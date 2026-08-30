@@ -82,6 +82,7 @@ type Router struct {
 	privacyPolicies        privacyPolicyService      // optional; nil ⇒ tenant source-privacy policy routes are not registered
 	incidents              incidentReader            // optional; nil ⇒ incident read routes are not registered (#594 C7)
 	incidentTriage         incidentTriager           // optional; nil ⇒ incident triage routes are not registered (#594 C5)
+	incidentRiskReassessor incidentRiskReassessor    // optional; nil ⇒ the tri-score reassess route is not registered (#594 C3/D/X5)
 	sarif                  sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
 	importedFindings       sarifReader               // optional read side for imported findings
 	fleetRolloutAdmin      fleetRolloutService       // optional; nil ⇒ the operator rollout routes are not served
@@ -408,6 +409,13 @@ func (rt *Router) routes() *http.ServeMux {
 			mux.HandleFunc("POST /api/v1/fleet/incidents/{id}/comments", rt.authz(userdom.PermTriage, rt.commentIncident))
 			mux.HandleFunc("POST /api/v1/fleet/incidents/{id}/status", rt.authz(userdom.PermTriage, rt.changeIncidentStatus))
 			mux.HandleFunc("POST /api/v1/fleet/incidents/{id}/disposition", rt.authz(userdom.PermReview, rt.setIncidentDisposition))
+		}
+		if rt.incidentRiskReassessor != nil {
+			// Tri-score risk reassessment (#594 C3/D/X5): re-gather the incident's factors (Threat +
+			// wired Exposure/Behavior + telemetry Coverage), run the deterministic Scorer, and record the
+			// RiskAssessment on the append-only incident log. Operator action (writes the incident), actor
+			// from the authenticated principal.
+			mux.HandleFunc("POST /api/v1/fleet/incidents/{id}/risk/reassess", rt.authz(userdom.PermOperate, rt.reassessIncidentRisk))
 		}
 	}
 	if rt.projects != nil {

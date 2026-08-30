@@ -442,6 +442,11 @@ type Config struct {
 	// sidecar extracts bounded facts, but unlike Go taint this pass never compiles or imports target code.
 	// Positive paths become gated CapSAST proposals; incomplete coverage never produces a clean verdict.
 	PythonTaintEnabled bool
+	// TriScoreReassessEnabled turns on the tri-score risk reassessment surface (#594 C3/D/X5): an operator
+	// route that re-scores an incident's RiskAssessment from its factors (Threat now; Exposure/Behavior/
+	// Coverage as their producers are wired) via the deterministic Scorer. Off by default while the
+	// Exposure/Behavior/Coverage producers are still being integrated.
+	TriScoreReassessEnabled bool
 
 	// JSReachabilityEnabled turns on deterministic Tier-1 JavaScript/TypeScript import-reachability: a
 	// declared npm dependency that first-party source never imports becomes not_reachable, which the
@@ -706,6 +711,7 @@ func Load() Config {
 		PySemanticReachabilityEnabled:         getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
 		ASTBin:                                os.Getenv("SYNAPSE_AST_BIN"),
 		PythonTaintEnabled:                    getbool("SYNAPSE_PYTAINT_ENABLED", false),
+		TriScoreReassessEnabled:               getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
 		JSReachabilityEnabled:                 getbool("SYNAPSE_JSREACH_ENABLED", false),
 		JSSymbolReachabilityEnabled:           getbool("SYNAPSE_JSREACH_TIER2_ENABLED", false),
 		RustReachabilityEnabled:               getbool("SYNAPSE_REACH_RUST", false),

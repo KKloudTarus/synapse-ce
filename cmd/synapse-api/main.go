@@ -31,6 +31,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/riskassessment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
@@ -119,6 +120,8 @@ import (
 	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
 	privacypolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacypolicy"
+	riskscorebridge "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscorebridge"
+	riskscoreuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscoreuc"
 	telemetryingest "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/telemetryingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
@@ -1651,6 +1654,31 @@ func main() {
 			log.Info("incident read + analyst-triage surface ENABLED (durable; append-only event log; tenant-scoped; RBAC-gated)")
 		} else {
 			log.Warn("incident read + analyst-triage surface ENABLED but NOT DURABLE - incidents and their triage history live in memory and are lost on restart; configure SYNAPSE_DB_DSN for a durable store")
+		}
+		if cfg.TriScoreReassessEnabled {
+			// Tri-score assembler (#594 C3/D/X5): the deterministic Scorer, run live on an incident's factors.
+			// Threat comes from the incident's own correlated severity (DefaultPolicy treats it as dominant);
+			// Exposure/Behavior/Coverage abstain honestly until their producers (exposureuc / baselineuc /
+			// coveragewindow) are wired — an abstaining factor contributes 0 and records its reason in the
+			// CoverageVector, never fabricating risk. incidentSvc satisfies the assembler's IncidentStore.
+			scorer, serr := riskassessment.NewScorer(riskassessment.DefaultPolicy())
+			if serr != nil {
+				log.Error("tri-score scorer init failed", "err", serr)
+				os.Exit(1)
+			}
+			assembler, aerr := riskscoreuc.NewService(
+				incidentSvc,
+				riskscorebridge.AbstainingExposure("exposure: exposureuc not yet wired at the composition root"),
+				riskscorebridge.AbstainingBehavior("behavior: baselineuc per-asset read path not yet wired"),
+				riskscorebridge.AbstainingCoverage(),
+				scorer, auditLog, ids, func() time.Time { return clock.Now().UTC() },
+			)
+			if aerr != nil {
+				log.Error("tri-score assembler init failed", "err", aerr)
+				os.Exit(1)
+			}
+			router.SetIncidentRiskReassessor(assembler)
+			log.Warn("tri-score risk reassessment ENABLED (Threat live; Exposure/Behavior/Coverage abstaining until their producers are wired) - POST /api/v1/fleet/incidents/{id}/risk/reassess")
 		}
 	}
 
