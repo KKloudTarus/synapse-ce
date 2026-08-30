@@ -1,0 +1,54 @@
+# OpenShift SecurityContextConstraints for the read-only cluster inventory agent (#632).
+#
+# The base manifest (cluster-agent.yaml) is already restricted-v2-compatible: runAsNonRoot, seccomp
+# RuntimeDefault, allowPrivilegeEscalation=false, readOnlyRootFilesystem=true, and all Linux capabilities
+# dropped. On OpenShift the built-in `restricted-v2` SCC already admits such a pod — the agent needs NO
+# elevated SCC because it only performs read-only get/list against the API server.
+#
+# This file ships an EXPLICIT, minimal SCC (equivalent to restricted-v2, with a fixed non-root uid range)
+# for clusters that pin agents to a named SCC for audit, and binds it to ONLY the agent's ServiceAccount.
+# It grants nothing beyond restricted-v2 — no host access, no privilege, no added capabilities.
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: synapse-cluster-agent-restricted
+  annotations:
+    kubernetes.io/description: >-
+      Restricted SCC for the Synapse read-only cluster inventory agent: non-root, no privilege escalation,
+      read-only root filesystem, seccomp RuntimeDefault, all capabilities dropped, no host namespaces or
+      volumes. Equivalent to restricted-v2; grants nothing extra.
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+allowPrivilegeEscalation: false
+allowPrivilegedContainer: false
+allowedCapabilities: []
+defaultAddCapabilities: []
+requiredDropCapabilities:
+  - ALL
+readOnlyRootFilesystem: true
+runAsUser:
+  # MustRunAsRange lets OpenShift assign a uid from the namespace range (the agent binary + state PVC
+  # tolerate an arbitrary non-root uid via fsGroup); set MustRunAs with a fixed uid instead only if you
+  # deploy off-OpenShift with a pinned uid.
+  type: MustRunAsRange
+seLinuxContext:
+  type: MustRunAs
+fsGroup:
+  type: MustRunAs
+supplementalGroups:
+  type: RunAsAny
+seccompProfiles:
+  - runtime/default
+volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - persistentVolumeClaim
+  - projected
+  - secret
+users:
+  - system:serviceaccount:synapse:synapse-cluster-agent
+groups: []
