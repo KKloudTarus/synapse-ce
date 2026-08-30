@@ -116,6 +116,7 @@ import (
 	correlationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/correlationuc"
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	coveragewindow "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coveragewindow"
+	desired "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/desired"
 	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
 	exposurereader "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposurereader"
 	exposureuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposureuc"
@@ -215,6 +216,24 @@ func metricsAddrIsLoopback(addr string) bool {
 	return ip.IsLoopback()
 }
 
+// telemetryBindingReader adapts the telemetry transport store's agent→asset binding list to the
+// desired-vs-observed BindingReader (#633), mapping ports.TelemetryAssetBinding to desired.CurrentBinding.
+type telemetryBindingReader struct {
+	list func(context.Context) ([]ports.TelemetryAssetBinding, error)
+}
+
+func (b telemetryBindingReader) ListCurrentBindings(ctx context.Context, _ shared.ID) ([]desired.CurrentBinding, error) {
+	raw, err := b.list(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]desired.CurrentBinding, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, desired.CurrentBinding{TenantID: r.TenantID, AssetID: r.AssetID, AgentID: r.AgentID})
+	}
+	return out, nil
+}
+
 func main() {
 	cfg := config.Load()
 	if cfg.CSPMEnabled && !cfg.FleetAssetsEnabled {
@@ -291,6 +310,7 @@ func main() {
 	var privacyPolicyStore ports.PrivacyPolicyAuditStore // #611 immutable source-redaction policy history
 	var coverageWindowStore ports.CoverageWindowStore    // #611 immutable coverage-window revisions
 	var endpointProcessStore ports.EndpointProcessStore  // #594 B5 per-host running-process projection
+	var fleetDesiredStore ports.FleetDesiredStore        // #633 desired-vs-observed capability state
 	var telemetrySvc *telemetryingest.Service            // wired to detection repair after both services exist
 	var detectSvc *detectledger.Service                  // tenant-scoped startup and periodic provenance repair
 	var detectionRunner *detectledger.ReconciliationRunner
@@ -494,6 +514,7 @@ func main() {
 			os.Exit(1)
 		}
 		endpointProcessStore = postgres.NewEndpointProcessRepository(pool)
+		fleetDesiredStore = postgres.NewFleetDesiredRepository(pool)
 		fleetRolloutStore = postgres.NewFleetRolloutRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
@@ -549,6 +570,7 @@ func main() {
 		sensorStateStore = memory.NewSensorStateStore()
 		coverageWindowStore = memory.NewCoverageWindowStore()
 		endpointProcessStore = memory.NewEndpointProcessStore()
+		fleetDesiredStore = memory.NewFleetDesiredStore()
 		fleetRolloutStore = memory.NewFleetRolloutStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
@@ -1659,6 +1681,25 @@ func main() {
 		}
 		router.SetIncidentTriage(triageSvc)
 		router.SetEndpointProcesses(endpointProcessStore) // #594 B5: running-process report/read + Exposure running-vs-installed
+		// Desired-vs-observed (#633): declare an asset's desired capabilities + list gaps against the
+		// observed agent fleet. Needs an asset reader (GetAssetByID) and the agent→asset binding list; both
+		// are read-only type assertions on stores already in the composition. If either is unavailable the
+		// surface is simply not registered (the routes 404) rather than booting a half-wired feature.
+		assetReader, assetReaderOK := assetStore.(desired.AssetReader)
+		bindingLister, bindingOK := telemetryTransportStore.(interface {
+			ListTelemetryAssetBindings(context.Context) ([]ports.TelemetryAssetBinding, error)
+		})
+		if assetReaderOK && bindingOK {
+			desiredSvc, derr := desired.NewService(fleetDesiredStore, assetReader, telemetryBindingReader{list: bindingLister.ListTelemetryAssetBindings}, fleetAgentStore, auditLog, clock, ids, cfg.FleetAgentStaleAfter)
+			if derr != nil {
+				log.Error("desired-vs-observed service init failed", "err", derr)
+				os.Exit(1)
+			}
+			router.SetDesiredCapabilities(desiredSvc)
+			log.Info("desired-vs-observed ENABLED (#633) - /api/v1/fleet/assets/{id}/desired-capabilities + /api/v1/fleet/desired-capabilities/gaps")
+		} else {
+			log.Warn("desired-vs-observed NOT wired: asset reader or telemetry binding list unavailable", "asset_reader", assetReaderOK, "binding_list", bindingOK)
+		}
 		if cfg.DBDSN != "" {
 			log.Info("incident read + analyst-triage surface ENABLED (durable; append-only event log; tenant-scoped; RBAC-gated)")
 		} else {

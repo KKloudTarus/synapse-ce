@@ -780,6 +780,23 @@ func (s *TelemetryTransportStore) ResolveTelemetryAsset(ctx context.Context, age
 	return binding.AssetID, nil
 }
 
+// ListTelemetryAssetBindings returns the tenant's current agent→asset bindings (#633 desired-vs-observed),
+// tenant-scoped from ctx and ordered by agent id for stability.
+func (s *TelemetryTransportStore) ListTelemetryAssetBindings(ctx context.Context) ([]ports.TelemetryAssetBinding, error) {
+	tenant, err := requireTelemetryTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]ports.TelemetryAssetBinding, 0, len(s.bindings[tenant]))
+	for _, b := range s.bindings[tenant] {
+		out = append(out, b)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].AgentID < out[j].AgentID })
+	return out, nil
+}
+
 // ResolveTelemetryReferences resolves causal references from the existing accepted-event facts.
 func (s *TelemetryTransportStore) ResolveTelemetryReferences(ctx context.Context, agentID, assetID shared.ID, redactionPolicyDigest string, refs []fleetagent.TelemetryReference) (ports.TelemetryReferenceStatus, error) {
 	tenant, err := requireTelemetryTenant(ctx)

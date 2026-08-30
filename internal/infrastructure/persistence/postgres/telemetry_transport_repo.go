@@ -709,6 +709,33 @@ func (r *TelemetryTransportRepository) ResolveTelemetryAsset(ctx context.Context
 	return asset, err
 }
 
+// ListTelemetryAssetBindings returns the tenant's current agent→asset bindings (#633 desired-vs-observed),
+// tenant-scoped from ctx and ordered by agent id.
+func (r *TelemetryTransportRepository) ListTelemetryAssetBindings(ctx context.Context) ([]ports.TelemetryAssetBinding, error) {
+	if err := requireTransportTenant(ctx); err != nil {
+		return nil, err
+	}
+	var out []ports.TelemetryAssetBinding
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		tenant, _ := shared.TenantFrom(ctx)
+		rows, err := tx.Query(ctx, `SELECT agent_id, asset_id, updated_at FROM telemetry_asset_bindings WHERE tenant_id=$1 ORDER BY agent_id`, tenant.String())
+		if err != nil {
+			return fmt.Errorf("list telemetry asset bindings: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var agentID, assetID string
+			var updatedAt time.Time
+			if err := rows.Scan(&agentID, &assetID, &updatedAt); err != nil {
+				return fmt.Errorf("scan telemetry asset binding: %w", err)
+			}
+			out = append(out, ports.TelemetryAssetBinding{TenantID: tenant, AgentID: shared.ID(agentID), AssetID: shared.ID(assetID), UpdatedAt: updatedAt})
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // TelemetryReferencesDurable resolves a detection's causal references from telemetry_batch_events,
 // the existing accepted raw-telemetry fact store. Missing or mismatched facts are pending, never inferred.
 func (r *TelemetryTransportRepository) ResolveTelemetryReferences(ctx context.Context, agentID, assetID shared.ID, redactionPolicyDigest string, refs []fleetagent.TelemetryReference) (ports.TelemetryReferenceStatus, error) {
