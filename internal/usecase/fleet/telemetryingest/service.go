@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/endpoint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
@@ -64,7 +65,20 @@ type Service struct {
 	bindings     ports.TelemetryAssetBindingStore
 	audit        ports.IdempotentAuditLogger
 	clock        ports.Clock
+	timeline     EnvelopeRecorder // optional #594 B7 State-Timeline projection sink
 }
+
+// EnvelopeRecorder projects an accepted telemetry envelope into the endpoint State Timeline (#594 B7).
+// endpointstate.Service satisfies it. Record is idempotent (deduped by EventID), so the best-effort
+// fan-out after a durable accept is safe to retry.
+type EnvelopeRecorder interface {
+	Record(ctx context.Context, env telemetry.TelemetryEnvelope) ([]endpoint.TimelineEntry, error)
+}
+
+// SetEndpointTimeline enables the B7 State-Timeline projection: after a batch is durably accepted, each
+// verified envelope is projected into the timeline best-effort. Kept optional (nil ⇒ no projection) so
+// existing telemetry-only compositions are unchanged, mirroring SetSensorStateStore.
+func (s *Service) SetEndpointTimeline(r EnvelopeRecorder) { s.timeline = r }
 
 func NewService(
 	transport ports.TelemetryAuditStore,
@@ -344,6 +358,20 @@ func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, req IngestR
 		}
 		if err := s.record(ctx, authAgentID, m, "fleet.telemetry.ingest", telemetryBatchGapOpen(m), now); err != nil {
 			return IngestResult{}, err
+		}
+		// B7 State-Timeline projection (#594): fan the just-accepted, already-redaction-authorized envelopes
+		// into the timeline. Best-effort — the batch is already durably stored, so a projection failure must
+		// not fail ingest; it is surfaced via an audit note, never silently swallowed. Record is idempotent,
+		// so this is safe on the ingest-retry loop.
+		if s.timeline != nil {
+			for _, v := range verified {
+				if _, terr := s.timeline.Record(ctx, v.envelope); terr != nil {
+					_ = s.audit.Record(ctx, ports.AuditEntry{
+						Actor: authAgentID.String(), Action: "fleet.timeline.projection_failed", Target: m.StreamID.String(), At: now,
+						Metadata: map[string]string{"event_id": v.envelope.EventID.String(), "batch_id": m.BatchID.String()},
+					})
+				}
+			}
 		}
 		return IngestResult{Accepted: true, ACK: ledger.HighestContiguous(), Provenance: ProvenanceAcknowledged, GapOpen: gapOpen}, nil
 	}
