@@ -30,6 +30,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualityprofile"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
@@ -616,11 +617,19 @@ type ScanRun struct {
 	FindingKeys  []string     `json:"finding_keys"` // dedup keys present in this run
 }
 
-// ScanRunStore persists scan-run manifests + finding keys for history + drift.
+// ScanRunStore persists scan-run manifests + finding keys for history + drift,
+// as well as tenant-scoped native sealed provenance.
 type ScanRunStore interface {
+	// Legacy methods (backward compatibility)
 	Save(ctx context.Context, run ScanRun) error
 	List(ctx context.Context, engagementID shared.ID) ([]ScanRun, error)
 	Get(ctx context.Context, runID string) (ScanRun, error)
+
+	// Tenant-scoped & sealed provenance methods (Issue #708)
+	SaveScanRun(ctx context.Context, run scanrun.ScanRun) error
+	GetScanRun(ctx context.Context, tenantID shared.ID, runID string) (scanrun.ScanRun, error)
+	ListScanRuns(ctx context.Context, tenantID, engagementID shared.ID) ([]scanrun.ScanRun, error)
+	SealScanRun(ctx context.Context, tenantID shared.ID, runID string, terminalStatus scanrun.TerminalStatus, lanes []scanrun.Lane, manifestSchemaVersion int, manifestHash string, sealedAt time.Time) error
 }
 
 // ScanRepository persists an SCA scan's SBOM (with its components) and the
