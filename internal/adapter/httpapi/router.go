@@ -85,6 +85,7 @@ type Router struct {
 	incidentRiskReassessor incidentRiskReassessor    // optional; nil ⇒ the tri-score reassess route is not registered (#594 C3/D/X5)
 	incidentCorrelator     incidentCorrelator        // optional; nil ⇒ the correlation route is not registered (#594 C2/C3)
 	endpointProcesses      endpointProcessStore      // optional; nil ⇒ the process-report routes are not registered (#594 B5)
+	processLearner         processLearner            // optional; nil ⇒ reported processes are not folded into the behavior baseline (#594 D)
 	desiredCapabilities    desiredCapabilityService  // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
 	endpointTimeline       endpointTimelineReader    // optional; nil ⇒ the State-Timeline read route is not registered (#594 B7)
 	retroHunter            retroHunter               // optional; nil ⇒ the retro-hunt route is not registered (#594 B7)

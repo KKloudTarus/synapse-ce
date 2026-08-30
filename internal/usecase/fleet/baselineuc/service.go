@@ -199,6 +199,31 @@ func (s *Service) Rebaseline(ctx context.Context, actor string, key baseline.Key
 }
 
 // load reads the persisted baseline + drift tracker, or fresh ones if none exists yet.
+// Score evaluates an observation against the CURRENT baseline WITHOUT learning from it — a read-only
+// anomaly for the risk scorer (#594 D). It abstains (Scoreable=false, Behavior=0) until the baseline is
+// active, exactly like Observe's scoring step, but never folds or persists, so it is safe to call on the
+// hot risk-assessment path (e.g. during an incident, when learning would poison the baseline anyway).
+func (s *Service) Score(ctx context.Context, key baseline.Key, obs baseline.Observation) (Assessment, error) {
+	if err := key.Validate(); err != nil {
+		return Assessment{}, err
+	}
+	if err := obs.Validate(); err != nil {
+		return Assessment{}, err
+	}
+	b, _, err := s.load(ctx, key)
+	if err != nil {
+		return Assessment{}, err
+	}
+	anomaly, scoreable := b.Anomaly(obs)
+	a := Assessment{State: b.State(), Behavior: 0}
+	if scoreable {
+		a.Behavior, a.Scoreable = anomaly, true
+	} else {
+		a.Reasons = append(a.Reasons, fmt.Sprintf("baseline not active (state=%s) — abstaining", b.State()))
+	}
+	return a, nil
+}
+
 func (s *Service) load(ctx context.Context, key baseline.Key) (*baseline.Baseline, *baseline.DriftTracker, error) {
 	rec, err := s.store.Load(ctx, key)
 	if errors.Is(err, shared.ErrNotFound) {
