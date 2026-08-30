@@ -2,22 +2,46 @@ package riskscorebridge
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposureuc"
 )
 
-func TestAbstainingExposureAlwaysAbstains(t *testing.T) {
-	f, err := AbstainingExposure("exposure not wired").ExposureFor(context.Background(), "asset-1")
+type fakeExposureProducer struct {
+	a   exposureuc.Assessment
+	err error
+}
+
+func (f fakeExposureProducer) Assess(context.Context, shared.ID) (exposureuc.Assessment, error) {
+	return f.a, f.err
+}
+
+func TestNewExposureMapsAssessment(t *testing.T) {
+	f, err := NewExposure(fakeExposureProducer{a: exposureuc.Assessment{Exposure: 73, Scoreable: true, Reasons: []string{"2 open exposures"}}}).ExposureFor(context.Background(), "asset-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.Scoreable {
-		t.Fatal("abstaining exposure must not be scoreable")
+	if !f.Scoreable || f.Score != 73 || len(f.Reasons) != 1 || f.Reasons[0] != "2 open exposures" {
+		t.Fatalf("exposure not mapped to FactorInput: %+v", f)
 	}
-	if f.Score != 0 {
-		t.Fatalf("an abstaining factor must contribute 0, got %d", f.Score)
+}
+
+func TestNewExposurePassesAbstainThrough(t *testing.T) {
+	f, err := NewExposure(fakeExposureProducer{a: exposureuc.Assessment{Scoreable: false, Reasons: []string{"no inventory"}}}).ExposureFor(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(f.Reasons) != 1 || f.Reasons[0] != "exposure not wired" {
-		t.Fatalf("reason not carried: %v", f.Reasons)
+	if f.Scoreable || f.Score != 0 {
+		t.Fatalf("abstain must flow through as 0/not-scoreable: %+v", f)
+	}
+}
+
+func TestNewExposurePropagatesError(t *testing.T) {
+	_, err := NewExposure(fakeExposureProducer{err: errors.New("store down")}).ExposureFor(context.Background(), "asset-1")
+	if err == nil {
+		t.Fatal("a producer error must propagate")
 	}
 }
 

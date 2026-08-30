@@ -114,6 +114,8 @@ import (
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	coveragewindow "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coveragewindow"
 	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
+	exposurereader "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposurereader"
+	exposureuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposureuc"
 	fleetaudit "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/fleetaudit"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
 	incidenttriage "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidenttriage"
@@ -1666,9 +1668,23 @@ func main() {
 				log.Error("tri-score scorer init failed", "err", serr)
 				os.Exit(1)
 			}
+			// Exposure (X5, #634): the real producer over the SCA stores — installed-based exposure from the
+			// asset's open vulnerability occurrences + their risk. Running-vs-installed refinement (the B5
+			// process store) is a further follow-up; NewReader (no runtime) scores installed exposures and
+			// records that running-vs-installed precision is limited, an honest coverage note.
+			exposureReader, xrerr := exposurereader.NewReader(businessAssetStore, vulnerabilityOccurrences, vulnerabilityAssessments)
+			if xrerr != nil {
+				log.Error("exposure reader init failed", "err", xrerr)
+				os.Exit(1)
+			}
+			exposureSvc, xerr := exposureuc.NewService(exposureReader)
+			if xerr != nil {
+				log.Error("exposure service init failed", "err", xerr)
+				os.Exit(1)
+			}
 			assembler, aerr := riskscoreuc.NewService(
 				incidentSvc,
-				riskscorebridge.AbstainingExposure("exposure: exposureuc not yet wired at the composition root"),
+				riskscorebridge.NewExposure(exposureSvc),
 				riskscorebridge.AbstainingBehavior("behavior: baselineuc per-asset read path not yet wired"),
 				riskscorebridge.AbstainingCoverage(),
 				scorer, auditLog, ids, func() time.Time { return clock.Now().UTC() },
@@ -1678,7 +1694,7 @@ func main() {
 				os.Exit(1)
 			}
 			router.SetIncidentRiskReassessor(assembler)
-			log.Warn("tri-score risk reassessment ENABLED (Threat live; Exposure/Behavior/Coverage abstaining until their producers are wired) - POST /api/v1/fleet/incidents/{id}/risk/reassess")
+			log.Warn("tri-score risk reassessment ENABLED (Threat + Exposure live; Behavior/Coverage abstaining until their producers are wired) - POST /api/v1/fleet/incidents/{id}/risk/reassess")
 		}
 	}
 
