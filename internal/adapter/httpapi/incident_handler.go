@@ -31,8 +31,19 @@ type incidentTriager interface {
 	SetDisposition(ctx context.Context, actor string, id shared.ID, disposition incident.Disposition) (incident.Incident, error)
 }
 
+// incidentRiskReassessor runs the tri-score assembler for one incident (#594 C3/D/X5):
+// re-gather Threat + Exposure + Behavior + telemetry Coverage, run the deterministic Scorer, and
+// record the RiskAssessment on the append-only incident log. riskscoreuc.Service satisfies it. The actor
+// is the FIRST arg after ctx: it must be the server-side authenticated principal, never a body field.
+type incidentRiskReassessor interface {
+	Reassess(ctx context.Context, actor string, incidentID shared.ID) (incident.Incident, error)
+}
+
 // SetIncidents wires the incident read surface (nil ⇒ the routes are not registered).
 func (rt *Router) SetIncidents(r incidentReader) { rt.incidents = r }
+
+// SetIncidentRiskReassessor wires the tri-score reassessment surface (nil ⇒ the route is not registered).
+func (rt *Router) SetIncidentRiskReassessor(r incidentRiskReassessor) { rt.incidentRiskReassessor = r }
 
 // SetIncidentTriage wires the incident triage surface (nil ⇒ the triage routes are not registered).
 func (rt *Router) SetIncidentTriage(t incidentTriager) { rt.incidentTriage = t }
@@ -177,6 +188,17 @@ func (rt *Router) changeIncidentStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	inc, err := rt.incidentTriage.ChangeStatus(incidentTenantContext(r), PrincipalFrom(r.Context()), shared.ID(r.PathValue("id")), incident.State(req.To))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, inc)
+}
+
+// reassessIncidentRisk runs the tri-score assembler for the incident and returns the updated incident
+// (whose .Risk now carries the RiskAssessment). No request body: the factors are gathered server-side.
+func (rt *Router) reassessIncidentRisk(w http.ResponseWriter, r *http.Request) {
+	inc, err := rt.incidentRiskReassessor.Reassess(incidentTenantContext(r), PrincipalFrom(r.Context()), shared.ID(r.PathValue("id")))
 	if err != nil {
 		writeError(w, rt.log, err)
 		return

@@ -217,6 +217,7 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | `SYNAPSE_PYREACH_ENABLED` | `false` | Python Tier-1 import-reachability (a dead dependency becomes an OpenVEX `not_affected`). |
 | `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python Tier-2 affected-symbol semantic reachability. Requires Tier-1, judgments, and a CGO-enabled `synapse-ast`. |
 | `SYNAPSE_PYTAINT_ENABLED` | `false` | Python interprocedural semantic taint proposals. Requires judgments and a CGO-enabled `synapse-ast`; it does not require the target-compilation sandbox. |
+| `SYNAPSE_TRISCORE_REASSESS_ENABLED` | `false` | Tri-score risk reassessment surface (`POST /api/v1/fleet/incidents/{id}/risk/reassess`): re-scores an incident's RiskAssessment via the deterministic Scorer. Threat is live; Exposure/Behavior/Coverage abstain until their producers are wired. |
 | `SYNAPSE_AST_BIN` | bundled / `PATH` | Optional path to the `synapse-ast` sidecar used by Python Tier-2 reachability, Python taint, and code-quality analysis. |
 | `SYNAPSE_JSREACH_ENABLED` | `false` | JS/TS Tier-1 import-level reachability. |
 | `SYNAPSE_JSREACH_TIER2_ENABLED` | `false` | JS/TS Tier-2 symbol-level reachability. |
@@ -233,6 +234,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED` | `false` | Accept Kubernetes inventory from `synapse-cluster-agent`. |
 | `SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED` | `false` | Accept signed agent telemetry batches (A3, `POST /api/v1/fleet/telemetry`); verified + idempotently sequenced server-side. |
 | `SYNAPSE_FLEET_DETECTION_INGEST_ENABLED` | `false` | Accept signed agent detection batches (A4, `POST /api/v1/fleet/detections`); sealed once into the evidence chain. |
+| `SYNAPSE_FLEET_DETECTION_RECONCILE_INTERVAL` | `1m` | How often the tenant-scoped reconciler repairs pending attributed detections. |
 | `SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED` | `false` | Serve agent signing-key registration (`POST /api/v1/fleet/keys`) + operator key list/revoke (A4, A0.2). |
 | `SYNAPSE_FLEET_STALE_AFTER` | `10m` | An agent older than this reads as stale (`<=0` disables the staleness view). |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |
