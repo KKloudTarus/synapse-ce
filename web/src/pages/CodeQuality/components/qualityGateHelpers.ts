@@ -53,26 +53,26 @@ export function getMetricCategoryStyle(category: MetricCategory) {
   switch (category) {
     case 'security':
       return {
-        cardBg: 'border-utility-pink-200 bg-utility-pink-50 dark:border-utility-pink-800 dark:bg-utility-pink-950',
+        cardBg: 'border-utility-pink-200 bg-utility-pink-50 dark:border-utility-pink-900/70 dark:bg-utility-pink-950/40',
         icon: ShieldZap,
         iconBg: 'bg-utility-pink-100 text-utility-pink-700 dark:bg-utility-pink-900 dark:text-utility-pink-300',
       }
     case 'rating':
       return {
-        cardBg: 'border-utility-orange-200 bg-utility-orange-50 dark:border-utility-orange-800 dark:bg-utility-orange-950',
+        cardBg: 'border-utility-orange-200 bg-utility-orange-50 dark:border-utility-orange-900/70 dark:bg-utility-orange-950/40',
         icon: Award01,
         iconBg: 'bg-utility-orange-100 text-utility-orange-700 dark:bg-utility-orange-900 dark:text-utility-orange-300',
       }
     case 'coverage':
       return {
-        cardBg: 'border-utility-green-200 bg-utility-green-50 dark:border-utility-green-800 dark:bg-utility-green-950',
+        cardBg: 'border-utility-green-200 bg-utility-green-50 dark:border-utility-green-900/70 dark:bg-utility-green-950/40',
         icon: Percent01,
         iconBg: 'bg-utility-green-100 text-utility-green-700 dark:bg-utility-green-900 dark:text-utility-green-300',
       }
     case 'duplication':
     default:
       return {
-        cardBg: 'border-utility-blue-200 bg-utility-blue-50 dark:border-utility-blue-800 dark:bg-utility-blue-950',
+        cardBg: 'border-utility-blue-200 bg-utility-blue-50 dark:border-utility-blue-900/70 dark:bg-utility-blue-950/40',
         icon: FileCode01,
         iconBg: 'bg-utility-blue-100 text-utility-blue-700 dark:bg-utility-blue-900 dark:text-utility-blue-300',
       }
