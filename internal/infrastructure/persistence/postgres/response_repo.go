@@ -50,15 +50,15 @@ func (r *ResponseRepository) Put(ctx context.Context, rec rdom.Record) error {
 	return WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO response_actions
-			  (tenant_id, id, engagement_id, kind, target, blast_radius, argv, reversal, state, approved_by, approval_evidence_id, applied_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			  (tenant_id, id, engagement_id, kind, target, blast_radius, argv, reversal, state, approved_by, approval_evidence_id, applied_at, updated_at, verification)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 			ON CONFLICT (tenant_id, id) DO UPDATE SET
 			  state = EXCLUDED.state, approved_by = EXCLUDED.approved_by,
 			  approval_evidence_id = EXCLUDED.approval_evidence_id, applied_at = EXCLUDED.applied_at,
-			  updated_at = EXCLUDED.updated_at`,
+			  updated_at = EXCLUDED.updated_at, verification = EXCLUDED.verification`,
 			rec.TenantID.String(), rec.ID.String(), rec.EngagementID.String(), string(rec.Action.Kind),
 			rec.Action.Target.String(), string(rec.Action.BlastRadius), argv, reversal, string(rec.State),
-			rec.ApprovedBy, evID, applied, rec.UpdatedAt.UTC())
+			rec.ApprovedBy, evID, applied, rec.UpdatedAt.UTC(), string(rec.Verification))
 		if err != nil {
 			return fmt.Errorf("upsert response action %s: %w", rec.ID, err)
 		}
@@ -72,7 +72,7 @@ func (r *ResponseRepository) Get(ctx context.Context, id shared.ID) (rdom.Record
 	found := false
 	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
-			SELECT tenant_id, id, engagement_id, kind, target, blast_radius, argv, reversal, state, approved_by, approval_evidence_id, applied_at
+			SELECT tenant_id, id, engagement_id, kind, target, blast_radius, argv, reversal, state, approved_by, approval_evidence_id, applied_at, verification
 			FROM response_actions WHERE id = $1`, id.String())
 		var scanned rdom.Record
 		if err := scanResponse(row, &scanned); err != nil {
@@ -93,7 +93,7 @@ func (r *ResponseRepository) ListByState(ctx context.Context, state rdom.State) 
 	var out []rdom.Record
 	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT tenant_id, id, engagement_id, kind, target, blast_radius, argv, reversal, state, approved_by, approval_evidence_id, applied_at
+			SELECT tenant_id, id, engagement_id, kind, target, blast_radius, argv, reversal, state, approved_by, approval_evidence_id, applied_at, verification
 			FROM response_actions WHERE state = $1 ORDER BY id ASC`, string(state))
 		if err != nil {
 			return err
@@ -114,11 +114,12 @@ func (r *ResponseRepository) ListByState(ctx context.Context, state rdom.State) 
 func scanResponse(row rowScanner, rec *rdom.Record) error {
 	var (
 		tenant, id, eng, kind, targetStr, radius, state, approvedBy string
+		verification                                                string
 		argv, reversal                                              []byte
 		evID                                                        *string
 		applied                                                     *time.Time
 	)
-	if err := row.Scan(&tenant, &id, &eng, &kind, &targetStr, &radius, &argv, &reversal, &state, &approvedBy, &evID, &applied); err != nil {
+	if err := row.Scan(&tenant, &id, &eng, &kind, &targetStr, &radius, &argv, &reversal, &state, &approvedBy, &evID, &applied, &verification); err != nil {
 		return err
 	}
 	var argvSlice []string
@@ -133,6 +134,7 @@ func scanResponse(row rowScanner, rec *rdom.Record) error {
 	rec.TenantID = shared.ID(tenant)
 	rec.EngagementID = shared.ID(eng)
 	rec.State = rdom.State(state)
+	rec.Verification = rdom.Verification(verification)
 	rec.ApprovedBy = approvedBy
 	if evID != nil {
 		rec.ApprovalEvidenceID = shared.ID(*evID)

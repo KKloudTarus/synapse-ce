@@ -60,11 +60,21 @@ type ExecOutcome struct {
 	AlreadyApplied bool
 }
 
+// EffectVerifier confirms, against telemetry, whether an applied action's intended EFFECT actually took
+// hold on the target (#638). It is READ-ONLY — it observes, it never executes anything on the host — so
+// wiring it crosses no execution boundary. `CommandApplied ≠ VerifiedSucceeded`: a kill whose syscall
+// returned but whose process is still observed alive verifies as Failed; a target with no covering
+// telemetry verifies as Unknown, never silently a success. Optional (nil ⇒ verification is not run).
+type EffectVerifier interface {
+	Verify(ctx context.Context, action rdom.Action, target shared.ID) (rdom.Verification, error)
+}
+
 // Record and State are the domain types (domain/response); re-exported as aliases so callers of this
 // usecase package need not import both.
 type (
-	Record = rdom.Record
-	State  = rdom.State
+	Record       = rdom.Record
+	State        = rdom.State
+	Verification = rdom.Verification
 )
 
 const (
@@ -73,15 +83,21 @@ const (
 	StateReverted  = rdom.StateReverted
 	StateCancelled = rdom.StateCancelled
 	StateViolation = rdom.StateViolation
+
+	VerificationPending   = rdom.VerificationPending
+	VerificationSucceeded = rdom.VerificationSucceeded
+	VerificationFailed    = rdom.VerificationFailed
+	VerificationUnknown   = rdom.VerificationUnknown
 )
 
 // Service applies response actions under the shared governance.
 type Service struct {
-	admit admitter
-	exec  Executor
-	store ports.ResponseStore
-	audit ports.AuditLogger
-	clock ports.Clock
+	admit  admitter
+	exec   Executor
+	store  ports.ResponseStore
+	audit  ports.AuditLogger
+	clock  ports.Clock
+	verify EffectVerifier // optional (#638): confirms an applied effect via telemetry; nil ⇒ not run
 }
 
 // NewService validates dependencies.
@@ -90,6 +106,43 @@ func NewService(admit admitter, exec Executor, store ports.ResponseStore, audit 
 		return nil, fmt.Errorf("%w: response service is missing a dependency", shared.ErrValidation)
 	}
 	return &Service{admit: admit, exec: exec, store: store, audit: audit, clock: clock}, nil
+}
+
+// SetEffectVerifier wires the telemetry-verified post-condition (#638). Optional and read-only: when set,
+// an applied action is verified against telemetry and the outcome is recorded on the record + audited;
+// nil leaves Verification as Pending. It never executes anything on the host.
+func (s *Service) SetEffectVerifier(v EffectVerifier) { s.verify = v }
+
+// verified runs the post-condition check on an APPLIED record (when a verifier is wired) and records the
+// outcome on the record + a distinct audit line. `CommandApplied ≠ VerifiedSucceeded`: a Failed outcome
+// means the command ran but the effect is not confirmed — a loud signal the operator must act on. A
+// verifier error is NEVER a silent success: it records Unknown. Read-only; no host side effect.
+func (s *Service) verified(ctx context.Context, rec Record, approver string) Record {
+	if s.verify == nil || rec.State != StateApplied {
+		return rec
+	}
+	v, err := s.verify.Verify(ctx, rec.Action, rec.Action.Target)
+	if err != nil {
+		rec.Verification = VerificationUnknown
+		s.recordAudit(ctx, "response.verification_unknown", approver, rec.Action, map[string]string{"reason": "verifier error"})
+		return rec
+	}
+	// A verifier that RAN must yield a definite outcome: an invalid value, or Pending ("" = "not
+	// verified"), is coerced to Unknown so a verifier that ran is never recorded as un-run and is always
+	// audited. Fail-closed — never a silent success.
+	if !v.Valid() || v == VerificationPending {
+		v = VerificationUnknown
+	}
+	rec.Verification = v
+	switch v {
+	case VerificationSucceeded:
+		s.recordAudit(ctx, "response.verified", approver, rec.Action, nil)
+	case VerificationFailed:
+		s.recordAudit(ctx, "response.verification_failed", approver, rec.Action, nil)
+	case VerificationUnknown:
+		s.recordAudit(ctx, "response.verification_unknown", approver, rec.Action, map[string]string{"reason": "insufficient coverage"})
+	}
+	return rec
 }
 
 // PlanStep is one line of a dry run: the action or reversal that WOULD run, and its argv.
@@ -167,10 +220,11 @@ func (s *Service) Apply(ctx context.Context, engagementID shared.ID, action rdom
 	}
 	if out.AlreadyApplied {
 		rec := s.record(tenantID, engagementID, action, StateApplied, approver, adm.EvidenceID())
+		s.recordAudit(ctx, "response.already_applied", approver, action, nil)
+		rec = s.verified(ctx, rec, approver) // re-verify the effect still holds on an idempotent re-issue
 		if err := s.put(ctx, rec); err != nil {
 			return Record{}, err
 		}
-		s.recordAudit(ctx, "response.already_applied", approver, action, nil)
 		return rec, nil
 	}
 	// Blast radius at EXECUTION: a broader-than-declared radius OR an effect touching more than the single
@@ -185,10 +239,13 @@ func (s *Service) Apply(ctx context.Context, engagementID shared.ID, action rdom
 	}
 
 	rec := s.record(tenantID, engagementID, action, StateApplied, approver, adm.EvidenceID())
+	s.recordAudit(ctx, "response.applied", approver, action, map[string]string{"decided_by": adm.DecidedBy()})
+	// Telemetry-verified post-condition (#638): the command applied — now confirm the EFFECT actually
+	// took hold. CommandApplied ≠ VerifiedSucceeded; the outcome rides on the record + a distinct audit.
+	rec = s.verified(ctx, rec, approver)
 	if err := s.put(ctx, rec); err != nil {
 		return Record{}, err
 	}
-	s.recordAudit(ctx, "response.applied", approver, action, map[string]string{"decided_by": adm.DecidedBy()})
 	return rec, nil
 }
 
