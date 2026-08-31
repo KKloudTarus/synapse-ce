@@ -60,6 +60,8 @@ import (
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/endpointstate"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -560,6 +562,19 @@ func main() {
 			Findings:     exploitSvc,
 			Hypotheses:   exploitSvc,
 			Reachability: postgres.NewScanResultStore(pool),
+		}
+		incidentSvc, ierr := incidentuc.NewService(postgres.NewIncidentEventRepository(pool))
+		if ierr != nil {
+			log.Error("agent incident reader init failed", "err", ierr)
+			os.Exit(1)
+		}
+		timelineSvc, terr := endpointstate.NewService(postgres.NewEndpointTimelineRepository(pool))
+		if terr != nil {
+			log.Error("agent timeline reader init failed", "err", terr)
+			os.Exit(1)
+		}
+		toolset.Investigation = &agenttools.InvestigationToolset{
+			Incidents: incidentSvc, Detections: postgres.NewDetectionRecordRepository(pool), Timeline: timelineSvc,
 		}
 		if cfg.JudgmentsEnabled {
 			judgmentSvc, jerr := analysisuc.NewService(postgres.NewJudgmentRepository(pool), evidenceService, auditLog, clock, ids)

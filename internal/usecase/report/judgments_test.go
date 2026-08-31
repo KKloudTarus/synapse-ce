@@ -104,6 +104,21 @@ func TestReportSkipsUnacceptedAndSortsDeterministically(t *testing.T) {
 	}
 }
 
+func TestReportDoesNotProjectInvestigationHypotheses(t *testing.T) {
+	var insight ports.ReportInsight
+	projectAcceptedJudgments(context.Background(), fakeJudgments{list: []judgment.Judgment{{
+		Capability: judgment.CapInvestigation, State: judgment.StateConfirmed, EvidenceScore: 100,
+		SubjectKind: judgment.SubjectIncident, SubjectID: "incident-1",
+		Claim: judgment.InvestigationClaim{
+			IncidentID: "incident-1", Tactic: judgment.TacticExecution, Confidence: 90,
+			Drivers: []string{"new_exec_paths"}, SuggestedNextStep: judgment.NextInspectProcessTree,
+		},
+	}}}, "engagement-1", &insight)
+	if len(insight.RiskRationales) != 0 || len(insight.CorrelationNotes) != 0 {
+		t.Fatalf("investigation hypotheses must stay out of the deterministic report projection: %+v", insight)
+	}
+}
+
 // TestReportProjectionIsByteReproducible proves the projection is TOTALLY ordered: multiple accepted
 // judgments on the SAME subject (same priority, different drivers) sort deterministically regardless of
 // the store's return order — reports are hash-sealed, so an unstable permutation would change the bytes.

@@ -29,9 +29,11 @@ type IncidentEventStore interface {
 	ListIncidentIDs(ctx context.Context, q IncidentQuery) ([]shared.ID, error)
 }
 
-// IncidentQuery selects incidents. An empty AssetID matches all incidents in the tenant; Limit caps the
-// result (0 means the store default).
+// IncidentQuery selects incidents. An empty AssetID matches all incidents in the tenant; DetectionIDs,
+// when non-empty, keeps incidents whose append-only event log references at least one of those detection
+// ids. Limit caps the result (0 means the store default).
 type IncidentQuery struct {
-	AssetID shared.ID
-	Limit   int
+	AssetID      shared.ID
+	DetectionIDs []shared.ID
+	Limit        int
 }

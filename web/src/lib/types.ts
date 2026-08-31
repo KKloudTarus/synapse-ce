@@ -260,6 +260,37 @@ export interface ReachabilityClaim {
   confidence: number // 0..100
 }
 
+export type InvestigationTactic =
+  | 'lateral_movement'
+  | 'data_exfiltration'
+  | 'privilege_escalation'
+  | 'credential_access'
+  | 'persistence'
+  | 'command_and_control'
+  | 'defense_evasion'
+  | 'execution'
+  | 'benign'
+
+export type InvestigationNextStep =
+  | 'inspect_process_tree'
+  | 'inspect_network_activity'
+  | 'inspect_file_activity'
+  | 'inspect_identity_events'
+  | 'retro_hunt_similar_activity'
+  | 'collect_additional_telemetry'
+  | 'close_as_benign'
+
+// InvestigationClaim is advisory, structured AI output. Human acceptance records a
+// review decision; it does not mutate the incident or authorize a response.
+export interface InvestigationClaim {
+  incident_id: string
+  tactic: InvestigationTactic
+  confidence: number // 0..100
+  drivers: string[]
+  relevant_event_ids?: string[]
+  suggested_next_step?: InvestigationNextStep
+}
+
 // Judgment is one AI-proposed, human-ratified analysis over a subject (a finding, a data flow…).
 // Read-only here; proposed = unverified AI output (score 0), confirmed = a distinct human verified
 // (gated) or accepted (ungated) it. The UI labels the state – it never presents a proposal as fact.
@@ -273,7 +304,7 @@ export interface Judgment {
   evidenceScore: number // 0..100
   proposedBy: string
   version: number
-  claim: RiskNarrativeClaim | CritiqueClaim | ReachabilityClaim | Record<string, unknown>
+  claim: RiskNarrativeClaim | CritiqueClaim | ReachabilityClaim | InvestigationClaim | Record<string, unknown>
 }
 
 // FindingComment is a persisted collaboration note on a finding.

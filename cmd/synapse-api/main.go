@@ -319,6 +319,7 @@ func main() {
 	var baselineStore ports.BaselineStore                 // #594 D behavioral baseline state
 	var telemetrySvc *telemetryingest.Service             // wired to detection repair after both services exist
 	var endpointStateSvc *endpointstate.Service           // #594 B7 State-Timeline projector; fed by telemetry ingest
+	var incidentSvc *incidentuc.Service                   // #594 C7 incident projection; shared with AI investigation reads
 	var detectSvc *detectledger.Service                   // tenant-scoped startup and periodic provenance repair
 	var detectionRunner *detectledger.ReconciliationRunner
 	var fleetAuditRunner *fleetaudit.ReconciliationRunner // #610/#611 state-local audit intention delivery
@@ -1679,7 +1680,8 @@ func main() {
 	// event on that log + the tamper-evident audit trail. RBAC + tenant scoping are enforced at the
 	// HTTP edge (router). No agent transport needed — this is an operator surface.
 	{
-		incidentSvc, ierr := incidentuc.NewService(incidentEventStore)
+		var ierr error
+		incidentSvc, ierr = incidentuc.NewService(incidentEventStore)
 		if ierr != nil {
 			log.Error("incident read service init failed", "err", ierr)
 			os.Exit(1)
@@ -2307,6 +2309,9 @@ func main() {
 			Findings:     exploitationService, // record unproven findings (score 0)
 			Hypotheses:   exploitationService, // propose attack-chain hypotheses (score 0; gated until human-verified)
 			Reachability: scanResultStore,     // read dep-graph reachability facts (T0/T1)
+			Investigation: &agenttools.InvestigationToolset{
+				Incidents: incidentSvc, Detections: detectionRecordStore, Timeline: endpointStateSvc,
+			},
 		}
 		if judgmentSvc != nil { // PROPOSE reachability/critique/… judgments (score 0); verify stays human-only (PermReview)
 			toolset.Judgments = judgmentSvc

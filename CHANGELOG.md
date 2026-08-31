@@ -9,6 +9,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Governed AI-assisted EDR investigation.** Agent and MCP clients can list engagement-scoped
+  incidents, retrieve bounded secret-redacted endpoint context, and propose a structured tactic,
+  confidence, relevant-event, driver-token, and read-only next-step hypothesis into the judgment ledger.
+  The analyst review UI requires a distinct evidence-scored verdict; neither proposal nor verification
+  can mutate incident facts, risk, disposition, or response actions, and reports remain model-free.
+
 - **Python Tier-2 semantic reachability and interprocedural taint analysis.** An opt-in, source-only
   tree-sitter sidecar now emits bounded semantic facts without importing or executing target Python;
   pure Go resolution proves affected-symbol call paths and precise value flow across assignments,

@@ -25,6 +25,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/logging"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
+	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
+	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/endpointstate"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -42,6 +46,10 @@ func main() {
 		log.Error("synapse-mcp requires SYNAPSE_MCP_ENGAGEMENT_ID (the engagement it is scoped to)")
 		os.Exit(1)
 	}
+	if cfg.MCPTenantID == "" {
+		log.Error("synapse-mcp requires SYNAPSE_MCP_TENANT_ID (tenant boundary for the pinned engagement)")
+		os.Exit(1)
+	}
 	if err := cfg.ValidateMigrationPosture(); err != nil {
 		log.Error("database migration posture invalid", "err", err)
 		os.Exit(1)
@@ -54,7 +62,11 @@ func main() {
 	// API) when configured, else in-memory/file for dev.
 	var findingRepo ports.FindingRepository
 	var evidenceStore ports.EvidenceStore
-	var auditLog ports.AuditLogger
+	var auditLog ports.IdempotentAuditLogger
+	var incidentStore ports.IncidentEventStore
+	var detectionStore ports.DetectionRecordStore
+	var timelineStore ports.EndpointTimelineStore
+	var judgmentStore analysisuc.Store
 	if cfg.DBDSN != "" {
 		startup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -93,11 +105,19 @@ func main() {
 		findingRepo = postgres.NewFindingRepository(pool)
 		evidenceStore = postgres.NewEvidenceStore(pool)
 		auditLog = postgres.NewAuditLog(pool)
+		incidentStore = postgres.NewIncidentEventRepository(pool)
+		detectionStore = postgres.NewDetectionRecordRepository(pool)
+		timelineStore = postgres.NewEndpointTimelineRepository(pool)
+		judgmentStore = postgres.NewJudgmentRepository(pool)
 		log.Info("persistence: postgres")
 	} else {
 		findingRepo = memory.NewFindingRepository()
 		evidenceStore = memory.NewEvidenceStore()
 		auditLog = file.NewAuditLog(cfg.AuditFile)
+		incidentStore = memory.NewIncidentEventStore()
+		detectionStore = memory.NewDetectionRecordStore()
+		timelineStore = memory.NewEndpointTimelineStore()
+		judgmentStore = memory.NewJudgmentStore()
 		log.Warn("persistence: in-memory (set SYNAPSE_DB_DSN to serve the API's data)")
 	}
 
@@ -110,7 +130,36 @@ func main() {
 		log.Error("agent catalog init failed", "err", err)
 		os.Exit(1)
 	}
-	srv, err := mcpserver.New(catalog, shared.ID(cfg.MCPEngagementID), cfg.MCPToken, buildinfo.App(), log)
+	incidentSvc, err := incidentuc.NewService(incidentStore)
+	if err != nil {
+		log.Error("mcp incident reader init failed", "err", err)
+		os.Exit(1)
+	}
+	timelineSvc, err := endpointstate.NewService(timelineStore)
+	if err != nil {
+		log.Error("mcp timeline reader init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := catalog.EnableInvestigation(agenttools.InvestigationToolset{
+		Incidents: incidentSvc, Detections: detectionStore, Timeline: timelineSvc,
+	}); err != nil {
+		log.Error("mcp investigation tools init failed", "err", err)
+		os.Exit(1)
+	}
+	if cfg.JudgmentsEnabled {
+		evidenceSvc, eerr := evidenceuc.NewService(evidenceStore, nil, auditLog, clock, ids)
+		if eerr != nil {
+			log.Error("mcp evidence sealer init failed", "err", eerr)
+			os.Exit(1)
+		}
+		judgmentSvc, jerr := analysisuc.NewService(judgmentStore, evidenceSvc, auditLog, clock, ids)
+		if jerr != nil {
+			log.Error("mcp judgment proposer init failed", "err", jerr)
+			os.Exit(1)
+		}
+		catalog.EnableJudgments(judgmentSvc)
+	}
+	srv, err := mcpserver.New(catalog, shared.ID(cfg.MCPTenantID), shared.ID(cfg.MCPEngagementID), cfg.MCPToken, buildinfo.App(), log)
 	if err != nil {
 		log.Error("mcp server init failed", "err", err)
 		os.Exit(1)
@@ -118,7 +167,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log.Info("synapse-mcp listening", "addr", cfg.MCPAddr, "engagement", cfg.MCPEngagementID)
+	log.Info("synapse-mcp listening", "addr", cfg.MCPAddr, "tenant", cfg.MCPTenantID, "engagement", cfg.MCPEngagementID)
 	if err := httpserver.Run(ctx, cfg.MCPAddr, srv.Handler(), log); err != nil {
 		log.Error("mcp server error", "err", err)
 		os.Exit(1)

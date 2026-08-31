@@ -5,6 +5,7 @@ import { api } from '../../../lib/api'
 import type {
   CritiqueClaim,
   EvidenceItem,
+  InvestigationClaim,
   Judgment,
   ReachabilityClaim,
   RiskNarrativeClaim,
@@ -111,6 +112,55 @@ export function Reachability({ j }: { j: Judgment }) {
   )
 }
 
+export function InvestigationHypothesis({ j }: { j: Judgment }) {
+  const c = j.claim as Partial<InvestigationClaim>
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-primary">AI investigation hypothesis</span>
+        <JudgmentStateBadge state={j.state} />
+        {c.tactic && (
+          <span className="rounded border border-brand-secondary bg-brand-primary px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-secondary">
+            {c.tactic.replaceAll('_', ' ')}
+          </span>
+        )}
+        {typeof c.confidence === 'number' && (
+          <span className="font-mono text-xs tabular-nums text-tertiary">{c.confidence}% confidence</span>
+        )}
+      </div>
+      {c.incident_id && (
+        <p className="text-xs text-tertiary">
+          Incident <span className="break-all font-mono text-primary">{c.incident_id}</span>
+        </p>
+      )}
+      {(c.drivers?.length ?? 0) > 0 && (
+        <div className="flex flex-wrap gap-1" aria-label="Hypothesis drivers">
+          {c.drivers!.map((driver) => (
+            <span key={driver} className="rounded border border-secondary bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary">
+              {driver}
+            </span>
+          ))}
+        </div>
+      )}
+      {(c.relevant_event_ids?.length ?? 0) > 0 && (
+        <p className="text-xs text-tertiary">
+          Relevant events:{' '}
+          <span className="font-mono text-primary">{c.relevant_event_ids!.join(', ')}</span>
+        </p>
+      )}
+      {c.suggested_next_step && (
+        <p className="text-xs text-tertiary">
+          Suggested next step:{' '}
+          <span className="font-medium text-primary">{c.suggested_next_step.replaceAll('_', ' ')}</span>
+        </p>
+      )}
+      <p className="text-xs text-warning-primary">
+        Unverified AI suggestion — only a distinct reviewer's sealed verdict can confirm it. It cannot change incident facts, risk, disposition, or response actions.
+      </p>
+    </div>
+  )
+}
+
 export function ExplainJudgments({ engagementId, findingId }: { engagementId: string; findingId: string }) {
   const { data: judgments } = useFetch(
     () => api.judgments(engagementId).catch(() => [] as Judgment[]),
@@ -147,9 +197,10 @@ export function ExplainJudgments({ engagementId, findingId }: { engagementId: st
   )
 }
 
-export const GATED_JUDGMENT_CAPABILITIES = new Set(['reachability', 'sast', 'critique', 'threat', 'vex_justification'])
+export const GATED_JUDGMENT_CAPABILITIES = new Set(['reachability', 'sast', 'critique', 'threat', 'vex_justification', 'investigation'])
 
 export function JudgmentClaim({ judgment }: { judgment: Judgment }) {
+  if (judgment.capability === 'investigation') return <InvestigationHypothesis j={judgment} />
   if (judgment.capability === 'reachability') return <Reachability j={judgment} />
   if (judgment.capability === 'critique') return <Critique j={judgment} />
   if (judgment.capability === 'risk_narrative') return <RiskNarrative j={judgment} />

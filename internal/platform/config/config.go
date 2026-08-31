@@ -580,9 +580,10 @@ type Config struct {
 	MeasureCursorSecret string
 
 	// MCP server: exposes the agent tool catalog to external MCP clients,
-	// bearer-locked (role "mcp") and pinned to one engagement. Token is never logged.
+	// bearer-locked (role "mcp") and pinned to one tenant + engagement. Token is never logged.
 	MCPToken        string
 	MCPAddr         string
+	MCPTenantID     string
 	MCPEngagementID string
 }
 
@@ -855,6 +856,7 @@ func Load() Config {
 
 		MCPToken:        getenv("SYNAPSE_MCP_TOKEN", ""),
 		MCPAddr:         getenv("SYNAPSE_MCP_ADDR", ":8081"),
+		MCPTenantID:     getenv("SYNAPSE_MCP_TENANT_ID", "default"),
 		MCPEngagementID: getenv("SYNAPSE_MCP_ENGAGEMENT_ID", ""),
 	}
 }

@@ -99,6 +99,13 @@ func TestIncidentEventRepository(t *testing.T) {
 	if err != nil || len(ids) != 1 || ids[0] != incID {
 		t.Fatalf("list by asset: %v err=%v", ids, err)
 	}
+	ids, err = repo.ListIncidentIDs(tctx, ports.IncidentQuery{DetectionIDs: []shared.ID{"d1"}})
+	if err != nil || len(ids) != 1 || ids[0] != incID {
+		t.Fatalf("list by detection: %v err=%v", ids, err)
+	}
+	if ids, err = repo.ListIncidentIDs(tctx, ports.IncidentQuery{DetectionIDs: []shared.ID{"d-other"}}); err != nil || len(ids) != 0 {
+		t.Fatalf("unrelated detection must match no incidents: %v err=%v", ids, err)
+	}
 
 	// Cross-tenant isolation: the other tenant sees nothing.
 	octx := shared.WithTenant(ctx, other)

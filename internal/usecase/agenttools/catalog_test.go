@@ -94,7 +94,7 @@ func newCatalog(t *testing.T, finds []finding.Finding, evs []evidence.Evidence, 
 }
 
 func session() agent.Session {
-	return agent.Session{ID: "s1", EngagementID: "eng-1", InitiatedBy: "alice"}
+	return agent.Session{ID: "s1", TenantID: "tenant-1", EngagementID: "eng-1", InitiatedBy: "alice"}
 }
 
 // TestToolsExposesOnlyAllowedTools is the anti-self-escalation guard: the advertised

@@ -229,7 +229,9 @@ export function JudgmentReviewForm({
       {gated ? (
         <div className="space-y-3">
           <p className="text-xs text-tertiary">
-            Record an adversarial verdict. Scores ≥ {EVIDENCE_BAR} confirm this claim; lower scores refute it. Either outcome is sealed.
+            {judgment.capability === 'investigation'
+              ? `Record a distinct analyst verdict on this AI hypothesis. Scores ≥ ${EVIDENCE_BAR} confirm it; lower scores refute it. Either outcome is sealed and cannot mutate incident facts, risk, disposition, or response actions.`
+              : `Record an adversarial verdict. Scores ≥ ${EVIDENCE_BAR} confirm this claim; lower scores refute it. Either outcome is sealed.`}
           </p>
           <Field label="Evidence score" hint="0–100">
             <Input

@@ -30,7 +30,7 @@ const (
 	CapCorrelation      Capability = "correlation"       // NOT gated (a cross-check disagreement; human-acknowledged, never auto-resolved)
 	CapPromotion        Capability = "promotion"         // gated (cross-pillar priority change, distinct-verifier only)
 	CapVexJustification Capability = "vex_justification" // gated (AI-proposed OpenVEX not_affected justification, human-ratified)
-	CapInvestigation    Capability = "investigation"     // NOT gated (E: an AI investigation HYPOTHESIS about an incident; advisory, human-accepted, never auto-acted)
+	CapInvestigation    Capability = "investigation"     // gated (E: AI investigation HYPOTHESIS; distinct-verifier only, never auto-acted)
 )
 
 // Valid reports whether c is a known capability.
@@ -43,12 +43,12 @@ func (c Capability) Valid() bool {
 }
 
 // Gated reports whether a verdict gates this capability's publishability (R2). Adversarially-
-// refutable capabilities (reachability/sast/critique/threat/promotion/vex_justification) are gated: publishable only with a sealed
+// refutable capabilities (reachability/sast/critique/threat/promotion/vex_justification/investigation) are gated: publishable only with a sealed
 // verdict >= EvidenceThreshold. Descriptive ones (risk_narrative; correlation – a deterministic
 // cross-check disagreement) have no "refuted at 75" semantics; they are human-accepted, not score-gated.
 func (c Capability) Gated() bool {
 	switch c {
-	case CapReachability, CapSAST, CapDAST, CapCritique, CapThreat, CapPromotion, CapVexJustification:
+	case CapReachability, CapSAST, CapDAST, CapCritique, CapThreat, CapPromotion, CapVexJustification, CapInvestigation:
 		return true
 	}
 	return false

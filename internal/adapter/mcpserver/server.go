@@ -4,9 +4,9 @@
 // tools/call – so it needs no third-party SDK and is fully testable offline. (The SDK can be
 // swapped in later behind the same Catalog seam.)
 //
-// Safety: the server is bearer-locked (role "mcp") and pinned to ONE engagement, so it can
-// never reach another engagement's data (the catalog is engagement-locked per session and an
-// engagement id is never accepted from the client). It dispatches through the SAME
+// Safety: the server is bearer-locked (role "mcp") and pinned to ONE tenant + engagement, so it can
+// never reach another scope (the catalog is locked per session and neither boundary is accepted from
+// the client). It dispatches through the SAME
 // agenttools.Catalog the in-process orchestrator uses, so read tools return data and an
 // execute proposal (start_recon) is returned as an approval-required envelope – the MCP path
 // has no executor and no gate, so it can never RUN a tool (it can only read + propose). All
@@ -30,9 +30,10 @@ import (
 // protocolVersion is the MCP revision this server speaks.
 const protocolVersion = "2024-11-05"
 
-// Server is an MCP endpoint over a fixed engagement.
+// Server is an MCP endpoint over a fixed tenant and engagement.
 type Server struct {
 	catalog      *agenttools.Catalog
+	tenantID     shared.ID
 	engagementID shared.ID
 	sessionID    shared.ID // synthetic session id used for catalog dispatch + audit attribution
 	token        string    // bearer token (role-locked "mcp"); never logged
@@ -41,13 +42,16 @@ type Server struct {
 	log          *slog.Logger
 }
 
-// New validates dependencies and returns an MCP server bound to one engagement.
-func New(catalog *agenttools.Catalog, engagementID shared.ID, token, version string, log *slog.Logger) (*Server, error) {
+// New validates dependencies and returns an MCP server bound to one tenant and engagement.
+func New(catalog *agenttools.Catalog, tenantID, engagementID shared.ID, token, version string, log *slog.Logger) (*Server, error) {
 	if catalog == nil {
 		return nil, fmt.Errorf("%w: mcp server needs a catalog", shared.ErrValidation)
 	}
 	if engagementID == "" {
 		return nil, fmt.Errorf("%w: mcp server needs an engagement id (SYNAPSE_MCP_ENGAGEMENT_ID)", shared.ErrValidation)
+	}
+	if tenantID.IsZero() {
+		return nil, fmt.Errorf("%w: mcp server needs a tenant id (SYNAPSE_MCP_TENANT_ID)", shared.ErrValidation)
 	}
 	if token == "" {
 		return nil, fmt.Errorf("%w: mcp server needs a bearer token (SYNAPSE_MCP_TOKEN)", shared.ErrValidation)
@@ -56,7 +60,7 @@ func New(catalog *agenttools.Catalog, engagementID shared.ID, token, version str
 		log = slog.Default()
 	}
 	return &Server{
-		catalog: catalog, engagementID: engagementID,
+		catalog: catalog, tenantID: tenantID, engagementID: engagementID,
 		sessionID: shared.ID("mcp-" + engagementID.String()),
 		token:     token, serverName: "synapse-mcp", version: version, log: log,
 	}, nil
@@ -174,8 +178,8 @@ func (s *Server) handleToolCall(ctx context.Context, w http.ResponseWriter, req 
 		writeJSON(w, http.StatusOK, errResp(req.ID, codeInvalidRequest, "tools/call needs a tool name"))
 		return
 	}
-	sess := agent.Session{ID: s.sessionID, EngagementID: s.engagementID, InitiatedBy: "mcp"}
-	res, err := s.catalog.Dispatch(ctx, sess, agent.ToolCall{ID: "mcp", Name: p.Name, Arguments: p.Arguments})
+	sess := agent.Session{ID: s.sessionID, TenantID: s.tenantID, EngagementID: s.engagementID, InitiatedBy: "mcp"}
+	res, err := s.catalog.Dispatch(shared.WithTenant(ctx, s.tenantID), sess, agent.ToolCall{ID: "mcp", Name: p.Name, Arguments: p.Arguments})
 	if err != nil {
 		// A tool/argument error is reported as an MCP tool error (isError), not a transport error.
 		writeJSON(w, http.StatusOK, okResp(req.ID, toolResult(err.Error(), true)))

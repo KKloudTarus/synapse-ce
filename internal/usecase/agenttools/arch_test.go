@@ -21,9 +21,12 @@ func TestCatalogCannotReachAScoreSetter(t *testing.T) {
 	forbidden := []string{
 		mod + "/internal/usecase/exploitation",
 		mod + "/internal/usecase/findings",
-		mod + "/internal/usecase/analysis",       // judgment Verify (the score/state mover) – the agent must not reach it
-		mod + "/internal/usecase/writeupdraftuc", // draft Edit/Accept/Reject (the human sign-off) – agent reaches Propose only, via the narrow writeupdraftProposer
-		mod + "/internal/infrastructure",         // concrete repos hold SetEvidenceScore / SetScoreState (and the writeupdraft store)
+		mod + "/internal/usecase/analysis",             // judgment Verify (the score/state mover) – the agent must not reach it
+		mod + "/internal/usecase/writeupdraftuc",       // draft Edit/Accept/Reject (the human sign-off) – agent reaches Propose only, via the narrow writeupdraftProposer
+		mod + "/internal/usecase/fleet/incidenttriage", // incident fact/disposition writer – investigation is read + judgment proposal only
+		mod + "/internal/usecase/fleet/riskscoreuc",    // RiskAssessment writer/reassembler – AI cannot set risk
+		mod + "/internal/usecase/response",             // governed response execution – AI investigation cannot reach it
+		mod + "/internal/infrastructure",               // concrete repos hold SetEvidenceScore / SetScoreState (and the writeupdraft store)
 	}
 	// NOTE: domain/judgment is intentionally NOT forbidden – the catalog imports it for the
 	// ReachabilityTier consts and will for ReachabilityClaim. Its in-memory

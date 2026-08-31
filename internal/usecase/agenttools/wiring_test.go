@@ -21,6 +21,7 @@ func fullToolset() AgentToolset {
 		Findings:      &fakeProposer{},
 		Hypotheses:    &fakeHypProposer{},
 		Reachability:  &fakeScanResults{},
+		Investigation: fakeInvestigationToolset(),
 		Judgments:     &fakeJudgmentProposer{},
 		WriteupDrafts: &fakeWriteupdraftProposer{},
 	}
@@ -35,6 +36,8 @@ var toolsetControlled = []string{
 	ToolProposeFinding,
 	ToolProposeAttackChain,
 	ToolReachabilityContext,
+	ToolListIncidents,
+	ToolGetIncidentContext,
 	ToolProposeReachability,
 	ToolProposeSASTValidation,
 	ToolProposeCritique,
@@ -96,6 +99,7 @@ func TestEnableAgentToolsetOptionalOff(t *testing.T) {
 		}
 	}
 	for _, n := range []string{
+		ToolListIncidents, ToolGetIncidentContext,
 		ToolProposeReachability, ToolProposeSASTValidation, ToolProposeCritique,
 		ToolProposeRiskNarrative, ToolProposeThreat, ToolProposeVexJustification, ToolProposeWriteupDraft,
 	} {

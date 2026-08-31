@@ -486,15 +486,42 @@ func (t InvestigationTactic) Valid() bool {
 	return false
 }
 
+// InvestigationNextStep is a closed analyst-action suggestion. It names a read-only investigation
+// activity, never a response action, command, target, or free-form instruction an agent could execute.
+type InvestigationNextStep string
+
+const (
+	NextInspectProcessTree     InvestigationNextStep = "inspect_process_tree"
+	NextInspectNetworkActivity InvestigationNextStep = "inspect_network_activity"
+	NextInspectFileActivity    InvestigationNextStep = "inspect_file_activity"
+	NextInspectIdentityEvents  InvestigationNextStep = "inspect_identity_events"
+	NextRetroHuntSimilar       InvestigationNextStep = "retro_hunt_similar_activity"
+	NextCollectTelemetry       InvestigationNextStep = "collect_additional_telemetry"
+	NextCloseAsBenign          InvestigationNextStep = "close_as_benign"
+)
+
+// Valid reports whether s is a known, non-executing investigation suggestion. Empty is allowed for
+// backwards compatibility with hypotheses persisted before next-step suggestions were introduced.
+func (s InvestigationNextStep) Valid() bool {
+	switch s {
+	case "", NextInspectProcessTree, NextInspectNetworkActivity, NextInspectFileActivity,
+		NextInspectIdentityEvents, NextRetroHuntSimilar, NextCollectTelemetry, NextCloseAsBenign:
+		return true
+	}
+	return false
+}
+
 // InvestigationClaim is an AI-proposed HYPOTHESIS about an incident (#594 E): a single closed tactic
 // category, a confidence, and structured driver tokens (the signals that support it — never free prose).
-// It is propose-only and NOT gated: it never proves anything or drives a response on its own; it is
-// advisory context a human analyst accepts or rejects. The LLM proposes; a human decides.
+// It is propose-only and evidence-gated: it never proves anything or drives a response on its own;
+// a distinct verifier must seal a verdict that clears the shared evidence threshold.
 type InvestigationClaim struct {
-	IncidentID shared.ID           `json:"incident_id"`
-	Tactic     InvestigationTactic `json:"tactic"`
-	Confidence int                 `json:"confidence"` // 0..100
-	Drivers    []string            `json:"drivers"`    // closed signal tokens (e.g. "new_exec_paths", "network_fanout_spike"), no prose
+	IncidentID        shared.ID             `json:"incident_id"`
+	Tactic            InvestigationTactic   `json:"tactic"`
+	Confidence        int                   `json:"confidence"`                    // 0..100
+	Drivers           []string              `json:"drivers"`                       // closed signal tokens, no prose
+	RelevantEventIDs  []shared.ID           `json:"relevant_event_ids,omitempty"`  // bounded event references from scoped context
+	SuggestedNextStep InvestigationNextStep `json:"suggested_next_step,omitempty"` // closed, read-only analyst suggestion
 }
 
 // Capability identifies this claim's brain.
@@ -519,6 +546,22 @@ func (c InvestigationClaim) Validate() error {
 		if len(d) > 64 || !driverRE.MatchString(d) {
 			return fmt.Errorf("%w: investigation driver %q must be a token (no free text)", shared.ErrValidation, d)
 		}
+	}
+	if len(c.RelevantEventIDs) > 32 {
+		return fmt.Errorf("%w: investigation hypothesis has too many relevant events (%d > 32)", shared.ErrValidation, len(c.RelevantEventIDs))
+	}
+	seenEvents := make(map[shared.ID]struct{}, len(c.RelevantEventIDs))
+	for _, id := range c.RelevantEventIDs {
+		if id.IsZero() || len(id) > 128 {
+			return fmt.Errorf("%w: investigation relevant event id must be non-empty and at most 128 bytes", shared.ErrValidation)
+		}
+		if _, duplicate := seenEvents[id]; duplicate {
+			return fmt.Errorf("%w: investigation relevant event id %q is duplicated", shared.ErrValidation, id)
+		}
+		seenEvents[id] = struct{}{}
+	}
+	if !c.SuggestedNextStep.Valid() {
+		return fmt.Errorf("%w: investigation suggested next step must be a known read-only token, got %q", shared.ErrValidation, c.SuggestedNextStep)
 	}
 	return nil
 }

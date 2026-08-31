@@ -73,7 +73,21 @@ func (s *Service) Append(ctx context.Context, id shared.ID, expectedRevision int
 // ListByAsset returns the projected incidents for an asset (all incidents in the tenant if assetID is
 // zero), ordered by incident id.
 func (s *Service) ListByAsset(ctx context.Context, assetID shared.ID, limit int) ([]incident.Incident, error) {
-	ids, err := s.store.ListIncidentIDs(ctx, ports.IncidentQuery{AssetID: assetID, Limit: limit})
+	return s.list(ctx, ports.IncidentQuery{AssetID: assetID, Limit: limit})
+}
+
+// ListByDetectionIDs returns incidents whose append-only log references at least one of the supplied
+// detections. This is the engagement-scoping seam used by AI/MCP investigation: detections are first
+// selected from one engagement, then only incidents backed by those ids may be exposed.
+func (s *Service) ListByDetectionIDs(ctx context.Context, detectionIDs []shared.ID, limit int) ([]incident.Incident, error) {
+	if len(detectionIDs) == 0 {
+		return []incident.Incident{}, nil
+	}
+	return s.list(ctx, ports.IncidentQuery{DetectionIDs: detectionIDs, Limit: limit})
+}
+
+func (s *Service) list(ctx context.Context, query ports.IncidentQuery) ([]incident.Incident, error) {
+	ids, err := s.store.ListIncidentIDs(ctx, query)
 	if err != nil {
 		return nil, err
 	}

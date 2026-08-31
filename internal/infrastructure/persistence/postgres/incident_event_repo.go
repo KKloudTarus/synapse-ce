@@ -132,7 +132,20 @@ func (r *IncidentEventRepository) ListIncidentIDs(ctx context.Context, q ports.I
 	args := []any{tenant.String()}
 	if !q.AssetID.IsZero() {
 		args = append(args, q.AssetID.String())
-		sql += ` AND asset_id=$2`
+		sql += fmt.Sprintf(` AND asset_id=$%d`, len(args))
+	}
+	if len(q.DetectionIDs) > 0 {
+		detectionIDs := make([]string, 0, len(q.DetectionIDs))
+		for _, id := range q.DetectionIDs {
+			if !id.IsZero() {
+				detectionIDs = append(detectionIDs, id.String())
+			}
+		}
+		if len(detectionIDs) == 0 {
+			return nil, nil
+		}
+		args = append(args, detectionIDs)
+		sql += fmt.Sprintf(` AND detection_id = ANY($%d)`, len(args))
 	}
 	args = append(args, limit)
 	sql += fmt.Sprintf(` GROUP BY incident_id ORDER BY incident_id COLLATE "C" LIMIT $%d`, len(args))

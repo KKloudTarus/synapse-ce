@@ -69,6 +69,12 @@ func TestIncidentEventStoreListAndTenantIsolation(t *testing.T) {
 	if err != nil || len(ids) != 1 || ids[0] != ieInc {
 		t.Fatalf("list by asset: %v err=%v", ids, err)
 	}
+	if ids, err := s.ListIncidentIDs(ieCtx(ieTenant), ports.IncidentQuery{DetectionIDs: []shared.ID{"d1"}}); err != nil || len(ids) != 1 || ids[0] != ieInc {
+		t.Fatalf("list by detection: %v err=%v", ids, err)
+	}
+	if ids, err := s.ListIncidentIDs(ieCtx(ieTenant), ports.IncidentQuery{DetectionIDs: []shared.ID{"d-other"}}); err != nil || len(ids) != 0 {
+		t.Fatalf("unrelated detection must match no incidents: %v err=%v", ids, err)
+	}
 	// Another tenant sees nothing, and cannot load the incident.
 	other := shared.ID("tenant-other")
 	if ids, _ := s.ListIncidentIDs(ieCtx(other), ports.IncidentQuery{}); len(ids) != 0 {

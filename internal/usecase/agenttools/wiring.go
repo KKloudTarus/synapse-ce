@@ -14,17 +14,18 @@ import (
 // toolset when driven durably — a correctness bug (issue #161).
 //
 // Findings, Hypotheses and Reachability are REQUIRED: a durable run must never silently advertise fewer
-// PROPOSAL tools than the inline run. Judgments and WriteupDrafts are OPTIONAL and mirror their feature
-// flags — a nil field leaves that tool off in BOTH binaries (they are gated by SYNAPSE_JUDGMENTS_ENABLED /
+// PROPOSAL tools than the inline run. Investigation, Judgments and WriteupDrafts are OPTIONAL and mirror
+// their feature flags — a nil field leaves that tool off in BOTH binaries (they are gated by SYNAPSE_JUDGMENTS_ENABLED /
 // SYNAPSE_WRITEUP_DRAFTS_ENABLED). To keep a tool off, the composition root leaves the field nil; it must
 // NOT assign a typed-nil service pointer (a non-nil interface wrapping a nil pointer), because that would
 // wire a tool backed by nothing. Each field is a propose/read-only slice — the agent can never confirm.
 type AgentToolset struct {
-	Findings      findingProposer      // required: propose_finding
-	Hypotheses    hypothesisProposer   // required: propose_attack_chain
-	Reachability  scanResultReader     // required: reachability_context (read-only)
-	Judgments     judgmentProposer     // optional (nil ⇒ off): propose_reachability/sast_validation/critique/risk_narrative/threat/vex_justification
-	WriteupDrafts writeupdraftProposer // optional (nil ⇒ off): propose_writeup_draft
+	Findings      findingProposer       // required: propose_finding
+	Hypotheses    hypothesisProposer    // required: propose_attack_chain
+	Reachability  scanResultReader      // required: reachability_context (read-only)
+	Investigation *InvestigationToolset // optional: engagement-scoped incident + timeline reads
+	Judgments     judgmentProposer      // optional (nil ⇒ off): propose_reachability/sast_validation/critique/risk_narrative/threat/vex_justification
+	WriteupDrafts writeupdraftProposer  // optional (nil ⇒ off): propose_writeup_draft
 }
 
 // EnableAgentToolset turns on planning + the proposal/read tools from a single dependency set, so the
@@ -44,6 +45,11 @@ func (c *Catalog) EnableAgentToolset(t AgentToolset) error {
 	c.EnableFindingProposals(t.Findings)
 	c.EnableHypotheses(t.Hypotheses)
 	c.EnableReachability(t.Reachability)
+	if t.Investigation != nil {
+		if err := c.EnableInvestigation(*t.Investigation); err != nil {
+			return err
+		}
+	}
 	if t.Judgments != nil {
 		c.EnableJudgments(t.Judgments)
 	}

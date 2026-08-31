@@ -117,6 +117,9 @@ func (s *IncidentEventStore) ListIncidentIDs(ctx context.Context, q ports.Incide
 		if !q.AssetID.IsZero() && log[0].AssetID != q.AssetID {
 			continue
 		}
+		if len(q.DetectionIDs) > 0 && !incidentLogReferencesAnyDetection(log, q.DetectionIDs) {
+			continue
+		}
 		ids = append(ids, id)
 	}
 	s.mu.Unlock()
@@ -130,4 +133,19 @@ func (s *IncidentEventStore) ListIncidentIDs(ctx context.Context, q ports.Incide
 		ids = ids[:limit]
 	}
 	return ids, nil
+}
+
+func incidentLogReferencesAnyDetection(log []incident.IncidentEvent, ids []shared.ID) bool {
+	wanted := make(map[shared.ID]struct{}, len(ids))
+	for _, id := range ids {
+		if !id.IsZero() {
+			wanted[id] = struct{}{}
+		}
+	}
+	for _, event := range log {
+		if _, ok := wanted[event.DetectionID]; ok {
+			return true
+		}
+	}
+	return false
 }

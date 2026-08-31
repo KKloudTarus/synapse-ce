@@ -11,6 +11,7 @@ code path through which it can run a tool.
 
 ```bash
 export SYNAPSE_MCP_TOKEN="$(openssl rand -hex 32)"
+export SYNAPSE_MCP_TENANT_ID="tenant_..."
 export SYNAPSE_MCP_ENGAGEMENT_ID="eng_..."
 ./bin/synapse-mcp
 ```
@@ -18,11 +19,14 @@ export SYNAPSE_MCP_ENGAGEMENT_ID="eng_..."
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_MCP_TOKEN` | (none) | Bearer token. Required. Never logged. |
+| `SYNAPSE_MCP_TENANT_ID` | `default` | The single tenant this server is scoped to. Clients cannot override it. |
 | `SYNAPSE_MCP_ENGAGEMENT_ID` | (none) | The single engagement this server is scoped to. Required. |
 | `SYNAPSE_MCP_ADDR` | `:8081` | Listen address. |
 
-The session is engagement-locked at construction. A client cannot select or reach another engagement's
-data, because the engagement is not a request parameter.
+The session is tenant- and engagement-locked at construction. A client cannot select or reach another
+tenant or engagement, because neither boundary is a request parameter. Incident access is narrower still:
+the server derives the allowed incident IDs by joining the engagement's detection ledger, rather than
+listing every incident in the tenant.
 
 ## Protocol surface
 
@@ -47,6 +51,8 @@ engagement cannot silently return a partial picture as if it were complete.
 | `reachability_context` | Dependency-graph reachability facts |
 | `evidence_sufficiency` | Advisory assessment of what a finding still needs to become publishable |
 | `plan_runtime_verification` | A safe, read-only verification plan for a SAST finding. Executes nothing |
+| `list_incidents` | Bounded incident summaries whose trigger detections belong to the configured engagement; no comments, owner, response records, or evidence content |
+| `get_incident_context` | A bounded, secret-redacted endpoint timeline around an allowed incident's server-derived asset and detection window |
 
 `evidence_sufficiency` is explicitly advisory. It sets no score; only a distinct verifier's sealed verdict
 moves a finding's evidence score.
@@ -69,11 +75,12 @@ can confirm itself.
 | `propose_threat` | A STRIDE threat over the architecture model |
 | `propose_vex_justification` | An OpenVEX `not_affected` justification |
 | `propose_writeup_draft` | Finding write-up prose awaiting human sign-off |
+| `propose_investigation` | A token-only incident hypothesis: tactic storyline, confidence, structured drivers, scoped relevant event IDs, and one closed read-only next-step suggestion. A distinct verifier must seal an above-threshold verdict; it cannot mutate facts, risk, disposition, or response actions |
 
 A `tools/call` response for a proposal carries `"proposal_requires_human_approval": true`. Treat it as a
 queued request for review, not as work that happened.
 
-Judgment proposal tools require `SYNAPSE_JUDGMENTS_ENABLED`, and `propose_writeup_draft` requires
+Judgment proposal tools, including `propose_investigation`, require `SYNAPSE_JUDGMENTS_ENABLED`, and `propose_writeup_draft` requires
 `SYNAPSE_WRITEUP_DRAFTS_ENABLED`. A tool whose dependency is not wired is simply absent from
 `tools/list` rather than present and failing.
 
@@ -91,5 +98,8 @@ Three independent controls hold, and none of them depends on the MCP client beha
 
 Secrets are never exposed to a client: credentials stay in the vault, substitution happens server-side at
 execution time, and evidence content is not a readable field in any tool result.
+
+Investigation judgments are deliberately absent from generated reports. Reports continue to render only
+their existing deterministic, typed projections; no MCP or LLM output is passed into the report path.
 
 Next: [Code quality rule authoring](code-quality-rules.md)

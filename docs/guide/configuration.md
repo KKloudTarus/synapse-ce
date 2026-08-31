@@ -448,11 +448,13 @@ The following variables are read by `synapse-agent` and `synapse-cluster-agent`,
 
 ## MCP server (synapse-mcp)
 
-Read and propose only. It never executes. The token and engagement ID are required to start it.
+Read and propose only. It never executes. The token and engagement ID are required to start it; tenant
+and engagement are fixed at process startup and cannot be supplied by an MCP client.
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_MCP_TOKEN` | (none) | Bearer token. Never logged. |
+| `SYNAPSE_MCP_TENANT_ID` | `default` | The tenant boundary for every MCP request. Set this explicitly when the deployment uses a non-default tenant; clients cannot override it. |
 | `SYNAPSE_MCP_ENGAGEMENT_ID` | (none) | The engagement the MCP server is scoped to. |
 | `SYNAPSE_MCP_ADDR` | `:8081` | Listen address. |
 

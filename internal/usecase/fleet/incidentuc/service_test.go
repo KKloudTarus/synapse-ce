@@ -131,3 +131,18 @@ func TestListByAsset(t *testing.T) {
 		t.Fatalf("other asset must list nothing, got %d", len(other))
 	}
 }
+
+func TestListByDetectionIDs(t *testing.T) {
+	svc, ctx := newSvc(t)
+	created, err := svc.RecordCorrelation(ctx, correlate(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	incs, err := svc.ListByDetectionIDs(ctx, []shared.ID{"d2"}, 10)
+	if err != nil || len(incs) != 1 || incs[0].ID != created[0].ID {
+		t.Fatalf("list by detection ids: %+v err=%v", incs, err)
+	}
+	if none, err := svc.ListByDetectionIDs(ctx, nil, 10); err != nil || len(none) != 0 {
+		t.Fatalf("empty detection scope must return an empty result: %+v err=%v", none, err)
+	}
+}

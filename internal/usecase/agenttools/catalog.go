@@ -30,10 +30,14 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/endpoint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
@@ -61,12 +65,14 @@ const (
 	ToolProposeSASTValidation   = "propose_sast_validation"   // propose a gated CapSAST judgment for verifier review; score 0, no execution
 	ToolProposeCritique         = "propose_critique"          // propose an adversarial critique Judgment against a finding (score 0)
 	ToolEvidenceSufficiency     = "evidence_sufficiency"      // read-only advisory – what's missing for a finding to reach the bar
+	ToolListIncidents           = "list_incidents"            // engagement-scoped incident projections backed by this engagement's detections
+	ToolGetIncidentContext      = "get_incident_context"      // bounded, redacted State-Timeline window around one scoped incident
 	ToolProposeRiskNarrative    = "propose_risk_narrative"    // propose a risk-narrative Judgment (ungated; a human accepts)
 	ToolProposeThreat           = "propose_threat"            // propose a STRIDE threat Judgment over the architecture model (score 0; a human ratifies)
 	ToolProposeWriteupDraft     = "propose_writeup_draft"     // propose a finding write-up DRAFT (prose) awaiting human sign-off (NOT a judgment)
 	ToolProposeAttackChain      = "propose_attack_chain"      // propose an attack-chain HYPOTHESIS finding (score 0; gated until a human verifies)
 	ToolProposeVexJustification = "propose_vex_justification" // propose an OpenVEX not_affected justification Judgment (score 0; a human ratifies)
-	ToolProposeInvestigation    = "propose_investigation"     // propose an AI investigation HYPOTHESIS about an incident (E; ungated, a human accepts)
+	ToolProposeInvestigation    = "propose_investigation"     // propose an evidence-gated AI investigation HYPOTHESIS (E; distinct verifier required)
 )
 
 // MaxPlanNodes bounds how many nodes a single propose_plan may carry (mirrors the domain cap);
@@ -86,6 +92,23 @@ type findingReader interface {
 
 type evidenceReader interface {
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]evidence.Evidence, error)
+}
+
+// incidentReader + detectionReader + endpointTimelineReader form the read-only EDR investigation seam.
+// The detection reader supplies the authoritative engagement boundary; an incident is exposed only when
+// its append-only event log references a detection returned for the session's engagement. Timeline reads
+// then use the already-authorized incident's asset id, never an LLM-supplied asset id.
+type incidentReader interface {
+	Get(ctx context.Context, id shared.ID) (incident.Incident, error)
+	ListByDetectionIDs(ctx context.Context, detectionIDs []shared.ID, limit int) ([]incident.Incident, error)
+}
+
+type detectionReader interface {
+	ListDetections(ctx context.Context, engagementID shared.ID) ([]detection.Record, error)
+}
+
+type endpointTimelineReader interface {
+	Query(ctx context.Context, q ports.EndpointTimelineQuery) ([]endpoint.TimelineEntry, error)
 }
 
 // findingProposer is the narrow slice of the exploitation use-case the catalog needs to record
@@ -144,6 +167,27 @@ type Catalog struct {
 	reach       scanResultReader     // advertise + dispatch reachability_context (nil ⇒ tool absent)
 	jproposer   judgmentProposer     // advertise + dispatch propose_reachability/critique/risk_narrative/threat (nil ⇒ absent)
 	drafter     writeupdraftProposer // advertise + dispatch propose_writeup_draft (nil ⇒ absent)
+	incidents   incidentReader       // optional EDR read side; enabled atomically with detections + timeline
+	detections  detectionReader      // authoritative engagement-to-detection scope join
+	timeline    endpointTimelineReader
+}
+
+// InvestigationToolset is the complete read-only dependency set for AI/MCP incident investigation.
+// It is enabled atomically so the catalog never advertises a list tool without the scoped context tool.
+type InvestigationToolset struct {
+	Incidents  incidentReader
+	Detections detectionReader
+	Timeline   endpointTimelineReader
+}
+
+// EnableInvestigation turns on the engagement-scoped incident list and bounded timeline-context tools.
+// All dependencies are required; a partial read plane fails closed and changes no catalog state.
+func (c *Catalog) EnableInvestigation(t InvestigationToolset) error {
+	if t.Incidents == nil || t.Detections == nil || t.Timeline == nil {
+		return fmt.Errorf("%w: investigation tools require incident, detection, and timeline readers", shared.ErrValidation)
+	}
+	c.incidents, c.detections, c.timeline = t.Incidents, t.Detections, t.Timeline
+	return nil
 }
 
 // EnableFindingProposals turns on the propose_finding tool. The agent can then
@@ -230,6 +274,12 @@ func (c *Catalog) Tools() []agent.ToolSchema {
 		{Name: ToolStartRecon, Description: "Propose a reconnaissance run against a target. This does NOT run the tool: it creates an approval-required proposal that the scope/authorization gate and a human approver must clear before anything executes. Always include a one-line rationale.", Parameters: json.RawMessage(`{"type":"object","properties":{"tool":{"type":"string","description":"recon tool name, e.g. subfinder"},"target":{"type":"string","description":"the target to run against, e.g. app.example.com"},"rationale":{"type":"string","description":"one-line justification shown to the approver"}},"required":["tool","target"],"additionalProperties":false}`)},
 		{Name: ToolEvidenceSufficiency, Description: "Assess whether a finding has enough evidence to be PUBLISHABLE. Returns its evidence score vs the bar, whether it is gated (exploitation/AI claims need a distinct verifier's sealed verdict; SCA/recon/manual do not), how many evidence items it has, and structured ADVICE on what is missing. Read-only and ADVISORY – it sets no score; only a distinct human verifier's sealed verdict moves a finding's score.", Parameters: json.RawMessage(`{"type":"object","properties":{"finding_id":{"type":"string","description":"the finding id to assess (from list_findings)"}},"required":["finding_id"],"additionalProperties":false}`)},
 	}
+	if c.incidents != nil {
+		schemas = append(schemas,
+			agent.ToolSchema{Name: ToolListIncidents, Description: "List incident projections backed by detections from the current engagement. Returns bounded factual state, disposition, tri-score risk, and coverage metadata; no analyst comments, response actions, or cross-engagement detection ids. Read-only.", Parameters: empty},
+			agent.ToolSchema{Name: ToolGetIncidentContext, Description: "Get a bounded, redacted State-Timeline window around one incident from list_incidents. The server derives the asset and trigger times from the engagement-scoped incident; the client cannot select another asset or arbitrary time. Read-only and coverage-honest; it never mutates facts, risk, disposition, or responses.", Parameters: json.RawMessage(`{"type":"object","properties":{"incident_id":{"type":"string","description":"the incident id from list_incidents"},"before_seconds":{"type":"integer","minimum":0,"maximum":3600,"description":"extra look-back before the first incident detection; default 300"},"after_seconds":{"type":"integer","minimum":0,"maximum":3600,"description":"extra look-forward after the last incident detection; default 300"},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"maximum timeline entries; default and hard maximum 50"}},"required":["incident_id"],"additionalProperties":false}`)},
+		)
+	}
 	if c.proposer != nil {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeFinding,
@@ -289,11 +339,13 @@ func (c *Catalog) Tools() []agent.ToolSchema {
 			Description: "Propose an OpenVEX JUSTIFICATION for why a finding is NOT AFFECTED – pick ONE of the closed OpenVEX justifications. This is a PROPOSAL recorded at score 0: you CANNOT confirm it; a distinct human ratifies it before any export trusts it (a false 'not affected' suppresses a real vuln). Pick the most specific justification you can support.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"finding_id":{"type":"string","description":"the finding this justification is about (from list_findings)"},"justification":{"type":"string","description":"one of: component_not_present | vulnerable_code_not_present | vulnerable_code_not_in_execute_path | vulnerable_code_cannot_be_controlled_by_adversary | inline_mitigations_already_exist"}},"required":["finding_id","justification"],"additionalProperties":false}`),
 		})
-		schemas = append(schemas, agent.ToolSchema{
-			Name:        ToolProposeInvestigation,
-			Description: "Propose an INVESTIGATION HYPOTHESIS about an incident: pick ONE closed ATT&CK-style tactic that best explains what is happening, a confidence 0..100, and the STRUCTURED signal tokens that support it (never prose). This is a PROPOSAL recorded at score 0 that a human analyst ACCEPTS or REJECTS – it proves nothing and NEVER drives a response on its own; you cannot accept your own hypothesis. Use 'benign' when the evidence points to NOT malicious.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"incident_id":{"type":"string","description":"the incident this hypothesis is about (from the incident list)"},"tactic":{"type":"string","description":"one of: lateral_movement | data_exfiltration | privilege_escalation | credential_access | persistence | command_and_control | defense_evasion | execution | benign"},"confidence":{"type":"integer","description":"0..100 confidence in the hypothesis"},"drivers":{"type":"array","items":{"type":"string"},"description":"the signal TOKENS that support it, e.g. new_exec_paths, network_fanout_spike, privilege_events (lowercase tokens, no spaces, no prose)"}},"required":["incident_id","tactic","confidence"],"additionalProperties":false}`),
-		})
+		if c.incidents != nil {
+			schemas = append(schemas, agent.ToolSchema{
+				Name:        ToolProposeInvestigation,
+				Description: "Propose an INVESTIGATION HYPOTHESIS about an incident from list_incidents: a closed tactic storyline, confidence, structured drivers, relevant event IDs from get_incident_context, and one read-only next step. The server rechecks incident/event scope. Recorded at score 0; only a DISTINCT verifier's sealed verdict can confirm it. It NEVER changes incident facts/risk/disposition and NEVER drives a response.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"incident_id":{"type":"string","description":"the incident this hypothesis is about (from list_incidents)"},"tactic":{"type":"string","description":"one of: lateral_movement | data_exfiltration | privilege_escalation | credential_access | persistence | command_and_control | defense_evasion | execution | benign"},"confidence":{"type":"integer","minimum":0,"maximum":100,"description":"confidence in the hypothesis"},"drivers":{"type":"array","maxItems":32,"items":{"type":"string"},"description":"signal TOKENS, e.g. new_exec_paths or network_fanout_spike (lowercase tokens, no prose)"},"relevant_event_ids":{"type":"array","maxItems":32,"items":{"type":"string"},"description":"event IDs returned by get_incident_context that support the storyline"},"context_before_seconds":{"type":"integer","minimum":0,"maximum":3600,"description":"the before_seconds used to read relevant_event_ids; default 300"},"context_after_seconds":{"type":"integer","minimum":0,"maximum":3600,"description":"the after_seconds used to read relevant_event_ids; default 300"},"suggested_next_step":{"type":"string","description":"one of: inspect_process_tree | inspect_network_activity | inspect_file_activity | inspect_identity_events | retro_hunt_similar_activity | collect_additional_telemetry | close_as_benign"}},"required":["incident_id","tactic","confidence","suggested_next_step"],"additionalProperties":false}`),
+			})
+		}
 	}
 	if c.drafter != nil {
 		schemas = append(schemas, agent.ToolSchema{
@@ -327,6 +379,16 @@ func (c *Catalog) Dispatch(ctx context.Context, sess agent.Session, call agent.T
 		return c.startRecon(ctx, sess, call.Arguments)
 	case ToolEvidenceSufficiency:
 		return c.evidenceSufficiency(ctx, sess, call.Arguments)
+	case ToolListIncidents:
+		if c.incidents == nil {
+			return Result{}, fmt.Errorf("%w: investigation reads are not enabled", shared.ErrValidation)
+		}
+		return c.listIncidents(ctx, sess)
+	case ToolGetIncidentContext:
+		if c.incidents == nil {
+			return Result{}, fmt.Errorf("%w: investigation reads are not enabled", shared.ErrValidation)
+		}
+		return c.getIncidentContext(ctx, sess, call.Arguments)
 	case ToolProposePlan:
 		if !c.planning {
 			return Result{}, fmt.Errorf("%w: planning is not enabled", shared.ErrValidation)
@@ -378,8 +440,8 @@ func (c *Catalog) Dispatch(ctx context.Context, sess agent.Session, call agent.T
 		}
 		return c.proposeVexJustification(ctx, sess, call.Arguments)
 	case ToolProposeInvestigation:
-		if c.jproposer == nil {
-			return Result{}, fmt.Errorf("%w: investigation proposals are not enabled", shared.ErrValidation)
+		if c.jproposer == nil || c.incidents == nil {
+			return Result{}, fmt.Errorf("%w: scoped investigation proposals are not enabled", shared.ErrValidation)
 		}
 		return c.proposeInvestigation(ctx, sess, call.Arguments)
 	case ToolProposeWriteupDraft:
@@ -508,6 +570,285 @@ type runtimeVerificationPlan struct {
 	PromotionGate         string   `json:"promotion_gate"`
 	ArchitectureGuard     string   `json:"architecture_guard"`
 	Note                  string   `json:"note"`
+}
+
+type incidentRiskView struct {
+	Risk       int      `json:"risk"`
+	Confidence int      `json:"confidence"`
+	Coverage   int      `json:"coverage"`
+	Reasons    []string `json:"reason_codes,omitempty"`
+}
+
+type incidentView struct {
+	ID           string            `json:"id"`
+	AssetID      string            `json:"asset_id"`
+	Title        string            `json:"title"`
+	Severity     string            `json:"severity"`
+	State        string            `json:"state"`
+	Disposition  string            `json:"disposition"`
+	DetectionIDs []string          `json:"detection_ids"`
+	Risk         *incidentRiskView `json:"risk,omitempty"`
+	Revision     int               `json:"revision"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
+}
+
+type timelineEntryView struct {
+	OccurredAt time.Time `json:"occurred_at"`
+	EventID    string    `json:"event_id"`
+	EntityKind string    `json:"entity_kind"`
+	EntityID   string    `json:"entity_id"`
+	Kind       string    `json:"kind"`
+	Summary    string    `json:"summary"`
+}
+
+const (
+	defaultInvestigationMargin = 5 * time.Minute
+	maxInvestigationMargin     = time.Hour
+)
+
+func (c *Catalog) investigationScope(ctx context.Context, sess agent.Session) (context.Context, []detection.Record, error) {
+	if sess.EngagementID.IsZero() {
+		return nil, nil, fmt.Errorf("%w: investigation requires a session engagement", shared.ErrValidation)
+	}
+	tenant, tenantBound := shared.TenantFrom(ctx)
+	if sess.TenantID.IsZero() {
+		if !tenantBound {
+			return nil, nil, fmt.Errorf("%w: investigation requires a tenant-bound session", shared.ErrValidation)
+		}
+	} else {
+		if tenantBound && tenant != sess.TenantID {
+			return nil, nil, fmt.Errorf("%w: investigation session tenant does not match context", shared.ErrValidation)
+		}
+		if !tenantBound {
+			tenant = sess.TenantID
+			ctx = shared.WithTenant(ctx, tenant)
+		}
+	}
+	records, err := c.detections.ListDetections(ctx, sess.EngagementID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list engagement detections: %w", err)
+	}
+	// Treat the persistence result as untrusted input too: an adapter bug must not widen an MCP session.
+	scoped := records[:0:0]
+	for _, record := range records {
+		if record.TenantID == tenant && record.EngagementID == sess.EngagementID {
+			scoped = append(scoped, record)
+		}
+	}
+	return ctx, scoped, nil
+}
+
+func detectionIDs(records []detection.Record) []shared.ID {
+	ids := make([]shared.ID, 0, len(records))
+	for _, record := range records {
+		if !record.ID.IsZero() {
+			ids = append(ids, record.ID)
+		}
+	}
+	return ids
+}
+
+func scopedIncidentView(inc incident.Incident, allowed map[shared.ID]struct{}) incidentView {
+	view := incidentView{
+		ID: inc.ID.String(), AssetID: inc.AssetID.String(), Title: redactInvestigationText(inc.Title),
+		Severity: string(inc.Severity), State: string(inc.State), Disposition: string(inc.Disposition),
+		Revision: inc.Revision, CreatedAt: inc.CreatedAt, UpdatedAt: inc.UpdatedAt,
+	}
+	for _, id := range inc.DetectionIDs {
+		if _, ok := allowed[id]; ok {
+			view.DetectionIDs = append(view.DetectionIDs, id.String())
+		}
+	}
+	if inc.Risk != nil {
+		reasons := make([]string, 0, len(inc.Risk.ReasonCodes))
+		for _, reason := range inc.Risk.ReasonCodes {
+			reasons = append(reasons, redactInvestigationText(reason))
+		}
+		view.Risk = &incidentRiskView{
+			Risk: int(inc.Risk.Risk), Confidence: int(inc.Risk.Confidence), Coverage: int(inc.Risk.Coverage), Reasons: reasons,
+		}
+	}
+	return view
+}
+
+func (c *Catalog) listIncidents(ctx context.Context, sess agent.Session) (Result, error) {
+	ctx, records, err := c.investigationScope(ctx, sess)
+	if err != nil {
+		return Result{}, err
+	}
+	ids := detectionIDs(records)
+	if len(ids) == 0 {
+		payload := json.RawMessage(`{"incidents":[],"returned":0,"scope":"detections_in_current_engagement","truncated":false}`)
+		if err := c.auditRead(ctx, sess, "agent.read.incidents", sess.EngagementID.String(), 0); err != nil {
+			return Result{}, err
+		}
+		return Result{Data: payload}, nil
+	}
+	incidents, err := c.incidents.ListByDetectionIDs(ctx, ids, maxRows+1)
+	if err != nil {
+		return Result{}, fmt.Errorf("list scoped incidents: %w", err)
+	}
+	allowed := make(map[shared.ID]struct{}, len(ids))
+	for _, id := range ids {
+		allowed[id] = struct{}{}
+	}
+	views := make([]incidentView, 0, len(incidents))
+	for _, inc := range incidents {
+		view := scopedIncidentView(inc, allowed)
+		if len(view.DetectionIDs) > 0 { // defense in depth if a reader violates its filter contract
+			views = append(views, view)
+		}
+	}
+	truncated := len(views) > maxRows
+	if truncated {
+		views = views[:maxRows]
+	}
+	payload, err := json.Marshal(map[string]any{
+		"incidents": views, "returned": len(views), "truncated": truncated,
+		"scope": "detections_in_current_engagement",
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("marshal incidents: %w", err)
+	}
+	if err := c.auditRead(ctx, sess, "agent.read.incidents", sess.EngagementID.String(), len(views)); err != nil {
+		return Result{}, err
+	}
+	return Result{Data: payload}, nil
+}
+
+type incidentContextArgs struct {
+	IncidentID   string `json:"incident_id"`
+	BeforeSecond *int   `json:"before_seconds"`
+	AfterSecond  *int   `json:"after_seconds"`
+	Limit        int    `json:"limit"`
+}
+
+func investigationMargin(value *int) (time.Duration, error) {
+	if value == nil {
+		return defaultInvestigationMargin, nil
+	}
+	d := time.Duration(*value) * time.Second
+	if d < 0 || d > maxInvestigationMargin {
+		return 0, fmt.Errorf("%w: investigation margin must be 0..3600 seconds", shared.ErrValidation)
+	}
+	return d, nil
+}
+
+func incidentInvestigationWindow(inc incident.Incident, records map[shared.ID]detection.Record, before, after time.Duration) (time.Time, time.Time, error) {
+	var from, to time.Time
+	for _, id := range inc.DetectionIDs {
+		record, ok := records[id]
+		if !ok || record.Detection.Observed.IsZero() {
+			continue
+		}
+		if from.IsZero() || record.Detection.Observed.Before(from) {
+			from = record.Detection.Observed
+		}
+		if to.IsZero() || record.Detection.Observed.After(to) {
+			to = record.Detection.Observed
+		}
+	}
+	if from.IsZero() {
+		from = inc.CreatedAt
+	}
+	if to.IsZero() {
+		to = from
+	}
+	if from.IsZero() {
+		return time.Time{}, time.Time{}, fmt.Errorf("%w: scoped incident has no trigger time", shared.ErrValidation)
+	}
+	return from.Add(-before), to.Add(after), nil
+}
+
+func (c *Catalog) getIncidentContext(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
+	var args incidentContextArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return Result{}, fmt.Errorf("%w: get_incident_context args: %w", shared.ErrValidation, err)
+	}
+	incidentID := shared.ID(strings.TrimSpace(args.IncidentID))
+	if incidentID.IsZero() {
+		return Result{}, fmt.Errorf("%w: incident_id is required", shared.ErrValidation)
+	}
+	before, err := investigationMargin(args.BeforeSecond)
+	if err != nil {
+		return Result{}, err
+	}
+	after, err := investigationMargin(args.AfterSecond)
+	if err != nil {
+		return Result{}, err
+	}
+	limit := args.Limit
+	if limit == 0 {
+		limit = maxRows
+	}
+	if limit < 1 || limit > maxRows {
+		return Result{}, fmt.Errorf("%w: investigation context limit must be 1..%d", shared.ErrValidation, maxRows)
+	}
+
+	ctx, records, err := c.investigationScope(ctx, sess)
+	if err != nil {
+		return Result{}, err
+	}
+	inc, err := c.incidents.Get(ctx, incidentID)
+	if err != nil {
+		return Result{}, fmt.Errorf("get incident: %w", err)
+	}
+	allowed := make(map[shared.ID]struct{}, len(records))
+	byID := make(map[shared.ID]detection.Record, len(records))
+	for _, record := range records {
+		allowed[record.ID] = struct{}{}
+		byID[record.ID] = record
+	}
+	view := scopedIncidentView(inc, allowed)
+	if len(view.DetectionIDs) == 0 {
+		return Result{}, fmt.Errorf("%w: incident %s is outside the session engagement", shared.ErrNotFound, incidentID)
+	}
+
+	from, to, err := incidentInvestigationWindow(inc, byID, before, after)
+	if err != nil {
+		return Result{}, err
+	}
+	entries, err := c.timeline.Query(ctx, ports.EndpointTimelineQuery{AssetID: inc.AssetID, From: from, To: to, Limit: limit + 1})
+	if err != nil {
+		return Result{}, fmt.Errorf("query incident timeline: %w", err)
+	}
+	tenant, _ := shared.TenantFrom(ctx)
+	timeline := make([]timelineEntryView, 0, len(entries))
+	for _, entry := range entries {
+		if entry.TenantID != tenant || entry.AssetID != inc.AssetID {
+			continue // a broken adapter must not widen the incident's tenant/asset boundary
+		}
+		timeline = append(timeline, timelineEntryView{
+			OccurredAt: entry.OccurredAt, EventID: entry.EventID.String(), EntityKind: string(entry.EntityKind),
+			EntityID: entry.EntityID.String(), Kind: string(entry.Kind), Summary: redactInvestigationText(entry.Summary),
+		})
+	}
+	truncated := len(timeline) > limit
+	if truncated {
+		timeline = timeline[:limit]
+	}
+	payload, err := json.Marshal(map[string]any{
+		"incident": view, "window": map[string]time.Time{"from": from, "to": to},
+		"timeline": timeline, "returned": len(timeline), "truncated": truncated,
+		"note": "read-only context; a hypothesis remains a proposal and cannot mutate incident facts, risk, disposition, or responses",
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("marshal incident context: %w", err)
+	}
+	if err := c.auditRead(ctx, sess, "agent.read.incident_context", incidentID.String(), len(timeline)); err != nil {
+		return Result{}, err
+	}
+	return Result{Data: payload}, nil
+}
+
+// redactInvestigationText applies the source privacy policy's known-secret floor again at
+// the AI boundary. Timeline data should already be source-redacted, but older/imported
+// records may predate that invariant; platform redact additionally strips URL credentials.
+func redactInvestigationText(value string) string {
+	value, _ = privacy.DefaultPolicy().Classify(privacy.CategoryProcessArg, value)
+	value = strings.ReplaceAll(value, privacy.RedactionPlaceholder, redact.Placeholder)
+	return redact.String(value, nil)
 }
 
 func (c *Catalog) listFindings(ctx context.Context, sess agent.Session) (Result, error) {
@@ -1229,17 +1570,21 @@ func (c *Catalog) proposeThreat(ctx context.Context, sess agent.Session, raw jso
 }
 
 type proposeInvestigationArgs struct {
-	IncidentID string   `json:"incident_id"`
-	Tactic     string   `json:"tactic"`
-	Confidence int      `json:"confidence"`
-	Drivers    []string `json:"drivers"`
+	IncidentID        string   `json:"incident_id"`
+	Tactic            string   `json:"tactic"`
+	Confidence        int      `json:"confidence"`
+	Drivers           []string `json:"drivers"`
+	RelevantEventIDs  []string `json:"relevant_event_ids"`
+	ContextBefore     *int     `json:"context_before_seconds"`
+	ContextAfter      *int     `json:"context_after_seconds"`
+	SuggestedNextStep string   `json:"suggested_next_step"`
 }
 
 // proposeInvestigation records a PROPOSED investigation hypothesis about an incident (#594 E): a single
 // closed ATT&CK-style tactic + confidence + structured driver tokens, persisted at score 0 by the analysis
-// service. UNGATED and human-accepted — the agent CANNOT accept its own hypothesis (the propose-only
-// interface + the arch tripwire make that structural), and a hypothesis NEVER drives a response on its own.
-// The domain InvestigationClaim.Validate rejects free prose and an unknown tactic.
+// service. It is evidence-gated: the agent CANNOT verify its own hypothesis (the propose-only interface
+// + the arch tripwire make that structural), and a hypothesis NEVER drives a response on its own. The
+// domain InvestigationClaim.Validate rejects free prose, unknown tactics, and executable next steps.
 func (c *Catalog) proposeInvestigation(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
 	var a proposeInvestigationArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
@@ -1249,20 +1594,74 @@ func (c *Catalog) proposeInvestigation(ctx context.Context, sess agent.Session, 
 	if incidentID.IsZero() {
 		return Result{}, fmt.Errorf("%w: incident_id is required", shared.ErrValidation)
 	}
-	claim := judgment.InvestigationClaim{
-		IncidentID: incidentID,
-		Tactic:     judgment.InvestigationTactic(strings.TrimSpace(a.Tactic)),
-		Confidence: a.Confidence,
-		Drivers:    a.Drivers,
+	if strings.TrimSpace(a.SuggestedNextStep) == "" {
+		return Result{}, fmt.Errorf("%w: suggested_next_step is required", shared.ErrValidation)
 	}
-	j, err := c.jproposer.Propose(ctx, sess.AgentActor(), sess.EngagementID, judgment.CapInvestigation, judgment.SubjectIncident, incidentID, claim)
+	scopedCtx, records, err := c.investigationScope(ctx, sess)
+	if err != nil {
+		return Result{}, err
+	}
+	inc, err := c.incidents.Get(scopedCtx, incidentID)
+	if err != nil {
+		return Result{}, fmt.Errorf("get proposed incident: %w", err)
+	}
+	allowed := make(map[shared.ID]struct{}, len(records))
+	for _, record := range records {
+		allowed[record.ID] = struct{}{}
+	}
+	if len(scopedIncidentView(inc, allowed).DetectionIDs) == 0 {
+		return Result{}, fmt.Errorf("%w: incident %s is outside the session engagement", shared.ErrNotFound, incidentID)
+	}
+	relevantEventIDs := make([]shared.ID, 0, len(a.RelevantEventIDs))
+	if len(a.RelevantEventIDs) > 0 {
+		before, merr := investigationMargin(a.ContextBefore)
+		if merr != nil {
+			return Result{}, merr
+		}
+		after, merr := investigationMargin(a.ContextAfter)
+		if merr != nil {
+			return Result{}, merr
+		}
+		byID := make(map[shared.ID]detection.Record, len(records))
+		for _, record := range records {
+			byID[record.ID] = record
+		}
+		from, to, werr := incidentInvestigationWindow(inc, byID, before, after)
+		if werr != nil {
+			return Result{}, werr
+		}
+		entries, qerr := c.timeline.Query(scopedCtx, ports.EndpointTimelineQuery{AssetID: inc.AssetID, From: from, To: to, Limit: maxRows + 1})
+		if qerr != nil {
+			return Result{}, fmt.Errorf("query proposed incident events: %w", qerr)
+		}
+		tenant, _ := shared.TenantFrom(scopedCtx)
+		available := make(map[shared.ID]struct{}, len(entries))
+		for _, entry := range entries {
+			if entry.TenantID == tenant && entry.AssetID == inc.AssetID {
+				available[entry.EventID] = struct{}{}
+			}
+		}
+		for _, rawID := range a.RelevantEventIDs {
+			id := shared.ID(strings.TrimSpace(rawID))
+			if _, ok := available[id]; !ok {
+				return Result{}, fmt.Errorf("%w: relevant event %q is outside the bounded incident context", shared.ErrNotFound, id)
+			}
+			relevantEventIDs = append(relevantEventIDs, id)
+		}
+	}
+	claim := judgment.InvestigationClaim{
+		IncidentID: incidentID, Tactic: judgment.InvestigationTactic(strings.TrimSpace(a.Tactic)),
+		Confidence: a.Confidence, Drivers: a.Drivers, RelevantEventIDs: relevantEventIDs,
+		SuggestedNextStep: judgment.InvestigationNextStep(strings.TrimSpace(a.SuggestedNextStep)),
+	}
+	j, err := c.jproposer.Propose(scopedCtx, sess.AgentActor(), sess.EngagementID, judgment.CapInvestigation, judgment.SubjectIncident, incidentID, claim)
 	if err != nil {
 		return Result{}, err // domain validates the claim; the service persists at score 0 + audits
 	}
 	payload, err := json.Marshal(map[string]any{
 		"judgment_id": j.ID.String(), "state": string(j.State), "evidence_score": j.EvidenceScore,
 		"proposed_by": j.ProposedBy, "publishable": j.Publishable(),
-		"note": "recorded as a PROPOSED investigation hypothesis (score 0); a human analyst accepts or rejects it – you cannot accept your own, and it never drives a response.",
+		"note": "recorded as a PROPOSED investigation hypothesis (score 0); only a distinct verifier's sealed verdict can confirm it, and it never drives a response.",
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal judgment: %w", err)
