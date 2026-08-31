@@ -33,7 +33,10 @@ export function DataGovernanceTab({ engagementId }: { engagementId: string }) {
 }
 
 function LegalHoldCard({ engagementId, canReview }: { engagementId: string; canReview: boolean }) {
-  const { data, loading, refetch } = useFetch<LegalHold[]>(() => api.listLegalHolds().catch(() => []), { deps: [engagementId] })
+  // Do NOT swallow the fetch error: on a legal-hold/retention safety control, a failed load must not
+  // render the reassuring "no hold" branch (an operator could then wrongly proceed to delete). Surface
+  // the error explicitly so the hold status is never a silent false-negative.
+  const { data, loading, error, refetch } = useFetch<LegalHold[]>(() => api.listLegalHolds(), { deps: [engagementId] })
   const [reason, setReason] = useState('')
 
   const hold = (data ?? []).find((h) => h.engagementId === engagementId && isActive(h)) ?? null
@@ -49,6 +52,11 @@ function LegalHoldCard({ engagementId, canReview }: { engagementId: string; canR
 
       {loading && !data ? (
         <p className="text-sm text-tertiary">Loading…</p>
+      ) : error && !data ? (
+        <div className="space-y-3">
+          <ErrorState message={`Could not load legal-hold status: ${error}. Hold status is unknown — do not proceed to deletion until this resolves.`} />
+          <Button variant="secondary" onClick={refetch}>Retry</Button>
+        </div>
       ) : hold ? (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
@@ -157,7 +165,8 @@ function DataDeletionCard({ engagementId, canReview }: { engagementId: string; c
             <p className="text-sm text-accent">Deleted {purged} detection record{purged === 1 ? '' : 's'}.</p>
           )}
           <Field label="Reason (required, audited)">
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. subject erasure request #456" disabled={purge.loading} />
+            {/* Locked once confirming so the reason can't be cleared between confirm and fire. */}
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. subject erasure request #456" disabled={purge.loading || confirming} />
           </Field>
           {!confirming ? (
             <Button variant="danger" disabled={!reason.trim()} onClick={() => setConfirming(true)}>
@@ -168,7 +177,8 @@ function DataDeletionCard({ engagementId, canReview }: { engagementId: string; c
               <span className="text-sm font-medium text-critical">Permanently delete this engagement’s detection projection?</span>
               <div className="ml-auto flex gap-2">
                 <Button variant="secondary" onClick={() => setConfirming(false)} disabled={purge.loading}>Cancel</Button>
-                <Button variant="danger" loading={purge.loading} onClick={() => purge.mutate(reason.trim())}>Confirm delete</Button>
+                {/* Re-validate the required reason at fire time, not just at step 1. */}
+                <Button variant="danger" loading={purge.loading} disabled={!reason.trim()} onClick={() => purge.mutate(reason.trim())}>Confirm delete</Button>
               </div>
             </div>
           )}
