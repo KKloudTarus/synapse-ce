@@ -10,12 +10,14 @@ export interface SeverityBadgeProps {
 }
 
 // Prominence must decrease monotonically: critical > high > medium > low > info.
-// Green on `low` would read as "safe" in a security tool and outrank `medium`.
+// Green on `low` would read as "safe" and outrank `medium`, so `low` uses blue — a distinct,
+// lower-urgency hue (cooler than amber) that is neither green nor a dull monochrome grey. `info`
+// (the truly lowest, purely informational) stays neutral grey.
 const SEVERITY_COLORS: Record<SeverityBadgeProps['severity'], BadgeColors> = {
   critical: 'error',
   high: 'orange',
   medium: 'warning',
-  low: 'gray',
+  low: 'blue',
   info: 'gray',
 }
 
