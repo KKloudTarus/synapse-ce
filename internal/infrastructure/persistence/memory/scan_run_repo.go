@@ -72,10 +72,13 @@ func (s *ScanRunStore) List(ctx context.Context, engagementID shared.ID) ([]port
 	defer s.mu.RUnlock()
 
 	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		tenantID = shared.DefaultTenant
+	}
 
 	var out []ports.ScanRun
 	for key, r := range s.runs {
-		if ok && key.TenantID != tenantID {
+		if key.TenantID != tenantID {
 			continue
 		}
 		if r.EngagementID == engagementID {
@@ -97,13 +100,13 @@ func (s *ScanRunStore) Get(ctx context.Context, runID string) (ports.ScanRun, er
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	tenantID, hasTenant := shared.TenantFrom(ctx)
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		tenantID = shared.DefaultTenant
+	}
 
 	for key, r := range s.runs {
-		if r.ID == runID {
-			if hasTenant && key.TenantID != tenantID {
-				continue
-			}
+		if key.TenantID == tenantID && r.ID == runID {
 			return toPortsScanRun(r), nil
 		}
 	}

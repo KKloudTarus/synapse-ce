@@ -2,6 +2,7 @@ package scanrun_test
 
 import (
 	"errors"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -93,7 +94,7 @@ func TestComputeManifestHash_RandomizedPermutations(t *testing.T) {
 		ExcludedScope:             []string{"vendor/", "test/", "docs/", "build/"},
 		StartedAt:                 now,
 		ResultSHA256:              "result-sha-12345",
-		ManifestSchemaVersion:     1,
+		ManifestSchemaVersion:     scanrun.CurrentManifestSchemaVersion,
 		Versions: []scanrun.LaneVersion{
 			{VersionKind: scanrun.VersionScanner, Name: "semgrep", Version: "1.45.0"},
 			{VersionKind: scanrun.VersionRulePack, Name: "default-rules", Version: "2026.08"},
@@ -112,32 +113,34 @@ func TestComputeManifestHash_RandomizedPermutations(t *testing.T) {
 		t.Fatalf("compute base hash: %v", err)
 	}
 
-	// Run 50 random permutations
+	rng := rand.New(rand.NewSource(0x708))
+
+	// Run 50 deterministic seeded random permutations
 	for i := 0; i < 50; i++ {
 		permutedLane := baseLane
 
 		// Shuffle finding kinds
 		fk := append([]string(nil), baseLane.AuthoritativeFindingKinds...)
-		randPermuteStrings(fk)
+		rng.Shuffle(len(fk), func(a, b int) { fk[a], fk[b] = fk[b], fk[a] })
 		permutedLane.AuthoritativeFindingKinds = fk
 
 		// Shuffle scopes
 		inc := append([]string(nil), baseLane.IncludedScope...)
-		randPermuteStrings(inc)
+		rng.Shuffle(len(inc), func(a, b int) { inc[a], inc[b] = inc[b], inc[a] })
 		permutedLane.IncludedScope = inc
 
 		exc := append([]string(nil), baseLane.ExcludedScope...)
-		randPermuteStrings(exc)
+		rng.Shuffle(len(exc), func(a, b int) { exc[a], exc[b] = exc[b], exc[a] })
 		permutedLane.ExcludedScope = exc
 
 		// Shuffle versions
 		vers := append([]scanrun.LaneVersion(nil), baseLane.Versions...)
-		randPermuteVersions(vers)
+		rng.Shuffle(len(vers), func(a, b int) { vers[a], vers[b] = vers[b], vers[a] })
 		permutedLane.Versions = vers
 
 		// Shuffle stages
 		stg := append([]scanrun.LaneStage(nil), baseLane.Stages...)
-		randPermuteStages(stg)
+		rng.Shuffle(len(stg), func(a, b int) { stg[a], stg[b] = stg[b], stg[a] })
 		permutedLane.Stages = stg
 
 		h, err := scanrun.ComputeManifestHash(permutedLane)
@@ -150,24 +153,104 @@ func TestComputeManifestHash_RandomizedPermutations(t *testing.T) {
 	}
 }
 
-func randPermuteStrings(s []string) {
-	for i := range s {
-		j := (i*7 + 3) % len(s)
-		s[i], s[j] = s[j], s[i]
+func TestComputeManifestHash_LaneKeyAndStatusSensitivity(t *testing.T) {
+	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
+	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
+
+	base := scanrun.Lane{
+		TenantID:                  "tenant-1",
+		EngagementID:              "eng-1",
+		ScanRunID:                 "run-1",
+		LaneKey:                   "sast-primary",
+		Producer:                  "synapse-sast",
+		TerminalStatus:            scanrun.StatusSucceeded,
+		Target:                    target,
+		AuthoritativeFindingKinds: []string{"sast_vuln"},
+		StartedAt:                 now,
+		ManifestSchemaVersion:     scanrun.CurrentManifestSchemaVersion,
+	}
+
+	baseHash, err := scanrun.ComputeManifestHash(base)
+	if err != nil {
+		t.Fatalf("compute base hash: %v", err)
+	}
+
+	// 1. Changing LaneKey MUST produce a different hash
+	diffLaneKey := base
+	diffLaneKey.LaneKey = "sast-secondary"
+	diffLaneKeyHash, err := scanrun.ComputeManifestHash(diffLaneKey)
+	if err != nil {
+		t.Fatalf("compute diffLaneKey hash: %v", err)
+	}
+	if diffLaneKeyHash == baseHash {
+		t.Errorf("changing LaneKey must produce different manifest hash; got identical %q", baseHash)
+	}
+
+	// 2. Changing TerminalStatus MUST produce a different hash
+	diffStatus := base
+	diffStatus.TerminalStatus = scanrun.StatusFailed
+	diffStatusHash, err := scanrun.ComputeManifestHash(diffStatus)
+	if err != nil {
+		t.Fatalf("compute diffStatus hash: %v", err)
+	}
+	if diffStatusHash == baseHash {
+		t.Errorf("changing TerminalStatus must produce different manifest hash; got identical %q", baseHash)
 	}
 }
 
-func randPermuteVersions(s []scanrun.LaneVersion) {
-	for i := range s {
-		j := (i*5 + 2) % len(s)
-		s[i], s[j] = s[j], s[i]
-	}
-}
+func TestComputeRunManifestHash_OrderInvariance(t *testing.T) {
+	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
+	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
 
-func randPermuteStages(s []scanrun.LaneStage) {
-	for i := range s {
-		j := (i*3 + 1) % len(s)
-		s[i], s[j] = s[j], s[i]
+	laneA := scanrun.Lane{
+		TenantID:                  "tenant-1",
+		EngagementID:              "eng-1",
+		ScanRunID:                 "run-1",
+		LaneKey:                   "lane-a",
+		Producer:                  "synapse-sast",
+		TerminalStatus:            scanrun.StatusSucceeded,
+		Target:                    target,
+		AuthoritativeFindingKinds: []string{"sast_vuln"},
+		StartedAt:                 now,
+		ManifestSchemaVersion:     scanrun.CurrentManifestSchemaVersion,
+	}
+
+	laneB := scanrun.Lane{
+		TenantID:                  "tenant-1",
+		EngagementID:              "eng-1",
+		ScanRunID:                 "run-1",
+		LaneKey:                   "lane-b",
+		Producer:                  "synapse-sca",
+		TerminalStatus:            scanrun.StatusSucceeded,
+		Target:                    target,
+		AuthoritativeFindingKinds: []string{"dep_vuln"},
+		StartedAt:                 now,
+		ManifestSchemaVersion:     scanrun.CurrentManifestSchemaVersion,
+	}
+
+	sliceAB := []scanrun.Lane{laneA, laneB}
+	sliceBA := []scanrun.Lane{laneB, laneA}
+
+	hashAB, err := scanrun.ComputeRunManifestHash(sliceAB)
+	if err != nil {
+		t.Fatalf("compute hash AB: %v", err)
+	}
+
+	hashBA, err := scanrun.ComputeRunManifestHash(sliceBA)
+	if err != nil {
+		t.Fatalf("compute hash BA: %v", err)
+	}
+
+	if hashAB != hashBA {
+		t.Fatalf("ComputeRunManifestHash must be invariant to slice order; got hashAB=%q, hashBA=%q", hashAB, hashBA)
+	}
+
+	// Assert caller input slices were NOT mutated
+	if sliceAB[0].LaneKey != "lane-a" || sliceAB[1].LaneKey != "lane-b" {
+		t.Errorf("sliceAB was mutated: got [%s, %s]", sliceAB[0].LaneKey, sliceAB[1].LaneKey)
+	}
+	if sliceBA[0].LaneKey != "lane-b" || sliceBA[1].LaneKey != "lane-a" {
+		t.Errorf("sliceBA was mutated: got [%s, %s]", sliceBA[0].LaneKey, sliceBA[1].LaneKey)
 	}
 }
 

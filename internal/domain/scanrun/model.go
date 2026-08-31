@@ -12,6 +12,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
+// CurrentManifestSchemaVersion is the canonical schema version for sealed manifest envelopes.
+const CurrentManifestSchemaVersion = 1
+
 // ProvenanceKind defines whether a scan run was generated via legacy opaque assertions or native sealed facts.
 type ProvenanceKind string
 
@@ -294,17 +297,19 @@ func (r ScanRun) IsCompleteCoverage() bool {
 
 // CanonicalManifestEnvelope is the deterministic data structure hashed to produce manifest_hash.
 type CanonicalManifestEnvelope struct {
-	ManifestSchemaVersion     int           `json:"manifest_schema_version"`
-	Producer                  string        `json:"producer"`
-	TargetKind                TargetKind    `json:"target_kind"`
-	TargetCanonical           string        `json:"target_canonical"`
-	EvaluatedRevision         string        `json:"evaluated_revision,omitempty"`
-	AuthoritativeFindingKinds []string      `json:"authoritative_finding_kinds"`
-	IncludedScope             []string      `json:"included_scope"`
-	ExcludedScope             []string      `json:"excluded_scope"`
-	Versions                  []LaneVersion `json:"versions"`
-	Stages                    []LaneStage   `json:"stages"`
-	ResultSHA256              string        `json:"result_sha256,omitempty"`
+	ManifestSchemaVersion     int            `json:"manifest_schema_version"`
+	LaneKey                   string         `json:"lane_key"`
+	Producer                  string         `json:"producer"`
+	TerminalStatus            TerminalStatus `json:"terminal_status"`
+	TargetKind                TargetKind     `json:"target_kind"`
+	TargetCanonical           string         `json:"target_canonical"`
+	EvaluatedRevision         string         `json:"evaluated_revision,omitempty"`
+	AuthoritativeFindingKinds []string       `json:"authoritative_finding_kinds"`
+	IncludedScope             []string       `json:"included_scope"`
+	ExcludedScope             []string       `json:"excluded_scope"`
+	Versions                  []LaneVersion  `json:"versions"`
+	Stages                    []LaneStage    `json:"stages"`
+	ResultSHA256              string         `json:"result_sha256,omitempty"`
 }
 
 // ComputeManifestHash calculates a deterministic SHA-256 hash for a producer lane's facts.
@@ -339,12 +344,14 @@ func ComputeManifestHash(lane Lane) (string, error) {
 
 	schemaVer := lane.ManifestSchemaVersion
 	if schemaVer < 1 {
-		schemaVer = 1
+		schemaVer = CurrentManifestSchemaVersion
 	}
 
 	envelope := CanonicalManifestEnvelope{
 		ManifestSchemaVersion:     schemaVer,
+		LaneKey:                   lane.LaneKey,
 		Producer:                  lane.Producer,
+		TerminalStatus:            lane.TerminalStatus,
 		TargetKind:                lane.Target.TargetKind,
 		TargetCanonical:           lane.Target.TargetIdentityCanonical,
 		EvaluatedRevision:         lane.Target.EvaluatedRevision,
@@ -362,5 +369,38 @@ func ComputeManifestHash(lane Lane) (string, error) {
 	}
 
 	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// ComputeRunManifestHash calculates the canonical aggregate manifest hash across all child lanes of a scan run.
+// It is guaranteed to be order-invariant to the caller's slice submission order by sorting a copy
+// of the lanes by LaneKey ascending. The input slice is never mutated.
+func ComputeRunManifestHash(lanes []Lane) (string, error) {
+	if len(lanes) == 0 {
+		return "", nil
+	}
+	copied := make([]Lane, len(lanes))
+	copy(copied, lanes)
+	sort.SliceStable(copied, func(i, j int) bool {
+		return copied[i].LaneKey < copied[j].LaneKey
+	})
+
+	var b strings.Builder
+	for _, lane := range copied {
+		laneHash := lane.ManifestHash
+		if strings.TrimSpace(laneHash) == "" {
+			var err error
+			laneHash, err = ComputeManifestHash(lane)
+			if err != nil {
+				return "", fmt.Errorf("compute lane %q hash: %w", lane.LaneKey, err)
+			}
+		}
+		b.WriteString(lane.LaneKey)
+		b.WriteString("\x00")
+		b.WriteString(laneHash)
+		b.WriteString("\n")
+	}
+
+	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:]), nil
 }

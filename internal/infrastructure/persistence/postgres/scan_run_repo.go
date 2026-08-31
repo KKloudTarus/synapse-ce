@@ -314,6 +314,15 @@ func (r *ScanRunStore) SealScanRun(ctx context.Context, tenantID shared.ID, runI
 	if tenantID.IsZero() || runID == "" {
 		return fmt.Errorf("%w: tenant ID and scan run ID are required", shared.ErrValidation)
 	}
+	if !terminalStatus.Valid() || !terminalStatus.IsTerminal() {
+		return fmt.Errorf("%w: invalid terminal status %q for sealing", shared.ErrValidation, terminalStatus)
+	}
+	if sealedAt.IsZero() {
+		return fmt.Errorf("%w: sealed_at timestamp is required", shared.ErrValidation)
+	}
+	if manifestSchemaVersion < 1 {
+		manifestSchemaVersion = scanrun.CurrentManifestSchemaVersion
+	}
 
 	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 		var (

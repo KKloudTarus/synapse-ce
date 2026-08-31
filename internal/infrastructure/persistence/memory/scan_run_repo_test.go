@@ -152,3 +152,70 @@ func TestMemoryScanRunStore_NativeSealedProvenance(t *testing.T) {
 		t.Fatalf("expected ErrNotFound for cross-tenant get, got %v", err)
 	}
 }
+
+func TestMemoryScanRunStore_TenantFallbackAndIsolation(t *testing.T) {
+	store := memory.NewScanRunStore()
+	now := time.Now().UTC()
+
+	tenantA := shared.ID("tenant-a")
+	tenantB := shared.ID("tenant-b")
+	engA := shared.ID("eng-a")
+	engB := shared.ID("eng-b")
+
+	ctxA := shared.WithTenant(context.Background(), tenantA)
+	ctxB := shared.WithTenant(context.Background(), tenantB)
+	ctxNoTenant := context.Background() // No tenant -> falls back to shared.DefaultTenant
+
+	// 1. Save runs under Tenant A and Tenant B
+	runA := ports.ScanRun{ID: "run-a", EngagementID: string(engA), CreatedAt: now}
+	runB := ports.ScanRun{ID: "run-b", EngagementID: string(engB), CreatedAt: now}
+
+	if err := store.Save(ctxA, runA); err != nil {
+		t.Fatalf("save run A: %v", err)
+	}
+	if err := store.Save(ctxB, runB); err != nil {
+		t.Fatalf("save run B: %v", err)
+	}
+
+	// 2. Querying with ctxNoTenant (DefaultTenant) must NOT return Tenant A or B's runs
+	_, err := store.Get(ctxNoTenant, "run-a")
+	if !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound querying run-a under default tenant, got %v", err)
+	}
+	_, err = store.Get(ctxNoTenant, "run-b")
+	if !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound querying run-b under default tenant, got %v", err)
+	}
+
+	listA, err := store.List(ctxNoTenant, engA)
+	if err != nil {
+		t.Fatalf("list engA under default tenant: %v", err)
+	}
+	if len(listA) != 0 {
+		t.Fatalf("expected empty list for engA under default tenant, got %d items", len(listA))
+	}
+
+	// 3. Save run under DefaultTenant using ctxNoTenant
+	runDef := ports.ScanRun{ID: "run-def", EngagementID: string(engA), CreatedAt: now}
+	if err := store.Save(ctxNoTenant, runDef); err != nil {
+		t.Fatalf("save run def: %v", err)
+	}
+
+	gotDef, err := store.Get(ctxNoTenant, "run-def")
+	if err != nil {
+		t.Fatalf("get run def: %v", err)
+	}
+	if gotDef.ID != "run-def" {
+		t.Fatalf("unexpected run: %+v", gotDef)
+	}
+
+	// 4. Tenant A still cannot see DefaultTenant run or Tenant B run
+	_, err = store.Get(ctxA, "run-def")
+	if !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for tenant A getting default run, got %v", err)
+	}
+	_, err = store.Get(ctxA, "run-b")
+	if !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for tenant A getting tenant B run, got %v", err)
+	}
+}

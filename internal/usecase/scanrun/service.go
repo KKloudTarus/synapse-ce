@@ -2,8 +2,6 @@ package scanrun
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -80,7 +78,7 @@ func (s *Service) CreateNativeScanRun(ctx context.Context, in CreateNativeScanRu
 		ID:                    runID,
 		Provenance:            scanrun.ProvenanceNative,
 		TerminalStatus:        scanrun.StatusBuilding,
-		ManifestSchemaVersion: 1,
+		ManifestSchemaVersion: scanrun.CurrentManifestSchemaVersion,
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
@@ -151,8 +149,6 @@ func (s *Service) SealScanRun(ctx context.Context, in SealScanRunInput) (scanrun
 
 	// Validate lanes and compute lane manifest hashes
 	preparedLanes := make([]scanrun.Lane, len(in.Lanes))
-	var aggregateHashComponents strings.Builder
-
 	for i, l := range in.Lanes {
 		l.TenantID = in.TenantID
 		l.ScanRunID = in.RunID
@@ -162,7 +158,7 @@ func (s *Service) SealScanRun(ctx context.Context, in SealScanRunInput) (scanrun
 			l.FinishedAt = &finish
 		}
 		if l.ManifestSchemaVersion < 1 {
-			l.ManifestSchemaVersion = 1
+			l.ManifestSchemaVersion = scanrun.CurrentManifestSchemaVersion
 		}
 
 		if err := l.Validate(); err != nil {
@@ -175,17 +171,16 @@ func (s *Service) SealScanRun(ctx context.Context, in SealScanRunInput) (scanrun
 		}
 		l.ManifestHash = hash
 		preparedLanes[i] = l
-
-		aggregateHashComponents.WriteString(hash)
-		aggregateHashComponents.WriteString(";")
 	}
 
-	aggSum := sha256.Sum256([]byte(aggregateHashComponents.String()))
-	manifestHash := hex.EncodeToString(aggSum[:])
+	manifestHash, err := scanrun.ComputeRunManifestHash(preparedLanes)
+	if err != nil {
+		return scanrun.ScanRun{}, fmt.Errorf("compute run manifest hash: %w", err)
+	}
 
 	if s.tx != nil {
 		err := s.tx.Run(ctx, in.TenantID, func(txCtx context.Context) error {
-			return s.runs.SealScanRun(txCtx, in.TenantID, in.RunID, in.TerminalStatus, preparedLanes, 1, manifestHash, now)
+			return s.runs.SealScanRun(txCtx, in.TenantID, in.RunID, in.TerminalStatus, preparedLanes, scanrun.CurrentManifestSchemaVersion, manifestHash, now)
 		})
 		if err != nil {
 			s.recordAudit(ctx, in.TenantID, ports.AuditEntry{
@@ -200,7 +195,7 @@ func (s *Service) SealScanRun(ctx context.Context, in SealScanRunInput) (scanrun
 			return scanrun.ScanRun{}, err
 		}
 	} else {
-		if err := s.runs.SealScanRun(ctx, in.TenantID, in.RunID, in.TerminalStatus, preparedLanes, 1, manifestHash, now); err != nil {
+		if err := s.runs.SealScanRun(ctx, in.TenantID, in.RunID, in.TerminalStatus, preparedLanes, scanrun.CurrentManifestSchemaVersion, manifestHash, now); err != nil {
 			s.recordAudit(ctx, in.TenantID, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "scan_run.provenance_conflict",

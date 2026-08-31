@@ -376,6 +376,143 @@ func TestPostgresScanRunStore_TimestampMicrosecondEquality(t *testing.T) {
 	}
 }
 
+func TestPostgresScanRunStore_SealValidationParity(t *testing.T) {
+	ctx, pool := setupTestDB(t)
+	store := NewScanRunStore(pool)
+
+	tenantID := shared.ID(fmt.Sprintf("t-val-%d", time.Now().UnixNano()))
+	engID := shared.ID(fmt.Sprintf("e-val-%d", time.Now().UnixNano()))
+	runID := fmt.Sprintf("run-val-%d", time.Now().UnixNano())
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	ensureTestTenantAndEngagement(t, ctx, pool, tenantID, engID, "", "")
+
+	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
+	lane := scanrun.Lane{
+		TenantID:                  tenantID,
+		EngagementID:              engID,
+		ScanRunID:                 runID,
+		LaneKey:                   "sast-lane",
+		Producer:                  "synapse-sast",
+		TerminalStatus:            scanrun.StatusSucceeded,
+		Target:                    target,
+		AuthoritativeFindingKinds: []string{"sast_vuln"},
+		StartedAt:                 now,
+		ManifestSchemaVersion:     scanrun.CurrentManifestSchemaVersion,
+		ManifestHash:              "hash1",
+	}
+
+	// 1. StatusBuilding is not terminal -> ErrValidation
+	err := store.SealScanRun(ctx, tenantID, runID, scanrun.StatusBuilding, []scanrun.Lane{lane}, 1, "hash1", now)
+	if !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("expected ErrValidation when sealing with StatusBuilding, got %v", err)
+	}
+
+	// 2. Zero sealedAt timestamp -> ErrValidation
+	err = store.SealScanRun(ctx, tenantID, runID, scanrun.StatusSucceeded, []scanrun.Lane{lane}, 1, "hash1", time.Time{})
+	if !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("expected ErrValidation when sealing with zero sealedAt, got %v", err)
+	}
+}
+
+func TestPostgresScanRunStore_ResealIdempotencyAndReproducibility(t *testing.T) {
+	ctx, pool := setupTestDB(t)
+	store := NewScanRunStore(pool)
+
+	tenantID := shared.ID(fmt.Sprintf("t-reseal-%d", time.Now().UnixNano()))
+	engID := shared.ID(fmt.Sprintf("e-reseal-%d", time.Now().UnixNano()))
+	runID := fmt.Sprintf("run-reseal-%d", time.Now().UnixNano())
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	ensureTestTenantAndEngagement(t, ctx, pool, tenantID, engID, "", "")
+
+	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
+
+	run := scanrun.ScanRun{
+		TenantID:              tenantID,
+		EngagementID:          engID,
+		ID:                    runID,
+		Provenance:            scanrun.ProvenanceNative,
+		TerminalStatus:        scanrun.StatusBuilding,
+		ManifestSchemaVersion: scanrun.CurrentManifestSchemaVersion,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}
+	if err := store.SaveScanRun(ctx, run); err != nil {
+		t.Fatalf("save building scan run: %v", err)
+	}
+
+	laneA := scanrun.Lane{
+		TenantID:                  tenantID,
+		EngagementID:              engID,
+		ScanRunID:                 runID,
+		LaneKey:                   "lane-a",
+		Producer:                  "synapse-sast",
+		TerminalStatus:            scanrun.StatusSucceeded,
+		Target:                    target,
+		AuthoritativeFindingKinds: []string{"sast_vuln"},
+		StartedAt:                 now,
+		ManifestSchemaVersion:     scanrun.CurrentManifestSchemaVersion,
+	}
+	hashA, err := scanrun.ComputeManifestHash(laneA)
+	if err != nil {
+		t.Fatalf("compute hash A: %v", err)
+	}
+	laneA.ManifestHash = hashA
+
+	laneB := scanrun.Lane{
+		TenantID:                  tenantID,
+		EngagementID:              engID,
+		ScanRunID:                 runID,
+		LaneKey:                   "lane-b",
+		Producer:                  "synapse-sca",
+		TerminalStatus:            scanrun.StatusSucceeded,
+		Target:                    target,
+		AuthoritativeFindingKinds: []string{"dep_vuln"},
+		StartedAt:                 now,
+		ManifestSchemaVersion:     scanrun.CurrentManifestSchemaVersion,
+	}
+	hashB, err := scanrun.ComputeManifestHash(laneB)
+	if err != nil {
+		t.Fatalf("compute hash B: %v", err)
+	}
+	laneB.ManifestHash = hashB
+
+	aggregateHash, err := scanrun.ComputeRunManifestHash([]scanrun.Lane{laneA, laneB})
+	if err != nil {
+		t.Fatalf("compute aggregate hash: %v", err)
+	}
+
+	// 1. First seal using [laneA, laneB] order
+	if err := store.SealScanRun(ctx, tenantID, runID, scanrun.StatusSucceeded, []scanrun.Lane{laneA, laneB}, scanrun.CurrentManifestSchemaVersion, aggregateHash, now); err != nil {
+		t.Fatalf("first seal: %v", err)
+	}
+
+	// 2. Second seal using [laneB, laneA] reverse order -> MUST be idempotent success, NOT ErrConflict
+	if err := store.SealScanRun(ctx, tenantID, runID, scanrun.StatusSucceeded, []scanrun.Lane{laneB, laneA}, scanrun.CurrentManifestSchemaVersion, aggregateHash, now); err != nil {
+		t.Fatalf("re-seal with reordered lanes must be idempotent success: %v", err)
+	}
+
+	// 3. Load from database and assert reproducibility
+	loaded, err := store.GetScanRun(ctx, tenantID, runID)
+	if err != nil {
+		t.Fatalf("get sealed scan run: %v", err)
+	}
+
+	if loaded.ManifestHash != aggregateHash {
+		t.Fatalf("stored manifest hash mismatch: got %q, want %q", loaded.ManifestHash, aggregateHash)
+	}
+
+	recomputedHash, err := scanrun.ComputeRunManifestHash(loaded.Lanes)
+	if err != nil {
+		t.Fatalf("recompute hash from loaded lanes: %v", err)
+	}
+
+	if recomputedHash != loaded.ManifestHash {
+		t.Fatalf("persisted lanes recomputation %q does not match stored manifest hash %q", recomputedHash, loaded.ManifestHash)
+	}
+}
+
 func TestPostgresScanRunStore_DirectSQLTriggerDefense(t *testing.T) {
 	ctx, pool := setupTestDB(t)
 	store := NewScanRunStore(pool)
