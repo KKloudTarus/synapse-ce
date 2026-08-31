@@ -25,8 +25,13 @@ export function ProfileDetail({
   const [detailCopiedKey, setDetailCopiedKey] = useState<string | null>(null)
 
   function copyKey(text: string) {
+    // Copies the rule/profile key so it can be pasted into search, the CLI (--rule), .synapseignore,
+    // or a VEX file. Falls back to a hidden textarea + execCommand for non-secure contexts where the
+    // async Clipboard API is unavailable, so the button always does something visible.
     if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).catch(() => {})
+      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text))
+    } else {
+      fallbackCopy(text)
     }
     setDetailCopiedKey(text)
     setTimeout(() => {
@@ -78,7 +83,7 @@ export function ProfileDetail({
         title={
           <div className="space-y-1">
             <h2 className="text-base font-bold text-primary sm:text-lg">{profile.name}</h2>
-            <div className="flex items-center gap-1.5 font-mono text-xs italic">
+            <div className="flex items-center gap-1.5 font-mono text-xs">
               <button
                 type="button"
                 onClick={() => copyKey(profile.key)}
@@ -283,19 +288,21 @@ export function ProfileDetail({
                         : 'border-secondary/60 bg-secondary/15 opacity-70 hover:opacity-100 hover:bg-secondary/30'
                     )}
                   >
-                    {/* Checkbox + Rule Info */}
+                    {/* Rule activation indicator. A native disabled checkbox greys out even when
+                        checked, so a read-only built-in profile's ACTIVE rules looked inactive. This
+                        custom box keeps active rules vividly brand-filled whether or not they're
+                        editable; only editable (custom) profiles toggle on click. */}
                     <div className="flex min-w-0 items-start gap-2.5">
-                      <input
-                        type="checkbox"
-                        checked={active}
-                        disabled={profile.builtIn || busy}
-                        aria-label={`Activate ${r.name}`}
-                        className="mt-0.5 size-4 shrink-0 rounded border-secondary text-brand-solid accent-brand-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 cursor-pointer disabled:cursor-not-allowed"
-                        onChange={(e) =>
+                      <RuleActivationBox
+                        active={active}
+                        readOnly={profile.builtIn}
+                        busy={busy}
+                        name={r.name}
+                        onToggle={() =>
                           run(() =>
-                            e.target.checked
-                              ? api.activateProfileRule(profile.key, r.key)
-                              : api.deactivateProfileRule(profile.key, r.key),
+                            active
+                              ? api.deactivateProfileRule(profile.key, r.key)
+                              : api.activateProfileRule(profile.key, r.key),
                           )
                         }
                       />
@@ -303,7 +310,7 @@ export function ProfileDetail({
                         <div className="truncate text-xs font-semibold text-primary" title={r.name}>
                           {r.name}
                         </div>
-                        <div className="mt-0.5 flex items-center gap-1 font-mono text-[11px] text-tertiary italic">
+                        <div className="mt-0.5 flex items-center gap-1 font-mono text-[11px] text-tertiary">
                           <button
                             type="button"
                             onClick={() => copyKey(r.key)}
@@ -411,4 +418,77 @@ export function ProfileDetail({
       )}
     </div>
   )
+}
+
+// RuleActivationBox shows whether a rule is active in the profile. Unlike a native disabled checkbox
+// (which the browser greys out even when checked), an ACTIVE rule stays vividly brand-filled here even
+// on a read-only built-in profile. Only editable (custom) profiles are clickable.
+function RuleActivationBox({
+  active,
+  readOnly,
+  busy,
+  name,
+  onToggle,
+}: {
+  active: boolean
+  readOnly: boolean
+  busy: boolean
+  name: string
+  onToggle: () => void
+}) {
+  const box = (
+    <span
+      className={cn(
+        'flex size-4 items-center justify-center rounded border transition-colors',
+        active ? 'border-brand-solid bg-brand-solid text-white' : 'border-secondary bg-primary',
+      )}
+    >
+      {active && <Check className="size-3" aria-hidden="true" />}
+    </span>
+  )
+
+  if (readOnly) {
+    return (
+      <span
+        role="checkbox"
+        aria-checked={active}
+        aria-disabled="true"
+        aria-label={`${name} — ${active ? 'active' : 'inactive'} (read-only)`}
+        className="mt-0.5 shrink-0 cursor-not-allowed"
+      >
+        {box}
+      </span>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={active}
+      aria-label={`${active ? 'Deactivate' : 'Activate'} ${name}`}
+      disabled={busy}
+      onClick={onToggle}
+      className="mt-0.5 shrink-0 cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {box}
+    </button>
+  )
+}
+
+// fallbackCopy copies text without the async Clipboard API (unavailable in non-secure contexts).
+function fallbackCopy(text: string) {
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  } catch {
+    /* best-effort; the transient "Copied" state still confirms the intent */
+  }
 }
