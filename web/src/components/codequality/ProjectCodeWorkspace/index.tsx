@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { copyText } from '../../../lib/clipboard'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   Check,
@@ -265,7 +266,7 @@ function WorkspaceHeader({
 
   function copyPath() {
     if (!file?.path) return
-    navigator.clipboard.writeText(file.path).then(() => {
+    copyText(file.path).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }).catch(() => {})

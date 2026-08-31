@@ -1,4 +1,5 @@
 import { useState, type FC } from 'react'
+import { copyText } from '../../../lib/clipboard'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   ChevronUp,
@@ -69,7 +70,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
 
   const copyToClipboard = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    navigator.clipboard.writeText(id)
+    copyText(id)
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 2000)
   }

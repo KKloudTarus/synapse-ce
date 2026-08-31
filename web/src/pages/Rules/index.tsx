@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import { copyText } from '../../lib/clipboard'
 import {
   AlertCircle,
   AlertTriangle,
@@ -34,7 +35,7 @@ function CopyButton({ text, ariaLabel = 'Copy' }: { text: string; ariaLabel?: st
   const [copied, setCopied] = useState(false)
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation()
-    void navigator.clipboard.writeText(text)
+    void copyText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

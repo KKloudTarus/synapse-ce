@@ -1,4 +1,5 @@
 import { ArrowRight, Check, ChevronDown, ChevronUp, Copy01, File02, XClose } from '@untitledui/icons'
+import { copyText } from '../../../lib/clipboard'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button, cn } from '../../../components/ui'
@@ -50,7 +51,7 @@ export function IssueDetail({
 
   function copyLocation(text: string) {
     if (!text) return
-    navigator.clipboard.writeText(text).then(() => {
+    copyText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }).catch(() => {})

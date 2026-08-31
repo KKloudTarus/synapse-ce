@@ -1,4 +1,5 @@
 import { AlertTriangle, ArrowLeft, BarChart01, Check, CheckCircle, Copy01, Play, Upload01 } from '@untitledui/icons'
+import { copyText } from '../../lib/clipboard'
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom'
 import { Button, EmptyState, ErrorState, Pill, Spinner, cn } from '../../components/ui'
@@ -54,7 +55,7 @@ export function CodeQualityProject() {
 
   function copySource(text: string) {
     if (!text) return
-    navigator.clipboard.writeText(text).then(() => {
+    copyText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }).catch(() => {})
