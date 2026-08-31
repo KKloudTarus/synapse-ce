@@ -47,7 +47,7 @@ function CopyButton({ text, ariaLabel = 'Copy' }: { text: string; ariaLabel?: st
       title={copied ? 'Copied to clipboard!' : ariaLabel}
       className="rounded p-1 text-tertiary transition-colors hover:bg-secondary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
     >
-      {copied ? <Check className="size-3.5 text-utility-success-600 dark:text-utility-success-400" /> : <Copy01 className="size-3.5" />}
+      {copied ? <Check className="size-3.5 text-utility-green-600 dark:text-utility-green-400" /> : <Copy01 className="size-3.5" />}
     </button>
   )
 }
@@ -67,7 +67,9 @@ function RuleTypeBadge({ type }: { type: string }) {
     colorClass = 'border-utility-blue-200 bg-utility-blue-50 text-utility-blue-700 dark:border-utility-blue-800 dark:bg-utility-blue-950/40 dark:text-utility-blue-300'
     Icon = FileCode01
   } else if (type === 'bug') {
-    colorClass = 'border-utility-error-200 bg-utility-error-50 text-utility-error-700 dark:border-utility-error-800 dark:bg-utility-error-950/40 dark:text-utility-error-300'
+    // NOTE: the theme has no `utility-error` scale (valid red = `utility-red`), so the old
+    // utility-error-* classes emitted NO CSS and the Bug badge rendered colourless. Use utility-red.
+    colorClass = 'border-utility-red-200 bg-utility-red-50 text-utility-red-700 dark:border-utility-red-800 dark:bg-utility-red-950/40 dark:text-utility-red-300'
     Icon = AlertTriangle
   }
 

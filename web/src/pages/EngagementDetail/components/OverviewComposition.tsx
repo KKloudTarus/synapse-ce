@@ -11,7 +11,7 @@ const LANG_COLORS = [
   'bg-utility-orange-600',
   'bg-utility-pink-600',
   'bg-brand-solid',
-  'bg-utility-gray-600',
+  'bg-utility-neutral-600',
 ]
 
 export function CardEmpty({ icon: Icon, text }: { icon: ComponentType<{ className?: string }>; text: string }) {

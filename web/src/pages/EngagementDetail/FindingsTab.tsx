@@ -160,7 +160,7 @@ export function FindingsTab({
                   value: 'all',
                   label: (
                     <span className="flex items-center gap-2">
-                      <span className="size-2 rounded-full bg-utility-gray-400" />
+                      <span className="size-2 rounded-full bg-utility-neutral-400" />
                       <span>All Severities</span>
                     </span>
                   ),
@@ -169,7 +169,7 @@ export function FindingsTab({
                   value: s,
                   label: (
                     <span className="flex items-center gap-2">
-                      <span className={cn('size-2 rounded-full', STATUS_DOT[s] ?? 'bg-utility-gray-400')} />
+                      <span className={cn('size-2 rounded-full', STATUS_DOT[s] ?? 'bg-utility-neutral-400')} />
                       <span className="capitalize">{s}</span>
                     </span>
                   ),
