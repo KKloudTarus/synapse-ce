@@ -6,6 +6,7 @@ import type {
   FleetAgentHealth,
   FleetCoverageRow,
   FleetCoverageSummary,
+  FleetDesiredGap,
   FleetVerdict,
 } from '../../lib/types'
 import { Button, Card, EmptyState, ErrorState, Pill, Spinner, cn } from '../../components/ui'
@@ -215,6 +216,51 @@ export function AgentsSection() {
   )
 }
 
+// --- Desired-capability gaps (#633) ---
+// A supplementary, self-degrading section: the desired-capabilities service is optional, so a fetch
+// error (feature off ⇒ 404) simply yields no gaps and the section renders nothing. Only UNCOVERED
+// rows are gaps, so a fully-covered estate also shows nothing here — no false "all clear" card.
+function DesiredGapsSection() {
+  const { data } = useFetch<FleetDesiredGap[]>(() => api.fleetDesiredGaps().catch(() => []), { deps: [] })
+  const gaps = (data ?? []).filter((g) => !g.covered)
+  if (gaps.length === 0) return null
+
+  return (
+    <Card title={`Desired-capability gaps (${gaps.length})`} bodyClass="p-0">
+      <VirtualTable
+        items={gaps}
+        columns={GAP_COLUMNS}
+        rowKey={(g, i) => `${g.assetId}:${g.capability}:${i}`}
+        maxHeightClass="max-h-[50vh]"
+        tableMinWidthClass="min-w-[56rem]"
+      />
+    </Card>
+  )
+}
+
+const GAP_COLUMNS: Column<FleetDesiredGap>[] = [
+  {
+    header: 'Asset',
+    className: 'w-52',
+    cell: (g) => <span className="font-mono text-[12px] text-primary" title={g.assetId}>{g.assetId}</span>,
+  },
+  {
+    header: 'Missing capability',
+    className: 'w-48',
+    cell: (g) => <span className="font-mono text-[12px] text-tertiary">{g.capability || 'N/A'}</span>,
+  },
+  {
+    header: 'Reason',
+    className: 'w-40',
+    cell: (g) => <span className="text-tertiary">{g.gapReason || 'uncovered'}</span>,
+  },
+  {
+    header: 'Detail',
+    className: 'flex-1',
+    cell: (g) => <span className="text-tertiary">{g.detail || 'N/A'}</span>,
+  },
+]
+
 // --- Main Fleet Page ---
 export function FleetCoverage() {
   const [exporting, setExporting] = useState(false)
@@ -279,6 +325,9 @@ export function FleetCoverage() {
         <div className="space-y-6">
           {/* Agents section */}
           <AgentsSection />
+
+          {/* Desired-vs-observed capability gaps (#633) — only renders when gaps exist */}
+          <DesiredGapsSection />
 
           {/* Per-asset coverage table */}
           {rows.length === 0 ? (

@@ -4,6 +4,7 @@ import type {
   FleetAgentRow,
   FleetCoverageRow,
   FleetCoverageSummary,
+  FleetDesiredGap,
 } from '../types'
 import { blobDownload, req } from './client'
 
@@ -68,5 +69,23 @@ export const fleetApi = {
 
   exportFleetCoverage: async (): Promise<void> => {
     await blobDownload('/api/v1/fleet/coverage/export', 'fleet-coverage.csv')
+  },
+
+  // Desired-vs-observed capability reconciliation (#633). Rows are snake_case-tagged (ReconciliationRow).
+  // The route only exists when the desired-capabilities service is wired, so callers degrade gracefully.
+  fleetDesiredGaps: async (): Promise<FleetDesiredGap[]> => {
+    const res = await req('/fleet/desired-capabilities/gaps')
+    return (Array.isArray(res?.gaps) ? res.gaps : []).map(
+      (raw: any): FleetDesiredGap => ({
+        assetId: raw?.asset_id ?? '',
+        capability: raw?.capability ?? '',
+        covered: Boolean(raw?.covered),
+        agentId: raw?.agent_id ?? '',
+        agentHealth: raw?.agent_health ?? '',
+        gapReason: raw?.gap_reason ?? '',
+        detail: raw?.detail ?? '',
+        lastSeen: raw?.last_seen ?? '',
+      }),
+    )
   },
 }

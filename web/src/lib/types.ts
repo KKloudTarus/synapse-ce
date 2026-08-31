@@ -1480,6 +1480,19 @@ export interface FleetCoverageSummary {
   assetsWithoutAgent: number
 }
 
+// Desired-vs-observed capability reconciliation row (#633): a capability an asset SHOULD have, and
+// whether the observed agent fleet covers it. Only uncovered rows (covered=false) are gaps.
+export interface FleetDesiredGap {
+  assetId: string
+  capability: string
+  covered: boolean
+  agentId: string
+  agentHealth: string
+  gapReason: string
+  detail: string
+  lastSeen: string
+}
+
 // ---- EDR incidents · tri-score risk · State Timeline (#594 C1/C3/C5/C7, B7) ----
 // The backend serializes incident.Incident and endpoint.TimelineEntry with Go field names
 // (PascalCase, no json tags), so the api client maps those verbatim into these camelCase views.
