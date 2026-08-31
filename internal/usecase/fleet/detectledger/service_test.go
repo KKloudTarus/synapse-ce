@@ -1338,3 +1338,25 @@ func TestExpireAuditFailureDeletesNoProjection(t *testing.T) {
 		t.Fatalf("expiry audit must carry actor + reason, got %+v", e)
 	}
 }
+
+type fakeHoldChecker struct {
+	held bool
+	err  error
+}
+
+func (f fakeHoldChecker) IsHeld(context.Context, shared.ID) (bool, error) { return f.held, f.err }
+
+// TestExpireRefusedUnderLegalHold: a held engagement's retention expiry is refused (#635), so held data
+// is preserved past its retention window; releasing the hold lets expiry proceed.
+func TestExpireRefusedUnderLegalHold(t *testing.T) {
+	h := newHarness(t, time.Hour)
+	h.svc.SetLegalHoldChecker(fakeHoldChecker{held: true})
+	if _, err := h.svc.Expire(tctx(), "eng-1", "operator", "retention"); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("expiry under a legal hold must be forbidden, got %v", err)
+	}
+	// No hold → expiry proceeds (0 expired here, but not refused).
+	h.svc.SetLegalHoldChecker(fakeHoldChecker{held: false})
+	if _, err := h.svc.Expire(tctx(), "eng-1", "operator", "retention"); err != nil {
+		t.Fatalf("expiry without a hold must proceed: %v", err)
+	}
+}
