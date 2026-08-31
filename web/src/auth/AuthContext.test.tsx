@@ -119,8 +119,10 @@ describe('BFF authentication', () => {
     vi.mocked(discoverSession).mockRejectedValue(new ApiError(404, 'not found'))
     renderConnect()
 
-    expect(await screen.findByRole('link', { name: 'Sign in with your organization' })).toBeInTheDocument()
-    expect(screen.getByLabelText('API token')).toBeInTheDocument()
+    // A 404 means OIDC/BFF is unconfigured, so the org sign-in would be a dead CTA — it is hidden and
+    // the API-token login is shown instead. No error banner is raised for this expected condition.
+    expect(await screen.findByLabelText('API token')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Sign in with your organization' })).not.toBeInTheDocument()
     expect(screen.queryByText(/Could not check your sign-in session/)).not.toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })

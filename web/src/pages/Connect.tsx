@@ -5,7 +5,7 @@ import { Button, ErrorState, Field, Input } from '../components/ui'
 import logo from '../assets/logo.png'
 
 export function Connect() {
-  const { phase, aup, error, connecting, connect, acceptAup, logout } = useAuth()
+  const { phase, aup, error, connecting, connect, acceptAup, logout, oidcAvailable } = useAuth()
   const [token, setToken] = useState('')
   const [showToken, setShowToken] = useState(false)
   const [accepting, setAccepting] = useState(false)
@@ -41,7 +41,7 @@ export function Connect() {
               type="button"
               disabled={signingOut}
               onClick={async () => { setSigningOut(true); try { await logout() } finally { setSigningOut(false) } }}
-              className="rounded text-xs text-tertiary underline-offset-2 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded text-xs text-tertiary underline-offset-2 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:cursor-not-allowed disabled:opacity-60"
             >
               {signingOut ? 'Signing out…' : 'Sign out'}
             </button>
@@ -55,23 +55,29 @@ export function Connect() {
         <Panel>
           <div className="mb-5 text-center">
             <h2 className="text-xl font-bold tracking-tight text-primary">Welcome back</h2>
-            <p className="mt-1 text-sm text-tertiary">Sign in with your organization to continue.</p>
+            <p className="mt-1 text-sm text-tertiary">
+              {oidcAvailable ? 'Sign in with your organization to continue.' : 'Sign in with your API token to continue.'}
+            </p>
           </div>
 
           {error && <div className="mb-4"><ErrorState message={error} /></div>}
 
-          <a
-            href="/api/auth/oidc/login"
-            className="btn-primary group flex w-full select-none items-center justify-center gap-2.5 rounded-xl px-4 py-3 text-sm font-semibold text-primary_on-brand transition-transform duration-150 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-          >
-            <LogIn04 className="size-5" /> Sign in with your organization
-          </a>
+          {oidcAvailable && (
+            <>
+              <a
+                href="/api/auth/oidc/login"
+                className="btn-primary group flex w-full select-none items-center justify-center gap-2.5 rounded-xl px-4 py-3 text-sm font-semibold text-primary_on-brand transition-transform duration-150 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+              >
+                <LogIn04 className="size-5" /> Sign in with your organization
+              </a>
 
-          <div className="my-5 flex items-center gap-3 text-[11px] font-medium uppercase tracking-wider text-quaternary before:h-px before:flex-1 before:bg-secondary after:h-px after:flex-1 after:bg-secondary">
-            or
-          </div>
+              <div className="my-5 flex items-center gap-3 text-[11px] font-medium uppercase tracking-wider text-quaternary before:h-px before:flex-1 before:bg-secondary after:h-px after:flex-1 after:bg-secondary">
+                or
+              </div>
+            </>
+          )}
 
-          <details className="group rounded-xl border border-secondary bg-secondary/30 transition-colors open:bg-secondary/50 hover:border-secondarystrong">
+          <details open={!oidcAvailable} className="group rounded-xl border border-secondary bg-secondary/30 transition-colors open:bg-secondary/50 hover:border-borderstrong">
             <summary className="flex cursor-pointer list-none items-center gap-3 p-3.5 [&::-webkit-details-marker]:hidden">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-primary text-brand-secondary ring-1 ring-inset ring-brand/20">
                 <Key01 className="size-4" />
@@ -117,7 +123,7 @@ export function Connect() {
             </form>
           </details>
 
-          <div className="mt-6 flex items-center justify-between border-t border-secondary pt-4 text-xs text-quaternary">
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-secondary pt-4 text-xs text-quaternary">
             <span className="inline-flex items-center gap-1.5">
               <ShieldTick className="size-3.5" /> Encrypted, audited access
             </span>
@@ -140,7 +146,7 @@ function Brand() {
         <img src={logo} alt="Synapse" className="size-10" />
       </div>
       <h1 className="text-2xl font-bold tracking-tight text-primary">Synapse</h1>
-      <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-brand">Security operations platform</p>
+      <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-brand dark:text-branddim">Security operations platform</p>
     </div>
   )
 }
