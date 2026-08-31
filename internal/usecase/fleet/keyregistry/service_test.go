@@ -188,3 +188,56 @@ func mustDecode(t *testing.T, b64 string) ed25519.PublicKey {
 	}
 	return ed25519.PublicKey(raw)
 }
+
+func TestRotateRegistersNewAndRevokesOld(t *testing.T) {
+	svc, audit, ctx := newHarness(t)
+	agent := shared.ID("agent-1")
+
+	// Existing (old) key.
+	oldReq, _, _ := proofFor(t, agent, fleetagent.PurposeDetectionBatch)
+	oldKey, err := svc.Register(ctx, agent, oldReq)
+	if err != nil {
+		t.Fatalf("register old: %v", err)
+	}
+
+	// Rotate: register a NEW key + revoke the old, in one audited op.
+	newReq, _, _ := proofFor(t, agent, fleetagent.PurposeDetectionBatch)
+	newKey, err := svc.Rotate(ctx, agent, newReq, oldKey.KeyID, "operator")
+	if err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	if newKey.KeyID == oldKey.KeyID {
+		t.Fatal("rotation must mint a distinct new key id")
+	}
+
+	keys, err := svc.List(ctx, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oldRevoked, newActive bool
+	for _, k := range keys {
+		if k.KeyID == oldKey.KeyID && !k.RevokedAt.IsZero() {
+			oldRevoked = true
+		}
+		if k.KeyID == newKey.KeyID && k.RevokedAt.IsZero() {
+			newActive = true
+		}
+	}
+	if !oldRevoked {
+		t.Fatal("rotation must revoke the old key")
+	}
+	if !newActive {
+		t.Fatal("rotation must leave the new key active")
+	}
+	if !audit.has("fleet.key.rotated") {
+		t.Fatal("rotation must be audited (fleet.key.rotated)")
+	}
+}
+
+func TestRotateNeedsOldKeyID(t *testing.T) {
+	svc, _, ctx := newHarness(t)
+	req, _, _ := proofFor(t, "agent-1", fleetagent.PurposeDetectionBatch)
+	if _, err := svc.Rotate(ctx, "agent-1", req, "", "operator"); err == nil {
+		t.Fatal("rotate without an old key id must be rejected")
+	}
+}

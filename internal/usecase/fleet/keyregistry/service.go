@@ -117,6 +117,27 @@ func (s *Service) Revoke(ctx context.Context, agentID shared.ID, keyID, actor st
 	return nil
 }
 
+// Rotate performs the standard signing-key rotation as one audited operation: register a NEW key for the
+// authenticated agent (same proof-of-possession + validity checks as Register), then revoke the OLD key.
+// The store keeps multiple keys per agent, so the overlap window lets batches signed with the old key
+// still verify until it is revoked — no gap. If the new key registers but the old revocation fails, the
+// error names both so the operator can complete the revoke; the new key stays valid (fail-safe: never
+// leave the agent with no usable key). actor attributes the revoke.
+func (s *Service) Rotate(ctx context.Context, authAgentID shared.ID, newKey RegisterRequest, oldKeyID, actor string) (fleetagent.AgentSigningKey, error) {
+	if strings.TrimSpace(oldKeyID) == "" {
+		return fleetagent.AgentSigningKey{}, fmt.Errorf("%w: rotate needs the old key id to revoke", shared.ErrValidation)
+	}
+	registered, err := s.Register(ctx, authAgentID, newKey)
+	if err != nil {
+		return fleetagent.AgentSigningKey{}, err
+	}
+	if err := s.Revoke(ctx, authAgentID, oldKeyID, actor); err != nil {
+		return fleetagent.AgentSigningKey{}, fmt.Errorf("rotate: new key %s registered but revoking old key %s failed: %w", registered.KeyID, oldKeyID, err)
+	}
+	s.record(ctx, actor, registered.KeyID, "fleet.key.rotated", map[string]string{"agent_id": authAgentID.String(), "old_key_id": oldKeyID})
+	return registered, nil
+}
+
 func (s *Service) record(ctx context.Context, actor, keyID, action string, meta map[string]string) {
 	if meta == nil {
 		meta = map[string]string{}
