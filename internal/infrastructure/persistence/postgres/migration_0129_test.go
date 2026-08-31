@@ -43,7 +43,7 @@ func TestMigrationInventoryNoDuplicateGooseVersions(t *testing.T) {
 	}
 }
 
-func TestMigration0127ScanRunProvenanceSchema(t *testing.T) {
+func TestMigration0129ScanRunProvenanceSchema(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -76,7 +76,7 @@ func TestMigration0127ScanRunProvenanceSchema(t *testing.T) {
 			t.Fatalf("inspect %s existence: %v", tbl, err)
 		}
 		if !exists {
-			t.Fatalf("table %s was not created by migration 0127", tbl)
+			t.Fatalf("table %s was not created by migration 0129", tbl)
 		}
 	}
 
@@ -123,7 +123,7 @@ func TestMigration0127ScanRunProvenanceSchema(t *testing.T) {
 	}
 }
 
-func TestMigration0127RollbackAndReapply(t *testing.T) {
+func TestMigration0129RollbackAndReapply(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -146,9 +146,9 @@ func TestMigration0127RollbackAndReapply(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. Rollback migration 0127 to 0126
-	if err := goose.DownTo(db, ".", 126); err != nil {
-		t.Fatalf("down to 126: %v", err)
+	// 1. Rollback migration 0129 to 0128
+	if err := goose.DownTo(db, ".", 128); err != nil {
+		t.Fatalf("down to 128: %v", err)
 	}
 
 	pool, err := Connect(ctx, dsn)
@@ -162,13 +162,13 @@ func TestMigration0127RollbackAndReapply(t *testing.T) {
 		var exists bool
 		_ = pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)`, tbl).Scan(&exists)
 		if exists {
-			t.Fatalf("table %s still exists after rollback to 126", tbl)
+			t.Fatalf("table %s still exists after rollback to 128", tbl)
 		}
 	}
 
-	// 2. Re-apply migration 0127
-	if err := goose.UpTo(db, ".", 127); err != nil {
-		t.Fatalf("up to 127: %v", err)
+	// 2. Re-apply migration 0129
+	if err := goose.UpTo(db, ".", 129); err != nil {
+		t.Fatalf("up to 129: %v", err)
 	}
 
 	// Verify child tables restored
@@ -176,7 +176,7 @@ func TestMigration0127RollbackAndReapply(t *testing.T) {
 		var exists bool
 		_ = pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)`, tbl).Scan(&exists)
 		if !exists {
-			t.Fatalf("table %s was not recreated after re-applying 127", tbl)
+			t.Fatalf("table %s was not recreated after re-applying 129", tbl)
 		}
 	}
 }

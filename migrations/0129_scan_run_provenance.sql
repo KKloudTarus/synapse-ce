@@ -26,7 +26,7 @@ DECLARE
 BEGIN
     SELECT COUNT(*) INTO v_orphans FROM scan_runs WHERE tenant_id IS NULL OR tenant_id = '';
     IF v_orphans > 0 THEN
-        RAISE EXCEPTION 'migration 0127: found % orphaned scan_runs rows with no matching engagement tenant_id', v_orphans;
+        RAISE EXCEPTION 'migration 0129: found % orphaned scan_runs rows with no matching engagement tenant_id', v_orphans;
     END IF;
 END $$;
 -- +goose StatementEnd
