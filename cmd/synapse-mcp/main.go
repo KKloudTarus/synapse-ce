@@ -25,6 +25,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/logging"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
+	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -55,6 +57,7 @@ func main() {
 	var findingRepo ports.FindingRepository
 	var evidenceStore ports.EvidenceStore
 	var auditLog ports.AuditLogger
+	var judgmentStore analysis.Store // #640 E: lets MCP clients PROPOSE judgments (investigation hypotheses etc.)
 	if cfg.DBDSN != "" {
 		startup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -93,11 +96,13 @@ func main() {
 		findingRepo = postgres.NewFindingRepository(pool)
 		evidenceStore = postgres.NewEvidenceStore(pool)
 		auditLog = postgres.NewAuditLog(pool)
+		judgmentStore = postgres.NewJudgmentRepository(pool)
 		log.Info("persistence: postgres")
 	} else {
 		findingRepo = memory.NewFindingRepository()
 		evidenceStore = memory.NewEvidenceStore()
 		auditLog = file.NewAuditLog(cfg.AuditFile)
+		judgmentStore = memory.NewJudgmentStore()
 		log.Warn("persistence: in-memory (set SYNAPSE_DB_DSN to serve the API's data)")
 	}
 
@@ -109,6 +114,26 @@ func main() {
 	if err != nil {
 		log.Error("agent catalog init failed", "err", err)
 		os.Exit(1)
+	}
+	// #640 E — MCP investigation: enable propose-only judgment tools (investigation hypotheses +
+	// reachability / sast / critique / threat / …) for external MCP clients. The MCP path stays
+	// propose-only — analysis.Service exposes ONLY Propose (never Verify/Accept), so a client can PROPOSE
+	// an investigation hypothesis about an incident but a HUMAN must accept it; nothing is executed.
+	if idempotentAudit, ok := auditLog.(ports.IdempotentAuditLogger); ok {
+		evidenceSvc, everr := evidenceuc.NewService(evidenceStore, nil, auditLog, clock, ids)
+		if everr != nil {
+			log.Error("evidence service init failed", "err", everr)
+			os.Exit(1)
+		}
+		analysisSvc, aerr := analysis.NewService(judgmentStore, evidenceSvc, idempotentAudit, clock, ids)
+		if aerr != nil {
+			log.Error("analysis service init failed", "err", aerr)
+			os.Exit(1)
+		}
+		catalog.EnableJudgments(analysisSvc)
+		log.Info("MCP judgment proposals ENABLED (propose-only: investigation hypotheses + reachability/critique/threat; a human accepts)")
+	} else {
+		log.Warn("MCP judgment proposals disabled: audit log is not idempotent")
 	}
 	srv, err := mcpserver.New(catalog, shared.ID(cfg.MCPEngagementID), cfg.MCPToken, buildinfo.App(), log)
 	if err != nil {
