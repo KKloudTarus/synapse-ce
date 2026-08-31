@@ -17,6 +17,7 @@ import { agentApi } from './agent'
 import { codeQualityApi } from './code-quality'
 import { rulesApi } from './rules'
 import { fleetApi } from './fleet'
+import { incidentsApi } from './incidents'
 import { assetsApi } from './assets'
 import { vulnerabilityApi } from './vulnerability'
 import { aiTriageApi } from './ai-triage'
@@ -45,6 +46,7 @@ export const api = {
   ...codeQualityApi,
   ...rulesApi,
   ...fleetApi,
+  ...incidentsApi,
   ...assetsApi,
   ...vulnerabilityApi,
   ...aiTriageApi,

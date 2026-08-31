@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useRef, type ReactNode } from 'react'
+import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { cn } from '../ui'
 
 export interface Column<T> {
@@ -21,6 +21,7 @@ export function VirtualTable<T>({
   headerClassName,
   rowClassName,
   totalItems,
+  onRowClick,
 }: {
   columns: Column<T>[]
   items: T[]
@@ -31,6 +32,8 @@ export function VirtualTable<T>({
   headerClassName?: string
   rowClassName?: string | ((item: T) => string)
   totalItems?: number
+  /** When set, each row is clickable (and keyboard-activatable) and invokes this with the row item. */
+  onRowClick?: (item: T) => void
 }) {
   const parentRef = useRef<HTMLDivElement>(null)
   const v = useVirtualizer({
@@ -90,8 +93,22 @@ export function VirtualTable<T>({
                 key={rowKey(item, vi.index)}
                 role="row"
                 aria-rowindex={vi.index + 2}
+                {...(onRowClick
+                  ? {
+                      tabIndex: 0,
+                      onClick: () => onRowClick(item),
+                      onKeyDown: (e: KeyboardEvent) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          onRowClick(item)
+                        }
+                      },
+                    }
+                  : {})}
                 className={cn(
                   'absolute left-0 top-0 flex w-full items-center gap-3 border-b border-border/60 px-4 text-sm hover:bg-elevated/40',
+                  onRowClick &&
+                    'cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand',
                   typeof rowClassName === 'function' ? rowClassName(item) : rowClassName,
                 )}
                 style={{ height: `${vi.size}px`, transform: `translateY(${vi.start}px)` }}

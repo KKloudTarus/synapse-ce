@@ -1,5 +1,6 @@
 import {
   Activity,
+  AlertTriangle,
   BarChartSquare02,
   BookClosed,
   CheckDone01,
@@ -70,6 +71,7 @@ const NAV_GROUPS: Array<{
       label: 'Runtime security',
       items: [
         { icon: Server01, label: 'Fleet', to: '/fleet' },
+        { icon: AlertTriangle, label: 'Incidents', to: '/fleet/incidents' },
         { icon: Activity, label: 'Automation Observability', to: '/ai-triage/observability' },
       ],
     },
