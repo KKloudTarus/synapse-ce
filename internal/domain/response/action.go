@@ -12,6 +12,7 @@ package response
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -59,6 +60,30 @@ type Action struct {
 	BlastRadius offensivepolicy.Radius
 	Argv        []string // argv-only; no shell
 	Reversal    ReversalSpec
+}
+
+// NewAction builds a complete, valid action for a kind + target from the catalogue: the argv-only
+// command, the catalogued blast radius, and the mandatory reversal. It is the single constructor callers
+// (the HTTP surface, the agent proposer) use so an action can never be assembled with a bogus argv or a
+// mismatched reversal — Validate is run before returning. The argv verb is derived from the kind
+// (isolate_host → "isolate-host"), matching the agent-response CLI contract.
+func NewAction(id shared.ID, kind Kind, target shared.ID) (Action, error) {
+	spec, ok := SpecFor(kind)
+	if !ok {
+		return Action{}, fmt.Errorf("%w: unknown response kind %q", shared.ErrValidation, kind)
+	}
+	a := Action{
+		ID:          id,
+		Kind:        kind,
+		Target:      target,
+		BlastRadius: spec.Radius,
+		Argv:        []string{"synapse-agent-response", strings.ReplaceAll(string(kind), "_", "-"), target.String()},
+		Reversal:    spec.Reversal,
+	}
+	if err := a.Validate(); err != nil {
+		return Action{}, err
+	}
+	return a, nil
 }
 
 // Validate fails CLOSED: a missing reversal, empty argv, a shell metacharacter, an unknown kind, or an
