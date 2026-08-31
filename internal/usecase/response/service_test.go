@@ -341,3 +341,76 @@ func TestApplyRequiresTenant(t *testing.T) {
 		t.Fatalf("a missing tenant must be refused, got %v", err)
 	}
 }
+
+// ---- #638 telemetry-verified post-condition -------------------------------------------------------
+
+type fakeVerifier struct {
+	outcome rdom.Verification
+	err     error
+	calls   int
+}
+
+func (f *fakeVerifier) Verify(_ context.Context, _ rdom.Action, _ shared.ID) (rdom.Verification, error) {
+	f.calls++
+	return f.outcome, f.err
+}
+
+// TestApplyVerifiesEffectPostCondition is the #638 guarantee: CommandApplied ≠ VerifiedSucceeded. When a
+// verifier is wired, an applied action's EFFECT is confirmed against telemetry — a kill whose process is
+// still observed alive verifies as Failed (not a success), insufficient coverage is Unknown, and a
+// verifier error is never a silent success. The command still counts as applied; verification is a
+// separate axis carried on the record + a distinct audit line, and it is persisted.
+func TestApplyVerifiesEffectPostCondition(t *testing.T) {
+	cases := []struct {
+		name    string
+		outcome rdom.Verification
+		err     error
+		want    rdom.Verification
+		audit   string
+	}{
+		{"succeeded", VerificationSucceeded, nil, VerificationSucceeded, "response.verified"},
+		{"failed_effect_not_present", VerificationFailed, nil, VerificationFailed, "response.verification_failed"},
+		{"unknown_coverage", VerificationUnknown, nil, VerificationUnknown, "response.verification_unknown"},
+		{"verifier_error_is_not_success", VerificationPending, errors.New("telemetry down"), VerificationUnknown, "response.verification_unknown"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			vf := &fakeVerifier{outcome: tc.outcome, err: tc.err}
+			h.svc.SetEffectVerifier(vf)
+			rec, err := h.svc.Apply(tctx(), "eng-1", act("a1"), target(), "alice")
+			if err != nil {
+				t.Fatalf("apply: %v", err)
+			}
+			if rec.State != StateApplied {
+				t.Fatalf("the command must still be applied, got state %s", rec.State)
+			}
+			if vf.calls != 1 {
+				t.Fatalf("verifier must run exactly once, got %d", vf.calls)
+			}
+			if rec.Verification != tc.want {
+				t.Fatalf("verification = %q, want %q", rec.Verification, tc.want)
+			}
+			if !h.audit.has(tc.audit) {
+				t.Errorf("expected audit %q", tc.audit)
+			}
+			got, found, _ := h.store.Get(tctx(), "a1")
+			if !found || got.Verification != tc.want {
+				t.Fatalf("persisted verification = %q (found=%v), want %q", got.Verification, found, tc.want)
+			}
+		})
+	}
+}
+
+// TestApplyWithoutVerifierLeavesVerificationPending: with no verifier wired the behaviour is unchanged —
+// the effect is simply not verified (Pending), never a false claim of success.
+func TestApplyWithoutVerifierLeavesVerificationPending(t *testing.T) {
+	h := newHarness(t)
+	rec, err := h.svc.Apply(tctx(), "eng-1", act("a1"), target(), "alice")
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if rec.Verification != VerificationPending {
+		t.Fatalf("no verifier ⇒ verification pending, got %q", rec.Verification)
+	}
+}
