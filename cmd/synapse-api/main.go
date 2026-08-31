@@ -128,6 +128,7 @@ import (
 	incidenttriage "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidenttriage"
 	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
+	legalholduc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/legalholduc"
 	privacypolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacypolicy"
 	retrohunt "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/retrohunt"
 	riskscorebridge "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscorebridge"
@@ -317,6 +318,7 @@ func main() {
 	var fleetDesiredStore ports.FleetDesiredStore         // #633 desired-vs-observed capability state
 	var endpointTimelineStore ports.EndpointTimelineStore // #594 B7 State Timeline projection
 	var baselineStore ports.BaselineStore                 // #594 D behavioral baseline state
+	var legalHoldStore ports.LegalHoldStore               // #635 legal holds (suspend retention expiry)
 	var telemetrySvc *telemetryingest.Service             // wired to detection repair after both services exist
 	var endpointStateSvc *endpointstate.Service           // #594 B7 State-Timeline projector; fed by telemetry ingest
 	var detectSvc *detectledger.Service                   // tenant-scoped startup and periodic provenance repair
@@ -524,6 +526,7 @@ func main() {
 		fleetDesiredStore = postgres.NewFleetDesiredRepository(pool)
 		endpointTimelineStore = postgres.NewEndpointTimelineRepository(pool)
 		baselineStore = postgres.NewBaselineRepository(pool)
+		legalHoldStore = postgres.NewLegalHoldRepository(pool)
 		fleetRolloutStore = postgres.NewFleetRolloutRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
@@ -582,6 +585,7 @@ func main() {
 		fleetDesiredStore = memory.NewFleetDesiredStore()
 		endpointTimelineStore = memory.NewEndpointTimelineStore()
 		baselineStore = memory.NewBaselineStore()
+		legalHoldStore = memory.NewLegalHoldStore()
 		fleetRolloutStore = memory.NewFleetRolloutStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
@@ -1995,6 +1999,16 @@ func main() {
 			router.SetFleetDetectionIngest(detectSvc)
 			if telemetrySvc != nil {
 				telemetrySvc.SetDetectionReconciler(detectSvc)
+			}
+			// Legal holds (#635): a held engagement's data is exempt from retention expiry. Wire the guard
+			// into the detection ledger's Expire path + expose the operator surface.
+			if legalHoldSvc, lherr := legalholduc.NewService(legalHoldStore, auditLog, func() time.Time { return clock.Now().UTC() }); lherr != nil {
+				log.Error("legal-hold service init failed", "err", lherr)
+				os.Exit(1)
+			} else {
+				detectSvc.SetLegalHoldChecker(legalHoldSvc)
+				router.SetLegalHolds(legalHoldSvc)
+				log.Info("legal holds ENABLED (#635): a held engagement's retention-bounded data is preserved until released")
 			}
 			tenantStore, ok := repo.(ports.DetectionReconciliationTenantStore)
 			if !ok {

@@ -86,8 +86,18 @@ type Service struct {
 	audit      ports.IdempotentAuditLogger
 	clock      ports.Clock
 	ids        ports.IDGenerator
-	retention  time.Duration // 0 = keep the projection forever (the chain is always permanent)
+	retention  time.Duration    // 0 = keep the projection forever (the chain is always permanent)
+	holds      legalHoldChecker // optional (#635): when set, an active hold blocks retention expiry
 }
+
+// legalHoldChecker reports whether an engagement is under an active legal hold. legalholduc.Service
+// satisfies it. When wired, Expire refuses to delete a held engagement's data (fail-closed preservation).
+type legalHoldChecker interface {
+	IsHeld(ctx context.Context, engagementID shared.ID) (bool, error)
+}
+
+// SetLegalHoldChecker wires the #635 legal-hold guard (nil ⇒ retention expiry is not hold-gated).
+func (s *Service) SetLegalHoldChecker(h legalHoldChecker) { s.holds = h }
 
 // NewService validates its dependencies. Every one is required: a ledger that cannot seal, resolve an
 // agent key, persist, or audit is not producing attributable evidence.
@@ -650,6 +660,17 @@ func (s *Service) Expire(ctx context.Context, engagementID shared.ID, actor, rea
 	}
 	if strings.TrimSpace(reason) == "" {
 		return 0, fmt.Errorf("%w: expiry must carry a reason", shared.ErrValidation)
+	}
+	// Legal hold (#635): a held engagement's data must NOT be expired, even past its retention window.
+	// Fail-closed — a checker error blocks the deletion rather than risk destroying held evidence.
+	if s.holds != nil {
+		held, herr := s.holds.IsHeld(ctx, engagementID)
+		if herr != nil {
+			return 0, fmt.Errorf("legal-hold check before expiry: %w", herr)
+		}
+		if held {
+			return 0, fmt.Errorf("%w: engagement %s is under a legal hold; retention expiry is suspended", shared.ErrForbidden, engagementID)
+		}
 	}
 
 	expired, err := s.records.ListExpiredDetections(ctx, engagementID, s.clock.Now().UTC())

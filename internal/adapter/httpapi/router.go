@@ -87,6 +87,7 @@ type Router struct {
 	endpointProcesses      endpointProcessStore      // optional; nil ⇒ the process-report routes are not registered (#594 B5)
 	processLearner         processLearner            // optional; nil ⇒ reported processes are not folded into the behavior baseline (#594 D)
 	desiredCapabilities    desiredCapabilityService  // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
+	legalHolds             legalHoldService          // optional; nil ⇒ the legal-hold routes are not registered (#635)
 	endpointTimeline       endpointTimelineReader    // optional; nil ⇒ the State-Timeline read route is not registered (#594 B7)
 	retroHunter            retroHunter               // optional; nil ⇒ the retro-hunt route is not registered (#594 B7)
 	sarif                  sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
@@ -442,6 +443,14 @@ func (rt *Router) routes() *http.ServeMux {
 		if rt.retroHunter != nil {
 			// B7 retro-hunt (#594): re-hunt a window of the timeline around a pivot. PermView (read-only analysis).
 			mux.HandleFunc("POST /api/v1/fleet/assets/{id}/retro-hunt", rt.authz(userdom.PermView, rt.retroHuntEndpoint))
+		}
+		if rt.legalHolds != nil {
+			// Legal hold (#635): place/release a hold on an engagement's data (exempts it from retention
+			// expiry) and list active holds. Place/release = PermReview (a governance/compliance decision);
+			// list = PermView. Actor + tenant are server-side.
+			mux.HandleFunc("PUT /api/v1/fleet/engagements/{id}/legal-hold", rt.authz(userdom.PermReview, rt.placeLegalHold))
+			mux.HandleFunc("DELETE /api/v1/fleet/engagements/{id}/legal-hold", rt.authz(userdom.PermReview, rt.releaseLegalHold))
+			mux.HandleFunc("GET /api/v1/fleet/legal-holds", rt.authz(userdom.PermView, rt.listLegalHolds))
 		}
 		if rt.desiredCapabilities != nil {
 			// Desired-vs-observed (#633): declare the capabilities an asset SHOULD have (PermOperate),
