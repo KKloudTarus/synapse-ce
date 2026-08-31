@@ -721,7 +721,7 @@ func (s *Service) deleteExpiredProjections(ctx context.Context, engagementID sha
 	if err := s.audit.RecordOnce(ctx, ports.AuditEntry{
 		Actor: actor, Action: "detection.expired", Target: engagementID.String(), At: s.clock.Now().UTC(),
 		Metadata: map[string]string{
-			"idempotency_key": expiryAuditKey(engagementID, ids, actor, reason),
+			"idempotency_key": deletionAuditKey("detection.expired", engagementID, ids, actor, reason),
 			"engagement":      engagementID.String(), "reason": reason, "expired": fmt.Sprint(len(ids)),
 		},
 	}); err != nil {
@@ -740,9 +740,106 @@ func (s *Service) deleteExpiredProjections(ctx context.Context, engagementID sha
 	return deleted, nil
 }
 
-// expiryAuditKey binds the audit line to the exact expiry set so a retry of the same
-// expiry repairs a missing line, while a later expiry of different detections records its own.
-func expiryAuditKey(engagementID shared.ID, ids []shared.ID, actor, reason string) string {
+// Purge is an on-demand governed deletion of ALL of an engagement's current detection projection
+// rows (#635 data deletion / right-to-erasure). Unlike Expire it is not gated on the retention
+// window — an operator/DPO purges the engagement's queryable data on demand — but it is otherwise
+// the SAME governed removal as retention expiry: legal-hold-checked (a held engagement refuses,
+// fail-closed), audited with the actor+reason BEFORE any row is dropped, provenance-tombstoned when
+// provenance is enabled, and it never touches the permanent hash chain — only the projection is
+// removed. Raw PII never enters that chain (source-side redaction), so purging the projection is
+// the deletion this platform can honestly offer. Returns the count purged.
+func (s *Service) Purge(ctx context.Context, engagementID shared.ID, actor, reason string) (int, error) {
+	if strings.TrimSpace(actor) == "" {
+		return 0, fmt.Errorf("%w: purge must name the actor", shared.ErrValidation)
+	}
+	if strings.TrimSpace(reason) == "" {
+		return 0, fmt.Errorf("%w: purge must carry a reason", shared.ErrValidation)
+	}
+	// Legal hold (#635): a held engagement's data must NOT be deleted, even on an erasure request —
+	// preservation trumps erasure. Fail-closed: a checker error blocks the deletion.
+	if s.holds != nil {
+		held, herr := s.holds.IsHeld(ctx, engagementID)
+		if herr != nil {
+			return 0, fmt.Errorf("legal-hold check before purge: %w", herr)
+		}
+		if held {
+			return 0, fmt.Errorf("%w: engagement %s is under a legal hold; data deletion is suspended", shared.ErrForbidden, engagementID)
+		}
+	}
+
+	recs, err := s.records.ListDetections(ctx, engagementID)
+	if err != nil {
+		return 0, fmt.Errorf("list detections for purge: %w", err)
+	}
+	if len(recs) == 0 {
+		return 0, nil
+	}
+	ids := make([]shared.ID, 0, len(recs))
+	for _, r := range recs {
+		ids = append(ids, r.ID)
+	}
+
+	if s.provenance != nil {
+		tenantID, ok := shared.TenantFrom(ctx)
+		if !ok || tenantID.IsZero() {
+			return 0, fmt.Errorf("%w: provenance purge requires a tenant in context", shared.ErrValidation)
+		}
+		for _, detectionID := range ids {
+			current, found, err := s.provenance.Current(ctx, engagementID, detectionID)
+			if err != nil {
+				return 0, fmt.Errorf("read provenance before purge: %w", err)
+			}
+			if !found {
+				return 0, fmt.Errorf("%w: detection %s has no durable provenance", shared.ErrConflict, detectionID)
+			}
+			if current.Status == detectionprovenance.StatusBroken {
+				return 0, fmt.Errorf("%w: detection %s provenance is broken", shared.ErrConflict, detectionID)
+			}
+			if current.Status != detectionprovenance.StatusExpired {
+				if err := appendProvenance(ctx, s.provenance, tenantID, engagementID, detectionID,
+					detectionprovenance.Expired, detectionprovenance.StatusExpired, current.EvidenceID, reason, s.clock); err != nil {
+					return 0, err
+				}
+			}
+		}
+	}
+	return s.purgeProjections(ctx, engagementID, ids, actor, reason)
+}
+
+// purgeProjections audits the actor+reason (action detection.purged) BEFORE dropping any row, on the
+// same fail-closed contract as deleteExpiredProjections — a failed audit stops the deletion so no
+// unattributable data loss is left behind. The key is derived from the purged set, so an exact retry
+// reuses the same line instead of duplicating it.
+func (s *Service) purgeProjections(ctx context.Context, engagementID shared.ID, ids []shared.ID, actor, reason string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	if err := s.audit.RecordOnce(ctx, ports.AuditEntry{
+		Actor: actor, Action: "detection.purged", Target: engagementID.String(), At: s.clock.Now().UTC(),
+		Metadata: map[string]string{
+			"idempotency_key": deletionAuditKey("detection.purged", engagementID, ids, actor, reason),
+			"engagement":      engagementID.String(), "reason": reason, "purged": fmt.Sprint(len(ids)),
+		},
+	}); err != nil {
+		return 0, fmt.Errorf("audit detection purge before deletion: %w", err)
+	}
+	deleted := 0
+	for _, detectionID := range ids {
+		removed, err := s.records.DeleteDetection(ctx, engagementID, detectionID)
+		if err != nil {
+			return deleted, fmt.Errorf("delete detection %s: %w", detectionID, err)
+		}
+		if removed {
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
+// deletionAuditKey binds the audit line to the exact deletion set (per action) so a retry of the
+// same deletion repairs a missing line, while a later deletion of different detections records its
+// own. The action prefix keeps expiry and purge lines distinct even over an identical set.
+func deletionAuditKey(action string, engagementID shared.ID, ids []shared.ID, actor, reason string) string {
 	sorted := make([]string, 0, len(ids))
 	for _, id := range ids {
 		sorted = append(sorted, id.String())
@@ -753,6 +850,9 @@ func expiryAuditKey(engagementID shared.ID, ids []shared.ID, actor, reason strin
 		_, _ = fmt.Fprintf(h, "%d:", len(value))
 		_, _ = h.Write([]byte(value))
 	}
+	// The action is NOT hashed — the returned key is prefixed with it, which already keeps expiry and
+	// purge lines distinct over an identical set. Keeping it out of the preimage leaves the expiry
+	// digest byte-identical to the pre-refactor key, so a retry straddling a binary upgrade still dedups.
 	write(engagementID.String())
 	write(strings.TrimSpace(actor))
 	write(strings.TrimSpace(reason))
@@ -760,7 +860,7 @@ func expiryAuditKey(engagementID shared.ID, ids []shared.ID, actor, reason strin
 	for _, id := range sorted {
 		write(id)
 	}
-	return "detection.expired:" + engagementID.String() + ":" + hex.EncodeToString(h.Sum(nil))
+	return action + ":" + engagementID.String() + ":" + hex.EncodeToString(h.Sum(nil))
 }
 
 // membership asserts the supplied items are EXACTLY the signed batch membership — a multiset match, so a

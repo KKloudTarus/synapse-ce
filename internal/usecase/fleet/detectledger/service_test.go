@@ -1297,14 +1297,14 @@ func TestExpireV2DeletionFailureAfterTombstoneIsResumable(t *testing.T) {
 // the audit and completes the expiry, writing exactly one line for that expiry set.
 func TestExpiryAuditKeyBindsActorReasonAndSet(t *testing.T) {
 	ids := []shared.ID{"d2", "d1"}
-	base := expiryAuditKey("eng-1", ids, "operator", "retention")
-	if got := expiryAuditKey("eng-1", []shared.ID{"d1", "d2"}, "operator", "retention"); got != base {
+	base := deletionAuditKey("detection.expired", "eng-1", ids, "operator", "retention")
+	if got := deletionAuditKey("detection.expired", "eng-1", []shared.ID{"d1", "d2"}, "operator", "retention"); got != base {
 		t.Fatalf("same expiry operation in another set order changed identity: %q != %q", got, base)
 	}
-	if got := expiryAuditKey("eng-1", ids, "other-operator", "retention"); got == base {
+	if got := deletionAuditKey("detection.expired", "eng-1", ids, "other-operator", "retention"); got == base {
 		t.Fatal("expiry operation identity did not bind actor")
 	}
-	if got := expiryAuditKey("eng-1", ids, "operator", "manual cleanup"); got == base {
+	if got := deletionAuditKey("detection.expired", "eng-1", ids, "operator", "manual cleanup"); got == base {
 		t.Fatal("expiry operation identity did not bind reason")
 	}
 }
@@ -1330,7 +1330,7 @@ func TestExpireAuditFailureDeletesNoProjection(t *testing.T) {
 	if err != nil || deleted != 1 {
 		t.Fatalf("expiry retry must repair the audit and delete: deleted=%d err=%v", deleted, err)
 	}
-	key := expiryAuditKey("eng-1", []shared.ID{"d1"}, "operator", "retention")
+	key := deletionAuditKey("detection.expired", "eng-1", []shared.ID{"d1"}, "operator", "retention")
 	if got := h.audit.recordedOnce(key); got != 1 {
 		t.Fatalf("repaired expiry audit lines = %d, want exactly 1", got)
 	}
@@ -1358,5 +1358,56 @@ func TestExpireRefusedUnderLegalHold(t *testing.T) {
 	h.svc.SetLegalHoldChecker(fakeHoldChecker{held: false})
 	if _, err := h.svc.Expire(tctx(), "eng-1", "operator", "retention"); err != nil {
 		t.Fatalf("expiry without a hold must proceed: %v", err)
+	}
+}
+
+// TestPurgeDeletesOnDemandAuditedAndHoldChecked: on-demand deletion (#635, right-to-erasure) drops ALL
+// of an engagement's current detection projection now — not gated on the retention window — but only
+// when named + reasoned, never under a legal hold, and always audited before any row is dropped.
+func TestPurgeDeletesOnDemandAuditedAndHoldChecked(t *testing.T) {
+	h := newHarness(t, 0) // never-expire projection: purge deletes on demand, not via the retention window
+	items := []IngestItem{
+		{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"},
+		{ID: "d2", Detection: mkDetection(t, "ps"), AssetID: "asset-2"},
+	}
+	if _, err := h.svc.Ingest(tctx(), "agent:1", h.signedBatch(t, 1, items), items); err != nil {
+		t.Fatal(err)
+	}
+	// Actor + reason required.
+	if _, err := h.svc.Purge(tctx(), "eng-1", " ", "erasure"); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("purge must require an actor, got %v", err)
+	}
+	if _, err := h.svc.Purge(tctx(), "eng-1", "dpo", " "); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("purge must require a reason, got %v", err)
+	}
+	// A held engagement refuses deletion (preservation trumps erasure) — nothing is dropped.
+	h.svc.SetLegalHoldChecker(fakeHoldChecker{held: true})
+	if _, err := h.svc.Purge(tctx(), "eng-1", "dpo", "erasure"); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("purge under a legal hold must be forbidden, got %v", err)
+	}
+	if got, _ := h.svc.ListDetections(tctx(), "eng-1"); len(got) != 2 {
+		t.Fatalf("held engagement must keep all rows, got %d", len(got))
+	}
+	// Release the hold: on-demand purge drops ALL current rows though none are past retention.
+	h.svc.SetLegalHoldChecker(fakeHoldChecker{held: false})
+	n, err := h.svc.Purge(tctx(), "eng-1", "dpo", "subject erasure request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("purge must drop every current row, got %d", n)
+	}
+	if got, _ := h.svc.ListDetections(tctx(), "eng-1"); len(got) != 0 {
+		t.Fatalf("projection must be empty after purge, got %d", len(got))
+	}
+	if !h.audit.has("detection.purged") {
+		t.Error("purge must be audited (actor + reason), never silent")
+	}
+	if e := h.audit.last["detection.purged"]; e.Actor != "dpo" || e.Metadata["reason"] != "subject erasure request" || e.Metadata["purged"] != "2" {
+		t.Errorf("purge audit must carry actor + reason + count, got %+v", e)
+	}
+	// Nothing left → a second purge is a no-op (not an error).
+	if n, err := h.svc.Purge(tctx(), "eng-1", "dpo", "erasure"); err != nil || n != 0 {
+		t.Fatalf("purge of an empty engagement must be a no-op, got n=%d err=%v", n, err)
 	}
 }

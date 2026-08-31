@@ -2010,6 +2010,13 @@ func main() {
 				detectSvc.SetLegalHoldChecker(legalHoldSvc)
 				router.SetLegalHolds(legalHoldSvc)
 				log.Info("legal holds ENABLED (#635): a held engagement's retention-bounded data is preserved until released")
+				// On-demand data deletion / right-to-erasure (#635): destructive (drops the engagement's
+				// detection projection, chain preserved), so it is OPT-IN. The Purge path is still
+				// legal-hold-checked + audited; the env flag only governs whether the HTTP surface exists.
+				if os.Getenv("SYNAPSE_DATA_DELETION_ENABLED") == "true" {
+					router.SetDataPurge(detectSvc)
+					log.Info("on-demand data deletion ENABLED (#635): DELETE /api/v1/fleet/engagements/{id}/detection-data (PermReview, legal-hold-checked)")
+				}
 				// Data-subject / DPO export (#635): a read-only, audited bundle of an engagement's detections
 				// + active legal holds.
 				if exportSvc, xerr := privacyexport.NewService(detectionRecordStore, legalHoldSvc, auditLog, func() time.Time { return clock.Now().UTC() }); xerr != nil {
