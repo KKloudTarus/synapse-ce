@@ -176,7 +176,7 @@ export function FindingsActivityGauge({
             ? 'bg-utility-yellow-600'
             : sev === 'low'
               ? 'bg-utility-blue-600'
-              : 'bg-utility-gray-600',
+              : 'bg-utility-neutral-600',
     colorHex:
       sev === 'critical'
         ? '#D92D20'
@@ -216,7 +216,7 @@ export function FindingsActivityGauge({
                   fill="none"
                   stroke="#F2F4F7"
                   strokeWidth={RING_STROKE_WIDTH}
-                  className="stroke-utility-gray-100"
+                  className="stroke-utility-neutral-100"
                 />
                 {/* Value arc */}
                 {count > 0 && (

@@ -8,10 +8,10 @@ import type { Finding } from '../../../lib/types'
 export const FINDING_STATUSES = ['open', 'triage', 'confirmed', 'false_positive', 'remediated']
 
 export const STATUS_DOT: Record<string, string> = {
-  open: 'bg-utility-gray-400',
+  open: 'bg-utility-neutral-400',
   triage: 'bg-utility-orange-500',
   confirmed: 'bg-utility-red-500',
-  false_positive: 'bg-utility-gray-300',
+  false_positive: 'bg-utility-neutral-300',
   remediated: 'bg-utility-green-500',
 }
 
@@ -26,7 +26,7 @@ export const STATUS_TEXT: Record<string, string> = {
 export function StatusLabel({ status }: { status: string }) {
   return (
     <span className={cn('flex items-center gap-2 font-medium', STATUS_TEXT[status] ?? 'text-tertiary')}>
-      <span className={cn('size-2 shrink-0 rounded-full', STATUS_DOT[status] ?? 'bg-utility-gray-400')} />
+      <span className={cn('size-2 shrink-0 rounded-full', STATUS_DOT[status] ?? 'bg-utility-neutral-400')} />
       {statusLabel(status)}
     </span>
   )

@@ -176,7 +176,7 @@ export function NewFindingModal({ engagementId, onCreated, onCancel }: { engagem
                   value: s,
                   label: (
                     <span className="flex items-center gap-2">
-                      <span className={cn('size-2 rounded-full', STATUS_DOT[s] ?? 'bg-utility-gray-400')} />
+                      <span className={cn('size-2 rounded-full', STATUS_DOT[s] ?? 'bg-utility-neutral-400')} />
                       <span className="capitalize">{s}</span>
                     </span>
                   ),
