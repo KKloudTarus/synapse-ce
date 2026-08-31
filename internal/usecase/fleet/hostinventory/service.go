@@ -36,10 +36,17 @@ var _ AssetWriter = (*assetuc.Service)(nil)
 
 // Service maps and persists a host inventory.
 type Service struct {
-	assets AssetWriter
-	audit  ports.AuditLogger
-	clock  ports.Clock
+	assets   AssetWriter
+	audit    ports.AuditLogger
+	clock    ports.Clock
+	bindings ports.TelemetryAssetBindingStore // optional; nil ⇒ no telemetry asset binding is established
 }
+
+// SetTelemetryBinder wires the server-authoritative agent→host telemetry binding store. When set, a
+// successful host-inventory sync establishes (or refreshes) the reporting agent's canonical telemetry
+// asset binding — the A3 mapping that telemetry ingest requires (see the Sync doc comment). Kept an
+// optional setter (nil ⇒ no binding) so telemetry-less compositions are unchanged.
+func (s *Service) SetTelemetryBinder(b ports.TelemetryAssetBindingStore) { s.bindings = b }
 
 // NewService validates its dependencies and constructs the service.
 func NewService(assets AssetWriter, audit ports.AuditLogger, clock ports.Clock) (*Service, error) {
@@ -118,6 +125,35 @@ func (s *Service) Sync(ctx context.Context, actor string, in SyncInput) (*SyncRe
 			At: now,
 		}); err != nil {
 			return nil, fmt.Errorf("host inventory: audit coverage gap: %w", err)
+		}
+	}
+
+	// Establish the canonical telemetry binding this host inventory authorizes: the authenticated
+	// reporting agent (actor) owns the host asset it just reconciled. Without this, telemetry ingest
+	// cannot resolve the agent's asset and refuses every batch. guardAssetBinding above already proved
+	// the reporting agent is not stealing another agent's host, so a cross-agent conflict here is a real
+	// race and is surfaced, never swallowed.
+	if s.bindings != nil {
+		if err := s.bindings.BindTelemetryAsset(ctx, ports.TelemetryAssetBinding{
+			TenantID: in.TenantID, AgentID: shared.ID(actor), AssetID: a.ID, UpdatedAt: now,
+		}); err != nil {
+			return nil, fmt.Errorf("host inventory: establish telemetry asset binding: %w", err)
+		}
+		// Audit the establishment/refresh of this server-authoritative binding, mirroring how blocked
+		// takeovers and coverage gaps are audited — the binding is a first-class trust action, so its
+		// creation must be as attributable as its rejection.
+		if err := s.audit.Record(ctx, ports.AuditEntry{
+			Actor:  actor,
+			Action: "host_inventory.telemetry_binding_established",
+			Target: a.ID.String(),
+			Metadata: map[string]string{
+				"tenant_id": in.TenantID.String(),
+				"asset_id":  a.ID.String(),
+				"agent_id":  actor,
+			},
+			At: now,
+		}); err != nil {
+			return nil, fmt.Errorf("host inventory: audit telemetry binding: %w", err)
 		}
 	}
 

@@ -262,3 +262,77 @@ func TestNewServiceValidatesDeps(t *testing.T) {
 		t.Error("nil clock must be rejected")
 	}
 }
+
+// fakeBinder records the agent→asset telemetry binding a sync establishes. errOn, when non-nil, makes
+// BindTelemetryAsset fail so the sync's hard-fail-on-binding-error path can be exercised.
+type fakeBinder struct {
+	last  ports.TelemetryAssetBinding
+	calls int
+	errOn error
+}
+
+func (f *fakeBinder) BindTelemetryAsset(_ context.Context, b ports.TelemetryAssetBinding) error {
+	f.calls++
+	if f.errOn != nil {
+		return f.errOn
+	}
+	f.last = b
+	return nil
+}
+
+func (f *fakeBinder) ResolveTelemetryAsset(_ context.Context, _ shared.ID) (shared.ID, error) {
+	if f.last.AssetID.IsZero() {
+		return "", shared.ErrNotFound
+	}
+	return f.last.AssetID, nil
+}
+
+// A wired binder is what makes telemetry ingest able to resolve the agent's asset; without this the whole
+// EDR detection pipeline is unreachable. A successful sync must establish it from the server-authoritative
+// actor + reconciled asset id.
+func TestSyncEstablishesTelemetryBindingWhenBinderSet(t *testing.T) {
+	w, a := newFakeWriter(), &fakeAudit{}
+	s := newService(t, w, a)
+	binder := &fakeBinder{}
+	s.SetTelemetryBinder(binder)
+
+	res, err := s.Sync(context.Background(), "agent-1", SyncInput{TenantID: "tenant-1", Inventory: completeHost()})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if binder.calls != 1 {
+		t.Fatalf("expected exactly one bind call, got %d", binder.calls)
+	}
+	if binder.last.AgentID != "agent-1" || binder.last.AssetID != res.AssetID || binder.last.TenantID != "tenant-1" {
+		t.Fatalf("binding must map the authenticated agent to the reconciled asset in-tenant: %+v (asset=%s)", binder.last, res.AssetID)
+	}
+	if binder.last.UpdatedAt.IsZero() {
+		t.Fatal("binding must carry a server-stamped update time")
+	}
+	// The binding is a first-class trust action and must be auditable.
+	e, ok := a.entry("host_inventory.telemetry_binding_established")
+	if !ok {
+		t.Fatal("establishing a telemetry binding must be audited")
+	}
+	if e.Actor != "agent-1" || e.Metadata["asset_id"] != res.AssetID.String() {
+		t.Fatalf("binding audit must attribute the actor + asset: %+v", e)
+	}
+}
+
+// The binder is optional: a telemetry-less composition (nil binder) must sync unchanged.
+func TestSyncWithoutBinderIsUnchanged(t *testing.T) {
+	s := newService(t, newFakeWriter(), &fakeAudit{})
+	if _, err := s.Sync(context.Background(), "agent-1", SyncInput{TenantID: "tenant-1", Inventory: completeHost()}); err != nil {
+		t.Fatalf("sync without a binder must succeed: %v", err)
+	}
+}
+
+// A binding failure (e.g. the asset is already bound to a different agent) must hard-fail the sync, never
+// be swallowed — a host whose telemetry cannot be attributed must not report success.
+func TestSyncFailsWhenBindingConflicts(t *testing.T) {
+	s := newService(t, newFakeWriter(), &fakeAudit{})
+	s.SetTelemetryBinder(&fakeBinder{errOn: shared.ErrConflict})
+	if _, err := s.Sync(context.Background(), "agent-1", SyncInput{TenantID: "tenant-1", Inventory: completeHost()}); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("a binding conflict must fail the sync, got %v", err)
+	}
+}

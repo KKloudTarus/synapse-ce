@@ -11,6 +11,7 @@ import {
   unavailableReasonText,
 } from '../../../lib/projectOverviewPresentation'
 import { Card, cn } from '../../ui'
+import { gradeTone, type Grade } from '../qualityPresentation'
 
 const icons: Record<OverviewMetricCardModel['key'], FC<SVGProps<SVGSVGElement>>> = {
   security: Shield,
@@ -51,9 +52,23 @@ export function OverviewMetricCard({
             <Icon className="size-4" aria-hidden="true" />
           </span>
         </div>
-        <div className={cn('font-mono text-4xl font-semibold tabular-nums', available ? 'text-foreground' : 'text-mutedfg')}>
-          {value ?? '—'}
-        </div>
+        {card.kind === 'rating' && available && value ? (
+          // A colour-coded grade chip (A green → E red), like SonarQube, so the rating reads at a glance
+          // instead of as flat monochrome text.
+          <div
+            className={cn(
+              'inline-flex size-14 items-center justify-center rounded-xl border font-mono text-3xl font-bold shadow-2xs',
+              gradeTone(value as Grade),
+            )}
+            aria-label={`${card.label} grade ${value}`}
+          >
+            {value}
+          </div>
+        ) : (
+          <div className={cn('font-mono text-4xl font-semibold tabular-nums', available ? 'text-foreground' : 'text-mutedfg')}>
+            {value ?? '—'}
+          </div>
+        )}
         {reason && <p className="text-sm text-mutedfg">{reason}</p>}
         {detailTarget ? (
           <Link
