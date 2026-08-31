@@ -23,6 +23,7 @@ vi.mock('../../lib/api', () => {
       exportFleetCoverage: vi.fn(),
       listFleetAgents: vi.fn(),
       getFleetAgent: vi.fn(),
+      fleetDesiredGaps: vi.fn(),
     },
   }
 })
@@ -49,6 +50,7 @@ describe('FleetCoverage', () => {
     restoreViewport = installVirtualViewport()
     vi.mocked(api.fleetCoverageSummary).mockResolvedValue(emptySummary)
     vi.mocked(api.listFleetAgents).mockResolvedValue([])
+    vi.mocked(api.fleetDesiredGaps).mockResolvedValue([])
   })
   afterEach(() => restoreViewport())
 
