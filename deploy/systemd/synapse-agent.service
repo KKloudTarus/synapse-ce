@@ -1,0 +1,40 @@
+# systemd unit for the Synapse VM endpoint agent (#405/#410, #633 fleet automation).
+#
+# Install: place the binary at /usr/local/bin/synapse-agent, write the environment to
+# /etc/synapse-agent/agent.env (see below), drop the one-time enrolment token at
+# /etc/synapse-agent/enrol-token (mode 0600), then:
+#   systemctl daemon-reload && systemctl enable --now synapse-agent
+#
+# /etc/synapse-agent/agent.env (0600):
+#   SYNAPSE_FLEET_URL=https://control-plane.example
+#   SYNAPSE_FLEET_ENROL_TOKEN_FILE=/etc/synapse-agent/enrol-token
+#   SYNAPSE_AGENT_STATE_DIR=/var/lib/synapse-agent
+#   SYNAPSE_INVENTORY_SWEEP_ENABLED=true      # A8 continuous inventory (default on)
+#   SYNAPSE_DETECT_CLASSES=                    # empty = detection off; set e.g. process,network to enable (Linux+root)
+
+[Unit]
+Description=Synapse fleet endpoint agent (host inventory + optional runtime detection)
+Documentation=https://github.com/KKloudTarus/synapse-ce
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Inventory-only runs unprivileged as a dedicated user; enable detection (eBPF) needs root — see below.
+DynamicUser=yes
+StateDirectory=synapse-agent
+EnvironmentFile=/etc/synapse-agent/agent.env
+ExecStart=/usr/local/bin/synapse-agent -root /
+Restart=always
+RestartSec=10
+# Hardening (inventory-only). If you enable eBPF detection (SYNAPSE_DETECT_CLASSES), remove DynamicUser,
+# run as root, and grant AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_NET_ADMIN instead of NoNewPrivileges.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ReadOnlyPaths=/
+ReadWritePaths=/var/lib/synapse-agent
+
+[Install]
+WantedBy=multi-user.target
