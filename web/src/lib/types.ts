@@ -1591,6 +1591,53 @@ export interface TimelineEntry {
   summary: string
 }
 
+// One agent security detection record (#594 B/C). detection.Record + its Detection are untagged
+// PascalCase; evidence event details are field-RBAC redacted server-side, so the UI shows the summary.
+export type AgentDetectionClass = 'process' | 'network' | 'file' | 'privilege' | ''
+
+export interface AgentDetectionRecord {
+  id: string
+  assetId: string
+  agentId: string
+  recordedAt: string
+  ruleId: string
+  ruleVersion: number
+  class: AgentDetectionClass
+  severity: Severity
+  evidenceCount: number
+  truncated: boolean
+  observedCount: number
+  observed: string
+}
+
+export interface CorrelateResult {
+  created: Incident[]
+  reassessed: number
+  reassessFailed: number
+}
+
+// ---- Privacy & data governance (#635): legal hold · data export · right-to-erasure ----
+
+// A legal hold pins an engagement's data against retention expiry / deletion. legalhold.Hold is untagged
+// PascalCase; ReleasedAt zero (year <= 1) ⇒ still active.
+export interface LegalHold {
+  tenantId: string
+  engagementId: string
+  reason: string
+  placedBy: string
+  placedAt: string
+  releasedBy: string
+  releasedAt: string
+}
+
+// The subject-access / DPO export bundle for one engagement (read-only, audited).
+export interface PrivacyExportBundle {
+  engagementId: string
+  generatedAt: string
+  detectionCount: number
+  legalHolds: LegalHold[]
+}
+
 export interface DashboardTrendPoint {
   date: string
   counts: Record<string, number>

@@ -18,6 +18,7 @@ import { codeQualityApi } from './code-quality'
 import { rulesApi } from './rules'
 import { fleetApi } from './fleet'
 import { incidentsApi } from './incidents'
+import { governanceApi } from './governance'
 import { assetsApi } from './assets'
 import { vulnerabilityApi } from './vulnerability'
 import { aiTriageApi } from './ai-triage'
@@ -47,6 +48,7 @@ export const api = {
   ...rulesApi,
   ...fleetApi,
   ...incidentsApi,
+  ...governanceApi,
   ...assetsApi,
   ...vulnerabilityApi,
   ...aiTriageApi,

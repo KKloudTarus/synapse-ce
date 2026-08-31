@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense, type FC } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
+  Activity,
   ArrowLeft,
   ChevronRight,
   LayoutGrid01,
@@ -34,6 +35,8 @@ import { packageLocationMap, countVulnerabilityFindings, VulnsTab } from './Vuln
 import { LicensesTab } from './LicensesTab'
 import { ComponentsTab } from './ComponentsTab'
 import { ReconTab } from './ReconTab'
+import { DetectionsTab } from './DetectionsTab'
+import { DataGovernanceTab } from './DataGovernanceTab'
 import { EvidenceTab } from './EvidenceTab'
 import { SettingsTab } from './SettingsTab'
 import { JudgmentReviewTab } from './ReviewsTab'
@@ -53,8 +56,10 @@ export type Tab =
   | 'threats'
   | 'recon'
   | 'agent'
+  | 'detections'
   | 'reviews'
   | 'evidence'
+  | 'data-governance'
   | 'settings'
 
 export interface SubTabDefinition {
@@ -107,6 +112,12 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
     ],
   },
   {
+    id: 'runtime',
+    label: 'Runtime',
+    icon: Activity,
+    sub: [{ id: 'detections', label: 'Detections' }],
+  },
+  {
     id: 'governance',
     label: 'Governance',
     icon: ShieldTick,
@@ -114,6 +125,7 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'evidence', label: 'Evidence' },
       { id: 'reviews', label: 'Awaiting Review' },
       { id: 'quality', label: 'Code Quality' },
+      { id: 'data-governance', label: 'Data governance' },
     ],
   },
   {
@@ -460,6 +472,8 @@ export function EngagementDetail() {
         {tab === 'quality' && <CodeQualityTab engagementId={id} />}
         {tab === 'recon' && <ReconTab eng={eng} onGoTab={setTab} />}
         {tab === 'agent' && <AgentTab engagementId={id} />}
+        {tab === 'detections' && <DetectionsTab key={id} engagementId={id} />}
+        {tab === 'data-governance' && <DataGovernanceTab key={id} engagementId={id} />}
         {tab === 'reviews' && <JudgmentReviewTab key={id} engagementId={id} />}
         {tab === 'evidence' && <EvidenceTab key={id} engagementId={id} />}
         {tab === 'settings' && <SettingsTab eng={eng} onUpdated={setEng} />}
