@@ -46,8 +46,12 @@ export function RadarChart({
   const polygonPath = dataPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x},${p.y}`).join(' ') + ' Z'
 
   return (
-    <div className="flex w-full flex-col items-center justify-around gap-4 sm:flex-row sm:gap-6">
-      <figure className="relative shrink-0 size-52 sm:size-56" aria-label={`${title}: ${total} total`}>
+    // @container so the figure+legend go side-by-side based on THIS card's width, not the viewport —
+    // in a 2-up dashboard grid a card can be ~400px while the viewport is >640px, which previously made
+    // the row layout overflow the card (the percent column spilled past the edge). Below @md it stacks.
+    <div className="@container w-full">
+      <div className="flex flex-col items-center justify-center gap-4 @md:flex-row @md:justify-around @md:gap-6">
+      <figure className="relative shrink-0 size-52 @md:size-56" aria-label={`${title}: ${total} total`}>
         <svg viewBox={`0 0 ${size} ${size}`} role="img" className="size-full select-none overflow-visible">
           <title>{title}</title>
           <defs>
@@ -150,12 +154,12 @@ export function RadarChart({
       </figure>
 
       {/* Legend list matching Untitled UI */}
-      <ul className="w-full sm:w-auto sm:min-w-[190px] sm:max-w-[220px] space-y-2">
+      <ul className="w-full min-w-0 space-y-2 @md:w-auto @md:min-w-[190px] @md:max-w-[240px]">
         {data.map((item) => (
           <li
             key={item.key}
             className={cn(
-              'grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem] items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors cursor-pointer',
+              'grid grid-cols-[minmax(0,1fr)_2.25rem_2.5rem] items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors cursor-pointer',
               hoverKey === item.key ? 'bg-secondary' : 'hover:bg-secondary',
             )}
             onMouseEnter={() => setHoverKey(item.key)}
@@ -171,6 +175,7 @@ export function RadarChart({
         ))}
         {total === 0 && <li className="text-xs text-tertiary">No posture data available.</li>}
       </ul>
+      </div>
     </div>
   )
 }
@@ -180,8 +185,10 @@ export function DonutChart({ title, centerLabel, data }: { title: string; center
   const CIRCUMFERENCE_INNER = 2 * Math.PI * 44
   let offset = 0
   return (
-    <div className="flex w-full flex-col items-center justify-around gap-4 sm:flex-row sm:gap-6">
-      <figure className="relative shrink-0 size-44 sm:size-48" aria-label={`${title}: ${total} total`}>
+    // @container: side-by-side only when this card is wide enough (see RadarChart), else stack.
+    <div className="@container w-full">
+      <div className="flex flex-col items-center justify-center gap-4 @md:flex-row @md:justify-around @md:gap-6">
+      <figure className="relative shrink-0 size-44 @md:size-48" aria-label={`${title}: ${total} total`}>
         <svg viewBox="0 0 120 120" role="img" className="size-full" aria-label={`${title} donut chart`}>
           <title>{title}</title>
           <circle cx="60" cy="60" r="44" fill="none" stroke="var(--color-border-secondary)" strokeWidth="12" />
@@ -217,9 +224,9 @@ export function DonutChart({ title, centerLabel, data }: { title: string; center
           </text>
         </svg>
       </figure>
-      <ul className="w-full sm:w-auto sm:min-w-[190px] sm:max-w-[220px] space-y-2">
+      <ul className="w-full min-w-0 space-y-2 @md:w-auto @md:min-w-[190px] @md:max-w-[240px]">
         {data.map((item) => (
-          <li key={item.key} className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem] items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors hover:bg-secondary">
+          <li key={item.key} className="grid grid-cols-[minmax(0,1fr)_2.25rem_2.5rem] items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors hover:bg-secondary">
             <span className="flex min-w-0 items-center gap-2.5 font-medium text-secondary">
               <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
               <span className="truncate">{item.label}</span>
@@ -230,6 +237,7 @@ export function DonutChart({ title, centerLabel, data }: { title: string; center
         ))}
         {total === 0 && <li className="text-xs text-tertiary">No data available.</li>}
       </ul>
+      </div>
     </div>
   )
 }

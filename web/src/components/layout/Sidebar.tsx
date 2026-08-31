@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Cube01,
+  LogOut01,
   Plus,
   Server01,
   Settings01,
@@ -19,6 +20,7 @@ import {
 import { useEffect, useRef, useState, type ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import logo from '../../assets/logo.png'
+import { useOptionalAuth } from '../../auth/AuthContext'
 import { cn } from '../ui'
 
 type IconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
@@ -92,6 +94,17 @@ function storageSet(key: string, value: string) {
 }
 
 function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
+  const auth = useOptionalAuth()
+  const [signingOut, setSigningOut] = useState(false)
+  async function onSignOut() {
+    if (!auth) return
+    setSigningOut(true)
+    try {
+      await auth.logout()
+    } finally {
+      setSigningOut(false)
+    }
+  }
   const location = useLocation()
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>(() => ({
     '/code-quality': storageGet('synapse-nav-expanded-/code-quality') !== 'false',
@@ -266,6 +279,22 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
 
       <div className="shrink-0 border-t border-secondary p-3">
         <div className="space-y-0.5">{renderItems([SETTINGS])}</div>
+        {auth && (
+        <button
+          type="button"
+          onClick={onSignOut}
+          disabled={signingOut}
+          title={collapsed ? 'Sign out' : undefined}
+          aria-label={collapsed ? 'Sign out' : undefined}
+          className={cn(
+            'group mt-0.5 flex w-full items-center rounded-lg py-2 text-sm font-medium text-secondary transition-colors hover:bg-primary_hover hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60',
+            collapsed ? 'justify-center px-0' : 'gap-3 px-3',
+          )}
+        >
+          <LogOut01 className="size-5 shrink-0 text-tertiary group-hover:text-primary" aria-hidden="true" />
+          <span className={cn('truncate', collapsed ? 'sr-only' : 'inline')}>{signingOut ? 'Signing out…' : 'Sign out'}</span>
+        </button>
+        )}
       </div>
     </>
   )

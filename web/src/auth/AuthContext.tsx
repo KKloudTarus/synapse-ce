@@ -34,6 +34,12 @@ export function useAuth(): AuthState {
   return v
 }
 
+// Non-throwing accessor for layout chrome (e.g. the sidebar) that renders inside AuthProvider in the
+// app but may be mounted in isolation by unit tests. Returns null when there is no provider.
+export function useOptionalAuth(): AuthState | null {
+  return useContext(Ctx)
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>('connecting')
   const [aup, setAup] = useState<AupStatus | null>(null)
