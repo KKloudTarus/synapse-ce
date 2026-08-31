@@ -308,7 +308,8 @@ func main() {
 		ports.TelemetryReferenceResolver
 		ports.TelemetryBatchAccountingReader
 		ports.CoverageGapReader
-	} // A3 telemetry transport sequencing state and #610 causal-reference resolver
+		ports.TelemetryAssetBindingStore
+	} // A3 telemetry transport sequencing state, #610 causal-reference resolver, agent→asset binding
 	var sensorStateStore interface {
 		ports.SensorStateAuditStore
 		ports.CoverageSensorStateReader
@@ -1924,6 +1925,12 @@ func main() {
 			if hierr != nil {
 				log.Error("host inventory ingest init failed", "err", hierr)
 				os.Exit(1)
+			}
+			// A3 binding: a host-inventory sync establishes the reporting agent's canonical telemetry
+			// asset binding, without which telemetry ingest (and therefore the detection pipeline)
+			// cannot resolve the agent's asset. The transport store owns that binding.
+			if telemetryTransportStore != nil {
+				hiSvc.SetTelemetryBinder(telemetryTransportStore)
 			}
 			router.SetFleetHostInventory(hiSvc)
 			log.Info("fleet host inventory ingest ENABLED (VM agents persist host inventories into the asset model)")

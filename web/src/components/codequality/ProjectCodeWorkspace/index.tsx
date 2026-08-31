@@ -564,10 +564,15 @@ function SourcePane({
           {visible.map((item) => {
             const line = source.lines[item.index]
             const lineFindings = byLine[line.number] ?? []
+            const hasFinding = lineFindings.length > 0
             const isHighlightLine =
               !!selectedFinding &&
               line.number >= selectedFinding.location.startLine &&
               line.number <= selectedFinding.location.endLine
+            // A line that carries a finding but isn't the currently-selected one still needs to stand out —
+            // otherwise a vulnerable line reads identically to a clean one (only a tiny gutter marker set it
+            // apart). Tint the whole row + a red rail, the way SonarQube/GitHub flag an issue line.
+            const isUnselectedFindingLine = hasFinding && !isHighlightLine
             const isCardLine = !!selectedFinding && line.number === selectedFinding.location.endLine
 
             return (
@@ -579,9 +584,11 @@ function SourcePane({
                   'group absolute left-0 top-0 flex flex-col w-full border-b border-secondary/15 transition-colors',
                   isHighlightLine
                     ? 'bg-brand-primary/10 border-l-2 border-l-brand-solid'
-                    : 'hover:bg-secondary/40',
-                  line.change === 'addition' && !isHighlightLine && 'bg-success-primary/5',
-                  line.duplicated && !isHighlightLine && 'bg-warning-primary/5',
+                    : isUnselectedFindingLine
+                      ? 'bg-error-primary/[0.06] border-l-2 border-l-error-primary/60 hover:bg-error-primary/10'
+                      : 'hover:bg-secondary/40',
+                  line.change === 'addition' && !isHighlightLine && !isUnselectedFindingLine && 'bg-success-primary/5',
+                  line.duplicated && !isHighlightLine && !isUnselectedFindingLine && 'bg-warning-primary/5',
                 )}
                 style={{ transform: `translateY(${item.start}px)` }}
               >
@@ -593,6 +600,7 @@ function SourcePane({
                     className={cn(
                       'sticky left-0 z-10 w-12 shrink-0 select-none border-r border-secondary bg-primary px-2 text-right leading-6.5 tabular-nums text-tertiary group-hover:text-primary transition-colors',
                       isHighlightLine && 'bg-brand-primary/20 text-brand-secondary font-bold',
+                      isUnselectedFindingLine && 'bg-error-primary/10 text-error-primary font-semibold',
                       line.change === 'addition' && 'border-l-2 border-l-success-primary',
                     )}
                   >
@@ -605,6 +613,7 @@ function SourcePane({
                     className={cn(
                       'sticky left-12 z-10 flex w-7 shrink-0 items-center justify-center border-r border-secondary bg-primary',
                       isHighlightLine && 'bg-brand-primary/20',
+                      isUnselectedFindingLine && 'bg-error-primary/10',
                     )}
                   >
                     {lineFindings.length > 0 && (
