@@ -1,4 +1,6 @@
 import type {
+  AgentDetectionRecord,
+  CorrelateResult,
   Incident,
   IncidentComment,
   IncidentDisposition,
@@ -166,4 +168,46 @@ export const incidentsApi = {
     const res = await req(`/fleet/assets/${encodeURIComponent(assetId)}/timeline${qs ? `?${qs}` : ''}`)
     return Array.isArray(res?.entries) ? res.entries.map(mapTimelineEntry) : []
   },
+
+  // Agent security detections for an engagement (GET /engagements/{id}/detections). detection.Record is
+  // untagged PascalCase (its evidence events are field-RBAC redacted server-side); field_scope reports
+  // how much the caller's role is allowed to see. Answers "does agent security detection show in the UI".
+  listEngagementDetections: async (engagementId: string): Promise<{ detections: AgentDetectionRecord[]; fieldScope: string }> => {
+    const res = await req(`/engagements/${encodeURIComponent(engagementId)}/detections`)
+    return {
+      detections: Array.isArray(res?.detections) ? res.detections.map(mapDetectionRecord) : [],
+      fieldScope: res?.field_scope ?? '',
+    }
+  },
+
+  // Correlate an engagement's sealed detections into incidents (POST /fleet/engagements/{id}/correlate).
+  correlateEngagement: async (engagementId: string): Promise<CorrelateResult> => {
+    const res = await req(`/fleet/engagements/${encodeURIComponent(engagementId)}/correlate`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    return {
+      created: Array.isArray(res?.created) ? res.created.map(mapIncident) : [],
+      reassessed: res?.reassessed ?? 0,
+      reassessFailed: res?.reassess_failed ?? 0,
+    }
+  },
+}
+
+function mapDetectionRecord(raw: any): AgentDetectionRecord {
+  const d = raw?.Detection ?? {}
+  return {
+    id: raw?.ID ?? '',
+    assetId: raw?.AssetID ?? '',
+    agentId: raw?.AgentID ?? '',
+    recordedAt: raw?.RecordedAt ?? '',
+    ruleId: d?.RuleID ?? '',
+    ruleVersion: d?.RuleVersion ?? 0,
+    class: (d?.Class ?? '') as AgentDetectionRecord['class'],
+    severity: (d?.Severity ?? 'unknown') as Severity,
+    evidenceCount: Array.isArray(d?.Evidence) ? d.Evidence.length : 0,
+    truncated: Boolean(d?.Truncated),
+    observedCount: d?.ObservedCount ?? 0,
+    observed: d?.Observed ?? '',
+  }
 }

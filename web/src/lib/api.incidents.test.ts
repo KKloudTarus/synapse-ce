@@ -96,6 +96,56 @@ describe('incidents API mapping', () => {
     expect(JSON.parse((fetchSpy.mock.calls[3][1] as RequestInit).body as string)).toEqual({ owner: 'analyst-2' })
   })
 
+  it('maps PascalCase agent detection records + correlate result', async () => {
+    respond({
+      detections: [
+        {
+          ID: 'det-1',
+          AssetID: 'asset-1',
+          AgentID: 'agent-1',
+          RecordedAt: '2026-08-30T00:00:00Z',
+          Detection: {
+            RuleID: 'det.suspicious_dns_beacon',
+            RuleVersion: 2,
+            Class: 'network',
+            Severity: 'high',
+            Evidence: [{}, {}, {}],
+            Truncated: true,
+            ObservedCount: 12,
+            Observed: '2026-08-29T23:59:00Z',
+          },
+        },
+      ],
+      field_scope: 'full',
+    })
+
+    const res = await api.listEngagementDetections('eng-1')
+    expect(fetchSpy).toHaveBeenCalledWith('/api/v1/engagements/eng-1/detections', expect.any(Object))
+    expect(res.fieldScope).toBe('full')
+    expect(res.detections[0]).toEqual({
+      id: 'det-1',
+      assetId: 'asset-1',
+      agentId: 'agent-1',
+      recordedAt: '2026-08-30T00:00:00Z',
+      ruleId: 'det.suspicious_dns_beacon',
+      ruleVersion: 2,
+      class: 'network',
+      severity: 'high',
+      evidenceCount: 3,
+      truncated: true,
+      observedCount: 12,
+      observed: '2026-08-29T23:59:00Z',
+    })
+
+    respond({ created: [{ ID: 'inc-1', Title: 'x' }], reassessed: 2, reassess_failed: 1 })
+    const c = await api.correlateEngagement('eng-1')
+    expect(fetchSpy.mock.calls[1][0]).toBe('/api/v1/fleet/engagements/eng-1/correlate')
+    expect(c.created).toHaveLength(1)
+    expect(c.created[0].id).toBe('inc-1')
+    expect(c.reassessed).toBe(2)
+    expect(c.reassessFailed).toBe(1)
+  })
+
   it('maps the PascalCase State Timeline entries', async () => {
     respond({
       entries: [
