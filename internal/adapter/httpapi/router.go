@@ -89,6 +89,7 @@ type Router struct {
 	desiredCapabilities    desiredCapabilityService  // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
 	legalHolds             legalHoldService          // optional; nil ⇒ the legal-hold routes are not registered (#635)
 	privacyExport          privacyExporter           // optional; nil ⇒ the data-export route is not registered (#635)
+	dataPurge              dataPurger                // optional; nil ⇒ the on-demand data-deletion route is not registered (#635)
 	endpointTimeline       endpointTimelineReader    // optional; nil ⇒ the State-Timeline read route is not registered (#594 B7)
 	retroHunter            retroHunter               // optional; nil ⇒ the retro-hunt route is not registered (#594 B7)
 	sarif                  sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
@@ -457,6 +458,12 @@ func (rt *Router) routes() *http.ServeMux {
 			// Data-subject / DPO export (#635): the governance data the control plane holds for one
 			// engagement (detections + active legal holds). Read-only + audited; a governance read → PermReview.
 			mux.HandleFunc("GET /api/v1/fleet/engagements/{id}/privacy-export", rt.authz(userdom.PermReview, rt.exportEngagementData))
+		}
+		if rt.dataPurge != nil {
+			// On-demand data deletion / right-to-erasure (#635): purge ALL of an engagement's detection
+			// projection now (legal-hold-checked, audited, chain preserved). Destructive + a governance
+			// decision → PermReview; a reason is required. Actor + tenant are server-side.
+			mux.HandleFunc("DELETE /api/v1/fleet/engagements/{id}/detection-data", rt.authz(userdom.PermReview, rt.purgeEngagementData))
 		}
 		if rt.desiredCapabilities != nil {
 			// Desired-vs-observed (#633): declare the capabilities an asset SHOULD have (PermOperate),
