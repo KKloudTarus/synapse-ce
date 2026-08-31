@@ -88,7 +88,10 @@ export function IncidentDetail() {
 
 function BackLink() {
   return (
-    <Link to="/fleet/incidents" className="inline-flex items-center gap-1.5 text-sm text-tertiary hover:text-primary">
+    <Link
+      to="/fleet/incidents"
+      className="inline-flex items-center gap-1.5 rounded-md text-sm text-tertiary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+    >
       <ArrowLeft className="size-4" /> Incidents
     </Link>
   )

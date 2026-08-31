@@ -109,7 +109,7 @@ export function Incidents() {
                   onClick={() => setFilter(f.value)}
                   className={cn(
                     'rounded-md px-2 py-1 text-xs font-semibold transition-colors',
-                    filter === f.value ? 'bg-brand-primary text-brand-secondary' : 'text-tertiary hover:bg-secondary',
+                    filter === f.value ? 'bg-brand-solid text-primary_on-brand' : 'text-tertiary hover:bg-secondary',
                   )}
                 >
                   {f.label}
@@ -126,6 +126,7 @@ export function Incidents() {
               columns={COLUMNS}
               rowKey={(r) => r.id}
               onRowClick={(r) => navigate(`/fleet/incidents/${encodeURIComponent(r.id)}`)}
+              rowAriaLabel={(r) => `Open incident ${r.title || r.id}`}
               maxHeightClass="max-h-[70vh]"
               tableMinWidthClass="min-w-[72rem]"
             />

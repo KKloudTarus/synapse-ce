@@ -119,7 +119,12 @@ export function ScoreBar({
         <span className="font-mono text-sm font-semibold tabular-nums text-primary">{pct}</span>
       </div>
       <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-        <div className={cn('h-full rounded-full transition-all', barColor)} style={{ width: `${pct}%` }} />
+        {/* Grow via scaleX (a transform), not width, so the animation stays on the compositor and
+            honours prefers-reduced-motion like the rest of the app's bars. */}
+        <div
+          className={cn('h-full w-full origin-left rounded-full transition-transform', barColor)}
+          style={{ transform: `scaleX(${pct / 100})` }}
+        />
       </div>
     </div>
   )

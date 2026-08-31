@@ -22,6 +22,7 @@ export function VirtualTable<T>({
   rowClassName,
   totalItems,
   onRowClick,
+  rowAriaLabel,
 }: {
   columns: Column<T>[]
   items: T[]
@@ -34,6 +35,8 @@ export function VirtualTable<T>({
   totalItems?: number
   /** When set, each row is clickable (and keyboard-activatable) and invokes this with the row item. */
   onRowClick?: (item: T) => void
+  /** Accessible label for a clickable row (screen-reader cue that it activates). Used only with onRowClick. */
+  rowAriaLabel?: (item: T) => string
 }) {
   const parentRef = useRef<HTMLDivElement>(null)
   const v = useVirtualizer({
@@ -96,6 +99,7 @@ export function VirtualTable<T>({
                 {...(onRowClick
                   ? {
                       tabIndex: 0,
+                      'aria-label': rowAriaLabel?.(item),
                       onClick: () => onRowClick(item),
                       onKeyDown: (e: KeyboardEvent) => {
                         if (e.key === 'Enter' || e.key === ' ') {
