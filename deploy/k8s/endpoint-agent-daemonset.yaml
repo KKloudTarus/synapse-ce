@@ -1,0 +1,77 @@
+# Endpoint fleet agent as a DaemonSet — one synapse-agent per node (#405/#410, #633 fleet automation).
+#
+# Default posture = INVENTORY ONLY: host facts + OS-package inventory + the continuous inventory sweep
+# (A8, #629), shipped over the signed fleet transport. This needs only a READ-ONLY mount of the host
+# root; it is non-root, no privilege escalation, all capabilities dropped. eBPF runtime detection (#422)
+# is OPT-IN and requires elevated privileges — see the commented block; leave it off for inventory-only.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: synapse-endpoint-agent
+  namespace: synapse
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: synapse-endpoint-agent
+  namespace: synapse
+  labels: { app.kubernetes.io/name: synapse-endpoint-agent }
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: synapse-endpoint-agent }
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: synapse-endpoint-agent }
+    spec:
+      serviceAccountName: synapse-endpoint-agent
+      automountServiceAccountToken: false # the agent authenticates to the fleet API with its own key, not the SA token
+      # Schedule on every node, including control-plane/tainted nodes, so inventory coverage is complete.
+      tolerations:
+        - operator: Exists
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: agent
+          image: ghcr.io/kkloudtarus/synapse-agent:latest # pin to a digest in production
+          args: ["-root", "/host", "-name", "$(NODE_NAME)"]
+          env:
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            - name: SYNAPSE_FLEET_URL
+              value: "https://REPLACE-with-control-plane"
+            - name: SYNAPSE_FLEET_ENROL_TOKEN_FILE
+              value: /var/run/synapse/enrol-token
+            - name: SYNAPSE_AGENT_STATE_DIR
+              value: /var/lib/synapse-agent
+            - name: SYNAPSE_INVENTORY_SWEEP_ENABLED
+              value: "true" # A8 continuous inventory (default on)
+            # eBPF runtime detection (#422) is OFF here; enabling it needs the privileged block below.
+            - name: SYNAPSE_DETECT_CLASSES
+              value: ""
+          volumeMounts:
+            - { name: host-root, mountPath: /host, readOnly: true } # inventory reads the host FS read-only
+            - { name: state, mountPath: /var/lib/synapse-agent }
+            - { name: enrol-token, mountPath: /var/run/synapse, readOnly: true }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+      volumes:
+        - name: host-root
+          hostPath: { path: /, type: Directory }
+        - name: state
+          hostPath: { path: /var/lib/synapse-agent, type: DirectoryOrCreate }
+        - name: enrol-token
+          secret: { secretName: synapse-endpoint-agent-enrol, optional: true }
+# --- OPT-IN: eBPF runtime detection (#422, Linux+root) ---------------------------------------------------
+# To ship live process/network/file/privilege detections, the container additionally needs (replace the
+# container securityContext above): privileged NOT required, but hostPID: true at pod level, and
+# `capabilities: { add: ["BPF","PERFMON","NET_ADMIN"] }`, runAsUser: 0, plus a bpf/tracefs mount. Keep it
+# OFF unless the detection engine is deliberately enabled — inventory works fully unprivileged.
