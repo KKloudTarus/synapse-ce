@@ -28,6 +28,7 @@ vi.mock('./lib/api', () => ({
 vi.mock('./auth/AuthContext', () => ({
   AuthProvider: ({ children }: any) => children,
   useAuth: () => ({ phase: 'ready', logout: vi.fn() }),
+  useOptionalAuth: () => ({ phase: 'ready', logout: vi.fn() }),
 }))
 
 describe('App Routing - Rules', () => {
