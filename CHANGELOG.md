@@ -9,6 +9,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Project dependency graph and subtree export.** Project analyses now expose a bounded, deterministic
+  dependency projection from the stored SBOM with direct/transitive relationships, reverse paths,
+  vulnerability matches, license policy risk, and reachability annotations. A new interactive Project
+  view supports tree exploration, package/PURL search, risk filters, vulnerable-path highlighting,
+  package details, and full or selected-subtree CycloneDX export without changing scan or matching logic.
+
 - **Python Tier-2 semantic reachability and interprocedural taint analysis.** An opt-in, source-only
   tree-sitter sidecar now emits bounded semantic facts without importing or executing target Python;
   pure Go resolution proves affected-symbol call paths and precise value flow across assignments,

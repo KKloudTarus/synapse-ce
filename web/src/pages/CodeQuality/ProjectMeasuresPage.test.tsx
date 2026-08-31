@@ -86,7 +86,7 @@ describe('Project Measures route and logic', () => {
     expect(await screen.findByText((_, el) => el?.tagName === 'H3' && /Current Node Metrics/.test(el.textContent || ''))).toBeInTheDocument()
     
     // Tab verification
-    const tabs = ['Overview', 'Issues', 'Security Hotspots', 'Measures', 'Analysis details', 'Activity']
+    const tabs = ['Overview', 'Issues', 'Security Hotspots', 'Dependencies', 'Measures', 'Analysis details', 'Activity']
     for (const tab of tabs) {
       expect(screen.getByRole('link', { name: tab })).toBeInTheDocument()
     }

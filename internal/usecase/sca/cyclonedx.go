@@ -145,7 +145,7 @@ func buildCycloneDX(doc *sbom.SBOM, target string, created time.Time) cdxOutDoc 
 		}
 		return comps[i].Version < comps[j].Version
 	})
-	valid := make(map[string]bool, len(comps)) // component bom-refs, so a dependency edge never dangles
+	refs := make(map[string]string, len(comps)) // domain component ID -> emitted bom-ref
 	for i, c := range comps {
 		ref := cdxBOMRef(c, i)
 		cc := cdxOutComponent{
@@ -166,9 +166,11 @@ func buildCycloneDX(doc *sbom.SBOM, target string, created time.Time) cdxOutDoc 
 			cc.Supplier = &cdxOutOrg{Name: sup}
 		}
 		out.Components = append(out.Components, cc)
-		valid[ref] = true
+		if id := sbom.ComponentID(c.Name, c.Version, c.PURL); id != "" {
+			refs[id] = ref
+		}
 	}
-	out.Dependencies = cdxDependencies(doc.Dependencies, valid)
+	out.Dependencies = cdxDependencies(doc.Dependencies, refs)
 	return out
 }
 
@@ -181,22 +183,23 @@ func cdxBOMRef(c sbom.Component, i int) string {
 	return fmt.Sprintf("synapse:comp:%d:%s", i, hash12(c.Name+"@"+c.Version))
 }
 
-// cdxDependencies projects the stored dependency edges (keyed by PURL) onto CycloneDX dependency entries,
-// dropping any endpoint that has no matching component so a bom-ref never dangles. Deterministic: sorted.
-func cdxDependencies(deps []sbom.Dependency, valid map[string]bool) []cdxOutDependency {
+// cdxDependencies maps domain component IDs onto emitted CycloneDX bom-refs, including synthesized refs
+// for components without a PURL. Unknown endpoints are dropped so a bom-ref never dangles. Deterministic: sorted.
+func cdxDependencies(deps []sbom.Dependency, refs map[string]string) []cdxOutDependency {
 	var out []cdxOutDependency
 	for _, d := range deps {
-		if !valid[d.Ref] {
+		ref, exists := refs[d.Ref]
+		if !exists {
 			continue
 		}
 		var on []string
 		for _, t := range d.DependsOn {
-			if valid[t] {
-				on = append(on, t)
+			if target, exists := refs[t]; exists {
+				on = append(on, target)
 			}
 		}
 		sort.Strings(on)
-		out = append(out, cdxOutDependency{Ref: d.Ref, DependsOn: on})
+		out = append(out, cdxOutDependency{Ref: ref, DependsOn: on})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Ref < out[j].Ref })
 	return out

@@ -95,6 +95,24 @@ func TestCDXDanglingDependencyEdgeDropped(t *testing.T) {
 	}
 }
 
+func TestCDXDependenciesUseSynthesizedRefsForComponentsWithoutPURL(t *testing.T) {
+	doc := &sbom.SBOM{
+		Components:   []sbom.Component{{Name: "root", Version: "1"}, {Name: "leaf", Version: "2"}},
+		Dependencies: []sbom.Dependency{{Ref: "root@1", DependsOn: []string{"leaf@2"}}},
+	}
+	d := buildCycloneDX(doc, "t", time.Unix(0, 0).UTC())
+	if len(d.Components) != 2 || len(d.Dependencies) != 1 || len(d.Dependencies[0].DependsOn) != 1 {
+		t.Fatalf("non-PURL dependency edge was dropped: components=%+v dependencies=%+v", d.Components, d.Dependencies)
+	}
+	refs := map[string]string{}
+	for _, component := range d.Components {
+		refs[component.Name] = component.BOMRef
+	}
+	if d.Dependencies[0].Ref != refs["root"] || d.Dependencies[0].DependsOn[0] != refs["leaf"] {
+		t.Fatalf("dependency refs = %+v, component refs = %+v", d.Dependencies[0], refs)
+	}
+}
+
 func TestCDXEvidenceScopeAndProperties(t *testing.T) {
 	doc := &sbom.SBOM{Components: []sbom.Component{
 		{Name: "prod", Version: "1", PURL: "pkg:npm/prod@1", Scope: sbom.ScopeProduction, Location: "package.json", Reachability: sbom.ReachabilityReachable},

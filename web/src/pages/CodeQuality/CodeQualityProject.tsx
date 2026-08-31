@@ -285,6 +285,7 @@ export function CodeQualityProject() {
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/hotspots`}>Security Hotspots</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/issues`}>Issues</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/code`}>Code</ProjectNavLink>
+        <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/dependencies`}>Dependencies</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/measures`}>Measures</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/analysis`}>Analysis details</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/activity`}>Activity</ProjectNavLink>

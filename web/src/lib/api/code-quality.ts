@@ -26,6 +26,7 @@ import type {
   ProjectCodeFileView,
   ProjectCodeRevision,
   ProjectCodeView,
+  ProjectDependencyGraph,
   ProjectIssue,
   QualityGate,
   QualityProfile,
@@ -35,7 +36,7 @@ import type {
 } from '../types'
 import { mapProjectOverviewResponse, type ProjectOverview } from '../projectOverview'
 import { mapProjectMeasureResponse, type MeasuresQuery, type ProjectMeasureResponse } from '../projectMeasures'
-import { ApiError, getToken, getOnUnauthorized, req } from './client'
+import { ApiError, blobDownload, getToken, getOnUnauthorized, req } from './client'
 import { mapScanJob, mapCodeQualityReport } from './scan'
 
 function mapQualityProfile(r: any): QualityProfile {
@@ -101,6 +102,47 @@ function mapProjectAnalysis(r: any): ProjectAnalysis {
     delta: r.delta ? { issues: counts(r.delta.issues), measures: r.delta.measures ?? {}, ratings: r.delta.ratings ?? {} } : null, measures: r.measures ?? {},
     coverage: r.coverage ? { coveredLines: r.coverage.covered_lines ?? 0, totalLines: r.coverage.total_lines ?? 0 } : null,
     duplication: { blocks: [], duplicatedLines: r.duplication?.duplicated_lines ?? 0, totalLines: r.duplication?.total_lines ?? 0, files: r.duplication?.files ?? 0 }, rating: rating(r.rating),
+  }
+}
+
+function mapProjectDependencyGraph(r: any): ProjectDependencyGraph {
+  return {
+    analysisId: r?.analysis_id ?? '',
+    roots: r?.roots ?? [],
+    nodes: (r?.nodes ?? []).map((node: any) => ({
+      id: node.id ?? '',
+      name: node.name ?? '',
+      version: node.version ?? '',
+      purl: node.purl ?? '',
+      scope: node.scope ?? 'unknown',
+      reachability: node.reachability ?? '',
+      direct: node.direct ?? false,
+      depth: node.depth ?? -1,
+      licenses: (node.licenses ?? []).map((license: any) => ({
+        id: license.id ?? '',
+        name: license.name ?? '',
+        category: license.category ?? 'unknown',
+      })),
+      licenseRisk: node.license_risk ?? false,
+      licenseVerdict: node.license_verdict ?? '',
+      vulnerabilities: (node.vulnerabilities ?? []).map((vulnerability: any) => ({
+        id: vulnerability.id ?? '',
+        source: vulnerability.source ?? '',
+        severity: vulnerability.severity ?? 'unknown',
+        fixedVersion: vulnerability.fixed_version ?? '',
+      })),
+      vulnerabilityCount: node.vulnerability_count ?? 0,
+      worstSeverity: node.worst_severity ?? '',
+    })),
+    edges: (r?.edges ?? []).map((edge: any) => ({ from: edge.from ?? '', to: edge.to ?? '' })),
+    summary: {
+      components: r?.summary?.components ?? 0,
+      direct: r?.summary?.direct ?? 0,
+      transitive: r?.summary?.transitive ?? 0,
+      vulnerable: r?.summary?.vulnerable ?? 0,
+      licenseRisk: r?.summary?.license_risk ?? 0,
+      edges: r?.summary?.edges ?? 0,
+    },
   }
 }
 
@@ -405,6 +447,17 @@ export const codeQualityApi = {
 
   projectOverview: async (key: string): Promise<ProjectOverview> =>
     mapProjectOverviewResponse(await req(`/projects/${encodeURIComponent(key)}/overview`)),
+
+  projectDependencyGraph: async (key: string, signal?: AbortSignal): Promise<ProjectDependencyGraph> =>
+    mapProjectDependencyGraph(await req(`/projects/${encodeURIComponent(key)}/dependency-graph`, { signal })),
+
+  downloadProjectDependencySubtree: async (key: string, root = ''): Promise<void> => {
+    const query = root ? `?${new URLSearchParams({ root })}` : ''
+    await blobDownload(
+      `/api/v1/projects/${encodeURIComponent(key)}/dependency-graph/export${query}`,
+      `${key}-dependencies${root ? '-subtree' : ''}.cdx.json`,
+    )
+  },
 
   listProjectCodeFiles: async (projectKey: string, analysisId: string, signal?: AbortSignal): Promise<ProjectCodeFileIndex> =>
     mapProjectCodeFileIndex(await req(`/projects/${encodeURIComponent(projectKey)}/analyses/${encodeURIComponent(analysisId)}/code/files`, { signal })),

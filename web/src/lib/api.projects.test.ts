@@ -70,6 +70,33 @@ describe('Projects API', () => {
     })
   })
 
+  it('maps the project dependency graph projection', async () => {
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
+      analysis_id: 'analysis-42',
+      roots: ['pkg:npm/app@1.0.0'],
+      nodes: [{
+        id: 'pkg:npm/log4j@2.14.1', name: 'log4j', version: '2.14.1', purl: 'pkg:npm/log4j@2.14.1',
+        scope: 'required', reachability: 'reachable', direct: false, depth: 2,
+        licenses: [{ id: 'Apache-2.0', category: 'permissive' }], license_risk: false, license_verdict: 'allow',
+        vulnerabilities: [{ id: 'CVE-2021-44228', source: 'nvd', severity: 'critical', fixed_version: '2.17.1' }],
+        vulnerability_count: 1, worst_severity: 'critical',
+      }],
+      edges: [{ from: 'pkg:npm/app@1.0.0', to: 'pkg:npm/log4j@2.14.1' }],
+      summary: { components: 2, direct: 1, transitive: 1, vulnerable: 1, license_risk: 0, edges: 1 },
+    }) } as Response)
+
+    const graph = await api.projectDependencyGraph('a b')
+    expect(fetchSpy).toHaveBeenCalledWith('/api/v1/projects/a%20b/dependency-graph', expect.any(Object))
+    expect(graph).toMatchObject({
+      analysisId: 'analysis-42',
+      nodes: [{
+        name: 'log4j', direct: false, licenseVerdict: 'allow', vulnerabilityCount: 1, worstSeverity: 'critical',
+        vulnerabilities: [{ id: 'CVE-2021-44228', fixedVersion: '2.17.1' }],
+      }],
+      summary: { components: 2, transitive: 1, vulnerable: 1 },
+    })
+  })
+
   it('preserves not-analyzed overview nulls', () => {
     const overview = mapProjectOverviewResponse(overviewNotAnalyzedWire())
     expect(overview).toMatchObject({
