@@ -129,6 +129,7 @@ import (
 	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
 	legalholduc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/legalholduc"
+	privacyexport "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacyexport"
 	privacypolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacypolicy"
 	retrohunt "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/retrohunt"
 	riskscorebridge "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscorebridge"
@@ -2009,6 +2010,15 @@ func main() {
 				detectSvc.SetLegalHoldChecker(legalHoldSvc)
 				router.SetLegalHolds(legalHoldSvc)
 				log.Info("legal holds ENABLED (#635): a held engagement's retention-bounded data is preserved until released")
+				// Data-subject / DPO export (#635): a read-only, audited bundle of an engagement's detections
+				// + active legal holds.
+				if exportSvc, xerr := privacyexport.NewService(detectionRecordStore, legalHoldSvc, auditLog, func() time.Time { return clock.Now().UTC() }); xerr != nil {
+					log.Error("privacy data-export service init failed", "err", xerr)
+					os.Exit(1)
+				} else {
+					router.SetPrivacyExport(exportSvc)
+					log.Info("privacy data-export ENABLED (#635): GET /api/v1/fleet/engagements/{id}/privacy-export")
+				}
 			}
 			tenantStore, ok := repo.(ports.DetectionReconciliationTenantStore)
 			if !ok {

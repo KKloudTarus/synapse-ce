@@ -88,6 +88,7 @@ type Router struct {
 	processLearner         processLearner            // optional; nil ⇒ reported processes are not folded into the behavior baseline (#594 D)
 	desiredCapabilities    desiredCapabilityService  // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
 	legalHolds             legalHoldService          // optional; nil ⇒ the legal-hold routes are not registered (#635)
+	privacyExport          privacyExporter           // optional; nil ⇒ the data-export route is not registered (#635)
 	endpointTimeline       endpointTimelineReader    // optional; nil ⇒ the State-Timeline read route is not registered (#594 B7)
 	retroHunter            retroHunter               // optional; nil ⇒ the retro-hunt route is not registered (#594 B7)
 	sarif                  sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
@@ -451,6 +452,11 @@ func (rt *Router) routes() *http.ServeMux {
 			mux.HandleFunc("PUT /api/v1/fleet/engagements/{id}/legal-hold", rt.authz(userdom.PermReview, rt.placeLegalHold))
 			mux.HandleFunc("DELETE /api/v1/fleet/engagements/{id}/legal-hold", rt.authz(userdom.PermReview, rt.releaseLegalHold))
 			mux.HandleFunc("GET /api/v1/fleet/legal-holds", rt.authz(userdom.PermView, rt.listLegalHolds))
+		}
+		if rt.privacyExport != nil {
+			// Data-subject / DPO export (#635): the governance data the control plane holds for one
+			// engagement (detections + active legal holds). Read-only + audited; a governance read → PermReview.
+			mux.HandleFunc("GET /api/v1/fleet/engagements/{id}/privacy-export", rt.authz(userdom.PermReview, rt.exportEngagementData))
 		}
 		if rt.desiredCapabilities != nil {
 			// Desired-vs-observed (#633): declare the capabilities an asset SHOULD have (PermOperate),
