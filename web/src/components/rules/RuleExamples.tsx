@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { copyText } from '../../lib/clipboard'
 import { Check, CheckCircle, Copy01, XCircle } from '@untitledui/icons'
 
 interface RuleExamplesProps {
@@ -9,7 +10,7 @@ interface RuleExamplesProps {
 function ExampleCopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = () => {
-    void navigator.clipboard.writeText(text)
+    void copyText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

@@ -1,4 +1,5 @@
 import { Check, Copy01, Package, SearchLg, XClose } from '@untitledui/icons'
+import { copyText } from '../../lib/clipboard'
 import { useState } from 'react'
 import { VirtualTable } from '../../components/synapse/VirtualTable'
 import { Card, EmptyState } from '../../components/ui'
@@ -11,7 +12,7 @@ function CopyPurlButton({ purl }: { purl: string }) {
   function copy(e: React.MouseEvent) {
     e.stopPropagation()
     if (!purl) return
-    navigator.clipboard.writeText(purl)
+    copyText(purl)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

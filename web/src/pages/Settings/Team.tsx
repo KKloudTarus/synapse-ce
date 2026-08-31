@@ -1,4 +1,5 @@
 import { Key01, ShieldTick, UserPlus01 } from '@untitledui/icons'
+import { copyText } from '../../lib/clipboard'
 import { useState } from 'react'
 import { api } from '../../lib/api'
 import type { UserRole } from '../../lib/types'
@@ -79,7 +80,7 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
   async function copyKey() {
     if (!issued) return
     try {
-      await navigator.clipboard.writeText(issued.key)
+      await copyText(issued.key)
       setCopied(true)
       setCopyError(null)
     } catch {

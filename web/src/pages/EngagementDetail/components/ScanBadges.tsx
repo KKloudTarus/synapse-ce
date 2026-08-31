@@ -1,4 +1,5 @@
 import { Check, Copy01, ShieldTick } from '@untitledui/icons'
+import { copyText } from '../../../lib/clipboard'
 import { useState } from 'react'
 import { cn } from '../../../components/ui'
 import { useFetch } from '../../../hooks'
@@ -14,7 +15,7 @@ export function ScopeBadge({ target }: { target: { kind: string; value: string }
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation()
-    navigator.clipboard.writeText(target.value)
+    copyText(target.value)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

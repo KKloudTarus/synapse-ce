@@ -9,6 +9,7 @@ import {
   ShieldTick,
   XClose as X,
 } from '@untitledui/icons'
+import { copyText } from '../../lib/clipboard'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError } from '../../lib/api'
@@ -42,7 +43,7 @@ export function HotspotSidePanel({
 
   function copyLocation(text: string) {
     if (!text) return
-    navigator.clipboard.writeText(text).then(() => {
+    copyText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }).catch(() => {})
