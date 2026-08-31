@@ -25,6 +25,8 @@ const CodeQualityProject = lazy(() => import('./pages/CodeQuality/CodeQualityPro
 const QualityGates = lazy(() => import('./pages/CodeQuality/QualityGates').then(m => ({ default: m.QualityGates })))
 const QualityProfiles = lazy(() => import('./pages/CodeQuality/QualityProfiles').then(m => ({ default: m.QualityProfiles })))
 const FleetCoverage = lazy(() => import('./pages/Fleet/FleetCoverage').then(m => ({ default: m.FleetCoverage })))
+const Incidents = lazy(() => import('./pages/Fleet/Incidents').then(m => ({ default: m.Incidents })))
+const IncidentDetail = lazy(() => import('./pages/Fleet/IncidentDetail').then(m => ({ default: m.IncidentDetail })))
 const Rules = lazy(() => import('./pages/Rules/index'))
 const RuleDetail = lazy(() => import('./pages/Rules/RuleDetail'))
 const Audit = lazy(() => import('./pages/Settings/Audit').then(m => ({ default: m.Audit })))
@@ -86,6 +88,8 @@ function Gate() {
         </Route>
         <Route path="fleet" element={<FleetCoverage />} />
         <Route path="fleet/agents" element={<Navigate to="/fleet" replace />} />
+        <Route path="fleet/incidents" element={<Incidents />} />
+        <Route path="fleet/incidents/:id" element={<IncidentDetail />} />
         <Route path="rules" element={<Rules />} />
         <Route path="rules/:key" element={<RuleDetail />} />
         <Route path="settings" element={<Settings />}>

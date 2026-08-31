@@ -1480,6 +1480,104 @@ export interface FleetCoverageSummary {
   assetsWithoutAgent: number
 }
 
+// ---- EDR incidents · tri-score risk · State Timeline (#594 C1/C3/C5/C7, B7) ----
+// The backend serializes incident.Incident and endpoint.TimelineEntry with Go field names
+// (PascalCase, no json tags), so the api client maps those verbatim into these camelCase views.
+
+export type IncidentState =
+  | 'new'
+  | 'open'
+  | 'triaged'
+  | 'investigating'
+  | 'contained'
+  | 'remediated'
+  | 'resolved'
+  | 'closed'
+  | 'reopened'
+
+export type IncidentDisposition =
+  | 'unknown'
+  | 'true_positive'
+  | 'benign_positive'
+  | 'false_positive'
+  | 'duplicate'
+  | 'test'
+
+// Risk/Confidence/Coverage are the three independent tri-score axes (0..100). Coverage is a vector
+// across the endpoint classes; a missing class lowers Coverage, never Risk (#594 C3).
+export interface RiskCoverageVector {
+  process: number
+  network: number
+  file: number
+  privilege: number
+  reasons: string[]
+}
+
+export interface RiskFactorContribution {
+  factor: string
+  points: number
+  detail: string
+}
+
+export interface IncidentRisk {
+  assessmentId: string
+  incidentRevision: number
+  scorerVersion: string
+  policyVersion: string
+  risk: number
+  confidence: number
+  coverage: number
+  coverageVector: RiskCoverageVector
+  factorContributions: RiskFactorContribution[]
+  reasonCodes: string[]
+  createdAt: string
+}
+
+export interface IncidentComment {
+  at: string
+  actor: string
+  text: string
+}
+
+export interface IncidentResponseRef {
+  actionId: string
+  verified: boolean
+}
+
+export interface Incident {
+  id: string
+  assetId: string
+  title: string
+  severity: Severity
+  state: IncidentState
+  disposition: IncidentDisposition
+  ownerId: string
+  detectionIds: string[]
+  risk: IncidentRisk | null
+  mergedInto: string
+  comments: IncidentComment[]
+  responses: IncidentResponseRef[]
+  revision: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface IncidentList {
+  incidents: Incident[]
+  truncated: boolean
+}
+
+// State Timeline entry — the per-asset event-time projection of accepted telemetry (#594 B7).
+export interface TimelineEntry {
+  occurredAt: string
+  assetId: string
+  entityKind: string
+  entityId: string
+  kind: string
+  eventId: string
+  summary: string
+}
+
 export interface DashboardTrendPoint {
   date: string
   counts: Record<string, number>

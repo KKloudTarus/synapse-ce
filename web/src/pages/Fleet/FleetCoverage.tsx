@@ -153,7 +153,7 @@ export function AgentsSection() {
               className={cn(
                 'rounded-md px-2 py-1 text-xs font-semibold transition-colors',
                 filter === f.value
-                  ? 'bg-brand-primary text-brand-secondary'
+                  ? 'bg-brand-solid text-primary_on-brand'
                   : 'text-tertiary hover:bg-secondary'
               )}
             >

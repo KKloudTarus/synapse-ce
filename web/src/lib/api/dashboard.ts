@@ -35,7 +35,9 @@ function mapJudgment(r: any): Judgment {
     subjectId: r.SubjectID ?? '',
     state: (r.State ?? 'proposed') as Judgment['state'],
     evidenceScore: r.EvidenceScore ?? 0,
-    proposedBy: r.ProposedBy ?? '',
+    // judgment.Judgment tags ProposedBy as `json:"proposed_by"` (the rest of the struct is untagged
+    // PascalCase), so read the snake_case key — reading r.ProposedBy silently blanked the attribution.
+    proposedBy: r.proposed_by ?? '',
     version: r.Version ?? 0,
     claim: r.Claim ?? {},
   }

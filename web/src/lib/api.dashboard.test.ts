@@ -43,3 +43,26 @@ describe('dashboardSecurityOperations', () => {
     expect(fetchSpy).toHaveBeenCalledWith('/api/v1/dashboard/security-operations?range=90d', expect.any(Object))
   })
 })
+
+describe('judgments mapping', () => {
+  let fetchSpy: any
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch')
+  })
+
+  // judgment.Judgment is untagged PascalCase EXCEPT ProposedBy, which carries `json:"proposed_by"`.
+  // Reading r.ProposedBy silently blanked the attribution; this pins the snake_case read.
+  it('reads the snake_case proposed_by attribution the backend actually emits', async () => {
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ judgments: [{ ID: 'j1', Capability: 'reachability', State: 'proposed', proposed_by: 'agent:planner' }] }),
+    } as unknown as Response)
+
+    const [j] = await api.judgments('eng-1')
+
+    expect(j.proposedBy).toBe('agent:planner')
+    expect(j.capability).toBe('reachability')
+  })
+})
