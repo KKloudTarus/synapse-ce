@@ -88,6 +88,20 @@ admin, consultant, reviewer, and read-only. Separation of duties means a machine
 never verify or accept its own claim. Tenant isolation is enforced at the service layer, so a
 caller cannot read another tenant's engagement even if a route wrapper is bypassed.
 
+External CI/CD integrations add a write-only encrypted credential boundary and an SSRF-resistant outbound connector. HTTPS, redirect rejection, per-dial address validation, tenant RLS, bounded responses, and exact-commit-only correlation are documented in [External CI/CD integrations](integrations.md).
+
+Assessment lifecycle projections are additive and fail closed behind independent rollout gates. Closure
+manifests use bounded canonical inputs and SHA-256 hashes, forced tenant RLS, immutable path/reference
+rows, one active manifest per Cycle, and a Cycle-version foreign key that blocks silent post-closure drift.
+Rollback migrations refuse to drop closure state once any manifest exists.
+
+Historical relationship review accepts only exact frozen boundaries plus deterministic evidence. Imported
+references are hash-only, decision reasons reject common credential material, every route requires
+`PermReview`, and decisions use optimistic concurrency plus idempotency. Confirmation persists only an
+append-only repair plan marked `execution: blocked`; no endpoint in this slice can move or merge Cycle
+members. Candidate, decision, and plan tables use composite tenant ownership foreign keys, forced RLS,
+append-only triggers, and rollback guards.
+
 ## Browser OIDC access
 
 Browser OIDC uses a backend-for-frontend model. The server accepts an identity only for an exact approved

@@ -70,6 +70,7 @@ func TestResolveToolExecution(t *testing.T) {
 		{name: "worker requires database", cfg: Config{Environment: "development"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "production worker requires sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "production worker accepts sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", SandboxEnabled: true}, role: ProcessRoleWorker, want: ToolExecutionWorker},
+		{name: "production integration worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileIntegrations}, role: ProcessRoleWorker, want: ToolExecutionWorker},
 		{name: "worker refuses other mode", cfg: Config{Environment: "development", DBDSN: "postgres://runtime", ToolExecutionMode: "dispatch-only"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "CLI defaults in process", cfg: Config{}, role: ProcessRoleCLI, want: ToolExecutionInProcess},
 		{name: "CLI refuses other mode", cfg: Config{ToolExecutionMode: "worker"}, role: ProcessRoleCLI, wantErr: true},
@@ -93,6 +94,35 @@ func TestLoadToolExecutionMode(t *testing.T) {
 	t.Setenv("SYNAPSE_TOOL_EXECUTION_MODE", "dispatch-only")
 	if got := Load().ToolExecutionMode; got != "dispatch-only" {
 		t.Fatalf("Load().ToolExecutionMode = %q, want dispatch-only", got)
+	}
+}
+
+func TestWorkerProfileValidation(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		valid bool
+	}{
+		{value: "", valid: true},
+		{value: "all", valid: true},
+		{value: " INTEGRATIONS ", valid: true},
+		{value: "scanner", valid: false},
+	} {
+		t.Run(test.value, func(t *testing.T) {
+			t.Setenv("SYNAPSE_WORKER_PROFILE", test.value)
+			cfg := Load()
+			if (cfg.ValidateWorkerProfile() == nil) != test.valid {
+				t.Fatalf("ValidateWorkerProfile() valid = %t, want %t (profile %q)", cfg.ValidateWorkerProfile() == nil, test.valid, cfg.WorkerProfile)
+			}
+		})
+	}
+}
+
+func TestValidateWorkerSandboxPosture(t *testing.T) {
+	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileIntegrations}).ValidateWorkerSandboxPosture(); err != nil {
+		t.Fatalf("integration-only worker must not require executable-tool sandbox: %v", err)
+	}
+	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileAll}).ValidateWorkerSandboxPosture(); err == nil {
+		t.Fatal("full production worker must still require the sandbox")
 	}
 }
 
@@ -317,6 +347,7 @@ func TestLoadVulnerabilitySchedulerDefaultsAndOverrides(t *testing.T) {
 	for _, key := range keys {
 		t.Setenv(key, "")
 	}
+	t.Setenv("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS", "")
 	cfg := Load()
 	if cfg.VulnerabilitySchedulerEnabled ||
 		cfg.VulnerabilitySchedulerPollInterval != time.Minute ||
@@ -344,6 +375,166 @@ func TestLoadVulnerabilitySchedulerDefaultsAndOverrides(t *testing.T) {
 		cfg.VulnerabilitySchedulerQueueDepth != 250 ||
 		cfg.VulnerabilitySchedulerRecovery != 30 {
 		t.Fatalf("vulnerability scheduler overrides = %+v", cfg)
+	}
+}
+
+func TestLoadIntegrationSchedulerDefaultsAndOverrides(t *testing.T) {
+	keys := []string{
+		"SYNAPSE_INTEGRATION_SCHEDULER_ENABLED",
+		"SYNAPSE_INTEGRATION_SCHEDULER_POLL",
+		"SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT",
+		"SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH",
+	}
+	for _, key := range keys {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.IntegrationSchedulerEnabled ||
+		cfg.IntegrationSchedulerInterval != time.Minute ||
+		cfg.IntegrationSchedulerDispatch != 10 ||
+		cfg.IntegrationSchedulerQueueDepth != 100 {
+		t.Fatalf("integration scheduler defaults = %+v", cfg)
+	}
+
+	t.Setenv("SYNAPSE_INTEGRATION_SCHEDULER_ENABLED", "true")
+	t.Setenv("SYNAPSE_INTEGRATION_SCHEDULER_POLL", "15s")
+	t.Setenv("SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT", "25")
+	t.Setenv("SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH", "250")
+	cfg = Load()
+	if !cfg.IntegrationSchedulerEnabled ||
+		cfg.IntegrationSchedulerInterval != 15*time.Second ||
+		cfg.IntegrationSchedulerDispatch != 25 ||
+		cfg.IntegrationSchedulerQueueDepth != 250 {
+		t.Fatalf("integration scheduler overrides = %+v", cfg)
+	}
+}
+
+func TestLoadAssessmentCycleAPIIsExplicitOptIn(t *testing.T) {
+	keys := []string{
+		"SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED",
+		"SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED",
+		"SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED",
+		"SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED",
+		"SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS",
+		"SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED",
+	}
+	for _, key := range keys {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.AssessmentCycleAPIEnabled || cfg.AssessmentCycleDualWriteEnabled || cfg.AssessmentSnapshotEnabled || cfg.AssessmentShadowEnabled || cfg.AssessmentLifecycleReadEnabled || cfg.AssessmentLifecycleUIDefault || cfg.AssessmentClosureEnabled {
+		t.Fatal("assessment cycle API must remain disabled by default")
+	}
+	if cfg.AssessmentBatchSize != 500 || cfg.AssessmentTenantJobs != 4 || cfg.AssessmentBacklogWarning != 500 || cfg.AssessmentBacklogHardLimit != 1000 {
+		t.Fatalf("assessment lifecycle limits = (%d,%d,%d,%d)", cfg.AssessmentBatchSize, cfg.AssessmentTenantJobs, cfg.AssessmentBacklogWarning, cfg.AssessmentBacklogHardLimit)
+	}
+
+	for _, key := range keys {
+		t.Setenv(key, "true")
+	}
+	t.Setenv("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS", "tenant-a,tenant-b")
+	t.Setenv("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS", "tenant-a,tenant-b")
+	t.Setenv("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS", "tenant-a")
+	t.Setenv("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS", "tenant-a")
+	cfg = Load()
+	if !cfg.AssessmentCycleAPIEnabled || !cfg.AssessmentCycleDualWriteEnabled || !cfg.AssessmentSnapshotEnabled || !cfg.AssessmentShadowEnabled || !cfg.AssessmentLifecycleReadEnabled || !cfg.AssessmentLifecycleUIDefault || !cfg.AssessmentClosureEnabled {
+		t.Fatalf("assessment lifecycle flags did not enable independently: %+v", cfg)
+	}
+	if len(cfg.AssessmentCycleDualWriteTenants) != 2 || len(cfg.AssessmentShadowTenants) != 2 || len(cfg.AssessmentLifecycleReadTenants) != 1 || len(cfg.AssessmentLifecycleUITenants) != 1 {
+		t.Fatalf("assessment rollout tenants = dual-write:%v shadow:%v read:%v ui:%v", cfg.AssessmentCycleDualWriteTenants, cfg.AssessmentShadowTenants, cfg.AssessmentLifecycleReadTenants, cfg.AssessmentLifecycleUITenants)
+	}
+
+	for _, key := range keys {
+		t.Setenv(key, "invalid")
+	}
+	cfg = Load()
+	if cfg.AssessmentCycleAPIEnabled || cfg.AssessmentCycleDualWriteEnabled || cfg.AssessmentSnapshotEnabled || cfg.AssessmentShadowEnabled || cfg.AssessmentLifecycleReadEnabled || cfg.AssessmentLifecycleUIDefault || cfg.AssessmentClosureEnabled {
+		t.Fatal("invalid assessment lifecycle feature flags must fail closed")
+	}
+}
+
+func TestValidateAssessmentLifecycleRollout(t *testing.T) {
+	valid := Config{
+		AssessmentBatchSize:            500,
+		AssessmentTenantJobs:           4,
+		AssessmentBacklogWarning:       500,
+		AssessmentBacklogHardLimit:     1000,
+		AssessmentSnapshotEnabled:      true,
+		AssessmentShadowEnabled:        true,
+		AssessmentShadowTenants:        []string{"tenant-a", "tenant-b"},
+		AssessmentLifecycleReadEnabled: true,
+		AssessmentLifecycleReadTenants: []string{"tenant-a"},
+		AssessmentLifecycleUIDefault:   true,
+		AssessmentLifecycleUITenants:   []string{"tenant-a"},
+		AssessmentClosureEnabled:       true,
+	}
+	if err := valid.ValidateAssessmentLifecycleRollout(); err != nil {
+		t.Fatalf("valid assessment lifecycle rollout: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{name: "batch above maximum", mutate: func(cfg *Config) { cfg.AssessmentBatchSize = 2001 }},
+		{name: "dual-write without tenants", mutate: func(cfg *Config) { cfg.AssessmentCycleDualWriteEnabled = true }},
+		{name: "too many tenant jobs", mutate: func(cfg *Config) { cfg.AssessmentTenantJobs = 5 }},
+		{name: "warning above gate", mutate: func(cfg *Config) { cfg.AssessmentBacklogWarning = 501 }},
+		{name: "hard below warning", mutate: func(cfg *Config) { cfg.AssessmentBacklogHardLimit = 499 }},
+		{name: "shadow without snapshots", mutate: func(cfg *Config) { cfg.AssessmentSnapshotEnabled = false; cfg.AssessmentClosureEnabled = false }},
+		{name: "shadow without tenants", mutate: func(cfg *Config) { cfg.AssessmentShadowTenants = nil }},
+		{name: "read tenant outside shadow", mutate: func(cfg *Config) { cfg.AssessmentLifecycleReadTenants = []string{"tenant-c"} }},
+		{name: "UI without read", mutate: func(cfg *Config) {
+			cfg.AssessmentLifecycleReadEnabled = false
+			cfg.AssessmentClosureEnabled = false
+		}},
+		{name: "UI tenant outside read", mutate: func(cfg *Config) { cfg.AssessmentLifecycleUITenants = []string{"tenant-b"} }},
+		{name: "closure without snapshots", mutate: func(cfg *Config) { cfg.AssessmentSnapshotEnabled = false }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := valid
+			test.mutate(&cfg)
+			if err := cfg.ValidateAssessmentLifecycleRollout(); err == nil {
+				t.Fatal("expected invalid assessment lifecycle rollout")
+			}
+		})
+	}
+}
+
+func TestAssessmentCycleDualWriteForTenant(t *testing.T) {
+	if !(Config{AssessmentCycleAPIEnabled: true}).AssessmentCycleDualWriteForTenant("tenant-any") {
+		t.Fatal("assessment cycle API compatibility flag must preserve all-tenant dual-write")
+	}
+	cfg := Config{AssessmentCycleDualWriteEnabled: true, AssessmentCycleDualWriteTenants: []string{"tenant-a"}}
+	if !cfg.AssessmentCycleDualWriteForTenant("tenant-a") || cfg.AssessmentCycleDualWriteForTenant("tenant-b") {
+		t.Fatal("tenant-scoped dual-write allowlist mismatch")
+	}
+	cfg.AssessmentCycleDualWriteTenants = []string{"*"}
+	if !cfg.AssessmentCycleDualWriteForTenant("tenant-b") {
+		t.Fatal("wildcard dual-write tenant did not match")
+	}
+}
+
+func TestAssessmentLifecycleTenantCanaryGates(t *testing.T) {
+	cfg := Config{
+		AssessmentShadowEnabled: true, AssessmentShadowTenants: []string{"tenant-a", "tenant-b"},
+		AssessmentLifecycleReadEnabled: true, AssessmentLifecycleReadTenants: []string{"tenant-a"},
+		AssessmentLifecycleUIDefault: true, AssessmentLifecycleUITenants: []string{"tenant-a"},
+	}
+	if !cfg.AssessmentShadowForTenant("tenant-b") || cfg.AssessmentLifecycleReadForTenant("tenant-b") || cfg.AssessmentLifecycleUIForTenant("tenant-b") {
+		t.Fatal("shadow-only tenant must not receive lifecycle reads or UI")
+	}
+	if !cfg.AssessmentLifecycleReadForTenant("tenant-a") || !cfg.AssessmentLifecycleUIForTenant("tenant-a") {
+		t.Fatal("canary tenant must receive explicitly enabled lifecycle reads and UI")
+	}
+	cfg.AssessmentLifecycleReadTenants = []string{"*"}
+	if !cfg.AssessmentLifecycleReadForTenant("tenant-c") {
+		t.Fatal("wildcard read cutover did not enable remaining tenants")
 	}
 }
 

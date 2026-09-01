@@ -11,7 +11,15 @@ import (
 
 var carrierGradeNAT = netip.MustParsePrefix("100.64.0.0/10")
 
+type lookupFunc func(context.Context, string, string) ([]netip.Addr, error)
+type dialFunc func(context.Context, string, string) (net.Conn, error)
+
 func New(timeout time.Duration, allowPrivate bool) *http.Client {
+	dialer := net.Dialer{Timeout: 30 * time.Second}
+	return newClient(timeout, allowPrivate, net.DefaultResolver.LookupNetIP, dialer.DialContext)
+}
+
+func newClient(timeout time.Duration, allowPrivate bool, lookup lookupFunc, dial dialFunc) *http.Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
@@ -27,11 +35,10 @@ func New(timeout time.Duration, allowPrivate bool) *http.Client {
 				if err != nil {
 					return nil, err
 				}
-				addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+				addresses, err := lookup(ctx, "ip", host)
 				if err != nil {
 					return nil, err
 				}
-				dialer := net.Dialer{Timeout: 30 * time.Second}
 				var lastErr error
 				for _, address := range addresses {
 					address = address.Unmap()
@@ -39,7 +46,7 @@ func New(timeout time.Duration, allowPrivate bool) *http.Client {
 						lastErr = fmt.Errorf("source endpoint resolves to a disallowed address")
 						continue
 					}
-					connection, err := dialer.DialContext(ctx, network, net.JoinHostPort(address.String(), port))
+					connection, err := dial(ctx, network, net.JoinHostPort(address.String(), port))
 					if err == nil {
 						return connection, nil
 					}

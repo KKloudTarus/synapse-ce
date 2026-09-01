@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../lib/api'
+import type { AssessmentLifecycle } from '../../lib/types'
 import { EngagementDetail } from './index'
 
 vi.mock('../../lib/api', () => ({
@@ -16,6 +17,12 @@ vi.mock('../../lib/api', () => ({
     evidence: vi.fn(),
     listBusinessAssets: vi.fn(),
     assignEngagementAsset: vi.fn(),
+    assessmentLifecycle: vi.fn(),
+    listAssessmentClosureManifests: vi.fn(),
+    me: vi.fn(),
+    createRetest: vi.fn(),
+    previewAssessmentRelationshipChange: vi.fn(),
+    commitAssessmentRelationshipChange: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     status: number
@@ -37,8 +44,49 @@ const mockEngagement = {
   authorizedTo: null,
   roe: { allowedToolClasses: [], blackouts: [] },
   liveReconEnabled: false,
+  requiresExplicitExecutionAuthorization: false,
   createdAt: '2026-08-15T00:00:00Z',
   businessAssetId: '',
+}
+
+const mockLifecycle: AssessmentLifecycle = {
+  assessmentId: 'eng-123456',
+  cycle: {
+    id: 'cycle-1',
+    name: 'Acme Core Security Audit',
+    boundaryKind: 'standalone',
+    businessAssetId: '',
+    projectId: '',
+    status: 'open',
+    rootAssessmentId: 'eng-123456',
+    selectedHeadAssessmentId: 'eng-123456',
+    nextRetestNumber: 1,
+    version: 1,
+    createdAt: '2026-08-15T00:00:00Z',
+    updatedAt: '2026-08-15T00:00:00Z',
+    createdBy: 'operator',
+    updatedBy: 'operator',
+  },
+  members: [{
+    assessmentId: 'eng-123456',
+    assessmentType: 'initial',
+    predecessorAssessmentId: '',
+    retestNumber: 0,
+    relationshipVersion: 1,
+    createdAt: '2026-08-15T00:00:00Z',
+    createdBy: 'operator',
+    archivedAt: null,
+  }],
+  branchHeads: [{
+    assessmentId: 'eng-123456',
+    assessmentType: 'initial',
+    predecessorAssessmentId: '',
+    retestNumber: 0,
+    relationshipVersion: 1,
+    createdAt: '2026-08-15T00:00:00Z',
+    createdBy: 'operator',
+    archivedAt: null,
+  }],
 }
 
 describe('EngagementDetail Page Shell', () => {
@@ -52,6 +100,9 @@ describe('EngagementDetail Page Shell', () => {
     vi.mocked(api.uploadedSource).mockResolvedValue(null as any)
     vi.mocked(api.evidence).mockResolvedValue(null)
     vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [], total: 0, limit: 200, offset: 0 })
+    vi.mocked(api.assessmentLifecycle).mockResolvedValue(mockLifecycle)
+    vi.mocked(api.listAssessmentClosureManifests).mockResolvedValue([])
+    vi.mocked(api.me).mockResolvedValue({ id: 'operator', name: 'Operator', role: 'member' })
   })
 
   it('renders breadcrumb, engagement name, and status pill', async () => {

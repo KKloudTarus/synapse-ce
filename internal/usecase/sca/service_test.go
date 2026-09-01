@@ -22,6 +22,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
@@ -362,7 +363,7 @@ func TestCodeQualityFindingsPersistWithScan(t *testing.T) {
 	if f.ID != findingID("e1", f.DedupKey) || f.EngagementID != "e1" || f.Kind != finding.KindQuality || f.RuleKey != "quality-high-complexity" || f.Class != finding.ClassFirstParty || f.Scope != sbom.ScopeProduction || !f.Audit.CreatedAt.Equal(now) {
 		t.Fatalf("persisted code-quality finding = %+v", f)
 	}
-	history, err := runs.List(ctx, "e1")
+	history, err := runs.List(ctx, shared.DefaultTenant, "e1")
 	if err != nil || len(history) != 2 || len(history[0].FindingKeys) != 1 || history[0].FindingKeys[0] != f.DedupKey {
 		t.Fatalf("scan history = %+v, err=%v", history, err)
 	}
@@ -397,8 +398,8 @@ func TestCodeQualityFailurePersistsNoFindings(t *testing.T) {
 	if got, _ := findings.ListByEngagement(ctx, "e1"); len(got) != 0 {
 		t.Fatalf("partial findings persisted: %+v", got)
 	}
-	if got, _ := runs.List(ctx, "e1"); len(got) != 0 {
-		t.Fatalf("scan history persisted after failure: %+v", got)
+	if got, _ := runs.List(ctx, shared.DefaultTenant, "e1"); len(got) != 1 || got[0].TerminalStatus != scanrun.StatusFailed || got[0].SealedAt == nil || len(got[0].Lanes) != 0 {
+		t.Fatalf("failed execution header = %+v", got)
 	}
 	if _, err := results.LatestResult(ctx, "e1"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("cached result error = %v, want not found", err)
@@ -1282,7 +1283,11 @@ type fakeIDs struct{}
 func (fakeIDs) NewID() shared.ID { return shared.ID("scan-job-1") }
 
 func newAsyncSvc(repo ports.EngagementRepository, clk ports.Clock, acq ports.Acquirer, audit ports.AuditLogger, det ports.LanguageDetector, jobs ports.ScanJobStore, ids ports.IDGenerator) *Service {
-	return NewService(repo, nil, nil, nil, jobs, nil, nil, ids, ports.Provenance{}, clk, audit, shared.SeverityHigh, 0, acq, det, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
+	return newAsyncSvcWithRuns(repo, clk, acq, audit, det, jobs, nil, ids)
+}
+
+func newAsyncSvcWithRuns(repo ports.EngagementRepository, clk ports.Clock, acq ports.Acquirer, audit ports.AuditLogger, det ports.LanguageDetector, jobs ports.ScanJobStore, runs ports.ScanRunStore, ids ports.IDGenerator) *Service {
+	return NewService(repo, nil, nil, nil, jobs, runs, nil, ids, ports.Provenance{}, clk, audit, shared.SeverityHigh, 0, acq, det, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
 }
 
 type contextRecorder struct {
@@ -1370,7 +1375,8 @@ func TestStartScanAsyncCompletes(t *testing.T) {
 func TestRunScanJobCancellationReturnsRetryableWithoutTerminalState(t *testing.T) {
 	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
 	jobs := newFakeJobStore()
-	svc := newAsyncSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, cancelingAcquirer{}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	runs := memory.NewScanRunStore()
+	svc := newAsyncSvcWithRuns(repo, fakeClock{t: time.Unix(0, 0).UTC()}, cancelingAcquirer{}, &fakeAudit{}, &fakeDetector{}, jobs, runs, fakeIDs{})
 	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
 	if err := jobs.CreateRunning(context.Background(), job); err != nil {
 		t.Fatal(err)
@@ -1395,6 +1401,10 @@ func TestRunScanJobCancellationReturnsRetryableWithoutTerminalState(t *testing.T
 	}
 	if stored.Status != ports.ScanRunning || stored.FinishedAt != nil || stored.Error != "" {
 		t.Fatalf("canceled delivery published terminal scan state: %+v", stored)
+	}
+	history, err := runs.List(context.Background(), shared.DefaultTenant, "e1")
+	if err != nil || len(history) != 1 || history[0].TerminalStatus != scanrun.StatusBuilding || history[0].SealedAt != nil {
+		t.Fatalf("retryable execution header = %+v err=%v", history, err)
 	}
 }
 
@@ -1454,7 +1464,8 @@ func TestRunScanJobAmbiguousEvidenceAppendCancellationIsIdempotentlyRetryable(t 
 func TestRunScanJobTimeoutRemainsTerminal(t *testing.T) {
 	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
 	jobs := newFakeJobStore()
-	svc := newAsyncSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, cancelingAcquirer{}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	runs := memory.NewScanRunStore()
+	svc := newAsyncSvcWithRuns(repo, fakeClock{t: time.Unix(0, 0).UTC()}, cancelingAcquirer{}, &fakeAudit{}, &fakeDetector{}, jobs, runs, fakeIDs{})
 	svc.timeout = 10 * time.Millisecond
 	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
 	if err := jobs.CreateRunning(context.Background(), job); err != nil {
@@ -1471,6 +1482,10 @@ func TestRunScanJobTimeoutRemainsTerminal(t *testing.T) {
 	}
 	if stored.Status != ports.ScanFailed || !strings.Contains(stored.Error, context.DeadlineExceeded.Error()) {
 		t.Fatalf("configured timeout job = %+v, want terminal deadline failure", stored)
+	}
+	history, err := runs.List(context.Background(), shared.DefaultTenant, "e1")
+	if err != nil || len(history) != 1 || history[0].TerminalStatus != scanrun.StatusCancelled || history[0].SealedAt == nil {
+		t.Fatalf("timed-out execution header = %+v err=%v", history, err)
 	}
 }
 
@@ -1601,9 +1616,10 @@ func TestLineCoverageSurvivesQueuedScanOptions(t *testing.T) {
 
 func TestFailStrandedScanJobFinalizes(t *testing.T) {
 	jobs := newFakeJobStore()
-	svc := newAsyncSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(100, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	runs := memory.NewScanRunStore()
+	svc := newAsyncSvcWithRuns(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(100, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, runs, fakeIDs{})
 	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
-	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, Stage: "sbom", Progress: 40}
+	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, Stage: "sbom", Progress: 40, StartedAt: time.Unix(1, 0).UTC()}
 	if err := jobs.Save(ctx, job); err != nil {
 		t.Fatal(err)
 	}
@@ -1625,6 +1641,10 @@ func TestFailStrandedScanJobFinalizes(t *testing.T) {
 	if got.FinishedAt == nil || got.Error == "" {
 		t.Errorf("finalized scan must set FinishedAt + Error: %+v", got)
 	}
+	history, err := runs.List(ctx, shared.DefaultTenant, "e1")
+	if err != nil || len(history) != 1 || history[0].TerminalStatus != scanrun.StatusFailed || history[0].SealedAt == nil {
+		t.Fatalf("dead-lettered execution header = %+v err=%v", history, err)
+	}
 	// Idempotent: a second finalize on the now-terminal job is a clean no-op.
 	if err := svc.FailStrandedScanJob(ctx, payload, errors.New("boom2")); err != nil {
 		t.Fatalf("second finalize must no-op cleanly, got %v", err)
@@ -1635,9 +1655,10 @@ func TestFailStrandedScanJobFinalizes(t *testing.T) {
 // stranded `running` past staleFor with no live owner is finalized failed.
 func TestSweepStaleScansReclaims(t *testing.T) {
 	jobs := newFakeJobStore()
-	svc := newAsyncSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(10000, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	runs := memory.NewScanRunStore()
+	svc := newAsyncSvcWithRuns(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(10000, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, runs, fakeIDs{})
 	svc.SetRunLock(memory.NewRunLock())
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	// now = 10000s; staleFor 5m ⇒ olderThan = 9700s. StartedAt 1000s ⇒ stranded.
 	stale := ports.ScanJob{ID: "job-stale", EngagementID: "e1", Status: ports.ScanRunning, Stage: "sbom", StartedAt: time.Unix(1000, 0).UTC()}
 	if err := jobs.Save(ctx, stale); err != nil {
@@ -1656,6 +1677,10 @@ func TestSweepStaleScansReclaims(t *testing.T) {
 	}
 	if got.Status != ports.ScanFailed || got.FinishedAt == nil {
 		t.Fatalf("stale scan must be finalized failed, got %q finished=%v", got.Status, got.FinishedAt)
+	}
+	history, err := runs.List(ctx, shared.DefaultTenant, "e1")
+	if err != nil || len(history) != 1 || history[0].TerminalStatus != scanrun.StatusFailed || history[0].SealedAt == nil {
+		t.Fatalf("swept execution header = %+v err=%v", history, err)
 	}
 }
 
@@ -1861,8 +1886,8 @@ func TestEvidenceFailurePreventsPersistence(t *testing.T) {
 	if got, _ := findings.ListByEngagement(ctx, "e1"); len(got) != 0 {
 		t.Fatalf("findings persisted after seal failure: %+v", got)
 	}
-	if got, _ := runs.List(ctx, "e1"); len(got) != 0 {
-		t.Fatalf("runs persisted after seal failure: %+v", got)
+	if got, _ := runs.List(ctx, shared.DefaultTenant, "e1"); len(got) != 1 || got[0].TerminalStatus != scanrun.StatusFailed || got[0].SealedAt == nil || len(got[0].Lanes) != 0 {
+		t.Fatalf("failed execution header = %+v", got)
 	}
 	if _, err := results.LatestResult(ctx, "e1"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("result persisted after seal failure: %v", err)
