@@ -71,6 +71,9 @@ type Engagement struct {
 	// sandbox + egress allowlist exist, active recon is lab-only and must be
 	// explicitly enabled per engagement. Default false (off).
 	LiveReconEnabled bool
+	// RequiresExplicitExecutionAuthorization is set on Assessment Re-tests so
+	// legacy open-window/empty-RoE defaults cannot authorize execution.
+	RequiresExplicitExecutionAuthorization bool
 
 	Audit shared.Audit
 }
@@ -133,7 +136,13 @@ func (e *Engagement) IsAuthorizedAt(t time.Time) bool {
 // no tool may run regardless of the authorization window. Draft + Active are both
 // permitted. Enforced by the execution guard before any tool starts.
 func (e *Engagement) AllowsExecution() bool {
-	return e.Status != StatusCompleted && e.Status != StatusArchived
+	if e.Status == StatusCompleted || e.Status == StatusArchived {
+		return false
+	}
+	if !e.RequiresExplicitExecutionAuthorization {
+		return true
+	}
+	return e.AuthorizedFrom != nil && e.AuthorizedTo != nil && (len(e.RoE.AllowedToolClasses) > 0 || len(e.RoE.Blackouts) > 0)
 }
 
 // Transition validates and applies a lifecycle status change, stamping UpdatedAt.

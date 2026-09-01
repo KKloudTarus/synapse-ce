@@ -45,21 +45,23 @@ func (s Status) CanTransitionTo(to Status) bool {
 // AssessmentCycle is the aggregate root representing a cohesive series of assessment
 // runs (root assessment + retests) with a frozen asset/project boundary.
 type AssessmentCycle struct {
-	TenantID                 shared.ID
-	ID                       shared.ID
-	Name                     string
-	BoundaryKind             BoundaryKind
-	BusinessAssetID          shared.ID
-	ProjectID                shared.ID
-	Status                   Status
-	RootAssessmentID         shared.ID
-	SelectedHeadAssessmentID shared.ID
-	NextRetestNumber         int
-	Version                  int64
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
-	CreatedBy                string
-	UpdatedBy                string
+	TenantID                  shared.ID
+	ID                        shared.ID
+	Name                      string
+	BoundaryKind              BoundaryKind
+	BusinessAssetID           shared.ID
+	ProjectID                 shared.ID
+	Status                    Status
+	RootAssessmentID          shared.ID
+	SelectedHeadAssessmentID  shared.ID
+	ActiveClosureManifestID   shared.ID
+	ActiveClosureCycleVersion int64
+	NextRetestNumber          int
+	Version                   int64
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	CreatedBy                 string
+	UpdatedBy                 string
 }
 
 // NewAssessmentCycle constructs and validates a new AssessmentCycle aggregate in open status.
@@ -136,7 +138,45 @@ func (c *AssessmentCycle) Validate() error {
 	if c.Version < 1 {
 		return fmt.Errorf("%w: cycle version must be >= 1, got %d", shared.ErrValidation, c.Version)
 	}
+	if c.ActiveClosureManifestID.IsZero() != (c.ActiveClosureCycleVersion == 0) ||
+		!c.ActiveClosureManifestID.IsZero() && (c.Status != StatusCompleted || c.ActiveClosureCycleVersion != c.Version) {
+		return fmt.Errorf("%w: active closure manifest must match the completed cycle version", shared.ErrValidation)
+	}
 	return nil
+}
+
+// CompleteWithManifest atomically models the aggregate half of a closure commit.
+func (c *AssessmentCycle) CompleteWithManifest(manifestID shared.ID, expectedVersion int64, actor string, now time.Time) error {
+	if c == nil || c.Status != StatusOpen || manifestID.IsZero() || now.IsZero() || strings.TrimSpace(actor) == "" {
+		return fmt.Errorf("%w: open cycle, manifest, actor, and time are required for closure", shared.ErrValidation)
+	}
+	if expectedVersion != c.Version {
+		return fmt.Errorf("%w: cycle version mismatch (expected %d, current %d)", shared.ErrConflict, expectedVersion, c.Version)
+	}
+	c.Status = StatusCompleted
+	c.Version++
+	c.ActiveClosureManifestID = manifestID
+	c.ActiveClosureCycleVersion = c.Version
+	c.UpdatedAt = now.UTC()
+	c.UpdatedBy = strings.TrimSpace(actor)
+	return c.Validate()
+}
+
+// ReopenFromManifest reopens a completed Cycle while preserving its immutable manifest history.
+func (c *AssessmentCycle) ReopenFromManifest(expectedVersion int64, actor string, now time.Time) error {
+	if c == nil || c.Status != StatusCompleted || c.ActiveClosureManifestID.IsZero() || now.IsZero() || strings.TrimSpace(actor) == "" {
+		return fmt.Errorf("%w: completed cycle with an active closure manifest is required", shared.ErrValidation)
+	}
+	if expectedVersion != c.Version {
+		return fmt.Errorf("%w: cycle version mismatch (expected %d, current %d)", shared.ErrConflict, expectedVersion, c.Version)
+	}
+	c.Status = StatusOpen
+	c.Version++
+	c.ActiveClosureManifestID = ""
+	c.ActiveClosureCycleVersion = 0
+	c.UpdatedAt = now.UTC()
+	c.UpdatedBy = strings.TrimSpace(actor)
+	return c.Validate()
 }
 
 // Transition advances the cycle status according to the lifecycle state machine with CAS checking.

@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -154,7 +156,8 @@ func TestStartScanAsyncObservesSuccessAtExecution(t *testing.T) {
 func TestRunScanJobIdempotentSkipDoesNotDoubleObserve(t *testing.T) {
 	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
 	jobs := newFakeJobStore()
-	svc := newAsyncSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	runs := memory.NewScanRunStore()
+	svc := newAsyncSvcWithRuns(repo, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, runs, fakeIDs{})
 	observer := &fakeSCAObserver{}
 	svc.SetObserver(observer)
 
@@ -269,7 +272,8 @@ func TestFailStrandedScanJobObservesFailedOnce(t *testing.T) {
 func TestStartScanEnqueueFailureObservesFailedOnce(t *testing.T) {
 	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
 	jobs := newFakeJobStore()
-	svc := newAsyncSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	runs := memory.NewScanRunStore()
+	svc := newAsyncSvcWithRuns(repo, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, runs, fakeIDs{})
 	observer := &fakeSCAObserver{}
 	svc.SetObserver(observer)
 	svc.SetQueue(&failingEnqueueQueue{})
@@ -280,6 +284,10 @@ func TestStartScanEnqueueFailureObservesFailedOnce(t *testing.T) {
 	}
 	if len(observer.snapshot()) != 1 || observer.snapshot()[0].outcome != "failed" {
 		t.Fatalf("observed calls = %+v, want exactly one failed", observer.snapshot())
+	}
+	history, listErr := runs.List(context.Background(), shared.DefaultTenant, "e1")
+	if listErr != nil || len(history) != 1 || history[0].TerminalStatus != scanrun.StatusFailed || history[0].SealedAt == nil {
+		t.Fatalf("enqueue-failed execution header = %+v err=%v", history, listErr)
 	}
 }
 

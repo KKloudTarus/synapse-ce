@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Cube01,
+  GitBranch01,
   LogOut01,
   Plus,
   Server01,
@@ -21,6 +22,8 @@ import { useEffect, useRef, useState, type ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import logo from '../../assets/logo.png'
 import { useOptionalAuth } from '../../auth/AuthContext'
+import { useFetch } from '../../hooks'
+import { api } from '../../lib/api'
 import { cn } from '../ui'
 
 type IconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
@@ -44,6 +47,7 @@ const NAV_GROUPS: Array<{
       label: 'Security operations',
       items: [
         { icon: Target04, label: 'Engagements', to: '/engagements' },
+        { icon: GitBranch01, label: 'Assessment Cycles', to: '/assessment-cycles' },
         { icon: ShieldTick, label: 'Review Queue', to: '/ai-triage/reviews' },
       ],
     },
@@ -95,6 +99,8 @@ function storageSet(key: string, value: string) {
 
 function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const auth = useOptionalAuth()
+  const meFetch = useFetch(fetchCurrentUser, { deps: [] })
+  const lifecycleUIEnabled = meFetch.data?.features?.assessmentLifecycleUIDefault === true
   const [signingOut, setSigningOut] = useState(false)
   async function onSignOut() {
     if (!auth) return
@@ -119,7 +125,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
   }
 
   function renderItems(items: NavItem[]) {
-    return items.map(({ icon: Icon, label, to, end, children }) => {
+    return items.filter((item) => item.to !== '/assessment-cycles' || lifecycleUIEnabled).map(({ icon: Icon, label, to, end, children }) => {
       const hasChildren = Boolean(children && children.length > 0)
       const isExpanded = Boolean(expandedItems[to])
       const isSubRouteActive = Boolean(
@@ -298,6 +304,11 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
       </div>
     </>
   )
+}
+
+function fetchCurrentUser() {
+  const fetcher = api.me
+  return typeof fetcher === 'function' ? fetcher().catch(() => null) : Promise.resolve(null)
 }
 
 export function Sidebar() {

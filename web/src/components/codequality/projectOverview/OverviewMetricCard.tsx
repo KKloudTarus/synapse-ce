@@ -5,13 +5,14 @@ import type { FC, SVGProps } from 'react'
 import { Link } from 'react-router-dom'
 import type { OverviewDetailTarget } from '../../../lib/projectOverviewDetailTargets'
 import type { OverviewMetricCardModel } from '../../../lib/projectOverviewPresentation'
+import type { Grade } from '../../../lib/types'
 import {
   availabilityLabel,
   formatOverviewPercentage,
   unavailableReasonText,
 } from '../../../lib/projectOverviewPresentation'
 import { Card, cn } from '../../ui'
-import { gradeTone, type Grade } from '../qualityPresentation'
+import { gradeTone } from '../qualityPresentation'
 
 const icons: Record<OverviewMetricCardModel['key'], FC<SVGProps<SVGSVGElement>>> = {
   security: Shield,
