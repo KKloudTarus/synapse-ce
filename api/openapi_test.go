@@ -307,3 +307,155 @@ func TestAttackPathOpenAPIContract(t *testing.T) {
 		}
 	}
 }
+
+func TestIntegrationOpenAPIContract(t *testing.T) {
+	b, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	paths, ok := doc["paths"].(map[string]any)
+	if !ok {
+		t.Fatal("OpenAPI paths missing")
+	}
+	expected := map[string]map[string]string{
+		"/api/v1/integration-providers":                       {"get": "listIntegrationProviders"},
+		"/api/v1/integrations":                                {"get": "listIntegrations", "post": "createIntegration"},
+		"/api/v1/integrations/{id}":                           {"get": "getIntegration", "put": "updateIntegration"},
+		"/api/v1/integrations/{id}/enable":                    {"post": "enableIntegration"},
+		"/api/v1/integrations/{id}/disable":                   {"post": "disableIntegration"},
+		"/api/v1/integrations/{id}/archive":                   {"post": "archiveIntegration"},
+		"/api/v1/integrations/{id}/credentials":               {"put": "putIntegrationCredential", "delete": "deleteIntegrationCredential"},
+		"/api/v1/integrations/{id}/operations":                {"get": "listIntegrationOperations", "post": "startIntegrationOperation"},
+		"/api/v1/integration-operations/{operationID}":        {"get": "getIntegrationOperation"},
+		"/api/v1/integration-operations/{operationID}/cancel": {"post": "cancelIntegrationOperation"},
+		"/api/v1/integrations/{id}/bindings":                  {"get": "listIntegrationBindings", "post": "createIntegrationBinding"},
+		"/api/v1/integrations/{id}/bindings/{bindingID}":      {"delete": "deleteIntegrationBinding"},
+		"/api/v1/integrations/{id}/external-runs":             {"get": "listIntegrationExternalRuns"},
+	}
+	for path, methods := range expected {
+		route, ok := paths[path].(map[string]any)
+		if !ok {
+			t.Errorf("integration path %s missing", path)
+			continue
+		}
+		for method, operationID := range methods {
+			operation, ok := route[method].(map[string]any)
+			if !ok || operation["operationId"] != operationID {
+				t.Errorf("%s %s operationId=%v, want %s", method, path, operation["operationId"], operationID)
+			}
+		}
+	}
+
+	components, _ := doc["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	integrationSchema, _ := schemas["Integration"].(map[string]any)
+	integrationProperties, _ := integrationSchema["properties"].(map[string]any)
+	if _, ok := integrationProperties["credential_configured"]; !ok {
+		t.Error("Integration.credential_configured presence flag missing")
+	}
+	for _, forbidden := range []string{"credentials", "secrets", "token", "ciphertext"} {
+		if _, ok := integrationProperties[forbidden]; ok {
+			t.Errorf("Integration response exposes forbidden property %q", forbidden)
+		}
+	}
+	provider, _ := integrationProperties["provider"].(map[string]any)
+	if _, closed := provider["enum"]; closed {
+		t.Error("Integration.provider must remain an opaque provider slug")
+	}
+
+	credentialSchema, _ := schemas["IntegrationCredentialRequest"].(map[string]any)
+	credentialProperties, _ := credentialSchema["properties"].(map[string]any)
+	secrets, _ := credentialProperties["secrets"].(map[string]any)
+	secretValue, _ := secrets["additionalProperties"].(map[string]any)
+	if secretValue["writeOnly"] != true {
+		t.Error("integration credential values must be writeOnly")
+	}
+}
+
+func TestAssessmentSnapshotOpenAPIContract(t *testing.T) {
+	b, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	paths, _ := doc["paths"].(map[string]any)
+	for path, methods := range map[string]map[string]string{
+		"/api/v1/engagements/{assessmentId}/snapshots/finalize": {"post": "finalizeAssessmentSnapshot"},
+		"/api/v1/engagements/{assessmentId}/snapshots":          {"get": "listAssessmentSnapshots"},
+		"/api/v1/assessment-snapshots/{snapshotId}":             {"get": "getAssessmentSnapshot"},
+	} {
+		route, ok := paths[path].(map[string]any)
+		if !ok {
+			t.Errorf("assessment snapshot path %s missing", path)
+			continue
+		}
+		for method, operationID := range methods {
+			operation, ok := route[method].(map[string]any)
+			if !ok || operation["operationId"] != operationID {
+				t.Errorf("%s %s operationId=%v, want %s", method, path, operation["operationId"], operationID)
+			}
+		}
+	}
+
+	components, _ := doc["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	snapshot, _ := schemas["AssessmentSnapshot"].(map[string]any)
+	snapshotProperties, _ := snapshot["properties"].(map[string]any)
+	for _, forbidden := range []string{"tenant_id", "request_key", "request_hash", "evidence", "credentials"} {
+		if _, ok := snapshotProperties[forbidden]; ok {
+			t.Errorf("AssessmentSnapshot response exposes forbidden property %q", forbidden)
+		}
+	}
+	request, _ := schemas["FinalizeAssessmentSnapshotRequest"].(map[string]any)
+	requestProperties, _ := request["properties"].(map[string]any)
+	if len(requestProperties) != 1 || requestProperties["selected_runs"] == nil {
+		t.Errorf("FinalizeAssessmentSnapshotRequest must contain only server-resolved run/lane selections: %v", requestProperties)
+	}
+}
+
+func TestAssessmentComparisonOpenAPIContract(t *testing.T) {
+	b, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	paths, _ := doc["paths"].(map[string]any)
+	for path, methods := range map[string]map[string]string{
+		"/api/v1/assessment-comparisons":                                              {"post": "createAssessmentComparison"},
+		"/api/v1/assessment-comparisons/{comparisonId}":                               {"get": "getAssessmentComparison"},
+		"/api/v1/assessment-comparisons/{comparisonId}/items":                         {"get": "listAssessmentComparisonItems"},
+		"/api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/confirm":         {"post": "confirmAssessmentComparisonItem"},
+		"/api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/unlink":          {"post": "unlinkAssessmentComparisonItem"},
+	} {
+		route, ok := paths[path].(map[string]any)
+		if !ok {
+			t.Errorf("assessment comparison path %s missing", path)
+			continue
+		}
+		for method, operationID := range methods {
+			operation, ok := route[method].(map[string]any)
+			if !ok || operation["operationId"] != operationID {
+				t.Errorf("%s %s operationId=%v, want %s", method, path, operation["operationId"], operationID)
+			}
+		}
+	}
+	components, _ := doc["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	comparison, _ := schemas["AssessmentComparison"].(map[string]any)
+	properties, _ := comparison["properties"].(map[string]any)
+	for _, forbidden := range []string{"tenant_id", "input_payload", "credentials", "evidence"} {
+		if _, ok := properties[forbidden]; ok {
+			t.Errorf("AssessmentComparison response exposes forbidden property %q", forbidden)
+		}
+	}
+}

@@ -124,6 +124,27 @@ func TestAssessmentCycleCASConflict(t *testing.T) {
 	}
 }
 
+func TestAssessmentCycleClosureAndReopenBindManifestVersion(t *testing.T) {
+	now := time.Now().UTC()
+	cycle, err := assessmentcycle.NewAssessmentCycle("c-1", "t-1", "Cycle", assessmentcycle.BoundaryStandalone, "", "", "root-1", "alice", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cycle.CompleteWithManifest("manifest-1", cycle.Version, "reviewer", now.Add(time.Minute)); err != nil {
+		t.Fatalf("complete with manifest: %v", err)
+	}
+	if cycle.Status != assessmentcycle.StatusCompleted || cycle.ActiveClosureManifestID != "manifest-1" || cycle.ActiveClosureCycleVersion != cycle.Version {
+		t.Fatalf("completed cycle manifest binding=%+v", cycle)
+	}
+	completedVersion := cycle.Version
+	if err := cycle.ReopenFromManifest(completedVersion, "reviewer", now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("reopen from manifest: %v", err)
+	}
+	if cycle.Status != assessmentcycle.StatusOpen || !cycle.ActiveClosureManifestID.IsZero() || cycle.ActiveClosureCycleVersion != 0 || cycle.Version != completedVersion+1 {
+		t.Fatalf("reopened cycle=%+v", cycle)
+	}
+}
+
 func TestAssessmentCycleAdvanceRetest(t *testing.T) {
 	now := time.Now().UTC()
 	c, _ := assessmentcycle.NewAssessmentCycle(

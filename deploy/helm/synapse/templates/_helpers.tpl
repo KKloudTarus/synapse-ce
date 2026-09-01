@@ -86,6 +86,36 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.cryptography.evidenceSigningSeed.name is required" .Values.existingSecrets.cryptography.evidenceSigningSeed.name }}, key: {{ required "existingSecrets.cryptography.evidenceSigningSeed.key is required" .Values.existingSecrets.cryptography.evidenceSigningSeed.key }}}}
 - name: SYNAPSE_MEASURE_CURSOR_SECRET
   valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.cryptography.measureCursorSecret.name is required" .Values.existingSecrets.cryptography.measureCursorSecret.name }}, key: {{ required "existingSecrets.cryptography.measureCursorSecret.key is required" .Values.existingSecrets.cryptography.measureCursorSecret.key }}}}
+- name: SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED
+  value: {{ .Values.api.assessmentCycleApi.enabled | quote }}
+- name: SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED
+  value: {{ .Values.api.assessmentCycleApi.dualWriteEnabled | quote }}
+- name: SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS
+  value: {{ join "," .Values.api.assessmentCycleApi.dualWriteTenants | quote }}
+- name: SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED
+  value: {{ .Values.api.assessmentCycleApi.snapshotEnabled | quote }}
+- name: SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED
+  value: {{ .Values.api.assessmentCycleApi.identityComparisonShadowEnabled | quote }}
+- name: SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS
+  value: {{ join "," .Values.api.assessmentCycleApi.identityComparisonShadowTenants | quote }}
+- name: SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED
+  value: {{ .Values.api.assessmentCycleApi.lifecycleReadEnabled | quote }}
+- name: SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS
+  value: {{ join "," .Values.api.assessmentCycleApi.lifecycleReadTenants | quote }}
+- name: SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED
+  value: {{ .Values.api.assessmentCycleApi.lifecycleUiDefaultEnabled | quote }}
+- name: SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS
+  value: {{ join "," .Values.api.assessmentCycleApi.lifecycleUiDefaultTenants | quote }}
+- name: SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED
+  value: {{ .Values.api.assessmentCycleApi.closureReportEnabled | quote }}
+- name: SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE
+  value: {{ .Values.api.assessmentCycleApi.migrationBatchSize | quote }}
+- name: SYNAPSE_ASSESSMENT_PROCESS_TENANT_JOBS
+  value: {{ .Values.api.assessmentCycleApi.processTenantJobs | quote }}
+- name: SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_WARNING
+  value: {{ .Values.api.assessmentCycleApi.comparisonBacklogWarning | quote }}
+- name: SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT
+  value: {{ .Values.api.assessmentCycleApi.comparisonBacklogHardLimit | quote }}
 {{- if .Values.oidc.enabled }}
 - name: SYNAPSE_OIDC_ENABLED
   value: "true"

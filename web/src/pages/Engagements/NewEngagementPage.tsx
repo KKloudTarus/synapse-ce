@@ -31,11 +31,15 @@ export const NewEngagementPage: FC = () => {
       {/* Form */}
       <CreateEngagementForm
         initialAssetId={initialAssetId}
-        onCreated={(engagement, sourceMode, scanStartError) => {
-          if (sourceMode === 'upload') {
+        onCreated={(engagement, creationKind, scanStartError) => {
+          if (creationKind === 'upload') {
             navigate(`/engagements/${encodeURIComponent(engagement.id)}`, {
               state: scanStartError ? { scanStartError } : undefined,
             })
+            return
+          }
+          if (creationKind === 'retest') {
+            navigate(`/engagements/${encodeURIComponent(engagement.id)}`)
             return
           }
           navigate('/engagements')
