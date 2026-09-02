@@ -4,7 +4,7 @@ import type {
   ScopeTarget,
   UploadedSourcePackage,
 } from '../types'
-import { newIdempotencyKey, req } from './client'
+import { req } from './client'
 
 function createRequest(input: CreateEngagementInput) {
   return {
@@ -36,7 +36,6 @@ function mapEngagement(r: any): Engagement {
       blackouts: (r.RoE?.blackouts ?? []).map((b: any) => ({ from: b.from ?? '', to: b.to ?? '' })),
     },
     liveReconEnabled: r.LiveReconEnabled ?? false,
-    requiresExplicitExecutionAuthorization: r.RequiresExplicitExecutionAuthorization ?? false,
     createdAt: r.Audit?.CreatedAt ?? null,
     businessAssetId: r.BusinessAssetID ?? '',
     // Optional list-view enrichment; stays undefined when the API omits it.
@@ -63,7 +62,6 @@ export const engagementsApi = {
     mapEngagement(
       await req('/engagements', {
         method: 'POST',
-        headers: { 'Idempotency-Key': newIdempotencyKey() },
         body: JSON.stringify(createRequest(input)),
       }),
     ),
@@ -74,7 +72,6 @@ export const engagementsApi = {
     form.append('source', source)
     return mapEngagement(await req('/engagements', {
       method: 'POST',
-      headers: { 'Idempotency-Key': newIdempotencyKey() },
       body: form,
     }))
   },

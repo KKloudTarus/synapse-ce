@@ -2,14 +2,11 @@ package assessmentcycle
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
-	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -73,108 +70,6 @@ type CreateInitialCycleInput struct {
 	ProjectID        shared.ID
 	RootAssessmentID shared.ID
 	Actor            string
-}
-
-type BackfillHistoricalSingletonInput struct {
-	TenantID      shared.ID
-	AssessmentID  shared.ID
-	SchemaVersion int
-	Actor         string
-	DryRun        bool
-}
-
-type BackfillHistoricalSingletonResult struct {
-	CycleID     shared.ID
-	Created     bool
-	WouldCreate bool
-	ReasonCode  string
-}
-
-// BackfillHistoricalSingleton creates one history-preserving singleton Cycle for an eligible legacy Assessment.
-func (s *Service) BackfillHistoricalSingleton(ctx context.Context, in BackfillHistoricalSingletonInput) (BackfillHistoricalSingletonResult, error) {
-	tenantID := shared.TenantOrDefault(in.TenantID)
-	if tenantID.IsZero() || in.AssessmentID.IsZero() || in.SchemaVersion <= 0 {
-		return BackfillHistoricalSingletonResult{}, fmt.Errorf("%w: tenant, assessment, and schema version are required", shared.ErrValidation)
-	}
-	var result BackfillHistoricalSingletonResult
-	err := s.tx.Run(ctx, tenantID, func(txCtx context.Context) error {
-		assessment, err := s.engagements.GetByID(txCtx, in.AssessmentID)
-		if err != nil {
-			return fmt.Errorf("%w: load historical assessment %q: %v", shared.ErrNotFound, in.AssessmentID, err)
-		}
-		if assessment.TenantID != tenantID {
-			return fmt.Errorf("%w: historical assessment %q does not belong to tenant %q", shared.ErrNotFound, in.AssessmentID, tenantID)
-		}
-		if !assessment.ProjectID.IsZero() {
-			return assessmentcycle.ErrHiddenProjectContext
-		}
-		if existing, err := s.cycles.GetCycleByAssessment(txCtx, tenantID, in.AssessmentID); err == nil {
-			result = BackfillHistoricalSingletonResult{CycleID: existing.ID, ReasonCode: "already_in_cycle"}
-			return nil
-		} else if !errors.Is(err, shared.ErrNotFound) {
-			return err
-		}
-		if in.DryRun {
-			result = BackfillHistoricalSingletonResult{WouldCreate: true, ReasonCode: "would_create"}
-			return nil
-		}
-
-		createdAt := assessment.Audit.CreatedAt.UTC()
-		if createdAt.IsZero() {
-			createdAt = s.clock.Now().UTC()
-		}
-		updatedAt := assessment.Audit.UpdatedAt.UTC()
-		if updatedAt.IsZero() || updatedAt.Before(createdAt) {
-			updatedAt = createdAt
-		}
-		createdBy := strings.TrimSpace(assessment.Audit.CreatedBy)
-		updatedBy := strings.TrimSpace(assessment.Audit.UpdatedBy)
-		if updatedBy == "" {
-			updatedBy = createdBy
-		}
-		boundary := assessmentcycle.BoundaryStandalone
-		if !assessment.BusinessAssetID.IsZero() {
-			boundary = assessmentcycle.BoundaryAsset
-		}
-		cycleID := historicalSingletonCycleID(tenantID, in.AssessmentID, in.SchemaVersion)
-		cycle, err := assessmentcycle.NewAssessmentCycle(cycleID, tenantID, assessment.Name, boundary, assessment.BusinessAssetID, "", assessment.ID, createdBy, createdAt)
-		if err != nil {
-			return err
-		}
-		switch assessment.Status {
-		case engdom.StatusCompleted:
-			cycle.Status = assessmentcycle.StatusCompleted
-		case engdom.StatusArchived:
-			cycle.Status = assessmentcycle.StatusArchived
-		}
-		cycle.UpdatedAt, cycle.UpdatedBy = updatedAt, updatedBy
-		root, err := assessmentcycle.NewInitialMember(tenantID, cycleID, assessment.ID, createdBy, createdAt)
-		if err != nil {
-			return err
-		}
-		if err := s.cycles.CreateCycle(txCtx, cycle); err != nil {
-			return err
-		}
-		if err := s.cycles.CreateMember(txCtx, root); err != nil {
-			if cleanup, ok := s.cycles.(ports.AssessmentCycleCompensationRepository); ok {
-				return errors.Join(err, cleanup.DeleteCycle(context.WithoutCancel(txCtx), tenantID, cycleID))
-			}
-			return err
-		}
-		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{Actor: strings.TrimSpace(in.Actor), Action: "assessment_cycle.backfill_created", Target: cycleID.String(), Metadata: map[string]string{
-				"tenant_id": tenantID.String(), "assessment_id": assessment.ID.String(), "schema_version": fmt.Sprintf("%d", in.SchemaVersion),
-			}, At: s.clock.Now().UTC()})
-		}
-		result = BackfillHistoricalSingletonResult{CycleID: cycleID, Created: true, ReasonCode: "created"}
-		return nil
-	})
-	return result, err
-}
-
-func historicalSingletonCycleID(tenantID, assessmentID shared.ID, schemaVersion int) shared.ID {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d", tenantID, assessmentID, schemaVersion)))
-	return shared.ID("acy-bf-" + hex.EncodeToString(sum[:16]))
 }
 
 // CreateInitialCycle atomically creates an AssessmentCycle and its root initial Member.
@@ -288,9 +183,6 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 			return err
 		}
 		if err := s.cycles.CreateMember(txCtx, rootMember); err != nil {
-			if cleanup, ok := s.cycles.(ports.AssessmentCycleCompensationRepository); ok {
-				return errors.Join(err, cleanup.DeleteCycle(context.WithoutCancel(txCtx), tenantID, cycleID))
-			}
 			return err
 		}
 
@@ -329,8 +221,8 @@ type CreateRetestInput struct {
 // CreateRetest atomically adds a new re-test member to an open AssessmentCycle and updates the cycle sequence.
 func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*assessmentcycle.Member, error) {
 	tenantID := shared.TenantOrDefault(in.TenantID)
-	if tenantID.IsZero() || in.CycleID.IsZero() || in.NewAssessmentID.IsZero() {
-		return nil, fmt.Errorf("%w: tenant, cycle, and new assessment ids are required", shared.ErrValidation)
+	if tenantID.IsZero() || in.CycleID.IsZero() || in.PredecessorAssessmentID.IsZero() || in.NewAssessmentID.IsZero() {
+		return nil, fmt.Errorf("%w: tenant, cycle, predecessor, and new assessment ids are required", shared.ErrValidation)
 	}
 
 	var createdMember *assessmentcycle.Member
@@ -342,23 +234,16 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 			return err
 		}
 		if cycle.Status != assessmentcycle.StatusOpen {
-			if cycle.Status == assessmentcycle.StatusCompleted {
-				return assessmentcycle.ErrCycleReopenRequired
-			}
-			return assessmentcycle.ErrCycleArchived
-		}
-		predecessorID := in.PredecessorAssessmentID
-		if predecessorID.IsZero() {
-			predecessorID = cycle.SelectedHeadAssessmentID
+			return fmt.Errorf("%w: cannot add retest to non-open cycle (status: %s)", shared.ErrValidation, cycle.Status)
 		}
 
 		// 2. Validate predecessor member
-		predMember, err := s.cycles.GetMember(txCtx, tenantID, in.CycleID, predecessorID)
+		predMember, err := s.cycles.GetMember(txCtx, tenantID, in.CycleID, in.PredecessorAssessmentID)
 		if err != nil {
-			return fmt.Errorf("%w: predecessor %q not found in cycle: %v", shared.ErrNotFound, predecessorID, err)
+			return fmt.Errorf("%w: predecessor %q not found in cycle: %v", shared.ErrNotFound, in.PredecessorAssessmentID, err)
 		}
 		if predMember.IsArchived() {
-			return fmt.Errorf("%w: predecessor %q is archived", shared.ErrValidation, predecessorID)
+			return fmt.Errorf("%w: predecessor %q is archived", shared.ErrValidation, in.PredecessorAssessmentID)
 		}
 
 		// 3. Validate new assessment
@@ -403,15 +288,14 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 			expectedVer = cycle.Version
 		}
 
-		originalCycle := *cycle
-		retestNumber, err := cycle.AdvanceRetest(in.NewAssessmentID, predecessorID, expectedVer, in.Actor, now)
+		retestNumber, err := cycle.AdvanceRetest(in.NewAssessmentID, in.PredecessorAssessmentID, expectedVer, in.Actor, now)
 		if err != nil {
 			return err
 		}
 
 		// 5. Build member
 		retestMember, err := assessmentcycle.NewRetestMember(
-			tenantID, in.CycleID, in.NewAssessmentID, predecessorID,
+			tenantID, in.CycleID, in.NewAssessmentID, in.PredecessorAssessmentID,
 			retestNumber, in.Actor, now,
 		)
 		if err != nil {
@@ -423,7 +307,7 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 			return err
 		}
 		if err := s.cycles.CreateMember(txCtx, retestMember); err != nil {
-			return errors.Join(err, s.cycles.UpdateCycleCAS(context.WithoutCancel(txCtx), &originalCycle, cycle.Version))
+			return err
 		}
 
 		// 7. Audit event
@@ -435,7 +319,7 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 				Metadata: map[string]string{
 					"tenant_id":        tenantID.String(),
 					"assessment_id":    in.NewAssessmentID.String(),
-					"predecessor_id":   predecessorID.String(),
+					"predecessor_id":   in.PredecessorAssessmentID.String(),
 					"retest_number":    fmt.Sprintf("%d", retestNumber),
 					"selected_head_id": cycle.SelectedHeadAssessmentID.String(),
 				},
@@ -808,55 +692,6 @@ func (s *Service) ArchiveCycle(ctx context.Context, in ArchiveCycleInput) error 
 
 		return nil
 	})
-}
-
-func (s *Service) compensateInitialCreate(ctx context.Context, tenantID, cycleID shared.ID) error {
-	cleanup, ok := s.cycles.(ports.AssessmentCycleCompensationRepository)
-	if !ok {
-		return fmt.Errorf("%w: assessment cycle compensation is unavailable", shared.ErrConflict)
-	}
-	return cleanup.DeleteCycle(ctx, shared.TenantOrDefault(tenantID), cycleID)
-}
-
-func (s *Service) compensateCycleMutation(ctx context.Context, original *assessmentcycle.AssessmentCycle, createdAssessmentID shared.ID) error {
-	if original == nil {
-		return fmt.Errorf("%w: original assessment cycle is required", shared.ErrValidation)
-	}
-	current, err := s.cycles.GetCycle(ctx, original.TenantID, original.ID)
-	if err != nil {
-		return err
-	}
-	if err := s.cycles.UpdateCycleCAS(ctx, original, current.Version); err != nil {
-		return err
-	}
-	if createdAssessmentID.IsZero() {
-		return nil
-	}
-	cleanup, ok := s.cycles.(ports.AssessmentCycleCompensationRepository)
-	if !ok {
-		return fmt.Errorf("%w: assessment cycle member compensation is unavailable", shared.ErrConflict)
-	}
-	return cleanup.DeleteMember(ctx, original.TenantID, original.ID, createdAssessmentID)
-}
-
-func (s *Service) compensateRelationshipMutation(ctx context.Context, originalCycle *assessmentcycle.AssessmentCycle, originalMember *assessmentcycle.Member) error {
-	if originalCycle == nil {
-		return fmt.Errorf("%w: original assessment cycle is required", shared.ErrValidation)
-	}
-	if originalMember != nil {
-		currentMember, err := s.cycles.GetMember(ctx, originalMember.TenantID, originalMember.CycleID, originalMember.AssessmentID)
-		if err != nil {
-			return err
-		}
-		if err := s.cycles.UpdateMemberCAS(ctx, originalMember, currentMember.RelationshipVersion); err != nil {
-			return err
-		}
-	}
-	currentCycle, err := s.cycles.GetCycle(ctx, originalCycle.TenantID, originalCycle.ID)
-	if err != nil {
-		return err
-	}
-	return s.cycles.UpdateCycleCAS(ctx, originalCycle, currentCycle.Version)
 }
 
 // GetCycle retrieves an AssessmentCycle by ID.

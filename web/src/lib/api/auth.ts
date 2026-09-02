@@ -7,16 +7,7 @@ export const authApi = {
   acceptAup: (version: string): Promise<unknown> =>
     req('/aup/accept', { method: 'POST', body: JSON.stringify({ version }) }),
 
-  me: async (): Promise<CurrentUser> => {
-    const value = await req('/me')
-    return {
-      id: value.id ?? '', name: value.name ?? '', role: value.role ?? '',
-      features: value.features ? {
-        assessmentLifecycleRead: Boolean(value.features.assessment_lifecycle_read),
-        assessmentLifecycleUIDefault: Boolean(value.features.assessment_lifecycle_ui_default),
-      } : undefined,
-    }
-  },
+  me: async (): Promise<CurrentUser> => req('/me'),
 }
 
 export const teamApi = {

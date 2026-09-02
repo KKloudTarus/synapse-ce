@@ -4,8 +4,6 @@
 
 Synapse is clean-architecture Go. Dependencies point inward only.
 
-External CI/CD connections use the same rule: provider-neutral domain/use-case contracts depend on a code-owned registry, while Jenkins lives in infrastructure. See [External CI/CD integrations](integrations.md).
-
 ```
 domain  <-  usecase  <-  adapter / infrastructure
 ```
@@ -35,15 +33,9 @@ authorization window, and lifecycle gate all execution. They are independent agg
 owns the other. Both may invoke the same analysis pipeline, while future project analyses reference
 their Project instead of duplicating or forking that engine.
 
-An **Assessment Cycle** owns rooted Assessment/Re-test ancestry and a frozen Asset/Project boundary.
-Immutable Snapshots own selected sealed run inputs; Comparisons own directional presence results.
-Closure manifests are built transactionally, sealed once, and thereafter may only be superseded.
-Their ordered path and typed immutable references remain tenant-scoped under forced PostgreSQL RLS.
-All lifecycle rollout flags default off, and startup migrations never execute historical backfills.
-
 ## Binaries
 
-`cmd/` holds the service, operational, helper, and agent composition roots.
+`cmd/` holds 15 composition roots. They fall into four groups.
 
 **Services**
 
@@ -58,18 +50,6 @@ All lifecycle rollout flags default off, and startup migrations never execute hi
 | Binary | Role |
 | --- | --- |
 | `synapse-cli` | CI-oriented scanner and code-quality gate using the same pipeline as the server. |
-
-**Operational commands**
-
-| Binary | Role |
-| --- | --- |
-| `synapse-migrate` | Applies embedded PostgreSQL migrations under the dedicated migration role. |
-| `synapse-assessment-backfill` | Runs the resumable, tenant-scoped historical singleton-Cycle backfill; never runs during API/worker startup. |
-| `synapse-assessment-snapshot-backfill` | Projects historical scan evidence into append-only legacy Assessment Snapshots with explicit unknown coverage. |
-| `synapse-finding-lineage-backfill` | Converts legacy Findings into versioned Identities, immutable Observations, review Candidates, and explicit redacted Skip records. |
-| `synapse-assessment-integrity` | Runs the resumable, read-only Cycle integrity verifier and emits deterministic repair plans. |
-
-Historical relationship review remains inside `synapse-api`: the service derives immutable candidates from frozen Cycle/Snapshot/Finding inputs, the HTTP edge gates every route with `PermReview`, and PostgreSQL stores append-only candidates, decisions, and blocked repair plans. Confirmation deliberately has no executor and no Cycle-graph mutation path.
 
 **Sandboxed helpers**
 

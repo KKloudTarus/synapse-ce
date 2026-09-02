@@ -62,23 +62,6 @@ func TestCreateUserAdminOnly(t *testing.T) {
 	}
 }
 
-func TestCurrentUserReportsTenantLifecycleRollout(t *testing.T) {
-	router := newUsersRouter(t)
-	router.SetAssessmentLifecycleRollout(func(tenantID string) bool { return tenantID == "tenant-canary" }, func(tenantID string) bool { return tenantID == "tenant-canary" })
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil).WithContext(context.WithValue(context.Background(), principalKey, Principal{ID: "p1", Name: "P", Role: "member", TenantID: "tenant-other"}))
-	recorder := httptest.NewRecorder()
-	router.currentUser(recorder, request)
-	var response struct {
-		Features map[string]bool `json:"features"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.Features["assessment_lifecycle_read"] || response.Features["assessment_lifecycle_ui_default"] {
-		t.Fatalf("non-canary features = %v", response.Features)
-	}
-}
-
 func TestListUsersAdminOnly(t *testing.T) {
 	rt := newUsersRouter(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil).WithContext(ctxAs("member"))

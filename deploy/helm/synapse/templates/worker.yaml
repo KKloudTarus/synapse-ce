@@ -49,14 +49,6 @@ spec:
             {{- include "synapse.runtimeEnv" . | nindent 12 }}
             - name: SYNAPSE_LEADER_ENABLED
               value: "true"
-            - name: SYNAPSE_INTEGRATION_SCHEDULER_ENABLED
-              value: {{ .Values.worker.integrationScheduler.enabled | quote }}
-            - name: SYNAPSE_INTEGRATION_SCHEDULER_POLL
-              value: {{ .Values.worker.integrationScheduler.poll | quote }}
-            - name: SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT
-              value: {{ .Values.worker.integrationScheduler.dispatchLimit | quote }}
-            - name: SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH
-              value: {{ .Values.worker.integrationScheduler.maxQueueDepth | quote }}
             - name: SYNAPSE_METRICS_ENABLED
               value: "false"
           resources:

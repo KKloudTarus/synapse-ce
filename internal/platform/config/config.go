@@ -15,13 +15,6 @@ import (
 const (
 	defaultWorkerConcurrency       = 1
 	maxWorkerConcurrency           = 64
-	defaultAssessmentBatchSize     = 500
-	maxAssessmentBatchSize         = 2000
-	defaultAssessmentTenantJobs    = 4
-	maxAssessmentTenantJobs        = 4
-	defaultComparisonBacklogWarn   = 500
-	defaultComparisonBacklogHard   = 1000
-	maxComparisonBacklogHard       = 1000
 	defaultFPTriageMaxFindings     = 100
 	maxFPTriageMaxFindings         = 1000
 	defaultFPTriageConcurrency     = 6
@@ -363,10 +356,6 @@ type Config struct {
 	LeaderRenew time.Duration
 	// WorkerConcurrency is the number of durable-queue claim loops in one synapse-worker process.
 	WorkerConcurrency int
-	// WorkerProfile narrows synapse-worker composition and queue claims. "all" keeps the
-	// hardened scanner worker; "integrations" runs only provider polling jobs and needs no
-	// executable-tool sandbox.
-	WorkerProfile WorkerProfile
 	// VulnerabilitySchedulerEnabled dispatches due vulnerability-source syncs and recovers stale
 	// runs. Postgres deployments must also enable fenced leader election to prevent duplicate work.
 	VulnerabilitySchedulerEnabled      bool
@@ -376,12 +365,6 @@ type Config struct {
 	VulnerabilitySchedulerDispatch     int
 	VulnerabilitySchedulerQueueDepth   int
 	VulnerabilitySchedulerRecovery     int
-	// IntegrationSchedulerEnabled dispatches polling operations for enabled external CI/CD
-	// integrations. The maintenance task is leader-gated by synapse-worker.
-	IntegrationSchedulerEnabled    bool
-	IntegrationSchedulerInterval   time.Duration
-	IntegrationSchedulerDispatch   int
-	IntegrationSchedulerQueueDepth int
 	// Vulnerability rollout gates default off. Tenant-scoped mutations additionally require
 	// an explicit tenant allowlist entry; "*" enables all tenants. Dry-run records correlation
 	// differences without mutating occurrences, findings, actions, or notification outbox rows.
@@ -395,25 +378,6 @@ type Config struct {
 	// SLAEnabled turns on durable risk-based remediation deadlines, versioned tenant policy, and
 	// human lifecycle APIs. Default false until an operator explicitly opts into the new schema/path.
 	SLAEnabled bool
-	// AssessmentCycleAPIEnabled atomically creates initial Assessment Cycles and exposes
-	// tenant-scoped lifecycle/Re-test/archive APIs. Default false for staged rollout.
-	AssessmentCycleAPIEnabled bool
-	// Assessment lifecycle rollout gates remain independent and disabled until their
-	// corresponding migration/backfill/canary slice is ready.
-	AssessmentCycleDualWriteEnabled bool
-	AssessmentCycleDualWriteTenants []string
-	AssessmentSnapshotEnabled       bool
-	AssessmentShadowEnabled         bool
-	AssessmentShadowTenants         []string
-	AssessmentLifecycleReadEnabled  bool
-	AssessmentLifecycleReadTenants  []string
-	AssessmentLifecycleUIDefault    bool
-	AssessmentLifecycleUITenants    []string
-	AssessmentClosureEnabled        bool
-	AssessmentBatchSize             int
-	AssessmentTenantJobs            int
-	AssessmentBacklogWarning        int
-	AssessmentBacklogHardLimit      int
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
@@ -797,7 +761,6 @@ func Load() Config {
 		LeaderTerm:                            getduration("SYNAPSE_LEADER_TERM", 15*time.Second),
 		LeaderRenew:                           getduration("SYNAPSE_LEADER_RENEW", 5*time.Second),
 		WorkerConcurrency:                     getint("SYNAPSE_WORKER_CONCURRENCY", defaultWorkerConcurrency),
-		WorkerProfile:                         WorkerProfile(normalizeEnv(getenv("SYNAPSE_WORKER_PROFILE", string(WorkerProfileAll)))),
 		VulnerabilitySchedulerEnabled:         getbool("SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED", false),
 		VulnerabilitySchedulerPollInterval:    getduration("SYNAPSE_VULNERABILITY_SCHEDULER_POLL", time.Minute),
 		VulnerabilitySchedulerStaleAfter:      getduration("SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER", 30*time.Minute),
@@ -805,10 +768,6 @@ func Load() Config {
 		VulnerabilitySchedulerDispatch:        getint("SYNAPSE_VULNERABILITY_SCHEDULER_DISPATCH_LIMIT", 10),
 		VulnerabilitySchedulerQueueDepth:      getint("SYNAPSE_VULNERABILITY_SCHEDULER_MAX_QUEUE_DEPTH", 100),
 		VulnerabilitySchedulerRecovery:        getint("SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT", 10),
-		IntegrationSchedulerEnabled:           getbool("SYNAPSE_INTEGRATION_SCHEDULER_ENABLED", false),
-		IntegrationSchedulerInterval:          getduration("SYNAPSE_INTEGRATION_SCHEDULER_POLL", time.Minute),
-		IntegrationSchedulerDispatch:          getint("SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT", 10),
-		IntegrationSchedulerQueueDepth:        getint("SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH", 100),
 		VulnerabilityProviderSyncEnabled:      getbool("SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", false),
 		VulnerabilityOccurrenceWritesEnabled:  getbool("SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED", false),
 		VulnerabilityFindingProjectionEnabled: getbool("SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED", false),
@@ -817,21 +776,6 @@ func Load() Config {
 		VulnerabilityDryRunEnabled:            getbool("SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED", true),
 		VulnerabilityTenantAllowlist:          splitList(getenv("SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "")),
 		SLAEnabled:                            getbool("SYNAPSE_SLA_ENABLED", false),
-		AssessmentCycleAPIEnabled:             getbool("SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED", false),
-		AssessmentCycleDualWriteEnabled:       getbool("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED", false),
-		AssessmentCycleDualWriteTenants:       splitList(getenv("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS", "")),
-		AssessmentSnapshotEnabled:             getbool("SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED", false),
-		AssessmentShadowEnabled:               getbool("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED", false),
-		AssessmentShadowTenants:               splitList(getenv("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS", "")),
-		AssessmentLifecycleReadEnabled:        getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED", false),
-		AssessmentLifecycleReadTenants:        splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS", "")),
-		AssessmentLifecycleUIDefault:          getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED", false),
-		AssessmentLifecycleUITenants:          splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS", "")),
-		AssessmentClosureEnabled:              getbool("SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED", false),
-		AssessmentBatchSize:                   getint("SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE", defaultAssessmentBatchSize),
-		AssessmentTenantJobs:                  getint("SYNAPSE_ASSESSMENT_PROCESS_TENANT_JOBS", defaultAssessmentTenantJobs),
-		AssessmentBacklogWarning:              getint("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_WARNING", defaultComparisonBacklogWarn),
-		AssessmentBacklogHardLimit:            getint("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT", defaultComparisonBacklogHard),
 		GovulncheckBin:                        getenv("SYNAPSE_GOVULNCHECK_BIN", "govulncheck"),
 		GoModGraphEnabled:                     getbool("SYNAPSE_GOMODGRAPH_ENABLED", true),
 		GoBin:                                 getenv("SYNAPSE_GO_BIN", "go"),
@@ -1059,33 +1003,6 @@ const (
 	ProcessRoleCLI    ProcessRole = "cli"
 )
 
-// WorkerProfile selects the smallest safe composition for a durable worker.
-type WorkerProfile string
-
-const (
-	WorkerProfileAll          WorkerProfile = "all"
-	WorkerProfileIntegrations WorkerProfile = "integrations"
-)
-
-func (c Config) ValidateWorkerProfile() error {
-	switch c.WorkerProfile {
-	case WorkerProfileAll, WorkerProfileIntegrations:
-		return nil
-	default:
-		return fmt.Errorf("SYNAPSE_WORKER_PROFILE must be %q or %q (got %q)", WorkerProfileAll, WorkerProfileIntegrations, c.WorkerProfile)
-	}
-}
-
-// ValidateWorkerSandboxPosture preserves the scanner worker's production fail-closed
-// sandbox gate while allowing the integration-only worker, which never constructs or
-// claims an executable-tool handler.
-func (c Config) ValidateWorkerSandboxPosture() error {
-	if c.WorkerProfile == WorkerProfileIntegrations {
-		return nil
-	}
-	return c.ValidateSandboxPosture()
-}
-
 // ResolveToolExecution decides how role may execute tools, failing closed on any
 // combination that would let a production API run an untrusted tool locally.
 //
@@ -1103,7 +1020,7 @@ func (c Config) ResolveToolExecution(role ProcessRole) (ToolExecution, error) {
 		if c.DBDSN == "" {
 			return "", errors.New("synapse-worker requires SYNAPSE_DB_DSN: queued execution cannot use process-local persistence")
 		}
-		if c.IsProduction() && !c.SandboxEnabled && c.WorkerProfile != WorkerProfileIntegrations {
+		if c.IsProduction() && !c.SandboxEnabled {
 			return "", errors.New("production synapse-worker requires SYNAPSE_SANDBOX_ENABLED=true")
 		}
 		return ToolExecutionWorker, nil
@@ -1212,105 +1129,6 @@ func (c Config) ValidateWorkerConcurrency() error {
 		return fmt.Errorf("SYNAPSE_WORKER_CONCURRENCY must be between 1 and %d (got %d)", maxWorkerConcurrency, c.WorkerConcurrency)
 	}
 	return nil
-}
-
-// ValidateAssessmentLifecycleRollout rejects rollout settings that can create
-// unbounded migration work or expose UI/closure paths before their read inputs.
-func (c Config) ValidateAssessmentLifecycleRollout() error {
-	if c.AssessmentCycleDualWriteEnabled && len(c.AssessmentCycleDualWriteTenants) == 0 {
-		return errors.New("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED requires SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS")
-	}
-	if c.AssessmentBatchSize < 1 || c.AssessmentBatchSize > maxAssessmentBatchSize {
-		return fmt.Errorf("SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE must be between 1 and %d (got %d)", maxAssessmentBatchSize, c.AssessmentBatchSize)
-	}
-	if c.AssessmentTenantJobs < 1 || c.AssessmentTenantJobs > maxAssessmentTenantJobs {
-		return fmt.Errorf("SYNAPSE_ASSESSMENT_PROCESS_TENANT_JOBS must be between 1 and %d (got %d)", maxAssessmentTenantJobs, c.AssessmentTenantJobs)
-	}
-	if c.AssessmentBacklogWarning < 1 || c.AssessmentBacklogWarning > defaultComparisonBacklogWarn {
-		return fmt.Errorf("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_WARNING must be between 1 and %d (got %d)", defaultComparisonBacklogWarn, c.AssessmentBacklogWarning)
-	}
-	if c.AssessmentBacklogHardLimit < c.AssessmentBacklogWarning || c.AssessmentBacklogHardLimit > maxComparisonBacklogHard {
-		return fmt.Errorf("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT must be between warning threshold %d and %d (got %d)", c.AssessmentBacklogWarning, maxComparisonBacklogHard, c.AssessmentBacklogHardLimit)
-	}
-	if c.AssessmentShadowEnabled && !c.AssessmentSnapshotEnabled {
-		return errors.New("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED requires SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED=true")
-	}
-	if c.AssessmentShadowEnabled && len(c.AssessmentShadowTenants) == 0 {
-		return errors.New("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED requires SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS")
-	}
-	if c.AssessmentLifecycleReadEnabled && (!c.AssessmentShadowEnabled || len(c.AssessmentLifecycleReadTenants) == 0) {
-		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED requires shadow generation and SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
-	}
-	if !tenantAllowlistCovers(c.AssessmentShadowTenants, c.AssessmentLifecycleReadTenants) {
-		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS must be a subset of SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS")
-	}
-	if c.AssessmentLifecycleUIDefault && !c.AssessmentLifecycleReadEnabled {
-		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED=true")
-	}
-	if c.AssessmentLifecycleUIDefault && len(c.AssessmentLifecycleUITenants) == 0 {
-		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS")
-	}
-	if !tenantAllowlistCovers(c.AssessmentLifecycleReadTenants, c.AssessmentLifecycleUITenants) {
-		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS must be a subset of SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
-	}
-	if c.AssessmentClosureEnabled && (!c.AssessmentLifecycleReadEnabled || !c.AssessmentSnapshotEnabled || !c.AssessmentShadowEnabled) {
-		return errors.New("SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED requires lifecycle read, snapshots, and identity/comparison shadow generation")
-	}
-	return nil
-}
-
-func (c Config) AssessmentCycleDualWriteForTenant(tenantID string) bool {
-	if c.AssessmentCycleAPIEnabled {
-		return true
-	}
-	return tenantFeatureEnabled(c.AssessmentCycleDualWriteEnabled, c.AssessmentCycleDualWriteTenants, tenantID)
-}
-
-func (c Config) AssessmentShadowForTenant(tenantID string) bool {
-	return tenantFeatureEnabled(c.AssessmentShadowEnabled, c.AssessmentShadowTenants, tenantID)
-}
-
-func (c Config) AssessmentLifecycleReadForTenant(tenantID string) bool {
-	return tenantFeatureEnabled(c.AssessmentLifecycleReadEnabled, c.AssessmentLifecycleReadTenants, tenantID)
-}
-
-func (c Config) AssessmentLifecycleUIForTenant(tenantID string) bool {
-	return tenantFeatureEnabled(c.AssessmentLifecycleUIDefault, c.AssessmentLifecycleUITenants, tenantID)
-}
-
-func tenantFeatureEnabled(enabled bool, allowlist []string, tenantID string) bool {
-	if !enabled {
-		return false
-	}
-	tenantID = strings.TrimSpace(tenantID)
-	for _, allowed := range allowlist {
-		if allowed == "*" || allowed == tenantID {
-			return true
-		}
-	}
-	return false
-}
-
-func tenantAllowlistCovers(parent, child []string) bool {
-	if len(child) == 0 {
-		return true
-	}
-	allowed := make(map[string]struct{}, len(parent))
-	for _, tenantID := range parent {
-		allowed[tenantID] = struct{}{}
-	}
-	if _, all := allowed["*"]; all {
-		return true
-	}
-	for _, tenantID := range child {
-		if tenantID == "*" {
-			return false
-		}
-		if _, ok := allowed[tenantID]; !ok {
-			return false
-		}
-	}
-	return true
 }
 
 // ValidateOIDCPosture fails closed when the browser OIDC BFF cannot bind identity/session state to a fixed tenant.

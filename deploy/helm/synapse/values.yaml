@@ -18,22 +18,6 @@ web:
 
 api:
   replicaCount: 2
-  assessmentCycleApi:
-    enabled: false
-    dualWriteEnabled: false
-    dualWriteTenants: []
-    snapshotEnabled: false
-    identityComparisonShadowEnabled: false
-    identityComparisonShadowTenants: []
-    lifecycleReadEnabled: false
-    lifecycleReadTenants: []
-    lifecycleUiDefaultEnabled: false
-    lifecycleUiDefaultTenants: []
-    closureReportEnabled: false
-    migrationBatchSize: 500
-    processTenantJobs: 4
-    comparisonBacklogWarning: 500
-    comparisonBacklogHardLimit: 1000
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -76,11 +60,6 @@ worker:
   nodeSelector: {}
   tolerations: []
   affinity: {}
-  integrationScheduler:
-    enabled: false
-    poll: 1m
-    dispatchLimit: 10
-    maxQueueDepth: 100
   resources:
     requests: {cpu: 500m, memory: 1Gi}
     limits: {cpu: "2", memory: 2Gi}

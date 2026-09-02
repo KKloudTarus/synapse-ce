@@ -50,6 +50,8 @@ GET /api/v1/engagements/{p}/risk-stories
 GET /api/v1/engagements/{p}/risk-stories/{p}
 GET /api/v1/engagements/{p}/sbom
 GET /api/v1/engagements/{p}/scan
+GET /api/v1/engagements/{p}/scan-runs
+GET /api/v1/engagements/{p}/scan-runs/compare
 GET /api/v1/engagements/{p}/scan-status
 GET /api/v1/engagements/{p}/threat-model
 GET /api/v1/engagements/{p}/vulnerability/actions

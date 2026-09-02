@@ -38,7 +38,6 @@ architectural boundaries that keep execution auditable.
 | [Backup, restore, and upgrade recovery](backup-restore-upgrade.md) | Quiesced paired backups, restore verification, active-write characterization, and safe upgrades |
 | [CLI](cli.md) | Scanning, code-quality gates, advisory maintenance, imports, and exit contracts |
 | [MCP integration](mcp-integration.md) | Read/propose-only tool access scoped to one engagement |
-| [External CI/CD integrations](integrations.md) | Jenkins onboarding, provider-neutral architecture, polling operations, correlation, and security boundaries |
 | [Fleet agent packaging](fleet-agent-packaging.md) | Package, identity, rollout, upgrade, and uninstall contracts |
 | [AI triage evaluation](ai-triage-evaluation.md) | Offline datasets, comparison gates, promotion, rollback, and drift detection |
 | [Operations drill evidence](operations-drill-evidence.md) | Versioned, redacted evidence for backup, restore, and rollback-on-copy drills |
