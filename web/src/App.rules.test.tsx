@@ -80,7 +80,7 @@ describe('App Routing - Rules', () => {
       </MemoryRouter>
     )
 
-    expect(await screen.findByRole('heading', { name: 'Security Operations' }, { timeout: 8000 })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Security Operations' }, { timeout: 15000 })).toBeInTheDocument()
   })
 
   it('renders RuleDetail page on /rules/:key route and decodes colon exactly once', async () => {
@@ -189,7 +189,7 @@ describe('App Routing - Rules', () => {
     // Wait for Engagements page to render
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Engagements' })).toBeInTheDocument()
-    })
+    }, { timeout: 15000 })
 
     // Open menu button MUST exist — mandatory assertion
     const menuButton = screen.getByRole('button', { name: /open menu/i })

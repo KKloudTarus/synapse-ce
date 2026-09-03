@@ -443,7 +443,10 @@ func TestHostileHarness(t *testing.T) {
 		{"readonly may list projects", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects", http.StatusOK},
 		{"readonly may get own-tenant project", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a", http.StatusOK},
 		{"readonly may read project analysis status", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/analysis-status", http.StatusNotFound},
+		{"readonly may read project dependency graph", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/dependency-graph", http.StatusNotFound},
+		{"readonly may export project dependency graph", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/dependency-graph/export", http.StatusNotFound},
 		{"readonly may list project hotspots", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/hotspots", http.StatusOK},
+		{"machine may not read project dependency graph", "agent", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/dependency-graph", http.StatusForbidden},
 		{"machine may not list project hotspots", "agent", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/hotspots", http.StatusForbidden},
 		// RBAC deny: readonly holds only view.
 		{"readonly may not create (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements", http.StatusForbidden},
@@ -473,6 +476,8 @@ func TestHostileHarness(t *testing.T) {
 		{"same-tenant engagement read → 200", "consultant", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA", http.StatusOK},
 		{"cross-tenant project read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a", http.StatusNotFound},
 		{"cross-tenant project analysis → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a/analysis", http.StatusNotFound},
+		{"cross-tenant project dependency graph → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a/dependency-graph", http.StatusNotFound},
+		{"cross-tenant project dependency export → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a/dependency-graph/export", http.StatusNotFound},
 		{"cross-tenant project hotspots → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a/hotspots", http.StatusNotFound},
 		{"same-tenant project read → 200", "consultant", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a", http.StatusOK},
 		// Sign-off routes (PermReview) – the crown-jewel separation-of-duties gates. A machine role

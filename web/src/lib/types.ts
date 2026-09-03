@@ -1061,6 +1061,56 @@ export interface LatestProjectAnalysis {
   result: ScanResult
 }
 
+export interface ProjectDependencyLicense {
+  id: string
+  name: string
+  category: LicenseCategory
+}
+
+export interface ProjectDependencyVulnerability {
+  id: string
+  source: string
+  severity: Severity
+  fixedVersion: string
+}
+
+export interface ProjectDependencyNode {
+  id: string
+  name: string
+  version: string
+  purl: string
+  scope: string
+  reachability: string
+  direct: boolean
+  depth: number
+  licenses: ProjectDependencyLicense[]
+  licenseRisk: boolean
+  licenseVerdict: Verdict | ''
+  vulnerabilities: ProjectDependencyVulnerability[]
+  vulnerabilityCount: number
+  worstSeverity: Severity | ''
+}
+
+export interface ProjectDependencyEdge {
+  from: string
+  to: string
+}
+
+export interface ProjectDependencyGraph {
+  analysisId: string
+  roots: string[]
+  nodes: ProjectDependencyNode[]
+  edges: ProjectDependencyEdge[]
+  summary: {
+    components: number
+    direct: number
+    transitive: number
+    vulnerable: number
+    licenseRisk: number
+    edges: number
+  }
+}
+
 // --- Rules API ---
 
 export type RuleType =
