@@ -91,7 +91,7 @@ describe('Engagements', () => {
       id: 'eng-upload', name: 'Uploaded assessment', client: '', status: 'draft',
       inScope: [{ kind: 'repo', value: `uploaded-source/sha256/${'b'.repeat(64)}` }], outOfScope: [],
       authorizedFrom: null, authorizedTo: null, roe: { allowedToolClasses: [], blackouts: [] },
-      liveReconEnabled: false, requiresExplicitExecutionAuthorization: false, createdAt: '2026-08-28T00:00:00Z', businessAssetId: '',
+      liveReconEnabled: false, createdAt: '2026-08-28T00:00:00Z', businessAssetId: '',
     }
     vi.mocked(api.createEngagementFromSource).mockResolvedValue(created)
     vi.mocked(api.startScan).mockResolvedValue({
@@ -133,7 +133,6 @@ describe('Engagements', () => {
         authorizedTo: null,
         roe: { allowedToolClasses: [], blackouts: [] },
         liveReconEnabled: false,
-        requiresExplicitExecutionAuthorization: false,
         createdAt: '2026-08-20T10:00:00Z',
         businessAssetId: 'a1',
       },
@@ -148,7 +147,6 @@ describe('Engagements', () => {
         authorizedTo: null,
         roe: { allowedToolClasses: [], blackouts: [] },
         liveReconEnabled: false,
-        requiresExplicitExecutionAuthorization: false,
         createdAt: '2026-08-10T10:00:00Z',
         businessAssetId: '',
       },

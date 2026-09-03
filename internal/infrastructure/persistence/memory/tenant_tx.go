@@ -14,8 +14,6 @@ type TenantTransactionRunner struct {
 	mu sync.Mutex
 }
 
-type tenantTransactionKey struct{}
-
 // NewTenantTransactionRunner constructs an in-memory TenantTransactionRunner.
 func NewTenantTransactionRunner() *TenantTransactionRunner {
 	return &TenantTransactionRunner{}
@@ -28,14 +26,7 @@ func (r *TenantTransactionRunner) Run(ctx context.Context, tenantID shared.ID, f
 	if tenantID.IsZero() || fn == nil {
 		return fmt.Errorf("%w: tenant transaction identity is required", shared.ErrValidation)
 	}
-	if boundTenant, ok := ctx.Value(tenantTransactionKey{}).(shared.ID); ok {
-		if boundTenant != tenantID {
-			return fmt.Errorf("%w: nested tenant transaction mismatch", shared.ErrValidation)
-		}
-		return fn(ctx)
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	txCtx := context.WithValue(ctx, tenantTransactionKey{}, tenantID)
-	return fn(shared.WithTenant(txCtx, tenantID))
+	return fn(shared.WithTenant(ctx, tenantID))
 }

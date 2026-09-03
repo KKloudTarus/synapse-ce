@@ -17,7 +17,6 @@ import (
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
-	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 )
 
@@ -196,36 +195,6 @@ func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
 		AuthorizedTo:    to,
 		Timezone:        req.Timezone,
 	}
-	dualWrite := rt.assessmentCycles != nil && rt.assessmentCycleDualWrite != nil && rt.assessmentCycleDualWrite(tenantID.String())
-	if dualWrite {
-		cycleInput := cycleuc.CreateInitialAssessmentInput{
-			Request: cycleuc.RetainedRequest{
-				TenantID: tenantID, Actor: PrincipalFrom(r.Context()), Route: "/api/v1/engagements",
-				IdempotencyKey: r.Header.Get("Idempotency-Key"),
-			},
-			Engagement: input,
-		}
-		if sourceFile != nil {
-			cycleInput.Source = &cycleuc.SourceUpload{Filename: sourceFilename, Size: sourceSize, SHA256: sourceSHA256, Reader: sourceFile}
-		}
-		response, err := rt.assessmentCycles.CreateInitialAssessment(r.Context(), cycleInput)
-		if err != nil {
-			rt.observeAssessmentCycleDualWrite("failed")
-			writeAssessmentCycleError(w, rt.log, err)
-			return
-		}
-		if response.Replayed {
-			rt.observeAssessmentCycleDualWrite("replayed")
-		} else {
-			rt.observeAssessmentCycleDualWrite("created")
-		}
-		w.Header().Set("X-Synapse-Assessment-Cycle-Dual-Write", "true")
-		writeRetainedJSON(w, response)
-		return
-	}
-	if rt.assessmentCycles != nil {
-		rt.observeAssessmentCycleDualWrite("legacy")
-	}
 	var e *engdom.Engagement
 	if sourceFile != nil {
 		e, _, err = rt.eng.CreateFromSourcePackage(r.Context(), input, sourceFilename, sourceSize, sourceSHA256, sourceFile)
@@ -237,16 +206,6 @@ func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, e)
-}
-
-type assessmentCycleDualWriteObserver interface {
-	ObserveAssessmentCycleDualWrite(outcome string)
-}
-
-func (rt *Router) observeAssessmentCycleDualWrite(outcome string) {
-	if observer, ok := rt.httpObserver.(assessmentCycleDualWriteObserver); ok {
-		observer.ObserveAssessmentCycleDualWrite(outcome)
-	}
 }
 
 func (rt *Router) listEngagements(w http.ResponseWriter, r *http.Request) {

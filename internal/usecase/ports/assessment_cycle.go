@@ -2,93 +2,10 @@ package ports
 
 import (
 	"context"
-	"time"
 
-	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcomparison"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
-
-type AssessmentCycleListQuery struct {
-	TenantID         shared.ID
-	Status           assessmentcycle.Status
-	BoundaryKind     assessmentcycle.BoundaryKind
-	AssessmentStatus engagement.Status
-	SelectedHeadID   shared.ID
-	AssessmentType   assessmentcycle.AssessmentType
-	ProducerKind     string
-	FindingKind      string
-	ReviewState      string
-	ChangePresence   assessmentcomparison.Presence
-	ChangeSeverity   shared.Severity
-	ScanStaleness    string
-	ScanStaleBefore  time.Time
-	Search           string
-	AfterUpdatedAt   time.Time
-	AfterCycleID     shared.ID
-	Limit            int
-	MemberLimit      int
-}
-
-type AssessmentCycleListRecord struct {
-	Cycle              assessmentcycle.AssessmentCycle
-	MemberCount        int
-	ActiveBranchCount  int
-	LatestAssessmentID shared.ID
-	LatestRetestNumber int
-	Members            []assessmentcycle.Member
-	MembersHaveMore    bool
-	RootSnapshotID     shared.ID
-	CurrentSnapshotID  shared.ID
-	ComparisonID       shared.ID
-	ComparisonStatus   assessmentcomparison.Status
-	ComparisonSummary  assessmentcomparison.Summary
-	ActiveManifestID   shared.ID
-	SelectedHeadScanAt *time.Time
-	ScanStaleness      string
-}
-
-type AssessmentCycleListRepository interface {
-	ListCycles(ctx context.Context, query AssessmentCycleListQuery) ([]AssessmentCycleListRecord, error)
-	ListMigrationPendingAssessments(ctx context.Context, query AssessmentCycleListQuery) ([]AssessmentCycleMigrationPendingRecord, int, error)
-}
-
-type AssessmentCycleMigrationPendingRecord struct {
-	AssessmentID    shared.ID
-	Name            string
-	Status          string
-	BoundaryKind    assessmentcycle.BoundaryKind
-	BusinessAssetID shared.ID
-	UpdatedAt       time.Time
-}
-
-type AssessmentCycleCompensationRepository interface {
-	DeleteCycle(ctx context.Context, tenantID, cycleID shared.ID) error
-	DeleteMember(ctx context.Context, tenantID, cycleID, assessmentID shared.ID) error
-}
-
-type AssessmentCycleRequestScope struct {
-	TenantID       shared.ID
-	Actor          string
-	Route          string
-	IdempotencyKey string
-}
-
-type AssessmentCycleRequest struct {
-	Scope        AssessmentCycleRequestScope
-	RequestHash  string
-	StatusCode   int
-	ResponseBody []byte
-	CreatedAt    time.Time
-	CompletedAt  *time.Time
-}
-
-type AssessmentCycleRequestStore interface {
-	BeginAssessmentCycleRequest(ctx context.Context, request AssessmentCycleRequest) (stored AssessmentCycleRequest, created bool, err error)
-	CompleteAssessmentCycleRequest(ctx context.Context, scope AssessmentCycleRequestScope, requestHash string, statusCode int, responseBody []byte, completedAt time.Time) error
-	AbortAssessmentCycleRequest(ctx context.Context, scope AssessmentCycleRequestScope, requestHash string) error
-}
 
 // AssessmentCycleRepository persists tenant-scoped AssessmentCycle aggregates and their members.
 type AssessmentCycleRepository interface {

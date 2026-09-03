@@ -169,22 +169,6 @@ func TestAuthorizeDeniesTerminalEngagement(t *testing.T) {
 	}
 }
 
-func TestAuthorizeDeniesRetestWithoutExplicitAuthorization(t *testing.T) {
-	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	audit := &fakeAudit{}
-	eng := engAt(now, false)
-	eng.RequiresExplicitExecutionAuthorization = true
-	eng.RoE = engagement.RoE{}
-	guard, _ := NewGuard(&fakeEngRepo{eng: eng}, fakeClock{now}, audit)
-
-	if _, err := guard.Authorize(context.Background(), newReq("app.acme.io")); !errors.Is(err, shared.ErrForbidden) {
-		t.Fatalf("Re-test without explicit RoE must be forbidden, got %v", err)
-	}
-	if got := audit.entries[len(audit.entries)-1].Metadata["reason"]; got != "explicit_authorization_required" {
-		t.Fatalf("deny reason = %q, want explicit_authorization_required", got)
-	}
-}
-
 func TestAuthorizeRoEDenies(t *testing.T) {
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
 	// In-window, in-scope, active – but RoE blocks the recon tool class.

@@ -30,7 +30,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualityprofile"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
@@ -610,26 +609,18 @@ type ScanManifest struct {
 // ScanRun is one persisted scan execution: its manifest plus the finding identity
 // keys, enough to list history and compute drift between two runs.
 type ScanRun struct {
-	TenantID              string                 `json:"tenant_id"`
-	ID                    string                 `json:"id"`
-	EngagementID          string                 `json:"engagement_id"`
-	CreatedAt             time.Time              `json:"created_at"`
-	Manifest              ScanManifest           `json:"manifest"`
-	FindingKeys           []string               `json:"finding_keys"` // dedup keys present in this run
-	Provenance            scanrun.Provenance     `json:"provenance"`
-	TerminalStatus        scanrun.TerminalStatus `json:"terminal_status"`
-	ManifestSchemaVersion int                    `json:"manifest_schema_version"`
-	ManifestHash          string                 `json:"manifest_hash,omitempty"`
-	SealedAt              *time.Time             `json:"sealed_at,omitempty"`
-	Lanes                 []scanrun.Lane         `json:"lanes"`
+	ID           string       `json:"id"`
+	EngagementID string       `json:"engagement_id"`
+	CreatedAt    time.Time    `json:"created_at"`
+	Manifest     ScanManifest `json:"manifest"`
+	FindingKeys  []string     `json:"finding_keys"` // dedup keys present in this run
 }
 
 // ScanRunStore persists scan-run manifests + finding keys for history + drift.
 type ScanRunStore interface {
-	Begin(ctx context.Context, run ScanRun) error
-	Seal(ctx context.Context, run ScanRun) error
-	List(ctx context.Context, tenantID, engagementID shared.ID) ([]ScanRun, error)
-	Get(ctx context.Context, tenantID shared.ID, runID string) (ScanRun, error)
+	Save(ctx context.Context, run ScanRun) error
+	List(ctx context.Context, engagementID shared.ID) ([]ScanRun, error)
+	Get(ctx context.Context, runID string) (ScanRun, error)
 }
 
 // ScanRepository persists an SCA scan's SBOM (with its components) and the

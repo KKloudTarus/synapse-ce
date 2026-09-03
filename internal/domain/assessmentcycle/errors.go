@@ -16,6 +16,4 @@ var (
 	ErrCannotArchiveSelectedHead = fmt.Errorf("%w: currently selected head cannot be archived", shared.ErrValidation)
 	ErrCycleBoundaryMismatch     = fmt.Errorf("%w: assessment does not match cycle boundary", shared.ErrValidation)
 	ErrHiddenProjectContext      = fmt.Errorf("%w: hidden project analysis context assessment cannot become cycle member", shared.ErrValidation)
-	ErrCycleReopenRequired       = fmt.Errorf("%w: cycle_reopen_required", shared.ErrConflict)
-	ErrCycleArchived             = fmt.Errorf("%w: cycle_archived", shared.ErrConflict)
 )

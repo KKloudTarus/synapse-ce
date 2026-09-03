@@ -3,14 +3,12 @@ package engagement
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentsnapshot"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
@@ -19,12 +17,11 @@ import (
 
 // Service implements engagement use cases.
 type Service struct {
-	repo      ports.EngagementRepository
-	clock     ports.Clock
-	ids       ports.IDGenerator
-	audit     ports.AuditLogger
-	sources   ports.EngagementSourceStore
-	snapshots ports.AssessmentSnapshotDefaultReader
+	repo    ports.EngagementRepository
+	clock   ports.Clock
+	ids     ports.IDGenerator
+	audit   ports.AuditLogger
+	sources ports.EngagementSourceStore
 }
 
 // NewService wires the engagement use case with its driven ports.
@@ -34,24 +31,18 @@ func NewService(repo ports.EngagementRepository, clock ports.Clock, ids ports.ID
 
 func (s *Service) SetSourceStore(store ports.EngagementSourceStore) { s.sources = store }
 
-func (s *Service) SetCompletionSnapshotReader(reader ports.AssessmentSnapshotDefaultReader) {
-	s.snapshots = reader
-}
-
 // CreateInput is the input for creating an engagement.
 type CreateInput struct {
-	TenantID                               shared.ID
-	BusinessAssetID                        shared.ID
-	CreatedBy                              string // the authenticated actor that owns the engagement (ownership)
-	Name                                   string
-	Client                                 string
-	InScope                                []domain.Target
-	OutOfScope                             []domain.Target
-	AuthorizedFrom                         *time.Time
-	AuthorizedTo                           *time.Time
-	Timezone                               string
-	RoE                                    *domain.RoE
-	RequiresExplicitExecutionAuthorization bool
+	TenantID        shared.ID
+	BusinessAssetID shared.ID
+	CreatedBy       string // the authenticated actor that owns the engagement (ownership)
+	Name            string
+	Client          string
+	InScope         []domain.Target
+	OutOfScope      []domain.Target
+	AuthorizedFrom  *time.Time
+	AuthorizedTo    *time.Time
+	Timezone        string
 }
 
 // Create validates and persists a new engagement with its scope.
@@ -87,15 +78,6 @@ func (s *Service) CreateFromSourcePackage(ctx context.Context, in CreateInput, f
 	return engagement, item, nil
 }
 
-func (s *Service) CompensateCreate(ctx context.Context, tenantID, engagementID shared.ID) error {
-	var cleanupErr error
-	if s.sources != nil {
-		cleanupErr = s.sources.Delete(context.WithoutCancel(ctx), shared.TenantOrDefault(tenantID), engagementID)
-	}
-	deleteErr := s.repo.Delete(ctx, engagementID)
-	return errors.Join(cleanupErr, deleteErr)
-}
-
 func (s *Service) create(ctx context.Context, in CreateInput, id shared.ID) (*domain.Engagement, error) {
 	now := s.clock.Now()
 	e, err := domain.New(id, in.TenantID, in.Name, in.Client, now)
@@ -103,17 +85,11 @@ func (s *Service) create(ctx context.Context, in CreateInput, id shared.ID) (*do
 		return nil, err
 	}
 	e.BusinessAssetID = in.BusinessAssetID
-	e.RequiresExplicitExecutionAuthorization = in.RequiresExplicitExecutionAuthorization
 	if err := e.SetScope(in.InScope, in.OutOfScope, now); err != nil {
 		return nil, err
 	}
 	if err := e.SetAuthorizationWindow(in.AuthorizedFrom, in.AuthorizedTo, in.Timezone, now); err != nil {
 		return nil, err
-	}
-	if in.RoE != nil {
-		if err := e.SetRoE(*in.RoE, now); err != nil {
-			return nil, err
-		}
 	}
 	// Ownership: the creating actor owns the engagement; updated_by starts equal.
 	e.Audit.CreatedBy = in.CreatedBy
@@ -200,21 +176,6 @@ func (s *Service) Transition(ctx context.Context, actor string, tenantID, id sha
 	e, err := s.repo.GetByIDInTenant(ctx, tenantID, id)
 	if err != nil {
 		return nil, err
-	}
-	if to == domain.StatusCompleted && e.Status != domain.StatusCompleted {
-		if s.snapshots == nil {
-			return nil, fmt.Errorf("%w: assessment snapshot completion guard is not configured", shared.ErrValidation)
-		}
-		snapshot, _, err := s.snapshots.GetDefault(ctx, shared.TenantOrDefault(tenantID), id)
-		if err != nil {
-			if errors.Is(err, shared.ErrNotFound) {
-				return nil, fmt.Errorf("%w: engagement requires a default finalized assessment snapshot before completion", shared.ErrValidation)
-			}
-			return nil, fmt.Errorf("load default assessment snapshot: %w", err)
-		}
-		if snapshot.Lifecycle != assessmentsnapshot.LifecycleFinalized {
-			return nil, fmt.Errorf("%w: engagement default assessment snapshot is not finalized", shared.ErrValidation)
-		}
 	}
 	now := s.clock.Now()
 	cp := *e

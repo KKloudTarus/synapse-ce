@@ -238,7 +238,6 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_FLEET_CORRELATION_ENABLED` | `false` | Correlation orchestration (`POST /api/v1/fleet/engagements/{id}/correlate`): folds an engagement's sealed detections into incidents, auto-scoring each when tri-score is enabled. |
 | `SYNAPSE_FLEET_CORRELATION_WINDOW` | `30m` | Session gap for correlation — detections on one (asset, host) more than this apart start a new incident. |
 | `SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT` | `100` | Cap on detections one incident reflects individually before a storm is suppressed to a single note. |
-| `SYNAPSE_DATA_DELETION_ENABLED` | `false` | Expose the audited, legal-hold-checked detection-data deletion route. Destructive deletion remains disabled unless the value is exactly `true`. |
 | `SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED` | `false` | Serve agent signing-key registration (`POST /api/v1/fleet/keys`) + operator key list/revoke (A4, A0.2). |
 | `SYNAPSE_FLEET_STALE_AFTER` | `10m` | An agent older than this reads as stale (`<=0` disables the staleness view). |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |
@@ -250,11 +249,6 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_LEADER_TERM` | `15s` | Lease term. |
 | `SYNAPSE_LEADER_RENEW` | `5s` | Renew interval. |
 | `SYNAPSE_WORKER_CONCURRENCY` | `1` | Durable queue claim loops per `synapse-worker` process; must be from 1 through 64. Jobs remain active on every worker, while maintenance sweepers are leader-gated when election is enabled. |
-| `SYNAPSE_WORKER_PROFILE` | `all` | `all` initializes hardened scanner handlers and requires the production sandbox. `integrations` initializes and claims only external-integration jobs, so a least-privilege provider worker does not need executable-tool sandbox support. |
-| `SYNAPSE_INTEGRATION_SCHEDULER_ENABLED` | `false` | Dispatch due external-integration polls. Requires PostgreSQL and `SYNAPSE_LEADER_ENABLED=true`; startup fails closed otherwise. |
-| `SYNAPSE_INTEGRATION_SCHEDULER_POLL` | `1m` | Interval for checking enabled integrations whose provider poll is due. |
-| `SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT` | `10` | Maximum integration poll operations created per scheduler tick. |
-| `SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH` | `100` | Stop integration dispatch when the durable queue reaches this aggregate depth. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED` | `false` | Dispatch due vulnerability-source syncs and recover stale runs. PostgreSQL deployments must also enable leader election. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_POLL` | `1m` | Scheduler polling interval. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER` | `30m` | Age after which a queued/running sync is eligible for checkpoint-based recovery. |
@@ -270,21 +264,6 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED` | `true` | Persist reconciliation diffs and counts without occurrence, finding, action, or notification mutations. |
 | `SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST` | empty | Comma-separated tenant IDs allowed to use tenant-scoped gates and dry-run; `*` enables every tenant. Empty fails closed. |
 | `SYNAPSE_SLA_ENABLED` | `false` | Enable versioned risk-based remediation deadlines, immutable assessment history, human-only lifecycle transitions, and continuous-intelligence reassessment. See [Remediation SLA governance](sla-governance.md). |
-| `SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED` | `false` | Atomically create initial Assessment Cycles and enable tenant-scoped lifecycle, Re-test, list, and archive APIs. Create/archive requests require `Idempotency-Key`; archive also requires `If-Match`. |
-| `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED` | `false` | Enable the independently gated new-Assessment Cycle/root dual-write path after schema readiness and tenant rollout checks. |
-| `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS` | empty | Comma-separated tenant allowlist for Cycle dual-write; `*` enables all tenants. Required when the dual-write gate is enabled. |
-| `SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED` | `false` | Enable immutable Assessment Snapshot generation and reads. |
-| `SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED` | `false` | Enable finding identity/observation and comparison shadow generation without changing legacy reads. |
-| `SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS` | empty | Comma-separated tenant allowlist for identity/Comparison shadow generation; `*` enables all tenants. Required when shadow generation is enabled. |
-| `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED` | `false` | Enable lifecycle read projections after backfill and integrity verification. |
-| `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS` | empty | Comma-separated tenant allowlist for lifecycle reads; must be a subset of the shadow-generation allowlist. |
-| `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED` | `false` | Make lifecycle UI the default; startup rejects this unless lifecycle reads are enabled. |
-| `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS` | empty | Comma-separated tenant allowlist for lifecycle UI; must be a subset of the lifecycle-read allowlist. |
-| `SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED` | `false` | Enable closure/report paths; requires lifecycle reads, snapshots, and identity/comparison generation. |
-| `SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE` | `500` | Rows per committed lifecycle migration/backfill batch; maximum `2000`. |
-| `SYNAPSE_ASSESSMENT_PROCESS_TENANT_JOBS` | `4` | Maximum tenants processed concurrently by one lifecycle runner process; maximum `4`. |
-| `SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_WARNING` | `500` | Per-tenant queued/generating comparison warning threshold; maximum `500`. |
-| `SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT` | `1000` | Per-tenant comparison rollout gate; must be at least the warning threshold and no more than `1000`. |
 | `SYNAPSE_DAST_RATE_PER_SEC` | `5` | DAST crawler request rate. |
 | `SYNAPSE_DAST_CONCURRENCY` | `4` | DAST crawler concurrency. |
 | `SYNAPSE_DAST_MAX_DEPTH` | `8` | Maximum crawl depth. |

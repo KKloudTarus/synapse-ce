@@ -29,7 +29,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sla"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
@@ -1537,17 +1536,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 			s.observeGateOutcome(err)
 			return nil, err
 		}
-		nativeRun, _, err := s.beginNativeScanRun(ctx, engagementID, "", now)
-		if err != nil {
-			s.observeSyncTerminal(started, err)
-			return nil, err
-		}
-		result, err := s.runImportedSBOMPipeline(ctx, actor, engagementID, now, imported, doc, opts, func(string, int, []ports.ScanDebugEvent) {}, shared.ID(nativeRun.ID))
-		if err != nil {
-			if sealErr := s.sealEmptyNativeScanRun(context.WithoutCancel(ctx), engagementID, shared.ID(nativeRun.ID), now, scanRunTerminalStatus(err), s.clock.Now()); sealErr != nil {
-				err = errors.Join(err, fmt.Errorf("seal terminal native scan run: %w", sealErr))
-			}
-		}
+		result, err := s.runImportedSBOMPipeline(ctx, actor, engagementID, now, imported, doc, opts, func(string, int, []ports.ScanDebugEvent) {}, "")
 		s.observeSyncTerminal(started, err)
 		return result, err
 	}
@@ -1556,17 +1545,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 		s.observeGateOutcome(err)
 		return nil, err
 	}
-	nativeRun, _, err := s.beginNativeScanRun(ctx, engagementID, "", now)
-	if err != nil {
-		s.observeSyncTerminal(started, err)
-		return nil, err
-	}
-	result, err := s.runPipeline(ctx, actor, engagementID, now, req, opts, func(string, int, []ports.ScanDebugEvent) {}, shared.ID(nativeRun.ID))
-	if err != nil {
-		if sealErr := s.sealEmptyNativeScanRun(context.WithoutCancel(ctx), engagementID, shared.ID(nativeRun.ID), now, scanRunTerminalStatus(err), s.clock.Now()); sealErr != nil {
-			err = errors.Join(err, fmt.Errorf("seal terminal native scan run: %w", sealErr))
-		}
-	}
+	result, err := s.runPipeline(ctx, actor, engagementID, now, req, opts, func(string, int, []ports.ScanDebugEvent) {}, "")
 	s.observeSyncTerminal(started, err)
 	return result, err
 }
@@ -1604,10 +1583,6 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		s.observeGateOutcome(err)
 		return ports.ScanJob{}, err
 	}
-	tenantID, ok := shared.TenantFrom(ctx)
-	if !ok {
-		return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for scan job", shared.ErrValidation)
-	}
 	target := req.Value
 	kind := kindOrLocal(req.Kind)
 	if useImported {
@@ -1625,16 +1600,8 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		StartedAt:    now,
 		DebugEvents:  []ports.ScanDebugEvent{},
 	}
-	if _, _, err := s.beginNativeScanRun(ctx, engagementID, shared.ID(job.ID), now); err != nil {
-		s.observeOutcome("failed")
-		return ports.ScanJob{}, err
-	}
 	if s.jobs != nil {
 		if err := s.jobs.CreateRunning(ctx, job); err != nil {
-			if sealErr := s.sealEmptyNativeScanRun(context.WithoutCancel(ctx), engagementID, shared.ID(job.ID), now, scanrun.StatusFailed, s.clock.Now()); sealErr != nil {
-				err = errors.Join(err, fmt.Errorf("seal failed native scan run: %w", sealErr))
-			}
-			s.observeOutcome("failed")
 			return ports.ScanJob{}, fmt.Errorf("create scan job: %w", err)
 		}
 	}
@@ -1642,6 +1609,10 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 	// claims + runs the pipeline with syft/grype sandboxed) – replaces the bare goroutine,
 	// so queued work survives a restart. Without a queue, the in-process goroutine runs it.
 	if s.jobQueue != nil {
+		tenantID, ok := shared.TenantFrom(ctx)
+		if !ok {
+			return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for scan job", shared.ErrValidation)
+		}
 		tenant := tenantID.String()
 		payload, mErr := json.Marshal(scaJobPayload{Actor: actor, TenantID: &tenant, EngagementID: engagementID.String(), Now: now, Req: req, Options: opts, Job: job})
 		if mErr != nil {
@@ -1651,15 +1622,16 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 			fin := s.clock.Now()
 			job.Status, job.Stage, job.Error, job.FinishedAt = ports.ScanFailed, "enqueue", truncateErr(err), &fin
 			_ = s.jobs.Save(context.WithoutCancel(ctx), job)
-			if sealErr := s.sealEmptyNativeScanRun(context.WithoutCancel(ctx), engagementID, shared.ID(job.ID), now, scanrun.StatusFailed, fin); sealErr != nil {
-				err = errors.Join(err, fmt.Errorf("seal failed native scan run: %w", sealErr))
-			}
 			// Terminal: the job never reaches execution, so it dead-ends here rather than
 			// double-counting when a worker later (never) runs it.
 			s.observeOutcome("failed")
 			return ports.ScanJob{}, fmt.Errorf("enqueue scan job: %w", err)
 		}
 		return job, nil
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for scan job", shared.ErrValidation)
 	}
 	go func() {
 		_ = s.runScanJob(shared.WithTenant(context.Background(), tenantID), actor, engagementID, now, req, opts, job)
@@ -1803,9 +1775,6 @@ func (s *Service) FailStrandedScanJob(ctx context.Context, payload []byte, cause
 		cause = errors.New("scan job dead-lettered after exhausting retries")
 	}
 	fin := s.clock.Now()
-	if err := s.sealEmptyNativeScanRun(context.WithoutCancel(ctx), shared.ID(p.EngagementID), shared.ID(job.ID), job.StartedAt, scanrun.StatusFailed, fin); err != nil {
-		return fmt.Errorf("seal dead-lettered native scan run: %w", err)
-	}
 	job.FinishedAt, job.Progress = &fin, 100
 	job.Status, job.Stage, job.Error = ports.ScanFailed, "dead-letter", truncateErr(cause)
 	if err := s.jobs.Save(ctx, job); err != nil {
@@ -1844,10 +1813,6 @@ func (s *Service) SweepStaleScans(ctx context.Context, staleFor time.Duration) (
 			continue
 		}
 		fin := s.clock.Now()
-		if err := s.sealEmptyNativeScanRun(context.WithoutCancel(ctx), shared.ID(job.EngagementID), shared.ID(job.ID), job.StartedAt, scanrun.StatusFailed, fin); err != nil {
-			release()
-			return n, fmt.Errorf("seal swept native scan run %s: %w", job.ID, err)
-		}
 		job.FinishedAt, job.Progress = &fin, 100
 		job.Status, job.Stage, job.Error = ports.ScanFailed, "swept", "scan stranded running past staleFor with no live owner – reclaimed by sweeper"
 		if err := s.jobs.Save(ctx, job); err != nil {
@@ -2025,13 +1990,6 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 			return nil
 		}
 	}
-	nativeRun, _, err := s.beginNativeScanRun(context.WithoutCancel(ctx), engagementID, shared.ID(job.ID), now)
-	if err != nil {
-		return err
-	}
-	if nativeRun.TerminalStatus != "" && nativeRun.TerminalStatus != scanrun.StatusBuilding {
-		return nil
-	}
 	if opts.ProjectAnalysis {
 		opts.ProjectAnalysisID = job.ID
 	}
@@ -2054,16 +2012,16 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 
 	var (
 		result *ScanResult
-		runErr error
+		err    error
 	)
 	if imported, doc, ok, loadErr := s.loadImportedSBOMForRequest(executionCtx, engagementID, req, opts); loadErr != nil {
-		runErr = loadErr
+		err = loadErr
 	} else if ok {
-		result, runErr = s.runImportedSBOMPipeline(executionCtx, actor, engagementID, now, imported, doc, opts, report, shared.ID(job.ID))
+		result, err = s.runImportedSBOMPipeline(executionCtx, actor, engagementID, now, imported, doc, opts, report, shared.ID(job.ID))
 	} else {
-		result, runErr = s.runPipeline(executionCtx, actor, engagementID, now, req, opts, report, shared.ID(job.ID))
+		result, err = s.runPipeline(executionCtx, actor, engagementID, now, req, opts, report, shared.ID(job.ID))
 	}
-	if retryErr := retryableScanInterruption(ctx, runErr); retryErr != nil {
+	if retryErr := retryableScanInterruption(ctx, err); retryErr != nil {
 		// The worker lost this delivery (lease loss or process shutdown) before the
 		// pipeline produced a durable terminal result. Leave the backing ScanJob running
 		// and release the queue claim for redelivery; a stale worker must not publish
@@ -2073,24 +2031,19 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 	}
 
 	fin := s.clock.Now()
-	if runErr != nil {
-		if sealErr := s.sealEmptyNativeScanRun(context.WithoutCancel(ctx), engagementID, shared.ID(job.ID), now, scanRunTerminalStatus(runErr), fin); sealErr != nil {
-			runErr = errors.Join(runErr, fmt.Errorf("seal terminal native scan run: %w", sealErr))
-		}
-	}
-	if runErr == nil && opts.ProjectAnalysis && s.projectAnalysisRecorder != nil {
+	if err == nil && opts.ProjectAnalysis && s.projectAnalysisRecorder != nil {
 		// Detach from the request's cancellation but KEEP the tenant that runScanJob's ctx
 		// carries: the recorder reads the engagement through a tenant-scoped (RLS) repository,
 		// and a bare context.Background() would drop the tenant and fail the whole scan at
 		// the persistence boundary.
 		completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.projectAnalysisCompletionTimeout)
-		runErr = s.projectAnalysisRecorder.RecordProjectAnalysis(completionCtx, engagementID, job.ID, fin, result)
+		err = s.projectAnalysisRecorder.RecordProjectAnalysis(completionCtx, engagementID, job.ID, fin, result)
 		cancel()
 	}
 
 	job.FinishedAt, job.Progress = &fin, 100
-	if runErr != nil {
-		job.Status, job.Stage, job.Error = ports.ScanFailed, "failed", truncateErr(runErr)
+	if err != nil {
+		job.Status, job.Stage, job.Error = ports.ScanFailed, "failed", truncateErr(err)
 	} else {
 		job.Status, job.Stage = ports.ScanSucceeded, "done"
 	}
@@ -2110,7 +2063,7 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 			return nil
 		}
 	}
-	s.observeSyncTerminal(execStarted, runErr)
+	s.observeSyncTerminal(execStarted, err)
 	return nil
 }
 
@@ -2278,8 +2231,12 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	if err != nil {
 		return nil, err
 	}
-	if err := s.persistNativeScanRun(ctx, engagementID, evidenceID, now, ports.AcquireRequest{Kind: ports.TargetUpload, Value: firstNonEmpty(record.TargetRef, record.Filename)}, result, evidenceRef, record.SHA256); err != nil {
-		return nil, err
+	if s.runs != nil {
+		keys := make([]string, 0, len(result.Findings))
+		for _, f := range result.Findings {
+			keys = append(keys, f.DedupKey)
+		}
+		_ = s.runs.Save(ctx, ports.ScanRun{ID: s.newRunID(), EngagementID: engagementID.String(), CreatedAt: now, Manifest: manifest, FindingKeys: keys})
 	}
 	if s.scans != nil {
 		skipped, err := s.scans.SaveScan(ctx, engagementID, doc, vulns, snap)
@@ -3192,8 +3149,18 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if err != nil {
 		return nil, err
 	}
-	if err := s.persistNativeScanRun(ctx, engagementID, evidenceID, now, req, result, evidenceRef, ""); err != nil {
-		return nil, err
+	if s.runs != nil {
+		keys := make([]string, 0, len(result.Findings))
+		for _, f := range result.Findings {
+			keys = append(keys, f.DedupKey)
+		}
+		_ = s.runs.Save(ctx, ports.ScanRun{
+			ID:           s.newRunID(),
+			EngagementID: engagementID.String(),
+			CreatedAt:    now,
+			Manifest:     manifest,
+			FindingKeys:  keys,
+		})
 	}
 
 	// The scan snapshot and the findings are written in SEPARATE transactions. A
@@ -4119,11 +4086,7 @@ func (s *Service) ScanRuns(ctx context.Context, engagementID shared.ID) ([]ports
 	if s.runs == nil {
 		return nil, nil
 	}
-	tenantID, _, err := s.scanRunTenant(ctx, engagementID)
-	if err != nil {
-		return nil, err
-	}
-	return s.runs.List(ctx, tenantID, engagementID)
+	return s.runs.List(ctx, engagementID)
 }
 
 // ScanDrift is the difference between two scan runs: which findings appeared or
@@ -4139,24 +4102,17 @@ type ScanDrift struct {
 
 // CompareRuns computes the drift between two runs and explains it from the
 // manifest deltas (chain-of-custody: "why does this differ from last month?").
-func (s *Service) CompareRuns(ctx context.Context, engagementID shared.ID, runA, runB string) (ScanDrift, error) {
+func (s *Service) CompareRuns(ctx context.Context, runA, runB string) (ScanDrift, error) {
 	if s.runs == nil {
 		return ScanDrift{}, fmt.Errorf("scan runs: %w", shared.ErrNotFound)
 	}
-	tenantID, _, err := s.scanRunTenant(ctx, engagementID)
+	a, err := s.runs.Get(ctx, runA)
 	if err != nil {
 		return ScanDrift{}, err
 	}
-	a, err := s.runs.Get(ctx, tenantID, runA)
+	b, err := s.runs.Get(ctx, runB)
 	if err != nil {
 		return ScanDrift{}, err
-	}
-	b, err := s.runs.Get(ctx, tenantID, runB)
-	if err != nil {
-		return ScanDrift{}, err
-	}
-	if a.EngagementID != engagementID.String() || b.EngagementID != engagementID.String() {
-		return ScanDrift{}, fmt.Errorf("scan runs: %w", shared.ErrNotFound)
 	}
 	return diffRuns(a, b), nil
 }
