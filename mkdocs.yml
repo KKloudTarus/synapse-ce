@@ -63,6 +63,7 @@ nav:
       - Remediation SLA governance: sla-governance.md
   - Operate:
       - Configuration: configuration.md
+      - Assessment lifecycle rollout: assessment-lifecycle-operations.md
       - Deployment: deployment.md
       - Capacity and service objectives: capacity-slos.md
       - Backup, restore, and upgrade: backup-restore-upgrade.md

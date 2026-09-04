@@ -48,7 +48,28 @@ The command appends immutable `legacy` Snapshots without changing an Assessment'
 
 Native Snapshot finalization accepts only tenant-owned Scan Runs whose aggregate and lane manifest hashes recompute correctly. The API selects server-stored run/lane facts; clients cannot submit arbitrary target, version, coverage, or evidence fields.
 
-## 3. Verify integrity
+## 3. Backfill Finding Identity and Observation lineage
+
+Run this only after the Cycle and Snapshot backfills complete. Start with a dry run, review its outcome counts, then run the write pass:
+
+```bash
+synapse-finding-lineage-backfill \
+  --tenants tenant-a \
+  --dry-run \
+  --producers sca,sast,quality,reliability,secret,iac,manual,offensive,dast,cloud \
+  --batch-size 500
+
+synapse-finding-lineage-backfill \
+  --tenants tenant-a \
+  --batch-size 500 \
+  --timeout 2h
+```
+
+The command pages immutable source Findings by ID and writes versioned Identities, immutable Observations, review Candidates, or explicit Skip records. It does not copy workflow, SLA, disposition, assignee, raw evidence, or secret values. Missing semantic anchors become provisional review candidates; unsupported producers receive stable skip reasons instead of fuzzy matches.
+
+Each source row records exactly one `observation_created`, `provisional_candidate_created`, or `skipped` outcome. PostgreSQL enforces the run-level equality `processed = observation_created + provisional_candidate_created + skipped`, one leased run per tenant, tenant RLS, composite ownership, and lease-token fencing for resume safety. The default batch size is `500`, the maximum is `2000`, and one process accepts at most four tenants.
+
+## 4. Verify integrity
 
 Run the read-only verifier after both write passes:
 
@@ -61,19 +82,20 @@ synapse-assessment-integrity \
 
 `--dry-run=false` is rejected. The verifier checks coverage, root/member shape, frozen boundaries, selected-head eligibility, Re-test allocation, predecessor integrity, graph acyclicity, and source/checkpoint reconciliation. Findings are persisted under tenant RLS and emitted as JSON lines with stable reason/severity codes and deterministic repair plans. Any finding causes a non-zero exit and must be resolved before read cutover.
 
-## 4. Canary and cut over reads
+## 5. Canary and cut over reads
 
 For each tenant, record the deployment revision, enabled flags, backfill run IDs, integrity run ID, approver, start/end timestamps, and rollback result.
 
 Use this order:
 
-1. Apply lifecycle migrations `0131` through `0135` after the Scan Run provenance migration from PR #779.
+1. Apply lifecycle migrations `0131` through `0137` after the Scan Run provenance migration from PR #779.
 2. Enable `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED` for an internal tenant allowlist.
 3. Confirm new initial Assessments atomically create a Cycle and root member.
-4. Run both backfills and the integrity verifier.
+4. Run the Cycle and Snapshot backfills, then the Finding lineage backfill and integrity verifier.
 5. Enable `SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED`.
-6. Enable `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED` for the verified tenant allowlist.
-7. Enable `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED` only for tenants already enabled for lifecycle reads.
+6. Enable `SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED` for a verified tenant allowlist and monitor the bounded Lineage metrics.
+7. Enable `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED` for the verified tenant allowlist.
+8. Enable `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED` only for tenants already enabled for lifecycle reads.
 
 ## Rollback
 

@@ -56,6 +56,9 @@ Metric names and label cardinality:
 | `synapse_job_queue_scrape_errors_total` | counter | none | Failed attempts to read aggregate durable job queue stats for a scrape. The three `synapse_job_queue_*` gauges above are omitted from that scrape (never a stale or bogus value) when this increments. |
 | `synapse_sca_scan_duration_seconds` | histogram | `outcome` | Completed synchronous or asynchronous SCA execution duration. For an async scan, measured from worker execution start, not from `StartScan`/enqueue time. Queue failures, dead letters, stale sweeps, and blocked gates do not record a duration. |
 | `synapse_sca_scan_outcomes_total` | counter | `outcome` | Terminal SCA outcomes: `success`, `failed`, or `blocked`. Queue failures, dead letters, and stale sweeps count as `failed` without a duration. `blocked` is recorded only for an execution-gate denial reached after a genuine scan attempt — never for a pre-gate validation failure. |
+| `synapse_finding_lineage_operations_total` | counter | `outcome`, `method`, `reason` | Finding correlation and human-review outcomes. Every label is reduced to a fixed allowlist. |
+| `synapse_finding_lineage_backfill_items_total` | counter | `outcome` | Backfill item outcomes: `observation_created`, `provisional_candidate_created`, `skipped`, or `unknown`. |
+| `synapse_finding_lineage_backfill_runs_total` | counter | `state` | Backfill terminal states: `completed`, `cancelled`, `failed`, or `unknown`. |
 
 No metric or access-log field ever carries a tenant id, engagement id, target, raw path, or free-form error text — the label sets above are exhaustive and deliberately bounded (unlike, for example, embedding a full URL path) to avoid unbounded label cardinality on the collector.
 
@@ -268,6 +271,8 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED` | `false` | Enable new-initial-Assessment Cycle/root dual-write only for the configured tenant allowlist. |
 | `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS` | empty | Comma-separated dual-write tenant allowlist; `*` enables all tenants. Required when the dual-write gate is enabled. |
 | `SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED` | `false` | Enable immutable Snapshot finalization and reads from sealed, hash-verified Scan Runs. |
+| `SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED` | `false` | Enable tenant-gated finding Identity/Observation shadow writes without changing lifecycle reads. Requires Snapshot generation. |
+| `SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS` | empty | Comma-separated tenant allowlist for Identity/Observation shadow writes; `*` enables all tenants. Required when shadow generation is enabled. |
 | `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED` | `false` | Enable lifecycle read projections after backfill and integrity verification. |
 | `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS` | empty | Comma-separated lifecycle-read allowlist; `*` enables all tenants. Required when lifecycle reads are enabled. |
 | `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED` | `false` | Show the Assessment Cycles UI by default. Startup rejects this unless lifecycle reads are enabled. |

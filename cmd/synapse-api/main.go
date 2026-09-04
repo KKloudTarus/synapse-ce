@@ -113,6 +113,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
+	lineageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findinglineage"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
 	baselineuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/baselineuc"
 	behaviorbaseline "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/behaviorbaseline"
@@ -388,6 +389,7 @@ func main() {
 	}
 	var assessmentCycleRequests ports.AssessmentCycleRequestStore
 	var assessmentCycleTransactions ports.TenantTransactionRunner
+	var findingLineageStore ports.FindingLineageRepository
 	var slaStore ports.SLAStore
 	var vulnerabilityWorker *worker.Worker
 	var reconRunLock ports.RunLocker              // recon run lease (Postgres only); row-lease, no pinned conn
@@ -504,6 +506,7 @@ func main() {
 		assessmentCycleStore = postgres.NewAssessmentCycleRepository(pool)
 		assessmentCycleRequests = postgres.NewAssessmentCycleRequestRepository(pool)
 		assessmentCycleTransactions = postgres.NewTenantTransactionRunner(pool)
+		findingLineageStore = postgres.NewFindingLineageRepository(pool)
 		projectAnalysisStore = postgres.NewProjectAnalysisStore(pool)
 		qualityGateStore = postgres.NewQualityGateStore(pool)
 		qualityProfileStore = postgres.NewQualityProfileStore(pool)
@@ -648,6 +651,7 @@ func main() {
 		assessmentCycleStore = memory.NewAssessmentCycleRepository()
 		assessmentCycleRequests = memory.NewAssessmentCycleRequestRepository()
 		assessmentCycleTransactions = memory.NewTenantTransactionRunner()
+		findingLineageStore = memory.NewFindingLineageRepository()
 		projectAnalysisStore = memory.NewProjectAnalysisStore()
 		qualityGateStore = memory.NewQualityGateStore()
 		qualityProfileStore = memory.NewQualityProfileStore()
@@ -1221,6 +1225,32 @@ func main() {
 			os.Exit(1)
 		}
 		snapshotService.SetScanJobStore(scanJobStore)
+	}
+	if cfg.AssessmentShadowEnabled {
+		var lineageObserver ports.FindingLineageObserver
+		if metrics != nil {
+			lineageObserver = metrics
+		}
+		lineageService, lineageErr := lineageuc.NewService(findingLineageStore, assessmentCycleTransactions, auditLog, clock, ids, lineageObserver)
+		if lineageErr != nil {
+			log.Error("finding lineage service init failed", "err", lineageErr)
+			os.Exit(1)
+		}
+		shadowProjector, shadowErr := lineageuc.NewShadowProjector(lineageService, assessmentCycleStore, assessmentSnapshotStore, findingRepo, cfg.AssessmentShadowForTenant)
+		if shadowErr != nil {
+			log.Error("finding lineage shadow projector init failed", "err", shadowErr)
+			os.Exit(1)
+		}
+		if err := findingsService.SetLifecycleShadow(assessmentCycleTransactions, shadowProjector, cfg.AssessmentShadowForTenant); err != nil {
+			log.Error("manual finding lineage shadow init failed", "err", err)
+			os.Exit(1)
+		}
+		if err := exploitationService.SetLifecycleShadow(assessmentCycleTransactions, shadowProjector, cfg.AssessmentShadowForTenant, repo); err != nil {
+			log.Error("offensive finding lineage shadow init failed", "err", err)
+			os.Exit(1)
+		}
+		snapshotService.SetFinalizationObserver(shadowProjector)
+		log.Info("finding lineage shadow writers configured", "tenant_count", len(cfg.AssessmentShadowTenants))
 	}
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
 		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,

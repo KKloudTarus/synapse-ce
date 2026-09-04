@@ -383,6 +383,8 @@ type Config struct {
 	AssessmentCycleDualWriteEnabled bool
 	AssessmentCycleDualWriteTenants []string
 	AssessmentSnapshotEnabled       bool
+	AssessmentShadowEnabled         bool
+	AssessmentShadowTenants         []string
 	AssessmentLifecycleReadEnabled  bool
 	AssessmentLifecycleReadTenants  []string
 	AssessmentLifecycleUIDefault    bool
@@ -789,6 +791,8 @@ func Load() Config {
 		AssessmentCycleDualWriteEnabled:       getbool("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED", false),
 		AssessmentCycleDualWriteTenants:       splitList(getenv("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS", "")),
 		AssessmentSnapshotEnabled:             getbool("SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED", false),
+		AssessmentShadowEnabled:               getbool("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED", false),
+		AssessmentShadowTenants:               splitList(getenv("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS", "")),
 		AssessmentLifecycleReadEnabled:        getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED", false),
 		AssessmentLifecycleReadTenants:        splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS", "")),
 		AssessmentLifecycleUIDefault:          getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED", false),
@@ -1154,6 +1158,12 @@ func (c Config) ValidateAssessmentLifecycleRollout() error {
 	if c.AssessmentCycleDualWriteEnabled && len(c.AssessmentCycleDualWriteTenants) == 0 {
 		return errors.New("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED requires SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS")
 	}
+	if c.AssessmentShadowEnabled && !c.AssessmentSnapshotEnabled {
+		return errors.New("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED requires SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED=true")
+	}
+	if c.AssessmentShadowEnabled && len(c.AssessmentShadowTenants) == 0 {
+		return errors.New("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED requires SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS")
+	}
 	if c.AssessmentLifecycleReadEnabled && len(c.AssessmentLifecycleReadTenants) == 0 {
 		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
 	}
@@ -1174,6 +1184,10 @@ func (c Config) AssessmentCycleDualWriteForTenant(tenantID string) bool {
 		return true
 	}
 	return tenantFeatureEnabled(c.AssessmentCycleDualWriteEnabled, c.AssessmentCycleDualWriteTenants, tenantID)
+}
+
+func (c Config) AssessmentShadowForTenant(tenantID string) bool {
+	return tenantFeatureEnabled(c.AssessmentShadowEnabled, c.AssessmentShadowTenants, tenantID)
 }
 
 func (c Config) AssessmentLifecycleReadForTenant(tenantID string) bool {

@@ -753,6 +753,8 @@ func TestLoadAssessmentLifecycleDefaultsFailClosed(t *testing.T) {
 		"SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED",
 		"SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS",
 		"SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED",
+		"SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED",
+		"SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS",
 		"SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED",
 		"SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS",
 		"SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED",
@@ -761,7 +763,7 @@ func TestLoadAssessmentLifecycleDefaultsFailClosed(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	cfg := Load()
-	if cfg.AssessmentCycleAPIEnabled || cfg.AssessmentCycleDualWriteEnabled || cfg.AssessmentSnapshotEnabled || cfg.AssessmentLifecycleReadEnabled || cfg.AssessmentLifecycleUIDefault {
+	if cfg.AssessmentCycleAPIEnabled || cfg.AssessmentCycleDualWriteEnabled || cfg.AssessmentSnapshotEnabled || cfg.AssessmentShadowEnabled || cfg.AssessmentLifecycleReadEnabled || cfg.AssessmentLifecycleUIDefault {
 		t.Fatal("assessment lifecycle flags must remain disabled by default")
 	}
 }
@@ -770,6 +772,9 @@ func TestValidateAssessmentLifecycleRollout(t *testing.T) {
 	valid := Config{
 		AssessmentCycleDualWriteEnabled: true,
 		AssessmentCycleDualWriteTenants: []string{"tenant-a"},
+		AssessmentSnapshotEnabled:       true,
+		AssessmentShadowEnabled:         true,
+		AssessmentShadowTenants:         []string{"tenant-a"},
 		AssessmentLifecycleReadEnabled:  true,
 		AssessmentLifecycleReadTenants:  []string{"tenant-a", "tenant-b"},
 		AssessmentLifecycleUIDefault:    true,
@@ -785,6 +790,16 @@ func TestValidateAssessmentLifecycleRollout(t *testing.T) {
 		t.Fatal("dual-write without a tenant allowlist must fail")
 	}
 	invalid = valid
+	invalid.AssessmentShadowTenants = nil
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("shadow generation without a tenant allowlist must fail")
+	}
+	invalid = valid
+	invalid.AssessmentSnapshotEnabled = false
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("shadow generation without snapshots must fail")
+	}
+	invalid = valid
 	invalid.AssessmentLifecycleUITenants = []string{"tenant-c"}
 	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
 		t.Fatal("UI tenant outside read allowlist must fail")
@@ -795,11 +810,16 @@ func TestAssessmentLifecycleTenantGates(t *testing.T) {
 	cfg := Config{
 		AssessmentCycleDualWriteEnabled: true,
 		AssessmentCycleDualWriteTenants: []string{"tenant-a"},
+		AssessmentShadowEnabled:         true,
+		AssessmentShadowTenants:         []string{"tenant-a"},
 		AssessmentLifecycleReadEnabled:  true,
 		AssessmentLifecycleReadTenants:  []string{"*"},
 	}
 	if !cfg.AssessmentCycleDualWriteForTenant("tenant-a") || cfg.AssessmentCycleDualWriteForTenant("tenant-b") {
 		t.Fatal("tenant-scoped cycle dual-write allowlist mismatch")
+	}
+	if !cfg.AssessmentShadowForTenant("tenant-a") || cfg.AssessmentShadowForTenant("tenant-b") {
+		t.Fatal("tenant-scoped identity shadow allowlist mismatch")
 	}
 	if !cfg.AssessmentLifecycleReadForTenant("tenant-b") || cfg.AssessmentLifecycleUIForTenant("tenant-b") {
 		t.Fatal("read wildcard or fail-closed UI gate mismatch")

@@ -37,6 +37,14 @@ type Service struct {
 	ids         ports.IDGenerator
 	clock       ports.Clock
 	audit       ports.AuditLogger
+	observer    FinalizationObserver
+}
+
+// FinalizationObserver performs tenant-gated shadow projections in the same
+// transaction as a newly finalized Snapshot. A failure aborts the Snapshot so
+// callers never observe a boundary without its required lineage projection.
+type FinalizationObserver interface {
+	AssessmentSnapshotFinalized(context.Context, *domain.Snapshot, string) error
 }
 
 func NewService(snapshots ports.AssessmentSnapshotRepository, cycles ports.AssessmentCycleRepository, engagements ports.EngagementRepository, runs ports.AssessmentSnapshotRunReader, tx ports.TenantTransactionRunner, ids ports.IDGenerator, clock ports.Clock, audit ports.AuditLogger) (*Service, error) {
@@ -47,6 +55,10 @@ func NewService(snapshots ports.AssessmentSnapshotRepository, cycles ports.Asses
 }
 
 func (service *Service) SetScanJobStore(jobs ports.ScanJobStore) { service.jobs = jobs }
+
+func (service *Service) SetFinalizationObserver(observer FinalizationObserver) {
+	service.observer = observer
+}
 
 type FinalizeInput struct {
 	TenantID               shared.ID
@@ -170,6 +182,11 @@ func (service *Service) Finalize(ctx context.Context, input FinalizeInput) (*dom
 			},
 		}); err != nil {
 			return fmt.Errorf("audit assessment snapshot finalization: %w", err)
+		}
+		if service.observer != nil {
+			if err := service.observer.AssessmentSnapshotFinalized(txCtx, finalized, actor); err != nil {
+				return fmt.Errorf("project finalized assessment snapshot: %w", err)
+			}
 		}
 		return nil
 	})
