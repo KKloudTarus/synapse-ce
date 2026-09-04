@@ -126,6 +126,13 @@ func contextTenantTx(ctx context.Context, tenantID shared.ID) (pgx.Tx, bool, err
 	return bound.tx, true, nil
 }
 
+// bindTenantTransaction exposes an already-open tenant transaction to nested
+// repositories. It is used by fenced backfill commits so the projected business
+// artifact and its accounting item share one database commit.
+func bindTenantTransaction(ctx context.Context, tenantID shared.ID, tx pgx.Tx) context.Context {
+	return shared.WithTenant(context.WithValue(ctx, tenantTransactionKey{}, tenantTransaction{tenantID: tenantID.String(), tx: tx}), tenantID)
+}
+
 // CheckRLSRuntimeRole reports whether the role the pool connects as can actually be constrained by
 // Row Level Security. RLS is bypassed entirely by SUPERUSER and BYPASSRLS roles regardless of
 // FORCE ROW LEVEL SECURITY, so if the runtime role holds either attribute the whole tenant

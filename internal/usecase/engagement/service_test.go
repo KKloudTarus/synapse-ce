@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentsnapshot"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
@@ -78,6 +79,12 @@ func (c fixedClock) Now() time.Time { return c.t }
 type fixedIDs struct{}
 
 func (fixedIDs) NewID() shared.ID { return shared.ID("eng-1") }
+
+type finalizedSnapshotReader struct{}
+
+func (finalizedSnapshotReader) GetDefault(context.Context, shared.ID, shared.ID) (*assessmentsnapshot.Snapshot, ports.AssessmentSnapshotDefault, error) {
+	return &assessmentsnapshot.Snapshot{Lifecycle: assessmentsnapshot.LifecycleFinalized}, ports.AssessmentSnapshotDefault{}, nil
+}
 
 type capAudit struct{ entries []ports.AuditEntry }
 
@@ -261,6 +268,7 @@ func TestEngagementMutationsAndGatePickup(t *testing.T) {
 	}
 
 	// Lifecycle: draft -> active -> completed; completed blocks execution.
+	svc.SetCompletionSnapshotReader(finalizedSnapshotReader{})
 	if _, err := svc.Transition(ctx, "operator", "", id, domain.StatusActive); err != nil {
 		t.Fatalf("activate: %v", err)
 	}
@@ -280,6 +288,21 @@ func TestEngagementMutationsAndGatePickup(t *testing.T) {
 	}
 	if _, err := svc.UpdateScope(ctx, "  ", "", id, nil, nil); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("empty actor should be ErrValidation, got %v", err)
+	}
+}
+
+func TestCompletionRequiresDefaultFinalizedSnapshot(t *testing.T) {
+	repo := newMemRepo()
+	svc := NewService(repo, fixedClock{time.Now().UTC()}, fixedIDs{}, &capAudit{})
+	item, err := svc.Create(context.Background(), CreateInput{Name: "Assessment", CreatedBy: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusActive); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusCompleted); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("completion without default snapshot=%v", err)
 	}
 }
 

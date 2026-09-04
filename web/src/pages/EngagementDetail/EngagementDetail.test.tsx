@@ -37,6 +37,7 @@ const mockEngagement = {
   authorizedTo: null,
   roe: { allowedToolClasses: [], blackouts: [] },
   liveReconEnabled: false,
+  requiresExplicitExecutionAuthorization: false,
   createdAt: '2026-08-15T00:00:00Z',
   businessAssetId: '',
 }

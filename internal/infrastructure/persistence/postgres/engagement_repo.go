@@ -17,7 +17,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-const engagementCols = `id, tenant_id, project_id, business_asset_id, name, client, status, authorized_from, authorized_to, created_at, updated_at, timezone, roe, live_recon, created_by, updated_by`
+const engagementCols = `id, tenant_id, project_id, business_asset_id, name, client, status, authorized_from, authorized_to, created_at, updated_at, timezone, roe, live_recon, requires_explicit_execution_authorization, created_by, updated_by`
 
 // EngagementRepository persists engagements and their scope to PostgreSQL.
 type EngagementRepository struct{ pool *pgxpool.Pool }
@@ -31,6 +31,7 @@ var _ ports.EngagementRepository = (*EngagementRepository)(nil)
 var _ ports.PromotionReconciliationScopeReader = (*EngagementRepository)(nil)
 var _ ports.VulnerabilityReconciliationTenantStore = (*EngagementRepository)(nil)
 var _ ports.DetectionReconciliationTenantStore = (*EngagementRepository)(nil)
+var _ ports.AssessmentCycleBackfillSource = (*EngagementRepository)(nil)
 
 // Create inserts the engagement and its scope targets in one transaction.
 func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagement) error {
@@ -42,9 +43,9 @@ func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagem
 			return fmt.Errorf("marshal roe: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+			`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
 			e.ID.String(), tenantID.String(), e.ProjectID.String(), e.BusinessAssetID.String(), e.Name, e.Client, string(e.Status),
-			e.AuthorizedFrom, e.AuthorizedTo, e.Audit.CreatedAt, e.Audit.UpdatedAt, e.Timezone, roeJSON, e.LiveReconEnabled,
+			e.AuthorizedFrom, e.AuthorizedTo, e.Audit.CreatedAt, e.Audit.UpdatedAt, e.Timezone, roeJSON, e.LiveReconEnabled, e.RequiresExplicitExecutionAuthorization,
 			e.Audit.CreatedBy, e.Audit.UpdatedBy); err != nil {
 			return fmt.Errorf("insert engagement: %w", err)
 		}
@@ -110,9 +111,9 @@ func (r *EngagementRepository) Update(ctx context.Context, e *engagement.Engagem
 			return fmt.Errorf("marshal roe: %w", err)
 		}
 		ct, err := tx.Exec(ctx,
-			`UPDATE engagements SET name=$2, client=$3, status=$4, authorized_from=$5, authorized_to=$6, timezone=$7, updated_at=$8, roe=$9, live_recon=$10, updated_by=$11, business_asset_id=NULLIF($12,'') WHERE id=$1`,
+			`UPDATE engagements SET name=$2, client=$3, status=$4, authorized_from=$5, authorized_to=$6, timezone=$7, updated_at=$8, roe=$9, live_recon=$10, updated_by=$11, business_asset_id=NULLIF($12,''), requires_explicit_execution_authorization=$13 WHERE id=$1`,
 			e.ID.String(), e.Name, e.Client, string(e.Status),
-			e.AuthorizedFrom, e.AuthorizedTo, e.Timezone, e.Audit.UpdatedAt, roeJSON, e.LiveReconEnabled, e.Audit.UpdatedBy, e.BusinessAssetID.String())
+			e.AuthorizedFrom, e.AuthorizedTo, e.Timezone, e.Audit.UpdatedAt, roeJSON, e.LiveReconEnabled, e.Audit.UpdatedBy, e.BusinessAssetID.String(), e.RequiresExplicitExecutionAuthorization)
 		if err != nil {
 			return fmt.Errorf("update engagement: %w", err)
 		}
@@ -264,6 +265,33 @@ func (r *EngagementRepository) List(ctx context.Context, tenantID shared.ID) (ou
 	return out, err
 }
 
+func (r *EngagementRepository) ListAssessmentCycleBackfillEngagements(ctx context.Context, tenantID, after shared.ID, snapshotAt time.Time, limit int) (out []*engagement.Engagement, err error) {
+	if snapshotAt.IsZero() || limit < 1 || limit > 2000 {
+		return nil, fmt.Errorf("%w: assessment cycle backfill page is invalid", shared.ErrValidation)
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	err = WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND project_id IS NULL AND id COLLATE "C">$2 AND created_at<=$3 ORDER BY id COLLATE "C" LIMIT $4`, tenantID.String(), after.String(), snapshotAt.UTC(), limit)
+		if err != nil {
+			return fmt.Errorf("list assessment cycle backfill engagements: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			item, err := scanEngagement(rows)
+			if err != nil {
+				return fmt.Errorf("scan assessment cycle backfill engagement: %w", err)
+			}
+			out = append(out, item)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+func (r *EngagementRepository) ListAssessmentSnapshotBackfillEngagements(ctx context.Context, tenantID, after shared.ID, snapshotAt time.Time, limit int) ([]*engagement.Engagement, error) {
+	return r.ListAssessmentCycleBackfillEngagements(ctx, tenantID, after, snapshotAt, limit)
+}
+
 // ListProjectEngagements returns the tenant's hidden Project analysis contexts for operational
 // aggregation. Normal engagement lists remain unchanged and continue to hide these rows.
 func (r *EngagementRepository) ListProjectEngagements(ctx context.Context, tenantID shared.ID) (out []*engagement.Engagement, err error) {
@@ -408,7 +436,7 @@ func scanEngagement(row rowScanner) (*engagement.Engagement, error) {
 		af, at                     pgtype.Timestamptz
 		roeJSON                    []byte
 	)
-	if err := row.Scan(&idStr, &ten, &projectID, &businessAssetID, &e.Name, &e.Client, &st, &af, &at, &e.Audit.CreatedAt, &e.Audit.UpdatedAt, &e.Timezone, &roeJSON, &e.LiveReconEnabled, &e.Audit.CreatedBy, &e.Audit.UpdatedBy); err != nil {
+	if err := row.Scan(&idStr, &ten, &projectID, &businessAssetID, &e.Name, &e.Client, &st, &af, &at, &e.Audit.CreatedAt, &e.Audit.UpdatedAt, &e.Timezone, &roeJSON, &e.LiveReconEnabled, &e.RequiresExplicitExecutionAuthorization, &e.Audit.CreatedBy, &e.Audit.UpdatedBy); err != nil {
 		return nil, err
 	}
 	if len(roeJSON) > 0 {

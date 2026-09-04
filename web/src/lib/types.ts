@@ -38,6 +38,7 @@ export interface Engagement {
   authorizedTo: string | null
   roe: RoE
   liveReconEnabled: boolean
+  requiresExplicitExecutionAuthorization: boolean
   createdAt: string | null
   businessAssetId: string
   /** List-view enrichment. Absent unless the API includes it; the Engagements
@@ -73,6 +74,208 @@ export interface UploadedSourcePackage {
   target: string
   uploadedBy: string
   uploadedAt: string | null
+}
+
+export type AssessmentCycleBoundaryKind = 'standalone' | 'asset' | 'project' | 'asset_project'
+export type AssessmentCycleStatus = 'open' | 'completed' | 'archived'
+export type AssessmentStatus = 'draft' | 'active' | 'completed' | 'archived'
+export type AssessmentCycleScanStaleness = 'fresh' | 'stale' | 'missing'
+
+export interface AssessmentCycleListFilters {
+  status?: AssessmentCycleStatus
+  boundaryKind?: AssessmentCycleBoundaryKind
+  assessmentStatus?: AssessmentStatus
+  selectedHeadAssessmentId?: string
+  assessmentType?: AssessmentCycleMember['assessmentType']
+  scanStaleness?: AssessmentCycleScanStaleness
+  search?: string
+  cursor?: string
+  limit?: number
+}
+
+export interface AssessmentCycleMember {
+  assessmentId: string
+  assessmentType: 'initial' | 'retest'
+  predecessorAssessmentId: string
+  retestNumber: number
+  relationshipVersion: number
+  createdAt: string
+  createdBy: string
+  archivedAt: string | null
+}
+
+export interface AssessmentCycle {
+  id: string
+  name: string
+  boundaryKind: AssessmentCycleBoundaryKind
+  businessAssetId: string
+  projectId: string
+  status: AssessmentCycleStatus
+  rootAssessmentId: string
+  selectedHeadAssessmentId: string
+  nextRetestNumber: number
+  version: number
+  createdAt: string
+  updatedAt: string
+  createdBy: string
+  updatedBy: string
+}
+
+export interface AssessmentCycleDetail {
+  cycle: AssessmentCycle
+  members: AssessmentCycleMember[]
+  branchHeads: AssessmentCycleMember[]
+}
+
+export interface AssessmentLifecycle extends AssessmentCycleDetail {
+  assessmentId: string
+}
+
+export interface AssessmentCycleSummary extends AssessmentCycle {
+  memberCount: number
+  activeBranchCount: number
+  latestAssessmentId: string
+  latestRetestNumber: number
+  members: AssessmentCycleMember[]
+  membersNextCursor: string
+  rootSnapshotId: string
+  currentSnapshotId: string
+  selectedHeadLastScanAt: string | null
+  scanStaleness: AssessmentCycleScanStaleness
+}
+
+export interface AssessmentCyclePage {
+  items: AssessmentCycleSummary[]
+  nextCursor: string
+  migrationPending: AssessmentCycleMigrationPending[]
+  migrationPendingTotal: number
+}
+
+export interface AssessmentCycleMemberPage {
+  items: AssessmentCycleMember[]
+  nextCursor: string
+}
+
+export interface AssessmentCycleMigrationPending {
+  assessmentId: string
+  name: string
+  status: string
+  boundaryKind: AssessmentCycleBoundaryKind
+  businessAssetId: string
+  updatedAt: string
+}
+
+export interface CreateAssessmentRetestInput {
+  name?: string
+  predecessorAssessmentId?: string
+  scopeStrategy?: 'copy' | 'empty'
+  profileStrategy?: 'none'
+  authorizedFrom?: string
+  authorizedTo?: string
+  timezone?: string
+  roe?: RoE
+  idempotencyKey?: string
+}
+
+export interface CreateAssessmentRetestResponse {
+  engagement: Engagement
+  cycle: AssessmentCycle
+  member: AssessmentCycleMember
+  inheritanceDiff: { scope: 'copy' | 'empty'; authorization: 'explicit_only'; roe: 'explicit_only'; scannerProfile: 'none' }
+  warnings: Array<'authorization_not_inherited' | 'roe_not_inherited' | 'scanner_profile_not_inherited'>
+}
+
+export type AssessmentSnapshotLifecycle = 'finalized' | 'superseded'
+export type AssessmentSnapshotProvenance = 'native' | 'legacy'
+export type AssessmentSnapshotCoverageState = 'complete' | 'partial' | 'unknown'
+export type AssessmentSnapshotTargetKind = 'repository' | 'oci' | 'host' | 'url' | 'cloud_resource'
+export type AssessmentSnapshotVersionKind = 'tool' | 'scanner' | 'profile' | 'rule_pack' | 'advisory_database' | 'correlation' | 'schema'
+
+export interface AssessmentSnapshotBoundary {
+  boundaryKind: AssessmentCycleBoundaryKind
+  businessAssetId: string
+  projectId: string
+}
+
+export interface AssessmentSnapshotLaneReference {
+  laneKey: string
+  manifestHash: string
+}
+
+export interface AssessmentSnapshotRunReference {
+  runId: string
+  manifestHash: string
+  laneReferences: AssessmentSnapshotLaneReference[]
+}
+
+export interface AssessmentSnapshotTarget {
+  kind: AssessmentSnapshotTargetKind
+  schemaVersion: number
+  canonical: string
+  evaluatedRevision: string
+}
+
+export interface AssessmentSnapshotVersion {
+  kind: AssessmentSnapshotVersionKind
+  name: string
+  version: string
+  digest: string
+}
+
+export interface AssessmentSnapshotDimension {
+  runId: string
+  laneKey: string
+  laneManifestHash: string
+  producer: string
+  findingKind: string
+  target: AssessmentSnapshotTarget
+  state: AssessmentSnapshotCoverageState
+  reasonCode: string
+  includedScope: string[]
+  excludedScope: string[]
+  versions: AssessmentSnapshotVersion[]
+}
+
+export interface AssessmentSnapshot {
+  id: string
+  cycleId: string
+  assessmentId: string
+  snapshotNumber: number
+  lifecycle: AssessmentSnapshotLifecycle
+  provenance: AssessmentSnapshotProvenance
+  boundary: AssessmentSnapshotBoundary
+  runReferences: AssessmentSnapshotRunReference[]
+  dimensions: AssessmentSnapshotDimension[]
+  schemaVersion: number
+  contentHash: string
+  createdAt: string
+  createdBy: string
+  finalizedAt: string
+  finalizedBy: string
+  supersededAt: string | null
+  supersededBy: string
+}
+
+export interface AssessmentSnapshotRunSelection {
+  runId: string
+  laneKeys?: string[]
+}
+
+export interface FinalizeAssessmentSnapshotInput {
+  selectedRuns: AssessmentSnapshotRunSelection[]
+  expectedDefaultVersion: number
+  idempotencyKey?: string
+}
+
+export interface FinalizeAssessmentSnapshotResponse {
+  snapshot: AssessmentSnapshot
+  defaultVersion: number
+}
+
+export interface AssessmentSnapshotListResponse {
+  items: AssessmentSnapshot[]
+  defaultSnapshotId: string
+  defaultVersion: number
 }
 
 export type BusinessAssetType = 'product' | 'application' | 'system' | 'business_service'
@@ -675,6 +878,10 @@ export interface CurrentUser {
   id: string
   name: string
   role: string
+  features?: {
+    assessmentLifecycleRead: boolean
+    assessmentLifecycleUIDefault: boolean
+  }
 }
 
 // Audit: one append-only, attributable audit record.

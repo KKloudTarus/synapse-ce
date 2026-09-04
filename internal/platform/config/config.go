@@ -378,6 +378,15 @@ type Config struct {
 	// SLAEnabled turns on durable risk-based remediation deadlines, versioned tenant policy, and
 	// human lifecycle APIs. Default false until an operator explicitly opts into the new schema/path.
 	SLAEnabled bool
+	// Assessment lifecycle gates default off and use explicit tenant allowlists for staged rollout.
+	AssessmentCycleAPIEnabled       bool
+	AssessmentCycleDualWriteEnabled bool
+	AssessmentCycleDualWriteTenants []string
+	AssessmentSnapshotEnabled       bool
+	AssessmentLifecycleReadEnabled  bool
+	AssessmentLifecycleReadTenants  []string
+	AssessmentLifecycleUIDefault    bool
+	AssessmentLifecycleUITenants    []string
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
@@ -776,6 +785,14 @@ func Load() Config {
 		VulnerabilityDryRunEnabled:            getbool("SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED", true),
 		VulnerabilityTenantAllowlist:          splitList(getenv("SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "")),
 		SLAEnabled:                            getbool("SYNAPSE_SLA_ENABLED", false),
+		AssessmentCycleAPIEnabled:             getbool("SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED", false),
+		AssessmentCycleDualWriteEnabled:       getbool("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED", false),
+		AssessmentCycleDualWriteTenants:       splitList(getenv("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS", "")),
+		AssessmentSnapshotEnabled:             getbool("SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED", false),
+		AssessmentLifecycleReadEnabled:        getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED", false),
+		AssessmentLifecycleReadTenants:        splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS", "")),
+		AssessmentLifecycleUIDefault:          getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED", false),
+		AssessmentLifecycleUITenants:          splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS", "")),
 		GovulncheckBin:                        getenv("SYNAPSE_GOVULNCHECK_BIN", "govulncheck"),
 		GoModGraphEnabled:                     getbool("SYNAPSE_GOMODGRAPH_ENABLED", true),
 		GoBin:                                 getenv("SYNAPSE_GO_BIN", "go"),
@@ -1129,6 +1146,75 @@ func (c Config) ValidateWorkerConcurrency() error {
 		return fmt.Errorf("SYNAPSE_WORKER_CONCURRENCY must be between 1 and %d (got %d)", maxWorkerConcurrency, c.WorkerConcurrency)
 	}
 	return nil
+}
+
+// ValidateAssessmentLifecycleRollout rejects partial feature combinations that
+// would expose lifecycle UI without its tenant-scoped read path.
+func (c Config) ValidateAssessmentLifecycleRollout() error {
+	if c.AssessmentCycleDualWriteEnabled && len(c.AssessmentCycleDualWriteTenants) == 0 {
+		return errors.New("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED requires SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS")
+	}
+	if c.AssessmentLifecycleReadEnabled && len(c.AssessmentLifecycleReadTenants) == 0 {
+		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
+	}
+	if c.AssessmentLifecycleUIDefault && !c.AssessmentLifecycleReadEnabled {
+		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED=true")
+	}
+	if c.AssessmentLifecycleUIDefault && len(c.AssessmentLifecycleUITenants) == 0 {
+		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS")
+	}
+	if !tenantAllowlistCovers(c.AssessmentLifecycleReadTenants, c.AssessmentLifecycleUITenants) {
+		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS must be a subset of SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
+	}
+	return nil
+}
+
+func (c Config) AssessmentCycleDualWriteForTenant(tenantID string) bool {
+	if c.AssessmentCycleAPIEnabled {
+		return true
+	}
+	return tenantFeatureEnabled(c.AssessmentCycleDualWriteEnabled, c.AssessmentCycleDualWriteTenants, tenantID)
+}
+
+func (c Config) AssessmentLifecycleReadForTenant(tenantID string) bool {
+	return tenantFeatureEnabled(c.AssessmentLifecycleReadEnabled, c.AssessmentLifecycleReadTenants, tenantID)
+}
+
+func (c Config) AssessmentLifecycleUIForTenant(tenantID string) bool {
+	return tenantFeatureEnabled(c.AssessmentLifecycleUIDefault, c.AssessmentLifecycleUITenants, tenantID)
+}
+
+func tenantFeatureEnabled(enabled bool, allowlist []string, tenantID string) bool {
+	if !enabled {
+		return false
+	}
+	tenantID = strings.TrimSpace(tenantID)
+	for _, allowed := range allowlist {
+		if allowed == "*" || strings.TrimSpace(allowed) == tenantID {
+			return true
+		}
+	}
+	return false
+}
+
+func tenantAllowlistCovers(superset, subset []string) bool {
+	if len(subset) == 0 {
+		return true
+	}
+	allowed := make(map[string]struct{}, len(superset))
+	for _, tenantID := range superset {
+		tenantID = strings.TrimSpace(tenantID)
+		if tenantID == "*" {
+			return true
+		}
+		allowed[tenantID] = struct{}{}
+	}
+	for _, tenantID := range subset {
+		if _, ok := allowed[strings.TrimSpace(tenantID)]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidateOIDCPosture fails closed when the browser OIDC BFF cannot bind identity/session state to a fixed tenant.

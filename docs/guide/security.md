@@ -88,6 +88,8 @@ admin, consultant, reviewer, and read-only. Separation of duties means a machine
 never verify or accept its own claim. Tenant isolation is enforced at the service layer, so a
 caller cannot read another tenant's engagement even if a route wrapper is bypassed.
 
+Assessment lifecycle projections are additive and fail closed behind independent rollout gates. Cycle, member, request, backfill, integrity, and Snapshot tables use tenant ownership constraints and forced PostgreSQL RLS. Native Snapshot finalization recomputes aggregate and lane manifest hashes from server-stored Scan Runs; callers submit identifiers only and cannot forge target, coverage, version, or evidence fields. Retained writes use idempotency keys, and pointer changes use optimistic concurrency.
+
 ## Browser OIDC access
 
 Browser OIDC uses a backend-for-frontend model. The server accepts an identity only for an exact approved

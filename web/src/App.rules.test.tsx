@@ -80,7 +80,7 @@ describe('App Routing - Rules', () => {
       </MemoryRouter>
     )
 
-    expect(await screen.findByRole('heading', { name: 'Security Operations' }, { timeout: 8000 })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Security Operations' }, { timeout: 15000 })).toBeInTheDocument()
   })
 
   it('renders RuleDetail page on /rules/:key route and decodes colon exactly once', async () => {

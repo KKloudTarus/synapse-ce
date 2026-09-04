@@ -33,6 +33,8 @@ authorization window, and lifecycle gate all execution. They are independent agg
 owns the other. Both may invoke the same analysis pipeline, while future project analyses reference
 their Project instead of duplicating or forking that engine.
 
+An **Assessment Cycle** owns rooted initial Assessment/Re-test ancestry and a frozen Asset/Project boundary. Immutable **Assessment Snapshots** select only sealed, hash-verified Scan Run inputs and record explicit coverage. Lifecycle migrations and historical backfills are separate: API/worker startup never runs backfill commands, and all rollout gates default off.
+
 ## Binaries
 
 `cmd/` holds 15 composition roots. They fall into four groups.
@@ -50,6 +52,14 @@ their Project instead of duplicating or forking that engine.
 | Binary | Role |
 | --- | --- |
 | `synapse-cli` | CI-oriented scanner and code-quality gate using the same pipeline as the server. |
+
+**Assessment lifecycle operations**
+
+| Binary | Role |
+| --- | --- |
+| `synapse-assessment-backfill` | Resumable tenant-scoped historical singleton-Cycle backfill. |
+| `synapse-assessment-snapshot-backfill` | Append-only projection of historical scan evidence into legacy Snapshots with explicit unknown coverage. |
+| `synapse-assessment-integrity` | Read-only Cycle integrity verification and deterministic repair-plan output. |
 
 **Sandboxed helpers**
 

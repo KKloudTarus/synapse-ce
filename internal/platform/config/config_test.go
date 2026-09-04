@@ -746,3 +746,62 @@ func TestProductionOIDCRequiresPostgres(t *testing.T) {
 		t.Fatalf("production OIDC with database: %v", err)
 	}
 }
+
+func TestLoadAssessmentLifecycleDefaultsFailClosed(t *testing.T) {
+	for _, key := range []string{
+		"SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED",
+		"SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED",
+		"SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS",
+		"SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS",
+	} {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.AssessmentCycleAPIEnabled || cfg.AssessmentCycleDualWriteEnabled || cfg.AssessmentSnapshotEnabled || cfg.AssessmentLifecycleReadEnabled || cfg.AssessmentLifecycleUIDefault {
+		t.Fatal("assessment lifecycle flags must remain disabled by default")
+	}
+}
+
+func TestValidateAssessmentLifecycleRollout(t *testing.T) {
+	valid := Config{
+		AssessmentCycleDualWriteEnabled: true,
+		AssessmentCycleDualWriteTenants: []string{"tenant-a"},
+		AssessmentLifecycleReadEnabled:  true,
+		AssessmentLifecycleReadTenants:  []string{"tenant-a", "tenant-b"},
+		AssessmentLifecycleUIDefault:    true,
+		AssessmentLifecycleUITenants:    []string{"tenant-a"},
+	}
+	if err := valid.ValidateAssessmentLifecycleRollout(); err != nil {
+		t.Fatalf("valid assessment lifecycle rollout: %v", err)
+	}
+
+	invalid := valid
+	invalid.AssessmentCycleDualWriteTenants = nil
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("dual-write without a tenant allowlist must fail")
+	}
+	invalid = valid
+	invalid.AssessmentLifecycleUITenants = []string{"tenant-c"}
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("UI tenant outside read allowlist must fail")
+	}
+}
+
+func TestAssessmentLifecycleTenantGates(t *testing.T) {
+	cfg := Config{
+		AssessmentCycleDualWriteEnabled: true,
+		AssessmentCycleDualWriteTenants: []string{"tenant-a"},
+		AssessmentLifecycleReadEnabled:  true,
+		AssessmentLifecycleReadTenants:  []string{"*"},
+	}
+	if !cfg.AssessmentCycleDualWriteForTenant("tenant-a") || cfg.AssessmentCycleDualWriteForTenant("tenant-b") {
+		t.Fatal("tenant-scoped cycle dual-write allowlist mismatch")
+	}
+	if !cfg.AssessmentLifecycleReadForTenant("tenant-b") || cfg.AssessmentLifecycleUIForTenant("tenant-b") {
+		t.Fatal("read wildcard or fail-closed UI gate mismatch")
+	}
+}

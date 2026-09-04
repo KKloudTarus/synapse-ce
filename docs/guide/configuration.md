@@ -264,6 +264,14 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED` | `true` | Persist reconciliation diffs and counts without occurrence, finding, action, or notification mutations. |
 | `SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST` | empty | Comma-separated tenant IDs allowed to use tenant-scoped gates and dry-run; `*` enables every tenant. Empty fails closed. |
 | `SYNAPSE_SLA_ENABLED` | `false` | Enable versioned risk-based remediation deadlines, immutable assessment history, human-only lifecycle transitions, and continuous-intelligence reassessment. See [Remediation SLA governance](sla-governance.md). |
+| `SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED` | `false` | Enable Cycle/Re-test/list/archive APIs and atomically create a Cycle for new initial Assessments. Retained writes require `Idempotency-Key`; archive also requires `If-Match`. |
+| `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED` | `false` | Enable new-initial-Assessment Cycle/root dual-write only for the configured tenant allowlist. |
+| `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS` | empty | Comma-separated dual-write tenant allowlist; `*` enables all tenants. Required when the dual-write gate is enabled. |
+| `SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED` | `false` | Enable immutable Snapshot finalization and reads from sealed, hash-verified Scan Runs. |
+| `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED` | `false` | Enable lifecycle read projections after backfill and integrity verification. |
+| `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS` | empty | Comma-separated lifecycle-read allowlist; `*` enables all tenants. Required when lifecycle reads are enabled. |
+| `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED` | `false` | Show the Assessment Cycles UI by default. Startup rejects this unless lifecycle reads are enabled. |
+| `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS` | empty | Comma-separated UI allowlist; it must be a subset of the lifecycle-read allowlist. |
 | `SYNAPSE_DAST_RATE_PER_SEC` | `5` | DAST crawler request rate. |
 | `SYNAPSE_DAST_CONCURRENCY` | `4` | DAST crawler concurrency. |
 | `SYNAPSE_DAST_MAX_DEPTH` | `8` | Maximum crawl depth. |

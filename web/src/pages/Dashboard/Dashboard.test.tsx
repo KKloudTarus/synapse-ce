@@ -28,10 +28,10 @@ const assets: BusinessAsset[] = [
 
 const engagements: Engagement[] = [
   {
-    id: 'eng-active', name: 'Payment API Review', client: 'Internal', status: 'active', inScope: [{ kind: 'repo', value: 'payments' }], outOfScope: [], authorizedFrom: null, authorizedTo: null, roe: { allowedToolClasses: [], blackouts: [] }, liveReconEnabled: false, createdAt: '2026-08-01T00:00:00Z', businessAssetId: 'asset-critical',
+    id: 'eng-active', name: 'Payment API Review', client: 'Internal', status: 'active', inScope: [{ kind: 'repo', value: 'payments' }], outOfScope: [], authorizedFrom: null, authorizedTo: null, roe: { allowedToolClasses: [], blackouts: [] }, liveReconEnabled: false, requiresExplicitExecutionAuthorization: false, createdAt: '2026-08-01T00:00:00Z', businessAssetId: 'asset-critical',
   },
   {
-    id: 'eng-unassigned', name: 'New Service Review', client: 'Internal', status: 'draft', inScope: [{ kind: 'service', value: 'new-service' }], outOfScope: [], authorizedFrom: null, authorizedTo: null, roe: { allowedToolClasses: [], blackouts: [] }, liveReconEnabled: false, createdAt: '2026-08-02T00:00:00Z', businessAssetId: '',
+    id: 'eng-unassigned', name: 'New Service Review', client: 'Internal', status: 'draft', inScope: [{ kind: 'service', value: 'new-service' }], outOfScope: [], authorizedFrom: null, authorizedTo: null, roe: { allowedToolClasses: [], blackouts: [] }, liveReconEnabled: false, requiresExplicitExecutionAuthorization: false, createdAt: '2026-08-02T00:00:00Z', businessAssetId: '',
   },
 ]
 
