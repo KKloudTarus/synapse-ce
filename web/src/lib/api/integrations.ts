@@ -41,6 +41,8 @@ function mapIntegration(value: any): Integration {
     enabled: value.enabled ?? false,
     archived: value.archived ?? false,
     version: value.version ?? 1,
+    connectionRevision: value.connection_revision ?? 1,
+    credentialRevision: value.credential_revision ?? 0,
     credentialConfigured: value.credential_configured ?? false,
     createdAt: value.created_at ?? '',
     updatedAt: value.updated_at ?? '',
@@ -158,12 +160,18 @@ export const integrationsApi = {
     await req(`/integrations/${id(integration.id)}/archive`, { method: 'POST', body: JSON.stringify({ version: integration.version }) })
   },
 
-  setIntegrationCredential: async (integrationId: string, secrets: Record<string, string>): Promise<void> => {
-    await req(`/integrations/${id(integrationId)}/credentials`, { method: 'PUT', body: JSON.stringify({ secrets }) })
+  setIntegrationCredential: async (integration: Integration, secrets: Record<string, string>): Promise<void> => {
+    await req(`/integrations/${id(integration.id)}/credentials`, {
+      method: 'PUT',
+      body: JSON.stringify({ secrets, version: integration.version, connection_revision: integration.connectionRevision }),
+    })
   },
 
-  deleteIntegrationCredential: async (integrationId: string): Promise<void> => {
-    await req(`/integrations/${id(integrationId)}/credentials`, { method: 'DELETE' })
+  deleteIntegrationCredential: async (integration: Integration): Promise<void> => {
+    await req(`/integrations/${id(integration.id)}/credentials`, {
+      method: 'DELETE',
+      body: JSON.stringify({ version: integration.version, connection_revision: integration.connectionRevision }),
+    })
   },
 
   startIntegrationOperation: async (integrationId: string, type: IntegrationOperationType): Promise<IntegrationOperation> =>

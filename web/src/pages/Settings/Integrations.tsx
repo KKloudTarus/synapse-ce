@@ -1,5 +1,5 @@
 import { Link01, Plus, RefreshCw01 } from '@untitledui/icons'
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner, cn } from '../../components/ui'
 import { api } from '../../lib/api'
 import type {
@@ -32,6 +32,9 @@ export function Integrations() {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const selectedIdRef = useRef(selectedId)
+  const detailGeneration = useRef(0)
+  selectedIdRef.current = selectedId
 
   const selected = integrations.find((item) => item.id === selectedId) ?? null
   const provider = providers.find((item) => item.provider === selected?.provider) ?? null
@@ -59,6 +62,7 @@ export function Integrations() {
 
   const loadDetail = useCallback(async (integrationId: string, quiet = false) => {
     if (!integrationId) return
+    const generation = ++detailGeneration.current
     if (!quiet) setDetailLoading(true)
     try {
       const [item, operationItems, bindingItems, runItems] = await Promise.all([
@@ -67,14 +71,15 @@ export function Integrations() {
         api.listIntegrationBindings(integrationId),
         api.listIntegrationExternalRuns(integrationId),
       ])
+      if (generation !== detailGeneration.current || selectedIdRef.current !== integrationId) return
       setIntegrations((current) => current.map((entry) => entry.id === item.id ? item : entry))
       setOperations(operationItems)
       setBindings(bindingItems)
       setRuns(runItems)
     } catch (caught) {
-      setError(message(caught))
+      if (generation === detailGeneration.current && selectedIdRef.current === integrationId) setError(message(caught))
     } finally {
-      if (!quiet) setDetailLoading(false)
+      if (generation === detailGeneration.current && selectedIdRef.current === integrationId) setDetailLoading(false)
     }
   }, [])
 
@@ -128,7 +133,7 @@ export function Integrations() {
       setIntegrations((current) => [...current, item])
       setSelectedId(item.id)
       setCreating(false)
-      if (Object.values(secrets).some(Boolean)) await api.setIntegrationCredential(item.id, secrets)
+      if (Object.values(secrets).some(Boolean)) await api.setIntegrationCredential(item, secrets)
       await loadOverview()
     }, 'Integration created.')
   }
@@ -172,7 +177,7 @@ export function Integrations() {
   async function saveCredential(secrets: Record<string, string>) {
     if (!selected) return
     await operate('credential', async () => {
-      await api.setIntegrationCredential(selected.id, secrets)
+      await api.setIntegrationCredential(selected, secrets)
       setCredentialOpen(false)
       await loadDetail(selected.id, true)
     }, 'Credentials saved and cleared from the form.')
@@ -181,7 +186,7 @@ export function Integrations() {
   async function deleteCredential() {
     if (!selected || !window.confirm(`Delete credentials for ${selected.name}?`)) return
     await operate('delete-credential', async () => {
-      await api.deleteIntegrationCredential(selected.id)
+      await api.deleteIntegrationCredential(selected)
       await loadDetail(selected.id, true)
     }, 'Credentials deleted.')
   }

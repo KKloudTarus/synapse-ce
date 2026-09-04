@@ -12,6 +12,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 type schedulerTenants []shared.ID
@@ -51,7 +52,7 @@ func TestSchedulerIsLeaderGatedBackpressureAwareAndDispatchBounded(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(store, registry, memory.NewProjectRepository(), memory.MissingIntegrationAnalysisMatcher{}, ids, clock, audit)
+	service, err := NewService(store, registry, memory.NewProjectRepository(), memory.MissingIntegrationAnalysisMatcher{}, ids, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func TestSchedulerIsLeaderGatedBackpressureAwareAndDispatchBounded(t *testing.T)
 			ID: shared.ID(string(rune('a'+index)) + "-integration"), TenantID: tenantID, Provider: "fake-ci", Name: "Fake", Endpoint: "https://ci.example.com/" + string(rune('a'+index)),
 			Config: []byte(`{}`), PollInterval: time.Minute, Enabled: true, Version: 1, CreatedAt: clock.Now(), UpdatedAt: clock.Now(),
 		}
-		if err := store.CreateIntegration(shared.WithTenant(ctx, tenantID), item); err != nil {
+		if err := store.CreateIntegration(shared.WithTenant(ctx, tenantID), item, ports.AuditEntry{Actor: "test", Action: "integration.created", Target: item.ID.String(), At: clock.Now()}); err != nil {
 			t.Fatal(err)
 		}
 	}

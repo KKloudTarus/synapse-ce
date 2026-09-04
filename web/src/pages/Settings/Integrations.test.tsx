@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -29,7 +29,8 @@ const provider: IntegrationProviderDescriptor = {
 const integration: Integration = {
   id: 'integration-1', provider: 'jenkins', name: 'Production Jenkins', endpoint: 'https://jenkins.example.com',
   config: {}, allowPrivateNetwork: false, pollIntervalSeconds: 300, enabled: false, archived: false,
-  version: 1, credentialConfigured: true, createdAt: '2026-08-30T10:00:00Z', updatedAt: '2026-08-30T10:00:00Z',
+  version: 1, connectionRevision: 1, credentialRevision: 1, credentialConfigured: true,
+  createdAt: '2026-08-30T10:00:00Z', updatedAt: '2026-08-30T10:00:00Z',
 }
 
 const successfulTest: IntegrationOperation = {
@@ -86,7 +87,7 @@ describe('Integrations settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create integration' }))
 
     await waitFor(() => expect(api.createIntegration).toHaveBeenCalledWith(expect.objectContaining({ provider: 'jenkins', endpoint: 'https://jenkins.example.com' })))
-    expect(api.setIntegrationCredential).toHaveBeenCalledWith(integration.id, { username: 'ci-reader', api_token: 'secret-token' })
+  expect(api.setIntegrationCredential).toHaveBeenCalledWith(integration, { username: 'ci-reader', api_token: 'secret-token' })
   })
 
   it('handles loading, empty onboarding, and keyboard access', async () => {
@@ -150,5 +151,27 @@ describe('Integrations settings', () => {
     expect(await screen.findByLabelText('Discovered pipeline')).toBeInTheDocument()
     expect(screen.queryByText('Run discovery to select a pipeline.')).not.toBeInTheDocument()
     expect(screen.getByText('partial')).toBeInTheDocument()
+  })
+
+  it('ignores detail responses from a previously selected integration', async () => {
+    const secondary = { ...integration, id: 'integration-2', name: 'Secondary Jenkins', endpoint: 'https://secondary.example.com', version: 9 }
+    const lateOperation = { ...successfulTest, id: 'operation-late', integrationId: integration.id, state: 'failed' as const, errors: ['Late primary response'] }
+    const currentOperation = { ...successfulTest, id: 'operation-current', integrationId: secondary.id, state: 'failed' as const, errors: ['Current secondary response'] }
+    let resolvePrimary!: (value: Integration) => void
+    vi.mocked(api.listIntegrations).mockResolvedValue([integration, secondary])
+    vi.mocked(api.getIntegration).mockImplementation((id) => id === integration.id ? new Promise((resolve) => { resolvePrimary = resolve }) : Promise.resolve(secondary))
+    vi.mocked(api.listIntegrationOperations).mockImplementation((id) => Promise.resolve(id === integration.id ? [lateOperation] : [currentOperation]))
+
+    render(<MemoryRouter><Integrations /></MemoryRouter>)
+    await screen.findByRole('button', { name: /Secondary Jenkins/ })
+    fireEvent.click(screen.getByRole('button', { name: /Secondary Jenkins/ }))
+    expect((await screen.findAllByText('Current secondary response')).length).toBeGreaterThan(0)
+
+    await act(async () => {
+      resolvePrimary(integration)
+      await Promise.resolve()
+    })
+    expect(screen.queryByText('Late primary response')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Current secondary response').length).toBeGreaterThan(0)
   })
 })

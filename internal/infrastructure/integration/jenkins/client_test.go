@@ -2,6 +2,7 @@ package jenkins
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -149,5 +150,26 @@ func TestJenkinsRejectsCredentialReflectionInProviderControlledFields(t *testing
 	adapter := testAdapter(t, http.DefaultTransport)
 	if _, err := adapter.safeRunURL("https://reader:token@jenkins.example.com/jenkins/job/release/1/", "/job/release/1"); err == nil {
 		t.Fatal("credential-bearing build URL was accepted")
+	}
+	if _, err := adapter.safeRunURL("https://jenkins.example.com/jenkins/job/release/%74%6f%6b%65%6e/", "/job/release/1"); err == nil {
+		t.Fatal("percent-encoded credential-bearing build URL was accepted")
+	}
+}
+
+func TestJenkinsRequestsConsumeAggregateOperationBudget(t *testing.T) {
+	adapter := testAdapter(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(`{}`), nil
+	}))
+	requestLimited := integration.WithOperationBudget(context.Background(), 1, 1024)
+	var output any
+	if err := adapter.get(requestLimited, "/api/json", nil, &output); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.get(requestLimited, "/api/json", nil, &output); !errors.Is(err, integration.ErrOperationBudgetExceeded) {
+		t.Fatalf("second request error=%v, want operation budget exceeded", err)
+	}
+	byteLimited := integration.WithOperationBudget(context.Background(), 1, 1)
+	if err := adapter.get(byteLimited, "/api/json", nil, &output); !errors.Is(err, integration.ErrOperationBudgetExceeded) {
+		t.Fatalf("response byte error=%v, want operation budget exceeded", err)
 	}
 }

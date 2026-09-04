@@ -25,6 +25,10 @@ func integrationOperationAudit(operation integration.Operation) ports.AuditEntry
 	}
 }
 
+func integrationMutationAudit(action string, target shared.ID, at time.Time) ports.AuditEntry {
+	return ports.AuditEntry{Actor: "admin", Action: action, Target: target.String(), At: at}
+}
+
 func TestMigration0130DefinesBoundedProviderNeutralRLSSchema(t *testing.T) {
 	contents, err := migrations.FS.ReadFile("0130_integration_framework.sql")
 	if err != nil {
@@ -97,11 +101,11 @@ func TestPostgresIntegrationStoreAtomicityRLSCredentialsAndUpsert(t *testing.T) 
 	now := time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC)
 	item := integration.Integration{ID: shared.ID("integration-" + suffix), TenantID: tenantA, Provider: "jenkins", Name: "Jenkins", Endpoint: "https://jenkins.example.com", Config: []byte(`{}`), PollInterval: time.Minute, Version: 1, CreatedAt: now, UpdatedAt: now}
 	actx := shared.WithTenant(ctx, tenantA)
-	if err := store.CreateIntegration(actx, item); err != nil {
+	if err := store.CreateIntegration(actx, item, integrationMutationAudit("integration.created", item.ID, now)); err != nil {
 		t.Fatal(err)
 	}
 	secret := []byte(`{"username":"reader","api_token":"secret-token"}`)
-	if err := store.PutIntegrationCredential(actx, item.ID, "default", secret); err != nil {
+	if err := store.PutIntegrationCredential(actx, item.ID, "default", secret, item.Version, 1, integrationMutationAudit("integration.credential_replaced", item.ID, now)); err != nil {
 		t.Fatal(err)
 	}
 	var ciphertext string
@@ -120,7 +124,7 @@ func TestPostgresIntegrationStoreAtomicityRLSCredentialsAndUpsert(t *testing.T) 
 		t.Fatalf("resolved credential=%q err=%v", resolved, err)
 	}
 
-	operation := integration.Operation{ID: shared.ID("operation-" + suffix), TenantID: tenantA, IntegrationID: item.ID, Type: integration.OperationTest, State: integration.OperationQueued, JobID: "job-" + suffix, Actor: "admin", CreatedAt: now, UpdatedAt: now}
+	operation := integration.Operation{ID: shared.ID("operation-" + suffix), TenantID: tenantA, IntegrationID: item.ID, Type: integration.OperationTest, State: integration.OperationQueued, JobID: "job-" + suffix, Actor: "admin", ConnectionRevision: current.ConnectionRevision, CredentialRevision: current.CredentialRevision, CreatedAt: now, UpdatedAt: now}
 	jobKind := "integration.operation." + suffix
 	if _, err := store.StartIntegrationOperation(actx, operation, jobKind, []byte(`{"operation_id":"`+operation.ID.String()+`"}`), integrationOperationAudit(operation)); err != nil {
 		t.Fatal(err)
@@ -167,11 +171,11 @@ func TestPostgresIntegrationStoreAtomicityRLSCredentialsAndUpsert(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	cancelledOperation := integration.Operation{ID: shared.ID("operation-cancelled-" + suffix), TenantID: tenantA, IntegrationID: item.ID, Type: integration.OperationDiscover, State: integration.OperationQueued, JobID: "job-cancelled-" + suffix, Actor: "admin", CreatedAt: now.Add(5 * time.Second), UpdatedAt: now.Add(5 * time.Second)}
+	cancelledOperation := integration.Operation{ID: shared.ID("operation-cancelled-" + suffix), TenantID: tenantA, IntegrationID: item.ID, Type: integration.OperationDiscover, State: integration.OperationQueued, JobID: "job-cancelled-" + suffix, Actor: "admin", ConnectionRevision: current.ConnectionRevision, CredentialRevision: current.CredentialRevision, CreatedAt: now.Add(5 * time.Second), UpdatedAt: now.Add(5 * time.Second)}
 	if _, err := store.StartIntegrationOperation(actx, cancelledOperation, jobKind, []byte(`{"operation_id":"`+cancelledOperation.ID.String()+`"}`), integrationOperationAudit(cancelledOperation)); err != nil {
 		t.Fatal(err)
 	}
-	cancelled, err := store.CancelIntegrationOperation(actx, cancelledOperation.ID, now.Add(6*time.Second))
+	cancelled, err := store.CancelIntegrationOperation(actx, cancelledOperation.ID, now.Add(6*time.Second), integrationMutationAudit("integration.operation_cancelled", cancelledOperation.ID, now.Add(6*time.Second)))
 	if err != nil || cancelled.State != integration.OperationCancelled || cancelled.Checkpoint != "" {
 		t.Fatalf("cancelled operation=%+v err=%v", cancelled, err)
 	}
@@ -189,7 +193,7 @@ func TestPostgresIntegrationStoreAtomicityRLSCredentialsAndUpsert(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	deadLetterOperation := integration.Operation{ID: shared.ID("operation-dead-letter-" + suffix), TenantID: tenantA, IntegrationID: item.ID, Type: integration.OperationTest, State: integration.OperationQueued, JobID: "job-dead-letter-" + suffix, Actor: "admin", CreatedAt: now.Add(9 * time.Second), UpdatedAt: now.Add(9 * time.Second)}
+	deadLetterOperation := integration.Operation{ID: shared.ID("operation-dead-letter-" + suffix), TenantID: tenantA, IntegrationID: item.ID, Type: integration.OperationTest, State: integration.OperationQueued, JobID: "job-dead-letter-" + suffix, Actor: "admin", ConnectionRevision: current.ConnectionRevision, CredentialRevision: current.CredentialRevision, CreatedAt: now.Add(9 * time.Second), UpdatedAt: now.Add(9 * time.Second)}
 	if _, err := store.StartIntegrationOperation(actx, deadLetterOperation, jobKind, []byte(`{"operation_id":"`+deadLetterOperation.ID.String()+`"}`), integrationOperationAudit(deadLetterOperation)); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +220,7 @@ func TestPostgresIntegrationStoreAtomicityRLSCredentialsAndUpsert(t *testing.T) 
 	}
 
 	binding := integration.Binding{ID: shared.ID("binding-" + suffix), TenantID: tenantA, IntegrationID: item.ID, ProjectID: projectA, ExternalKey: "/job/main", ExternalName: "main", Version: 1, CreatedAt: now, UpdatedAt: now}
-	if err := store.CreateIntegrationBinding(actx, binding); err != nil {
+	if err := store.CreateIntegrationBinding(actx, binding, integrationMutationAudit("integration.binding_created", binding.ID, now)); err != nil {
 		t.Fatal(err)
 	}
 	run := integration.ExternalRun{ID: shared.ID("run-1-" + suffix), TenantID: tenantA, IntegrationID: item.ID, BindingID: binding.ID, ProviderKey: "build:1", PipelineKey: binding.ExternalKey, Lifecycle: integration.RunCompleted, Result: integration.ResultSuccess, Correlation: integration.CorrelationMissing, ProviderUpdatedAt: now, CreatedAt: now, UpdatedAt: now}
@@ -224,11 +228,11 @@ func TestPostgresIntegrationStoreAtomicityRLSCredentialsAndUpsert(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err = store.SetIntegrationEnabled(actx, item.ID, true, current.Version)
+	current, err = store.SetIntegrationEnabled(actx, item.ID, true, current.Version, integrationMutationAudit("integration.enabled", item.ID, now))
 	if err != nil {
 		t.Fatal(err)
 	}
-	pollOperation := integration.Operation{ID: shared.ID("operation-poll-" + suffix), TenantID: tenantA, IntegrationID: item.ID, Type: integration.OperationPoll, State: integration.OperationQueued, JobID: "job-poll-" + suffix, Actor: "admin", CreatedAt: now.Add(13 * time.Second), UpdatedAt: now.Add(13 * time.Second)}
+	pollOperation := integration.Operation{ID: shared.ID("operation-poll-" + suffix), TenantID: tenantA, IntegrationID: item.ID, Type: integration.OperationPoll, State: integration.OperationQueued, JobID: "job-poll-" + suffix, Actor: "admin", ConnectionRevision: current.ConnectionRevision, CredentialRevision: current.CredentialRevision, CreatedAt: now.Add(13 * time.Second), UpdatedAt: now.Add(13 * time.Second)}
 	pollOperation, err = store.StartIntegrationOperation(actx, pollOperation, jobKind, []byte(`{}`), integrationOperationAudit(pollOperation))
 	if err != nil {
 		t.Fatal(err)
@@ -237,11 +241,19 @@ func TestPostgresIntegrationStoreAtomicityRLSCredentialsAndUpsert(t *testing.T) 
 	if err != nil || !execute {
 		t.Fatalf("begin poll materialization fence=%+v execute=%v err=%v", pollOperation, execute, err)
 	}
-	if err := store.UpsertIntegrationExternalRuns(actx, pollOperation.ID, []integration.ExternalRun{run}); err != nil {
+	if _, err := store.FinishIntegrationPoll(actx, pollOperation.ID, integration.OperationSucceeded, "1", integration.OperationCounts{Runs: 1}, nil, []integration.ExternalRun{run}, now.Add(15*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	run.ID, run.Result, run.UpdatedAt = shared.ID("run-2-"+suffix), integration.ResultFailure, now.Add(time.Second)
-	if err := store.UpsertIntegrationExternalRuns(actx, pollOperation.ID, []integration.ExternalRun{run}); err != nil {
+	secondPoll := integration.Operation{ID: shared.ID("operation-poll-2-" + suffix), TenantID: tenantA, IntegrationID: item.ID, Type: integration.OperationPoll, State: integration.OperationQueued, JobID: "job-poll-2-" + suffix, Actor: "admin", ConnectionRevision: current.ConnectionRevision, CredentialRevision: current.CredentialRevision, CreatedAt: now.Add(16 * time.Second), UpdatedAt: now.Add(16 * time.Second)}
+	secondPoll, err = store.StartIntegrationOperation(actx, secondPoll, jobKind, []byte(`{}`), integrationOperationAudit(secondPoll))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondPoll, execute, err = store.BeginIntegrationOperation(actx, secondPoll.ID, now.Add(17*time.Second)); err != nil || !execute {
+		t.Fatalf("begin second poll=%+v execute=%v err=%v", secondPoll, execute, err)
+	}
+	if _, err := store.FinishIntegrationPoll(actx, secondPoll.ID, integration.OperationSucceeded, "1", integration.OperationCounts{Runs: 1}, nil, []integration.ExternalRun{run}, now.Add(18*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	runs, err := store.ListIntegrationExternalRuns(actx, item.ID, 10)

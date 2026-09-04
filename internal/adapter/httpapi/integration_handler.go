@@ -24,6 +24,8 @@ type integrationDTO struct {
 	Enabled              bool                 `json:"enabled"`
 	Archived             bool                 `json:"archived"`
 	Version              int                  `json:"version"`
+	ConnectionRevision   int                  `json:"connection_revision"`
+	CredentialRevision   int                  `json:"credential_revision"`
 	CredentialConfigured bool                 `json:"credential_configured"`
 	CreatedAt            time.Time            `json:"created_at"`
 	UpdatedAt            time.Time            `json:"updated_at"`
@@ -34,7 +36,8 @@ func integrationResponse(item integration.Integration) integrationDTO {
 	return integrationDTO{
 		ID: item.ID, Provider: item.Provider, Name: item.Name, Endpoint: item.Endpoint, Config: config,
 		AllowPrivateNetwork: item.AllowPrivateNetwork, PollIntervalSeconds: int64(item.PollInterval / time.Second), Enabled: item.Enabled,
-		Archived: item.Archived, Version: item.Version, CredentialConfigured: item.CredentialConfigured, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		Archived: item.Archived, Version: item.Version, ConnectionRevision: item.ConnectionRevision, CredentialRevision: item.CredentialRevision,
+		CredentialConfigured: item.CredentialConfigured, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 }
 
@@ -149,12 +152,14 @@ func (rt *Router) archiveIntegration(w http.ResponseWriter, r *http.Request) {
 
 func (rt *Router) putIntegrationCredential(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Secrets map[string]string `json:"secrets"`
+		Secrets            map[string]string `json:"secrets"`
+		Version            int               `json:"version"`
+		ConnectionRevision int               `json:"connection_revision"`
 	}
 	if !decodeIntegrationJSON(w, r, &body) {
 		return
 	}
-	if err := rt.integrations.SetCredential(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("id")), body.Secrets, PrincipalFrom(r.Context())); err != nil {
+	if err := rt.integrations.SetCredential(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("id")), body.Secrets, body.Version, body.ConnectionRevision, PrincipalFrom(r.Context())); err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
@@ -162,7 +167,14 @@ func (rt *Router) putIntegrationCredential(w http.ResponseWriter, r *http.Reques
 }
 
 func (rt *Router) deleteIntegrationCredential(w http.ResponseWriter, r *http.Request) {
-	if err := rt.integrations.DeleteCredential(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("id")), PrincipalFrom(r.Context())); err != nil {
+	var body struct {
+		Version            int `json:"version"`
+		ConnectionRevision int `json:"connection_revision"`
+	}
+	if !decodeIntegrationJSON(w, r, &body) {
+		return
+	}
+	if err := rt.integrations.DeleteCredential(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("id")), body.Version, body.ConnectionRevision, PrincipalFrom(r.Context())); err != nil {
 		writeError(w, rt.log, err)
 		return
 	}

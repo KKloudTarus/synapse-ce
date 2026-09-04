@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -54,7 +55,7 @@ func newIntegrationHTTPRouter(t *testing.T) *Router {
 	audit := integrationHTTPAudit{}
 	service, err := integrationuc.NewService(
 		memory.NewIntegrationStore(queue, cipher, clock, audit), registry, memory.NewProjectRepository(),
-		memory.MissingIntegrationAnalysisMatcher{}, ids, clock, audit,
+		memory.MissingIntegrationAnalysisMatcher{}, ids, clock,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +123,7 @@ func TestDecodeIntegrationJSONRejectsUnknownTrailingAndOversizedInput(t *testing
 func TestIntegrationResponseNeverContainsCredentialPlaintext(t *testing.T) {
 	item := integration.Integration{
 		ID: "integration-1", TenantID: "tenant-1", Provider: "jenkins", Name: "Jenkins", Endpoint: "https://jenkins.example.com",
-		Config: []byte(`{}`), PollInterval: time.Minute, Version: 1, CredentialConfigured: true,
+		Config: []byte(`{}`), PollInterval: time.Minute, Version: 1, ConnectionRevision: 1, CredentialConfigured: true,
 		CreatedAt: time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC),
 	}
 	encoded, err := json.Marshal(integrationResponse(item))
@@ -158,7 +159,8 @@ func TestIntegrationHTTPWorkflowEnforcesRBACIsolationAndSecretRedaction(t *testi
 	}
 
 	credentialResponse := httptest.NewRecorder()
-	handler.ServeHTTP(credentialResponse, integrationHTTPRequest(http.MethodPut, "/api/v1/integrations/"+created.ID.String()+"/credentials", `{"secrets":{"token":"secret-token"}}`, string(user.RoleAdmin), "tenant-a"))
+	credentialBody := fmt.Sprintf(`{"secrets":{"token":"secret-token"},"version":%d,"connection_revision":%d}`, created.Version, created.ConnectionRevision)
+	handler.ServeHTTP(credentialResponse, integrationHTTPRequest(http.MethodPut, "/api/v1/integrations/"+created.ID.String()+"/credentials", credentialBody, string(user.RoleAdmin), "tenant-a"))
 	if credentialResponse.Code != http.StatusNoContent {
 		t.Fatalf("credential status=%d body=%s", credentialResponse.Code, credentialResponse.Body.String())
 	}

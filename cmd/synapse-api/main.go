@@ -688,7 +688,7 @@ func main() {
 		log.Error("integration provider registry init failed", "err", err)
 		os.Exit(1)
 	}
-	integrationService, err := integrationuc.NewService(integrationStore, integrationRegistry, projectRepo, integrationMatcher, ids, clock, auditLog)
+	integrationService, err := integrationuc.NewService(integrationStore, integrationRegistry, projectRepo, integrationMatcher, ids, clock)
 	if err != nil {
 		log.Error("integration service init failed", "err", err)
 		os.Exit(1)

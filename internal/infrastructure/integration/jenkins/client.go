@@ -398,6 +398,9 @@ func (adapter *Adapter) get(ctx context.Context, resource string, query url.Valu
 	if err != nil {
 		return integration.PermanentError(err)
 	}
+	if err := integration.ConsumeOperationRequest(ctx); err != nil {
+		return integration.PermanentError(err)
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
 	if err != nil {
 		return integration.PermanentError(fmt.Errorf("build Jenkins request: %w", err))
@@ -426,6 +429,9 @@ func (adapter *Adapter) get(ctx context.Context, resource string, query url.Valu
 	}
 	if len(body) > maxResponseBytes {
 		return integration.PermanentError(fmt.Errorf("Jenkins response exceeds %d bytes", maxResponseBytes))
+	}
+	if err := integration.ConsumeOperationBytes(ctx, int64(len(body))); err != nil {
+		return integration.PermanentError(err)
 	}
 	if err := json.Unmarshal(body, output); err != nil {
 		return integration.PermanentError(fmt.Errorf("Jenkins returned invalid JSON"))
@@ -514,7 +520,11 @@ func (adapter *Adapter) safeRunURL(raw, fallbackKey string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return safe.String(), nil
+	canonical := safe.String()
+	if err := adapter.rejectCredentialReflection(parsed.Path, safe.Path, canonical); err != nil {
+		return "", err
+	}
+	return canonical, nil
 }
 
 func (adapter *Adapter) rejectCredentialReflection(values ...string) error {

@@ -1984,6 +1984,8 @@ export interface Integration {
   enabled: boolean
   archived: boolean
   version: number
+  connectionRevision: number
+  credentialRevision: number
   credentialConfigured: boolean
   createdAt: string
   updatedAt: string

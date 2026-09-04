@@ -2484,15 +2484,19 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Version or connection revision conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     delete:
       tags: [integrations]
       operationId: deleteIntegrationCredential
       summary: Delete the integration credential bundle
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntegrationRevisionRequest'}}}}
       responses:
         '204': {description: Credential deleted}
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Version or connection revision conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
 
   /api/v1/integrations/{id}/operations:
     parameters: [{$ref: '#/components/parameters/IntegrationId'}]
@@ -2788,7 +2792,7 @@ components:
     Integration:
       type: object
       additionalProperties: false
-      required: [id, provider, name, endpoint, config, allow_private_network, poll_interval_seconds, enabled, archived, version, credential_configured, created_at, updated_at]
+      required: [id, provider, name, endpoint, config, allow_private_network, poll_interval_seconds, enabled, archived, version, connection_revision, credential_revision, credential_configured, created_at, updated_at]
       properties:
         id: {type: string}
         provider: {type: string}
@@ -2800,6 +2804,8 @@ components:
         enabled: {type: boolean}
         archived: {type: boolean}
         version: {type: integer, minimum: 1}
+        connection_revision: {type: integer, minimum: 1}
+        credential_revision: {type: integer, minimum: 0}
         credential_configured: {type: boolean, description: Presence only; plaintext is never returned.}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
@@ -2817,13 +2823,16 @@ components:
         poll_interval_seconds: {type: integer, minimum: 30, maximum: 86400, default: 300}
 
     UpdateIntegrationRequest:
-      allOf:
-      - $ref: '#/components/schemas/CreateIntegrationRequest'
-      - type: object
-        required: [version]
-        properties:
-          provider: false
-          version: {type: integer, minimum: 1}
+      type: object
+      additionalProperties: false
+      required: [name, endpoint, config, allow_private_network, poll_interval_seconds, version]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        endpoint: {type: string, format: uri, pattern: '^https://'}
+        config: {type: object, additionalProperties: true}
+        allow_private_network: {type: boolean, default: false}
+        poll_interval_seconds: {type: integer, minimum: 30, maximum: 86400, default: 300}
+        version: {type: integer, minimum: 1}
 
     IntegrationVersionRequest:
       type: object
@@ -2832,11 +2841,21 @@ components:
       properties:
         version: {type: integer, minimum: 1}
 
+    IntegrationRevisionRequest:
+      type: object
+      additionalProperties: false
+      required: [version, connection_revision]
+      properties:
+        version: {type: integer, minimum: 1}
+        connection_revision: {type: integer, minimum: 1}
+
     IntegrationCredentialRequest:
       type: object
       additionalProperties: false
-      required: [secrets]
+      required: [secrets, version, connection_revision]
       properties:
+        version: {type: integer, minimum: 1}
+        connection_revision: {type: integer, minimum: 1}
         secrets:
           type: object
           minProperties: 1

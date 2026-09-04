@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,7 +48,7 @@ func integrationTenant(ctx context.Context) (shared.ID, error) {
 	return shared.TenantOrDefault(tenantID), nil
 }
 
-func (store *IntegrationStore) CreateIntegration(ctx context.Context, item integration.Integration) error {
+func (store *IntegrationStore) CreateIntegration(ctx context.Context, item integration.Integration, audit ports.AuditEntry) error {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
 		return err
@@ -68,6 +69,9 @@ func (store *IntegrationStore) CreateIntegration(ctx context.Context, item integ
 		if existing.TenantID == tenantID && !existing.Archived && existing.Provider == item.Provider && existing.Endpoint == item.Endpoint {
 			return shared.ErrConflict
 		}
+	}
+	if err := store.recordAuditLocked(ctx, audit); err != nil {
+		return err
 	}
 	store.integrations[key] = item.Clone()
 	return nil
@@ -104,7 +108,7 @@ func (store *IntegrationStore) GetIntegration(ctx context.Context, id shared.ID)
 	return item.Clone(), nil
 }
 
-func (store *IntegrationStore) UpdateIntegration(ctx context.Context, item integration.Integration, expectedVersion int) (integration.Integration, error) {
+func (store *IntegrationStore) UpdateIntegration(ctx context.Context, item integration.Integration, expectedVersion int, audit ports.AuditEntry) (integration.Integration, error) {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
 		return integration.Integration{}, err
@@ -134,6 +138,9 @@ func (store *IntegrationStore) UpdateIntegration(ctx context.Context, item integ
 	originChanged := current.Endpoint != item.Endpoint
 	item.Enabled, item.Archived, item.CreatedAt = current.Enabled, current.Archived, current.CreatedAt
 	item.ConnectionRevision, item.CredentialRevision = current.ConnectionRevision, current.CredentialRevision
+	if err := store.recordAuditLocked(ctx, audit); err != nil {
+		return integration.Integration{}, err
+	}
 	if material {
 		if err := store.invalidateActiveOperationsLocked(ctx, tenantID, item.ID, store.clock.Now().UTC()); err != nil {
 			return integration.Integration{}, err
@@ -151,7 +158,7 @@ func (store *IntegrationStore) UpdateIntegration(ctx context.Context, item integ
 	return item.Clone(), nil
 }
 
-func (store *IntegrationStore) SetIntegrationEnabled(ctx context.Context, id shared.ID, enabled bool, expectedVersion int) (integration.Integration, error) {
+func (store *IntegrationStore) SetIntegrationEnabled(ctx context.Context, id shared.ID, enabled bool, expectedVersion int, audit ports.AuditEntry) (integration.Integration, error) {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
 		return integration.Integration{}, err
@@ -181,6 +188,9 @@ func (store *IntegrationStore) SetIntegrationEnabled(ctx context.Context, id sha
 			return integration.Integration{}, shared.ErrConflict
 		}
 	}
+	if err := store.recordAuditLocked(ctx, audit); err != nil {
+		return integration.Integration{}, err
+	}
 	item.Enabled = enabled
 	item.Version++
 	item.UpdatedAt = store.clock.Now().UTC()
@@ -188,7 +198,7 @@ func (store *IntegrationStore) SetIntegrationEnabled(ctx context.Context, id sha
 	return item.Clone(), nil
 }
 
-func (store *IntegrationStore) ArchiveIntegration(ctx context.Context, id shared.ID, expectedVersion int) error {
+func (store *IntegrationStore) ArchiveIntegration(ctx context.Context, id shared.ID, expectedVersion int, audit ports.AuditEntry) error {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
 		return err
@@ -203,8 +213,16 @@ func (store *IntegrationStore) ArchiveIntegration(ctx context.Context, id shared
 	if item.Archived || item.Version != expectedVersion {
 		return shared.ErrConflict
 	}
+	if err := store.recordAuditLocked(ctx, audit); err != nil {
+		return err
+	}
 	if err := store.invalidateActiveOperationsLocked(ctx, tenantID, id, store.clock.Now().UTC()); err != nil {
 		return err
+	}
+	for key := range store.credentials {
+		if strings.HasPrefix(key, tenantID.String()+"\x1f"+id.String()+"\x1f") {
+			delete(store.credentials, key)
+		}
 	}
 	item.Enabled, item.Archived = false, true
 	item.Version++
@@ -221,7 +239,7 @@ func credentialAAD(tenantID, integrationID shared.ID, credentialID string) []byt
 	return []byte("synapse:integration-credential:" + tenantID.String() + ":" + integrationID.String() + ":" + credentialID)
 }
 
-func (store *IntegrationStore) PutIntegrationCredential(ctx context.Context, integrationID shared.ID, credentialID string, plaintext []byte) error {
+func (store *IntegrationStore) PutIntegrationCredential(ctx context.Context, integrationID shared.ID, credentialID string, plaintext []byte, expectedVersion, expectedConnectionRevision int, audit ports.AuditEntry) error {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
 		return err
@@ -240,6 +258,12 @@ func (store *IntegrationStore) PutIntegrationCredential(ctx context.Context, int
 	if !exists {
 		return shared.ErrNotFound
 	}
+	if item.Archived || item.Version != expectedVersion || item.ConnectionRevision != expectedConnectionRevision {
+		return shared.ErrConflict
+	}
+	if err := store.recordAuditLocked(ctx, audit); err != nil {
+		return err
+	}
 	if err := store.invalidateActiveOperationsLocked(ctx, tenantID, integrationID, store.clock.Now().UTC()); err != nil {
 		return err
 	}
@@ -252,7 +276,7 @@ func (store *IntegrationStore) PutIntegrationCredential(ctx context.Context, int
 	return nil
 }
 
-func (store *IntegrationStore) DeleteIntegrationCredential(ctx context.Context, integrationID shared.ID, credentialID string) error {
+func (store *IntegrationStore) DeleteIntegrationCredential(ctx context.Context, integrationID shared.ID, credentialID string, expectedVersion, expectedConnectionRevision int, audit ports.AuditEntry) error {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
 		return err
@@ -267,6 +291,12 @@ func (store *IntegrationStore) DeleteIntegrationCredential(ctx context.Context, 
 	item, exists := store.integrations[integrationKey]
 	if !exists {
 		return shared.ErrNotFound
+	}
+	if item.Archived || item.Version != expectedVersion || item.ConnectionRevision != expectedConnectionRevision {
+		return shared.ErrConflict
+	}
+	if err := store.recordAuditLocked(ctx, audit); err != nil {
+		return err
 	}
 	if err := store.invalidateActiveOperationsLocked(ctx, tenantID, integrationID, store.clock.Now().UTC()); err != nil {
 		return err
@@ -312,7 +342,7 @@ func (store *IntegrationStore) IntegrationCredentialConfigured(ctx context.Conte
 	return exists, nil
 }
 
-func (store *IntegrationStore) CreateIntegrationBinding(ctx context.Context, binding integration.Binding) error {
+func (store *IntegrationStore) CreateIntegrationBinding(ctx context.Context, binding integration.Binding, audit ports.AuditEntry) error {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
 		return err
@@ -323,15 +353,22 @@ func (store *IntegrationStore) CreateIntegrationBinding(ctx context.Context, bin
 		}
 		return fmt.Errorf("%w: integration binding tenant mismatch", shared.ErrValidation)
 	}
-	if _, err := store.GetIntegration(ctx, binding.IntegrationID); err != nil {
-		return err
-	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	item, exists := store.integrations[tenantKey(tenantID, binding.IntegrationID)]
+	if !exists {
+		return shared.ErrNotFound
+	}
+	if item.Archived {
+		return shared.ErrConflict
+	}
 	for _, existing := range store.bindings {
 		if existing.TenantID == tenantID && existing.IntegrationID == binding.IntegrationID && existing.ExternalKey == binding.ExternalKey {
 			return shared.ErrConflict
 		}
+	}
+	if err := store.recordAuditLocked(ctx, audit); err != nil {
+		return err
 	}
 	store.bindings[tenantKey(tenantID, binding.ID)] = binding
 	return nil
@@ -354,7 +391,7 @@ func (store *IntegrationStore) ListIntegrationBindings(ctx context.Context, inte
 	return items, nil
 }
 
-func (store *IntegrationStore) DeleteIntegrationBinding(ctx context.Context, integrationID, bindingID shared.ID) error {
+func (store *IntegrationStore) DeleteIntegrationBinding(ctx context.Context, integrationID, bindingID shared.ID, audit ports.AuditEntry) error {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
 		return err
@@ -365,6 +402,9 @@ func (store *IntegrationStore) DeleteIntegrationBinding(ctx context.Context, int
 	binding, exists := store.bindings[key]
 	if !exists || binding.IntegrationID != integrationID {
 		return shared.ErrNotFound
+	}
+	if err := store.recordAuditLocked(ctx, audit); err != nil {
+		return err
 	}
 	delete(store.bindings, key)
 	return nil
@@ -384,10 +424,9 @@ func (store *IntegrationStore) StartIntegrationOperation(ctx context.Context, op
 	if !exists {
 		return integration.Operation{}, shared.ErrNotFound
 	}
-	if item.Archived {
+	if item.Archived || item.ConnectionRevision != operation.ConnectionRevision || item.CredentialRevision != operation.CredentialRevision || (operation.Type == integration.OperationPoll && !item.Enabled) {
 		return integration.Operation{}, shared.ErrConflict
 	}
-	operation.ConnectionRevision, operation.CredentialRevision = item.ConnectionRevision, item.CredentialRevision
 	for _, existing := range store.operations {
 		if existing.TenantID == tenantID && existing.IntegrationID == operation.IntegrationID && !existing.State.Terminal() {
 			return integration.Operation{}, shared.ErrConflict
@@ -494,7 +533,54 @@ func (store *IntegrationStore) FinishIntegrationOperation(ctx context.Context, i
 	return operation.Clone(), nil
 }
 
-func (store *IntegrationStore) CancelIntegrationOperation(ctx context.Context, id shared.ID, finishedAt time.Time) (integration.Operation, error) {
+func (store *IntegrationStore) FinishIntegrationPoll(ctx context.Context, id shared.ID, state integration.OperationState, checkpoint string, counts integration.OperationCounts, errorsIn []string, runs []integration.ExternalRun, finishedAt time.Time) (integration.Operation, error) {
+	tenantID, err := integrationTenant(ctx)
+	if err != nil {
+		return integration.Operation{}, err
+	}
+	if state != integration.OperationSucceeded && state != integration.OperationPartial {
+		return integration.Operation{}, fmt.Errorf("%w: terminal poll state is invalid", shared.ErrValidation)
+	}
+	for index := range runs {
+		if err := runs[index].Normalize(); err != nil {
+			return integration.Operation{}, err
+		}
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	key := tenantKey(tenantID, id)
+	operation, exists := store.operations[key]
+	if !exists {
+		return integration.Operation{}, shared.ErrNotFound
+	}
+	item, exists := store.integrations[tenantKey(tenantID, operation.IntegrationID)]
+	if !exists {
+		return integration.Operation{}, shared.ErrNotFound
+	}
+	if operation.State != integration.OperationRunning || operation.Type != integration.OperationPoll || item.Archived || !item.Enabled || item.ConnectionRevision != operation.ConnectionRevision || item.CredentialRevision != operation.CredentialRevision {
+		return integration.Operation{}, shared.ErrConflict
+	}
+	for _, run := range runs {
+		if run.TenantID != tenantID || run.IntegrationID != operation.IntegrationID {
+			return integration.Operation{}, fmt.Errorf("%w: external run integration mismatch", shared.ErrValidation)
+		}
+	}
+	for _, run := range runs {
+		runKey := tenantID.String() + "\x1f" + run.IntegrationID.String() + "\x1f" + run.ProviderKey
+		if current, exists := store.runs[runKey]; exists {
+			run.ID, run.CreatedAt = current.ID, current.CreatedAt
+		}
+		store.runs[runKey] = run
+	}
+	operation.State, operation.Checkpoint, operation.Counts = state, checkpoint, counts
+	operation.Errors = integration.BoundedErrors(errorsIn)
+	operation.Pipelines = []integration.Pipeline{}
+	operation.FinishedAt, operation.UpdatedAt = &finishedAt, finishedAt
+	store.operations[key] = operation
+	return operation.Clone(), nil
+}
+
+func (store *IntegrationStore) CancelIntegrationOperation(ctx context.Context, id shared.ID, finishedAt time.Time, audit ports.AuditEntry) (integration.Operation, error) {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
 		return integration.Operation{}, err
@@ -508,6 +594,9 @@ func (store *IntegrationStore) CancelIntegrationOperation(ctx context.Context, i
 	}
 	if operation.State.Terminal() {
 		return integration.Operation{}, shared.ErrConflict
+	}
+	if err := store.recordAuditLocked(ctx, audit); err != nil {
+		return integration.Operation{}, err
 	}
 	if err := store.invalidateJobLocked(ctx, operation.JobID); err != nil {
 		return integration.Operation{}, err
@@ -555,42 +644,6 @@ func (store *IntegrationStore) ListDueIntegrations(ctx context.Context, now time
 	return items, nil
 }
 
-func (store *IntegrationStore) UpsertIntegrationExternalRuns(ctx context.Context, operationID shared.ID, runs []integration.ExternalRun) error {
-	tenantID, err := integrationTenant(ctx)
-	if err != nil {
-		return err
-	}
-	for index := range runs {
-		if err := runs[index].Normalize(); err != nil || runs[index].TenantID != tenantID {
-			if err != nil {
-				return err
-			}
-			return fmt.Errorf("%w: external run tenant mismatch", shared.ErrValidation)
-		}
-	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	operation, exists := store.operations[tenantKey(tenantID, operationID)]
-	if !exists {
-		return shared.ErrNotFound
-	}
-	item, exists := store.integrations[tenantKey(tenantID, operation.IntegrationID)]
-	if !exists {
-		return shared.ErrNotFound
-	}
-	if operation.State != integration.OperationRunning || operation.Type != integration.OperationPoll || item.Archived || !item.Enabled || item.ConnectionRevision != operation.ConnectionRevision || item.CredentialRevision != operation.CredentialRevision {
-		return shared.ErrConflict
-	}
-	for _, run := range runs {
-		key := tenantID.String() + "\x1f" + run.IntegrationID.String() + "\x1f" + run.ProviderKey
-		if current, exists := store.runs[key]; exists {
-			run.ID, run.CreatedAt = current.ID, current.CreatedAt
-		}
-		store.runs[key] = run
-	}
-	return nil
-}
-
 type integrationJobInvalidator interface {
 	Invalidate(context.Context, string) error
 }
@@ -616,6 +669,13 @@ func (store *IntegrationStore) invalidateActiveOperationsLocked(ctx context.Cont
 		store.operations[key] = operation
 	}
 	return nil
+}
+
+func (store *IntegrationStore) recordAuditLocked(ctx context.Context, audit ports.AuditEntry) error {
+	if store.audit == nil {
+		return fmt.Errorf("%w: integration audit logger is required", shared.ErrValidation)
+	}
+	return store.audit.Record(ctx, audit)
 }
 
 func (store *IntegrationStore) ListIntegrationExternalRuns(ctx context.Context, integrationID shared.ID, limit int) ([]integration.ExternalRun, error) {

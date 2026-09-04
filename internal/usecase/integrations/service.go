@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	JobKind             = "integration.operation"
-	credentialIdentity  = "default"
-	defaultHistoryLimit = 50
+	JobKind              = "integration.operation"
+	credentialIdentity   = "default"
+	defaultHistoryLimit  = 50
+	pollOperationTimeout = 2 * time.Minute
 )
 
 type Job struct {
@@ -52,7 +53,6 @@ type Service struct {
 	matcher  ports.IntegrationAnalysisMatcher
 	ids      ports.IDGenerator
 	clock    ports.Clock
-	audit    ports.AuditLogger
 	observer ports.IntegrationObserver
 	runLock  ports.RunLocker
 }
@@ -60,11 +60,11 @@ type Service struct {
 func (service *Service) SetObserver(observer ports.IntegrationObserver) { service.observer = observer }
 func (service *Service) SetRunLock(runLock ports.RunLocker)             { service.runLock = runLock }
 
-func NewService(store ports.IntegrationStore, registry *integration.Registry, projects ports.ProjectRepository, matcher ports.IntegrationAnalysisMatcher, ids ports.IDGenerator, clock ports.Clock, audit ports.AuditLogger) (*Service, error) {
-	if store == nil || registry == nil || projects == nil || matcher == nil || ids == nil || clock == nil || audit == nil {
+func NewService(store ports.IntegrationStore, registry *integration.Registry, projects ports.ProjectRepository, matcher ports.IntegrationAnalysisMatcher, ids ports.IDGenerator, clock ports.Clock) (*Service, error) {
+	if store == nil || registry == nil || projects == nil || matcher == nil || ids == nil || clock == nil {
 		return nil, fmt.Errorf("%w: integration service dependencies are required", shared.ErrValidation)
 	}
-	return &Service{store: store, registry: registry, projects: projects, matcher: matcher, ids: ids, clock: clock, audit: audit}, nil
+	return &Service{store: store, registry: registry, projects: projects, matcher: matcher, ids: ids, clock: clock}, nil
 }
 
 func (service *Service) ProviderDescriptors() []integration.ProviderDescriptor {
@@ -100,10 +100,8 @@ func (service *Service) Create(ctx context.Context, input CreateInput) (integrat
 		return integration.Integration{}, err
 	}
 	tenantCtx := shared.WithTenant(ctx, item.TenantID)
-	if err := service.store.CreateIntegration(tenantCtx, item); err != nil {
-		return integration.Integration{}, err
-	}
-	if err := service.record(tenantCtx, input.Actor, "integration.created", item.ID, map[string]string{"provider": string(item.Provider)}); err != nil {
+	audit := service.auditEntry(input.Actor, "integration.created", item.ID, map[string]string{"provider": string(item.Provider)})
+	if err := service.store.CreateIntegration(tenantCtx, item, audit); err != nil {
 		return integration.Integration{}, err
 	}
 	return item, nil
@@ -165,17 +163,15 @@ func (service *Service) Update(ctx context.Context, tenantID, id shared.ID, inpu
 	if err := current.Normalize(); err != nil {
 		return integration.Integration{}, err
 	}
-	updated, err := service.store.UpdateIntegration(tenantCtx, current, input.Version)
+	audit := service.auditEntry(input.Actor, "integration.updated", id, map[string]string{"provider": string(current.Provider)})
+	updated, err := service.store.UpdateIntegration(tenantCtx, current, input.Version, audit)
 	if err != nil {
 		return integration.Integration{}, err
 	}
-	if err := service.record(tenantCtx, input.Actor, "integration.updated", id, map[string]string{"provider": string(current.Provider)}); err != nil {
-		return integration.Integration{}, err
-	}
-	return updated, nil
+	return service.hydrateCredentialPresence(tenantCtx, updated)
 }
 
-func (service *Service) SetCredential(ctx context.Context, tenantID, integrationID shared.ID, secrets map[string]string, actor string) error {
+func (service *Service) SetCredential(ctx context.Context, tenantID, integrationID shared.ID, secrets map[string]string, expectedVersion, expectedConnectionRevision int, actor string) error {
 	tenantID = shared.TenantOrDefault(tenantID)
 	tenantCtx := shared.WithTenant(ctx, tenantID)
 	item, err := service.store.GetIntegration(tenantCtx, integrationID)
@@ -193,23 +189,19 @@ func (service *Service) SetCredential(ctx context.Context, tenantID, integration
 	if err != nil || len(plaintext) > integration.MaxCredentialBytes {
 		return fmt.Errorf("%w: integration credential bundle is invalid", shared.ErrValidation)
 	}
-	if err := service.store.PutIntegrationCredential(tenantCtx, integrationID, credentialIdentity, plaintext); err != nil {
-		return err
-	}
-	return service.record(tenantCtx, actor, "integration.credential_replaced", integrationID, map[string]string{"provider": string(item.Provider)})
+	audit := service.auditEntry(actor, "integration.credential_replaced", integrationID, map[string]string{"provider": string(item.Provider)})
+	return service.store.PutIntegrationCredential(tenantCtx, integrationID, credentialIdentity, plaintext, expectedVersion, expectedConnectionRevision, audit)
 }
 
-func (service *Service) DeleteCredential(ctx context.Context, tenantID, integrationID shared.ID, actor string) error {
+func (service *Service) DeleteCredential(ctx context.Context, tenantID, integrationID shared.ID, expectedVersion, expectedConnectionRevision int, actor string) error {
 	tenantID = shared.TenantOrDefault(tenantID)
 	tenantCtx := shared.WithTenant(ctx, tenantID)
 	item, err := service.store.GetIntegration(tenantCtx, integrationID)
 	if err != nil {
 		return err
 	}
-	if err := service.store.DeleteIntegrationCredential(tenantCtx, integrationID, credentialIdentity); err != nil {
-		return err
-	}
-	return service.record(tenantCtx, actor, "integration.credential_deleted", integrationID, map[string]string{"provider": string(item.Provider)})
+	audit := service.auditEntry(actor, "integration.credential_deleted", integrationID, map[string]string{"provider": string(item.Provider)})
+	return service.store.DeleteIntegrationCredential(tenantCtx, integrationID, credentialIdentity, expectedVersion, expectedConnectionRevision, audit)
 }
 
 func (service *Service) SetEnabled(ctx context.Context, tenantID, integrationID shared.ID, enabled bool, version int, actor string) (integration.Integration, error) {
@@ -228,21 +220,19 @@ func (service *Service) SetEnabled(ctx context.Context, tenantID, integrationID 
 			return integration.Integration{}, fmt.Errorf("%w: configure credentials before enabling the integration", shared.ErrConflict)
 		}
 	}
-	updated, err := service.store.SetIntegrationEnabled(tenantCtx, integrationID, enabled, version)
+	action := "integration.disabled"
+	if enabled {
+		action = "integration.enabled"
+	}
+	audit := service.auditEntry(actor, action, integrationID, map[string]string{"provider": string(item.Provider)})
+	updated, err := service.store.SetIntegrationEnabled(tenantCtx, integrationID, enabled, version, audit)
 	if err != nil {
 		if enabled && errors.Is(err, shared.ErrConflict) {
 			return integration.Integration{}, fmt.Errorf("%w: test the exact connection and credential revision successfully before enabling the integration", err)
 		}
 		return integration.Integration{}, err
 	}
-	action := "integration.disabled"
-	if enabled {
-		action = "integration.enabled"
-	}
-	if err := service.record(tenantCtx, actor, action, integrationID, map[string]string{"provider": string(item.Provider)}); err != nil {
-		return integration.Integration{}, err
-	}
-	return updated, nil
+	return service.hydrateCredentialPresence(tenantCtx, updated)
 }
 
 func (service *Service) Archive(ctx context.Context, tenantID, integrationID shared.ID, version int, actor string) error {
@@ -252,10 +242,8 @@ func (service *Service) Archive(ctx context.Context, tenantID, integrationID sha
 	if err != nil {
 		return err
 	}
-	if err := service.store.ArchiveIntegration(tenantCtx, integrationID, version); err != nil {
-		return err
-	}
-	return service.record(tenantCtx, actor, "integration.archived", integrationID, map[string]string{"provider": string(item.Provider)})
+	audit := service.auditEntry(actor, "integration.archived", integrationID, map[string]string{"provider": string(item.Provider)})
+	return service.store.ArchiveIntegration(tenantCtx, integrationID, version, audit)
 }
 
 func (service *Service) CreateBinding(ctx context.Context, tenantID, integrationID, projectID shared.ID, externalKey, externalName, actor string) (integration.Binding, error) {
@@ -272,10 +260,8 @@ func (service *Service) CreateBinding(ctx context.Context, tenantID, integration
 	if err := binding.Normalize(); err != nil {
 		return integration.Binding{}, err
 	}
-	if err := service.store.CreateIntegrationBinding(tenantCtx, binding); err != nil {
-		return integration.Binding{}, err
-	}
-	if err := service.record(tenantCtx, actor, "integration.binding_created", binding.ID, map[string]string{"integration_id": integrationID.String(), "project_id": projectID.String()}); err != nil {
+	audit := service.auditEntry(actor, "integration.binding_created", binding.ID, map[string]string{"integration_id": integrationID.String(), "project_id": projectID.String()})
+	if err := service.store.CreateIntegrationBinding(tenantCtx, binding, audit); err != nil {
 		return integration.Binding{}, err
 	}
 	return binding, nil
@@ -287,10 +273,8 @@ func (service *Service) ListBindings(ctx context.Context, tenantID, integrationI
 
 func (service *Service) DeleteBinding(ctx context.Context, tenantID, integrationID, bindingID shared.ID, actor string) error {
 	tenantCtx := shared.WithTenant(ctx, shared.TenantOrDefault(tenantID))
-	if err := service.store.DeleteIntegrationBinding(tenantCtx, integrationID, bindingID); err != nil {
-		return err
-	}
-	return service.record(tenantCtx, actor, "integration.binding_deleted", bindingID, map[string]string{"integration_id": integrationID.String()})
+	audit := service.auditEntry(actor, "integration.binding_deleted", bindingID, map[string]string{"integration_id": integrationID.String()})
+	return service.store.DeleteIntegrationBinding(tenantCtx, integrationID, bindingID, audit)
 }
 
 func (service *Service) StartOperation(ctx context.Context, tenantID, integrationID shared.ID, operationType integration.OperationType, actor string) (integration.Operation, error) {
@@ -317,7 +301,7 @@ func (service *Service) StartOperation(ctx context.Context, tenantID, integratio
 		return integration.Operation{}, fmt.Errorf("%w: integration must be enabled before polling", shared.ErrConflict)
 	}
 	now := service.clock.Now().UTC()
-	operation := integration.Operation{ID: service.ids.NewID(), TenantID: tenantID, IntegrationID: integrationID, Type: operationType, State: integration.OperationQueued, JobID: service.ids.NewID().String(), Actor: strings.TrimSpace(actor), CreatedAt: now, UpdatedAt: now}
+	operation := integration.Operation{ID: service.ids.NewID(), TenantID: tenantID, IntegrationID: integrationID, Type: operationType, State: integration.OperationQueued, JobID: service.ids.NewID().String(), Actor: strings.TrimSpace(actor), ConnectionRevision: item.ConnectionRevision, CredentialRevision: item.CredentialRevision, CreatedAt: now, UpdatedAt: now}
 	if operation.Actor == "" {
 		operation.Actor = "system:integration"
 	}
@@ -349,11 +333,13 @@ func (service *Service) ListOperations(ctx context.Context, tenantID, integratio
 
 func (service *Service) CancelOperation(ctx context.Context, tenantID, operationID shared.ID, actor string) (integration.Operation, error) {
 	tenantCtx := shared.WithTenant(ctx, shared.TenantOrDefault(tenantID))
-	operation, err := service.store.CancelIntegrationOperation(tenantCtx, operationID, service.clock.Now().UTC())
+	current, err := service.store.GetIntegrationOperation(tenantCtx, operationID)
 	if err != nil {
 		return integration.Operation{}, err
 	}
-	if err := service.record(tenantCtx, actor, "integration.operation_cancelled", operationID, map[string]string{"integration_id": operation.IntegrationID.String(), "operation": string(operation.Type)}); err != nil {
+	audit := service.auditEntry(actor, "integration.operation_cancelled", operationID, map[string]string{"integration_id": current.IntegrationID.String(), "operation": string(current.Type)})
+	operation, err := service.store.CancelIntegrationOperation(tenantCtx, operationID, service.clock.Now().UTC(), audit)
+	if err != nil {
 		return integration.Operation{}, err
 	}
 	if item, getErr := service.store.GetIntegration(tenantCtx, operation.IntegrationID); getErr == nil {
@@ -432,7 +418,7 @@ func (service *Service) HandleJob(ctx context.Context, jobID string, payload []b
 	if err != nil {
 		return err
 	}
-	if item.Archived || item.ConnectionRevision != operation.ConnectionRevision || item.CredentialRevision != operation.CredentialRevision {
+	if item.Archived || (operation.Type == integration.OperationPoll && !item.Enabled) || item.ConnectionRevision != operation.ConnectionRevision || item.CredentialRevision != operation.CredentialRevision {
 		return service.finishProviderFailure(executionCtx, item.Provider, operation, fmt.Errorf("integration operation revision is stale"))
 	}
 	credentials, err := service.credentials(executionCtx, item.ID, operation.CredentialRevision)
@@ -522,6 +508,12 @@ func (service *Service) executePoll(ctx context.Context, provider integration.Pr
 	if err != nil {
 		return err
 	}
+	if len(bindings) > integration.MaxBindingsPerPoll {
+		return service.finishProviderFailure(ctx, provider, operation, fmt.Errorf("integration poll exceeds %d bindings", integration.MaxBindingsPerPoll))
+	}
+	pollCtx, cancel := context.WithTimeout(ctx, pollOperationTimeout)
+	defer cancel()
+	pollCtx = integration.WithOperationBudget(pollCtx, integration.MaxRequestsPerPoll, integration.MaxBytesPerPoll)
 	checkpoints := decodeCheckpoints(operation.Checkpoint)
 	nextCheckpoints := cloneCheckpoints(checkpoints)
 	now := service.clock.Now().UTC()
@@ -530,8 +522,14 @@ func (service *Service) executePoll(ctx context.Context, provider integration.Pr
 	errorSamples := make([]string, 0)
 	retryableFailures := 0
 	for _, binding := range bindings {
-		runs, nextCheckpoint, readErr := reader.ReadRuns(ctx, binding, checkpoints[binding.ID.String()])
+		if pollCtx.Err() != nil {
+			return service.finishProviderFailure(ctx, provider, operation, fmt.Errorf("integration poll exceeded its deadline"))
+		}
+		runs, nextCheckpoint, readErr := reader.ReadRuns(pollCtx, binding, checkpoints[binding.ID.String()])
 		if readErr != nil {
+			if errors.Is(readErr, integration.ErrOperationBudgetExceeded) || (errors.Is(readErr, context.DeadlineExceeded) && ctx.Err() == nil) {
+				return service.finishProviderFailure(ctx, provider, operation, fmt.Errorf("integration poll exhausted its operation budget"))
+			}
 			counts.Errors++
 			errorSamples = append(errorSamples, "failed to read runs for one bound pipeline")
 			if integration.IsRetryable(readErr) {
@@ -539,10 +537,8 @@ func (service *Service) executePoll(ctx context.Context, provider integration.Pr
 			}
 			continue
 		}
-		if len(runs) > integration.MaxRunsPerPoll {
-			counts.Errors++
-			errorSamples = append(errorSamples, "provider returned too many runs for one pipeline")
-			continue
+		if len(runs) > integration.MaxRunsPerPoll || len(allRuns)+len(runs) > integration.MaxRunsPerPoll {
+			return service.finishProviderFailure(ctx, provider, operation, fmt.Errorf("integration poll exceeds %d runs", integration.MaxRunsPerPoll))
 		}
 		for index := range runs {
 			run := &runs[index]
@@ -555,7 +551,7 @@ func (service *Service) executePoll(ctx context.Context, provider integration.Pr
 			}
 			run.Correlation = integration.CorrelationMissing
 			if run.Revision != "" {
-				run.AnalysisID, run.Correlation, err = service.matcher.MatchIntegrationAnalysis(ctx, binding.ProjectID, run.Revision)
+				run.AnalysisID, run.Correlation, err = service.matcher.MatchIntegrationAnalysis(pollCtx, binding.ProjectID, run.Revision)
 				if err != nil {
 					return err
 				}
@@ -580,9 +576,6 @@ func (service *Service) executePoll(ctx context.Context, provider integration.Pr
 	if len(allRuns) == 0 && retryableFailures > 0 {
 		return integration.RetryableError(fmt.Errorf("integration provider poll failed"))
 	}
-	if err := service.store.UpsertIntegrationExternalRuns(ctx, operation.ID, allRuns); err != nil {
-		return err
-	}
 	state := integration.OperationSucceeded
 	if counts.Errors > 0 {
 		state = integration.OperationPartial
@@ -591,7 +584,7 @@ func (service *Service) executePoll(ctx context.Context, provider integration.Pr
 	if err != nil {
 		return err
 	}
-	finished, err := service.store.FinishIntegrationOperation(ctx, operation.ID, state, checkpoint, counts, errorSamples, nil, now)
+	finished, err := service.store.FinishIntegrationPoll(ctx, operation.ID, state, checkpoint, counts, errorSamples, allRuns, now)
 	if err == nil && finished.State == state {
 		service.observe(provider, operation.Type, state)
 	}
@@ -630,12 +623,21 @@ func (service *Service) credentials(ctx context.Context, integrationID shared.ID
 	return integration.CredentialBundle(credentials), nil
 }
 
-func (service *Service) record(ctx context.Context, actor, action string, target shared.ID, metadata map[string]string) error {
+func (service *Service) auditEntry(actor, action string, target shared.ID, metadata map[string]string) ports.AuditEntry {
 	actor = strings.TrimSpace(actor)
 	if actor == "" {
 		actor = "system:integration"
 	}
-	return service.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: action, Target: target.String(), Metadata: metadata, At: service.clock.Now().UTC()})
+	return ports.AuditEntry{Actor: actor, Action: action, Target: target.String(), Metadata: metadata, At: service.clock.Now().UTC()}
+}
+
+func (service *Service) hydrateCredentialPresence(ctx context.Context, item integration.Integration) (integration.Integration, error) {
+	configured, err := service.store.IntegrationCredentialConfigured(ctx, item.ID, credentialIdentity)
+	if err != nil {
+		return integration.Integration{}, err
+	}
+	item.CredentialConfigured = configured
+	return item, nil
 }
 
 func decodeCheckpoints(raw string) map[string]string {

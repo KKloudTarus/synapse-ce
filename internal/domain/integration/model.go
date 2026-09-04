@@ -23,7 +23,10 @@ const (
 	MaxConfigBytes       = 32 << 10
 	MaxCredentialBytes   = 16 << 10
 	MaxPipelines         = 1000
+	MaxBindingsPerPoll   = 100
 	MaxRunsPerPoll       = 200
+	MaxRequestsPerPoll   = 250
+	MaxBytesPerPoll      = 32 << 20
 	MaxOperationErrors   = 20
 	MaxOperationErrorLen = 256
 	DefaultPollInterval  = 5 * time.Minute

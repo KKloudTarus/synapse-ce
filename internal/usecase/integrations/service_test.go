@@ -3,6 +3,7 @@ package integrations
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -44,11 +45,12 @@ func (observer *integrationTestObserver) ObserveIntegrationOperation(provider, o
 }
 
 type integrationTestAdapter struct {
-	descriptor integration.ProviderDescriptor
-	clock      *integrationTestClock
-	readErrors map[string]error
-	testError  error
-	onTest     func()
+	descriptor     integration.ProviderDescriptor
+	clock          *integrationTestClock
+	readErrors     map[string]error
+	runsPerBinding int
+	testError      error
+	onTest         func()
 }
 
 func (adapter *integrationTestAdapter) Descriptor() integration.ProviderDescriptor {
@@ -70,10 +72,19 @@ func (adapter *integrationTestAdapter) ReadRuns(_ context.Context, binding integ
 	if err := adapter.readErrors[binding.ExternalKey]; err != nil {
 		return nil, "", err
 	}
-	return []integration.ExternalRun{{
-		ProviderKey: binding.ExternalKey + ":build:1", PipelineKey: binding.ExternalKey, Number: "1", Lifecycle: integration.RunCompleted,
-		Result: integration.ResultSuccess, Revision: "abc123", ProviderUpdatedAt: adapter.clock.Now(),
-	}}, "1", nil
+	count := adapter.runsPerBinding
+	if count == 0 {
+		count = 1
+	}
+	runs := make([]integration.ExternalRun, count)
+	for index := range runs {
+		number := index + 1
+		runs[index] = integration.ExternalRun{
+			ProviderKey: fmt.Sprintf("%s:build:%d", binding.ExternalKey, number), PipelineKey: binding.ExternalKey, Number: fmt.Sprint(number), Lifecycle: integration.RunCompleted,
+			Result: integration.ResultSuccess, Revision: "abc123", ProviderUpdatedAt: adapter.clock.Now(),
+		}
+	}
+	return runs, fmt.Sprint(count), nil
 }
 
 type integrationTestLeaseLock struct{ cancel context.CancelFunc }
@@ -129,7 +140,7 @@ func TestServiceFullMemoryWorkflowIsIdempotentAndCancellationSafe(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(store, registry, projects, integrationTestMatcher{}, ids, clock, audit)
+	service, err := NewService(store, registry, projects, integrationTestMatcher{}, ids, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,12 +153,23 @@ func TestServiceFullMemoryWorkflowIsIdempotentAndCancellationSafe(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.SetCredential(ctx, tenantID, created.ID, map[string]string{"token": "secret"}, "admin"); err != nil {
+	initialVersion, initialConnectionRevision := created.Version, created.ConnectionRevision
+	if err := service.SetCredential(ctx, tenantID, created.ID, map[string]string{"token": "secret"}, created.Version, created.ConnectionRevision, "admin"); err != nil {
 		t.Fatal(err)
+	}
+	if err := service.SetCredential(ctx, tenantID, created.ID, map[string]string{"token": "stale"}, initialVersion, initialConnectionRevision, "admin"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("stale credential replacement error=%v, want conflict", err)
 	}
 	created, err = service.Get(ctx, tenantID, created.ID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	created, err = service.Update(ctx, tenantID, created.ID, UpdateInput{
+		Name: created.Name, Endpoint: created.Endpoint, Config: map[string]any{}, AllowPrivateNetwork: created.AllowPrivateNetwork,
+		PollInterval: created.PollInterval, Version: created.Version, Actor: "admin",
+	})
+	if err != nil || !created.CredentialConfigured {
+		t.Fatalf("update credential presence = %+v, err=%v", created, err)
 	}
 
 	clock.advance()
@@ -225,7 +247,7 @@ func TestServiceFullMemoryWorkflowIsIdempotentAndCancellationSafe(t *testing.T) 
 	}
 
 	enabled, err := service.SetEnabled(ctx, tenantID, created.ID, true, created.Version, "admin")
-	if err != nil || !enabled.Enabled {
+	if err != nil || !enabled.Enabled || !enabled.CredentialConfigured {
 		t.Fatalf("enable integration = %+v, err=%v", enabled, err)
 	}
 
@@ -274,6 +296,22 @@ func TestServiceFullMemoryWorkflowIsIdempotentAndCancellationSafe(t *testing.T) 
 	if err != nil || seedOperation.State != integration.OperationSucceeded || seedOperation.Counts.Runs != 2 {
 		t.Fatalf("seed multi-binding poll = %+v, err=%v", seedOperation, err)
 	}
+	adapter.runsPerBinding = integration.MaxRunsPerPoll/2 + 1
+	clock.advance()
+	boundedOperation, err := service.StartOperation(ctx, tenantID, created.ID, integration.OperationPoll, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executeNextIntegrationJob(t, ctx, tenantID, queue, service)
+	boundedOperation, err = service.GetOperation(ctx, tenantID, boundedOperation.ID)
+	if err != nil || boundedOperation.State != integration.OperationFailed {
+		t.Fatalf("aggregate run budget operation = %+v, err=%v", boundedOperation, err)
+	}
+	boundedRuns, err := service.ListExternalRuns(ctx, tenantID, created.ID, 500)
+	if err != nil || len(boundedRuns) != 2 {
+		t.Fatalf("over-budget poll published partial runs = %+v, err=%v", boundedRuns, err)
+	}
+	adapter.runsPerBinding = 0
 	adapter.readErrors = map[string]error{secondBinding.ExternalKey: integration.PermanentError(errors.New("provider pipeline unavailable"))}
 	clock.advance()
 	partialOperation, err := service.StartOperation(ctx, tenantID, created.ID, integration.OperationPoll, "admin")
@@ -290,7 +328,33 @@ func TestServiceFullMemoryWorkflowIsIdempotentAndCancellationSafe(t *testing.T) 
 		t.Fatalf("partial poll discarded last-known-good runs = %+v, err=%v", runs, err)
 	}
 	clock.advance()
-	if err := service.SetCredential(ctx, tenantID, created.ID, map[string]string{"token": "replacement"}, "admin"); err != nil {
+	fencedPoll, err := service.StartOperation(ctx, tenantID, created.ID, integration.OperationPoll, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fencedJob, err := queue.Claim(ctx, time.Minute, JobKind)
+	if err != nil || fencedJob == nil {
+		t.Fatalf("claim publication-fence job = %+v, err=%v", fencedJob, err)
+	}
+	if _, execute, beginErr := store.BeginIntegrationOperation(shared.WithTenant(ctx, tenantID), fencedPoll.ID, clock.Now()); beginErr != nil || !execute {
+		t.Fatalf("begin publication-fence poll: execute=%v err=%v", execute, beginErr)
+	}
+	if _, err := service.CancelOperation(ctx, tenantID, fencedPoll.ID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	lateRun := integration.ExternalRun{
+		ID: service.ids.NewID(), TenantID: tenantID, IntegrationID: created.ID, BindingID: binding.ID, ProviderKey: "late:build:1", PipelineKey: binding.ExternalKey,
+		Lifecycle: integration.RunCompleted, Result: integration.ResultSuccess, Correlation: integration.CorrelationMissing, ProviderUpdatedAt: clock.Now(), CreatedAt: clock.Now(), UpdatedAt: clock.Now(),
+	}
+	if _, err := store.FinishIntegrationPoll(shared.WithTenant(ctx, tenantID), fencedPoll.ID, integration.OperationSucceeded, "late", integration.OperationCounts{Runs: 1}, nil, []integration.ExternalRun{lateRun}, clock.Now()); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("cancelled poll publication error=%v, want conflict", err)
+	}
+	runs, err = service.ListExternalRuns(ctx, tenantID, created.ID, 100)
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("cancelled poll published runs = %+v, err=%v", runs, err)
+	}
+	clock.advance()
+	if err := service.SetCredential(ctx, tenantID, created.ID, map[string]string{"token": "replacement"}, enabled.Version, enabled.ConnectionRevision, "admin"); err != nil {
 		t.Fatal(err)
 	}
 	invalidated, err := service.Get(ctx, tenantID, created.ID)
