@@ -46,6 +46,9 @@ func TestCollectorsScrapeOutput(t *testing.T) {
 	c := New(nil, nil)
 	c.ObserveHTTPRequest("GET", "GET /healthz", "2xx", time.Millisecond)
 	c.ObserveSCAScan(time.Second, "success")
+	c.ObserveFindingLineage("matched", "fingerprint", "exact_fingerprint")
+	c.ObserveFindingLineageBackfillItem("observation_created")
+	c.ObserveFindingLineageBackfillRun("completed")
 
 	rec := httptest.NewRecorder()
 	c.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
@@ -56,9 +59,43 @@ func TestCollectorsScrapeOutput(t *testing.T) {
 		"synapse_http_request_duration_seconds",
 		"synapse_sca_scan_duration_seconds",
 		"synapse_sca_scan_outcomes_total",
+		"synapse_finding_lineage_operations_total",
+		"synapse_finding_lineage_backfill_items_total",
+		"synapse_finding_lineage_backfill_runs_total",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("scrape output missing metric %q", want)
+		}
+	}
+}
+
+func TestCollectorsFindingLineageMetricsUseOnlyBoundedLabels(t *testing.T) {
+	c := New(nil, nil)
+	c.ObserveFindingLineage("matched", "fingerprint", "exact_fingerprint")
+	c.ObserveFindingLineage("tenant-a", "source-123", "raw-finding-id")
+	c.ObserveFindingLineageBackfillItem("observation_created")
+	c.ObserveFindingLineageBackfillItem("source-finding-id")
+	c.ObserveFindingLineageBackfillRun("completed")
+	c.ObserveFindingLineageBackfillRun("tenant-a")
+
+	recorder := httptest.NewRecorder()
+	c.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+	for _, expected := range []string{
+		`synapse_finding_lineage_operations_total{method="fingerprint",outcome="matched",reason="exact_fingerprint"} 1`,
+		`synapse_finding_lineage_operations_total{method="unknown",outcome="unknown",reason="unknown"} 1`,
+		`synapse_finding_lineage_backfill_items_total{outcome="observation_created"} 1`,
+		`synapse_finding_lineage_backfill_items_total{outcome="unknown"} 1`,
+		`synapse_finding_lineage_backfill_runs_total{state="completed"} 1`,
+		`synapse_finding_lineage_backfill_runs_total{state="unknown"} 1`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("finding lineage metric missing %q: %s", expected, body)
+		}
+	}
+	for _, forbidden := range []string{"source-123", "raw-finding-id", "source-finding-id", "tenant-a"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("finding lineage metric leaked %q: %s", forbidden, body)
 		}
 	}
 }

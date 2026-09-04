@@ -59,6 +59,7 @@ An **Assessment Cycle** owns rooted initial Assessment/Re-test ancestry and a fr
 | --- | --- |
 | `synapse-assessment-backfill` | Resumable tenant-scoped historical singleton-Cycle backfill. |
 | `synapse-assessment-snapshot-backfill` | Append-only projection of historical scan evidence into legacy Snapshots with explicit unknown coverage. |
+| `synapse-finding-lineage-backfill` | Resumable conversion of legacy Findings into versioned Identities, immutable Observations, review Candidates, or explicit redacted Skip records. |
 | `synapse-assessment-integrity` | Read-only Cycle integrity verification and deterministic repair-plan output. |
 
 **Sandboxed helpers**

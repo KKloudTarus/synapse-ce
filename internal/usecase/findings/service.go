@@ -36,6 +36,13 @@ type Service struct {
 	clock       ports.Clock
 	ids         ports.IDGenerator
 	attributor  ports.FindingAttributor
+	shadowTx    ports.TenantTransactionRunner
+	shadow      CreatedFindingProjector
+	shadowOn    func(string) bool
+}
+
+type CreatedFindingProjector interface {
+	ProjectCreatedFinding(context.Context, shared.ID, finding.Finding, string) error
 }
 
 // NewService wires the findings workflow service.
@@ -50,6 +57,16 @@ func (s *Service) SetEngagementTenantResolver(r ports.EngagementTenantResolver) 
 // SetAttributor wires authoritative asset-to-finding bindings; nil preserves legacy internal callers.
 func (s *Service) SetAttributor(a ports.FindingAttributor) { s.attributor = a }
 
+// SetLifecycleShadow makes a newly-authored Finding, its audit/attribution, and
+// its shadow lineage Observation one tenant-local transaction.
+func (s *Service) SetLifecycleShadow(tx ports.TenantTransactionRunner, projector CreatedFindingProjector, enabled func(string) bool) error {
+	if tx == nil || projector == nil || enabled == nil || s.engagements == nil {
+		return fmt.Errorf("%w: finding lifecycle shadow dependencies are required", shared.ErrValidation)
+	}
+	s.shadowTx, s.shadow, s.shadowOn = tx, projector, enabled
+	return nil
+}
+
 // CreateAttributed requires an explicit asset for a new externally-authored finding.
 func (s *Service) CreateAttributed(ctx context.Context, actor string, engagementID, assetID shared.ID, in finding.ManualInput) (finding.Finding, error) {
 	if s.attributor == nil {
@@ -59,42 +76,48 @@ func (s *Service) CreateAttributed(ctx context.Context, actor string, engagement
 		return finding.Finding{}, err
 	}
 	key := attributedManualKey(actor, engagementID, assetID, in)
-	f, err := s.findByDedupKey(ctx, engagementID, key)
-	if err != nil {
-		return finding.Finding{}, err
-	}
-	created := f.ID.IsZero()
-	if created {
-		if v := strings.TrimSpace(in.CVSSVector); v != "" {
-			score, ok := shared.CVSSv3BaseScore(v)
-			if !ok {
-				return finding.Finding{}, fmt.Errorf("%w: invalid CVSS v3.1 vector", shared.ErrValidation)
-			}
-			in.Severity = shared.SeverityFromScore(score)
-		}
-		f, err = finding.NewManual(s.ids.NewID(), engagementID, in, s.clock.Now())
+	var f finding.Finding
+	err := s.withCreationBoundary(ctx, engagementID, func(writeCtx context.Context, tenantID shared.ID, project bool) error {
+		var err error
+		f, err = s.findByDedupKey(writeCtx, engagementID, key)
 		if err != nil {
-			return finding.Finding{}, err
+			return err
 		}
-		f.DedupKey = key
-		if err := s.repo.Upsert(ctx, []finding.Finding{f}); err != nil {
-			return f, fmt.Errorf("persist finding: %w", err)
+		created := f.ID.IsZero()
+		if created {
+			if v := strings.TrimSpace(in.CVSSVector); v != "" {
+				score, ok := shared.CVSSv3BaseScore(v)
+				if !ok {
+					return fmt.Errorf("%w: invalid CVSS v3.1 vector", shared.ErrValidation)
+				}
+				in.Severity = shared.SeverityFromScore(score)
+			}
+			f, err = finding.NewManual(s.ids.NewID(), engagementID, in, s.clock.Now())
+			if err != nil {
+				return err
+			}
+			f.DedupKey = key
+			if err := s.repo.Upsert(writeCtx, []finding.Finding{f}); err != nil {
+				return fmt.Errorf("persist finding: %w", err)
+			}
+			if stored, err := s.findByDedupKey(writeCtx, engagementID, key); err != nil {
+				return err
+			} else if !stored.ID.IsZero() {
+				f = stored
+			}
+			if err := s.record(writeCtx, actor, "finding.created", engagementID, f.ID, map[string]string{"severity": string(f.Severity), "kind": string(f.Kind)}); err != nil {
+				return err
+			}
 		}
-		if stored, err := s.findByDedupKey(ctx, engagementID, key); err != nil {
-			return f, err
-		} else if !stored.ID.IsZero() {
-			f = stored
+		if err := s.attributor.Record(writeCtx, engagementID, assetID, "manual:"+f.ID, "manual:"+f.ID, asset.EdgeObserved, []shared.ID{f.ID}); err != nil {
+			return fmt.Errorf("record finding attribution: %w", err)
 		}
-	}
-	if created {
-		if err := s.record(ctx, actor, "finding.created", engagementID, f.ID, map[string]string{"severity": string(f.Severity), "kind": string(f.Kind)}); err != nil {
-			return f, &ports.PartialWriteError{Operation: "manual finding", IDs: []shared.ID{f.ID}, Err: err}
+		if created && project {
+			return s.shadow.ProjectCreatedFinding(writeCtx, tenantID, f, actor)
 		}
-	}
-	if err := s.attributor.Record(ctx, engagementID, assetID, "manual:"+f.ID, "manual:"+f.ID, asset.EdgeObserved, []shared.ID{f.ID}); err != nil {
-		return f, &ports.PartialWriteError{Operation: "manual finding", IDs: []shared.ID{f.ID}, Err: fmt.Errorf("record finding attribution: %w", err)}
-	}
-	return f, nil
+		return nil
+	})
+	return f, err
 }
 
 func attributedManualKey(actor string, engagementID, assetID shared.ID, in finding.ManualInput) string {
@@ -403,19 +426,43 @@ func (s *Service) Create(ctx context.Context, actor string, engagementID shared.
 		}
 		in.Severity = shared.SeverityFromScore(score)
 	}
-	now := s.clock.Now()
-	f, err := finding.NewManual(s.ids.NewID(), engagementID, in, now)
+	var f finding.Finding
+	err := s.withCreationBoundary(ctx, engagementID, func(writeCtx context.Context, tenantID shared.ID, project bool) error {
+		var err error
+		f, err = finding.NewManual(s.ids.NewID(), engagementID, in, s.clock.Now())
+		if err != nil {
+			return err
+		}
+		if err := s.repo.Upsert(writeCtx, []finding.Finding{f}); err != nil {
+			return fmt.Errorf("persist finding: %w", err)
+		}
+		if err := s.record(writeCtx, actor, "finding.created", engagementID, f.ID,
+			map[string]string{"severity": string(f.Severity), "kind": string(f.Kind)}); err != nil {
+			return err
+		}
+		if project {
+			return s.shadow.ProjectCreatedFinding(writeCtx, tenantID, f, actor)
+		}
+		return nil
+	})
+	return f, err
+}
+
+func (s *Service) withCreationBoundary(ctx context.Context, engagementID shared.ID, write func(context.Context, shared.ID, bool) error) error {
+	if s.shadowTx == nil || s.shadow == nil || s.shadowOn == nil {
+		return write(ctx, "", false)
+	}
+	engagement, err := s.engagements.GetByID(ctx, engagementID)
 	if err != nil {
-		return finding.Finding{}, err
+		return err
 	}
-	if err := s.repo.Upsert(ctx, []finding.Finding{f}); err != nil {
-		return finding.Finding{}, fmt.Errorf("persist finding: %w", err)
+	tenantID := shared.TenantOrDefault(engagement.TenantID)
+	if !s.shadowOn(tenantID.String()) {
+		return write(ctx, tenantID, false)
 	}
-	if err := s.record(ctx, actor, "finding.created", engagementID, f.ID,
-		map[string]string{"severity": string(f.Severity), "kind": string(f.Kind)}); err != nil {
-		return finding.Finding{}, err
-	}
-	return f, nil
+	return s.shadowTx.Run(ctx, tenantID, func(txCtx context.Context) error {
+		return write(txCtx, tenantID, true)
+	})
 }
 
 // UpdateStatus validates and applies a triage status change with optimistic

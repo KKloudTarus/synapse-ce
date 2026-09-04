@@ -17,13 +17,16 @@ const queueStatsTimeout = time.Second
 // Collectors owns a private Prometheus registry. It contains no global
 // collectors, so only Synapse's documented metrics are exposed by /metrics.
 type Collectors struct {
-	registry     *prometheus.Registry
-	httpRequests *prometheus.CounterVec
-	httpDuration *prometheus.HistogramVec
-	scaDuration  *prometheus.HistogramVec
-	scaOutcomes  *prometheus.CounterVec
-	queueReader  ports.AggregateJobQueueStatsReader
-	now          func() time.Time
+	registry                    *prometheus.Registry
+	httpRequests                *prometheus.CounterVec
+	httpDuration                *prometheus.HistogramVec
+	scaDuration                 *prometheus.HistogramVec
+	scaOutcomes                 *prometheus.CounterVec
+	findingLineage              *prometheus.CounterVec
+	findingLineageBackfillItems *prometheus.CounterVec
+	findingLineageBackfillRuns  *prometheus.CounterVec
+	queueReader                 ports.AggregateJobQueueStatsReader
+	now                         func() time.Time
 }
 
 // New constructs the bounded Prometheus collectors used by the API metrics listener.
@@ -49,8 +52,20 @@ func New(queueReader ports.AggregateJobQueueStatsReader, pool ports.PoolStatsRea
 			Namespace: "synapse", Subsystem: "sca", Name: "scan_outcomes_total",
 			Help: "Terminal SCA scan outcomes.",
 		}, []string{"outcome"}),
+		findingLineage: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "synapse", Subsystem: "finding_lineage", Name: "operations_total",
+			Help: "Finding lineage correlation and review outcomes.",
+		}, []string{"outcome", "method", "reason"}),
+		findingLineageBackfillItems: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "synapse", Subsystem: "finding_lineage", Name: "backfill_items_total",
+			Help: "Legacy Finding lineage backfill item outcomes.",
+		}, []string{"outcome"}),
+		findingLineageBackfillRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "synapse", Subsystem: "finding_lineage", Name: "backfill_runs_total",
+			Help: "Legacy Finding lineage backfill terminal run states.",
+		}, []string{"state"}),
 	}
-	c.registry.MustRegister(c.httpRequests, c.httpDuration, c.scaDuration, c.scaOutcomes)
+	c.registry.MustRegister(c.httpRequests, c.httpDuration, c.scaDuration, c.scaOutcomes, c.findingLineage, c.findingLineageBackfillItems, c.findingLineageBackfillRuns)
 	if queueReader != nil {
 		queue := newQueueCollector(queueReader, c.now)
 		c.registry.MustRegister(queue)
@@ -197,9 +212,68 @@ func (c *Collectors) ObserveSCAScan(duration time.Duration, outcome string) {
 	c.ObserveSCAOutcome(outcome)
 }
 
+func (c *Collectors) ObserveFindingLineage(outcome, method, reason string) {
+	c.findingLineage.WithLabelValues(boundedLineageOutcome(outcome), boundedLineageMethod(method), boundedLineageReason(reason)).Inc()
+}
+
+func (c *Collectors) ObserveFindingLineageBackfillItem(outcome string) {
+	switch outcome {
+	case "observation_created", "provisional_candidate_created", "skipped":
+	default:
+		outcome = "unknown"
+	}
+	c.findingLineageBackfillItems.WithLabelValues(outcome).Inc()
+}
+
+func (c *Collectors) ObserveFindingLineageBackfillRun(state string) {
+	switch state {
+	case "completed", "cancelled", "failed":
+	default:
+		state = "unknown"
+	}
+	c.findingLineageBackfillRuns.WithLabelValues(state).Inc()
+}
+
+func boundedLineageOutcome(value string) string {
+	switch value {
+	case "matched", "created", "needs_review", "skipped", "resolved", "override":
+		return value
+	case "":
+		return "none"
+	default:
+		return "unknown"
+	}
+}
+
+func boundedLineageMethod(value string) string {
+	switch value {
+	case "override", "producer_id", "fingerprint", "alias", "matcher", "manual", "new_identity":
+		return value
+	case "":
+		return "none"
+	default:
+		return "unknown"
+	}
+}
+
+func boundedLineageReason(value string) string {
+	switch value {
+	case "observation_replay", "active_override", "trusted_producer_id", "exact_fingerprint", "approved_alias", "new_identity",
+		"fingerprint_collision", "split", "merge", "insufficient_anchor", "legacy_ambiguous",
+		"invalid_trust", "invalid_ownership", "redaction_required", "confirm_existing", "create_distinct_identity",
+		"unlink", "dismiss", "supersede", "confirm":
+		return value
+	case "":
+		return "none"
+	default:
+		return "unknown"
+	}
+}
+
 // Handler returns the private-registry Prometheus metrics endpoint.
 func (c *Collectors) Handler() http.Handler {
 	return promhttp.HandlerFor(c.registry, promhttp.HandlerOpts{})
 }
 
 var _ ports.SCAObserver = (*Collectors)(nil)
+var _ ports.FindingLineageObserver = (*Collectors)(nil)
