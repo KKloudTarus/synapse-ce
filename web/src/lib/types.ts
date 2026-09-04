@@ -79,6 +79,8 @@ export interface UploadedSourcePackage {
 export type AssessmentCycleBoundaryKind = 'standalone' | 'asset' | 'project' | 'asset_project'
 export type AssessmentCycleStatus = 'open' | 'completed' | 'archived'
 export type AssessmentStatus = 'draft' | 'active' | 'completed' | 'archived'
+export type AssessmentCycleReviewState = 'needs_review' | 'verified' | 'clear'
+export type AssessmentCycleChangePresence = 'new' | 'reopened'
 export type AssessmentCycleScanStaleness = 'fresh' | 'stale' | 'missing'
 
 export interface AssessmentCycleListFilters {
@@ -87,6 +89,11 @@ export interface AssessmentCycleListFilters {
   assessmentStatus?: AssessmentStatus
   selectedHeadAssessmentId?: string
   assessmentType?: AssessmentCycleMember['assessmentType']
+  producer?: string
+  findingKind?: string
+  reviewState?: AssessmentCycleReviewState
+  changePresence?: AssessmentCycleChangePresence
+  changeSeverity?: Extract<Severity, 'critical' | 'high'>
   scanStaleness?: AssessmentCycleScanStaleness
   search?: string
   cursor?: string
@@ -113,6 +120,8 @@ export interface AssessmentCycle {
   status: AssessmentCycleStatus
   rootAssessmentId: string
   selectedHeadAssessmentId: string
+  activeClosureManifestId?: string
+  activeClosureCycleVersion?: number
   nextRetestNumber: number
   version: number
   createdAt: string
@@ -131,6 +140,194 @@ export interface AssessmentLifecycle extends AssessmentCycleDetail {
   assessmentId: string
 }
 
+export type AssessmentRelationshipChangeCommand = 'reparent_within_cycle' | 'select_head'
+
+export interface AssessmentRelationshipChangeRequest {
+  command: AssessmentRelationshipChangeCommand
+  assessmentId?: string
+  newPredecessorAssessmentId?: string
+  selectedHeadAssessmentId?: string
+}
+
+export interface AssessmentRelationshipImpact {
+  memberIds: string[]
+  snapshotIds: string[]
+  identityIds: string[]
+  comparisonIds: string[]
+  projectionIds: string[]
+}
+
+export interface AssessmentRelationshipPreview {
+  cycleId: string
+  command: AssessmentRelationshipChangeCommand
+  assessmentId: string
+  oldPredecessorAssessmentId: string
+  newPredecessorAssessmentId: string
+  oldSelectedHeadAssessmentId: string
+  newSelectedHeadAssessmentId: string
+  descendantAssessmentIds: string[]
+  impact: AssessmentRelationshipImpact
+  locks: string[]
+  reasonRequired: boolean
+  commitAllowed: boolean
+  cycleVersion: number
+  expiresAt: string
+  previewToken: string
+}
+
+export interface AssessmentRelationshipCommitResult {
+  cycle: AssessmentCycle
+  replacedComparisonIds: string[]
+  replacementComparisonIds: string[]
+}
+
+export type AssessmentClosureLifecycle = 'building' | 'active' | 'superseded'
+
+export interface AssessmentClosureBlocker {
+  id: string
+  code: string
+  message: string
+  overrideable: boolean
+  overridden: boolean
+}
+
+export interface AssessmentClosureWarning {
+  code: string
+  message: string
+}
+
+export interface AssessmentClosureCoverageDecision {
+  snapshotId: string
+  dimensionId: string
+  state: AssessmentSnapshotCoverageState
+  reasonCode: string
+  waived: boolean
+}
+
+export interface AssessmentClosureCoverageDecisions {
+  initial: AssessmentClosureCoverageDecision[]
+  final: AssessmentClosureCoverageDecision[]
+}
+
+export interface AssessmentClosurePathMember {
+  pathPosition: number
+  assessmentId: string
+  assessmentType: AssessmentCycleMember['assessmentType']
+  retestNumber: number
+  relationshipVersion: number
+  snapshotId: string
+}
+
+export interface AssessmentClosureReference {
+  kind: string
+  id: string
+  version: number
+  contentHash: string
+  expiresAt: string | null
+  metadata: unknown
+}
+
+export interface AssessmentClosureBranchState {
+  assessmentId: string
+  relationshipVersion: number
+  archived: boolean
+}
+
+export interface AssessmentClosureScopeProfileChange {
+  assessmentId: string
+  kind: string
+  summary: string
+}
+
+export interface AssessmentClosurePolicyResult {
+  policyVersion: string
+  blockers: AssessmentClosureBlocker[]
+  warnings: AssessmentClosureWarning[]
+  coverageDecisions: AssessmentClosureCoverageDecisions
+  commitAllowed: boolean
+}
+
+export interface AssessmentClosurePreviewInput {
+  reason: string
+  overrideBlockerIds: string[]
+  overrideReason: string
+}
+
+export interface AssessmentClosurePreview {
+  cycleId: string
+  cycleVersion: number
+  manifestVersion: number
+  finalAssessmentId: string
+  path: AssessmentClosurePathMember[]
+  nonFinalBranches: AssessmentClosureBranchState[]
+  initialSnapshotId: string
+  finalSnapshotId: string
+  comparisonId: string
+  policy: AssessmentClosurePolicyResult
+  references: AssessmentClosureReference[]
+  scopeProfileChanges: AssessmentClosureScopeProfileChange[]
+  rendererContractVersion: string
+  expiresAt: string
+  previewToken: string
+}
+
+export interface AssessmentClosureManifest {
+  id: string
+  cycleId: string
+  manifestVersion: number
+  lifecycle: AssessmentClosureLifecycle
+  cycleVersion: number
+  rootAssessmentId: string
+  finalAssessmentId: string
+  initialSnapshotId: string
+  finalSnapshotId: string
+  comparisonId: string
+  initialSnapshotHash: string
+  finalSnapshotHash: string
+  comparisonHash: string
+  canonicalInputHash: string
+  contentHash: string
+  policyVersion: string
+  algorithmVersion: string
+  fingerprintVersion: string
+  riskVersion: string
+  rendererContractVersion: string
+  coverageDecisions: AssessmentClosureCoverageDecisions
+  scopeProfileChanges: AssessmentClosureScopeProfileChange[]
+  overrideBlockerIds: string[]
+  nonFinalBranches: AssessmentClosureBranchState[]
+  path: AssessmentClosurePathMember[]
+  references: AssessmentClosureReference[]
+  reason: string
+  overrideReason: string
+  asOfAt: string
+  createdAt: string
+  createdBy: string
+  sealedAt: string | null
+  sealedBy: string
+  supersededAt: string | null
+}
+
+export interface AssessmentClosureCommitResult {
+  cycle: AssessmentCycle
+  manifest: AssessmentClosureManifest
+  reportJobId: string
+}
+
+export interface AssessmentReopenPreview {
+  cycleId: string
+  cycleVersion: number
+  manifest: AssessmentClosureManifest
+  impact: string
+  expiresAt: string
+  previewToken: string
+}
+
+export interface AssessmentReopenCommitResult {
+  cycle: AssessmentCycle
+  supersededManifest: AssessmentClosureManifest
+}
+
 export interface AssessmentCycleSummary extends AssessmentCycle {
   memberCount: number
   activeBranchCount: number
@@ -140,6 +337,10 @@ export interface AssessmentCycleSummary extends AssessmentCycle {
   membersNextCursor: string
   rootSnapshotId: string
   currentSnapshotId: string
+  comparisonId: string
+  comparisonStatus: AssessmentComparisonStatus | ''
+  comparisonSummary: AssessmentComparisonSummary | null
+  activeClosureManifestId: string
   selectedHeadLastScanAt: string | null
   scanStaleness: AssessmentCycleScanStaleness
 }
@@ -163,6 +364,64 @@ export interface AssessmentCycleMigrationPending {
   boundaryKind: AssessmentCycleBoundaryKind
   businessAssetId: string
   updatedAt: string
+}
+
+export type AssessmentRelationshipStatus = 'open' | 'confirmed' | 'rejected' | 'dismissed' | 'expired'
+export type AssessmentRelationshipConfidence = 'medium' | 'high'
+export type AssessmentRelationshipDecisionAction = 'confirm' | 'reject' | 'dismiss'
+export type AssessmentRelationshipSignalKind =
+  | 'exact_frozen_boundary'
+  | 'explicit_imported_reference'
+  | 'trusted_manifest_compatible'
+  | 'deterministic_finding_overlap'
+
+export interface AssessmentRelationshipSignal {
+  kind: AssessmentRelationshipSignalKind
+  evidenceHash: string
+  matchCount: number
+  scoreMilli: number
+  schemaVersion: number
+}
+
+export interface AssessmentRelationshipDecision {
+  id: string
+  action: AssessmentRelationshipDecisionAction
+  actor: string
+  reason: string
+  version: number
+  createdAt: string
+}
+
+export interface AssessmentRelationshipRepairPlan {
+  id: string
+  inputHash: string
+  planHash: string
+  body: Record<string, unknown>
+  createdBy: string
+  createdAt: string
+}
+
+export interface AssessmentRelationshipCandidate {
+  id: string
+  predecessorCycleId: string
+  predecessorAssessmentId: string
+  predecessorRelationshipVersion: number
+  predecessorSnapshotId: string
+  successorCycleId: string
+  successorAssessmentId: string
+  successorRelationshipVersion: number
+  successorSnapshotId: string
+  boundaryKeyHash: string
+  signals: AssessmentRelationshipSignal[]
+  inputHash: string
+  confidence: AssessmentRelationshipConfidence
+  status: AssessmentRelationshipStatus
+  version: number
+  expiresAt: string
+  createdBy: string
+  createdAt: string
+  decision?: AssessmentRelationshipDecision
+  repairPlan?: AssessmentRelationshipRepairPlan
 }
 
 export interface CreateAssessmentRetestInput {
@@ -276,6 +535,131 @@ export interface AssessmentSnapshotListResponse {
   items: AssessmentSnapshot[]
   defaultSnapshotId: string
   defaultVersion: number
+}
+
+export type AssessmentComparisonMode = 'lifecycle' | 'neutral_diff'
+export type AssessmentComparisonStatus = 'queued' | 'generating' | 'complete' | 'needs_review' | 'failed' | 'superseded'
+export type AssessmentComparisonPresence = 'new' | 'still_detected' | 'not_detected_under_comparable_coverage' | 'not_evaluated' | 'reopened' | 'needs_review'
+export type AssessmentComparisonNeutralPresence = 'only_in_a' | 'both' | 'only_in_b' | 'needs_review'
+export type AssessmentComparisonChangeFlag = 'severity_increased' | 'severity_decreased' | 'component_version_changed' | 'location_changed' | 'reachability_changed' | 'evidence_changed' | 'scanner_changed' | 'rule_profile_changed' | 'advisory_changed'
+export type AssessmentComparisonCoverage = 'comparable' | 'partially_comparable' | 'not_comparable'
+
+export interface AssessmentComparisonSeverityCounts {
+  critical: number
+  high: number
+  medium: number
+  low: number
+  info: number
+  unknown: number
+}
+
+export interface AssessmentComparisonRatio {
+  numerator: number
+  denominator: number
+  naReason: string
+}
+
+export interface AssessmentComparisonSummary {
+  comparisonId: string
+  baselineSnapshotId: string
+  currentSnapshotId: string
+  riskModelVersion: number
+  fixedRate: AssessmentComparisonRatio
+  countReduction: AssessmentComparisonRatio
+  riskReduction: AssessmentComparisonRatio
+  fixedCount: number
+  baselineCount: number
+  currentCount: number
+  baselineRisk: number
+  currentRisk: number
+  newCount: number
+  reopenedCount: number
+  stillDetectedCount: number
+  notEvaluatedCount: number
+  reviewCount: number
+  newRisk: number
+  reopenedRisk: number
+  baselineSeverity: AssessmentComparisonSeverityCounts
+  currentSeverity: AssessmentComparisonSeverityCounts
+}
+
+export interface AssessmentComparisonObservation {
+  severity: Severity
+  componentVersion: string
+  location: string
+  reachability: string
+  evidenceDigest: string
+  scanner: { scanRunId: string; laneKey: string; toolName: string; toolVersion: string; ruleId: string }
+  observedAt: string
+}
+
+export interface AssessmentComparison {
+  id: string
+  cycleId: string
+  baselineSnapshotId: string
+  currentSnapshotId: string
+  mode: AssessmentComparisonMode
+  inputHash: string
+  algorithmVersion: number
+  fingerprintVersion: number
+  riskModelVersion: number
+  coveragePolicyVersion: number
+  status: AssessmentComparisonStatus
+  version: number
+  attempts: number
+  failureCode: string
+  contentHash: string
+  summary: AssessmentComparisonSummary
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
+  supersededAt: string | null
+  supersededBy: string
+}
+
+export interface AssessmentComparisonItem {
+  id: string
+  position: number
+  identityId: string
+  producerKind: string
+  findingKind: string
+  targetCanonical: string
+  baselineObservationId: string
+  currentObservationId: string
+  baselineObservation: AssessmentComparisonObservation | null
+  currentObservation: AssessmentComparisonObservation | null
+  presence?: AssessmentComparisonPresence
+  neutralPresence?: AssessmentComparisonNeutralPresence
+  changeFlags: AssessmentComparisonChangeFlag[]
+  coverageDecision: AssessmentComparisonCoverage | ''
+  matchMethods: string[]
+  verificationId: string
+  verificationState: string
+  fixedBasis: '' | 'comparable_absence' | 'explicit_verification'
+  baselineActionable: boolean
+  currentActionable: boolean
+  comparableBaseline: boolean
+  baselineRiskMilli: number
+  currentRiskMilli: number
+  reviewCandidateIds: string[]
+  reviewCandidates: AssessmentComparisonReviewCandidate[]
+}
+
+export interface AssessmentComparisonReviewCandidate {
+  id: string
+  sourceObservationIds: string[]
+}
+
+export interface AssessmentComparisonItemPage {
+  items: AssessmentComparisonItem[]
+  nextCursor: string
+}
+
+export interface AssessmentComparisonReviewResult {
+  overrideEventId: string
+  supersededComparisonId: string
+  replacementComparisonId: string
+  replacementStatus: AssessmentComparisonStatus
 }
 
 export type BusinessAssetType = 'product' | 'application' | 'system' | 'business_service'

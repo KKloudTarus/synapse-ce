@@ -383,3 +383,43 @@ func TestAssessmentSnapshotOpenAPIContract(t *testing.T) {
 		t.Errorf("FinalizeAssessmentSnapshotRequest must contain only server-resolved run/lane selections: %v", requestProperties)
 	}
 }
+
+func TestAssessmentComparisonOpenAPIContract(t *testing.T) {
+	b, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	paths, _ := doc["paths"].(map[string]any)
+	for path, methods := range map[string]map[string]string{
+		"/api/v1/assessment-comparisons":                                       {"post": "createAssessmentComparison"},
+		"/api/v1/assessment-comparisons/{comparisonId}":                        {"get": "getAssessmentComparison"},
+		"/api/v1/assessment-comparisons/{comparisonId}/items":                  {"get": "listAssessmentComparisonItems"},
+		"/api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/confirm": {"post": "confirmAssessmentComparisonItem"},
+		"/api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/unlink":  {"post": "unlinkAssessmentComparisonItem"},
+	} {
+		route, ok := paths[path].(map[string]any)
+		if !ok {
+			t.Errorf("assessment comparison path %s missing", path)
+			continue
+		}
+		for method, operationID := range methods {
+			operation, ok := route[method].(map[string]any)
+			if !ok || operation["operationId"] != operationID {
+				t.Errorf("%s %s operationId=%v, want %s", method, path, operation["operationId"], operationID)
+			}
+		}
+	}
+	components, _ := doc["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	comparison, _ := schemas["AssessmentComparison"].(map[string]any)
+	properties, _ := comparison["properties"].(map[string]any)
+	for _, forbidden := range []string{"tenant_id", "input_payload", "credentials", "evidence"} {
+		if _, ok := properties[forbidden]; ok {
+			t.Errorf("AssessmentComparison response exposes forbidden property %q", forbidden)
+		}
+	}
+}

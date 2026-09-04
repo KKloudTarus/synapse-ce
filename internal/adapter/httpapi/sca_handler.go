@@ -201,7 +201,7 @@ func (rt *Router) compareScanRuns(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "both run ids (a, b) are required"})
 		return
 	}
-	drift, err := rt.sca.CompareRuns(r.Context(), a, b)
+	drift, err := rt.sca.CompareRuns(r.Context(), shared.ID(r.PathValue("id")), a, b)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return

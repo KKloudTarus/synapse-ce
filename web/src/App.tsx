@@ -13,6 +13,7 @@ import { Connect } from './pages/Connect'
 const Dashboard = lazy(() => import('./pages/Dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })))
 const Engagements = lazy(() => import('./pages/Engagements/EngagementsPage').then(m => ({ default: m.EngagementsPage })))
 const AssessmentCycles = lazy(() => import('./pages/AssessmentCycles/AssessmentCyclesPage').then(m => ({ default: m.AssessmentCyclesPage })))
+const AssessmentCycleDetail = lazy(() => import('./pages/AssessmentCycles/AssessmentCycleDetailPage').then(m => ({ default: m.AssessmentCycleDetailPage })))
 const NewEngagement = lazy(() => import('./pages/Engagements/NewEngagementPage').then(m => ({ default: m.NewEngagementPage })))
 const EngagementDetail = lazy(() => import('./pages/EngagementDetail').then(m => ({ default: m.EngagementDetail })))
 const Assets = lazy(() => import('./pages/Assets/Assets').then(m => ({ default: m.Assets })))
@@ -35,6 +36,7 @@ const RuleDetail = lazy(() => import('./pages/Rules/RuleDetail'))
 const Audit = lazy(() => import('./pages/Settings/Audit').then(m => ({ default: m.Audit })))
 const Settings = lazy(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })))
 const SettingsConfig = lazy(() => import('./pages/Settings/SettingsConfig').then(m => ({ default: m.SettingsConfig })))
+const AssessmentRelationships = lazy(() => import('./pages/Settings/AssessmentRelationships').then(m => ({ default: m.AssessmentRelationships })))
 const AITriageReviews = lazy(() => import('./pages/AITriage/AITriageReviews').then(m => ({ default: m.AITriageReviews })))
 const AITriageObservability = lazy(() => import('./pages/AITriage/AITriageObservability').then(m => ({ default: m.AITriageObservability })))
 const VulnerabilityIntelligence = lazy(() => import('./pages/VulnerabilityIntelligence').then(m => ({ default: m.VulnerabilityIntelligence })))
@@ -66,6 +68,7 @@ function Gate() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="engagements" element={<Engagements />} />
         <Route path="assessment-cycles" element={<AssessmentLifecycleRoute><AssessmentCycles /></AssessmentLifecycleRoute>} />
+        <Route path="assessment-cycles/:cycleId" element={<AssessmentLifecycleRoute><AssessmentCycleDetail /></AssessmentLifecycleRoute>} />
         <Route path="engagements/new" element={<NewEngagement />} />
         <Route path="engagements/:id" element={<EngagementDetail />} />
         <Route path="engagements/:id/:tabSlug" element={<EngagementDetail />} />
@@ -99,6 +102,7 @@ function Gate() {
         <Route path="settings" element={<Settings />}>
           <Route index element={<Audit />} />
           <Route path="team" element={<Team />} />
+          <Route path="relationships" element={<AssessmentRelationships />} />
           <Route path="config" element={<SettingsConfig />} />
         </Route>
         <Route path="audit" element={<Navigate to="/settings" replace />} />

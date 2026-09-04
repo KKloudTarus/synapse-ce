@@ -4,6 +4,8 @@ package observability
 import (
 	"context"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -17,16 +19,23 @@ const queueStatsTimeout = time.Second
 // Collectors owns a private Prometheus registry. It contains no global
 // collectors, so only Synapse's documented metrics are exposed by /metrics.
 type Collectors struct {
-	registry                    *prometheus.Registry
-	httpRequests                *prometheus.CounterVec
-	httpDuration                *prometheus.HistogramVec
-	scaDuration                 *prometheus.HistogramVec
-	scaOutcomes                 *prometheus.CounterVec
-	findingLineage              *prometheus.CounterVec
-	findingLineageBackfillItems *prometheus.CounterVec
-	findingLineageBackfillRuns  *prometheus.CounterVec
-	queueReader                 ports.AggregateJobQueueStatsReader
-	now                         func() time.Time
+	registry                         *prometheus.Registry
+	httpRequests                     *prometheus.CounterVec
+	httpDuration                     *prometheus.HistogramVec
+	scaDuration                      *prometheus.HistogramVec
+	scaOutcomes                      *prometheus.CounterVec
+	findingLineage                   *prometheus.CounterVec
+	findingLineageBackfillItems      *prometheus.CounterVec
+	findingLineageBackfillRuns       *prometheus.CounterVec
+	assessmentComparisons            *prometheus.CounterVec
+	assessmentComparisonBacklog      *prometheus.GaugeVec
+	assessmentComparisonOldestAge    *prometheus.GaugeVec
+	assessmentComparisonDuration     *prometheus.HistogramVec
+	assessmentRelationshipCandidates *prometheus.CounterVec
+	assessmentRelationshipDecisions  *prometheus.CounterVec
+	assessmentClosureReports         *prometheus.CounterVec
+	queueReader                      ports.AggregateJobQueueStatsReader
+	now                              func() time.Time
 }
 
 // New constructs the bounded Prometheus collectors used by the API metrics listener.
@@ -64,8 +73,37 @@ func New(queueReader ports.AggregateJobQueueStatsReader, pool ports.PoolStatsRea
 			Namespace: "synapse", Subsystem: "finding_lineage", Name: "backfill_runs_total",
 			Help: "Legacy Finding lineage backfill terminal run states.",
 		}, []string{"state"}),
+		assessmentComparisons: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "synapse", Subsystem: "assessment_comparison", Name: "operations_total",
+			Help: "Assessment comparison generation and lifecycle outcomes.",
+		}, []string{"status", "mode", "reason"}),
+		assessmentComparisonBacklog: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "synapse", Subsystem: "assessment_comparison", Name: "backlog",
+			Help: "Current tenant-scoped Assessment comparison backlog by state.",
+		}, []string{"tenant_id", "state"}),
+		assessmentComparisonOldestAge: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "synapse", Subsystem: "assessment_comparison", Name: "oldest_active_age_seconds",
+			Help: "Age in seconds of the oldest queued or generating Assessment comparison by tenant.",
+		}, []string{"tenant_id"}),
+		assessmentComparisonDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "synapse", Subsystem: "assessment_comparison", Name: "generation_duration_seconds",
+			Help:    "Assessment comparison worker generation duration by tenant, immutable versions, and bounded item-count band.",
+			Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600},
+		}, []string{"tenant_id", "mode", "status", "fingerprint_version", "risk_model_version", "item_count_band"}),
+		assessmentRelationshipCandidates: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "synapse", Subsystem: "assessment_relationship", Name: "candidates_total",
+			Help: "Historical Assessment relationship candidate generation outcomes.",
+		}, []string{"outcome", "confidence"}),
+		assessmentRelationshipDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "synapse", Subsystem: "assessment_relationship", Name: "decisions_total",
+			Help: "Historical Assessment relationship review decision outcomes.",
+		}, []string{"action", "outcome"}),
+		assessmentClosureReports: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "synapse", Subsystem: "assessment_closure", Name: "reports_total",
+			Help: "Deterministic Assessment closure report outcomes.",
+		}, []string{"outcome", "reason"}),
 	}
-	c.registry.MustRegister(c.httpRequests, c.httpDuration, c.scaDuration, c.scaOutcomes, c.findingLineage, c.findingLineageBackfillItems, c.findingLineageBackfillRuns)
+	c.registry.MustRegister(c.httpRequests, c.httpDuration, c.scaDuration, c.scaOutcomes, c.findingLineage, c.findingLineageBackfillItems, c.findingLineageBackfillRuns, c.assessmentComparisons, c.assessmentComparisonBacklog, c.assessmentComparisonOldestAge, c.assessmentComparisonDuration, c.assessmentRelationshipCandidates, c.assessmentRelationshipDecisions, c.assessmentClosureReports)
 	if queueReader != nil {
 		queue := newQueueCollector(queueReader, c.now)
 		c.registry.MustRegister(queue)
@@ -234,6 +272,135 @@ func (c *Collectors) ObserveFindingLineageBackfillRun(state string) {
 	c.findingLineageBackfillRuns.WithLabelValues(state).Inc()
 }
 
+func (c *Collectors) ObserveAssessmentComparison(status, mode, reason string) {
+	c.assessmentComparisons.WithLabelValues(boundedComparisonStatus(status), boundedComparisonMode(mode), boundedComparisonReason(reason)).Inc()
+}
+
+func (c *Collectors) ObserveAssessmentComparisonBacklog(tenantID string, backlog ports.AssessmentComparisonBacklog, observedAt time.Time) {
+	tenantID = boundedMetricTenant(tenantID)
+	c.assessmentComparisonBacklog.WithLabelValues(tenantID, "queued").Set(float64(backlog.Queued))
+	c.assessmentComparisonBacklog.WithLabelValues(tenantID, "generating").Set(float64(backlog.Generating))
+	c.assessmentComparisonBacklog.WithLabelValues(tenantID, "failed").Set(float64(backlog.Failed))
+	c.assessmentComparisonBacklog.WithLabelValues(tenantID, "dead_lettered").Set(float64(backlog.DeadLettered))
+	age := 0.0
+	if backlog.OldestActiveAt != nil && observedAt.After(*backlog.OldestActiveAt) {
+		age = observedAt.Sub(*backlog.OldestActiveAt).Seconds()
+	}
+	c.assessmentComparisonOldestAge.WithLabelValues(tenantID).Set(age)
+}
+
+func (c *Collectors) ObserveAssessmentComparisonGeneration(tenantID, mode, status string, fingerprintVersion, riskModelVersion, itemCount int, duration time.Duration) {
+	c.assessmentComparisonDuration.WithLabelValues(
+		boundedMetricTenant(tenantID), boundedComparisonMode(mode), boundedComparisonStatus(status), boundedMetricVersion(fingerprintVersion), boundedMetricVersion(riskModelVersion), comparisonItemCountBand(itemCount),
+	).Observe(duration.Seconds())
+}
+
+func (c *Collectors) ObserveAssessmentRelationshipCandidate(outcome, confidence string) {
+	switch outcome {
+	case "created", "existing", "failed":
+	default:
+		outcome = "unknown"
+	}
+	switch confidence {
+	case "medium", "high":
+	default:
+		confidence = "unknown"
+	}
+	c.assessmentRelationshipCandidates.WithLabelValues(outcome, confidence).Inc()
+}
+
+func (c *Collectors) ObserveAssessmentRelationshipDecision(action, outcome string) {
+	switch action {
+	case "confirm", "reject", "dismiss":
+	default:
+		action = "unknown"
+	}
+	switch outcome {
+	case "applied", "replayed", "failed":
+	default:
+		outcome = "unknown"
+	}
+	c.assessmentRelationshipDecisions.WithLabelValues(action, outcome).Inc()
+}
+
+func (c *Collectors) ObserveAssessmentClosureReport(outcome, reason string) {
+	switch outcome {
+	case "generated", "cached", "failed":
+	default:
+		outcome = "unknown"
+	}
+	switch reason {
+	case "none", "manifest_read", "audit", "artifact_read", "render", "artifact_write", "invalid_job", "closure_reference_missing", "closure_reference_integrity_failed":
+	default:
+		reason = "unknown"
+	}
+	c.assessmentClosureReports.WithLabelValues(outcome, reason).Inc()
+}
+
+func boundedMetricTenant(tenantID string) string {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" || len(tenantID) > 128 {
+		return "unknown"
+	}
+	return tenantID
+}
+
+func boundedMetricVersion(version int) string {
+	if version < 1 || version > 99 {
+		return "unknown"
+	}
+	return strconv.Itoa(version)
+}
+
+func comparisonItemCountBand(itemCount int) string {
+	switch {
+	case itemCount < 0:
+		return "unknown"
+	case itemCount < 1000:
+		return "lt_1k"
+	case itemCount < 10000:
+		return "1k_10k"
+	case itemCount < 100000:
+		return "10k_100k"
+	default:
+		return "gte_100k"
+	}
+}
+
+func boundedComparisonStatus(value string) string {
+	switch value {
+	case "queued", "generating", "complete", "needs_review", "failed", "superseded", "rejected":
+		return value
+	case "":
+		return "none"
+	default:
+		return "unknown"
+	}
+}
+
+func boundedComparisonMode(value string) string {
+	switch value {
+	case "lifecycle", "neutral_diff":
+		return value
+	case "":
+		return "none"
+	default:
+		return "unknown"
+	}
+}
+
+func boundedComparisonReason(value string) string {
+	switch value {
+	case "created", "replayed", "generated", "worker_recovered", "input_changed", "input_missing", "invalid_input", "worker_cancelled", "generation_failed",
+		"directed", "neutral_sibling", "neutral_reverse", "same_snapshot", "cross_cycle", "snapshot_not_finalized", "lifecycle_reverse", "lifecycle_sibling", "lifecycle_direction_available", "missing_relationship":
+		return value
+	case "":
+		return "none"
+	default:
+		return "unknown"
+	}
+}
+
 func boundedLineageOutcome(value string) string {
 	switch value {
 	case "matched", "created", "needs_review", "skipped", "resolved", "override":
@@ -277,3 +444,8 @@ func (c *Collectors) Handler() http.Handler {
 
 var _ ports.SCAObserver = (*Collectors)(nil)
 var _ ports.FindingLineageObserver = (*Collectors)(nil)
+var _ ports.AssessmentComparisonObserver = (*Collectors)(nil)
+var _ ports.AssessmentComparisonBacklogObserver = (*Collectors)(nil)
+var _ ports.AssessmentComparisonGenerationObserver = (*Collectors)(nil)
+var _ ports.AssessmentRelationshipObserver = (*Collectors)(nil)
+var _ ports.AssessmentClosureReportObserver = (*Collectors)(nil)

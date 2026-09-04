@@ -53,6 +53,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
+	comparisonuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcomparison"
+	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
+	lifecycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentlifecycle"
+	snapshotuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentsnapshot"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
 	attackpathuc "github.com/KKloudTarus/synapse-ce/internal/usecase/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/cspm"
@@ -60,6 +64,7 @@ import (
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
+	lineageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findinglineage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -104,6 +109,10 @@ func main() {
 	}
 	if err := cfg.ValidateNetworkExecutionPosture(config.ProcessRoleWorker); err != nil {
 		log.Error("network execution posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateAssessmentLifecycleRollout(); err != nil {
+		log.Error("assessment lifecycle rollout invalid", "err", err)
 		os.Exit(1)
 	}
 
@@ -159,6 +168,41 @@ func main() {
 	evidenceStore := postgres.NewEvidenceStore(pool)
 	auditLog := postgres.NewAuditLog(pool)
 	queue := postgres.NewJobQueue(pool, ids)
+	assessmentCycleStore := postgres.NewAssessmentCycleRepository(pool)
+	assessmentSnapshotStore := postgres.NewAssessmentSnapshotRepository(pool)
+	assessmentComparisonStore := postgres.NewAssessmentComparisonRepository(pool)
+	assessmentLineageStore := postgres.NewFindingLineageRepository(pool)
+	assessmentTransactions := postgres.NewTenantTransactionRunner(pool)
+	comparisonVerification, err := comparisonuc.NewRetestVerificationReader(assessmentLineageStore, assessmentSnapshotStore, postgres.NewRetestRepository(pool))
+	if err != nil {
+		log.Error("assessment comparison verification reader init failed", "err", err)
+		os.Exit(1)
+	}
+	assessmentComparisonService, err := comparisonuc.NewService(
+		assessmentComparisonStore, assessmentSnapshotStore, assessmentCycleStore, assessmentLineageStore,
+		assessmentTransactions, auditLog, clock, ids, comparisonVerification, nil,
+	)
+	if err != nil {
+		log.Error("assessment comparison service init failed", "err", err)
+		os.Exit(1)
+	}
+	var lineageObserver ports.FindingLineageObserver
+	assessmentLineageService, err := lineageuc.NewService(assessmentLineageStore, assessmentTransactions, auditLog, clock, ids, lineageObserver)
+	if err != nil {
+		log.Error("assessment lineage service init failed", "err", err)
+		os.Exit(1)
+	}
+	assessmentComparisonService.SetAPIStores(nil, queue, assessmentLineageService)
+	closureDecisionReader, err := cycleuc.NewClosureDecisionReader(assessmentLineageStore, assessmentSnapshotStore, postgres.NewRetestRepository(pool), postgres.NewSLAStore(pool))
+	if err != nil {
+		log.Error("assessment closure decision reader init failed", "err", err)
+		os.Exit(1)
+	}
+	assessmentClosureReportService, err := cycleuc.NewClosureReportService(assessmentCycleStore, assessmentCycleStore, assessmentSnapshotStore, assessmentComparisonStore, closureDecisionReader, auditLog)
+	if err != nil {
+		log.Error("assessment closure report service init failed", "err", err)
+		os.Exit(1)
+	}
 	vulnerabilitySources := postgres.NewVulnerabilitySourceStore(pool)
 	vulnerabilityRuns := postgres.NewSyncRunStore(pool, ids)
 	vulnerabilityMaterializer := postgres.NewAdvisoryMaterializer(pool)
@@ -268,6 +312,26 @@ func main() {
 		log.Info("compliance report ENABLED (Synapse AppSec Baseline; deterministic, LLM-free)")
 	}
 	scaService.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ScanTimeout+time.Minute))
+	if cfg.AssessmentShadowEnabled {
+		shadowSnapshotService, shadowErr := snapshotuc.NewService(assessmentSnapshotStore, assessmentCycleStore, repo, scanRunStore, assessmentTransactions, ids, clock, auditLog)
+		if shadowErr != nil {
+			log.Error("worker assessment snapshot shadow init failed", "err", shadowErr)
+			os.Exit(1)
+		}
+		shadowProjector, shadowErr := lineageuc.NewShadowProjector(assessmentLineageService, assessmentCycleStore, assessmentSnapshotStore, findingRepo, cfg.AssessmentShadowForTenant)
+		if shadowErr != nil {
+			log.Error("worker assessment lineage shadow init failed", "err", shadowErr)
+			os.Exit(1)
+		}
+		shadowSnapshotService.SetFinalizationObserver(shadowProjector)
+		shadowCoordinator, shadowErr := lifecycleuc.NewShadowCoordinator(assessmentCycleStore, assessmentSnapshotStore, shadowSnapshotService, assessmentComparisonService, cfg.AssessmentShadowForTenant)
+		if shadowErr != nil {
+			log.Error("worker assessment lifecycle shadow coordinator init failed", "err", shadowErr)
+			os.Exit(1)
+		}
+		scaService.SetScanRunObserver(shadowCoordinator)
+		log.Info("worker assessment lifecycle shadow writers configured", "tenant_count", len(cfg.AssessmentShadowTenants))
+	}
 
 	// The sandbox is REQUIRED here – the worker exists to run recon contained.
 	sb, serr := sandbox.NewRunner(cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.SandboxMemMax, cfg.SandboxPidsMax)
@@ -343,8 +407,10 @@ func main() {
 
 	var maintenanceTasks []func(context.Context)
 	handlers := map[string]worker.Handler{
-		reconuc.JobKind:   reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
-		scauc.ScanJobKind: scaJobHandler{svc: scaService},
+		reconuc.JobKind:                        reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
+		scauc.ScanJobKind:                      scaJobHandler{svc: scaService},
+		comparisonuc.JobKind:                   assessmentComparisonJobHandler{svc: assessmentComparisonService},
+		cycleuc.AssessmentClosureReportJobKind: assessmentClosureReportJobHandler{svc: assessmentClosureReportService},
 	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
@@ -805,6 +871,22 @@ func (h reconJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, 
 type cspmJobHandler struct{ svc *cspm.Service }
 
 type vulnerabilitySyncJobHandler struct{ svc *vulnerabilitymonitor.Service }
+
+type assessmentComparisonJobHandler struct{ svc *comparisonuc.Service }
+
+type assessmentClosureReportJobHandler struct{ svc *cycleuc.ClosureReportService }
+
+func (handler assessmentClosureReportJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	return handler.svc.HandleJob(ctx, job)
+}
+
+func (handler assessmentComparisonJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	return handler.svc.HandleJob(ctx, job.Payload)
+}
+
+func (handler assessmentComparisonJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, _ error) error {
+	return handler.svc.OnDeadLetter(ctx, job.Payload)
+}
 
 type vulnerabilityReconcileJobHandler struct {
 	svc *vulnerabilityreconciliation.Service

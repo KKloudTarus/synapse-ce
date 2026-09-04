@@ -6,11 +6,14 @@ import { useFetch } from '../../hooks'
 import { api } from '../../lib/api'
 import type {
   AssessmentCycleBoundaryKind,
+  AssessmentCycleChangePresence,
   AssessmentCycleMember,
+  AssessmentCycleReviewState,
   AssessmentCycleScanStaleness,
   AssessmentCycleStatus,
   AssessmentCycleSummary,
   AssessmentStatus,
+  Severity,
 } from '../../lib/types'
 
 export function AssessmentCyclesPage() {
@@ -19,18 +22,28 @@ export function AssessmentCyclesPage() {
   const boundaryKind = (params.get('boundary') ?? '') as AssessmentCycleBoundaryKind | ''
   const assessmentStatus = (params.get('assessment_status') ?? '') as AssessmentStatus | ''
   const assessmentType = (params.get('assessment_type') ?? '') as AssessmentCycleMember['assessmentType'] | ''
+  const reviewState = (params.get('review') ?? '') as AssessmentCycleReviewState | ''
+  const changePresence = (params.get('presence') ?? '') as AssessmentCycleChangePresence | ''
+  const changeSeverity = (params.get('severity') ?? '') as Extract<Severity, 'critical' | 'high'> | ''
   const scanStaleness = (params.get('scan') ?? '') as AssessmentCycleScanStaleness | ''
   const selectedHeadAssessmentId = params.get('selected_head') ?? ''
+  const producer = params.get('producer') ?? ''
+  const findingKind = params.get('kind') ?? ''
   const cursor = params.get('cursor') ?? ''
   const search = params.get('q') ?? ''
   const expanded = new Set((params.get('expanded') ?? '').split(',').filter(Boolean))
-  const filterValues = [status, boundaryKind, assessmentStatus, assessmentType, scanStaleness, selectedHeadAssessmentId, search]
+  const filterValues = [status, boundaryKind, assessmentStatus, assessmentType, reviewState, changePresence, changeSeverity, scanStaleness, selectedHeadAssessmentId, producer, findingKind, search]
   const cyclesFetch = useFetch(() => api.listAssessmentCycles({
     status: status || undefined,
     boundaryKind: boundaryKind || undefined,
     assessmentStatus: assessmentStatus || undefined,
     selectedHeadAssessmentId: selectedHeadAssessmentId || undefined,
     assessmentType: assessmentType || undefined,
+    producer: producer || undefined,
+    findingKind: findingKind || undefined,
+    reviewState: reviewState || undefined,
+    changePresence: changePresence || undefined,
+    changeSeverity: changeSeverity || undefined,
     scanStaleness: scanStaleness || undefined,
     search: search || undefined,
     cursor,
@@ -80,6 +93,11 @@ export function AssessmentCyclesPage() {
       <Select ariaLabel="Assessment member type" value={assessmentType} onValueChange={(value) => update({ assessment_type: value, cursor: '' })} placeholder="Initial or Re-test" options={[{ value: 'initial', label: 'Initial' }, { value: 'retest', label: 'Re-test' }]} className="w-full" />
       <Input aria-label="Selected head Assessment ID" value={selectedHeadAssessmentId} onChange={(event) => update({ selected_head: event.target.value, cursor: '' })} placeholder="Selected head ID" />
       <Select ariaLabel="Selected-head scan staleness" value={scanStaleness} onValueChange={(value) => update({ scan: value, cursor: '' })} placeholder="Any scan freshness" options={[{ value: 'fresh', label: 'Fresh ≤ 24h' }, { value: 'stale', label: 'Stale > 24h' }, { value: 'missing', label: 'No trustworthy scan' }]} className="w-full" />
+      <Input aria-label="Comparison producer" value={producer} onChange={(event) => update({ producer: event.target.value, cursor: '' })} placeholder="Producer" />
+      <Input aria-label="Comparison finding kind" value={findingKind} onChange={(event) => update({ kind: event.target.value, cursor: '' })} placeholder="Finding kind" />
+      <Select ariaLabel="Comparison review state" value={reviewState} onValueChange={(value) => update({ review: value, cursor: '' })} placeholder="Any review state" options={[{ value: 'needs_review', label: 'Needs review' }, { value: 'verified', label: 'Verified' }, { value: 'clear', label: 'Clear' }]} className="w-full" />
+      <Select ariaLabel="Comparison change presence" value={changePresence} onValueChange={(value) => update({ presence: value, cursor: '' })} placeholder="New or reopened" options={[{ value: 'new', label: 'New' }, { value: 'reopened', label: 'Reopened' }]} className="w-full" />
+      <Select ariaLabel="Comparison change severity" value={changeSeverity} onValueChange={(value) => update({ severity: value, cursor: '' })} placeholder="Critical or High" options={[{ value: 'critical', label: 'Critical' }, { value: 'high', label: 'High' }]} className="w-full" />
       {filterValues.some(Boolean) ? <Button variant="secondary" onClick={() => setParams(new URLSearchParams(), { replace: true })}>Clear filters</Button> : null}
     </Card>
     {cyclesFetch.loading && !cyclesFetch.data ? <Spinner label="Loading Assessment Cycles…" /> : null}
@@ -93,8 +111,9 @@ export function AssessmentCyclesPage() {
 
 function CycleRow({ cycle, expanded, extraMembers, nextMemberCursor, loading, error, onToggle, onLoadMore }: { cycle: AssessmentCycleSummary; expanded: boolean; extraMembers: AssessmentCycleMember[]; nextMemberCursor: string; loading: boolean; error: string; onToggle: () => void; onLoadMore: () => void }) {
   const members = [...cycle.members, ...extraMembers]
-  return <Card bodyClass="p-0"><button type="button" aria-expanded={expanded} aria-controls={`cycle-${cycle.id}`} onClick={onToggle} className="grid w-full gap-3 px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:grid-cols-[minmax(240px,1.4fr)_repeat(3,minmax(110px,.6fr))_auto] md:items-center"><span><span className="flex flex-wrap items-center gap-2"><strong className="text-sm text-primary">{cycle.name}</strong><Pill>{cycle.status} Cycle</Pill></span><span className="mt-1 block font-mono text-xs text-tertiary">{cycle.id}</span></span><Stat label="Members / branches" value={`${cycle.memberCount} / ${cycle.activeBranchCount}`} /><Stat label="Latest member" value={cycle.latestRetestNumber > 0 ? `Re-test #${cycle.latestRetestNumber}` : 'Initial'} /><Stat label="Selected-head scan" value={cycle.scanStaleness} /><ChevronDown className={cn('size-4 text-tertiary transition-transform', expanded && 'rotate-180')} aria-hidden="true" /></button>{expanded ? <div id={`cycle-${cycle.id}`} className="border-t border-secondary px-5 py-4"><div className="mb-3 grid gap-2 text-xs text-tertiary sm:grid-cols-2 lg:grid-cols-4"><span><strong>Root snapshot:</strong> {cycle.rootSnapshotId || 'N/A'}</span><span><strong>Current snapshot:</strong> {cycle.currentSnapshotId || 'N/A'}</span><span><strong>Display latest:</strong> {cycle.latestAssessmentId || 'N/A'}</span><span><strong>Last trusted scan:</strong> {cycle.selectedHeadLastScanAt ? formatDate(cycle.selectedHeadLastScanAt) : 'N/A'}</span></div><ul aria-label={`${cycle.name} members`} className="space-y-2">{members.map((member) => <li key={member.assessmentId}><Link to={`/engagements/${encodeURIComponent(member.assessmentId)}`} className="flex flex-wrap items-center gap-2 rounded-lg border border-secondary px-3 py-2 text-sm hover:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"><span className="font-semibold text-primary">{member.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial'}</span><span className="font-mono text-xs text-tertiary">{member.assessmentId}</span>{member.assessmentId === cycle.selectedHeadAssessmentId ? <Pill className="text-brand-secondary">Selected head</Pill> : null}{member.assessmentId === cycle.latestAssessmentId ? <Pill className="text-brand-secondary">Display latest</Pill> : null}{member.archivedAt ? <Pill className="text-warning">Archived</Pill> : null}<span className="ml-auto text-xs text-tertiary">{formatDate(member.createdAt)}</span></Link></li>)}</ul>{error ? <ErrorState className="mt-3" message={error} /> : null}{nextMemberCursor ? <Button className="mt-3" variant="secondary" loading={loading} onClick={onLoadMore}>Load more members</Button> : null}</div> : null}</Card>
+  return <Card bodyClass="p-0"><button type="button" aria-expanded={expanded} aria-controls={`cycle-${cycle.id}`} onClick={onToggle} className="grid w-full gap-3 px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:grid-cols-[minmax(240px,1.4fr)_repeat(4,minmax(110px,.6fr))_auto] md:items-center"><span><span className="flex flex-wrap items-center gap-2"><strong className="text-sm text-primary">{cycle.name}</strong><Pill>{cycle.status} Cycle</Pill>{cycle.activeClosureManifestId ? <Pill className="text-success">Final manifest</Pill> : null}</span><span className="mt-1 block font-mono text-xs text-tertiary">{cycle.id}</span></span><Stat label="Members / branches" value={`${cycle.memberCount} / ${cycle.activeBranchCount}`} /><Stat label="Fixed rate" value={ratio(cycle.comparisonSummary?.fixedRate)} /><Stat label="New / reopened" value={cycle.comparisonSummary ? `${cycle.comparisonSummary.newCount} / ${cycle.comparisonSummary.reopenedCount}` : 'N/A'} /><Stat label="Selected-head scan" value={cycle.scanStaleness} /><ChevronDown className={cn('size-4 text-tertiary transition-transform', expanded && 'rotate-180')} aria-hidden="true" /></button>{expanded ? <div id={`cycle-${cycle.id}`} className="border-t border-secondary px-5 py-4"><div className="mb-3 grid gap-2 text-xs text-tertiary sm:grid-cols-2 lg:grid-cols-5"><span><strong>Root snapshot:</strong> {cycle.rootSnapshotId || 'N/A'}</span><span><strong>Current/final snapshot:</strong> {cycle.currentSnapshotId || 'N/A'}</span><span><strong>Comparison:</strong> {cycle.comparisonId || 'N/A'}</span><span><strong>Display latest:</strong> {cycle.latestAssessmentId || 'N/A'}</span><span><strong>Last trusted scan:</strong> {cycle.selectedHeadLastScanAt ? formatDate(cycle.selectedHeadLastScanAt) : 'N/A'}</span></div><Link to={`/assessment-cycles/${encodeURIComponent(cycle.id)}`} className="mb-3 inline-flex rounded-lg text-sm font-semibold text-brand-secondary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand">Open Cycle details and closure history</Link><ul aria-label={`${cycle.name} members`} className="space-y-2">{members.map((member) => <li key={member.assessmentId}><Link to={`/engagements/${encodeURIComponent(member.assessmentId)}`} className="flex flex-wrap items-center gap-2 rounded-lg border border-secondary px-3 py-2 text-sm hover:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"><span className="font-semibold text-primary">{member.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial'}</span><span className="font-mono text-xs text-tertiary">{member.assessmentId}</span>{member.assessmentId === cycle.selectedHeadAssessmentId ? <Pill className="text-brand-secondary">Selected head</Pill> : null}{member.assessmentId === cycle.latestAssessmentId ? <Pill className="text-brand-secondary">Display latest</Pill> : null}{member.archivedAt ? <Pill className="text-warning">Archived</Pill> : null}<span className="ml-auto text-xs text-tertiary">{formatDate(member.createdAt)}</span></Link></li>)}</ul>{error ? <ErrorState className="mt-3" message={error} /> : null}{nextMemberCursor ? <Button className="mt-3" variant="secondary" loading={loading} onClick={onLoadMore}>Load more members</Button> : null}</div> : null}</Card>
 }
 
 function Stat({ label, value }: { label: string; value: string }) { return <span><span className="block text-[11px] font-semibold uppercase tracking-wide text-quaternary">{label}</span><span className="mt-1 block text-sm font-semibold capitalize text-primary">{value}</span></span> }
+function ratio(value?: { numerator: number; denominator: number; naReason: string }) { return !value || value.denominator <= 0 ? 'N/A' : `${Math.round(value.numerator * 100 / value.denominator)}%` }
 function formatDate(value: string) { return value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : 'Unknown' }

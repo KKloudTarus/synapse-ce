@@ -12,12 +12,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcomparison"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-const assessmentCycleCols = `tenant_id, id, name, boundary_kind, business_asset_id, project_id, status, root_assessment_id, selected_head_assessment_id, next_retest_number, version, created_at, updated_at, created_by, updated_by`
+const assessmentCycleCols = `tenant_id, id, name, boundary_kind, business_asset_id, project_id, status, root_assessment_id, selected_head_assessment_id, next_retest_number, version, created_at, updated_at, created_by, updated_by, active_closure_manifest_id, active_closure_cycle_version`
 const assessmentCycleMemberCols = `tenant_id, cycle_id, assessment_id, assessment_type, predecessor_assessment_id, retest_number, relationship_version, created_at, created_by, archived_at`
 
 // AssessmentCycleRepository persists AssessmentCycle aggregates and their members to PostgreSQL.
@@ -46,7 +47,7 @@ func (r *AssessmentCycleRepository) CreateCycle(ctx context.Context, cycle *asse
 
 	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 		query := `INSERT INTO assessment_cycles (` + assessmentCycleCols + `)
-			VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8, $9, $10, $11, $12, $13, $14, $15)`
+			VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8, $9, $10, $11, $12, $13, $14, $15, NULLIF($16, ''), NULLIF($17, 0))`
 
 		_, err := tx.Exec(ctx, query,
 			tenantID.String(),
@@ -64,6 +65,8 @@ func (r *AssessmentCycleRepository) CreateCycle(ctx context.Context, cycle *asse
 			cycle.UpdatedAt,
 			cycle.CreatedBy,
 			cycle.UpdatedBy,
+			cycle.ActiveClosureManifestID.String(),
+			cycle.ActiveClosureCycleVersion,
 		)
 		if err != nil {
 			return mapPostgresError(err, "create assessment cycle")
@@ -105,7 +108,7 @@ func (r *AssessmentCycleRepository) GetCycleByAssessment(ctx context.Context, te
 	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 		query := `SELECT c.tenant_id, c.id, c.name, c.boundary_kind, c.business_asset_id, c.project_id, c.status,
 				c.root_assessment_id, c.selected_head_assessment_id, c.next_retest_number, c.version,
-				c.created_at, c.updated_at, c.created_by, c.updated_by
+				c.created_at, c.updated_at, c.created_by, c.updated_by, c.active_closure_manifest_id, c.active_closure_cycle_version
 			FROM assessment_cycles c
 			JOIN assessment_cycle_members m ON c.tenant_id = m.tenant_id AND c.id = m.cycle_id
 			WHERE m.tenant_id = $1 AND m.assessment_id = $2`
@@ -141,10 +144,12 @@ func (r *AssessmentCycleRepository) ListCycles(ctx context.Context, query ports.
 			       COALESCE(stats.member_count, 0), COALESCE(stats.branch_count, 0),
 			       COALESCE(latest.assessment_id, ''), COALESCE(latest.retest_number, -1),
 			       COALESCE(member_page.members, '[]'::jsonb),
-			       COALESCE(root_default.snapshot_id, ''), COALESCE(current_default.snapshot_id, ''),
-			       latest_scan.last_scan_at,
+			       COALESCE(CASE WHEN c.status = 'completed' THEN active_manifest.initial_snapshot_id ELSE root_default.snapshot_id END, ''),
+			       COALESCE(CASE WHEN c.status = 'completed' THEN active_manifest.final_snapshot_id ELSE current_default.snapshot_id END, ''),
+			       COALESCE(comparison.id, ''), COALESCE(comparison.status, ''), COALESCE(comparison.summary, '{}'::jsonb),
+			       COALESCE(c.active_closure_manifest_id, ''), latest_scan.last_scan_at,
 			       CASE WHEN latest_scan.last_scan_at IS NULL THEN 'missing'
-			            WHEN latest_scan.last_scan_at >= $12::timestamptz THEN 'fresh' ELSE 'stale' END
+			            WHEN latest_scan.last_scan_at >= $17::timestamptz THEN 'fresh' ELSE 'stale' END
 			FROM assessment_cycles c
 			JOIN engagements selected_head
 			  ON selected_head.tenant_id = c.tenant_id AND selected_head.id = c.selected_head_assessment_id
@@ -187,6 +192,26 @@ func (r *AssessmentCycleRepository) ListCycles(ctx context.Context, query ports.
 			  ON root_default.tenant_id = c.tenant_id AND root_default.assessment_id = c.root_assessment_id
 			LEFT JOIN assessment_snapshot_defaults current_default
 			  ON current_default.tenant_id = c.tenant_id AND current_default.assessment_id = c.selected_head_assessment_id
+			LEFT JOIN assessment_cycle_closure_manifests active_manifest
+			  ON active_manifest.tenant_id = c.tenant_id AND active_manifest.cycle_id = c.id
+			 AND active_manifest.id = c.active_closure_manifest_id AND active_manifest.lifecycle = 'active'
+			LEFT JOIN LATERAL (
+				SELECT value.id, value.status, value.summary
+				FROM assessment_comparisons value
+				WHERE value.tenant_id = c.tenant_id AND value.cycle_id = c.id
+				  AND value.mode = 'lifecycle'
+				  AND ((c.status = 'completed' AND active_manifest.id IS NOT NULL
+				        AND value.id = active_manifest.comparison_id
+				        AND value.baseline_snapshot_id = active_manifest.initial_snapshot_id
+				        AND value.current_snapshot_id = active_manifest.final_snapshot_id
+				        AND value.status IN ('complete','superseded'))
+				    OR (c.status <> 'completed'
+				        AND value.baseline_snapshot_id = root_default.snapshot_id
+				        AND value.current_snapshot_id = current_default.snapshot_id
+				        AND value.status IN ('complete','needs_review')))
+				ORDER BY value.completed_at DESC, value.id DESC
+					LIMIT 1
+				) comparison ON true
 			LEFT JOIN LATERAL (
 				SELECT MAX(run.sealed_at) AS last_scan_at
 				FROM scan_runs run
@@ -203,13 +228,25 @@ func (r *AssessmentCycleRepository) ListCycles(ctx context.Context, query ports.
 				  SELECT 1 FROM assessment_cycle_members filtered_member
 				  WHERE filtered_member.tenant_id = c.tenant_id AND filtered_member.cycle_id = c.id AND filtered_member.assessment_type = $10
 			  ))
-			  AND ($11 = '' OR CASE WHEN latest_scan.last_scan_at IS NULL THEN 'missing'
-			      WHEN latest_scan.last_scan_at >= $12::timestamptz THEN 'fresh' ELSE 'stale' END = $11)
-			  AND ($13 = '' OR position(lower($13) in lower(c.name)) > 0 OR position(lower($13) in lower(c.id)) > 0
-			      OR position(lower($13) in lower(c.root_assessment_id)) > 0 OR position(lower($13) in lower(c.selected_head_assessment_id)) > 0)
+			  AND (($11 = '' AND $12 = '' AND $13 = '' AND $14 = '' AND $15 = '') OR EXISTS (
+				  SELECT 1 FROM assessment_comparison_items filtered_item
+				  WHERE filtered_item.tenant_id = c.tenant_id AND filtered_item.cycle_id = c.id AND filtered_item.comparison_id = comparison.id
+				    AND ($11 = '' OR filtered_item.producer_kind = $11)
+				    AND ($12 = '' OR filtered_item.finding_kind = $12)
+				    AND ($13 = '' OR CASE
+				      WHEN filtered_item.presence = 'needs_review' OR filtered_item.neutral_presence = 'needs_review' OR jsonb_array_length(filtered_item.review_candidate_ids) > 0 THEN 'needs_review'
+				      WHEN filtered_item.verification_id IS NOT NULL THEN 'verified' ELSE 'clear' END = $13)
+				    AND ($14 = '' OR filtered_item.presence = $14)
+				    AND ($15 = '' OR COALESCE(NULLIF(filtered_item.current_observation->>'severity',''), filtered_item.baseline_observation->>'severity') = $15)
+			  ))
+			  AND ($16 = '' OR CASE WHEN latest_scan.last_scan_at IS NULL THEN 'missing'
+			      WHEN latest_scan.last_scan_at >= $17::timestamptz THEN 'fresh' ELSE 'stale' END = $16)
+			  AND ($18 = '' OR position(lower($18) in lower(c.name)) > 0 OR position(lower($18) in lower(c.id)) > 0
+			      OR position(lower($18) in lower(c.root_assessment_id)) > 0 OR position(lower($18) in lower(c.selected_head_assessment_id)) > 0)
 			ORDER BY c.updated_at DESC, c.id DESC
 			LIMIT $6`, tenantID.String(), string(query.Status), string(query.BoundaryKind), nullableCycleCursorTime(query.AfterUpdatedAt), query.AfterCycleID.String(), query.Limit, query.MemberLimit+1,
-			string(query.AssessmentStatus), query.SelectedHeadID.String(), string(query.AssessmentType), query.ScanStaleness, query.ScanStaleBefore, query.Search)
+			string(query.AssessmentStatus), query.SelectedHeadID.String(), string(query.AssessmentType), query.ProducerKind, query.FindingKind, query.ReviewState,
+			string(query.ChangePresence), string(query.ChangeSeverity), query.ScanStaleness, query.ScanStaleBefore, query.Search)
 		if err != nil {
 			return fmt.Errorf("list assessment cycles: %w", err)
 		}
@@ -240,7 +277,8 @@ func (r *AssessmentCycleRepository) ListMigrationPendingAssessments(ctx context.
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM engagements e WHERE `+predicate, tenantID.String()).Scan(&total); err != nil {
 			return fmt.Errorf("count migration-pending assessments: %w", err)
 		}
-		if query.Status != "" || !query.SelectedHeadID.IsZero() || query.AssessmentType != "" || query.ScanStaleness != "" {
+		if query.Status != "" || !query.SelectedHeadID.IsZero() || query.AssessmentType != "" || query.ProducerKind != "" || query.FindingKind != "" ||
+			query.ReviewState != "" || query.ChangePresence != "" || query.ChangeSeverity != "" || query.ScanStaleness != "" {
 			return nil
 		}
 		rows, err := tx.Query(ctx, `SELECT e.id,e.name,e.status,
@@ -307,8 +345,8 @@ func (r *AssessmentCycleRepository) UpdateCycleCAS(ctx context.Context, cycle *a
 			query = `UPDATE assessment_cycles
 				SET name = $3, boundary_kind = $4, business_asset_id = NULLIF($5, ''), project_id = NULLIF($6, ''),
 				    status = $7, selected_head_assessment_id = $8, next_retest_number = $9, version = $10,
-				    updated_at = $11, updated_by = $12
-				WHERE tenant_id = $1 AND id = $2 AND version = $13`
+				    updated_at = $11, updated_by = $12, active_closure_manifest_id = NULLIF($13, ''), active_closure_cycle_version = NULLIF($14, 0)
+				WHERE tenant_id = $1 AND id = $2 AND version = $15`
 			args = []any{
 				tenantID.String(),
 				cycle.ID.String(),
@@ -322,13 +360,15 @@ func (r *AssessmentCycleRepository) UpdateCycleCAS(ctx context.Context, cycle *a
 				cycle.Version,
 				cycle.UpdatedAt,
 				cycle.UpdatedBy,
+				cycle.ActiveClosureManifestID.String(),
+				cycle.ActiveClosureCycleVersion,
 				expectedVersion,
 			}
 		} else {
 			query = `UPDATE assessment_cycles
 				SET name = $3, boundary_kind = $4, business_asset_id = NULLIF($5, ''), project_id = NULLIF($6, ''),
 				    status = $7, selected_head_assessment_id = $8, next_retest_number = $9, version = $10,
-				    updated_at = $11, updated_by = $12
+				    updated_at = $11, updated_by = $12, active_closure_manifest_id = NULLIF($13, ''), active_closure_cycle_version = NULLIF($14, 0)
 				WHERE tenant_id = $1 AND id = $2`
 			args = []any{
 				tenantID.String(),
@@ -343,6 +383,8 @@ func (r *AssessmentCycleRepository) UpdateCycleCAS(ctx context.Context, cycle *a
 				cycle.Version,
 				cycle.UpdatedAt,
 				cycle.UpdatedBy,
+				cycle.ActiveClosureManifestID.String(),
+				cycle.ActiveClosureCycleVersion,
 			}
 		}
 
@@ -538,6 +580,8 @@ func scanAssessmentCycle(row rowScanner) (*assessmentcycle.AssessmentCycle, erro
 		version                                  int64
 		createdAt, updatedAt                     time.Time
 		createdBy, updatedBy                     string
+		activeManifestID                         pgtype.Text
+		activeCycleVersion                       pgtype.Int8
 	)
 
 	err := row.Scan(
@@ -556,27 +600,31 @@ func scanAssessmentCycle(row rowScanner) (*assessmentcycle.AssessmentCycle, erro
 		&updatedAt,
 		&createdBy,
 		&updatedBy,
+		&activeManifestID,
+		&activeCycleVersion,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	return &assessmentcycle.AssessmentCycle{
-		TenantID:                 shared.ID(tenantID),
-		ID:                       shared.ID(id),
-		Name:                     name,
-		BoundaryKind:             assessmentcycle.BoundaryKind(boundaryKind),
-		BusinessAssetID:          shared.ID(businessAssetID.String),
-		ProjectID:                shared.ID(projectID.String),
-		Status:                   assessmentcycle.Status(status),
-		RootAssessmentID:         shared.ID(rootAssessmentID),
-		SelectedHeadAssessmentID: shared.ID(selectedHeadID),
-		NextRetestNumber:         nextRetestNumber,
-		Version:                  version,
-		CreatedAt:                createdAt,
-		UpdatedAt:                updatedAt,
-		CreatedBy:                createdBy,
-		UpdatedBy:                updatedBy,
+		TenantID:                  shared.ID(tenantID),
+		ID:                        shared.ID(id),
+		Name:                      name,
+		BoundaryKind:              assessmentcycle.BoundaryKind(boundaryKind),
+		BusinessAssetID:           shared.ID(businessAssetID.String),
+		ProjectID:                 shared.ID(projectID.String),
+		Status:                    assessmentcycle.Status(status),
+		RootAssessmentID:          shared.ID(rootAssessmentID),
+		SelectedHeadAssessmentID:  shared.ID(selectedHeadID),
+		NextRetestNumber:          nextRetestNumber,
+		Version:                   version,
+		CreatedAt:                 createdAt,
+		UpdatedAt:                 updatedAt,
+		CreatedBy:                 createdBy,
+		UpdatedBy:                 updatedBy,
+		ActiveClosureManifestID:   shared.ID(activeManifestID.String),
+		ActiveClosureCycleVersion: activeCycleVersion.Int64,
 	}, nil
 }
 
@@ -591,6 +639,10 @@ func scanAssessmentCycleListRecord(row rowScanner, memberLimit int) (*assessment
 		membersJSON        []byte
 		rootSnapshotID     string
 		currentSnapshotID  string
+		comparisonID       string
+		comparisonStatus   string
+		comparisonSummary  []byte
+		activeManifestID   string
 		selectedHeadScanAt pgtype.Timestamptz
 		scanStaleness      string
 		record             ports.AssessmentCycleListRecord
@@ -600,7 +652,7 @@ func scanAssessmentCycleListRecord(row rowScanner, memberLimit int) (*assessment
 		&cycle.RootAssessmentID, &cycle.SelectedHeadAssessmentID, &cycle.NextRetestNumber, &cycle.Version,
 		&cycle.CreatedAt, &cycle.UpdatedAt, &cycle.CreatedBy, &cycle.UpdatedBy,
 		&record.MemberCount, &record.ActiveBranchCount, &latestAssessmentID, &record.LatestRetestNumber,
-		&membersJSON, &rootSnapshotID, &currentSnapshotID,
+		&membersJSON, &rootSnapshotID, &currentSnapshotID, &comparisonID, &comparisonStatus, &comparisonSummary, &activeManifestID,
 		&selectedHeadScanAt, &scanStaleness,
 	)
 	if err != nil {
@@ -626,10 +678,16 @@ func scanAssessmentCycleListRecord(row rowScanner, memberLimit int) (*assessment
 			CreatedAt: member.CreatedAt, CreatedBy: member.CreatedBy, ArchivedAt: member.ArchivedAt,
 		})
 	}
-	record.RootSnapshotID, record.CurrentSnapshotID, record.ScanStaleness = shared.ID(rootSnapshotID), shared.ID(currentSnapshotID), scanStaleness
+	record.RootSnapshotID, record.CurrentSnapshotID, record.ComparisonID = shared.ID(rootSnapshotID), shared.ID(currentSnapshotID), shared.ID(comparisonID)
+	record.ComparisonStatus, record.ActiveManifestID, record.ScanStaleness = assessmentcomparison.Status(comparisonStatus), shared.ID(activeManifestID), scanStaleness
 	if selectedHeadScanAt.Valid {
 		scanAt := selectedHeadScanAt.Time.UTC()
 		record.SelectedHeadScanAt = &scanAt
+	}
+	if comparisonID != "" {
+		if err := json.Unmarshal(comparisonSummary, &record.ComparisonSummary); err != nil {
+			return nil, ports.AssessmentCycleListRecord{}, fmt.Errorf("decode assessment cycle comparison summary: %w", err)
+		}
 	}
 	if err := cycle.Validate(); err != nil {
 		return nil, ports.AssessmentCycleListRecord{}, err

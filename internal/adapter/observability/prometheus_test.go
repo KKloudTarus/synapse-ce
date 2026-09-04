@@ -49,6 +49,13 @@ func TestCollectorsScrapeOutput(t *testing.T) {
 	c.ObserveFindingLineage("matched", "fingerprint", "exact_fingerprint")
 	c.ObserveFindingLineageBackfillItem("observation_created")
 	c.ObserveFindingLineageBackfillRun("completed")
+	c.ObserveAssessmentComparison("complete", "lifecycle", "generated")
+	oldest := time.Now().Add(-10 * time.Minute)
+	c.ObserveAssessmentComparisonBacklog("tenant-a", ports.AssessmentComparisonBacklog{Queued: 2, OldestActiveAt: &oldest}, time.Now())
+	c.ObserveAssessmentComparisonGeneration("tenant-a", "lifecycle", "complete", 1, 1, 1000, time.Second)
+	c.ObserveAssessmentRelationshipCandidate("created", "medium")
+	c.ObserveAssessmentRelationshipDecision("confirm", "applied")
+	c.ObserveAssessmentClosureReport("generated", "none")
 
 	rec := httptest.NewRecorder()
 	c.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
@@ -62,9 +69,46 @@ func TestCollectorsScrapeOutput(t *testing.T) {
 		"synapse_finding_lineage_operations_total",
 		"synapse_finding_lineage_backfill_items_total",
 		"synapse_finding_lineage_backfill_runs_total",
+		"synapse_assessment_comparison_operations_total",
+		"synapse_assessment_comparison_backlog",
+		"synapse_assessment_comparison_oldest_active_age_seconds",
+		"synapse_assessment_comparison_generation_duration_seconds",
+		"synapse_assessment_relationship_candidates_total",
+		"synapse_assessment_relationship_decisions_total",
+		"synapse_assessment_closure_reports_total",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("scrape output missing metric %q", want)
+		}
+	}
+}
+
+func TestCollectorsAssessmentLifecycleUsesBoundedLabels(t *testing.T) {
+	c := New(nil, nil)
+	c.ObserveAssessmentComparison("complete", "lifecycle", "generated")
+	c.ObserveAssessmentComparison("comparison-secret", "finding-secret", "raw-secret")
+	c.ObserveAssessmentRelationshipCandidate("created", "high")
+	c.ObserveAssessmentRelationshipCandidate("candidate-secret", "tenant-secret")
+	c.ObserveAssessmentRelationshipDecision("dismiss", "replayed")
+	c.ObserveAssessmentClosureReport("generated", "none")
+	c.ObserveAssessmentClosureReport("manifest-secret", "tenant-secret")
+
+	recorder := httptest.NewRecorder()
+	c.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+	for _, expected := range []string{
+		`synapse_assessment_comparison_operations_total{mode="lifecycle",reason="generated",status="complete"} 1`,
+		`synapse_assessment_comparison_operations_total{mode="unknown",reason="unknown",status="unknown"} 1`,
+		`synapse_assessment_relationship_candidates_total{confidence="unknown",outcome="unknown"} 1`,
+		`synapse_assessment_closure_reports_total{outcome="unknown",reason="unknown"} 1`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("assessment lifecycle metric missing %q: %s", expected, body)
+		}
+	}
+	for _, forbidden := range []string{"comparison-secret", "finding-secret", "raw-secret", "candidate-secret", "manifest-secret", "tenant-secret"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("assessment lifecycle metric leaked %q: %s", forbidden, body)
 		}
 	}
 }

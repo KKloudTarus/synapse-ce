@@ -126,6 +126,7 @@ type Service struct {
 	log              *slog.Logger
 	gateDecoder      ports.GateDecoder
 	slaAssessor      ports.FindingSLAAssessor // optional; nil while SYNAPSE_SLA_ENABLED=false
+	scanRunObserver  ScanRunObserver          // optional; tenant-gated assessment lifecycle shadow writer
 }
 
 // SetSeverityEnricher configures optional severity backfill (NVD CVSS) for vulnerabilities the
@@ -2231,12 +2232,9 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	if err != nil {
 		return nil, err
 	}
-	if s.runs != nil {
-		keys := make([]string, 0, len(result.Findings))
-		for _, f := range result.Findings {
-			keys = append(keys, f.DedupKey)
-		}
-		_ = s.runs.Save(ctx, ports.ScanRun{ID: s.newRunID(), EngagementID: engagementID.String(), CreatedAt: now, Manifest: manifest, FindingKeys: keys})
+	assessmentRunID, err := s.persistAssessmentScanRun(ctx, engagementID, evidenceID, now, ports.AcquireRequest{Kind: ports.TargetUpload, Value: record.TargetRef}, result, record.SHA256)
+	if err != nil {
+		return nil, err
 	}
 	if s.scans != nil {
 		skipped, err := s.scans.SaveScan(ctx, engagementID, doc, vulns, snap)
@@ -2272,6 +2270,9 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		if data, mErr := json.Marshal(result); mErr == nil {
 			_ = s.results.SaveResult(ctx, engagementID, data)
 		}
+	}
+	if err := s.notifyAssessmentScanRun(ctx, engagementID, assessmentRunID); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -3149,18 +3150,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if err != nil {
 		return nil, err
 	}
-	if s.runs != nil {
-		keys := make([]string, 0, len(result.Findings))
-		for _, f := range result.Findings {
-			keys = append(keys, f.DedupKey)
-		}
-		_ = s.runs.Save(ctx, ports.ScanRun{
-			ID:           s.newRunID(),
-			EngagementID: engagementID.String(),
-			CreatedAt:    now,
-			Manifest:     manifest,
-			FindingKeys:  keys,
-		})
+	assessmentRunID, err := s.persistAssessmentScanRun(ctx, engagementID, evidenceID, now, req, result, "")
+	if err != nil {
+		return nil, err
 	}
 
 	// The scan snapshot and the findings are written in SEPARATE transactions. A
@@ -3222,6 +3214,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Record the image's manifest digest so the fleet cluster agent can correlate a running digest
 	// with this scan (#446). This is the pipeline that populates result.Image (image scans).
 	s.recordScannedImage(ctx, engagementID, result)
+	if err := s.notifyAssessmentScanRun(ctx, engagementID, assessmentRunID); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -4102,7 +4097,7 @@ type ScanDrift struct {
 
 // CompareRuns computes the drift between two runs and explains it from the
 // manifest deltas (chain-of-custody: "why does this differ from last month?").
-func (s *Service) CompareRuns(ctx context.Context, runA, runB string) (ScanDrift, error) {
+func (s *Service) CompareRuns(ctx context.Context, engagementID shared.ID, runA, runB string) (ScanDrift, error) {
 	if s.runs == nil {
 		return ScanDrift{}, fmt.Errorf("scan runs: %w", shared.ErrNotFound)
 	}
@@ -4113,6 +4108,9 @@ func (s *Service) CompareRuns(ctx context.Context, runA, runB string) (ScanDrift
 	b, err := s.runs.Get(ctx, runB)
 	if err != nil {
 		return ScanDrift{}, err
+	}
+	if a.EngagementID != engagementID.String() || b.EngagementID != engagementID.String() {
+		return ScanDrift{}, fmt.Errorf("scan runs: %w", shared.ErrNotFound)
 	}
 	return diffRuns(a, b), nil
 }

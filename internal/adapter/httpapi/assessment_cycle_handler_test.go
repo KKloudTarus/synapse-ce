@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	cycledom "github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	comparisonuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcomparison"
 	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -60,6 +62,20 @@ func newAssessmentCycleHTTPRouter(t *testing.T, apiEnabled bool, dualWrite func(
 	if err != nil {
 		t.Fatal(err)
 	}
+	snapshots := memory.NewAssessmentSnapshotRepository()
+	comparisons := memory.NewAssessmentComparisonRepository()
+	lineage := memory.NewFindingLineageRepository()
+	verification, err := comparisonuc.NewRetestVerificationReader(lineage, snapshots, memory.NewRetestRepository())
+	if err != nil {
+		t.Fatal(err)
+	}
+	comparisonService, err := comparisonuc.NewService(comparisons, snapshots, cycles, lineage, transactions, audit, clock, ids, verification, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cycleAPI.SetRelationshipChangeDependencies(snapshots, comparisons, lineage, memory.NewScanJobStore(), comparisonService, []byte("0123456789abcdef0123456789abcdef")); err != nil {
+		t.Fatal(err)
+	}
 	observer := &assessmentCycleHTTPObserver{}
 	router := &Router{log: discardLog(), eng: engagementService}
 	router.SetObservability(false, observer)
@@ -82,6 +98,94 @@ func TestAssessmentLifecycleReadGateIsTenantScopedAndFailClosed(t *testing.T) {
 	handler(allowed, cycleRequest(http.MethodGet, "/api/v1/assessment-cycles", "", userdom.RoleReadOnly, "tenant-canary"))
 	if allowed.Code != http.StatusNoContent {
 		t.Fatalf("allowed lifecycle read = %d", allowed.Code)
+	}
+}
+
+func TestAssessmentRelationshipChangeHTTPContract(t *testing.T) {
+	router, cycles, _ := newAssessmentCycleHTTPRouter(t, true, func(string) bool { return true })
+	ctx := context.Background()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	tenantID := shared.ID("tenant-relationship-http")
+	cycle, err := cycledom.NewAssessmentCycle("cycle-relationship-http", tenantID, "Relationship HTTP", cycledom.BoundaryStandalone, "", "", "root", "operator", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cycle.AdvanceRetest("head-a", "root", cycle.Version, "operator", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cycle.AdvanceRetest("head-b", "root", cycle.Version, "operator", now); err != nil {
+		t.Fatal(err)
+	}
+	root, _ := cycledom.NewInitialMember(tenantID, cycle.ID, "root", "operator", now)
+	headA, _ := cycledom.NewRetestMember(tenantID, cycle.ID, "head-a", "root", 1, "operator", now)
+	headB, _ := cycledom.NewRetestMember(tenantID, cycle.ID, "head-b", "root", 2, "operator", now)
+	if err := cycles.CreateCycle(ctx, cycle); err != nil {
+		t.Fatal(err)
+	}
+	for _, member := range []*cycledom.Member{root, headA, headB} {
+		if err := cycles.CreateMember(ctx, member); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler := router.routes()
+	path := "/api/v1/assessment-cycles/" + cycle.ID.String()
+	changeBody := `{"command":"select_head","selected_head_assessment_id":"head-b"}`
+
+	denied := httptest.NewRecorder()
+	handler.ServeHTTP(denied, cycleRequest(http.MethodPost, path+"/relationship-previews", changeBody, userdom.RoleReadOnly, tenantID.String()))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("permission response=%d body=%s", denied.Code, denied.Body.String())
+	}
+	crossTenant := httptest.NewRecorder()
+	handler.ServeHTTP(crossTenant, cycleRequest(http.MethodPost, path+"/relationship-previews", changeBody, userdom.RoleReviewer, "other-tenant"))
+	if crossTenant.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant response=%d body=%s", crossTenant.Code, crossTenant.Body.String())
+	}
+
+	previewResponse := httptest.NewRecorder()
+	handler.ServeHTTP(previewResponse, cycleRequest(http.MethodPost, path+"/relationship-previews", changeBody, userdom.RoleReviewer, tenantID.String()))
+	if previewResponse.Code != http.StatusOK {
+		t.Fatalf("preview response=%d body=%s", previewResponse.Code, previewResponse.Body.String())
+	}
+	var preview cycleuc.RelationshipPreview
+	if err := json.Unmarshal(previewResponse.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if !preview.CommitAllowed || preview.PreviewToken == "" || preview.NewSelectedHeadAssessmentID != "head-b" {
+		t.Fatalf("preview=%+v", preview)
+	}
+	commitBody := `{"command":"select_head","selected_head_assessment_id":"head-b","preview_token":"` + preview.PreviewToken + `"}`
+	missingPrecondition := httptest.NewRecorder()
+	handler.ServeHTTP(missingPrecondition, cycleRequest(http.MethodPost, path+"/relationship-commits", commitBody, userdom.RoleReviewer, tenantID.String()))
+	if missingPrecondition.Code != http.StatusPreconditionRequired {
+		t.Fatalf("missing If-Match response=%d body=%s", missingPrecondition.Code, missingPrecondition.Body.String())
+	}
+
+	commitRequest := cycleRequest(http.MethodPost, path+"/relationship-commits", commitBody, userdom.RoleReviewer, tenantID.String())
+	commitRequest.Header.Set("If-Match", strconv.FormatInt(preview.CycleVersion, 10))
+	commitRequest.Header.Set("Idempotency-Key", "relationship-http-commit")
+	committed := httptest.NewRecorder()
+	handler.ServeHTTP(committed, commitRequest)
+	if committed.Code != http.StatusOK {
+		t.Fatalf("commit response=%d body=%s", committed.Code, committed.Body.String())
+	}
+
+	replayRequest := cycleRequest(http.MethodPost, path+"/relationship-commits", commitBody, userdom.RoleReviewer, tenantID.String())
+	replayRequest.Header.Set("If-Match", strconv.FormatInt(preview.CycleVersion, 10))
+	replayRequest.Header.Set("Idempotency-Key", "relationship-http-commit")
+	replayed := httptest.NewRecorder()
+	handler.ServeHTTP(replayed, replayRequest)
+	if replayed.Code != http.StatusOK || replayed.Header().Get("Idempotency-Replayed") != "true" || replayed.Body.String() != committed.Body.String() {
+		t.Fatalf("replay response=%d headers=%v body=%s", replayed.Code, replayed.Header(), replayed.Body.String())
+	}
+
+	reusedRequest := cycleRequest(http.MethodPost, path+"/relationship-commits", commitBody, userdom.RoleReviewer, tenantID.String())
+	reusedRequest.Header.Set("If-Match", strconv.FormatInt(preview.CycleVersion, 10))
+	reusedRequest.Header.Set("Idempotency-Key", "relationship-http-reuse")
+	reused := httptest.NewRecorder()
+	handler.ServeHTTP(reused, reusedRequest)
+	if reused.Code != http.StatusConflict || !strings.Contains(reused.Body.String(), cycleuc.CodeRelationshipPreviewStale) {
+		t.Fatalf("reused token response=%d body=%s", reused.Code, reused.Body.String())
 	}
 }
 
