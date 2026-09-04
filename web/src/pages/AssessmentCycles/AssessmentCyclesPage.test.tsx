@@ -16,7 +16,7 @@ const cycle: AssessmentCycleSummary = {
     { assessmentId: 'assessment-root', assessmentType: 'initial', predecessorAssessmentId: '', retestNumber: 0, relationshipVersion: 1, createdAt: '2026-08-01T00:00:00Z', createdBy: 'alice', archivedAt: null },
     { assessmentId: 'assessment-head', assessmentType: 'retest', predecessorAssessmentId: 'assessment-root', retestNumber: 1, relationshipVersion: 1, createdAt: '2026-08-02T00:00:00Z', createdBy: 'alice', archivedAt: null },
   ],
-  membersNextCursor: 'member-cursor', rootSnapshotId: '', currentSnapshotId: '',
+  membersNextCursor: 'member-cursor', rootSnapshotId: '', currentSnapshotId: '', comparisonId: '', comparisonStatus: '', comparisonSummary: null, activeClosureManifestId: '',
   selectedHeadLastScanAt: null, scanStaleness: 'missing',
 }
 
@@ -54,14 +54,16 @@ describe('AssessmentCyclesPage', () => {
   })
 
   it('persists bounded filters in the URL-backed API query and clears them', async () => {
-    render(<MemoryRouter initialEntries={['/assessment-cycles?assessment_status=active&assessment_type=retest&selected_head=assessment-head&scan=stale&q=payments']}><AssessmentCyclesPage /></MemoryRouter>)
+    render(<MemoryRouter initialEntries={['/assessment-cycles?assessment_status=active&assessment_type=retest&selected_head=assessment-head&producer=semgrep&kind=sast&review=needs_review&presence=new&severity=critical&scan=stale&q=payments']}><AssessmentCyclesPage /></MemoryRouter>)
 
     await waitFor(() => expect(api.listAssessmentCycles).toHaveBeenCalledWith(expect.objectContaining({
-      assessmentStatus: 'active', assessmentType: 'retest', selectedHeadAssessmentId: 'assessment-head', scanStaleness: 'stale', search: 'payments',
+      assessmentStatus: 'active', assessmentType: 'retest', selectedHeadAssessmentId: 'assessment-head', producer: 'semgrep', findingKind: 'sast',
+      reviewState: 'needs_review', changePresence: 'new', changeSeverity: 'critical', scanStaleness: 'stale', search: 'payments',
     })))
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
     await waitFor(() => expect(api.listAssessmentCycles).toHaveBeenLastCalledWith(expect.objectContaining({
-      assessmentStatus: undefined, assessmentType: undefined, selectedHeadAssessmentId: undefined, scanStaleness: undefined, search: undefined,
+      assessmentStatus: undefined, assessmentType: undefined, selectedHeadAssessmentId: undefined, producer: undefined, findingKind: undefined,
+      reviewState: undefined, changePresence: undefined, changeSeverity: undefined, scanStaleness: undefined, search: undefined,
     })))
   })
 })

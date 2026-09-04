@@ -288,9 +288,10 @@ func TestAPIServiceListCyclesCursorAndFilterValidation(t *testing.T) {
 		t.Fatalf("search result=%+v err=%v", filtered, err)
 	}
 	for name, input := range map[string]cycleuc.ListCyclesInput{
-		"oversized search":  {TenantID: tenantID, Search: strings.Repeat("x", 257)},
-		"control search":    {TenantID: tenantID, Search: "bad\nquery"},
-		"invalid staleness": {TenantID: tenantID, ScanStaleness: "ancient"},
+		"oversized producer": {TenantID: tenantID, ProducerKind: strings.Repeat("x", 257)},
+		"control search":     {TenantID: tenantID, Search: "bad\nquery"},
+		"medium change":      {TenantID: tenantID, ChangeSeverity: shared.SeverityMedium},
+		"invalid staleness":  {TenantID: tenantID, ScanStaleness: "ancient"},
 	} {
 		if _, err := api.ListCycles(ctx, input); cycleuc.ErrorCode(err) != cycleuc.CodeInvalidFilter {
 			t.Fatalf("%s error=%v code=%s", name, err, cycleuc.ErrorCode(err))

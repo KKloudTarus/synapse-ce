@@ -25,6 +25,8 @@ import { aiTriageApi } from './ai-triage'
 import { dashboardApi } from './dashboard'
 import { assessmentCyclesApi } from './assessment-cycles'
 import { assessmentSnapshotsApi } from './assessment-snapshots'
+import { assessmentRelationshipsApi } from './assessment-relationships'
+import { assessmentComparisonsApi } from './assessment-comparisons'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -57,4 +59,6 @@ export const api = {
   ...dashboardApi,
   ...assessmentCyclesApi,
   ...assessmentSnapshotsApi,
+  ...assessmentRelationshipsApi,
+  ...assessmentComparisonsApi,
 }

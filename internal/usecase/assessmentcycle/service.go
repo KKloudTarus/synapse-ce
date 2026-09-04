@@ -839,6 +839,26 @@ func (s *Service) compensateCycleMutation(ctx context.Context, original *assessm
 	return cleanup.DeleteMember(ctx, original.TenantID, original.ID, createdAssessmentID)
 }
 
+func (s *Service) compensateRelationshipMutation(ctx context.Context, originalCycle *assessmentcycle.AssessmentCycle, originalMember *assessmentcycle.Member) error {
+	if originalCycle == nil {
+		return fmt.Errorf("%w: original assessment cycle is required", shared.ErrValidation)
+	}
+	if originalMember != nil {
+		currentMember, err := s.cycles.GetMember(ctx, originalMember.TenantID, originalMember.CycleID, originalMember.AssessmentID)
+		if err != nil {
+			return err
+		}
+		if err := s.cycles.UpdateMemberCAS(ctx, originalMember, currentMember.RelationshipVersion); err != nil {
+			return err
+		}
+	}
+	currentCycle, err := s.cycles.GetCycle(ctx, originalCycle.TenantID, originalCycle.ID)
+	if err != nil {
+		return err
+	}
+	return s.cycles.UpdateCycleCAS(ctx, originalCycle, currentCycle.Version)
+}
+
 // GetCycle retrieves an AssessmentCycle by ID.
 func (s *Service) GetCycle(ctx context.Context, tenantID, cycleID shared.ID) (*assessmentcycle.AssessmentCycle, error) {
 	tenantID = shared.TenantOrDefault(tenantID)

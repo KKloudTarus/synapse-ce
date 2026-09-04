@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	cmpdom "github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcomparison"
 	cycledom "github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -27,6 +28,27 @@ type createAssessmentRetestRequest struct {
 	AuthorizedTo            string      `json:"authorized_to"`
 	Timezone                string      `json:"timezone"`
 	RoE                     *engdom.RoE `json:"roe"`
+}
+
+type assessmentRelationshipChangeRequest struct {
+	Command                    string `json:"command"`
+	AssessmentID               string `json:"assessment_id"`
+	NewPredecessorAssessmentID string `json:"new_predecessor_assessment_id"`
+	SelectedHeadAssessmentID   string `json:"selected_head_assessment_id"`
+	PreviewToken               string `json:"preview_token"`
+	Reason                     string `json:"reason"`
+}
+
+type assessmentClosureRequest struct {
+	PreviewToken       string   `json:"preview_token"`
+	Reason             string   `json:"reason"`
+	OverrideBlockerIDs []string `json:"override_blocker_ids"`
+	OverrideReason     string   `json:"override_reason"`
+}
+
+type assessmentReopenRequest struct {
+	PreviewToken string `json:"preview_token"`
+	Reason       string `json:"reason"`
 }
 
 func (rt *Router) createAssessmentRetest(w http.ResponseWriter, r *http.Request) {
@@ -101,6 +123,8 @@ func (rt *Router) listAssessmentCycles(w http.ResponseWriter, r *http.Request) {
 		TenantID: shared.ID(TenantFrom(r.Context())), Status: cycledom.Status(r.URL.Query().Get("status")),
 		BoundaryKind: cycledom.BoundaryKind(r.URL.Query().Get("boundary_kind")), AssessmentStatus: engdom.Status(r.URL.Query().Get("assessment_status")),
 		SelectedHeadID: shared.ID(r.URL.Query().Get("selected_head_assessment_id")), AssessmentType: cycledom.AssessmentType(r.URL.Query().Get("assessment_type")),
+		ProducerKind: r.URL.Query().Get("producer"), FindingKind: r.URL.Query().Get("finding_kind"), ReviewState: r.URL.Query().Get("review_state"),
+		ChangePresence: cmpdom.Presence(r.URL.Query().Get("change_presence")), ChangeSeverity: shared.Severity(r.URL.Query().Get("change_severity")),
 		ScanStaleness: r.URL.Query().Get("scan_staleness"), Search: r.URL.Query().Get("q"), Cursor: r.URL.Query().Get("cursor"), Limit: limit,
 	})
 	if err != nil {
@@ -148,6 +172,156 @@ func (rt *Router) archiveAssessmentCycle(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeRetainedJSON(w, response)
+}
+
+func (rt *Router) previewAssessmentRelationshipChange(w http.ResponseWriter, r *http.Request) {
+	var request assessmentRelationshipChangeRequest
+	if !decodeAssessmentCycleJSON(w, r, &request) {
+		return
+	}
+	preview, err := rt.assessmentCycles.PreviewRelationshipChange(r.Context(), cycleuc.RelationshipPreviewInput{
+		TenantID: shared.ID(TenantFrom(r.Context())), Actor: PrincipalFrom(r.Context()), CycleID: shared.ID(r.PathValue("cycleId")),
+		Request: cycleuc.RelationshipChangeRequest{Command: request.Command, AssessmentID: shared.ID(request.AssessmentID), NewPredecessorAssessmentID: shared.ID(request.NewPredecessorAssessmentID), SelectedHeadAssessmentID: shared.ID(request.SelectedHeadAssessmentID)},
+	})
+	if err != nil {
+		writeAssessmentCycleError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
+}
+
+func (rt *Router) commitAssessmentRelationshipChange(w http.ResponseWriter, r *http.Request) {
+	expectedVersion, err := parseCycleIfMatch(r.Header.Get("If-Match"))
+	if err != nil {
+		writeJSON(w, http.StatusPreconditionRequired, errorBody{Error: "precondition_required"})
+		return
+	}
+	var request assessmentRelationshipChangeRequest
+	if !decodeAssessmentCycleJSON(w, r, &request) {
+		return
+	}
+	response, err := rt.assessmentCycles.CommitRelationshipChange(r.Context(), cycleuc.RelationshipCommitInput{
+		Request: cycleuc.RetainedRequest{TenantID: shared.ID(TenantFrom(r.Context())), Actor: PrincipalFrom(r.Context()), Route: r.URL.Path, IdempotencyKey: r.Header.Get("Idempotency-Key")},
+		CycleID: shared.ID(r.PathValue("cycleId")), ExpectedVersion: expectedVersion, PreviewToken: request.PreviewToken, Reason: request.Reason,
+		Change: cycleuc.RelationshipChangeRequest{Command: request.Command, AssessmentID: shared.ID(request.AssessmentID), NewPredecessorAssessmentID: shared.ID(request.NewPredecessorAssessmentID), SelectedHeadAssessmentID: shared.ID(request.SelectedHeadAssessmentID)},
+	})
+	if err != nil {
+		writeAssessmentCycleError(w, rt.log, err)
+		return
+	}
+	writeRetainedJSON(w, response)
+}
+
+func (rt *Router) previewAssessmentClosure(w http.ResponseWriter, r *http.Request) {
+	var request assessmentClosureRequest
+	if !decodeAssessmentCycleJSON(w, r, &request) {
+		return
+	}
+	preview, err := rt.assessmentCycles.PreviewClosure(r.Context(), cycleuc.ClosurePreviewInput{
+		TenantID: shared.ID(TenantFrom(r.Context())), Actor: PrincipalFrom(r.Context()), CycleID: shared.ID(r.PathValue("cycleId")),
+		Reason: request.Reason, OverrideBlockerIDs: request.OverrideBlockerIDs, OverrideReason: request.OverrideReason,
+	})
+	if err != nil {
+		writeAssessmentCycleError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
+}
+
+func (rt *Router) commitAssessmentClosure(w http.ResponseWriter, r *http.Request) {
+	expectedVersion, err := parseCycleIfMatch(r.Header.Get("If-Match"))
+	if err != nil {
+		writeJSON(w, http.StatusPreconditionRequired, errorBody{Error: "precondition_required"})
+		return
+	}
+	var request assessmentClosureRequest
+	if !decodeAssessmentCycleJSON(w, r, &request) {
+		return
+	}
+	response, err := rt.assessmentCycles.CommitClosure(r.Context(), cycleuc.ClosureCommitInput{
+		Request: cycleuc.RetainedRequest{TenantID: shared.ID(TenantFrom(r.Context())), Actor: PrincipalFrom(r.Context()), Route: r.URL.Path, IdempotencyKey: r.Header.Get("Idempotency-Key")},
+		CycleID: shared.ID(r.PathValue("cycleId")), ExpectedVersion: expectedVersion, PreviewToken: request.PreviewToken,
+		Reason: request.Reason, OverrideBlockerIDs: request.OverrideBlockerIDs, OverrideReason: request.OverrideReason,
+	})
+	if err != nil {
+		writeAssessmentCycleError(w, rt.log, err)
+		return
+	}
+	writeRetainedJSON(w, response)
+}
+
+func (rt *Router) previewAssessmentReopen(w http.ResponseWriter, r *http.Request) {
+	var request struct{}
+	if !decodeAssessmentCycleJSON(w, r, &request) {
+		return
+	}
+	preview, err := rt.assessmentCycles.PreviewReopen(r.Context(), cycleuc.ReopenPreviewInput{
+		TenantID: shared.ID(TenantFrom(r.Context())), Actor: PrincipalFrom(r.Context()), CycleID: shared.ID(r.PathValue("cycleId")),
+	})
+	if err != nil {
+		writeAssessmentCycleError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
+}
+
+func (rt *Router) commitAssessmentReopen(w http.ResponseWriter, r *http.Request) {
+	expectedVersion, err := parseCycleIfMatch(r.Header.Get("If-Match"))
+	if err != nil {
+		writeJSON(w, http.StatusPreconditionRequired, errorBody{Error: "precondition_required"})
+		return
+	}
+	var request assessmentReopenRequest
+	if !decodeAssessmentCycleJSON(w, r, &request) {
+		return
+	}
+	response, err := rt.assessmentCycles.CommitReopen(r.Context(), cycleuc.ReopenCommitInput{
+		Request: cycleuc.RetainedRequest{TenantID: shared.ID(TenantFrom(r.Context())), Actor: PrincipalFrom(r.Context()), Route: r.URL.Path, IdempotencyKey: r.Header.Get("Idempotency-Key")},
+		CycleID: shared.ID(r.PathValue("cycleId")), ExpectedVersion: expectedVersion, PreviewToken: request.PreviewToken, Reason: request.Reason,
+	})
+	if err != nil {
+		writeAssessmentCycleError(w, rt.log, err)
+		return
+	}
+	writeRetainedJSON(w, response)
+}
+
+func (rt *Router) listAssessmentClosureManifests(w http.ResponseWriter, r *http.Request) {
+	manifests, err := rt.assessmentCycles.ListClosureManifests(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("cycleId")))
+	if err != nil {
+		writeAssessmentCycleError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": manifests})
+}
+
+func (rt *Router) getAssessmentClosureManifest(w http.ResponseWriter, r *http.Request) {
+	manifest, err := rt.assessmentCycles.GetClosureManifest(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("cycleId")), shared.ID(r.PathValue("manifestId")))
+	if err != nil {
+		writeAssessmentCycleError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, manifest)
+}
+
+func (rt *Router) downloadAssessmentClosureReport(w http.ResponseWriter, r *http.Request) {
+	report, err := rt.assessmentCycles.GetClosureReport(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("cycleId")), shared.ID(r.PathValue("manifestId")))
+	if err != nil {
+		writeAssessmentCycleError(w, rt.log, err)
+		return
+	}
+	etag := `"sha256:` + report.ContentHash + `"`
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("Content-Disposition", `attachment; filename="assessment-cycle-closure-report.json"`)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", etag)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(report.Content)
 }
 
 func decodeAssessmentCycleJSON(w http.ResponseWriter, r *http.Request, target any) bool {

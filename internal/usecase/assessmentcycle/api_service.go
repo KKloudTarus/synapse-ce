@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	cmpdom "github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcomparison"
 	cycledom "github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -56,13 +57,15 @@ func ErrorCode(err error) string {
 }
 
 type APIService struct {
-	cycles      *Service
-	cycleList   ports.AssessmentCycleListRepository
-	requests    ports.AssessmentCycleRequestStore
-	engagements *enguc.Service
-	tx          ports.TenantTransactionRunner
-	clock       ports.Clock
-	audit       ports.AuditLogger
+	cycles              *Service
+	cycleList           ports.AssessmentCycleListRepository
+	requests            ports.AssessmentCycleRequestStore
+	engagements         *enguc.Service
+	tx                  ports.TenantTransactionRunner
+	clock               ports.Clock
+	audit               ports.AuditLogger
+	relationshipChanges *relationshipChangeSupport
+	closure             *closureSupport
 }
 
 func NewAPIService(cycles *Service, cycleList ports.AssessmentCycleListRepository, requests ports.AssessmentCycleRequestStore, engagements *enguc.Service, tx ports.TenantTransactionRunner, clock ports.Clock, audit ports.AuditLogger) (*APIService, error) {
@@ -310,20 +313,22 @@ type MemberView struct {
 }
 
 type CycleView struct {
-	ID                       string                `json:"id"`
-	Name                     string                `json:"name"`
-	BoundaryKind             cycledom.BoundaryKind `json:"boundary_kind"`
-	BusinessAssetID          string                `json:"business_asset_id,omitempty"`
-	ProjectID                string                `json:"project_id,omitempty"`
-	Status                   cycledom.Status       `json:"status"`
-	RootAssessmentID         string                `json:"root_assessment_id"`
-	SelectedHeadAssessmentID string                `json:"selected_head_assessment_id"`
-	NextRetestNumber         int                   `json:"next_retest_number"`
-	Version                  int64                 `json:"version"`
-	CreatedAt                time.Time             `json:"created_at"`
-	UpdatedAt                time.Time             `json:"updated_at"`
-	CreatedBy                string                `json:"created_by"`
-	UpdatedBy                string                `json:"updated_by"`
+	ID                        string                `json:"id"`
+	Name                      string                `json:"name"`
+	BoundaryKind              cycledom.BoundaryKind `json:"boundary_kind"`
+	BusinessAssetID           string                `json:"business_asset_id,omitempty"`
+	ProjectID                 string                `json:"project_id,omitempty"`
+	Status                    cycledom.Status       `json:"status"`
+	RootAssessmentID          string                `json:"root_assessment_id"`
+	SelectedHeadAssessmentID  string                `json:"selected_head_assessment_id"`
+	ActiveClosureManifestID   string                `json:"active_closure_manifest_id,omitempty"`
+	ActiveClosureCycleVersion int64                 `json:"active_closure_cycle_version,omitempty"`
+	NextRetestNumber          int                   `json:"next_retest_number"`
+	Version                   int64                 `json:"version"`
+	CreatedAt                 time.Time             `json:"created_at"`
+	UpdatedAt                 time.Time             `json:"updated_at"`
+	CreatedBy                 string                `json:"created_by"`
+	UpdatedBy                 string                `json:"updated_by"`
 }
 
 type CycleDetail struct {
@@ -361,6 +366,11 @@ type ListCyclesInput struct {
 	AssessmentStatus engdom.Status
 	SelectedHeadID   shared.ID
 	AssessmentType   cycledom.AssessmentType
+	ProducerKind     string
+	FindingKind      string
+	ReviewState      string
+	ChangePresence   cmpdom.Presence
+	ChangeSeverity   shared.Severity
 	ScanStaleness    string
 	Search           string
 	Cursor           string
@@ -369,16 +379,20 @@ type ListCyclesInput struct {
 
 type CycleSummary struct {
 	CycleView
-	MemberCount            int          `json:"member_count"`
-	ActiveBranchCount      int          `json:"active_branch_count"`
-	LatestAssessmentID     string       `json:"latest_assessment_id,omitempty"`
-	LatestRetestNumber     int          `json:"latest_retest_number"`
-	Members                []MemberView `json:"members"`
-	MembersNextCursor      string       `json:"members_next_cursor,omitempty"`
-	RootSnapshotID         string       `json:"root_snapshot_id,omitempty"`
-	CurrentSnapshotID      string       `json:"current_snapshot_id,omitempty"`
-	SelectedHeadLastScanAt *time.Time   `json:"selected_head_last_scan_at,omitempty"`
-	ScanStaleness          string       `json:"scan_staleness"`
+	MemberCount             int             `json:"member_count"`
+	ActiveBranchCount       int             `json:"active_branch_count"`
+	LatestAssessmentID      string          `json:"latest_assessment_id,omitempty"`
+	LatestRetestNumber      int             `json:"latest_retest_number"`
+	Members                 []MemberView    `json:"members"`
+	MembersNextCursor       string          `json:"members_next_cursor,omitempty"`
+	RootSnapshotID          string          `json:"root_snapshot_id,omitempty"`
+	CurrentSnapshotID       string          `json:"current_snapshot_id,omitempty"`
+	ComparisonID            string          `json:"comparison_id,omitempty"`
+	ComparisonStatus        string          `json:"comparison_status,omitempty"`
+	ComparisonSummary       *cmpdom.Summary `json:"comparison_summary,omitempty"`
+	ActiveClosureManifestID string          `json:"active_closure_manifest_id,omitempty"`
+	SelectedHeadLastScanAt  *time.Time      `json:"selected_head_last_scan_at,omitempty"`
+	ScanStaleness           string          `json:"scan_staleness"`
 }
 
 type CyclePage struct {
@@ -432,7 +446,8 @@ func (service *APIService) ListCycles(ctx context.Context, input ListCyclesInput
 	}
 	query := ports.AssessmentCycleListQuery{
 		TenantID: input.TenantID, Status: input.Status, BoundaryKind: input.BoundaryKind, AssessmentStatus: input.AssessmentStatus,
-		SelectedHeadID: input.SelectedHeadID, AssessmentType: input.AssessmentType,
+		SelectedHeadID: input.SelectedHeadID, AssessmentType: input.AssessmentType, ProducerKind: input.ProducerKind, FindingKind: input.FindingKind,
+		ReviewState: input.ReviewState, ChangePresence: input.ChangePresence, ChangeSeverity: input.ChangeSeverity,
 		ScanStaleness: input.ScanStaleness, ScanStaleBefore: service.clock.Now().UTC().Add(-24 * time.Hour), Search: input.Search,
 		AfterUpdatedAt: updatedAt, AfterCycleID: cycleID, Limit: limit + 1, MemberLimit: 10,
 	}
@@ -446,6 +461,7 @@ func (service *APIService) ListCycles(ctx context.Context, input ListCyclesInput
 			CycleView: projectCycle(&record.Cycle), MemberCount: record.MemberCount, ActiveBranchCount: record.ActiveBranchCount,
 			LatestAssessmentID: record.LatestAssessmentID.String(), LatestRetestNumber: record.LatestRetestNumber,
 			Members: make([]MemberView, 0, len(record.Members)), RootSnapshotID: record.RootSnapshotID.String(), CurrentSnapshotID: record.CurrentSnapshotID.String(),
+			ComparisonID: record.ComparisonID.String(), ComparisonStatus: string(record.ComparisonStatus), ActiveClosureManifestID: record.ActiveManifestID.String(),
 			SelectedHeadLastScanAt: record.SelectedHeadScanAt, ScanStaleness: record.ScanStaleness,
 		}
 		for _, member := range record.Members {
@@ -454,6 +470,10 @@ func (service *APIService) ListCycles(ctx context.Context, input ListCyclesInput
 		if record.MembersHaveMore && len(record.Members) > 0 {
 			last := record.Members[len(record.Members)-1]
 			summary.MembersNextCursor = encodeCycleMemberCursor(last.RetestNumber, last.AssessmentID)
+		}
+		if !record.ComparisonID.IsZero() {
+			comparisonSummary := record.ComparisonSummary
+			summary.ComparisonSummary = &comparisonSummary
 		}
 		page.Items = append(page.Items, summary)
 	}
@@ -483,10 +503,21 @@ func normalizeCycleListFilters(input *ListCyclesInput) error {
 	if input.AssessmentType != "" && !input.AssessmentType.Valid() {
 		return invalidCycleListFilter("assessment_type")
 	}
+	if input.ChangePresence != "" && input.ChangePresence != cmpdom.PresenceNew && input.ChangePresence != cmpdom.PresenceReopened {
+		return invalidCycleListFilter("change_presence")
+	}
+	if input.ChangeSeverity != "" && input.ChangeSeverity != shared.SeverityCritical && input.ChangeSeverity != shared.SeverityHigh {
+		return invalidCycleListFilter("change_severity")
+	}
+	if input.ReviewState != "" && input.ReviewState != "needs_review" && input.ReviewState != "verified" && input.ReviewState != "clear" {
+		return invalidCycleListFilter("review_state")
+	}
 	if input.ScanStaleness != "" && input.ScanStaleness != "fresh" && input.ScanStaleness != "stale" && input.ScanStaleness != "missing" {
 		return invalidCycleListFilter("scan_staleness")
 	}
-	for name, value := range map[string]*string{"q": &input.Search} {
+	for name, value := range map[string]*string{
+		"producer": &input.ProducerKind, "finding_kind": &input.FindingKind, "q": &input.Search,
+	} {
 		*value = strings.TrimSpace(*value)
 		if len(*value) > 256 || strings.ContainsFunc(*value, unicode.IsControl) {
 			return invalidCycleListFilter(name)
@@ -672,6 +703,7 @@ func projectCycle(cycle *cycledom.AssessmentCycle) CycleView {
 		ID: cycle.ID.String(), Name: cycle.Name, BoundaryKind: cycle.BoundaryKind,
 		BusinessAssetID: cycle.BusinessAssetID.String(), ProjectID: cycle.ProjectID.String(), Status: cycle.Status,
 		RootAssessmentID: cycle.RootAssessmentID.String(), SelectedHeadAssessmentID: cycle.SelectedHeadAssessmentID.String(),
+		ActiveClosureManifestID: cycle.ActiveClosureManifestID.String(), ActiveClosureCycleVersion: cycle.ActiveClosureCycleVersion,
 		NextRetestNumber: cycle.NextRetestNumber, Version: cycle.Version, CreatedAt: cycle.CreatedAt, UpdatedAt: cycle.UpdatedAt,
 		CreatedBy: cycle.CreatedBy, UpdatedBy: cycle.UpdatedBy,
 	}

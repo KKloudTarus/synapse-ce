@@ -17,14 +17,14 @@ vi.mock('../../../lib/api', () => ({
 
 const cycle: AssessmentCycleSummary = {
   id: 'cycle-1', name: 'Payments Cycle', boundaryKind: 'asset_project', businessAssetId: 'asset-1', projectId: 'project-1', status: 'open',
-  rootAssessmentId: 'assessment-0', selectedHeadAssessmentId: 'assessment-1',
+  rootAssessmentId: 'assessment-0', selectedHeadAssessmentId: 'assessment-1', activeClosureManifestId: '', activeClosureCycleVersion: 0,
   nextRetestNumber: 2, version: 3, createdAt: '2026-08-20T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', createdBy: 'operator', updatedBy: 'operator',
   memberCount: 2, activeBranchCount: 1, latestAssessmentId: 'assessment-1', latestRetestNumber: 1,
   members: [
     { assessmentId: 'assessment-0', assessmentType: 'initial', predecessorAssessmentId: '', retestNumber: 0, relationshipVersion: 1, createdAt: '2026-08-20T00:00:00Z', createdBy: 'operator', archivedAt: null },
     { assessmentId: 'assessment-1', assessmentType: 'retest', predecessorAssessmentId: 'assessment-0', retestNumber: 1, relationshipVersion: 1, createdAt: '2026-08-25T00:00:00Z', createdBy: 'operator', archivedAt: null },
   ],
-  membersNextCursor: '', rootSnapshotId: 'snapshot-0', currentSnapshotId: 'snapshot-1',
+  membersNextCursor: '', rootSnapshotId: 'snapshot-0', currentSnapshotId: 'snapshot-1', comparisonId: 'comparison-1', comparisonStatus: 'complete', comparisonSummary: null,
   selectedHeadLastScanAt: '2026-09-01T00:00:00Z', scanStaleness: 'fresh',
 }
 

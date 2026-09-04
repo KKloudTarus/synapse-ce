@@ -337,8 +337,9 @@ func TestCodeQualityFindingsPersistWithScan(t *testing.T) {
 		CWE: "CWE-1120", Sources: []string{"synapse-codeanalysis"}, Class: finding.ClassFirstParty,
 		Status: finding.StatusOpen, Kind: finding.KindQuality, RuleKey: "quality-high-complexity", DedupKey: "cq:quality:quality-high-complexity:internal/handler.go:42",
 	}}}}
+	ids := &sequenceIDs{}
 	svc := NewService(
-		&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, findings, nil, results, nil, runs, evidenceService, fakeIDs{},
+		&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, findings, nil, results, nil, runs, evidenceService, ids,
 		ports.Provenance{}, fakeClock{t: now}, &fakeAudit{}, shared.SeverityHigh, 0,
 		&fakeAcquirer{dir: "/tmp/ws"}, &fakeDetector{}, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil,
 	)
@@ -1280,6 +1281,15 @@ func (f *fakeJobStore) ListStaleRunning(_ context.Context, olderThan time.Time, 
 type fakeIDs struct{}
 
 func (fakeIDs) NewID() shared.ID { return shared.ID("scan-job-1") }
+
+type sequenceIDs struct {
+	next int
+}
+
+func (s *sequenceIDs) NewID() shared.ID {
+	s.next++
+	return shared.ID(fmt.Sprintf("scan-job-%d", s.next))
+}
 
 func newAsyncSvc(repo ports.EngagementRepository, clk ports.Clock, acq ports.Acquirer, audit ports.AuditLogger, det ports.LanguageDetector, jobs ports.ScanJobStore, ids ports.IDGenerator) *Service {
 	return NewService(repo, nil, nil, nil, jobs, nil, nil, ids, ports.Provenance{}, clk, audit, shared.SeverityHigh, 0, acq, det, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)

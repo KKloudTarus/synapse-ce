@@ -759,12 +759,20 @@ func TestLoadAssessmentLifecycleDefaultsFailClosed(t *testing.T) {
 		"SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS",
 		"SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED",
 		"SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS",
+		"SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED",
+		"SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE",
+		"SYNAPSE_ASSESSMENT_PROCESS_TENANT_JOBS",
+		"SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_WARNING",
+		"SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT",
 	} {
 		t.Setenv(key, "")
 	}
 	cfg := Load()
-	if cfg.AssessmentCycleAPIEnabled || cfg.AssessmentCycleDualWriteEnabled || cfg.AssessmentSnapshotEnabled || cfg.AssessmentShadowEnabled || cfg.AssessmentLifecycleReadEnabled || cfg.AssessmentLifecycleUIDefault {
+	if cfg.AssessmentCycleAPIEnabled || cfg.AssessmentCycleDualWriteEnabled || cfg.AssessmentSnapshotEnabled || cfg.AssessmentShadowEnabled || cfg.AssessmentLifecycleReadEnabled || cfg.AssessmentLifecycleUIDefault || cfg.AssessmentClosureEnabled {
 		t.Fatal("assessment lifecycle flags must remain disabled by default")
+	}
+	if cfg.AssessmentBatchSize != 500 || cfg.AssessmentTenantJobs != 4 || cfg.AssessmentBacklogWarning != 500 || cfg.AssessmentBacklogHardLimit != 1000 {
+		t.Fatalf("assessment lifecycle limits = (%d,%d,%d,%d)", cfg.AssessmentBatchSize, cfg.AssessmentTenantJobs, cfg.AssessmentBacklogWarning, cfg.AssessmentBacklogHardLimit)
 	}
 }
 
@@ -772,13 +780,18 @@ func TestValidateAssessmentLifecycleRollout(t *testing.T) {
 	valid := Config{
 		AssessmentCycleDualWriteEnabled: true,
 		AssessmentCycleDualWriteTenants: []string{"tenant-a"},
+		AssessmentBatchSize:             500,
+		AssessmentTenantJobs:            4,
+		AssessmentBacklogWarning:        500,
+		AssessmentBacklogHardLimit:      1000,
 		AssessmentSnapshotEnabled:       true,
 		AssessmentShadowEnabled:         true,
-		AssessmentShadowTenants:         []string{"tenant-a"},
+		AssessmentShadowTenants:         []string{"tenant-a", "tenant-b"},
 		AssessmentLifecycleReadEnabled:  true,
 		AssessmentLifecycleReadTenants:  []string{"tenant-a", "tenant-b"},
 		AssessmentLifecycleUIDefault:    true,
 		AssessmentLifecycleUITenants:    []string{"tenant-a"},
+		AssessmentClosureEnabled:        true,
 	}
 	if err := valid.ValidateAssessmentLifecycleRollout(); err != nil {
 		t.Fatalf("valid assessment lifecycle rollout: %v", err)
@@ -803,6 +816,31 @@ func TestValidateAssessmentLifecycleRollout(t *testing.T) {
 	invalid.AssessmentLifecycleUITenants = []string{"tenant-c"}
 	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
 		t.Fatal("UI tenant outside read allowlist must fail")
+	}
+	invalid = valid
+	invalid.AssessmentLifecycleReadTenants = []string{"tenant-c"}
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("read tenant outside shadow allowlist must fail")
+	}
+	invalid = valid
+	invalid.AssessmentBatchSize = 2001
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("unbounded assessment batch size must fail")
+	}
+	invalid = valid
+	invalid.AssessmentTenantJobs = 5
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("unbounded assessment tenant concurrency must fail")
+	}
+	invalid = valid
+	invalid.AssessmentBacklogHardLimit = 499
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("hard backlog limit below warning threshold must fail")
+	}
+	invalid = valid
+	invalid.AssessmentSnapshotEnabled = false
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("closure without snapshots must fail")
 	}
 }
 

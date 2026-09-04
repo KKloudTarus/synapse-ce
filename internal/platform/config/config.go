@@ -15,6 +15,13 @@ import (
 const (
 	defaultWorkerConcurrency       = 1
 	maxWorkerConcurrency           = 64
+	defaultAssessmentBatchSize     = 500
+	maxAssessmentBatchSize         = 2000
+	defaultAssessmentTenantJobs    = 4
+	maxAssessmentTenantJobs        = 4
+	defaultComparisonBacklogWarn   = 500
+	defaultComparisonBacklogHard   = 1000
+	maxComparisonBacklogHard       = 1000
 	defaultFPTriageMaxFindings     = 100
 	maxFPTriageMaxFindings         = 1000
 	defaultFPTriageConcurrency     = 6
@@ -389,6 +396,11 @@ type Config struct {
 	AssessmentLifecycleReadTenants  []string
 	AssessmentLifecycleUIDefault    bool
 	AssessmentLifecycleUITenants    []string
+	AssessmentClosureEnabled        bool
+	AssessmentBatchSize             int
+	AssessmentTenantJobs            int
+	AssessmentBacklogWarning        int
+	AssessmentBacklogHardLimit      int
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
@@ -797,6 +809,11 @@ func Load() Config {
 		AssessmentLifecycleReadTenants:        splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS", "")),
 		AssessmentLifecycleUIDefault:          getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED", false),
 		AssessmentLifecycleUITenants:          splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS", "")),
+		AssessmentClosureEnabled:              getbool("SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED", false),
+		AssessmentBatchSize:                   getint("SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE", defaultAssessmentBatchSize),
+		AssessmentTenantJobs:                  getint("SYNAPSE_ASSESSMENT_PROCESS_TENANT_JOBS", defaultAssessmentTenantJobs),
+		AssessmentBacklogWarning:              getint("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_WARNING", defaultComparisonBacklogWarn),
+		AssessmentBacklogHardLimit:            getint("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT", defaultComparisonBacklogHard),
 		GovulncheckBin:                        getenv("SYNAPSE_GOVULNCHECK_BIN", "govulncheck"),
 		GoModGraphEnabled:                     getbool("SYNAPSE_GOMODGRAPH_ENABLED", true),
 		GoBin:                                 getenv("SYNAPSE_GO_BIN", "go"),
@@ -1152,11 +1169,23 @@ func (c Config) ValidateWorkerConcurrency() error {
 	return nil
 }
 
-// ValidateAssessmentLifecycleRollout rejects partial feature combinations that
-// would expose lifecycle UI without its tenant-scoped read path.
+// ValidateAssessmentLifecycleRollout rejects rollout settings that can create
+// unbounded migration work or expose UI/closure paths before their read inputs.
 func (c Config) ValidateAssessmentLifecycleRollout() error {
 	if c.AssessmentCycleDualWriteEnabled && len(c.AssessmentCycleDualWriteTenants) == 0 {
 		return errors.New("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED requires SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS")
+	}
+	if c.AssessmentBatchSize < 1 || c.AssessmentBatchSize > maxAssessmentBatchSize {
+		return fmt.Errorf("SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE must be between 1 and %d (got %d)", maxAssessmentBatchSize, c.AssessmentBatchSize)
+	}
+	if c.AssessmentTenantJobs < 1 || c.AssessmentTenantJobs > maxAssessmentTenantJobs {
+		return fmt.Errorf("SYNAPSE_ASSESSMENT_PROCESS_TENANT_JOBS must be between 1 and %d (got %d)", maxAssessmentTenantJobs, c.AssessmentTenantJobs)
+	}
+	if c.AssessmentBacklogWarning < 1 || c.AssessmentBacklogWarning > defaultComparisonBacklogWarn {
+		return fmt.Errorf("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_WARNING must be between 1 and %d (got %d)", defaultComparisonBacklogWarn, c.AssessmentBacklogWarning)
+	}
+	if c.AssessmentBacklogHardLimit < c.AssessmentBacklogWarning || c.AssessmentBacklogHardLimit > maxComparisonBacklogHard {
+		return fmt.Errorf("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT must be between warning threshold %d and %d (got %d)", c.AssessmentBacklogWarning, maxComparisonBacklogHard, c.AssessmentBacklogHardLimit)
 	}
 	if c.AssessmentShadowEnabled && !c.AssessmentSnapshotEnabled {
 		return errors.New("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED requires SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED=true")
@@ -1164,8 +1193,11 @@ func (c Config) ValidateAssessmentLifecycleRollout() error {
 	if c.AssessmentShadowEnabled && len(c.AssessmentShadowTenants) == 0 {
 		return errors.New("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED requires SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS")
 	}
-	if c.AssessmentLifecycleReadEnabled && len(c.AssessmentLifecycleReadTenants) == 0 {
-		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
+	if c.AssessmentLifecycleReadEnabled && (!c.AssessmentShadowEnabled || len(c.AssessmentLifecycleReadTenants) == 0) {
+		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED requires shadow generation and SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
+	}
+	if !tenantAllowlistCovers(c.AssessmentShadowTenants, c.AssessmentLifecycleReadTenants) {
+		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS must be a subset of SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS")
 	}
 	if c.AssessmentLifecycleUIDefault && !c.AssessmentLifecycleReadEnabled {
 		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED=true")
@@ -1175,6 +1207,9 @@ func (c Config) ValidateAssessmentLifecycleRollout() error {
 	}
 	if !tenantAllowlistCovers(c.AssessmentLifecycleReadTenants, c.AssessmentLifecycleUITenants) {
 		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS must be a subset of SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
+	}
+	if c.AssessmentClosureEnabled && (!c.AssessmentLifecycleReadEnabled || !c.AssessmentSnapshotEnabled || !c.AssessmentShadowEnabled) {
+		return errors.New("SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED requires lifecycle read, snapshots, and identity/comparison shadow generation")
 	}
 	return nil
 }

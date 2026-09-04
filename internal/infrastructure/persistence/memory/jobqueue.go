@@ -146,6 +146,23 @@ func (q *JobQueue) Deadletter(_ context.Context, id string, fence int64) error {
 	return nil
 }
 
+// Invalidate makes queued or claimed work permanently unclaimable and advances
+// its fence so a worker holding an older claim cannot acknowledge it.
+func (q *JobQueue) Invalidate(_ context.Context, id string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	job := q.jobs[id]
+	if job == nil {
+		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
+	}
+	if job.status == "queued" || job.status == "claimed" {
+		job.status = "done"
+		job.claimFence++
+		job.claimedUntil = time.Time{}
+	}
+	return nil
+}
+
 // Depth counts not-yet-terminal jobs (queued or claimed); 'done'/'failed' are excluded.
 // Optional kind filter (empty = any). Mirrors the Postgres adapter.
 func (q *JobQueue) Depth(_ context.Context, kinds ...string) (int, error) {

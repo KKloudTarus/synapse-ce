@@ -33,11 +33,11 @@ authorization window, and lifecycle gate all execution. They are independent agg
 owns the other. Both may invoke the same analysis pipeline, while future project analyses reference
 their Project instead of duplicating or forking that engine.
 
-An **Assessment Cycle** owns rooted initial Assessment/Re-test ancestry and a frozen Asset/Project boundary. Immutable **Assessment Snapshots** select only sealed, hash-verified Scan Run inputs and record explicit coverage. Lifecycle migrations and historical backfills are separate: API/worker startup never runs backfill commands, and all rollout gates default off.
+An **Assessment Cycle** owns rooted Assessment/Re-test ancestry and a frozen Asset/Project boundary. Immutable Snapshots own selected sealed run inputs; Comparisons own directional presence results. Closure manifests are built transactionally, sealed once, and thereafter may only be superseded. Their ordered path and typed immutable references remain tenant-scoped under forced PostgreSQL RLS. Lifecycle migrations and historical backfills are separate: API/worker startup never runs backfill commands, and all rollout gates default off.
 
 ## Binaries
 
-`cmd/` holds 15 composition roots. They fall into four groups.
+`cmd/` holds the service, operational, helper, and agent composition roots.
 
 **Services**
 
@@ -60,7 +60,11 @@ An **Assessment Cycle** owns rooted initial Assessment/Re-test ancestry and a fr
 | `synapse-assessment-backfill` | Resumable tenant-scoped historical singleton-Cycle backfill. |
 | `synapse-assessment-snapshot-backfill` | Append-only projection of historical scan evidence into legacy Snapshots with explicit unknown coverage. |
 | `synapse-finding-lineage-backfill` | Resumable conversion of legacy Findings into versioned Identities, immutable Observations, review Candidates, or explicit redacted Skip records. |
+| `synapse-assessment-comparison-backfill` | Tenant-scoped shadow Comparison generation and deterministic failed-item repair. |
 | `synapse-assessment-integrity` | Read-only Cycle integrity verification and deterministic repair-plan output. |
+| `synapse-assessment-rollout-gate` | Offline fail-closed evaluator for canary, read-cutover, UI-default, and rollback evidence. |
+
+Historical relationship review remains inside `synapse-api`: immutable candidates are derived from frozen Cycle, Snapshot, and Finding inputs. Confirmation creates only an append-only blocked repair plan; this slice has no graph-mutation executor.
 
 **Sandboxed helpers**
 

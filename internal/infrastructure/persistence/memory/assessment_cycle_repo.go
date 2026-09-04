@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentclosure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -18,6 +19,8 @@ type AssessmentCycleRepository struct {
 	cycles            map[shared.ID]map[shared.ID]*assessmentcycle.AssessmentCycle
 	members           map[shared.ID]map[shared.ID]map[shared.ID]*assessmentcycle.Member
 	assessmentToCycle map[shared.ID]map[shared.ID]shared.ID
+	closureManifests  map[shared.ID]map[shared.ID]map[shared.ID]*assessmentclosure.Manifest
+	closureReports    map[shared.ID]map[shared.ID]map[shared.ID]map[string]ports.AssessmentClosureReportArtifact
 }
 
 // NewAssessmentCycleRepository creates a new in-memory AssessmentCycleRepository.
@@ -26,12 +29,16 @@ func NewAssessmentCycleRepository() *AssessmentCycleRepository {
 		cycles:            make(map[shared.ID]map[shared.ID]*assessmentcycle.AssessmentCycle),
 		members:           make(map[shared.ID]map[shared.ID]map[shared.ID]*assessmentcycle.Member),
 		assessmentToCycle: make(map[shared.ID]map[shared.ID]shared.ID),
+		closureManifests:  make(map[shared.ID]map[shared.ID]map[shared.ID]*assessmentclosure.Manifest),
+		closureReports:    make(map[shared.ID]map[shared.ID]map[shared.ID]map[string]ports.AssessmentClosureReportArtifact),
 	}
 }
 
 var _ ports.AssessmentCycleRepository = (*AssessmentCycleRepository)(nil)
 var _ ports.AssessmentCycleListRepository = (*AssessmentCycleRepository)(nil)
 var _ ports.AssessmentCycleCompensationRepository = (*AssessmentCycleRepository)(nil)
+var _ ports.AssessmentClosureRepository = (*AssessmentCycleRepository)(nil)
+var _ ports.AssessmentClosureReportStore = (*AssessmentCycleRepository)(nil)
 
 func (r *AssessmentCycleRepository) CreateCycle(ctx context.Context, cycle *assessmentcycle.AssessmentCycle) error {
 	if cycle == nil {
@@ -286,7 +293,7 @@ func (r *AssessmentCycleRepository) ListCycles(_ context.Context, query ports.As
 				continue
 			}
 		}
-		if query.AssessmentStatus != "" || query.ScanStaleness != "" {
+		if query.AssessmentStatus != "" || query.ProducerKind != "" || query.FindingKind != "" || query.ReviewState != "" || query.ChangePresence != "" || query.ChangeSeverity != "" || query.ScanStaleness != "" {
 			continue
 		}
 		if !query.AfterUpdatedAt.IsZero() && (cycle.UpdatedAt.After(query.AfterUpdatedAt) || cycle.UpdatedAt.Equal(query.AfterUpdatedAt) && cycle.ID >= query.AfterCycleID) {

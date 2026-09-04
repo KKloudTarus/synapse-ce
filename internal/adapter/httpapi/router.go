@@ -15,7 +15,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
+	comparisonuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcomparison"
 	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
+	relationshipuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentrelationship"
 	snapshotuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentsnapshot"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
@@ -67,6 +69,8 @@ type Router struct {
 	credentials              *credentialsuc.Service
 	assessmentCycles         *cycleuc.APIService
 	assessmentSnapshots      *snapshotuc.Service
+	assessmentComparisons    *comparisonuc.Service
+	assessmentRelationships  *relationshipuc.Service
 	assessmentCycleAPI       bool
 	assessmentCycleDualWrite func(string) bool
 	assessmentLifecycleRead  func(string) bool
@@ -253,6 +257,14 @@ func (rt *Router) SetAssessmentLifecycleRollout(readEnabled, uiEnabled func(stri
 
 func (rt *Router) SetAssessmentSnapshots(service *snapshotuc.Service) {
 	rt.assessmentSnapshots = service
+}
+
+func (rt *Router) SetAssessmentComparisons(service *comparisonuc.Service) {
+	rt.assessmentComparisons = service
+}
+
+func (rt *Router) SetAssessmentRelationships(service *relationshipuc.Service) {
+	rt.assessmentRelationships = service
 }
 
 func (rt *Router) requireAssessmentLifecycleRead(next http.HandlerFunc) http.HandlerFunc {
@@ -545,11 +557,33 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}/members", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentCycleMembers)))
 		mux.HandleFunc("GET /api/v1/assessment-cycles", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentCycles)))
 		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/archive", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.archiveAssessmentCycle)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/relationship-previews", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.previewAssessmentRelationshipChange)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/relationship-commits", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.commitAssessmentRelationshipChange)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/closure-previews", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.previewAssessmentClosure)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/closure-commits", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.commitAssessmentClosure)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/reopen-previews", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.previewAssessmentReopen)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/reopen-commits", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.commitAssessmentReopen)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}/closure-manifests", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentClosureManifests)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}/closure-manifests/{manifestId}", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentClosureManifest)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}/closure-manifests/{manifestId}/report", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.downloadAssessmentClosureReport)))
 	}
 	if rt.assessmentSnapshots != nil {
 		mux.HandleFunc("POST /api/v1/engagements/{id}/snapshots/finalize", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.finalizeAssessmentSnapshot)))
 		mux.HandleFunc("GET /api/v1/engagements/{id}/snapshots", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.withEngTenant(rt.listAssessmentSnapshots))))
 		mux.HandleFunc("GET /api/v1/assessment-snapshots/{snapshotId}", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentSnapshot)))
+	}
+	if rt.assessmentComparisons != nil {
+		mux.HandleFunc("POST /api/v1/assessment-comparisons", rt.authz(userdom.PermOperate, rt.requireAssessmentLifecycleRead(rt.createAssessmentComparison)))
+		mux.HandleFunc("GET /api/v1/assessment-comparisons/{comparisonId}", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentComparison)))
+		mux.HandleFunc("GET /api/v1/assessment-comparisons/{comparisonId}/items", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentComparisonItems)))
+		mux.HandleFunc("POST /api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/confirm", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.confirmAssessmentComparisonItem)))
+		mux.HandleFunc("POST /api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/unlink", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.unlinkAssessmentComparisonItem)))
+	}
+	if rt.assessmentRelationships != nil {
+		mux.HandleFunc("POST /api/v1/assessment-relationship-candidates/generate", rt.authz(userdom.PermReview, rt.generateAssessmentRelationshipCandidate))
+		mux.HandleFunc("GET /api/v1/assessment-relationship-candidates", rt.authz(userdom.PermReview, rt.listAssessmentRelationshipCandidates))
+		mux.HandleFunc("GET /api/v1/assessment-relationship-candidates/{candidateId}", rt.authz(userdom.PermReview, rt.getAssessmentRelationshipCandidate))
+		mux.HandleFunc("POST /api/v1/assessment-relationship-candidates/{candidateId}/decisions", rt.authz(userdom.PermReview, rt.decideAssessmentRelationshipCandidate))
 	}
 	if rt.fleetRolloutAdmin != nil {
 		// These are OPERATOR routes and they live under /api/v1/agents, not /api/v1/fleet.
