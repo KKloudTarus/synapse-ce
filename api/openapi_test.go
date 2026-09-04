@@ -307,3 +307,79 @@ func TestAttackPathOpenAPIContract(t *testing.T) {
 		}
 	}
 }
+
+func TestAssessmentCycleOpenAPIContract(t *testing.T) {
+	b, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	paths, _ := doc["paths"].(map[string]any)
+	for path, methods := range map[string]map[string]string{
+		"/api/v1/engagements/{assessmentId}/retests":   {"post": "createAssessmentRetest"},
+		"/api/v1/engagements/{assessmentId}/lifecycle": {"get": "getAssessmentLifecycle"},
+		"/api/v1/assessment-cycles":                    {"get": "listAssessmentCycles"},
+		"/api/v1/assessment-cycles/{cycleId}":          {"get": "getAssessmentCycle"},
+		"/api/v1/assessment-cycles/{cycleId}/members":  {"get": "listAssessmentCycleMembers"},
+		"/api/v1/assessment-cycles/{cycleId}/archive":  {"post": "archiveAssessmentCycle"},
+	} {
+		route, ok := paths[path].(map[string]any)
+		if !ok {
+			t.Errorf("assessment cycle path %s missing", path)
+			continue
+		}
+		for method, operationID := range methods {
+			operation, ok := route[method].(map[string]any)
+			if !ok || operation["operationId"] != operationID {
+				t.Errorf("%s %s operationId=%v, want %s", method, path, operation["operationId"], operationID)
+			}
+		}
+	}
+}
+
+func TestAssessmentSnapshotOpenAPIContract(t *testing.T) {
+	b, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	paths, _ := doc["paths"].(map[string]any)
+	for path, methods := range map[string]map[string]string{
+		"/api/v1/engagements/{assessmentId}/snapshots/finalize": {"post": "finalizeAssessmentSnapshot"},
+		"/api/v1/engagements/{assessmentId}/snapshots":          {"get": "listAssessmentSnapshots"},
+		"/api/v1/assessment-snapshots/{snapshotId}":             {"get": "getAssessmentSnapshot"},
+	} {
+		route, ok := paths[path].(map[string]any)
+		if !ok {
+			t.Errorf("assessment snapshot path %s missing", path)
+			continue
+		}
+		for method, operationID := range methods {
+			operation, ok := route[method].(map[string]any)
+			if !ok || operation["operationId"] != operationID {
+				t.Errorf("%s %s operationId=%v, want %s", method, path, operation["operationId"], operationID)
+			}
+		}
+	}
+
+	components, _ := doc["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	snapshot, _ := schemas["AssessmentSnapshot"].(map[string]any)
+	snapshotProperties, _ := snapshot["properties"].(map[string]any)
+	for _, forbidden := range []string{"tenant_id", "request_key", "request_hash", "evidence", "credentials"} {
+		if _, ok := snapshotProperties[forbidden]; ok {
+			t.Errorf("AssessmentSnapshot response exposes forbidden property %q", forbidden)
+		}
+	}
+	request, _ := schemas["FinalizeAssessmentSnapshotRequest"].(map[string]any)
+	requestProperties, _ := request["properties"].(map[string]any)
+	if len(requestProperties) != 1 || requestProperties["selected_runs"] == nil {
+		t.Errorf("FinalizeAssessmentSnapshotRequest must contain only server-resolved run/lane selections: %v", requestProperties)
+	}
+}

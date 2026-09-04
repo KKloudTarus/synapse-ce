@@ -91,6 +91,8 @@ import (
 	aitriagereviewuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aitriagereviewuc"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
+	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
+	snapshotuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentsnapshot"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
 	attackpathuc "github.com/KKloudTarus/synapse-ce/internal/usecase/attackpath"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
@@ -279,6 +281,10 @@ func main() {
 		log.Error("network execution posture invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateAssessmentLifecycleRollout(); err != nil {
+		log.Error("assessment lifecycle rollout invalid", "err", err)
+		os.Exit(1)
+	}
 
 	// Fail closed: no anonymous access. The token is never logged.
 	if cfg.APIToken == "" {
@@ -348,6 +354,7 @@ func main() {
 	var promotionStore ports.PendingPromotionAuditStore
 	var scanJobStore ports.ScanJobStore
 	var scanRunStore ports.ScanRunStore
+	var assessmentSnapshotStore ports.AssessmentSnapshotRepository
 	var projectAnalysisStore ports.ProjectAnalysisStore
 	var qualityGateStore ports.QualityGateStore
 	var qualityProfileStore ports.QualityProfileStore
@@ -375,6 +382,12 @@ func main() {
 	var vulnerabilityActions ports.VulnerabilityActionStore
 	var vulnerabilityReconcileRuns ports.VulnerabilityReconcileRunStore
 	var vulnerabilityTransactions ports.TenantTransactionRunner
+	var assessmentCycleStore interface {
+		ports.AssessmentCycleRepository
+		ports.AssessmentCycleListRepository
+	}
+	var assessmentCycleRequests ports.AssessmentCycleRequestStore
+	var assessmentCycleTransactions ports.TenantTransactionRunner
 	var slaStore ports.SLAStore
 	var vulnerabilityWorker *worker.Worker
 	var reconRunLock ports.RunLocker              // recon run lease (Postgres only); row-lease, no pinned conn
@@ -487,6 +500,10 @@ func main() {
 		}
 		scanJobStore = postgres.NewScanJobStore(pool)
 		scanRunStore = postgres.NewScanRunStore(pool)
+		assessmentSnapshotStore = postgres.NewAssessmentSnapshotRepository(pool)
+		assessmentCycleStore = postgres.NewAssessmentCycleRepository(pool)
+		assessmentCycleRequests = postgres.NewAssessmentCycleRequestRepository(pool)
+		assessmentCycleTransactions = postgres.NewTenantTransactionRunner(pool)
 		projectAnalysisStore = postgres.NewProjectAnalysisStore(pool)
 		qualityGateStore = postgres.NewQualityGateStore(pool)
 		qualityProfileStore = postgres.NewQualityProfileStore(pool)
@@ -627,6 +644,10 @@ func main() {
 		}
 		scanJobStore = memory.NewScanJobStore()
 		scanRunStore = memory.NewScanRunStore()
+		assessmentSnapshotStore = memory.NewAssessmentSnapshotRepository()
+		assessmentCycleStore = memory.NewAssessmentCycleRepository()
+		assessmentCycleRequests = memory.NewAssessmentCycleRequestRepository()
+		assessmentCycleTransactions = memory.NewTenantTransactionRunner()
 		projectAnalysisStore = memory.NewProjectAnalysisStore()
 		qualityGateStore = memory.NewQualityGateStore()
 		qualityProfileStore = memory.NewQualityProfileStore()
@@ -672,6 +693,9 @@ func main() {
 
 	// Use cases.
 	engService := enguc.NewService(repo, clock, ids, auditLog)
+	if cfg.AssessmentSnapshotEnabled {
+		engService.SetCompletionSnapshotReader(assessmentSnapshotStore)
+	}
 	projectService := projectuc.NewService(projectRepo, repo, clock, ids, auditLog, !cfg.IsProduction())
 	projectService.SetArchiveStore(file.NewProjectArchiveStore(cfg.ProjectUploadDir, cfg.MaxWorkspaceBytes))
 	projectService.SetAnalysisStore(projectAnalysisStore)
@@ -1188,6 +1212,16 @@ func main() {
 		}
 	}
 	router.SetObservability(cfg.AccessLogEnabled, httpObserver)
+	router.SetAssessmentLifecycleRollout(cfg.AssessmentLifecycleReadForTenant, cfg.AssessmentLifecycleUIForTenant)
+	var snapshotService *snapshotuc.Service
+	if cfg.AssessmentSnapshotEnabled {
+		snapshotService, err = snapshotuc.NewService(assessmentSnapshotStore, assessmentCycleStore, repo, scanRunStore, assessmentCycleTransactions, ids, clock, auditLog)
+		if err != nil {
+			log.Error("assessment snapshot service init failed", "err", err)
+			os.Exit(1)
+		}
+		snapshotService.SetScanJobStore(scanJobStore)
+	}
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
 		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
 		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
@@ -1364,6 +1398,24 @@ func main() {
 		os.Exit(1)
 	}
 	router.SetBusinessAssets(businessAssetService)
+	if cfg.AssessmentCycleAPIEnabled || cfg.AssessmentCycleDualWriteEnabled {
+		cycleService, cycleErr := cycleuc.NewService(assessmentCycleStore, repo, businessAssetStore, projectRepo, assessmentCycleTransactions, ids, clock, auditLog)
+		if cycleErr != nil {
+			log.Error("assessment cycle service init failed", "err", cycleErr)
+			os.Exit(1)
+		}
+		cycleAPI, cycleErr := cycleuc.NewAPIService(cycleService, assessmentCycleStore, assessmentCycleRequests, engService, assessmentCycleTransactions, clock, auditLog)
+		if cycleErr != nil {
+			log.Error("assessment cycle API init failed", "err", cycleErr)
+			os.Exit(1)
+		}
+		router.SetAssessmentCycles(cycleAPI, cfg.AssessmentCycleAPIEnabled, cfg.AssessmentCycleDualWriteForTenant)
+		log.Info("assessment cycle services configured", "api_enabled", cfg.AssessmentCycleAPIEnabled, "dual_write_enabled", cfg.AssessmentCycleDualWriteEnabled, "dual_write_tenant_count", len(cfg.AssessmentCycleDualWriteTenants))
+	}
+	if snapshotService != nil {
+		router.SetAssessmentSnapshots(snapshotService)
+		log.Info("assessment snapshot API configured")
+	}
 	router.SetExploitation(exploitationService) // evidence-gated finding verify endpoint
 	// Read-only code-quality dashboard. Server-side analysis is PURE-GO and memory-safe only (pattern
 	// rules + duplication + Go-parser inventory); tree-sitter complexity is intentionally NOT wired here

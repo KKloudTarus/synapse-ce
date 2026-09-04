@@ -29,6 +29,10 @@ tags:
 - name: health
 - name: aup
 - name: engagements
+- name: assessment-cycles
+  description: Tenant-scoped initial Assessment and Re-test lifecycle Cycles
+- name: assessment-snapshots
+  description: Immutable coverage snapshots finalized from trusted Scan Runs
 - name: findings
 - name: sca
 - name: export
@@ -128,7 +132,12 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
     post:
       tags: [engagements]
-      summary: Create an engagement
+      summary: Create an initial Assessment and Assessment Cycle
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 128}
       requestBody:
         required: true
         content:
@@ -155,8 +164,249 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {description: Engagement already has a different uploaded source package}
+        "409": {description: Idempotency body mismatch or source-package conflict}
         "413": {description: Uploaded source package exceeds 512 MiB}
+
+  /api/v1/engagements/{assessmentId}/retests:
+    parameters:
+    - name: assessmentId
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [engagements, assessment-cycles]
+      operationId: createAssessmentRetest
+      summary: Create a non-executable Assessment Re-test draft
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 128}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateAssessmentRetestRequest"}
+      responses:
+        "201":
+          description: Re-test created
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreateAssessmentRetestResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Idempotency mismatch, completed Cycle, or concurrent conflict}
+
+  /api/v1/engagements/{assessmentId}/lifecycle:
+    parameters:
+    - name: assessmentId
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags: [engagements, assessment-cycles]
+      operationId: getAssessmentLifecycle
+      summary: Get the Assessment lifecycle containing an Assessment
+      responses:
+        "200":
+          description: Assessment lifecycle
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AssessmentLifecycle"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/engagements/{assessmentId}/snapshots/finalize:
+    parameters:
+    - name: assessmentId
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    post:
+      tags: [assessment-snapshots]
+      operationId: finalizeAssessmentSnapshot
+      summary: Finalize an immutable Assessment Snapshot
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 128}
+      - name: If-Match
+        in: header
+        required: true
+        description: Current default Snapshot version; use 0 when no default Snapshot exists.
+        schema: {type: string, pattern: '^(W/)?"?[0-9]+"?$'}
+        example: '"0"'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/FinalizeAssessmentSnapshotRequest"}
+            example:
+              selected_runs:
+              - run_id: scan-run-01
+                lane_keys: [sca, sast]
+      responses:
+        "201":
+          description: Finalized Snapshot or retained idempotent response
+          headers:
+            ETag:
+              description: Default Snapshot version accepted by the next If-Match request.
+              schema: {type: string}
+            Idempotency-Replayed:
+              description: Present and true when the retained response was replayed.
+              schema: {type: string, enum: ['true']}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FinalizeAssessmentSnapshotResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Idempotency body mismatch, stale default version, or concurrent conflict}
+        "413": {description: Request body exceeds 64 KiB}
+        "428": {description: If-Match is required}
+
+  /api/v1/engagements/{assessmentId}/snapshots:
+    parameters:
+    - name: assessmentId
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    get:
+      tags: [assessment-snapshots]
+      operationId: listAssessmentSnapshots
+      summary: List immutable Snapshots for one Assessment
+      responses:
+        "200":
+          description: Snapshot history and current default pointer
+          headers:
+            ETag:
+              description: Current default Snapshot version, or 0 when none exists.
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AssessmentSnapshotListResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/assessment-snapshots/{snapshotId}:
+    parameters:
+    - name: snapshotId
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    get:
+      tags: [assessment-snapshots]
+      operationId: getAssessmentSnapshot
+      summary: Get one immutable tenant-scoped Assessment Snapshot
+      responses:
+        "200":
+          description: Immutable Assessment Snapshot
+          headers:
+            ETag:
+              description: SHA-256 content-hash entity tag.
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AssessmentSnapshot"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/assessment-cycles:
+    get:
+      tags: [assessment-cycles]
+      operationId: listAssessmentCycles
+      summary: List tenant-scoped Assessment Cycles
+      parameters:
+      - {name: status, in: query, schema: {type: string, enum: [open, completed, archived]}}
+      - {name: boundary_kind, in: query, schema: {type: string, enum: [standalone, asset, project, asset_project]}}
+      - {name: assessment_status, in: query, description: Selected-head Assessment status., schema: {type: string, enum: [draft, active, completed, archived]}}
+      - {name: selected_head_assessment_id, in: query, schema: {type: string, maxLength: 256}}
+      - {name: assessment_type, in: query, description: Require at least one member of this type., schema: {type: string, enum: [initial, retest]}}
+      - {name: scan_staleness, in: query, description: Fresh means a sealed native succeeded/partial selected-head scan within 24 hours., schema: {type: string, enum: [fresh, stale, missing]}}
+      - {name: q, in: query, description: Bounded literal search across Cycle name/ID, root ID, and selected-head ID., schema: {type: string, maxLength: 256}}
+      - {name: cursor, in: query, schema: {type: string, maxLength: 512}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        "200":
+          description: Stable descending page ordered by updated_at and cycle_id
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AssessmentCyclePage"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/assessment-cycles/{cycleId}:
+    parameters:
+    - name: cycleId
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags: [assessment-cycles]
+      operationId: getAssessmentCycle
+      summary: Get an Assessment Cycle and immutable member projection IDs
+      responses:
+        "200": {description: Assessment Cycle detail, content: {application/json: {schema: {$ref: "#/components/schemas/AssessmentCycleDetail"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/assessment-cycles/{cycleId}/members:
+    parameters:
+    - name: cycleId
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags: [assessment-cycles]
+      operationId: listAssessmentCycleMembers
+      summary: Continue the deterministic member page for one Assessment Cycle
+      parameters:
+      - {name: cursor, in: query, schema: {type: string, maxLength: 684}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 25}}
+      responses:
+        "200": {description: Root-first member page, content: {application/json: {schema: {$ref: "#/components/schemas/AssessmentCycleMemberPage"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/assessment-cycles/{cycleId}/archive:
+    parameters:
+    - name: cycleId
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [assessment-cycles]
+      operationId: archiveAssessmentCycle
+      summary: Archive an Assessment Cycle with optimistic concurrency
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 128}
+      - name: If-Match
+        in: header
+        required: true
+        description: Current Cycle version, optionally quoted as an ETag.
+        schema: {type: string, pattern: '^(W/)?"?[1-9][0-9]*"?$'}
+      responses:
+        "200": {description: Archived Assessment Cycle, content: {application/json: {schema: {$ref: "#/components/schemas/AssessmentCycleDetail"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Idempotency body mismatch or Cycle version conflict}
+        "428": {description: If-Match is missing or invalid}
 
   /api/v1/engagements/{id}/source:
     parameters:
@@ -3931,6 +4181,288 @@ components:
         timezone: {type: string, description: IANA timezone name}
         asset_id: {type: string}
 
+    AssessmentCycleMember:
+      type: object
+      required: [assessment_id, assessment_type, retest_number, relationship_version, created_at, created_by]
+      properties:
+        assessment_id: {type: string}
+        assessment_type: {type: string, enum: [initial, retest]}
+        predecessor_assessment_id: {type: string}
+        retest_number: {type: integer, minimum: 0}
+        relationship_version: {type: integer, format: int64, minimum: 1}
+        created_at: {type: string, format: date-time}
+        created_by: {type: string}
+        archived_at: {type: [string, "null"], format: date-time}
+
+    AssessmentCycle:
+      type: object
+      required: [id, name, boundary_kind, status, root_assessment_id, selected_head_assessment_id, next_retest_number, version, created_at, updated_at, created_by, updated_by]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        boundary_kind: {type: string, enum: [standalone, asset, project, asset_project]}
+        business_asset_id: {type: string}
+        project_id: {type: string}
+        status: {type: string, enum: [open, completed, archived]}
+        root_assessment_id: {type: string}
+        selected_head_assessment_id: {type: string}
+        next_retest_number: {type: integer, minimum: 1}
+        version: {type: integer, format: int64, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        created_by: {type: string}
+        updated_by: {type: string}
+
+    AssessmentCycleDetail:
+      type: object
+      required: [cycle, members, branch_heads]
+      properties:
+        cycle: {$ref: "#/components/schemas/AssessmentCycle"}
+        members:
+          type: array
+          items: {$ref: "#/components/schemas/AssessmentCycleMember"}
+        branch_heads:
+          type: array
+          items: {$ref: "#/components/schemas/AssessmentCycleMember"}
+
+    AssessmentLifecycle:
+      allOf:
+      - $ref: "#/components/schemas/AssessmentCycleDetail"
+      - type: object
+        required: [assessment_id]
+        properties:
+          assessment_id: {type: string}
+
+    AssessmentCycleSummary:
+      allOf:
+      - $ref: "#/components/schemas/AssessmentCycle"
+      - type: object
+        required: [member_count, active_branch_count, latest_retest_number, members, scan_staleness]
+        properties:
+          member_count: {type: integer, minimum: 0}
+          active_branch_count: {type: integer, minimum: 0}
+          latest_assessment_id: {type: string}
+          latest_retest_number: {type: integer, minimum: 0}
+          members: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/AssessmentCycleMember"}}
+          members_next_cursor: {type: string}
+          root_snapshot_id: {type: string}
+          current_snapshot_id: {type: string}
+          selected_head_last_scan_at: {type: string, format: date-time}
+          scan_staleness: {type: string, enum: [fresh, stale, missing]}
+
+    AssessmentCycleMemberPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/AssessmentCycleMember"}}
+        next_cursor: {type: string}
+
+    AssessmentCycleMigrationPending:
+      type: object
+      required: [assessment_id, name, status, boundary_kind, updated_at]
+      properties:
+        assessment_id: {type: string}
+        name: {type: string}
+        status: {type: string, enum: [draft, active, completed, archived]}
+        boundary_kind: {type: string, enum: [standalone, asset]}
+        business_asset_id: {type: string}
+        updated_at: {type: string, format: date-time}
+
+    AssessmentCyclePage:
+      type: object
+      required: [items, migration_pending, migration_pending_total]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: {$ref: "#/components/schemas/AssessmentCycleSummary"}
+        next_cursor: {type: string}
+        migration_pending:
+          type: array
+          maxItems: 100
+          items: {$ref: "#/components/schemas/AssessmentCycleMigrationPending"}
+        migration_pending_total: {type: integer, minimum: 0}
+
+    CreateAssessmentRetestRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: {type: string}
+        predecessor_assessment_id: {type: string}
+        scope_strategy: {type: string, enum: [copy, empty], default: copy}
+        profile_strategy: {type: string, enum: [none], default: none}
+        authorized_from: {type: string, format: date-time}
+        authorized_to: {type: string, format: date-time}
+        timezone: {type: string}
+        roe:
+          type: object
+          properties:
+            allowed_tool_classes:
+              type: array
+              items: {type: string}
+            blackouts:
+              type: array
+              items:
+                type: object
+                required: [from, to]
+                properties:
+                  from: {type: string, format: date-time}
+                  to: {type: string, format: date-time}
+
+    AssessmentInheritanceDiff:
+      type: object
+      required: [scope, authorization, roe, scanner_profile]
+      properties:
+        scope: {type: string, enum: [copy, empty]}
+        authorization: {type: string, enum: [explicit_only]}
+        roe: {type: string, enum: [explicit_only]}
+        scanner_profile: {type: string, enum: [none]}
+
+    CreateAssessmentRetestResponse:
+      type: object
+      required: [engagement, cycle, member, inheritance_diff, warnings]
+      properties:
+        engagement: {$ref: "#/components/schemas/Engagement"}
+        cycle: {$ref: "#/components/schemas/AssessmentCycle"}
+        member: {$ref: "#/components/schemas/AssessmentCycleMember"}
+        inheritance_diff: {$ref: "#/components/schemas/AssessmentInheritanceDiff"}
+        warnings:
+          type: array
+          items:
+            type: string
+            enum: [authorization_not_inherited, roe_not_inherited, scanner_profile_not_inherited]
+
+    FinalizeAssessmentSnapshotRun:
+      type: object
+      additionalProperties: false
+      required: [run_id]
+      properties:
+        run_id: {type: string, minLength: 1, maxLength: 256}
+        lane_keys:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          description: Omit to select every eligible lane in the run.
+          items: {type: string, minLength: 1, maxLength: 256}
+
+    FinalizeAssessmentSnapshotRequest:
+      type: object
+      additionalProperties: false
+      required: [selected_runs]
+      properties:
+        selected_runs:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: {$ref: "#/components/schemas/FinalizeAssessmentSnapshotRun"}
+
+    AssessmentSnapshotBoundary:
+      type: object
+      required: [boundary_kind]
+      properties:
+        boundary_kind: {type: string, enum: [standalone, asset, project, asset_project]}
+        business_asset_id: {type: string}
+        project_id: {type: string}
+
+    AssessmentSnapshotLaneReference:
+      type: object
+      required: [lane_key, manifest_hash]
+      properties:
+        lane_key: {type: string}
+        manifest_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+
+    AssessmentSnapshotRunReference:
+      type: object
+      required: [run_id, manifest_hash, lane_refs]
+      properties:
+        run_id: {type: string}
+        manifest_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        lane_refs:
+          type: array
+          items: {$ref: "#/components/schemas/AssessmentSnapshotLaneReference"}
+
+    AssessmentSnapshotTarget:
+      type: object
+      required: [kind, schema_version, canonical]
+      properties:
+        kind: {type: string, enum: [repository, oci, host, url, cloud_resource]}
+        schema_version: {type: integer, minimum: 1}
+        canonical: {type: string}
+        evaluated_revision: {type: string}
+
+    AssessmentSnapshotVersion:
+      type: object
+      required: [kind, name, version]
+      properties:
+        kind: {type: string, enum: [tool, scanner, profile, rule_pack, advisory_database, correlation, schema]}
+        name: {type: string}
+        version: {type: string}
+        digest: {type: string}
+
+    AssessmentSnapshotDimension:
+      type: object
+      required: [run_id, lane_key, lane_manifest_hash, producer, finding_kind, target, state, reason_code, included_scope, excluded_scope, versions]
+      properties:
+        run_id: {type: string}
+        lane_key: {type: string}
+        lane_manifest_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        producer: {type: string}
+        finding_kind: {type: string}
+        target: {$ref: "#/components/schemas/AssessmentSnapshotTarget"}
+        state: {type: string, enum: [complete, partial, unknown]}
+        reason_code:
+          type: string
+          enum: [trusted_terminal_lane, legacy_provenance, run_partial, run_failed, run_cancelled, lane_partial, lane_failed, lane_cancelled, stage_failed, stage_skipped]
+        included_scope: {type: array, items: {type: string}}
+        excluded_scope: {type: array, items: {type: string}}
+        versions:
+          type: array
+          items: {$ref: "#/components/schemas/AssessmentSnapshotVersion"}
+
+    AssessmentSnapshot:
+      type: object
+      required: [id, cycle_id, assessment_id, snapshot_number, lifecycle, provenance, boundary, run_references, dimensions, schema_version, content_hash, created_at, created_by, finalized_at, finalized_by]
+      properties:
+        id: {type: string}
+        cycle_id: {type: string}
+        assessment_id: {type: string}
+        snapshot_number: {type: integer, minimum: 1}
+        lifecycle: {type: string, enum: [finalized, superseded]}
+        provenance: {type: string, enum: [native, legacy]}
+        boundary: {$ref: "#/components/schemas/AssessmentSnapshotBoundary"}
+        run_references:
+          type: array
+          minItems: 1
+          items: {$ref: "#/components/schemas/AssessmentSnapshotRunReference"}
+        dimensions:
+          type: array
+          items: {$ref: "#/components/schemas/AssessmentSnapshotDimension"}
+        schema_version: {type: integer, const: 1}
+        content_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        created_at: {type: string, format: date-time}
+        created_by: {type: string}
+        finalized_at: {type: string, format: date-time}
+        finalized_by: {type: string}
+        superseded_at: {type: string, format: date-time}
+        superseded_by: {type: string}
+
+    FinalizeAssessmentSnapshotResponse:
+      type: object
+      required: [snapshot, default_version]
+      properties:
+        snapshot: {$ref: "#/components/schemas/AssessmentSnapshot"}
+        default_version: {type: integer, minimum: 1}
+
+    AssessmentSnapshotListResponse:
+      type: object
+      required: [items, default_version]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/AssessmentSnapshot"}
+        default_snapshot_id: {type: string}
+        default_version: {type: integer, minimum: 0}
+
     UploadedSourcePackage:
       type: object
       required: [filename, size, sha256, target, uploaded_by, uploaded_at]
@@ -3969,6 +4501,7 @@ components:
                   Value: {type: string}
         AuthorizedFrom: {type: [string, "null"], format: date-time}
         AuthorizedTo: {type: [string, "null"], format: date-time}
+        RequiresExplicitExecutionAuthorization: {type: boolean}
 
     CreateManualFindingRequest:
       type: object

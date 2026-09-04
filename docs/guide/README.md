@@ -34,6 +34,7 @@ architectural boundaries that keep execution auditable.
 | Guide | What it covers |
 | --- | --- |
 | [Configuration](configuration.md) | Environment variables, defaults, dependencies, and production requirements |
+| [Assessment Cycle and Snapshot rollout](assessment-lifecycle-operations.md) | Tenant canary, resumable backfills, integrity verification, read cutover, and rollback |
 | [Deployment](deployment.md) | Containers, services, agents, Linux-only capabilities, and production checks |
 | [Backup, restore, and upgrade recovery](backup-restore-upgrade.md) | Quiesced paired backups, restore verification, active-write characterization, and safe upgrades |
 | [CLI](cli.md) | Scanning, code-quality gates, advisory maintenance, imports, and exit contracts |

@@ -15,6 +15,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
+	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
+	snapshotuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentsnapshot"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
@@ -43,78 +45,84 @@ import (
 
 // Router wires HTTP routes to use case services.
 type Router struct {
-	log                    *slog.Logger
-	accessLogEnabled       bool
-	httpObserver           HTTPObserver
-	auth                   *Authenticator
-	oidc                   OIDCService
-	oidcFrontendURL        string
-	eng                    *enguc.Service
-	sca                    *scauc.Service
-	aup                    *aupuc.Service
-	findings               *findingsuc.Service
-	export                 *exportuc.Service
-	report                 *reportuc.Service
-	evidence               *evidenceuc.Service
-	recon                  *reconuc.Service
-	logs                   ports.LogStream
-	transfer               *transferuc.Service
-	audit                  *audituc.Service
-	vex                    *vexuc.Service
-	users                  *usersuc.Service
-	credentials            *credentialsuc.Service
-	dastVerifier           runtimeVerifierService
-	dastWorkflow           dastWorkflowService
-	agent                  *agentDeps                // optional; nil ⇒ agent routes are not registered
-	exploitation           findingVerifier           // optional; nil ⇒ the verify route is not registered
-	judgments              judgmentService           // optional; nil ⇒ judgment routes are not registered
-	autoVerifier           autoVerifierService       // optional; nil ⇒ the LLM auto-verify route is not registered
-	threatModels           threatModelService        // optional; nil ⇒ threat-model routes are not registered
-	drafts                 writeupDraftService       // optional; nil ⇒ writeup-draft sign-off routes are not registered
-	aiTriageReviews        aiTriageReviewService     // optional; nil ⇒ AI-triage review queue routes are not registered
-	projects               projectService            // optional; nil ⇒ project routes are not registered
-	assets                 assetService              // optional; nil ⇒ fleet asset routes are not registered
-	cspm                   *cspm.Service             // optional; nil ⇒ CSPM routes are not registered
-	businessAssets         businessAssetService      // optional; nil ⇒ business-level Asset routes are not registered
-	attackPaths            attackPathService         // optional; nil ⇒ attack-path routes are not registered
-	coverage               coverageService           // optional; nil ⇒ fleet coverage/agent-view routes are not registered
-	coverageWindows        coverageWindowReader      // optional; nil ⇒ immutable telemetry coverage-window routes are not registered
-	privacyPolicies        privacyPolicyService      // optional; nil ⇒ tenant source-privacy policy routes are not registered
-	incidents              incidentReader            // optional; nil ⇒ incident read routes are not registered (#594 C7)
-	incidentTriage         incidentTriager           // optional; nil ⇒ incident triage routes are not registered (#594 C5)
-	incidentRiskReassessor incidentRiskReassessor    // optional; nil ⇒ the tri-score reassess route is not registered (#594 C3/D/X5)
-	incidentCorrelator     incidentCorrelator        // optional; nil ⇒ the correlation route is not registered (#594 C2/C3)
-	endpointProcesses      endpointProcessStore      // optional; nil ⇒ the process-report routes are not registered (#594 B5)
-	processLearner         processLearner            // optional; nil ⇒ reported processes are not folded into the behavior baseline (#594 D)
-	desiredCapabilities    desiredCapabilityService  // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
-	legalHolds             legalHoldService          // optional; nil ⇒ the legal-hold routes are not registered (#635)
-	privacyExport          privacyExporter           // optional; nil ⇒ the data-export route is not registered (#635)
-	dataPurge              dataPurger                // optional; nil ⇒ the on-demand data-deletion route is not registered (#635)
-	endpointTimeline       endpointTimelineReader    // optional; nil ⇒ the State-Timeline read route is not registered (#594 B7)
-	retroHunter            retroHunter               // optional; nil ⇒ the retro-hunt route is not registered (#594 B7)
-	sarif                  sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
-	importedFindings       sarifReader               // optional read side for imported findings
-	fleetRolloutAdmin      fleetRolloutService       // optional; nil ⇒ the operator rollout routes are not served
-	offensiveHalt          offensiveKillSwitch       // optional; nil ⇒ the red-team halt route is not served
-	detections             detectionReader           // optional read side for the detection ledger (#423)
-	detectionProvenance    detectionProvenanceReader // optional read side for durable detection provenance (#610)
-	riskStories            riskStoryReader           // optional read side for the unified per-asset risk story (#427)
-	purpleCoverage         purpleCoverageReader      // optional read side for purple-team coverage (#426)
-	fleet                  *fleetRouter              // optional; nil ⇒ agent transport plane is not served
-	fleetAdmin             fleetAdminService         // optional; nil ⇒ operator agent-admin routes not registered
-	fleetKeys              fleetKeyAdmin             // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
-	qualityGates           qualityGateService        // optional; nil ⇒ quality-gate routes are not registered
-	qualityProfiles        qualityProfileService     // optional; nil ⇒ quality-profile routes are not registered
-	rules                  rulesService              // optional; nil ⇒ rule catalog routes are not registered
-	dastScan               dastScanService
-	vulnerabilitySources   *vulnerabilitysourceuc.Service
-	vulnerabilityMonitor   *vulnerabilitymonitor.Service
-	vulnerabilityReconcile *vulnerabilityreconciliation.Service
-	vulnerabilityAudit     ports.AuditLogger
-	vulnerabilityRead      *vulnerabilityinteluc.Service
-	vulnerabilityActions   *vulnerabilityactionuc.Service
-	sla                    *slauc.Service
-	readiness              readinessConfig
+	log                      *slog.Logger
+	accessLogEnabled         bool
+	httpObserver             HTTPObserver
+	auth                     *Authenticator
+	oidc                     OIDCService
+	oidcFrontendURL          string
+	eng                      *enguc.Service
+	sca                      *scauc.Service
+	aup                      *aupuc.Service
+	findings                 *findingsuc.Service
+	export                   *exportuc.Service
+	report                   *reportuc.Service
+	evidence                 *evidenceuc.Service
+	recon                    *reconuc.Service
+	logs                     ports.LogStream
+	transfer                 *transferuc.Service
+	audit                    *audituc.Service
+	vex                      *vexuc.Service
+	users                    *usersuc.Service
+	credentials              *credentialsuc.Service
+	assessmentCycles         *cycleuc.APIService
+	assessmentSnapshots      *snapshotuc.Service
+	assessmentCycleAPI       bool
+	assessmentCycleDualWrite func(string) bool
+	assessmentLifecycleRead  func(string) bool
+	assessmentLifecycleUI    func(string) bool
+	dastVerifier             runtimeVerifierService
+	dastWorkflow             dastWorkflowService
+	agent                    *agentDeps                // optional; nil ⇒ agent routes are not registered
+	exploitation             findingVerifier           // optional; nil ⇒ the verify route is not registered
+	judgments                judgmentService           // optional; nil ⇒ judgment routes are not registered
+	autoVerifier             autoVerifierService       // optional; nil ⇒ the LLM auto-verify route is not registered
+	threatModels             threatModelService        // optional; nil ⇒ threat-model routes are not registered
+	drafts                   writeupDraftService       // optional; nil ⇒ writeup-draft sign-off routes are not registered
+	aiTriageReviews          aiTriageReviewService     // optional; nil ⇒ AI-triage review queue routes are not registered
+	projects                 projectService            // optional; nil ⇒ project routes are not registered
+	assets                   assetService              // optional; nil ⇒ fleet asset routes are not registered
+	cspm                     *cspm.Service             // optional; nil ⇒ CSPM routes are not registered
+	businessAssets           businessAssetService      // optional; nil ⇒ business-level Asset routes are not registered
+	attackPaths              attackPathService         // optional; nil ⇒ attack-path routes are not registered
+	coverage                 coverageService           // optional; nil ⇒ fleet coverage/agent-view routes are not registered
+	coverageWindows          coverageWindowReader      // optional; nil ⇒ immutable telemetry coverage-window routes are not registered
+	privacyPolicies          privacyPolicyService      // optional; nil ⇒ tenant source-privacy policy routes are not registered
+	incidents                incidentReader            // optional; nil ⇒ incident read routes are not registered (#594 C7)
+	incidentTriage           incidentTriager           // optional; nil ⇒ incident triage routes are not registered (#594 C5)
+	incidentRiskReassessor   incidentRiskReassessor    // optional; nil ⇒ the tri-score reassess route is not registered (#594 C3/D/X5)
+	incidentCorrelator       incidentCorrelator        // optional; nil ⇒ the correlation route is not registered (#594 C2/C3)
+	endpointProcesses        endpointProcessStore      // optional; nil ⇒ the process-report routes are not registered (#594 B5)
+	processLearner           processLearner            // optional; nil ⇒ reported processes are not folded into the behavior baseline (#594 D)
+	desiredCapabilities      desiredCapabilityService  // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
+	legalHolds               legalHoldService          // optional; nil ⇒ the legal-hold routes are not registered (#635)
+	privacyExport            privacyExporter           // optional; nil ⇒ the data-export route is not registered (#635)
+	dataPurge                dataPurger                // optional; nil ⇒ the on-demand data-deletion route is not registered (#635)
+	endpointTimeline         endpointTimelineReader    // optional; nil ⇒ the State-Timeline read route is not registered (#594 B7)
+	retroHunter              retroHunter               // optional; nil ⇒ the retro-hunt route is not registered (#594 B7)
+	sarif                    sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
+	importedFindings         sarifReader               // optional read side for imported findings
+	fleetRolloutAdmin        fleetRolloutService       // optional; nil ⇒ the operator rollout routes are not served
+	offensiveHalt            offensiveKillSwitch       // optional; nil ⇒ the red-team halt route is not served
+	detections               detectionReader           // optional read side for the detection ledger (#423)
+	detectionProvenance      detectionProvenanceReader // optional read side for durable detection provenance (#610)
+	riskStories              riskStoryReader           // optional read side for the unified per-asset risk story (#427)
+	purpleCoverage           purpleCoverageReader      // optional read side for purple-team coverage (#426)
+	fleet                    *fleetRouter              // optional; nil ⇒ agent transport plane is not served
+	fleetAdmin               fleetAdminService         // optional; nil ⇒ operator agent-admin routes not registered
+	fleetKeys                fleetKeyAdmin             // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
+	qualityGates             qualityGateService        // optional; nil ⇒ quality-gate routes are not registered
+	qualityProfiles          qualityProfileService     // optional; nil ⇒ quality-profile routes are not registered
+	rules                    rulesService              // optional; nil ⇒ rule catalog routes are not registered
+	dastScan                 dastScanService
+	vulnerabilitySources     *vulnerabilitysourceuc.Service
+	vulnerabilityMonitor     *vulnerabilitymonitor.Service
+	vulnerabilityReconcile   *vulnerabilityreconciliation.Service
+	vulnerabilityAudit       ports.AuditLogger
+	vulnerabilityRead        *vulnerabilityinteluc.Service
+	vulnerabilityActions     *vulnerabilityactionuc.Service
+	sla                      *slauc.Service
+	readiness                readinessConfig
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -230,6 +238,31 @@ func (rt *Router) SetVulnerabilityReadModel(service *vulnerabilityinteluc.Servic
 
 func (rt *Router) SetVulnerabilityActions(actions *vulnerabilityactionuc.Service) {
 	rt.vulnerabilityActions = actions
+}
+
+func (rt *Router) SetAssessmentCycles(service *cycleuc.APIService, apiEnabled bool, dualWrite func(string) bool) {
+	rt.assessmentCycles = service
+	rt.assessmentCycleAPI = apiEnabled
+	rt.assessmentCycleDualWrite = dualWrite
+}
+
+func (rt *Router) SetAssessmentLifecycleRollout(readEnabled, uiEnabled func(string) bool) {
+	rt.assessmentLifecycleRead = readEnabled
+	rt.assessmentLifecycleUI = uiEnabled
+}
+
+func (rt *Router) SetAssessmentSnapshots(service *snapshotuc.Service) {
+	rt.assessmentSnapshots = service
+}
+
+func (rt *Router) requireAssessmentLifecycleRead(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if rt.assessmentLifecycleRead != nil && !rt.assessmentLifecycleRead(TenantFrom(r.Context())) {
+			writeJSON(w, http.StatusNotFound, errorBody{Error: "assessment_lifecycle_read_disabled"})
+			return
+		}
+		next(w, r)
+	}
 }
 
 // SetSLA wires the opt-in risk-based remediation governance API.
@@ -505,6 +538,19 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/projects/{key}/analysis", rt.authz(userdom.PermView, rt.latestProjectAnalysis))
 	}
 	mux.HandleFunc("POST /api/v1/engagements", rt.authz(userdom.PermOperate, rt.createEngagement))
+	if rt.assessmentCycles != nil && rt.assessmentCycleAPI {
+		mux.HandleFunc("POST /api/v1/engagements/{assessmentId}/retests", rt.authz(userdom.PermOperate, rt.createAssessmentRetest))
+		mux.HandleFunc("GET /api/v1/engagements/{assessmentId}/lifecycle", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentLifecycle)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentCycle)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}/members", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentCycleMembers)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentCycles)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/archive", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.archiveAssessmentCycle)))
+	}
+	if rt.assessmentSnapshots != nil {
+		mux.HandleFunc("POST /api/v1/engagements/{id}/snapshots/finalize", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.finalizeAssessmentSnapshot)))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/snapshots", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.withEngTenant(rt.listAssessmentSnapshots))))
+		mux.HandleFunc("GET /api/v1/assessment-snapshots/{snapshotId}", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentSnapshot)))
+	}
 	if rt.fleetRolloutAdmin != nil {
 		// These are OPERATOR routes and they live under /api/v1/agents, not /api/v1/fleet.
 		// Handler() mounts /api/v1/fleet/ on the untrusted AGENT auth plane, which deliberately

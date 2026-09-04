@@ -1,15 +1,18 @@
 import { Menu01 } from '@untitledui/icons'
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoadingFallback } from './components/layout/LoadingFallback'
 import { MobileSidebar, Sidebar } from './components/layout/Sidebar'
+import { useFetch } from './hooks'
+import { api } from './lib/api'
 import { Connect } from './pages/Connect'
 
 // --- Lazy-loaded page components ---
 const Dashboard = lazy(() => import('./pages/Dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })))
 const Engagements = lazy(() => import('./pages/Engagements/EngagementsPage').then(m => ({ default: m.EngagementsPage })))
+const AssessmentCycles = lazy(() => import('./pages/AssessmentCycles/AssessmentCyclesPage').then(m => ({ default: m.AssessmentCyclesPage })))
 const NewEngagement = lazy(() => import('./pages/Engagements/NewEngagementPage').then(m => ({ default: m.NewEngagementPage })))
 const EngagementDetail = lazy(() => import('./pages/EngagementDetail').then(m => ({ default: m.EngagementDetail })))
 const Assets = lazy(() => import('./pages/Assets/Assets').then(m => ({ default: m.Assets })))
@@ -62,6 +65,7 @@ function Gate() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="engagements" element={<Engagements />} />
+        <Route path="assessment-cycles" element={<AssessmentLifecycleRoute><AssessmentCycles /></AssessmentLifecycleRoute>} />
         <Route path="engagements/new" element={<NewEngagement />} />
         <Route path="engagements/:id" element={<EngagementDetail />} />
         <Route path="engagements/:id/:tabSlug" element={<EngagementDetail />} />
@@ -107,6 +111,13 @@ function Gate() {
       </Route>
     </Routes>
   )
+}
+
+function AssessmentLifecycleRoute({ children }: { children: ReactNode }) {
+  const meFetch = useFetch(() => api.me().catch(() => null), { deps: [] })
+  if (meFetch.loading) return <LoadingFallback />
+  if (meFetch.data?.features?.assessmentLifecycleUIDefault !== true) return <Navigate to="/engagements" replace />
+  return children
 }
 
 function Shell() {
