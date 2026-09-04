@@ -1952,3 +1952,113 @@ export interface VulnerabilityReconcileAccepted {
   state: 'queued' | 'running' | 'succeeded' | 'failed'
   created: boolean
 }
+
+export type IntegrationFieldKind = 'text' | 'password' | 'boolean'
+export type IntegrationCapability = 'test_connection' | 'discover_pipelines' | 'read_runs'
+
+export interface IntegrationFieldDescriptor {
+  name: string
+  label: string
+  kind: IntegrationFieldKind
+  required: boolean
+  description: string
+}
+
+export interface IntegrationProviderDescriptor {
+  provider: string
+  name: string
+  description: string
+  capabilities: IntegrationCapability[]
+  configFields: IntegrationFieldDescriptor[]
+  secretFields: IntegrationFieldDescriptor[]
+}
+
+export interface Integration {
+  id: string
+  provider: string
+  name: string
+  endpoint: string
+  config: Record<string, unknown>
+  allowPrivateNetwork: boolean
+  pollIntervalSeconds: number
+  enabled: boolean
+  archived: boolean
+  version: number
+  credentialConfigured: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface IntegrationInput {
+  provider: string
+  name: string
+  endpoint: string
+  config: Record<string, unknown>
+  allowPrivateNetwork: boolean
+  pollIntervalSeconds: number
+}
+
+export interface IntegrationPipeline {
+  externalKey: string
+  name: string
+  fullName: string
+  kind: string
+  url: string
+}
+
+export type IntegrationOperationType = 'test' | 'discover' | 'poll'
+export type IntegrationOperationState = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled'
+
+export interface IntegrationOperation {
+  id: string
+  integrationId: string
+  type: IntegrationOperationType
+  state: IntegrationOperationState
+  checkpoint: string
+  counts: { pipelines: number; runs: number; linked: number; unlinked: number; errors: number }
+  errors: string[]
+  pipelines: IntegrationPipeline[]
+  jobId: string
+  actor: string
+  startedAt: string | null
+  finishedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface IntegrationBinding {
+  id: string
+  integrationId: string
+  projectId: string
+  externalKey: string
+  externalName: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type IntegrationRunLifecycle = 'queued' | 'running' | 'completed'
+export type IntegrationRunResult = 'success' | 'failure' | 'unstable' | 'aborted' | 'not_built' | 'unknown'
+export type IntegrationCorrelation = 'linked' | 'missing' | 'ambiguous'
+
+export interface IntegrationExternalRun {
+  id: string
+  integrationId: string
+  bindingId: string
+  providerKey: string
+  pipelineKey: string
+  number: string
+  url: string
+  lifecycle: IntegrationRunLifecycle
+  result: IntegrationRunResult
+  revision: string
+  branch: string
+  analysisId: string
+  correlation: IntegrationCorrelation
+  queuedAt: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  providerUpdatedAt: string
+  createdAt: string
+  updatedAt: string
+}

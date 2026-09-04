@@ -32,6 +32,7 @@ const RuleDetail = lazy(() => import('./pages/Rules/RuleDetail'))
 const Audit = lazy(() => import('./pages/Settings/Audit').then(m => ({ default: m.Audit })))
 const Settings = lazy(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })))
 const SettingsConfig = lazy(() => import('./pages/Settings/SettingsConfig').then(m => ({ default: m.SettingsConfig })))
+const Integrations = lazy(() => import('./pages/Settings/Integrations').then(m => ({ default: m.Integrations })))
 const AITriageReviews = lazy(() => import('./pages/AITriage/AITriageReviews').then(m => ({ default: m.AITriageReviews })))
 const AITriageObservability = lazy(() => import('./pages/AITriage/AITriageObservability').then(m => ({ default: m.AITriageObservability })))
 const VulnerabilityIntelligence = lazy(() => import('./pages/VulnerabilityIntelligence').then(m => ({ default: m.VulnerabilityIntelligence })))
@@ -97,6 +98,7 @@ function Gate() {
         <Route path="settings" element={<Settings />}>
           <Route index element={<Audit />} />
           <Route path="team" element={<Team />} />
+          <Route path="integrations" element={<Integrations />} />
           <Route path="config" element={<SettingsConfig />} />
         </Route>
         <Route path="audit" element={<Navigate to="/settings" replace />} />

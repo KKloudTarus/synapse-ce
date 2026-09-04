@@ -23,12 +23,14 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
+	integrationdom "github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cloudsandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
+	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
@@ -60,6 +62,7 @@ import (
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
+	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -80,13 +83,17 @@ import (
 func main() {
 	cfg := config.Load()
 	log := logging.New(cfg.LogLevel)
+	if err := cfg.ValidateWorkerProfile(); err != nil {
+		log.Error("worker profile invalid", "err", err)
+		os.Exit(1)
+	}
 	toolExecution, err := cfg.ResolveToolExecution(config.ProcessRoleWorker)
 	if err != nil {
 		log.Error("tool execution posture invalid", "err", err)
 		os.Exit(1)
 	}
-	log.Info("starting synapse-worker", "env", cfg.Environment, "tool_execution", toolExecution)
-	if err := cfg.ValidateSandboxPosture(); err != nil {
+	log.Info("starting synapse-worker", "env", cfg.Environment, "tool_execution", toolExecution, "profile", cfg.WorkerProfile)
+	if err := cfg.ValidateWorkerSandboxPosture(); err != nil {
 		log.Error("sandbox posture invalid", "err", err)
 		os.Exit(1)
 	}
@@ -111,6 +118,10 @@ func main() {
 	// is required – an in-memory queue is not shared across processes.
 	if cfg.DBDSN == "" {
 		log.Error("synapse-worker requires SYNAPSE_DB_DSN (the durable queue + repos shared with the API)")
+		os.Exit(1)
+	}
+	if cfg.IntegrationSchedulerEnabled && !cfg.LeaderElectionEnabled {
+		log.Error("integration scheduler requires SYNAPSE_LEADER_ENABLED=true")
 		os.Exit(1)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -178,7 +189,49 @@ func main() {
 	importedSBOMStore := postgres.NewImportedSBOMStore(pool)
 
 	// Credential vault – same master key as the API so secrets resolve.
-	credVault := vault.NewPostgresVault(pool, mustVaultCipher(cfg, log))
+	vaultCipher := mustVaultCipher(cfg, log)
+	credVault := vault.NewPostgresVault(pool, vaultCipher)
+	integrationStore := postgres.NewIntegrationStore(pool, vaultCipher)
+	integrationRegistry := integrationdom.NewRegistry()
+	if err := jenkinsintegration.Register(integrationRegistry); err != nil {
+		log.Error("integration provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+	integrationService, err := integrationuc.NewService(integrationStore, integrationRegistry, postgres.NewProjectRepository(pool), integrationStore, ids, clock, auditLog)
+	if err != nil {
+		log.Error("integration service init failed", "err", err)
+		os.Exit(1)
+	}
+	integrationService.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), time.Minute))
+	var integrationMaintenanceTasks []func(context.Context)
+	if cfg.IntegrationSchedulerEnabled {
+		integrationScheduler, schedulerErr := integrationuc.NewScheduler(
+			integrationStore,
+			repo,
+			queue,
+			integrationService,
+			clock,
+			integrationuc.AlwaysLeader{},
+			integrationuc.SchedulerConfig{
+				Interval:      cfg.IntegrationSchedulerInterval,
+				DispatchLimit: cfg.IntegrationSchedulerDispatch,
+				MaxQueueDepth: cfg.IntegrationSchedulerQueueDepth,
+			},
+			log,
+		)
+		if schedulerErr != nil {
+			log.Error("integration scheduler init failed", "err", schedulerErr)
+			os.Exit(1)
+		}
+		integrationMaintenanceTasks = append(integrationMaintenanceTasks, integrationScheduler.Run)
+		log.Info("integration scheduler ENABLED", "poll", cfg.IntegrationSchedulerInterval, "dispatch_limit", cfg.IntegrationSchedulerDispatch, "max_queue_depth", cfg.IntegrationSchedulerQueueDepth)
+	}
+	if cfg.WorkerProfile == config.WorkerProfileIntegrations {
+		runWorkerRuntime(ctx, cfg, queue, map[string]worker.Handler{
+			integrationuc.JobKind: integrationJobHandler{svc: integrationService},
+		}, integrationMaintenanceTasks, leaderStore, auditLog, clock, ids, cfg.ReconTimeout+time.Minute, log)
+		return
+	}
 
 	// Evidence blob store (shared with the API when MinIO is configured).
 	var blobStore ports.BlobStore
@@ -341,10 +394,11 @@ func main() {
 	}
 	reconService.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
 
-	var maintenanceTasks []func(context.Context)
+	maintenanceTasks := append([]func(context.Context){}, integrationMaintenanceTasks...)
 	handlers := map[string]worker.Handler{
-		reconuc.JobKind:   reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
-		scauc.ScanJobKind: scaJobHandler{svc: scaService},
+		reconuc.JobKind:       reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
+		scauc.ScanJobKind:     scaJobHandler{svc: scaService},
+		integrationuc.JobKind: integrationJobHandler{svc: integrationService},
 	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
@@ -665,19 +719,35 @@ func main() {
 		},
 	)
 
+	runWorkerRuntime(ctx, cfg, queue, handlers, maintenanceTasks, leaderStore, auditLog, clock, ids, visibility, log)
+}
+
+func runWorkerRuntime(
+	ctx context.Context,
+	cfg config.Config,
+	queue ports.JobQueue,
+	handlers map[string]worker.Handler,
+	maintenanceTasks []func(context.Context),
+	leaderStore ports.LeaderStore,
+	auditLog ports.AuditLogger,
+	clock ports.Clock,
+	ids ports.IDGenerator,
+	visibility time.Duration,
+	log *slog.Logger,
+) {
 	if cfg.LeaderElectionEnabled {
 		resource := cfg.LeaderResource + "-worker-maintenance"
-		elector, eerr := leaderuc.NewElector(leaderStore, auditLog, clock, resource, ids.NewID().String(), cfg.LeaderTerm, cfg.LeaderRenew)
-		if eerr != nil {
-			log.Error("worker leader election configuration invalid", "err", eerr)
+		elector, err := leaderuc.NewElector(leaderStore, auditLog, clock, resource, ids.NewID().String(), cfg.LeaderTerm, cfg.LeaderRenew)
+		if err != nil {
+			log.Error("worker leader election configuration invalid", "err", err)
 			os.Exit(1)
 		}
 		go elector.Run(ctx)
 		go func() {
 			var maintenanceCancel context.CancelFunc
 			wasLeader := false
-			t := time.NewTicker(time.Second)
-			defer t.Stop()
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
 			defer func() {
 				if maintenanceCancel != nil {
 					maintenanceCancel()
@@ -700,28 +770,27 @@ func main() {
 				select {
 				case <-ctx.Done():
 					return
-				case <-t.C:
+				case <-ticker.C:
 				}
 			}
 		}()
 		log.Info("worker maintenance leader election ENABLED", "resource", resource, "term", cfg.LeaderTerm, "renew", cfg.LeaderRenew)
 	} else {
-		// Keep the single-worker behavior explicit: without leader election, maintenance runs here.
 		for _, task := range maintenanceTasks {
 			go task(ctx)
 		}
 	}
 
 	var loops sync.WaitGroup
-	for i := 0; i < cfg.WorkerConcurrency; i++ {
+	for index := 0; index < cfg.WorkerConcurrency; index++ {
 		loops.Add(1)
 		go func(loop int) {
 			defer loops.Done()
-			w := worker.New(queue, handlers, worker.Config{Visibility: visibility, MaxAttempts: 3}, log.With("loop", loop+1))
-			if err := w.Run(ctx); err != nil && ctx.Err() == nil {
+			claimWorker := worker.New(queue, handlers, worker.Config{Visibility: visibility, MaxAttempts: 3}, log.With("loop", loop+1))
+			if err := claimWorker.Run(ctx); err != nil && ctx.Err() == nil {
 				log.Error("worker claim loop exited with error", "loop", loop+1, "err", err)
 			}
-		}(i)
+		}(index)
 	}
 	loops.Wait()
 	log.Info("synapse-worker stopped", "loops", cfg.WorkerConcurrency)
@@ -805,6 +874,16 @@ func (h reconJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, 
 type cspmJobHandler struct{ svc *cspm.Service }
 
 type vulnerabilitySyncJobHandler struct{ svc *vulnerabilitymonitor.Service }
+
+type integrationJobHandler struct{ svc *integrationuc.Service }
+
+func (handler integrationJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	return handler.svc.HandleJob(ctx, job.ID, job.Payload)
+}
+
+func (handler integrationJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, _ error) error {
+	return handler.svc.OnDeadLetter(ctx, job.Payload)
+}
 
 type vulnerabilityReconcileJobHandler struct {
 	svc *vulnerabilityreconciliation.Service

@@ -46,6 +46,7 @@ func TestCollectorsScrapeOutput(t *testing.T) {
 	c := New(nil, nil)
 	c.ObserveHTTPRequest("GET", "GET /healthz", "2xx", time.Millisecond)
 	c.ObserveSCAScan(time.Second, "success")
+	c.ObserveIntegrationOperation("jenkins", "test", "succeeded")
 
 	rec := httptest.NewRecorder()
 	c.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
@@ -59,6 +60,22 @@ func TestCollectorsScrapeOutput(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("scrape output missing metric %q", want)
+		}
+	}
+}
+
+func TestCollectorsIntegrationMetricsUseOnlyBoundedLabels(t *testing.T) {
+	c := New(nil, nil)
+	c.ObserveIntegrationOperation("jenkins", "poll", "succeeded")
+	rec := httptest.NewRecorder()
+	c.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, `synapse_integration_operations_total{operation="poll",outcome="succeeded",provider="jenkins"} 1`) {
+		t.Fatalf("integration metric missing: %s", body)
+	}
+	for _, forbidden := range []string{"endpoint", "job_name", "pipeline", "tenant"} {
+		if strings.Contains(body, forbidden+"=") {
+			t.Fatalf("integration metric must not expose %s labels: %s", forbidden, body)
 		}
 	}
 }

@@ -1,0 +1,125 @@
+name: jenkins-integration
+
+x-synapse-image: &synapse-image
+  image: synapse-integration-e2e:local
+  platform: linux/amd64
+
+x-synapse-build: &synapse-build
+  <<: *synapse-image
+  build:
+    context: ../..
+    dockerfile: deploy/Dockerfile
+    target: production
+
+x-synapse-runtime-db: &synapse-runtime-db
+  SYNAPSE_ENV: development
+  SYNAPSE_DB_DSN: postgres://synapse_app:${DB_APP_PASSWORD:?DB_APP_PASSWORD is required}@postgres:5432/synapse?sslmode=disable
+  SYNAPSE_DB_AUTO_MIGRATE: "false"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: synapse_admin
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD:?DB_ADMIN_PASSWORD is required}
+      POSTGRES_DB: synapse
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse_admin -d synapse"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  postgres-init:
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${DB_ADMIN_PASSWORD:?DB_ADMIN_PASSWORD is required}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD is required}
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        psql -h postgres -U synapse_admin -d synapse -v ON_ERROR_STOP=1 -v app_role=synapse_app <<'SQL'
+        \getenv app_password DB_APP_PASSWORD
+        SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD %L', :'app_role', :'app_password')
+        WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_role')
+        \gexec
+        ALTER ROLE :"app_role" NOSUPERUSER NOBYPASSRLS PASSWORD :'app_password';
+        SQL
+
+  migrate:
+    <<: *synapse-build
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
+    entrypoint: ["/opt/synapse/synapse-migrate"]
+    environment:
+      <<: *synapse-runtime-db
+      SYNAPSE_DB_MIGRATION_DSN: postgres://synapse_admin:${DB_ADMIN_PASSWORD:?DB_ADMIN_PASSWORD is required}@postgres:5432/synapse?sslmode=disable
+
+  jenkins:
+    image: jenkins/jenkins:2.568.2-lts-jdk21
+    environment:
+      JAVA_OPTS: -Djenkins.install.runSetupWizard=false
+      JENKINS_TEST_PASSWORD: ${JENKINS_TEST_PASSWORD:?JENKINS_TEST_PASSWORD is required}
+      JENKINS_HTTPS_KEYSTORE_PASSWORD: ${JENKINS_HTTPS_KEYSTORE_PASSWORD:?JENKINS_HTTPS_KEYSTORE_PASSWORD is required}
+    entrypoint: ["/bin/bash", "/usr/share/jenkins/ref/jenkins-tls-entrypoint.sh"]
+    ports:
+      - "18443:8443"
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - ./init.groovy.d:/usr/share/jenkins/ref/init.groovy.d:ro
+      - ./jenkins-tls-entrypoint.sh:/usr/share/jenkins/ref/jenkins-tls-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -kfsS https://localhost:8443/login >/dev/null"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
+  synapse-api:
+    <<: *synapse-image
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      jenkins:
+        condition: service_healthy
+    ports:
+      - "18081:8080"
+    volumes:
+      - jenkins-home:/jenkins:ro
+    environment:
+      <<: *synapse-runtime-db
+      SYNAPSE_API_TOKEN: ${SYNAPSE_API_TOKEN:?SYNAPSE_API_TOKEN is required}
+      SYNAPSE_HTTP_ADDR: :8080
+      SYNAPSE_SINGLE_TENANT: "true"
+      SYNAPSE_TOOL_EXECUTION_MODE: dispatch-only
+      SYNAPSE_SANDBOX_ENABLED: "false"
+      SYNAPSE_VAULT_MASTER_KEY: ${SYNAPSE_VAULT_MASTER_KEY:?SYNAPSE_VAULT_MASTER_KEY is required}
+      SSL_CERT_FILE: /jenkins/tls/ca.crt
+
+  synapse-worker:
+    <<: *synapse-image
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      jenkins:
+        condition: service_healthy
+    entrypoint: ["/opt/synapse/synapse-worker"]
+    volumes:
+      - jenkins-home:/jenkins:ro
+    environment:
+      <<: *synapse-runtime-db
+      SYNAPSE_TOOL_EXECUTION_MODE: worker
+      # ponytail: this fixture claims provider jobs only; use the default profile when scanner execution joins the E2E scope.
+      SYNAPSE_WORKER_PROFILE: integrations
+      SYNAPSE_SANDBOX_ENABLED: "false"
+      SYNAPSE_VAULT_MASTER_KEY: ${SYNAPSE_VAULT_MASTER_KEY:?SYNAPSE_VAULT_MASTER_KEY is required}
+      SSL_CERT_FILE: /jenkins/tls/ca.crt
+
+volumes:
+  postgres-data:
+  jenkins-home:

@@ -75,6 +75,7 @@ nav:
   - Integrate:
       - CLI: cli.md
       - MCP integration: mcp-integration.md
+      - CI/CD integrations: integrations.md
       - Code quality rule authoring: code-quality-rules.md
   - Architecture and security:
       - Architecture: architecture.md

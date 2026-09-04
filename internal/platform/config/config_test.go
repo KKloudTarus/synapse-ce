@@ -70,6 +70,7 @@ func TestResolveToolExecution(t *testing.T) {
 		{name: "worker requires database", cfg: Config{Environment: "development"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "production worker requires sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "production worker accepts sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", SandboxEnabled: true}, role: ProcessRoleWorker, want: ToolExecutionWorker},
+		{name: "production integration worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileIntegrations}, role: ProcessRoleWorker, want: ToolExecutionWorker},
 		{name: "worker refuses other mode", cfg: Config{Environment: "development", DBDSN: "postgres://runtime", ToolExecutionMode: "dispatch-only"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "CLI defaults in process", cfg: Config{}, role: ProcessRoleCLI, want: ToolExecutionInProcess},
 		{name: "CLI refuses other mode", cfg: Config{ToolExecutionMode: "worker"}, role: ProcessRoleCLI, wantErr: true},
@@ -86,6 +87,35 @@ func TestResolveToolExecution(t *testing.T) {
 				t.Fatalf("ResolveToolExecution() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWorkerProfileValidation(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		valid bool
+	}{
+		{value: "", valid: true},
+		{value: "all", valid: true},
+		{value: " INTEGRATIONS ", valid: true},
+		{value: "scanner", valid: false},
+	} {
+		t.Run(test.value, func(t *testing.T) {
+			t.Setenv("SYNAPSE_WORKER_PROFILE", test.value)
+			cfg := Load()
+			if (cfg.ValidateWorkerProfile() == nil) != test.valid {
+				t.Fatalf("ValidateWorkerProfile() valid = %t, want %t (profile %q)", cfg.ValidateWorkerProfile() == nil, test.valid, cfg.WorkerProfile)
+			}
+		})
+	}
+}
+
+func TestValidateWorkerSandboxPosture(t *testing.T) {
+	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileIntegrations}).ValidateWorkerSandboxPosture(); err != nil {
+		t.Fatalf("integration-only worker must not require executable-tool sandbox: %v", err)
+	}
+	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileAll}).ValidateWorkerSandboxPosture(); err == nil {
+		t.Fatal("full production worker must still require the sandbox")
 	}
 }
 
@@ -344,6 +374,37 @@ func TestLoadVulnerabilitySchedulerDefaultsAndOverrides(t *testing.T) {
 		cfg.VulnerabilitySchedulerQueueDepth != 250 ||
 		cfg.VulnerabilitySchedulerRecovery != 30 {
 		t.Fatalf("vulnerability scheduler overrides = %+v", cfg)
+	}
+}
+
+func TestLoadIntegrationSchedulerDefaultsAndOverrides(t *testing.T) {
+	keys := []string{
+		"SYNAPSE_INTEGRATION_SCHEDULER_ENABLED",
+		"SYNAPSE_INTEGRATION_SCHEDULER_POLL",
+		"SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT",
+		"SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH",
+	}
+	for _, key := range keys {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.IntegrationSchedulerEnabled ||
+		cfg.IntegrationSchedulerInterval != time.Minute ||
+		cfg.IntegrationSchedulerDispatch != 10 ||
+		cfg.IntegrationSchedulerQueueDepth != 100 {
+		t.Fatalf("integration scheduler defaults = %+v", cfg)
+	}
+
+	t.Setenv("SYNAPSE_INTEGRATION_SCHEDULER_ENABLED", "true")
+	t.Setenv("SYNAPSE_INTEGRATION_SCHEDULER_POLL", "15s")
+	t.Setenv("SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT", "25")
+	t.Setenv("SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH", "250")
+	cfg = Load()
+	if !cfg.IntegrationSchedulerEnabled ||
+		cfg.IntegrationSchedulerInterval != 15*time.Second ||
+		cfg.IntegrationSchedulerDispatch != 25 ||
+		cfg.IntegrationSchedulerQueueDepth != 250 {
+		t.Fatalf("integration scheduler overrides = %+v", cfg)
 	}
 }
 

@@ -17,13 +17,14 @@ const queueStatsTimeout = time.Second
 // Collectors owns a private Prometheus registry. It contains no global
 // collectors, so only Synapse's documented metrics are exposed by /metrics.
 type Collectors struct {
-	registry     *prometheus.Registry
-	httpRequests *prometheus.CounterVec
-	httpDuration *prometheus.HistogramVec
-	scaDuration  *prometheus.HistogramVec
-	scaOutcomes  *prometheus.CounterVec
-	queueReader  ports.AggregateJobQueueStatsReader
-	now          func() time.Time
+	registry              *prometheus.Registry
+	httpRequests          *prometheus.CounterVec
+	httpDuration          *prometheus.HistogramVec
+	scaDuration           *prometheus.HistogramVec
+	scaOutcomes           *prometheus.CounterVec
+	integrationOperations *prometheus.CounterVec
+	queueReader           ports.AggregateJobQueueStatsReader
+	now                   func() time.Time
 }
 
 // New constructs the bounded Prometheus collectors used by the API metrics listener.
@@ -49,8 +50,12 @@ func New(queueReader ports.AggregateJobQueueStatsReader, pool ports.PoolStatsRea
 			Namespace: "synapse", Subsystem: "sca", Name: "scan_outcomes_total",
 			Help: "Terminal SCA scan outcomes.",
 		}, []string{"outcome"}),
+		integrationOperations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "synapse", Subsystem: "integration", Name: "operations_total",
+			Help: "Terminal external integration operation outcomes.",
+		}, []string{"provider", "operation", "outcome"}),
 	}
-	c.registry.MustRegister(c.httpRequests, c.httpDuration, c.scaDuration, c.scaOutcomes)
+	c.registry.MustRegister(c.httpRequests, c.httpDuration, c.scaDuration, c.scaOutcomes, c.integrationOperations)
 	if queueReader != nil {
 		queue := newQueueCollector(queueReader, c.now)
 		c.registry.MustRegister(queue)
@@ -197,9 +202,16 @@ func (c *Collectors) ObserveSCAScan(duration time.Duration, outcome string) {
 	c.ObserveSCAOutcome(outcome)
 }
 
+// ObserveIntegrationOperation records a terminal integration operation using only
+// bounded provider, operation, and outcome labels.
+func (c *Collectors) ObserveIntegrationOperation(provider, operation, outcome string) {
+	c.integrationOperations.WithLabelValues(provider, operation, outcome).Inc()
+}
+
 // Handler returns the private-registry Prometheus metrics endpoint.
 func (c *Collectors) Handler() http.Handler {
 	return promhttp.HandlerFor(c.registry, promhttp.HandlerOpts{})
 }
 
 var _ ports.SCAObserver = (*Collectors)(nil)
+var _ ports.IntegrationObserver = (*Collectors)(nil)

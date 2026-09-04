@@ -26,6 +26,7 @@ import (
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
+	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
@@ -63,6 +64,7 @@ type Router struct {
 	vex                    *vexuc.Service
 	users                  *usersuc.Service
 	credentials            *credentialsuc.Service
+	integrations           *integrationuc.Service
 	dastVerifier           runtimeVerifierService
 	dastWorkflow           dastWorkflowService
 	agent                  *agentDeps                // optional; nil ⇒ agent routes are not registered
@@ -235,6 +237,9 @@ func (rt *Router) SetVulnerabilityActions(actions *vulnerabilityactionuc.Service
 // SetSLA wires the opt-in risk-based remediation governance API.
 func (rt *Router) SetSLA(service *slauc.Service) { rt.sla = service }
 
+// SetIntegrations wires the CI/CD integration API.
+func (rt *Router) SetIntegrations(service *integrationuc.Service) { rt.integrations = service }
+
 // SetObservability installs the optional bounded HTTP observer and access-log policy.
 // A nil observer disables metrics feed but access logging (if enabled) still runs.
 func (rt *Router) SetObservability(accessLogEnabled bool, observer HTTPObserver) {
@@ -309,6 +314,26 @@ func (rt *Router) routes() *http.ServeMux {
 	// caller then hits the tenant 404. Machine (mcp/agent) roles are granted nothing here.
 	mux.HandleFunc("GET /api/v1/aup", rt.getAUP)
 	mux.HandleFunc("POST /api/v1/aup/accept", rt.acceptAUP)
+	if rt.integrations != nil {
+		mux.HandleFunc("GET /api/v1/integration-providers", rt.authz(userdom.PermView, rt.listIntegrationProviders))
+		mux.HandleFunc("POST /api/v1/integrations", rt.authz(userdom.PermAdminister, rt.createIntegration))
+		mux.HandleFunc("GET /api/v1/integrations", rt.authz(userdom.PermView, rt.listIntegrations))
+		mux.HandleFunc("GET /api/v1/integrations/{id}", rt.authz(userdom.PermView, rt.getIntegration))
+		mux.HandleFunc("PUT /api/v1/integrations/{id}", rt.authz(userdom.PermAdminister, rt.updateIntegration))
+		mux.HandleFunc("POST /api/v1/integrations/{id}/enable", rt.authz(userdom.PermAdminister, rt.enableIntegration))
+		mux.HandleFunc("POST /api/v1/integrations/{id}/disable", rt.authz(userdom.PermAdminister, rt.disableIntegration))
+		mux.HandleFunc("POST /api/v1/integrations/{id}/archive", rt.authz(userdom.PermAdminister, rt.archiveIntegration))
+		mux.HandleFunc("PUT /api/v1/integrations/{id}/credentials", rt.authz(userdom.PermAdminister, rt.putIntegrationCredential))
+		mux.HandleFunc("DELETE /api/v1/integrations/{id}/credentials", rt.authz(userdom.PermAdminister, rt.deleteIntegrationCredential))
+		mux.HandleFunc("POST /api/v1/integrations/{id}/operations", rt.authz(userdom.PermAdminister, rt.startIntegrationOperation))
+		mux.HandleFunc("GET /api/v1/integrations/{id}/operations", rt.authz(userdom.PermView, rt.listIntegrationOperations))
+		mux.HandleFunc("GET /api/v1/integration-operations/{operationID}", rt.authz(userdom.PermView, rt.getIntegrationOperation))
+		mux.HandleFunc("POST /api/v1/integration-operations/{operationID}/cancel", rt.authz(userdom.PermAdminister, rt.cancelIntegrationOperation))
+		mux.HandleFunc("POST /api/v1/integrations/{id}/bindings", rt.authz(userdom.PermAdminister, rt.createIntegrationBinding))
+		mux.HandleFunc("GET /api/v1/integrations/{id}/bindings", rt.authz(userdom.PermView, rt.listIntegrationBindings))
+		mux.HandleFunc("DELETE /api/v1/integrations/{id}/bindings/{bindingID}", rt.authz(userdom.PermAdminister, rt.deleteIntegrationBinding))
+		mux.HandleFunc("GET /api/v1/integrations/{id}/external-runs", rt.authz(userdom.PermView, rt.listIntegrationExternalRuns))
+	}
 	if rt.qualityGates != nil {
 		mux.HandleFunc("GET /api/v1/quality-gates", rt.authz(userdom.PermView, rt.listQualityGates))
 		mux.HandleFunc("GET /api/v1/quality-gates/{key}", rt.authz(userdom.PermView, rt.getQualityGate))

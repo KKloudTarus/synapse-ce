@@ -4,6 +4,7 @@ import { cn } from '../../components/ui'
 const TABS = [
   { label: 'Audit', to: '/settings', end: true },
   { label: 'Team', to: '/settings/team' },
+  { label: 'Integrations', to: '/settings/integrations' },
   { label: 'Config', to: '/settings/config' },
 ]
 
@@ -13,7 +14,7 @@ export function Settings() {
       <header>
         <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">Settings</h1>
         <p className="mt-1 text-sm text-secondary">
-          Audit trail, team management, and platform configuration
+          Audit trail, team management, external integrations, and platform configuration
         </p>
       </header>
 
