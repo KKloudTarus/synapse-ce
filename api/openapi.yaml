@@ -2362,6 +2362,251 @@ paths:
         '429': {description: Backpressure; the agent preserves WAL state and retries according to Retry-After, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/integration-providers:
+    get:
+      tags: [integrations]
+      operationId: listIntegrationProviders
+      summary: List code-owned integration provider descriptors
+      responses:
+        '200': {description: Provider descriptors without secrets, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/IntegrationProviderDescriptor'}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/integrations:
+    get:
+      tags: [integrations]
+      operationId: listIntegrations
+      summary: List tenant integrations
+      parameters:
+      - name: include_archived
+        in: query
+        schema: {type: boolean, default: false}
+      responses:
+        '200': {description: Integrations with credential presence only, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Integration'}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [integrations]
+      operationId: createIntegration
+      summary: Create a disabled integration
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CreateIntegrationRequest'}}}
+      responses:
+        '201': {description: Created integration, content: {application/json: {schema: {$ref: '#/components/schemas/Integration'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: Active provider endpoint already exists, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/integrations/{id}:
+    parameters: [{$ref: '#/components/parameters/IntegrationId'}]
+    get:
+      tags: [integrations]
+      operationId: getIntegration
+      summary: Get an integration without credential plaintext
+      responses:
+        '200': {description: Integration, content: {application/json: {schema: {$ref: '#/components/schemas/Integration'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [integrations]
+      operationId: updateIntegration
+      summary: Update integration configuration with optimistic concurrency
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/UpdateIntegrationRequest'}}}
+      responses:
+        '200': {description: Updated integration, content: {application/json: {schema: {$ref: '#/components/schemas/Integration'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Version conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/integrations/{id}/enable:
+    parameters: [{$ref: '#/components/parameters/IntegrationId'}]
+    post:
+      tags: [integrations]
+      operationId: enableIntegration
+      summary: Enable an integration after a successful connection test
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntegrationVersionRequest'}}}}
+      responses:
+        '200': {description: Enabled integration, content: {application/json: {schema: {$ref: '#/components/schemas/Integration'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Missing successful test or version conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/integrations/{id}/disable:
+    parameters: [{$ref: '#/components/parameters/IntegrationId'}]
+    post:
+      tags: [integrations]
+      operationId: disableIntegration
+      summary: Disable scheduled polling for an integration
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntegrationVersionRequest'}}}}
+      responses:
+        '200': {description: Disabled integration, content: {application/json: {schema: {$ref: '#/components/schemas/Integration'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Version conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/integrations/{id}/archive:
+    parameters: [{$ref: '#/components/parameters/IntegrationId'}]
+    post:
+      tags: [integrations]
+      operationId: archiveIntegration
+      summary: Archive an integration while retaining history
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntegrationVersionRequest'}}}}
+      responses:
+        '204': {description: Archived}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Version conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/integrations/{id}/credentials:
+    parameters: [{$ref: '#/components/parameters/IntegrationId'}]
+    put:
+      tags: [integrations]
+      operationId: putIntegrationCredential
+      summary: Set or replace a write-only encrypted credential bundle
+      description: Plaintext is accepted only in this request and is never returned by any API.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntegrationCredentialRequest'}}}}
+      responses:
+        '204': {description: Credential encrypted and stored}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Version or connection revision conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      tags: [integrations]
+      operationId: deleteIntegrationCredential
+      summary: Delete the integration credential bundle
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntegrationRevisionRequest'}}}}
+      responses:
+        '204': {description: Credential deleted}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Version or connection revision conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/integrations/{id}/operations:
+    parameters: [{$ref: '#/components/parameters/IntegrationId'}]
+    get:
+      tags: [integrations]
+      operationId: listIntegrationOperations
+      summary: List durable integration operations
+      parameters:
+      - name: limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        '200': {description: Operation history, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/IntegrationOperation'}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    post:
+      tags: [integrations]
+      operationId: startIntegrationOperation
+      summary: Queue a connection test, discovery, or poll operation
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StartIntegrationOperationRequest'}}}}
+      responses:
+        '202': {description: Durable operation accepted, content: {application/json: {schema: {$ref: '#/components/schemas/IntegrationOperation'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Active operation or lifecycle conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/integration-operations/{operationID}:
+    parameters: [{$ref: '#/components/parameters/IntegrationOperationId'}]
+    get:
+      tags: [integrations]
+      operationId: getIntegrationOperation
+      summary: Get one durable integration operation
+      responses:
+        '200': {description: Operation, content: {application/json: {schema: {$ref: '#/components/schemas/IntegrationOperation'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/integration-operations/{operationID}/cancel:
+    parameters: [{$ref: '#/components/parameters/IntegrationOperationId'}]
+    post:
+      tags: [integrations]
+      operationId: cancelIntegrationOperation
+      summary: Cancel a queued or running integration operation
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '200': {description: Cancelled operation, content: {application/json: {schema: {$ref: '#/components/schemas/IntegrationOperation'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Operation already terminal, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/integrations/{id}/bindings:
+    parameters: [{$ref: '#/components/parameters/IntegrationId'}]
+    get:
+      tags: [integrations]
+      operationId: listIntegrationBindings
+      summary: List Project bindings for an integration
+      responses:
+        '200': {description: Bindings, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/IntegrationBinding'}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    post:
+      tags: [integrations]
+      operationId: createIntegrationBinding
+      summary: Bind a discovered external pipeline to a tenant Project
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateIntegrationBindingRequest'}}}}
+      responses:
+        '201': {description: Binding, content: {application/json: {schema: {$ref: '#/components/schemas/IntegrationBinding'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Pipeline already bound, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/integrations/{id}/bindings/{bindingID}:
+    parameters:
+    - $ref: '#/components/parameters/IntegrationId'
+    - $ref: '#/components/parameters/IntegrationBindingId'
+    delete:
+      tags: [integrations]
+      operationId: deleteIntegrationBinding
+      summary: Delete a Project binding
+      responses:
+        '204': {description: Binding deleted}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/integrations/{id}/external-runs:
+    parameters: [{$ref: '#/components/parameters/IntegrationId'}]
+    get:
+      tags: [integrations]
+      operationId: listIntegrationExternalRuns
+      summary: List normalized external CI/CD runs and correlation state
+      parameters:
+      - name: limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 500, default: 100}
+      responses:
+        '200': {description: External runs, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/IntegrationExternalRun'}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2374,6 +2619,21 @@ components:
       description: Enrolled fleet-agent bearer credential. A deployment may instead authenticate through its configured trusted mTLS proxy path.
 
   parameters:
+    IntegrationId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string}
+    IntegrationOperationId:
+      name: operationID
+      in: path
+      required: true
+      schema: {type: string}
+    IntegrationBindingId:
+      name: bindingID
+      in: path
+      required: true
+      schema: {type: string}
     FleetProtocolVersion:
       name: X-Synapse-Fleet-Proto
       in: header
@@ -2506,6 +2766,202 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
+    IntegrationFieldDescriptor:
+      type: object
+      additionalProperties: false
+      required: [name, label, kind, required]
+      properties:
+        name: {type: string, pattern: '^[a-z][a-z0-9_]*$'}
+        label: {type: string}
+        kind: {type: string, enum: [text, password, boolean]}
+        required: {type: boolean}
+        description: {type: string}
+
+    IntegrationProviderDescriptor:
+      type: object
+      additionalProperties: false
+      required: [provider, name, description, capabilities, config_fields, secret_fields]
+      properties:
+        provider: {type: string, pattern: '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$'}
+        name: {type: string}
+        description: {type: string}
+        capabilities: {type: array, uniqueItems: true, items: {type: string, enum: [test_connection, discover_pipelines, read_runs]}}
+        config_fields: {type: array, items: {$ref: '#/components/schemas/IntegrationFieldDescriptor'}}
+        secret_fields: {type: array, items: {$ref: '#/components/schemas/IntegrationFieldDescriptor'}}
+
+    Integration:
+      type: object
+      additionalProperties: false
+      required: [id, provider, name, endpoint, config, allow_private_network, poll_interval_seconds, enabled, archived, version, connection_revision, credential_revision, credential_configured, created_at, updated_at]
+      properties:
+        id: {type: string}
+        provider: {type: string}
+        name: {type: string, maxLength: 120}
+        endpoint: {type: string, format: uri, pattern: '^https://'}
+        config: {type: object, additionalProperties: true}
+        allow_private_network: {type: boolean}
+        poll_interval_seconds: {type: integer, minimum: 30, maximum: 86400}
+        enabled: {type: boolean}
+        archived: {type: boolean}
+        version: {type: integer, minimum: 1}
+        connection_revision: {type: integer, minimum: 1}
+        credential_revision: {type: integer, minimum: 0}
+        credential_configured: {type: boolean, description: Presence only; plaintext is never returned.}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    CreateIntegrationRequest:
+      type: object
+      additionalProperties: false
+      required: [provider, name, endpoint, config, allow_private_network, poll_interval_seconds]
+      properties:
+        provider: {type: string, pattern: '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        endpoint: {type: string, format: uri, pattern: '^https://'}
+        config: {type: object, additionalProperties: true}
+        allow_private_network: {type: boolean, default: false}
+        poll_interval_seconds: {type: integer, minimum: 30, maximum: 86400, default: 300}
+
+    UpdateIntegrationRequest:
+      type: object
+      additionalProperties: false
+      required: [name, endpoint, config, allow_private_network, poll_interval_seconds, version]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        endpoint: {type: string, format: uri, pattern: '^https://'}
+        config: {type: object, additionalProperties: true}
+        allow_private_network: {type: boolean, default: false}
+        poll_interval_seconds: {type: integer, minimum: 30, maximum: 86400, default: 300}
+        version: {type: integer, minimum: 1}
+
+    IntegrationVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+
+    IntegrationRevisionRequest:
+      type: object
+      additionalProperties: false
+      required: [version, connection_revision]
+      properties:
+        version: {type: integer, minimum: 1}
+        connection_revision: {type: integer, minimum: 1}
+
+    IntegrationCredentialRequest:
+      type: object
+      additionalProperties: false
+      required: [secrets, version, connection_revision]
+      properties:
+        version: {type: integer, minimum: 1}
+        connection_revision: {type: integer, minimum: 1}
+        secrets:
+          type: object
+          minProperties: 1
+          maxProperties: 32
+          additionalProperties: {type: string, maxLength: 16384, writeOnly: true}
+
+    StartIntegrationOperationRequest:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, enum: [test, discover, poll]}
+
+    IntegrationPipeline:
+      type: object
+      additionalProperties: false
+      required: [external_key, name, full_name, kind]
+      properties:
+        external_key: {type: string, maxLength: 1024}
+        name: {type: string, maxLength: 255}
+        full_name: {type: string, maxLength: 1024}
+        kind: {type: string, maxLength: 64}
+        url: {type: string, format: uri, maxLength: 2048}
+
+    IntegrationOperationCounts:
+      type: object
+      additionalProperties: false
+      required: [pipelines, runs, linked, unlinked, errors]
+      properties:
+        pipelines: {type: integer, minimum: 0}
+        runs: {type: integer, minimum: 0}
+        linked: {type: integer, minimum: 0}
+        unlinked: {type: integer, minimum: 0}
+        errors: {type: integer, minimum: 0}
+
+    IntegrationOperation:
+      type: object
+      additionalProperties: false
+      required: [id, tenant_id, integration_id, type, state, counts, errors, job_id, actor, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        integration_id: {type: string}
+        type: {type: string, enum: [test, discover, poll]}
+        state: {type: string, enum: [queued, running, succeeded, partial, failed, cancelled]}
+        checkpoint: {type: string, maxLength: 65536}
+        counts: {$ref: '#/components/schemas/IntegrationOperationCounts'}
+        errors: {type: array, maxItems: 20, items: {type: string, maxLength: 256}}
+        pipelines: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/IntegrationPipeline'}}
+        job_id: {type: string}
+        actor: {type: string}
+        started_at: {type: [string, 'null'], format: date-time}
+        finished_at: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    CreateIntegrationBindingRequest:
+      type: object
+      additionalProperties: false
+      required: [project_id, external_key, external_name]
+      properties:
+        project_id: {type: string}
+        external_key: {type: string, minLength: 1, maxLength: 1024}
+        external_name: {type: string, minLength: 1, maxLength: 1024}
+
+    IntegrationBinding:
+      type: object
+      additionalProperties: false
+      required: [id, tenant_id, integration_id, project_id, external_key, external_name, version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        integration_id: {type: string}
+        project_id: {type: string}
+        external_key: {type: string}
+        external_name: {type: string}
+        version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    IntegrationExternalRun:
+      type: object
+      additionalProperties: false
+      required: [id, tenant_id, integration_id, provider_key, pipeline_key, lifecycle, result, correlation, provider_updated_at, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        integration_id: {type: string}
+        binding_id: {type: string}
+        provider_key: {type: string, maxLength: 1024}
+        pipeline_key: {type: string, maxLength: 1024}
+        number: {type: string, maxLength: 128}
+        url: {type: string, format: uri, maxLength: 2048}
+        lifecycle: {type: string, enum: [queued, running, completed]}
+        result: {type: string, enum: [success, failure, unstable, aborted, not_built, unknown]}
+        revision: {type: string, maxLength: 128}
+        branch: {type: string, maxLength: 512}
+        analysis_id: {type: string}
+        correlation: {type: string, enum: [linked, missing, ambiguous]}
+        queued_at: {type: [string, 'null'], format: date-time}
+        started_at: {type: [string, 'null'], format: date-time}
+        finished_at: {type: [string, 'null'], format: date-time}
+        provider_updated_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
     DetectionProvenanceStatus:
       type: string
       enum: [pending, complete, expired, broken]

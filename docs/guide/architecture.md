@@ -4,6 +4,8 @@
 
 Synapse is clean-architecture Go. Dependencies point inward only.
 
+External CI/CD connections use the same rule: provider-neutral domain/use-case contracts depend on a code-owned registry, while Jenkins lives in infrastructure. See [External CI/CD integrations](integrations.md).
+
 ```
 domain  <-  usecase  <-  adapter / infrastructure
 ```

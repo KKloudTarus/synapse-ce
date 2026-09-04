@@ -356,6 +356,10 @@ type Config struct {
 	LeaderRenew time.Duration
 	// WorkerConcurrency is the number of durable-queue claim loops in one synapse-worker process.
 	WorkerConcurrency int
+	// WorkerProfile narrows synapse-worker composition and queue claims. "all" keeps the
+	// hardened scanner worker; "integrations" runs only provider polling jobs and needs no
+	// executable-tool sandbox.
+	WorkerProfile WorkerProfile
 	// VulnerabilitySchedulerEnabled dispatches due vulnerability-source syncs and recovers stale
 	// runs. Postgres deployments must also enable fenced leader election to prevent duplicate work.
 	VulnerabilitySchedulerEnabled      bool
@@ -365,6 +369,12 @@ type Config struct {
 	VulnerabilitySchedulerDispatch     int
 	VulnerabilitySchedulerQueueDepth   int
 	VulnerabilitySchedulerRecovery     int
+	// IntegrationSchedulerEnabled dispatches polling operations for enabled external CI/CD
+	// integrations. The maintenance task is leader-gated by synapse-worker.
+	IntegrationSchedulerEnabled    bool
+	IntegrationSchedulerInterval   time.Duration
+	IntegrationSchedulerDispatch   int
+	IntegrationSchedulerQueueDepth int
 	// Vulnerability rollout gates default off. Tenant-scoped mutations additionally require
 	// an explicit tenant allowlist entry; "*" enables all tenants. Dry-run records correlation
 	// differences without mutating occurrences, findings, actions, or notification outbox rows.
@@ -761,6 +771,7 @@ func Load() Config {
 		LeaderTerm:                            getduration("SYNAPSE_LEADER_TERM", 15*time.Second),
 		LeaderRenew:                           getduration("SYNAPSE_LEADER_RENEW", 5*time.Second),
 		WorkerConcurrency:                     getint("SYNAPSE_WORKER_CONCURRENCY", defaultWorkerConcurrency),
+		WorkerProfile:                         WorkerProfile(normalizeEnv(getenv("SYNAPSE_WORKER_PROFILE", string(WorkerProfileAll)))),
 		VulnerabilitySchedulerEnabled:         getbool("SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED", false),
 		VulnerabilitySchedulerPollInterval:    getduration("SYNAPSE_VULNERABILITY_SCHEDULER_POLL", time.Minute),
 		VulnerabilitySchedulerStaleAfter:      getduration("SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER", 30*time.Minute),
@@ -768,6 +779,10 @@ func Load() Config {
 		VulnerabilitySchedulerDispatch:        getint("SYNAPSE_VULNERABILITY_SCHEDULER_DISPATCH_LIMIT", 10),
 		VulnerabilitySchedulerQueueDepth:      getint("SYNAPSE_VULNERABILITY_SCHEDULER_MAX_QUEUE_DEPTH", 100),
 		VulnerabilitySchedulerRecovery:        getint("SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT", 10),
+		IntegrationSchedulerEnabled:           getbool("SYNAPSE_INTEGRATION_SCHEDULER_ENABLED", false),
+		IntegrationSchedulerInterval:          getduration("SYNAPSE_INTEGRATION_SCHEDULER_POLL", time.Minute),
+		IntegrationSchedulerDispatch:          getint("SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT", 10),
+		IntegrationSchedulerQueueDepth:        getint("SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH", 100),
 		VulnerabilityProviderSyncEnabled:      getbool("SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", false),
 		VulnerabilityOccurrenceWritesEnabled:  getbool("SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED", false),
 		VulnerabilityFindingProjectionEnabled: getbool("SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED", false),
@@ -1003,6 +1018,33 @@ const (
 	ProcessRoleCLI    ProcessRole = "cli"
 )
 
+// WorkerProfile selects the smallest safe composition for a durable worker.
+type WorkerProfile string
+
+const (
+	WorkerProfileAll          WorkerProfile = "all"
+	WorkerProfileIntegrations WorkerProfile = "integrations"
+)
+
+func (c Config) ValidateWorkerProfile() error {
+	switch c.WorkerProfile {
+	case WorkerProfileAll, WorkerProfileIntegrations:
+		return nil
+	default:
+		return fmt.Errorf("SYNAPSE_WORKER_PROFILE must be %q or %q (got %q)", WorkerProfileAll, WorkerProfileIntegrations, c.WorkerProfile)
+	}
+}
+
+// ValidateWorkerSandboxPosture preserves the scanner worker's production fail-closed
+// sandbox gate while allowing the integration-only worker, which never constructs or
+// claims an executable-tool handler.
+func (c Config) ValidateWorkerSandboxPosture() error {
+	if c.WorkerProfile == WorkerProfileIntegrations {
+		return nil
+	}
+	return c.ValidateSandboxPosture()
+}
+
 // ResolveToolExecution decides how role may execute tools, failing closed on any
 // combination that would let a production API run an untrusted tool locally.
 //
@@ -1020,7 +1062,7 @@ func (c Config) ResolveToolExecution(role ProcessRole) (ToolExecution, error) {
 		if c.DBDSN == "" {
 			return "", errors.New("synapse-worker requires SYNAPSE_DB_DSN: queued execution cannot use process-local persistence")
 		}
-		if c.IsProduction() && !c.SandboxEnabled {
+		if c.IsProduction() && !c.SandboxEnabled && c.WorkerProfile != WorkerProfileIntegrations {
 			return "", errors.New("production synapse-worker requires SYNAPSE_SANDBOX_ENABLED=true")
 		}
 		return ToolExecutionWorker, nil

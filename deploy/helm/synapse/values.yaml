@@ -60,6 +60,11 @@ worker:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  integrationScheduler:
+    enabled: false
+    poll: 1m
+    dispatchLimit: 10
+    maxQueueDepth: 100
   resources:
     requests: {cpu: 500m, memory: 1Gi}
     limits: {cpu: "2", memory: 2Gi}
