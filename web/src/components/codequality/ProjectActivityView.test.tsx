@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ProjectActivityView } from './ProjectActivityView'
 
 const analysis = {
-  id: 'a1', createdAt: '2026-07-16T12:00:00Z', sourceRef: 'main', sourceCommit: 'abcdef1234567890',
+  id: 'a1', createdAt: '2026-07-16T12:00:00Z', origin: 'server' as const, ci: null, sourceRef: 'main', sourceCommit: 'abcdef1234567890',
   gate: { passed: false, results: [{ condition: { metric: 'new_high', op: '<=', threshold: 0 }, actual: 1, passed: false }] }, gateInfo: { key: 'synapse-way', name: 'Synapse way', source: 'default' as const }, issues: { total: 2, byKind: {}, bySeverity: { critical: 1 }, byStatus: {} },
   newCode: { previousId: '', counts: { total: 2, byKind: {}, bySeverity: { critical: 1 }, byStatus: {} }, rating: { security: 'E' as const, reliability: 'A' as const, maintainability: null } },
   delta: null, measures: {}, coverage: null,
@@ -47,6 +47,21 @@ describe('ProjectActivityView', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Security rating' }))
     expect(screen.getByText(/Rating is unavailable because the analysis did not provide a grade/i)).toBeInTheDocument()
     expect(screen.queryByLabelText(/Security rating trend/)).not.toBeInTheDocument()
+  })
+
+  it('marks a pipeline-recorded analysis and links its run', () => {
+    const fromCI = {
+      ...analysis,
+      id: 'ci-1',
+      origin: 'ci' as const,
+      ci: { provider: 'github-actions', runUrl: 'https://github.com/acme/app/actions/runs/7', runId: '7', branch: 'main', actor: 'octocat' },
+    }
+    render(<ProjectActivityView analyses={[fromCI, analysis]} />)
+    expect(screen.getByText(/from CI · github-actions/i)).toBeInTheDocument()
+    const link = screen.getByRole('link', { name: /pipeline run #7/i })
+    expect(link).toHaveAttribute('href', 'https://github.com/acme/app/actions/runs/7')
+    // The server analysis beside it carries no such marker.
+    expect(screen.getAllByText(/from CI/i)).toHaveLength(1)
   })
 
   it('loads older history on demand', () => {

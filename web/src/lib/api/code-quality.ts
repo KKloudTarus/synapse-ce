@@ -87,7 +87,7 @@ function mapProject(r: ProjectWire): Project {
 function mapProjectSummaryAnalysis(r: any): ProjectAnalysis {
   const counts = (value: any) => ({ total: value?.total ?? 0, byKind: value?.by_kind ?? {}, bySeverity: value?.by_severity ?? {}, byStatus: value?.by_status ?? {} })
   const grade = (value: any): CodeRating => ({ security: (value?.security ?? '?') as CodeRating['security'], reliability: (value?.reliability ?? '?') as CodeRating['reliability'], maintainability: (value?.maintainability ?? '?') as CodeRating['maintainability'], techDebtMinutes: 0, debtRatioPct: 0, linesOfCode: 0 })
-  return { id: r.id ?? '', createdAt: r.created_at ?? '', sourceRef: '', sourceCommit: r.source_commit ?? '', gate: { passed: r.gate_passed ?? false, results: [] }, gateInfo: { key: r.gate_info?.key ?? '', name: r.gate_info?.name ?? 'Quality gate', source: r.gate_info?.source ?? '' }, issues: counts(r.issues), newCode: { previousId: '', counts: { ...counts(null), total: r.new_issues ?? 0 }, rating: { security: '?', reliability: '?', maintainability: null } }, delta: null, measures: {}, coverage: null, duplication: { blocks: [], duplicatedLines: 0, totalLines: 0, files: 0 }, rating: grade(r.rating) }
+  return { id: r.id ?? '', createdAt: r.created_at ?? '', origin: r.origin === 'ci' ? 'ci' : 'server', ci: null, sourceRef: '', sourceCommit: r.source_commit ?? '', gate: { passed: r.gate_passed ?? false, results: [] }, gateInfo: { key: r.gate_info?.key ?? '', name: r.gate_info?.name ?? 'Quality gate', source: r.gate_info?.source ?? '' }, issues: counts(r.issues), newCode: { previousId: '', counts: { ...counts(null), total: r.new_issues ?? 0 }, rating: { security: '?', reliability: '?', maintainability: null } }, delta: null, measures: {}, coverage: null, duplication: { blocks: [], duplicatedLines: 0, totalLines: 0, files: 0 }, rating: grade(r.rating) }
 }
 
 function mapProjectAnalysis(r: any): ProjectAnalysis {
@@ -97,8 +97,12 @@ function mapProjectAnalysis(r: any): ProjectAnalysis {
     maintainability: (value?.maintainability ?? '?') as CodeRating['maintainability'], techDebtMinutes: value?.tech_debt_minutes ?? 0,
     debtRatioPct: value?.debt_ratio_pct ?? 0, linesOfCode: value?.lines_of_code ?? 0,
   })
+  const origin: ProjectAnalysis['origin'] = r.origin === 'ci' ? 'ci' : 'server'
+  const ci: ProjectAnalysis['ci'] = r.ci
+    ? { provider: r.ci.provider ?? '', runUrl: r.ci.run_url ?? '', runId: r.ci.run_id ?? '', branch: r.ci.branch ?? '', actor: r.ci.actor ?? '' }
+    : null
   return {
-    id: r.id ?? '', createdAt: r.created_at ?? '', sourceRef: r.source_ref ?? '', sourceCommit: r.source_commit ?? '',
+    id: r.id ?? '', createdAt: r.created_at ?? '', origin, ci, sourceRef: r.source_ref ?? '', sourceCommit: r.source_commit ?? '',
     gate: { passed: r.gate?.passed ?? false, results: (r.gate?.results ?? []).map((result: any) => ({ condition: { metric: result.metric ?? '', op: result.op ?? '', threshold: result.threshold ?? 0 }, actual: result.actual ?? 0, passed: result.passed ?? false })) },
     gateInfo: { key: r.gate_info?.key ?? '', name: r.gate_info?.name ?? 'Quality gate', source: r.gate_info?.source ?? '' },
     issues: counts(r.issues), newCode: { previousId: r.new_code?.previous_id ?? '', counts: counts(r.new_code?.counts), rating: { security: (r.new_code?.rating?.security ?? '?') as Grade, reliability: (r.new_code?.rating?.reliability ?? '?') as Grade, maintainability: r.new_code?.rating?.maintainability ? r.new_code.rating.maintainability as Grade : null } },

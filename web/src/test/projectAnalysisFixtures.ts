@@ -33,6 +33,8 @@ export function buildLatestProjectAnalysis(
     analysis: {
       id,
       createdAt: '2026-07-18T00:00:00Z',
+      origin: 'server',
+      ci: null,
       sourceRef: options.sourceRef ?? 'main',
       sourceCommit: `${id}-abcdef1234567890`,
       gate: { passed: true, results: [] },

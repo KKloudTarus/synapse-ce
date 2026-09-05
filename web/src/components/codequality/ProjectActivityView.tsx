@@ -193,6 +193,18 @@ export function ProjectActivityView({
                             first analysis
                           </span>
                         )}
+                        {analysis.origin === 'ci' && (
+                          <span
+                            className="rounded-md border border-secondary bg-primary px-2 py-0.5 text-[11px] font-medium text-secondary"
+                            title={
+                              analysis.ci
+                                ? `Recorded by ${analysis.ci.provider || 'a pipeline'}${analysis.ci.actor ? ` for ${analysis.ci.actor}` : ''}. Branch and commit are the pipeline's own account.`
+                                : 'Recorded by a pipeline through synapse-cli.'
+                            }
+                          >
+                            from CI{analysis.ci?.provider ? ` · ${analysis.ci.provider}` : ''}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-xs text-tertiary">
                         <span className="inline-flex items-center gap-1 font-medium text-secondary">
@@ -203,6 +215,17 @@ export function ProjectActivityView({
                           <span className="rounded border border-secondary bg-primary px-1.5 py-0.2 text-[11px] font-bold text-primary">
                             {analysis.sourceCommit.slice(0, 12)}
                           </span>
+                        )}
+                        {analysis.ci?.runUrl && (
+                          <a
+                            href={analysis.ci.runUrl}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            pipeline run{analysis.ci.runId ? ` #${analysis.ci.runId}` : ''}
+                          </a>
                         )}
                         <span>· {analysis.gateInfo.name || 'Quality gate'}</span>
                       </div>

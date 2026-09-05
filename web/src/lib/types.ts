@@ -1046,9 +1046,23 @@ export interface ProjectGateInfo {
   source: 'managed' | 'repository' | 'default' | ''
 }
 
+export type ProjectAnalysisOrigin = 'server' | 'ci'
+
+/** What a pipeline said about the run that produced an analysis. Unverified by the server. */
+export interface ProjectAnalysisCI {
+  provider: string
+  runUrl: string
+  runId: string
+  branch: string
+  actor: string
+}
+
 export interface ProjectAnalysis {
   id: string
   createdAt: string
+  /** Who produced it: the server scanning the source itself, or a pipeline that pushed the result. */
+  origin: ProjectAnalysisOrigin
+  ci: ProjectAnalysisCI | null
   sourceRef: string
   sourceCommit: string
   gate: ProjectGateResult
@@ -1660,6 +1674,31 @@ export interface TimelineEntry {
 // One agent security detection record (#594 B/C). detection.Record + its Detection are untagged
 // PascalCase; evidence event details are field-RBAC redacted server-side, so the UI shows the summary.
 export type AgentDetectionClass = 'process' | 'network' | 'file' | 'privilege' | ''
+
+/** A finding a third-party tool produced and a pipeline imported through the SARIF route. It is held
+ *  apart from first-party findings on purpose: it entered under governance, it cannot promote itself,
+ *  and its provenance (tool, version, digest, who imported it) is the point of showing it. */
+export interface ImportedFinding {
+  id: string
+  findingId: string
+  severity: Severity
+  title: string
+  message: string
+  path: string
+  startLine: number
+  startColumn: number
+  logicalName: string
+  suppressedByTool: boolean
+  fingerprint: string
+  external: boolean
+  canSelfPromote: boolean
+  tool: string
+  toolVersion: string
+  rule: string
+  sourceDigest: string
+  ingestedBy: string
+  ingestedAt: string
+}
 
 export interface AgentDetectionRecord {
   id: string

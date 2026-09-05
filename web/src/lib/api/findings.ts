@@ -1,6 +1,7 @@
 import type {
   Finding,
   FindingComment,
+  ImportedFinding,
   Retest,
   RetestOutcome,
   SLAAssessment,
@@ -9,6 +10,31 @@ import type {
   SLAView,
 } from '../types'
 import { req } from './client'
+
+// Wire shape is importedFindingPayload in internal/adapter/httpapi/sarif_handler.go: snake_case.
+export function mapImportedFinding(r: any): ImportedFinding {
+  return {
+    id: r.id ?? '',
+    findingId: r.finding_id ?? '',
+    severity: (r.severity ?? 'unknown') as ImportedFinding['severity'],
+    title: r.title ?? '',
+    message: r.message ?? '',
+    path: r.path ?? '',
+    startLine: r.start_line ?? 0,
+    startColumn: r.start_column ?? 0,
+    logicalName: r.logical_name ?? '',
+    suppressedByTool: r.suppressed_by_tool ?? false,
+    fingerprint: r.fingerprint ?? '',
+    external: r.external ?? true,
+    canSelfPromote: r.can_self_promote ?? false,
+    tool: r.tool ?? '',
+    toolVersion: r.tool_version ?? '',
+    rule: r.rule ?? '',
+    sourceDigest: r.source_digest ?? '',
+    ingestedBy: r.ingested_by ?? '',
+    ingestedAt: r.ingested_at ?? '',
+  }
+}
 
 export function mapFinding(r: any): Finding {
   return {
@@ -156,6 +182,12 @@ function mapComment(r: any): FindingComment {
 }
 
 export const findingsApi = {
+  // Third-party findings a pipeline imported through POST /engagements/{id}/sarif.
+  listImportedFindings: async (engagementId: string): Promise<ImportedFinding[]> => {
+    const res = await req(`/engagements/${encodeURIComponent(engagementId)}/imported-findings`)
+    return Array.isArray(res) ? res.map(mapImportedFinding) : []
+  },
+
   findings: async (engagementId: string): Promise<Finding[]> =>
     ((await req(`/engagements/${encodeURIComponent(engagementId)}/findings`)) ?? []).map(mapFinding),
 

@@ -36,6 +36,7 @@ import { LicensesTab } from './LicensesTab'
 import { ComponentsTab } from './ComponentsTab'
 import { ReconTab } from './ReconTab'
 import { DetectionsTab } from './DetectionsTab'
+import { ImportedFindingsTab } from './ImportedFindingsTab'
 import { DataGovernanceTab } from './DataGovernanceTab'
 import { EvidenceTab } from './EvidenceTab'
 import { SettingsTab } from './SettingsTab'
@@ -48,6 +49,7 @@ const DependencyGraphTab = lazy(() => import('../DependencyGraph').then((m) => (
 export type Tab =
   | 'overview'
   | 'findings'
+  | 'imported'
   | 'sla'
   | 'components'
   | 'vulns'
@@ -88,6 +90,7 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
     icon: ShieldZap,
     sub: [
       { id: 'findings', label: 'All Findings', countKey: 'findings' },
+      { id: 'imported', label: 'Imported' },
       { id: 'sla', label: 'Remediation SLA' },
     ],
   },
@@ -505,6 +508,7 @@ export function EngagementDetail() {
         {tab === 'recon' && <ReconTab eng={eng} onGoTab={setTab} />}
         {tab === 'agent' && <AgentTab engagementId={id} />}
         {tab === 'detections' && <DetectionsTab key={id} engagementId={id} />}
+        {tab === 'imported' && <ImportedFindingsTab key={id} engagementId={id} />}
         {tab === 'data-governance' && <DataGovernanceTab key={id} engagementId={id} />}
         {tab === 'reviews' && <JudgmentReviewTab key={id} engagementId={id} />}
         {tab === 'evidence' && <EvidenceTab key={id} engagementId={id} />}

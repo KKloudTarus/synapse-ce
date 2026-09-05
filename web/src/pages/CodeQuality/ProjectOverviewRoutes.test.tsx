@@ -61,6 +61,8 @@ function buildAnalysis(id: string, sourceRef: string): ProjectAnalysis {
   return {
     id,
     createdAt: '2026-07-18T00:00:00Z',
+    origin: 'server',
+    ci: null,
     sourceRef,
     sourceCommit: `${id}abcdef1234567890`,
     gate: { passed: true, results: [] },
