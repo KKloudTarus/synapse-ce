@@ -42,6 +42,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   `det.suspicious_dns_beacon` is v2: 120 DNS datagrams to one destination within a minute, where v1
   fired on every DNS packet. The agent engine, retro hunts and release evidence share the evaluator.
 
+- **The offensive policy register is loaded by the binary.** `synapse-api` parses and validates
+  `policy.yaml` at startup and refuses to start on an invalid register; `GET /api/v1/redteam/policy`
+  shows every technique with its risk class, approval mode, blast radius and whether it is prohibited or
+  production-safe, so the console shows what the running binary enforces rather than what a document says.
+
 - **Imported findings are visible.** Findings a pipeline sent through the SARIF route landed in a
   table no page rendered. The engagement's Findings group gains an Imported tab that lists them with
   tool, version, location and provenance.

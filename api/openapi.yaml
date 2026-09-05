@@ -1449,6 +1449,21 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/redteam/policy:
+    get:
+      tags: [redteam]
+      operationId: getOffensivePolicy
+      summary: Show the offensive policy register the running binary enforces
+      description: >
+        The register (policy.yaml) is parsed and validated at startup; an invalid register stops the
+        process. This route returns it read-only: legal review status and every classified technique with
+        its risk class, approval mode, blast radius and whether the binary treats it as prohibited or
+        production-safe.
+      responses:
+        '200': {description: Policy register, content: {application/json: {schema: {$ref: '#/components/schemas/OffensivePolicy'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
   /api/v1/alerts/test:
     post:
       tags: [fleet]
@@ -4925,6 +4940,32 @@ components:
         total: {type: integer, minimum: 0}
         limit: {type: integer}
         offset: {type: integer}
+    OffensivePolicyTechnique:
+      type: object
+      properties:
+        technique: {type: string}
+        taxonomy_ref: {type: string}
+        disruption: {type: string}
+        reversibility: {type: string}
+        risk_class: {type: string}
+        approval: {type: string}
+        blast_radius: {type: string}
+        production_safe: {type: boolean}
+        prohibited: {type: boolean}
+    OffensivePolicy:
+      type: object
+      properties:
+        legal_review:
+          type: object
+          properties:
+            reviewed: {type: boolean}
+            date: {type: string}
+            owner: {type: string}
+            counsel_reviewed: {type: boolean}
+            counsel_date: {type: string}
+        techniques: {type: array, items: {$ref: '#/components/schemas/OffensivePolicyTechnique'}}
+        prohibited: {type: integer}
+        production_safe: {type: integer}
     AlertOutcome:
       type: object
       properties:

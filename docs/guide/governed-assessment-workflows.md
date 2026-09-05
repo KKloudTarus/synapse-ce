@@ -197,7 +197,10 @@ an export.
 ## Offensive work
 
 Governed exploitation and emulation run only through the allowlist in the
-[offensive policy](repository/offensive-policy.md). A technique absent from the register is refused. The
+[offensive policy](repository/offensive-policy.md), which `synapse-api` loads and validates at startup
+(an invalid register stops the process) and exposes read-only at `GET /api/v1/redteam/policy` with each
+technique's risk class, approval mode, blast radius and prohibited/production-safe flags. A technique
+absent from the register is refused. The
 kill switch stops issuance estate-wide:
 
 ```

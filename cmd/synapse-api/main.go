@@ -34,6 +34,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/correlation"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/riskassessment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
@@ -1586,6 +1587,16 @@ func main() {
 		os.Exit(1)
 	}
 	var assetSvc *assetuc.Service
+	// Offensive policy register (#823): the binary, not a document, decides which techniques are prohibited.
+	// An invalid register is a startup failure; the validated register is exposed read-only to operators.
+	offensiveRegister, oerr := offensivepolicy.Load()
+	if oerr != nil {
+		log.Error("offensive policy register failed validation; refusing to start", "err", oerr)
+		os.Exit(1)
+	}
+	router.SetOffensivePolicy(offensiveRegister)
+	log.Info("offensive policy register loaded", "techniques", len(offensiveRegister.TechniqueIDs()), "counsel_reviewed", offensiveRegister.LegalReview.CounselReviewed, "route", "GET /api/v1/redteam/policy")
+
 	// Operator alerting (#822): a signed webhook that receives every incident correlation opens, plus the
 	// correlator handle detection ingest uses so an incident exists as soon as its detections are sealed.
 	var alertSvc *alertinguc.Service

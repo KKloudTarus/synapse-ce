@@ -11,6 +11,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aitriagereview"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
@@ -76,6 +77,7 @@ type Router struct {
 	assets                 assetService              // optional; nil ⇒ fleet asset routes are not registered
 	hostVulns              hostVulnerabilityService  // optional; nil ⇒ host vulnerability routes are not registered (#820)
 	alerts                 alertService              // optional; nil ⇒ operator alerting routes are not registered
+	offensivePolicy        *offensivepolicy.Register // optional; nil ⇒ the policy register route is not registered
 	cspm                   *cspm.Service             // optional; nil ⇒ CSPM routes are not registered
 	businessAssets         businessAssetService      // optional; nil ⇒ business-level Asset routes are not registered
 	attackPaths            attackPathService         // optional; nil ⇒ attack-path routes are not registered
@@ -541,6 +543,9 @@ func (rt *Router) routes() *http.ServeMux {
 		// offensive work is an administrative act, and the same person who can run offensive work should
 		// not be the only one who can stop it.
 		mux.HandleFunc("POST /api/v1/redteam/halt", rt.authz(userdom.PermAdminister, rt.haltOffensiveWork))
+	}
+	if rt.offensivePolicy != nil {
+		mux.HandleFunc("GET /api/v1/redteam/policy", rt.authz(userdom.PermView, rt.getOffensivePolicy))
 	}
 	mux.HandleFunc("GET /api/v1/engagements", rt.authz(userdom.PermView, rt.listEngagements))
 	mux.HandleFunc("GET /api/v1/engagements/{id}", rt.authz(userdom.PermView, rt.getEngagement))
