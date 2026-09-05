@@ -379,3 +379,63 @@ func TestPlatformAdminMayProvisionAnotherTenant(t *testing.T) {
 		t.Fatalf("provisioned key must authenticate into tenant-b: %+v %v", got, err)
 	}
 }
+
+// TestDefaultTenantAdminCannotSeizeTheBootstrapPrincipal pins the escalation that the tenant
+// confinement alone does not close. The bootstrap admin is stored with an empty tenant_id, which
+// normalizes to the default tenant, so it sits in that tenant's roster and an ordinary default-tenant
+// admin reaches it through the normal lookup. Rotating its key would hand that admin the plaintext
+// credential of the platform principal every global-resource guard tests for; disabling or demoting
+// it would lock the deployment operator out.
+func TestDefaultTenantAdminCannotSeizeTheBootstrapPrincipal(t *testing.T) {
+	svc, _ := newAuditedSvc(t)
+	ctx := context.Background()
+	if err := svc.EnsureBootstrapAdmin(ctx, "env-token"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	// An admin of the default tenant, which is the tenant the bootstrap row normalizes into.
+	_, _, admin := seedAdmin(t, svc, "default", "Default Admin")
+
+	// The operator is visible in the roster; that is honest, it really is in this tenant.
+	roster, err := svc.List(ctx, admin)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var sawOperator bool
+	for _, u := range roster {
+		if u.ID.String() == BootstrapID {
+			sawOperator = true
+		}
+	}
+	if !sawOperator {
+		t.Fatal("bootstrap admin should be listed in the default tenant it belongs to")
+	}
+
+	mutations := []struct {
+		name string
+		call func() error
+	}{
+		{"rotate", func() error { _, _, err := svc.RotateAPIKey(ctx, admin, BootstrapID); return err }},
+		{"disable", func() error { _, err := svc.SetDisabled(ctx, admin, BootstrapID, true); return err }},
+		{"demote", func() error { _, err := svc.Update(ctx, admin, BootstrapID, "", user.RoleReadOnly); return err }},
+		{"rename", func() error { _, err := svc.Update(ctx, admin, BootstrapID, "Pwned", ""); return err }},
+	}
+	for _, m := range mutations {
+		if err := m.call(); !errors.Is(err, shared.ErrForbidden) {
+			t.Errorf("%s of the bootstrap principal = %v, want forbidden", m.name, err)
+		}
+	}
+
+	// The env token still authenticates as the untouched operator.
+	got, err := svc.Authenticate(ctx, "env-token")
+	if err != nil {
+		t.Fatalf("bootstrap token must still authenticate: %v", err)
+	}
+	if got.ID.String() != BootstrapID || got.Disabled || !got.Role.Can(user.PermAdminister) {
+		t.Fatalf("bootstrap principal was altered: %+v", got)
+	}
+
+	// The operator itself still rotates its own key, which is how the product supports rotation.
+	if _, _, err := svc.RotateAPIKey(ctx, bootstrapActor, BootstrapID); err != nil {
+		t.Fatalf("bootstrap self-rotation: %v", err)
+	}
+}

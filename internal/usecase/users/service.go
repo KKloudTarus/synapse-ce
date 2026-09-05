@@ -103,6 +103,24 @@ func (a Actor) tenant() shared.ID { return shared.TenantOrDefault(shared.ID(a.Te
 // confined to the actor's own tenant for the bootstrap principal too.
 func (a Actor) platformAdmin() bool { return a.ID == BootstrapID }
 
+// mayMutate refuses a user-management mutation aimed at the bootstrap principal by anybody else.
+//
+// The bootstrap admin is stored with an empty tenant_id, which normalizes to the default tenant, so
+// it is a member of that tenant's roster and reachable by its admins through the ordinary
+// tenant-scoped lookup. Without this guard a default-tenant admin could rotate the bootstrap key,
+// read the new plaintext from the response, and present it to become the platform principal that
+// every global-resource guard in the product tests for. Disabling or demoting it would equally lock
+// the deployment operator out of its own deployment.
+//
+// The bootstrap credential is owned by SYNAPSE_API_TOKEN and rotated by changing that variable and
+// restarting, which is the only path that should move it.
+func (a Actor) mayMutate(id shared.ID) error {
+	if id.String() == BootstrapID && a.ID != BootstrapID {
+		return fmt.Errorf("%w: the bootstrap operator is managed through SYNAPSE_API_TOKEN, not through user management", shared.ErrForbidden)
+	}
+	return nil
+}
+
 // targetTenant resolves the tenant an action applies to. An empty request means "my own tenant".
 // A different tenant is refused unless the actor is the platform admin, so a tenant-A admin can
 // neither provision into tenant B nor receive that user's API key.
@@ -158,6 +176,9 @@ func (s *Service) List(ctx context.Context, actor Actor) ([]*user.User, error) {
 // leaves that field unchanged, so a caller can rename without knowing the current role. Demoting
 // the tenant's last enabled admin is refused, else the tenant would be left unmanageable. Audited.
 func (s *Service) Update(ctx context.Context, actor Actor, id shared.ID, name string, role user.Role) (*user.User, error) {
+	if err := actor.mayMutate(id); err != nil {
+		return nil, err
+	}
 	u, err := s.repo.GetByID(ctx, actor.tenant(), id)
 	if err != nil {
 		return nil, fmt.Errorf("load user: %w", err)
@@ -198,6 +219,9 @@ func (s *Service) Update(ctx context.Context, actor Actor, id shared.ID, name st
 // attribution, is preserved while authentication stops. Disabling the tenant's last enabled admin
 // is refused, else nobody could administer the tenant afterwards. Audited.
 func (s *Service) SetDisabled(ctx context.Context, actor Actor, id shared.ID, disabled bool) (*user.User, error) {
+	if err := actor.mayMutate(id); err != nil {
+		return nil, err
+	}
 	u, err := s.repo.GetByID(ctx, actor.tenant(), id)
 	if err != nil {
 		return nil, fmt.Errorf("load user: %w", err)
@@ -229,6 +253,9 @@ func (s *Service) SetDisabled(ctx context.Context, actor Actor, id shared.ID, di
 // product. Audited; the key itself never reaches the audit log. A disabled user may be rotated —
 // rotation invalidates the old credential whether or not the account is currently usable.
 func (s *Service) RotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (*user.User, string, error) {
+	if err := actor.mayMutate(id); err != nil {
+		return nil, "", err
+	}
 	u, err := s.repo.GetByID(ctx, actor.tenant(), id)
 	if err != nil {
 		return nil, "", fmt.Errorf("load user: %w", err)

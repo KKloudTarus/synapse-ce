@@ -108,12 +108,29 @@ evidence, and finding attribution, so removing the row would break the history t
 records provable. A disabled operator keeps its id and every past attribution; only authentication
 stops.
 
-Two rules keep this surface from becoming an escalation path. Provisioning into a tenant other than
-the caller's own is refused with `403` unless the caller is the bootstrap principal seeded from
-`SYNAPSE_API_TOKEN`, which is the only identity that may seed a new tenant's first admin; there is
-deliberately no platform-admin role, because a role would be assignable through this same API.
+Three rules keep this surface from becoming an escalation path.
+
+Provisioning into a tenant other than the caller's own is refused with `403` unless the caller is
+the bootstrap principal seeded from `SYNAPSE_API_TOKEN`, which is the only identity that may seed a
+new tenant's first admin. There is deliberately no platform-admin role, because a role would be
+assignable through this same API.
+
+The bootstrap principal itself is not manageable through this API. It is stored with an empty
+tenant, which normalizes to the default tenant, so it appears in that tenant's roster and its admins
+can see it. Updating it, disabling it, and rotating its key are refused with `403` for every caller
+but the bootstrap principal. Without that rule a default-tenant admin could rotate the bootstrap key,
+read the new plaintext from the response, and present it to become the platform principal that every
+global-resource guard tests for. Rotate the bootstrap credential by changing `SYNAPSE_API_TOKEN` and
+restarting, which is the only path that moves it.
+
 Disabling or demoting a tenant's last enabled admin is refused with `409`, so an admin cannot lock
 its own tenant out.
+
+`GET /api/v1/capabilities` is readable by any authenticated caller, including the read-only role. It
+reports which optional subsystems this deployment has switched on and names the `SYNAPSE_*` variable
+that controls each, never a variable's value. That is deployment topology, and it is exposed
+deliberately so the dashboard can explain a disabled feature to the person looking at it rather than
+showing a bare `404`.
 
 ## Browser OIDC access
 
