@@ -11,7 +11,8 @@ import {
   unavailableReasonText,
 } from '../../../lib/projectOverviewPresentation'
 import { Card, cn } from '../../ui'
-import { gradeTone, type Grade } from '../qualityPresentation'
+import type { Grade } from '../../../lib/types'
+import { gradeTone } from '../qualityPresentation'
 
 const icons: Record<OverviewMetricCardModel['key'], FC<SVGProps<SVGSVGElement>>> = {
   security: Shield,
