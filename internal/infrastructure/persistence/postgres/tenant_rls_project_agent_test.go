@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -27,13 +29,23 @@ import (
 )
 
 const (
-	rls817Role     = "synapse_rls817_runtime"
-	rls817Password = "rls817pw"
-	rls817TenantA  = shared.ID("rls817-tenant-a")
-	rls817TenantB  = shared.ID("rls817-tenant-b")
-	rls817EngA     = shared.ID("rls817-eng-a")
-	rls817EngB     = shared.ID("rls817-eng-b")
+	rls817Role    = "synapse_rls817_runtime"
+	rls817TenantA = shared.ID("rls817-tenant-a")
+	rls817TenantB = shared.ID("rls817-tenant-b")
+	rls817EngA    = shared.ID("rls817-eng-a")
+	rls817EngB    = shared.ID("rls817-eng-b")
 )
+
+// rls817Password is generated per run rather than written into the source. The role exists only for
+// the length of one test, so a literal buys nothing, and a checked-in password string is a finding
+// for any credential scanner pointed at this repository whatever the value actually protects.
+var rls817Password = func() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("generate rls test role password: " + err.Error())
+	}
+	return hex.EncodeToString(b[:])
+}()
 
 // rls817Fixture holds an owner pool (the dev superuser, which bypasses RLS and is therefore only
 // used for setup and teardown) and a runtime pool that connects as a NOSUPERUSER NOBYPASSRLS role

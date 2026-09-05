@@ -19,8 +19,9 @@
 # NOSUPERUSER NOBYPASSRLS application role, mirroring what the full stack does. Point the API at
 # both roles: the owner runs migrations and grants, the app role serves traffic.
 #
-#   export SYNAPSE_DB_DSN='postgres://synapse_app:synapse-app@localhost:5432/synapse?sslmode=disable'
-#   export SYNAPSE_DB_MIGRATION_DSN='postgres://synapse:synapse@localhost:5432/synapse?sslmode=disable'
+#   export DB_PASSWORD="${DB_PASSWORD:-synapse}" DB_APP_PASSWORD="${DB_APP_PASSWORD:-synapse-app}"
+#   export SYNAPSE_DB_DSN="postgres://synapse_app:${DB_APP_PASSWORD}@localhost:5432/synapse?sslmode=disable"
+#   export SYNAPSE_DB_MIGRATION_DSN="postgres://synapse:${DB_PASSWORD}@localhost:5432/synapse?sslmode=disable"
 #
 # Credentials are LOCAL DEV ONLY and are read from the environment with defaults. This stack keeps
 # well-known defaults because it holds nothing but throwaway local state; the full stack, which

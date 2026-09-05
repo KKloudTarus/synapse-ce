@@ -56,8 +56,10 @@ To back the native API with PostgreSQL instead of the in-memory stores, start th
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d   # Postgres + MinIO, project synapse-dev
-export SYNAPSE_DB_DSN='postgres://synapse_app:synapse-app@localhost:5432/synapse?sslmode=disable'
-export SYNAPSE_DB_MIGRATION_DSN='postgres://synapse:synapse@localhost:5432/synapse?sslmode=disable'
+# The stack's own defaults; set these in deploy/.env to use anything else.
+export DB_PASSWORD="${DB_PASSWORD:-synapse}" DB_APP_PASSWORD="${DB_APP_PASSWORD:-synapse-app}"
+export SYNAPSE_DB_DSN="postgres://synapse_app:${DB_APP_PASSWORD}@localhost:5432/synapse?sslmode=disable"
+export SYNAPSE_DB_MIGRATION_DSN="postgres://synapse:${DB_PASSWORD}@localhost:5432/synapse?sslmode=disable"
 make dev
 ```
 
