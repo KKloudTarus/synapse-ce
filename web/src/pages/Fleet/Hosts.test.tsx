@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { api } from '../../lib/api'
@@ -48,10 +48,11 @@ describe('Hosts', () => {
   })
   afterEach(() => restoreViewport())
 
-  it('shows a loading state while the list is in flight', () => {
+  it('keeps the table frame while the list is in flight', () => {
     vi.mocked(api.listHosts).mockReturnValue(new Promise(() => {}))
     renderPage()
-    expect(screen.getByText('Loading hosts…')).toBeInTheDocument()
+    expect(screen.getByLabelText('Loading')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Hosts' })).toBeInTheDocument()
   })
 
   it('lists hosts with their severity counts, scan state and fleet totals', async () => {
@@ -59,21 +60,44 @@ describe('Hosts', () => {
     renderPage()
     expect(await screen.findByText('web01')).toBeInTheDocument()
     expect(screen.getByText('machine-id/abc')).toBeInTheDocument()
-    expect(screen.getByText('linux 12')).toBeInTheDocument()
+    expect(screen.getByText(/linux 12/)).toBeInTheDocument()
     expect(screen.getByText('Scanned')).toBeInTheDocument()
     expect(screen.getByText('db01')).toBeInTheDocument()
-    expect(screen.getByText('No packages reported')).toBeInTheDocument()
-    // The incomplete inventory is marked on the package count.
-    expect(screen.getByText('0*')).toBeInTheDocument()
-    // Header totals: 2 hosts, 1 scanned, 1 critical, 2 high, 1 KEV.
-    expect(screen.getByText('· 1 scanned')).toBeInTheDocument()
+    // db01 reported no packages: the scan badge and the package cell both say so.
+    expect(screen.getByText('No package inventory')).toBeInTheDocument()
+    expect(screen.getByText(/^none/)).toBeInTheDocument()
+    // The fleet strip: 2 hosts, 1 with findings, 1 critical, 2 high, 1 KEV, 1 without inventory.
+    expect(screen.getByLabelText('Hosts: 2')).toBeInTheDocument()
+    expect(screen.getByLabelText('With findings: 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('Critical: 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('High: 2')).toBeInTheDocument()
+    expect(screen.getByLabelText('Known exploited: 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('No inventory: 1')).toBeInTheDocument()
     expect(screen.getByRole('row', { name: 'Open host web01' })).toBeInTheDocument()
+    expect(screen.getByText(/Last package set recorded/)).toBeInTheDocument()
   })
 
-  it('shows the empty state when no host is inventoried', async () => {
+  it('filters by state and by search', async () => {
+    vi.mocked(api.listHosts).mockResolvedValue([scanned, quiet])
+    renderPage()
+    await screen.findByText('web01')
+    fireEvent.click(screen.getByRole('button', { name: 'No inventory' }))
+    expect(screen.queryByText('web01')).not.toBeInTheDocument()
+    expect(screen.getByText('db01')).toBeInTheDocument()
+    expect(screen.getByText('1 of 2 hosts')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'All' }))
+    fireEvent.change(screen.getByLabelText('Search hosts'), { target: { value: 'machine-id/abc' } })
+    expect(screen.getByText('web01')).toBeInTheDocument()
+    expect(screen.queryByText('db01')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Search hosts'), { target: { value: 'nothing-matches' } })
+    expect(screen.getByText('No hosts match')).toBeInTheDocument()
+  })
+
+  it('shows the empty state inside the table frame when no host is inventoried', async () => {
     vi.mocked(api.listHosts).mockResolvedValue([])
     renderPage()
-    expect(await screen.findByText('No hosts inventoried')).toBeInTheDocument()
+    expect(await screen.findByText('No hosts received yet')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open fleet agents' })).toBeInTheDocument()
   })
 
   it('explains the disabled feature on a 404', async () => {
@@ -82,10 +106,12 @@ describe('Hosts', () => {
     await waitFor(() => expect(screen.getByText(/SYNAPSE_FLEET_HOST_INGEST_ENABLED/)).toBeInTheDocument())
   })
 
-  it('shows the error with a retry on any other failure', async () => {
+  it('shows a framed error with the cause and a retry on any other failure', async () => {
     vi.mocked(api.listHosts).mockRejectedValue(new Error('HTTP 500: boom'))
     renderPage()
-    expect(await screen.findByText(/HTTP 500: boom/)).toBeInTheDocument()
+    expect(await screen.findByText('Could not load hosts')).toBeInTheDocument()
+    expect(screen.getByText(/HTTP 500: boom/)).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 })

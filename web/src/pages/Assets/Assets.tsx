@@ -11,6 +11,7 @@ import {
 } from '@untitledui/icons'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Metric, MetricStrip } from '../../components/synapse/Metric'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner, cn } from '../../components/ui'
 import { BadgeWithIcon } from '../../components/base/badges/badges'
 import { PaginationCardDefault } from '../../components/application/pagination/pagination'
@@ -105,12 +106,12 @@ export function Assets() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <MetricStrip ariaLabel="Asset inventory summary">
         <SummaryCard icon={LayersThree01} label="Total assets" value={result?.total ?? 0} tone="muted" />
         <SummaryCard icon={AlertTriangle} label="Critical" value={visible.filter((asset) => asset.criticality === 'critical').length} tone="critical" />
         <SummaryCard icon={Activity} label="Active" value={visible.filter((asset) => asset.lifecycle === 'active').length} tone="accent" />
         <SummaryCard icon={ShieldTick} label="Needs attention" value={visible.filter((asset) => !['good', 'unknown'].includes(asset.posture ?? 'unknown')).length} tone="brand" />
-      </div>
+      </MetricStrip>
 
       <Card className="overflow-hidden" bodyClass="p-0">
         <div className="border-b border-secondary px-4 py-3.5 sm:px-5 sm:py-4">
@@ -185,7 +186,6 @@ export function Assets() {
 }
 
 function SummaryCard({
-  icon: Icon,
   label,
   value,
   tone = 'muted',
@@ -195,25 +195,7 @@ function SummaryCard({
   value: number | string
   tone?: 'muted' | 'critical' | 'accent' | 'brand'
 }) {
-  const iconColor = {
-    muted: 'text-tertiary',
-    critical: 'text-critical',
-    accent: 'text-success-primary',
-    brand: 'text-brand-secondary',
-  }[tone]
-  return (
-    <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-secondary">{label}</span>
-          <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">{value}</div>
-        </div>
-        <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
-          <Icon className={cn('size-5', iconColor)} aria-hidden="true" />
-        </span>
-      </div>
-    </div>
-  )
+  return <Metric label={label} value={value} tone={tone} />
 }
 
 function AssetRow({ asset }: { asset: BusinessAsset }) {

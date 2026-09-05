@@ -30,6 +30,19 @@ describe('fleet host vulnerabilities', () => {
     expect(hosts[1].summary.total).toBe(0)
   })
 
+  it('maps the recorded package inventory', async () => {
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
+      asset_id: 'asset-1', engagement_id: 'ctx-1', recorded_at: '2026-09-05T09:00:00Z',
+      packages: [{ name: 'openssl', version: '3.0.13-0ubuntu3.9', purl: 'pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.9?arch=amd64&distro=ubuntu-24.04' }, { name: 'zlib1g', version: '1:1.3.dfsg-3.1ubuntu2' }],
+    }) } as Response)
+    const inv = await api.hostPackages('asset-1')
+    expect(fetchSpy.mock.calls[0][0]).toContain('/assets/asset-1/packages')
+    expect(inv.engagementId).toBe('ctx-1')
+    expect(inv.packages).toHaveLength(2)
+    expect(inv.packages[0]).toEqual({ name: 'openssl', version: '3.0.13-0ubuntu3.9', purl: 'pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.9?arch=amd64&distro=ubuntu-24.04' })
+    expect(inv.packages[1].purl).toBe('')
+  })
+
   it('maps one host with its findings and the computed CVSS score', async () => {
     fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
       ...row,

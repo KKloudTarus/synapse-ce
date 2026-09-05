@@ -1575,6 +1575,19 @@ export interface HostVulnerabilities extends HostRow {
   findings: HostFinding[]
 }
 
+export interface HostPackage {
+  name: string
+  version: string
+  purl: string
+}
+
+export interface HostPackages {
+  assetId: string
+  engagementId: string
+  recordedAt: string | null
+  packages: HostPackage[]
+}
+
 export interface FleetOrderBrief {
   id: string
   capability: string

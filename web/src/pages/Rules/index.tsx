@@ -9,7 +9,6 @@ import {
   ChevronDown,
   Copy01,
   FileCode01,
-  LayersThree01,
   RefreshCw01,
   SearchLg,
   ShieldZap,
@@ -19,6 +18,7 @@ import {
 } from '@untitledui/icons'
 import { Link } from 'react-router-dom'
 import { Button, Card, EmptyState, Spinner, cn } from '../../components/ui'
+import { Metric, MetricStrip } from '../../components/synapse/Metric'
 import { Badge } from '../../components/base/badges/badges'
 import { SeverityBadge } from '../../components/synapse/SeverityBadge'
 import { VirtualRuleCards } from '../../components/rules/VirtualRuleCards'
@@ -270,63 +270,12 @@ export default function Rules() {
       </header>
 
       {!catalogLoading && !catalogError && catalogRules.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
-          <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-secondary">Vulnerabilities</span>
-                <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
-                  {stats.vulns.toLocaleString()}
-                </div>
-              </div>
-              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
-                <ShieldZap className="size-5 text-utility-pink-600 dark:text-utility-pink-400" aria-hidden="true" />
-              </span>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-secondary">Security Hotspots</span>
-                <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
-                  {stats.hotspots.toLocaleString()}
-                </div>
-              </div>
-              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
-                <Target04 className="size-5 text-utility-orange-600 dark:text-utility-orange-400" aria-hidden="true" />
-              </span>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-secondary">Code Smells &amp; Bugs</span>
-                <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
-                  {stats.smellsAndBugs.toLocaleString()}
-                </div>
-              </div>
-              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
-                <FileCode01 className="size-5 text-utility-blue-600 dark:text-utility-blue-400" aria-hidden="true" />
-              </span>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-secondary">Supported Stacks</span>
-                <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
-                  {stats.languages}
-                </div>
-              </div>
-              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
-                <LayersThree01 className="size-5 text-utility-green-600 dark:text-utility-green-400" aria-hidden="true" />
-              </span>
-            </div>
-          </div>
-        </div>
+        <MetricStrip ariaLabel="Rule catalogue summary">
+          <Metric label="Vulnerabilities" value={stats.vulns} tone="critical" />
+          <Metric label="Security hotspots" value={stats.hotspots} tone="high" />
+          <Metric label="Code smells & bugs" value={stats.smellsAndBugs} />
+          <Metric label="Supported stacks" value={stats.languages} />
+        </MetricStrip>
       )}
 
       {catalogError ? (

@@ -18,6 +18,7 @@ import {
 } from '../../components/synapse/DashboardCharts'
 import { useDashboardData } from './hooks/useDashboardData'
 import { StatCard } from './components/StatCard'
+import { MetricStrip } from '@/components/synapse/Metric'
 import { ChartCard } from './components/ChartCard'
 import { PriorityAssetsTable } from './components/PriorityAssetsTable'
 import { AssessmentActivityTable } from './components/AssessmentActivityTable'
@@ -64,7 +65,7 @@ export const DashboardPage: FC = () => {
       </header>
 
       {/* KPI Stat Cards Row */}
-      <section aria-label="Security operations summary" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <MetricStrip ariaLabel="Security operations summary">
         <StatCard
           icon={Package}
           label="Total Assets"
@@ -91,7 +92,7 @@ export const DashboardPage: FC = () => {
           valueClassName={fleetDisabled ? 'text-lg sm:text-xl' : undefined}
           tone={fleetDisabled ? 'muted' : coverageGaps ? 'high' : 'accent'}
         />
-      </section>
+      </MetricStrip>
 
       {/* Telemetry / Hero Chart Section + Activity Feed */}
       {analyticsError && <ErrorState message={analyticsError} />}

@@ -11,6 +11,7 @@ import {
 import { api } from '../../lib/api'
 import { useFetch } from '../../hooks'
 import { EngagementStatCard } from './components/EngagementStatCard'
+import { MetricStrip } from '@/components/synapse/Metric'
 import { EngagementFilterBar } from './components/EngagementFilterBar'
 import { EngagementTable } from './components/EngagementTable'
 import { PageError } from '../../components/synapse/PageError'
@@ -312,7 +313,7 @@ export const EngagementsPage: FC = () => {
       )}
 
       {/* KPI Stat Cards Row */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <MetricStrip ariaLabel="Engagement summary">
         <EngagementStatCard
           label="Total"
           value={data ? totalCount : 0}
@@ -337,7 +338,7 @@ export const EngagementsPage: FC = () => {
           icon={LayersThree01}
           tone={unassignedCount > 0 ? 'warning' : 'default'}
         />
-      </div>
+      </MetricStrip>
 
       {/* Error state */}
       {error && <PageError error={error} />}

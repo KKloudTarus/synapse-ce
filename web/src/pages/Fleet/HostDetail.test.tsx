@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { api } from '../../lib/api'
@@ -16,7 +16,7 @@ vi.mock('../../lib/api', () => {
       this.status = status
     }
   }
-  return { ApiError, api: { hostVulnerabilities: vi.fn() } }
+  return { ApiError, api: { hostVulnerabilities: vi.fn(), hostPackages: vi.fn() } }
 })
 
 const finding: HostFinding = {
@@ -55,31 +55,67 @@ describe('HostDetail', () => {
   })
   afterEach(() => restoreViewport())
 
-  it('renders the host, its exposure and the findings table', async () => {
+  it('renders the host, its exposure strip and the findings table', async () => {
     vi.mocked(api.hostVulnerabilities).mockResolvedValue(host)
     renderPage()
     expect(await screen.findByRole('heading', { name: 'web01' })).toBeInTheDocument()
     expect(vi.mocked(api.hostVulnerabilities)).toHaveBeenCalledWith('asset-1')
-    expect(screen.getByText('Scanned')).toBeInTheDocument()
-    expect(screen.getByText('Vulnerabilities (1)')).toBeInTheDocument()
-    // Advisory, package, installed and fixed version, CVSS, sources.
+    expect(screen.getAllByText('Scanned').length).toBeGreaterThan(0)
+    expect(screen.getByRole('tab', { name: /Vulnerabilities 1/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Packages 412/ })).toBeInTheDocument()
+    // Exposure strip.
+    expect(screen.getByLabelText('Open findings: 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('Critical: 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('Known exploited: 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('Fixable: 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('Packages: 412')).toBeInTheDocument()
+    expect(screen.getByLabelText('Coverage gaps: 4')).toBeInTheDocument()
+    // Advisory, package, installed and fixed version, CVSS, KEV, sources.
     expect(screen.getByText('CVE-2024-0001')).toBeInTheDocument()
     expect(screen.getByText('openssl')).toBeInTheDocument()
     expect(screen.getByText('3.0.11-1~deb12u2')).toBeInTheDocument()
     expect(screen.getByText('3.0.13-1~deb12u1')).toBeInTheDocument()
     expect(screen.getByText('9.8')).toBeInTheDocument()
+    expect(screen.getByText('KEV')).toBeInTheDocument()
     expect(screen.getByText('osv, grype')).toBeInTheDocument()
-    expect(screen.getByText('Known exploited', { selector: 'span' })).toBeInTheDocument()
-    // Host facts.
+    // Host facts in the header.
     expect(screen.getByText('6.1.0-18-amd64')).toBeInTheDocument()
     expect(screen.getByText('agent-1')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy host key' })).toBeInTheDocument()
   })
 
-  it('tells the operator when the host never reported packages', async () => {
-    vi.mocked(api.hostVulnerabilities).mockResolvedValue({ ...host, engagementId: '', packages: 0, recordedAt: null, lastScan: null, findings: [], summary: { ...host.summary, total: 0, critical: 0, fixable: 0, kev: 0 } })
+  it('filters findings by severity, fix state and search', async () => {
+    const low: HostFinding = { ...finding, id: 'f2', title: 'CVE-2023-0002 in zlib1g@1:1.2.13', severity: 'low', kev: false, fixedVersion: '', cvssScore: 0, advisoryId: 'CVE-2023-0002', dedupKey: 'vuln:CVE-2023-0002:zlib1g:1:1.2.13' }
+    vi.mocked(api.hostVulnerabilities).mockResolvedValue({ ...host, findings: [finding, low], summary: { ...host.summary, total: 2, low: 1 } })
     renderPage()
-    expect(await screen.findByText('No packages reported yet')).toBeInTheDocument()
-    expect(screen.queryByText('Last scan')).not.toBeInTheDocument()
+    await screen.findByText('CVE-2024-0001')
+    expect(screen.getByText('CVE-2023-0002')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Fix available' }))
+    expect(screen.queryByText('CVE-2023-0002')).not.toBeInTheDocument()
+    expect(screen.getByText('1 of 2 findings')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Any fix state' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Low' }))
+    expect(screen.queryByText('CVE-2024-0001')).not.toBeInTheDocument()
+    expect(screen.getByText('CVE-2023-0002')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'All severities' }))
+    fireEvent.change(screen.getByLabelText('Search findings'), { target: { value: 'openssl' } })
+    expect(screen.getByText('CVE-2024-0001')).toBeInTheDocument()
+    expect(screen.queryByText('CVE-2023-0002')).not.toBeInTheDocument()
+  })
+
+  it('names the missing package inventory and the unrecorded state separately', async () => {
+    vi.mocked(api.hostVulnerabilities).mockResolvedValue({ ...host, engagementId: '', packages: 0, recordedAt: null, lastScan: null, findings: [], summary: { ...host.summary, total: 0, critical: 0, fixable: 0, kev: 0 }, asset: { ...host.asset, attributes: { ...host.asset.attributes, packages: '0' } } })
+    const { unmount } = renderPage()
+    expect(await screen.findByText('Package inventory missing')).toBeInTheDocument()
+    expect(screen.getAllByText('No package inventory').length).toBeGreaterThan(0)
+    unmount()
+
+    // The agent reported 427 packages but nothing was recorded: the page says so instead of "no packages".
+    vi.mocked(api.hostVulnerabilities).mockResolvedValue({ ...host, engagementId: '', packages: 0, recordedAt: null, lastScan: null, findings: [], summary: { ...host.summary, total: 0, critical: 0, fixable: 0, kev: 0 }, asset: { ...host.asset, attributes: { ...host.asset.attributes, packages: '427' } } })
+    renderPage()
+    expect(await screen.findByText('Packages reported, none recorded')).toBeInTheDocument()
+    expect(screen.getAllByText('Packages not recorded').length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Packages: 427')).toBeInTheDocument()
   })
 
   it('distinguishes a running scan from a clean result', async () => {
@@ -90,13 +126,31 @@ describe('HostDetail', () => {
 
     vi.mocked(api.hostVulnerabilities).mockResolvedValue({ ...host, findings: [], summary: { ...host.summary, total: 0, critical: 0, fixable: 0, kev: 0 } })
     renderPage()
-    expect(await screen.findByText('No known vulnerabilities')).toBeInTheDocument()
+    expect(await screen.findByText('No vulnerable OS packages found')).toBeInTheDocument()
   })
 
-  it('shows the error with a way back', async () => {
+  it('lists the recorded packages on the Packages tab', async () => {
+    vi.mocked(api.hostVulnerabilities).mockResolvedValue(host)
+    vi.mocked(api.hostPackages).mockResolvedValue({ assetId: 'asset-1', engagementId: 'ctx-1', recordedAt: '2026-09-05T09:00:00Z', packages: [
+      { name: 'openssl', version: '3.0.11-1~deb12u2', purl: 'pkg:deb/debian/openssl@3.0.11-1~deb12u2?distro=debian-12' },
+      { name: 'zlib1g', version: '1:1.2.13.dfsg-1', purl: '' },
+    ] })
+    renderPage()
+    await screen.findByRole('heading', { name: 'web01' })
+    fireEvent.click(screen.getByRole('tab', { name: /Packages/ }))
+    expect(await screen.findByText('zlib1g')).toBeInTheDocument()
+    expect(vi.mocked(api.hostPackages)).toHaveBeenCalledWith('asset-1')
+    expect(screen.getByText(/2 packages/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Search packages'), { target: { value: 'zlib' } })
+    expect(screen.queryByText('pkg:deb/debian/openssl@3.0.11-1~deb12u2?distro=debian-12')).not.toBeInTheDocument()
+    expect(screen.getByText('1 of 2 packages', { exact: false })).toBeInTheDocument()
+  })
+
+  it('shows a framed error with a way back', async () => {
     vi.mocked(api.hostVulnerabilities).mockRejectedValue(new Error('HTTP 500: boom'))
     renderPage()
-    expect(await screen.findByText(/HTTP 500: boom/)).toBeInTheDocument()
+    expect(await screen.findByText('Could not load this host')).toBeInTheDocument()
+    expect(screen.getByText(/HTTP 500: boom/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Hosts/ })).toHaveAttribute('href', '/fleet/hosts')
   })
 })

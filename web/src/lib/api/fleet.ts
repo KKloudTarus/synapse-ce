@@ -6,6 +6,7 @@ import type {
   FleetCoverageSummary,
   FleetDesiredGap,
   HostFinding,
+  HostPackages,
   HostRow,
   HostScan,
   HostVulnerabilities,
@@ -95,6 +96,16 @@ export const fleetApi = {
   hostVulnerabilities: async (assetId: string): Promise<HostVulnerabilities> => {
     const raw = await req(`/assets/${encodeURIComponent(assetId)}/vulnerabilities`)
     return { ...mapHostRow(raw), findings: (raw?.findings ?? []).map(mapHostFinding) }
+  },
+
+  hostPackages: async (assetId: string): Promise<HostPackages> => {
+    const raw = await req(`/assets/${encodeURIComponent(assetId)}/packages`)
+    return {
+      assetId: raw?.asset_id ?? '',
+      engagementId: raw?.engagement_id ?? '',
+      recordedAt: raw?.recorded_at ?? null,
+      packages: (raw?.packages ?? []).map((p: any) => ({ name: p?.name ?? '', version: p?.version ?? '', purl: p?.purl ?? '' })),
+    }
   },
 
   listFleetAgents: async (state?: FleetAgentHealth): Promise<FleetAgentRow[]> => {

@@ -52,6 +52,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   table no page rendered. The engagement's Findings group gains an Imported tab that lists them with
   tool, version, location and provenance.
 
+### Changed
+
+- **Console pages read as one operational surface.** The Hosts list is a dense table (host, OS,
+  packages, open findings by severity, fixable, KEV, scan state, recorded) with a filter row; the host
+  detail shows the facts in the header, one metric strip, and Vulnerabilities and Packages tabs whose
+  empty states name the missing stage (no inventory, reported but not recorded, scan pending, scan
+  failed, clean). The framed stat cards on Dashboard, Assets, Engagements and Rules are replaced by
+  the same compact metric strip, and loading and empty states share one component across pages.
+
 ### Fixed
 
 - **SAST precision on a real repository.** A full scan of this repository produced 623 findings, 140 of
