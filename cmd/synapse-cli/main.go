@@ -490,7 +490,13 @@ func runDuplication(args []string) error {
 // runQuality runs the maintainability + reliability rules (plus duplication and, when the synapse-ast
 // sidecar is available, high-complexity) over a local source tree and reports the findings, optionally
 // emitting SARIF or gating on severity.
-func runQuality(args []string) error {
+func runQuality(args []string) error { return runQualityTo(os.Stdout, args) }
+
+// runQualityTo is runQuality with the report stream injected, so a test can assert what was written.
+// The report (SARIF or the human summary) is ALWAYS written before the --fail-on decision: the gate
+// result belongs in the exit code, and a caller redirecting stdout to a file must still get the report
+// on a failing gate.
+func runQualityTo(w io.Writer, args []string) error {
 	dir := args[0]
 	if strings.HasPrefix(dir, "-") {
 		return fmt.Errorf("first argument must be a path, got option %q", dir)
@@ -546,24 +552,30 @@ func runQuality(args []string) error {
 		if merr != nil {
 			return fmt.Errorf("encode sarif: %w", merr)
 		}
-		if _, werr := os.Stdout.Write(append(out, '\n')); werr != nil {
+		if _, werr := w.Write(append(out, '\n')); werr != nil {
 			return fmt.Errorf("write sarif: %w", werr)
 		}
 	} else {
-		fmt.Printf("\nSynapse code quality – %s\n", dir)
 		byKind := map[finding.Kind]int{}
 		for _, f := range findings {
 			byKind[f.Kind]++
 		}
-		fmt.Printf("  findings: %d (quality: %d, reliability: %d, sast: %d)\n", len(findings), byKind[finding.KindQuality], byKind[finding.KindReliability], byKind[finding.KindSAST])
+		var rep bytes.Buffer
+		fmt.Fprintf(&rep, "\nSynapse code quality – %s\n", dir)
+		fmt.Fprintf(&rep, "  findings: %d (quality: %d, reliability: %d, sast: %d)\n", len(findings), byKind[finding.KindQuality], byKind[finding.KindReliability], byKind[finding.KindSAST])
 		if !includeTestSmells {
-			fmt.Println("  note: info-severity smells in test code are hidden (--include-test-smells to show)")
+			fmt.Fprintln(&rep, "  note: info-severity smells in test code are hidden (--include-test-smells to show)")
 		}
 		for _, f := range findings {
-			fmt.Printf("    [%-8s %-11s] %s\n", f.Severity, f.Kind, f.Title)
+			fmt.Fprintf(&rep, "    [%-8s %-11s] %s\n", f.Severity, f.Kind, f.Title)
+		}
+		if _, werr := w.Write(rep.Bytes()); werr != nil {
+			return fmt.Errorf("write report: %w", werr)
 		}
 	}
 
+	// Gate LAST, on purpose: the report above is already out, so a non-zero exit never costs the caller
+	// the findings it is exiting over.
 	if failOn != "" {
 		gate := shared.SeverityRank(shared.Severity(failOn))
 		over := 0

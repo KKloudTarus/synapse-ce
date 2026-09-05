@@ -106,6 +106,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   contains HTML or CSS. The AST language packs report `security` and `maintainability` rule classes,
   which now map to the SAST and quality finding kinds; an unrecognized class degrades to quality
   instead of failing the command.
+- `synapse-cli quality --sarif` writes the SARIF report even when `--fail-on` then fails the run, so a
+  redirected stdout keeps the findings the non-zero exit is about.
 
 ## [0.1.8] - 2026-08-15
 
