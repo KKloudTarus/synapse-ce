@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './auth/AuthContext'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoadingFallback } from './components/layout/LoadingFallback'
 import { MobileSidebar, Sidebar } from './components/layout/Sidebar'
+import { ToastProvider } from './components/synapse/Toast'
 import { Connect } from './pages/Connect'
 
 // --- Lazy-loaded page components ---
@@ -49,7 +50,9 @@ const ProjectDependencyGraphPage = lazy(() => import('./pages/CodeQuality/Projec
 export default function App() {
   return (
     <AuthProvider>
-      <Gate />
+      <ToastProvider>
+        <Gate />
+      </ToastProvider>
     </AuthProvider>
   )
 }
