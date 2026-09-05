@@ -279,7 +279,10 @@ end
 			evidenceContains: []string{"name<-source"},
 		},
 		{
-			name: "go command injection",
+			// exec.Command builds an argv array and spawns the program directly, so a request value
+			// in a LATER argument is argument injection, not command injection. The Contrast
+			// go-test-bench corpus labels this same shape as the SAFE way to pass untrusted input.
+			name: "go subprocess untrusted argument",
 			files: map[string]string{"handler.go": `
 r.GET("/ping", func(c *gin.Context) {
   host := c.Query("host")
@@ -287,14 +290,33 @@ r.GET("/ping", func(c *gin.Context) {
   _, _ = c.Writer.Write(out)
 })
 `},
-			rule:             "go-command-dynamic",
-			cwe:              "CWE-78",
-			owasp:            "A05:2025 Injection",
+			rule:             "go-subprocess-untrusted-arg",
+			cwe:              "CWE-88",
+			owasp:            "OWASP Top 10:2025 mapping needs review",
 			routeContains:    "GET /ping",
 			sourceContains:   "HTTP form/query value",
 			dataflow:         "propagated",
-			disposition:      "needs-runtime-proof",
+			disposition:      "reportable-static-candidate",
 			evidenceContains: []string{"host<-source"},
+		},
+		{
+			// The real thing: the attacker chooses the PROGRAM, not just one of its arguments.
+			name: "go command injection variable binary",
+			files: map[string]string{"exec.go": `
+r.GET("/run", func(c *gin.Context) {
+  parts := strings.Fields(c.Query("cmd"))
+  out, _ := exec.Command(parts[0], parts[1:]...).Output()
+  _, _ = c.Writer.Write(out)
+})
+`},
+			rule:             "go-command-dynamic",
+			cwe:              "CWE-78",
+			owasp:            "A05:2025 Injection",
+			routeContains:    "GET /run",
+			sourceContains:   "HTTP form/query value",
+			dataflow:         "propagated",
+			disposition:      "needs-runtime-proof",
+			evidenceContains: []string{"parts<-source"},
 		},
 		{
 			name: "go ssrf dynamic url",

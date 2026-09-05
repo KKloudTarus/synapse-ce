@@ -74,6 +74,14 @@ var crossLineSinks = map[string]crossLineSink{
 		paren:    true,
 		evidence: crossLineRequestRe,
 	},
+	// The value usually arrives on the line above: `host := c.Query("host")` and then
+	// `exec.Command("ping", "-c", "1", host)`. Only a request-derived assignment counts, because a
+	// locally built string passed as an argv parameter is not the risk this rule names.
+	"go-subprocess-untrusted-arg": {
+		re:       regexp.MustCompile(`exec\.Command(?:Context)?\s*\(`),
+		paren:    true,
+		evidence: crossLineRequestRe,
+	},
 	"rb:open-redirect": {
 		re:       regexp.MustCompile(`\bredirect_to\b`),
 		evidence: crossLineRequestRe,

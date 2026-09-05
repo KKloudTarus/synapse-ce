@@ -170,8 +170,25 @@ const bareVariableArg = `(?:\[\]byte\()?\s*[A-Za-z_$][\w$]*(?:\[[^\]` + "\n" + `
 const bareFirstArg = `\s*` + bareVariableArg
 const bareLaterArg = `[^;` + "\n" + `]*,\s*` + bareVariableArg
 
+// shellBinaryArg matches a FIRST argument that names a shell. exec.Command builds an argv array and
+// spawns the program directly, with no shell to re-parse anything, so a variable in a later argument
+// is an ordinary parameter rather than an injection. A shell is the exception: everything after
+// `sh -c` is a program the shell parses, so a dynamic value there really is command injection.
+const shellBinaryArg = `\s*["'` + "`" + `](?:[a-z]:)?(?:[/\\](?:usr[/\\])?bin[/\\])?(?:sh|bash|zsh|ksh|dash|ash|busybox|cmd|cmd\.exe|powershell|powershell\.exe|pwsh)["'` + "`" + `]\s*,`
+
 // commandArgEvidence is what an exec.Command argument list must carry to be dynamic.
-const commandArgEvidence = `(?:` + requestMarkerNoQuote + `|[^;` + "\n" + `]*fmt\.Sprintf|` + literalPlusVar + `|` + bareLaterArg + `|` + bareFirstArg + `)`
+//
+// A bare variable in a LATER argument is deliberately absent. `exec.Command("echo", in)` is the
+// SAFE way to pass untrusted input to a program, and the Contrast go-test-bench corpus labels it
+// exactly that way; reporting it cost precision on the one shape the rule most needs to get right.
+// What remains is the set of shapes that are actually dangerous: a variable BINARY, where the
+// attacker chooses the program; a shell binary with anything dynamic after it; a value built by
+// concatenation or Sprintf; and a request value reached without crossing a quote.
+const commandArgEvidence = `(?:` + requestMarkerNoQuote +
+	`|[^;` + "\n" + `]*fmt\.Sprintf` +
+	`|` + literalPlusVar +
+	`|` + shellBinaryArg + `[^;` + "\n" + `]*` + bareVariableArg +
+	`|` + bareFirstArg + `)`
 
 // literalPlusVar is string concatenation with a variable: a quoted literal joined to an identifier
 // by `+` in either order. A constant-only `"a" + "b"` never matches.
@@ -331,6 +348,18 @@ func builtinRules() []rule {
 			re: regexp.MustCompile(`(?i)exec\.Command\s*\(` + commandArgEvidence +
 				`|(?i)exec\.CommandContext\s*\([^,;\n]*,` + commandArgEvidence),
 			skipFn: commentOnlyLine,
+		},
+		{
+			id: "go-subprocess-untrusted-arg", cwe: "CWE-88", severity: shared.SeverityMedium, title: "Untrusted value passed as a subprocess argument",
+			desc: "A request-derived value is passed as an argument to a subprocess. exec.Command spawns the program directly, so this is not command injection, but the callee may treat the value as an option or a path. Validate it against an allowlist and pass `--` before positional arguments.",
+			// Deliberately separate from go-command-dynamic and a step lower in severity. The
+			// Contrast go-test-bench corpus labels `exec.Command("echo", in)` as the SAFE way to
+			// pass untrusted input, and it is: there is no shell to re-parse anything. Reporting it
+			// as CWE-78 cost precision on the one shape the rule most needs to get right. What is
+			// left is a real but bounded risk, argument injection, and it is named as that.
+			re:     regexp.MustCompile(`(?i)exec\.Command(?:Context)?\s*\([^;` + "\n" + `]*` + requestMarkerNoQuote + `[^;` + "\n" + `]*\)`),
+			skipFn: commentOnlyLine,
+			exts:   goExts,
 		},
 		{
 			id: "unsafe-deserialization-node-serialize", cwe: "CWE-502", severity: shared.SeverityHigh, title: "Unsafe node-serialize deserialization",

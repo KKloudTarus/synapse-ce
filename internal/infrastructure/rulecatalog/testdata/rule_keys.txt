@@ -916,6 +916,7 @@ go-ssh-ignore-hostkey
 go-ssrf-dynamic-url
 go-ssrf-request-url
 go-subprocess-shell
+go-subprocess-untrusted-arg
 go-time-format-layout
 go-tls-insecure-skip-verify
 go-tls-old-version
