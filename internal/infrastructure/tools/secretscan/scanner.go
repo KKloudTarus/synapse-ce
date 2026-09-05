@@ -46,6 +46,9 @@ type rule struct {
 	group    int
 	minEnt   float64
 	allow    []*regexp.Regexp // per-rule allow-list (matched against the secret text)
+	// lineSkip, when set, drops a match based on the whole line it sits on. It is how a rule tells a
+	// delimiter quoted inside other code from the thing it delimits.
+	lineSkip func(line string) bool
 }
 
 // Scanner implements ports.SecretScanner with an owned ruleset.
@@ -229,6 +232,9 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			if s.allowed(secret, r.allow) {
 				continue
 			}
+			if r.lineSkip != nil && r.lineSkip(lineOf(text, start)) {
+				continue
+			}
 			if r.minEnt > 0 && shannon(secret) < r.minEnt {
 				continue
 			}
@@ -250,6 +256,27 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 		}
 	}
 	return false
+}
+
+// lineOf returns the full line containing byte offset at.
+func lineOf(text string, at int) string {
+	start := strings.LastIndexByte(text[:at], '\n') + 1
+	end := strings.IndexByte(text[at:], '\n')
+	if end < 0 {
+		return text[start:]
+	}
+	return text[start : at+end]
+}
+
+// pemHeaderQuotedInline reports whether the PEM header on this line is a quoted one-line constant rather
+// than the first line of a key block: the header is not at the start of the line, or the same line also
+// carries the END marker or an escaped newline.
+func pemHeaderQuotedInline(line string) bool {
+	trimmed := strings.TrimLeft(line, " \t\"'`")
+	if !strings.HasPrefix(trimmed, "-----BEGIN") {
+		return true
+	}
+	return strings.Contains(line, "-----END") || strings.Contains(line, `\n`)
 }
 
 // maskVBComments preserves byte offsets and newlines while blanking apostrophe and statement Rem comments.
@@ -425,6 +452,10 @@ func defaultRules() []rule {
 			id: "private-key", category: "PrivateKey", title: "Private key block", severity: shared.SeverityCritical,
 			keywords: []string{"PRIVATE KEY"},
 			re:       regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----`),
+			// A key block starts its line with the header (a PEM file, a raw string). A header that sits
+			// after other code on its line, with the END marker or an escaped newline beside it, is a
+			// one-line string constant: a rule example, a delimiter to strip, a test name.
+			lineSkip: pemHeaderQuotedInline,
 		},
 		{
 			id: "jwt", category: "JWT", title: "JSON Web Token", severity: shared.SeverityMedium,

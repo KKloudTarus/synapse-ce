@@ -127,6 +127,31 @@ func thirdPartyBanner(lines []string) bool {
 	return (licence || copyright) && project
 }
 
+// requestSinkRules are the rules whose evidence is "request data reaches a sink" but whose sink pattern
+// alone (a file open, a formatted write) is everyday code. They run only in files that handle requests.
+var requestSinkRules = map[string]bool{
+	"reflected-response-write":   true,
+	"path-traversal-file-access": true,
+}
+
+// requestContextRe marks a file as request-handling: an HTTP framework import or type, a request
+// object, or a superglobal. Matched once per file, across languages.
+var requestContextRe = regexp.MustCompile(`(?i)(?:"net/http"|http\.Request\b|http\.ResponseWriter|gin\.Context|echo\.Context|fiber\.Ctx|chi\.|httprouter\.|gorilla/mux|` +
+	`\br\.URL\b|URL\.Query\(|\.FormValue\(|\.PostFormValue\(|\.PathValue\(|\bc\.(?:Query|Param|PostForm)\(|getParameter\(|` +
+	`\breq\.(?:query|params|body|headers|url|path)|\brequest\.(?:args|form|files|values|GET|POST|json|body|params|query)|\bparams\[|\$_(?:GET|POST|REQUEST|FILES)|` +
+	`HttpServletRequest|@RequestParam|@PathVariable|@RequestBody|@QueryParam|` +
+	`require\(['"](?:express|koa|fastify|hapi)['"]|from ['"](?:express|koa|fastify|next/server|@nestjs/common)['"]|` +
+	`from flask import|from django|from fastapi|from starlette|ActionController|Rack::Request)`)
+
+func requestContextFile(lines []string) bool {
+	for _, line := range lines {
+		if requestContextRe.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
 // bundledAssetLine reports whether any line is long enough to mark the file as build output. It is
 // applied only to web assets under an asset directory, never to first-party source elsewhere: a
 // generated loader carries lines of many kilobytes, and the scanner's own per-line cap would read
@@ -148,6 +173,9 @@ var webAssetExts = map[string]bool{
 
 var skipExts = map[string]bool{
 	".log": true, ".map": true,
+	// Prose. A Go snippet quoted in a changelog is documentation; the rules that match it are written
+	// for source files.
+	".md": true, ".markdown": true, ".rst": true, ".adoc": true,
 }
 
 // skipSuffixes are compound extensions filepath.Ext cannot express: it returns ".js" for
@@ -494,6 +522,9 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 	isGo := goExts[ext]
 	// Browser context is a whole-file property, so it is decided once before the line loop.
 	browserFile := isJS && browserContextFile(lines)
+	// So is "does this file handle requests at all": a file reader in a CLI is not a request sink,
+	// whatever the variable is called.
+	requestFile := requestContextFile(lines)
 	isPHP := phpExts[ext]
 	var phpViews []phpLineView
 	phpTextLines, phpCodeLines := lines, lines
@@ -556,6 +587,9 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			}
 			if r.id == "ssrf-fetch-user-url" && browserFile {
 				continue // a fetch in a DOM-touching file is a browser request, not server-side SSRF
+			}
+			if requestSinkRules[r.id] && !requestFile {
+				continue // no request reaches this file, so nothing in it reflects or traverses on request data
 			}
 			var matched bool
 			if isScala && strings.HasPrefix(r.id, "scala:") {

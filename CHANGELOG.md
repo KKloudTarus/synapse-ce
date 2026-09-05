@@ -53,6 +53,19 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **SAST precision on a real repository.** A full scan of this repository produced 623 findings, 140 of
+  them high-severity SAST, most of them noise: Go rules matched code quoted in `CHANGELOG.md`,
+  `reflected-response-write` flagged `fmt.Fprintln(os.Stderr, err)` in every CLI, `go-sql-dynamic-query`
+  flagged `r.URL.Query().Get("q")`, `path-traversal-file-access` flagged any `os.Open(path)` in code no
+  request reaches, `hardcoded-credential` flagged `MetricNewSecret = "new_secret"`,
+  `jwt-hardcoded-secret-or-none` flagged `NoSamplingAlgorithm = "none"`, `redos-vulnerable-regex` flagged
+  `(?:\.[0-9]+)*`, and the secret scanner's private-key rule flagged its own rule catalogue. Prose files
+  are no longer source; the request-sink rules run only in files that handle requests; the Go
+  `Fprint*` branch needs a response writer; the SQL rule ignores the request URL's `Query()`; label
+  identifiers are not credentials; `algorithm` is a whole word; a separator-led nested group is not
+  ambiguous; a one-line quoted PEM header is a delimiter, not a key. Test files stay reported (the gate
+  already classifies them as background scope).
+
 - **Asset exposure no longer reads every asset as clean.** `exposurereader` filtered an asset's
   vulnerability occurrences by comparing project and fleet-asset ids with SBOM component ids, two id
   namespaces that never match, so the join dropped every occurrence and the asset scored as a

@@ -214,6 +214,88 @@ func skipUnlessRegexContext(line string) bool {
 	return commentOnlyLine(line) || !redosContextRe.MatchString(line)
 }
 
+// nestedQuantifiedGroupRe finds every quantified group that itself contains a quantifier, the shape
+// the ReDoS rule reports, together with the first characters inside the group.
+var nestedQuantifiedGroupRe = regexp.MustCompile(`\((?:\?:)?([^()\n]{0,80}[+*][^()\n]{0,80})\)\s*[+*]`)
+
+// skipUnlessAmbiguousNestedQuantifier keeps the ReDoS rule to groups whose repetition is ambiguous.
+// A nested group that begins with an escaped literal separator, such as (?:\.[0-9]+)* in a version
+// pattern, can only re-enter on that separator, so the engine never has two ways to split the same
+// run of characters and cannot backtrack exponentially.
+func skipUnlessAmbiguousNestedQuantifier(line string) bool {
+	if skipUnlessRegexContext(line) {
+		return true
+	}
+	ambiguous := false
+	for _, m := range nestedQuantifiedGroupRe.FindAllStringSubmatch(line, -1) {
+		inner := strings.TrimLeft(m[1], "^")
+		if separatedRepeat(inner) {
+			continue
+		}
+		ambiguous = true
+	}
+	return !ambiguous
+}
+
+// separatedRepeat reports whether a group body starts with a literal that cannot be produced by the
+// quantified atom that follows it: an escaped punctuation character or a bare separator.
+func separatedRepeat(inner string) bool {
+	if len(inner) >= 2 && inner[0] == '\\' && strings.ContainsRune(`.-/,;:|_= `, rune(inner[1])) {
+		return true
+	}
+	return len(inner) >= 1 && strings.ContainsRune(`-/,;:|_= `, rune(inner[0]))
+}
+
+// goResponseWriterArg names the first argument of a Go fmt.Fprint* call that is plausibly an HTTP
+// response writer. fmt.Fprintln(os.Stderr, err) is a CLI printing an error, not a reflected write.
+const goResponseWriterArg = `(?:w|rw|res|resp|rsp|response|writer|c\.Writer|ctx\.Writer|ctx\.Response\(\)(?:\.Writer)?|[a-zA-Z_]*[wW]riter)`
+
+// goSQLDynamicQueryRe is the database/sql dynamic-query shape; skipURLQueryOnly removes the request
+// URL's Query() from the line before re-testing it so r.URL.Query().Get("q") is not a SQL query.
+var goSQLDynamicQueryRe = regexp.MustCompile(`(?i)\.(Query|QueryContext|QueryRow|QueryRowContext|Exec|ExecContext)\s*\([^;\n]*(\+|fmt\.Sprintf|FormValue|PostFormValue|URL\.Query|c\.(Query|Param))`)
+
+var urlQueryCallRe = regexp.MustCompile(`(?i)\bURL\.Query\(\)`)
+
+func skipURLQueryOnly(line string) bool {
+	if commentOnlyLine(line) {
+		return true
+	}
+	stripped := urlQueryCallRe.ReplaceAllString(line, "URLQUERY")
+	return !goSQLDynamicQueryRe.MatchString(stripped)
+}
+
+// credentialAssignmentRe captures the identifier and the quoted value of a credential-shaped
+// assignment: `MetricNewSecret = "new_secret"`, `cookieSecret: "..."`, `app.config['SECRET_KEY'] = '...'`.
+var credentialAssignmentRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_.]*)["']?\s*\]?\s*[:=]\s*["']([^"'\s]{6,})["']`)
+
+// labelIdentifierMarkers are identifier fragments that describe a metric, an enum member, a pattern set
+// or a category. A secret concept named by such an identifier is a label, not credential material.
+var labelIdentifierMarkers = []string{"metric", "pattern", "kind", "type", "label", "enum", "category", "status", "state", "setid", "set_id", "algorithm", "scheme", "mode"}
+
+// versionedLabelValueRe is a lowercase word list ending in a version tag: "secret-patterns:v2".
+var versionedLabelValueRe = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[_\-./][a-z0-9]+)*:v?\d+$`)
+
+// skipCommentPlaceholderOrLabelSecret extends the placeholder filter with assignments whose identifier
+// names a label: MetricNewSecret = "new_secret" or secretPatternSetID = "secret-patterns:v2" describe
+// a secret concept; they do not contain one. The value alone is not enough to decide (a literal
+// "secret" assigned to a secret key IS the finding), so the identifier carries the decision.
+func skipCommentPlaceholderOrLabelSecret(line string) bool {
+	if skipCommentOrPlaceholderSecret(line) {
+		return true
+	}
+	m := credentialAssignmentRe.FindStringSubmatch(line)
+	if m == nil {
+		return false
+	}
+	ident := strings.ToLower(m[1])
+	for _, marker := range labelIdentifierMarkers {
+		if strings.Contains(ident, marker) {
+			return true
+		}
+	}
+	return versionedLabelValueRe.MatchString(m[2])
+}
+
 func builtinRules() []rule {
 	core := []rule{
 		{
@@ -276,7 +358,7 @@ func builtinRules() []rule {
 			// suffix and sit inside brackets/quotes, and the value minimum drops to 6 so a literal
 			// `'secret'` counts. The placeholder skip list is what keeps the rule high-signal.
 			re:     regexp.MustCompile(`(?i)(?:password|passwd|pwd|api[_-]?key|secret|access[_-]?token|auth[_-]?token)[A-Za-z0-9_]{0,32}["']?\s*\]?\s*[:=]\s*["'][^"'\s^~<>=][^"'\s]{5,}["']`),
-			skipFn: skipCommentOrPlaceholderSecret,
+			skipFn: skipCommentPlaceholderOrLabelSecret,
 		},
 		{
 			id: "password-md5-hash", cwe: "CWE-916", severity: shared.SeverityMedium, title: "Password hashed with unsalted MD5",
@@ -313,8 +395,8 @@ func builtinRules() []rule {
 		{
 			id: "go-sql-dynamic-query", cwe: "CWE-89", severity: shared.SeverityHigh, title: "Go SQL query uses dynamic string construction",
 			desc:   "A Go database/sql query appears to use string concatenation, fmt.Sprintf, or request-derived data. Use placeholders and parameter binding.",
-			re:     regexp.MustCompile(`(?i)\.(Query|QueryContext|QueryRow|QueryRowContext|Exec|ExecContext)\s*\([^;\n]*(\+|fmt\.Sprintf|FormValue|PostFormValue|URL\.Query|c\.(Query|Param))`),
-			skipFn: commentOnlyLine,
+			re:     goSQLDynamicQueryRe,
+			skipFn: skipURLQueryOnly,
 			exts:   goExts, // database/sql is Go: without the gate this matched minified JS
 		},
 		{
@@ -414,7 +496,9 @@ func builtinRules() []rule {
 			// writer/status first, so their evidence starts after that argument.
 			re: regexp.MustCompile(`(?i)(?:res\.(?:send|end|write)|response\.write|HttpResponse|w\.Write)\s*\(` +
 				`(?:` + requestMarkerNoQuote + `|` + bareFirstArg + `|` + literalPlusVar + `|` + templateInterpolation + `)` +
-				`|(?i)(?:fmt\.Fprint(?:f|ln)?|c\.String)\s*\(` +
+				`|(?i)fmt\.Fprint(?:f|ln)?\s*\(\s*` + goResponseWriterArg + `\s*,` +
+				`(?:` + requestMarkerNoQuote + `|` + bareFirstArg + `|` + bareLaterArg + `|` + literalPlusVar + `|` + templateInterpolation + `)` +
+				`|(?i)c\.String\s*\(` +
 				`(?:` + requestMarkerNoQuote + `|` + bareLaterArg + `|` + literalPlusVar + `|` + templateInterpolation + `)`),
 			skipFn: commentOnlyLine,
 		},
@@ -445,7 +529,7 @@ func builtinRules() []rule {
 		{
 			id: "jwt-hardcoded-secret-or-none", cwe: "CWE-347", severity: shared.SeverityHigh, title: "JWT uses hardcoded secret or insecure algorithm",
 			desc:   "JWT signing/verifying with a hardcoded weak secret or accepting the none algorithm can allow token forgery. Use managed secrets and enforce strong algorithms.",
-			re:     regexp.MustCompile(`(?i)(jwt\.(sign|verify)\s*\([^,\n]+,\s*["'](secret|changeme|password|jwt[_-]?secret|test)["']|algorithm\s*[:=]\s*["']none["']|algorithms\s*[:=]\s*\[[^\]]*["']none["'])`),
+			re:     regexp.MustCompile(`(?i)(jwt\.(sign|verify)\s*\([^,\n]+,\s*["'](secret|changeme|password|jwt[_-]?secret|test)["']|\balgorithm\s*[:=]\s*["']none["']|\balgorithms\s*[:=]\s*\[[^\]]*["']none["'])`),
 			skipFn: commentOrTestPlaceholder,
 		},
 		{
@@ -557,7 +641,7 @@ func builtinRules() []rule {
 			id: "redos-vulnerable-regex", cwe: "CWE-1333", severity: shared.SeverityMedium, title: "Regular expression vulnerable to catastrophic backtracking (ReDoS)",
 			desc:   "A regex nests a quantifier inside a quantified group (e.g. (a+)+, (.*)*), which backtracks exponentially on crafted input and can hang the process. Rewrite without nested quantifiers, anchor the pattern, or use a linear-time engine.",
 			re:     regexp.MustCompile(`\([^()\n]{0,80}[+*][^()\n]{0,80}\)\s*[+*]`),
-			skipFn: skipUnlessRegexContext,
+			skipFn: skipUnlessAmbiguousNestedQuantifier,
 		},
 		{
 			id: "insecure-temp-file", cwe: "CWE-377", severity: shared.SeverityMedium, title: "Insecure temporary file",
