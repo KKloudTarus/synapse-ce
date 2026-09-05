@@ -1531,6 +1531,50 @@ export interface FleetAgentRow {
   currentWork: number
 }
 
+// Fleet host vulnerabilities (#820). Wire shape: hostSummaryDTO / hostVulnerabilitiesDTO in
+// internal/adapter/httpapi/host_vulnerability_handler.go.
+export interface HostScan {
+  jobId: string
+  status: 'running' | 'succeeded' | 'failed'
+  stage: string
+  error: string
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export interface HostVulnerabilitySummary {
+  total: number
+  critical: number
+  high: number
+  medium: number
+  low: number
+  info: number
+  fixable: number
+  kev: number
+}
+
+export interface HostRow {
+  asset: TechnicalAsset
+  engagementId: string // empty until the host reports packages
+  packages: number
+  recordedAt: string | null
+  lastScan: HostScan | null
+  summary: HostVulnerabilitySummary
+}
+
+export interface HostFinding extends Finding {
+  cvssScore: number
+  fixedVersion: string
+  advisoryId: string
+  sources: string[]
+  confidence: string
+  detectionState: string
+}
+
+export interface HostVulnerabilities extends HostRow {
+  findings: HostFinding[]
+}
+
 export interface FleetOrderBrief {
   id: string
   capability: string

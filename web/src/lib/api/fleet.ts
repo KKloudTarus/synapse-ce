@@ -5,8 +5,65 @@ import type {
   FleetCoverageRow,
   FleetCoverageSummary,
   FleetDesiredGap,
+  HostFinding,
+  HostRow,
+  HostScan,
+  HostVulnerabilities,
+  HostVulnerabilitySummary,
 } from '../types'
+import { mapTechnicalAsset } from './assets'
 import { blobDownload, req } from './client'
+import { mapFinding } from './findings'
+
+function mapHostScan(raw: any): HostScan | null {
+  if (!raw) return null
+  return {
+    jobId: raw.job_id ?? '',
+    status: (raw.status ?? 'running') as HostScan['status'],
+    stage: raw.stage ?? '',
+    error: raw.error ?? '',
+    startedAt: raw.started_at ?? null,
+    finishedAt: raw.finished_at ?? null,
+  }
+}
+
+function mapHostSummary(raw: any): HostVulnerabilitySummary {
+  return {
+    total: raw?.total ?? 0,
+    critical: raw?.critical ?? 0,
+    high: raw?.high ?? 0,
+    medium: raw?.medium ?? 0,
+    low: raw?.low ?? 0,
+    info: raw?.info ?? 0,
+    fixable: raw?.fixable ?? 0,
+    kev: raw?.kev ?? 0,
+  }
+}
+
+function mapHostRow(raw: any): HostRow {
+  return {
+    asset: mapTechnicalAsset(raw?.asset ?? {}),
+    engagementId: raw?.engagement_id ?? '',
+    packages: raw?.packages ?? 0,
+    recordedAt: raw?.recorded_at ?? null,
+    lastScan: mapHostScan(raw?.last_scan),
+    summary: mapHostSummary(raw?.summary),
+  }
+}
+
+// Findings keep the PascalCase domain keys of the engagement findings list; cvss_score is the one
+// snake_case addition the host route computes from the vector.
+export function mapHostFinding(raw: any): HostFinding {
+  return {
+    ...mapFinding(raw),
+    cvssScore: raw.cvss_score ?? 0,
+    fixedVersion: raw.FixedVersion ?? '',
+    advisoryId: raw.AdvisoryID ?? '',
+    sources: Array.isArray(raw.Sources) ? raw.Sources : [],
+    confidence: raw.Confidence ?? '',
+    detectionState: raw.DetectionState ?? '',
+  }
+}
 
 function mapFleetAgent(raw: any): FleetAgentRow {
   return {
@@ -33,6 +90,13 @@ function mapFleetCoverageRow(raw: any): FleetCoverageRow {
 }
 
 export const fleetApi = {
+  listHosts: async (): Promise<HostRow[]> => ((await req('/assets/hosts')) ?? []).map(mapHostRow),
+
+  hostVulnerabilities: async (assetId: string): Promise<HostVulnerabilities> => {
+    const raw = await req(`/assets/${encodeURIComponent(assetId)}/vulnerabilities`)
+    return { ...mapHostRow(raw), findings: (raw?.findings ?? []).map(mapHostFinding) }
+  },
+
   listFleetAgents: async (state?: FleetAgentHealth): Promise<FleetAgentRow[]> => {
     const q = new URLSearchParams()
     if (state) q.set('state', state)

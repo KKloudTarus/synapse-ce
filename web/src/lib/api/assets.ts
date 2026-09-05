@@ -42,7 +42,7 @@ function mapAssetMembership(r: any): AssetMembership {
   }
 }
 
-function mapTechnicalAsset(r: any): TechnicalAsset {
+export function mapTechnicalAsset(r: any): TechnicalAsset {
   return {
     id: r.ID ?? r.id ?? '',
     kind: r.Kind ?? r.kind ?? '',

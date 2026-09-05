@@ -11,6 +11,7 @@ import {
   LogOut01,
   Plus,
   Server01,
+  Server02,
   Settings01,
   ShieldTick,
   SlashCircle01,
@@ -84,6 +85,7 @@ const NAV_GROUPS: Array<{
       label: 'Runtime security',
       items: [
         { icon: Server01, label: 'Fleet', to: '/fleet', capability: 'fleet' },
+        { icon: Server02, label: 'Hosts', to: '/fleet/hosts', capability: 'fleet' },
         { icon: AlertTriangle, label: 'Incidents', to: '/fleet/incidents' },
         { icon: Activity, label: 'Automation Observability', to: '/ai-triage/observability', capability: 'ai_triage' },
       ],
