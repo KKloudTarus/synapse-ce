@@ -899,6 +899,11 @@ func main() {
 		log.Error("vex service init failed", "err", err)
 		os.Exit(1)
 	}
+	if vulnerabilityTransactions != nil {
+		// One VEX document retires many findings. Without a transaction each retirement commits
+		// on its own, so a failure part way through leaves some findings retired and the rest not.
+		vexService.SetTransactionRunner(vulnerabilityTransactions)
+	}
 
 	// Recon orchestration: one shared execution guard, an argv-only
 	// ToolRunner (timeout + output cap), a bounded worker pool replacing the P1 bare
@@ -1068,6 +1073,11 @@ func main() {
 		log.Error("approval service init failed", "err", err)
 		os.Exit(1)
 	}
+	if vulnerabilityTransactions != nil {
+		// A human's approve or deny and its audit record commit together, so an operator is
+		// never told the decision failed while the agent acts on it.
+		approvalSvc.SetTransactionRunner(vulnerabilityTransactions)
+	}
 	safetyGate, err := safety.NewGate(reconGuard, approvalSvc, evidenceService)
 	if err != nil {
 		log.Error("safety gate init failed", "err", err)
@@ -1227,6 +1237,7 @@ func main() {
 		os.Exit(1)
 	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
+	vulnerabilityRegistry.AllowPrivateNetworkSources(cfg.VulnerabilitySourceAllowPrivateNetwork)
 	if err := vulnerabilityprovider.RegisterAll(vulnerabilityRegistry, vulnerabilityprovider.Dependencies{
 		LookupCanonical: vulnerabilityMaterializer.GetCanonical,
 		CurrentRecords:  vulnerabilityMaterializer.CurrentSourceRecordIDs,

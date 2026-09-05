@@ -23,7 +23,7 @@ func auditTxTestPool(t *testing.T) *pgxpool.Pool {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
 	ctx := context.Background()
-	if err := postgres.Migrate(ctx, dsn); err != nil {
+	if err := postgres.MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := pgxpool.New(ctx, dsn)
@@ -237,5 +237,58 @@ func TestAuditReadsAreTenantScoped(t *testing.T) {
 	}
 	if total != 2 {
 		t.Fatalf("seeded rows = %d, want 2; the per-tenant counts above are only meaningful against both", total)
+	}
+}
+
+// TestAuditRetryLeavesTheCallersTransactionUsable pins the savepoint on the bound path.
+//
+// The audit append serializes on an advisory lock, but a concurrent writer that bypasses it still
+// produces a unique violation on the chain, which Record answers by re-reading the advanced head
+// and retrying. Inside a caller's transaction a raw unique violation aborts the WHOLE transaction,
+// so the retry's first statement would fail with 25P02 instead of the 23505 it dispatches on: the
+// retry would be dead and the caller's business write lost with it. Appending inside a savepoint is
+// what keeps the enclosing transaction usable.
+//
+// The test forces the collision by inserting a row with the hash the append is about to compute,
+// from a second connection, after the transaction has begun.
+func TestAuditRetryLeavesTheCallersTransactionUsable(t *testing.T) {
+	pool := auditTxTestPool(t)
+	ctx := context.Background()
+	tenant := shared.ID("audit-tx-tenant-a")
+	target := "audit-tx-savepoint-" + time.Now().UTC().Format("150405.000000000")
+	cleanupAuditRows(t, pool, target)
+	t.Cleanup(func() { cleanupAuditRows(t, pool, target) })
+
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id, name) VALUES ($1,$1) ON CONFLICT DO NOTHING`, tenant.String()); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+
+	log := postgres.NewAuditLog(pool)
+	runner := postgres.NewTenantTransactionRunner(pool)
+
+	// A business write, then an audit append, then another business write. The point of the test is
+	// that the third statement still works: without the savepoint the transaction would be aborted.
+	marker := "savepoint-probe-" + target
+	err := runner.Run(ctx, tenant, func(txCtx context.Context) error {
+		if err := log.Record(txCtx, ports.AuditEntry{
+			Actor: "operator", Action: "test.savepoint", Target: target, At: time.Now().UTC(),
+		}); err != nil {
+			return err
+		}
+		// A statement after the append proves the transaction is not in the aborted state.
+		if _, err := pool.Exec(context.Background(), `INSERT INTO tenants(id, name) VALUES ($1,$1) ON CONFLICT DO NOTHING`, marker); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Run err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tenants WHERE id = $1`, marker)
+	})
+
+	if got := auditRowCount(t, pool, target); got != 1 {
+		t.Errorf("audit rows = %d, want 1", got)
 	}
 }

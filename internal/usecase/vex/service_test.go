@@ -152,3 +152,80 @@ func TestApplyRejectsNonVEX(t *testing.T) {
 		t.Errorf("bad json: want ErrValidation, got %v", err)
 	}
 }
+
+// rollbackRunner is a transaction runner over the fake repository: it snapshots the finding list
+// before the body runs and restores it when the body fails, which is what a real transaction does.
+type rollbackRunner struct{ repo *fakeRepo }
+
+func (r rollbackRunner) Run(ctx context.Context, _ shared.ID, fn func(context.Context) error) error {
+	before := append([]finding.Finding(nil), r.repo.list...)
+	if err := fn(ctx); err != nil {
+		r.repo.list = before
+		return err
+	}
+	return nil
+}
+
+// failingAudit fails on the nth append, so a test can break the apply part way through.
+type failingAudit struct {
+	calls  int
+	failAt int
+}
+
+func (a *failingAudit) Record(context.Context, ports.AuditEntry) error {
+	a.calls++
+	if a.calls == a.failAt {
+		return errors.New("audit chain conflict")
+	}
+	return nil
+}
+
+// TestApplyIsAtomicWhenAuditFails pins the property the code claims: a VEX apply is one unit. An
+// audit failure on the second finding must leave the FIRST finding unchanged too, because a finding
+// retired as a false positive with no attributable record is exactly what the append-only audit
+// chain exists to prevent.
+func TestApplyIsAtomicWhenAuditFails(t *testing.T) {
+	findings := []finding.Finding{
+		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2020-1:foo:1.2.3", Status: finding.StatusOpen, Version: 1},
+		{ID: "f2", EngagementID: "e1", DedupKey: "vuln:CVE-2020-1:bar:2.0.0", Status: finding.StatusOpen, Version: 1},
+	}
+	repo := &fakeRepo{list: findings}
+	audit := &failingAudit{failAt: 2}
+	svc, err := NewService(fakeEngRepo{}, repo, audit, fixedClock{})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	svc.SetTransactionRunner(rollbackRunner{repo: repo})
+
+	doc := []byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+		{"vulnerability":{"name":"CVE-2020-1"},"products":[{"@id":"foo@1.2.3"},{"@id":"bar@2.0.0"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`)
+
+	res, err := svc.Apply(context.Background(), "alice", "", "e1", doc)
+	if err == nil {
+		t.Fatal("apply returned nil despite an audit failure")
+	}
+	for i := range repo.list {
+		if repo.list[i].Status != finding.StatusOpen {
+			t.Errorf("finding %s = %s after a rolled-back apply, want open", repo.list[i].ID, repo.list[i].Status)
+		}
+	}
+	if res.Applied != 0 {
+		t.Errorf("result reports %d applied after a rollback; nothing was applied", res.Applied)
+	}
+}
+
+// TestApplyWithoutATransactionRunnerStillWorks keeps the in-memory and file deployments working:
+// the runner is optional, and its absence must not change the outcome of a successful apply.
+func TestApplyWithoutATransactionRunnerStillWorks(t *testing.T) {
+	svc, repo := newSvc(t, []finding.Finding{
+		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2020-1:foo:1.2.3", Status: finding.StatusOpen, Version: 1},
+	})
+	doc := []byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+		{"vulnerability":{"name":"CVE-2020-1"},"products":[{"@id":"foo@1.2.3"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`)
+	if _, err := svc.Apply(context.Background(), "alice", "", "e1", doc); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if repo.list[0].Status != finding.StatusFalsePos {
+		t.Errorf("finding status = %s, want false_positive", repo.list[0].Status)
+	}
+}

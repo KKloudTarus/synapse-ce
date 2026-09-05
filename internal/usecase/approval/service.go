@@ -30,6 +30,17 @@ type Service struct {
 	mode    agent.ApprovalMode
 	timeout time.Duration
 	resume  ResumeFunc // optional; set via SetResumeEnqueuer to re-drive on timeout
+	// transactions makes a decision and its audit record one unit. Optional: the in-memory and
+	// file stores have no transactions, and the Postgres composition roots set it.
+	transactions ports.TenantTransactionRunner
+}
+
+// SetTransactionRunner makes Decide atomic. Without it the decision commits first and the audit
+// append is a separate transaction, so an audit failure returns an error to an operator whose
+// approval has already taken effect: the interface reports failure, the agent proceeds, and the
+// retry answers "already decided".
+func (s *Service) SetTransactionRunner(transactions ports.TenantTransactionRunner) {
+	s.transactions = transactions
 }
 
 // SetResumeEnqueuer installs the callback used to re-drive a session after a timeout deny, so
@@ -87,10 +98,29 @@ func (s *Service) Decide(ctx context.Context, human string, actionID shared.ID, 
 		state = agent.ApprovalDenied
 	}
 	dec := agent.ApprovalDecision{ActionID: actionID, State: state, DecidedBy: human, Reason: reason, DecidedAt: s.clock.Now()}
+	if s.transactions == nil {
+		return s.decide(ctx, dec, human, state)
+	}
+	tenantID, _ := shared.TenantFrom(ctx)
+	var out agent.ApprovalDecision
+	if err := s.transactions.Run(ctx, tenantID, func(txCtx context.Context) error {
+		var decideErr error
+		out, decideErr = s.decide(txCtx, dec, human, state)
+		return decideErr
+	}); err != nil {
+		return agent.ApprovalDecision{}, err
+	}
+	return out, nil
+}
+
+// decide writes the decision and its audit record. Both statements land on the caller's bound
+// transaction when there is one, so a failed audit append undoes the decision instead of leaving a
+// committed approval the operator was told had failed.
+func (s *Service) decide(ctx context.Context, dec agent.ApprovalDecision, human string, state agent.ApprovalState) (agent.ApprovalDecision, error) {
 	if err := s.store.Decide(ctx, dec); err != nil {
 		return agent.ApprovalDecision{}, err // ErrConflict if already decided
 	}
-	if a, _, err := s.store.Get(ctx, actionID); err == nil {
+	if a, _, err := s.store.Get(ctx, dec.ActionID); err == nil {
 		if err := s.record(ctx, a, "agent.approval."+string(state), human); err != nil {
 			return agent.ApprovalDecision{}, fmt.Errorf("record approval decision: %w", err)
 		}
