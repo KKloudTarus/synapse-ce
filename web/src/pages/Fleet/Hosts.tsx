@@ -34,10 +34,18 @@ const COLUMNS: Column<HostRow>[] = [
       </span>
     ),
   },
-  { header: 'Critical', className: 'w-20 text-right', cell: (r) => <SeverityCount count={r.summary.critical} tone="critical" /> },
-  { header: 'High', className: 'w-20 text-right', cell: (r) => <SeverityCount count={r.summary.high} tone="high" /> },
-  { header: 'Medium', className: 'w-20 text-right', cell: (r) => <SeverityCount count={r.summary.medium} tone="medium" /> },
-  { header: 'Low', className: 'w-20 text-right', cell: (r) => <SeverityCount count={r.summary.low} tone="low" /> },
+  {
+    header: 'Open findings',
+    className: 'w-56',
+    cell: (r) => (
+      <div className="flex items-baseline gap-3" title={`${r.summary.critical} critical, ${r.summary.high} high, ${r.summary.medium} medium, ${r.summary.low} low`}>
+        <span className="flex items-baseline gap-1"><SeverityCount count={r.summary.critical} tone="critical" /><span className="text-[10px] uppercase text-quaternary">crit</span></span>
+        <span className="flex items-baseline gap-1"><SeverityCount count={r.summary.high} tone="high" /><span className="text-[10px] uppercase text-quaternary">high</span></span>
+        <span className="flex items-baseline gap-1"><SeverityCount count={r.summary.medium} tone="medium" /><span className="text-[10px] uppercase text-quaternary">med</span></span>
+        <span className="flex items-baseline gap-1"><SeverityCount count={r.summary.low} tone="low" /><span className="text-[10px] uppercase text-quaternary">low</span></span>
+      </div>
+    ),
+  },
   {
     header: 'Fixable',
     className: 'w-20 text-right',
@@ -112,7 +120,7 @@ export function Hosts() {
               onRowClick={(r) => navigate(`/fleet/hosts/${encodeURIComponent(r.asset.id)}`)}
               rowAriaLabel={(r) => `Open host ${r.asset.name || r.asset.key}`}
               maxHeightClass="max-h-[70vh]"
-              tableMinWidthClass="min-w-[80rem]"
+              tableMinWidthClass="min-w-[60rem]"
             />
           ) : (
             <div className="p-6">

@@ -105,7 +105,7 @@ function FindingsBody({ host }: { host: HostVulnerabilities }) {
       columns={COLUMNS}
       rowKey={(f) => f.id}
       maxHeightClass="max-h-[65vh]"
-      tableMinWidthClass="min-w-[68rem]"
+      tableMinWidthClass="min-w-[52rem]"
     />
   )
 }
@@ -150,8 +150,8 @@ export function HostDetail() {
         </div>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-6">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-6">
           <Card title={`Vulnerabilities${host.findings.length ? ` (${host.findings.length})` : ''}`} bodyClass="p-0">
             <FindingsBody host={host} />
           </Card>
