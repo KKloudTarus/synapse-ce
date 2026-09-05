@@ -289,7 +289,7 @@ func (r *AssetRepository) listBusinessAssetLinks(ctx context.Context, tenantID, 
 
 func (r *AssetRepository) AssignEngagementBusinessAsset(ctx context.Context, tenantID, engagementID, assetID shared.ID) error {
 	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
-		ct, err := tx.Exec(ctx, `UPDATE engagements SET business_asset_id=NULLIF($3,''), updated_at=now() WHERE tenant_id=$1 AND id=$2 AND project_id IS NULL`, tenantID.String(), engagementID.String(), assetID.String())
+		ct, err := tx.Exec(ctx, `UPDATE engagements SET business_asset_id=NULLIF($3,''), updated_at=now() WHERE tenant_id=$1 AND id=$2 AND project_id IS NULL AND host_asset_id IS NULL`, tenantID.String(), engagementID.String(), assetID.String())
 		if err != nil {
 			return err
 		}

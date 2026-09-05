@@ -57,6 +57,44 @@ func (s *ImportedSBOMStore) SaveActive(ctx context.Context, record importedsbom.
 	})
 }
 
+// MetadataByEngagements returns the active record's metadata for each listed engagement in one query,
+// without the raw document.
+func (s *ImportedSBOMStore) MetadataByEngagements(ctx context.Context, tenantID shared.ID, engagementIDs []shared.ID) (map[shared.ID]importedsbom.Metadata, error) {
+	out := make(map[shared.ID]importedsbom.Metadata, len(engagementIDs))
+	if len(engagementIDs) == 0 {
+		return out, nil
+	}
+	ids := make([]string, len(engagementIDs))
+	for i, id := range engagementIDs {
+		ids[i] = id.String()
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	err := WithTenant(ctx, s.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+		SELECT id, tenant_id, engagement_id, filename, format, spec_version, target_ref,
+		       component_count, dependency_count, sha256, created_by, created_at
+		FROM imported_sboms
+		WHERE tenant_id = $1 AND engagement_id = ANY($2)`, tenantID.String(), ids)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var m importedsbom.Metadata
+			if err := rows.Scan(&m.ID, &m.TenantID, &m.EngagementID, &m.Filename, &m.Format, &m.SpecVersion, &m.TargetRef,
+				&m.ComponentCount, &m.DependencyCount, &m.SHA256, &m.CreatedBy, &m.CreatedAt); err != nil {
+				return err
+			}
+			out[m.EngagementID] = m
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load imported SBOM metadata: %w", err)
+	}
+	return out, nil
+}
+
 // LatestByEngagement returns the active imported SBOM for a tenant-scoped engagement.
 func (s *ImportedSBOMStore) LatestByEngagement(ctx context.Context, tenantID, engagementID shared.ID) (importedsbom.Record, error) {
 	var record importedsbom.Record

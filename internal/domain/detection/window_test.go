@@ -128,7 +128,7 @@ func TestEvaluatorBoundsGroupsAndEvidence(t *testing.T) {
 	for i := 0; i <= MaxWindowGroups; i++ {
 		ev.Evaluate(dnsEvent(t0.Add(time.Duration(i)*time.Millisecond), "10.1."+string(rune('a'+i%26))+"."+string(rune('a'+i/26))))
 	}
-	if n := ev.perRule[r.ID]; n > MaxWindowGroups {
+	if n := len(ev.buckets[r.ID]); n > MaxWindowGroups {
 		t.Fatalf("groups = %d, exceeds cap %d", n, MaxWindowGroups)
 	}
 	// A burst longer than the evidence cap fires once with the last MaxEvidence events.
@@ -175,5 +175,25 @@ func TestDNSBeaconRuleIsARate(t *testing.T) {
 	again, _ := Lookup("det.suspicious_dns_beacon")
 	if again.Window.Count == 1 {
 		t.Fatal("catalogue window was mutated through a returned rule")
+	}
+}
+
+// A late event stamped before the span does not count and does not stretch the span; the span is
+// measured from the newest event the group has seen and its boundary is exclusive.
+func TestEvaluatorIgnoresOutOfOrderAndBoundaryEvents(t *testing.T) {
+	ev, _ := NewEvaluator([]Rule{windowedRule(3, time.Minute)})
+	t0 := time.Unix(1_000, 0)
+	ev.Evaluate(dnsEvent(t0, "10.0.0.53"))
+	ev.Evaluate(dnsEvent(t0.Add(30*time.Second), "10.0.0.53"))
+	if fired := ev.Evaluate(dnsEvent(t0.Add(-10*time.Minute), "10.0.0.53")); len(fired) != 0 {
+		t.Fatalf("an event ten minutes before the burst counted toward it: %+v", fired)
+	}
+	// Exactly Within after the first event is outside the span (exclusive), so this is only the third
+	// in-span event when the first has expired: 30s, 60s -> two events, no fire.
+	if fired := ev.Evaluate(dnsEvent(t0.Add(60*time.Second), "10.0.0.53")); len(fired) != 0 {
+		t.Fatalf("boundary event completed a burst: %+v", fired)
+	}
+	if fired := ev.Evaluate(dnsEvent(t0.Add(70*time.Second), "10.0.0.53")); len(fired) != 1 {
+		t.Fatalf("30s, 60s, 70s are inside one minute and must fire: %+v", fired)
 	}
 }

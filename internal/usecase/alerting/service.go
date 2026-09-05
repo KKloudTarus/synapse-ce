@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/alerting"
@@ -21,6 +22,20 @@ import (
 // ErrNoSinkAcknowledged is returned by Test when every configured sink refused the test alert.
 var ErrNoSinkAcknowledged = errors.New("no alert sink acknowledged the test alert")
 
+// Delivery bounds. Incident notifications leave the request path through a bounded worker set; a
+// tenant that produces more alerts than the bucket allows has the excess audited as suppressed rather
+// than delivered, so a compromised agent cannot turn correlation into a pager flood.
+const (
+	// deliveryWorkers is the number of concurrent asynchronous deliveries.
+	deliveryWorkers = 4
+	// deliveryQueue is how many notifications may wait for a worker before new ones are dropped (and
+	// audited as alert.dropped).
+	deliveryQueue = 1024
+	// tenantAlertsPerMinute is the sustained per-tenant delivery rate; the bucket also holds that many
+	// tokens as burst.
+	tenantAlertsPerMinute = 60
+)
+
 // Service evaluates and delivers alerts.
 type Service struct {
 	sinks []ports.AlertSink
@@ -28,6 +43,34 @@ type Service struct {
 	audit ports.AuditLogger
 	clock ports.Clock
 	ids   ports.IDGenerator
+
+	queue    chan func()
+	wg       sync.WaitGroup // worker goroutines
+	inflight sync.WaitGroup // queued or running deliveries
+	mu       sync.Mutex
+	buckets  map[shared.ID]*tokenBucket
+}
+
+// tokenBucket is a per-tenant rate limiter on delivered alerts.
+type tokenBucket struct {
+	tokens float64
+	last   time.Time
+}
+
+func (b *tokenBucket) take(now time.Time) bool {
+	elapsed := now.Sub(b.last).Minutes()
+	if elapsed > 0 {
+		b.tokens += elapsed * tenantAlertsPerMinute
+		if b.tokens > tenantAlertsPerMinute {
+			b.tokens = tenantAlertsPerMinute
+		}
+		b.last = now
+	}
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
 }
 
 // NewService validates its dependencies. At least one sink is required: a service with nowhere to deliver
@@ -51,7 +94,70 @@ func NewService(sinks []ports.AlertSink, rule alerting.Rule, audit ports.AuditLo
 	if err := rule.Validate(); err != nil {
 		return nil, err
 	}
-	return &Service{sinks: append([]ports.AlertSink(nil), sinks...), rule: rule, audit: audit, clock: clock, ids: ids}, nil
+	s := &Service{sinks: append([]ports.AlertSink(nil), sinks...), rule: rule, audit: audit, clock: clock, ids: ids,
+		queue: make(chan func(), deliveryQueue), buckets: map[shared.ID]*tokenBucket{}}
+	for i := 0; i < deliveryWorkers; i++ {
+		s.wg.Add(1)
+		go s.worker()
+	}
+	return s, nil
+}
+
+func (s *Service) worker() {
+	defer s.wg.Done()
+	for job := range s.queue {
+		job()
+	}
+}
+
+// Close stops accepting asynchronous notifications and waits for the queued ones to finish.
+func (s *Service) Close() {
+	s.mu.Lock()
+	if s.queue != nil {
+		close(s.queue)
+		s.queue = nil
+	}
+	s.mu.Unlock()
+	s.wg.Wait()
+}
+
+// Flush blocks until every notification queued so far has been delivered. Tests use it; a caller in
+// production never waits on delivery.
+func (s *Service) Flush() { s.inflight.Wait() }
+
+// enqueue hands a delivery to the workers without blocking the caller. It reports false when the
+// queue is full or closed.
+func (s *Service) enqueue(job func()) bool {
+	s.mu.Lock()
+	q := s.queue
+	s.mu.Unlock()
+	if q == nil {
+		return false
+	}
+	s.inflight.Add(1)
+	wrapped := func() {
+		defer s.inflight.Done()
+		job()
+	}
+	select {
+	case q <- wrapped:
+		return true
+	default:
+		s.inflight.Done()
+		return false
+	}
+}
+
+// allow applies the per-tenant rate limit.
+func (s *Service) allow(tenant shared.ID, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.buckets[tenant]
+	if !ok {
+		b = &tokenBucket{tokens: tenantAlertsPerMinute, last: now}
+		s.buckets[tenant] = b
+	}
+	return b.take(now)
 }
 
 // Outcome counts what one notification did across sinks. Matched is false when the rule filtered the
@@ -65,14 +171,17 @@ type Outcome struct {
 
 // IncidentsCreated notifies each incident correlation opened. It satisfies correlationuc.IncidentNotifier
 // and returns nothing on purpose: the incidents are recorded, and the per-sink result is in the audit log.
+// Delivery runs on the worker set, detached from the caller's request context, so a slow or dead
+// receiver never holds the agent's ingest; the rate limit and a full queue are audited, never silent.
 func (s *Service) IncidentsCreated(ctx context.Context, actor string, engagementID shared.ID, created []incident.Incident) {
 	tenant := s.tenant(ctx)
+	bg := context.WithoutCancel(ctx)
 	for _, inc := range created {
 		at := inc.CreatedAt
 		if at.IsZero() {
 			at = s.clock.Now()
 		}
-		s.Notify(ctx, actor, alerting.Alert{
+		a := alerting.Alert{
 			ID:           s.ids.NewID(),
 			TenantID:     tenant,
 			Kind:         alerting.KindIncidentCreated,
@@ -84,9 +193,24 @@ func (s *Service) IncidentsCreated(ctx context.Context, actor string, engagement
 			IncidentID:   inc.ID,
 			Link:         "/fleet/incidents/" + inc.ID.String(),
 			OccurredAt:   at.UTC(),
-		})
+		}
+		if !s.rule.Matches(a) {
+			continue
+		}
+		if !s.allow(tenant, s.clock.Now()) {
+			_ = s.record(ctx, actor, "alert.suppressed", a, "", errRateLimited)
+			continue
+		}
+		if !s.enqueue(func() { s.Notify(bg, actor, a) }) {
+			_ = s.record(ctx, actor, "alert.dropped", a, "", errQueueFull)
+		}
 	}
 }
+
+var (
+	errRateLimited = errors.New("tenant alert rate limit reached")
+	errQueueFull   = errors.New("alert delivery queue is full")
+)
 
 // Test delivers a synthetic alert so an operator can prove the configured sinks receive alerts. It
 // bypasses the severity rule and reports the outcome; an error means no sink acknowledged it.

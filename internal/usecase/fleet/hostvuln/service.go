@@ -29,6 +29,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	dhi "github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
@@ -38,6 +39,15 @@ import (
 
 // Filename is the artifact name the host package list is recorded under in the imported-SBOM store.
 const Filename = "host-inventory.cdx.json"
+
+// MaxPackages bounds one inventory. A real host carries a few thousand packages; a list far beyond
+// that is not an inventory, and an agent must not be able to make the server render and scan one.
+const MaxPackages = 50000
+
+// MinRecordInterval is the shortest gap between two recorded package sets for one host. The sweep
+// cadence is hourly; a host whose package set changes on every sync is being driven, not maintained,
+// and the server records at most one set per interval instead of importing and scanning each time.
+const MinRecordInterval = 10 * time.Minute
 
 // targetPrefix makes the host's natural key a scope target the SCA gate can match exactly.
 const targetPrefix = "host://"
@@ -64,6 +74,7 @@ type Service struct {
 	engagements ports.EngagementRepository
 	assets      ports.AssetRepository
 	findings    FindingLister
+	summaries   ports.FindingSummaryReader // optional; nil ⇒ Hosts lists each context's findings to count them
 	scanner     SBOMScanner
 	imported    ports.ImportedSBOMStore
 	jobs        ports.ScanJobStore
@@ -71,6 +82,10 @@ type Service struct {
 	clock       ports.Clock
 	audit       ports.AuditLogger
 }
+
+// SetFindingSummaries wires the aggregate read Hosts uses to count findings per context in one query
+// instead of loading every context's finding rows.
+func (s *Service) SetFindingSummaries(r ports.FindingSummaryReader) { s.summaries = r }
 
 var _ hostinventory.VulnerabilityRecorder = (*Service)(nil)
 
@@ -107,6 +122,9 @@ func (s *Service) Record(ctx context.Context, actor string, tenantID shared.ID, 
 	if len(inv.Packages) == 0 {
 		return hostinventory.VulnerabilityOutcome{Skipped: true, Reason: hostinventory.ReasonNoPackages}, nil
 	}
+	if len(inv.Packages) > MaxPackages {
+		return hostinventory.VulnerabilityOutcome{}, fmt.Errorf("%w: host reported %d packages, above the %d cap", shared.ErrValidation, len(inv.Packages), MaxPackages)
+	}
 
 	ref := TargetRef(host)
 	data, err := Document(host, inv.Packages)
@@ -133,6 +151,9 @@ func (s *Service) Record(ctx context.Context, actor string, tenantID shared.ID, 
 			// The worker reloads the active SBOM when it executes, so replacing it under a running
 			// scan would change what that scan measures. The next sweep records the new set.
 			outcome.Skipped, outcome.Reason = true, hostinventory.ReasonScanActive
+			return outcome, nil
+		case scanRecent:
+			outcome.Skipped, outcome.Reason = true, hostinventory.ReasonRecordedRecently
 			return outcome, nil
 		}
 	}
@@ -236,11 +257,13 @@ const (
 	scanStale     scanState = iota // no record, a different package set, or a failed scan: record and scan
 	scanUnchanged                  // same package set and the last scan did not fail: nothing to do
 	scanActive                     // a scan is still running: do not replace its input
+	scanRecent                     // a different set, but one was recorded less than MinRecordInterval ago
 )
 
 // lastScanState compares the active imported SBOM and the latest scan job with the digest of the
 // package set being recorded. A failed or missing scan is retried even when the package set did not
-// change.
+// change, and so is a scan that started before the active record was written: the import succeeded
+// but the scan start did not, so the recorded set has never been measured.
 func (s *Service) lastScanState(ctx context.Context, tenantID, engagementID shared.ID, digest string) (scanState, error) {
 	job, err := s.jobs.LatestForEngagement(ctx, engagementID)
 	switch {
@@ -250,33 +273,31 @@ func (s *Service) lastScanState(ctx context.Context, tenantID, engagementID shar
 		return scanStale, fmt.Errorf("load latest host vulnerability scan: %w", err)
 	case job.Status == ports.ScanRunning:
 		return scanActive, nil
-	case job.Status == ports.ScanFailed:
-		return scanStale, nil
 	}
-	rec, err := s.imported.LatestByEngagement(ctx, tenantID, engagementID)
-	if errors.Is(err, shared.ErrNotFound) {
-		return scanStale, nil
-	}
+	// Metadata only: the digest and the recording time decide; the document body (hundreds of KB per
+	// host, every hourly sweep) stays in the store.
+	recs, err := s.imported.MetadataByEngagements(ctx, tenantID, []shared.ID{engagementID})
 	if err != nil {
 		return scanStale, fmt.Errorf("load recorded host packages: %w", err)
 	}
+	rec, ok := recs[engagementID]
+	if !ok {
+		return scanStale, nil
+	}
 	if rec.SHA256 != digest {
+		if s.clock.Now().Sub(rec.CreatedAt) < MinRecordInterval {
+			return scanRecent, nil
+		}
+		return scanStale, nil
+	}
+	if job.Status == ports.ScanFailed || job.StartedAt.Before(rec.CreatedAt) {
 		return scanStale, nil
 	}
 	return scanUnchanged, nil
 }
 
 // Summary counts a host's vulnerability findings.
-type Summary struct {
-	Total    int `json:"total"`
-	Critical int `json:"critical"`
-	High     int `json:"high"`
-	Medium   int `json:"medium"`
-	Low      int `json:"low"`
-	Info     int `json:"info"`
-	Fixable  int `json:"fixable"`
-	KEV      int `json:"kev"`
-}
+type Summary = ports.VulnerabilitySummary
 
 // HostVulnerabilities is one host's recorded package set, its latest scan, and the findings.
 type HostVulnerabilities struct {
@@ -317,10 +338,12 @@ func (s *Service) Vulnerabilities(ctx context.Context, tenantID, assetID shared.
 		return nil, fmt.Errorf("load host vulnerability context: %w", err)
 	}
 	out.EngagementID = eng.ID
-	if rec, err := s.imported.LatestByEngagement(ctx, tenantID, eng.ID); err == nil {
-		out.Packages, out.RecordedAt = rec.ComponentCount, rec.CreatedAt
-	} else if !errors.Is(err, shared.ErrNotFound) {
+	recs, err := s.imported.MetadataByEngagements(ctx, tenantID, []shared.ID{eng.ID})
+	if err != nil {
 		return nil, fmt.Errorf("load recorded host packages: %w", err)
+	}
+	if rec, ok := recs[eng.ID]; ok {
+		out.Packages, out.RecordedAt = rec.ComponentCount, rec.CreatedAt
 	}
 	if job, err := s.jobs.LatestForEngagement(ctx, eng.ID); err == nil {
 		out.LastScan = &job
@@ -340,58 +363,61 @@ func (s *Service) Vulnerabilities(ctx context.Context, tenantID, assetID shared.
 	return out, nil
 }
 
-// Hosts lists every host asset with its vulnerability summary. It performs one context, one SBOM
-// and one finding read per host plus one batched job read: O(H) round trips for H hosts, which fits
-// the fleet sizes the asset model targets (hundreds, not hundreds of thousands).
+// Hosts lists every host asset with its vulnerability summary. It is five round trips for the whole
+// fleet, independent of the host count: the host assets, their contexts, the active SBOM metadata,
+// the per-context finding summary and the latest scan jobs. Without a summary reader it falls back to
+// listing each context's findings, which is O(H) reads and fine for a small fleet only.
 func (s *Service) Hosts(ctx context.Context, tenantID shared.ID) ([]HostSummary, error) {
 	all, err := s.assets.ListAssets(ctx, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list host assets: %w", err)
 	}
-	out := make([]HostSummary, 0)
-	engagementIDs := make([]shared.ID, 0)
+	hosts := make([]*asset.Asset, 0, len(all))
 	for _, a := range all {
-		if a.Kind != asset.KindHost {
-			continue
+		if a.Kind == asset.KindHost {
+			hosts = append(hosts, a)
 		}
-		row := HostSummary{Asset: a}
-		eng, err := s.engagements.GetByHostAssetID(ctx, tenantID, a.ID)
-		if err != nil && !errors.Is(err, shared.ErrNotFound) {
-			return nil, fmt.Errorf("load host vulnerability context: %w", err)
-		}
-		if err == nil {
-			row.EngagementID = eng.ID
-			engagementIDs = append(engagementIDs, eng.ID)
-			if rec, err := s.imported.LatestByEngagement(ctx, tenantID, eng.ID); err == nil {
-				row.Packages, row.RecordedAt = rec.ComponentCount, rec.CreatedAt
-			} else if !errors.Is(err, shared.ErrNotFound) {
-				return nil, fmt.Errorf("load recorded host packages: %w", err)
-			}
-			list, err := s.findings.List(ctx, eng.ID)
-			if err != nil {
-				return nil, fmt.Errorf("list host vulnerabilities: %w", err)
-			}
-			vulns := make([]finding.Finding, 0, len(list))
-			for _, f := range list {
-				if isVulnerability(f) {
-					vulns = append(vulns, f)
-				}
-			}
-			row.Summary = summarize(vulns)
-		}
-		out = append(out, row)
 	}
+	contexts, err := s.contextsByHost(ctx, tenantID, hosts)
+	if err != nil {
+		return nil, err
+	}
+	engagementIDs := make([]shared.ID, 0, len(contexts))
+	for _, eng := range contexts {
+		engagementIDs = append(engagementIDs, eng.ID)
+	}
+	sort.Slice(engagementIDs, func(i, j int) bool { return engagementIDs[i] < engagementIDs[j] })
+
+	metadata := map[shared.ID]importedsbom.Metadata{}
+	summaries := map[shared.ID]Summary{}
+	jobs := map[shared.ID]ports.ScanJob{}
 	if len(engagementIDs) > 0 {
-		jobs, err := s.jobs.LatestForEngagements(ctx, engagementIDs)
-		if err != nil {
+		if metadata, err = s.imported.MetadataByEngagements(ctx, tenantID, engagementIDs); err != nil {
+			return nil, fmt.Errorf("load recorded host packages: %w", err)
+		}
+		if summaries, err = s.summarize(ctx, engagementIDs); err != nil {
+			return nil, err
+		}
+		if jobs, err = s.jobs.LatestForEngagements(ctx, engagementIDs); err != nil {
 			return nil, fmt.Errorf("load latest host vulnerability scans: %w", err)
 		}
-		for i := range out {
-			if job, ok := jobs[out[i].EngagementID]; ok && !out[i].EngagementID.IsZero() {
+	}
+
+	out := make([]HostSummary, 0, len(hosts))
+	for _, a := range hosts {
+		row := HostSummary{Asset: a}
+		if eng, ok := contexts[a.ID]; ok {
+			row.EngagementID = eng.ID
+			if rec, ok := metadata[eng.ID]; ok {
+				row.Packages, row.RecordedAt = rec.ComponentCount, rec.CreatedAt
+			}
+			row.Summary = summaries[eng.ID]
+			if job, ok := jobs[eng.ID]; ok {
 				j := job
-				out[i].LastScan = &j
+				row.LastScan = &j
 			}
 		}
+		out = append(out, row)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Summary.Critical != out[j].Summary.Critical {
@@ -408,6 +434,60 @@ func (s *Service) Hosts(ctx context.Context, tenantID shared.ID) ([]HostSummary,
 	return out, nil
 }
 
+// contextsByHost resolves the hidden context of every host in one read when the repository can list
+// them, else one lookup per host.
+func (s *Service) contextsByHost(ctx context.Context, tenantID shared.ID, hosts []*asset.Asset) (map[shared.ID]*engagement.Engagement, error) {
+	out := make(map[shared.ID]*engagement.Engagement, len(hosts))
+	if lister, ok := s.engagements.(ports.HostEngagementLister); ok {
+		all, err := lister.ListHostEngagements(ctx, tenantID)
+		if err != nil {
+			return nil, fmt.Errorf("list host vulnerability contexts: %w", err)
+		}
+		for _, eng := range all {
+			out[eng.HostAssetID] = eng
+		}
+		return out, nil
+	}
+	for _, a := range hosts {
+		eng, err := s.engagements.GetByHostAssetID(ctx, tenantID, a.ID)
+		if errors.Is(err, shared.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("load host vulnerability context: %w", err)
+		}
+		out[a.ID] = eng
+	}
+	return out, nil
+}
+
+// summarize counts findings per context: one aggregate query when a summary reader is wired, else one
+// finding list per context.
+func (s *Service) summarize(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]Summary, error) {
+	if s.summaries != nil {
+		out, err := s.summaries.SummarizeVulnerabilitiesByEngagements(ctx, engagementIDs)
+		if err != nil {
+			return nil, fmt.Errorf("summarize host vulnerabilities: %w", err)
+		}
+		return out, nil
+	}
+	out := make(map[shared.ID]Summary, len(engagementIDs))
+	for _, id := range engagementIDs {
+		list, err := s.findings.List(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("list host vulnerabilities: %w", err)
+		}
+		vulns := make([]finding.Finding, 0, len(list))
+		for _, f := range list {
+			if isVulnerability(f) {
+				vulns = append(vulns, f)
+			}
+		}
+		out[id] = summarize(vulns)
+	}
+	return out, nil
+}
+
 // isVulnerability keeps the advisory-backed findings of the context. The imported-SBOM pipeline also
 // derives license findings from the same components; those are not host vulnerabilities.
 func isVulnerability(f finding.Finding) bool {
@@ -420,25 +500,7 @@ func isVulnerability(f finding.Finding) bool {
 func summarize(list []finding.Finding) Summary {
 	var sum Summary
 	for _, f := range list {
-		sum.Total++
-		switch f.Severity {
-		case shared.SeverityCritical:
-			sum.Critical++
-		case shared.SeverityHigh:
-			sum.High++
-		case shared.SeverityMedium:
-			sum.Medium++
-		case shared.SeverityLow:
-			sum.Low++
-		default:
-			sum.Info++
-		}
-		if strings.TrimSpace(f.FixedVersion) != "" {
-			sum.Fixable++
-		}
-		if f.KEV {
-			sum.KEV++
-		}
+		sum.Add(f.Severity, strings.TrimSpace(f.FixedVersion) != "", f.KEV)
 	}
 	return sum
 }

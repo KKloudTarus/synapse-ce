@@ -31,6 +31,7 @@ var _ ports.EngagementRepository = (*EngagementRepository)(nil)
 var _ ports.PromotionReconciliationScopeReader = (*EngagementRepository)(nil)
 var _ ports.VulnerabilityReconciliationTenantStore = (*EngagementRepository)(nil)
 var _ ports.DetectionReconciliationTenantStore = (*EngagementRepository)(nil)
+var _ ports.HostEngagementLister = (*EngagementRepository)(nil)
 
 // Create inserts the engagement and its scope targets in one transaction.
 func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagement) error {
@@ -277,26 +278,36 @@ func (r *EngagementRepository) List(ctx context.Context, tenantID shared.ID) (ou
 	return out, err
 }
 
+// ListHostEngagements returns the tenant's hidden fleet host vulnerability contexts for operational
+// aggregation (advisory reconciliation). Normal engagement lists continue to hide these rows.
+func (r *EngagementRepository) ListHostEngagements(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error) {
+	return r.listInternal(ctx, tenantID, `host_asset_id IS NOT NULL`, "host")
+}
+
 // ListProjectEngagements returns the tenant's hidden Project analysis contexts for operational
 // aggregation. Normal engagement lists remain unchanged and continue to hide these rows.
-func (r *EngagementRepository) ListProjectEngagements(ctx context.Context, tenantID shared.ID) (out []*engagement.Engagement, err error) {
+func (r *EngagementRepository) ListProjectEngagements(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error) {
+	return r.listInternal(ctx, tenantID, `project_id IS NOT NULL`, "project")
+}
+
+func (r *EngagementRepository) listInternal(ctx context.Context, tenantID shared.ID, predicate, kind string) (out []*engagement.Engagement, err error) {
 	tenantID = shared.TenantOrDefault(tenantID)
 	err = WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND project_id IS NOT NULL ORDER BY created_at DESC`, tenantID.String())
+		rows, err := tx.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND `+predicate+` ORDER BY created_at DESC`, tenantID.String())
 		if err != nil {
-			return fmt.Errorf("list project engagements: %w", err)
+			return fmt.Errorf("list %s engagements: %w", kind, err)
 		}
 		for rows.Next() {
 			e, err := scanEngagement(rows)
 			if err != nil {
 				rows.Close()
-				return fmt.Errorf("scan project engagement: %w", err)
+				return fmt.Errorf("scan %s engagement: %w", kind, err)
 			}
 			out = append(out, e)
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()
-			return fmt.Errorf("list project engagements: %w", err)
+			return fmt.Errorf("list %s engagements: %w", kind, err)
 		}
 		rows.Close()
 		for _, e := range out {

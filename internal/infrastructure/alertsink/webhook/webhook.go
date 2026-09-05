@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -127,7 +128,7 @@ func (s *Sink) Deliver(ctx context.Context, a alerting.Alert) error {
 	for attempt := 0; attempt < attempts; attempt++ {
 		if attempt > 0 {
 			if err := s.sleep(ctx, baseBackoff<<(attempt-1)); err != nil {
-				return err
+				return fmt.Errorf("%w (last attempt: %v)", err, last)
 			}
 		}
 		final, err := s.post(ctx, a, body)
@@ -159,6 +160,12 @@ func (s *Sink) post(ctx context.Context, a alerting.Alert, body []byte) (final b
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
+		// *url.Error prints the request URL, and for Slack-style hooks the URL path is the credential.
+		// Keep the transport cause and drop the URL before it reaches an audit entry.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return false, fmt.Errorf("deliver alert: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()

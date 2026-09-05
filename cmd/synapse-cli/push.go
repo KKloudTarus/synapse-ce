@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,7 +25,15 @@ type pushTarget struct {
 	project string
 	token   string
 	ci      projectanalysis.CIContext
+	// insecureHTTP allows a plain-http server that is not loopback. The bearer token travels in the
+	// clear then; a pipeline has to say so explicitly.
+	insecureHTTP bool
 }
+
+// projectKeyPattern mirrors the server's project key rule (internal/domain/project): lowercase
+// alphanumerics joined by single hyphens. A key that fails it would either be refused by the server or,
+// with a slash, change the route.
+var projectKeyPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 func (p pushTarget) enabled() bool { return strings.TrimSpace(p.server) != "" }
 
@@ -36,11 +46,18 @@ func (p pushTarget) validate() error {
 	if strings.TrimSpace(p.project) == "" {
 		return fmt.Errorf("--server requires --project KEY (the server-owned project this result belongs to)")
 	}
+	if !projectKeyPattern.MatchString(strings.TrimSpace(p.project)) {
+		return fmt.Errorf("--project %q is not a project key (lowercase letters, digits and single hyphens)", p.project)
+	}
 	if strings.TrimSpace(p.token) == "" {
 		return fmt.Errorf("--server requires SYNAPSE_API_TOKEN in the environment")
 	}
-	if _, err := pushBaseURL(p.server); err != nil {
+	u, err := pushBaseURL(p.server)
+	if err != nil {
 		return err
+	}
+	if u.Scheme == "http" && !p.insecureHTTP && !loopbackHost(u.Hostname()) {
+		return fmt.Errorf("--server %s sends the API token over plain http; use https, or pass --insecure-http to accept that on a trusted network", u.Host)
 	}
 	if _, err := p.ci.Normalize(); err != nil {
 		return err
@@ -56,6 +73,14 @@ func pushBaseURL(server string) (*url.URL, error) {
 	u.Path = strings.TrimRight(u.Path, "/")
 	u.RawQuery, u.Fragment = "", ""
 	return u, nil
+}
+
+func loopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // pushedAnalysis is the part of the server's answer the pipeline log needs.

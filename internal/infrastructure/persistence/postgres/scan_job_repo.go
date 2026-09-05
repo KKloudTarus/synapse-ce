@@ -130,7 +130,15 @@ func (r *ScanJobStore) LatestForEngagements(ctx context.Context, engagementIDs [
 	if len(ids) == 0 {
 		return map[shared.ID]ports.ScanJob{}, nil
 	}
-	rows, err := r.pool.Query(ctx, `SELECT DISTINCT ON (engagement_id) id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at FROM scan_jobs WHERE engagement_id = ANY($1) ORDER BY engagement_id, started_at DESC, id DESC`, ids)
+	// A LATERAL top-1 per engagement walks idx_scan_jobs_engagement once per id; DISTINCT ON over every
+	// job of every engagement sorted the whole set (an on-disk merge at tens of thousands of jobs).
+	rows, err := r.pool.Query(ctx, `SELECT j.id, j.engagement_id, j.target, j.kind, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at
+		FROM unnest($1::text[]) AS e(engagement_id)
+		JOIN LATERAL (
+			SELECT id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at
+			FROM scan_jobs WHERE engagement_id = e.engagement_id
+			ORDER BY started_at DESC, id DESC LIMIT 1
+		) j ON true`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("list latest scan jobs: %w", err)
 	}

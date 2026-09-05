@@ -202,6 +202,52 @@ func classifyFindingUpdateMiss(ctx context.Context, tx pgx.Tx, engagementID, fin
 
 // ListByEngagement returns the engagement's findings, highest risk first
 // (CISA KEV, then EPSS x CVSS, then severity).
+// SummarizeVulnerabilitiesByEngagements aggregates SCA vulnerability findings per engagement in one
+// GROUP BY, so a list over thousands of contexts never loads their finding rows.
+func (r *FindingRepository) SummarizeVulnerabilitiesByEngagements(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]ports.VulnerabilitySummary, error) {
+	out := make(map[shared.ID]ports.VulnerabilitySummary, len(engagementIDs))
+	if len(engagementIDs) == 0 {
+		return out, nil
+	}
+	ids := make([]string, len(engagementIDs))
+	for i, id := range engagementIDs {
+		ids[i] = id.String()
+		out[id] = ports.VulnerabilitySummary{}
+	}
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+		SELECT engagement_id, severity, count(*),
+		       count(*) FILTER (WHERE COALESCE(fixed_version,'') <> ''),
+		       count(*) FILTER (WHERE kev)
+		FROM findings
+		WHERE engagement_id = ANY($1)
+		  AND (kind = '' OR kind = 'sca' OR kind IS NULL)
+		  AND (dedup_key IS NULL OR dedup_key NOT LIKE 'license:%')
+		GROUP BY engagement_id, severity`, ids)
+		if err != nil {
+			return fmt.Errorf("summarize findings: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var eng, severity string
+			var total, fixable, kev int
+			if err := rows.Scan(&eng, &severity, &total, &fixable, &kev); err != nil {
+				return fmt.Errorf("scan finding summary: %w", err)
+			}
+			sum := out[shared.ID(eng)]
+			for i := 0; i < total; i++ {
+				sum.Add(shared.Severity(severity), i < fixable, i < kev)
+			}
+			out[shared.ID(eng)] = sum
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *FindingRepository) ListByEngagement(ctx context.Context, engagementID shared.ID) (out []finding.Finding, err error) {
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,

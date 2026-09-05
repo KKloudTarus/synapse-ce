@@ -366,6 +366,12 @@ type ProjectEngagementLister interface {
 	ListProjectEngagements(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error)
 }
 
+// HostEngagementLister returns the tenant's hidden fleet host vulnerability contexts, so a pass that
+// must visit every scanned SBOM (advisory-revision reconciliation) reaches hosts as well as projects.
+type HostEngagementLister interface {
+	ListHostEngagements(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error)
+}
+
 // GovernanceReconciler repairs durable governance side effects for one engagement.
 type GovernanceReconciler interface {
 	Reconcile(ctx context.Context, engagementID shared.ID) error
@@ -892,6 +898,52 @@ type AITriageFindingDecision interface {
 type ImportedSBOMStore interface {
 	SaveActive(ctx context.Context, record importedsbom.Record) error
 	LatestByEngagement(ctx context.Context, tenantID, engagementID shared.ID) (importedsbom.Record, error)
+	// MetadataByEngagements returns the active record's metadata (no raw document) for each of the
+	// engagements that has one, in one round trip. A list view of many SBOM-bearing contexts must not
+	// pull every document body to show a component count and a digest.
+	MetadataByEngagements(ctx context.Context, tenantID shared.ID, engagementIDs []shared.ID) (map[shared.ID]importedsbom.Metadata, error)
+}
+
+// VulnerabilitySummary counts the advisory-backed findings of one engagement by severity.
+type VulnerabilitySummary struct {
+	Total    int `json:"total"`
+	Critical int `json:"critical"`
+	High     int `json:"high"`
+	Medium   int `json:"medium"`
+	Low      int `json:"low"`
+	Info     int `json:"info"`
+	Fixable  int `json:"fixable"`
+	KEV      int `json:"kev"`
+}
+
+// Add folds one finding's severity, fix state and KEV flag into the summary.
+func (s *VulnerabilitySummary) Add(severity shared.Severity, fixable, kev bool) {
+	s.Total++
+	switch severity {
+	case shared.SeverityCritical:
+		s.Critical++
+	case shared.SeverityHigh:
+		s.High++
+	case shared.SeverityMedium:
+		s.Medium++
+	case shared.SeverityLow:
+		s.Low++
+	default:
+		s.Info++
+	}
+	if fixable {
+		s.Fixable++
+	}
+	if kev {
+		s.KEV++
+	}
+}
+
+// FindingSummaryReader aggregates SCA vulnerability findings per engagement in one read, for list
+// views over many engagements. License findings (dedup key "license:*") and non-SCA kinds are excluded.
+// Optional: a store that does not implement it makes callers fall back to listing findings.
+type FindingSummaryReader interface {
+	SummarizeVulnerabilitiesByEngagements(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]VulnerabilitySummary, error)
 }
 
 // AlertSink delivers one operator alert to a destination (a webhook, a chat integration). Deliver

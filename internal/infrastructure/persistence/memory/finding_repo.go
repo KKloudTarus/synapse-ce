@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -261,6 +262,24 @@ func (r *FindingRepository) setPriorityInternal(engagementID, findingID shared.I
 }
 
 // ListByEngagement returns the engagement's findings, highest risk first (KEV -> EPSS x CVSS).
+// SummarizeVulnerabilitiesByEngagements counts SCA vulnerability findings per engagement.
+func (r *FindingRepository) SummarizeVulnerabilitiesByEngagements(_ context.Context, engagementIDs []shared.ID) (map[shared.ID]ports.VulnerabilitySummary, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[shared.ID]ports.VulnerabilitySummary, len(engagementIDs))
+	for _, id := range engagementIDs {
+		var sum ports.VulnerabilitySummary
+		for _, f := range r.data[id] {
+			if (f.Kind != "" && f.Kind != finding.KindSCA) || strings.HasPrefix(f.DedupKey, "license:") {
+				continue
+			}
+			sum.Add(f.Severity, strings.TrimSpace(f.FixedVersion) != "", f.KEV)
+		}
+		out[id] = sum
+	}
+	return out, nil
+}
+
 func (r *FindingRepository) ListByEngagement(ctx context.Context, engagementID shared.ID) ([]finding.Finding, error) {
 	r.mu.RLock()
 	byKey := r.data[engagementID]

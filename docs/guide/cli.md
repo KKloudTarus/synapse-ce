@@ -88,7 +88,8 @@ synapse-cli scan <path|image-ref> [flags]
 | `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. |
 | `--sarif` | Print a SARIF 2.1.0 report to stdout, ready to upload to GitHub code scanning. Covers every finding kind; SAST, secret and misconfig findings carry a file and line so the platform annotates the exact source line. Findings exempted from the CI gate by verified AI consensus remain present and carry an external suppression with the policy version and reason. `--fail-on` still sets the exit code. |
 | `--sbom` | Print the generated CycloneDX SBOM to stdout instead of a findings report. |
-| `--server <url> --project <key>` | Record the result on a Synapse server as that project's next analysis. The token comes from `SYNAPSE_API_TOKEN`. See [Push results to the console](#push-results-to-the-console). |
+| `--server <url> --project <key>` | Record the result on a Synapse server as that project's next analysis. The token comes from `SYNAPSE_API_TOKEN`. `https` is required unless the host is loopback. See [Push results to the console](#push-results-to-the-console). |
+| `--insecure-http` | Accept a plain-`http` `--server` that is not loopback. The API token then travels in the clear; use it only on a network you trust. |
 | `--branch <ref>`, `--run-url <url>`, `--ci-provider <name>` | What the pipeline says about itself, shown on the analysis in the console. On GitHub Actions, GitLab CI and Jenkins these are read from the provider's variables when not given. |
 
 `--json`, `--sarif`, and `--sbom` each take over stdout completely, so they are mutually exclusive.

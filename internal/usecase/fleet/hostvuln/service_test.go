@@ -26,7 +26,7 @@ const tenant = shared.ID("tenant-a")
 
 type fixedClock struct{ t time.Time }
 
-func (c fixedClock) Now() time.Time { return c.t }
+func (c *fixedClock) Now() time.Time { return c.t }
 
 type seqIDs struct{ n int }
 
@@ -102,6 +102,7 @@ func (f fakeFindings) List(_ context.Context, id shared.ID) ([]finding.Finding, 
 
 type harness struct {
 	svc      *Service
+	clock    *fixedClock
 	eng      *memory.EngagementRepository
 	assets   *memory.AssetStore
 	scanner  *fakeScanner
@@ -113,8 +114,9 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	clock := fixedClock{t: time.Date(2026, 9, 5, 9, 0, 0, 0, time.UTC)}
+	clock := &fixedClock{t: time.Date(2026, 9, 5, 9, 0, 0, 0, time.UTC)}
 	h := &harness{
+		clock:    clock,
 		eng:      memory.NewEngagementRepository(),
 		assets:   memory.NewAssetStore(),
 		jobs:     memory.NewScanJobStore(),
@@ -241,8 +243,9 @@ func TestRecordSkipsUnchangedPackagesAndRescansOnChange(t *testing.T) {
 		t.Fatalf("unchanged host re-imported: imports=%d starts=%d", len(h.scanner.imports), h.scanner.starts)
 	}
 
-	// Once the scan finished, the upgraded package changes the digest and triggers a new import and
-	// scan on the same context.
+	// Once the scan finished and the record interval has passed, the upgraded package changes the
+	// digest and triggers a new import and scan on the same context.
+	h.clock.t = h.clock.t.Add(MinRecordInterval)
 	out, err = h.svc.Record(ctx, "agent-1", tenant, h.host, inventory(upgraded))
 	if err != nil {
 		t.Fatal(err)
@@ -415,10 +418,140 @@ func TestDocumentIsDeterministic(t *testing.T) {
 
 func TestNewServiceValidatesDependencies(t *testing.T) {
 	h := newHarness(t)
-	if _, err := NewService(nil, h.assets, h.findings, h.scanner, h.scanner.imported, h.jobs, &seqIDs{}, fixedClock{}, h.audit); !errors.Is(err, shared.ErrValidation) {
+	if _, err := NewService(nil, h.assets, h.findings, h.scanner, h.scanner.imported, h.jobs, &seqIDs{}, &fixedClock{}, h.audit); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("nil engagements err = %v", err)
 	}
-	if _, err := NewService(h.eng, h.assets, h.findings, nil, h.scanner.imported, h.jobs, &seqIDs{}, fixedClock{}, h.audit); !errors.Is(err, shared.ErrValidation) {
+	if _, err := NewService(h.eng, h.assets, h.findings, nil, h.scanner.imported, h.jobs, &seqIDs{}, &fixedClock{}, h.audit); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("nil scanner err = %v", err)
 	}
+}
+
+// Import succeeds, the scan start fails, the next sweep reports the same set: the recorded set was never
+// measured, so it is scanned now rather than read as unchanged against an older successful scan.
+func TestRecordRescansWhenTheScanStartFailedAfterImport(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.svc.Record(ctx, "agent-1", tenant, h.host, inventory(packages())); err != nil {
+		t.Fatal(err)
+	}
+	h.finishLatestScan(t, "id-1", ports.ScanSucceeded)
+	h.clock.t = h.clock.t.Add(time.Hour)
+	upgraded := packages()
+	upgraded[1].Version = "3.0.13-1~deb12u1"
+	h.scanner.startErr = errors.New("queue down")
+	if _, err := h.svc.Record(ctx, "agent-1", tenant, h.host, inventory(upgraded)); err == nil {
+		t.Fatal("scan start failure not surfaced")
+	}
+	h.scanner.startErr = nil
+	h.clock.t = h.clock.t.Add(time.Hour)
+	out, err := h.svc.Record(ctx, "agent-1", tenant, h.host, inventory(upgraded))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Skipped || out.JobID != "job-2" {
+		t.Fatalf("unmeasured set was not scanned: %+v", out)
+	}
+	if len(h.scanner.imports) != 3 {
+		t.Fatalf("imports = %d (initial, failed-start, retry)", len(h.scanner.imports))
+	}
+}
+
+// A changed set arriving within the minimum record interval is deferred, not imported and scanned.
+func TestRecordDefersRapidChanges(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.svc.Record(ctx, "agent-1", tenant, h.host, inventory(packages())); err != nil {
+		t.Fatal(err)
+	}
+	h.finishLatestScan(t, "id-1", ports.ScanSucceeded)
+	changed := packages()
+	changed[0].Version = "1:1.2.13.dfsg-2"
+	h.clock.t = h.clock.t.Add(MinRecordInterval / 2)
+	out, err := h.svc.Record(ctx, "agent-1", tenant, h.host, inventory(changed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Skipped || out.Reason != hostinventory.ReasonRecordedRecently || len(h.scanner.imports) != 1 {
+		t.Fatalf("rapid change was recorded: %+v imports=%d", out, len(h.scanner.imports))
+	}
+	h.clock.t = h.clock.t.Add(MinRecordInterval)
+	out, err = h.svc.Record(ctx, "agent-1", tenant, h.host, inventory(changed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Skipped || len(h.scanner.imports) != 2 {
+		t.Fatalf("change after the interval not recorded: %+v", out)
+	}
+}
+
+func TestRecordRefusesOversizedInventory(t *testing.T) {
+	h := newHarness(t)
+	huge := make([]sbom.Component, MaxPackages+1)
+	for i := range huge {
+		huge[i] = sbom.Component{Name: "p" + strconv.Itoa(i), Version: "1", PURL: "pkg:deb/debian/p" + strconv.Itoa(i) + "@1?distro=debian-12"}
+	}
+	if _, err := h.svc.Record(context.Background(), "agent-1", tenant, h.host, inventory(huge)); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("oversized inventory accepted: %v", err)
+	}
+	if len(h.scanner.imports) != 0 {
+		t.Fatal("oversized inventory reached the scanner")
+	}
+}
+
+type fakeSummaries struct {
+	calls int
+	ids   []shared.ID
+	out   map[shared.ID]ports.VulnerabilitySummary
+}
+
+func (f *fakeSummaries) SummarizeVulnerabilitiesByEngagements(_ context.Context, ids []shared.ID) (map[shared.ID]ports.VulnerabilitySummary, error) {
+	f.calls++
+	f.ids = append([]shared.ID(nil), ids...)
+	return f.out, nil
+}
+
+// With a summary reader wired, Hosts counts every context in one call and never lists findings.
+func TestHostsUsesTheBatchedSummaryRead(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	out, err := h.svc.Record(ctx, "agent-1", tenant, h.host, inventory(packages()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := asset.New("asset-2", tenant, asset.KindHost, "machine-id/def", "db01", nil, time.Now())
+	if err := h.assets.UpsertAsset(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	out2, err := h.svc.Record(ctx, "agent-2", tenant, second, inventory(packages()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sums := &fakeSummaries{out: map[shared.ID]ports.VulnerabilitySummary{
+		out.EngagementID:  {Total: 3, High: 3},
+		out2.EngagementID: {Total: 1, Critical: 1},
+	}}
+	h.svc.SetFindingSummaries(sums)
+	listing := &countingFindings{}
+	h.svc.findings = listing
+
+	rows, err := h.svc.Hosts(ctx, tenant)
+	if err != nil {
+		t.Fatalf("Hosts: %v", err)
+	}
+	if sums.calls != 1 || len(sums.ids) != 2 || listing.calls != 0 {
+		t.Fatalf("summary calls=%d ids=%v list calls=%d", sums.calls, sums.ids, listing.calls)
+	}
+	if len(rows) != 2 || rows[0].Asset.ID != second.ID || rows[0].Summary.Critical != 1 || rows[1].Summary.High != 3 {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if rows[0].Packages != 2 || rows[0].LastScan == nil || rows[1].LastScan == nil {
+		t.Fatalf("metadata or jobs missing: %+v", rows)
+	}
+}
+
+type countingFindings struct{ calls int }
+
+func (c *countingFindings) List(context.Context, shared.ID) ([]finding.Finding, error) {
+	c.calls++
+	return nil, nil
 }

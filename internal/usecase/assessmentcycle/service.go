@@ -135,7 +135,7 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 		}
 
 		// Rule #10: Hidden Project analysis-context Engagements cannot become Cycle members
-		if !eng.ProjectID.IsZero() {
+		if eng.Internal() {
 			return assessmentcycle.ErrHiddenProjectContext
 		}
 
@@ -259,7 +259,7 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 		}
 
 		// Rule #10: Hidden Project analysis-context Engagements cannot become Cycle members
-		if !eng.ProjectID.IsZero() {
+		if eng.Internal() {
 			return assessmentcycle.ErrHiddenProjectContext
 		}
 

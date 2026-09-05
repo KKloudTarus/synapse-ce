@@ -2047,6 +2047,9 @@ func main() {
 				log.Error("host vulnerability init failed", "err", hverr)
 				os.Exit(1)
 			}
+			if summaries, ok := findingRepo.(ports.FindingSummaryReader); ok {
+				hvSvc.SetFindingSummaries(summaries)
+			}
 			hiSvc.SetVulnerabilityRecorder(hvSvc)
 			router.SetHostVulnerabilities(hvSvc)
 			router.SetFleetHostInventory(hiSvc)

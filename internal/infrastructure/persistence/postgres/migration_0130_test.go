@@ -14,7 +14,8 @@ import (
 // TestMigration0130HostAssetContext asserts the column and its partial unique index exist, then
 // drives the repository round trip the host vulnerability use case relies on: a context created
 // for a host asset is found by GetByHostAssetID, hidden from GetByIDInTenant and List, unique per
-// (tenant, asset), and removed with its asset.
+// (tenant, asset), unassignable to a business asset, listed by ListHostEngagements, and pinned to its
+// asset by a RESTRICT foreign key (0131).
 func TestMigration0130HostAssetContext(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
@@ -110,10 +111,27 @@ func TestMigration0130HostAssetContext(t *testing.T) {
 		t.Fatalf("second context for the same host asset was accepted")
 	}
 
-	if _, err := pool.Exec(ctx, `DELETE FROM fleet_assets WHERE id=$1`, host.ID.String()); err != nil {
-		t.Fatalf("delete asset: %v", err)
+	// An operator cannot hang a business asset on a host context through the assignment path (parity
+	// with the memory store, which refuses internal contexts).
+	if err := assets.AssignEngagementBusinessAsset(ctx, tenant, ctxEng.ID, "ba-0130"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("host context accepted a business asset assignment: %v", err)
 	}
-	if _, err := repo.GetByHostAssetID(ctx, tenant, host.ID); !errors.Is(err, shared.ErrNotFound) {
-		t.Fatalf("context survived its asset: %v", err)
+	hosts, err := repo.ListHostEngagements(ctx, tenant)
+	if err != nil || len(hosts) != 1 || hosts[0].ID != ctxEng.ID {
+		t.Fatalf("ListHostEngagements = %d, %v", len(hosts), err)
+	}
+
+	// 0131: the context owns sealed evidence, so the asset it hangs on cannot be deleted under it.
+	if _, err := pool.Exec(ctx, `DELETE FROM fleet_assets WHERE id=$1`, host.ID.String()); err == nil {
+		t.Fatalf("fleet asset with a host context was deleted; the FK must be RESTRICT")
+	}
+	if _, err := repo.GetByHostAssetID(ctx, tenant, host.ID); err != nil {
+		t.Fatalf("context lost after a refused asset delete: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM engagements WHERE id=$1`, ctxEng.ID.String()); err != nil {
+		t.Fatalf("delete context: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM fleet_assets WHERE id=$1`, host.ID.String()); err != nil {
+		t.Fatalf("delete asset after its context: %v", err)
 	}
 }

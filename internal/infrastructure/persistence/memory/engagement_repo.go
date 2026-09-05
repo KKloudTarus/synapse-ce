@@ -31,6 +31,7 @@ var _ ports.PromotionReconciliationScopeReader = (*EngagementRepository)(nil)
 var _ ports.VulnerabilityReconciliationTenantStore = (*EngagementRepository)(nil)
 var _ ports.DetectionReconciliationTenantStore = (*EngagementRepository)(nil)
 var _ ports.VulnerabilityReconciliationEngagementStore = (*EngagementRepository)(nil)
+var _ ports.HostEngagementLister = (*EngagementRepository)(nil)
 
 func (r *EngagementRepository) Create(_ context.Context, e *engagement.Engagement) error {
 	r.mu.Lock()
@@ -172,6 +173,20 @@ func (r *EngagementRepository) ListProjectEngagements(_ context.Context, tenantI
 	out := make([]*engagement.Engagement, 0)
 	for _, e := range r.data {
 		if !e.ProjectID.IsZero() && e.TenantID == tenantID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+// ListHostEngagements returns the tenant's hidden host vulnerability contexts.
+func (r *EngagementRepository) ListHostEngagements(_ context.Context, tenantID shared.ID) ([]*engagement.Engagement, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	tenantID = shared.TenantOrDefault(tenantID)
+	out := make([]*engagement.Engagement, 0)
+	for _, e := range r.data {
+		if !e.HostAssetID.IsZero() && e.TenantID == tenantID {
 			out = append(out, e)
 		}
 	}

@@ -74,6 +74,19 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   and reads their occurrences directly. With the component inventory wired it abstains when nothing
   was scanned instead of reporting clean.
 
+- **Review fixes on the fleet host and alerting work.** A host whose scan start failed after its package
+  set was recorded is scanned on the next sweep instead of being read as unchanged; a windowed detection
+  rule ignores events stamped before its span and treats the span as exclusive; alert delivery runs off
+  the ingest path with a bounded queue and a per-tenant rate limit, and its error never carries the
+  webhook URL; correlation runs asynchronously per engagement and also after provenance reconciliation
+  completes detections; host contexts are excluded from business-asset assignment on Postgres, included
+  in advisory-revision reconciliation, and pinned to their asset by a RESTRICT foreign key (migration
+  0131, which also adds the operator-engagement partial index); the hosts list is five round trips for
+  the whole fleet, reads SBOM metadata without the document body and counts findings in one aggregate;
+  the latest-scan batch read is one index probe per engagement; the host page receives a finding
+  projection instead of full records; `synapse-cli scan --server` requires https unless loopback or
+  `--insecure-http`, and validates the project key.
+
 - **OS-package findings carry CVSS.** Distro advisories (Ubuntu, Debian, Alpine) rarely publish a
   CVSS vector of their own; grype puts the NVD vector and score on the related upstream CVE. The
   grype adapter read only the primary record, so every OS-package finding arrived without a vector

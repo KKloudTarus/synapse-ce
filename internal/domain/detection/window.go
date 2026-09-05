@@ -18,7 +18,8 @@ type Window struct {
 	// Count is the number of matching events that must fall inside the span (>= 2; a count of one is a
 	// plain rule).
 	Count int
-	// Within is the sliding span measured on event timestamps.
+	// Within is the sliding span measured on event timestamps, exclusive: events exactly Within apart
+	// are not in one burst.
 	Within time.Duration
 	// GroupBy partitions the count by the values of these fields, so ten queries to ten resolvers do not
 	// add up to a burst against one. Empty groups by host only. Fields must belong to the rule's class.
@@ -84,8 +85,7 @@ type Fired struct {
 // events, which a sensor stream already does.
 type Evaluator struct {
 	rules   []Rule
-	buckets map[string]*bucket // rule id -> group key -> burst, flattened as rule\x00group
-	perRule map[string]int
+	buckets map[string]map[string]*bucket // rule id -> group key -> burst
 }
 
 type bucket struct {
@@ -96,7 +96,7 @@ type bucket struct {
 
 // NewEvaluator validates the rules and prepares state for the windowed ones.
 func NewEvaluator(rules []Rule) (*Evaluator, error) {
-	out := &Evaluator{rules: make([]Rule, 0, len(rules)), buckets: map[string]*bucket{}, perRule: map[string]int{}}
+	out := &Evaluator{rules: make([]Rule, 0, len(rules)), buckets: map[string]map[string]*bucket{}}
 	for _, r := range rules {
 		if err := r.Validate(); err != nil {
 			return nil, err
@@ -128,34 +128,44 @@ func (ev *Evaluator) Evaluate(e Event) []Fired {
 // inside the span. Firing resets the group, so a sustained storm yields one detection per Count events
 // rather than one per event past the threshold.
 func (ev *Evaluator) observe(r Rule, e Event) ([]Event, int, bool) {
-	key := r.ID + "\x00" + groupKey(e, r.Window.GroupBy)
-	b, ok := ev.buckets[key]
-	if !ok {
-		ev.evictIfFull(r.ID)
-		b = &bucket{}
-		ev.buckets[key] = b
-		ev.perRule[r.ID]++
+	groups := ev.buckets[r.ID]
+	if groups == nil {
+		groups = map[string]*bucket{}
+		ev.buckets[r.ID] = groups
 	}
-	cutoff := e.At.Add(-r.Window.Within)
+	key := groupKey(e, r.Window.GroupBy)
+	b, ok := groups[key]
+	if !ok {
+		evictIfFull(groups, e.At.Add(-r.Window.Within))
+		b = &bucket{}
+		groups[key] = b
+	}
+	// The span is measured from the newest event the group has seen, not from this arrival: events
+	// reach the evaluator in arrival order, and a late event stamped long before the others (a drained
+	// kernel timestamp behind a wall-clock fallback) must neither extend the span nor count in it.
+	if e.At.After(b.newest) {
+		b.newest = e.At
+	}
+	cutoff := b.newest.Add(-r.Window.Within)
+	if !e.At.After(cutoff) {
+		return nil, 0, false // older than the span: cannot be part of this burst
+	}
 	times := b.times[:0]
 	for _, t := range b.times {
-		if !t.Before(cutoff) {
+		if t.After(cutoff) {
 			times = append(times, t)
 		}
 	}
 	b.times = append(times, e.At)
 	events := b.events[:0]
 	for _, old := range b.events {
-		if !old.At.Before(cutoff) {
+		if old.At.After(cutoff) {
 			events = append(events, old)
 		}
 	}
 	b.events = append(events, e.clone())
 	if len(b.events) > MaxEvidence {
 		b.events = b.events[len(b.events)-MaxEvidence:]
-	}
-	if e.At.After(b.newest) {
-		b.newest = e.At
 	}
 	if len(b.times) < r.Window.Count {
 		return nil, 0, false
@@ -168,25 +178,26 @@ func (ev *Evaluator) observe(r Rule, e Event) ([]Event, int, bool) {
 	return burst, observed, true
 }
 
-// evictIfFull drops the stalest group of a rule when the rule is at its group cap.
-func (ev *Evaluator) evictIfFull(ruleID string) {
-	if ev.perRule[ruleID] < MaxWindowGroups {
+// evictIfFull makes room for a new group when a rule is at its group cap. Groups whose newest event is
+// already outside the span can no longer complete a burst, so they go first; only when none has
+// expired is the stalest live group dropped. The scan covers one rule's groups, never every rule's.
+func evictIfFull(groups map[string]*bucket, cutoff time.Time) {
+	if len(groups) < MaxWindowGroups {
 		return
 	}
-	prefix := ruleID + "\x00"
 	var staleKey string
 	var stale time.Time
-	for k, b := range ev.buckets {
-		if !strings.HasPrefix(k, prefix) {
+	for k, b := range groups {
+		if !b.newest.After(cutoff) {
+			delete(groups, k)
 			continue
 		}
 		if staleKey == "" || b.newest.Before(stale) {
 			staleKey, stale = k, b.newest
 		}
 	}
-	if staleKey != "" {
-		delete(ev.buckets, staleKey)
-		ev.perRule[ruleID]--
+	if len(groups) >= MaxWindowGroups && staleKey != "" {
+		delete(groups, staleKey)
 	}
 }
 

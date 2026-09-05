@@ -35,12 +35,14 @@ import (
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
+	hostvulnuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostvuln"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	promotionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/promotion"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
+	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 )
 
@@ -171,6 +173,24 @@ func (harnessDetections) Incidents(_ context.Context, _ shared.ID) ([]detection.
 // harnessPurple is the #426 purple-coverage read side: it returns one tenant-A coverage record carrying a
 // marker technique, so the harness proves a cross-tenant read (blocked by withEngTenant → 404) never
 // reaches it, while a same-tenant read does.
+// harnessFindingLister adapts the memory finding repository to the host vulnerability lister.
+type harnessFindingLister struct{ repo *memory.FindingRepository }
+
+func (l harnessFindingLister) List(ctx context.Context, engagementID shared.ID) ([]finding.Finding, error) {
+	return l.repo.ListByEngagement(ctx, engagementID)
+}
+
+// harnessSBOMScanner satisfies the recorder's scanner; the harness only reads.
+type harnessSBOMScanner struct{}
+
+func (harnessSBOMScanner) ImportContextSBOM(context.Context, string, shared.ID, shared.ID, string, []byte) (*scauc.ScanResult, error) {
+	return &scauc.ScanResult{}, nil
+}
+
+func (harnessSBOMScanner) StartScanWithOptions(context.Context, string, shared.ID, ports.AcquireRequest, scauc.ScanOptions) (ports.ScanJob, error) {
+	return ports.ScanJob{}, nil
+}
+
 type harnessPurple struct{}
 
 func (harnessPurple) Trend(_ context.Context, engagementID shared.ID) ([]purplecoverage.Coverage, error) {
@@ -389,6 +409,30 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetVulnerabilityAudit(audit)
 	rt.SetDetectionReader(harnessDetections{})  // register the #423 detection-ledger read route
 	rt.SetPurpleCoverageReader(harnessPurple{}) // register the #426 purple-coverage read route
+	// #820 host vulnerabilities: the real use case over tenantA's host asset, its hidden context and one
+	// finding, so a cross-tenant read of the host routes is proven empty rather than assumed.
+	hostAsset := &asset.Asset{ID: "host-A", TenantID: "tenantA", Kind: asset.KindHost, Key: "machine-id/host-A", Name: "host-A", Attributes: map[string]string{"os": "linux"}}
+	if err := attackAssets.UpsertAsset(context.Background(), hostAsset); err != nil {
+		t.Fatalf("seed host asset: %v", err)
+	}
+	if err := engRepo.Create(context.Background(), &engdom.Engagement{
+		ID: "hostctx-A", TenantID: "tenantA", HostAssetID: "host-A", Name: "host-A host vulnerabilities", Status: engdom.StatusDraft,
+	}); err != nil {
+		t.Fatalf("seed host context: %v", err)
+	}
+	hostFindings := memory.NewFindingRepository()
+	if err := hostFindings.Upsert(promotionCtx, []finding.Finding{{
+		ID: "hostvuln-A", EngagementID: "hostctx-A", Kind: finding.KindSCA, Severity: shared.SeverityHigh, Status: finding.StatusOpen,
+		Title: "CVE-2026-0001 in openssl@1.0", DedupKey: "vuln:CVE-2026-0001:openssl:1.0", Priority: 3, Version: 1,
+		Audit: shared.Audit{CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)},
+	}}); err != nil {
+		t.Fatalf("seed host finding: %v", err)
+	}
+	hostVulns, err := hostvulnuc.NewService(engRepo, attackAssets, harnessFindingLister{repo: hostFindings}, harnessSBOMScanner{}, memory.NewImportedSBOMStore(), memory.NewScanJobStore(), engIDs{}, fixedClock{t: time.Unix(1, 0)}, audit)
+	if err != nil {
+		t.Fatalf("host vulnerability service: %v", err)
+	}
+	rt.SetHostVulnerabilities(hostVulns)
 	rt.SetFleetRolloutAdmin(harnessRollout{})
 	// A real approval store, not nil: the generated sweep below reads the approvals route as the
 	// owning tenant, so the handler must run rather than dereference a nil dependency.
@@ -619,6 +663,14 @@ func TestHostileHarness(t *testing.T) {
 		{"readonly may export fleet coverage (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/fleet/coverage/export", http.StatusOK},
 		{"same-tenant fleet agent detail → 200", "readonly", "tenantA", true, http.MethodGet, "/api/v1/fleet/agents/ag1", http.StatusOK},
 		{"cross-tenant fleet agent detail → 404", "readonly", "tenantB", true, http.MethodGet, "/api/v1/fleet/agents/ag1", http.StatusNotFound},
+		// #820 host vulnerabilities (PermView): machine roles denied, readonly may read, a cross-tenant
+		// host read is 404, a principal-less read is denied. The cross-tenant LIST emptiness is asserted
+		// on the body below the table.
+		{"readonly may list hosts (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/assets/hosts", http.StatusOK},
+		{"machine may not list hosts (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/assets/hosts", http.StatusForbidden},
+		{"principal-less host list is denied", "", "", false, http.MethodGet, "/api/v1/assets/hosts", http.StatusForbidden},
+		{"readonly may read a host's vulnerabilities (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/assets/host-A/vulnerabilities", http.StatusOK},
+		{"cross-tenant host vulnerabilities → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/assets/host-A/vulnerabilities", http.StatusNotFound},
 	}
 	for _, c := range cases {
 		if got, body := send(c.role, c.tenant, c.method, c.path, c.authed); got != c.want {
@@ -648,6 +700,20 @@ func TestHostileHarness(t *testing.T) {
 
 	if code, body := send("readonly", "tenantB", http.MethodGet, "/api/v1/attack-paths", true); code != http.StatusOK || strings.Contains(body, "tenant-A-secret-marker") {
 		t.Errorf("tenantB attack paths leaked tenantA data (code=%d body=%s)", code, body)
+	}
+	// #820 host vulnerabilities: tenantA sees its host and the host's finding; tenantB's list is an
+	// empty 200 and the host read is a 404 that carries nothing of tenantA's.
+	if code, body := send("readonly", "tenantA", http.MethodGet, "/api/v1/assets/hosts", true); code != http.StatusOK || !strings.Contains(body, "host-A") || !strings.Contains(body, "hostctx-A") {
+		t.Fatalf("tenantA must see its own host (code=%d body=%s)", code, body)
+	}
+	if code, body := send("readonly", "tenantA", http.MethodGet, "/api/v1/assets/host-A/vulnerabilities", true); code != http.StatusOK || !strings.Contains(body, "CVE-2026-0001") {
+		t.Fatalf("tenantA must see its host's findings (code=%d body=%s)", code, body)
+	}
+	if code, body := send("readonly", "tenantB", http.MethodGet, "/api/v1/assets/hosts", true); code != http.StatusOK || strings.Contains(body, "host-A") || strings.Contains(body, "hostctx-A") {
+		t.Errorf("cross-tenant host list must be empty (code=%d body=%s)", code, body)
+	}
+	if code, body := send("consultant", "tenantB", http.MethodGet, "/api/v1/assets/host-A/vulnerabilities", true); code != http.StatusNotFound || strings.Contains(body, "CVE-2026-0001") || strings.Contains(body, "hostctx-A") {
+		t.Errorf("cross-tenant host read must be 404 with no tenantA data (code=%d body=%s)", code, body)
 	}
 
 	// Cross-tenant fleet reads must return NOTHING, not merely a 200. tenantA's asset id must never

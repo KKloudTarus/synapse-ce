@@ -107,6 +107,12 @@ func TestPushTargetValidation(t *testing.T) {
 		{"missing project", pushTarget{server: "https://synapse.example", token: "t"}, false},
 		{"missing token", pushTarget{server: "https://synapse.example", project: "app"}, false},
 		{"relative server", pushTarget{server: "synapse.example", project: "app", token: "t"}, false},
+		{"plain http to a remote host", pushTarget{server: "http://synapse.internal:8080", project: "app", token: "t"}, false},
+		{"plain http accepted explicitly", pushTarget{server: "http://synapse.internal:8080", project: "app", token: "t", insecureHTTP: true}, true},
+		{"plain http to loopback", pushTarget{server: "http://127.0.0.1:8080", project: "app", token: "t"}, true},
+		{"plain http to localhost", pushTarget{server: "http://localhost:8080", project: "app", token: "t"}, true},
+		{"project key with a slash", pushTarget{server: "https://synapse.example", project: "app/../other", token: "t"}, false},
+		{"project key uppercase", pushTarget{server: "https://synapse.example", project: "App", token: "t"}, false},
 		{"bad run url", pushTarget{server: "https://synapse.example", project: "app", token: "t", ci: projectanalysis.CIContext{RunURL: "ftp://x"}}, false},
 	}
 	for _, tc := range cases {

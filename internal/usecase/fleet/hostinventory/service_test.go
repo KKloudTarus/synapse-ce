@@ -53,6 +53,16 @@ func (f *fakeAssetWriter) UpsertAsset(_ context.Context, _ string, in assetuc.Up
 	return &copyAsset, nil
 }
 
+func (f *fakeAssetWriter) ListAssets(_ context.Context, _ shared.ID) ([]*asset.Asset, error) {
+	out := make([]*asset.Asset, 0, len(f.assets))
+	for _, a := range f.assets {
+		copyAsset := *a
+		copyAsset.Attributes = cloneStringMap(a.Attributes)
+		out = append(out, &copyAsset)
+	}
+	return out, nil
+}
+
 func cloneStringMap(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
@@ -408,5 +418,36 @@ func TestSyncWithoutRecorderReportsNoScan(t *testing.T) {
 	}
 	if res.VulnerabilityScan != nil {
 		t.Fatalf("outcome without recorder = %+v", res.VulnerabilityScan)
+	}
+}
+
+// One agent identity may create MaxHostsPerAgent hosts; the next new key is refused and audited, while
+// re-syncing an existing host is unaffected.
+func TestSyncCapsHostsPerAgent(t *testing.T) {
+	w := newFakeWriter()
+	audit := &fakeAudit{}
+	s := newService(t, w, audit)
+	for i := 0; i < MaxHostsPerAgent; i++ {
+		inv := dhi.HostInventory{Facts: dhi.HostFacts{Hostname: "h", OS: "linux", MachineID: "id-" + itoa(i)}}
+		if _, err := s.Sync(context.Background(), "agent-1", SyncInput{TenantID: "tenant-1", Inventory: inv}); err != nil {
+			t.Fatalf("host %d: %v", i, err)
+		}
+	}
+	extra := dhi.HostInventory{Facts: dhi.HostFacts{Hostname: "h", OS: "linux", MachineID: "id-extra"}}
+	if _, err := s.Sync(context.Background(), "agent-1", SyncInput{TenantID: "tenant-1", Inventory: extra}); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("host beyond the cap accepted: %v", err)
+	}
+	if _, ok := audit.entry("host_inventory.host_cap_reached"); !ok {
+		t.Fatalf("cap refusal not audited: %+v", audit.entries)
+	}
+	// An existing host still syncs.
+	again := dhi.HostInventory{Facts: dhi.HostFacts{Hostname: "h", OS: "linux", MachineID: "id-0"}}
+	if _, err := s.Sync(context.Background(), "agent-1", SyncInput{TenantID: "tenant-1", Inventory: again}); err != nil {
+		t.Fatalf("existing host refused: %v", err)
+	}
+	// Another agent has its own budget.
+	other := dhi.HostInventory{Facts: dhi.HostFacts{Hostname: "h", OS: "linux", MachineID: "id-other"}}
+	if _, err := s.Sync(context.Background(), "agent-2", SyncInput{TenantID: "tenant-1", Inventory: other}); err != nil {
+		t.Fatalf("second agent refused: %v", err)
 	}
 }

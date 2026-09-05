@@ -111,11 +111,15 @@ vulnerability reconciliation job when advisories change, so a host that never ch
 new CVEs.
 
 Recording is idempotent per package set. An unchanged host does not re-import or re-scan on its next
-sweep; a changed set is recorded once the previous scan has finished. The `POST
-/api/v1/fleet/inventory/host` response carries a `vulnerability_scan` object with the outcome
-(`engagement_id`, `job_id`, `components`, or `skipped` with a `reason`). A scan-pipeline failure is
-audited as `host_inventory.vulnerability_scan_failed` and reported in that object; it never fails the
-inventory sync itself.
+sweep; a changed set is recorded once the previous scan has finished, and at most once per ten
+minutes per host. An inventory above 50,000 packages is refused, and one agent identity may create at
+most 16 host assets (a reimaged machine gets a new machine id; an agent varying its facts does not get
+unbounded hosts, contexts and scans). The `POST /api/v1/fleet/inventory/host` response carries a
+`vulnerability_scan` object with the outcome (`engagement_id`, `job_id`, `components`, or `skipped`
+with a `reason`). A scan-pipeline failure is audited as `host_inventory.vulnerability_scan_failed` and
+reported in that object; it never fails the inventory sync itself. The advisory-revision reconciler
+visits host contexts alongside projects, so a host whose packages never change still gains a finding
+when a new advisory names one of them.
 
 ```
 GET /api/v1/assets/hosts                          every host with its vulnerability summary
@@ -210,8 +214,10 @@ by default and has no authentication. Exported series have bounded labels (prior
 ## Alerting
 
 Set `SYNAPSE_ALERT_WEBHOOK_URL` and the control plane posts a signed JSON alert to that URL every time
-correlation opens an incident. Correlation itself runs on every detection batch that seals new detections
-(and on demand through `POST /api/v1/fleet/engagements/{id}/correlate`), so with
+correlation opens an incident. Correlation itself runs after every detection batch that seals new
+detections, off the agent's request, one run per engagement at a time (batches that arrive during a run
+are folded into a single rerun), and on demand through `POST /api/v1/fleet/engagements/{id}/correlate`;
+detections completed later by provenance reconciliation are correlated the same way. So with
 `SYNAPSE_FLEET_DETECTION_INGEST_ENABLED`, `SYNAPSE_FLEET_CORRELATION_ENABLED` and a webhook set, a
 detection on an agent becomes an incident and a notification without anyone calling an endpoint.
 
@@ -226,8 +232,11 @@ engagement, severity, title, a short summary and a console link (`/fleet/inciden
 raw telemetry. With a secret set, `X-Synapse-Signature` is `sha256=<hex HMAC-SHA256>` over
 `<X-Synapse-Timestamp>.<body>`; verify it and reject stale timestamps. Transient failures (network, 429,
 5xx) are retried three times; a 4xx is final. Every attempt is audited as `alert.delivered` or
-`alert.failed` with the sink and the error, so a missed page is in the audit log. Delivery never blocks or
-rolls back the incident it reports.
+`alert.failed` with the sink and the error (the error never carries the webhook URL, whose path is the
+credential for many chat hooks), so a missed page is in the audit log. Delivery runs on a bounded
+worker set off the ingest path, so a slow receiver never holds an agent's request. A tenant is limited
+to 60 delivered alerts per minute; the excess is audited as `alert.suppressed`, and a full queue as
+`alert.dropped`. Delivery never blocks or rolls back the incident it reports.
 
 `POST /api/v1/alerts/test` (administer) sends an `alert.test` alert that bypasses the severity floor and
 returns how many sinks acknowledged it; use it after configuring the receiver. The webhook client refuses

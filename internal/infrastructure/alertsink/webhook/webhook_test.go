@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -158,5 +159,36 @@ func TestNewValidatesDestination(t *testing.T) {
 		if !tc.ok && !errors.Is(err, shared.ErrValidation) {
 			t.Errorf("%s: err = %v, want ErrValidation", name, err)
 		}
+	}
+}
+
+// A transport failure must not put the destination URL into the error: for Slack-style hooks the path
+// is the credential, and the error text lands in the audit log.
+func TestDeliverErrorNeverCarriesTheURL(t *testing.T) {
+	s, err := New("https://hooks.example.invalid/services/T000/B000/SECRETTOKENXYZ", "", 500*time.Millisecond, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.sleep = func(context.Context, time.Duration) error { return nil }
+	err = s.Deliver(context.Background(), alert())
+	if err == nil {
+		t.Fatal("delivery to an unresolvable host succeeded")
+	}
+	if strings.Contains(err.Error(), "SECRETTOKENXYZ") || strings.Contains(err.Error(), "/services/") {
+		t.Fatalf("error leaks the credential path: %v", err)
+	}
+}
+
+func TestDeliverCancelledRetryKeepsTheLastCause(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("db down"))
+	}))
+	defer srv.Close()
+	s := newSink(t, srv.URL, "")
+	s.sleep = func(ctx context.Context, _ time.Duration) error { return context.Canceled }
+	err := s.Deliver(context.Background(), alert())
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "responded 500") {
+		t.Fatalf("err = %v, want the cancellation with the last 500 attached", err)
 	}
 }

@@ -35,6 +35,19 @@ func (s *ImportedSBOMStore) SaveActive(_ context.Context, record importedsbom.Re
 }
 
 // LatestByEngagement returns a copy of the active imported SBOM.
+// MetadataByEngagements returns the metadata of every listed engagement's active record.
+func (s *ImportedSBOMStore) MetadataByEngagements(ctx context.Context, tenantID shared.ID, engagementIDs []shared.ID) (map[shared.ID]importedsbom.Metadata, error) {
+	out := make(map[shared.ID]importedsbom.Metadata, len(engagementIDs))
+	for _, id := range engagementIDs {
+		rec, err := s.LatestByEngagement(ctx, tenantID, id)
+		if err != nil {
+			continue
+		}
+		out[id] = rec.Metadata()
+	}
+	return out, nil
+}
+
 func (s *ImportedSBOMStore) LatestByEngagement(_ context.Context, tenantID, engagementID shared.ID) (importedsbom.Record, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -3,6 +3,8 @@ package alerting
 import (
 	"context"
 	"errors"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,7 +14,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
+// The fakes are mutex-guarded: deliveries run on the service's workers.
 type fakeSink struct {
+	mu    sync.Mutex
 	name  string
 	err   error
 	got   []alerting.Alert
@@ -21,22 +25,29 @@ type fakeSink struct {
 
 func (f *fakeSink) Name() string { return f.name }
 func (f *fakeSink) Deliver(ctx context.Context, a alerting.Alert) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	_, f.ctxOK = shared.TenantFrom(ctx)
 	f.got = append(f.got, a)
 	return f.err
 }
 
 type fakeAudit struct {
+	mu      sync.Mutex
 	entries []ports.AuditEntry
 	err     error
 }
 
 func (a *fakeAudit) Record(_ context.Context, e ports.AuditEntry) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.entries = append(a.entries, e)
 	return a.err
 }
 
 func (a *fakeAudit) actions() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	out := make([]string, 0, len(a.entries))
 	for _, e := range a.entries {
 		out = append(out, e.Action)
@@ -76,6 +87,7 @@ func TestIncidentsCreatedDeliversMatchingAlertsAndAudits(t *testing.T) {
 	svc, audit := newSvc(t, alerting.Rule{MinSeverity: shared.SeverityMedium}, sink)
 
 	svc.IncidentsCreated(ctxT(), "agent-1", "eng-1", incidents())
+	svc.Flush()
 
 	if len(sink.got) != 1 {
 		t.Fatalf("the low incident must be filtered; delivered %d", len(sink.got))
@@ -102,6 +114,7 @@ func TestSinkFailureIsAuditedNotReturned(t *testing.T) {
 	svc, audit := newSvc(t, alerting.DefaultRule(), ok, bad)
 
 	svc.IncidentsCreated(ctxT(), "agent-1", "eng-1", incidents()[:1])
+	svc.Flush()
 
 	got := audit.actions()
 	if len(got) != 2 || got[0] != "alert.delivered" || got[1] != "alert.failed" {
@@ -116,6 +129,7 @@ func TestIncidentWithoutTimestampUsesClock(t *testing.T) {
 	sink := &fakeSink{name: "webhook"}
 	svc, _ := newSvc(t, alerting.Rule{MinSeverity: shared.SeverityLow}, sink)
 	svc.IncidentsCreated(ctxT(), "agent-1", "eng-1", incidents()[1:])
+	svc.Flush()
 	if len(sink.got) != 1 || sink.got[0].OccurredAt != (clock{}).Now() {
 		t.Fatalf("alert = %+v", sink.got)
 	}
@@ -181,5 +195,79 @@ func TestNewServiceValidation(t *testing.T) {
 	}
 	if _, err := NewService([]ports.AlertSink{&fakeSink{}}, alerting.DefaultRule(), nil, clock{}, &ids{}); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("nil audit: %v", err)
+	}
+}
+
+// A slow sink never holds the caller: IncidentsCreated returns before delivery, and delivery still
+// completes on the workers with a context that outlives the request.
+func TestIncidentsCreatedDoesNotBlockOnASlowSink(t *testing.T) {
+	release := make(chan struct{})
+	slow := &blockingSink{release: release}
+	svc, audit := newSvc(t, alerting.DefaultRule(), slow)
+	ctx, cancel := context.WithCancel(ctxT())
+	done := make(chan struct{})
+	go func() {
+		svc.IncidentsCreated(ctx, "agent-1", "eng-1", incidents()[:1])
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("IncidentsCreated blocked on the sink")
+	}
+	cancel() // the request is over; delivery must still run
+	close(release)
+	svc.Flush()
+	slow.mu.Lock()
+	calls, cancelled := slow.calls, slow.cancelled
+	slow.mu.Unlock()
+	if calls != 1 || cancelled {
+		t.Fatalf("delivery calls=%d cancelled=%v", calls, cancelled)
+	}
+	if got := audit.actions(); len(got) != 1 || got[0] != "alert.delivered" {
+		t.Fatalf("audit = %v", got)
+	}
+}
+
+type blockingSink struct {
+	mu        sync.Mutex
+	release   chan struct{}
+	calls     int
+	cancelled bool
+}
+
+func (b *blockingSink) Name() string { return "slow" }
+func (b *blockingSink) Deliver(ctx context.Context, _ alerting.Alert) error {
+	<-b.release
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.calls++
+	b.cancelled = ctx.Err() != nil
+	return nil
+}
+
+// Beyond the per-tenant bucket, alerts are audited as suppressed instead of delivered, and another
+// tenant's bucket is untouched.
+func TestIncidentsCreatedIsRateLimitedPerTenant(t *testing.T) {
+	sink := &fakeSink{name: "webhook"}
+	svc, audit := newSvc(t, alerting.Rule{MinSeverity: shared.SeverityLow}, sink)
+	flood := make([]incident.Incident, 0, tenantAlertsPerMinute+5)
+	for i := 0; i < tenantAlertsPerMinute+5; i++ {
+		flood = append(flood, incident.Incident{ID: shared.ID("inc-" + strconv.Itoa(i)), AssetID: "host-1", Title: "burst", Severity: shared.SeverityHigh, CreatedAt: time.Unix(1, 0)})
+	}
+	svc.IncidentsCreated(ctxT(), "agent-1", "eng-1", flood)
+	svc.IncidentsCreated(shared.WithTenant(context.Background(), "tenant-b"), "agent-2", "eng-2", flood[:1])
+	svc.Flush()
+	if len(sink.got) != tenantAlertsPerMinute+1 {
+		t.Fatalf("delivered %d, want %d for tenant-a plus 1 for tenant-b", len(sink.got), tenantAlertsPerMinute+1)
+	}
+	suppressed := 0
+	for _, action := range audit.actions() {
+		if action == "alert.suppressed" {
+			suppressed++
+		}
+	}
+	if suppressed != 5 {
+		t.Fatalf("suppressed = %d, want 5", suppressed)
 	}
 }

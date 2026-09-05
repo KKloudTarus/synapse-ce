@@ -1010,8 +1010,9 @@ func gradeNum(g rating.Grade) float64 {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  synapse-cli doctor [path] [--json]       # offline pre-scan readiness: toolchain, markers, and dimension coverage")
-	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--min-confidence low|medium|high|very_high] [--base REF] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise] [--server URL --project KEY [--branch REF] [--run-url URL] [--ci-provider NAME]]")
+	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--min-confidence low|medium|high|very_high] [--base REF] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise] [--server URL --project KEY [--branch REF] [--run-url URL] [--ci-provider NAME] [--insecure-http]]")
 	fmt.Fprintln(os.Stderr, "      --server   record the result on a Synapse server as the project's next analysis (token from SYNAPSE_API_TOKEN); the history, trend and managed gate in the console pick it up")
+	fmt.Fprintln(os.Stderr, "      --insecure-http   allow a plain-http --server that is not loopback (the token then travels in the clear)")
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  no network egress: skip live OSV, every registry resolver (npm/composer/poetry/bundler/maven/gradle), KEV/EPSS, online NVD, license metadata and AI triage; detect with Grype's offline DB only (air-gapped / fast)")
@@ -1054,6 +1055,8 @@ func runScan() {
 	push := pushTarget{token: strings.TrimSpace(os.Getenv("SYNAPSE_API_TOKEN"))}
 	for i := 3; i < len(os.Args); i++ {
 		switch {
+		case os.Args[i] == "--insecure-http":
+			push.insecureHTTP = true
 		case os.Args[i] == "--server" && i+1 < len(os.Args):
 			push.server = os.Args[i+1]
 			i++

@@ -25,12 +25,19 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
+// MaxHostsPerAgent bounds how many distinct host assets one agent identity may create. An agent
+// reports the host it runs on; a machine-id change (reimage, cloned VM) legitimately makes a new one,
+// so the cap is a small multiple rather than one. Above it, a new key is refused: an agent varying its
+// facts must not mint host assets, hidden vulnerability contexts and scans without bound.
+const MaxHostsPerAgent = 16
+
 // AssetWriter is the subset of the asset use case this service needs. The read is part of the
 // authorization boundary: an authenticated agent may update the host it already reports, but must
 // never silently take over a host natural key already owned by a different enrolled agent.
 type AssetWriter interface {
 	GetAssetByKey(ctx context.Context, tenantID shared.ID, kind asset.Kind, key string) (*asset.Asset, error)
 	UpsertAsset(ctx context.Context, actor string, in assetuc.UpsertAssetInput) (*asset.Asset, error)
+	ListAssets(ctx context.Context, tenantID shared.ID) ([]*asset.Asset, error)
 }
 
 // The concrete asset use case satisfies the consumer-side interface.
@@ -60,7 +67,9 @@ const (
 	ReasonNoPackages = "no packages reported"
 	ReasonUnchanged  = "package set unchanged since the last recorded scan"
 	ReasonScanActive = "a vulnerability scan is still running for this host; the next sync records the change"
-	ReasonQueueError = "vulnerability scan could not be queued; see the audit log"
+	// ReasonRecordedRecently: a different package set arrived within the minimum record interval.
+	ReasonRecordedRecently = "a package set was recorded for this host less than ten minutes ago; the next sync records the change"
+	ReasonQueueError       = "vulnerability scan could not be queued; see the audit log"
 )
 
 // Service maps and persists a host inventory.
@@ -241,7 +250,7 @@ func (s *Service) guardAssetBinding(ctx context.Context, actor string, tenantID 
 	existing, err := s.assets.GetAssetByKey(ctx, tenantID, asset.KindHost, key)
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		return nil
+		return s.guardHostsPerAgent(ctx, actor, tenantID, key)
 	case err != nil:
 		return fmt.Errorf("host inventory: lookup host asset: %w", err)
 	}
@@ -285,6 +294,40 @@ func (s *Service) guardAssetBinding(ctx context.Context, actor string, tenantID 
 		return fmt.Errorf("host inventory: emit asset-binding security alert: %w", err)
 	}
 	return fmt.Errorf("%w: host asset %s is already bound to agent %s", shared.ErrConflict, existing.ID, oldAgent)
+}
+
+// guardHostsPerAgent refuses a NEW host key once the reporting agent already owns MaxHostsPerAgent
+// hosts. It runs only when the key is new, so the O(assets) scan is paid on host creation, not on
+// every sync. The refusal is audited so a misbehaving or compromised agent is attributable.
+func (s *Service) guardHostsPerAgent(ctx context.Context, actor string, tenantID shared.ID, key string) error {
+	all, err := s.assets.ListAssets(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("host inventory: count agent hosts: %w", err)
+	}
+	owned := 0
+	for _, a := range all {
+		if a.Kind == asset.KindHost && strings.TrimSpace(a.Attributes["reporting_agent_id"]) == actor {
+			owned++
+		}
+	}
+	if owned < MaxHostsPerAgent {
+		return nil
+	}
+	if err := s.audit.Record(ctx, ports.AuditEntry{
+		Actor:  actor,
+		Action: "host_inventory.host_cap_reached",
+		Target: key,
+		Metadata: map[string]string{
+			"tenant_id": tenantID.String(),
+			"asset_key": key,
+			"hosts":     strconv.Itoa(owned),
+			"cap":       strconv.Itoa(MaxHostsPerAgent),
+		},
+		At: s.clock.Now(),
+	}); err != nil {
+		return fmt.Errorf("host inventory: audit host cap: %w", err)
+	}
+	return fmt.Errorf("%w: agent %s already reports %d hosts; a new host key is refused", shared.ErrForbidden, actor, owned)
 }
 
 // hostKey is the host's stable natural key: the machine id when known (survives hostname changes),
