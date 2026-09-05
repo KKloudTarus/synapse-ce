@@ -1843,10 +1843,10 @@ func main() {
 			var exposureReader *exposurereader.Reader
 			var xrerr error
 			if componentLister, ok := vulnerabilityInventory.(exposurereader.ComponentLister); ok {
-				exposureReader, xrerr = exposurereader.NewReaderWithRuntime(businessAssetStore, vulnerabilityOccurrences, vulnerabilityAssessments, endpointProcessStore, componentLister)
+				exposureReader, xrerr = exposurereader.NewReaderWithRuntime(businessAssetStore, repo, vulnerabilityOccurrences, vulnerabilityAssessments, endpointProcessStore, componentLister)
 				log.Info("exposure: running-vs-installed ENABLED (B5 process store + component inventory)")
 			} else {
-				exposureReader, xrerr = exposurereader.NewReader(businessAssetStore, vulnerabilityOccurrences, vulnerabilityAssessments)
+				exposureReader, xrerr = exposurereader.NewReader(businessAssetStore, repo, vulnerabilityOccurrences, vulnerabilityAssessments)
 			}
 			if xrerr != nil {
 				log.Error("exposure reader init failed", "err", xrerr)

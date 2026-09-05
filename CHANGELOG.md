@@ -33,6 +33,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **Asset exposure no longer reads every asset as clean.** `exposurereader` filtered an asset's
+  vulnerability occurrences by comparing project and fleet-asset ids with SBOM component ids, two id
+  namespaces that never match, so the join dropped every occurrence and the asset scored as a
+  trustworthy clean (#819). The reader now resolves the engagements that belong to the asset (the ones
+  assigned to it, each linked project's analysis context, each linked host's vulnerability context)
+  and reads their occurrences directly. With the component inventory wired it abstains when nothing
+  was scanned instead of reporting clean.
+
 - **OS-package findings carry CVSS.** Distro advisories (Ubuntu, Debian, Alpine) rarely publish a
   CVSS vector of their own; grype puts the NVD vector and score on the related upstream CVE. The
   grype adapter read only the primary record, so every OS-package finding arrived without a vector

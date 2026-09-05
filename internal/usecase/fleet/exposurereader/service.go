@@ -34,14 +34,25 @@ var (
 	_ RiskReader       = ports.VulnerabilityRiskAssessmentStore(nil)
 )
 
-// MembershipReader is the asset-side view: which engagements an asset belongs to and which components make
-// it up. ports.BusinessAssetRepository satisfies it. (Occurrences carry no AssetID, so the component
-// membership is the bridge from an asset to its vulnerabilities.)
+// MembershipReader is the asset-side view: which engagements an asset is assigned to and which projects
+// and technical (fleet) assets make it up. ports.BusinessAssetRepository satisfies it. Occurrences carry
+// no AssetID; they carry an EngagementID, so the bridge from an asset to its vulnerabilities is the set of
+// engagements that belong to the asset: the ones assigned to it, plus the hidden analysis context of each
+// linked project and the hidden vulnerability context of each linked host (see ContextResolver).
 type MembershipReader interface {
 	ListEngagementsByBusinessAsset(ctx context.Context, tenantID, assetID shared.ID) ([]*engagement.Engagement, error)
 	ListBusinessAssetProjects(ctx context.Context, tenantID, assetID shared.ID) ([]asset.ComponentMembership, error)
 	ListBusinessAssetTechnicalAssets(ctx context.Context, tenantID, assetID shared.ID) ([]asset.ComponentMembership, error)
 }
+
+// ContextResolver resolves a linked project or host to its machine-owned engagement, where that
+// project's or host's SBOM and occurrences live. ports.EngagementRepository satisfies it.
+type ContextResolver interface {
+	ProjectContexts(ctx context.Context, tenantID shared.ID, projectIDs []shared.ID) (map[shared.ID]*engagement.Engagement, error)
+	GetByHostAssetID(ctx context.Context, tenantID, assetID shared.ID) (*engagement.Engagement, error)
+}
+
+var _ ContextResolver = ports.EngagementRepository(nil)
 
 // OccurrenceReader lists an engagement's vulnerability occurrences by state. ports.VulnerabilityOccurrenceStore satisfies it.
 type OccurrenceReader interface {
@@ -70,6 +81,7 @@ type ComponentLister interface {
 // Presence; when nil (NewReader), every component is reported installed-only.
 type Reader struct {
 	memberships MembershipReader
+	contexts    ContextResolver
 	occurrences OccurrenceReader
 	risk        RiskReader
 	processes   ProcessLister
@@ -81,24 +93,26 @@ var (
 	_ ProcessLister                       = ports.EndpointProcessStore(nil)
 )
 
-// NewReader constructs the adapter. All three stores are required.
-func NewReader(memberships MembershipReader, occurrences OccurrenceReader, risk RiskReader) (*Reader, error) {
+// NewReader constructs the adapter. All four stores are required.
+func NewReader(memberships MembershipReader, contexts ContextResolver, occurrences OccurrenceReader, risk RiskReader) (*Reader, error) {
 	switch {
 	case memberships == nil:
 		return nil, fmt.Errorf("%w: exposure reader requires a membership store", shared.ErrValidation)
+	case contexts == nil:
+		return nil, fmt.Errorf("%w: exposure reader requires an engagement context resolver", shared.ErrValidation)
 	case occurrences == nil:
 		return nil, fmt.Errorf("%w: exposure reader requires an occurrence store", shared.ErrValidation)
 	case risk == nil:
 		return nil, fmt.Errorf("%w: exposure reader requires a risk store", shared.ErrValidation)
 	}
-	return &Reader{memberships: memberships, occurrences: occurrences, risk: risk}, nil
+	return &Reader{memberships: memberships, contexts: contexts, occurrences: occurrences, risk: risk}, nil
 }
 
 // NewReaderWithRuntime is NewReader plus the runtime signals needed to resolve running-vs-installed: the
 // B5 process store (running processes per host) and a component enumerator (ComponentID -> package name).
 // With both wired, a vulnerable component whose package matches a running process is marked Running.
-func NewReaderWithRuntime(memberships MembershipReader, occurrences OccurrenceReader, risk RiskReader, processes ProcessLister, components ComponentLister) (*Reader, error) {
-	r, err := NewReader(memberships, occurrences, risk)
+func NewReaderWithRuntime(memberships MembershipReader, contexts ContextResolver, occurrences OccurrenceReader, risk RiskReader, processes ProcessLister, components ComponentLister) (*Reader, error) {
+	r, err := NewReader(memberships, contexts, occurrences, risk)
 	if err != nil {
 		return nil, err
 	}
@@ -118,12 +132,18 @@ func tenantIDFrom(ctx context.Context) (shared.ID, error) {
 	return tenantID, nil
 }
 
-// ListAssetVulnerableComponents resolves, for one asset: the engagements it is scoped into, the components
-// that make it up, and the currently-open vulnerability occurrences on those components (with their
-// evaluated risk). It ABSTAINS with shared.ErrNotFound when the asset has no exposure data to assess (not
-// in any engagement, or no component inventory) — never reporting absence as clean. An asset that IS
-// scanned but has no open occurrences returns (nil, nil) = a trustworthy clean. Presence is installed-only
-// (B5 running snapshots deferred).
+// ListAssetVulnerableComponents resolves, for one asset, the engagements that belong to it and the
+// currently-open vulnerability occurrences on those engagements (with their evaluated risk). The
+// engagements are the ones assigned to the asset, the hidden analysis context of every linked project and
+// the hidden vulnerability context of every linked host; an occurrence on one of them is the asset's by
+// construction, so no further component filter is applied. (The previous join compared project and
+// technical asset ids with SBOM component ids, two namespaces that never match, and read every asset as
+// clean: #819.)
+//
+// It ABSTAINS with shared.ErrNotFound when the asset has no exposure data to assess: no memberships and
+// no assigned engagement, or, when a component lister is wired, no engagement with a component inventory
+// (nothing was ever scanned). An asset that IS scanned but has no open occurrences returns (nil, nil), a
+// trustworthy clean.
 func (r *Reader) ListAssetVulnerableComponents(ctx context.Context, assetID shared.ID) ([]exposureuc.AssetVulnerableComponent, error) {
 	tenant, err := tenantIDFrom(ctx)
 	if err != nil {
@@ -133,31 +153,21 @@ func (r *Reader) ListAssetVulnerableComponents(ctx context.Context, assetID shar
 		return nil, fmt.Errorf("%w: asset id is required", shared.ErrValidation)
 	}
 
-	engs, err := r.memberships.ListEngagementsByBusinessAsset(ctx, tenant, assetID)
+	engs, technical, err := r.assetEngagements(ctx, tenant, assetID)
 	if err != nil {
-		return nil, fmt.Errorf("list engagements for asset %s: %w", assetID, err) // ErrNotFound → abstain
+		return nil, err
 	}
 	if len(engs) == 0 {
-		return nil, fmt.Errorf("%w: asset %s is not scoped into any engagement", shared.ErrNotFound, assetID)
+		return nil, fmt.Errorf("%w: asset %s is not scoped into any engagement and has no scanned components", shared.ErrNotFound, assetID)
 	}
-
-	projects, err := r.memberships.ListBusinessAssetProjects(ctx, tenant, assetID)
-	if err != nil {
-		return nil, fmt.Errorf("list project components for asset %s: %w", assetID, err)
-	}
-	technical, err := r.memberships.ListBusinessAssetTechnicalAssets(ctx, tenant, assetID)
-	if err != nil {
-		return nil, fmt.Errorf("list technical components for asset %s: %w", assetID, err)
-	}
-	components := make(map[shared.ID]struct{}, len(projects)+len(technical))
-	for _, m := range projects {
-		components[m.ComponentID] = struct{}{}
-	}
-	for _, m := range technical {
-		components[m.ComponentID] = struct{}{}
-	}
-	if len(components) == 0 {
-		return nil, fmt.Errorf("%w: asset %s has no component inventory", shared.ErrNotFound, assetID)
+	if r.components != nil {
+		scanned, err := r.anyInventory(ctx, tenant, engs)
+		if err != nil {
+			return nil, err
+		}
+		if !scanned {
+			return nil, fmt.Errorf("%w: asset %s has no component inventory", shared.ErrNotFound, assetID)
+		}
 	}
 
 	// Dedup by (component, advisory): the same vulnerable component can appear under more than one of the
@@ -175,9 +185,6 @@ func (r *Reader) ListAssetVulnerableComponents(ctx context.Context, assetID shar
 			return nil, fmt.Errorf("list occurrences for engagement %s: %w", eng.ID, err)
 		}
 		for _, occ := range occs {
-			if _, ok := components[occ.ComponentID]; !ok {
-				continue
-			}
 			ra, err := r.risk.Current(ctx, tenant, occ.ID)
 			if err != nil {
 				if errors.Is(err, shared.ErrNotFound) {
@@ -230,6 +237,80 @@ func (r *Reader) ListAssetVulnerableComponents(ctx context.Context, assetID shar
 		return out[i].AdvisoryID < out[j].AdvisoryID
 	})
 	return out, nil
+}
+
+// assetEngagements returns the engagements whose occurrences belong to the asset, deduplicated by id,
+// plus the technical (host) memberships the running-vs-installed step reuses as its host bridge. A linked
+// project or host that has no context yet (never analysed, never reported packages) contributes nothing;
+// the abstain rules above decide what an empty result means.
+func (r *Reader) assetEngagements(ctx context.Context, tenant, assetID shared.ID) ([]*engagement.Engagement, []asset.ComponentMembership, error) {
+	assigned, err := r.memberships.ListEngagementsByBusinessAsset(ctx, tenant, assetID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list engagements for asset %s: %w", assetID, err)
+	}
+	projects, err := r.memberships.ListBusinessAssetProjects(ctx, tenant, assetID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list project components for asset %s: %w", assetID, err)
+	}
+	technical, err := r.memberships.ListBusinessAssetTechnicalAssets(ctx, tenant, assetID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list technical components for asset %s: %w", assetID, err)
+	}
+
+	seen := make(map[shared.ID]bool, len(assigned)+len(projects)+len(technical))
+	out := make([]*engagement.Engagement, 0, len(assigned)+len(projects)+len(technical))
+	add := func(e *engagement.Engagement) {
+		if e == nil || e.ID.IsZero() || seen[e.ID] {
+			return
+		}
+		seen[e.ID] = true
+		out = append(out, e)
+	}
+	for _, e := range assigned {
+		add(e)
+	}
+	if len(projects) > 0 {
+		ids := make([]shared.ID, 0, len(projects))
+		for _, m := range projects {
+			ids = append(ids, m.ComponentID) // ComponentID here is the project id
+		}
+		contexts, err := r.contexts.ProjectContexts(ctx, tenant, ids)
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve project contexts for asset %s: %w", assetID, err)
+		}
+		// Deterministic order: by project id, not map iteration.
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		for _, id := range ids {
+			add(contexts[id])
+		}
+	}
+	for _, m := range technical {
+		e, err := r.contexts.GetByHostAssetID(ctx, tenant, m.ComponentID) // ComponentID here is the host asset id
+		if errors.Is(err, shared.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve host context %s for asset %s: %w", m.ComponentID, assetID, err)
+		}
+		add(e)
+	}
+	return out, technical, nil
+}
+
+// anyInventory reports whether at least one of the engagements has a current component inventory, which
+// is the evidence that something was scanned. Without it a zero-occurrence result would be an unscanned
+// asset read as clean.
+func (r *Reader) anyInventory(ctx context.Context, tenant shared.ID, engs []*engagement.Engagement) (bool, error) {
+	for _, eng := range engs {
+		recs, err := r.components.ListCurrentComponentsByEngagement(ctx, tenant, eng.ID)
+		if err != nil {
+			return false, fmt.Errorf("list components for engagement %s: %w", eng.ID, err)
+		}
+		if len(recs) > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // componentKey dedups a vulnerable (component, advisory) across the asset's engagements.
