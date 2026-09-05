@@ -483,3 +483,53 @@ func TestCycleSkipsClaimAgainstTooOldControlPlane(t *testing.T) {
 		t.Fatalf("an older-than-required control plane must skip claim; claims=%d", api.claims)
 	}
 }
+
+// resolvedFakeAPI is fakeAPI plus the resolved host-inventory response the production client returns.
+type resolvedFakeAPI struct {
+	*fakeAPI
+	assetID  string
+	resolved int
+}
+
+func (f *resolvedFakeAPI) SendHostInventoryResolved(_ context.Context, _ string, _ any) (fleetclient.HostInventoryResponse, error) {
+	f.resolved++
+	return fleetclient.HostInventoryResponse{AssetID: f.assetID}, nil
+}
+
+// TestSweepPersistsTheCanonicalAssetBinding pins the binding the whole detection pipeline waits on.
+//
+// The run loop starts the telemetry transport only once the credential carries the canonical asset id
+// the control plane assigned. That id was persisted only from the work-order branch, and nothing in the
+// product can issue a work order, so on a stock agent the field stayed empty for the life of the
+// process and no detection was ever shipped. The inventory sweep already makes the server-side binding
+// on every pass; it simply threw the answer away.
+func TestSweepPersistsTheCanonicalAssetBinding(t *testing.T) {
+	dir := t.TempDir()
+	base := &fakeAPI{}
+	api := &resolvedFakeAPI{fakeAPI: base, assetID: "asset-canonical-1"}
+	r := &runner{
+		api: api,
+		collect: func(context.Context, string) (hostinventory.HostInventory, error) {
+			return hostinventory.HostInventory{}, nil
+		},
+		cfg:   config{stateDir: dir, root: dir, name: "host1", enrolToken: "enrol"},
+		store: fleetclient.NewCredentialStore(dir),
+	}
+	cred := fleetclient.Credential{Token: "tok", AgentID: "agent-1"}
+	if err := r.store.Persist(cred, []byte("-----BEGIN PRIVATE KEY-----\nseed\n-----END PRIVATE KEY-----\n")); err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+
+	r.sweepOnce(t.Context(), cred)
+
+	if api.resolved != 1 {
+		t.Fatalf("sweep used the resolved inventory call %d times, want 1", api.resolved)
+	}
+	stored, ok := r.store.Load()
+	if !ok {
+		t.Fatal("credential disappeared")
+	}
+	if stored.AssetID != "asset-canonical-1" {
+		t.Fatalf("stored asset id = %q, want the canonical id the control plane returned; without it the telemetry transport never starts", stored.AssetID)
+	}
+}

@@ -286,6 +286,16 @@ func (r *runner) run(ctx context.Context) error {
 		// A0.1 requires the canonical server-provided asset binding before telemetry
 		// transport starts. The transport owns historical durable WAL independently of
 		// whether current source observation is authorized by an active privacy policy.
+		//
+		// The binding is established by the inventory sweep, which runs in its own goroutine and
+		// writes it to the credential store, so re-read it here rather than trusting the copy this
+		// loop started with. Without the re-read the loop would hold an empty AssetID for the life
+		// of the process and the transport would never start.
+		if transport == nil && cred.AssetID == "" {
+			if stored, ok := r.store.Load(); ok && stored.AssetID != "" {
+				cred = stored
+			}
+		}
 		if transport == nil && cred.AssetID != "" {
 			transport, err = r.startDetectionTransport(ctx, cred)
 			if err != nil {
