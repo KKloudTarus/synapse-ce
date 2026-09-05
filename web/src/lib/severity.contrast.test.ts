@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs'
-import path from 'node:path'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { SEVERITY_ORDER, sevSoft, sevText } from './severity'
+
+// The stylesheet is the single source of truth for these tokens, so the test
+// measures the file rather than a copy of its values.
+const CSS = readFileSync(resolve(import.meta.dirname, '../index.css'), 'utf8')
 
 /**
  * The severity badges are the densest 12px text in the product. The solid
@@ -9,8 +13,6 @@ import { SEVERITY_ORDER, sevSoft, sevText } from './severity'
  * and 4.04:1 (critical) on a light card. This locks the `*text` pair at WCAG AA
  * against the surfaces the badges actually sit on, in both themes.
  */
-
-const CSS = readFileSync(path.resolve(import.meta.dirname, '../index.css'), 'utf8')
 
 function block(startMarker: string): string {
   const start = CSS.indexOf(startMarker)
