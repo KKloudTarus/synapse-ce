@@ -42,6 +42,16 @@
   --color-low: #168b48;
   --color-infosev: #64748b;
 
+  /* Text-on-surface pair for each severity. The solid tokens above are tuned as
+     fills (dots, bars, gradients); at 12px on a light card they land at 3.0-4.1:1,
+     under WCAG AA. These are the same hue darkened until every severity clears
+     4.5:1 on its own soft badge background as well as on the page and card. */
+  --color-criticaltext: #c0243c;
+  --color-hightext: #a94a15;
+  --color-mediumtext: #8e5d0b;
+  --color-lowtext: #13753d;
+  --color-infosevtext: #556377;
+
   --font-sans: "Inter", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   --font-mono: "JetBrains Mono", "Roboto Mono", ui-monospace, SFMono-Regular, monospace;
 }
@@ -67,6 +77,13 @@
   --color-medium: #f5bb3f;
   --color-low: #22c55e;
   --color-infosev: #8593aa;
+  /* Dark surfaces already clear AA with the solid tokens, so the text pair
+     tracks them and only info is lifted off the muted grey. */
+  --color-criticaltext: #fb4d63;
+  --color-hightext: #fb8b3c;
+  --color-mediumtext: #f5bb3f;
+  --color-lowtext: #22c55e;
+  --color-infosevtext: #9aa7bd;
 }
 
 @layer base {
