@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -28,60 +29,74 @@ var publicRoutePatterns = map[string]string{
 	"POST /api/auth/logout":       "ends the caller's own session; must work for any role",
 }
 
-var routeRegistration = regexp.MustCompile(`mux\.HandleFunc\("((?:GET|POST|PUT|PATCH|DELETE|HEAD) [^"]+)",\s*([^\n]*)`)
+// registeredRoutes parses router.go into the routes it actually registers. Parsing rather than
+// matching text is what makes the guards below hard to fool: a registration written across several
+// lines, one built with mux.Handle, or a line that merely mentions rt.authz in a comment all read
+// correctly, and a form the parser does not model is a failure rather than a silent skip.
+func registeredRoutes(t *testing.T) []RouteRegistration {
+	t.Helper()
+	routes, err := ParseRouteRegistrations("router.go")
+	if err != nil {
+		t.Fatalf("read the route table: %v", err)
+	}
+	if len(routes) < 100 {
+		t.Fatalf("found %d route registrations; the inventory is no longer reading the route table", len(routes))
+	}
+	return routes
+}
 
 // TestEveryHumanRouteGoesThroughAuthz walks the route table in router.go and fails for any route
 // registered without rt.authz, unless it is listed above as a deliberate exception.
 func TestEveryHumanRouteGoesThroughAuthz(t *testing.T) {
-	source := routerSource(t)
-	matches := routeRegistration.FindAllStringSubmatch(source, -1)
-	if len(matches) < 100 {
-		t.Fatalf("found %d route registrations; the inventory is no longer reading the route table", len(matches))
-	}
-
 	var unguarded []string
-	for _, m := range matches {
-		pattern, registration := m[1], m[2]
-		if _, public := publicRoutePatterns[pattern]; public {
+	for _, route := range registeredRoutes(t) {
+		if _, public := publicRoutePatterns[route.Pattern]; public {
 			continue
 		}
-		if strings.Contains(registration, "rt.authz(") {
+		if route.Guard == "rt.authz" {
 			continue
 		}
-		unguarded = append(unguarded, pattern)
+		unguarded = append(unguarded, fmt.Sprintf("%s (router.go:%d, outermost wrapper %q)", route.Pattern, route.Line, route.Guard))
 	}
 	sort.Strings(unguarded)
-	for _, pattern := range unguarded {
-		t.Errorf("route %q is registered without rt.authz and is not a documented public route", pattern)
+	for _, route := range unguarded {
+		t.Errorf("route %s is registered without rt.authz and is not a documented public route", route)
 	}
 }
 
-// TestPublicRouteExceptionsAreAllRegistered keeps the exception list honest: an entry that no
-// longer matches a real route is a stale exemption that would hide the next unguarded route.
+// TestPublicRouteExceptionsAreAllRegistered keeps the exception list honest in both directions: an
+// entry that matches no real route is a stale exemption that would hide the next unguarded route,
+// and an entry for a route that IS wrapped in rt.authz is an exemption nobody needs.
 func TestPublicRouteExceptionsAreAllRegistered(t *testing.T) {
-	source := routerSource(t)
-	registered := map[string]bool{}
-	for _, m := range routeRegistration.FindAllStringSubmatch(source, -1) {
-		registered[m[1]] = true
+	registered := map[string]RouteRegistration{}
+	for _, route := range registeredRoutes(t) {
+		registered[route.Pattern] = route
 	}
 	for pattern := range publicRoutePatterns {
-		if !registered[pattern] {
+		route, ok := registered[pattern]
+		if !ok {
 			t.Errorf("public-route exception %q matches no registered route; remove the stale exemption", pattern)
+			continue
+		}
+		if route.Guard == "rt.authz" {
+			t.Errorf("public-route exception %q is in fact wrapped in rt.authz; remove the exemption rather than leaving it to cover a future route", pattern)
 		}
 	}
 }
 
 // TestTenantScopedRoutesAreCoveredByTheHostileHarness reports how much of the tenant-scoped
-// surface the cross-tenant harness actually probes. The harness table is hand-maintained, so a
-// route added today is silently uncovered tomorrow; this makes the gap visible and stops it from
-// growing.
+// surface the cross-tenant harness actually probes, so the gap is visible and cannot grow.
+//
+// Coverage is measured on the WHOLE pattern with its parameters filled in, not on the fixed prefix
+// before the first parameter. Measuring the prefix counts every route under /api/v1/engagements as
+// covered the moment the harness mentions any engagement path once, so the number rises with each
+// new route and the guard can never fire for the case it exists to catch.
 func TestTenantScopedRoutesAreCoveredByTheHostileHarness(t *testing.T) {
-	source := routerSource(t)
 	harness := harnessSource(t)
 
 	tenantScoped := map[string]bool{}
-	for _, m := range routeRegistration.FindAllStringSubmatch(source, -1) {
-		pattern := m[1]
+	for _, route := range registeredRoutes(t) {
+		pattern := route.Pattern
 		// Routes under an engagement, a project or an asset carry another tenant's data when the
 		// path id is guessed, which is exactly what the harness exists to reject.
 		if strings.Contains(pattern, "/engagements/{") || strings.Contains(pattern, "/projects/{") || strings.Contains(pattern, "/assets/{") {
@@ -92,17 +107,35 @@ func TestTenantScopedRoutesAreCoveredByTheHostileHarness(t *testing.T) {
 		t.Fatal("found no tenant-scoped routes; the inventory is no longer reading the route table")
 	}
 
+	// Every (method, path) pair the harness actually sends, including the generated sweep, which
+	// builds its paths from this same route table.
+	type request struct{ method, path string }
+	var sent []request
+	for _, m := range harnessRequest.FindAllStringSubmatch(harness, -1) {
+		sent = append(sent, request{method: strings.ToUpper(m[1]), path: m[2]})
+	}
+	for _, route := range tenantScopedGETRoutes(t) {
+		if path := concreteHarnessPath(route); path != "" {
+			sent = append(sent, request{method: "GET", path: path})
+		}
+	}
+	if len(sent) < 40 {
+		t.Fatalf("read %d harness requests; the harness is no longer being parsed", len(sent))
+	}
+
 	covered := 0
 	var uncovered []string
 	for pattern := range tenantScoped {
-		path := pattern[strings.Index(pattern, " ")+1:]
-		// The harness writes concrete paths, so compare on the fixed prefix before the first
-		// path parameter plus the segment that follows it.
-		prefix := path
-		if i := strings.Index(path, "/{"); i >= 0 {
-			prefix = path[:i]
+		method, path, _ := strings.Cut(pattern, " ")
+		matcher := patternMatcher(path)
+		hit := false
+		for _, req := range sent {
+			if req.method == method && matcher.MatchString(req.path) {
+				hit = true
+				break
+			}
 		}
-		if strings.Contains(harness, prefix) {
+		if hit {
 			covered++
 			continue
 		}
@@ -110,12 +143,44 @@ func TestTenantScopedRoutesAreCoveredByTheHostileHarness(t *testing.T) {
 	}
 	sort.Strings(uncovered)
 
-	// The harness covered 115 of the tenant-scoped route prefixes when this guard was written.
-	// The ratchet may only improve: raise the floor when you add coverage, never lower it.
-	const minimumCovered = 115
+	// The honest measurement when this guard was rewritten. The ratchet may only improve: raise the
+	// floor when you add coverage, never lower it.
+	const minimumCovered = 94
 	if covered < minimumCovered {
-		t.Errorf("hostile harness covers %d tenant-scoped routes, below the ratchet of %d; add cases rather than lowering the floor.\nUncovered:\n  %s",
-			covered, minimumCovered, strings.Join(uncovered, "\n  "))
+		t.Errorf("hostile harness covers %d of %d tenant-scoped routes, below the ratchet of %d; add cases rather than lowering the floor.\nUncovered:\n  %s",
+			covered, len(tenantScoped), minimumCovered, strings.Join(uncovered, "\n  "))
 	}
 	t.Logf("hostile harness covers %d of %d tenant-scoped routes; %d uncovered", covered, len(tenantScoped), len(uncovered))
+}
+
+// harnessRequest matches the http.MethodX, "/path" pairs the harness sends, which is how a request
+// appears both in its table entries and in its inline assertions.
+var harnessRequest = regexp.MustCompile(`http\.Method(\w+),\s*"(/[^"]*)"`)
+
+// patternMatcher turns a ServeMux pattern into a matcher for the concrete paths the harness sends.
+// A {name} segment matches one path segment; a {name...} wildcard matches the rest of the path.
+func patternMatcher(path string) *regexp.Regexp {
+	var b strings.Builder
+	b.WriteString("^")
+	for {
+		open := strings.Index(path, "{")
+		if open < 0 {
+			b.WriteString(regexp.QuoteMeta(path))
+			break
+		}
+		closeAt := strings.Index(path[open:], "}")
+		if closeAt < 0 {
+			b.WriteString(regexp.QuoteMeta(path))
+			break
+		}
+		b.WriteString(regexp.QuoteMeta(path[:open]))
+		if strings.HasSuffix(path[open:open+closeAt], "...") {
+			b.WriteString(".+")
+		} else {
+			b.WriteString("[^/]+")
+		}
+		path = path[open+closeAt+1:]
+	}
+	b.WriteString("$")
+	return regexp.MustCompile(b.String())
 }

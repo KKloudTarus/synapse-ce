@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -330,6 +331,12 @@ func TestHostileHarness(t *testing.T) {
 	}
 	projectRepo := memory.NewProjectRepository()
 	projectSvc := projectuc.NewService(projectRepo, engRepo, fixedClock{}, engIDs{}, &fakeAudit{}, true)
+	// The measures route signs its pagination cursor, and refuses to serve at all without a key.
+	// The generated sweep below must reach the tenant check on that route rather than stopping at
+	// an unconfigured-deployment error.
+	if err := projectSvc.SetCursorSecret([]byte(strings.Repeat("harness-cursor-secret", 3))); err != nil {
+		t.Fatalf("set measure cursor secret: %v", err)
+	}
 	if _, err := projectSvc.Create(context.Background(), projectuc.CreateInput{
 		TenantID: "tenantA", CreatedBy: "p", Name: "Project A", Key: "project-a",
 		SourceBinding: projectdom.SourceBinding{Kind: projectdom.SourceLocal, Value: "/repo"},
@@ -364,8 +371,9 @@ func TestHostileHarness(t *testing.T) {
 	}
 	// Register the two CONDITIONAL sign-off routes so the harness guards their gates too: the
 	// PermReview /verify route (needs a non-nil exploitation verifier) and the agent routes incl.
-	// PermReview approval-decide (needs a non-nil agent – nil deps are fine because every assertion
-	// below on these routes is a DENY that authz/withEngTenant reject before any handler runs).
+	// PermReview approval-decide. The deps that the generated sweep actually reads are real; the
+	// rest stay nil because every assertion on those routes is a DENY that authz or withEngTenant
+	// rejects before any handler runs.
 	rt.SetExploitation(&fakeVerifier{})
 	rt.SetJudgments(promotionAnalysis) // real judgment/promotion lifecycle for hostile verification coverage
 	rt.SetRuntimeVerifier(&fakeRuntimeVerifier{})
@@ -382,7 +390,11 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetDetectionReader(harnessDetections{})  // register the #423 detection-ledger read route
 	rt.SetPurpleCoverageReader(harnessPurple{}) // register the #426 purple-coverage read route
 	rt.SetFleetRolloutAdmin(harnessRollout{})
-	rt.EnableAgent(nil, nil, nil, nil, nil, 1, 8)
+	// A real approval store, not nil: the generated sweep below reads the approvals route as the
+	// owning tenant, so the handler must run rather than dereference a nil dependency.
+	rt.EnableAgent(nil, memory.NewAgentSessionStore(), nil, memory.NewApprovalStore(), nil, 1, 8)
+	rt.SetAgentPlanStore(memory.NewPlanStore())
+	rt.SetAgentDecisionStore(memory.NewDecisionStore())
 	mux := rt.routes()
 
 	send := func(role, tenant, method, path string, authed bool) (int, string) {
@@ -650,5 +662,138 @@ func TestHostileHarness(t *testing.T) {
 		} else if strings.Contains(body, "asset-A") || strings.Contains(body, "ag1") {
 			t.Errorf("cross-tenant %s leaked tenantA data: %s", path, body)
 		}
+	}
+
+	// Generated cross-tenant sweep. The hand-written cases above prove specific leaks are closed;
+	// this walks the whole tenant-scoped GET surface from the route table so a route added tomorrow
+	// is probed the day it is registered, instead of waiting for somebody to remember the harness.
+	//
+	// The property asserted is the weakest one that is still true of every route: a caller in
+	// tenantB asking for a tenantA-owned path must not be answered with that resource. A 403 or a
+	// 404 is correct, and so is a 200 that carries none of tenantA's markers. A 200 that echoes a
+	// tenantA identifier is the leak.
+	t.Run("generated cross-tenant sweep", func(t *testing.T) {
+		// Markers seeded into tenantA only. A tenantB caller must never see one of these.
+		// Values the fixture seeds for tenantA only. "tenantA" itself is the broadest: a response
+		// to a tenantB caller that names tenantA is a leak whatever else it contains.
+		markers := []string{"tenantA", "promotion-finding-A", "asset-A", "ag1", "A Admin", "det-A", "ev-A", "agent:A", "host-A"}
+		containsMarker := func(body string) string {
+			for _, marker := range markers {
+				if strings.Contains(body, marker) {
+					return marker
+				}
+			}
+			return ""
+		}
+		// probe runs one request and reports whether the handler could run at all. This fixture
+		// deliberately leaves optional subsystems unwired, and their handlers dereference the
+		// dependency the router guarantees them in production, so an unwired route panics here.
+		// That is a gap in the fixture rather than a tenancy finding, so it is counted and skipped.
+		probe := func(tenant, path string) (code int, body string, ran bool) {
+			defer func() {
+				if recover() != nil {
+					ran = false
+				}
+			}()
+			code, body = send("admin", tenant, http.MethodGet, path, true)
+			return code, body, true
+		}
+
+		var probed, unwired, servingTenantA int
+		var servingRoutes []string
+		for _, route := range tenantScopedGETRoutes(t) {
+			path := concreteHarnessPath(route)
+			if path == "" {
+				continue
+			}
+			// Control: does this route serve tenantA its own seeded data? A route that answers
+			// nobody proves nothing when it also answers tenantB nothing, so the count below keeps
+			// the sweep from decaying into a set of vacuous passes.
+			code, body, ran := probe("tenantA", path)
+			if !ran {
+				unwired++
+				continue
+			}
+			probed++
+			if code == http.StatusOK && containsMarker(body) != "" {
+				servingTenantA++
+				servingRoutes = append(servingRoutes, route)
+			}
+			t.Run(route, func(t *testing.T) {
+				code, body, ran := probe("tenantB", path)
+				if !ran {
+					t.Skip("subsystem is not wired in this fixture")
+				}
+				if code == http.StatusOK {
+					if marker := containsMarker(body); marker != "" {
+						t.Errorf("%s answered a tenantB caller with tenantA data (marker %q): %s", route, marker, body)
+					}
+				}
+				if code >= 500 {
+					t.Errorf("%s returned %d for a cross-tenant read; a guard must reject, not crash: %s", route, code, body)
+				}
+			})
+		}
+		if probed < 40 {
+			t.Errorf("the sweep probed %d routes; the route table is no longer being read", probed)
+		}
+		// Five routes in this fixture are seeded with tenantA data, so for those the tenantB probe
+		// proves a real absence. For the rest the sweep proves the weaker but still useful property
+		// that a cross-tenant read neither crashes nor echoes a tenantA identifier. Raise this floor
+		// when you seed more fixture data; never lower it.
+		if servingTenantA < 5 {
+			t.Errorf("only %d of %d probed routes served tenantA its own seeded data (%v); the sweep is passing vacuously", servingTenantA, probed, servingRoutes)
+		}
+		t.Logf("generated sweep probed %d tenant-scoped GET routes (%d serve tenantA real data); %d skipped as unwired in this fixture", probed, servingTenantA, unwired)
+	})
+}
+
+// tenantScopedGETRoutes reads the route table and returns every GET route whose path carries an
+// engagement, project or asset id. Those are the routes that serve one tenant's resource by id, so
+// a caller from another tenant must not be answered with it.
+func tenantScopedGETRoutes(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	for _, route := range registeredRoutes(t) {
+		pattern := route.Pattern
+		if !strings.HasPrefix(pattern, "GET ") {
+			continue
+		}
+		if strings.Contains(pattern, "/engagements/{") || strings.Contains(pattern, "/projects/{") || strings.Contains(pattern, "/assets/{") {
+			out = append(out, pattern)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// harnessPathValues maps a route parameter to the concrete id the harness fixture seeds for it.
+// A parameter with no entry means the route cannot be probed generically, and it is skipped rather
+// than probed with a guessed value that would only ever produce a 404.
+var harnessPathValues = map[string]string{
+	"{id}": "engA", "{key}": "project-a", "{assetID}": "asset-A", "{aid}": "asset-A",
+	"{fid}": "f1", "{jid}": "j1", "{rid}": "r1", "{sid}": "s1", "{cid}": "c1",
+	"{a}": "a1", "{pid}": "p1", "{tid}": "t1", "{vid}": "v1", "{eid}": "e1", "{name}": "n1",
+}
+
+// concreteHarnessPath turns a registered pattern into a request path the harness fixture can serve,
+// or "" when a parameter has no seeded value.
+func concreteHarnessPath(route string) string {
+	path := route[strings.Index(route, " ")+1:]
+	for {
+		open := strings.Index(path, "{")
+		if open < 0 {
+			return path
+		}
+		closeAt := strings.Index(path[open:], "}")
+		if closeAt < 0 {
+			return ""
+		}
+		param := path[open : open+closeAt+1]
+		value, ok := harnessPathValues[param]
+		if !ok {
+			return ""
+		}
+		path = path[:open] + value + path[open+closeAt+1:]
 	}
 }
