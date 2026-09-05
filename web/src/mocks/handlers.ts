@@ -361,6 +361,17 @@ export const handlers = [
   // deployment runs everything the browser mock can serve, so every entry is enabled here.
   http.get('/api/v1/capabilities', () => HttpResponse.json({ capabilities: CAPABILITIES })),
 
+  // Source-control connectors (Settings → Connectors). Token is never returned.
+  http.get('/api/v1/connectors', () => HttpResponse.json({ connectors: [
+    { id: 'conn-1', name: 'Production GitHub', provider: 'github', host: 'github.com', username: 'x-access-token', auth_kind: 'pat', created_at: WEEK_AGO, updated_at: WEEK_AGO },
+    { id: 'conn-2', name: 'Internal GitLab', provider: 'gitlab', host: 'gitlab.corp.internal', username: 'oauth2', auth_kind: 'pat', created_at: MONTH_AGO, updated_at: MONTH_AGO },
+  ] })),
+  http.post('/api/v1/connectors', async ({ request }) => {
+    const b = (await request.json()) as any
+    return HttpResponse.json({ id: 'conn-new', name: b?.name ?? '', provider: b?.provider ?? 'generic', host: b?.host ?? '', username: b?.username || 'x-access-token', auth_kind: 'pat', created_at: NOW, updated_at: NOW }, { status: 201 })
+  }),
+  http.delete('/api/v1/connectors/:id', () => new HttpResponse(null, { status: 204 })),
+
   // --- Dashboard ---
   http.get('/api/v1/dashboard/security-operations', () => HttpResponse.json(DASHBOARD)),
 

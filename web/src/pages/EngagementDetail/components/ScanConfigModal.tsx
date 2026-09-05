@@ -23,7 +23,9 @@ export function trapTabFocus(e: KeyboardEvent, panel: HTMLElement | null) {
   }
 }
 
-export const KINDS = ['git', 'local', 'archive', 'image']
+// Scan-by-reference kinds. An archive is uploaded through the source-upload flow, not scanned by
+// reference, so it is not offered here (the server refuses kind=archive on this route).
+export const KINDS = ['git', 'local', 'image']
 
 export const SCAN_MODES: Array<{ value: ScanMode; label: string }> = [
   { value: 'full', label: 'Full' },
@@ -242,7 +244,13 @@ export function ScanConfigModal({
                 id="scan-target-input"
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
-                placeholder={kind === 'git' ? 'https://github.com/org/repo' : '/path/to/target'}
+                placeholder={
+                  kind === 'git'
+                    ? 'https://github.com/org/repo'
+                    : kind === 'image'
+                      ? 'docker.io/library/nginx:1.27'
+                      : '/path/to/target'
+                }
                 className="h-9 w-full font-mono text-xs"
                 aria-label="Scan target"
               />
@@ -250,6 +258,12 @@ export function ScanConfigModal({
             {!sourceLocked && kind === 'local' && (
               <p className="text-[11px] text-tertiary">
                 Use an absolute folder path on the server inside this engagement scope.
+              </p>
+            )}
+            {!sourceLocked && kind === 'image' && (
+              <p className="text-[11px] text-tertiary">
+                A container image reference. Synapse pulls it daemonlessly and reports its OS and language
+                package CVEs. The image must be in this engagement's scope.
               </p>
             )}
           </div>

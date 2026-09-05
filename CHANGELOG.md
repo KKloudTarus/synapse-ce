@@ -9,6 +9,21 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Private repositories can be scanned through source-control connectors.** A server-initiated scan
+  could only clone a public repository: the acquirer blanked every git credential. A tenant can now
+  configure a source-control connector (a git host, a username, and a personal access token) at
+  `GET/POST /api/v1/connectors` and `DELETE /api/v1/connectors/{id}` (administer permission; the token
+  is sealed AES-256-GCM at rest and is write-only). When a Project's git source host matches a
+  connector, the acquirer authenticates the clone by supplying the token through `GIT_ASKPASS`, so it
+  never enters argv, the URL, the workspace `.git/config`, or a log. GitHub, GitLab, Bitbucket and a
+  generic host are supported; a self-hosted host may be an IP. Manage connectors in Settings.
+
+- **Container images can be scanned from the server and the dashboard.** Image scanning (crane pull,
+  OS-package and language cataloging, layer attribution) already ran through the CLI, but the server
+  route `POST /api/v1/sca/scans` rejected `kind=image` at the edge, so the dashboard's image button
+  4xx'd. The edge now validates a container-image reference and forwards it to the acquirer; the
+  engagement scope still gates the image server-side as a `TargetImage`.
+
 - **A drifted behavior baseline can be re-baselined.** A behavior baseline that latched on drift (or
   was refused as poisoned) abstained from scoring forever, because the reset the domain supports had no
   route. `POST /api/v1/fleet/assets/{id}/behavior-baseline/rebaseline` now drives it through a clean

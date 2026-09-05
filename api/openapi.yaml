@@ -1574,6 +1574,50 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '502': {description: No sink acknowledged the alert, content: {application/json: {schema: {$ref: '#/components/schemas/AlertTestResult'}}}}
 
+  /api/v1/connectors:
+    get:
+      tags: [settings]
+      operationId: listConnectors
+      summary: List the tenant's source-control connectors
+      description: >
+        Every source-control connector configured for the caller's tenant, as metadata only. The
+        personal access token is never returned. Registered only when a connector store is wired.
+      responses:
+        '200': {description: Connectors, content: {application/json: {schema: {type: object, properties: {connectors: {type: array, items: {$ref: '#/components/schemas/SCMConnector'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [settings]
+      operationId: createConnector
+      summary: Add a source-control connector so scans can clone a private repository
+      description: >
+        Stores a tenant-scoped git-host + username + personal access token. The token is sealed at
+        rest (AES-256-GCM) and is write-only: it is accepted here and never returned. A server-initiated
+        scan of a Project whose git source host matches this connector authenticates the clone with it.
+        One connector per host per tenant. Requires the administer permission.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/SCMConnectorCreate'}}}
+      responses:
+        '201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/SCMConnector'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: A connector already exists for this host}
+
+  /api/v1/connectors/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    delete:
+      tags: [settings]
+      operationId: deleteConnector
+      summary: Remove a source-control connector
+      description: Deletes the connector and its sealed token. Requires the administer permission.
+      responses:
+        '204': {description: Deleted}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
   /api/v1/assets/hosts:
     get:
       tags: [assets]
@@ -5202,6 +5246,27 @@ components:
       properties:
         outcome: {$ref: '#/components/schemas/AlertOutcome'}
         error: {type: string}
+    SCMConnector:
+      type: object
+      description: A source-control connector's non-secret metadata. The token is never included.
+      properties:
+        id: {type: string}
+        name: {type: string}
+        provider: {type: string, enum: [github, gitlab, bitbucket, generic]}
+        host: {type: string, description: Normalized git host, e.g. github.com.}
+        username: {type: string, description: The git username the token authenticates as.}
+        auth_kind: {type: string, enum: [pat]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    SCMConnectorCreate:
+      type: object
+      required: [name, provider, host, token]
+      properties:
+        name: {type: string, description: A label for the connector.}
+        provider: {type: string, enum: [github, gitlab, bitbucket, generic]}
+        host: {type: string, description: The git host, bare or as an https URL; only the host is kept.}
+        username: {type: string, description: Optional git username; defaults per provider (x-access-token for GitHub, oauth2 for GitLab).}
+        token: {type: string, description: Personal access token. Write-only; sealed at rest and never returned.}
     FleetAsset:
       type: object
       description: Serialized from the fleet asset domain struct (PascalCase keys).

@@ -84,11 +84,13 @@ func validateProductionNetworkedTools(cfg config.Config) error {
 	return fmt.Errorf("production networked SCA tools require authoritative signed scan grants and are not yet supported: %s", strings.Join(enabled, ", "))
 }
 
-func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.AdvisoryStore) (Execution, error) {
+func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.AdvisoryStore, gitCreds ports.GitCredentialResolver) (Execution, error) {
 	if err := validateProductionNetworkedTools(cfg); err != nil {
 		return Execution{}, err
 	}
-	localAcquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled).WithComparisonDepth(cfg.ProjectGitComparisonDepth)
+	// gitCreds authenticates a server-initiated clone of a PRIVATE repository from a tenant
+	// source-control connector; nil (no connector store wired) clones public repos only.
+	localAcquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled).WithComparisonDepth(cfg.ProjectGitComparisonDepth).WithGitCredentialResolver(gitCreds)
 	var acquirer ports.Acquirer = localAcquirer
 	var scaSandbox *sandbox.Runner
 	var sbomGen ports.SBOMGenerator

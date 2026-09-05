@@ -251,7 +251,12 @@ func main() {
 		},
 		VulnDBSource: "osv.dev",
 	}
-	scaExecution, eerr := scacompose.BuildExecution(cfg, log, postgres.NewAdvisoryRepository(pool))
+	scmConnectorStore, scmErr := postgres.NewSCMConnectorRepository(pool, mustVaultCipher(cfg, log))
+	if scmErr != nil {
+		log.Error("source-control connector store init failed", "err", scmErr)
+		os.Exit(1)
+	}
+	scaExecution, eerr := scacompose.BuildExecution(cfg, log, postgres.NewAdvisoryRepository(pool), scmConnectorStore)
 	if eerr != nil {
 		log.Error(eerr.Error())
 		os.Exit(1)

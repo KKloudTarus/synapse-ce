@@ -83,7 +83,7 @@ func TestResolveComparisonUsesFetchedBaseRef(t *testing.T) {
 	workspace := t.TempDir()
 	git(t, workspace, "clone", "--depth", "1", "--branch", "feature", "file://"+bare, ".")
 	head := strings.TrimSpace(git(t, workspace, "rev-parse", "HEAD"))
-	base, mergeBase := acquirer.resolveComparison(context.Background(), workspace, "https://example.invalid/repo.git", nil, head, "feature", "main", "")
+	base, mergeBase := acquirer.resolveComparison(context.Background(), workspace, "https://example.invalid/repo.git", nil, nil, head, "feature", "main", "")
 	if base == "" || mergeBase == "" {
 		t.Fatalf("base=%q mergeBase=%q, want resolved comparison", base, mergeBase)
 	}

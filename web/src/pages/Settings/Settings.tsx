@@ -4,6 +4,7 @@ import { cn } from '../../components/ui'
 const TABS = [
   { label: 'Audit', to: '/settings', end: true },
   { label: 'Team', to: '/settings/team' },
+  { label: 'Connectors', to: '/settings/connectors' },
   { label: 'Config', to: '/settings/config' },
 ]
 

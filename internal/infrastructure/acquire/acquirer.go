@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scmconnector"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -36,12 +37,24 @@ var credsRE = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@`)
 
 // Acquirer prepares isolated workspaces for SCA targets.
 type Acquirer struct {
-	sandbox           ports.ToolRunner // when set, git clone + image pull always use the hardened runner
-	egressScoped      bool             // when true, request scoped egress; false requests legacy host-net and is rejected by the hardened runner
-	imageTool         string           // crane (go-containerregistry CLI) binary for daemonless image pulls
-	maxWorkspaceBytes int64            // prepared-workspace size cap; <=0 ⇒ the MaxWorkspaceBytes default
-	materializeRootFS bool             // when true, an image pull also assembles the layers into a walkable rootfs
-	comparisonDepth   int              // bounded history depth for Code comparison resolution
+	sandbox            ports.ToolRunner            // when set, git clone + image pull always use the hardened runner
+	egressScoped       bool                        // when true, request scoped egress; false requests legacy host-net and is rejected by the hardened runner
+	imageTool          string                      // crane (go-containerregistry CLI) binary for daemonless image pulls
+	maxWorkspaceBytes  int64                       // prepared-workspace size cap; <=0 ⇒ the MaxWorkspaceBytes default
+	materializeRootFS  bool                        // when true, an image pull also assembles the layers into a walkable rootfs
+	comparisonDepth    int                         // bounded history depth for Code comparison resolution
+	gitCreds           ports.GitCredentialResolver // when set, a git clone whose host has a tenant connector authenticates (private repos)
+	allowInternalHosts bool                        // test-only: permit a loopback/link-local git host (a loopback httptest server). Never set in production.
+}
+
+// rejectInternalHost refuses a git clone target that resolves to a loopback/link-local/metadata
+// address (SSRF guard), matching image acquisition. The test-only allowInternalHosts escape permits a
+// loopback httptest server; it is never set by any composition root.
+func (a *Acquirer) rejectInternalHost(host string) error {
+	if a.allowInternalHosts {
+		return nil
+	}
+	return rejectInternalAcquisitionHost(host)
 }
 
 // New returns a new Acquirer.
@@ -95,6 +108,16 @@ func (a *Acquirer) WithImageRootFS(enabled bool) *Acquirer {
 // deployment that cannot build a netns. A nil runner is the only path that execs directly.
 func (a *Acquirer) WithSandbox(r ports.ToolRunner, egressScoped bool) *Acquirer {
 	a.sandbox, a.egressScoped = r, egressScoped
+	return a
+}
+
+// WithGitCredentialResolver lets a git clone authenticate to a PRIVATE repository. When set,
+// acquireGit resolves the clone URL's host to a tenant source-control connector (server-side,
+// from ctx) and, when one exists, injects the personal access token via GIT_ASKPASS, never
+// into argv, the URL, or the workspace's .git/config. A nil resolver, or a host with no
+// connector, clones unauthenticated exactly as before (public repos).
+func (a *Acquirer) WithGitCredentialResolver(r ports.GitCredentialResolver) *Acquirer {
+	a.gitCreds = r
 	return a
 }
 
@@ -322,6 +345,63 @@ func extractZipEntry(f *zip.File, target string, remaining int64) (int64, error)
 	return n, nil
 }
 
+// gitAuth resolves a source-control connector for the clone URL's host and, when one exists,
+// returns the clone URL rewritten with the connector username (NO secret) plus the GIT_ASKPASS
+// environment that supplies the token from a 0600 file. The token never enters argv, the URL, the
+// cloned workspace's .git/config, or the audited sandbox spec env: only the file PATH is passed,
+// and the file is bound read-only into the sandbox via roPaths. Returns the original url, no auth,
+// and a no-op cleanup when no resolver is wired or the host has no connector (public clone).
+func (a *Acquirer) gitAuth(ctx context.Context, rawURL string) (cloneURL string, authEnv, roPaths []string, cleanup func(), err error) {
+	noop := func() {}
+	if a.gitCreds == nil {
+		return rawURL, nil, nil, noop, nil
+	}
+	host, herr := gitHost(rawURL)
+	if herr != nil {
+		return "", nil, nil, noop, herr
+	}
+	normHost, nerr := scmconnector.NormalizeHost(host)
+	if nerr != nil {
+		return rawURL, nil, nil, noop, nil // an unusual host we cannot key a connector by; clone unauthenticated
+	}
+	cred, ok, rerr := a.gitCreds.ResolveGitCredential(ctx, normHost)
+	if rerr != nil {
+		return "", nil, nil, noop, fmt.Errorf("resolve git credential: %w", rerr)
+	}
+	if !ok || len(cred.Token) == 0 {
+		return rawURL, nil, nil, noop, nil
+	}
+	// A 0600 token file plus a constant askpass helper, in a temp dir OUTSIDE the (must-be-empty)
+	// clone dir. The dir is bound read-only into the sandbox (the base sandbox masks /tmp with a
+	// fresh tmpfs, so an explicit ReadOnlyPaths bind is required for the helper to be visible).
+	credDir, derr := os.MkdirTemp("", "synapse-gitcred-*")
+	if derr != nil {
+		return "", nil, nil, noop, fmt.Errorf("create credential dir: %w", derr)
+	}
+	cleanup = func() { _ = os.RemoveAll(credDir) }
+	tokenFile := filepath.Join(credDir, "token")
+	if werr := os.WriteFile(tokenFile, cred.Token, 0o600); werr != nil {
+		cleanup()
+		return "", nil, nil, noop, fmt.Errorf("write credential: %w", werr)
+	}
+	askpass := filepath.Join(credDir, "askpass")
+	// git invokes the helper for the password; it prints the token file's contents. /bin/sh is on
+	// the host and, in the sandbox, under the read-only-bound /bin.
+	script := "#!/bin/sh\nexec cat \"$SYNAPSE_GIT_TOKEN_FILE\"\n"
+	if werr := os.WriteFile(askpass, []byte(script), 0o700); werr != nil {
+		cleanup()
+		return "", nil, nil, noop, fmt.Errorf("write askpass: %w", werr)
+	}
+	u, perr := neturl.Parse(rawURL)
+	if perr != nil {
+		cleanup()
+		return "", nil, nil, noop, fmt.Errorf("%w: invalid git url", shared.ErrValidation)
+	}
+	u.User = neturl.User(cred.Username) // username only; the token is supplied via askpass
+	authEnv = []string{"GIT_ASKPASS=" + askpass, "SYNAPSE_GIT_TOKEN_FILE=" + tokenFile}
+	return u.String(), authEnv, []string{credDir}, cleanup, nil
+}
+
 func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit string) (*ports.Workspace, error) {
 	if err := validateGitURL(url); err != nil {
 		return nil, err
@@ -337,23 +417,52 @@ func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit
 	if a.sandbox != nil && !a.egressScoped {
 		return nil, fmt.Errorf("%w: remote git acquisition requires authoritative signed execution grants", shared.ErrValidation)
 	}
+	// SSRF/metadata guard on BOTH the sandboxed and the direct-exec path (image acquisition already
+	// guards unconditionally): refuse a loopback/link-local target BEFORE a credential is resolved, so a
+	// tenant PAT is never presented to an internal host and the server cannot be turned into a prober.
+	if host, herr := gitHost(url); herr != nil {
+		return nil, herr
+	} else if herr := a.rejectInternalHost(host); herr != nil {
+		return nil, herr
+	}
+	// Resolve a private-repo credential for this host (a no-op that returns the original url when
+	// no connector matches). The token is supplied to git via GIT_ASKPASS, never argv or the URL.
+	cloneURL, authEnv, roPaths, authCleanup, err := a.gitAuth(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	defer authCleanup()
+
 	dir, err := os.MkdirTemp("", "synapse-ws-*")
 	if err != nil {
 		return nil, fmt.Errorf("create workspace: %w", err)
 	}
 	cleanup := func() error { return os.RemoveAll(dir) }
 
-	// argv (no shell), shallow, no tags, restricted transports, no prompts.
+	// argv (no shell), shallow, no tags, restricted transports, no prompts. credential.helper is
+	// blanked so ONLY a connector-provided askpass can authenticate: no ambient credential helper
+	// (cache/store/manager) may supply or persist credentials for a scanned host.
 	args := []string{
 		"-c", "protocol.ext.allow=never",
 		"-c", "protocol.file.allow=never",
+		"-c", "credential.helper=",
+		// Do not follow a cross-host redirect: git re-invokes the askpass on a redirect target, which would
+		// hand the connector token to a host the operator never configured. Fail rather than leak.
+		"-c", "http.followRedirects=false",
 		"clone", "--depth", "1", "--no-tags", "--single-branch",
 	}
 	if ref != "" {
 		args = append(args, "--branch", ref) // validated: no option injection
 	}
-	args = append(args, "--", url, dir)
-	gitEnv := []string{"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "GCM_INTERACTIVE=never"}
+	args = append(args, "--", cloneURL, dir)
+	// GIT_TERMINAL_PROMPT=0 forbids interactive auth; GIT_ASKPASS is the connector helper when a
+	// credential resolved, else blanked to defeat any ambient credential helper (public clone).
+	gitEnv := []string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"}
+	if len(authEnv) > 0 {
+		gitEnv = append(gitEnv, authEnv...)
+	} else {
+		gitEnv = append(gitEnv, "GIT_ASKPASS=")
+	}
 
 	if a.sandbox != nil {
 		// Sandboxed clone (E15/F4): confine git with the workspace as the only writable path.
@@ -370,12 +479,13 @@ func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit
 		}
 		egress, hostNet := a.sandboxNet([]string{host})
 		res, rerr := a.sandbox.Run(ctx, ports.ToolSpec{
-			Name:         "git",
-			Args:         args,
-			Env:          gitEnv,
-			Workdir:      dir, // the only writable path; git clones here
-			EgressPolicy: egress,
-			HostNetwork:  hostNet,
+			Name:          "git",
+			Args:          args,
+			Env:           gitEnv,
+			Workdir:       dir,     // the only writable path; git clones here
+			ReadOnlyPaths: roPaths, // the connector askpass helper + token file, when authenticating
+			EgressPolicy:  egress,
+			HostNetwork:   hostNet,
 		})
 		if rerr != nil {
 			_ = cleanup()
@@ -401,7 +511,7 @@ func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit
 		_ = cleanup()
 		return nil, err
 	}
-	base, mergeBase := a.resolveComparison(ctx, dir, url, gitEnv, commit, ref, baseRef, baseCommit)
+	base, mergeBase := a.resolveComparison(ctx, dir, url, gitEnv, roPaths, commit, ref, baseRef, baseCommit)
 	lockfiles, localModules, unresolved, err := inspectWorkspace(dir, a.maxWorkspaceBytes)
 	if err != nil {
 		_ = cleanup()
@@ -412,7 +522,7 @@ func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit
 
 // resolveComparison is deliberately best-effort: an unavailable base never turns a
 // successful source scan into a failure. Git refs were validated before acquisition.
-func (a *Acquirer) resolveComparison(ctx context.Context, dir, url string, gitEnv []string, head, headRef, baseRef, baseCommit string) (string, string) {
+func (a *Acquirer) resolveComparison(ctx context.Context, dir, url string, gitEnv, roPaths []string, head, headRef, baseRef, baseCommit string) (string, string) {
 	candidate := strings.TrimSpace(baseCommit)
 	if candidate == "" {
 		candidate = strings.TrimSpace(baseRef)
@@ -423,10 +533,10 @@ func (a *Acquirer) resolveComparison(ctx context.Context, dir, url string, gitEn
 	// A depth-one clone does not have the head's parents. Fetch the selected
 	// refs into private local names: a plain fetch updates only FETCH_HEAD, which
 	// cannot be resolved reliably after fetching another ref.
-	if headRef != "" && !a.gitFetch(ctx, dir, url, gitEnv, headRef, "refs/synapse-comparison/head") {
+	if headRef != "" && !a.gitFetch(ctx, dir, url, gitEnv, roPaths, headRef, "refs/synapse-comparison/head") {
 		return "", ""
 	}
-	if baseRef != "" && !a.gitFetch(ctx, dir, url, gitEnv, baseRef, "refs/synapse-comparison/base") {
+	if baseRef != "" && !a.gitFetch(ctx, dir, url, gitEnv, roPaths, baseRef, "refs/synapse-comparison/base") {
 		return "", ""
 	}
 	if baseRef != "" && baseCommit == "" {
@@ -443,15 +553,19 @@ func (a *Acquirer) resolveComparison(ctx context.Context, dir, url string, gitEn
 	return base, mergeBase
 }
 
-func (a *Acquirer) gitFetch(ctx context.Context, dir, url string, gitEnv []string, ref, destination string) bool {
-	args := []string{"fetch", "--depth", strconv.Itoa(a.comparisonDepth), "--no-tags", "origin", ref + ":" + destination}
+func (a *Acquirer) gitFetch(ctx context.Context, dir, url string, gitEnv, roPaths []string, ref, destination string) bool {
+	// The comparison fetch is the other networked git op on a possibly-authenticated origin, so it carries
+	// the SAME credential hardening as the clone: no ambient credential helper may supply or persist the
+	// PAT, and no cross-host redirect may divert it.
+	args := []string{"-c", "credential.helper=", "-c", "http.followRedirects=false",
+		"fetch", "--depth", strconv.Itoa(a.comparisonDepth), "--no-tags", "origin", ref + ":" + destination}
 	if a.sandbox != nil {
 		host, err := gitHost(url)
 		if err != nil {
 			return false
 		}
 		egress, hostNet := a.sandboxNet([]string{host})
-		res, err := a.sandbox.Run(ctx, ports.ToolSpec{Name: "git", Args: args, Env: gitEnv, Workdir: dir, EgressPolicy: egress, HostNetwork: hostNet})
+		res, err := a.sandbox.Run(ctx, ports.ToolSpec{Name: "git", Args: args, Env: gitEnv, Workdir: dir, ReadOnlyPaths: roPaths, EgressPolicy: egress, HostNetwork: hostNet})
 		return err == nil && res.ExitCode == 0
 	}
 	cmd := exec.CommandContext(ctx, "git", args...)

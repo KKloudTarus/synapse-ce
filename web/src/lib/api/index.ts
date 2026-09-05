@@ -5,6 +5,7 @@ export { ApiError, setToken, setCSRFToken, setUnauthorizedHandler, discoverSessi
 export { type ReportType, type ReportBuildOptions } from './evidence'
 export { type ReconLogEvent, streamReconLogs } from './recon'
 export { type AgentStreamEvent, streamAgentSession } from './agent'
+export { type Connector, type ConnectorCreate, type ConnectorProvider } from './connectors'
 
 import { authApi, teamApi } from './auth'
 import { auditApi } from './audit'
@@ -24,6 +25,7 @@ import { vulnerabilityApi } from './vulnerability'
 import { aiTriageApi } from './ai-triage'
 import { dashboardApi } from './dashboard'
 import { capabilitiesApi } from './capabilities'
+import { connectorsApi } from './connectors'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -55,4 +57,5 @@ export const api = {
   ...aiTriageApi,
   ...dashboardApi,
   ...capabilitiesApi,
+  ...connectorsApi,
 }

@@ -82,6 +82,7 @@ type Router struct {
 	offensivePolicy        *offensivepolicy.Register  // optional; nil ⇒ the policy register route is not registered
 	responses              responseService            // optional; nil ⇒ governed defensive-response routes are not registered (#425)
 	responseIDs            ports.IDGenerator          // set with responses; mints the server-authoritative action id
+	connectors             connectorService           // optional; nil ⇒ source-control connector routes are not registered
 	cspm                   *cspm.Service              // optional; nil ⇒ CSPM routes are not registered
 	businessAssets         businessAssetService       // optional; nil ⇒ business-level Asset routes are not registered
 	attackPaths            attackPathService          // optional; nil ⇒ attack-path routes are not registered
@@ -567,6 +568,14 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/blueteam/engagements/{id}/response/apply", rt.authz(userdom.PermOperate, rt.applyResponse))
 		mux.HandleFunc("POST /api/v1/blueteam/response/{id}/revert", rt.authz(userdom.PermOperate, rt.revertResponse))
 		mux.HandleFunc("GET /api/v1/blueteam/response", rt.authz(userdom.PermView, rt.listResponses))
+	}
+	if rt.connectors != nil {
+		// Source-control connectors: tenant-scoped git-host + PAT bindings that let a server-initiated
+		// scan clone a PRIVATE repository. PermAdminister to manage; the token is write-only (sealed on
+		// create, never returned), and the acquirer resolves it by host at clone time.
+		mux.HandleFunc("GET /api/v1/connectors", rt.authz(userdom.PermAdminister, rt.listConnectors))
+		mux.HandleFunc("POST /api/v1/connectors", rt.authz(userdom.PermAdminister, rt.createConnector))
+		mux.HandleFunc("DELETE /api/v1/connectors/{id}", rt.authz(userdom.PermAdminister, rt.deleteConnector))
 	}
 	mux.HandleFunc("GET /api/v1/engagements", rt.authz(userdom.PermView, rt.listEngagements))
 	mux.HandleFunc("GET /api/v1/engagements/{id}", rt.authz(userdom.PermView, rt.getEngagement))

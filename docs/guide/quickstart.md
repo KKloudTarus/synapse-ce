@@ -110,8 +110,13 @@ generates the SBOM and runs detection.
 Two constraints are enforced server-side, so it is worth knowing them before the first attempt:
 
 - A local target must be an **absolute path** that the API process can read. A relative path is rejected.
-- Container image and archive targets are **not yet supported on this endpoint**. To scan an image today,
-  use the CLI: `synapse-cli scan alpine:3.19 --image`.
+- A **container image** target is supported: set the kind to `image` and give a reference such as
+  `docker.io/library/alpine:3.19`. The server pulls it daemonlessly (crane) and reports its OS and
+  language package CVEs. The image must be in the engagement scope. The CLI form is
+  `synapse-cli scan alpine:3.19 --image`.
+- An **archive** is not scanned by reference on this endpoint; upload it through the source-upload flow.
+- A **private git repository** is cloned when its host has a source-control connector configured in
+  Settings (a personal access token, sealed server-side). Without a connector, only public repos clone.
 
 **Import a client SBOM.** If the client handed you a CycloneDX SBOM, use Import SBOM on the
 engagement. That makes their inventory a first-class, attested artifact. To then compute

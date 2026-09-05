@@ -170,6 +170,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sbomcrosscheckjudge"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/scmconnectoruc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/srcreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/taintscan"
@@ -379,8 +380,9 @@ func main() {
 	var auditLog ports.IdempotentAuditLogger
 	var timestampStore ports.TimestampStore
 	var credVault ports.CredentialVault
-	var reconQueue ports.JobQueue         // durable queue for recon-via-worker (Postgres only)
-	var vulnerabilityQueue ports.JobQueue // continuous vulnerability sync queue
+	var scmConnectorStore ports.SCMConnectorStore // tenant-scoped source-control connectors (private-repo clone auth)
+	var reconQueue ports.JobQueue                 // durable queue for recon-via-worker (Postgres only)
+	var vulnerabilityQueue ports.JobQueue         // continuous vulnerability sync queue
 	var vulnerabilitySourceStore ports.VulnerabilitySourceStore
 	var vulnerabilityRunStore ports.SyncRunStore
 	var vulnerabilityMaterializer ports.AdvisoryMaterializer
@@ -565,6 +567,12 @@ func main() {
 		qualityGateMutator = postgres.NewQualityGateMutator(pool)
 		timestampStore = postgres.NewTimestampStore(pool)
 		credVault = vault.NewPostgresVault(pool, vaultCipher)
+		scmRepo, scmErr := postgres.NewSCMConnectorRepository(pool, vaultCipher)
+		if scmErr != nil {
+			log.Error("source-control connector store init failed", "err", scmErr)
+			os.Exit(1)
+		}
+		scmConnectorStore = scmRepo
 		reconQueue = postgres.NewJobQueue(pool, ids)
 		vulnerabilityQueue = reconQueue
 		vulnerabilitySourceStore = postgres.NewVulnerabilitySourceStore(pool)
@@ -663,6 +671,7 @@ func main() {
 		qualityGateMutator = memory.NewQualityGateMutator(qualityGateStore.(*memory.QualityGateStore), projectRepo.(*memory.ProjectRepository), auditLog)
 		timestampStore = memory.NewTimestampStore()
 		credVault = vault.NewMemoryVault(vaultCipher, nil)
+		scmConnectorStore = memory.NewSCMConnectorStore()
 		vulnerabilityQueue = memory.NewJobQueue(ids, clock.Now)
 		vulnerabilitySourceStore = memory.NewVulnerabilitySourceStore()
 		vulnerabilityRunStore = memory.NewSyncRunStore(ids, clock.Now, vulnerabilityQueue)
@@ -835,7 +844,7 @@ func main() {
 		detectionSources = []ports.DetectionSource{dispatchOnly}
 		log.Info("SCA execution adapters omitted from dispatch-only API")
 	} else {
-		execution, eerr := scacompose.BuildExecution(cfg, log, advisoryStore)
+		execution, eerr := scacompose.BuildExecution(cfg, log, advisoryStore, scmConnectorStore)
 		if eerr != nil {
 			log.Error(eerr.Error())
 			os.Exit(1)
@@ -1419,6 +1428,17 @@ func main() {
 	}
 	log.Info("immutable project source capture ENABLED", "retention", cfg.ProjectSourceRetention)
 	router.SetProjects(projectService)
+	// Source-control connectors: tenant-scoped git-host + PAT bindings so a server-initiated scan can
+	// clone a PRIVATE repository. The same store is the acquirer's clone-time credential resolver.
+	if scmConnectorStore != nil {
+		connectorSvc, connErr := scmconnectoruc.NewService(scmConnectorStore, ids, clock)
+		if connErr != nil {
+			log.Error("source-control connector service init failed", "err", connErr)
+			os.Exit(1)
+		}
+		router.SetConnectors(connectorSvc)
+		log.Info("source-control connectors ENABLED (manage at /api/v1/connectors; private-repo clone auth)")
+	}
 	router.SetQualityGates(qualityGateService)
 	router.SetQualityProfiles(qualityProfileService)
 	if memoryAssets, ok := assetStore.(*memory.AssetStore); ok {

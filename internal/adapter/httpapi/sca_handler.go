@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
+
+// scanImageRefRE bounds a container image reference to safe characters at the HTTP edge, mirroring
+// the acquirer's authoritative check (no shell metacharacters, no leading '-'). The acquirer still
+// validates and pulls the reference daemonlessly (crane); this is a fast-fail 400 for garbage.
+var scanImageRefRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]*$`)
 
 type scaScanRequest struct {
 	EngagementID string `json:"engagement_id"`
@@ -55,8 +61,15 @@ func validateScanTarget(kind, target string) string {
 		if target != "" {
 			return "uploaded source target is managed by the server"
 		}
-	case "archive", "image":
-		return "archive/image targets are not supported yet"
+	case ports.TargetImage:
+		// Container-image scanning: the acquirer pulls the reference daemonlessly (crane) into an
+		// OCI layout and catalogs its OS + language packages, so the server accepts an image ref here.
+		if !scanImageRefRE.MatchString(target) {
+			return "image target must be a valid container image reference"
+		}
+	case "archive":
+		// A remote archive is not fetched by the server; upload it via the source-upload route instead.
+		return "archive targets are uploaded via the source-upload route, not scanned by reference"
 	case "", "local":
 		if !filepath.IsAbs(filepath.Clean(target)) {
 			return "local target must be an absolute path"
