@@ -621,10 +621,15 @@ func defaultRules() []rule {
 		{
 			id: "generic-secret", category: "Generic", title: "Hardcoded secret", severity: shared.SeverityMedium,
 			keywords: []string{"secret", "token", "passwd", "password", "api_key", "apikey", "apiKey", "access_key", "SECRET", "TOKEN", "API_KEY"},
-			re:       regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)\]|(?:api[_-]?key|secret|token|passwd|password|access[_-]?key))\$?\s*(?:as\s+[A-Za-z_][A-Za-z0-9_.]*)?\s*["']?\s*[:=]\s*["']([A-Za-z0-9/+=_\-]{16,})["']`),
-			group:    1,
-			minEnt:   3.5,
-			allow:    compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
+			// The key had to be the bare word or a VB [bracketed] keyword, which missed the two
+			// shapes real config files use: camelCase (`cookieSecret: "\u2026"`) and a bracketed
+			// config key (`app.config['SECRET_KEY_HMAC_2'] = "\u2026"`). The keyword may now carry
+			// an identifier suffix and be wrapped in brackets and quotes. The value guards
+			// (16 characters, entropy 3.5, allow-list) are untouched, so precision is unchanged.
+			re:     regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[\s*["']?)?(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_]{0,32}["']?\s*\]?\$?\s*(?:as\s+[A-Za-z_][A-Za-z0-9_.]*)?\s*["']?\s*\]?\s*[:=]\s*["']([A-Za-z0-9/+=_\-]{16,})["']`),
+			group:  1,
+			minEnt: 3.5,
+			allow:  compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
 		},
 	}
 }

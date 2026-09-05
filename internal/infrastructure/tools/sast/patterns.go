@@ -73,6 +73,7 @@ var scalaExts = map[string]bool{".scala": true, ".sc": true}
 var rubyExts = map[string]bool{".rb": true, ".rake": true, ".ru": true, ".gemspec": true, ".erb": true}
 var vbExts = map[string]bool{".vb": true}
 var phpExts = map[string]bool{".php": true, ".phtml": true, ".inc": true, ".php5": true, ".module": true, ".phar": true}
+
 // jsxExts gate rules that only make sense in JSX/TSX markup. A plain .js file may contain a
 // `class = "..."` assignment that has nothing to do with a React prop.
 var jsxExts = map[string]bool{".jsx": true, ".tsx": true}
@@ -242,7 +243,12 @@ func builtinRules() []rule {
 		{
 			id: "hardcoded-credential", cwe: "CWE-798", severity: shared.SeverityHigh, title: "Possible hardcoded credential",
 			desc: "A credential appears to be assigned a literal value. Load secrets from the environment or a vault instead of embedding them.",
-			re:     regexp.MustCompile(`(?i)\b(password|passwd|pwd|api[_-]?key|secret|access[_-]?token|auth[_-]?token)\b\s*[:=]\s*["'][^"'\s]{8,}["']`),
+			// The key had to be a WHOLE word with `\b`, which missed the two shapes real config
+			// uses: camelCase (`cookieSecret: "\u2026"`) and a bracketed config key
+			// (`app.config['SECRET_KEY_HMAC'] = '\u2026'`). The keyword may now carry an identifier
+			// suffix and sit inside brackets/quotes, and the value minimum drops to 6 so a literal
+			// `'secret'` counts. The placeholder skip list is what keeps the rule high-signal.
+			re:     regexp.MustCompile(`(?i)(?:password|passwd|pwd|api[_-]?key|secret|access[_-]?token|auth[_-]?token)[A-Za-z0-9_]{0,32}["']?\s*\]?\s*[:=]\s*["'][^"'\s]{6,}["']`),
 			skipFn: skipCommentOrPlaceholderSecret,
 		},
 		{
