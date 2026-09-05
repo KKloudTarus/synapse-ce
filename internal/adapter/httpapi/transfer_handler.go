@@ -51,7 +51,7 @@ func (rt *Router) importBundle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, eng)
+	writeJSON(w, http.StatusCreated, toEngagementView(eng))
 }
 
 // listAudit returns the most recent append-only audit entries (audit trail).

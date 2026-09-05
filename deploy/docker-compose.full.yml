@@ -1,23 +1,41 @@
 # Full Synapse stack: API server + Postgres + MinIO (+ bucket init), all env wired.
 #
-#   docker compose -f deploy/docker-compose.full.yml up -d --build
+# It needs an env file with the database credentials and DSNs; README.md and
+# docs/guide/deployment.md both generate one at deploy/.env.local.
+#
+#   docker compose --env-file deploy/.env.local -f deploy/docker-compose.full.yml up -d --build --wait
 #   curl localhost:8080/healthz   # liveness
 #   curl localhost:8080/readyz    # dependency readiness
+#   open http://localhost:5173    # dashboard
 #   # authenticated call:
 #   curl -H "Authorization: Bearer $SYNAPSE_API_TOKEN" localhost:8080/api/...
 #
 # Full JVM SCA from a container (Maven/Gradle resolvers + reachability run UNSANDBOXED = trusted-local,
 # so use the CLI, not the API server, which fail-closes those without bubblewrap):
-#   docker compose -f deploy/docker-compose.full.yml run --rm -v "$PWD:/scan:ro" synapse-api \
-#       /usr/local/bin/synapse-cli scan /scan --mode full
+#   docker compose --env-file deploy/.env.local -f deploy/docker-compose.full.yml \
+#       run --rm -v "$PWD:/scan:ro" synapse-api /usr/local/bin/synapse-cli scan /scan --mode full
 #
 # SANDBOX: this stack runs SANDBOX-OFF (dev) – a plain container can't run bubblewrap. Untrusted-target
 # recon + the API-server Maven/Gradle resolvers require a Linux host with bubblewrap (+ CAP_NET_ADMIN for
 # egress scoping) and a privileged/user-ns container; that's a separate hardened deployment.
 #
-# Credentials below use local-dev defaults where safe. Set DB_ADMIN_PASSWORD and DB_APP_PASSWORD
-# via the shell or an .env file next to this compose; the admin owns migrations and the API
-# connects as a non-superuser app role.
+# Credentials below use local-dev defaults where safe. DB_ADMIN_PASSWORD, DB_APP_PASSWORD, and both
+# DSNs have no default and must be supplied: this stack serves the API, and a predictable database
+# password in a committed file is the kind of default that survives into something exposed. Put them
+# in an env file and pass it explicitly, because Compose does not read deploy/.env.local merely
+# because this file lives in deploy/ (see README.md, or docs/guide/deployment.md):
+#
+#   docker compose --env-file deploy/.env.local -f deploy/docker-compose.full.yml up -d --build --wait
+#
+# The admin role owns migrations; the API connects as a non-superuser app role, because the API
+# refuses to serve under a role that bypasses row level security.
+#
+# PROJECT NAME. Compose otherwise derives the project name from the directory holding this file, so
+# this stack and deploy/docker-compose.yml would both be project "deploy", sharing the volume
+# "deploy_pgdata" while creating different superusers. Running the dev stack and then this one
+# failed in postgres-init with `password authentication failed for user "synapse_admin"`. The
+# explicit name pins this stack to its own project, containers, network, and volumes.
+name: synapse-full
 
 services:
   postgres:
@@ -190,29 +208,31 @@ services:
       SYNAPSE_FP_TRIAGE_MODEL: "${SYNAPSE_FP_TRIAGE_MODEL:-}"
       SYNAPSE_VERIFIER_MODEL: "${SYNAPSE_VERIFIER_MODEL:-}"         # distinct family enables consensus
 
-  # Vite dev server for the React/Tailwind web UI. Vite proxies /api + /healthz
-  # to synapse-api:8080 via the VITE_API_PROXY_TARGET env var (see Dockerfile.web),
-  # so the SPA on :5173 talks to the same backend the CLI uses.
+  # Built dashboard served by nginx, with /api, /healthz, and /readyz reverse-proxied to
+  # synapse-api. The Kubernetes ingress performs that routing in production; Compose has no
+  # ingress, so the `compose` image target carries the equivalent server block.
+  #
+  # This is deliberately NOT Dockerfile.web's `dev` target. That target bind-mounts ../web over
+  # /app, which shadows the node_modules installed at build time; pnpm then re-resolves them at
+  # container start as the unprivileged `node` user, downloads its own copy of pnpm through
+  # corepack because the runtime user's corepack cache is empty, and dies with
+  # `[EACCES] EACCES: permission denied, open '/app/_tmp_...'`. Hot reload belongs to a native
+  # `make dev`, where the source tree is already writable; this stack's job is to run the product.
   web:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.web
-      target: dev
+      target: compose
     depends_on:
       synapse-api:
         condition: service_healthy
     ports:
-      - "5173:5173"
-    environment:
-      # In-network API URL – the Vite dev server proxies /api + /healthz to this.
-      VITE_API_PROXY_TARGET: "http://synapse-api:8080"
-      # Hit the real API through the proxy instead of the in-browser MSW mocks.
-      VITE_ENABLE_MSW: "false"
-    volumes:
-      # Hot reload: mount the source in, leave node_modules from the image intact.
-      - ../web:/app
-      - /app/node_modules
-    # No healthcheck – Vite's dev server is long-lived; an HTTP probe is enough.
+      - "5173:8080"   # nginx-unprivileged listens on 8080; the dashboard URL stays :5173
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
 
 volumes:
   pgdata:

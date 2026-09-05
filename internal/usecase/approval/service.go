@@ -30,6 +30,17 @@ type Service struct {
 	mode    agent.ApprovalMode
 	timeout time.Duration
 	resume  ResumeFunc // optional; set via SetResumeEnqueuer to re-drive on timeout
+	// transactions makes a decision and its audit record one unit. Optional: the in-memory and
+	// file stores have no transactions, and the Postgres composition roots set it.
+	transactions ports.TenantTransactionRunner
+}
+
+// SetTransactionRunner makes Decide atomic. Without it the decision commits first and the audit
+// append is a separate transaction, so an audit failure returns an error to an operator whose
+// approval has already taken effect: the interface reports failure, the agent proceeds, and the
+// retry answers "already decided".
+func (s *Service) SetTransactionRunner(transactions ports.TenantTransactionRunner) {
+	s.transactions = transactions
 }
 
 // SetResumeEnqueuer installs the callback used to re-drive a session after a timeout deny, so
@@ -64,10 +75,14 @@ func (s *Service) Request(ctx context.Context, p agent.ProposedAction) (agent.Ap
 		if err := s.store.Decide(ctx, dec); err != nil {
 			return agent.ApprovalDecision{}, fmt.Errorf("record auto-approval: %w", err)
 		}
-		s.record(ctx, p, "agent.approval.auto", dec.DecidedBy)
+		if err := s.record(ctx, p, "agent.approval.auto", dec.DecidedBy); err != nil {
+			return agent.ApprovalDecision{}, fmt.Errorf("record auto-approval decision: %w", err)
+		}
 		return dec, nil
 	}
-	s.record(ctx, p, "agent.approval.requested", p.SessionID.String())
+	if err := s.record(ctx, p, "agent.approval.requested", p.SessionID.String()); err != nil {
+		return agent.ApprovalDecision{}, fmt.Errorf("record approval request: %w", err)
+	}
 	_, dec, err := s.store.Get(ctx, p.ID)
 	return dec, err // pending
 }
@@ -83,11 +98,32 @@ func (s *Service) Decide(ctx context.Context, human string, actionID shared.ID, 
 		state = agent.ApprovalDenied
 	}
 	dec := agent.ApprovalDecision{ActionID: actionID, State: state, DecidedBy: human, Reason: reason, DecidedAt: s.clock.Now()}
+	if s.transactions == nil {
+		return s.decide(ctx, dec, human, state)
+	}
+	tenantID, _ := shared.TenantFrom(ctx)
+	var out agent.ApprovalDecision
+	if err := s.transactions.Run(ctx, tenantID, func(txCtx context.Context) error {
+		var decideErr error
+		out, decideErr = s.decide(txCtx, dec, human, state)
+		return decideErr
+	}); err != nil {
+		return agent.ApprovalDecision{}, err
+	}
+	return out, nil
+}
+
+// decide writes the decision and its audit record. Both statements land on the caller's bound
+// transaction when there is one, so a failed audit append undoes the decision instead of leaving a
+// committed approval the operator was told had failed.
+func (s *Service) decide(ctx context.Context, dec agent.ApprovalDecision, human string, state agent.ApprovalState) (agent.ApprovalDecision, error) {
 	if err := s.store.Decide(ctx, dec); err != nil {
 		return agent.ApprovalDecision{}, err // ErrConflict if already decided
 	}
-	if a, _, err := s.store.Get(ctx, actionID); err == nil {
-		s.record(ctx, a, "agent.approval."+string(state), human)
+	if a, _, err := s.store.Get(ctx, dec.ActionID); err == nil {
+		if err := s.record(ctx, a, "agent.approval."+string(state), human); err != nil {
+			return agent.ApprovalDecision{}, fmt.Errorf("record approval decision: %w", err)
+		}
 	}
 	return dec, nil
 }
@@ -110,7 +146,9 @@ func (s *Service) SweepExpired(ctx context.Context, engagementID shared.ID) (int
 		}
 		dec := agent.ApprovalDecision{ActionID: a.ID, State: agent.ApprovalTimeout, Reason: "approval timed out (fail-closed)", DecidedAt: now}
 		if err := s.store.Decide(ctx, dec); err == nil {
-			s.record(ctx, a, "agent.approval.timeout", "system")
+			if rerr := s.record(ctx, a, "agent.approval.timeout", "system"); rerr != nil {
+				return n, fmt.Errorf("record approval timeout: %w", rerr)
+			}
 			n++
 			// Re-drive the suspended session so it sees the denial and fails fast (no hang).
 			// If the re-enqueue fails the action is already durably timeout-denied (safe); the
@@ -128,17 +166,26 @@ func (s *Service) SweepExpired(ctx context.Context, engagementID shared.ID) (int
 
 // SweepAllExpired sweeps every engagement that currently has a pending approval (the prod
 // timeout sweeper's fan-out). Returns the total expired.
+//
+// The sweeper runs on a background context with no tenant, so each scope's tenant is bound before
+// its engagement is swept. Everything downstream of that binding (Pending, Decide, the record
+// audit and the resume enqueue) then runs inside one tenant, which is what lets the durable store
+// reach the RLS-protected approval queue at all.
 func (s *Service) SweepAllExpired(ctx context.Context) (int, error) {
 	if s.timeout <= 0 {
 		return 0, nil
 	}
-	engs, err := s.store.EngagementsWithPending(ctx)
+	scopes, err := s.store.EngagementsWithPending(ctx)
 	if err != nil {
 		return 0, err
 	}
 	total := 0
-	for _, e := range engs {
-		n, err := s.SweepExpired(ctx, e)
+	for _, scope := range scopes {
+		scopeCtx := ctx
+		if !scope.TenantID.IsZero() {
+			scopeCtx = shared.WithTenant(ctx, scope.TenantID)
+		}
+		n, err := s.SweepExpired(scopeCtx, scope.EngagementID)
 		if err != nil {
 			return total, err
 		}
@@ -165,8 +212,11 @@ func (s *Service) RunSweeper(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func (s *Service) record(ctx context.Context, p agent.ProposedAction, action, actor string) {
-	_ = s.audit.Record(ctx, ports.AuditEntry{
+// record appends the approval decision to the audit chain. An approval decision is the
+// human gate in front of an agent action, so the decision and its record are one unit: the
+// error is returned rather than dropped, and every caller propagates it.
+func (s *Service) record(ctx context.Context, p agent.ProposedAction, action, actor string) error {
+	return s.audit.Record(ctx, ports.AuditEntry{
 		Actor:  actor,
 		Action: action,
 		Target: p.Target.Value,

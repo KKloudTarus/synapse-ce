@@ -23,6 +23,7 @@ import { assetsApi } from './assets'
 import { vulnerabilityApi } from './vulnerability'
 import { aiTriageApi } from './ai-triage'
 import { dashboardApi } from './dashboard'
+import { capabilitiesApi } from './capabilities'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -53,4 +54,5 @@ export const api = {
   ...vulnerabilityApi,
   ...aiTriageApi,
   ...dashboardApi,
+  ...capabilitiesApi,
 }

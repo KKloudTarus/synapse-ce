@@ -15,7 +15,7 @@ import (
 func TestPostgresIdentityStore(t *testing.T) {
 	dsn := testDSN(t)
 	base := context.Background()
-	if err := Migrate(base, dsn); err != nil {
+	if err := MigrateLocked(base, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(base, dsn)

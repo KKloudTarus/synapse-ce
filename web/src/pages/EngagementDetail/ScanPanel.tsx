@@ -8,6 +8,7 @@ import { api } from '../../lib/api'
 import { StatusPill } from '../Engagements'
 import { fmtWindow } from './VulnsTab'
 import type { Engagement, ImportedSBOMMetadata, ScanJob, ScanMode, ScanResult, UploadedSourcePackage } from '../../lib/types'
+import { ARCHIVED_REASON, isReadOnly } from './readOnly'
 import { EvidenceBadge, ScopeBadge } from './components/ScanBadges'
 import { ScanConfigModal, detectKind } from './components/ScanConfigModal'
 import { ScanDebugTimeline } from './components/ScanDebugTimeline'
@@ -63,6 +64,8 @@ export function ScanPanel({
   )
 
   const running = job?.status === 'running'
+  // Archived is terminal: no scan may start against it.
+  const archived = isReadOnly(eng)
   const debugEvents = job?.debugEvents?.length ? job.debugEvents : (summary?.debugEvents ?? [])
   const usingImportedSBOM = Boolean(importedSBOM) && !usingUploadedSource
 
@@ -218,16 +221,19 @@ export function ScanPanel({
             <span>Scan settings</span>
           </Button>
 
-          <Button
-            onClick={run}
-            loading={running}
-            disabled={running || outsideWindow}
-            variant="primary"
-            className="h-10 px-6 text-sm font-bold rounded-xl shadow-xs transition-transform active:scale-[0.98]"
-          >
-            <Play className="size-4" />
-            <span>{running ? 'Scanning…' : 'Run scan'}</span>
-          </Button>
+          <span title={archived ? ARCHIVED_REASON : undefined}>
+            <Button
+              onClick={run}
+              loading={running}
+              disabled={running || outsideWindow || archived}
+              aria-describedby={archived ? 'engagement-archived-note' : undefined}
+              variant="primary"
+              className="h-10 px-6 text-sm font-bold rounded-xl shadow-xs transition-transform active:scale-[0.98]"
+            >
+              <Play className="size-4" />
+              <span>{running ? 'Scanning…' : 'Run scan'}</span>
+            </Button>
+          </span>
         </div>
       </div>
 
@@ -244,7 +250,17 @@ export function ScanPanel({
         </div>
       )}
 
-      {outsideWindow && (
+      {archived && (
+        <div
+          id="engagement-archived-note"
+          className="flex items-start gap-2 rounded-lg border border-secondary bg-secondary p-3 text-xs text-tertiary"
+        >
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-fg-quaternary" />
+          <span>{ARCHIVED_REASON} Scans, new findings and triage changes are disabled.</span>
+        </div>
+      )}
+
+      {!archived && outsideWindow && (
         <div className="flex items-start gap-2 rounded-lg border border-error bg-error-primary p-3 text-xs text-error-primary">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-fg-error-primary" />
           <span>
@@ -268,8 +284,8 @@ export function ScanPanel({
         </div>
       )}
 
-      {/* Horizontal Pipeline Journey Track (kept in place) */}
-      <ScanDebugTimeline events={debugEvents} running={running} />
+      {/* Horizontal Pipeline Journey Track — collapsed by default once a scan has finished. */}
+      <ScanDebugTimeline events={debugEvents} running={running} scanStatus={job?.status} />
 
       {error && (
         <div>

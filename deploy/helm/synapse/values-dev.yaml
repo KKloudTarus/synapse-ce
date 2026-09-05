@@ -1,0 +1,60 @@
+# Development overlay for the Synapse chart.
+#
+# The chart's defaults are fail-closed: values.yaml ships empty egress CIDR lists so that
+# `helm lint` and `helm template` refuse a render that would silently allow unrestricted
+# runtime egress. That refusal is correct for production and stays as it is. This file is the
+# smallest set of overrides that turns the same chart into a renderable, installable
+# development deployment, so a first-time reader can inspect the manifests before owning a
+# production values file.
+#
+#   helm lint --strict deploy/helm/synapse -f deploy/helm/synapse/values-dev.yaml
+#   helm template synapse deploy/helm/synapse -f deploy/helm/synapse/values-dev.yaml --kube-version 1.29.0
+#
+# What this file does NOT do:
+#   - relax the schema (digest-pinned images, TLS ingress, sandbox on, verify-full DSNs all hold),
+#   - create Secret data (the chart never renders Secrets; see README.md "First install"),
+#   - reduce replica counts (the schema floor of two API and two web replicas is deliberate).
+#
+# The image digests inherited from values.yaml are all-zero placeholders. They satisfy the
+# schema so the chart renders, and they will not pull. Supply the real digests on install:
+#   --set image.digest=sha256:<api digest> --set web.image.digest=sha256:<web digest>
+
+api:
+  grantAuthority:
+    # The machine-only grant-authority listener needs an AWS Load Balancer Controller and a
+    # dedicated private NLB, so it stays off in development. values.schema.json still requires a
+    # non-empty CIDR list for the field; this TEST-NET-1 block (RFC 5737) is an unused placeholder
+    # that reads as obviously non-routable. Replace it with the real NLB subnet CIDRs before
+    # setting `enabled: true`.
+    enabled: false
+    networkPolicySourceCIDRs: ["192.0.2.0/24"]
+
+networkPolicy:
+  # A CIDR-based NetworkPolicy cannot express FQDNs, so every dependency has to be named as the
+  # address range it actually resolves to. In a single-node development cluster (kind, minikube,
+  # k3d) an in-cluster PostgreSQL and an in-cluster S3-compatible store both live in the pod
+  # CIDR, which defaults to 10.244.0.0/16 on kind and k3d. Change these to the real ranges for
+  # any other cluster: an over-wide range here is a real weakening of the egress boundary.
+  runtimeEgress:
+    database: ["10.244.0.0/16"]
+    objectStore: ["10.244.0.0/16"]
+    # Empty is valid: the OIDC egress rule is only rendered when OIDC is in use.
+    oidc: []
+  # Recon and governed acquisition still may not reach the internet. Turning this on requires an
+  # FQDN-aware CNI or an egress gateway with an authorized-target allowlist.
+  allowInternetEgress: false
+
+ingress:
+  # localtest.me and its subdomains resolve to 127.0.0.1 from any public resolver, so a local
+  # ingress controller works without an /etc/hosts entry. `ingress.tls.secretName` must still
+  # name a TLS Secret that exists in the namespace; a self-signed one is fine here.
+  host: synapse.localtest.me
+  tls:
+    secretName: synapse-tls
+
+objectStore:
+  # Point at the in-cluster S3-compatible service. useSSL is pinned to true by the schema, so the
+  # development object store has to terminate TLS (a self-signed certificate is acceptable).
+  endpoint: minio.synapse.svc.cluster.local:443
+  bucket: synapse-evidence
+  useSSL: true

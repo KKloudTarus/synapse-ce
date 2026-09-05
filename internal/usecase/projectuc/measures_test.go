@@ -400,7 +400,7 @@ func TestGetMeasures_Postgres(t *testing.T) {
 
 	t.Logf("RUN: PostgreSQL integration test")
 	ctx := context.Background()
-	if err := postgres.Migrate(ctx, dsn); err != nil {
+	if err := postgres.MigrateLocked(ctx, dsn); err != nil {
 		t.Logf("FAILED: %v", err)
 		t.Fatal(err)
 	}

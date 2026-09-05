@@ -50,6 +50,24 @@ func testTelemetrySigner(t *testing.T, agent string) fleetclient.TelemetrySigner
 	return fleetclient.TelemetrySigner{PrivateKey: private, Key: key}
 }
 
+// testTelemetrySpoolItem builds an enqueue item whose payload is a real telemetry envelope with
+// the envelope content type. The shipper refuses to ship a WAL record of any other content type,
+// so a fixture that writes raw JSON never reaches the behaviour under test.
+func testTelemetrySpoolItem(agent string, sequence uint64, schema int) ports.SpoolItem {
+	record := testTelemetryRecord(agent, sequence, schema)
+	return ports.SpoolItem{
+		Kind:          record.Kind,
+		Priority:      record.Position.Priority,
+		EventID:       record.EventID,
+		EventClass:    record.EventClass,
+		ContentType:   record.ContentType,
+		Payload:       record.Payload,
+		ObservedAt:    record.ObservedAt,
+		MustNotShed:   record.MustNotShed,
+		SchemaVersion: record.SchemaVersion,
+	}
+}
+
 func testTelemetryRecord(agent string, sequence uint64, schema int) ports.SpoolRecord {
 	now := time.Unix(1_700_000_000+int64(sequence), 0).UTC()
 	eventID := shared.ID("event-" + strconv.FormatUint(sequence, 10))
@@ -269,12 +287,7 @@ func TestTelemetryACKedJournalFinalizesWithoutNetworkReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer durable.Close()
-	position, err := durable.Enqueue(ctx, ports.SpoolItem{
-		Kind: ports.SpoolRecordTelemetry, Priority: fleetagent.PriorityP3,
-		EventID: "event-1", EventClass: detection.ClassProcess,
-		ContentType: "application/json", Payload: []byte(`{"event":"one"}`),
-		ObservedAt: time.Now().UTC(), MustNotShed: false, SchemaVersion: 2,
-	})
+	position, err := durable.Enqueue(ctx, testTelemetrySpoolItem("agent-1", 1, 2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,12 +342,7 @@ func TestTelemetry429RetainsPendingJournalAndWAL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer durable.Close()
-	if _, err := durable.Enqueue(ctx, ports.SpoolItem{
-		Kind: ports.SpoolRecordTelemetry, Priority: fleetagent.PriorityP3,
-		EventID: "event-1", EventClass: detection.ClassProcess,
-		ContentType: "application/json", Payload: []byte(`{"event":"one"}`),
-		ObservedAt: time.Now().UTC(), MustNotShed: false, SchemaVersion: 2,
-	}); err != nil {
+	if _, err := durable.Enqueue(ctx, testTelemetrySpoolItem("agent-1", 1, 2)); err != nil {
 		t.Fatal(err)
 	}
 	signer := testTelemetrySigner(t, "agent-1")

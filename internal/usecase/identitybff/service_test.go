@@ -2,7 +2,9 @@ package identitybff
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 	"testing"
 	"time"
 
@@ -98,12 +100,18 @@ func (s *bffUsers) Create(_ context.Context, u *user.User) error {
 	return nil
 }
 func (s *bffUsers) Bootstrap(context.Context, *user.User, ports.AuditEntry) error { return nil }
-func (s *bffUsers) GetByID(_ context.Context, id shared.ID) (*user.User, error) {
-	if s.user != nil && s.user.ID == id {
+
+// GetByID mirrors the production repositories: the lookup is scoped to tenantID, so a user in
+// another tenant reads as not found.
+func (s *bffUsers) GetByID(_ context.Context, tenantID, id shared.ID) (*user.User, error) {
+	match := func(u *user.User) bool {
+		return u.ID == id && shared.TenantOrDefault(shared.ID(u.TenantID)) == shared.TenantOrDefault(tenantID)
+	}
+	if s.user != nil && match(s.user) {
 		return s.user, nil
 	}
 	for _, u := range s.created {
-		if u.ID == id {
+		if match(u) {
 			return u, nil
 		}
 	}
@@ -112,7 +120,11 @@ func (s *bffUsers) GetByID(_ context.Context, id shared.ID) (*user.User, error) 
 func (s *bffUsers) GetByAPIKeyHash(context.Context, string) (*user.User, error) {
 	return nil, shared.ErrNotFound
 }
-func (s *bffUsers) List(context.Context) ([]*user.User, error) { return nil, nil }
+func (s *bffUsers) List(context.Context, shared.ID) ([]*user.User, error) { return nil, nil }
+func (s *bffUsers) Update(_ context.Context, _ shared.ID, u *user.User) error {
+	s.upserts = append(s.upserts, u)
+	return nil
+}
 func (s *bffUsers) Upsert(_ context.Context, u *user.User) error {
 	s.upserts = append(s.upserts, u)
 	return nil
@@ -236,3 +248,37 @@ func TestCompleteRejectsAuthorizationTenantTamper(t *testing.T) {
 }
 
 func extractState(url string) string { return url[len("https://issuer.example/auth?state="):] }
+
+// TestCompleteRefusesToTouchTheBootstrapOperator pins the second write path to the users table.
+//
+// User management refuses to mutate the bootstrap principal, because its API key is the platform
+// credential the deployment's global-resource guards test for. This service writes the same table
+// through Upsert to apply a mapped group, so it has to refuse the same identity. Nothing links an
+// external identity to that id today; the guard exists so that stays true if anything ever does.
+func TestCompleteRefusesToTouchTheBootstrapOperator(t *testing.T) {
+	store := &bffStore{}
+	service, provider, users := newBFFTestServiceWithUsers(t, store, true)
+
+	// Re-link the external identity to the bootstrap principal.
+	operator, err := user.New(usersuc.BootstrapID, "tenant", "Operator (bootstrap admin)", user.RoleAdmin, "hash", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	users.user = operator
+	external, err := identity.NewExternalIdentity("external-1", "tenant", operator.ID, "https://issuer.example", "subject", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.identity = external
+
+	start, err := service.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("Complete err = %v, want forbidden", err)
+	}
+	if len(users.upserts) != 0 {
+		t.Errorf("the bootstrap principal was written: %+v", users.upserts)
+	}
+}

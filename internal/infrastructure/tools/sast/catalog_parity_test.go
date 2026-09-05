@@ -56,8 +56,8 @@ func TestCatalogParity(t *testing.T) {
 		expectedLang := ""
 
 		switch {
-		case tc.exts != nil && tc.exts[".js"]:
-			expectedLang = "JavaScript/TypeScript"
+		case tc.exts != nil && (tc.exts[".js"] || tc.exts[".jsx"]):
+			expectedLang = "JavaScript/TypeScript" // jsExts, or the JSX-only jsxExts subset
 		case tc.exts != nil && tc.exts[".py"]:
 			expectedLang = "Python"
 		case tc.exts != nil && tc.exts[".java"]:

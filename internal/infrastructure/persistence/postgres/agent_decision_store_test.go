@@ -18,7 +18,7 @@ func TestAgentDecisionStore_AppendIdempotentSeq(t *testing.T) {
 	// query can never silently escape RLS. Fixtures must therefore state the tenant they act as,
 	// exactly like the HTTP middleware and the worker do.
 	ctx = shared.WithTenant(ctx, "default")
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)

@@ -294,7 +294,9 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
             className={cn(
               'inline-flex w-fit rounded-md border px-2 py-0.5 font-mono text-xs font-semibold uppercase',
               row.severity === 'critical'
-                ? 'border-error bg-error-primary text-error-primary'
+                // The utility ramp inverts per theme and red-700 clears AA on red-50;
+      // text-error-primary (red-600) measured 4.36:1 at 12px in light mode.
+      ? 'border-utility-red-200 bg-utility-red-50 text-utility-red-700'
                 : row.severity === 'high'
                   ? 'border-utility-orange-300 bg-warning-primary text-warning-primary'
                   : 'border-secondary bg-secondary text-secondary',
@@ -423,7 +425,9 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
 export function PriorityBadge({ priority }: { priority: number }) {
   const tone =
     priority <= 1
-      ? 'border-error bg-error-primary text-error-primary'
+      // The utility ramp inverts per theme and red-700 clears AA on red-50;
+      // text-error-primary (red-600) measured 4.36:1 at 12px in light mode.
+      ? 'border-utility-red-200 bg-utility-red-50 text-utility-red-700'
       : priority === 2
         ? 'border-utility-orange-200 bg-utility-orange-50 text-utility-orange-700'
         : priority === 3
@@ -439,11 +443,11 @@ export function PriorityBadge({ priority }: { priority: number }) {
 export const SCOPE_CONFIG: Record<string, { label: string; tone: string }> = {
   production: {
     label: 'prod',
-    tone: 'text-error-primary bg-error-primary border-error',
+    tone: 'text-utility-red-700 bg-utility-red-50 border-utility-red-200',
   },
   prod: {
     label: 'prod',
-    tone: 'text-error-primary bg-error-primary border-error',
+    tone: 'text-utility-red-700 bg-utility-red-50 border-utility-red-200',
   },
   development: {
     label: 'dev',

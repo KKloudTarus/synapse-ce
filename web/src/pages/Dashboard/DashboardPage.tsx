@@ -34,6 +34,7 @@ export const DashboardPage: FC = () => {
     highRiskAssets,
     activeEngagements,
     coverageGaps,
+    fleetDisabled,
     priorityAssets,
     assessmentQueue,
     assetNames,
@@ -85,8 +86,10 @@ export const DashboardPage: FC = () => {
         <StatCard
           icon={Signal01}
           label="Coverage Gaps"
-          value={coverageGaps ?? 'N/A'}
-          tone={coverageGaps ? 'high' : 'accent'}
+          value={fleetDisabled ? 'Fleet disabled' : (coverageGaps ?? 'N/A')}
+          hint={fleetDisabled ? 'Set SYNAPSE_FLEET_ENABLED=true to measure agent coverage.' : undefined}
+          valueClassName={fleetDisabled ? 'text-lg sm:text-xl' : undefined}
+          tone={fleetDisabled ? 'muted' : coverageGaps ? 'high' : 'accent'}
         />
       </section>
 

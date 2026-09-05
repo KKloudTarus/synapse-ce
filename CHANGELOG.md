@@ -7,7 +7,109 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Security
+
+- **Global vulnerability sources now require the platform operator.** The source registry has no
+  tenant column and decides which advisories every tenant's detection reads, so mutating it needs
+  the bootstrap principal from `SYNAPSE_API_TOKEN` in addition to the administer permission. The
+  per-source `allow_private_network` switch also needs a deployment opt-in,
+  `SYNAPSE_VULNERABILITY_SOURCE_ALLOW_PRIVATE_NETWORK`, which defaults to off.
+
+- **The bootstrap operator is immutable through user management, including by itself.** Startup
+  refreshes that row from `SYNAPSE_API_TOKEN`, so a key rotated through the API authenticated only
+  until the next restart while the environment token stopped working in the meantime. Changing the
+  variable and restarting is the one path that moves the credential.
+
+- **The static analyzer no longer drops first-party code silently.** Every `.js` under `static/`,
+  `assets/` or `public/` was skipped as vendored, which is where a Flask or Django application keeps
+  its own scripts, a bare corporate copyright header read as a third-party banner, and a short file
+  holding one long constant tripped the minified probe. Both were
+  dropped with the report still saying the scan was complete. A web asset in those trees is now
+  skipped only when the file itself says third-party: a distributed-library banner, a vendor or build
+  directory in its path, or a line long enough to be build output. Files excluded by policy are
+  counted in a new `SkippedFiles` field rather than folded into `Truncated`, and the SCA scan turns
+  both into a source warning, which nothing consumed before.
+
+- **Two rules stopped matching their highest-signal shape.** `exec.Command(args[0], args[1:]...)`,
+  where the binary itself is attacker-controlled, and `w.Write([]byte(s))`, the idiomatic Go response
+  write, both fell through the bare-argument pattern because of the subscript and the conversion.
+
+- **Three cross-line false positives are closed.** `||` is logical-or everywhere but SQL and PL/SQL,
+  so `opts.sql || DEFAULT_SQL` was reported as SQL injection; the ten-line look-back reached over a
+  function boundary and attributed one function's assignment to another's sink; and
+  `redirect_to <model>`, the canonical safe Rails idiom, was reported as an open redirect.
+
+- **The bootstrap operator can no longer be seized by a tenant admin.** The bootstrap principal is
+  stored with an empty tenant, which normalizes to the default tenant, so it appeared in that
+  tenant's roster and its admins could rotate its API key and read the new plaintext from the
+  response. That key is the platform principal every global-resource guard tests for. Updating,
+  disabling and rotating the bootstrap identity are now refused for anybody but the bootstrap
+  principal itself; the credential is owned by `SYNAPSE_API_TOKEN`.
+
+- **The private-network gate now covers every egress path.** Checking it only on create and update
+  left the connection test, re-enabling a stored source, and the sync scheduler resolving a source
+  row created while the switch was on. The gate now sits in the provider registry, which is the
+  single point every caller resolves a source through.
+
+- **The last-admin guard is safe under concurrency.** It counted a tenant's other enabled admins and
+  then wrote, so two concurrent demotions each saw the other admin still enabled, both passed, and
+  the tenant was left with nobody who could administer it. The count and the write now run in one
+  transaction, the roster read takes a row lock, and an in-process mutex serializes a single replica.
+
+- **Request bodies and connection lifetimes are bounded on the human API plane.** Every mutation
+  route carries a 1 MiB ceiling, with larger explicit ceilings for the routes that accept an upload:
+  source publish, engagement and project creation, coverage upload, bundle import, SARIF, SBOM,
+  evidence and OpenVEX. A guard now reads every handler that bounds a body and fails when the
+  handler asks for more than its route allows, which is how the OpenVEX gap was found. API listeners now set a write and an idle timeout alongside the
+  existing header timeout, and the two server-sent-event handlers release the write deadline so a
+  live log stream is not cut off at the listener timeout. The Compose dashboard's nginx gains a
+  matching body ceiling and read timeout plus baseline security response headers.
+
+- **An audit entry is written on the caller's transaction.** A business write that rolls back no
+  longer leaves a committed audit row claiming it happened. The append runs inside a savepoint, so
+  a chain conflict can be retried without aborting the caller's transaction, and the assessment
+  cycle paths propagate an audit failure instead of discarding it. The VEX apply and the approval
+  decision now run inside one tenant transaction, so a document that retires many findings is
+  applied in full or not at all, and an operator is never told a decision failed while it stands.
+  `golang.org/x/image` moves to v0.45.0, clearing the one vulnerability govulncheck reported as
+  reachable.
+
+- **Database-enforced tenant isolation for the project, quality-gate and agent tables.** `projects`,
+  `project_analyses`, `project_analysis_hotspots`, `project_hotspots`, `project_hotspot_review_events`,
+  `project_issues`, `project_issue_review_events`, `quality_gates`, `quality_profiles`, `threat_models`,
+  `agent_sessions`, `agent_approvals` and `agent_plans` now run under forced Postgres row level
+  security, and every repository that touches them routes reads and writes through a tenant-bound
+  transaction while keeping an explicit `tenant_id` predicate. Two stores previously dropped the
+  tenant predicate when the caller supplied none (project analyses widened to a project-wide read,
+  approvals keyed decisions on the action id alone); both now fail closed, and an approval decision
+  or consume cannot be applied across tenants. `agent_approvals.tenant_id` and `agent_plans.tenant_id`
+  are backfilled from the owning engagement and pinned `NOT NULL`.
+
+  Operators must deploy the binaries before applying migration `0129`, which inverts this project's
+  usual migrate-then-deploy order; the migration header states the required sequence.
+
 ### Added
+
+- **Operator key revocation and role management.** `PATCH /api/v1/users/{id}` changes a name and
+  role, `POST /api/v1/users/{id}/disable` and `/enable` revoke and restore access, and
+  `POST /api/v1/users/{id}/rotate-key` issues a new API key and invalidates the previous one. Every
+  mutation is audited and requires the `administer` capability. Deleting a user is deliberately not
+  offered: an identity owns its audit, evidence, and finding attribution, so access is revoked by
+  disabling the account or rotating its key. Disabling or demoting a tenant's last enabled admin is
+  refused, so a tenant cannot lock itself out.
+
+- **Deployment capability catalog.** `GET /api/v1/capabilities` reports every optional subsystem
+  with a stable key, a human name, whether this deployment enables it, the `SYNAPSE_*` variable that
+  controls it, and the capabilities it depends on. An optional subsystem registers its routes only
+  when its switch is on, so a disabled subsystem and a broken one previously both answered `404`; a
+  client can now render "disabled" and name the switch. The route is gated at the view floor and
+  returns configuration booleans and variable names only, never a configured value.
+
+- **Navigation reflects the deployment's capabilities.** The sidebar reads
+  `GET /api/v1/capabilities` and renders a subsystem the server reports as off as an inert row
+  naming the `SYNAPSE_*` switch that turns it on, rather than a link that answers `404`. A server
+  that does not serve the route, or cannot answer it, keeps the previous behaviour of showing
+  everything.
 
 - **Project dependency graph and subtree export.** Project analyses now expose a bounded, deterministic
   dependency projection from the stored SBOM with direct/transitive relationships, reverse paths,
@@ -91,6 +193,21 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Changed
 
+- **Breaking: engagements and projects serialize in snake_case.** Both aggregates were written to
+  the wire straight from their domain structs, so they answered with Go field names (`ID`,
+  `TenantID`, `SourceBinding`, `Scope.InScope`, `Audit.CreatedAt`) while scans, analyses, findings,
+  and every newer resource answered in snake_case, and a client had to special-case per resource.
+  Engagement and project responses now go through explicit view types in the HTTP layer:
+  `id`, `tenant_id`, `name`, `client`, `status`, `scope.in_scope[].kind`, `scope.in_scope[].value`,
+  `roe`, `authorized_from`, `authorized_to`, `live_recon_enabled`, `source_binding`,
+  `default_profile_by_lang`, `gate_id`, and the former nested `Audit` flattened to `created_at` and
+  `updated_at`. Go cannot emit two names for one field, so the old keys are gone rather than
+  duplicated. Affected routes: `GET|POST /api/v1/engagements`, `GET /api/v1/engagements/{id}`,
+  `PATCH /api/v1/engagements/{id}`, `PUT /api/v1/engagements/{id}/status|scope|authorization-window|roe|live-recon`,
+  `POST /api/v1/engagements/import`, `GET /api/v1/appsec/assets/{id}/engagements`, and
+  `GET|POST /api/v1/projects`, `GET /api/v1/projects/{key}`, `PUT /api/v1/projects/{key}/gate`.
+  `api/openapi.yaml` documents the new shape.
+
 - **Workflow-oriented sidebar navigation.** Reorganizes shipped dashboard capabilities around security operations, exposure management, engineering, runtime, and governance; separates engagement creation from the active navigation state; and removes unavailable placeholder destinations.
 
 - **Breaking Asset API consolidation.** Removed `POST|GET /api/v1/assets/services`, `asset.BusinessService`, and the unused `member_of` fleet edge. Business-level Asset reads and writes now use `/api/v1/appsec/assets`; technical/fleet `/api/v1/assets` remains unchanged. Existing business-service rows retain their IDs and owners and receive stable keys during migration.
@@ -98,10 +215,51 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 - Release gates use the owned SBOM engine, provision their pinned Syft and Grype dependencies, and can
   be dispatched manually.
 
+- **`synapse-cli scan --offline` now means no network egress.** It previously dropped only the live
+  OSV.dev source while the npm, composer, poetry, Bundler, Maven and Gradle resolvers still reached
+  their registries and the KEV/EPSS, online NVD, and deps.dev/PyPI enrichers still made HTTP calls.
+  Offline (and `SYNAPSE_OFFLINE=true`) now disables all of them, plus the Maven Central JAR SHA-1
+  lookup and AI false-positive triage. Target acquisition is unchanged: a registry image reference or
+  a remote git URL is still fetched.
+
 ### Fixed
+
+- **The dashboard reads engagements and projects again.** The API moved both resources to
+  snake_case (`engagementView` and `projectView` in `internal/adapter/httpapi/resource_view.go`)
+  while the web client still mapped Go field names, so against a real server the engagements list
+  crashed on an undefined id and every project rendered with a blank name, key and source. The
+  client now maps the served keys, the MSW fixtures carry the server's shape, and a contract test
+  pins fixture, mapper and mock to the Go view types together.
+
+- **Documented the fleet operator-plane routes.** Fifteen shipped `/api/v1/fleet/*` operations were
+  registered by the router but absent from `api/openapi.yaml`, so no generated client could reach
+  them: retro-hunt, desired capabilities and their gaps, legal holds, privacy export, endpoint
+  processes, the asset state timeline, detection-data deletion, engagement correlation, and incident
+  risk reassessment. Each is now described with the parameters, request body, and status codes its
+  handler actually produces, including the PascalCase payloads the domain structs serialize.
+
+- **Documented engagement lifecycle route.** `PUT /api/v1/engagements/{id}/status` answered `404`:
+  the transition was reachable only as `PATCH /api/v1/engagements/{id}`, which no guide described.
+  Both spellings now apply the same change through the same `operate` gate, and both are described
+  in `api/openapi.yaml` and the governed-assessments guide.
+
+- **Cross-tenant user management.** `POST /api/v1/users` accepted a `tenant_id` from the request
+  body without comparing it with the caller's tenant, so a tenant-A admin could provision an admin
+  into tenant B and receive that admin's API key, and `GET /api/v1/users` listed every tenant's
+  operators on all three persistence backends. User reads and writes now carry their tenant
+  explicitly through the repository port and apply it as a query predicate, independent of row level
+  security. Provisioning into another tenant is refused unless the caller is the bootstrap principal
+  from `SYNAPSE_API_TOKEN`, the one identity that may seed a new tenant's first admin. The hostile
+  tenant-isolation harness now covers both routes.
 
 - Standalone CLI scans bind the default tenant before persisting results.
 - Release-signing CI uses the corrected provenance action and uploads the checksum signature once.
+- `synapse-cli quality` no longer fails with `unknown code-analysis finding kind` on any tree that
+  contains HTML or CSS. The AST language packs report `security` and `maintainability` rule classes,
+  which now map to the SAST and quality finding kinds; an unrecognized class degrades to quality
+  instead of failing the command.
+- `synapse-cli quality --sarif` writes the SARIF report even when `--fail-on` then fails the run, so a
+  redirected stdout keeps the findings the non-zero exit is about.
 
 ## [0.1.8] - 2026-08-15
 

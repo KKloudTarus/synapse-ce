@@ -18,13 +18,10 @@ func TestMigration0056BackfillsOnlyCanonicalRelativePaths(t *testing.T) {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("initial migrate up: %v", err)
 	}
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatalf("goose open db: %v", err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {

@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from './api'
 
+// Shape from `engagementView` in internal/adapter/httpapi/resource_view.go.
 const engagementWire = {
-  ID: 'eng-upload',
-  Name: 'Uploaded assessment',
-  Status: 'draft',
-  Scope: { InScope: [], OutOfScope: [] },
+  id: 'eng-upload',
+  name: 'Uploaded assessment',
+  status: 'draft',
+  scope: { in_scope: [], out_of_scope: [] },
 }
 
 describe('Engagements API', () => {

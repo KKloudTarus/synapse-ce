@@ -77,6 +77,17 @@ describe('FleetCoverage', () => {
     expect(await screen.findByText('No coverage rows')).toBeInTheDocument()
   })
 
+  it('names the switch instead of an HTTP 404 when fleet is off server-side', async () => {
+    vi.mocked(api.listFleetCoverage).mockRejectedValue(new ApiError(404, 'HTTP 404'))
+    vi.mocked(api.fleetCoverageSummary).mockRejectedValue(new ApiError(404, 'HTTP 404'))
+    renderPage()
+
+    expect(await screen.findByText('Fleet is not enabled')).toBeInTheDocument()
+    expect(screen.getByText(/SYNAPSE_FLEET_ENABLED=true/)).toBeInTheDocument()
+    expect(screen.queryByText('HTTP 404')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  })
+
   it('renders non-covered verdicts distinctly and exports CSV', async () => {
     vi.mocked(api.listFleetCoverage).mockResolvedValue([
       { assetId: 'asset-A', capability: 'scan.host', verdict: 'covered', detail: '', lastRun: '2026-01-01T00:00:00Z', agentId: 'ag1' },

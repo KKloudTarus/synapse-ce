@@ -68,6 +68,16 @@ var (
 // auditChainLock is a fixed key for the transaction-scoped advisory lock that
 // serializes audit appends, so the read-head/insert-next step is race-free even
 // across connections (the chain head must be read and extended atomically).
+//
+// The key is one per deployment, covering every tenant, and the lock is transaction-scoped rather
+// than statement-scoped. On the bound path that means it is taken inside the CALLER's transaction
+// and held until the caller commits, so an audit append made early in a long transaction serializes
+// every other audit append in the deployment behind it, and can deadlock against a transaction that
+// takes the same row locks in the other order.
+//
+// The rule that keeps this safe: in a tenant-bound transaction, audit LAST. Every caller today
+// (assessmentcycle, vulnerabilitycorrelation, vex, approval) records as its final statement.
+// TestAuditIsTheLastStatementInABoundTransaction guards the rule.
 const auditChainLock = 0x5359_4E41 // "SYNA"
 
 // scanEntries reads audit rows in result order into entries.
@@ -258,8 +268,24 @@ func (l *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
 
 // recordOnce performs one locked read-head → chain → insert attempt. A 23505 unique violation
 // propagates (wrapped) so Record can retry.
+//
+// When the caller is already inside a tenant transaction (TenantTransactionRunner.Run binds one
+// onto the context), the entry is appended on THAT transaction rather than a private one. That is
+// what makes the state change and its audit record atomic: a rolled-back business write can no
+// longer leave a committed audit row claiming it happened, and a committed write can no longer
+// lose its record because a separate audit transaction failed afterwards. Outside a bound
+// transaction the audit log opens its own, as before.
 func (l *AuditLog) recordOnce(ctx context.Context, e ports.AuditEntry) error {
 	tenantID, tenantBound := shared.TenantFrom(ctx)
+	if tenantBound {
+		bound, isBound, err := contextTenantTx(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		if isBound {
+			return appendOnNested(ctx, bound, tenantID, e)
+		}
+	}
 	tx, err := l.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("audit tx: %w", err)
@@ -270,21 +296,54 @@ func (l *AuditLog) recordOnce(ctx context.Context, e ports.AuditEntry) error {
 			return fmt.Errorf("audit tx: set tenant: %w", err)
 		}
 	}
-	var rlsEnforced bool
-	if err := tx.QueryRow(ctx, "SELECT row_security_active('audit_log'::regclass)").Scan(&rlsEnforced); err != nil {
-		return fmt.Errorf("audit tx: inspect RLS: %w", err)
-	}
-	if tenantBound && rlsEnforced {
-		if err := appendTenantAudit(ctx, tx, tenantID.String(), e); err != nil {
-			return err
-		}
-	} else if err := appendAudit(ctx, tx, e); err != nil {
+	if err := appendOn(ctx, tx, tenantID, tenantBound, e); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("audit commit: %w", err)
 	}
 	return nil
+}
+
+// appendOnNested writes one entry inside a savepoint on the caller's transaction.
+//
+// The savepoint is what keeps Record's retry alive on the bound path. A unique violation on the
+// chain puts the whole enclosing transaction into the aborted state, so without a savepoint the
+// retry's first statement fails with 25P02 instead of the 23505 the retry looks for, the fork race
+// is never re-chained, and the caller's business transaction is lost along with it. Rolling back to
+// the savepoint leaves the caller's own writes intact and lets the retry re-read the advanced head.
+//
+// pgx models a nested Begin as a savepoint, so this costs one SAVEPOINT and one RELEASE.
+func appendOnNested(ctx context.Context, tx pgx.Tx, tenantID shared.ID, e ports.AuditEntry) error {
+	nested, err := tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("audit savepoint: %w", err)
+	}
+	if err := appendOn(ctx, nested, tenantID, true, e); err != nil {
+		// Roll back to the savepoint so the enclosing transaction stays usable and Record can
+		// retry. The rollback error is deliberately not returned: the append error is the one the
+		// caller must see, and Record dispatches its retry on that error's code.
+		_ = nested.Rollback(ctx)
+		return err
+	}
+	if err := nested.Commit(ctx); err != nil {
+		return fmt.Errorf("audit savepoint release: %w", err)
+	}
+	return nil
+}
+
+// appendOn writes one entry on an existing transaction, choosing the tenant-chained or the
+// global-chained form the same way whether the transaction was opened here or handed in by the
+// caller. It never commits: whoever owns the transaction does.
+func appendOn(ctx context.Context, tx pgx.Tx, tenantID shared.ID, tenantBound bool, e ports.AuditEntry) error {
+	var rlsEnforced bool
+	if err := tx.QueryRow(ctx, "SELECT row_security_active('audit_log'::regclass)").Scan(&rlsEnforced); err != nil {
+		return fmt.Errorf("audit tx: inspect RLS: %w", err)
+	}
+	if tenantBound && rlsEnforced {
+		return appendTenantAudit(ctx, tx, tenantID.String(), e)
+	}
+	return appendAudit(ctx, tx, e)
 }
 
 // appendAudit extends the audit chain within an existing transaction.

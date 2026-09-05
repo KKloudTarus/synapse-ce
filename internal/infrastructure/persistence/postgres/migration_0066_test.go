@@ -17,13 +17,10 @@ func TestMigration0066PreservesLegacyAssessmentGraph(t *testing.T) {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	db, err := goose.OpenDBWithDriver("pgx", dsnForMigrate(dsn))
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {

@@ -188,7 +188,7 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 
 		// 8. Audit event
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.created",
 				Target: cycleID.String(),
@@ -198,7 +198,10 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 					"root_assessment_id": in.RootAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				// The audit append runs inside a savepoint on this transaction, so a failure leaves the transaction usable and rolling the whole unit back is a choice rather than a necessity. It is the right choice: a committed state change with no attributable record is what the append-only chain exists to prevent.
+				return fmt.Errorf("record audit entry: %w", err)
+			}
 		}
 
 		createdCycle = cycle
@@ -312,7 +315,7 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 
 		// 7. Audit event
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.retest_created",
 				Target: in.CycleID.String(),
@@ -324,7 +327,10 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 					"selected_head_id": cycle.SelectedHeadAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				// The audit append runs inside a savepoint on this transaction, so a failure leaves the transaction usable and rolling the whole unit back is a choice rather than a necessity. It is the right choice: a committed state change with no attributable record is what the append-only chain exists to prevent.
+				return fmt.Errorf("record audit entry: %w", err)
+			}
 		}
 
 		createdMember = retestMember
@@ -426,7 +432,7 @@ func (s *Service) ReparentWithinCycle(ctx context.Context, in ReparentInput) err
 
 		// 8. Audit event
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.reparented",
 				Target: in.CycleID.String(),
@@ -436,7 +442,10 @@ func (s *Service) ReparentWithinCycle(ctx context.Context, in ReparentInput) err
 					"new_predecessor_id": in.NewPredecessorAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				// The audit append runs inside a savepoint on this transaction, so a failure leaves the transaction usable and rolling the whole unit back is a choice rather than a necessity. It is the right choice: a committed state change with no attributable record is what the append-only chain exists to prevent.
+				return fmt.Errorf("record audit entry: %w", err)
+			}
 		}
 
 		return nil
@@ -499,7 +508,7 @@ func (s *Service) SelectHead(ctx context.Context, in SelectHeadInput) error {
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.head_selected",
 				Target: in.CycleID.String(),
@@ -508,7 +517,10 @@ func (s *Service) SelectHead(ctx context.Context, in SelectHeadInput) error {
 					"selected_head_id": in.TargetAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				// The audit append runs inside a savepoint on this transaction, so a failure leaves the transaction usable and rolling the whole unit back is a choice rather than a necessity. It is the right choice: a committed state change with no attributable record is what the append-only chain exists to prevent.
+				return fmt.Errorf("record audit entry: %w", err)
+			}
 		}
 
 		return nil
@@ -578,7 +590,7 @@ func (s *Service) ArchiveMember(ctx context.Context, in ArchiveMemberInput) erro
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.member_archived",
 				Target: in.CycleID.String(),
@@ -587,7 +599,10 @@ func (s *Service) ArchiveMember(ctx context.Context, in ArchiveMemberInput) erro
 					"assessment_id": in.AssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				// The audit append runs inside a savepoint on this transaction, so a failure leaves the transaction usable and rolling the whole unit back is a choice rather than a necessity. It is the right choice: a committed state change with no attributable record is what the append-only chain exists to prevent.
+				return fmt.Errorf("record audit entry: %w", err)
+			}
 		}
 
 		return nil
@@ -629,7 +644,7 @@ func (s *Service) ReopenCycle(ctx context.Context, in ReopenCycleInput) error {
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.reopened",
 				Target: in.CycleID.String(),
@@ -637,7 +652,10 @@ func (s *Service) ReopenCycle(ctx context.Context, in ReopenCycleInput) error {
 					"tenant_id": tenantID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				// The audit append runs inside a savepoint on this transaction, so a failure leaves the transaction usable and rolling the whole unit back is a choice rather than a necessity. It is the right choice: a committed state change with no attributable record is what the append-only chain exists to prevent.
+				return fmt.Errorf("record audit entry: %w", err)
+			}
 		}
 
 		return nil
@@ -679,7 +697,7 @@ func (s *Service) ArchiveCycle(ctx context.Context, in ArchiveCycleInput) error 
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.archived",
 				Target: in.CycleID.String(),
@@ -687,7 +705,10 @@ func (s *Service) ArchiveCycle(ctx context.Context, in ArchiveCycleInput) error 
 					"tenant_id": tenantID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				// The audit append runs inside a savepoint on this transaction, so a failure leaves the transaction usable and rolling the whole unit back is a choice rather than a necessity. It is the right choice: a committed state change with no attributable record is what the append-only chain exists to prevent.
+				return fmt.Errorf("record audit entry: %w", err)
+			}
 		}
 
 		return nil

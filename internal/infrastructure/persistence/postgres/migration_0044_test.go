@@ -21,14 +21,11 @@ func TestMigration0044(t *testing.T) {
 
 	// Start from the current schema so this test is safe to run against the same CI database as the
 	// rest of the integration suite. The cleanup below restores current HEAD again before returning.
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("initial migrate up: %v", err)
 	}
 
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatalf("goose open db: %v", err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
 	goose.SetBaseFS(migrations.FS)

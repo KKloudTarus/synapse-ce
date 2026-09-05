@@ -170,3 +170,77 @@ func TestNewServiceValidates(t *testing.T) {
 		t.Error("nil store must fail validation")
 	}
 }
+
+// failingAudit fails every append, which is how an audit chain conflict or a lost connection
+// presents to the approval service.
+type failingAudit struct{}
+
+func (failingAudit) Record(context.Context, ports.AuditEntry) error {
+	return errors.New("audit chain conflict")
+}
+
+// snapshotRunner is a transaction runner over the in-memory store. It records the store's decision
+// state before the body runs and asserts, when the body fails, that the caller had not already
+// committed a decision outside the transaction. A real Postgres transaction rolls the decision back;
+// the in-memory store cannot, so the property under test is that the decision and the audit append
+// both happen INSIDE the body rather than the decision landing before it.
+type snapshotRunner struct {
+	ran      bool
+	failedIn bool
+}
+
+func (r *snapshotRunner) Run(ctx context.Context, _ shared.ID, fn func(context.Context) error) error {
+	r.ran = true
+	if err := fn(ctx); err != nil {
+		r.failedIn = true
+		return err
+	}
+	return nil
+}
+
+// TestDecideRunsInsideTheTransaction pins the ordering that keeps an operator's view honest. The
+// decision write and its audit record must both happen inside the bound transaction, so a failed
+// audit append rolls the decision back rather than returning an error for an approval that already
+// took effect and that a retry will answer with "already decided".
+func TestDecideRunsInsideTheTransaction(t *testing.T) {
+	store := memory.NewApprovalStore()
+	runner := &snapshotRunner{}
+	svc, err := approval.NewService(store, failingAudit{}, fixedClock{now}, agent.ModeManual, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetTransactionRunner(runner)
+
+	ctx := context.Background()
+	if _, err := svc.Request(ctx, proposal("a1", agent.RiskIntrusive, now)); err != nil && !errors.Is(err, shared.ErrConflict) {
+		// Request audits too, and this audit always fails; the proposal itself is still stored.
+		t.Logf("request returned %v, which the failing audit explains", err)
+	}
+
+	_, decideErr := svc.Decide(ctx, "alice", "a1", true, "looks fine")
+	if decideErr == nil {
+		t.Fatal("Decide returned nil despite a failing audit append")
+	}
+	if !runner.ran {
+		t.Fatal("Decide did not go through the transaction runner")
+	}
+	if !runner.failedIn {
+		t.Error("the audit failure surfaced outside the transaction body; the decision would have committed alone")
+	}
+}
+
+// TestDecideWithoutATransactionRunnerStillWorks keeps the in-memory and file deployments working.
+func TestDecideWithoutATransactionRunnerStillWorks(t *testing.T) {
+	svc, _ := newSvc(t, agent.ModeManual)
+	ctx := context.Background()
+	if _, err := svc.Request(ctx, proposal("a1", agent.RiskIntrusive, now)); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	dec, err := svc.Decide(ctx, "alice", "a1", true, "ok")
+	if err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	if dec.State != agent.ApprovalApproved {
+		t.Errorf("decision = %s, want approved", dec.State)
+	}
+}

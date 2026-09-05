@@ -1,0 +1,7 @@
+package httpapi
+
+const somePattern = "GET /hidden"
+
+func (rt *Router) routes() {
+	mux.HandleFunc(somePattern, rt.handler)
+}

@@ -102,7 +102,7 @@ func (rt *Router) createProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, p)
+	writeJSON(w, http.StatusCreated, toProjectView(p))
 }
 
 type projectSummaryAnalysisResponse struct {
@@ -131,14 +131,15 @@ type projectSummaryJobResponse struct {
 }
 
 type projectSummaryResponse struct {
-	ID                   shared.ID                       `json:"ID"`
-	TenantID             shared.ID                       `json:"TenantID"`
-	Name                 string                          `json:"Name"`
-	Key                  string                          `json:"Key"`
-	SourceBinding        project.SourceBinding           `json:"SourceBinding"`
-	DefaultProfileByLang map[string]string               `json:"DefaultProfileByLang"`
-	GateID               string                          `json:"GateID"`
-	Audit                shared.Audit                    `json:"Audit"`
+	ID                   string                          `json:"id"`
+	TenantID             string                          `json:"tenant_id"`
+	Name                 string                          `json:"name"`
+	Key                  string                          `json:"key"`
+	SourceBinding        project.SourceBinding           `json:"source_binding"`
+	DefaultProfileByLang map[string]string               `json:"default_profile_by_lang"`
+	GateID               string                          `json:"gate_id,omitempty"`
+	CreatedAt            time.Time                       `json:"created_at"`
+	UpdatedAt            time.Time                       `json:"updated_at"`
 	LatestAnalysis       *projectSummaryAnalysisResponse `json:"latest_analysis"`
 	LatestJob            *projectSummaryJobResponse      `json:"latest_job"`
 }
@@ -152,7 +153,12 @@ func (rt *Router) listProjects(w http.ResponseWriter, r *http.Request) {
 	out := make([]projectSummaryResponse, len(list))
 	for i, summary := range list {
 		p := summary.Project
-		out[i] = projectSummaryResponse{ID: p.ID, TenantID: p.TenantID, Name: p.Name, Key: p.Key, SourceBinding: p.SourceBinding, DefaultProfileByLang: p.DefaultProfileByLang, GateID: p.GateID, Audit: p.Audit}
+		view := toProjectView(p)
+		out[i] = projectSummaryResponse{
+			ID: view.ID, TenantID: view.TenantID, Name: view.Name, Key: view.Key,
+			SourceBinding: view.SourceBinding, DefaultProfileByLang: view.DefaultProfileByLang,
+			GateID: view.GateID, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt,
+		}
 		if summary.LatestAnalysis != nil {
 			analysis := summary.LatestAnalysis
 			out[i].LatestAnalysis = &projectSummaryAnalysisResponse{
@@ -180,7 +186,7 @@ func (rt *Router) getProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	writeJSON(w, http.StatusOK, toProjectView(p))
 }
 
 func (rt *Router) deleteProject(w http.ResponseWriter, r *http.Request) {
@@ -204,7 +210,7 @@ func (rt *Router) assignProjectGate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	writeJSON(w, http.StatusOK, toProjectView(p))
 }
 
 type projectAnalysisJobResponse struct {

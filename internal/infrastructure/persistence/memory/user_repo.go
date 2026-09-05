@@ -49,14 +49,36 @@ func (r *UserRepository) Bootstrap(ctx context.Context, u *user.User, _ ports.Au
 	return r.Upsert(ctx, u)
 }
 
-func (r *UserRepository) GetByID(_ context.Context, id shared.ID) (*user.User, error) {
+// sameTenant reports whether a stored row belongs to the requested tenant. Both sides are
+// normalized, so the empty tenant of the bootstrap admin and an explicit "default" name one tenant.
+func sameTenant(rowTenant string, tenantID shared.ID) bool {
+	return shared.TenantOrDefault(shared.ID(rowTenant)) == shared.TenantOrDefault(tenantID)
+}
+
+func (r *UserRepository) GetByID(_ context.Context, tenantID, id shared.ID) (*user.User, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if u, ok := r.byID[id]; ok {
+	if u, ok := r.byID[id]; ok && sameTenant(u.TenantID, tenantID) {
 		cp := *u
 		return &cp, nil
 	}
+	// A user in another tenant is not found, never forbidden: existence is not revealed.
 	return nil, shared.ErrNotFound
+}
+
+// Update writes the mutable fields of an existing user inside tenantID. The tenant of the stored
+// row is preserved, so an update can never move a user between tenants.
+func (r *UserRepository) Update(_ context.Context, tenantID shared.ID, u *user.User) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	existing, ok := r.byID[u.ID]
+	if !ok || !sameTenant(existing.TenantID, tenantID) {
+		return shared.ErrNotFound
+	}
+	updated := *u
+	updated.TenantID = existing.TenantID
+	r.byID[u.ID] = &updated
+	return nil
 }
 
 func (r *UserRepository) GetByAPIKeyHash(_ context.Context, hash string) (*user.User, error) {
@@ -71,11 +93,14 @@ func (r *UserRepository) GetByAPIKeyHash(_ context.Context, hash string) (*user.
 	return nil, shared.ErrNotFound
 }
 
-func (r *UserRepository) List(_ context.Context) ([]*user.User, error) {
+func (r *UserRepository) List(_ context.Context, tenantID shared.ID) ([]*user.User, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]*user.User, 0, len(r.byID))
 	for _, u := range r.byID {
+		if !sameTenant(u.TenantID, tenantID) {
+			continue
+		}
 		cp := *u
 		out = append(out, &cp)
 	}

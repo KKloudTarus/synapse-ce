@@ -18,16 +18,23 @@ type ApprovalStore struct {
 	mu        sync.Mutex
 	actions   map[shared.ID]agent.ProposedAction
 	decisions map[shared.ID]agent.ApprovalDecision
+	// tenants records the tenant an action was enqueued under, so EngagementsWithPending can
+	// hand the sweeper the same tenant-bound scopes the Postgres twin does.
+	tenants map[shared.ID]shared.ID
 }
 
 // NewApprovalStore returns an empty in-memory approval store.
 func NewApprovalStore() *ApprovalStore {
-	return &ApprovalStore{actions: map[shared.ID]agent.ProposedAction{}, decisions: map[shared.ID]agent.ApprovalDecision{}}
+	return &ApprovalStore{
+		actions:   map[shared.ID]agent.ProposedAction{},
+		decisions: map[shared.ID]agent.ApprovalDecision{},
+		tenants:   map[shared.ID]shared.ID{},
+	}
 }
 
 var _ ports.ApprovalStore = (*ApprovalStore)(nil)
 
-func (s *ApprovalStore) Enqueue(_ context.Context, a agent.ProposedAction) error {
+func (s *ApprovalStore) Enqueue(ctx context.Context, a agent.ProposedAction) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.actions[a.ID]; exists {
@@ -35,6 +42,9 @@ func (s *ApprovalStore) Enqueue(_ context.Context, a agent.ProposedAction) error
 	}
 	s.actions[a.ID] = a
 	s.decisions[a.ID] = agent.ApprovalDecision{ActionID: a.ID, State: agent.ApprovalPending}
+	if tenantID, ok := shared.TenantFrom(ctx); ok {
+		s.tenants[a.ID] = tenantID
+	}
 	return nil
 }
 
@@ -51,18 +61,28 @@ func (s *ApprovalStore) Pending(_ context.Context, engagementID shared.ID) ([]ag
 	return out, nil
 }
 
-func (s *ApprovalStore) EngagementsWithPending(_ context.Context) ([]shared.ID, error) {
+func (s *ApprovalStore) EngagementsWithPending(_ context.Context) ([]ports.ApprovalSweepScope, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	seen := map[shared.ID]bool{}
-	var out []shared.ID
+	seen := map[ports.ApprovalSweepScope]bool{}
+	var out []ports.ApprovalSweepScope
 	for id, a := range s.actions {
-		if s.decisions[id].State == agent.ApprovalPending && !seen[a.EngagementID] {
-			seen[a.EngagementID] = true
-			out = append(out, a.EngagementID)
+		if s.decisions[id].State != agent.ApprovalPending {
+			continue
 		}
+		scope := ports.ApprovalSweepScope{TenantID: s.tenants[id], EngagementID: a.EngagementID}
+		if seen[scope] {
+			continue
+		}
+		seen[scope] = true
+		out = append(out, scope)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].TenantID != out[j].TenantID {
+			return out[i].TenantID < out[j].TenantID
+		}
+		return out[i].EngagementID < out[j].EngagementID
+	})
 	return out, nil
 }
 

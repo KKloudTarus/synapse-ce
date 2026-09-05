@@ -387,7 +387,7 @@ func TestService_PostgresParity(t *testing.T) {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres parity test")
 	}
 	ctx := context.Background()
-	if err := postgres.Migrate(ctx, dsn); err != nil {
+	if err := postgres.MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := postgres.Connect(ctx, dsn)

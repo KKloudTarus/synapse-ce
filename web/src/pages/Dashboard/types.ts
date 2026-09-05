@@ -17,6 +17,8 @@ export interface StatCardProps {
   severity?: 'success' | 'warning' | 'critical'
   icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
   className?: string
+  /** Override the value type scale when the value is a phrase, not a number. */
+  valueClassName?: string
 }
 
 export interface DashboardHookResult {
@@ -24,6 +26,8 @@ export interface DashboardHookResult {
   error: string | null
   fleet: FleetCoverageSummary | null
   fleetError: string | null
+  /** The fleet feature answered 404: switched off server-side, not broken. */
+  fleetDisabled: boolean
   analytics: DashboardSecurityOperations | null
   analyticsError: string | null
   rangeDays: number

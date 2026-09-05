@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { AlertTriangle, Plus, Save01, Trash01 } from '@untitledui/icons'
 import { Button, Card, ErrorState, Field, Input, Pill, Select, cn } from '../../components/ui'
+import { ConfirmDialog } from '../../components/synapse/ConfirmDialog'
+import { useToast } from '../../components/synapse/Toast'
 import { useFetch } from '../../hooks'
 import { api } from '../../lib/api'
 import { kindLabel } from '../../lib/format'
@@ -129,21 +131,49 @@ export const LIFECYCLE_NEXT: Record<string, { status: string; label: string; var
   archived: [],
 }
 
+/** Statuses with no outbound transition: entering one cannot be undone from the UI. */
+export const TERMINAL_STATUSES = new Set(
+  Object.entries(LIFECYCLE_NEXT)
+    .filter(([, transitions]) => transitions.length === 0)
+    .map(([status]) => status),
+)
+
+export function isTerminalStatus(status: string): boolean {
+  return TERMINAL_STATUSES.has(status)
+}
+
 export function LifecycleCard({ eng, onUpdated }: { eng: Engagement; onUpdated: (e: Engagement) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [pending, setPending] = useState<{ status: string; label: string } | null>(null)
+  const { notify } = useToast()
   const next = LIFECYCLE_NEXT[eng.status] ?? []
 
   async function go(status: string) {
     setBusy(status)
     setErr(null)
     try {
-      onUpdated(await api.transitionEngagement(eng.id, status))
+      const updated = await api.transitionEngagement(eng.id, status)
+      onUpdated(updated)
+      setPending(null)
+      notify(`Engagement is now ${status}.`, 'success')
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Transition failed')
+      const message = e instanceof Error ? e.message : 'Transition failed'
+      setErr(message)
+      notify(message, 'error')
     } finally {
       setBusy(null)
     }
+  }
+
+  // A terminal transition has no way back, so it is confirmed before the PATCH.
+  function request(transition: { status: string; label: string }) {
+    if (isTerminalStatus(transition.status)) {
+      setErr(null)
+      setPending(transition)
+      return
+    }
+    void go(transition.status)
   }
 
   return (
@@ -153,7 +183,7 @@ export function LifecycleCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
         <StatusPill status={eng.status} />
         <span className="hidden text-quaternary sm:inline">·</span>
         <span className="text-xs text-quaternary">
-          {eng.status === 'archived' ? 'Terminal state' : 'Scope and authorization enforced on every run'}
+          {isTerminalStatus(eng.status) ? 'Terminal state' : 'Scope and authorization enforced on every run'}
         </span>
         <div className="ml-auto flex flex-wrap gap-2">
           {next.length === 0 ? (
@@ -165,7 +195,7 @@ export function LifecycleCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
                 variant={n.variant}
                 loading={busy === n.status}
                 disabled={busy !== null}
-                onClick={() => go(n.status)}
+                onClick={() => request(n)}
               >
                 {n.label}
               </Button>
@@ -173,11 +203,30 @@ export function LifecycleCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
           )}
         </div>
       </div>
-      {err && (
+      {err && !pending && (
         <div className="mt-2">
           <ErrorState message={err} />
         </div>
       )}
+      <ConfirmDialog
+        open={pending !== null}
+        title={`${pending?.label ?? 'Archive'} this engagement?`}
+        description={
+          <>
+            <strong className="font-semibold text-primary">{eng.name}</strong> moves to{' '}
+            <span className="font-mono">{pending?.status}</span>, which is a terminal state: there is no transition
+            back, and scans and edits stay closed from then on.
+          </>
+        }
+        confirmLabel={pending?.label ?? 'Archive'}
+        busy={busy !== null}
+        error={err}
+        onConfirm={() => pending && go(pending.status)}
+        onCancel={() => {
+          setPending(null)
+          setErr(null)
+        }}
+      />
     </Card>
   )
 }

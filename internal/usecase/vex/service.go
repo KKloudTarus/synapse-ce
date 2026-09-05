@@ -20,10 +20,19 @@ import (
 
 // Service applies OpenVEX statements to an engagement's findings.
 type Service struct {
-	engagements ports.EngagementRepository
-	findings    ports.FindingRepository
-	audit       ports.AuditLogger
-	clock       ports.Clock
+	engagements  ports.EngagementRepository
+	findings     ports.FindingRepository
+	audit        ports.AuditLogger
+	clock        ports.Clock
+	transactions ports.TenantTransactionRunner
+}
+
+// SetTransactionRunner makes one Apply atomic. Without it each status change commits on its own
+// connection and the audit entry opens a separate transaction, so an audit failure part way through
+// leaves findings already retired with no attributable record. Optional because the in-memory and
+// file stores have no transactions; the Postgres composition roots set it.
+func (s *Service) SetTransactionRunner(transactions ports.TenantTransactionRunner) {
+	s.transactions = transactions
 }
 
 // NewService validates dependencies and returns the VEX service.
@@ -56,6 +65,26 @@ func (s *Service) Apply(ctx context.Context, actor string, tenantID, engagementI
 		return ApplyResult{}, fmt.Errorf("load engagement: %w", err)
 	}
 
+	if s.transactions != nil {
+		var res ApplyResult
+		if err := s.transactions.Run(ctx, tenantID, func(txCtx context.Context) error {
+			var applyErr error
+			res, applyErr = s.apply(txCtx, actor, engagementID, doc)
+			return applyErr
+		}); err != nil {
+			// The transaction rolled back, so nothing was applied. Reporting a partial count
+			// would describe changes that no longer exist.
+			return ApplyResult{Statements: len(doc.Statements)}, err
+		}
+		return res, nil
+	}
+	return s.apply(ctx, actor, engagementID, doc)
+}
+
+// apply walks the document against the engagement's findings. When the caller wrapped it in a
+// tenant transaction, every status change and every audit append lands on that one transaction, so
+// a failure anywhere undoes the whole apply.
+func (s *Service) apply(ctx context.Context, actor string, engagementID shared.ID, doc vex.Document) (ApplyResult, error) {
 	findings, err := s.findings.ListByEngagement(ctx, engagementID)
 	if err != nil {
 		return ApplyResult{}, fmt.Errorf("load findings: %w", err)
@@ -83,7 +112,12 @@ func (s *Service) Apply(ctx context.Context, actor string, tenantID, engagementI
 			}
 			*f = updated
 			res.Applied++
-			_ = s.audit.Record(ctx, ports.AuditEntry{
+			// The status change and its audit record are one unit when the service has a
+			// transaction runner: both land on the bound transaction, so an audit failure
+			// rolls the status change back with it. A VEX statement that silently retires a
+			// finding with no attributable record is exactly the case the append-only audit
+			// chain exists to prevent.
+			if err := s.audit.Record(ctx, ports.AuditEntry{
 				Actor: actor, Action: "finding.vex", Target: f.ID.String(),
 				Metadata: map[string]string{
 					"engagement":    engagementID.String(),
@@ -93,7 +127,9 @@ func (s *Service) Apply(ctx context.Context, actor string, tenantID, engagementI
 					"justification": st.Justification,
 				},
 				At: s.clock.Now(),
-			})
+			}); err != nil {
+				return res, fmt.Errorf("record vex status change for finding %s: %w", f.ID, err)
+			}
 		}
 	}
 	return res, nil

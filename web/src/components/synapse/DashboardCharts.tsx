@@ -1,6 +1,36 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '../ui'
 import type { DashboardTrendPoint } from '../../lib/types'
+
+/**
+ * Width of an element, tracked with a ResizeObserver. A fixed viewBox made the
+ * trend chart render 576px wide inside a 358px card at 390px viewport width, so
+ * the most recent points fell outside the card.
+ */
+function useMeasuredWidth<T extends HTMLElement>(fallback: number) {
+  const ref = useRef<T>(null)
+  const [width, setWidth] = useState(fallback)
+
+  const measure = useCallback(() => {
+    const next = ref.current?.clientWidth ?? 0
+    if (next > 0) setWidth(next)
+  }, [])
+
+  useEffect(() => {
+    measure()
+    const element = ref.current
+    if (!element) return
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure)
+      return () => window.removeEventListener('resize', measure)
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [measure])
+
+  return [ref, width] as const
+}
 
 export type ChartDatum = { key: string; label: string; value: number; color: string }
 
@@ -265,11 +295,15 @@ export function HorizontalBarChart({ title, data }: { title: string; data: Chart
 
 export function FindingsTrendChart({ points, series }: { points: DashboardTrendPoint[]; series: ChartDatum[] }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const [figureRef, measuredWidth] = useMeasuredWidth<HTMLElement>(840)
 
-  const width = 840
+  // The viewBox tracks the real pixel width, so the plot always fits its card
+  // and never needs a min-width that overflows a phone.
+  const width = Math.max(280, Math.round(measuredWidth))
   const height = 260
-  const left = 36
-  const right = 16
+  const compact = width < 480
+  const left = compact ? 26 : 36
+  const right = compact ? 8 : 16
   const top = 16
   const bottom = 32
   const plotWidth = width - left - right
@@ -287,8 +321,8 @@ export function FindingsTrendChart({ points, series }: { points: DashboardTrendP
     0,
   )
 
-  // Determine x-axis label indices (e.g. 5-7 labels max)
-  const step = Math.max(1, Math.floor((points.length - 1) / 5))
+  // Determine x-axis label indices; a narrow card gets fewer so they never collide.
+  const step = Math.max(1, Math.floor((points.length - 1) / (compact ? 2 : 5)))
   const labelIndexes = new Set<number>()
   for (let i = 0; i < points.length; i += step) {
     labelIndexes.add(i)
@@ -312,11 +346,15 @@ export function FindingsTrendChart({ points, series }: { points: DashboardTrendP
         ))}
       </div>
 
-      <figure aria-label={`Findings over time: ${total} created findings`} className="relative overflow-x-auto">
+      <figure
+        ref={figureRef}
+        aria-label={`Findings over time: ${total} created findings`}
+        className="relative w-full"
+      >
         <svg
           viewBox={`0 0 ${width} ${height}`}
           role="img"
-          className="h-64 min-w-[36rem] w-full select-none"
+          className="h-64 w-full select-none"
           onMouseLeave={() => setHoverIndex(null)}
         >
           <title>Findings created by day and severity</title>
@@ -457,9 +495,10 @@ export function FindingsTrendChart({ points, series }: { points: DashboardTrendP
         {/* Floating Tooltip card on hover */}
         {hoverIndex !== null && activePoint && (
           <div
-            className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-lg border border-secondary bg-primary p-3 shadow-lg transition-all"
+            className="pointer-events-none absolute z-10 max-w-[min(14rem,90%)] -translate-x-1/2 rounded-lg border border-secondary bg-primary p-3 shadow-lg transition-all"
             style={{
-              left: `${(x(hoverIndex) / width) * 100}%`,
+              // Clamped so the card cannot hang off either edge on a phone.
+              left: `${Math.min(88, Math.max(12, (x(hoverIndex) / width) * 100))}%`,
               top: '12px',
             }}
           >

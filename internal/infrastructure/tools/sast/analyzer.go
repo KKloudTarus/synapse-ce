@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -27,16 +28,215 @@ const (
 	maxRetainedSourceBytes = 64 << 20 // cap source held for cross-file context analysis
 	maxLineBytes           = 4096     // skip minified/blob lines
 	maxFindings            = 500      // cap unique hits so a hostile/huge tree can't flood the report
+	maxFindingsPerFile     = 50       // per-file share of the budget so one huge file can't consume it all
+
+	// Minified/bundled-content probe. A generated bundle is not hand-written source: every hit in it
+	// is noise, and a single 200 KB line burns the whole finding budget.
+	maxMinifiedLineBytes = 50 << 10 // one line this long ⇒ bundled/minified, skip the file
+	minifiedProbeLines   = 20       // lines sampled for the average-line-length probe
+	minifiedMinLines     = 10       // fewest lines the ordinary average-line-length probe will judge
+	// minifiedShortAvgLineBytes is the average a file with fewer lines than minifiedMinLines must
+	// exceed to count as minified. Well above anything hand-written, so a short file holding one
+	// long constant is still scanned.
+	minifiedShortAvgLineBytes = 1500
+	bannerProbeLines          = 15 // lines sampled for a distributed-library banner
+	// assetBundleLineBytes marks a web asset under an asset directory as build output. Well below
+	// maxMinifiedLineBytes, because this test is scoped to asset trees rather than to all source.
+	assetBundleLineBytes = 4 << 10
+	minifiedAvgLineBytes = 500 // average length over the probe that marks a file minified
+	generatedProbeLines  = 3   // lines sampled for the "Code generated … DO NOT EDIT" banner
 )
 
 // skipDirs are heavy vendored/build trees never worth scanning for first-party weaknesses.
 var skipDirs = map[string]bool{
 	".git": true, "node_modules": true, "vendor": true, "dist": true, "build": true,
 	".venv": true, "venv": true, "__pycache__": true, "target": true, ".idea": true, ".tox": true,
+	"bower_components": true, "third_party": true, "thirdparty": true, "third-party": true,
+}
+
+// assetDirs hold BOTH first-party source and vendored/bundled web assets: a Rails app/assets, a
+// Django static/, a Next.js public/. Skipping the directory outright would drop real first-party
+// code (Ruby helpers under app/assets, Python under static/), so the skip is narrowed twice: to
+// files that are themselves web assets, AND to files that also sit in a directory naming them as
+// third-party or build output — see vendoredAssetFile.
+//
+// An earlier version skipped every .js under these directories. That is where a Flask or Django
+// application keeps its OWN scripts, so a hand-written static/js/app.js was dropped along with the
+// vendored jQuery copy, and the report still said the scan was complete. A machine-produced bundle
+// that does not live in one of the vendor directories is still caught by looksMinified.
+var assetDirs = map[string]bool{"static": true, "assets": true, "public": true}
+
+// vendorDirs name a directory whose contents are third-party or build output whatever the file is
+// called. These are the segments that make a web asset under an assetDirs tree skippable.
+var vendorDirs = map[string]bool{
+	"vendor": true, "vendors": true, "node_modules": true, "bower_components": true,
+	"dist": true, "build": true, "third_party": true, "thirdparty": true, "external": true,
+}
+
+// A distributed JavaScript library announces itself in its header, and the announcement has a
+// recognisable shape: a licence, plus something that identifies the project, such as a version or a
+// home page. Matching a bare copyright line is not enough, because that is also the most common
+// header on FIRST-PARTY corporate source, and skipping those is the exact failure this whole
+// heuristic exists to avoid.
+//
+// The residual error is real and runs both ways. A first-party file that carries a full open-source
+// header, version and project URL included, is skipped; a vendored file copied in with its header
+// stripped is scanned. Neither is silent: an excluded file is counted in SkippedFiles and surfaced
+// as a scan warning, so the reader can see the scan did not cover the whole tree.
+var (
+	// bannerLicenceRe is distribution language, or the name of a licence.
+	bannerLicenceRe = regexp.MustCompile(`(?i)(licen[sc]ed under|released under|dual licen[sc]ed|\bMIT\b|\bGPL|\bBSD\b|\bISC\b|Apache License|Mozilla Public)`)
+	// bannerCopyrightRe is an ownership line.
+	bannerCopyrightRe = regexp.MustCompile(`(?i)(copyright\s+(?:\(c\)|©|\d{4})|\(c\)\s*\d{4}|all rights reserved)`)
+	// bannerProjectRe identifies the project rather than its owner: a release version or a home page.
+	bannerProjectRe = regexp.MustCompile(`(?i)(\bv\d+\.\d+(?:\.\d+)?\b|https?://)`)
+	// bannerTagRe is a documentation tag only a distributed package writes.
+	bannerTagRe = regexp.MustCompile(`(?i)@(?:license|copyright)\b`)
+)
+
+// thirdPartyBanner reports whether the head of the file declares it as a distributed library.
+//
+// Markers are accumulated across the whole head comment rather than required on one line, because a
+// real library header spreads them over several: the project and version on one, the home page on
+// the next, the copyright below that. Only comment text counts, and lines inside a block comment
+// count whether or not they carry a leading star, which is how most such headers are written.
+func thirdPartyBanner(lines []string) bool {
+	var licence, copyright, project bool
+	inBlock := false
+	for _, line := range lines[:min(len(lines), bannerProbeLines)] {
+		trimmed := strings.TrimSpace(line)
+		commented := inBlock ||
+			strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*") ||
+			strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#")
+		if strings.Contains(trimmed, "/*") {
+			inBlock = true
+		}
+		if strings.Contains(trimmed, "*/") {
+			inBlock = false
+		}
+		if !commented {
+			continue
+		}
+		if bannerTagRe.MatchString(trimmed) {
+			return true
+		}
+		licence = licence || bannerLicenceRe.MatchString(trimmed)
+		copyright = copyright || bannerCopyrightRe.MatchString(trimmed)
+		project = project || bannerProjectRe.MatchString(trimmed)
+	}
+	return (licence || copyright) && project
+}
+
+// bundledAssetLine reports whether any line is long enough to mark the file as build output. It is
+// applied only to web assets under an asset directory, never to first-party source elsewhere: a
+// generated loader carries lines of many kilobytes, and the scanner's own per-line cap would read
+// only the first few thousand bytes of one anyway, so what it reports about such a file is noise.
+func bundledAssetLine(lines []string) bool {
+	for _, line := range lines {
+		if len(line) >= assetBundleLineBytes {
+			return true
+		}
+	}
+	return false
+}
+
+// webAssetExts are the browser-asset file types the assetDirs narrowing applies to.
+var webAssetExts = map[string]bool{
+	".js": true, ".mjs": true, ".cjs": true, ".jsx": true,
+	".css": true, ".scss": true, ".sass": true, ".less": true, ".map": true,
 }
 
 var skipExts = map[string]bool{
-	".log": true, ".map": true, ".min.js": true,
+	".log": true, ".map": true,
+}
+
+// skipSuffixes are compound extensions filepath.Ext cannot express: it returns ".js" for
+// "jquery.min.js", so a ".min.js" entry in skipExts never matched. Suffixes are checked first.
+var skipSuffixes = []string{
+	".min.js", ".min.mjs", ".min.css", ".bundle.js", ".bundle.css", ".pack.js", "-min.js",
+}
+
+// skippedSourceFile reports whether the file name alone disqualifies a path from scanning.
+func skippedSourceFile(path string) bool {
+	name := strings.ToLower(filepath.Base(path))
+	for _, suffix := range skipSuffixes {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return skipExts[filepath.Ext(name)]
+}
+
+// vendoredAssetFile reports whether rel is a web asset living under an assetDirs directory AND in a
+// vendor or build-output directory. Both halves are required: a .js under static/ is first-party
+// until something in its path says otherwise.
+func vendoredAssetFile(rel, ext string, lines []string) bool {
+	if !webAssetExts[ext] {
+		return false
+	}
+	segs := strings.Split(rel, "/")
+	dirs := segs[:max(len(segs)-1, 0)]
+	var underAssets bool
+	for _, seg := range dirs {
+		if assetDirs[strings.ToLower(seg)] {
+			underAssets = true
+			break
+		}
+	}
+	if !underAssets {
+		return false
+	}
+	if thirdPartyBanner(lines) || bundledAssetLine(lines) {
+		return true
+	}
+	for _, seg := range dirs {
+		if vendorDirs[strings.ToLower(seg)] {
+			return true
+		}
+	}
+	return false
+}
+
+// looksMinified reports whether the content is a machine-produced bundle rather than hand-written
+// source: one enormous line, or a very high average line length over the first lines.
+func looksMinified(lines []string) bool {
+	for _, line := range lines {
+		if len(line) >= maxMinifiedLineBytes {
+			return true
+		}
+	}
+	probe := min(len(lines), minifiedProbeLines)
+	if probe == 0 {
+		return false // no content to judge; the caller already skips empty files, so this is a guard
+	}
+	total := 0
+	for _, line := range lines[:probe] {
+		total += len(line)
+	}
+	average := total / probe
+	if probe < minifiedMinLines {
+		// Too few lines to apply the ordinary threshold: a three-line file holding one long
+		// constant averages well over it and is plainly hand-written. A short file whose lines
+		// average this much, though, is a bundle collapsed onto one or two lines, which no
+		// human writes.
+		return average > minifiedShortAvgLineBytes
+	}
+	return average > minifiedAvgLineBytes
+}
+
+// generatedBannerRe matches the conventional generated-source banner (Go's is normative, other
+// generators copy it). A finding in generated code is not actionable: the fix belongs in the
+// generator, and the file is rewritten on the next run.
+var generatedBannerRe = regexp.MustCompile(`Code generated .* DO NOT EDIT`)
+
+// isGeneratedSource reports whether the banner appears in the first lines of the file.
+func isGeneratedSource(lines []string) bool {
+	for _, line := range lines[:min(len(lines), generatedProbeLines)] {
+		if generatedBannerRe.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }
 
 // Analyzer is the pure-Go pattern-SAST adapter.
@@ -63,25 +263,43 @@ func New() *Analyzer {
 	return a
 }
 
-var _ ports.SASTAnalyzer = (*Analyzer)(nil)
+var (
+	_ ports.SASTAnalyzer       = (*Analyzer)(nil)
+	_ ports.SASTSourceReporter = (*Analyzer)(nil)
+)
 
 // Name identifies the analyzer (recorded as the finding's source/provenance).
 func (a *Analyzer) Name() string { return "synapse-pattern-sast" }
 
 // AnalyzeSource walks root and returns deterministic SAST findings, oldest-path first. It honors ctx
-// cancellation and never aborts the whole scan on a single unreadable file.
+// cancellation and never aborts the whole scan on a single unreadable file. Callers that need to
+// know whether a safety cap cut the scan short use AnalyzeSourceReport.
 func (a *Analyzer) AnalyzeSource(ctx context.Context, root string) ([]ports.SASTRawFinding, error) {
+	report, err := a.analyzeSource(ctx, root, maxSourceFiles, maxRetainedSourceBytes)
+	return report.Findings, err
+}
+
+// AnalyzeSourceReport is AnalyzeSource plus the honest completeness flag: Truncated is true when a
+// safety cap (per-file finding budget, whole-tree finding budget, retained-source budget, or an
+// oversized line) stopped the scan, so Findings is a lower bound and must not back a clean result.
+func (a *Analyzer) AnalyzeSourceReport(ctx context.Context, root string) (ports.SASTSourceReport, error) {
 	return a.analyzeSource(ctx, root, maxSourceFiles, maxRetainedSourceBytes)
 }
 
-func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int, maxBytes int64) ([]ports.SASTRawFinding, error) {
+func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int, maxBytes int64) (ports.SASTSourceReport, error) {
 	if root == "" {
-		return nil, nil
+		return ports.SASTSourceReport{}, nil
 	}
 	var files []sourceFile
 	var retainedBytes int64
+	truncated := false
+	// skippedFiles counts the files the walk excluded as vendored, minified or generated. The count
+	// is reported rather than folded into Truncated: excluding a bundle is a scope decision, and a
+	// flag that is true for every real repository tells the caller nothing.
+	skippedFiles := 0
 	appendFile := func(file sourceFile, bytes int64) bool {
 		if len(files) >= maxFiles || bytes > maxBytes-retainedBytes {
+			truncated = true // the tree outgrew the retained-source budget: results are a lower bound
 			return false
 		}
 		files = append(files, file)
@@ -104,7 +322,10 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 		if !d.Type().IsRegular() { // never follow symlinks/devices
 			return nil
 		}
-		if skipExts[strings.ToLower(filepath.Ext(path))] {
+		if skippedSourceFile(path) {
+			// Counted like every other policy exclusion. A .min.js dropped on its name is exactly
+			// as invisible to the reader as one dropped on its content, so the report must say so.
+			skippedFiles++
 			return nil
 		}
 		rel, relErr := filepath.Rel(root, path)
@@ -145,6 +366,13 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 			return nil
 		}
 		ext := sastSourceExt(path)
+		if vendoredAssetFile(rel, ext, lines) || looksMinified(lines) || isGeneratedSource(lines) {
+			// Report the exclusion. Dropping a file and still returning a complete-looking
+			// report is the failure mode a scanner must never have: the caller cannot tell a
+			// clean tree from an unscanned one, and --fail-on passes either way.
+			skippedFiles++
+			return nil
+		}
 		contextLines := lines
 		if phpExts[ext] {
 			contextLines, _ = phpContextLines(ext, lines, phpLineViews(ext, lines))
@@ -153,32 +381,40 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 		return nil
 	})
 	if walkErr != nil {
-		return nil, walkErr
+		return ports.SASTSourceReport{}, walkErr
 	}
 
 	project, err := buildProjectContext(ctx, files)
 	if err != nil {
-		return nil, err
+		return ports.SASTSourceReport{}, err
 	}
 	out := make([]ports.SASTRawFinding, 0, maxFindings)
 	seen := make(map[string]bool, maxFindings)
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return ports.SASTSourceReport{}, err
 		}
-		hits, _, scanErr := a.scanLines(ctx, file.Rel, file.Ext, file.Lines, project, seen, maxFindings-len(out))
+		// The per-file cap is applied BEFORE the tree-wide one so a single generated or vendored file
+		// that matches thousands of times cannot spend the whole report budget on itself.
+		limit := min(maxFindingsPerFile, maxFindings-len(out))
+		hits, status, scanErr := a.scanLines(ctx, file.Rel, file.Ext, file.Lines, project, seen, limit)
 		out = append(out, hits...)
 		if scanErr != nil {
-			return nil, scanErr
+			return ports.SASTSourceReport{}, scanErr
 		}
-		if len(out) == maxFindings {
+		truncated = truncated || status.findingsTruncated || status.lineLimitReached || status.statementLimitReached
+		if len(out) >= maxFindings {
+			// Only truncated when a file was actually left unscanned. Landing exactly on the
+			// budget with the last file complete is a complete scan, and reporting it as a lower
+			// bound would make every caller distrust a result that is in fact exhaustive.
+			truncated = truncated || file.Rel != files[len(files)-1].Rel
 			break
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return ports.SASTSourceReport{}, err
 	}
-	return dedupeFindings(out), nil
+	return ports.SASTSourceReport{Findings: dedupeFindings(out), Truncated: truncated, SkippedFiles: skippedFiles}, nil
 }
 
 func sourceLinesBytes(lines []string) int64 {
@@ -252,6 +488,12 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 	var scalaLex scalaLexState
 	var rubyLex rubyLexState
 	var rubyERBLex rubyERBLexState
+	var jsLex jsLexState
+	var goExitFunc goExitFuncContext
+	isJS := jsExts[ext]
+	isGo := goExts[ext]
+	// Browser context is a whole-file property, so it is decided once before the line loop.
+	browserFile := isJS && browserContextFile(lines)
 	isPHP := phpExts[ext]
 	var phpViews []phpLineView
 	phpTextLines, phpCodeLines := lines, lines
@@ -279,6 +521,8 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			}
 		} else if isVB {
 			matchText = vbCodeOnly(text)
+		} else if isJS {
+			matchText = jsLex.codeOnly(text)
 		} else if isPHP {
 			phpText = phpViews[i].text
 			matchText = phpViews[i].code
@@ -287,6 +531,7 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			status.lineLimitReached = true
 			continue // advance lexer state; callers mark the bounded scan incomplete
 		}
+		insideGoExitFunc := isGo && goExitFunc.advance(text)
 		for ri := range a.rules {
 			if ri%64 == 0 {
 				if err := ctx.Err(); err != nil {
@@ -306,6 +551,12 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			if r.id == "vb:empty-catch" || r.id == "vb:idisposable-not-disposed" {
 				continue // bounded VB passes own these block-sensitive rules
 			}
+			if r.id == "go-log-fatal-in-code" && insideGoExitFunc {
+				continue // main/init is exactly where ending the process is correct
+			}
+			if r.id == "ssrf-fetch-user-url" && browserFile {
+				continue // a fetch in a DOM-touching file is a browser request, not server-side SSRF
+			}
 			var matched bool
 			if isScala && strings.HasPrefix(r.id, "scala:") {
 				matched = scalaRuleMatches(r, text, matchText)
@@ -315,6 +566,8 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 				matched = vbRuleMatches(r, text, matchText)
 			} else if isVB {
 				matched = vbGenericRuleMatches(r, text, matchText)
+			} else if isJS {
+				matched = jsRuleMatches(r, text, matchText)
 			} else if isPHP && r.id == "php:closing-tag" {
 				matched = phpClosingTagEligible(ext) && phpRuleMatches(r, phpText, matchText)
 			} else if isPHP && phpRuleNeedsCodePosition(r.id) {
@@ -323,6 +576,10 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 				matched = r.re.MatchString(phpText) && !r.skip(phpText)
 			} else {
 				matched = r.re.MatchString(text) && !r.skip(text)
+			}
+			if !matched {
+				// The concatenation that makes this sink dangerous may sit on an earlier line.
+				matched = crossLineMatch(r.id, ext, lines, i)
 			}
 			if matched && isPHP && phpRuleOwnsGeneric(r.id, a, ext, phpText, matchText) {
 				continue

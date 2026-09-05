@@ -2,6 +2,7 @@ package sast
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -581,13 +582,13 @@ func TestAnalyzerRespectsAggregateLimits(t *testing.T) {
 	writeFile(t, root, "a.go", "import \"crypto/md5\"\n")
 	writeFile(t, root, "b.go", "import \"crypto/sha1\"\n")
 
-	hits, err := New().analyzeSource(context.Background(), root, 1, maxRetainedSourceBytes)
-	if err != nil || len(hits) != 1 {
-		t.Fatalf("file-limited scan = %+v, err=%v", hits, err)
+	report, err := New().analyzeSource(context.Background(), root, 1, maxRetainedSourceBytes)
+	if err != nil || len(report.Findings) != 1 || !report.Truncated {
+		t.Fatalf("file-limited scan = %+v, err=%v", report, err)
 	}
-	hits, err = New().analyzeSource(context.Background(), root, maxSourceFiles, 24)
-	if err != nil || len(hits) != 1 {
-		t.Fatalf("byte-limited scan = %+v, err=%v", hits, err)
+	report, err = New().analyzeSource(context.Background(), root, maxSourceFiles, 24)
+	if err != nil || len(report.Findings) != 1 || !report.Truncated {
+		t.Fatalf("byte-limited scan = %+v, err=%v", report, err)
 	}
 }
 
@@ -961,4 +962,209 @@ router.post("/search", async (req, res) => {
 	if !strings.Contains(h.SeverityRationale, "source-to-sink value flow") {
 		t.Fatalf("severity rationale should name value-flow proof gap: %q", h.SeverityRationale)
 	}
+}
+
+// TestAnalyzeSourceReportSurfacesTruncation pins the completeness flag: a tree that overruns the
+// finding budget reports Truncated, a small clean tree does not.
+func TestAnalyzeSourceReportSurfacesTruncation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		lines int
+		want  bool
+	}{
+		{name: "within budget", lines: 3, want: false},
+		{name: "over budget", lines: maxFindings * 3, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			var b strings.Builder
+			b.WriteString("package x\n")
+			for i := 0; i < tc.lines; i++ {
+				b.WriteString("var _ = md5.New()\n")
+			}
+			writeFile(t, root, "hash.go", b.String())
+
+			report, err := New().AnalyzeSourceReport(context.Background(), root)
+			if err != nil {
+				t.Fatalf("analyze: %v", err)
+			}
+			if report.Truncated != tc.want {
+				t.Errorf("Truncated = %v, want %v (findings=%d)", report.Truncated, tc.want, len(report.Findings))
+			}
+			if len(report.Findings) == 0 {
+				t.Error("want at least one finding")
+			}
+		})
+	}
+}
+
+// TestPerFileFindingCapKeepsOtherFiles proves the per-file cap is applied before the tree-wide one:
+// a single file matching far past the whole-tree budget must not starve the next file.
+func TestPerFileFindingCapKeepsOtherFiles(t *testing.T) {
+	root := t.TempDir()
+	var noisy strings.Builder
+	noisy.WriteString("package x\n")
+	for i := 0; i < maxFindings+100; i++ { // 600 hits: more than the whole-tree budget on its own
+		noisy.WriteString("var _ = md5.New()\n")
+	}
+	writeFile(t, root, "a_noisy.go", noisy.String())
+	var quiet strings.Builder
+	quiet.WriteString("package y\n")
+	for i := 0; i < 10; i++ {
+		quiet.WriteString("var _ = sha1.New()\n")
+	}
+	writeFile(t, root, "b_quiet.go", quiet.String())
+
+	report, err := New().AnalyzeSourceReport(context.Background(), root)
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	byFile := map[string]int{}
+	sha1Hits := 0
+	for _, f := range report.Findings {
+		byFile[filepath.ToSlash(f.File)]++
+		if f.RuleID == "weak-hash-sha1" {
+			sha1Hits++
+		}
+	}
+	if byFile["a_noisy.go"] != maxFindingsPerFile {
+		t.Errorf("noisy file findings = %d, want the per-file cap %d", byFile["a_noisy.go"], maxFindingsPerFile)
+	}
+	if sha1Hits != 10 {
+		t.Errorf("second file weak-hash-sha1 hits = %d, want 10 (the noisy file must not eat the budget)", sha1Hits)
+	}
+	if !report.Truncated {
+		t.Error("a capped file must report Truncated")
+	}
+}
+
+// TestSkipsVendoredMinifiedAndGeneratedFiles covers the walk-level skips: compound minified
+// extensions, bundled content, generated banners, third-party trees, and web assets under the
+// mixed-content asset directories.
+//
+// The asset-directory cases carry the important distinction. A .js under static/, assets/ or
+// public/ is skipped only when something about the FILE says third-party: a distributed-library
+// banner, a vendor or build directory in its path, or a line long enough to be build output. A
+// hand-written script in the same tree is first-party code and must be scanned, which is where a
+// Flask or Django application keeps its own JavaScript.
+func TestSkipsVendoredMinifiedAndGeneratedFiles(t *testing.T) {
+	longLine := strings.Repeat("a", 900) + ";"
+	oneHugeLine := strings.Repeat("var x=1;", 8000) // > 50 KiB on a single line
+
+	for _, tc := range []struct {
+		name    string
+		rel     string
+		content string
+		want    bool // want the file scanned
+	}{
+		{name: "min.js suffix", rel: "web/jquery.min.js", content: "var h = CryptoJS.MD5(x);\n", want: false},
+		{name: "bundle.js suffix", rel: "web/app.bundle.js", content: "var h = CryptoJS.MD5(x);\n", want: false},
+		{name: "single huge line", rel: "web/app.js", content: "var h = CryptoJS.MD5(x);\n" + oneHugeLine + "\n", want: false},
+		{name: "high average line length", rel: "web/packed.js", content: "var h = CryptoJS.MD5(x);\n" + strings.Repeat(longLine+"\n", 12), want: false},
+		{name: "short file with one long constant is not minified", rel: "web/config.js", content: "var h = CryptoJS.MD5(x);\n" + longLine + "\n", want: true},
+		{name: "generated banner", rel: "zz_generated.go", content: "// Code generated by mockgen. DO NOT EDIT.\n\nimport \"crypto/md5\"\n", want: false},
+		{name: "third_party tree", rel: "third_party/lib/x.go", content: "import \"crypto/md5\"\n", want: false},
+		{name: "bower_components tree", rel: "bower_components/x/x.js", content: "var h = CryptoJS.MD5(x);\n", want: false},
+		{name: "library banner under assets", rel: "app/assets/javascripts/jquery.plugin.js", content: "/*\n Fancy Plugin v2.1.0 | http://example.invalid | MIT Licensed\n*/\nvar h = CryptoJS.MD5(x);\n", want: false},
+		{name: "copyright banner under assets", rel: "app/assets/javascripts/widget.js", content: "/*\n Widget v1.4.0\n Copyright 2013 Someone Else\n Released under the MIT license\n*/\nvar h = CryptoJS.MD5(x);\n", want: false},
+		// A bare corporate header is the commonest header on FIRST-PARTY source. It names an owner
+		// and nothing else, so it must not read as a distributed library.
+		{name: "corporate copyright header is first-party", rel: "static/js/app.js", content: "/*\n * Copyright 2026 Acme Inc. All rights reserved.\n */\nvar h = CryptoJS.MD5(x);\n", want: true},
+		{name: "corporate licence header is first-party", rel: "static/js/app.js", content: "/*\n * Copyright 2026 Acme Inc.\n * Licensed under the Apache License, Version 2.0\n */\nvar h = CryptoJS.MD5(x);\n", want: true},
+		{name: "vendor directory under assets", rel: "app/assets/javascripts/vendor/thing.js", content: "var h = CryptoJS.MD5(x);\n", want: false},
+		{name: "build output line under assets", rel: "public/js/loader.js", content: "var h = CryptoJS.MD5(x);\n" + strings.Repeat("z", 5000) + "\n", want: false},
+		{name: "css under public with a banner", rel: "public/theme.css", content: "/* Theme v1.2.0 | MIT Licensed | example.invalid */\n/* CryptoJS.MD5 */\nbody { color: red }\n", want: false},
+		{name: "first-party js under static is scanned", rel: "static/js/app.js", content: "var h = CryptoJS.MD5(x);\n", want: true},
+		{name: "first-party js under assets is scanned", rel: "app/assets/javascripts/application.js", content: "var h = CryptoJS.MD5(x);\n", want: true},
+		{name: "python under static", rel: "static/gen.py", content: "import hashlib\nh = hashlib.md5(x)\n", want: true},
+		{name: "ruby under assets", rel: "app/assets/helper.rb", content: "h = Digest::MD5.new\nrequire 'hashlib.md5('\n", want: true},
+		{name: "plain first-party js", rel: "src/app.js", content: "var h = CryptoJS.MD5(x);\n", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, tc.rel, tc.content)
+			report, err := New().AnalyzeSourceReport(context.Background(), root)
+			if err != nil {
+				t.Fatalf("analyze: %v", err)
+			}
+			got := len(report.Findings) > 0
+			if got != tc.want {
+				t.Errorf("scanned = %v, want %v (findings=%+v)", got, tc.want, report.Findings)
+			}
+		})
+	}
+}
+
+// TestReportSeparatesExclusionsFromTruncation pins the two halves of the completeness contract.
+//
+// A file excluded as vendored, minified or generated is a scope decision, so it is counted in
+// SkippedFiles and does not set Truncated: folding it in would make Truncated true for every real
+// repository, which tells a caller nothing. A cap that stops the scan short does set Truncated. The
+// failure this guards against is the one that matters most in a scanner: dropping a file and still
+// returning a report that looks complete, so a clean tree and an unscanned one read the same.
+func TestReportSeparatesExclusionsFromTruncation(t *testing.T) {
+	t.Run("an excluded file is counted, not called truncation", func(t *testing.T) {
+		root := t.TempDir()
+		writeFile(t, root, "src/app.js", "var h = CryptoJS.MD5(x);\n")
+		writeFile(t, root, "web/jquery.min.js", "var h = CryptoJS.MD5(x);\n")
+		writeFile(t, root, "zz_generated.go", "// Code generated by mockgen. DO NOT EDIT.\n\nimport \"crypto/md5\"\n")
+
+		report, err := New().AnalyzeSourceReport(context.Background(), root)
+		if err != nil {
+			t.Fatalf("analyze: %v", err)
+		}
+		// Both exclusions count: the .min.js dropped on its name and the generated file dropped on
+		// its banner. A file dropped on its name is exactly as invisible to the reader as one
+		// dropped on its content.
+		if report.SkippedFiles != 2 {
+			t.Errorf("SkippedFiles = %d, want 2 (the .min.js and the generated file)", report.SkippedFiles)
+		}
+		if report.SkippedFiles == 0 {
+			t.Error("SkippedFiles = 0; an excluded file must be reported, else a dropped file is silent")
+		}
+		if report.Truncated {
+			t.Error("Truncated = true for a scan that only excluded vendored and generated files")
+		}
+		if len(report.Findings) == 0 {
+			t.Error("the first-party file must still be scanned")
+		}
+	})
+
+	t.Run("a complete scan at exactly the budget is not truncated", func(t *testing.T) {
+		// One line can match several rules, so measure the yield of a single line first and size
+		// the corpus from it. Landing exactly on maxFindings with the last file fully read is the
+		// case under test: nothing was dropped, so nothing may claim otherwise.
+		probe := t.TempDir()
+		writeFile(t, probe, "probe.go", "package x\nvar _ = md5.New()\n")
+		probeReport, err := New().AnalyzeSourceReport(context.Background(), probe)
+		if err != nil {
+			t.Fatalf("probe: %v", err)
+		}
+		perLine := len(probeReport.Findings)
+		if perLine == 0 || maxFindings%perLine != 0 {
+			t.Skipf("one line yields %d findings, which does not divide the %d budget evenly", perLine, maxFindings)
+		}
+		linesPerFile := maxFindingsPerFile / perLine
+		files := maxFindings / (linesPerFile * perLine)
+
+		root := t.TempDir()
+		for f := 0; f < files; f++ {
+			var b strings.Builder
+			b.WriteString("package x\n")
+			for i := 0; i < linesPerFile; i++ {
+				fmt.Fprintf(&b, "var _%d_%d = md5.New()\n", f, i)
+			}
+			writeFile(t, root, fmt.Sprintf("pkg%02d/hash.go", f), b.String())
+		}
+		report, err := New().AnalyzeSourceReport(context.Background(), root)
+		if err != nil {
+			t.Fatalf("analyze: %v", err)
+		}
+		if len(report.Findings) != maxFindings {
+			t.Fatalf("findings = %d, want exactly %d so the boundary is the case under test", len(report.Findings), maxFindings)
+		}
+		if report.Truncated {
+			t.Error("Truncated = true for a scan that ended exactly on the budget with every file read")
+		}
+	})
 }

@@ -115,7 +115,7 @@ func TestEmbeddedMigrationVersionsConcurrent(t *testing.T) {
 func TestPostgresReadinessChecks(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatal(err)
 	}
 	pool, err := Connect(ctx, dsn)

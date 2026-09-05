@@ -18,7 +18,7 @@ func TestMigration0123PrivacyPolicyActivationEvidenceGuards(t *testing.T) {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
@@ -62,13 +62,10 @@ func TestMigration0123RefusesRollbackWithActivationHistory(t *testing.T) {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatalf("goose open: %v", err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() {
 		_, _ = db.ExecContext(context.Background(), `SET session_replication_role = replica`)
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM privacy_policy_activations WHERE operation_id='migration-0123-probe'`)

@@ -20,7 +20,7 @@ func TestEngagementRepository(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)

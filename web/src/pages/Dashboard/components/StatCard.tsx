@@ -9,6 +9,7 @@ export const StatCard: FC<StatCardProps> = ({
   hint,
   tone = 'muted',
   className,
+  valueClassName,
 }) => {
   const iconTone = {
     muted: 'text-fg-tertiary',
@@ -31,7 +32,7 @@ export const StatCard: FC<StatCardProps> = ({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <span className="truncate block text-sm font-semibold text-secondary">{label}</span>
-          <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+          <div className={cx('mt-2 font-mono font-bold tabular-nums text-primary', valueClassName ?? 'text-3xl sm:text-4xl')}>
             {typeof value === 'number' ? value.toLocaleString() : value}
           </div>
         </div>

@@ -96,6 +96,7 @@ import (
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/businessassetuc"
+	capabilitiesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/capabilities"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/crosscheckjudge"
@@ -898,6 +899,11 @@ func main() {
 		log.Error("vex service init failed", "err", err)
 		os.Exit(1)
 	}
+	if vulnerabilityTransactions != nil {
+		// One VEX document retires many findings. Without a transaction each retirement commits
+		// on its own, so a failure part way through leaves some findings retired and the rest not.
+		vexService.SetTransactionRunner(vulnerabilityTransactions)
+	}
 
 	// Recon orchestration: one shared execution guard, an argv-only
 	// ToolRunner (timeout + output cap), a bounded worker pool replacing the P1 bare
@@ -1035,6 +1041,12 @@ func main() {
 		log.Error("users service init failed", "err", err)
 		os.Exit(1)
 	}
+	if vulnerabilityTransactions != nil {
+		// The last-admin guard counts the roster and then writes. Both statements must be one
+		// transaction, or two concurrent demotions each see the other admin still enabled and the
+		// tenant is left with nobody who can administer it.
+		usersService.SetTransactionRunner(vulnerabilityTransactions)
+	}
 	if err := usersService.EnsureBootstrapAdmin(context.Background(), cfg.APIToken); err != nil {
 		log.Error("bootstrap admin seed failed", "err", err)
 		os.Exit(1)
@@ -1066,6 +1078,11 @@ func main() {
 	if err != nil {
 		log.Error("approval service init failed", "err", err)
 		os.Exit(1)
+	}
+	if vulnerabilityTransactions != nil {
+		// A human's approve or deny and its audit record commit together, so an operator is
+		// never told the decision failed while the agent acts on it.
+		approvalSvc.SetTransactionRunner(vulnerabilityTransactions)
 	}
 	safetyGate, err := safety.NewGate(reconGuard, approvalSvc, evidenceService)
 	if err != nil {
@@ -1119,6 +1136,32 @@ func main() {
 		log.Error("fleet audit reconciliation runner init failed", "err", err)
 		os.Exit(1)
 	}
+	// Optional-subsystem catalog for GET /api/v1/capabilities: every field is one resolved
+	// SYNAPSE_* switch, so a client can tell a disabled subsystem from a broken one.
+	capabilitySvc, err := capabilitiesuc.NewService(capabilitiesuc.Flags{
+		Fleet:                cfg.FleetEnabled,
+		FleetAssets:          cfg.FleetAssetsEnabled,
+		FleetHostIngest:      cfg.FleetHostIngestEnabled,
+		FleetClusterIngest:   cfg.FleetClusterIngestEnabled,
+		FleetTelemetryIngest: cfg.FleetTelemetryIngestEnabled,
+		FleetDetectionIngest: cfg.FleetDetectionIngestEnabled,
+		CSPM:                 cfg.CSPMEnabled,
+		Agent:                cfg.AgentEnabled,
+		FPTriage:             cfg.FPTriageEnabled,
+		SLA:                  cfg.SLAEnabled,
+		Judgments:            cfg.JudgmentsEnabled,
+		Sandbox:              cfg.SandboxEnabled,
+		WriteupDrafts:        cfg.WriteupDraftsEnabled,
+		Taint:                cfg.TaintEnabled,
+		JSReachability:       cfg.JSReachabilityEnabled,
+		SingleTenant:         cfg.SingleTenant,
+		OIDC:                 cfg.OIDCEnabled,
+	})
+	if err != nil {
+		log.Error("capability catalog init failed", "err", err)
+		os.Exit(1)
+	}
+	router.SetCapabilities(capabilitySvc)
 	router.SetCoverageWindowReader(coverageWindowStore)
 	router.SetPrivacyPolicyService(privacyPolicySvc)
 	if cfg.OIDCEnabled {
@@ -1200,6 +1243,7 @@ func main() {
 		os.Exit(1)
 	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
+	vulnerabilityRegistry.AllowPrivateNetworkSources(cfg.VulnerabilitySourceAllowPrivateNetwork)
 	if err := vulnerabilityprovider.RegisterAll(vulnerabilityRegistry, vulnerabilityprovider.Dependencies{
 		LookupCanonical: vulnerabilityMaterializer.GetCanonical,
 		CurrentRecords:  vulnerabilityMaterializer.CurrentSourceRecordIDs,
@@ -1221,6 +1265,7 @@ func main() {
 		log.Error("vulnerability source service init failed", "err", err)
 		os.Exit(1)
 	}
+	vulnerabilitySourceService.AllowPrivateNetworkSources(cfg.VulnerabilitySourceAllowPrivateNetwork)
 	vulnerabilityProjection, err := vulnerabilityprojection.NewService(findingRepo)
 	if err != nil {
 		log.Error("vulnerability finding projection init failed", "err", err)

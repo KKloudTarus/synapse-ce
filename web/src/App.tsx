@@ -5,7 +5,9 @@ import { AuthProvider, useAuth } from './auth/AuthContext'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoadingFallback } from './components/layout/LoadingFallback'
 import { MobileSidebar, Sidebar } from './components/layout/Sidebar'
+import { ToastProvider } from './components/synapse/Toast'
 import { Connect } from './pages/Connect'
+import { NotFound } from './pages/NotFound'
 
 // --- Lazy-loaded page components ---
 const Dashboard = lazy(() => import('./pages/Dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })))
@@ -49,7 +51,9 @@ const ProjectDependencyGraphPage = lazy(() => import('./pages/CodeQuality/Projec
 export default function App() {
   return (
     <AuthProvider>
-      <Gate />
+      <ToastProvider>
+        <Gate />
+      </ToastProvider>
     </AuthProvider>
   )
 }
@@ -105,7 +109,7 @@ function Gate() {
         <Route path="ai-triage/observability" element={<AITriageObservability />} />
         <Route path="vulnerability-intelligence" element={<VulnerabilityIntelligence />} />
         <Route path="vulnerability-intelligence/advisories/:advisoryId" element={<VulnerabilityAdvisoryPage />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   )
@@ -116,6 +120,20 @@ function Shell() {
   const location = useLocation()
   return (
     <div className="h-screen overflow-hidden bg-primary md:grid md:grid-cols-[auto_1fr]">
+      <a
+        href="#main-content"
+        onClick={(e) => {
+          // The shell scrolls inside <main>, so move focus explicitly instead of
+          // relying on a fragment navigation the router would swallow.
+          e.preventDefault()
+          const main = document.getElementById('main-content')
+          main?.focus()
+          main?.scrollTo({ top: 0 })
+        }}
+        className="sr-only z-[110] rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-primary_on-brand shadow-lg focus:not-sr-only focus:absolute focus:left-4 focus:top-4"
+      >
+        Skip to main content
+      </a>
       <Sidebar />
       <MobileSidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
       <div className="flex min-h-0 min-w-0 flex-col bg-primary md:pt-4">
@@ -130,7 +148,11 @@ function Shell() {
             <Menu01 className="size-5" />
           </button>
         </div>
-        <main className="flex-1 overflow-auto bg-secondary-subtle p-4 sm:p-6 xl:p-8 md:rounded-tl-[40px] md:border-t md:border-l md:border-secondary md:shadow-md">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 overflow-auto bg-secondary-subtle p-4 sm:p-6 xl:p-8 outline-none md:rounded-tl-[40px] md:border-t md:border-l md:border-secondary md:shadow-md"
+        >
           <ErrorBoundary key={location.pathname}>
             <Suspense fallback={<LoadingFallback />}>
               <Outlet />

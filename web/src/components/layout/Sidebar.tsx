@@ -13,6 +13,7 @@ import {
   Server01,
   Settings01,
   ShieldTick,
+  SlashCircle01,
   ShieldZap,
   Target04,
   XClose,
@@ -21,6 +22,9 @@ import { useEffect, useRef, useState, type ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import logo from '../../assets/logo.png'
 import { useOptionalAuth } from '../../auth/AuthContext'
+import { capabilityHint, disabledCapability, useCapabilities } from '../../lib/capabilities'
+import type { Capability } from '../../lib/types'
+import { Tooltip, TooltipTrigger } from '../base/tooltip/tooltip'
 import { cn } from '../ui'
 
 type IconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
@@ -31,6 +35,13 @@ type NavItem = {
   to: string
   end?: boolean
   children?: Array<{ label: string; to: string }>
+  /**
+   * Key of the optional subsystem that serves this destination, from
+   * internal/usecase/capabilities/service.go. When the deployment reports it disabled, the row
+   * renders inert with the controlling switch in its tooltip instead of a link that 404s.
+   * Omit it for destinations every deployment serves.
+   */
+  capability?: string
 }
 
 const DASHBOARD: NavItem = { icon: BarChartSquare02, label: 'Dashboard', to: '/dashboard', end: true }
@@ -44,7 +55,7 @@ const NAV_GROUPS: Array<{
       label: 'Security operations',
       items: [
         { icon: Target04, label: 'Engagements', to: '/engagements' },
-        { icon: ShieldTick, label: 'Review Queue', to: '/ai-triage/reviews' },
+        { icon: ShieldTick, label: 'Review Queue', to: '/ai-triage/reviews', capability: 'ai_triage' },
       ],
     },
     {
@@ -72,9 +83,9 @@ const NAV_GROUPS: Array<{
     {
       label: 'Runtime security',
       items: [
-        { icon: Server01, label: 'Fleet', to: '/fleet' },
+        { icon: Server01, label: 'Fleet', to: '/fleet', capability: 'fleet' },
         { icon: AlertTriangle, label: 'Incidents', to: '/fleet/incidents' },
-        { icon: Activity, label: 'Automation Observability', to: '/ai-triage/observability' },
+        { icon: Activity, label: 'Automation Observability', to: '/ai-triage/observability', capability: 'ai_triage' },
       ],
     },
   ]
@@ -93,6 +104,45 @@ function storageSet(key: string, value: string) {
   } catch {}
 }
 
+/**
+ * A nav destination whose subsystem the server reports as off. It stays visible so the product
+ * still says what Synapse can do, but it is inert and names the switch: a live link here answers
+ * 404, which reads as a broken build rather than a configuration choice.
+ */
+function renderDisabledItem({
+  icon: Icon,
+  label,
+  to,
+  capability,
+  collapsed,
+}: {
+  icon?: IconComponent
+  label: string
+  to: string
+  capability: Capability
+  collapsed: boolean
+}) {
+  const hint = capabilityHint(capability)
+  return (
+    <div key={to} className="space-y-0.5">
+      <Tooltip title={`${label} is not enabled`} description={hint} placement="right">
+        <TooltipTrigger
+          aria-label={`${label}. ${hint}`}
+          aria-disabled="true"
+          className={cn(
+            'group relative flex h-10 w-full max-w-full cursor-not-allowed items-center rounded-lg text-sm font-semibold text-quaternary select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
+            collapsed ? 'justify-center px-0' : 'gap-3 px-3 py-2',
+          )}
+        >
+          {Icon && <Icon className="size-5 shrink-0 text-fg-quaternary" aria-hidden="true" />}
+          <span className={cn('truncate', collapsed ? 'sr-only' : 'inline')}>{label}</span>
+          {!collapsed && <SlashCircle01 className="ml-auto size-4 shrink-0 text-fg-quaternary" aria-hidden="true" />}
+        </TooltipTrigger>
+      </Tooltip>
+    </div>
+  )
+}
+
 function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const auth = useOptionalAuth()
   const [signingOut, setSigningOut] = useState(false)
@@ -106,6 +156,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
     }
   }
   const location = useLocation()
+  const capabilities = useCapabilities()
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>(() => ({
     '/code-quality': storageGet('synapse-nav-expanded-/code-quality') !== 'false',
   }))
@@ -119,7 +170,9 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
   }
 
   function renderItems(items: NavItem[]) {
-    return items.map(({ icon: Icon, label, to, end, children }) => {
+    return items.map(({ icon: Icon, label, to, end, children, capability }) => {
+      const offline = disabledCapability(capabilities, capability)
+      if (offline) return renderDisabledItem({ icon: Icon, label, to, capability: offline, collapsed })
       const hasChildren = Boolean(children && children.length > 0)
       const isExpanded = Boolean(expandedItems[to])
       const isSubRouteActive = Boolean(

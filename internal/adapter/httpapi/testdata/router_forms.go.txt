@@ -1,0 +1,15 @@
+package httpapi
+
+func (rt *Router) routes() {
+	mux.HandleFunc("GET /guarded", rt.authz(perm, rt.handler))
+	mux.HandleFunc("GET /public", rt.handler)
+	// A comment that mentions rt.authz( must not make the next line look guarded.
+	mux.HandleFunc("GET /commented", rt.handler)
+	mux.HandleFunc(
+		"GET /multiline",
+		rt.handler,
+	)
+	mux.Handle("GET /via-handle", someHandler)
+	mux.HandleFunc("GET /nested", rt.authz(perm, rt.withEngTenant(rt.handler)))
+	mux.HandleFunc("GET /platform", rt.authz(perm, rt.requirePlatformAdmin(rt.handler)))
+}

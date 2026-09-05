@@ -113,8 +113,9 @@ export function ExportButtons({
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        {/* Primary Action */}
-        <Button size="sm" color="primary" onClick={() => setBuilding(true)} iconLeading={File06}>
+        {/* The engagement header has one primary action, and it is Run scan in
+            the hero below. Report and export are secondary and tertiary. */}
+        <Button size="sm" color="secondary" onClick={() => setBuilding(true)} iconLeading={File06}>
           Build report
         </Button>
 
@@ -122,7 +123,7 @@ export function ExportButtons({
         <Dropdown.Root>
           <Button
             size="sm"
-            color="secondary"
+            color="tertiary"
             iconLeading={Download01}
             iconTrailing={ChevronDown}
             isLoading={busy !== null && ['sarif', 'openvex', 'spdx', 'cyclonedx', 'bundle', 'excel'].includes(busy)}

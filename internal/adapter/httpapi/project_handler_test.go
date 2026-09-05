@@ -233,8 +233,19 @@ func TestProjectHandlers(t *testing.T) {
 		t.Fatalf("get: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["Key"] != "synapse" {
+	// Projects serialize in snake_case, like every other resource.
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["key"] != "synapse" {
 		t.Fatalf("body=%v err=%v", body, err)
+	}
+	for _, legacy := range []string{"ID", "TenantID", "Key", "SourceBinding", "Audit"} {
+		if _, ok := body[legacy]; ok {
+			t.Errorf("response still carries the Go field name %q", legacy)
+		}
+	}
+	for _, key := range []string{"id", "tenant_id", "name", "source_binding", "created_at", "updated_at"} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("response is missing %q: %v", key, body)
+		}
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/projects/synapse", nil)

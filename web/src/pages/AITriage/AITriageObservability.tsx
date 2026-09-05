@@ -1,14 +1,23 @@
 import { useState } from 'react'
 import { Activity, AlertTriangle, BarChart01, Coins01, RefreshCw01 } from '@untitledui/icons'
 import { Button, Card, EmptyState, ErrorState, Spinner, cn } from '../../components/ui'
+import { FeatureDisabledState, isFeatureDisabled } from '../../components/synapse/FeatureDisabledState'
 import { api } from '../../lib/api'
 import type { AITriageMetricRow, AITriageObservability as Observability } from '../../lib/types'
 import { useFetch } from '../../hooks'
 
 export function AITriageObservability() {
   const [revision, setRevision] = useState(0)
-  const { data, loading, error } = useFetch<Observability>(
-    () => api.aiTriageObservability(),
+  const [disabled, setDisabled] = useState(false)
+  const { data, loading, error } = useFetch<Observability | null>(
+    () =>
+      api.aiTriageObservability().catch((e) => {
+        if (isFeatureDisabled(e)) {
+          setDisabled(true)
+          return null
+        }
+        throw e
+      }),
     { deps: [revision] },
   )
 
@@ -27,7 +36,19 @@ export function AITriageObservability() {
           <RefreshCw01 className="size-4" />Refresh
         </Button>
       </header>
-      {error ? <ErrorState message={error} /> : loading || data === null ? <Spinner label="Loading AI triage metrics…" /> : <Dashboard data={data} />}
+      {disabled ? (
+        <FeatureDisabledState
+          feature="AI triage"
+          envVar="SYNAPSE_FP_TRIAGE_ENABLED"
+          hint="Provider requests, disagreement and gate-exemption rates are recorded once triage runs."
+        />
+      ) : error ? (
+        <ErrorState message={error} />
+      ) : loading || data === null ? (
+        <Spinner label="Loading AI triage metrics…" />
+      ) : (
+        <Dashboard data={data} />
+      )}
     </div>
   )
 }

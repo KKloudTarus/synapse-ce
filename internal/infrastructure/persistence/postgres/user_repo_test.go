@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 func TestBootstrapIsConcurrentAndAuditedOnce(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
@@ -86,7 +87,7 @@ func TestBootstrapIsConcurrentAndAuditedOnce(t *testing.T) {
 func TestUserRepoTenantRoundTrip(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
@@ -121,5 +122,95 @@ func TestUserRepoTenantRoundTrip(t *testing.T) {
 	}
 	if got2, _ := repo.GetByAPIKeyHash(ctx, hash2); got2.TenantID != "" {
 		t.Fatalf("a user without a tenant must default to '', got %q", got2.TenantID)
+	}
+}
+
+// TestUserRepoScopesReadsAndWritesByTenant proves the explicit tenant predicate, independent of row
+// level security: a user of another tenant is invisible to reads and untouched by an update, while
+// the bootstrap admin's empty tenant_id resolves to the default tenant. Gated on SYNAPSE_TEST_DB_DSN.
+func TestUserRepoScopesReadsAndWritesByTenant(t *testing.T) {
+	dsn := testDSN(t)
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	repo := NewUserRepository(pool)
+
+	suffix := randHex(t)
+	tenantA, tenantB := shared.ID("tenant-a-"+suffix), shared.ID("tenant-b-"+suffix)
+	mk := func(tenant shared.ID, name string) *user.User {
+		t.Helper()
+		u, err := user.New(shared.ID(name+"-"+suffix), tenant.String(), name, user.RoleMember, "hash-"+name+"-"+suffix, time.Unix(1, 0).UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Create(ctx, u); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, u.ID.String()) })
+		return u
+	}
+	inA, inB := mk(tenantA, "alice"), mk(tenantB, "bob")
+	// A pre-tenant row (empty tenant_id) belongs to the default tenant.
+	legacy, err := user.New(shared.ID("legacy-"+suffix), "", "Legacy", user.RoleAdmin, "hash-legacy-"+suffix, time.Unix(1, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(ctx, legacy); err != nil {
+		t.Fatalf("create legacy: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, legacy.ID.String()) })
+
+	if got, err := repo.GetByID(ctx, tenantA, inA.ID); err != nil || got.ID != inA.ID {
+		t.Fatalf("own-tenant read: %+v %v", got, err)
+	}
+	if _, err := repo.GetByID(ctx, tenantA, inB.ID); !errors.Is(err, shared.ErrNotFound) {
+		t.Errorf("cross-tenant read = %v, want not found", err)
+	}
+	if got, err := repo.GetByID(ctx, shared.DefaultTenant, legacy.ID); err != nil || got.ID != legacy.ID {
+		t.Errorf("an empty tenant_id must resolve to the default tenant: %+v %v", got, err)
+	}
+	if _, err := repo.GetByID(ctx, tenantA, legacy.ID); !errors.Is(err, shared.ErrNotFound) {
+		t.Errorf("default-tenant row must not leak into tenant-a: %v", err)
+	}
+
+	listed, err := repo.List(ctx, tenantA)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != inA.ID {
+		t.Fatalf("tenant-a list = %d rows, want only %s", len(listed), inA.ID)
+	}
+
+	// An update from the wrong tenant changes nothing.
+	inB.Name = "renamed by tenant a"
+	if err := repo.Update(ctx, tenantA, inB); !errors.Is(err, shared.ErrNotFound) {
+		t.Errorf("cross-tenant update = %v, want not found", err)
+	}
+	unchanged, err := repo.GetByID(ctx, tenantB, inB.ID)
+	if err != nil || unchanged.Name != "bob" {
+		t.Fatalf("cross-tenant update mutated the row: %+v %v", unchanged, err)
+	}
+
+	// An own-tenant update writes the mutable fields and cannot move the user to another tenant.
+	inA.Name, inA.Disabled, inA.TenantID = "alice renamed", true, tenantB.String()
+	inA.APIKeyHash = "rotated-" + suffix
+	if err := repo.Update(ctx, tenantA, inA); err != nil {
+		t.Fatalf("own-tenant update: %v", err)
+	}
+	after, err := repo.GetByID(ctx, tenantA, inA.ID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if after.Name != "alice renamed" || !after.Disabled || after.APIKeyHash != "rotated-"+suffix {
+		t.Errorf("update did not persist: %+v", after)
+	}
+	if after.TenantID != tenantA.String() {
+		t.Errorf("update moved the user to tenant %q", after.TenantID)
 	}
 }

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,5 +159,69 @@ func TestLoadAndApplySynapseignore(t *testing.T) {
 	// Missing file => empty ruleset, no error.
 	if rs, err := loadSynapseignore(t.TempDir()); err != nil || rs != nil {
 		t.Fatalf("missing .synapseignore must be (nil, nil), got %v %v", rs, err)
+	}
+}
+
+// TestRunQualityEmitsSARIFWhenGateFails locks the report/gate ordering: `quality --sarif --fail-on ...`
+// must write the SARIF document even though the gate then fails the command. Redirecting stdout to a
+// file used to leave that file empty, so the CI step that failed the build also destroyed its evidence.
+func TestRunQualityEmitsSARIFWhenGateFails(t *testing.T) {
+	root := t.TempDir()
+	src := "// TODO: fix this\nfunction f(a) {\n  return a;\n}\n"
+	if err := os.WriteFile(filepath.Join(root, "app.js"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		args     []string
+		contains string
+	}{
+		{name: "sarif", args: []string{root, "--sarif", "--fail-on", "info"}, contains: `"results"`},
+		{name: "text", args: []string{root, "--fail-on", "info"}, contains: "findings:"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := runQualityTo(&buf, tc.args)
+			if err == nil {
+				t.Fatal("runQualityTo returned nil, want the --fail-on gate error")
+			}
+			if !strings.Contains(err.Error(), "at or above info") {
+				t.Fatalf("gate error = %v, want the --fail-on message", err)
+			}
+			if buf.Len() == 0 {
+				t.Fatal("report is empty; it must be written before the gate decision")
+			}
+			if !strings.Contains(buf.String(), tc.contains) {
+				t.Fatalf("report missing %q, got:\n%s", tc.contains, buf.String())
+			}
+		})
+	}
+}
+
+// TestRunQualitySARIFIsValidJSON checks the emitted SARIF actually decodes and carries the findings, so
+// the ordering test above cannot pass on a truncated or half-written document.
+func TestRunQualitySARIFIsValidJSON(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "app.js"), []byte("// TODO: fix this\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := runQualityTo(&buf, []string{root, "--sarif", "--fail-on", "info"}); err == nil {
+		t.Fatal("runQualityTo returned nil, want the --fail-on gate error")
+	}
+	var doc struct {
+		Runs []struct {
+			Results []struct {
+				RuleID string `json:"ruleId"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("decode sarif: %v\n%s", err, buf.String())
+	}
+	if len(doc.Runs) == 0 || len(doc.Runs[0].Results) == 0 {
+		t.Fatalf("sarif carries no results: %s", buf.String())
 	}
 }

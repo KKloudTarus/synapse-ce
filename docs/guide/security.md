@@ -88,6 +88,50 @@ admin, consultant, reviewer, and read-only. Separation of duties means a machine
 never verify or accept its own claim. Tenant isolation is enforced at the service layer, so a
 caller cannot read another tenant's engagement even if a route wrapper is bypassed.
 
+## Operator identities and key revocation
+
+Every operator has its own bearer key, so each action is attributable to a person. Key management is
+`administer`-only and confined to the caller's own tenant:
+
+```
+GET   /api/v1/users                    the caller's tenant roster
+POST  /api/v1/users                    provision an operator; the key is shown once
+PATCH /api/v1/users/{id}               change name and role
+POST  /api/v1/users/{id}/disable       revoke access, keeping the identity
+POST  /api/v1/users/{id}/enable        restore access
+POST  /api/v1/users/{id}/rotate-key    issue a new key; the previous one stops working at once
+```
+
+Rotate the key when one leaks: the previous key stops authenticating the moment the new one is
+issued. Disable the account when a person leaves. There is no delete: an identity owns its audit,
+evidence, and finding attribution, so removing the row would break the history that makes those
+records provable. A disabled operator keeps its id and every past attribution; only authentication
+stops.
+
+Three rules keep this surface from becoming an escalation path.
+
+Provisioning into a tenant other than the caller's own is refused with `403` unless the caller is
+the bootstrap principal seeded from `SYNAPSE_API_TOKEN`, which is the only identity that may seed a
+new tenant's first admin. There is deliberately no platform-admin role, because a role would be
+assignable through this same API.
+
+The bootstrap principal itself is not manageable through this API. It is stored with an empty
+tenant, which normalizes to the default tenant, so it appears in that tenant's roster and its admins
+can see it. Updating it, disabling it, and rotating its key are refused with `403` for every caller
+but the bootstrap principal. Without that rule a default-tenant admin could rotate the bootstrap key,
+read the new plaintext from the response, and present it to become the platform principal that every
+global-resource guard tests for. Rotate the bootstrap credential by changing `SYNAPSE_API_TOKEN` and
+restarting, which is the only path that moves it.
+
+Disabling or demoting a tenant's last enabled admin is refused with `409`, so an admin cannot lock
+its own tenant out.
+
+`GET /api/v1/capabilities` is readable by any authenticated caller, including the read-only role. It
+reports which optional subsystems this deployment has switched on and names the `SYNAPSE_*` variable
+that controls each, never a variable's value. That is deployment topology, and it is exposed
+deliberately so the dashboard can explain a disabled feature to the person looking at it rather than
+showing a bare `404`.
+
 ## Browser OIDC access
 
 Browser OIDC uses a backend-for-frontend model. The server accepts an identity only for an exact approved

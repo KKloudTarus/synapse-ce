@@ -38,9 +38,12 @@ func (s *IdentityStore) CreateExternalIdentity(ctx context.Context, external ide
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	u, err := s.users.GetByID(ctx, external.UserID)
+	// The user lookup is tenant-scoped, so a user that does not exist and a user that belongs to
+	// another tenant are one case here – which is exactly how PostgreSQL answers, where both violate
+	// the (user_id, tenant_id) foreign key and surface as forbidden.
+	u, err := s.users.GetByID(ctx, external.TenantID, external.UserID)
 	if err != nil {
-		return fmt.Errorf("identity user %s: %w", external.UserID, err)
+		return fmt.Errorf("identity user %s tenant link is invalid: %w", external.UserID, shared.ErrForbidden)
 	}
 	if shared.TenantOrDefault(shared.ID(u.TenantID)) != external.TenantID {
 		return fmt.Errorf("identity user %s tenant: %w", external.UserID, shared.ErrForbidden)
@@ -107,9 +110,9 @@ func (s *IdentityStore) CreateSession(ctx context.Context, session identity.Sess
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	u, err := s.users.GetByID(ctx, session.UserID)
+	u, err := s.users.GetByID(ctx, session.TenantID, session.UserID)
 	if err != nil {
-		return fmt.Errorf("session user %s: %w", session.UserID, err)
+		return fmt.Errorf("session user %s tenant link is invalid: %w", session.UserID, shared.ErrForbidden)
 	}
 	if shared.TenantOrDefault(shared.ID(u.TenantID)) != session.TenantID {
 		return fmt.Errorf("session user %s tenant: %w", session.UserID, shared.ErrForbidden)
@@ -132,9 +135,9 @@ func (s *IdentityStore) RotateSession(ctx context.Context, previousSessionID sha
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	u, err := s.users.GetByID(ctx, replacement.UserID)
+	u, err := s.users.GetByID(ctx, replacement.TenantID, replacement.UserID)
 	if err != nil {
-		return fmt.Errorf("replacement session user %s: %w", replacement.UserID, err)
+		return fmt.Errorf("replacement session user %s tenant link is invalid: %w", replacement.UserID, shared.ErrForbidden)
 	}
 	if shared.TenantOrDefault(shared.ID(u.TenantID)) != replacement.TenantID {
 		return fmt.Errorf("replacement session user %s tenant: %w", replacement.UserID, shared.ErrForbidden)

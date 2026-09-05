@@ -9,23 +9,38 @@ Synapse ships as a set of Go binaries plus a web dashboard. The provided Compose
 The `deploy/docker-compose.full.yml` stack runs everything: PostgreSQL, an S3-compatible object
 store, the API server with Syft and Grype bundled, and the web dashboard.
 
-The stack requires explicit database credentials and complete runtime/migration DSNs. From the repository root:
+The stack requires explicit database credentials and complete runtime/migration DSNs. There are no defaults for them, and that is the point: a database password committed to a public repository is a password every reader of the repository has. Generate them once. From the repository root:
 
 ```bash
-cat > deploy/.env.local <<'EOF'
-DB_ADMIN_PASSWORD=replace-with-a-strong-local-admin-password
-DB_APP_PASSWORD=replace-with-a-different-local-app-password
-BLOB_PASSWORD=replace-with-a-third-local-password
-SYNAPSE_API_TOKEN=replace-with-a-random-token
-SYNAPSE_DB_DSN=postgres://synapse_app:replace-with-a-different-local-app-password@postgres:5432/synapse?sslmode=disable
-SYNAPSE_DB_MIGRATION_DSN=postgres://synapse_admin:replace-with-a-strong-local-admin-password@postgres:5432/synapse?sslmode=disable
+umask 077
+DB_ADMIN_PASSWORD="$(openssl rand -hex 16)"
+DB_APP_PASSWORD="$(openssl rand -hex 16)"
+BLOB_PASSWORD="$(openssl rand -hex 16)"
+cat > deploy/.env.local <<EOF
+DB_ADMIN_PASSWORD=$DB_ADMIN_PASSWORD
+DB_APP_PASSWORD=$DB_APP_PASSWORD
+BLOB_PASSWORD=$BLOB_PASSWORD
+SYNAPSE_API_TOKEN=$(openssl rand -hex 32)
+SYNAPSE_DB_DSN=postgres://synapse_app:$DB_APP_PASSWORD@postgres:5432/synapse?sslmode=disable
+SYNAPSE_DB_MIGRATION_DSN=postgres://synapse_admin:$DB_ADMIN_PASSWORD@postgres:5432/synapse?sslmode=disable
 EOF
 
 docker compose --env-file deploy/.env.local \
   -f deploy/docker-compose.full.yml up -d --build --wait
 ```
 
-`--env-file` is intentional: Compose does not infer `deploy/.env.local` merely because the Compose file lives in `deploy/`. Keep the file out of version control. Use URL-safe example passwords, or percent-encode reserved characters in complete DSNs. PostgreSQL stores its initial credentials in `pgdata`; changing the env file does not rewrite an existing role password. Keep the original credentials, rotate them in PostgreSQL, or reset disposable local state with `down -v`.
+Then check both surfaces:
+
+```bash
+curl localhost:8080/readyz                                  # {"status":"ready",...}
+curl -s -o /dev/null -w '%{http_code}\n' localhost:5173/    # 200
+```
+
+`--env-file` is intentional: Compose does not infer `deploy/.env.local` merely because the Compose file lives in `deploy/`. Keep the file out of version control; `.gitignore` already covers `.env.local`. Hex passwords are URL-safe; percent-encode reserved characters in any complete DSN you write by hand. PostgreSQL stores its initial credentials in the `pgdata` volume; changing the env file does not rewrite an existing role password. Keep the original credentials, rotate them in PostgreSQL, or reset disposable local state with `down -v`.
+
+The two database roles are not interchangeable. `synapse_admin` owns the schema, runs migrations, and grants the runtime role its table privileges. `synapse_app` is `NOSUPERUSER NOBYPASSRLS` and is the only role the API will serve under: `SYNAPSE_DB_DSN` pointed at a superuser stops startup with `rls: runtime DB role cannot enforce isolation: role is SUPERUSER`, because row level security is silently a no-op for a role that bypasses it.
+
+The two Compose files declare distinct project names, `synapse-dev` for `deploy/docker-compose.yml` and `synapse-full` for `deploy/docker-compose.full.yml`. Without them Compose derives the project name from the `deploy/` directory, both stacks share the volume `deploy_pgdata`, and the second one to run inherits the first one's superuser and fails with `password authentication failed`. Each stack now owns `synapse-dev_pgdata` or `synapse-full_pgdata`, so they can be started and stopped independently. They still both publish 5432, so run one at a time.
 
 Treat this profile as local development only. Its ports bind beyond loopback by default, MinIO has administrative access to the evidence bucket, and `SYNAPSE_SANDBOX_ENABLED=false` means source-acquisition and tool processes lack Synapse's required production containment. Restrict it with host firewall rules and use only trusted fixture targets. A production deployment must enable the fail-closed Linux sandbox, keep data services private, terminate TLS, and follow the checklist below.
 
@@ -38,6 +53,8 @@ Treat this profile as local development only. Its ports bind beyond loopback by 
 
 Init containers (`postgres-init`, `minio-init`, `project-source-artifacts-init`) prepare the database,
 bucket, and source-artifact volume before the API starts.
+
+`web` serves the built dashboard from nginx (`deploy/Dockerfile.web` target `compose`) and reverse-proxies `/api`, `/healthz`, and `/readyz` to `synapse-api`, which is the routing a Kubernetes ingress performs in production. Editing `web/` therefore does not hot-reload here; run `make dev` for that.
 
 ## Beyond a single API
 
@@ -64,19 +81,56 @@ export them in your shell.
 
 ## Image targets
 
-`deploy/Dockerfile` builds two images.
+`deploy/Dockerfile` has three buildable targets. `build` and `ast-build` are internal compile stages
+and are not meant to be built directly.
 
-- **api**: a minimal distroless image with only the `synapse-api` binary. Smallest and most
-  locked-down. Scan against an SBOM you provide, or keep Syft and Grype on PATH.
-- **full**: a Debian-based image that bundles pinned Syft and Grype for an end-to-end scan.
+- **production**: the hardened runtime the Helm chart deploys. Debian trixie with bubblewrap, tini,
+  git, every server-side binary, and pinned Syft and Grype. Use this one for a real deployment.
+- **api**: a distroless image carrying `synapse-api`, `synapse-cli`, `synapse-dast-helper`, Syft, and
+  Grype. Smallest and most locked-down; it has no shell and no bubblewrap, so sandboxed execution
+  fails closed there.
+- **full**: the local-development image `deploy/docker-compose.full.yml` builds. Debian bookworm with
+  a JDK 17, Maven, and a Gradle distribution on top of the API and CLI binaries, so
+  `synapse-cli scan --mode full` can resolve JVM dependency trees from source.
 
 ```bash
 docker build -t synapse-api:latest --target api -f deploy/Dockerfile .
 docker build -t synapse:full --target full -f deploy/Dockerfile .
+docker build -t synapse:production --target production -f deploy/Dockerfile .
 ```
 
 The build is cgo-free, so the distroless image works with a pure-Go SQLite driver and no
-system libraries.
+system libraries. The one exception is `synapse-ast`, which is tree-sitter-linked and is therefore
+compiled in a separate Debian stage against glibc for the `production` image.
+
+### The `full` image is large
+
+`full` measures roughly 940 MB against roughly 320 MB for `api`. The JVM toolchain is the
+difference, and it is load-bearing: JVM software composition analysis shells out to `mvn` and
+`gradle` to resolve transitive dependency trees, so removing the toolchain removes that capability.
+When you do not need JVM-from-source SCA, build `--target api` and get the same HTTP server in a
+third of the size.
+
+That toolchain layer caches independently of your Go code. In the `full` stage the
+`RUN apt-get install ... && curl gradle` line is the first instruction after
+`FROM debian:bookworm-slim`, and the compiled binaries arrive afterwards through
+`COPY --from=build`. BuildKit keys that `RUN` on the base image and the command text alone, so a
+change under `cmd/` or `internal/` rebuilds only the Go compile stage. A measured rebuild after
+editing `cmd/synapse-api/main.go`:
+
+```
+#16 [build 6/6] RUN CGO_ENABLED=0 go build ...          DONE 70.5s
+#17 [full 2/7]  RUN apt-get update && apt-get install   CACHED
+```
+
+Keep it that way. Moving `COPY --from=build` above the toolchain `RUN`, or inserting an `ARG` or a
+`COPY` of repository content before it, would put every JVM install back on the critical path of
+every rebuild.
+
+Only the first build pays for the toolchain, about a minute of apt plus the Gradle download from
+`services.gradle.org`. If your Docker daemon has restricted egress, that download fails with
+`curl` exit 35 and the layer never caches; `docker build --network=host` runs the build in the
+daemon's network namespace and gets past it.
 
 ## Production EKS control plane and EC2 execution tier
 

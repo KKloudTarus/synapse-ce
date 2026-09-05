@@ -211,7 +211,7 @@ func coverageWindowPostgresFixture(t *testing.T) (*pgxpool.Pool, context.Context
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
 	base := context.Background()
-	if err := Migrate(base, dsn); err != nil {
+	if err := MigrateLocked(base, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(base, dsn)

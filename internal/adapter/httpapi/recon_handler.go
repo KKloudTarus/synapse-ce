@@ -94,6 +94,8 @@ func (rt *Router) streamReconLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering so events flush
+	// The stream may run for its full ceiling, which is longer than the listener write timeout.
+	releaseWriteDeadline(w)
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 

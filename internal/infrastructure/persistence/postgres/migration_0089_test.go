@@ -17,18 +17,15 @@ func TestMigration0089BackfillsAndIsolatesScanInventory(t *testing.T) {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := Migrate(context.Background(), dsn); err != nil {
+		if err := MigrateLocked(context.Background(), dsn); err != nil {
 			t.Errorf("restore migrations: %v", err)
 		}
 	})
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatalf("goose open: %v", err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
@@ -80,7 +77,7 @@ func TestMigration0089BackfillsAndIsolatesScanInventory(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer pool.Close()
-	const role = "sbom_rls_probe_0089"
+	role := uniqueProbeRole(t, dsn, "sbom_rls_probe_0089")
 	_, _ = pool.Exec(ctx, `DROP OWNED BY `+role)
 	_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS `+role)
 	if _, err := pool.Exec(ctx, `CREATE ROLE `+role+` NOSUPERUSER NOBYPASSRLS`); err != nil {

@@ -267,3 +267,32 @@ func TestEmptyDirNoError(t *testing.T) {
 		t.Errorf("empty dir: %+v", rs)
 	}
 }
+
+// TestGenericSecretKeyShapes covers the key shapes real config files use: the bare word the rule
+// always handled, a camelCase key (NodeGoat config/env/all.js), and a bracketed config key
+// (Vulnerable-Flask-App app.py). The value guards are unchanged, so the low-entropy and
+// placeholder cases must stay silent.
+func TestGenericSecretKeyShapes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		file string
+		line string
+		want bool
+	}{
+		{name: "bare key", file: "a.json", line: "{\"api_key\": \"" + highEnt + "\"}", want: true},
+		{name: "camelCase key", file: "config/env/all.js", line: "    cookieSecret: \"" + highEnt + "\",", want: true},
+		{name: "suffixed snake key", file: "b.py", line: "SECRET_KEY_HMAC = \"" + highEnt + "\"", want: true},
+		{name: "bracket config key", file: "app.py", line: "app.config['SECRET_KEY_HMAC_2'] = \"" + highEnt + "\"", want: true},
+		{name: "vb bracketed keyword", file: "c.vb", line: "Dim [secret] As String = \"" + highEnt + "\"", want: true},
+		{name: "low entropy value", file: "d.env", line: "cookieSecret = \"aaaaaaaaaaaaaaaa\"", want: false},
+		{name: "placeholder value", file: "e.env", line: "cookieSecret = \"${COOKIE_SECRET}\"", want: false},
+		{name: "short value", file: "f.py", line: "app.config['SECRET_KEY'] = 'secret'", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rs := scanDir(t, map[string]string{tc.file: tc.line + "\n"})
+			if got := hasRule(rs, "generic-secret") != nil; got != tc.want {
+				t.Errorf("generic-secret fired = %v, want %v (%+v)", got, tc.want, rs)
+			}
+		})
+	}
+}

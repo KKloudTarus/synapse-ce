@@ -114,6 +114,7 @@ type Router struct {
 	vulnerabilityRead      *vulnerabilityinteluc.Service
 	vulnerabilityActions   *vulnerabilityactionuc.Service
 	sla                    *slauc.Service
+	capabilities           capabilityCatalog // optional; nil ⇒ the capability catalog route is not registered
 	readiness              readinessConfig
 }
 
@@ -531,7 +532,11 @@ func (rt *Router) routes() *http.ServeMux {
 	}
 	mux.HandleFunc("GET /api/v1/engagements", rt.authz(userdom.PermView, rt.listEngagements))
 	mux.HandleFunc("GET /api/v1/engagements/{id}", rt.authz(userdom.PermView, rt.getEngagement))
+	// Lifecycle transition. Two spellings reach the same handler: the original PATCH on the
+	// engagement row, and the resource-shaped PUT on its status that clients and the guide document.
+	// Both are described in api/openapi.yaml.
 	mux.HandleFunc("PATCH /api/v1/engagements/{id}", rt.authz(userdom.PermOperate, rt.transitionEngagement))
+	mux.HandleFunc("PUT /api/v1/engagements/{id}/status", rt.authz(userdom.PermOperate, rt.transitionEngagement))
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/scope", rt.authz(userdom.PermOperate, rt.updateScope))
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/authorization-window", rt.authz(userdom.PermOperate, rt.setAuthorizationWindow))
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/roe", rt.authz(userdom.PermOperate, rt.setRoE))
@@ -628,24 +633,39 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/engagements/import", rt.authz(userdom.PermOperate, rt.importBundle))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/findings/{fid}/retests", rt.authz(userdom.PermView, rt.withEngTenant(rt.listRetests)))
 	mux.HandleFunc("POST /api/v1/engagements/{id}/findings/{fid}/retests", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.recordRetest)))
-	// Audit is oversight data and is NOT yet tenant-scoped (global), so it is gated to the
-	// sign-off capability (reviewer/admin) rather than the view floor.
+	// Audit is oversight data: reads are tenant-scoped by the store (Postgres enforces it with
+	// the audit_log RLS policy from migration 0086; the file store filters on the bound tenant),
+	// and the route is gated to the sign-off capability (reviewer/admin) rather than the view
+	// floor. Legacy v1 rows predate tenant chaining and are visible to no tenant by design.
 	mux.HandleFunc("GET /api/v1/audit", rt.authz(userdom.PermReview, rt.listAudit))
 	mux.HandleFunc("GET /api/v1/audit/verify", rt.authz(userdom.PermReview, rt.verifyAudit))
+	if rt.capabilities != nil {
+		// Optional-subsystem catalog: configuration booleans only, so the view floor is the right
+		// gate. It must stay registered whatever else is off — a client uses it to tell a disabled
+		// subsystem from a broken one.
+		mux.HandleFunc("GET /api/v1/capabilities", rt.authz(userdom.PermView, rt.listCapabilities))
+	}
 	mux.HandleFunc("GET /api/v1/me", rt.currentUser)
+	// User management is administer-only and confined to the caller's own tenant. Deleting a user is
+	// deliberately absent: an identity owns its audit, evidence, and finding attribution, so access is
+	// revoked by disabling the account or rotating its key, never by removing the row.
 	mux.HandleFunc("GET /api/v1/users", rt.authz(userdom.PermAdminister, rt.listUsers))
 	mux.HandleFunc("POST /api/v1/users", rt.authz(userdom.PermAdminister, rt.createUser))
+	mux.HandleFunc("PATCH /api/v1/users/{id}", rt.authz(userdom.PermAdminister, rt.updateUser))
+	mux.HandleFunc("POST /api/v1/users/{id}/disable", rt.authz(userdom.PermAdminister, rt.disableUser))
+	mux.HandleFunc("POST /api/v1/users/{id}/enable", rt.authz(userdom.PermAdminister, rt.enableUser))
+	mux.HandleFunc("POST /api/v1/users/{id}/rotate-key", rt.authz(userdom.PermAdminister, rt.rotateUserAPIKey))
 	if rt.vulnerabilitySources != nil && rt.vulnerabilityMonitor != nil {
 		mux.HandleFunc("GET /api/v1/vulnerability/sources/types", rt.authz(userdom.PermView, rt.listVulnerabilityAdapterTypes))
 		mux.HandleFunc("GET /api/v1/vulnerability/sources", rt.authz(userdom.PermView, rt.listVulnerabilitySources))
-		mux.HandleFunc("POST /api/v1/vulnerability/sources", rt.authz(userdom.PermAdminister, rt.createVulnerabilitySource))
-		mux.HandleFunc("PUT /api/v1/vulnerability/sources/{id}", rt.authz(userdom.PermAdminister, rt.updateVulnerabilitySource))
-		mux.HandleFunc("PATCH /api/v1/vulnerability/sources/{id}", rt.authz(userdom.PermAdminister, rt.updateVulnerabilitySource))
-		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/enable", rt.authz(userdom.PermAdminister, rt.setVulnerabilitySourceEnabled))
-		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/disable", rt.authz(userdom.PermAdminister, rt.setVulnerabilitySourceEnabled))
-		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/archive", rt.authz(userdom.PermAdminister, rt.archiveVulnerabilitySource))
-		mux.HandleFunc("POST /api/v1/vulnerability/sources/test", rt.authz(userdom.PermAdminister, rt.testVulnerabilitySourceDraft))
-		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/test", rt.authz(userdom.PermAdminister, rt.testVulnerabilitySource))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.createVulnerabilitySource)))
+		mux.HandleFunc("PUT /api/v1/vulnerability/sources/{id}", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.updateVulnerabilitySource)))
+		mux.HandleFunc("PATCH /api/v1/vulnerability/sources/{id}", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.updateVulnerabilitySource)))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/enable", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.setVulnerabilitySourceEnabled)))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/disable", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.setVulnerabilitySourceEnabled)))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/archive", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.archiveVulnerabilitySource)))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/test", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.testVulnerabilitySourceDraft)))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/test", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.testVulnerabilitySource)))
 		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/sync", rt.authz(userdom.PermOperate, rt.startVulnerabilitySync))
 		mux.HandleFunc("POST /api/v1/vulnerability/sync-all", rt.authz(userdom.PermOperate, rt.startAllVulnerabilitySync))
 		if rt.vulnerabilityRead != nil {
@@ -752,7 +772,7 @@ func (rt *Router) Handler() http.Handler {
 	human := rt.auth.Middleware(public, rt.requireAUP(aupExempt, routes))
 	// Attach a method-aware route pattern before auth/AUP can reject a known human
 	// route. ServeMux returns an empty pattern for unknown paths and method mismatches.
-	human = annotateRoutePattern(routes, human)
+	human = annotateRoutePattern(routes, limitRequestBody(human))
 	var complete http.Handler
 	if rt.fleet == nil {
 		complete = normalizePath(human)

@@ -9,6 +9,47 @@ This chart deploys the production control plane: at least two API replicas, one 
 - Pre-created, split Secrets named by `existingSecrets` and a pre-created TLS Secret named by `ingress.tls.secretName`. The chart never renders Secret data.
 - Digest-qualified production images. Tags are rejected by `values.schema.json`.
 
+## First install
+
+The chart is fail-closed. A bare `helm lint deploy/helm/synapse` or `helm template deploy/helm/synapse` fails on purpose, because rendering with the shipped defaults would produce a deployment whose runtime egress is unrestricted:
+
+```
+[ERROR] values.yaml: - at '/api/grantAuthority/networkPolicySourceCIDRs': minItems: got 0, want 1
+Error: networkPolicy.runtimeEgress.database must list the PostgreSQL CIDR(s)
+```
+
+Three CIDR lists have no safe default and must be supplied:
+
+| Value | What it must contain |
+| --- | --- |
+| `networkPolicy.runtimeEgress.database` | The address range PostgreSQL resolves to, for example the RDS subnet CIDRs. |
+| `networkPolicy.runtimeEgress.objectStore` | The address range of the S3-compatible endpoint, for example the S3 prefix-list ranges. |
+| `api.grantAuthority.networkPolicySourceCIDRs` | The dedicated private NLB subnet CIDRs. The schema requires a non-empty list even while `api.grantAuthority.enabled` is `false`. |
+
+Eight Secrets must already exist in the release namespace. The chart references them and never renders Secret data, so supply them with external-secrets, the Secrets Store CSI driver, or an equivalent controller:
+
+| `existingSecrets` path | Default Secret name | Key | Contents |
+| --- | --- | --- | --- |
+| `apiToken` | `synapse-api-token` | `api-token` | Bootstrap-admin bearer token. |
+| `database.runtime` | `synapse-db-runtime` | `dsn` | Runtime DSN for the non-superuser application role, `sslmode=verify-full`. |
+| `database.migration` | `synapse-db-migration` | `dsn` | Owner DSN used only by the migration Job. |
+| `objectStore.accessKey` | `synapse-s3-access` | `access-key` | Object-store access key. |
+| `objectStore.secretKey` | `synapse-s3-secret` | `secret-key` | Object-store secret key. |
+| `cryptography.vaultMasterKey` | `synapse-vault-key` | `key` | 32-byte vault master key. |
+| `cryptography.evidenceSigningSeed` | `synapse-evidence-signing` | `seed` | Evidence signing seed. |
+| `cryptography.measureCursorSecret` | `synapse-cursor-secret` | `secret` | HMAC key for Measures pagination cursors. |
+
+Two more Secrets are referenced outside `existingSecrets`: `externalDatabase.caBundle.secretName` (`synapse-database-ca`, key `ca.crt`) supplies the database trust anchor, and `ingress.tls.secretName` (`synapse-tls`) supplies the ingress certificate. Enabling `oidc.enabled` or `api.grantAuthority.enabled` adds `existingSecrets.oidc.clientSecret` and the two `existingSecrets.egressGrant` entries.
+
+`values-dev.yaml` supplies the three CIDR lists and a local ingress host so the chart renders and installs on a development cluster without touching the production defaults:
+
+```bash
+helm lint --strict deploy/helm/synapse -f deploy/helm/synapse/values-dev.yaml
+helm template synapse deploy/helm/synapse -f deploy/helm/synapse/values-dev.yaml --kube-version 1.29.0
+```
+
+Its image digests are the all-zero placeholders from `values.yaml`: they satisfy the schema and will not pull. Pass real digests on install. Replica counts stay at the schema floor of two API and two web replicas even in development, because a single replica cannot prove the rollout path the chart is built around.
+
 ## Install
 
 Copy the production test values as a starting point, replace only references and non-secret endpoints, and use your secret-management controller for the referenced Secrets:

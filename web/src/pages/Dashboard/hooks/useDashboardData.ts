@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { useFetch } from '../../../hooks'
 import { api } from '../../../lib/api'
+import { isFeatureDisabled } from '../../../components/synapse/FeatureDisabledState'
 import type { BusinessAsset, DashboardSecurityOperations, FleetCoverageSummary } from '../../../lib/types'
 import type { DashboardData, DashboardHookResult } from '../types'
+
+type FleetSummaryResult = { kind: 'ok'; summary: FleetCoverageSummary } | { kind: 'disabled' }
 
 const ENGAGEMENT_ORDER = ['active', 'draft', 'completed', 'archived'] as const
 const POSTURE_WEIGHT: Record<string, number> = { critical: 5, high_risk: 4, attention: 3, unknown: 2, good: 1 }
@@ -28,10 +31,22 @@ export function useDashboardData(): DashboardHookResult {
     { deps: [] },
   )
 
-  const { data: fleet, error: fleetError } = useFetch<FleetCoverageSummary>(
-    () => api.fleetCoverageSummary(),
+  // A 404 here means SYNAPSE_FLEET_ENABLED is off. That is a configuration
+  // answer, not a failure, so it is carried as its own state instead of an error
+  // string that would render as a bare "N/A".
+  const { data: fleetResult, error: fleetError } = useFetch<FleetSummaryResult>(
+    () =>
+      api
+        .fleetCoverageSummary()
+        .then((summary) => ({ kind: 'ok', summary }) as FleetSummaryResult)
+        .catch((e) => {
+          if (isFeatureDisabled(e)) return { kind: 'disabled' } as FleetSummaryResult
+          throw e
+        }),
     { deps: [] },
   )
+  const fleet = fleetResult?.kind === 'ok' ? fleetResult.summary : null
+  const fleetDisabled = fleetResult?.kind === 'disabled'
 
   const { data: analytics, error: analyticsError } = useFetch<DashboardSecurityOperations>(
     () => api.dashboardSecurityOperations(rangeDays),
@@ -44,6 +59,7 @@ export function useDashboardData(): DashboardHookResult {
       error,
       fleet,
       fleetError,
+      fleetDisabled,
       analytics,
       analyticsError,
       rangeDays,
@@ -101,6 +117,7 @@ export function useDashboardData(): DashboardHookResult {
     error,
     fleet,
     fleetError,
+    fleetDisabled,
     analytics,
     analyticsError,
     rangeDays,

@@ -347,6 +347,7 @@ func main() {
 		scauc.ScanJobKind: scaJobHandler{svc: scaService},
 	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
+	vulnerabilityRegistry.AllowPrivateNetworkSources(cfg.VulnerabilitySourceAllowPrivateNetwork)
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
 		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
 		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
@@ -530,6 +531,11 @@ func main() {
 		if perr != nil {
 			log.Error("approval service init failed", "err", perr)
 			os.Exit(1)
+		}
+		if vulnerabilityTransactions != nil {
+			// A human's approve or deny and its audit record commit together, so an operator is
+			// never told the decision failed while the agent acts on it.
+			approvalSvc.SetTransactionRunner(vulnerabilityTransactions)
 		}
 		agentGate, gerr := safety.NewGate(guard, approvalSvc, evidenceService)
 		if gerr != nil {
