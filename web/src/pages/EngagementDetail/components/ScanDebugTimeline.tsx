@@ -217,9 +217,38 @@ function StepInspectorCard({ event }: { event: ScanDebugEvent }) {
   )
 }
 
-export function ScanDebugTimeline({ events, running }: { events: ScanDebugEvent[]; running: boolean }) {
-  if (!events.length && !running) return null
+/** Remembered across reloads so the operator's choice survives a refresh. */
+export const TRACK_OPEN_KEY = 'synapse.pipeline-track-open'
+
+function readStoredPreference(): boolean | null {
+  try {
+    const raw = localStorage.getItem(TRACK_OPEN_KEY)
+    return raw === null ? null : raw === 'true'
+  } catch {
+    return null
+  }
+}
+
+function writeStoredPreference(open: boolean) {
+  try {
+    localStorage.setItem(TRACK_OPEN_KEY, String(open))
+  } catch {
+    // Storage can be blocked; the toggle still works for this page view.
+  }
+}
+
+export function ScanDebugTimeline({
+  events,
+  running,
+  scanStatus,
+}: {
+  events: ScanDebugEvent[]
+  running: boolean
+  /** Latest scan job status. A finished scan collapses the track by default. */
+  scanStatus?: string
+}) {
   const [selectedIdx, setSelectedIdx] = useState<number>(Math.max(0, events.length - 1))
+  const [userOpen, setUserOpen] = useState<boolean | null>(readStoredPreference)
 
   // Update selected index when new events arrive
   useEffect(() => {
@@ -228,10 +257,26 @@ export function ScanDebugTimeline({ events, running }: { events: ScanDebugEvent[
     }
   }, [events.length])
 
+  // Hooks first: this component used to return before useState, which React
+  // reports as "Expected static flag was missing" on every engagement load.
+  if (!events.length && !running) return null
+
   const selectedEvent = events[selectedIdx] ?? events[events.length - 1]
+  // A finished scan's steps are reference material; a running scan's are the
+  // live view. The default follows that, and the operator's toggle overrides it.
+  const defaultOpen = running || scanStatus !== 'succeeded'
+  const open = userOpen ?? defaultOpen
 
   return (
-    <details className="group mt-3 text-xs" open={running || events.length > 0}>
+    <details
+      className="group mt-3 text-xs"
+      open={open}
+      onToggle={(e) => {
+        const next = (e.currentTarget as HTMLDetailsElement).open
+        setUserOpen(next)
+        writeStoredPreference(next)
+      }}
+    >
       <summary className="inline-flex cursor-pointer select-none items-center gap-1.5 font-semibold text-secondary transition-colors hover:text-primary">
         <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
         <span>Pipeline Journey Track</span>

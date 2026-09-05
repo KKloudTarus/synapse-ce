@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, lazy, Suspense, type FC } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense, type FC } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   Activity,
@@ -165,6 +165,7 @@ export function EngagementDetail() {
   // /engagements/:id/<tab> deep links land on the right tab.
   const [tab, setTabState] = useState<Tab>(() => (isTab(tabSlug) ? tabSlug : 'overview'))
   const [findingsFilter, setFindingsFilter] = useState<Severity | 'all'>('all')
+  const tablistRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (isTab(tabSlug)) setTabState(tabSlug)
@@ -255,11 +256,43 @@ export function EngagementDetail() {
     setFindings((cur) => (cur ? cur.map((f) => (f.id === updated.id ? updated : f)) : cur))
   }
 
+  const activeGroup = getGroupForTab(tab)
+
   // selectSeverity wires the Overview's distribution + attention cards to the
   // Findings table (the decision surface).
   function selectSeverity(sev: Severity | 'all') {
     setFindingsFilter(sev)
     setTab('findings')
+  }
+
+  function selectGroup(group: TabGroupDefinition) {
+    if (group.sub && group.sub.length > 0) {
+      if (activeGroup.id !== group.id) setTab(group.sub[0].id)
+      return
+    }
+    setTab(group.id as Tab)
+  }
+
+  // WAI-ARIA tabs pattern: Left/Right move between tabs, Home/End jump to the
+  // ends, and the newly selected tab takes focus.
+  function onTablistKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End']
+    if (!keys.includes(event.key)) return
+    const current = TAB_GROUPS.findIndex((g) => g.id === activeGroup.id)
+    if (current < 0) return
+    event.preventDefault()
+    const last = TAB_GROUPS.length - 1
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? last
+          : event.key === 'ArrowLeft'
+            ? (current - 1 + TAB_GROUPS.length) % TAB_GROUPS.length
+            : (current + 1) % TAB_GROUPS.length
+    const target = TAB_GROUPS[nextIndex]
+    selectGroup(target)
+    tablistRef.current?.querySelector<HTMLButtonElement>(`#tab-${target.id}`)?.focus()
   }
 
   if (engErr)
@@ -303,8 +336,6 @@ export function EngagementDetail() {
     vulns: scan ? countVulnerabilityFindings(scan.vulnerabilities, packageLocationMap(scan.components)) : 0,
     licenses: scan?.licenses.length ?? 0,
   }
-
-  const activeGroup = getGroupForTab(tab)
 
   return (
     <div className="mx-auto max-w-[1600px] animate-fade-in space-y-5">
@@ -350,12 +381,15 @@ export function EngagementDetail() {
         />
       </div>
 
-      {/* 2-Tier Navigation Section */}
-      <div className="space-y-2.5">
+      {/* 2-Tier Navigation Section. Sticky so a tab switch does not leave the
+          reader hunting for the content below a tall hero. */}
+      <div className="sticky top-0 z-20 -mx-4 space-y-2.5 bg-secondary-subtle px-4 pt-2 sm:-mx-6 sm:px-6 xl:-mx-8 xl:px-8">
         {/* Level 1: Main Tabs */}
         <div
+          ref={tablistRef}
           role="tablist"
           aria-label="Engagement Views"
+          onKeyDown={onTablistKeyDown}
           className="flex gap-2 overflow-x-auto border-b border-secondary"
         >
           {TAB_GROUPS.map((group) => {
@@ -374,15 +408,9 @@ export function EngagementDetail() {
                 id={`tab-${group.id}`}
                 aria-selected={isGroupActive}
                 aria-controls="engagement-tabpanel"
-                onClick={() => {
-                  if (group.sub && group.sub.length > 0) {
-                    if (activeGroup.id !== group.id) {
-                      setTab(group.sub[0].id)
-                    }
-                  } else {
-                    setTab(group.id as Tab)
-                  }
-                }}
+                // Roving tabindex: one stop for the whole tablist, arrows move within it.
+                tabIndex={isGroupActive ? 0 : -1}
+                onClick={() => selectGroup(group)}
                 className={cn(
                   '-mb-px inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid',
                   isGroupActive

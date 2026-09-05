@@ -268,8 +268,8 @@ export function ScanPanel({
         </div>
       )}
 
-      {/* Horizontal Pipeline Journey Track (kept in place) */}
-      <ScanDebugTimeline events={debugEvents} running={running} />
+      {/* Horizontal Pipeline Journey Track — collapsed by default once a scan has finished. */}
+      <ScanDebugTimeline events={debugEvents} running={running} scanStatus={job?.status} />
 
       {error && (
         <div>

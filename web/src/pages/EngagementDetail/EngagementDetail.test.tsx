@@ -96,6 +96,37 @@ describe('EngagementDetail Page Shell', () => {
     })
   })
 
+  it('moves between tabs with the arrow keys and keeps one tab stop', async () => {
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456']}>
+        <Routes>
+          <Route path="/engagements/:id" element={<EngagementDetail />} />
+          <Route path="/engagements/:id/:tabSlug" element={<EngagementDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const tablist = await screen.findByRole('tablist', { name: 'Engagement Views' })
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    // Roving tabindex: exactly one tab is in the tab order.
+    expect(tabs.filter((tab) => tab.getAttribute('tabindex') === '0')).toHaveLength(1)
+
+    fireEvent.keyDown(tablist, { key: 'ArrowRight' })
+    await waitFor(() => expect(screen.getAllByRole('tab')[1]).toHaveAttribute('aria-selected', 'true'))
+    expect(screen.getAllByRole('tab')[1]).toHaveFocus()
+
+    fireEvent.keyDown(tablist, { key: 'End' })
+    await waitFor(() => {
+      const all = screen.getAllByRole('tab')
+      expect(all[all.length - 1]).toHaveAttribute('aria-selected', 'true')
+    })
+
+    // End wraps forward to the first tab, Home returns to it directly.
+    fireEvent.keyDown(tablist, { key: 'ArrowRight' })
+    await waitFor(() => expect(screen.getAllByRole('tab')[0]).toHaveAttribute('aria-selected', 'true'))
+  })
+
   it('renders not found state when engagement does not exist', async () => {
     vi.mocked(api.getEngagement).mockResolvedValue(null as any)
 
