@@ -363,6 +363,12 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 	var scalaLex scalaLexState
 	var rubyLex rubyLexState
 	var rubyERBLex rubyERBLexState
+	var jsLex jsLexState
+	var goExitFunc goExitFuncContext
+	isJS := jsExts[ext]
+	isGo := goExts[ext]
+	// Browser context is a whole-file property, so it is decided once before the line loop.
+	browserFile := isJS && browserContextFile(lines)
 	isPHP := phpExts[ext]
 	var phpViews []phpLineView
 	phpTextLines, phpCodeLines := lines, lines
@@ -390,6 +396,8 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			}
 		} else if isVB {
 			matchText = vbCodeOnly(text)
+		} else if isJS {
+			matchText = jsLex.codeOnly(text)
 		} else if isPHP {
 			phpText = phpViews[i].text
 			matchText = phpViews[i].code
@@ -398,6 +406,7 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			status.lineLimitReached = true
 			continue // advance lexer state; callers mark the bounded scan incomplete
 		}
+		insideGoExitFunc := isGo && goExitFunc.advance(text)
 		for ri := range a.rules {
 			if ri%64 == 0 {
 				if err := ctx.Err(); err != nil {
@@ -417,6 +426,12 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			if r.id == "vb:empty-catch" || r.id == "vb:idisposable-not-disposed" {
 				continue // bounded VB passes own these block-sensitive rules
 			}
+			if r.id == "go-log-fatal-in-code" && insideGoExitFunc {
+				continue // main/init is exactly where ending the process is correct
+			}
+			if r.id == "ssrf-fetch-user-url" && browserFile {
+				continue // a fetch in a DOM-touching file is a browser request, not server-side SSRF
+			}
 			var matched bool
 			if isScala && strings.HasPrefix(r.id, "scala:") {
 				matched = scalaRuleMatches(r, text, matchText)
@@ -426,6 +441,8 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 				matched = vbRuleMatches(r, text, matchText)
 			} else if isVB {
 				matched = vbGenericRuleMatches(r, text, matchText)
+			} else if isJS {
+				matched = jsRuleMatches(r, text, matchText)
 			} else if isPHP && r.id == "php:closing-tag" {
 				matched = phpClosingTagEligible(ext) && phpRuleMatches(r, phpText, matchText)
 			} else if isPHP && phpRuleNeedsCodePosition(r.id) {

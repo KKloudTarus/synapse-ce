@@ -73,7 +73,12 @@ RULES = [
       rationale="Asserting a string literal never fails; the message was likely meant as the second argument.",
       remediation="Assert the condition and pass the message: assert cond, \"msg\".",
       source="https://github.com/PyCQA/flake8-bugbear",
-      re=r'''assert\s+["']''', nc='assert "must be configured"', c='assert value, "must be configured"'),
+      # The WHOLE condition has to be the literal, optionally followed by the assert message or a
+      # trailing comment. Matching a leading quote alone fired on every `assert "x" in y`,
+      # `assert \'a\' == b`, `assert "%s" % v` and `assert "".join(y)`, which are ordinary conditions.
+      re=r'''\bassert\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\s*(?:,[^\n]*)?(?:#[^\n]*)?\s*$''',
+      nc='assert "must be configured"',
+      c='assert value, "must be configured"\nassert "X" in y\nassert \'a\' == b\nassert "%s" % v\nassert "".join(y)\nassert name.startswith("x")'),
     r(id="python-range-start-zero", type="smell", qual="maint", sev="low", cwe="",
       title="range(0, n)", desc="range(0, n) is just range(n).",
       rationale="The start defaults to 0, so range(0, n) is redundant (flake8-pie PIE808).",
