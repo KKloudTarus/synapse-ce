@@ -1464,6 +1464,22 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
 
+  /api/v1/assets/{assetID}/packages:
+    parameters: [{$ref: '#/components/parameters/HostAssetId'}]
+    get:
+      tags: [assets]
+      operationId: getHostPackages
+      summary: Get the OS package inventory recorded for a fleet host
+      description: >
+        The components of the host's active package SBOM (name, version, package URL), sorted by name.
+        A host that never reported packages returns an empty list and no engagement id.
+      responses:
+        '200': {description: Host packages, content: {application/json: {schema: {$ref: '#/components/schemas/HostPackages'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
   /api/v1/alerts/test:
     post:
       tags: [fleet]
@@ -4966,6 +4982,20 @@ components:
         techniques: {type: array, items: {$ref: '#/components/schemas/OffensivePolicyTechnique'}}
         prohibited: {type: integer}
         production_safe: {type: integer}
+    HostPackages:
+      type: object
+      properties:
+        asset_id: {type: string}
+        engagement_id: {type: string}
+        recorded_at: {type: string, format: date-time}
+        packages:
+          type: array
+          items:
+            type: object
+            properties:
+              name: {type: string}
+              version: {type: string}
+              purl: {type: string}
     AlertOutcome:
       type: object
       properties:

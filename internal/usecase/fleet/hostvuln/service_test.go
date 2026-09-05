@@ -555,3 +555,33 @@ func (c *countingFindings) List(context.Context, shared.ID) ([]finding.Finding, 
 	c.calls++
 	return nil, nil
 }
+
+// Packages returns the recorded set, sorted, and an empty list for a host that never reported one.
+func TestPackagesReturnsTheRecordedInventory(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.svc.Record(ctx, "agent-1", tenant, h.host, inventory(packages())); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.svc.Packages(ctx, tenant, h.host.ID)
+	if err != nil {
+		t.Fatalf("Packages: %v", err)
+	}
+	if got.EngagementID != "id-1" || len(got.Packages) != 2 || got.Packages[0].Name != "openssl" || got.Packages[1].Name != "zlib1g" || got.RecordedAt.IsZero() {
+		t.Fatalf("packages = %+v", got)
+	}
+	if got.Packages[0].PURL != packages()[1].PURL {
+		t.Fatalf("purl lost: %+v", got.Packages[0])
+	}
+	quiet, _ := asset.New("asset-2", tenant, asset.KindHost, "machine-id/def", "db01", nil, time.Now())
+	if err := h.assets.UpsertAsset(ctx, quiet); err != nil {
+		t.Fatal(err)
+	}
+	none, err := h.svc.Packages(ctx, tenant, quiet.ID)
+	if err != nil || !none.EngagementID.IsZero() || len(none.Packages) != 0 {
+		t.Fatalf("unrecorded host = %+v, %v", none, err)
+	}
+	if _, err := h.svc.Packages(ctx, "tenant-b", h.host.ID); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("cross-tenant err = %v", err)
+	}
+}

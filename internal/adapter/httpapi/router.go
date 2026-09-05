@@ -365,6 +365,7 @@ func (rt *Router) routes() *http.ServeMux {
 	if rt.hostVulns != nil {
 		mux.HandleFunc("GET /api/v1/assets/hosts", rt.authz(userdom.PermView, rt.listHostVulnerabilities))
 		mux.HandleFunc("GET /api/v1/assets/{assetID}/vulnerabilities", rt.authz(userdom.PermView, rt.getHostVulnerabilities))
+		mux.HandleFunc("GET /api/v1/assets/{assetID}/packages", rt.authz(userdom.PermView, rt.getHostPackages))
 	}
 	if rt.alerts != nil {
 		mux.HandleFunc("POST /api/v1/alerts/test", rt.authz(userdom.PermAdminister, rt.testAlert))

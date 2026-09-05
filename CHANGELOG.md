@@ -23,9 +23,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   the list as the host's SBOM in a hidden per-host engagement (`engagements.host_asset_id`, migration
   0130) and runs the SCA imported-SBOM pipeline against it, so host CVEs get the same advisory
   matching, OS version comparison, KEV/EPSS ranking, dedup and reconciliation as a repository or
-  image. Recording is idempotent per package set. New routes `GET /api/v1/assets/hosts` and
-  `GET /api/v1/assets/{assetID}/vulnerabilities`; the host inventory response reports the scan
-  outcome; the console gains Fleet, Hosts with a per-host vulnerability view.
+  image. Recording is idempotent per package set. New routes `GET /api/v1/assets/hosts`,
+  `GET /api/v1/assets/{assetID}/vulnerabilities` and `GET /api/v1/assets/{assetID}/packages` (the
+  recorded package list, as the scan saw it); the host inventory response reports the scan outcome;
+  the console gains Fleet, Hosts with a per-host vulnerability and package view.
 
 - **Incidents exist without a human calling an endpoint.** A detection batch that seals new detections
   now runs correlation for its engagement at once, so an incident is open as soon as the detections behind

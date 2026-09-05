@@ -363,6 +363,54 @@ func (s *Service) Vulnerabilities(ctx context.Context, tenantID, assetID shared.
 	return out, nil
 }
 
+// HostPackages is the package inventory recorded for a host: the components of its active SBOM.
+type HostPackages struct {
+	Asset        *asset.Asset
+	EngagementID shared.ID
+	RecordedAt   time.Time
+	Packages     []sbom.Component
+}
+
+// Packages returns the OS packages recorded for the host, sorted by name then version. A host without
+// a recorded set returns an empty list with a zero EngagementID.
+func (s *Service) Packages(ctx context.Context, tenantID, assetID shared.ID) (*HostPackages, error) {
+	host, err := s.assets.GetAssetByID(ctx, tenantID, assetID)
+	if err != nil {
+		return nil, err
+	}
+	if host.Kind != asset.KindHost {
+		return nil, fmt.Errorf("%w: asset %s is a %s, not a host", shared.ErrValidation, host.ID, host.Kind)
+	}
+	out := &HostPackages{Asset: host, Packages: []sbom.Component{}}
+	eng, err := s.engagements.GetByHostAssetID(ctx, tenantID, host.ID)
+	if errors.Is(err, shared.ErrNotFound) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load host vulnerability context: %w", err)
+	}
+	out.EngagementID = eng.ID
+	rec, err := s.imported.LatestByEngagement(ctx, tenantID, eng.ID)
+	if errors.Is(err, shared.ErrNotFound) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load recorded host packages: %w", err)
+	}
+	comps, err := scauc.ParseCycloneDXComponents(rec.RawJSON)
+	if err != nil {
+		return nil, fmt.Errorf("parse recorded host packages: %w", err)
+	}
+	sort.Slice(comps, func(i, j int) bool {
+		if comps[i].Name != comps[j].Name {
+			return comps[i].Name < comps[j].Name
+		}
+		return comps[i].Version < comps[j].Version
+	})
+	out.RecordedAt, out.Packages = rec.CreatedAt, comps
+	return out, nil
+}
+
 // Hosts lists every host asset with its vulnerability summary. It is five round trips for the whole
 // fleet, independent of the host count: the host assets, their contexts, the active SBOM metadata,
 // the per-context finding summary and the latest scan jobs. Without a summary reader it falls back to

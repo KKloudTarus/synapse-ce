@@ -225,6 +225,17 @@ func supportedCDXSpecVersion(v string) bool {
 	return supportedCDXSpecVersions[strings.TrimSpace(v)]
 }
 
+// ParseCycloneDXComponents returns the components of a CycloneDX document: name, version, PURL and
+// licences, as the import path reads them. Read-side callers (a host's package list) use it to show
+// what an imported SBOM contains without re-running the pipeline.
+func ParseCycloneDXComponents(data []byte) ([]sbom.Component, error) {
+	parsed, err := parseCycloneDX(data)
+	if err != nil {
+		return nil, err
+	}
+	return parsed.Components, nil
+}
+
 // parseCycloneDX decodes a CycloneDX JSON document into domain components + the
 // target name from metadata. Rejects a non-CycloneDX or empty document.
 func parseCycloneDX(data []byte) (parsedCycloneDX, error) {
