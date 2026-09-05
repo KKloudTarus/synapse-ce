@@ -3736,15 +3736,16 @@ components:
       description: Serialized from the domain struct (PascalCase keys). What a matched rule emitted, with full attribution.
       required: [RuleID, RuleVersion, Class, Severity, HostID, AgentID, Evidence, Truncated, ObservedCount, Observed]
       properties:
-        RuleID: {type: string}
-        RuleVersion: {type: integer}
+        RuleID: {type: string, minLength: 1}
+        RuleVersion: {type: integer, minimum: 1}
         Class: {$ref: '#/components/schemas/FleetDetectionClass'}
-        Severity: {type: string, enum: [critical, high, medium, low, info, unknown]}
-        HostID: {type: string}
-        AgentID: {type: string}
+        Severity: {type: string, enum: [critical, high, medium, low, info], description: A stored detection never carries the unknown severity; ingest rejects it.}
+        HostID: {type: string, minLength: 1}
+        AgentID: {type: string, minLength: 1}
         Evidence:
-          type: [array, "null"]
-          description: The triggering event plus surrounding context, capped at 64 events.
+          type: array
+          description: The triggering event plus surrounding context. A detection with no evidence is a claim, not a detection, so at least one event is always present.
+          minItems: 1
           maxItems: 64
           items: {$ref: '#/components/schemas/FleetDetectionEvent'}
         Truncated: {type: boolean, description: The evidence window was capped, so Evidence is not the complete sequence.}
@@ -3852,7 +3853,7 @@ components:
         ID: {type: string}
         AssetID: {type: string}
         Title: {type: string}
-        Severity: {type: string, enum: [critical, high, medium, low, info, unknown]}
+        Severity: {type: string, enum: ["", critical, high, medium, low, info, unknown], description: Empty when the created event carried no severity; the fold accepts that and the scorer abstains on it.}
         State: {$ref: '#/components/schemas/FleetIncidentState'}
         Disposition: {$ref: '#/components/schemas/FleetIncidentDisposition'}
         OwnerID: {type: string, description: Empty until an owner is assigned.}
