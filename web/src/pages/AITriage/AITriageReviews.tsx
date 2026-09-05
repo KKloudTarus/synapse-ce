@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Check, HelpCircle, LinkExternal02, XClose } from '@untitledui/icons'
 import { AITriageBadges } from '../../components/synapse/AITriageBadges'
 import { Button, EmptyState, ErrorState, Field, Input, Pill, Select, SevBadge, Spinner, cn } from '../../components/ui'
+import { FeatureDisabledState, isFeatureDisabled } from '../../components/synapse/FeatureDisabledState'
 import { useFetch } from '../../hooks'
 import { api, ApiError } from '../../lib/api'
 import type { AITriageReview, AITriageReviewFilter, AITriageReviewState, CurrentUser, Project, Severity } from '../../lib/types'
@@ -25,9 +26,21 @@ export function AITriageReviews() {
     state: (params.get('state') as AITriageReviewState) || undefined,
   }), [params])
 
+  const [disabled, setDisabled] = useState(false)
   const { data, error } = useFetch<{ reviews: AITriageReview[]; projects: Project[]; me: CurrentUser | null }>(
-    () => Promise.all([api.aiTriageReviews(filter), api.listProjects().catch(() => [] as Project[]), api.me().catch(() => null)])
-      .then(([reviews, projects, me]) => ({ reviews, projects, me })),
+    () =>
+      Promise.all([
+        // The triage review queue only exists when AI triage is switched on.
+        api.aiTriageReviews(filter).catch((e) => {
+          if (isFeatureDisabled(e)) {
+            setDisabled(true)
+            return [] as AITriageReview[]
+          }
+          throw e
+        }),
+        api.listProjects().catch(() => [] as Project[]),
+        api.me().catch(() => null),
+      ]).then(([reviews, projects, me]) => ({ reviews, projects, me })),
     { deps: [filter.severity, filter.cwe, filter.project, filter.state, refresh] },
   )
 
@@ -157,7 +170,13 @@ export function AITriageReviews() {
         />
       </div>
 
-      {errorMessage ? (
+      {disabled ? (
+        <FeatureDisabledState
+          feature="AI triage"
+          envVar="SYNAPSE_FP_TRIAGE_ENABLED"
+          hint="Review-required findings from AI-triaged scans queue here for a human decision."
+        />
+      ) : errorMessage ? (
         <div className="space-y-3">
           <ErrorState message={errorMessage} />
           <Button variant="secondary" onClick={() => setRefresh((v) => v + 1)}>

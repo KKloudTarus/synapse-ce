@@ -4,12 +4,14 @@ import { api, ApiError } from '../../lib/api'
 import type {
   FleetAgentDetail,
   FleetAgentHealth,
+  FleetAgentRow,
   FleetCoverageRow,
   FleetCoverageSummary,
   FleetDesiredGap,
   FleetVerdict,
 } from '../../lib/types'
 import { Button, Card, EmptyState, ErrorState, Pill, Spinner, cn } from '../../components/ui'
+import { FeatureDisabledState, isFeatureDisabled } from '../../components/synapse/FeatureDisabledState'
 import { VirtualTable, type Column } from '../../components/synapse/VirtualTable'
 import { FLEET_VERDICT_ORDER, FleetStateBadge, FleetVerdictBadge, formatFleetTime } from './fleetShared'
 import { useFetch, useParallelFetch } from '../../hooks'
@@ -135,11 +137,32 @@ const FILTERS: { value: StateFilter; label: string }[] = [
 
 export function AgentsSection() {
   const [filter, setFilter] = useState<StateFilter>('all')
+  const [disabled, setDisabled] = useState(false)
   const { data: rows, loading, error, refetch } = useFetch(
-    () => api.listFleetAgents(filter === 'all' ? undefined : filter),
+    () =>
+      api.listFleetAgents(filter === 'all' ? undefined : filter).catch((e) => {
+        // Agent administration is its own switch; a 404 is "off", not "broken".
+        if (isFeatureDisabled(e)) {
+          setDisabled(true)
+          return [] as FleetAgentRow[]
+        }
+        throw e
+      }),
     { deps: [filter] },
   )
   const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  if (disabled) {
+    return (
+      <Card title="Agents" bodyClass="p-4">
+        <FeatureDisabledState
+          feature="Agent administration"
+          envVar="SYNAPSE_FLEET_ENABLED"
+          hint="It lists enrolled agents, their health and their recent work."
+        />
+      </Card>
+    )
+  }
 
   return (
     <Card
@@ -262,12 +285,29 @@ const GAP_COLUMNS: Column<FleetDesiredGap>[] = [
 ]
 
 // --- Main Fleet Page ---
+const EMPTY_SUMMARY: FleetCoverageSummary = {
+  agentsByState: {},
+  rowsByVerdict: {},
+  oldestPerCapability: {},
+  assetsWithoutAgent: 0,
+}
+
 export function FleetCoverage() {
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
+  const [disabled, setDisabled] = useState(false)
 
   const { data, error, refetch } = useParallelFetch(
-    () => Promise.all([api.listFleetCoverage(), api.fleetCoverageSummary()] as const),
+    () =>
+      Promise.all([api.listFleetCoverage(), api.fleetCoverageSummary()] as const).catch((e) => {
+        // The whole fleet surface is gated by one switch. Retrying a 404 just 404s
+        // again, so record the disabled state and say which switch turns it on.
+        if (isFeatureDisabled(e)) {
+          setDisabled(true)
+          return [[] as FleetCoverageRow[], EMPTY_SUMMARY] as const
+        }
+        throw e
+      }),
     { deps: [] },
   )
 
@@ -292,7 +332,7 @@ export function FleetCoverage() {
       <header>
         <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">Fleet</h1>
 
-        {summary && (
+        {summary && !disabled && (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-secondary bg-secondary px-4 py-2.5">
             <span className="text-sm text-secondary">
               <span className="font-bold text-lg tabular-nums text-primary">{Object.values(summary.rowsByVerdict).reduce((a, b) => a + b, 0)}</span> pairs assessed
@@ -314,7 +354,13 @@ export function FleetCoverage() {
         )}
       </header>
 
-      {error ? (
+      {disabled ? (
+        <FeatureDisabledState
+          feature="Fleet"
+          envVar="SYNAPSE_FLEET_ENABLED"
+          hint="It reports per-asset agent coverage, agent health and capability gaps."
+        />
+      ) : error ? (
         <div className="space-y-3">
           <ErrorState message={error} />
           <Button variant="secondary" onClick={refetch}>Retry</Button>

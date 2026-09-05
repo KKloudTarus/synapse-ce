@@ -5,14 +5,18 @@ export const SEVERITY_ORDER: Severity[] = ['critical', 'high', 'medium', 'low', 
 const RANK: Record<Severity, number> = { critical: 5, high: 4, medium: 3, low: 2, info: 1, unknown: 0 }
 export const sevRank = (s: Severity): number => RANK[s] ?? 0
 
-/** Solid text color per severity. */
+/**
+ * Text colour per severity. These are the `*text` token pair, not the solid fill
+ * token: the fills are tuned for dots and bars and fall under WCAG AA as 12px
+ * text on a light surface.
+ */
 export const sevText: Record<Severity, string> = {
-  critical: 'text-critical',
-  high: 'text-high',
-  medium: 'text-medium',
-  low: 'text-low',
-  info: 'text-mutedfg',
-  unknown: 'text-mutedfg',
+  critical: 'text-criticaltext',
+  high: 'text-hightext',
+  medium: 'text-mediumtext',
+  low: 'text-lowtext',
+  info: 'text-infosevtext',
+  unknown: 'text-infosevtext',
 }
 
 /** Solid background (dots, bars). */
@@ -37,12 +41,12 @@ export const sevFill: Record<Severity, string> = {
 
 /** Soft, ringed badge style per severity. */
 export const sevSoft: Record<Severity, string> = {
-  critical: 'bg-critical/10 text-critical ring-critical/25',
-  high: 'bg-high/10 text-high ring-high/25',
-  medium: 'bg-medium/10 text-medium ring-medium/25',
-  low: 'bg-low/10 text-low ring-low/25',
-  info: 'bg-infosev/15 text-mutedfg ring-infosev/25',
-  unknown: 'bg-infosev/15 text-mutedfg ring-infosev/25',
+  critical: 'bg-critical/10 text-criticaltext ring-critical/25',
+  high: 'bg-high/10 text-hightext ring-high/25',
+  medium: 'bg-medium/10 text-mediumtext ring-medium/25',
+  low: 'bg-low/10 text-lowtext ring-low/25',
+  info: 'bg-infosev/15 text-infosevtext ring-infosev/25',
+  unknown: 'bg-infosev/15 text-infosevtext ring-infosev/25',
 }
 
 export const VERDICT_STYLE: Record<Verdict, { label: string; soft: string; dot: string }> = {

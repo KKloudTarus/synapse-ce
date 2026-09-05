@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle, CpuChip01, List, Play, XClose } from '@untitledui/icons'
 import { Button, Card, EmptyState, ErrorState, Spinner, cn } from '../../components/ui'
+import { FeatureDisabledState } from '../../components/synapse/FeatureDisabledState'
 import type { AgentReadiness } from '../../lib/types'
 import { ApprovalCard } from './ApprovalCard'
 import { SessionTranscript } from './SessionTranscript'
@@ -22,6 +23,7 @@ function statusTone(status: string): string {
 export function AgentTab({ engagementId }: { engagementId: string }) {
   const {
     sessions,
+    disabled,
     error,
     goal,
     setGoal,
@@ -36,6 +38,15 @@ export function AgentTab({ engagementId }: { engagementId: string }) {
     decide,
   } = useAgentSessions(engagementId)
 
+  if (disabled)
+    return (
+      <FeatureDisabledState
+        feature="The AI agent"
+        envVar="SYNAPSE_AGENT_ENABLED"
+        hint="It proposes recon, triage and attack-path workflows under scope, window and approval checks."
+        icon={CpuChip01}
+      />
+    )
   if (error) return <ErrorState message={error} />
   if (sessions === null) return <Spinner label="Loading agent sessions…" />
 
@@ -57,7 +68,7 @@ export function AgentTab({ engagementId }: { engagementId: string }) {
             aria-label="Agent goal"
             className="flex-1 rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary placeholder:text-quaternary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
           />
-          <Button loading={starting} disabled={!goal.trim()} onClick={startAgent} color="secondary" className="px-3 py-2">
+          <Button loading={starting} disabled={!goal.trim()} onClick={startAgent} variant="primary" className="px-3 py-2">
             <Play className="size-4" /> Start agent
           </Button>
         </div>

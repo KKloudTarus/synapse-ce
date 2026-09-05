@@ -10,6 +10,7 @@ import {
   Check,
   Target01,
 } from '@untitledui/icons'
+import { Tooltip, TooltipTrigger } from '../../../components/base/tooltip/tooltip'
 import { StatusPill } from './StatusPill'
 import { EngagementRowActions } from './EngagementRowActions'
 import { SeverityBadge } from '../../../components/synapse/SeverityBadge'
@@ -278,7 +279,21 @@ export const EngagementTable: FC<EngagementTableProps> = ({
 
                     {/* Column 4: Findings breakdown */}
                     <td className="px-4 py-3.5">
-                      {totalFindings > 0 ? (
+                      {findingsCount === null ? (
+                        // The list endpoint does not carry counts. Rendering 0
+                        // here read as "no findings" on engagements with
+                        // hundreds, so say "unknown" instead of guessing.
+                        <Tooltip
+                          title="Not reported"
+                          description="not reported by the list endpoint"
+                          placement="top"
+                          arrow
+                        >
+                          <TooltipTrigger aria-label="Findings count not reported by the list endpoint">
+                            <span className="font-mono text-xs text-tertiary cursor-help">&mdash;</span>
+                          </TooltipTrigger>
+                        </Tooltip>
+                      ) : totalFindings > 0 ? (
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="font-mono text-xs font-semibold tabular-nums text-primary">
                             {totalFindings}
@@ -313,14 +328,20 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                       )}
                     </td>
 
-                    {/* Column 5: Last Scan */}
+                    {/* Column 5: Last Scan. Falling back to createdAt without
+                        saying so reported a creation time as a scan time. */}
                     <td className="px-4 py-3.5">
-                      <span
-                        className="font-mono text-xs text-secondary"
-                        title={engagement.lastScanDate || engagement.createdAt || undefined}
-                      >
-                        {formatRelativeTime(engagement.lastScanDate || engagement.createdAt)}
-                      </span>
+                      {engagement.lastScanDate ? (
+                        <span className="font-mono text-xs text-secondary" title={engagement.lastScanDate}>
+                          {formatRelativeTime(engagement.lastScanDate)}
+                        </span>
+                      ) : engagement.createdAt ? (
+                        <span className="font-mono text-xs text-tertiary" title={engagement.createdAt}>
+                          Created {formatRelativeTime(engagement.createdAt)}
+                        </span>
+                      ) : (
+                        <span className="font-mono text-xs text-tertiary">&mdash;</span>
+                      )}
                     </td>
 
                     {/* Column 6: Actions menu */}

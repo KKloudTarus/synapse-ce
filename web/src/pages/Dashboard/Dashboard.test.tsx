@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
-import { api } from '../../lib/api'
+import { api, ApiError } from '../../lib/api'
 import type { BusinessAsset, DashboardSecurityOperations, Engagement, FleetCoverageSummary } from '../../lib/types'
 import { DashboardPage as Dashboard } from './DashboardPage'
 
@@ -11,6 +11,15 @@ vi.mock('../../lib/api', () => ({
     listEngagements: vi.fn(),
     fleetCoverageSummary: vi.fn(),
     dashboardSecurityOperations: vi.fn(),
+  },
+  ApiError: class ApiError extends Error {
+    constructor(
+      public status: number,
+      message: string,
+    ) {
+      super(message)
+      this.name = 'ApiError'
+    }
   },
 }))
 
@@ -110,6 +119,15 @@ describe('Dashboard', () => {
 
     expect(await screen.findByLabelText(/Total assets: 3/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/Coverage gaps: N\/A/i)).toBeInTheDocument()
+  })
+
+  it('labels the coverage tile Fleet disabled when the fleet routes are absent', async () => {
+    vi.mocked(api.fleetCoverageSummary).mockRejectedValue(new ApiError(404, 'HTTP 404'))
+    renderDashboard()
+
+    expect(await screen.findByLabelText('Coverage Gaps: Fleet disabled')).toBeInTheDocument()
+    expect(screen.getByText(/SYNAPSE_FLEET_ENABLED=true/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Coverage gaps: N\/A/i)).not.toBeInTheDocument()
   })
 
   it('reloads the finding trend for a selected range', async () => {
