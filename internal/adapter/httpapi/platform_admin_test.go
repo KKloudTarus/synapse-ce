@@ -21,6 +21,16 @@ func routerSource(t *testing.T) string {
 	return string(b)
 }
 
+// harnessSource reads the hostile-harness test table so an inventory test can measure coverage.
+func harnessSource(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("harness_test.go")
+	if err != nil {
+		t.Fatalf("read harness_test.go: %v", err)
+	}
+	return string(b)
+}
+
 // TestIsPlatformAdminFailsClosed pins the one property that makes this check usable as
 // authorization: with no authenticated principal bound it must answer no. PrincipalFrom
 // deliberately falls back to the operator id for attribution, so a check built on it would
