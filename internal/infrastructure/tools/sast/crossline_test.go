@@ -122,6 +122,16 @@ end
 			rule: "rb:open-redirect", want: false,
 		},
 		{
+			name: "boolean fallback is not construction",
+			file: "fallback.js",
+			content: `app.get("/go", function (req, res) {
+  const target = fallbackUrl || defaultUrl;
+  res.redirect(target);
+});
+`,
+			rule: "open-redirect-user-url", want: false,
+		},
+		{
 			name: "assignment further back than the look-back window",
 			file: "far.py",
 			content: `q = "SELECT * FROM t WHERE a = '%s'" % v

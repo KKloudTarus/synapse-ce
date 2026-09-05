@@ -61,6 +61,8 @@ func TestRulePrecisionFixes(t *testing.T) {
 			content: "const el = document.getElementById(\"x\")\nfunction load(target) {\n  return fetch(target)\n}\n"},
 		{name: "server fetch", rule: "ssrf-fetch-user-url", file: "src/proxy.js", want: true,
 			content: "async function proxy(req, res) {\n  const target = req.query.url\n  return fetch(target)\n}\n"},
+		{name: "ruby hash fetch", rule: "ssrf-fetch-user-url", file: "db/seeds.rb", want: false,
+			content: "row[:user_id] = user_map.fetch(row.delete(:user))\n"},
 
 		// private-key-material: the header alone is a delimiter, not a key.
 		{name: "pem header constant", rule: "private-key-material", file: "Pem.java", want: false,
@@ -93,6 +95,17 @@ func TestRulePrecisionFixes(t *testing.T) {
 			content: "/*\npassword = \"supersecretvalue\"\n*/\nconst x = 1\n"},
 		{name: "live credential", rule: "hardcoded-credential", file: "conf.go", want: true,
 			content: "var password = \"supersecretvalue\"\n"},
+		// Key shapes real config uses. The literals are the NodeGoat and Flask lines verbatim.
+		{name: "camelCase credential key", rule: "hardcoded-credential", file: "config/env/all.js", want: true,
+			content: "module.exports = {\n    cookieSecret: \"secret_here_or_whatever\",\n}\n"},
+		{name: "bracket config credential key", rule: "hardcoded-credential", file: "app/app.py", want: true,
+			content: "app.config['SECRET_KEY_HMAC'] = 'secret'\n"},
+		{name: "bracket config credential key with suffix", rule: "hardcoded-credential", file: "app/app2.py", want: true,
+			content: "app.config['SECRET_KEY_HMAC_2'] = 'am0r3C0mpl3xK3y'\n"},
+		{name: "placeholder credential still skipped", rule: "hardcoded-credential", file: "app/tpl.py", want: false,
+			content: "app.config['SECRET_KEY'] = os.environ['SECRET_KEY']\ncookieSecret: \"${COOKIE_SECRET}\"\n"},
+		{name: "dependency version pin is not a credential", rule: "hardcoded-credential", file: "package-lock.json", want: false,
+			content: "{\n  \"dependencies\": {\n    \"parse-passwd\": \"^1.0.0\",\n    \"registry-auth-token\": \"~3.0.1\"\n  }\n}\n"},
 
 		// go-log-fatal-in-code: main and init are allowed to end the process.
 		{name: "fatal in main", rule: "go-log-fatal-in-code", file: "main.go", want: false,

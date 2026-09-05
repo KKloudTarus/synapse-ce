@@ -252,8 +252,13 @@ func builtinRules() []rule {
 		},
 		{
 			id: "hardcoded-credential", cwe: "CWE-798", severity: shared.SeverityHigh, title: "Possible hardcoded credential",
-			desc:   "A credential appears to be assigned a literal value. Load secrets from the environment or a vault instead of embedding them.",
-			re:     regexp.MustCompile(`(?i)\b(password|passwd|pwd|api[_-]?key|secret|access[_-]?token|auth[_-]?token)\b\s*[:=]\s*["'][^"'\s]{8,}["']`),
+			desc: "A credential appears to be assigned a literal value. Load secrets from the environment or a vault instead of embedding them.",
+			// The key had to be a WHOLE word with `\b`, which missed the two shapes real config
+			// uses: camelCase (`cookieSecret: "\u2026"`) and a bracketed config key
+			// (`app.config['SECRET_KEY_HMAC'] = '\u2026'`). The keyword may now carry an identifier
+			// suffix and sit inside brackets/quotes, and the value minimum drops to 6 so a literal
+			// `'secret'` counts. The placeholder skip list is what keeps the rule high-signal.
+			re:     regexp.MustCompile(`(?i)(?:password|passwd|pwd|api[_-]?key|secret|access[_-]?token|auth[_-]?token)[A-Za-z0-9_]{0,32}["']?\s*\]?\s*[:=]\s*["'][^"'\s^~<>=][^"'\s]{5,}["']`),
 			skipFn: skipCommentOrPlaceholderSecret,
 		},
 		{
@@ -342,8 +347,12 @@ func builtinRules() []rule {
 		},
 		{
 			id: "ssrf-fetch-user-url", cwe: "CWE-918", severity: shared.SeverityHigh, title: "Server-side fetch of user-controlled URL",
-			desc:   "A server-side fetch appears to use a generic url variable or request field. Validate scheme/host, block private networks/metadata IPs, and proxy through an allowlist.",
-			re:     regexp.MustCompile(`(?i)\b(fetch|axios\.(get|post|put|request))\s*\(\s*([A-Za-z_$][\w$]*|url\b|req\.(body|query|params)|.*\burl\b)`),
+			desc: "A server-side fetch appears to use a generic url variable or request field. Validate scheme/host, block private networks/metadata IPs, and proxy through an allowlist.",
+			// `fetch` must be the GLOBAL function, not a method: `\bfetch` also matched Ruby's
+			// Hash#fetch, so every `user_map.fetch(key)` was reported as SSRF. The rule stays
+			// language-agnostic (server-side JS runs under several extensions) and the browser
+			// gate in the scan loop drops DOM-context files.
+			re:     regexp.MustCompile(`(?i)(?:(?:^|[^.\w])fetch|axios\.(?:get|post|put|request))\s*\(\s*([A-Za-z_$][\w$]*|url\b|req\.(body|query|params)|.*\burl\b)`),
 			skipFn: commentOnlyLine,
 		},
 		{
