@@ -184,10 +184,46 @@ Gate a repository in CI with the reusable action (see [`docs/guide/cli.md`](docs
 
 ### Run the full stack with Docker
 
+The stack has no default database password and no default API token. That is deliberate: a
+credential committed to a public repository ends up in a deployment that somebody can reach, so the
+Compose file fails fast rather than booting with a password an attacker already knows. Generate the
+values once into `deploy/.env.local`, which `.gitignore` already covers:
+
 ```bash
-docker compose -f deploy/docker-compose.full.yml up --build
-# then open http://localhost:5173
+umask 077
+DB_ADMIN_PASSWORD="$(openssl rand -hex 16)"
+DB_APP_PASSWORD="$(openssl rand -hex 16)"
+BLOB_PASSWORD="$(openssl rand -hex 16)"
+cat > deploy/.env.local <<EOF
+DB_ADMIN_PASSWORD=$DB_ADMIN_PASSWORD
+DB_APP_PASSWORD=$DB_APP_PASSWORD
+BLOB_PASSWORD=$BLOB_PASSWORD
+SYNAPSE_API_TOKEN=$(openssl rand -hex 32)
+SYNAPSE_DB_DSN=postgres://synapse_app:$DB_APP_PASSWORD@postgres:5432/synapse?sslmode=disable
+SYNAPSE_DB_MIGRATION_DSN=postgres://synapse_admin:$DB_ADMIN_PASSWORD@postgres:5432/synapse?sslmode=disable
+EOF
+
+docker compose --env-file deploy/.env.local \
+  -f deploy/docker-compose.full.yml up -d --build --wait
 ```
+
+`--env-file` is required. Compose does not read `deploy/.env.local` just because the Compose file
+lives in `deploy/`. Hex passwords keep the DSNs URL-safe; percent-encode anything else.
+
+```bash
+curl localhost:8080/readyz                       # {"status":"ready",...}
+open http://localhost:5173                       # dashboard
+```
+
+Paste the `SYNAPSE_API_TOKEN` from `deploy/.env.local` into the dashboard and accept the
+Acceptable Use Policy. Two roles exist on purpose: `synapse_admin` owns the schema and runs
+migrations, `synapse_app` serves traffic and cannot bypass row level security. PostgreSQL writes
+its initial credentials into the volume, so rotating the env file afterwards does not change the
+stored password; for throwaway local data, reset with
+`docker compose --env-file deploy/.env.local -f deploy/docker-compose.full.yml down -v`.
+
+Full details, including the port table and what this profile deliberately does not harden, are in
+[Deployment](docs/guide/deployment.md#full-stack-with-docker-compose).
 
 ### Run natively (development)
 
@@ -203,6 +239,26 @@ make dev                           # API on :8080, dashboard on :5173
 Open <http://localhost:5173>, paste the token, accept the Acceptable Use Policy. A blank
 `SYNAPSE_DB_DSN` runs an in-memory dev store, so nothing is persisted. Migrations are embedded
 and applied automatically at startup.
+
+For a durable local database, start the dependency stack and point the API at it. Its one-shot
+`postgres-init` container creates the application role the API connects as.
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d   # Postgres + MinIO; same as `make docker-up`
+export SYNAPSE_DB_DSN='postgres://synapse_app:synapse-app@localhost:5432/synapse?sslmode=disable'
+export SYNAPSE_DB_MIGRATION_DSN='postgres://synapse:synapse@localhost:5432/synapse?sslmode=disable'
+make dev
+```
+
+Both DSNs are needed. `synapse` owns the schema, migrates it, and grants the runtime role its
+table privileges; `synapse_app` is `NOSUPERUSER NOBYPASSRLS` and is the only role the API will
+serve under. Connecting as the superuser stops the API at startup with
+`rls: runtime DB role cannot enforce isolation: role is SUPERUSER`, because row level security is
+silently a no-op for such a role. These credentials are throwaway local defaults.
+
+Skip `--wait` on this stack: Compose counts the exited `postgres-init` container as not running and
+reports a failure even when it finished successfully. To block until the role exists, run
+`docker compose -f deploy/docker-compose.yml run --rm postgres-init`, which is idempotent.
 
 ## Command line
 
