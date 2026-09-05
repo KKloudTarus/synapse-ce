@@ -63,6 +63,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **The per-agent host cap holds under concurrent syncs.** The 16-host cap was checked before the
+  write, so two syncs from one agent that both counted 15 could both create a host. A `fleet_assets`
+  trigger (migration 0132) now recounts under a per-agent advisory lock inside the insert and refuses
+  the row past the cap; the in-memory store does the same under its lock. The refusal is audited and
+  returned as 403 like the fast-path one.
+
 - **SAST precision on a real repository.** A full scan of this repository produced 623 findings, 140 of
   them high-severity SAST, most of them noise: Go rules matched code quoted in `CHANGELOG.md`,
   `reflected-response-write` flagged `fmt.Fprintln(os.Stderr, err)` in every CLI, `go-sql-dynamic-query`

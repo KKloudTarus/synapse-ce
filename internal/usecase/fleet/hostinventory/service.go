@@ -29,7 +29,7 @@ import (
 // reports the host it runs on; a machine-id change (reimage, cloned VM) legitimately makes a new one,
 // so the cap is a small multiple rather than one. Above it, a new key is refused: an agent varying its
 // facts must not mint host assets, hidden vulnerability contexts and scans without bound.
-const MaxHostsPerAgent = 16
+const MaxHostsPerAgent = dhi.MaxHostsPerAgent
 
 // AssetWriter is the subset of the asset use case this service needs. The read is part of the
 // authorization boundary: an authenticated agent may update the host it already reports, but must
@@ -154,6 +154,14 @@ func (s *Service) Sync(ctx context.Context, actor string, in SyncInput) (*SyncRe
 		Attributes: attributes(inv, degraded, actor),
 	})
 	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			// The store's own cap check refused the row: two syncs from this agent raced past
+			// guardHostsPerAgent and the transaction-level backstop caught the second. Audit it the
+			// same way so the refusal stays attributable.
+			if aerr := s.auditHostCap(ctx, actor, in.TenantID, key, MaxHostsPerAgent); aerr != nil {
+				return nil, aerr
+			}
+		}
 		return nil, fmt.Errorf("host inventory: upsert host asset: %w", err)
 	}
 
@@ -313,6 +321,15 @@ func (s *Service) guardHostsPerAgent(ctx context.Context, actor string, tenantID
 	if owned < MaxHostsPerAgent {
 		return nil
 	}
+	if err := s.auditHostCap(ctx, actor, tenantID, key, owned); err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: agent %s already reports %d hosts; a new host key is refused", shared.ErrForbidden, actor, owned)
+}
+
+// auditHostCap records a refused host key. owned is the count the refusing side observed: the use
+// case's own count on the fast path, the cap itself when the store's transactional check refused.
+func (s *Service) auditHostCap(ctx context.Context, actor string, tenantID shared.ID, key string, owned int) error {
 	if err := s.audit.Record(ctx, ports.AuditEntry{
 		Actor:  actor,
 		Action: "host_inventory.host_cap_reached",
@@ -327,7 +344,7 @@ func (s *Service) guardHostsPerAgent(ctx context.Context, actor string, tenantID
 	}); err != nil {
 		return fmt.Errorf("host inventory: audit host cap: %w", err)
 	}
-	return fmt.Errorf("%w: agent %s already reports %d hosts; a new host key is refused", shared.ErrForbidden, actor, owned)
+	return nil
 }
 
 // hostKey is the host's stable natural key: the machine id when known (survives hostname changes),

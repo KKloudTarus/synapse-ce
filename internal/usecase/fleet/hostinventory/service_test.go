@@ -3,6 +3,7 @@ package hostinventory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -15,11 +16,12 @@ import (
 )
 
 type fakeAssetWriter struct {
-	ids     map[string]shared.ID
-	assets  map[string]*asset.Asset
-	next    int
-	upserts int
-	last    assetuc.UpsertAssetInput
+	ids       map[string]shared.ID
+	assets    map[string]*asset.Asset
+	next      int
+	upserts   int
+	last      assetuc.UpsertAssetInput
+	upsertErr error // returned by UpsertAsset when set: the store refused the write
 }
 
 func newFakeWriter() *fakeAssetWriter {
@@ -39,6 +41,9 @@ func (f *fakeAssetWriter) GetAssetByKey(_ context.Context, _ shared.ID, kind ass
 func (f *fakeAssetWriter) UpsertAsset(_ context.Context, _ string, in assetuc.UpsertAssetInput) (*asset.Asset, error) {
 	f.upserts++
 	f.last = in
+	if f.upsertErr != nil {
+		return nil, f.upsertErr
+	}
 	k := string(in.Kind) + "|" + in.Key
 	id, ok := f.ids[k]
 	if !ok {
@@ -449,5 +454,38 @@ func TestSyncCapsHostsPerAgent(t *testing.T) {
 	other := dhi.HostInventory{Facts: dhi.HostFacts{Hostname: "h", OS: "linux", MachineID: "id-other"}}
 	if _, err := s.Sync(context.Background(), "agent-2", SyncInput{TenantID: "tenant-1", Inventory: other}); err != nil {
 		t.Fatalf("second agent refused: %v", err)
+	}
+}
+
+// TestSyncAuditsTheStoreCapBackstop covers the race the count-then-write check cannot close on its
+// own: two syncs from one agent both count below the cap, and the store's transactional check (the
+// fleet_assets trigger in Postgres, the store lock in memory) refuses the second row. The refusal is
+// audited like the fast-path one and surfaces as forbidden, never as an opaque write error.
+func TestSyncAuditsTheStoreCapBackstop(t *testing.T) {
+	w := newFakeWriter()
+	w.upsertErr = fmt.Errorf("%w: agent agent-1 already reports the maximum number of hosts", shared.ErrForbidden)
+	audit := &fakeAudit{}
+	s := newService(t, w, audit)
+
+	_, err := s.Sync(context.Background(), "agent-1", SyncInput{TenantID: "tenant-1", Inventory: completeHost()})
+	if !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("err = %v, want forbidden", err)
+	}
+	e, ok := audit.entry("host_inventory.host_cap_reached")
+	if !ok {
+		t.Fatalf("store refusal not audited: %+v", audit.entries)
+	}
+	if e.Actor != "agent-1" || e.Metadata["asset_key"] != "machine-id/abc123" || e.Metadata["cap"] != itoa(MaxHostsPerAgent) || e.Metadata["hosts"] != itoa(MaxHostsPerAgent) {
+		t.Fatalf("audit entry = %+v", e)
+	}
+
+	// Any other store failure is a plain error: no cap audit, no forbidden.
+	w.upsertErr = errors.New("connection reset")
+	audit.entries = nil
+	if _, err := s.Sync(context.Background(), "agent-1", SyncInput{TenantID: "tenant-1", Inventory: completeHost()}); err == nil || errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("err = %v, want a plain store error", err)
+	}
+	if _, ok := audit.entry("host_inventory.host_cap_reached"); ok {
+		t.Fatalf("a plain store error was audited as a cap refusal: %+v", audit.entries)
 	}
 }

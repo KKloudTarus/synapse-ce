@@ -2,11 +2,14 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	dhi "github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -46,13 +49,42 @@ func edgeKey(e *asset.Edge) string {
 	return e.TenantID.String() + "|" + e.From.String() + "|" + e.To.String() + "|" + string(e.Kind) + "|" + e.Provenance.String()
 }
 
-// UpsertAsset stores a by its natural key, replacing any prior value for that key.
+// UpsertAsset stores a by its natural key, replacing any prior value for that key. A new host row
+// past its reporting agent's cap is refused with shared.ErrForbidden, under the store lock, the way
+// the fleet_assets trigger (migration 0132) refuses it in Postgres.
 func (s *AssetStore) UpsertAsset(_ context.Context, a *asset.Asset) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	k := assetKey(a.TenantID, a.Kind, a.Key)
+	if _, exists := s.assets[k]; !exists {
+		if err := s.guardHostCap(a); err != nil {
+			return err
+		}
+	}
 	cp := *a
 	cp.Attributes = cloneMap(a.Attributes)
-	s.assets[assetKey(a.TenantID, a.Kind, a.Key)] = &cp
+	s.assets[k] = &cp
+	return nil
+}
+
+// guardHostCap counts the host assets already attributed to a's reporting agent. Callers hold s.mu.
+func (s *AssetStore) guardHostCap(a *asset.Asset) error {
+	if a.Kind != asset.KindHost {
+		return nil
+	}
+	agent := strings.TrimSpace(a.Attributes["reporting_agent_id"])
+	if agent == "" {
+		return nil
+	}
+	owned := 0
+	for _, e := range s.assets {
+		if e.TenantID == a.TenantID && e.Kind == asset.KindHost && strings.TrimSpace(e.Attributes["reporting_agent_id"]) == agent {
+			owned++
+		}
+	}
+	if owned >= dhi.MaxHostsPerAgent {
+		return fmt.Errorf("%w: agent %s already reports %d hosts; a new host key is refused", shared.ErrForbidden, agent, owned)
+	}
 	return nil
 }
 

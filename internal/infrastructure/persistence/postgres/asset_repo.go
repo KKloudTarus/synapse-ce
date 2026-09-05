@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
@@ -31,7 +33,9 @@ const assetCols = `id, tenant_id, kind, "key", name, attributes, created_at, upd
 const businessAssetCols = `id, tenant_id, "key", name, description, asset_type, criticality, lifecycle, owner, metadata, version, created_at, updated_at, created_by, updated_by`
 
 // UpsertAsset inserts or updates by the (tenant_id, kind, key) natural key, preserving the id and
-// created_at of an existing row so re-observation does not churn identity.
+// created_at of an existing row so re-observation does not churn identity. A new host row that would
+// take its reporting agent past the per-agent cap is refused by the fleet_assets trigger (migration
+// 0132) and surfaces as shared.ErrForbidden.
 func (r *AssetRepository) UpsertAsset(ctx context.Context, a *asset.Asset) error {
 	attrs, err := json.Marshal(a.Attributes)
 	if err != nil {
@@ -45,6 +49,11 @@ func (r *AssetRepository) UpsertAsset(ctx context.Context, a *asset.Asset) error
 			SET name = EXCLUDED.name, attributes = EXCLUDED.attributes, updated_at = EXCLUDED.updated_at`,
 			a.ID.String(), a.TenantID.String(), string(a.Kind), a.Key, a.Name, attrs,
 			a.Audit.CreatedAt, a.Audit.UpdatedAt)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23514" && pgErr.ConstraintName == "fleet_assets_host_cap_per_agent" {
+			return fmt.Errorf("%w: agent %s already reports the maximum number of hosts; a new host key is refused",
+				shared.ErrForbidden, strings.TrimSpace(a.Attributes["reporting_agent_id"]))
+		}
 		return err
 	})
 }

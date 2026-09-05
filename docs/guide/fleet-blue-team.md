@@ -114,7 +114,10 @@ Recording is idempotent per package set. An unchanged host does not re-import or
 sweep; a changed set is recorded once the previous scan has finished, and at most once per ten
 minutes per host. An inventory above 50,000 packages is refused, and one agent identity may create at
 most 16 host assets (a reimaged machine gets a new machine id; an agent varying its facts does not get
-unbounded hosts, contexts and scans). The `POST /api/v1/fleet/inventory/host` response carries a
+unbounded hosts, contexts and scans). The cap is checked before the write and enforced again inside
+it: a `fleet_assets` trigger (migration 0132) serialises new host rows per agent and refuses the row
+past the cap, so two syncs racing past the first check cannot both create a host. A refusal is audited
+as `host_inventory.host_cap_reached` and returned as 403. The `POST /api/v1/fleet/inventory/host` response carries a
 `vulnerability_scan` object with the outcome (`engagement_id`, `job_id`, `components`, or `skipped`
 with a `reason`). A scan-pipeline failure is audited as `host_inventory.vulnerability_scan_failed` and
 reported in that object; it never fails the inventory sync itself. The advisory-revision reconciler

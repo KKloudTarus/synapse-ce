@@ -14,6 +14,14 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
+// MaxHostsPerAgent bounds how many distinct host assets one enrolled agent identity may create.
+// A host key is agent supplied, so without a cap a misbehaving or compromised agent could mint
+// unbounded hosts, hidden vulnerability contexts and scans by varying its facts. A reimaged machine
+// gets a new machine id and legitimately consumes one slot. The use case checks the cap before it
+// writes; the fleet_assets trigger in migration 0132 and the in-memory store enforce the same number
+// inside the write so concurrent syncs cannot exceed it.
+const MaxHostsPerAgent = 16
+
 // CoverageKind classifies why part of the host could not be inventoried.
 type CoverageKind string
 
