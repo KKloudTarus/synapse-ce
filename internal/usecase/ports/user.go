@@ -36,3 +36,16 @@ type UserRepository interface {
 	// record auditEntry only when the user is first created.
 	Bootstrap(ctx context.Context, u *user.User, auditEntry AuditEntry) error
 }
+
+// UserRosterLocker is the optional capability that makes the last-admin guard safe against a
+// concurrent second mutation. The guard is a read-modify-write: it counts the tenant's other
+// enabled admins, then demotes or disables one. Two concurrent demotions each see the other admin
+// still enabled, both pass, and the tenant is left with nobody who can administer it.
+//
+// An implementation returns the tenant's roster with those rows locked for the remainder of the
+// caller's transaction, so the second mutation blocks until the first commits and then observes it.
+// A repository that cannot lock simply does not implement this, and the service falls back to the
+// plain read; the in-process mutex still serializes a single replica.
+type UserRosterLocker interface {
+	ListForUpdate(ctx context.Context, tenantID shared.ID) ([]*user.User, error)
+}

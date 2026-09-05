@@ -439,3 +439,89 @@ func TestDefaultTenantAdminCannotSeizeTheBootstrapPrincipal(t *testing.T) {
 		t.Fatalf("bootstrap self-rotation: %v", err)
 	}
 }
+
+// TestConcurrentDemotionsCannotStrandATenant is the regression for the last-admin guard's
+// read-modify-write. The guard counts the tenant's OTHER enabled admins and then writes. Two
+// concurrent demotions, one per admin, each see the other still enabled, so both pass the count and
+// both commit, leaving a tenant nobody can administer. The guard exists precisely to make that
+// impossible, so exactly one of the two must be refused.
+func TestConcurrentDemotionsCannotStrandATenant(t *testing.T) {
+	for iteration := 0; iteration < 200; iteration++ {
+		svc, _ := newAuditedSvc(t)
+		ctx := context.Background()
+		a1, _, actor1 := seedAdmin(t, svc, "acme", "Admin One")
+		a2, _, actor2 := seedAdmin(t, svc, "acme", "Admin Two")
+
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		for _, demotion := range []struct {
+			actor Actor
+			id    shared.ID
+		}{{actor1, a2.ID}, {actor2, a1.ID}} {
+			go func() {
+				<-start
+				_, err := svc.Update(ctx, demotion.actor, demotion.id, "", user.RoleReadOnly)
+				errs <- err
+			}()
+		}
+		close(start)
+		first, second := <-errs, <-errs
+
+		roster, err := svc.List(ctx, actor1)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		enabledAdmins := 0
+		for _, u := range roster {
+			if !u.Disabled && u.Role.Can(user.PermAdminister) {
+				enabledAdmins++
+			}
+		}
+		if enabledAdmins == 0 {
+			t.Fatalf("iteration %d: both demotions succeeded and the tenant has no enabled admin (errors %v / %v)", iteration, first, second)
+		}
+		if first == nil && second == nil {
+			t.Fatalf("iteration %d: both demotions reported success; one must be refused", iteration)
+		}
+	}
+}
+
+// TestConcurrentDisableAndDemoteCannotStrandATenant is the same race across the two mutations that
+// share the guard, which is the shape a real deployment is likelier to hit than two demotions.
+func TestConcurrentDisableAndDemoteCannotStrandATenant(t *testing.T) {
+	for iteration := 0; iteration < 200; iteration++ {
+		svc, _ := newAuditedSvc(t)
+		ctx := context.Background()
+		a1, _, actor1 := seedAdmin(t, svc, "acme", "Admin One")
+		a2, _, actor2 := seedAdmin(t, svc, "acme", "Admin Two")
+
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		go func() {
+			<-start
+			_, err := svc.SetDisabled(ctx, actor1, a2.ID, true)
+			errs <- err
+		}()
+		go func() {
+			<-start
+			_, err := svc.Update(ctx, actor2, a1.ID, "", user.RoleReadOnly)
+			errs <- err
+		}()
+		close(start)
+		first, second := <-errs, <-errs
+
+		roster, err := svc.List(ctx, actor1)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		enabledAdmins := 0
+		for _, u := range roster {
+			if !u.Disabled && u.Role.Can(user.PermAdminister) {
+				enabledAdmins++
+			}
+		}
+		if enabledAdmins == 0 {
+			t.Fatalf("iteration %d: the tenant has no enabled admin (errors %v / %v)", iteration, first, second)
+		}
+	}
+}

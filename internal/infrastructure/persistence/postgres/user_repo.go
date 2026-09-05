@@ -106,18 +106,20 @@ func (r *UserRepository) GetByID(ctx context.Context, tenantID, id shared.ID) (*
 // from the SET list, so an update can never move a user between tenants, and the tenant predicate
 // means a cross-tenant id updates nothing.
 func (r *UserRepository) Update(ctx context.Context, tenantID shared.ID, u *user.User) error {
-	tag, err := r.pool.Exec(ctx,
-		`UPDATE users SET name=$4, role=$5, api_key_hash=$6, disabled=$7, updated_at=$8
-		 WHERE `+userTenantPredicate+` AND id=$3`,
-		shared.DefaultTenant.String(), shared.TenantOrDefault(tenantID).String(), u.ID.String(),
-		u.Name, string(u.Role), u.APIKeyHash, u.Disabled, u.Audit.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("update user: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return shared.ErrNotFound
-	}
-	return nil
+	return WithTenant(ctx, r.pool, shared.TenantOrDefault(tenantID).String(), func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`UPDATE users SET name=$4, role=$5, api_key_hash=$6, disabled=$7, updated_at=$8
+			 WHERE `+userTenantPredicate+` AND id=$3`,
+			shared.DefaultTenant.String(), shared.TenantOrDefault(tenantID).String(), u.ID.String(),
+			u.Name, string(u.Role), u.APIKeyHash, u.Disabled, u.Audit.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("update user: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return shared.ErrNotFound
+		}
+		return nil
+	})
 }
 
 // GetByAPIKeyHash is the authentication path: the tenant is unknown until the presented token
@@ -136,22 +138,41 @@ func (r *UserRepository) GetByAPIKeyHash(ctx context.Context, hash string) (*use
 }
 
 func (r *UserRepository) List(ctx context.Context, tenantID shared.ID) ([]*user.User, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT `+userCols+` FROM users WHERE `+userTenantPredicate+` ORDER BY created_at ASC, id ASC`,
-		shared.DefaultTenant.String(), shared.TenantOrDefault(tenantID).String())
-	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
-	}
-	defer rows.Close()
-	out := []*user.User{}
-	for rows.Next() {
-		u, err := scanUser(rows)
+	return r.list(ctx, tenantID, "")
+}
+
+// ListForUpdate is List with the tenant's rows locked for the rest of the caller's transaction, so
+// the last-admin guard's count cannot be invalidated by a concurrent demotion between the count and
+// the write. Outside a transaction the lock is released immediately and this is just List.
+func (r *UserRepository) ListForUpdate(ctx context.Context, tenantID shared.ID) ([]*user.User, error) {
+	return r.list(ctx, tenantID, " FOR UPDATE")
+}
+
+var _ ports.UserRosterLocker = (*UserRepository)(nil)
+
+func (r *UserRepository) list(ctx context.Context, tenantID shared.ID, lock string) ([]*user.User, error) {
+	query := `SELECT ` + userCols + ` FROM users WHERE ` + userTenantPredicate + ` ORDER BY created_at ASC, id ASC` + lock
+	var out []*user.User
+	err := WithTenant(ctx, r.pool, shared.TenantOrDefault(tenantID).String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, shared.DefaultTenant.String(), shared.TenantOrDefault(tenantID).String())
 		if err != nil {
-			return nil, fmt.Errorf("scan user: %w", err)
+			return fmt.Errorf("list users: %w", err)
 		}
-		out = append(out, u)
+		defer rows.Close()
+		out = []*user.User{}
+		for rows.Next() {
+			u, scanErr := scanUser(rows)
+			if scanErr != nil {
+				return fmt.Errorf("scan user: %w", scanErr)
+			}
+			out = append(out, u)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func scanUser(row rowScanner) (*user.User, error) {

@@ -1041,6 +1041,12 @@ func main() {
 		log.Error("users service init failed", "err", err)
 		os.Exit(1)
 	}
+	if vulnerabilityTransactions != nil {
+		// The last-admin guard counts the roster and then writes. Both statements must be one
+		// transaction, or two concurrent demotions each see the other admin still enabled and the
+		// tenant is left with nobody who can administer it.
+		usersService.SetTransactionRunner(vulnerabilityTransactions)
+	}
 	if err := usersService.EnsureBootstrapAdmin(context.Background(), cfg.APIToken); err != nil {
 		log.Error("bootstrap admin seed failed", "err", err)
 		os.Exit(1)

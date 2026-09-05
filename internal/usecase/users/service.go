@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
@@ -30,6 +31,21 @@ type Service struct {
 	audit ports.AuditLogger
 	clock ports.Clock
 	ids   ports.IDGenerator
+	// transactions makes the last-admin guard and its write one unit. Optional: the in-memory and
+	// file stores have no transactions, and the Postgres composition roots set it.
+	transactions ports.TenantTransactionRunner
+	// roster serializes the guarded mutations within this process. The guard is a read-modify-write
+	// over the tenant's roster, so two concurrent demotions each see the other admin still enabled,
+	// both pass, and the tenant is left with nobody who can administer it. A single mutex is enough
+	// because user management is a rare, human-paced operation; across replicas the row lock taken
+	// by ports.UserRosterLocker inside the transaction is what serializes them.
+	roster sync.Mutex
+}
+
+// SetTransactionRunner makes the last-admin guard atomic against a concurrent second mutation.
+// Without it the count and the write commit separately, and the roster can change in between.
+func (s *Service) SetTransactionRunner(transactions ports.TenantTransactionRunner) {
+	s.transactions = transactions
 }
 
 // NewService validates dependencies and returns the users service.
@@ -179,6 +195,12 @@ func (s *Service) Update(ctx context.Context, actor Actor, id shared.ID, name st
 	if err := actor.mayMutate(id); err != nil {
 		return nil, err
 	}
+	return guarded(ctx, s, actor, func(txCtx context.Context) (*user.User, error) {
+		return s.update(txCtx, actor, id, name, role)
+	})
+}
+
+func (s *Service) update(ctx context.Context, actor Actor, id shared.ID, name string, role user.Role) (*user.User, error) {
 	u, err := s.repo.GetByID(ctx, actor.tenant(), id)
 	if err != nil {
 		return nil, fmt.Errorf("load user: %w", err)
@@ -222,6 +244,12 @@ func (s *Service) SetDisabled(ctx context.Context, actor Actor, id shared.ID, di
 	if err := actor.mayMutate(id); err != nil {
 		return nil, err
 	}
+	return guarded(ctx, s, actor, func(txCtx context.Context) (*user.User, error) {
+		return s.setDisabled(txCtx, actor, id, disabled)
+	})
+}
+
+func (s *Service) setDisabled(ctx context.Context, actor Actor, id shared.ID, disabled bool) (*user.User, error) {
 	u, err := s.repo.GetByID(ctx, actor.tenant(), id)
 	if err != nil {
 		return nil, fmt.Errorf("load user: %w", err)
@@ -256,6 +284,10 @@ func (s *Service) RotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (
 	if err := actor.mayMutate(id); err != nil {
 		return nil, "", err
 	}
+	// Rotation does not touch the admin count, so it needs no roster guard; it still takes the
+	// mutex so a rotation cannot interleave with a demotion of the same row.
+	s.roster.Lock()
+	defer s.roster.Unlock()
 	u, err := s.repo.GetByID(ctx, actor.tenant(), id)
 	if err != nil {
 		return nil, "", fmt.Errorf("load user: %w", err)
@@ -283,7 +315,7 @@ func (s *Service) RotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (
 // It counts the tenant's OTHER enabled admins, so an admin cannot lock the tenant out by disabling
 // or demoting itself.
 func (s *Service) assertNotLastEnabledAdmin(ctx context.Context, actor Actor, id shared.ID, action string) error {
-	roster, err := s.repo.List(ctx, actor.tenant())
+	roster, err := s.lockedRoster(ctx, actor.tenant())
 	if err != nil {
 		return fmt.Errorf("count tenant admins: %w", err)
 	}
@@ -296,6 +328,36 @@ func (s *Service) assertNotLastEnabledAdmin(ctx context.Context, actor Actor, id
 		}
 	}
 	return fmt.Errorf("%w: cannot %s the last enabled admin of tenant %q", shared.ErrConflict, action, actor.tenant())
+}
+
+// guarded runs one roster mutation with the last-admin guard held: serialized in this process by
+// the service mutex, and against other replicas by the row lock the guard's read takes inside the
+// transaction. Both are needed, and neither alone is sufficient.
+func guarded(ctx context.Context, s *Service, actor Actor, fn func(context.Context) (*user.User, error)) (*user.User, error) {
+	s.roster.Lock()
+	defer s.roster.Unlock()
+	if s.transactions == nil {
+		return fn(ctx)
+	}
+	var out *user.User
+	if err := s.transactions.Run(ctx, actor.tenant(), func(txCtx context.Context) error {
+		var mutateErr error
+		out, mutateErr = fn(txCtx)
+		return mutateErr
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// lockedRoster reads the tenant's roster, locking the rows for the rest of the caller's transaction
+// where the repository supports it. A repository that cannot lock falls back to a plain read, which
+// leaves the in-process mutex as the only serialization.
+func (s *Service) lockedRoster(ctx context.Context, tenant shared.ID) ([]*user.User, error) {
+	if locker, ok := s.repo.(ports.UserRosterLocker); ok {
+		return locker.ListForUpdate(ctx, tenant)
+	}
+	return s.repo.List(ctx, tenant)
 }
 
 // Authenticate resolves a presented bearer token to its (enabled) user, or an error.
