@@ -68,7 +68,7 @@ export function AgentTab({ engagementId }: { engagementId: string }) {
             aria-label="Agent goal"
             className="flex-1 rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary placeholder:text-quaternary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
           />
-          <Button loading={starting} disabled={!goal.trim()} onClick={startAgent} color="secondary" className="px-3 py-2">
+          <Button loading={starting} disabled={!goal.trim()} onClick={startAgent} variant="primary" className="px-3 py-2">
             <Play className="size-4" /> Start agent
           </Button>
         </div>
