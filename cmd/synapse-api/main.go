@@ -149,6 +149,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	promotionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/promotion"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/purplecoverage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/pyreach"
 	qualitygatesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualitygates"
 	qualityprofilesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualityprofiles"
@@ -345,6 +346,7 @@ func main() {
 	var importedSBOMStore ports.ImportedSBOMStore
 	var importedFindingStore ports.ImportedFindingStore         // third-party (SARIF) findings under governance
 	var detectionRecordStore ports.DetectionRecordStore         // #423 detection ledger projection
+	var purpleCoverageStore ports.PurpleCoverageStore           // #426 emulated technique vs observed detection
 	var detectionProvenanceStore ports.DetectionProvenanceStore // #610 durable detection lifecycle facts
 	var incidentEventStore ports.IncidentEventStore             // #594 C7 incident append-only event log
 	var promotionStore ports.PendingPromotionAuditStore
@@ -476,6 +478,7 @@ func main() {
 		importedSBOMStore = postgres.NewImportedSBOMStore(pool)
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
 		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
+		purpleCoverageStore = postgres.NewPurpleRepository(pool)
 		detectionProvenanceStore, err = postgres.NewDetectionProvenanceRepository(pool)
 		if err != nil {
 			log.Error("postgres detection provenance store init failed", "err", err)
@@ -609,6 +612,7 @@ func main() {
 		importedSBOMStore = memory.NewImportedSBOMStore()
 		importedFindingStore = memory.NewImportedFindingStore()
 		detectionRecordStore = memory.NewDetectionRecordStore()
+		purpleCoverageStore = memory.NewPurpleStore()
 		detectionProvenanceStore = memory.NewDetectionProvenanceStore()
 		incidentEventStore = memory.NewIncidentEventStore()
 		memoryFindings, ok := findingRepo.(*memory.FindingRepository)
@@ -1713,6 +1717,17 @@ func main() {
 			os.Exit(1)
 		} else {
 			router.SetRiskStoryReader(riskStorySvc)
+		}
+		// #426 purple coverage: join each emulated ATT&CK technique against the detections actually
+		// observed on that asset inside the run's window, so the report answers "did we see it?"
+		// rather than "did we run it?". The domain, the use case and the route already existed and
+		// were tested; the composition root never built the service, so the route was registered
+		// against a nil reader and did not exist on a running server.
+		if purpleSvc, perr := purplecoverage.NewService(purpleCoverageStore, detectionRecordStore, auditLog, clock); perr != nil {
+			log.Error("purple coverage init failed", "err", perr)
+			os.Exit(1)
+		} else {
+			router.SetPurpleCoverageReader(purpleSvc)
 		}
 		// The ingest writes an append-only audit entry asserting that N external results entered an
 		// engagement. Without Postgres those rows live only in this process, so the banner says so
