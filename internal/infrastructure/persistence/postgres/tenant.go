@@ -83,11 +83,17 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn fun
 		return normalizePersistenceError(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return fmt.Errorf("rls: commit: %w", err)
+		return fmt.Errorf("rls: commit: %w: %w", ErrTenantCommit, err)
 	}
 	committed = true
 	return nil
 }
+
+// ErrTenantCommit marks a failure of the COMMIT that ends a WithTenant transaction, as opposed to
+// a failure inside fn. Once COMMIT has been sent its durable outcome can be unknowable, so a
+// caller that compensates on failure (by deleting an artifact it wrote outside the database, say)
+// must not treat this as "the transaction did not happen".
+var ErrTenantCommit = errors.New("tenant transaction commit failed")
 
 // normalizePersistenceError translates database-enforced application conflicts into the same
 // domain sentinel used by deterministic pre-checks. The telemetry asset-binding constraint is a
@@ -162,3 +168,45 @@ func CheckRLSRuntimeRole(ctx context.Context, pool *pgxpool.Pool) error {
 
 // errRLSRoleBypasses is the sentinel wrapped by CheckRLSRuntimeRole so callers can match it.
 var errRLSRoleBypasses = fmt.Errorf("cannot enforce isolation")
+
+// requireTenant runs fn inside a WithTenant transaction bound to tenantID, refusing an empty
+// tenant up front. WithTenant would otherwise bind the empty string and let synapse_current_tenant() resolve it
+// to the RLS DENY sentinel, so the caller would see an empty result set or a not-found instead of
+// the programming error that produced it. Repositories of RLS-protected tables whose port carries
+// an explicit tenant argument use this; those whose port relies on the ambient tenant use
+// WithContextTenant.
+func requireTenant(ctx context.Context, pool *pgxpool.Pool, tenantID shared.ID, fn func(pgx.Tx) error) error {
+	if tenantID.IsZero() {
+		return fmt.Errorf("%w: tenant is required", shared.ErrValidation)
+	}
+	return WithTenant(ctx, pool, tenantID.String(), fn)
+}
+
+// listTenantIDs enumerates every tenant so a cross-tenant maintenance sweep can run one
+// tenant-bound query per tenant instead of one unscoped query over an RLS-protected table.
+// tenants is deliberate global reference data and carries no policy of its own; label names the
+// sweep for the wrapped error. This is the same fan-out the job queue's Claim and the engagement
+// repository's reconciliation scan already use.
+func listTenantIDs(ctx context.Context, pool *pgxpool.Pool, label string) ([]shared.ID, error) {
+	rows, err := pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list tenants for %s: %w", label, err)
+	}
+	defer rows.Close()
+	var out []shared.ID
+	for rows.Next() {
+		var tenantID shared.ID
+		if err := rows.Scan(&tenantID); err != nil {
+			return nil, fmt.Errorf("scan tenant for %s: %w", label, err)
+		}
+		// The legacy empty tenant is the RLS DENY sentinel, never a partition to sweep.
+		if tenantID.IsZero() {
+			continue
+		}
+		out = append(out, tenantID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list tenants for %s: %w", label, err)
+	}
+	return out, nil
+}

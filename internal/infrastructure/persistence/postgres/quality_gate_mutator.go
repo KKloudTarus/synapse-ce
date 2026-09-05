@@ -18,7 +18,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// QualityGateMutator commits managed-gate writes and their audit records together.
+// QualityGateMutator commits managed-gate writes and their audit records together. quality_gates
+// and projects are RLS-protected (migration 0129), so every mutation runs inside requireTenant.
+// That replaces the hand-rolled transaction plus manual set_config this used before: the tenant is
+// now fail-closed when empty, and a nested tenant transaction is checked for a mismatch instead of
+// being silently rebound. The audit_log policy reads the same binding, which is why the audit
+// append still lands in the same transaction as the write it records.
 type QualityGateMutator struct{ pool *pgxpool.Pool }
 
 func NewQualityGateMutator(pool *pgxpool.Pool) *QualityGateMutator {
@@ -28,10 +33,7 @@ func NewQualityGateMutator(pool *pgxpool.Pool) *QualityGateMutator {
 var _ ports.QualityGateMutator = (*QualityGateMutator)(nil)
 
 func (m *QualityGateMutator) CreateGate(ctx context.Context, tenantID shared.ID, gate qualitygate.Gate, audit ports.AuditEntry) error {
-	return m.inTx(ctx, func(tx pgx.Tx) error {
-		if err := setAuditTenant(ctx, tx, tenantID); err != nil {
-			return err
-		}
+	return m.inTx(ctx, tenantID, func(tx pgx.Tx) error {
 		if err := lockGate(ctx, tx, tenantID, gate.Key); err != nil {
 			return err
 		}
@@ -47,10 +49,7 @@ func (m *QualityGateMutator) CreateGate(ctx context.Context, tenantID shared.ID,
 }
 
 func (m *QualityGateMutator) UpdateGate(ctx context.Context, tenantID shared.ID, gate qualitygate.Gate, audit ports.AuditEntry) error {
-	return m.inTx(ctx, func(tx pgx.Tx) error {
-		if err := setAuditTenant(ctx, tx, tenantID); err != nil {
-			return err
-		}
+	return m.inTx(ctx, tenantID, func(tx pgx.Tx) error {
 		if err := lockGate(ctx, tx, tenantID, gate.Key); err != nil {
 			return err
 		}
@@ -70,10 +69,7 @@ func (m *QualityGateMutator) UpdateGate(ctx context.Context, tenantID shared.ID,
 }
 
 func (m *QualityGateMutator) DeleteGate(ctx context.Context, tenantID shared.ID, key string, audit ports.AuditEntry) error {
-	return m.inTx(ctx, func(tx pgx.Tx) error {
-		if err := setAuditTenant(ctx, tx, tenantID); err != nil {
-			return err
-		}
+	return m.inTx(ctx, tenantID, func(tx pgx.Tx) error {
 		if err := lockGate(ctx, tx, tenantID, key); err != nil {
 			return err
 		}
@@ -99,10 +95,7 @@ func (m *QualityGateMutator) DeleteGate(ctx context.Context, tenantID shared.ID,
 }
 
 func (m *QualityGateMutator) AssignProjectGate(ctx context.Context, tenantID shared.ID, projectKey, gateID string, audit ports.AuditEntry) error {
-	return m.inTx(ctx, func(tx pgx.Tx) error {
-		if err := setAuditTenant(ctx, tx, tenantID); err != nil {
-			return err
-		}
+	return m.inTx(ctx, tenantID, func(tx pgx.Tx) error {
 		gateID = strings.TrimSpace(gateID)
 		if err := requireCustomGate(ctx, tx, tenantID, gateID); err != nil {
 			return err
@@ -119,7 +112,7 @@ func (m *QualityGateMutator) AssignProjectGate(ctx context.Context, tenantID sha
 }
 
 func (m *QualityGateMutator) CreateProjectWithGate(ctx context.Context, p *project.Project) error {
-	return m.inTx(ctx, func(tx pgx.Tx) error {
+	return m.inTx(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if err := requireCustomGate(ctx, tx, p.TenantID, p.GateID); err != nil {
 			return err
 		}
@@ -148,10 +141,13 @@ func requireCustomGate(ctx context.Context, tx pgx.Tx, tenantID shared.ID, key s
 	return nil
 }
 
-func (m *QualityGateMutator) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
+// inTx runs fn in a tenant-bound transaction, retrying the unique-violation the advisory-lock
+// race can still produce. Each attempt is a fresh transaction because requireTenant rolls its own
+// back on error.
+func (m *QualityGateMutator) inTx(ctx context.Context, tenantID shared.ID, fn func(pgx.Tx) error) error {
 	const maxAttempts = 8
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		err := m.inTxOnce(ctx, fn)
+		err := requireTenant(ctx, m.pool, tenantID, fn)
 		if err == nil {
 			return nil
 		}
@@ -162,31 +158,6 @@ func (m *QualityGateMutator) inTx(ctx context.Context, fn func(pgx.Tx) error) er
 		return err
 	}
 	return fmt.Errorf("quality gate mutation: %w after %d attempts", shared.ErrConflict, maxAttempts)
-}
-
-func (m *QualityGateMutator) inTxOnce(ctx context.Context, fn func(pgx.Tx) error) error {
-	tx, err := m.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("quality gate transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if err := fn(tx); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("quality gate commit: %w", err)
-	}
-	return nil
-}
-
-// setAuditTenant binds the transaction-scoped tenant that the audit_log RLS policy
-// (synapse_current_tenant) checks. It must run before appendTenantAudit, otherwise the
-// audit INSERT is rejected with a row-level security violation.
-func setAuditTenant(ctx context.Context, tx pgx.Tx, tenantID shared.ID) error {
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantID.String()); err != nil {
-		return fmt.Errorf("set audit tenant: %w", err)
-	}
-	return nil
 }
 
 func lockGate(ctx context.Context, tx pgx.Tx, tenantID shared.ID, key string) error {

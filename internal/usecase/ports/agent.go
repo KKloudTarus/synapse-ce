@@ -38,9 +38,20 @@ type ApprovalStore interface {
 	// Consume atomically marks an approved action as used. The first caller wins;
 	// later callers receive shared.ErrConflict.
 	Consume(ctx context.Context, actionID shared.ID) error
-	// EngagementsWithPending lists the engagements that have at least one pending approval –
-	// so the prod timeout sweeper can fan out across them without a global scan.
-	EngagementsWithPending(ctx context.Context) ([]shared.ID, error)
+	// EngagementsWithPending lists the engagements that have at least one pending approval,
+	// so the prod timeout sweeper can fan out across them without a global scan. Each scope
+	// carries its tenant because the sweeper runs with no ambient tenant: the caller binds the
+	// scope's tenant before sweeping it, which keeps every subsequent Pending/Decide inside one
+	// tenant and lets the durable store reach RLS-protected agent_approvals at all.
+	EngagementsWithPending(ctx context.Context) ([]ApprovalSweepScope, error)
+}
+
+// ApprovalSweepScope is one tenant-bound engagement the fail-closed approval timeout sweeper
+// must visit. It mirrors PromotionReconciliationScope: a cross-tenant maintenance pass names the
+// tenant explicitly instead of running an unscoped query.
+type ApprovalSweepScope struct {
+	TenantID     shared.ID
+	EngagementID shared.ID
 }
 
 // PlanStore persists an agent session's execution plan.

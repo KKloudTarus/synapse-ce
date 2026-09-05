@@ -49,29 +49,19 @@ func (r *ProjectAnalysisStore) SaveWithResultAndProjections(ctx context.Context,
 		return fmt.Errorf("marshal project analysis: %w", err)
 	}
 
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin project analysis transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if _, err := tx.Exec(ctx, `INSERT INTO project_analyses (id, tenant_id, project_id, created_at, payload, result)
-		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
-		analysis.ID, analysis.TenantID, analysis.ProjectID, analysis.CreatedAt, payload, result); err != nil {
-		return fmt.Errorf("insert project analysis: %w", err)
-	}
-
-	if err := upsertHotspotsTx(ctx, tx, analysis, hotspotItems); err != nil {
-		return err
-	}
-	if err := upsertIssuesTx(ctx, tx, issueItems); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit project analysis transaction: %w", err)
-	}
-	return nil
+	// One tenant-bound transaction for the analysis and both projections: a projection failure
+	// still rolls the analysis back, and every table it writes is RLS-protected.
+	return requireTenant(ctx, r.pool, shared.ID(analysis.TenantID), func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO project_analyses (id, tenant_id, project_id, created_at, payload, result)
+			VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
+			analysis.ID, analysis.TenantID, analysis.ProjectID, analysis.CreatedAt, payload, result); err != nil {
+			return fmt.Errorf("insert project analysis: %w", err)
+		}
+		if err := upsertHotspotsTx(ctx, tx, analysis, hotspotItems); err != nil {
+			return err
+		}
+		return upsertIssuesTx(ctx, tx, issueItems)
+	})
 }
 
 // upsertIssuesTx projects each issue candidate, preserving the triage lifecycle
@@ -135,73 +125,77 @@ func (r *ProjectAnalysisStore) ListIssues(ctx context.Context, tenantID, project
 	query := `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
 		status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
 		FROM project_issues WHERE ` + where + ` ORDER BY last_seen_at DESC, id COLLATE "C" DESC LIMIT $` + fmt.Sprint(len(args))
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return issue.Page{}, fmt.Errorf("list project issues: %w", err)
-	}
-	defer rows.Close()
-	items := make([]issue.Issue, 0, limit+1)
-	for rows.Next() {
-		item, err := scanIssue(rows)
-		if err != nil {
-			return issue.Page{}, fmt.Errorf("scan project issue: %w", err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return issue.Page{}, err
-	}
-	page := issue.Page{}
-	if len(items) > limit {
-		last := items[limit-1]
-		page.Next = &issue.Cursor{BeforeLastSeenAt: last.LastSeenAt, BeforeID: last.ID}
-		items = items[:limit]
-	}
-	page.Items = items
-
 	// Facets and summary are computed over the filtered (but unpaginated) set: the
 	// cursor is deliberately excluded so paging never shrinks the counts.
 	facetWhere, facetArgs := issueWhere(tenantID, projectID, filter, false)
+	page := issue.Page{}
+	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list project issues: %w", err)
+		}
+		defer rows.Close()
+		items := make([]issue.Issue, 0, limit+1)
+		for rows.Next() {
+			item, err := scanIssue(rows)
+			if err != nil {
+				return fmt.Errorf("scan project issue: %w", err)
+			}
+			items = append(items, item)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(items) > limit {
+			last := items[limit-1]
+			page.Next = &issue.Cursor{BeforeLastSeenAt: last.LastSeenAt, BeforeID: last.ID}
+			items = items[:limit]
+		}
+		page.Items = items
 
-	var total, open, resolved int
-	if err := r.pool.QueryRow(ctx, `SELECT count(*),
+		var total, open, resolved int
+		if err := tx.QueryRow(ctx, `SELECT count(*),
 		count(*) FILTER (WHERE status = 'open'),
 		count(*) FILTER (WHERE status IN ('accepted','false_positive','wont_fix'))
 		FROM project_issues WHERE `+facetWhere, facetArgs...).Scan(&total, &open, &resolved); err != nil {
-		return issue.Page{}, fmt.Errorf("summary project issues: %w", err)
-	}
-	page.Summary = issue.Summary{Total: total, Open: open, Resolved: resolved}
+			return fmt.Errorf("summary project issues: %w", err)
+		}
+		page.Summary = issue.Summary{Total: total, Open: open, Resolved: resolved}
 
-	facetRows, err := r.pool.Query(ctx, `SELECT 'type' AS kind, issue_type AS value, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY issue_type
+		facetRows, err := tx.Query(ctx, `SELECT 'type' AS kind, issue_type AS value, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY issue_type
 		UNION ALL SELECT 'status', status, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY status
 		UNION ALL SELECT 'severity', severity, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY severity
 		UNION ALL SELECT 'rule', rule_key, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY rule_key
 		UNION ALL SELECT 'language', language, count(*) FROM project_issues WHERE `+facetWhere+` AND language <> '' GROUP BY language`, facetArgs...)
-	if err != nil {
-		return issue.Page{}, fmt.Errorf("facet project issues: %w", err)
-	}
-	defer facetRows.Close()
-	page.Facets = issue.Facets{Types: map[string]int{}, Statuses: map[string]int{}, Severities: map[string]int{}, RuleKeys: map[string]int{}, Languages: map[string]int{}}
-	for facetRows.Next() {
-		var kind, value string
-		var count int
-		if err := facetRows.Scan(&kind, &value, &count); err != nil {
-			return issue.Page{}, fmt.Errorf("scan project issue facet: %w", err)
+		if err != nil {
+			return fmt.Errorf("facet project issues: %w", err)
 		}
-		switch kind {
-		case "type":
-			page.Facets.Types[value] = count
-		case "status":
-			page.Facets.Statuses[value] = count
-		case "severity":
-			page.Facets.Severities[value] = count
-		case "rule":
-			page.Facets.RuleKeys[value] = count
-		case "language":
-			page.Facets.Languages[value] = count
+		defer facetRows.Close()
+		page.Facets = issue.Facets{Types: map[string]int{}, Statuses: map[string]int{}, Severities: map[string]int{}, RuleKeys: map[string]int{}, Languages: map[string]int{}}
+		for facetRows.Next() {
+			var kind, value string
+			var count int
+			if err := facetRows.Scan(&kind, &value, &count); err != nil {
+				return fmt.Errorf("scan project issue facet: %w", err)
+			}
+			switch kind {
+			case "type":
+				page.Facets.Types[value] = count
+			case "status":
+				page.Facets.Statuses[value] = count
+			case "severity":
+				page.Facets.Severities[value] = count
+			case "rule":
+				page.Facets.RuleKeys[value] = count
+			case "language":
+				page.Facets.Languages[value] = count
+			}
 		}
+		return facetRows.Err()
+	}); err != nil {
+		return issue.Page{}, err
 	}
-	return page, facetRows.Err()
+	return page, nil
 }
 
 func issueLikeEscape(value string) string {
@@ -254,15 +248,21 @@ func issueWhere(tenantID, projectID shared.ID, filter issue.ListFilter, cursor b
 }
 
 func (r *ProjectAnalysisStore) GetIssue(ctx context.Context, tenantID, projectID, issueID shared.ID) (issue.Issue, error) {
-	row := r.pool.QueryRow(ctx, `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
+	var item issue.Issue
+	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		found, err := scanIssue(tx.QueryRow(ctx, `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
 		status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
-		FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND id=$3`, tenantID.String(), projectID.String(), issueID.String())
-	item, err := scanIssue(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return issue.Issue{}, shared.ErrNotFound
-	}
-	if err != nil {
-		return issue.Issue{}, fmt.Errorf("get project issue: %w", err)
+		FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND id=$3`, tenantID.String(), projectID.String(), issueID.String()))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("get project issue: %w", err)
+		}
+		item = found
+		return nil
+	}); err != nil {
+		return issue.Issue{}, err
 	}
 	return item, nil
 }
@@ -293,69 +293,78 @@ func scanIssue(row rowScanner) (issue.Issue, error) {
 }
 
 func (r *ProjectAnalysisStore) TransitionIssue(ctx context.Context, cmd issue.TransitionCommand) (issue.Issue, issue.ReviewEvent, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return issue.Issue{}, issue.ReviewEvent{}, fmt.Errorf("begin issue transition tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	row := tx.QueryRow(ctx, `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
+	var (
+		updated issue.Issue
+		event   issue.ReviewEvent
+	)
+	if err := requireTenant(ctx, r.pool, cmd.TenantID, func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
 		status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
 		FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND id=$3 FOR UPDATE`, cmd.TenantID.String(), cmd.ProjectID.String(), cmd.IssueID.String())
-	item, err := scanIssue(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return issue.Issue{}, issue.ReviewEvent{}, shared.ErrNotFound
-	}
-	if err != nil {
-		return issue.Issue{}, issue.ReviewEvent{}, fmt.Errorf("get issue for update: %w", err)
-	}
+		item, err := scanIssue(row)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("get issue for update: %w", err)
+		}
 
-	updated, event, err := item.Transition(cmd.To, cmd.Actor, cmd.Rationale, cmd.ExpectedVersion, cmd.EventID, time.Now())
-	if err != nil {
-		return issue.Issue{}, issue.ReviewEvent{}, err
-	}
+		updated, event, err = item.Transition(cmd.To, cmd.Actor, cmd.Rationale, cmd.ExpectedVersion, cmd.EventID, time.Now())
+		if err != nil {
+			return err
+		}
 
-	if _, err := tx.Exec(ctx, `UPDATE project_issues SET status=$1, version=$2, updated_at=$3, last_reviewed_by=$4, last_reviewed_at=$5 WHERE id=$6`,
-		string(updated.Status), updated.Version, updated.Audit.UpdatedAt, updated.LastReviewedBy, updated.LastReviewedAt, updated.ID.String()); err != nil {
-		return issue.Issue{}, issue.ReviewEvent{}, fmt.Errorf("update issue status: %w", err)
-	}
+		// The guard repeats the tenant and project so the write cannot land on another tenant's
+		// row even if the id were forged.
+		tag, err := tx.Exec(ctx, `UPDATE project_issues SET status=$1, version=$2, updated_at=$3, last_reviewed_by=$4, last_reviewed_at=$5 WHERE tenant_id=$6 AND project_id=$7 AND id=$8`,
+			string(updated.Status), updated.Version, updated.Audit.UpdatedAt, updated.LastReviewedBy, updated.LastReviewedAt, cmd.TenantID.String(), cmd.ProjectID.String(), updated.ID.String())
+		if err != nil {
+			return fmt.Errorf("update issue status: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return shared.ErrNotFound
+		}
 
-	if _, err := tx.Exec(ctx, `INSERT INTO project_issue_review_events
+		if _, err := tx.Exec(ctx, `INSERT INTO project_issue_review_events
 		(id, tenant_id, project_id, issue_id, from_status, to_status, actor, rationale, previous_version, version, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		event.ID.String(), event.TenantID.String(), event.ProjectID.String(), event.IssueID.String(),
-		string(event.From), string(event.To), event.Actor, event.Rationale, event.PreviousVersion, event.Version, event.CreatedAt); err != nil {
-		return issue.Issue{}, issue.ReviewEvent{}, fmt.Errorf("insert issue review event: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return issue.Issue{}, issue.ReviewEvent{}, fmt.Errorf("commit issue transition tx: %w", err)
+			event.ID.String(), event.TenantID.String(), event.ProjectID.String(), event.IssueID.String(),
+			string(event.From), string(event.To), event.Actor, event.Rationale, event.PreviousVersion, event.Version, event.CreatedAt); err != nil {
+			return fmt.Errorf("insert issue review event: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return issue.Issue{}, issue.ReviewEvent{}, err
 	}
 	return updated, event, nil
 }
 
 func (r *ProjectAnalysisStore) IssueHistory(ctx context.Context, tenantID, projectID, issueID shared.ID) ([]issue.ReviewEvent, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id, tenant_id, project_id, issue_id, from_status, to_status, actor, rationale, previous_version, version, created_at
+	var events []issue.ReviewEvent
+	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id, tenant_id, project_id, issue_id, from_status, to_status, actor, rationale, previous_version, version, created_at
 		FROM project_issue_review_events
 		WHERE tenant_id=$1 AND project_id=$2 AND issue_id=$3
 		ORDER BY version DESC, id COLLATE "C" DESC`, tenantID.String(), projectID.String(), issueID.String())
-	if err != nil {
-		return nil, fmt.Errorf("query issue review events: %w", err)
-	}
-	defer rows.Close()
-
-	var events []issue.ReviewEvent
-	for rows.Next() {
-		var e issue.ReviewEvent
-		var id, tID, pID, iID, from, to string
-		if err := rows.Scan(&id, &tID, &pID, &iID, &from, &to, &e.Actor, &e.Rationale, &e.PreviousVersion, &e.Version, &e.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan issue review event: %w", err)
+		if err != nil {
+			return fmt.Errorf("query issue review events: %w", err)
 		}
-		e.ID, e.TenantID, e.ProjectID, e.IssueID = shared.ID(id), shared.ID(tID), shared.ID(pID), shared.ID(iID)
-		e.From, e.To = issue.Status(from), issue.Status(to)
-		events = append(events, e)
+		defer rows.Close()
+		for rows.Next() {
+			var e issue.ReviewEvent
+			var id, tID, pID, iID, from, to string
+			if err := rows.Scan(&id, &tID, &pID, &iID, &from, &to, &e.Actor, &e.Rationale, &e.PreviousVersion, &e.Version, &e.CreatedAt); err != nil {
+				return fmt.Errorf("scan issue review event: %w", err)
+			}
+			e.ID, e.TenantID, e.ProjectID, e.IssueID = shared.ID(id), shared.ID(tID), shared.ID(pID), shared.ID(iID)
+			e.From, e.To = issue.Status(from), issue.Status(to)
+			events = append(events, e)
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
 	}
-	return events, rows.Err()
+	return events, nil
 }
 
 func sourceLocationFields(location *finding.SourceLocation) (any, any, any, any, any) {
@@ -385,37 +394,47 @@ func (r *ProjectAnalysisStore) CurrentFindingStatuses(ctx context.Context, tenan
 	if len(keys) == 0 {
 		return map[string]string{}, nil
 	}
-	rows, err := r.pool.Query(ctx, `SELECT issue_key, status FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND issue_key = ANY($3)
-		UNION ALL SELECT hotspot_key, status FROM project_hotspots WHERE tenant_id=$1 AND project_id=$2 AND hotspot_key = ANY($3)`, tenantID.String(), projectID.String(), keys)
-	if err != nil {
-		return nil, fmt.Errorf("query current finding statuses: %w", err)
-	}
-	defer rows.Close()
 	out := make(map[string]string, len(keys))
-	for rows.Next() {
-		var key, status string
-		if err := rows.Scan(&key, &status); err != nil {
-			return nil, fmt.Errorf("scan current finding status: %w", err)
+	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT issue_key, status FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND issue_key = ANY($3)
+		UNION ALL SELECT hotspot_key, status FROM project_hotspots WHERE tenant_id=$1 AND project_id=$2 AND hotspot_key = ANY($3)`, tenantID.String(), projectID.String(), keys)
+		if err != nil {
+			return fmt.Errorf("query current finding statuses: %w", err)
 		}
-		out[key] = status
+		defer rows.Close()
+		for rows.Next() {
+			var key, status string
+			if err := rows.Scan(&key, &status); err != nil {
+				return fmt.Errorf("scan current finding status: %w", err)
+			}
+			out[key] = status
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *ProjectAnalysisStore) ResolvedIssueKeys(ctx context.Context, tenantID, projectID shared.ID) (map[string]bool, error) {
-	rows, err := r.pool.Query(ctx, `SELECT issue_key FROM project_issues
-		WHERE tenant_id=$1 AND project_id=$2 AND status IN ('accepted','false_positive','wont_fix')`, tenantID.String(), projectID.String())
-	if err != nil {
-		return nil, fmt.Errorf("query resolved issue keys: %w", err)
-	}
-	defer rows.Close()
 	out := map[string]bool{}
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, fmt.Errorf("scan resolved issue key: %w", err)
+	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT issue_key FROM project_issues
+		WHERE tenant_id=$1 AND project_id=$2 AND status IN ('accepted','false_positive','wont_fix')`, tenantID.String(), projectID.String())
+		if err != nil {
+			return fmt.Errorf("query resolved issue keys: %w", err)
 		}
-		out[key] = true
+		defer rows.Close()
+		for rows.Next() {
+			var key string
+			if err := rows.Scan(&key); err != nil {
+				return fmt.Errorf("scan resolved issue key: %w", err)
+			}
+			out[key] = true
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }

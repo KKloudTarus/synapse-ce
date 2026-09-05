@@ -136,17 +136,26 @@ func (s *Service) SweepExpired(ctx context.Context, engagementID shared.ID) (int
 
 // SweepAllExpired sweeps every engagement that currently has a pending approval (the prod
 // timeout sweeper's fan-out). Returns the total expired.
+//
+// The sweeper runs on a background context with no tenant, so each scope's tenant is bound before
+// its engagement is swept. Everything downstream of that binding (Pending, Decide, the record
+// audit and the resume enqueue) then runs inside one tenant, which is what lets the durable store
+// reach the RLS-protected approval queue at all.
 func (s *Service) SweepAllExpired(ctx context.Context) (int, error) {
 	if s.timeout <= 0 {
 		return 0, nil
 	}
-	engs, err := s.store.EngagementsWithPending(ctx)
+	scopes, err := s.store.EngagementsWithPending(ctx)
 	if err != nil {
 		return 0, err
 	}
 	total := 0
-	for _, e := range engs {
-		n, err := s.SweepExpired(ctx, e)
+	for _, scope := range scopes {
+		scopeCtx := ctx
+		if !scope.TenantID.IsZero() {
+			scopeCtx = shared.WithTenant(ctx, scope.TenantID)
+		}
+		n, err := s.SweepExpired(scopeCtx, scope.EngagementID)
 		if err != nil {
 			return total, err
 		}

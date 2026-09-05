@@ -28,47 +28,46 @@ func (r *ProjectAnalysisStore) AttachSourceWithAudit(ctx context.Context, tenant
 		return err
 	}
 
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin source attachment: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	// requireTenant owns the transaction so the analysis read, the payload update and the audit
+	// append all run under one bound tenant; the audit_log policy needs that binding too.
+	err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		var payload []byte
+		if err := tx.QueryRow(ctx, `SELECT payload FROM project_analyses WHERE tenant_id=$1 AND project_id=$2 AND id=$3 FOR UPDATE`, tenantID.String(), projectID.String(), analysisID.String()).Scan(&payload); errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("lock project analysis for source attachment: %w", err)
+		}
+		var analysis projectanalysis.Analysis
+		if err := json.Unmarshal(payload, &analysis); err != nil {
+			return fmt.Errorf("decode project analysis for source attachment: %w", err)
+		}
+		if analysis.Capabilities.Source.Available || analysis.SourceManifest.Digest != "" || len(analysis.SourceManifest.Files) != 0 || analysis.SourceManifest.Writer != nil {
+			return shared.ErrConflict
+		}
+		if err := validateCaptureAgainstAnalysis(analysis, capture.Manifest); err != nil {
+			return err
+		}
 
-	var payload []byte
-	if err := tx.QueryRow(ctx, `SELECT payload FROM project_analyses WHERE tenant_id=$1 AND project_id=$2 AND id=$3 FOR UPDATE`, tenantID.String(), projectID.String(), analysisID.String()).Scan(&payload); errors.Is(err, pgx.ErrNoRows) {
-		return shared.ErrNotFound
-	} else if err != nil {
-		return fmt.Errorf("lock project analysis for source attachment: %w", err)
-	}
-	var analysis projectanalysis.Analysis
-	if err := json.Unmarshal(payload, &analysis); err != nil {
-		return fmt.Errorf("decode project analysis for source attachment: %w", err)
-	}
-	if analysis.Capabilities.Source.Available || analysis.SourceManifest.Digest != "" || len(analysis.SourceManifest.Files) != 0 || analysis.SourceManifest.Writer != nil {
-		return shared.ErrConflict
-	}
-	if err := validateCaptureAgainstAnalysis(analysis, capture.Manifest); err != nil {
-		return err
-	}
-
-	analysis.SourceManifest = capture.Manifest
-	analysis.Capabilities.Source = projectanalysis.Capability{Available: true}
-	analysis.Capabilities.Highlighting = projectanalysis.Capability{Available: true}
-	updated, err := json.Marshal(analysis)
+		analysis.SourceManifest = capture.Manifest
+		analysis.Capabilities.Source = projectanalysis.Capability{Available: true}
+		analysis.Capabilities.Highlighting = projectanalysis.Capability{Available: true}
+		updated, err := json.Marshal(analysis)
+		if err != nil {
+			return fmt.Errorf("marshal project analysis source attachment: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE project_analyses SET payload=$4 WHERE tenant_id=$1 AND project_id=$2 AND id=$3`, tenantID.String(), projectID.String(), analysisID.String(), updated); err != nil {
+			return fmt.Errorf("attach project analysis source: %w", err)
+		}
+		return appendAudit(ctx, tx, audit)
+	})
 	if err != nil {
-		return fmt.Errorf("marshal project analysis source attachment: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE project_analyses SET payload=$4 WHERE tenant_id=$1 AND project_id=$2 AND id=$3`, tenantID.String(), projectID.String(), analysisID.String(), updated); err != nil {
-		return fmt.Errorf("attach project analysis source: %w", err)
-	}
-	if err := appendAudit(ctx, tx, audit); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		// Once COMMIT has been sent, a transport failure can make its durable outcome unknowable.
 		// The caller must not compensate by deleting the artifact: the DB row and audit may already
 		// be committed. An orphan is safe to retain and later reap; missing committed bytes are not.
-		return fmt.Errorf("%w: commit project analysis source attachment: %v", ports.ErrProjectSourceCommitUncertain, err)
+		if errors.Is(err, ErrTenantCommit) {
+			return fmt.Errorf("%w: commit project analysis source attachment: %v", ports.ErrProjectSourceCommitUncertain, err)
+		}
+		return err
 	}
 	return nil
 }
