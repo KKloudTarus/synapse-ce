@@ -344,9 +344,12 @@ func main() {
 	var scanResultStore ports.ScanResultStore
 	var aiTriageReviewStore ports.AITriageReviewStore
 	var importedSBOMStore ports.ImportedSBOMStore
-	var importedFindingStore ports.ImportedFindingStore         // third-party (SARIF) findings under governance
-	var detectionRecordStore ports.DetectionRecordStore         // #423 detection ledger projection
-	var purpleCoverageStore ports.PurpleCoverageStore           // #426 emulated technique vs observed detection
+	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
+	var detectionRecordStore ports.DetectionRecordStore // #423 detection ledger projection
+	var purpleCoverageStore ports.PurpleCoverageStore   // #426 emulated technique vs observed detection
+	// Registry of the LLM agent runs executing in this process, so the offensive kill switch can cancel
+	// one mid-decision. Declared here because the kill switch is built before the orchestrator is.
+	agentRunRegistry := orchestrator.NewRunRegistry()
 	var detectionProvenanceStore ports.DetectionProvenanceStore // #610 durable detection lifecycle facts
 	var incidentEventStore ports.IncidentEventStore             // #594 C7 incident append-only event log
 	var promotionStore ports.PendingPromotionAuditStore
@@ -1918,8 +1921,11 @@ func main() {
 			// which for this single-process deployment is the whole control plane.
 			chainRegistry := exploitationuc.NewChainRegistry()
 			killSwitch.SetChainHalter(chainRegistry)
+			// Third layer: the LLM agent loop. A run holds no work order and is not a chain, so without
+			// this the halt stopped everything except the thing actively choosing the next action.
+			killSwitch.SetAgentHalter(agentRunRegistry)
 			router.SetOffensiveKillSwitch(killSwitch)
-			log.Info("offensive kill switch ENABLED", "route", "POST /api/v1/redteam/halt", "bound", offensivepolicyuc.HaltBound.String(), "chain_registry", true)
+			log.Info("offensive kill switch ENABLED", "route", "POST /api/v1/redteam/halt", "bound", offensivepolicyuc.HaltBound.String(), "chain_registry", true, "agent_registry", true)
 		}
 		// Optional certificate identity (#408): when a control-plane CA is configured, enrolment
 		// with a CSR issues a client certificate. Fail closed on a misconfigured CA.
@@ -2436,6 +2442,8 @@ func main() {
 		if agentRunLock != nil {
 			orch.SetRunLock(agentRunLock) // advisory session lock – cannot expire mid-LLM-loop
 		}
+		// Make this orchestrator's runs reachable by the offensive kill switch.
+		orch.SetRunRegistry(agentRunRegistry)
 		orch.SetPlanStore(planStore)         // drive a proposed plan DAG (node-CAS idempotency)
 		orch.SetDecisionStore(decisionStore) // structured decision-log projection
 		// Durable dispatch when SYNAPSE_AGENT_VIA_WORKER (requires the recon worker + Postgres):

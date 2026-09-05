@@ -144,6 +144,7 @@ type Orchestrator struct {
 	runLock   ports.RunLocker     // optional; single-active-execution per session (durable jobs)
 	planStore ports.PlanStore     // optional; when set + the catalog has planning enabled,
 	decisions ports.DecisionStore // optional; structured decision-log projection (explainability)
+	runs      *RunRegistry        // optional; makes a run cancellable by the offensive kill switch
 	cfg       Config              // a propose_plan call drives a DAG. nil ⇒ byte-identical legacy loop.
 }
 
@@ -184,6 +185,11 @@ func (o *Orchestrator) SetPlanStore(s ports.PlanStore) { o.planStore = s }
 // each linked to the evidence chain by hash. It is a queryable projection: a recording failure
 // is audited but NEVER fails the (evidence-sealed) run. nil ⇒ no decision log (legacy).
 func (o *Orchestrator) SetDecisionStore(s ports.DecisionStore) { o.decisions = s }
+
+// SetRunRegistry makes this orchestrator's runs reachable by the offensive kill switch. Optional:
+// unset, runs are still bounded by the step, token and wall-clock budgets, but an operator halt
+// cannot cancel one mid-decision.
+func (o *Orchestrator) SetRunRegistry(r *RunRegistry) { o.runs = r }
 
 // Start creates + persists a session (status running) and seeds the transcript, returning
 // immediately WITHOUT driving the loop. The caller (HTTP layer) hands the session id back to
@@ -244,6 +250,14 @@ func (o *Orchestrator) Drive(ctx context.Context, sessionID shared.ID) (agent.Se
 		return sess, nil // another worker is driving this session
 	}
 	defer release()
+	// Register the run so an operator halt can cancel it. Cancelling ends the in-flight provider call
+	// and the loop stops before it can propose or execute another action, which is the step that
+	// matters. The release unregisters, so a run is haltable for exactly as long as it runs.
+	if o.runs != nil {
+		var stopTracking func()
+		ctx, stopTracking = o.runs.Track(ctx, sessionID)
+		defer stopTracking()
+	}
 	// Plan path: if this session already has a plan, drive it (continue / crash-recover)
 	// rather than re-entering the reactive loop (which would re-ask the LLM). Reload under the
 	// lock; an awaiting_approval session is NEVER auto-driven (a human must Resume – matches the

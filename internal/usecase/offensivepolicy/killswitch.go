@@ -50,6 +50,16 @@ type ChainHalter interface {
 	HaltChains(ctx context.Context, tenantID shared.ID, actor, reason string) (ChainHaltSummary, error)
 }
 
+// AgentHalter stops the LLM agent runs executing in this process for a tenant.
+//
+// An agent run holds no work order and is not an exploitation chain, so without this layer the kill
+// switch stopped everything except the one thing actively deciding what to do next. Bounding a run with
+// step and token budgets is not the same as halting it, and a switch that does less than the operator
+// believes is the failure this contract cannot have. Optional; nil means no agent layer.
+type AgentHalter interface {
+	HaltAgents(ctx context.Context, tenantID shared.ID, actor, reason string) (int, error)
+}
+
 // ResponseHalter halts pending/in-flight DEFENSIVE response actions for a tenant (#425): the kill switch
 // stops response actions exactly as it stops offensive work — a defensive action that changes a
 // production system must be as haltable as an offensive one. Optional; nil means no response layer.
@@ -78,6 +88,10 @@ type HaltResult struct {
 	// ResponseHaltError is set when that layer could not be driven at all.
 	ResponsesHalted   int
 	ResponseHaltError string
+	// AgentsHalted counts the LLM agent runs this halt cancelled in this process; AgentHaltError is
+	// set when that layer could not be driven at all.
+	AgentsHalted   int
+	AgentHaltError string
 	// EstateStopNote states, in the response, what the bound does not cover. An operator reading only
 	// this field must not conclude the estate has stopped.
 	EstateStopNote string
@@ -86,7 +100,7 @@ type HaltResult struct {
 // Halted reports whether every in-flight offensive order AND every running chain was cancelled. A halt
 // that stopped every work order but left a chain running is not a clean halt.
 func (r HaltResult) Halted() bool {
-	return len(r.Failed) == 0 && r.Chains.clean() && r.ChainHaltError == "" && r.ResponseHaltError == ""
+	return len(r.Failed) == 0 && r.Chains.clean() && r.ChainHaltError == "" && r.ResponseHaltError == "" && r.AgentHaltError == ""
 }
 
 // KillSwitch halts all in-flight offensive work for a tenant.
@@ -96,6 +110,7 @@ type KillSwitch struct {
 	isOffensive func(*workorder.WorkOrder) bool
 	now         func() time.Time
 	chains      ChainHalter
+	agents      AgentHalter
 	responses   ResponseHalter
 }
 
@@ -106,6 +121,15 @@ type KillSwitch struct {
 func (k *KillSwitch) SetChainHalter(ch ChainHalter) {
 	if k != nil {
 		k.chains = ch
+	}
+}
+
+// SetAgentHalter wires the LLM agent layer so a halt also cancels agent runs executing in this process.
+// Optional: left unset, the kill switch covers work orders, chains and responses alone, and the result's
+// AgentsHalted stays zero to say so.
+func (k *KillSwitch) SetAgentHalter(ah AgentHalter) {
+	if k != nil {
+		k.agents = ah
 	}
 }
 
@@ -173,6 +197,16 @@ func (k *KillSwitch) Halt(ctx context.Context, tenantID shared.ID, actor, reason
 		result.Chains = summary
 		if cerr != nil {
 			result.ChainHaltError = cerr.Error()
+		}
+	}
+	// And the agent layer, before the work-order enumeration for the same reason as chains: a run that
+	// is mid-decision is the thing most likely to take the next dangerous step, and it must not depend
+	// on a healthy work-order store to be stopped.
+	if k.agents != nil {
+		n, aerr := k.agents.HaltAgents(ctx, tenantID, actor, reason)
+		result.AgentsHalted = n
+		if aerr != nil {
+			result.AgentHaltError = aerr.Error()
 		}
 	}
 	// And the defensive-response layer: pending/in-flight response actions are halted like offensive work.
