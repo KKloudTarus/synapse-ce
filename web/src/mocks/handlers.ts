@@ -13,14 +13,29 @@ const MONTH_AGO = new Date(Date.now() - 30 * 86400_000).toISOString()
 // MOCK DATA
 // ============================================================================
 
+// --- Capabilities ---
+// Wire shape: `capabilityView` in internal/adapter/httpapi/capability_handler.go, resolved from
+// internal/usecase/capabilities/service.go.
+const CAPABILITIES = [
+  { key: 'fleet', name: 'Agent fleet transport', enabled: true, switch: 'SYNAPSE_FLEET_ENABLED' },
+  { key: 'fleet_assets', name: 'Fleet asset model', enabled: true, switch: 'SYNAPSE_FLEET_ASSETS_ENABLED' },
+  { key: 'agent', name: 'AI agent orchestration', enabled: true, switch: 'SYNAPSE_AGENT_ENABLED' },
+  { key: 'ai_triage', name: 'AI false-positive triage', enabled: true, switch: 'SYNAPSE_FP_TRIAGE_ENABLED' },
+  { key: 'judgments', name: 'Judgment lifecycle', enabled: true, switch: 'SYNAPSE_JUDGMENTS_ENABLED' },
+  { key: 'sla', name: 'SLA governance', enabled: true, switch: 'SYNAPSE_SLA_ENABLED' },
+]
+
 // --- Engagements ---
-const ENGAGEMENTS = [
-  { ID: 'eng-001', Name: 'synapse-ce-audit', Status: 'active', Client: 'Internal', BusinessAssetID: 'ba-001', Scope: { InScope: [{ Kind: 'repo', Value: 'https://github.com/KKloudTarus/synapse-ce.git' }], OutOfScope: [] }, AuthorizedFrom: MONTH_AGO, AuthorizedTo: null, LiveReconEnabled: false, RoE: { allowed_tool_classes: [], blackouts: [] }, Audit: { CreatedAt: MONTH_AGO } },
-  { ID: 'eng-002', Name: 'gin-framework-scan', Status: 'completed', Client: 'OSS Review', BusinessAssetID: '', Scope: { InScope: [{ Kind: 'repo', Value: 'https://github.com/gin-gonic/gin.git' }], OutOfScope: [] }, AuthorizedFrom: WEEK_AGO, AuthorizedTo: null, LiveReconEnabled: false, RoE: { allowed_tool_classes: [], blackouts: [] }, Audit: { CreatedAt: WEEK_AGO } },
-  { ID: 'eng-003', Name: 'api-pentest-q3', Status: 'active', Client: 'Acme Corp', BusinessAssetID: 'ba-002', Scope: { InScope: [{ Kind: 'domain', Value: 'api.acme.io' }, { Kind: 'url', Value: 'https://api.acme.io/v2' }], OutOfScope: [{ Kind: 'host', Value: '10.0.0.0/8' }] }, AuthorizedFrom: WEEK_AGO, AuthorizedTo: new Date(Date.now() + 30 * 86400_000).toISOString(), LiveReconEnabled: true, RoE: { allowed_tool_classes: ['scanner', 'fuzzer'], blackouts: [] }, Audit: { CreatedAt: WEEK_AGO } },
-  { ID: 'eng-004', Name: 'payment-gateway-review', Status: 'active', Client: 'Payments', BusinessAssetID: 'ba-004', Scope: { InScope: [{ Kind: 'repo', Value: 'https://github.com/internal/payment-service.git' }], OutOfScope: [] }, AuthorizedFrom: DAY_AGO, AuthorizedTo: null, LiveReconEnabled: false, RoE: { allowed_tool_classes: [], blackouts: [] }, Audit: { CreatedAt: DAY_AGO } },
-  { ID: 'eng-005', Name: 'auth-hardening', Status: 'draft', Client: '', BusinessAssetID: 'ba-005', Scope: { InScope: [{ Kind: 'repo', Value: 'https://github.com/internal/auth-service.git' }], OutOfScope: [] }, AuthorizedFrom: null, AuthorizedTo: null, LiveReconEnabled: false, RoE: { allowed_tool_classes: [], blackouts: [] }, Audit: { CreatedAt: DAY_AGO } },
-  { ID: 'eng-006', Name: 'mobile-app-scan', Status: 'draft', Client: '', BusinessAssetID: '', Scope: { InScope: [{ Kind: 'repo', Value: 'https://github.com/internal/mobile-app.git' }], OutOfScope: [] }, AuthorizedFrom: null, AuthorizedTo: null, LiveReconEnabled: false, RoE: { allowed_tool_classes: [], blackouts: [] }, Audit: { CreatedAt: NOW } },
+// Wire shape: `engagementView` in internal/adapter/httpapi/resource_view.go. Exported so
+// src/lib/api.contract.test.ts can assert these fixtures still carry the keys the server sends;
+// a mock that drifts back to Go field names is what let the PascalCase mappers survive.
+export const ENGAGEMENTS = [
+  { id: 'eng-001', tenant_id: 'tenant-dev', project_id: '', business_asset_id: 'ba-001', name: 'synapse-ce-audit', client: 'Internal', status: 'active', scope: { in_scope: [{ kind: 'repo', value: 'https://github.com/KKloudTarus/synapse-ce.git' }], out_of_scope: [] }, roe: { allowed_tool_classes: [], blackouts: [] }, authorized_from: MONTH_AGO, authorized_to: null, timezone: 'UTC', live_recon_enabled: false, created_at: MONTH_AGO, updated_at: MONTH_AGO },
+  { id: 'eng-002', tenant_id: 'tenant-dev', project_id: '', business_asset_id: '', name: 'gin-framework-scan', client: 'OSS Review', status: 'completed', scope: { in_scope: [{ kind: 'repo', value: 'https://github.com/gin-gonic/gin.git' }], out_of_scope: [] }, roe: { allowed_tool_classes: [], blackouts: [] }, authorized_from: WEEK_AGO, authorized_to: null, timezone: 'UTC', live_recon_enabled: false, created_at: WEEK_AGO, updated_at: WEEK_AGO },
+  { id: 'eng-003', tenant_id: 'tenant-dev', project_id: '', business_asset_id: 'ba-002', name: 'api-pentest-q3', client: 'Acme Corp', status: 'active', scope: { in_scope: [{ kind: 'domain', value: 'api.acme.io' }, { kind: 'url', value: 'https://api.acme.io/v2' }], out_of_scope: [{ kind: 'host', value: '10.0.0.0/8' }] }, roe: { allowed_tool_classes: ['scanner', 'fuzzer'], blackouts: [] }, authorized_from: WEEK_AGO, authorized_to: new Date(Date.now() + 30 * 86400_000).toISOString(), timezone: 'UTC', live_recon_enabled: true, created_at: WEEK_AGO, updated_at: WEEK_AGO },
+  { id: 'eng-004', tenant_id: 'tenant-dev', project_id: '', business_asset_id: 'ba-004', name: 'payment-gateway-review', client: 'Payments', status: 'active', scope: { in_scope: [{ kind: 'repo', value: 'https://github.com/internal/payment-service.git' }], out_of_scope: [] }, roe: { allowed_tool_classes: [], blackouts: [] }, authorized_from: DAY_AGO, authorized_to: null, timezone: 'UTC', live_recon_enabled: false, created_at: DAY_AGO, updated_at: DAY_AGO },
+  { id: 'eng-005', tenant_id: 'tenant-dev', project_id: '', business_asset_id: 'ba-005', name: 'auth-hardening', client: '', status: 'draft', scope: { in_scope: [{ kind: 'repo', value: 'https://github.com/internal/auth-service.git' }], out_of_scope: [] }, roe: { allowed_tool_classes: [], blackouts: [] }, authorized_from: null, authorized_to: null, timezone: 'UTC', live_recon_enabled: false, created_at: DAY_AGO, updated_at: DAY_AGO },
+  { id: 'eng-006', tenant_id: 'tenant-dev', project_id: '', business_asset_id: '', name: 'mobile-app-scan', client: '', status: 'draft', scope: { in_scope: [{ kind: 'repo', value: 'https://github.com/internal/mobile-app.git' }], out_of_scope: [] }, roe: { allowed_tool_classes: [], blackouts: [] }, authorized_from: null, authorized_to: null, timezone: 'UTC', live_recon_enabled: false, created_at: NOW, updated_at: NOW },
 ]
 
 // --- Findings (for engagement detail) -- PascalCase matching Go API output ---
@@ -221,9 +236,12 @@ const DASHBOARD = {
 }
 
 // --- Code Quality Projects ---
-const PROJECTS = [
-  { ID: 'proj-001', Name: 'Synapse CE', Key: 'synapse-ce', SourceBinding: { kind: 'git', value: 'https://github.com/KKloudTarus/synapse-ce.git', ref: 'main' }, DefaultProfileByLang: { go: 'default', typescript: 'default' }, GateID: 'default', Audit: { CreatedAt: MONTH_AGO }, latest_analysis: { id: 'an-001', gate: { passed: false, results: [{ metric: 'new_critical_issues', condition: '= 0', actual: 2, passed: false }] }, gate_info: { key: 'default', name: 'Synapse Way', source: 'managed' }, created_at: HOUR_AGO, source_commit: 'a1b2c3d', rating: { security: 'B', reliability: 'A', maintainability: 'C' }, issues: { total: 47, by_severity: { critical: 2, high: 8, medium: 19, low: 18 } }, new_code: { counts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 }, period: 'previous_version' } }, latest_job: { id: 'job-001', status: 'succeeded' } },
-  { ID: 'proj-002', Name: 'Gin Framework', Key: 'gin-gonic', SourceBinding: { kind: 'git', value: 'https://github.com/gin-gonic/gin.git', ref: 'master' }, DefaultProfileByLang: { go: 'default' }, GateID: 'default', Audit: { CreatedAt: WEEK_AGO }, latest_analysis: { id: 'an-002', gate: { passed: true, results: [{ metric: 'new_critical_issues', condition: '= 0', actual: 0, passed: true }] }, gate_info: { key: 'default', name: 'Synapse Way', source: 'managed' }, created_at: DAY_AGO, source_commit: 'f4e5d6c', rating: { security: 'A', reliability: 'A', maintainability: 'B' }, issues: { total: 12, by_severity: { critical: 0, high: 2, medium: 5, low: 5 } }, new_code: { counts: { total: 1, critical: 0, high: 0, medium: 1, low: 0 }, period: 'previous_version' } }, latest_job: { id: 'job-002', status: 'succeeded' } },
+// Wire shape: `projectView` in internal/adapter/httpapi/resource_view.go, plus the
+// `latest_analysis`/`latest_job` enrichment `projectSummaryResponse` adds on the list route.
+// Exported for the contract assertions in src/lib/api.contract.test.ts.
+export const PROJECTS = [
+  { id: 'proj-001', tenant_id: 'tenant-dev', name: 'Synapse CE', key: 'synapse-ce', source_binding: { kind: 'git', value: 'https://github.com/KKloudTarus/synapse-ce.git', ref: 'main' }, default_profile_by_lang: { go: 'default', typescript: 'default' }, gate_id: 'default', created_at: MONTH_AGO, updated_at: MONTH_AGO, latest_analysis: { id: 'an-001', gate: { passed: false, results: [{ metric: 'new_critical_issues', condition: '= 0', actual: 2, passed: false }] }, gate_info: { key: 'default', name: 'Synapse Way', source: 'managed' }, created_at: HOUR_AGO, source_commit: 'a1b2c3d', rating: { security: 'B', reliability: 'A', maintainability: 'C' }, issues: { total: 47, by_severity: { critical: 2, high: 8, medium: 19, low: 18 } }, new_code: { counts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 }, period: 'previous_version' } }, latest_job: { id: 'job-001', status: 'succeeded' } },
+  { id: 'proj-002', tenant_id: 'tenant-dev', name: 'Gin Framework', key: 'gin-gonic', source_binding: { kind: 'git', value: 'https://github.com/gin-gonic/gin.git', ref: 'master' }, default_profile_by_lang: { go: 'default' }, gate_id: 'default', created_at: WEEK_AGO, updated_at: WEEK_AGO, latest_analysis: { id: 'an-002', gate: { passed: true, results: [{ metric: 'new_critical_issues', condition: '= 0', actual: 0, passed: true }] }, gate_info: { key: 'default', name: 'Synapse Way', source: 'managed' }, created_at: DAY_AGO, source_commit: 'f4e5d6c', rating: { security: 'A', reliability: 'A', maintainability: 'B' }, issues: { total: 12, by_severity: { critical: 0, high: 2, medium: 5, low: 5 } }, new_code: { counts: { total: 1, critical: 0, high: 0, medium: 1, low: 0 }, period: 'previous_version' } }, latest_job: { id: 'job-002', status: 'succeeded' } },
 ]
 
 // --- Rules ---
@@ -331,19 +349,24 @@ export const handlers = [
   http.get('/api/v1/aup', () => HttpResponse.json({ version: '1.0', accepted: true, accepted_at: NOW })),
   http.post('/api/v1/aup/accept', () => HttpResponse.json({ ok: true })),
 
+  // --- Optional-subsystem catalog ---
+  // Wire shape: `capabilityView` in internal/adapter/httpapi/capability_handler.go. The demo
+  // deployment runs everything the browser mock can serve, so every entry is enabled here.
+  http.get('/api/v1/capabilities', () => HttpResponse.json({ capabilities: CAPABILITIES })),
+
   // --- Dashboard ---
   http.get('/api/v1/dashboard/security-operations', () => HttpResponse.json(DASHBOARD)),
 
   // --- Engagements ---
   http.get('/api/v1/engagements', () => HttpResponse.json(ENGAGEMENTS)),
   http.get('/api/v1/engagements/:id', ({ params }) => {
-    const eng = ENGAGEMENTS.find(e => e.ID === params.id) ?? ENGAGEMENTS[0]
+    const eng = ENGAGEMENTS.find(e => e.id === params.id) ?? ENGAGEMENTS[0]
     return HttpResponse.json(eng)
   }),
   http.get('/api/v1/engagements/:id/source', () => new HttpResponse(null, { status: 404 })),
   http.post('/api/v1/engagements', () => HttpResponse.json(ENGAGEMENTS[0])),
   http.patch('/api/v1/engagements/:id', ({ params }) => {
-    const eng = ENGAGEMENTS.find(e => e.ID === params.id) ?? ENGAGEMENTS[0]
+    const eng = ENGAGEMENTS.find(e => e.id === params.id) ?? ENGAGEMENTS[0]
     return HttpResponse.json(eng)
   }),
 
@@ -579,8 +602,8 @@ export const handlers = [
       suppressed_by_tool: false,
       provenance: { ToolName: 'synapse-sast', ToolVersion: '1.4.2', RuleID: (f as any).RuleID ?? `rule-${i}`, SourceDigest: 'sha256:abc123', IngestedBy: 'scanner', IngestedAt: HOUR_AGO },
       reachability: { state: ['reachable', 'unreachable', 'unknown'][i % 3], tier: `tier-${i % 3}`, confidence: 70 + i * 3, path: [], status: '', source: 'callgraph', history: [] },
-      engagement_id: ENGAGEMENTS[i % 3]?.ID ?? 'eng-001',
-      engagement_name: ENGAGEMENTS[i % 3]?.Name ?? 'synapse-ce-audit',
+      engagement_id: ENGAGEMENTS[i % 3]?.id ?? 'eng-001',
+      engagement_name: ENGAGEMENTS[i % 3]?.name ?? 'synapse-ce-audit',
     }))
   )),
   http.get('/api/v1/appsec/assets/:key/coverage', () => HttpResponse.json({
@@ -640,7 +663,7 @@ export const handlers = [
     return HttpResponse.json({
       items: Array.from({ length: count }, (_, i) => ({
         ID: `occ-${advisoryId}-${i + 1}`,
-        EngagementID: ENGAGEMENTS[i % ENGAGEMENTS.length].ID,
+        EngagementID: ENGAGEMENTS[i % ENGAGEMENTS.length].id,
         AdvisoryID: advisoryId,
         AdvisoryRevision: 1,
         ComponentID: `comp-${i + 1}`,
@@ -825,16 +848,16 @@ export const handlers = [
   // --- Code Quality Projects ---
   http.get('/api/v1/projects', () => HttpResponse.json(PROJECTS)),
   http.get('/api/v1/projects/:key', ({ params }) => {
-    const p = PROJECTS.find(pr => pr.Key === params.key) ?? PROJECTS[0]
+    const p = PROJECTS.find(pr => pr.key === params.key) ?? PROJECTS[0]
     return HttpResponse.json(p)
   }),
   http.get('/api/v1/projects/:key/overview', ({ params }) => {
-    const p = PROJECTS.find(pr => pr.Key === params.key) ?? PROJECTS[0]
+    const p = PROJECTS.find(pr => pr.key === params.key) ?? PROJECTS[0]
     const analysis = p.latest_analysis
     const gatePassed = analysis.gate.passed
     return HttpResponse.json({
       state: 'analyzed',
-      project: { key: p.Key, name: p.Name },
+      project: { key: p.key, name: p.name },
       latest_analysis: {
         id: analysis.id,
         created_at: analysis.created_at,
@@ -889,7 +912,7 @@ export const handlers = [
     next: null,
   })),
   http.get('/api/v1/projects/:key/analysis', ({ params }) => {
-    const p = PROJECTS.find(pr => pr.Key === params.key) ?? PROJECTS[0]
+    const p = PROJECTS.find(pr => pr.key === params.key) ?? PROJECTS[0]
     const a = p.latest_analysis
     return HttpResponse.json({
       analysis: {
@@ -917,7 +940,7 @@ export const handlers = [
   }),
   http.get('/api/v1/projects/:key/analysis-status', () => new HttpResponse(null, { status: 404 })),
   http.get('/api/v1/projects/:key/measures', ({ params, request }) => {
-    const p = PROJECTS.find(pr => pr.Key === params.key) ?? PROJECTS[0]
+    const p = PROJECTS.find(pr => pr.key === params.key) ?? PROJECTS[0]
     const url = new URL(request.url)
     const path = url.searchParams.get('path') ?? ''
     const av = (value: number) => ({ availability: 'available', value, unavailable_reason: null })
@@ -932,7 +955,7 @@ export const handlers = [
       debt: { remediation_effort_minutes: av(cyclo * 2) },
       ratings: { security: ag('B'), reliability: ag('A'), maintainability: ag('C') },
     })
-    const base = { state: 'analyzed' as const, project: { key: p.Key, name: p.Name }, analysis: { id: p.latest_analysis.id, created_at: p.latest_analysis.created_at, source_ref: 'refs/heads/main', source_commit: p.latest_analysis.source_commit }, included_domains: ['size', 'complexity', 'coverage', 'duplication', 'issues', 'debt', 'ratings'] }
+    const base = { state: 'analyzed' as const, project: { key: p.key, name: p.name }, analysis: { id: p.latest_analysis.id, created_at: p.latest_analysis.created_at, source_ref: 'refs/heads/main', source_commit: p.latest_analysis.source_commit }, included_domains: ['size', 'complexity', 'coverage', 'duplication', 'issues', 'debt', 'ratings'] }
     if (path) {
       // Drill-down: return files inside the directory
       const dirName = path.split('/').pop() ?? path
@@ -941,7 +964,7 @@ export const handlers = [
     }
     return HttpResponse.json({ ...base,
       path: '',
-      node: makeNode('', p.Name, 'project', 312, 38200, 1820, 2840, 1950, 72.4, 1550),
+      node: makeNode('', p.name, 'project', 312, 38200, 1820, 2840, 1950, 72.4, 1550),
       children: { items: [
         makeNode('internal/handlers', 'handlers', 'directory', 45, 9800, 420, 820, 580, 68.5, 205),
         makeNode('internal/usecase', 'usecase', 'directory', 32, 6500, 310, 540, 380, 81.2, 98),

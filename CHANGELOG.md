@@ -56,6 +56,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   client can now render "disabled" and name the switch. The route is gated at the view floor and
   returns configuration booleans and variable names only, never a configured value.
 
+- **Navigation reflects the deployment's capabilities.** The sidebar reads
+  `GET /api/v1/capabilities` and renders a subsystem the server reports as off as an inert row
+  naming the `SYNAPSE_*` switch that turns it on, rather than a link that answers `404`. A server
+  that does not serve the route, or cannot answer it, keeps the previous behaviour of showing
+  everything.
+
 - **Project dependency graph and subtree export.** Project analyses now expose a bounded, deterministic
   dependency projection from the stored SBOM with direct/transitive relationships, reverse paths,
   vulnerability matches, license policy risk, and reachability annotations. A new interactive Project
@@ -168,6 +174,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   a remote git URL is still fetched.
 
 ### Fixed
+
+- **The dashboard reads engagements and projects again.** The API moved both resources to
+  snake_case (`engagementView` and `projectView` in `internal/adapter/httpapi/resource_view.go`)
+  while the web client still mapped Go field names, so against a real server the engagements list
+  crashed on an undefined id and every project rendered with a blank name, key and source. The
+  client now maps the served keys, the MSW fixtures carry the server's shape, and a contract test
+  pins fixture, mapper and mock to the Go view types together.
 
 - **Documented the fleet operator-plane routes.** Fifteen shipped `/api/v1/fleet/*` operations were
   registered by the router but absent from `api/openapi.yaml`, so no generated client could reach

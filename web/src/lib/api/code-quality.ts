@@ -37,6 +37,7 @@ import type {
 import { mapProjectOverviewResponse, type ProjectOverview } from '../projectOverview'
 import { mapProjectMeasureResponse, type MeasuresQuery, type ProjectMeasureResponse } from '../projectMeasures'
 import { ApiError, blobDownload, getToken, getOnUnauthorized, req } from './client'
+import type { ProjectWire } from './wire'
 import { mapScanJob, mapCodeQualityReport } from './scan'
 
 function mapQualityProfile(r: any): QualityProfile {
@@ -63,19 +64,21 @@ function mapQualityGate(r: any): QualityGate {
   }
 }
 
-function mapProject(r: any): Project {
+// The wire shape is `projectView` in internal/adapter/httpapi/resource_view.go, plus the two
+// list-only enrichments `projectSummaryResponse` adds. See ./wire.ts.
+function mapProject(r: ProjectWire): Project {
   return {
-    id: r.ID ?? '',
-    name: r.Name ?? '',
-    key: r.Key ?? '',
+    id: r.id ?? '',
+    name: r.name ?? '',
+    key: r.key ?? '',
     sourceBinding: {
-      kind: r.SourceBinding?.kind ?? 'local',
-      value: r.SourceBinding?.value ?? '',
-      ref: r.SourceBinding?.ref ?? '',
+      kind: (r.source_binding?.kind ?? 'local') as Project['sourceBinding']['kind'],
+      value: r.source_binding?.value ?? '',
+      ref: r.source_binding?.ref ?? '',
     },
-    defaultProfileByLang: r.DefaultProfileByLang ?? {},
-    gateId: r.GateID ?? '',
-    createdAt: r.Audit?.CreatedAt ?? null,
+    defaultProfileByLang: r.default_profile_by_lang ?? {},
+    gateId: r.gate_id ?? '',
+    createdAt: r.created_at ?? null,
     latestAnalysis: r.latest_analysis ? mapProjectSummaryAnalysis(r.latest_analysis) : null,
     latestJob: r.latest_job ? mapScanJob(r.latest_job) : null,
   }

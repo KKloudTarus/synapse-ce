@@ -5,6 +5,7 @@ import type {
   UploadedSourcePackage,
 } from '../types'
 import { req } from './client'
+import type { EngagementWire, ScopeTargetWire } from './wire'
 
 function createRequest(input: CreateEngagementInput) {
   return {
@@ -19,25 +20,27 @@ function createRequest(input: CreateEngagementInput) {
   }
 }
 
-function mapEngagement(r: any): Engagement {
-  const targets = (xs: any[]): { kind: string; value: string }[] =>
-    (xs ?? []).map((t) => ({ kind: t.Kind ?? '', value: t.Value ?? '' }))
+// The wire shape is `engagementView` in internal/adapter/httpapi/resource_view.go: snake_case,
+// with the audit timestamps flattened onto the resource. See ./wire.ts.
+function mapEngagement(r: EngagementWire): Engagement {
+  const targets = (xs: ScopeTargetWire[] | undefined): ScopeTarget[] =>
+    (xs ?? []).map((t) => ({ kind: t?.kind ?? '', value: t?.value ?? '' }))
   return {
-    id: r.ID,
-    name: r.Name ?? '',
-    client: r.Client ?? '',
-    status: r.Status ?? '',
-    inScope: targets(r.Scope?.InScope),
-    outOfScope: targets(r.Scope?.OutOfScope),
-    authorizedFrom: r.AuthorizedFrom ?? null,
-    authorizedTo: r.AuthorizedTo ?? null,
+    id: r.id ?? '',
+    name: r.name ?? '',
+    client: r.client ?? '',
+    status: r.status ?? '',
+    inScope: targets(r.scope?.in_scope),
+    outOfScope: targets(r.scope?.out_of_scope),
+    authorizedFrom: r.authorized_from ?? null,
+    authorizedTo: r.authorized_to ?? null,
     roe: {
-      allowedToolClasses: r.RoE?.allowed_tool_classes ?? [],
-      blackouts: (r.RoE?.blackouts ?? []).map((b: any) => ({ from: b.from ?? '', to: b.to ?? '' })),
+      allowedToolClasses: r.roe?.allowed_tool_classes ?? [],
+      blackouts: (r.roe?.blackouts ?? []).map((b) => ({ from: b?.from ?? '', to: b?.to ?? '' })),
     },
-    liveReconEnabled: r.LiveReconEnabled ?? false,
-    createdAt: r.Audit?.CreatedAt ?? null,
-    businessAssetId: r.BusinessAssetID ?? '',
+    liveReconEnabled: r.live_recon_enabled ?? false,
+    createdAt: r.created_at ?? null,
+    businessAssetId: r.business_asset_id ?? '',
     // Optional list-view enrichment; stays undefined when the API omits it.
     findingsCount: r.findings_count
       ? {

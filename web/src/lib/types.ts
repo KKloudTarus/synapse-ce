@@ -27,6 +27,22 @@ export interface RoE {
   blackouts: Blackout[]
 }
 
+/**
+ * One optional subsystem this deployment either switched on or left off.
+ *
+ * Wire shape: `capabilityView` in internal/adapter/httpapi/capability_handler.go.
+ * `switch` is the name of the `SYNAPSE_*` variable an operator sets, never its value.
+ * `requires` lists the keys of capabilities this one needs, so an enabled switch that still
+ * yields a disabled subsystem can be explained.
+ */
+export interface Capability {
+  key: string
+  name: string
+  enabled: boolean
+  switch: string
+  requires: string[]
+}
+
 export interface Engagement {
   id: string
   name: string
