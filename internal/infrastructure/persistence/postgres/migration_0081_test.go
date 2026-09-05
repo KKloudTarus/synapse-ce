@@ -16,7 +16,7 @@ func TestMigration0081MakesIndependenceConstraintFailClosed(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
-	if err := Migrate(context.Background(), dsn); err != nil {
+	if err := MigrateLocked(context.Background(), dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	db, err := goose.OpenDBWithDriver("pgx", dsn)

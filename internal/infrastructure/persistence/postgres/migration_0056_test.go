@@ -18,7 +18,7 @@ func TestMigration0056BackfillsOnlyCanonicalRelativePaths(t *testing.T) {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("initial migrate up: %v", err)
 	}
 	db, err := goose.OpenDBWithDriver("pgx", dsn)
@@ -33,7 +33,7 @@ func TestMigration0056BackfillsOnlyCanonicalRelativePaths(t *testing.T) {
 	// Migration tests share the integration database with repository tests. Always restore current
 	// HEAD, including when an assertion fails after a historical DownTo.
 	t.Cleanup(func() {
-		if err := Migrate(context.Background(), dsn); err != nil {
+		if err := MigrateLocked(context.Background(), dsn); err != nil {
 			t.Errorf("restore latest schema: %v", err)
 		}
 	})

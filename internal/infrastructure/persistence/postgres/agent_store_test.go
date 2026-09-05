@@ -14,7 +14,7 @@ import (
 func TestPostgresAgentStores(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)

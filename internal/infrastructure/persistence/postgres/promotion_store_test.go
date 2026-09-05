@@ -34,7 +34,7 @@ func TestPromotionStore(t *testing.T) {
 	}
 	ctx := context.Background()
 	ctx = shared.WithTenant(ctx, "default")
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
@@ -576,7 +576,7 @@ func TestPromotionStoreAuditStatusLifecycle(t *testing.T) {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
 	ctx := shared.WithTenant(context.Background(), "default")
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
@@ -655,7 +655,7 @@ func TestPromotionStoreFindByJudgmentUsesRLSTenant(t *testing.T) {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
 	ctx := shared.WithTenant(context.Background(), "default")
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)

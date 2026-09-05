@@ -30,7 +30,7 @@ func setupJobQueue(t *testing.T) (*JobQueue, context.Context) {
 	t.Helper()
 	dsn := testDSN(t)
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	adminPool, err := Connect(ctx, dsn)

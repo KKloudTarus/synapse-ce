@@ -35,7 +35,7 @@ var rls0129Tables = []string{
 func TestMigration0129EnablesTenantRLS(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
@@ -91,7 +91,7 @@ func TestMigration0129EnablesTenantRLS(t *testing.T) {
 func TestMigration0129PinsAgentTenantColumns(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
@@ -134,11 +134,11 @@ func TestMigration0129PinsAgentTenantColumns(t *testing.T) {
 func TestMigration0129DownIsSafe(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	// Always leave the schema fully migrated, whatever this test does.
-	t.Cleanup(func() { _ = Migrate(context.Background(), dsn) })
+	t.Cleanup(func() { _ = MigrateLocked(context.Background(), dsn) })
 
 	db, err := goose.OpenDBWithDriver("pgx", dsn)
 	if err != nil {

@@ -21,7 +21,7 @@ func TestMigration0044(t *testing.T) {
 
 	// Start from the current schema so this test is safe to run against the same CI database as the
 	// rest of the integration suite. The cleanup below restores current HEAD again before returning.
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("initial migrate up: %v", err)
 	}
 
@@ -38,7 +38,7 @@ func TestMigration0044(t *testing.T) {
 	// A migration test must not leave the shared integration database pinned to an old version even
 	// when an assertion fails midway through the test.
 	t.Cleanup(func() {
-		if err := Migrate(context.Background(), dsn); err != nil {
+		if err := MigrateLocked(context.Background(), dsn); err != nil {
 			t.Errorf("restore latest schema: %v", err)
 		}
 	})
