@@ -18,7 +18,7 @@ const crossLineLookback = 10
 
 // crossLineBuildRe marks a value that was BUILT rather than written as a constant: Sprintf, printf
 // %-formatting, .format(), an f-string, or string concatenation adjacent to a quote.
-var crossLineBuildRe = regexp.MustCompile("(?i)(fmt\\.Sprintf|\\bsprintf\\s*\\(|\\.format\\s*\\(|\\bf[\"'`]|[\"'][^\"'\\n]*[\"']\\s*%|[\"'`]\\s*\\+|\\+\\s*[\"'`]|\\$\\{|#\\{|\\.\\s*\\$|\\|\\|)")
+var crossLineBuildRe = regexp.MustCompile("(?i)(fmt\\.Sprintf|\\bsprintf\\s*\\(|\\.format\\s*\\(|\\bf[\"'`]|[\"'][^\"'\\n]*[\"']\\s*%|[\"'`]\\s*\\+|\\+\\s*[\"'`]|\\$\\{|#\\{|\\.\\s*\\$)")
 
 // crossLineRequestRe marks a value read from the request: the user-controlled subset only, so a
 // redirect built from a server-derived host is not flagged.
