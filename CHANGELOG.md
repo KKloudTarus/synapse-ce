@@ -15,6 +15,24 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   per-source `allow_private_network` switch also needs a deployment opt-in,
   `SYNAPSE_VULNERABILITY_SOURCE_ALLOW_PRIVATE_NETWORK`, which defaults to off.
 
+- **The static analyzer no longer drops first-party code silently.** Every `.js` under `static/`,
+  `assets/` or `public/` was skipped as vendored, which is where a Flask or Django application keeps
+  its own scripts, and a short file holding one long constant tripped the minified probe. Both were
+  dropped with the report still saying the scan was complete. A web asset in those trees is now
+  skipped only when the file itself says third-party: a distributed-library banner, a vendor or build
+  directory in its path, or a line long enough to be build output. Files excluded by policy are
+  counted in a new `SkippedFiles` field rather than folded into `Truncated`, and the SCA scan turns
+  both into a source warning, which nothing consumed before.
+
+- **Two rules stopped matching their highest-signal shape.** `exec.Command(args[0], args[1:]...)`,
+  where the binary itself is attacker-controlled, and `w.Write([]byte(s))`, the idiomatic Go response
+  write, both fell through the bare-argument pattern because of the subscript and the conversion.
+
+- **Three cross-line false positives are closed.** `||` is logical-or everywhere but SQL and PL/SQL,
+  so `opts.sql || DEFAULT_SQL` was reported as SQL injection; the ten-line look-back reached over a
+  function boundary and attributed one function's assignment to another's sink; and
+  `redirect_to <model>`, the canonical safe Rails idiom, was reported as an open redirect.
+
 - **The bootstrap operator can no longer be seized by a tenant admin.** The bootstrap principal is
   stored with an empty tenant, which normalizes to the default tenant, so it appeared in that
   tenant's roster and its admins could rotate its API key and read the new plaintext from the
@@ -26,6 +44,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   left the connection test, re-enabling a stored source, and the sync scheduler resolving a source
   row created while the switch was on. The gate now sits in the provider registry, which is the
   single point every caller resolves a source through.
+
+- **The last-admin guard is safe under concurrency.** It counted a tenant's other enabled admins and
+  then wrote, so two concurrent demotions each saw the other admin still enabled, both passed, and
+  the tenant was left with nobody who could administer it. The count and the write now run in one
+  transaction, the roster read takes a row lock, and an in-process mutex serializes a single replica.
 
 - **Request bodies and connection lifetimes are bounded on the human API plane.** Every mutation
   route carries a 1 MiB ceiling, with larger explicit ceilings for the routes that accept an upload:
