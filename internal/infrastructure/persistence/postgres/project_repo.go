@@ -18,6 +18,11 @@ import (
 
 const projectCols = `id, tenant_id, name, key, source_binding, default_profile_by_lang, gate_id, created_at, updated_at, created_by, updated_by`
 
+// ProjectRepository persists the long-lived Project identity. projects is RLS-protected
+// (migration 0129), so every statement runs inside requireTenant and keeps its own tenant_id
+// predicate. The pre-0129 reads dropped that predicate entirely when the caller passed a zero
+// tenant, which turned a missing tenant into a cross-tenant listing; a missing tenant is now a
+// validation error.
 type ProjectRepository struct{ pool *pgxpool.Pool }
 
 func NewProjectRepository(pool *pgxpool.Pool) *ProjectRepository {
@@ -27,7 +32,9 @@ func NewProjectRepository(pool *pgxpool.Pool) *ProjectRepository {
 var _ ports.ProjectRepository = (*ProjectRepository)(nil)
 
 func (r *ProjectRepository) Create(ctx context.Context, p *project.Project) error {
-	return insertProject(ctx, r.pool, p)
+	return requireTenant(ctx, r.pool, p.TenantID, func(tx pgx.Tx) error {
+		return insertProject(ctx, tx, p)
+	})
 }
 
 type projectExecer interface {
@@ -57,123 +64,125 @@ func insertProject(ctx context.Context, execer projectExecer, p *project.Project
 }
 
 func (r *ProjectRepository) List(ctx context.Context, tenantID shared.ID) ([]*project.Project, error) {
-	var (
-		rows pgx.Rows
-		err  error
-	)
-	if tenantID.IsZero() {
-		rows, err = r.pool.Query(ctx, `SELECT `+projectCols+` FROM projects ORDER BY created_at DESC, key`)
-	} else {
-		rows, err = r.pool.Query(ctx, `SELECT `+projectCols+` FROM projects WHERE tenant_id=$1 ORDER BY created_at DESC, key`, tenantID.String())
-	}
-	if err != nil {
-		return nil, fmt.Errorf("list projects: %w", err)
-	}
-	defer rows.Close()
 	out := make([]*project.Project, 0)
-	for rows.Next() {
-		p, err := scanProject(rows)
+	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+projectCols+` FROM projects WHERE tenant_id=$1 ORDER BY created_at DESC, key`, tenantID.String())
 		if err != nil {
-			return nil, fmt.Errorf("scan project: %w", err)
+			return fmt.Errorf("list projects: %w", err)
 		}
-		out = append(out, p)
+		defer rows.Close()
+		for rows.Next() {
+			p, err := scanProject(rows)
+			if err != nil {
+				return fmt.Errorf("scan project: %w", err)
+			}
+			out = append(out, p)
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *ProjectRepository) GetByKey(ctx context.Context, tenantID shared.ID, key string) (*project.Project, error) {
-	var row pgx.Row
-	if tenantID.IsZero() {
-		row = r.pool.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE key=$1 ORDER BY created_at, id LIMIT 1`, key)
-	} else {
-		row = r.pool.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key)
+	var out *project.Project
+	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		p, err := scanProject(tx.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("select project: %w", err)
+		}
+		out = p
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	p, err := scanProject(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, shared.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("select project: %w", err)
-	}
-	return p, nil
+	return out, nil
 }
 
 func (r *ProjectRepository) GetByID(ctx context.Context, tenantID, projectID shared.ID) (*project.Project, error) {
-	var row pgx.Row
-	if tenantID.IsZero() {
-		row = r.pool.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE id=$1`, projectID.String())
-	} else {
-		row = r.pool.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE tenant_id=$1 AND id=$2`, tenantID.String(), projectID.String())
+	var out *project.Project
+	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		p, err := scanProject(tx.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE tenant_id=$1 AND id=$2`, tenantID.String(), projectID.String()))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("select project: %w", err)
+		}
+		out = p
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	p, err := scanProject(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, shared.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("select project: %w", err)
-	}
-	return p, nil
+	return out, nil
 }
 
 func (r *ProjectRepository) UpdateGate(ctx context.Context, tenantID shared.ID, key, gateID string) error {
-	ct, err := r.pool.Exec(ctx, `UPDATE projects SET gate_id=$3, updated_at=now() WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key, gateID)
-	if err != nil {
-		return fmt.Errorf("update project gate: %w", err)
-	}
-	if ct.RowsAffected() == 0 {
-		return shared.ErrNotFound
-	}
-	return nil
+	return requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		ct, err := tx.Exec(ctx, `UPDATE projects SET gate_id=$3, updated_at=now() WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key, gateID)
+		if err != nil {
+			return fmt.Errorf("update project gate: %w", err)
+		}
+		if ct.RowsAffected() == 0 {
+			return shared.ErrNotFound
+		}
+		return nil
+	})
 }
 
 // AssignProfile sets or clears the quality profile for a language in the project's JSONB
 // default_profile_by_lang map, atomically at the column level (no read-modify-write race).
 func (r *ProjectRepository) AssignProfile(ctx context.Context, tenantID shared.ID, projectKey, language, profileKey string) error {
-	var (
-		ct  pgconn.CommandTag
-		err error
-	)
-	if strings.TrimSpace(profileKey) == "" {
-		ct, err = r.pool.Exec(ctx, `UPDATE projects SET default_profile_by_lang = coalesce(default_profile_by_lang, '{}'::jsonb) - $3::text, updated_at=now() WHERE tenant_id=$1 AND key=$2`,
-			tenantID.String(), projectKey, language)
-	} else {
-		ct, err = r.pool.Exec(ctx, `UPDATE projects SET default_profile_by_lang = jsonb_set(coalesce(default_profile_by_lang, '{}'::jsonb), ARRAY[$3::text], to_jsonb($4::text), true), updated_at=now() WHERE tenant_id=$1 AND key=$2`,
-			tenantID.String(), projectKey, language, profileKey)
-	}
-	if err != nil {
-		return fmt.Errorf("assign project profile: %w", err)
-	}
-	if ct.RowsAffected() == 0 {
-		return shared.ErrNotFound
-	}
-	return nil
+	return requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		var (
+			ct  pgconn.CommandTag
+			err error
+		)
+		if strings.TrimSpace(profileKey) == "" {
+			ct, err = tx.Exec(ctx, `UPDATE projects SET default_profile_by_lang = coalesce(default_profile_by_lang, '{}'::jsonb) - $3::text, updated_at=now() WHERE tenant_id=$1 AND key=$2`,
+				tenantID.String(), projectKey, language)
+		} else {
+			ct, err = tx.Exec(ctx, `UPDATE projects SET default_profile_by_lang = jsonb_set(coalesce(default_profile_by_lang, '{}'::jsonb), ARRAY[$3::text], to_jsonb($4::text), true), updated_at=now() WHERE tenant_id=$1 AND key=$2`,
+				tenantID.String(), projectKey, language, profileKey)
+		}
+		if err != nil {
+			return fmt.Errorf("assign project profile: %w", err)
+		}
+		if ct.RowsAffected() == 0 {
+			return shared.ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (r *ProjectRepository) CountByGate(ctx context.Context, tenantID shared.ID, gateID string) (int, error) {
 	var n int
-	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM projects WHERE tenant_id=$1 AND gate_id=$2`, tenantID.String(), gateID).Scan(&n); err != nil {
-		return 0, fmt.Errorf("count projects by gate: %w", err)
+	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM projects WHERE tenant_id=$1 AND gate_id=$2`, tenantID.String(), gateID).Scan(&n); err != nil {
+			return fmt.Errorf("count projects by gate: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return 0, err
 	}
 	return n, nil
 }
 
 func (r *ProjectRepository) DeleteByKey(ctx context.Context, tenantID shared.ID, key string) error {
-	var (
-		ct  pgconn.CommandTag
-		err error
-	)
-	if tenantID.IsZero() {
-		ct, err = r.pool.Exec(ctx, `DELETE FROM projects WHERE id=(SELECT id FROM projects WHERE key=$1 ORDER BY created_at, id LIMIT 1)`, key)
-	} else {
-		ct, err = r.pool.Exec(ctx, `DELETE FROM projects WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key)
-	}
-	if err != nil {
-		return fmt.Errorf("delete project: %w", err)
-	}
-	if ct.RowsAffected() == 0 {
-		return shared.ErrNotFound
-	}
-	return nil
+	return requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		ct, err := tx.Exec(ctx, `DELETE FROM projects WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key)
+		if err != nil {
+			return fmt.Errorf("delete project: %w", err)
+		}
+		if ct.RowsAffected() == 0 {
+			return shared.ErrNotFound
+		}
+		return nil
+	})
 }
 
 func scanProject(row rowScanner) (*project.Project, error) {

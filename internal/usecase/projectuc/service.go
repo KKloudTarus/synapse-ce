@@ -425,7 +425,9 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 		if recordErr == nil || s.sourceArtifacts == nil {
 			return
 		}
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), s.completionTimeout())
+		// WithoutCancel, not Background: the compensation must survive the request being canceled
+		// AND keep the ctx values, because the analysis store is tenant-scoped now.
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.completionTimeout())
 		defer cancel()
 		if _, err := s.analyses.Get(cleanupCtx, p.TenantID, p.ID, shared.ID(jobID)); err == nil || !errors.Is(err, shared.ErrNotFound) {
 			return
