@@ -15,15 +15,34 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   per-source `allow_private_network` switch also needs a deployment opt-in,
   `SYNAPSE_VULNERABILITY_SOURCE_ALLOW_PRIVATE_NETWORK`, which defaults to off.
 
+- **The bootstrap operator can no longer be seized by a tenant admin.** The bootstrap principal is
+  stored with an empty tenant, which normalizes to the default tenant, so it appeared in that
+  tenant's roster and its admins could rotate its API key and read the new plaintext from the
+  response. That key is the platform principal every global-resource guard tests for. Updating,
+  disabling and rotating the bootstrap identity are now refused for anybody but the bootstrap
+  principal itself; the credential is owned by `SYNAPSE_API_TOKEN`.
+
+- **The private-network gate now covers every egress path.** Checking it only on create and update
+  left the connection test, re-enabling a stored source, and the sync scheduler resolving a source
+  row created while the switch was on. The gate now sits in the provider registry, which is the
+  single point every caller resolves a source through.
+
 - **Request bodies and connection lifetimes are bounded on the human API plane.** Every mutation
-  route carries a 1 MiB ceiling, with larger explicit ceilings for source publish, bundle import,
-  SARIF, SBOM, evidence and threat-model routes. API listeners now set a write and an idle timeout
-  alongside the existing header timeout.
+  route carries a 1 MiB ceiling, with larger explicit ceilings for the routes that accept an upload:
+  source publish, engagement and project creation, coverage upload, bundle import, SARIF, SBOM,
+  evidence and threat model. API listeners now set a write and an idle timeout alongside the
+  existing header timeout, and the two server-sent-event handlers release the write deadline so a
+  live log stream is not cut off at the listener timeout. The Compose dashboard's nginx gains a
+  matching body ceiling and read timeout plus baseline security response headers.
 
 - **An audit entry is written on the caller's transaction.** A business write that rolls back no
-  longer leaves a committed audit row claiming it happened, and the VEX apply and approval
-  decision paths fail rather than committing an unrecorded change. `golang.org/x/image` moves to
-  v0.45.0, clearing the one vulnerability govulncheck reported as reachable.
+  longer leaves a committed audit row claiming it happened. The append runs inside a savepoint, so
+  a chain conflict can be retried without aborting the caller's transaction, and the assessment
+  cycle paths propagate an audit failure instead of discarding it. The VEX apply and the approval
+  decision now run inside one tenant transaction, so a document that retires many findings is
+  applied in full or not at all, and an operator is never told a decision failed while it stands.
+  `golang.org/x/image` moves to v0.45.0, clearing the one vulnerability govulncheck reported as
+  reachable.
 
 - **Database-enforced tenant isolation for the project, quality-gate and agent tables.** `projects`,
   `project_analyses`, `project_analysis_hotspots`, `project_hotspots`, `project_hotspot_review_events`,
