@@ -1010,7 +1010,8 @@ func gradeNum(g rating.Grade) float64 {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  synapse-cli doctor [path] [--json]       # offline pre-scan readiness: toolchain, markers, and dimension coverage")
-	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--min-confidence low|medium|high|very_high] [--base REF] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
+	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--min-confidence low|medium|high|very_high] [--base REF] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise] [--server URL --project KEY [--branch REF] [--run-url URL] [--ci-provider NAME]]")
+	fmt.Fprintln(os.Stderr, "      --server   record the result on a Synapse server as the project's next analysis (token from SYNAPSE_API_TOKEN); the history, trend and managed gate in the console pick it up")
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  no network egress: skip live OSV, every registry resolver (npm/composer/poetry/bundler/maven/gradle), KEV/EPSS, online NVD, license metadata and AI triage; detect with Grype's offline DB only (air-gapped / fast)")
@@ -1050,8 +1051,24 @@ func runScan() {
 	includeTest := false
 	minConfidence := ""
 	baseRef := ""
+	push := pushTarget{token: strings.TrimSpace(os.Getenv("SYNAPSE_API_TOKEN"))}
 	for i := 3; i < len(os.Args); i++ {
 		switch {
+		case os.Args[i] == "--server" && i+1 < len(os.Args):
+			push.server = os.Args[i+1]
+			i++
+		case os.Args[i] == "--project" && i+1 < len(os.Args):
+			push.project = os.Args[i+1]
+			i++
+		case os.Args[i] == "--branch" && i+1 < len(os.Args):
+			push.ci.Branch = os.Args[i+1]
+			i++
+		case os.Args[i] == "--run-url" && i+1 < len(os.Args):
+			push.ci.RunURL = os.Args[i+1]
+			i++
+		case os.Args[i] == "--ci-provider" && i+1 < len(os.Args):
+			push.ci.Provider = os.Args[i+1]
+			i++
 		case os.Args[i] == "--fail-on" && i+1 < len(os.Args):
 			failOn = shared.Severity(os.Args[i+1])
 			i++
@@ -1109,6 +1126,23 @@ func runScan() {
 		fmt.Fprintf(os.Stderr, "synapse-cli: %v (mode want full|vulnerabilities|licenses; detection-priority want comprehensive|precise)\n", err)
 		os.Exit(2)
 	}
+	if push.enabled() {
+		push.ci = ciContextFromEnv(push.ci, os.Getenv)
+		if image {
+			// A project analysis is a source-tree analysis: it carries measures, ratings and a code
+			// quality report that have no meaning for an image.
+			fmt.Fprintln(os.Stderr, "synapse-cli: --server records a project analysis and cannot be combined with --image")
+			os.Exit(2)
+		}
+		if mode != scauc.ScanModeFull {
+			fmt.Fprintln(os.Stderr, "synapse-cli: --server records a full project analysis; --mode must be full")
+			os.Exit(2)
+		}
+	}
+	if err := push.validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "synapse-cli: %v\n", err)
+		os.Exit(2)
+	}
 	// The three output modes each own stdout completely, so they are mutually exclusive rather than
 	// silently last-one-wins.
 	chosen := 0
@@ -1121,7 +1155,7 @@ func runScan() {
 		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json, --sarif or --sbom")
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, priority, minConfidence, baseRef, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest); err != nil {
+	if err := run(os.Args[2], failOn, mode, priority, minConfidence, baseRef, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest, push); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -1307,7 +1341,7 @@ func scopeToNewCode(findings []finding.Finding, changed gitdiff.ChangedLines) []
 	return out
 }
 
-func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest bool) error {
+func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest bool, push pushTarget) error {
 	// An image target is an OCI reference (acquired via crane → OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -1578,7 +1612,14 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 			policyDir = cwd
 		}
 	}
-	res, err := sca.ScanWithOptions(ctx, "synapse-cli", eng.ID, ports.AcquireRequest{Kind: acqKind, Value: target}, scauc.ScanOptions{Mode: mode, DetectionPriority: priority, PolicyDir: policyDir})
+	scanOpts := scauc.ScanOptions{Mode: mode, DetectionPriority: priority, PolicyDir: policyDir}
+	if push.enabled() {
+		// The server's own project analysis runs with these set, and the recorder builds measures,
+		// ratings and hotspots from the code-quality report they produce. Without them a pushed
+		// analysis would carry security findings and nothing else.
+		scanOpts.CodeQuality, scanOpts.ProjectAnalysis = true, true
+	}
+	res, err := sca.ScanWithOptions(ctx, "synapse-cli", eng.ID, ports.AcquireRequest{Kind: acqKind, Value: target}, scanOpts)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
@@ -1699,6 +1740,18 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		}
 	default:
 		printReport(target, res)
+	}
+
+	if push.enabled() {
+		pushCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+		analysis, console, perr := pushAnalysis(pushCtx, pushHTTPClient(), push, res)
+		if perr != nil {
+			// A pipeline that asked for its result to be recorded must not go green because the
+			// record silently did not happen, so this is a failure whatever the local gate says.
+			return fmt.Errorf("record analysis on the server: %w", perr)
+		}
+		reportPush(analysis, console)
 	}
 
 	gate := shared.SeverityRank(failOn)

@@ -586,6 +586,86 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalServerError"}
 
+  /api/v1/projects/{key}/analyses/import:
+    parameters:
+    - $ref: '#/components/parameters/ProjectKey'
+    post:
+      tags: [projects]
+      summary: Record a pipeline-produced scan result as the Project's next analysis
+      operationId: importProjectAnalysis
+      description: >
+        The CI path into the console. `synapse-cli scan --server URL --project KEY` runs the scan on
+        the pipeline's own checkout and posts the result here. The server records it through the
+        same recorder as a server-side analysis, so it takes its place in the project history, moves
+        the trend, evaluates the project's managed quality gate, and carries ratings, issues and
+        hotspots. The gate in the payload is ignored: the server's managed gate is the policy, and a
+        client that could ship its own gate could ship a passing one. The analysis is marked
+        `origin: ci` and carries the pipeline's own account of the run, which the server does not
+        verify. Requires the operate permission. Body ceiling 64 MiB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [result]
+              additionalProperties: false
+              properties:
+                ci:
+                  type: object
+                  description: The pipeline's own account of the run; every field optional and unverified.
+                  additionalProperties: false
+                  properties:
+                    provider: {type: string, maxLength: 512, description: 'e.g. github-actions, gitlab-ci, jenkins'}
+                    run_url: {type: string, format: uri, maxLength: 512}
+                    run_id: {type: string, maxLength: 512}
+                    branch: {type: string, maxLength: 512}
+                    actor: {type: string, maxLength: 512}
+                result:
+                  type: object
+                  description: A synapse-cli scan result, exactly as `synapse-cli scan --json` prints it.
+                  additionalProperties: true
+      responses:
+        "201":
+          description: The recorded analysis, in the same shape as the analysis history returns it
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, created_at, origin, gate, gate_info, issues, new_code, measures, rating]
+                properties:
+                  id: {type: string}
+                  created_at: {type: string, format: date-time}
+                  origin: {type: string, enum: [server, ci]}
+                  ci:
+                    type: object
+                    properties:
+                      provider: {type: string}
+                      run_url: {type: string}
+                      run_id: {type: string}
+                      branch: {type: string}
+                      actor: {type: string}
+                  source_ref: {type: string}
+                  source_commit: {type: string}
+                  gate:
+                    type: object
+                    properties:
+                      passed: {type: boolean}
+                      results: {type: array, items: {type: object}}
+                  gate_info: {type: object}
+                  issues: {type: object}
+                  new_code: {type: object}
+                  delta: {type: object, nullable: true}
+                  measures: {type: object, additionalProperties: {type: number}}
+                  coverage: {type: object, nullable: true}
+                  duplication: {type: object}
+                  rating: {type: object}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "413": {description: The scan result exceeds the import size limit}
+        "500": {$ref: "#/components/responses/InternalServerError"}
   /api/v1/projects/{key}/analyses/{id}/source:
     parameters:
     - $ref: '#/components/parameters/ProjectKey'

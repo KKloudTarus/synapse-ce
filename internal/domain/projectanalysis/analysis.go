@@ -62,11 +62,17 @@ type GateInfo struct {
 // Analysis is an append-only Project analysis snapshot. InternalIssues never crosses
 // the HTTP boundary; it is only persisted to compute the next snapshot's identity set.
 type Analysis struct {
-	ID             string                    `json:"id"`
-	TenantID       string                    `json:"tenant_id"`
-	ProjectID      string                    `json:"project_id"`
-	ProjectKey     string                    `json:"project_key"`
-	CreatedAt      time.Time                 `json:"created_at"`
+	ID         string    `json:"id"`
+	TenantID   string    `json:"tenant_id"`
+	ProjectID  string    `json:"project_id"`
+	ProjectKey string    `json:"project_key"`
+	CreatedAt  time.Time `json:"created_at"`
+	// Origin says whether the server produced this analysis or a pipeline pushed it. Absent on rows
+	// written before the field existed, which the reader treats as OriginServer: every analysis
+	// before the import route was a server analysis.
+	Origin Origin `json:"origin,omitempty"`
+	// CI is the pipeline's own account of the run, present only for OriginCI.
+	CI             *CIContext                `json:"ci,omitempty"`
 	SourceRef      string                    `json:"source_ref,omitempty"`
 	SourceCommit   string                    `json:"source_commit,omitempty"`
 	SourceRevision SourceRevision            `json:"source_revision,omitempty"`
@@ -140,6 +146,8 @@ type Input struct {
 	ProjectID         shared.ID
 	ProjectKey        string
 	CreatedAt         time.Time
+	Origin            Origin
+	CI                *CIContext
 	SourceRef         string
 	SourceCommit      string
 	SourceRevision    SourceRevision
@@ -228,9 +236,13 @@ func Build(in Input) (Analysis, error) {
 	gate.Incomplete = in.AnalysisTruncated
 	gate.Passed = gate.Passed && !gate.Incomplete
 
+	origin := in.Origin
+	if !origin.Valid() {
+		origin = OriginServer
+	}
 	return Analysis{
 		ID: in.ID, TenantID: in.TenantID.String(), ProjectID: in.ProjectID.String(),
-		ProjectKey: in.ProjectKey, CreatedAt: in.CreatedAt, SourceRef: in.SourceRef,
+		ProjectKey: in.ProjectKey, CreatedAt: in.CreatedAt, Origin: origin, CI: in.CI, SourceRef: in.SourceRef,
 		SourceCommit: in.SourceCommit, SourceRevision: in.SourceRevision,
 		Capabilities: in.Capabilities, SourceManifest: in.SourceManifest, Comparison: in.Comparison, FileChanges: in.FileChanges, Annotations: in.Annotations,
 		Measures: measures, Gate: gate,

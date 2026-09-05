@@ -684,6 +684,9 @@ func main() {
 	projectService := projectuc.NewService(projectRepo, repo, clock, ids, auditLog, !cfg.IsProduction())
 	projectService.SetArchiveStore(file.NewProjectArchiveStore(cfg.ProjectUploadDir, cfg.MaxWorkspaceBytes))
 	projectService.SetAnalysisStore(projectAnalysisStore)
+	// A pipeline-imported analysis leaves a scan-job record, so the project's status and job history
+	// show the CI run exactly as they show a server run.
+	projectService.SetScanJobs(scanJobStore)
 	if issueStore, ok := projectAnalysisStore.(ports.ProjectIssueStore); ok {
 		projectService.SetIssueStore(issueStore)
 	} else {

@@ -30,6 +30,8 @@ type projectGateResponse struct {
 type projectAnalysisResponse struct {
 	ID             string                             `json:"id"`
 	CreatedAt      time.Time                          `json:"created_at"`
+	Origin         projectanalysis.Origin             `json:"origin"`
+	CI             *projectanalysis.CIContext         `json:"ci,omitempty"`
 	SourceRef      string                             `json:"source_ref,omitempty"`
 	SourceCommit   string                             `json:"source_commit,omitempty"`
 	SourceRevision projectanalysis.SourceRevision     `json:"source_revision,omitempty"`
@@ -50,8 +52,12 @@ func projectAnalysisDTO(analysis projectanalysis.Analysis) projectAnalysisRespon
 	for i, result := range analysis.Gate.Results {
 		gate.Results[i] = projectGateConditionResponse{Metric: result.Condition.Metric, Op: string(result.Condition.Op), Threshold: result.Condition.Threshold, Actual: result.Actual, Passed: result.Passed}
 	}
+	origin := analysis.Origin
+	if !origin.Valid() {
+		origin = projectanalysis.OriginServer // every analysis before the import route was a server analysis
+	}
 	return projectAnalysisResponse{
-		ID: analysis.ID, CreatedAt: analysis.CreatedAt, SourceRef: analysis.SourceRef, SourceCommit: analysis.SourceCommit,
+		ID: analysis.ID, CreatedAt: analysis.CreatedAt, Origin: origin, CI: analysis.CI, SourceRef: analysis.SourceRef, SourceCommit: analysis.SourceCommit,
 		SourceRevision: analysis.SourceRevision, Capabilities: analysis.Capabilities,
 		Gate: gate, GateInfo: analysis.GateInfo, Issues: analysis.Issues, NewCode: analysis.NewCode, Delta: analysis.Delta,
 		Measures: analysis.Measures, Coverage: analysis.Coverage, Duplication: analysis.Duplication, Rating: analysis.Rating,

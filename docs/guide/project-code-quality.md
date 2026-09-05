@@ -40,9 +40,11 @@ GET  /api/v1/projects/{key}/analyses/{id}/code/diff       new-code diff
 POST /api/v1/projects/{key}/analyses/{id}/source          publish source
 ```
 
-Only files the analysis listed as retainable are accepted. Publish them from CI with
-[`synapse-cli publish-source`](cli.md#publish-analysis-source), which verifies the returned manifest
-digest.
+Only files the analysis listed as retainable are accepted. `synapse-cli publish-source` uploads the
+source files an existing analysis listed, so the console can annotate code; it does not upload
+findings. To record a pipeline's scan result as an analysis, use
+[`synapse-cli scan --server`](cli.md#push-results-to-the-console), which posts the result to
+`POST /api/v1/projects/{key}/analyses/import` and marks the analysis `origin: ci`.
 
 ## Issues
 

@@ -498,6 +498,9 @@ func (rt *Router) routes() *http.ServeMux {
 			mux.HandleFunc("PUT /api/v1/projects/{key}/profiles/{language}", rt.authz(userdom.PermOperate, rt.assignProjectProfile))
 		}
 		mux.HandleFunc("POST /api/v1/projects/{key}/analyses", rt.authz(userdom.PermOperate, rt.startProjectAnalysis))
+		// A pipeline that ran synapse-cli on its own checkout hands the result to the server here, and
+		// it is recorded through the same recorder as a server analysis.
+		mux.HandleFunc("POST /api/v1/projects/{key}/analyses/import", rt.authz(userdom.PermOperate, rt.importProjectAnalysis))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses", rt.authz(userdom.PermView, rt.listProjectAnalyses))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses/{id}", rt.authz(userdom.PermView, rt.getProjectAnalysis))
 		mux.HandleFunc("POST /api/v1/projects/{key}/analyses/{id}/source", rt.authz(userdom.PermOperate, rt.publishProjectSource))

@@ -38,13 +38,15 @@ var routeBodyLimits = map[string]int64{
 	// Engagement and project creation both accept a multipart source archive on the same
 	// route that otherwise takes a small JSON body. The JSON branch of each handler bounds
 	// itself, so the large ceiling applies only to the upload it exists for.
-	"POST /api/v1/engagements":               sourceUploadBodyLimit,
-	"POST /api/v1/projects":                  sourceUploadBodyLimit,
-	"POST /api/v1/projects/{key}/analyses":   importBodyLimit,
-	"POST /api/v1/engagements/import":        importBodyLimit,
-	"POST /api/v1/engagements/{id}/sarif":    importBodyLimit,
-	"POST /api/v1/engagements/{id}/sbom":     importBodyLimit,
-	"POST /api/v1/engagements/{id}/evidence": importBodyLimit,
+	"POST /api/v1/engagements":             sourceUploadBodyLimit,
+	"POST /api/v1/projects":                sourceUploadBodyLimit,
+	"POST /api/v1/projects/{key}/analyses": importBodyLimit,
+	// A pipeline's full scan result, SBOM included, is a document produced elsewhere.
+	"POST /api/v1/projects/{key}/analyses/import": importBodyLimit,
+	"POST /api/v1/engagements/import":             importBodyLimit,
+	"POST /api/v1/engagements/{id}/sarif":         importBodyLimit,
+	"POST /api/v1/engagements/{id}/sbom":          importBodyLimit,
+	"POST /api/v1/engagements/{id}/evidence":      importBodyLimit,
 	// An OpenVEX document is a whole file produced elsewhere; the handler bounds it at 8 MiB.
 	"POST /api/v1/engagements/{id}/vex": importBodyLimit,
 	// The threat-model routes are deliberately absent. Their handler bounds the body at 1 MiB,

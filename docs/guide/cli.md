@@ -88,6 +88,8 @@ synapse-cli scan <path|image-ref> [flags]
 | `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. |
 | `--sarif` | Print a SARIF 2.1.0 report to stdout, ready to upload to GitHub code scanning. Covers every finding kind; SAST, secret and misconfig findings carry a file and line so the platform annotates the exact source line. Findings exempted from the CI gate by verified AI consensus remain present and carry an external suppression with the policy version and reason. `--fail-on` still sets the exit code. |
 | `--sbom` | Print the generated CycloneDX SBOM to stdout instead of a findings report. |
+| `--server <url> --project <key>` | Record the result on a Synapse server as that project's next analysis. The token comes from `SYNAPSE_API_TOKEN`. See [Push results to the console](#push-results-to-the-console). |
+| `--branch <ref>`, `--run-url <url>`, `--ci-provider <name>` | What the pipeline says about itself, shown on the analysis in the console. On GitHub Actions, GitLab CI and Jenkins these are read from the provider's variables when not given. |
 
 `--json`, `--sarif`, and `--sbom` each take over stdout completely, so they are mutually exclusive.
 Passing more than one exits `2` rather than silently honoring the last flag.
@@ -129,9 +131,38 @@ synapse-cli scan alpine:3.19 --image --offline
 The exit code is 0 when no finding meets the `--fail-on` threshold. See
 [Exit codes](#exit-codes) for the full contract, which distinguishes a gate result from a usage error.
 
-### Project analysis parity
+### Push results to the console
 
-`synapse-cli scan <local-path>` runs the same governed security scan path used by a Code Quality Project analysis and creates an ephemeral, scope-checked engagement around the target. The CLI does not attach the Project's combined code-quality report, create a Project, retain async job status, or persist the result; use `synapse-cli gate` for local code-quality gating. Git cloning and archive uploads are managed by the server-side Project flow, so clone or extract the source first for a serverless run.
+Without `--server`, `synapse-cli scan` is a self-contained gate: it prints a report, sets the exit
+code, and nothing is persisted. With `--server`, the same scan is also recorded on a Synapse server
+as the named project's next analysis:
+
+```bash
+export SYNAPSE_API_TOKEN="$CI_SECRET_SYNAPSE_TOKEN"
+synapse-cli scan . --fail-on high --server https://synapse.example.com --project payments-api
+```
+
+What happens on the server is exactly what happens for an analysis the server runs itself. The
+result goes through the same recorder, so it takes its place in the project's history, moves the
+trend on the Activity page, is evaluated against the project's **managed** quality gate, and carries
+ratings, issues and hotspots. The analysis is marked `origin: ci` and shows the branch, the run and
+the actor the pipeline reported, with a link back to the run.
+
+Two things are different from a server-run analysis, and the console says so. The branch and commit
+are the pipeline's own account, since the server did not clone anything. And the gate that decides
+is the server's: the CLI's `--fail-on` threshold still sets this process's exit code for the
+pipeline, and the server's managed gate verdict is printed alongside it. If they disagree, both are
+right about what they measure, and the server's is the one the console records.
+
+A push that fails is an error whatever the local gate says. A pipeline that asked for its result to
+be recorded must not go green because the record silently did not happen.
+
+`--server` runs a full source analysis, so it cannot be combined with `--image` or with a `--mode`
+other than `full`. The project must exist on the server first; create it in the console or with
+`POST /api/v1/projects`.
+
+Recording a result needs the operate permission. Give the pipeline its own user with that role
+rather than the bootstrap operator token.
 
 ## False-positive gate
 

@@ -32,6 +32,7 @@ type projectService interface {
 	Delete(context.Context, string, shared.ID, string) error
 	AssignGate(context.Context, string, shared.ID, string, string) (*project.Project, error)
 	StartAnalysis(context.Context, string, shared.ID, string, *measure.CoverageReport) (ports.ScanJob, error)
+	ImportAnalysis(context.Context, shared.ID, string, projectuc.ImportAnalysisInput) (projectanalysis.Analysis, error)
 	AnalysisStatus(context.Context, shared.ID, string) (ports.ScanJob, error)
 	LatestAnalysis(context.Context, shared.ID, string) (projectuc.LatestAnalysis, error)
 	ProjectDependencyGraph(context.Context, shared.ID, string) (projectuc.DependencyGraph, error)
@@ -108,6 +109,7 @@ func (rt *Router) createProject(w http.ResponseWriter, r *http.Request) {
 type projectSummaryAnalysisResponse struct {
 	ID           string                   `json:"id"`
 	CreatedAt    time.Time                `json:"created_at"`
+	Origin       projectanalysis.Origin   `json:"origin"`
 	SourceCommit string                   `json:"source_commit,omitempty"`
 	GatePassed   bool                     `json:"gate_passed"`
 	GateInfo     projectanalysis.GateInfo `json:"gate_info"`
@@ -161,8 +163,12 @@ func (rt *Router) listProjects(w http.ResponseWriter, r *http.Request) {
 		}
 		if summary.LatestAnalysis != nil {
 			analysis := summary.LatestAnalysis
+			origin := analysis.Origin
+			if !origin.Valid() {
+				origin = projectanalysis.OriginServer
+			}
 			out[i].LatestAnalysis = &projectSummaryAnalysisResponse{
-				ID: analysis.ID, CreatedAt: analysis.CreatedAt, SourceCommit: analysis.SourceCommit,
+				ID: analysis.ID, CreatedAt: analysis.CreatedAt, Origin: origin, SourceCommit: analysis.SourceCommit,
 				GatePassed: analysis.Gate.Passed, GateInfo: analysis.GateInfo, Issues: analysis.Issues,
 				NewIssues: analysis.NewCode.Counts.Total,
 				Rating: struct {

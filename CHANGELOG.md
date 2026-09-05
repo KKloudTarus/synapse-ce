@@ -7,6 +7,22 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Added
+
+- **Pipeline results reach the console.** `synapse-cli scan --server URL --project KEY` records the
+  scan result on the server as the project's next analysis, through the same recorder a server-run
+  analysis uses, so it appears in the history, moves the trend, is evaluated against the project's
+  managed quality gate, and carries ratings, issues and hotspots. The analysis is marked `origin: ci`
+  and shows the branch, run and actor the pipeline reported, with a link to the run. The new route is
+  `POST /api/v1/projects/{key}/analyses/import`; the GitHub Action gains `server`, `project` and
+  `api-token` inputs. Before this, the CLI was a self-contained gate whose result died with the
+  process and the console was fed only by scans the server ran itself.
+
+- **Imported findings are visible.** Findings a pipeline sent through the SARIF route landed in a
+  table no page rendered. The engagement's Findings group gains an Imported tab that lists them with
+  tool, version, location and provenance.
+
+
 ### Security
 
 - **Global vulnerability sources now require the platform operator.** The source registry has no

@@ -34,6 +34,18 @@ inputs:
     description: "Path for the SARIF report when `sarif` is true."
     required: false
     default: "synapse.sarif"
+  server:
+    description: "Synapse API base URL, e.g. https://synapse.example.com. When set, the scan result is recorded on the server as the project's next analysis, so the console's history, trend and managed quality gate pick it up. Requires `project` and `api-token`."
+    required: false
+    default: ""
+  project:
+    description: "Server-owned project key the result belongs to. Required when `server` is set."
+    required: false
+    default: ""
+  api-token:
+    description: "Synapse API token with the operate permission. Pass a secret, never a literal. Required when `server` is set."
+    required: false
+    default: ""
 
 outputs:
   sarif-file:
@@ -138,6 +150,9 @@ runs:
         SYNAPSE_SARIF: ${{ inputs.sarif }}
         SYNAPSE_OFFLINE: ${{ inputs.offline }}
         SYNAPSE_SARIF_OUT: ${{ inputs.sarif-output }}
+        SYNAPSE_SERVER: ${{ inputs.server }}
+        SYNAPSE_PROJECT: ${{ inputs.project }}
+        SYNAPSE_API_TOKEN: ${{ inputs.api-token }}
       run: |
         # Not `-e`: the scan's non-zero exit IS the gate result, propagated deliberately at the end so
         # the SARIF output is still recorded when the gate fails (an `if: always()` upload keeps working).
@@ -148,6 +163,11 @@ runs:
         fi
         if [ "${SYNAPSE_OFFLINE}" = "true" ]; then
           args+=(--offline)
+        fi
+        if [ -n "${SYNAPSE_SERVER}" ]; then
+          # Record the result on the server as the project's next analysis. synapse-cli reads the
+          # branch, run id, run URL and actor from the GITHUB_* variables, so nothing else is passed.
+          args+=(--server "${SYNAPSE_SERVER}" --project "${SYNAPSE_PROJECT}")
         fi
         rc=0
         if [ "${SYNAPSE_SARIF}" = "true" ]; then
