@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -39,6 +40,67 @@ func TestMultipartRoutesCarryAnUploadCeiling(t *testing.T) {
 				t.Errorf("%s is registered at %q with a %d byte ceiling; an upload route needs an entry in routeBodyLimits", handler, pattern, got)
 			}
 		})
+	}
+}
+
+// TestEveryBoundedHandlerFitsItsRouteCeiling is the general form of the check above. It reads every
+// handler that bounds a request body, whatever helper it uses, and fails when the handler's own
+// bound is larger than the ceiling its route grants. A handler cannot raise the outer bound, so
+// asking for more than the route allows is a silently truncated upload. This is the check that
+// would have caught POST /api/v1/engagements/{id}/vex, which reads 8 MiB through readBounded and
+// therefore never matched a pattern looking only for http.MaxBytesReader.
+func TestEveryBoundedHandlerFitsItsRouteCeiling(t *testing.T) {
+	routes, err := ParseRouteRegistrations("router.go")
+	if err != nil {
+		t.Fatalf("read the route table: %v", err)
+	}
+	routerSource, err := os.ReadFile("router.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	routerLines := strings.Split(string(routerSource), "\n")
+
+	bound := regexp.MustCompile(`(?:MaxBytesReader\(w, r\.Body,|readBounded\(w, r,)\s*([0-9]+)\s*<<\s*([0-9]+)`)
+	handler := regexp.MustCompile(`^func \(rt \*Router\) (\w+)\(`)
+
+	files, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range files {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		src, readErr := os.ReadFile(name)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		current := ""
+		for _, line := range strings.Split(string(src), "\n") {
+			if m := handler.FindStringSubmatch(line); m != nil {
+				current = m[1]
+			}
+			m := bound.FindStringSubmatch(line)
+			if m == nil || current == "" {
+				continue
+			}
+			mantissa, _ := strconv.ParseInt(m[1], 10, 64)
+			shift, _ := strconv.ParseInt(m[2], 10, 64)
+			want := mantissa << uint(shift)
+			if want <= defaultBodyLimit {
+				continue // the handler is tighter than the default, which always works
+			}
+			for _, route := range routes {
+				if !regexp.MustCompile(`rt\.` + regexp.QuoteMeta(current) + `\b`).MatchString(routerLines[route.Line-1]) {
+					continue
+				}
+				if got := bodyLimitFor(route.Pattern); got < want {
+					t.Errorf("%s reads up to %d bytes but %q is capped at %d; add it to routeBodyLimits or the upload is truncated",
+						current, want, route.Pattern, got)
+				}
+			}
+		}
 	}
 }
 
