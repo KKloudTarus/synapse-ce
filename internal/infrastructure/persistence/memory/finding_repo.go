@@ -262,22 +262,36 @@ func (r *FindingRepository) setPriorityInternal(engagementID, findingID shared.I
 }
 
 // ListByEngagement returns the engagement's findings, highest risk first (KEV -> EPSS x CVSS).
-// SummarizeVulnerabilitiesByEngagements counts SCA vulnerability findings per engagement.
+// SummarizeVulnerabilitiesByEngagements counts open SCA vulnerability findings per engagement.
 func (r *FindingRepository) SummarizeVulnerabilitiesByEngagements(_ context.Context, engagementIDs []shared.ID) (map[shared.ID]ports.VulnerabilitySummary, error) {
+	return r.summarizeByEngagements(engagementIDs, true), nil
+}
+
+// SummarizeOpenFindingsByEngagements counts open findings of every kind per engagement.
+func (r *FindingRepository) SummarizeOpenFindingsByEngagements(_ context.Context, engagementIDs []shared.ID) (map[shared.ID]ports.VulnerabilitySummary, error) {
+	return r.summarizeByEngagements(engagementIDs, false), nil
+}
+
+// summarizeByEngagements mirrors the Postgres GROUP BY: false positives, remediated findings and
+// licence records are not counted; scaOnly further restricts to SCA vulnerability findings.
+func (r *FindingRepository) summarizeByEngagements(engagementIDs []shared.ID, scaOnly bool) map[shared.ID]ports.VulnerabilitySummary {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make(map[shared.ID]ports.VulnerabilitySummary, len(engagementIDs))
 	for _, id := range engagementIDs {
 		var sum ports.VulnerabilitySummary
 		for _, f := range r.data[id] {
-			if (f.Kind != "" && f.Kind != finding.KindSCA) || strings.HasPrefix(f.DedupKey, "license:") {
+			if f.Status == finding.StatusFalsePos || f.Status == finding.StatusRemediated || strings.HasPrefix(f.DedupKey, "license:") {
+				continue
+			}
+			if scaOnly && f.Kind != "" && f.Kind != finding.KindSCA {
 				continue
 			}
 			sum.Add(f.Severity, strings.TrimSpace(f.FixedVersion) != "", f.KEV)
 		}
 		out[id] = sum
 	}
-	return out, nil
+	return out
 }
 
 func (r *FindingRepository) ListByEngagement(ctx context.Context, engagementID shared.ID) ([]finding.Finding, error) {

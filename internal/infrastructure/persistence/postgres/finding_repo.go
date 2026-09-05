@@ -202,9 +202,21 @@ func classifyFindingUpdateMiss(ctx context.Context, tx pgx.Tx, engagementID, fin
 
 // ListByEngagement returns the engagement's findings, highest risk first
 // (CISA KEV, then EPSS x CVSS, then severity).
-// SummarizeVulnerabilitiesByEngagements aggregates SCA vulnerability findings per engagement in one
-// GROUP BY, so a list over thousands of contexts never loads their finding rows.
+// SummarizeVulnerabilitiesByEngagements aggregates open SCA vulnerability findings per engagement in
+// one GROUP BY, for list views that would otherwise load every finding of every context.
 func (r *FindingRepository) SummarizeVulnerabilitiesByEngagements(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]ports.VulnerabilitySummary, error) {
+	return r.summarizeByEngagements(ctx, engagementIDs, true)
+}
+
+// SummarizeOpenFindingsByEngagements aggregates open findings of every kind per engagement.
+func (r *FindingRepository) SummarizeOpenFindingsByEngagements(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]ports.VulnerabilitySummary, error) {
+	return r.summarizeByEngagements(ctx, engagementIDs, false)
+}
+
+// summarizeByEngagements is one GROUP BY over the rows' findings: O(findings of those engagements)
+// once, whatever the number of engagements. Findings triaged false positive or remediated are not
+// open and licence records are not security findings, so neither counts.
+func (r *FindingRepository) summarizeByEngagements(ctx context.Context, engagementIDs []shared.ID, scaOnly bool) (map[shared.ID]ports.VulnerabilitySummary, error) {
 	out := make(map[shared.ID]ports.VulnerabilitySummary, len(engagementIDs))
 	if len(engagementIDs) == 0 {
 		return out, nil
@@ -214,6 +226,10 @@ func (r *FindingRepository) SummarizeVulnerabilitiesByEngagements(ctx context.Co
 		ids[i] = id.String()
 		out[id] = ports.VulnerabilitySummary{}
 	}
+	kindFilter := ""
+	if scaOnly {
+		kindFilter = ` AND (kind = '' OR kind = 'sca' OR kind IS NULL)`
+	}
 	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 		SELECT engagement_id, severity, count(*),
@@ -221,8 +237,8 @@ func (r *FindingRepository) SummarizeVulnerabilitiesByEngagements(ctx context.Co
 		       count(*) FILTER (WHERE kev)
 		FROM findings
 		WHERE engagement_id = ANY($1)
-		  AND (kind = '' OR kind = 'sca' OR kind IS NULL)
-		  AND (dedup_key IS NULL OR dedup_key NOT LIKE 'license:%')
+		  AND status NOT IN ('false_positive', 'remediated')
+		  AND (dedup_key IS NULL OR dedup_key NOT LIKE 'license:%')`+kindFilter+`
 		GROUP BY engagement_id, severity`, ids)
 		if err != nil {
 			return fmt.Errorf("summarize findings: %w", err)

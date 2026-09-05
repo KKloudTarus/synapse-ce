@@ -9,6 +9,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Engagement rows carry their findings and their last scan.** `GET /api/v1/engagements` now
+  returns `findings_count` (open findings of every kind by severity) and `last_scan_date` with
+  `last_scan_status` on every row, read in two batched queries (one GROUP BY over the rows' findings,
+  one latest-job lookup) whatever the number of engagements. The console's Engagements table showed
+  "not reported" and the creation time in those columns against a real server; it now shows the counts,
+  "Scanned 2h ago", "Failed 1d ago", or "Not scanned".
+
 - **Pipeline results reach the console.** `synapse-cli scan --server URL --project KEY` records the
   scan result on the server as the project's next analysis, through the same recorder a server-run
   analysis uses, so it appears in the history, moves the trend, is evaluated against the project's
@@ -62,6 +69,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   the same compact metric strip, and loading and empty states share one component across pages.
 
 ### Fixed
+
+- **Open counts exclude triaged-away findings.** The per-engagement summaries behind the host pages
+  and the engagement list skip findings marked false positive or remediated, so "open findings" means
+  open.
 
 - **The per-agent host cap holds under concurrent syncs.** The 16-host cap was checked before the
   write, so two syncs from one agent that both counted 15 could both create a host. A `fleet_assets`

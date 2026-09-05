@@ -66,50 +66,52 @@ type Router struct {
 	credentials            *credentialsuc.Service
 	dastVerifier           runtimeVerifierService
 	dastWorkflow           dastWorkflowService
-	agent                  *agentDeps                // optional; nil ⇒ agent routes are not registered
-	exploitation           findingVerifier           // optional; nil ⇒ the verify route is not registered
-	judgments              judgmentService           // optional; nil ⇒ judgment routes are not registered
-	autoVerifier           autoVerifierService       // optional; nil ⇒ the LLM auto-verify route is not registered
-	threatModels           threatModelService        // optional; nil ⇒ threat-model routes are not registered
-	drafts                 writeupDraftService       // optional; nil ⇒ writeup-draft sign-off routes are not registered
-	aiTriageReviews        aiTriageReviewService     // optional; nil ⇒ AI-triage review queue routes are not registered
-	projects               projectService            // optional; nil ⇒ project routes are not registered
-	assets                 assetService              // optional; nil ⇒ fleet asset routes are not registered
-	hostVulns              hostVulnerabilityService  // optional; nil ⇒ host vulnerability routes are not registered (#820)
-	alerts                 alertService              // optional; nil ⇒ operator alerting routes are not registered
-	offensivePolicy        *offensivepolicy.Register // optional; nil ⇒ the policy register route is not registered
-	cspm                   *cspm.Service             // optional; nil ⇒ CSPM routes are not registered
-	businessAssets         businessAssetService      // optional; nil ⇒ business-level Asset routes are not registered
-	attackPaths            attackPathService         // optional; nil ⇒ attack-path routes are not registered
-	coverage               coverageService           // optional; nil ⇒ fleet coverage/agent-view routes are not registered
-	coverageWindows        coverageWindowReader      // optional; nil ⇒ immutable telemetry coverage-window routes are not registered
-	privacyPolicies        privacyPolicyService      // optional; nil ⇒ tenant source-privacy policy routes are not registered
-	incidents              incidentReader            // optional; nil ⇒ incident read routes are not registered (#594 C7)
-	incidentTriage         incidentTriager           // optional; nil ⇒ incident triage routes are not registered (#594 C5)
-	incidentRiskReassessor incidentRiskReassessor    // optional; nil ⇒ the tri-score reassess route is not registered (#594 C3/D/X5)
-	incidentCorrelator     incidentCorrelator        // optional; nil ⇒ the correlation route is not registered (#594 C2/C3)
-	endpointProcesses      endpointProcessStore      // optional; nil ⇒ the process-report routes are not registered (#594 B5)
-	processLearner         processLearner            // optional; nil ⇒ reported processes are not folded into the behavior baseline (#594 D)
-	desiredCapabilities    desiredCapabilityService  // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
-	legalHolds             legalHoldService          // optional; nil ⇒ the legal-hold routes are not registered (#635)
-	privacyExport          privacyExporter           // optional; nil ⇒ the data-export route is not registered (#635)
-	dataPurge              dataPurger                // optional; nil ⇒ the on-demand data-deletion route is not registered (#635)
-	endpointTimeline       endpointTimelineReader    // optional; nil ⇒ the State-Timeline read route is not registered (#594 B7)
-	retroHunter            retroHunter               // optional; nil ⇒ the retro-hunt route is not registered (#594 B7)
-	sarif                  sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
-	importedFindings       sarifReader               // optional read side for imported findings
-	fleetRolloutAdmin      fleetRolloutService       // optional; nil ⇒ the operator rollout routes are not served
-	offensiveHalt          offensiveKillSwitch       // optional; nil ⇒ the red-team halt route is not served
-	detections             detectionReader           // optional read side for the detection ledger (#423)
-	detectionProvenance    detectionProvenanceReader // optional read side for durable detection provenance (#610)
-	riskStories            riskStoryReader           // optional read side for the unified per-asset risk story (#427)
-	purpleCoverage         purpleCoverageReader      // optional read side for purple-team coverage (#426)
-	fleet                  *fleetRouter              // optional; nil ⇒ agent transport plane is not served
-	fleetAdmin             fleetAdminService         // optional; nil ⇒ operator agent-admin routes not registered
-	fleetKeys              fleetKeyAdmin             // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
-	qualityGates           qualityGateService        // optional; nil ⇒ quality-gate routes are not registered
-	qualityProfiles        qualityProfileService     // optional; nil ⇒ quality-profile routes are not registered
-	rules                  rulesService              // optional; nil ⇒ rule catalog routes are not registered
+	agent                  *agentDeps                 // optional; nil ⇒ agent routes are not registered
+	exploitation           findingVerifier            // optional; nil ⇒ the verify route is not registered
+	judgments              judgmentService            // optional; nil ⇒ judgment routes are not registered
+	autoVerifier           autoVerifierService        // optional; nil ⇒ the LLM auto-verify route is not registered
+	threatModels           threatModelService         // optional; nil ⇒ threat-model routes are not registered
+	drafts                 writeupDraftService        // optional; nil ⇒ writeup-draft sign-off routes are not registered
+	aiTriageReviews        aiTriageReviewService      // optional; nil ⇒ AI-triage review queue routes are not registered
+	projects               projectService             // optional; nil ⇒ project routes are not registered
+	assets                 assetService               // optional; nil ⇒ fleet asset routes are not registered
+	hostVulns              hostVulnerabilityService   // optional; nil ⇒ host vulnerability routes are not registered (#820)
+	findingSummaries       ports.FindingSummaryReader // optional; nil ⇒ engagement list rows carry no finding counts
+	scanJobs               ports.ScanJobStore         // optional; nil ⇒ engagement list rows carry no last scan
+	alerts                 alertService               // optional; nil ⇒ operator alerting routes are not registered
+	offensivePolicy        *offensivepolicy.Register  // optional; nil ⇒ the policy register route is not registered
+	cspm                   *cspm.Service              // optional; nil ⇒ CSPM routes are not registered
+	businessAssets         businessAssetService       // optional; nil ⇒ business-level Asset routes are not registered
+	attackPaths            attackPathService          // optional; nil ⇒ attack-path routes are not registered
+	coverage               coverageService            // optional; nil ⇒ fleet coverage/agent-view routes are not registered
+	coverageWindows        coverageWindowReader       // optional; nil ⇒ immutable telemetry coverage-window routes are not registered
+	privacyPolicies        privacyPolicyService       // optional; nil ⇒ tenant source-privacy policy routes are not registered
+	incidents              incidentReader             // optional; nil ⇒ incident read routes are not registered (#594 C7)
+	incidentTriage         incidentTriager            // optional; nil ⇒ incident triage routes are not registered (#594 C5)
+	incidentRiskReassessor incidentRiskReassessor     // optional; nil ⇒ the tri-score reassess route is not registered (#594 C3/D/X5)
+	incidentCorrelator     incidentCorrelator         // optional; nil ⇒ the correlation route is not registered (#594 C2/C3)
+	endpointProcesses      endpointProcessStore       // optional; nil ⇒ the process-report routes are not registered (#594 B5)
+	processLearner         processLearner             // optional; nil ⇒ reported processes are not folded into the behavior baseline (#594 D)
+	desiredCapabilities    desiredCapabilityService   // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
+	legalHolds             legalHoldService           // optional; nil ⇒ the legal-hold routes are not registered (#635)
+	privacyExport          privacyExporter            // optional; nil ⇒ the data-export route is not registered (#635)
+	dataPurge              dataPurger                 // optional; nil ⇒ the on-demand data-deletion route is not registered (#635)
+	endpointTimeline       endpointTimelineReader     // optional; nil ⇒ the State-Timeline read route is not registered (#594 B7)
+	retroHunter            retroHunter                // optional; nil ⇒ the retro-hunt route is not registered (#594 B7)
+	sarif                  sarifIngester              // optional; nil ⇒ the third-party SARIF import route is not registered
+	importedFindings       sarifReader                // optional read side for imported findings
+	fleetRolloutAdmin      fleetRolloutService        // optional; nil ⇒ the operator rollout routes are not served
+	offensiveHalt          offensiveKillSwitch        // optional; nil ⇒ the red-team halt route is not served
+	detections             detectionReader            // optional read side for the detection ledger (#423)
+	detectionProvenance    detectionProvenanceReader  // optional read side for durable detection provenance (#610)
+	riskStories            riskStoryReader            // optional read side for the unified per-asset risk story (#427)
+	purpleCoverage         purpleCoverageReader       // optional read side for purple-team coverage (#426)
+	fleet                  *fleetRouter               // optional; nil ⇒ agent transport plane is not served
+	fleetAdmin             fleetAdminService          // optional; nil ⇒ operator agent-admin routes not registered
+	fleetKeys              fleetKeyAdmin              // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
+	qualityGates           qualityGateService         // optional; nil ⇒ quality-gate routes are not registered
+	qualityProfiles        qualityProfileService      // optional; nil ⇒ quality-profile routes are not registered
+	rules                  rulesService               // optional; nil ⇒ rule catalog routes are not registered
 	dastScan               dastScanService
 	vulnerabilitySources   *vulnerabilitysourceuc.Service
 	vulnerabilityMonitor   *vulnerabilitymonitor.Service

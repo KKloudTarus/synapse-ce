@@ -5400,6 +5400,27 @@ components:
       properties:
         id: {type: string}
         tenant_id: {type: string}
+        findings_count:
+          description: >-
+            Open findings of every kind by severity, excluding licence records and findings triaged
+            false positive or remediated. Present on list responses when the finding store is wired.
+          type: object
+          properties:
+            total: {type: integer}
+            critical: {type: integer}
+            high: {type: integer}
+            medium: {type: integer}
+            low: {type: integer}
+            info: {type: integer}
+        last_scan_date:
+          description: >-
+            Finish time (start time while running) of the engagement's latest scan job. Present on
+            list responses when a scan ran.
+          type: string
+          format: date-time
+        last_scan_status:
+          description: Status of the latest scan job (running, succeeded, failed). Present with last_scan_date.
+          type: string
         project_id:
           type: string
           description: Present when the engagement is the analysis context of a code-quality Project.

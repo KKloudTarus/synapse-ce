@@ -510,6 +510,10 @@ func (f *fakeSummaries) SummarizeVulnerabilitiesByEngagements(_ context.Context,
 	return f.out, nil
 }
 
+func (f *fakeSummaries) SummarizeOpenFindingsByEngagements(ctx context.Context, ids []shared.ID) (map[shared.ID]ports.VulnerabilitySummary, error) {
+	return f.SummarizeVulnerabilitiesByEngagements(ctx, ids)
+}
+
 // With a summary reader wired, Hosts counts every context in one call and never lists findings.
 func TestHostsUsesTheBatchedSummaryRead(t *testing.T) {
 	h := newHarness(t)

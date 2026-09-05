@@ -231,3 +231,73 @@ func TestFindingRepository(t *testing.T) {
 		t.Fatalf("Python data flow round trip = %+v", flowRoundTrip)
 	}
 }
+
+// TestFindingRepositorySummarizesOpenFindingsByEngagement drives the GROUP BY both list views read:
+// false positives, remediated findings and licence records are not counted; the vulnerability summary
+// is SCA only while the finding summary counts every kind.
+func TestFindingRepositorySummarizesOpenFindingsByEngagement(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := shared.WithTenant(context.Background(), "default")
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	eid := shared.ID("fs-" + randHex(t))
+	e, err := engagement.New(eid, "", "summary-test", "", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := NewEngagementRepository(pool).Create(ctx, e); err != nil {
+		t.Fatalf("create engagement: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM findings WHERE engagement_id=$1", eid.String())
+		_, _ = pool.Exec(ctx, "DELETE FROM engagements WHERE id=$1", eid.String())
+	})
+	repo := NewFindingRepository(pool)
+	now := time.Now().UTC().Truncate(time.Second)
+	suffix := randHex(t)
+	mk := func(dedup string, kind finding.Kind, sev shared.Severity, status finding.Status, kev bool) finding.Finding {
+		f := finding.Finding{ID: shared.ID("f-" + randHex(t)), EngagementID: eid, Kind: kind, DedupKey: dedup + ":" + suffix, Title: dedup, Severity: sev, Status: status, KEV: kev, FixedVersion: "1.2", Audit: shared.Audit{CreatedAt: now, UpdatedAt: now}}
+		if kind != finding.KindSCA {
+			f.RuleKey = "rule-" + dedup // code findings carry the rule that produced them
+		}
+		return f
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{
+		mk("vuln:CVE-1:a:1", finding.KindSCA, shared.SeverityCritical, finding.StatusOpen, true),
+		mk("vuln:CVE-2:b:1", finding.KindSCA, shared.SeverityHigh, finding.StatusRemediated, false),
+		mk("vuln:CVE-3:c:1", finding.KindSCA, shared.SeverityHigh, finding.StatusFalsePos, false),
+		mk("license:GPL:d:1", finding.KindSCA, shared.SeverityLow, finding.StatusOpen, false),
+		mk("sast:rule:e.go:1", finding.KindSAST, shared.SeverityMedium, finding.StatusConfirmed, false),
+		mk("secret:aws:f.env:1", finding.KindSecret, shared.SeverityHigh, finding.StatusOpen, false),
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	vulns, err := repo.SummarizeVulnerabilitiesByEngagements(ctx, []shared.ID{eid, "eng-none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := vulns[eid]; v.Total != 1 || v.Critical != 1 || v.Fixable != 1 || v.KEV != 1 {
+		t.Fatalf("vulnerability summary = %+v, want the one open SCA finding", v)
+	}
+	if v := vulns["eng-none"]; v.Total != 0 {
+		t.Fatalf("unknown engagement summary = %+v", v)
+	}
+	all, err := repo.SummarizeOpenFindingsByEngagements(ctx, []shared.ID{eid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := all[eid]; a.Total != 3 || a.Critical != 1 || a.High != 1 || a.Medium != 1 {
+		t.Fatalf("open finding summary = %+v, want SCA + SAST + secret", a)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +18,9 @@ import (
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // engRepoFake is an in-test engagement repository – adapter tests stay free of
@@ -85,7 +88,16 @@ func (r *engRepoFake) ProjectContexts(_ context.Context, tenantID shared.ID, pro
 	}
 	return out, nil
 }
-func (r *engRepoFake) List(context.Context, shared.ID) ([]*engdom.Engagement, error) { return nil, nil }
+func (r *engRepoFake) List(context.Context, shared.ID) ([]*engdom.Engagement, error) {
+	out := make([]*engdom.Engagement, 0, len(r.data))
+	for _, e := range r.data {
+		if !e.Internal() {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
 
 type engIDs struct{}
 
@@ -401,5 +413,73 @@ func TestTransitionRouteAcceptsDocumentedStatusPath(t *testing.T) {
 				t.Errorf("a rejected call moved the engagement to %q", got.Status)
 			}
 		})
+	}
+}
+
+type fakeEngSummaries struct {
+	out map[shared.ID]ports.VulnerabilitySummary
+	ids []shared.ID
+}
+
+func (f *fakeEngSummaries) SummarizeVulnerabilitiesByEngagements(ctx context.Context, ids []shared.ID) (map[shared.ID]ports.VulnerabilitySummary, error) {
+	return f.SummarizeOpenFindingsByEngagements(ctx, ids)
+}
+
+func (f *fakeEngSummaries) SummarizeOpenFindingsByEngagements(_ context.Context, ids []shared.ID) (map[shared.ID]ports.VulnerabilitySummary, error) {
+	f.ids = append([]shared.ID(nil), ids...)
+	return f.out, nil
+}
+
+// TestListEngagementsCarriesFindingCountsAndLastScan: the list used to send rows the table could only
+// render as "not reported" and "Created …". With the stores wired, every row carries its open
+// finding counts and its latest scan in one batched read each; without them the fields are absent.
+func TestListEngagementsCarriesFindingCountsAndLastScan(t *testing.T) {
+	rt, _, _ := newEngRouter(t)
+	list := func() []map[string]any {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/engagements", nil)
+		rec := httptest.NewRecorder()
+		rt.listEngagements(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list: code=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("rows = %d, want 1", len(rows))
+		}
+		return rows
+	}
+
+	bare := list()[0]
+	for _, key := range []string{"findings_count", "last_scan_date", "last_scan_status"} {
+		if _, ok := bare[key]; ok {
+			t.Errorf("unwired list carries %q: %v", key, bare)
+		}
+	}
+
+	summaries := &fakeEngSummaries{out: map[shared.ID]ports.VulnerabilitySummary{"eng-1": {Total: 6, Critical: 1, High: 2, Medium: 3}}}
+	rt.SetFindingSummaries(summaries)
+	jobs := memory.NewScanJobStore()
+	finished := time.Date(2026, 9, 5, 10, 0, 0, 0, time.UTC)
+	if err := jobs.CreateRunning(context.Background(), ports.ScanJob{ID: "job-1", EngagementID: "eng-1", Kind: "sbom", Status: ports.ScanSucceeded, StartedAt: finished.Add(-time.Minute), FinishedAt: &finished}); err != nil {
+		t.Fatal(err)
+	}
+	rt.SetScanJobs(jobs)
+
+	row := list()[0]
+	if len(summaries.ids) != 1 || summaries.ids[0] != "eng-1" {
+		t.Fatalf("summary read asked for %v, want the listed engagement once", summaries.ids)
+	}
+	counts, _ := row["findings_count"].(map[string]any)
+	if counts["total"] != float64(6) || counts["critical"] != float64(1) || counts["high"] != float64(2) || counts["medium"] != float64(3) {
+		t.Fatalf("findings_count = %v", row["findings_count"])
+	}
+	if row["last_scan_status"] != "succeeded" {
+		t.Fatalf("last_scan_status = %v", row["last_scan_status"])
+	}
+	if got, _ := row["last_scan_date"].(string); !strings.HasPrefix(got, "2026-09-05T10:00:00") {
+		t.Fatalf("last_scan_date = %v, want the job's finish time", row["last_scan_date"])
 	}
 }

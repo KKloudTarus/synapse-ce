@@ -50,6 +50,22 @@ type engagementView struct {
 	LiveReconEnabled bool       `json:"live_recon_enabled"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+	// List enrichment (listEngagements): open finding counts and the latest scan job, so the table
+	// shows what a row's scan found without a request per row. Absent on single-resource responses
+	// and when the stores are not wired.
+	FindingsCount  *engagementFindingsView `json:"findings_count,omitempty"`
+	LastScanDate   *time.Time              `json:"last_scan_date,omitempty"`
+	LastScanStatus string                  `json:"last_scan_status,omitempty"`
+}
+
+// engagementFindingsView counts an engagement's open findings of every kind by severity.
+type engagementFindingsView struct {
+	Total    int `json:"total"`
+	Critical int `json:"critical"`
+	High     int `json:"high"`
+	Medium   int `json:"medium"`
+	Low      int `json:"low"`
+	Info     int `json:"info"`
 }
 
 func toTargetViews(targets []engdom.Target) []scopeTargetDTO {

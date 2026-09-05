@@ -22,14 +22,17 @@ var wireContract = map[string][]string{
 		"id", "tenant_id", "project_id", "business_asset_id", "name", "client", "status",
 		"scope", "roe", "authorized_from", "authorized_to", "timezone", "live_recon_enabled",
 		"created_at", "updated_at",
+		// list enrichment, present only on listEngagements rows with the stores wired
+		"findings_count", "last_scan_date", "last_scan_status",
 	},
 	"projectView": {
 		"id", "tenant_id", "name", "key", "source_binding", "default_profile_by_lang",
 		"gate_id", "created_at", "updated_at",
 	},
-	"scopeView":    {"in_scope", "out_of_scope"},
-	"roeView":      {"allowed_tool_classes", "blackouts"},
-	"blackoutView": {"from", "to"},
+	"engagementFindingsView": {"total", "critical", "high", "medium", "low", "info"},
+	"scopeView":              {"in_scope", "out_of_scope"},
+	"roeView":                {"allowed_tool_classes", "blackouts"},
+	"blackoutView":           {"from", "to"},
 }
 
 // TestResourceViewWireContract compares the declared contract with the struct tags in

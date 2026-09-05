@@ -1105,6 +1105,10 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	if summaries, ok := findingRepo.(ports.FindingSummaryReader); ok {
+		router.SetFindingSummaries(summaries)
+	}
+	router.SetScanJobs(scanJobStore)
 	coverageWindowSvc, err := coveragewindow.NewService(sensorStateStore, telemetryTransportStore, telemetryTransportStore, coverageWindowStore, clock)
 	if err != nil {
 		log.Error("coverage window service init failed", "err", err)

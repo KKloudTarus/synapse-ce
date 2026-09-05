@@ -943,7 +943,13 @@ func (s *VulnerabilitySummary) Add(severity shared.Severity, fixable, kev bool) 
 // views over many engagements. License findings (dedup key "license:*") and non-SCA kinds are excluded.
 // Optional: a store that does not implement it makes callers fall back to listing findings.
 type FindingSummaryReader interface {
+	// SummarizeVulnerabilitiesByEngagements counts open SCA vulnerability findings per engagement:
+	// licence records and findings triaged false positive or remediated are excluded.
 	SummarizeVulnerabilitiesByEngagements(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]VulnerabilitySummary, error)
+	// SummarizeOpenFindingsByEngagements counts open findings of every kind (SCA, SAST, secrets, IaC,
+	// DAST, quality) per engagement with the same exclusions. It backs the engagement list's
+	// Findings column.
+	SummarizeOpenFindingsByEngagements(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]VulnerabilitySummary, error)
 }
 
 // AlertSink delivers one operator alert to a destination (a webhook, a chat integration). Deliver

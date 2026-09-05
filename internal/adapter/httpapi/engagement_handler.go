@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 const createEngagementMetadataLimit = int64(1 << 20)
@@ -218,7 +220,63 @@ func (rt *Router) listEngagements(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toEngagementViews(list))
+	views := toEngagementViews(list)
+	if err := rt.enrichEngagementViews(r.Context(), views); err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, views)
+}
+
+// SetFindingSummaries wires the batched finding counter the engagement list uses for its Findings
+// column. Optional: without it rows carry no findings_count.
+func (rt *Router) SetFindingSummaries(r ports.FindingSummaryReader) { rt.findingSummaries = r }
+
+// SetScanJobs wires the scan job store the engagement list uses for its Last scan column. Optional:
+// without it rows carry no last_scan_date.
+func (rt *Router) SetScanJobs(s ports.ScanJobStore) { rt.scanJobs = s }
+
+// enrichEngagementViews attaches open finding counts and the latest scan to every row in two batched
+// reads (one GROUP BY over the rows' findings, one lateral latest-job lookup), so the list costs O(1)
+// queries however many engagements the tenant has.
+func (rt *Router) enrichEngagementViews(ctx context.Context, views []engagementView) error {
+	if len(views) == 0 || (rt.findingSummaries == nil && rt.scanJobs == nil) {
+		return nil
+	}
+	ids := make([]shared.ID, len(views))
+	for i := range views {
+		ids[i] = shared.ID(views[i].ID)
+	}
+	if rt.findingSummaries != nil {
+		sums, err := rt.findingSummaries.SummarizeOpenFindingsByEngagements(ctx, ids)
+		if err != nil {
+			return fmt.Errorf("summarize engagement findings: %w", err)
+		}
+		for i := range views {
+			if s, ok := sums[ids[i]]; ok {
+				views[i].FindingsCount = &engagementFindingsView{Total: s.Total, Critical: s.Critical, High: s.High, Medium: s.Medium, Low: s.Low, Info: s.Info}
+			}
+		}
+	}
+	if rt.scanJobs != nil {
+		jobs, err := rt.scanJobs.LatestForEngagements(ctx, ids)
+		if err != nil {
+			return fmt.Errorf("latest engagement scans: %w", err)
+		}
+		for i := range views {
+			job, ok := jobs[ids[i]]
+			if !ok {
+				continue
+			}
+			at := job.StartedAt
+			if job.FinishedAt != nil {
+				at = *job.FinishedAt
+			}
+			views[i].LastScanDate = &at
+			views[i].LastScanStatus = string(job.Status)
+		}
+	}
+	return nil
 }
 
 func (rt *Router) getEngagement(w http.ResponseWriter, r *http.Request) {

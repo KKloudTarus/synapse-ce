@@ -226,3 +226,47 @@ func TestCloudFindingVisibilityFollowsActiveObservation(t *testing.T) {
 		t.Fatalf("inactive cloud finding publishable: %#v", got)
 	}
 }
+
+// The two summaries agree on what "open" means (no false positives, no remediated, no licence
+// records) and differ only in kind: the vulnerability summary is SCA only, the finding summary counts
+// every kind the engagement list shows.
+func TestFindingRepositorySummarizesOpenFindingsByEngagement(t *testing.T) {
+	ctx := context.Background()
+	repo := NewFindingRepository()
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	mk := func(id, dedup string, kind finding.Kind, sev shared.Severity, status finding.Status) finding.Finding {
+		f := finding.Finding{ID: shared.ID(id), EngagementID: "eng-1", Kind: kind, DedupKey: dedup, Title: id, Severity: sev, Status: status, FixedVersion: "1.2", Audit: shared.Audit{CreatedAt: now, UpdatedAt: now}}
+		if kind != finding.KindSCA {
+			f.RuleKey = "rule-" + id // code findings carry the rule that produced them
+		}
+		return f
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{
+		mk("f1", "vuln:CVE-1:a:1", finding.KindSCA, shared.SeverityCritical, finding.StatusOpen),
+		mk("f2", "vuln:CVE-2:b:1", finding.KindSCA, shared.SeverityHigh, finding.StatusRemediated),
+		mk("f3", "vuln:CVE-3:c:1", finding.KindSCA, shared.SeverityHigh, finding.StatusFalsePos),
+		mk("f4", "license:GPL:d:1", finding.KindSCA, shared.SeverityLow, finding.StatusOpen),
+		mk("f5", "sast:rule:e.go:1", finding.KindSAST, shared.SeverityMedium, finding.StatusConfirmed),
+		mk("f6", "secret:aws:f.env:1", finding.KindSecret, shared.SeverityHigh, finding.StatusOpen),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	vulns, err := repo.SummarizeVulnerabilitiesByEngagements(ctx, []shared.ID{"eng-1", "eng-none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := vulns["eng-1"]; v.Total != 1 || v.Critical != 1 || v.Fixable != 1 {
+		t.Fatalf("vulnerability summary = %+v, want the one open SCA finding", v)
+	}
+	if v := vulns["eng-none"]; v.Total != 0 {
+		t.Fatalf("unknown engagement summary = %+v", v)
+	}
+	all, err := repo.SummarizeOpenFindingsByEngagements(ctx, []shared.ID{"eng-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := all["eng-1"]; a.Total != 3 || a.Critical != 1 || a.High != 1 || a.Medium != 1 {
+		t.Fatalf("open finding summary = %+v, want SCA + SAST + secret", a)
+	}
+}
