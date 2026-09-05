@@ -59,6 +59,42 @@ func TestGrypeParseAndMap(t *testing.T) {
 	}
 }
 
+// A distro advisory (here Ubuntu's record for an OS package) carries no CVSS of its own; grype puts the
+// NVD vector and score on the related upstream CVE. Without the fallback every host finding shows no
+// CVSS, which is what the fleet host e2e surfaced.
+func TestGrypeFallsBackToRelatedVulnerabilityCVSS(t *testing.T) {
+	const distroMatch = `{"matches": [{
+	  "vulnerability": {"id": "CVE-2026-45447", "severity": "High", "fix": {"versions": ["3.0.13-0ubuntu3.11"], "state": "fixed"}, "cvss": []},
+	  "relatedVulnerabilities": [{"id": "CVE-2026-45447", "cvss": [
+	    {"vector": "CVSS:2.0/AV:N/AC:L/Au:N/C:P/I:P/A:P", "metrics": {"baseScore": 7.5}},
+	    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "metrics": {"baseScore": 9.8}}
+	  ]}],
+	  "artifact": {"name": "openssl", "version": "3.0.13-0ubuntu3.9", "purl": "pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.9?arch=amd64&distro=ubuntu-24.04"}
+	}]}`
+	var out grypeOutput
+	if err := json.Unmarshal([]byte(distroMatch), &out); err != nil {
+		t.Fatal(err)
+	}
+	r := matchToRaw(out.Matches[0], nil)
+	if r.CVSSScore != 9.8 || r.CVSSVector != "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" {
+		t.Fatalf("cvss = %v %q, want the highest related score", r.CVSSScore, r.CVSSVector)
+	}
+	if r.Ecosystem != "Ubuntu:24.04" {
+		t.Fatalf("ecosystem = %q", r.Ecosystem)
+	}
+
+	// The advisory's own CVSS wins when present, even if a related record scores higher.
+	var own grypeOutput
+	if err := json.Unmarshal([]byte(sampleGrype), &own); err != nil {
+		t.Fatal(err)
+	}
+	own.Matches[0].RelatedVulnerabilities[0].CVSS = []grypeCVSS{{Vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}
+	own.Matches[0].RelatedVulnerabilities[0].CVSS[0].Metrics.BaseScore = 9.8
+	if r := matchToRaw(own.Matches[0], nil); r.CVSSScore != 7.5 {
+		t.Fatalf("own cvss overridden by a related record: %v", r.CVSSScore)
+	}
+}
+
 func TestGrypeUsesSBOMComponentNameForArtifactPURL(t *testing.T) {
 	match := grypeMatch{}
 	match.Vulnerability.ID = "CVE-2024-38816"

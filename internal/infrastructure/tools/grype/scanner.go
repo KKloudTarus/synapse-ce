@@ -436,15 +436,14 @@ type grypeMatch struct {
 			Versions []string `json:"versions"`
 			State    string   `json:"state"`
 		} `json:"fix"`
-		CVSS []struct {
-			Vector  string `json:"vector"`
-			Metrics struct {
-				BaseScore float64 `json:"baseScore"`
-			} `json:"metrics"`
-		} `json:"cvss"`
+		CVSS []grypeCVSS `json:"cvss"`
 	} `json:"vulnerability"`
+	// RelatedVulnerabilities carry the upstream (NVD) record behind a distro advisory. Distro feeds
+	// (Ubuntu, Debian, Alpine) rarely publish CVSS themselves, so for OS packages this is usually the
+	// only place a vector and base score exist.
 	RelatedVulnerabilities []struct {
-		ID string `json:"id"`
+		ID   string      `json:"id"`
+		CVSS []grypeCVSS `json:"cvss"`
 	} `json:"relatedVulnerabilities"`
 	Artifact struct {
 		Name    string `json:"name"`
@@ -474,10 +473,13 @@ func matchToRaw(m grypeMatch, components map[string]sbom.Component) vulnerabilit
 		Severity:    mapSeverity(m.Vulnerability.Severity),
 		Description: m.Vulnerability.Description,
 	}
-	for _, c := range m.Vulnerability.CVSS {
-		if c.Metrics.BaseScore > r.CVSSScore {
-			r.CVSSScore = c.Metrics.BaseScore
-			r.CVSSVector = c.Vector
+	r.CVSSScore, r.CVSSVector = highestCVSS(m.Vulnerability.CVSS)
+	if r.CVSSScore == 0 {
+		// The matched advisory has no CVSS of its own; fall back to the related upstream records.
+		for _, rel := range m.RelatedVulnerabilities {
+			if score, vector := highestCVSS(rel.CVSS); score > r.CVSSScore {
+				r.CVSSScore, r.CVSSVector = score, vector
+			}
 		}
 	}
 	r.FixState = m.Vulnerability.Fix.State // fixed / not-fixed / wont-fix / unknown – drives --ignore-unfixed
@@ -486,6 +488,25 @@ func matchToRaw(m grypeMatch, components map[string]sbom.Component) vulnerabilit
 		r.FixedVersion = m.Vulnerability.Fix.Versions[0]
 	}
 	return r
+}
+
+type grypeCVSS struct {
+	Vector  string `json:"vector"`
+	Metrics struct {
+		BaseScore float64 `json:"baseScore"`
+	} `json:"metrics"`
+}
+
+// highestCVSS picks the entry with the highest base score; a vector without a score is ignored.
+func highestCVSS(list []grypeCVSS) (float64, string) {
+	var score float64
+	var vector string
+	for _, c := range list {
+		if c.Metrics.BaseScore > score {
+			score, vector = c.Metrics.BaseScore, c.Vector
+		}
+	}
+	return score, vector
 }
 
 func mapSeverity(s string) shared.Severity {

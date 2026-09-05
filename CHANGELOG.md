@@ -31,6 +31,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   table no page rendered. The engagement's Findings group gains an Imported tab that lists them with
   tool, version, location and provenance.
 
+### Fixed
+
+- **OS-package findings carry CVSS.** Distro advisories (Ubuntu, Debian, Alpine) rarely publish a
+  CVSS vector of their own; grype puts the NVD vector and score on the related upstream CVE. The
+  grype adapter read only the primary record, so every OS-package finding arrived without a vector
+  and a risk score of 0. It now falls back to the related records; the advisory's own CVSS still
+  wins when present.
 
 ### Security
 
