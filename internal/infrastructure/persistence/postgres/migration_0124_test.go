@@ -192,10 +192,7 @@ func TestMigration0124RefusesRollbackWithSignedGapHistory(t *testing.T) {
 	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatalf("goose open: %v", err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	const tenant = "migration-0124-probe"
 	const agent = "migration-0124-agent"
 	const asset = "migration-0124-asset"

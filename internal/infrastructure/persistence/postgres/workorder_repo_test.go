@@ -160,10 +160,7 @@ func TestMigration0059(t *testing.T) {
 	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatalf("goose open: %v", err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	// Registered as a cleanup rather than deferred: cleanups run LIFO and AFTER every
 	// deferred call, so a deferred Close would shut the handle before the schema-restore
 	// cleanup below could use it.

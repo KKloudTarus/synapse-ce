@@ -140,10 +140,7 @@ func TestMigration0129DownIsSafe(t *testing.T) {
 	// Always leave the schema fully migrated, whatever this test does.
 	t.Cleanup(func() { _ = MigrateLocked(context.Background(), dsn) })
 
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	defer func() { _ = db.Close() }()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {

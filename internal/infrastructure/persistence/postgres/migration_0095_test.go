@@ -31,10 +31,7 @@ func TestMigration0095ActionOutboxIsolationAndIdempotency(t *testing.T) {
 			t.Errorf("restore migrations: %v", err)
 		}
 	})
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {

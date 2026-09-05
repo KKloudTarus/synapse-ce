@@ -25,10 +25,7 @@ func TestMigration0044(t *testing.T) {
 		t.Fatalf("initial migrate up: %v", err)
 	}
 
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatalf("goose open db: %v", err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
 	goose.SetBaseFS(migrations.FS)
@@ -38,7 +35,7 @@ func TestMigration0044(t *testing.T) {
 	// A migration test must not leave the shared integration database pinned to an old version even
 	// when an assertion fails midway through the test.
 	t.Cleanup(func() {
-		if err := MigrateLocked(context.Background(), dsn); err != nil {
+		if err := Migrate(context.Background(), dsn); err != nil {
 			t.Errorf("restore latest schema: %v", err)
 		}
 	})

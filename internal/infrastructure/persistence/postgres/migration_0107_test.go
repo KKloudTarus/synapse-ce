@@ -25,10 +25,7 @@ func TestMigration0107FleetDesiredState(t *testing.T) {
 		}
 	})
 
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {

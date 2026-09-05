@@ -65,10 +65,7 @@ func TestMigration0123RefusesRollbackWithActivationHistory(t *testing.T) {
 	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatalf("goose open: %v", err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() {
 		_, _ = db.ExecContext(context.Background(), `SET session_replication_role = replica`)
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM privacy_policy_activations WHERE operation_id='migration-0123-probe'`)

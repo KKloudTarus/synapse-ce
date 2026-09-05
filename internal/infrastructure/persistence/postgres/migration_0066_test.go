@@ -20,10 +20,7 @@ func TestMigration0066PreservesLegacyAssessmentGraph(t *testing.T) {
 	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	db, err := goose.OpenDBWithDriver("pgx", dsnForMigrate(dsn))
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {

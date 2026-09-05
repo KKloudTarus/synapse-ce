@@ -578,10 +578,7 @@ func TestMigration0125RefusesRollbackWithIntentHistory(t *testing.T) {
 	if _, err := repo.insertFleetAudit(f.ctx, fleetAuditIntent("intent-rollback", f.at)); err != nil {
 		t.Fatalf("seed intention: %v", err)
 	}
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
-	if err != nil {
-		t.Fatalf("goose open: %v", err)
-	}
+	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
