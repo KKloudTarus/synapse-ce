@@ -50,16 +50,6 @@ export const EngagementsPage: FC = () => {
   const [importErr, setImportErr] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
-  if (searchParams.get('create') === '1') {
-    const assetId = searchParams.get('assetId')
-    return (
-      <Navigate
-        replace
-        to={assetId ? `/engagements/new?${new URLSearchParams({ assetId }).toString()}` : '/engagements/new'}
-      />
-    )
-  }
-
   // Fetch engagements + assets
   const { data, error, loading } = useFetch<{ list: Engagement[]; assetNames: Record<string, string> }>(
     async () => {
@@ -262,6 +252,18 @@ export const EngagementsPage: FC = () => {
     } finally {
       setImporting(false)
     }
+  }
+
+  // Below every hook: an early return above them changed the hook count between
+  // renders as soon as ?create=1 was added or removed.
+  if (searchParams.get('create') === '1') {
+    const assetId = searchParams.get('assetId')
+    return (
+      <Navigate
+        replace
+        to={assetId ? `/engagements/new?${new URLSearchParams({ assetId }).toString()}` : '/engagements/new'}
+      />
+    )
   }
 
   return (
