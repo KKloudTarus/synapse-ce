@@ -82,7 +82,6 @@ GET /api/v1/quality-gates/{p}
 GET /api/v1/quality-profiles
 GET /api/v1/quality-profiles/{p}
 GET /api/v1/recon/tools
-GET /api/v1/users
 GET /api/v1/vulnerability/sources/types
 GET /api/v1/writeups
 PATCH /api/v1/engagements/{p}
@@ -139,7 +138,6 @@ POST /api/v1/quality-profiles/{p}/activate
 POST /api/v1/quality-profiles/{p}/copy
 POST /api/v1/quality-profiles/{p}/deactivate
 POST /api/v1/quality-profiles/{p}/severity
-POST /api/v1/users
 POST /api/v1/vulnerability/reconcile/full
 POST /api/v1/vulnerability/sources
 POST /api/v1/vulnerability/sources/{p}/archive

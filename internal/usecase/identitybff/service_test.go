@@ -98,12 +98,18 @@ func (s *bffUsers) Create(_ context.Context, u *user.User) error {
 	return nil
 }
 func (s *bffUsers) Bootstrap(context.Context, *user.User, ports.AuditEntry) error { return nil }
-func (s *bffUsers) GetByID(_ context.Context, id shared.ID) (*user.User, error) {
-	if s.user != nil && s.user.ID == id {
+
+// GetByID mirrors the production repositories: the lookup is scoped to tenantID, so a user in
+// another tenant reads as not found.
+func (s *bffUsers) GetByID(_ context.Context, tenantID, id shared.ID) (*user.User, error) {
+	match := func(u *user.User) bool {
+		return u.ID == id && shared.TenantOrDefault(shared.ID(u.TenantID)) == shared.TenantOrDefault(tenantID)
+	}
+	if s.user != nil && match(s.user) {
 		return s.user, nil
 	}
 	for _, u := range s.created {
-		if u.ID == id {
+		if match(u) {
 			return u, nil
 		}
 	}
@@ -112,7 +118,11 @@ func (s *bffUsers) GetByID(_ context.Context, id shared.ID) (*user.User, error) 
 func (s *bffUsers) GetByAPIKeyHash(context.Context, string) (*user.User, error) {
 	return nil, shared.ErrNotFound
 }
-func (s *bffUsers) List(context.Context) ([]*user.User, error) { return nil, nil }
+func (s *bffUsers) List(context.Context, shared.ID) ([]*user.User, error) { return nil, nil }
+func (s *bffUsers) Update(_ context.Context, _ shared.ID, u *user.User) error {
+	s.upserts = append(s.upserts, u)
+	return nil
+}
 func (s *bffUsers) Upsert(_ context.Context, u *user.User) error {
 	s.upserts = append(s.upserts, u)
 	return nil

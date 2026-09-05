@@ -9,6 +9,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Operator key revocation and role management.** `PATCH /api/v1/users/{id}` changes a name and
+  role, `POST /api/v1/users/{id}/disable` and `/enable` revoke and restore access, and
+  `POST /api/v1/users/{id}/rotate-key` issues a new API key and invalidates the previous one. Every
+  mutation is audited and requires the `administer` capability. Deleting a user is deliberately not
+  offered: an identity owns its audit, evidence, and finding attribution, so access is revoked by
+  disabling the account or rotating its key. Disabling or demoting a tenant's last enabled admin is
+  refused, so a tenant cannot lock itself out.
+
 - **Deployment capability catalog.** `GET /api/v1/capabilities` reports every optional subsystem
   with a stable key, a human name, whether this deployment enables it, the `SYNAPSE_*` variable that
   controls it, and the capabilities it depends on. An optional subsystem registers its routes only
@@ -106,6 +114,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   be dispatched manually.
 
 ### Fixed
+
+- **Cross-tenant user management.** `POST /api/v1/users` accepted a `tenant_id` from the request
+  body without comparing it with the caller's tenant, so a tenant-A admin could provision an admin
+  into tenant B and receive that admin's API key, and `GET /api/v1/users` listed every tenant's
+  operators on all three persistence backends. User reads and writes now carry their tenant
+  explicitly through the repository port and apply it as a query predicate, independent of row level
+  security. Provisioning into another tenant is refused unless the caller is the bootstrap principal
+  from `SYNAPSE_API_TOKEN`, the one identity that may seed a new tenant's first admin. The hostile
+  tenant-isolation harness now covers both routes.
 
 - Standalone CLI scans bind the default tenant before persisting results.
 - Release-signing CI uses the corrected provenance action and uploads the checksum signature once.

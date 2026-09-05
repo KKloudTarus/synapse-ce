@@ -640,8 +640,15 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/capabilities", rt.authz(userdom.PermView, rt.listCapabilities))
 	}
 	mux.HandleFunc("GET /api/v1/me", rt.currentUser)
+	// User management is administer-only and confined to the caller's own tenant. Deleting a user is
+	// deliberately absent: an identity owns its audit, evidence, and finding attribution, so access is
+	// revoked by disabling the account or rotating its key, never by removing the row.
 	mux.HandleFunc("GET /api/v1/users", rt.authz(userdom.PermAdminister, rt.listUsers))
 	mux.HandleFunc("POST /api/v1/users", rt.authz(userdom.PermAdminister, rt.createUser))
+	mux.HandleFunc("PATCH /api/v1/users/{id}", rt.authz(userdom.PermAdminister, rt.updateUser))
+	mux.HandleFunc("POST /api/v1/users/{id}/disable", rt.authz(userdom.PermAdminister, rt.disableUser))
+	mux.HandleFunc("POST /api/v1/users/{id}/enable", rt.authz(userdom.PermAdminister, rt.enableUser))
+	mux.HandleFunc("POST /api/v1/users/{id}/rotate-key", rt.authz(userdom.PermAdminister, rt.rotateUserAPIKey))
 	if rt.vulnerabilitySources != nil && rt.vulnerabilityMonitor != nil {
 		mux.HandleFunc("GET /api/v1/vulnerability/sources/types", rt.authz(userdom.PermView, rt.listVulnerabilityAdapterTypes))
 		mux.HandleFunc("GET /api/v1/vulnerability/sources", rt.authz(userdom.PermView, rt.listVulnerabilitySources))

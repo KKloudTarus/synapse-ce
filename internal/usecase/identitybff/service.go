@@ -102,7 +102,7 @@ func (s *Service) resolveUser(ctx context.Context, verified ports.OIDCIdentity) 
 		if external.TenantID != s.cfg.TenantID {
 			return nil, fmt.Errorf("OIDC linked identity tenant mismatch: %w", shared.ErrForbidden)
 		}
-		u, getErr := s.users.GetByID(ctx, external.UserID)
+		u, getErr := s.users.GetByID(ctx, external.TenantID, external.UserID)
 		if getErr != nil || u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID {
 			return nil, fmt.Errorf("OIDC user is unavailable: %w", shared.ErrForbidden)
 		}
@@ -143,7 +143,7 @@ func (s *Service) provisionUser(ctx context.Context, verified ports.OIDCIdentity
 		if errors.Is(err, shared.ErrConflict) {
 			external, getErr := s.store.GetExternalIdentity(ctx, verified.Issuer, verified.Subject)
 			if getErr == nil && external.TenantID == s.cfg.TenantID {
-				if existing, userErr := s.users.GetByID(ctx, external.UserID); userErr == nil && !existing.Disabled {
+				if existing, userErr := s.users.GetByID(ctx, external.TenantID, external.UserID); userErr == nil && !existing.Disabled {
 					return existing, nil
 				}
 			}
@@ -178,7 +178,7 @@ func (s *Service) Authenticate(ctx context.Context, token, csrfToken string, uns
 	if unsafe && (csrfToken == "" || subtle.ConstantTimeCompare([]byte(hash(csrfToken)), []byte(session.CSRFTokenHash)) != 1) {
 		return Principal{}, fmt.Errorf("CSRF token mismatch: %w", shared.ErrForbidden)
 	}
-	u, err := s.users.GetByID(ctx, session.UserID)
+	u, err := s.users.GetByID(ctx, session.TenantID, session.UserID)
 	if err != nil || u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID {
 		return Principal{}, shared.ErrForbidden
 	}
@@ -192,7 +192,7 @@ func (s *Service) Discover(ctx context.Context, token string) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	u, err := s.users.GetByID(ctx, session.UserID)
+	u, err := s.users.GetByID(ctx, session.TenantID, session.UserID)
 	if err != nil || u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID || !u.Role.Valid() {
 		return Session{}, shared.ErrForbidden
 	}

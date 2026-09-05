@@ -15,6 +15,12 @@ import (
 
 const userCols = `id, name, role, api_key_hash, disabled, created_at, updated_at, tenant_id`
 
+// userTenantPredicate scopes a query to one tenant WITHOUT relying on row level security being
+// present on the users table. It normalizes the stored tenant the same way shared.TenantOrDefault
+// does in Go, so the bootstrap admin's empty tenant_id and an explicit 'default' name one tenant.
+// $1 is the default-tenant literal; $2 is the caller's already-normalized tenant.
+const userTenantPredicate = `COALESCE(NULLIF(tenant_id, ''), $1) = $2`
+
 // UserRepository persists operator identities to PostgreSQL.
 type UserRepository struct{ pool *pgxpool.Pool }
 
@@ -82,9 +88,12 @@ func (r *UserRepository) Bootstrap(ctx context.Context, u *user.User, auditEntry
 	return nil
 }
 
-func (r *UserRepository) GetByID(ctx context.Context, id shared.ID) (*user.User, error) {
-	u, err := scanUser(r.pool.QueryRow(ctx, `SELECT `+userCols+` FROM users WHERE id=$1`, id.String()))
+func (r *UserRepository) GetByID(ctx context.Context, tenantID, id shared.ID) (*user.User, error) {
+	u, err := scanUser(r.pool.QueryRow(ctx,
+		`SELECT `+userCols+` FROM users WHERE `+userTenantPredicate+` AND id=$3`,
+		shared.DefaultTenant.String(), shared.TenantOrDefault(tenantID).String(), id.String()))
 	if errors.Is(err, pgx.ErrNoRows) {
+		// A user in another tenant is not found, never forbidden: existence is not revealed.
 		return nil, shared.ErrNotFound
 	}
 	if err != nil {
@@ -93,6 +102,28 @@ func (r *UserRepository) GetByID(ctx context.Context, id shared.ID) (*user.User,
 	return u, nil
 }
 
+// Update writes the mutable fields of a user that already exists in tenantID. tenant_id is absent
+// from the SET list, so an update can never move a user between tenants, and the tenant predicate
+// means a cross-tenant id updates nothing.
+func (r *UserRepository) Update(ctx context.Context, tenantID shared.ID, u *user.User) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE users SET name=$4, role=$5, api_key_hash=$6, disabled=$7, updated_at=$8
+		 WHERE `+userTenantPredicate+` AND id=$3`,
+		shared.DefaultTenant.String(), shared.TenantOrDefault(tenantID).String(), u.ID.String(),
+		u.Name, string(u.Role), u.APIKeyHash, u.Disabled, u.Audit.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return shared.ErrNotFound
+	}
+	return nil
+}
+
+// GetByAPIKeyHash is the authentication path: the tenant is unknown until the presented token
+// resolves to a user, so this is the one user lookup without a tenant predicate. The key is the
+// SHA-256 digest of a 192-bit random secret, and the resolved user's own tenant scopes every
+// subsequent read and write.
 func (r *UserRepository) GetByAPIKeyHash(ctx context.Context, hash string) (*user.User, error) {
 	u, err := scanUser(r.pool.QueryRow(ctx, `SELECT `+userCols+` FROM users WHERE api_key_hash=$1`, hash))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -104,8 +135,10 @@ func (r *UserRepository) GetByAPIKeyHash(ctx context.Context, hash string) (*use
 	return u, nil
 }
 
-func (r *UserRepository) List(ctx context.Context) ([]*user.User, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+userCols+` FROM users ORDER BY created_at ASC, id ASC`)
+func (r *UserRepository) List(ctx context.Context, tenantID shared.ID) ([]*user.User, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+userCols+` FROM users WHERE `+userTenantPredicate+` ORDER BY created_at ASC, id ASC`,
+		shared.DefaultTenant.String(), shared.TenantOrDefault(tenantID).String())
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}

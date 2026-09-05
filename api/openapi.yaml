@@ -26,6 +26,8 @@ security:
 - bearerAuth: []
 
 tags:
+- name: users
+  description: Operator identities, roles, and API-key lifecycle
 - name: platform
   description: Deployment-wide configuration a client needs before it renders navigation
 - name: health
@@ -2389,6 +2391,143 @@ paths:
         '429': {description: Backpressure; the agent preserves WAL state and retries according to Retry-After, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/users:
+    get:
+      tags: [users]
+      summary: List the operators of the caller's own tenant
+      description: >
+        Requires the `administer` capability (admin role). The roster is scoped to the caller's
+        tenant; no caller lists another tenant's operators. The API-key hash is never serialized.
+      responses:
+        "200":
+          description: The tenant's operators
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/User"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [users]
+      summary: Provision an operator and return its API key once
+      description: >
+        Requires the `administer` capability. The key is shown exactly once and is not recoverable.
+        `tenant_id` defaults to the caller's own tenant; a different tenant is refused with `403`
+        unless the caller is the bootstrap platform principal, which is the only identity allowed to
+        seed another tenant's first admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateUserRequest"}
+      responses:
+        "201":
+          description: Created; the API key is returned once
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UserWithAPIKey"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Missing the administer capability, or the requested tenant is not the caller's own}
+
+  /api/v1/users/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    patch:
+      tags: [users]
+      summary: Update an operator's name and role
+      description: >
+        Requires the `administer` capability. An omitted or empty field is left unchanged. Demoting
+        the tenant's last enabled admin is refused with `409`, so a tenant cannot be locked out.
+        Deleting an operator is deliberately not offered: an identity owns its audit, evidence, and
+        finding attribution, so access is revoked by disabling the account or rotating its key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateUserRequest"}
+      responses:
+        "200":
+          description: The updated operator
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The change would leave the tenant with no enabled admin}
+
+  /api/v1/users/{id}/disable:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [users]
+      summary: Disable an operator's credentials
+      description: >
+        Requires the `administer` capability. The identity and its attribution are preserved; only
+        authentication stops, immediately, for the operator's API key. Disabling the tenant's last
+        enabled admin is refused with `409`.
+      responses:
+        "200":
+          description: The disabled operator
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The operator is the tenant's last enabled admin}
+
+  /api/v1/users/{id}/enable:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [users]
+      summary: Re-enable a disabled operator
+      description: Requires the `administer` capability. The operator keeps the API key it had.
+      responses:
+        "200":
+          description: The re-enabled operator
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/users/{id}/rotate-key:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [users]
+      summary: Rotate an operator's API key and return the new key once
+      description: >
+        Requires the `administer` capability. The previous key stops authenticating immediately,
+        which is how a leaked key is revoked. The new key is shown exactly once.
+      responses:
+        "200":
+          description: The operator and its new API key
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UserWithAPIKey"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2918,6 +3057,54 @@ components:
             Keys of the capabilities this one depends on. Present only when the subsystem needs more
             than its own switch, so a client can explain an enabled switch that is still disabled.
           items: {type: string}
+
+    User:
+      type: object
+      required: [id, name, role, disabled, createdAt]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        role: {type: string, enum: [admin, consultant, reviewer, readonly, member]}
+        disabled:
+          type: boolean
+          description: A disabled operator keeps its identity and history; its API key stops authenticating.
+        createdAt: {type: string, format: date-time}
+
+    UserWithAPIKey:
+      type: object
+      required: [user, apiKey]
+      properties:
+        user: {$ref: "#/components/schemas/User"}
+        apiKey:
+          type: string
+          description: The raw bearer key, shown exactly once and never recoverable afterwards.
+          example: syn_0123456789abcdef
+
+    CreateUserRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        role:
+          type: string
+          enum: [admin, consultant, reviewer, readonly, member]
+          default: member
+        tenant_id:
+          type: string
+          description: >
+            Tenant the new operator belongs to. Empty means the calling admin's own tenant. A
+            different tenant is refused with 403 unless the caller is the bootstrap platform principal.
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Empty leaves the current name unchanged.
+        role:
+          type: string
+          enum: [admin, consultant, reviewer, readonly, member]
+          description: Empty leaves the current role unchanged.
 
     Readiness:
       type: object

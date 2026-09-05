@@ -88,6 +88,33 @@ admin, consultant, reviewer, and read-only. Separation of duties means a machine
 never verify or accept its own claim. Tenant isolation is enforced at the service layer, so a
 caller cannot read another tenant's engagement even if a route wrapper is bypassed.
 
+## Operator identities and key revocation
+
+Every operator has its own bearer key, so each action is attributable to a person. Key management is
+`administer`-only and confined to the caller's own tenant:
+
+```
+GET   /api/v1/users                    the caller's tenant roster
+POST  /api/v1/users                    provision an operator; the key is shown once
+PATCH /api/v1/users/{id}               change name and role
+POST  /api/v1/users/{id}/disable       revoke access, keeping the identity
+POST  /api/v1/users/{id}/enable        restore access
+POST  /api/v1/users/{id}/rotate-key    issue a new key; the previous one stops working at once
+```
+
+Rotate the key when one leaks: the previous key stops authenticating the moment the new one is
+issued. Disable the account when a person leaves. There is no delete: an identity owns its audit,
+evidence, and finding attribution, so removing the row would break the history that makes those
+records provable. A disabled operator keeps its id and every past attribution; only authentication
+stops.
+
+Two rules keep this surface from becoming an escalation path. Provisioning into a tenant other than
+the caller's own is refused with `403` unless the caller is the bootstrap principal seeded from
+`SYNAPSE_API_TOKEN`, which is the only identity that may seed a new tenant's first admin; there is
+deliberately no platform-admin role, because a role would be assignable through this same API.
+Disabling or demoting a tenant's last enabled admin is refused with `409`, so an admin cannot lock
+its own tenant out.
+
 ## Browser OIDC access
 
 Browser OIDC uses a backend-for-frontend model. The server accepts an identity only for an exact approved
