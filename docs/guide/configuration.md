@@ -412,6 +412,7 @@ not operator settings and must not be injected manually.
 | `SYNAPSE_AGENT_QUEUE_DEPTH` | `256` | Pending agent-work queue depth. |
 | `SYNAPSE_AGENT_MAX_PARALLEL` | `1` | Maximum parallel actions per agent; serial by default. |
 | `SYNAPSE_AGENT_RECON_CONCURRENCY` | `3` | Recon work admitted within the agent budget. |
+| `SYNAPSE_DATA_DELETION_ENABLED` | `false` | Serve on-demand erasure (`DELETE /api/v1/fleet/engagements/{id}/detection-data`). Opt-in because the call drops an engagement's detection projection; the evidence chain survives, the request is legal-hold-checked, and the deletion is audited. Takes effect only when fleet detection ingest is enabled. |
 
 ### Host and Kubernetes agents
 
