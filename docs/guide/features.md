@@ -64,12 +64,25 @@ against a hostile filesystem or a crafted package database.
 
 ## First-party SAST and code quality
 
-Synapse ships its own source-code analysis, not just dependency scanning. First-party SAST rules
-run across many languages and feed a taint engine over the sandboxed `go/ssa` and tree-sitter call
-graphs; confirmed results emit `Kind=sast` findings. A SonarQube-style code-quality surface adds
-quality rules, quality gates and quality profiles, and hotspots. Third-party results enter the same
-governance path through **SARIF ingest**, so findings from other scanners are de-duplicated,
-prioritized, and reported alongside first-party ones.
+Synapse ships its own source-code analysis, not just dependency scanning. Two distinct engines, with
+distinct guarantees, so it is worth being precise about what each does.
+
+The first-party SAST engine is a **pattern scanner for dangerous idioms**: a deterministic rule set
+over single lines with a bounded ten-line look-back, across many languages. It is good, and fast, at
+the class of bug that is visible in one place: a weak hash, a hardcoded credential, a shell command
+built by string concatenation, an unsafe deserializer. It is not an interprocedural or cross-file
+dataflow analyzer, and does not reason about framework routing, aliasing, or sanitizers, so it does
+not claim parity with a dataflow product. Its precision is pinned to a labelled corpus by the
+`TestLabelledCorpusPrecisionAndRecall` gate. Confirmed hits emit `Kind=sast` findings.
+
+The stronger asset is the **reachability engine**: a taint and call-graph analysis over the sandboxed
+`go/ssa` and tree-sitter graphs (`taintcallgraph`, `ssacallgraph`, `jvmreach`, `pyreach`, `srcreach`).
+A finding it proves reachable is worth more than a larger pile of unproven ones, and a
+statically-proven hypothesis can be confirmed at runtime by a safe DAST probe (see below).
+
+A SonarQube-style code-quality surface adds quality rules, quality gates and quality profiles, and
+hotspots. Third-party results enter the same governance path through **SARIF ingest**, so findings
+from other scanners are de-duplicated, prioritized, and reported alongside first-party ones.
 
 ## Offensive testing (red team)
 
