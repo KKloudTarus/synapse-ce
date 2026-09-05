@@ -7,6 +7,24 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Security
+
+- **Global vulnerability sources now require the platform operator.** The source registry has no
+  tenant column and decides which advisories every tenant's detection reads, so mutating it needs
+  the bootstrap principal from `SYNAPSE_API_TOKEN` in addition to the administer permission. The
+  per-source `allow_private_network` switch also needs a deployment opt-in,
+  `SYNAPSE_VULNERABILITY_SOURCE_ALLOW_PRIVATE_NETWORK`, which defaults to off.
+
+- **Request bodies and connection lifetimes are bounded on the human API plane.** Every mutation
+  route carries a 1 MiB ceiling, with larger explicit ceilings for source publish, bundle import,
+  SARIF, SBOM, evidence and threat-model routes. API listeners now set a write and an idle timeout
+  alongside the existing header timeout.
+
+- **An audit entry is written on the caller's transaction.** A business write that rolls back no
+  longer leaves a committed audit row claiming it happened, and the VEX apply and approval
+  decision paths fail rather than committing an unrecorded change. `golang.org/x/image` moves to
+  v0.45.0, clearing the one vulnerability govulncheck reported as reachable.
+
 ### Added
 
 - **Project dependency graph and subtree export.** Project analyses now expose a bounded, deterministic
