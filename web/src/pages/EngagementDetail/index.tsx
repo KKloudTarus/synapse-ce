@@ -40,6 +40,7 @@ import { DataGovernanceTab } from './DataGovernanceTab'
 import { EvidenceTab } from './EvidenceTab'
 import { SettingsTab } from './SettingsTab'
 import { JudgmentReviewTab } from './ReviewsTab'
+import { ARCHIVED_REASON, isReadOnly } from './readOnly'
 
 // Lazy-loaded so React Flow stays out of the initial bundle (only the Graph tab needs it).
 const DependencyGraphTab = lazy(() => import('../DependencyGraph').then((m) => ({ default: m.DependencyGraphTab })))
@@ -330,6 +331,7 @@ export function EngagementDetail() {
     )
   }
 
+  const archived = isReadOnly(eng)
   const counts = {
     findings: findings?.length ?? 0,
     components: scan?.components.length ?? 0,
@@ -485,6 +487,8 @@ export function EngagementDetail() {
             focusedFindingId={focusedFindingId}
             onUpdated={applyFinding}
             onReload={reloadFindings}
+            readOnly={archived}
+            readOnlyReason={archived ? ARCHIVED_REASON : undefined}
           />
         )}
         {tab === 'sla' && <SLATab key={id} engagementId={id} findings={findings} />}
