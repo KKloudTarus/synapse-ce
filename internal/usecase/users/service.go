@@ -119,7 +119,8 @@ func (a Actor) tenant() shared.ID { return shared.TenantOrDefault(shared.ID(a.Te
 // confined to the actor's own tenant for the bootstrap principal too.
 func (a Actor) platformAdmin() bool { return a.ID == BootstrapID }
 
-// mayMutate refuses a user-management mutation aimed at the bootstrap principal by anybody else.
+// mayMutate refuses every user-management mutation aimed at the bootstrap principal, including one
+// the bootstrap principal makes on itself.
 //
 // The bootstrap admin is stored with an empty tenant_id, which normalizes to the default tenant, so
 // it is a member of that tenant's roster and reachable by its admins through the ordinary
@@ -128,10 +129,14 @@ func (a Actor) platformAdmin() bool { return a.ID == BootstrapID }
 // every global-resource guard in the product tests for. Disabling or demoting it would equally lock
 // the deployment operator out of its own deployment.
 //
-// The bootstrap credential is owned by SYNAPSE_API_TOKEN and rotated by changing that variable and
-// restarting, which is the only path that should move it.
+// Self-mutation is refused for a different reason. EnsureBootstrapAdmin refreshes this row from
+// SYNAPSE_API_TOKEN on every startup, overwriting the key hash, the role and the disabled flag. A
+// key rotated through this API therefore authenticates only until the next restart, while the
+// environment token stops working in the meantime: two credentials, each valid at a different time,
+// and no way to tell which from the outside. The credential is owned by SYNAPSE_API_TOKEN, and
+// changing that variable and restarting is the one path that actually moves it.
 func (a Actor) mayMutate(id shared.ID) error {
-	if id.String() == BootstrapID && a.ID != BootstrapID {
+	if id.String() == BootstrapID {
 		return fmt.Errorf("%w: the bootstrap operator is managed through SYNAPSE_API_TOKEN, not through user management", shared.ErrForbidden)
 	}
 	return nil
@@ -284,13 +289,33 @@ func (s *Service) RotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (
 	if err := actor.mayMutate(id); err != nil {
 		return nil, "", err
 	}
-	// Rotation does not touch the admin count, so it needs no roster guard; it still takes the
-	// mutex so a rotation cannot interleave with a demotion of the same row.
-	s.roster.Lock()
-	defer s.roster.Unlock()
-	u, err := s.repo.GetByID(ctx, actor.tenant(), id)
+	u, plaintext, err := guardedKey(ctx, s, actor, func(txCtx context.Context) (*user.User, string, error) {
+		return s.rotateAPIKey(txCtx, actor, id)
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return u, plaintext, nil
+}
+
+// rotateAPIKey issues the new key. It reads the user from the LOCKED roster rather than through a
+// plain lookup: Update writes the whole aggregate, so a read outside the lock lets a rotation on
+// one replica silently revert a disable or a demotion committed on another between the two
+// statements. Reading under the same row lock the guard takes makes the read-modify-write atomic.
+func (s *Service) rotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (*user.User, string, error) {
+	roster, err := s.lockedRoster(ctx, actor.tenant())
 	if err != nil {
 		return nil, "", fmt.Errorf("load user: %w", err)
+	}
+	var u *user.User
+	for _, candidate := range roster {
+		if candidate.ID == id {
+			u = candidate
+			break
+		}
+	}
+	if u == nil {
+		return nil, "", fmt.Errorf("load user: %w", shared.ErrNotFound)
 	}
 	plaintext, hash, err := generateKey()
 	if err != nil {
@@ -348,6 +373,28 @@ func guarded(ctx context.Context, s *Service, actor Actor, fn func(context.Conte
 		return nil, err
 	}
 	return out, nil
+}
+
+// guardedKey is guarded for the mutation that also returns a secret. The two differ only in the
+// shape of the value they carry out of the transaction.
+func guardedKey(ctx context.Context, s *Service, actor Actor, fn func(context.Context) (*user.User, string, error)) (*user.User, string, error) {
+	s.roster.Lock()
+	defer s.roster.Unlock()
+	if s.transactions == nil {
+		return fn(ctx)
+	}
+	var (
+		out       *user.User
+		plaintext string
+	)
+	if err := s.transactions.Run(ctx, actor.tenant(), func(txCtx context.Context) error {
+		var mutateErr error
+		out, plaintext, mutateErr = fn(txCtx)
+		return mutateErr
+	}); err != nil {
+		return nil, "", err
+	}
+	return out, plaintext, nil
 }
 
 // lockedRoster reads the tenant's roster, locking the rows for the rest of the caller's transaction

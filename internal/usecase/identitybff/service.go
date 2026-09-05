@@ -16,6 +16,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	identityuc "github.com/KKloudTarus/synapse-ce/internal/usecase/identityuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 )
 
 type Config struct {
@@ -105,6 +106,15 @@ func (s *Service) resolveUser(ctx context.Context, verified ports.OIDCIdentity) 
 		u, getErr := s.users.GetByID(ctx, external.TenantID, external.UserID)
 		if getErr != nil || u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID {
 			return nil, fmt.Errorf("OIDC user is unavailable: %w", shared.ErrForbidden)
+		}
+		if u.ID.String() == usersuc.BootstrapID {
+			// The bootstrap principal is the deployment operator, seeded from SYNAPSE_API_TOKEN,
+			// and user management refuses to mutate it for exactly that reason. This path writes
+			// the same table through Upsert, so it has to refuse too, or an identity-provider
+			// group change would demote the one identity that administers the deployment. No code
+			// path links an external identity to this id today; the guard is here so that stays
+			// true if one ever does.
+			return nil, fmt.Errorf("the bootstrap operator cannot be linked to an external identity: %w", shared.ErrForbidden)
 		}
 		if u.Role != verified.Role {
 			u.Role = verified.Role

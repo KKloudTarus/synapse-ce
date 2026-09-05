@@ -434,9 +434,14 @@ func TestDefaultTenantAdminCannotSeizeTheBootstrapPrincipal(t *testing.T) {
 		t.Fatalf("bootstrap principal was altered: %+v", got)
 	}
 
-	// The operator itself still rotates its own key, which is how the product supports rotation.
-	if _, _, err := svc.RotateAPIKey(ctx, bootstrapActor, BootstrapID); err != nil {
-		t.Fatalf("bootstrap self-rotation: %v", err)
+	// The operator cannot rotate itself either. EnsureBootstrapAdmin rewrites this row from the
+	// environment token on every startup, so a key issued here would authenticate only until the
+	// next restart while the environment token stopped working in the meantime.
+	if _, _, err := svc.RotateAPIKey(ctx, bootstrapActor, BootstrapID); !errors.Is(err, shared.ErrForbidden) {
+		t.Errorf("bootstrap self-rotation = %v, want forbidden", err)
+	}
+	if _, err := svc.SetDisabled(ctx, bootstrapActor, BootstrapID, true); !errors.Is(err, shared.ErrForbidden) {
+		t.Errorf("bootstrap self-disable = %v, want forbidden", err)
 	}
 }
 
@@ -522,6 +527,50 @@ func TestConcurrentDisableAndDemoteCannotStrandATenant(t *testing.T) {
 		}
 		if enabledAdmins == 0 {
 			t.Fatalf("iteration %d: the tenant has no enabled admin (errors %v / %v)", iteration, first, second)
+		}
+	}
+}
+
+// TestRotationDoesNotRevertAConcurrentDisable pins the read-modify-write in key rotation.
+//
+// Update writes the whole aggregate, so rotation that reads the user outside the guard can carry a
+// stale disabled flag or role back over a change another caller committed in between. Reading the
+// user from the locked roster closes the window: a revoked account must stay revoked after somebody
+// rotates its key.
+func TestRotationDoesNotRevertAConcurrentDisable(t *testing.T) {
+	for iteration := 0; iteration < 200; iteration++ {
+		svc, _ := newAuditedSvc(t)
+		ctx := context.Background()
+		_, _, admin := seedAdmin(t, svc, "acme", "Admin")
+		target, _, err := svc.CreateUser(ctx, admin, "", "Member", user.RoleMember)
+		if err != nil {
+			t.Fatalf("seed member: %v", err)
+		}
+
+		start := make(chan struct{})
+		done := make(chan struct{}, 2)
+		go func() {
+			<-start
+			_, _ = svc.SetDisabled(ctx, admin, target.ID, true)
+			done <- struct{}{}
+		}()
+		go func() {
+			<-start
+			_, _, _ = svc.RotateAPIKey(ctx, admin, target.ID)
+			done <- struct{}{}
+		}()
+		close(start)
+		<-done
+		<-done
+
+		roster, err := svc.List(ctx, admin)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		for _, u := range roster {
+			if u.ID == target.ID && !u.Disabled {
+				t.Fatalf("iteration %d: the disable was reverted by a concurrent rotation", iteration)
+			}
 		}
 	}
 }
