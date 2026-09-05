@@ -7,6 +7,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
@@ -185,13 +186,24 @@ func (s *Service) RetroRunRule(ctx context.Context, q ports.HuntQuery) ([]detect
 	if err != nil {
 		return nil, res, err
 	}
+	// The stored events are replayed in time order through an evaluator, so a windowed rule fires on the
+	// same bursts it would have fired on live.
+	evaluator, err := detection.NewEvaluator(rules)
+	if err != nil {
+		return nil, res, err
+	}
+	events := append([]detection.Event(nil), res.Events...)
+	sort.SliceStable(events, func(i, j int) bool { return events[i].At.Before(events[j].At) })
 	var fired []detection.Detection
-	for _, ev := range res.Events {
-		for _, r := range rules {
-			if !r.Match(ev) {
-				continue
+	for _, ev := range events {
+		for _, f := range evaluator.Evaluate(ev) {
+			var d detection.Detection
+			var derr error
+			if len(f.Evidence) > 0 {
+				d, derr = detection.NewBurstDetection(f.Rule, ev.Host, q.HostID, f.Evidence, f.Observed, s.clock.Now().UTC())
+			} else {
+				d, derr = detection.NewDetection(f.Rule, ev.Host, q.HostID, []detection.Event{ev}, s.clock.Now().UTC())
 			}
-			d, derr := detection.NewDetection(r, ev.Host, q.HostID, []detection.Event{ev}, s.clock.Now().UTC())
 			if derr != nil {
 				continue
 			}

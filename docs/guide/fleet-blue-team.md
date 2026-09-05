@@ -159,6 +159,18 @@ records were already reclaimed. Keys rotate before expiry, and one `403` causes 
 plus a retry of the same pending sequence. A second rejection stops that delivery lane instead of
 generating keys indefinitely; the raw telemetry and durable-gap workers remain independent.
 
+### Rate rules
+
+A rule matches per event or per burst. A windowed rule (`Window{Count, Within, GroupBy}`) counts the
+events its predicates match inside a sliding span, partitioned by the grouped fields, and fires once when
+the count is reached; the detection carries the burst as evidence (the last 64 events when it is longer)
+and the count restarts. `det.suspicious_dns_beacon` v2 is the first: 120 outbound DNS datagrams to one
+destination inside a minute, grouped by `net.remote_addr`. v1 fired on every DNS packet, which is name
+resolution, not beaconing. The same evaluator replays stored telemetry in retro hunts and release
+evidence, so a windowed rule fires on the same bursts offline as it does live. Per rule the evaluator
+tracks at most 1024 groups and evicts the stalest, so a sensor's memory stays bounded whatever an
+attacker varies.
+
 ### Durable telemetry spool
 
 Before the detection engine evaluates an eBPF event, the agent normalizes it to the canonical telemetry

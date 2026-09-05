@@ -21,6 +21,9 @@ type Rule struct {
 	Title    string
 	Severity shared.Severity
 	Matcher  Matcher
+	// Window, when set, makes the rule fire on a rate of matching events rather than on each one. Nil is
+	// the plain per-event rule.
+	Window *Window
 }
 
 // Validate enforces the invariants a catalogued rule must hold. A rule that fails these cannot produce a
@@ -49,14 +52,24 @@ func (r Rule) Validate() error {
 	if err := r.Matcher.validate(); err != nil {
 		return fmt.Errorf("rule %s: %w", r.ID, err)
 	}
+	if r.Window != nil {
+		if err := r.Window.validate(r.Class); err != nil {
+			return fmt.Errorf("rule %s: %w", r.ID, err)
+		}
+	}
 	return nil
 }
 
-// Match reports whether an event satisfies this rule. It observes and matches only — it never executes
-// anything (golden rule 1); the Matcher is typed data, not a shell expression.
+// Match reports whether an event satisfies this rule's predicates. It observes and matches only — it
+// never executes anything (golden rule 1); the Matcher is typed data, not a shell expression. For a
+// windowed rule a match is one event that counts toward the burst, not yet a detection; Evaluator decides
+// when the count is reached.
 func (r Rule) Match(e Event) bool {
 	return r.Matcher.Match(e)
 }
+
+// Windowed reports whether the rule fires on a rate rather than on every matching event.
+func (r Rule) Windowed() bool { return r.Window != nil }
 
 // clone returns a deep copy of the rule: the Matcher's predicate slice and each predicate's Values slice
 // are copied, not aliased. The catalogue accessors return clones so a caller cannot reach through a
@@ -75,5 +88,6 @@ func (r Rule) clone() Rule {
 		}
 		c.Matcher.All = preds
 	}
+	c.Window = r.Window.clone()
 	return c
 }

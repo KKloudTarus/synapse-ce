@@ -60,7 +60,7 @@ type Result struct {
 type Service struct {
 	detections DetectionReader
 	incidents  IncidentRecorder
-	reassessor RiskReassessor // may be nil
+	reassessor RiskReassessor   // may be nil
 	notifier   IncidentNotifier // may be nil
 	cfg        correlation.Config
 	audit      ports.AuditLogger

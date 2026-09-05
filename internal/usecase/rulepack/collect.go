@@ -76,11 +76,17 @@ func CollectRetroEvidence(ctx context.Context, p rulepackdomain.RulePack, hunter
 		if len(result.Events) >= q.Limit {
 			return nil, fmt.Errorf("retro hunt rule %s reached its %d-event limit; window completeness is unproven", candidate.RuleID, q.Limit)
 		}
+		// Count what the rule would have fired, not what its predicates touch: for a windowed rule the two
+		// differ by design (one burst is one detection).
+		evaluator, err := detection.NewEvaluator([]detection.Rule{rule})
+		if err != nil {
+			return nil, fmt.Errorf("retro hunt rule %s: %w", candidate.RuleID, err)
+		}
+		events := append([]detection.Event(nil), result.Events...)
+		sort.SliceStable(events, func(i, j int) bool { return events[i].At.Before(events[j].At) })
 		matched := 0
-		for _, event := range result.Events {
-			if rule.Match(event) {
-				matched++
-			}
+		for _, event := range events {
+			matched += len(evaluator.Evaluate(event))
 		}
 		out = append(out, RetroEvidence{
 			RuleID:        candidate.RuleID,

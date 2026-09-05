@@ -26,7 +26,7 @@ var catalogue = []Technique{
 	},
 	{
 		ID: "emu.dns_beacon_benign", TaxonomyRef: "T1071.004", BenignVariant: true, ProductionSafe: true,
-		Expected: ExpectedObservable{Telemetry: []TelemetryClass{TelemetryDNS, TelemetryNetwork}, DetectionID: "det.suspicious_dns_beacon", Version: "v1"},
+		Expected: ExpectedObservable{Telemetry: []TelemetryClass{TelemetryDNS, TelemetryNetwork}, DetectionID: "det.suspicious_dns_beacon", Version: "v2"},
 	},
 	{
 		ID: "emu.credential_file_read", TaxonomyRef: "T1552.001", BenignVariant: true, ProductionSafe: true,

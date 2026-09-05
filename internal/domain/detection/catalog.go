@@ -1,6 +1,8 @@
 package detection
 
 import (
+	"time"
+
 	"fmt"
 	"sort"
 
@@ -32,13 +34,17 @@ var catalogue = []Rule{
 		}},
 	},
 	{
-		ID: "det.suspicious_dns_beacon", Version: 1, Class: ClassNetwork,
-		Title: "DNS egress (T1071.004)", Severity: shared.SeverityMedium,
+		// v2: a rate, not a packet. v1 fired on every outbound DNS datagram, which is not beaconing and
+		// buried the console. The window counts DNS egress per destination; a sustained two queries per
+		// second to one address for a minute is tunnelling or a beacon, not name resolution.
+		ID: "det.suspicious_dns_beacon", Version: 2, Class: ClassNetwork,
+		Title: "DNS beaconing to one destination (T1071.004)", Severity: shared.SeverityMedium,
 		Matcher: Matcher{Class: ClassNetwork, All: []Predicate{
 			{Field: FieldNetProto, Op: OpEquals, Value: "udp"},
 			{Field: FieldNetRemotePort, Op: OpEquals, Value: "53"},
 			{Field: FieldNetDirection, Op: OpEquals, Value: "egress"},
 		}},
+		Window: &Window{Count: 120, Within: time.Minute, GroupBy: []Field{FieldNetRemoteAddr}},
 	},
 	{
 		ID: "det.credential_file_access", Version: 1, Class: ClassFile,

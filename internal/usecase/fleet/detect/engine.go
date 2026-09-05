@@ -72,6 +72,7 @@ type Engine struct {
 	host     shared.ID
 	agentID  shared.ID
 	rules    map[detection.Class][]detection.Rule
+	evals    map[detection.Class]*detection.Evaluator // per-class rule evaluation, incl. windowed-rule state (guarded by mu)
 	enabled  map[detection.Class]bool
 	ceiling  float64
 	sampler  LoadSampler
@@ -102,6 +103,7 @@ func NewEngine(sensor ports.DetectionSensor, sink ports.DetectionSink, host, age
 	}
 	enabled := make(map[detection.Class]bool, len(classes))
 	rules := make(map[detection.Class][]detection.Rule, len(classes))
+	evals := make(map[detection.Class]*detection.Evaluator, len(classes))
 	for _, c := range classes {
 		if !c.Valid() {
 			return nil, fmt.Errorf("%w: unknown detection class %q", shared.ErrValidation, c)
@@ -112,6 +114,11 @@ func NewEngine(sensor ports.DetectionSensor, sink ports.DetectionSink, host, age
 			return nil, fmt.Errorf("load rules for %s: %w", c, err)
 		}
 		rules[c] = rs
+		ev, err := detection.NewEvaluator(rs)
+		if err != nil {
+			return nil, fmt.Errorf("prepare rules for %s: %w", c, err)
+		}
+		evals[c] = ev
 	}
 	sampler := opts.Sampler
 	if sampler == nil {
@@ -127,7 +134,7 @@ func NewEngine(sensor ports.DetectionSensor, sink ports.DetectionSink, host, age
 	}
 	return &Engine{
 		sensor: sensor, sink: sink, host: host, agentID: agentID,
-		rules: rules, enabled: enabled, ceiling: opts.CPUCeilingPct, sampler: sampler,
+		rules: rules, evals: evals, enabled: enabled, ceiling: opts.CPUCeilingPct, sampler: sampler,
 		interval: opts.SampleInterval, window: window, clock: clock,
 		shed: map[detection.Class]bool{}, ctxBuf: map[detection.Class][]detection.Event{},
 		emitFail: map[detection.Class]uint64{},
@@ -171,7 +178,9 @@ func (e *Engine) Run(ctx context.Context) (err error) {
 }
 
 // process handles one event: sample load (maybe shed), then — unless the class is shed or disabled —
-// buffer it as context and evaluate every rule for its class, emitting a detection per match.
+// buffer it as context and evaluate every rule for its class, emitting a detection per rule that fires. A
+// plain rule fires on the event and carries the recent same-class context; a windowed rule fires when its
+// burst threshold is reached and carries the burst itself.
 func (e *Engine) process(ctx context.Context, ev detection.Event) {
 	if !e.enabled[ev.Class] {
 		return
@@ -184,14 +193,17 @@ func (e *Engine) process(ctx context.Context, ev detection.Event) {
 		return // this class is shed to stay under the ceiling; its events are not evaluated
 	}
 	window := e.pushContextLocked(ev)
-	rules := e.rules[ev.Class]
+	fired := e.evals[ev.Class].Evaluate(ev) // windowed state lives in the evaluator; mutate it under mu only
 	e.mu.Unlock()
 
-	for _, r := range rules {
-		if !r.Match(ev) {
-			continue
+	for _, f := range fired {
+		var d detection.Detection
+		var err error
+		if len(f.Evidence) > 0 {
+			d, err = detection.NewBurstDetection(f.Rule, e.host, e.agentID, f.Evidence, f.Observed, e.clock.Now().UTC())
+		} else {
+			d, err = detection.NewDetection(f.Rule, e.host, e.agentID, window, e.clock.Now().UTC())
 		}
-		d, err := detection.NewDetection(r, e.host, e.agentID, window, e.clock.Now().UTC())
 		if err != nil {
 			// A malformed event cannot produce a detection. Skip rather than emit a bad one, but COUNT
 			// it — a matched rule that produced nothing is a coverage signal, not a silent miss.

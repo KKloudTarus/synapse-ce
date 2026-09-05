@@ -323,3 +323,47 @@ func TestEngineRunLoopProcessesThenStops(t *testing.T) {
 		t.Error("Run must start the sensor")
 	}
 }
+
+func dnsEvent(at time.Time, remote string) detection.Event {
+	return detection.Event{Class: detection.ClassNetwork, At: at, Host: "host-1",
+		Network: &detection.NetworkEvent{Proto: "udp", RemoteAddr: remote, RemotePort: 53, Direction: "egress", PID: 9, Comm: "beacon"}}
+}
+
+// The DNS rule is windowed: single packets emit nothing, a burst to one destination emits one detection
+// whose evidence is the burst (capped at MaxEvidence), and the count restarts after it fires.
+func TestEngineWindowedRuleFiresOnBurstOnly(t *testing.T) {
+	sensor := newFakeSensor()
+	sink := &fakeSink{}
+	eng := newEngine(t, sensor, sink, Options{Classes: []detection.Class{detection.ClassNetwork}})
+	rule, ok := detection.Lookup("det.suspicious_dns_beacon")
+	if !ok || !rule.Windowed() {
+		t.Fatalf("dns rule = %+v", rule)
+	}
+	t0 := time.Unix(1_000, 0)
+	// Spread across two destinations, each below the count: nothing.
+	for i := 0; i < rule.Window.Count-1; i++ {
+		eng.process(context.Background(), dnsEvent(t0.Add(time.Duration(i)*100*time.Millisecond), "10.0.0.53"))
+		eng.process(context.Background(), dnsEvent(t0.Add(time.Duration(i)*100*time.Millisecond), "10.0.0.54"))
+	}
+	if got := sink.detections(); len(got) != 0 {
+		t.Fatalf("emitted %d detections below the burst threshold", len(got))
+	}
+	eng.process(context.Background(), dnsEvent(t0.Add(time.Duration(rule.Window.Count)*100*time.Millisecond), "10.0.0.53"))
+	got := sink.detections()
+	if len(got) != 1 || got[0].RuleID != rule.ID || got[0].RuleVersion != 2 {
+		t.Fatalf("detections = %+v", got)
+	}
+	if len(got[0].Evidence) != detection.MaxEvidence || !got[0].Truncated {
+		t.Fatalf("burst evidence = %d truncated=%v", len(got[0].Evidence), got[0].Truncated)
+	}
+	for _, e := range got[0].Evidence {
+		if e.Network.RemoteAddr != "10.0.0.53" {
+			t.Fatalf("evidence from another destination: %+v", e)
+		}
+	}
+	// The other destination is still one short; one more packet to it fires its own detection.
+	eng.process(context.Background(), dnsEvent(t0.Add(time.Duration(rule.Window.Count+1)*100*time.Millisecond), "10.0.0.54"))
+	if got := sink.detections(); len(got) != 2 {
+		t.Fatalf("second destination did not fire independently: %d", len(got))
+	}
+}

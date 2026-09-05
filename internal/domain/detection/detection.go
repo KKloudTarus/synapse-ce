@@ -42,6 +42,21 @@ type Detection struct {
 // the triggering event and its immediate lead-up are the useful context; the drop is recorded in the
 // detection's Truncated/ObservedCount fields so a caller never presents a bounded window as complete.
 func NewDetection(r Rule, host, agent shared.ID, evidence []Event, at time.Time) (Detection, error) {
+	return newDetection(r, host, agent, evidence, len(evidence), at)
+}
+
+// NewBurstDetection is NewDetection for a windowed rule whose burst was longer than the evidence the
+// evaluator kept: observed is the number of matching events in the burst, evidence the most recent of
+// them. When observed exceeds the evidence, the detection is marked truncated with that count, so a
+// 120-packet burst that ships 64 packets never presents as a 64-packet one.
+func NewBurstDetection(r Rule, host, agent shared.ID, evidence []Event, observed int, at time.Time) (Detection, error) {
+	if observed < len(evidence) {
+		observed = len(evidence)
+	}
+	return newDetection(r, host, agent, evidence, observed, at)
+}
+
+func newDetection(r Rule, host, agent shared.ID, evidence []Event, observed int, at time.Time) (Detection, error) {
 	if err := r.Validate(); err != nil {
 		return Detection{}, fmt.Errorf("detection needs a valid rule: %w", err)
 	}
@@ -60,8 +75,8 @@ func NewDetection(r Rule, host, agent shared.ID, evidence []Event, at time.Time)
 		}
 	}
 
-	observedCount := len(evidence)
-	truncated := false
+	observedCount := observed
+	truncated := observed > len(evidence)
 	kept := evidence
 	if len(kept) > MaxEvidence {
 		kept = kept[len(kept)-MaxEvidence:]
