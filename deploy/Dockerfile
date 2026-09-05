@@ -42,6 +42,17 @@ FROM anchore/grype:v0.115.0 AS grype
 
 # ---------------------------------------------------------------------------
 # target: full – batteries-included local-development SCA image.
+#
+# LAYER ORDER IS LOAD-BEARING. The JVM toolchain below is the first instruction after the base
+# image, and the compiled binaries arrive afterwards through COPY --from=build. BuildKit keys this
+# RUN on the base image and the command text alone, so editing anything under cmd/ or internal/
+# rebuilds only the Go compile stage and reuses the toolchain layer (measured: 70s of Go compile,
+# JVM layer CACHED). Moving a COPY --from=build above this RUN, or inserting an ARG or a COPY of
+# repository content before it, would put a one-minute apt install plus a Gradle download on the
+# critical path of every rebuild.
+#
+# The toolchain itself stays: JVM SCA shells out to mvn and gradle to resolve transitive dependency
+# trees. --target api is the build for anyone who does not need that (roughly 320 MB against 940).
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim AS full
 ARG GRADLE_VERSION=8.10.2

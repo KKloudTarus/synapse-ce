@@ -1,9 +1,34 @@
-# Local development dependencies for Synapse.
-# Usage: docker compose -f deploy/docker-compose.yml up -d
+# Local development dependencies for Synapse: PostgreSQL + MinIO, no application containers.
+# Run the API and the dashboard natively against it (`make dev`, or `make run` plus `pnpm dev`).
 #
-# Credentials are LOCAL DEV ONLY and are read from the environment with defaults.
-# Override them for anything but a throwaway local stack, for example in a .env file
-# next to this one (DB_USER, DB_PASSWORD, BLOB_USER, BLOB_PASSWORD).
+#   docker compose -f deploy/docker-compose.yml up -d      # or: make docker-up
+#
+# Do not add `--wait`: Compose counts the one-shot postgres-init container as not running and
+# reports failure even when it exited 0. To block until the application role exists, run
+# `docker compose -f deploy/docker-compose.yml run --rm postgres-init`, which is idempotent.
+#
+# PROJECT NAME. Compose otherwise derives the project name from the directory holding this file, so
+# this stack and deploy/docker-compose.full.yml would both be project "deploy", sharing the volume
+# "deploy_pgdata" while creating different superusers. Running one after the other then failed with
+# `password authentication failed for user "synapse_admin"`. The explicit name pins this stack to
+# its own project, containers, network, and volumes.
+#
+# DATABASE ROLES. The API refuses to serve when its runtime role can bypass row level security, so
+# connecting as the superuser fails startup with
+# `rls: runtime DB role cannot enforce isolation: role is SUPERUSER`. postgres-init below creates a
+# NOSUPERUSER NOBYPASSRLS application role, mirroring what the full stack does. Point the API at
+# both roles: the owner runs migrations and grants, the app role serves traffic.
+#
+#   export SYNAPSE_DB_DSN='postgres://synapse_app:synapse-app@localhost:5432/synapse?sslmode=disable'
+#   export SYNAPSE_DB_MIGRATION_DSN='postgres://synapse:synapse@localhost:5432/synapse?sslmode=disable'
+#
+# Credentials are LOCAL DEV ONLY and are read from the environment with defaults. This stack keeps
+# well-known defaults because it holds nothing but throwaway local state; the full stack, which
+# serves the API, deliberately has none. Override them for anything but a throwaway local stack,
+# for example in a .env file next to this one (DB_USER, DB_PASSWORD, DB_APP_USER, DB_APP_PASSWORD,
+# BLOB_USER, BLOB_PASSWORD).
+name: synapse-dev
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -20,6 +45,31 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # One-shot: create the non-superuser runtime role the API connects as. Idempotent, so a rerun
+  # over an existing pgdata volume is a no-op. Table and sequence grants are deliberately absent:
+  # the API applies them itself after migrating, whenever SYNAPSE_DB_MIGRATION_DSN names a
+  # different user than SYNAPSE_DB_DSN.
+  postgres-init:
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: "${DB_PASSWORD:-synapse}"
+      DB_APP_PASSWORD: "${DB_APP_PASSWORD:-synapse-app}"
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        psql -h postgres -U "${DB_USER:-synapse}" -d "${DB_NAME:-synapse}" -v ON_ERROR_STOP=1 \
+          -v app_role="${DB_APP_USER:-synapse_app}" <<'SQL'
+        \getenv app_password DB_APP_PASSWORD
+        SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD %L', :'app_role', :'app_password')
+        WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_role')
+        \gexec
+        ALTER ROLE :"app_role" NOSUPERUSER NOBYPASSRLS;
+        SQL
 
   minio:
     image: minio/minio:latest
