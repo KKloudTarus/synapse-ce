@@ -76,6 +76,9 @@ RULES = [
       rationale="Disabling verification accepts any certificate, enabling MITM.",
       remediation="Leave verification on; pass a CA bundle path if you need a custom trust store.",
       source="https://cwe.mitre.org/data/definitions/295.html",
+      # PyJWT's decode() takes the same keyword to mean "skip claim validation", which is a
+      # different (and non-TLS) setting, so that call is filtered out in skipJWTVerifyFlag.
+      skip="skipJWTVerifyFlag",
       re=r"verify\s*=\s*False\b", nc="resp = requests.get(url, verify=False)", c="resp = requests.get(url, verify=True)"),
     r(id="python-flask-debug", type="hotspot", qual="sec", sev="medium", cwe="CWE-489", owasp="A05:2021",
       title="Flask debug mode enabled", desc="app.run(debug=True) exposes the Werkzeug debugger (RCE).",

@@ -167,14 +167,15 @@ const (
 	ScopeFixture       = "fixture"
 	ScopeBenchmark     = "benchmark"
 	ScopeDocumentation = "documentation"
+	ScopeVendored      = "vendored"
 	ScopeUnknown       = "unknown"
 )
 
-// IsBackgroundScope reports whether a scope is non-shipping (example/test/etc.) –
-// findings there are background, not actionable.
+// IsBackgroundScope reports whether a scope is non-shipping or not-first-party
+// (example/test/vendored/etc.) – findings there are background, not actionable.
 func IsBackgroundScope(s string) bool {
 	switch s {
-	case ScopeExample, ScopeTest, ScopeFixture, ScopeBenchmark, ScopeDocumentation:
+	case ScopeExample, ScopeTest, ScopeFixture, ScopeBenchmark, ScopeDocumentation, ScopeVendored:
 		return true
 	}
 	return false
@@ -188,6 +189,13 @@ func ClassifyScope(location, cdxScope string) string {
 	segs := strings.FieldsFunc(l, func(r rune) bool { return r == '/' || r == '\\' })
 	for _, s := range segs {
 		switch s {
+		// Vendored third-party code copied into the tree. A weakness there is somebody else's
+		// source: it is background for a first-party assessment, exactly like a fixture. The
+		// owned-manifest walk already skips these directories, so a real dependency component
+		// is never demoted by this branch – only file-path findings (SAST/secret/misconfig).
+		case "vendor", "vendors", "node_modules", "bower_components", "jspm_packages",
+			"third_party", "thirdparty", "third-party", "site-packages", "dist-packages":
+			return ScopeVendored
 		case "examples", "example", "sample", "samples", "demo", "demos":
 			return ScopeExample
 		case "fixtures", "fixture", "testdata", "__fixtures__":

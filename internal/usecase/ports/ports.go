@@ -1770,6 +1770,23 @@ type SASTAnalyzer interface {
 	AnalyzeSource(ctx context.Context, root string) ([]SASTRawFinding, error)
 }
 
+// SASTSourceReport is the bounded output of a deterministic SAST scan. Truncated means a safety cap
+// (per-file finding budget, whole-tree finding budget, retained-source budget, or an oversized line)
+// stopped the scan, so Findings is a LOWER BOUND: a caller must not read it as a clean result.
+type SASTSourceReport struct {
+	Findings  []SASTRawFinding
+	Truncated bool
+}
+
+// SASTSourceReporter is the optional completeness capability of a SASTAnalyzer. It exists so the
+// truncation flag reaches the caller without changing the SASTAnalyzer contract every adapter and
+// test double implements; callers type-assert it and treat a non-implementing analyzer as
+// "completeness unknown". Mirrors CodeAnalysisReport.Truncated on the code-quality path.
+type SASTSourceReporter interface {
+	SASTAnalyzer
+	AnalyzeSourceReport(ctx context.Context, root string) (SASTSourceReport, error)
+}
+
 // SecretRawFinding is one hardcoded-secret hit located at file:line in the scanned source. The Match is
 // ALWAYS a redacted preview (never the raw secret): the scanner masks the value before it leaves the
 // adapter, so a leaked credential never re-enters logs, the transcript, the evidence seal, or the report.

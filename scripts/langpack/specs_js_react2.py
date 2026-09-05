@@ -29,10 +29,12 @@ RULES = [
       rationale="A string style is invalid in React JSX; it must be an object (eslint-plugin-react style-prop-object).",
       remediation="Pass a style object: style={{ ... }}.", source="https://react.dev/reference/react-dom/components/common#applying-css-styles",
       re=r'''\bstyle\s*=\s*["']''', nc='<div style="color: red">', c='<div style={{ color: "red" }}>'),
-    r(id="js-react-jsx-class-attribute", title="class attribute in JSX", desc="JSX uses className, not class.",
+    r(id="js-react-jsx-class-attribute", lang="jsx", title="class attribute in JSX", desc="JSX uses className, not class.",
       rationale="The class attribute is ignored by React; the prop is className (eslint-plugin-react no-unknown-property).",
       remediation="Use className.", source="https://react.dev/learn/writing-markup-with-jsx",
-      re=r'''\bclass\s*=\s*["']''', nc='<div class="box">', c='<div className="box">'),
+      # Gated to .jsx/.tsx: a plain .js or .ts file writes `class = "..."` for reasons that have
+      # nothing to do with a React prop, and the rule fired on every one of them.
+      re=r'''<[A-Za-z][\w.-]*[^>\n]*\sclass\s*=\s*["']''', nc='<div class="box">', c='<div className="box">'),
     r(id="js-angular-testbed-get", title="Angular TestBed.get()", desc="TestBed.get was deprecated in favor of inject.",
       rationale="TestBed.get is deprecated; TestBed.inject is type-safe.", remediation="Use TestBed.inject(Token).",
       source="https://angular.io/api/core/testing/TestBed", re=r"TestBed\.get\s*\(",

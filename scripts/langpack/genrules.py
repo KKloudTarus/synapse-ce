@@ -13,8 +13,8 @@ sys.dont_write_bytecode = True
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-LANG_EXTS = {"js": "jsExts", "java": "javaExts", "py": "pyExts", "go": "goExts", "cs": "csExts", "c": "cExts", "cpp": "cppExts", "rust": "rustExts", "kt": "ktExts", "scala": "scalaExts", "rb": "rubyExts", "vb": "vbExts", "php": "phpExts"}
-LANG_LABEL = {"js": "JavaScript/TypeScript", "java": "Java", "py": "Python", "go": "Go", "cs": "C#", "c": "C", "cpp": "C++", "rust": "Rust", "kt": "Kotlin", "scala": "Scala", "rb": "Ruby", "vb": "VB.NET", "php": "PHP"}
+LANG_EXTS = {"jsx": "jsxExts", "js": "jsExts", "java": "javaExts", "py": "pyExts", "go": "goExts", "cs": "csExts", "c": "cExts", "cpp": "cppExts", "rust": "rustExts", "kt": "ktExts", "scala": "scalaExts", "rb": "rubyExts", "vb": "vbExts", "php": "phpExts"}
+LANG_LABEL = {"jsx": "JavaScript/TypeScript", "js": "JavaScript/TypeScript", "java": "Java", "py": "Python", "go": "Go", "cs": "C#", "c": "C", "cpp": "C++", "rust": "Rust", "kt": "Kotlin", "scala": "Scala", "rb": "Ruby", "vb": "VB.NET", "php": "PHP"}
 TYPE_CONST = {"vuln": "TypeVulnerability", "bug": "TypeBug", "smell": "TypeCodeSmell", "hotspot": "TypeSecurityHotspot"}
 QUAL_CONST = {"sec": "QualitySecurity", "rel": "QualityReliability", "maint": "QualityMaintainability"}
 SEV_CONST = {"critical": "SeverityCritical", "high": "SeverityHigh", "medium": "SeverityMedium", "low": "SeverityLow", "info": "SeverityInfo"}

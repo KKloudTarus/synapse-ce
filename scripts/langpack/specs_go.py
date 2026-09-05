@@ -372,7 +372,7 @@ RULES = [
       re=r'fmt\.Sprintf\("%s",\s*\w+\)',
       nc='name := fmt.Sprintf("%s", raw)',
       c='name := raw'),
-    r(id="go-todo-marker", type="smell", qual="maint", sev="info", cwe="", skip="",
+    r(id="go-todo-marker", type="smell", qual="maint", sev="info", cwe="", skip="skipGoTodoMarker",
       title="TODO/FIXME marker (tracked debt)",
       desc="A TODO/FIXME/XXX/HACK comment marks unfinished work.",
       rationale="Such markers record known, incomplete work; surfacing them as tracked technical debt keeps them from being forgotten (ISO/IEC 25010 maintainability).",

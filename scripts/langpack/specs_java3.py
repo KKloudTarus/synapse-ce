@@ -81,7 +81,11 @@ RULES=[
    rationale="Array contents stay writable through a public static (final) reference, so callers can mutate shared state.",
    remediation="Make it private and expose an unmodifiable copy or accessor.",
    source="https://wiki.sei.cmu.edu/confluence/display/java/OBJ01-J.+Limit+accessibility+of+fields",
-   re=r"\bpublic\s+static\s+[\w<>]+\[\]",nc="public static int[] CODES = {1, 2};",c="private static final List<Integer> CODES = List.of(1, 2);"),
+   # A FIELD declaration: the array type is followed by a name and then "=" or ";". Without the
+   # tail this also matched `public static int[] getCodes() {`, a method returning an array.
+   re=r"\bpublic\s+static\s+(?:final\s+)?[\w.<>]+\s*\[\s*\]\s+[A-Za-z_]\w*\s*(?:=|;)",
+   nc="public static int[] CODES = {1, 2};",
+   c="private static final List<Integer> CODES = List.of(1, 2);\npublic static int[] getCodes() { return CODES.clone(); }"),
  r(id="java-string-equals-empty",type="smell",qual="maint",sev="low",cwe="",title="equals(\"\") instead of isEmpty()",
    desc="`s.equals(\"\")` is clearer as `s.isEmpty()`.",
    rationale="isEmpty() states intent directly and avoids allocating/scanning against an empty literal.",
