@@ -137,6 +137,7 @@ import (
 	legalholduc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/legalholduc"
 	privacyexport "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacyexport"
 	privacypolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacypolicy"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/processreport"
 	retrohunt "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/retrohunt"
 	riskscorebridge "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscorebridge"
 	riskscoreuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscoreuc"
@@ -326,6 +327,7 @@ func main() {
 	var privacyPolicyStore ports.PrivacyPolicyAuditStore  // #611 immutable source-redaction policy history
 	var coverageWindowStore ports.CoverageWindowStore     // #611 immutable coverage-window revisions
 	var endpointProcessStore ports.EndpointProcessStore   // #594 B5 per-host running-process projection
+	var fleetProcessReportSvc *processreport.Service      // #594 D: agent running-process report -> behavior baseline
 	var fleetDesiredStore ports.FleetDesiredStore         // #633 desired-vs-observed capability state
 	var endpointTimelineStore ports.EndpointTimelineStore // #594 B7 State Timeline projection
 	var baselineStore ports.BaselineStore                 // #594 D behavioral baseline state
@@ -1821,6 +1823,17 @@ func main() {
 		}
 		router.SetEndpointProcesses(endpointProcessStore) // #594 B5: running-process report/read + Exposure running-vs-installed
 		router.SetProcessLearner(behaviorSvc)             // #594 D: learn the process profile on each report
+		// Close the input gap the baseline had (#594 D): the shipped agent reported host packages but
+		// never its processes, so the statistical baseline never saw an observation. This ingests the
+		// agent's running-process report on the transport plane, resolving the host asset server-side from
+		// the authenticated agent, and folds it into the same learner. The route is registered after
+		// SetFleet (below) because it lives on the agent transport plane.
+		if prSvc, prErr := processreport.NewService(telemetryTransportStore, endpointProcessStore, behaviorSvc, clock); prErr != nil {
+			log.Error("process report service init failed", "err", prErr)
+			os.Exit(1)
+		} else {
+			fleetProcessReportSvc = prSvc
+		}
 		// B7 State Timeline + retro-hunt (#594): the timeline projects accepted telemetry per host (fed by
 		// the telemetry-ingest fan-out, wired where telemetrySvc is built), and retro-hunt re-hunts a window
 		// of it. Read-only surfaces (PermView).
@@ -2011,6 +2024,10 @@ func main() {
 			log.Info("fleet agent certificate identity ENABLED (CSR enrolment issues client certs)")
 		}
 		router.SetFleet(agentSvc, workSvc, clock.Now, cfg.FleetClientCertHeader)
+		if fleetProcessReportSvc != nil {
+			router.SetFleetProcessReport(fleetProcessReportSvc)
+			log.Info("agent process reporting ENABLED", "route", "POST /api/v1/fleet/processes", "baseline_learn", true)
+		}
 		router.SetFleetPrivacyPolicyReader(privacyPolicySvc)
 		router.SetFleetAdmin(agentSvc)
 

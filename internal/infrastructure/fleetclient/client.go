@@ -199,6 +199,24 @@ func (c *Client) SendHostInventory(ctx context.Context, token string, inv any) e
 	return c.do(ctx, http.MethodPost, "/api/v1/fleet/inventory/host", token, inv, nil)
 }
 
+// ReportedProcess is one running process the agent observed, in the wire shape the process-report
+// endpoint accepts. The agent maps its OS enumeration to this; the client keeps no OS dependency.
+type ReportedProcess struct {
+	PID     int    `json:"pid"`
+	Comm    string `json:"comm"`
+	Path    string `json:"path"`
+	Running bool   `json:"running"`
+}
+
+// ReportProcesses posts the host's running-process snapshot for the behavior baseline (#594 D). The
+// control plane resolves the host asset from the authenticated agent, so no asset id crosses the wire.
+func (c *Client) ReportProcesses(ctx context.Context, token string, procs []ReportedProcess) error {
+	body := struct {
+		Processes []ReportedProcess `json:"processes"`
+	}{Processes: procs}
+	return c.do(ctx, http.MethodPost, "/api/v1/fleet/processes", token, body, nil)
+}
+
 // RegisterDetectionKey registers an agent-owned detection signing key with proof-of-possession. The
 // private key never enters this adapter; only the public lifecycle record and its PoP signature cross
 // the wire. Registration is idempotent server-side.

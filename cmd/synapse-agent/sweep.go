@@ -115,4 +115,7 @@ func (r *runner) sweepOnce(ctx context.Context, cred fleetclient.Credential) {
 	if inv.Degraded() {
 		log.Print("inventory sweep: shipped a DEGRADED inventory (package data incomplete); coverage recorded server-side")
 	}
+	// The inventory report bound (or refreshed) this host's canonical asset, so the server can now resolve
+	// a process report to it. Ship the running-process snapshot for the behavior baseline (#594 D).
+	r.reportProcesses(ctx, cred)
 }

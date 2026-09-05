@@ -2536,6 +2536,54 @@ paths:
         '503': {description: Backpressure; the agent keeps the report pending and retries according to Retry-After, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/fleet/processes:
+    post:
+      tags: [fleet]
+      operationId: reportFleetProcesses
+      summary: Report the host's running processes for the behavior baseline
+      description: >
+        Agent-plane endpoint (#594 D input). An enrolled agent ships its running-process snapshot
+        (pid, comm, resolved exe path, liveness) read from procfs. The host asset the report is
+        attributed to is resolved server-side from the authenticated agent's canonical telemetry
+        binding, never from the request, so an agent cannot report for a host it does not own. An
+        agent with no binding yet (it has not reported inventory) is refused. The snapshot is stored
+        as the per-host running-process projection and folded into the asset's behavior baseline.
+        Registered only when process reporting is wired.
+      security:
+      - fleetAgentAuth: []
+      parameters:
+      - $ref: '#/components/parameters/FleetProtocolVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                processes:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      pid: {type: integer}
+                      comm: {type: string}
+                      path: {type: string}
+                      running: {type: boolean}
+      responses:
+        '200':
+          description: Report accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asset_id: {type: string}
+                  saved: {type: integer}
+                  learned: {type: boolean}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {description: Process reporting not enabled}
+
   /api/v1/fleet/telemetry:
     post:
       tags: [fleet]

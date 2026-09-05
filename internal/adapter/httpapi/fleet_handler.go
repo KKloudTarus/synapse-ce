@@ -25,6 +25,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/processreport"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 )
 
@@ -74,6 +75,13 @@ type fleetHostInventory interface {
 	Sync(ctx context.Context, actor string, in hostinventoryuc.SyncInput) (*hostinventoryuc.SyncResult, error)
 }
 
+// fleetProcessReport ingests an enrolled agent's running-process report and folds it into the behavior
+// baseline (#594 D). *processreport.Service satisfies it. The asset is resolved server-side from the
+// authenticated agent, never taken from the request.
+type fleetProcessReport interface {
+	Report(ctx context.Context, tenantID, agentID shared.ID, procs []processreport.Process) (processreport.Result, error)
+}
+
 // fleetRolloutDecider answers what ONE agent is offered. It is the narrow slice of the rollout service
 // this transport needs; fleetrolloutuc.Service satisfies it.
 type fleetRolloutDecider interface {
@@ -85,6 +93,7 @@ type fleetRouter struct {
 	work             fleetWorkService
 	clusterInv       fleetClusterInventory    // optional; nil ⇒ cluster inventory ingest is not served
 	hostInv          fleetHostInventory       // optional; nil ⇒ host inventory ingest is not served
+	procReport       fleetProcessReport       // optional; nil ⇒ agent process reporting is not served (#594 D input)
 	telemetry        fleetTelemetryIngest     // optional; nil ⇒ telemetry ingest is not served (A3 #624)
 	detections       fleetDetectionIngest     // optional; nil ⇒ detection ingest is not served (A4 #625)
 	keyReg           fleetKeyRegistration     // optional; nil ⇒ signing-key registration is not served (A4 #625)
@@ -180,6 +189,14 @@ func (rt *Router) SetFleetClusterInventory(s fleetClusterInventory) {
 func (rt *Router) SetFleetHostInventory(s fleetHostInventory) {
 	if rt.fleet != nil {
 		rt.fleet.hostInv = s
+	}
+}
+
+// SetFleetProcessReport wires the agent-plane running-process report (#594 D input). When nil (or
+// unset), POST /api/v1/fleet/processes returns 404. It must be called after SetFleet.
+func (rt *Router) SetFleetProcessReport(s fleetProcessReport) {
+	if rt.fleet != nil {
+		rt.fleet.procReport = s
 	}
 }
 
@@ -346,6 +363,8 @@ func fleetAgentPlaneRoutes() []fleetAgentPlaneRoute {
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.clusterInventory)) }},
 		{"POST /api/v1/fleet/inventory/host", "/api/v1/fleet/inventory/",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.hostInventory)) }},
+		{"POST /api/v1/fleet/processes", "/api/v1/fleet/processes",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.reportProcesses)) }},
 		{"POST /api/v1/fleet/telemetry", "/api/v1/fleet/telemetry",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestTelemetry)) }},
 		{"POST /api/v1/fleet/sensor-states", "/api/v1/fleet/sensor-states",
@@ -722,6 +741,52 @@ func (f *fleetRouter) hostInventory(w http.ResponseWriter, r *http.Request) {
 		body["vulnerability_scan"] = res.VulnerabilityScan
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// reportProcesses ingests one agent's running-process snapshot for the behavior baseline (#594 D). The
+// host asset is resolved server-side from the authenticated agent's canonical binding, never from the
+// request, so an agent cannot report for a host it does not own. Best-effort by design: a learn failure
+// is reported in the response but the projection is already durably saved.
+func (f *fleetRouter) reportProcesses(w http.ResponseWriter, r *http.Request) {
+	if f.procReport == nil {
+		writeJSON(w, http.StatusNotFound, errorBody{Error: "process reporting not enabled"})
+		return
+	}
+	agent, ok := agentFrom(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorBody{Error: "unauthenticated"})
+		return
+	}
+	var req fleetProcessReportRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetInventoryCap)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid process report body"})
+		return
+	}
+	if len(req.Processes) > processreport.MaxProcesses {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "too many processes in one report"})
+		return
+	}
+	procs := make([]processreport.Process, 0, len(req.Processes))
+	for _, p := range req.Processes {
+		procs = append(procs, processreport.Process{PID: p.PID, Comm: p.Comm, Path: p.Path, Running: p.Running})
+	}
+	res, err := f.procReport.Report(r.Context(), agent.TenantID, agent.ID, procs)
+	if err != nil {
+		writeError(w, f.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"asset_id": res.AssetID.String(), "saved": res.Saved, "learned": res.Learned})
+}
+
+type fleetProcessReportRequest struct {
+	Processes []fleetProcessDTO `json:"processes"`
+}
+
+type fleetProcessDTO struct {
+	PID     int    `json:"pid"`
+	Comm    string `json:"comm"`
+	Path    string `json:"path"`
+	Running bool   `json:"running"`
 }
 
 func (f *fleetRouter) transitionTo(w http.ResponseWriter, r *http.Request, to workorder.State, reason string) {

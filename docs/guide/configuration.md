@@ -452,6 +452,8 @@ The following variables are read by `synapse-agent` and `synapse-cluster-agent`,
 | `SYNAPSE_AGENT_NAME` | hostname | Human-readable agent display name. |
 | `SYNAPSE_INVENTORY_SWEEP_ENABLED` | `true` | Ship host inventory continuously on a cadence (A8, #629), not only on a `scan.host` work order. Ingest is idempotent server-side (host upsert-by-natural-key), so a re-sweep of an unchanged host is a no-op. Set `false` to disable. |
 | `SYNAPSE_INVENTORY_SWEEP_INTERVAL` | `1h` | Cadence of the continuous host-inventory sweep. Clamped to a 1-minute floor so a misconfiguration cannot busy-loop the collector over the filesystem. |
+| `SYNAPSE_PROCESS_REPORT_ENABLED` | `true` | Report the host's running processes to the behavior baseline (#594 D) on the inventory-sweep cadence. Read-only procfs metadata (pid, comm, exe path); no process memory is read and nothing is executed. Set `false` to disable. |
+| `SYNAPSE_AGENT_PROC_ROOT` | `/proc` | Procfs root the agent enumerates running processes from. A host without procfs reports nothing. |
 | `SYNAPSE_DETECT_CLASSES` | empty | Comma-separated eBPF classes: `process`, `network`, `file`, `privilege`. Empty disables the engine; Linux root/capabilities are required. |
 | `SYNAPSE_DETECT_CPU_CEIL_PCT` | `0` | CPU ceiling for deterministic class shedding; zero disables shedding. |
 | `SYNAPSE_DETECTION_ENGAGEMENT_ID` | empty | Engagement receiving signed detection batches. Empty keeps confirmed detections durably local and does not start the remote detection shipper. |

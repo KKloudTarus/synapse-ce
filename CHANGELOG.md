@@ -9,6 +9,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **The behavior baseline finally has input.** The statistical baseline that scores a host's Behavior
+  risk factor never saw an observation, because the shipped agent reported host packages but never its
+  processes. The VM agent now reports its running processes on the inventory-sweep cadence (read-only
+  procfs: pid, comm, exe path) via the new agent-plane route `POST /api/v1/fleet/processes`; the
+  control plane resolves the host asset from the authenticated agent (never the request), stores the
+  running-process projection, and folds the profile into the asset's behavior baseline (#594 D). On by
+  default, disable with `SYNAPSE_PROCESS_REPORT_ENABLED=false`.
+
 - **Governed defensive response is operable.** The response subsystem (issue #425) was fully modelled
   — three reversible action kinds, an admission gate, a blast-radius check, a telemetry-verified
   post-condition — but had no route and no caller. It is now wired: `POST

@@ -186,6 +186,10 @@ type config struct {
 	// periodic stream (A8, #629). It is default-on and cadence-clamped to avoid busy loops.
 	inventorySweepEnabled  bool
 	inventorySweepInterval time.Duration
+	// processReportEnabled ships the host's running-process snapshot to the behavior baseline (#594 D)
+	// on the inventory-sweep cadence. Read-only /proc metadata; on by default, operator-disableable.
+	processReportEnabled bool
+	procRoot             string
 }
 
 func main() {
@@ -243,6 +247,8 @@ func parseConfig() config {
 	flag.StringVar(&cfg.metricsAddr, "agent-metrics-addr", os.Getenv("SYNAPSE_AGENT_METRICS_ADDR"), "optional address for private agent Prometheus metrics (for example 127.0.0.1:9465)")
 	flag.BoolVar(&cfg.inventorySweepEnabled, "inventory-sweep", envEnabledDefaultTrue(os.Getenv("SYNAPSE_INVENTORY_SWEEP_ENABLED")), "ship host inventory continuously on a cadence (A8, #629); on by default")
 	flag.DurationVar(&cfg.inventorySweepInterval, "inventory-sweep-interval", parsePositiveDuration(os.Getenv("SYNAPSE_INVENTORY_SWEEP_INTERVAL"), time.Hour), "cadence of the continuous host-inventory sweep (clamped to a floor)")
+	flag.BoolVar(&cfg.processReportEnabled, "process-report", envEnabledDefaultTrue(os.Getenv("SYNAPSE_PROCESS_REPORT_ENABLED")), "report the host's running processes to the behavior baseline on the sweep cadence (read-only /proc; #594 D); on by default")
+	flag.StringVar(&cfg.procRoot, "proc-root", envOr("SYNAPSE_AGENT_PROC_ROOT", "/proc"), "procfs root to enumerate running processes from")
 	flag.Parse()
 	if cfg.enrolToken == "" {
 		// An absent token file is NOT fatal: it is the normal state after enrolment, once the
