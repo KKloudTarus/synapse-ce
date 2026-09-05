@@ -36,11 +36,30 @@ func TestClassifyScope(t *testing.T) {
 		{"api/openapi.spec.yaml", "", ScopeProduction}, // OpenAPI spec, not a test
 		{"config/db.spec.json", "", ScopeProduction},   // config artifact, not a test
 		{"web/src/Button.spec.ts", "", ScopeTest},      // real jasmine spec
+		// Vendored third-party trees: somebody else's source copied into the repo is background,
+		// not first-party production. Windows separators normalize the same way.
+		{"vendor/github.com/pkg/errors/errors.go", "", ScopeVendored},
+		{"node_modules/lodash/lodash.js", "", ScopeVendored},
+		{"app/assets/bower_components/jquery/jquery.js", "", ScopeVendored},
+		{"third_party/protobuf/parser.cc", "", ScopeVendored},
+		{"lib\\python3.11\\site-packages\\flask\\app.py", "", ScopeVendored},
+		// A directory that only CONTAINS the word must stay production.
+		{"internal/vendoring/policy.go", "", ScopeProduction},
+		{"src/thirdpartyintegration/client.ts", "", ScopeProduction},
 	}
 	for _, c := range cases {
 		if got := ClassifyScope(c.loc, c.cdx); got != c.want {
 			t.Errorf("ClassifyScope(%q,%q) = %q, want %q", c.loc, c.cdx, got, c.want)
 		}
+	}
+}
+
+func TestVendoredScopeIsBackground(t *testing.T) {
+	if !IsBackgroundScope(ScopeVendored) {
+		t.Error("vendored code must count as background so a gate never fails on a third-party copy")
+	}
+	if IsBackgroundScope(ScopeProduction) || IsBackgroundScope(ScopeDevelopment) {
+		t.Error("production/development must stay actionable")
 	}
 }
 
