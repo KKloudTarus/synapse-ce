@@ -205,9 +205,16 @@ func (s *Service) Apply(ctx context.Context, engagementID shared.ID, action rdom
 	}
 	adm, err := s.admit.Admit(ctx, p, approver)
 	if err != nil {
-		// Record the pending/refused state so the kill switch can see an in-flight action.
+		// Record the pending state durably so the kill switch and the list route see the in-flight
+		// action. If that write fails the 202 would be a lie (nothing to cancel, nothing to resume), so
+		// the persistence error is returned instead of the pending signal.
 		if isPending(err) {
-			_ = s.put(ctx, Record{ID: action.ID, TenantID: tenantID, EngagementID: engagementID, Action: action, State: StatePending, ApprovedBy: approver, UpdatedAt: s.clock.Now().UTC()})
+			pending := Record{ID: action.ID, TenantID: tenantID, EngagementID: engagementID, Action: action, State: StatePending, ApprovedBy: approver, UpdatedAt: s.clock.Now().UTC()}
+			if perr := s.put(ctx, pending); perr != nil {
+				return Record{}, fmt.Errorf("record pending response %s: %w", action.ID, perr)
+			}
+			// Hand the pending record back so the caller learns the server-minted id it can reference.
+			return pending, err
 		}
 		return Record{}, err
 	}
@@ -284,8 +291,20 @@ func (s *Service) Revert(ctx context.Context, actionID shared.ID, target engagem
 		return Record{}, err
 	}
 	// The executed reversal argv is exactly the admitted payload (p.Argv above is rev.Argv).
-	if _, err := s.exec.Execute(ctx, ExecRequest{Argv: rev.Argv, Target: rec.Action.Target, Declared: rec.Action.BlastRadius, IsReversal: true}); err != nil {
+	out, err := s.exec.Execute(ctx, ExecRequest{Argv: rev.Argv, Target: rec.Action.Target, Declared: rec.Action.BlastRadius, IsReversal: true})
+	if err != nil {
 		return Record{}, fmt.Errorf("execute reversal %s: %w", actionID, err)
+	}
+	// A reversal that exceeds its declared single-target radius is a violation, exactly as apply enforces:
+	// the reversal is a first-class governed action and cannot escape the blast-radius rule.
+	if radiusExceeded(rec.Action.BlastRadius, out.ObservedRadius) || out.AffectedCount > 1 {
+		rec.State = StateViolation
+		rec.UpdatedAt = s.clock.Now().UTC()
+		_ = s.put(ctx, rec)
+		s.recordAudit(ctx, "response.reversal_blast_radius_violation", approver, rec.Action, map[string]string{
+			"declared": string(rec.Action.BlastRadius), "observed": string(out.ObservedRadius), "affected": fmt.Sprint(out.AffectedCount),
+		})
+		return rec, fmt.Errorf("%w: reversal of %s effect exceeded its declared single-target radius (observed=%s affected=%d)", shared.ErrForbidden, actionID, out.ObservedRadius, out.AffectedCount)
 	}
 	rec.State = StateReverted
 	rec.UpdatedAt = s.clock.Now().UTC()

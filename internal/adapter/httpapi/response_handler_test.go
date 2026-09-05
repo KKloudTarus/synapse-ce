@@ -35,7 +35,9 @@ func (f *fakeResponseSvc) DryRun(action rdom.Action) ([]responseuc.PlanStep, err
 func (f *fakeResponseSvc) Apply(_ context.Context, _ shared.ID, action rdom.Action, target engagement.Target, approver string) (responseuc.Record, error) {
 	f.applied, f.appTarget, f.approver = action, target, approver
 	if f.applyErr != nil {
-		return responseuc.Record{}, f.applyErr
+		// Mirror the real service: on a pending admission the record is returned WITH the error so the
+		// handler can surface the server-minted id in the 202.
+		return rdom.Record{Action: action, State: rdom.StatePending, ApprovedBy: approver}, f.applyErr
 	}
 	return f.rec, nil
 }
@@ -149,6 +151,23 @@ func TestApplyResponsePendingApprovalIs202(t *testing.T) {
 	rt.applyResponse(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("pending approval: code=%d, want 202 (%s)", rec.Code, rec.Body.String())
+	}
+	var body responseRecordDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ID != "act-1" || body.State != "pending" {
+		t.Fatalf("202 body must carry the server-minted pending id: %+v", body)
+	}
+}
+
+func TestListResponseRejectsUnknownState(t *testing.T) {
+	rt, _ := responseRouter(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blueteam/response?state=garbage", nil)
+	rec := httptest.NewRecorder()
+	rt.listResponses(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown state: code=%d, want 400 (%s)", rec.Code, rec.Body.String())
 	}
 }
 

@@ -15,7 +15,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   /api/v1/blueteam/engagements/{id}/response/{plan,apply}`, `POST /api/v1/blueteam/response/{id}/revert`
   and `GET /api/v1/blueteam/response` drive the full admission -> human approval -> apply -> verify ->
   revert ledger through the same gate exploitation and DAST use, and the `/api/v1/redteam/halt` kill
-  switch now cancels pending response actions. The default executor records every state without a host
+  switch now cancels pending response actions. A pending second-approval returns the action's id so an
+  operator can find it; the reversal enforces the same blast-radius rule as apply. The default executor records every state without a host
   effect; a real host executor stays a deliberate, review-gated extension point, so the platform never
   applies a real isolation without an explicit execution-safety decision.
 

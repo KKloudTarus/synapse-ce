@@ -91,9 +91,14 @@ func toResponseRecordDTO(rec responseuc.Record) responseRecordDTO {
 }
 
 // planResponse dry-runs a response action for an engagement: it enumerates the apply and the mandatory
-// reversal and executes NOTHING. It still validates the kind + target, so an unknown kind is a 400 here
-// rather than at apply time.
+// reversal and executes NOTHING. It validates the action's SHAPE (an unknown kind is a 400 here) and
+// resolves the engagement in the caller's tenant (404 on cross-tenant/unknown). It does NOT authorize
+// the target against the engagement scope — that check runs at apply, through the admission gate.
 func (rt *Router) planResponse(w http.ResponseWriter, r *http.Request) {
+	if _, err := rt.eng.Get(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("id"))); err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
 	var req responseActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
@@ -142,6 +147,12 @@ func (rt *Router) applyResponse(w http.ResponseWriter, r *http.Request) {
 	target := engagement.Target{Kind: targetKindOrDefault(req.TargetKind), Value: req.Target}
 	ctx := shared.WithTenant(r.Context(), shared.TenantOrDefault(eng.TenantID))
 	rec, err := rt.responses.Apply(ctx, engID, action, target, PrincipalFrom(r.Context()))
+	if errors.Is(err, safety.ErrPendingApproval) {
+		// The action is recorded pending a second human; hand back its server-minted id so the operator
+		// can find it in the list and the kill switch can cancel it.
+		writeJSON(w, http.StatusAccepted, toResponseRecordDTO(rec))
+		return
+	}
 	if err != nil {
 		writeResponseError(w, rt.log, err)
 		return
@@ -175,6 +186,10 @@ func (rt *Router) listResponses(w http.ResponseWriter, r *http.Request) {
 	if state == "" {
 		state = rdom.StatePending
 	}
+	if !state.Valid() {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "unknown response state: " + string(state)})
+		return
+	}
 	ctx := shared.WithTenant(r.Context(), requestTenant(r))
 	recs, err := rt.responses.ListByState(ctx, state)
 	if err != nil {
@@ -188,13 +203,14 @@ func (rt *Router) listResponses(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"responses": out})
 }
 
-// writeResponseError maps the governed-response failures to status codes: a pending-approval is 202
-// (accepted, awaiting a second human), a blast-radius or scope refusal is 403, validation is 400.
+// writeResponseError maps governed-response failures to status codes. The pending-approval case is
+// handled directly by applyResponse (it returns the pending record), so this maps a blast-radius or
+// scope refusal to 403 and validation to 400 through writeError, and 202 for any pending signal that
+// still reaches it (revert).
 func writeResponseError(w http.ResponseWriter, log *slog.Logger, err error) {
-	switch {
-	case errors.Is(err, safety.ErrPendingApproval):
+	if errors.Is(err, safety.ErrPendingApproval) {
 		writeJSON(w, http.StatusAccepted, errorBody{Error: "response action recorded; awaiting a second human approval"})
-	default:
-		writeError(w, log, err)
+		return
 	}
+	writeError(w, log, err)
 }

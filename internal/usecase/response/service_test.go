@@ -289,6 +289,51 @@ func TestRevertIsAdmittedAndAudited(t *testing.T) {
 	}
 }
 
+// TestRevertEnforcesTheBlastRadius is the same guarantee as apply, on the reversal: a reversal whose
+// executed effect exceeds its declared single-target radius is a violation, halted and audited, never a
+// clean revert. Without it a reversal could escape the blast-radius rule apply enforces.
+func TestRevertEnforcesTheBlastRadius(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.svc.Apply(tctx(), "eng-1", act("a1"), target(), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	// The next execution (the reversal) reports touching two entities: a blast-radius violation.
+	h.exec.affected = 2
+	rec, err := h.svc.Revert(tctx(), "a1", target(), "alice")
+	if !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("a reversal exceeding its radius must be forbidden, got %v", err)
+	}
+	if rec.State != StateViolation {
+		t.Fatalf("want violation, got %s", rec.State)
+	}
+	if !h.audit.has("response.reversal_blast_radius_violation") {
+		t.Error("the reversal violation must be audited")
+	}
+	stored, _, _ := h.store.Get(tctx(), "a1")
+	if stored.State != StateViolation {
+		t.Fatalf("the violation must be persisted, got %s", stored.State)
+	}
+}
+
+// TestApplyPendingReturnsTheRecordSoItCanBeReferenced: a pending admission records the action under its
+// server-minted id and hands that record back (with the pending error), so the operator learns the id
+// to find it in the list and the kill switch can cancel it.
+func TestApplyPendingReturnsTheRecordSoItCanBeReferenced(t *testing.T) {
+	h := newHarness(t)
+	h.admit.err = safety.ErrPendingApproval
+	rec, err := h.svc.Apply(tctx(), "eng-1", act("a1"), target(), "alice")
+	if !errors.Is(err, safety.ErrPendingApproval) {
+		t.Fatalf("want pending, got %v", err)
+	}
+	if rec.Action.ID != "a1" || rec.State != StatePending {
+		t.Fatalf("pending record = %+v, want the server-minted id in pending state", rec)
+	}
+	stored, found, _ := h.store.Get(tctx(), "a1")
+	if !found || stored.State != StatePending {
+		t.Fatalf("the pending action must be durably stored, got found=%v state=%s", found, stored.State)
+	}
+}
+
 // TestKillSwitchHaltsPending is the #425 kill-switch requirement, measured: a pending (admitted-but-not-
 // approved) action is halted.
 func TestKillSwitchHaltsPending(t *testing.T) {

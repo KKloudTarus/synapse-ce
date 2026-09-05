@@ -1472,8 +1472,10 @@ paths:
       summary: Dry-run a governed defensive response action
       description: >
         Enumerates exactly what a response action (isolate_host, quarantine_file, stop_process) would do
-        — the argv-only apply and its mandatory reversal — and executes NOTHING. Validates the kind and
-        target, so an unknown kind is a 400 here. Registered only when the response subsystem is wired.
+        — the argv-only apply and its mandatory reversal — and executes NOTHING. Validates the action
+        shape (an unknown kind is a 400) and resolves the engagement in the caller tenant (404 on
+        cross-tenant/unknown). It does NOT authorize the target against the engagement scope; that check
+        runs at apply, through the admission gate. Registered only when the response subsystem is wired.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/ResponseActionRequest'}}}
