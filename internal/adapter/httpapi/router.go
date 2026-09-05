@@ -532,7 +532,11 @@ func (rt *Router) routes() *http.ServeMux {
 	}
 	mux.HandleFunc("GET /api/v1/engagements", rt.authz(userdom.PermView, rt.listEngagements))
 	mux.HandleFunc("GET /api/v1/engagements/{id}", rt.authz(userdom.PermView, rt.getEngagement))
+	// Lifecycle transition. Two spellings reach the same handler: the original PATCH on the
+	// engagement row, and the resource-shaped PUT on its status that clients and the guide document.
+	// Both are described in api/openapi.yaml.
 	mux.HandleFunc("PATCH /api/v1/engagements/{id}", rt.authz(userdom.PermOperate, rt.transitionEngagement))
+	mux.HandleFunc("PUT /api/v1/engagements/{id}/status", rt.authz(userdom.PermOperate, rt.transitionEngagement))
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/scope", rt.authz(userdom.PermOperate, rt.updateScope))
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/authorization-window", rt.authz(userdom.PermOperate, rt.setAuthorizationWindow))
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/roe", rt.authz(userdom.PermOperate, rt.setRoE))

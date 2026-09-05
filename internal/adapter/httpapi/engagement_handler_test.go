@@ -331,3 +331,56 @@ func TestSetRoEHandler(t *testing.T) {
 		t.Errorf("bad blackout timestamp: want 400, got %d", rec.Code)
 	}
 }
+
+// TestTransitionRouteAcceptsDocumentedStatusPath covers the path clients and the guide document.
+// PUT /api/v1/engagements/{id}/status answered 404 because the transition was only reachable as a
+// PATCH on the engagement row; both spellings must now drive the same lifecycle change through the
+// same authorization gate.
+func TestTransitionRouteAcceptsDocumentedStatusPath(t *testing.T) {
+	transition := func(t *testing.T, rt *Router, role, method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctxAs(role))
+		rec := httptest.NewRecorder()
+		rt.routes().ServeHTTP(rec, req)
+		return rec
+	}
+	cases := []struct {
+		name           string
+		method, path   string
+		body           string
+		role           string
+		want           int
+		wantTransition bool
+	}{
+		{"documented status path activates", http.MethodPut, "/api/v1/engagements/eng-1/status", `{"status":"active"}`, "consultant", http.StatusOK, true},
+		{"row patch still activates", http.MethodPatch, "/api/v1/engagements/eng-1", `{"status":"active"}`, "consultant", http.StatusOK, true},
+		{"illegal transition is rejected", http.MethodPut, "/api/v1/engagements/eng-1/status", `{"status":"bogus"}`, "consultant", http.StatusBadRequest, false},
+		{"status path needs the operate capability", http.MethodPut, "/api/v1/engagements/eng-1/status", `{"status":"active"}`, "readonly", http.StatusForbidden, false},
+		{"machine role is denied", http.MethodPut, "/api/v1/engagements/eng-1/status", `{"status":"active"}`, "agent", http.StatusForbidden, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rt, repo, audit := newEngRouter(t)
+			rec := transition(t, rt, c.role, c.method, c.path, c.body)
+			if rec.Code != c.want {
+				t.Fatalf("%s %s = %d, want %d: %s", c.method, c.path, rec.Code, c.want, rec.Body.String())
+			}
+			got, err := repo.GetByID(context.Background(), "eng-1")
+			if err != nil {
+				t.Fatalf("read engagement: %v", err)
+			}
+			if c.wantTransition {
+				if got.Status != engdom.StatusActive {
+					t.Errorf("status = %q, want active", got.Status)
+				}
+				if !auditHas(audit, "engagement.transition") {
+					t.Error("transition not audited")
+				}
+				return
+			}
+			if got.Status != engdom.StatusDraft {
+				t.Errorf("a rejected call moved the engagement to %q", got.Status)
+			}
+		})
+	}
+}

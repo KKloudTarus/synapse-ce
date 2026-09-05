@@ -84,7 +84,6 @@ GET /api/v1/quality-profiles/{p}
 GET /api/v1/recon/tools
 GET /api/v1/vulnerability/sources/types
 GET /api/v1/writeups
-PATCH /api/v1/engagements/{p}
 PATCH /api/v1/vulnerability/sources/{p}
 POST /api/v1/agents/{p}/revoke
 POST /api/v1/agents/enrolment-tokens

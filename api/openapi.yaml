@@ -187,6 +187,59 @@ paths:
         "409": {description: Engagement already has a different uploaded source package}
         "413": {description: Uploaded source package exceeds 512 MiB}
 
+  /api/v1/engagements/{id}:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    patch:
+      tags: [engagements]
+      summary: Apply a lifecycle transition to an engagement
+      description: >
+        Requires the `operate` capability. The legal transitions are draft to active, active to
+        completed, and draft, active, or completed to archived; archived is terminal. An illegal
+        transition is rejected with `400`. `PUT /api/v1/engagements/{id}/status` applies the same
+        change on the status sub-resource.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngagementTransitionRequest"}
+      responses:
+        "200":
+          description: The transitioned engagement
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Engagement"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/engagements/{id}/status:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    put:
+      tags: [engagements]
+      summary: Set an engagement's lifecycle status
+      description: >
+        Requires the `operate` capability. Identical in effect to
+        `PATCH /api/v1/engagements/{id}`: the same legal transitions, the same authorization gate,
+        and the same audit record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngagementTransitionRequest"}
+      responses:
+        "200":
+          description: The transitioned engagement
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Engagement"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/engagements/{id}/source:
     parameters:
     - $ref: "#/components/parameters/EngagementId"
@@ -3031,6 +3084,15 @@ components:
         skipped: {type: integer, minimum: 0}
         missing: {type: integer, format: uint64, minimum: 0}
         replay: {type: boolean}
+
+    EngagementTransitionRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [active, completed, archived]
+          description: Target lifecycle status. draft is the creation state and cannot be returned to.
 
     Capability:
       type: object

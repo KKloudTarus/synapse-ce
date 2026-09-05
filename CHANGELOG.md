@@ -115,6 +115,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **Documented engagement lifecycle route.** `PUT /api/v1/engagements/{id}/status` answered `404`:
+  the transition was reachable only as `PATCH /api/v1/engagements/{id}`, which no guide described.
+  Both spellings now apply the same change through the same `operate` gate, and both are described
+  in `api/openapi.yaml` and the governed-assessments guide.
+
 - **Cross-tenant user management.** `POST /api/v1/users` accepted a `tenant_id` from the request
   body without comparing it with the caller's tenant, so a tenant-A admin could provision an admin
   into tenant B and receive that admin's API key, and `GET /api/v1/users` listed every tenant's
