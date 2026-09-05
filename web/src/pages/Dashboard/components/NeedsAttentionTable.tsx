@@ -26,14 +26,14 @@ export const NeedsAttentionTable: FC<{ items: AttentionItem[]; loaded: boolean }
   }
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[40rem] table-fixed border-collapse text-left text-sm" aria-label="Needs attention">
+      <table className="w-full min-w-[56rem] border-collapse text-left text-sm" aria-label="Needs attention">
         <thead>
           <tr className="border-b border-secondary text-[11px] font-semibold uppercase tracking-wide text-quaternary">
             <th scope="col" className="w-14 px-4 py-2.5">Prio</th>
             <th scope="col" className="w-28 px-3 py-2.5">Type</th>
-            <th scope="col" className="w-[11rem] px-3 py-2.5">Asset / engagement</th>
+            <th scope="col" className="w-[16rem] px-3 py-2.5">Asset / engagement</th>
             <th scope="col" className="px-3 py-2.5">Issue</th>
-            <th scope="col" className="w-24 px-3 py-2.5">Owner</th>
+            <th scope="col" className="w-36 px-3 py-2.5">Owner</th>
             <th scope="col" className="w-14 px-3 py-2.5 text-right">Age</th>
             <th scope="col" className="w-36 px-4 py-2.5 text-right">Next action</th>
           </tr>

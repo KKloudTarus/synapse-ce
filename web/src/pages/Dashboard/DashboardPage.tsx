@@ -65,33 +65,23 @@ export const DashboardPage: FC = () => {
         <Metric
           label="Coverage gaps"
           value={fleetDisabled ? 'Fleet disabled' : (coverageGaps ?? 'N/A')}
-          hint={fleetDisabled ? 'Set SYNAPSE_FLEET_ENABLED=true to measure agent coverage.' : undefined}
+          hint={fleetDisabled ? 'Set SYNAPSE_FLEET_ENABLED=true to measure agent coverage.' : 'fleet capability checks'}
           tone={fleetDisabled ? 'muted' : coverageGaps ? 'warning' : 'muted'}
         />
         <Metric label="Needs attention" value={attention.length} tone={attention.length ? 'warning' : 'muted'} />
       </MetricStrip>
 
-      {/* The queue is the page: what to act on, then who is assessing what. */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-        <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs lg:col-span-3">
-          <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-3.5">
-            <h3 className="text-sm font-semibold text-primary">Needs attention</h3>
-            <span className="font-mono text-xs tabular-nums text-quaternary">{attention.length === 1 ? '1 item' : `${attention.length} items`}</span>
-          </header>
-          <div className="flex-1">
-            <NeedsAttentionTable items={attention} loaded={Boolean(data)} />
-          </div>
-        </section>
-        <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs lg:col-span-1">
-          <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-3.5">
-            <h3 className="text-sm font-semibold text-primary">Assessment Activity</h3>
-            <LinkArrow to="/engagements" label="View All" />
-          </header>
-          <div className="flex-1">
-            <AssessmentActivityTable engagements={assessmentQueue} assetNames={assetNames} />
-          </div>
-        </section>
-      </div>
+      {/* The queue is the page: what to act on. Full width so the issue and the next action are never
+          clipped — the two columns an operator reads first. */}
+      <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs">
+        <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-3.5">
+          <h3 className="text-sm font-semibold text-primary">Needs attention</h3>
+          <span className="font-mono text-xs tabular-nums text-quaternary">{attention.length === 1 ? '1 item' : `${attention.length} items`}</span>
+        </header>
+        <div className="flex-1">
+          <NeedsAttentionTable items={attention} loaded={Boolean(data)} />
+        </div>
+      </section>
 
       {analyticsError && <ErrorState message={analyticsError} />}
       {!analytics && !analyticsError && <Spinner label="Loading operations analytics…" className="min-h-64" />}
@@ -140,6 +130,17 @@ export const DashboardPage: FC = () => {
           </section>
         </div>
       )}
+
+      {/* Who is assessing what — secondary to the queue, so it sits below the trend. */}
+      <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs">
+        <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-3.5">
+          <h3 className="text-sm font-semibold text-primary">Assessment Activity</h3>
+          <LinkArrow to="/engagements" label="View All" />
+        </header>
+        <div className="flex-1">
+          <AssessmentActivityTable engagements={assessmentQueue} assetNames={assetNames} />
+        </div>
+      </section>
     </div>
   )
 }

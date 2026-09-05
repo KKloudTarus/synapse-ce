@@ -95,6 +95,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   host asset now records `coverage_gap_kinds` and `coverage_gap_details`, not only the count). Low
   severity is blue in both themes; green now only marks a healthy or successful state.
 
+- **Dashboard queue is full-width and decision-grade.** The Needs attention queue moved to its own
+  row so the issue text (two lines, untruncated), the owner, and the next action are all visible;
+  Assessment Activity sits below the trend. The Coverage gaps metric is scoped ("fleet capability
+  checks") so it no longer reads as the same count as a host's coverage gaps, and a running
+  engagement scan reads "Scanning · started 1h ago" rather than a stale-looking "1h ago".
+
 ### Fixed
 
 - **Open counts exclude triaged-away findings.** The per-engagement summaries behind the host pages

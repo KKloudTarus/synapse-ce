@@ -313,7 +313,9 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                       {engagement.lastScanDate ? (
                         <div className="flex flex-wrap items-center gap-1.5" title={engagement.lastScanDate}>
                           <ScanStatusPill state={scanStateOf(engagement.lastScanStatus ?? 'succeeded')} />
-                          <span className="font-mono text-xs text-tertiary">{formatRelativeTime(engagement.lastScanDate)}</span>
+                          <span className="font-mono text-xs text-tertiary">
+                            {engagement.lastScanStatus === 'running' ? `started ${formatRelativeTime(engagement.lastScanDate)}` : formatRelativeTime(engagement.lastScanDate)}
+                          </span>
                         </div>
                       ) : (
                         <span
