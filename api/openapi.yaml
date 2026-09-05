@@ -2443,6 +2443,382 @@ paths:
         '429': {description: Backpressure; the agent preserves WAL state and retries according to Retry-After, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/fleet/assets/{id}/desired-capabilities:
+    parameters: [{$ref: '#/components/parameters/FleetAssetId'}]
+    put:
+      tags: [fleet]
+      operationId: setFleetAssetDesiredCapabilities
+      summary: Declare the capabilities a canonical host or cluster asset should have
+      description: >
+        Operator-owned desired state, deliberately separate from the capabilities an untrusted agent
+        observes and advertises. The tenant comes from the authenticated principal, the asset from the
+        path, and the actor from the authenticated principal; none of the three is a body field. The
+        submitted list is normalized (trimmed, de-duplicated, sorted) before storage, so the stored set
+        may be shorter than the one sent. Replacing an existing set increments Version within the same
+        PolicyID; clearing and recreating mints a new PolicyID. Only host and cluster assets are
+        accepted.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SetFleetDesiredCapabilitiesRequest'}
+      responses:
+        '200':
+          description: Stored desired-capability state after normalization
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FleetDesiredCapabilityState'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+    get:
+      tags: [fleet]
+      operationId: getFleetAssetDesiredCapabilities
+      summary: Read the desired capabilities declared for one asset
+      description: Tenant comes from the authenticated principal; an asset with no declared intent answers 404.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Current desired-capability state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FleetDesiredCapabilityState'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+    delete:
+      tags: [fleet]
+      operationId: clearFleetAssetDesiredCapabilities
+      summary: Clear the desired capabilities declared for one asset
+      description: >
+        Idempotent: an asset with no declared intent also answers 204. Clearing ends the policy
+        lifecycle, so a later declaration receives a new PolicyID and Version 1.
+      security:
+      - bearerAuth: []
+      responses:
+        '204': {description: Desired capabilities cleared, or none were declared}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/desired-capabilities/gaps:
+    get:
+      tags: [fleet]
+      operationId: listFleetDesiredCapabilityGaps
+      summary: List desired capabilities not covered by a healthy bound agent
+      description: >
+        Reconciles every declared desired capability in the tenant against the current agent bindings
+        and the observed agent fleet, and returns only the uncovered rows. The read is side-effect
+        free. A capability is covered when a healthy bound agent advertises it; otherwise the row
+        carries the most informative representative agent and a closed-set gap reason.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Uncovered desired capabilities, ordered by asset then capability
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FleetDesiredCapabilityGapList'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/assets/{id}/processes:
+    parameters: [{$ref: '#/components/parameters/FleetAssetId'}]
+    post:
+      tags: [fleet]
+      operationId: reportFleetAssetProcesses
+      summary: Report the running-process snapshot for one host asset
+      description: >
+        Upserts the reported snapshots by (tenant, asset, entity); re-reporting a process in place
+        flips Running rather than adding a row. The tenant is the authenticated fleet tenant and the
+        asset is the path id, so a report cannot claim another tenant's or asset's processes. At most
+        10000 processes per report. Reporting also folds the profile into the asset's behavioural
+        baseline when that learner is wired; a learn failure is logged and does not fail the report.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReportFleetEndpointProcessesRequest'}
+      responses:
+        '200':
+          description: Snapshots durably upserted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReportFleetEndpointProcessesResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+    get:
+      tags: [fleet]
+      operationId: listFleetAssetProcesses
+      summary: List the currently running processes on one host asset
+      description: Returns only snapshots whose Running flag is set, ordered by EntityID. An asset with none returns an empty array.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Running-process projection for the asset
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FleetEndpointProcessList'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/assets/{id}/timeline:
+    parameters: [{$ref: '#/components/parameters/FleetAssetId'}]
+    get:
+      tags: [fleet]
+      operationId: queryFleetAssetTimeline
+      summary: Query the endpoint state timeline for one host asset
+      description: >
+        Reads the per-asset projection of accepted telemetry, ordered by event time (when the
+        transition happened on the host), never by ingest order. The tenant is the authenticated
+        fleet tenant. Entries stay explainable after the raw telemetry that produced them expires.
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: from
+        in: query
+        description: RFC 3339 inclusive lower bound on event time. Omit for no lower bound.
+        schema: {type: string, format: date-time}
+      - name: to
+        in: query
+        description: RFC 3339 inclusive upper bound on event time. Omit for no upper bound.
+        schema: {type: string, format: date-time}
+      - name: entity
+        in: query
+        description: Restrict the window to one endpoint entity id.
+        schema: {type: string}
+      - name: limit
+        in: query
+        description: >
+          Maximum entries to return. An absent, unparsable, or non-positive value falls back to 500;
+          a value above 5000 is clamped to 5000.
+        schema: {type: integer, minimum: 1, maximum: 5000, default: 500}
+      responses:
+        '200':
+          description: Event-time ordered timeline window
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FleetEndpointTimelineList'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/assets/{id}/retro-hunt:
+    parameters: [{$ref: '#/components/parameters/FleetAssetId'}]
+    post:
+      tags: [fleet]
+      operationId: retroHuntFleetAssetTimeline
+      summary: Re-hunt the endpoint timeline window around a pivot time
+      description: >
+        Read-only analysis: pivots to the transitions in [around - before_seconds, around +
+        after_seconds] on the asset, optionally focused on one entity. Fail-closed on a missing pivot,
+        a negative look-back or look-forward, or a zero-width window. Truncated is honest: the service
+        queries one entry past the effective limit so a capped window is always reported as partial.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FleetRetroHuntRequest'}
+      responses:
+        '200':
+          description: The surrounding timeline window
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FleetRetroHuntResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/engagements/{id}/legal-hold:
+    parameters: [{$ref: '#/components/parameters/EngagementId'}]
+    put:
+      tags: [fleet]
+      operationId: placeFleetLegalHold
+      summary: Place a legal hold on an engagement's data
+      description: >
+        A hold suspends retention expiry: held data survives its retention window until the hold is
+        released. Idempotent, so re-placing returns the existing active hold unchanged. The reason is
+        mandatory for accountability; the placing operator and the tenant are server-side.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PlaceFleetLegalHoldRequest'}
+      responses:
+        '200':
+          description: The active hold, newly placed or already in force
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FleetLegalHold'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+    delete:
+      tags: [fleet]
+      operationId: releaseFleetLegalHold
+      summary: Release the active legal hold on an engagement's data
+      description: >
+        Idempotent: an engagement with no active hold also answers 204. The released hold is retained
+        as append-only history so the hold and release trail stays auditable.
+      security:
+      - bearerAuth: []
+      responses:
+        '204': {description: Hold released, or none was active}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/legal-holds:
+    get:
+      tags: [fleet]
+      operationId: listFleetLegalHolds
+      summary: List the tenant's active legal holds
+      description: Active holds only, ordered by engagement id. Tenant identity comes from the authenticated principal.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Active legal holds
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FleetLegalHoldList'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/engagements/{id}/privacy-export:
+    parameters: [{$ref: '#/components/parameters/EngagementId'}]
+    get:
+      tags: [fleet]
+      operationId: exportFleetEngagementPrivacyData
+      summary: Export the governance data held for one engagement
+      description: >
+        Data-subject and DPO export: the detection projection rows the control plane holds for the
+        engagement plus the active legal holds covering them. Read-only and mutates nothing; the
+        immutable evidence chain is untouched. The export itself is an audited governance access, so
+        an audit-write failure fails the request rather than returning an unlogged bundle.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: The export bundle
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FleetPrivacyExportBundle'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/engagements/{id}/detection-data:
+    parameters: [{$ref: '#/components/parameters/EngagementId'}]
+    delete:
+      tags: [fleet]
+      operationId: purgeFleetEngagementDetectionData
+      summary: Delete an engagement's detection projection on demand
+      description: >
+        Right-to-erasure over the queryable projection only: the append-only evidence chain is
+        preserved. Destructive and irreversible for the projection, so a reason is mandatory and the
+        deletion is audited with actor and reason. Fail-closed on a legal hold, which answers 403:
+        preservation trumps erasure. An engagement with no detection rows answers 200 with a zero
+        count.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PurgeFleetDetectionDataRequest'}
+      responses:
+        '200':
+          description: Projection rows deleted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PurgeFleetDetectionDataResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/engagements/{id}/correlate:
+    parameters: [{$ref: '#/components/parameters/EngagementId'}]
+    post:
+      tags: [fleet]
+      operationId: correlateFleetEngagementDetections
+      summary: Fold an engagement's sealed detections into incidents
+      description: >
+        No request body: the detections are read server-side and the actor is the authenticated
+        principal. Idempotent, because the correlator mints deterministic incident ids, so a re-run
+        over the same detections creates nothing new. Tri-scoring each new incident is best-effort
+        when the reassessor is wired: a scoring failure never rolls back a durably recorded incident,
+        it is counted in reassess_failed so a caller sees that scoring was partial.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: The incidents created by this pass and how many were scored
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FleetCorrelationResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/incidents/{id}/risk/reassess:
+    parameters: [{$ref: '#/components/parameters/FleetIncidentId'}]
+    post:
+      tags: [fleet]
+      operationId: reassessFleetIncidentRisk
+      summary: Re-run the tri-score risk assessment for one incident
+      description: >
+        No request body: the Threat, Exposure, Behaviour and telemetry Coverage factors are gathered
+        server-side and the actor is the authenticated principal. The deterministic scorer records a
+        RiskAssessment as an event on the append-only incident log and the updated projection is
+        returned. Risk, Confidence and Coverage stay separate fields: missing coverage lowers
+        Coverage, never Risk.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: The incident projection with its new risk assessment
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FleetIncident'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
   /api/v1/users:
     get:
       tags: [users]
@@ -2617,6 +2993,18 @@ components:
       name: id
       in: path
       required: true
+      schema: {type: string, minLength: 1}
+    FleetAssetId:
+      name: id
+      in: path
+      required: true
+      description: Canonical host or cluster asset identifier
+      schema: {type: string, minLength: 1}
+    FleetIncidentId:
+      name: id
+      in: path
+      required: true
+      description: Phase-C incident identifier
       schema: {type: string, minLength: 1}
     SigningKeyId:
       name: keyID
@@ -3083,6 +3471,429 @@ components:
         skipped: {type: integer, minimum: 0}
         missing: {type: integer, format: uint64, minimum: 0}
         replay: {type: boolean}
+
+    SetFleetDesiredCapabilitiesRequest:
+      type: object
+      required: [capabilities]
+      properties:
+        capabilities:
+          type: array
+          description: >
+            Capability names the asset should have. At most 256 raw entries are accepted; blank
+            entries are dropped and the rest are trimmed, de-duplicated and sorted, after which at
+            most 64 distinct names may remain. An empty canonical result is rejected: clear the
+            intent with DELETE instead.
+          maxItems: 256
+          items: {type: string, maxLength: 128}
+
+    FleetDesiredCapabilityState:
+      type: object
+      description: Serialized from the domain struct (PascalCase keys).
+      required: [TenantID, AssetID, PolicyID, Capabilities, UpdatedBy, Version, Audit]
+      properties:
+        TenantID: {type: string}
+        AssetID: {type: string, description: The canonical host or cluster asset the intent is declared for.}
+        PolicyID: {type: string, description: Stable for the life of one policy; clearing and recreating mints a new one.}
+        Capabilities:
+          type: array
+          description: Canonical form; trimmed, unique and sorted.
+          maxItems: 64
+          items: {type: string, minLength: 1, maxLength: 128}
+        UpdatedBy: {type: string}
+        Version: {type: integer, format: int64, minimum: 1, description: Starts at 1 and increments once per semantic replacement within the PolicyID lifecycle.}
+        Audit:
+          type: object
+          properties:
+            CreatedAt: {type: string, format: date-time}
+            UpdatedAt: {type: string, format: date-time}
+            CreatedBy: {type: string}
+            UpdatedBy: {type: string}
+
+    FleetAgentHealth:
+      type: string
+      description: Derived liveness of a fleet agent. Stale is first-class; an idle agent is never reported as healthy.
+      enum: [healthy, stale, revoked, decommissioned]
+
+    FleetDesiredCapabilityGapReason:
+      type: string
+      description: Closed set naming why a desired capability is not covered by a healthy bound agent.
+      enum: [agent_missing, agent_stale, agent_revoked, agent_decommissioned, capability_missing]
+
+    FleetDesiredCapabilityGap:
+      type: object
+      required: [asset_id, policy_id, policy_version, capability, covered, last_seen]
+      properties:
+        asset_id: {type: string}
+        policy_id: {type: string}
+        policy_version: {type: integer, format: int64, minimum: 1}
+        agent_id:
+          type: string
+          description: >
+            The witness that satisfied the capability, or the best available representative when it is
+            uncovered. Absent when no current agent is bound to the asset.
+        capability: {type: string}
+        agent_health: {$ref: '#/components/schemas/FleetAgentHealth'}
+        covered: {type: boolean}
+        gap_reason: {$ref: '#/components/schemas/FleetDesiredCapabilityGapReason'}
+        detail: {type: string, description: Human-readable explanation of the gap.}
+        last_seen:
+          type: string
+          format: date-time
+          description: Last heartbeat of the representative agent; the zero time when no observed agent row backs the row.
+
+    FleetDesiredCapabilityGapList:
+      type: object
+      required: [gaps]
+      properties:
+        gaps: {type: array, items: {$ref: '#/components/schemas/FleetDesiredCapabilityGap'}}
+
+    ReportFleetEndpointProcessesRequest:
+      type: object
+      required: [processes]
+      properties:
+        processes:
+          type: array
+          maxItems: 10000
+          items:
+            type: object
+            required: [entity_id]
+            properties:
+              entity_id: {type: string, minLength: 1, description: Stable endpoint entity id; the upsert key together with the server-side tenant and asset.}
+              pid: {type: integer, minimum: 0}
+              comm: {type: string, description: Short kernel command name.}
+              path: {type: string, description: Resolved executable path.}
+              running: {type: boolean, description: False marks a process that has exited; the row is kept and flipped in place.}
+              last_seen_at: {type: string, format: date-time}
+
+    ReportFleetEndpointProcessesResult:
+      type: object
+      required: [saved]
+      properties:
+        saved: {type: integer, minimum: 0, description: Number of snapshots upserted.}
+
+    FleetEndpointProcess:
+      type: object
+      description: Serialized from the port struct (PascalCase keys).
+      required: [TenantID, AssetID, EntityID, PID, Comm, Path, Running, LastSeenAt]
+      properties:
+        TenantID: {type: string}
+        AssetID: {type: string}
+        EntityID: {type: string}
+        PID: {type: integer, minimum: 0}
+        Comm: {type: string}
+        Path: {type: string}
+        Running: {type: boolean}
+        LastSeenAt: {type: string, format: date-time}
+
+    FleetEndpointProcessList:
+      type: object
+      required: [processes]
+      properties:
+        processes: {type: array, items: {$ref: '#/components/schemas/FleetEndpointProcess'}}
+
+    FleetEndpointEntityKind:
+      type: string
+      enum: [process, network, file, identity, container]
+
+    FleetEndpointTimelineEntryKind:
+      type: string
+      enum: [process_start, process_exec, network_connect, file_open, file_write, file_rename, privilege_change]
+
+    FleetEndpointTimelineEntry:
+      type: object
+      description: Serialized from the domain struct (PascalCase keys). One endpoint state transition, ordered by event time.
+      required: [OccurredAt, TenantID, AssetID, EntityKind, EntityID, Kind, EventID, Summary]
+      properties:
+        OccurredAt: {type: string, format: date-time, description: When the transition happened on the host, never the ingest time.}
+        TenantID: {type: string}
+        AssetID: {type: string}
+        EntityKind: {$ref: '#/components/schemas/FleetEndpointEntityKind'}
+        EntityID: {type: string}
+        Kind: {$ref: '#/components/schemas/FleetEndpointTimelineEntryKind'}
+        EventID: {type: string, description: Source envelope event id; the dedupe key and the tiebreak for transitions sharing OccurredAt.}
+        Summary: {type: string, description: Self-contained description, so the entry stays explainable after the raw telemetry expires.}
+
+    FleetEndpointTimelineList:
+      type: object
+      required: [entries]
+      properties:
+        entries: {type: array, items: {$ref: '#/components/schemas/FleetEndpointTimelineEntry'}}
+
+    FleetRetroHuntRequest:
+      type: object
+      required: [around]
+      properties:
+        around: {type: string, format: date-time, description: The pivot time to hunt around. Required.}
+        before_seconds: {type: integer, format: int64, minimum: 0, default: 0, description: Look-back from the pivot. At least one of before_seconds and after_seconds must be positive.}
+        after_seconds: {type: integer, format: int64, minimum: 0, default: 0, description: Look-forward from the pivot. At least one of before_seconds and after_seconds must be positive.}
+        entity_id: {type: string, description: Optionally focus the hunt on one entity's transitions.}
+        limit: {type: integer, minimum: 0, default: 0, description: Caps the entries returned. Zero or negative applies the default bound of 1000.}
+
+    FleetRetroHuntResult:
+      type: object
+      description: Serialized from the usecase struct (PascalCase keys).
+      required: [AssetID, From, To, Entries, Truncated]
+      properties:
+        AssetID: {type: string}
+        From: {type: string, format: date-time, description: Pivot minus before_seconds.}
+        To: {type: string, format: date-time, description: Pivot plus after_seconds.}
+        Entries:
+          type: [array, "null"]
+          items: {$ref: '#/components/schemas/FleetEndpointTimelineEntry'}
+        Truncated: {type: boolean, description: The effective limit capped the window, so the view is partial.}
+
+    PlaceFleetLegalHoldRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, description: Why the data must be preserved. Mandatory for accountability.}
+
+    FleetLegalHold:
+      type: object
+      description: Serialized from the domain struct (PascalCase keys). Active while ReleasedAt is the zero time.
+      required: [TenantID, EngagementID, Reason, PlacedBy, PlacedAt, ReleasedBy, ReleasedAt]
+      properties:
+        TenantID: {type: string}
+        EngagementID: {type: string}
+        Reason: {type: string}
+        PlacedBy: {type: string}
+        PlacedAt: {type: string, format: date-time}
+        ReleasedBy: {type: string, description: Empty while the hold is active.}
+        ReleasedAt: {type: string, format: date-time, description: The zero time while the hold is active.}
+
+    FleetLegalHoldList:
+      type: object
+      required: [holds]
+      properties:
+        holds:
+          type: [array, "null"]
+          description: Null rather than an empty array when the tenant holds none.
+          items: {$ref: '#/components/schemas/FleetLegalHold'}
+
+    PurgeFleetDetectionDataRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, description: Why the projection is being deleted. Mandatory; recorded in the audit log with the actor.}
+
+    PurgeFleetDetectionDataResult:
+      type: object
+      required: [purged]
+      properties:
+        purged: {type: integer, minimum: 0, description: Number of detection projection rows deleted.}
+
+    FleetDetectionClass:
+      type: string
+      enum: [process, network, file, privilege]
+
+    FleetDetectionEvent:
+      type: object
+      description: >
+        Serialized from the domain struct (PascalCase keys). Exactly one per-class payload is present;
+        the other three are null, and the one present always matches Class.
+      required: [Class, At, Host]
+      properties:
+        Class: {$ref: '#/components/schemas/FleetDetectionClass'}
+        At: {type: string, format: date-time}
+        Host: {type: string}
+        Process:
+          type: [object, "null"]
+          properties:
+            PID: {type: integer}
+            PPID: {type: integer}
+            Comm: {type: string}
+            Path: {type: string}
+            Args: {type: [array, "null"], items: {type: string}}
+            UID: {type: integer}
+        Network:
+          type: [object, "null"]
+          properties:
+            Proto: {type: string, enum: [tcp, udp]}
+            RemoteAddr: {type: string}
+            RemotePort: {type: integer}
+            Direction: {type: string, enum: [egress, ingress]}
+            PID: {type: integer}
+            Comm: {type: string}
+        File:
+          type: [object, "null"]
+          properties:
+            Path: {type: string}
+            Op: {type: string, enum: [read, write, open, unlink]}
+            PID: {type: integer}
+            Comm: {type: string}
+        Privilege:
+          type: [object, "null"]
+          properties:
+            PID: {type: integer}
+            Comm: {type: string}
+            FromUID: {type: integer}
+            ToUID: {type: integer}
+            Cap: {type: string, description: Capability gained, if any.}
+            Kind: {type: string, enum: [setuid, setgid, capset]}
+
+    FleetDetection:
+      type: object
+      description: Serialized from the domain struct (PascalCase keys). What a matched rule emitted, with full attribution.
+      required: [RuleID, RuleVersion, Class, Severity, HostID, AgentID, Evidence, Truncated, ObservedCount, Observed]
+      properties:
+        RuleID: {type: string}
+        RuleVersion: {type: integer}
+        Class: {$ref: '#/components/schemas/FleetDetectionClass'}
+        Severity: {type: string, enum: [critical, high, medium, low, info, unknown]}
+        HostID: {type: string}
+        AgentID: {type: string}
+        Evidence:
+          type: [array, "null"]
+          description: The triggering event plus surrounding context, capped at 64 events.
+          maxItems: 64
+          items: {$ref: '#/components/schemas/FleetDetectionEvent'}
+        Truncated: {type: boolean, description: The evidence window was capped, so Evidence is not the complete sequence.}
+        ObservedCount: {type: integer, description: Events seen before truncation; at least the length of Evidence.}
+        Observed: {type: string, format: date-time}
+
+    FleetDetectionRecord:
+      type: object
+      description: Serialized from the domain struct (PascalCase keys). One sealed, chain-linked detection projection row.
+      required: [ID, TenantID, EngagementID, AssetID, AgentID, Detection, EvidenceID, BatchSeq, RecordedAt, ExpiresAt]
+      properties:
+        ID: {type: string}
+        TenantID: {type: string}
+        EngagementID: {type: string}
+        AssetID: {type: string, description: The asset the detection was observed on.}
+        AgentID: {type: string}
+        Detection: {$ref: '#/components/schemas/FleetDetection'}
+        EvidenceID: {type: string, description: The evidence-chain link that sealed this detection.}
+        BatchSeq: {type: integer, format: int64, minimum: 0, description: The agent batch sequence the detection arrived in.}
+        RecordedAt: {type: string, format: date-time}
+        ExpiresAt: {type: string, format: date-time, description: The zero time means the row never expires; a set value is enforced by audited retention.}
+
+    FleetPrivacyExportBundle:
+      type: object
+      required: [engagement_id, generated_at, detections, legal_holds, detection_count]
+      properties:
+        engagement_id: {type: string}
+        generated_at: {type: string, format: date-time}
+        detections:
+          type: [array, "null"]
+          description: Null rather than an empty array when the engagement holds no detection rows.
+          items: {$ref: '#/components/schemas/FleetDetectionRecord'}
+        legal_holds:
+          type: [array, "null"]
+          description: Active holds covering this engagement's data; null when there are none.
+          items: {$ref: '#/components/schemas/FleetLegalHold'}
+        detection_count: {type: integer, minimum: 0}
+
+    FleetIncidentState:
+      type: string
+      description: Where the incident sits in the response workflow. Independent of Disposition and of risk.
+      enum: [new, open, triaged, investigating, contained, remediated, resolved, closed, reopened]
+
+    FleetIncidentDisposition:
+      type: string
+      description: The analyst's verdict. Independent of State and never mutates the risk score.
+      enum: [unknown, true_positive, benign_positive, false_positive, duplicate, test]
+
+    FleetRiskScore:
+      type: integer
+      description: Normalized 0..100 factor, integer so scoring stays deterministic and reproducible.
+      minimum: 0
+      maximum: 100
+
+    FleetIncidentRiskAssessment:
+      type: object
+      description: >
+        Serialized from the domain struct (PascalCase keys). Risk, Confidence and Coverage are three
+        different things and are carried separately: missing coverage lowers Coverage, never Risk.
+      required: [AssessmentID, IncidentRevision, ScorerVersion, PolicyVersion, InputSnapshotHash, Risk, Confidence, Coverage, CoverageVector, Context, FactorContributions, ReasonCodes, CreatedAt]
+      properties:
+        AssessmentID: {type: string}
+        IncidentRevision: {type: integer}
+        ScorerVersion: {type: string}
+        PolicyVersion: {type: string}
+        InputSnapshotHash: {type: string, description: With ScorerVersion and PolicyVersion, makes the assessment reproducible and auditable.}
+        Risk: {$ref: '#/components/schemas/FleetRiskScore'}
+        Confidence: {$ref: '#/components/schemas/FleetRiskScore'}
+        Coverage: {$ref: '#/components/schemas/FleetRiskScore'}
+        CoverageVector:
+          type: object
+          description: Coverage per telemetry class, never averaged into a scalar.
+          properties:
+            Process: {$ref: '#/components/schemas/FleetRiskScore'}
+            Network: {$ref: '#/components/schemas/FleetRiskScore'}
+            File: {$ref: '#/components/schemas/FleetRiskScore'}
+            Privilege: {$ref: '#/components/schemas/FleetRiskScore'}
+            Reasons: {type: [array, "null"], items: {type: string}}
+        Context:
+          type: object
+          description: The three independent risk factors. Exposure and Behavior are zero until those pillars fill them.
+          properties:
+            Threat: {$ref: '#/components/schemas/FleetRiskScore'}
+            Exposure: {$ref: '#/components/schemas/FleetRiskScore'}
+            Behavior: {$ref: '#/components/schemas/FleetRiskScore'}
+        FactorContributions:
+          type: [array, "null"]
+          description: Weighted inputs to Risk, each with a human reason, so a score is explainable.
+          items:
+            type: object
+            properties:
+              Factor: {type: string}
+              Points: {$ref: '#/components/schemas/FleetRiskScore'}
+              Reason: {type: string}
+        ReasonCodes: {type: [array, "null"], items: {type: string}}
+        CreatedAt: {type: string, format: date-time}
+
+    FleetIncident:
+      type: object
+      description: >
+        Serialized from the domain struct (PascalCase keys). The projection folded from the incident's
+        append-only event log, which remains the source of truth.
+      required: [ID, AssetID, Title, Severity, State, Disposition, OwnerID, DetectionIDs, Risk, MergedInto, Comments, Responses, Revision, CreatedAt, UpdatedAt]
+      properties:
+        ID: {type: string}
+        AssetID: {type: string}
+        Title: {type: string}
+        Severity: {type: string, enum: [critical, high, medium, low, info, unknown]}
+        State: {$ref: '#/components/schemas/FleetIncidentState'}
+        Disposition: {$ref: '#/components/schemas/FleetIncidentDisposition'}
+        OwnerID: {type: string, description: Empty until an owner is assigned.}
+        DetectionIDs:
+          type: [array, "null"]
+          description: Every detection folded in, so an auditor can descend to the individual hash-chained records.
+          items: {type: string}
+        Risk:
+          description: Null until a risk assessment has been recorded on the log.
+          anyOf: [{$ref: '#/components/schemas/FleetIncidentRiskAssessment'}, {type: 'null'}]
+        MergedInto: {type: string, description: Empty unless the incident was merged into another.}
+        Comments:
+          type: [array, "null"]
+          items:
+            type: object
+            properties:
+              At: {type: string, format: date-time}
+              Actor: {type: string}
+              Text: {type: string}
+        Responses:
+          type: [array, "null"]
+          description: Governed response actions linked to the incident, with whether their post-condition was telemetry-verified.
+          items:
+            type: object
+            properties:
+              ActionID: {type: string}
+              Verified: {type: boolean}
+        Revision: {type: integer, description: The number of events folded, so a projection is comparable to any point in the log.}
+        CreatedAt: {type: string, format: date-time}
+        UpdatedAt: {type: string, format: date-time}
+
+    FleetCorrelationResult:
+      type: object
+      required: [created, reassessed, reassess_failed]
+      properties:
+        created:
+          type: [array, "null"]
+          description: The incidents this pass recorded. Null when the pass created none.
+          items: {$ref: '#/components/schemas/FleetIncident'}
+        reassessed: {type: integer, minimum: 0, description: How many of the created incidents were tri-scored.}
+        reassess_failed: {type: integer, minimum: 0, description: How many scoring attempts failed; the incidents are still recorded.}
 
     EngagementTransitionRequest:
       type: object
