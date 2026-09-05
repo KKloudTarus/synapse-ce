@@ -34,6 +34,11 @@ func TestPromotionStore(t *testing.T) {
 	}
 	ctx := context.Background()
 	ctx = shared.WithTenant(ctx, "default")
+	// A promotion fingerprint is unique for the life of the database: the store refuses to apply
+	// one that another judgment already used. Fixed fingerprints therefore made this test pass only
+	// against a database it had never run on, so a second run, or `go test -count=2`, failed with a
+	// conflict that had nothing to do with what was under test. Each run gets its own namespace.
+	fp := promotionFingerprint(t)
 	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -89,7 +94,7 @@ func TestPromotionStore(t *testing.T) {
 			Rule:           judgment.RuleRuntimeReachableExposed,
 			Inputs:         []judgment.PromotionInput{{Kind: judgment.PromotionInputReachability, ID: "reach-1"}},
 			Proposed:       judgment.PromotionEscalate,
-			Fingerprint:    strings.Repeat("a", 64),
+			Fingerprint:    fp("a"),
 			FindingVersion: 1,
 			BeforePriority: 3,
 			AfterPriority:  2,
@@ -115,7 +120,7 @@ func TestPromotionStore(t *testing.T) {
 			Inputs: []judgment.PromotionInput{
 				{Kind: judgment.PromotionInputReachability, ID: "reach-1"},
 			},
-			Fingerprint:      strings.Repeat("a", 64),
+			Fingerprint:      fp("a"),
 			VerdictScore:     80,
 			AppliedBy:        "tester",
 			VerdictRationale: "verified",
@@ -170,7 +175,7 @@ func TestPromotionStore(t *testing.T) {
 			Inputs: []judgment.PromotionInput{
 				{Kind: judgment.PromotionInputReachability, ID: "reach-1"},
 			},
-			Fingerprint:      strings.Repeat("a", 64), // same fingerprint
+			Fingerprint:      fp("a"), // same fingerprint
 			VerdictScore:     80,
 			AppliedBy:        "tester",
 			VerdictRationale: "verified",
@@ -214,7 +219,7 @@ func TestPromotionStore(t *testing.T) {
 			Inputs: []judgment.PromotionInput{
 				{Kind: judgment.PromotionInputReachability, ID: "reach-1"},
 			},
-			Fingerprint:      strings.Repeat("a", 64),
+			Fingerprint:      fp("a"),
 			AppliedBy:        "tester",
 			VerdictRationale: "verified",
 			EvidenceID:       "evidence-1",
@@ -238,7 +243,7 @@ func TestPromotionStore(t *testing.T) {
 				Rule:           judgment.RuleRuntimeReachableExposed,
 				Inputs:         []judgment.PromotionInput{{Kind: judgment.PromotionInputReachability, ID: "reach-2"}},
 				Proposed:       judgment.PromotionEscalate,
-				Fingerprint:    strings.Repeat("b", 64),
+				Fingerprint:    fp("b"),
 				FindingVersion: 1,
 				BeforePriority: 3,
 				AfterPriority:  2,
@@ -264,7 +269,7 @@ func TestPromotionStore(t *testing.T) {
 			Inputs: []judgment.PromotionInput{
 				{Kind: judgment.PromotionInputReachability, ID: "reach-2"},
 			},
-			Fingerprint:      strings.Repeat("a", 64), // same as first
+			Fingerprint:      fp("a"), // same as first
 			AppliedBy:        "tester",
 			VerdictRationale: "verified",
 			EvidenceID:       "evidence-1",
@@ -288,7 +293,7 @@ func TestPromotionStore(t *testing.T) {
 				Rule:           judgment.RuleDeterministicUnreachable,
 				Inputs:         []judgment.PromotionInput{{Kind: judgment.PromotionInputReachability, ID: "reach-3"}},
 				Proposed:       judgment.PromotionDeescalate,
-				Fingerprint:    strings.Repeat("c", 64),
+				Fingerprint:    fp("c"),
 				FindingVersion: 1,
 				BeforePriority: 3,
 				AfterPriority:  4,
@@ -313,7 +318,7 @@ func TestPromotionStore(t *testing.T) {
 			Inputs: []judgment.PromotionInput{
 				{Kind: judgment.PromotionInputReachability, ID: "reach-3"},
 			},
-			Fingerprint:      strings.Repeat("c", 64),
+			Fingerprint:      fp("c"),
 			AppliedBy:        "tester",
 			VerdictRationale: "verified",
 			EvidenceID:       "evidence-1",
@@ -337,7 +342,7 @@ func TestPromotionStore(t *testing.T) {
 				Rule:           judgment.RuleDeterministicUnreachable,
 				Inputs:         []judgment.PromotionInput{{Kind: judgment.PromotionInputReachability, ID: "reach-4"}},
 				Proposed:       judgment.PromotionDeescalate,
-				Fingerprint:    strings.Repeat("d", 64),
+				Fingerprint:    fp("d"),
 				FindingVersion: 1,
 				BeforePriority: 2,
 				AfterPriority:  3,
@@ -362,7 +367,7 @@ func TestPromotionStore(t *testing.T) {
 			Inputs: []judgment.PromotionInput{
 				{Kind: judgment.PromotionInputReachability, ID: "reach-4"},
 			},
-			Fingerprint:      strings.Repeat("d", 64),
+			Fingerprint:      fp("d"),
 			AppliedBy:        "tester",
 			VerdictRationale: "verified",
 			EvidenceID:       "evidence-1",
@@ -386,7 +391,7 @@ func TestPromotionStore(t *testing.T) {
 				Rule:           judgment.RuleDeterministicUnreachable,
 				Inputs:         []judgment.PromotionInput{{Kind: judgment.PromotionInputReachability, ID: "reach-5"}},
 				Proposed:       judgment.PromotionDeescalate,
-				Fingerprint:    strings.Repeat("e", 64),
+				Fingerprint:    fp("e"),
 				FindingVersion: 1,
 				BeforePriority: 2,
 				AfterPriority:  3,
@@ -411,7 +416,7 @@ func TestPromotionStore(t *testing.T) {
 			Inputs: []judgment.PromotionInput{
 				{Kind: judgment.PromotionInputReachability, ID: "reach-5"},
 			},
-			Fingerprint:      strings.Repeat("e", 64),
+			Fingerprint:      fp("e"),
 			AppliedBy:        "tester",
 			VerdictRationale: "verified",
 			EvidenceID:       "evidence-1",
@@ -435,7 +440,7 @@ func TestPromotionStore(t *testing.T) {
 				Rule:           judgment.RuleCorroboratingSignalLoss,
 				Inputs:         []judgment.PromotionInput{{Kind: judgment.PromotionInputPrior, ID: "prior-for-claim"}, {Kind: judgment.PromotionInputReachability, ID: "reach-6"}},
 				Proposed:       judgment.PromotionDeescalate,
-				Fingerprint:    strings.Repeat("6", 64),
+				Fingerprint:    fp("6"),
 				FindingVersion: 1,
 				BeforePriority: 2,
 				AfterPriority:  3,
@@ -461,7 +466,7 @@ func TestPromotionStore(t *testing.T) {
 				{Kind: judgment.PromotionInputReachability, ID: "reach-6"},
 				// No prior_promotion input.
 			},
-			Fingerprint:      strings.Repeat("6", 64),
+			Fingerprint:      fp("6"),
 			AppliedBy:        "tester",
 			VerdictRationale: "verified",
 			EvidenceID:       "evidence-1",
@@ -485,7 +490,7 @@ func TestPromotionStore(t *testing.T) {
 				Rule:           judgment.RuleCorroboratingSignalLoss,
 				Inputs:         []judgment.PromotionInput{{Kind: judgment.PromotionInputPrior, ID: "nonexistent-event"}, {Kind: judgment.PromotionInputReachability, ID: "reach-7"}},
 				Proposed:       judgment.PromotionDeescalate,
-				Fingerprint:    strings.Repeat("7", 64),
+				Fingerprint:    fp("7"),
 				FindingVersion: 1,
 				BeforePriority: 2,
 				AfterPriority:  3,
@@ -511,7 +516,7 @@ func TestPromotionStore(t *testing.T) {
 				{Kind: judgment.PromotionInputReachability, ID: "reach-7"},
 				{Kind: judgment.PromotionInputPrior, ID: "nonexistent-event"},
 			},
-			Fingerprint:      strings.Repeat("7", 64),
+			Fingerprint:      fp("7"),
 			AppliedBy:        "tester",
 			VerdictRationale: "verified",
 			EvidenceID:       "evidence-1",
@@ -559,7 +564,7 @@ func TestPromotionStore(t *testing.T) {
 			BeforePriority:   3,
 			AfterPriority:    2,
 			Inputs:           []judgment.PromotionInput{{Kind: judgment.PromotionInputReachability, ID: "j1"}},
-			Fingerprint:      strings.Repeat("f", 64),
+			Fingerprint:      fp("f"),
 		}
 		_, err := pStore.Apply(ctx, eid, shared.ID("nonexistent-f"), cmd)
 		if !errors.Is(err, shared.ErrNotFound) {
@@ -571,6 +576,7 @@ func TestPromotionStore(t *testing.T) {
 // TestPromotionStoreAuditStatusLifecycle verifies that Apply creates the pending
 // audit status in its transaction, and acknowledgement removes it from recovery.
 func TestPromotionStoreAuditStatusLifecycle(t *testing.T) {
+	fp := promotionFingerprint(t)
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -617,7 +623,7 @@ func TestPromotionStoreAuditStatusLifecycle(t *testing.T) {
 		FindingVersion: 1, Rule: judgment.RuleRuntimeReachableExposed, Effect: judgment.PromotionEscalate,
 		BeforePriority: 3, AfterPriority: 2,
 		Inputs:      []judgment.PromotionInput{{Kind: judgment.PromotionInputReachability, ID: "reach-1"}},
-		Fingerprint: strings.Repeat("2", 64), VerdictScore: 80, VerdictRationale: "verified",
+		Fingerprint: fp("2"), VerdictScore: 80, VerdictRationale: "verified",
 		EvidenceID: "evidence-1", Verifier: "human:verifier", AppliedBy: "tester",
 	}
 	if err := NewJudgmentRepository(pool).Save(ctx, judgment.Judgment{
@@ -650,6 +656,7 @@ func TestPromotionStoreAuditStatusLifecycle(t *testing.T) {
 }
 
 func TestPromotionStoreFindByJudgmentUsesRLSTenant(t *testing.T) {
+	fp := promotionFingerprint(t)
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -695,7 +702,7 @@ func TestPromotionStoreFindByJudgmentUsesRLSTenant(t *testing.T) {
 		FindingVersion: 1, Rule: judgment.RuleRuntimeReachableExposed, Effect: judgment.PromotionEscalate,
 		BeforePriority: 3, AfterPriority: 2,
 		Inputs:      []judgment.PromotionInput{{Kind: judgment.PromotionInputReachability, ID: "reach-1"}},
-		Fingerprint: strings.Repeat("3", 64), VerdictScore: 80, VerdictRationale: "verified",
+		Fingerprint: fp("3"), VerdictScore: 80, VerdictRationale: "verified",
 		EvidenceID: "evidence-1", Verifier: "human:verifier", AppliedBy: "tester",
 	}
 	if err := NewJudgmentRepository(pool).Save(ctx, judgment.Judgment{
@@ -722,7 +729,9 @@ func TestPromotionStoreFindByJudgmentUsesRLSTenant(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ($1, $1)`, otherTenantID.String()); err != nil {
 		t.Fatalf("seed tenant B: %v", err)
 	}
-	role := "promo_find_rls_" + randHex(t)
+	// uniqueProbeRole owns the drop and opens its own connection for it, so it survives this
+	// test's deferred pool close.
+	role := uniqueProbeRole(t, dsn, "promo_find_rls")
 	for _, query := range []string{
 		`CREATE ROLE ` + role + ` NOSUPERUSER NOBYPASSRLS`,
 		`GRANT USAGE ON SCHEMA public TO ` + role,
@@ -733,10 +742,7 @@ func TestPromotionStoreFindByJudgmentUsesRLSTenant(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
-		bg := context.Background()
-		_, _ = pool.Exec(bg, `DROP OWNED BY `+role)
-		_, _ = pool.Exec(bg, `DROP ROLE IF EXISTS `+role)
-		_, _ = pool.Exec(bg, `DELETE FROM tenants WHERE id=$1`, otherTenantID.String())
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tenants WHERE id=$1`, otherTenantID.String())
 	})
 	otherCtx := shared.WithTenant(context.Background(), otherTenantID)
 	if err := WithContextTenant(otherCtx, pool, func(tx pgx.Tx) error {
@@ -754,4 +760,17 @@ func TestPromotionStoreFindByJudgmentUsesRLSTenant(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("cross-tenant RLS lookup: %v", err)
 	}
+}
+
+// promotionFingerprint returns a fingerprint generator whose values are unique to this test run.
+//
+// A promotion fingerprint is unique for the life of the database: the store refuses to apply one
+// that another judgment already used. Fixed fingerprints therefore made these tests pass only
+// against a database they had never run on, so a second run, or `go test -count=2`, failed with a
+// conflict that had nothing to do with what was under test. The value stays a 64-character
+// lowercase hex digest, which the domain validates.
+func promotionFingerprint(t *testing.T) func(seed string) string {
+	t.Helper()
+	run := randHex(t)
+	return func(seed string) string { return strings.Repeat(seed, 64-len(run)) + run }
 }

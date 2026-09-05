@@ -108,7 +108,7 @@ func TestAttackPathImportedFindingBindings(t *testing.T) {
 		t.Fatal("cross-engagement imported target must fail")
 	}
 
-	role := uniqueProbeRole(t, "attack_path_0070_role")
+	role := uniqueProbeRole(t, dsn, "attack_path_0070_role")
 	_, _ = pool.Exec(ctx, `DROP OWNED BY `+role)
 	_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS `+role)
 	for _, stmt := range []string{
@@ -120,10 +120,6 @@ func TestAttackPathImportedFindingBindings(t *testing.T) {
 			t.Fatalf("set up no-tenant RLS role: %v", err)
 		}
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DROP OWNED BY `+role)
-		_, _ = pool.Exec(context.Background(), `DROP ROLE IF EXISTS `+role)
-	})
 	if err := WithTenant(ctx, pool, "", func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SET LOCAL ROLE `+role); err != nil {
 			return err

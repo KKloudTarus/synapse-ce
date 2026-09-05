@@ -167,13 +167,13 @@ func (f detectionProvenancePostgresFixture) admission(t *testing.T) (detectionpr
 		t.Fatalf("canonical pending detection: %v", err)
 	}
 	return detectionprovenance.Current{
-			TenantID: f.tenant, EngagementID: f.engagement, DetectionID: f.detection,
-			Status: detectionprovenance.StatusPending, PendingInput: input, UpdatedAt: f.at,
-		}, detectionprovenance.Transition{
-			TenantID: f.tenant, EngagementID: f.engagement, DetectionID: f.detection, Sequence: 1,
-			Kind: detectionprovenance.Received, Status: detectionprovenance.StatusPending, TelemetryRefs: refs,
-			AgentID: f.agent, AssetID: f.asset, Reason: "v2 batch admitted", OccurredAt: f.at,
-		}
+		TenantID: f.tenant, EngagementID: f.engagement, DetectionID: f.detection,
+		Status: detectionprovenance.StatusPending, PendingInput: input, UpdatedAt: f.at,
+	}, detectionprovenance.Transition{
+		TenantID: f.tenant, EngagementID: f.engagement, DetectionID: f.detection, Sequence: 1,
+		Kind: detectionprovenance.Received, Status: detectionprovenance.StatusPending, TelemetryRefs: refs,
+		AgentID: f.agent, AssetID: f.asset, Reason: "v2 batch admitted", OccurredAt: f.at,
+	}
 }
 
 func newDetectionProvenanceRLSRole(t *testing.T, fixture detectionProvenancePostgresFixture) string {

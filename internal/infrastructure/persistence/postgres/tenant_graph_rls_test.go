@@ -61,7 +61,7 @@ func TestAssessmentGraphRLSKnownIDIsolation(t *testing.T) {
 		}
 	}
 
-	role := uniqueProbeRole(t, "asset_graph_runtime")
+	role := uniqueProbeRole(t, dsn, "asset_graph_runtime")
 	for _, statement := range []string{
 		`DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='` + role + `') THEN EXECUTE 'DROP OWNED BY ` + role + `'; EXECUTE 'DROP ROLE ` + role + `'; END IF; END $$`,
 		`CREATE ROLE ` + role + ` NOSUPERUSER NOBYPASSRLS`,
@@ -72,10 +72,6 @@ func TestAssessmentGraphRLSKnownIDIsolation(t *testing.T) {
 			t.Fatalf("role setup: %v", err)
 		}
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DROP OWNED BY `+role)
-		_, _ = pool.Exec(context.Background(), `DROP ROLE IF EXISTS `+role)
-	})
 
 	underRole := func(tenant *string, fn func(pgx.Tx) error) error {
 		tx, err := pool.Begin(ctx)

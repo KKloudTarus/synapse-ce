@@ -80,13 +80,15 @@ func TestAUPStoreAndAuditLog(t *testing.T) {
 	}
 
 	// --- AUP acceptance audit under a NOSUPERUSER, NOBYPASSRLS runtime role ---
-	role := "aup_runtime_" + randHex(t)
+	// uniqueProbeRole owns the drop and opens its own connection for it: this test closes its
+	// pools with plain defers, and Go runs those before t.Cleanup, so a cleanup using them ran
+	// against a closed pool and leaked a cluster-global role on every run.
+	role := uniqueProbeRole(t, dsn, "aup_runtime")
 	runtimePool, err := runtimeAUPPool(ctx, pool, dsn, role)
 	if err != nil {
 		t.Fatalf("runtime role setup: %v", err)
 	}
 	defer runtimePool.Close()
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DROP ROLE "+role) })
 
 	tenantID := shared.ID("tenant-aup-" + randHex(t))
 	tenantCtx := shared.WithTenant(ctx, tenantID)
