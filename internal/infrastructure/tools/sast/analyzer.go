@@ -435,6 +435,10 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			} else {
 				matched = r.re.MatchString(text) && !r.skip(text)
 			}
+			if !matched {
+				// The concatenation that makes this sink dangerous may sit on an earlier line.
+				matched = crossLineMatch(r.id, lines, i)
+			}
 			if matched && isPHP && phpRuleOwnsGeneric(r.id, a, ext, phpText, matchText) {
 				continue
 			}
