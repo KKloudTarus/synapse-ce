@@ -17,7 +17,8 @@ func TestBodyLimitFor(t *testing.T) {
 		pattern string
 		want    int64
 	}{
-		{"unknown route falls back to the default", "POST /api/v1/engagements", defaultBodyLimit},
+		{"unregistered pattern falls back to the default", "POST /api/v1/not-a-route", defaultBodyLimit},
+		{"an ordinary JSON route takes the default", "POST /api/v1/engagements/{id}/findings", defaultBodyLimit},
 		{"empty pattern falls back to the default", "", defaultBodyLimit},
 		{"source publish keeps the archive ceiling", "POST /api/v1/projects/{key}/analyses/{id}/source", sourceUploadBodyLimit},
 		{"bundle import", "POST /api/v1/engagements/import", importBodyLimit},
@@ -47,8 +48,8 @@ func TestLimitRequestBodyRejectsOversizedBody(t *testing.T) {
 	}))
 
 	body := bytes.Repeat([]byte("a"), int(defaultBodyLimit)+4096)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements", bytes.NewReader(body))
-	req.Pattern = "POST /api/v1/engagements"
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements/e1/findings", bytes.NewReader(body))
+	req.Pattern = "POST /api/v1/engagements/{id}/findings"
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
 	if readErr == nil {
@@ -71,8 +72,8 @@ func TestLimitRequestBodyAllowsBodyUnderLimit(t *testing.T) {
 	}))
 
 	body := bytes.Repeat([]byte("a"), 512<<10)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements", bytes.NewReader(body))
-	req.Pattern = "POST /api/v1/engagements"
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements/e1/findings", bytes.NewReader(body))
+	req.Pattern = "POST /api/v1/engagements/{id}/findings"
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
 	if readErr != nil {
@@ -113,7 +114,7 @@ func TestLimitRequestBodyPassesThroughBodylessMethods(t *testing.T) {
 			handler := limitRequestBody(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				seen = r.Body
 			}))
-			req := httptest.NewRequest(method, "/api/v1/engagements", nil)
+			req := httptest.NewRequest(method, "/api/v1/engagements/e1/findings", nil)
 			original := req.Body
 			handler.ServeHTTP(httptest.NewRecorder(), req)
 			if seen != original {

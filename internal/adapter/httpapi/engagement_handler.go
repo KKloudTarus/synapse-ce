@@ -151,7 +151,9 @@ func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-	} else if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	} else if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, createEngagementMetadataLimit)).Decode(&req); err != nil {
+		// The route carries the source-archive ceiling for the multipart branch, so the JSON
+		// branch states its own bound rather than inheriting one sized for a 512 MiB upload.
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
 		return
 	}

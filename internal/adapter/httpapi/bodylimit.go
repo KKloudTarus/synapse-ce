@@ -5,9 +5,14 @@ import (
 )
 
 // Request-body ceilings for the human API plane. The agent plane sets its own caps in
-// fleet_handler.go. These are transport ceilings, not validation: a handler that needs a
-// tighter bound still applies its own http.MaxBytesReader, and an inner reader nested in
-// the outer one behaves correctly.
+// fleet_handler.go.
+//
+// These are transport ceilings, not validation. A handler may nest its own
+// http.MaxBytesReader inside this one, but nesting can only ever TIGHTEN the bound: the
+// outer reader counts every byte the inner one pulls, so a handler that wraps the body in a
+// larger reader still stops at the ceiling chosen here. Any route whose handler legitimately
+// accepts more than defaultBodyLimit must therefore be listed in routeBodyLimits, and
+// TestMultipartRoutesCarryAnUploadCeiling fails if one is not.
 const (
 	// defaultBodyLimit covers every JSON mutation route. 1 MiB is far above any request
 	// body the API defines and small enough that an authenticated client cannot exhaust
@@ -30,12 +35,18 @@ const (
 // moment it is registered.
 var routeBodyLimits = map[string]int64{
 	"POST /api/v1/projects/{key}/analyses/{id}/source": sourceUploadBodyLimit,
-	"POST /api/v1/engagements/import":                  importBodyLimit,
-	"POST /api/v1/engagements/{id}/sarif":              importBodyLimit,
-	"POST /api/v1/engagements/{id}/sbom":               importBodyLimit,
-	"POST /api/v1/engagements/{id}/evidence":           importBodyLimit,
-	"POST /api/v1/engagements/{id}/threat-model":       importBodyLimit,
-	"PUT /api/v1/engagements/{id}/threat-model":        importBodyLimit,
+	// Engagement and project creation both accept a multipart source archive on the same
+	// route that otherwise takes a small JSON body. The JSON branch of each handler bounds
+	// itself, so the large ceiling applies only to the upload it exists for.
+	"POST /api/v1/engagements":                   sourceUploadBodyLimit,
+	"POST /api/v1/projects":                      sourceUploadBodyLimit,
+	"POST /api/v1/projects/{key}/analyses":       importBodyLimit,
+	"POST /api/v1/engagements/import":            importBodyLimit,
+	"POST /api/v1/engagements/{id}/sarif":        importBodyLimit,
+	"POST /api/v1/engagements/{id}/sbom":         importBodyLimit,
+	"POST /api/v1/engagements/{id}/evidence":     importBodyLimit,
+	"POST /api/v1/engagements/{id}/threat-model": importBodyLimit,
+	"PUT /api/v1/engagements/{id}/threat-model":  importBodyLimit,
 }
 
 // bodyLimitFor returns the transport ceiling for a resolved route pattern.
