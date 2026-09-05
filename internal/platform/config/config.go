@@ -109,9 +109,12 @@ type Config struct {
 	// (FixedVersion empty – not-fixed / wont-fix / deferred) to findings, matching Trivy's
 	// --ignore-unfixed. Default false (show everything); they remain in the vuln inventory.
 	IgnoreUnfixed bool
-	// Offline, when true, omits detection sources that require network egress (the live OSV.dev
-	// source), running only offline sources – Grype's pre-synced DB and the owned advisory store.
-	// Trades some recall for a fast, air-gapped scan (no live HTTP per scan). Default false.
+	// Offline, when true, forbids network egress for a scan. It omits detection sources that require it
+	// (the live OSV.dev source), running only offline sources – Grype's pre-synced DB and the owned
+	// advisory store – AND switches off every registry resolver (npm, composer, poetry, Bundler, Maven,
+	// Gradle), the Maven Central JAR SHA-1 lookup, the KEV/EPSS and online NVD enrichers, the deps.dev
+	// and PyPI license metadata, and AI triage. Trades some recall for an air-gapped scan (no HTTP at
+	// all). Default false.
 	Offline bool
 	// MaxWorkspaceBytes caps the total size of a prepared SCA workspace: the
 	// acquirer rejects a target whose files exceed it. <=0 keeps the 2 GiB default.

@@ -79,7 +79,7 @@ synapse-cli scan <path|image-ref> [flags]
 | `--mode full\|vulnerabilities\|licenses` | What to scan. Default is full. |
 | `--fail-on critical\|high\|medium\|low\|info` | Exit non-zero if a finding at or above this severity is present. Default is high. |
 | `--image` | Treat the argument as a container image reference, pulled via crane, instead of a local path. |
-| `--offline` | Skip the live advisory source and detect with the offline database only. |
+| `--offline` | Make the scan run without network egress. Detection uses Grype's pre-synced database (and the owned advisory store) only, and every network-capable resolver and enricher is switched off: npm, composer, poetry, Bundler, Maven, Gradle, the Maven Central JAR SHA-1 lookup, KEV/EPSS, online NVD CVSS backfill, deps.dev and PyPI license metadata, and AI false-positive triage. `SYNAPSE_OFFLINE=true` does the same. Recall drops in exchange; the run makes no outbound request. Target acquisition is the one step outside the flag: a registry `--image` reference or a remote git URL is still fetched, so on an air-gapped runner point the scan at a local path or a local OCI layout. |
 | `--ignore-unfixed` | Ignore vulnerabilities that have no fix available. |
 | `--min-confidence low\|medium\|high\|very_high` | Drop findings below this confidence. Findings that carry no confidence (SAST/misconfig) are kept. Useful to cut lower-signal secret matches. |
 | `--base <ref>` | Scope line-anchored findings (SAST, secret, misconfig) to code changed vs this git ref (Clean-as-You-Code), so a repo with a backlog gates the pipeline only on what a change introduces. Dependency/license findings are not line-attributable and are kept — baseline those with `.synapseignore`. Local git repos only (not `--image`). |
