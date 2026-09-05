@@ -120,7 +120,9 @@ past the cap, so two syncs racing past the first check cannot both create a host
 as `host_inventory.host_cap_reached` and returned as 403. The `POST /api/v1/fleet/inventory/host` response carries a
 `vulnerability_scan` object with the outcome (`engagement_id`, `job_id`, `components`, or `skipped`
 with a `reason`). A scan-pipeline failure is audited as `host_inventory.vulnerability_scan_failed` and
-reported in that object; it never fails the inventory sync itself. The advisory-revision reconciler
+reported in that object; it never fails the inventory sync itself. The host asset's attributes carry the
+coverage gaps the agent declared (`coverage_gaps`, `coverage_gap_kinds`, `coverage_gap_details`), and
+the host page's Coverage gaps tab lists them with what each one means for the findings. The advisory-revision reconciler
 visits host contexts alongside projects, so a host whose packages never change still gains a finding
 when a new advisory names one of them.
 

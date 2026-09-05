@@ -192,6 +192,13 @@ func TestSyncCoverageAuditedAndDegraded(t *testing.T) {
 	if a.gaps != 2 {
 		t.Fatalf("every coverage gap must be audited, got %d", a.gaps)
 	}
+	// The domain keeps issues sorted by kind, so the attributes are deterministic across syncs.
+	if got := w.last.Attributes["coverage_gap_kinds"]; got != "not-collected,unreadable-package-db" {
+		t.Fatalf("coverage_gap_kinds = %q", got)
+	}
+	if got := w.last.Attributes["coverage_gap_details"]; got != "not-collected: listening-sockets\nunreadable-package-db: /var/lib/rpm unreadable" {
+		t.Fatalf("coverage_gap_details = %q", got)
+	}
 	if w.last.Attributes["degraded"] != "true" {
 		t.Fatalf("the host asset must record degraded=true, got %v", w.last.Attributes)
 	}

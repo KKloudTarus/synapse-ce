@@ -381,6 +381,20 @@ func attributes(inv dhi.HostInventory, degraded bool, reportingAgent string) map
 		"coverage_gaps":      strconv.Itoa(len(inv.Coverage)),
 		"reporting_agent_id": strings.TrimSpace(reportingAgent),
 	}
+	// The gaps themselves, not only their count, so the host page can say what was not inventoried
+	// and why. One kind per issue, comma separated; details newline separated as "kind: detail".
+	if len(inv.Coverage) > 0 {
+		kinds := make([]string, 0, len(inv.Coverage))
+		details := make([]string, 0, len(inv.Coverage))
+		for _, c := range inv.Coverage {
+			kinds = append(kinds, string(c.Kind))
+			if c.Detail != "" {
+				details = append(details, string(c.Kind)+": "+c.Detail)
+			}
+		}
+		attrs["coverage_gap_kinds"] = strings.Join(kinds, ",")
+		attrs["coverage_gap_details"] = strings.Join(details, "\n")
+	}
 	// Drop empty fact values so the asset attributes stay clean.
 	for k, v := range attrs {
 		if v == "" {
