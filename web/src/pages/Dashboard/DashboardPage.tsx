@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { FC } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, HelpCircle } from '@untitledui/icons'
@@ -5,13 +6,24 @@ import { ErrorState, Spinner } from '../../components/ui'
 import { Tooltip, TooltipTrigger } from '../../components/base/tooltip/tooltip'
 import { FindingsTrendChart, type ChartDatum } from '../../components/synapse/DashboardCharts'
 import { useDashboardData } from './hooks/useDashboardData'
-import { buildAttentionQueue } from './hooks/attentionQueue'
+import { buildAttentionQueue, type AttentionType } from './hooks/attentionQueue'
 import { Metric, MetricStrip } from '@/components/synapse/Metric'
 import { ChartCard } from './components/ChartCard'
 import { NeedsAttentionTable } from './components/NeedsAttentionTable'
 import { PriorityAssetsTable } from './components/PriorityAssetsTable'
 import { AssessmentActivityTable } from './components/AssessmentActivityTable'
 import { cx } from '@/utils/cx'
+
+type QueueFilter = 'all' | 'p1' | AttentionType
+
+const QUEUE_FILTERS: [QueueFilter, string][] = [
+  ['all', 'All'],
+  ['p1', 'P1'],
+  ['Scan failed', 'Scan failed'],
+  ['Coverage gap', 'Coverage gaps'],
+  ['Asset posture', 'Asset posture'],
+  ['Not scanned', 'Not scanned'],
+]
 
 export const DashboardPage: FC = () => {
   const {
@@ -31,6 +43,8 @@ export const DashboardPage: FC = () => {
     assetNames,
   } = useDashboardData()
 
+  const [queueFilter, setQueueFilter] = useState<QueueFilter>('all')
+
   if (error) {
     return (
       <div className="mx-auto max-w-[1600px]">
@@ -44,6 +58,11 @@ export const DashboardPage: FC = () => {
   }
 
   const attention = buildAttentionQueue({ assets: data.assets, engagements: data.engagements, fleet, assetNames })
+  const visibleAttention = queueFilter === 'all'
+    ? attention
+    : queueFilter === 'p1'
+      ? attention.filter((item) => item.priority === 1)
+      : attention.filter((item) => item.type === queueFilter)
 
   return (
     <div className="mx-auto max-w-[1600px] animate-fade-in space-y-6">
@@ -72,14 +91,37 @@ export const DashboardPage: FC = () => {
       </MetricStrip>
 
       {/* The queue is the page: what to act on. Full width so the issue and the next action are never
-          clipped — the two columns an operator reads first. */}
+          clipped, with a filter row so the counters above become something an operator can act on. */}
       <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs">
-        <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-3.5">
-          <h3 className="text-sm font-semibold text-primary">Needs attention</h3>
-          <span className="font-mono text-xs tabular-nums text-quaternary">{attention.length === 1 ? '1 item' : `${attention.length} items`}</span>
+        <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-secondary px-5 py-3">
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-semibold text-primary">Needs attention</h3>
+            <span className="font-mono text-xs tabular-nums text-quaternary">
+              {visibleAttention.length === attention.length ? `${attention.length} ${attention.length === 1 ? 'item' : 'items'}` : `${visibleAttention.length} of ${attention.length}`}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Filter the attention queue">
+            {QUEUE_FILTERS.map(([value, label]) => {
+              const n = value === 'all' ? attention.length : value === 'p1' ? attention.filter((i) => i.priority === 1).length : attention.filter((i) => i.type === value).length
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={queueFilter === value}
+                  onClick={() => setQueueFilter(value)}
+                  className={cx(
+                    'rounded-md px-2.5 py-1 text-xs font-semibold transition-colors',
+                    queueFilter === value ? 'bg-secondary text-primary ring-1 ring-inset ring-border' : 'text-tertiary hover:bg-secondary',
+                  )}
+                >
+                  {label}<span className="ml-1 font-mono tabular-nums opacity-70">{n}</span>
+                </button>
+              )
+            })}
+          </div>
         </header>
         <div className="flex-1">
-          <NeedsAttentionTable items={attention} loaded={Boolean(data)} />
+          <NeedsAttentionTable items={visibleAttention} loaded={Boolean(data)} onClear={queueFilter === 'all' ? undefined : () => setQueueFilter('all')} />
         </div>
       </section>
 

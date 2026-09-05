@@ -15,8 +15,27 @@ export interface AttentionItem {
   owner: string
   /** When the condition started (ISO); null when the source does not say. */
   since: string | null
+  /** When this condition is due for action, derived from `since` plus a priority SLA window. Null when
+   *  the start is unknown (e.g. a fleet coverage gap with no recorded onset). */
+  dueAt: string | null
   action: string
   to: string
+}
+
+// slaWindowMs is the time an operator has to act on a condition, by priority: P1 within a day, P2 within
+// three days, P3 within a week. A default operational SLA, not a per-tenant policy; it turns "how long has
+// this stood" (age) into "how long until it must be handled" (due), which is what orders the work.
+const slaWindowMs: Record<AttentionPriority, number> = {
+  1: 24 * 60 * 60 * 1000,
+  2: 72 * 60 * 60 * 1000,
+  3: 7 * 24 * 60 * 60 * 1000,
+}
+
+function dueAtFrom(since: string | null, priority: AttentionPriority): string | null {
+  if (!since) return null
+  const ms = Date.parse(since)
+  if (Number.isNaN(ms)) return null
+  return new Date(ms + slaWindowMs[priority]).toISOString()
 }
 
 export interface AttentionInput {
@@ -55,6 +74,7 @@ export function buildAttentionQueue({ assets, engagements, fleet, assetNames }: 
       issue: `${posture === 'critical' ? 'Critical' : 'High-risk'} security posture on a ${asset.criticality}-criticality ${asset.type.replaceAll('_', ' ')}${asset.postureExplanation ? `: ${asset.postureExplanation}` : ''}`,
       owner: asset.owner || 'Owner not set',
       since: asset.updatedAt,
+      dueAt: null,
       action: 'Open findings',
       to: `/assets/${encodeURIComponent(asset.id)}`,
     })
@@ -72,6 +92,7 @@ export function buildAttentionQueue({ assets, engagements, fleet, assetNames }: 
         issue: `Last scan failed${engagement.findingsCount ? `; ${engagement.findingsCount.total} open ${engagement.findingsCount.total === 1 ? 'finding is' : 'findings are'} from the previous run` : '; no findings recorded from a previous run'}`,
         owner,
         since: engagement.lastScanDate ?? null,
+        dueAt: null,
         action: 'Rerun scan',
         to: `/engagements/${encodeURIComponent(engagement.id)}`,
       })
@@ -84,6 +105,7 @@ export function buildAttentionQueue({ assets, engagements, fleet, assetNames }: 
         issue: 'Active engagement with no scan yet; its findings and gate state are unknown',
         owner,
         since: engagement.createdAt,
+        dueAt: null,
         action: 'Start scan',
         to: `/engagements/${encodeURIComponent(engagement.id)}`,
       })
@@ -101,6 +123,7 @@ export function buildAttentionQueue({ assets, engagements, fleet, assetNames }: 
         issue: `${count} ${label} capability ${count === 1 ? 'check' : 'checks'}; the posture of the assets behind ${count === 1 ? 'it' : 'them'} may be out of date`,
         owner: 'Fleet',
         since: null,
+        dueAt: null,
         action: 'Open fleet coverage',
         to: '/fleet',
       })
@@ -108,6 +131,9 @@ export function buildAttentionQueue({ assets, engagements, fleet, assetNames }: 
   }
   // Within a priority: exposure that already exists (posture) before a lost view of it (failed
   // scan), then coverage, then unscanned; ties by how long the condition has stood.
+  for (const item of items) {
+    item.dueAt = dueAtFrom(item.since, item.priority)
+  }
   return items.sort(
     (left, right) =>
       left.priority - right.priority ||
@@ -133,4 +159,21 @@ export function ageLabel(iso: string | null, now = Date.now()): string {
   const days = Math.floor(hours / 24)
   if (days < 14) return `${days}d`
   return `${Math.floor(days / 7)}w`
+}
+
+/** dueLabel renders the operational urgency: "Overdue 4h", "Due 6h", "Due 2d", or "" when there is no
+ *  due date. tone drives colour: overdue is critical, due within 12h is warning, otherwise neutral. */
+export function dueLabel(dueAt: string | null, now = Date.now()): { text: string; tone: 'critical' | 'warning' | 'muted' } {
+  if (!dueAt) return { text: '', tone: 'muted' }
+  const ms = Date.parse(dueAt)
+  if (Number.isNaN(ms)) return { text: '', tone: 'muted' }
+  const diff = ms - now
+  const span = (abs: number): string => {
+    const h = Math.floor(abs / (60 * 60 * 1000))
+    if (h < 1) return `${Math.max(1, Math.floor(abs / (60 * 1000)))}m`
+    if (h < 48) return `${h}h`
+    return `${Math.floor(h / 24)}d`
+  }
+  if (diff < 0) return { text: `Overdue ${span(-diff)}`, tone: 'critical' }
+  return { text: `Due ${span(diff)}`, tone: diff < 12 * 60 * 60 * 1000 ? 'warning' : 'muted' }
 }

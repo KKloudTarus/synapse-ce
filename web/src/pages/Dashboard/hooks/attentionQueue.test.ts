@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BusinessAsset, Engagement, FleetCoverageSummary } from '../../../lib/types'
-import { ageLabel, buildAttentionQueue } from './attentionQueue'
+import { ageLabel, buildAttentionQueue, dueLabel } from './attentionQueue'
 
 function asset(overrides: Partial<BusinessAsset>): BusinessAsset {
   return { id: 'a', key: 'a', name: 'Asset', description: '', type: 'system', criticality: 'high', lifecycle: 'active', owner: 'Team', metadata: {}, version: 1, createdAt: null, updatedAt: '2026-09-01T00:00:00Z', posture: 'good', ...overrides }
@@ -59,5 +59,33 @@ describe('buildAttentionQueue', () => {
     expect(ageLabel('2026-09-01T12:00:00Z', now)).toBe('4d')
     expect(ageLabel('2026-07-01T12:00:00Z', now)).toBe('9w')
     expect(ageLabel(null, now)).toBe('')
+  })
+})
+
+describe('dueLabel and SLA', () => {
+  it('sets a priority-based due date and labels overdue vs due-soon vs normal', () => {
+    const now = Date.parse('2026-09-05T12:00:00Z')
+    // A P1 asset-posture item whose condition began 20h ago: SLA 24h -> due in ~4h (due-soon warning).
+    const queue = buildAttentionQueue({
+      assets: [{ id: 'a', key: 'a', name: 'Payments', description: '', type: 'system', criticality: 'critical', lifecycle: 'active', owner: 'T', metadata: {}, version: 1, createdAt: null, updatedAt: '2026-09-04T16:00:00Z', posture: 'critical' }],
+      engagements: [],
+      fleet: null,
+      assetNames: {},
+    })
+    const p1 = queue[0]
+    expect(p1.dueAt).not.toBeNull()
+    const due = dueLabel(p1.dueAt, now)
+    expect(due.text).toMatch(/^Due /)
+    expect(due.tone).toBe('warning') // within 12h
+
+    // Overdue: due date in the past.
+    const od = dueLabel('2026-09-05T08:00:00Z', now)
+    expect(od.text).toMatch(/^Overdue /)
+    expect(od.tone).toBe('critical')
+    // Far out: neutral.
+    const far = dueLabel('2026-09-10T12:00:00Z', now)
+    expect(far.tone).toBe('muted')
+    // No due date.
+    expect(dueLabel(null, now).text).toBe('')
   })
 })
