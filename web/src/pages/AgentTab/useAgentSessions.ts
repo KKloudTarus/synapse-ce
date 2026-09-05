@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../lib/api'
+import { isFeatureDisabled } from '../../components/synapse/FeatureDisabledState'
 import type { AgentReadiness, AgentSession, PendingApproval } from '../../lib/types'
 
 export function useAgentSessions(engagementId: string) {
@@ -10,6 +11,7 @@ export function useAgentSessions(engagementId: string) {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [approvals, setApprovals] = useState<PendingApproval[]>([])
   const [readiness, setReadiness] = useState<AgentReadiness | null>(null)
+  const [disabled, setDisabled] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -23,15 +25,25 @@ export function useAgentSessions(engagementId: string) {
       setReadiness(rd)
       setError(null)
     } catch (e) {
+      // The orchestrator is optional; its routes are absent (404) when the switch
+      // is off. Report that as a disabled feature, not as a broken page.
+      if (isFeatureDisabled(e)) {
+        setDisabled(true)
+        setSessions([])
+        setError(null)
+        return
+      }
       setError(e instanceof Error ? e.message : 'Failed to load agent sessions')
     }
   }, [engagementId])
 
   useEffect(() => {
     refresh()
+    // Stop polling a feature that answered 404 once.
+    if (disabled) return
     const t = setInterval(refresh, 3000)
     return () => clearInterval(t)
-  }, [refresh])
+  }, [refresh, disabled])
 
   const startWithGoal = useCallback(
     async (g: string) => {
@@ -68,6 +80,7 @@ export function useAgentSessions(engagementId: string) {
 
   return {
     sessions,
+    disabled,
     error,
     goal,
     setGoal,

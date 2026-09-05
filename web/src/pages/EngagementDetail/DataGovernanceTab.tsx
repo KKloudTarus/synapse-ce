@@ -3,6 +3,7 @@ import { Download01, Lock01, Trash01 } from '@untitledui/icons'
 import { api } from '../../lib/api'
 import type { CurrentUser, LegalHold, PrivacyExportBundle } from '../../lib/types'
 import { Button, Card, ErrorState, Field, Input, Pill, cn } from '../../components/ui'
+import { FeatureDisabledState, isFeatureDisabled } from '../../components/synapse/FeatureDisabledState'
 import { useFetch, useMutation } from '../../hooks'
 
 const REVIEW_ROLES = ['admin', 'reviewer']
@@ -36,7 +37,21 @@ function LegalHoldCard({ engagementId, canReview }: { engagementId: string; canR
   // Do NOT swallow the fetch error: on a legal-hold/retention safety control, a failed load must not
   // render the reassuring "no hold" branch (an operator could then wrongly proceed to delete). Surface
   // the error explicitly so the hold status is never a silent false-negative.
-  const { data, loading, error, refetch } = useFetch<LegalHold[]>(() => api.listLegalHolds(), { deps: [engagementId] })
+  const [disabled, setDisabled] = useState(false)
+  const { data, loading, error, refetch } = useFetch<LegalHold[]>(
+    () =>
+      api.listLegalHolds().catch((e) => {
+        // Legal hold ships with the fleet detection ledger. A 404 means that
+        // switch is off — distinct from "the hold status could not be read",
+        // which must never be silently reassuring.
+        if (isFeatureDisabled(e)) {
+          setDisabled(true)
+          return [] as LegalHold[]
+        }
+        throw e
+      }),
+    { deps: [engagementId] },
+  )
   const [reason, setReason] = useState('')
 
   const hold = (data ?? []).find((h) => h.engagementId === engagementId && isActive(h)) ?? null
@@ -50,7 +65,14 @@ function LegalHoldCard({ engagementId, canReview }: { engagementId: string; canR
         An active hold preserves this engagement’s detection data against retention expiry and on-demand deletion.
       </p>
 
-      {loading && !data ? (
+      {disabled ? (
+        <FeatureDisabledState
+          feature="Legal hold"
+          envVar="SYNAPSE_FLEET_DETECTION_INGEST_ENABLED"
+          hint="It preserves an engagement's detection data against retention expiry and on-demand deletion."
+          icon={Lock01}
+        />
+      ) : loading && !data ? (
         <p className="text-sm text-tertiary">Loading…</p>
       ) : error && !data ? (
         <div className="space-y-3">
