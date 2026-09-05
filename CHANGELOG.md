@@ -155,6 +155,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **Documented the fleet operator-plane routes.** Fifteen shipped `/api/v1/fleet/*` operations were
+  registered by the router but absent from `api/openapi.yaml`, so no generated client could reach
+  them: retro-hunt, desired capabilities and their gaps, legal holds, privacy export, endpoint
+  processes, the asset state timeline, detection-data deletion, engagement correlation, and incident
+  risk reassessment. Each is now described with the parameters, request body, and status codes its
+  handler actually produces, including the PascalCase payloads the domain structs serialize.
+
 - **Documented engagement lifecycle route.** `PUT /api/v1/engagements/{id}/status` answered `404`:
   the transition was reachable only as `PATCH /api/v1/engagements/{id}`, which no guide described.
   Both spellings now apply the same change through the same `operate` gate, and both are described
