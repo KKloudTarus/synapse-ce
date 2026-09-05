@@ -72,7 +72,7 @@ describe('Hosts', () => {
     expect(screen.getByLabelText('Critical: 1')).toBeInTheDocument()
     expect(screen.getByLabelText('High: 2')).toBeInTheDocument()
     expect(screen.getByLabelText('Known exploited: 1')).toBeInTheDocument()
-    expect(screen.getByLabelText('Needs attention: 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('Inventory issues: 1')).toBeInTheDocument()
     expect(screen.getByRole('row', { name: 'Open host web01' })).toBeInTheDocument()
     expect(screen.getByText(/Last package set recorded/)).toBeInTheDocument()
   })

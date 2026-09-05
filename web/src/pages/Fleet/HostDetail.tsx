@@ -12,8 +12,9 @@ import { useFetch } from '../../hooks'
 import { formatFleetTime } from './fleetShared'
 import { HostScanBadge, hostDegraded, hostFindingAdvisory, hostFindingPackage, hostOS, hostScanState, hostShortName, reportedPackages } from './hostShared'
 
-type Tab = 'vulnerabilities' | 'packages'
-type SeverityFilter = 'all' | Severity
+type Tab = 'vulnerabilities' | 'packages' | 'coverage'
+type SeverityFilter = 'all' | Severity | 'unrated'
+const RATED: Severity[] = ['critical', 'high', 'medium', 'low']
 type FixFilter = 'all' | 'fixable' | 'unfixed'
 
 const FINDING_COLUMNS: Column<HostFinding>[] = [
@@ -24,7 +25,7 @@ const FINDING_COLUMNS: Column<HostFinding>[] = [
   },
   { header: 'Severity', className: 'w-24', cell: (f) => <SevBadge sev={f.severity} /> },
   {
-    header: 'CVSS / KEV',
+    header: 'CVSS',
     className: 'w-28',
     cell: (f) => (
       <span className="flex items-baseline gap-2">
@@ -126,7 +127,7 @@ function VulnerabilitiesBody({ host }: { host: HostVulnerabilities }) {
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     return host.findings.filter((f) => {
-      if (severity !== 'all' && f.severity !== severity) return false
+      if (severity === 'unrated' ? RATED.includes(f.severity) : severity !== 'all' && f.severity !== severity) return false
       if (fix === 'fixable' && !f.fixedVersion) return false
       if (fix === 'unfixed' && f.fixedVersion) return false
       if (kevOnly && !f.kev) return false
@@ -190,6 +191,8 @@ function VulnerabilitiesBody({ host }: { host: HostVulnerabilities }) {
 
   const chip = (active: boolean) => cn('rounded-md px-2.5 py-1 text-xs font-semibold transition-colors', active ? 'bg-brand-solid text-primary_on-brand' : 'text-tertiary hover:bg-secondary')
   const bySeverity = host.findings.reduce<Partial<Record<Severity, number>>>((acc, f) => { acc[f.severity] = (acc[f.severity] ?? 0) + 1; return acc }, {})
+  // Findings whose advisory carries no severity band; shown so the chips add up to the total.
+  const unrated = host.findings.length - RATED.reduce((n, s) => n + (bySeverity[s] ?? 0), 0)
   return (
     <>
       <div className="flex flex-wrap items-center gap-3 border-b border-secondary px-4 py-3">
@@ -198,10 +201,10 @@ function VulnerabilitiesBody({ host }: { host: HostVulnerabilities }) {
           <Input aria-label="Search findings" placeholder="Search advisory, package, fix" value={query} onChange={(e) => setQuery(e.target.value)} className="pl-9" />
         </div>
         <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by severity">
-          {(['all', 'critical', 'high', 'medium', 'low'] as SeverityFilter[]).map((s) => (
+          {(['all', 'critical', 'high', 'medium', 'low', 'unrated'] as SeverityFilter[]).map((s) => (
             <button key={s} type="button" aria-pressed={severity === s} className={chip(severity === s)} onClick={() => setSeverity(s)}>
               {s === 'all' ? 'All severities' : s[0].toUpperCase() + s.slice(1)}
-              {s !== 'all' && <span className="ml-1 font-mono tabular-nums opacity-70">{bySeverity[s] ?? 0}</span>}
+              {s !== 'all' && <span className="ml-1 font-mono tabular-nums opacity-70">{s === 'unrated' ? unrated : bySeverity[s] ?? 0}</span>}
             </button>
           ))}
         </div>
@@ -223,6 +226,62 @@ function VulnerabilitiesBody({ host }: { host: HostVulnerabilities }) {
         <VirtualTable items={visible} columns={FINDING_COLUMNS} rowKey={(f) => f.id} maxHeightClass="max-h-[62vh]" tableMinWidthClass="min-w-[56rem]" />
       )}
     </>
+  )
+}
+
+/** What each declared coverage gap means for the findings on this host. */
+const COVERAGE_KIND: Record<string, { label: string; effect: string }> = {
+  'unreadable-package-db': { label: 'Package database unreadable', effect: 'The package list is incomplete, so vulnerability findings for the unread packages are missing.' },
+  'no-package-db': { label: 'No package database', effect: 'No supported package database was found; no OS packages were inventoried.' },
+  'unsupported-platform': { label: 'Unsupported platform', effect: 'The agent cannot inventory this operating system; nothing here is measured.' },
+  'missing-fact': { label: 'Host fact missing', effect: 'A host fact could not be determined; identity or OS matching may be weaker.' },
+  'not-collected': { label: 'Not collected', effect: 'This dimension is not gathered in this release; its absence is declared, not implied.' },
+}
+
+function coverageGaps(host: HostVulnerabilities): { kind: string; detail: string }[] {
+  const kinds = (host.asset.attributes.coverage_gap_kinds ?? '').split(',').map((k) => k.trim()).filter(Boolean)
+  const details = new Map<string, string[]>()
+  for (const line of (host.asset.attributes.coverage_gap_details ?? '').split('\n')) {
+    const colon = line.indexOf(':')
+    if (colon <= 0) continue
+    const kind = line.slice(0, colon).trim()
+    details.set(kind, [...(details.get(kind) ?? []), line.slice(colon + 1).trim()])
+  }
+  return kinds.map((kind) => ({ kind, detail: details.get(kind)?.shift() ?? '' }))
+}
+
+function CoverageBody({ host }: { host: HostVulnerabilities }) {
+  const declared = Number(host.asset.attributes.coverage_gaps ?? '0') || 0
+  const gaps = coverageGaps(host)
+  if (declared === 0) {
+    return <OperationalState tone="success" title="Full coverage" detail="The agent read every package database it found and reported every fact it collects." />
+  }
+  if (gaps.length === 0) {
+    return (
+      <OperationalState
+        title="Gap details not recorded"
+        detail={`The agent declared ${declared} coverage ${declared === 1 ? 'gap' : 'gaps'} but this host was last synced by a server that stored the count only. The next inventory sync records each gap's kind and detail.`}
+      />
+    )
+  }
+  return (
+    <div className="divide-y divide-secondary">
+      {gaps.map((gap, i) => {
+        const meta = COVERAGE_KIND[gap.kind] ?? { label: gap.kind, effect: 'Undocumented gap kind reported by the agent.' }
+        return (
+          <div key={`${gap.kind}-${i}`} className="grid gap-x-6 gap-y-1 px-4 py-3 sm:grid-cols-[14rem_1fr]">
+            <div>
+              <div className="text-sm font-medium text-primary">{meta.label}</div>
+              <div className="font-mono text-[11px] text-quaternary">{gap.kind}</div>
+            </div>
+            <div className="min-w-0">
+              {gap.detail && <div className="truncate font-mono text-xs text-secondary" title={gap.detail}>{gap.detail}</div>}
+              <div className="text-xs text-tertiary">{meta.effect}</div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -316,7 +375,7 @@ export function HostDetail() {
 
       <Card bodyClass="p-0">
         <div className="flex items-center gap-1 border-b border-secondary px-2" role="tablist" aria-label="Host views">
-          {([['vulnerabilities', `Vulnerabilities`, host.findings.length], ['packages', 'Packages', host.packages || reported]] as [Tab, string, number][]).map(([value, label, count]) => (
+          {([['vulnerabilities', `Vulnerabilities`, host.findings.length], ['packages', 'Packages', host.packages || reported], ['coverage', 'Coverage gaps', Number(a.coverage_gaps ?? '0') || 0]] as [Tab, string, number][]).map(([value, label, count]) => (
             <button
               key={value}
               type="button"
@@ -329,7 +388,7 @@ export function HostDetail() {
             </button>
           ))}
         </div>
-        {tab === 'vulnerabilities' ? <VulnerabilitiesBody host={host} /> : <PackagesBody assetId={host.asset.id} />}
+        {tab === 'vulnerabilities' ? <VulnerabilitiesBody host={host} /> : tab === 'packages' ? <PackagesBody assetId={host.asset.id} /> : <CoverageBody host={host} />}
       </Card>
     </div>
   )

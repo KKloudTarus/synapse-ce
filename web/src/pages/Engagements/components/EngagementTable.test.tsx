@@ -82,7 +82,7 @@ describe('EngagementTable honest columns', () => {
       engagement({ lastScanDate: new Date(Date.now() - 86_400_000).toISOString(), lastScanStatus: 'failed' }),
     ])
 
-    expect(row.getByText('Failed')).toBeInTheDocument()
+    expect(row.getByText('Scan failed')).toBeInTheDocument()
     expect(row.getByText('1d ago')).toBeInTheDocument()
   })
 })

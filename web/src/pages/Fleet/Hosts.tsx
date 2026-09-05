@@ -19,7 +19,7 @@ const FILTERS: { value: StateFilter; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'vulnerable', label: 'With findings' },
   { value: 'critical', label: 'Critical or high' },
-  { value: 'attention', label: 'Needs attention' },
+  { value: 'attention', label: 'Inventory issues' },
   { value: 'no-inventory', label: 'No inventory' },
 ]
 
@@ -82,7 +82,7 @@ const COLUMNS: Column<HostRow>[] = [
   },
   {
     header: 'Open findings',
-    className: 'w-60',
+    className: 'w-80',
     cell: (r) => {
       // Findings without a severity band (unrated) are in the total but in no bucket; the shared
       // buckets show the remainder so the row adds up to the number the host page reports.
@@ -168,7 +168,7 @@ export function Hosts() {
           <Metric label="Critical" value={strip.critical} tone="critical" />
           <Metric label="High" value={strip.high} tone="high" />
           <Metric label="Known exploited" value={strip.kev} tone="critical" />
-          <Metric label="Needs attention" value={strip.attention} tone={strip.attention ? 'warning' : 'muted'} hint={strip.attention ? 'no inventory, unrecorded, or scan failed' : undefined} />
+          <Metric label="Inventory issues" value={strip.attention} tone={strip.attention ? 'warning' : 'muted'} />
         </MetricStrip>
       )}
 
@@ -237,7 +237,7 @@ export function Hosts() {
             onRowClick={(r) => navigate(`/fleet/hosts/${encodeURIComponent(r.asset.id)}`)}
             rowAriaLabel={(r) => `Open host ${r.asset.name || r.asset.key}`}
             maxHeightClass="max-h-[72vh]"
-            tableMinWidthClass="min-w-[62rem]"
+            tableMinWidthClass="min-w-[66rem]"
           />
         )}
       </Card>

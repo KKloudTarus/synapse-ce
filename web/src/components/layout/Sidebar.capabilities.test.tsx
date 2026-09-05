@@ -78,3 +78,24 @@ describe('Sidebar capability gating', () => {
     release(null)
   })
 })
+
+describe('Sidebar active route', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.resetAllMocks()
+    resetCapabilityCache()
+    vi.mocked(api.listCapabilities).mockResolvedValue(CATALOG.map((c) => ({ ...c, enabled: true })))
+  })
+
+  it('lights only the sibling that owns the route, never the Fleet parent beside it', async () => {
+    render(
+      <MemoryRouter initialEntries={['/fleet/incidents']}>
+        <Sidebar />
+      </MemoryRouter>,
+    )
+    const incidents = await screen.findByRole('link', { name: 'Incidents' })
+    const fleet = screen.getByRole('link', { name: 'Fleet' })
+    await waitFor(() => expect(incidents.className).toContain('bg-active'))
+    expect(fleet.className).not.toContain('bg-active')
+  })
+})

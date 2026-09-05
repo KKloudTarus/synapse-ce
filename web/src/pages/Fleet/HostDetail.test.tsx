@@ -28,7 +28,7 @@ const finding: HostFinding = {
 }
 
 const host: HostVulnerabilities = {
-  asset: { id: 'asset-1', kind: 'host', key: 'machine-id/abc', name: 'web01', attributes: { os: 'linux', os_version: '12', arch: 'amd64', kernel: '6.1.0-18-amd64', packages: '412', machine_id: 'abc', reporting_agent_id: 'agent-1', coverage_gaps: '4' } },
+  asset: { id: 'asset-1', kind: 'host', key: 'machine-id/abc', name: 'web01', attributes: { os: 'linux', os_version: '12', arch: 'amd64', kernel: '6.1.0-18-amd64', packages: '412', machine_id: 'abc', reporting_agent_id: 'agent-1', coverage_gaps: '2', coverage_gap_kinds: 'not-collected,unreadable-package-db', coverage_gap_details: 'not-collected: listening-sockets\nunreadable-package-db: /var/lib/rpm unreadable' } },
   engagementId: 'ctx-1',
   packages: 412,
   recordedAt: '2026-09-05T09:00:00Z',
@@ -69,7 +69,7 @@ describe('HostDetail', () => {
     expect(screen.getByLabelText('Known exploited: 1')).toBeInTheDocument()
     expect(screen.getByLabelText('Fixable: 1')).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /Packages\s*412/ })).toBeInTheDocument()
-    expect(screen.getByLabelText('Coverage gaps: 4')).toBeInTheDocument()
+    expect(screen.getByLabelText('Coverage gaps: 2')).toBeInTheDocument()
     // Advisory, package, installed and fixed version, CVSS, KEV, sources.
     expect(screen.getByText('CVE-2024-0001')).toBeInTheDocument()
     expect(screen.getByText('openssl')).toBeInTheDocument()
@@ -153,6 +153,18 @@ describe('HostDetail', () => {
     expect(screen.getByText(/HTTP 500: boom/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Hosts/ })).toHaveAttribute('href', '/fleet/hosts')
   })
+
+  it('lists the declared coverage gaps with their effect', async () => {
+    vi.mocked(api.hostVulnerabilities).mockResolvedValue(host)
+    renderPage('asset-1')
+    await screen.findByText('CVE-2024-0001')
+    fireEvent.click(screen.getByRole('tab', { name: /Coverage gaps\s*2/ }))
+    expect(screen.getByText('Package database unreadable')).toBeInTheDocument()
+    expect(screen.getByText('/var/lib/rpm unreadable')).toBeInTheDocument()
+    expect(screen.getByText(/vulnerability findings for the unread packages are missing/)).toBeInTheDocument()
+    expect(screen.getByText('Not collected')).toBeInTheDocument()
+    expect(screen.getByText('listening-sockets')).toBeInTheDocument()
+  })
 })
 
 describe('host finding helpers', () => {
@@ -167,4 +179,5 @@ describe('host finding helpers', () => {
     expect(hostFindingAdvisory({ title: 'GHSA-xxxx in pkg@1', advisoryId: '' })).toBe('GHSA-xxxx')
     expect(hostFindingAdvisory({ title: 'Plain', advisoryId: '' })).toBe('Plain')
   })
+
 })

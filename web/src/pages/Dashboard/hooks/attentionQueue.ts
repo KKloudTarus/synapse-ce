@@ -26,6 +26,8 @@ export interface AttentionInput {
   assetNames: Record<string, string>
 }
 
+const TYPE_RANK: Record<AttentionType, number> = { 'Asset posture': 0, 'Scan failed': 1, 'Coverage gap': 2, 'Not scanned': 3 }
+
 const VERDICT_LABEL: Record<string, string> = {
   stale: 'stale',
   unauthorized: 'unauthorized',
@@ -50,10 +52,10 @@ export function buildAttentionQueue({ assets, engagements, fleet, assetNames }: 
       priority: posture === 'critical' ? 1 : 2,
       type: 'Asset posture',
       subject: asset.name,
-      issue: `${posture === 'critical' ? 'Critical' : 'High-risk'} posture, ${asset.criticality} criticality`,
+      issue: `${posture === 'critical' ? 'Critical' : 'High-risk'} security posture on a ${asset.criticality}-criticality ${asset.type.replaceAll('_', ' ')}${asset.postureExplanation ? `: ${asset.postureExplanation}` : ''}`,
       owner: asset.owner || 'Owner not set',
       since: asset.updatedAt,
-      action: 'Review exposure',
+      action: 'Open findings',
       to: `/assets/${encodeURIComponent(asset.id)}`,
     })
   }
@@ -67,7 +69,7 @@ export function buildAttentionQueue({ assets, engagements, fleet, assetNames }: 
         priority: 1,
         type: 'Scan failed',
         subject: engagement.name,
-        issue: 'The last scan failed; findings are from the previous run',
+        issue: `Last scan failed${engagement.findingsCount ? `; ${engagement.findingsCount.total} open ${engagement.findingsCount.total === 1 ? 'finding is' : 'findings are'} from the previous run` : '; no findings recorded from a previous run'}`,
         owner,
         since: engagement.lastScanDate ?? null,
         action: 'Rerun scan',
@@ -79,7 +81,7 @@ export function buildAttentionQueue({ assets, engagements, fleet, assetNames }: 
         priority: 3,
         type: 'Not scanned',
         subject: engagement.name,
-        issue: 'Active engagement, no scan has run',
+        issue: 'Active engagement with no scan yet; its findings and gate state are unknown',
         owner,
         since: engagement.createdAt,
         action: 'Start scan',
@@ -96,17 +98,20 @@ export function buildAttentionQueue({ assets, engagements, fleet, assetNames }: 
         priority: 2,
         type: 'Coverage gap',
         subject: 'Fleet',
-        issue: `${count} ${label} capability ${count === 1 ? 'check' : 'checks'}`,
+        issue: `${count} ${label} capability ${count === 1 ? 'check' : 'checks'}; the posture of the assets behind ${count === 1 ? 'it' : 'them'} may be out of date`,
         owner: 'Fleet',
         since: null,
-        action: 'Review coverage',
+        action: 'Open fleet coverage',
         to: '/fleet',
       })
     }
   }
+  // Within a priority: exposure that already exists (posture) before a lost view of it (failed
+  // scan), then coverage, then unscanned; ties by how long the condition has stood.
   return items.sort(
     (left, right) =>
       left.priority - right.priority ||
+      TYPE_RANK[left.type] - TYPE_RANK[right.type] ||
       sinceMillis(left.since) - sinceMillis(right.since) ||
       left.subject.localeCompare(right.subject),
   )

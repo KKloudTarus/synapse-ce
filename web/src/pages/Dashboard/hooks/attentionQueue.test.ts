@@ -40,9 +40,12 @@ describe('buildAttentionQueue', () => {
     const failed = queue.find((item) => item.type === 'Scan failed')!
     expect(failed.owner).toBe('Payments')
     expect(failed.action).toBe('Rerun scan')
+    expect(failed.issue).toBe('Last scan failed; no findings recorded from a previous run')
     expect(failed.to).toBe('/engagements/failed')
     const gap = queue.find((item) => item.type === 'Coverage gap')!
-    expect(gap.issue).toBe('2 stale capability checks')
+    expect(gap.issue).toBe('2 stale capability checks; the posture of the assets behind them may be out of date')
+    expect(queue[0].action).toBe('Open findings')
+    expect(queue[0].issue).toBe('Critical security posture on a critical-criticality system')
   })
 
   it('is empty when nothing needs action and the fleet is unavailable', () => {

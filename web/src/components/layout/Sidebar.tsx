@@ -181,6 +181,14 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
         hasChildren &&
         children?.some((child) => location.pathname === child.to || location.pathname.startsWith(`${child.to}/`)),
       )
+      // A sibling whose route sits under this one (Fleet › Hosts, Fleet › Incidents) owns the
+      // active state when it matches; the parent must not light up beside it.
+      const shadowed = items.some(
+        (other) =>
+          other.to !== to &&
+          other.to.startsWith(`${to}/`) &&
+          (location.pathname === other.to || location.pathname.startsWith(`${other.to}/`)),
+      )
 
       const panelId = hasChildren ? `nav-group-${to.replace(/\W+/g, '-')}` : undefined
 
@@ -201,7 +209,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
               onNavigate?.()
             }}
             className={({ isActive: navActive }) => {
-              const isActive = navActive && !isSubRouteActive
+              const isActive = navActive && !isSubRouteActive && !shadowed
 
               return cn(
                 'group relative flex h-10 items-center rounded-lg text-sm font-semibold select-none transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
@@ -214,7 +222,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
             }}
           >
             {({ isActive: navActive }) => {
-              const isActive = navActive && !isSubRouteActive
+              const isActive = navActive && !isSubRouteActive && !shadowed
 
               return (
                 <>

@@ -1,4 +1,4 @@
-import { Pill, cn } from '../../components/ui'
+import { SCAN_STATE_LABEL, ScanStatusPill, type ScanState } from '../../components/synapse/ScanStatusPill'
 import type { HostFinding, HostRow, HostScan } from '../../lib/types'
 
 /** Package and installed version of an SCA finding. The pipeline titles them "<advisory> in <pkg>@<version>";
@@ -40,7 +40,7 @@ export function hostDegraded(row: Pick<HostRow, 'asset'>): boolean {
  * - `pending`: a set is recorded and no scan job exists yet.
  * - `running` | `succeeded` | `failed`: the latest scan job.
  */
-export type HostScanState = 'none' | 'unrecorded' | 'pending' | 'running' | 'succeeded' | 'failed'
+export type HostScanState = ScanState
 
 export function hostScanState(row: Pick<HostRow, 'engagementId' | 'lastScan' | 'packages' | 'asset'>): HostScanState {
   if (row.lastScan) return row.lastScan.status
@@ -49,38 +49,19 @@ export function hostScanState(row: Pick<HostRow, 'engagementId' | 'lastScan' | '
   return reported > 0 ? 'unrecorded' : 'none'
 }
 
-const SCAN_LABEL: Record<HostScanState, string> = {
-  none: 'No package inventory',
-  unrecorded: 'Packages not recorded',
-  pending: 'Scan pending',
-  running: 'Scanning',
-  succeeded: 'Scanned',
-  failed: 'Scan failed',
-}
-
-// Scan state is workflow, not risk: neutral, brand and success tones; only a failure borrows the error tone.
-const SCAN_CLASS: Record<HostScanState, string> = {
-  none: 'bg-secondary text-tertiary',
-  unrecorded: 'bg-warning-primary text-warning-primary',
-  pending: 'bg-secondary text-secondary',
-  running: 'bg-brand-primary text-brand-secondary',
-  succeeded: 'bg-success-primary text-success-primary',
-  failed: 'bg-error-primary text-error-primary',
-}
-
 export function HostScanBadge({ row }: { row: Pick<HostRow, 'engagementId' | 'lastScan' | 'packages' | 'asset'> }) {
   const state = hostScanState(row)
   const title = row.lastScan?.error || (row.lastScan ? `Stage: ${row.lastScan.stage}` : undefined)
-  return <Pill className={cn(SCAN_CLASS[state])}><span title={title}>{SCAN_LABEL[state]}</span></Pill>
+  return <ScanStatusPill state={state} title={title} />
 }
 
 export function scanLabel(scan: HostScan | null): string {
-  if (!scan) return SCAN_LABEL.none
-  return SCAN_LABEL[scan.status]
+  if (!scan) return SCAN_STATE_LABEL.none
+  return SCAN_STATE_LABEL[scan.status]
 }
 
 export function scanStateLabel(state: HostScanState): string {
-  return SCAN_LABEL[state]
+  return SCAN_STATE_LABEL[state]
 }
 
 /** The packages the host reported on its last inventory, whether or not a set was recorded. */

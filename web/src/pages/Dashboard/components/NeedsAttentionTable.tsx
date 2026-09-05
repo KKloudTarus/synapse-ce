@@ -31,11 +31,11 @@ export const NeedsAttentionTable: FC<{ items: AttentionItem[]; loaded: boolean }
           <tr className="border-b border-secondary text-[11px] font-semibold uppercase tracking-wide text-quaternary">
             <th scope="col" className="w-14 px-4 py-2.5">Prio</th>
             <th scope="col" className="w-28 px-3 py-2.5">Type</th>
-            <th scope="col" className="w-[13rem] px-3 py-2.5">Asset / engagement</th>
+            <th scope="col" className="w-[11rem] px-3 py-2.5">Asset / engagement</th>
             <th scope="col" className="px-3 py-2.5">Issue</th>
-            <th scope="col" className="w-28 px-3 py-2.5">Owner</th>
+            <th scope="col" className="w-24 px-3 py-2.5">Owner</th>
             <th scope="col" className="w-14 px-3 py-2.5 text-right">Age</th>
-            <th scope="col" className="w-32 px-4 py-2.5 text-right">Next action</th>
+            <th scope="col" className="w-36 px-4 py-2.5 text-right">Next action</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-secondary">
@@ -48,7 +48,7 @@ export const NeedsAttentionTable: FC<{ items: AttentionItem[]; loaded: boolean }
               </td>
               <td className="truncate px-3 py-2.5 text-xs text-secondary" title={item.type}>{item.type}</td>
               <td className="truncate px-3 py-2.5 font-medium text-primary" title={item.subject}>{item.subject}</td>
-              <td className="truncate px-3 py-2.5 text-xs text-tertiary" title={item.issue}>{item.issue}</td>
+              <td className="px-3 py-2.5 text-xs leading-5 text-tertiary"><span className="line-clamp-2" title={item.issue}>{item.issue}</span></td>
               <td className="truncate px-3 py-2.5 text-xs text-tertiary" title={item.owner}>{item.owner}</td>
               <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums text-tertiary" title={item.since ?? undefined}>{ageLabel(item.since) || '—'}</td>
               <td className="px-4 py-2.5 text-right">

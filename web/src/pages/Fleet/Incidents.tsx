@@ -106,7 +106,7 @@ export function Incidents() {
       {all && (
         <MetricStrip ariaLabel="Incident summary">
           <Metric label="Open" value={strip.open} tone={strip.open ? 'high' : 'muted'} hint="new, open, reopened" />
-          <Metric label="Critical open" value={strip.critical} tone="critical" hint="critical severity, not resolved" />
+          <Metric label="Critical unresolved" value={strip.critical} tone="critical" hint="critical severity, not resolved or closed" />
           <Metric label="In progress" value={strip.inProgress} hint="triaged, investigating, contained, remediated" />
           <Metric label="Resolved" value={strip.resolved} hint="resolved, closed" />
         </MetricStrip>
@@ -164,7 +164,8 @@ export function Incidents() {
         ) : filter === 'all' ? (
           <OperationalState
             title="No active incidents"
-            detail="Runtime detections are evaluated as they arrive. An incident appears here when correlation promotes a detection group: the correlator runs on every sealed detection batch and on POST /api/v1/fleet/incidents/correlate."
+            detail="Detections from enrolled agents are correlated automatically as they arrive; an incident opens here when related detections cross the promotion threshold. Agent health and detection coverage are on the Fleet page."
+            action={<Button variant="secondary" onClick={() => navigate('/fleet')}>Open fleet coverage</Button>}
           />
         ) : (
           <OperationalState

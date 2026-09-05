@@ -80,7 +80,9 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   loading, and framed empty and error states that say what fills the table and how to retry. The Hosts
   list shows the open total next to the severity buckets (with an unrated remainder so the row adds up
   to the host page), folds the recorded time into the Scan column, and reports "Needs attention" as one
-  count. Low severity is blue in both themes; green now only marks a healthy or successful state.
+  count, and gains a Coverage gaps tab that lists what the agent could not inventory and why (the
+  host asset now records `coverage_gap_kinds` and `coverage_gap_details`, not only the count). Low
+  severity is blue in both themes; green now only marks a healthy or successful state.
 
 ### Fixed
 
