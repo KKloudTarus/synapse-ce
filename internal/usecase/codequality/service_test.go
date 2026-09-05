@@ -435,3 +435,86 @@ func TestServiceRealXMLAnalyzerIntegration(t *testing.T) {
 	check("xml:undeclared-prefix", finding.KindReliability)
 	check("xml:not-well-formed", finding.KindReliability)
 }
+
+// TestAnalyzerKindsMapToDomainKinds pins the full kind vocabulary the deterministic analyzers can emit.
+// The astwalk language packs speak "security" (HTML security rules) and "maintainability" (CSS rules) on
+// top of the domain "quality"/"reliability"/"sast"; every one of them must resolve to a domain kind. The
+// unknown case is the regression guard: a kind added to a language pack later must degrade, not crash.
+func TestAnalyzerKindsMapToDomainKinds(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want finding.Kind
+	}{
+		{name: "quality", raw: "quality", want: finding.KindQuality},
+		{name: "maintainability", raw: "maintainability", want: finding.KindQuality},
+		{name: "reliability", raw: "reliability", want: finding.KindReliability},
+		{name: "sast", raw: "sast", want: finding.KindSAST},
+		{name: "security", raw: "security", want: finding.KindSAST},
+		{name: "mixed case", raw: "Security", want: finding.KindSAST},
+		{name: "padded", raw: " reliability ", want: finding.KindReliability},
+		{name: "unknown falls back", raw: "accessibility", want: finding.KindQuality},
+		{name: "empty falls back", raw: "", want: finding.KindQuality},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := domainKind(tc.raw); got != tc.want {
+				t.Fatalf("domainKind(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+			if !tc.want.Valid() {
+				t.Fatalf("domainKind(%q) produced an invalid domain kind %q", tc.raw, tc.want)
+			}
+		})
+	}
+}
+
+// TestAnalyzeAcceptsEveryAnalyzerKind runs the service over raw findings carrying every kind an analyzer
+// can report, through both the primary and the structural analyzer slots. Before the fix the structural
+// slot failed the whole run with `unknown code-analysis finding kind "security"` on any tree with HTML.
+func TestAnalyzeAcceptsEveryAnalyzerKind(t *testing.T) {
+	raws := []ports.CodeAnalysisRawFinding{
+		{Kind: "quality", RuleID: "quality-todo-comment", Severity: shared.SeverityLow, Title: "todo", File: "a.js", Line: 1},
+		{Kind: "maintainability", RuleID: "css:important-overuse", Severity: shared.SeverityLow, Title: "important", File: "a.css", Line: 2},
+		{Kind: "reliability", RuleID: "js:always-true", Severity: shared.SeverityMedium, Title: "always true", File: "a.js", Line: 3},
+		{Kind: "sast", RuleID: "js:eval", CWE: "95", Severity: shared.SeverityHigh, Title: "eval", File: "a.js", Line: 4},
+		{Kind: "security", RuleID: "html:javascript-url", CWE: "79", Severity: shared.SeverityHigh, Title: "javascript url", File: "a.html", Line: 5},
+		{Kind: "some-future-kind", RuleID: "html:future", Severity: shared.SeverityLow, Title: "future", File: "a.html", Line: 6},
+	}
+	for _, slot := range []string{"primary", "structural"} {
+		t.Run(slot, func(t *testing.T) {
+			var svc *Service
+			if slot == "primary" {
+				svc = New(fakeAnalyzer{raws: raws})
+			} else {
+				svc = New(fakeAnalyzer{}, WithStructuralAnalyzer(fakeAnalyzer{raws: raws}))
+			}
+			got, err := svc.Analyze(context.Background(), "/repo")
+			if err != nil {
+				t.Fatalf("Analyze: %v", err)
+			}
+			if len(got) != len(raws) {
+				t.Fatalf("got %d findings, want %d", len(got), len(raws))
+			}
+			want := map[string]finding.Kind{
+				"quality-todo-comment":  finding.KindQuality,
+				"css:important-overuse": finding.KindQuality,
+				"js:always-true":        finding.KindReliability,
+				"js:eval":               finding.KindSAST,
+				"html:javascript-url":   finding.KindSAST,
+				"html:future":           finding.KindQuality,
+			}
+			for rule, wantKind := range want {
+				f := byRule(got, rule)
+				if f == nil {
+					t.Fatalf("rule %q missing from findings", rule)
+				}
+				if f.Kind != wantKind {
+					t.Errorf("rule %q kind = %q, want %q", rule, f.Kind, wantKind)
+				}
+				if !strings.HasPrefix(f.DedupKey, "cq:"+string(wantKind)+":") {
+					t.Errorf("rule %q dedup key = %q, want the resolved domain kind in the key", rule, f.DedupKey)
+				}
+			}
+		})
+	}
+}

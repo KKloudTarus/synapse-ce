@@ -102,6 +102,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 - Standalone CLI scans bind the default tenant before persisting results.
 - Release-signing CI uses the corrected provenance action and uploads the checksum signature once.
+- `synapse-cli quality` no longer fails with `unknown code-analysis finding kind` on any tree that
+  contains HTML or CSS. The AST language packs report `security` and `maintainability` rule classes,
+  which now map to the SAST and quality finding kinds; an unrecognized class degrades to quality
+  instead of failing the command.
 
 ## [0.1.8] - 2026-08-15
 

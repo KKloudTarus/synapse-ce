@@ -117,30 +117,22 @@ func (s *Service) analyze(ctx context.Context, root string) ([]finding.Finding, 
 		return nil, nil, nil, false, fmt.Errorf("code analysis: %w", err)
 	}
 	truncated := analysis.Truncated
-	appendRaws := func(raws []ports.CodeAnalysisRawFinding) error {
+	appendRaws := func(raws []ports.CodeAnalysisRawFinding) {
 		for _, r := range raws {
-			if r.Kind != "quality" && r.Kind != "reliability" && r.Kind != "sast" {
-				return fmt.Errorf("unknown code-analysis finding kind %q", r.Kind)
-			}
 			if !s.includeTestSmells && r.Severity == shared.SeverityInfo && isTestPath(r.File) {
 				continue // low-value info smell in test code – suppressed by default (see WithTestScopedSmells)
 			}
 			out = append(out, newFinding(r.Kind, r.RuleID, r.CWE, r.Severity, r.Title, r.Description, r.File, r.Line))
 		}
-		return nil
 	}
-	if err := appendRaws(analysis.Findings); err != nil {
-		return nil, nil, nil, false, err
-	}
+	appendRaws(analysis.Findings)
 	if s.structural != nil {
 		structural, serr := s.structural.Analyze(ctx, root)
 		if serr != nil {
 			return nil, nil, nil, false, fmt.Errorf("structural analysis: %w", serr)
 		}
 		truncated = truncated || structural.Truncated
-		if err := appendRaws(structural.Findings); err != nil {
-			return nil, nil, nil, false, err
-		}
+		appendRaws(structural.Findings)
 	}
 
 	if s.dup != nil {
@@ -213,19 +205,38 @@ func (s *Service) analyze(ctx context.Context, root string) ([]finding.Finding, 
 	return out, dupReport, compReport, truncated, nil
 }
 
+// analyzerKinds maps the kind vocabulary the deterministic analyzers emit onto the three domain kinds
+// this producer publishes. The mapping is many-to-one on purpose: the AST sidecar's language packs speak
+// their own vocabulary ("security" for the HTML security rules, "maintainability" for the CSS rules)
+// while the pure-Go rule engine speaks the domain one. Extending a language pack must not require a
+// change here, so domainKind falls back instead of failing.
+var analyzerKinds = map[string]finding.Kind{
+	"quality":         finding.KindQuality,
+	"maintainability": finding.KindQuality,
+	"reliability":     finding.KindReliability,
+	"sast":            finding.KindSAST,
+	"security":        finding.KindSAST,
+}
+
+// domainKind resolves the kind an analyzer reported to a domain finding kind. An unrecognized kind is a
+// maintainability signal, never an error: a rule added to a language pack must not be able to fail a
+// whole run (that was the "unknown code-analysis finding kind" crash on any tree containing HTML or CSS).
+func domainKind(raw string) finding.Kind {
+	if k, ok := analyzerKinds[strings.ToLower(strings.TrimSpace(raw))]; ok {
+		return k
+	}
+	return finding.KindQuality
+}
+
 // newFinding maps a raw code-quality signal to a first-party finding. The DedupKey
 // (cq:<kind>:<rule>:<file>:<line>) keeps this producer separate from pattern-SAST while preserving the
-// SARIF exporter physical location. The finding is TRANSIENT (read-only CLI/SARIF producer): EngagementID
-// and Audit are intentionally unset; SCA scan wiring populates them before persistence.
+// SARIF exporter physical location. The kind in the key is the RESOLVED domain kind, so the key vocabulary
+// stays the three domain kinds whatever an analyzer calls its rule class. The finding is TRANSIENT
+// (read-only CLI/SARIF producer): EngagementID and Audit are intentionally unset; SCA scan wiring
+// populates them before persistence.
 func newFinding(kind, ruleID, cwe string, sev shared.Severity, title, desc, file string, line int) finding.Finding {
-	dedup := "cq:" + kind + ":" + ruleID + ":" + file + ":" + strconv.Itoa(line)
-	k := finding.KindQuality
-	switch kind {
-	case "reliability":
-		k = finding.KindReliability
-	case "sast":
-		k = finding.KindSAST
-	}
+	k := domainKind(kind)
+	dedup := "cq:" + string(k) + ":" + ruleID + ":" + file + ":" + strconv.Itoa(line)
 	return finding.Finding{
 		ID:             deterministicID(dedup),
 		Title:          fmt.Sprintf("%s (%s:%d)", title, file, line),
