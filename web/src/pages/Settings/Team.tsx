@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { api } from '../../lib/api'
 import type { UserRole } from '../../lib/types'
 import { Button, Card, cn, EmptyState, ErrorState, Input, Pill, Select, Spinner } from '../../components/ui'
+import { useToast } from '../../components/synapse/Toast'
 import { useUserList } from '../../hooks'
 
 export function Team() {
@@ -60,6 +61,7 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
   const [issued, setIssued] = useState<{ name: string; key: string } | null>(null)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState<string | null>(null)
+  const { notify } = useToast()
 
   async function submit() {
     if (!name.trim()) { setErr('Name required'); return }
@@ -70,8 +72,11 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
       setIssued({ name: user.name, key: apiKey })
       setName('')
       onCreated()
+      notify(`${user.name} added as ${role}. Copy the API key now: it is shown once.`, 'success')
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed')
+      const message = e instanceof Error ? e.message : 'Failed'
+      setErr(message)
+      notify(message, 'error')
     } finally {
       setBusy(false)
     }
@@ -83,6 +88,7 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
       await copyText(issued.key)
       setCopied(true)
       setCopyError(null)
+      notify('API key copied to the clipboard.', 'success')
     } catch {
       // Clipboard writes reject in non-secure contexts or when the permission is
       // denied — say so instead of leaving the button silently unchanged.
@@ -116,12 +122,18 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
       </div>
       {err && <span className="text-xs text-critical">{err}</span>}
       {issued && (
-        <div className="flex items-center gap-2 rounded-md border border-secondary bg-secondary/40 px-2 py-1.5">
-          <Key01 className="size-3.5 text-medium shrink-0" />
-          <code className="flex-1 truncate font-mono text-[11px] text-primary">{issued.key}</code>
-          <button type="button" onClick={copyKey} className="text-xs text-brand-secondary hover:underline shrink-0">
-            {copied ? 'Copied' : 'Copy'}
-          </button>
+        <div className="space-y-1 rounded-md border border-secondary bg-secondary/40 px-2 py-1.5">
+          <div className="flex items-center gap-2">
+            <Key01 className="size-3.5 text-medium shrink-0" />
+            <code className="flex-1 truncate font-mono text-[11px] text-primary">{issued.key}</code>
+            <button type="button" onClick={copyKey} className="text-xs text-brand-secondary hover:underline shrink-0">
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          {/* The server never returns this key again, so say so where it is read. */}
+          <p className="pl-5 text-[11px] font-medium text-medium">
+            Shown once. Copy it now: {issued.name}'s key cannot be retrieved again.
+          </p>
         </div>
       )}
       {copyError && <span className="text-xs text-critical">{copyError}</span>}
