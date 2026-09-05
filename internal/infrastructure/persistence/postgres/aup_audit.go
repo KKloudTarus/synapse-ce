@@ -258,8 +258,24 @@ func (l *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
 
 // recordOnce performs one locked read-head → chain → insert attempt. A 23505 unique violation
 // propagates (wrapped) so Record can retry.
+//
+// When the caller is already inside a tenant transaction (TenantTransactionRunner.Run binds one
+// onto the context), the entry is appended on THAT transaction rather than a private one. That is
+// what makes the state change and its audit record atomic: a rolled-back business write can no
+// longer leave a committed audit row claiming it happened, and a committed write can no longer
+// lose its record because a separate audit transaction failed afterwards. Outside a bound
+// transaction the audit log opens its own, as before.
 func (l *AuditLog) recordOnce(ctx context.Context, e ports.AuditEntry) error {
 	tenantID, tenantBound := shared.TenantFrom(ctx)
+	if tenantBound {
+		bound, isBound, err := contextTenantTx(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		if isBound {
+			return appendOn(ctx, bound, tenantID, true, e)
+		}
+	}
 	tx, err := l.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("audit tx: %w", err)
@@ -270,21 +286,27 @@ func (l *AuditLog) recordOnce(ctx context.Context, e ports.AuditEntry) error {
 			return fmt.Errorf("audit tx: set tenant: %w", err)
 		}
 	}
-	var rlsEnforced bool
-	if err := tx.QueryRow(ctx, "SELECT row_security_active('audit_log'::regclass)").Scan(&rlsEnforced); err != nil {
-		return fmt.Errorf("audit tx: inspect RLS: %w", err)
-	}
-	if tenantBound && rlsEnforced {
-		if err := appendTenantAudit(ctx, tx, tenantID.String(), e); err != nil {
-			return err
-		}
-	} else if err := appendAudit(ctx, tx, e); err != nil {
+	if err := appendOn(ctx, tx, tenantID, tenantBound, e); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("audit commit: %w", err)
 	}
 	return nil
+}
+
+// appendOn writes one entry on an existing transaction, choosing the tenant-chained or the
+// global-chained form the same way whether the transaction was opened here or handed in by the
+// caller. It never commits: whoever owns the transaction does.
+func appendOn(ctx context.Context, tx pgx.Tx, tenantID shared.ID, tenantBound bool, e ports.AuditEntry) error {
+	var rlsEnforced bool
+	if err := tx.QueryRow(ctx, "SELECT row_security_active('audit_log'::regclass)").Scan(&rlsEnforced); err != nil {
+		return fmt.Errorf("audit tx: inspect RLS: %w", err)
+	}
+	if tenantBound && rlsEnforced {
+		return appendTenantAudit(ctx, tx, tenantID.String(), e)
+	}
+	return appendAudit(ctx, tx, e)
 }
 
 // appendAudit extends the audit chain within an existing transaction.

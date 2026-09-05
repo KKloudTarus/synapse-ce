@@ -64,10 +64,14 @@ func (s *Service) Request(ctx context.Context, p agent.ProposedAction) (agent.Ap
 		if err := s.store.Decide(ctx, dec); err != nil {
 			return agent.ApprovalDecision{}, fmt.Errorf("record auto-approval: %w", err)
 		}
-		s.record(ctx, p, "agent.approval.auto", dec.DecidedBy)
+		if err := s.record(ctx, p, "agent.approval.auto", dec.DecidedBy); err != nil {
+			return agent.ApprovalDecision{}, fmt.Errorf("record auto-approval decision: %w", err)
+		}
 		return dec, nil
 	}
-	s.record(ctx, p, "agent.approval.requested", p.SessionID.String())
+	if err := s.record(ctx, p, "agent.approval.requested", p.SessionID.String()); err != nil {
+		return agent.ApprovalDecision{}, fmt.Errorf("record approval request: %w", err)
+	}
 	_, dec, err := s.store.Get(ctx, p.ID)
 	return dec, err // pending
 }
@@ -87,7 +91,9 @@ func (s *Service) Decide(ctx context.Context, human string, actionID shared.ID, 
 		return agent.ApprovalDecision{}, err // ErrConflict if already decided
 	}
 	if a, _, err := s.store.Get(ctx, actionID); err == nil {
-		s.record(ctx, a, "agent.approval."+string(state), human)
+		if err := s.record(ctx, a, "agent.approval."+string(state), human); err != nil {
+			return agent.ApprovalDecision{}, fmt.Errorf("record approval decision: %w", err)
+		}
 	}
 	return dec, nil
 }
@@ -110,7 +116,9 @@ func (s *Service) SweepExpired(ctx context.Context, engagementID shared.ID) (int
 		}
 		dec := agent.ApprovalDecision{ActionID: a.ID, State: agent.ApprovalTimeout, Reason: "approval timed out (fail-closed)", DecidedAt: now}
 		if err := s.store.Decide(ctx, dec); err == nil {
-			s.record(ctx, a, "agent.approval.timeout", "system")
+			if rerr := s.record(ctx, a, "agent.approval.timeout", "system"); rerr != nil {
+				return n, fmt.Errorf("record approval timeout: %w", rerr)
+			}
 			n++
 			// Re-drive the suspended session so it sees the denial and fails fast (no hang).
 			// If the re-enqueue fails the action is already durably timeout-denied (safe); the
@@ -165,8 +173,11 @@ func (s *Service) RunSweeper(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func (s *Service) record(ctx context.Context, p agent.ProposedAction, action, actor string) {
-	_ = s.audit.Record(ctx, ports.AuditEntry{
+// record appends the approval decision to the audit chain. An approval decision is the
+// human gate in front of an agent action, so the decision and its record are one unit: the
+// error is returned rather than dropped, and every caller propagates it.
+func (s *Service) record(ctx context.Context, p agent.ProposedAction, action, actor string) error {
+	return s.audit.Record(ctx, ports.AuditEntry{
 		Actor:  actor,
 		Action: action,
 		Target: p.Target.Value,

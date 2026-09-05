@@ -628,8 +628,10 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/engagements/import", rt.authz(userdom.PermOperate, rt.importBundle))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/findings/{fid}/retests", rt.authz(userdom.PermView, rt.withEngTenant(rt.listRetests)))
 	mux.HandleFunc("POST /api/v1/engagements/{id}/findings/{fid}/retests", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.recordRetest)))
-	// Audit is oversight data and is NOT yet tenant-scoped (global), so it is gated to the
-	// sign-off capability (reviewer/admin) rather than the view floor.
+	// Audit is oversight data: reads are tenant-scoped by the store (Postgres enforces it with
+	// the audit_log RLS policy from migration 0086; the file store filters on the bound tenant),
+	// and the route is gated to the sign-off capability (reviewer/admin) rather than the view
+	// floor. Legacy v1 rows predate tenant chaining and are visible to no tenant by design.
 	mux.HandleFunc("GET /api/v1/audit", rt.authz(userdom.PermReview, rt.listAudit))
 	mux.HandleFunc("GET /api/v1/audit/verify", rt.authz(userdom.PermReview, rt.verifyAudit))
 	mux.HandleFunc("GET /api/v1/me", rt.currentUser)
@@ -752,7 +754,7 @@ func (rt *Router) Handler() http.Handler {
 	human := rt.auth.Middleware(public, rt.requireAUP(aupExempt, routes))
 	// Attach a method-aware route pattern before auth/AUP can reject a known human
 	// route. ServeMux returns an empty pattern for unknown paths and method mismatches.
-	human = annotateRoutePattern(routes, human)
+	human = annotateRoutePattern(routes, limitRequestBody(human))
 	var complete http.Handler
 	if rt.fleet == nil {
 		complete = normalizePath(human)

@@ -16,11 +16,44 @@ func Run(ctx context.Context, addr string, handler http.Handler, log *slog.Logge
 	return RunPair(ctx, addr, handler, "", nil, log)
 }
 
+// Timeouts bound a connection's lifetime. Zero fields take the package defaults.
+//
+// ReadHeaderTimeout is the slowloris guard and is always applied. WriteTimeout in Go
+// covers the span from the end of the request headers to the end of the response write,
+// so it also bounds reading a large request body: the default is generous enough for a
+// retained source archive on a slow link while still reaping a stuck connection.
+// ReadTimeout is deliberately left unset for that same reason.
+type Timeouts struct {
+	ReadHeader time.Duration
+	Write      time.Duration
+	Idle       time.Duration
+}
+
+const (
+	defaultReadHeaderTimeout = 10 * time.Second
+	defaultWriteTimeout      = 10 * time.Minute
+	defaultIdleTimeout       = 120 * time.Second
+)
+
+func (t Timeouts) withDefaults() Timeouts {
+	if t.ReadHeader <= 0 {
+		t.ReadHeader = defaultReadHeaderTimeout
+	}
+	if t.Write <= 0 {
+		t.Write = defaultWriteTimeout
+	}
+	if t.Idle <= 0 {
+		t.Idle = defaultIdleTimeout
+	}
+	return t
+}
+
 // Listener describes one HTTP listener in a coordinated server group.
 type Listener struct {
-	Name    string
-	Addr    string
-	Handler http.Handler
+	Name     string
+	Addr     string
+	Handler  http.Handler
+	Timeouts Timeouts
 }
 
 // RunPair serves the API and an optional metrics listener under one coordinated
@@ -56,7 +89,14 @@ func RunListeners(ctx context.Context, listeners []Listener, log *slog.Logger) e
 		if name == "" {
 			name = "http server"
 		}
-		servers = append(servers, namedServer{name: name, srv: &http.Server{Addr: listener.Addr, Handler: listener.Handler, ReadHeaderTimeout: 10 * time.Second}})
+		timeouts := listener.Timeouts.withDefaults()
+		servers = append(servers, namedServer{name: name, srv: &http.Server{
+			Addr:              listener.Addr,
+			Handler:           listener.Handler,
+			ReadHeaderTimeout: timeouts.ReadHeader,
+			WriteTimeout:      timeouts.Write,
+			IdleTimeout:       timeouts.Idle,
+		}})
 	}
 
 	errCh := make(chan error, len(servers))

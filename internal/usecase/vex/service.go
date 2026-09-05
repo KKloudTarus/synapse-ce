@@ -83,7 +83,11 @@ func (s *Service) Apply(ctx context.Context, actor string, tenantID, engagementI
 			}
 			*f = updated
 			res.Applied++
-			_ = s.audit.Record(ctx, ports.AuditEntry{
+			// The status change and its audit record are one unit: a VEX statement that
+			// silently retires a finding with no attributable record is exactly the case
+			// the append-only audit chain exists to prevent, so an audit failure fails the
+			// whole apply rather than leaving an unrecorded status change behind.
+			if err := s.audit.Record(ctx, ports.AuditEntry{
 				Actor: actor, Action: "finding.vex", Target: f.ID.String(),
 				Metadata: map[string]string{
 					"engagement":    engagementID.String(),
@@ -93,7 +97,9 @@ func (s *Service) Apply(ctx context.Context, actor string, tenantID, engagementI
 					"justification": st.Justification,
 				},
 				At: s.clock.Now(),
-			})
+			}); err != nil {
+				return res, fmt.Errorf("record vex status change for finding %s: %w", f.ID, err)
+			}
 		}
 	}
 	return res, nil
