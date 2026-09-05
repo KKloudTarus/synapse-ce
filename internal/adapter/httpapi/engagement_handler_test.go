@@ -202,8 +202,19 @@ func TestGetEngagementHandler(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body["ID"] != "eng-1" {
-		t.Errorf("id = %v, want eng-1", body["ID"])
+	// Engagements serialize in snake_case, like every other resource.
+	if body["id"] != "eng-1" {
+		t.Errorf("id = %v, want eng-1", body["id"])
+	}
+	for _, legacy := range []string{"ID", "TenantID", "Status", "Audit"} {
+		if _, ok := body[legacy]; ok {
+			t.Errorf("response still carries the Go field name %q", legacy)
+		}
+	}
+	for _, key := range []string{"tenant_id", "name", "client", "status", "scope", "roe", "live_recon_enabled", "created_at", "updated_at"} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("response is missing %q: %v", key, body)
+		}
 	}
 
 	// Unknown id -> 404.

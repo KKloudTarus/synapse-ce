@@ -106,6 +106,21 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Changed
 
+- **Breaking: engagements and projects serialize in snake_case.** Both aggregates were written to
+  the wire straight from their domain structs, so they answered with Go field names (`ID`,
+  `TenantID`, `SourceBinding`, `Scope.InScope`, `Audit.CreatedAt`) while scans, analyses, findings,
+  and every newer resource answered in snake_case, and a client had to special-case per resource.
+  Engagement and project responses now go through explicit view types in the HTTP layer:
+  `id`, `tenant_id`, `name`, `client`, `status`, `scope.in_scope[].kind`, `scope.in_scope[].value`,
+  `roe`, `authorized_from`, `authorized_to`, `live_recon_enabled`, `source_binding`,
+  `default_profile_by_lang`, `gate_id`, and the former nested `Audit` flattened to `created_at` and
+  `updated_at`. Go cannot emit two names for one field, so the old keys are gone rather than
+  duplicated. Affected routes: `GET|POST /api/v1/engagements`, `GET /api/v1/engagements/{id}`,
+  `PATCH /api/v1/engagements/{id}`, `PUT /api/v1/engagements/{id}/status|scope|authorization-window|roe|live-recon`,
+  `POST /api/v1/engagements/import`, `GET /api/v1/appsec/assets/{id}/engagements`, and
+  `GET|POST /api/v1/projects`, `GET /api/v1/projects/{key}`, `PUT /api/v1/projects/{key}/gate`.
+  `api/openapi.yaml` documents the new shape.
+
 - **Workflow-oriented sidebar navigation.** Reorganizes shipped dashboard capabilities around security operations, exposure management, engineering, runtime, and governance; separates engagement creation from the active navigation state; and removes unavailable placeholder destinations.
 
 - **Breaking Asset API consolidation.** Removed `POST|GET /api/v1/assets/services`, `asset.BusinessService`, and the unused `member_of` fleet edge. Business-level Asset reads and writes now use `/api/v1/appsec/assets`; technical/fleet `/api/v1/assets` remains unchanged. Existing business-service rows retain their IDs and owners and receive stable keys during migration.

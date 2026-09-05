@@ -186,7 +186,7 @@ func (rt *Router) getBusinessAssetEngagements(w http.ResponseWriter, r *http.Req
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, rows)
+	writeJSON(w, http.StatusOK, toEngagementViews(rows))
 }
 func (rt *Router) assignEngagementBusinessAsset(w http.ResponseWriter, r *http.Request) {
 	var req struct {

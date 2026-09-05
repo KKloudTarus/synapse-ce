@@ -14,9 +14,8 @@ info:
     After operator authentication, every endpoint except the AUP endpoints also
     requires that the current Acceptable Use Policy has been accepted, else `403`.
 
-    Note: legacy response objects may use PascalCase where they are serialized
-    directly from domain structs. Endpoints with explicit response schemas,
-    including the rule catalog API, use the field names documented below.
+    Response objects use snake_case. A few endpoints that are still serialized directly from a
+    domain struct answer in PascalCase; each is documented with the field names it actually returns.
 
 servers:
 - url: http://localhost:8080
@@ -4318,31 +4317,64 @@ components:
 
     Engagement:
       type: object
-      description: Serialized from the domain struct (PascalCase keys).
+      required: [id, tenant_id, name, client, status, scope, roe, live_recon_enabled, created_at, updated_at]
       properties:
-        ID: {type: string}
-        Name: {type: string}
-        Client: {type: string}
-        Status: {type: string, enum: [draft, active, completed, archived]}
-        Scope:
+        id: {type: string}
+        tenant_id: {type: string}
+        project_id:
+          type: string
+          description: Present when the engagement is the analysis context of a code-quality Project.
+        business_asset_id:
+          type: string
+          description: Present when a primary business-level Asset is assigned.
+        name: {type: string}
+        client: {type: string}
+        status: {type: string, enum: [draft, active, completed, archived]}
+        scope:
           type: object
+          required: [in_scope, out_of_scope]
           properties:
-            InScope:
+            in_scope:
+              type: array
+              items: {$ref: "#/components/schemas/ScopeTarget"}
+            out_of_scope:
+              type: array
+              items: {$ref: "#/components/schemas/ScopeTarget"}
+        roe:
+          type: object
+          description: Rules of engagement the execution gate enforces alongside scope and the window.
+          required: [allowed_tool_classes, blackouts]
+          properties:
+            allowed_tool_classes:
+              type: array
+              description: Empty means no restriction.
+              items: {type: string}
+            blackouts:
               type: array
               items:
                 type: object
+                required: [from, to]
                 properties:
-                  Kind: {type: string}
-                  Value: {type: string}
-            OutOfScope:
-              type: array
-              items:
-                type: object
-                properties:
-                  Kind: {type: string}
-                  Value: {type: string}
-        AuthorizedFrom: {type: [string, "null"], format: date-time}
-        AuthorizedTo: {type: [string, "null"], format: date-time}
+                  from: {type: string, format: date-time}
+                  to: {type: string, format: date-time}
+        authorized_from:
+          type: [string, "null"]
+          format: date-time
+          description: Null is open on that side of the authorization window.
+        authorized_to: {type: [string, "null"], format: date-time}
+        timezone:
+          type: string
+          description: IANA zone the operator entered the window in; display and audit only.
+        live_recon_enabled: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    ScopeTarget:
+      type: object
+      required: [kind, value]
+      properties:
+        kind: {type: string, enum: [domain, ip, cidr, url, repo, image, cloud_account]}
+        value: {type: string}
 
     CreateManualFindingRequest:
       type: object
