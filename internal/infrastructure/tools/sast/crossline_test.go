@@ -188,6 +188,44 @@ end
 			rule: "rb:open-redirect", want: false,
 		},
 		{
+			name: "arrow function boundary ends the walk",
+			file: "f.js",
+			content: `const build = (id) => {
+  const sql = "SELECT " + id;
+  return sql;
+};
+
+const run = (conn) => {
+  conn.execute(sql);
+};
+`,
+			rule: "generic-sql-dynamic-execute", want: false,
+		},
+		{
+			name: "a sibling nested function does not supply the evidence",
+			file: "h.js",
+			content: `function handler(req, db) {
+  const query = "SELECT 1";
+  function audit() {
+    const query = "SELECT " + req.query.id;
+    return query;
+  }
+  db.execute(query);
+}
+`,
+			rule: "generic-sql-dynamic-execute", want: false,
+		},
+		{
+			name: "a nested block inside the same function still resolves",
+			file: "g.py",
+			content: `def handler(cursor, uid):
+    if uid:
+        query = "SELECT * FROM t WHERE id = %s" % uid
+        cursor.execute(query)
+`,
+			rule: "generic-sql-dynamic-execute", want: true,
+		},
+		{
 			name: "redirect to a raw request value is still an open redirect",
 			file: "e.rb",
 			content: `class SessionsController < ApplicationController

@@ -73,31 +73,35 @@ var vendorDirs = map[string]bool{
 	"dist": true, "build": true, "third_party": true, "thirdparty": true, "external": true,
 }
 
-// thirdPartyBannerRe matches the header a distributed JavaScript library carries: a copyright, a
-// licence grant, or a library-and-version line. The Rails asset pipeline is the case that matters,
-// because a copied jQuery or Bootstrap sits directly in app/assets/javascripts with nothing in its
-// path to mark it third-party, while the application's own scripts in the same directory carry no
-// such banner. Checking the file's own head separates the two without a library name list.
-var thirdPartyBannerRe = regexp.MustCompile(`(?i)(@license|@copyright|licen[sc]ed under|released under|copyright\s+(?:\(c\)|©|\d{4})|\(c\)\s*\d{4}|all rights reserved|\bv\d+\.\d+(?:\.\d+)?\b.*\|)`)
+// A distributed JavaScript library announces itself in its header, and the announcement has a
+// recognisable shape: a licence, plus something that identifies the project, such as a version or a
+// home page. Matching a bare copyright line is not enough, because that is also the most common
+// header on FIRST-PARTY corporate source, and skipping those is the exact failure this whole
+// heuristic exists to avoid.
+//
+// The residual error is real and runs both ways. A first-party file that carries a full open-source
+// header, version and project URL included, is skipped; a vendored file copied in with its header
+// stripped is scanned. Neither is silent: an excluded file is counted in SkippedFiles and surfaced
+// as a scan warning, so the reader can see the scan did not cover the whole tree.
+var (
+	// bannerLicenceRe is distribution language, or the name of a licence.
+	bannerLicenceRe = regexp.MustCompile(`(?i)(licen[sc]ed under|released under|dual licen[sc]ed|\bMIT\b|\bGPL|\bBSD\b|\bISC\b|Apache License|Mozilla Public)`)
+	// bannerCopyrightRe is an ownership line.
+	bannerCopyrightRe = regexp.MustCompile(`(?i)(copyright\s+(?:\(c\)|©|\d{4})|\(c\)\s*\d{4}|all rights reserved)`)
+	// bannerProjectRe identifies the project rather than its owner: a release version or a home page.
+	bannerProjectRe = regexp.MustCompile(`(?i)(\bv\d+\.\d+(?:\.\d+)?\b|https?://)`)
+	// bannerTagRe is a documentation tag only a distributed package writes.
+	bannerTagRe = regexp.MustCompile(`(?i)@(?:license|copyright)\b`)
+)
 
-// bundledAssetLine reports whether any line is long enough to mark the file as build output. It is
-// applied only to web assets under an asset directory, never to first-party source elsewhere: a
-// generated loader carries lines of many kilobytes, and the scanner's own per-line cap would read
-// only the first few thousand bytes of one anyway, so what it reports about such a file is noise.
-func bundledAssetLine(lines []string) bool {
-	for _, line := range lines {
-		if len(line) >= assetBundleLineBytes {
-			return true
-		}
-	}
-	return false
-}
-
-// thirdPartyBanner reports whether the head of the file declares it as a distributed library. Only
-// comment text counts, so a copyright string inside application code is not a banner. Lines inside
-// a block comment count whether or not they are decorated with a leading star, because the usual
-// library header writes its copyright as plain prose between the delimiters.
+// thirdPartyBanner reports whether the head of the file declares it as a distributed library.
+//
+// Markers are accumulated across the whole head comment rather than required on one line, because a
+// real library header spreads them over several: the project and version on one, the home page on
+// the next, the copyright below that. Only comment text counts, and lines inside a block comment
+// count whether or not they carry a leading star, which is how most such headers are written.
 func thirdPartyBanner(lines []string) bool {
+	var licence, copyright, project bool
 	inBlock := false
 	for _, line := range lines[:min(len(lines), bannerProbeLines)] {
 		trimmed := strings.TrimSpace(line)
@@ -110,7 +114,26 @@ func thirdPartyBanner(lines []string) bool {
 		if strings.Contains(trimmed, "*/") {
 			inBlock = false
 		}
-		if commented && thirdPartyBannerRe.MatchString(trimmed) {
+		if !commented {
+			continue
+		}
+		if bannerTagRe.MatchString(trimmed) {
+			return true
+		}
+		licence = licence || bannerLicenceRe.MatchString(trimmed)
+		copyright = copyright || bannerCopyrightRe.MatchString(trimmed)
+		project = project || bannerProjectRe.MatchString(trimmed)
+	}
+	return (licence || copyright) && project
+}
+
+// bundledAssetLine reports whether any line is long enough to mark the file as build output. It is
+// applied only to web assets under an asset directory, never to first-party source elsewhere: a
+// generated loader carries lines of many kilobytes, and the scanner's own per-line cap would read
+// only the first few thousand bytes of one anyway, so what it reports about such a file is noise.
+func bundledAssetLine(lines []string) bool {
+	for _, line := range lines {
+		if len(line) >= assetBundleLineBytes {
 			return true
 		}
 	}
@@ -183,6 +206,9 @@ func looksMinified(lines []string) bool {
 		}
 	}
 	probe := min(len(lines), minifiedProbeLines)
+	if probe == 0 {
+		return false // no content to judge; the caller already skips empty files, so this is a guard
+	}
 	total := 0
 	for _, line := range lines[:probe] {
 		total += len(line)
@@ -297,6 +323,9 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 			return nil
 		}
 		if skippedSourceFile(path) {
+			// Counted like every other policy exclusion. A .min.js dropped on its name is exactly
+			// as invisible to the reader as one dropped on its content, so the report must say so.
+			skippedFiles++
 			return nil
 		}
 		rel, relErr := filepath.Rel(root, path)

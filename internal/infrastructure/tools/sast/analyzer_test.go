@@ -1066,7 +1066,11 @@ func TestSkipsVendoredMinifiedAndGeneratedFiles(t *testing.T) {
 		{name: "third_party tree", rel: "third_party/lib/x.go", content: "import \"crypto/md5\"\n", want: false},
 		{name: "bower_components tree", rel: "bower_components/x/x.js", content: "var h = CryptoJS.MD5(x);\n", want: false},
 		{name: "library banner under assets", rel: "app/assets/javascripts/jquery.plugin.js", content: "/*\n Fancy Plugin v2.1.0 | http://example.invalid | MIT Licensed\n*/\nvar h = CryptoJS.MD5(x);\n", want: false},
-		{name: "copyright banner under assets", rel: "app/assets/javascripts/widget.js", content: "/*\n Widget\n Copyright 2013 Someone Else\n Released under the MIT license\n*/\nvar h = CryptoJS.MD5(x);\n", want: false},
+		{name: "copyright banner under assets", rel: "app/assets/javascripts/widget.js", content: "/*\n Widget v1.4.0\n Copyright 2013 Someone Else\n Released under the MIT license\n*/\nvar h = CryptoJS.MD5(x);\n", want: false},
+		// A bare corporate header is the commonest header on FIRST-PARTY source. It names an owner
+		// and nothing else, so it must not read as a distributed library.
+		{name: "corporate copyright header is first-party", rel: "static/js/app.js", content: "/*\n * Copyright 2026 Acme Inc. All rights reserved.\n */\nvar h = CryptoJS.MD5(x);\n", want: true},
+		{name: "corporate licence header is first-party", rel: "static/js/app.js", content: "/*\n * Copyright 2026 Acme Inc.\n * Licensed under the Apache License, Version 2.0\n */\nvar h = CryptoJS.MD5(x);\n", want: true},
 		{name: "vendor directory under assets", rel: "app/assets/javascripts/vendor/thing.js", content: "var h = CryptoJS.MD5(x);\n", want: false},
 		{name: "build output line under assets", rel: "public/js/loader.js", content: "var h = CryptoJS.MD5(x);\n" + strings.Repeat("z", 5000) + "\n", want: false},
 		{name: "css under public with a banner", rel: "public/theme.css", content: "/* Theme v1.2.0 | MIT Licensed | example.invalid */\n/* CryptoJS.MD5 */\nbody { color: red }\n", want: false},
@@ -1108,6 +1112,12 @@ func TestReportSeparatesExclusionsFromTruncation(t *testing.T) {
 		report, err := New().AnalyzeSourceReport(context.Background(), root)
 		if err != nil {
 			t.Fatalf("analyze: %v", err)
+		}
+		// Both exclusions count: the .min.js dropped on its name and the generated file dropped on
+		// its banner. A file dropped on its name is exactly as invisible to the reader as one
+		// dropped on its content.
+		if report.SkippedFiles != 2 {
+			t.Errorf("SkippedFiles = %d, want 2 (the .min.js and the generated file)", report.SkippedFiles)
 		}
 		if report.SkippedFiles == 0 {
 			t.Error("SkippedFiles = 0; an excluded file must be reported, else a dropped file is silent")

@@ -111,6 +111,11 @@ func crossLineMatch(ruleID, ext string, lines []string, at int) bool {
 		evidence = sqlConcatBuildOrRequestRe
 	}
 	sinkIndent := leadingIndent(lines[at])
+	// crossedNested records that the walk has passed the boundary of a definition nested at the
+	// sink's own level. Anything indented deeper than the sink from there back belongs to that
+	// nested scope, not to the sink's, so a `function audit() { const query = ... }` sitting beside
+	// the sink cannot supply the sink's evidence.
+	crossedNested := false
 	start := max(0, at-crossLineLookback)
 	for j := at - 1; j >= start && len(pending) > 0; j-- {
 		prev := lines[j]
@@ -119,6 +124,13 @@ func crossLineMatch(ruleID, ext string, lines []string, at int) bool {
 		}
 		if startsEnclosingDefinition(prev, sinkIndent) {
 			return false // a different function's assignments are not this sink's data flow
+		}
+		if indent := leadingIndent(prev); indent >= sinkIndent &&
+			(definitionStartRe.MatchString(prev) || blockEndRe.MatchString(prev)) {
+			crossedNested = true
+		}
+		if crossedNested && leadingIndent(prev) > sinkIndent {
+			continue // inside the nested scope the walk just left
 		}
 		m := crossLineAssignRe.FindStringSubmatch(prev)
 		if m == nil || !pending[m[1]] {
@@ -157,14 +169,27 @@ func leadingIndent(line string) int {
 }
 
 // definitionStartRe matches the start of a function, method or class in the languages the
-// cross-line sinks cover.
-var definitionStartRe = regexp.MustCompile(`^\s*(?:(?:async\s+)?def|func|function|class|module|sub|public|private|protected|static)\b|^\s*[A-Za-z_$][\w$]*\s*(?:=|:)\s*(?:async\s+)?function\b|^\s*[A-Za-z_$][\w$]*\s*\([^)]*\)\s*\{\s*$`)
+// cross-line sinks cover, including the two JavaScript forms that are not spelled `function`: a
+// function expression bound to a name, and an arrow function.
+var definitionStartRe = regexp.MustCompile(
+	`^\s*(?:(?:async\s+)?def|func|function|class|module|sub|public|private|protected|static)\b` +
+		`|^\s*(?:const|let|var)?\s*[A-Za-z_$][\w$]*\s*(?:=|:)\s*(?:async\s+)?function\b` +
+		`|^\s*(?:const|let|var)?\s*[A-Za-z_$][\w$]*\s*(?:=|:)\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>` +
+		`|^\s*[A-Za-z_$][\w$]*\s*\([^)]*\)\s*\{\s*$`)
+
+// blockEndRe matches a line that only closes a block. In a brace language the previous scope ends
+// there, so it bounds the walk even when the definition that opened it is spelled in a form
+// definitionStartRe does not model.
+var blockEndRe = regexp.MustCompile(`^\s*[})\]]+;?\s*$`)
 
 // startsEnclosingDefinition reports whether prev opens a definition that encloses or precedes the
 // sink rather than sitting inside the sink's own body. An indentation no deeper than the sink's own
 // means the sink cannot be inside it, so the walk has left the sink's function.
 func startsEnclosingDefinition(prev string, sinkIndent int) bool {
-	return leadingIndent(prev) < sinkIndent && definitionStartRe.MatchString(prev)
+	if leadingIndent(prev) >= sinkIndent {
+		return false
+	}
+	return definitionStartRe.MatchString(prev) || blockEndRe.MatchString(prev)
 }
 
 // crossLineSinkIdents returns the sink call's bare-identifier arguments.
