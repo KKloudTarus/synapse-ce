@@ -296,6 +296,12 @@ func (s *Service) Revert(ctx context.Context, actionID shared.ID, target engagem
 	return rec, nil
 }
 
+// ListByState returns the tenant's response actions in a state (from ctx tenant), for the operator's
+// view of what is admitted-but-not-applied — the same set the kill switch cancels.
+func (s *Service) ListByState(ctx context.Context, state State) ([]Record, error) {
+	return s.store.ListByState(ctx, state)
+}
+
 // HaltResponses cancels every pending (admitted-but-not-yet-applied) response action for the tenant,
 // exactly as the kill switch halts offensive work. It is the ResponseHalter the #418 kill switch drives,
 // so its signature matches that seam. A single operator action, audited with the operator + reason.

@@ -99,7 +99,9 @@ and Kubernetes estates:
 - A **columnar telemetry tier** retains raw events with a retention/cost model for retro-hunting.
 - **Governed response actions** (isolate host, quarantine file, stop process) run under the *same*
   admission model as exploitation: server-side authorization, a human-approved sealed evidence
-  record, argv-only execution, a mandatory reversal, and a declared blast radius.
+  record, argv-only execution, a mandatory reversal, and a declared blast radius. The plan, apply,
+  revert and list routes live under `/api/v1/blueteam/response`; the default executor records the full
+  governed ledger without a host effect, and the kill switch cancels pending actions.
 - **Purple-team coverage** measures which techniques would actually be detected by joining
   emulation-expected detections with what actually fired, and reports the gap as a first-class number.
 

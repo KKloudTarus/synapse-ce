@@ -9,6 +9,16 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Governed defensive response is operable.** The response subsystem (issue #425) was fully modelled
+  — three reversible action kinds, an admission gate, a blast-radius check, a telemetry-verified
+  post-condition — but had no route and no caller. It is now wired: `POST
+  /api/v1/blueteam/engagements/{id}/response/{plan,apply}`, `POST /api/v1/blueteam/response/{id}/revert`
+  and `GET /api/v1/blueteam/response` drive the full admission -> human approval -> apply -> verify ->
+  revert ledger through the same gate exploitation and DAST use, and the `/api/v1/redteam/halt` kill
+  switch now cancels pending response actions. The default executor records every state without a host
+  effect; a real host executor stays a deliberate, review-gated extension point, so the platform never
+  applies a real isolation without an explicit execution-safety decision.
+
 - **Engagement rows carry their findings and their last scan.** `GET /api/v1/engagements` now
   returns `findings_count` (open findings of every kind by severity) and `last_scan_date` with
   `last_scan_status` on every row, read in two batched queries (one GROUP BY over the rows' findings,

@@ -162,6 +162,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachproof"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
+	responseuc "github.com/KKloudTarus/synapse-ce/internal/usecase/response"
 	riskstoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/riskstoryuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
@@ -308,6 +309,7 @@ func main() {
 	var attackPathStore ports.AttackPathStore
 	var scannedImageStore ports.ScannedImageStore
 	var workOrderStore ports.WorkOrderStore
+	var responseStore ports.ResponseStore
 	var fleetAgentStore ports.FleetAgentStore
 	var agentSigningKeyStore ports.AgentSigningKeyStore // A0.2 signing-key registry (A3 resolve+verify)
 	var telemetryTransportStore interface {
@@ -514,6 +516,7 @@ func main() {
 		attackPathStore = postgres.NewAttackPathStore(pool)
 		scannedImageStore = postgres.NewScannedImageStore(pool)
 		workOrderStore = postgres.NewWorkOrderRepository(pool)
+		responseStore = postgres.NewResponseRepository(pool)
 		fleetAgentStore = postgres.NewFleetAgentRepository(pool)
 		agentSigningKeyStore = postgres.NewAgentSigningKeyRepository(pool)
 		telemetryTransportStore, err = postgres.NewTelemetryTransportRepository(pool)
@@ -589,6 +592,7 @@ func main() {
 		attackPathStore = memory.NewAttackPathStore()
 		scannedImageStore = memory.NewScannedImageStore()
 		workOrderStore = memory.NewWorkOrderStore()
+		responseStore = memory.NewResponseStore()
 		fleetAgentStore = memory.NewFleetAgentStore()
 		agentSigningKeyStore = memory.NewAgentSigningKeyStore()
 		telemetryTransportStore = memory.NewTelemetryTransportStore()
@@ -1957,6 +1961,23 @@ func main() {
 		// in-flight offensive work order. Wired only where a work order store exists, because a halt
 		// endpoint that accepts a request and stops nothing is the worst possible failure for this
 		// control -- an unwired route 404s instead, which an operator can see.
+		// Governed defensive response (#425): the SAME admission gate exploitation and DAST use, an
+		// argv-only executor, and an append-only ledger. The executor is the SimulationExecutor by
+		// default: it drives the full admission -> human approval -> apply -> telemetry-verify -> revert
+		// loop and records every state, but executes NOTHING on a host. A real host executor is a
+		// deliberate, review-gated extension point (see internal/usecase/response/simulation.go); wiring
+		// it crosses the execution-safety boundary and is left to an explicit operator decision.
+		var responseSvc *responseuc.Service
+		if responseStore != nil {
+			rs, rerr := responseuc.NewService(safetyGate, responseuc.SimulationExecutor{}, responseStore, auditLog, clock)
+			if rerr != nil {
+				log.Error("response service init failed", "err", rerr)
+				os.Exit(1)
+			}
+			responseSvc = rs
+			router.SetResponse(responseSvc, ids)
+			log.Info("governed defensive response ENABLED", "routes", "POST /api/v1/blueteam/engagements/{id}/response/{plan,apply}, POST /api/v1/blueteam/response/{id}/revert", "executor", "simulation (no host effect)")
+		}
 		if killSwitch, kerr := offensivepolicyuc.NewKillSwitch(workOrderStore, auditLog, nil, func() time.Time { return clock.Now().UTC() }); kerr != nil {
 			log.Error("offensive kill switch init failed", "err", kerr)
 			os.Exit(1)
@@ -1970,8 +1991,13 @@ func main() {
 			// Third layer: the LLM agent loop. A run holds no work order and is not a chain, so without
 			// this the halt stopped everything except the thing actively choosing the next action.
 			killSwitch.SetAgentHalter(agentRunRegistry)
+			// Fourth layer: pending defensive-response actions. A halt cancels admitted-but-not-applied
+			// responses so the switch stops the whole estate, offensive and defensive, in one action.
+			if responseSvc != nil {
+				killSwitch.SetResponseHalter(responseSvc)
+			}
 			router.SetOffensiveKillSwitch(killSwitch)
-			log.Info("offensive kill switch ENABLED", "route", "POST /api/v1/redteam/halt", "bound", offensivepolicyuc.HaltBound.String(), "chain_registry", true, "agent_registry", true)
+			log.Info("offensive kill switch ENABLED", "route", "POST /api/v1/redteam/halt", "bound", offensivepolicyuc.HaltBound.String(), "chain_registry", true, "agent_registry", true, "response_registry", responseSvc != nil)
 		}
 		// Optional certificate identity (#408): when a control-plane CA is configured, enrolment
 		// with a CSR issues a client certificate. Fail closed on a misconfigured CA.

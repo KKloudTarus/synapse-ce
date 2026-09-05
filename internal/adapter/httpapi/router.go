@@ -80,6 +80,8 @@ type Router struct {
 	scanJobs               ports.ScanJobStore         // optional; nil ⇒ engagement list rows carry no last scan
 	alerts                 alertService               // optional; nil ⇒ operator alerting routes are not registered
 	offensivePolicy        *offensivepolicy.Register  // optional; nil ⇒ the policy register route is not registered
+	responses              responseService            // optional; nil ⇒ governed defensive-response routes are not registered (#425)
+	responseIDs            ports.IDGenerator          // set with responses; mints the server-authoritative action id
 	cspm                   *cspm.Service              // optional; nil ⇒ CSPM routes are not registered
 	businessAssets         businessAssetService       // optional; nil ⇒ business-level Asset routes are not registered
 	attackPaths            attackPathService          // optional; nil ⇒ attack-path routes are not registered
@@ -549,6 +551,15 @@ func (rt *Router) routes() *http.ServeMux {
 	}
 	if rt.offensivePolicy != nil {
 		mux.HandleFunc("GET /api/v1/redteam/policy", rt.authz(userdom.PermView, rt.getOffensivePolicy))
+	}
+	if rt.responses != nil {
+		// Governed defensive response (#425): plan (dry run), apply, revert, list. PermOperate to act,
+		// PermView to list; a machine approver is refused inside the use case, and the kill switch cancels
+		// pending actions.
+		mux.HandleFunc("POST /api/v1/blueteam/engagements/{id}/response/plan", rt.authz(userdom.PermOperate, rt.planResponse))
+		mux.HandleFunc("POST /api/v1/blueteam/engagements/{id}/response/apply", rt.authz(userdom.PermOperate, rt.applyResponse))
+		mux.HandleFunc("POST /api/v1/blueteam/response/{id}/revert", rt.authz(userdom.PermOperate, rt.revertResponse))
+		mux.HandleFunc("GET /api/v1/blueteam/response", rt.authz(userdom.PermView, rt.listResponses))
 	}
 	mux.HandleFunc("GET /api/v1/engagements", rt.authz(userdom.PermView, rt.listEngagements))
 	mux.HandleFunc("GET /api/v1/engagements/{id}", rt.authz(userdom.PermView, rt.getEngagement))

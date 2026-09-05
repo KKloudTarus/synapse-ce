@@ -1464,6 +1464,83 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
 
+  /api/v1/blueteam/engagements/{id}/response/plan:
+    parameters: [{$ref: '#/components/parameters/EngagementId'}]
+    post:
+      tags: [blueteam]
+      operationId: planResponse
+      summary: Dry-run a governed defensive response action
+      description: >
+        Enumerates exactly what a response action (isolate_host, quarantine_file, stop_process) would do
+        — the argv-only apply and its mandatory reversal — and executes NOTHING. Validates the kind and
+        target, so an unknown kind is a 400 here. Registered only when the response subsystem is wired.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ResponseActionRequest'}}}
+      responses:
+        '200': {description: The plan, content: {application/json: {schema: {$ref: '#/components/schemas/ResponsePlan'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/blueteam/engagements/{id}/response/apply:
+    parameters: [{$ref: '#/components/parameters/EngagementId'}]
+    post:
+      tags: [blueteam]
+      operationId: applyResponse
+      summary: Apply a governed defensive response action
+      description: >
+        Applies a response action to an in-scope target through the SAME admission gate exploitation and
+        DAST use: server-side scope authorization, a recorded human approver (a machine identity is
+        refused), and a blast-radius check on the executed effect. The action id is server-minted. A
+        second-approval requirement answers 202. The default executor performs no host effect; a real
+        host executor is a deliberate, review-gated extension.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ResponseActionRequest'}}}
+      responses:
+        '200': {description: The applied action record, content: {application/json: {schema: {$ref: '#/components/schemas/ResponseRecord'}}}}
+        '202': {description: Recorded pending a second human approval}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/blueteam/response/{id}/revert:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}, description: The response action id to revert}]
+    post:
+      tags: [blueteam]
+      operationId: revertResponse
+      summary: Revert an applied defensive response action
+      description: >
+        Reverses an applied action through the same admission gate and audit — a reversal is a
+        first-class governed action. Only an applied action can be reverted, and the target must match
+        the action's target.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ResponseRevertRequest'}}}
+      responses:
+        '200': {description: The reverted action record, content: {application/json: {schema: {$ref: '#/components/schemas/ResponseRecord'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/blueteam/response:
+    get:
+      tags: [blueteam]
+      operationId: listResponses
+      summary: List the tenant's response actions in a state
+      description: >
+        The tenant's response actions in a state (default pending) — the admitted-but-not-applied set the
+        kill switch cancels.
+      parameters:
+        - {name: state, in: query, required: false, schema: {type: string, enum: [pending, applied, reverted, cancelled, violation]}, description: 'Filter by state (default: pending)'}
+      responses:
+        '200': {description: Response actions, content: {application/json: {schema: {$ref: '#/components/schemas/ResponseList'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
   /api/v1/assets/{assetID}/packages:
     parameters: [{$ref: '#/components/parameters/HostAssetId'}]
     get:
@@ -5003,6 +5080,45 @@ components:
         delivered: {type: integer}
         failed: {type: integer}
         audit_failed: {type: integer}
+    ResponseActionRequest:
+      type: object
+      required: [kind, target]
+      properties:
+        kind: {type: string, enum: [isolate_host, quarantine_file, stop_process], description: The response action kind; each has a mandatory typed reversal.}
+        target: {type: string, description: The asset id the action affects; must be in the engagement scope.}
+        target_kind: {type: string, description: 'The scope-entry kind the target is authorized as (default: ip).'}
+    ResponseRevertRequest:
+      type: object
+      required: [target]
+      properties:
+        target: {type: string}
+        target_kind: {type: string}
+    ResponsePlanStep:
+      type: object
+      properties:
+        label: {type: string}
+        argv: {type: array, items: {type: string}}
+        blast_radius: {type: string}
+    ResponsePlan:
+      type: object
+      properties:
+        kind: {type: string}
+        target: {type: string}
+        steps: {type: array, items: {$ref: '#/components/schemas/ResponsePlanStep'}}
+    ResponseRecord:
+      type: object
+      properties:
+        id: {type: string}
+        kind: {type: string}
+        target: {type: string}
+        state: {type: string, enum: [pending, applied, reverted, cancelled, violation]}
+        approver: {type: string}
+        verification: {type: string, enum: [pending, succeeded, failed, unknown], description: 'Telemetry-verified post-condition: was the effect confirmed?'}
+        evidence_id: {type: string}
+    ResponseList:
+      type: object
+      properties:
+        responses: {type: array, items: {$ref: '#/components/schemas/ResponseRecord'}}
     AlertTestResult:
       type: object
       properties:

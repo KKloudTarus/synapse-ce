@@ -277,6 +277,18 @@ that declines work records `refused` rather than failing quietly. Bound server-s
 Response actions are governed, reversible, and audited. They run through the same scope and authorization
 enforcement as any other execution.
 
+Wire the routes and a defender can drive the full loop: `POST /api/v1/blueteam/engagements/{id}/response/plan`
+dry-runs an action (isolate_host, quarantine_file, stop_process) and its mandatory reversal and executes
+nothing; `.../response/apply` applies it through the shared admission gate (server-side scope
+authorization, a recorded human approver, a blast-radius check on the executed effect); `POST
+/api/v1/blueteam/response/{id}/revert` reverses it; `GET /api/v1/blueteam/response` lists the
+admitted-but-not-applied set the kill switch cancels. The action id is server-minted, and a second-approval
+requirement answers 202. The default executor records the full admission -> approval -> apply -> verify ->
+revert ledger without touching a host; a real host executor is a deliberate, review-gated extension point
+(`internal/usecase/response/simulation.go`), so applying a real isolation still requires an explicit
+execution-safety decision the platform does not make on its own. The `POST /api/v1/redteam/halt` kill switch
+now cancels pending response actions as a fourth layer, so one operator action stops the whole estate.
+
 ## Rollout and upgrades
 
 ```
