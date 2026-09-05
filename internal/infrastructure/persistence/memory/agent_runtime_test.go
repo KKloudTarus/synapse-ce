@@ -61,7 +61,7 @@ func TestApprovalStore_EngagementsWithPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0] != "e1" {
+	if len(got) != 1 || got[0].EngagementID != "e1" {
 		t.Fatalf("expected only e1 (distinct, pending-only), got %v", got)
 	}
 }
