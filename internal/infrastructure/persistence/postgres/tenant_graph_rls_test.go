@@ -61,7 +61,7 @@ func TestAssessmentGraphRLSKnownIDIsolation(t *testing.T) {
 		}
 	}
 
-	const role = "asset_graph_runtime"
+	role := uniqueProbeRole(t, "asset_graph_runtime")
 	for _, statement := range []string{
 		`DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='` + role + `') THEN EXECUTE 'DROP OWNED BY ` + role + `'; EXECUTE 'DROP ROLE ` + role + `'; END IF; END $$`,
 		`CREATE ROLE ` + role + ` NOSUPERUSER NOBYPASSRLS`,

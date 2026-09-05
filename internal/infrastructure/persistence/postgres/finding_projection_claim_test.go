@@ -97,21 +97,21 @@ func TestFindingProjectionClaimPostgresAtomicAndRLS(t *testing.T) {
 		t.Fatal("a cross-tenant claim must not report a conflict: that discloses the engagement exists elsewhere")
 	}
 
-	role := "projection_claim_role"
-	_, _ = pool.Exec(ctx, `DROP OWNED BY projection_claim_role`)
-	_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS projection_claim_role`)
+	role := uniqueProbeRole(t, "projection_claim_role")
+	_, _ = pool.Exec(ctx, `DROP OWNED BY `+role)
+	_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS `+role)
 	for _, statement := range []string{
-		`CREATE ROLE projection_claim_role NOSUPERUSER NOBYPASSRLS`,
-		`GRANT USAGE ON SCHEMA public TO projection_claim_role`,
-		`GRANT SELECT ON finding_projection_claims TO projection_claim_role`,
+		`CREATE ROLE ` + role + ` NOSUPERUSER NOBYPASSRLS`,
+		`GRANT USAGE ON SCHEMA public TO ` + role,
+		`GRANT SELECT ON finding_projection_claims TO ` + role,
 	} {
 		if _, err := pool.Exec(ctx, statement); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DROP OWNED BY projection_claim_role`)
-		_, _ = pool.Exec(context.Background(), `DROP ROLE IF EXISTS projection_claim_role`)
+		_, _ = pool.Exec(context.Background(), `DROP OWNED BY `+role)
+		_, _ = pool.Exec(context.Background(), `DROP ROLE IF EXISTS `+role)
 	})
 	if err := WithTenant(ctx, pool, "", func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SET LOCAL ROLE `+role); err != nil {

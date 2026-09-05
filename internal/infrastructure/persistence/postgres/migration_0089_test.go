@@ -80,7 +80,7 @@ func TestMigration0089BackfillsAndIsolatesScanInventory(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer pool.Close()
-	const role = "sbom_rls_probe_0089"
+	role := uniqueProbeRole(t, "sbom_rls_probe_0089")
 	_, _ = pool.Exec(ctx, `DROP OWNED BY `+role)
 	_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS `+role)
 	if _, err := pool.Exec(ctx, `CREATE ROLE `+role+` NOSUPERUSER NOBYPASSRLS`); err != nil {

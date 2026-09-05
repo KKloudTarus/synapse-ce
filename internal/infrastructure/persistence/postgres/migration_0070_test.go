@@ -108,21 +108,21 @@ func TestAttackPathImportedFindingBindings(t *testing.T) {
 		t.Fatal("cross-engagement imported target must fail")
 	}
 
-	role := "attack_path_0070_role"
-	_, _ = pool.Exec(ctx, `DROP OWNED BY attack_path_0070_role`)
-	_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS attack_path_0070_role`)
+	role := uniqueProbeRole(t, "attack_path_0070_role")
+	_, _ = pool.Exec(ctx, `DROP OWNED BY `+role)
+	_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS `+role)
 	for _, stmt := range []string{
-		`CREATE ROLE attack_path_0070_role NOSUPERUSER NOBYPASSRLS`,
-		`GRANT USAGE ON SCHEMA public TO attack_path_0070_role`,
-		`GRANT SELECT ON attack_path_edges TO attack_path_0070_role`,
+		`CREATE ROLE ` + role + ` NOSUPERUSER NOBYPASSRLS`,
+		`GRANT USAGE ON SCHEMA public TO ` + role,
+		`GRANT SELECT ON attack_path_edges TO ` + role,
 	} {
 		if _, err := pool.Exec(ctx, stmt); err != nil {
 			t.Fatalf("set up no-tenant RLS role: %v", err)
 		}
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DROP OWNED BY attack_path_0070_role`)
-		_, _ = pool.Exec(context.Background(), `DROP ROLE IF EXISTS attack_path_0070_role`)
+		_, _ = pool.Exec(context.Background(), `DROP OWNED BY `+role)
+		_, _ = pool.Exec(context.Background(), `DROP ROLE IF EXISTS `+role)
 	})
 	if err := WithTenant(ctx, pool, "", func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SET LOCAL ROLE `+role); err != nil {
