@@ -1221,6 +1221,7 @@ func main() {
 		log.Error("vulnerability source service init failed", "err", err)
 		os.Exit(1)
 	}
+	vulnerabilitySourceService.AllowPrivateNetworkSources(cfg.VulnerabilitySourceAllowPrivateNetwork)
 	vulnerabilityProjection, err := vulnerabilityprojection.NewService(findingRepo)
 	if err != nil {
 		log.Error("vulnerability finding projection init failed", "err", err)
