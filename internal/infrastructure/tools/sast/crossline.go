@@ -18,7 +18,19 @@ const crossLineLookback = 10
 
 // crossLineBuildRe marks a value that was BUILT rather than written as a constant: Sprintf, printf
 // %-formatting, .format(), an f-string, or string concatenation adjacent to a quote.
-var crossLineBuildRe = regexp.MustCompile("(?i)(fmt\\.Sprintf|\\bsprintf\\s*\\(|\\.format\\s*\\(|\\bf[\"'`]|[\"'][^\"'\\n]*[\"']\\s*%|[\"'`]\\s*\\+|\\+\\s*[\"'`]|\\$\\{|#\\{|\\.\\s*\\$|\\|\\|)")
+//
+// `||` is deliberately absent. It concatenates in SQL and PL/SQL and nowhere else: in JavaScript,
+// Ruby, Go and Python it is logical-or, so `const sql = opts.sql || DEFAULT_SQL` was read as string
+// building and reported as SQL injection. sqlConcatBuildRe adds it back for the languages where it
+// really is concatenation.
+var crossLineBuildRe = regexp.MustCompile("(?i)(fmt\\.Sprintf|\\bsprintf\\s*\\(|\\.format\\s*\\(|\\bf[\"'`]|[\"'][^\"'\\n]*[\"']\\s*%|[\"'`]\\s*\\+|\\+\\s*[\"'`]|\\$\\{|#\\{|\\.\\s*\\$)")
+
+// sqlConcatBuildRe is crossLineBuildRe plus the SQL string-concatenation operator, used only for
+// files written in SQL dialects.
+var sqlConcatBuildRe = regexp.MustCompile(crossLineBuildRe.String() + "|\\|\\|")
+
+// sqlDialectExts are the extensions where `||` concatenates strings.
+var sqlDialectExts = map[string]bool{".sql": true, ".pls": true, ".plsql": true, ".pks": true, ".pkb": true}
 
 // crossLineRequestRe marks a value read from the request: the user-controlled subset only, so a
 // redirect built from a server-derived host is not flagged.
@@ -79,7 +91,11 @@ var crossLineAssignRe = regexp.MustCompile(`(?:^|[;{}(\s])\$?([A-Za-z_][A-Za-z0-
 
 // crossLineMatch reports whether the sink for ruleID on lines[at] takes a bare identifier that an
 // earlier line assigned from a built or request-derived value.
-func crossLineMatch(ruleID string, lines []string, at int) bool {
+//
+// The walk stops at the start of the enclosing definition, so an assignment in a DIFFERENT function
+// cannot supply the evidence. Without that the ten-line window reaches over a function boundary and
+// reports a safe `cursor.execute(query)` because some other function above built a `query`.
+func crossLineMatch(ruleID, ext string, lines []string, at int) bool {
 	sink, ok := crossLineSinks[ruleID]
 	if !ok || at >= len(lines) || len(lines[at]) > maxLineBytes || commentOnlyLine(lines[at]) {
 		return false
@@ -88,22 +104,67 @@ func crossLineMatch(ruleID string, lines []string, at int) bool {
 	if len(pending) == 0 {
 		return false
 	}
+	evidence := sink.evidence
+	if sqlDialectExts[ext] && evidence == crossLineBuildRe {
+		evidence = sqlConcatBuildRe
+	} else if sqlDialectExts[ext] && evidence == crossLineBuildOrRequestRe {
+		evidence = sqlConcatBuildOrRequestRe
+	}
+	sinkIndent := leadingIndent(lines[at])
 	start := max(0, at-crossLineLookback)
 	for j := at - 1; j >= start && len(pending) > 0; j-- {
 		prev := lines[j]
 		if len(prev) > maxLineBytes || commentOnlyLine(prev) {
 			continue
 		}
+		if startsEnclosingDefinition(prev, sinkIndent) {
+			return false // a different function's assignments are not this sink's data flow
+		}
 		m := crossLineAssignRe.FindStringSubmatch(prev)
 		if m == nil || !pending[m[1]] {
 			continue
 		}
 		delete(pending, m[1]) // nearest assignment wins: a constant literal closes this identifier
-		if sink.evidence.MatchString(assignmentStatement(lines, j, at)) {
+		statement := assignmentStatement(lines, j, at)
+		if ruleID == "rb:open-redirect" && railsRecordLookup.MatchString(statement) {
+			// `user = User.find(params[:id])` then `redirect_to user` routes through the model's
+			// own path helper, which is the canonical safe Rails idiom. The request marker in the
+			// finder's argument is a record id, not the redirect target.
+			continue
+		}
+		if evidence.MatchString(statement) {
 			return true
 		}
 	}
 	return false
+}
+
+// sqlConcatBuildOrRequestRe is crossLineBuildOrRequestRe for SQL dialects, where `||` concatenates.
+var sqlConcatBuildOrRequestRe = regexp.MustCompile(sqlConcatBuildRe.String() + "|" + crossLineRequestRe.String())
+
+// railsRecordLookup matches an ActiveRecord lookup: the value it returns is a model instance, and
+// redirecting to one produces a route from the model rather than from request text.
+var railsRecordLookup = regexp.MustCompile(`(?i)\b[A-Z]\w*\.(?:find(?:_by\w*)?|where|first|last|find_or_\w+)\b|\.\s*(?:find|find_by\w*)\s*\(`)
+
+// leadingIndent returns the width of a line's leading whitespace, counting a tab as one column.
+func leadingIndent(line string) int {
+	for i, r := range line {
+		if r != ' ' && r != '\t' {
+			return i
+		}
+	}
+	return len(line)
+}
+
+// definitionStartRe matches the start of a function, method or class in the languages the
+// cross-line sinks cover.
+var definitionStartRe = regexp.MustCompile(`^\s*(?:(?:async\s+)?def|func|function|class|module|sub|public|private|protected|static)\b|^\s*[A-Za-z_$][\w$]*\s*(?:=|:)\s*(?:async\s+)?function\b|^\s*[A-Za-z_$][\w$]*\s*\([^)]*\)\s*\{\s*$`)
+
+// startsEnclosingDefinition reports whether prev opens a definition that encloses or precedes the
+// sink rather than sitting inside the sink's own body. An indentation no deeper than the sink's own
+// means the sink cannot be inside it, so the walk has left the sink's function.
+func startsEnclosingDefinition(prev string, sinkIndent int) bool {
+	return leadingIndent(prev) < sinkIndent && definitionStartRe.MatchString(prev)
 }
 
 // crossLineSinkIdents returns the sink call's bare-identifier arguments.

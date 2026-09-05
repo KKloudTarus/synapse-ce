@@ -1770,12 +1770,21 @@ type SASTAnalyzer interface {
 	AnalyzeSource(ctx context.Context, root string) ([]SASTRawFinding, error)
 }
 
-// SASTSourceReport is the bounded output of a deterministic SAST scan. Truncated means a safety cap
-// (per-file finding budget, whole-tree finding budget, retained-source budget, or an oversized line)
-// stopped the scan, so Findings is a LOWER BOUND: a caller must not read it as a clean result.
+// SASTSourceReport is the bounded output of a deterministic SAST scan.
+//
+// Truncated means a safety cap (per-file finding budget, whole-tree finding budget, retained-source
+// budget, or an oversized line) stopped the scan, so Findings is a LOWER BOUND: a caller must not
+// read it as a clean result.
+//
+// SkippedFiles counts files the analyzer excluded by policy rather than by budget: a vendored
+// bundle, a minified asset, a generated source. That is a deliberate scope decision rather than a
+// failure, so it is reported separately instead of being folded into Truncated, which would be true
+// for every real repository and therefore mean nothing. A caller that needs to know the scan did not
+// cover the whole tree must look at both.
 type SASTSourceReport struct {
-	Findings  []SASTRawFinding
-	Truncated bool
+	Findings     []SASTRawFinding
+	Truncated    bool
+	SkippedFiles int
 }
 
 // SASTSourceReporter is the optional completeness capability of a SASTAnalyzer. It exists so the

@@ -155,10 +155,20 @@ func skipCommentOrPlaceholderSecret(line string) bool {
 // crossing a quote, so a word sitting inside a string literal can never stand in for one.
 const requestMarkerNoQuote = `[^;"'` + "\n" + `]*(?:req\.|request\.|params\[|\$_(?:GET|POST|REQUEST)|FormValue|URL\.Query|c\.(?:Query|Param)|getParameter)`
 
-// bareFirstArg / bareLaterArg require an ARGUMENT that is a bare variable: a value the reader
-// cannot see, as opposed to a literal the rule can prove constant.
-const bareFirstArg = `\s*[A-Za-z_$][\w$]*\s*[,)]`
-const bareLaterArg = `[^;` + "\n" + `]*,\s*[A-Za-z_$][\w$]*\s*[,)]`
+// bareVariableArg is an ARGUMENT that is a bare variable: a value the reader cannot see, as opposed
+// to a literal the rule can prove constant. It also accepts the two wrappers that appear constantly
+// around such a value and that a plain identifier pattern used to miss:
+//
+//   - an index or slice, as in exec.Command(args[0], args[1:]...), where the BINARY itself is
+//     attacker-controlled, which is the strongest command-injection shape there is;
+//   - a []byte conversion, as in w.Write([]byte(s)), which is the idiomatic Go response write.
+//
+// A quoted literal still cannot match, because the first character after the wrapper must be an
+// identifier character rather than a quote.
+const bareVariableArg = `(?:\[\]byte\()?\s*[A-Za-z_$][\w$]*(?:\[[^\]` + "\n" + `]*\])?\s*(?:\.\.\.)?\s*\)?\s*[,)]`
+
+const bareFirstArg = `\s*` + bareVariableArg
+const bareLaterArg = `[^;` + "\n" + `]*,\s*` + bareVariableArg
 
 // commandArgEvidence is what an exec.Command argument list must carry to be dynamic.
 const commandArgEvidence = `(?:` + requestMarkerNoQuote + `|[^;` + "\n" + `]*fmt\.Sprintf|` + literalPlusVar + `|` + bareLaterArg + `|` + bareFirstArg + `)`

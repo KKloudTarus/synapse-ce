@@ -2954,9 +2954,26 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// insecure config in first-party source. In-process, read-only, no LLM; findings publish like SCA.
 	var sastRaws []ports.SASTRawFinding
 	if opts.scansVulnerabilities() && s.sastAnalyzer != nil {
-		sastRaws, err = s.sastAnalyzer.AnalyzeSource(ctx, ws.Dir)
-		if err != nil {
-			return nil, fmt.Errorf("analyze source (sast): %w", err)
+		// Prefer the reporting form so the completeness of the scan reaches the caller. An
+		// analyzer that does not implement it is treated as "completeness unknown", which is why
+		// the plain form remains the fallback rather than an error.
+		if reporter, ok := s.sastAnalyzer.(ports.SASTSourceReporter); ok {
+			report, rerr := reporter.AnalyzeSourceReport(ctx, ws.Dir)
+			if rerr != nil {
+				return nil, fmt.Errorf("analyze source (sast): %w", rerr)
+			}
+			sastRaws = report.Findings
+			if report.Truncated {
+				result.SourceWarnings = append(result.SourceWarnings, "static analysis incomplete or truncated; SAST findings are a lower bound")
+			}
+			if report.SkippedFiles > 0 {
+				result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf("static analysis skipped %d vendored, minified or generated file(s)", report.SkippedFiles))
+			}
+		} else {
+			sastRaws, err = s.sastAnalyzer.AnalyzeSource(ctx, ws.Dir)
+			if err != nil {
+				return nil, fmt.Errorf("analyze source (sast): %w", err)
+			}
 		}
 	}
 	result.Findings = buildFindings(engagementID, result, now, s.minSeverity, s.ignoreUnfixed, sastRaws)

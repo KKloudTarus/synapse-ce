@@ -140,6 +140,55 @@ cur.execute(q)
 `,
 			rule: "generic-sql-dynamic-execute", want: false,
 		},
+		// False positives the look-back used to produce. Each was reported at HIGH severity on code
+		// that is correct, which is the most expensive kind of wrong a scanner can be.
+		{
+			name: "logical or default is not sql concatenation",
+			file: "b.js",
+			content: `const DEFAULT_SQL = "SELECT 1";
+function run(conn, opts) {
+  const sql = opts.sql || DEFAULT_SQL;
+  conn.execute(sql);
+}
+`,
+			rule: "generic-sql-dynamic-execute", want: false,
+		},
+		{
+			name: "assignment in another function is not this sink's data flow",
+			file: "c.py",
+			content: `def build(uid):
+    query = "SELECT * FROM t WHERE id = %s" % uid
+    return query
+
+def safe(cursor):
+    cursor.execute(query)
+`,
+			rule: "generic-sql-dynamic-execute", want: false,
+		},
+		{
+			name: "redirect to a model record is the safe rails idiom",
+			file: "d.rb",
+			content: `class UsersController < ApplicationController
+  def show
+    user = User.find(params[:id])
+    redirect_to user
+  end
+end
+`,
+			rule: "rb:open-redirect", want: false,
+		},
+		{
+			name: "redirect to a raw request value is still an open redirect",
+			file: "e.rb",
+			content: `class SessionsController < ApplicationController
+  def create
+    target = params[:return_to]
+    redirect_to target
+  end
+end
+`,
+			rule: "rb:open-redirect", want: true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -197,5 +246,32 @@ func TestCrossLineDoesNotDoubleReport(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("go-sql-dynamic-query fired %d times, want 1", n)
+	}
+}
+
+// TestDoublePipeIsConcatenationOnlyInSQL pins the language split. `||` joins strings in SQL and
+// PL/SQL; everywhere else it is logical-or, and reading it as concatenation reported a safe
+// `const sql = opts.sql || DEFAULT_SQL` as SQL injection at high severity.
+func TestDoublePipeIsConcatenationOnlyInSQL(t *testing.T) {
+	lines := []string{
+		"v_sql := 'SELECT * FROM users WHERE name = ' || p_name;",
+		"cursor.execute(v_sql)",
+	}
+	for _, tc := range []struct {
+		ext  string
+		want bool
+	}{
+		{ext: ".sql", want: true},
+		{ext: ".pls", want: true},
+		{ext: ".js", want: false},
+		{ext: ".py", want: false},
+		{ext: ".rb", want: false},
+		{ext: ".go", want: false},
+	} {
+		t.Run(tc.ext, func(t *testing.T) {
+			if got := crossLineMatch("generic-sql-dynamic-execute", tc.ext, lines, 1); got != tc.want {
+				t.Errorf("crossLineMatch(%q) = %v, want %v", tc.ext, got, tc.want)
+			}
+		})
 	}
 }

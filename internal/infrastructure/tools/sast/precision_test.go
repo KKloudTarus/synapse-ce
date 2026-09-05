@@ -26,6 +26,11 @@ func TestRulePrecisionFixes(t *testing.T) {
 			content: "func h(w http.ResponseWriter, r *http.Request) {\n\tname := r.URL.Query().Get(\"n\")\n\tfmt.Fprintf(w, \"hello %s\", name)\n}\n"},
 		{name: "go fprintln constant", rule: "reflected-response-write", file: "ok.go", want: false,
 			content: "func h(w http.ResponseWriter) {\n\tfmt.Fprintln(w, \"ok\")\n}\n"},
+		// []byte(x) is the idiomatic Go response write and must not hide the variable inside it.
+		{name: "go write byte conversion of a variable", rule: "reflected-response-write", file: "bw.go", want: true,
+			content: "func h(w http.ResponseWriter, s string) {\n\t_, _ = w.Write([]byte(s))\n}\n"},
+		{name: "go write byte conversion of a constant", rule: "reflected-response-write", file: "bwok.go", want: false,
+			content: "func h(w http.ResponseWriter) {\n\t_, _ = w.Write([]byte(\"ok\"))\n}\n"},
 		{name: "gin c.String with a variable", rule: "reflected-response-write", file: "gin.go", want: true,
 			content: "func h(c *gin.Context) {\n\tname := c.Query(\"n\")\n\tc.String(http.StatusOK, name)\n}\n"},
 
@@ -38,6 +43,12 @@ func TestRulePrecisionFixes(t *testing.T) {
 			content: "func run(userVar string) {\n\texec.Command(\"sh\", userVar)\n}\n"},
 		{name: "request derived argv", rule: "go-command-dynamic", file: "req.go", want: true,
 			content: "func run(c *gin.Context) {\n\texec.Command(c.Query(\"cmd\"))\n}\n"},
+		// The binary itself taken from an indexed variable is the strongest command-injection
+		// shape there is, and an identifier-only pattern misses it because of the subscript.
+		{name: "indexed argv", rule: "go-command-dynamic", file: "idx.go", want: true,
+			content: "func run(args []string) {\n\texec.Command(args[0], args[1:]...)\n}\n"},
+		{name: "indexed argv single", rule: "go-command-dynamic", file: "idx2.go", want: true,
+			content: "func run(parts []string) {\n\t_ = exec.Command(parts[0]).Run()\n}\n"},
 
 		// go-sql-dynamic-query: database/sql is Go only.
 		{name: "js query concat", rule: "go-sql-dynamic-query", file: "src/db.js", want: false,

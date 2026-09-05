@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -517,4 +519,62 @@ func TestAnalyzeAcceptsEveryAnalyzerKind(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestEveryAnalyzerKindIsMappedExplicitly keeps the fallback in domainKind from quietly demoting a
+// security signal.
+//
+// domainKind answers KindQuality for a kind it does not recognize, which is deliberate: a rule added
+// to a language pack must not be able to crash a whole run, and that crash is exactly the defect
+// this release fixed. The cost is that an unmapped SECURITY kind silently becomes a low-severity
+// quality finding and stops failing the gate. This test walks the kind vocabulary the language packs
+// actually emit and requires each to be mapped on purpose, so a new one is a decision rather than a
+// demotion.
+func TestEveryAnalyzerKindIsMappedExplicitly(t *testing.T) {
+	packKinds, err := analyzerKindVocabulary()
+	if err != nil {
+		t.Fatalf("read the language packs: %v", err)
+	}
+	if len(packKinds) < 3 {
+		t.Fatalf("found %d kinds in the language packs; the vocabulary is no longer being read", len(packKinds))
+	}
+	for _, kind := range packKinds {
+		if _, mapped := analyzerKinds[kind]; !mapped {
+			t.Errorf("language packs emit kind %q with no entry in analyzerKinds, so it silently becomes a quality finding; map it on purpose", kind)
+		}
+	}
+
+	// A security vocabulary must never fall through to the quality fallback.
+	for _, kind := range []string{"sast", "security"} {
+		if got := domainKind(kind); got != finding.KindSAST {
+			t.Errorf("domainKind(%q) = %q, want %q: a security signal must not be demoted", kind, got, finding.KindSAST)
+		}
+	}
+}
+
+// analyzerKindVocabulary reads the kind literals the language-pack rule tables declare. The tables
+// are Go composite literals whose first element is the kind, so the vocabulary is readable without
+// running the cgo analyzers this test cannot build.
+func analyzerKindVocabulary() ([]string, error) {
+	matches, err := filepath.Glob(filepath.Join("..", "..", "infrastructure", "tools", "astwalk", "*_quality_cgo.go"))
+	if err != nil {
+		return nil, err
+	}
+	kindLiteral := regexp.MustCompile(`\{"([a-z_]+)",`)
+	seen := map[string]bool{}
+	var out []string
+	for _, path := range matches {
+		src, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil, readErr
+		}
+		for _, m := range kindLiteral.FindAllStringSubmatch(string(src), -1) {
+			if !seen[m[1]] {
+				seen[m[1]] = true
+				out = append(out, m[1])
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }

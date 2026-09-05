@@ -34,8 +34,17 @@ const (
 	// is noise, and a single 200 KB line burns the whole finding budget.
 	maxMinifiedLineBytes = 50 << 10 // one line this long ⇒ bundled/minified, skip the file
 	minifiedProbeLines   = 20       // lines sampled for the average-line-length probe
-	minifiedAvgLineBytes = 500      // average length over the probe that marks a file minified
-	generatedProbeLines  = 3        // lines sampled for the "Code generated … DO NOT EDIT" banner
+	minifiedMinLines     = 10       // fewest lines the ordinary average-line-length probe will judge
+	// minifiedShortAvgLineBytes is the average a file with fewer lines than minifiedMinLines must
+	// exceed to count as minified. Well above anything hand-written, so a short file holding one
+	// long constant is still scanned.
+	minifiedShortAvgLineBytes = 1500
+	bannerProbeLines          = 15 // lines sampled for a distributed-library banner
+	// assetBundleLineBytes marks a web asset under an asset directory as build output. Well below
+	// maxMinifiedLineBytes, because this test is scoped to asset trees rather than to all source.
+	assetBundleLineBytes = 4 << 10
+	minifiedAvgLineBytes = 500 // average length over the probe that marks a file minified
+	generatedProbeLines  = 3   // lines sampled for the "Code generated … DO NOT EDIT" banner
 )
 
 // skipDirs are heavy vendored/build trees never worth scanning for first-party weaknesses.
@@ -47,11 +56,66 @@ var skipDirs = map[string]bool{
 
 // assetDirs hold BOTH first-party source and vendored/bundled web assets: a Rails app/assets, a
 // Django static/, a Next.js public/. Skipping the directory outright would drop real first-party
-// code (Ruby helpers under app/assets, Python under static/), so the skip is narrowed to files that
-// are themselves web assets — see vendoredAssetFile. A first-party hand-written app.js under
-// assets/ is lost with the vendored jQuery copy; that is the deliberate trade, because these trees
-// are overwhelmingly third-party bundles and every hit in them is unactionable.
+// code (Ruby helpers under app/assets, Python under static/), so the skip is narrowed twice: to
+// files that are themselves web assets, AND to files that also sit in a directory naming them as
+// third-party or build output — see vendoredAssetFile.
+//
+// An earlier version skipped every .js under these directories. That is where a Flask or Django
+// application keeps its OWN scripts, so a hand-written static/js/app.js was dropped along with the
+// vendored jQuery copy, and the report still said the scan was complete. A machine-produced bundle
+// that does not live in one of the vendor directories is still caught by looksMinified.
 var assetDirs = map[string]bool{"static": true, "assets": true, "public": true}
+
+// vendorDirs name a directory whose contents are third-party or build output whatever the file is
+// called. These are the segments that make a web asset under an assetDirs tree skippable.
+var vendorDirs = map[string]bool{
+	"vendor": true, "vendors": true, "node_modules": true, "bower_components": true,
+	"dist": true, "build": true, "third_party": true, "thirdparty": true, "external": true,
+}
+
+// thirdPartyBannerRe matches the header a distributed JavaScript library carries: a copyright, a
+// licence grant, or a library-and-version line. The Rails asset pipeline is the case that matters,
+// because a copied jQuery or Bootstrap sits directly in app/assets/javascripts with nothing in its
+// path to mark it third-party, while the application's own scripts in the same directory carry no
+// such banner. Checking the file's own head separates the two without a library name list.
+var thirdPartyBannerRe = regexp.MustCompile(`(?i)(@license|@copyright|licen[sc]ed under|released under|copyright\s+(?:\(c\)|©|\d{4})|\(c\)\s*\d{4}|all rights reserved|\bv\d+\.\d+(?:\.\d+)?\b.*\|)`)
+
+// bundledAssetLine reports whether any line is long enough to mark the file as build output. It is
+// applied only to web assets under an asset directory, never to first-party source elsewhere: a
+// generated loader carries lines of many kilobytes, and the scanner's own per-line cap would read
+// only the first few thousand bytes of one anyway, so what it reports about such a file is noise.
+func bundledAssetLine(lines []string) bool {
+	for _, line := range lines {
+		if len(line) >= assetBundleLineBytes {
+			return true
+		}
+	}
+	return false
+}
+
+// thirdPartyBanner reports whether the head of the file declares it as a distributed library. Only
+// comment text counts, so a copyright string inside application code is not a banner. Lines inside
+// a block comment count whether or not they are decorated with a leading star, because the usual
+// library header writes its copyright as plain prose between the delimiters.
+func thirdPartyBanner(lines []string) bool {
+	inBlock := false
+	for _, line := range lines[:min(len(lines), bannerProbeLines)] {
+		trimmed := strings.TrimSpace(line)
+		commented := inBlock ||
+			strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*") ||
+			strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#")
+		if strings.Contains(trimmed, "/*") {
+			inBlock = true
+		}
+		if strings.Contains(trimmed, "*/") {
+			inBlock = false
+		}
+		if commented && thirdPartyBannerRe.MatchString(trimmed) {
+			return true
+		}
+	}
+	return false
+}
 
 // webAssetExts are the browser-asset file types the assetDirs narrowing applies to.
 var webAssetExts = map[string]bool{
@@ -80,14 +144,30 @@ func skippedSourceFile(path string) bool {
 	return skipExts[filepath.Ext(name)]
 }
 
-// vendoredAssetFile reports whether rel is a web asset living under an assetDirs directory.
-func vendoredAssetFile(rel, ext string) bool {
+// vendoredAssetFile reports whether rel is a web asset living under an assetDirs directory AND in a
+// vendor or build-output directory. Both halves are required: a .js under static/ is first-party
+// until something in its path says otherwise.
+func vendoredAssetFile(rel, ext string, lines []string) bool {
 	if !webAssetExts[ext] {
 		return false
 	}
 	segs := strings.Split(rel, "/")
-	for _, seg := range segs[:max(len(segs)-1, 0)] {
+	dirs := segs[:max(len(segs)-1, 0)]
+	var underAssets bool
+	for _, seg := range dirs {
 		if assetDirs[strings.ToLower(seg)] {
+			underAssets = true
+			break
+		}
+	}
+	if !underAssets {
+		return false
+	}
+	if thirdPartyBanner(lines) || bundledAssetLine(lines) {
+		return true
+	}
+	for _, seg := range dirs {
+		if vendorDirs[strings.ToLower(seg)] {
 			return true
 		}
 	}
@@ -103,14 +183,19 @@ func looksMinified(lines []string) bool {
 		}
 	}
 	probe := min(len(lines), minifiedProbeLines)
-	if probe < 3 {
-		return false // too little content to judge; a short file is cheap to scan anyway
-	}
 	total := 0
 	for _, line := range lines[:probe] {
 		total += len(line)
 	}
-	return total/probe > minifiedAvgLineBytes
+	average := total / probe
+	if probe < minifiedMinLines {
+		// Too few lines to apply the ordinary threshold: a three-line file holding one long
+		// constant averages well over it and is plainly hand-written. A short file whose lines
+		// average this much, though, is a bundle collapsed onto one or two lines, which no
+		// human writes.
+		return average > minifiedShortAvgLineBytes
+	}
+	return average > minifiedAvgLineBytes
 }
 
 // generatedBannerRe matches the conventional generated-source banner (Go's is normative, other
@@ -182,6 +267,10 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 	var files []sourceFile
 	var retainedBytes int64
 	truncated := false
+	// skippedFiles counts the files the walk excluded as vendored, minified or generated. The count
+	// is reported rather than folded into Truncated: excluding a bundle is a scope decision, and a
+	// flag that is true for every real repository tells the caller nothing.
+	skippedFiles := 0
 	appendFile := func(file sourceFile, bytes int64) bool {
 		if len(files) >= maxFiles || bytes > maxBytes-retainedBytes {
 			truncated = true // the tree outgrew the retained-source budget: results are a lower bound
@@ -248,7 +337,11 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 			return nil
 		}
 		ext := sastSourceExt(path)
-		if vendoredAssetFile(rel, ext) || looksMinified(lines) || isGeneratedSource(lines) {
+		if vendoredAssetFile(rel, ext, lines) || looksMinified(lines) || isGeneratedSource(lines) {
+			// Report the exclusion. Dropping a file and still returning a complete-looking
+			// report is the failure mode a scanner must never have: the caller cannot tell a
+			// clean tree from an unscanned one, and --fail-on passes either way.
+			skippedFiles++
 			return nil
 		}
 		contextLines := lines
@@ -282,14 +375,17 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 		}
 		truncated = truncated || status.findingsTruncated || status.lineLimitReached || status.statementLimitReached
 		if len(out) >= maxFindings {
-			truncated = true
+			// Only truncated when a file was actually left unscanned. Landing exactly on the
+			// budget with the last file complete is a complete scan, and reporting it as a lower
+			// bound would make every caller distrust a result that is in fact exhaustive.
+			truncated = truncated || file.Rel != files[len(files)-1].Rel
 			break
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return ports.SASTSourceReport{}, err
 	}
-	return ports.SASTSourceReport{Findings: dedupeFindings(out), Truncated: truncated}, nil
+	return ports.SASTSourceReport{Findings: dedupeFindings(out), Truncated: truncated, SkippedFiles: skippedFiles}, nil
 }
 
 func sourceLinesBytes(lines []string) int64 {
@@ -454,7 +550,7 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			}
 			if !matched {
 				// The concatenation that makes this sink dangerous may sit on an earlier line.
-				matched = crossLineMatch(r.id, lines, i)
+				matched = crossLineMatch(r.id, ext, lines, i)
 			}
 			if matched && isPHP && phpRuleOwnsGeneric(r.id, a, ext, phpText, matchText) {
 				continue
