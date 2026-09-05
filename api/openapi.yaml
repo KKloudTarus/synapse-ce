@@ -1449,6 +1449,21 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/alerts/test:
+    post:
+      tags: [fleet]
+      operationId: testAlert
+      summary: Deliver a test alert to every configured alert sink
+      description: >
+        Sends a synthetic `alert.test` alert through the configured sinks (the webhook set by
+        SYNAPSE_ALERT_WEBHOOK_URL) so an operator can prove the alert path works before relying on it.
+        The test alert bypasses the severity floor. Registered only when alerting is configured.
+      responses:
+        '200': {description: At least one sink acknowledged, content: {application/json: {schema: {$ref: '#/components/schemas/AlertTestResult'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '502': {description: No sink acknowledged the alert, content: {application/json: {schema: {$ref: '#/components/schemas/AlertTestResult'}}}}
+
   /api/v1/assets/hosts:
     get:
       tags: [assets]
@@ -4910,6 +4925,18 @@ components:
         total: {type: integer, minimum: 0}
         limit: {type: integer}
         offset: {type: integer}
+    AlertOutcome:
+      type: object
+      properties:
+        matched: {type: boolean, description: Whether the alert cleared the severity rule.}
+        delivered: {type: integer}
+        failed: {type: integer}
+        audit_failed: {type: integer}
+    AlertTestResult:
+      type: object
+      properties:
+        outcome: {$ref: '#/components/schemas/AlertOutcome'}
+        error: {type: string}
     FleetAsset:
       type: object
       description: Serialized from the fleet asset domain struct (PascalCase keys).

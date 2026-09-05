@@ -9,6 +9,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aitriagereview"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/alerting"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/audit"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aup"
@@ -891,6 +892,14 @@ type AITriageFindingDecision interface {
 type ImportedSBOMStore interface {
 	SaveActive(ctx context.Context, record importedsbom.Record) error
 	LatestByEngagement(ctx context.Context, tenantID, engagementID shared.ID) (importedsbom.Record, error)
+}
+
+// AlertSink delivers one operator alert to a destination (a webhook, a chat integration). Deliver
+// returns an error when the destination did not acknowledge the alert; the caller decides whether that
+// is retried or only audited. Name identifies the sink in audit entries.
+type AlertSink interface {
+	Name() string
+	Deliver(ctx context.Context, alert alerting.Alert) error
 }
 
 // EvidenceStore appends to and reads the per-engagement hash-chained evidence

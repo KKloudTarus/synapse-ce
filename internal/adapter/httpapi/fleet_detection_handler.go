@@ -59,10 +59,12 @@ func (f *fleetRouter) ingestDetections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"engagement_id": res.EngagementID.String(),
-		"sealed":        len(res.SealedRecords),
-		"skipped":       len(res.Skipped),
-		"missing":       res.Gap.Missing,
-		"replay":        res.Gap.Replay,
+		"engagement_id":      res.EngagementID.String(),
+		"sealed":             len(res.SealedRecords),
+		"skipped":            len(res.Skipped),
+		"missing":            res.Gap.Missing,
+		"replay":             res.Gap.Replay,
+		"incidents_created":  res.IncidentsCreated,
+		"correlation_failed": res.CorrelationFailed,
 	})
 }

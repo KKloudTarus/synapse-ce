@@ -41,6 +41,13 @@ type RiskReassessor interface {
 	Reassess(ctx context.Context, actor string, incidentID shared.ID) (incident.Incident, error)
 }
 
+// IncidentNotifier tells a defender about the incidents a pass opened. alerting.Service satisfies it.
+// Optional: a nil notifier records incidents silently. It returns nothing because the incidents are
+// already durable; the notifier audits its own delivery outcome.
+type IncidentNotifier interface {
+	IncidentsCreated(ctx context.Context, actor string, engagementID shared.ID, created []incident.Incident)
+}
+
 // Result reports what one correlation pass produced. Created is the incidents newly recorded this pass;
 // Reassessed/ReassessFailed account for the best-effort tri-score pass over them.
 type Result struct {
@@ -54,10 +61,14 @@ type Service struct {
 	detections DetectionReader
 	incidents  IncidentRecorder
 	reassessor RiskReassessor // may be nil
+	notifier   IncidentNotifier // may be nil
 	cfg        correlation.Config
 	audit      ports.AuditLogger
 	now        func() time.Time
 }
+
+// SetNotifier wires the alerting path for newly created incidents (nil keeps correlation silent).
+func (s *Service) SetNotifier(n IncidentNotifier) { s.notifier = n }
 
 // NewService constructs the orchestrator. detections, incidents, audit and now are required; reassessor is
 // optional. cfg must be a valid correlation.Config (Window > 0, MaxPerIncident > 0).
@@ -115,6 +126,10 @@ func (s *Service) CorrelateEngagement(ctx context.Context, actor string, engagem
 			created[i] = scored
 			res.Reassessed++
 		}
+	}
+
+	if s.notifier != nil && len(created) > 0 {
+		s.notifier.IncidentsCreated(ctx, actor, engagementID, created)
 	}
 
 	entry := ports.AuditEntry{

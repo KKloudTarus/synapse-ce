@@ -1411,3 +1411,71 @@ func TestPurgeDeletesOnDemandAuditedAndHoldChecked(t *testing.T) {
 		t.Fatalf("purge of an empty engagement must be a no-op, got n=%d err=%v", n, err)
 	}
 }
+
+// ---- correlation on ingest ------------------------------------------------------------------------------
+
+// A wired correlator runs as soon as a batch seals new detections, with the agent as actor, and its count
+// lands in the result. A replayed batch seals nothing and does not correlate again.
+func TestIngestCorrelatesSealedDetectionsOnce(t *testing.T) {
+	h := newHarness(t, 0)
+	var calls int
+	var gotActor string
+	var gotEng shared.ID
+	h.svc.SetCorrelator(func(_ context.Context, actor string, engagementID shared.ID) (int, error) {
+		calls++
+		gotActor, gotEng = actor, engagementID
+		return 2, nil
+	})
+	items := []IngestItem{{ID: "d1", AssetID: "asset-1", Detection: mkDetection(t, "ps")}}
+	b := h.signedBatch(t, 1, items)
+	res, err := h.svc.Ingest(tctx(), b.AgentID, b, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || gotActor != "agent:1" || gotEng != "eng-1" {
+		t.Fatalf("correlator call = %d actor=%q eng=%q", calls, gotActor, gotEng)
+	}
+	if res.IncidentsCreated != 2 || res.CorrelationFailed {
+		t.Fatalf("result = %+v", res)
+	}
+	replay, err := h.svc.Ingest(tctx(), b.AgentID, b, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || replay.IncidentsCreated != 0 || len(replay.Skipped) != 1 {
+		t.Fatalf("replay correlated again: calls=%d result=%+v", calls, replay)
+	}
+}
+
+// A correlator failure never fails the ingest: the detections are sealed, the failure is audited, and the
+// result says correlation did not happen.
+func TestIngestCorrelatorFailureIsAuditedNotFatal(t *testing.T) {
+	h := newHarness(t, 0)
+	h.svc.SetCorrelator(func(context.Context, string, shared.ID) (int, error) { return 0, errors.New("incident store down") })
+	items := []IngestItem{{ID: "d1", AssetID: "asset-1", Detection: mkDetection(t, "ps")}}
+	b := h.signedBatch(t, 1, items)
+	res, err := h.svc.Ingest(tctx(), b.AgentID, b, items)
+	if err != nil {
+		t.Fatalf("correlator failure must not fail the ingest: %v", err)
+	}
+	if len(res.SealedRecords) != 1 || !res.CorrelationFailed || res.IncidentsCreated != 0 {
+		t.Fatalf("result = %+v", res)
+	}
+	e, ok := h.audit.last["detection.correlate_on_ingest_failed"]
+	if !ok || e.Metadata["error"] != "incident store down" || e.Metadata["engagement"] != "eng-1" {
+		t.Fatalf("failure not audited: %+v (actions %v)", e, h.audit.actions)
+	}
+}
+
+func TestIngestWithoutCorrelatorIsUnchanged(t *testing.T) {
+	h := newHarness(t, 0)
+	items := []IngestItem{{ID: "d1", AssetID: "asset-1", Detection: mkDetection(t, "ps")}}
+	b := h.signedBatch(t, 1, items)
+	res, err := h.svc.Ingest(tctx(), b.AgentID, b, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IncidentsCreated != 0 || res.CorrelationFailed {
+		t.Fatalf("result = %+v", res)
+	}
+}

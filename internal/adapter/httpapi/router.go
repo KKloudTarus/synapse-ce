@@ -75,6 +75,7 @@ type Router struct {
 	projects               projectService            // optional; nil ⇒ project routes are not registered
 	assets                 assetService              // optional; nil ⇒ fleet asset routes are not registered
 	hostVulns              hostVulnerabilityService  // optional; nil ⇒ host vulnerability routes are not registered (#820)
+	alerts                 alertService              // optional; nil ⇒ operator alerting routes are not registered
 	cspm                   *cspm.Service             // optional; nil ⇒ CSPM routes are not registered
 	businessAssets         businessAssetService      // optional; nil ⇒ business-level Asset routes are not registered
 	attackPaths            attackPathService         // optional; nil ⇒ attack-path routes are not registered
@@ -362,6 +363,9 @@ func (rt *Router) routes() *http.ServeMux {
 	if rt.hostVulns != nil {
 		mux.HandleFunc("GET /api/v1/assets/hosts", rt.authz(userdom.PermView, rt.listHostVulnerabilities))
 		mux.HandleFunc("GET /api/v1/assets/{assetID}/vulnerabilities", rt.authz(userdom.PermView, rt.getHostVulnerabilities))
+	}
+	if rt.alerts != nil {
+		mux.HandleFunc("POST /api/v1/alerts/test", rt.authz(userdom.PermAdminister, rt.testAlert))
 	}
 	if rt.businessAssets != nil {
 		if rt.eng != nil && rt.findings != nil {

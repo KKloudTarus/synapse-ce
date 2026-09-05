@@ -74,7 +74,15 @@ type IngestResult struct {
 	EvidenceIDs   []shared.ID
 	Skipped       []shared.ID // already-sealed detections skipped on an idempotent retry
 	Gap           fleetagent.SequenceGap
+	// IncidentsCreated is what the correlator opened for this engagement right after the batch sealed new
+	// detections; CorrelationFailed marks a correlator error that was audited and did not fail the ingest.
+	IncidentsCreated  int
+	CorrelationFailed bool
 }
+
+// CorrelateFunc folds an engagement's sealed detections into incidents and returns how many it created.
+// correlationuc.Service.CorrelateEngagement is adapted to it in the composition root.
+type CorrelateFunc func(ctx context.Context, actor string, engagementID shared.ID) (created int, err error)
 
 // Service ingests agent detection batches into the evidence ledger.
 type Service struct {
@@ -88,7 +96,13 @@ type Service struct {
 	ids        ports.IDGenerator
 	retention  time.Duration    // 0 = keep the projection forever (the chain is always permanent)
 	holds      legalHoldChecker // optional (#635): when set, an active hold blocks retention expiry
+	correlate  CorrelateFunc    // optional: when set, a batch that seals new detections is correlated at once
 }
+
+// SetCorrelator wires correlation-on-ingest. With it, an incident exists as soon as the detections behind
+// it are sealed, without an operator calling the correlate route. A correlator failure is audited and
+// reported in the result; the sealed detections are never rolled back.
+func (s *Service) SetCorrelator(f CorrelateFunc) { s.correlate = f }
 
 // legalHoldChecker reports whether an engagement is under an active legal hold. legalholduc.Service
 // satisfies it. When wired, Expire refuses to delete a held engagement's data (fail-closed preservation).
@@ -273,7 +287,26 @@ func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, batch fleet
 		}); err != nil {
 		return result, fmt.Errorf("audit sealed detection batch: %w", err)
 	}
+	s.correlateAfterIngest(ctx, batch.AgentID, batch.EngagementID, &result)
 	return result, nil
+}
+
+// correlateAfterIngest runs the wired correlator when the batch sealed at least one new detection. It is
+// best effort: the detections are durable, so a correlator failure is audited and surfaced in the result
+// rather than returned, and the operator route can still correlate later.
+func (s *Service) correlateAfterIngest(ctx context.Context, agentID, engagementID shared.ID, result *IngestResult) {
+	if s.correlate == nil || len(result.SealedRecords) == 0 {
+		return
+	}
+	created, err := s.correlate(ctx, agentID.String(), engagementID)
+	if err != nil {
+		result.CorrelationFailed = true
+		_ = s.recordAudit(ctx, "detection.correlate_on_ingest_failed", agentID.String(), map[string]string{
+			"engagement": engagementID.String(), "sealed": fmt.Sprint(len(result.SealedRecords)), "error": err.Error(),
+		})
+		return
+	}
+	result.IncidentsCreated = created
 }
 
 // IngestV2 admits a separately signed v2 detection batch. A v2 item cannot be admitted without its
@@ -380,6 +413,7 @@ func (s *Service) IngestV2(ctx context.Context, authAgentID shared.ID, batch fle
 		}); err != nil {
 		return result, fmt.Errorf("audit reconciled v2 detection batch: %w", err)
 	}
+	s.correlateAfterIngest(ctx, batch.AgentID, batch.EngagementID, &result)
 	return result, nil
 }
 

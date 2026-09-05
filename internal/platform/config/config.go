@@ -465,6 +465,17 @@ type Config struct {
 	// FleetCorrelationMaxPerIncident caps how many detections one incident reflects individually before a
 	// storm is suppressed to a single note.
 	FleetCorrelationMaxPerIncident int
+	// AlertWebhookURL, when set, enables operator alerting: every incident correlation opens (and any
+	// other alert-producing event) is posted as signed JSON to this URL. Empty disables alerting.
+	AlertWebhookURL string
+	// AlertWebhookSecret signs each webhook body (HMAC-SHA256 over "<timestamp>.<body>", header
+	// X-Synapse-Signature). Optional; at least 16 bytes when set.
+	AlertWebhookSecret string
+	// AlertMinSeverity is the inclusive severity floor an alert must reach to be delivered.
+	AlertMinSeverity string
+	// AlertWebhookAllowPrivate lets the webhook client dial private and link-local addresses (an
+	// in-network receiver). Off by default; the SSRF guard otherwise refuses them.
+	AlertWebhookAllowPrivate bool
 
 	// JSReachabilityEnabled turns on deterministic Tier-1 JavaScript/TypeScript import-reachability: a
 	// declared npm dependency that first-party source never imports becomes not_reachable, which the
@@ -733,6 +744,10 @@ func Load() Config {
 		FleetCorrelationEnabled:                getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
 		FleetCorrelationWindow:                 getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
 		FleetCorrelationMaxPerIncident:         getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
+		AlertWebhookURL:                        getenv("SYNAPSE_ALERT_WEBHOOK_URL", ""),
+		AlertWebhookSecret:                     getenv("SYNAPSE_ALERT_WEBHOOK_SECRET", ""),
+		AlertMinSeverity:                       getenv("SYNAPSE_ALERT_MIN_SEVERITY", "medium"),
+		AlertWebhookAllowPrivate:               getbool("SYNAPSE_ALERT_WEBHOOK_ALLOW_PRIVATE", false),
 		JSReachabilityEnabled:                  getbool("SYNAPSE_JSREACH_ENABLED", false),
 		JSSymbolReachabilityEnabled:            getbool("SYNAPSE_JSREACH_TIER2_ENABLED", false),
 		RustReachabilityEnabled:                getbool("SYNAPSE_REACH_RUST", false),

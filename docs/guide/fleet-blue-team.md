@@ -195,6 +195,33 @@ by default and has no authentication. Exported series have bounded labels (prior
 - `synapse_agent_spool_corruption_events_total`
 - `synapse_agent_spool_fsync_total` and `synapse_agent_spool_fsync_duration_seconds_total`
 
+## Alerting
+
+Set `SYNAPSE_ALERT_WEBHOOK_URL` and the control plane posts a signed JSON alert to that URL every time
+correlation opens an incident. Correlation itself runs on every detection batch that seals new detections
+(and on demand through `POST /api/v1/fleet/engagements/{id}/correlate`), so with
+`SYNAPSE_FLEET_DETECTION_INGEST_ENABLED`, `SYNAPSE_FLEET_CORRELATION_ENABLED` and a webhook set, a
+detection on an agent becomes an incident and a notification without anyone calling an endpoint.
+
+```bash
+SYNAPSE_ALERT_WEBHOOK_URL=https://hooks.example.com/synapse
+SYNAPSE_ALERT_WEBHOOK_SECRET=$(openssl rand -hex 24)     # optional; >= 16 bytes
+SYNAPSE_ALERT_MIN_SEVERITY=medium                        # critical | high | medium | low | info
+```
+
+The body is `{"type": "incident.created", "sent_at": ..., "alert": {...}}` with the incident id, asset,
+engagement, severity, title, a short summary and a console link (`/fleet/incidents/{id}`). It carries no
+raw telemetry. With a secret set, `X-Synapse-Signature` is `sha256=<hex HMAC-SHA256>` over
+`<X-Synapse-Timestamp>.<body>`; verify it and reject stale timestamps. Transient failures (network, 429,
+5xx) are retried three times; a 4xx is final. Every attempt is audited as `alert.delivered` or
+`alert.failed` with the sink and the error, so a missed page is in the audit log. Delivery never blocks or
+rolls back the incident it reports.
+
+`POST /api/v1/alerts/test` (administer) sends an `alert.test` alert that bypasses the severity floor and
+returns how many sinks acknowledged it; use it after configuring the receiver. The webhook client refuses
+private and link-local destinations unless `SYNAPSE_ALERT_WEBHOOK_ALLOW_PRIVATE=true`; `http` is accepted
+only for a loopback receiver in development.
+
 ## Coverage
 
 ```

@@ -123,3 +123,40 @@ func TestValidation(t *testing.T) {
 		t.Fatal("a non-positive window must be rejected")
 	}
 }
+
+type fakeNotifier struct {
+	calls    int
+	engID    shared.ID
+	actor    string
+	incident []incident.Incident
+}
+
+func (n *fakeNotifier) IncidentsCreated(_ context.Context, actor string, engagementID shared.ID, created []incident.Incident) {
+	n.calls++
+	n.actor, n.engID, n.incident = actor, engagementID, created
+}
+
+// A wired notifier hears about every incident a pass creates, with the scored projection when tri-score
+// ran, and hears nothing on an idempotent re-run that creates none.
+func TestNotifierHearsCreatedIncidentsOnce(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	svc, _ := newSvc(t, []detection.Record{rec("d1", "host-1", base), rec("d2", "host-1", base.Add(time.Minute))}, &fakeReassessor{})
+	n := &fakeNotifier{}
+	svc.SetNotifier(n)
+	res, err := svc.CorrelateEngagement(context.Background(), "analyst", "eng-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Created) == 0 {
+		t.Fatal("fixture created no incident")
+	}
+	if n.calls != 1 || n.actor != "analyst" || n.engID != "eng-1" || len(n.incident) != len(res.Created) {
+		t.Fatalf("notifier call = %+v", n)
+	}
+	if _, err := svc.CorrelateEngagement(context.Background(), "analyst", "eng-1"); err != nil {
+		t.Fatal(err)
+	}
+	if n.calls != 1 {
+		t.Fatalf("re-run notified again: %d", n.calls)
+	}
+}

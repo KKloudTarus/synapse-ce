@@ -27,6 +27,16 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   `GET /api/v1/assets/{assetID}/vulnerabilities`; the host inventory response reports the scan
   outcome; the console gains Fleet, Hosts with a per-host vulnerability view.
 
+- **Incidents exist without a human calling an endpoint.** A detection batch that seals new detections
+  now runs correlation for its engagement at once, so an incident is open as soon as the detections behind
+  it are durable. The correlate route stays for on-demand runs; a correlator failure is audited and
+  reported in the ingest response, never fails the ingest.
+
+- **Operator alerting.** `SYNAPSE_ALERT_WEBHOOK_URL` (with an optional `SYNAPSE_ALERT_WEBHOOK_SECRET`
+  and `SYNAPSE_ALERT_MIN_SEVERITY`) posts a signed JSON alert for every incident correlation opens, with
+  bounded retries and a per-sink audit entry. `POST /api/v1/alerts/test` proves the path works. Before
+  this, nothing in the repository told anyone an incident existed.
+
 - **Imported findings are visible.** Findings a pipeline sent through the SARIF route landed in a
   table no page rendered. The engagement's Findings group gains an Imported tab that lists them with
   tool, version, location and provenance.

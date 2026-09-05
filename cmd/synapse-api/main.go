@@ -28,6 +28,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/alerting"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/correlation"
@@ -37,6 +38,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
+	alertwebhook "github.com/KKloudTarus/synapse-ce/internal/infrastructure/alertsink/webhook"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastchecks"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastengine"
@@ -89,6 +91,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/worksign"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
 	aitriagereviewuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aitriagereviewuc"
+	alertinguc "github.com/KKloudTarus/synapse-ce/internal/usecase/alerting"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
@@ -1583,6 +1586,26 @@ func main() {
 		os.Exit(1)
 	}
 	var assetSvc *assetuc.Service
+	// Operator alerting (#822): a signed webhook that receives every incident correlation opens, plus the
+	// correlator handle detection ingest uses so an incident exists as soon as its detections are sealed.
+	var alertSvc *alertinguc.Service
+	if cfg.AlertWebhookURL != "" {
+		rule := alerting.Rule{MinSeverity: shared.Severity(strings.ToLower(strings.TrimSpace(cfg.AlertMinSeverity)))}
+		sink, aerr := alertwebhook.New(cfg.AlertWebhookURL, cfg.AlertWebhookSecret, 10*time.Second, cfg.AlertWebhookAllowPrivate)
+		if aerr != nil {
+			log.Error("alert webhook init failed (SYNAPSE_ALERT_WEBHOOK_URL / SYNAPSE_ALERT_WEBHOOK_SECRET)", "err", aerr)
+			os.Exit(1)
+		}
+		var aerr2 error
+		alertSvc, aerr2 = alertinguc.NewService([]ports.AlertSink{sink}, rule, auditLog, clock, ids)
+		if aerr2 != nil {
+			log.Error("alerting init failed (SYNAPSE_ALERT_MIN_SEVERITY)", "err", aerr2)
+			os.Exit(1)
+		}
+		router.SetAlerts(alertSvc)
+		log.Info("operator alerting ENABLED (signed webhook; POST /api/v1/alerts/test sends a test alert)", "min_severity", rule.MinSeverity)
+	}
+	var incidentCorrelator *correlationuc.Service
 	if cfg.FleetAssetsEnabled {
 		svc, derr := assetuc.NewService(assetStore, auditLog, clock, ids)
 		if derr != nil {
@@ -1885,8 +1908,12 @@ func main() {
 				log.Error("correlation service init failed", "err", cerr)
 				os.Exit(1)
 			}
+			if alertSvc != nil {
+				corr.SetNotifier(alertSvc)
+			}
+			incidentCorrelator = corr
 			router.SetIncidentCorrelator(corr)
-			log.Warn("fleet correlation ENABLED (detections -> incidents; auto-reassess=" + strconv.FormatBool(triScore != nil) + ") - POST /api/v1/fleet/engagements/{id}/correlate")
+			log.Warn("fleet correlation ENABLED (detections -> incidents on every sealed batch; auto-reassess=" + strconv.FormatBool(triScore != nil) + "; alerting=" + strconv.FormatBool(alertSvc != nil) + ") - POST /api/v1/fleet/engagements/{id}/correlate")
 		}
 	}
 
@@ -2082,6 +2109,14 @@ func main() {
 			if derr != nil {
 				log.Error("fleet detection ingest init failed", "err", derr)
 				os.Exit(1)
+			}
+			if incidentCorrelator != nil {
+				// Correlate on ingest: the batch that seals new detections folds them into incidents at once.
+				corr := incidentCorrelator
+				detectSvc.SetCorrelator(func(ctx context.Context, actor string, engagementID shared.ID) (int, error) {
+					res, err := corr.CorrelateEngagement(ctx, actor, engagementID)
+					return len(res.Created), err
+				})
 			}
 			router.SetFleetDetectionIngest(detectSvc)
 			if telemetrySvc != nil {
