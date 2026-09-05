@@ -152,7 +152,10 @@ func TestAcquireGitPrivateRepoEndToEnd(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	host, _, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "https://"))
+	// The connector key is the port-aware authority: httptest binds a non-default loopback port, so the
+	// credential must be resolved for "127.0.0.1:<port>", not the bare host.
+	hostOnly, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "https://"))
+	host := net.JoinHostPort(hostOnly, port)
 	cloneURL := srv.URL + "/repo.git"
 
 	// With the connector: the private clone succeeds and the work tree carries the committed file.
@@ -200,5 +203,26 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+// TestGitAuthPortAwareMatching proves a connector configured for one host:port never authenticates a
+// clone of a different port on the same host (Codex code-review hardening).
+func TestGitAuthPortAwareMatching(t *testing.T) {
+	a := New().WithGitCredentialResolver(fakeGitCreds{host: "git.example.com:8443", user: "svc", token: "tok"})
+	a.allowInternalHosts = true
+
+	// Same host, WRONG port: no credential attached (unauthenticated).
+	url, env, _, cl, err := a.gitAuth(context.Background(), "https://git.example.com:9443/org/repo.git")
+	cl()
+	if err != nil || env != nil || url != "https://git.example.com:9443/org/repo.git" {
+		t.Fatalf("a different port must not authenticate: url=%q env=%v err=%v", url, env, err)
+	}
+
+	// Same host, RIGHT port: credential attached.
+	url, env, _, cl2, err := a.gitAuth(context.Background(), "https://git.example.com:8443/org/repo.git")
+	defer cl2()
+	if err != nil || len(env) == 0 || !strings.Contains(url, "svc@") {
+		t.Fatalf("the matching port must authenticate: url=%q env=%v err=%v", url, env, err)
 	}
 }

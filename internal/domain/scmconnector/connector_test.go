@@ -21,7 +21,7 @@ func TestNewConnectorNormalizesHostAndDefaultsUsername(t *testing.T) {
 	}{
 		{"bare host, github default user", "GitHub.com", ProviderGitHub, "", "github.com", "x-access-token"},
 		{"url host, gitlab default user", "https://gitlab.example.com/group", ProviderGitLab, "", "gitlab.example.com", "oauth2"},
-		{"host with port stripped", "ghe.corp.io:8443", ProviderGeneric, "svc-scanner", "ghe.corp.io", "svc-scanner"},
+		{"non-default port kept", "ghe.corp.io:8443", ProviderGeneric, "svc-scanner", "ghe.corp.io:8443", "svc-scanner"},
 		{"explicit username kept", "github.com", ProviderGitHub, "octo-bot", "github.com", "octo-bot"},
 	}
 	for _, tc := range cases {
@@ -91,8 +91,10 @@ func TestNormalizeHostAcceptsIPLiterals(t *testing.T) {
 	cases := map[string]string{
 		"127.0.0.1":            "127.0.0.1",
 		"[2001:db8::1]":        "2001:db8::1",
-		"2001:db8::1":          "2001:db8::1", // bare IPv6, the form gitHost yields at clone time
-		"[2001:DB8::0:1]:8443": "2001:db8::1",
+		"2001:db8::1":          "2001:db8::1",          // bare IPv6, the form gitHost yields at clone time
+		"[2001:DB8::0:1]:8443": "[2001:db8::1]:8443",   // a non-default port is kept, bracketed for v6
+		"github.com:443":       "github.com",           // the https default port is dropped
+		"git.example.com:8443": "git.example.com:8443", // a non-default port distinguishes the service
 		"10.1.2.3":             "10.1.2.3",
 	}
 	for in, want := range cases {

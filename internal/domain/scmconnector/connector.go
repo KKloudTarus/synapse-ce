@@ -169,12 +169,21 @@ func NormalizeHost(raw string) (string, error) {
 	if err != nil || u.Host == "" {
 		return "", fmt.Errorf("%w: connector host is not a valid hostname", shared.ErrValidation)
 	}
-	host := strings.ToLower(u.Hostname()) // drops any :port and userinfo
+	host := strings.ToLower(u.Hostname()) // drops userinfo; port taken separately
+	// Keep a NON-default port in the key: on a self-hosted host a different port can be a different
+	// service or tenant, so a connector for :8443 must not authenticate a clone of :443 or :9443. The
+	// https default (443) is dropped so "github.com" and "github.com:443" resolve to one key.
+	withPort := func(h string) string {
+		if p := u.Port(); p != "" && p != "443" {
+			return net.JoinHostPort(h, p) // brackets an IPv6 literal
+		}
+		return h
+	}
 	// A self-hosted git host may be reachable only by IP literal, so accept one (v4 or a bracket-stripped
 	// v6) canonicalized the same way as the bare-IP branch above, so "[2001:DB8::1]" and "2001:db8::1"
 	// resolve to one key.
 	if ip := net.ParseIP(host); ip != nil {
-		return ip.String(), nil
+		return withPort(ip.String()), nil
 	}
 	ascii, err := idna.Lookup.ToASCII(host)
 	if err != nil {
@@ -183,5 +192,5 @@ func NormalizeHost(raw string) (string, error) {
 	if !hostPattern.MatchString(ascii) {
 		return "", fmt.Errorf("%w: connector host must be a fully-qualified hostname or an IP", shared.ErrValidation)
 	}
-	return ascii, nil
+	return withPort(ascii), nil
 }

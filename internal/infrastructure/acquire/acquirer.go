@@ -356,11 +356,15 @@ func (a *Acquirer) gitAuth(ctx context.Context, rawURL string) (cloneURL string,
 	if a.gitCreds == nil {
 		return rawURL, nil, nil, noop, nil
 	}
-	host, herr := gitHost(rawURL)
-	if herr != nil {
-		return "", nil, nil, noop, herr
+	u0, perr0 := neturl.Parse(rawURL)
+	if perr0 != nil || !strings.EqualFold(u0.Scheme, "https") {
+		// Only ever attach a credential to an https clone (defense in depth: validateGitURL already
+		// enforces https before we get here). Never authenticate a non-https target.
+		return rawURL, nil, nil, noop, nil
 	}
-	normHost, nerr := scmconnector.NormalizeHost(host)
+	// Resolve by the port-aware host key (scheme+host+non-default port), so a connector for one host:port
+	// never authenticates a clone of a different port on the same host.
+	normHost, nerr := scmconnector.NormalizeHost(rawURL)
 	if nerr != nil {
 		return rawURL, nil, nil, noop, nil // an unusual host we cannot key a connector by; clone unauthenticated
 	}
@@ -385,9 +389,10 @@ func (a *Acquirer) gitAuth(ctx context.Context, rawURL string) (cloneURL string,
 		return "", nil, nil, noop, fmt.Errorf("write credential: %w", werr)
 	}
 	askpass := filepath.Join(credDir, "askpass")
-	// git invokes the helper for the password; it prints the token file's contents. /bin/sh is on
-	// the host and, in the sandbox, under the read-only-bound /bin.
-	script := "#!/bin/sh\nexec cat \"$SYNAPSE_GIT_TOKEN_FILE\"\n"
+	// git invokes the helper for the password; it prints the token file's contents. A fixed PATH stops a
+	// repo-provided `cat` on an inherited PATH (cwd is the cloned repo during the comparison fetch) from
+	// running in place of the system one. /bin/sh is on the host and, in the sandbox, under the ro-bound /bin.
+	script := "#!/bin/sh\nPATH=/usr/bin:/bin\nexec cat \"$SYNAPSE_GIT_TOKEN_FILE\"\n"
 	if werr := os.WriteFile(askpass, []byte(script), 0o700); werr != nil {
 		cleanup()
 		return "", nil, nil, noop, fmt.Errorf("write askpass: %w", werr)
@@ -457,7 +462,10 @@ func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit
 	args = append(args, "--", cloneURL, dir)
 	// GIT_TERMINAL_PROMPT=0 forbids interactive auth; GIT_ASKPASS is the connector helper when a
 	// credential resolved, else blanked to defeat any ambient credential helper (public clone).
-	gitEnv := []string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"}
+	// GIT_CONFIG_NOSYSTEM + GIT_CONFIG_GLOBAL=/dev/null run git with NO ambient config, so no
+	// system/global credential helper, smudge/clean filter, or LFS process can load and read the
+	// token file or run during checkout. This applies to the clone and every follow-on git op.
+	gitEnv := []string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
 	if len(authEnv) > 0 {
 		gitEnv = append(gitEnv, authEnv...)
 	} else {
@@ -811,10 +819,19 @@ func validateGitURL(url string) error {
 	// reason git:// is rejected): a MITM'd clone could plant a malicious lockfile/source the
 	// SCA pipeline then parses. The egress pin limits WHERE the clone connects, not the
 	// integrity of what comes back.
-	if strings.HasPrefix(strings.ToLower(url), "https://") {
-		return nil
+	if !strings.HasPrefix(strings.ToLower(url), "https://") {
+		return fmt.Errorf("%w: git URL must be https://", shared.ErrValidation)
 	}
-	return fmt.Errorf("%w: git URL must be https://", shared.ErrValidation)
+	// Refuse credentials embedded in the URL. A scan target must not carry a secret: credentials come
+	// from a source-control connector, resolved server-side and injected via askpass, never from the
+	// URL (which would otherwise land in argv and the cloned .git/config).
+	if u, err := neturl.Parse(url); err != nil || u.User != nil {
+		if err != nil {
+			return fmt.Errorf("%w: invalid git URL", shared.ErrValidation)
+		}
+		return fmt.Errorf("%w: git URL must not embed credentials; configure a source-control connector instead", shared.ErrValidation)
+	}
+	return nil
 }
 
 // gitRefPattern allows a branch/tag name: starts alphanumeric, then word chars,
