@@ -336,3 +336,77 @@ func TestSyncFailsWhenBindingConflicts(t *testing.T) {
 		t.Fatalf("a binding conflict must fail the sync, got %v", err)
 	}
 }
+
+// fakeRecorder is the vulnerability recorder the sync hands the package list to.
+type fakeRecorder struct {
+	calls   int
+	last    dhi.HostInventory
+	lastID  shared.ID
+	actor   string
+	outcome VulnerabilityOutcome
+	err     error
+}
+
+func (f *fakeRecorder) Record(_ context.Context, actor string, _ shared.ID, host *asset.Asset, inv dhi.HostInventory) (VulnerabilityOutcome, error) {
+	f.calls++
+	f.actor, f.lastID, f.last = actor, host.ID, inv
+	if f.err != nil {
+		return VulnerabilityOutcome{}, f.err
+	}
+	return f.outcome, nil
+}
+
+// With a recorder wired, a sync hands the persisted host and its packages to the recorder and reports
+// the recorder's outcome. The actor is the authenticated agent, never anything from the inventory.
+func TestSyncRecordsPackagesForVulnerabilityCorrelation(t *testing.T) {
+	w := newFakeWriter()
+	s := newService(t, w, &fakeAudit{})
+	rec := &fakeRecorder{outcome: VulnerabilityOutcome{EngagementID: "ctx-1", JobID: "job-1", Components: 2}}
+	s.SetVulnerabilityRecorder(rec)
+
+	res, err := s.Sync(context.Background(), "agent-1", SyncInput{TenantID: "tenant-1", Inventory: completeHost()})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if rec.calls != 1 || rec.actor != "agent-1" || rec.lastID != res.AssetID || len(rec.last.Packages) != 2 {
+		t.Fatalf("recorder call = %+v", rec)
+	}
+	if res.VulnerabilityScan == nil || res.VulnerabilityScan.JobID != "job-1" || res.VulnerabilityScan.EngagementID != "ctx-1" {
+		t.Fatalf("result outcome = %+v", res.VulnerabilityScan)
+	}
+}
+
+// A recorder failure is audited with its cause and reported in the result; the inventory sync itself
+// succeeded and must not be reported as failed to the agent.
+func TestSyncAuditsRecorderFailureWithoutFailingTheSync(t *testing.T) {
+	audit := &fakeAudit{}
+	s := newService(t, newFakeWriter(), audit)
+	s.SetVulnerabilityRecorder(&fakeRecorder{err: errors.New("queue unavailable")})
+
+	res, err := s.Sync(context.Background(), "agent-1", SyncInput{TenantID: "tenant-1", Inventory: completeHost()})
+	if err != nil {
+		t.Fatalf("recorder failure must not fail the sync: %v", err)
+	}
+	if res.VulnerabilityScan == nil || !res.VulnerabilityScan.Failed || !res.VulnerabilityScan.Skipped || res.VulnerabilityScan.Reason != ReasonQueueError || res.VulnerabilityScan.Components != 2 {
+		t.Fatalf("failed outcome = %+v", res.VulnerabilityScan)
+	}
+	e, ok := audit.entry("host_inventory.vulnerability_scan_failed")
+	if !ok {
+		t.Fatalf("failure not audited: %+v", audit.entries)
+	}
+	if e.Actor != "agent-1" || e.Target != res.AssetID.String() || e.Metadata["error"] != "queue unavailable" || e.Metadata["packages"] != "2" {
+		t.Fatalf("failure audit = %+v", e)
+	}
+}
+
+// Without a recorder the sync is unchanged: no outcome, packages only counted.
+func TestSyncWithoutRecorderReportsNoScan(t *testing.T) {
+	s := newService(t, newFakeWriter(), &fakeAudit{})
+	res, err := s.Sync(context.Background(), "agent-1", SyncInput{TenantID: "tenant-1", Inventory: completeHost()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.VulnerabilityScan != nil {
+		t.Fatalf("outcome without recorder = %+v", res.VulnerabilityScan)
+	}
+}

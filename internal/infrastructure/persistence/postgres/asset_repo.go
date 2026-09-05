@@ -302,7 +302,7 @@ func (r *AssetRepository) AssignEngagementBusinessAsset(ctx context.Context, ten
 func (r *AssetRepository) ListEngagementsByBusinessAsset(ctx context.Context, tenantID, assetID shared.ID) ([]*engagement.Engagement, error) {
 	out := []*engagement.Engagement{}
 	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND business_asset_id=$2 AND project_id IS NULL ORDER BY updated_at DESC,id`, tenantID.String(), assetID.String())
+		rows, err := tx.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND business_asset_id=$2 AND project_id IS NULL AND host_asset_id IS NULL ORDER BY updated_at DESC,id`, tenantID.String(), assetID.String())
 		if err != nil {
 			return err
 		}

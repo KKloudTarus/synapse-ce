@@ -60,6 +60,14 @@ func (r *memRepo) GetByProjectID(_ context.Context, tenantID, projectID shared.I
 	}
 	return nil, shared.ErrNotFound
 }
+func (r *memRepo) GetByHostAssetID(_ context.Context, tenantID, assetID shared.ID) (*domain.Engagement, error) {
+	for _, e := range r.data {
+		if !assetID.IsZero() && e.HostAssetID == assetID && (tenantID.IsZero() || e.TenantID == tenantID) {
+			return e, nil
+		}
+	}
+	return nil, shared.ErrNotFound
+}
 func (r *memRepo) ProjectContexts(_ context.Context, tenantID shared.ID, projectIDs []shared.ID) (map[shared.ID]*domain.Engagement, error) {
 	out := map[shared.ID]*domain.Engagement{}
 	for _, id := range projectIDs {

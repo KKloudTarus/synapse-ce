@@ -68,6 +68,14 @@ func (r *engRepoFake) GetByProjectID(_ context.Context, tenantID, projectID shar
 	}
 	return nil, shared.ErrNotFound
 }
+func (r *engRepoFake) GetByHostAssetID(_ context.Context, tenantID, assetID shared.ID) (*engdom.Engagement, error) {
+	for _, e := range r.data {
+		if !assetID.IsZero() && e.HostAssetID == assetID && (tenantID.IsZero() || e.TenantID == tenantID) {
+			return e, nil
+		}
+	}
+	return nil, shared.ErrNotFound
+}
 func (r *engRepoFake) ProjectContexts(_ context.Context, tenantID shared.ID, projectIDs []shared.ID) (map[shared.ID]*engdom.Engagement, error) {
 	out := map[shared.ID]*engdom.Engagement{}
 	for _, id := range projectIDs {

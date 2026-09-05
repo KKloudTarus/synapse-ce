@@ -100,6 +100,32 @@ The cluster agent requires `SYNAPSE_CLUSTER` as a stable identity keyed into eve
 `SYNAPSE_CLUSTER_NAMESPACES` to narrow scope and `SYNAPSE_CLUSTER_RESYNC` (default `5m`) to set the
 collection interval.
 
+## Host vulnerabilities
+
+A host agent reports the installed OS packages (dpkg, apk, rpm) with distro-qualified package URLs in
+every inventory snapshot. The control plane records that list as the host's SBOM in a hidden per-host
+engagement (the fleet twin of a Project's analysis context) and runs the SCA imported-SBOM pipeline
+against it: the same advisory sources, OS version comparison, severity backfill, KEV/EPSS risk
+ranking and deduplication a repository or image scan gets. Findings are re-evaluated by the
+vulnerability reconciliation job when advisories change, so a host that never changes still picks up
+new CVEs.
+
+Recording is idempotent per package set. An unchanged host does not re-import or re-scan on its next
+sweep; a changed set is recorded once the previous scan has finished. The `POST
+/api/v1/fleet/inventory/host` response carries a `vulnerability_scan` object with the outcome
+(`engagement_id`, `job_id`, `components`, or `skipped` with a `reason`). A scan-pipeline failure is
+audited as `host_inventory.vulnerability_scan_failed` and reported in that object; it never fails the
+inventory sync itself.
+
+```
+GET /api/v1/assets/hosts                          every host with its vulnerability summary
+GET /api/v1/assets/{assetID}/vulnerabilities      one host: packages, latest scan, findings
+```
+
+The console lists hosts under Fleet, Hosts, worst first, and opens each host to its findings with
+package, installed and fixed version, severity, CVSS and KEV. The hidden context does not appear in
+the engagement list and is not reachable through the engagement routes.
+
 ## Detections
 
 ```bash

@@ -17,7 +17,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-const engagementCols = `id, tenant_id, project_id, business_asset_id, name, client, status, authorized_from, authorized_to, created_at, updated_at, timezone, roe, live_recon, created_by, updated_by`
+const engagementCols = `id, tenant_id, project_id, business_asset_id, name, client, status, authorized_from, authorized_to, created_at, updated_at, timezone, roe, live_recon, created_by, updated_by, host_asset_id`
 
 // EngagementRepository persists engagements and their scope to PostgreSQL.
 type EngagementRepository struct{ pool *pgxpool.Pool }
@@ -42,10 +42,10 @@ func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagem
 			return fmt.Errorf("marshal roe: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+			`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NULLIF($17,''))`,
 			e.ID.String(), tenantID.String(), e.ProjectID.String(), e.BusinessAssetID.String(), e.Name, e.Client, string(e.Status),
 			e.AuthorizedFrom, e.AuthorizedTo, e.Audit.CreatedAt, e.Audit.UpdatedAt, e.Timezone, roeJSON, e.LiveReconEnabled,
-			e.Audit.CreatedBy, e.Audit.UpdatedBy); err != nil {
+			e.Audit.CreatedBy, e.Audit.UpdatedBy, e.HostAssetID.String()); err != nil {
 			return fmt.Errorf("insert engagement: %w", err)
 		}
 
@@ -171,7 +171,7 @@ func (r *EngagementRepository) GetByID(ctx context.Context, id shared.ID) (out *
 func (r *EngagementRepository) GetByIDInTenant(ctx context.Context, tenantID, id shared.ID) (out *engagement.Engagement, err error) {
 	tenantID = shared.TenantOrDefault(tenantID)
 	err = WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
-		out, err = r.get(ctx, tx, `id=$1 AND project_id IS NULL AND tenant_id=$2`, id.String(), tenantID.String())
+		out, err = r.get(ctx, tx, `id=$1 AND project_id IS NULL AND host_asset_id IS NULL AND tenant_id=$2`, id.String(), tenantID.String())
 		return err
 	})
 	return out, err
@@ -181,6 +181,19 @@ func (r *EngagementRepository) GetByProjectID(ctx context.Context, tenantID, pro
 	tenantID = shared.TenantOrDefault(tenantID)
 	err = WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 		out, err = r.get(ctx, tx, `project_id=$1 AND tenant_id=$2`, projectID.String(), tenantID.String())
+		return err
+	})
+	return out, err
+}
+
+// GetByHostAssetID loads the hidden fleet host vulnerability context for one Kind=host asset.
+func (r *EngagementRepository) GetByHostAssetID(ctx context.Context, tenantID, assetID shared.ID) (out *engagement.Engagement, err error) {
+	if assetID.IsZero() {
+		return nil, shared.ErrNotFound
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	err = WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		out, err = r.get(ctx, tx, `host_asset_id=$1 AND tenant_id=$2`, assetID.String(), tenantID.String())
 		return err
 	})
 	return out, err
@@ -204,7 +217,7 @@ func (r *EngagementRepository) ListPromotionReconciliationScopes(ctx context.Con
 			return nil, fmt.Errorf("scan promotion reconciliation tenant: %w", err)
 		}
 		if err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
-			rows, err := tx.Query(ctx, `SELECT id FROM engagements WHERE project_id IS NULL ORDER BY id`)
+			rows, err := tx.Query(ctx, `SELECT id FROM engagements WHERE project_id IS NULL AND host_asset_id IS NULL ORDER BY id`)
 			if err != nil {
 				return fmt.Errorf("list promotion reconciliation engagements: %w", err)
 			}
@@ -235,7 +248,7 @@ func (r *EngagementRepository) ListPromotionReconciliationScopes(ctx context.Con
 func (r *EngagementRepository) List(ctx context.Context, tenantID shared.ID) (out []*engagement.Engagement, err error) {
 	tenantID = shared.TenantOrDefault(tenantID)
 	err = WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND project_id IS NULL ORDER BY created_at DESC`, tenantID.String())
+		rows, err := tx.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND project_id IS NULL AND host_asset_id IS NULL ORDER BY created_at DESC`, tenantID.String())
 		if err != nil {
 			return fmt.Errorf("list engagements: %w", err)
 		}
@@ -405,10 +418,11 @@ func scanEngagement(row rowScanner) (*engagement.Engagement, error) {
 		e                          engagement.Engagement
 		idStr, ten, st             string
 		projectID, businessAssetID pgtype.Text
+		hostAssetID                pgtype.Text
 		af, at                     pgtype.Timestamptz
 		roeJSON                    []byte
 	)
-	if err := row.Scan(&idStr, &ten, &projectID, &businessAssetID, &e.Name, &e.Client, &st, &af, &at, &e.Audit.CreatedAt, &e.Audit.UpdatedAt, &e.Timezone, &roeJSON, &e.LiveReconEnabled, &e.Audit.CreatedBy, &e.Audit.UpdatedBy); err != nil {
+	if err := row.Scan(&idStr, &ten, &projectID, &businessAssetID, &e.Name, &e.Client, &st, &af, &at, &e.Audit.CreatedAt, &e.Audit.UpdatedAt, &e.Timezone, &roeJSON, &e.LiveReconEnabled, &e.Audit.CreatedBy, &e.Audit.UpdatedBy, &hostAssetID); err != nil {
 		return nil, err
 	}
 	if len(roeJSON) > 0 {
@@ -423,6 +437,9 @@ func scanEngagement(row rowScanner) (*engagement.Engagement, error) {
 	}
 	if businessAssetID.Valid {
 		e.BusinessAssetID = shared.ID(businessAssetID.String)
+	}
+	if hostAssetID.Valid {
+		e.HostAssetID = shared.ID(hostAssetID.String)
 	}
 	e.Status = engagement.Status(st)
 	if af.Valid {

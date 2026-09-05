@@ -1449,6 +1449,40 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/assets/hosts:
+    get:
+      tags: [assets]
+      operationId: listHostVulnerabilities
+      summary: List fleet host assets with their vulnerability summary
+      description: >
+        Every Kind=host asset of the tenant, worst first (critical, then high, then total). A host
+        that reported OS packages carries the id of its hidden vulnerability context, the size and
+        recording time of its active package SBOM, the latest scan job and the finding counts; a host
+        that never reported packages has an empty summary and no engagement id. Registered only when
+        SYNAPSE_FLEET_HOST_INGEST_ENABLED is set.
+      responses:
+        '200': {description: Host rows, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/HostVulnerabilitySummary'}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/assets/{assetID}/vulnerabilities:
+    parameters: [{$ref: '#/components/parameters/HostAssetId'}]
+    get:
+      tags: [assets, findings]
+      operationId: getHostVulnerabilities
+      summary: Get one fleet host's recorded packages, latest scan and vulnerability findings
+      description: >
+        The host's summary row plus the advisory-backed findings of its hidden vulnerability
+        context, highest risk first, in the same shape as the engagement findings list. License
+        findings derived from the same packages are excluded. A host that never reported packages
+        returns an empty findings list; a non-host asset is a 400.
+      responses:
+        '200': {description: Host vulnerabilities, content: {application/json: {schema: {$ref: '#/components/schemas/HostVulnerabilities'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
   /api/v1/appsec/assets:
     get:
       tags: [assets]
@@ -3095,6 +3129,12 @@ components:
       name: assetID
       in: path
       required: true
+      schema: {type: string, minLength: 1}
+    HostAssetId:
+      name: assetID
+      in: path
+      required: true
+      description: Server-issued id of a Kind=host fleet asset.
       schema: {type: string, minLength: 1}
     AITriageReviewId:
       name: rid
@@ -4870,6 +4910,55 @@ components:
         total: {type: integer, minimum: 0}
         limit: {type: integer}
         offset: {type: integer}
+    FleetAsset:
+      type: object
+      description: Serialized from the fleet asset domain struct (PascalCase keys).
+      properties:
+        ID: {type: string}
+        TenantID: {type: string}
+        Kind: {type: string, enum: [host, workload, image, cloud_account, storage, exposure, identity, namespace, cluster, repository]}
+        Key: {type: string, description: Natural key per kind; for a host the machine id or hostname.}
+        Name: {type: string}
+        Attributes: {type: object, additionalProperties: {type: string}}
+        Audit: {type: object}
+    HostScan:
+      type: object
+      description: The latest scan job of a host's vulnerability context.
+      properties:
+        job_id: {type: string}
+        status: {type: string, enum: [running, succeeded, failed]}
+        stage: {type: string}
+        error: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+    HostVulnerabilitySummaryCounts:
+      type: object
+      properties:
+        total: {type: integer}
+        critical: {type: integer}
+        high: {type: integer}
+        medium: {type: integer}
+        low: {type: integer}
+        info: {type: integer}
+        fixable: {type: integer, description: Findings whose advisory names a fixed version.}
+        kev: {type: integer, description: Findings on the CISA Known Exploited Vulnerabilities list.}
+    HostVulnerabilitySummary:
+      type: object
+      properties:
+        asset: {$ref: '#/components/schemas/FleetAsset'}
+        engagement_id: {type: string, description: Hidden vulnerability context; absent until the host reports packages.}
+        packages: {type: integer, description: Components in the active package SBOM.}
+        recorded_at: {type: string, format: date-time}
+        last_scan: {$ref: '#/components/schemas/HostScan'}
+        summary: {$ref: '#/components/schemas/HostVulnerabilitySummaryCounts'}
+    HostVulnerabilities:
+      allOf:
+      - $ref: '#/components/schemas/HostVulnerabilitySummary'
+      - type: object
+        properties:
+          findings:
+            type: array
+            items: {$ref: '#/components/schemas/Finding'}
     AssetMembership:
       type: object
       required: [id, role, provenance]

@@ -38,6 +38,9 @@ func (r *multiEngRepo) GetByID(_ context.Context, id shared.ID) (*engagement.Eng
 func (r *multiEngRepo) GetByIDInTenant(ctx context.Context, _ shared.ID, id shared.ID) (*engagement.Engagement, error) {
 	return r.GetByID(ctx, id)
 }
+func (*multiEngRepo) GetByHostAssetID(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
+	return nil, shared.ErrNotFound
+}
 func (*multiEngRepo) GetByProjectID(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
 	return nil, shared.ErrNotFound
 }

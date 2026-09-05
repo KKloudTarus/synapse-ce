@@ -715,9 +715,13 @@ func (f *fleetRouter) hostInventory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, f.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"asset_id": res.AssetID.String(), "complete": res.Complete, "degraded": res.Degraded, "coverage_gaps": res.Coverage,
-	})
+	}
+	if res.VulnerabilityScan != nil {
+		body["vulnerability_scan"] = res.VulnerabilityScan
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (f *fleetRouter) transitionTo(w http.ResponseWriter, r *http.Request, to workorder.State, reason string) {

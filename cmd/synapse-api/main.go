@@ -126,6 +126,7 @@ import (
 	exposureuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposureuc"
 	fleetaudit "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/fleetaudit"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
+	hostvulnuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostvuln"
 	incidenttriage "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidenttriage"
 	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
@@ -2001,8 +2002,17 @@ func main() {
 			if telemetryTransportStore != nil {
 				hiSvc.SetTelemetryBinder(telemetryTransportStore)
 			}
+			// #820: the reported OS packages become the host's SBOM in a hidden per-host engagement and
+			// run through the SCA imported-SBOM pipeline, so host CVEs reach the console per asset.
+			hvSvc, hverr := hostvulnuc.NewService(repo, assetStore, findingsService, scaService, importedSBOMStore, scanJobStore, ids, clock, auditLog)
+			if hverr != nil {
+				log.Error("host vulnerability init failed", "err", hverr)
+				os.Exit(1)
+			}
+			hiSvc.SetVulnerabilityRecorder(hvSvc)
+			router.SetHostVulnerabilities(hvSvc)
 			router.SetFleetHostInventory(hiSvc)
-			log.Info("fleet host inventory ingest ENABLED (VM agents persist host inventories into the asset model)")
+			log.Info("fleet host inventory ingest ENABLED (VM agents persist host inventories into the asset model; packages are correlated with advisories per host)")
 		}
 
 		// Agent→control-plane telemetry batch ingest (A3, #624): an enrolled agent ships a signed

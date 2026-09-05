@@ -101,6 +101,9 @@ type ScannedImageStore interface {
 type AssetRepository interface {
 	UpsertAsset(ctx context.Context, a *asset.Asset) error
 	GetAssetByKey(ctx context.Context, tenantID shared.ID, kind asset.Kind, key string) (*asset.Asset, error)
+	// GetAssetByID loads one asset by server-issued id, scoped to tenantID. A zero tenant or id is a
+	// validation error; a valid but absent or cross-tenant asset returns ErrNotFound.
+	GetAssetByID(ctx context.Context, tenantID, id shared.ID) (*asset.Asset, error)
 	ListAssets(ctx context.Context, tenantID shared.ID) ([]*asset.Asset, error)
 	UpsertEdge(ctx context.Context, e *asset.Edge) error
 	ListEdges(ctx context.Context, tenantID shared.ID) ([]*asset.Edge, error)
@@ -329,6 +332,9 @@ type EngagementRepository interface {
 	// It is only for Project use-case internals; normal engagement reads must use GetByIDInTenant.
 	GetByProjectID(ctx context.Context, tenantID, projectID shared.ID) (*engagement.Engagement, error)
 	ProjectContexts(ctx context.Context, tenantID shared.ID, projectIDs []shared.ID) (map[shared.ID]*engagement.Engagement, error)
+	// GetByHostAssetID loads the hidden fleet host vulnerability context for a Kind=host asset, scoped to
+	// tenantID. Only the host vulnerability use case reads it; normal engagement reads use GetByIDInTenant.
+	GetByHostAssetID(ctx context.Context, tenantID, assetID shared.ID) (*engagement.Engagement, error)
 	List(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error)
 	// Update persists changes to an existing engagement aggregate – its row
 	// (name/client/status/authorization window/timezone) and its full scope target

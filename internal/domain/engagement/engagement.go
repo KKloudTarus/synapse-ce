@@ -50,6 +50,7 @@ type Engagement struct {
 	ID              shared.ID
 	TenantID        shared.ID // multi-tenant-ready; zero value = default tenant in single-tenant mode
 	ProjectID       shared.ID // non-zero for an internal Project analysis context; hidden from engagement lists
+	HostAssetID     shared.ID // non-zero for an internal fleet host vulnerability context; hidden from engagement lists
 	BusinessAssetID shared.ID // optional primary business-level Asset; zero means Unassigned
 	Name            string
 	Client          string
@@ -115,6 +116,14 @@ func New(id, tenantID shared.ID, name, client string, now time.Time) (*Engagemen
 		Scope:    Scope{},
 		Audit:    shared.Audit{CreatedAt: now, UpdatedAt: now},
 	}, nil
+}
+
+// Internal reports whether the engagement is a machine-owned context (a Project analysis context or a
+// fleet host vulnerability context). Internal engagements never appear in operator engagement lists
+// and are not reachable through the tenant-scoped engagement reads; their owning aggregate reaches
+// them through the dedicated repository lookups.
+func (e *Engagement) Internal() bool {
+	return !e.ProjectID.IsZero() || !e.HostAssetID.IsZero()
 }
 
 // IsAuthorizedAt reports whether testing is legally authorized at time t.

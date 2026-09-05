@@ -46,6 +46,9 @@ func (f *fakeEngRepo) GetByID(context.Context, shared.ID) (*engdom.Engagement, e
 func (f *fakeEngRepo) GetByIDInTenant(context.Context, shared.ID, shared.ID) (*engdom.Engagement, error) {
 	return f.eng, f.err
 }
+func (*fakeEngRepo) GetByHostAssetID(context.Context, shared.ID, shared.ID) (*engdom.Engagement, error) {
+	return nil, shared.ErrNotFound
+}
 func (*fakeEngRepo) GetByProjectID(context.Context, shared.ID, shared.ID) (*engdom.Engagement, error) {
 	return nil, shared.ErrNotFound
 }

@@ -5,8 +5,9 @@
 //
 // Coverage honesty is preserved: the inventory's coverage issues are recorded (count + degraded flag
 // on the asset, each issue audited), so a partial host inventory is never presented as complete. The
-// package LIST feeds the SCA vulnerability pipeline separately; the asset model records the host
-// identity, its facts, and a package count — it is not a package table.
+// asset model records the host identity, its facts, and a package count; the package LIST goes to the
+// optional VulnerabilityRecorder (the hostvuln use case), which records it as the host's SBOM and
+// queues the SCA vulnerability pipeline against it (#820).
 package hostinventory
 
 import (
@@ -15,6 +16,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	dhi "github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
@@ -34,13 +36,47 @@ type AssetWriter interface {
 // The concrete asset use case satisfies the consumer-side interface.
 var _ AssetWriter = (*assetuc.Service)(nil)
 
+// VulnerabilityRecorder turns the packages a host reported into CVE findings for that host (#820). The
+// concrete implementation lives in the hostvuln use case; this consumer-side interface keeps the
+// inventory path free of the SCA pipeline's types.
+type VulnerabilityRecorder interface {
+	Record(ctx context.Context, actor string, tenantID shared.ID, host *asset.Asset, inv dhi.HostInventory) (VulnerabilityOutcome, error)
+}
+
+// VulnerabilityOutcome reports what a sync did with the host's package list. Skipped with a Reason is
+// a normal outcome (no packages, or the package set is unchanged since the last recorded scan);
+// Failed marks a recorder error that was audited and did not fail the inventory sync.
+type VulnerabilityOutcome struct {
+	EngagementID shared.ID `json:"engagement_id,omitempty"`
+	JobID        string    `json:"job_id,omitempty"`
+	Components   int       `json:"components"`
+	Skipped      bool      `json:"skipped"`
+	Failed       bool      `json:"failed,omitempty"`
+	Reason       string    `json:"reason,omitempty"`
+}
+
+// Reasons a sync records no new vulnerability scan.
+const (
+	ReasonNoPackages = "no packages reported"
+	ReasonUnchanged  = "package set unchanged since the last recorded scan"
+	ReasonScanActive = "a vulnerability scan is still running for this host; the next sync records the change"
+	ReasonQueueError = "vulnerability scan could not be queued; see the audit log"
+)
+
 // Service maps and persists a host inventory.
 type Service struct {
 	assets   AssetWriter
 	audit    ports.AuditLogger
 	clock    ports.Clock
 	bindings ports.TelemetryAssetBindingStore // optional; nil ⇒ no telemetry asset binding is established
+	vulns    VulnerabilityRecorder            // optional; nil ⇒ packages are counted but not correlated with advisories
 }
+
+// SetVulnerabilityRecorder wires the recorder that correlates the reported packages with advisories.
+// When set, every sync that carries packages records them as the host's SBOM and queues a
+// vulnerability scan; a recorder failure is audited and reported in the result, never returned, so a
+// host inventory is persisted even when the scan pipeline is unavailable.
+func (s *Service) SetVulnerabilityRecorder(r VulnerabilityRecorder) { s.vulns = r }
 
 // SetTelemetryBinder wires the server-authoritative agent→host telemetry binding store. When set, a
 // successful host-inventory sync establishes (or refreshes) the reporting agent's canonical telemetry
@@ -74,6 +110,8 @@ type SyncResult struct {
 	Complete bool
 	Degraded bool
 	Coverage int
+	// VulnerabilityScan is nil when no recorder is wired.
+	VulnerabilityScan *VulnerabilityOutcome
 }
 
 // Sync persists the host as a Kind=host asset. It is idempotent: two syncs of an unchanged host reuse
@@ -157,7 +195,42 @@ func (s *Service) Sync(ctx context.Context, actor string, in SyncInput) (*SyncRe
 		}
 	}
 
-	return &SyncResult{AssetID: a.ID, Complete: inv.Complete, Degraded: degraded, Coverage: len(inv.Coverage)}, nil
+	res := &SyncResult{AssetID: a.ID, Complete: inv.Complete, Degraded: degraded, Coverage: len(inv.Coverage)}
+	if s.vulns != nil {
+		outcome, err := s.recordVulnerabilities(ctx, actor, in.TenantID, a, inv, now)
+		if err != nil {
+			return nil, err
+		}
+		res.VulnerabilityScan = &outcome
+	}
+	return res, nil
+}
+
+// recordVulnerabilities hands the package list to the recorder. The inventory is already persisted,
+// so a recorder failure is audited with the cause and reported as a failed outcome rather than
+// undoing the sync; the agent resends the inventory on its next sweep and the scan is retried then.
+// Only an audit failure is returned, because an unattributable failure is the one thing this path
+// must not swallow.
+func (s *Service) recordVulnerabilities(ctx context.Context, actor string, tenantID shared.ID, a *asset.Asset, inv dhi.HostInventory, now time.Time) (VulnerabilityOutcome, error) {
+	outcome, err := s.vulns.Record(ctx, actor, tenantID, a, inv)
+	if err == nil {
+		return outcome, nil
+	}
+	if aerr := s.audit.Record(ctx, ports.AuditEntry{
+		Actor:  actor,
+		Action: "host_inventory.vulnerability_scan_failed",
+		Target: a.ID.String(),
+		Metadata: map[string]string{
+			"tenant_id": tenantID.String(),
+			"asset_id":  a.ID.String(),
+			"packages":  strconv.Itoa(len(inv.Packages)),
+			"error":     err.Error(),
+		},
+		At: now,
+	}); aerr != nil {
+		return VulnerabilityOutcome{}, fmt.Errorf("host inventory: audit vulnerability scan failure: %w", aerr)
+	}
+	return VulnerabilityOutcome{Components: len(inv.Packages), Skipped: true, Failed: true, Reason: ReasonQueueError}, nil
 }
 
 // guardAssetBinding prevents an authenticated agent from claiming the stable natural key of a host that

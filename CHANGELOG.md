@@ -18,6 +18,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   `api-token` inputs. Before this, the CLI was a self-contained gate whose result died with the
   process and the console was fed only by scans the server ran itself.
 
+- **Fleet hosts get CVE findings.** A host agent already reported its installed OS packages with
+  distro-qualified package URLs; the control plane counted them and dropped the list. It now records
+  the list as the host's SBOM in a hidden per-host engagement (`engagements.host_asset_id`, migration
+  0130) and runs the SCA imported-SBOM pipeline against it, so host CVEs get the same advisory
+  matching, OS version comparison, KEV/EPSS ranking, dedup and reconciliation as a repository or
+  image. Recording is idempotent per package set. New routes `GET /api/v1/assets/hosts` and
+  `GET /api/v1/assets/{assetID}/vulnerabilities`; the host inventory response reports the scan
+  outcome; the console gains Fleet, Hosts with a per-host vulnerability view.
+
 - **Imported findings are visible.** Findings a pipeline sent through the SARIF route landed in a
   table no page rendered. The engagement's Findings group gains an Imported tab that lists them with
   tool, version, location and provenance.

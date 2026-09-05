@@ -74,6 +74,7 @@ type Router struct {
 	aiTriageReviews        aiTriageReviewService     // optional; nil ⇒ AI-triage review queue routes are not registered
 	projects               projectService            // optional; nil ⇒ project routes are not registered
 	assets                 assetService              // optional; nil ⇒ fleet asset routes are not registered
+	hostVulns              hostVulnerabilityService  // optional; nil ⇒ host vulnerability routes are not registered (#820)
 	cspm                   *cspm.Service             // optional; nil ⇒ CSPM routes are not registered
 	businessAssets         businessAssetService      // optional; nil ⇒ business-level Asset routes are not registered
 	attackPaths            attackPathService         // optional; nil ⇒ attack-path routes are not registered
@@ -357,6 +358,10 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/assets", rt.authz(userdom.PermView, rt.listAssets))
 		mux.HandleFunc("POST /api/v1/assets/edges", rt.authz(userdom.PermOperate, rt.createAssetEdge))
 		mux.HandleFunc("GET /api/v1/assets/edges", rt.authz(userdom.PermView, rt.listAssetEdges))
+	}
+	if rt.hostVulns != nil {
+		mux.HandleFunc("GET /api/v1/assets/hosts", rt.authz(userdom.PermView, rt.listHostVulnerabilities))
+		mux.HandleFunc("GET /api/v1/assets/{assetID}/vulnerabilities", rt.authz(userdom.PermView, rt.getHostVulnerabilities))
 	}
 	if rt.businessAssets != nil {
 		if rt.eng != nil && rt.findings != nil {

@@ -88,7 +88,8 @@ inside the hardened sandbox with server-side scope and authorization:
 A distributed **agent fleet** extends Synapse from point-in-time analysis to runtime, over both host
 and Kubernetes estates:
 
-- **Agents** collect host inventory and Kubernetes workload/exposure/identity inventory, with
+- **Agents** collect host inventory (facts and installed OS packages, correlated with advisories into
+  per-host CVE findings) and Kubernetes workload/exposure/identity inventory, with
   certificate enrolment, signed packaging and updates, per-asset coverage and freshness, and fenced
   leadership so scheduled work runs once.
 - An **eBPF detection engine** observes process, file, network, and privilege events and evaluates a

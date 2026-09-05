@@ -30,6 +30,9 @@ func (f *fakeEngRepo) GetByIDInTenant(context.Context, shared.ID, shared.ID) (*e
 func (*fakeEngRepo) GetByProjectID(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
 	return nil, shared.ErrNotFound
 }
+func (*fakeEngRepo) GetByHostAssetID(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
+	return nil, shared.ErrNotFound
+}
 func (*fakeEngRepo) ProjectContexts(context.Context, shared.ID, []shared.ID) (map[shared.ID]*engagement.Engagement, error) {
 	return map[shared.ID]*engagement.Engagement{}, nil
 }
