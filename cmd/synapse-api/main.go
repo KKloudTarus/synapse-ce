@@ -96,6 +96,7 @@ import (
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/businessassetuc"
+	capabilitiesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/capabilities"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/crosscheckjudge"
@@ -1119,6 +1120,32 @@ func main() {
 		log.Error("fleet audit reconciliation runner init failed", "err", err)
 		os.Exit(1)
 	}
+	// Optional-subsystem catalog for GET /api/v1/capabilities: every field is one resolved
+	// SYNAPSE_* switch, so a client can tell a disabled subsystem from a broken one.
+	capabilitySvc, err := capabilitiesuc.NewService(capabilitiesuc.Flags{
+		Fleet:                cfg.FleetEnabled,
+		FleetAssets:          cfg.FleetAssetsEnabled,
+		FleetHostIngest:      cfg.FleetHostIngestEnabled,
+		FleetClusterIngest:   cfg.FleetClusterIngestEnabled,
+		FleetTelemetryIngest: cfg.FleetTelemetryIngestEnabled,
+		FleetDetectionIngest: cfg.FleetDetectionIngestEnabled,
+		CSPM:                 cfg.CSPMEnabled,
+		Agent:                cfg.AgentEnabled,
+		FPTriage:             cfg.FPTriageEnabled,
+		SLA:                  cfg.SLAEnabled,
+		Judgments:            cfg.JudgmentsEnabled,
+		Sandbox:              cfg.SandboxEnabled,
+		WriteupDrafts:        cfg.WriteupDraftsEnabled,
+		Taint:                cfg.TaintEnabled,
+		JSReachability:       cfg.JSReachabilityEnabled,
+		SingleTenant:         cfg.SingleTenant,
+		OIDC:                 cfg.OIDCEnabled,
+	})
+	if err != nil {
+		log.Error("capability catalog init failed", "err", err)
+		os.Exit(1)
+	}
+	router.SetCapabilities(capabilitySvc)
 	router.SetCoverageWindowReader(coverageWindowStore)
 	router.SetPrivacyPolicyService(privacyPolicySvc)
 	if cfg.OIDCEnabled {

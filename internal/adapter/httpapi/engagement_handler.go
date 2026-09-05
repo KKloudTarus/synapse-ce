@@ -205,7 +205,7 @@ func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, e)
+	writeJSON(w, http.StatusCreated, toEngagementView(e))
 }
 
 func (rt *Router) listEngagements(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +216,7 @@ func (rt *Router) listEngagements(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	writeJSON(w, http.StatusOK, toEngagementViews(list))
 }
 
 func (rt *Router) getEngagement(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +225,7 @@ func (rt *Router) getEngagement(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, e)
+	writeJSON(w, http.StatusOK, toEngagementView(e))
 }
 
 type updateScopeRequest struct {
@@ -247,7 +247,7 @@ func (rt *Router) updateScope(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, e)
+	writeJSON(w, http.StatusOK, toEngagementView(e))
 }
 
 type setWindowRequest struct {
@@ -284,7 +284,7 @@ func (rt *Router) setAuthorizationWindow(w http.ResponseWriter, r *http.Request)
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, e)
+	writeJSON(w, http.StatusOK, toEngagementView(e))
 }
 
 type transitionRequest struct {
@@ -304,7 +304,7 @@ func (rt *Router) transitionEngagement(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, e)
+	writeJSON(w, http.StatusOK, toEngagementView(e))
 }
 
 type blackoutDTO struct {
@@ -335,7 +335,7 @@ func (rt *Router) setLiveRecon(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, e)
+	writeJSON(w, http.StatusOK, toEngagementView(e))
 }
 
 // setRoE replaces the engagement's rules of engagement. The execution gate
@@ -368,5 +368,5 @@ func (rt *Router) setRoE(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, e)
+	writeJSON(w, http.StatusOK, toEngagementView(e))
 }

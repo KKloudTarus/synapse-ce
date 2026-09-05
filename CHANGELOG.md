@@ -27,6 +27,21 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Operator key revocation and role management.** `PATCH /api/v1/users/{id}` changes a name and
+  role, `POST /api/v1/users/{id}/disable` and `/enable` revoke and restore access, and
+  `POST /api/v1/users/{id}/rotate-key` issues a new API key and invalidates the previous one. Every
+  mutation is audited and requires the `administer` capability. Deleting a user is deliberately not
+  offered: an identity owns its audit, evidence, and finding attribution, so access is revoked by
+  disabling the account or rotating its key. Disabling or demoting a tenant's last enabled admin is
+  refused, so a tenant cannot lock itself out.
+
+- **Deployment capability catalog.** `GET /api/v1/capabilities` reports every optional subsystem
+  with a stable key, a human name, whether this deployment enables it, the `SYNAPSE_*` variable that
+  controls it, and the capabilities it depends on. An optional subsystem registers its routes only
+  when its switch is on, so a disabled subsystem and a broken one previously both answered `404`; a
+  client can now render "disabled" and name the switch. The route is gated at the view floor and
+  returns configuration booleans and variable names only, never a configured value.
+
 - **Project dependency graph and subtree export.** Project analyses now expose a bounded, deterministic
   dependency projection from the stored SBOM with direct/transitive relationships, reverse paths,
   vulnerability matches, license policy risk, and reachability annotations. A new interactive Project
@@ -109,6 +124,21 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Changed
 
+- **Breaking: engagements and projects serialize in snake_case.** Both aggregates were written to
+  the wire straight from their domain structs, so they answered with Go field names (`ID`,
+  `TenantID`, `SourceBinding`, `Scope.InScope`, `Audit.CreatedAt`) while scans, analyses, findings,
+  and every newer resource answered in snake_case, and a client had to special-case per resource.
+  Engagement and project responses now go through explicit view types in the HTTP layer:
+  `id`, `tenant_id`, `name`, `client`, `status`, `scope.in_scope[].kind`, `scope.in_scope[].value`,
+  `roe`, `authorized_from`, `authorized_to`, `live_recon_enabled`, `source_binding`,
+  `default_profile_by_lang`, `gate_id`, and the former nested `Audit` flattened to `created_at` and
+  `updated_at`. Go cannot emit two names for one field, so the old keys are gone rather than
+  duplicated. Affected routes: `GET|POST /api/v1/engagements`, `GET /api/v1/engagements/{id}`,
+  `PATCH /api/v1/engagements/{id}`, `PUT /api/v1/engagements/{id}/status|scope|authorization-window|roe|live-recon`,
+  `POST /api/v1/engagements/import`, `GET /api/v1/appsec/assets/{id}/engagements`, and
+  `GET|POST /api/v1/projects`, `GET /api/v1/projects/{key}`, `PUT /api/v1/projects/{key}/gate`.
+  `api/openapi.yaml` documents the new shape.
+
 - **Workflow-oriented sidebar navigation.** Reorganizes shipped dashboard capabilities around security operations, exposure management, engineering, runtime, and governance; separates engagement creation from the active navigation state; and removes unavailable placeholder destinations.
 
 - **Breaking Asset API consolidation.** Removed `POST|GET /api/v1/assets/services`, `asset.BusinessService`, and the unused `member_of` fleet edge. Business-level Asset reads and writes now use `/api/v1/appsec/assets`; technical/fleet `/api/v1/assets` remains unchanged. Existing business-service rows retain their IDs and owners and receive stable keys during migration.
@@ -124,6 +154,20 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   a remote git URL is still fetched.
 
 ### Fixed
+
+- **Documented engagement lifecycle route.** `PUT /api/v1/engagements/{id}/status` answered `404`:
+  the transition was reachable only as `PATCH /api/v1/engagements/{id}`, which no guide described.
+  Both spellings now apply the same change through the same `operate` gate, and both are described
+  in `api/openapi.yaml` and the governed-assessments guide.
+
+- **Cross-tenant user management.** `POST /api/v1/users` accepted a `tenant_id` from the request
+  body without comparing it with the caller's tenant, so a tenant-A admin could provision an admin
+  into tenant B and receive that admin's API key, and `GET /api/v1/users` listed every tenant's
+  operators on all three persistence backends. User reads and writes now carry their tenant
+  explicitly through the repository port and apply it as a query predicate, independent of row level
+  security. Provisioning into another tenant is refused unless the caller is the bootstrap principal
+  from `SYNAPSE_API_TOKEN`, the one identity that may seed a new tenant's first admin. The hostile
+  tenant-isolation harness now covers both routes.
 
 - Standalone CLI scans bind the default tenant before persisting results.
 - Release-signing CI uses the corrected provenance action and uploads the checksum signature once.

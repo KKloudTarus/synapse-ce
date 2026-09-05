@@ -113,3 +113,40 @@ func New(id shared.ID, tenantID string, name string, role Role, apiKeyHash strin
 	}
 	return &User{ID: id, TenantID: tenantID, Name: name, Role: role, APIKeyHash: apiKeyHash, Audit: shared.Audit{CreatedAt: now, UpdatedAt: now}}, nil
 }
+
+// Rename changes the display name, stamping UpdatedAt. An empty name is rejected: attribution reads
+// this string, so it must stay non-empty for the life of the identity.
+func (u *User) Rename(name string, now time.Time) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("%w: user name is required", shared.ErrValidation)
+	}
+	u.Name, u.Audit.UpdatedAt = name, now
+	return nil
+}
+
+// SetRole changes the permission level, stamping UpdatedAt. Machine and unknown roles are rejected
+// here, so a role that grants nothing on the human API can never be assigned by mistake.
+func (u *User) SetRole(role Role, now time.Time) error {
+	if !role.Valid() {
+		return fmt.Errorf("%w: invalid role %q", shared.ErrValidation, role)
+	}
+	u.Role, u.Audit.UpdatedAt = role, now
+	return nil
+}
+
+// SetDisabled turns the identity's credentials on or off, stamping UpdatedAt. A disabled user keeps
+// its id and its history, so past actions stay attributable; only authentication stops.
+func (u *User) SetDisabled(disabled bool, now time.Time) {
+	u.Disabled, u.Audit.UpdatedAt = disabled, now
+}
+
+// SetAPIKeyHash replaces the stored credential digest, stamping UpdatedAt. The previous key stops
+// authenticating the moment this is persisted, which is what makes rotation a revocation.
+func (u *User) SetAPIKeyHash(apiKeyHash string, now time.Time) error {
+	if strings.TrimSpace(apiKeyHash) == "" {
+		return fmt.Errorf("%w: api key hash is required", shared.ErrValidation)
+	}
+	u.APIKeyHash, u.Audit.UpdatedAt = apiKeyHash, now
+	return nil
+}

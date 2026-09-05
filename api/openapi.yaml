@@ -14,9 +14,8 @@ info:
     After operator authentication, every endpoint except the AUP endpoints also
     requires that the current Acceptable Use Policy has been accepted, else `403`.
 
-    Note: legacy response objects may use PascalCase where they are serialized
-    directly from domain structs. Endpoints with explicit response schemas,
-    including the rule catalog API, use the field names documented below.
+    Response objects use snake_case. A few endpoints that are still serialized directly from a
+    domain struct answer in PascalCase; each is documented with the field names it actually returns.
 
 servers:
 - url: http://localhost:8080
@@ -26,6 +25,10 @@ security:
 - bearerAuth: []
 
 tags:
+- name: users
+  description: Operator identities, roles, and API-key lifecycle
+- name: platform
+  description: Deployment-wide configuration a client needs before it renders navigation
 - name: health
 - name: aup
 - name: engagements
@@ -112,6 +115,31 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
 
+  /api/v1/capabilities:
+    get:
+      tags: [platform]
+      summary: List optional subsystems and whether this deployment enables them
+      description: >
+        Every optional subsystem registers its routes only when its `SYNAPSE_*` switch is on, so a
+        disabled subsystem and a broken one both answer 404. This endpoint reports, per subsystem, a
+        stable key, a human name, whether it is enabled, and the environment variable that controls
+        it, so a client can render "disabled" rather than a dead link. It returns configuration
+        booleans and variable NAMES only, never a configured value, and is gated at the view floor.
+      responses:
+        "200":
+          description: The deployment's capability catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [capabilities]
+                properties:
+                  capabilities:
+                    type: array
+                    items: {$ref: "#/components/schemas/Capability"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
   /api/v1/engagements:
     get:
       tags: [engagements]
@@ -157,6 +185,59 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: Engagement already has a different uploaded source package}
         "413": {description: Uploaded source package exceeds 512 MiB}
+
+  /api/v1/engagements/{id}:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    patch:
+      tags: [engagements]
+      summary: Apply a lifecycle transition to an engagement
+      description: >
+        Requires the `operate` capability. The legal transitions are draft to active, active to
+        completed, and draft, active, or completed to archived; archived is terminal. An illegal
+        transition is rejected with `400`. `PUT /api/v1/engagements/{id}/status` applies the same
+        change on the status sub-resource.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngagementTransitionRequest"}
+      responses:
+        "200":
+          description: The transitioned engagement
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Engagement"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/engagements/{id}/status:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    put:
+      tags: [engagements]
+      summary: Set an engagement's lifecycle status
+      description: >
+        Requires the `operate` capability. Identical in effect to
+        `PATCH /api/v1/engagements/{id}`: the same legal transitions, the same authorization gate,
+        and the same audit record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngagementTransitionRequest"}
+      responses:
+        "200":
+          description: The transitioned engagement
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Engagement"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/engagements/{id}/source:
     parameters:
@@ -2362,6 +2443,143 @@ paths:
         '429': {description: Backpressure; the agent preserves WAL state and retries according to Retry-After, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/users:
+    get:
+      tags: [users]
+      summary: List the operators of the caller's own tenant
+      description: >
+        Requires the `administer` capability (admin role). The roster is scoped to the caller's
+        tenant; no caller lists another tenant's operators. The API-key hash is never serialized.
+      responses:
+        "200":
+          description: The tenant's operators
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/User"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [users]
+      summary: Provision an operator and return its API key once
+      description: >
+        Requires the `administer` capability. The key is shown exactly once and is not recoverable.
+        `tenant_id` defaults to the caller's own tenant; a different tenant is refused with `403`
+        unless the caller is the bootstrap platform principal, which is the only identity allowed to
+        seed another tenant's first admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateUserRequest"}
+      responses:
+        "201":
+          description: Created; the API key is returned once
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UserWithAPIKey"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Missing the administer capability, or the requested tenant is not the caller's own}
+
+  /api/v1/users/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    patch:
+      tags: [users]
+      summary: Update an operator's name and role
+      description: >
+        Requires the `administer` capability. An omitted or empty field is left unchanged. Demoting
+        the tenant's last enabled admin is refused with `409`, so a tenant cannot be locked out.
+        Deleting an operator is deliberately not offered: an identity owns its audit, evidence, and
+        finding attribution, so access is revoked by disabling the account or rotating its key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateUserRequest"}
+      responses:
+        "200":
+          description: The updated operator
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The change would leave the tenant with no enabled admin}
+
+  /api/v1/users/{id}/disable:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [users]
+      summary: Disable an operator's credentials
+      description: >
+        Requires the `administer` capability. The identity and its attribution are preserved; only
+        authentication stops, immediately, for the operator's API key. Disabling the tenant's last
+        enabled admin is refused with `409`.
+      responses:
+        "200":
+          description: The disabled operator
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The operator is the tenant's last enabled admin}
+
+  /api/v1/users/{id}/enable:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [users]
+      summary: Re-enable a disabled operator
+      description: Requires the `administer` capability. The operator keeps the API key it had.
+      responses:
+        "200":
+          description: The re-enabled operator
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/users/{id}/rotate-key:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [users]
+      summary: Rotate an operator's API key and return the new key once
+      description: >
+        Requires the `administer` capability. The previous key stops authenticating immediately,
+        which is how a leaked key is revoked. The new key is shown exactly once.
+      responses:
+        "200":
+          description: The operator and its new API key
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UserWithAPIKey"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2865,6 +3083,89 @@ components:
         skipped: {type: integer, minimum: 0}
         missing: {type: integer, format: uint64, minimum: 0}
         replay: {type: boolean}
+
+    EngagementTransitionRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [active, completed, archived]
+          description: Target lifecycle status. draft is the creation state and cannot be returned to.
+
+    Capability:
+      type: object
+      required: [key, name, enabled, switch]
+      properties:
+        key:
+          type: string
+          description: Stable subsystem identifier a client keys its navigation off.
+          example: fleet
+        name:
+          type: string
+          description: Human name for display.
+          example: Agent fleet transport
+        enabled:
+          type: boolean
+          description: Whether this deployment serves the subsystem's routes.
+        switch:
+          type: string
+          description: The SYNAPSE_* environment variable an operator sets to change `enabled`.
+          example: SYNAPSE_FLEET_ENABLED
+        requires:
+          type: array
+          description: >
+            Keys of the capabilities this one depends on. Present only when the subsystem needs more
+            than its own switch, so a client can explain an enabled switch that is still disabled.
+          items: {type: string}
+
+    User:
+      type: object
+      required: [id, name, role, disabled, createdAt]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        role: {type: string, enum: [admin, consultant, reviewer, readonly, member]}
+        disabled:
+          type: boolean
+          description: A disabled operator keeps its identity and history; its API key stops authenticating.
+        createdAt: {type: string, format: date-time}
+
+    UserWithAPIKey:
+      type: object
+      required: [user, apiKey]
+      properties:
+        user: {$ref: "#/components/schemas/User"}
+        apiKey:
+          type: string
+          description: The raw bearer key, shown exactly once and never recoverable afterwards.
+          example: syn_0123456789abcdef
+
+    CreateUserRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        role:
+          type: string
+          enum: [admin, consultant, reviewer, readonly, member]
+          default: member
+        tenant_id:
+          type: string
+          description: >
+            Tenant the new operator belongs to. Empty means the calling admin's own tenant. A
+            different tenant is refused with 403 unless the caller is the bootstrap platform principal.
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Empty leaves the current name unchanged.
+        role:
+          type: string
+          enum: [admin, consultant, reviewer, readonly, member]
+          description: Empty leaves the current role unchanged.
 
     Readiness:
       type: object
@@ -4016,31 +4317,64 @@ components:
 
     Engagement:
       type: object
-      description: Serialized from the domain struct (PascalCase keys).
+      required: [id, tenant_id, name, client, status, scope, roe, live_recon_enabled, created_at, updated_at]
       properties:
-        ID: {type: string}
-        Name: {type: string}
-        Client: {type: string}
-        Status: {type: string, enum: [draft, active, completed, archived]}
-        Scope:
+        id: {type: string}
+        tenant_id: {type: string}
+        project_id:
+          type: string
+          description: Present when the engagement is the analysis context of a code-quality Project.
+        business_asset_id:
+          type: string
+          description: Present when a primary business-level Asset is assigned.
+        name: {type: string}
+        client: {type: string}
+        status: {type: string, enum: [draft, active, completed, archived]}
+        scope:
           type: object
+          required: [in_scope, out_of_scope]
           properties:
-            InScope:
+            in_scope:
+              type: array
+              items: {$ref: "#/components/schemas/ScopeTarget"}
+            out_of_scope:
+              type: array
+              items: {$ref: "#/components/schemas/ScopeTarget"}
+        roe:
+          type: object
+          description: Rules of engagement the execution gate enforces alongside scope and the window.
+          required: [allowed_tool_classes, blackouts]
+          properties:
+            allowed_tool_classes:
+              type: array
+              description: Empty means no restriction.
+              items: {type: string}
+            blackouts:
               type: array
               items:
                 type: object
+                required: [from, to]
                 properties:
-                  Kind: {type: string}
-                  Value: {type: string}
-            OutOfScope:
-              type: array
-              items:
-                type: object
-                properties:
-                  Kind: {type: string}
-                  Value: {type: string}
-        AuthorizedFrom: {type: [string, "null"], format: date-time}
-        AuthorizedTo: {type: [string, "null"], format: date-time}
+                  from: {type: string, format: date-time}
+                  to: {type: string, format: date-time}
+        authorized_from:
+          type: [string, "null"]
+          format: date-time
+          description: Null is open on that side of the authorization window.
+        authorized_to: {type: [string, "null"], format: date-time}
+        timezone:
+          type: string
+          description: IANA zone the operator entered the window in; display and audit only.
+        live_recon_enabled: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    ScopeTarget:
+      type: object
+      required: [kind, value]
+      properties:
+        kind: {type: string, enum: [domain, ip, cidr, url, repo, image, cloud_account]}
+        value: {type: string}
 
     CreateManualFindingRequest:
       type: object

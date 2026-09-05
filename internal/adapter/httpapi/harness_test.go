@@ -23,6 +23,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
+	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
@@ -338,9 +339,22 @@ func TestHostileHarness(t *testing.T) {
 	analysisStore := memory.NewProjectAnalysisStore()
 	projectSvc.SetHotspotStore(analysisStore)
 	projectSvc.SetAnalysisStore(analysisStore)
-	usersSvc, err := usersuc.NewService(memory.NewUserRepository(), &fakeAudit{}, fixedClock{}, engIDs{})
+	usersSvc, err := usersuc.NewService(memory.NewUserRepository(), &fakeAudit{}, fixedClock{}, &seqIDs{})
 	if err != nil {
 		t.Fatalf("users svc: %v", err)
+	}
+	// One admin per tenant, plus a tenantB member, so the roster read below can prove that a
+	// tenantB admin never observes tenantA's operators.
+	platform := usersuc.Actor{ID: usersuc.BootstrapID}
+	tenantAAdmin, _, err := usersSvc.CreateUser(context.Background(), platform, "tenantA", "A Admin", userdom.RoleAdmin)
+	if err != nil {
+		t.Fatalf("seed tenantA admin: %v", err)
+	}
+	if _, _, err := usersSvc.CreateUser(context.Background(), platform, "tenantB", "B Admin", userdom.RoleAdmin); err != nil {
+		t.Fatalf("seed tenantB admin: %v", err)
+	}
+	if _, _, err := usersSvc.CreateUser(context.Background(), platform, "tenantB", "B Member", userdom.RoleMember); err != nil {
+		t.Fatalf("seed tenantB member: %v", err)
 	}
 	rt := &Router{
 		log:      discardLog(),
@@ -379,6 +393,26 @@ func TestHostileHarness(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		return rec.Code, rec.Body.String()
+	}
+
+	sendBody := func(role, tenant, method, path, body string) (int, string) {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "p", Role: role, TenantID: tenant}))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+
+	// Cross-tenant user provisioning: a tenantA admin must not be able to mint an operator (and
+	// receive that operator's API key) inside tenantB.
+	if code, body := sendBody("admin", "tenantA", http.MethodPost, "/api/v1/users", `{"name":"Planted","role":"admin","tenant_id":"other-b"}`); code != http.StatusForbidden || strings.Contains(body, "syn_") {
+		t.Errorf("tenantA admin provisioned into another tenant: code=%d body=%s", code, body)
+	}
+	// Roster reads are tenant-scoped: a tenantB admin sees tenantB operators only.
+	if code, body := send("admin", "tenantB", http.MethodGet, "/api/v1/users", true); code != http.StatusOK ||
+		strings.Contains(body, tenantAAdmin.ID.String()) || strings.Contains(body, "A Admin") ||
+		!strings.Contains(body, "B Admin") || !strings.Contains(body, "B Member") {
+		t.Errorf("tenantB admin observed the wrong roster: code=%d body=%s", code, body)
 	}
 
 	verifyPromotion := func(role, tenant string) (int, string) {

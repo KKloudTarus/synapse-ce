@@ -14,11 +14,17 @@ are independent aggregates.
 
 ```
 POST /api/v1/engagements                              create
+PUT  /api/v1/engagements/{id}/status                   lifecycle transition (also PATCH /api/v1/engagements/{id})
 PUT  /api/v1/engagements/{id}/scope                    in-scope and out-of-scope targets
 PUT  /api/v1/engagements/{id}/authorization-window     legal start and end
 PUT  /api/v1/engagements/{id}/roe                      rules of engagement
 PUT  /api/v1/engagements/{id}/live-recon                enable or disable live recon
 ```
+
+The lifecycle is draft, active, completed, archived. Draft goes to active or archived, active goes
+to completed or archived, completed goes to archived, and archived is terminal. Send the target
+state as `{"status": "active"}`; an illegal transition is rejected with `400`. Both spellings apply
+the same change through the same `operate` gate and write the same audit record.
 
 Every execution path checks the active engagement, the authorization window, the exact target scope, and
 the rules of engagement before running anything. The same chokepoint serves human-initiated runs and
