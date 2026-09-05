@@ -98,6 +98,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 - Release gates use the owned SBOM engine, provision their pinned Syft and Grype dependencies, and can
   be dispatched manually.
 
+- **`synapse-cli scan --offline` now means no network egress.** It previously dropped only the live
+  OSV.dev source while the npm, composer, poetry, Bundler, Maven and Gradle resolvers still reached
+  their registries and the KEV/EPSS, online NVD, and deps.dev/PyPI enrichers still made HTTP calls.
+  Offline (and `SYNAPSE_OFFLINE=true`) now disables all of them, plus the Maven Central JAR SHA-1
+  lookup and AI false-positive triage. Target acquisition is unchanged: a registry image reference or
+  a remote git URL is still fetched.
+
 ### Fixed
 
 - Standalone CLI scans bind the default tenant before persisting results.

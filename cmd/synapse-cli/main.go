@@ -1013,7 +1013,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--min-confidence low|medium|high|very_high] [--base REF] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
-	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
+	fmt.Fprintln(os.Stderr, "      --offline  no network egress: skip live OSV, every registry resolver (npm/composer/poetry/bundler/maven/gradle), KEV/EPSS, online NVD, license metadata and AI triage; detect with Grype's offline DB only (air-gapped / fast)")
 	fmt.Fprintln(os.Stderr, "      --include-test  also fail the gate on findings in test/fixture/example paths (default: reported but exempt)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli publish-source [path] --server URL --project KEY --analysis ID  # stream server-inventoried source; token from SYNAPSE_API_TOKEN")
 	fmt.Fprintln(os.Stderr, "  synapse-cli inventory <path>             # per-language code-size inventory (files, code/comment/blank lines, functions) – no DB")
@@ -1335,23 +1335,37 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 			"synapse": buildinfo.App(),
 		},
 	}
+	// One policy decides every network-capable part of this scan, so --offline cannot mean "offline
+	// except the resolvers" again.
+	egress := newScanEgress(cfg, offline, os.LookupEnv)
 	// Grype (offline DB) always; live OSV unless --offline / SYNAPSE_OFFLINE (air-gapped / fast path).
 	detectionSources := []ports.DetectionSource{grype.New(cfg.GrypeBin, cfg.GrypeDBDir)}
-	if offline || cfg.Offline {
-		// Make the reduced-coverage mode visible: the operator chose lower recall for speed. Leave
-		// VulnDBSource empty so the evidence snapshot does NOT claim osv.dev was queried when it wasn't
-		// (Grype's DB version is recorded separately in GrypeDBVersion).
-		fmt.Fprintln(os.Stderr, "synapse-cli: offline mode – live OSV disabled; detecting with Grype's offline DB only")
-	} else {
+	if egress.OSV {
 		prov.VulnDBSource = "osv.dev"
 		detectionSources = append([]ports.DetectionSource{osv.New(cfg.OSVBaseURL, nil)}, detectionSources...)
+	}
+	if egress.offline() {
+		// Make the reduced-coverage mode visible: the operator chose lower recall for no egress. Leaving
+		// VulnDBSource empty keeps the evidence snapshot from claiming osv.dev was queried when it wasn't
+		// (Grype's DB version is recorded separately in GrypeDBVersion).
+		fmt.Fprintln(os.Stderr, "synapse-cli: offline mode – no network egress: live OSV, the npm/composer/poetry/bundler/maven/gradle resolvers, KEV/EPSS, online NVD, deps.dev + PyPI license metadata and AI triage are all disabled; detecting with Grype's offline DB only")
+	}
+	// KEV + EPSS and the deps.dev/PyPI license metadata are HTTP feeds. Offline drops the risk enricher
+	// entirely (the service nil-checks it) and keeps only the local OS-metadata license enricher.
+	var riskEnricher ports.RiskEnricher
+	licenseEnrichers := []ports.LicenseEnricher{licensemeta.NewOSMetadata()}
+	if egress.RiskFeeds {
+		riskEnricher = risk.New(cfg.KEVURL, cfg.EPSSURL, nil)
+	}
+	if egress.LicenseMetadata {
+		licenseEnrichers = append(licenseEnrichers, licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil))
 	}
 	sca := scauc.NewService(
 		engRepo, memory.NewFindingRepository(), memory.NewScanRepository(), nil, nil, nil, nil, nil, prov, clock, stderrAudit{},
 		shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled),
 		enry.New(), syft.New(cfg.SyftBin),
 		detectionSources,
-		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)),
+		riskEnricher, license.New(), licensemeta.NewChain(licenseEnrichers...),
 	)
 	if cfg.SLAEnabled {
 		slaService, slaErr := slauc.NewService(memory.NewSLAStore(), clock, ids)
@@ -1378,7 +1392,7 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 			fmt.Fprintf(os.Stderr, "synapse-cli: JAR SHA-1 OFFLINE index ON (%s)\n", cfg.JarHashDBPath)
 		}
 	}
-	if cfg.JarHashOnlineEnabled {
+	if egress.JarHashOnline {
 		jhResolvers = append(jhResolvers, jarhash.New(cfg.JarHashBaseURL, nil))
 		fmt.Fprintln(os.Stderr, "synapse-cli: JAR SHA-1 ONLINE Maven Central ON (fallback after offline)")
 	}
@@ -1394,33 +1408,25 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	// (arbitrary code via build extensions/plugins) on the host. It is therefore OPT-IN even for the CLI —
 	// default-on would contradict "safe by construction" and is dangerous on a shared/multi-tenant CI
 	// runner. Enable with SYNAPSE_MAVEN_RESOLVE_ENABLED=true. Best-effort when on.
-	if cfg.MavenResolveEnabled {
+	if egress.MavenResolve {
 		sca.SetMavenResolver(mavenresolve.New(cfg.MvnBin).WithRepoHosts(cfg.MavenRepoHosts).WithLocalRepo(cfg.MavenLocalRepo))
 		fmt.Fprintln(os.Stderr, "synapse-cli: Maven resolver ON – runs `mvn` UNSANDBOXED over the project if it has a pom.xml (opt-in via SYNAPSE_MAVEN_RESOLVE_ENABLED)")
 	}
 	// Gradle full-tree resolution EXECUTES build.gradle (arbitrary Groovy/Kotlin) — even higher-risk than
 	// mvn — so it is likewise OPT-IN (SYNAPSE_GRADLE_RESOLVE_ENABLED=true), never default-on.
-	if cfg.GradleResolveEnabled {
+	if egress.GradleResolve {
 		sca.SetGradleResolver(gradleresolve.New(cfg.GradleBin).WithRepoHosts(cfg.MavenRepoHosts).WithGradleHome(cfg.GradleHome))
 		fmt.Fprintln(os.Stderr, "synapse-cli: Gradle resolver ON – runs `gradle` UNSANDBOXED over the project if it has a build.gradle, which executes the build script (opt-in via SYNAPSE_GRADLE_RESOLVE_ENABLED)")
 	}
 	// npm resolution for a lockfile-less package.json – same default-on-for-CLI model (trusted local).
 	// Opt out with SYNAPSE_NPM_RESOLVE_ENABLED=false. Best-effort; --ignore-scripts so no project code runs.
-	npmOn := cfg.NPMResolveEnabled
-	if _, set := os.LookupEnv("SYNAPSE_NPM_RESOLVE_ENABLED"); !set {
-		npmOn = true
-	}
-	if npmOn {
+	if egress.NPMResolve {
 		sca.SetNPMResolver(npmresolve.New(cfg.NPMBin).WithRegistryHosts(cfg.NPMRegistryHosts))
 		fmt.Fprintln(os.Stderr, "synapse-cli: npm resolver ON – runs `npm install --package-lock-only --ignore-scripts` over a COPY of a lockfile-less package.json to pin versions (no project scripts run; set SYNAPSE_NPM_RESOLVE_ENABLED=false to disable)")
 	}
 	// Lockfile-less manifest resolvers (composer.json / Gemfile / pyproject.toml) – default-on for the CLI
 	// (trusted local). Each runs its ecosystem tool in lock-only, no-scripts mode over a COPY. Best-effort.
-	manifestOn := cfg.ManifestResolveEnabled
-	if _, set := os.LookupEnv("SYNAPSE_MANIFEST_RESOLVE_ENABLED"); !set {
-		manifestOn = true
-	}
-	if manifestOn {
+	if egress.ManifestResolve {
 		// composer + poetry only: each runs lock-only, --no-scripts over a COPY, so no project code runs.
 		binOf := map[string]string{"composer": cfg.ComposerBin, "poetry": cfg.PoetryBin}
 		for _, eco := range []string{"composer", "poetry"} {
@@ -1431,7 +1437,7 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	// Bundler (gem) is split out and OPT-IN: `bundle lock` EVALUATES the Gemfile as Ruby, so it runs the
 	// project's manifest code UNSANDBOXED — unlike the inert composer/poetry/npm resolvers it is NOT
 	// default-on. Enable with SYNAPSE_BUNDLER_RESOLVE_ENABLED=true.
-	if cfg.BundlerResolveEnabled {
+	if egress.BundlerResolve {
 		sca.AddManifestResolver(manifestresolve.New("gem", cfg.BundleBin).WithRegistryHosts(cfg.ManifestRegistryHosts))
 		fmt.Fprintln(os.Stderr, "synapse-cli: Bundler resolver ON – `bundle lock` EVALUATES a lockfile-less Gemfile as Ruby (runs project code UNSANDBOXED); opt-in via SYNAPSE_BUNDLER_RESOLVE_ENABLED")
 	}
@@ -1494,13 +1500,16 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	// back to the online NVD enricher (rate-limited, best-effort, unknown-severity only).
 	if p := strings.TrimSpace(os.Getenv("SYNAPSE_NVD_CVSS_DB")); p != "" {
 		if oe, oerr := nvd.LoadOffline(p); oerr != nil {
-			fmt.Fprintf(os.Stderr, "synapse-cli: NVD offline CVSS DB %q not usable (%v) – falling back to online NVD\n", p, oerr)
-			sca.SetSeverityEnricher(nvd.New(cfg.NVDAPIURL, cfg.NVDAPIKey, nil).WithBudget(cfg.NVDBudget))
+			fmt.Fprintf(os.Stderr, "synapse-cli: NVD offline CVSS DB %q not usable (%v)\n", p, oerr)
+			if egress.NVDSeverity {
+				fmt.Fprintln(os.Stderr, "synapse-cli: falling back to online NVD")
+				sca.SetSeverityEnricher(nvd.New(cfg.NVDAPIURL, cfg.NVDAPIKey, nil).WithBudget(cfg.NVDBudget))
+			}
 		} else {
 			sca.SetSeverityEnricher(oe)
 			fmt.Fprintf(os.Stderr, "synapse-cli: NVD offline CVSS DB ON (%d CVEs) – backfills missing CVSS locally, no network/rate-limit\n", oe.Size())
 		}
-	} else {
+	} else if egress.NVDSeverity {
 		sca.SetSeverityEnricher(nvd.New(cfg.NVDAPIURL, cfg.NVDAPIKey, nil).WithBudget(cfg.NVDBudget))
 	}
 	// --ignore-unfixed (or SYNAPSE_IGNORE_UNFIXED) drops vulns with no upstream fix – the
@@ -1511,7 +1520,7 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	// production-scope first-party source findings. A refutation is advisory unless a distinct verifier
 	// agrees and the deterministic human-review floor allows a gate exemption. High/critical, secrets,
 	// and dangerous CWEs always keep gating. Findings are never deleted. Skipped for image targets.
-	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" && !image {
+	if egress.AITriage && cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" && !image {
 		sca.SetFPTriageMode(cfg.FPTriageMode)
 		sca.SetFPTriageMaxFindings(cfg.FPTriageMaxFindings)
 		sca.SetFPTriageIndependence(cfg.FPTriageIndependence)
