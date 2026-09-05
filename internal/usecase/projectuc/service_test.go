@@ -29,9 +29,15 @@ type fixedIDs struct{}
 
 func (fixedIDs) NewID() shared.ID { return "p1" }
 
-type captureAudit struct{ entries []ports.AuditEntry }
+type captureAudit struct {
+	entries []ports.AuditEntry
+	fail    error // returned by Record when set: the audit chain refused the write
+}
 
 func (a *captureAudit) Record(_ context.Context, e ports.AuditEntry) error {
+	if a.fail != nil {
+		return a.fail
+	}
 	a.entries = append(a.entries, e)
 	return nil
 }

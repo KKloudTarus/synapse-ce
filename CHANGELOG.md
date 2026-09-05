@@ -69,6 +69,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   the row past the cap; the in-memory store does the same under its lock. The refusal is audited and
   returned as 403 like the fast-path one.
 
+- **A rejected pipeline import no longer leaves a succeeded job.** `POST /api/v1/projects/{key}/analyses/import`
+  wrote the `ci-import` scan job as succeeded before the recorder ran, so a payload the recorder refused
+  (a duplicate file path in the inventory, for instance) left a succeeded job with no analysis behind it.
+  The job is now marked failed with the rejection reason, and a failure to write the import's audit
+  record is returned to the caller instead of being dropped.
+
 - **SAST precision on a real repository.** A full scan of this repository produced 623 findings, 140 of
   them high-severity SAST, most of them noise: Go rules matched code quoted in `CHANGELOG.md`,
   `reflected-response-write` flagged `fmt.Fprintln(os.Stderr, err)` in every CLI, `go-sql-dynamic-query`

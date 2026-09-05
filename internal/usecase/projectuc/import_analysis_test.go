@@ -23,12 +23,17 @@ import (
 
 func newImportService(t *testing.T) (*Service, *memory.ProjectAnalysisStore, *memory.ScanJobStore, *memory.EngagementRepository) {
 	t.Helper()
+	return newImportServiceWithAudit(t, &captureAudit{})
+}
+
+func newImportServiceWithAudit(t *testing.T, audit *captureAudit) (*Service, *memory.ProjectAnalysisStore, *memory.ScanJobStore, *memory.EngagementRepository) {
+	t.Helper()
 	analyses := memory.NewProjectAnalysisStore()
 	jobs := memory.NewScanJobStore()
 	engagements := memory.NewEngagementRepository()
 	// A real clock time and distinct ids: the recorder stamps issue timestamps from the clock, and the
 	// import mints an analysis id that must not collide with the project's own id.
-	svc := NewService(memory.NewProjectRepository(), engagements, fixedClock{now: time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)}, &sequentialIDs{}, &captureAudit{}, true)
+	svc := NewService(memory.NewProjectRepository(), engagements, fixedClock{now: time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)}, &sequentialIDs{}, audit, true)
 	svc.SetAnalysisStore(analyses)
 	svc.SetScanJobs(jobs)
 	svc.SetRuleCatalog(projectRuleCatalog{rules: map[rule.Key]rule.Rule{
@@ -110,6 +115,50 @@ func TestImportAnalysisRecordsAPipelineResult(t *testing.T) {
 	}
 	if job.Status != ports.ScanSucceeded || job.Kind != "ci-import" || job.ID != analysis.ID {
 		t.Errorf("job = %+v, want a succeeded ci-import job sharing the analysis id", job)
+	}
+}
+
+// TestImportAnalysisMarksTheJobFailedWhenTheResultIsRejected: the job row is written before the
+// recorder runs so the history shows the run. A payload the recorder refuses (here a duplicate
+// canonical path in the inventory) must leave a failed job with the reason, never a succeeded
+// ci-import job with no analysis behind it.
+func TestImportAnalysisMarksTheJobFailedWhenTheResultIsRejected(t *testing.T) {
+	ctx := context.Background()
+	svc, analyses, jobs, engagements := newImportService(t)
+	result := pipelineResult()
+	result.CodeQuality.Inventory.Files = append(result.CodeQuality.Inventory.Files, measure.FileInventory{Path: "src/main.go", Language: "go", CodeLines: 1})
+
+	_, err := svc.ImportAnalysis(ctx, "tenant", "project", ImportAnalysisInput{Actor: "ci-bot", Result: result})
+	if err == nil || !strings.Contains(err.Error(), "duplicate canonical file path") {
+		t.Fatalf("import err = %v, want the recorder's rejection", err)
+	}
+	contexts, err := engagements.ListProjectEngagements(ctx, "tenant")
+	if err != nil || len(contexts) != 1 {
+		t.Fatalf("project contexts = %v, %v", contexts, err)
+	}
+	job, err := jobs.LatestForEngagement(ctx, contexts[0].ID)
+	if err != nil {
+		t.Fatalf("latest job: %v", err)
+	}
+	if job.Status != ports.ScanFailed || job.Stage != "import-rejected" || !strings.Contains(job.Error, "duplicate canonical file path") {
+		t.Fatalf("job = %+v, want a failed ci-import job carrying the rejection", job)
+	}
+	if list, _, err := analyses.List(ctx, "tenant", contexts[0].ProjectID, 5, time.Now().Add(time.Hour), ""); err != nil || len(list) != 0 {
+		t.Fatalf("analyses = %v, %v; want none recorded", list, err)
+	}
+}
+
+// TestImportAnalysisFailsWhenTheAuditCannotBeWritten: the import mutates project history, so a lost
+// audit record is an error the pipeline sees, not a silent success.
+func TestImportAnalysisFailsWhenTheAuditCannotBeWritten(t *testing.T) {
+	ctx := context.Background()
+	audit := &captureAudit{}
+	svc, _, _, _ := newImportServiceWithAudit(t, audit)
+	audit.fail = errors.New("audit chain sealed")
+
+	_, err := svc.ImportAnalysis(ctx, "tenant", "project", ImportAnalysisInput{Actor: "ci-bot", Result: pipelineResult()})
+	if err == nil || !strings.Contains(err.Error(), "audit imported analysis") || !errors.Is(err, audit.fail) {
+		t.Fatalf("import err = %v, want the audit failure", err)
 	}
 }
 

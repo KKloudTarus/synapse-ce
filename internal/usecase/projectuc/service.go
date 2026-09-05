@@ -470,9 +470,10 @@ func (s *Service) ImportAnalysis(ctx context.Context, tenantID shared.ID, key st
 
 	// Leave a scan-job record so the project's analysis status and job history reflect this run.
 	// It is recorded as already succeeded: the work happened in the pipeline, not here.
+	var job ports.ScanJob
 	if s.jobs != nil {
 		finished := now
-		job := ports.ScanJob{
+		job = ports.ScanJob{
 			ID: jobID, EngagementID: e.ID.String(), Target: result.Target, Kind: "ci-import",
 			Status: ports.ScanSucceeded, Stage: "imported", Progress: 100,
 			StartedAt: now, FinishedAt: &finished, DebugEvents: []ports.ScanDebugEvent{},
@@ -487,10 +488,18 @@ func (s *Service) ImportAnalysis(ctx context.Context, tenantID shared.ID, key st
 		ciPtr = &ci
 	}
 	if err := s.recordProjectAnalysis(ctx, e.ID, jobID, now, &result, projectanalysis.OriginCI, ciPtr); err != nil {
+		// The job row exists so the history shows the run. A rejected result (a payload the
+		// recorder refuses) must not leave it reading as a success with no analysis behind it.
+		if s.jobs != nil {
+			job.Status, job.Stage, job.Error = ports.ScanFailed, "import-rejected", err.Error()
+			if saveErr := s.jobs.Save(ctx, job); saveErr != nil {
+				return projectanalysis.Analysis{}, errors.Join(err, fmt.Errorf("mark imported scan job failed: %w", saveErr))
+			}
+		}
 		return projectanalysis.Analysis{}, err
 	}
 	if s.audit != nil {
-		_ = s.audit.Record(ctx, ports.AuditEntry{
+		if err := s.audit.Record(ctx, ports.AuditEntry{
 			Actor: in.Actor, Action: "project.analysis.imported", Target: p.ID.String(),
 			Metadata: map[string]string{
 				"project_key": p.Key, "analysis_id": jobID, "origin": string(projectanalysis.OriginCI),
@@ -498,7 +507,9 @@ func (s *Service) ImportAnalysis(ctx context.Context, tenantID shared.ID, key st
 				"findings": strconv.Itoa(len(result.Findings)),
 			},
 			At: now,
-		})
+		}); err != nil {
+			return projectanalysis.Analysis{}, fmt.Errorf("audit imported analysis: %w", err)
+		}
 	}
 	return s.analyses.Get(ctx, tenantID, p.ID, shared.ID(jobID))
 }
