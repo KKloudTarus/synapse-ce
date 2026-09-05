@@ -98,6 +98,22 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 - Release gates use the owned SBOM engine, provision their pinned Syft and Grype dependencies, and can
   be dispatched manually.
 
+### Security
+
+- **Database-enforced tenant isolation for the project, quality-gate and agent tables.** `projects`,
+  `project_analyses`, `project_analysis_hotspots`, `project_hotspots`, `project_hotspot_review_events`,
+  `project_issues`, `project_issue_review_events`, `quality_gates`, `quality_profiles`, `threat_models`,
+  `agent_sessions`, `agent_approvals` and `agent_plans` now run under forced Postgres row level
+  security, and every repository that touches them routes reads and writes through a tenant-bound
+  transaction while keeping an explicit `tenant_id` predicate. Two stores previously dropped the
+  tenant predicate when the caller supplied none (project analyses widened to a project-wide read,
+  approvals keyed decisions on the action id alone); both now fail closed, and an approval decision
+  or consume cannot be applied across tenants. `agent_approvals.tenant_id` and `agent_plans.tenant_id`
+  are backfilled from the owning engagement and pinned `NOT NULL`.
+
+  Operators must deploy the binaries before applying migration `0129`, which inverts this project's
+  usual migrate-then-deploy order; the migration header states the required sequence.
+
 ### Fixed
 
 - Standalone CLI scans bind the default tenant before persisting results.
