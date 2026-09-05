@@ -24,6 +24,7 @@ import (
 type BaselineEngine interface {
 	Observe(ctx context.Context, actor string, key baseline.Key, obs baseline.Observation, window baseline.LearnWindow) (baselineuc.Assessment, error)
 	Score(ctx context.Context, key baseline.Key, obs baseline.Observation) (baselineuc.Assessment, error)
+	Rebaseline(ctx context.Context, actor string, key baseline.Key) error
 }
 
 // ProcessLister returns an asset's currently-running processes. ports.EndpointProcessStore satisfies it.
@@ -82,6 +83,21 @@ func (s *Service) BehaviorFor(ctx context.Context, assetID shared.ID) (Factor, e
 		return Factor{}, err
 	}
 	return Factor{Behavior: int(a.Behavior), Scoreable: a.Scoreable, Reasons: a.Reasons}, nil
+}
+
+// Rebaseline drives a drifted or poisoned behavior baseline for one host asset through a clean
+// re-baseline (reset_pending -> learning), so a baseline that latched on drift re-learns from fresh
+// windows instead of abstaining forever. Audited by the underlying engine. It needs no process
+// observation — it acts on the stored baseline for the asset's key.
+func (s *Service) Rebaseline(ctx context.Context, actor string, assetID shared.ID) error {
+	tenant, ok := shared.TenantFrom(ctx)
+	if !ok || tenant == "" {
+		return fmt.Errorf("%w: behavior baseline requires a tenant in context", shared.ErrValidation)
+	}
+	if assetID.IsZero() {
+		return fmt.Errorf("%w: behavior baseline requires an asset id", shared.ErrValidation)
+	}
+	return s.engine.Rebaseline(ctx, actor, baseline.Key{Tenant: tenant, Group: assetID.String()})
 }
 
 func (s *Service) observe(ctx context.Context, assetID shared.ID) (baseline.Key, baseline.Observation, error) {

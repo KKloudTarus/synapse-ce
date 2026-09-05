@@ -66,3 +66,41 @@ func TestProcessRoutesAbsentWhenUnwired(t *testing.T) {
 		t.Fatalf("unwired process route must 404, got %d", rec.Code)
 	}
 }
+
+type fakeRebaseliner struct {
+	asset shared.ID
+	actor string
+	calls int
+	err   error
+}
+
+func (f *fakeRebaseliner) Rebaseline(_ context.Context, actor string, assetID shared.ID) error {
+	f.calls++
+	f.actor, f.asset = actor, assetID
+	return f.err
+}
+
+func TestRebaselineBehaviorRBACAndWiring(t *testing.T) {
+	reb := &fakeRebaseliner{}
+	rt := &Router{log: discardLog(), incidents: &fakeIncidentStore{}, behaviorRebaseliner: reb}
+	mux := rt.routes()
+
+	// readonly cannot re-baseline (it mutates security state → PermOperate).
+	if rec := incidentReq(mux, "readonly", http.MethodPost, "/api/v1/fleet/assets/asset-9/behavior-baseline/rebaseline", ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("readonly re-baseline must be forbidden, got %d", rec.Code)
+	}
+	// consultant can; the asset id comes from the path, the actor from the principal.
+	if rec := incidentReq(mux, "consultant", http.MethodPost, "/api/v1/fleet/assets/asset-9/behavior-baseline/rebaseline", ""); rec.Code != http.StatusOK {
+		t.Fatalf("consultant re-baseline: got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if reb.calls != 1 || reb.asset != "asset-9" || reb.actor == "" {
+		t.Fatalf("rebaseliner not called with the path asset + principal: %+v", reb)
+	}
+}
+
+func TestRebaselineRouteAbsentWhenUnwired(t *testing.T) {
+	rt := &Router{log: discardLog(), incidents: &fakeIncidentStore{}} // no rebaseliner
+	if rec := incidentReq(rt.routes(), "consultant", http.MethodPost, "/api/v1/fleet/assets/a1/behavior-baseline/rebaseline", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("unwired re-baseline route must 404, got %d", rec.Code)
+	}
+}

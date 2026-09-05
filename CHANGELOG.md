@@ -9,6 +9,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **A drifted behavior baseline can be re-baselined.** A behavior baseline that latched on drift (or
+  was refused as poisoned) abstained from scoring forever, because the reset the domain supports had no
+  route. `POST /api/v1/fleet/assets/{id}/behavior-baseline/rebaseline` now drives it through a clean
+  reset (reset_pending -> learning) so it re-learns from fresh windows. PermOperate, audited.
+
 - **The behavior baseline finally has input.** The statistical baseline that scores a host's Behavior
   risk factor never saw an observation, because the shipped agent reported host packages but never its
   processes. The VM agent now reports its running processes on the inventory-sweep cadence (read-only

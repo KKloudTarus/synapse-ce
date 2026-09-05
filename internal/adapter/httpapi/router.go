@@ -94,6 +94,7 @@ type Router struct {
 	incidentCorrelator     incidentCorrelator         // optional; nil ⇒ the correlation route is not registered (#594 C2/C3)
 	endpointProcesses      endpointProcessStore       // optional; nil ⇒ the process-report routes are not registered (#594 B5)
 	processLearner         processLearner             // optional; nil ⇒ reported processes are not folded into the behavior baseline (#594 D)
+	behaviorRebaseliner    behaviorRebaseliner        // optional; nil ⇒ the behavior-baseline re-baseline route is not registered (#594 D)
 	desiredCapabilities    desiredCapabilityService   // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
 	legalHolds             legalHoldService           // optional; nil ⇒ the legal-hold routes are not registered (#635)
 	privacyExport          privacyExporter            // optional; nil ⇒ the data-export route is not registered (#635)
@@ -454,6 +455,11 @@ func (rt *Router) routes() *http.ServeMux {
 			// (writes the projection); read = PermView. Tenant + asset are server-side, not request fields.
 			mux.HandleFunc("POST /api/v1/fleet/assets/{id}/processes", rt.authz(userdom.PermOperate, rt.reportEndpointProcesses))
 			mux.HandleFunc("GET /api/v1/fleet/assets/{id}/processes", rt.authz(userdom.PermView, rt.listEndpointProcesses))
+		}
+		if rt.behaviorRebaseliner != nil {
+			// Re-baseline a drifted/poisoned behavior baseline so it re-learns instead of abstaining
+			// permanently (#594 D). PermOperate: resetting a security baseline is an operating action.
+			mux.HandleFunc("POST /api/v1/fleet/assets/{id}/behavior-baseline/rebaseline", rt.authz(userdom.PermOperate, rt.rebaselineBehavior))
 		}
 		if rt.endpointTimeline != nil {
 			// B7 State Timeline (#594): read the per-host timeline projection of accepted telemetry. PermView.

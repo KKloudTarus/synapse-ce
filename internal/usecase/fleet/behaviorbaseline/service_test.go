@@ -11,11 +11,15 @@ import (
 )
 
 type fakeEngine struct {
-	learnedObs baseline.Observation
-	learnWin   baseline.LearnWindow
-	scoreObs   baseline.Observation
-	learnCalls int
-	scoreRet   baselineuc.Assessment
+	learnedObs  baseline.Observation
+	learnWin    baseline.LearnWindow
+	scoreObs    baseline.Observation
+	learnCalls  int
+	scoreRet    baselineuc.Assessment
+	rebaseKey   baseline.Key
+	rebaseActor string
+	rebaseCalls int
+	rebaseRet   error
 }
 
 func (f *fakeEngine) Observe(_ context.Context, _ string, _ baseline.Key, obs baseline.Observation, w baseline.LearnWindow) (baselineuc.Assessment, error) {
@@ -27,6 +31,11 @@ func (f *fakeEngine) Observe(_ context.Context, _ string, _ baseline.Key, obs ba
 func (f *fakeEngine) Score(_ context.Context, _ baseline.Key, obs baseline.Observation) (baselineuc.Assessment, error) {
 	f.scoreObs = obs
 	return f.scoreRet, nil
+}
+func (f *fakeEngine) Rebaseline(_ context.Context, actor string, key baseline.Key) error {
+	f.rebaseCalls++
+	f.rebaseActor, f.rebaseKey = actor, key
+	return f.rebaseRet
 }
 
 type fakeProcs struct{ procs []ports.ProcessSnapshot }
@@ -78,5 +87,32 @@ func TestBehaviorForRequiresTenant(t *testing.T) {
 	svc, _ := NewService(&fakeEngine{}, fakeProcs{})
 	if _, err := svc.BehaviorFor(context.Background(), "asset-1"); err == nil {
 		t.Fatal("a missing tenant must be rejected")
+	}
+}
+
+// TestRebaselineDerivesTheAssetKeyAndDelegates: Rebaseline computes the asset's baseline key from the
+// tenant + asset id and drives the engine, so an operator can reset a drifted baseline by asset id.
+func TestRebaselineDerivesTheAssetKeyAndDelegates(t *testing.T) {
+	eng := &fakeEngine{}
+	svc, err := NewService(eng, &fakeProcs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := shared.WithTenant(context.Background(), "tenant-a")
+	if err := svc.Rebaseline(ctx, "op@example.test", "asset-9"); err != nil {
+		t.Fatalf("rebaseline: %v", err)
+	}
+	if eng.rebaseCalls != 1 || eng.rebaseActor != "op@example.test" {
+		t.Fatalf("engine rebaseline = %d calls, actor %q", eng.rebaseCalls, eng.rebaseActor)
+	}
+	if eng.rebaseKey.Tenant != "tenant-a" || eng.rebaseKey.Group != "asset-9" {
+		t.Fatalf("rebaseline key = %+v, want tenant-a/asset-9", eng.rebaseKey)
+	}
+	// A missing tenant or asset is a validation error, never a silent no-op.
+	if err := svc.Rebaseline(context.Background(), "op", "asset-9"); err == nil {
+		t.Fatal("a missing tenant must fail")
+	}
+	if err := svc.Rebaseline(ctx, "op", ""); err == nil {
+		t.Fatal("a missing asset id must fail")
 	}
 }

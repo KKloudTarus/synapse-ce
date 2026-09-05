@@ -2820,6 +2820,34 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/fleet/assets/{id}/behavior-baseline/rebaseline:
+    parameters: [{$ref: '#/components/parameters/FleetAssetId'}]
+    post:
+      tags: [fleet]
+      operationId: rebaselineBehaviorBaseline
+      summary: Re-baseline a drifted or poisoned behavior baseline for one host asset
+      description: >
+        A behavior baseline that latched on drift (or was refused as poisoned) abstains from scoring
+        until it is re-baselined. This resets it (reset_pending -> learning), clearing its accumulators
+        so it re-learns from fresh eligible windows. A baseline not in a re-baselineable state is a 400.
+        The reset is audited. Registered only when the behavior baseline is wired.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Baseline reset to re-learn
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asset_id: {type: string}
+                  rebaselined: {type: boolean}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: Behavior baseline re-baseline not enabled}
+
   /api/v1/fleet/assets/{id}/processes:
     parameters: [{$ref: '#/components/parameters/FleetAssetId'}]
     post:

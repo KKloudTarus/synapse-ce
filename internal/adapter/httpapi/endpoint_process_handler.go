@@ -19,6 +19,13 @@ type endpointProcessStore interface {
 	ListRunningByAsset(ctx context.Context, assetID shared.ID) ([]ports.ProcessSnapshot, error)
 }
 
+// behaviorRebaseliner re-baselines a drifted/poisoned behavior baseline for one host asset, so a baseline
+// that latched on drift re-learns instead of abstaining forever (#594 D). *behaviorbaseline.Service
+// satisfies it.
+type behaviorRebaseliner interface {
+	Rebaseline(ctx context.Context, actor string, assetID shared.ID) error
+}
+
 // processLearner folds a just-reported process profile into the asset's behavioral baseline (#594 D).
 // behaviorbaseline.Service satisfies it. Optional: nil ⇒ reporting does not learn.
 type processLearner interface {
@@ -30,6 +37,10 @@ func (rt *Router) SetEndpointProcesses(s endpointProcessStore) { rt.endpointProc
 
 // SetProcessLearner wires the behavioral-baseline learner (nil ⇒ reported processes are not learned).
 func (rt *Router) SetProcessLearner(l processLearner) { rt.processLearner = l }
+
+// SetBehaviorRebaseliner wires the behavior-baseline re-baseline route (nil ⇒ the route is not
+// registered). A drifted or poisoned baseline abstains until an operator re-baselines it here.
+func (rt *Router) SetBehaviorRebaseliner(r behaviorRebaseliner) { rt.behaviorRebaseliner = r }
 
 const (
 	// endpointProcessBodyLimit caps a process-report body. A host reports a bounded process list; a very
@@ -96,4 +107,20 @@ func (rt *Router) listEndpointProcesses(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"processes": running})
+}
+
+// rebaselineBehavior re-baselines a drifted or poisoned behavior baseline for one host asset (#594 D).
+// Without this a baseline that latched on drift abstains permanently. PermOperate; tenant from the
+// incident context. A baseline not in a re-baselineable state answers 400 (validation).
+func (rt *Router) rebaselineBehavior(w http.ResponseWriter, r *http.Request) {
+	if rt.behaviorRebaseliner == nil {
+		writeJSON(w, http.StatusNotFound, errorBody{Error: "behavior baseline re-baseline not enabled"})
+		return
+	}
+	assetID := shared.ID(r.PathValue("id"))
+	if err := rt.behaviorRebaseliner.Rebaseline(incidentTenantContext(r), PrincipalFrom(r.Context()), assetID); err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"asset_id": assetID.String(), "rebaselined": true})
 }
