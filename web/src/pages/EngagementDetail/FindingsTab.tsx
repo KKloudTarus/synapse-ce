@@ -1,10 +1,22 @@
 import { CheckCircle, File06, Plus, SearchLg, XClose } from '@untitledui/icons'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Button, Card, EmptyState, Select, Spinner, cn } from '../../components/ui'
 import { findingKindLabel } from '../../lib/format'
 import type { Finding, ScanResult, Severity, Vulnerability } from '../../lib/types'
-import { vulnKey } from './VulnsTab'
-import { FindingsTable, PAGE_SIZE, TablePagination, findingAnchor } from './components/FindingsTable'
+import { vulnKey, shortPkg } from './VulnsTab'
+import {
+  DEFAULT_PAGE_SIZE,
+  FindingsTable,
+  INITIAL_DIRECTION,
+  PAGE_SIZE_OPTIONS,
+  TablePagination,
+  findingAnchor,
+  isFindingSortKey,
+  sortFindings,
+  type FindingSortKey,
+  type SortDirection,
+} from './components/FindingsTable'
 import { STATUS_DOT } from './components/FindingStatus'
 import { NewFindingModal } from './components/NewFindingModal'
 
@@ -18,6 +30,37 @@ export {
 } from './components/FindingJudgments'
 export { FindingDetail } from './components/FindingDetail'
 
+const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'] as const
+
+function isSeverityFilter(value: string | null): value is Severity | 'all' {
+  return value === 'all' || (value !== null && (SEVERITIES as readonly string[]).includes(value))
+}
+
+/**
+ * Everything a search should reach for one row. The placeholder promises CVE,
+ * CWE and package, so the package name, its dependency path, the CVE id and the
+ * priority label are indexed alongside the title and description.
+ */
+export function findingSearchIndex(finding: Finding, vuln: Vulnerability | undefined): string {
+  const parts = [
+    finding.title,
+    finding.description,
+    finding.cwe,
+    finding.assignee,
+    finding.scope,
+    finding.kind,
+    // The dedup key carries the rule or advisory identity, e.g.
+    // sca:CVE-2020-7774:yargs-parser.
+    finding.dedupKey,
+    `P${finding.priority}`,
+  ]
+  if (vuln) {
+    parts.push(vuln.id, vuln.component, shortPkg(vuln.component), vuln.version, vuln.ecosystem ?? '')
+    parts.push(...vuln.path, ...vuln.path.map(shortPkg))
+  }
+  return parts.filter(Boolean).join(' ').toLowerCase()
+}
+
 export function FindingsTab({
   findings,
   scan,
@@ -27,6 +70,8 @@ export function FindingsTab({
   focusedFindingId,
   onUpdated,
   onReload,
+  readOnly = false,
+  readOnlyReason,
 }: {
   findings: Finding[] | null
   scan: ScanResult | null
@@ -36,18 +81,53 @@ export function FindingsTab({
   focusedFindingId: string
   onUpdated: (f: Finding) => void
   onReload: () => void
+  /** Archived engagements accept no writes. */
+  readOnly?: boolean
+  readOnlyReason?: string
 }) {
+  const [params, setParams] = useSearchParams()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [creating, setCreating] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [kindFilter, setKindFilter] = useState<string>('all')
-  const [page, setPage] = useState(1)
 
+  // Filters, sort and paging live in the query string so a shared link keeps them.
+  const searchQuery = params.get('q') ?? ''
+  const kindFilter = params.get('kind') ?? 'all'
+  const sortParam = params.get('sort')
+  const sortKey: FindingSortKey | null = isFindingSortKey(sortParam) ? sortParam : null
+  const sortDirection: SortDirection = params.get('dir') === 'desc' ? 'desc' : 'asc'
+  const sizeParam = Number(params.get('size'))
+  const pageSize = (PAGE_SIZE_OPTIONS as readonly number[]).includes(sizeParam) ? sizeParam : DEFAULT_PAGE_SIZE
+  const page = Math.max(1, Number(params.get('fpage')) || 1)
+
+  const patch = useCallback(
+    (next: Record<string, string | null>) => {
+      setParams(
+        (current) => {
+          const updated = new URLSearchParams(current)
+          for (const [key, value] of Object.entries(next)) {
+            if (value === null || value === '') updated.delete(key)
+            else updated.set(key, value)
+          }
+          return updated
+        },
+        { replace: true },
+      )
+    },
+    [setParams],
+  )
+
+  // The severity filter is shared with the Overview cards, which set it through
+  // the parent. A link's severity wins on arrival, the parent state afterwards.
+  const urlSeverity = params.get('sev')
   useEffect(() => {
-    setPage(1)
-  }, [filter, kindFilter, searchQuery])
+    if (isSeverityFilter(urlSeverity) && urlSeverity !== filter) setFilter(urlSeverity)
+    // Mount only: adopting the link's severity, not tracking it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if ((params.get('sev') ?? 'all') !== filter) patch({ sev: filter === 'all' ? null : filter, fpage: null })
+  }, [filter, params, patch])
 
-  // Separate actionable third-party findings from first-party historical advisories
   // Separate actionable third-party findings from first-party historical advisories.
   const thirdParty = useMemo(
     () => (findings ?? []).filter((f) => f.class !== 'first_party_historical'),
@@ -63,27 +143,38 @@ export function FindingsTab({
     [thirdParty],
   )
 
-  // Filter rows by severity, kind, and search query.
+  const vulnByKey = useMemo(() => {
+    const m = new Map<string, Vulnerability>()
+    for (const v of scan?.vulnerabilities ?? []) m.set(vulnKey(v), v)
+    return m
+  }, [scan])
+
+  const searchIndex = useMemo(() => {
+    const index = new Map<string, string>()
+    for (const finding of thirdParty) {
+      index.set(finding.id, findingSearchIndex(finding, vulnByKey.get(finding.dedupKey)))
+    }
+    return index
+  }, [thirdParty, vulnByKey])
+
+  // Filter rows by severity, kind, and search query, then sort.
   const rows = useMemo(() => {
     const q = searchQuery.toLowerCase().trim()
-    return thirdParty.filter((f) => {
+    const filtered = thirdParty.filter((f) => {
       const matchSeverity = filter === 'all' || f.severity === filter
       const matchKind = kindFilter === 'all' || f.kind === kindFilter
-      const matchSearch =
-        !q ||
-        f.title.toLowerCase().includes(q) ||
-        f.description.toLowerCase().includes(q) ||
-        (f.cwe && f.cwe.toLowerCase().includes(q)) ||
-        (f.assignee && f.assignee.toLowerCase().includes(q))
+      const matchSearch = !q || (searchIndex.get(f.id) ?? '').includes(q)
       return matchSeverity && matchKind && matchSearch
     })
-  }, [thirdParty, filter, kindFilter, searchQuery])
+    return sortFindings(filtered, sortKey, sortDirection)
+  }, [thirdParty, filter, kindFilter, searchQuery, searchIndex, sortKey, sortDirection])
 
   useEffect(() => {
     if (!focusedFindingId || findings === null) return
     const idx = rows.findIndex((f) => f.id === focusedFindingId)
     if (idx >= 0) {
-      setPage(Math.floor(idx / PAGE_SIZE) + 1)
+      const targetPage = Math.floor(idx / pageSize) + 1
+      if (targetPage !== page) patch({ fpage: targetPage === 1 ? null : String(targetPage) })
     }
     // Bail out when already expanded so this never feeds a re-render cycle.
     setExpanded((current) => (current.has(focusedFindingId) ? current : new Set(current).add(focusedFindingId)))
@@ -91,13 +182,7 @@ export function FindingsTab({
       document.getElementById(findingAnchor(focusedFindingId))?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     })
     return () => cancelAnimationFrame(frame)
-  }, [findings, focusedFindingId, rows])
-
-  const vulnByKey = useMemo(() => {
-    const m = new Map<string, Vulnerability>()
-    for (const v of scan?.vulnerabilities ?? []) m.set(vulnKey(v), v)
-    return m
-  }, [scan])
+  }, [findings, focusedFindingId, rows, page, pageSize, patch])
 
   const triageByKey = useMemo(() => {
     const map = new Map<string, NonNullable<ScanResult['aiTriage']>[number]>()
@@ -119,6 +204,15 @@ export function FindingsTab({
     })
   }
 
+  function onSort(key: FindingSortKey) {
+    const nextDirection: SortDirection =
+      sortKey === key ? (sortDirection === 'asc' ? 'desc' : 'asc') : INITIAL_DIRECTION[key]
+    patch({ sort: key, dir: nextDirection, fpage: null })
+  }
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
+  const safePage = Math.min(page, totalPages)
+
   return (
     <div className="space-y-4">
       {/* Action and Filter Console Bar */}
@@ -132,16 +226,18 @@ export function FindingsTab({
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => patch({ q: e.target.value, fpage: null })}
                 placeholder="Search findings, CVE, CWE, package..."
+                aria-label="Search findings"
                 className="h-9 w-full rounded-lg border border-secondary bg-primary pl-9 pr-8 text-xs text-primary placeholder:text-quaternary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid"
               />
               {searchQuery && (
                 <button
                   type="button"
-                  onClick={() => setSearchQuery('')}
+                  onClick={() => patch({ q: null, fpage: null })}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-quaternary hover:text-primary"
                   title="Clear search"
+                  aria-label="Clear search"
                 >
                   <XClose className="size-3.5" />
                 </button>
@@ -165,7 +261,7 @@ export function FindingsTab({
                     </span>
                   ),
                 },
-                ...['critical', 'high', 'medium', 'low', 'info'].map((s) => ({
+                ...SEVERITIES.map((s) => ({
                   value: s,
                   label: (
                     <span className="flex items-center gap-2">
@@ -181,7 +277,7 @@ export function FindingsTab({
             {kinds.length > 1 && (
               <Select
                 value={kindFilter}
-                onValueChange={setKindFilter}
+                onValueChange={(v) => patch({ kind: v === 'all' ? null : v, fpage: null })}
                 size="sm"
                 ariaLabel="Filter findings by kind"
                 className="min-w-[9rem]"
@@ -207,20 +303,29 @@ export function FindingsTab({
                 <span>{historical.length} historical</span>
               </span>
             )}
-            <Button
-              variant="primary"
-              onClick={() => setCreating((c) => !c)}
-              className="inline-flex items-center gap-1.5 h-9 px-3.5 text-xs font-semibold"
-            >
-              <Plus className="size-4" />
-              <span>New finding</span>
-            </Button>
+            <span title={readOnly ? readOnlyReason : undefined}>
+              <Button
+                variant="secondary"
+                disabled={readOnly}
+                aria-describedby={readOnly ? 'findings-read-only' : undefined}
+                onClick={() => setCreating((c) => !c)}
+                className="inline-flex items-center gap-1.5 h-9 px-3.5 text-xs font-semibold"
+              >
+                <Plus className="size-4" />
+                <span>New finding</span>
+              </Button>
+            </span>
           </div>
         </div>
+        {readOnly && readOnlyReason && (
+          <p id="findings-read-only" className="mt-2 text-xs text-tertiary">
+            {readOnlyReason}
+          </p>
+        )}
       </Card>
 
       {/* Creation Modal */}
-      {creating && (
+      {creating && !readOnly && (
         <NewFindingModal
           engagementId={engagementId}
           onCreated={() => {
@@ -252,7 +357,11 @@ export function FindingsTab({
           {rows.length > 0 && (
             <FindingsTable
               rows={rows}
-              page={page}
+              page={safePage}
+              pageSize={pageSize}
+              sortKey={sortKey}
+              sortDirection={sortDirection}
+              onSort={onSort}
               expanded={expanded}
               focusedFindingId={focusedFindingId}
               vulnByKey={vulnByKey}
@@ -261,15 +370,18 @@ export function FindingsTab({
               onToggle={toggle}
               onUpdated={onUpdated}
               onReload={onReload}
+              readOnly={readOnly}
+              readOnlyReason={readOnlyReason}
             />
           )}
 
           <TablePagination
-            page={page}
-            totalPages={Math.max(1, Math.ceil(rows.length / PAGE_SIZE))}
+            page={safePage}
+            totalPages={totalPages}
             total={rows.length}
-            pageSize={PAGE_SIZE}
-            onPageChange={setPage}
+            pageSize={pageSize}
+            onPageChange={(p) => patch({ fpage: p === 1 ? null : String(p) })}
+            onPageSizeChange={(size) => patch({ size: String(size), fpage: null })}
           />
         </Card>
       )}

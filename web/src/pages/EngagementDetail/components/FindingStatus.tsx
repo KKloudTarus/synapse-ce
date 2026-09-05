@@ -37,11 +37,16 @@ export function FindingStatusControl({
   engagementId,
   onUpdated,
   onReload,
+  readOnly = false,
+  readOnlyReason,
 }: {
   finding: Finding
   engagementId: string
   onUpdated: (f: Finding) => void
   onReload: () => void
+  /** Archived engagements accept no triage writes. */
+  readOnly?: boolean
+  readOnlyReason?: string
 }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<'' | 'failed' | 'conflict'>('')
@@ -65,13 +70,17 @@ export function FindingStatusControl({
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" title={readOnly ? readOnlyReason : undefined}>
       <Select
         value={finding.status}
         onValueChange={change}
-        disabled={busy}
+        disabled={busy || readOnly}
         size="sm"
-        ariaLabel={`Triage status for ${finding.title}`}
+        ariaLabel={
+          readOnly && readOnlyReason
+            ? `Triage status for ${finding.title} — ${readOnlyReason}`
+            : `Triage status for ${finding.title}`
+        }
         className="min-w-[9.5rem]"
         options={FINDING_STATUSES.map((s) => ({ value: s, label: <StatusLabel status={s} /> }))}
       />
