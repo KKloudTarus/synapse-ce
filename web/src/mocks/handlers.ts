@@ -13,6 +13,18 @@ const MONTH_AGO = new Date(Date.now() - 30 * 86400_000).toISOString()
 // MOCK DATA
 // ============================================================================
 
+// --- Capabilities ---
+// Wire shape: `capabilityView` in internal/adapter/httpapi/capability_handler.go, resolved from
+// internal/usecase/capabilities/service.go.
+const CAPABILITIES = [
+  { key: 'fleet', name: 'Agent fleet transport', enabled: true, switch: 'SYNAPSE_FLEET_ENABLED' },
+  { key: 'fleet_assets', name: 'Fleet asset model', enabled: true, switch: 'SYNAPSE_FLEET_ASSETS_ENABLED' },
+  { key: 'agent', name: 'AI agent orchestration', enabled: true, switch: 'SYNAPSE_AGENT_ENABLED' },
+  { key: 'ai_triage', name: 'AI false-positive triage', enabled: true, switch: 'SYNAPSE_FP_TRIAGE_ENABLED' },
+  { key: 'judgments', name: 'Judgment lifecycle', enabled: true, switch: 'SYNAPSE_JUDGMENTS_ENABLED' },
+  { key: 'sla', name: 'SLA governance', enabled: true, switch: 'SYNAPSE_SLA_ENABLED' },
+]
+
 // --- Engagements ---
 // Wire shape: `engagementView` in internal/adapter/httpapi/resource_view.go. Exported so
 // src/lib/api.contract.test.ts can assert these fixtures still carry the keys the server sends;
@@ -336,6 +348,11 @@ export const handlers = [
   http.post('/api/auth/logout', () => new HttpResponse(null, { status: 204 })),
   http.get('/api/v1/aup', () => HttpResponse.json({ version: '1.0', accepted: true, accepted_at: NOW })),
   http.post('/api/v1/aup/accept', () => HttpResponse.json({ ok: true })),
+
+  // --- Optional-subsystem catalog ---
+  // Wire shape: `capabilityView` in internal/adapter/httpapi/capability_handler.go. The demo
+  // deployment runs everything the browser mock can serve, so every entry is enabled here.
+  http.get('/api/v1/capabilities', () => HttpResponse.json({ capabilities: CAPABILITIES })),
 
   // --- Dashboard ---
   http.get('/api/v1/dashboard/security-operations', () => HttpResponse.json(DASHBOARD)),

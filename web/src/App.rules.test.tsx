@@ -10,6 +10,8 @@ vi.mock('./lib/api', () => ({
     listRules: vi.fn(),
     getRule: vi.fn(),
     listEngagements: vi.fn(),
+    // The sidebar probes the optional-subsystem catalog; null means "report nothing, show everything".
+    listCapabilities: vi.fn().mockResolvedValue(null),
     listBusinessAssets: vi.fn(),
     fleetCoverageSummary: vi.fn(),
     dashboardSecurityOperations: vi.fn(),
