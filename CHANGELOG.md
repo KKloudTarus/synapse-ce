@@ -15,9 +15,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   per-source `allow_private_network` switch also needs a deployment opt-in,
   `SYNAPSE_VULNERABILITY_SOURCE_ALLOW_PRIVATE_NETWORK`, which defaults to off.
 
+- **The bootstrap operator is immutable through user management, including by itself.** Startup
+  refreshes that row from `SYNAPSE_API_TOKEN`, so a key rotated through the API authenticated only
+  until the next restart while the environment token stopped working in the meantime. Changing the
+  variable and restarting is the one path that moves the credential.
+
 - **The static analyzer no longer drops first-party code silently.** Every `.js` under `static/`,
   `assets/` or `public/` was skipped as vendored, which is where a Flask or Django application keeps
-  its own scripts, and a short file holding one long constant tripped the minified probe. Both were
+  its own scripts, a bare corporate copyright header read as a third-party banner, and a short file
+  holding one long constant tripped the minified probe. Both were
   dropped with the report still saying the scan was complete. A web asset in those trees is now
   skipped only when the file itself says third-party: a distributed-library banner, a vendor or build
   directory in its path, or a line long enough to be build output. Files excluded by policy are
@@ -53,7 +59,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 - **Request bodies and connection lifetimes are bounded on the human API plane.** Every mutation
   route carries a 1 MiB ceiling, with larger explicit ceilings for the routes that accept an upload:
   source publish, engagement and project creation, coverage upload, bundle import, SARIF, SBOM,
-  evidence and threat model. API listeners now set a write and an idle timeout alongside the
+  evidence and OpenVEX. A guard now reads every handler that bounds a body and fails when the
+  handler asks for more than its route allows, which is how the OpenVEX gap was found. API listeners now set a write and an idle timeout alongside the
   existing header timeout, and the two server-sent-event handlers release the write deadline so a
   live log stream is not cut off at the listener timeout. The Compose dashboard's nginx gains a
   matching body ceiling and read timeout plus baseline security response headers.
