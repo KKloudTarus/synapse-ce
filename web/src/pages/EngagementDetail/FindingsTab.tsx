@@ -341,7 +341,11 @@ export function FindingsTab({
         <EmptyState
           icon={CheckCircle}
           title="No findings yet"
-          hint="Run a scan or add a manual finding above to begin remediation tracking."
+          hint={
+            readOnly
+              ? 'This engagement was archived without any findings recorded.'
+              : 'Run a scan or add a manual finding above to begin remediation tracking.'
+          }
         />
       ) : (
         <Card bodyClass="p-0" className="overflow-hidden shadow-xs">
