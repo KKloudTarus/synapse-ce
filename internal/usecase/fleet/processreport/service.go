@@ -32,6 +32,9 @@ type AssetResolver interface {
 // ProcessStore persists the running-process projection. ports.EndpointProcessStore satisfies it.
 type ProcessStore interface {
 	SaveProcesses(ctx context.Context, snapshots []ports.ProcessSnapshot) error
+	// ReplaceRunningProcesses makes the asset's running set exactly the reported snapshots, retiring any
+	// process that exited since the last report. Used for a COMPLETE report (the agent saw every process).
+	ReplaceRunningProcesses(ctx context.Context, assetID shared.ID, snapshots []ports.ProcessSnapshot) error
 }
 
 // Learner folds the just-reported profile into the asset's behavior baseline. *behaviorbaseline.Service
@@ -64,11 +67,14 @@ func NewService(resolver AssetResolver, store ProcessStore, learner Learner, clo
 	return &Service{resolver: resolver, store: store, learner: learner, clock: clock}, nil
 }
 
-// Result reports what a report produced, for the agent-plane response and the audit trail.
+// Result reports what a report produced, for the agent-plane response and the audit trail. LearnErr is
+// non-empty when the snapshots were saved but folding them into the behavior baseline failed: the report
+// still succeeds (the snapshots are durable), so the caller logs LearnErr rather than failing the agent.
 type Result struct {
-	AssetID shared.ID
-	Saved   int
-	Learned bool
+	AssetID  shared.ID
+	Saved    int
+	Learned  bool
+	LearnErr string
 }
 
 // Report resolves the agent's canonical asset, persists the running processes as snapshots under the
@@ -76,7 +82,11 @@ type Result struct {
 // authenticated agent; the ctx it saves under is bound to that tenant so the store's RLS holds. An agent
 // with no established binding yet (it has not reported inventory) is a validation error, not a 500: the
 // binding is a prerequisite the agent satisfies by shipping inventory first.
-func (s *Service) Report(ctx context.Context, tenantID, agentID shared.ID, procs []Process) (Result, error) {
+// Report ingests one agent report. complete is true when the agent enumerated every live process (it
+// did not hit its cap); a complete report REPLACES the asset's running set so processes that exited
+// since the last report are retired, and a truncated report only upserts (retiring absent rows would
+// wrongly drop live processes beyond the cap).
+func (s *Service) Report(ctx context.Context, tenantID, agentID shared.ID, procs []Process, complete bool) (Result, error) {
 	tenantID = shared.TenantOrDefault(tenantID)
 	if agentID.IsZero() {
 		return Result{}, fmt.Errorf("%w: process report requires an agent id", shared.ErrValidation)
@@ -108,16 +118,26 @@ func (s *Service) Report(ctx context.Context, tenantID, agentID shared.ID, procs
 			PID:      p.PID, Comm: p.Comm, Path: p.Path, Running: p.Running, LastSeenAt: now,
 		})
 	}
-	if err := s.store.SaveProcesses(tctx, snapshots); err != nil {
+	if complete {
+		// Replace the asset's running set with exactly what the agent reported: this retires processes
+		// that exited between reports, so the baseline's process-count feature stays stationary instead
+		// of climbing on every sweep.
+		if err := s.store.ReplaceRunningProcesses(tctx, assetID, snapshots); err != nil {
+			return Result{}, fmt.Errorf("replace running process snapshots: %w", err)
+		}
+	} else if err := s.store.SaveProcesses(tctx, snapshots); err != nil {
 		return Result{}, fmt.Errorf("save process snapshots: %w", err)
 	}
 	res := Result{AssetID: assetID, Saved: len(snapshots)}
 	if s.learner != nil {
-		// The snapshots are durably saved; a learn failure must not fail the report. The caller logs it.
+		// The snapshots are durably saved, so a learn failure is best-effort: it is recorded on the result
+		// (so the caller can log it, never silent) but it does not fail the report — the agent must not
+		// retry the whole snapshot because the baseline hiccupped.
 		if err := s.learner.Learn(tctx, agentID.String(), assetID); err != nil {
-			return res, fmt.Errorf("learn behavior baseline: %w", err)
+			res.LearnErr = err.Error()
+		} else {
+			res.Learned = true
 		}
-		res.Learned = true
 	}
 	return res, nil
 }

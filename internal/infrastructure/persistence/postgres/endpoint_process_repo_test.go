@@ -89,3 +89,74 @@ func TestEndpointProcessRepository(t *testing.T) {
 		t.Fatalf("cross-tenant snapshot must be rejected, got %v", err)
 	}
 }
+
+// TestEndpointProcessReplaceRetiresExitedProcesses is the Postgres regression for the unbounded-growth
+// bug: a complete report replaces the asset's running set (upsert reported + retire absent) in one
+// transaction, so a process reported once and then omitted is marked not-running, and another asset's
+// rows are untouched.
+func TestEndpointProcessReplaceRetiresExitedProcesses(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	id := randHex(t)
+	tenant := shared.ID("epr-" + id)
+	assetA := shared.ID("epr-a-" + id)
+	assetB := shared.ID("epr-b-" + id)
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES($1,$1)`, tenant.String()); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+	for _, a := range []shared.ID{assetA, assetB} {
+		if _, err := pool.Exec(ctx, `INSERT INTO fleet_assets(id,tenant_id,kind,"key",name) VALUES($1,$2,'host',$1,$1)`, a.String(), tenant.String()); err != nil {
+			t.Fatalf("seed asset: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM endpoint_processes WHERE tenant_id=$1`, tenant.String())
+		_, _ = pool.Exec(bg, `DELETE FROM fleet_assets WHERE tenant_id=$1`, tenant.String())
+		_, _ = pool.Exec(bg, `DELETE FROM tenants WHERE id=$1`, tenant.String())
+	})
+	repo := NewEndpointProcessRepository(pool)
+	tctx := shared.WithTenant(ctx, tenant)
+	now := time.Unix(1_800_000_100, 0).UTC()
+	snapA := func(entity string) ports.ProcessSnapshot {
+		return ports.ProcessSnapshot{TenantID: tenant, AssetID: assetA, EntityID: shared.ID(entity), PID: 7, Comm: "x", Path: "/x", Running: true, LastSeenAt: now}
+	}
+	// Seed asset B so we can prove a replace on A leaves B alone.
+	if err := repo.ReplaceRunningProcesses(tctx, assetB, []ports.ProcessSnapshot{{TenantID: tenant, AssetID: assetB, EntityID: "b1", PID: 1, Comm: "y", Path: "/y", Running: true, LastSeenAt: now}}); err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+	// Sweep 1 on A: {e1,e2,e3}.
+	if err := repo.ReplaceRunningProcesses(tctx, assetA, []ports.ProcessSnapshot{snapA("e1"), snapA("e2"), snapA("e3")}); err != nil {
+		t.Fatalf("sweep1: %v", err)
+	}
+	if got, _ := repo.ListRunningByAsset(tctx, assetA); len(got) != 3 {
+		t.Fatalf("A sweep1 running = %d, want 3", len(got))
+	}
+	// Sweep 2 on A: e2 exited, e4 spawned.
+	if err := repo.ReplaceRunningProcesses(tctx, assetA, []ports.ProcessSnapshot{snapA("e1"), snapA("e3"), snapA("e4")}); err != nil {
+		t.Fatalf("sweep2: %v", err)
+	}
+	got, _ := repo.ListRunningByAsset(tctx, assetA)
+	if len(got) != 3 {
+		t.Fatalf("A sweep2 running = %d, want 3 (e2 retired): %+v", len(got), got)
+	}
+	for _, p := range got {
+		if p.EntityID == "e2" {
+			t.Fatalf("e2 exited but still running: %+v", got)
+		}
+	}
+	if b, _ := repo.ListRunningByAsset(tctx, assetB); len(b) != 1 || b[0].EntityID != "b1" {
+		t.Fatalf("asset B running changed by an asset A replace: %+v", b)
+	}
+}

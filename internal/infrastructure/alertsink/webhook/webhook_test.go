@@ -23,7 +23,7 @@ func alert() alerting.Alert {
 // newSink points at a loopback test server (http is allowed for loopback) with retries made instant.
 func newSink(t *testing.T, url, secret string) *Sink {
 	t.Helper()
-	s, err := New(url, secret, 5*time.Second, true)
+	s, err := New(url, secret, 5*time.Second, true, secret == "")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -139,20 +139,22 @@ func TestDeliverHonoursContextCancellation(t *testing.T) {
 func TestNewValidatesDestination(t *testing.T) {
 	cases := map[string]struct {
 		url, secret string
+		unsigned    bool
 		ok          bool
 	}{
-		"https":              {"https://hooks.example.com/synapse", "", true},
-		"http loopback":      {"http://127.0.0.1:9000/hook", "", true},
-		"http localhost":     {"http://localhost:9000/hook", "", true},
-		"http remote":        {"http://hooks.example.com/synapse", "", false},
-		"ftp":                {"ftp://hooks.example.com/synapse", "", false},
-		"relative":           {"/hooks", "", false},
-		"credentials in url": {"https://user:pw@hooks.example.com/synapse", "", false},
-		"short secret":       {"https://hooks.example.com/synapse", "short", false},
-		"long enough secret": {"https://hooks.example.com/synapse", "0123456789abcdef", true},
+		"https unsigned opt-in":   {"https://hooks.example.com/synapse", "", true, true},
+		"https no secret refused": {"https://hooks.example.com/synapse", "", false, false},
+		"http loopback unsigned":  {"http://127.0.0.1:9000/hook", "", true, true},
+		"http localhost unsigned": {"http://localhost:9000/hook", "", true, true},
+		"http remote":             {"http://hooks.example.com/synapse", "", true, false},
+		"ftp":                     {"ftp://hooks.example.com/synapse", "", true, false},
+		"relative":                {"/hooks", "", true, false},
+		"credentials in url":      {"https://user:pw@hooks.example.com/synapse", "", true, false},
+		"short secret":            {"https://hooks.example.com/synapse", "short", false, false},
+		"long enough secret":      {"https://hooks.example.com/synapse", "0123456789abcdef", false, true},
 	}
 	for name, tc := range cases {
-		_, err := New(tc.url, tc.secret, time.Second, false)
+		_, err := New(tc.url, tc.secret, time.Second, false, tc.unsigned)
 		if tc.ok && err != nil {
 			t.Errorf("%s: unexpected error %v", name, err)
 		}
@@ -165,7 +167,7 @@ func TestNewValidatesDestination(t *testing.T) {
 // A transport failure must not put the destination URL into the error: for Slack-style hooks the path
 // is the credential, and the error text lands in the audit log.
 func TestDeliverErrorNeverCarriesTheURL(t *testing.T) {
-	s, err := New("https://hooks.example.invalid/services/T000/B000/SECRETTOKENXYZ", "", 500*time.Millisecond, false)
+	s, err := New("https://hooks.example.invalid/services/T000/B000/SECRETTOKENXYZ", "", 500*time.Millisecond, false, true)
 	if err != nil {
 		t.Fatal(err)
 	}

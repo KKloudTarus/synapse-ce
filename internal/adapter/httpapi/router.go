@@ -95,6 +95,7 @@ type Router struct {
 	endpointProcesses      endpointProcessStore       // optional; nil ⇒ the process-report routes are not registered (#594 B5)
 	processLearner         processLearner             // optional; nil ⇒ reported processes are not folded into the behavior baseline (#594 D)
 	behaviorRebaseliner    behaviorRebaseliner        // optional; nil ⇒ the behavior-baseline re-baseline route is not registered (#594 D)
+	hostAssets             hostAssetVerifier          // optional; verifies an id is a live host asset before the operator process/rebaseline routes mutate state
 	desiredCapabilities    desiredCapabilityService   // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
 	legalHolds             legalHoldService           // optional; nil ⇒ the legal-hold routes are not registered (#635)
 	privacyExport          privacyExporter            // optional; nil ⇒ the data-export route is not registered (#635)

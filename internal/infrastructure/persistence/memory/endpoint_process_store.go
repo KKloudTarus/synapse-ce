@@ -67,6 +67,52 @@ func (s *EndpointProcessStore) SaveProcesses(ctx context.Context, snapshots []po
 	return nil
 }
 
+// ReplaceRunningProcesses makes the asset's running set exactly the reported snapshots: it upserts them
+// and marks every other currently-running row for that asset not-running, so a process that exited
+// between reports is retired instead of lingering as running=true.
+func (s *EndpointProcessStore) ReplaceRunningProcesses(ctx context.Context, assetID shared.ID, snapshots []ports.ProcessSnapshot) error {
+	tenant, err := requireProcessTenant(ctx)
+	if err != nil {
+		return err
+	}
+	for _, p := range snapshots {
+		if err := p.Validate(); err != nil {
+			return err
+		}
+		if p.TenantID != tenant {
+			return fmt.Errorf("%w: snapshot tenant %q does not match context tenant %q", shared.ErrValidation, p.TenantID, tenant)
+		}
+	}
+	reported := make(map[shared.ID]struct{}, len(snapshots))
+	for _, p := range snapshots {
+		reported[p.EntityID] = struct{}{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	byAsset := s.recs[tenant]
+	if byAsset == nil {
+		byAsset = make(map[shared.ID]map[shared.ID]ports.ProcessSnapshot)
+		s.recs[tenant] = byAsset
+	}
+	byEntity := byAsset[assetID]
+	if byEntity == nil {
+		byEntity = make(map[shared.ID]ports.ProcessSnapshot)
+		byAsset[assetID] = byEntity
+	}
+	// Retire any running row absent from the report.
+	for id, rec := range byEntity {
+		if _, ok := reported[id]; !ok && rec.Running {
+			rec.Running = false
+			byEntity[id] = rec
+		}
+	}
+	// Upsert the reported set.
+	for _, p := range snapshots {
+		byEntity[p.EntityID] = p
+	}
+	return nil
+}
+
 // ListRunningByAsset returns the running snapshots for an asset, ordered by EntityID.
 func (s *EndpointProcessStore) ListRunningByAsset(ctx context.Context, assetID shared.ID) ([]ports.ProcessSnapshot, error) {
 	tenant, err := requireProcessTenant(ctx)

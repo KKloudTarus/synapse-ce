@@ -79,7 +79,7 @@ type fleetHostInventory interface {
 // baseline (#594 D). *processreport.Service satisfies it. The asset is resolved server-side from the
 // authenticated agent, never taken from the request.
 type fleetProcessReport interface {
-	Report(ctx context.Context, tenantID, agentID shared.ID, procs []processreport.Process) (processreport.Result, error)
+	Report(ctx context.Context, tenantID, agentID shared.ID, procs []processreport.Process, complete bool) (processreport.Result, error)
 }
 
 // fleetRolloutDecider answers what ONE agent is offered. It is the narrow slice of the rollout service
@@ -770,16 +770,23 @@ func (f *fleetRouter) reportProcesses(w http.ResponseWriter, r *http.Request) {
 	for _, p := range req.Processes {
 		procs = append(procs, processreport.Process{PID: p.PID, Comm: p.Comm, Path: p.Path, Running: p.Running})
 	}
-	res, err := f.procReport.Report(r.Context(), agent.TenantID, agent.ID, procs)
+	res, err := f.procReport.Report(r.Context(), agent.TenantID, agent.ID, procs, req.Complete)
 	if err != nil {
 		writeError(w, f.log, err)
 		return
+	}
+	if res.LearnErr != "" {
+		// Best-effort: the snapshots are saved; a baseline-learn failure is logged, never fails the report.
+		f.log.Warn("behavior baseline learn failed", "asset", res.AssetID.String(), "err", res.LearnErr)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"asset_id": res.AssetID.String(), "saved": res.Saved, "learned": res.Learned})
 }
 
 type fleetProcessReportRequest struct {
 	Processes []fleetProcessDTO `json:"processes"`
+	// Complete is true when the agent enumerated every live process (it did not truncate at its cap). A
+	// complete report replaces the host's running set; a truncated one only upserts.
+	Complete bool `json:"complete"`
 }
 
 type fleetProcessDTO struct {

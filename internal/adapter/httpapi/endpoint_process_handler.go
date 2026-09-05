@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -41,6 +42,36 @@ func (rt *Router) SetProcessLearner(l processLearner) { rt.processLearner = l }
 // SetBehaviorRebaseliner wires the behavior-baseline re-baseline route (nil ⇒ the route is not
 // registered). A drifted or poisoned baseline abstains until an operator re-baselines it here.
 func (rt *Router) SetBehaviorRebaseliner(r behaviorRebaseliner) { rt.behaviorRebaseliner = r }
+
+// hostAssetVerifier resolves an asset by (tenant, id) so the operator process/rebaseline routes can
+// refuse to mutate process or baseline state for an id that is not a live host asset in the tenant.
+// ports.AssetRepository satisfies it.
+type hostAssetVerifier interface {
+	GetAssetByID(ctx context.Context, tenantID, id shared.ID) (*asset.Asset, error)
+}
+
+// SetHostAssetVerifier wires the host-asset check for the operator process/rebaseline routes. Optional:
+// when unset the routes do not pre-verify the asset (the tenant-scoped stores still isolate tenants).
+func (rt *Router) SetHostAssetVerifier(v hostAssetVerifier) { rt.hostAssets = v }
+
+// requireHostAsset returns true when assetID is a host asset in tenant, else writes the response (404 for
+// unknown/cross-tenant, 400 for a non-host asset) and returns false. When no verifier is wired it admits
+// (the store isolation still holds); the check is defence-in-depth against acting on a bogus id.
+func (rt *Router) requireHostAsset(w http.ResponseWriter, r *http.Request, tenant, assetID shared.ID) bool {
+	if rt.hostAssets == nil {
+		return true
+	}
+	a, err := rt.hostAssets.GetAssetByID(r.Context(), tenant, assetID)
+	if err != nil {
+		writeError(w, rt.log, err) // ErrNotFound -> 404, validation -> 400
+		return false
+	}
+	if a.Kind != asset.KindHost {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "asset is not a host asset"})
+		return false
+	}
+	return true
+}
 
 const (
 	// endpointProcessBodyLimit caps a process-report body. A host reports a bounded process list; a very
@@ -78,6 +109,9 @@ func (rt *Router) reportEndpointProcesses(w http.ResponseWriter, r *http.Request
 	ctx := incidentTenantContext(r)
 	tenant := fleetTenant(r.Context())
 	assetID := shared.ID(r.PathValue("id"))
+	if !rt.requireHostAsset(w, r, tenant, assetID) {
+		return
+	}
 	snapshots := make([]ports.ProcessSnapshot, 0, len(req.Processes))
 	for _, p := range req.Processes {
 		snapshots = append(snapshots, ports.ProcessSnapshot{
@@ -118,6 +152,9 @@ func (rt *Router) rebaselineBehavior(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	assetID := shared.ID(r.PathValue("id"))
+	if !rt.requireHostAsset(w, r, fleetTenant(r.Context()), assetID) {
+		return
+	}
 	if err := rt.behaviorRebaseliner.Rebaseline(incidentTenantContext(r), PrincipalFrom(r.Context()), assetID); err != nil {
 		writeError(w, rt.log, err)
 		return

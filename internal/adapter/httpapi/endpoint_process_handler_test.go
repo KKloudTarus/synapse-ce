@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -102,5 +104,61 @@ func TestRebaselineRouteAbsentWhenUnwired(t *testing.T) {
 	rt := &Router{log: discardLog(), incidents: &fakeIncidentStore{}} // no rebaseliner
 	if rec := incidentReq(rt.routes(), "consultant", http.MethodPost, "/api/v1/fleet/assets/a1/behavior-baseline/rebaseline", ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("unwired re-baseline route must 404, got %d", rec.Code)
+	}
+}
+
+func TestRebaselineBehaviorErrorMapping(t *testing.T) {
+	// A not-eligible baseline is a validation error -> 400; a generic error -> 500.
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"not eligible", shared.ErrValidation, http.StatusBadRequest},
+		{"transient", errors.New("baseline store down"), http.StatusInternalServerError},
+	} {
+		reb := &fakeRebaseliner{err: tc.err}
+		rt := &Router{log: discardLog(), incidents: &fakeIncidentStore{}, behaviorRebaseliner: reb}
+		rec := incidentReq(rt.routes(), "consultant", http.MethodPost, "/api/v1/fleet/assets/asset-9/behavior-baseline/rebaseline", "")
+		if rec.Code != tc.want {
+			t.Fatalf("%s: code=%d, want %d (%s)", tc.name, rec.Code, tc.want, rec.Body.String())
+		}
+	}
+}
+
+type fakeHostAssets struct {
+	kind asset.Kind
+	err  error
+}
+
+func (f *fakeHostAssets) GetAssetByID(_ context.Context, _ shared.ID, id shared.ID) (*asset.Asset, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &asset.Asset{ID: id, Kind: f.kind}, nil
+}
+
+// TestOperatorRoutesVerifyHostAsset: with a host-asset verifier wired, the operator process and
+// rebaseline routes refuse an id that is not a host asset (400) or is unknown/cross-tenant (404),
+// before touching any store.
+func TestOperatorRoutesVerifyHostAsset(t *testing.T) {
+	// A non-host asset is rejected 400.
+	rt := &Router{log: discardLog(), incidents: &fakeIncidentStore{}, endpointProcesses: &fakeProcessStore{}, behaviorRebaseliner: &fakeRebaseliner{}, hostAssets: &fakeHostAssets{kind: asset.KindImage}}
+	body := `{"processes":[{"entity_id":"e1","pid":1,"comm":"x","running":true}]}`
+	if rec := incidentReq(rt.routes(), "consultant", http.MethodPost, "/api/v1/fleet/assets/img-1/processes", body); rec.Code != http.StatusBadRequest {
+		t.Fatalf("process report on a non-host asset: code=%d, want 400 (%s)", rec.Code, rec.Body.String())
+	}
+	if rec := incidentReq(rt.routes(), "consultant", http.MethodPost, "/api/v1/fleet/assets/img-1/behavior-baseline/rebaseline", ""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("rebaseline on a non-host asset: code=%d, want 400 (%s)", rec.Code, rec.Body.String())
+	}
+	// An unknown/cross-tenant asset is 404.
+	rt404 := &Router{log: discardLog(), incidents: &fakeIncidentStore{}, endpointProcesses: &fakeProcessStore{}, behaviorRebaseliner: &fakeRebaseliner{}, hostAssets: &fakeHostAssets{err: shared.ErrNotFound}}
+	if rec := incidentReq(rt404.routes(), "consultant", http.MethodPost, "/api/v1/fleet/assets/nope/behavior-baseline/rebaseline", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("rebaseline on an unknown asset: code=%d, want 404 (%s)", rec.Code, rec.Body.String())
+	}
+	// A host asset is admitted (the fake rebaseliner returns nil -> 200).
+	rtok := &Router{log: discardLog(), incidents: &fakeIncidentStore{}, behaviorRebaseliner: &fakeRebaseliner{}, hostAssets: &fakeHostAssets{kind: asset.KindHost}}
+	if rec := incidentReq(rtok.routes(), "consultant", http.MethodPost, "/api/v1/fleet/assets/host-1/behavior-baseline/rebaseline", ""); rec.Code != http.StatusOK {
+		t.Fatalf("rebaseline on a host asset: code=%d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
 }

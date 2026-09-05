@@ -1612,7 +1612,7 @@ func main() {
 	var alertSvc *alertinguc.Service
 	if cfg.AlertWebhookURL != "" {
 		rule := alerting.Rule{MinSeverity: shared.Severity(strings.ToLower(strings.TrimSpace(cfg.AlertMinSeverity)))}
-		sink, aerr := alertwebhook.New(cfg.AlertWebhookURL, cfg.AlertWebhookSecret, 10*time.Second, cfg.AlertWebhookAllowPrivate)
+		sink, aerr := alertwebhook.New(cfg.AlertWebhookURL, cfg.AlertWebhookSecret, 10*time.Second, cfg.AlertWebhookAllowPrivate, cfg.AlertWebhookAllowUnsigned)
 		if aerr != nil {
 			log.Error("alert webhook init failed (SYNAPSE_ALERT_WEBHOOK_URL / SYNAPSE_ALERT_WEBHOOK_SECRET)", "err", aerr)
 			os.Exit(1)
@@ -1824,6 +1824,7 @@ func main() {
 		router.SetEndpointProcesses(endpointProcessStore) // #594 B5: running-process report/read + Exposure running-vs-installed
 		router.SetProcessLearner(behaviorSvc)             // #594 D: learn the process profile on each report
 		router.SetBehaviorRebaseliner(behaviorSvc)        // #594 D: re-baseline a drifted/poisoned baseline instead of abstaining forever
+		router.SetHostAssetVerifier(assetStore)           // refuse operator process/rebaseline on a non-host or unknown asset id
 		// Close the input gap the baseline had (#594 D): the shipped agent reported host packages but
 		// never its processes, so the statistical baseline never saw an observation. This ingests the
 		// agent's running-process report on the transport plane, resolving the host asset server-side from

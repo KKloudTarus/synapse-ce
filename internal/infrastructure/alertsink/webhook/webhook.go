@@ -52,7 +52,7 @@ var _ ports.AlertSink = (*Sink)(nil)
 // New validates the destination. The URL must be https, or http to a loopback host; a secret, when set,
 // must be at least 16 bytes so the signature is worth verifying. allowPrivate lets the client dial
 // private and link-local addresses (an in-network receiver); it is off in production.
-func New(rawURL, secret string, timeout time.Duration, allowPrivate bool) (*Sink, error) {
+func New(rawURL, secret string, timeout time.Duration, allowPrivate, allowUnsigned bool) (*Sink, error) {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("%w: alert webhook url is not a valid absolute URL", shared.ErrValidation)
@@ -70,7 +70,14 @@ func New(rawURL, secret string, timeout time.Duration, allowPrivate bool) (*Sink
 	if u.User != nil {
 		return nil, fmt.Errorf("%w: alert webhook url must not carry credentials", shared.ErrValidation)
 	}
-	if secret != "" && len(secret) < 16 {
+	if secret == "" {
+		// The whole point of this sink is a signed alert the receiver can trust. An empty secret ships
+		// unsigned alerts a receiver cannot distinguish from a spoof, so it is refused unless the
+		// operator explicitly opts into unsigned delivery (a development posture).
+		if !allowUnsigned {
+			return nil, fmt.Errorf("%w: alert webhook requires a signing secret; set SYNAPSE_ALERT_WEBHOOK_SECRET or opt into unsigned delivery with SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED=true", shared.ErrValidation)
+		}
+	} else if len(secret) < 16 {
 		return nil, fmt.Errorf("%w: alert webhook secret must be at least 16 bytes", shared.ErrValidation)
 	}
 	if timeout <= 0 {

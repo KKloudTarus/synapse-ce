@@ -116,6 +116,27 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **The running-process projection retires exited processes.** The agent reports only live processes
+  and the store upserted them, so a process that exited between reports lingered as running forever and
+  the behavior baseline's process-count feature climbed every sweep, self-poisoning into false drift. A
+  complete agent report (it enumerated every process, under the cap) now REPLACES the host's running set
+  in one transaction: the reported set is upserted and any other running row for that host is retired.
+  Found by the verification-gate QA and Codex reviews.
+- **A configured alert webhook requires a signing secret.** With `SYNAPSE_ALERT_WEBHOOK_URL` set but no
+  secret, alerts were delivered unsigned, which a receiver cannot distinguish from a spoof. A secret is
+  now required unless the operator explicitly opts into unsigned delivery with
+  `SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED=true`.
+- **Response blast-radius violations persist reliably.** The violation-state write on a response
+  apply/revert was best-effort (`_ = put`); a lost write is now joined to the violation error so the
+  kill switch and the list always see a halted action. The operator process-report and
+  behavior-baseline rebaseline routes now verify the path id is a live host asset before mutating.
+
+- **Process snapshots upsert in one round trip.** The Postgres endpoint-process store issued one
+  statement per process, so a host at the 4096-process cap made thousands of sequential round trips
+  holding a pooled connection; a synchronized fleet restart could saturate the connection pool. It is
+  now a single multi-row upsert over `unnest` (measured ~5x faster), and the agent's inventory sweep
+  gains a boot jitter so a fleet restarted together does not report in lockstep.
+
 - **Open counts exclude triaged-away findings.** The per-engagement summaries behind the host pages
   and the engagement list skip findings marked false positive or remediated, so "open findings" means
   open.

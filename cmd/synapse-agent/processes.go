@@ -15,7 +15,7 @@ import (
 // client satisfies it. The behavior baseline (#594 D) had no input before this: the agent shipped host
 // packages but never its processes.
 type processReportAPI interface {
-	ReportProcesses(ctx context.Context, token string, procs []fleetclient.ReportedProcess) error
+	ReportProcesses(ctx context.Context, token string, procs []fleetclient.ReportedProcess, complete bool) error
 }
 
 // maxReportedProcesses caps one report from the agent side, mirroring the server cap so a report is never
@@ -73,9 +73,12 @@ func (r *runner) reportProcesses(ctx context.Context, cred fleetclient.Credentia
 	}
 	procs := collectProcesses(r.cfg.procRoot)
 	if len(procs) == 0 {
-		return // nothing to report (or no procfs on this platform)
+		return // nothing to report (or no procfs on this platform); never send a spurious empty clear
 	}
-	if err := client.ReportProcesses(ctx, cred.Token, procs); err != nil {
+	// complete = the agent enumerated every live process (it did not hit its cap), so the server may
+	// replace the host's running set and retire processes that exited since the last sweep.
+	complete := len(procs) < maxReportedProcesses
+	if err := client.ReportProcesses(ctx, cred.Token, procs, complete); err != nil {
 		log.Printf("process report: %v", err)
 	}
 }

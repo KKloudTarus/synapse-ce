@@ -263,6 +263,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_ALERT_WEBHOOK_SECRET` | (unset) | Signs each webhook body: `X-Synapse-Signature: sha256=<hex HMAC-SHA256 of "<X-Synapse-Timestamp>.<body>">`. At least 16 bytes when set. |
 | `SYNAPSE_ALERT_MIN_SEVERITY` | `medium` | Inclusive severity floor for delivered alerts (`critical`, `high`, `medium`, `low`, `info`). Test alerts always deliver. |
 | `SYNAPSE_ALERT_WEBHOOK_ALLOW_PRIVATE` | `false` | Let the webhook client dial private and link-local receivers. The SSRF guard refuses them otherwise. |
+| `SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED` | `false` | Allow UNSIGNED alert delivery when no secret is set. Default false: a configured webhook requires `SYNAPSE_ALERT_WEBHOOK_SECRET` so a receiver can trust the alert is genuine. Set true only for a development receiver that does not verify the signature. |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |
 | `SYNAPSE_FLEET_MIN_AGENT_VERSION` | empty | Reject agents below this version (empty = no floor). |
 | `SYNAPSE_FLEET_CA_CERT` / `_CA_KEY` / `_CERT_TTL` | empty | Enrolment PKI for agent client certificates (never logged). |

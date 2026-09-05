@@ -210,10 +210,11 @@ type ReportedProcess struct {
 
 // ReportProcesses posts the host's running-process snapshot for the behavior baseline (#594 D). The
 // control plane resolves the host asset from the authenticated agent, so no asset id crosses the wire.
-func (c *Client) ReportProcesses(ctx context.Context, token string, procs []ReportedProcess) error {
+func (c *Client) ReportProcesses(ctx context.Context, token string, procs []ReportedProcess, complete bool) error {
 	body := struct {
 		Processes []ReportedProcess `json:"processes"`
-	}{Processes: procs}
+		Complete  bool              `json:"complete"`
+	}{Processes: procs, Complete: complete}
 	return c.do(ctx, http.MethodPost, "/api/v1/fleet/processes", token, body, nil)
 }
 

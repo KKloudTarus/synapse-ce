@@ -47,6 +47,13 @@ type EndpointProcessStore interface {
 	// TenantID must equal the context tenant, else it fails closed with shared.ErrValidation (no
 	// cross-tenant write). Saving zero snapshots is a no-op.
 	SaveProcesses(ctx context.Context, snapshots []ProcessSnapshot) error
+	// ReplaceRunningProcesses makes the asset's running set EXACTLY the given snapshots: it upserts them
+	// and marks every other row of (tenant, asset) that is currently running but absent from the report
+	// as not-running, in one atomic operation. It is for a COMPLETE report (the agent enumerated every
+	// live process); without it a process that exits between reports would stay running=true forever,
+	// because an upsert-only SaveProcesses never touches a row the report omits. An empty snapshot list
+	// clears the asset's running set (every process exited). All snapshots must carry the ctx tenant.
+	ReplaceRunningProcesses(ctx context.Context, assetID shared.ID, snapshots []ProcessSnapshot) error
 	// ListRunningByAsset returns the currently-RUNNING process snapshots for one host asset, tenant-scoped,
 	// ordered by EntityID for stability. An asset with no running processes returns an empty slice.
 	ListRunningByAsset(ctx context.Context, assetID shared.ID) ([]ProcessSnapshot, error)

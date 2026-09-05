@@ -238,11 +238,16 @@ func (s *Service) Apply(ctx context.Context, engagementID shared.ID, action rdom
 	// declared target is a violation — halted and recorded, mirroring the exploitation rule.
 	if radiusExceeded(action.BlastRadius, out.ObservedRadius) || out.AffectedCount > 1 {
 		rec := s.record(tenantID, engagementID, action, StateViolation, approver, adm.EvidenceID())
-		_ = s.put(ctx, rec)
+		violation := fmt.Errorf("%w: response %s effect exceeded its declared single-target radius (observed=%s affected=%d)", shared.ErrForbidden, action.ID, out.ObservedRadius, out.AffectedCount)
+		// The violation record must persist so the halt/list see the halted action; a lost write is
+		// joined to the violation error, never swallowed (a governed action's state is not best-effort).
+		if err := s.put(ctx, rec); err != nil {
+			return rec, errors.Join(violation, fmt.Errorf("persist response violation %s: %w", action.ID, err))
+		}
 		s.recordAudit(ctx, "response.blast_radius_violation", approver, action, map[string]string{
 			"declared": string(action.BlastRadius), "observed": string(out.ObservedRadius), "affected": fmt.Sprint(out.AffectedCount),
 		})
-		return rec, fmt.Errorf("%w: response %s effect exceeded its declared single-target radius (observed=%s affected=%d)", shared.ErrForbidden, action.ID, out.ObservedRadius, out.AffectedCount)
+		return rec, violation
 	}
 
 	rec := s.record(tenantID, engagementID, action, StateApplied, approver, adm.EvidenceID())
@@ -300,11 +305,14 @@ func (s *Service) Revert(ctx context.Context, actionID shared.ID, target engagem
 	if radiusExceeded(rec.Action.BlastRadius, out.ObservedRadius) || out.AffectedCount > 1 {
 		rec.State = StateViolation
 		rec.UpdatedAt = s.clock.Now().UTC()
-		_ = s.put(ctx, rec)
+		revViolation := fmt.Errorf("%w: reversal of %s effect exceeded its declared single-target radius (observed=%s affected=%d)", shared.ErrForbidden, actionID, out.ObservedRadius, out.AffectedCount)
+		if err := s.put(ctx, rec); err != nil {
+			return rec, errors.Join(revViolation, fmt.Errorf("persist reversal violation %s: %w", actionID, err))
+		}
 		s.recordAudit(ctx, "response.reversal_blast_radius_violation", approver, rec.Action, map[string]string{
 			"declared": string(rec.Action.BlastRadius), "observed": string(out.ObservedRadius), "affected": fmt.Sprint(out.AffectedCount),
 		})
-		return rec, fmt.Errorf("%w: reversal of %s effect exceeded its declared single-target radius (observed=%s affected=%d)", shared.ErrForbidden, actionID, out.ObservedRadius, out.AffectedCount)
+		return rec, revViolation
 	}
 	rec.State = StateReverted
 	rec.UpdatedAt = s.clock.Now().UTC()

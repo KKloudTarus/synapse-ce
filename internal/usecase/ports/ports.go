@@ -939,6 +939,26 @@ func (s *VulnerabilitySummary) Add(severity shared.Severity, fixable, kev bool) 
 	}
 }
 
+// AddCounts folds a pre-aggregated (severity, total, fixable, kev) group into the summary, for callers
+// that already have per-severity counts from a GROUP BY and must not replay Add once per finding.
+func (s *VulnerabilitySummary) AddCounts(severity shared.Severity, total, fixable, kev int) {
+	s.Total += total
+	switch severity {
+	case shared.SeverityCritical:
+		s.Critical += total
+	case shared.SeverityHigh:
+		s.High += total
+	case shared.SeverityMedium:
+		s.Medium += total
+	case shared.SeverityLow:
+		s.Low += total
+	default:
+		s.Info += total
+	}
+	s.Fixable += fixable
+	s.KEV += kev
+}
+
 // FindingSummaryReader aggregates SCA vulnerability findings per engagement in one read, for list
 // views over many engagements. License findings (dedup key "license:*") and non-SCA kinds are excluded.
 // Optional: a store that does not implement it makes callers fall back to listing findings.

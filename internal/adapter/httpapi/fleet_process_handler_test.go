@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -113,4 +114,47 @@ func onlyAgentID(t *testing.T, agentSvc *fleetagentuc.Service) shared.ID {
 		t.Fatalf("want exactly one enrolled agent, got %d", len(agents))
 	}
 	return agents[0].ID
+}
+
+type failingLearner struct{}
+
+func (failingLearner) Learn(context.Context, string, shared.ID) error {
+	return errors.New("baseline transiently sealed")
+}
+
+// TestProcessReportLearnFailureIsBestEffort: a baseline-learn failure does not fail the agent's report
+// (the snapshots are durably saved); the transport answers 200 with learned:false.
+func TestProcessReportLearnFailureIsBestEffort(t *testing.T) {
+	h, agentSvc, _ := setupFleetWithIngest(t)
+	token := enrolAgentToken(t, h, agentSvc)
+	bindings := memory.NewTelemetryTransportStore()
+	agentID := onlyAgentID(t, agentSvc)
+	if err := bindings.BindTelemetryAsset(shared.WithTenant(context.Background(), "default"),
+		ports.TelemetryAssetBinding{TenantID: "default", AgentID: agentID, AssetID: "host-asset-1", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	svc, err := processreport.NewService(bindings, memory.NewEndpointProcessStore(), failingLearner{}, ftClock{})
+	if err != nil {
+		t.Fatalf("svc: %v", err)
+	}
+	rt := &Router{log: discardLog()}
+	rt.SetFleet(agentSvc, nil, func() time.Time { return time.Now().UTC() }, "")
+	rt.SetFleetProcessReport(svc)
+	handler := rt.fleet.handler()
+
+	w := fleetCall(handler, http.MethodPost, "/api/v1/fleet/processes", token,
+		map[string]any{"processes": []map[string]any{{"pid": 1, "comm": "x", "running": true}}, "complete": true}, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("a learn failure must not fail the report, got %d (%s)", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Saved   int  `json:"saved"`
+		Learned bool `json:"learned"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Saved != 1 || resp.Learned {
+		t.Fatalf("resp = %+v, want saved:1 learned:false", resp)
+	}
 }

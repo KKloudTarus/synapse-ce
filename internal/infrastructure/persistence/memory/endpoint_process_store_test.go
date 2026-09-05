@@ -79,3 +79,42 @@ func TestEndpointProcessStoreValidation(t *testing.T) {
 		t.Fatalf("saving zero snapshots must be a no-op, got %v", err)
 	}
 }
+
+// TestEndpointProcessStoreReplaceRetiresExitedProcesses is the regression for the unbounded-growth bug:
+// a complete report replaces the asset's running set, so a process reported once and then absent is
+// retired (running=false) instead of lingering as running forever.
+func TestEndpointProcessStoreReplaceRetiresExitedProcesses(t *testing.T) {
+	s := NewEndpointProcessStore()
+	ctx := shared.WithTenant(context.Background(), "ta")
+	// Sweep 1: three live processes.
+	if err := s.ReplaceRunningProcesses(ctx, "host-1", []ports.ProcessSnapshot{
+		snap("ta", "host-1", "e1", true), snap("ta", "host-1", "e2", true), snap("ta", "host-1", "e3", true),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.ListRunningByAsset(ctx, "host-1"); len(got) != 3 {
+		t.Fatalf("sweep 1 running = %d, want 3", len(got))
+	}
+	// Sweep 2: e2 exited, e4 spawned. The running set must be exactly {e1, e3, e4} — not the union.
+	if err := s.ReplaceRunningProcesses(ctx, "host-1", []ports.ProcessSnapshot{
+		snap("ta", "host-1", "e1", true), snap("ta", "host-1", "e3", true), snap("ta", "host-1", "e4", true),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.ListRunningByAsset(ctx, "host-1")
+	if len(got) != 3 {
+		t.Fatalf("sweep 2 running = %d, want 3 (e2 retired), got %+v", len(got), got)
+	}
+	for _, p := range got {
+		if p.EntityID == "e2" {
+			t.Fatalf("e2 exited but is still running: %+v", got)
+		}
+	}
+	// Another asset's rows are untouched by a replace scoped to host-1.
+	if err := s.ReplaceRunningProcesses(ctx, "host-2", []ports.ProcessSnapshot{snap("ta", "host-2", "x1", true)}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.ListRunningByAsset(ctx, "host-1"); len(got) != 3 {
+		t.Fatalf("host-1 running changed by a host-2 replace: %+v", got)
+	}
+}

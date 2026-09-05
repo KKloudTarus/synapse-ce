@@ -251,9 +251,10 @@ func (r *FindingRepository) summarizeByEngagements(ctx context.Context, engageme
 				return fmt.Errorf("scan finding summary: %w", err)
 			}
 			sum := out[shared.ID(eng)]
-			for i := 0; i < total; i++ {
-				sum.Add(shared.Severity(severity), i < fixable, i < kev)
-			}
+			// The GROUP BY already carries the per-(engagement, severity) totals; add them arithmetically
+			// rather than replaying Add once per finding, so a tenant with many findings does not pay
+			// O(findings) CPU to rebuild an aggregate the database already computed.
+			sum.AddCounts(shared.Severity(severity), total, fixable, kev)
 			out[shared.ID(eng)] = sum
 		}
 		return rows.Err()

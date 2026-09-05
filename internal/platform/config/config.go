@@ -476,6 +476,9 @@ type Config struct {
 	// AlertWebhookAllowPrivate lets the webhook client dial private and link-local addresses (an
 	// in-network receiver). Off by default; the SSRF guard otherwise refuses them.
 	AlertWebhookAllowPrivate bool
+	// AlertWebhookAllowUnsigned opts into UNSIGNED alert delivery when no secret is set. Default false:
+	// a configured webhook requires a signing secret so a receiver can trust the alert is genuine.
+	AlertWebhookAllowUnsigned bool
 
 	// JSReachabilityEnabled turns on deterministic Tier-1 JavaScript/TypeScript import-reachability: a
 	// declared npm dependency that first-party source never imports becomes not_reachable, which the
@@ -748,6 +751,7 @@ func Load() Config {
 		AlertWebhookSecret:                     getenv("SYNAPSE_ALERT_WEBHOOK_SECRET", ""),
 		AlertMinSeverity:                       getenv("SYNAPSE_ALERT_MIN_SEVERITY", "medium"),
 		AlertWebhookAllowPrivate:               getbool("SYNAPSE_ALERT_WEBHOOK_ALLOW_PRIVATE", false),
+		AlertWebhookAllowUnsigned:              getbool("SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED", false),
 		JSReachabilityEnabled:                  getbool("SYNAPSE_JSREACH_ENABLED", false),
 		JSSymbolReachabilityEnabled:            getbool("SYNAPSE_JSREACH_TIER2_ENABLED", false),
 		RustReachabilityEnabled:                getbool("SYNAPSE_REACH_RUST", false),
