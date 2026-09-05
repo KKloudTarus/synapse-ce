@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -12,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/aup"
 )
 
 // multipartUploadRoutes ties each route that accepts a file upload to the handler function that
@@ -112,5 +115,68 @@ func TestUploadRouteAcceptsABodyOverTheJSONDefault(t *testing.T) {
 				t.Errorf("handler read %d bytes, want %d", read, want)
 			}
 		})
+	}
+}
+
+// TestUploadCeilingSurvivesTheRealChain drives the production handler rather than a hand-built
+// middleware, because the route ceiling depends on the ORDER of two middlewares and the unit tests
+// above set r.Pattern themselves.
+//
+// annotateRoutePattern must run outside limitRequestBody. Reversed, r.Pattern is still empty when
+// the ceiling is chosen, every route silently falls back to the 1 MiB default, and every upload
+// route is capped again with no test failing. This drives rt.Handler() end to end so the wiring is
+// what is under test.
+func TestUploadCeilingSurvivesTheRealChain(t *testing.T) {
+	aupStore := newFakeAUPStore()
+	aupStore.accepted["1.0"] = aup.Acceptance{Version: "1.0"}
+	rt := &Router{
+		log: discardLog(),
+		auth: NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
+			if token == "operator" {
+				return Principal{ID: "operator", Role: "admin", TenantID: "tenant-a"}, true
+			}
+			return Principal{}, false
+		}),
+		aup: newTestAUP(aupStore, &fakeAudit{}),
+	}
+	handler := rt.Handler()
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	if err := mw.WriteField("metadata", `{"name":"Upload","client":"acme"}`); err != nil {
+		t.Fatalf("write field: %v", err)
+	}
+	part, err := mw.CreateFormFile("source", "src.tar.gz")
+	if err != nil {
+		t.Fatalf("create part: %v", err)
+	}
+	if _, err := part.Write(bytes.Repeat([]byte("a"), 2<<20)); err != nil {
+		t.Fatalf("write part: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements", bytes.NewReader(body.Bytes()))
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer operator")
+	rec := httptest.NewRecorder()
+	// The engagement service is not wired in this fixture, so reaching the handler with the whole
+	// body read is itself the success condition: the handler parses the multipart form first and
+	// only then touches the service. A size rejection happens strictly earlier, in the middleware.
+	reachedHandler := func() (reached bool) {
+		defer func() { reached = recover() != nil }()
+		handler.ServeHTTP(rec, req)
+		return false
+	}()
+
+	if rec.Code == http.StatusRequestEntityTooLarge {
+		t.Fatalf("a 2 MiB source upload was rejected as too large: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "oversized") {
+		t.Fatalf("a 2 MiB source upload was rejected as oversized: %s", rec.Body.String())
+	}
+	if !reachedHandler && rec.Code >= 400 {
+		t.Fatalf("the upload never reached the handler: %d %s", rec.Code, rec.Body.String())
 	}
 }
