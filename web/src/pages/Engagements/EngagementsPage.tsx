@@ -14,6 +14,9 @@ import { EngagementStatCard } from './components/EngagementStatCard'
 import { EngagementFilterBar } from './components/EngagementFilterBar'
 import { EngagementTable } from './components/EngagementTable'
 import { PageError } from '../../components/synapse/PageError'
+import { ConfirmDialog } from '../../components/synapse/ConfirmDialog'
+import { useToast } from '../../components/synapse/Toast'
+import { isTerminalStatus } from '../EngagementDetail/SettingsTab'
 import type { Engagement } from '../../lib/types'
 import type { EngagementStatusFilter, SortDirection, SortField } from './types'
 
@@ -38,6 +41,10 @@ export const EngagementsPage: FC = () => {
   const [pageSize, setPageSize] = useState(isNaN(pageSizeParam) ? 20 : pageSizeParam)
   const [sortField, setSortField] = useState<SortField>(sortParam)
   const [sortDirection, setSortDirection] = useState<SortDirection>(dirParam)
+  const [pendingTransition, setPendingTransition] = useState<{ id: string; status: string; name: string } | null>(null)
+  const [transitionBusy, setTransitionBusy] = useState(false)
+  const [transitionErr, setTransitionErr] = useState<string | null>(null)
+  const { notify } = useToast()
 
   const [importing, setImporting] = useState(false)
   const [importErr, setImportErr] = useState<string | null>(null)
@@ -213,13 +220,32 @@ export const EngagementsPage: FC = () => {
     updateQueryParams({ pageSize: newPageSize, page: 1 })
   }
 
-  const handleTransitionStatus = async (id: string, newStatus: string) => {
+  const applyTransition = async (id: string, newStatus: string) => {
+    setTransitionBusy(true)
+    setTransitionErr(null)
     try {
       await api.transitionEngagement(id, newStatus)
       setRefreshKey((k) => k + 1)
+      setPendingTransition(null)
+      notify(`Engagement is now ${newStatus}.`, 'success')
     } catch (err) {
-      setImportErr(err instanceof Error ? err.message : 'Status transition failed')
+      const message = err instanceof Error ? err.message : 'Status transition failed'
+      setTransitionErr(message)
+      notify(message, 'error')
+    } finally {
+      setTransitionBusy(false)
     }
+  }
+
+  // A terminal status cannot be left again, so the row action asks first.
+  const handleTransitionStatus = async (id: string, newStatus: string) => {
+    if (isTerminalStatus(newStatus)) {
+      setTransitionErr(null)
+      const target = data?.list.find((engagement: Engagement) => engagement.id === id)
+      setPendingTransition({ id, status: newStatus, name: target?.name ?? id })
+      return
+    }
+    await applyTransition(id, newStatus)
   }
 
   const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -341,6 +367,26 @@ export const EngagementsPage: FC = () => {
         onPageChange={handlePageChange}
         onPageSizeChange={handlePageSizeChange}
         onStatusChange={handleTransitionStatus}
+      />
+
+      <ConfirmDialog
+        open={pendingTransition !== null}
+        title="Archive this engagement?"
+        description={
+          <>
+            <strong className="font-semibold text-primary">{pendingTransition?.name}</strong> moves to{' '}
+            <span className="font-mono">archived</span>, which is a terminal state: there is no transition back, and
+            scans and edits stay closed from then on.
+          </>
+        }
+        confirmLabel="Archive"
+        busy={transitionBusy}
+        error={transitionErr}
+        onConfirm={() => pendingTransition && applyTransition(pendingTransition.id, pendingTransition.status)}
+        onCancel={() => {
+          setPendingTransition(null)
+          setTransitionErr(null)
+        }}
       />
     </div>
   )
