@@ -34,6 +34,30 @@ func auditTxTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// cleanupAuditRows removes the rows a test created. audit_log is append-only by trigger, which
+// is the point of the table, so the test drops the guard for the length of the delete as the
+// owning role. Without this the rows persist for the rest of the package run and migration 0085's
+// Down guard ("cannot roll back audit_log tenant chains after tenant genesis rows exist") fails
+// every later migration rollback test that shares the database.
+func cleanupAuditRows(t *testing.T, pool *pgxpool.Pool, target string) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if _, err := pool.Exec(ctx, `ALTER TABLE audit_log DISABLE TRIGGER audit_log_append_only`); err != nil {
+			t.Logf("cleanup: disable append-only trigger: %v", err)
+			return
+		}
+		defer func() {
+			if _, err := pool.Exec(ctx, `ALTER TABLE audit_log ENABLE TRIGGER audit_log_append_only`); err != nil {
+				t.Logf("cleanup: re-enable append-only trigger: %v", err)
+			}
+		}()
+		if _, err := pool.Exec(ctx, `DELETE FROM audit_log WHERE target = $1`, target); err != nil {
+			t.Logf("cleanup: delete audit rows: %v", err)
+		}
+	})
+}
+
 func auditRowCount(t *testing.T, pool *pgxpool.Pool, target string) int {
 	t.Helper()
 	var n int
@@ -52,6 +76,7 @@ func TestAuditRollsBackWithTheBoundTransaction(t *testing.T) {
 	ctx := context.Background()
 	tenant := shared.ID("audit-tx-tenant-a")
 	target := "audit-tx-rollback-" + time.Now().UTC().Format("150405.000000000")
+	cleanupAuditRows(t, pool, target)
 
 	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id, name) VALUES ($1,$1) ON CONFLICT DO NOTHING`, tenant.String()); err != nil {
 		t.Fatalf("seed tenant: %v", err)
@@ -85,6 +110,7 @@ func TestAuditCommitsWithTheBoundTransaction(t *testing.T) {
 	ctx := context.Background()
 	tenant := shared.ID("audit-tx-tenant-a")
 	target := "audit-tx-commit-" + time.Now().UTC().Format("150405.000000000")
+	cleanupAuditRows(t, pool, target)
 
 	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id, name) VALUES ($1,$1) ON CONFLICT DO NOTHING`, tenant.String()); err != nil {
 		t.Fatalf("seed tenant: %v", err)
@@ -113,6 +139,7 @@ func TestAuditOutsideATransactionStillCommits(t *testing.T) {
 	ctx := context.Background()
 	tenant := shared.ID("audit-tx-tenant-a")
 	target := "audit-tx-unbound-" + time.Now().UTC().Format("150405.000000000")
+	cleanupAuditRows(t, pool, target)
 
 	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id, name) VALUES ($1,$1) ON CONFLICT DO NOTHING`, tenant.String()); err != nil {
 		t.Fatalf("seed tenant: %v", err)
@@ -143,6 +170,7 @@ func TestAuditReadsAreTenantScoped(t *testing.T) {
 	tenantA := shared.ID("audit-scope-tenant-a")
 	tenantB := shared.ID("audit-scope-tenant-b")
 	target := "audit-scope-" + time.Now().UTC().Format("150405.000000000")
+	cleanupAuditRows(t, pool, target)
 
 	for _, id := range []shared.ID{tenantA, tenantB} {
 		if _, err := pool.Exec(ctx, `INSERT INTO tenants(id, name) VALUES ($1,$1) ON CONFLICT DO NOTHING`, id.String()); err != nil {
