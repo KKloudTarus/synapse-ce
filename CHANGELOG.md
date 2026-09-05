@@ -9,6 +9,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Deployment capability catalog.** `GET /api/v1/capabilities` reports every optional subsystem
+  with a stable key, a human name, whether this deployment enables it, the `SYNAPSE_*` variable that
+  controls it, and the capabilities it depends on. An optional subsystem registers its routes only
+  when its switch is on, so a disabled subsystem and a broken one previously both answered `404`; a
+  client can now render "disabled" and name the switch. The route is gated at the view floor and
+  returns configuration booleans and variable names only, never a configured value.
+
 - **Project dependency graph and subtree export.** Project analyses now expose a bounded, deterministic
   dependency projection from the stored SBOM with direct/transitive relationships, reverse paths,
   vulnerability matches, license policy risk, and reachability annotations. A new interactive Project

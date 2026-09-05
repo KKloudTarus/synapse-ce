@@ -26,6 +26,8 @@ security:
 - bearerAuth: []
 
 tags:
+- name: platform
+  description: Deployment-wide configuration a client needs before it renders navigation
 - name: health
 - name: aup
 - name: engagements
@@ -111,6 +113,31 @@ paths:
         "200": {description: Accepted}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/capabilities:
+    get:
+      tags: [platform]
+      summary: List optional subsystems and whether this deployment enables them
+      description: >
+        Every optional subsystem registers its routes only when its `SYNAPSE_*` switch is on, so a
+        disabled subsystem and a broken one both answer 404. This endpoint reports, per subsystem, a
+        stable key, a human name, whether it is enabled, and the environment variable that controls
+        it, so a client can render "disabled" rather than a dead link. It returns configuration
+        booleans and variable NAMES only, never a configured value, and is gated at the view floor.
+      responses:
+        "200":
+          description: The deployment's capability catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [capabilities]
+                properties:
+                  capabilities:
+                    type: array
+                    items: {$ref: "#/components/schemas/Capability"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/engagements:
     get:
@@ -2865,6 +2892,32 @@ components:
         skipped: {type: integer, minimum: 0}
         missing: {type: integer, format: uint64, minimum: 0}
         replay: {type: boolean}
+
+    Capability:
+      type: object
+      required: [key, name, enabled, switch]
+      properties:
+        key:
+          type: string
+          description: Stable subsystem identifier a client keys its navigation off.
+          example: fleet
+        name:
+          type: string
+          description: Human name for display.
+          example: Agent fleet transport
+        enabled:
+          type: boolean
+          description: Whether this deployment serves the subsystem's routes.
+        switch:
+          type: string
+          description: The SYNAPSE_* environment variable an operator sets to change `enabled`.
+          example: SYNAPSE_FLEET_ENABLED
+        requires:
+          type: array
+          description: >
+            Keys of the capabilities this one depends on. Present only when the subsystem needs more
+            than its own switch, so a client can explain an enabled switch that is still disabled.
+          items: {type: string}
 
     Readiness:
       type: object

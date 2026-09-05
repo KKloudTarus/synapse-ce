@@ -10,6 +10,25 @@ A fully documented template lives in [`.env.example`](https://github.com/KKloudT
 Conventions: an empty value means unset, so the built-in default applies. Booleans accept
 `1/0/true/false`. Durations use Go syntax such as `30s`, `10m`, `1h`. Sizes are byte counts.
 
+## Reading the enabled set back
+
+`GET /api/v1/capabilities` reports, for every optional subsystem, a stable key, a human name,
+whether this deployment enables it, and the `SYNAPSE_*` variable that controls it:
+
+```json
+{"capabilities": [
+  {"key": "fleet", "name": "Agent fleet transport", "enabled": false, "switch": "SYNAPSE_FLEET_ENABLED"},
+  {"key": "cspm", "name": "Cloud security posture management", "enabled": false,
+   "switch": "SYNAPSE_CSPM_ENABLED", "requires": ["fleet_assets"]}
+]}
+```
+
+An optional subsystem registers its routes only when its switch is on, so a disabled subsystem and a
+broken one both answer `404`. Read this endpoint first and render a disabled subsystem as disabled.
+`requires` names the other capabilities a subsystem depends on, which is why an enabled switch can
+still report `enabled: false`. The response carries booleans and variable names, never a configured
+value. Any authenticated role may read it.
+
 ## Required
 
 | Variable | Default | Description |

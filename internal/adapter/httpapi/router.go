@@ -114,6 +114,7 @@ type Router struct {
 	vulnerabilityRead      *vulnerabilityinteluc.Service
 	vulnerabilityActions   *vulnerabilityactionuc.Service
 	sla                    *slauc.Service
+	capabilities           capabilityCatalog // optional; nil ⇒ the capability catalog route is not registered
 	readiness              readinessConfig
 }
 
@@ -632,6 +633,12 @@ func (rt *Router) routes() *http.ServeMux {
 	// sign-off capability (reviewer/admin) rather than the view floor.
 	mux.HandleFunc("GET /api/v1/audit", rt.authz(userdom.PermReview, rt.listAudit))
 	mux.HandleFunc("GET /api/v1/audit/verify", rt.authz(userdom.PermReview, rt.verifyAudit))
+	if rt.capabilities != nil {
+		// Optional-subsystem catalog: configuration booleans only, so the view floor is the right
+		// gate. It must stay registered whatever else is off — a client uses it to tell a disabled
+		// subsystem from a broken one.
+		mux.HandleFunc("GET /api/v1/capabilities", rt.authz(userdom.PermView, rt.listCapabilities))
+	}
 	mux.HandleFunc("GET /api/v1/me", rt.currentUser)
 	mux.HandleFunc("GET /api/v1/users", rt.authz(userdom.PermAdminister, rt.listUsers))
 	mux.HandleFunc("POST /api/v1/users", rt.authz(userdom.PermAdminister, rt.createUser))
