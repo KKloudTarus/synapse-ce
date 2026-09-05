@@ -52,6 +52,7 @@ function mapEngagement(r: EngagementWire): Engagement {
         }
       : undefined,
     lastScanDate: r.last_scan_date ?? undefined,
+    lastScanStatus: r.last_scan_status ?? undefined,
   }
 }
 

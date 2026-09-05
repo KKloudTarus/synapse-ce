@@ -53,6 +53,7 @@ export interface EngagementWire {
   findings_count?: { total: number; critical: number; high: number; medium: number; low: number }
   /** List-view enrichment; see `findings_count`. */
   last_scan_date?: string | null
+  last_scan_status?: string | null
 }
 
 export interface SourceBindingWire {
@@ -97,6 +98,10 @@ export const ENGAGEMENT_WIRE_KEYS = [
   'live_recon_enabled',
   'created_at',
   'updated_at',
+  // List enrichment (listEngagements): present only on list rows with the stores wired.
+  'findings_count',
+  'last_scan_date',
+  'last_scan_status',
 ] as const
 
 /** Every key `projectView` serializes, in json-tag form. Ordered as the Go struct declares. */

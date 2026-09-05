@@ -39,7 +39,7 @@
   --color-criticalfg: #ffffff;
   --color-high: #e7661d;
   --color-medium: #b97a0f;
-  --color-low: #168b48;
+  --color-low: #1570ef;
   --color-infosev: #64748b;
 
   /* Text-on-surface pair for each severity. The solid tokens above are tuned as
@@ -49,7 +49,7 @@
   --color-criticaltext: #c0243c;
   --color-hightext: #a94a15;
   --color-mediumtext: #8e5d0b;
-  --color-lowtext: #13753d;
+  --color-lowtext: #175cd3;
   --color-infosevtext: #556377;
 
   --font-sans: "Inter", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
@@ -75,14 +75,14 @@
   --color-criticalfg: #2a0710;
   --color-high: #fb8b3c;
   --color-medium: #f5bb3f;
-  --color-low: #22c55e;
+  --color-low: #53b1fd;
   --color-infosev: #8593aa;
   /* Dark surfaces already clear AA with the solid tokens, so the text pair
      tracks them and only info is lifted off the muted grey. */
   --color-criticaltext: #fb4d63;
   --color-hightext: #fb8b3c;
   --color-mediumtext: #f5bb3f;
-  --color-lowtext: #22c55e;
+  --color-lowtext: #53b1fd;
   --color-infosevtext: #9aa7bd;
 }
 

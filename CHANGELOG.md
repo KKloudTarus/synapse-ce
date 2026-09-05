@@ -68,6 +68,20 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   failed, clean). The framed stat cards on Dashboard, Assets, Engagements and Rules are replaced by
   the same compact metric strip, and loading and empty states share one component across pages.
 
+- **The dashboard leads with a Needs attention queue.** The radar and donut panels are replaced by a
+  table of what an operator acts on today, built from data the page already loads: critical or
+  high-risk assets, engagements whose last scan failed, fleet coverage gaps, and active engagements
+  that were never scanned, each with owner, age and a link to the page where the action happens. The
+  metric strip carries action counters (critical open, high open, high-risk assets, coverage gaps,
+  needs attention); the finding trend moves below the queue.
+
+- **Incidents and Hosts read as operational tables.** Incidents gains a metric strip (open, critical
+  open, in progress, resolved), state chips with counts, an Opened column, a table skeleton while
+  loading, and framed empty and error states that say what fills the table and how to retry. The Hosts
+  list shows the open total next to the severity buckets (with an unrated remainder so the row adds up
+  to the host page), folds the recorded time into the Scan column, and reports "Needs attention" as one
+  count. Low severity is blue in both themes; green now only marks a healthy or successful state.
+
 ### Fixed
 
 - **Open counts exclude triaged-away findings.** The per-engagement summaries behind the host pages

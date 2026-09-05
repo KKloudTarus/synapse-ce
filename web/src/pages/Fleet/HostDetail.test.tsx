@@ -68,7 +68,7 @@ describe('HostDetail', () => {
     expect(screen.getByLabelText('Critical: 1')).toBeInTheDocument()
     expect(screen.getByLabelText('Known exploited: 1')).toBeInTheDocument()
     expect(screen.getByLabelText('Fixable: 1')).toBeInTheDocument()
-    expect(screen.getByLabelText('Packages: 412')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Packages\s*412/ })).toBeInTheDocument()
     expect(screen.getByLabelText('Coverage gaps: 4')).toBeInTheDocument()
     // Advisory, package, installed and fixed version, CVSS, KEV, sources.
     expect(screen.getByText('CVE-2024-0001')).toBeInTheDocument()
@@ -81,7 +81,7 @@ describe('HostDetail', () => {
     // Host facts in the header.
     expect(screen.getByText('6.1.0-18-amd64')).toBeInTheDocument()
     expect(screen.getByText('agent-1')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Copy host key' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /copy machine id/i })).toBeInTheDocument()
   })
 
   it('filters findings by severity, fix state and search', async () => {
@@ -94,7 +94,7 @@ describe('HostDetail', () => {
     expect(screen.queryByText('CVE-2023-0002')).not.toBeInTheDocument()
     expect(screen.getByText('1 of 2 findings')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Any fix state' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Low' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Low/ }))
     expect(screen.queryByText('CVE-2024-0001')).not.toBeInTheDocument()
     expect(screen.getByText('CVE-2023-0002')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'All severities' }))
@@ -115,7 +115,7 @@ describe('HostDetail', () => {
     renderPage()
     expect(await screen.findByText('Packages reported, none recorded')).toBeInTheDocument()
     expect(screen.getAllByText('Packages not recorded').length).toBeGreaterThan(0)
-    expect(screen.getByLabelText('Packages: 427')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Packages\s*427/ })).toBeInTheDocument()
   })
 
   it('distinguishes a running scan from a clean result', async () => {

@@ -1,25 +1,14 @@
 import type { FC } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  Activity,
-  ArrowRight,
-  HelpCircle,
-  Package,
-  Shield01,
-  Signal01,
-} from '@untitledui/icons'
+import { ArrowRight, HelpCircle } from '@untitledui/icons'
 import { ErrorState, Spinner } from '../../components/ui'
 import { Tooltip, TooltipTrigger } from '../../components/base/tooltip/tooltip'
-import {
-  DonutChart,
-  FindingsTrendChart,
-  RadarChart,
-  type ChartDatum,
-} from '../../components/synapse/DashboardCharts'
+import { FindingsTrendChart, type ChartDatum } from '../../components/synapse/DashboardCharts'
 import { useDashboardData } from './hooks/useDashboardData'
-import { StatCard } from './components/StatCard'
-import { MetricStrip } from '@/components/synapse/Metric'
+import { buildAttentionQueue } from './hooks/attentionQueue'
+import { Metric, MetricStrip } from '@/components/synapse/Metric'
 import { ChartCard } from './components/ChartCard'
+import { NeedsAttentionTable } from './components/NeedsAttentionTable'
 import { PriorityAssetsTable } from './components/PriorityAssetsTable'
 import { AssessmentActivityTable } from './components/AssessmentActivityTable'
 import { cx } from '@/utils/cx'
@@ -28,6 +17,7 @@ export const DashboardPage: FC = () => {
   const {
     data,
     error,
+    fleet,
     analytics,
     analyticsError,
     rangeDays,
@@ -53,48 +43,56 @@ export const DashboardPage: FC = () => {
     return <Spinner label="Loading security operations…" />
   }
 
+  const attention = buildAttentionQueue({ assets: data.assets, engagements: data.engagements, fleet, assetNames })
+
   return (
     <div className="mx-auto max-w-[1600px] animate-fade-in space-y-6">
-      {/* Header Section */}
-      <header className="flex items-end justify-between gap-4 pb-2">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">
-            Security Operations
-          </h1>
-        </div>
+      <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+        <h1 className="text-2xl font-bold tracking-tight text-primary">Security Operations</h1>
+        {analytics && (
+          <span className="text-xs text-tertiary" title={analytics.generatedAt}>
+            Analytics as of {new Date(analytics.generatedAt).toLocaleString()} · {data.assetTotal} {data.assetTotal === 1 ? 'asset' : 'assets'}
+          </span>
+        )}
       </header>
 
-      {/* KPI Stat Cards Row */}
+      {/* Action counters: each number is something the queue below or a linked page acts on. */}
       <MetricStrip ariaLabel="Security operations summary">
-        <StatCard
-          icon={Package}
-          label="Total Assets"
-          value={data.assetTotal}
-          tone="info"
-        />
-        <StatCard
-          icon={Shield01}
-          label="High-risk Assets"
-          value={highRiskAssets}
-          tone={highRiskAssets ? 'critical' : 'accent'}
-        />
-        <StatCard
-          icon={Activity}
-          label="Active Engagements"
-          value={activeEngagements}
-          tone="brand"
-        />
-        <StatCard
-          icon={Signal01}
-          label="Coverage Gaps"
+        <Metric label="Critical open" value={analytics ? analytics.activeFindingsBySeverity.critical ?? 0 : '—'} tone="critical" />
+        <Metric label="High open" value={analytics ? analytics.activeFindingsBySeverity.high ?? 0 : '—'} tone="high" />
+        <Metric label="High-risk assets" value={highRiskAssets} tone={highRiskAssets ? 'critical' : 'muted'} />
+        <Metric label="Active engagements" value={activeEngagements} />
+        <Metric
+          label="Coverage gaps"
           value={fleetDisabled ? 'Fleet disabled' : (coverageGaps ?? 'N/A')}
           hint={fleetDisabled ? 'Set SYNAPSE_FLEET_ENABLED=true to measure agent coverage.' : undefined}
-          valueClassName={fleetDisabled ? 'text-lg sm:text-xl' : undefined}
-          tone={fleetDisabled ? 'muted' : coverageGaps ? 'high' : 'accent'}
+          tone={fleetDisabled ? 'muted' : coverageGaps ? 'warning' : 'muted'}
         />
+        <Metric label="Needs attention" value={attention.length} tone={attention.length ? 'warning' : 'muted'} />
       </MetricStrip>
 
-      {/* Telemetry / Hero Chart Section + Activity Feed */}
+      {/* The queue is the page: what to act on, then who is assessing what. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+        <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs lg:col-span-3">
+          <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-3.5">
+            <h3 className="text-sm font-semibold text-primary">Needs attention</h3>
+            <span className="font-mono text-xs tabular-nums text-quaternary">{attention.length === 1 ? '1 item' : `${attention.length} items`}</span>
+          </header>
+          <div className="flex-1">
+            <NeedsAttentionTable items={attention} loaded={Boolean(data)} />
+          </div>
+        </section>
+        <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs lg:col-span-1">
+          <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-3.5">
+            <h3 className="text-sm font-semibold text-primary">Assessment Activity</h3>
+            <LinkArrow to="/engagements" label="View All" />
+          </header>
+          <div className="flex-1">
+            <AssessmentActivityTable engagements={assessmentQueue} assetNames={assetNames} />
+          </div>
+        </section>
+      </div>
+
       {analyticsError && <ErrorState message={analyticsError} />}
       {!analytics && !analyticsError && <Spinner label="Loading operations analytics…" className="min-h-64" />}
 
@@ -104,90 +102,44 @@ export const DashboardPage: FC = () => {
             title="Findings Over Time"
             description="New publishable findings grouped by UTC day and severity."
             tooltip={
-              analytics.findingsWithoutTimestamp > 0 ? (
-                <Tooltip
-                  title="Excluded findings"
-                  description={`${analytics.findingsWithoutTimestamp} finding${analytics.findingsWithoutTimestamp === 1 ? '' : 's'} excluded from the trend because no creation timestamp is available.`}
-                  arrow
-                >
-                  <TooltipTrigger aria-label="Excluded findings info">
-                    <HelpCircle className="size-4 text-fg-quaternary hover:text-fg-secondary cursor-help" />
-                  </TooltipTrigger>
-                </Tooltip>
-              ) : undefined
+              <>
+                {analytics.findingsWithoutTimestamp > 0 && (
+                  <Tooltip
+                    title="Excluded findings"
+                    description={`${analytics.findingsWithoutTimestamp} finding${analytics.findingsWithoutTimestamp === 1 ? '' : 's'} excluded from the trend because no creation timestamp is available.`}
+                    arrow
+                  >
+                    <TooltipTrigger aria-label="Excluded findings info">
+                      <HelpCircle className="size-4 text-fg-quaternary hover:text-fg-secondary cursor-help" />
+                    </TooltipTrigger>
+                  </Tooltip>
+                )}
+                {!analytics.externalFindingsIncluded && (
+                  <Tooltip title="Scope Note" description="Third-party findings are not included." arrow>
+                    <TooltipTrigger aria-label="Third-party findings note">
+                      <HelpCircle className="size-4 text-fg-quaternary hover:text-fg-secondary cursor-help" />
+                    </TooltipTrigger>
+                  </Tooltip>
+                )}
+              </>
             }
             action={<RangeSelector value={rangeDays} onChange={setRangeDays} />}
             className="lg:col-span-3"
           >
-            <FindingsTrendChart points={analytics.findingsOverTime} series={severityChart({}, false)} />
+            <FindingsTrendChart points={analytics.findingsOverTime} series={severityChart({})} />
           </ChartCard>
 
-          {/* Activity Feed — right panel */}
           <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs lg:col-span-1">
-            <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-4">
-              <h3 className="text-sm font-semibold text-primary">Assessment Activity</h3>
-              <LinkArrow to="/engagements" label="View All" />
+            <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-3.5">
+              <h3 className="text-sm font-semibold text-primary">Priority Assets</h3>
+              <LinkArrow to="/assets" label="View All" />
             </header>
             <div className="flex-1">
-              <AssessmentActivityTable engagements={assessmentQueue} assetNames={assetNames} />
+              <PriorityAssetsTable assets={priorityAssets} hasTotalAssets={data.assets.length > 0} />
             </div>
           </section>
         </div>
       )}
-
-      {/* Posture + Finding Risk + Priority — matching Findings/Activity row proportions */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:col-span-3">
-          {analytics && (
-            <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs">
-              <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-4">
-                <h3 className="text-sm font-semibold text-primary">Asset Security Posture</h3>
-              </header>
-              <div className="flex flex-1 items-center justify-center p-5">
-                <RadarChart title="Asset Security Posture" data={postureChart(analytics.assetPosture)} />
-              </div>
-            </section>
-          )}
-
-          {analytics && (
-            <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs">
-              <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-4">
-                <div className="flex items-center gap-1.5">
-                  <h3 className="text-sm font-semibold text-primary">Active Finding Risk Mix</h3>
-                  {!analytics.externalFindingsIncluded && (
-                    <Tooltip
-                      title="Scope Note"
-                      description="Third-party findings are not included."
-                      arrow
-                    >
-                      <TooltipTrigger aria-label="Third-party findings note">
-                        <HelpCircle className="size-4 text-fg-quaternary hover:text-fg-secondary cursor-help" />
-                      </TooltipTrigger>
-                    </Tooltip>
-                  )}
-                </div>
-              </header>
-              <div className="flex flex-1 items-center justify-center p-5">
-                <DonutChart
-                  title="Active Finding Risk Mix"
-                  centerLabel="Active"
-                  data={severityChart(analytics.activeFindingsBySeverity, true)}
-                />
-              </div>
-            </section>
-          )}
-        </div>
-
-        <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs lg:col-span-1">
-          <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-4">
-            <h3 className="text-sm font-semibold text-primary">Priority Assets</h3>
-            <LinkArrow to="/assets" label="View All" />
-          </header>
-          <div className="flex-1">
-            <PriorityAssetsTable assets={priorityAssets} hasTotalAssets={data.assets.length > 0} />
-          </div>
-        </section>
-      </div>
     </div>
   )
 }
@@ -226,30 +178,13 @@ function RangeSelector({ value, onChange }: { value: number; onChange: (value: n
   )
 }
 
-function postureChart(counts: Record<string, number>): ChartDatum[] {
+function severityChart(counts: Record<string, number>): ChartDatum[] {
   return [
-    chartItem('critical', 'Critical', counts, 'var(--color-utility-red-500)'),
-    chartItem('high_risk', 'High Risk', counts, 'var(--color-utility-orange-500)'),
-    chartItem('attention', 'Attention', counts, 'var(--color-utility-yellow-500)'),
-    chartItem('unknown', 'Unknown', counts, 'var(--color-utility-neutral-400)'),
-    chartItem('good', 'Good', counts, 'var(--color-utility-green-500)'),
-  ]
-}
-
-function severityChart(counts: Record<string, number>, includeUnknown: boolean): ChartDatum[] {
-  const rows = [
     chartItem('critical', 'Critical', counts, 'var(--color-utility-red-500)'),
     chartItem('high', 'High', counts, 'var(--color-utility-orange-500)'),
     chartItem('medium', 'Medium', counts, 'var(--color-utility-yellow-500)'),
     chartItem('low', 'Low', counts, 'var(--color-utility-blue-500)'),
   ]
-  if (includeUnknown) {
-    rows.push(
-      chartItem('info', 'Info', counts, 'var(--color-utility-indigo-500)'),
-      chartItem('unknown', 'Unknown', counts, 'var(--color-utility-neutral-400)'),
-    )
-  }
-  return rows
 }
 
 function chartItem(key: string, label: string, counts: Record<string, number>, color: string): ChartDatum {

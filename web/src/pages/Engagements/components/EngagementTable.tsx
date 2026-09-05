@@ -13,7 +13,7 @@ import {
 import { Tooltip, TooltipTrigger } from '../../../components/base/tooltip/tooltip'
 import { StatusPill } from './StatusPill'
 import { EngagementRowActions } from './EngagementRowActions'
-import { SeverityBadge } from '../../../components/synapse/SeverityBadge'
+import { SeverityBuckets } from '../../../components/synapse/SeverityCount'
 import type { Engagement } from '../../../lib/types'
 import type { SortField, SortDirection } from '../types'
 
@@ -32,6 +32,27 @@ export interface EngagementTableProps {
   onPageSizeChange: (newPageSize: number) => void
   onStatusChange?: (id: string, newStatus: string) => Promise<void>
   onDelete?: (id: string) => Promise<void>
+}
+
+function scanStatusLabel(status: string | undefined): string {
+  switch (status) {
+    case 'failed':
+      return 'Failed'
+    case 'running':
+      return 'Running'
+    case 'succeeded':
+    case undefined:
+    case '':
+      return 'Scanned'
+    default:
+      return status
+  }
+}
+
+function scanStatusClass(status: string | undefined): string {
+  if (status === 'failed') return 'font-semibold text-critical'
+  if (status === 'running') return 'text-brand-secondary'
+  return 'text-secondary'
 }
 
 function formatRelativeTime(dateString: string | null | undefined): string {
@@ -95,7 +116,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
     <div className="flex flex-col overflow-hidden rounded-xl border border-secondary bg-primary shadow-xs">
       {/* Table Container */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] border-collapse text-left text-sm" role="table" aria-rowcount={totalItems + 1}>
+        <table className="w-full min-w-[960px] border-collapse text-left text-sm" role="table" aria-rowcount={totalItems + 1}>
           <thead>
             <tr className="border-b border-secondary bg-secondary text-xs font-semibold text-tertiary">
               {/* Column 1: Name */}
@@ -111,7 +132,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
               </th>
 
               {/* Column 2: In Scope */}
-              <th scope="col" className="w-[200px] px-4 py-3">
+              <th scope="col" className="w-[240px] px-4 py-3">
                 <button
                   type="button"
                   onClick={() => onSort('repository')}
@@ -135,7 +156,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
               </th>
 
               {/* Column 4: Findings */}
-              <th scope="col" className="w-[180px] px-4 py-3">
+              <th scope="col" className="w-[250px] px-4 py-3">
                 <button
                   type="button"
                   onClick={() => onSort('findings')}
@@ -294,53 +315,31 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                           </TooltipTrigger>
                         </Tooltip>
                       ) : totalFindings > 0 ? (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="font-mono text-xs font-semibold tabular-nums text-primary">
-                            {totalFindings}
-                          </span>
-                          {(findingsCount?.critical ?? 0) > 0 && (
-                            <SeverityBadge
-                              severity="critical"
-                              size="sm"
-                              showIcon={false}
-                              className="font-mono text-[10px] tabular-nums"
-                            />
-                          )}
-                          {(findingsCount?.high ?? 0) > 0 && (
-                            <SeverityBadge
-                              severity="high"
-                              size="sm"
-                              showIcon={false}
-                              className="font-mono text-[10px] tabular-nums"
-                            />
-                          )}
-                          {(findingsCount?.medium ?? 0) > 0 && (
-                            <SeverityBadge
-                              severity="medium"
-                              size="sm"
-                              showIcon={false}
-                              className="font-mono text-[10px] tabular-nums"
-                            />
-                          )}
-                        </div>
-                      ) : (
+                        <SeverityBuckets
+                          total={totalFindings}
+                          counts={{ critical: findingsCount?.critical ?? 0, high: findingsCount?.high ?? 0, medium: findingsCount?.medium ?? 0, low: findingsCount?.low ?? 0 }}
+                        />
+                      ) : engagement.lastScanDate ? (
                         <span className="font-mono text-xs text-tertiary">0</span>
+                      ) : (
+                        <span className="font-mono text-xs text-quaternary">Not scanned</span>
                       )}
                     </td>
 
-                    {/* Column 5: Last Scan. Falling back to createdAt without
-                        saying so reported a creation time as a scan time. */}
+                    {/* Column 5: Last Scan carries the scan's state and time, never the creation time. */}
                     <td className="px-4 py-3.5">
                       {engagement.lastScanDate ? (
-                        <span className="font-mono text-xs text-secondary" title={engagement.lastScanDate}>
-                          {formatRelativeTime(engagement.lastScanDate)}
-                        </span>
-                      ) : engagement.createdAt ? (
-                        <span className="font-mono text-xs text-tertiary" title={engagement.createdAt}>
-                          Created {formatRelativeTime(engagement.createdAt)}
-                        </span>
+                        <div className="flex items-baseline gap-1.5 font-mono text-xs" title={engagement.lastScanDate}>
+                          <span className={scanStatusClass(engagement.lastScanStatus)}>{scanStatusLabel(engagement.lastScanStatus)}</span>
+                          <span className="text-tertiary">{formatRelativeTime(engagement.lastScanDate)}</span>
+                        </div>
                       ) : (
-                        <span className="font-mono text-xs text-tertiary">&mdash;</span>
+                        <span
+                          className="font-mono text-xs text-quaternary"
+                          title={engagement.createdAt ? `Created ${formatRelativeTime(engagement.createdAt)}, no scan has run` : 'No scan has run'}
+                        >
+                          Not scanned
+                        </span>
                       )}
                     </td>
 

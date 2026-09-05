@@ -59,18 +59,30 @@ describe('EngagementTable honest columns', () => {
     expect(row.queryByLabelText(/not reported by the list endpoint/)).not.toBeInTheDocument()
   })
 
-  it('labels a creation time as created, never as a last scan', () => {
+  it('says not scanned instead of showing the creation time as a scan', () => {
     const row = renderTable([engagement()])
 
-    expect(row.getByText(/^Created \d+m ago$/)).toBeInTheDocument()
+    expect(row.getByText('Not scanned')).toBeInTheDocument()
+    expect(row.queryByText(/^Created/)).not.toBeInTheDocument()
   })
 
-  it('reports a real last-scan time without the Created prefix', () => {
+  it('reports the last scan with its state and time', () => {
     const row = renderTable([
-      engagement({ lastScanDate: new Date(Date.now() - 2 * 3_600_000).toISOString() }),
+      engagement({ lastScanDate: new Date(Date.now() - 2 * 3_600_000).toISOString(), lastScanStatus: 'succeeded', findingsCount: { total: 0, critical: 0, high: 0, medium: 0, low: 0 } }),
     ])
 
+    expect(row.getByText('Scanned')).toBeInTheDocument()
     expect(row.getByText('2h ago')).toBeInTheDocument()
+    expect(row.getByText('0')).toBeInTheDocument()
     expect(row.queryByText(/^Created/)).not.toBeInTheDocument()
+  })
+
+  it('marks a failed last scan', () => {
+    const row = renderTable([
+      engagement({ lastScanDate: new Date(Date.now() - 86_400_000).toISOString(), lastScanStatus: 'failed' }),
+    ])
+
+    expect(row.getByText('Failed')).toBeInTheDocument()
+    expect(row.getByText('1d ago')).toBeInTheDocument()
   })
 })

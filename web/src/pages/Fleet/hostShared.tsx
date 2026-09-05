@@ -101,11 +101,4 @@ export function formatCount(n: number): string {
 }
 
 /** Compact severity count cell: a number in the severity's colour, dimmed when zero. */
-export function SeverityCount({ count, tone }: { count: number; tone: 'critical' | 'high' | 'medium' | 'low' }) {
-  const color = { critical: 'text-critical', high: 'text-high', medium: 'text-medium', low: 'text-low' }[tone]
-  return (
-    <span className={cn('font-mono text-sm tabular-nums', count > 0 ? cn(color, 'font-semibold') : 'text-quaternary')}>
-      {count}
-    </span>
-  )
-}
+export { SeverityCount } from '../../components/synapse/SeverityCount'

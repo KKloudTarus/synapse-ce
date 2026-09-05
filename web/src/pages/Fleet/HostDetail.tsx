@@ -63,9 +63,16 @@ const FINDING_COLUMNS: Column<HostFinding>[] = [
   {
     header: 'Status',
     className: 'w-24',
-    cell: (f) => <span className="text-xs text-tertiary">{f.status.replace(/_/g, ' ')}</span>,
+    cell: (f) => <Pill className="bg-secondary text-secondary">{f.status.replace(/_/g, ' ')}</Pill>,
   },
 ]
+
+/** The stable host key split into what it is and its value: "machine-id/<id>" or "hostname/<name>". */
+function hostKeyParts(key: string): [string, string] {
+  const slash = key.indexOf('/')
+  if (slash <= 0) return ['key', key]
+  return [key.slice(0, slash).replace('-', ' '), key.slice(slash + 1)]
+}
 
 const PACKAGE_COLUMNS: Column<HostPackages['packages'][number]>[] = [
   { header: 'Package', className: 'w-72', cell: (p) => <span className="truncate text-primary" title={p.name}>{p.name}</span> },
@@ -182,17 +189,19 @@ function VulnerabilitiesBody({ host }: { host: HostVulnerabilities }) {
   }
 
   const chip = (active: boolean) => cn('rounded-md px-2.5 py-1 text-xs font-semibold transition-colors', active ? 'bg-brand-solid text-primary_on-brand' : 'text-tertiary hover:bg-secondary')
+  const bySeverity = host.findings.reduce<Partial<Record<Severity, number>>>((acc, f) => { acc[f.severity] = (acc[f.severity] ?? 0) + 1; return acc }, {})
   return (
     <>
       <div className="flex flex-wrap items-center gap-3 border-b border-secondary px-4 py-3">
         <div className="relative min-w-[14rem] flex-1">
           <SearchSm className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-quaternary" />
-          <Input aria-label="Search findings" placeholder="Search advisory, package, fixed version, source" value={query} onChange={(e) => setQuery(e.target.value)} className="pl-9" />
+          <Input aria-label="Search findings" placeholder="Search advisory, package, fix" value={query} onChange={(e) => setQuery(e.target.value)} className="pl-9" />
         </div>
         <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by severity">
           {(['all', 'critical', 'high', 'medium', 'low'] as SeverityFilter[]).map((s) => (
             <button key={s} type="button" aria-pressed={severity === s} className={chip(severity === s)} onClick={() => setSeverity(s)}>
               {s === 'all' ? 'All severities' : s[0].toUpperCase() + s.slice(1)}
+              {s !== 'all' && <span className="ml-1 font-mono tabular-nums opacity-70">{bySeverity[s] ?? 0}</span>}
             </button>
           ))}
         </div>
@@ -201,7 +210,9 @@ function VulnerabilitiesBody({ host }: { host: HostVulnerabilities }) {
             <button key={v} type="button" aria-pressed={fix === v} className={chip(fix === v)} onClick={() => setFix(v)}>{l}</button>
           ))}
         </div>
-        <button type="button" aria-pressed={kevOnly} className={chip(kevOnly)} onClick={() => setKevOnly((v) => !v)}>Known exploited only</button>
+        <button type="button" aria-pressed={kevOnly} className={chip(kevOnly)} onClick={() => setKevOnly((v) => !v)}>
+          Known exploited<span className="ml-1 font-mono tabular-nums opacity-70">{host.summary.kev}</span>
+        </button>
         <span className="ml-auto font-mono text-xs tabular-nums text-quaternary">
           {visible.length === host.findings.length ? `${host.findings.length} findings` : `${visible.length} of ${host.findings.length} findings`}
         </span>
@@ -265,9 +276,9 @@ export function HostDetail() {
 
   const a = host.asset.attributes
   const s = host.summary
-  const state = hostScanState(host)
   const reported = reportedPackages(host)
   const title = hostShortName(host.asset.name, host.asset.key)
+  const [keyLabel, keyValue] = hostKeyParts(host.asset.key)
 
   return (
     <div className="mx-auto max-w-[1400px] animate-fade-in space-y-5 pb-12">
@@ -280,9 +291,10 @@ export function HostDetail() {
           {hostDegraded(host) && <Pill className="bg-warning-primary text-warning-primary">Incomplete inventory</Pill>}
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
-          <span className="inline-flex items-center gap-1 font-mono text-[12px] text-tertiary" title={host.asset.key}>
-            {host.asset.key}
-            <CopyButton value={host.asset.key} label="host key" />
+          <span className="inline-flex items-center gap-1.5" title={host.asset.key}>
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-quaternary">{keyLabel}</span>
+            <span className="font-mono text-[12px] text-secondary">{keyValue}</span>
+            <CopyButton value={keyValue} label={keyLabel} />
           </span>
           <Fact label="os" value={hostOS(host)} />
           <Fact label="arch" value={a.arch ?? ''} />
@@ -299,7 +311,6 @@ export function HostDetail() {
         <Metric label="High" value={s.high} tone="high" />
         <Metric label="Known exploited" value={s.kev} tone="critical" />
         <Metric label="Fixable" value={s.fixable} hint={s.total ? `of ${s.total} with a published fix` : undefined} />
-        <Metric label="Packages" value={host.packages || reported} hint={host.recordedAt ? `recorded ${formatFleetTime(host.recordedAt)}` : state === 'unrecorded' ? 'reported, not recorded' : 'none reported'} />
         <Metric label="Coverage gaps" value={Number(a.coverage_gaps ?? '0') || 0} tone={hostDegraded(host) ? 'warning' : 'muted'} />
       </MetricStrip>
 

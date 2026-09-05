@@ -61,6 +61,8 @@ export interface Engagement {
   findingsCount?: EngagementFindingsCount
   /** List-view enrichment; see findingsCount. */
   lastScanDate?: string | null
+  /** Status of the latest scan job (running, succeeded, failed); present with lastScanDate. */
+  lastScanStatus?: string
 }
 
 export interface EngagementFindingsCount {

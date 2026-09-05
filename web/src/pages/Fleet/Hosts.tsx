@@ -10,7 +10,8 @@ import { OperationalState, TableSkeleton } from '../../components/synapse/Operat
 import { VirtualTable, type Column } from '../../components/synapse/VirtualTable'
 import { useFetch } from '../../hooks'
 import { formatFleetTime } from './fleetShared'
-import { HostScanBadge, SeverityCount, hostDegraded, hostOS, hostScanState, hostShortName, reportedPackages, type HostScanState } from './hostShared'
+import { SeverityBuckets } from '../../components/synapse/SeverityCount'
+import { HostScanBadge, hostDegraded, hostOS, hostScanState, hostShortName, reportedPackages, type HostScanState } from './hostShared'
 
 type StateFilter = 'all' | 'vulnerable' | 'critical' | 'no-inventory' | 'attention'
 
@@ -45,7 +46,7 @@ function matchesSearch(r: HostRow, q: string): boolean {
 const COLUMNS: Column<HostRow>[] = [
   {
     header: 'Host',
-    className: 'flex-1 min-w-[10rem]',
+    className: 'flex-1 min-w-[12rem]',
     cell: (r) => (
       <div className="min-w-0">
         <div className="truncate font-medium text-primary" title={r.asset.name}>{hostShortName(r.asset.name, r.asset.key)}</div>
@@ -57,8 +58,9 @@ const COLUMNS: Column<HostRow>[] = [
     header: 'OS / arch',
     className: 'w-28',
     cell: (r) => (
-      <div className="min-w-0 truncate text-secondary" title={`${hostOS(r)} ${r.asset.attributes.arch ?? ''}`}>
-        {hostOS(r)}{r.asset.attributes.arch ? <span className="text-quaternary"> · {r.asset.attributes.arch}</span> : null}
+      <div className="min-w-0" title={`${hostOS(r)} ${r.asset.attributes.arch ?? ''}`}>
+        <div className="truncate text-secondary">{hostOS(r)}</div>
+        <div className="truncate font-mono text-[11px] text-quaternary">{r.asset.attributes.arch ?? ''}</div>
       </div>
     ),
   },
@@ -80,17 +82,13 @@ const COLUMNS: Column<HostRow>[] = [
   },
   {
     header: 'Open findings',
-    className: 'w-52',
-    cell: (r) => (
-      <div className="flex items-baseline gap-3 tabular-nums" title={`${r.summary.critical} critical, ${r.summary.high} high, ${r.summary.medium} medium, ${r.summary.low} low`}>
-        {(['critical', 'high', 'medium', 'low'] as const).map((tone) => (
-          <span key={tone} className="flex items-baseline gap-1">
-            <SeverityCount count={r.summary[tone]} tone={tone} />
-            <span className="text-[10px] uppercase text-quaternary">{tone === 'critical' ? 'crit' : tone === 'medium' ? 'med' : tone}</span>
-          </span>
-        ))}
-      </div>
-    ),
+    className: 'w-60',
+    cell: (r) => {
+      // Findings without a severity band (unrated) are in the total but in no bucket; the shared
+      // buckets show the remainder so the row adds up to the number the host page reports.
+      const s = r.summary
+      return <SeverityBuckets total={s.total} counts={{ critical: s.critical, high: s.high, medium: s.medium, low: s.low }} />
+    },
   },
   {
     header: 'Fixable',
@@ -102,13 +100,23 @@ const COLUMNS: Column<HostRow>[] = [
     className: 'w-12 text-right',
     cell: (r) => <span className={cn('font-mono text-sm tabular-nums', r.summary.kev ? 'font-semibold text-critical' : 'text-quaternary')}>{r.summary.kev}</span>,
   },
-  { header: 'Scan', className: 'w-32', cell: (r) => <HostScanBadge row={r} /> },
   {
-    header: 'Recorded',
-    className: 'w-36 tabular-nums',
-    cell: (r) => <span className="text-tertiary" title={r.recordedAt ?? undefined}>{formatFleetTime(r.recordedAt ?? '')}</span>,
+    header: 'Scan',
+    className: 'w-44',
+    cell: (r) => (
+      <div className="min-w-0">
+        <HostScanBadge row={r} />
+        <div className="mt-0.5 truncate text-[11px] tabular-nums text-quaternary" title={r.recordedAt ?? undefined}>
+          {r.recordedAt ? `recorded ${formatFleetTime(r.recordedAt)}` : 'nothing recorded'}
+        </div>
+      </div>
+    ),
   },
 ]
+
+function hostCount(n: number) {
+  return `${n} ${n === 1 ? 'host' : 'hosts'}`
+}
 
 export function Hosts() {
   const navigate = useNavigate()
@@ -138,8 +146,9 @@ export function Hosts() {
     critical: all.reduce((n, r) => n + r.summary.critical, 0),
     high: all.reduce((n, r) => n + r.summary.high, 0),
     kev: all.reduce((n, r) => n + r.summary.kev, 0),
-    noInventory: all.filter((r) => { const s = hostScanState(r); return s === 'none' || s === 'unrecorded' }).length,
-    failed: all.filter((r) => hostScanState(r) === 'failed').length,
+    // Hosts an operator has to act on before their exposure is known: no package inventory, a
+    // reported set that was never recorded, or a failed scan.
+    attention: all.filter((r) => { const s = hostScanState(r); return s === 'none' || s === 'unrecorded' || s === 'failed' }).length,
   }
   const lastRecorded = all.reduce<string | null>((latest, r) => (r.recordedAt && (!latest || r.recordedAt > latest) ? r.recordedAt : latest), null)
 
@@ -159,8 +168,7 @@ export function Hosts() {
           <Metric label="Critical" value={strip.critical} tone="critical" />
           <Metric label="High" value={strip.high} tone="high" />
           <Metric label="Known exploited" value={strip.kev} tone="critical" />
-          <Metric label="No inventory" value={strip.noInventory} tone={strip.noInventory ? 'warning' : 'muted'} />
-          <Metric label="Scan failed" value={strip.failed} tone={strip.failed ? 'warning' : 'muted'} />
+          <Metric label="Needs attention" value={strip.attention} tone={strip.attention ? 'warning' : 'muted'} hint={strip.attention ? 'no inventory, unrecorded, or scan failed' : undefined} />
         </MetricStrip>
       )}
 
@@ -194,7 +202,7 @@ export function Hosts() {
           </div>
           {rows && (
             <span className="ml-auto font-mono text-xs tabular-nums text-quaternary">
-              {visible.length === rows.length ? `${rows.length} hosts` : `${visible.length} of ${rows.length} hosts`}
+              {visible.length === rows.length ? hostCount(rows.length) : `${visible.length} of ${hostCount(rows.length)}`}
             </span>
           )}
         </div>
@@ -229,7 +237,7 @@ export function Hosts() {
             onRowClick={(r) => navigate(`/fleet/hosts/${encodeURIComponent(r.asset.id)}`)}
             rowAriaLabel={(r) => `Open host ${r.asset.name || r.asset.key}`}
             maxHeightClass="max-h-[72vh]"
-            tableMinWidthClass="min-w-[64rem]"
+            tableMinWidthClass="min-w-[62rem]"
           />
         )}
       </Card>
