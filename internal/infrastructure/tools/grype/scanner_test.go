@@ -95,6 +95,24 @@ func TestGrypeFallsBackToRelatedVulnerabilityCVSS(t *testing.T) {
 	}
 }
 
+// A v3 vector wins over a higher-scored v2 one because every consumer scores and bands v3 first; a
+// v2-only record still yields its vector so the read side can score it with the v2 formula.
+func TestHighestCVSSPrefersV3Vectors(t *testing.T) {
+	v2 := grypeCVSS{Vector: "AV:N/AC:L/Au:N/C:C/I:C/A:C"}
+	v2.Metrics.BaseScore = 10
+	v3 := grypeCVSS{Vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"}
+	v3.Metrics.BaseScore = 9.1
+	if score, vector := highestCVSS([]grypeCVSS{v2, v3}); score != 9.1 || vector != v3.Vector {
+		t.Fatalf("got %v %q, want the v3 entry", score, vector)
+	}
+	if score, vector := highestCVSS([]grypeCVSS{v2}); score != 10 || vector != v2.Vector {
+		t.Fatalf("got %v %q, want the v2 entry when no v3 exists", score, vector)
+	}
+	if score, vector := highestCVSS(nil); score != 0 || vector != "" {
+		t.Fatalf("got %v %q for no entries", score, vector)
+	}
+}
+
 func TestGrypeUsesSBOMComponentNameForArtifactPURL(t *testing.T) {
 	match := grypeMatch{}
 	match.Vulnerability.ID = "CVE-2024-38816"

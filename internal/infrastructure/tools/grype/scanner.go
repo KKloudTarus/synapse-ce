@@ -497,16 +497,24 @@ type grypeCVSS struct {
 	} `json:"metrics"`
 }
 
-// highestCVSS picks the entry with the highest base score; a vector without a score is ignored.
+// highestCVSS picks the highest-scored v3.x entry and falls back to the highest entry of any version
+// (v2 on older CVEs) only when no v3 vector exists. v3 wins even when a v2 score is higher because
+// every consumer scores and bands v3 first. A vector without a score is ignored.
 func highestCVSS(list []grypeCVSS) (float64, string) {
-	var score float64
-	var vector string
+	var v3Score, anyScore float64
+	var v3Vector, anyVector string
 	for _, c := range list {
-		if c.Metrics.BaseScore > score {
-			score, vector = c.Metrics.BaseScore, c.Vector
+		if c.Metrics.BaseScore > anyScore {
+			anyScore, anyVector = c.Metrics.BaseScore, c.Vector
+		}
+		if strings.HasPrefix(c.Vector, "CVSS:3") && c.Metrics.BaseScore > v3Score {
+			v3Score, v3Vector = c.Metrics.BaseScore, c.Vector
 		}
 	}
-	return score, vector
+	if v3Vector != "" {
+		return v3Score, v3Vector
+	}
+	return anyScore, anyVector
 }
 
 func mapSeverity(s string) shared.Severity {

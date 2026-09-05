@@ -55,6 +55,53 @@ func CVSSv3BaseScore(vector string) (float64, bool) {
 	return roundUpCVSS(math.Min(sum, 10), v31), true
 }
 
+// CVSSv2BaseScore computes the CVSS v2 base score from a vector string, with or without the
+// "CVSS:2.0/" prefix or the NVD parentheses ("(AV:N/AC:L/Au:N/C:P/I:P/A:P)"). Returns (0, false) for
+// anything else. Distro advisories on older CVEs often carry only a v2 vector.
+func CVSSv2BaseScore(vector string) (float64, bool) {
+	vector = strings.TrimSpace(vector)
+	vector = strings.TrimPrefix(vector, "CVSS:2.0/")
+	vector = strings.TrimSuffix(strings.TrimPrefix(vector, "("), ")")
+	m := map[string]string{}
+	for _, part := range strings.Split(vector, "/") {
+		if k, v, found := strings.Cut(part, ":"); found {
+			m[k] = v
+		}
+	}
+	av, ok1 := v2AccessVector[m["AV"]]
+	ac, ok2 := v2AccessComplexity[m["AC"]]
+	au, ok3 := v2Authentication[m["Au"]]
+	c, ok4 := v2Impact[m["C"]]
+	i, ok5 := v2Impact[m["I"]]
+	a, ok6 := v2Impact[m["A"]]
+	if !(ok1 && ok2 && ok3 && ok4 && ok5 && ok6) {
+		return 0, false
+	}
+	impact := 10.41 * (1 - (1-c)*(1-i)*(1-a))
+	if impact == 0 {
+		return 0, true
+	}
+	exploitability := 20 * av * ac * au
+	base := (0.6*impact + 0.4*exploitability - 1.5) * 1.176
+	return math.Round(base*10) / 10, true
+}
+
+// CVSSBaseScore scores a v3.x vector, else a v2 vector. Read paths that only display a number use it;
+// paths that require v3 (the finding vector builder) keep calling CVSSv3BaseScore.
+func CVSSBaseScore(vector string) (float64, bool) {
+	if score, ok := CVSSv3BaseScore(vector); ok {
+		return score, true
+	}
+	return CVSSv2BaseScore(vector)
+}
+
+var (
+	v2AccessVector     = map[string]float64{"L": 0.395, "A": 0.646, "N": 1.0}
+	v2AccessComplexity = map[string]float64{"H": 0.35, "M": 0.61, "L": 0.71}
+	v2Authentication   = map[string]float64{"M": 0.45, "S": 0.56, "N": 0.704}
+	v2Impact           = map[string]float64{"N": 0.0, "P": 0.275, "C": 0.660}
+)
+
 var (
 	metricAV     = map[string]float64{"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.20}
 	metricAC     = map[string]float64{"L": 0.77, "H": 0.44}

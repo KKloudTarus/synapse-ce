@@ -75,6 +75,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   The job is now marked failed with the rejection reason, and a failure to write the import's audit
   record is returned to the caller instead of being dropped.
 
+- **CVSS v2-only advisories get a score.** Host findings whose advisory carries only a CVSS v2 vector
+  (older CVEs on distro packages) showed no score because only v3 vectors were scored. The read side now
+  scores v2 vectors with the v2 formula, and grype's CVSS selection prefers a v3 vector over a
+  higher-scored v2 one so the vector recorded is the one every consumer can score.
+
 - **SAST precision on a real repository.** A full scan of this repository produced 623 findings, 140 of
   them high-severity SAST, most of them noise: Go rules matched code quoted in `CHANGELOG.md`,
   `reflected-response-write` flagged `fmt.Fprintln(os.Stderr, err)` in every CLI, `go-sql-dynamic-query`
