@@ -50,6 +50,10 @@ spec:
             {{- end }}
           env:
             {{- include "synapse.runtimeEnv" . | nindent 12 }}
+            # A production Helm release is a single-tenant regional cell: tenant
+            # routing cannot move data across residency boundaries inside one cell.
+            - name: SYNAPSE_SINGLE_TENANT
+              value: "true"
             - name: SYNAPSE_HTTP_ADDR
               value: ":8080"
             - name: SYNAPSE_METRICS_ENABLED

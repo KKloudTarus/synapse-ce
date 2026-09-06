@@ -1,0 +1,21 @@
+{{- /*
+Production data-governance guard (#635).
+
+The chart cannot introspect an external PostgreSQL or S3-compatible service, so residency is
+anchored to the standard Kubernetes region label on the control-plane data-processing tier.
+The supported AWS deployment supplies the database, evidence bucket, and native execution tier
+from the same Terraform provider region and tests KMS encryption separately.
+*/ -}}
+{{- $mode := include "synapse.executionMode" . -}}
+{{- if or (eq $mode "externalNative") (eq $mode "inClusterBroker") -}}
+{{- $dataRegion := default "" (index .Values.api.nodeSelector "topology.kubernetes.io/region") | trim -}}
+{{- if eq $dataRegion "" -}}
+{{- fail "production execution.mode requires api.nodeSelector[\"topology.kubernetes.io/region\"] to pin the control-plane data-processing tier to its governed data region" -}}
+{{- end -}}
+{{- if eq $mode "inClusterBroker" -}}
+{{- $executionRegion := default "" (index .Values.egressBroker.nodeSelector "topology.kubernetes.io/region") | trim -}}
+{{- if ne $executionRegion $dataRegion -}}
+{{- fail (printf "execution.mode=inClusterBroker requires egressBroker.nodeSelector[\"topology.kubernetes.io/region\"]=%q to match the control-plane data region (got %q)" $dataRegion $executionRegion) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

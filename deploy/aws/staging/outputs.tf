@@ -1,3 +1,13 @@
+output "deployment_region" {
+  description = "Governed AWS region containing the staging control plane, PostgreSQL, evidence bucket, and native execution tier."
+  value       = var.aws_region
+}
+
+output "data_kms_key_arn" {
+  description = "Customer-managed rotating KMS key used by RDS, evidence S3, ECR, and native worker root volumes."
+  value       = aws_kms_key.staging.arn
+}
+
 output "eks_cluster_name" {
   description = "EKS cluster name."
   value       = aws_eks_cluster.staging.name
