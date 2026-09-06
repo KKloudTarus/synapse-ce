@@ -165,6 +165,26 @@ export const blueteamApi = {
     }).length
     return { runId: run.ID ?? run.id ?? '', techniques: coverage.length, executed }
   },
+  /** Rehearse a governed exploitation chain (no-host simulation). PermOperate. Returns the chain's
+   *  terminal state; every rehearsal is a simulation and touches no host. */
+  rehearseChain: async (
+    engagementId: string,
+    steps: { technique: string; target: string; blastRadius: string; cleanup?: string[]; cleanupVerification?: string }[],
+  ): Promise<{ chainId: string; state: string; steps: number; simulated: boolean }> => {
+    const r = await req(`/engagements/${encodeURIComponent(engagementId)}/exploitation/rehearsals`, {
+      method: 'POST',
+      body: JSON.stringify({
+        steps: steps.map((s) => ({
+          technique: s.technique,
+          target: s.target,
+          blast_radius: s.blastRadius,
+          cleanup: s.cleanup ?? [],
+          cleanup_verification: s.cleanupVerification ?? '',
+        })),
+      }),
+    })
+    return { chainId: r?.chain_id ?? '', state: r?.state ?? '', steps: r?.steps ?? 0, simulated: r?.simulated === true }
+  },
   /** Halt every offensive path fleet-wide (kill switch). PermAdminister. */
   haltOffensive: async (reason: string): Promise<HaltResult> => {
     const r = await req('/redteam/halt', { method: 'POST', body: JSON.stringify({ reason }) })

@@ -37,6 +37,7 @@ import { ComponentsTab } from './ComponentsTab'
 import { ReconTab } from './ReconTab'
 import { ScanRunsTab } from './ScanRunsTab'
 import { PurpleCoverageTab } from './PurpleCoverageTab'
+import { ChainRehearsalTab } from './ChainRehearsalTab'
 import { RiskStoriesTab } from './RiskStoriesTab'
 import { VulnPostureTab } from './VulnPostureTab'
 import { DetectionsTab } from './DetectionsTab'
@@ -66,6 +67,7 @@ export type Tab =
   | 'threats'
   | 'recon'
   | 'purple'
+  | 'rehearsal'
   | 'agent'
   | 'detections'
   | 'reviews'
@@ -124,6 +126,7 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'recon', label: 'Recon' },
       { id: 'threats', label: 'Threat Model' },
       { id: 'purple', label: 'Purple Coverage' },
+      { id: 'rehearsal', label: 'Chain Rehearsal' },
       { id: 'agent', label: 'Agent' },
     ],
   },
@@ -522,6 +525,7 @@ export function EngagementDetail() {
         {tab === 'quality' && <CodeQualityTab engagementId={id} />}
         {tab === 'recon' && <ReconTab eng={eng} onGoTab={setTab} />}
         {tab === 'purple' && <PurpleCoverageTab key={id} engagementId={id} />}
+        {tab === 'rehearsal' && <ChainRehearsalTab key={id} engagementId={id} />}
         {tab === 'agent' && <AgentTab engagementId={id} />}
         {tab === 'detections' && <DetectionsTab key={id} engagementId={id} />}
         {tab === 'imported' && <ImportedFindingsTab key={id} engagementId={id} />}

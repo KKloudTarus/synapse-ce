@@ -567,6 +567,11 @@ export const handlers = [
     if (url.searchParams.get('run')) return HttpResponse.json({ work_items: PURPLE_WORK_ITEMS })
     return HttpResponse.json({ coverage: PURPLE_COVERAGE })
   }),
+  http.post('/api/v1/engagements/:id/exploitation/rehearsals', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { steps?: unknown[] }
+    const n = Array.isArray(body.steps) ? body.steps.length : 0
+    return HttpResponse.json({ chain_id: 'chain-mock', state: 'succeeded', steps: n, simulated: true })
+  }),
   http.post('/api/v1/engagements/:id/emulation', async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { target?: string }
     // demu.Run carries no json tags, so the keys are the capitalized Go field names.

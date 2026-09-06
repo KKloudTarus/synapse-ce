@@ -31,6 +31,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	attackpathuc "github.com/KKloudTarus/synapse-ce/internal/usecase/attackpath"
+	chainrehearsaluc "github.com/KKloudTarus/synapse-ce/internal/usecase/chainrehearsal"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
@@ -226,6 +227,14 @@ func (fakeDASTWorkflow) Decide(context.Context, string, shared.ID, shared.ID, bo
 }
 func (fakeDASTWorkflow) Run(context.Context, string, shared.ID, shared.ID, dastrunner.Probe) (dastrunner.Result, error) {
 	return dastrunner.Result{}, nil
+}
+
+// fakeChainRehearser backs the exploitation chain-rehearsal route so the harness guards its operate +
+// tenant gates. A cross-tenant caller is rejected by withEngTenant before this runs.
+type fakeChainRehearser struct{}
+
+func (fakeChainRehearser) RunChain(context.Context, shared.ID, shared.ID, string, []chainrehearsaluc.StepSpec) (chainrehearsaluc.Result, error) {
+	return chainrehearsaluc.Result{}, nil
 }
 
 // fakeDASTRunner backs the durable DAST run status route. It holds one run owned by tenantA/engA and is
@@ -437,6 +446,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetDetectionReader(harnessDetections{})  // register the #423 detection-ledger read route
 	rt.SetPurpleCoverageReader(harnessPurple{}) // register the #426 purple-coverage read route
 	rt.SetPurpleTeam(fakePurpleTeam{})          // register the #426 adversary-emulation producer route
+	rt.SetChainRehearsal(fakeChainRehearser{})  // register the exploitation chain-rehearsal route
 	// #820 host vulnerabilities: the real use case over tenantA's host asset, its hidden context and one
 	// finding, so a cross-tenant read of the host routes is proven empty rather than assumed.
 	hostAsset := &asset.Asset{ID: "host-A", TenantID: "tenantA", Kind: asset.KindHost, Key: "machine-id/host-A", Name: "host-A", Attributes: map[string]string{"os": "linux"}}
@@ -497,6 +507,12 @@ func TestHostileHarness(t *testing.T) {
 	// engagement. withEngTenant rejects the engagement before the run is built.
 	if code, _ := sendBody("consultant", "tenantB", http.MethodPost, "/api/v1/engagements/engA/emulation", `{"target":"asset-1"}`); code != http.StatusNotFound {
 		t.Errorf("cross-tenant emulation run = %d, want 404", code)
+	}
+
+	// Cross-tenant exploitation rehearsal: a tenantB operator must not rehearse a chain against tenantA's
+	// engagement. withEngTenant rejects the engagement before the chain is built.
+	if code, _ := sendBody("consultant", "tenantB", http.MethodPost, "/api/v1/engagements/engA/exploitation/rehearsals", `{"steps":[{"technique":"recon.service_banner","target":"asset-1","blast_radius":"read_only"}]}`); code != http.StatusNotFound {
+		t.Errorf("cross-tenant exploitation rehearsal = %d, want 404", code)
 	}
 
 	// Cross-tenant user provisioning: a tenantA admin must not be able to mint an operator (and

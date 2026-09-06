@@ -268,6 +268,38 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/engagements/{id}/exploitation/rehearsals:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    post:
+      tags: [engagements, redteam]
+      summary: Rehearse a governed exploitation chain (no-host simulation)
+      description: >
+        Requires the `operate` capability. Rehearses an operator-declared exploitation chain: each step is
+        admitted through the engagement's offensive rules of engagement (the same #418 governance the rest
+        of the offensive pillar uses), sealed as per-step evidence, verified by a distinct system verifier,
+        and its cleanup obligation discharged. The rehearsal executes with a no-host SIMULATION executor, so
+        it proves the chain is policy-admissible and its custody chain is sound WITHOUT touching a host; it
+        is not a claim of real compromise. The running chain is registered with the offensive kill switch so
+        `POST /api/v1/redteam/halt` can stop it mid-run. A real host executor and an independent verifier are
+        a deliberate, review-gated extension point. Available when the fleet transport is enabled (the
+        offensive kill switch, which this route registers its chain with, is wired with the fleet stores).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RehearseChainRequest"}
+      responses:
+        "200":
+          description: The rehearsed chain's terminal state
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ChainRehearsalResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/engagements/{id}/emulation:
     parameters:
     - $ref: "#/components/parameters/EngagementId"
@@ -4353,6 +4385,35 @@ components:
           type: string
           enum: [active, completed, archived]
           description: Target lifecycle status. draft is the creation state and cannot be returned to.
+
+    RehearseChainRequest:
+      type: object
+      required: [steps]
+      properties:
+        steps:
+          type: array
+          minItems: 1
+          description: The ordered chain steps to rehearse. A state-changing step must declare a cleanup path.
+          items:
+            type: object
+            required: [technique, target, blast_radius]
+            properties:
+              technique: {type: string, description: An offensive-policy register technique id.}
+              target: {type: string, description: The asset id the step targets.}
+              blast_radius: {type: string, enum: [read_only, state_changing]}
+              cleanup:
+                type: array
+                items: {type: string}
+                description: Cleanup steps for a state-changing step (required for state_changing, forbidden for read_only).
+              cleanup_verification: {type: string, description: How to confirm the cleanup succeeded.}
+
+    ChainRehearsalResult:
+      type: object
+      properties:
+        chain_id: {type: string}
+        state: {type: string, description: The chain's terminal state (e.g. succeeded, failed, cleaned).}
+        steps: {type: integer}
+        simulated: {type: boolean, description: Always true; a rehearsal never touches a host.}
 
     RunEmulationRequest:
       type: object
