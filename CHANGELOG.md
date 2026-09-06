@@ -9,6 +9,18 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Attack paths, SLA policy, offensive policy, and alerting reach the dashboard.** Four capabilities
+  were wired non-nil in `cmd/synapse-api` but had no UI, so operators could not reach them. A new
+  **Attack paths** tab under Vulnerability Intelligence renders the exposure-to-finding graph
+  (`GET /attack-paths`) as an evidence-carrying chain per path with a confident/inferred verdict and the
+  reasons a path is uncertain. Three new Settings tabs cover the rest: **SLA policy** reads the active
+  scoring policy and lets an admin activate a new version (`GET`/`POST /sla/policies`) through an editor
+  that mirrors the server rules; **Offensive policy** renders the read-only technique register
+  (`GET /redteam/policy`) with risk class, blast radius, approval, and legal review; **Alerting** runs the
+  sink self-test (`POST /alerts/test`) and shows the per-count outcome, including the no-acknowledgement
+  (502) case.
+
+
 - **Chained exploitation is reachable as a governed rehearsal.** The exploitation state machine (per-step
   admission through the offensive policy, sealed per-step evidence, a distinct verifier, cleanup
   obligations) and its kill-switch registry existed and were tested, but nothing constructed a chain outside
@@ -40,6 +52,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   `offensive_roe`. Migration `0135` adds the columns backward-compatibly (defaults leave the offensive
   pillar refused until an operator fills them in) with a `risk_ceiling` CHECK. This is the foundation the
   offensive/purple pillar (emulation, purple coverage, exploitation chains) needs to become reachable.
+
 
 - **Governed DAST verification runs execute on the worker (#823).** An approved DAST probe used to run on
   the API request thread. With the Postgres job queue it now runs as a durable, lease-executed job: the

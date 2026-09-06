@@ -4,6 +4,26 @@ import { http, HttpResponse } from 'msw'
 // TIMESTAMPS
 // ============================================================================
 const NOW = new Date().toISOString()
+const SLA_DAY_NS = 86400000000000
+const SLA_POLICY = {
+  tenant_id: 'tenant-dev',
+  sha256: 'a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff00',
+  created_by: 'admin@dev',
+  created_at: NOW,
+  config: {
+    version: 'sla-v1',
+    weights: { severity: 35, exploitability: 25, threat_intel: 10, exposure: 15, criticality: 15, feasibility_relief: 15 },
+    thresholds: { emergency: 85, critical: 70, high: 50, medium: 30 },
+    due_ranges: {
+      emergency: { mitigate_within: 1 * SLA_DAY_NS, remediate_within: 7 * SLA_DAY_NS },
+      critical: { mitigate_within: 3 * SLA_DAY_NS, remediate_within: 15 * SLA_DAY_NS },
+      high: { mitigate_within: 7 * SLA_DAY_NS, remediate_within: 30 * SLA_DAY_NS },
+      medium: { mitigate_within: 30 * SLA_DAY_NS, remediate_within: 90 * SLA_DAY_NS },
+      low: { mitigate_within: 90 * SLA_DAY_NS, remediate_within: 180 * SLA_DAY_NS },
+      exception: { mitigate_within: 30 * SLA_DAY_NS, remediate_within: 180 * SLA_DAY_NS },
+    },
+  },
+}
 const HOUR_AGO = new Date(Date.now() - 3600_000).toISOString()
 const DAY_AGO = new Date(Date.now() - 86400_000).toISOString()
 const WEEK_AGO = new Date(Date.now() - 7 * 86400_000).toISOString()
@@ -508,6 +528,70 @@ export const handlers = [
   }),
   http.post('/api/v1/blueteam/response/:id/revert', () => HttpResponse.json({ id: 'resp-1', kind: 'isolate_host', target: 'host-web-01', state: 'reverted', approver: 'alice' })),
   http.post('/api/v1/redteam/halt', () => HttpResponse.json({ halted: true, within_bound: true, duration_ms: 42, orders_halted: ['ord-1'], chains_halted: [] })),
+
+  // --- Attack paths (tenant-wide). Nested asset.Asset / finding.Finding carry no JSON tags, so they are
+  //     PascalCase on the wire; the mapper reads both cases. ---
+  http.get('/api/v1/attack-paths', () =>
+    HttpResponse.json({
+      paths: [
+        {
+          id: 'ap-confident-1',
+          confident: true,
+          uncertainties: [],
+          nodes: [
+            { asset: { asset: { ID: 'a-edge', TenantID: 'tenant-dev', Kind: 'host', Key: 'edge-gw-01', Name: 'edge-gw-01' } } },
+            { asset: { asset: { ID: 'a-api', TenantID: 'tenant-dev', Kind: 'container_image', Key: 'sha256:api', Name: 'checkout-api' } } },
+            { finding: { input: { target: { ID: 'f-1', Kind: 'canonical' }, finding: { ID: 'f-1', Title: 'CVE-2026-1337 RCE in checkout-api', Severity: 'critical' }, reachability: 'reachable', confirmed: true, external: false } } },
+          ],
+          steps: [
+            { from: 'a-edge', to: 'a-api', kind: 'routes_to', observed: true, toFinding: false, evidence: [{ producer: 'recon', provenance: 'ev-101', confidence: 'observed' }] },
+            { from: 'a-api', to: 'f-1', kind: 'hosts_finding', observed: true, toFinding: true, evidence: [{ producer: 'sca', provenance: 'ev-102', confidence: 'observed' }] },
+          ],
+        },
+        {
+          id: 'ap-inferred-2',
+          confident: false,
+          uncertainties: ['inferred_edge', 'unconfirmed_reachability'],
+          nodes: [
+            { asset: { asset: { ID: 'a-edge', TenantID: 'tenant-dev', Kind: 'host', Key: 'edge-gw-01', Name: 'edge-gw-01' } } },
+            { finding: { input: { target: { ID: 'f-2', Kind: 'canonical' }, finding: { ID: 'f-2', Title: 'Exposed admin console', Severity: 'high' }, reachability: 'reachable', confirmed: false, external: false } } },
+          ],
+          steps: [
+            { from: 'a-edge', to: 'f-2', kind: 'exposes', observed: false, toFinding: true, evidence: [{ producer: 'inference', provenance: 'ev-201', confidence: 'inferred' }] },
+          ],
+        },
+      ],
+      bounds: { maxLength: 8, maxPaths: 100, maxDuration: 0, truncated: false, lengthHit: false, pathsHit: false, targetPathsHit: false, findingPathsHit: false, wallClockHit: false },
+    }),
+  ),
+
+  // --- SLA remediation policy (tenant-wide). Durations are int64 nanoseconds. ---
+  http.get('/api/v1/sla/policies', () => HttpResponse.json({ active: SLA_POLICY, policies: [SLA_POLICY] })),
+  http.post('/api/v1/sla/policies', async ({ request }) => {
+    const b = (await request.json().catch(() => ({}))) as { config?: unknown }
+    return HttpResponse.json(
+      { policy: { ...SLA_POLICY, config: b?.config ?? SLA_POLICY.config, created_by: 'you', created_at: NOW }, created: true },
+      { status: 201 },
+    )
+  }),
+
+  // --- Offensive policy register (read-only). ---
+  http.get('/api/v1/redteam/policy', () =>
+    HttpResponse.json({
+      legal_review: { reviewed: true, date: '2026-08-01', owner: 'security-lead', counsel_reviewed: true, counsel_date: '2026-08-04' },
+      techniques: [
+        { technique: 'recon.port_scan', taxonomy_ref: 'TA0043', disruption: 'none', reversibility: 'reversible', risk_class: 'low', approval: 'auto', blast_radius: 'read_only', production_safe: true, prohibited: false },
+        { technique: 'access.credential_spray', taxonomy_ref: 'T1110.003', disruption: 'low', reversibility: 'reversible', risk_class: 'medium', approval: 'operator', blast_radius: 'state_changing', production_safe: false, prohibited: false },
+        { technique: 'impact.service_stop', taxonomy_ref: 'T1489', disruption: 'high', reversibility: 'reversible', risk_class: 'high', approval: 'dual_control', blast_radius: 'state_changing', production_safe: false, prohibited: false },
+        { technique: 'impact.data_destruction', taxonomy_ref: 'T1485', disruption: 'high', reversibility: 'irreversible', risk_class: 'prohibited', approval: '', blast_radius: 'destructive', production_safe: false, prohibited: true },
+      ],
+      prohibited: 1,
+      production_safe: 1,
+    }),
+  ),
+
+  // --- Alerting self-test. ---
+  http.post('/api/v1/alerts/test', () => HttpResponse.json({ outcome: { matched: true, delivered: 2, failed: 0, audit_failed: 0 } })),
 
   // --- Dashboard ---
   http.get('/api/v1/dashboard/security-operations', () => HttpResponse.json(DASHBOARD)),

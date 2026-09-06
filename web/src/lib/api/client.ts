@@ -2,6 +2,10 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    // The parsed JSON error body, when the server sent one. Some endpoints attach structured detail
+    // alongside the message (e.g. /alerts/test returns { error, outcome } on 502); callers that need it
+    // read err.body, while the common `err.status === 404` checks are unaffected.
+    public body?: unknown,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -93,13 +97,14 @@ export async function req(path: string, init?: RequestInit): Promise<any> {
   if (res.status === 401 && onUnauthorized) onUnauthorized()
   if (!res.ok) {
     let msg = `HTTP ${res.status}`
+    let body: unknown
     try {
-      const body = await res.json()
-      if (body?.error) msg = body.error
+      body = await res.json()
+      if ((body as { error?: string })?.error) msg = (body as { error: string }).error
     } catch {
       /* non-JSON error body */
     }
-    throw new ApiError(res.status, msg)
+    throw new ApiError(res.status, msg, body)
   }
   if (res.status === 204) return null
   return res.json()
