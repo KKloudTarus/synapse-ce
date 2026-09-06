@@ -114,7 +114,7 @@ function PlanApply({ onApplied }: { onApplied: () => void }) {
   const [target, setTarget] = useState('')
   const [plan, setPlan] = useState<ResponsePlan | null>(null)
   const [busy, setBusy] = useState(false)
-  const [applyMsg, setApplyMsg] = useState<string | null>(null)
+  const [applyResult, setApplyResult] = useState<{ record: ResponseRecord; pending: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -128,7 +128,7 @@ function PlanApply({ onApplied }: { onApplied: () => void }) {
   const canPlan = engagementId !== '' && target.trim() !== '' && !busy
 
   const doPlan = async () => {
-    setBusy(true); setError(null); setApplyMsg(null); setPlan(null)
+    setBusy(true); setError(null); setApplyResult(null); setPlan(null)
     try {
       setPlan(await api.planResponse(engagementId, { kind, target: target.trim() }))
     } catch (e) {
@@ -140,7 +140,7 @@ function PlanApply({ onApplied }: { onApplied: () => void }) {
     setBusy(true); setError(null)
     try {
       const { record, pending } = await api.applyResponse(engagementId, { kind, target: target.trim() })
-      setApplyMsg(pending ? `Recorded ${record.id} — awaiting a second approval` : `Applied ${record.id}`)
+      setApplyResult({ record, pending })
       setPlan(null)
       onApplied()
     } catch (e) {
@@ -172,9 +172,25 @@ function PlanApply({ onApplied }: { onApplied: () => void }) {
             <Play className="size-4" /> Apply through the gate
           </Button>
         )}
-        {applyMsg && <span className="text-xs text-success-primary">{applyMsg}</span>}
       </div>
       {error && <div className="mt-3"><ErrorState message={error} /></div>}
+      {applyResult && (
+        <div className={cn('mt-4 rounded-lg border p-4 text-sm',
+          applyResult.pending ? 'border-warning-primary bg-warning-secondary' : 'border-utility-green-300 bg-success-secondary')}>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className={cn('font-semibold', applyResult.pending ? 'text-warning-primary' : 'text-success-primary')}>
+              {applyResult.pending ? 'Recorded — awaiting a second human approval' : 'Applied through the admission gate'}
+            </span>
+            <span className="font-mono text-xs text-tertiary">action {applyResult.record.id}</span>
+            {applyResult.record.evidenceId && <span className="font-mono text-xs text-tertiary">evidence {applyResult.record.evidenceId}</span>}
+          </div>
+          <p className="mt-1 text-xs text-tertiary">
+            {applyResult.pending
+              ? 'A reviewer approves it from the actions ledger below; the kill switch can cancel a pending action.'
+              : 'The executor is simulation, so no host changed. It is reversible from the ledger below.'}
+          </p>
+        </div>
+      )}
       {plan && (
         <div className="mt-4 rounded-lg border border-secondary bg-secondary/30 p-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-tertiary">Plan (executes nothing)</p>
@@ -231,6 +247,7 @@ function ResponseList({ records, loadError, onChanged }: { records: ResponseReco
                 <th className="px-3 py-2.5">State</th>
                 <th className="px-3 py-2.5">Verification</th>
                 <th className="px-3 py-2.5">Approver</th>
+                <th className="px-3 py-2.5">Evidence</th>
                 <th className="px-4 py-2.5 text-right">&nbsp;</th>
               </tr>
             </thead>
@@ -242,6 +259,7 @@ function ResponseList({ records, loadError, onChanged }: { records: ResponseReco
                   <td className={cn('px-3 py-2.5 text-xs font-semibold capitalize', STATE_TONE[r.state] ?? 'text-tertiary')}>{r.state}</td>
                   <td className="px-3 py-2.5 text-xs text-tertiary">{r.verification || '—'}</td>
                   <td className="truncate px-3 py-2.5 text-xs text-tertiary">{r.approver || '—'}</td>
+                  <td className="px-3 py-2.5 font-mono text-xs text-tertiary" title={r.evidenceId}>{r.evidenceId || '—'}</td>
                   <td className="px-4 py-2.5 text-right">
                     {r.state === 'applied' && <RevertButton record={r} onDone={onChanged} />}
                   </td>
