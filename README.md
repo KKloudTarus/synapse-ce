@@ -76,8 +76,11 @@ anything intrusive.
   whether a vulnerable symbol is actually reachable from application code.
 
 **Code & configuration**
-- **First-party SAST** with source-code rules across many languages, plus a taint engine over the
-  sandboxed call graph.
+- **First-party SAST**: a line-level pattern scanner for dangerous idioms (weak crypto, hardcoded
+  secrets, a shell built by concatenation, an unsafe deserializer) across many languages, pinned to a
+  labelled precision/recall corpus. Interprocedural and cross-file dataflow analysis is the separate
+  **reachability engine**: a taint and call-graph analysis over the sandboxed `go/ssa` and tree-sitter
+  graphs.
 - **Secret scanning** and **IaC misconfiguration** (Terraform, CloudFormation, ARM, Kubernetes,
   Helm, Dockerfile, Compose).
 - **Code quality** rules, quality gates and profiles, and third-party **SARIF ingest** into the
