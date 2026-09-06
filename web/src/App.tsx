@@ -43,6 +43,9 @@ const AITriageObservability = lazy(() => import('./pages/AITriage/AITriageObserv
 const VulnerabilityIntelligence = lazy(() => import('./pages/VulnerabilityIntelligence').then(m => ({ default: m.VulnerabilityIntelligence })))
 const VulnerabilityAdvisoryPage = lazy(() => import('./pages/VulnerabilityIntelligence/VulnIntelAdvisories').then(m => ({ default: m.VulnerabilityAdvisoryPage })))
 const Team = lazy(() => import('./pages/Settings/Team').then(m => ({ default: m.Team })))
+const SLAPolicy = lazy(() => import('./pages/Settings/SLAPolicy').then(m => ({ default: m.SLAPolicy })))
+const OffensivePolicy = lazy(() => import('./pages/Settings/OffensivePolicy').then(m => ({ default: m.OffensivePolicy })))
+const Alerting = lazy(() => import('./pages/Settings/Alerting').then(m => ({ default: m.Alerting })))
 const ProjectOverviewPage = lazy(() => import('./pages/CodeQuality/ProjectOverviewPage').then(m => ({ default: m.ProjectOverviewPage })))
 const ProjectAnalysisPage = lazy(() => import('./pages/CodeQuality/ProjectAnalysisPage').then(m => ({ default: m.ProjectAnalysisPage })))
 const ProjectActivityPage = lazy(() => import('./pages/CodeQuality/ProjectActivityPage').then(m => ({ default: m.ProjectActivityPage })))
@@ -110,6 +113,9 @@ function Gate() {
           <Route path="team" element={<Team />} />
           <Route path="connectors" element={<Connectors />} />
           <Route path="config" element={<SettingsConfig />} />
+          <Route path="sla" element={<SLAPolicy />} />
+          <Route path="offensive-policy" element={<OffensivePolicy />} />
+          <Route path="alerting" element={<Alerting />} />
         </Route>
         <Route path="audit" element={<Navigate to="/settings" replace />} />
         <Route path="team" element={<Navigate to="/settings/team" replace />} />
