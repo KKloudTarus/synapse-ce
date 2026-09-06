@@ -43,6 +43,7 @@ import { DetectionsTab } from './DetectionsTab'
 import { ImportedFindingsTab } from './ImportedFindingsTab'
 import { DataGovernanceTab } from './DataGovernanceTab'
 import { WriteupDraftsTab } from './WriteupDraftsTab'
+import { CloudPostureTab } from './CloudPostureTab'
 import { EvidenceTab } from './EvidenceTab'
 import { SettingsTab } from './SettingsTab'
 import { JudgmentReviewTab } from './ReviewsTab'
@@ -68,6 +69,7 @@ export type Tab =
   | 'recon'
   | 'purple'
   | 'agent'
+  | 'cspm'
   | 'detections'
   | 'reviews'
   | 'evidence'
@@ -127,6 +129,7 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'threats', label: 'Threat Model' },
       { id: 'purple', label: 'Purple Coverage' },
       { id: 'agent', label: 'Agent' },
+      { id: 'cspm', label: 'Cloud Posture' },
     ],
   },
   {
@@ -530,6 +533,7 @@ export function EngagementDetail() {
         {tab === 'imported' && <ImportedFindingsTab key={id} engagementId={id} />}
         {tab === 'data-governance' && <DataGovernanceTab key={id} engagementId={id} />}
         {tab === 'writeup-drafts' && <WriteupDraftsTab key={id} engagementId={id} />}
+        {tab === 'cspm' && <CloudPostureTab key={id} engagementId={id} />}
         {tab === 'reviews' && <JudgmentReviewTab key={id} engagementId={id} />}
         {tab === 'evidence' && <EvidenceTab key={id} engagementId={id} />}
         {tab === 'settings' && <SettingsTab eng={eng} onUpdated={setEng} />}

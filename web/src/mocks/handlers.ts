@@ -622,6 +622,20 @@ export const handlers = [
       ['low', 'medium', 'high'].includes(String(body.risk_ceiling)) && body.exclusions_reviewed === true
     return HttpResponse.json({ ...eng, roe: { ...eng.roe, offensive: { ...body, complete } } })
   }),
+  // Cloud posture (CSPM) run: POST accepts and returns a running run; GET completes it (poll).
+  http.post('/api/v1/engagements/:id/cspm/runs', ({ params }) => HttpResponse.json({
+    id: 'cspm-run-1', engagement_id: params.id, actor: 'you', status: 'running', complete: false,
+    assets: 0, findings: 0, coverage_issues: [], error_code: '', evidence_refs: [], started_at: NOW, finished_at: null,
+  }, { status: 202 })),
+  http.get('/api/v1/engagements/:id/cspm/runs/:rid', ({ params }) => HttpResponse.json({
+    id: params.rid, engagement_id: params.id, actor: 'you', status: 'succeeded', complete: true,
+    assets: 214, findings: 9,
+    coverage_issues: [{ scope: 'aws:123456789012', reason: 'CloudTrail not multi-region' }],
+    error_code: '',
+    evidence_refs: [{ scope_key: 'aws:123456789012', id: 'ev-cspm-1', hash: 'sha256:abcd' }],
+    started_at: NOW, finished_at: NOW,
+  })),
+
   // Governed adversary-emulation run: a synchronous coverage summary after the detection join.
   http.post('/api/v1/engagements/:id/emulation/runs', async ({ params, request }) => {
     const body = (await request.json()) as { target?: string }

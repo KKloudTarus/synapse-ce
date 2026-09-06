@@ -33,6 +33,7 @@ import { blueteamApi } from './blueteam'
 import { riskStoryApi } from './riskstory'
 import { slaApi } from './sla'
 import { writeupApi } from './writeup'
+import { cspmApi } from './cspm'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -69,6 +70,7 @@ export const api = {
   ...riskStoryApi,
   ...slaApi,
   ...writeupApi,
+  ...cspmApi,
 }
 export {
   type SlaConfig,
@@ -93,3 +95,10 @@ export {
   type RetroHuntResult,
   type TimelineEntry,
 } from './fleet'
+export {
+  type CSPMRun,
+  type CSPMStatus,
+  type CloudProvider,
+  type CloudTarget,
+  type CSPMEvidenceRef,
+} from './cspm'
