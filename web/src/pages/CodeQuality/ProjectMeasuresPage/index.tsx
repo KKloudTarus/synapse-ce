@@ -332,8 +332,8 @@ export function ProjectMeasuresPage() {
               <table className="min-w-full text-left text-sm whitespace-nowrap">
                 <thead className="bg-secondary/40 text-[10px] uppercase tracking-wider text-tertiary border-b border-secondary sticky top-0 font-bold font-sans">
                   <tr>
-                    {cols.map((c) => (
-                      <th key={c.header} scope="col" className={cn('px-4 py-2.5 font-bold', c.className)}>
+                    {cols.map((c, ci) => (
+                      <th key={ci} scope="col" className={cn('px-4 py-2.5 font-bold', c.className)}>
                         {c.header}
                       </th>
                     ))}
@@ -342,8 +342,8 @@ export function ProjectMeasuresPage() {
                 <tbody className="divide-y divide-secondary/40 font-sans text-xs">
                   {sortedAndFilteredItems.map((item) => (
                     <tr key={item.path} className="hover:bg-secondary/40 transition-colors group">
-                      {cols.map((c) => (
-                        <td key={c.header} className={cn('px-4 py-2.5 min-w-0 truncate', c.className)}>
+                      {cols.map((c, ci) => (
+                        <td key={ci} className={cn('px-4 py-2.5 min-w-0 truncate', c.className)}>
                           {c.cell(item)}
                         </td>
                       ))}
