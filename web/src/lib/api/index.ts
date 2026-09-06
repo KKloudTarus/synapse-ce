@@ -88,3 +88,8 @@ export {
   type CoverageVector,
 } from './fleet'
 export { type WriteupDraft, type WriteupDraftState } from './writeup'
+export {
+  type RetroHuntRequest,
+  type RetroHuntResult,
+  type TimelineEntry,
+} from './fleet'

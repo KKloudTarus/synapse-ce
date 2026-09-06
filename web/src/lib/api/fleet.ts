@@ -163,6 +163,21 @@ export const fleetApi = {
     return (Array.isArray(res?.coverage_windows) ? res.coverage_windows : []).map(mapCoverageWindow)
   },
 
+  // Re-hunt the endpoint state timeline in [around-before, around+after] on a host asset (#594 B7).
+  retroHunt: async (assetId: string, input: RetroHuntRequest): Promise<RetroHuntResult> =>
+    mapRetroHuntResult(
+      await req(`/fleet/assets/${encodeURIComponent(assetId)}/retro-hunt`, {
+        method: 'POST',
+        body: JSON.stringify({
+          around: input.around,
+          before_seconds: input.beforeSeconds,
+          after_seconds: input.afterSeconds,
+          entity_id: input.entityId ?? '',
+          limit: input.limit ?? 0,
+        }),
+      }),
+    ),
+
   // The route only exists when the desired-capabilities service is wired, so callers degrade gracefully.
   fleetDesiredGaps: async (): Promise<FleetDesiredGap[]> => {
     const res = await req('/fleet/desired-capabilities/gaps')
@@ -261,5 +276,53 @@ function mapCoverageWindow(r: any): CoverageWindow {
       privilege: r?.coverage?.privilege ?? 0,
       reasons: Array.isArray(r?.coverage?.reasons) ? r.coverage.reasons : [],
     },
+  }
+}
+
+// --- Retro-hunt (#594 B7): re-hunt the endpoint state timeline in a window around a pivot ---
+
+export interface RetroHuntRequest {
+  around: string // RFC3339 pivot time
+  beforeSeconds: number
+  afterSeconds: number
+  entityId?: string
+  limit?: number
+}
+
+export interface TimelineEntry {
+  occurredAt: string
+  entityKind: string
+  entityId: string
+  kind: string
+  eventId: string
+  summary: string
+}
+
+export interface RetroHuntResult {
+  assetId: string
+  from: string
+  to: string
+  entries: TimelineEntry[]
+  truncated: boolean
+}
+
+function mapTimelineEntry(r: any): TimelineEntry {
+  return {
+    occurredAt: r?.OccurredAt ?? r?.occurred_at ?? '',
+    entityKind: r?.EntityKind ?? r?.entity_kind ?? '',
+    entityId: r?.EntityID ?? r?.entity_id ?? '',
+    kind: r?.Kind ?? r?.kind ?? '',
+    eventId: r?.EventID ?? r?.event_id ?? '',
+    summary: r?.Summary ?? r?.summary ?? '',
+  }
+}
+
+export function mapRetroHuntResult(r: any): RetroHuntResult {
+  return {
+    assetId: r?.AssetID ?? r?.asset_id ?? '',
+    from: r?.From ?? r?.from ?? '',
+    to: r?.To ?? r?.to ?? '',
+    entries: Array.isArray(r?.Entries) ? r.Entries.map(mapTimelineEntry) : Array.isArray(r?.entries) ? r.entries.map(mapTimelineEntry) : [],
+    truncated: r?.Truncated ?? r?.truncated ?? false,
   }
 }

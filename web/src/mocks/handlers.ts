@@ -852,6 +852,14 @@ export const handlers = [
     const a = BUSINESS_ASSETS.find(x => x.ID === params.id) ?? BUSINESS_ASSETS[0]
     return HttpResponse.json({ ...a, type: 'host', tags: ['production'], finding_count: 12, last_scanned: HOUR_AGO, engagements: ENGAGEMENTS.slice(0, 2) })
   }),
+  http.get('/api/v1/assets/:id/vulnerabilities', ({ params }) => HttpResponse.json({
+    asset: { ID: params.id, Kind: 'host', Key: 'hostname/web-01', Name: 'web-01', Attributes: { reporting_agent_id: 'agent-001', coverage_gaps: '1', degraded: 'false', os: 'ubuntu 22.04' } },
+    engagement_id: 'eng-001', packages: 842, recorded_at: HOUR_AGO,
+    last_scan: { job_id: 'hs-1', status: 'succeeded', stage: '', error: '', started_at: HOUR_AGO, finished_at: HOUR_AGO },
+    summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0, fixable: 0, kev: 0 },
+    findings: [],
+  })),
+  http.get('/api/v1/assets/:id/packages', ({ params }) => HttpResponse.json({ asset_id: params.id, engagement_id: 'eng-001', recorded_at: HOUR_AGO, packages: [{ name: 'openssl', version: '3.0.2', purl: 'pkg:deb/ubuntu/openssl@3.0.2' }] })),
   http.get('/api/v1/appsec/assets', ({ request }) => {
     const url = new URL(request.url)
     const limit = Number(url.searchParams.get('limit')) || 5
@@ -1140,6 +1148,23 @@ export const handlers = [
   }),
   http.get('/api/v1/fleet/coverage', () => HttpResponse.json(FLEET_COVERAGE)),
   http.get('/api/v1/fleet/coverage-windows', () => HttpResponse.json({ coverage_windows: COVERAGE_WINDOWS })),
+  http.post('/api/v1/fleet/assets/:id/retro-hunt', async ({ params, request }) => {
+    const body = (await request.json()) as { around?: string; before_seconds?: number; after_seconds?: number }
+    const around = body.around ? new Date(body.around) : new Date()
+    const from = new Date(around.getTime() - (body.before_seconds ?? 900) * 1000).toISOString()
+    const to = new Date(around.getTime() + (body.after_seconds ?? 900) * 1000).toISOString()
+    return HttpResponse.json({
+      AssetID: params.id,
+      From: from,
+      To: to,
+      Truncated: false,
+      Entries: [
+        { OccurredAt: from, EntityKind: 'process', EntityID: 'pid-4821', Kind: 'process_exec', EventID: 'ev-1', Summary: 'curl spawned by bash (parent sshd)' },
+        { OccurredAt: around.toISOString(), EntityKind: 'network', EntityID: 'conn-77', Kind: 'egress_connect', EventID: 'ev-2', Summary: 'outbound 443 to 203.0.113.9 (unclassified)' },
+        { OccurredAt: to, EntityKind: 'file', EntityID: '/etc/cron.d/x', Kind: 'file_write', EventID: 'ev-3', Summary: 'new file written under /etc/cron.d' },
+      ],
+    })
+  }),
   http.get('/api/v1/fleet/incidents', ({ request }) => {
     const state = new URL(request.url).searchParams.get('state')
     const incidents = FLEET_INCIDENTS.filter((i) => !state || i.State === state)
