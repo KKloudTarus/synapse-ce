@@ -2236,7 +2236,9 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		for _, f := range result.Findings {
 			keys = append(keys, f.DedupKey)
 		}
-		_ = s.runs.Save(ctx, ports.ScanRun{ID: s.newRunID(), EngagementID: engagementID.String(), CreatedAt: now, Manifest: manifest, FindingKeys: keys})
+		if err := s.runs.Save(ctx, ports.ScanRun{ID: s.newRunID(), EngagementID: engagementID.String(), CreatedAt: now, Manifest: manifest, FindingKeys: keys}); err != nil {
+			return nil, fmt.Errorf("persist scan run: %w", err)
+		}
 	}
 	if s.scans != nil {
 		skipped, err := s.scans.SaveScan(ctx, engagementID, doc, vulns, snap)
@@ -3171,13 +3173,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		for _, f := range result.Findings {
 			keys = append(keys, f.DedupKey)
 		}
-		_ = s.runs.Save(ctx, ports.ScanRun{
+		if err := s.runs.Save(ctx, ports.ScanRun{
 			ID:           s.newRunID(),
 			EngagementID: engagementID.String(),
 			CreatedAt:    now,
 			Manifest:     manifest,
 			FindingKeys:  keys,
-		})
+		}); err != nil {
+			return nil, fmt.Errorf("persist scan run: %w", err)
+		}
 	}
 
 	// The scan snapshot and the findings are written in SEPARATE transactions. A
