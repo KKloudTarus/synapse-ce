@@ -105,6 +105,7 @@ import (
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/crosscheckjudge"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/cspm"
+	dastrunuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrun"
 	dastrunneruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
 	dastsessionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastsession"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
@@ -371,6 +372,7 @@ func main() {
 	var qualityGateMutator ports.QualityGateMutator
 	var reconRunStore ports.ReconRunStore
 	var cloudRunStore ports.CloudRunStore
+	var dastRunStore ports.DASTRunStore
 	var cloudObservationStore ports.CloudObservationStore
 	var evidenceStore ports.EvidenceStore
 	var advisoryStore ports.AdvisoryStore         // owned normalized-advisory store (global reference data, not tenant-scoped)
@@ -511,6 +513,7 @@ func main() {
 		qualityProfileStore = postgres.NewQualityProfileStore(pool)
 		reconRunStore = postgres.NewReconRunStore(pool)
 		cloudRunStore = postgres.NewCloudRunStore(pool)
+		dastRunStore = postgres.NewDASTRunStore(pool)
 		cloudObservationStore = postgres.NewCloudObservationStore(pool)
 		evidenceStore = postgres.NewEvidenceStore(pool)
 		advisoryStore = postgres.NewAdvisoryRepository(pool)
@@ -660,6 +663,7 @@ func main() {
 		qualityProfileStore = memory.NewQualityProfileStore()
 		reconRunStore = memory.NewReconRunRepository()
 		cloudRunStore = memory.NewCloudRunStore()
+		dastRunStore = memory.NewDASTRunStore()
 		cloudObservationStore = memory.NewCloudObservationStore()
 		evidenceStore = memory.NewEvidenceStore()
 		advisoryStore = memory.NewAdvisoryStore()
@@ -1566,6 +1570,20 @@ func main() {
 					os.Exit(1)
 				}
 				router.SetDASTWorkflow(dastWorkflowSvc)
+				// #823 durable DAST verification: with the Postgres job queue, the run route enqueues a
+				// worker job (executed by synapse-worker's dast_run handler) instead of running the probe
+				// on the request thread, and a status route polls it. Without the queue (in-memory dev)
+				// the run stays synchronous. The submit-side service carries no prober; only the worker
+				// executes.
+				if reconQueue != nil {
+					dastRunSvc, drerr := dastrunuc.NewService(dastRunStore, nil, auditLog, clock, ids)
+					if drerr != nil {
+						log.Error("DAST durable run service init failed", "err", drerr)
+						os.Exit(1)
+					}
+					router.SetDASTRunner(dastRunSvc)
+					log.Info("DAST verification runs execute on the worker (durable)", "route", "POST .../runtime-verification/proposals/{aid}/run")
+				}
 				engine, eerr := dastengine.New(reconRunner, cfg.DASTHelperBin, cfg.DASTMaxWallClock, cfg.ReconMaxOutput)
 				if eerr != nil {
 					log.Error("authenticated DAST engine init failed", "err", eerr)

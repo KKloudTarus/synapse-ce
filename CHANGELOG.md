@@ -9,6 +9,20 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Governed DAST verification runs execute on the worker (#823).** An approved DAST probe used to run on
+  the API request thread. With the Postgres job queue it now runs as a durable, lease-executed job: the
+  run route (`POST /engagements/{id}/judgments/{jid}/runtime-verification/proposals/{aid}/run`) enqueues
+  it and answers `202` with a queued run, `synapse-worker` executes the SAME approval-gated, sandboxed,
+  evidence-sealing probe (so the single-use consume and the evidence seal still happen exactly once), and
+  `GET /engagements/{id}/dast/runs/{rid}` polls the run to a terminal state. The run record is secret-free
+  (verdict class, observed HTTP status, sealed-evidence id). Without the queue (in-memory dev) the probe
+  stays synchronous. Backed by a new `dast_runs` table with tenant RLS. A redelivered job never re-runs a
+  probe that may already have consumed its single-use approval: the outcome is written with a
+  compare-and-set that only fires from `running`, so a late delivery cannot overwrite a recorded success,
+  and an interrupted run terminalizes `interrupted` instead. A worker that has no live scoped-egress
+  broker still claims the job and fails the run `egress_unavailable` rather than leave it orphaned at
+  `queued`, so an enqueued run is always visible to the poller.
+
 - **Per-engagement vulnerability posture in the dashboard.** The reconciled advisory occurrences and the
   governed action queue for an engagement (`GET /engagements/{id}/vulnerability/occurrences` and
   `.../vulnerability/actions`, with `.../actions/{aid}/acknowledge` and `/resolve`) had no UI. A new

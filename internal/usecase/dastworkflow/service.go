@@ -13,7 +13,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
@@ -158,25 +157,8 @@ func probeDigest(probe dastrunner.Probe, method string) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// validateDASTURL delegates to dastrunner.ValidateURL, the single source of truth for probe-target
+// validation, so the durable submit edge and the execution edge reject exactly the same URLs.
 func validateDASTURL(raw string) error {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u == nil || u.User != nil || u.Scheme == "" || u.Host == "" {
-		return fmt.Errorf("%w: invalid DAST target URL", shared.ErrValidation)
-	}
-	for key := range u.Query() {
-		if sensitiveDASTQueryKey(key) {
-			return fmt.Errorf("%w: DAST target URL cannot contain credential-like query keys", shared.ErrValidation)
-		}
-	}
-	return nil
-}
-
-func sensitiveDASTQueryKey(key string) bool {
-	key = strings.ToLower(key)
-	for _, sensitive := range []string{"token", "session", "api_key", "key", "secret", "password", "auth", "signature", "sig"} {
-		if strings.Contains(key, sensitive) {
-			return true
-		}
-	}
-	return false
+	return dastrunner.ValidateURL(raw)
 }

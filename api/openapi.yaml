@@ -306,6 +306,32 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/engagements/{id}/dast/runs/{rid}:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    - name: rid
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags: [engagements, findings]
+      operationId: getDASTRun
+      summary: Get a durable DAST verification run
+      description: >
+        Returns the status of a governed DAST verification probe executed as a worker job (#823). The run
+        route enqueues the probe and answers 202 with a queued run; this route polls it to completion. The
+        record is secret-free: it carries the verdict class, the observed HTTP status, and the
+        sealed-evidence id, never the probe body or any request or response content.
+      responses:
+        "200":
+          description: DAST verification run status
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DASTRun"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/engagements/{id}/detection-provenance:
     parameters:
     - $ref: "#/components/parameters/EngagementId"
@@ -4884,6 +4910,22 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/VulnerabilityReconcileDiff'}}
         next: {$ref: '#/components/schemas/VulnerabilityReconcileDiffCursor'}
+
+    DASTRun:
+      type: object
+      required: [id, engagement_id, action_id, actor, status, started_at]
+      properties:
+        id: {type: string}
+        engagement_id: {type: string}
+        action_id: {type: string, description: The consumed DAST approval the probe bound to}
+        actor: {type: string}
+        status: {type: string, enum: [queued, running, succeeded, failed]}
+        verdict: {type: string, description: The verification's proof class; empty until terminal}
+        http_status: {type: integer, minimum: 0, description: The probe's observed HTTP status; zero until observed}
+        evidence_id: {type: string, description: The sealed evidence the run produced}
+        error_code: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: [string, "null"], format: date-time}
 
     CSPMRun:
       type: object
