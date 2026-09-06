@@ -8,6 +8,7 @@ This chart deploys Synapse. `execution.mode` selects the tool-execution placemen
 - A Linux amd64 node runtime that permits unprivileged user namespaces. Bubblewrap is installed in the production image and Synapse supplies its own default-deny seccomp BPF filter. The chart does not request privileged mode, `SYS_ADMIN`, host networking, or host mounts.
 - Pre-created, split Secrets named by `existingSecrets` and a pre-created TLS Secret named by `ingress.tls.secretName`. The chart never renders Secret data.
 - Digest-qualified production images. Tags are rejected by `values.schema.json`.
+- For production execution modes, nodes in the control-plane data region must carry the standard `topology.kubernetes.io/region` label and `api.nodeSelector.topology.kubernetes.io/region` must select that governed region.
 
 ## First install
 
@@ -50,6 +51,32 @@ helm template synapse deploy/helm/synapse -f deploy/helm/synapse/values-dev.yaml
 
 Its image digests are the all-zero placeholders from `values.yaml`: they satisfy the schema and will not pull. Pass real digests on install. Replica counts stay at the schema floor of two API and two web replicas even in development, because a single replica cannot prove the rollout path the chart is built around.
 
+## Regional data-governance contract
+
+A production Helm release is a **single-tenant regional cell**. The API explicitly sets `SYNAPSE_SINGLE_TENANT=true`; serve a tenant from exactly one governed cell, and use a separate release, datastore, Terraform state/backend, and region when a different residency boundary is required. The chart does not route tenant data between regions inside one cell.
+
+Production modes (`externalNative` and `inClusterBroker`) must set `api.nodeSelector.topology.kubernetes.io/region` to the governed region containing the durable data plane. The migration Job automatically inherits that selector because schema changes operate on tenant-owned durable state. In `inClusterBroker`, the execution broker/worker selector must declare the **same** region; a mismatched or missing region fails Helm rendering.
+
+Helm cannot query the physical region or encryption configuration of an external PostgreSQL or S3-compatible endpoint. Operators must therefore place those services in the same governed region and verify their at-rest encryption outside the chart. `deploy/aws/staging` is the reference implementation: it provisions the database, evidence bucket, control plane and native worker tier from one AWS provider region and binds RDS, S3, ECR and worker EBS storage to one rotating customer-managed KMS key. Its static tests fail when that contract is weakened.
+
+The chart enforces the transport half of the boundary independently: production object-store traffic requires TLS, database DSNs use `sslmode=verify-full` with an operator-supplied CA, ingress uses a TLS Secret, and the native-worker grant authority is an internal TLS-terminating NLB.
+
+Example production placement:
+
+```yaml
+api:
+  nodeSelector:
+    synapse.example/runtime: control-plane
+    topology.kubernetes.io/region: us-east-1
+
+egressBroker:
+  nodeSelector:
+    synapse.dev/execution-node: "true"
+    topology.kubernetes.io/region: us-east-1
+```
+
+The second selector matters only for `inClusterBroker`. `externalNative` workers live outside Kubernetes; the supported AWS Terraform deployment keeps them in the same provider region instead.
+
 ## Install
 
 Copy the production test values as a starting point, replace only references and non-secret endpoints, and use your secret-management controller for the referenced Secrets:
@@ -68,6 +95,7 @@ The migration hook uses the separate owner DSN Secret. API and worker set `SYNAP
 helm lint --strict deploy/helm/synapse -f deploy/helm/synapse/tests/production-values.yaml
 helm template synapse deploy/helm/synapse -f deploy/helm/synapse/tests/production-values.yaml --kube-version 1.29.0
 (cd deploy/helm/synapse && sh testdata/render_test.sh)
+(cd deploy/helm/synapse && sh testdata/data_governance_test.sh)
 ```
 
 NetworkPolicy starts with namespace-wide default deny, allows ingress only from the configured ingress-controller namespace, permits DNS plus TLS/PostgreSQL egress, and grants HTTP/S recon egress only to the worker. Configure an FQDN-aware CNI or egress gateway with managed PostgreSQL/S3 and authorized-target allowlists before production use.

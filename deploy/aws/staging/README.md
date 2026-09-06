@@ -14,6 +14,29 @@ The remote state reveals infrastructure metadata and can contain provider-manage
 
 The wrappers initialize the configured remote backend but never create a backend. `provision.sh` refuses to apply without an explicit confirmation. `teardown.sh` also refuses to destroy until the supplied `expires_at` has passed and a second explicit confirmation is supplied.
 
+## Regional residency and encryption at rest
+
+This stack is the reference implementation for the remaining deployment controls in privacy/data-governance issue #635. It is deliberately **single-region**: `aws_region` is validated as `us-east-1`, the AWS provider consumes only that value, and the configured Availability Zones must belong to the same region. PostgreSQL, the evidence bucket, ECR, EKS, and the native execution-worker tier are therefore created in one governed region. This stack creates no cross-region replica, replication rule, or secondary datastore. A deployment that needs another residency boundary must use a separate environment/state/backend in that region rather than sharing this state.
+
+Durable storage is encrypted with one customer-managed, rotating KMS key owned by this stack:
+
+- RDS PostgreSQL sets `storage_encrypted = true` and uses the governed KMS key; its managed master secret and Performance Insights data use the same key.
+- The evidence S3 bucket uses SSE-KMS with the governed key and bucket-key support.
+- The private ECR repository uses KMS encryption with the governed key.
+- Native worker root EBS volumes are encrypted with the governed key.
+
+The static test fails if any of those resources falls back to provider-default encryption or loses the shared key binding. Verify the source posture with:
+
+```bash
+./scripts/test.sh
+terraform output deployment_region
+terraform output data_kms_key_arn
+```
+
+`deployment_region` and `data_kms_key_arn` are non-secret evidence outputs intended for deployment review. They do not prove the state of a separately managed backend or an external service that is not created by this stack; those must be governed and audited independently.
+
+The Helm production chart complements this infrastructure boundary: its API/data-processing placement must carry `topology.kubernetes.io/region`, its migration Job inherits that region, and in-cluster execution is rejected if its region differs. Database traffic remains `sslmode=verify-full`, object-store transport requires TLS in production, and the public ingress terminates TLS.
+
 ## Private worker grant authority
 
 Terraform places the native Auto Scaling Group in dedicated private worker subnets and creates a dedicated frontend security group for the internal egress-grant NLB. Its only ingress rule references the native worker security group on TCP/443; it does not admit the shared private-subnet CIDRs. The NLB may forward only to the API pod port configured by `worker_grant_authority_backend_port`.

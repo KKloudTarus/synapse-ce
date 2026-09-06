@@ -1,3 +1,4 @@
+{{- $dataRegion := default "" (index .Values.api.nodeSelector "topology.kubernetes.io/region") | trim -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -22,6 +23,12 @@ spec:
       restartPolicy: Never
       serviceAccountName: {{ include "synapse.serviceAccountName" . }}
       automountServiceAccountToken: false
+      {{- if $dataRegion }}
+      # The migration job handles tenant-owned durable state, so keep it in the same
+      # governed region as the API rather than allowing the scheduler to place it freely.
+      nodeSelector:
+        topology.kubernetes.io/region: {{ $dataRegion | quote }}
+      {{- end }}
       securityContext:
         {{- include "synapse.podSecurityContext" . | nindent 8 }}
       containers:

@@ -26,6 +26,24 @@ for required in 'manage_master_user_password\s*=\s*true' 'storage_encrypted\s*=\
   perl -0777 -ne "BEGIN { \$found = 0 } \$found = 1 if /$required/; END { exit !\$found }" -- ./*.tf || fail "missing required security control: $required"
 done
 
+# #635 data-governance posture: all durable AWS data planes and native worker disks
+# use the same rotating customer-managed KMS key. Do not accept provider-default
+# encryption here because it would make key ownership and rotation unverifiable.
+for required in \
+  'resource\s+"aws_ecr_repository"\s+"app".*?encryption_type\s*=\s*"KMS".*?kms_key\s*=\s*aws_kms_key\.staging\.arn' \
+  'resource\s+"aws_s3_bucket_server_side_encryption_configuration"\s+"evidence".*?kms_master_key_id\s*=\s*aws_kms_key\.staging\.arn.*?sse_algorithm\s*=\s*"aws:kms"' \
+  'resource\s+"aws_db_instance"\s+"postgres".*?storage_encrypted\s*=\s*true.*?kms_key_id\s*=\s*aws_kms_key\.staging\.arn' \
+  'resource\s+"aws_launch_template"\s+"worker".*?encrypted\s*=\s*true.*?kms_key_id\s*=\s*aws_kms_key\.staging\.arn'; do
+  perl -0777 -ne "BEGIN { \$found = 0 } \$found = 1 if /$required/s; END { exit !\$found }" -- ./*.tf || fail "missing governed KMS wiring: $required"
+done
+
+# This reference stack is deliberately single-region. The provider consumes one validated
+# aws_region value and every configured AZ must belong to that same region. Cross-region
+# replication is therefore an explicit separate deployment, never an accidental default.
+grep -Fq 'region = var.aws_region' versions.tf || fail "AWS provider must use the governed aws_region variable"
+perl -0777 -ne 'exit !(/variable\s+"aws_region"\s*\{.*?condition\s*=\s*var\.aws_region\s*==\s*"us-east-1"/s)' variables.tf || fail "staging aws_region must remain explicitly constrained"
+perl -0777 -ne 'exit !(/variable\s+"availability_zones"\s*\{.*?startswith\(az,\s*"us-east-1"\)/s)' variables.tf || fail "availability zones must remain inside the governed region"
+
 for required in 'http_tokens\s*=\s*"required"' 'associate_public_ip_address\s*=\s*false' 'encrypted\s*=\s*true' 'AmazonSSMManagedInstanceCore' 'aws_autoscaling_group" "worker' 'aws_imagebuilder_image" "worker' 'referenced_security_group_id\s*=\s*aws_security_group.worker.id' 'aws_security_group" "grant_authority_nlb' 'aws_subnet" "worker' 'AWSServiceRoleForAutoScaling' 'kms:GrantIsForAWSResource'; do
   perl -0777 -ne "BEGIN { \$found = 0 } \$found = 1 if /$required/; END { exit !\$found }" -- ./*.tf || fail "missing native worker control: $required"
 done
@@ -39,4 +57,4 @@ grep -Fq 'update-ca-trust extract' worker.tf || fail "AMI must install the pinne
 grep -Fq 'worker_trust_anchor_sha256' worker.tf || fail "AMI must verify the private trust anchor digest"
 grep -Fq 'cidrhost(cidr, 4)' locals.tf || fail "grant NLB output must match the fixed private addresses assigned by Helm"
 
-printf '%s\n' 'static security checks passed'
+printf '%s\n' 'static security and data-governance checks passed'

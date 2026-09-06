@@ -67,6 +67,9 @@ jobs:
             exit 1
           fi
 
+      - name: Check AWS staging security and data-governance invariants
+        run: bash deploy/aws/staging/tests/static.sh
+
       - name: Build
         run: go build ./...
 
