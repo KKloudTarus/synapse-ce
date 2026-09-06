@@ -23,10 +23,11 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/purplecoverage"
 )
 
-// defaultCoverageWindow brackets the emulation run when joining detections: it is short because the
-// benign observables and any detection they trigger are near-simultaneous, and a wide window risks
-// counting an unrelated detection as coverage.
-const defaultCoverageWindow = 10 * time.Minute
+// defaultCoverageGrace pads each side of the run's own execution span when joining detections. The join
+// window is anchored to the run (start .. end), not a floating lookback from "now": a wide lookback would
+// count an unrelated detection that fired before the run as coverage. The grace only absorbs clock skew
+// between the control plane and the reporting host and a little detection-ingest latency.
+const defaultCoverageGrace = 2 * time.Minute
 
 // EngagementReader loads authoritative engagement state (scope, window, offensive RoE), tenant-scoped.
 type EngagementReader interface {
@@ -64,7 +65,7 @@ func NewService(engagements EngagementReader, gov Governance, exec exploituc.Ste
 		return nil, fmt.Errorf("%w: emulation run service is missing a dependency", shared.ErrValidation)
 	}
 	if window <= 0 {
-		window = defaultCoverageWindow
+		window = defaultCoverageGrace
 	}
 	return &Service{engagements: engagements, gov: gov, exec: exec, runs: runs, coverage: coverage, audit: audit, clock: clock, ids: ids, window: window}, nil
 }
@@ -122,12 +123,16 @@ func (s *Service) Run(ctx context.Context, engagementID, target shared.ID, actor
 	if err != nil {
 		return Summary{}, fmt.Errorf("build emulation service: %w", err)
 	}
+	start := s.clock.Now().UTC()
 	run, err := emu.Emulate(ctx, tenant, engagementID, target, actor, emuc.Options{AllowLabOnly: allowLab})
 	if err != nil {
 		return Summary{}, fmt.Errorf("run emulation: %w", err)
 	}
-	now := s.clock.Now().UTC()
-	result, err := s.coverage.Compute(ctx, run, purplecoverage.Window{From: now.Add(-s.window), To: now})
+	// Anchor the detection-join window to the run's own execution span, padded by the grace, rather than
+	// a fixed lookback from now: a lookback would count a detection that fired before the run started as
+	// coverage for this run.
+	end := s.clock.Now().UTC()
+	result, err := s.coverage.Compute(ctx, run, purplecoverage.Window{From: start.Add(-s.window), To: end.Add(s.window)})
 	if err != nil {
 		return Summary{}, fmt.Errorf("compute coverage: %w", err)
 	}

@@ -183,8 +183,9 @@ func TestRunAuthorizesProductionSafeTechniquesUnderCompleteRoE(t *testing.T) {
 	if cov.calls != 1 {
 		t.Fatalf("coverage computed %d times, want 1", cov.calls)
 	}
-	if !cov.lastWin.To.Equal(runNow) || !cov.lastWin.From.Equal(runNow.Add(-defaultCoverageWindow)) {
-		t.Errorf("coverage window = [%s,%s], want [%s,%s]", cov.lastWin.From, cov.lastWin.To, runNow.Add(-defaultCoverageWindow), runNow)
+	// The window is anchored at the run (start .. end, both runNow here) padded by the grace on each side.
+	if !cov.lastWin.From.Equal(runNow.Add(-defaultCoverageGrace)) || !cov.lastWin.To.Equal(runNow.Add(defaultCoverageGrace)) {
+		t.Errorf("coverage window = [%s,%s], want [%s,%s]", cov.lastWin.From, cov.lastWin.To, runNow.Add(-defaultCoverageGrace), runNow.Add(defaultCoverageGrace))
 	}
 	if cov.lastRun.ID != runs.saved[0].ID {
 		t.Errorf("coverage joined a different run than was persisted")

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	dexploit "github.com/KKloudTarus/synapse-ce/internal/domain/exploitation"
@@ -39,11 +40,12 @@ func TestExecuteMapsTechniqueToBenignArgv(t *testing.T) {
 		technique string
 		wantName  string
 		wantArgs  []string
+		redacted  bool // a credential-path read withholds its output, so no proof is captured
 	}{
-		{"emu.process_discovery", "ps", []string{"-e"}},
-		{"emu.system_network_config_discovery", "ip", []string{"addr"}},
-		{"emu.dns_beacon_benign", "getent", []string{"hosts", "localhost"}},
-		{"emu.credential_file_read", "head", []string{"-c", "1", "/etc/shadow"}},
+		{"emu.process_discovery", "ps", []string{"-e"}, false},
+		{"emu.system_network_config_discovery", "ip", []string{"addr"}, false},
+		{"emu.dns_beacon_benign", "getent", []string{"hosts", "localhost"}, false},
+		{"emu.credential_file_read", "head", []string{"-c", "1", "/etc/shadow"}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.technique, func(t *testing.T) {
@@ -73,7 +75,11 @@ func TestExecuteMapsTechniqueToBenignArgv(t *testing.T) {
 			if out.ObservedRadius != offensivepolicy.RadiusReadOnly {
 				t.Errorf("ObservedRadius = %q, want read_only", out.ObservedRadius)
 			}
-			if !bytes.Equal(out.Proof, []byte("ok")) {
+			if c.redacted {
+				if len(out.Proof) != 0 {
+					t.Errorf("Proof = %q, want withheld for a credential-path read", out.Proof)
+				}
+			} else if !bytes.Equal(out.Proof, []byte("ok")) {
 				t.Errorf("Proof = %q, want ok", out.Proof)
 			}
 		})
@@ -129,5 +135,34 @@ func TestExecuteBoundsProof(t *testing.T) {
 	out, _ := x.Execute(context.Background(), nil, dexploit.Step{Technique: "emu.process_discovery"})
 	if len(out.Proof) > maxProofBytes {
 		t.Errorf("Proof len = %d, want <= %d", len(out.Proof), maxProofBytes)
+	}
+}
+
+func TestExecuteRedactsCredentialProof(t *testing.T) {
+	fr := &fakeRunner{result: ports.ToolResult{Stdout: []byte("x"), ExitCode: 0}} // one byte of /etc/shadow
+	x, _ := New(fr)
+	out, err := x.Execute(context.Background(), nil, dexploit.Step{Technique: "emu.credential_file_read"})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !out.Succeeded {
+		t.Error("Succeeded = false on exit 0")
+	}
+	if len(out.Proof) != 0 {
+		t.Errorf("Proof captured credential-file content (%q); it must be withheld", out.Proof)
+	}
+	if !strings.Contains(out.Observation, "withheld") {
+		t.Errorf("Observation should note the output was withheld, got %q", out.Observation)
+	}
+}
+
+func TestExecutePropagatesContextCancellation(t *testing.T) {
+	for _, ce := range []error{context.Canceled, context.DeadlineExceeded} {
+		fr := &fakeRunner{err: ce}
+		x, _ := New(fr)
+		_, err := x.Execute(context.Background(), nil, dexploit.Step{Technique: "emu.process_discovery"})
+		if !errors.Is(err, ce) {
+			t.Errorf("context error %v must propagate, got %v", ce, err)
+		}
 	}
 }
