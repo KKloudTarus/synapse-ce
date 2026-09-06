@@ -82,6 +82,23 @@ func (s *DetectionRecordStore) ListDetections(ctx context.Context, engagementID 
 	return out, nil
 }
 
+// ClassCountsByAsset counts the non-expired detections observed on an asset at or after a cutoff,
+// grouped by telemetry class, under the ctx tenant. It feeds the behavior baseline's runtime-anomaly
+// features (#822): the network / privilege / file per-class rates the process snapshot cannot carry.
+func (s *DetectionRecordStore) ClassCountsByAsset(ctx context.Context, assetID shared.ID, since time.Time) (map[detection.Class]int, error) {
+	tenant := shared.TenantOrDefault(tenantFromCtx(ctx))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	counts := map[detection.Class]int{}
+	for _, r := range s.byTenant[tenant] {
+		if r.AssetID == assetID && !r.Expired(now) && !r.RecordedAt.Before(since) {
+			counts[r.Detection.Class]++
+		}
+	}
+	return counts, nil
+}
+
 // HasDetection reports whether a record with this id already exists in the given engagement under the ctx tenant, so ingest can
 // skip an already-sealed detection on a retry (idempotent resume) rather than sealing it twice.
 func (s *DetectionRecordStore) HasDetection(ctx context.Context, engagementID, id shared.ID) (bool, error) {

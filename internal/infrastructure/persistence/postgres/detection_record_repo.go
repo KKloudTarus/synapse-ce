@@ -110,6 +110,37 @@ func (r *DetectionRecordRepository) ListDetections(ctx context.Context, engageme
 	return out, err
 }
 
+// ClassCountsByAsset counts the non-expired detections observed on an asset at or after a cutoff,
+// grouped by telemetry class, tenant-scoped by RLS. It feeds the behavior baseline's runtime-anomaly
+// features (#822): the network / privilege / file per-class rates a process snapshot cannot carry.
+func (r *DetectionRecordRepository) ClassCountsByAsset(ctx context.Context, assetID shared.ID, since time.Time) (map[detection.Class]int, error) {
+	counts := map[detection.Class]int{}
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT class, count(*)
+			FROM detections
+			WHERE asset_id = $1 AND recorded_at >= $2 AND (expires_at IS NULL OR expires_at > now())
+			GROUP BY class`, assetID.String(), since.UTC())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var class string
+			var n int64
+			if err := rows.Scan(&class, &n); err != nil {
+				return err
+			}
+			counts[detection.Class(class)] = int(n)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("count detections by class for asset %s: %w", assetID, err)
+	}
+	return counts, nil
+}
+
 // HasDetection reports whether a record with this id already exists in the given engagement (ctx tenant).
 func (r *DetectionRecordRepository) HasDetection(ctx context.Context, engagementID, id shared.ID) (bool, error) {
 	var exists bool

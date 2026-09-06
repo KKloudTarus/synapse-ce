@@ -1892,7 +1892,15 @@ func main() {
 			log.Error("behavioral baseline service init failed", "err", blErr)
 			os.Exit(1)
 		}
-		behaviorSvc, bhErr := behaviorbaseline.NewService(baselineSvc, endpointProcessStore)
+		// Fold the host's recent per-class detection rate into the behavior baseline (#822): the detection
+		// ledger already stores each detection with its asset and telemetry class, so the network,
+		// privilege and file features the process snapshot cannot carry are read from it. Optional: a
+		// detection store that does not implement the reader (or none) leaves those features at 0.
+		var detRates behaviorbaseline.DetectionRates
+		if dr, ok := detectionRecordStore.(behaviorbaseline.DetectionRates); ok {
+			detRates = dr
+		}
+		behaviorSvc, bhErr := behaviorbaseline.NewService(baselineSvc, endpointProcessStore, detRates, func() time.Time { return clock.Now().UTC() }, 0)
 		if bhErr != nil {
 			log.Error("behavior-baseline producer init failed", "err", bhErr)
 			os.Exit(1)

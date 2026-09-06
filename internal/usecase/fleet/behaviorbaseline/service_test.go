@@ -3,12 +3,25 @@ package behaviorbaseline
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/baseline"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/baselineuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+type fakeRates struct {
+	counts map[detection.Class]int
+	since  time.Time
+	asset  shared.ID
+}
+
+func (f *fakeRates) ClassCountsByAsset(_ context.Context, assetID shared.ID, since time.Time) (map[detection.Class]int, error) {
+	f.asset, f.since = assetID, since
+	return f.counts, nil
+}
 
 type fakeEngine struct {
 	learnedObs  baseline.Observation
@@ -51,7 +64,7 @@ func TestObservationMapsProcessCountAndDistinctPaths(t *testing.T) {
 	procs := fakeProcs{procs: []ports.ProcessSnapshot{
 		{Path: "/usr/sbin/nginx", Running: true}, {Path: "/usr/sbin/nginx", Running: true}, {Path: "/bin/bash", Running: true},
 	}}
-	svc, err := NewService(eng, procs)
+	svc, err := NewService(eng, procs, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,8 +96,40 @@ func TestObservationMapsProcessCountAndDistinctPaths(t *testing.T) {
 	}
 }
 
+func TestObservationFoldsDetectionClassRates(t *testing.T) {
+	eng := &fakeEngine{scoreRet: baselineuc.Assessment{Behavior: 60, Scoreable: true}}
+	procs := fakeProcs{procs: []ports.ProcessSnapshot{{Path: "/bin/bash", Running: true}}}
+	rates := &fakeRates{counts: map[detection.Class]int{detection.ClassNetwork: 5, detection.ClassPrivilege: 2, detection.ClassFile: 3}}
+	now := time.Date(2026, 2, 20, 0, 0, 0, 0, time.UTC)
+	svc, err := NewService(eng, procs, rates, func() time.Time { return now }, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Learn(ctxT(), "operator", "asset-1"); err != nil {
+		t.Fatal(err)
+	}
+	// The network / privilege / file features now come from the host's recent per-class detection rate,
+	// not left at 0 (the #822 fix).
+	if eng.learnedObs.Values[baseline.FeatureNetworkFanout] != 5 ||
+		eng.learnedObs.Values[baseline.FeaturePrivilegeEvents] != 2 ||
+		eng.learnedObs.Values[baseline.FeatureFileWriteBreadth] != 3 {
+		t.Fatalf("detection-fed features wrong: %+v", eng.learnedObs.Values)
+	}
+	// Process features are still mapped from the snapshot.
+	if eng.learnedObs.Values[baseline.FeatureProcessSpawnRate] != 1 {
+		t.Fatalf("process feature wrong: %+v", eng.learnedObs.Values)
+	}
+	// The rate is counted over [now-window, now] for exactly this asset.
+	if !rates.since.Equal(now.Add(-time.Hour)) {
+		t.Fatalf("detection cutoff wrong: got %v want %v", rates.since, now.Add(-time.Hour))
+	}
+	if rates.asset != "asset-1" {
+		t.Fatalf("detection asset wrong: %v", rates.asset)
+	}
+}
+
 func TestBehaviorForRequiresTenant(t *testing.T) {
-	svc, _ := NewService(&fakeEngine{}, fakeProcs{})
+	svc, _ := NewService(&fakeEngine{}, fakeProcs{}, nil, nil, 0)
 	if _, err := svc.BehaviorFor(context.Background(), "asset-1"); err == nil {
 		t.Fatal("a missing tenant must be rejected")
 	}
@@ -94,7 +139,7 @@ func TestBehaviorForRequiresTenant(t *testing.T) {
 // tenant + asset id and drives the engine, so an operator can reset a drifted baseline by asset id.
 func TestRebaselineDerivesTheAssetKeyAndDelegates(t *testing.T) {
 	eng := &fakeEngine{}
-	svc, err := NewService(eng, &fakeProcs{})
+	svc, err := NewService(eng, &fakeProcs{}, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

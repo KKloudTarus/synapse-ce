@@ -9,6 +9,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Runtime detections feed the behavior baseline (#822).** The statistical baseline behind a host's
+  Behavior risk factor only ever saw its process snapshot, so the network, privilege and file features
+  stayed at zero and anomaly scoring never ran over runtime telemetry. The baseline now folds the host's
+  per-class detection rate (network / privilege / file) from the sealed detection ledger over a recent
+  window into the observation, alongside the process features. A new `ClassCountsByAsset` read on the
+  detection store backs it (memory and Postgres, no schema change). The detection source is optional and
+  best-effort: a store error or a deployment without the ledger leaves those features at zero.
+
+
 - **Sequence detection rules (#822).** The detection engine matched single events and, since the rate
   window, bursts; it now also matches an ordered *sequence* of events of one class within a span, grouped
   per host. A new `Sequence` rule type (mutually exclusive with a rate `Window`) carries the ordered step
