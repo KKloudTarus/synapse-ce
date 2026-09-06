@@ -58,4 +58,21 @@ describe('Engagements API', () => {
     })
     expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/engagements/eng%20upload/source')
   })
+
+  it('runEmulation posts the target and maps the tag-less run summary defensively', async () => {
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        run: { ID: 'emu-1', Target: 'asset-1', Coverage: [{ TechniqueID: 'T1', Executed: true }, { TechniqueID: 'T2', Executed: false }] },
+        coverage: { Coverage: [], Bonus: [], Gaps: [] },
+      }),
+    } as Response)
+    const res = await api.runEmulation('eng-1', 'asset-1')
+    expect(res).toEqual({ runId: 'emu-1', techniques: 2, executed: 1 })
+    const [, opts] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(opts.method).toBe('POST')
+    expect(JSON.parse(opts.body as string)).toEqual({ target: 'asset-1' })
+  })
+
 })

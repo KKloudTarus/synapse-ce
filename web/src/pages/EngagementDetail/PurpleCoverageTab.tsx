@@ -7,10 +7,12 @@ import {
   SlashCircle01,
   Target04,
 } from '@untitledui/icons'
-import { Card, EmptyState, ErrorState, Pill, Spinner, cn } from '../../components/ui'
-import { useParallelFetch } from '../../hooks'
+import { Button, Card, EmptyState, ErrorState, Pill, Select, Spinner, cn } from '../../components/ui'
+import { useToast } from '../../components/synapse/Toast'
+import { useFetch, useParallelFetch } from '../../hooks'
 import { api } from '../../lib/api'
 import type { PurpleCoverageRow, PurpleWorkItem } from '../../lib/api'
+import type { TechnicalAsset } from '../../lib/types'
 
 interface RunSummary {
   runId: string
@@ -204,10 +206,72 @@ function GapList({ items, loading, error }: { items: PurpleWorkItem[]; loading: 
   )
 }
 
+// RunEmulationControl triggers a governed adversary-emulation run against a chosen asset and refreshes the
+// coverage once it completes. The run is admitted per technique through the engagement's rules of
+// engagement, so a technique the RoE does not permit is recorded as a gap rather than executed.
+function RunEmulationControl({ engagementId, onRan }: { engagementId: string; onRan: () => void }) {
+  const { data: assets } = useFetch<TechnicalAsset[]>(() => api.listTechnicalAssets(), { deps: [] })
+  const [target, setTarget] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const { notify } = useToast()
+
+  const options = useMemo(
+    () => [
+      { value: '', label: assets && assets.length > 0 ? 'Select a target asset…' : 'No assets enrolled' },
+      ...(assets ?? []).map((a) => ({ value: a.id, label: `${a.name} (${a.kind})` })),
+    ],
+    [assets],
+  )
+
+  async function run() {
+    if (!target) return
+    setBusy(true)
+    setErr('')
+    try {
+      const res = await api.runEmulation(engagementId, target)
+      // A toast, not local state: the parent shows a page-level spinner while coverage refetches, which
+      // unmounts this control, so an inline message would be discarded.
+      notify(`Emulation complete: ${res.executed} of ${res.techniques} techniques executed.`, 'success')
+      onRan()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to run emulation')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card
+      title="Run adversary emulation"
+      actions={
+        <Button loading={busy} disabled={!target} onClick={run} variant="primary" className="px-3 py-1.5">
+          <ShieldTick className="size-4" /> Run emulation
+        </Button>
+      }
+    >
+      <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
+        <div className="space-y-1.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">Target asset</div>
+          <Select value={target} onValueChange={setTarget} size="sm" aria-label="Target asset" className="w-80" options={options} />
+        </div>
+      </div>
+      <p className="mt-3 text-xs text-tertiary">
+        Runs the ATT&CK technique catalogue against the asset under this engagement's rules of engagement,
+        then joins each expected detection against what actually fired. A technique the rules of engagement
+        do not permit is recorded as not executed, never run.
+      </p>
+      {!target && <p className="mt-1 text-xs text-quaternary">Select a target asset to enable the run.</p>}
+      {err && <p className="mt-2 text-xs text-error-primary">{err}</p>}
+    </Card>
+  )
+}
+
 export function PurpleCoverageTab({ engagementId }: { engagementId: string }) {
+  const [refreshKey, setRefreshKey] = useState(0)
   const { data, loading, error } = useParallelFetch<[PurpleCoverageRow[]]>(
     () => Promise.all([api.purpleCoverage(engagementId)]),
-    { deps: [engagementId] },
+    { deps: [engagementId, refreshKey] },
   )
 
   const runs = useMemo(() => summarize(data?.[0] ?? []), [data])
@@ -244,15 +308,19 @@ export function PurpleCoverageTab({ engagementId }: { engagementId: string }) {
   if (error) return <ErrorState message={error} />
   if (runs.length === 0)
     return (
-      <EmptyState
-        icon={ShieldTick}
-        title="No purple-team coverage yet"
-        hint="Run an adversary emulation on an enrolled asset; coverage joins each executed technique with the detections that fired."
-      />
+      <div className="space-y-6">
+        <RunEmulationControl engagementId={engagementId} onRan={() => setRefreshKey((k) => k + 1)} />
+        <EmptyState
+          icon={ShieldTick}
+          title="No purple-team coverage yet"
+          hint="Run an adversary emulation on an enrolled asset; coverage joins each executed technique with the detections that fired."
+        />
+      </div>
     )
 
   return (
     <div className="space-y-6">
+      <RunEmulationControl engagementId={engagementId} onRan={() => setRefreshKey((k) => k + 1)} />
       <SummaryCard latest={runs[0]} />
       {runs.length > 1 && (
         <Card title="Coverage by emulation run">

@@ -9,6 +9,18 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Adversary emulation is reachable and produces purple-team coverage.** The emulation catalogue, its
+  run store, the offensive governance policy, and the purple-coverage read route all existed and were
+  tested, but nothing ran an emulation: no composition root constructed the producer, so the purple panel
+  read an empty store. `POST /api/v1/engagements/{id}/emulation` (operate-gated) now runs the technique
+  catalogue against a target asset, admitting each technique through the engagement's offensive rules of
+  engagement (the same #418 governance the exploitation chains use), then computes and persists the purple
+  coverage the dashboard reads. A technique the rules of engagement do not permit is recorded as not
+  executed (verdict unknown), never run. Emulation executes through a no-host simulation executor, so the governed measurement is
+  honest and testable without touching a host; the real host executor stays a deliberate extension point.
+  This also constructs the offensive governance service for the first time, which enforces an engagement's
+  risk ceiling, authorization window, and recorded approvals on every technique.
+
 - **Engagements carry their offensive rules of engagement.** The offensive governance policy refuses
   adversary emulation and exploitation chains until an engagement declares its customer and emergency
   contacts, a risk ceiling (`low`/`medium`/`high`/`prohibited`), and that the out-of-scope list was

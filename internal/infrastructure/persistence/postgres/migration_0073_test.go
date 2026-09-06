@@ -128,4 +128,12 @@ func TestMigration0073EmulationRuns(t *testing.T) {
 	if !errors.As(ckErr2, &pgErr) || pgErr.Code != "23514" {
 		t.Fatalf("a matched detection recorded as a gap must fail a CHECK, got %v", ckErr2)
 	}
+
+	// The store derives the write tenant from the context and rejects a run that claims a different one,
+	// so a producer cannot write into another tenant's partition (defense in depth over RLS).
+	foreign := run
+	foreign.TenantID = shared.ID("tenant-foreign-0073")
+	if err := repo.SaveRun(ctx, foreign); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("cross-tenant SaveRun = %v, want ErrForbidden", err)
+	}
 }

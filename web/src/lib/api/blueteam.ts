@@ -146,6 +146,25 @@ export const blueteamApi = {
     )
     return Array.isArray(r?.work_items) ? r.work_items.map(mapPurpleWorkItem) : []
   },
+  /** Run adversary emulation against a target asset, producing purple coverage. PermOperate. Returns a
+   *  small summary; the coverage itself is read back through purpleCoverage. */
+  runEmulation: async (
+    engagementId: string,
+    target: string,
+  ): Promise<{ runId: string; techniques: number; executed: number }> => {
+    const r = await req(`/engagements/${encodeURIComponent(engagementId)}/emulation`, {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    })
+    // demu.Run carries no json tags, so keys are the capitalized Go field names; read defensively.
+    const run = r?.run ?? {}
+    const coverage: unknown[] = Array.isArray(run.Coverage) ? run.Coverage : Array.isArray(run.coverage) ? run.coverage : []
+    const executed = coverage.filter((c) => {
+      const rec = c as Record<string, unknown>
+      return rec?.Executed === true || rec?.executed === true
+    }).length
+    return { runId: run.ID ?? run.id ?? '', techniques: coverage.length, executed }
+  },
   /** Halt every offensive path fleet-wide (kill switch). PermAdminister. */
   haltOffensive: async (reason: string): Promise<HaltResult> => {
     const r = await req('/redteam/halt', { method: 'POST', body: JSON.stringify({ reason }) })

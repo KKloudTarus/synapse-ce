@@ -112,6 +112,7 @@ import (
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/egressgrant"
+	emulationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/emulation"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
@@ -157,6 +158,7 @@ import (
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	promotionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/promotion"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/purplecoverage"
+	purpleteamuc "github.com/KKloudTarus/synapse-ce/internal/usecase/purpleteam"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/pyreach"
 	qualitygatesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualitygates"
 	qualityprofilesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualityprofiles"
@@ -358,6 +360,7 @@ func main() {
 	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
 	var detectionRecordStore ports.DetectionRecordStore // #423 detection ledger projection
 	var purpleCoverageStore ports.PurpleCoverageStore   // #426 emulated technique vs observed detection
+	var emulationRunStore emulationuc.RunStore          // #426 adversary-emulation run producer
 	// Registry of the LLM agent runs executing in this process, so the offensive kill switch can cancel
 	// one mid-decision. Declared here because the kill switch is built before the orchestrator is.
 	agentRunRegistry := orchestrator.NewRunRegistry()
@@ -495,6 +498,7 @@ func main() {
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
 		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
 		purpleCoverageStore = postgres.NewPurpleRepository(pool)
+		emulationRunStore = postgres.NewEmulationRunRepository(pool)
 		detectionProvenanceStore, err = postgres.NewDetectionProvenanceRepository(pool)
 		if err != nil {
 			log.Error("postgres detection provenance store init failed", "err", err)
@@ -638,6 +642,7 @@ func main() {
 		importedFindingStore = memory.NewImportedFindingStore()
 		detectionRecordStore = memory.NewDetectionRecordStore()
 		purpleCoverageStore = memory.NewPurpleStore()
+		emulationRunStore = memory.NewEmulationRunStore()
 		detectionProvenanceStore = memory.NewDetectionProvenanceStore()
 		incidentEventStore = memory.NewIncidentEventStore()
 		memoryFindings, ok := findingRepo.(*memory.FindingRepository)
@@ -1645,6 +1650,22 @@ func main() {
 	router.SetOffensivePolicy(offensiveRegister)
 	log.Info("offensive policy register loaded", "techniques", len(offensiveRegister.TechniqueIDs()), "counsel_reviewed", offensiveRegister.LegalReview.CounselReviewed, "route", "GET /api/v1/redteam/policy")
 
+	// The offensive governance SERVICE (not just the register): it authorizes one technique against one
+	// target under an engagement's rules of engagement, sealing the authorization as evidence. It gates the
+	// offensive pillar (adversary emulation now, exploitation chains next), so an incomplete RoE refuses.
+	offensiveSealer := offensivepolicyuc.NewEvidenceChainSealer(func(ctx context.Context, engagementID shared.ID, kind string, content []byte, createdBy string) (shared.ID, error) {
+		ev, serr := evidenceService.Seal(ctx, engagementID, kind, content, createdBy)
+		if serr != nil {
+			return "", serr
+		}
+		return ev.ID, nil
+	})
+	offensivePolicySvc, operr := offensivepolicyuc.NewService(offensiveRegister, offensiveSealer, auditLog)
+	if operr != nil {
+		log.Error("offensive policy service init failed", "err", operr)
+		os.Exit(1)
+	}
+
 	// Operator alerting (#822): a signed webhook that receives every incident correlation opens, plus the
 	// correlator handle detection ingest uses so an incident exists as soon as its detections are sealed.
 	var alertSvc *alertinguc.Service
@@ -1817,6 +1838,19 @@ func main() {
 			os.Exit(1)
 		} else {
 			router.SetPurpleCoverageReader(purpleSvc)
+			// #426 producer: run the governed adversary-emulation catalogue and compute the coverage the
+			// reader above serves, so the purple panel shows measured coverage instead of an empty store.
+			// Emulation runs through a no-host SimulationExecutor; the real host executor stays a deliberate
+			// extension point.
+			if emulationRunStore != nil {
+				ptSvc, pterr := purpleteamuc.NewService(repo, offensivePolicySvc, exploitationuc.SimulationExecutor{}, emulationRunStore, purpleSvc, auditLog, clock, ids)
+				if pterr != nil {
+					log.Error("purple-team emulation producer init failed", "err", pterr)
+					os.Exit(1)
+				}
+				router.SetPurpleTeam(ptSvc)
+				log.Info("adversary emulation ENABLED (governed, no-host simulation)", "route", "POST /api/v1/engagements/{id}/emulation")
+			}
 		}
 		// The ingest writes an append-only audit entry asserting that N external results entered an
 		// engagement. Without Postgres those rows live only in this process, so the banner says so
