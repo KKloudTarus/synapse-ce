@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -143,11 +144,17 @@ func (r *EngagementRepository) Update(ctx context.Context, e *engagement.Engagem
 }
 
 // Delete removes an engagement; ON DELETE CASCADE drops its scope, findings,
-// comments, evidence, recon runs, and retests. Idempotent (no error if absent).
-// Used to roll back a partially-materialized import.
+// comments, evidence, recon runs, and retests. Retained scan-run provenance
+// deliberately uses RESTRICT and is surfaced as a conflict. Idempotent (no
+// error if absent). Used to roll back a partially-materialized import.
 func (r *EngagementRepository) Delete(ctx context.Context, id shared.ID) error {
 	return WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM engagements WHERE id=$1`, id.String()); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" &&
+				(pgErr.ConstraintName == "fk_scan_runs_engagement" || pgErr.ConstraintName == "fk_scan_run_lanes_engagement") {
+				return fmt.Errorf("%w: engagement has retained scan-run provenance", shared.ErrConflict)
+			}
 			return fmt.Errorf("delete engagement: %w", err)
 		}
 		return nil

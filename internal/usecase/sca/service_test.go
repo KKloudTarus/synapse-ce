@@ -325,13 +325,14 @@ func TestCodeQualityRequiresExplicitScanOption(t *testing.T) {
 }
 
 func TestCodeQualityFindingsPersistWithScan(t *testing.T) {
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	now := time.Unix(100, 0).UTC()
 	findings := memory.NewFindingRepository()
 	runs := memory.NewScanRunStore()
 	results := memory.NewScanResultStore()
 	evidenceStore := &fakeEvidence{}
-	evidenceService, err := evidenceuc.NewService(evidenceStore, nil, &fakeAudit{}, fakeClock{t: now}, fakeIDs{})
+	ids := &sequenceIDs{}
+	evidenceService, err := evidenceuc.NewService(evidenceStore, nil, &fakeAudit{}, fakeClock{t: now}, ids)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +342,7 @@ func TestCodeQualityFindingsPersistWithScan(t *testing.T) {
 		Status: finding.StatusOpen, Kind: finding.KindQuality, RuleKey: "quality-high-complexity", DedupKey: "cq:quality:quality-high-complexity:internal/handler.go:42",
 	}}}}
 	svc := NewService(
-		&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, findings, nil, results, nil, runs, evidenceService, fakeIDs{},
+		&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, findings, nil, results, nil, runs, evidenceService, ids,
 		ports.Provenance{}, fakeClock{t: now}, &fakeAudit{}, shared.SeverityHigh, 0,
 		&fakeAcquirer{dir: "/tmp/ws"}, &fakeDetector{}, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil,
 	)
@@ -383,7 +384,7 @@ func TestCodeQualityFindingsPersistWithScan(t *testing.T) {
 }
 
 func TestCodeQualityFailurePersistsNoFindings(t *testing.T) {
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	findings := memory.NewFindingRepository()
 	runs := memory.NewScanRunStore()
 	results := memory.NewScanResultStore()
@@ -1284,6 +1285,13 @@ type fakeIDs struct{}
 
 func (fakeIDs) NewID() shared.ID { return shared.ID("scan-job-1") }
 
+type sequenceIDs struct{ next int }
+
+func (s *sequenceIDs) NewID() shared.ID {
+	s.next++
+	return shared.ID(fmt.Sprintf("scan-sequence-%d", s.next))
+}
+
 func newAsyncSvc(repo ports.EngagementRepository, clk ports.Clock, acq ports.Acquirer, audit ports.AuditLogger, det ports.LanguageDetector, jobs ports.ScanJobStore, ids ports.IDGenerator) *Service {
 	return NewService(repo, nil, nil, nil, jobs, nil, nil, ids, ports.Provenance{}, clk, audit, shared.SeverityHigh, 0, acq, det, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
 }
@@ -1848,7 +1856,7 @@ func TestScanDegradesWhenSBOMGenerationFails(t *testing.T) {
 }
 
 func TestEvidenceFailurePreventsPersistence(t *testing.T) {
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	findings := memory.NewFindingRepository()
 	runs := memory.NewScanRunStore()
 	results := memory.NewScanResultStore()
