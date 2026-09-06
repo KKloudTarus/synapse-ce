@@ -101,6 +101,7 @@ describe('engagement wire contract', () => {
         blackouts: [{ from: '2026-09-06T00:00:00Z', to: '2026-09-07T00:00:00Z' }],
       },
       liveReconEnabled: true,
+      offensiveRoe: { customerContact: '', emergencyContact: '', riskCeiling: '', exclusionsChecked: false },
       createdAt: '2026-09-05T02:56:56.617935338Z',
       businessAssetId: 'ba-77',
       findingsCount: undefined,

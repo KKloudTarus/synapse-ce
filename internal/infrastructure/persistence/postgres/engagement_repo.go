@@ -17,7 +17,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-const engagementCols = `id, tenant_id, project_id, business_asset_id, name, client, status, authorized_from, authorized_to, created_at, updated_at, timezone, roe, live_recon, created_by, updated_by, host_asset_id`
+const engagementCols = `id, tenant_id, project_id, business_asset_id, name, client, status, authorized_from, authorized_to, created_at, updated_at, timezone, roe, live_recon, created_by, updated_by, host_asset_id, customer_contact, emergency_contact, risk_ceiling, exclusions_checked`
 
 // EngagementRepository persists engagements and their scope to PostgreSQL.
 type EngagementRepository struct{ pool *pgxpool.Pool }
@@ -43,10 +43,11 @@ func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagem
 			return fmt.Errorf("marshal roe: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NULLIF($17,''))`,
+			`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NULLIF($17,''),$18,$19,$20,$21)`,
 			e.ID.String(), tenantID.String(), e.ProjectID.String(), e.BusinessAssetID.String(), e.Name, e.Client, string(e.Status),
 			e.AuthorizedFrom, e.AuthorizedTo, e.Audit.CreatedAt, e.Audit.UpdatedAt, e.Timezone, roeJSON, e.LiveReconEnabled,
-			e.Audit.CreatedBy, e.Audit.UpdatedBy, e.HostAssetID.String()); err != nil {
+			e.Audit.CreatedBy, e.Audit.UpdatedBy, e.HostAssetID.String(),
+			e.CustomerContact, e.EmergencyContact, e.RiskCeiling, e.ExclusionsChecked); err != nil {
 			return fmt.Errorf("insert engagement: %w", err)
 		}
 
@@ -111,9 +112,10 @@ func (r *EngagementRepository) Update(ctx context.Context, e *engagement.Engagem
 			return fmt.Errorf("marshal roe: %w", err)
 		}
 		ct, err := tx.Exec(ctx,
-			`UPDATE engagements SET name=$2, client=$3, status=$4, authorized_from=$5, authorized_to=$6, timezone=$7, updated_at=$8, roe=$9, live_recon=$10, updated_by=$11, business_asset_id=NULLIF($12,'') WHERE id=$1`,
+			`UPDATE engagements SET name=$2, client=$3, status=$4, authorized_from=$5, authorized_to=$6, timezone=$7, updated_at=$8, roe=$9, live_recon=$10, updated_by=$11, business_asset_id=NULLIF($12,''), customer_contact=$13, emergency_contact=$14, risk_ceiling=$15, exclusions_checked=$16 WHERE id=$1`,
 			e.ID.String(), e.Name, e.Client, string(e.Status),
-			e.AuthorizedFrom, e.AuthorizedTo, e.Timezone, e.Audit.UpdatedAt, roeJSON, e.LiveReconEnabled, e.Audit.UpdatedBy, e.BusinessAssetID.String())
+			e.AuthorizedFrom, e.AuthorizedTo, e.Timezone, e.Audit.UpdatedAt, roeJSON, e.LiveReconEnabled, e.Audit.UpdatedBy, e.BusinessAssetID.String(),
+			e.CustomerContact, e.EmergencyContact, e.RiskCeiling, e.ExclusionsChecked)
 		if err != nil {
 			return fmt.Errorf("update engagement: %w", err)
 		}
@@ -433,7 +435,7 @@ func scanEngagement(row rowScanner) (*engagement.Engagement, error) {
 		af, at                     pgtype.Timestamptz
 		roeJSON                    []byte
 	)
-	if err := row.Scan(&idStr, &ten, &projectID, &businessAssetID, &e.Name, &e.Client, &st, &af, &at, &e.Audit.CreatedAt, &e.Audit.UpdatedAt, &e.Timezone, &roeJSON, &e.LiveReconEnabled, &e.Audit.CreatedBy, &e.Audit.UpdatedBy, &hostAssetID); err != nil {
+	if err := row.Scan(&idStr, &ten, &projectID, &businessAssetID, &e.Name, &e.Client, &st, &af, &at, &e.Audit.CreatedAt, &e.Audit.UpdatedAt, &e.Timezone, &roeJSON, &e.LiveReconEnabled, &e.Audit.CreatedBy, &e.Audit.UpdatedBy, &hostAssetID, &e.CustomerContact, &e.EmergencyContact, &e.RiskCeiling, &e.ExclusionsChecked); err != nil {
 		return nil, err
 	}
 	if len(roeJSON) > 0 {

@@ -39,6 +39,12 @@ function mapEngagement(r: EngagementWire): Engagement {
       blackouts: (r.roe?.blackouts ?? []).map((b) => ({ from: b?.from ?? '', to: b?.to ?? '' })),
     },
     liveReconEnabled: r.live_recon_enabled ?? false,
+    offensiveRoe: {
+      customerContact: r.offensive_roe?.customer_contact ?? '',
+      emergencyContact: r.offensive_roe?.emergency_contact ?? '',
+      riskCeiling: r.offensive_roe?.risk_ceiling ?? '',
+      exclusionsChecked: r.offensive_roe?.exclusions_checked ?? false,
+    },
     createdAt: r.created_at ?? null,
     businessAssetId: r.business_asset_id ?? '',
     // Optional list-view enrichment; stays undefined when the API omits it.
@@ -116,6 +122,27 @@ export const engagementsApi = {
       await req(`/engagements/${encodeURIComponent(id)}/authorization-window`, {
         method: 'PUT',
         body: JSON.stringify({ authorized_from: authorizedFrom, authorized_to: authorizedTo, timezone }),
+      }),
+    ),
+
+  setOffensiveRoE: async (
+    id: string,
+    roe: {
+      customerContact: string
+      emergencyContact: string
+      riskCeiling: string
+      exclusionsChecked: boolean
+    },
+  ): Promise<Engagement> =>
+    mapEngagement(
+      await req(`/engagements/${encodeURIComponent(id)}/offensive-roe`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          customer_contact: roe.customerContact,
+          emergency_contact: roe.emergencyContact,
+          risk_ceiling: roe.riskCeiling,
+          exclusions_checked: roe.exclusionsChecked,
+        }),
       }),
     ),
 

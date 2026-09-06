@@ -21,7 +21,7 @@ var wireContract = map[string][]string{
 	"engagementView": {
 		"id", "tenant_id", "project_id", "business_asset_id", "name", "client", "status",
 		"scope", "roe", "authorized_from", "authorized_to", "timezone", "live_recon_enabled",
-		"created_at", "updated_at",
+		"offensive_roe", "created_at", "updated_at",
 		// list enrichment, present only on listEngagements rows with the stores wired
 		"findings_count", "last_scan_date", "last_scan_status",
 	},
@@ -32,6 +32,7 @@ var wireContract = map[string][]string{
 	"engagementFindingsView": {"total", "critical", "high", "medium", "low", "info"},
 	"scopeView":              {"in_scope", "out_of_scope"},
 	"roeView":                {"allowed_tool_classes", "blackouts"},
+	"offensiveRoEView":       {"customer_contact", "emergency_contact", "risk_ceiling", "exclusions_checked"},
 	"blackoutView":           {"from", "to"},
 }
 

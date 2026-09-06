@@ -73,7 +73,49 @@ type Engagement struct {
 	// explicitly enabled per engagement. Default false (off).
 	LiveReconEnabled bool
 
+	// Offensive rules of engagement. The offensive governance policy (adversary emulation, exploitation
+	// chains) refuses ANY offensive action until these are set, so they gate the whole offensive pillar,
+	// not display. CustomerContact and EmergencyContact are who to reach when an action goes wrong;
+	// RiskCeiling is the highest risk class an action may carry ("low"/"medium"/"high"/"prohibited", empty
+	// = unset = offensive refused); ExclusionsChecked records that an operator reviewed the out-of-scope
+	// list, so an empty exclusion set means "nothing excluded" rather than "nobody looked".
+	CustomerContact   string
+	EmergencyContact  string
+	RiskCeiling       string
+	ExclusionsChecked bool
+
 	Audit shared.Audit
+}
+
+// RiskCeilingValues are the risk classes an engagement may set as its offensive ceiling. They mirror the
+// offensive-policy domain's RiskClass; the engagement stays decoupled by storing the value as a string and
+// letting the offensive-policy layer map and enforce it.
+var RiskCeilingValues = []string{"low", "medium", "high", "prohibited"}
+
+func validRiskCeiling(v string) bool {
+	for _, c := range RiskCeilingValues {
+		if v == c {
+			return true
+		}
+	}
+	return false
+}
+
+// SetOffensiveRoE sets the offensive rules of engagement and stamps UpdatedAt. Contacts are trimmed; an
+// empty contact clears it (which the offensive gate then refuses on). RiskCeiling must be one of
+// RiskCeilingValues or empty (empty leaves the offensive pillar refused). ExclusionsChecked is the
+// operator's explicit confirmation that the out-of-scope list was reviewed.
+func (e *Engagement) SetOffensiveRoE(customerContact, emergencyContact, riskCeiling string, exclusionsChecked bool, now time.Time) error {
+	riskCeiling = strings.TrimSpace(strings.ToLower(riskCeiling))
+	if riskCeiling != "" && !validRiskCeiling(riskCeiling) {
+		return fmt.Errorf("%w: risk_ceiling must be one of low, medium, high, prohibited", shared.ErrValidation)
+	}
+	e.CustomerContact = strings.TrimSpace(customerContact)
+	e.EmergencyContact = strings.TrimSpace(emergencyContact)
+	e.RiskCeiling = riskCeiling
+	e.ExclusionsChecked = exclusionsChecked
+	e.Audit.UpdatedAt = now
+	return nil
 }
 
 // SetLiveRecon toggles whether live reconnaissance may run for this engagement and

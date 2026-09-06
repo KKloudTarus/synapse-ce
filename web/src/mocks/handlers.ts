@@ -149,7 +149,7 @@ const CAPABILITIES = [
 export const ENGAGEMENTS = [
   { id: 'eng-001', tenant_id: 'tenant-dev', project_id: '', business_asset_id: 'ba-001', name: 'synapse-ce-audit', client: 'Internal', status: 'active', findings_count: { total: 45, critical: 4, high: 12, medium: 19, low: 10, info: 0 }, last_scan_date: HOUR_AGO, last_scan_status: 'succeeded', scope: { in_scope: [{ kind: 'repo', value: 'https://github.com/KKloudTarus/synapse-ce.git' }], out_of_scope: [] }, roe: { allowed_tool_classes: [], blackouts: [] }, authorized_from: MONTH_AGO, authorized_to: null, timezone: 'UTC', live_recon_enabled: false, created_at: MONTH_AGO, updated_at: MONTH_AGO },
   { id: 'eng-002', tenant_id: 'tenant-dev', project_id: '', business_asset_id: '', name: 'gin-framework-scan', client: 'OSS Review', status: 'completed', findings_count: { total: 3, critical: 0, high: 1, medium: 2, low: 0, info: 0 }, last_scan_date: WEEK_AGO, last_scan_status: 'succeeded', scope: { in_scope: [{ kind: 'repo', value: 'https://github.com/gin-gonic/gin.git' }], out_of_scope: [] }, roe: { allowed_tool_classes: [], blackouts: [] }, authorized_from: WEEK_AGO, authorized_to: null, timezone: 'UTC', live_recon_enabled: false, created_at: WEEK_AGO, updated_at: WEEK_AGO },
-  { id: 'eng-003', tenant_id: 'tenant-dev', project_id: '', business_asset_id: 'ba-002', name: 'api-pentest-q3', client: 'Acme Corp', status: 'active', findings_count: { total: 8, critical: 0, high: 2, medium: 4, low: 2, info: 0 }, last_scan_date: DAY_AGO, last_scan_status: 'failed', scope: { in_scope: [{ kind: 'domain', value: 'api.acme.io' }, { kind: 'url', value: 'https://api.acme.io/v2' }], out_of_scope: [{ kind: 'host', value: '10.0.0.0/8' }] }, roe: { allowed_tool_classes: ['scanner', 'fuzzer'], blackouts: [] }, authorized_from: WEEK_AGO, authorized_to: new Date(Date.now() + 30 * 86400_000).toISOString(), timezone: 'UTC', live_recon_enabled: true, created_at: WEEK_AGO, updated_at: WEEK_AGO },
+  { id: 'eng-003', tenant_id: 'tenant-dev', project_id: '', business_asset_id: 'ba-002', name: 'api-pentest-q3', client: 'Acme Corp', status: 'active', findings_count: { total: 8, critical: 0, high: 2, medium: 4, low: 2, info: 0 }, last_scan_date: DAY_AGO, last_scan_status: 'failed', scope: { in_scope: [{ kind: 'domain', value: 'api.acme.io' }, { kind: 'url', value: 'https://api.acme.io/v2' }], out_of_scope: [{ kind: 'host', value: '10.0.0.0/8' }] }, roe: { allowed_tool_classes: ['scanner', 'fuzzer'], blackouts: [] }, authorized_from: WEEK_AGO, authorized_to: new Date(Date.now() + 30 * 86400_000).toISOString(), timezone: 'UTC', live_recon_enabled: true, offensive_roe: { customer_contact: 'Alex Rivera <alex@acme.io>', emergency_contact: '+1-555-0142 (SOC)', risk_ceiling: 'high', exclusions_checked: true }, created_at: WEEK_AGO, updated_at: WEEK_AGO },
   { id: 'eng-004', tenant_id: 'tenant-dev', project_id: '', business_asset_id: 'ba-004', name: 'payment-gateway-review', client: 'Payments', status: 'active', findings_count: { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 }, last_scan_date: HOUR_AGO, last_scan_status: 'running', scope: { in_scope: [{ kind: 'repo', value: 'https://github.com/internal/payment-service.git' }], out_of_scope: [] }, roe: { allowed_tool_classes: [], blackouts: [] }, authorized_from: DAY_AGO, authorized_to: null, timezone: 'UTC', live_recon_enabled: false, created_at: DAY_AGO, updated_at: DAY_AGO },
   { id: 'eng-005', tenant_id: 'tenant-dev', project_id: '', business_asset_id: 'ba-005', name: 'auth-hardening', client: '', status: 'draft', scope: { in_scope: [{ kind: 'repo', value: 'https://github.com/internal/auth-service.git' }], out_of_scope: [] }, roe: { allowed_tool_classes: [], blackouts: [] }, authorized_from: null, authorized_to: null, timezone: 'UTC', live_recon_enabled: false, created_at: DAY_AGO, updated_at: DAY_AGO },
   { id: 'eng-006', tenant_id: 'tenant-dev', project_id: '', business_asset_id: '', name: 'mobile-app-scan', client: '', status: 'draft', scope: { in_scope: [{ kind: 'repo', value: 'https://github.com/internal/mobile-app.git' }], out_of_scope: [] }, roe: { allowed_tool_classes: [], blackouts: [] }, authorized_from: null, authorized_to: null, timezone: 'UTC', live_recon_enabled: false, created_at: NOW, updated_at: NOW },
@@ -523,6 +523,21 @@ export const handlers = [
   http.patch('/api/v1/engagements/:id', ({ params }) => {
     const eng = ENGAGEMENTS.find(e => e.id === params.id) ?? ENGAGEMENTS[0]
     return HttpResponse.json(eng)
+  }),
+  http.put('/api/v1/engagements/:id/offensive-roe', async ({ params, request }) => {
+    const eng = ENGAGEMENTS.find(e => e.id === params.id) ?? ENGAGEMENTS[0]
+    const body = (await request.json()) as {
+      customer_contact?: string; emergency_contact?: string; risk_ceiling?: string; exclusions_checked?: boolean
+    }
+    return HttpResponse.json({
+      ...eng,
+      offensive_roe: {
+        customer_contact: body.customer_contact ?? '',
+        emergency_contact: body.emergency_contact ?? '',
+        risk_ceiling: body.risk_ceiling ?? '',
+        exclusions_checked: body.exclusions_checked ?? false,
+      },
+    })
   }),
 
   // --- Engagement Findings (raw PascalCase array -- mapFinding expects this) ---

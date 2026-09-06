@@ -47,6 +47,12 @@ export interface EngagementWire {
   authorized_to: string | null
   timezone?: string
   live_recon_enabled: boolean
+  offensive_roe?: {
+    customer_contact?: string
+    emergency_contact?: string
+    risk_ceiling?: string
+    exclusions_checked?: boolean
+  }
   created_at: string
   updated_at: string
   /** List-view enrichment. Not part of `engagementView`; present only where the API adds it. */
@@ -96,6 +102,7 @@ export const ENGAGEMENT_WIRE_KEYS = [
   'authorized_to',
   'timezone',
   'live_recon_enabled',
+  'offensive_roe',
   'created_at',
   'updated_at',
   // List enrichment (listEngagements): present only on list rows with the stores wired.

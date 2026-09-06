@@ -43,6 +43,14 @@ export interface Capability {
   requires: string[]
 }
 
+/** Offensive rules of engagement. riskCeiling is '' | 'low' | 'medium' | 'high' | 'prohibited'. */
+export interface OffensiveRoe {
+  customerContact: string
+  emergencyContact: string
+  riskCeiling: string
+  exclusionsChecked: boolean
+}
+
 export interface Engagement {
   id: string
   name: string
@@ -54,6 +62,9 @@ export interface Engagement {
   authorizedTo: string | null
   roe: RoE
   liveReconEnabled: boolean
+  /** Offensive rules of engagement the governance policy requires before emulation / exploitation.
+   *  Always populated by mapEngagement from the API; optional here so lightweight fixtures may omit it. */
+  offensiveRoe?: OffensiveRoe
   createdAt: string | null
   businessAssetId: string
   /** List-view enrichment. Absent unless the API includes it; the Engagements
