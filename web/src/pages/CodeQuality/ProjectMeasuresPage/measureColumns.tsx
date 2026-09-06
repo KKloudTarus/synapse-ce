@@ -249,7 +249,12 @@ export function getDomainColumns(
         return [
           ...base,
           {
-            header: '🐞 Bugs',
+            header: (
+              <span className="inline-flex items-center gap-1.5">
+                <Virus className="size-3.5 text-warning-primary" aria-hidden />
+                Bugs
+              </span>
+            ),
             cell: (i) => {
               const count = i.issues?.byType['bug']?.value
               return count && count > 0 ? (
@@ -262,7 +267,12 @@ export function getDomainColumns(
             },
           },
           {
-            header: '🛡️ Vulnerabilities',
+            header: (
+              <span className="inline-flex items-center gap-1.5">
+                <ShieldTick className="size-3.5 text-error-primary" aria-hidden />
+                Vulnerabilities
+              </span>
+            ),
             cell: (i) => {
               const count = i.issues?.byType['vulnerability']?.value
               return count && count > 0 ? (
@@ -275,7 +285,12 @@ export function getDomainColumns(
             },
           },
           {
-            header: '🔧 Code Smells',
+            header: (
+              <span className="inline-flex items-center gap-1.5">
+                <Tool01 className="size-3.5 text-utility-blue-600 dark:text-utility-blue-400" aria-hidden />
+                Code Smells
+              </span>
+            ),
             cell: (i) => {
               const count = i.issues?.byType['code_smell']?.value
               return count && count > 0 ? (
@@ -288,7 +303,12 @@ export function getDomainColumns(
             },
           },
           {
-            header: '🔥 Hotspots',
+            header: (
+              <span className="inline-flex items-center gap-1.5">
+                <Zap className="size-3.5 text-warning-primary" aria-hidden />
+                Hotspots
+              </span>
+            ),
             cell: (i) => {
               const count = i.issues?.byType['security_hotspot']?.value
               return count && count > 0 ? (

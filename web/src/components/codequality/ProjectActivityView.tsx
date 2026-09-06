@@ -465,8 +465,8 @@ function Trend({ metric, points }: { metric: MetricKey; points: TrendPoint[] }) 
 
           <defs>
             <linearGradient id="githubTrackGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#1570EF" stopOpacity="0.25" />
-              <stop offset="100%" stopColor="#1570EF" stopOpacity="0.02" />
+              <stop offset="0%" stopColor="var(--color-utility-blue-600)" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="var(--color-utility-blue-600)" stopOpacity="0.02" />
             </linearGradient>
           </defs>
 
@@ -514,7 +514,7 @@ function Trend({ metric, points }: { metric: MetricKey; points: TrendPoint[] }) 
                 y1={baselineY}
                 x2={coord.x}
                 y2={coord.y}
-                stroke="#1570EF"
+                stroke="var(--color-utility-blue-600)"
                 strokeDasharray="3 3"
                 strokeWidth="1.5"
               />
@@ -523,7 +523,7 @@ function Trend({ metric, points }: { metric: MetricKey; points: TrendPoint[] }) 
                 cx={coord.x}
                 cy={baselineY}
                 r="3.5"
-                fill="#1570EF"
+                fill="var(--color-utility-blue-600)"
               />
             </g>
           ))}
@@ -535,7 +535,7 @@ function Trend({ metric, points }: { metric: MetricKey; points: TrendPoint[] }) 
           {coords.length > 1 && (
             <polyline
               fill="none"
-              stroke="#1570EF"
+              stroke="var(--color-utility-blue-600)"
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -577,8 +577,8 @@ function Trend({ metric, points }: { metric: MetricKey; points: TrendPoint[] }) 
                   cx={coord.x}
                   cy={coord.y}
                   r="8"
-                  fill="#EFF8FF"
-                  stroke="#1570EF"
+                  fill="var(--color-utility-blue-50)"
+                  stroke="var(--color-utility-blue-600)"
                   strokeWidth="2.5"
                 />
 
@@ -587,7 +587,7 @@ function Trend({ metric, points }: { metric: MetricKey; points: TrendPoint[] }) 
                   cx={coord.x}
                   cy={coord.y}
                   r="3.5"
-                  fill="#1570EF"
+                  fill="var(--color-utility-blue-600)"
                 >
                   <title>
                     {p.label}: {p.display}
@@ -603,20 +603,20 @@ function Trend({ metric, points }: { metric: MetricKey; points: TrendPoint[] }) 
                     width="48"
                     height="18"
                     rx="4"
-                    fill="#1570EF"
-                    stroke="#175CD3"
+                    fill="var(--color-utility-blue-600)"
+                    stroke="var(--color-utility-blue-700)"
                     strokeWidth="1"
                   />
                   <polygon
                     points="0,-1 -3,-4 3,-4"
-                    fill="#1570EF"
+                    fill="var(--color-utility-blue-600)"
                   />
                   <text
                     x="0"
                     y="-2"
                     textAnchor="middle"
                     dominantBaseline="middle"
-                    fill="#FFFFFF"
+                    fill="var(--color-text-white)"
                     className="font-mono font-bold text-[10px]"
                   >
                     {p.display}

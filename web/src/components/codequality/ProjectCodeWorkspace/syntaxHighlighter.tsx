@@ -182,21 +182,21 @@ export function tokenizeLine(line: string, filename: string): Token[] {
 function tokenClass(type: TokenType): string {
   switch (type) {
     case 'keyword':
-      return 'text-[#9333ea] dark:text-[#c084fc] font-semibold'
+      return 'text-utility-purple-600 font-semibold'
     case 'key':
-      return 'text-[#7c3aed] dark:text-[#d8b4fe] font-semibold'
+      return 'text-utility-indigo-600 font-semibold'
     case 'string':
-      return 'text-[#16a34a] dark:text-[#4ade80]'
+      return 'text-utility-green-600'
     case 'number':
-      return 'text-[#ea580c] dark:text-[#fb923c] font-mono'
+      return 'text-utility-orange-600 font-mono'
     case 'function':
-      return 'text-[#0284c7] dark:text-[#38bdf8] font-medium'
+      return 'text-utility-sky-600 font-medium'
     case 'type':
-      return 'text-[#d97706] dark:text-[#facc15]'
+      return 'text-utility-amber-600'
     case 'comment':
       return 'text-tertiary italic select-none'
     case 'operator':
-      return 'text-[#ec4899] dark:text-[#f472b6]'
+      return 'text-utility-pink-600'
     case 'punctuation':
       return 'text-secondary'
     case 'text':

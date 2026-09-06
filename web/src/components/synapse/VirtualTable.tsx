@@ -3,7 +3,7 @@ import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { cn } from '../ui'
 
 export interface Column<T> {
-  header: string
+  header: ReactNode
   /** Width/grow/alignment classes, applied to both the header and the cells. */
   className?: string
   cell: (item: T) => ReactNode

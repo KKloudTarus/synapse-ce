@@ -9,6 +9,38 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Per-engagement vulnerability posture in the dashboard.** The reconciled advisory occurrences and the
+  governed action queue for an engagement (`GET /engagements/{id}/vulnerability/occurrences` and
+  `.../vulnerability/actions`, with `.../actions/{aid}/acknowledge` and `/resolve`) had no UI. A new
+  **Vuln Posture** tab (under Findings) lists the action queue with in-place acknowledge/resolve and the
+  reconciled occurrences with fix version and reachability, surfaced where the operator works the engagement.
+
+- **Reconciliation run results in the dashboard.** A tenant could start a vulnerability reconciliation
+  but could not see its outcome. Starting a full reconciliation now opens a run panel that polls the run
+  to completion and shows its counts (processed/added/updated/unchanged/unmatchable/retired) and its
+  per-item diffs, filterable by class (missing/changed/stale/in-sync) with cursor paging.
+
+- **Per-asset risk stories in the dashboard.** The server assembles one correlated risk narrative per
+  asset (`GET /engagements/{id}/risk-stories`), joining identity, exposure, findings, attack paths and
+  detections into a single ranked score, but no UI consumed it. A new **Risk Stories** tab (under
+  Findings) shows one card per asset ranked by risk, with each finding's corroboration (reachable, on an
+  attack path, seen under attack) that raised it.
+
+- **Purple-team detection coverage in the dashboard.** The server computes, for each executed attack
+  technique, whether its expected detection fired (`GET /engagements/{id}/purple-coverage`, and
+  `?run=<id>` for a run's gap work items), but no dashboard surface consumed it. A new **Purple
+  Coverage** tab (under Offensive) shows the latest emulation run's coverage percentage and its
+  covered/gap/not-run/out-of-reach breakdown, a per-run coverage trend, and the detection gaps (one
+  work item per executed-but-undetected technique) to close.
+
+- **Scan-run history and run-to-run drift in the dashboard.** Every SCA scan already sealed a manifest
+  of its inputs (tool and database versions, the SBOM hash, a reproducibility score) and the finding
+  keys it produced, and the server exposed `GET /engagements/{id}/scan-runs` and
+  `.../scan-runs/compare?a=&b=`, but no dashboard surface consumed them. A new **Scan Runs** tab (under
+  Supply Chain) lists the history with each run's reproducibility score and pinned/live inputs, and
+  comparing two runs shows which finding keys were added or removed, how many are unchanged, and the
+  manifest deltas (grype-db, vuln-db snapshot, tool versions) that explain a legitimate change.
+
 - **One artifact deploys to native hosts and Kubernetes via `execution.mode`.** The Helm chart gained a
   top-level `execution.mode`: `controlPlaneOnly` (default — offline scanner console that boots on any node,
   including managed EKS and `kind`), `externalNative` (production control plane on k8s, execution tier on
@@ -109,6 +141,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   tool, version, location and provenance.
 
 ### Changed
+
+- **Dashboard theme fidelity.** The Code Quality measures table now labels bug, vulnerability, code-smell
+  and hotspot columns with icons instead of emoji; the project-activity trend chart, the code-viewer
+  syntax highlighter, the modern badge addon, and the dependency-graph minimap now draw from semantic
+  theme tokens so they render correctly in both light and dark themes.
 
 - **Console pages read as one operational surface.** The Hosts list is a dense table (host, OS,
   packages, open findings by severity, fixable, KEV, scan state, recorded) with a filter row; the host

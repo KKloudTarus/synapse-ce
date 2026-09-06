@@ -4,8 +4,11 @@ import type {
   CodeRating,
   Component,
   ImportedSBOMMetadata,
+  ScanDrift,
   ScanJob,
+  ScanManifest,
   ScanResult,
+  ScanRun,
   Vulnerability,
   Writeup,
 } from '../types'
@@ -279,6 +282,40 @@ function mapScanResult(r: any): ScanResult {
   }
 }
 
+function mapScanManifest(m: any): ScanManifest {
+  return {
+    toolVersions: m?.tool_versions ?? {},
+    vulnDBSnapshot: m?.vuln_db_snapshot ?? '',
+    grypeDBVersion: m?.grype_db_version ?? '',
+    correlationVersion: m?.correlation_version ?? 0,
+    sbomSha256: m?.sbom_sha256 ?? '',
+    reproScore: m?.repro_score ?? 0,
+    pinnedInputs: m?.pinned_inputs ?? [],
+    unpinnedInputs: m?.unpinned_inputs ?? [],
+  }
+}
+
+function mapScanRun(r: any): ScanRun {
+  return {
+    id: r?.id ?? '',
+    engagementId: r?.engagement_id ?? '',
+    createdAt: r?.created_at ?? '',
+    manifest: mapScanManifest(r?.manifest),
+    findingKeys: r?.finding_keys ?? [],
+  }
+}
+
+function mapScanDrift(r: any): ScanDrift {
+  return {
+    runA: mapScanRun(r?.run_a),
+    runB: mapScanRun(r?.run_b),
+    added: r?.added ?? [],
+    removed: r?.removed ?? [],
+    unchanged: r?.unchanged ?? 0,
+    explanation: r?.explanation ?? [],
+  }
+}
+
 export const scanApi = {
   startScan: async (engagementId: string, target: string, kind: string, ref = '', mode = 'full', codeQuality = false): Promise<ScanJob> => {
     const r = await req('/sca/scans', {
@@ -286,6 +323,22 @@ export const scanApi = {
       body: JSON.stringify({ engagement_id: engagementId, target, kind, ref, mode, code_quality: codeQuality }),
     })
     return mapScanJob(r)
+  },
+
+  // Scan-run history: the manifest + finding-key snapshot of every persisted scan,
+  // for reproducibility and run-to-run drift (chain of custody).
+  scanRuns: async (engagementId: string): Promise<ScanRun[]> => {
+    const r = await req(`/engagements/${encodeURIComponent(engagementId)}/scan-runs`)
+    return Array.isArray(r) ? r.map(mapScanRun) : []
+  },
+
+  // Drift between two scan runs: which finding keys appeared/disappeared and the
+  // manifest deltas that explain a legitimate change.
+  compareScanRuns: async (engagementId: string, a: string, b: string): Promise<ScanDrift> => {
+    const r = await req(
+      `/engagements/${encodeURIComponent(engagementId)}/scan-runs/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`,
+    )
+    return mapScanDrift(r)
   },
 
   scanStatus: async (engagementId: string): Promise<ScanJob | null> => {

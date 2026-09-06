@@ -144,7 +144,12 @@ function GraphCanvas({
           <Background color="var(--color-border)" gap={22} />
           <Controls showInteractive={false} />
           {flow.nodes.length > 40 && (
-            <MiniMap pannable zoomable style={{ background: 'var(--color-surface)' }} maskColor="rgba(0,0,0,0.5)" />
+            <MiniMap
+              pannable
+              zoomable
+              style={{ background: 'var(--color-surface)' }}
+              maskColor="color-mix(in srgb, var(--color-bg-overlay) 50%, transparent)"
+            />
           )}
         </ReactFlow>
       </div>

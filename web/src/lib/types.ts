@@ -408,6 +408,27 @@ export interface ScanManifest {
   unpinnedInputs: string[]
 }
 
+// One persisted scan execution: its manifest (reproducibility inputs) plus the
+// finding identity keys present in the run, enough to list history and compute drift.
+export interface ScanRun {
+  id: string
+  engagementId: string
+  createdAt: string
+  manifest: ScanManifest
+  findingKeys: string[]
+}
+
+// The difference between two scan runs: which finding keys appeared or disappeared,
+// and the manifest deltas that explain why a result legitimately changed.
+export interface ScanDrift {
+  runA: ScanRun
+  runB: ScanRun
+  added: string[]
+  removed: string[]
+  unchanged: number
+  explanation: string[]
+}
+
 export interface LicenseFinding {
   license: string
   category: LicenseCategory
