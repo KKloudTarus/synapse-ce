@@ -101,6 +101,7 @@ import (
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/businessassetuc"
 	capabilitiesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/capabilities"
+	chainrehearsaluc "github.com/KKloudTarus/synapse-ce/internal/usecase/chainrehearsal"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/crosscheckjudge"
@@ -361,6 +362,7 @@ func main() {
 	var detectionRecordStore ports.DetectionRecordStore // #423 detection ledger projection
 	var purpleCoverageStore ports.PurpleCoverageStore   // #426 emulated technique vs observed detection
 	var emulationRunStore emulationuc.RunStore          // #426 adversary-emulation run producer
+	var exploitChainStore exploitationuc.ChainStore     // governed exploitation chain rehearsal store
 	// Registry of the LLM agent runs executing in this process, so the offensive kill switch can cancel
 	// one mid-decision. Declared here because the kill switch is built before the orchestrator is.
 	agentRunRegistry := orchestrator.NewRunRegistry()
@@ -499,6 +501,7 @@ func main() {
 		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
 		purpleCoverageStore = postgres.NewPurpleRepository(pool)
 		emulationRunStore = postgres.NewEmulationRunRepository(pool)
+		exploitChainStore = postgres.NewExploitationChainRepository(pool)
 		detectionProvenanceStore, err = postgres.NewDetectionProvenanceRepository(pool)
 		if err != nil {
 			log.Error("postgres detection provenance store init failed", "err", err)
@@ -643,6 +646,7 @@ func main() {
 		detectionRecordStore = memory.NewDetectionRecordStore()
 		purpleCoverageStore = memory.NewPurpleStore()
 		emulationRunStore = memory.NewEmulationRunStore()
+		exploitChainStore = memory.NewExploitationChainStore()
 		detectionProvenanceStore = memory.NewDetectionProvenanceStore()
 		incidentEventStore = memory.NewIncidentEventStore()
 		memoryFindings, ok := findingRepo.(*memory.FindingRepository)
@@ -2075,6 +2079,24 @@ func main() {
 			// which for this single-process deployment is the whole control plane.
 			chainRegistry := exploitationuc.NewChainRegistry()
 			killSwitch.SetChainHalter(chainRegistry)
+			// Chain driver: rehearse a governed exploitation chain as a no-host SIMULATION and register its
+			// Machine here (via RunTracked) so the kill switch can halt it mid-run. This fills the registry
+			// the switch guards and makes chained exploitation reachable; the real host executor and an
+			// independent verifier stay a deliberate, review-gated extension point.
+			chainSealer := chainrehearsaluc.SealerFunc(func(ctx context.Context, engagementID shared.ID, kind string, content []byte, createdBy string) (shared.ID, error) {
+				ev, serr := evidenceService.Seal(ctx, engagementID, kind, content, createdBy)
+				if serr != nil {
+					return "", serr
+				}
+				return ev.ID, nil
+			})
+			if rehearsalSvc, rherr := chainrehearsaluc.NewService(repo, offensivePolicySvc, offensiveRegister, chainRegistry, exploitChainStore, chainSealer, auditLog, clock, ids); rherr != nil {
+				log.Error("exploitation chain rehearsal init failed", "err", rherr)
+				os.Exit(1)
+			} else {
+				router.SetChainRehearsal(rehearsalSvc)
+				log.Info("exploitation chain rehearsal ENABLED (governed, no-host simulation)", "route", "POST /api/v1/engagements/{id}/exploitation/rehearsals")
+			}
 			// Third layer: the LLM agent loop. A run holds no work order and is not a chain, so without
 			// this the halt stopped everything except the thing actively choosing the next action.
 			killSwitch.SetAgentHalter(agentRunRegistry)

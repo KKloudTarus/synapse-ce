@@ -9,6 +9,17 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Chained exploitation is reachable as a governed rehearsal.** The exploitation state machine (per-step
+  admission through the offensive policy, sealed per-step evidence, a distinct verifier, cleanup
+  obligations) and its kill-switch registry existed and were tested, but nothing constructed a chain outside
+  tests, so the kill switch guarded an empty registry and the capability was unreachable. `POST
+  /api/v1/engagements/{id}/exploitation/rehearsals` (operate-gated) now rehearses an operator-declared chain
+  through the SAME governance the rest of the offensive pillar uses, registering the running chain with the
+  kill switch so `POST /api/v1/redteam/halt` can stop it mid-run. The rehearsal executes with a no-host
+  simulation executor and a distinct system verifier, so it proves a chain is policy-admissible and its
+  chain of custody is sound without touching a host. It is a simulation, not a claim of real compromise; a
+  real host executor and an independent verifier stay a deliberate, review-gated extension point.
+
 - **Adversary emulation is reachable and produces purple-team coverage.** The emulation catalogue, its
   run store, the offensive governance policy, and the purple-coverage read route all existed and were
   tested, but nothing ran an emulation: no composition root constructed the producer, so the purple panel

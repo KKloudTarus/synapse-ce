@@ -91,8 +91,12 @@ inside the hardened sandbox with server-side scope and authorization:
 
 - **Recon** enumerates a target's surface within the authorized scope.
 - An **attack-path graph** correlates the asset inventory into reachable exposure chains.
-- **Chained exploitation** advances step by step, each step producing its own proof; nothing
-  promotes without a distinct verifier's sealed verdict.
+- **Chained exploitation** advances step by step, each step admitted through the engagement's rules of
+  engagement, producing its own sealed proof, and verified by a distinct verifier before the chain
+  advances; a running chain is haltable by the kill switch. It runs as a governed no-host rehearsal
+  (simulation) by default, reachable at `POST /engagements/{id}/exploitation/rehearsals`; a real host
+  executor is a deliberate, review-gated extension point. The rehearsal route and the offensive kill
+  switch are wired when the fleet transport is enabled.
 - **Adversary emulation** runs benign technique variants that declare the detection each technique
   should produce — the offensive half of the purple-team ledger.
 
