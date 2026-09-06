@@ -37,6 +37,7 @@ const Audit = lazy(() => import('./pages/Settings/Audit').then(m => ({ default: 
 const Settings = lazy(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })))
 const SettingsConfig = lazy(() => import('./pages/Settings/SettingsConfig').then(m => ({ default: m.SettingsConfig })))
 const Connectors = lazy(() => import('./pages/Settings/Connectors').then(m => ({ default: m.Connectors })))
+const ResponseOps = lazy(() => import('./pages/BlueTeam/ResponseOps').then(m => ({ default: m.ResponseOps })))
 const AITriageReviews = lazy(() => import('./pages/AITriage/AITriageReviews').then(m => ({ default: m.AITriageReviews })))
 const AITriageObservability = lazy(() => import('./pages/AITriage/AITriageObservability').then(m => ({ default: m.AITriageObservability })))
 const VulnerabilityIntelligence = lazy(() => import('./pages/VulnerabilityIntelligence').then(m => ({ default: m.VulnerabilityIntelligence })))
@@ -100,6 +101,7 @@ function Gate() {
         <Route path="fleet/hosts" element={<Hosts />} />
         <Route path="fleet/hosts/:id" element={<HostDetail />} />
         <Route path="fleet/incidents" element={<Incidents />} />
+        <Route path="blueteam/response" element={<ResponseOps />} />
         <Route path="fleet/incidents/:id" element={<IncidentDetail />} />
         <Route path="rules" element={<Rules />} />
         <Route path="rules/:key" element={<RuleDetail />} />

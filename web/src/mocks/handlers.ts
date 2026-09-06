@@ -372,6 +372,26 @@ export const handlers = [
   }),
   http.delete('/api/v1/connectors/:id', () => new HttpResponse(null, { status: 204 })),
 
+  // Blue-team governed response (#425) + kill switch.
+  http.get('/api/v1/blueteam/response', () => HttpResponse.json({ responses: [
+    { id: 'resp-1', kind: 'isolate_host', target: 'host-web-01', state: 'applied', approver: 'alice', verification: 'succeeded', evidence_id: 'ev-9' },
+    { id: 'resp-2', kind: 'stop_process', target: 'host-db-02', state: 'pending', approver: 'bob' },
+    { id: 'resp-3', kind: 'quarantine_file', target: 'host-web-01', state: 'reverted', approver: 'alice', verification: 'succeeded' },
+  ] })),
+  http.post('/api/v1/blueteam/engagements/:id/response/plan', async ({ request }) => {
+    const b = (await request.json()) as any
+    return HttpResponse.json({ kind: b?.kind ?? 'isolate_host', target: b?.target ?? '', steps: [
+      { label: `apply ${b?.kind ?? 'isolate_host'}`, argv: ['synapse-agent-response', String(b?.kind ?? 'isolate_host').replaceAll('_', '-'), b?.target ?? ''], blast_radius: 'host' },
+      { label: 'reverse via allow', argv: ['synapse-agent-response', 'restore', b?.target ?? ''], blast_radius: 'host' },
+    ] })
+  }),
+  http.post('/api/v1/blueteam/engagements/:id/response/apply', async ({ request }) => {
+    const b = (await request.json()) as any
+    return HttpResponse.json({ id: 'resp-new', kind: b?.kind ?? 'isolate_host', target: b?.target ?? '', state: 'pending', approver: 'you' }, { status: 202 })
+  }),
+  http.post('/api/v1/blueteam/response/:id/revert', () => HttpResponse.json({ id: 'resp-1', kind: 'isolate_host', target: 'host-web-01', state: 'reverted', approver: 'alice' })),
+  http.post('/api/v1/redteam/halt', () => HttpResponse.json({ halted: true, within_bound: true, duration_ms: 42, orders_halted: ['ord-1'], chains_halted: [] })),
+
   // --- Dashboard ---
   http.get('/api/v1/dashboard/security-operations', () => HttpResponse.json(DASHBOARD)),
 
