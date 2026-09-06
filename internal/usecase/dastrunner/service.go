@@ -348,3 +348,30 @@ func redactProbeExcerpt(body []byte) string {
 	}
 	return text
 }
+
+// ValidateURL rejects a malformed or credential-bearing DAST target URL. It is the single source of truth
+// for probe-target validation, enforced at both edges: when a run is submitted (before the probe is
+// persisted on the durable job) and again inside the governed workflow before execution. Rejecting at
+// submit keeps a credential-like URL (e.g. ?token=...) out of the durable jobs payload at rest.
+func ValidateURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u == nil || u.User != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("%w: invalid DAST target URL", shared.ErrValidation)
+	}
+	for key := range u.Query() {
+		if sensitiveURLQueryKey(key) {
+			return fmt.Errorf("%w: DAST target URL cannot contain credential-like query keys", shared.ErrValidation)
+		}
+	}
+	return nil
+}
+
+func sensitiveURLQueryKey(key string) bool {
+	key = strings.ToLower(key)
+	for _, sensitive := range []string{"token", "session", "api_key", "key", "secret", "password", "auth", "signature", "sig"} {
+		if strings.Contains(key, sensitive) {
+			return true
+		}
+	}
+	return false
+}

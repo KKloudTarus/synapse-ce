@@ -56,6 +56,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
 	attackpathuc "github.com/KKloudTarus/synapse-ce/internal/usecase/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/cspm"
+	dastrunuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrun"
+	dastrunneruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
+	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
+	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
@@ -428,6 +432,61 @@ func main() {
 	vulnerabilityMonitor.SetReconciler(vulnerabilityRuntime)
 	handlers[vulnerabilitymonitor.JobKind] = vulnerabilitySyncJobHandler{svc: vulnerabilityMonitor}
 	handlers[vulnerabilityreconcile.JobKind] = vulnerabilityReconcileJobHandler{svc: vulnerabilityReconciliation}
+
+	// #823 durable DAST verification. A governed, approved probe used to execute on the API request
+	// thread; it now runs here as a lease job. The stack is the SAME the API's in-process path uses
+	// (runtime verifier + sandboxed runner + safety gate + approval consume + evidence seal), so the
+	// single-use consume and the evidence seal happen exactly once, on the worker. DAST actively probes a
+	// URL, so it can only execute when the sandbox kernel-enforces egress (egressLive). The handler is
+	// registered UNCONDITIONALLY, though: the API enqueues a run whenever the durable queue exists, so a
+	// worker without a live egress broker must still claim the job and fail it egress_unavailable rather
+	// than leave the run orphaned at 'queued' forever (invisible to the operator polling GET .../runs).
+	{
+		var dastProber dastrunuc.Prober
+		if egressLive {
+			dastJudgmentSvc, jerr := analysisuc.NewService(postgres.NewJudgmentRepository(pool), evidenceService, auditLog, clock, ids)
+			if jerr != nil {
+				log.Error("DAST judgment service init failed", "err", jerr)
+				os.Exit(1)
+			}
+			runtimeVerifierSvc, rverr := dastverifieruc.NewService(dastJudgmentSvc)
+			if rverr != nil {
+				log.Error("DAST runtime verifier init failed", "err", rverr)
+				os.Exit(1)
+			}
+			dastRunnerSvc, drerr := dastrunneruc.NewService(sb, evidenceService, runtimeVerifierSvc, "curl", 10*time.Second, cfg.ReconMaxOutput)
+			if drerr != nil {
+				log.Error("DAST runner init failed", "err", drerr)
+				os.Exit(1)
+			}
+			dastApprovalStore := postgres.NewApprovalStore(pool)
+			dastApprovalSvc, aerr := approval.NewService(dastApprovalStore, auditLog, clock, agent.ApprovalMode(cfg.AgentApprovalMode), cfg.AgentApprovalTimeout)
+			if aerr != nil {
+				log.Error("DAST approval service init failed", "err", aerr)
+				os.Exit(1)
+			}
+			dastGate, gerr := safety.NewGate(guard, dastApprovalSvc, evidenceService)
+			if gerr != nil {
+				log.Error("DAST safety gate init failed", "err", gerr)
+				os.Exit(1)
+			}
+			dastWorkflowSvc, werr := dastworkflowuc.NewService(dastGate, dastApprovalSvc, dastApprovalStore, dastRunnerSvc, evidenceService, clock, ids)
+			if werr != nil {
+				log.Error("DAST workflow init failed", "err", werr)
+				os.Exit(1)
+			}
+			dastProber = dastWorkflowSvc
+			log.Info("DAST verification runs execute on this worker (dast_run handler)")
+		} else {
+			log.Warn("worker has no scoped-egress broker – DAST runs will fail egress_unavailable")
+		}
+		dastRunSvc, rserr := dastrunuc.NewService(postgres.NewDASTRunStore(pool), dastProber, auditLog, clock, ids)
+		if rserr != nil {
+			log.Error("DAST durable run service init failed", "err", rserr)
+			os.Exit(1)
+		}
+		handlers[dastrunuc.JobKind] = dastRunJobHandler{svc: dastRunSvc}
+	}
 	if cfg.CSPMEnabled {
 		connectors := make(map[cloudposture.Provider]ports.CloudConnector, len(cfg.CSPMProviders))
 		for _, name := range cfg.CSPMProviders {
@@ -812,6 +871,17 @@ func (h reconJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, 
 // agentJobHandler binds the orchestrator to the worker's Handler + DeadLetterer interfaces:
 // running an agent job is RunJob; dead-lettering one finalizes the backing session, so the
 // reconciler stops re-driving it (closes the dead-letter → re-drive livelock).
+// dastRunJobHandler binds durable DAST verification execution and dead-letter finalization.
+type dastRunJobHandler struct{ svc *dastrunuc.Service }
+
+func (h dastRunJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	return h.svc.RunJob(ctx, job.Payload)
+}
+
+func (h dastRunJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error {
+	return h.svc.FailStrandedJob(ctx, job.Payload, cause)
+}
+
 // cspmJobHandler binds durable CSPM execution and dead-letter finalization.
 type cspmJobHandler struct{ svc *cspm.Service }
 

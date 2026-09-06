@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/dastrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -225,6 +227,21 @@ func (fakeDASTWorkflow) Run(context.Context, string, shared.ID, shared.ID, dastr
 	return dastrunner.Result{}, nil
 }
 
+// fakeDASTRunner backs the durable DAST run status route. It holds one run owned by tenantA/engA and is
+// tenant-scoped like the real store, so the harness can prove the read route rejects a cross-tenant caller
+// (through withEngTenant) and a machine role (through the view gate).
+type fakeDASTRunner struct{}
+
+func (fakeDASTRunner) Submit(context.Context, shared.ID, shared.ID, string, dastrunner.Probe) (dastrun.Run, error) {
+	return dastrun.Run{}, nil
+}
+func (fakeDASTRunner) GetRun(_ context.Context, tenantID, runID shared.ID) (dastrun.Run, error) {
+	if tenantID == "tenantA" && runID == "dast-run-a" {
+		return dastrun.Run{ID: "dast-run-a", TenantID: "tenantA", EngagementID: "engA", ActionID: "act-a", Actor: "operator", Status: dastrun.RunSucceeded, Verdict: "confirmed", HTTPStatus: 200, EvidenceID: "ev-a", StartedAt: time.Unix(1_700_000_000, 0).UTC()}, nil
+	}
+	return dastrun.Run{}, fmt.Errorf("%w: DAST run", shared.ErrNotFound)
+}
+
 type fakeThreatModel struct{}
 
 func (fakeThreatModel) Ingest(context.Context, string, shared.ID, shared.ID, threatmodel.Model) (threatmodel.ModelDelta, error) {
@@ -398,6 +415,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetJudgments(promotionAnalysis) // real judgment/promotion lifecycle for hostile verification coverage
 	rt.SetRuntimeVerifier(&fakeRuntimeVerifier{})
 	rt.SetDASTWorkflow(&fakeDASTWorkflow{})
+	rt.SetDASTRunner(fakeDASTRunner{})        // register the #823 durable DAST run status route so the harness guards its view + tenant gates
 	rt.SetThreatModel(&fakeThreatModel{})     // register the threat-model ingest/read routes so the harness guards their gates
 	rt.SetWriteupDrafts(&fakeWriteupDrafts{}) // register the writeup-draft sign-off routes so the harness guards their SoD gates
 	rt.SetAITriageReviews(&aiReviewFake{})    // register AI-triage queue read/claim/decision routes
@@ -550,6 +568,10 @@ func TestHostileHarness(t *testing.T) {
 		// The scan-job read carries its engagement in the RESPONSE, not the path, so withEngTenant
 		// cannot wrap it; the handler re-checks the tenant itself. A machine role is denied outright.
 		{"machine may not read scan job (view)", "agent", "tenantA", true, http.MethodGet, "/api/v1/sca/scans/job-1", http.StatusForbidden},
+		// #823 durable DAST run status route: view-gated and tenant-scoped through withEngTenant.
+		{"readonly may read own-tenant dast run", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/dast/runs/dast-run-a", http.StatusOK},
+		{"machine may not read dast run (view)", "agent", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/dast/runs/dast-run-a", http.StatusForbidden},
+		{"tenantB cannot read tenantA dast run", "admin", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/dast/runs/dast-run-a", http.StatusNotFound},
 		{"readonly may not read audit (review)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/audit", http.StatusForbidden},
 		{"readonly may not manage users (administer)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/users", http.StatusForbidden},
 		// Consultant: operate yes (covered elsewhere), but NOT review or administer.

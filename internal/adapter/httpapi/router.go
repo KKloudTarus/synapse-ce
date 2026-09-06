@@ -9,6 +9,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aitriagereview"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/dastrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
@@ -66,6 +67,7 @@ type Router struct {
 	credentials            *credentialsuc.Service
 	dastVerifier           runtimeVerifierService
 	dastWorkflow           dastWorkflowService
+	dastRun                dastRunService             // optional; nil ⇒ DAST verification runs execute synchronously in-process
 	agent                  *agentDeps                 // optional; nil ⇒ agent routes are not registered
 	exploitation           findingVerifier            // optional; nil ⇒ the verify route is not registered
 	judgments              judgmentService            // optional; nil ⇒ judgment routes are not registered
@@ -191,6 +193,17 @@ type dastWorkflowService interface {
 
 // SetDASTWorkflow wires the governed safe-DAST proposal/approval/run endpoints.
 func (rt *Router) SetDASTWorkflow(s dastWorkflowService) { rt.dastWorkflow = s }
+
+// dastRunService is the durable-execution slice: submit a governed DAST verification as a worker job and
+// read its status. *dastrun.Service satisfies it. Left unset, a verification run executes synchronously.
+type dastRunService interface {
+	Submit(ctx context.Context, engagementID, actionID shared.ID, actor string, probe dastrunner.Probe) (dastrun.Run, error)
+	GetRun(ctx context.Context, tenantID, runID shared.ID) (dastrun.Run, error)
+}
+
+// SetDASTRunner wires durable DAST verification execution: the run route enqueues a job and a status
+// route reads it. nil ⇒ the run route executes the probe synchronously (dev / in-memory).
+func (rt *Router) SetDASTRunner(s dastRunService) { rt.dastRun = s }
 
 type dastScanService interface {
 	ProposeScan(context.Context, string, shared.ID, dastworkflowuc.ScanConfig) (dastworkflowuc.Proposal, error)
@@ -643,6 +656,9 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/engagements/{id}/judgments/{jid}/runtime-verification/proposals", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.proposeRuntimeVerification)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/dast/approvals/{aid}/decide", rt.authz(userdom.PermReview, rt.withEngTenant(rt.decideRuntimeVerification)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/judgments/{jid}/runtime-verification/proposals/{aid}/run", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.runRuntimeVerification)))
+		if rt.dastRun != nil {
+			mux.HandleFunc("GET /api/v1/engagements/{id}/dast/runs/{rid}", rt.authz(userdom.PermView, rt.withEngTenant(rt.getDASTRun)))
+		}
 	}
 	if rt.dastScan != nil {
 		mux.HandleFunc("POST /api/v1/engagements/{id}/dast/proposals", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.proposeDASTScan)))
