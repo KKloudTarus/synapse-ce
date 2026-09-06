@@ -1,3 +1,6 @@
+# execution.mode selects the tool-execution placement (see values.yaml).
+execution:
+  mode: externalNative
 image:
   repository: registry.example.invalid/synapse
   digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

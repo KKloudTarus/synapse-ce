@@ -7,7 +7,7 @@
 | Component | Notes |
 | --- | --- |
 | Go 1.26 | Pinned in `go.mod`. Builds cgo-free, so the container image is distroless. |
-| Node 20 and pnpm 9 | For the web dashboard. Use pnpm, not npm or yarn. |
+| Node 22 and pnpm | For the web dashboard. Use pnpm, not npm or yarn. |
 | Syft | Required for any scan. Generates the SBOM. |
 | Grype | Optional. Adds the offline vulnerability database. Missing means detection degrades to the live source only. |
 | PostgreSQL | Optional for development, required for durable persistence, the fleet, scheduled provider work, and the owned advisory store. |

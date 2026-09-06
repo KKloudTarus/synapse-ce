@@ -1,0 +1,20 @@
+# Local kind control-plane smoke overlay. Layer ON TOP of values-dev.yaml:
+#   helm install ... -f values-dev.yaml -f deploy/kind/values-kind.yaml
+# Proves execution.mode=controlPlaneOnly boots on a capless managed-style node and serves the OFFLINE product.
+# NOT a production posture (non-prod env, sandbox off, dev creds). The egress-enforced tier (DAST/recon/CSPM/
+# remote clone) is intentionally absent here; those need the native/broker execution tier.
+fullnameOverride: synapse
+execution:
+  mode: controlPlaneOnly
+image:
+  repository: synapse
+  tag: local
+  pullPolicy: Never
+web:
+  image:
+    repository: synapse-web
+    tag: local
+    pullPolicy: Never
+objectStore:
+  endpoint: minio:9000
+  useSSL: false

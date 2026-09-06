@@ -1,6 +1,13 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# execution.mode selects where the untrusted-tool execution tier runs. See templates/_helpers.tpl.
+#   controlPlaneOnly - offline scanner console, boots on any node (incl. managed EKS / kind). No DAST/recon/CSPM/remote-clone.
+#   externalNative   - production control plane in k8s; execution on native EC2 workers + broker (ADR 0008). Needs api.grantAuthority.
+#   inClusterBroker  - production; execution in-cluster via a privileged egress-broker DaemonSet on capable nodes.
+execution:
+  mode: controlPlaneOnly
+
 image:
   repository: ghcr.io/kkloudtarus/synapse
   digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
@@ -107,6 +114,8 @@ existingSecrets:
   egressGrant:
     issuerToken: {name: synapse-egress-grant-issuer, key: token}
     signingSeed: {name: synapse-egress-grant-signing, key: seed}
+    # Worker machine bearer for the grant authority (inClusterBroker only).
+    authorityToken: {name: synapse-egress-grant-authority, key: token}
   # Referenced only when oidc.enabled is true; the value is never rendered by the chart.
   oidc:
     clientSecret: {name: synapse-oidc-client, key: client-secret}
@@ -146,6 +155,36 @@ sandbox:
   hostUsers: true
   # Nodes must permit unprivileged user namespaces for bubblewrap. Do not grant SYS_ADMIN.
   userNamespacesRequired: true
+
+# egressBroker is the privileged per-run egress enforcer for execution.mode=inClusterBroker ONLY. It runs as a
+# root DaemonSet on execution-capable nodes and hands the capless worker a node-local Unix socket. It is the ONE
+# component that holds NET_ADMIN/SYS_ADMIN; the worker and API stay capless. Standard managed EKS/GKE nodes that
+# deny nested unprivileged user namespaces CANNOT run this — use execution.mode=externalNative with native EC2
+# workers instead. Left disabled for controlPlaneOnly and externalNative.
+egressBroker:
+  enabled: false
+  # Absolute host path the broker's socket + grant replay journal live under (shared with the worker via hostPath).
+  socketHostPath: /run/synapse-egress-broker
+  # Private HTTPS URL of the API grant-authority listener the worker redeems grants from.
+  grantAuthorityURL: ""
+  # base64 Ed25519 PUBLIC key the broker verifies grants with (the public half of the API's signing seed). Not
+  # secret; a plain value. REQUIRED for inClusterBroker.
+  grantPublicKey: ""
+  # Pin the broker AND worker to execution-capable nodes. REQUIRED for inClusterBroker (a render guard enforces it).
+  nodeSelector:
+    synapse.dev/execution-node: "true"
+  tolerations:
+    - key: synapse.dev/execution-node
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+  # Base cap set the broker needs to build a per-run netns + veth + NAT + iptables. `privileged: true` is the
+  # last-resort escape hatch for runtimes that will not honour the exact caps + Unconfined seccomp.
+  privileged: false
+  capabilities: ["NET_ADMIN", "SYS_ADMIN", "SYS_PTRACE", "DAC_READ_SEARCH", "CHOWN"]
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 256Mi}
 
 ingress:
   enabled: true

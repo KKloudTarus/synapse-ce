@@ -1,6 +1,6 @@
 # Synapse Helm chart
 
-This chart deploys the production control plane: at least two API replicas, one lease-locked worker, a static web dashboard, and a pre-install/pre-upgrade migration Job. It expects external PostgreSQL and S3-compatible object storage.
+This chart deploys Synapse. `execution.mode` selects the tool-execution placement: `controlPlaneOnly` (the default — API + web + migration, offline product, boots on any node including managed EKS and kind), `externalNative` (production control plane here, execution tier on native EC2 hosts — the recommended posture), or `inClusterBroker` (execution in-cluster via a privileged egress-broker DaemonSet on capable nodes). It expects external PostgreSQL and S3-compatible object storage. The runtime DB role must be `NOSUPERUSER NOBYPASSRLS`. See `docs/guide/deployment.md` for the full matrix.
 
 ## Prerequisites
 

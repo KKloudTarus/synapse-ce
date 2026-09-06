@@ -1,4 +1,4 @@
-{{- if .Values.worker.enabled }}
+{{- if eq (include "synapse.executionMode" .) "inClusterBroker" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -32,10 +32,12 @@ spec:
         {{- include "synapse.podSecurityContext" . | nindent 8 }}
       topologySpreadConstraints:
         {{- include "synapse.topologySpreadConstraints" (list . "worker") | nindent 8 }}
+      # The worker must land on the SAME execution-capable nodes as the broker DaemonSet, so it inherits the
+      # broker's node selector and tolerations and reads the node-local broker socket via hostPath.
       nodeSelector:
-        {{- toYaml .Values.worker.nodeSelector | nindent 8 }}
+        {{- toYaml .Values.egressBroker.nodeSelector | nindent 8 }}
       tolerations:
-        {{- toYaml .Values.worker.tolerations | nindent 8 }}
+        {{- toYaml .Values.egressBroker.tolerations | nindent 8 }}
       affinity:
         {{- toYaml .Values.worker.affinity | nindent 8 }}
       containers:
@@ -47,6 +49,7 @@ spec:
             {{- include "synapse.containerSecurityContext" . | nindent 12 }}
           env:
             {{- include "synapse.runtimeEnv" . | nindent 12 }}
+            {{- include "synapse.workerEgressEnv" . | nindent 12 }}
             - name: SYNAPSE_LEADER_ENABLED
               value: "true"
             - name: SYNAPSE_METRICS_ENABLED
@@ -66,6 +69,8 @@ spec:
             - {name: synapse-data, mountPath: /var/lib/synapse}
             - {name: tmp, mountPath: /tmp}
             - {name: database-ca, mountPath: /etc/synapse/database-ca, readOnly: true}
+            # The node-local broker socket, shared with the privileged broker DaemonSet on this node.
+            - {name: egress-broker-socket, mountPath: {{ .Values.egressBroker.socketHostPath }}}
       volumes:
         - name: synapse-data
           emptyDir: {}
@@ -77,4 +82,8 @@ spec:
             items:
               - key: {{ required "externalDatabase.caBundle.key is required" .Values.externalDatabase.caBundle.key }}
                 path: ca.crt
+        - name: egress-broker-socket
+          hostPath:
+            path: {{ .Values.egressBroker.socketHostPath }}
+            type: DirectoryOrCreate
 {{- end }}

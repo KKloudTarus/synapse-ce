@@ -132,15 +132,53 @@ Only the first build pays for the toolchain, about a minute of apt plus the Grad
 `curl` exit 35 and the layer never caches; `docker build --network=host` runs the build in the
 daemon's network namespace and gets past it.
 
+## Execution modes: one product, three placements
+
+Synapse ships one artifact set. The Helm value `execution.mode` selects where the untrusted-tool execution
+tier runs. The security model is identical everywhere: the API signs per-run egress grants, the worker
+executes capless, and a root-owned broker enforces per-run kernel egress.
+
+| `execution.mode` | What runs | What works | Where it fits |
+| --- | --- | --- | --- |
+| `controlPlaneOnly` (default) | API (in-process) + web + migration. No worker, no broker. Non-production, sandbox off. | The OFFLINE product: SCA, SAST, secrets, IaC, SBOM import, code quality, connectors management, CI push, fleet host-CVE. | Any node, including standard managed EKS/GKE and `kind`. The portable, boots-anywhere posture and the local smoke target. |
+| `externalNative` | Production control plane on k8s (API `dispatch-only` + web + migration). Execution tier (`synapse-worker` + root `synapse-egress-broker`) runs on NATIVE EC2/VM hosts. | Everything, including DAST, live recon, CSPM, and remote git-clone / image-pull, executed on the native tier under kernel-enforced egress. | The recommended production topology (ADR 0008). Requires `api.grantAuthority.enabled=true`. |
+| `inClusterBroker` | Everything in `externalNative` plus the worker and a privileged `synapse-egress-broker` DaemonSet IN-cluster, on tainted/labelled execution nodes. | Same as `externalNative`, entirely in k8s. | Self-managed clusters or Karpenter/EC2NodeClass custom AMIs whose nodes permit unprivileged user namespaces. Opt-in; a chart guard requires the broker to be enabled and node-pinned. |
+
+The dividing line is the node, not the chart. **Standard managed EKS/GKE nodes deny the nested unprivileged
+user namespaces bubblewrap needs**, so they cannot run the sandboxed execution tier in a Pod. On those, use
+`externalNative` with native EC2 workers; the offline `controlPlaneOnly` product still runs in-cluster. Only
+`inClusterBroker` on a demonstrably capable node pool runs the full product inside k8s. The egress broker is
+the ONE privileged component (NET_ADMIN + SYS_ADMIN); the worker and API stay capless.
+
+Single host (one EC2/VM): the offline product runs from `deploy/docker-compose.full.yml` (sandbox off, dev).
+The full product on one box runs the three native roles co-located — `synapse-api` (dispatch-only),
+`synapse-worker`, and root `synapse-egress-broker` — keeping the same privilege split; the API never holds
+NET_ADMIN/SYS_ADMIN.
+
+### The runtime database role must be non-superuser
+
+Synapse enforces tenant isolation with PostgreSQL Row Level Security and **refuses to serve if its runtime DB
+role is a SUPERUSER** (superusers bypass RLS). Run migrations with an owner role and serve with a distinct
+`NOSUPERUSER NOBYPASSRLS` runtime role. The bundled `deploy/docker-compose*.yml` and `deploy/kind/deps.yaml`
+create such a role; a managed database must be configured the same way (the runtime DSN's role is not the
+database owner and is not a superuser).
+
+### Local Kubernetes smoke (kind)
+
+`make kind-smoke` (or `deploy/kind/kind-smoke.sh`) installs `execution.mode=controlPlaneOnly` into a local
+`kind` cluster with in-cluster Postgres + MinIO and asserts the control plane serves `/readyz`. It proves the
+chart deploys and the offline product runs; it does not exercise the sandbox/egress tier, which needs a
+capable node. `make helm-render-test` validates the chart renders and lints across all three modes.
+
 ## Production EKS control plane and EC2 execution tier
 
 The production reference topology keeps `synapse-api`, web, and the ordered migration Job on Amazon EKS.
 Run at least two ready API replicas behind a TLS-terminating ingress. PostgreSQL and S3-compatible evidence
 storage are private, externally operated dependencies rather than Helm-managed StatefulSets.
 
-Production untrusted-tool execution does **not** run in an EKS Pod. Set the API execution posture to
-`dispatch-only`, disable the chart worker with `worker.enabled=false`, and run native non-root
-`synapse-worker` services in dedicated private EC2 worker subnets. [ADR 0008](../adr/0008-native-ec2-execution-tier.md)
+Production untrusted-tool execution does **not** run in an EKS Pod. Set `execution.mode=externalNative`
+(the API becomes `dispatch-only` and no worker renders in-cluster) and run native non-root
+`synapse-worker` + root `synapse-egress-broker` services in dedicated private EC2 worker subnets. [ADR 0008](../adr/0008-native-ec2-execution-tier.md)
 supersedes only ADR 0005's worker-placement decision; ADR 0005 still governs the control plane and migration
 order.
 

@@ -7,10 +7,27 @@ in_cluster=$(mktemp)
 trap 'rm -f "$out" "$in_cluster"' EXIT
 
 helm lint --strict "$chart_dir" -f "$values"
-# Production uses the hardened external EC2 worker tier. Render the optional in-cluster worker
-# separately so development compatibility and its security posture remain covered.
+# Production default is execution.mode=externalNative: the control plane runs on k8s, the hardened
+# execution tier (worker + root egress-broker) runs on native EC2. Render the opt-in in-cluster
+# execution mode (inClusterBroker) separately so the worker + privileged broker DaemonSet posture is
+# covered. The production values file pins execution.mode=externalNative.
 helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 >"$out"
-helm template synapse "$chart_dir" -f "$values" --set worker.enabled=true --kube-version 1.29.0 >"$in_cluster"
+helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 \
+  --set execution.mode=inClusterBroker \
+  --set egressBroker.enabled=true \
+  --set egressBroker.grantAuthorityURL=https://grant.internal.example \
+  --set egressBroker.grantPublicKey=Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMzJieXRlcw== >"$in_cluster"
+
+# controlPlaneOnly must BOOT on any node (managed EKS / kind): non-production, sandbox off, in-process,
+# no worker, no broker, and it does NOT require the grant authority. This is the portable/offline posture.
+cpo=$(mktemp); trap 'rm -f "$out" "$in_cluster" "$cpo"' EXIT
+helm template synapse "$chart_dir" -f "$chart_dir/values-dev.yaml" --kube-version 1.29.0 \
+  --set execution.mode=controlPlaneOnly >"$cpo"
+grep -q 'value: development' "$cpo"
+awk '/name: SYNAPSE_SANDBOX_ENABLED/{getline; if ($0 ~ /value: "false"/) ok=1} END{exit ok?0:1}' "$cpo"
+! grep -q 'app.kubernetes.io/component: worker' "$cpo"
+! grep -q 'app.kubernetes.io/component: egress-broker' "$cpo"
+! grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR' "$cpo"
 
 # Production policy: only digest-qualified images, no privileged containers/capability additions,
 # a private metrics listener, and migrations as an ordered Helm hook.
@@ -56,7 +73,16 @@ if [ "$(grep -c 'hostUsers: true' "$out")" -ne 3 ]; then
   printf '%s\n' 'expected explicit hostUsers posture on API, web, and migration workloads' >&2
   exit 1
 fi
-! grep -E 'privileged: true|SYS_ADMIN' "$out" "$in_cluster"
+# The control plane (externalNative) must never carry a privileged container or SYS_ADMIN.
+! grep -E 'privileged: true|SYS_ADMIN' "$out"
+# In inClusterBroker, elevated capabilities appear ONLY on the egress-broker DaemonSet, never on the
+# api/web/worker. Assert every SYS_ADMIN/NET_ADMIN line belongs to the broker block.
+awk '
+  /^---$/ { comp="" }
+  /app\.kubernetes\.io\/component:/ { comp=$NF }
+  /SYS_ADMIN|NET_ADMIN|privileged: true/ { if (comp != "egress-broker") { print "elevated privilege outside the broker: comp="comp; bad=1 } }
+  END { exit bad?1:0 }
+' "$in_cluster"
 # Metrics use a dedicated API listener and ClusterIP port, never the public ingress. The aggregate
 # collectors have fixed low-cardinality labels and the runtime NetworkPolicy keeps this unauthenticated
 # endpoint private to explicitly allowed monitoring clients.
@@ -147,8 +173,19 @@ grep -q 'kind: Ingress' "$out"
 grep -q 'synapse.example/runtime: control-plane' "$out"
 ! grep -q 'synapse.example/runtime: execution' "$out"
 grep -q 'app.kubernetes.io/component: worker' "$in_cluster"
-grep -q 'synapse.example/runtime: execution' "$in_cluster"
+# The worker and broker co-schedule onto execution-capable nodes via the broker's node selector.
+grep -q 'synapse.dev/execution-node' "$in_cluster"
 grep -q 'synapse-sandbox-check' "$in_cluster"
+# The privileged per-run egress broker renders as a DaemonSet with hostPID and reaches the worker over a
+# node-local socket; the worker carries the broker socket + grant-authority env.
+grep -q 'app.kubernetes.io/component: egress-broker' "$in_cluster"
+grep -q 'kind: DaemonSet' "$in_cluster"
+grep -q 'hostPID: true' "$in_cluster"
+grep -q 'SYNAPSE_EGRESS_BROKER_SOCKET' "$in_cluster"
+grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_URL' "$in_cluster"
+# The control-plane (externalNative) render never contains the execution tier.
+! grep -q 'app.kubernetes.io/component: worker' "$out"
+! grep -q 'app.kubernetes.io/component: egress-broker' "$out"
 worker_strategy=$(awk '
   /^---$/ { worker=0; next }
   /app\.kubernetes\.io\/component: worker/ { worker=1 }

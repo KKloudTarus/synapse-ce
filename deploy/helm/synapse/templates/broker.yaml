@@ -1,0 +1,84 @@
+{{- if .Values.egressBroker.enabled }}
+{{- /*
+The privileged per-run egress broker (execution.mode=inClusterBroker). It is the ONE component that holds
+NET_ADMIN/SYS_ADMIN. It runs as a DaemonSet on execution-capable nodes only (nodeSelector/taint), builds a
+per-run netns + veth + NAT + default-DENY iptables for each worker bubblewrap process, and authorises the
+worker over a node-local Unix socket after verifying a control-plane Ed25519 grant.
+
+REQUIREMENTS (validate on the target node before relying on this path):
+  - The node must permit unprivileged user namespaces (for the worker's bubblewrap) and delegated cgroup v2.
+    Standard managed EKS/GKE nodes DENY nested unprivileged userns; on those, use execution.mode=externalNative
+    with native EC2 workers instead. This DaemonSet cannot make an incapable node capable.
+  - hostPID is required so the broker can attach a netns to the worker's bwrap PID across pod boundaries, the
+    same way the native broker manages the worker process on a shared host.
+This template renders a correct starting point; the maintainer validates it on a capable node pool (self-managed
+or a Karpenter/EC2NodeClass custom AMI). It is intentionally an explicit opt-in, not a default.
+*/ -}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "synapse.fullname" . }}-egress-broker
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: egress-broker
+spec:
+  selector:
+    matchLabels:
+      {{- include "synapse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: egress-broker
+  template:
+    metadata:
+      labels:
+        {{- include "synapse.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: egress-broker
+    spec:
+      # hostPID lets the broker attach a per-run netns to the worker's bwrap process (native-equivalent).
+      hostPID: true
+      serviceAccountName: {{ include "synapse.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      nodeSelector:
+        {{- toYaml .Values.egressBroker.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.egressBroker.tolerations | nindent 8 }}
+      containers:
+        - name: egress-broker
+          image: {{ include "synapse.image" .Values.image | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/opt/synapse/synapse-egress-broker"]
+          args:
+            - "-socket={{ .Values.egressBroker.socketHostPath }}/egress-broker.sock"
+            - "-user=synapse"
+            - "-group=synapse"
+            - "-bwrap=/usr/bin/bwrap"
+            - "-grant-public-key={{ required "egressBroker.grantPublicKey is required for inClusterBroker" .Values.egressBroker.grantPublicKey }}"
+            - "-grant-replay-journal={{ .Values.egressBroker.socketHostPath }}/grant-replays.jsonl"
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            readOnlyRootFilesystem: true
+            {{- if .Values.egressBroker.privileged }}
+            privileged: true
+            {{- else }}
+            allowPrivilegeEscalation: true
+            capabilities:
+              drop: ["ALL"]
+              add: {{ .Values.egressBroker.capabilities | toJson }}
+            # bubblewrap + unshare need syscalls the RuntimeDefault profile blocks.
+            seccompProfile:
+              type: Unconfined
+            {{- end }}
+          resources:
+            {{- toYaml .Values.egressBroker.resources | nindent 12 }}
+          volumeMounts:
+            - {name: broker-run, mountPath: {{ .Values.egressBroker.socketHostPath }}}
+            - {name: netns, mountPath: /run/netns, mountPropagation: Bidirectional}
+      volumes:
+        - name: broker-run
+          hostPath:
+            path: {{ .Values.egressBroker.socketHostPath }}
+            type: DirectoryOrCreate
+        - name: netns
+          hostPath:
+            path: /run/netns
+            type: DirectoryOrCreate
+{{- end }}

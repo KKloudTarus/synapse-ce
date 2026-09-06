@@ -31,8 +31,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
+{{- /* Production pins an immutable digest. A `tag` (dev/kind/local, where a locally-loaded image has no
+       registry digest) overrides it; the production render_test forbids tag-qualified images. */ -}}
 {{- define "synapse.image" -}}
+{{- if .tag -}}
+{{- printf "%s:%s" .repository .tag }}
+{{- else -}}
 {{- printf "%s@%s" .repository .digest }}
+{{- end -}}
 {{- end }}
 
 {{- define "synapse.podSecurityContext" -}}
@@ -57,13 +63,80 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
+{{- /*
+synapse.executionMode selects one of three placements for the untrusted-tool execution tier:
+  controlPlaneOnly - API serves and runs OFFLINE scans in-process (SCA/SAST/secrets/IaC/SBOM). Non-production,
+                     sandbox off, so it BOOTS on any node (managed EKS, kind, restricted PSA). No egress-enforced
+                     execution: DAST, live recon, CSPM, and remote git-clone/image-pull fail closed.
+  externalNative   - Production control plane on k8s; the execution tier (synapse-worker + root egress-broker)
+                     runs on NATIVE hosts (ADR 0008). Requires api.grantAuthority.enabled. No worker in-cluster.
+  inClusterBroker  - Production; runs the execution tier IN-cluster via a privileged egress-broker DaemonSet on
+                     capable, tainted/labelled nodes (self-managed / Karpenter custom AMI permitting unprivileged
+                     user namespaces). Worker pods stay capless and reach the node-local broker socket.
+*/ -}}
+{{- define "synapse.executionMode" -}}
+{{- $m := default "controlPlaneOnly" .Values.execution.mode -}}
+{{- if not (has $m (list "controlPlaneOnly" "externalNative" "inClusterBroker")) -}}
+{{- fail (printf "execution.mode must be one of controlPlaneOnly|externalNative|inClusterBroker, got %q" $m) -}}
+{{- end -}}
+{{- $m -}}
+{{- end }}
+
+{{- /*
+synapse.validate is a render-time guard that fails with a clear message instead of shipping a chart that
+CrashLoopBackOffs. externalNative/inClusterBroker are production and REQUIRE the grant-authority listener so the
+API can sign per-run egress grants (config.go ValidateEgressGrantPosture); inClusterBroker additionally needs the
+broker DaemonSet enabled and an execution node selector.
+*/ -}}
+{{- define "synapse.validate" -}}
+{{- $mode := include "synapse.executionMode" . -}}
+{{- if or (eq $mode "externalNative") (eq $mode "inClusterBroker") -}}
+{{- if not .Values.api.grantAuthority.enabled -}}
+{{- fail (printf "execution.mode=%s is a production posture and requires api.grantAuthority.enabled=true so the API can sign egress grants" $mode) -}}
+{{- end -}}
+{{- end -}}
+{{- if or (eq $mode "externalNative") (eq $mode "inClusterBroker") -}}
+{{- if not .Values.objectStore.useSSL -}}
+{{- fail "objectStore.useSSL must be true in a production execution.mode; plaintext blob transport is only permitted in controlPlaneOnly (local/dev)" -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $mode "inClusterBroker" -}}
+{{- if not .Values.egressBroker.enabled -}}
+{{- fail "execution.mode=inClusterBroker requires egressBroker.enabled=true (the privileged per-run egress broker DaemonSet)" -}}
+{{- end -}}
+{{- if not .Values.egressBroker.nodeSelector -}}
+{{- fail "execution.mode=inClusterBroker requires egressBroker.nodeSelector to pin the broker and worker to execution-capable nodes (unprivileged userns + delegated cgroup v2)" -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- /* synapse.workerEgressEnv wires the worker to the control-plane grant authority and the node-local broker socket. */ -}}
+{{- define "synapse.workerEgressEnv" -}}
+- name: SYNAPSE_EGRESS_GRANT_AUTHORITY_URL
+  value: {{ required "egressBroker.grantAuthorityURL is required for inClusterBroker" .Values.egressBroker.grantAuthorityURL | quote }}
+- name: SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN
+  valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.egressGrant.authorityToken.name is required" .Values.existingSecrets.egressGrant.authorityToken.name }}, key: {{ required "existingSecrets.egressGrant.authorityToken.key is required" .Values.existingSecrets.egressGrant.authorityToken.key }}}}
+- name: SYNAPSE_EGRESS_BROKER_SOCKET
+  value: {{ .Values.egressBroker.socketHostPath }}/egress-broker.sock
+{{- end }}
+
 {{- define "synapse.runtimeEnv" -}}
+{{- $mode := include "synapse.executionMode" . -}}
+{{- if eq $mode "controlPlaneOnly" }}
+- name: SYNAPSE_ENV
+  value: development
+- name: SYNAPSE_SANDBOX_ENABLED
+  value: "false"
+{{- else }}
 - name: SYNAPSE_ENV
   value: production
-- name: SYNAPSE_DB_AUTO_MIGRATE
-  value: "false"
 - name: SYNAPSE_SANDBOX_ENABLED
   value: "true"
+- name: SYNAPSE_TOOL_EXECUTION_MODE
+  value: dispatch-only
+{{- end }}
+- name: SYNAPSE_DB_AUTO_MIGRATE
+  value: "false"
 - name: SYNAPSE_BLOB_ENDPOINT
   value: {{ required "objectStore.endpoint is required" .Values.objectStore.endpoint | quote }}
 - name: SYNAPSE_BLOB_BUCKET

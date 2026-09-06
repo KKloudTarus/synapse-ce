@@ -1,5 +1,5 @@
 .PHONY: help install tools dev build run test harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify \
-        rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down clean web-dev web-build smoke release-smoke
+        rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down kind-smoke helm-render-test clean web-dev web-build smoke release-smoke
 
 GO ?= go
 IMAGE ?= synapse-api:dev
@@ -104,6 +104,12 @@ docker-up: ## Start dev dependencies (Postgres + MinIO)
 
 docker-down: ## Stop dev dependencies
 	docker compose -f deploy/docker-compose.yml down
+
+kind-smoke: ## Deploy execution.mode=controlPlaneOnly to a local kind cluster and assert the control plane serves
+	bash deploy/kind/kind-smoke.sh
+
+helm-render-test: ## Validate the Helm chart renders/lints across all execution modes
+	sh deploy/helm/synapse/testdata/render_test.sh
 
 clean: ## Remove build artifacts
 	rm -rf bin web/dist
