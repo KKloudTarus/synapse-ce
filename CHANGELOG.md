@@ -9,6 +9,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Tenant telemetry-privacy governance in the dashboard.** The fleet source-privacy policy routes
+  (`GET /fleet/privacy-policies/active`, `GET/POST /fleet/privacy-policies`, `POST
+  /fleet/privacy-policies/activate`) had no UI. A new **Telemetry Privacy** settings page shows the
+  active policy as a field-by-field disposition matrix (allow/redact/hash/drop, with limits and the
+  content digest), admits a new policy from a form (with an "admit and activate" shortcut), and rolls
+  a policy out from the admission history behind a confirm. The hash salt never crosses this human plane.
+
+
 - **Per-engagement tool credentials in the dashboard.** The vault-sealed credential routes
   (`GET/POST/DELETE /engagements/{id}/credentials`) had no UI. A new **Credentials** tab (under
   Governance) lists the stored placeholders with their timestamps, adds one through a collapsible form

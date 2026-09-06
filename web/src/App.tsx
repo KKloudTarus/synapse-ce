@@ -37,6 +37,7 @@ const Audit = lazy(() => import('./pages/Settings/Audit').then(m => ({ default: 
 const Settings = lazy(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })))
 const SettingsConfig = lazy(() => import('./pages/Settings/SettingsConfig').then(m => ({ default: m.SettingsConfig })))
 const Connectors = lazy(() => import('./pages/Settings/Connectors').then(m => ({ default: m.Connectors })))
+const TelemetryPrivacy = lazy(() => import('./pages/Settings/TelemetryPrivacy').then(m => ({ default: m.TelemetryPrivacy })))
 const ResponseOps = lazy(() => import('./pages/BlueTeam/ResponseOps').then(m => ({ default: m.ResponseOps })))
 const AITriageReviews = lazy(() => import('./pages/AITriage/AITriageReviews').then(m => ({ default: m.AITriageReviews })))
 const AITriageObservability = lazy(() => import('./pages/AITriage/AITriageObservability').then(m => ({ default: m.AITriageObservability })))
@@ -112,6 +113,7 @@ function Gate() {
           <Route index element={<Audit />} />
           <Route path="team" element={<Team />} />
           <Route path="connectors" element={<Connectors />} />
+          <Route path="privacy" element={<TelemetryPrivacy />} />
           <Route path="config" element={<SettingsConfig />} />
           <Route path="sla" element={<SLAPolicy />} />
           <Route path="offensive-policy" element={<OffensivePolicy />} />
