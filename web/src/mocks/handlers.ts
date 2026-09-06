@@ -324,6 +324,25 @@ const OBSERVABILITY = {
 }
 
 // --- Remediation SLA ---
+const DAY_NS = 86_400_000_000_000
+const SLA_POLICY = {
+  config: {
+    version: 'sla-v1',
+    weights: { severity: 35, exploitability: 25, threat_intel: 10, exposure: 15, criticality: 15, feasibility_relief: 15 },
+    thresholds: { emergency: 85, critical: 70, high: 50, medium: 30 },
+    due_ranges: {
+      emergency: { mitigate_within: 1 * DAY_NS, remediate_within: 7 * DAY_NS },
+      critical: { mitigate_within: 3 * DAY_NS, remediate_within: 15 * DAY_NS },
+      high: { mitigate_within: 7 * DAY_NS, remediate_within: 30 * DAY_NS },
+      medium: { mitigate_within: 30 * DAY_NS, remediate_within: 90 * DAY_NS },
+      low: { mitigate_within: 90 * DAY_NS, remediate_within: 180 * DAY_NS },
+      exception: { mitigate_within: 30 * DAY_NS, remediate_within: 180 * DAY_NS },
+    },
+  },
+  sha256: 'a1b2c3d4e5f6a1b2c3d4e5f6',
+  created_by: 'system',
+  created_at: MONTH_AGO,
+}
 const SLA_ITEMS = [
   { assessment: { tenant_id: 't1', id: 'sla-001', engagement_id: 'eng-001', finding_id: 'finding-001', source_risk_assessment_id: 'ra-1', inputs: { severity: 'critical', cvss_score: 9.8, kev: true, epss: 0.92, public_poc: true, active_exploitation: true, criticality: 'high', exposure: 'external', feasibility: 'patch_available' }, result: { tier: 'emergency', score: 98, breakdown: { severity: 30, exploitability: 25, threat_intel: 20, exposure: 10, criticality: 8, feasibility: 5, overrides: ['kev_active'] }, mitigate_by: new Date(Date.now() + 86400_000).toISOString(), remediate_by: new Date(Date.now() + 3 * 86400_000).toISOString(), reason: 'Active exploitation + KEV + external', computed_at: HOUR_AGO, config_version: '2026.08' }, input_hash: 'abc', config_hash: 'cfg', previous_assessment_id: '', deadline_anchor_at: DAY_AGO, assessed_at: HOUR_AGO, created_at: DAY_AGO }, lifecycle: { tenant_id: 't1', engagement_id: 'eng-001', finding_id: 'finding-001', assessment_id: 'sla-001', status: 'open', version: 1, reason: '', compensating_control: '', accepted_by: '', accepted_at: null, acceptance_expires_at: null, updated_by: 'system', updated_at: HOUR_AGO }, effective_state: 'open', overdue: false, acceptance_expired: false },
   { assessment: { tenant_id: 't1', id: 'sla-002', engagement_id: 'eng-001', finding_id: 'finding-003', source_risk_assessment_id: 'ra-2', inputs: { severity: 'high', cvss_score: 7.5, kev: false, epss: 0.45, public_poc: true, active_exploitation: false, criticality: 'medium', exposure: 'external', feasibility: 'patch_available' }, result: { tier: 'critical', score: 72, breakdown: { severity: 25, exploitability: 18, threat_intel: 12, exposure: 8, criticality: 5, feasibility: 4, overrides: [] }, mitigate_by: new Date(Date.now() + 7 * 86400_000).toISOString(), remediate_by: new Date(Date.now() + 14 * 86400_000).toISOString(), reason: 'High + public PoC + external', computed_at: HOUR_AGO, config_version: '2026.08' }, input_hash: 'def', config_hash: 'cfg', previous_assessment_id: '', deadline_anchor_at: WEEK_AGO, assessed_at: HOUR_AGO, created_at: WEEK_AGO }, lifecycle: { tenant_id: 't1', engagement_id: 'eng-001', finding_id: 'finding-003', assessment_id: 'sla-002', status: 'mitigating', version: 2, reason: 'WAF rule deployed', compensating_control: 'WAF block rule #4521', accepted_by: '', accepted_at: null, acceptance_expires_at: null, updated_by: 'alice', updated_at: DAY_AGO }, effective_state: 'mitigating', overdue: false, acceptance_expired: false },
@@ -339,6 +358,32 @@ const FLEET_AGENTS = [
   { id: 'agent-005', name: 'k8s-node-scanner', platform: 'linux/amd64', agent_version: '0.9.4', state: 'healthy', last_seen: NOW, capabilities: ['scan.host', 'scan.container', 'detect.runtime', 'scan.k8s'], current_work: 3 },
 ]
 
+const COVERAGE_WINDOWS = [
+  {
+    asset_id: 'ba-001', agent_id: 'agent-001', host_id: 'host-web-01',
+    since: DAY_AGO, until: NOW, input_digest: 'sha256:9f1c0a44e7b2', revision: 'rev-0042', created_at: NOW,
+    states: [
+      { class: 'process', host_id: 'host-web-01', agent_id: 'agent-001', state: 'covered', reason: '', since: DAY_AGO },
+      { class: 'network', host_id: 'host-web-01', agent_id: 'agent-001', state: 'covered', reason: '', since: DAY_AGO },
+      { class: 'file', host_id: 'host-web-01', agent_id: 'agent-001', state: 'degraded', reason: 'sampling above target', since: HOUR_AGO },
+      { class: 'privilege', host_id: 'host-web-01', agent_id: 'agent-001', state: 'covered', reason: '', since: DAY_AGO },
+    ],
+    sampled_count: 18420, truncated_count: 12, dropped_count: 3, gap_count: 1, batch_count: 96,
+    coverage: { process: 1, network: 1, file: 1, privilege: 1, reasons: ['file sensor above sampling target for 42m'] },
+  },
+  {
+    asset_id: 'ba-002', agent_id: 'agent-002', host_id: 'host-db-02',
+    since: WEEK_AGO, until: DAY_AGO, input_digest: 'sha256:1abed3390f77', revision: 'rev-0031', created_at: DAY_AGO,
+    states: [
+      { class: 'process', host_id: 'host-db-02', agent_id: 'agent-002', state: 'covered', reason: '', since: WEEK_AGO },
+      { class: 'network', host_id: 'host-db-02', agent_id: 'agent-002', state: 'blind', reason: 'ebpf program failed to load', since: DAY_AGO },
+      { class: 'file', host_id: 'host-db-02', agent_id: 'agent-002', state: 'covered', reason: '', since: WEEK_AGO },
+      { class: 'privilege', host_id: 'host-db-02', agent_id: 'agent-002', state: 'covered', reason: '', since: WEEK_AGO },
+    ],
+    sampled_count: 9280, truncated_count: 0, dropped_count: 141, gap_count: 2, batch_count: 44,
+    coverage: { process: 1, network: 0, file: 1, privilege: 1, reasons: ['network class blind: ebpf load failure', 'kernel 5.4 lacks BTF'] },
+  },
+]
 const FLEET_COVERAGE = [
   { asset_id: 'ba-001', capability: 'scan.host', verdict: 'covered', detail: 'Last scan 2h ago', last_run: HOUR_AGO, agent_id: 'agent-001' },
   { asset_id: 'ba-001', capability: 'detect.runtime', verdict: 'covered', detail: 'Active monitoring', last_run: NOW, agent_id: 'agent-001' },
@@ -591,6 +636,13 @@ export const handlers = [
   ),
   http.get('/api/v1/engagements/:id/scan', () => HttpResponse.json(SCAN_RESULT)),
   http.post('/api/v1/sca/scans', () => HttpResponse.json({ id: 'job-mock', engagement_id: 'eng-001', target: 'https://github.com/KKloudTarus/synapse-ce.git', kind: 'git', status: 'complete', stage: 'done', progress: 100, error: '', started_at: new Date(Date.now() - 300000).toISOString(), finished_at: NOW, debug_events: SCAN_RESULT.debug_events })),
+
+  // --- SLA policy admin (GET/POST /sla/policies). Durations are Go time.Duration (nanoseconds). ---
+  http.get('/api/v1/sla/policies', () => HttpResponse.json({ active: SLA_POLICY, policies: [SLA_POLICY] })),
+  http.post('/api/v1/sla/policies', async ({ request }) => {
+    const body = (await request.json()) as { config?: Record<string, unknown> }
+    return HttpResponse.json({ policy: { ...SLA_POLICY, config: body.config ?? SLA_POLICY.config, sha256: 'newdigest0000' }, created: true }, { status: 201 })
+  }),
 
   // --- Engagement SLA (returns { slas: [...] }) ---
   http.get('/api/v1/engagements/:id/slas', () => HttpResponse.json({ slas: SLA_ITEMS })),
@@ -1055,6 +1107,7 @@ export const handlers = [
     return HttpResponse.json({ agent, recent_work: [{ id: 'wo-1', capability: 'scan.host', asset_id: 'ba-001', state: 'succeeded', updated_at: HOUR_AGO }, { id: 'wo-2', capability: 'detect.runtime', asset_id: 'ba-001', state: 'running', updated_at: NOW }] })
   }),
   http.get('/api/v1/fleet/coverage', () => HttpResponse.json(FLEET_COVERAGE)),
+  http.get('/api/v1/fleet/coverage-windows', () => HttpResponse.json({ coverage_windows: COVERAGE_WINDOWS })),
   http.get('/api/v1/fleet/incidents', ({ request }) => {
     const state = new URL(request.url).searchParams.get('state')
     const incidents = FLEET_INCIDENTS.filter((i) => !state || i.State === state)

@@ -29,6 +29,7 @@ const QualityProfiles = lazy(() => import('./pages/CodeQuality/QualityProfiles')
 const FleetCoverage = lazy(() => import('./pages/Fleet/FleetCoverage').then(m => ({ default: m.FleetCoverage })))
 const Incidents = lazy(() => import('./pages/Fleet/Incidents').then(m => ({ default: m.Incidents })))
 const Hosts = lazy(() => import('./pages/Fleet/Hosts').then(m => ({ default: m.Hosts })))
+const CoverageWindows = lazy(() => import('./pages/Fleet/CoverageWindows').then(m => ({ default: m.CoverageWindows })))
 const HostDetail = lazy(() => import('./pages/Fleet/HostDetail').then(m => ({ default: m.HostDetail })))
 const IncidentDetail = lazy(() => import('./pages/Fleet/IncidentDetail').then(m => ({ default: m.IncidentDetail })))
 const Rules = lazy(() => import('./pages/Rules/index'))
@@ -36,6 +37,7 @@ const RuleDetail = lazy(() => import('./pages/Rules/RuleDetail'))
 const Audit = lazy(() => import('./pages/Settings/Audit').then(m => ({ default: m.Audit })))
 const Settings = lazy(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })))
 const SettingsConfig = lazy(() => import('./pages/Settings/SettingsConfig').then(m => ({ default: m.SettingsConfig })))
+const SLAPolicy = lazy(() => import('./pages/Settings/SLAPolicy').then(m => ({ default: m.SLAPolicy })))
 const Connectors = lazy(() => import('./pages/Settings/Connectors').then(m => ({ default: m.Connectors })))
 const ResponseOps = lazy(() => import('./pages/BlueTeam/ResponseOps').then(m => ({ default: m.ResponseOps })))
 const AITriageReviews = lazy(() => import('./pages/AITriage/AITriageReviews').then(m => ({ default: m.AITriageReviews })))
@@ -99,6 +101,7 @@ function Gate() {
         <Route path="fleet" element={<FleetCoverage />} />
         <Route path="fleet/agents" element={<Navigate to="/fleet" replace />} />
         <Route path="fleet/hosts" element={<Hosts />} />
+        <Route path="fleet/coverage-windows" element={<CoverageWindows />} />
         <Route path="fleet/hosts/:id" element={<HostDetail />} />
         <Route path="fleet/incidents" element={<Incidents />} />
         <Route path="blueteam/response" element={<ResponseOps />} />
@@ -110,6 +113,7 @@ function Gate() {
           <Route path="team" element={<Team />} />
           <Route path="connectors" element={<Connectors />} />
           <Route path="config" element={<SettingsConfig />} />
+          <Route path="sla" element={<SLAPolicy />} />
         </Route>
         <Route path="audit" element={<Navigate to="/settings" replace />} />
         <Route path="team" element={<Navigate to="/settings/team" replace />} />

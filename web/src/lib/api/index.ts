@@ -31,6 +31,7 @@ import { capabilitiesApi } from './capabilities'
 import { connectorsApi } from './connectors'
 import { blueteamApi } from './blueteam'
 import { riskStoryApi } from './riskstory'
+import { slaApi } from './sla'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -65,4 +66,22 @@ export const api = {
   ...connectorsApi,
   ...blueteamApi,
   ...riskStoryApi,
+  ...slaApi,
 }
+export {
+  type SlaConfig,
+  type SlaPolicy,
+  type SlaWeights,
+  type SlaThresholds,
+  type SlaDueRange,
+  type SlaDueRanges,
+  type SlaTier,
+  SLA_TIERS,
+} from './sla'
+export {
+  type CoverageWindow,
+  type CoverageWindowFilters,
+  type CoverageClass,
+  type CoverageClassState,
+  type CoverageVector,
+} from './fleet'

@@ -6,6 +6,7 @@ const TABS = [
   { label: 'Team', to: '/settings/team' },
   { label: 'Connectors', to: '/settings/connectors' },
   { label: 'Config', to: '/settings/config' },
+  { label: 'SLA policy', to: '/settings/sla' },
 ]
 
 export function Settings() {
