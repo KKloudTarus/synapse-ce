@@ -177,16 +177,18 @@ export function FindingsActivityGauge({
             : sev === 'low'
               ? 'bg-utility-blue-600'
               : 'bg-utility-neutral-600',
-    colorHex:
+    // SVG stroke as a semantic utility class (same ramp as `dot`), so it remaps in dark mode instead of a
+    // hardcoded hex.
+    strokeClass:
       sev === 'critical'
-        ? '#D92D20'
+        ? 'stroke-utility-red-600'
         : sev === 'high'
-          ? '#F79009'
+          ? 'stroke-utility-orange-600'
           : sev === 'medium'
-            ? '#FDB022'
+            ? 'stroke-utility-yellow-600'
             : sev === 'low'
-              ? '#1570EF'
-              : '#98A2B3',
+              ? 'stroke-utility-blue-600'
+              : 'stroke-utility-neutral-600',
   }))
   const total = findings.length
   const maxVal = Math.max(...counts.map((c) => c.count), 1)
@@ -200,7 +202,7 @@ export function FindingsActivityGauge({
           className="size-52 sm:size-56"
           aria-label={`Findings by severity activity gauge: ${total} total findings`}
         >
-          {counts.map(({ sev, count, colorHex }, idx) => {
+          {counts.map(({ sev, count, strokeClass }, idx) => {
             const r = RING_RADII[idx]
             const circumference = 2 * Math.PI * r
             const ratio = count > 0 ? (count / maxVal) * 0.85 : 0
@@ -214,7 +216,6 @@ export function FindingsActivityGauge({
                   cy="130"
                   r={r}
                   fill="none"
-                  stroke="#F2F4F7"
                   strokeWidth={RING_STROKE_WIDTH}
                   className="stroke-utility-neutral-100"
                 />
@@ -225,7 +226,7 @@ export function FindingsActivityGauge({
                     cy="130"
                     r={r}
                     fill="none"
-                    stroke={colorHex}
+                    className={strokeClass}
                     strokeWidth={RING_STROKE_WIDTH}
                     strokeLinecap="round"
                     strokeDasharray={`${strokeDash} ${circumference}`}

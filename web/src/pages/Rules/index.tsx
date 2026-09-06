@@ -279,7 +279,7 @@ export default function Rules() {
       )}
 
       {catalogError ? (
-        <div className="mb-6 rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-600 dark:text-red-400">
+        <div className="mb-6 rounded-lg border border-error bg-error-secondary p-4 text-sm text-error-primary">
           <div className="flex items-center gap-2 font-medium">
             <AlertCircle className="size-4" />
             Failed to load catalog
@@ -313,7 +313,7 @@ export default function Rules() {
 
           <div className="space-y-4" aria-busy={resultLoading}>
             {resultError && (
-              <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-600 dark:text-red-400">
+              <div className="rounded-lg border border-error bg-error-secondary p-4 text-sm text-error-primary">
                 <div className="flex items-center gap-2 font-medium">
                   <AlertCircle className="size-4" />
                   Failed to load filtered results
