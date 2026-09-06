@@ -237,6 +237,34 @@ func (s *Service) SetLiveRecon(ctx context.Context, actor string, tenantID, id s
 	return &cp, nil
 }
 
+// SetOffensiveRoE records the offensive rules of engagement (customer + emergency contact, risk ceiling,
+// exclusions reviewed) that the offensive governance policy requires before adversary emulation or
+// exploitation chains may run. It is tenant-scoped through the repository, so a cross-tenant write returns
+// ErrNotFound. Validation of the fields (risk ceiling in range) lives on the domain mutator.
+func (s *Service) SetOffensiveRoE(ctx context.Context, actor string, tenantID, id shared.ID, customerContact, emergencyContact, riskCeiling string, exclusionsChecked bool) (*domain.Engagement, error) {
+	if err := requireActor(actor); err != nil {
+		return nil, err
+	}
+	e, err := s.repo.GetByIDInTenant(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	now := s.clock.Now()
+	cp := *e
+	if err := cp.SetOffensiveRoE(customerContact, emergencyContact, riskCeiling, exclusionsChecked, now); err != nil {
+		return nil, err
+	}
+	cp.Audit.UpdatedBy = actor
+	if err := s.repo.Update(ctx, &cp); err != nil {
+		return nil, fmt.Errorf("persist offensive roe: %w", err)
+	}
+	meta := map[string]string{"risk_ceiling": cp.RiskCeiling, "exclusions_checked": strconv.FormatBool(cp.ExclusionsChecked)}
+	if err := s.auditChange(ctx, actor, "engagement.offensive_roe.update", id, meta, now); err != nil {
+		return nil, err
+	}
+	return &cp, nil
+}
+
 func (s *Service) SetRoE(ctx context.Context, actor string, tenantID, id shared.ID, roe domain.RoE) (*domain.Engagement, error) {
 	if err := requireActor(actor); err != nil {
 		return nil, err

@@ -477,6 +477,12 @@ func TestHostileHarness(t *testing.T) {
 		return rec.Code, rec.Body.String()
 	}
 
+	// Cross-tenant offensive-RoE write: a tenantB operator must not set tenantA's rules of engagement.
+	// The write is tenant-scoped (GetByIDInTenant), so it fails ErrNotFound rather than mutating.
+	if code, _ := sendBody("consultant", "tenantB", http.MethodPut, "/api/v1/engagements/engA/offensive-roe", `{"customer_contact":"x","emergency_contact":"y","risk_ceiling":"low","exclusions_checked":true}`); code != http.StatusNotFound {
+		t.Errorf("cross-tenant offensive-roe write = %d, want 404", code)
+	}
+
 	// Cross-tenant user provisioning: a tenantA admin must not be able to mint an operator (and
 	// receive that operator's API key) inside tenantB.
 	if code, body := sendBody("admin", "tenantA", http.MethodPost, "/api/v1/users", `{"name":"Planted","role":"admin","tenant_id":"other-b"}`); code != http.StatusForbidden || strings.Contains(body, "syn_") {

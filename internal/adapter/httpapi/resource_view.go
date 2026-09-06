@@ -48,8 +48,11 @@ type engagementView struct {
 	AuthorizedTo     *time.Time `json:"authorized_to"`
 	Timezone         string     `json:"timezone,omitempty"`
 	LiveReconEnabled bool       `json:"live_recon_enabled"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	// OffensiveRoE is the rules of engagement the offensive governance policy requires before adversary
+	// emulation or exploitation chains may run. Distinct from RoE above (allowed tool classes + blackouts).
+	OffensiveRoE offensiveRoEView `json:"offensive_roe"`
+	CreatedAt    time.Time        `json:"created_at"`
+	UpdatedAt    time.Time        `json:"updated_at"`
 	// List enrichment (listEngagements): open finding counts and the latest scan job, so the table
 	// shows what a row's scan found without a request per row. Absent on single-resource responses
 	// and when the stores are not wired.
@@ -88,6 +91,14 @@ func toRoEView(roe engdom.RoE) roeView {
 	return roeView{AllowedToolClasses: classes, Blackouts: blackouts}
 }
 
+// offensiveRoEView is the serialized offensive rules of engagement.
+type offensiveRoEView struct {
+	CustomerContact   string `json:"customer_contact"`
+	EmergencyContact  string `json:"emergency_contact"`
+	RiskCeiling       string `json:"risk_ceiling"`
+	ExclusionsChecked bool   `json:"exclusions_checked"`
+}
+
 func toEngagementView(e *engdom.Engagement) engagementView {
 	if e == nil {
 		return engagementView{}
@@ -109,8 +120,14 @@ func toEngagementView(e *engdom.Engagement) engagementView {
 		AuthorizedTo:     e.AuthorizedTo,
 		Timezone:         e.Timezone,
 		LiveReconEnabled: e.LiveReconEnabled,
-		CreatedAt:        e.Audit.CreatedAt,
-		UpdatedAt:        e.Audit.UpdatedAt,
+		OffensiveRoE: offensiveRoEView{
+			CustomerContact:   e.CustomerContact,
+			EmergencyContact:  e.EmergencyContact,
+			RiskCeiling:       e.RiskCeiling,
+			ExclusionsChecked: e.ExclusionsChecked,
+		},
+		CreatedAt: e.Audit.CreatedAt,
+		UpdatedAt: e.Audit.UpdatedAt,
 	}
 }
 

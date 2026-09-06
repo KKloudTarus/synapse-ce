@@ -239,6 +239,35 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/engagements/{id}/offensive-roe:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    put:
+      tags: [engagements]
+      summary: Set an engagement's offensive rules of engagement
+      description: >
+        Requires the `operate` capability. Records the customer and emergency contacts, the risk
+        ceiling (`low`/`medium`/`high`/`prohibited`, or empty to leave unset), and that the
+        out-of-scope list was reviewed. The offensive governance policy refuses adversary emulation
+        and exploitation chains until these rules of engagement are complete. This replaces the whole
+        rules-of-engagement set: send all four fields, since an omitted field is written as its empty
+        value.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SetOffensiveRoERequest"}
+      responses:
+        "200":
+          description: The updated engagement
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Engagement"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/engagements/{id}/source:
     parameters:
     - $ref: "#/components/parameters/EngagementId"
@@ -4296,6 +4325,26 @@ components:
           enum: [active, completed, archived]
           description: Target lifecycle status. draft is the creation state and cannot be returned to.
 
+    SetOffensiveRoERequest:
+      type: object
+      description: >
+        Offensive rules of engagement. The offensive governance policy refuses adversary emulation and
+        exploitation chains until every field is set (an empty risk ceiling leaves the pillar refused).
+      properties:
+        customer_contact:
+          type: string
+          description: Who to reach on the customer side when an offensive action goes wrong.
+        emergency_contact:
+          type: string
+          description: Out-of-hours emergency contact for offensive actions.
+        risk_ceiling:
+          type: string
+          enum: ["", low, medium, high, prohibited]
+          description: Highest risk class an offensive action may carry. Empty leaves the pillar refused.
+        exclusions_checked:
+          type: boolean
+          description: The operator confirmed the out-of-scope list was reviewed.
+
     Capability:
       type: object
       required: [key, name, enabled, switch]
@@ -5767,6 +5816,14 @@ components:
           type: string
           description: IANA zone the operator entered the window in; display and audit only.
         live_recon_enabled: {type: boolean}
+        offensive_roe:
+          type: object
+          description: Offensive rules of engagement the governance policy requires before emulation / exploitation.
+          properties:
+            customer_contact: {type: string}
+            emergency_contact: {type: string}
+            risk_ceiling: {type: string, enum: ["", low, medium, high, prohibited]}
+            exclusions_checked: {type: boolean}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
 

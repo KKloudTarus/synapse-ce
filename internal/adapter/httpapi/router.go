@@ -601,6 +601,7 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/authorization-window", rt.authz(userdom.PermOperate, rt.setAuthorizationWindow))
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/roe", rt.authz(userdom.PermOperate, rt.setRoE))
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/live-recon", rt.authz(userdom.PermOperate, rt.setLiveRecon))
+	mux.HandleFunc("PUT /api/v1/engagements/{id}/offensive-roe", rt.authz(userdom.PermOperate, rt.setOffensiveRoE))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/findings", rt.authz(userdom.PermView, rt.withEngTenant(rt.listFindings)))
 	mux.HandleFunc("POST /api/v1/engagements/{id}/findings", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.createFinding)))
 	if rt.detectionProvenance != nil {

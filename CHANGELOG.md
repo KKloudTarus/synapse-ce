@@ -9,6 +9,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Engagements carry their offensive rules of engagement.** The offensive governance policy refuses
+  adversary emulation and exploitation chains until an engagement declares its customer and emergency
+  contacts, a risk ceiling (`low`/`medium`/`high`/`prohibited`), and that the out-of-scope list was
+  reviewed. The `Engagement` aggregate now holds these fields, `PUT /api/v1/engagements/{id}/offensive-roe`
+  sets them (operate-gated, tenant-scoped, audited), and every engagement response returns them under
+  `offensive_roe`. Migration `0135` adds the columns backward-compatibly (defaults leave the offensive
+  pillar refused until an operator fills them in) with a `risk_ceiling` CHECK. This is the foundation the
+  offensive/purple pillar (emulation, purple coverage, exploitation chains) needs to become reachable.
+
 - **Governed DAST verification runs execute on the worker (#823).** An approved DAST probe used to run on
   the API request thread. With the Postgres job queue it now runs as a durable, lease-executed job: the
   run route (`POST /engagements/{id}/judgments/{jid}/runtime-verification/proposals/{aid}/run`) enqueues

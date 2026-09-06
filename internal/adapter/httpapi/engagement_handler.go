@@ -347,6 +347,30 @@ func (rt *Router) setAuthorizationWindow(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, toEngagementView(e))
 }
 
+type setOffensiveRoERequest struct {
+	CustomerContact   string `json:"customer_contact"`
+	EmergencyContact  string `json:"emergency_contact"`
+	RiskCeiling       string `json:"risk_ceiling"` // low|medium|high|prohibited, or empty to leave unset
+	ExclusionsChecked bool   `json:"exclusions_checked"`
+}
+
+// setOffensiveRoE records the offensive rules of engagement the governance policy requires before
+// adversary emulation or exploitation chains may run for this engagement.
+func (rt *Router) setOffensiveRoE(w http.ResponseWriter, r *http.Request) {
+	var req setOffensiveRoERequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
+		return
+	}
+	e, err := rt.eng.SetOffensiveRoE(r.Context(), PrincipalFrom(r.Context()), shared.ID(TenantFrom(r.Context())),
+		shared.ID(r.PathValue("id")), req.CustomerContact, req.EmergencyContact, req.RiskCeiling, req.ExclusionsChecked)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toEngagementView(e))
+}
+
 type transitionRequest struct {
 	Status string `json:"status"` // target lifecycle status: active|completed|archived
 }

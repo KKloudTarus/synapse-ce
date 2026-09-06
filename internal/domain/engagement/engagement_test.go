@@ -163,3 +163,27 @@ func TestIsAuthorizedAt(t *testing.T) {
 		})
 	}
 }
+
+func TestSetOffensiveRoE(t *testing.T) {
+	e, err := New("e1", "t1", "Eng", "Client", time.Unix(1_700_000_000, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_100, 0).UTC()
+	if err := e.SetOffensiveRoE("  Ops  ", " +1-555 ", "HIGH", true, now); err != nil {
+		t.Fatalf("SetOffensiveRoE: %v", err)
+	}
+	if e.CustomerContact != "Ops" || e.EmergencyContact != "+1-555" || e.RiskCeiling != "high" || !e.ExclusionsChecked {
+		t.Fatalf("fields not set/normalized: %+v", e)
+	}
+	if !e.Audit.UpdatedAt.Equal(now) {
+		t.Errorf("UpdatedAt not stamped: %v", e.Audit.UpdatedAt)
+	}
+	if err := e.SetOffensiveRoE("Ops", "+1", "bogus", true, now); err == nil {
+		t.Fatal("an unknown risk ceiling was accepted")
+	}
+	// Empty risk ceiling is allowed (leaves the offensive pillar refused, not a validation error).
+	if err := e.SetOffensiveRoE("Ops", "+1", "", false, now); err != nil {
+		t.Fatalf("empty risk ceiling rejected: %v", err)
+	}
+}
