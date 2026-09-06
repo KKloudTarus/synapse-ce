@@ -37,6 +37,14 @@ function mapEngagement(r: EngagementWire): Engagement {
     roe: {
       allowedToolClasses: r.roe?.allowed_tool_classes ?? [],
       blackouts: (r.roe?.blackouts ?? []).map((b) => ({ from: b?.from ?? '', to: b?.to ?? '' })),
+      offensive: {
+        customerContact: r.roe?.offensive?.customer_contact ?? '',
+        emergencyContact: r.roe?.offensive?.emergency_contact ?? '',
+        riskCeiling: r.roe?.offensive?.risk_ceiling ?? '',
+        excludedAssets: r.roe?.offensive?.excluded_assets ?? [],
+        exclusionsReviewed: r.roe?.offensive?.exclusions_reviewed ?? false,
+        complete: r.roe?.offensive?.complete ?? false,
+      },
     },
     liveReconEnabled: r.live_recon_enabled ?? false,
     createdAt: r.created_at ?? null,
@@ -136,6 +144,29 @@ export const engagementsApi = {
       await req(`/engagements/${encodeURIComponent(id)}/roe`, {
         method: 'PUT',
         body: JSON.stringify({ allowed_tool_classes: allowedToolClasses, blackouts }),
+      }),
+    ),
+
+  setOffensiveRoE: async (
+    id: string,
+    roe: {
+      customerContact: string
+      emergencyContact: string
+      riskCeiling: string
+      excludedAssets: string[]
+      exclusionsReviewed: boolean
+    },
+  ): Promise<Engagement> =>
+    mapEngagement(
+      await req(`/engagements/${encodeURIComponent(id)}/offensive-roe`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          customer_contact: roe.customerContact,
+          emergency_contact: roe.emergencyContact,
+          risk_ceiling: roe.riskCeiling,
+          excluded_assets: roe.excludedAssets,
+          exclusions_reviewed: roe.exclusionsReviewed,
+        }),
       }),
     ),
 

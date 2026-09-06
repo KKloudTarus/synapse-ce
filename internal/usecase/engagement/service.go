@@ -263,6 +263,37 @@ func (s *Service) SetRoE(ctx context.Context, actor string, tenantID, id shared.
 	return &cp, nil
 }
 
+// SetOffensiveRoE sets the engagement's offensive-governance rules of engagement (contacts, risk ceiling,
+// reviewed exclusions), which the offensive gate requires before any offensive action runs. It preserves
+// the execution-gate tool-class rules and is audited like any other config change.
+func (s *Service) SetOffensiveRoE(ctx context.Context, actor string, tenantID, id shared.ID, roe domain.OffensiveRoE) (*domain.Engagement, error) {
+	if err := requireActor(actor); err != nil {
+		return nil, err
+	}
+	e, err := s.repo.GetByIDInTenant(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	now := s.clock.Now()
+	cp := *e
+	if err := cp.SetOffensiveRoE(roe, now); err != nil {
+		return nil, err
+	}
+	cp.Audit.UpdatedBy = actor
+	if err := s.repo.Update(ctx, &cp); err != nil {
+		return nil, fmt.Errorf("persist offensive roe: %w", err)
+	}
+	if err := s.auditChange(ctx, actor, "engagement.offensive_roe.update", id, map[string]string{
+		"risk_ceiling":        string(roe.RiskCeiling),
+		"excluded_assets":     strconv.Itoa(len(roe.ExcludedAssets)),
+		"exclusions_reviewed": strconv.FormatBool(roe.ExclusionsReviewed),
+		"complete":            strconv.FormatBool(roe.Complete()),
+	}, now); err != nil {
+		return nil, err
+	}
+	return &cp, nil
+}
+
 // requireActor enforces attributability: never apply an audited
 // change without a principal, even if a caller omits one.
 func requireActor(actor string) error {

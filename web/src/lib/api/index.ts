@@ -6,7 +6,7 @@ export { type ReportType, type ReportBuildOptions } from './evidence'
 export { type ReconLogEvent, streamReconLogs } from './recon'
 export { type AgentStreamEvent, streamAgentSession } from './agent'
 export { type Connector, type ConnectorCreate, type ConnectorProvider } from './connectors'
-export { type ResponseRecord, type ResponsePlan, type ResponseKind, type ResponseState, type HaltResult, type PurpleVerdict, type PurpleCoverageRow, type PurpleWorkItem } from './blueteam'
+export { type ResponseRecord, type ResponsePlan, type ResponseKind, type ResponseState, type HaltResult, type PurpleVerdict, type PurpleCoverageRow, type PurpleWorkItem, type EmulationRunSummary } from './blueteam'
 export { type RiskStory, type RiskFinding, type RiskExposure, type RiskPath, type RiskDetection, type RiskAssetFacts } from './riskstory'
 export { type ReconcileRun, type ReconcileCounts, type ReconcileState, type ReconcileDiff, type ReconcileDiffClass, type ReconcileDiffCursor, type ReconcileDiffPage } from './vulnerability'
 

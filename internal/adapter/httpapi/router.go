@@ -84,6 +84,7 @@ type Router struct {
 	responseIDs            ports.IDGenerator          // set with responses; mints the server-authoritative action id
 	connectors             connectorService           // optional; nil ⇒ source-control connector routes are not registered
 	cspm                   *cspm.Service              // optional; nil ⇒ CSPM routes are not registered
+	emulation              emulationRunner            // optional; nil ⇒ the governed emulation-run route is not registered
 	businessAssets         businessAssetService       // optional; nil ⇒ business-level Asset routes are not registered
 	attackPaths            attackPathService          // optional; nil ⇒ attack-path routes are not registered
 	coverage               coverageService            // optional; nil ⇒ fleet coverage/agent-view routes are not registered
@@ -587,6 +588,7 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/scope", rt.authz(userdom.PermOperate, rt.updateScope))
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/authorization-window", rt.authz(userdom.PermOperate, rt.setAuthorizationWindow))
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/roe", rt.authz(userdom.PermOperate, rt.setRoE))
+	mux.HandleFunc("PUT /api/v1/engagements/{id}/offensive-roe", rt.authz(userdom.PermOperate, rt.setOffensiveRoE))
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/live-recon", rt.authz(userdom.PermOperate, rt.setLiveRecon))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/findings", rt.authz(userdom.PermView, rt.withEngTenant(rt.listFindings)))
 	mux.HandleFunc("POST /api/v1/engagements/{id}/findings", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.createFinding)))
@@ -755,6 +757,9 @@ func (rt *Router) routes() *http.ServeMux {
 	if rt.cspm != nil {
 		mux.HandleFunc("POST /api/v1/engagements/{id}/cspm/runs", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.runCSPM)))
 		mux.HandleFunc("GET /api/v1/engagements/{id}/cspm/runs/{rid}", rt.authz(userdom.PermView, rt.withEngTenant(rt.getCSPMRun)))
+	}
+	if rt.emulation != nil {
+		mux.HandleFunc("POST /api/v1/engagements/{id}/emulation/runs", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.runEmulation)))
 	}
 	mux.HandleFunc("GET /api/v1/engagements/{id}/recon/runs", rt.authz(userdom.PermView, rt.withEngTenant(rt.listReconRuns)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/recon/runs/{rid}", rt.authz(userdom.PermView, rt.withEngTenant(rt.getReconRun)))

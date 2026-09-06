@@ -22,9 +22,19 @@ export interface BlackoutWire {
   to: string
 }
 
+export interface OffensiveRoEWire {
+  customer_contact?: string
+  emergency_contact?: string
+  risk_ceiling?: string
+  excluded_assets?: string[]
+  exclusions_reviewed?: boolean
+  complete?: boolean
+}
+
 export interface RoEWire {
   allowed_tool_classes: string[]
   blackouts: BlackoutWire[]
+  offensive?: OffensiveRoEWire
 }
 
 export interface ScopeWire {

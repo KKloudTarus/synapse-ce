@@ -28,8 +28,20 @@ type blackoutView struct {
 
 // roeView is the serialized rules of engagement the execution gate enforces.
 type roeView struct {
-	AllowedToolClasses []string       `json:"allowed_tool_classes"`
-	Blackouts          []blackoutView `json:"blackouts"`
+	AllowedToolClasses []string          `json:"allowed_tool_classes"`
+	Blackouts          []blackoutView    `json:"blackouts"`
+	Offensive          offensiveRoEView  `json:"offensive"`
+}
+
+// offensiveRoEView is the serialized offensive-governance rules of engagement. Complete reports whether
+// every field an offensive action needs is set, so the UI can show readiness without re-deriving it.
+type offensiveRoEView struct {
+	CustomerContact    string   `json:"customer_contact"`
+	EmergencyContact   string   `json:"emergency_contact"`
+	RiskCeiling        string   `json:"risk_ceiling"`
+	ExcludedAssets     []string `json:"excluded_assets"`
+	ExclusionsReviewed bool     `json:"exclusions_reviewed"`
+	Complete           bool     `json:"complete"`
 }
 
 // engagementView is the serialized shape of an engagement.
@@ -85,7 +97,23 @@ func toRoEView(roe engdom.RoE) roeView {
 	for _, blackout := range roe.Blackouts {
 		blackouts = append(blackouts, blackoutView{From: blackout.From, To: blackout.To})
 	}
-	return roeView{AllowedToolClasses: classes, Blackouts: blackouts}
+	o := roe.Offensive
+	excluded := append([]string(nil), o.ExcludedAssets...)
+	if excluded == nil {
+		excluded = []string{}
+	}
+	return roeView{
+		AllowedToolClasses: classes,
+		Blackouts:          blackouts,
+		Offensive: offensiveRoEView{
+			CustomerContact:    o.CustomerContact,
+			EmergencyContact:   o.EmergencyContact,
+			RiskCeiling:        string(o.RiskCeiling),
+			ExcludedAssets:     excluded,
+			ExclusionsReviewed: o.ExclusionsReviewed,
+			Complete:           o.Complete(),
+		},
+	}
 }
 
 func toEngagementView(e *engdom.Engagement) engagementView {

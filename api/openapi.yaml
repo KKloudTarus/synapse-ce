@@ -306,6 +306,98 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/engagements/{id}/offensive-roe:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    put:
+      tags: [engagements]
+      operationId: setOffensiveRoE
+      summary: Set the engagement's offensive-governance rules of engagement
+      description: >
+        Sets the contacts, risk ceiling, and reviewed exclusions the offensive governance gate (#418)
+        requires before any offensive action (live recon, DAST, adversary emulation, exploitation) is
+        authorized. The execution-gate tool-class rules are left untouched. Every field is required before
+        an offensive action is authorized; a partially filled set keeps offensive work refused (fail-closed).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customer_contact: {type: string, description: Contact reached on an incident during the engagement}
+                emergency_contact: {type: string, description: Out-of-hours emergency contact}
+                risk_ceiling:
+                  type: string
+                  enum: [low, medium, high]
+                  description: Highest risk class the engagement permits; narrows the register, never widens it
+                excluded_assets:
+                  type: array
+                  items: {type: string}
+                  description: Assets explicitly out of offensive scope
+                exclusions_reviewed:
+                  type: boolean
+                  description: The operator has reviewed exclusions (distinguishes "nothing excluded" from "nobody looked")
+      responses:
+        "200":
+          description: Updated engagement with its offensive rules of engagement
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Engagement"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/engagements/{id}/emulation/runs:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    post:
+      tags: [engagements, findings]
+      operationId: runEmulation
+      summary: Run a governed adversary-emulation pass and compute its purple coverage
+      description: >
+        Authorizes every catalogued emulation technique through the same #418 offensive governance the
+        exploitation chains use, executes each benign observable in a confined sandbox, persists the run,
+        and joins it against the detection ledger for per-asset coverage (#426). Refused unless the
+        engagement's offensive rules of engagement are complete and the authorization window is open. A
+        technique that is not authorized, or whose observable does not fire, is recorded as a gap rather
+        than assumed clean.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target]
+              properties:
+                target:
+                  type: string
+                  minLength: 1
+                  description: Asset id the run is attributed to; coverage is per-asset
+                allow_lab_only:
+                  type: boolean
+                  description: Opt in to lab-only techniques that have no benign proof (still subject to their own approvals)
+      responses:
+        "200":
+          description: Emulation run complete; the coverage summary after the detection join (synchronous)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id: {type: string}
+                  engagement_id: {type: string}
+                  target: {type: string}
+                  techniques: {type: integer, description: Total catalogued techniques evaluated}
+                  executed: {type: integer, description: Techniques authorized and observed}
+                  gaps: {type: integer, description: Executed techniques with no matching detection}
+                  covered: {type: integer, description: Executed techniques a detection confirmed}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/engagements/{id}/detection-provenance:
     parameters:
     - $ref: "#/components/parameters/EngagementId"
@@ -5716,6 +5808,16 @@ components:
                 properties:
                   from: {type: string, format: date-time}
                   to: {type: string, format: date-time}
+            offensive:
+              type: object
+              description: Offensive-governance rules (#418) the offensive gate requires beyond scope and the window.
+              properties:
+                customer_contact: {type: string}
+                emergency_contact: {type: string}
+                risk_ceiling: {type: string, enum: ["", low, medium, high], description: Empty until set; an empty ceiling keeps offensive work refused}
+                excluded_assets: {type: array, items: {type: string}}
+                exclusions_reviewed: {type: boolean}
+                complete: {type: boolean, description: Whether every field an offensive authorization needs is set}
         authorized_from:
           type: [string, "null"]
           format: date-time

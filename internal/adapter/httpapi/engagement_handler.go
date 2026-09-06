@@ -16,6 +16,7 @@ import (
 	"time"
 
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
@@ -424,6 +425,37 @@ func (rt *Router) setRoE(w http.ResponseWriter, r *http.Request) {
 		roe.Blackouts = append(roe.Blackouts, engdom.Blackout{From: from, To: to})
 	}
 	e, err := rt.eng.SetRoE(r.Context(), PrincipalFrom(r.Context()), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("id")), roe)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toEngagementView(e))
+}
+
+type offensiveRoERequest struct {
+	CustomerContact    string   `json:"customer_contact"`
+	EmergencyContact   string   `json:"emergency_contact"`
+	RiskCeiling        string   `json:"risk_ceiling"`
+	ExcludedAssets     []string `json:"excluded_assets"`
+	ExclusionsReviewed bool     `json:"exclusions_reviewed"`
+}
+
+// setOffensiveRoE sets the engagement's offensive-governance rules of engagement (the contacts, risk
+// ceiling, and reviewed exclusions the #418 offensive gate requires before any offensive action runs).
+// It leaves the execution-gate tool-class rules untouched.
+func (rt *Router) setOffensiveRoE(w http.ResponseWriter, r *http.Request) {
+	var req offensiveRoERequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
+		return
+	}
+	e, err := rt.eng.SetOffensiveRoE(r.Context(), PrincipalFrom(r.Context()), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("id")), engdom.OffensiveRoE{
+		CustomerContact:    req.CustomerContact,
+		EmergencyContact:   req.EmergencyContact,
+		RiskCeiling:        offensivepolicy.RiskClass(req.RiskCeiling),
+		ExcludedAssets:     req.ExcludedAssets,
+		ExclusionsReviewed: req.ExclusionsReviewed,
+	})
 	if err != nil {
 		writeError(w, rt.log, err)
 		return

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { AlertTriangle, Plus, Save01, Trash01 } from '@untitledui/icons'
+import { AlertTriangle, CheckCircle, Plus, Save01, ShieldTick, Trash01 } from '@untitledui/icons'
 import { Button, Card, ErrorState, Field, Input, Pill, Select, cn } from '../../components/ui'
 import { ConfirmDialog } from '../../components/synapse/ConfirmDialog'
 import { useToast } from '../../components/synapse/Toast'
@@ -18,6 +18,7 @@ export function SettingsTab({ eng, onUpdated }: { eng: Engagement; onUpdated: (e
       <ScopeEditorCard eng={eng} onUpdated={onUpdated} />
       <WindowEditorCard eng={eng} onUpdated={onUpdated} />
       <RoeEditorCard eng={eng} onUpdated={onUpdated} />
+      <OffensiveRoeEditorCard eng={eng} onUpdated={onUpdated} />
       <LiveReconCard eng={eng} onUpdated={onUpdated} />
     </div>
   )
@@ -568,6 +569,178 @@ export function RoeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
         </div>
       )}
       {saved && !err && <p className="mt-3 text-xs text-accent">Rules of engagement saved.</p>}
+    </Card>
+  )
+}
+
+export const RISK_CEILINGS: { value: string; label: string }[] = [
+  { value: '', label: 'Not set — offensive work refused' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+]
+
+// OffensiveRoeEditorCard sets the offensive-governance rules (#418) the offensive gate requires before
+// any offensive action (adversary emulation, DAST, exploitation) runs. Every field must be set and the
+// exclusions reviewed; until then the gate refuses, which the readiness pill makes visible.
+export function OffensiveRoeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated: (e: Engagement) => void }) {
+  const off = eng.roe.offensive
+  const [customer, setCustomer] = useState(off?.customerContact ?? '')
+  const [emergency, setEmergency] = useState(off?.emergencyContact ?? '')
+  const [ceiling, setCeiling] = useState(off?.riskCeiling ?? '')
+  const [excluded, setExcluded] = useState((off?.excludedAssets ?? []).join(', '))
+  const [reviewed, setReviewed] = useState(off?.exclusionsReviewed ?? false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    const o = eng.roe.offensive
+    setCustomer(o?.customerContact ?? '')
+    setEmergency(o?.emergencyContact ?? '')
+    setCeiling(o?.riskCeiling ?? '')
+    setExcluded((o?.excludedAssets ?? []).join(', '))
+    setReviewed(o?.exclusionsReviewed ?? false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eng.id])
+
+  // Live readiness mirrors the server's completeness rule so the operator sees the effect before saving.
+  const missing = [
+    customer.trim() === '' && 'customer contact',
+    emergency.trim() === '' && 'emergency contact',
+    !(ceiling === 'low' || ceiling === 'medium' || ceiling === 'high') && 'risk ceiling',
+    !reviewed && 'exclusions review',
+  ].filter(Boolean) as string[]
+  const ready = missing.length === 0
+
+  async function save() {
+    setBusy(true)
+    setErr(null)
+    setSaved(false)
+    try {
+      const excludedAssets = excluded
+        .split(/[\n,]/)
+        .map((s) => s.trim())
+        .filter((s) => s !== '')
+      onUpdated(
+        await api.setOffensiveRoE(eng.id, {
+          customerContact: customer.trim(),
+          emergencyContact: emergency.trim(),
+          riskCeiling: ceiling,
+          excludedAssets,
+          exclusionsReviewed: reviewed,
+        }),
+      )
+      setSaved(true)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to save offensive rules of engagement')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card
+      title="Offensive rules of engagement"
+      titleClassName="flex items-center gap-2"
+      actions={
+        <div className="flex items-center gap-3">
+          {ready ? (
+            <Pill className="bg-accent/10 text-accent ring-1 ring-inset ring-accent/25">
+              <CheckCircle className="mr-1 inline size-3.5" /> Ready
+            </Pill>
+          ) : (
+            <Pill className="bg-medium/10 text-medium ring-1 ring-inset ring-medium/30">
+              {missing.length} to go
+            </Pill>
+          )}
+          <Button loading={busy} onClick={save} variant="secondary-color" className="px-3 py-1.5">
+            <Save01 className="size-4" /> Save
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex items-start gap-2 rounded-lg border border-secondary bg-secondary/20 p-3 text-xs text-tertiary">
+        <ShieldTick className="mt-0.5 size-4 shrink-0 text-brand-secondary" aria-hidden />
+        <span>
+          Offensive actions (adversary emulation, DAST, exploitation) are refused until every field here is
+          set and the authorization window is open. The risk ceiling narrows what the register permits; it
+          never widens it.
+        </span>
+      </div>
+      {!ready && (
+        <p className="mt-2 text-xs text-medium">
+          Still needed: {missing.join(', ')}.
+        </p>
+      )}
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Customer contact" hint="Reached on an incident during the engagement">
+          <Input
+            value={customer}
+            onChange={(e) => setCustomer(e.target.value)}
+            placeholder="Name and email or phone"
+            aria-label="Offensive RoE customer contact"
+          />
+        </Field>
+        <Field label="Emergency contact" hint="Out-of-hours escalation">
+          <Input
+            value={emergency}
+            onChange={(e) => setEmergency(e.target.value)}
+            placeholder="24/7 phone or email"
+            aria-label="Offensive RoE emergency contact"
+          />
+        </Field>
+        <Field label="Risk ceiling" hint="Highest risk class this engagement permits">
+          <Select
+            value={ceiling}
+            onValueChange={setCeiling}
+            ariaLabel="Offensive RoE risk ceiling"
+            options={RISK_CEILINGS}
+          />
+        </Field>
+        <Field label="Excluded assets" hint="Comma or newline separated; may be empty">
+          <Input
+            value={excluded}
+            onChange={(e) => setExcluded(e.target.value)}
+            placeholder="10.0.0.9, db-prod"
+            className="font-mono"
+            aria-label="Offensive RoE excluded assets"
+          />
+        </Field>
+      </div>
+      <button
+        type="button"
+        aria-pressed={reviewed}
+        onClick={() => setReviewed((v) => !v)}
+        className={cn(
+          'mt-4 flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
+          reviewed ? 'border-brand/40 bg-brand-primary/5' : 'border-secondary bg-primary hover:bg-secondary/40',
+        )}
+      >
+        <span
+          className={cn(
+            'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border',
+            reviewed ? 'border-brand bg-brand-primary text-brand-secondary' : 'border-tertiary',
+          )}
+          aria-hidden
+        >
+          {reviewed && <CheckCircle className="size-3" />}
+        </span>
+        <span className="text-sm text-primary">
+          Exclusions reviewed
+          <span className="mt-0.5 block text-xs text-tertiary">
+            The operator has considered what is out of offensive scope. This distinguishes "nothing excluded"
+            from "nobody looked" and is required even when the list is empty.
+          </span>
+        </span>
+      </button>
+      {err && (
+        <div className="mt-3">
+          <ErrorState message={err} />
+        </div>
+      )}
+      {saved && !err && <p className="mt-3 text-xs text-accent">Offensive rules of engagement saved.</p>}
     </Card>
   )
 }

@@ -4,10 +4,10 @@ import { MemoryRouter } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { ToastProvider } from '../../components/synapse/Toast'
 import type { Engagement } from '../../lib/types'
-import { LifecycleCard, isTerminalStatus } from './SettingsTab'
+import { LifecycleCard, OffensiveRoeEditorCard, isTerminalStatus } from './SettingsTab'
 
 vi.mock('../../lib/api', () => ({
-  api: { transitionEngagement: vi.fn() },
+  api: { transitionEngagement: vi.fn(), setOffensiveRoE: vi.fn() },
   ApiError: class ApiError extends Error {
     constructor(
       public status: number,
@@ -110,5 +110,82 @@ describe('LifecycleCard', () => {
 
     expect(await screen.findAllByText('archive refused')).not.toHaveLength(0)
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+})
+
+describe('OffensiveRoeEditorCard', () => {
+  beforeEach(() => vi.resetAllMocks())
+
+  // Seed the risk ceiling (a Radix Select that jsdom cannot drive); the test exercises the Input and
+  // toggle controls, which is where the readiness rule and the save payload are assembled.
+  function engOffensive(over: Partial<{ customer: string; emergency: string; ceiling: string; reviewed: boolean }> = {}): Engagement {
+    return {
+      id: 'eng-1',
+      name: 'Acme',
+      client: 'Acme',
+      status: 'active',
+      inScope: [],
+      outOfScope: [],
+      authorizedFrom: null,
+      authorizedTo: null,
+      roe: {
+        allowedToolClasses: [],
+        blackouts: [],
+        offensive: {
+          customerContact: over.customer ?? '',
+          emergencyContact: over.emergency ?? '',
+          riskCeiling: over.ceiling ?? '',
+          excludedAssets: [],
+          exclusionsReviewed: over.reviewed ?? false,
+          complete: false,
+        },
+      },
+      liveReconEnabled: false,
+      createdAt: null,
+      businessAssetId: '',
+    }
+  }
+
+  function renderOffensive(eng: Engagement) {
+    const onUpdated = vi.fn()
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <OffensiveRoeEditorCard eng={eng} onUpdated={onUpdated} />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+    return { onUpdated }
+  }
+
+  it('shows Incomplete until every required field is set, then Ready', async () => {
+    // Contacts and ceiling are set; only the exclusions review is missing.
+    renderOffensive(engOffensive({ customer: 'ciso@acme.example', emergency: '+1-555-0100', ceiling: 'high' }))
+    expect(screen.getByText(/to go/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /exclusions reviewed/i }))
+
+    await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument())
+  })
+
+  it('saves the offensive rules of engagement with the entered values', async () => {
+    vi.mocked(api.setOffensiveRoE).mockResolvedValue(engOffensive({ customer: 'x', emergency: 'y', ceiling: 'medium', reviewed: true }))
+    renderOffensive(engOffensive({ ceiling: 'medium' }))
+
+    fireEvent.change(screen.getByLabelText('Offensive RoE customer contact'), { target: { value: 'ciso@acme.example' } })
+    fireEvent.change(screen.getByLabelText('Offensive RoE emergency contact'), { target: { value: '+1-555-0100' } })
+    fireEvent.change(screen.getByLabelText('Offensive RoE excluded assets'), { target: { value: '10.0.0.9, db-prod' } })
+    fireEvent.click(screen.getByRole('button', { name: /exclusions reviewed/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() =>
+      expect(api.setOffensiveRoE).toHaveBeenCalledWith('eng-1', {
+        customerContact: 'ciso@acme.example',
+        emergencyContact: '+1-555-0100',
+        riskCeiling: 'medium',
+        excludedAssets: ['10.0.0.9', 'db-prod'],
+        exclusionsReviewed: true,
+      }),
+    )
   })
 })

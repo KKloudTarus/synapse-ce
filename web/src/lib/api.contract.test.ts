@@ -42,6 +42,14 @@ function engagementWire() {
     roe: {
       allowed_tool_classes: ['scanner'],
       blackouts: [{ from: '2026-09-06T00:00:00Z', to: '2026-09-07T00:00:00Z' }],
+      offensive: {
+        customer_contact: 'ciso@client.example',
+        emergency_contact: '+84-000-000-000',
+        risk_ceiling: 'high',
+        excluded_assets: ['10.0.0.9'],
+        exclusions_reviewed: true,
+        complete: true,
+      },
     },
     authorized_from: '2026-09-05T00:00:00Z',
     authorized_to: '2026-09-12T00:00:00Z',
@@ -99,6 +107,14 @@ describe('engagement wire contract', () => {
       roe: {
         allowedToolClasses: ['scanner'],
         blackouts: [{ from: '2026-09-06T00:00:00Z', to: '2026-09-07T00:00:00Z' }],
+        offensive: {
+          customerContact: 'ciso@client.example',
+          emergencyContact: '+84-000-000-000',
+          riskCeiling: 'high',
+          excludedAssets: ['10.0.0.9'],
+          exclusionsReviewed: true,
+          complete: true,
+        },
       },
       liveReconEnabled: true,
       createdAt: '2026-09-05T02:56:56.617935338Z',

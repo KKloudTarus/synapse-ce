@@ -3,14 +3,17 @@ import {
   AlertTriangle,
   CheckCircle,
   HelpCircle,
+  Play,
   ShieldTick,
   SlashCircle01,
   Target04,
 } from '@untitledui/icons'
-import { Card, EmptyState, ErrorState, Pill, Spinner, cn } from '../../components/ui'
+import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Spinner, cn } from '../../components/ui'
+import { useToast } from '../../components/synapse/Toast'
 import { useParallelFetch } from '../../hooks'
 import { api } from '../../lib/api'
-import type { PurpleCoverageRow, PurpleWorkItem } from '../../lib/api'
+import type { EmulationRunSummary, PurpleCoverageRow, PurpleWorkItem } from '../../lib/api'
+import type { Engagement } from '../../lib/types'
 
 interface RunSummary {
   runId: string
@@ -204,8 +207,121 @@ function GapList({ items, loading, error }: { items: PurpleWorkItem[]; loading: 
   )
 }
 
-export function PurpleCoverageTab({ engagementId }: { engagementId: string }) {
-  const { data, loading, error } = useParallelFetch<[PurpleCoverageRow[]]>(
+// windowOpen reports whether now sits inside the engagement's authorization window. An unset bound is
+// open on that side. It mirrors the server gate so the run action can explain a closed window before the
+// request 403s.
+function windowOpen(eng: Engagement | undefined): boolean {
+  if (!eng) return true
+  const now = Date.now()
+  if (eng.authorizedFrom) {
+    const f = new Date(eng.authorizedFrom).getTime()
+    if (!Number.isNaN(f) && now < f) return false
+  }
+  if (eng.authorizedTo) {
+    const t = new Date(eng.authorizedTo).getTime()
+    if (!Number.isNaN(t) && now > t) return false
+  }
+  return true
+}
+
+function RunEmulationPanel({
+  engagementId,
+  eng,
+  onRan,
+}: {
+  engagementId: string
+  eng: Engagement | undefined
+  onRan: (runId: string) => void
+}) {
+  // Default to the first in-scope target: the run target must be within engagement scope (the server
+  // refuses an out-of-scope target), and coverage joins against detections keyed by that asset value.
+  const [target, setTarget] = useState(eng?.inScope[0]?.value ?? '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [last, setLast] = useState<EmulationRunSummary | null>(null)
+  const { notify } = useToast()
+
+  const roeComplete = eng?.roe.offensive?.complete ?? false
+  const inWindow = windowOpen(eng)
+  const gated = !roeComplete || !inWindow
+  const canRun = target.trim() !== '' && !busy && !gated
+
+  async function run() {
+    setBusy(true)
+    setErr('')
+    try {
+      const summary = await api.runEmulation(engagementId, target.trim())
+      setLast(summary)
+      notify(
+        `Emulation run complete: ${summary.executed}/${summary.techniques} executed, ${summary.gaps} gap${summary.gaps === 1 ? '' : 's'}.`,
+        'success',
+      )
+      onRan(summary.runId)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to run emulation'
+      setErr(message)
+      notify(message, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card title="Run adversary emulation" titleClassName="flex items-center gap-2">
+      <p className="text-xs text-tertiary">
+        Runs each catalogued technique through the offensive governance gate and joins it against the
+        detections on the target asset. An authorized-but-undetected technique is a coverage gap.
+      </p>
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <div className="min-w-64 flex-1">
+          <Field label="Target asset" hint="Coverage is per-asset">
+            <Input
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              placeholder="in-scope asset"
+              className="font-mono"
+              aria-label="Emulation target asset id"
+            />
+          </Field>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <Button loading={busy} disabled={!canRun} onClick={run} variant="primary" className="px-3 py-2">
+            <Play className="size-4" /> Run emulation
+          </Button>
+          {gated && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-medium">
+              <AlertTriangle className="size-3 shrink-0" aria-hidden />
+              {!roeComplete ? 'Offensive RoE incomplete' : 'Outside authorization window'}
+            </span>
+          )}
+        </div>
+      </div>
+      {gated && (
+        <p className="mt-2 text-[11px] text-tertiary">
+          {!roeComplete
+            ? 'Complete the offensive rules of engagement under Settings before a run can be authorized.'
+            : 'A run is refused until the engagement is inside its authorization window.'}
+        </p>
+      )}
+      {last && !err && (
+        <p className="mt-3 text-xs text-tertiary">
+          Latest run <span className="font-mono text-secondary">{shortId(last.runId)}</span>:{' '}
+          <span className="font-semibold text-primary">{last.executed}</span> executed,{' '}
+          <span className="font-semibold text-error-primary">{last.gaps}</span> gap{last.gaps === 1 ? '' : 's'},{' '}
+          <span className="font-semibold text-success-primary">{last.covered}</span> covered.
+        </p>
+      )}
+      {err && (
+        <div className="mt-3">
+          <ErrorState message={err} />
+        </div>
+      )}
+    </Card>
+  )
+}
+
+export function PurpleCoverageTab({ engagementId, eng }: { engagementId: string; eng?: Engagement }) {
+  const { data, loading, error, refetch } = useParallelFetch<[PurpleCoverageRow[]]>(
     () => Promise.all([api.purpleCoverage(engagementId)]),
     { deps: [engagementId] },
   )
@@ -240,19 +356,29 @@ export function PurpleCoverageTab({ engagementId }: { engagementId: string }) {
     }
   }, [engagementId, activeRun])
 
+  // After a run, reload coverage and point at the new run once it lands in the reloaded list.
+  const onRan = (runId: string) => {
+    setSelectedRun(runId)
+    refetch()
+  }
+
   if (loading) return <Spinner label="Loading purple coverage…" />
   if (error) return <ErrorState message={error} />
   if (runs.length === 0)
     return (
-      <EmptyState
-        icon={ShieldTick}
-        title="No purple-team coverage yet"
-        hint="Run an adversary emulation on an enrolled asset; coverage joins each executed technique with the detections that fired."
-      />
+      <div className="space-y-6">
+        <RunEmulationPanel engagementId={engagementId} eng={eng} onRan={onRan} />
+        <EmptyState
+          icon={ShieldTick}
+          title="No purple-team coverage yet"
+          hint="Run an adversary emulation on the target asset above; coverage joins each executed technique with the detections that fired."
+        />
+      </div>
     )
 
   return (
     <div className="space-y-6">
+      <RunEmulationPanel engagementId={engagementId} eng={eng} onRan={onRan} />
       <SummaryCard latest={runs[0]} />
       {runs.length > 1 && (
         <Card title="Coverage by emulation run">

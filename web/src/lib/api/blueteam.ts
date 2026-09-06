@@ -88,6 +88,31 @@ export interface PurpleWorkItem {
   missingDetection: string
 }
 
+// The outcome of a governed adversary-emulation run (POST /engagements/{id}/emulation/runs), after the
+// detection join. `executed` counts techniques that were authorized and observed; `gaps` are executed
+// techniques with no matching detection; `covered` are executed techniques a detection confirmed.
+export interface EmulationRunSummary {
+  runId: string
+  engagementId: string
+  target: string
+  techniques: number
+  executed: number
+  gaps: number
+  covered: number
+}
+
+function mapEmulationSummary(r: any): EmulationRunSummary {
+  return {
+    runId: r?.run_id ?? '',
+    engagementId: r?.engagement_id ?? '',
+    target: r?.target ?? '',
+    techniques: r?.techniques ?? 0,
+    executed: r?.executed ?? 0,
+    gaps: r?.gaps ?? 0,
+    covered: r?.covered ?? 0,
+  }
+}
+
 // The coverage records carry no JSON tags server-side, so the wire keys are PascalCase; tolerate a
 // snake_case shape too in case tags are added later.
 function mapPurpleRow(r: any): PurpleCoverageRow {
@@ -146,6 +171,21 @@ export const blueteamApi = {
     )
     return Array.isArray(r?.work_items) ? r.work_items.map(mapPurpleWorkItem) : []
   },
+  // Run a governed adversary-emulation pass against a target asset. The server authorizes every
+  // catalogued technique through the offensive governance gate, executes each benign observable in the
+  // sandbox, and joins the run against the detection ledger. Refused (403) unless the engagement's
+  // offensive rules of engagement are complete and the authorization window is open.
+  runEmulation: async (
+    engagementId: string,
+    target: string,
+    allowLabOnly = false,
+  ): Promise<EmulationRunSummary> =>
+    mapEmulationSummary(
+      await req(`/engagements/${encodeURIComponent(engagementId)}/emulation/runs`, {
+        method: 'POST',
+        body: JSON.stringify({ target, allow_lab_only: allowLabOnly }),
+      }),
+    ),
   /** Halt every offensive path fleet-wide (kill switch). PermAdminister. */
   haltOffensive: async (reason: string): Promise<HaltResult> => {
     const r = await req('/redteam/halt', { method: 'POST', body: JSON.stringify({ reason }) })

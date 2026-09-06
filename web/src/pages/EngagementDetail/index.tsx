@@ -521,7 +521,7 @@ export function EngagementDetail() {
         {tab === 'threats' && <ThreatModelTab engagementId={id} />}
         {tab === 'quality' && <CodeQualityTab engagementId={id} />}
         {tab === 'recon' && <ReconTab eng={eng} onGoTab={setTab} />}
-        {tab === 'purple' && <PurpleCoverageTab key={id} engagementId={id} />}
+        {tab === 'purple' && <PurpleCoverageTab key={id} engagementId={id} eng={eng} />}
         {tab === 'agent' && <AgentTab engagementId={id} />}
         {tab === 'detections' && <DetectionsTab key={id} engagementId={id} />}
         {tab === 'imported' && <ImportedFindingsTab key={id} engagementId={id} />}

@@ -483,3 +483,32 @@ func TestListEngagementsCarriesFindingCountsAndLastScan(t *testing.T) {
 		t.Fatalf("last_scan_date = %v, want the job's finish time", row["last_scan_date"])
 	}
 }
+
+func TestSetOffensiveRoEHandler(t *testing.T) {
+	rt, repo, audit := newEngRouter(t)
+	rec := engCall(rt.setOffensiveRoE, http.MethodPut, `{"customer_contact":"ciso@client.example","emergency_contact":"+1-555-0100","risk_ceiling":"high","excluded_assets":["10.0.0.9"],"exclusions_reviewed":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("offensive roe: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	got, _ := repo.GetByID(context.Background(), shared.ID("eng-1"))
+	if !got.RoE.Offensive.Complete() {
+		t.Errorf("offensive roe not persisted complete: %+v", got.RoE.Offensive)
+	}
+	if got.RoE.Offensive.RiskCeiling != "high" || len(got.RoE.Offensive.ExcludedAssets) != 1 {
+		t.Errorf("offensive roe fields not persisted: %+v", got.RoE.Offensive)
+	}
+	if !auditHas(audit, "engagement.offensive_roe.update") {
+		t.Error("offensive roe update not audited")
+	}
+	// The response view must expose completeness so the UI can show readiness without re-deriving it.
+	if !strings.Contains(rec.Body.String(), `"complete":true`) {
+		t.Errorf("response view missing offensive completeness: %s", rec.Body.String())
+	}
+	// A non-executable risk ceiling is rejected at the domain boundary (400, not persisted as-is).
+	if rec := engCall(rt.setOffensiveRoE, http.MethodPut, `{"customer_contact":"a@b","emergency_contact":"c","risk_ceiling":"prohibited","exclusions_reviewed":true}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("prohibited ceiling: want 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := engCall(rt.setOffensiveRoE, http.MethodPut, `{bad json`); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad json: want 400, got %d", rec.Code)
+	}
+}

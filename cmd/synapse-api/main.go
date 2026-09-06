@@ -46,6 +46,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	egressinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/egress"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/emulationexec"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
@@ -111,6 +112,8 @@ import (
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/egressgrant"
+	emuc "github.com/KKloudTarus/synapse-ce/internal/usecase/emulation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/emulationrun"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
@@ -357,6 +360,7 @@ func main() {
 	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
 	var detectionRecordStore ports.DetectionRecordStore // #423 detection ledger projection
 	var purpleCoverageStore ports.PurpleCoverageStore   // #426 emulated technique vs observed detection
+	var emuRunStore emuc.RunStore                       // #421/#823 persisted adversary-emulation runs
 	// Registry of the LLM agent runs executing in this process, so the offensive kill switch can cancel
 	// one mid-decision. Declared here because the kill switch is built before the orchestrator is.
 	agentRunRegistry := orchestrator.NewRunRegistry()
@@ -493,6 +497,7 @@ func main() {
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
 		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
 		purpleCoverageStore = postgres.NewPurpleRepository(pool)
+		emuRunStore = postgres.NewEmulationRunRepository(pool)
 		detectionProvenanceStore, err = postgres.NewDetectionProvenanceRepository(pool)
 		if err != nil {
 			log.Error("postgres detection provenance store init failed", "err", err)
@@ -635,6 +640,7 @@ func main() {
 		importedFindingStore = memory.NewImportedFindingStore()
 		detectionRecordStore = memory.NewDetectionRecordStore()
 		purpleCoverageStore = memory.NewPurpleStore()
+		emuRunStore = memory.NewEmulationRunStore()
 		detectionProvenanceStore = memory.NewDetectionProvenanceStore()
 		incidentEventStore = memory.NewIncidentEventStore()
 		memoryFindings, ok := findingRepo.(*memory.FindingRepository)
@@ -1799,6 +1805,37 @@ func main() {
 			os.Exit(1)
 		} else {
 			router.SetPurpleCoverageReader(purpleSvc)
+			// #421/#823 governed adversary emulation: authorize every catalogued technique through the SAME
+			// #418 offensive governance the exploitation chains use, execute each benign observable in the
+			// sandbox, persist the run, then join it against the detection ledger (purpleSvc) for coverage.
+			// Wired only when a sandbox exists (nil in dispatch-only): the executor must confine execution,
+			// so with no sandbox the route stays unregistered rather than running unconfined.
+			if scaSandbox == nil {
+				log.Info("adversary emulation runner DISABLED (no sandbox in this posture); route not registered")
+			} else if emuExecutor, eerr := emulationexec.New(scaSandbox); eerr != nil {
+				log.Error("emulation executor init failed", "err", eerr)
+				os.Exit(1)
+			} else {
+				emuSealer := offensivepolicyuc.NewEvidenceChainSealer(func(ctx context.Context, engagementID shared.ID, kind string, content []byte, createdBy string) (shared.ID, error) {
+					ev, serr := evidenceService.Seal(ctx, engagementID, kind, content, createdBy)
+					if serr != nil {
+						return "", serr
+					}
+					return ev.ID, nil
+				})
+				emuGov, gerr := offensivepolicyuc.NewService(offensiveRegister, emuSealer, auditLog)
+				if gerr != nil {
+					log.Error("emulation governance init failed", "err", gerr)
+					os.Exit(1)
+				}
+				emuRunner, rerr := emulationrun.NewService(engService, emuGov, emuExecutor, emuRunStore, purpleSvc, auditLog, clock, ids, 0)
+				if rerr != nil {
+					log.Error("emulation runner init failed", "err", rerr)
+					os.Exit(1)
+				}
+				router.SetEmulationRunner(emuRunner)
+				log.Info("adversary emulation runner ENABLED (governed, sandbox-confined, coverage-joined)", "route", "POST /api/v1/engagements/{id}/emulation/runs")
+			}
 		}
 		// The ingest writes an append-only audit entry asserting that N external results entered an
 		// engagement. Without Postgres those rows live only in this process, so the banner says so

@@ -20,11 +20,25 @@ export interface Blackout {
   to: string // RFC3339
 }
 
+// OffensiveRoE – the offensive-governance rules (#418) the offensive gate requires beyond scope and
+// the authorization window, before any offensive action (live recon, DAST, adversary emulation,
+// exploitation) is authorized. `complete` is server-derived: every field an authorization needs is set.
+export interface OffensiveRoE {
+  customerContact: string
+  emergencyContact: string
+  // '' | 'low' | 'medium' | 'high'. Empty keeps offensive work refused.
+  riskCeiling: string
+  excludedAssets: string[]
+  exclusionsReviewed: boolean
+  complete: boolean
+}
+
 // RoE – rules of engagement the execution gate enforces. Empty
 // allowedToolClasses means no tool-class restriction (all allowed).
 export interface RoE {
   allowedToolClasses: string[]
   blackouts: Blackout[]
+  offensive?: OffensiveRoE
 }
 
 /**

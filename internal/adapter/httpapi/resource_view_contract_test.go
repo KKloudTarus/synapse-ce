@@ -31,7 +31,8 @@ var wireContract = map[string][]string{
 	},
 	"engagementFindingsView": {"total", "critical", "high", "medium", "low", "info"},
 	"scopeView":              {"in_scope", "out_of_scope"},
-	"roeView":                {"allowed_tool_classes", "blackouts"},
+	"roeView":                {"allowed_tool_classes", "blackouts", "offensive"},
+	"offensiveRoEView":       {"customer_contact", "emergency_contact", "risk_ceiling", "excluded_assets", "exclusions_reviewed", "complete"},
 	"blackoutView":           {"from", "to"},
 }
 

@@ -9,6 +9,17 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Governed adversary emulation reachable from the control plane.** The emulation catalogue, its
+  offensive-policy admission (#418), and purple coverage (#426) were tested domain and use-case code that
+  no composition root ever built, so the run was unreachable. The API server now wires an emulation runner
+  (`POST /engagements/{id}/emulation/runs`) that authorizes every catalogued technique through the same
+  #418 governance the exploitation chains use, executes each benign observable in the confined sandbox,
+  persists the run, and joins it against the detection ledger for per-asset coverage. It is registered only
+  when a sandbox exists (unregistered in dispatch-only posture) and refuses unless the engagement's
+  offensive rules of engagement are complete and the authorization window is open. Engagements gain an
+  offensive rules-of-engagement surface (`PUT /engagements/{id}/offensive-roe`) for the contacts, risk
+  ceiling, and reviewed exclusions the gate requires; an incomplete set keeps all offensive work refused.
+
 - **Per-engagement vulnerability posture in the dashboard.** The reconciled advisory occurrences and the
   governed action queue for an engagement (`GET /engagements/{id}/vulnerability/occurrences` and
   `.../vulnerability/actions`, with `.../actions/{aid}/acknowledge` and `/resolve`) had no UI. A new
