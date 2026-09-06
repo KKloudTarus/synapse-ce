@@ -141,6 +141,24 @@ func (m Matcher) validate() error {
 	return nil
 }
 
+// clone returns a deep copy of the matcher: the predicate slice and each predicate's Values slice are
+// copied, not aliased, so a returned rule cannot be reached through to mutate the package-level catalogue.
+func (m Matcher) clone() Matcher {
+	c := m
+	if m.All != nil {
+		preds := make([]Predicate, len(m.All))
+		for i, p := range m.All {
+			pc := p
+			if p.Values != nil {
+				pc.Values = append([]string(nil), p.Values...)
+			}
+			preds[i] = pc
+		}
+		c.All = preds
+	}
+	return c
+}
+
 // Match reports whether the event satisfies every predicate. A cross-class event, or one missing the
 // field a predicate names, does not match — a rule never matches something it cannot see.
 func (m Matcher) Match(e Event) bool {

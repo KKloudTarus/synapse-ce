@@ -9,6 +9,16 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Sequence detection rules (#822).** The detection engine matched single events and, since the rate
+  window, bursts; it now also matches an ordered *sequence* of events of one class within a span, grouped
+  per host. A new `Sequence` rule type (mutually exclusive with a rate `Window`) carries the ordered step
+  matchers; the per-class evaluator tracks each group's partial match under the same `MaxWindowGroups`
+  memory bound, allocates a group only on a first-step match, re-anchors on a repeated first step so a
+  restaged tool is not missed, and fires once with the ordered evidence. The shipped catalogue gains
+  `det.tool_staging_sequence`: a downloader (curl/wget/tftp/ftp) followed by a remote-shell tool
+  (nc/ncat/socat) on one host within two minutes, which neither process alone reveals.
+
+
 - **Attack paths, SLA policy, offensive policy, and alerting reach the dashboard.** Four capabilities
   were wired non-nil in `cmd/synapse-api` but had no UI, so operators could not reach them. A new
   **Attack paths** tab under Vulnerability Intelligence renders the exposure-to-finding graph
@@ -67,6 +77,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   and an interrupted run terminalizes `interrupted` instead. A worker that has no live scoped-egress
   broker still claims the job and fails the run `egress_unavailable` rather than leave it orphaned at
   `queued`, so an enqueued run is always visible to the poller.
+
 
 - **Per-engagement vulnerability posture in the dashboard.** The reconciled advisory occurrences and the
   governed action queue for an engagement (`GET /engagements/{id}/vulnerability/occurrences` and
