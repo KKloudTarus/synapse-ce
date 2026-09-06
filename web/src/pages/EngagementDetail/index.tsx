@@ -35,6 +35,10 @@ import { packageLocationMap, countVulnerabilityFindings, VulnsTab } from './Vuln
 import { LicensesTab } from './LicensesTab'
 import { ComponentsTab } from './ComponentsTab'
 import { ReconTab } from './ReconTab'
+import { ScanRunsTab } from './ScanRunsTab'
+import { PurpleCoverageTab } from './PurpleCoverageTab'
+import { RiskStoriesTab } from './RiskStoriesTab'
+import { VulnPostureTab } from './VulnPostureTab'
 import { DetectionsTab } from './DetectionsTab'
 import { ImportedFindingsTab } from './ImportedFindingsTab'
 import { DataGovernanceTab } from './DataGovernanceTab'
@@ -51,13 +55,17 @@ export type Tab =
   | 'findings'
   | 'imported'
   | 'sla'
+  | 'risk-stories'
+  | 'vuln-posture'
   | 'components'
   | 'vulns'
   | 'licenses'
   | 'graph'
+  | 'scanruns'
   | 'quality'
   | 'threats'
   | 'recon'
+  | 'purple'
   | 'agent'
   | 'detections'
   | 'reviews'
@@ -91,6 +99,8 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
     sub: [
       { id: 'findings', label: 'All Findings', countKey: 'findings' },
       { id: 'imported', label: 'Imported' },
+      { id: 'risk-stories', label: 'Risk Stories' },
+      { id: 'vuln-posture', label: 'Vuln Posture' },
       { id: 'sla', label: 'Remediation SLA' },
     ],
   },
@@ -103,6 +113,7 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'vulns', label: 'Vulnerabilities', countKey: 'vulns' },
       { id: 'licenses', label: 'Licenses', countKey: 'licenses' },
       { id: 'graph', label: 'Dependency Graph' },
+      { id: 'scanruns', label: 'Scan Runs' },
     ],
   },
   {
@@ -112,6 +123,7 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
     sub: [
       { id: 'recon', label: 'Recon' },
       { id: 'threats', label: 'Threat Model' },
+      { id: 'purple', label: 'Purple Coverage' },
       { id: 'agent', label: 'Agent' },
     ],
   },
@@ -495,6 +507,8 @@ export function EngagementDetail() {
           />
         )}
         {tab === 'sla' && <SLATab key={id} engagementId={id} findings={findings} />}
+        {tab === 'risk-stories' && <RiskStoriesTab key={id} engagementId={id} />}
+        {tab === 'vuln-posture' && <VulnPostureTab key={id} engagementId={id} />}
         {tab === 'components' && <ComponentsTab scan={scan} />}
         {tab === 'vulns' && <VulnsTab scan={scan} />}
         {tab === 'graph' && (
@@ -503,9 +517,11 @@ export function EngagementDetail() {
           </Suspense>
         )}
         {tab === 'licenses' && <LicensesTab scan={scan} />}
+        {tab === 'scanruns' && <ScanRunsTab key={id} engagementId={id} />}
         {tab === 'threats' && <ThreatModelTab engagementId={id} />}
         {tab === 'quality' && <CodeQualityTab engagementId={id} />}
         {tab === 'recon' && <ReconTab eng={eng} onGoTab={setTab} />}
+        {tab === 'purple' && <PurpleCoverageTab key={id} engagementId={id} />}
         {tab === 'agent' && <AgentTab engagementId={id} />}
         {tab === 'detections' && <DetectionsTab key={id} engagementId={id} />}
         {tab === 'imported' && <ImportedFindingsTab key={id} engagementId={id} />}

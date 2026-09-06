@@ -6,7 +6,9 @@ export { type ReportType, type ReportBuildOptions } from './evidence'
 export { type ReconLogEvent, streamReconLogs } from './recon'
 export { type AgentStreamEvent, streamAgentSession } from './agent'
 export { type Connector, type ConnectorCreate, type ConnectorProvider } from './connectors'
-export { type ResponseRecord, type ResponsePlan, type ResponseKind, type ResponseState, type HaltResult } from './blueteam'
+export { type ResponseRecord, type ResponsePlan, type ResponseKind, type ResponseState, type HaltResult, type PurpleVerdict, type PurpleCoverageRow, type PurpleWorkItem } from './blueteam'
+export { type RiskStory, type RiskFinding, type RiskExposure, type RiskPath, type RiskDetection, type RiskAssetFacts } from './riskstory'
+export { type ReconcileRun, type ReconcileCounts, type ReconcileState, type ReconcileDiff, type ReconcileDiffClass, type ReconcileDiffCursor, type ReconcileDiffPage } from './vulnerability'
 
 import { authApi, teamApi } from './auth'
 import { auditApi } from './audit'
@@ -28,6 +30,7 @@ import { dashboardApi } from './dashboard'
 import { capabilitiesApi } from './capabilities'
 import { connectorsApi } from './connectors'
 import { blueteamApi } from './blueteam'
+import { riskStoryApi } from './riskstory'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -61,4 +64,5 @@ export const api = {
   ...capabilitiesApi,
   ...connectorsApi,
   ...blueteamApi,
+  ...riskStoryApi,
 }

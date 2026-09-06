@@ -9,6 +9,123 @@ const DAY_AGO = new Date(Date.now() - 86400_000).toISOString()
 const WEEK_AGO = new Date(Date.now() - 7 * 86400_000).toISOString()
 const MONTH_AGO = new Date(Date.now() - 30 * 86400_000).toISOString()
 
+const SCAN_RUNS = [
+  {
+    id: 'run-2026-02',
+    engagement_id: 'eng-001',
+    created_at: WEEK_AGO,
+    manifest: {
+      tool_versions: { syft: '1.18.1', grype: '0.86.1', synapse: 'dev' },
+      vuln_db_snapshot: 'osv.dev@2026-02-20T00:00:00Z',
+      grype_db_version: 'v5@2026-02-20',
+      correlation_version: 7,
+      sbom_sha256: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+      repro_score: 82,
+      pinned_inputs: ['syft', 'grype', 'grype-db'],
+      unpinned_inputs: ['osv.dev'],
+    },
+    finding_keys: [
+      'pkg:npm/lodash@4.17.20|CVE-2021-23337',
+      'pkg:golang/github.com/gogo/protobuf@1.3.1|CVE-2021-3121',
+      'pkg:pypi/pyyaml@5.3.1|CVE-2020-14343',
+    ],
+  },
+  {
+    id: 'run-2026-01',
+    engagement_id: 'eng-001',
+    created_at: MONTH_AGO,
+    manifest: {
+      tool_versions: { syft: '1.17.0', grype: '0.85.0', synapse: 'dev' },
+      vuln_db_snapshot: 'osv.dev@2026-01-20T00:00:00Z',
+      grype_db_version: 'v5@2026-01-20',
+      correlation_version: 7,
+      sbom_sha256: '00998877665544332211aabbccddeeff00112233445566778899aabbccddeeff',
+      repro_score: 82,
+      pinned_inputs: ['syft', 'grype', 'grype-db'],
+      unpinned_inputs: ['osv.dev'],
+    },
+    finding_keys: [
+      'pkg:golang/github.com/gogo/protobuf@1.3.1|CVE-2021-3121',
+      'pkg:pypi/pyyaml@5.3.1|CVE-2020-14343',
+    ],
+  },
+]
+
+// Purple-coverage records carry no JSON tags server-side, so the mock uses PascalCase keys.
+const PURPLE_COVERAGE = [
+  { RunID: 'emu-feb', AssetID: 'asset-1', TechniqueID: 'T1059.001', TaxonomyRef: 'attack:T1059.001', Expected: 'det-powershell', Actual: ['det-powershell'], Verdict: 'covered', ComputedAt: WEEK_AGO },
+  { RunID: 'emu-feb', AssetID: 'asset-1', TechniqueID: 'T1053.005', TaxonomyRef: 'attack:T1053.005', Expected: 'det-schtask', Actual: [], Verdict: 'gap', ComputedAt: WEEK_AGO },
+  { RunID: 'emu-feb', AssetID: 'asset-1', TechniqueID: 'T1021.001', TaxonomyRef: 'attack:T1021.001', Expected: 'det-rdp', Actual: [], Verdict: 'unknown', ComputedAt: WEEK_AGO },
+  { RunID: 'emu-feb', AssetID: 'asset-1', TechniqueID: 'T1552.001', TaxonomyRef: 'attack:T1552.001', Expected: '', Actual: [], Verdict: 'out_of_reach', ComputedAt: WEEK_AGO },
+  { RunID: 'emu-jan', AssetID: 'asset-1', TechniqueID: 'T1059.001', TaxonomyRef: 'attack:T1059.001', Expected: 'det-powershell', Actual: [], Verdict: 'gap', ComputedAt: MONTH_AGO },
+  { RunID: 'emu-jan', AssetID: 'asset-1', TechniqueID: 'T1053.005', TaxonomyRef: 'attack:T1053.005', Expected: 'det-schtask', Actual: [], Verdict: 'gap', ComputedAt: MONTH_AGO },
+]
+
+const PURPLE_WORK_ITEMS = [
+  { TechniqueID: 'T1053.005', TaxonomyRef: 'attack:T1053.005', MissingDetection: 'det-schtask' },
+]
+
+const RECONCILE_RUN = {
+  tenant_id: 't-1',
+  id: 'rec-001',
+  scope: 'tenant',
+  advisory_id: '',
+  dry_run: false,
+  durable_job_id: 'job-rec-001',
+  counts: { processed: 1284, added: 12, updated: 37, unchanged: 1201, unmatchable: 28, retired: 6 },
+  error_samples: [],
+  state: 'succeeded',
+  snapshot_at: HOUR_AGO,
+  started_at: HOUR_AGO,
+  finished_at: NOW,
+  created_at: HOUR_AGO,
+  updated_at: NOW,
+}
+
+const RECONCILE_DIFFS = [
+  { run_id: 'rec-001', engagement_id: 'eng-001', advisory_id: 'CVE-2021-23337', component_fingerprint: 'pkg:npm/lodash@4.17.20', class: 'missing_occurrence', details: {}, created_at: NOW },
+  { run_id: 'rec-001', engagement_id: 'eng-001', advisory_id: 'CVE-2020-14343', component_fingerprint: 'pkg:pypi/pyyaml@5.3.1', class: 'changed_occurrence', details: {}, created_at: NOW },
+  { run_id: 'rec-001', engagement_id: 'eng-002', advisory_id: 'CVE-2021-3121', component_fingerprint: 'pkg:golang/github.com/gogo/protobuf@1.3.1', class: 'stale_occurrence', details: {}, created_at: NOW },
+]
+
+const ENG_VULN_OCCURRENCES = [
+  { id: 'occ-1', engagement_id: 'eng-001', advisory_id: 'CVE-2021-23337', package_name: 'lodash', component_version: '4.17.20', ecosystem: 'npm', state: 'open', reachability: 'reachable', fixed_version: '4.17.21' },
+  { id: 'occ-2', engagement_id: 'eng-001', advisory_id: 'CVE-2020-14343', package_name: 'pyyaml', component_version: '5.3.1', ecosystem: 'pypi', state: 'open', reachability: 'unknown', fixed_version: '5.4' },
+]
+
+const ENG_VULN_ACTIONS = [
+  { id: 'act-1', engagement_id: 'eng-001', occurrence_id: 'occ-1', finding_id: 'f-1', type: 'remediate', status: 'open', title: 'Upgrade lodash to 4.17.21', reason_codes: ['reachable', 'has_fix'], created_at: DAY_AGO, updated_at: DAY_AGO },
+  { id: 'act-2', engagement_id: 'eng-001', occurrence_id: 'occ-2', finding_id: 'f-2', type: 'triage', status: 'acknowledged', title: 'Assess pyyaml unsafe load exposure', reason_codes: ['no_reachability'], created_at: WEEK_AGO, updated_at: DAY_AGO },
+]
+
+const RISK_STORIES = [
+  {
+    asset_id: 'asset-web-01',
+    identity: { kind: 'host', key: 'web-01', name: 'web-01.prod' },
+    exposure: [{ description: 'internet-facing via edge LB', confidence: 'observed', qualifiers: ['public'] }],
+    findings: [
+      { finding_id: 'f-1', title: 'lodash prototype pollution (CVE-2021-23337)', severity: 'high', priority: 1, risk_score: 8.4, kev: false, reachability: 'reachable', reachable: true, on_attack_path: true, seen_under_attack: false, corroboration: ['reachable', 'on_attack_path'], rank_reason: 'raised by corroboration: reachable + on_attack_path', last_observed: WEEK_AGO, stale: false },
+      { finding_id: 'f-2', title: 'pyyaml unsafe load (CVE-2020-14343)', severity: 'medium', priority: 3, risk_score: 5.1, kev: false, reachability: 'unknown', reachable: false, on_attack_path: false, seen_under_attack: false, corroboration: [], rank_reason: 'base priority; no corroborating signals', last_observed: MONTH_AGO, stale: true },
+    ],
+    paths: [{ summary: 'edge LB -> web-01 -> db-01', confidence: 'inferred', qualifiers: [] }],
+    detections: [{ rule_id: 'proc.suspicious_shell', severity: 'high', observed: DAY_AGO, stale: false, qualifiers: [] }],
+    score: 1,
+    qualifiers: ['internet_facing', 'under_active_attack_path'],
+    generated_at: NOW,
+  },
+  {
+    asset_id: 'asset-db-01',
+    identity: { kind: 'host', key: 'db-01', name: 'db-01.prod' },
+    exposure: [],
+    findings: [],
+    paths: [],
+    detections: [],
+    score: 0,
+    qualifiers: [],
+    generated_at: NOW,
+  },
+]
+
 // ============================================================================
 // MOCK DATA
 // ============================================================================
@@ -416,6 +533,40 @@ export const handlers = [
   // 404 matches the real backend (ErrNotFound) when no job exists. A 200 with a
   // null body made mapScanJob(null) throw on every poll tick.
   http.get('/api/v1/engagements/:id/scan-status', () => new HttpResponse(null, { status: 404 })),
+  http.get('/api/v1/engagements/:id/scan-runs/compare', () =>
+    HttpResponse.json({
+      run_a: SCAN_RUNS[0],
+      run_b: SCAN_RUNS[1],
+      added: [],
+      removed: ['pkg:npm/lodash@4.17.20|CVE-2021-23337'],
+      unchanged: 2,
+      explanation: [
+        'grype-db changed: "v5@2026-02-20" -> "v5@2026-01-20"',
+        'vuln-db snapshot changed: "osv.dev@2026-02-20T00:00:00Z" -> "osv.dev@2026-01-20T00:00:00Z"',
+      ],
+    }),
+  ),
+  http.get('/api/v1/engagements/:id/scan-runs', () => HttpResponse.json(SCAN_RUNS)),
+  http.get('/api/v1/engagements/:id/purple-coverage', ({ request }) => {
+    const url = new URL(request.url)
+    if (url.searchParams.get('run')) return HttpResponse.json({ work_items: PURPLE_WORK_ITEMS })
+    return HttpResponse.json({ coverage: PURPLE_COVERAGE })
+  }),
+  http.get('/api/v1/engagements/:id/risk-stories', () => HttpResponse.json({ stories: RISK_STORIES })),
+  http.get('/api/v1/vulnerability/reconcile-runs/:id', () => HttpResponse.json(RECONCILE_RUN)),
+  http.get('/api/v1/vulnerability/reconcile-runs/:id/diffs', ({ request }) => {
+    const cls = new URL(request.url).searchParams.get('class')
+    const items = cls ? RECONCILE_DIFFS.filter((d) => d.class === cls) : RECONCILE_DIFFS
+    return HttpResponse.json({ items, next: null })
+  }),
+  http.get('/api/v1/engagements/:id/vulnerability/occurrences', () => HttpResponse.json({ items: ENG_VULN_OCCURRENCES, next: null })),
+  http.get('/api/v1/engagements/:id/vulnerability/actions', () => HttpResponse.json({ items: ENG_VULN_ACTIONS, next: null })),
+  http.post('/api/v1/engagements/:id/vulnerability/actions/:aid/acknowledge', ({ params }) =>
+    HttpResponse.json({ ...(ENG_VULN_ACTIONS.find((a) => a.id === params.aid) ?? ENG_VULN_ACTIONS[0]), id: params.aid, status: 'acknowledged' }),
+  ),
+  http.post('/api/v1/engagements/:id/vulnerability/actions/:aid/resolve', ({ params }) =>
+    HttpResponse.json({ ...(ENG_VULN_ACTIONS.find((a) => a.id === params.aid) ?? ENG_VULN_ACTIONS[0]), id: params.aid, status: 'resolved' }),
+  ),
   http.get('/api/v1/engagements/:id/scan', () => HttpResponse.json(SCAN_RESULT)),
   http.post('/api/v1/sca/scans', () => HttpResponse.json({ id: 'job-mock', engagement_id: 'eng-001', target: 'https://github.com/KKloudTarus/synapse-ce.git', kind: 'git', status: 'complete', stage: 'done', progress: 100, error: '', started_at: new Date(Date.now() - 300000).toISOString(), finished_at: NOW, debug_events: SCAN_RESULT.debug_events })),
 

@@ -66,6 +66,51 @@ export interface ApplyOutcome {
   pending: boolean // 202: recorded, awaiting a second human approval
 }
 
+// Purple-team coverage (#426): for each executed attack technique, whether the expected detection fired.
+// covered = executed and detected; gap = executed but undetected (produces a work item); unknown = not
+// executed this run; out_of_reach = the platform cannot emulate it.
+export type PurpleVerdict = 'out_of_reach' | 'unknown' | 'covered' | 'gap'
+
+export interface PurpleCoverageRow {
+  runId: string
+  assetId: string
+  techniqueId: string
+  taxonomyRef: string
+  expected: string
+  actual: string[]
+  verdict: PurpleVerdict
+  computedAt: string
+}
+
+export interface PurpleWorkItem {
+  techniqueId: string
+  taxonomyRef: string
+  missingDetection: string
+}
+
+// The coverage records carry no JSON tags server-side, so the wire keys are PascalCase; tolerate a
+// snake_case shape too in case tags are added later.
+function mapPurpleRow(r: any): PurpleCoverageRow {
+  return {
+    runId: r?.RunID ?? r?.run_id ?? '',
+    assetId: r?.AssetID ?? r?.asset_id ?? '',
+    techniqueId: r?.TechniqueID ?? r?.technique_id ?? '',
+    taxonomyRef: r?.TaxonomyRef ?? r?.taxonomy_ref ?? '',
+    expected: r?.Expected ?? r?.expected ?? '',
+    actual: Array.isArray(r?.Actual) ? r.Actual : Array.isArray(r?.actual) ? r.actual : [],
+    verdict: (r?.Verdict ?? r?.verdict ?? 'unknown') as PurpleVerdict,
+    computedAt: r?.ComputedAt ?? r?.computed_at ?? '',
+  }
+}
+
+function mapPurpleWorkItem(r: any): PurpleWorkItem {
+  return {
+    techniqueId: r?.TechniqueID ?? r?.technique_id ?? '',
+    taxonomyRef: r?.TaxonomyRef ?? r?.taxonomy_ref ?? '',
+    missingDetection: r?.MissingDetection ?? r?.missing_detection ?? '',
+  }
+}
+
 export const blueteamApi = {
   /** null when the deployment does not expose governed response (route 404). */
   listResponses: async (state?: ResponseState): Promise<ResponseRecord[] | null> => {
@@ -88,6 +133,19 @@ export const blueteamApi = {
   },
   revertResponse: async (id: string, body: { target: string; target_kind?: string }): Promise<ResponseRecord> =>
     mapRecord(await req(`/blueteam/response/${encodeURIComponent(id)}/revert`, { method: 'POST', body: JSON.stringify(body) })),
+  // Purple-team coverage trend for an engagement (all coverage records across runs). Returns [] when the
+  // feature is not enabled (the route answers an empty set rather than 404).
+  purpleCoverage: async (engagementId: string): Promise<PurpleCoverageRow[]> => {
+    const r = await req(`/engagements/${encodeURIComponent(engagementId)}/purple-coverage`)
+    return Array.isArray(r?.coverage) ? r.coverage.map(mapPurpleRow) : []
+  },
+  // The gap work items (one per undetected technique) for a single run.
+  purpleWorkItems: async (engagementId: string, runId: string): Promise<PurpleWorkItem[]> => {
+    const r = await req(
+      `/engagements/${encodeURIComponent(engagementId)}/purple-coverage?run=${encodeURIComponent(runId)}`,
+    )
+    return Array.isArray(r?.work_items) ? r.work_items.map(mapPurpleWorkItem) : []
+  },
   /** Halt every offensive path fleet-wide (kill switch). PermAdminister. */
   haltOffensive: async (reason: string): Promise<HaltResult> => {
     const r = await req('/redteam/halt', { method: 'POST', body: JSON.stringify({ reason }) })
