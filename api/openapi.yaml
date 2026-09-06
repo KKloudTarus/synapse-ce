@@ -268,6 +268,35 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/engagements/{id}/emulation:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    post:
+      tags: [engagements, blueteam]
+      summary: Run adversary emulation and compute purple-team coverage
+      description: >
+        Requires the `operate` capability. Runs the adversary-emulation technique catalogue against the
+        target asset, admitting each technique through the engagement's offensive rules of engagement
+        (the same #418 governance the exploitation chains use), then joins the run's expected detections
+        against the detections that actually fired and persists the purple-team coverage the
+        `GET .../purple-coverage` route serves. Emulation executes through a no-host simulation executor;
+        a technique the rules of engagement do not permit is recorded as not executed (verdict unknown), never run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RunEmulationRequest"}
+      responses:
+        "200":
+          description: The emulation run and the purple coverage it produced
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EmulationRunResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/engagements/{id}/source:
     parameters:
     - $ref: "#/components/parameters/EngagementId"
@@ -4324,6 +4353,25 @@ components:
           type: string
           enum: [active, completed, archived]
           description: Target lifecycle status. draft is the creation state and cannot be returned to.
+
+    RunEmulationRequest:
+      type: object
+      required: [target]
+      properties:
+        target:
+          type: string
+          description: Asset id the techniques run against and the coverage is attributed to.
+
+    EmulationRunResult:
+      type: object
+      description: One adversary-emulation run and the purple-team coverage it produced.
+      properties:
+        run:
+          type: object
+          description: The emulation run with its per-technique coverage records (expected detections).
+        coverage:
+          type: object
+          description: The computed purple coverage (per-technique covered/gap, bonus detections, work items).
 
     SetOffensiveRoERequest:
       type: object

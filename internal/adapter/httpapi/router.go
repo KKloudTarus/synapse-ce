@@ -113,6 +113,7 @@ type Router struct {
 	detectionProvenance    detectionProvenanceReader  // optional read side for durable detection provenance (#610)
 	riskStories            riskStoryReader            // optional read side for the unified per-asset risk story (#427)
 	purpleCoverage         purpleCoverageReader       // optional read side for purple-team coverage (#426)
+	purpleTeam             purpleTeamRunner           // optional producer: runs governed emulation → coverage (#426)
 	fleet                  *fleetRouter               // optional; nil ⇒ agent transport plane is not served
 	fleetAdmin             fleetAdminService          // optional; nil ⇒ operator agent-admin routes not registered
 	fleetKeys              fleetKeyAdmin              // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
@@ -625,6 +626,9 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/engagements/{id}/risk-stories/{assetID}", rt.authz(userdom.PermView, rt.withEngTenant(rt.getRiskStory)))
 	if rt.purpleCoverage != nil {
 		mux.HandleFunc("GET /api/v1/engagements/{id}/purple-coverage", rt.authz(userdom.PermView, rt.withEngTenant(rt.listPurpleCoverage)))
+	}
+	if rt.purpleTeam != nil {
+		mux.HandleFunc("POST /api/v1/engagements/{id}/emulation", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.runEmulation)))
 	}
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan", rt.authz(userdom.PermView, rt.withEngTenant(rt.latestScan)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/source", rt.authz(userdom.PermView, rt.withEngTenant(rt.uploadedSource)))

@@ -567,6 +567,22 @@ export const handlers = [
     if (url.searchParams.get('run')) return HttpResponse.json({ work_items: PURPLE_WORK_ITEMS })
     return HttpResponse.json({ coverage: PURPLE_COVERAGE })
   }),
+  http.post('/api/v1/engagements/:id/emulation', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { target?: string }
+    // demu.Run carries no json tags, so the keys are the capitalized Go field names.
+    return HttpResponse.json({
+      run: {
+        ID: 'emu-run-mock',
+        Target: body.target ?? 'asset-1',
+        Coverage: [
+          { TechniqueID: 'T1059', Executed: true },
+          { TechniqueID: 'T1071.001', Executed: true },
+          { TechniqueID: 'T1003', Executed: false },
+        ],
+      },
+      coverage: { Coverage: [], Bonus: [], Gaps: [] },
+    })
+  }),
   http.get('/api/v1/engagements/:id/risk-stories', () => HttpResponse.json({ stories: RISK_STORIES })),
   http.get('/api/v1/vulnerability/reconcile-runs/:id', () => HttpResponse.json(RECONCILE_RUN)),
   http.get('/api/v1/vulnerability/reconcile-runs/:id/diffs', ({ request }) => {
