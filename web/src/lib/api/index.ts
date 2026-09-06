@@ -13,6 +13,7 @@ export { type AttackPathResult, type AttackPath, type AttackPathNode, type Attac
 export { type SLAPoliciesView, type SLAPolicy, type SLAConfig, type SLAWeights, type SLAThresholds, type SLADueRange, type SLADueRanges, type SLADueTier, type SLAActivateResult, nsToDays, daysToNs } from './sla'
 export { type OffensivePolicy, type OffensiveTechnique, type OffensiveLegalReview } from './offensivepolicy'
 export { type AlertTestResult, type AlertTestOutcome, AlertNotEnabledError } from './alerting'
+export { type EngagementCredential } from './engagements'
 
 import { authApi, teamApi } from './auth'
 import { auditApi } from './audit'

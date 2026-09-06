@@ -64,6 +64,14 @@ function mapEngagement(r: EngagementWire): Engagement {
 
 export { mapEngagement }
 
+// A per-engagement tool credential. The secret value is write-only: it is sealed in the vault on set
+// and never returned, so this metadata carries only the name and timestamps.
+export interface EngagementCredential {
+  name: string
+  createdAt: string
+  updatedAt: string
+}
+
 export const engagementsApi = {
   listEngagements: async (): Promise<Engagement[]> =>
     ((await req('/engagements')) ?? []).map(mapEngagement),
@@ -165,6 +173,23 @@ export const engagementsApi = {
         body: JSON.stringify({ allowed_tool_classes: allowedToolClasses, blackouts }),
       }),
     ),
+
+  // Per-engagement tool credentials (vault-sealed placeholders resolved only at tool-execution time).
+  engagementCredentials: async (id: string): Promise<EngagementCredential[]> =>
+    ((await req(`/engagements/${encodeURIComponent(id)}/credentials`)) ?? []).map((c: any) => ({
+      name: c?.name ?? '',
+      createdAt: c?.created_at ?? '',
+      updatedAt: c?.updated_at ?? '',
+    })),
+  setEngagementCredential: async (id: string, name: string, value: string): Promise<void> => {
+    await req(`/engagements/${encodeURIComponent(id)}/credentials`, {
+      method: 'POST',
+      body: JSON.stringify({ name, value }),
+    })
+  },
+  deleteEngagementCredential: async (id: string, name: string): Promise<void> => {
+    await req(`/engagements/${encodeURIComponent(id)}/credentials/${encodeURIComponent(name)}`, { method: 'DELETE' })
+  },
 
   importBundle: async (bundleJSON: string): Promise<Engagement> =>
     mapEngagement(await req('/engagements/import', { method: 'POST', body: bundleJSON })),

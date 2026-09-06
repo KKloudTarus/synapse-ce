@@ -673,6 +673,17 @@ export const handlers = [
     })
   }),
   http.get('/api/v1/engagements/:id/risk-stories', () => HttpResponse.json({ stories: RISK_STORIES })),
+  http.get('/api/v1/engagements/:id/credentials', () =>
+    HttpResponse.json([
+      { name: 'registry_token', created_at: WEEK_AGO, updated_at: DAY_AGO },
+      { name: 'github_pat', created_at: MONTH_AGO, updated_at: MONTH_AGO },
+    ]),
+  ),
+  http.post('/api/v1/engagements/:id/credentials', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { name?: string }
+    return HttpResponse.json({ name: body?.name ?? '', status: 'stored' }, { status: 201 })
+  }),
+  http.delete('/api/v1/engagements/:id/credentials/:name', () => new HttpResponse(null, { status: 204 })),
   http.get('/api/v1/vulnerability/reconcile-runs/:id', () => HttpResponse.json(RECONCILE_RUN)),
   http.get('/api/v1/vulnerability/reconcile-runs/:id/diffs', ({ request }) => {
     const cls = new URL(request.url).searchParams.get('class')

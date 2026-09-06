@@ -9,6 +9,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Per-engagement tool credentials in the dashboard.** The vault-sealed credential routes
+  (`GET/POST/DELETE /engagements/{id}/credentials`) had no UI. A new **Credentials** tab (under
+  Governance) lists the stored placeholders with their timestamps, adds one through a collapsible form
+  (the secret is write-only, sealed in the vault, and never shown again), and deletes one behind an
+  inline confirm. Referenced from tool config as `{{secret:NAME}}` and resolved server-side only at
+  tool-execution time.
+
+
 - **Runtime detections feed the behavior baseline (#822).** The statistical baseline behind a host's
   Behavior risk factor only ever saw its process snapshot, so the network, privilege and file features
   stayed at zero and anomaly scoring never ran over runtime telemetry. The baseline now folds the host's
