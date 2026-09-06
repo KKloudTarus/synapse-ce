@@ -34,6 +34,7 @@ import { riskStoryApi } from './riskstory'
 import { slaApi } from './sla'
 import { writeupApi } from './writeup'
 import { cspmApi } from './cspm'
+import { attackPathApi } from './attackpath'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -71,6 +72,7 @@ export const api = {
   ...slaApi,
   ...writeupApi,
   ...cspmApi,
+  ...attackPathApi,
 }
 export {
   type SlaConfig,
@@ -102,3 +104,10 @@ export {
   type CloudTarget,
   type CSPMEvidenceRef,
 } from './cspm'
+export {
+  type AttackPath,
+  type AttackPathNode,
+  type AttackPathStep,
+  type AttackPathResult,
+  type AttackPathFilters,
+} from './attackpath'

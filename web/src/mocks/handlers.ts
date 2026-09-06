@@ -862,6 +862,32 @@ export const handlers = [
 
   // --- Assets ---
   http.get('/api/v1/assets', () => HttpResponse.json(BUSINESS_ASSETS.map(a => ({ ...a, type: 'host', tags: ['production'], finding_count: 12, last_scanned: HOUR_AGO })))),
+  // Attack paths (#... attackpath): nested nodes (asset.Asset is PascalCase inside the camelCase node).
+  http.get('/api/v1/attack-paths', () => HttpResponse.json({
+    bounds: { truncated: false, maxLength: 8, maxPaths: 50 },
+    paths: [
+      {
+        id: 'path-001', confident: true, uncertainties: [],
+        nodes: [
+          { asset: { asset: { ID: 'asset-edge', Kind: 'host', Key: 'hostname/edge-gw', Name: 'edge-gw' } } },
+          { asset: { asset: { ID: 'asset-app', Kind: 'service', Key: 'svc/checkout', Name: 'checkout-svc' } } },
+          { finding: { input: { target: { id: 'finding-001', kind: 'canonical' }, finding: { Title: 'Deserialization of untrusted data', Severity: 'critical' }, reachability: 'reachable' } } },
+        ],
+        steps: [
+          { kind: 'network', observed: true, toFinding: false },
+          { kind: 'reachability', observed: true, toFinding: true },
+        ],
+      },
+      {
+        id: 'path-002', confident: false, uncertainties: ['inferred_edge', 'unconfirmed_reachability'],
+        nodes: [
+          { asset: { asset: { ID: 'asset-app', Kind: 'service', Key: 'svc/checkout', Name: 'checkout-svc' } } },
+          { finding: { input: { target: { id: 'finding-003', kind: 'canonical' }, finding: { Title: 'Reflected XSS in search', Severity: 'high' }, reachability: 'unknown' } } },
+        ],
+        steps: [{ kind: 'inferred', observed: false, toFinding: true }],
+      },
+    ],
+  })),
   http.get('/api/v1/assets/:id', ({ params }) => {
     const a = BUSINESS_ASSETS.find(x => x.ID === params.id) ?? BUSINESS_ASSETS[0]
     return HttpResponse.json({ ...a, type: 'host', tags: ['production'], finding_count: 12, last_scanned: HOUR_AGO, engagements: ENGAGEMENTS.slice(0, 2) })

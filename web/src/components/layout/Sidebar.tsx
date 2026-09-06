@@ -12,6 +12,7 @@ import {
   Plus,
   Monitor01,
   Server01,
+  Share07,
   Signal01,
   Settings01,
   ShieldTick,
@@ -65,6 +66,7 @@ const NAV_GROUPS: Array<{
       items: [
         { icon: Cube01, label: 'Assets', to: '/assets' },
         { icon: ShieldZap, label: 'Vulnerability Intelligence', to: '/vulnerability-intelligence' },
+        { icon: Share07, label: 'Attack Paths', to: '/attack-paths' },
       ],
     },
     {
