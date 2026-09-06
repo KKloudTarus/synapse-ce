@@ -1480,7 +1480,7 @@ func main() {
 	var judgmentSvc *analysisuc.Service                   // shared by the HTTP verify/accept routes + the agent propose tool
 	var promotionEval *promotionuc.Evaluator              // optional source-signal reevaluator; proposes only
 	var promotionRunner *promotionuc.ReconciliationRunner // server-only promotion recovery
-	if cfg.JudgmentsEnabled {                             // AI judgment lifecycle (verify/accept/list); off by default
+	if cfg.JudgmentsEnabled {                             // AI judgment lifecycle (verify/accept/list); on by default
 		svc, aerr := analysisuc.NewService(judgmentStore, evidenceService, auditLog, clock, ids)
 		if aerr != nil {
 			log.Error("analysis (judgment) service init failed", "err", aerr)

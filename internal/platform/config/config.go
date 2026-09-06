@@ -281,7 +281,7 @@ type Config struct {
 	PromotionReconcileInterval      time.Duration
 	FleetDetectionReconcileInterval time.Duration
 
-	// JudgmentsEnabled turns on the AI judgment lifecycle HTTP routes; off by default.
+	// JudgmentsEnabled turns on the AI judgment lifecycle HTTP routes; on by default.
 	JudgmentsEnabled bool
 	// FleetAssetsEnabled turns on the multi-tenant fleet asset model (assets, edges, business
 	// services) and its HTTP routes; off by default. When on with Postgres, startup refuses to
