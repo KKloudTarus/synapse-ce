@@ -42,6 +42,7 @@ import { VulnPostureTab } from './VulnPostureTab'
 import { DetectionsTab } from './DetectionsTab'
 import { ImportedFindingsTab } from './ImportedFindingsTab'
 import { DataGovernanceTab } from './DataGovernanceTab'
+import { WriteupDraftsTab } from './WriteupDraftsTab'
 import { EvidenceTab } from './EvidenceTab'
 import { SettingsTab } from './SettingsTab'
 import { JudgmentReviewTab } from './ReviewsTab'
@@ -71,6 +72,7 @@ export type Tab =
   | 'reviews'
   | 'evidence'
   | 'data-governance'
+  | 'writeup-drafts'
   | 'settings'
 
 export interface SubTabDefinition {
@@ -142,6 +144,7 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'reviews', label: 'Awaiting Review' },
       { id: 'quality', label: 'Code Quality' },
       { id: 'data-governance', label: 'Data governance' },
+      { id: 'writeup-drafts', label: 'Write-up Drafts' },
     ],
   },
   {
@@ -526,6 +529,7 @@ export function EngagementDetail() {
         {tab === 'detections' && <DetectionsTab key={id} engagementId={id} />}
         {tab === 'imported' && <ImportedFindingsTab key={id} engagementId={id} />}
         {tab === 'data-governance' && <DataGovernanceTab key={id} engagementId={id} />}
+        {tab === 'writeup-drafts' && <WriteupDraftsTab key={id} engagementId={id} />}
         {tab === 'reviews' && <JudgmentReviewTab key={id} engagementId={id} />}
         {tab === 'evidence' && <EvidenceTab key={id} engagementId={id} />}
         {tab === 'settings' && <SettingsTab eng={eng} onUpdated={setEng} />}

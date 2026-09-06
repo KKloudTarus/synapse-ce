@@ -32,6 +32,7 @@ import { connectorsApi } from './connectors'
 import { blueteamApi } from './blueteam'
 import { riskStoryApi } from './riskstory'
 import { slaApi } from './sla'
+import { writeupApi } from './writeup'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -67,6 +68,7 @@ export const api = {
   ...blueteamApi,
   ...riskStoryApi,
   ...slaApi,
+  ...writeupApi,
 }
 export {
   type SlaConfig,
@@ -85,3 +87,4 @@ export {
   type CoverageClassState,
   type CoverageVector,
 } from './fleet'
+export { type WriteupDraft, type WriteupDraftState } from './writeup'

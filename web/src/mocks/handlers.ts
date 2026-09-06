@@ -323,6 +323,22 @@ const OBSERVABILITY = {
   alerts: [{ project_id: 'proj-synapse', project_name: 'synapse-ce', alert: { metric: 'disagreement_rate', observed_basis_points: 707, baseline_basis_points: 400, deviation_basis_points: 307, sample_size: 99, message: 'Disagreement rate elevated above baseline for synapse-ce' } }],
 }
 
+// --- AI-proposed write-up drafts (raw domain, PascalCase) ---
+const WRITEUP_DRAFTS = [
+  {
+    ID: 'draft-001', EngagementID: 'eng-001', FindingID: 'finding-001',
+    Description: 'The application deserializes untrusted session data with a permissive type resolver, allowing an attacker who controls a cookie to instantiate arbitrary gadget chains.',
+    Remediation: 'Pin the deserializer to an allow-list of expected types and sign session payloads. Reject any type outside the allow-list before construction.',
+    State: 'proposed', ProposedBy: 'agent:writer-01', DecidedBy: '', CreatedAt: HOUR_AGO, UpdatedAt: HOUR_AGO,
+  },
+  {
+    ID: 'draft-002', EngagementID: 'eng-001', FindingID: 'finding-003',
+    Description: 'Reflected XSS in the search parameter; the value is echoed into an HTML attribute without encoding.',
+    Remediation: 'Context-encode the parameter for the HTML-attribute sink and add a strict Content-Security-Policy.',
+    State: 'accepted', ProposedBy: 'agent:writer-01', DecidedBy: 'alice', CreatedAt: DAY_AGO, UpdatedAt: HOUR_AGO,
+  },
+]
+
 // --- Remediation SLA ---
 const DAY_NS = 86_400_000_000_000
 const SLA_POLICY = {
@@ -636,6 +652,22 @@ export const handlers = [
   ),
   http.get('/api/v1/engagements/:id/scan', () => HttpResponse.json(SCAN_RESULT)),
   http.post('/api/v1/sca/scans', () => HttpResponse.json({ id: 'job-mock', engagement_id: 'eng-001', target: 'https://github.com/KKloudTarus/synapse-ce.git', kind: 'git', status: 'complete', stage: 'done', progress: 100, error: '', started_at: new Date(Date.now() - 300000).toISOString(), finished_at: NOW, debug_events: SCAN_RESULT.debug_events })),
+
+  // --- AI-proposed write-up drafts (PascalCase wire; the domain Draft has no JSON tags) ---
+  http.get('/api/v1/engagements/:id/writeup-drafts', () => HttpResponse.json({ writeup_drafts: WRITEUP_DRAFTS })),
+  http.post('/api/v1/engagements/:id/writeup-drafts/:did/edit', async ({ params, request }) => {
+    const body = (await request.json()) as { description?: string; remediation?: string }
+    const d = WRITEUP_DRAFTS.find((x) => x.ID === params.did) ?? WRITEUP_DRAFTS[0]
+    return HttpResponse.json({ ...d, Description: body.description ?? d.Description, Remediation: body.remediation ?? d.Remediation })
+  }),
+  http.post('/api/v1/engagements/:id/writeup-drafts/:did/accept', ({ params }) => {
+    const d = WRITEUP_DRAFTS.find((x) => x.ID === params.did) ?? WRITEUP_DRAFTS[0]
+    return HttpResponse.json({ ...d, State: 'accepted', DecidedBy: 'you' })
+  }),
+  http.post('/api/v1/engagements/:id/writeup-drafts/:did/reject', ({ params }) => {
+    const d = WRITEUP_DRAFTS.find((x) => x.ID === params.did) ?? WRITEUP_DRAFTS[0]
+    return HttpResponse.json({ ...d, State: 'rejected', DecidedBy: 'you' })
+  }),
 
   // --- SLA policy admin (GET/POST /sla/policies). Durations are Go time.Duration (nanoseconds). ---
   http.get('/api/v1/sla/policies', () => HttpResponse.json({ active: SLA_POLICY, policies: [SLA_POLICY] })),
