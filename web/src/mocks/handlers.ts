@@ -1288,6 +1288,7 @@ export const handlers = [
       },
     })
   }),
+  http.get('/api/v1/projects/:key/branches', () => HttpResponse.json({ branches: ['main', 'develop', 'feature/multi-branch'] })),
   http.get('/api/v1/projects/:key/analyses', () => HttpResponse.json({
     items: Array.from({ length: 8 }, (_, i) => ({
       id: `an-${String(8 - i).padStart(3, '0')}`,

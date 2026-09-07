@@ -7,6 +7,7 @@ import { ProjectDependencyGraphPage } from './ProjectDependencyGraphPage'
 
 vi.mock('../../lib/api', () => ({
   api: {
+    projectBranches: vi.fn(() => Promise.resolve([])),
     projectDependencyGraph: vi.fn(),
     downloadProjectDependencySubtree: vi.fn(),
   },

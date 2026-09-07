@@ -28,7 +28,7 @@ import {
 import { useProjectRouteContext } from './CodeQualityProject'
 
 export function ProjectOverviewPage() {
-  const { projectKey, isRunning, analysisRevision, startAnalysis } = useProjectRouteContext()
+  const { projectKey, branch, isRunning, analysisRevision, startAnalysis } = useProjectRouteContext()
   const [searchParams, setSearchParams] = useSearchParams()
   const lens = parseCodeLens(searchParams.get('lens'))
 
@@ -48,13 +48,13 @@ export function ProjectOverviewPage() {
   }
 
   const { data: overview, loading, error, refetch: load } = useFetch<ProjectOverview>(
-    () => api.projectOverview(projectKey).catch((e) => {
+    () => api.projectOverview(projectKey, branch).catch((e) => {
       const message = e instanceof Error && e.message === 'Invalid project overview response'
         ? 'Project Overview data is unavailable.'
         : e instanceof Error ? e.message : 'Failed to load Project Overview'
       throw new Error(message)
     }),
-    { deps: [projectKey, analysisRevision] },
+    { deps: [projectKey, branch, analysisRevision] },
   )
 
   if (loading) return <ProjectOverviewSkeleton />

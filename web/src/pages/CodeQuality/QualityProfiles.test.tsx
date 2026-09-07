@@ -6,6 +6,7 @@ import type { QualityProfile, RuleSummary } from '../../lib/types'
 
 vi.mock('../../lib/api', () => ({
   api: {
+    projectBranches: vi.fn(() => Promise.resolve([])),
     listQualityProfiles: vi.fn(),
     listRules: vi.fn(),
     copyQualityProfile: vi.fn(),
