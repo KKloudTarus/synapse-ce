@@ -102,6 +102,11 @@ export {
   type TimelineEntry,
   type Workload,
   type WorkloadImage,
+  type DesiredCapabilities,
+  type EndpointProcess,
+  type AgentKey,
+  type RolloutView,
+  type RolloutStatus,
 } from './fleet'
 export {
   type CSPMRun,

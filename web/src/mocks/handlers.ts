@@ -1611,6 +1611,49 @@ export const handlers = [
     })
   }),
 
+  // --- Fleet management: desired capabilities, processes, agent admin, rollout ---
+  // State and ProcessSnapshot have no Go json tags, so they answer PascalCase; keys/rollout are snake_case.
+  http.get('/api/v1/fleet/assets/:id/desired-capabilities', ({ params }) =>
+    HttpResponse.json({ TenantID: 'default', AssetID: params.id, PolicyID: 'pol-fleet', Capabilities: ['edr.process', 'edr.network'], Version: 3, Audit: { UpdatedBy: 'ana', UpdatedAt: '2026-09-05T09:00:00Z' } }),
+  ),
+  http.put('/api/v1/fleet/assets/:id/desired-capabilities', async ({ params, request }) => {
+    const body = (await request.json()) as { capabilities?: string[] }
+    return HttpResponse.json({ TenantID: 'default', AssetID: params.id, PolicyID: 'pol-fleet', Capabilities: body.capabilities ?? [], Version: 4, Audit: { UpdatedBy: 'ana', UpdatedAt: new Date().toISOString() } })
+  }),
+  http.delete('/api/v1/fleet/assets/:id/desired-capabilities', () => new HttpResponse(null, { status: 204 })),
+  http.get('/api/v1/fleet/assets/:id/processes', ({ params }) =>
+    HttpResponse.json({ processes: [
+      { TenantID: 'default', AssetID: params.id, EntityID: 'e-4821', PID: 4821, Comm: 'nginx', Path: '/usr/sbin/nginx', Running: true, LastSeenAt: '2026-09-05T09:00:00Z' },
+      { TenantID: 'default', AssetID: params.id, EntityID: 'e-22', PID: 22, Comm: 'sshd', Path: '/usr/sbin/sshd', Running: true, LastSeenAt: '2026-09-05T09:00:00Z' },
+      { TenantID: 'default', AssetID: params.id, EntityID: 'e-991', PID: 991, Comm: 'cron', Path: '/usr/sbin/cron', Running: false, LastSeenAt: '2026-09-05T08:30:00Z' },
+    ] }),
+  ),
+  http.post('/api/v1/fleet/assets/:id/behavior-baseline/rebaseline', ({ params }) => HttpResponse.json({ asset_id: params.id, rebaselined: true })),
+  http.post('/api/v1/agents/enrolment-tokens', () => HttpResponse.json({ enrolment_token: `enrol_${Math.random().toString(36).slice(2, 10)}` }, { status: 201 })),
+  http.post('/api/v1/agents/:id/revoke', ({ params }) => HttpResponse.json({ agent_id: params.id, state: 'revoked' })),
+  http.get('/api/v1/agents/:id/keys', ({ params }) =>
+    HttpResponse.json({ agent_id: params.id, keys: [
+      { key_id: 'key-sign-2', purpose: 'signing', algorithm: 'ed25519', not_before: '2026-08-01T00:00:00Z', not_after: '2027-08-01T00:00:00Z', revoked: false, replaced_by: '' },
+      { key_id: 'key-sign-1', purpose: 'signing', algorithm: 'ed25519', not_before: '2026-01-01T00:00:00Z', not_after: '2026-08-01T00:00:00Z', revoked: true, replaced_by: 'key-sign-2' },
+    ] }),
+  ),
+  http.post('/api/v1/agents/:id/keys/:keyID/revoke', ({ params }) => HttpResponse.json({ agent_id: params.id, key_id: params.keyID, state: 'revoked' })),
+  http.get('/api/v1/agents/rollout', ({ request }) => {
+    const channel = new URL(request.url).searchParams.get('channel') || 'stable'
+    return HttpResponse.json({ configured: true, rollout: { channel, target_version: '1.4.2', canary_groups: ['canary-a'], promoted_to_all: false, paused: false, updated_by: 'ana', updated_at: '2026-09-05T09:00:00Z' } })
+  }),
+  http.put('/api/v1/agents/rollout', async ({ request }) => {
+    const channel = new URL(request.url).searchParams.get('channel') || 'stable'
+    const body = (await request.json()) as { target_version?: string; canary_groups?: string[] }
+    return HttpResponse.json({ configured: true, rollout: { channel, target_version: body.target_version ?? '1.4.2', canary_groups: body.canary_groups ?? [], promoted_to_all: false, paused: false, updated_by: 'ana', updated_at: new Date().toISOString() } })
+  }),
+  ...['promote', 'pause', 'resume'].map((verb) =>
+    http.post(`/api/v1/agents/rollout/${verb}`, ({ request }) => {
+      const channel = new URL(request.url).searchParams.get('channel') || 'stable'
+      return HttpResponse.json({ configured: true, rollout: { channel, target_version: '1.4.2', canary_groups: ['canary-a'], promoted_to_all: verb === 'promote', paused: verb === 'pause', pause_reason: verb === 'pause' ? 'held for review' : '', updated_by: 'ana', updated_at: new Date().toISOString() } })
+    }),
+  ),
+
   // --- Catch-all fallback ---
   http.get('/api/v1/*', ({ request }) => {
     console.warn('[MSW] Unhandled GET:', new URL(request.url).pathname)

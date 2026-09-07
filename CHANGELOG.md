@@ -9,6 +9,9 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Fleet agent management and per-host capability surfaces reach the dashboard.** Several fleet routes were wired non-nil in `cmd/synapse-api` but had no UI. A new **Agents** page (`/fleet/agents`) mints single-use enrolment tokens, revokes agents, lists and revokes their signing keys, and drives the staged agent binary rollout per channel (read the plan, set target and canary groups, promote, pause, resume). The host detail view gains two tabs: **Capabilities** declares and reconciles the desired capabilities for a host (`GET`/`PUT`/`DELETE /fleet/assets/{id}/desired-capabilities`, reconciled against the observed gaps), and **Processes** lists the running-process projection that feeds the behavior baseline and resets that baseline (`GET /fleet/assets/{id}/processes`, `POST /fleet/assets/{id}/behavior-baseline/rebaseline`). Write actions are gated to the operator and administrator roles client-side and re-enforced server-side.
+
+
 - **Provider-neutral external CI/CD integrations.** Adds tenant-isolated, write-only encrypted Jenkins
   credentials; bounded SSRF-resistant test, discovery, and polling operations; Project bindings and
   exact-commit correlation; durable scheduled work; normalized run history; and an operator-controlled,

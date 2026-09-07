@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Copy01, SearchSm } from '@untitledui/icons'
+import { ArrowLeft, Copy01, RefreshCcw01, SearchSm, Trash01, XClose } from '@untitledui/icons'
 import { api } from '../../lib/api'
-import type { RetroHuntResult } from '../../lib/api'
-import type { HostFinding, HostPackages, HostVulnerabilities, Severity } from '../../lib/types'
-import { Button, Card, Input, Pill, SevBadge, cn } from '../../components/ui'
+import type { DesiredCapabilities, EndpointProcess, RetroHuntResult } from '../../lib/api'
+import type { FleetDesiredGap, HostFinding, HostPackages, HostVulnerabilities, Severity } from '../../lib/types'
+import { Button, Card, InfoNote, Input, Pill, SevBadge, cn } from '../../components/ui'
 import { FeatureDisabledState, isFeatureDisabledMessage } from '../../components/synapse/FeatureDisabledState'
 import { Metric, MetricStrip } from '../../components/synapse/Metric'
 import { OperationalState, TableSkeleton } from '../../components/synapse/OperationalState'
@@ -13,7 +13,7 @@ import { useFetch } from '../../hooks'
 import { formatFleetTime } from './fleetShared'
 import { HostScanBadge, hostDegraded, hostFindingAdvisory, hostFindingPackage, hostOS, hostScanState, hostShortName, reportedPackages } from './hostShared'
 
-type Tab = 'vulnerabilities' | 'packages' | 'coverage' | 'retrohunt'
+type Tab = 'vulnerabilities' | 'packages' | 'coverage' | 'capabilities' | 'processes' | 'retrohunt'
 type SeverityFilter = 'all' | Severity | 'unrated'
 const RATED: Severity[] = ['critical', 'high', 'medium', 'low']
 type FixFilter = 'all' | 'fixable' | 'unfixed'
@@ -425,10 +425,239 @@ export function RetroHuntBody({ assetId }: { assetId: string }) {
   )
 }
 
+const GAP_REASON_LABEL: Record<string, string> = {
+  agent_missing: 'No agent assigned',
+  agent_stale: 'Agent stale',
+  agent_revoked: 'Agent revoked',
+  agent_decommissioned: 'Agent decommissioned',
+  capability_missing: 'Capability not run',
+}
+
+/** Desired capabilities: the capabilities an operator declares this host must run, reconciled against
+ *  what its agent actually reports. The declared set is editable; the reconciliation shows the gaps. */
+function CapabilitiesBody({ assetId, canOperate }: { assetId: string; canOperate: boolean }) {
+  const { data: desired, loading, error, refetch } = useFetch<DesiredCapabilities | null>(() => api.getDesiredCapabilities(assetId), { deps: [assetId] })
+  const { data: gaps, refetch: refetchGaps } = useFetch<FleetDesiredGap[]>(() => api.fleetDesiredGaps(), { deps: [assetId] })
+  const assetGaps = useMemo(() => (gaps ?? []).filter((g) => g.assetId === assetId), [gaps, assetId])
+  const [draft, setDraft] = useState<string[]>([])
+  const [entry, setEntry] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    setDraft(desired?.capabilities ?? [])
+  }, [desired])
+
+  const dirty = useMemo(() => {
+    const a = [...draft].sort()
+    const b = [...(desired?.capabilities ?? [])].sort()
+    return a.length !== b.length || a.some((v, i) => v !== b[i])
+  }, [draft, desired])
+
+  function addEntry() {
+    const v = entry.trim()
+    if (!v || draft.includes(v)) {
+      setEntry('')
+      return
+    }
+    setDraft((d) => [...d, v])
+    setEntry('')
+  }
+
+  async function save() {
+    setBusy(true)
+    setErr('')
+    try {
+      await api.setDesiredCapabilities(assetId, draft)
+      await Promise.all([refetch(), refetchGaps()])
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not save desired capabilities')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function clearAll() {
+    if (!window.confirm('Remove the declared desired capabilities for this host? Reconciliation will no longer flag missing capabilities.')) return
+    setBusy(true)
+    setErr('')
+    try {
+      await api.clearDesiredCapabilities(assetId)
+      await Promise.all([refetch(), refetchGaps()])
+      setDraft([])
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not clear desired capabilities')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (error) return <OperationalState tone="error" title="Could not load desired capabilities" detail={error} onRetry={refetch} />
+  if (loading && desired === undefined) return <TableSkeleton rows={4} columns={2} />
+
+  return (
+    <div className="space-y-5 p-4">
+      <section className="space-y-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-primary">Declared capabilities</h3>
+          <InfoNote label="What is this">
+            The capabilities an operator requires this host to run. The server reconciles the declared set
+            against what the host's agent actually reports; anything declared but not observed is a gap below.
+          </InfoNote>
+          {desired && <span className="font-mono text-xs text-quaternary">v{desired.version}{desired.updatedAt ? ` · updated ${formatFleetTime(desired.updatedAt)}` : ''}</span>}
+        </div>
+        {canOperate ? (
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              {draft.length === 0 && <span className="text-sm text-tertiary">None declared.</span>}
+              {draft.map((c) => (
+                <span key={c} className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-1 font-mono text-xs text-secondary">
+                  {c}
+                  <button type="button" aria-label={`Remove ${c}`} className="text-quaternary hover:text-primary" onClick={() => setDraft((d) => d.filter((x) => x !== c))}>
+                    <XClose className="size-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                aria-label="Add capability"
+                placeholder="capability id, e.g. edr.process"
+                value={entry}
+                onChange={(e) => setEntry(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEntry() } }}
+                className="w-64 font-mono"
+              />
+              <Button variant="secondary" onClick={addEntry} disabled={!entry.trim()}>Add</Button>
+              <Button variant="primary" loading={busy} disabled={busy || !dirty} onClick={save}>Save</Button>
+              {desired && <Button variant="ghost" loading={busy} disabled={busy} onClick={clearAll}><Trash01 className="size-4" /> Clear</Button>}
+            </div>
+          </div>
+        ) : draft.length === 0 ? (
+          <p className="text-sm text-tertiary">No desired capabilities are declared for this host.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {draft.map((c) => <span key={c} className="rounded-md bg-secondary px-2 py-1 font-mono text-xs text-secondary">{c}</span>)}
+          </div>
+        )}
+        {err && <p className="text-sm text-error-primary">{err}</p>}
+      </section>
+
+      <section className="space-y-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-primary">Reconciliation</h3>
+          <InfoNote label="What is this">
+            Desired-vs-observed per capability. A row is covered when a healthy agent reports the capability;
+            otherwise the reason it is not (no agent, stale, revoked, or the capability was never run).
+          </InfoNote>
+        </div>
+        {assetGaps.length === 0 ? (
+          <OperationalState tone={draft.length ? 'success' : 'neutral'} title={draft.length ? 'All declared capabilities are covered' : 'Nothing to reconcile'} detail={draft.length ? 'A healthy agent reports every declared capability for this host.' : 'Declare a capability above to reconcile it against what the agent reports.'} />
+        ) : (
+          <div className="overflow-hidden rounded-lg border border-secondary">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/40 text-left text-xs uppercase tracking-wide text-quaternary">
+                <tr><th className="px-3 py-2 font-medium">Capability</th><th className="px-3 py-2 font-medium">State</th><th className="px-3 py-2 font-medium">Agent</th><th className="px-3 py-2 font-medium">Last seen</th></tr>
+              </thead>
+              <tbody className="divide-y divide-secondary">
+                {assetGaps.map((g, i) => (
+                  <tr key={`${g.capability}-${i}`}>
+                    <td className="px-3 py-2 font-mono text-secondary">{g.capability}</td>
+                    <td className="px-3 py-2">
+                      {g.covered ? (
+                        <Pill className="bg-success-primary/10 text-success-primary ring-1 ring-inset ring-success-primary/25">covered</Pill>
+                      ) : (
+                        <Pill className="bg-warning-primary/10 text-warning-primary ring-1 ring-inset ring-warning-primary/25">{GAP_REASON_LABEL[g.gapReason] ?? 'gap'}</Pill>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-tertiary">{g.agentId || '—'}{g.agentHealth ? ` (${g.agentHealth})` : ''}</td>
+                    <td className="px-3 py-2 text-xs text-tertiary">{formatFleetTime(g.lastSeen)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+const PROCESS_COLUMNS: Column<EndpointProcess>[] = [
+  { header: 'PID', className: 'w-20', cell: (p) => <span className="font-mono text-sm tabular-nums text-secondary">{p.pid}</span> },
+  { header: 'Command', className: 'w-40', cell: (p) => <span className="truncate font-mono text-sm text-primary" title={p.comm}>{p.comm || '—'}</span> },
+  { header: 'Path', cell: (p) => <span className="truncate font-mono text-xs text-tertiary" title={p.path}>{p.path || '—'}</span> },
+  { header: 'State', className: 'w-24', cell: (p) => p.running ? <Pill className="bg-success-primary/10 text-success-primary ring-1 ring-inset ring-success-primary/25">running</Pill> : <Pill>exited</Pill> },
+  { header: 'Last seen', className: 'w-44', cell: (p) => <span className="text-xs tabular-nums text-tertiary">{formatFleetTime(p.lastSeenAt)}</span> },
+]
+
+/** The host's running-process projection (the input to the behavior baseline), plus a rebaseline action. */
+function ProcessesBody({ assetId, canOperate }: { assetId: string; canOperate: boolean }) {
+  const { data, loading, error, refetch } = useFetch<EndpointProcess[]>(() => api.listEndpointProcesses(assetId), { deps: [assetId] })
+  const [query, setQuery] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [err, setErr] = useState('')
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return (data ?? []).filter((p) => !q || `${p.comm} ${p.path} ${p.pid}`.toLowerCase().includes(q))
+  }, [data, query])
+
+  async function rebaseline() {
+    if (!window.confirm('Reset this host’s behavior baseline? Anomaly scoring re-learns from scratch and will not flag drift until the new baseline settles.')) return
+    setBusy(true)
+    setErr('')
+    setNotice('')
+    try {
+      await api.rebaselineBehavior(assetId)
+      setNotice('Behavior baseline reset. The next telemetry sweep starts the new baseline.')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Rebaseline failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (error) return <OperationalState tone="error" title="Could not load processes" detail={error} onRetry={refetch} />
+  if (loading && !data) return <TableSkeleton rows={8} columns={5} />
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-3 border-b border-secondary px-4 py-3">
+        <div className="relative min-w-[14rem] flex-1">
+          <SearchSm className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-quaternary" />
+          <Input aria-label="Search processes" placeholder="Search command, path, pid" value={query} onChange={(e) => setQuery(e.target.value)} className="pl-9" />
+        </div>
+        <div className="flex items-center gap-2">
+          <InfoNote label="Behavior baseline">
+            The running-process set is one input to the statistical behavior baseline. Rebaselining discards the
+            learned baseline so scoring re-learns; drift is not flagged until the new baseline settles.
+          </InfoNote>
+          {canOperate && <Button variant="secondary" loading={busy} disabled={busy} onClick={rebaseline}><RefreshCcw01 className="size-4" /> Rebaseline</Button>}
+          <span className="font-mono text-xs tabular-nums text-quaternary">
+            {visible.length === (data?.length ?? 0) ? `${data?.length ?? 0} processes` : `${visible.length} of ${data?.length ?? 0} processes`}
+          </span>
+        </div>
+      </div>
+      {notice && <p className="border-b border-secondary bg-success-primary/5 px-4 py-2 text-sm text-success-primary">{notice}</p>}
+      {err && <p className="border-b border-secondary bg-error-primary/5 px-4 py-2 text-sm text-error-primary">{err}</p>}
+      {(data?.length ?? 0) === 0 ? (
+        <OperationalState title="No processes reported" detail="The host's agent has not reported a running-process snapshot. Processes appear once the endpoint agent reports them." />
+      ) : visible.length === 0 ? (
+        <OperationalState title="No processes match" detail="No process matches the current filter." action={<Button variant="secondary" onClick={() => setQuery('')}>Clear filter</Button>} />
+      ) : (
+        <VirtualTable items={visible} columns={PROCESS_COLUMNS} rowKey={(p) => `${p.entityId || p.pid}-${p.comm}`} maxHeightClass="max-h-[62vh]" tableMinWidthClass="min-w-[56rem]" />
+      )}
+    </>
+  )
+}
+
 export function HostDetail() {
   const { id = '' } = useParams()
   const [tab, setTab] = useState<Tab>('vulnerabilities')
   const { data: host, loading, error, refetch } = useFetch<HostVulnerabilities>(() => api.hostVulnerabilities(id), { deps: [id] })
+  const { data: me } = useFetch(() => api.me(), { deps: [] })
+  const canOperate = me?.role === 'admin' || me?.role === 'consultant' || me?.role === 'member'
 
   if (loading && !host) return <div className="mx-auto max-w-[1400px] space-y-4 p-4"><BackLink /><TableSkeleton rows={8} columns={6} /></div>
   if (error && !host) {
@@ -486,7 +715,7 @@ export function HostDetail() {
 
       <Card bodyClass="p-0">
         <div className="flex items-center gap-1 border-b border-secondary px-2" role="tablist" aria-label="Host views">
-          {([['vulnerabilities', `Vulnerabilities`, host.findings.length], ['packages', 'Packages', host.packages || reported], ['coverage', 'Coverage gaps', Number(a.coverage_gaps ?? '0') || 0], ['retrohunt', 'Timeline', null]] as [Tab, string, number | null][]).map(([value, label, count]) => (
+          {([['vulnerabilities', `Vulnerabilities`, host.findings.length], ['packages', 'Packages', host.packages || reported], ['coverage', 'Coverage gaps', Number(a.coverage_gaps ?? '0') || 0], ['capabilities', 'Capabilities', null], ['processes', 'Processes', null], ['retrohunt', 'Timeline', null]] as [Tab, string, number | null][]).map(([value, label, count]) => (
             <button
               key={value}
               type="button"
@@ -504,6 +733,10 @@ export function HostDetail() {
           <VulnerabilitiesBody host={host} />
         ) : tab === 'packages' ? (
           <PackagesBody assetId={host.asset.id} />
+        ) : tab === 'capabilities' ? (
+          <CapabilitiesBody assetId={host.asset.id} canOperate={canOperate} />
+        ) : tab === 'processes' ? (
+          <ProcessesBody assetId={host.asset.id} canOperate={canOperate} />
         ) : tab === 'retrohunt' ? (
           <RetroHuntBody assetId={host.asset.id} />
         ) : (
