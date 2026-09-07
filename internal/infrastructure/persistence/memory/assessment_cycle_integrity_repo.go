@@ -2,6 +2,9 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -32,6 +35,18 @@ func NewAssessmentCycleIntegrityRepository(engagements *EngagementRepository, cy
 
 var _ ports.AssessmentCycleIntegritySource = (*AssessmentCycleIntegrityRepository)(nil)
 var _ ports.AssessmentCycleIntegrityStore = (*AssessmentCycleIntegrityRepository)(nil)
+
+func (repository *AssessmentCycleIntegrityRepository) AssessmentCycleIntegrityGeneration(_ context.Context, tenantID shared.ID) (int64, error) {
+	if repository.engagements == nil || repository.cycles == nil {
+		return 0, fmt.Errorf("%w: assessment cycle integrity source is invalid", shared.ErrValidation)
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	repository.engagements.mu.RLock()
+	repository.cycles.mu.Lock()
+	defer repository.engagements.mu.RUnlock()
+	defer repository.cycles.mu.Unlock()
+	return repository.currentSourceGenerationLocked(tenantID)
+}
 
 func (repository *AssessmentCycleIntegrityRepository) ListAssessmentCycleIntegritySubjects(_ context.Context, tenantID, after shared.ID, snapshotAt time.Time, limit int) ([]ports.AssessmentCycleIntegritySubject, error) {
 	if repository.engagements == nil || repository.cycles == nil || snapshotAt.IsZero() || limit < 1 || limit > 2000 {
@@ -241,6 +256,23 @@ func (repository *AssessmentCycleIntegrityRepository) FinishAssessmentCycleInteg
 	if run.State != ports.AssessmentCycleIntegrityRunning || run.LeaseOwner != strings.TrimSpace(leaseOwner) || run.LeaseToken != leaseToken || !run.LeaseExpiresAt.After(now.UTC()) {
 		return ports.AssessmentCycleIntegrityRun{}, fmt.Errorf("%w: assessment cycle integrity completion rejected", shared.ErrConflict)
 	}
+	if state == ports.AssessmentCycleIntegrityCompleted {
+		repository.engagements.mu.RLock()
+		repository.cycles.mu.Lock()
+		generation, err := repository.currentSourceGenerationLocked(tenantID)
+		if err != nil {
+			repository.cycles.mu.Unlock()
+			repository.engagements.mu.RUnlock()
+			return ports.AssessmentCycleIntegrityRun{}, err
+		}
+		if generation != run.SourceGeneration {
+			repository.cycles.mu.Unlock()
+			repository.engagements.mu.RUnlock()
+			return ports.AssessmentCycleIntegrityRun{}, fmt.Errorf("%w: assessment cycle integrity source changed", shared.ErrConflict)
+		}
+		defer repository.engagements.mu.RUnlock()
+		defer repository.cycles.mu.Unlock()
+	}
 	completedAt := now.UTC()
 	run.State, run.UpdatedAt, run.CompletedAt = state, completedAt, &completedAt
 	run.LeaseOwner, run.LeaseToken, run.LeaseExpiresAt = "", "", time.Time{}
@@ -287,4 +319,45 @@ func cloneIntegrityRun(run ports.AssessmentCycleIntegrityRun) ports.AssessmentCy
 		run.CompletedAt = &completedAt
 	}
 	return run
+}
+
+func (repository *AssessmentCycleIntegrityRepository) currentSourceGenerationLocked(tenantID shared.ID) (int64, error) {
+	type sourceState struct {
+		Engagements []any `json:"engagements"`
+		Cycles      []any `json:"cycles"`
+		Members     []any `json:"members"`
+	}
+	state := sourceState{}
+	engagementIDs := make([]shared.ID, 0)
+	for assessmentID, assessment := range repository.engagements.data {
+		if assessment.TenantID == tenantID && assessment.ProjectID.IsZero() {
+			engagementIDs = append(engagementIDs, assessmentID)
+		}
+	}
+	sort.Slice(engagementIDs, func(left, right int) bool { return engagementIDs[left] < engagementIDs[right] })
+	for _, assessmentID := range engagementIDs {
+		state.Engagements = append(state.Engagements, repository.engagements.data[assessmentID])
+	}
+	cycleIDs := make([]shared.ID, 0, len(repository.cycles.cycles[tenantID]))
+	for cycleID := range repository.cycles.cycles[tenantID] {
+		cycleIDs = append(cycleIDs, cycleID)
+	}
+	sort.Slice(cycleIDs, func(left, right int) bool { return cycleIDs[left] < cycleIDs[right] })
+	for _, cycleID := range cycleIDs {
+		state.Cycles = append(state.Cycles, repository.cycles.cycles[tenantID][cycleID])
+		memberIDs := make([]shared.ID, 0, len(repository.cycles.members[tenantID][cycleID]))
+		for assessmentID := range repository.cycles.members[tenantID][cycleID] {
+			memberIDs = append(memberIDs, assessmentID)
+		}
+		sort.Slice(memberIDs, func(left, right int) bool { return memberIDs[left] < memberIDs[right] })
+		for _, assessmentID := range memberIDs {
+			state.Members = append(state.Members, repository.cycles.members[tenantID][cycleID][assessmentID])
+		}
+	}
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return 0, fmt.Errorf("hash assessment cycle integrity source: %w", err)
+	}
+	digest := sha256.Sum256(payload)
+	return int64(binary.BigEndian.Uint64(digest[:8]) & uint64(^uint64(0)>>1)), nil
 }

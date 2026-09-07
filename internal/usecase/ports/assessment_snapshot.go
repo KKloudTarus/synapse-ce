@@ -19,13 +19,25 @@ type AssessmentSnapshotDefault struct {
 	UpdatedBy    string
 }
 
+type AssessmentSnapshotListQuery struct {
+	TenantID            shared.ID
+	AssessmentID        shared.ID
+	AfterSnapshotNumber int
+	Limit               int
+}
+
+type AssessmentSnapshotPage struct {
+	Items   []assessmentsnapshot.Snapshot
+	HasMore bool
+}
+
 type AssessmentSnapshotRepository interface {
 	CreateFinalizedCAS(ctx context.Context, snapshot *assessmentsnapshot.Snapshot, expectedDefaultVersion int64) (*assessmentsnapshot.Snapshot, bool, error)
 	CreateLegacyProjection(ctx context.Context, snapshot *assessmentsnapshot.Snapshot) (*assessmentsnapshot.Snapshot, bool, error)
 	Get(ctx context.Context, tenantID, snapshotID shared.ID) (*assessmentsnapshot.Snapshot, error)
 	GetByRequestKey(ctx context.Context, tenantID, assessmentID shared.ID, requestKey string) (*assessmentsnapshot.Snapshot, error)
 	GetDefault(ctx context.Context, tenantID, assessmentID shared.ID) (*assessmentsnapshot.Snapshot, AssessmentSnapshotDefault, error)
-	ListByAssessment(ctx context.Context, tenantID, assessmentID shared.ID) ([]assessmentsnapshot.Snapshot, error)
+	ListAssessmentSnapshots(ctx context.Context, query AssessmentSnapshotListQuery) (AssessmentSnapshotPage, error)
 }
 
 type AssessmentSnapshotDefaultReader interface {

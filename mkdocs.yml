@@ -56,6 +56,7 @@ nav:
   - Assessment workflows:
       - Project code quality: project-code-quality.md
       - Governed assessments: governed-assessment-workflows.md
+      - Assessment lifecycle operations: assessment-lifecycle-operations.md
       - Vulnerability intelligence: vulnerability-intelligence.md
       - Cloud posture (CSPM): cloud-posture.md
       - Fleet and runtime defense: fleet-blue-team.md

@@ -5,8 +5,6 @@ import { AuthProvider, useAuth } from './auth/AuthContext'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoadingFallback } from './components/layout/LoadingFallback'
 import { MobileSidebar, Sidebar } from './components/layout/Sidebar'
-import { useFetch } from './hooks'
-import { api } from './lib/api'
 import { Connect } from './pages/Connect'
 
 // --- Lazy-loaded page components ---
@@ -114,9 +112,8 @@ function Gate() {
 }
 
 function AssessmentLifecycleRoute({ children }: { children: ReactNode }) {
-  const meFetch = useFetch(() => api.me().catch(() => null), { deps: [] })
-  if (meFetch.loading) return <LoadingFallback />
-  if (meFetch.data?.features?.assessmentLifecycleUIDefault !== true) return <Navigate to="/engagements" replace />
+  const { currentUser } = useAuth()
+  if (currentUser?.features?.assessmentLifecycleUIDefault !== true) return <Navigate to="/engagements" replace />
   return children
 }
 

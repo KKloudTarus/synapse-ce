@@ -265,6 +265,16 @@ func (rt *Router) requireAssessmentLifecycleRead(next http.HandlerFunc) http.Han
 	}
 }
 
+func (rt *Router) requireAssessmentLifecycleWrite(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if rt.assessmentLifecycleRead == nil || !rt.assessmentLifecycleRead(TenantFrom(r.Context())) {
+			writeJSON(w, http.StatusNotFound, errorBody{Error: "assessment_lifecycle_write_disabled"})
+			return
+		}
+		next(w, r)
+	}
+}
+
 // SetSLA wires the opt-in risk-based remediation governance API.
 func (rt *Router) SetSLA(service *slauc.Service) { rt.sla = service }
 
@@ -539,15 +549,16 @@ func (rt *Router) routes() *http.ServeMux {
 	}
 	mux.HandleFunc("POST /api/v1/engagements", rt.authz(userdom.PermOperate, rt.createEngagement))
 	if rt.assessmentCycles != nil && rt.assessmentCycleAPI {
-		mux.HandleFunc("POST /api/v1/engagements/{assessmentId}/retests", rt.authz(userdom.PermOperate, rt.createAssessmentRetest))
+		mux.HandleFunc("POST /api/v1/engagements/{assessmentId}/retests", rt.authz(userdom.PermOperate, rt.requireAssessmentLifecycleWrite(rt.createAssessmentRetest)))
 		mux.HandleFunc("GET /api/v1/engagements/{assessmentId}/lifecycle", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentLifecycle)))
 		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentCycle)))
 		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}/members", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentCycleMembers)))
 		mux.HandleFunc("GET /api/v1/assessment-cycles", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentCycles)))
-		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/archive", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.archiveAssessmentCycle)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/archive", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleWrite(rt.archiveAssessmentCycle)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/reopen", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleWrite(rt.reopenAssessmentCycle)))
 	}
 	if rt.assessmentSnapshots != nil {
-		mux.HandleFunc("POST /api/v1/engagements/{id}/snapshots/finalize", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.finalizeAssessmentSnapshot)))
+		mux.HandleFunc("POST /api/v1/engagements/{id}/snapshots/finalize", rt.authz(userdom.PermOperate, rt.requireAssessmentLifecycleWrite(rt.withEngTenant(rt.finalizeAssessmentSnapshot))))
 		mux.HandleFunc("GET /api/v1/engagements/{id}/snapshots", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.withEngTenant(rt.listAssessmentSnapshots))))
 		mux.HandleFunc("GET /api/v1/assessment-snapshots/{snapshotId}", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentSnapshot)))
 	}

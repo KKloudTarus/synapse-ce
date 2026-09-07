@@ -19,7 +19,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-const assessmentCycleIntegrityRunCols = `tenant_id,id,batch_size,snapshot_at,checkpoint_assessment_id,state,lease_owner,lease_token,lease_expires_at,scanned_count,clean_count,finding_count,created_by,created_at,updated_at,completed_at`
+const assessmentCycleIntegrityRunCols = `tenant_id,id,batch_size,snapshot_at,source_generation,checkpoint_assessment_id,state,lease_owner,lease_token,lease_expires_at,scanned_count,clean_count,finding_count,created_by,created_at,updated_at,completed_at`
 
 type AssessmentCycleIntegrityRepository struct{ pool *pgxpool.Pool }
 
@@ -29,6 +29,14 @@ func NewAssessmentCycleIntegrityRepository(pool *pgxpool.Pool) *AssessmentCycleI
 
 var _ ports.AssessmentCycleIntegritySource = (*AssessmentCycleIntegrityRepository)(nil)
 var _ ports.AssessmentCycleIntegrityStore = (*AssessmentCycleIntegrityRepository)(nil)
+
+func (repository *AssessmentCycleIntegrityRepository) AssessmentCycleIntegrityGeneration(ctx context.Context, tenantID shared.ID) (generation int64, err error) {
+	tenantID = shared.TenantOrDefault(tenantID)
+	err = WithTenant(ctx, repository.pool, tenantID.String(), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT COALESCE((SELECT generation FROM assessment_cycle_integrity_generations WHERE tenant_id=$1),0)`, tenantID.String()).Scan(&generation)
+	})
+	return generation, err
+}
 
 func (repository *AssessmentCycleIntegrityRepository) ListAssessmentCycleIntegritySubjects(ctx context.Context, tenantID, after shared.ID, snapshotAt time.Time, limit int) (subjects []ports.AssessmentCycleIntegritySubject, err error) {
 	if snapshotAt.IsZero() || limit < 1 || limit > 2000 {
@@ -184,14 +192,17 @@ func (repository *AssessmentCycleIntegrityRepository) AcquireAssessmentCycleInte
 	err = WithTenant(ctx, repository.pool, request.Run.TenantID.String(), func(tx pgx.Tx) error {
 		existing, scanErr := scanAssessmentCycleIntegrityRun(tx.QueryRow(ctx, `SELECT `+assessmentCycleIntegrityRunCols+` FROM assessment_cycle_integrity_runs WHERE tenant_id=$1 AND state='running' FOR UPDATE`, request.Run.TenantID.String()))
 		if scanErr == nil {
-			if existing.LeaseOwner != request.Run.LeaseOwner && existing.LeaseExpiresAt.After(request.Run.CreatedAt) {
-				return fmt.Errorf("%w: assessment cycle integrity verifier already running for tenant", shared.ErrConflict)
-			}
 			if existing.BatchSize != request.Run.BatchSize {
 				return fmt.Errorf("%w: requested assessment cycle integrity batch size %d differs from persisted batch size %d", shared.ErrConflict, request.Run.BatchSize, existing.BatchSize)
 			}
-			updated, err := scanAssessmentCycleIntegrityRun(tx.QueryRow(ctx, `UPDATE assessment_cycle_integrity_runs SET lease_owner=$3,lease_token=$4,lease_expires_at=$5,updated_at=$6 WHERE tenant_id=$1 AND id=$2 AND state='running' RETURNING `+assessmentCycleIntegrityRunCols,
-				request.Run.TenantID.String(), existing.ID.String(), request.Run.LeaseOwner, request.Run.LeaseToken.String(), request.Run.CreatedAt.Add(request.LeaseDuration), request.Run.CreatedAt))
+			updated, err := scanAssessmentCycleIntegrityRun(tx.QueryRow(ctx, `UPDATE assessment_cycle_integrity_runs
+				SET lease_owner=$3,lease_token=$4,lease_expires_at=now()+($5 * interval '1 microsecond'),updated_at=$6
+				WHERE tenant_id=$1 AND id=$2 AND state='running' AND (lease_owner=$3 OR lease_expires_at <= now())
+				RETURNING `+assessmentCycleIntegrityRunCols,
+				request.Run.TenantID.String(), existing.ID.String(), request.Run.LeaseOwner, request.Run.LeaseToken.String(), request.LeaseDuration.Microseconds(), request.Run.CreatedAt))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("%w: assessment cycle integrity verifier already running for tenant", shared.ErrConflict)
+			}
 			if err != nil {
 				return fmt.Errorf("resume assessment cycle integrity run: %w", err)
 			}
@@ -201,8 +212,8 @@ func (repository *AssessmentCycleIntegrityRepository) AcquireAssessmentCycleInte
 		if !errors.Is(scanErr, pgx.ErrNoRows) {
 			return fmt.Errorf("find active assessment cycle integrity run: %w", scanErr)
 		}
-		created, err := scanAssessmentCycleIntegrityRun(tx.QueryRow(ctx, `INSERT INTO assessment_cycle_integrity_runs (`+assessmentCycleIntegrityRunCols+`) VALUES ($1,$2,$3,$4,'','running',$5,$6,$7,0,0,0,$8,$9,$9,NULL) RETURNING `+assessmentCycleIntegrityRunCols,
-			request.Run.TenantID.String(), request.Run.ID.String(), request.Run.BatchSize, request.Run.SnapshotAt, request.Run.LeaseOwner, request.Run.LeaseToken.String(), request.Run.CreatedAt.Add(request.LeaseDuration), request.Run.CreatedBy, request.Run.CreatedAt))
+		created, err := scanAssessmentCycleIntegrityRun(tx.QueryRow(ctx, `INSERT INTO assessment_cycle_integrity_runs (`+assessmentCycleIntegrityRunCols+`) VALUES ($1,$2,$3,$4,$5,'','running',$6,$7,now()+($8 * interval '1 microsecond'),0,0,0,$9,$10,$10,NULL) RETURNING `+assessmentCycleIntegrityRunCols,
+			request.Run.TenantID.String(), request.Run.ID.String(), request.Run.BatchSize, request.Run.SnapshotAt, request.Run.SourceGeneration, request.Run.LeaseOwner, request.Run.LeaseToken.String(), request.LeaseDuration.Microseconds(), request.Run.CreatedBy, request.Run.CreatedAt))
 		if err != nil {
 			return fmt.Errorf("create assessment cycle integrity run: %w", err)
 		}
@@ -270,7 +281,7 @@ func (repository *AssessmentCycleIntegrityRepository) SaveAssessmentCycleIntegri
 	}
 	err = WithTenant(ctx, repository.pool, result.TenantID.String(), func(tx pgx.Tx) error {
 		var active bool
-		if err := tx.QueryRow(ctx, `SELECT state='running' AND lease_token=$3 AND lease_expires_at>$4 FROM assessment_cycle_integrity_runs WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, result.TenantID.String(), result.RunID.String(), leaseToken.String(), now.UTC()).Scan(&active); errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.QueryRow(ctx, `SELECT state='running' AND lease_token=$3 AND lease_expires_at>now() FROM assessment_cycle_integrity_runs WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, result.TenantID.String(), result.RunID.String(), leaseToken.String()).Scan(&active); errors.Is(err, pgx.ErrNoRows) {
 			return shared.ErrNotFound
 		} else if err != nil {
 			return fmt.Errorf("lock assessment cycle integrity lease: %w", err)
@@ -305,11 +316,11 @@ func (repository *AssessmentCycleIntegrityRepository) AdvanceAssessmentCycleInte
 		return ports.AssessmentCycleIntegrityRun{}, fmt.Errorf("%w: assessment cycle integrity checkpoint is invalid", shared.ErrValidation)
 	}
 	err = WithTenant(ctx, repository.pool, tenantID.String(), func(tx pgx.Tx) error {
-		updated, err := scanAssessmentCycleIntegrityRun(tx.QueryRow(ctx, `UPDATE assessment_cycle_integrity_runs AS run SET checkpoint_assessment_id=$5,updated_at=$6::timestamptz,lease_expires_at=$6::timestamptz+($7 * interval '1 microsecond'),
+		updated, err := scanAssessmentCycleIntegrityRun(tx.QueryRow(ctx, `UPDATE assessment_cycle_integrity_runs AS run SET checkpoint_assessment_id=$5,updated_at=$6::timestamptz,lease_expires_at=now()+($7 * interval '1 microsecond'),
 			scanned_count=(SELECT count(*) FROM assessment_cycle_integrity_subjects subject WHERE subject.tenant_id=run.tenant_id AND subject.run_id=run.id),
 			clean_count=(SELECT count(*) FROM assessment_cycle_integrity_subjects subject WHERE subject.tenant_id=run.tenant_id AND subject.run_id=run.id AND subject.clean),
 			finding_count=(SELECT COALESCE(sum(subject.finding_count),0) FROM assessment_cycle_integrity_subjects subject WHERE subject.tenant_id=run.tenant_id AND subject.run_id=run.id)
-			WHERE run.tenant_id=$1 AND run.id=$2 AND run.state='running' AND run.lease_owner=$3 AND run.lease_token=$4 AND run.lease_expires_at>$6 AND run.checkpoint_assessment_id COLLATE "C"<=$5 RETURNING `+assessmentCycleIntegrityRunCols,
+			WHERE run.tenant_id=$1 AND run.id=$2 AND run.state='running' AND run.lease_owner=$3 AND run.lease_token=$4 AND run.lease_expires_at>now() AND run.checkpoint_assessment_id COLLATE "C"<=$5 RETURNING `+assessmentCycleIntegrityRunCols,
 			tenantID.String(), runID.String(), leaseOwner, leaseToken.String(), checkpoint.String(), now, leaseDuration.Microseconds()))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("%w: assessment cycle integrity checkpoint rejected", shared.ErrConflict)
@@ -332,11 +343,15 @@ func (repository *AssessmentCycleIntegrityRepository) FinishAssessmentCycleInteg
 		return ports.AssessmentCycleIntegrityRun{}, fmt.Errorf("%w: assessment cycle integrity completion identity is invalid", shared.ErrValidation)
 	}
 	err = WithTenant(ctx, repository.pool, tenantID.String(), func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('assessment-cycle-integrity:' || $1, 0))`, tenantID.String()); err != nil {
+			return fmt.Errorf("lock assessment cycle integrity source generation: %w", err)
+		}
 		finished, err := scanAssessmentCycleIntegrityRun(tx.QueryRow(ctx, `UPDATE assessment_cycle_integrity_runs AS run SET state=$5,lease_owner='',lease_token='',lease_expires_at=NULL,updated_at=$6,completed_at=$6,
 			scanned_count=(SELECT count(*) FROM assessment_cycle_integrity_subjects subject WHERE subject.tenant_id=run.tenant_id AND subject.run_id=run.id),
 			clean_count=(SELECT count(*) FROM assessment_cycle_integrity_subjects subject WHERE subject.tenant_id=run.tenant_id AND subject.run_id=run.id AND subject.clean),
 			finding_count=(SELECT COALESCE(sum(subject.finding_count),0) FROM assessment_cycle_integrity_subjects subject WHERE subject.tenant_id=run.tenant_id AND subject.run_id=run.id)
-			WHERE run.tenant_id=$1 AND run.id=$2 AND run.state='running' AND run.lease_owner=$3 AND run.lease_token=$4 AND run.lease_expires_at>$6 RETURNING `+assessmentCycleIntegrityRunCols,
+			WHERE run.tenant_id=$1 AND run.id=$2 AND run.state='running' AND run.lease_owner=$3 AND run.lease_token=$4 AND run.lease_expires_at>now()
+			AND ($5 <> 'completed' OR run.source_generation=COALESCE((SELECT generation FROM assessment_cycle_integrity_generations WHERE tenant_id=$1),0)) RETURNING `+assessmentCycleIntegrityRunCols,
 			tenantID.String(), runID.String(), leaseOwner, leaseToken.String(), string(state), now))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("%w: assessment cycle integrity completion rejected", shared.ErrConflict)
@@ -356,7 +371,7 @@ func scanAssessmentCycleIntegrityRun(row rowScanner) (ports.AssessmentCycleInteg
 		state                     string
 		leaseExpires, completedAt pgtype.Timestamptz
 	)
-	if err := row.Scan(&run.TenantID, &run.ID, &run.BatchSize, &run.SnapshotAt, &run.CheckpointAssessment, &state, &run.LeaseOwner, &run.LeaseToken, &leaseExpires,
+	if err := row.Scan(&run.TenantID, &run.ID, &run.BatchSize, &run.SnapshotAt, &run.SourceGeneration, &run.CheckpointAssessment, &state, &run.LeaseOwner, &run.LeaseToken, &leaseExpires,
 		&run.ScannedCount, &run.CleanCount, &run.FindingCount, &run.CreatedBy, &run.CreatedAt, &run.UpdatedAt, &completedAt); err != nil {
 		return ports.AssessmentCycleIntegrityRun{}, err
 	}

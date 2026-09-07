@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	cycledom "github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
@@ -64,6 +65,7 @@ func newAssessmentCycleHTTPRouter(t *testing.T, apiEnabled bool, dualWrite func(
 	router := &Router{log: discardLog(), eng: engagementService}
 	router.SetObservability(false, observer)
 	router.SetAssessmentCycles(cycleAPI, apiEnabled, dualWrite)
+	router.SetAssessmentLifecycleRollout(func(string) bool { return true }, func(string) bool { return true })
 	return router, cycles, observer
 }
 
@@ -85,14 +87,32 @@ func TestAssessmentLifecycleReadGateIsTenantScopedAndFailClosed(t *testing.T) {
 	}
 }
 
-func TestAssessmentCycleRoutesPermissionAndIdempotency(t *testing.T) {
+func TestAssessmentLifecycleWriteGateUsesTenantReadCanary(t *testing.T) {
 	router, _, _ := newAssessmentCycleHTTPRouter(t, true, func(string) bool { return true })
+	router.SetAssessmentLifecycleRollout(func(tenantID string) bool { return tenantID == "tenant-canary" }, func(string) bool { return false })
+	handler := router.requireAssessmentLifecycleWrite(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+
+	blocked := httptest.NewRecorder()
+	handler(blocked, cycleRequest(http.MethodPost, "/api/v1/engagements/a/retests", `{}`, userdom.RoleConsultant, "tenant-other"))
+	if blocked.Code != http.StatusNotFound || !strings.Contains(blocked.Body.String(), "assessment_lifecycle_write_disabled") {
+		t.Fatalf("blocked lifecycle write = %d %s", blocked.Code, blocked.Body.String())
+	}
+
+	allowed := httptest.NewRecorder()
+	handler(allowed, cycleRequest(http.MethodPost, "/api/v1/engagements/a/retests", `{}`, userdom.RoleConsultant, "tenant-canary"))
+	if allowed.Code != http.StatusNoContent {
+		t.Fatalf("allowed lifecycle write = %d", allowed.Code)
+	}
+}
+
+func TestAssessmentCycleRoutesPermissionAndIdempotency(t *testing.T) {
+	router, cycles, _ := newAssessmentCycleHTTPRouter(t, true, func(string) bool { return true })
 	handler := router.routes()
 
 	missingKey := cycleRequest(http.MethodPost, "/api/v1/engagements", `{"name":"Acme"}`, userdom.RoleConsultant, "tenant-1")
 	missingKeyResponse := httptest.NewRecorder()
 	handler.ServeHTTP(missingKeyResponse, missingKey)
-	if missingKeyResponse.Code != http.StatusBadRequest || !strings.Contains(missingKeyResponse.Body.String(), cycleuc.CodeIdempotencyKeyRequired) {
+	if missingKeyResponse.Code != http.StatusCreated || missingKeyResponse.Header().Get("X-Synapse-Assessment-Cycle-Dual-Write") != "true" {
 		t.Fatalf("missing key response = %d %s", missingKeyResponse.Code, missingKeyResponse.Body.String())
 	}
 
@@ -151,6 +171,38 @@ func TestAssessmentCycleRoutesPermissionAndIdempotency(t *testing.T) {
 	if err := json.Unmarshal(lifecycleResponse.Body.Bytes(), &lifecycleBody); err != nil {
 		t.Fatal(err)
 	}
+	storedCycle, err := cycles.GetCycle(context.Background(), "tenant-1", shared.ID(lifecycleBody.Cycle.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storedCycle.Transition(cycledom.StatusCompleted, storedCycle.Version, "reviewer", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := cycles.UpdateCycleCAS(context.Background(), storedCycle, lifecycleBody.Cycle.Version); err != nil {
+		t.Fatal(err)
+	}
+	reopenPath := "/api/v1/assessment-cycles/" + lifecycleBody.Cycle.ID + "/reopen"
+	missingReason := cycleRequest(http.MethodPost, reopenPath, `{}`, userdom.RoleReviewer, "tenant-1")
+	missingReason.Header.Set("Idempotency-Key", "reopen-missing-reason")
+	missingReason.Header.Set("If-Match", strconv.FormatInt(storedCycle.Version, 10))
+	missingReasonResponse := httptest.NewRecorder()
+	handler.ServeHTTP(missingReasonResponse, missingReason)
+	if missingReasonResponse.Code != http.StatusBadRequest || !strings.Contains(missingReasonResponse.Body.String(), "reopen_reason_required") {
+		t.Fatalf("missing reopen reason = %d %s", missingReasonResponse.Code, missingReasonResponse.Body.String())
+	}
+	reopen := cycleRequest(http.MethodPost, reopenPath, `{"reason":"continue remediation verification"}`, userdom.RoleReviewer, "tenant-1")
+	reopen.Header.Set("Idempotency-Key", "reopen-1")
+	reopen.Header.Set("If-Match", strconv.FormatInt(storedCycle.Version, 10))
+	reopenResponse := httptest.NewRecorder()
+	handler.ServeHTTP(reopenResponse, reopen)
+	if reopenResponse.Code != http.StatusOK {
+		t.Fatalf("reopen response = %d %s", reopenResponse.Code, reopenResponse.Body.String())
+	}
+	var reopened cycleuc.CycleDetail
+	if err := json.Unmarshal(reopenResponse.Body.Bytes(), &reopened); err != nil || reopened.Cycle.Status != cycledom.StatusOpen {
+		t.Fatalf("reopened cycle = %+v err=%v", reopened, err)
+	}
+	lifecycleBody.Cycle = reopened.Cycle
 
 	archivePath := "/api/v1/assessment-cycles/" + lifecycleBody.Cycle.ID + "/archive"
 	consultantArchive := cycleRequest(http.MethodPost, archivePath, "", userdom.RoleConsultant, "tenant-1")
@@ -180,24 +232,15 @@ func TestAssessmentCycleDualWriteTenantRollout(t *testing.T) {
 	missingKey := cycleRequest(http.MethodPost, "/api/v1/engagements", body, userdom.RoleConsultant, "tenant-a")
 	missingKeyResponse := httptest.NewRecorder()
 	handler.ServeHTTP(missingKeyResponse, missingKey)
-	if missingKeyResponse.Code != http.StatusBadRequest || observer.count("failed") != 1 {
+	if missingKeyResponse.Code != http.StatusCreated || observer.count("created") != 1 {
 		t.Fatalf("tenant-a missing key = %d outcomes=%v body=%s", missingKeyResponse.Code, observer.outcomes, missingKeyResponse.Body.String())
 	}
 
 	tenantA := cycleRequest(http.MethodPost, "/api/v1/engagements", body, userdom.RoleConsultant, "tenant-a")
-	tenantA.Header.Set("Idempotency-Key", "tenant-a-create")
 	tenantAResponse := httptest.NewRecorder()
 	handler.ServeHTTP(tenantAResponse, tenantA)
-	if tenantAResponse.Code != http.StatusCreated || tenantAResponse.Header().Get("X-Synapse-Assessment-Cycle-Dual-Write") != "true" || observer.count("created") != 1 {
+	if tenantAResponse.Code != http.StatusCreated || tenantAResponse.Header().Get("Idempotency-Replayed") != "true" || tenantAResponse.Body.String() != missingKeyResponse.Body.String() || observer.count("replayed") != 1 {
 		t.Fatalf("tenant-a create = %d headers=%v outcomes=%v body=%s", tenantAResponse.Code, tenantAResponse.Header(), observer.outcomes, tenantAResponse.Body.String())
-	}
-
-	replay := cycleRequest(http.MethodPost, "/api/v1/engagements", body, userdom.RoleConsultant, "tenant-a")
-	replay.Header.Set("Idempotency-Key", "tenant-a-create")
-	replayResponse := httptest.NewRecorder()
-	handler.ServeHTTP(replayResponse, replay)
-	if replayResponse.Code != http.StatusCreated || replayResponse.Header().Get("Idempotency-Replayed") != "true" || replayResponse.Body.String() != tenantAResponse.Body.String() || observer.count("replayed") != 1 {
-		t.Fatalf("tenant-a replay = %d headers=%v outcomes=%v body=%s", replayResponse.Code, replayResponse.Header(), observer.outcomes, replayResponse.Body.String())
 	}
 
 	tenantB := cycleRequest(http.MethodPost, "/api/v1/engagements", body, userdom.RoleConsultant, "tenant-b")

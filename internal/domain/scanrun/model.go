@@ -338,6 +338,16 @@ func ComputeManifestHash(lane Lane) (string, error) {
 
 	stages := make([]LaneStage, len(lane.Stages))
 	copy(stages, lane.Stages)
+	// PostgreSQL timestamptz stores microsecond precision. Hash the durable
+	// representation so a lane sealed with nanosecond Go timestamps verifies
+	// identically after a database round trip.
+	for index := range stages {
+		stages[index].StartedAt = stages[index].StartedAt.UTC().Truncate(time.Microsecond)
+		if stages[index].FinishedAt != nil {
+			finishedAt := stages[index].FinishedAt.UTC().Truncate(time.Microsecond)
+			stages[index].FinishedAt = &finishedAt
+		}
+	}
 	sort.SliceStable(stages, func(i, j int) bool {
 		return stages[i].StageKey < stages[j].StageKey
 	})

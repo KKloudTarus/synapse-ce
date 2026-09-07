@@ -95,17 +95,27 @@ func (verifier *IntegrityVerifier) Run(ctx context.Context, request IntegrityReq
 		leaseDuration = defaultAssessmentCycleIntegrityLease
 	}
 	now := verifier.clock.Now().UTC()
+	sourceGeneration, err := verifier.source.AssessmentCycleIntegrityGeneration(ctx, tenantID)
+	if err != nil {
+		return ports.AssessmentCycleIntegrityRun{}, fmt.Errorf("load assessment cycle integrity source generation: %w", err)
+	}
 	acquisitionID := verifier.ids.NewID()
 	run, resumed, err := verifier.store.AcquireAssessmentCycleIntegrityRun(ctx, ports.AssessmentCycleIntegrityAcquireRequest{Run: ports.AssessmentCycleIntegrityRun{
 		TenantID: tenantID, ID: acquisitionID, BatchSize: batchSize, SnapshotAt: now, State: ports.AssessmentCycleIntegrityRunning,
-		LeaseOwner: leaseOwner, LeaseToken: acquisitionID, LeaseExpiresAt: now.Add(leaseDuration), CreatedBy: actor, CreatedAt: now, UpdatedAt: now,
+		SourceGeneration: sourceGeneration,
+		LeaseOwner:       leaseOwner, LeaseToken: acquisitionID, LeaseExpiresAt: now.Add(leaseDuration), CreatedBy: actor, CreatedAt: now, UpdatedAt: now,
 	}, LeaseDuration: leaseDuration})
 	if err != nil {
 		return ports.AssessmentCycleIntegrityRun{}, err
 	}
-	verifier.record(ctx, actor, "assessment_cycle.integrity_started", run.ID, map[string]string{
+	if resumed && run.SourceGeneration != sourceGeneration {
+		return verifier.finish(ctx, run, leaseOwner, ports.AssessmentCycleIntegrityFailed, actor, fmt.Errorf("%w: assessment cycle integrity source changed while the run was interrupted", shared.ErrConflict))
+	}
+	if err := verifier.record(ctx, actor, "assessment_cycle.integrity_started", run.ID, map[string]string{
 		"tenant_id": tenantID.String(), "resumed": strconv.FormatBool(resumed), "batch_size": strconv.Itoa(run.BatchSize),
-	})
+	}); err != nil {
+		return verifier.finish(ctx, run, leaseOwner, ports.AssessmentCycleIntegrityFailed, actor, fmt.Errorf("audit assessment Cycle integrity start: %w", err))
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return verifier.finish(ctx, run, leaseOwner, ports.AssessmentCycleIntegrityCancelled, actor, err)
@@ -165,9 +175,11 @@ func (verifier *IntegrityVerifier) Run(ctx context.Context, request IntegrityReq
 		if err != nil {
 			return verifier.finish(ctx, run, leaseOwner, ports.AssessmentCycleIntegrityFailed, actor, err)
 		}
-		verifier.record(ctx, actor, "assessment_cycle.integrity_batch_committed", run.ID, map[string]string{
+		if err := verifier.record(ctx, actor, "assessment_cycle.integrity_batch_committed", run.ID, map[string]string{
 			"tenant_id": tenantID.String(), "checkpoint_assessment_id": checkpoint.String(), "scanned_count": strconv.Itoa(run.ScannedCount), "finding_count": strconv.Itoa(run.FindingCount),
-		})
+		}); err != nil {
+			return verifier.finish(ctx, run, leaseOwner, ports.AssessmentCycleIntegrityFailed, actor, fmt.Errorf("audit assessment Cycle integrity batch: %w", err))
+		}
 	}
 }
 
@@ -343,19 +355,26 @@ func (verifier *IntegrityVerifier) finish(ctx context.Context, run ports.Assessm
 	if verifier.observer != nil {
 		verifier.observer.ObserveAssessmentCycleIntegrityRun(string(state))
 	}
-	verifier.record(finishCtx, actor, "assessment_cycle.integrity_"+string(state), run.ID, map[string]string{
+	auditErr := verifier.record(finishCtx, actor, "assessment_cycle.integrity_"+string(state), run.ID, map[string]string{
 		"tenant_id": run.TenantID.String(), "scanned_count": strconv.Itoa(finished.ScannedCount), "clean_count": strconv.Itoa(finished.CleanCount), "finding_count": strconv.Itoa(finished.FindingCount),
 	})
 	if cause != nil {
+		if auditErr != nil {
+			return finished, errors.Join(cause, fmt.Errorf("audit assessment Cycle integrity finish: %w", auditErr))
+		}
 		return finished, cause
+	}
+	if auditErr != nil {
+		return finished, fmt.Errorf("audit assessment Cycle integrity finish: %w", auditErr)
 	}
 	return finished, nil
 }
 
-func (verifier *IntegrityVerifier) record(ctx context.Context, actor, action string, target shared.ID, metadata map[string]string) {
+func (verifier *IntegrityVerifier) record(ctx context.Context, actor, action string, target shared.ID, metadata map[string]string) error {
 	if verifier.audit != nil {
-		_ = verifier.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: action, Target: target.String(), Metadata: metadata, At: verifier.clock.Now().UTC()})
+		return verifier.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: action, Target: target.String(), Metadata: metadata, At: verifier.clock.Now().UTC()})
 	}
+	return nil
 }
 
 func retryIntegrity[T any](ctx context.Context, operation func() (T, error)) (T, error) {

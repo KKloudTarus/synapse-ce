@@ -214,9 +214,11 @@ func (runner *BackfillRunner) Run(ctx context.Context, request BackfillRequest) 
 	if err != nil {
 		return ports.AssessmentSnapshotBackfillRun{}, err
 	}
-	runner.record(ctx, actor, "assessment_snapshot.backfill_started", run.ID, map[string]string{
+	if err := runner.record(ctx, actor, "assessment_snapshot.backfill_started", run.ID, map[string]string{
 		"tenant_id": tenantID.String(), "dry_run": strconv.FormatBool(run.DryRun), "resumed": strconv.FormatBool(resumed), "batch_size": strconv.Itoa(run.BatchSize),
-	})
+	}); err != nil {
+		return runner.finish(ctx, run, leaseOwner, ports.AssessmentSnapshotBackfillFailed, actor, fmt.Errorf("audit assessment Snapshot backfill start: %w", err))
+	}
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -256,9 +258,11 @@ func (runner *BackfillRunner) Run(ctx context.Context, request BackfillRequest) 
 		if err != nil {
 			return runner.finish(ctx, run, leaseOwner, snapshotBackfillTerminalState(err), actor, err)
 		}
-		runner.record(ctx, actor, "assessment_snapshot.backfill_batch_committed", run.ID, map[string]string{
+		if err := runner.record(ctx, actor, "assessment_snapshot.backfill_batch_committed", run.ID, map[string]string{
 			"tenant_id": tenantID.String(), "checkpoint_assessment_id": checkpoint.String(), "processed_count": strconv.Itoa(run.ProcessedCount),
-		})
+		}); err != nil {
+			return runner.finish(ctx, run, leaseOwner, ports.AssessmentSnapshotBackfillFailed, actor, fmt.Errorf("audit assessment Snapshot backfill batch: %w", err))
+		}
 	}
 }
 
@@ -388,20 +392,27 @@ func (runner *BackfillRunner) finish(ctx context.Context, run ports.AssessmentSn
 	if runner.observer != nil {
 		runner.observer.ObserveAssessmentSnapshotBackfillRun(string(state))
 	}
-	runner.record(finishCtx, actor, "assessment_snapshot.backfill_"+string(state), run.ID, map[string]string{
+	auditErr := runner.record(finishCtx, actor, "assessment_snapshot.backfill_"+string(state), run.ID, map[string]string{
 		"tenant_id": run.TenantID.String(), "processed_count": strconv.Itoa(finished.ProcessedCount), "created_count": strconv.Itoa(finished.CreatedCount),
 		"would_create_count": strconv.Itoa(finished.WouldCreateCount), "skipped_count": strconv.Itoa(finished.SkippedCount), "failed_count": strconv.Itoa(finished.FailedCount),
 	})
 	if cause != nil {
+		if auditErr != nil {
+			return finished, errors.Join(cause, fmt.Errorf("audit assessment Snapshot backfill finish: %w", auditErr))
+		}
 		return finished, cause
+	}
+	if auditErr != nil {
+		return finished, fmt.Errorf("audit assessment Snapshot backfill finish: %w", auditErr)
 	}
 	return finished, nil
 }
 
-func (runner *BackfillRunner) record(ctx context.Context, actor, action string, target shared.ID, metadata map[string]string) {
+func (runner *BackfillRunner) record(ctx context.Context, actor, action string, target shared.ID, metadata map[string]string) error {
 	if runner.audit != nil {
-		_ = runner.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: action, Target: target.String(), Metadata: metadata, At: runner.clock.Now().UTC()})
+		return runner.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: action, Target: target.String(), Metadata: metadata, At: runner.clock.Now().UTC()})
 	}
+	return nil
 }
 
 func retryableAssessmentSnapshotBackfillError(err error) bool {

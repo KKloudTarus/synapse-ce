@@ -274,6 +274,7 @@ export interface FinalizeAssessmentSnapshotResponse {
 
 export interface AssessmentSnapshotListResponse {
   items: AssessmentSnapshot[]
+  nextCursor: string
   defaultSnapshotId: string
   defaultVersion: number
 }

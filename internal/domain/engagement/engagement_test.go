@@ -65,6 +65,10 @@ func TestRetestRequiresExplicitExecutionAuthorization(t *testing.T) {
 	if engagement.AllowsExecution() {
 		t.Fatal("authorization window without explicit RoE must not execute")
 	}
+	engagement.RoE = RoE{Blackouts: []Blackout{{From: now.Add(2 * time.Hour), To: now.Add(3 * time.Hour)}}}
+	if engagement.AllowsExecution() {
+		t.Fatal("a blackout-only RoE must not authorize every tool class")
+	}
 	engagement.RoE = RoE{AllowedToolClasses: []ToolClass{"sca"}}
 	if !engagement.AllowsExecution() {
 		t.Fatal("Re-test with explicit authorization window and RoE should execute")

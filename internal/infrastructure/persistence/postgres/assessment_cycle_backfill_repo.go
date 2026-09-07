@@ -33,16 +33,19 @@ func (repository *AssessmentCycleBackfillRepository) AcquireAssessmentCycleBackf
 		row := tx.QueryRow(ctx, `SELECT `+assessmentCycleBackfillRunCols+` FROM assessment_cycle_backfill_runs WHERE tenant_id=$1 AND state='running' FOR UPDATE`, request.Run.TenantID.String())
 		existing, scanErr := scanAssessmentCycleBackfillRun(row)
 		if scanErr == nil {
-			if existing.LeaseOwner != request.Run.LeaseOwner && existing.LeaseExpiresAt.After(request.Run.CreatedAt) {
-				return fmt.Errorf("%w: assessment cycle backfill already running for tenant", shared.ErrConflict)
-			}
 			if existing.SchemaVersion != request.Run.SchemaVersion || existing.DryRun != request.Run.DryRun || existing.BatchSize != request.Run.BatchSize {
 				return fmt.Errorf("%w: requested assessment cycle backfill config (schema=%d dry_run=%t batch_size=%d) differs from persisted config (schema=%d dry_run=%t batch_size=%d)", shared.ErrConflict,
 					request.Run.SchemaVersion, request.Run.DryRun, request.Run.BatchSize, existing.SchemaVersion, existing.DryRun, existing.BatchSize)
 			}
-			row = tx.QueryRow(ctx, `UPDATE assessment_cycle_backfill_runs SET lease_owner=$3,lease_token=$4,lease_expires_at=$5,updated_at=$6 WHERE tenant_id=$1 AND id=$2 AND state='running' RETURNING `+assessmentCycleBackfillRunCols,
-				request.Run.TenantID.String(), existing.ID.String(), request.Run.LeaseOwner, request.Run.LeaseToken.String(), request.Run.CreatedAt.Add(request.LeaseDuration), request.Run.CreatedAt)
+			row = tx.QueryRow(ctx, `UPDATE assessment_cycle_backfill_runs
+				SET lease_owner=$3,lease_token=$4,lease_expires_at=now()+($5 * interval '1 microsecond'),updated_at=$6
+				WHERE tenant_id=$1 AND id=$2 AND state='running' AND (lease_owner=$3 OR lease_expires_at <= now())
+				RETURNING `+assessmentCycleBackfillRunCols,
+				request.Run.TenantID.String(), existing.ID.String(), request.Run.LeaseOwner, request.Run.LeaseToken.String(), request.LeaseDuration.Microseconds(), request.Run.CreatedAt)
 			updated, err := scanAssessmentCycleBackfillRun(row)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("%w: assessment cycle backfill already running for tenant", shared.ErrConflict)
+			}
 			if err != nil {
 				return fmt.Errorf("resume assessment cycle backfill run: %w", err)
 			}
@@ -52,9 +55,9 @@ func (repository *AssessmentCycleBackfillRepository) AcquireAssessmentCycleBackf
 		if !errors.Is(scanErr, pgx.ErrNoRows) {
 			return fmt.Errorf("find active assessment cycle backfill run: %w", scanErr)
 		}
-		row = tx.QueryRow(ctx, `INSERT INTO assessment_cycle_backfill_runs (`+assessmentCycleBackfillRunCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,'running',$8,$9,$10,0,0,0,0,0,$11,$12,$12,NULL) RETURNING `+assessmentCycleBackfillRunCols,
+		row = tx.QueryRow(ctx, `INSERT INTO assessment_cycle_backfill_runs (`+assessmentCycleBackfillRunCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,'running',$8,$9,now()+($10 * interval '1 microsecond'),0,0,0,0,0,$11,$12,$12,NULL) RETURNING `+assessmentCycleBackfillRunCols,
 			request.Run.TenantID.String(), request.Run.ID.String(), request.Run.SchemaVersion, request.Run.DryRun, request.Run.BatchSize, request.Run.SnapshotAt,
-			request.InitialCheckpoint.String(), request.Run.LeaseOwner, request.Run.LeaseToken.String(), request.Run.CreatedAt.Add(request.LeaseDuration), request.Run.CreatedBy, request.Run.CreatedAt)
+			request.InitialCheckpoint.String(), request.Run.LeaseOwner, request.Run.LeaseToken.String(), request.LeaseDuration.Microseconds(), request.Run.CreatedBy, request.Run.CreatedAt)
 		created, err := scanAssessmentCycleBackfillRun(row)
 		if err != nil {
 			return fmt.Errorf("create assessment cycle backfill run: %w", err)
@@ -102,7 +105,7 @@ func (repository *AssessmentCycleBackfillRepository) CommitAssessmentCycleBackfi
 	}
 	err = WithTenant(ctx, repository.pool, tenantID.String(), func(tx pgx.Tx) error {
 		var active bool
-		if err := tx.QueryRow(ctx, `SELECT state='running' AND lease_token=$3 AND lease_expires_at>$4 FROM assessment_cycle_backfill_runs WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenantID.String(), runID.String(), leaseToken.String(), now).Scan(&active); errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.QueryRow(ctx, `SELECT state='running' AND lease_token=$3 AND lease_expires_at>now() FROM assessment_cycle_backfill_runs WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenantID.String(), runID.String(), leaseToken.String()).Scan(&active); errors.Is(err, pgx.ErrNoRows) {
 			return shared.ErrNotFound
 		} else if err != nil {
 			return fmt.Errorf("lock assessment cycle backfill lease: %w", err)
@@ -143,13 +146,13 @@ func (repository *AssessmentCycleBackfillRepository) AdvanceAssessmentCycleBackf
 		return ports.AssessmentCycleBackfillRun{}, fmt.Errorf("%w: assessment cycle backfill checkpoint is invalid", shared.ErrValidation)
 	}
 	err = WithTenant(ctx, repository.pool, tenantID.String(), func(tx pgx.Tx) error {
-		row := tx.QueryRow(ctx, `UPDATE assessment_cycle_backfill_runs AS run SET checkpoint_assessment_id=$5,updated_at=$6::timestamptz,lease_expires_at=$6::timestamptz+($7 * interval '1 microsecond'),
+		row := tx.QueryRow(ctx, `UPDATE assessment_cycle_backfill_runs AS run SET checkpoint_assessment_id=$5,updated_at=$6::timestamptz,lease_expires_at=now()+($7 * interval '1 microsecond'),
 			processed_count=(SELECT count(*) FROM assessment_cycle_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id),
 			created_count=(SELECT count(*) FROM assessment_cycle_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id AND item.outcome='created'),
 			would_create_count=(SELECT count(*) FROM assessment_cycle_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id AND item.outcome='would_create'),
 			skipped_count=(SELECT count(*) FROM assessment_cycle_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id AND item.outcome='skipped'),
 			failed_count=(SELECT count(*) FROM assessment_cycle_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id AND item.outcome='failed')
-			WHERE run.tenant_id=$1 AND run.id=$2 AND run.state='running' AND run.lease_owner=$3 AND run.lease_token=$4 AND run.lease_expires_at>$6 AND run.checkpoint_assessment_id COLLATE "C"<=$5 RETURNING `+assessmentCycleBackfillRunCols,
+			WHERE run.tenant_id=$1 AND run.id=$2 AND run.state='running' AND run.lease_owner=$3 AND run.lease_token=$4 AND run.lease_expires_at>now() AND run.checkpoint_assessment_id COLLATE "C"<=$5 RETURNING `+assessmentCycleBackfillRunCols,
 			tenantID.String(), runID.String(), leaseOwner, leaseToken.String(), checkpoint.String(), now, leaseDuration.Microseconds())
 		updated, err := scanAssessmentCycleBackfillRun(row)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -179,7 +182,7 @@ func (repository *AssessmentCycleBackfillRepository) FinishAssessmentCycleBackfi
 			would_create_count=(SELECT count(*) FROM assessment_cycle_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id AND item.outcome='would_create'),
 			skipped_count=(SELECT count(*) FROM assessment_cycle_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id AND item.outcome='skipped'),
 			failed_count=(SELECT count(*) FROM assessment_cycle_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id AND item.outcome='failed')
-			WHERE run.tenant_id=$1 AND run.id=$2 AND run.state='running' AND run.lease_owner=$3 AND run.lease_token=$4 AND run.lease_expires_at>$6 RETURNING `+assessmentCycleBackfillRunCols,
+			WHERE run.tenant_id=$1 AND run.id=$2 AND run.state='running' AND run.lease_owner=$3 AND run.lease_token=$4 AND run.lease_expires_at>now() RETURNING `+assessmentCycleBackfillRunCols,
 			tenantID.String(), runID.String(), leaseOwner, leaseToken.String(), string(state), now)
 		finished, err := scanAssessmentCycleBackfillRun(row)
 		if errors.Is(err, pgx.ErrNoRows) {

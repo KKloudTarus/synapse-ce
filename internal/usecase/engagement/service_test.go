@@ -301,8 +301,24 @@ func TestCompletionRequiresDefaultFinalizedSnapshot(t *testing.T) {
 	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusActive); err != nil {
 		t.Fatal(err)
 	}
+	svc.SetCompletionSnapshotPolicy(nil, func(string) bool { return true })
 	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusCompleted); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("completion without default snapshot=%v", err)
+	}
+}
+
+func TestCompletionSnapshotPolicyDefaultsToLegacyCompatible(t *testing.T) {
+	repo := newMemRepo()
+	svc := NewService(repo, fixedClock{time.Now().UTC()}, fixedIDs{}, &capAudit{})
+	item, err := svc.Create(context.Background(), CreateInput{Name: "Legacy Assessment", CreatedBy: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusActive); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusCompleted); err != nil {
+		t.Fatalf("default-off completion must preserve legacy behavior: %v", err)
 	}
 }
 

@@ -31,7 +31,7 @@ func NewAssessmentSnapshotRepository() *AssessmentSnapshotRepository {
 
 var _ ports.AssessmentSnapshotRepository = (*AssessmentSnapshotRepository)(nil)
 
-func (repository *AssessmentSnapshotRepository) CreateFinalizedCAS(_ context.Context, snapshot *assessmentsnapshot.Snapshot, expectedDefaultVersion int64) (*assessmentsnapshot.Snapshot, bool, error) {
+func (repository *AssessmentSnapshotRepository) CreateFinalizedCAS(ctx context.Context, snapshot *assessmentsnapshot.Snapshot, expectedDefaultVersion int64) (*assessmentsnapshot.Snapshot, bool, error) {
 	if snapshot == nil {
 		return nil, false, fmt.Errorf("%w: assessment snapshot is required", shared.ErrValidation)
 	}
@@ -63,6 +63,7 @@ func (repository *AssessmentSnapshotRepository) CreateFinalizedCAS(_ context.Con
 			return nil, false, fmt.Errorf("%w: assessment snapshot %q already exists", shared.ErrConflict, snapshot.ID)
 		}
 	}
+	repository.registerRollback(ctx)
 
 	if repository.counters[tenantID] == nil {
 		repository.counters[tenantID] = map[shared.ID]int{}
@@ -104,7 +105,7 @@ func (repository *AssessmentSnapshotRepository) CreateFinalizedCAS(_ context.Con
 	return cloneAssessmentSnapshot(stored), true, nil
 }
 
-func (repository *AssessmentSnapshotRepository) CreateLegacyProjection(_ context.Context, snapshot *assessmentsnapshot.Snapshot) (*assessmentsnapshot.Snapshot, bool, error) {
+func (repository *AssessmentSnapshotRepository) CreateLegacyProjection(ctx context.Context, snapshot *assessmentsnapshot.Snapshot) (*assessmentsnapshot.Snapshot, bool, error) {
 	if snapshot == nil || snapshot.Provenance != assessmentsnapshot.ProvenanceLegacy {
 		return nil, false, fmt.Errorf("%w: legacy assessment snapshot is required", shared.ErrValidation)
 	}
@@ -131,6 +132,7 @@ func (repository *AssessmentSnapshotRepository) CreateLegacyProjection(_ context
 			return nil, false, fmt.Errorf("%w: assessment snapshot %q already exists", shared.ErrConflict, snapshot.ID)
 		}
 	}
+	repository.registerRollback(ctx)
 	if repository.counters[tenantID] == nil {
 		repository.counters[tenantID] = map[shared.ID]int{}
 	}
@@ -190,17 +192,29 @@ func (repository *AssessmentSnapshotRepository) GetDefault(_ context.Context, te
 }
 
 func (repository *AssessmentSnapshotRepository) ListByAssessment(_ context.Context, tenantID, assessmentID shared.ID) ([]assessmentsnapshot.Snapshot, error) {
-	tenantID = shared.TenantOrDefault(tenantID)
+	page, err := repository.ListAssessmentSnapshots(context.Background(), ports.AssessmentSnapshotListQuery{TenantID: tenantID, AssessmentID: assessmentID, Limit: 100})
+	return page.Items, err
+}
+
+func (repository *AssessmentSnapshotRepository) ListAssessmentSnapshots(_ context.Context, query ports.AssessmentSnapshotListQuery) (ports.AssessmentSnapshotPage, error) {
+	if query.Limit < 1 || query.Limit > 100 || query.AfterSnapshotNumber < 0 {
+		return ports.AssessmentSnapshotPage{}, fmt.Errorf("%w: assessment snapshot page is invalid", shared.ErrValidation)
+	}
+	tenantID, assessmentID := shared.TenantOrDefault(query.TenantID), query.AssessmentID
 	repository.mu.RLock()
 	defer repository.mu.RUnlock()
 	var out []assessmentsnapshot.Snapshot
 	for _, snapshot := range repository.byID[tenantID] {
-		if snapshot.AssessmentID == assessmentID {
+		if snapshot.AssessmentID == assessmentID && snapshot.SnapshotNumber > query.AfterSnapshotNumber {
 			out = append(out, *cloneAssessmentSnapshot(snapshot))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].SnapshotNumber < out[j].SnapshotNumber })
-	return out, nil
+	page := ports.AssessmentSnapshotPage{Items: out}
+	if len(page.Items) > query.Limit {
+		page.Items, page.HasMore = page.Items[:query.Limit], true
+	}
+	return page, nil
 }
 
 func cloneAssessmentSnapshot(snapshot *assessmentsnapshot.Snapshot) *assessmentsnapshot.Snapshot {
@@ -214,8 +228,8 @@ func cloneAssessmentSnapshot(snapshot *assessmentsnapshot.Snapshot) *assessments
 	}
 	copySnapshot.Dimensions = append([]assessmentsnapshot.Dimension(nil), snapshot.Dimensions...)
 	for index := range copySnapshot.Dimensions {
-		copySnapshot.Dimensions[index].IncludedScope = append([]string(nil), snapshot.Dimensions[index].IncludedScope...)
-		copySnapshot.Dimensions[index].ExcludedScope = append([]string(nil), snapshot.Dimensions[index].ExcludedScope...)
+		copySnapshot.Dimensions[index].IncludedScope = cloneSnapshotStrings(snapshot.Dimensions[index].IncludedScope)
+		copySnapshot.Dimensions[index].ExcludedScope = cloneSnapshotStrings(snapshot.Dimensions[index].ExcludedScope)
 		copySnapshot.Dimensions[index].Versions = append([]assessmentsnapshot.Version(nil), snapshot.Dimensions[index].Versions...)
 	}
 	if snapshot.FinalizedAt != nil {
@@ -227,4 +241,66 @@ func cloneAssessmentSnapshot(snapshot *assessmentsnapshot.Snapshot) *assessments
 		copySnapshot.SupersededAt = &value
 	}
 	return &copySnapshot
+}
+
+func cloneSnapshotStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	cloned := make([]string, len(values))
+	copy(cloned, values)
+	return cloned
+}
+
+type assessmentSnapshotRepositoryState struct {
+	byID     map[shared.ID]map[shared.ID]*assessmentsnapshot.Snapshot
+	requests map[shared.ID]map[shared.ID]map[string]shared.ID
+	defaults map[shared.ID]map[shared.ID]ports.AssessmentSnapshotDefault
+	counters map[shared.ID]map[shared.ID]int
+}
+
+func (repository *AssessmentSnapshotRepository) registerRollback(ctx context.Context) {
+	state := repository.cloneState()
+	registerTenantRollback(ctx, func() {
+		repository.mu.Lock()
+		defer repository.mu.Unlock()
+		repository.byID, repository.requests, repository.defaults, repository.counters = state.byID, state.requests, state.defaults, state.counters
+	})
+}
+
+func (repository *AssessmentSnapshotRepository) cloneState() assessmentSnapshotRepositoryState {
+	state := assessmentSnapshotRepositoryState{
+		byID:     make(map[shared.ID]map[shared.ID]*assessmentsnapshot.Snapshot, len(repository.byID)),
+		requests: make(map[shared.ID]map[shared.ID]map[string]shared.ID, len(repository.requests)),
+		defaults: make(map[shared.ID]map[shared.ID]ports.AssessmentSnapshotDefault, len(repository.defaults)),
+		counters: make(map[shared.ID]map[shared.ID]int, len(repository.counters)),
+	}
+	for tenantID, snapshots := range repository.byID {
+		state.byID[tenantID] = make(map[shared.ID]*assessmentsnapshot.Snapshot, len(snapshots))
+		for snapshotID, snapshot := range snapshots {
+			state.byID[tenantID][snapshotID] = cloneAssessmentSnapshot(snapshot)
+		}
+	}
+	for tenantID, tenantRequests := range repository.requests {
+		state.requests[tenantID] = make(map[shared.ID]map[string]shared.ID, len(tenantRequests))
+		for assessmentID, assessmentRequests := range tenantRequests {
+			state.requests[tenantID][assessmentID] = make(map[string]shared.ID, len(assessmentRequests))
+			for requestKey, snapshotID := range assessmentRequests {
+				state.requests[tenantID][assessmentID][requestKey] = snapshotID
+			}
+		}
+	}
+	for tenantID, pointers := range repository.defaults {
+		state.defaults[tenantID] = make(map[shared.ID]ports.AssessmentSnapshotDefault, len(pointers))
+		for assessmentID, pointer := range pointers {
+			state.defaults[tenantID][assessmentID] = pointer
+		}
+	}
+	for tenantID, counters := range repository.counters {
+		state.counters[tenantID] = make(map[shared.ID]int, len(counters))
+		for assessmentID, counter := range counters {
+			state.counters[tenantID][assessmentID] = counter
+		}
+	}
+	return state
 }

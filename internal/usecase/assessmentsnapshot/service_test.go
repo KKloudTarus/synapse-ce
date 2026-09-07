@@ -36,6 +36,10 @@ func (audit *auditRecorder) Record(_ context.Context, entry ports.AuditEntry) er
 	return nil
 }
 
+type failingAudit struct{ err error }
+
+func (audit failingAudit) Record(context.Context, ports.AuditEntry) error { return audit.err }
+
 func TestFinalizeReplayReplacementAndCAS(t *testing.T) {
 	harness := newHarness(t)
 	first, created, err := harness.service.Finalize(context.Background(), uc.FinalizeInput{
@@ -61,6 +65,19 @@ func TestFinalizeReplayReplacementAndCAS(t *testing.T) {
 	if err != nil || !created || second.SnapshotNumber != 2 {
 		t.Fatalf("second finalize=%+v created=%v err=%v", second, created, err)
 	}
+	replayedOld, created, err := harness.service.Finalize(context.Background(), uc.FinalizeInput{
+		TenantID: "tenant", CycleID: "cycle", AssessmentID: "assessment", SelectedRunIDs: []string{"run-1"},
+		RequestKey: "request-1", ExpectedDefaultVersion: 0, Actor: "operator",
+	})
+	if err != nil || created || replayedOld.DefaultVersion != 2 {
+		t.Fatalf("old replay must return current default version: replay=%+v created=%v err=%v", replayedOld, created, err)
+	}
+	if _, _, err := harness.service.Finalize(context.Background(), uc.FinalizeInput{
+		TenantID: "tenant", CycleID: "cycle", AssessmentID: "assessment", SelectedRunIDs: []string{"run-1"},
+		RequestKey: "request-1", ExpectedDefaultVersion: 77, Actor: "operator",
+	}); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("replay with mismatched precondition error=%v", err)
+	}
 	old, err := harness.snapshots.Get(context.Background(), "tenant", first.ID)
 	if err != nil || old.Lifecycle != assessmentsnapshot.LifecycleSuperseded {
 		t.Fatalf("old snapshot=%+v err=%v", old, err)
@@ -81,6 +98,58 @@ func TestFinalizeReplayReplacementAndCAS(t *testing.T) {
 				t.Fatalf("snapshot audit leaked request/evidence material: %s", joined)
 			}
 		}
+	}
+}
+
+func TestFinalizeRejectsLegacyRunAndRollsBackOnAuditFailure(t *testing.T) {
+	harness := newHarness(t)
+	legacy := scanrun.ScanRun{
+		TenantID: "tenant", ID: "legacy-run", EngagementID: "assessment", CreatedAt: harness.clock.now, UpdatedAt: harness.clock.now,
+		Provenance: scanrun.ProvenanceLegacy, TerminalStatus: scanrun.StatusUnknown, ManifestSchemaVersion: scanrun.CurrentManifestSchemaVersion,
+		LegacyFindingKeys: []string{"legacy-finding"},
+	}
+	harness.saveRun(t, legacy)
+	if _, _, err := harness.service.Finalize(context.Background(), uc.FinalizeInput{
+		TenantID: "tenant", CycleID: "cycle", AssessmentID: "assessment", SelectedRunIDs: []string{"legacy-run"},
+		RequestKey: "legacy-interactive", Actor: "operator",
+	}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("interactive legacy finalization error=%v", err)
+	}
+
+	auditErr := errors.New("audit unavailable")
+	failing := newHarnessWithAudit(t, failingAudit{err: auditErr})
+	if _, _, err := failing.service.Finalize(context.Background(), uc.FinalizeInput{
+		TenantID: "tenant", CycleID: "cycle", AssessmentID: "assessment", SelectedRunIDs: []string{"run-1"},
+		RequestKey: "audit-failure", Actor: "operator",
+	}); !errors.Is(err, auditErr) {
+		t.Fatalf("audit failure=%v", err)
+	}
+	if _, err := failing.snapshots.GetByRequestKey(context.Background(), "tenant", "assessment", "audit-failure"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("snapshot survived failed audit: %v", err)
+	}
+}
+
+func TestSnapshotHistoryUsesBoundedCursorPages(t *testing.T) {
+	harness := newHarness(t)
+	for index, runID := range []string{"run-2", "run-3", "run-4"} {
+		harness.saveRun(t, nativeRun(t, runID, "assessment", fmt.Sprintf("%040d", index+1)))
+		if _, created, err := harness.service.Finalize(context.Background(), uc.FinalizeInput{
+			TenantID: "tenant", CycleID: "cycle", AssessmentID: "assessment", SelectedRunIDs: []string{runID},
+			RequestKey: "page-" + runID, ExpectedDefaultVersion: int64(index), Actor: "operator",
+		}); err != nil || !created {
+			t.Fatalf("finalize %s created=%v err=%v", runID, created, err)
+		}
+	}
+	first, err := harness.service.ListByAssessment(context.Background(), "tenant", "assessment", "", 1)
+	if err != nil || len(first.Items) != 1 || first.NextCursor == "" || first.Items[0].SnapshotNumber != 1 {
+		t.Fatalf("first page=%+v err=%v", first, err)
+	}
+	second, err := harness.service.ListByAssessment(context.Background(), "tenant", "assessment", first.NextCursor, 1)
+	if err != nil || len(second.Items) != 1 || second.NextCursor == "" || second.Items[0].SnapshotNumber != 2 {
+		t.Fatalf("second page=%+v err=%v", second, err)
+	}
+	if _, err := harness.service.ListByAssessment(context.Background(), "tenant", "assessment", "not-base64!", 1); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("invalid cursor=%v", err)
 	}
 }
 
@@ -145,6 +214,11 @@ type harness struct {
 }
 
 func newHarness(t *testing.T) *harness {
+	audit := &auditRecorder{}
+	return newHarnessWithAudit(t, audit)
+}
+
+func newHarnessWithAudit(t *testing.T, audit ports.AuditLogger) *harness {
 	t.Helper()
 	clock := fixedClock{now: time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)}
 	engagements := memory.NewEngagementRepository()
@@ -175,12 +249,12 @@ func newHarness(t *testing.T) *harness {
 	}
 	runs := memory.NewScanRunStore()
 	snapshots := memory.NewAssessmentSnapshotRepository()
-	audit := &auditRecorder{}
 	service, err := uc.NewService(snapshots, cycles, engagements, runs, memory.NewTenantTransactionRunner(), &sequenceIDs{}, clock, audit)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{service: service, snapshots: snapshots, engagements: engagements, runs: runs, audit: audit, clock: clock}
+	recorder, _ := audit.(*auditRecorder)
+	h := &harness{service: service, snapshots: snapshots, engagements: engagements, runs: runs, audit: recorder, clock: clock}
 	h.saveRun(t, nativeRun(t, "run-1", "assessment", "0123456789abcdef0123456789abcdef01234567"))
 	return h
 }

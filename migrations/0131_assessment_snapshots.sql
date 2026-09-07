@@ -25,6 +25,7 @@ CREATE TABLE assessment_snapshots (
     superseded_at    TIMESTAMPTZ,
     superseded_by    TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (tenant_id, id),
+	UNIQUE (tenant_id, assessment_id, id),
     UNIQUE (tenant_id, assessment_id, snapshot_number),
     UNIQUE (tenant_id, assessment_id, request_key),
     FOREIGN KEY (tenant_id, cycle_id, assessment_id)
@@ -113,7 +114,7 @@ CREATE TABLE assessment_snapshot_defaults (
     updated_by     TEXT NOT NULL,
     PRIMARY KEY (tenant_id, assessment_id),
     FOREIGN KEY (tenant_id, assessment_id) REFERENCES engagements(tenant_id, id) ON DELETE RESTRICT,
-    FOREIGN KEY (tenant_id, snapshot_id) REFERENCES assessment_snapshots(tenant_id, id) ON DELETE RESTRICT
+	FOREIGN KEY (tenant_id, assessment_id, snapshot_id) REFERENCES assessment_snapshots(tenant_id, assessment_id, id) ON DELETE RESTRICT
 );
 
 -- +goose StatementBegin
@@ -122,7 +123,7 @@ DECLARE engagement_status TEXT;
 BEGIN
     IF TG_OP = 'INSERT' THEN
         SELECT status INTO engagement_status FROM engagements WHERE tenant_id = NEW.tenant_id AND id = NEW.assessment_id;
-        IF engagement_status NOT IN ('draft','active') THEN
+		IF NEW.provenance = 'native' AND engagement_status NOT IN ('draft','active') THEN
             RAISE EXCEPTION 'assessment snapshot requires draft/active engagement';
         END IF;
         RETURN NEW;
@@ -194,6 +195,38 @@ END $$;
 
 CREATE TRIGGER assessment_snapshot_defaults_guard BEFORE INSERT OR UPDATE ON assessment_snapshot_defaults FOR EACH ROW EXECUTE FUNCTION synapse_assessment_snapshot_default_guard();
 
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION synapse_assessment_snapshot_pointer_delete_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	RAISE EXCEPTION 'assessment snapshot pointer and counter rows cannot be deleted';
+END $$;
+-- +goose StatementEnd
+
+CREATE TRIGGER assessment_snapshot_defaults_delete_guard BEFORE DELETE ON assessment_snapshot_defaults FOR EACH ROW EXECUTE FUNCTION synapse_assessment_snapshot_pointer_delete_guard();
+CREATE TRIGGER assessment_snapshot_counters_delete_guard BEFORE DELETE ON assessment_snapshot_counters FOR EACH ROW EXECUTE FUNCTION synapse_assessment_snapshot_pointer_delete_guard();
+
+-- Once an Assessment joins a Cycle its governed Business Asset boundary is
+-- immutable. This invariant lives in the first migration introduced by this
+-- slice so upgrades from an already-applied 0126 install it as well.
+-- +goose StatementBegin
+CREATE FUNCTION synapse_reject_assessment_cycle_boundary_change() RETURNS trigger AS $$
+BEGIN
+    IF NEW.business_asset_id IS DISTINCT FROM OLD.business_asset_id AND EXISTS (
+        SELECT 1 FROM assessment_cycle_members
+        WHERE tenant_id = OLD.tenant_id AND assessment_id = OLD.id
+    ) THEN
+        RAISE EXCEPTION 'Assessment Cycle membership freezes the Business Asset boundary'
+            USING ERRCODE = '23514', CONSTRAINT = 'assessment_cycle_frozen_business_asset';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+CREATE TRIGGER trg_assessment_cycle_frozen_business_asset
+    BEFORE UPDATE OF business_asset_id ON engagements
+    FOR EACH ROW EXECUTE FUNCTION synapse_reject_assessment_cycle_boundary_change();
+
 CALL synapse_enable_tenant_rls('assessment_snapshots');
 CALL synapse_enable_tenant_rls('assessment_snapshot_run_refs');
 CALL synapse_enable_tenant_rls('assessment_snapshot_lane_refs');
@@ -209,6 +242,8 @@ DO $$ BEGIN
     END IF;
 END $$;
 -- +goose StatementEnd
+DROP TRIGGER IF EXISTS trg_assessment_cycle_frozen_business_asset ON engagements;
+DROP FUNCTION IF EXISTS synapse_reject_assessment_cycle_boundary_change();
 DROP TABLE IF EXISTS assessment_snapshot_defaults;
 DROP TABLE IF EXISTS assessment_snapshot_counters;
 DROP TABLE IF EXISTS assessment_snapshot_dimensions;
@@ -218,3 +253,4 @@ DROP TABLE IF EXISTS assessment_snapshots;
 DROP FUNCTION IF EXISTS synapse_assessment_snapshot_default_guard();
 DROP FUNCTION IF EXISTS synapse_assessment_snapshot_child_guard();
 DROP FUNCTION IF EXISTS synapse_assessment_snapshot_guard();
+DROP FUNCTION IF EXISTS synapse_assessment_snapshot_pointer_delete_guard();

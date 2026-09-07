@@ -20,7 +20,7 @@ func (clock *postgresBackfillClock) Now() time.Time { return clock.now }
 
 func TestPostgresAssessmentCycleBackfillRunner(t *testing.T) {
 	db, dsn := newAssessmentMigrationDB(t)
-	if err := goose.UpTo(db, ".", 132); err != nil {
+	if err := goose.UpTo(db, ".", 133); err != nil {
 		t.Fatalf("up to 0132: %v", err)
 	}
 	ctx := context.Background()
@@ -80,7 +80,7 @@ func TestPostgresAssessmentCycleBackfillRunner(t *testing.T) {
 
 func TestPostgresAssessmentCycleBackfillLeaseAndCompositeFK(t *testing.T) {
 	db, dsn := newAssessmentMigrationDB(t)
-	if err := goose.UpTo(db, ".", 132); err != nil {
+	if err := goose.UpTo(db, ".", 133); err != nil {
 		t.Fatalf("up to 0132: %v", err)
 	}
 	ctx := context.Background()

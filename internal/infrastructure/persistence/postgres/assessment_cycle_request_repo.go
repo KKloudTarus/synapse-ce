@@ -25,6 +25,9 @@ func NewAssessmentCycleRequestRepository(pool *pgxpool.Pool) *AssessmentCycleReq
 var _ ports.AssessmentCycleRequestStore = (*AssessmentCycleRequestRepository)(nil)
 
 func (repository *AssessmentCycleRequestRepository) BeginAssessmentCycleRequest(ctx context.Context, request ports.AssessmentCycleRequest) (ports.AssessmentCycleRequest, bool, error) {
+	if request.ExpiresAt.IsZero() {
+		request.ExpiresAt = request.CreatedAt.Add(24 * time.Hour)
+	}
 	if err := validatePostgresAssessmentCycleRequest(request); err != nil {
 		return ports.AssessmentCycleRequest{}, false, err
 	}
@@ -32,11 +35,14 @@ func (repository *AssessmentCycleRequestRepository) BeginAssessmentCycleRequest(
 	var stored ports.AssessmentCycleRequest
 	created := false
 	err := WithTenant(ctx, repository.pool, tenantID.String(), func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM assessment_cycle_api_requests WHERE tenant_id=$1 AND expires_at <= $2`, tenantID.String(), request.CreatedAt.UTC()); err != nil {
+			return fmt.Errorf("prune expired assessment cycle requests: %w", err)
+		}
 		tag, err := tx.Exec(ctx, `INSERT INTO assessment_cycle_api_requests
-			(tenant_id, actor, route, idempotency_key, request_hash, created_at)
-			VALUES ($1,$2,$3,$4,$5,$6)
+			(tenant_id, actor, route, idempotency_key, request_hash, created_at, expires_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
 			ON CONFLICT (tenant_id, actor, route, idempotency_key) DO NOTHING`,
-			tenantID.String(), request.Scope.Actor, request.Scope.Route, request.Scope.IdempotencyKey, request.RequestHash, request.CreatedAt.UTC())
+			tenantID.String(), request.Scope.Actor, request.Scope.Route, request.Scope.IdempotencyKey, request.RequestHash, request.CreatedAt.UTC(), request.ExpiresAt.UTC())
 		if err != nil {
 			return fmt.Errorf("reserve assessment cycle request: %w", err)
 		}
@@ -45,7 +51,7 @@ func (repository *AssessmentCycleRequestRepository) BeginAssessmentCycleRequest(
 			return nil
 		}
 		loaded, err := scanAssessmentCycleRequest(tx.QueryRow(ctx, `SELECT tenant_id, actor, route, idempotency_key, request_hash,
-			status_code, response_body, created_at, completed_at
+			status_code, response_body, created_at, expires_at, completed_at
 			FROM assessment_cycle_api_requests
 			WHERE tenant_id=$1 AND actor=$2 AND route=$3 AND idempotency_key=$4`,
 			tenantID.String(), request.Scope.Actor, request.Scope.Route, request.Scope.IdempotencyKey))
@@ -59,7 +65,7 @@ func (repository *AssessmentCycleRequestRepository) BeginAssessmentCycleRequest(
 }
 
 func (repository *AssessmentCycleRequestRepository) CompleteAssessmentCycleRequest(ctx context.Context, scope ports.AssessmentCycleRequestScope, requestHash string, statusCode int, responseBody []byte, completedAt time.Time) error {
-	if err := validatePostgresAssessmentCycleRequest(ports.AssessmentCycleRequest{Scope: scope, RequestHash: requestHash, CreatedAt: completedAt}); err != nil || statusCode < 200 || statusCode > 599 || len(responseBody) == 0 || len(responseBody) > maxAssessmentCycleResponseBytes {
+	if err := validatePostgresAssessmentCycleRequest(ports.AssessmentCycleRequest{Scope: scope, RequestHash: requestHash, CreatedAt: completedAt, ExpiresAt: completedAt.Add(24 * time.Hour)}); err != nil || statusCode < 200 || statusCode > 599 || len(responseBody) == 0 || len(responseBody) > maxAssessmentCycleResponseBytes {
 		return fmt.Errorf("%w: assessment cycle request completion is invalid", shared.ErrValidation)
 	}
 	tenantID := shared.TenantOrDefault(scope.TenantID)
@@ -98,7 +104,7 @@ func scanAssessmentCycleRequest(row rowScanner) (ports.AssessmentCycleRequest, e
 		completedAt pgtype.Timestamptz
 	)
 	if err := row.Scan(&request.Scope.TenantID, &request.Scope.Actor, &request.Scope.Route, &request.Scope.IdempotencyKey,
-		&request.RequestHash, &statusCode, &request.ResponseBody, &request.CreatedAt, &completedAt); err != nil {
+		&request.RequestHash, &statusCode, &request.ResponseBody, &request.CreatedAt, &request.ExpiresAt, &completedAt); err != nil {
 		return ports.AssessmentCycleRequest{}, fmt.Errorf("scan assessment cycle request: %w", err)
 	}
 	if statusCode.Valid {
@@ -112,7 +118,7 @@ func scanAssessmentCycleRequest(row rowScanner) (ports.AssessmentCycleRequest, e
 }
 
 func validatePostgresAssessmentCycleRequest(request ports.AssessmentCycleRequest) error {
-	if shared.TenantOrDefault(request.Scope.TenantID).IsZero() || strings.TrimSpace(request.Scope.Actor) == "" || len(request.Scope.Actor) > 256 || strings.TrimSpace(request.Scope.Route) == "" || len(request.Scope.Route) > 256 || strings.TrimSpace(request.Scope.IdempotencyKey) == "" || len(request.Scope.IdempotencyKey) > 128 || len(request.RequestHash) != 64 || request.CreatedAt.IsZero() {
+	if shared.TenantOrDefault(request.Scope.TenantID).IsZero() || strings.TrimSpace(request.Scope.Actor) == "" || len(request.Scope.Actor) > 256 || strings.TrimSpace(request.Scope.Route) == "" || len(request.Scope.Route) > 256 || strings.TrimSpace(request.Scope.IdempotencyKey) == "" || len(request.Scope.IdempotencyKey) > 128 || len(request.RequestHash) != 64 || request.CreatedAt.IsZero() || !request.ExpiresAt.After(request.CreatedAt) {
 		return fmt.Errorf("%w: assessment cycle idempotency request is invalid", shared.ErrValidation)
 	}
 	return nil

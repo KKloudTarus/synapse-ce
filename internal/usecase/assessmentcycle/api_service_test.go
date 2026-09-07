@@ -24,6 +24,38 @@ type failCompleteRequestStore struct {
 	fail  bool
 }
 
+type rejectingAudit struct{ err error }
+
+func (audit rejectingAudit) Record(context.Context, ports.AuditEntry) error { return audit.err }
+
+func TestHistoricalCycleBackfillRollsBackWhenAuditFails(t *testing.T) {
+	ctx := context.Background()
+	tenantID := shared.ID("tenant-audit-rollback")
+	clock := fixedClock{t: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)}
+	engagements := memory.NewEngagementRepository()
+	assessment, err := engdom.New("assessment-audit-rollback", tenantID, "Historical", "", clock.t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engagements.Create(ctx, assessment); err != nil {
+		t.Fatal(err)
+	}
+	cycles := memory.NewAssessmentCycleRepository()
+	auditErr := errors.New("audit unavailable")
+	service, err := cycleuc.NewService(cycles, engagements, nil, nil, memory.NewTenantTransactionRunner(), &seqIDGen{}, clock, rejectingAudit{err: auditErr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.BackfillHistoricalSingleton(ctx, cycleuc.BackfillHistoricalSingletonInput{
+		TenantID: tenantID, AssessmentID: assessment.ID, SchemaVersion: 1, Actor: "operator",
+	}); !errors.Is(err, auditErr) {
+		t.Fatalf("backfill audit failure=%v", err)
+	}
+	if _, err := cycles.GetCycleByAssessment(ctx, tenantID, assessment.ID); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("cycle survived failed audit: %v", err)
+	}
+}
+
 func (store *failCompleteRequestStore) failNext() {
 	store.mu.Lock()
 	store.fail = true
@@ -90,6 +122,12 @@ func TestAPIServiceRetainedLifecycle(t *testing.T) {
 	if _, err := api.CreateInitialAssessment(ctx, mismatch); !errors.Is(err, shared.ErrConflict) || cycleuc.ErrorCode(err) != cycleuc.CodeIdempotencyBodyMismatch {
 		t.Fatalf("body mismatch = %v", err)
 	}
+	if _, err := api.CreateRetestAssessment(ctx, cycleuc.CreateRetestAssessmentInput{
+		Request:      cycleuc.RetainedRequest{TenantID: tenantID, Actor: "alice", Route: "/api/v1/engagements/" + root.ID.String() + "/retests", IdempotencyKey: "cross-lineage"},
+		AssessmentID: root.ID, PredecessorAssessmentID: "another-assessment",
+	}); !errors.Is(err, shared.ErrValidation) || cycleuc.ErrorCode(err) != cycleuc.CodeInvalidPredecessor {
+		t.Fatalf("cross-assessment predecessor = %v", err)
+	}
 
 	retest, err := api.CreateRetestAssessment(ctx, cycleuc.CreateRetestAssessmentInput{
 		Request:      cycleuc.RetainedRequest{TenantID: tenantID, Actor: "alice", Route: "/api/v1/engagements/" + root.ID.String() + "/retests", IdempotencyKey: "retest-1"},
@@ -142,8 +180,11 @@ func TestAPIServiceRetainedLifecycle(t *testing.T) {
 		}
 		if strings.HasPrefix(entry.Action, "assessment_cycle.api_") {
 			apiAuditCount++
-			if entry.Actor == "" || entry.Target == "" || entry.Metadata["tenant_id"] != tenantID.String() || entry.Metadata["idempotency_key"] == "" || entry.Metadata["cycle_version"] == "" {
+			if entry.Actor == "" || entry.Target == "" || entry.Metadata["tenant_id"] != tenantID.String() || entry.Metadata["cycle_version"] == "" {
 				t.Fatalf("incomplete assessment cycle API audit entry: %+v", entry)
+			}
+			if _, leaked := entry.Metadata["idempotency_key"]; leaked {
+				t.Fatalf("assessment cycle API audit leaked idempotency key: %+v", entry)
 			}
 		}
 	}

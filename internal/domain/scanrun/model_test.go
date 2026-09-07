@@ -198,6 +198,32 @@ func TestComputeManifestHash_LaneKeyAndStatusSensitivity(t *testing.T) {
 	}
 }
 
+func TestComputeManifestHashUsesDurableTimestampPrecision(t *testing.T) {
+	started := time.Date(2026, 9, 4, 10, 11, 12, 987654321, time.FixedZone("fixture", 7*60*60))
+	finished := started.Add(3*time.Second + 123*time.Nanosecond)
+	lane := scanrun.Lane{
+		LaneKey: "sca", Producer: "sca", TerminalStatus: scanrun.StatusSucceeded,
+		ManifestSchemaVersion: scanrun.CurrentManifestSchemaVersion,
+		Stages:                []scanrun.LaneStage{{StageKey: "scan", Status: scanrun.StageSucceeded, StartedAt: started, FinishedAt: &finished}},
+	}
+	original, err := scanrun.ComputeManifestHash(lane)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTripped := lane
+	roundTripped.Stages = append([]scanrun.LaneStage(nil), lane.Stages...)
+	roundTripped.Stages[0].StartedAt = started.UTC().Truncate(time.Microsecond)
+	roundTrippedFinished := finished.UTC().Truncate(time.Microsecond)
+	roundTripped.Stages[0].FinishedAt = &roundTrippedFinished
+	afterDatabase, err := scanrun.ComputeManifestHash(roundTripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if original != afterDatabase {
+		t.Fatalf("manifest hash changed after timestamptz round trip: before=%s after=%s", original, afterDatabase)
+	}
+}
+
 func TestComputeRunManifestHash_OrderInvariance(t *testing.T) {
 	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
 	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")

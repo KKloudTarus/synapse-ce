@@ -268,6 +268,8 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED` | `false` | Enable new-initial-Assessment Cycle/root dual-write only for the configured tenant allowlist. |
 | `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS` | empty | Comma-separated dual-write tenant allowlist; `*` enables all tenants. Required when the dual-write gate is enabled. |
 | `SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED` | `false` | Enable immutable Snapshot finalization and reads from sealed, hash-verified Scan Runs. |
+| `SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED` | `false` | Require a finalized default Snapshot before Assessment completion for an explicit rollout cohort. Disabled preserves legacy completion behavior. |
+| `SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS` | empty | Comma-separated Snapshot-completion enforcement allowlist; it must be a subset of the lifecycle-read allowlist. |
 | `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED` | `false` | Enable lifecycle read projections after backfill and integrity verification. |
 | `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS` | empty | Comma-separated lifecycle-read allowlist; `*` enables all tenants. Required when lifecycle reads are enabled. |
 | `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED` | `false` | Show the Assessment Cycles UI by default. Startup rejects this unless lifecycle reads are enabled. |

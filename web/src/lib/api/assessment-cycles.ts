@@ -146,4 +146,11 @@ export const assessmentCyclesApi = {
       headers: { 'Idempotency-Key': newIdempotencyKey(), 'If-Match': String(version) },
       body: '{}',
     })),
+
+  reopenAssessmentCycle: async (cycleId: string, version: number, reason: string, idempotencyKey = newIdempotencyKey()): Promise<AssessmentCycleDetail> =>
+    mapDetail(await req(`/assessment-cycles/${id(cycleId)}/reopen`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(version) },
+      body: JSON.stringify({ reason }),
+    })),
 }

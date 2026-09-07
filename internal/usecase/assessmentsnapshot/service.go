@@ -3,11 +3,13 @@ package assessmentsnapshot
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
@@ -19,10 +21,12 @@ import (
 )
 
 const (
-	maxSelectedRuns    = 100
-	maxSelectedLanes   = 100
-	maxSelectionIDSize = 256
-	maxRequestKeySize  = 128
+	maxSelectedRuns         = 100
+	maxSelectedLanes        = 100
+	maxSelectionIDSize      = 256
+	maxRequestKeySize       = 128
+	defaultSnapshotPageSize = 50
+	maxSnapshotPageSize     = 100
 )
 
 var ErrIdempotencyBodyMismatch = errors.New("assessment snapshot idempotency body mismatch")
@@ -96,6 +100,18 @@ func (service *Service) Finalize(ctx context.Context, input FinalizeInput) (*dom
 		if replay.CycleID != input.CycleID || !sameRunSelection(replay.RunReferences, selectedRuns) {
 			return nil, false, idempotencyBodyMismatch()
 		}
+		// The retained request was admitted against the pointer version immediately
+		// preceding this Snapshot. Keep the original precondition part of the
+		// idempotency identity so a caller cannot reuse a key with an arbitrary
+		// If-Match value while still returning the current pointer version below.
+		if input.ExpectedDefaultVersion != replay.DefaultVersion-1 {
+			return nil, false, fmt.Errorf("%w: assessment snapshot replay precondition mismatch", shared.ErrConflict)
+		}
+		_, pointer, err := service.snapshots.GetDefault(ctx, tenantID, input.AssessmentID)
+		if err != nil {
+			return nil, false, fmt.Errorf("load current assessment snapshot default: %w", err)
+		}
+		replay.DefaultVersion = pointer.Version
 		return replay, false, nil
 	} else if !errors.Is(err, shared.ErrNotFound) {
 		return nil, false, err
@@ -141,6 +157,9 @@ func (service *Service) Finalize(ctx context.Context, input FinalizeInput) (*dom
 			if run.EngagementID != input.AssessmentID {
 				return fmt.Errorf("%w: selected scan run %q belongs to another assessment", shared.ErrValidation, runID)
 			}
+			if run.Provenance != scanrun.ProvenanceNative {
+				return fmt.Errorf("%w: interactive snapshot finalization requires native scan run provenance", shared.ErrValidation)
+			}
 			selected, err := trustedSelectedRun(run, selection.LaneKeys)
 			if err != nil {
 				return err
@@ -184,12 +203,56 @@ func (service *Service) Get(ctx context.Context, tenantID, snapshotID shared.ID)
 	return service.snapshots.Get(ctx, tenantID, snapshotID)
 }
 
-func (service *Service) ListByAssessment(ctx context.Context, tenantID, assessmentID shared.ID) ([]domain.Snapshot, error) {
+type SnapshotPage struct {
+	Items      []domain.Snapshot
+	NextCursor string
+}
+
+func (service *Service) ListByAssessment(ctx context.Context, tenantID, assessmentID shared.ID, cursor string, limit int) (SnapshotPage, error) {
 	tenantID = shared.TenantOrDefault(tenantID)
 	if tenantID.IsZero() || assessmentID.IsZero() {
-		return nil, fmt.Errorf("%w: snapshot tenant and assessment are required", shared.ErrValidation)
+		return SnapshotPage{}, fmt.Errorf("%w: snapshot tenant and assessment are required", shared.ErrValidation)
 	}
-	return service.snapshots.ListByAssessment(ctx, tenantID, assessmentID)
+	if limit == 0 {
+		limit = defaultSnapshotPageSize
+	}
+	if limit < 1 || limit > maxSnapshotPageSize {
+		return SnapshotPage{}, fmt.Errorf("%w: snapshot page size must be between 1 and %d", shared.ErrValidation, maxSnapshotPageSize)
+	}
+	after, err := decodeSnapshotCursor(cursor)
+	if err != nil {
+		return SnapshotPage{}, err
+	}
+	page, err := service.snapshots.ListAssessmentSnapshots(ctx, ports.AssessmentSnapshotListQuery{
+		TenantID: tenantID, AssessmentID: assessmentID, AfterSnapshotNumber: after, Limit: limit,
+	})
+	if err != nil {
+		return SnapshotPage{}, err
+	}
+	result := SnapshotPage{Items: page.Items}
+	if page.HasMore && len(page.Items) > 0 {
+		result.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(strconv.Itoa(page.Items[len(page.Items)-1].SnapshotNumber)))
+	}
+	return result, nil
+}
+
+func decodeSnapshotCursor(cursor string) (int, error) {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return 0, nil
+	}
+	if len(cursor) > 128 {
+		return 0, fmt.Errorf("%w: snapshot cursor is invalid", shared.ErrValidation)
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return 0, fmt.Errorf("%w: snapshot cursor is invalid", shared.ErrValidation)
+	}
+	value, err := strconv.Atoi(string(decoded))
+	if err != nil || value < 1 {
+		return 0, fmt.Errorf("%w: snapshot cursor is invalid", shared.ErrValidation)
+	}
+	return value, nil
 }
 
 func (service *Service) GetDefault(ctx context.Context, tenantID, assessmentID shared.ID) (*domain.Snapshot, ports.AssessmentSnapshotDefault, error) {

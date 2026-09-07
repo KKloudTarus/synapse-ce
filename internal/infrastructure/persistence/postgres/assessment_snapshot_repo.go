@@ -264,10 +264,18 @@ func (repository *AssessmentSnapshotRepository) GetDefault(ctx context.Context, 
 }
 
 func (repository *AssessmentSnapshotRepository) ListByAssessment(ctx context.Context, tenantID, assessmentID shared.ID) ([]assessmentsnapshot.Snapshot, error) {
-	tenantID = shared.TenantOrDefault(tenantID)
-	var out []assessmentsnapshot.Snapshot
+	page, err := repository.ListAssessmentSnapshots(ctx, ports.AssessmentSnapshotListQuery{TenantID: tenantID, AssessmentID: assessmentID, Limit: 100})
+	return page.Items, err
+}
+
+func (repository *AssessmentSnapshotRepository) ListAssessmentSnapshots(ctx context.Context, query ports.AssessmentSnapshotListQuery) (ports.AssessmentSnapshotPage, error) {
+	if query.Limit < 1 || query.Limit > 100 || query.AfterSnapshotNumber < 0 {
+		return ports.AssessmentSnapshotPage{}, fmt.Errorf("%w: assessment snapshot page is invalid", shared.ErrValidation)
+	}
+	tenantID, assessmentID := shared.TenantOrDefault(query.TenantID), query.AssessmentID
+	page := ports.AssessmentSnapshotPage{}
 	err := WithTenant(ctx, repository.pool, tenantID.String(), func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id FROM assessment_snapshots WHERE tenant_id=$1 AND assessment_id=$2 ORDER BY snapshot_number`, tenantID.String(), assessmentID.String())
+		rows, err := tx.Query(ctx, `SELECT id FROM assessment_snapshots WHERE tenant_id=$1 AND assessment_id=$2 AND snapshot_number>$3 ORDER BY snapshot_number LIMIT $4`, tenantID.String(), assessmentID.String(), query.AfterSnapshotNumber, query.Limit+1)
 		if err != nil {
 			return fmt.Errorf("list assessment snapshots: %w", err)
 		}
@@ -283,16 +291,19 @@ func (repository *AssessmentSnapshotRepository) ListByAssessment(ctx context.Con
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		if len(ids) > query.Limit {
+			ids, page.HasMore = ids[:query.Limit], true
+		}
 		for _, id := range ids {
 			snapshot, err := loadAssessmentSnapshot(ctx, tx, tenantID, id)
 			if err != nil {
 				return err
 			}
-			out = append(out, *snapshot)
+			page.Items = append(page.Items, *snapshot)
 		}
 		return nil
 	})
-	return out, err
+	return page, err
 }
 
 func loadAssessmentSnapshotByRequest(ctx context.Context, tx pgx.Tx, tenantID, assessmentID shared.ID, requestKey string) (*assessmentsnapshot.Snapshot, error) {

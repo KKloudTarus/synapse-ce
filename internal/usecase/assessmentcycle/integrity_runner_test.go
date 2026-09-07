@@ -52,9 +52,14 @@ func TestIntegrityVerifierPersistsFindingsAndResumesExpiredRun(t *testing.T) {
 	}
 
 	lease := time.Minute
+	sourceGeneration, err := repository.AssessmentCycleIntegrityGeneration(ctx, tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	crashed, _, err := repository.AcquireAssessmentCycleIntegrityRun(ctx, ports.AssessmentCycleIntegrityAcquireRequest{Run: ports.AssessmentCycleIntegrityRun{
 		TenantID: tenantID, ID: "integrity-crashed", BatchSize: 1, SnapshotAt: now, State: ports.AssessmentCycleIntegrityRunning,
-		LeaseOwner: "dead", LeaseToken: "dead-token", LeaseExpiresAt: now.Add(lease), CreatedBy: "operator", CreatedAt: now, UpdatedAt: now,
+		SourceGeneration: sourceGeneration,
+		LeaseOwner:       "dead", LeaseToken: "dead-token", LeaseExpiresAt: now.Add(lease), CreatedBy: "operator", CreatedAt: now, UpdatedAt: now,
 	}, LeaseDuration: lease})
 	if err != nil {
 		t.Fatal(err)
@@ -78,5 +83,41 @@ func TestIntegrityVerifierRejectsOversizedBatch(t *testing.T) {
 	}
 	if _, err := verifier.Run(context.Background(), cycleuc.IntegrityRequest{TenantID: "tenant", Actor: "operator", LeaseOwner: "process", BatchSize: 2001}); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("oversized batch = %v", err)
+	}
+}
+
+func TestIntegrityCompletionRejectsConcurrentSourceGeneration(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	tenantID := shared.ID("tenant-generation-fence")
+	engagements := memory.NewEngagementRepository()
+	assessment, err := engdom.New("assessment-generation", tenantID, "Before", "", now.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engagements.Create(ctx, assessment); err != nil {
+		t.Fatal(err)
+	}
+	repository := memory.NewAssessmentCycleIntegrityRepository(engagements, memory.NewAssessmentCycleRepository())
+	generation, err := repository.AssessmentCycleIntegrityGeneration(ctx, tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := repository.AcquireAssessmentCycleIntegrityRun(ctx, ports.AssessmentCycleIntegrityAcquireRequest{Run: ports.AssessmentCycleIntegrityRun{
+		TenantID: tenantID, ID: "generation-run", BatchSize: 1, SnapshotAt: now, SourceGeneration: generation,
+		State: ports.AssessmentCycleIntegrityRunning, LeaseOwner: "worker", LeaseToken: "generation-token", LeaseExpiresAt: now.Add(time.Minute),
+		CreatedBy: "operator", CreatedAt: now, UpdatedAt: now,
+	}, LeaseDuration: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := *assessment
+	changed.Name = "After"
+	changed.Audit.UpdatedAt = now.Add(time.Second)
+	if err := engagements.Update(ctx, &changed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.FinishAssessmentCycleIntegrityRun(ctx, tenantID, run.ID, "worker", run.LeaseToken, ports.AssessmentCycleIntegrityCompleted, now.Add(2*time.Second)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("completion over changed source=%v", err)
 	}
 }

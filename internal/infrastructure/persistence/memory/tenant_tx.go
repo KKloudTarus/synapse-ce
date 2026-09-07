@@ -16,6 +16,11 @@ type TenantTransactionRunner struct {
 
 type tenantTransactionKey struct{}
 
+type tenantTransaction struct {
+	tenantID  shared.ID
+	rollbacks []func()
+}
+
 // NewTenantTransactionRunner constructs an in-memory TenantTransactionRunner.
 func NewTenantTransactionRunner() *TenantTransactionRunner {
 	return &TenantTransactionRunner{}
@@ -28,14 +33,33 @@ func (r *TenantTransactionRunner) Run(ctx context.Context, tenantID shared.ID, f
 	if tenantID.IsZero() || fn == nil {
 		return fmt.Errorf("%w: tenant transaction identity is required", shared.ErrValidation)
 	}
-	if boundTenant, ok := ctx.Value(tenantTransactionKey{}).(shared.ID); ok {
-		if boundTenant != tenantID {
+	if transaction, ok := ctx.Value(tenantTransactionKey{}).(*tenantTransaction); ok {
+		if transaction.tenantID != tenantID {
 			return fmt.Errorf("%w: nested tenant transaction mismatch", shared.ErrValidation)
 		}
 		return fn(ctx)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	txCtx := context.WithValue(ctx, tenantTransactionKey{}, tenantID)
-	return fn(shared.WithTenant(txCtx, tenantID))
+	transaction := &tenantTransaction{tenantID: tenantID}
+	txCtx := shared.WithTenant(context.WithValue(ctx, tenantTransactionKey{}, transaction), tenantID)
+	if err := fn(txCtx); err != nil {
+		for index := len(transaction.rollbacks) - 1; index >= 0; index-- {
+			transaction.rollbacks[index]()
+		}
+		return err
+	}
+	return nil
+}
+
+// registerTenantRollback adds a repository-local compensation to the current
+// in-memory transaction. Repositories call it while holding their own mutex and
+// restore the captured state only after the mutation has returned and unlocked.
+func registerTenantRollback(ctx context.Context, rollback func()) bool {
+	transaction, ok := ctx.Value(tenantTransactionKey{}).(*tenantTransaction)
+	if !ok || rollback == nil {
+		return false
+	}
+	transaction.rollbacks = append(transaction.rollbacks, rollback)
+	return true
 }

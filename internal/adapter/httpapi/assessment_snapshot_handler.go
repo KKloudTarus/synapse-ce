@@ -54,6 +54,7 @@ type finalizedAssessmentSnapshotResponse struct {
 
 type assessmentSnapshotListResponse struct {
 	Items             []assessmentSnapshotResponse `json:"items"`
+	NextCursor        string                       `json:"next_cursor,omitempty"`
 	DefaultSnapshotID shared.ID                    `json:"default_snapshot_id,omitempty"`
 	DefaultVersion    int64                        `json:"default_version"`
 }
@@ -112,16 +113,25 @@ func (rt *Router) finalizeAssessmentSnapshot(w http.ResponseWriter, r *http.Requ
 func (rt *Router) listAssessmentSnapshots(w http.ResponseWriter, r *http.Request) {
 	tenantID := shared.ID(TenantFrom(r.Context()))
 	assessmentID := shared.ID(r.PathValue("id"))
-	snapshots, err := rt.assessmentSnapshots.ListByAssessment(r.Context(), tenantID, assessmentID)
+	limit := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid_page_size"})
+			return
+		}
+		limit = parsed
+	}
+	page, err := rt.assessmentSnapshots.ListByAssessment(r.Context(), tenantID, assessmentID, r.URL.Query().Get("cursor"), limit)
 	if err != nil {
 		writeAssessmentSnapshotError(w, rt.log, err)
 		return
 	}
-	response := assessmentSnapshotListResponse{Items: make([]assessmentSnapshotResponse, 0, len(snapshots))}
-	for index := range snapshots {
-		response.Items = append(response.Items, newAssessmentSnapshotResponse(&snapshots[index]))
+	response := assessmentSnapshotListResponse{Items: make([]assessmentSnapshotResponse, 0, len(page.Items)), NextCursor: page.NextCursor}
+	for index := range page.Items {
+		response.Items = append(response.Items, newAssessmentSnapshotResponse(&page.Items[index]))
 	}
-	if len(snapshots) > 0 {
+	if len(page.Items) > 0 {
 		_, pointer, err := rt.assessmentSnapshots.GetDefault(r.Context(), tenantID, assessmentID)
 		if err != nil && !errors.Is(err, shared.ErrNotFound) {
 			writeAssessmentSnapshotError(w, rt.log, err)

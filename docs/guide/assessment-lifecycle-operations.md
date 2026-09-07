@@ -48,6 +48,8 @@ The command appends immutable `legacy` Snapshots without changing an Assessment'
 
 Native Snapshot finalization accepts only tenant-owned Scan Runs whose aggregate and lane manifest hashes recompute correctly. The API selects server-stored run/lane facts; clients cannot submit arbitrary target, version, coverage, or evidence fields.
 
+Creating a Re-test from a completed Cycle first requires `POST /api/v1/assessment-cycles/{cycleId}/reopen` with Review permission, `Idempotency-Key`, the current Cycle version in `If-Match`, and a non-empty audited `reason`.
+
 ## 3. Verify integrity
 
 Run the read-only verifier after both write passes:
@@ -59,7 +61,7 @@ synapse-assessment-integrity \
   --batch-size 500
 ```
 
-`--dry-run=false` is rejected. The verifier checks coverage, root/member shape, frozen boundaries, selected-head eligibility, Re-test allocation, predecessor integrity, graph acyclicity, and source/checkpoint reconciliation. Findings are persisted under tenant RLS and emitted as JSON lines with stable reason/severity codes and deterministic repair plans. Any finding causes a non-zero exit and must be resolved before read cutover.
+`--dry-run=false` is rejected. The verifier checks coverage, root/member shape, frozen boundaries, selected-head eligibility, Re-test allocation, predecessor integrity, graph acyclicity, and source/checkpoint reconciliation. A tenant-local source generation fences completion, so a concurrent Assessment, Cycle, or membership change forces the run to fail and restart instead of publishing a stale clean result. Findings are persisted under tenant RLS and emitted as JSON lines with stable reason/severity codes and deterministic repair plans. Any finding causes a non-zero exit and must be resolved before read cutover.
 
 ## 4. Canary and cut over reads
 
@@ -74,13 +76,15 @@ Use this order:
 5. Enable `SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED`.
 6. Enable `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED` for the verified tenant allowlist.
 7. Enable `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED` only for tenants already enabled for lifecycle reads.
+8. After native Snapshot finalization is verified for the cohort, enable `SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED` and add only those tenants to `SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS`. Until this step, legacy Assessment completion remains available.
 
 ## Rollback
 
-1. Remove the tenant from `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS` and deploy.
-2. Remove it from `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS` and deploy.
-3. Disable Snapshot and dual-write gates if the incident requires write rollback.
-4. Do not delete source Assessments, Scan Runs, Cycles, members, or Snapshots.
-5. Verify `/api/v1/me` reports lifecycle read/UI as false, lifecycle routes fail closed, the sidebar is hidden, and legacy Engagement reads still work.
+1. Remove the tenant from `SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS` so legacy completion is restored.
+2. Remove the tenant from `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS` and deploy.
+3. Remove it from `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS` and deploy.
+4. Disable Snapshot and dual-write gates if the incident requires write rollback.
+5. Do not delete source Assessments, Scan Runs, Cycles, members, or Snapshots.
+6. Verify `/api/v1/me` reports lifecycle read/UI as false, lifecycle routes fail closed, the sidebar is hidden, and legacy Engagement reads still work.
 
 Rollback migrations deliberately refuse to drop populated immutable lifecycle state. Preserve it for audit and repair.

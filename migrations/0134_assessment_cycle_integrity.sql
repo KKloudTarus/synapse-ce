@@ -2,11 +2,17 @@
 -- Assessment Cycle integrity verification schema.
 -- A9b.2 (#731): resumable, read-only Assessment Cycle integrity verification and repair plans.
 
+CREATE TABLE assessment_cycle_integrity_generations (
+    tenant_id  TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE RESTRICT,
+    generation BIGINT NOT NULL DEFAULT 0 CHECK (generation >= 0)
+);
+
 CREATE TABLE assessment_cycle_integrity_runs (
     tenant_id                TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
     id                       TEXT NOT NULL,
     batch_size               INTEGER NOT NULL,
     snapshot_at              TIMESTAMPTZ NOT NULL,
+    source_generation        BIGINT NOT NULL,
     checkpoint_assessment_id TEXT NOT NULL DEFAULT '',
     state                    TEXT NOT NULL,
     lease_owner              TEXT NOT NULL DEFAULT '',
@@ -21,6 +27,7 @@ CREATE TABLE assessment_cycle_integrity_runs (
     completed_at             TIMESTAMPTZ NULL,
     PRIMARY KEY (tenant_id, id),
     CONSTRAINT assessment_cycle_integrity_runs_batch_check CHECK (batch_size BETWEEN 1 AND 2000),
+    CONSTRAINT assessment_cycle_integrity_runs_generation_check CHECK (source_generation >= 0),
     CONSTRAINT assessment_cycle_integrity_runs_checkpoint_check CHECK (octet_length(checkpoint_assessment_id) <= 512),
     CONSTRAINT assessment_cycle_integrity_runs_state_check CHECK (state IN ('running', 'completed', 'cancelled', 'failed')),
     CONSTRAINT assessment_cycle_integrity_runs_lease_check CHECK (
@@ -80,6 +87,37 @@ CREATE INDEX idx_assessment_cycle_integrity_findings_reason
 CALL synapse_enable_tenant_rls('assessment_cycle_integrity_runs');
 CALL synapse_enable_tenant_rls('assessment_cycle_integrity_subjects');
 CALL synapse_enable_tenant_rls('assessment_cycle_integrity_findings');
+CALL synapse_enable_tenant_rls('assessment_cycle_integrity_generations');
+
+-- Serialize lifecycle source mutations with verifier completion and advance a
+-- tenant-local generation for every integrity-relevant change.
+-- +goose StatementBegin
+CREATE FUNCTION synapse_bump_assessment_cycle_integrity_generation() RETURNS trigger AS $$
+DECLARE
+    affected_tenant TEXT;
+BEGIN
+    affected_tenant := CASE WHEN TG_OP = 'DELETE' THEN OLD.tenant_id ELSE NEW.tenant_id END;
+    PERFORM pg_advisory_xact_lock(hashtextextended('assessment-cycle-integrity:' || affected_tenant, 0));
+    INSERT INTO assessment_cycle_integrity_generations(tenant_id,generation)
+    VALUES(affected_tenant,1)
+    ON CONFLICT (tenant_id) DO UPDATE SET generation=assessment_cycle_integrity_generations.generation+1;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+CREATE TRIGGER trg_engagement_integrity_generation
+    AFTER INSERT OR UPDATE OR DELETE ON engagements
+    FOR EACH ROW EXECUTE FUNCTION synapse_bump_assessment_cycle_integrity_generation();
+CREATE TRIGGER trg_assessment_cycle_integrity_generation
+    AFTER INSERT OR UPDATE OR DELETE ON assessment_cycles
+    FOR EACH ROW EXECUTE FUNCTION synapse_bump_assessment_cycle_integrity_generation();
+CREATE TRIGGER trg_assessment_cycle_member_integrity_generation
+    AFTER INSERT OR UPDATE OR DELETE ON assessment_cycle_members
+    FOR EACH ROW EXECUTE FUNCTION synapse_bump_assessment_cycle_integrity_generation();
 
 -- +goose Down
 -- +goose StatementBegin
@@ -94,6 +132,12 @@ END;
 $$;
 -- +goose StatementEnd
 
+DROP TRIGGER IF EXISTS trg_assessment_cycle_member_integrity_generation ON assessment_cycle_members;
+DROP TRIGGER IF EXISTS trg_assessment_cycle_integrity_generation ON assessment_cycles;
+DROP TRIGGER IF EXISTS trg_engagement_integrity_generation ON engagements;
+DROP FUNCTION IF EXISTS synapse_bump_assessment_cycle_integrity_generation();
+
 DROP TABLE IF EXISTS assessment_cycle_integrity_findings;
 DROP TABLE IF EXISTS assessment_cycle_integrity_subjects;
 DROP TABLE IF EXISTS assessment_cycle_integrity_runs;
+DROP TABLE IF EXISTS assessment_cycle_integrity_generations;

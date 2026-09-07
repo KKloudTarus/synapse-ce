@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { api, ApiError, discoverSession, logoutSession, setCSRFToken, setToken as setApiToken, setUnauthorizedHandler } from '../lib/api'
-import type { AupStatus } from '../lib/types'
+import type { AupStatus, CurrentUser } from '../lib/types'
 
 // The development/automation bearer token is kept in sessionStorage so it dies with the
 // browser tab instead of persisting across restarts for later XSS to read.
@@ -18,6 +18,7 @@ type Phase = 'connecting' | 'unauthenticated' | 'need-aup' | 'ready'
 interface AuthState {
   phase: Phase
   aup: AupStatus | null
+  currentUser: CurrentUser | null
   error: string | null
   connecting: boolean
   oidcAvailable: boolean
@@ -43,6 +44,7 @@ export function useOptionalAuth(): AuthState | null {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>('connecting')
   const [aup, setAup] = useState<AupStatus | null>(null)
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [oidcAvailable, setOidcAvailable] = useState(true)
@@ -54,11 +56,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCSRFToken('')
     setAuthMethod(null)
     setAup(null)
+    setCurrentUser(null)
   }, [])
 
   const refreshAup = useCallback(async () => {
     const status = await api.aup()
     setAup(status)
+    const me = status.accepted && typeof api.me === 'function' ? await api.me().catch(() => null) : null
+    setCurrentUser(me)
     setPhase(status.accepted ? 'ready' : 'need-aup')
   }, [])
 
@@ -198,8 +203,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearAuthentication, refreshAup])
 
   const value = useMemo(
-    () => ({ phase, aup, error, connecting, oidcAvailable, connect, acceptAup, logout }),
-    [phase, aup, error, connecting, oidcAvailable, connect, acceptAup, logout],
+    () => ({ phase, aup, currentUser, error, connecting, oidcAvailable, connect, acceptAup, logout }),
+    [phase, aup, currentUser, error, connecting, oidcAvailable, connect, acceptAup, logout],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

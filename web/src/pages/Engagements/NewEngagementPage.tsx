@@ -1,10 +1,12 @@
 import type { FC } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useOptionalAuth } from '../../auth/AuthContext'
 import { CreateEngagementForm } from './components/CreateEngagementForm'
 
 export const NewEngagementPage: FC = () => {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const auth = useOptionalAuth()
   const initialAssetId = searchParams.get('assetId') ?? ''
 
   return (
@@ -31,6 +33,7 @@ export const NewEngagementPage: FC = () => {
       {/* Form */}
       <CreateEngagementForm
         initialAssetId={initialAssetId}
+        assessmentLifecycleEnabled={auth?.currentUser?.features?.assessmentLifecycleUIDefault === true}
         onCreated={(engagement, creationKind, scanStartError) => {
           if (creationKind === 'upload') {
             navigate(`/engagements/${encodeURIComponent(engagement.id)}`, {

@@ -22,8 +22,6 @@ import { useEffect, useRef, useState, type ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import logo from '../../assets/logo.png'
 import { useOptionalAuth } from '../../auth/AuthContext'
-import { useFetch } from '../../hooks'
-import { api } from '../../lib/api'
 import { cn } from '../ui'
 
 type IconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
@@ -99,8 +97,7 @@ function storageSet(key: string, value: string) {
 
 function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const auth = useOptionalAuth()
-  const meFetch = useFetch(fetchCurrentUser, { deps: [] })
-  const lifecycleUIEnabled = meFetch.data?.features?.assessmentLifecycleUIDefault === true
+  const lifecycleUIEnabled = auth?.currentUser?.features?.assessmentLifecycleUIDefault === true
   const [signingOut, setSigningOut] = useState(false)
   async function onSignOut() {
     if (!auth) return
@@ -304,11 +301,6 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
       </div>
     </>
   )
-}
-
-function fetchCurrentUser() {
-  const fetcher = api.me
-  return typeof fetcher === 'function' ? fetcher().catch(() => null) : Promise.resolve(null)
 }
 
 export function Sidebar() {

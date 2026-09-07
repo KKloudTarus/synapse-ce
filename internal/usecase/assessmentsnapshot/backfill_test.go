@@ -130,6 +130,40 @@ func TestSnapshotBackfillProjectsLegacyRunWithoutInventedDimensions(t *testing.T
 	}
 }
 
+func TestLegacyProjectionRollsBackWhenAuditFails(t *testing.T) {
+	harness := newSnapshotBackfillHarness(t, nil)
+	auditErr := errors.New("audit unavailable")
+	projector, err := uc.NewLegacyProjector(
+		harness.snapshots,
+		harness.cycles,
+		memory.NewTenantTransactionRunner(),
+		harness.ids,
+		harness.clock,
+		failingAudit{err: auditErr},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = projector.Project(context.Background(), uc.LegacyProjectionInput{
+		TenantID:     "tenant",
+		AssessmentID: "assessment",
+		Actor:        "operator",
+		SourceHash:   strings.Repeat("a", 64),
+		SelectedRun: assessmentsnapshot.SelectedRun{
+			ID:             "legacy-run",
+			ManifestHash:   strings.Repeat("b", 64),
+			Provenance:     scanrun.ProvenanceLegacy,
+			TerminalStatus: scanrun.StatusUnknown,
+		},
+	})
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("legacy projection audit failure=%v", err)
+	}
+	if snapshots, listErr := harness.snapshots.ListByAssessment(context.Background(), "tenant", "assessment"); listErr != nil || len(snapshots) != 0 {
+		t.Fatalf("legacy projection survived audit rollback: snapshots=%+v err=%v", snapshots, listErr)
+	}
+}
+
 func TestSnapshotBackfillLeaseResumeDryRunAndRedactedRetry(t *testing.T) {
 	harness := newSnapshotBackfillHarness(t, []scanrun.ScanRun{nativeRun(t, "sealed-run", "assessment", "0123456789abcdef0123456789abcdef01234567")})
 	dryRun, err := harness.runner.Run(context.Background(), uc.BackfillRequest{TenantID: "tenant", Actor: "operator", LeaseOwner: "dry-run", DryRun: true, BatchSize: 1})
@@ -188,6 +222,7 @@ func TestSnapshotBackfillLeaseResumeDryRunAndRedactedRetry(t *testing.T) {
 type snapshotBackfillHarness struct {
 	runner      *uc.BackfillRunner
 	snapshots   *memory.AssessmentSnapshotRepository
+	cycles      *memory.AssessmentCycleRepository
 	engagements *memory.EngagementRepository
 	store       *memory.AssessmentSnapshotBackfillRepository
 	runs        *staticBackfillRunStore
@@ -242,5 +277,5 @@ func newSnapshotBackfillHarness(t *testing.T, runs []scanrun.ScanRun) *snapshotB
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &snapshotBackfillHarness{runner: runner, snapshots: snapshots, engagements: engagements, store: store, runs: runStore, results: results, ids: ids, clock: clock, audit: audit, projector: projector}
+	return &snapshotBackfillHarness{runner: runner, snapshots: snapshots, cycles: cycles, engagements: engagements, store: store, runs: runStore, results: results, ids: ids, clock: clock, audit: audit, projector: projector}
 }

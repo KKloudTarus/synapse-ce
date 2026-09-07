@@ -198,10 +198,25 @@ func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
 	}
 	dualWrite := rt.assessmentCycles != nil && rt.assessmentCycleDualWrite != nil && rt.assessmentCycleDualWrite(tenantID.String())
 	if dualWrite {
+		idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if idempotencyKey == "" {
+			canonical, marshalErr := json.Marshal(struct {
+				Engagement     enguc.CreateInput `json:"engagement"`
+				SourceFilename string            `json:"source_filename,omitempty"`
+				SourceSize     int64             `json:"source_size,omitempty"`
+				SourceSHA256   string            `json:"source_sha256,omitempty"`
+			}{Engagement: input, SourceFilename: sourceFilename, SourceSize: sourceSize, SourceSHA256: sourceSHA256})
+			if marshalErr != nil {
+				writeError(w, rt.log, fmt.Errorf("derive assessment creation idempotency key: %w", marshalErr))
+				return
+			}
+			digest := sha256.Sum256(canonical)
+			idempotencyKey = "server-" + hex.EncodeToString(digest[:])
+		}
 		cycleInput := cycleuc.CreateInitialAssessmentInput{
 			Request: cycleuc.RetainedRequest{
 				TenantID: tenantID, Actor: PrincipalFrom(r.Context()), Route: "/api/v1/engagements",
-				IdempotencyKey: r.Header.Get("Idempotency-Key"),
+				IdempotencyKey: idempotencyKey,
 			},
 			Engagement: input,
 		}

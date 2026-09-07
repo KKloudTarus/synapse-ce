@@ -33,10 +33,21 @@ var _ ports.DetectionReconciliationTenantStore = (*EngagementRepository)(nil)
 var _ ports.VulnerabilityReconciliationEngagementStore = (*EngagementRepository)(nil)
 var _ ports.AssessmentCycleBackfillSource = (*EngagementRepository)(nil)
 
-func (r *EngagementRepository) Create(_ context.Context, e *engagement.Engagement) error {
+func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagement) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e.TenantID = shared.TenantOrDefault(e.TenantID)
+	previous, existed := r.data[e.ID]
+	previous = cloneMemoryEngagement(previous)
+	registerTenantRollback(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if existed {
+			r.data[e.ID] = previous
+		} else {
+			delete(r.data, e.ID)
+		}
+	})
 	r.data[e.ID] = e
 	return nil
 }
@@ -96,12 +107,19 @@ func (r *EngagementRepository) ProjectContexts(_ context.Context, tenantID share
 	return out, nil
 }
 
-func (r *EngagementRepository) Update(_ context.Context, e *engagement.Engagement) error {
+func (r *EngagementRepository) Update(ctx context.Context, e *engagement.Engagement) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.data[e.ID]; !ok {
+	previous, ok := r.data[e.ID]
+	if !ok {
 		return shared.ErrNotFound
 	}
+	previous = cloneMemoryEngagement(previous)
+	registerTenantRollback(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.data[e.ID] = previous
+	})
 	e.TenantID = shared.TenantOrDefault(e.TenantID)
 	r.data[e.ID] = e
 	return nil
@@ -110,11 +128,41 @@ func (r *EngagementRepository) Update(_ context.Context, e *engagement.Engagemen
 // Delete removes an engagement (idempotent). In Postgres the FK cascade removes
 // children; in memory other stores are independent, but import rollback only needs
 // the engagement gone so a re-import isn't blocked.
-func (r *EngagementRepository) Delete(_ context.Context, id shared.ID) error {
+func (r *EngagementRepository) Delete(ctx context.Context, id shared.ID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	previous, existed := r.data[id]
+	previous = cloneMemoryEngagement(previous)
+	registerTenantRollback(ctx, func() {
+		if !existed {
+			return
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.data[id] = previous
+	})
 	delete(r.data, id)
 	return nil
+}
+
+func cloneMemoryEngagement(item *engagement.Engagement) *engagement.Engagement {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.Scope.InScope = append([]engagement.Target(nil), item.Scope.InScope...)
+	cloned.Scope.OutOfScope = append([]engagement.Target(nil), item.Scope.OutOfScope...)
+	cloned.RoE.AllowedToolClasses = append([]engagement.ToolClass(nil), item.RoE.AllowedToolClasses...)
+	cloned.RoE.Blackouts = append([]engagement.Blackout(nil), item.RoE.Blackouts...)
+	if item.AuthorizedFrom != nil {
+		value := *item.AuthorizedFrom
+		cloned.AuthorizedFrom = &value
+	}
+	if item.AuthorizedTo != nil {
+		value := *item.AuthorizedTo
+		cloned.AuthorizedTo = &value
+	}
+	return &cloned
 }
 
 // ListPromotionReconciliationScopes returns every non-project engagement for

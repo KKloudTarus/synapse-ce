@@ -71,6 +71,7 @@ type AssessmentCycleRequest struct {
 	StatusCode   int
 	ResponseBody []byte
 	CreatedAt    time.Time
+	ExpiresAt    time.Time
 	CompletedAt  *time.Time
 }
 

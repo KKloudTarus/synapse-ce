@@ -19,12 +19,13 @@ import (
 
 // Service implements engagement use cases.
 type Service struct {
-	repo      ports.EngagementRepository
-	clock     ports.Clock
-	ids       ports.IDGenerator
-	audit     ports.AuditLogger
-	sources   ports.EngagementSourceStore
-	snapshots ports.AssessmentSnapshotDefaultReader
+	repo                      ports.EngagementRepository
+	clock                     ports.Clock
+	ids                       ports.IDGenerator
+	audit                     ports.AuditLogger
+	sources                   ports.EngagementSourceStore
+	snapshots                 ports.AssessmentSnapshotDefaultReader
+	requireCompletionSnapshot func(string) bool
 }
 
 // NewService wires the engagement use case with its driven ports.
@@ -36,6 +37,15 @@ func (s *Service) SetSourceStore(store ports.EngagementSourceStore) { s.sources 
 
 func (s *Service) SetCompletionSnapshotReader(reader ports.AssessmentSnapshotDefaultReader) {
 	s.snapshots = reader
+	s.requireCompletionSnapshot = func(string) bool { return true }
+}
+
+// SetCompletionSnapshotPolicy enables the finalized-Snapshot completion guard
+// only for tenants that have passed the lifecycle rollout. A disabled policy
+// preserves legacy completion behavior.
+func (s *Service) SetCompletionSnapshotPolicy(reader ports.AssessmentSnapshotDefaultReader, required func(string) bool) {
+	s.snapshots = reader
+	s.requireCompletionSnapshot = required
 }
 
 // CreateInput is the input for creating an engagement.
@@ -202,20 +212,24 @@ func (s *Service) Transition(ctx context.Context, actor string, tenantID, id sha
 		return nil, err
 	}
 	if to == domain.StatusCompleted && e.Status != domain.StatusCompleted {
-		if s.snapshots == nil {
-			return nil, fmt.Errorf("%w: assessment snapshot completion guard is not configured", shared.ErrValidation)
-		}
-		snapshot, _, err := s.snapshots.GetDefault(ctx, shared.TenantOrDefault(tenantID), id)
-		if err != nil {
-			if errors.Is(err, shared.ErrNotFound) {
-				return nil, fmt.Errorf("%w: engagement requires a default finalized assessment snapshot before completion", shared.ErrValidation)
+		required := s.requireCompletionSnapshot != nil && s.requireCompletionSnapshot(shared.TenantOrDefault(tenantID).String())
+		if required {
+			if s.snapshots == nil {
+				return nil, fmt.Errorf("%w: assessment snapshot completion guard is not configured", shared.ErrValidation)
 			}
-			return nil, fmt.Errorf("load default assessment snapshot: %w", err)
-		}
-		if snapshot.Lifecycle != assessmentsnapshot.LifecycleFinalized {
-			return nil, fmt.Errorf("%w: engagement default assessment snapshot is not finalized", shared.ErrValidation)
+			snapshot, _, err := s.snapshots.GetDefault(ctx, shared.TenantOrDefault(tenantID), id)
+			if err != nil {
+				if errors.Is(err, shared.ErrNotFound) {
+					return nil, fmt.Errorf("%w: engagement requires a default finalized assessment snapshot before completion", shared.ErrValidation)
+				}
+				return nil, fmt.Errorf("load default assessment snapshot: %w", err)
+			}
+			if snapshot.Lifecycle != assessmentsnapshot.LifecycleFinalized {
+				return nil, fmt.Errorf("%w: engagement default assessment snapshot is not finalized", shared.ErrValidation)
+			}
 		}
 	}
+
 	now := s.clock.Now()
 	cp := *e
 	if err := cp.Transition(to, now); err != nil {

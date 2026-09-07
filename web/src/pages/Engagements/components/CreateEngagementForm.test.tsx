@@ -37,7 +37,7 @@ describe('CreateEngagementForm Re-test purpose', () => {
 
   it('submits only lifecycle input and reuses the idempotency key for a draft retry', async () => {
     vi.mocked(api.createRetest).mockRejectedValue(new Error('temporary network failure'))
-    render(<CreateEngagementForm onCreated={vi.fn()} />)
+    render(<CreateEngagementForm assessmentLifecycleEnabled onCreated={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('radio', { name: /Re-test existing assessment/ }))
     expect(await screen.findByRole('combobox', { name: 'Based on Assessment' })).toHaveTextContent('Payments Cycle · Re-test #1')
@@ -55,5 +55,27 @@ describe('CreateEngagementForm Re-test purpose', () => {
     expect(second?.[1]?.idempotencyKey).toBe(first?.[1]?.idempotencyKey)
     expect(first?.[1]).not.toHaveProperty('cycleId')
     expect(first?.[1]).not.toHaveProperty('boundaryKind')
+  })
+
+  it('hides Re-test controls outside the tenant lifecycle rollout', () => {
+    render(<CreateEngagementForm onCreated={vi.fn()} />)
+    expect(screen.queryByRole('radio', { name: /Re-test existing assessment/ })).not.toBeInTheDocument()
+  })
+
+  it('reuses one idempotency key when an initial Assessment request is retried', async () => {
+    vi.mocked(api.createEngagement).mockRejectedValue(new Error('temporary network failure'))
+    render(<CreateEngagementForm onCreated={vi.fn()} />)
+
+    fireEvent.change(screen.getByRole('textbox', { name: /Name/ }), { target: { value: 'Initial assessment' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Target value for row 1' }), { target: { value: 'app.example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Engagement' }))
+    expect(await screen.findByText('temporary network failure')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Create Engagement' }))
+
+    await waitFor(() => expect(api.createEngagement).toHaveBeenCalledTimes(2))
+    const firstKey = vi.mocked(api.createEngagement).mock.calls[0]?.[1]
+    const secondKey = vi.mocked(api.createEngagement).mock.calls[1]?.[1]
+    expect(firstKey).toBeTruthy()
+    expect(secondKey).toBe(firstKey)
   })
 })

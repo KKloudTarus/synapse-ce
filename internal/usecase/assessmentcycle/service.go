@@ -162,9 +162,11 @@ func (s *Service) BackfillHistoricalSingleton(ctx context.Context, in BackfillHi
 			return err
 		}
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{Actor: strings.TrimSpace(in.Actor), Action: "assessment_cycle.backfill_created", Target: cycleID.String(), Metadata: map[string]string{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{Actor: strings.TrimSpace(in.Actor), Action: "assessment_cycle.backfill_created", Target: cycleID.String(), Metadata: map[string]string{
 				"tenant_id": tenantID.String(), "assessment_id": assessment.ID.String(), "schema_version": fmt.Sprintf("%d", in.SchemaVersion),
-			}, At: s.clock.Now().UTC()})
+			}, At: s.clock.Now().UTC()}); err != nil {
+				return fmt.Errorf("audit assessment cycle backfill: %w", err)
+			}
 		}
 		result = BackfillHistoricalSingletonResult{CycleID: cycleID, Created: true, ReasonCode: "created"}
 		return nil
@@ -296,7 +298,7 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 
 		// 8. Audit event
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.created",
 				Target: cycleID.String(),
@@ -306,7 +308,9 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 					"root_assessment_id": in.RootAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle creation: %w", err)
+			}
 		}
 
 		createdCycle = cycle
@@ -428,7 +432,7 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 
 		// 7. Audit event
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.retest_created",
 				Target: in.CycleID.String(),
@@ -440,7 +444,9 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 					"selected_head_id": cycle.SelectedHeadAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle re-test creation: %w", err)
+			}
 		}
 
 		createdMember = retestMember
@@ -542,7 +548,7 @@ func (s *Service) ReparentWithinCycle(ctx context.Context, in ReparentInput) err
 
 		// 8. Audit event
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.reparented",
 				Target: in.CycleID.String(),
@@ -552,7 +558,9 @@ func (s *Service) ReparentWithinCycle(ctx context.Context, in ReparentInput) err
 					"new_predecessor_id": in.NewPredecessorAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle reparent: %w", err)
+			}
 		}
 
 		return nil
@@ -615,7 +623,7 @@ func (s *Service) SelectHead(ctx context.Context, in SelectHeadInput) error {
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.head_selected",
 				Target: in.CycleID.String(),
@@ -624,7 +632,9 @@ func (s *Service) SelectHead(ctx context.Context, in SelectHeadInput) error {
 					"selected_head_id": in.TargetAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle head selection: %w", err)
+			}
 		}
 
 		return nil
@@ -694,7 +704,7 @@ func (s *Service) ArchiveMember(ctx context.Context, in ArchiveMemberInput) erro
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.member_archived",
 				Target: in.CycleID.String(),
@@ -703,7 +713,9 @@ func (s *Service) ArchiveMember(ctx context.Context, in ArchiveMemberInput) erro
 					"assessment_id": in.AssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle member archive: %w", err)
+			}
 		}
 
 		return nil
@@ -715,13 +727,15 @@ type ReopenCycleInput struct {
 	CycleID              shared.ID
 	ExpectedCycleVersion int64
 	Actor                string
+	Reason               string
 }
 
 // ReopenCycle transitions a completed AssessmentCycle back to open.
 func (s *Service) ReopenCycle(ctx context.Context, in ReopenCycleInput) error {
 	tenantID := shared.TenantOrDefault(in.TenantID)
-	if tenantID.IsZero() || in.CycleID.IsZero() {
-		return fmt.Errorf("%w: tenant and cycle ids are required", shared.ErrValidation)
+	reason := strings.TrimSpace(in.Reason)
+	if tenantID.IsZero() || in.CycleID.IsZero() || reason == "" || len(reason) > 1024 {
+		return fmt.Errorf("%w: tenant, cycle, and a bounded reopen reason are required", shared.ErrValidation)
 	}
 
 	return s.tx.Run(ctx, tenantID, func(txCtx context.Context) error {
@@ -745,15 +759,18 @@ func (s *Service) ReopenCycle(ctx context.Context, in ReopenCycleInput) error {
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.reopened",
 				Target: in.CycleID.String(),
 				Metadata: map[string]string{
 					"tenant_id": tenantID.String(),
+					"reason":    reason,
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle reopen: %w", err)
+			}
 		}
 
 		return nil
@@ -795,7 +812,7 @@ func (s *Service) ArchiveCycle(ctx context.Context, in ArchiveCycleInput) error 
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.archived",
 				Target: in.CycleID.String(),
@@ -803,7 +820,9 @@ func (s *Service) ArchiveCycle(ctx context.Context, in ArchiveCycleInput) error 
 					"tenant_id": tenantID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle archive: %w", err)
+			}
 		}
 
 		return nil

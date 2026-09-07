@@ -23,6 +23,7 @@ type AssessmentCycleIntegrityRun struct {
 	ID                   shared.ID
 	BatchSize            int
 	SnapshotAt           time.Time
+	SourceGeneration     int64
 	CheckpointAssessment shared.ID
 	State                AssessmentCycleIntegrityState
 	LeaseOwner           string
@@ -86,6 +87,7 @@ type AssessmentCycleIntegrityFinding struct {
 }
 
 type AssessmentCycleIntegritySource interface {
+	AssessmentCycleIntegrityGeneration(ctx context.Context, tenantID shared.ID) (int64, error)
 	ListAssessmentCycleIntegritySubjects(ctx context.Context, tenantID, after shared.ID, snapshotAt time.Time, limit int) ([]AssessmentCycleIntegritySubject, error)
 	CountAssessmentCycleIntegritySubjects(ctx context.Context, tenantID shared.ID, snapshotAt time.Time) (eligible int, memberships int, err error)
 }

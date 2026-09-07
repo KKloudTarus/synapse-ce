@@ -28,6 +28,9 @@ func TestPostgresAssessmentCycleAPIReplayConcurrency(t *testing.T) {
 	suffix := fmt.Sprintf("cycle-api-%d", time.Now().UnixNano())
 	tenantID := shared.ID("tenant-" + suffix)
 	otherTenantID := shared.ID("other-" + suffix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM assessment_cycle_api_requests WHERE tenant_id IN ($1,$2)`, tenantID.String(), otherTenantID.String())
+	})
 	for _, tenant := range []shared.ID{tenantID, otherTenantID} {
 		if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ($1,$2)`, tenant.String(), tenant.String()); err != nil {
 			t.Fatal(err)

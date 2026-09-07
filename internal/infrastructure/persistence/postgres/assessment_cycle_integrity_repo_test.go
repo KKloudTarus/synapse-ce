@@ -17,7 +17,7 @@ import (
 
 func TestPostgresAssessmentCycleIntegrityVerifierFindsCorruption(t *testing.T) {
 	db, dsn := newAssessmentMigrationDB(t)
-	if err := goose.UpTo(db, ".", 133); err != nil {
+	if err := goose.UpTo(db, ".", 134); err != nil {
 		t.Fatalf("up to 0133: %v", err)
 	}
 	ctx := context.Background()
@@ -87,7 +87,7 @@ func TestPostgresAssessmentCycleIntegrityVerifierFindsCorruption(t *testing.T) {
 
 func TestPostgresAssessmentCycleIntegrityLease(t *testing.T) {
 	db, dsn := newAssessmentMigrationDB(t)
-	if err := goose.UpTo(db, ".", 133); err != nil {
+	if err := goose.UpTo(db, ".", 134); err != nil {
 		t.Fatalf("up to 0133: %v", err)
 	}
 	ctx := context.Background()

@@ -136,7 +136,8 @@ paths:
       parameters:
       - name: Idempotency-Key
         in: header
-        required: true
+        required: false
+        description: Optional client key. When omitted, the server derives a stable key from the canonical create request for safe retries.
         schema: {type: string, minLength: 1, maxLength: 128}
       requestBody:
         required: true
@@ -280,6 +281,9 @@ paths:
       tags: [assessment-snapshots]
       operationId: listAssessmentSnapshots
       summary: List immutable Snapshots for one Assessment
+      parameters:
+      - {name: cursor, in: query, schema: {type: string, maxLength: 128}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
       responses:
         "200":
           description: Snapshot history and current default pointer
@@ -401,6 +405,45 @@ paths:
         schema: {type: string, pattern: '^(W/)?"?[1-9][0-9]*"?$'}
       responses:
         "200": {description: Archived Assessment Cycle, content: {application/json: {schema: {$ref: "#/components/schemas/AssessmentCycleDetail"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Idempotency body mismatch or Cycle version conflict}
+        "428": {description: If-Match is missing or invalid}
+
+  /api/v1/assessment-cycles/{cycleId}/reopen:
+    parameters:
+    - name: cycleId
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [assessment-cycles]
+      operationId: reopenAssessmentCycle
+      summary: Reopen a completed Assessment Cycle with an audited reason
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 128}
+      - name: If-Match
+        in: header
+        required: true
+        description: Current Cycle version, optionally quoted as an ETag.
+        schema: {type: string, pattern: '^(W/)?"?[1-9][0-9]*"?$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 1024}
+      responses:
+        "200": {description: Reopened Assessment Cycle, content: {application/json: {schema: {$ref: "#/components/schemas/AssessmentCycleDetail"}}}}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -4459,7 +4502,9 @@ components:
       properties:
         items:
           type: array
+          maxItems: 100
           items: {$ref: "#/components/schemas/AssessmentSnapshot"}
+        next_cursor: {type: string}
         default_snapshot_id: {type: string}
         default_version: {type: integer, minimum: 0}
 

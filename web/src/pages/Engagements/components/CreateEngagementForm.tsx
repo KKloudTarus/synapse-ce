@@ -13,11 +13,13 @@ type CreationKind = SourceMode | 'retest'
 
 export interface CreateEngagementFormProps {
   initialAssetId?: string
+  assessmentLifecycleEnabled?: boolean
   onCreated: (engagement: Engagement, creationKind: CreationKind, scanStartError?: string) => void
 }
 
 export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
   initialAssetId,
+  assessmentLifecycleEnabled = false,
   onCreated,
 }) => {
   const [name, setName] = useState('')
@@ -37,6 +39,7 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
   const [eligibleError, setEligibleError] = useState('')
   const [basedOnAssessmentId, setBasedOnAssessmentId] = useState('')
   const [toolClasses, setToolClasses] = useState('')
+  const [initialIdempotencyKey] = useState(newIdempotencyKey)
   const [retestIdempotencyKey] = useState(newIdempotencyKey)
 
   useEffect(() => {
@@ -181,8 +184,8 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
         assetId,
       }
       const engagement = sourceMode === 'upload'
-        ? await api.createEngagementFromSource(input, sourceFile!)
-        : await api.createEngagement(input)
+        ? await api.createEngagementFromSource(input, sourceFile!, initialIdempotencyKey)
+        : await api.createEngagement(input, initialIdempotencyKey)
       if (sourceMode === 'upload') {
         try {
           await api.startScan(engagement.id, '', 'upload')
@@ -223,10 +226,10 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
               <input type="radio" name="assessment-purpose" checked={purpose === 'initial'} disabled={submitting} onChange={() => { setPurpose('initial'); setError(null) }} className="mt-1 size-4 accent-brand-solid" />
               <span><span className="block text-sm font-semibold text-primary">Initial assessment</span><span className="mt-1 block text-xs text-tertiary">Create a new standalone or Asset-bound Cycle.</span></span>
             </label>
-            <label className="flex cursor-pointer gap-3 rounded-xl border border-secondary bg-secondary/30 p-4">
+            {assessmentLifecycleEnabled ? <label className="flex cursor-pointer gap-3 rounded-xl border border-secondary bg-secondary/30 p-4">
               <input type="radio" name="assessment-purpose" checked={purpose === 'retest'} disabled={submitting} onChange={() => { setPurpose('retest'); setError(null) }} className="mt-1 size-4 accent-brand-solid" />
               <span><span className="block text-sm font-semibold text-primary">Re-test existing assessment</span><span className="mt-1 block text-xs text-tertiary">Cycle, boundary, type, scope, and profile are server-derived.</span></span>
-            </label>
+            </label> : null}
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <div>

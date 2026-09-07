@@ -87,10 +87,12 @@ export const assessmentSnapshotsApi = {
     return { snapshot: mapAssessmentSnapshot(value.snapshot ?? {}), defaultVersion: Number(value.default_version ?? 0) }
   },
 
-  assessmentSnapshots: async (assessmentId: string): Promise<AssessmentSnapshotListResponse> => {
-    const value = await req(`/engagements/${id(assessmentId)}/snapshots`)
+  assessmentSnapshots: async (assessmentId: string, cursor = ''): Promise<AssessmentSnapshotListResponse> => {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
+    const value = await req(`/engagements/${id(assessmentId)}/snapshots${query}`)
     return {
       items: (value.items ?? []).map(mapAssessmentSnapshot),
+      nextCursor: value.next_cursor ?? '',
       defaultSnapshotId: value.default_snapshot_id ?? '',
       defaultVersion: Number(value.default_version ?? 0),
     }

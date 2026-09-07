@@ -20,7 +20,7 @@ import (
 
 func TestPostgresAssessmentSnapshotBackfillRunnerAndRLS(t *testing.T) {
 	db, dsn := newAssessmentMigrationDB(t)
-	if err := goose.UpTo(db, ".", 134); err != nil {
+	if err := goose.UpTo(db, ".", 135); err != nil {
 		t.Fatalf("up to 0134: %v", err)
 	}
 	ctx := context.Background()
@@ -97,7 +97,7 @@ func TestPostgresAssessmentSnapshotBackfillRunnerAndRLS(t *testing.T) {
 
 func TestPostgresAssessmentSnapshotBackfillLeaseAndCompositeOwnership(t *testing.T) {
 	db, dsn := newAssessmentMigrationDB(t)
-	if err := goose.UpTo(db, ".", 134); err != nil {
+	if err := goose.UpTo(db, ".", 135); err != nil {
 		t.Fatalf("up to 0134: %v", err)
 	}
 	ctx := context.Background()
@@ -137,7 +137,7 @@ func TestPostgresAssessmentSnapshotBackfillLeaseAndCompositeOwnership(t *testing
 
 func TestPostgresAssessmentSnapshotBackfillConcurrentStart(t *testing.T) {
 	db, dsn := newAssessmentMigrationDB(t)
-	if err := goose.UpTo(db, ".", 134); err != nil {
+	if err := goose.UpTo(db, ".", 135); err != nil {
 		t.Fatalf("up to 0134: %v", err)
 	}
 	ctx := context.Background()
@@ -199,7 +199,7 @@ func TestPostgresAssessmentSnapshotBackfillProjectsUpgradedLegacyRun(t *testing.
 			t.Fatalf("seed upgraded legacy fixture: %v", err)
 		}
 	}
-	if err := goose.UpTo(db, ".", 134); err != nil {
+	if err := goose.UpTo(db, ".", 135); err != nil {
 		t.Fatalf("upgrade fixture to 0134: %v", err)
 	}
 	ctx := context.Background()

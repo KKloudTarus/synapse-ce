@@ -4,7 +4,7 @@ import type {
   ScopeTarget,
   UploadedSourcePackage,
 } from '../types'
-import { newIdempotencyKey, req } from './client'
+import { req } from './client'
 
 function createRequest(input: CreateEngagementInput) {
   return {
@@ -59,22 +59,22 @@ export const engagementsApi = {
   listEngagements: async (): Promise<Engagement[]> =>
     ((await req('/engagements')) ?? []).map(mapEngagement),
 
-  createEngagement: async (input: CreateEngagementInput): Promise<Engagement> =>
+  createEngagement: async (input: CreateEngagementInput, idempotencyKey: string): Promise<Engagement> =>
     mapEngagement(
       await req('/engagements', {
         method: 'POST',
-        headers: { 'Idempotency-Key': newIdempotencyKey() },
+        headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify(createRequest(input)),
       }),
     ),
 
-  createEngagementFromSource: async (input: CreateEngagementInput, source: File): Promise<Engagement> => {
+  createEngagementFromSource: async (input: CreateEngagementInput, source: File, idempotencyKey: string): Promise<Engagement> => {
     const form = new FormData()
     form.append('metadata', JSON.stringify(createRequest(input)))
     form.append('source', source)
     return mapEngagement(await req('/engagements', {
       method: 'POST',
-      headers: { 'Idempotency-Key': newIdempotencyKey() },
+      headers: { 'Idempotency-Key': idempotencyKey },
       body: form,
     }))
   },

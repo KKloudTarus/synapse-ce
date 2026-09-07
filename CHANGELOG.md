@@ -9,6 +9,19 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Tenant-gated Assessment Cycles and immutable Assessment Snapshots.** New Cycle, Re-test,
+  archive/reopen, Snapshot finalization, bounded history, historical projection, and integrity APIs
+  preserve legacy completion while rollout is disabled and enforce native finalized evidence only for
+  explicit tenant cohorts. The `synapse-assessment-backfill`, `synapse-assessment-integrity`, and
+  `synapse-assessment-snapshot-backfill` operators provide resumable, lease-fenced migration tooling.
+  Migrations 0131–0135 add the tenant-isolated Snapshot, retained-request, backfill, and integrity
+  stores. Rollout is controlled by `SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED`,
+  `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED`, `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS`,
+  `SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED`, `SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED`,
+  `SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS`, `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED`,
+  `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS`, `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED`,
+  and `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS`.
+
 - **Python Tier-2 semantic reachability and interprocedural taint analysis.** An opt-in, source-only
   tree-sitter sidecar now emits bounded semantic facts without importing or executing target Python;
   pure Go resolution proves affected-symbol call paths and precise value flow across assignments,

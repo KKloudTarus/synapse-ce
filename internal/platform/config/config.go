@@ -379,14 +379,16 @@ type Config struct {
 	// human lifecycle APIs. Default false until an operator explicitly opts into the new schema/path.
 	SLAEnabled bool
 	// Assessment lifecycle gates default off and use explicit tenant allowlists for staged rollout.
-	AssessmentCycleAPIEnabled       bool
-	AssessmentCycleDualWriteEnabled bool
-	AssessmentCycleDualWriteTenants []string
-	AssessmentSnapshotEnabled       bool
-	AssessmentLifecycleReadEnabled  bool
-	AssessmentLifecycleReadTenants  []string
-	AssessmentLifecycleUIDefault    bool
-	AssessmentLifecycleUITenants    []string
+	AssessmentCycleAPIEnabled           bool
+	AssessmentCycleDualWriteEnabled     bool
+	AssessmentCycleDualWriteTenants     []string
+	AssessmentSnapshotEnabled           bool
+	AssessmentSnapshotCompletionEnabled bool
+	AssessmentSnapshotCompletionTenants []string
+	AssessmentLifecycleReadEnabled      bool
+	AssessmentLifecycleReadTenants      []string
+	AssessmentLifecycleUIDefault        bool
+	AssessmentLifecycleUITenants        []string
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
@@ -789,6 +791,8 @@ func Load() Config {
 		AssessmentCycleDualWriteEnabled:       getbool("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED", false),
 		AssessmentCycleDualWriteTenants:       splitList(getenv("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS", "")),
 		AssessmentSnapshotEnabled:             getbool("SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED", false),
+		AssessmentSnapshotCompletionEnabled:   getbool("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED", false),
+		AssessmentSnapshotCompletionTenants:   splitList(getenv("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS", "")),
 		AssessmentLifecycleReadEnabled:        getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED", false),
 		AssessmentLifecycleReadTenants:        splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS", "")),
 		AssessmentLifecycleUIDefault:          getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED", false),
@@ -1157,6 +1161,18 @@ func (c Config) ValidateAssessmentLifecycleRollout() error {
 	if c.AssessmentLifecycleReadEnabled && len(c.AssessmentLifecycleReadTenants) == 0 {
 		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
 	}
+	if c.AssessmentSnapshotCompletionEnabled && !c.AssessmentSnapshotEnabled {
+		return errors.New("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED requires SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED=true")
+	}
+	if c.AssessmentSnapshotCompletionEnabled && len(c.AssessmentSnapshotCompletionTenants) == 0 {
+		return errors.New("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED requires SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS")
+	}
+	if c.AssessmentSnapshotCompletionEnabled && !c.AssessmentLifecycleReadEnabled {
+		return errors.New("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED=true")
+	}
+	if !tenantAllowlistCovers(c.AssessmentLifecycleReadTenants, c.AssessmentSnapshotCompletionTenants) {
+		return errors.New("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS must be a subset of SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
+	}
 	if c.AssessmentLifecycleUIDefault && !c.AssessmentLifecycleReadEnabled {
 		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED=true")
 	}
@@ -1170,14 +1186,15 @@ func (c Config) ValidateAssessmentLifecycleRollout() error {
 }
 
 func (c Config) AssessmentCycleDualWriteForTenant(tenantID string) bool {
-	if c.AssessmentCycleAPIEnabled {
-		return true
-	}
 	return tenantFeatureEnabled(c.AssessmentCycleDualWriteEnabled, c.AssessmentCycleDualWriteTenants, tenantID)
 }
 
 func (c Config) AssessmentLifecycleReadForTenant(tenantID string) bool {
 	return tenantFeatureEnabled(c.AssessmentLifecycleReadEnabled, c.AssessmentLifecycleReadTenants, tenantID)
+}
+
+func (c Config) AssessmentSnapshotCompletionForTenant(tenantID string) bool {
+	return tenantFeatureEnabled(c.AssessmentSnapshotCompletionEnabled, c.AssessmentSnapshotCompletionTenants, tenantID)
 }
 
 func (c Config) AssessmentLifecycleUIForTenant(tenantID string) bool {

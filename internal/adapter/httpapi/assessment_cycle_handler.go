@@ -150,6 +150,32 @@ func (rt *Router) archiveAssessmentCycle(w http.ResponseWriter, r *http.Request)
 	writeRetainedJSON(w, response)
 }
 
+func (rt *Router) reopenAssessmentCycle(w http.ResponseWriter, r *http.Request) {
+	expectedVersion, err := parseCycleIfMatch(r.Header.Get("If-Match"))
+	if err != nil {
+		writeJSON(w, http.StatusPreconditionRequired, errorBody{Error: "precondition_required"})
+		return
+	}
+	var request struct {
+		Reason string `json:"reason"`
+	}
+	if !decodeAssessmentCycleJSON(w, r, &request) {
+		return
+	}
+	response, err := rt.assessmentCycles.ReopenCycle(r.Context(), cycleuc.ReopenCycleRequest{
+		Request: cycleuc.RetainedRequest{
+			TenantID: shared.ID(TenantFrom(r.Context())), Actor: PrincipalFrom(r.Context()), Route: r.URL.Path,
+			IdempotencyKey: r.Header.Get("Idempotency-Key"),
+		},
+		CycleID: shared.ID(r.PathValue("cycleId")), ExpectedVersion: expectedVersion, Reason: request.Reason,
+	})
+	if err != nil {
+		writeAssessmentCycleError(w, rt.log, err)
+		return
+	}
+	writeRetainedJSON(w, response)
+}
+
 func decodeAssessmentCycleJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, assessmentCycleRequestLimit)
 	decoder := json.NewDecoder(r.Body)

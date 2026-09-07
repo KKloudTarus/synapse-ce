@@ -34,10 +34,13 @@ const (
 	CodeInvalidPageSize            = "invalid_page_size"
 	CodeInvalidScopeStrategy       = "invalid_scope_strategy"
 	CodeInvalidProfileStrategy     = "invalid_profile_strategy"
+	CodeInvalidPredecessor         = "invalid_predecessor_assessment"
 	WarningAuthorizationNotCopied  = "authorization_not_inherited"
 	WarningRoENotCopied            = "roe_not_inherited"
 	WarningScannerProfileNotCopied = "scanner_profile_not_inherited"
 )
+
+const assessmentCycleRequestRetention = 24 * time.Hour
 
 type APIError struct {
 	Code  string
@@ -151,9 +154,11 @@ func (service *APIService) CreateInitialAssessment(ctx context.Context, input Cr
 				service.engagements.CompensateCreate(cleanupCtx, assessment.TenantID, assessment.ID),
 			)
 		}
-		service.record(txCtx, input.Request, "assessment_cycle.api_initial_created", cycle.ID, map[string]string{
+		if err := service.record(txCtx, input.Request, "assessment_cycle.api_initial_created", cycle.ID, map[string]string{
 			"assessment_id": assessment.ID.String(), "cycle_version": strconv.FormatInt(cycle.Version, 10),
-		})
+		}); err != nil {
+			return 0, nil, err
+		}
 		return 201, assessment, nil
 	}, func(cleanupCtx context.Context) error {
 		if compensate == nil {
@@ -206,6 +211,9 @@ func (service *APIService) CreateRetestAssessment(ctx context.Context, input Cre
 	}{input.AssessmentID, input.Name, input.PredecessorAssessmentID, input.ScopeStrategy, input.ProfileStrategy, input.AuthorizedFrom, input.AuthorizedTo, input.Timezone, input.RoE}
 	return service.executeRetained(ctx, input.Request, canonical, func(txCtx context.Context) (int, any, error) {
 		tenantID := shared.TenantOrDefault(input.Request.TenantID)
+		if !input.PredecessorAssessmentID.IsZero() && input.PredecessorAssessmentID != input.AssessmentID {
+			return 0, nil, &APIError{Code: CodeInvalidPredecessor, Cause: shared.ErrValidation}
+		}
 		cycle, err := service.cycles.GetCycleByAssessment(txCtx, tenantID, input.AssessmentID)
 		if err != nil {
 			return 0, nil, err
@@ -281,10 +289,12 @@ func (service *APIService) CreateRetestAssessment(ctx context.Context, input Cre
 		if input.RoE != nil {
 			warnings = removeWarning(warnings, WarningRoENotCopied)
 		}
-		service.record(txCtx, input.Request, "assessment_cycle.api_retest_created", cycle.ID, map[string]string{
+		if err := service.record(txCtx, input.Request, "assessment_cycle.api_retest_created", cycle.ID, map[string]string{
 			"assessment_id": assessment.ID.String(), "predecessor_id": member.PredecessorAssessmentID.String(),
 			"retest_number": strconv.Itoa(member.RetestNumber), "cycle_version": strconv.FormatInt(updatedCycle.Version, 10),
-		})
+		}); err != nil {
+			return 0, nil, err
+		}
 		return 201, CreateRetestResponse{
 			Engagement: assessment, Cycle: projectCycle(updatedCycle), Member: projectMember(*member),
 			InheritanceDiff: InheritanceDiff{Scope: scopeStrategy, Authorization: "explicit_only", RoE: "explicit_only", ScannerProfile: profileStrategy},
@@ -549,6 +559,59 @@ type ArchiveCycleRequest struct {
 	ExpectedVersion int64
 }
 
+type ReopenCycleRequest struct {
+	Request         RetainedRequest
+	CycleID         shared.ID
+	ExpectedVersion int64
+	Reason          string
+}
+
+func (service *APIService) ReopenCycle(ctx context.Context, input ReopenCycleRequest) (RetainedResponse, error) {
+	var compensate func(context.Context) error
+	reason := strings.TrimSpace(input.Reason)
+	canonical := struct {
+		CycleID         shared.ID `json:"cycle_id"`
+		ExpectedVersion int64     `json:"expected_version"`
+		Reason          string    `json:"reason"`
+	}{input.CycleID, input.ExpectedVersion, reason}
+	return service.executeRetained(ctx, input.Request, canonical, func(txCtx context.Context) (int, any, error) {
+		if input.ExpectedVersion < 1 {
+			return 0, nil, &APIError{Code: "precondition_required", Cause: shared.ErrValidation}
+		}
+		if reason == "" || len(reason) > 1024 {
+			return 0, nil, &APIError{Code: "reopen_reason_required", Cause: shared.ErrValidation}
+		}
+		originalCycle, err := service.cycles.GetCycle(txCtx, input.Request.TenantID, input.CycleID)
+		if err != nil {
+			return 0, nil, err
+		}
+		if err := service.cycles.ReopenCycle(txCtx, ReopenCycleInput{
+			TenantID: input.Request.TenantID, CycleID: input.CycleID, ExpectedCycleVersion: input.ExpectedVersion,
+			Actor: input.Request.Actor, Reason: reason,
+		}); err != nil {
+			return 0, nil, err
+		}
+		compensate = func(cleanupCtx context.Context) error {
+			return service.cycles.compensateCycleMutation(cleanupCtx, originalCycle, "")
+		}
+		detail, err := service.GetCycle(txCtx, input.Request.TenantID, input.CycleID)
+		if err != nil {
+			return 0, nil, err
+		}
+		if err := service.record(txCtx, input.Request, "assessment_cycle.api_reopened", input.CycleID, map[string]string{
+			"previous_version": strconv.FormatInt(input.ExpectedVersion, 10), "cycle_version": strconv.FormatInt(detail.Cycle.Version, 10), "reason": reason,
+		}); err != nil {
+			return 0, nil, err
+		}
+		return 200, detail, nil
+	}, func(cleanupCtx context.Context) error {
+		if compensate == nil {
+			return nil
+		}
+		return compensate(cleanupCtx)
+	})
+}
+
 func (service *APIService) ArchiveCycle(ctx context.Context, input ArchiveCycleRequest) (RetainedResponse, error) {
 	var compensate func(context.Context) error
 	canonical := struct {
@@ -576,9 +639,11 @@ func (service *APIService) ArchiveCycle(ctx context.Context, input ArchiveCycleR
 		if err != nil {
 			return 0, nil, err
 		}
-		service.record(txCtx, input.Request, "assessment_cycle.api_archived", input.CycleID, map[string]string{
+		if err := service.record(txCtx, input.Request, "assessment_cycle.api_archived", input.CycleID, map[string]string{
 			"previous_version": strconv.FormatInt(input.ExpectedVersion, 10), "cycle_version": strconv.FormatInt(detail.Cycle.Version, 10),
-		})
+		}); err != nil {
+			return 0, nil, err
+		}
 		return 200, detail, nil
 	}, func(cleanupCtx context.Context) error {
 		if compensate == nil {
@@ -606,8 +671,9 @@ func (service *APIService) executeRetained(ctx context.Context, request Retained
 	var response RetainedResponse
 	createdReservation := false
 	err = service.tx.Run(ctx, scope.TenantID, func(txCtx context.Context) error {
+		createdAt := service.clock.Now().UTC()
 		stored, created, err := service.requests.BeginAssessmentCycleRequest(txCtx, ports.AssessmentCycleRequest{
-			Scope: scope, RequestHash: requestHash, CreatedAt: service.clock.Now().UTC(),
+			Scope: scope, RequestHash: requestHash, CreatedAt: createdAt, ExpiresAt: createdAt.Add(assessmentCycleRequestRetention),
 		})
 		if err != nil {
 			return err
@@ -658,13 +724,15 @@ func (service *APIService) cycleDetail(ctx context.Context, tenantID shared.ID, 
 	return detail, nil
 }
 
-func (service *APIService) record(ctx context.Context, request RetainedRequest, action string, target shared.ID, metadata map[string]string) {
+func (service *APIService) record(ctx context.Context, request RetainedRequest, action string, target shared.ID, metadata map[string]string) error {
 	if service.audit == nil {
-		return
+		return nil
 	}
 	metadata["tenant_id"] = shared.TenantOrDefault(request.TenantID).String()
-	metadata["idempotency_key"] = strings.TrimSpace(request.IdempotencyKey)
-	_ = service.audit.Record(ctx, ports.AuditEntry{Actor: strings.TrimSpace(request.Actor), Action: action, Target: target.String(), Metadata: metadata, At: service.clock.Now().UTC()})
+	if err := service.audit.Record(ctx, ports.AuditEntry{Actor: strings.TrimSpace(request.Actor), Action: action, Target: target.String(), Metadata: metadata, At: service.clock.Now().UTC()}); err != nil {
+		return fmt.Errorf("audit retained assessment cycle mutation: %w", err)
+	}
+	return nil
 }
 
 func projectCycle(cycle *cycledom.AssessmentCycle) CycleView {

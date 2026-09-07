@@ -693,9 +693,7 @@ func main() {
 
 	// Use cases.
 	engService := enguc.NewService(repo, clock, ids, auditLog)
-	if cfg.AssessmentSnapshotEnabled {
-		engService.SetCompletionSnapshotReader(assessmentSnapshotStore)
-	}
+	engService.SetCompletionSnapshotPolicy(assessmentSnapshotStore, cfg.AssessmentSnapshotCompletionForTenant)
 	projectService := projectuc.NewService(projectRepo, repo, clock, ids, auditLog, !cfg.IsProduction())
 	projectService.SetArchiveStore(file.NewProjectArchiveStore(cfg.ProjectUploadDir, cfg.MaxWorkspaceBytes))
 	projectService.SetAnalysisStore(projectAnalysisStore)
@@ -1397,6 +1395,7 @@ func main() {
 		log.Error("business asset service init failed", "err", err)
 		os.Exit(1)
 	}
+	businessAssetService.SetAssessmentCycleReader(assessmentCycleStore)
 	router.SetBusinessAssets(businessAssetService)
 	if cfg.AssessmentCycleAPIEnabled || cfg.AssessmentCycleDualWriteEnabled {
 		cycleService, cycleErr := cycleuc.NewService(assessmentCycleStore, repo, businessAssetStore, projectRepo, assessmentCycleTransactions, ids, clock, auditLog)

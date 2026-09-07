@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
@@ -89,6 +90,15 @@ func TestPostgresAssessmentCycleRepository_LifecycleAndCAS(t *testing.T) {
 	}
 	if err := repo.CreateMember(ctx, rootMember); err != nil {
 		t.Fatalf("create initial member: %v", err)
+	}
+	assetID := "asset-" + tenantID.String()
+	if _, err := pool.Exec(ctx, `INSERT INTO fleet_business_services(id,tenant_id,"key",name,owner) VALUES($1,$2,$1,'Frozen boundary','team')`, assetID, tenantID.String()); err != nil {
+		t.Fatalf("create boundary-change probe asset: %v", err)
+	}
+	_, err = pool.Exec(ctx, `UPDATE engagements SET business_asset_id=$1 WHERE tenant_id=$2 AND id=$3`, assetID, tenantID.String(), rootID.String())
+	var boundaryErr *pgconn.PgError
+	if !errors.As(err, &boundaryErr) || boundaryErr.Code != "23514" || boundaryErr.ConstraintName != "assessment_cycle_frozen_business_asset" {
+		t.Fatalf("database boundary invariant error=%v", err)
 	}
 
 	// 3. Duplicate Cycle Create -> ErrConflict

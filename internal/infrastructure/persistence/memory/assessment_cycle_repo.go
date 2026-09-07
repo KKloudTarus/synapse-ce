@@ -45,6 +45,7 @@ func (r *AssessmentCycleRepository) CreateCycle(ctx context.Context, cycle *asse
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.registerRollback(ctx)
 
 	tenantCycles := r.cycles[tenantID]
 	if tenantCycles == nil {
@@ -121,6 +122,7 @@ func (r *AssessmentCycleRepository) UpdateCycleCAS(ctx context.Context, cycle *a
 		return fmt.Errorf("%w: cycle version mismatch (expected %d, found %d)", shared.ErrConflict, expectedVersion, existing.Version)
 	}
 
+	r.registerRollback(ctx)
 	r.cycles[tenantID][cycle.ID] = cloneCycle(cycle)
 	return nil
 }
@@ -137,6 +139,7 @@ func (r *AssessmentCycleRepository) CreateMember(ctx context.Context, member *as
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.registerRollback(ctx)
 
 	// Enforce global uniqueness: one Assessment in at most one Cycle
 	tenantAssToCycle := r.assessmentToCycle[tenantID]
@@ -232,6 +235,7 @@ func (r *AssessmentCycleRepository) UpdateMemberCAS(ctx context.Context, member 
 		return fmt.Errorf("%w: member relationship version mismatch (expected %d, found %d)", shared.ErrConflict, expectedVersion, existing.RelationshipVersion)
 	}
 
+	r.registerRollback(ctx)
 	r.members[tenantID][member.CycleID][member.AssessmentID] = cloneMember(member)
 	return nil
 }
@@ -240,10 +244,11 @@ func (r *AssessmentCycleRepository) LockCycleForUpdate(ctx context.Context, tena
 	return r.GetCycle(ctx, tenantID, cycleID)
 }
 
-func (r *AssessmentCycleRepository) DeleteCycle(_ context.Context, tenantID, cycleID shared.ID) error {
+func (r *AssessmentCycleRepository) DeleteCycle(ctx context.Context, tenantID, cycleID shared.ID) error {
 	tenantID = shared.TenantOrDefault(tenantID)
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.registerRollback(ctx)
 	for assessmentID := range r.members[tenantID][cycleID] {
 		delete(r.assessmentToCycle[tenantID], assessmentID)
 	}
@@ -252,10 +257,11 @@ func (r *AssessmentCycleRepository) DeleteCycle(_ context.Context, tenantID, cyc
 	return nil
 }
 
-func (r *AssessmentCycleRepository) DeleteMember(_ context.Context, tenantID, cycleID, assessmentID shared.ID) error {
+func (r *AssessmentCycleRepository) DeleteMember(ctx context.Context, tenantID, cycleID, assessmentID shared.ID) error {
 	tenantID = shared.TenantOrDefault(tenantID)
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.registerRollback(ctx)
 	delete(r.members[tenantID][cycleID], assessmentID)
 	delete(r.assessmentToCycle[tenantID], assessmentID)
 	return nil
@@ -366,4 +372,49 @@ func cloneMember(m *assessmentcycle.Member) *assessmentcycle.Member {
 		copy.ArchivedAt = &t
 	}
 	return &copy
+}
+
+type assessmentCycleRepositoryState struct {
+	cycles            map[shared.ID]map[shared.ID]*assessmentcycle.AssessmentCycle
+	members           map[shared.ID]map[shared.ID]map[shared.ID]*assessmentcycle.Member
+	assessmentToCycle map[shared.ID]map[shared.ID]shared.ID
+}
+
+func (r *AssessmentCycleRepository) registerRollback(ctx context.Context) {
+	state := r.cloneState()
+	registerTenantRollback(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.cycles, r.members, r.assessmentToCycle = state.cycles, state.members, state.assessmentToCycle
+	})
+}
+
+func (r *AssessmentCycleRepository) cloneState() assessmentCycleRepositoryState {
+	state := assessmentCycleRepositoryState{
+		cycles:            make(map[shared.ID]map[shared.ID]*assessmentcycle.AssessmentCycle, len(r.cycles)),
+		members:           make(map[shared.ID]map[shared.ID]map[shared.ID]*assessmentcycle.Member, len(r.members)),
+		assessmentToCycle: make(map[shared.ID]map[shared.ID]shared.ID, len(r.assessmentToCycle)),
+	}
+	for tenantID, tenantCycles := range r.cycles {
+		state.cycles[tenantID] = make(map[shared.ID]*assessmentcycle.AssessmentCycle, len(tenantCycles))
+		for cycleID, cycle := range tenantCycles {
+			state.cycles[tenantID][cycleID] = cloneCycle(cycle)
+		}
+	}
+	for tenantID, tenantMembers := range r.members {
+		state.members[tenantID] = make(map[shared.ID]map[shared.ID]*assessmentcycle.Member, len(tenantMembers))
+		for cycleID, cycleMembers := range tenantMembers {
+			state.members[tenantID][cycleID] = make(map[shared.ID]*assessmentcycle.Member, len(cycleMembers))
+			for assessmentID, member := range cycleMembers {
+				state.members[tenantID][cycleID][assessmentID] = cloneMember(member)
+			}
+		}
+	}
+	for tenantID, mappings := range r.assessmentToCycle {
+		state.assessmentToCycle[tenantID] = make(map[shared.ID]shared.ID, len(mappings))
+		for assessmentID, cycleID := range mappings {
+			state.assessmentToCycle[tenantID][assessmentID] = cycleID
+		}
+	}
+	return state
 }

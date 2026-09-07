@@ -225,6 +225,9 @@ func (l *AuditLog) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
 	if e.Metadata["idempotency_key"] == "" {
 		return l.Record(ctx, e)
 	}
+	if handled, err := l.recordInBoundTenantTransaction(ctx, e); handled {
+		return err
+	}
 	const maxAttempts = 8
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		err := l.recordOnce(ctx, e)
@@ -241,6 +244,9 @@ func (l *AuditLog) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
 }
 
 func (l *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
+	if handled, err := l.recordInBoundTenantTransaction(ctx, e); handled {
+		return err
+	}
 	const maxAttempts = 8
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		err := l.recordOnce(ctx, e)
@@ -254,6 +260,18 @@ func (l *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
 		return err
 	}
 	return fmt.Errorf("append audit entry: %w after %d attempts", shared.ErrConflict, maxAttempts)
+}
+
+func (l *AuditLog) recordInBoundTenantTransaction(ctx context.Context, e ports.AuditEntry) (bool, error) {
+	tenantID, tenantBound := shared.TenantFrom(ctx)
+	if !tenantBound {
+		return false, nil
+	}
+	tx, bound, err := contextTenantTx(ctx, tenantID)
+	if err != nil || !bound {
+		return bound, err
+	}
+	return true, appendTenantAudit(ctx, tx, tenantID.String(), e)
 }
 
 // recordOnce performs one locked read-head → chain → insert attempt. A 23505 unique violation

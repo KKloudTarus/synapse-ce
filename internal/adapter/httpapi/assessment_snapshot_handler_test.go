@@ -71,6 +71,15 @@ func TestAssessmentSnapshotRoutesContractsPermissionsAndTenantIsolation(t *testi
 		t.Fatalf("replay=%d headers=%v body=%s", replayed.Code, replayed.Header(), replayed.Body.String())
 	}
 
+	staleReplay := cycleRequest(http.MethodPost, path, body, userdom.RoleConsultant, "tenant-snapshot-http")
+	staleReplay.Header.Set("Idempotency-Key", "snapshot-http-create")
+	staleReplay.Header.Set("If-Match", "77")
+	staleReplayResponse := httptest.NewRecorder()
+	handler.ServeHTTP(staleReplayResponse, staleReplay)
+	if staleReplayResponse.Code != http.StatusConflict || !strings.Contains(staleReplayResponse.Body.String(), "snapshot_conflict") {
+		t.Fatalf("stale replay=%d body=%s", staleReplayResponse.Code, staleReplayResponse.Body.String())
+	}
+
 	mismatch := cycleRequest(http.MethodPost, path, `{"selected_runs":[{"run_id":"snapshot-http-run","lane_keys":["other"]}]}`, userdom.RoleConsultant, "tenant-snapshot-http")
 	mismatch.Header.Set("Idempotency-Key", "snapshot-http-create")
 	mismatch.Header.Set("If-Match", "0")
@@ -166,6 +175,7 @@ func newAssessmentSnapshotHTTPRouter(t *testing.T) *Router {
 	}
 	engagementService := enguc.NewService(engagements, clock, ids, audit)
 	router := &Router{log: discardLog(), eng: engagementService}
+	router.SetAssessmentLifecycleRollout(func(string) bool { return true }, func(string) bool { return true })
 	router.SetAssessmentSnapshots(service)
 	return router
 }

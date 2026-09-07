@@ -142,7 +142,11 @@ func (e *Engagement) AllowsExecution() bool {
 	if !e.RequiresExplicitExecutionAuthorization {
 		return true
 	}
-	return e.AuthorizedFrom != nil && e.AuthorizedTo != nil && (len(e.RoE.AllowedToolClasses) > 0 || len(e.RoE.Blackouts) > 0)
+	// A Re-test must positively name at least one executable tool class. A
+	// blackout-only RoE is merely a negative constraint and, because an empty
+	// allowlist means "all" for legacy engagements, cannot serve as explicit
+	// execution authorization.
+	return e.AuthorizedFrom != nil && e.AuthorizedTo != nil && len(e.RoE.AllowedToolClasses) > 0
 }
 
 // Transition validates and applies a lifecycle status change, stamping UpdatedAt.
