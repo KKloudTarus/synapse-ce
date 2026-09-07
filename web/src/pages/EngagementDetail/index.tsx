@@ -40,6 +40,7 @@ import { PurpleCoverageTab } from './PurpleCoverageTab'
 import { ChainRehearsalTab } from './ChainRehearsalTab'
 import { RiskStoriesTab } from './RiskStoriesTab'
 import { VulnPostureTab } from './VulnPostureTab'
+import { CredentialsTab } from './CredentialsTab'
 import { DetectionsTab } from './DetectionsTab'
 import { ImportedFindingsTab } from './ImportedFindingsTab'
 import { DataGovernanceTab } from './DataGovernanceTab'
@@ -63,6 +64,7 @@ export type Tab =
   | 'licenses'
   | 'graph'
   | 'scanruns'
+  | 'credentials'
   | 'quality'
   | 'threats'
   | 'recon'
@@ -144,6 +146,7 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'evidence', label: 'Evidence' },
       { id: 'reviews', label: 'Awaiting Review' },
       { id: 'quality', label: 'Code Quality' },
+      { id: 'credentials', label: 'Credentials' },
       { id: 'data-governance', label: 'Data governance' },
     ],
   },
@@ -532,6 +535,7 @@ export function EngagementDetail() {
         {tab === 'data-governance' && <DataGovernanceTab key={id} engagementId={id} />}
         {tab === 'reviews' && <JudgmentReviewTab key={id} engagementId={id} />}
         {tab === 'evidence' && <EvidenceTab key={id} engagementId={id} />}
+        {tab === 'credentials' && <CredentialsTab key={id} engagementId={id} />}
         {tab === 'settings' && <SettingsTab eng={eng} onUpdated={setEng} />}
       </div>
     </div>
