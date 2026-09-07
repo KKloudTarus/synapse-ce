@@ -1,0 +1,32 @@
+name: Export 779 workspace
+
+on:
+  push:
+    branches:
+      - feat/708-a2a-scan-run-provenance
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Fetch current fork main
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
+      - name: Build git bundle
+        run: git bundle create synapse-779.bundle HEAD refs/remotes/origin/main
+
+      - name: Upload workspace bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: synapse-779-workspace
+          path: synapse-779.bundle
+          if-no-files-found: error
+          retention-days: 1
