@@ -71,6 +71,12 @@ BEGIN
         RAISE EXCEPTION 'migration 0138: found % orphaned scan_runs rows with no matching engagement tenant_id', v_orphans;
     END IF;
 
+    -- Validate the legacy engagement relation while its FORCE RLS barrier is
+    -- temporarily lifted. A production migration owner has neither SUPERUSER
+    -- nor BYPASSRLS, so validating this after restoring FORCE would hide every
+    -- parent row and reject otherwise valid legacy scan_runs.
+    EXECUTE 'ALTER TABLE scan_runs ADD CONSTRAINT fk_scan_runs_engagement FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE RESTRICT';
+
     EXECUTE 'ALTER TABLE engagements FORCE ROW LEVEL SECURITY';
 END $$;
 -- +goose StatementEnd
@@ -153,11 +159,9 @@ ALTER TABLE scan_runs ADD CONSTRAINT chk_scan_runs_terminal_status
 ALTER TABLE scan_runs ADD CONSTRAINT uq_scan_runs_tenant_id
     UNIQUE (tenant_id, id);
 
--- The legacy single-column relationship is safe during the nullable overlap
--- and makes engagement deletion an explicit conflict instead of orphaning scan
--- history. The tenant-composite FK is deferred to the contract migration.
-ALTER TABLE scan_runs ADD CONSTRAINT fk_scan_runs_engagement
-    FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE RESTRICT;
+-- The legacy single-column relationship was validated while engagements FORCE
+-- RLS was temporarily lifted above. The tenant-composite FK is deferred to the
+-- contract migration.
 
 CREATE INDEX IF NOT EXISTS idx_scan_runs_tenant_engagement
     ON scan_runs (tenant_id, engagement_id, created_at DESC);
