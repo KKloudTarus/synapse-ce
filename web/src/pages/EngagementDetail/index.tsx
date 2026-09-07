@@ -44,6 +44,8 @@ import { CredentialsTab } from './CredentialsTab'
 import { DetectionsTab } from './DetectionsTab'
 import { ImportedFindingsTab } from './ImportedFindingsTab'
 import { DataGovernanceTab } from './DataGovernanceTab'
+import { WriteupDraftsTab } from './WriteupDraftsTab'
+import { CloudPostureTab } from './CloudPostureTab'
 import { EvidenceTab } from './EvidenceTab'
 import { SettingsTab } from './SettingsTab'
 import { JudgmentReviewTab } from './ReviewsTab'
@@ -71,10 +73,12 @@ export type Tab =
   | 'purple'
   | 'rehearsal'
   | 'agent'
+  | 'cspm'
   | 'detections'
   | 'reviews'
   | 'evidence'
   | 'data-governance'
+  | 'writeup-drafts'
   | 'settings'
 
 export interface SubTabDefinition {
@@ -130,6 +134,7 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'purple', label: 'Purple Coverage' },
       { id: 'rehearsal', label: 'Chain Rehearsal' },
       { id: 'agent', label: 'Agent' },
+      { id: 'cspm', label: 'Cloud Posture' },
     ],
   },
   {
@@ -148,6 +153,7 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'quality', label: 'Code Quality' },
       { id: 'credentials', label: 'Credentials' },
       { id: 'data-governance', label: 'Data governance' },
+      { id: 'writeup-drafts', label: 'Write-up Drafts' },
     ],
   },
   {
@@ -533,6 +539,8 @@ export function EngagementDetail() {
         {tab === 'detections' && <DetectionsTab key={id} engagementId={id} />}
         {tab === 'imported' && <ImportedFindingsTab key={id} engagementId={id} />}
         {tab === 'data-governance' && <DataGovernanceTab key={id} engagementId={id} />}
+        {tab === 'writeup-drafts' && <WriteupDraftsTab key={id} engagementId={id} />}
+        {tab === 'cspm' && <CloudPostureTab key={id} engagementId={id} />}
         {tab === 'reviews' && <JudgmentReviewTab key={id} engagementId={id} />}
         {tab === 'evidence' && <EvidenceTab key={id} engagementId={id} />}
         {tab === 'credentials' && <CredentialsTab key={id} engagementId={id} />}

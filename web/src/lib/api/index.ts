@@ -42,6 +42,8 @@ import { slaApi } from './sla'
 import { offensivePolicyApi } from './offensivepolicy'
 import { alertingApi } from './alerting'
 import { privacyApi } from './privacy'
+import { writeupApi } from './writeup'
+import { cspmApi } from './cspm'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -81,4 +83,26 @@ export const api = {
   ...offensivePolicyApi,
   ...alertingApi,
   ...privacyApi,
+  ...writeupApi,
+  ...cspmApi,
 }
+export {
+  type CoverageWindow,
+  type CoverageWindowFilters,
+  type CoverageClass,
+  type CoverageClassState,
+  type CoverageVector,
+} from './fleet'
+export { type WriteupDraft, type WriteupDraftState } from './writeup'
+export {
+  type RetroHuntRequest,
+  type RetroHuntResult,
+  type TimelineEntry,
+} from './fleet'
+export {
+  type CSPMRun,
+  type CSPMStatus,
+  type CloudProvider,
+  type CloudTarget,
+  type CSPMEvidenceRef,
+} from './cspm'

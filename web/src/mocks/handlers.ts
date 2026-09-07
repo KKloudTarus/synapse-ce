@@ -497,6 +497,49 @@ const TEAM_MEMBERS = [
 // HANDLERS
 // ============================================================================
 
+// --- Net-new dashboard surfaces (#832 extract): write-up drafts, coverage windows ---
+const WRITEUP_DRAFTS = [
+  {
+    ID: 'draft-001', EngagementID: 'eng-001', FindingID: 'finding-001',
+    Description: 'The application deserializes untrusted session data with a permissive type resolver, allowing an attacker who controls a cookie to instantiate arbitrary gadget chains.',
+    Remediation: 'Pin the deserializer to an allow-list of expected types and sign session payloads. Reject any type outside the allow-list before construction.',
+    State: 'proposed', ProposedBy: 'agent:writer-01', DecidedBy: '', CreatedAt: HOUR_AGO, UpdatedAt: HOUR_AGO,
+  },
+  {
+    ID: 'draft-002', EngagementID: 'eng-001', FindingID: 'finding-003',
+    Description: 'Reflected XSS in the search parameter; the value is echoed into an HTML attribute without encoding.',
+    Remediation: 'Context-encode the parameter for the HTML-attribute sink and add a strict Content-Security-Policy.',
+    State: 'accepted', ProposedBy: 'agent:writer-01', DecidedBy: 'alice', CreatedAt: DAY_AGO, UpdatedAt: HOUR_AGO,
+  },
+]
+
+const COVERAGE_WINDOWS = [
+  {
+    asset_id: 'ba-001', agent_id: 'agent-001', host_id: 'host-web-01',
+    since: DAY_AGO, until: NOW, input_digest: 'sha256:9f1c0a44e7b2', revision: 'rev-0042', created_at: NOW,
+    states: [
+      { class: 'process', host_id: 'host-web-01', agent_id: 'agent-001', state: 'covered', reason: '', since: DAY_AGO },
+      { class: 'network', host_id: 'host-web-01', agent_id: 'agent-001', state: 'covered', reason: '', since: DAY_AGO },
+      { class: 'file', host_id: 'host-web-01', agent_id: 'agent-001', state: 'degraded', reason: 'sampling above target', since: HOUR_AGO },
+      { class: 'privilege', host_id: 'host-web-01', agent_id: 'agent-001', state: 'covered', reason: '', since: DAY_AGO },
+    ],
+    sampled_count: 18420, truncated_count: 12, dropped_count: 3, gap_count: 1, batch_count: 96,
+    coverage: { process: 1, network: 1, file: 1, privilege: 1, reasons: ['file sensor above sampling target for 42m'] },
+  },
+  {
+    asset_id: 'ba-002', agent_id: 'agent-002', host_id: 'host-db-02',
+    since: WEEK_AGO, until: DAY_AGO, input_digest: 'sha256:1abed3390f77', revision: 'rev-0031', created_at: DAY_AGO,
+    states: [
+      { class: 'process', host_id: 'host-db-02', agent_id: 'agent-002', state: 'covered', reason: '', since: WEEK_AGO },
+      { class: 'network', host_id: 'host-db-02', agent_id: 'agent-002', state: 'blind', reason: 'ebpf program failed to load', since: DAY_AGO },
+      { class: 'file', host_id: 'host-db-02', agent_id: 'agent-002', state: 'covered', reason: '', since: WEEK_AGO },
+      { class: 'privilege', host_id: 'host-db-02', agent_id: 'agent-002', state: 'covered', reason: '', since: WEEK_AGO },
+    ],
+    sampled_count: 9280, truncated_count: 0, dropped_count: 141, gap_count: 2, batch_count: 44,
+    coverage: { process: 1, network: 0, file: 1, privilege: 1, reasons: ['network class blind: ebpf load failure', 'kernel 5.4 lacks BTF'] },
+  },
+]
+
 export const handlers = [
   // --- Auth (BFF) ---
   // discoverSession() calls GET /api/auth/session and expects an authenticated
@@ -1509,6 +1552,56 @@ export const handlers = [
     const newUser = { id: `user-${String(TEAM_MEMBERS.length + 1).padStart(3, '0')}`, name: body.name, role: body.role, disabled: false, createdAt: NOW }
     TEAM_MEMBERS.push(newUser as any)
     return HttpResponse.json({ user: newUser, apiKey: `syn_${Math.random().toString(36).slice(2, 18)}_${Math.random().toString(36).slice(2, 10)}` })
+  }),
+
+  // --- Cloud posture, write-up drafts, coverage windows, retro-hunt (wired routes, new UI) ---
+  // Cloud posture (CSPM) run: POST accepts and returns a running run; GET completes it (poll).
+  http.post('/api/v1/engagements/:id/cspm/runs', ({ params }) => HttpResponse.json({
+    id: 'cspm-run-1', engagement_id: params.id, actor: 'you', status: 'running', complete: false,
+    assets: 0, findings: 0, coverage_issues: [], error_code: '', evidence_refs: [], started_at: NOW, finished_at: null,
+  }, { status: 202 })),
+  http.get('/api/v1/engagements/:id/cspm/runs/:rid', ({ params }) => HttpResponse.json({
+    id: params.rid, engagement_id: params.id, actor: 'you', status: 'succeeded', complete: true,
+    assets: 214, findings: 9,
+    coverage_issues: [{ scope: 'aws:123456789012', reason: 'CloudTrail not multi-region' }],
+    error_code: '',
+    evidence_refs: [{ scope_key: 'aws:123456789012', id: 'ev-cspm-1', hash: 'sha256:abcd' }],
+    started_at: NOW, finished_at: NOW,
+  })),
+
+  // --- AI-proposed write-up drafts (PascalCase wire; the domain Draft has no JSON tags) ---
+  http.get('/api/v1/engagements/:id/writeup-drafts', () => HttpResponse.json({ writeup_drafts: WRITEUP_DRAFTS })),
+  http.post('/api/v1/engagements/:id/writeup-drafts/:did/edit', async ({ params, request }) => {
+    const body = (await request.json()) as { description?: string; remediation?: string }
+    const d = WRITEUP_DRAFTS.find((x) => x.ID === params.did) ?? WRITEUP_DRAFTS[0]
+    return HttpResponse.json({ ...d, Description: body.description ?? d.Description, Remediation: body.remediation ?? d.Remediation })
+  }),
+  http.post('/api/v1/engagements/:id/writeup-drafts/:did/accept', ({ params }) => {
+    const d = WRITEUP_DRAFTS.find((x) => x.ID === params.did) ?? WRITEUP_DRAFTS[0]
+    return HttpResponse.json({ ...d, State: 'accepted', DecidedBy: 'you' })
+  }),
+  http.post('/api/v1/engagements/:id/writeup-drafts/:did/reject', ({ params }) => {
+    const d = WRITEUP_DRAFTS.find((x) => x.ID === params.did) ?? WRITEUP_DRAFTS[0]
+    return HttpResponse.json({ ...d, State: 'rejected', DecidedBy: 'you' })
+  }),
+
+  http.get('/api/v1/fleet/coverage-windows', () => HttpResponse.json({ coverage_windows: COVERAGE_WINDOWS })),
+  http.post('/api/v1/fleet/assets/:id/retro-hunt', async ({ params, request }) => {
+    const body = (await request.json()) as { around?: string; before_seconds?: number; after_seconds?: number }
+    const around = body.around ? new Date(body.around) : new Date()
+    const from = new Date(around.getTime() - (body.before_seconds ?? 900) * 1000).toISOString()
+    const to = new Date(around.getTime() + (body.after_seconds ?? 900) * 1000).toISOString()
+    return HttpResponse.json({
+      AssetID: params.id,
+      From: from,
+      To: to,
+      Truncated: false,
+      Entries: [
+        { OccurredAt: from, EntityKind: 'process', EntityID: 'pid-4821', Kind: 'process_exec', EventID: 'ev-1', Summary: 'curl spawned by bash (parent sshd)' },
+        { OccurredAt: around.toISOString(), EntityKind: 'network', EntityID: 'conn-77', Kind: 'egress_connect', EventID: 'ev-2', Summary: 'outbound 443 to 203.0.113.9 (unclassified)' },
+        { OccurredAt: to, EntityKind: 'file', EntityID: '/etc/cron.d/x', Kind: 'file_write', EventID: 'ev-3', Summary: 'new file written under /etc/cron.d' },
+      ],
+    })
   }),
 
   // --- Catch-all fallback ---
