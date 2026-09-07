@@ -1587,6 +1587,12 @@ export const handlers = [
   }),
 
   http.get('/api/v1/fleet/coverage-windows', () => HttpResponse.json({ coverage_windows: COVERAGE_WINDOWS })),
+  http.get('/api/v1/fleet/workloads', () => HttpResponse.json({ workloads: [
+    { cluster: 'prod-cluster', namespace: 'shop', kind: 'Deployment', name: 'checkout-api', service_account: 'checkout', images: [{ ref: 'registry.internal/checkout-api:1.4.2', digest: 'sha256:1111111111111111111111111111111111111111111111111111111111111111' }] },
+    { cluster: 'prod-cluster', namespace: 'data', kind: 'StatefulSet', name: 'postgres', service_account: 'default', images: [{ ref: 'docker.io/library/postgres:16', digest: 'sha256:1111111111111111111111111111111111111111111111111111111111111111' }] },
+    { cluster: 'prod-cluster', namespace: 'shop', kind: 'Deployment', name: 'web', service_account: 'default', images: [{ ref: 'docker.io/library/nginx:1.27', digest: 'sha256:2222222222222222222222222222222222222222222222222222222222222222' }] },
+  ] })),
+
   http.post('/api/v1/fleet/assets/:id/retro-hunt', async ({ params, request }) => {
     const body = (await request.json()) as { around?: string; before_seconds?: number; after_seconds?: number }
     const around = body.around ? new Date(body.around) : new Date()

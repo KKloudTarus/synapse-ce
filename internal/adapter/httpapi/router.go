@@ -383,6 +383,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/assets", rt.authz(userdom.PermView, rt.listAssets))
 		mux.HandleFunc("POST /api/v1/assets/edges", rt.authz(userdom.PermOperate, rt.createAssetEdge))
 		mux.HandleFunc("GET /api/v1/assets/edges", rt.authz(userdom.PermView, rt.listAssetEdges))
+		mux.HandleFunc("GET /api/v1/fleet/workloads", rt.authz(userdom.PermView, rt.listFleetWorkloads))
 	}
 	if rt.hostVulns != nil {
 		mux.HandleFunc("GET /api/v1/assets/hosts", rt.authz(userdom.PermView, rt.listHostVulnerabilities))

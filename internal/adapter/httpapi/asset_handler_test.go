@@ -21,6 +21,9 @@ func (fakeAssetService) ListAssets(context.Context, shared.ID) ([]*asset.Asset, 
 }
 func (fakeAssetService) UpsertEdge(context.Context, string, assetuc.EdgeInput) error { return nil }
 func (fakeAssetService) ListEdges(context.Context, shared.ID) ([]*asset.Edge, error) { return nil, nil }
+func (fakeAssetService) Workloads(context.Context, shared.ID) ([]assetuc.WorkloadOrigin, error) {
+	return nil, nil
+}
 
 func TestRouter_AssetRoutePresence(t *testing.T) {
 	rt := &Router{log: discardLog()}

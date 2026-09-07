@@ -122,3 +122,38 @@ func TestListAssetsTenantScoped(t *testing.T) {
 		t.Fatalf("tenant t1 should see only its asset, got %+v", list)
 	}
 }
+
+func TestWorkloadsMapsWorkloadsToImages(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+	img, err := svc.UpsertAsset(ctx, "actor", UpsertAssetInput{TenantID: "t1", Kind: asset.KindImage, Key: "sha256:img1", Name: "sha256:img1", Attributes: map[string]string{"image": "registry/checkout:1.4"}})
+	if err != nil {
+		t.Fatalf("image: %v", err)
+	}
+	wl, err := svc.UpsertAsset(ctx, "actor", UpsertAssetInput{TenantID: "t1", Kind: asset.KindWorkload, Key: "prod/shop/Deployment/checkout-api", Name: "checkout-api", Attributes: map[string]string{"namespace": "shop", "controller_kind": "Deployment", "service_account": "checkout"}})
+	if err != nil {
+		t.Fatalf("workload: %v", err)
+	}
+	// A non-workload, non-dependent asset must be ignored.
+	if _, err := svc.UpsertAsset(ctx, "actor", UpsertAssetInput{TenantID: "t1", Kind: asset.KindHost, Key: "host/vm-1", Name: "vm-1"}); err != nil {
+		t.Fatalf("host: %v", err)
+	}
+	if err := svc.UpsertEdge(ctx, "actor", EdgeInput{TenantID: "t1", From: wl.ID, To: img.ID, Kind: asset.EdgeDependsOn, Provenance: "obs", Confidence: asset.EdgeObserved}); err != nil {
+		t.Fatalf("edge: %v", err)
+	}
+
+	got, err := svc.Workloads(ctx, "t1")
+	if err != nil {
+		t.Fatalf("workloads: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected exactly one workload (hosts/images excluded), got %d", len(got))
+	}
+	w := got[0]
+	if w.Name != "checkout-api" || w.Kind != "Deployment" || w.Namespace != "shop" || w.Cluster != "prod" || w.ServiceAccount != "checkout" {
+		t.Fatalf("workload fields wrong: %+v", w)
+	}
+	if len(w.Images) != 1 || w.Images[0].Digest != "sha256:img1" || w.Images[0].Ref != "registry/checkout:1.4" {
+		t.Fatalf("expected the depended-on image, got %+v", w.Images)
+	}
+}
