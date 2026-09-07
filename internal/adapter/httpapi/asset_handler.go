@@ -107,7 +107,10 @@ func (rt *Router) createAssetEdge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
+	// UpsertEdge is an idempotent create with no response body, so answer 204 rather than a
+	// bodyless 201: a JSON client (the dashboard) reads 204 as "done, nothing to parse", where a
+	// 201 with no body makes it fail parsing an empty response.
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (rt *Router) listAssetEdges(w http.ResponseWriter, r *http.Request) {

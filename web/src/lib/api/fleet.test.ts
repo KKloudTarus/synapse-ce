@@ -82,4 +82,22 @@ describe('fleet management adapters', () => {
     expect((fetchSpy.mock.calls[0][1] as RequestInit).method).toBe('PUT')
     expect(lastBody()).toEqual({ target_version: '2.0.0', canary_groups: ['g1'] })
   })
+
+  it('maps the PascalCase asset relationship edges', async () => {
+    respond([
+      { TenantID: 'default', From: 'asset-a', To: 'asset-b', Kind: 'depends_on', Provenance: 'obs-1', Confidence: 'observed' },
+      { TenantID: 'default', From: 'asset-b', To: 'asset-c', Kind: 'reaches', Provenance: 'obs-2', Confidence: 'inferred' },
+    ])
+    const edges = await api.fleetAssetEdges()
+    expect(edges).toHaveLength(2)
+    expect(edges[0]).toMatchObject({ from: 'asset-a', to: 'asset-b', kind: 'depends_on', provenance: 'obs-1', confidence: 'observed' })
+    expect(edges[1]).toMatchObject({ kind: 'reaches', confidence: 'inferred' })
+  })
+
+  it('creates an edge with a snake_case body and tolerates a 204', async () => {
+    respond(null, 204)
+    await api.createAssetEdge({ from: 'asset-a', to: 'asset-b', kind: 'depends_on', provenance: 'obs-1', confidence: 'observed' })
+    expect((fetchSpy.mock.calls[0][1] as RequestInit).method).toBe('POST')
+    expect(lastBody()).toEqual({ from: 'asset-a', to: 'asset-b', kind: 'depends_on', provenance: 'obs-1', confidence: 'observed' })
+  })
 })

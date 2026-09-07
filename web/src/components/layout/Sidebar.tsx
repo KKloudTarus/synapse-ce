@@ -91,6 +91,7 @@ const NAV_GROUPS: Array<{
         { icon: Monitor01, label: 'Hosts', to: '/fleet/hosts', capability: 'fleet' },
         { icon: Signal01, label: 'Coverage Windows', to: '/fleet/coverage-windows', capability: 'fleet' },
         { icon: Dataflow03, label: 'Workloads', to: '/fleet/workloads', capability: 'fleet' },
+        { icon: Cube01, label: 'Asset Graph', to: '/fleet/asset-graph', capability: 'fleet' },
         { icon: Key01, label: 'Agents', to: '/fleet/agents', capability: 'fleet' },
         { icon: AlertTriangle, label: 'Incidents', to: '/fleet/incidents' },
         { icon: ShieldTick, label: 'Response', to: '/blueteam/response', capability: 'fleet' },

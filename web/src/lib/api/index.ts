@@ -107,6 +107,10 @@ export {
   type AgentKey,
   type RolloutView,
   type RolloutStatus,
+  type AssetEdge,
+  type AssetEdgeInput,
+  type AssetEdgeKind,
+  type AssetEdgeConfidence,
 } from './fleet'
 export {
   type CSPMRun,

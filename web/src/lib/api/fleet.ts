@@ -322,6 +322,27 @@ export const fleetApi = {
 
   resumeFleetRollout: async (channel?: string): Promise<RolloutStatus> =>
     mapRolloutStatus(await req(`/agents/rollout/resume${rolloutQuery(channel)}`, { method: 'POST' }), channel),
+
+  // Technical asset relationship graph. The Edge DTO has no json tags, so it is PascalCase on the wire.
+  // GET returns the whole tenant's edge set (no server-side filter); scope client-side.
+  fleetAssetEdges: async (): Promise<AssetEdge[]> => {
+    const res = await req('/assets/edges')
+    return (Array.isArray(res) ? res : []).map(mapAssetEdge)
+  },
+
+  // Idempotent create by natural key (tenant, from, to, kind, provenance). The route answers 204.
+  createAssetEdge: async (input: AssetEdgeInput): Promise<void> => {
+    await req('/assets/edges', {
+      method: 'POST',
+      body: JSON.stringify({
+        from: input.from,
+        to: input.to,
+        kind: input.kind,
+        provenance: input.provenance,
+        confidence: input.confidence,
+      }),
+    })
+  },
 }
 
 // --- Coverage windows (#611 immutable telemetry coverage revisions) ---
@@ -566,5 +587,38 @@ function mapRolloutStatus(raw: any, channel?: string): RolloutStatus {
     configured,
     reason: raw?.reason ?? '',
     rollout,
+  }
+}
+
+// --- Technical asset relationship graph (#asset edges) ---
+
+export type AssetEdgeKind = 'runs' | 'exposes' | 'depends_on' | 'can_assume' | 'reaches' | 'affected_by' | 'mounts'
+export type AssetEdgeConfidence = 'observed' | 'inferred'
+
+export interface AssetEdge {
+  tenantId: string
+  from: string
+  to: string
+  kind: string
+  provenance: string
+  confidence: string
+}
+
+export interface AssetEdgeInput {
+  from: string
+  to: string
+  kind: AssetEdgeKind
+  provenance: string
+  confidence: AssetEdgeConfidence
+}
+
+function mapAssetEdge(r: any): AssetEdge {
+  return {
+    tenantId: r?.TenantID ?? r?.tenant_id ?? '',
+    from: r?.From ?? r?.from ?? '',
+    to: r?.To ?? r?.to ?? '',
+    kind: r?.Kind ?? r?.kind ?? '',
+    provenance: r?.Provenance ?? r?.provenance ?? '',
+    confidence: r?.Confidence ?? r?.confidence ?? '',
   }
 }

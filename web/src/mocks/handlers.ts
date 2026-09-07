@@ -1654,6 +1654,16 @@ export const handlers = [
     }),
   ),
 
+  // --- Technical asset relationship graph. Edge has no Go json tags: PascalCase wire. ---
+  http.get('/api/v1/assets/edges', () =>
+    HttpResponse.json([
+      { TenantID: 'default', From: 'ta-host-web01', To: 'ta-wl-checkout', Kind: 'runs', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-wl-checkout', To: 'ta-img-checkout', Kind: 'depends_on', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-exposure-lb', To: 'ta-wl-checkout', Kind: 'exposes', Provenance: 'recon-1', Confidence: 'inferred' },
+    ]),
+  ),
+  http.post('/api/v1/assets/edges', () => new HttpResponse(null, { status: 204 })),
+
   // --- Catch-all fallback ---
   http.get('/api/v1/*', ({ request }) => {
     console.warn('[MSW] Unhandled GET:', new URL(request.url).pathname)
