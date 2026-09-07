@@ -110,6 +110,22 @@ func TestMigration0074Detections(t *testing.T) {
 		t.Fatalf("append critical: %v", err)
 	}
 
+	// #822: the per-class detection rate for an asset, counted over a window, feeds the behavior
+	// baseline's network/privilege/file features. Both records are ClassProcess on asset-x at t=1000.
+	if counts, err := repo.ClassCountsByAsset(tctx, "asset-x", time.Unix(0, 0)); err != nil {
+		t.Fatalf("class counts: %v", err)
+	} else if counts[detection.ClassProcess] != 2 {
+		t.Fatalf("ClassCountsByAsset must count both process detections on the asset, got %+v", counts)
+	}
+	// A cutoff after the records' timestamp excludes them (window respected).
+	if counts, _ := repo.ClassCountsByAsset(tctx, "asset-x", time.Unix(2000, 0)); counts[detection.ClassProcess] != 0 {
+		t.Fatalf("ClassCountsByAsset must respect the since cutoff, got %+v", counts)
+	}
+	// Another asset in the same tenant shares none of these detections.
+	if counts, _ := repo.ClassCountsByAsset(tctx, "asset-other", time.Unix(0, 0)); counts[detection.ClassProcess] != 0 {
+		t.Fatalf("ClassCountsByAsset must be per-asset, got %+v", counts)
+	}
+
 	// RLS under a NOSUPERUSER NOBYPASSRLS role (the pool superuser bypasses RLS).
 	role := "det_runtime"
 	for _, q := range []string{

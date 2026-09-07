@@ -1,24 +1,30 @@
-// Package behaviorbaseline turns the B5 per-host running-process projection into the coverage-honest
-// RiskContext.Behavior factor (#594 D). It maps a host's running processes to a baseline.Observation,
-// LEARNS the asset's normal process profile at report time (baselineuc.Observe — which scores-then-folds
-// with anti-poisoning), and SCORES the current profile read-only at risk-assessment time
-// (baselineuc.Score, no fold). Learning and scoring are separated so scoring never poisons the baseline —
-// and, critically, the risk-assessment path (an incident is active) never learns.
-//
-// It observes only the two features a process snapshot honestly carries — process count (spawn-rate proxy)
-// and distinct exec paths — leaving the network/privilege/file features at 0 (unobserved from processes),
-// so the baseline never invents a signal it did not measure.
+// Package behaviorbaseline turns the B5 per-host running-process projection plus the host's sealed
+// runtime detections into the coverage-honest RiskContext.Behavior factor (#594 D). It maps a host's
+// running processes to the process features of a baseline.Observation, and folds the per-class rate of
+// the eBPF detections observed on that host in a recent window into the network / privilege / file
+// features, so the statistical baseline scores anomalies over runtime telemetry rather than over
+// process snapshots alone (#822). It LEARNS the asset's normal profile at report time (baselineuc.Observe,
+// which scores-then-folds with anti-poisoning) and SCORES the current profile read-only at
+// risk-assessment time (baselineuc.Score, no fold). Learning and scoring are separated so scoring never
+// poisons the baseline, and the risk-assessment path (an incident is active) never learns.
 package behaviorbaseline
 
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/baseline"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/baselineuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+// defaultDetectionWindow bounds how far back the per-class detection rate is counted for an observation.
+// A day balances "recent enough to reflect current behavior" against "long enough for a sparse host to
+// register any runtime signal at all".
+const defaultDetectionWindow = 24 * time.Hour
 
 // BaselineEngine is the baselineuc surface this producer needs: Observe (learn+score) and Score (read-only).
 type BaselineEngine interface {
@@ -32,6 +38,14 @@ type ProcessLister interface {
 	ListRunningByAsset(ctx context.Context, assetID shared.ID) ([]ports.ProcessSnapshot, error)
 }
 
+// DetectionRates returns the count of sealed detections observed on an asset since a cutoff, grouped by
+// telemetry class, tenant-scoped by ctx. It is OPTIONAL: a nil DetectionRates leaves the network,
+// privilege and file features unobserved (0), which is the pre-#822 behavior. The memory and Postgres
+// detection-record stores satisfy it.
+type DetectionRates interface {
+	ClassCountsByAsset(ctx context.Context, assetID shared.ID, since time.Time) (map[detection.Class]int, error)
+}
+
 // Factor is the coverage-honest Behavior factor for one asset.
 type Factor struct {
 	Behavior  int
@@ -39,18 +53,28 @@ type Factor struct {
 	Reasons   []string
 }
 
-// Service produces + learns the Behavior factor from process snapshots.
+// Service produces + learns the Behavior factor from process snapshots and runtime detection rates.
 type Service struct {
-	engine    BaselineEngine
-	processes ProcessLister
+	engine     BaselineEngine
+	processes  ProcessLister
+	detections DetectionRates // optional; nil leaves network/privilege/file features at 0
+	now        func() time.Time
+	window     time.Duration
 }
 
-// NewService constructs the producer. Both collaborators are required.
-func NewService(engine BaselineEngine, processes ProcessLister) (*Service, error) {
+// NewService constructs the producer. The engine and process lister are required. detections is optional
+// (nil = process features only); now defaults to time.Now and window to a day when zero.
+func NewService(engine BaselineEngine, processes ProcessLister, detections DetectionRates, now func() time.Time, window time.Duration) (*Service, error) {
 	if engine == nil || processes == nil {
 		return nil, fmt.Errorf("%w: behavior baseline needs a baseline engine and a process lister", shared.ErrValidation)
 	}
-	return &Service{engine: engine, processes: processes}, nil
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
+	if window <= 0 {
+		window = defaultDetectionWindow
+	}
+	return &Service{engine: engine, processes: processes, detections: detections, now: now, window: window}, nil
 }
 
 // Learn folds the asset's current running-process profile into its behavior baseline. It is called at
@@ -112,12 +136,21 @@ func (s *Service) observe(ctx context.Context, assetID shared.ID) (baseline.Key,
 	if err != nil {
 		return baseline.Key{}, baseline.Observation{}, fmt.Errorf("list running processes: %w", err)
 	}
-	return baseline.Key{Tenant: tenant, Group: assetID.String()}, observationFrom(procs), nil
+	// Fold the recent per-class detection rate when a detection source is wired. A store hiccup is
+	// best-effort: it must not blind the process-based baseline, so the counts fall back to nil (0).
+	var counts map[detection.Class]int
+	if s.detections != nil {
+		if c, cerr := s.detections.ClassCountsByAsset(ctx, assetID, s.now().Add(-s.window)); cerr == nil {
+			counts = c
+		}
+	}
+	return baseline.Key{Tenant: tenant, Group: assetID.String()}, observationFrom(procs, counts), nil
 }
 
-// observationFrom maps running processes to the two baseline features a process snapshot honestly carries:
-// process count (spawn-rate proxy) and distinct exec paths. Values are clamped to the feature max.
-func observationFrom(procs []ports.ProcessSnapshot) baseline.Observation {
+// observationFrom maps running processes to the process features (count as a spawn-rate proxy, distinct
+// exec paths) and the recent per-class detection rate to the network / privilege / file features. Values
+// are clamped to the feature max. A nil counts map leaves the detection-fed features at 0.
+func observationFrom(procs []ports.ProcessSnapshot, counts map[detection.Class]int) baseline.Observation {
 	paths := make(map[string]struct{}, len(procs))
 	for _, p := range procs {
 		if p.Path != "" {
@@ -127,6 +160,11 @@ func observationFrom(procs []ports.ProcessSnapshot) baseline.Observation {
 	var o baseline.Observation
 	o.Values[baseline.FeatureProcessSpawnRate] = clampFeature(int64(len(procs)))
 	o.Values[baseline.FeatureNewExecPaths] = clampFeature(int64(len(paths)))
+	if counts != nil {
+		o.Values[baseline.FeatureNetworkFanout] = clampFeature(int64(counts[detection.ClassNetwork]))
+		o.Values[baseline.FeaturePrivilegeEvents] = clampFeature(int64(counts[detection.ClassPrivilege]))
+		o.Values[baseline.FeatureFileWriteBreadth] = clampFeature(int64(counts[detection.ClassFile]))
+	}
 	return o
 }
 
