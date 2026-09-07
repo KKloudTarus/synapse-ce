@@ -16,7 +16,7 @@ import (
 )
 
 func TestPostgresScanRunStore_LegacyCompatibility(t *testing.T) {
-	ctx, pool := setupTestDB(t)
+	ctx, pool := setupScanRunTestDB(t)
 	store := NewScanRunStore(pool)
 
 	tenantID := shared.ID(fmt.Sprintf("t-legacy-%d", time.Now().UnixNano()))
@@ -24,7 +24,7 @@ func TestPostgresScanRunStore_LegacyCompatibility(t *testing.T) {
 	runID := fmt.Sprintf("legacy-run-%d", time.Now().UnixNano())
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
-	ensureTestTenantAndEngagement(t, ctx, pool, tenantID, engID, "", "")
+	ensureScanRunTenantAndEngagement(t, ctx, pool, tenantID, engID)
 
 	ctxWithTenant := shared.WithTenant(ctx, tenantID)
 
@@ -61,7 +61,7 @@ func TestPostgresScanRunStore_LegacyCompatibility(t *testing.T) {
 }
 
 func TestPostgresScanRunStore_NativeSealedProvenance(t *testing.T) {
-	ctx, pool := setupTestDB(t)
+	ctx, pool := setupScanRunTestDB(t)
 	store := NewScanRunStore(pool)
 
 	tenantID := shared.ID(fmt.Sprintf("t-native-%d", time.Now().UnixNano()))
@@ -69,7 +69,7 @@ func TestPostgresScanRunStore_NativeSealedProvenance(t *testing.T) {
 	runID := fmt.Sprintf("run-nat-%d", time.Now().UnixNano())
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
-	ensureTestTenantAndEngagement(t, ctx, pool, tenantID, engID, "", "")
+	ensureScanRunTenantAndEngagement(t, ctx, pool, tenantID, engID)
 
 	target, err := scanrun.CanonicalizeRepositoryTarget("https://github.com/KKloudTarus/synapse-ce", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
 	if err != nil {
@@ -183,7 +183,7 @@ func TestPostgresScanRunStore_NativeSealedProvenance(t *testing.T) {
 }
 
 func TestPostgresScanRunStore_ConcurrentSealing(t *testing.T) {
-	ctx, pool := setupTestDB(t)
+	ctx, pool := setupScanRunTestDB(t)
 	store := NewScanRunStore(pool)
 
 	tenantID := shared.ID(fmt.Sprintf("t-conc-%d", time.Now().UnixNano()))
@@ -191,7 +191,7 @@ func TestPostgresScanRunStore_ConcurrentSealing(t *testing.T) {
 	runID := fmt.Sprintf("run-conc-%d", time.Now().UnixNano())
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
-	ensureTestTenantAndEngagement(t, ctx, pool, tenantID, engID, "", "")
+	ensureScanRunTenantAndEngagement(t, ctx, pool, tenantID, engID)
 
 	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
 
@@ -287,7 +287,7 @@ func TestPostgresScanRunStore_ConcurrentSealing(t *testing.T) {
 }
 
 func TestPostgresScanRunStore_UnprivilegedRoleRLS(t *testing.T) {
-	ctx, pool := setupTestDB(t)
+	ctx, pool := setupScanRunTestDB(t)
 	store := NewScanRunStore(pool)
 
 	tenantA := shared.ID(fmt.Sprintf("t-rls-a-%d", time.Now().UnixNano()))
@@ -296,8 +296,8 @@ func TestPostgresScanRunStore_UnprivilegedRoleRLS(t *testing.T) {
 	engB := shared.ID(fmt.Sprintf("e-rls-b-%d", time.Now().UnixNano()))
 	runA := fmt.Sprintf("run-rls-a-%d", time.Now().UnixNano())
 
-	ensureTestTenantAndEngagement(t, ctx, pool, tenantA, engA, "", "")
-	ensureTestTenantAndEngagement(t, ctx, pool, tenantB, engB, "", "")
+	ensureScanRunTenantAndEngagement(t, ctx, pool, tenantA, engA)
+	ensureScanRunTenantAndEngagement(t, ctx, pool, tenantB, engB)
 
 	// Create dedicated unprivileged test role
 	const unprivRole = "synapse_scanrun_rls_test"
@@ -373,14 +373,14 @@ func TestPostgresScanRunStore_UnprivilegedRoleRLS(t *testing.T) {
 }
 
 func TestPostgresScanRunStore_TimestampMicrosecondEquality(t *testing.T) {
-	ctx, pool := setupTestDB(t)
+	ctx, pool := setupScanRunTestDB(t)
 	store := NewScanRunStore(pool)
 
 	tenantID := shared.ID(fmt.Sprintf("t-ts-%d", time.Now().UnixNano()))
 	engID := shared.ID(fmt.Sprintf("e-ts-%d", time.Now().UnixNano()))
 	runID := fmt.Sprintf("run-ts-%d", time.Now().UnixNano())
 
-	ensureTestTenantAndEngagement(t, ctx, pool, tenantID, engID, "", "")
+	ensureScanRunTenantAndEngagement(t, ctx, pool, tenantID, engID)
 
 	// Microsecond truncated timestamp
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -411,7 +411,7 @@ func TestPostgresScanRunStore_TimestampMicrosecondEquality(t *testing.T) {
 }
 
 func TestPostgresScanRunStore_SealValidationParity(t *testing.T) {
-	ctx, pool := setupTestDB(t)
+	ctx, pool := setupScanRunTestDB(t)
 	store := NewScanRunStore(pool)
 
 	tenantID := shared.ID(fmt.Sprintf("t-val-%d", time.Now().UnixNano()))
@@ -419,7 +419,7 @@ func TestPostgresScanRunStore_SealValidationParity(t *testing.T) {
 	runID := fmt.Sprintf("run-val-%d", time.Now().UnixNano())
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
-	ensureTestTenantAndEngagement(t, ctx, pool, tenantID, engID, "", "")
+	ensureScanRunTenantAndEngagement(t, ctx, pool, tenantID, engID)
 
 	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
 	lane := scanrun.Lane{
@@ -450,7 +450,7 @@ func TestPostgresScanRunStore_SealValidationParity(t *testing.T) {
 }
 
 func TestPostgresScanRunStore_ResealIdempotencyAndReproducibility(t *testing.T) {
-	ctx, pool := setupTestDB(t)
+	ctx, pool := setupScanRunTestDB(t)
 	store := NewScanRunStore(pool)
 
 	tenantID := shared.ID(fmt.Sprintf("t-reseal-%d", time.Now().UnixNano()))
@@ -458,7 +458,7 @@ func TestPostgresScanRunStore_ResealIdempotencyAndReproducibility(t *testing.T) 
 	runID := fmt.Sprintf("run-reseal-%d", time.Now().UnixNano())
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
-	ensureTestTenantAndEngagement(t, ctx, pool, tenantID, engID, "", "")
+	ensureScanRunTenantAndEngagement(t, ctx, pool, tenantID, engID)
 
 	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
 
@@ -548,7 +548,7 @@ func TestPostgresScanRunStore_ResealIdempotencyAndReproducibility(t *testing.T) 
 }
 
 func TestPostgresScanRunStore_DirectSQLTriggerDefense(t *testing.T) {
-	ctx, pool := setupTestDB(t)
+	ctx, pool := setupScanRunTestDB(t)
 	store := NewScanRunStore(pool)
 
 	tenantA := shared.ID(fmt.Sprintf("t-trig-a-%d", time.Now().UnixNano()))
@@ -558,8 +558,8 @@ func TestPostgresScanRunStore_DirectSQLTriggerDefense(t *testing.T) {
 	runID := fmt.Sprintf("run-trig-%d", time.Now().UnixNano())
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
-	ensureTestTenantAndEngagement(t, ctx, pool, tenantA, engA, "", "")
-	ensureTestTenantAndEngagement(t, ctx, pool, tenantB, engB, "", "")
+	ensureScanRunTenantAndEngagement(t, ctx, pool, tenantA, engA)
+	ensureScanRunTenantAndEngagement(t, ctx, pool, tenantB, engB)
 
 	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
 
