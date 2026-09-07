@@ -292,6 +292,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **The production Helm chart's values schema parses again.** A merge of the external CI/CD
+  integrations work duplicated the top-level `properties` block in
+  `deploy/helm/synapse/values.schema.json`, leaving malformed JSON that made `helm lint` and `helm
+  template` fail on every install of the production chart. The schema is restored to one block that
+  keeps the strict posture (`objectStore.useSSL` fixed to `true`, `worker.integrationScheduler`
+  required, the `existingSecrets.egressGrant.authorityToken` secret) together with the newer
+  `execution` and `egressBroker` definitions. The chart lints under `--strict` and renders against
+  `tests/production-values.yaml` again.
 - **The running-process projection retires exited processes.** The agent reports only live processes
   and the store upserted them, so a process that exited between reports lingered as running forever and
   the behavior baseline's process-count feature climbed every sweep, self-poisoning into false drift. A
