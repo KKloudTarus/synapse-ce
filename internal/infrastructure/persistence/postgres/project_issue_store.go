@@ -52,9 +52,9 @@ func (r *ProjectAnalysisStore) SaveWithResultAndProjections(ctx context.Context,
 	// One tenant-bound transaction for the analysis and both projections: a projection failure
 	// still rolls the analysis back, and every table it writes is RLS-protected.
 	return requireTenant(ctx, r.pool, shared.ID(analysis.TenantID), func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO project_analyses (id, tenant_id, project_id, created_at, payload, result)
-			VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
-			analysis.ID, analysis.TenantID, analysis.ProjectID, analysis.CreatedAt, payload, result); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO project_analyses (id, tenant_id, project_id, branch, created_at, payload, result)
+			VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
+			analysis.ID, analysis.TenantID, analysis.ProjectID, analysis.Branch(), analysis.CreatedAt, payload, result); err != nil {
 			return fmt.Errorf("insert project analysis: %w", err)
 		}
 		if err := upsertHotspotsTx(ctx, tx, analysis, hotspotItems); err != nil {

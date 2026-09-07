@@ -160,13 +160,16 @@ func (s *ProjectAnalysisStore) LatestForProjects(_ context.Context, tenantID sha
 	return out, nil
 }
 
-func (s *ProjectAnalysisStore) LatestWithResult(_ context.Context, tenantID, projectID shared.ID) (projectanalysis.Analysis, []byte, error) {
+func (s *ProjectAnalysisStore) LatestWithResult(_ context.Context, tenantID, projectID shared.ID, branch string) (projectanalysis.Analysis, []byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var latest *storedProjectAnalysis
 	for i := range s.data {
 		current := &s.data[i]
 		if current.analysis.ProjectID != projectID.String() || (!tenantID.IsZero() && current.analysis.TenantID != tenantID.String()) || len(current.result) == 0 {
+			continue
+		}
+		if branch != "" && current.analysis.Branch() != branch {
 			continue
 		}
 		if latest == nil || current.analysis.CreatedAt.After(latest.analysis.CreatedAt) || (current.analysis.CreatedAt.Equal(latest.analysis.CreatedAt) && current.analysis.ID > latest.analysis.ID) {
@@ -179,13 +182,16 @@ func (s *ProjectAnalysisStore) LatestWithResult(_ context.Context, tenantID, pro
 	return cloneProjectAnalysis(latest.analysis), slices.Clone(latest.result), nil
 }
 
-func (s *ProjectAnalysisStore) List(_ context.Context, tenantID, projectID shared.ID, limit int, beforeCreatedAt time.Time, beforeID shared.ID) ([]projectanalysis.Analysis, bool, error) {
+func (s *ProjectAnalysisStore) List(_ context.Context, tenantID, projectID shared.ID, branch string, limit int, beforeCreatedAt time.Time, beforeID shared.ID) ([]projectanalysis.Analysis, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]projectanalysis.Analysis, 0)
 	for _, stored := range s.data {
 		analysis := stored.analysis
 		if analysis.ProjectID != projectID.String() || (!tenantID.IsZero() && analysis.TenantID != tenantID.String()) {
+			continue
+		}
+		if branch != "" && analysis.Branch() != branch {
 			continue
 		}
 		if !beforeCreatedAt.IsZero() && (analysis.CreatedAt.After(beforeCreatedAt) || (analysis.CreatedAt.Equal(beforeCreatedAt) && analysis.ID >= beforeID.String())) {
@@ -204,6 +210,28 @@ func (s *ProjectAnalysisStore) List(_ context.Context, tenantID, projectID share
 		out = out[:limit]
 	}
 	return out, hasMore, nil
+}
+
+// Branches returns the distinct branch values recorded for the project, sorted and stable.
+func (s *ProjectAnalysisStore) Branches(_ context.Context, tenantID, projectID shared.ID) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := map[string]struct{}{}
+	out := make([]string, 0)
+	for _, stored := range s.data {
+		analysis := stored.analysis
+		if analysis.ProjectID != projectID.String() || (!tenantID.IsZero() && analysis.TenantID != tenantID.String()) {
+			continue
+		}
+		branch := analysis.Branch()
+		if _, ok := seen[branch]; ok {
+			continue
+		}
+		seen[branch] = struct{}{}
+		out = append(out, branch)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func cloneSourceLocation(in *finding.SourceLocation) *finding.SourceLocation {

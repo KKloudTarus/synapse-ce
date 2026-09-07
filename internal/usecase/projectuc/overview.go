@@ -2,6 +2,7 @@ package projectuc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -158,7 +159,9 @@ type Overview struct {
 	NewCode        OverviewLens
 }
 
-func (s *Service) Overview(ctx context.Context, tenantID shared.ID, key string) (Overview, error) {
+// Overview summarizes the project's newest analysis. An empty branch reflects the latest overall
+// analysis; a non-empty branch reflects that branch's newest completed analysis.
+func (s *Service) Overview(ctx context.Context, tenantID shared.ID, key, branch string) (Overview, error) {
 	if strings.TrimSpace(key) == "" {
 		return Overview{}, fmt.Errorf("%w: project key is required", shared.ErrValidation)
 	}
@@ -173,11 +176,10 @@ func (s *Service) Overview(ctx context.Context, tenantID shared.ID, key string) 
 	if s.analyses == nil {
 		return Overview{}, fmt.Errorf("project analysis store is not configured")
 	}
-	latest, err := s.analyses.LatestForProjects(ctx, tenantID, []shared.ID{p.ID})
+	analysis, ok, err := s.overviewLatestAnalysis(ctx, tenantID, p.ID, branch)
 	if err != nil {
-		return Overview{}, fmt.Errorf("get latest project overview analysis: %w", err)
+		return Overview{}, err
 	}
-	analysis, ok := latest[p.ID]
 	if !ok {
 		return notAnalyzedOverview(projectView), nil
 	}
@@ -190,6 +192,29 @@ func (s *Service) Overview(ctx context.Context, tenantID shared.ID, key string) 
 		}
 	}
 	return analyzedOverview(p, analysis)
+}
+
+// overviewLatestAnalysis resolves the analysis the overview should reflect. With no branch it uses
+// the cross-project latest-overall read (the project list shares that query); with a branch it reads
+// that branch's newest completed analysis, and a project with no analysis on that branch reads as
+// not-analyzed rather than an error.
+func (s *Service) overviewLatestAnalysis(ctx context.Context, tenantID, projectID shared.ID, branch string) (projectanalysis.Analysis, bool, error) {
+	if branch != "" {
+		analysis, _, err := s.analyses.LatestWithResult(ctx, tenantID, projectID, branch)
+		if errors.Is(err, shared.ErrNotFound) {
+			return projectanalysis.Analysis{}, false, nil
+		}
+		if err != nil {
+			return projectanalysis.Analysis{}, false, fmt.Errorf("get latest project overview analysis: %w", err)
+		}
+		return analysis, true, nil
+	}
+	latest, err := s.analyses.LatestForProjects(ctx, tenantID, []shared.ID{projectID})
+	if err != nil {
+		return projectanalysis.Analysis{}, false, fmt.Errorf("get latest project overview analysis: %w", err)
+	}
+	analysis, ok := latest[projectID]
+	return analysis, ok, nil
 }
 
 func notAnalyzedOverview(p OverviewProject) Overview {

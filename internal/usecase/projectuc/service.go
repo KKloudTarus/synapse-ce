@@ -342,7 +342,9 @@ func (s *Service) projectAcquireRequest(ctx context.Context, p *project.Project)
 	if p.SourceBinding.Ref == "" || s.analyses == nil {
 		return request, nil
 	}
-	previous, _, err := s.analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	// Diff against the previous analysis on the SAME branch. result.SourceRef, which becomes the
+	// stored branch, is this request's Ref, so the branch we key on here is p.SourceBinding.Ref.
+	previous, _, err := s.analyses.List(ctx, p.TenantID, p.ID, p.SourceBinding.Ref, 1, time.Time{}, "")
 	if err != nil {
 		return ports.AcquireRequest{}, fmt.Errorf("list comparison baseline: %w", err)
 	}
@@ -373,7 +375,9 @@ type LatestAnalysis struct {
 	Result   []byte
 }
 
-func (s *Service) LatestAnalysis(ctx context.Context, tenantID shared.ID, key string) (LatestAnalysis, error) {
+// LatestAnalysis returns the newest completed analysis. An empty branch means the latest across all
+// branches (the default); a non-empty branch restricts the result to that branch.
+func (s *Service) LatestAnalysis(ctx context.Context, tenantID shared.ID, key, branch string) (LatestAnalysis, error) {
 	if s.analyses == nil {
 		return LatestAnalysis{}, shared.ErrNotFound
 	}
@@ -381,15 +385,16 @@ func (s *Service) LatestAnalysis(ctx context.Context, tenantID shared.ID, key st
 	if err != nil {
 		return LatestAnalysis{}, err
 	}
-	analysis, result, err := s.analyses.LatestWithResult(ctx, tenantID, p.ID)
+	analysis, result, err := s.analyses.LatestWithResult(ctx, tenantID, p.ID, branch)
 	if err != nil {
 		return LatestAnalysis{}, err
 	}
 	return LatestAnalysis{Analysis: analysis, Result: result}, nil
 }
 
-// ListAnalyses returns one immutable Project history page, newest first.
-func (s *Service) ListAnalyses(ctx context.Context, tenantID shared.ID, key string, limit int, beforeCreatedAt time.Time, beforeID shared.ID) ([]projectanalysis.Analysis, bool, error) {
+// ListAnalyses returns one immutable Project history page, newest first. An empty branch means all
+// branches; a non-empty branch restricts the page to analyses produced on that branch.
+func (s *Service) ListAnalyses(ctx context.Context, tenantID shared.ID, key, branch string, limit int, beforeCreatedAt time.Time, beforeID shared.ID) ([]projectanalysis.Analysis, bool, error) {
 	if s.analyses == nil {
 		return nil, false, shared.ErrNotFound
 	}
@@ -397,7 +402,19 @@ func (s *Service) ListAnalyses(ctx context.Context, tenantID shared.ID, key stri
 	if err != nil {
 		return nil, false, err
 	}
-	return s.analyses.List(ctx, tenantID, p.ID, limit, beforeCreatedAt, beforeID)
+	return s.analyses.List(ctx, tenantID, p.ID, branch, limit, beforeCreatedAt, beforeID)
+}
+
+// Branches returns the distinct branch values recorded for the Project, sorted.
+func (s *Service) Branches(ctx context.Context, tenantID shared.ID, key string) ([]string, error) {
+	if s.analyses == nil {
+		return nil, shared.ErrNotFound
+	}
+	p, err := s.Get(ctx, tenantID, key)
+	if err != nil {
+		return nil, err
+	}
+	return s.analyses.Branches(ctx, tenantID, p.ID)
 }
 
 // GetAnalysis returns one snapshot without disclosing another Project's history.
@@ -547,7 +564,10 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 		}
 		_ = s.sourceArtifacts.DeleteAnalysis(cleanupCtx, p.TenantID, p.ID, jobID)
 	}()
-	previous, _, err := s.analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	// The New-Code baseline is the previous analysis on the SAME branch as the one being recorded,
+	// so a feature branch diffs against its own history, not whichever branch scanned last.
+	recordingBranch := projectanalysis.Analysis{SourceRef: result.SourceRef, CI: ci}.Branch()
+	previous, _, err := s.analyses.List(ctx, p.TenantID, p.ID, recordingBranch, 1, time.Time{}, "")
 	if err != nil {
 		return fmt.Errorf("list project analyses: %w", err)
 	}

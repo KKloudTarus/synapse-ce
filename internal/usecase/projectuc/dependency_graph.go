@@ -109,7 +109,7 @@ func (s *Service) ExportProjectDependencySubtree(ctx context.Context, tenantID s
 }
 
 func (s *Service) latestDependencyScan(ctx context.Context, tenantID shared.ID, key string) (LatestAnalysis, scauc.ScanResult, error) {
-	latest, err := s.LatestAnalysis(ctx, tenantID, key)
+	latest, err := s.LatestAnalysis(ctx, tenantID, key, "")
 	if err != nil {
 		return LatestAnalysis{}, scauc.ScanResult{}, err
 	}

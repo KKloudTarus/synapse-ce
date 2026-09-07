@@ -80,7 +80,8 @@ func (rt *Router) listProjectAnalyses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	analyses, hasMore, err := rt.projects.ListAnalyses(r.Context(), shared.ID(TenantFrom(r.Context())), r.PathValue("key"), limit, beforeCreatedAt, beforeID)
+	branch := strings.TrimSpace(r.URL.Query().Get("branch"))
+	analyses, hasMore, err := rt.projects.ListAnalyses(r.Context(), shared.ID(TenantFrom(r.Context())), r.PathValue("key"), branch, limit, beforeCreatedAt, beforeID)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return

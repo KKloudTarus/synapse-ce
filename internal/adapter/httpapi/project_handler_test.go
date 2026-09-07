@@ -27,7 +27,7 @@ type projectAnalysisServiceStub struct {
 	err    error
 }
 
-func (s projectAnalysisServiceStub) LatestAnalysis(context.Context, shared.ID, string) (projectuc.LatestAnalysis, error) {
+func (s projectAnalysisServiceStub) LatestAnalysis(context.Context, shared.ID, string, string) (projectuc.LatestAnalysis, error) {
 	return s.latest, s.err
 }
 

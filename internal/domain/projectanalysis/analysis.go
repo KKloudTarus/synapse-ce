@@ -138,6 +138,18 @@ func (a *Analysis) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Branch is the normalized branch/tag this analysis was produced on. It falls back to the CI-reported
+// branch, and is empty for a legacy analysis that recorded neither.
+func (a Analysis) Branch() string {
+	if a.SourceRef != "" {
+		return a.SourceRef
+	}
+	if a.CI != nil {
+		return a.CI.Branch
+	}
+	return ""
+}
+
 // Input supplies one completed scan's project-facing facts. Findings must be the
 // merged root and code-quality findings, not two independently counted lists.
 type Input struct {

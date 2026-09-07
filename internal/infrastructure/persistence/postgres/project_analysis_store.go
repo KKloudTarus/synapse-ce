@@ -41,9 +41,9 @@ func (r *ProjectAnalysisStore) SaveWithResult(ctx context.Context, analysis proj
 		return fmt.Errorf("marshal project analysis: %w", err)
 	}
 	return requireTenant(ctx, r.pool, shared.ID(analysis.TenantID), func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO project_analyses (id, tenant_id, project_id, created_at, payload, result)
-			VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
-			analysis.ID, analysis.TenantID, analysis.ProjectID, analysis.CreatedAt, payload, result); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO project_analyses (id, tenant_id, project_id, branch, created_at, payload, result)
+			VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
+			analysis.ID, analysis.TenantID, analysis.ProjectID, analysis.Branch(), analysis.CreatedAt, payload, result); err != nil {
 			return fmt.Errorf("insert project analysis: %w", err)
 		}
 		return nil
@@ -84,14 +84,21 @@ func (r *ProjectAnalysisStore) LatestForProjects(ctx context.Context, tenantID s
 	return out, nil
 }
 
-func (r *ProjectAnalysisStore) LatestWithResult(ctx context.Context, tenantID, projectID shared.ID) (projectanalysis.Analysis, []byte, error) {
+func (r *ProjectAnalysisStore) LatestWithResult(ctx context.Context, tenantID, projectID shared.ID, branch string) (projectanalysis.Analysis, []byte, error) {
 	var (
 		analysis projectanalysis.Analysis
 		result   []byte
 	)
 	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		var payload []byte
-		err := tx.QueryRow(ctx, `SELECT payload, result FROM project_analyses WHERE tenant_id=$1 AND project_id=$2 AND result IS NOT NULL ORDER BY created_at DESC, id COLLATE "C" DESC LIMIT 1`, tenantID.String(), projectID.String()).
+		query := `SELECT payload, result FROM project_analyses WHERE tenant_id=$1 AND project_id=$2 AND result IS NOT NULL`
+		args := []any{tenantID.String(), projectID.String()}
+		if branch != "" {
+			query += ` AND branch=$3`
+			args = append(args, branch)
+		}
+		query += ` ORDER BY created_at DESC, id COLLATE "C" DESC LIMIT 1`
+		err := tx.QueryRow(ctx, query, args...).
 			Scan(&payload, &result)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return shared.ErrNotFound
@@ -109,16 +116,23 @@ func (r *ProjectAnalysisStore) LatestWithResult(ctx context.Context, tenantID, p
 	return analysis, result, nil
 }
 
-func (r *ProjectAnalysisStore) List(ctx context.Context, tenantID, projectID shared.ID, limit int, beforeCreatedAt time.Time, beforeID shared.ID) ([]projectanalysis.Analysis, bool, error) {
+func (r *ProjectAnalysisStore) List(ctx context.Context, tenantID, projectID shared.ID, branch string, limit int, beforeCreatedAt time.Time, beforeID shared.ID) ([]projectanalysis.Analysis, bool, error) {
 	cursor := beforeCreatedAt
 	if beforeCreatedAt.IsZero() {
 		cursor = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC)
 	}
 	out := make([]projectanalysis.Analysis, 0, limit+1)
 	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT payload FROM project_analyses
-			WHERE tenant_id=$1 AND project_id=$2 AND (created_at < $3 OR (created_at = $3 AND id COLLATE "C" < $4))
-			ORDER BY created_at DESC, id COLLATE "C" DESC LIMIT $5`, tenantID.String(), projectID.String(), cursor, beforeID.String(), limit+1)
+		query := `SELECT payload FROM project_analyses
+			WHERE tenant_id=$1 AND project_id=$2 AND (created_at < $3 OR (created_at = $3 AND id COLLATE "C" < $4))`
+		args := []any{tenantID.String(), projectID.String(), cursor, beforeID.String()}
+		if branch != "" {
+			args = append(args, branch)
+			query += fmt.Sprintf(" AND branch=$%d", len(args))
+		}
+		args = append(args, limit+1)
+		query += fmt.Sprintf(` ORDER BY created_at DESC, id COLLATE "C" DESC LIMIT $%d`, len(args))
+		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("list project analyses: %w", err)
 		}
@@ -139,6 +153,29 @@ func (r *ProjectAnalysisStore) List(ctx context.Context, tenantID, projectID sha
 		out = out[:limit]
 	}
 	return out, hasMore, nil
+}
+
+// Branches returns the distinct branch values recorded for the project, sorted.
+func (r *ProjectAnalysisStore) Branches(ctx context.Context, tenantID, projectID shared.ID) ([]string, error) {
+	out := make([]string, 0)
+	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT branch FROM project_analyses WHERE tenant_id=$1 AND project_id=$2 ORDER BY branch`, tenantID.String(), projectID.String())
+		if err != nil {
+			return fmt.Errorf("list project analysis branches: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var branch string
+			if err := rows.Scan(&branch); err != nil {
+				return fmt.Errorf("scan project analysis branch: %w", err)
+			}
+			out = append(out, branch)
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *ProjectAnalysisStore) Get(ctx context.Context, tenantID, projectID, analysisID shared.ID) (projectanalysis.Analysis, error) {

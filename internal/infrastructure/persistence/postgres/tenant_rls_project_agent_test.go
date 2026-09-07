@@ -403,11 +403,11 @@ func TestConvertedStoresRoundTripUnderRLS(t *testing.T) {
 		if err != nil || got.ID != "rls817-analysis-1" {
 			t.Fatalf("get after save returned %+v err=%v", got, err)
 		}
-		listed, _, err := store.List(ctx, tenant, projectID, 10, time.Time{}, "")
+		listed, _, err := store.List(ctx, tenant, projectID, "", 10, time.Time{}, "")
 		if err != nil || len(listed) != 1 {
 			t.Fatalf("list returned %d analyses, err=%v", len(listed), err)
 		}
-		latest, result, err := store.LatestWithResult(ctx, tenant, projectID)
+		latest, result, err := store.LatestWithResult(ctx, tenant, projectID, "")
 		if err != nil || latest.ID != "rls817-analysis-1" || len(result) == 0 {
 			t.Fatalf("latest with result returned %+v result=%q err=%v", latest, result, err)
 		}

@@ -89,7 +89,7 @@ func (s *Service) GetMeasures(ctx context.Context, tenantID, projectKey, path st
 		}
 		analysis = &a
 	} else {
-		analyses, _, err := s.analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+		analyses, _, err := s.analyses.List(ctx, p.TenantID, p.ID, "", 1, time.Time{}, "")
 		if err != nil {
 			return ProjectMeasureResponse{}, err
 		}

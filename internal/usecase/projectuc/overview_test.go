@@ -67,7 +67,7 @@ func (s *overviewAnalysisStoreSpy) Save(context.Context, projectanalysis.Analysi
 func (s *overviewAnalysisStoreSpy) SaveWithResult(context.Context, projectanalysis.Analysis, []byte) error {
 	panic("unexpected SaveWithResult")
 }
-func (s *overviewAnalysisStoreSpy) LatestWithResult(context.Context, shared.ID, shared.ID) (projectanalysis.Analysis, []byte, error) {
+func (s *overviewAnalysisStoreSpy) LatestWithResult(context.Context, shared.ID, shared.ID, string) (projectanalysis.Analysis, []byte, error) {
 	panic("unexpected LatestWithResult")
 }
 func (s *overviewAnalysisStoreSpy) LatestForProjects(_ context.Context, tenantID shared.ID, projectIDs []shared.ID) (map[shared.ID]projectanalysis.Analysis, error) {
@@ -79,8 +79,11 @@ func (s *overviewAnalysisStoreSpy) LatestForProjects(_ context.Context, tenantID
 	}
 	return s.latest, nil
 }
-func (s *overviewAnalysisStoreSpy) List(context.Context, shared.ID, shared.ID, int, time.Time, shared.ID) ([]projectanalysis.Analysis, bool, error) {
+func (s *overviewAnalysisStoreSpy) List(context.Context, shared.ID, shared.ID, string, int, time.Time, shared.ID) ([]projectanalysis.Analysis, bool, error) {
 	panic("unexpected List")
+}
+func (s *overviewAnalysisStoreSpy) Branches(context.Context, shared.ID, shared.ID) ([]string, error) {
+	panic("unexpected Branches")
 }
 func (s *overviewAnalysisStoreSpy) Get(context.Context, shared.ID, shared.ID, shared.ID) (projectanalysis.Analysis, error) {
 	panic("unexpected Get")
@@ -94,7 +97,7 @@ func TestOverviewProjectNotFound(t *testing.T) {
 	repo := &overviewProjectRepoSpy{err: shared.ErrNotFound}
 	svc := NewService(repo, nil, fixedClock{}, fixedIDs{}, &captureAudit{}, true)
 	svc.SetAnalysisStore(&overviewAnalysisStoreSpy{})
-	_, err := svc.Overview(context.Background(), "tenant-a", "missing")
+	_, err := svc.Overview(context.Background(), "tenant-a", "missing", "")
 	if !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("error=%v, want not found", err)
 	}
@@ -102,7 +105,7 @@ func TestOverviewProjectNotFound(t *testing.T) {
 
 func TestOverviewRequiresAnalysisStore(t *testing.T) {
 	svc := NewService(&overviewProjectRepoSpy{project: overviewTestProject()}, nil, fixedClock{}, fixedIDs{}, &captureAudit{}, true)
-	_, err := svc.Overview(context.Background(), "tenant-a", "payments-api")
+	_, err := svc.Overview(context.Background(), "tenant-a", "payments-api", "")
 	if err == nil || errors.Is(err, shared.ErrNotFound) || errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("error=%v, want internal configuration error", err)
 	}
@@ -114,7 +117,7 @@ func TestOverviewNotAnalyzedUsesExplicitUnavailableMetrics(t *testing.T) {
 	svc := NewService(repo, nil, fixedClock{}, fixedIDs{}, &captureAudit{}, true)
 	svc.SetAnalysisStore(store)
 
-	got, err := svc.Overview(context.Background(), "tenant-a", "  payments-api ")
+	got, err := svc.Overview(context.Background(), "tenant-a", "  payments-api ", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +162,7 @@ func TestOverviewAnalyzedMapsImmutableSnapshot(t *testing.T) {
 	svc := NewService(&overviewProjectRepoSpy{project: overviewTestProject()}, nil, fixedClock{}, fixedIDs{}, &captureAudit{}, true)
 	svc.SetAnalysisStore(&overviewAnalysisStoreSpy{latest: map[shared.ID]projectanalysis.Analysis{"p1": analysis}})
 
-	got, err := svc.Overview(context.Background(), "tenant-a", "payments-api")
+	got, err := svc.Overview(context.Background(), "tenant-a", "payments-api", "")
 	if err != nil {
 		t.Fatal(err)
 	}
