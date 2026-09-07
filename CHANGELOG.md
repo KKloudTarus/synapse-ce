@@ -9,6 +9,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Dashboard, attack-path, and metric-strip UI polish.** The Security Operations metric strip now spreads evenly across the width and moves each figure's definition into an info tooltip instead of a second line of small print, which also removes the stray "fleet capability checks" line under Coverage gaps. The attack-path view is reworked into a cleaner exposure-to-finding flow with colored node rails, canonical severity badges, relationship-labelled edges, and the "why uncertain" reasons behind a tooltip. `listHosts` degrades to an empty list instead of throwing when the endpoint answers a non-array shape.
+
 - **Cloud posture, write-up drafts, coverage windows, and host retro-hunt reach the dashboard.** Four more routes were wired non-nil in `cmd/synapse-api` but had no UI. New surfaces consume them: a **Cloud Posture** tab runs a bounded read-only CSPM scan (`POST`/`GET /engagements/{id}/cspm/runs`); a **Write-up Drafts** tab lists AI-proposed finding write-ups with reviewer accept/edit/reject under separation of duties (`/engagements/{id}/writeup-drafts`); a **Coverage Windows** page shows the immutable per-asset telemetry coverage revisions with per-class sensor state (`GET /fleet/coverage-windows`); and a host **Timeline** tab re-hunts a window of the host timeline around a pivot (`POST /fleet/assets/{id}/retro-hunt`).
 
 - **Tenant telemetry-privacy governance in the dashboard.** The fleet source-privacy policy routes
