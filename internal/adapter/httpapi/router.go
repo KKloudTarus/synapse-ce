@@ -14,6 +14,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
@@ -82,6 +83,7 @@ type Router struct {
 	hostVulns              hostVulnerabilityService   // optional; nil ⇒ host vulnerability routes are not registered (#820)
 	findingSummaries       ports.FindingSummaryReader // optional; nil ⇒ engagement list rows carry no finding counts
 	scanJobs               ports.ScanJobStore         // optional; nil ⇒ engagement list rows carry no last scan
+	scanRunHistory         scanRunHistoryReader       // optional; normalized provenance read side for the existing scan-runs route
 	alerts                 alertService               // optional; nil ⇒ operator alerting routes are not registered
 	offensivePolicy        *offensivepolicy.Register  // optional; nil ⇒ the policy register route is not registered
 	responses              responseService            // optional; nil ⇒ governed defensive-response routes are not registered (#425)
