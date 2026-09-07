@@ -147,6 +147,37 @@ export const fleetApi = {
   },
 
   // Desired-vs-observed capability reconciliation (#633). Rows are snake_case-tagged (ReconciliationRow).
+  // Immutable telemetry coverage-window revisions (#611): one sealed record per asset/agent/host window,
+  // carrying the per-class sensor state and the sample/drop/gap counts the revision was computed from.
+  // Filters are optional; the tenant comes from the authenticated session.
+  listCoverageWindows: async (filters: CoverageWindowFilters = {}): Promise<CoverageWindow[]> => {
+    const qs = new URLSearchParams()
+    if (filters.agentId) qs.set('agent_id', filters.agentId)
+    if (filters.assetId) qs.set('asset_id', filters.assetId)
+    if (filters.hostId) qs.set('host_id', filters.hostId)
+    if (filters.since) qs.set('since', filters.since)
+    if (filters.until) qs.set('until', filters.until)
+    if (filters.limit) qs.set('limit', String(filters.limit))
+    const q = qs.toString()
+    const res = await req(`/fleet/coverage-windows${q ? `?${q}` : ''}`)
+    return (Array.isArray(res?.coverage_windows) ? res.coverage_windows : []).map(mapCoverageWindow)
+  },
+
+  // Re-hunt the endpoint state timeline in [around-before, around+after] on a host asset (#594 B7).
+  retroHunt: async (assetId: string, input: RetroHuntRequest): Promise<RetroHuntResult> =>
+    mapRetroHuntResult(
+      await req(`/fleet/assets/${encodeURIComponent(assetId)}/retro-hunt`, {
+        method: 'POST',
+        body: JSON.stringify({
+          around: input.around,
+          before_seconds: input.beforeSeconds,
+          after_seconds: input.afterSeconds,
+          entity_id: input.entityId ?? '',
+          limit: input.limit ?? 0,
+        }),
+      }),
+    ),
+
   // The route only exists when the desired-capabilities service is wired, so callers degrade gracefully.
   fleetDesiredGaps: async (): Promise<FleetDesiredGap[]> => {
     const res = await req('/fleet/desired-capabilities/gaps')
@@ -163,4 +194,135 @@ export const fleetApi = {
       }),
     )
   },
+}
+
+// --- Coverage windows (#611 immutable telemetry coverage revisions) ---
+
+export interface CoverageWindowFilters {
+  agentId?: string
+  assetId?: string
+  hostId?: string
+  since?: string
+  until?: string
+  limit?: number
+}
+
+export type CoverageClass = 'process' | 'network' | 'file' | 'privilege'
+
+export interface CoverageClassState {
+  class: string
+  hostId: string
+  agentId: string
+  state: string
+  reason: string
+  since: string
+}
+
+export interface CoverageVector {
+  process: number
+  network: number
+  file: number
+  privilege: number
+  reasons: string[]
+}
+
+export interface CoverageWindow {
+  assetId: string
+  agentId: string
+  hostId: string
+  since: string
+  until: string
+  inputDigest: string
+  revision: string
+  createdAt: string
+  states: CoverageClassState[]
+  sampledCount: number
+  truncatedCount: number
+  droppedCount: number
+  gapCount: number
+  batchCount: number
+  coverage: CoverageVector
+}
+
+function mapCoverageWindow(r: any): CoverageWindow {
+  return {
+    assetId: r?.asset_id ?? '',
+    agentId: r?.agent_id ?? '',
+    hostId: r?.host_id ?? '',
+    since: r?.since ?? '',
+    until: r?.until ?? '',
+    inputDigest: r?.input_digest ?? '',
+    revision: r?.revision ?? '',
+    createdAt: r?.created_at ?? '',
+    states: Array.isArray(r?.states)
+      ? r.states.map((s: any): CoverageClassState => ({
+          class: s?.class ?? '',
+          hostId: s?.host_id ?? '',
+          agentId: s?.agent_id ?? '',
+          state: s?.state ?? '',
+          reason: s?.reason ?? '',
+          since: s?.since ?? '',
+        }))
+      : [],
+    sampledCount: r?.sampled_count ?? 0,
+    truncatedCount: r?.truncated_count ?? 0,
+    droppedCount: r?.dropped_count ?? 0,
+    gapCount: r?.gap_count ?? 0,
+    batchCount: r?.batch_count ?? 0,
+    coverage: {
+      process: r?.coverage?.process ?? 0,
+      network: r?.coverage?.network ?? 0,
+      file: r?.coverage?.file ?? 0,
+      privilege: r?.coverage?.privilege ?? 0,
+      reasons: Array.isArray(r?.coverage?.reasons) ? r.coverage.reasons : [],
+    },
+  }
+}
+
+// --- Retro-hunt (#594 B7): re-hunt the endpoint state timeline in a window around a pivot ---
+
+export interface RetroHuntRequest {
+  around: string // RFC3339 pivot time
+  beforeSeconds: number
+  afterSeconds: number
+  entityId?: string
+  limit?: number
+}
+
+export interface TimelineEntry {
+  occurredAt: string
+  entityKind: string
+  entityId: string
+  kind: string
+  eventId: string
+  summary: string
+}
+
+export interface RetroHuntResult {
+  assetId: string
+  from: string
+  to: string
+  entries: TimelineEntry[]
+  truncated: boolean
+}
+
+function mapTimelineEntry(r: any): TimelineEntry {
+  return {
+    occurredAt: r?.OccurredAt ?? r?.occurred_at ?? '',
+    entityKind: r?.EntityKind ?? r?.entity_kind ?? '',
+    entityId: r?.EntityID ?? r?.entity_id ?? '',
+    kind: r?.Kind ?? r?.kind ?? '',
+    eventId: r?.EventID ?? r?.event_id ?? '',
+    summary: r?.Summary ?? r?.summary ?? '',
+  }
+}
+
+export function mapRetroHuntResult(r: any): RetroHuntResult {
+  return {
+    assetId: r?.AssetID ?? r?.asset_id ?? '',
+    from: r?.From ?? r?.from ?? '',
+    to: r?.To ?? r?.to ?? '',
+    entries: Array.isArray(r?.Entries) ? r.Entries.map(mapTimelineEntry) : Array.isArray(r?.entries) ? r.entries.map(mapTimelineEntry) : [],
+    truncated: r?.Truncated ?? r?.truncated ?? false,
+  }
 }

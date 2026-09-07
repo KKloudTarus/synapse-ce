@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Copy01, SearchSm } from '@untitledui/icons'
 import { api } from '../../lib/api'
+import type { RetroHuntResult } from '../../lib/api'
 import type { HostFinding, HostPackages, HostVulnerabilities, Severity } from '../../lib/types'
 import { Button, Card, Input, Pill, SevBadge, cn } from '../../components/ui'
 import { FeatureDisabledState, isFeatureDisabledMessage } from '../../components/synapse/FeatureDisabledState'
@@ -12,7 +13,7 @@ import { useFetch } from '../../hooks'
 import { formatFleetTime } from './fleetShared'
 import { HostScanBadge, hostDegraded, hostFindingAdvisory, hostFindingPackage, hostOS, hostScanState, hostShortName, reportedPackages } from './hostShared'
 
-type Tab = 'vulnerabilities' | 'packages' | 'coverage'
+type Tab = 'vulnerabilities' | 'packages' | 'coverage' | 'retrohunt'
 type SeverityFilter = 'all' | Severity | 'unrated'
 const RATED: Severity[] = ['critical', 'high', 'medium', 'low']
 type FixFilter = 'all' | 'fixable' | 'unfixed'
@@ -314,6 +315,116 @@ function PackagesBody({ assetId }: { assetId: string }) {
   )
 }
 
+function toLocalInput(d: Date): string {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+}
+
+export function RetroHuntBody({ assetId }: { assetId: string }) {
+  const localZone = (() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'
+    } catch {
+      return 'local'
+    }
+  })()
+  const [around, setAround] = useState(() => toLocalInput(new Date()))
+  const [beforeMin, setBeforeMin] = useState(15)
+  const [afterMin, setAfterMin] = useState(15)
+  const [entityId, setEntityId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [result, setResult] = useState<RetroHuntResult | null>(null)
+
+  async function run() {
+    setBusy(true)
+    setErr('')
+    try {
+      const iso = around ? new Date(around).toISOString() : ''
+      const res = await api.retroHunt(assetId, {
+        around: iso,
+        beforeSeconds: Math.max(0, Math.round(beforeMin * 60)),
+        afterSeconds: Math.max(0, Math.round(afterMin * 60)),
+        entityId: entityId.trim() || undefined,
+        limit: 500,
+      })
+      setResult(res)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Retro-hunt failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4 p-4">
+      <p className="text-xs text-tertiary">
+        Re-hunt this host's endpoint state timeline in a window around a pivot time, optionally scoped to
+        one entity. The window is anchored to the pivot; a capped window is reported as truncated.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+            Pivot time <span className="font-normal normal-case text-quaternary">({localZone})</span>
+          </span>
+          <Input type="datetime-local" value={around} onChange={(e) => setAround(e.target.value)} aria-label="Retro-hunt pivot time" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">Look back (min)</span>
+          <Input type="number" min={0} value={beforeMin} onChange={(e) => setBeforeMin(Number(e.target.value) || 0)} className="w-28" aria-label="Retro-hunt look-back minutes" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">Look forward (min)</span>
+          <Input type="number" min={0} value={afterMin} onChange={(e) => setAfterMin(Number(e.target.value) || 0)} className="w-28" aria-label="Retro-hunt look-forward minutes" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">Entity (optional)</span>
+          <Input value={entityId} onChange={(e) => setEntityId(e.target.value)} placeholder="entity id" className="w-48 font-mono" aria-label="Retro-hunt entity id" />
+        </label>
+        <Button variant="primary" className="px-3 py-2" loading={busy} disabled={busy || (beforeMin === 0 && afterMin === 0)} onClick={run}>
+          <SearchSm className="size-4" /> Hunt
+        </Button>
+      </div>
+      {beforeMin === 0 && afterMin === 0 && (
+        <p className="text-xs text-warning-primary">Set a non-zero look-back or look-forward; a zero-width window is rejected.</p>
+      )}
+      {err && <OperationalState tone="error" title="Retro-hunt failed" detail={err} />}
+      {result && !err && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-tertiary">
+            <span>{formatFleetTime(result.from)} → {formatFleetTime(result.to)}</span>
+            <Pill>{result.entries.length} transition{result.entries.length === 1 ? '' : 's'}</Pill>
+            {result.truncated ? (
+              <Pill className="bg-warning-primary/10 text-warning-primary ring-1 ring-inset ring-warning-primary/25">
+                truncated — window capped
+              </Pill>
+            ) : (
+              <Pill className="bg-success-primary/10 text-success-primary ring-1 ring-inset ring-success-primary/25">complete window</Pill>
+            )}
+          </div>
+          {result.entries.length === 0 ? (
+            <p className="text-sm text-tertiary">No endpoint transitions in this window.</p>
+          ) : (
+            <ol className="relative space-y-2 border-l border-secondary pl-4">
+              {result.entries.map((en) => (
+                <li key={en.eventId || `${en.occurredAt}-${en.entityId}`} className="relative">
+                  <span className="absolute -left-[21px] top-1.5 size-2 rounded-full bg-brand-solid" aria-hidden />
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                    <span className="inline-block w-40 shrink-0 font-mono text-xs tabular-nums text-secondary">{formatFleetTime(en.occurredAt)}</span>
+                    <span className="text-sm font-medium text-primary">{en.kind}</span>
+                    {en.entityKind && <Pill className="capitalize">{en.entityKind}</Pill>}
+                    {en.entityId && <span className="font-mono text-xs text-quaternary">{en.entityId}</span>}
+                  </div>
+                  {en.summary && <p className="mt-0.5 text-sm text-tertiary">{en.summary}</p>}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function HostDetail() {
   const { id = '' } = useParams()
   const [tab, setTab] = useState<Tab>('vulnerabilities')
@@ -375,7 +486,7 @@ export function HostDetail() {
 
       <Card bodyClass="p-0">
         <div className="flex items-center gap-1 border-b border-secondary px-2" role="tablist" aria-label="Host views">
-          {([['vulnerabilities', `Vulnerabilities`, host.findings.length], ['packages', 'Packages', host.packages || reported], ['coverage', 'Coverage gaps', Number(a.coverage_gaps ?? '0') || 0]] as [Tab, string, number][]).map(([value, label, count]) => (
+          {([['vulnerabilities', `Vulnerabilities`, host.findings.length], ['packages', 'Packages', host.packages || reported], ['coverage', 'Coverage gaps', Number(a.coverage_gaps ?? '0') || 0], ['retrohunt', 'Timeline', null]] as [Tab, string, number | null][]).map(([value, label, count]) => (
             <button
               key={value}
               type="button"
@@ -384,11 +495,20 @@ export function HostDetail() {
               onClick={() => setTab(value)}
               className={cn('-mb-px border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors', tab === value ? 'border-brand-solid text-primary' : 'border-transparent text-tertiary hover:text-primary')}
             >
-              {label} <span className="ml-1 font-mono text-xs tabular-nums text-quaternary">{count.toLocaleString()}</span>
+              {label}{' '}
+              {count !== null && <span className="font-mono text-xs tabular-nums text-quaternary">{count.toLocaleString()}</span>}
             </button>
           ))}
         </div>
-        {tab === 'vulnerabilities' ? <VulnerabilitiesBody host={host} /> : tab === 'packages' ? <PackagesBody assetId={host.asset.id} /> : <CoverageBody host={host} />}
+        {tab === 'vulnerabilities' ? (
+          <VulnerabilitiesBody host={host} />
+        ) : tab === 'packages' ? (
+          <PackagesBody assetId={host.asset.id} />
+        ) : tab === 'retrohunt' ? (
+          <RetroHuntBody assetId={host.asset.id} />
+        ) : (
+          <CoverageBody host={host} />
+        )}
       </Card>
     </div>
   )

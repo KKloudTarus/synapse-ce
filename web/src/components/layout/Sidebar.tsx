@@ -12,6 +12,7 @@ import {
   Plus,
   Monitor01,
   Server01,
+  Signal01,
   Settings01,
   ShieldTick,
   SlashCircle01,
@@ -86,6 +87,7 @@ const NAV_GROUPS: Array<{
       items: [
         { icon: Server01, label: 'Fleet', to: '/fleet', capability: 'fleet' },
         { icon: Monitor01, label: 'Hosts', to: '/fleet/hosts', capability: 'fleet' },
+        { icon: Signal01, label: 'Coverage Windows', to: '/fleet/coverage-windows', capability: 'fleet' },
         { icon: AlertTriangle, label: 'Incidents', to: '/fleet/incidents' },
         { icon: ShieldTick, label: 'Response', to: '/blueteam/response', capability: 'fleet' },
         { icon: Activity, label: 'Automation Observability', to: '/ai-triage/observability', capability: 'ai_triage' },
