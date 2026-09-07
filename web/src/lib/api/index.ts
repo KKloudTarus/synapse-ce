@@ -98,6 +98,8 @@ export {
   type RetroHuntRequest,
   type RetroHuntResult,
   type TimelineEntry,
+  type Workload,
+  type WorkloadImage,
 } from './fleet'
 export {
   type CSPMRun,

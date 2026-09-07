@@ -17,6 +17,7 @@ type assetService interface {
 	ListAssets(context.Context, shared.ID) ([]*asset.Asset, error)
 	UpsertEdge(context.Context, string, assetuc.EdgeInput) error
 	ListEdges(context.Context, shared.ID) ([]*asset.Edge, error)
+	Workloads(context.Context, shared.ID) ([]assetuc.WorkloadOrigin, error)
 }
 
 // SetAssets wires the asset service and enables the asset routes.
@@ -119,4 +120,40 @@ func (rt *Router) listAssetEdges(w http.ResponseWriter, r *http.Request) {
 		list = []*asset.Edge{}
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+type workloadImageDTO struct {
+	Ref    string `json:"ref"`
+	Digest string `json:"digest"`
+}
+
+// workloadOriginDTO is one Kubernetes workload and the images it runs, from the cluster-inventory
+// graph. It lets an operator trace a container CVE (found on an image) back to the workload that runs
+// it: the deployment, statefulset, daemonset, and namespace it came from.
+type workloadOriginDTO struct {
+	Cluster        string             `json:"cluster"`
+	Namespace      string             `json:"namespace"`
+	Kind           string             `json:"kind"`
+	Name           string             `json:"name"`
+	ServiceAccount string             `json:"service_account,omitempty"`
+	Images         []workloadImageDTO `json:"images"`
+}
+
+// listFleetWorkloads returns the tenant's Kubernetes workloads with the images they run, so a CVE on
+// an image can be traced to its workload origin. Empty until a cluster agent ingests a snapshot.
+func (rt *Router) listFleetWorkloads(w http.ResponseWriter, r *http.Request) {
+	list, err := rt.assets.Workloads(r.Context(), fleetTenant(r.Context()))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	out := make([]workloadOriginDTO, 0, len(list))
+	for _, wl := range list {
+		dto := workloadOriginDTO{Cluster: wl.Cluster, Namespace: wl.Namespace, Kind: wl.Kind, Name: wl.Name, ServiceAccount: wl.ServiceAccount, Images: []workloadImageDTO{}}
+		for _, img := range wl.Images {
+			dto.Images = append(dto.Images, workloadImageDTO{Ref: img.Ref, Digest: img.Digest})
+		}
+		out = append(out, dto)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workloads": out})
 }

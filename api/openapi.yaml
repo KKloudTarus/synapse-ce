@@ -2694,6 +2694,51 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/fleet/workloads:
+    get:
+      tags: [fleet]
+      operationId: listFleetWorkloads
+      summary: List Kubernetes workloads with the images they run
+      description: >
+        Human/operator read of the tenant's Kubernetes workloads mapped to the container image digests
+        they run, derived from the cluster-inventory asset graph (workload depends_on image). It answers
+        "which deployment or statefulset does this image come from": a container CVE found on an image
+        digest can be attributed to every workload that runs it. Tenant identity comes only from the
+        authenticated principal. Empty until a cluster agent ingests a snapshot.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Workloads and the images they run
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workloads]
+                properties:
+                  workloads:
+                    type: array
+                    items:
+                      type: object
+                      required: [cluster, namespace, kind, name, images]
+                      properties:
+                        cluster: {type: string}
+                        namespace: {type: string}
+                        kind: {type: string, description: 'controller kind: Deployment, StatefulSet, DaemonSet, ...'}
+                        name: {type: string}
+                        service_account: {type: string}
+                        images:
+                          type: array
+                          items:
+                            type: object
+                            required: [ref, digest]
+                            properties:
+                              ref: {type: string, description: image reference as declared}
+                              digest: {type: string, description: resolved image digest (the image asset natural key)}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
   /api/v1/fleet/sensor-states:
     post:
       tags: [fleet]

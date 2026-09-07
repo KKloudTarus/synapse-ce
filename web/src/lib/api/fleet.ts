@@ -12,6 +12,32 @@ import type {
   HostVulnerabilities,
   HostVulnerabilitySummary,
 } from '../types'
+
+export interface WorkloadImage {
+  ref: string
+  digest: string
+}
+
+/** One Kubernetes workload and the images it runs, from the cluster-inventory graph. */
+export interface Workload {
+  cluster: string
+  namespace: string
+  kind: string
+  name: string
+  serviceAccount: string
+  images: WorkloadImage[]
+}
+
+function mapWorkload(r: any): Workload {
+  return {
+    cluster: r?.cluster ?? '',
+    namespace: r?.namespace ?? '',
+    kind: r?.kind ?? '',
+    name: r?.name ?? '',
+    serviceAccount: r?.service_account ?? '',
+    images: Array.isArray(r?.images) ? r.images.map((i: any) => ({ ref: i?.ref ?? '', digest: i?.digest ?? '' })) : [],
+  }
+}
 import { mapTechnicalAsset } from './assets'
 import { blobDownload, req } from './client'
 import { mapFinding } from './findings'
@@ -183,6 +209,16 @@ export const fleetApi = {
         }),
       }),
     ),
+
+  /**
+   * Kubernetes workloads with the images they run, from the cluster-inventory graph. This is the
+   * "which deployment/statefulset does this image come from" lookup: a container CVE found on an image
+   * digest can be traced to every workload that runs it. Empty until a cluster agent ingests a snapshot.
+   */
+  fleetWorkloads: async (): Promise<Workload[]> => {
+    const r = await req('/fleet/workloads')
+    return Array.isArray(r?.workloads) ? r.workloads.map(mapWorkload) : []
+  },
 
   // The route only exists when the desired-capabilities service is wired, so callers degrade gracefully.
   fleetDesiredGaps: async (): Promise<FleetDesiredGap[]> => {

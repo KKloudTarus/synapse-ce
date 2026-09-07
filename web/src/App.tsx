@@ -30,6 +30,7 @@ const FleetCoverage = lazy(() => import('./pages/Fleet/FleetCoverage').then(m =>
 const Incidents = lazy(() => import('./pages/Fleet/Incidents').then(m => ({ default: m.Incidents })))
 const Hosts = lazy(() => import('./pages/Fleet/Hosts').then(m => ({ default: m.Hosts })))
 const CoverageWindows = lazy(() => import('./pages/Fleet/CoverageWindows').then(m => ({ default: m.CoverageWindows })))
+const Workloads = lazy(() => import('./pages/Fleet/Workloads').then(m => ({ default: m.Workloads })))
 const HostDetail = lazy(() => import('./pages/Fleet/HostDetail').then(m => ({ default: m.HostDetail })))
 const IncidentDetail = lazy(() => import('./pages/Fleet/IncidentDetail').then(m => ({ default: m.IncidentDetail })))
 const Rules = lazy(() => import('./pages/Rules/index'))
@@ -105,6 +106,7 @@ function Gate() {
         <Route path="fleet/agents" element={<Navigate to="/fleet" replace />} />
         <Route path="fleet/hosts" element={<Hosts />} />
         <Route path="fleet/coverage-windows" element={<CoverageWindows />} />
+        <Route path="fleet/workloads" element={<Workloads />} />
         <Route path="fleet/hosts/:id" element={<HostDetail />} />
         <Route path="fleet/incidents" element={<Incidents />} />
         <Route path="blueteam/response" element={<ResponseOps />} />

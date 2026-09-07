@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -145,4 +147,88 @@ func (s *Service) ListAssets(ctx context.Context, tenantID shared.ID) ([]*asset.
 // ListEdges returns the tenant's edges, deterministically ordered.
 func (s *Service) ListEdges(ctx context.Context, tenantID shared.ID) ([]*asset.Edge, error) {
 	return s.repo.ListEdges(ctx, tenantID)
+}
+
+// WorkloadImage is a container image a workload runs, taken from the cluster-inventory graph.
+type WorkloadImage struct {
+	Ref    string // image reference as declared (may be a mutable tag)
+	Digest string // resolved image digest; the KindImage asset's natural key
+}
+
+// WorkloadOrigin is one Kubernetes workload (Deployment/StatefulSet/DaemonSet/...) and the images it
+// runs, derived from the cluster-inventory asset graph (KindWorkload --depends_on--> KindImage). It
+// answers "which workload runs this image", so a CVE found on an image can be traced to its workload.
+type WorkloadOrigin struct {
+	Cluster        string
+	Namespace      string
+	Kind           string // controller kind
+	Name           string
+	ServiceAccount string
+	Images         []WorkloadImage
+}
+
+// Workloads returns the tenant's Kubernetes workloads with the images they run, from the asset graph.
+// It is read-only and returns an empty slice when no cluster inventory has been ingested.
+func (s *Service) Workloads(ctx context.Context, tenantID shared.ID) ([]WorkloadOrigin, error) {
+	assets, err := s.repo.ListAssets(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list assets: %w", err)
+	}
+	edges, err := s.repo.ListEdges(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list edges: %w", err)
+	}
+	byID := make(map[shared.ID]*asset.Asset, len(assets))
+	for _, a := range assets {
+		byID[a.ID] = a
+	}
+	// workload id -> the image assets it depends on
+	imagesOf := make(map[shared.ID][]*asset.Asset)
+	for _, e := range edges {
+		if e.Kind != asset.EdgeDependsOn {
+			continue
+		}
+		from, to := byID[e.From], byID[e.To]
+		if from == nil || to == nil || from.Kind != asset.KindWorkload || to.Kind != asset.KindImage {
+			continue
+		}
+		imagesOf[from.ID] = append(imagesOf[from.ID], to)
+	}
+	out := make([]WorkloadOrigin, 0)
+	for _, a := range assets {
+		if a.Kind != asset.KindWorkload {
+			continue
+		}
+		wo := WorkloadOrigin{
+			Cluster:        clusterFromWorkloadKey(a.Key),
+			Namespace:      a.Attributes["namespace"],
+			Kind:           a.Attributes["controller_kind"],
+			Name:           a.Name,
+			ServiceAccount: a.Attributes["service_account"],
+		}
+		for _, img := range imagesOf[a.ID] {
+			wo.Images = append(wo.Images, WorkloadImage{Ref: img.Attributes["image"], Digest: img.Name})
+		}
+		sort.Slice(wo.Images, func(i, j int) bool { return wo.Images[i].Digest < wo.Images[j].Digest })
+		out = append(out, wo)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Namespace != out[j].Namespace {
+			return out[i].Namespace < out[j].Namespace
+		}
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Kind < out[j].Kind
+	})
+	return out, nil
+}
+
+// clusterFromWorkloadKey extracts the cluster identity, the first segment of a workload's natural key
+// (cluster/namespace/controllerKind/name).
+func clusterFromWorkloadKey(key string) string {
+	if i := strings.IndexByte(key, '/'); i >= 0 {
+		return key[:i]
+	}
+	return key
 }
