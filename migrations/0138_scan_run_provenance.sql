@@ -3,7 +3,7 @@
 -- and add normalized, sealed producer-lane provenance tables.
 --
 -- This is the expand release. scan_runs.tenant_id deliberately remains nullable
--- and scan_runs remains outside forced RLS so a pre-0134 binary can keep writing
+-- and scan_runs remains outside forced RLS so a pre-0138 binary can keep writing
 -- and reading scan history during the migrate-first rollout window. A small
 -- transitional engagement-to-tenant map plus BEFORE INSERT/UPDATE trigger fills
 -- tenant_id for legacy writers that do not know about the new column. The
@@ -51,7 +51,7 @@ BEGIN
          LIMIT 1
     ) bad;
     IF FOUND THEN
-        RAISE EXCEPTION 'migration 0134: scan_runs ownership cannot be resolved from engagements';
+        RAISE EXCEPTION 'migration 0138: scan_runs ownership cannot be resolved from engagements';
     END IF;
 
     UPDATE scan_runs sr
@@ -68,7 +68,7 @@ BEGIN
 
     SELECT COUNT(*) INTO v_orphans FROM scan_runs WHERE tenant_id IS NULL OR tenant_id = '';
     IF v_orphans > 0 THEN
-        RAISE EXCEPTION 'migration 0134: found % orphaned scan_runs rows with no matching engagement tenant_id', v_orphans;
+        RAISE EXCEPTION 'migration 0138: found % orphaned scan_runs rows with no matching engagement tenant_id', v_orphans;
     END IF;
 
     EXECUTE 'ALTER TABLE engagements FORCE ROW LEVEL SECURITY';
@@ -317,7 +317,7 @@ CALL synapse_enable_tenant_rls('scan_run_lane_stages');
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM scan_runs WHERE sealed_at IS NOT NULL) THEN
-        RAISE EXCEPTION 'migration 0134: cannot roll back while sealed scan runs exist';
+        RAISE EXCEPTION 'migration 0138: cannot roll back while sealed scan runs exist';
     END IF;
 END $$;
 -- +goose StatementEnd
