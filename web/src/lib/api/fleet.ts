@@ -91,7 +91,13 @@ function mapFleetCoverageRow(raw: any): FleetCoverageRow {
 }
 
 export const fleetApi = {
-  listHosts: async (): Promise<HostRow[]> => ((await req('/assets/hosts')) ?? []).map(mapHostRow),
+  listHosts: async (): Promise<HostRow[]> => {
+    // The endpoint answers a bare JSON array; guard against any non-array shape (an error body,
+    // an object envelope) so a malformed response degrades to "no hosts" instead of crashing on .map.
+    const res = await req('/assets/hosts')
+    const rows = Array.isArray(res) ? res : Array.isArray(res?.hosts) ? res.hosts : []
+    return rows.map(mapHostRow)
+  },
 
   hostVulnerabilities: async (assetId: string): Promise<HostVulnerabilities> => {
     const raw = await req(`/assets/${encodeURIComponent(assetId)}/vulnerabilities`)

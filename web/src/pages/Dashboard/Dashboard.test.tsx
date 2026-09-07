@@ -132,11 +132,12 @@ describe('Dashboard', () => {
     expect(screen.getByLabelText(/Coverage gaps: N\/A/i)).toBeInTheDocument()
   })
 
-  it('labels the coverage tile Fleet disabled when the fleet routes are absent', async () => {
+  it('blanks the coverage tile and explains in the tooltip when fleet routes are absent', async () => {
     vi.mocked(api.fleetCoverageSummary).mockRejectedValue(new ApiError(404, 'HTTP 404'))
     renderDashboard()
 
-    expect(await screen.findByLabelText('Coverage gaps: Fleet disabled')).toBeInTheDocument()
+    // Fleet-disabled shows an em dash; the reason lives in the tile's info tooltip, not as a value.
+    expect(await screen.findByLabelText('Coverage gaps: —')).toBeInTheDocument()
     expect(screen.getByText(/SYNAPSE_FLEET_ENABLED=true/)).toBeInTheDocument()
     expect(screen.queryByLabelText(/Coverage gaps: N\/A/i)).not.toBeInTheDocument()
   })

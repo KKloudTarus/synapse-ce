@@ -83,8 +83,12 @@ export const DashboardPage: FC = () => {
         <Metric label="Active engagements" value={activeEngagements} />
         <Metric
           label="Coverage gaps"
-          value={fleetDisabled ? 'Fleet disabled' : (coverageGaps ?? 'N/A')}
-          hint={fleetDisabled ? 'Set SYNAPSE_FLEET_ENABLED=true to measure agent coverage.' : 'fleet capability checks'}
+          value={fleetDisabled ? '—' : (coverageGaps ?? 'N/A')}
+          hint={
+            fleetDisabled
+              ? 'Fleet is disabled. Set SYNAPSE_FLEET_ENABLED=true to measure agent coverage.'
+              : 'Assets missing an expected fleet-agent capability (process, network, file, or privilege telemetry).'
+          }
           tone={fleetDisabled ? 'muted' : coverageGaps ? 'warning' : 'muted'}
         />
         <Metric label="Needs attention" value={attention.length} tone={attention.length ? 'warning' : 'muted'} />
