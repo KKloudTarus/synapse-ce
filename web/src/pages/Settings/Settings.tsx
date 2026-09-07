@@ -8,6 +8,7 @@ const TABS = [
   { label: 'SLA policy', to: '/settings/sla' },
   { label: 'Offensive policy', to: '/settings/offensive-policy' },
   { label: 'Alerting', to: '/settings/alerting' },
+  { label: 'Telemetry Privacy', to: '/settings/privacy' },
   { label: 'Config', to: '/settings/config' },
 ]
 

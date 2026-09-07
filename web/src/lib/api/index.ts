@@ -8,6 +8,7 @@ export { type AgentStreamEvent, streamAgentSession } from './agent'
 export { type Connector, type ConnectorCreate, type ConnectorProvider } from './connectors'
 export { type ResponseRecord, type ResponsePlan, type ResponseKind, type ResponseState, type HaltResult, type PurpleVerdict, type PurpleCoverageRow, type PurpleWorkItem } from './blueteam'
 export { type RiskStory, type RiskFinding, type RiskExposure, type RiskPath, type RiskDetection, type RiskAssetFacts } from './riskstory'
+export { type PrivacyDisposition, type PrivacyPolicy, type PrivacyAssignment, PRIVACY_CATEGORIES } from './privacy'
 export { type ReconcileRun, type ReconcileCounts, type ReconcileState, type ReconcileDiff, type ReconcileDiffClass, type ReconcileDiffCursor, type ReconcileDiffPage } from './vulnerability'
 export { type AttackPathResult, type AttackPath, type AttackPathNode, type AttackPathStep, type AttackPathBounds, type AttackPathQuery, type AttackPathNodeKind } from './attackpaths'
 export { type SLAPoliciesView, type SLAPolicy, type SLAConfig, type SLAWeights, type SLAThresholds, type SLADueRange, type SLADueRanges, type SLADueTier, type SLAActivateResult, nsToDays, daysToNs } from './sla'
@@ -40,6 +41,7 @@ import { attackPathsApi } from './attackpaths'
 import { slaApi } from './sla'
 import { offensivePolicyApi } from './offensivepolicy'
 import { alertingApi } from './alerting'
+import { privacyApi } from './privacy'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -78,4 +80,5 @@ export const api = {
   ...slaApi,
   ...offensivePolicyApi,
   ...alertingApi,
+  ...privacyApi,
 }

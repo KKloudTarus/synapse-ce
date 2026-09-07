@@ -351,6 +351,20 @@ const SLA_ITEMS = [
 ]
 
 // --- Fleet ---
+const PRIVACY_POLICY_V1 = {
+  dispositions: { 'process.comm': 'allow', 'process.arg': 'redact', 'process.path': 'allow', 'process.env': 'drop', 'file.path': 'hash', 'file.comm': 'allow', 'network.comm': 'allow', 'privilege.comm': 'allow' },
+  redact_secrets: true,
+  max_arg_len: 4096,
+  max_arg_count: 64,
+  max_path_len: 1024,
+  version: 'v1',
+}
+const PRIVACY_ACTIVE = { tenant_id: 't-1', policy: PRIVACY_POLICY_V1, digest: 'sha256:aa11bb22cc33dd44ee55', created_by: 'operator', created_at: WEEK_AGO }
+const PRIVACY_HISTORY = [
+  PRIVACY_ACTIVE,
+  { tenant_id: 't-1', policy: { ...PRIVACY_POLICY_V1, dispositions: { ...PRIVACY_POLICY_V1.dispositions, 'process.arg': 'allow' } }, digest: 'sha256:ff99ee88dd77cc66', created_by: 'operator', created_at: MONTH_AGO },
+]
+
 const FLEET_AGENTS = [
   { id: 'agent-001', name: 'prod-scanner-01', platform: 'linux/amd64', agent_version: '0.9.4', state: 'healthy', last_seen: NOW, capabilities: ['scan.host', 'scan.container', 'detect.runtime'], current_work: 2 },
   { id: 'agent-002', name: 'staging-scanner', platform: 'linux/arm64', agent_version: '0.9.3', state: 'healthy', last_seen: HOUR_AGO, capabilities: ['scan.host', 'detect.runtime'], current_work: 0 },
@@ -1152,6 +1166,16 @@ export const handlers = [
   ], next: '' })),
 
   // --- Fleet ---
+  http.get('/api/v1/fleet/privacy-policies/active', () => HttpResponse.json({ assignment: PRIVACY_ACTIVE })),
+  http.get('/api/v1/fleet/privacy-policies', () => HttpResponse.json({ assignments: PRIVACY_HISTORY })),
+  http.post('/api/v1/fleet/privacy-policies', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { policy?: unknown }
+    return HttpResponse.json({ assignment: { ...PRIVACY_ACTIVE, digest: 'sha256:newadmitted01', policy: body?.policy ?? PRIVACY_ACTIVE.policy }, created: true }, { status: 201 })
+  }),
+  http.post('/api/v1/fleet/privacy-policies/activate', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { digest?: string }
+    return HttpResponse.json({ assignment: { ...PRIVACY_ACTIVE, digest: body?.digest ?? PRIVACY_ACTIVE.digest } })
+  }),
   http.get('/api/v1/fleet/coverage/summary', () => HttpResponse.json({
     agents_by_state: { healthy: 4, stale: 1, revoked: 0 },
     rows_by_verdict: { covered: 4, stale: 1, partial: 1, agent_missing: 1 },
