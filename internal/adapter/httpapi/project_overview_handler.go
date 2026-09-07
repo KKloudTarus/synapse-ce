@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -90,7 +91,8 @@ type projectOverviewCountMetricDTO struct {
 }
 
 func (rt *Router) projectOverview(w http.ResponseWriter, r *http.Request) {
-	overview, err := rt.projects.Overview(r.Context(), shared.ID(TenantFrom(r.Context())), r.PathValue("key"))
+	branch := strings.TrimSpace(r.URL.Query().Get("branch"))
+	overview, err := rt.projects.Overview(r.Context(), shared.ID(TenantFrom(r.Context())), r.PathValue("key"), branch)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return

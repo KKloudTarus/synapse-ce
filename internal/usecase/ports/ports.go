@@ -224,9 +224,15 @@ type QualityGateMutator interface {
 type ProjectAnalysisStore interface {
 	Save(ctx context.Context, analysis projectanalysis.Analysis) error
 	SaveWithResult(ctx context.Context, analysis projectanalysis.Analysis, result []byte) error
-	LatestWithResult(ctx context.Context, tenantID, projectID shared.ID) (projectanalysis.Analysis, []byte, error)
+	// LatestWithResult returns the newest completed analysis for the project. An empty branch means
+	// the latest across all branches; a non-empty branch restricts the result to that branch.
+	LatestWithResult(ctx context.Context, tenantID, projectID shared.ID, branch string) (projectanalysis.Analysis, []byte, error)
 	LatestForProjects(ctx context.Context, tenantID shared.ID, projectIDs []shared.ID) (map[shared.ID]projectanalysis.Analysis, error)
-	List(ctx context.Context, tenantID, projectID shared.ID, limit int, beforeCreatedAt time.Time, beforeID shared.ID) ([]projectanalysis.Analysis, bool, error)
+	// List pages a project's analysis history newest first. An empty branch means all branches; a
+	// non-empty branch restricts the page to analyses produced on that branch.
+	List(ctx context.Context, tenantID, projectID shared.ID, branch string, limit int, beforeCreatedAt time.Time, beforeID shared.ID) ([]projectanalysis.Analysis, bool, error)
+	// Branches returns the distinct non-deleted branch values recorded for the project, sorted.
+	Branches(ctx context.Context, tenantID, projectID shared.ID) ([]string, error)
 	Get(ctx context.Context, tenantID, projectID, analysisID shared.ID) (projectanalysis.Analysis, error)
 }
 

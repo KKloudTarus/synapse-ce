@@ -57,7 +57,7 @@ func TestRecordProjectAnalysisIssueAttribution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	list, _, err := analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	list, _, err := analyses.List(ctx, p.TenantID, p.ID, "", 1, time.Time{}, "")
 	if err != nil || len(list) != 1 {
 		t.Fatalf("analysis=%+v err=%v", list, err)
 	}

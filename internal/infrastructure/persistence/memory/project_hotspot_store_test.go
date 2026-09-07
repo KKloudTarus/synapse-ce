@@ -108,10 +108,10 @@ func TestProjectHotspotProjectionRejectsCandidateAtomically(t *testing.T) {
 	if err := store.SaveWithResultAndHotspots(ctx, projectionAnalysis("a1", time.Unix(1, 0)), nil, []hotspot.Candidate{valid, invalid}); err == nil {
 		t.Fatal("invalid candidate should fail")
 	}
-	if _, _, err := store.List(ctx, "tenant-a", "project-a", 10, time.Time{}, ""); err != nil {
+	if _, _, err := store.List(ctx, "tenant-a", "project-a", "", 10, time.Time{}, ""); err != nil {
 		t.Fatal(err)
 	} else {
-		analyses, _, _ := store.List(ctx, "tenant-a", "project-a", 10, time.Time{}, "")
+		analyses, _, _ := store.List(ctx, "tenant-a", "project-a", "", 10, time.Time{}, "")
 		if len(analyses) != 0 {
 			t.Fatalf("analysis committed despite projection validation: %+v", analyses)
 		}

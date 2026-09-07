@@ -96,7 +96,7 @@ func TestImportAnalysisRecordsAPipelineResult(t *testing.T) {
 	}
 
 	// It is in the history, newest first, exactly like a server analysis.
-	list, _, err := analyses.List(ctx, "tenant", shared.ID(analysis.ProjectID), 5, analysis.CreatedAt.Add(1), "")
+	list, _, err := analyses.List(ctx, "tenant", shared.ID(analysis.ProjectID), "", 5, analysis.CreatedAt.Add(1), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestImportAnalysisMarksTheJobFailedWhenTheResultIsRejected(t *testing.T) {
 	if job.Status != ports.ScanFailed || job.Stage != "import-rejected" || !strings.Contains(job.Error, "duplicate canonical file path") {
 		t.Fatalf("job = %+v, want a failed ci-import job carrying the rejection", job)
 	}
-	if list, _, err := analyses.List(ctx, "tenant", contexts[0].ProjectID, 5, time.Now().Add(time.Hour), ""); err != nil || len(list) != 0 {
+	if list, _, err := analyses.List(ctx, "tenant", contexts[0].ProjectID, "", 5, time.Now().Add(time.Hour), ""); err != nil || len(list) != 0 {
 		t.Fatalf("analyses = %v, %v; want none recorded", list, err)
 	}
 }

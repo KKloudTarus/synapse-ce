@@ -48,7 +48,7 @@ func (s *ExpectationSource) Expectations(ctx context.Context, tenantID, engageme
 	if engagement.ProjectID.IsZero() {
 		return nil, nil, nil
 	}
-	analysis, _, err := s.analyses.LatestWithResult(ctx, tenantID, engagement.ProjectID)
+	analysis, _, err := s.analyses.LatestWithResult(ctx, tenantID, engagement.ProjectID, "")
 	if err != nil {
 		return nil, []cloudposture.CoverageIssue{{Category: "drift", Code: "source_unavailable"}}, nil
 	}

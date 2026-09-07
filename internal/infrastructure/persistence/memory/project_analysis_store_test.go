@@ -63,7 +63,7 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	got.Snapshot.Nodes[0].Counters.IssuesByType["bug"] = 0
 	*got.Snapshot.NewCodeCoverage.Value = 0.0
 
-	list, _, err := store.List(ctx, "tenant", "project", 1, time.Time{}, "")
+	list, _, err := store.List(ctx, "tenant", "project", "", 1, time.Time{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestProjectAnalysisStoreLatestResultStaysWithSnapshot(t *testing.T) {
 	if err := store.SaveWithResult(ctx, latest, []byte(`{"run":"latest"}`)); err != nil {
 		t.Fatal(err)
 	}
-	got, result, err := store.LatestWithResult(ctx, "tenant", "project")
+	got, result, err := store.LatestWithResult(ctx, "tenant", "project", "")
 	if err != nil || got.ID != "latest" || string(result) != `{"run":"latest"}` {
 		t.Fatalf("analysis=%+v result=%s err=%v", got, result, err)
 	}
@@ -106,7 +106,7 @@ func TestProjectAnalysisStoreLatestResultSkipsMetadataOnlySnapshot(t *testing.T)
 	if err := store.Save(ctx, metadataOnly); err != nil {
 		t.Fatal(err)
 	}
-	got, result, err := store.LatestWithResult(ctx, "tenant", "project")
+	got, result, err := store.LatestWithResult(ctx, "tenant", "project", "")
 	if err != nil || got.ID != withResult.ID || string(result) != `{"run":"complete"}` {
 		t.Fatalf("analysis=%+v result=%s err=%v", got, result, err)
 	}
@@ -124,15 +124,49 @@ func TestProjectAnalysisStoreScopesAndOrdersSnapshots(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	list, more, err := store.List(ctx, "tenant-a", "project-a", 2, time.Time{}, "")
+	list, more, err := store.List(ctx, "tenant-a", "project-a", "", 2, time.Time{}, "")
 	if err != nil || !more || len(list) != 2 || list[0].ID != "latest-b" || list[1].ID != "latest-a" {
 		t.Fatalf("list=%+v more=%v err=%v", list, more, err)
 	}
-	next, more, err := store.List(ctx, "tenant-a", "project-a", 2, list[1].CreatedAt, shared.ID(list[1].ID))
+	next, more, err := store.List(ctx, "tenant-a", "project-a", "", 2, list[1].CreatedAt, shared.ID(list[1].ID))
 	if err != nil || more || len(next) != 1 || next[0].ID != "old" {
 		t.Fatalf("next=%+v more=%v err=%v", next, more, err)
 	}
 	if _, err := store.Get(ctx, "tenant-a", "project-a", "other"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("cross-project read=%v, want not found", err)
+	}
+}
+
+func TestProjectAnalysisStoreFiltersByBranch(t *testing.T) {
+	ctx := context.Background()
+	store := NewProjectAnalysisStore()
+	mainOld := projectanalysis.Analysis{ID: "main-old", TenantID: "tenant", ProjectID: "project", CreatedAt: time.Unix(1, 0), SourceRef: "main"}
+	feature := projectanalysis.Analysis{ID: "feature-1", TenantID: "tenant", ProjectID: "project", CreatedAt: time.Unix(2, 0), SourceRef: "feature/x"}
+	mainNew := projectanalysis.Analysis{ID: "main-new", TenantID: "tenant", ProjectID: "project", CreatedAt: time.Unix(3, 0), SourceRef: "main"}
+	for _, a := range []projectanalysis.Analysis{mainOld, feature, mainNew} {
+		if err := store.SaveWithResult(ctx, a, []byte(`{"r":"`+a.ID+`"}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	list, more, err := store.List(ctx, "tenant", "project", "feature/x", 10, time.Time{}, "")
+	if err != nil || more || len(list) != 1 || list[0].ID != "feature-1" {
+		t.Fatalf("feature list=%+v more=%v err=%v", list, more, err)
+	}
+
+	branches, err := store.Branches(ctx, "tenant", "project")
+	if err != nil || len(branches) != 2 || branches[0] != "feature/x" || branches[1] != "main" {
+		t.Fatalf("branches=%v err=%v", branches, err)
+	}
+
+	latest, result, err := store.LatestWithResult(ctx, "tenant", "project", "main")
+	if err != nil || latest.ID != "main-new" || string(result) != `{"r":"main-new"}` {
+		t.Fatalf("latest main=%+v result=%s err=%v", latest, result, err)
+	}
+
+	// The unfiltered latest is the newest across all branches.
+	overall, _, err := store.LatestWithResult(ctx, "tenant", "project", "")
+	if err != nil || overall.ID != "main-new" {
+		t.Fatalf("overall latest=%+v err=%v", overall, err)
 	}
 }

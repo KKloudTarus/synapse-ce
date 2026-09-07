@@ -982,7 +982,16 @@ paths:
       description: >
         Returns the latest immutable Project analysis overview without loading the
         full scan-result blob. Existing Projects without an analysis return
-        `state=not_analyzed` with explicit unavailable metric values.
+        `state=not_analyzed` with explicit unavailable metric values. The optional
+        `branch` query parameter restricts the overview to the newest analysis on
+        that branch; omitting it reflects the latest analysis across all branches.
+      parameters:
+      - name: branch
+        in: query
+        required: false
+        description: Restrict the overview to the newest analysis on this branch. Omit for the latest overall.
+        schema: {type: string}
+        example: main
       responses:
         "200":
           description: Project overview
@@ -1061,6 +1070,35 @@ paths:
                           unavailable_reason: no_analysis}
                         coverage: {availability: unavailable, value: null, unavailable_reason: no_analysis}
                         duplications: {availability: unavailable, value: null, unavailable_reason: no_analysis}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+
+  /api/v1/projects/{key}/branches:
+    parameters:
+    - name: key
+      in: path
+      required: true
+      schema: {type: string}
+      example: payments-api
+    get:
+      tags: [projects]
+      summary: List the branches a Project has analyses on
+      operationId: listProjectBranches
+      description: >
+        Returns the distinct, sorted set of branch values recorded across the
+        Project's immutable analyses. A caller uses it to populate a branch filter
+        for the overview and analysis-history routes. A legacy analysis that
+        recorded no branch contributes an empty-string entry.
+      responses:
+        "200":
+          description: Project branches
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProjectBranches"}
+              example:
+                branches: [feature/x, main]
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -6370,6 +6408,17 @@ components:
 
       - security_hotspots_reviewed
       - new_security_hotspots_reviewed
+    ProjectBranches:
+      type: object
+      required: [branches]
+      properties:
+        branches:
+          type: array
+          description: Distinct branch values recorded across the Project's analyses, sorted.
+          items: {type: string}
+      example:
+        branches: [feature/x, main]
+
     ProjectOverview:
       oneOf:
       - $ref: "#/components/schemas/ProjectOverviewNotAnalyzed"

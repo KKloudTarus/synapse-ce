@@ -83,11 +83,28 @@ func TestProjectAcquireRequestUsesPriorGitCommit(t *testing.T) {
 	svc := NewService(nil, nil, fixedClock{}, fixedIDs{}, &captureAudit{}, true)
 	svc.SetAnalysisStore(analyses)
 	p := &project.Project{ID: "project", TenantID: "tenant", SourceBinding: project.SourceBinding{Kind: project.SourceGit, Value: "https://example.test/repo.git", Ref: "main"}}
-	if err := analyses.Save(context.Background(), projectanalysis.Analysis{ID: "previous", TenantID: "tenant", ProjectID: "project", CreatedAt: time.Unix(1, 0), SourceCommit: "immutable-commit", SourceRevision: projectanalysis.SourceRevision{Kind: projectanalysis.ScanKindGit}}); err != nil {
+	// The prior scan of the same branch recorded its ref (result.SourceRef == req.Ref), so the base
+	// commit is picked from the previous analysis on branch "main".
+	if err := analyses.Save(context.Background(), projectanalysis.Analysis{ID: "previous", TenantID: "tenant", ProjectID: "project", CreatedAt: time.Unix(1, 0), SourceRef: "main", SourceCommit: "immutable-commit", SourceRevision: projectanalysis.SourceRevision{Kind: projectanalysis.ScanKindGit}}); err != nil {
 		t.Fatal(err)
 	}
 	request, err := svc.projectAcquireRequest(context.Background(), p)
 	if err != nil || request.BaseRef != "main" || request.BaseCommit != "immutable-commit" {
+		t.Fatalf("request=%+v err=%v", request, err)
+	}
+}
+
+func TestProjectAcquireRequestIgnoresOtherBranchBaseline(t *testing.T) {
+	analyses := memory.NewProjectAnalysisStore()
+	svc := NewService(nil, nil, fixedClock{}, fixedIDs{}, &captureAudit{}, true)
+	svc.SetAnalysisStore(analyses)
+	p := &project.Project{ID: "project", TenantID: "tenant", SourceBinding: project.SourceBinding{Kind: project.SourceGit, Value: "https://example.test/repo.git", Ref: "main"}}
+	// Only a feature-branch analysis exists; it must not become the base commit for a main-branch scan.
+	if err := analyses.Save(context.Background(), projectanalysis.Analysis{ID: "feature", TenantID: "tenant", ProjectID: "project", CreatedAt: time.Unix(1, 0), SourceRef: "feature/x", SourceCommit: "feature-commit", SourceRevision: projectanalysis.SourceRevision{Kind: projectanalysis.ScanKindGit}}); err != nil {
+		t.Fatal(err)
+	}
+	request, err := svc.projectAcquireRequest(context.Background(), p)
+	if err != nil || request.BaseRef != "" || request.BaseCommit != "" {
 		t.Fatalf("request=%+v err=%v", request, err)
 	}
 }
@@ -300,7 +317,7 @@ func TestRecordProjectAnalysisUsesAssignedGate(t *testing.T) {
 	if err := svc.RecordProjectAnalysis(ctx, e.ID, "job-1", time.Unix(1, 0), &scauc.ScanResult{Findings: []finding.Finding{{ID: "high", DedupKey: "high", Kind: finding.KindSCA, Severity: shared.SeverityHigh, Status: finding.StatusOpen}}}); err != nil {
 		t.Fatal(err)
 	}
-	list, _, err := analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	list, _, err := analyses.List(ctx, p.TenantID, p.ID, "", 1, time.Time{}, "")
 	if err != nil || len(list) != 1 || !list[0].Gate.Passed || len(list[0].Gate.Results) != 1 {
 		t.Fatalf("analysis=%+v err=%v", list, err)
 	}
@@ -332,7 +349,7 @@ func TestRecordProjectAnalysisMarksTruncatedCodeQualityGateIncomplete(t *testing
 	if err := svc.RecordProjectAnalysis(ctx, e.ID, "job-1", time.Unix(1, 0), result); err != nil {
 		t.Fatal(err)
 	}
-	list, _, err := analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	list, _, err := analyses.List(ctx, p.TenantID, p.ID, "", 1, time.Time{}, "")
 	if err != nil || len(list) != 1 {
 		t.Fatalf("analysis=%+v err=%v", list, err)
 	}
@@ -362,7 +379,7 @@ func TestRecordProjectAnalysisUsesRepositoryGate(t *testing.T) {
 	if err := svc.RecordProjectAnalysis(ctx, e.ID, "job-1", time.Unix(1, 0), &scauc.ScanResult{Gate: gate}); err != nil {
 		t.Fatal(err)
 	}
-	list, _, err := analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	list, _, err := analyses.List(ctx, p.TenantID, p.ID, "", 1, time.Time{}, "")
 	if err != nil || len(list) != 1 || list[0].GateInfo.Source != "repository" || list[0].GateInfo.Key != "repo" {
 		t.Fatalf("analysis=%+v err=%v", list, err)
 	}
@@ -388,7 +405,7 @@ func TestRecordProjectAnalysisPersistsLineCoverage(t *testing.T) {
 	if err := svc.RecordProjectAnalysis(ctx, e.ID, "job-1", time.Unix(1, 0), &scauc.ScanResult{LineCoverage: coverage}); err != nil {
 		t.Fatal(err)
 	}
-	list, _, err := analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	list, _, err := analyses.List(ctx, p.TenantID, p.ID, "", 1, time.Time{}, "")
 	if err != nil || len(list) != 1 || list[0].Coverage == nil || list[0].Coverage.Percent() != 50 || list[0].Measures[qualitygate.MetricCoveragePct] != 50 {
 		t.Fatalf("analysis=%+v err=%v", list, err)
 	}
@@ -423,7 +440,7 @@ func TestRecordProjectAnalysisHydratesCurrentTriageOnly(t *testing.T) {
 	if err := svc.RecordProjectAnalysis(ctx, e.ID, "job-1", time.Unix(1, 0), result); err != nil {
 		t.Fatal(err)
 	}
-	list, _, err := analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	list, _, err := analyses.List(ctx, p.TenantID, p.ID, "", 1, time.Time{}, "")
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list=%+v err=%v", list, err)
 	}
@@ -499,7 +516,7 @@ func TestRecordProjectAnalysisExcludesCatalogHotspotsFromProjectMetrics(t *testi
 	if err := svc.RecordProjectAnalysis(ctx, e.ID, "job-1", time.Unix(1, 0), result); err != nil {
 		t.Fatal(err)
 	}
-	list, _, err := analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	list, _, err := analyses.List(ctx, p.TenantID, p.ID, "", 1, time.Time{}, "")
 	if err != nil || len(list) != 1 {
 		t.Fatalf("analysis=%+v err=%v", list, err)
 	}
@@ -559,7 +576,7 @@ func TestRecordProjectAnalysisSnapshotFiltersNonRuleFindings(t *testing.T) {
 	if err := svc.RecordProjectAnalysis(ctx, e.ID, "job-2", time.Unix(2, 0), result); err != nil {
 		t.Fatal(err)
 	}
-	list, _, err := analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	list, _, err := analyses.List(ctx, p.TenantID, p.ID, "", 1, time.Time{}, "")
 	if err != nil || len(list) != 1 {
 		t.Fatalf("analysis=%+v err=%v", list, err)
 	}

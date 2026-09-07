@@ -34,12 +34,13 @@ type projectService interface {
 	StartAnalysis(context.Context, string, shared.ID, string, *measure.CoverageReport) (ports.ScanJob, error)
 	ImportAnalysis(context.Context, shared.ID, string, projectuc.ImportAnalysisInput) (projectanalysis.Analysis, error)
 	AnalysisStatus(context.Context, shared.ID, string) (ports.ScanJob, error)
-	LatestAnalysis(context.Context, shared.ID, string) (projectuc.LatestAnalysis, error)
+	LatestAnalysis(context.Context, shared.ID, string, string) (projectuc.LatestAnalysis, error)
 	ProjectDependencyGraph(context.Context, shared.ID, string) (projectuc.DependencyGraph, error)
 	ExportProjectDependencySubtree(context.Context, shared.ID, string, string) ([]byte, string, error)
-	Overview(context.Context, shared.ID, string) (projectuc.Overview, error)
+	Overview(context.Context, shared.ID, string, string) (projectuc.Overview, error)
 	GetMeasures(context.Context, string, string, string, []string, int, string) (projectuc.ProjectMeasureResponse, error)
-	ListAnalyses(context.Context, shared.ID, string, int, time.Time, shared.ID) ([]projectanalysis.Analysis, bool, error)
+	ListAnalyses(context.Context, shared.ID, string, string, int, time.Time, shared.ID) ([]projectanalysis.Analysis, bool, error)
+	Branches(context.Context, shared.ID, string) ([]string, error)
 	GetAnalysis(context.Context, shared.ID, string, string) (projectanalysis.Analysis, error)
 	ListCodeFiles(context.Context, shared.ID, string, string) ([]projectuc.CodeFile, projectanalysis.SourceCapabilities, error)
 	ListCodeFilesWithFilter(context.Context, shared.ID, string, string, projectuc.CodeFileFilter) ([]projectuc.CodeFile, projectanalysis.SourceCapabilities, error)
@@ -293,7 +294,8 @@ func (rt *Router) projectAnalysisStatus(w http.ResponseWriter, r *http.Request) 
 }
 
 func (rt *Router) latestProjectAnalysis(w http.ResponseWriter, r *http.Request) {
-	latest, err := rt.projects.LatestAnalysis(r.Context(), shared.ID(TenantFrom(r.Context())), r.PathValue("key"))
+	branch := strings.TrimSpace(r.URL.Query().Get("branch"))
+	latest, err := rt.projects.LatestAnalysis(r.Context(), shared.ID(TenantFrom(r.Context())), r.PathValue("key"), branch)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
@@ -308,6 +310,22 @@ func (rt *Router) latestProjectAnalysis(w http.ResponseWriter, r *http.Request) 
 		Analysis projectAnalysisResponse `json:"analysis"`
 		Result   json.RawMessage         `json:"result"`
 	}{Analysis: projectAnalysisDTO(latest.Analysis), Result: result})
+}
+
+type projectBranchesResponse struct {
+	Branches []string `json:"branches"`
+}
+
+func (rt *Router) listProjectBranches(w http.ResponseWriter, r *http.Request) {
+	branches, err := rt.projects.Branches(r.Context(), shared.ID(TenantFrom(r.Context())), r.PathValue("key"))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	if branches == nil {
+		branches = []string{}
+	}
+	writeJSON(w, http.StatusOK, projectBranchesResponse{Branches: branches})
 }
 
 func (rt *Router) sanitizeProjectAnalysisResult(ctx context.Context, data []byte) ([]byte, error) {

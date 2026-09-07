@@ -23,7 +23,7 @@ type projectOverviewServiceStub struct {
 	key      string
 }
 
-func (s *projectOverviewServiceStub) Overview(_ context.Context, tenantID shared.ID, key string) (projectuc.Overview, error) {
+func (s *projectOverviewServiceStub) Overview(_ context.Context, tenantID shared.ID, key, branch string) (projectuc.Overview, error) {
 	s.calls++
 	s.tenant, s.key = tenantID, key
 	return s.overview, s.err

@@ -521,6 +521,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/projects/{key}", rt.authz(userdom.PermView, rt.getProject))
 		mux.HandleFunc("DELETE /api/v1/projects/{key}", rt.authz(userdom.PermOperate, rt.deleteProject))
 		mux.HandleFunc("GET /api/v1/projects/{key}/overview", rt.authz(userdom.PermView, rt.projectOverview))
+		mux.HandleFunc("GET /api/v1/projects/{key}/branches", rt.authz(userdom.PermView, rt.listProjectBranches))
 		mux.HandleFunc("GET /api/v1/projects/{key}/dependency-graph", rt.authz(userdom.PermView, rt.projectDependencyGraph))
 		mux.HandleFunc("GET /api/v1/projects/{key}/dependency-graph/export", rt.authz(userdom.PermView, rt.exportProjectDependencySubtree))
 		mux.HandleFunc("GET /api/v1/projects/{key}/measures", rt.authz(userdom.PermView, rt.getProjectMeasures))

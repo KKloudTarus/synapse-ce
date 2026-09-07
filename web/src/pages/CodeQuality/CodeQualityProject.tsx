@@ -1,7 +1,7 @@
-import { AlertTriangle, ArrowLeft, BarChart01, Check, CheckCircle, Copy01, Play, Upload01 } from '@untitledui/icons'
+import { AlertTriangle, ArrowLeft, BarChart01, Check, CheckCircle, Copy01, GitBranch01 as BranchIcon, Play, Upload01 } from '@untitledui/icons'
 import { copyText } from '../../lib/clipboard'
-import { useEffect, useRef, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, NavLink, Outlet, useLocation, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import { Button, EmptyState, ErrorState, Pill, Spinner, cn } from '../../components/ui'
 import { api } from '../../lib/api'
 import { useFetch } from '../../hooks'
@@ -10,6 +10,8 @@ import type { Project, QualityGate, ScanJob } from '../../lib/types'
 export interface ProjectRouteContext {
   projectKey: string
   project: Project
+  /** The branch the project views are scoped to (from the ?branch= selector; the project's default branch otherwise). */
+  branch: string
   job: ScanJob | null
   isRunning: boolean
   operationError: string | null
@@ -49,7 +51,29 @@ export function CodeQualityProject() {
   const [coverageFile, setCoverageFile] = useState<File | null>(null)
   const [analysisRevision, setAnalysisRevision] = useState(0)
   const [copied, setCopied] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { data: branchList } = useFetch(() => api.projectBranches(key), { deps: [key, analysisRevision], enabled: !!key })
   const poll = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const defaultBranch = project?.sourceBinding.ref || 'main'
+  const selectedBranch = searchParams.get('branch') || defaultBranch
+  const branchOptions = useMemo(() => {
+    const set = new Set<string>()
+    if (defaultBranch) set.add(defaultBranch)
+    for (const b of branchList ?? []) if (b) set.add(b)
+    if (selectedBranch) set.add(selectedBranch)
+    return [...set]
+  }, [branchList, defaultBranch, selectedBranch])
+  function selectBranch(value: string) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (value === defaultBranch) next.delete('branch')
+        else next.set('branch', value)
+        return next
+      },
+      { replace: true },
+    )
+  }
   const pollGeneration = useRef<symbol | null>(null)
   const lastTerminalJob = useRef<string | null>(null)
 
@@ -189,6 +213,7 @@ export function CodeQualityProject() {
   const context: ProjectRouteContext = {
     projectKey: key,
     project,
+    branch: selectedBranch,
     job,
     isRunning,
     operationError,
@@ -237,7 +262,22 @@ export function CodeQualityProject() {
                 <span className="capitalize">{project.sourceBinding.kind}</span>
               )}
               <span className="text-quaternary">·</span>
-              <span className="font-mono text-xs">{project.sourceBinding.ref || 'main'}</span>
+              <span className="inline-flex items-center gap-1">
+                <BranchIcon className="size-3.5 text-quaternary" aria-hidden="true" />
+                <select
+                  aria-label="Branch"
+                  value={selectedBranch}
+                  onChange={(event) => selectBranch(event.target.value)}
+                  className="h-6 rounded border border-secondary bg-primary px-1.5 font-mono text-xs text-primary focus:outline-none focus:ring-2 focus:ring-brand/60"
+                >
+                  {branchOptions.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                      {b === defaultBranch ? ' (default)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </span>
               <span className="text-quaternary">·</span>
               <select
                 aria-label="Quality gate"

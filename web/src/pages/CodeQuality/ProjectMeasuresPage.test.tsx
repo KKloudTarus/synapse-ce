@@ -8,6 +8,7 @@ import type { ProjectMeasureResponse } from '../../lib/projectMeasures'
 
 vi.mock('../../lib/api', () => ({
   api: {
+    projectBranches: vi.fn(() => Promise.resolve([])),
     getProject: vi.fn(),
     projectAnalysisStatus: vi.fn(),
     projectMeasures: vi.fn(),

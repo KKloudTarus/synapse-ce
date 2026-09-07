@@ -8,7 +8,7 @@ import type { ProjectAnalysis, ProjectAnalysisCursor } from '../../lib/types'
 import { useProjectRouteContext } from './CodeQualityProject'
 
 export function ProjectActivityPage() {
-  const { projectKey, analysisRevision } = useProjectRouteContext()
+  const { projectKey, branch, analysisRevision } = useProjectRouteContext()
   const [analyses, setAnalyses] = useState<ProjectAnalysis[]>([])
   const [cursor, setCursor] = useState<ProjectAnalysisCursor | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -20,8 +20,8 @@ export function ProjectActivityPage() {
     loading,
     error,
     refetch: loadFirstPage,
-  } = useFetch(() => api.projectAnalyses(projectKey), {
-    deps: [projectKey, analysisRevision],
+  } = useFetch(() => api.projectAnalyses(projectKey, null, branch), {
+    deps: [projectKey, branch, analysisRevision],
   })
 
   useEffect(() => {
@@ -41,7 +41,7 @@ export function ProjectActivityPage() {
     setLoadingOlder(true)
     setOlderError(null)
     try {
-      const page = await api.projectAnalyses(projectKey, cursor)
+      const page = await api.projectAnalyses(projectKey, cursor, branch)
       if (olderRequestToken.current !== token) return
       setAnalyses((current) => [...current, ...page.items])
       setCursor(page.next)

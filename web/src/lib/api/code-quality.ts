@@ -452,8 +452,14 @@ export const codeQualityApi = {
   getProject: async (key: string): Promise<Project> =>
     mapProject(await req(`/projects/${encodeURIComponent(key)}`)),
 
-  projectOverview: async (key: string): Promise<ProjectOverview> =>
-    mapProjectOverviewResponse(await req(`/projects/${encodeURIComponent(key)}/overview`)),
+  projectOverview: async (key: string, branch = ''): Promise<ProjectOverview> =>
+    mapProjectOverviewResponse(await req(`/projects/${encodeURIComponent(key)}/overview${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`)),
+
+  /** The distinct branches this project has recorded analyses on, sorted; empty when never analyzed. */
+  projectBranches: async (key: string): Promise<string[]> => {
+    const r = await req(`/projects/${encodeURIComponent(key)}/branches`)
+    return Array.isArray(r?.branches) ? r.branches.filter((b: unknown): b is string => typeof b === 'string') : []
+  },
 
   projectDependencyGraph: async (key: string, signal?: AbortSignal): Promise<ProjectDependencyGraph> =>
     mapProjectDependencyGraph(await req(`/projects/${encodeURIComponent(key)}/dependency-graph`, { signal })),
@@ -592,8 +598,9 @@ export const codeQualityApi = {
     return mapScanJob(await res.json())
   },
 
-  projectAnalyses: async (key: string, cursor: ProjectAnalysisCursor | null = null): Promise<ProjectAnalysisPage> => {
+  projectAnalyses: async (key: string, cursor: ProjectAnalysisCursor | null = null, branch = ''): Promise<ProjectAnalysisPage> => {
     const query = new URLSearchParams({ limit: '25' })
+    if (branch) query.set('branch', branch)
     if (cursor) {
       query.set('before_created_at', cursor.beforeCreatedAt)
       query.set('before_id', cursor.beforeId)
