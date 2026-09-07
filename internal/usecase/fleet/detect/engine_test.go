@@ -367,3 +367,30 @@ func TestEngineWindowedRuleFiresOnBurstOnly(t *testing.T) {
 		t.Fatalf("second destination did not fire independently: %d", len(got))
 	}
 }
+
+// TestEngineEmitsSequenceDetection: a downloader then a remote-shell tool on one host becomes a single
+// det.tool_staging_sequence detection carrying the ordered pair as evidence, proving the engine routes a
+// sequence match through the burst-detection path.
+func TestEngineEmitsSequenceDetection(t *testing.T) {
+	sensor, sink := newFakeSensor(), &fakeSink{}
+	e := newEngine(t, sensor, sink, Options{Classes: []detection.Class{detection.ClassProcess}})
+
+	e.process(context.Background(), procEvent("curl")) // staging: no detection yet
+	if got := sink.detections(); len(got) != 0 {
+		t.Fatalf("the staging step alone must not detect, got %d", len(got))
+	}
+	e.process(context.Background(), procEvent("ncat")) // use: completes the sequence
+
+	var seq *detection.Detection
+	for i, d := range sink.detections() {
+		if d.RuleID == "det.tool_staging_sequence" {
+			seq = &sink.detections()[i]
+		}
+	}
+	if seq == nil {
+		t.Fatalf("the tool-staging sequence was not detected: %+v", sink.detections())
+	}
+	if len(seq.Evidence) != 2 || seq.Evidence[0].Process.Comm != "curl" || seq.Evidence[1].Process.Comm != "ncat" {
+		t.Fatalf("sequence evidence is not the ordered pair: %+v", seq.Evidence)
+	}
+}

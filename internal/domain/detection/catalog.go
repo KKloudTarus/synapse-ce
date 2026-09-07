@@ -70,6 +70,25 @@ var catalogue = []Rule{
 			{Field: FieldPrivKind, Op: OpIn, Values: []string{"setuid", "capset"}},
 		}},
 	},
+	{
+		// A sequence, not a single event: a downloader (ingress tooling, T1105) followed by a
+		// remote-shell tool on the same host within two minutes is staging then use. Neither process on
+		// its own is a detection — curl is ordinary, and nc is ordinary — but the ordered pair is the
+		// behaviour a single-event or rate rule cannot express. Grouped by host (the default).
+		ID: "det.tool_staging_sequence", Version: 1, Class: ClassProcess,
+		Title: "Tool staging then remote shell (T1105 -> T1059)", Severity: shared.SeverityHigh,
+		Sequence: &Sequence{
+			Within: 2 * time.Minute,
+			Steps: []Matcher{
+				{Class: ClassProcess, All: []Predicate{
+					{Field: FieldProcComm, Op: OpIn, Values: []string{"curl", "wget", "tftp", "ftp"}},
+				}},
+				{Class: ClassProcess, All: []Predicate{
+					{Field: FieldProcComm, Op: OpIn, Values: []string{"nc", "ncat", "socat"}},
+				}},
+			},
+		},
+	},
 }
 
 // Catalogue returns a validated copy of the built-in rule set, deterministically ordered by id so a

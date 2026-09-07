@@ -85,7 +85,8 @@ type Fired struct {
 // events, which a sensor stream already does.
 type Evaluator struct {
 	rules   []Rule
-	buckets map[string]map[string]*bucket // rule id -> group key -> burst
+	buckets map[string]map[string]*bucket      // rule id -> group key -> burst
+	seqs    map[string]map[string]*seqProgress // rule id -> group key -> ordered partial match
 }
 
 type bucket struct {
@@ -94,9 +95,17 @@ type bucket struct {
 	newest time.Time
 }
 
-// NewEvaluator validates the rules and prepares state for the windowed ones.
+// seqProgress is one group's partial match of a sequence rule: how many steps are satisfied, the events
+// that satisfied them, and the instant the whole sequence must finish by (first-match time + Within).
+type seqProgress struct {
+	step     int
+	events   []Event
+	deadline time.Time
+}
+
+// NewEvaluator validates the rules and prepares state for the windowed and sequence ones.
 func NewEvaluator(rules []Rule) (*Evaluator, error) {
-	out := &Evaluator{rules: make([]Rule, 0, len(rules)), buckets: map[string]map[string]*bucket{}}
+	out := &Evaluator{rules: make([]Rule, 0, len(rules)), buckets: map[string]map[string]*bucket{}, seqs: map[string]map[string]*seqProgress{}}
 	for _, r := range rules {
 		if err := r.Validate(); err != nil {
 			return nil, err
@@ -110,6 +119,12 @@ func NewEvaluator(rules []Rule) (*Evaluator, error) {
 func (ev *Evaluator) Evaluate(e Event) []Fired {
 	var fired []Fired
 	for _, r := range ev.rules {
+		if r.Sequence != nil {
+			if burst, ok := ev.observeSequence(r, e); ok {
+				fired = append(fired, Fired{Rule: r, Evidence: burst, Observed: len(burst)})
+			}
+			continue
+		}
 		if !r.Match(e) {
 			continue
 		}
@@ -122,6 +137,86 @@ func (ev *Evaluator) Evaluate(e Event) []Fired {
 		}
 	}
 	return fired
+}
+
+// observeSequence advances a sequence rule's partial match for the event's group and reports the ordered
+// evidence once the last step is satisfied within the span. A group holds a partial match only while one
+// is live: a lapsed or completed match is deleted, and an event that neither advances a live match nor
+// starts one leaves no group. So an unrelated event never occupies a slot, and it cannot evict another
+// group's live partial match. An event that matches the first step while a later step was pending
+// restarts the sequence from that event, so a repeated staging is not missed.
+func (ev *Evaluator) observeSequence(r Rule, e Event) ([]Event, bool) {
+	if e.Class != r.Class {
+		return nil, false // an event of another class cannot advance a same-class sequence
+	}
+	groups := ev.seqs[r.ID]
+	if groups == nil {
+		groups = map[string]*seqProgress{}
+		ev.seqs[r.ID] = groups
+	}
+	key := groupKey(e, r.Sequence.GroupBy)
+	if p := groups[key]; p != nil {
+		// The next step advances the match, but only inside the anchor's span and not before the last
+		// matched event: a skewed timestamp (kernel vs wall-clock) must neither extend the span nor
+		// reorder the evidence. A late or out-of-order event simply does not advance.
+		last := p.events[len(p.events)-1].At
+		if e.At.Before(p.deadline) && !e.At.Before(last) && r.Sequence.Steps[p.step].Match(e) {
+			p.events = append(p.events, e.clone())
+			p.step++
+			if p.step < len(r.Sequence.Steps) {
+				return nil, false
+			}
+			burst := make([]Event, len(p.events))
+			copy(burst, p.events)
+			if len(burst) > MaxEvidence {
+				burst = burst[len(burst)-MaxEvidence:]
+			}
+			delete(groups, key) // completed: free the group so an identical later sequence fires again
+			return burst, true
+		}
+		// A fresh first step re-anchors the (possibly stalled) match to this newer staging, so a repeated
+		// downloader whose use lands after the first anchor's span is not missed.
+		if r.Sequence.Steps[0].Match(e) {
+			p.step, p.events, p.deadline = 1, []Event{e.clone()}, e.At.Add(r.Sequence.Within)
+		}
+		// Otherwise the live match is left untouched: an unrelated event, even one with a skewed forward
+		// timestamp, never drops it. An expired match is reclaimed lazily by evictSeqIfFull, which frees
+		// expired groups first, so memory stays bounded without trusting a stray timestamp.
+		return nil, false
+	}
+
+	// No live match for this group: only a first-step event starts one, so unrelated events never
+	// allocate a slot. A sequence has at least two steps, so a first-step match never completes here.
+	if !r.Sequence.Steps[0].Match(e) {
+		return nil, false
+	}
+	evictSeqIfFull(groups)
+	groups[key] = &seqProgress{step: 1, events: []Event{e.clone()}, deadline: e.At.Add(r.Sequence.Within)}
+	return nil, false
+}
+
+// evictSeqIfFull makes room for a new group when a sequence rule is at its group cap, which is only
+// reached by that many concurrent LIVE partial matches (unrelated events hold no group). It drops exactly
+// the earliest-deadline (stalest) match, with the lowest group key breaking a tie so eviction is
+// deterministic and never depends on map iteration order. It does NOT compare deadlines to any incoming
+// event's timestamp: a skewed step-0 timestamp must not be able to reclassify other groups as expired and
+// evict live partial matches en masse. The earliest-deadline group is the stalest whether it has expired
+// or not, so a single deterministic drop is both correct and skew-proof.
+func evictSeqIfFull(groups map[string]*seqProgress) {
+	if len(groups) < MaxWindowGroups {
+		return
+	}
+	var victim string
+	var earliest time.Time
+	found := false
+	for k, p := range groups {
+		if !found || p.deadline.Before(earliest) || (p.deadline.Equal(earliest) && k < victim) {
+			victim, earliest, found = k, p.deadline, true
+		}
+	}
+	if found {
+		delete(groups, victim)
+	}
 }
 
 // observe records a matching event in its group's bucket and reports the burst once the count is reached
