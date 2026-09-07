@@ -98,4 +98,27 @@ export const dashboardApi = {
         { method: 'POST', body: JSON.stringify({ version }) },
       ),
     ),
+
+  // Batch LLM auto-verify: the verifier model runs over every proposed judgment it can, confirming or
+  // refuting each without a human. It never self-confirms (a judgment its own model proposed is skipped).
+  // 404 means the route is not registered because a distinct verifier model is not configured.
+  autoVerifyJudgments: async (engagementId: string): Promise<AutoVerifyResult> => {
+    const r = await req(`/engagements/${encodeURIComponent(engagementId)}/judgments/auto-verify`, { method: 'POST' })
+    return {
+      attempted: r?.attempted ?? 0,
+      confirmed: r?.confirmed ?? 0,
+      refuted: r?.refuted ?? 0,
+      skipped: r?.skipped ?? 0,
+      errors: r?.errors ?? 0,
+    }
+  },
+}
+
+/** The counts a batch auto-verify returns. */
+export interface AutoVerifyResult {
+  attempted: number
+  confirmed: number
+  refuted: number
+  skipped: number
+  errors: number
 }
