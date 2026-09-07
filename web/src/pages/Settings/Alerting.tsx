@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AlertTriangle, BellRinging01, CheckCircle, Send01 } from '@untitledui/icons'
-import { Button, Card, EmptyState, cn } from '../../components/ui'
+import { Button, Card, EmptyState, InfoNote, cn } from '../../components/ui'
 import { useToast } from '../../components/synapse/Toast'
 import { useFetch } from '../../hooks'
 import { api, AlertNotEnabledError } from '../../lib/api'
@@ -10,9 +10,9 @@ function OutcomeStat({ value, label, tone, hint }: { value: number; label: strin
   return (
     <div className="flex items-center gap-3 rounded-lg border border-secondary bg-primary px-3 py-2">
       <span className={cn('text-xl font-bold tabular-nums', tone)}>{value}</span>
-      <span className="flex flex-col leading-tight">
-        <span className="text-sm font-medium text-primary">{label}</span>
-        <span className="text-xs text-tertiary">{hint}</span>
+      <span className="inline-flex items-center gap-1 text-sm font-medium text-primary">
+        {label}
+        <InfoNote label={label}>{hint}</InfoNote>
       </span>
     </div>
   )
@@ -91,7 +91,12 @@ export function Alerting() {
             )
           }
         >
-          {ranAt && <p className="mb-3 text-xs text-tertiary">Tested at {ranAt}. The API reports per-sink counts, not individual sink identities.</p>}
+          {ranAt && (
+            <p className="mb-3 inline-flex items-center gap-1 text-xs text-tertiary">
+              Tested at {ranAt}
+              <InfoNote label="About these counts">The API reports per-sink counts, not individual sink identities.</InfoNote>
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <OutcomeStat value={result.outcome.delivered} label="Delivered" hint="sinks that acknowledged" tone="text-success-primary" />
             <OutcomeStat value={result.outcome.failed} label="Failed" hint="sinks that refused" tone={result.outcome.failed > 0 ? 'text-error-primary' : 'text-tertiary'} />
