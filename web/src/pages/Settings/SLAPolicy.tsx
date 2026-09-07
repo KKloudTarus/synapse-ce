@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle, Scales02, Save01 } from '@untitledui/icons'
-import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Spinner, cn } from '../../components/ui'
+import { Button, Card, EmptyState, ErrorState, Field, InfoNote, Input, Pill, Spinner, cn } from '../../components/ui'
 import { useToast } from '../../components/synapse/Toast'
 import { useFetch } from '../../hooks'
 import { api } from '../../lib/api'
@@ -230,8 +230,10 @@ function ActivateForm({ seed, canAdmin, onDone }: { seed: SLAConfig; canAdmin: b
         </div>
 
         <div>
-          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-tertiary">Due windows (days)</h3>
-          <p className="mb-2 text-xs text-quaternary">Windows are edited in whole or fractional days; a policy set out-of-band with sub-day precision is rounded to the day view here.</p>
+          <h3 className="mb-2 inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-tertiary">
+            Due windows (days)
+            <InfoNote label="Due windows">Windows are edited in whole or fractional days; a policy set out-of-band with sub-day precision is rounded to the day view here.</InfoNote>
+          </h3>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[24rem] text-sm">
               <thead>
