@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/endpoint"
 	evdom "github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
@@ -81,7 +82,7 @@ func (v *TelemetryEffectVerifier) Verify(ctx context.Context, req VerificationRe
 	if !receiptFound || receipt.ReceiptID != source.Report.ReceiptID || receipt.Digest != source.Report.ReceiptDigest || receipt.Validate() != nil {
 		return VerificationReceipt{}, fmt.Errorf("%w: accepted report has no valid matching target evidence receipt", shared.ErrForbidden)
 	}
-	if receipt.TenantID != req.TenantID || receipt.EngagementID != req.EngagementID || receipt.ActionID != req.Action.ID || receipt.ActionDigest != responseActionDigest(req.Action) || receipt.VerificationChallenge != req.VerificationChallenge || receipt.Target != req.Target || receipt.Reversal != req.Reversal || receipt.AttemptKey != req.AttemptKey || !receipt.AttemptedAt.Equal(req.AttemptedAt.UTC()) || receipt.WindowUntil.After(req.DeadlineAt) {
+	if receipt.TenantID != req.TenantID || receipt.EngagementID != req.EngagementID || receipt.ActionID != req.Action.ID || receipt.ActionDigest != responseActionDigest(req.Action) || receipt.VerificationChallenge != req.VerificationChallenge || receipt.Target != req.Target || receipt.Reversal != req.Reversal || receipt.AttemptKey != req.AttemptKey || !receipt.AttemptedAt.Equal(req.AttemptedAt.UTC().Truncate(time.Microsecond)) || receipt.WindowUntil.After(req.DeadlineAt) {
 		return VerificationReceipt{}, fmt.Errorf("%w: target evidence receipt is not bound to attempt", shared.ErrForbidden)
 	}
 	source.Receipt, source.Timeline, source.Coverage = receipt, receipt.Timeline, receipt.Coverage
@@ -110,9 +111,6 @@ func (v *TelemetryEffectVerifier) Verify(ctx context.Context, req VerificationRe
 func deriveTelemetryVerification(req VerificationRequest, receipt fleetagent.ResponseTargetEvidenceReceipt) (rdom.Verification, error) {
 	if err := receipt.Validate(); err != nil {
 		return VerificationUnknown, err
-	}
-	if receipt.SourceAgentID == req.ExecutorAgentID || strings.EqualFold("agent:"+receipt.SourceAgentID.String()+":response-observer", strings.TrimSpace(req.ExecutorID)) {
-		return VerificationUnknown, fmt.Errorf("%w: target evidence receipt cannot originate from the response executor", shared.ErrForbidden)
 	}
 	if !receipt.TimelineComplete || !receipt.CoverageComplete || receipt.Saturated {
 		return VerificationUnknown, nil

@@ -23,6 +23,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/endpoint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	evdom "github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
@@ -30,6 +31,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sensorstate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
@@ -124,7 +126,7 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 
 	agents := memory.NewFleetAgentStore()
 	nativeSagaAddAgent(t, ctx, agents, executorID, assetID, []string{workorder.CapabilityResponseProcess}, clock.Now())
-	nativeSagaAddAgent(t, ctx, agents, observerID, assetID, []string{workorder.CapabilityResponseObserve}, clock.Now())
+	nativeSagaAddAgent(t, ctx, agents, observerID, observerHostID, []string{workorder.CapabilityResponseObserve}, clock.Now())
 	bindings := memory.NewTelemetryTransportStore()
 	for agentID, boundAssetID := range map[shared.ID]shared.ID{executorID: assetID, observerID: observerHostID} {
 		if err := bindings.BindTelemetryAsset(ctx, ports.TelemetryAssetBinding{
@@ -176,7 +178,7 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	coverageReconciler, err := coveragewindow.NewReconciler(coverageService, coveragewindow.DefaultInterval, coveragewindow.DefaultMaxAffectedWindows)
+	coverageReconciler, err := coveragewindow.NewReconciler(coverageService, time.Millisecond, coveragewindow.DefaultMaxAffectedWindows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,6 +214,11 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	receiptBuilder, err := NewTargetEvidenceReceiptBuilder(bindings, timeline, coverage, observations, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher.SetTargetEvidenceReceiptBuilder(receiptBuilder)
 	verifier.SetObservationDispatcher(dispatcher)
 	responseService, err := responseuc.NewService(gate, executor, responseStore, auditLog, clock, verifier, evidenceService, evidencePublicKey, observations, observations, observerKeys)
 	if err != nil {
@@ -252,18 +259,18 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 	// Re-enter through the response service after the human decision. The coordinator's first pending call
 	// already durably recorded IncidentResponseRequested; its second call below adds ResponseVerified.
 	endpointDone := make(chan error, 1)
-	go nativeSagaRunEndpointWorker(ctx, work, endpointExecutor, executorID, endpointDone)
+	go nativeSagaRunEndpointWorker(ctx, work, endpointExecutor, executorID, func(ctx context.Context, command fleetagent.ResponseCommand) error {
+		if err := nativeSagaExpectTermination(ctx, childExited); err != nil {
+			return err
+		}
+		return nativeSagaIngestTargetProcess(ctx, telemetryService, observerKeys, timeline, coverage, executorID, assetID, privacyAssignment.Digest, command, event, "", clock)
+	}, endpointDone)
 	observerDone := make(chan error, 1)
 	ingestService, err := responseverificationingest.NewService(observations, observations, responseStore, work, observerAwareBindings, observerKeys, auditLog, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	go nativeSagaRunObserverWorker(ctx, work, ingestService, telemetryService, observerKeys, observerID, assetID, privacyAssignment.Digest, func(ctx context.Context) (detection.ProcessEvent, shared.ID, error) {
-		if err := nativeSagaExpectTermination(ctx, childExited); err != nil {
-			return detection.ProcessEvent{}, "", err
-		}
-		return event, "", nil
-	}, clock, observerDone)
+	go nativeSagaRunObserverWorker(ctx, work, ingestService, observerKeys, observerID, assetID, clock, observerDone)
 
 	record, err := responseService.Apply(ctx, eng.ID, action, target, fingerprint, "operator-bob")
 	if !errors.Is(err, responseuc.ErrVerificationPending) || record.State != responseuc.StateApplied || record.Verification != responseuc.VerificationPending {
@@ -302,7 +309,13 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 		t.Fatalf("human reversal approval: %v", err)
 	}
 	rollbackEndpointDone := make(chan error, 1)
-	go nativeSagaRunEndpointWorker(ctx, work, endpointExecutor, executorID, rollbackEndpointDone)
+	go nativeSagaRunEndpointWorker(ctx, work, endpointExecutor, executorID, func(ctx context.Context, command fleetagent.ResponseCommand) error {
+		restarted, replacementProcessID, err := nativeSagaFindRestartedProbe(ctx, probe, event.PID, assetID)
+		if err != nil {
+			return err
+		}
+		return nativeSagaIngestTargetProcess(ctx, telemetryService, observerKeys, timeline, coverage, executorID, assetID, privacyAssignment.Digest, command, restarted, replacementProcessID, clock)
+	}, rollbackEndpointDone)
 
 	record, err = responseService.Revert(ctx, action.ID, target, fingerprint, "operator-alice")
 	if !errors.Is(err, responseuc.ErrVerificationPending) || record.State != responseuc.StateApplied {
@@ -317,9 +330,7 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 		t.Fatalf("rollback endpoint worker: %v", err)
 	}
 	rollbackObserverDone := make(chan error, 1)
-	go nativeSagaRunObserverWorker(ctx, work, ingestService, telemetryService, observerKeys, observerID, assetID, privacyAssignment.Digest, func(ctx context.Context) (detection.ProcessEvent, shared.ID, error) {
-		return nativeSagaFindRestartedProbe(ctx, probe, event.PID, assetID)
-	}, clock, rollbackObserverDone)
+	go nativeSagaRunObserverWorker(ctx, work, ingestService, observerKeys, observerID, assetID, clock, rollbackObserverDone)
 	if err := <-rollbackObserverDone; err != nil {
 		t.Fatalf("rollback observer worker: %v", err)
 	}
@@ -585,7 +596,7 @@ func nativeSagaProcessStartNanos(pid int) (uint64, error) {
 	return ticks * 10_000_000, nil
 }
 
-func nativeSagaRunEndpointWorker(ctx context.Context, work *fleetwork.Service, service *responseexecute.Service, agentID shared.ID, done chan<- error) {
+func nativeSagaRunEndpointWorker(ctx context.Context, work *fleetwork.Service, service *responseexecute.Service, agentID shared.ID, observe func(context.Context, fleetagent.ResponseCommand) error, done chan<- error) {
 	for {
 		orders, err := work.Claim(ctx, "agent:"+agentID.String(), nativeSagaTenantID, agentID, 1)
 		if err != nil {
@@ -613,6 +624,12 @@ func nativeSagaRunEndpointWorker(ctx context.Context, work *fleetwork.Service, s
 			done <- fmt.Errorf("execute %s response command: %w", order.ID, err)
 			return
 		}
+		if observe != nil {
+			if err := observe(ctx, *order.ResponseCommand); err != nil {
+				done <- fmt.Errorf("ingest target process evidence: %w", err)
+				return
+			}
+		}
 		if err := work.CompleteResponse(ctx, "agent:"+agentID.String(), nativeSagaTenantID, order.ID, result, "registry actuator applied command"); err != nil {
 			done <- err
 			return
@@ -626,7 +643,7 @@ func nativeSagaRunEndpointWorker(ctx context.Context, work *fleetwork.Service, s
 	}
 }
 
-func nativeSagaRunObserverWorker(ctx context.Context, work *fleetwork.Service, ingest *responseverificationingest.Service, telemetryIngest *telemetryingest.Service, keys *memory.AgentSigningKeyStore, agentID, assetID shared.ID, privacyDigest string, observe func(context.Context) (detection.ProcessEvent, shared.ID, error), clock ports.Clock, done chan<- error) {
+func nativeSagaRunObserverWorker(ctx context.Context, work *fleetwork.Service, ingest *responseverificationingest.Service, keys *memory.AgentSigningKeyStore, agentID, assetID shared.ID, clock ports.Clock, done chan<- error) {
 	for {
 		orders, err := work.Claim(ctx, "agent:"+agentID.String(), nativeSagaTenantID, agentID, 1)
 		if err != nil {
@@ -649,13 +666,8 @@ func nativeSagaRunObserverWorker(ctx context.Context, work *fleetwork.Service, i
 			done <- err
 			return
 		}
-		event, replacementProcessID, err := observe(ctx)
-		if err != nil {
-			done <- err
-			return
-		}
-		if err := nativeSagaIngestObservedProcess(ctx, ingest, telemetryIngest, keys, *order.ResponseObserve, agentID, assetID, privacyDigest, event, replacementProcessID, clock); err != nil {
-			done <- err
+		if err := nativeSagaIngestObserverReport(ctx, ingest, keys, *order.ResponseObserve, agentID, assetID, clock); err != nil {
+			done <- fmt.Errorf("ingest response observation: %w", err)
 			return
 		}
 		if err := work.Transition(ctx, "agent:"+agentID.String(), nativeSagaTenantID, order.ID, order.LeaseID, workorder.StateSucceeded, "signed observation accepted"); err != nil {
@@ -667,7 +679,7 @@ func nativeSagaRunObserverWorker(ctx context.Context, work *fleetwork.Service, i
 	}
 }
 
-func nativeSagaIngestObservedProcess(ctx context.Context, ingest *responseverificationingest.Service, telemetryIngest *telemetryingest.Service, keys *memory.AgentSigningKeyStore, request fleetagent.ResponseObservationRequest, agentID, assetID shared.ID, privacyDigest string, event detection.ProcessEvent, replacementProcessID shared.ID, clock ports.Clock) error {
+func nativeSagaIngestObserverReport(ctx context.Context, ingest *responseverificationingest.Service, keys *memory.AgentSigningKeyStore, request fleetagent.ResponseObservationRequest, agentID, assetID shared.ID, clock ports.Clock) error {
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return err
@@ -686,23 +698,24 @@ func nativeSagaIngestObservedProcess(ctx context.Context, ingest *responseverifi
 	if err := keys.Register(ctx, key); err != nil {
 		return err
 	}
+	replacementProcessEntityID := shared.ID("")
+	if request.Reversal {
+		replacementProcessEntityID = request.Target.ProcessEntityID + "-replacement"
+	}
 	report := fleetagent.ResponseVerificationReport{
 		ProtocolVersion: fleetagent.TelemetryProtocolVersion, ReportID: request.RequestID, AgentID: agentID, HostID: agentID,
 		AgentSessionID: fleetagent.CanonicalSessionID(agentID), AssetID: assetID, EngagementID: request.EngagementID,
 		ActionID: request.ActionID, ActionDigest: request.ActionDigest, AttemptKey: request.AttemptKey,
-		ReceiptID: "receipt", ReceiptDigest: "0000000000000000000000000000000000000000000000000000000000000000", VerificationChallenge: request.VerificationChallenge, Target: request.Target, Reversal: request.Reversal,
-		ObservedAt: observedAt, ReplacementProcessEntityID: replacementProcessID, KeyID: key.KeyID,
+		ReceiptID: request.ReceiptID, ReceiptDigest: request.ReceiptDigest, VerificationChallenge: request.VerificationChallenge, Target: request.Target, Reversal: request.Reversal,
+		ObservedAt: observedAt, ReplacementProcessEntityID: replacementProcessEntityID, KeyID: key.KeyID,
 	}
 	report.Signature = fleetagent.SignResponseVerification(private, report)
-
-	if err := nativeSagaIngestObservationTelemetry(ctx, telemetryIngest, keys, agentID, assetID, privacyDigest, request, event, replacementProcessID, observedAt); err != nil {
-		return err
-	}
 	_, err = ingest.Ingest(ctx, agentID, report)
 	return err
 }
 
-func nativeSagaIngestObservationTelemetry(ctx context.Context, ingest *telemetryingest.Service, keys *memory.AgentSigningKeyStore, agentID, assetID shared.ID, privacyDigest string, request fleetagent.ResponseObservationRequest, event detection.ProcessEvent, replacementProcessID shared.ID, observedAt time.Time) error {
+func nativeSagaIngestTargetProcess(ctx context.Context, ingest *telemetryingest.Service, keys *memory.AgentSigningKeyStore, timeline *memory.EndpointTimelineStore, coverage *memory.CoverageWindowStore, agentID, assetID shared.ID, privacyDigest string, command fleetagent.ResponseCommand, event detection.ProcessEvent, replacementProcessID shared.ID, clock ports.Clock) error {
+	observedAt := clock.Now().UTC().Truncate(time.Microsecond)
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return err
@@ -714,23 +727,22 @@ func nativeSagaIngestObservationTelemetry(ctx context.Context, ingest *telemetry
 	if err := keys.Register(ctx, key); err != nil {
 		return err
 	}
-	activeAt := request.AttemptedAt.UTC().Truncate(time.Microsecond).Add(-time.Microsecond)
+	activeAt := command.IssuedAt.UTC().Truncate(time.Microsecond).Add(-time.Microsecond)
 	if activeAt.IsZero() {
 		activeAt = observedAt.Add(-time.Minute)
 	}
-	statePayload := sha256.Sum256([]byte("native-saga-process-active:" + request.AttemptKey))
+	statePayload := sha256.Sum256([]byte("native-saga-process-active:" + command.AttemptKey))
 	state := fleetagent.SensorStateReport{
-		ProtocolVersion:       fleetagent.TelemetryProtocolVersion,
-		ReportID:              shared.ID("native-sensor-state:" + request.AttemptKey),
-		AgentID:               agentID,
-		HostID:                agentID,
-		AgentSessionID:        fleetagent.CanonicalSessionID(agentID),
-		AssetID:               assetID,
-		ResponseObservationID: request.RequestID,
-		Kind:                  "sensor_state",
-		ObservedAt:            activeAt,
-		SchemaVersion:         1,
-		PayloadDigest:         hex.EncodeToString(statePayload[:]),
+		ProtocolVersion: fleetagent.TelemetryProtocolVersion,
+		ReportID:        shared.ID("native-sensor-state:" + command.AttemptKey),
+		AgentID:         agentID,
+		HostID:          agentID,
+		AgentSessionID:  fleetagent.CanonicalSessionID(agentID),
+		AssetID:         assetID,
+		Kind:            "sensor_state",
+		ObservedAt:      activeAt,
+		SchemaVersion:   1,
+		PayloadDigest:   hex.EncodeToString(statePayload[:]),
 		States: []detection.ClassCoverage{{
 			Class: detection.ClassProcess, HostID: agentID, AgentID: agentID, State: detection.StateActive, Since: activeAt,
 		}},
@@ -749,11 +761,11 @@ func nativeSagaIngestObservationTelemetry(ctx context.Context, ingest *telemetry
 	bootID := shared.ID("native-boot")
 	exitAt := observedAt.UTC().Truncate(time.Microsecond)
 	sequence, previousSequence := uint64(1), uint64(0)
-	if request.Reversal {
+	if command.Reversal {
 		sequence, previousSequence = 2, 1
 	}
-	processKind, processID := "exit", request.Target.ProcessEntityID
-	if request.Reversal {
+	processKind, processID := "exit", command.Target.ProcessEntityID
+	if command.Reversal {
 		processKind, processID = "exec", replacementProcessID
 	}
 	process := &telemetry.ProcessObservation{
@@ -777,8 +789,8 @@ func nativeSagaIngestObservationTelemetry(ctx context.Context, ingest *telemetry
 	manifest := fleetagent.TelemetryBatchManifest{
 		ProtocolVersion: fleetagent.TelemetryProtocolVersion,
 		SchemaVersion:   telemetry.SchemaVersion,
-		BatchID:         shared.ID("native-process-batch:" + request.AttemptKey), AgentID: agentID, HostID: agentID,
-		AssetID: assetID, ResponseObservationID: request.RequestID, StreamID: streamID,
+		BatchID:         shared.ID("native-process-batch:" + command.AttemptKey), AgentID: agentID, HostID: agentID,
+		AssetID: assetID, StreamID: streamID,
 		Position:         fleetagent.StreamPosition{Priority: fleetagent.PriorityP3, Epoch: 1, Sequence: sequence, Session: sessionID, Boot: fleetagent.BootID(bootID)},
 		PreviousSequence: previousSequence, EventTimeMin: exitAt, EventTimeMax: exitAt,
 		ObservedCount: 1, KeptCount: 1, SamplingPolicyDigest: "native-saga-p3", Events: []fleetagent.EventRef{ref},
@@ -794,6 +806,46 @@ func nativeSagaIngestObservationTelemetry(ctx context.Context, ingest *telemetry
 	}
 	if !result.Accepted || result.GapOpen {
 		return fmt.Errorf("signed process-exit telemetry admission=%+v, want accepted without gaps", result)
+	}
+
+	kind, entityID := endpoint.TimelineProcessExit, command.Target.ProcessEntityID
+	if command.Reversal {
+		kind, entityID = endpoint.TimelineProcessStart, replacementProcessID
+	}
+	timelineEntry := endpoint.TimelineEntry{
+		OccurredAt: observedAt, TenantID: nativeSagaTenantID, AssetID: assetID,
+		SourceAgentID: agentID, SourceAgentSessionID: shared.ID(sessionID), EntityKind: endpoint.EntityProcess,
+		EntityID: entityID, Kind: kind, EventID: eventID,
+	}
+	timelineEntries := []endpoint.TimelineEntry{timelineEntry}
+	if command.Reversal {
+		timelineEntries = append([]endpoint.TimelineEntry{{
+			OccurredAt: command.IssuedAt.UTC().Truncate(time.Microsecond).Add(time.Microsecond), TenantID: nativeSagaTenantID, AssetID: assetID,
+			SourceAgentID: agentID, SourceAgentSessionID: shared.ID(sessionID), EntityKind: endpoint.EntityProcess,
+			EntityID: command.Target.ProcessEntityID, Kind: endpoint.TimelineProcessExit, EventID: shared.ID("native-original-exit:" + command.AttemptKey),
+		}}, timelineEntries...)
+	}
+	if err := timeline.AppendTimeline(ctx, timelineEntries); err != nil {
+		return fmt.Errorf("append authoritative process timeline: %w", err)
+	}
+	window := sensorstate.CoverageWindow{
+		AssetID: assetID, AgentID: agentID, HostID: assetID,
+		Since: command.IssuedAt.UTC().Truncate(time.Microsecond).Add(-time.Second), Until: command.NotAfter.UTC().Truncate(time.Microsecond),
+		InputDigest: strings.Repeat("a", 64), CreatedAt: observedAt.Add(time.Microsecond), BatchCount: 1,
+		States: []detection.ClassCoverage{{
+			Class: detection.ClassProcess, HostID: assetID, AgentID: agentID,
+			State: detection.StateActive, Since: command.IssuedAt.UTC().Truncate(time.Microsecond),
+		}},
+	}
+	window.Vector = sensorstate.BuildCoverageVector(window)
+	window.Revision = sensorstate.RevisionFor(window)
+	if _, err := coverage.AppendCoverageWindow(ctx, window); err != nil {
+		return fmt.Errorf("append authoritative process coverage: %w", err)
+	}
+	storedTimeline, _ := timeline.QueryTimeline(ctx, ports.EndpointTimelineQuery{AssetID: assetID, SourceAgentID: agentID, SourceAgentSessionID: shared.ID(sessionID), From: command.IssuedAt, To: observedAt.Add(time.Second), Limit: 10})
+	storedCoverage, _ := coverage.ListCoverageWindowsBounded(ctx, ports.CoverageWindowQuery{AgentID: agentID, AssetID: assetID, HostID: assetID, Since: command.IssuedAt, Until: observedAt.Add(time.Second)}, 10)
+	if len(storedTimeline) == 0 || len(storedCoverage) == 0 {
+		return fmt.Errorf("authoritative process evidence was not readable: timeline=%d coverage=%d", len(storedTimeline), len(storedCoverage))
 	}
 	return nil
 }
