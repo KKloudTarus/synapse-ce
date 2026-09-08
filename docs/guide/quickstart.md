@@ -92,7 +92,11 @@ An engagement is the container for a piece of authorized work. Create one with:
 The dashboard accepts `.zip`, `.tar`, `.tar.gz`, and `.tgz` source packages up to 512 MiB. Synapse stores
 the package as an Engagement-owned artifact, verifies its SHA-256 before every scan, and extracts it into a
 bounded temporary workspace. In API + worker deployments, both processes must point at the same S3/MinIO
-bucket through the `SYNAPSE_BLOB_*` settings.
+bucket through the `SYNAPSE_BLOB_*` settings, or share the persistent filesystem root configured by
+`SYNAPSE_ENGAGEMENT_SOURCE_DIR`. Durable metadata requires PostgreSQL. Re-scan keeps the same package;
+to test another revision, create a child Re-test and choose **Upload new source**, or choose **Use current
+source** to reuse the predecessor's verified archive. See the
+[uploaded-source lifecycle](assessment-lifecycle-operations.md#uploaded-source-lifecycle).
 
 Nothing runs outside that scope and window.
 

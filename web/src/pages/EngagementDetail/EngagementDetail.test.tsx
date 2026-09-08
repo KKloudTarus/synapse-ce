@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { api } from '../../lib/api'
+import { api, ApiError } from '../../lib/api'
 import type { AssessmentLifecycle } from '../../lib/types'
 import { EngagementDetail } from './index'
 
@@ -262,6 +262,31 @@ describe('EngagementDetail Page Shell', () => {
     expect(screen.queryByLabelText('Scan target')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Save & Run scan' }))
     await waitFor(() => expect(api.startScan).toHaveBeenCalledWith('eng-123456', '', 'upload', '', 'full', false))
+  })
+
+  it('shows source metadata failures with retry instead of treating them as a source-less engagement', async () => {
+    vi.mocked(api.uploadedSource).mockRejectedValueOnce(new ApiError(503, 'Source service unavailable')).mockResolvedValueOnce({
+      versionId: 'source-version', filename: 'restored.zip', size: 123, sha256: 'c'.repeat(64), target: '',
+      uploadedBy: 'operator', uploadedAt: '2026-09-08T00:00:00Z',
+    })
+    render(<MemoryRouter initialEntries={['/engagements/eng-123456']}><Routes>
+      <Route path="/engagements/:id" element={<EngagementDetail />} />
+    </Routes></MemoryRouter>)
+    expect(await screen.findByText('Could not load source metadata: Source service unavailable')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry source lookup' }))
+    expect(await screen.findByText('Source: restored.zip')).toBeVisible()
+    expect(screen.queryByText('Could not load source metadata: Source service unavailable')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Immutable source details'))
+    expect(screen.getByLabelText(`Source SHA-256 ${'c'.repeat(64)}`)).toBeVisible()
+  })
+
+  it('does not show a source metadata error for a linked engagement without an uploaded package', async () => {
+    vi.mocked(api.uploadedSource).mockRejectedValue(new ApiError(404, 'No source package'))
+    render(<MemoryRouter initialEntries={['/engagements/eng-123456']}><Routes>
+      <Route path="/engagements/:id" element={<EngagementDetail />} />
+    </Routes></MemoryRouter>)
+    expect(await screen.findByRole('heading', { name: 'Acme Core Security Audit' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Retry source lookup' })).not.toBeInTheDocument()
   })
 
   it('locks uploaded source scans before package metadata loads', async () => {

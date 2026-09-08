@@ -23,6 +23,8 @@ import (
 const assessmentCycleRequestLimit = int64(1 << 20)
 
 type createAssessmentRetestRequest struct {
+	SourceStrategy          string      `json:"source_strategy"`
+	SourceVersionID         string      `json:"source_version_id"`
 	PlannedDate             string      `json:"planned_date"`
 	Name                    string      `json:"name"`
 	PredecessorAssessmentID string      `json:"predecessor_assessment_id"`
@@ -138,6 +140,7 @@ func (rt *Router) createAssessmentRetest(w http.ResponseWriter, r *http.Request)
 			IdempotencyKey: r.Header.Get("Idempotency-Key"),
 		},
 		AssessmentID: shared.ID(r.PathValue("assessmentId")), Name: request.Name, Source: source,
+		SourceStrategy: request.SourceStrategy, SourceVersionID: shared.ID(request.SourceVersionID),
 		PredecessorAssessmentID: shared.ID(request.PredecessorAssessmentID), ScopeStrategy: request.ScopeStrategy,
 		ProfileStrategy: request.ProfileStrategy, AuthorizedFrom: authorizedFrom, AuthorizedTo: authorizedTo,
 		Timezone: request.Timezone, RoE: request.RoE, PlannedDate: request.PlannedDate,
@@ -152,12 +155,13 @@ func (rt *Router) createAssessmentRetest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeRetainedValue(w, response, struct {
-		Engagement      engagementView          `json:"engagement"`
-		Cycle           cycleuc.CycleView       `json:"cycle"`
-		Member          cycleuc.MemberView      `json:"member"`
-		InheritanceDiff cycleuc.InheritanceDiff `json:"inheritance_diff"`
-		Warnings        []string                `json:"warnings"`
-	}{toEngagementView(result.Engagement), result.Cycle, result.Member, result.InheritanceDiff, result.Warnings})
+		Engagement      engagementView                 `json:"engagement"`
+		Cycle           cycleuc.CycleView              `json:"cycle"`
+		Member          cycleuc.MemberView             `json:"member"`
+		InheritanceDiff cycleuc.InheritanceDiff        `json:"inheritance_diff"`
+		Warnings        []string                       `json:"warnings"`
+		SourceSelection *cycleuc.RetestSourceSelection `json:"source_selection,omitempty"`
+	}{toEngagementView(result.Engagement), result.Cycle, result.Member, result.InheritanceDiff, result.Warnings, result.SourceSelection})
 }
 
 func (rt *Router) getAssessmentLifecycle(w http.ResponseWriter, r *http.Request) {

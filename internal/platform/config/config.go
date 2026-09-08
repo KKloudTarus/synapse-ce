@@ -128,6 +128,9 @@ type Config struct {
 	MaxWorkspaceBytes int64
 	// ProjectUploadDir retains uploaded Project source archives for repeat analysis.
 	ProjectUploadDir string
+	// EngagementSourceDir is the durable operator-owned upload object root used
+	// when MinIO/S3 is not configured. API and workers must share the same root.
+	EngagementSourceDir string
 	// ProjectSourceArtifactDir retains immutable, analysis-owned Code source snapshots.
 	// It must be operator-owned; source contents are never fetched again at read time.
 	ProjectSourceArtifactDir  string
@@ -716,6 +719,7 @@ func Load() Config {
 		Offline:                   getbool("SYNAPSE_OFFLINE", false),
 		MaxWorkspaceBytes:         getint64("SYNAPSE_MAX_WORKSPACE_BYTES", 2<<30),
 		ProjectUploadDir:          getenv("SYNAPSE_PROJECT_UPLOAD_DIR", "data/project-uploads"),
+		EngagementSourceDir:       engagementSourceDir(),
 		ProjectSourceArtifactDir:  projectSourceArtifactDir(),
 		ProjectSourceRetention:    getduration("SYNAPSE_PROJECT_SOURCE_RETENTION", 90*24*time.Hour),
 		ProjectSourceMaxFileBytes: getint64("SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES", 2<<20),

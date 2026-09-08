@@ -12,6 +12,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
@@ -22,23 +23,35 @@ import (
 var scanImageRefRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]*$`)
 
 type scaScanRequest struct {
-	EngagementID string `json:"engagement_id"`
-	Target       string `json:"target"`
-	Kind         string `json:"kind"`         // local (default) | git | archive | upload | image
-	Ref          string `json:"ref"`          // optional git branch/tag
-	Mode         string `json:"mode"`         // full (default) | vulnerabilities | licenses
-	CodeQuality  bool   `json:"code_quality"` // include first-party code-quality findings
+	SourceVersionID string `json:"source_version_id,omitempty"`
+	EngagementID    string `json:"engagement_id"`
+	Target          string `json:"target"`
+	Kind            string `json:"kind"`         // local (default) | git | archive | upload | image
+	Ref             string `json:"ref"`          // optional git branch/tag
+	Mode            string `json:"mode"`         // full (default) | vulnerabilities | licenses
+	CodeQuality     bool   `json:"code_quality"` // include first-party code-quality findings
 }
 
 type uploadedSourceResponse struct {
-	Filename   string    `json:"filename"`
-	Size       int64     `json:"size"`
-	SHA256     string    `json:"sha256"`
-	Target     string    `json:"target"`
-	UploadedBy string    `json:"uploaded_by"`
-	UploadedAt time.Time `json:"uploaded_at"`
+	VersionID           shared.ID `json:"version_id,omitempty"`
+	ReusedFromVersionID shared.ID `json:"reused_from_version_id,omitempty"`
+	AssociatedBy        string    `json:"associated_by,omitempty"`
+	AssociatedAt        time.Time `json:"associated_at,omitempty"`
+	Filename            string    `json:"filename"`
+	Size                int64     `json:"size"`
+	SHA256              string    `json:"sha256"`
+	Target              string    `json:"target"`
+	UploadedBy          string    `json:"uploaded_by"`
+	UploadedAt          time.Time `json:"uploaded_at"`
 }
 
+func uploadedSourceView(item sourcepackage.Package) uploadedSourceResponse {
+	return uploadedSourceResponse{
+		VersionID: item.VersionID, ReusedFromVersionID: item.ReusedFromVersionID,
+		AssociatedBy: item.AssociatedBy, AssociatedAt: item.AssociatedAt,
+		Filename: item.Filename, Size: item.Size, SHA256: item.SHA256, Target: item.Target(), UploadedBy: item.CreatedBy, UploadedAt: item.CreatedAt,
+	}
+}
 
 // scanRunHistoryReader is the normalized, tenant-scoped provenance read side.
 // It deliberately excludes mutation methods: this existing HTTP route is view-only.
@@ -50,25 +63,38 @@ type scanRunHistoryReader interface {
 func (rt *Router) SetScanRunHistory(history scanRunHistoryReader) { rt.scanRunHistory = history }
 
 type scanRunHistoryResponse struct {
-	ID               string            `json:"id"`
-	EngagementID     string            `json:"engagement_id"`
-	CreatedAt        time.Time         `json:"created_at"`
-	Manifest         ports.ScanManifest `json:"manifest"`
-	FindingKeys      []string          `json:"finding_keys"`
-	Provenance       string            `json:"provenance"`
-	TerminalStatus   string            `json:"terminal_status"`
-	SealedAt         *time.Time        `json:"sealed_at,omitempty"`
-	ManifestHash     string            `json:"manifest_hash,omitempty"`
-	LaneCount        int               `json:"lane_count"`
-	CompleteCoverage bool              `json:"complete_coverage"`
+	SourcePackage    *uploadedSourceResponse `json:"source_package,omitempty"`
+	TargetKind       string                  `json:"target_kind,omitempty"`
+	Target           string                  `json:"target,omitempty"`
+	ID               string                  `json:"id"`
+	EngagementID     string                  `json:"engagement_id"`
+	CreatedAt        time.Time               `json:"created_at"`
+	Manifest         ports.ScanManifest      `json:"manifest"`
+	FindingKeys      []string                `json:"finding_keys"`
+	Provenance       string                  `json:"provenance"`
+	TerminalStatus   string                  `json:"terminal_status"`
+	SealedAt         *time.Time              `json:"sealed_at,omitempty"`
+	ManifestHash     string                  `json:"manifest_hash,omitempty"`
+	LaneCount        int                     `json:"lane_count"`
+	CompleteCoverage bool                    `json:"complete_coverage"`
 }
 
 func legacyScanRunResponse(run ports.ScanRun) scanRunHistoryResponse {
-	return scanRunHistoryResponse{
+	view := scanRunHistoryResponse{
 		ID: run.ID, EngagementID: run.EngagementID, CreatedAt: run.CreatedAt,
 		Manifest: run.Manifest, FindingKeys: run.FindingKeys,
 		Provenance: "legacy", TerminalStatus: "unknown",
 	}
+	attachScanSource(&view, run.Manifest.SourcePackage)
+	return view
+}
+
+func attachScanSource(view *scanRunHistoryResponse, item *sourcepackage.Package) {
+	if item == nil {
+		return
+	}
+	source := uploadedSourceView(*item)
+	view.SourcePackage, view.TargetKind, view.Target = &source, ports.TargetUpload, item.Target()
 }
 
 func mergeScanRunHistory(legacy []ports.ScanRun, normalized []scanrun.ScanRun) []scanRunHistoryResponse {
@@ -87,7 +113,15 @@ func mergeScanRunHistory(legacy []ports.ScanRun, normalized []scanrun.ScanRun) [
 		}
 		if legacyRun, ok := legacyByID[run.ID]; ok {
 			view.Manifest, view.FindingKeys = legacyRun.Manifest, legacyRun.FindingKeys
+		} else if len(run.LegacyManifest) > 0 {
+			// The normalized read side also retains this run's immutable
+			// manifest; never substitute engagement-level current metadata.
+			var manifest ports.ScanManifest
+			if json.Unmarshal(run.LegacyManifest, &manifest) == nil {
+				view.Manifest = manifest
+			}
 		}
+		attachScanSource(&view, view.Manifest.SourcePackage)
 		out = append(out, view)
 		seen[run.ID] = struct{}{}
 	}
@@ -182,12 +216,16 @@ func (rt *Router) runSCAScan(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, errorBody{Error: msg})
 			return
 		}
-		job, err := rt.sca.StartUploadedSourceScanWithOptions(r.Context(), PrincipalFrom(r.Context()), tenantID, engagementID, scauc.ScanOptions{Mode: req.Mode, CodeQuality: req.CodeQuality})
+		job, err := rt.sca.StartUploadedSourceVersionScanWithOptions(r.Context(), PrincipalFrom(r.Context()), tenantID, engagementID, shared.ID(req.SourceVersionID), scauc.ScanOptions{Mode: req.Mode, CodeQuality: req.CodeQuality})
 		if err != nil {
 			writeError(w, rt.log, err)
 			return
 		}
 		writeJSON(w, http.StatusAccepted, job)
+		return
+	}
+	if req.SourceVersionID != "" {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "source_version_id requires an upload target"})
 		return
 	}
 	usingImportedSBOM := false
@@ -233,9 +271,7 @@ func (rt *Router) uploadedSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, uploadedSourceResponse{
-		Filename: item.Filename, Size: item.Size, SHA256: item.SHA256, Target: item.Target(), UploadedBy: item.CreatedBy, UploadedAt: item.CreatedAt,
-	})
+	writeJSON(w, http.StatusOK, uploadedSourceView(item))
 }
 
 // evidenceLedger returns the engagement's hash-chained evidence + verification.

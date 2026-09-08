@@ -264,8 +264,11 @@ export function EngagementDetail() {
     () => api.importedSBOM(id).catch(() => null),
     { deps: [id] },
   )
-  const { data: uploadedSource } = useFetch<UploadedSourcePackage | null>(
-    () => api.uploadedSource(id).catch(() => null),
+  const { data: uploadedSource, error: uploadedSourceError, refetch: refetchUploadedSource } = useFetch<UploadedSourcePackage | null>(
+    () => api.uploadedSource(id).catch((error) => {
+      if (error instanceof ApiError && error.status === 404) return null
+      throw error
+    }),
     { deps: [id] },
   )
 
@@ -399,6 +402,8 @@ export function EngagementDetail() {
           eng={eng}
           importedSBOM={importedSBOM}
           uploadedSource={uploadedSource}
+          uploadedSourceError={uploadedSourceError}
+          onRetryUploadedSource={refetchUploadedSource}
           initialError={scanStartError}
           onImportedSBOMChanged={refreshAll}
           job={job}

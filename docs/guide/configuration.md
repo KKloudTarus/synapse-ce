@@ -113,18 +113,30 @@ The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADD
 
 ## Shared artifact store (S3 or MinIO)
 
-The same object store retains evidence artifacts and Engagement source packages uploaded from the UI.
-Uploaded packages accept `.zip`, `.tar`, `.tar.gz`, and `.tgz` files up to 512 MiB compressed. API and
-worker processes must use the same bucket; the in-memory default only supports a single-process local
-development run and is not durable across restarts.
+When S3/MinIO is configured, the same object store retains evidence artifacts and Engagement source
+packages uploaded from the UI. Uploaded packages accept non-empty `.zip`, `.tar`, `.tar.gz`, and `.tgz`
+files up to 512 MiB compressed. API and worker processes must use the same endpoint and bucket.
+Without an endpoint, evidence uses the non-durable development store, but uploaded source uses a
+persistent filesystem root. Durable source metadata also requires PostgreSQL; an in-memory database
+is not a restart-safe deployment even when archive files are retained.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_BLOB_ENDPOINT` | (in-memory) | Host and port without a scheme. Empty runs an in-memory blob store. |
-| `SYNAPSE_BLOB_ACCESS_KEY` | `synapse` | Access key. |
-| `SYNAPSE_BLOB_SECRET_KEY` | `synapse-secret` | Secret key. |
+| `SYNAPSE_BLOB_ENDPOINT` | (none) | Host and port without a scheme. Empty uses in-memory evidence storage and filesystem storage for uploaded Engagement source. |
+| `SYNAPSE_BLOB_ACCESS_KEY` | (none) | Object-store access key; provide through the deployment's secret-management mechanism. |
+| `SYNAPSE_BLOB_SECRET_KEY` | (none) | Object-store secret key; never commit it to configuration or logs. |
 | `SYNAPSE_BLOB_BUCKET` | `synapse-evidence` | Shared bucket for evidence artifacts and uploaded Engagement source packages. |
-| `SYNAPSE_BLOB_USE_SSL` | `false` | Set true for https endpoints. |
+| `SYNAPSE_BLOB_USE_SSL` | `false` | Set true for HTTPS endpoints; use TLS for production object-store traffic. |
+| `SYNAPSE_ENGAGEMENT_SOURCE_DIR` | OS user configuration directory + `synapse/engagement-sources` | Durable operator-owned source archive root when the blob endpoint is empty. Must be an absolute, non-root real directory, not a symlink. API and workers must use the same persistent volume and root; keep it outside scanned repositories and temporary workspaces. |
+
+The filesystem adapter creates private directories/files and refuses unsafe roots or invalid object
+paths. Do not treat this root as a disposable cache. Separate containers or hosts do not share their
+default user configuration directories: mount the same retained volume and configure the path in each
+process, or use S3/MinIO. Back up PostgreSQL and source objects consistently. Changing an existing
+filesystem root or bucket does not migrate retained objects. Source reuse verifies the actual bytes;
+metadata or SHA-256 alone cannot restore a missing archive. See the
+[uploaded-source lifecycle](assessment-lifecycle-operations.md#uploaded-source-lifecycle) for immutable
+versions, Re-test choices, legacy limitations and migrations `0152`/`0153`.
 
 ## Restore verification (synapse-verify-restore)
 

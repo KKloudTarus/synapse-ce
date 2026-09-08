@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '../../lib/api'
-import type { AssessmentClosureManifest, AssessmentLifecycle } from '../../lib/types'
+import type { AssessmentClosureManifest, AssessmentLifecycle, UploadedSourcePackage } from '../../lib/types'
 import { AssessmentLifecyclePanel } from './AssessmentLifecyclePanel'
 
 vi.mock('../../lib/api', () => ({
@@ -12,6 +12,8 @@ vi.mock('../../lib/api', () => ({
     listAssessmentClosureManifests: vi.fn(),
     me: vi.fn(),
     createRetest: vi.fn(),
+    uploadedSource: vi.fn(),
+    getEngagement: vi.fn(),
     previewAssessmentRelationshipChange: vi.fn(),
     commitAssessmentRelationshipChange: vi.fn(),
   },
@@ -23,6 +25,11 @@ vi.mock('../../lib/api', () => ({
     }
   },
 }))
+
+const sourcePackage: UploadedSourcePackage = {
+  versionId: 'source-version-2', filename: 'payments-v2.zip', size: 2048, sha256: 'b'.repeat(64),
+  target: `uploaded-source/sha256/${'b'.repeat(64)}`, uploadedBy: 'alice', uploadedAt: '2026-09-08T00:00:00Z',
+}
 
 const lifecycle: AssessmentLifecycle = {
   assessmentId: 'assessment-2',
@@ -55,6 +62,8 @@ describe('AssessmentLifecyclePanel', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     vi.mocked(api.assessmentLifecycle).mockResolvedValue(lifecycle)
+    vi.mocked(api.uploadedSource).mockRejectedValue(new ApiError(404, 'No uploaded source'))
+    vi.mocked(api.getEngagement).mockResolvedValue({ inScope: [{ kind: 'repo', value: 'https://example.test/repo' }] } as never)
     vi.mocked(api.listAssessmentClosureManifests).mockResolvedValue([])
     vi.mocked(api.me).mockResolvedValue({ id: 'admin-1', name: 'Admin', role: 'admin', features: { assessmentLifecycleRead: true, assessmentLifecycleUIDefault: true } })
   })
@@ -101,6 +110,7 @@ describe('AssessmentLifecyclePanel', () => {
     renderPanel()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Create Re-test' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create Re-test' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
     expect(await screen.findByText('temporary network failure')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
@@ -133,6 +143,7 @@ describe('AssessmentLifecyclePanel', () => {
       expect(drawer.queryByLabelText(label)).not.toBeInTheDocument()
     }
     expect(drawer.getByRole('combobox', { name: 'Based on Assessment' })).toHaveTextContent('Re-test #2 · assessment-2')
+    await waitFor(() => expect(drawer.getByRole('button', { name: 'Create Re-test' })).toBeEnabled())
     fireEvent.click(drawer.getByRole('button', { name: 'Create Re-test' }))
     expect(await screen.findByText('Re-test created')).toBeInTheDocument()
     expect(api.createRetest).toHaveBeenCalledTimes(1)
@@ -147,10 +158,12 @@ describe('AssessmentLifecyclePanel', () => {
     expect(await screen.findByRole('heading', { name: 'New Re-test opened' })).toBeInTheDocument()
   })
 
-  it('keeps source archive validation and lets the operator correct a missing revision without entering text', async () => {
-    vi.mocked(api.createRetest).mockRejectedValue(new Error('source_package_required_for_retest'))
+  it('validates a new archive and keeps identical retries stable while edited source commands get a new key', async () => {
+    vi.mocked(api.uploadedSource).mockResolvedValue(sourcePackage)
+    vi.mocked(api.createRetest).mockRejectedValue(new Error('temporary upload failure'))
     renderPanel()
     fireEvent.click(await screen.findByRole('button', { name: 'Create Re-test' }))
+    fireEvent.click(await screen.findByRole('radio', { name: /Upload new source/ }))
     const upload = screen.getByLabelText('Re-test source archive')
     fireEvent.change(upload, { target: { files: [new File(['wrong type'], 'source.exe')] } })
     fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
@@ -158,12 +171,70 @@ describe('AssessmentLifecyclePanel', () => {
     expect(api.createRetest).not.toHaveBeenCalled()
     fireEvent.change(upload, { target: { files: [] } })
     fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
-    expect(await screen.findByText(/Choose the source revision to evaluate in this Re-test/)).toBeInTheDocument()
+    expect(await screen.findByText('Choose a source archive to upload.')).toBeInTheDocument()
     const source = new File(['new revision'], 'source.zip', { type: 'application/zip' })
     fireEvent.change(upload, { target: { files: [source] } })
     fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
+    expect(await screen.findByText('temporary upload failure')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
     await waitFor(() => expect(api.createRetest).toHaveBeenCalledTimes(2))
     expect(vi.mocked(api.createRetest).mock.calls[1]?.[1]?.source).toBe(source)
+    expect(vi.mocked(api.createRetest).mock.calls[0]?.[1]?.idempotencyKey).toBe(vi.mocked(api.createRetest).mock.calls[1]?.[1]?.idempotencyKey)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create Re-test' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('radio', { name: /Use current source/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
+    await waitFor(() => expect(api.createRetest).toHaveBeenCalledTimes(3))
+    const edited = vi.mocked(api.createRetest).mock.calls[2]?.[1]
+    expect(edited).toMatchObject({ sourceStrategy: 'reuse_current', sourceVersionId: 'source-version-2', source: undefined })
+    expect(edited?.idempotencyKey).not.toBe(vi.mocked(api.createRetest).mock.calls[1]?.[1]?.idempotencyKey)
+  })
+
+  it('defaults to the selected predecessor immutable source and keeps a draft minimal', async () => {
+    vi.mocked(api.uploadedSource).mockResolvedValue(sourcePackage)
+    vi.mocked(api.createRetest).mockRejectedValue(new Error('expected rejection'))
+    renderPanel()
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Re-test' }))
+    expect(await screen.findByRole('radio', { name: /Use current source/ })).toBeChecked()
+    expect(api.uploadedSource).toHaveBeenCalledWith('assessment-2')
+    expect(screen.getByText('payments-v2.zip')).toBeVisible()
+    expect(screen.getByLabelText(`Source SHA-256 ${'b'.repeat(64)}`)).toBeVisible()
+    expect(screen.queryByLabelText('Re-test source archive')).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Scope strategy' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
+    await waitFor(() => expect(api.createRetest).toHaveBeenCalledWith('assessment-2', {
+      predecessorAssessmentId: 'assessment-2', scopeStrategy: 'copy', profileStrategy: 'none',
+      sourceStrategy: 'reuse_current', sourceVersionId: 'source-version-2', source: undefined, idempotencyKey: expect.any(String),
+    }))
+  })
+
+  it('blocks creation on source lookup errors and retries without losing the predecessor', async () => {
+    vi.mocked(api.uploadedSource).mockRejectedValueOnce(new ApiError(503, 'Source service unavailable')).mockResolvedValueOnce(sourcePackage)
+    renderPanel()
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Re-test' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Source service unavailable')
+    expect(screen.getByRole('button', { name: 'Create Re-test' })).toBeDisabled()
+    expect(screen.queryByRole('radio', { name: /Use current source/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry source lookup' }))
+    expect(await screen.findByRole('radio', { name: /Use current source/ })).toBeChecked()
+    expect(screen.getByRole('combobox', { name: 'Based on Assessment' })).toHaveTextContent('Re-test #2')
+    expect(screen.getByRole('button', { name: 'Create Re-test' })).toBeEnabled()
+    expect(api.uploadedSource).toHaveBeenCalledTimes(2)
+  })
+
+  it('can create a new-source child when the predecessor upload metadata is no longer available', async () => {
+    vi.mocked(api.getEngagement).mockResolvedValue({ inScope: [{ kind: 'repo', value: `uploaded-source/sha256/${'d'.repeat(64)}` }] } as never)
+    vi.mocked(api.createRetest).mockRejectedValue(new Error('expected request rejection'))
+    renderPanel()
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Re-test' }))
+    expect(await screen.findByRole('radio', { name: /Use current source/ })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: /Upload new source/ })).toBeChecked()
+    expect(screen.getByRole('combobox', { name: 'Scope strategy' })).toBeDisabled()
+    const source = new File(['new revision'], 'replacement.zip')
+    fireEvent.change(screen.getByLabelText('Re-test source archive'), { target: { files: [source] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
+    await waitFor(() => expect(api.createRetest).toHaveBeenCalledWith('assessment-2', expect.objectContaining({
+      predecessorAssessmentId: 'assessment-2', scopeStrategy: 'copy', sourceStrategy: 'upload_new', sourceVersionId: undefined, source,
+    })))
   })
 
   it('refreshes eligible predecessors when the current Assessment completes without navigation', async () => {

@@ -8,6 +8,9 @@ import { Button, cn, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner
 import { useFetch } from '../../hooks'
 import { api, ApiError } from '../../lib/api'
 import { newIdempotencyKey } from '../../lib/api/client'
+import { useRequestIdempotency } from '../../hooks/useRequestIdempotency'
+import { useRetestSource } from '../../hooks/useRetestSource'
+import { RetestSourceChoice } from '../../components/synapse/RetestSourceChoice'
 import type { AssessmentClosureManifest, AssessmentCycleMember, AssessmentLifecycle, AssessmentRelationshipChangeRequest, AssessmentRelationshipPreview } from '../../lib/types'
 
 type Drawer = 'retest' | 'reparent' | 'select_head' | null
@@ -143,23 +146,26 @@ function RetestDrawer({ lifecycle, assessmentId, onClose, onCreated }: { lifecyc
   const navigate = useNavigate()
   const activeMembers = lifecycle.members.filter((member) => !member.archivedAt && member.assessmentStatus === 'completed')
   const [predecessor, setPredecessor] = useState(activeMembers.some((member) => member.assessmentId === assessmentId) ? assessmentId : activeMembers[0]?.assessmentId ?? '')
-  const [source, setSource] = useState<File | undefined>()
-  const [scopeStrategy, setScopeStrategy] = useState('copy')
+  const sourceSelection = useRetestSource(predecessor)
+  const [scopeStrategy, setScopeStrategy] = useState<'copy' | 'empty'>('copy')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [created, setCreated] = useState<Awaited<ReturnType<typeof api.createRetest>> | null>(null)
-  const [idempotencyKey] = useState(newIdempotencyKey)
+  const requestKey = useRequestIdempotency()
+  const effectiveScopeStrategy = sourceSelection.hasUploadedSource ? 'copy' : scopeStrategy
   async function submit() {
     if (submitting || created) return
-    if (source && (!/\.(zip|tar|tar\.gz|tgz)$/i.test(source.name) || source.size === 0 || source.size > 512 * 1024 * 1024)) { setError('Choose a non-empty ZIP or TAR source archive up to 512 MiB.'); return }
     if (!predecessor) { setError('Choose a completed predecessor Assessment.'); return }
+    const sourceError = sourceSelection.validationError(effectiveScopeStrategy)
+    if (sourceError) { setError(sourceError); return }
     setSubmitting(true); setError('')
     try {
-      const result = await api.createRetest(predecessor, {
-        source, predecessorAssessmentId: predecessor, scopeStrategy: scopeStrategy as 'copy' | 'empty', profileStrategy: 'none', idempotencyKey,
-      })
+      const input = {
+        source: undefined, ...sourceSelection.input, predecessorAssessmentId: predecessor, scopeStrategy: effectiveScopeStrategy, profileStrategy: 'none' as const,
+      }
+      const result = await api.createRetest(predecessor, { ...input, idempotencyKey: requestKey(input, input.source) })
       setCreated(result); onCreated()
-    } catch (cause) { setError(cause instanceof Error && cause.message.includes('source_package_required_for_retest') ? 'This Assessment uses an uploaded source archive. Choose the source revision to evaluate in this Re-test.' : cause instanceof Error ? cause.message : 'Re-test creation failed.') }
+    } catch (cause) { setError(cause instanceof Error && cause.message.includes('source_package_required_for_retest') ? 'The predecessor source is unavailable. Retry the source lookup or upload a new source archive.' : cause instanceof Error ? cause.message : 'Re-test creation failed.') }
     finally { setSubmitting(false) }
   }
   return <SlideoutMenu isOpen onOpenChange={(open) => { if (!open) onClose() }}>
@@ -173,6 +179,7 @@ function RetestDrawer({ lifecycle, assessmentId, onClose, onCreated }: { lifecyc
           <p className="font-semibold text-primary">Re-test created</p>
           <p className="mt-1 break-words text-sm text-secondary">{created.engagement.name}</p>
           <p className="mt-1 text-sm text-secondary">Scope: {created.inheritanceDiff.scope} · Authorization: {created.inheritanceDiff.authorization} · RoE: {created.inheritanceDiff.roe} · Scanner profile: {created.inheritanceDiff.scannerProfile}</p>
+          {created.sourceSelection ? <p className="mt-1 break-words text-sm text-secondary">Source: {created.sourceSelection.filename} · {created.sourceSelection.strategy === 'reuse_current' ? 'Current archive reused' : 'New archive uploaded'}</p> : null}
         </div>
         <p className="text-sm text-tertiary">The draft is ready. Configure execution authorization in Re-test Settings before running a scan.</p>
         {created.warnings.map((warning) => <p key={warning} className="flex gap-2 text-sm text-warning"><AlertCircle className="size-4 shrink-0" aria-hidden="true" />{labelize(warning)}</p>)}
@@ -182,12 +189,12 @@ function RetestDrawer({ lifecycle, assessmentId, onClose, onCreated }: { lifecyc
           <p className="break-words font-medium text-primary">{lifecycle.cycle.name}</p>
           <p className="mt-1 text-xs text-tertiary">Same Cycle and boundary · Scope copied by default</p>
         </div>
-        <Field label="Based on Assessment"><Select ariaLabel="Based on Assessment" value={predecessor} onValueChange={setPredecessor} options={activeMembers.map((member) => ({ value: member.assessmentId, label: memberLabel(member) }))} className="w-full" /></Field>
-        <Field label="Source archive" hint="When copying an uploaded-source scope, choose the new revision to evaluate. Otherwise, leave this empty."><Input aria-label="Re-test source archive" type="file" accept=".zip,.tar,.tar.gz,.tgz" onChange={(event) => setSource(event.target.files?.[0])} /></Field>
-        <Field label="Scope strategy"><Select ariaLabel="Scope strategy" value={scopeStrategy} onValueChange={setScopeStrategy} options={[{ value: 'copy', label: 'Copy frozen scope' }, { value: 'empty', label: 'Start with empty scope' }]} className="w-full" /></Field>
+        <Field label="Based on Assessment"><Select disabled={submitting} ariaLabel="Based on Assessment" value={predecessor} onValueChange={(value) => { setPredecessor(value); setError('') }} options={activeMembers.map((member) => ({ value: member.assessmentId, label: memberLabel(member) }))} className="w-full" /></Field>
+        <RetestSourceChoice selection={sourceSelection} disabled={submitting} onChange={() => setError('')} />
+        <Field label="Scope strategy" hint={sourceSelection.hasUploadedSource ? 'Uploaded-source Re-tests retain the frozen scope. Only the source revision changes.' : undefined}><Select disabled={submitting || sourceSelection.loading || sourceSelection.hasUploadedSource} ariaLabel="Scope strategy" value={effectiveScopeStrategy} onValueChange={(value) => setScopeStrategy(value as 'copy' | 'empty')} options={[{ value: 'copy', label: 'Copy frozen scope' }, { value: 'empty', label: 'Start with empty scope' }]} className="w-full" /></Field>
         <p className="text-xs leading-relaxed text-tertiary">Creating a Re-test does not start a scan. Configure execution authorization later in Settings.</p>
         {error ? <ErrorState message={error} /> : null}
-        <Button loading={submitting} onClick={submit}>Create Re-test</Button>
+        <Button loading={submitting} disabled={sourceSelection.loading || Boolean(sourceSelection.error)} onClick={submit}>Create Re-test</Button>
       </div>}
     </SlideoutMenu.Content>
   </SlideoutMenu>

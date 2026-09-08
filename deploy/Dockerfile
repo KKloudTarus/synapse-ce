@@ -31,7 +31,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-api ./cmd/synapse-api \
     && CGO_ENABLED=0 go build -trimpath -o /out/synapse-cspm ./cmd/synapse-cspm \
     && CGO_ENABLED=0 go build -trimpath -o /out/synapse-cli ./cmd/synapse-cli \
     && CGO_ENABLED=0 go build -trimpath -o /out/synapse-verify-restore ./cmd/synapse-verify-restore \
-    && mkdir -p /out/project-uploads /out/project-source-artifacts
+    && mkdir -p /out/project-uploads /out/project-source-artifacts /out/engagement-sources
 
 # The tree-sitter helper is CGO-linked, so build it against Debian glibc for the
 # Debian production runtime rather than copying an Alpine/musl-linked executable.
@@ -85,6 +85,7 @@ ENV SYNAPSE_SYFT_BIN=/usr/local/bin/syft \
     SYNAPSE_MVN_BIN=/usr/bin/mvn \
     SYNAPSE_GRADLE_BIN=/usr/local/bin/gradle \
     SYNAPSE_PROJECT_UPLOAD_DIR=/home/synapse/project-uploads \
+    SYNAPSE_ENGAGEMENT_SOURCE_DIR=/home/synapse/engagement-sources \
     SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR=/home/synapse/project-source-artifacts \
     JAVA_HOME=/opt/java-home
 EXPOSE 8080
@@ -102,9 +103,11 @@ COPY --from=syft /syft /usr/local/bin/syft
 COPY --from=grype /grype /usr/local/bin/grype
 COPY --from=build --chown=nonroot:nonroot /out/project-uploads /project-uploads
 COPY --from=build --chown=nonroot:nonroot /out/project-source-artifacts /project-source-artifacts
+COPY --from=build --chown=nonroot:nonroot /out/engagement-sources /engagement-sources
 ENV SYNAPSE_SYFT_BIN=/usr/local/bin/syft \
     SYNAPSE_GRYPE_BIN=/usr/local/bin/grype \
     SYNAPSE_PROJECT_UPLOAD_DIR=/project-uploads \
+    SYNAPSE_ENGAGEMENT_SOURCE_DIR=/engagement-sources \
     SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR=/project-source-artifacts
 EXPOSE 8080
 USER nonroot:nonroot
@@ -157,6 +160,7 @@ ENV PATH=/opt/synapse:/usr/bin:/bin \
     SYNAPSE_CSPM_HELPER_BIN=/opt/synapse/synapse-cspm \
     SYNAPSE_TAINT_CALLGRAPH_BIN=/opt/synapse/synapse-callgraph \
     SYNAPSE_PROJECT_UPLOAD_DIR=/var/lib/synapse/project-uploads \
+    SYNAPSE_ENGAGEMENT_SOURCE_DIR=/var/lib/synapse/engagement-sources \
     SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR=/var/lib/synapse/project-source-artifacts
 WORKDIR /home/synapse
 EXPOSE 8080

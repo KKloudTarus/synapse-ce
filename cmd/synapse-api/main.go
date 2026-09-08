@@ -385,6 +385,7 @@ func main() {
 	var incidentEventStore ports.IncidentEventStore             // #594 C7 incident append-only event log
 	var promotionStore ports.PendingPromotionAuditStore
 	var scanJobStore ports.ScanJobStore
+	var engagementSourceRepo ports.EngagementSourceRepository
 	var scanRunStore ports.ScanRunStore
 	var scanRunTransactions ports.TenantTransactionRunner
 	var assessmentSnapshotStore ports.AssessmentSnapshotRepository
@@ -547,6 +548,7 @@ func main() {
 			os.Exit(1)
 		}
 		scanJobStore = postgres.NewScanJobStore(pool)
+		engagementSourceRepo = postgres.NewEngagementSourceRepository(pool)
 		scanRunStore = postgres.NewScanRunStore(pool)
 		assessmentSnapshotStore = postgres.NewAssessmentSnapshotRepository(pool)
 		assessmentComparisonStore = postgres.NewAssessmentComparisonRepository(pool)
@@ -709,6 +711,7 @@ func main() {
 			os.Exit(1)
 		}
 		scanJobStore = memory.NewScanJobStore()
+		engagementSourceRepo = memory.NewEngagementSourceRepository()
 		memoryScanRuns := memory.NewScanRunStore()
 		scanRunStore = memoryScanRuns
 		scanRunTransactions = memory.NewTenantTransactionRunner()
@@ -867,7 +870,20 @@ func main() {
 		objectStore = memoryStore
 		log.Info("blob store: in-memory (set SYNAPSE_BLOB_ENDPOINT for MinIO/S3)")
 	}
-	uploadedSources := sourceupload.NewStore(objectStore, 0)
+	// Raw source archives must survive an API restart and be readable by a
+	// separate worker. Evidence's development memory fallback is not suitable.
+	sourceObjects := objectStore
+	if cfg.BlobEndpoint == "" {
+		localSources, err := blob.NewFilesystem(cfg.EngagementSourceDir)
+		if err != nil {
+			log.Error("durable engagement source store init failed", "err", err)
+			os.Exit(1)
+		}
+		defer func() { _ = localSources.Close() }()
+		sourceObjects = localSources
+		log.Info("engagement source archives: durable filesystem")
+	}
+	uploadedSources := sourceupload.NewStoreWithRepository(sourceObjects, engagementSourceRepo, 0)
 	engService.SetSourceStore(uploadedSources)
 	// Evidence vault: the one tamper-evident chain + verify-on-read path per engagement.
 	evidenceService, err := evidenceuc.NewService(evidenceStore, blobStore, auditLog, clock, ids)

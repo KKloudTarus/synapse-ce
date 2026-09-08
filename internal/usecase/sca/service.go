@@ -157,13 +157,7 @@ func (s *Service) UploadedSourceMetadata(ctx context.Context, tenantID, engageme
 }
 
 func (s *Service) StartUploadedSourceScanWithOptions(ctx context.Context, actor string, tenantID, engagementID shared.ID, opts ScanOptions) (ports.ScanJob, error) {
-	item, err := s.UploadedSourceMetadata(ctx, tenantID, engagementID)
-	if err != nil {
-		return ports.ScanJob{}, err
-	}
-	return s.StartScanWithOptions(ctx, actor, engagementID, ports.AcquireRequest{
-		Kind: ports.TargetUpload, Value: item.Target(), Locator: item.Locator,
-	}, opts)
+	return s.StartUploadedSourceVersionScanWithOptions(ctx, actor, tenantID, engagementID, "", opts)
 }
 
 // SetScannedImageRecorder wires the scanned-image digest index (#446). When set, a completed image
@@ -1527,6 +1521,10 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 		return nil, err
 	}
 	req = normalizeLocalTarget(req)
+	req, err = s.pinUploadedSource(ctx, engagementID, req)
+	if err != nil {
+		return nil, err
+	}
 	if s.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.timeout)
@@ -1573,6 +1571,10 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 	}
 	req = normalizeLocalTarget(req)
 	var imported importedsbom.Record
+	req, err = s.pinUploadedSource(ctx, engagementID, req)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
 	var importedDoc *sbom.SBOM
 	var useImported bool
 	if imported, importedDoc, useImported, err = s.loadImportedSBOMForRequest(ctx, engagementID, req, opts); err != nil {
@@ -1596,14 +1598,15 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		_ = importedDoc // loaded now to fail fast; worker reloads the active artifact when executing.
 	}
 	job := ports.ScanJob{
-		ID:           s.ids.NewID().String(),
-		EngagementID: engagementID.String(),
-		Target:       target,
-		Kind:         kind,
-		Status:       ports.ScanRunning,
-		Stage:        "queued",
-		StartedAt:    now,
-		DebugEvents:  []ports.ScanDebugEvent{},
+		SourcePackage: publicSourcePackage(req.SourcePackage),
+		ID:            s.ids.NewID().String(),
+		EngagementID:  engagementID.String(),
+		Target:        target,
+		Kind:          kind,
+		Status:        ports.ScanRunning,
+		Stage:         "queued",
+		StartedAt:     now,
+		DebugEvents:   []ports.ScanDebugEvent{},
 	}
 	if s.jobs != nil {
 		if err := s.jobs.CreateRunning(ctx, job); err != nil {
@@ -1817,10 +1820,25 @@ func (s *Service) SweepStaleScans(ctx context.Context, staleFor time.Duration) (
 			release()
 			continue
 		}
+		jobCtx := ctx
+		if source := job.SourcePackage; source != nil {
+			if source.TenantID.IsZero() || source.EngagementID.String() != job.EngagementID || job.Kind != ports.TargetUpload || job.Target != source.Target() {
+				release()
+				return n, fmt.Errorf("%w: stranded scan source ownership is invalid", shared.ErrValidation)
+			}
+			// The daemon sweeps across tenants. Derive each write's tenant from
+			// the frozen source binding, then verify its engagement owner before
+			// using tenant-scoped persistence; do not weaken the store's checks.
+			jobCtx = shared.WithTenant(ctx, source.TenantID)
+			if _, err := s.engagements.GetByIDInTenant(jobCtx, source.TenantID, source.EngagementID); err != nil {
+				release()
+				return n, fmt.Errorf("verify stranded scan source owner: %w", err)
+			}
+		}
 		fin := s.clock.Now()
 		job.FinishedAt, job.Progress = &fin, 100
 		job.Status, job.Stage, job.Error = ports.ScanFailed, "swept", "scan stranded running past staleFor with no live owner – reclaimed by sweeper"
-		if err := s.jobs.Save(ctx, job); err != nil {
+		if err := s.jobs.Save(jobCtx, job); err != nil {
 			release()
 			return n, fmt.Errorf("save swept scan job %s: %w", job.ID, err)
 		}
@@ -1868,12 +1886,20 @@ func (s *Service) gateAndAudit(ctx context.Context, actor string, engagementID s
 	if req.Kind == ports.TargetImage {
 		targetKind = engagement.TargetImage
 	}
+	metadata := map[string]string{"kind": kindOrLocal(req.Kind), "engagement": engagementID.String(), "mode": opts.Mode}
+	if req.SourcePackage != nil {
+		metadata["source_version_id"] = req.SourcePackage.VersionID.String()
+		metadata["source_sha256"] = req.SourcePackage.SHA256
+		if !req.SourcePackage.ReusedFromVersionID.IsZero() {
+			metadata["reused_from_version_id"] = req.SourcePackage.ReusedFromVersionID.String()
+		}
+	}
 	return s.guard.Authorize(ctx, execution.Request{
 		Actor:        actor,
 		EngagementID: engagementID,
 		Action:       "sca.scan",
 		Target:       engagement.Target{Kind: targetKind, Value: req.Value},
-		Metadata:     map[string]string{"kind": kindOrLocal(req.Kind), "engagement": engagementID.String(), "mode": opts.Mode},
+		Metadata:     metadata,
 	})
 }
 
@@ -2413,6 +2439,11 @@ func importedCompleteness(doc *sbom.SBOM) ports.Completeness {
 }
 
 func (s *Service) runPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (*ScanResult, error) {
+	var err error
+	req, err = s.pinUploadedSource(ctx, engagementID, req)
+	if err != nil {
+		return nil, err
+	}
 	stage, pct := stageAcquire, 5
 	trace := newScanDebugTrace(func(events []ports.ScanDebugEvent) { report(stage, pct, events) })
 	report(stage, pct, trace.snapshot())
@@ -2897,6 +2928,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	}
 	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
+	manifest.SourcePackage = publicSourcePackage(req.SourcePackage)
 
 	// Maven, once its full tree is resolved (mvn dependency:list), is no longer an under-reporting
 	// unresolved ecosystem – drop it from the completeness signal so the scan reads as complete.
@@ -3339,10 +3371,12 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 	preserved := false
 	preservedVulnerabilities := false
 	if !opts.scansVulnerabilities() {
+		source := current.Manifest.SourcePackage
 		current.Vulnerabilities = previous.Vulnerabilities
 		current.VulnDBSnapshot = previous.VulnDBSnapshot
 		current.ToolVersions = previous.ToolVersions
 		current.Manifest = previous.Manifest
+		current.Manifest.SourcePackage = source
 		current.RiskMatches = previous.RiskMatches
 		current.Findings = mergeFindingsByKind(previous.Findings, current.Findings, true)
 		current.AnalysisCoverage = cloneAnalysisCoverage(previous.AnalysisCoverage)

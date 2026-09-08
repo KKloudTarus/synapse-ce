@@ -11,11 +11,12 @@ Assessment lifecycle rollout is additive and fail-closed. Apply migrations first
   and an explicit predecessor. No per-Finding selection is required. Creating from
   the selected head advances it; creating from another completed member branches
   without changing the selected head.
-- **Uploaded source:** choose a new ZIP/TAR archive when copying uploaded-source
-  scope (non-empty, maximum 512 MiB). The predecessor archive is not reused. A
-  changed archive retains its own content digest and the Cycle source namespace.
-- **Authorization:** enter new start/end bounds and allowed tool classes, or save
-  a non-executable draft. Planned date is planning only. Previous authorization,
+- **Uploaded source:** use the selected predecessor's current archive (the default),
+  or upload another ZIP/TAR revision for the new Re-test. Both choices copy the
+  frozen scope and leave the predecessor's source and history unchanged.
+- **Authorization:** the compact Create Re-test drawer saves an automatically named,
+  non-executable draft. Configure its own authorization window and allowed tool
+  classes before scanning. Planned date is planning only. Previous authorization,
   RoE and scanner profiles are never inherited implicitly.
 - **Compare:** choose two finalized Snapshots. Ordered snapshots/ancestry permit
   lifecycle classification; reverse or sibling pairs require neutral diff. Missing,
@@ -24,6 +25,89 @@ Assessment lifecycle rollout is additive and fail-closed. Apply migrations first
 - **Close/reopen:** reviewers use signed, expiring preview/commit commands. Closure
   freezes the root-to-selected-head path and generates a JSON report. Reopen
   supersedes the old manifest; it does not rewrite or remove its report/history.
+
+## Uploaded-source lifecycle
+
+An Assessment owns at most one immutable source package. Initial source upload
+accepts a non-empty `.zip`, `.tar`, `.tar.gz`, or `.tgz` archive up to 512 MiB
+compressed. Create & Scan attaches it and requests a scan, subject to the usual
+scope, authorization and execution gates. Re-scan uses that same package; there
+is no replace-source action on an existing Assessment. To test another revision,
+complete the Assessment and create a child Re-test in the same open Cycle.
+
+Both Re-test entry points offer the following choices when the selected predecessor
+has uploaded-source scope:
+
+- **Use current source** reuses the exact verified bytes attached to that predecessor,
+  not the Cycle's root or selected head. It requires no file selection. The new
+  Assessment gets its own source version and association; filename, size, SHA-256,
+  original uploader and upload time remain unchanged.
+- **Upload new source** requires a valid archive and attaches it only to the new
+  Assessment. It has its own version, digest and upload attribution. The Cycle's
+  source namespace remains stable for supported comparison; a changed digest alone
+  is not proof that a Finding is Fixed.
+
+Uploaded-source Re-tests must copy scope; empty scope cannot be combined with
+either source choice. Changing the selected predecessor clears the previous file
+and source selection, and a failed source lookup must be retried before submission.
+Linked Git repositories, local targets and container images retain their existing
+flows without uploaded-source controls. Creating a Re-test draft does not start a
+scan or inherit execution permission.
+
+For API clients, `source_strategy` is `reuse_current` or `upload_new`. Reuse can pin
+the selected predecessor's `source_version_id`; a mismatch returns a conflict
+instead of selecting another version. A new file uses multipart upload and must not
+be combined with `reuse_current`. The response's `source_selection` records the
+chosen strategy and resulting version. Source metadata keeps `uploaded_by` and
+`uploaded_at` as original attribution; `associated_by`, `associated_at` and
+`reused_from_version_id` describe a later reuse without rewriting that attribution.
+
+### Scan history and audit
+
+Source metadata is pinned when the scan is enqueued, retained with the job, and
+sealed into the run manifest. The run-history UI displays that run's `source_package`
+(filename, size, SHA-256, version and attribution), never the Assessment's current
+metadata as a substitute. Legacy runs without retained source metadata show
+**Source metadata unavailable**; no archive identity or upload type is invented.
+The Re-test creation audit includes the source strategy, version, digest and reuse
+relationship. Internal object keys and filesystem locators are not exposed in the
+source or run API views.
+
+### Storage, upgrades and unavailable archives
+
+Use PostgreSQL for durable metadata and either shared S3/MinIO storage or a
+persistent filesystem source root. With no `SYNAPSE_BLOB_ENDPOINT`, uploaded source
+uses `SYNAPSE_ENGAGEMENT_SOURCE_DIR`, not the temporary extraction workspace or the
+development evidence store. API and worker processes must access the same retained
+objects. See the [artifact-store configuration](configuration.md#shared-artifact-store-s3-or-minio)
+for defaults and shared-volume requirements. Back up metadata and archive objects
+together; changing the configured root or bucket does not move existing objects.
+
+If a commit or durable-reference check has an unknown result, cleanup conservatively
+retains the uniquely written archive: deleting it could remove committed source or
+historical bytes. There is no automatic garbage collection for these uncertain
+objects. Before any manual cleanup, an operator must reconcile the write outcome
+and verify tenant ownership and all durable references. Never purge source objects
+blindly based on a failed request or an archive's age.
+
+Apply migration `0152` (tenant-owned, immutable source packages and reuse
+attribution), then `0153` (immutable job/run source bindings), before deploying the
+updated API and workers. These are additive; they do not infer historical run
+metadata from a newer source. Their down migrations refuse to discard populated
+source packages or retained bindings. Roll back exposure or application binaries
+only with the schema compatibility gates satisfied; do not delete history to make
+a down migration succeed.
+
+An intact legacy source manifest can be promoted only after its retained archive
+passes size and SHA-256 verification. A scope digest, database row or run summary
+cannot reconstruct missing archive bytes or missing original upload attribution.
+Restore the actual retained objects and metadata from a consistent backup when
+available. Otherwise, if a completed predecessor still has uploaded-source scope
+but its source metadata is missing, the Re-test UI disables **Use current source**
+and permits **Upload new source** for a new child. This does not repair or relabel
+older runs. If metadata exists but its archive is missing or corrupt, reuse and
+scanning fail closed; upload another archive to a new Re-test rather than replacing
+the old Assessment's source.
 
 Large closure reference cohorts (over 256 per kind) are represented as hashed
 `*_set` references with source kind, exact count and earliest expiry. Report
@@ -161,7 +245,7 @@ Verifier metrics also use bounded labels:
 
 ## Shadow Comparison backfill and deterministic repair
 
-1. Apply the additive migration chain `0138` through `0151` (ScanRun provenance through immutable native comparison evidence). Released migrations `0001` through `0137` are unchanged.
+1. Apply the additive migration chain `0138` through `0153` (ScanRun provenance, immutable native comparison evidence, source packages and job/run source bindings). Released migrations `0001` through `0137` are unchanged.
 2. Enable `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED` for an internal tenant allowlist.
 3. Confirm new initial Assessments atomically create a Cycle and root member.
 4. Run the Cycle and Snapshot backfills, then the Finding lineage backfill and integrity verifier.

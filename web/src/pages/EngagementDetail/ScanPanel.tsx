@@ -12,6 +12,7 @@ import { ARCHIVED_REASON, isReadOnly } from './readOnly'
 import { EvidenceBadge, ScopeBadge } from './components/ScanBadges'
 import { ScanConfigModal, detectKind } from './components/ScanConfigModal'
 import { ScanDebugTimeline } from './components/ScanDebugTimeline'
+import { SourcePackageSummary } from '../../components/synapse/SourcePackageSummary'
 
 // Re-export shared helpers consumed by sibling modules (ReportBuilderModal).
 export { trapTabFocus } from './components/ScanConfigModal'
@@ -26,6 +27,8 @@ export function ScanPanel({
   eng,
   importedSBOM,
   uploadedSource,
+  uploadedSourceError,
+  onRetryUploadedSource,
   initialError,
   onImportedSBOMChanged,
   job,
@@ -35,6 +38,8 @@ export function ScanPanel({
   eng: Engagement
   importedSBOM: ImportedSBOMMetadata | null
   uploadedSource: UploadedSourcePackage | null
+  uploadedSourceError?: string | null
+  onRetryUploadedSource?: () => void
   initialError?: string
   onImportedSBOMChanged: () => void
   job: ScanJob | null
@@ -244,6 +249,15 @@ export function ScanPanel({
           </span>
         </div>
       </div>
+
+      {uploadedSource ? <details className="rounded-lg border border-secondary px-3 py-2">
+        <summary className="cursor-pointer text-xs font-semibold text-secondary">Immutable source details</summary>
+        <div className="mt-3"><SourcePackageSummary source={uploadedSource} /></div>
+      </details> : null}
+      {uploadedSourceError ? <div role="alert" className="rounded-lg border border-error/30 p-3 text-sm text-error-primary">
+        <p>Could not load source metadata: {uploadedSourceError}</p>
+        {onRetryUploadedSource ? <button type="button" className="mt-2 font-semibold underline" onClick={onRetryUploadedSource}>Retry source lookup</button> : null}
+      </div> : null}
 
       {(sbomError || sbomMessage) && (
         <div

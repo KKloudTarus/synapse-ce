@@ -79,4 +79,33 @@ describe('ScanRunsTab', () => {
     render(<ScanRunsTab engagementId="eng-001" />)
     expect(await screen.findByText('No scan runs yet')).toBeInTheDocument()
   })
+
+  it('renders each run immutable archive without replacing old evidence with the newest source', async () => {
+    const first = run('run-first', '2026-09-01T00:00:00Z', 100, ['first'])
+    const second = run('run-second', '2026-09-08T00:00:00Z', 100, ['second'])
+    first.sourcePackage = { versionId: 'source-v1', filename: 'original.zip', size: 1024, sha256: 'a'.repeat(64), target: '', uploadedBy: 'alice', uploadedAt: '2026-09-01T00:00:00Z' }
+    second.sourcePackage = { versionId: 'source-v2', filename: 'updated.zip', size: 2048, sha256: 'b'.repeat(64), target: '', uploadedBy: 'bob', uploadedAt: '2026-09-08T00:00:00Z' }
+    vi.mocked(api.scanRuns).mockResolvedValue([first, second])
+    render(<ScanRunsTab engagementId="eng-001" />)
+    expect(await screen.findByText('original.zip')).toBeVisible()
+    expect(screen.getByText('updated.zip')).toBeVisible()
+    expect(screen.getByLabelText(`Source SHA-256 ${'a'.repeat(64)}`)).toBeVisible()
+    expect(screen.getByLabelText(`Source SHA-256 ${'b'.repeat(64)}`)).toBeVisible()
+    expect(screen.getByText(/Uploaded by alice/)).toBeVisible()
+    expect(screen.getByText(/Uploaded by bob/)).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Scan run run-first' })).toHaveTextContent('original.zip')
+    expect(screen.getByRole('button', { name: 'Scan run run-first' })).not.toHaveTextContent('updated.zip')
+  })
+
+  it('labels legacy missing source metadata neutrally and keeps non-upload target kinds', async () => {
+    vi.mocked(api.scanRuns).mockResolvedValue([
+      { ...run('legacy', '2026-09-01T00:00:00Z', 0, []), provenance: 'legacy' },
+      { ...run('git-run', '2026-09-02T00:00:00Z', 100, []), targetKind: 'git', target: 'https://example.test/repo' },
+      { ...run('image-run', '2026-09-03T00:00:00Z', 100, []), targetKind: 'image', target: 'example/image@sha256:abc' },
+    ])
+    render(<ScanRunsTab engagementId="eng-001" />)
+    expect(await screen.findByText('Source metadata unavailable')).toBeVisible()
+    expect(screen.getByText('git target · https://example.test/repo')).toBeVisible()
+    expect(screen.getByText('image target · example/image@sha256:abc')).toBeVisible()
+  })
 })

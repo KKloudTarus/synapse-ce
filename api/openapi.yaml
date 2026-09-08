@@ -356,9 +356,13 @@ paths:
       description: |
         Requires a completed predecessor in an open Cycle. Omit execution authorization
         to save a non-executable draft; planned_date never grants authorization.
-        Copying an uploaded-source scope requires a new source archive via multipart.
-        The predecessor archive is never silently reused. Idempotency binds metadata
-        and the uploaded filename, size, and SHA-256 digest.
+        For an uploaded-source predecessor, choose reuse_current to create a child-owned
+        association to its immutable archive, or upload_new with a new archive via multipart.
+        When source_strategy is omitted, a file selects upload_new; without a file, copied
+        uploaded-source scope selects reuse_current. Non-uploaded scopes are unchanged.
+        source_version_id, when provided, must match the selected predecessor's immutable
+        source version. Source selection cannot be combined with empty scope.
+        Idempotency binds the source strategy/version and uploaded filename, size, and SHA-256.
       parameters:
       - name: Idempotency-Key
         in: header
@@ -1058,6 +1062,24 @@ paths:
         "409": {description: Candidate expired, already decided, stale version, or idempotency body mismatch}
         "413": {description: Request body exceeds 16 KiB}
         "428": {description: If-Match is required}
+  /api/v1/engagements/{id}/scan-runs:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    get:
+      tags: [engagements, sca]
+      summary: List immutable scan history with the source version used by each run
+      responses:
+        "200":
+          description: Runs with native or legacy provenance; source metadata is omitted when historically unavailable.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/ScanRunHistory"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/engagements/{id}/source:
     parameters:
     - $ref: "#/components/parameters/EngagementId"
@@ -7869,6 +7891,14 @@ components:
       properties:
         name: {type: string}
         predecessor_assessment_id: {type: string}
+        source_strategy:
+          type: string
+          enum: [reuse_current, upload_new]
+          description: Optional explicit archive choice. A file defaults to upload_new; copied uploaded-source scope without a file defaults to reuse_current.
+        source_version_id:
+          type: string
+          maxLength: 256
+          description: Optional expected immutable version of the selected predecessor source, not an arbitrary archive locator or another Assessment's version.
         scope_strategy: {type: string, enum: [copy, empty], default: copy}
         profile_strategy: {type: string, enum: [none], default: none}
         planned_date: {type: string, description: 'Optional YYYY-MM-DD planning date or empty string; never grants execution authorization.'}
@@ -7907,11 +7937,24 @@ components:
         cycle: {$ref: "#/components/schemas/AssessmentCycle"}
         member: {$ref: "#/components/schemas/AssessmentCycleMember"}
         inheritance_diff: {$ref: "#/components/schemas/AssessmentInheritanceDiff"}
+        source_selection: {$ref: "#/components/schemas/AssessmentRetestSourceSelection"}
         warnings:
           type: array
           items:
             type: string
             enum: [authorization_not_inherited, roe_not_inherited, scanner_profile_not_inherited]
+
+    AssessmentRetestSourceSelection:
+      type: object
+      required: [strategy, version_id, filename, size, sha256]
+      properties:
+        strategy: {type: string, enum: [reuse_current, upload_new]}
+        version_id: {type: string, description: Immutable child-owned source association version.}
+        filename: {type: string}
+        size: {type: integer, format: int64}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        source_assessment_id: {type: string, description: Predecessor Assessment whose archive was reused.}
+        reused_from_version_id: {type: string, description: Exact predecessor source version reused by this child.}
 
     FinalizeAssessmentSnapshotRun:
       type: object
@@ -8048,8 +8091,13 @@ components:
 
     UploadedSourcePackage:
       type: object
+      description: Immutable source association. Reuse retains original upload attribution; each assessment gets its own version. Storage keys and archive bytes are never returned.
       required: [filename, size, sha256, target, uploaded_by, uploaded_at]
       properties:
+        version_id: {type: string, description: Immutable source association ID; absent only for legacy metadata.}
+        reused_from_version_id: {type: string}
+        associated_by: {type: string}
+        associated_at: {type: string, format: date-time}
         filename: {type: string}
         size: {type: integer, format: int64, minimum: 1, maximum: 536870912}
         sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
@@ -8387,6 +8435,7 @@ components:
       required: [engagement_id]
       properties:
         engagement_id: {type: string}
+        source_version_id: {type: string, description: Optional expected source version for kind upload. A mismatch returns409; other target kinds reject this field.}
         target: {type: string, description: Path or git URL; must be empty for kind upload and may be empty when an imported SBOM is active.}
         kind:
           type: string
@@ -8406,6 +8455,8 @@ components:
         engagement_id: {type: string}
         target: {type: string}
         kind: {type: string}
+        source_package:
+          $ref: "#/components/schemas/ScanSourceBinding"
         status:
           type: string
           enum: [running, succeeded, failed]
@@ -8417,6 +8468,42 @@ components:
         debug_events:
           type: array
           items: {type: object}
+
+    ScanSourceBinding:
+      type: object
+      description: Source metadata frozen at job admission and copied to the immutable run manifest, including failed jobs. Legacy runs are not backfilled from current source.
+      required: [tenant_id, engagement_id, filename, size, sha256, created_by, created_at]
+      properties:
+        tenant_id: {type: string}
+        engagement_id: {type: string}
+        version_id: {type: string}
+        reused_from_version_id: {type: string}
+        filename: {type: string}
+        size: {type: integer, format: int64}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        created_by: {type: string, description: Original uploader, unchanged on reuse.}
+        created_at: {type: string, format: date-time}
+        associated_by: {type: string}
+        associated_at: {type: string, format: date-time}
+
+    ScanRunHistory:
+      type: object
+      description: A run's source_package comes only from its own immutable manifest, never from the engagement's current source.
+      properties:
+        id: {type: string}
+        engagement_id: {type: string}
+        created_at: {type: string, format: date-time}
+        provenance: {type: string, enum: [native, legacy]}
+        terminal_status: {type: string}
+        source_package: {$ref: "#/components/schemas/UploadedSourcePackage"}
+        target_kind: {type: string}
+        target: {type: string}
+        manifest: {type: object}
+        finding_keys: {type: array, items: {type: string}}
+        manifest_hash: {type: string}
+        sealed_at: {type: string, format: date-time}
+        lane_count: {type: integer}
+        complete_coverage: {type: boolean}
 
     ScanResult:
       type: object

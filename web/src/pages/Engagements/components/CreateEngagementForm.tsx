@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type FC, type FormEvent } from 'react'
 import { Check, Link01, Plus, Trash01, Upload01 } from '@untitledui/icons'
 import { api } from '../../../lib/api'
-import { newIdempotencyKey } from '../../../lib/api/client'
+import { useRequestIdempotency } from '../../../hooks/useRequestIdempotency'
+import { useRetestSource } from '../../../hooks/useRetestSource'
+import { RetestSourceChoice } from '../../../components/synapse/RetestSourceChoice'
 import { kindLabel } from '../../../lib/format'
 import type { AssessmentCycleSummary, BusinessAsset, Engagement, Project, ScopeTarget } from '../../../lib/types'
 import { Select } from '../../../components/ui'
@@ -46,8 +48,9 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
   const [eligibleError, setEligibleError] = useState('')
   const [basedOnAssessmentId, setBasedOnAssessmentId] = useState('')
   const [toolClasses, setToolClasses] = useState('')
-  const [initialIdempotencyKey] = useState(newIdempotencyKey)
-  const [retestIdempotencyKey] = useState(newIdempotencyKey)
+  const initialRequestKey = useRequestIdempotency()
+  const retestRequestKey = useRequestIdempotency()
+  const retestSource = useRetestSource(purpose === 'retest' ? basedOnAssessmentId : '')
 
   useEffect(() => {
     if (!assessmentLifecycleEnabled) return
@@ -190,6 +193,10 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
       setError('Choose an eligible completed Assessment in an open Cycle.')
       return
     }
+    if (purpose === 'retest') {
+      const sourceError = retestSource.validationError('copy')
+      if (sourceError) { setError(sourceError); return }
+    }
     if (purpose === 'initial' && sourceMode === 'linked' && inScope.length === 0) {
       setError('Add at least one in-scope target.')
       return
@@ -222,12 +229,13 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
     setError(null)
     try {
       if (purpose === 'retest') {
-        const result = await api.createRetest(basedOnAssessmentId, {
-          name: name.trim(), predecessorAssessmentId: basedOnAssessmentId, scopeStrategy: 'copy', profileStrategy: 'none',
+        const input = {
+          name: name.trim(), predecessorAssessmentId: basedOnAssessmentId, scopeStrategy: 'copy' as const, profileStrategy: 'none' as const,
           authorizedFrom: draft ? '' : from ?? '', authorizedTo: draft ? '' : to ?? '', timezone: timezone || 'UTC',
           roe: draft ? undefined : { allowedToolClasses: toolClasses.split(',').map((value) => value.trim()).filter(Boolean), blackouts: [] },
-          idempotencyKey: retestIdempotencyKey, source: sourceFile ?? undefined,
-        })
+          ...retestSource.input,
+        }
+        const result = await api.createRetest(basedOnAssessmentId, { ...input, idempotencyKey: retestRequestKey(input, input.source) })
         onCreated(result.engagement, 'retest')
         return
       }
@@ -243,8 +251,8 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
         assessmentProjectId: assessmentLifecycleEnabled ? assessmentProjectId : undefined,
       }
       const engagement = sourceMode === 'upload'
-        ? await api.createEngagementFromSource(input, sourceFile!, initialIdempotencyKey)
-        : await api.createEngagement(input, initialIdempotencyKey)
+        ? await api.createEngagementFromSource(input, sourceFile!, initialRequestKey(input, sourceFile!))
+        : await api.createEngagement(input, initialRequestKey(input))
       if (sourceMode === 'upload') {
         try {
           await api.startScan(engagement.id, '', 'upload')
@@ -352,7 +360,7 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
             </div> : null}
             </> : <div className="sm:col-span-1 xl:col-span-2">
               <label className="block text-xs font-medium text-secondary">Based on Assessment <span className="text-utility-red-600">*</span></label>
-              {predecessorOptions.length ? <Select ariaLabel="Based on Assessment" disabled={submitting || eligibleLoading} value={basedOnAssessmentId || predecessorOptions[0]!.value} onValueChange={setBasedOnAssessmentId} options={predecessorOptions} className="mt-1.5 h-10 w-full border-primary bg-primary shadow-xs" /> : null}
+              {predecessorOptions.length ? <Select ariaLabel="Based on Assessment" disabled={submitting || eligibleLoading} value={basedOnAssessmentId || predecessorOptions[0]!.value} onValueChange={(value) => { setBasedOnAssessmentId(value); setError(null) }} options={predecessorOptions} className="mt-1.5 h-10 w-full border-primary bg-primary shadow-xs" /> : null}
               {eligibleLoading ? <p role="status" className="mt-1.5 text-xs text-tertiary">Loading eligible completed Assessments…</p> : null}
               {!eligibleLoading && !eligibleError && predecessorOptions.length === 0 ? <p role="status" className="mt-1.5 text-xs text-warning">No eligible completed Assessment in the loaded Cycles. Reopen the Cycle first if it is completed.</p> : null}
               {eligibleError ? <div role="alert" className="mt-1.5 text-xs text-error-primary">{eligibleError} <button type="button" disabled={eligibleLoading} className="underline" onClick={() => eligibleCursor ? loadMoreEligible() : setEligibleRetry((value) => value + 1)}>Retry</button></div> : null}
@@ -484,7 +492,7 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
               </div>
             )}
           </div>
-        </div> : <div className="border-t border-secondary pt-6"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary"><span className="flex size-6 items-center justify-center rounded-full bg-brand-solid text-xs font-bold text-white">2</span>Derived lifecycle context</div><div className="rounded-xl border border-secondary bg-secondary/30 p-4 text-sm text-secondary"><p><strong>Assessment type:</strong> Re-test</p><p className="mt-1"><strong>Scope/profile:</strong> copied only by the server contract; no Cycle or boundary selector is writable.</p></div><div className="mt-4"><label htmlFor="retest-source-package" className="block text-xs font-medium text-secondary">Re-test source archive</label><input id="retest-source-package" type="file" accept=".zip,.tar,.tar.gz,.tgz" disabled={submitting} onChange={(event) => chooseSource(event.target.files?.[0])} className="mt-1.5 w-full rounded-lg border border-primary bg-primary px-3.5 py-2 text-sm text-primary shadow-xs" /><p className="mt-1.5 text-xs text-tertiary">Required when the predecessor uses an uploaded source. Choose the revision to evaluate; the previous archive is not reused. Maximum 512 MiB.</p></div></div>}
+        </div> : <div className="border-t border-secondary pt-6"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary"><span className="flex size-6 items-center justify-center rounded-full bg-brand-solid text-xs font-bold text-white">2</span>Derived lifecycle context</div><div className="rounded-xl border border-secondary bg-secondary/30 p-4 text-sm text-secondary"><p><strong>Assessment type:</strong> Re-test</p><p className="mt-1"><strong>Scope/profile:</strong> copied only by the server contract; no Cycle or boundary selector is writable.</p></div><div className="mt-4"><RetestSourceChoice selection={retestSource} disabled={submitting} onChange={() => setError(null)} /></div></div>}
 
         {/* Step 3: Authorization Window */}
         <div className="border-t border-secondary pt-6">
@@ -528,16 +536,16 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
         </div>
 
         {error && (
-          <div className="rounded-lg border border-utility-red-200 bg-utility-red-50 p-3 text-xs font-medium text-utility-red-700 dark:border-utility-red-800 dark:bg-utility-red-950/40 dark:text-utility-red-300">
+          <div role="alert" className="rounded-lg border border-utility-red-200 bg-utility-red-50 p-3 text-xs font-medium text-utility-red-700 dark:border-utility-red-800 dark:bg-utility-red-950/40 dark:text-utility-red-300">
             {error}
           </div>
         )}
 
         <div className="flex flex-wrap items-center justify-end gap-3 border-t border-secondary pt-6">
-          {purpose === 'retest' ? <button type="button" disabled={submitting || eligibleLoading} onClick={() => submit(true)} className="inline-flex items-center justify-center rounded-lg border border-secondary bg-primary px-4 py-2.5 text-sm font-semibold text-secondary shadow-xs transition hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-brand/30 disabled:cursor-not-allowed disabled:opacity-50">Save non-executable draft</button> : null}
+          {purpose === 'retest' ? <button type="button" disabled={submitting || eligibleLoading || retestSource.loading || Boolean(retestSource.error)} onClick={() => submit(true)} className="inline-flex items-center justify-center rounded-lg border border-secondary bg-primary px-4 py-2.5 text-sm font-semibold text-secondary shadow-xs transition hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-brand/30 disabled:cursor-not-allowed disabled:opacity-50">Save non-executable draft</button> : null}
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || purpose === 'retest' && (eligibleLoading || retestSource.loading || Boolean(retestSource.error))}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white shadow-xs transition hover:bg-brand-solid_hover focus:outline-none focus:ring-2 focus:ring-brand/30 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? (

@@ -6,6 +6,20 @@ import (
 	"strings"
 )
 
+// Uploaded archives are original evidence, not a disposable source-preview cache.
+// Keep the default in persistent application data outside scanned workspaces.
+func engagementSourceDir() string {
+	if configured := strings.TrimSpace(os.Getenv("SYNAPSE_ENGAGEMENT_SOURCE_DIR")); configured != "" {
+		return configured
+	}
+	if root, err := os.UserConfigDir(); err == nil && filepath.IsAbs(root) {
+		return filepath.Join(root, "synapse", "engagement-sources")
+	}
+	// No temporary-directory fallback: an unavailable durable root must surface
+	// as a configuration error, not silently lose uploads on restart.
+	return ""
+}
+
 // projectSourceArtifactDir returns an operator-owned absolute default outside the process working
 // tree. An explicit environment value is preserved so write adapters can fail closed on a relative
 // configuration instead of silently rebasing it into an attacker-controlled checkout.

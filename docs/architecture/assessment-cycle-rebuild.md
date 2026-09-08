@@ -82,11 +82,25 @@ cannot reuse cached vulnerability observations. Manual/offensive Findings enter
 a newly finalized Snapshot, not an older default. Risk-only EPSS/KEV metadata is
 retained in the immutable run/evidence, but does not define detection coverage.
 
-Uploaded-source Re-tests require an explicit new archive when copying scope.
-The original source is not silently reused. Each run retains its verified content
-digest; same-Cycle uploads use the immutable root Snapshot's source namespace.
-Ambiguous, legacy or unrelated source boundaries are not automatically joined.
-Offline API/worker provenance does not claim a live OSV query.
+Each Assessment owns at most one immutable uploaded-source package. Uploaded-source
+Re-tests explicitly offer **Use current source** (default) or **Upload new source**
+while copying scope. Reuse resolves the selected predecessor, not the Cycle head,
+and creates a new child association/version while retaining the original bytes and
+upload attribution. New uploads belong only to the child; existing Assessments and
+their run history are never relabelled. Each queued scan pins its source metadata,
+which is retained in the immutable run manifest. Same-Cycle uploads use the immutable
+root Snapshot's source namespace; ambiguous, legacy or unrelated source boundaries
+are not automatically joined. Offline API/worker provenance does not claim a live
+OSV query.
+
+The source-lifecycle follow-up adds migrations `0152` (source versions and immutable
+attribution) and `0153` (job/run source bindings). Metadata is tenant-owned; object
+storage is shared S3/MinIO or the persistent `SYNAPSE_ENGAGEMENT_SOURCE_DIR` fallback,
+separate from temporary scan workspaces. Intact legacy packages are verified before
+promotion. Missing bytes or original metadata are not reconstructed from hashes;
+legacy runs remain visibly unavailable, and a new child upload is the recovery path
+when the old source is lost. See the
+[uploaded-source operations contract](../guide/assessment-lifecycle-operations.md#uploaded-source-lifecycle).
 
 Additional correctness fixes include visible Project association, completed
 predecessor eligibility and UI refresh after completion, separately authorized

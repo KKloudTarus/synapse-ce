@@ -9,6 +9,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Immutable uploaded-source lifecycle for Assessment Re-tests.** Both Re-test entry points can reuse
+  the selected predecessor's verified archive or attach a new revision to the child Assessment, while
+  preserving original upload attribution and older history. Scan jobs and run manifests pin source
+  versions for read-only provenance. Migrations `0152`/`0153` retain tenant-owned source metadata and
+  immutable bindings; archive storage uses shared S3/MinIO or a persistent filesystem fallback.
+
 - **Scan runs now support tenant-owned, sealed provenance v1.** Native execution headers can be
   sealed once with normalized producer lanes, versions, stages, canonical target identities, and
   reproducible SHA-256 manifests. Migration 0134 is expand-only for migrate-first rollouts,

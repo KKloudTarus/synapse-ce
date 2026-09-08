@@ -35,13 +35,28 @@ describe('assessmentCyclesApi closure workflow', () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({engagement: {id: 'retest'}, cycle: cycle('open', 2), member: {assessment_id: 'retest'}}, 201))
     vi.stubGlobal('fetch', fetchMock)
     const source = new File(['revision'], 'source.zip', {type: 'application/zip'})
-    await assessmentCyclesApi.createRetest('root', {name: 'Revision', source, idempotencyKey: 'upload-key'})
+    await assessmentCyclesApi.createRetest('root', {name: 'Revision', source, sourceStrategy: 'upload_new', idempotencyKey: 'upload-key'})
     const request = fetchMock.mock.calls[0]?.[1]
     expect(request.body).toBeInstanceOf(FormData)
     expect(request.body.get('source')).toBe(source)
-    expect(JSON.parse(request.body.get('metadata'))).toMatchObject({name: 'Revision', scope_strategy: 'copy'})
+    expect(JSON.parse(request.body.get('metadata'))).toMatchObject({name: 'Revision', scope_strategy: 'copy', source_strategy: 'upload_new'})
     expect(new Headers(request.headers).get('Idempotency-Key')).toBe('upload-key')
     expect(new Headers(request.headers).has('Content-Type')).toBe(false)
+  })
+
+  it('reuses a pinned predecessor source using JSON and maps the retained selection receipt', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      engagement: { id: 'retest' }, cycle: cycle('open', 2), member: { assessment_id: 'retest' },
+      source_selection: { strategy: 'reuse_current', version_id: 'child-version', filename: 'current.zip', size: 4096, sha256: 'a'.repeat(64), reused_from_version_id: 'parent-version', source_assessment_id: 'root' },
+    }, 201))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await assessmentCyclesApi.createRetest('root', { sourceStrategy: 'reuse_current', sourceVersionId: 'parent-version', idempotencyKey: 'reuse-key' })
+    const request = fetchMock.mock.calls[0]?.[1]
+    expect(typeof request.body).toBe('string')
+    expect(JSON.parse(request.body)).toMatchObject({ source_strategy: 'reuse_current', source_version_id: 'parent-version', scope_strategy: 'copy' })
+    expect(JSON.parse(request.body)).not.toHaveProperty('source')
+    expect(new Headers(request.headers).get('Idempotency-Key')).toBe('reuse-key')
+    expect(result.sourceSelection).toEqual({ strategy: 'reuse_current', versionId: 'child-version', filename: 'current.zip', size: 4096, sha256: 'a'.repeat(64), reusedFromVersionId: 'parent-version', sourceAssessmentId: 'root' })
   })
 
   it('persists a date-only Re-test plan separately from execution authorization', async () => {

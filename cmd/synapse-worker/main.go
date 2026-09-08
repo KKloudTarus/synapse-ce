@@ -298,7 +298,17 @@ func main() {
 		blobStore = memoryStore
 		objectStore = memoryStore
 	}
-	uploadedSources := sourceupload.NewStore(objectStore, 0)
+	sourceObjects := objectStore
+	if cfg.BlobEndpoint == "" {
+		localSources, err := blob.NewFilesystem(cfg.EngagementSourceDir)
+		if err != nil {
+			log.Error("durable engagement source store init failed", "err", err)
+			os.Exit(1)
+		}
+		defer func() { _ = localSources.Close() }()
+		sourceObjects = localSources
+	}
+	uploadedSources := sourceupload.NewStoreWithRepository(sourceObjects, postgres.NewEngagementSourceRepository(pool), 0)
 
 	guard, err := execution.NewGuard(repo, clock, auditLog)
 	if err != nil {

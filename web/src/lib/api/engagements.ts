@@ -67,6 +67,21 @@ function mapEngagement(r: EngagementWire): Engagement {
 
 export { mapEngagement }
 
+export function mapUploadedSource(source: any): UploadedSourcePackage {
+  return {
+    versionId: source.version_id || undefined,
+    reusedFromVersionId: source.reused_from_version_id || undefined,
+    associatedBy: source.associated_by || undefined,
+    associatedAt: source.associated_at ?? null,
+    filename: source.filename ?? '',
+    size: source.size ?? 0,
+    sha256: source.sha256 ?? '',
+    target: source.target ?? '',
+    uploadedBy: source.uploaded_by ?? '',
+    uploadedAt: source.uploaded_at ?? null,
+  }
+}
+
 // A per-engagement tool credential. The secret value is write-only: it is sealed in the vault on set
 // and never returned, so this metadata carries only the name and timestamps.
 export interface EngagementCredential {
@@ -104,14 +119,7 @@ export const engagementsApi = {
 
   uploadedSource: async (id: string): Promise<UploadedSourcePackage> => {
     const source = await req(`/engagements/${encodeURIComponent(id)}/source`)
-    return {
-      filename: source.filename ?? '',
-      size: source.size ?? 0,
-      sha256: source.sha256 ?? '',
-      target: source.target ?? '',
-      uploadedBy: source.uploaded_by ?? '',
-      uploadedAt: source.uploaded_at ?? null,
-    }
+    return mapUploadedSource(source)
   },
 
   updateScope: async (id: string, inScope: ScopeTarget[], outOfScope: ScopeTarget[]): Promise<Engagement> =>

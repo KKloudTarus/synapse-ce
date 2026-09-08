@@ -168,6 +168,8 @@ export const assessmentCyclesApi = {
         predecessor_assessment_id: input.predecessorAssessmentId ?? '',
         scope_strategy: input.scopeStrategy ?? 'copy',
         profile_strategy: input.profileStrategy ?? 'none',
+        source_strategy: input.sourceStrategy,
+        source_version_id: input.sourceVersionId,
         authorized_from: input.authorizedFrom ?? '',
         authorized_to: input.authorizedTo ?? '',
         timezone: input.timezone ?? '',
@@ -198,6 +200,15 @@ export const assessmentCyclesApi = {
         scannerProfile: value.inheritance_diff?.scanner_profile ?? 'none',
       },
       warnings: value.warnings ?? [],
+      sourceSelection: value.source_selection ? {
+        strategy: value.source_selection.strategy,
+        versionId: value.source_selection.version_id ?? '',
+        filename: value.source_selection.filename ?? '',
+        size: value.source_selection.size ?? 0,
+        sha256: value.source_selection.sha256 ?? '',
+        reusedFromVersionId: value.source_selection.reused_from_version_id || undefined,
+        sourceAssessmentId: value.source_selection.source_assessment_id || undefined,
+      } : undefined,
     }
   },
 

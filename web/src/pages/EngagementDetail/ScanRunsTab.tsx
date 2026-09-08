@@ -13,6 +13,7 @@ import { Button, Card, EmptyState, ErrorState, Pill, Spinner, cn } from '../../c
 import { useParallelFetch } from '../../hooks'
 import { api } from '../../lib/api'
 import type { ScanDrift, ScanRun } from '../../lib/types'
+import { SourcePackageSummary } from '../../components/synapse/SourcePackageSummary'
 
 // A scan run's reproducibility score maps to a semantic tone: a run built entirely
 // from pinned inputs (100) is reproducible; a run with live inputs (osv.dev) is not.
@@ -111,6 +112,11 @@ function RunRow({
         <Pill>{pinned} pinned</Pill>
         {unpinned > 0 && <Pill className="text-warning-primary">{unpinned} live</Pill>}
       </span>
+      <div className="w-full border-t border-secondary pt-2">
+        <p className="mb-1 text-xs font-semibold text-secondary">Source recorded for this run</p>
+        {run.sourcePackage ? <SourcePackageSummary source={run.sourcePackage} /> :
+          <p className="text-xs text-tertiary">{run.targetKind && run.targetKind !== 'upload' ? `${run.targetKind} target` : 'Source metadata unavailable'}{run.targetKind && run.targetKind !== 'upload' && run.target ? ` · ${run.target}` : ''}</p>}
+      </div>
     </button>
   )
 }

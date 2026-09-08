@@ -111,6 +111,7 @@ type CreateInitialAssessmentInput struct {
 
 func (service *APIService) CreateInitialAssessment(ctx context.Context, input CreateInitialAssessmentInput) (RetainedResponse, error) {
 	var compensate func(context.Context) error
+	var createdSource sourcepackage.Package
 	canonical := struct {
 		Engagement enguc.CreateInput `json:"engagement"`
 		Source     *struct {
@@ -140,10 +141,18 @@ func (service *APIService) CreateInitialAssessment(ctx context.Context, input Cr
 			if input.Source.Reader == nil {
 				return 0, nil, &APIError{Code: "source_upload_required", Cause: shared.ErrValidation}
 			}
-			assessment, _, err = service.engagements.CreateFromSourcePackage(txCtx, engagementInput, input.Source.Filename, input.Source.Size, input.Source.SHA256, input.Source.Reader)
+			assessment, createdSource, err = service.engagements.CreateFromSourcePackage(txCtx, engagementInput, input.Source.Filename, input.Source.Size, input.Source.SHA256, input.Source.Reader)
 		}
 		if err != nil {
+			if !createdSource.VersionID.IsZero() {
+				compensate = func(cleanupCtx context.Context) error {
+					return service.engagements.CompensateCreate(cleanupCtx, createdSource.TenantID, createdSource.EngagementID)
+				}
+			}
 			return 0, nil, err
+		}
+		compensate = func(cleanupCtx context.Context) error {
+			return service.engagements.CompensateCreate(cleanupCtx, assessment.TenantID, assessment.ID)
 		}
 		boundary := cycledom.BoundaryFor(assessment.BusinessAssetID, assessment.AssessmentProjectID)
 		cycle, _, err := service.cycles.CreateInitialCycle(txCtx, CreateInitialCycleInput{
@@ -170,11 +179,15 @@ func (service *APIService) CreateInitialAssessment(ctx context.Context, input Cr
 			return nil
 		}
 		return compensate(cleanupCtx)
+	}, func(cleanupCtx context.Context) error {
+		return service.engagements.DiscardUnpublishedSource(cleanupCtx, createdSource)
 	})
 }
 
 type CreateRetestAssessmentInput struct {
 	Source                  *SourceUpload
+	SourceStrategy          string
+	SourceVersionID         shared.ID
 	PlannedDate             string
 	Request                 RetainedRequest
 	AssessmentID            shared.ID
@@ -196,21 +209,35 @@ type InheritanceDiff struct {
 }
 
 type CreateRetestResponse struct {
-	Engagement      *engdom.Engagement `json:"engagement"`
-	Cycle           CycleView          `json:"cycle"`
-	Member          MemberView         `json:"member"`
-	InheritanceDiff InheritanceDiff    `json:"inheritance_diff"`
-	Warnings        []string           `json:"warnings"`
+	Engagement      *engdom.Engagement     `json:"engagement"`
+	Cycle           CycleView              `json:"cycle"`
+	Member          MemberView             `json:"member"`
+	InheritanceDiff InheritanceDiff        `json:"inheritance_diff"`
+	Warnings        []string               `json:"warnings"`
+	SourceSelection *RetestSourceSelection `json:"source_selection,omitempty"`
+}
+
+type RetestSourceSelection struct {
+	Strategy            string    `json:"strategy"`
+	VersionID           shared.ID `json:"version_id"`
+	Filename            string    `json:"filename"`
+	Size                int64     `json:"size"`
+	SHA256              string    `json:"sha256"`
+	SourceAssessmentID  shared.ID `json:"source_assessment_id,omitempty"`
+	ReusedFromVersionID shared.ID `json:"reused_from_version_id,omitempty"`
 }
 
 func (service *APIService) CreateRetestAssessment(ctx context.Context, input CreateRetestAssessmentInput) (RetainedResponse, error) {
 	var compensate func(context.Context) error
+	var selectedPackage sourcepackage.Package
 	canonical := struct {
 		Source *struct {
 			Filename string
 			Size     int64
 			SHA256   string
 		} `json:"source,omitempty"`
+		SourceStrategy          string      `json:"source_strategy,omitempty"`
+		SourceVersionID         shared.ID   `json:"source_version_id,omitempty"`
 		PlannedDate             string      `json:"planned_date,omitempty"`
 		AssessmentID            shared.ID   `json:"assessment_id"`
 		Name                    string      `json:"name,omitempty"`
@@ -221,7 +248,10 @@ func (service *APIService) CreateRetestAssessment(ctx context.Context, input Cre
 		AuthorizedTo            *time.Time  `json:"authorized_to,omitempty"`
 		Timezone                string      `json:"timezone,omitempty"`
 		RoE                     *engdom.RoE `json:"roe,omitempty"`
-	}{nil, input.PlannedDate, input.AssessmentID, input.Name, input.PredecessorAssessmentID, input.ScopeStrategy, input.ProfileStrategy, input.AuthorizedFrom, input.AuthorizedTo, input.Timezone, input.RoE}
+	}{SourceStrategy: input.SourceStrategy, SourceVersionID: input.SourceVersionID, PlannedDate: input.PlannedDate,
+		AssessmentID: input.AssessmentID, Name: input.Name, PredecessorAssessmentID: input.PredecessorAssessmentID,
+		ScopeStrategy: input.ScopeStrategy, ProfileStrategy: input.ProfileStrategy, AuthorizedFrom: input.AuthorizedFrom,
+		AuthorizedTo: input.AuthorizedTo, Timezone: input.Timezone, RoE: input.RoE}
 	if input.Source != nil {
 		canonical.Source = &struct {
 			Filename string
@@ -276,15 +306,58 @@ func (service *APIService) CreateRetestAssessment(ctx context.Context, input Cre
 		if name == "" {
 			name = source.Name + " Re-test"
 		}
-		// Uploaded archives are immutable and belong to one Assessment. A Re-test
-		// explicitly supplies its evaluated revision; copying scope never copies a
-		// storage locator or silently scans the predecessor's old source.
+		sourceStrategy := strings.TrimSpace(input.SourceStrategy)
+		if sourceStrategy != "" && sourceStrategy != "reuse_current" && sourceStrategy != "upload_new" {
+			return 0, nil, &APIError{Code: "invalid_source_strategy", Cause: shared.ErrValidation}
+		}
+		if len(input.SourceVersionID.String()) > 256 {
+			return 0, nil, &APIError{Code: "invalid_source_version_id", Cause: shared.ErrValidation}
+		}
+		if scopeStrategy == "empty" && (sourceStrategy != "" || input.Source != nil || !input.SourceVersionID.IsZero()) {
+			return 0, nil, &APIError{Code: "source_selection_requires_copied_scope", Cause: shared.ErrValidation}
+		}
+		if input.Source != nil {
+			if sourceStrategy == "reuse_current" {
+				return 0, nil, &APIError{Code: "source_strategy_file_conflict", Cause: shared.ErrValidation}
+			}
+			sourceStrategy = "upload_new"
+		} else if sourceStrategy == "upload_new" {
+			return 0, nil, &APIError{Code: "source_upload_required", Cause: shared.ErrValidation}
+		}
+		var predecessorTarget string
+		for _, target := range source.Scope.InScope {
+			if target.Kind == engdom.TargetRepo && sourcepackage.DigestFromTarget(target.Value) != "" {
+				if predecessorTarget != "" && predecessorTarget != target.Value {
+					return 0, nil, &APIError{Code: "ambiguous_predecessor_source", Cause: shared.ErrValidation}
+				}
+				predecessorTarget = target.Value
+			}
+		}
+		if sourceStrategy == "" && scopeStrategy == "copy" && predecessorTarget != "" {
+			sourceStrategy = "reuse_current"
+		}
+		var predecessorPackage sourcepackage.Package
+		if sourceStrategy == "reuse_current" || !input.SourceVersionID.IsZero() {
+			if predecessorTarget == "" {
+				return 0, nil, &APIError{Code: "predecessor_has_no_uploaded_source", Cause: shared.ErrValidation}
+			}
+			predecessorPackage, err = service.engagements.SourcePackage(txCtx, tenantID, input.AssessmentID)
+			if err != nil {
+				return 0, nil, err
+			}
+			if predecessorPackage.Target() != predecessorTarget {
+				return 0, nil, &APIError{Code: "predecessor_source_scope_mismatch", Cause: shared.ErrValidation}
+			}
+			if !input.SourceVersionID.IsZero() && input.SourceVersionID != predecessorPackage.VersionID {
+				return 0, nil, &APIError{Code: "source_version_mismatch", Cause: shared.ErrConflict}
+			}
+		}
+		// A child owns its immutable source association. Copying scope never copies
+		// an internal locator; the store either verifies and reuses the selected
+		// predecessor version or retains the explicitly uploaded new archive.
 		filtered := make([]engdom.Target, 0, len(inScope))
 		for _, target := range inScope {
-			if sourcepackage.DigestFromTarget(target.Value) != "" {
-				if input.Source == nil {
-					return 0, nil, &APIError{Code: "source_package_required_for_retest", Cause: shared.ErrValidation}
-				}
+			if target.Kind == engdom.TargetRepo && sourcepackage.DigestFromTarget(target.Value) != "" {
 				continue
 			}
 			filtered = append(filtered, target)
@@ -297,16 +370,26 @@ func (service *APIService) CreateRetestAssessment(ctx context.Context, input Cre
 			RoE: input.RoE, RequiresExplicitExecutionAuthorization: true,
 		}
 		var assessment *engdom.Engagement
-		if input.Source == nil {
+		if sourceStrategy == "reuse_current" {
+			assessment, selectedPackage, err = service.engagements.CreateFromReusedSource(txCtx, engagementInput, input.AssessmentID, predecessorPackage.VersionID)
+		} else if input.Source == nil {
 			assessment, err = service.engagements.Create(txCtx, engagementInput)
 		} else {
 			if input.Source.Reader == nil {
 				return 0, nil, &APIError{Code: "source_upload_required", Cause: shared.ErrValidation}
 			}
-			assessment, _, err = service.engagements.CreateFromSourcePackage(txCtx, engagementInput, input.Source.Filename, input.Source.Size, input.Source.SHA256, input.Source.Reader)
+			assessment, selectedPackage, err = service.engagements.CreateFromSourcePackage(txCtx, engagementInput, input.Source.Filename, input.Source.Size, input.Source.SHA256, input.Source.Reader)
 		}
 		if err != nil {
+			if !selectedPackage.VersionID.IsZero() {
+				compensate = func(cleanupCtx context.Context) error {
+					return service.engagements.CompensateCreate(cleanupCtx, selectedPackage.TenantID, selectedPackage.EngagementID)
+				}
+			}
 			return 0, nil, err
+		}
+		compensate = func(cleanupCtx context.Context) error {
+			return service.engagements.CompensateCreate(cleanupCtx, tenantID, assessment.ID)
 		}
 		member, err := service.cycles.CreateRetest(txCtx, CreateRetestInput{
 			TenantID: tenantID, CycleID: cycle.ID, PredecessorAssessmentID: input.AssessmentID,
@@ -332,10 +415,22 @@ func (service *APIService) CreateRetestAssessment(ctx context.Context, input Cre
 		if input.RoE != nil {
 			warnings = removeWarning(warnings, WarningRoENotCopied)
 		}
-		if err := service.record(txCtx, input.Request, "assessment_cycle.api_retest_created", cycle.ID, map[string]string{
+		metadata := map[string]string{
 			"assessment_id": assessment.ID.String(), "predecessor_id": member.PredecessorAssessmentID.String(),
 			"retest_number": strconv.Itoa(member.RetestNumber), "cycle_version": strconv.FormatInt(updatedCycle.Version, 10),
-		}); err != nil {
+		}
+		var selection *RetestSourceSelection
+		if sourceStrategy != "" {
+			selection = &RetestSourceSelection{Strategy: sourceStrategy, VersionID: selectedPackage.VersionID,
+				Filename: selectedPackage.Filename, Size: selectedPackage.Size, SHA256: selectedPackage.SHA256,
+				ReusedFromVersionID: selectedPackage.ReusedFromVersionID}
+			metadata["source_strategy"], metadata["source_version_id"], metadata["source_sha256"] = sourceStrategy, selectedPackage.VersionID.String(), selectedPackage.SHA256
+			if sourceStrategy == "reuse_current" {
+				selection.SourceAssessmentID = input.AssessmentID
+				metadata["source_assessment_id"], metadata["reused_from_version_id"] = input.AssessmentID.String(), predecessorPackage.VersionID.String()
+			}
+		}
+		if err := service.record(txCtx, input.Request, "assessment_cycle.api_retest_created", cycle.ID, metadata); err != nil {
 			return 0, nil, err
 		}
 		memberView := projectMember(*member)
@@ -344,12 +439,15 @@ func (service *APIService) CreateRetestAssessment(ctx context.Context, input Cre
 			Engagement: assessment, Cycle: projectCycle(updatedCycle), Member: memberView,
 			InheritanceDiff: InheritanceDiff{Scope: scopeStrategy, Authorization: "explicit_only", RoE: "explicit_only", ScannerProfile: profileStrategy},
 			Warnings:        warnings,
+			SourceSelection: selection,
 		}, nil
 	}, func(cleanupCtx context.Context) error {
 		if compensate == nil {
 			return nil
 		}
 		return compensate(cleanupCtx)
+	}, func(cleanupCtx context.Context) error {
+		return service.engagements.DiscardUnpublishedSource(cleanupCtx, selectedPackage)
 	})
 }
 
@@ -734,7 +832,7 @@ func (service *APIService) ArchiveCycle(ctx context.Context, input ArchiveCycleR
 	})
 }
 
-func (service *APIService) executeRetained(ctx context.Context, request RetainedRequest, canonical any, operation func(context.Context) (int, any, error), compensate func(context.Context) error) (RetainedResponse, error) {
+func (service *APIService) executeRetained(ctx context.Context, request RetainedRequest, canonical any, operation func(context.Context) (int, any, error), compensate func(context.Context) error, afterRollback ...func(context.Context) error) (RetainedResponse, error) {
 	scope := ports.AssessmentCycleRequestScope{
 		TenantID: shared.TenantOrDefault(request.TenantID), Actor: strings.TrimSpace(request.Actor),
 		Route: strings.TrimSpace(request.Route), IdempotencyKey: strings.TrimSpace(request.IdempotencyKey),
@@ -751,6 +849,7 @@ func (service *APIService) executeRetained(ctx context.Context, request Retained
 	}
 	var response RetainedResponse
 	createdReservation := false
+	operationFailed := false
 	err = service.tx.Run(ctx, scope.TenantID, func(txCtx context.Context) error {
 		createdAt := service.clock.Now().UTC()
 		stored, created, err := service.requests.BeginAssessmentCycleRequest(txCtx, ports.AssessmentCycleRequest{
@@ -772,18 +871,30 @@ func (service *APIService) executeRetained(ctx context.Context, request Retained
 		}
 		statusCode, value, err := operation(txCtx)
 		if err != nil {
+			operationFailed = true
 			return errors.Join(err, compensate(context.WithoutCancel(txCtx)))
 		}
 		body, err := json.Marshal(value)
 		if err != nil {
+			operationFailed = true
 			return errors.Join(fmt.Errorf("marshal assessment cycle response: %w", err), compensate(context.WithoutCancel(txCtx)))
 		}
 		if err := service.requests.CompleteAssessmentCycleRequest(txCtx, scope, requestHash, statusCode, body, service.clock.Now().UTC()); err != nil {
+			operationFailed = true
 			return errors.Join(err, compensate(context.WithoutCancel(txCtx)))
 		}
 		response = RetainedResponse{StatusCode: statusCode, Body: body}
 		return nil
 	})
+	// Only a failure inside the transaction callback establishes that COMMIT
+	// was never attempted. An ambiguous commit or retained replay must not
+	// trigger object cleanup. These callbacks remove no database metadata and
+	// must recheck durable source references using the fresh outer context.
+	if err != nil && operationFailed {
+		for _, cleanup := range afterRollback {
+			err = errors.Join(err, cleanup(context.WithoutCancel(ctx)))
+		}
+	}
 	if err != nil && createdReservation {
 		_ = service.requests.AbortAssessmentCycleRequest(context.WithoutCancel(ctx), scope, requestHash)
 	}

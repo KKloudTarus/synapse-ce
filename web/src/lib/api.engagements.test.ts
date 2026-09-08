@@ -51,13 +51,33 @@ describe('Engagements API', () => {
         filename: 'source.zip', size: 42, sha256: 'a'.repeat(64),
         target: `uploaded-source/sha256/${'a'.repeat(64)}`,
         uploaded_by: 'operator', uploaded_at: '2026-08-28T00:00:00Z',
+        version_id: 'version-2', reused_from_version_id: 'version-1', associated_by: 'reviewer', associated_at: '2026-09-08T00:00:00Z',
       }),
     } as Response)
 
     await expect(api.uploadedSource('eng upload')).resolves.toMatchObject({
       filename: 'source.zip', size: 42, uploadedBy: 'operator', uploadedAt: '2026-08-28T00:00:00Z',
+      versionId: 'version-2', reusedFromVersionId: 'version-1', associatedBy: 'reviewer', associatedAt: '2026-09-08T00:00:00Z',
     })
     expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/engagements/eng%20upload/source')
+  })
+
+  it('maps immutable source metadata from each scan run and leaves legacy absence undefined', async () => {
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => [
+      { id: 'run-1', engagement_id: 'eng-upload', target_kind: 'upload', target: 'uploaded-source/sha256/aaa', source_package: {
+        version_id: 'source-1', filename: 'initial.zip', size: 123, sha256: 'a'.repeat(64), uploaded_by: 'alice', uploaded_at: '2026-09-01T00:00:00Z',
+      } },
+      { id: 'run-2', engagement_id: 'eng-upload', target_kind: 'upload', source_package: {
+        version_id: 'source-2', filename: 'updated.zip', size: 456, sha256: 'b'.repeat(64), uploaded_by: 'bob', uploaded_at: '2026-09-08T00:00:00Z',
+      } },
+      { id: 'legacy-run', engagement_id: 'eng-upload', provenance: 'legacy' },
+    ] } as Response)
+    const runs = await api.scanRuns('eng-upload')
+    expect(runs[0]).toMatchObject({ targetKind: 'upload', sourcePackage: { versionId: 'source-1', filename: 'initial.zip', sha256: 'a'.repeat(64), uploadedBy: 'alice' } })
+    expect(runs[1]).toMatchObject({ sourcePackage: { versionId: 'source-2', filename: 'updated.zip', sha256: 'b'.repeat(64), uploadedBy: 'bob' } })
+    expect(runs[2]?.sourcePackage).toBeUndefined()
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/engagements/eng-upload/scan-runs')
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
   it('runEmulation posts the target and maps the tag-less run summary defensively', async () => {

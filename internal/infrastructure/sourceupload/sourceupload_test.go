@@ -23,7 +23,8 @@ func digest(data []byte) string {
 func TestStoreSaveGetMaterializeAndVerify(t *testing.T) {
 	ctx := context.Background()
 	objects := blob.NewMemory()
-	store := NewStore(objects, 0)
+	// Keep legacy manifest compatibility covered independently of v2 metadata.
+	store := NewStoreWithRepository(objects, nil, 0)
 	data := []byte("source archive bytes")
 	item, err := store.Save(ctx, "tenant-a", "eng-a", "../source.tar.gz", "alice", time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC), int64(len(data)), digest(data), bytes.NewReader(data))
 	if err != nil {
@@ -35,6 +36,9 @@ func TestStoreSaveGetMaterializeAndVerify(t *testing.T) {
 	got, err := store.Get(ctx, "tenant-a", "eng-a")
 	if err != nil || got.SHA256 != item.SHA256 {
 		t.Fatalf("Get: item=%+v err=%v", got, err)
+	}
+	if _, _, _, err := store.Materialize(shared.WithTenant(ctx, "tenant-b"), item.Locator); err == nil {
+		t.Fatal("legacy Materialize accepted a foreign tenant context")
 	}
 	path, materialized, cleanup, err := store.Materialize(ctx, item.Locator)
 	if err != nil {
@@ -139,7 +143,7 @@ func (a *captureAcquirer) Acquire(_ context.Context, request ports.AcquireReques
 }
 
 func TestAcquirerMaterializesAndCleansUploadedSource(t *testing.T) {
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "tenant-a")
 	store := NewStore(blob.NewMemory(), 0)
 	data := []byte("archive")
 	item, err := store.Save(ctx, "tenant-a", "eng-a", "source.zip", "alice", time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC), int64(len(data)), digest(data), bytes.NewReader(data))

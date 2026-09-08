@@ -99,6 +99,10 @@ export interface CreateEngagementInput {
 }
 
 export interface UploadedSourcePackage {
+  versionId?: string
+  reusedFromVersionId?: string
+  associatedBy?: string
+  associatedAt?: string | null
   filename: string
   size: number
   sha256: string
@@ -459,6 +463,8 @@ export interface AssessmentRelationshipCandidate {
 
 export interface CreateAssessmentRetestInput {
   source?: File
+  sourceStrategy?: 'reuse_current' | 'upload_new'
+  sourceVersionId?: string
   plannedDate?: string
   name?: string
   predecessorAssessmentId?: string
@@ -477,6 +483,15 @@ export interface CreateAssessmentRetestResponse {
   member: AssessmentCycleMember
   inheritanceDiff: { scope: 'copy' | 'empty'; authorization: 'explicit_only'; roe: 'explicit_only'; scannerProfile: 'none' }
   warnings: Array<'authorization_not_inherited' | 'roe_not_inherited' | 'scanner_profile_not_inherited'>
+  sourceSelection?: {
+    strategy: 'reuse_current' | 'upload_new'
+    versionId: string
+    filename: string
+    size: number
+    sha256: string
+    reusedFromVersionId?: string
+    sourceAssessmentId?: string
+  }
 }
 
 export type AssessmentSnapshotLifecycle = 'finalized' | 'superseded'
@@ -1027,6 +1042,9 @@ export interface ScanRun {
   manifestHash: string
   laneCount: number
   completeCoverage: boolean
+  sourcePackage?: UploadedSourcePackage
+  targetKind?: string
+  target?: string
 }
 
 // The difference between two scan runs: which finding keys appeared or disappeared,

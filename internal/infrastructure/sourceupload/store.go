@@ -16,6 +16,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -24,8 +25,9 @@ const metadataLimit = int64(64 << 10)
 var locatorPattern = regexp.MustCompile(`^engagement-sources/v1/[0-9a-f]{64}/[0-9a-f]{64}$`)
 
 type Store struct {
-	objects  ports.ObjectStore
-	maxBytes int64
+	objects    ports.ObjectStore
+	repository ports.EngagementSourceRepository
+	maxBytes   int64
 }
 
 type manifest struct {
@@ -37,12 +39,25 @@ func NewStore(objects ports.ObjectStore, maxBytes int64) *Store {
 	if maxBytes <= 0 || maxBytes > sourcepackage.MaxArchiveBytes {
 		maxBytes = sourcepackage.MaxArchiveBytes
 	}
-	return &Store{objects: objects, maxBytes: maxBytes}
+	return &Store{objects: objects, repository: memory.NewEngagementSourceRepository(), maxBytes: maxBytes}
+}
+
+func NewStoreWithRepository(objects ports.ObjectStore, repository ports.EngagementSourceRepository, maxBytes int64) *Store {
+	store := NewStore(objects, maxBytes)
+	store.repository = repository
+	return store
 }
 
 var _ ports.EngagementSourceStore = (*Store)(nil)
 
 func (s *Store) Save(ctx context.Context, tenantID, engagementID shared.ID, filename, actor string, createdAt time.Time, size int64, sha256hex string, src io.Reader) (sourcepackage.Package, error) {
+	if s != nil && s.repository != nil {
+		return s.saveVersioned(ctx, tenantID, engagementID, filename, actor, createdAt, size, sha256hex, src)
+	}
+	return s.saveLegacy(ctx, tenantID, engagementID, filename, actor, createdAt, size, sha256hex, src)
+}
+
+func (s *Store) saveLegacy(ctx context.Context, tenantID, engagementID shared.ID, filename, actor string, createdAt time.Time, size int64, sha256hex string, src io.Reader) (sourcepackage.Package, error) {
 	if s == nil || s.objects == nil {
 		return sourcepackage.Package{}, fmt.Errorf("%w: engagement source uploads are not configured", shared.ErrValidation)
 	}
@@ -96,6 +111,9 @@ func (s *Store) Get(ctx context.Context, tenantID, engagementID shared.ID) (sour
 	if tenantID.IsZero() || engagementID.IsZero() {
 		return sourcepackage.Package{}, fmt.Errorf("%w: source package tenant and engagement are required", shared.ErrValidation)
 	}
+	if s.repository != nil {
+		return s.getVersioned(ctx, tenantID, engagementID)
+	}
 	item, err := s.getByLocator(ctx, locatorFor(tenantID, engagementID))
 	if err != nil {
 		return sourcepackage.Package{}, err
@@ -107,6 +125,19 @@ func (s *Store) Get(ctx context.Context, tenantID, engagementID shared.ID) (sour
 }
 
 func (s *Store) Delete(ctx context.Context, tenantID, engagementID shared.ID) error {
+	if s.repository != nil {
+		item, unreferenced, err := s.repository.Delete(ctx, tenantID, engagementID)
+		if errors.Is(err, shared.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if unreferenced {
+			return s.objects.DeleteObject(ctx, item.ObjectKey)
+		}
+		return nil
+	}
 	locator := locatorFor(tenantID, engagementID)
 	stored, err := s.readManifest(ctx, locator)
 	if err != nil && !errors.Is(err, shared.ErrNotFound) {
@@ -124,6 +155,9 @@ func (s *Store) Materialize(ctx context.Context, locator string) (string, source
 	stored, err := s.readManifest(ctx, locator)
 	if err != nil {
 		return "", sourcepackage.Package{}, nil, err
+	}
+	if tenantID, ok := shared.TenantFrom(ctx); ok && tenantID != stored.Package.TenantID {
+		return "", sourcepackage.Package{}, nil, shared.ErrNotFound
 	}
 	if stored.Package.Size > s.maxBytes {
 		return "", sourcepackage.Package{}, nil, fmt.Errorf("%w: uploaded source exceeds %d bytes", shared.ErrValidation, s.maxBytes)
@@ -165,6 +199,20 @@ func (s *Store) getByLocator(ctx context.Context, locator string) (sourcepackage
 }
 
 func (s *Store) readManifest(ctx context.Context, locator string) (manifest, error) {
+	if s != nil && s.repository != nil && versionLocatorPattern.MatchString(locator) {
+		tenantID, ok := shared.TenantFrom(ctx)
+		if !ok || tenantID.IsZero() {
+			return manifest{}, fmt.Errorf("%w: source materialization requires tenant context", shared.ErrValidation)
+		}
+		item, err := s.repository.GetByLocator(ctx, tenantID, locator)
+		if err != nil {
+			return manifest{}, err
+		}
+		if err := validateStoredVersion(item); err != nil {
+			return manifest{}, err
+		}
+		return manifest{Package: item, ObjectKey: item.ObjectKey}, nil
+	}
 	if s == nil || s.objects == nil || !locatorPattern.MatchString(locator) {
 		return manifest{}, fmt.Errorf("%w: uploaded source locator is invalid", shared.ErrValidation)
 	}

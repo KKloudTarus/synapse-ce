@@ -75,38 +75,130 @@ func (s *Service) CreateFromSourcePackage(ctx context.Context, in CreateInput, f
 		return nil, sourcepackage.Package{}, fmt.Errorf("%w: engagement source uploads are not configured", shared.ErrValidation)
 	}
 	id := s.ids.NewID()
-	item, err := s.sources.Save(ctx, shared.TenantOrDefault(in.TenantID), id, filename, in.CreatedBy, s.clock.Now(), size, sha256hex, src)
+	metadata := sourcepackage.Package{
+		TenantID: shared.TenantOrDefault(in.TenantID), EngagementID: id, Filename: sourcepackage.BaseFilename(filename),
+		Size: size, SHA256: strings.ToLower(strings.TrimSpace(sha256hex)), CreatedBy: in.CreatedBy, CreatedAt: s.clock.Now(),
+	}
+	if err := metadata.Validate(); err != nil || src == nil {
+		if err != nil {
+			return nil, sourcepackage.Package{}, err
+		}
+		return nil, sourcepackage.Package{}, fmt.Errorf("%w: source upload is required", shared.ErrValidation)
+	}
+	// Persist the draft owner before its source association so metadata stores
+	// can enforce the engagement foreign key. No scan can execute this draft.
+	in.InScope = append([]domain.Target{{Kind: domain.TargetRepo, Value: metadata.Target()}}, in.InScope...)
+	engagement, err := s.create(ctx, in, id)
 	if err != nil {
 		return nil, sourcepackage.Package{}, err
 	}
-	in.InScope = append([]domain.Target{{Kind: domain.TargetRepo, Value: item.Target()}}, in.InScope...)
-	engagement, err := s.create(ctx, in, id)
+	item, err := s.sources.Save(ctx, metadata.TenantID, id, metadata.Filename, in.CreatedBy, metadata.CreatedAt, size, metadata.SHA256, src)
 	if err != nil {
-		// Compensating delete: the engagement didn't persist, so the stored source would be orphaned.
-		_ = s.sources.Delete(context.WithoutCancel(ctx), item.TenantID, id)
-		return nil, sourcepackage.Package{}, err
+		return nil, item, errors.Join(err, s.CompensateCreate(context.WithoutCancel(ctx), metadata.TenantID, id, item))
 	}
 	// Chain-of-custody: record the ingest of untrusted source bytes in the append-only, hash-chained
 	// audit log (who uploaded which archive to which engagement), not only in the manifest metadata.
 	if err := s.auditChange(ctx, in.CreatedBy, "engagement.source_uploaded", id, map[string]string{
-		"filename": item.Filename,
-		"sha256":   item.SHA256,
-		"size":     strconv.FormatInt(item.Size, 10),
+		"filename":          item.Filename,
+		"sha256":            item.SHA256,
+		"size":              strconv.FormatInt(item.Size, 10),
+		"source_version_id": item.VersionID.String(),
 	}, s.clock.Now()); err != nil {
 		// Reject an unaudited upload and remove both the newly created engagement
 		// and external source bytes, including when the request was cancelled.
-		return nil, sourcepackage.Package{}, errors.Join(err, s.CompensateCreate(context.WithoutCancel(ctx), item.TenantID, id))
+		return nil, item, errors.Join(err, s.CompensateCreate(context.WithoutCancel(ctx), item.TenantID, id, item))
 	}
 	return engagement, item, nil
 }
 
-func (s *Service) CompensateCreate(ctx context.Context, tenantID, engagementID shared.ID) error {
+// SourcePackage resolves metadata only through the tenant-scoped engagement.
+// Storage locators remain internal; callers use the immutable version identity.
+func (s *Service) SourcePackage(ctx context.Context, tenantID, engagementID shared.ID) (sourcepackage.Package, error) {
+	tenantID = shared.TenantOrDefault(tenantID)
+	if _, err := s.Get(ctx, tenantID, engagementID); err != nil {
+		return sourcepackage.Package{}, err
+	}
+	if s.sources == nil {
+		return sourcepackage.Package{}, shared.ErrNotFound
+	}
+	return s.sources.Get(ctx, tenantID, engagementID)
+}
+
+// CreateFromReusedSource creates a child-owned immutable association to the
+// selected predecessor archive. Reuse never changes the predecessor package or
+// inherits its execution authorization, and original upload attribution is kept.
+func (s *Service) CreateFromReusedSource(ctx context.Context, in CreateInput, predecessorID, expectedVersionID shared.ID) (*domain.Engagement, sourcepackage.Package, error) {
+	reuser, ok := s.sources.(ports.EngagementSourceReuser)
+	if !ok {
+		return nil, sourcepackage.Package{}, fmt.Errorf("%w: source reuse is not configured", shared.ErrValidation)
+	}
+	parent, err := s.SourcePackage(ctx, in.TenantID, predecessorID)
+	if err != nil {
+		return nil, sourcepackage.Package{}, err
+	}
+	if !expectedVersionID.IsZero() && parent.VersionID != expectedVersionID {
+		return nil, sourcepackage.Package{}, fmt.Errorf("%w: selected source version no longer matches the predecessor", shared.ErrConflict)
+	}
+	id := s.ids.NewID()
+	in.InScope = append([]domain.Target{{Kind: domain.TargetRepo, Value: parent.Target()}}, in.InScope...)
+	assessment, err := s.create(ctx, in, id)
+	if err != nil {
+		return nil, sourcepackage.Package{}, err
+	}
+	item, err := reuser.Reuse(ctx, shared.TenantOrDefault(in.TenantID), predecessorID, id, parent.VersionID, in.CreatedBy, s.clock.Now())
+	if err != nil {
+		return nil, item, errors.Join(err, s.CompensateCreate(context.WithoutCancel(ctx), parent.TenantID, id, item))
+	}
+	if err := s.auditChange(ctx, in.CreatedBy, "engagement.source_reused", id, map[string]string{
+		"source_version_id": item.VersionID.String(), "sha256": item.SHA256,
+		"source_assessment_id": predecessorID.String(), "reused_from_version_id": parent.VersionID.String(),
+	}, s.clock.Now()); err != nil {
+		return nil, item, errors.Join(err, s.CompensateCreate(context.WithoutCancel(ctx), item.TenantID, id, item))
+	}
+	return assessment, item, nil
+}
+
+func (s *Service) CompensateCreate(ctx context.Context, tenantID, engagementID shared.ID, createdSources ...sourcepackage.Package) error {
+	for _, item := range createdSources {
+		if !item.VersionID.IsZero() && (item.TenantID != shared.TenantOrDefault(tenantID) || item.EngagementID != engagementID) {
+			return fmt.Errorf("%w: source cleanup ownership mismatch", shared.ErrValidation)
+		}
+	}
 	var cleanupErr error
 	if s.sources != nil {
 		cleanupErr = s.sources.Delete(context.WithoutCancel(ctx), shared.TenantOrDefault(tenantID), engagementID)
 	}
 	deleteErr := s.repo.Delete(ctx, engagementID)
-	return errors.Join(cleanupErr, deleteErr)
+	if cleanupErr != nil || deleteErr != nil {
+		return errors.Join(cleanupErr, deleteErr)
+	}
+	if compensator, ok := s.sources.(ports.EngagementSourceCompensator); ok {
+		for _, item := range createdSources {
+			if item.VersionID.IsZero() {
+				continue
+			}
+			// A retained-command transaction may already have rolled back its
+			// metadata. The captured package identifies only this child's bytes.
+			if err := compensator.DiscardUnpublished(ctx, item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// DiscardUnpublishedSource releases only the private object captured by a failed
+// create command, after its enclosing transaction has rolled back. It never
+// removes engagement or source metadata; the store verifies that no durable
+// reference remains and retains bytes if that outcome cannot be established.
+func (s *Service) DiscardUnpublishedSource(ctx context.Context, item sourcepackage.Package) error {
+	if item.VersionID.IsZero() {
+		return nil
+	}
+	if compensator, ok := s.sources.(ports.EngagementSourceCompensator); ok {
+		return compensator.DiscardUnpublished(ctx, item)
+	}
+	return nil
 }
 
 func (s *Service) create(ctx context.Context, in CreateInput, id shared.ID) (*domain.Engagement, error) {

@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -702,6 +703,22 @@ func TestProjectSourceCaptureDefaults(t *testing.T) {
 	}
 }
 
+func TestEngagementSourceArchiveRootIsPersistentAndExplicit(t *testing.T) {
+	t.Setenv("SYNAPSE_ENGAGEMENT_SOURCE_DIR", "")
+	root := Load().EngagementSourceDir
+	if !filepath.IsAbs(root) || !strings.HasSuffix(root, filepath.Join("synapse", "engagement-sources")) {
+		t.Fatalf("uploaded archive root must be persistent absolute application data: %q", root)
+	}
+	t.Setenv("SYNAPSE_ENGAGEMENT_SOURCE_DIR", "/operator/source-archives")
+	if got := Load().EngagementSourceDir; got != "/operator/source-archives" {
+		t.Fatalf("explicit archive root ignored: %q", got)
+	}
+	t.Setenv("SYNAPSE_ENGAGEMENT_SOURCE_DIR", "relative/source-archives")
+	if got := Load().EngagementSourceDir; got != "relative/source-archives" {
+		t.Fatal("unsafe relative configuration must be rejected by the adapter, not silently rebased")
+	}
+}
+
 func TestProjectAnalysisCompletionTimeout(t *testing.T) {
 	t.Setenv("SYNAPSE_SCAN_TIMEOUT", "2m")
 	t.Setenv("SYNAPSE_PROJECT_ANALYSIS_COMPLETION_TIMEOUT", "")
@@ -856,11 +873,11 @@ func TestValidateAssessmentLifecycleRollout(t *testing.T) {
 		AssessmentLifecycleUITenants:        []string{"tenant-a"},
 		AssessmentSnapshotCompletionEnabled: true,
 		AssessmentSnapshotCompletionTenants: []string{"tenant-a"},
-		AssessmentBatchSize:             500,
-		AssessmentTenantJobs:            4,
-		AssessmentBacklogWarning:        500,
-		AssessmentBacklogHardLimit:      1000,
-		AssessmentClosureEnabled:        true,
+		AssessmentBatchSize:                 500,
+		AssessmentTenantJobs:                4,
+		AssessmentBacklogWarning:            500,
+		AssessmentBacklogHardLimit:          1000,
+		AssessmentClosureEnabled:            true,
 	}
 	if err := valid.ValidateAssessmentLifecycleRollout(); err != nil {
 		t.Fatalf("valid assessment lifecycle rollout: %v", err)

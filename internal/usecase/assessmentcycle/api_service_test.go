@@ -2,6 +2,8 @@ package assessmentcycle_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +14,9 @@ import (
 
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
 	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -132,6 +136,12 @@ func TestAPIServiceRetainedLifecycle(t *testing.T) {
 	}); !errors.Is(err, shared.ErrValidation) || cycleuc.ErrorCode(err) != cycleuc.CodeInvalidPredecessor {
 		t.Fatalf("cross-assessment predecessor = %v", err)
 	}
+	if _, err := api.CreateRetestAssessment(ctx, cycleuc.CreateRetestAssessmentInput{
+		Request:      cycleuc.RetainedRequest{TenantID: tenantID, Actor: "alice", Route: "/api/v1/engagements/" + root.ID.String() + "/retests", IdempotencyKey: "reuse-non-upload"},
+		AssessmentID: root.ID, SourceStrategy: "reuse_current",
+	}); !errors.Is(err, shared.ErrValidation) || cycleuc.ErrorCode(err) != "predecessor_has_no_uploaded_source" {
+		t.Fatalf("non-uploaded source reuse = %v", err)
+	}
 
 	retest, err := api.CreateRetestAssessment(ctx, cycleuc.CreateRetestAssessmentInput{
 		Request:      cycleuc.RetainedRequest{TenantID: tenantID, Actor: "alice", Route: "/api/v1/engagements/" + root.ID.String() + "/retests", IdempotencyKey: "retest-1"},
@@ -194,6 +204,105 @@ func TestAPIServiceRetainedLifecycle(t *testing.T) {
 	}
 	if apiAuditCount != 3 {
 		t.Fatalf("assessment cycle API audit count = %d, want 3", apiAuditCount)
+	}
+}
+
+func TestAPIServiceRetestReuseCompensatesChildAndAuditsSelectedVersion(t *testing.T) {
+	ctx := context.Background()
+	tenantID := shared.ID("reuse-tenant")
+	clock := fixedClock{t: time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC)}
+	ids, audit := &seqIDGen{}, &recordAudit{}
+	engagements := memory.NewEngagementRepository()
+	cycles := memory.NewAssessmentCycleRepository()
+	transactions := memory.NewTenantTransactionRunner()
+	requests := &failCompleteRequestStore{inner: memory.NewAssessmentCycleRequestRepository()}
+	sources := sourceupload.NewStore(blob.NewMemory(), 0)
+	engagementService := enguc.NewService(engagements, clock, ids, audit)
+	engagementService.SetSourceStore(sources)
+	cycleService, err := cycleuc.NewService(cycles, engagements, nil, nil, transactions, ids, clock, audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := cycleuc.NewAPIService(cycleService, cycles, requests, engagementService, transactions, clock, audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const archive = "immutable source fixture"
+	digest := sha256.Sum256([]byte(archive))
+	created, err := api.CreateInitialAssessment(ctx, cycleuc.CreateInitialAssessmentInput{
+		Request:    cycleuc.RetainedRequest{TenantID: tenantID, Actor: "original-uploader", Route: "/api/v1/engagements", IdempotencyKey: "initial-upload"},
+		Engagement: enguc.CreateInput{Name: "Initial upload"},
+		Source:     &cycleuc.SourceUpload{Filename: "initial.zip", Size: int64(len(archive)), SHA256: hex.EncodeToString(digest[:]), Reader: strings.NewReader(archive)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root engdom.Engagement
+	if err := json.Unmarshal(created.Body, &root); err != nil {
+		t.Fatal(err)
+	}
+	root.Status = engdom.StatusCompleted
+	if err := engagements.Update(ctx, &root); err != nil {
+		t.Fatal(err)
+	}
+	original, err := sources.Get(ctx, tenantID, root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := cycleuc.CreateRetestAssessmentInput{
+		Request:      cycleuc.RetainedRequest{TenantID: tenantID, Actor: "retest-creator", Route: "/api/v1/engagements/" + root.ID.String() + "/retests", IdempotencyKey: "reuse-version"},
+		AssessmentID: root.ID, SourceStrategy: "reuse_current", SourceVersionID: original.VersionID,
+	}
+	requests.failNext()
+	if _, err := api.CreateRetestAssessment(ctx, input); err == nil {
+		t.Fatal("expected retained response failure")
+	}
+	assertAssessmentCycleCounts(t, ctx, engagementService, cycles, tenantID, 1, 1)
+	var compensatedID shared.ID
+	for _, event := range audit.entries {
+		if event.Action == "engagement.source_reused" {
+			compensatedID = shared.ID(event.Target)
+		}
+	}
+	if compensatedID.IsZero() {
+		t.Fatal("reuse did not reach compensation test boundary")
+	}
+	if _, err := sources.Get(ctx, tenantID, compensatedID); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("failed child source survived compensation: %v", err)
+	}
+	retained, err := sources.Get(ctx, tenantID, root.ID)
+	if err != nil || retained.VersionID != original.VersionID || retained.SHA256 != original.SHA256 {
+		t.Fatalf("compensation damaged predecessor: %+v err=%v", retained, err)
+	}
+	response, err := api.CreateRetestAssessment(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result cycleuc.CreateRetestResponse
+	if err := json.Unmarshal(response.Body, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.SourceSelection == nil || result.SourceSelection.Strategy != "reuse_current" || result.SourceSelection.SourceAssessmentID != root.ID || result.SourceSelection.ReusedFromVersionID != original.VersionID || result.SourceSelection.SHA256 != original.SHA256 || result.SourceSelection.VersionID == original.VersionID {
+		t.Fatalf("retained source selection=%+v", result.SourceSelection)
+	}
+	if !result.Engagement.RequiresExplicitExecutionAuthorization || result.Engagement.AllowsExecution() || len(result.Warnings) != 3 {
+		t.Fatalf("source reuse inherited execution authorization: %+v", result)
+	}
+	foundAudit := false
+	for _, event := range audit.entries {
+		if event.Action == "assessment_cycle.api_retest_created" && event.Metadata["assessment_id"] == result.Engagement.ID.String() {
+			foundAudit = true
+			if event.Metadata["source_strategy"] != "reuse_current" || event.Metadata["source_version_id"] != result.SourceSelection.VersionID.String() || event.Metadata["source_sha256"] != original.SHA256 || event.Metadata["source_assessment_id"] != root.ID.String() || event.Metadata["reused_from_version_id"] != original.VersionID.String() {
+				t.Fatalf("audit lost selected source: %+v", event.Metadata)
+			}
+		}
+	}
+	if !foundAudit {
+		t.Fatal("source selection was not audited")
+	}
+	replayed, err := api.CreateRetestAssessment(ctx, input)
+	if err != nil || !replayed.Replayed || string(replayed.Body) != string(response.Body) {
+		t.Fatalf("reuse replay changed source: %+v err=%v", replayed, err)
 	}
 }
 
