@@ -16,7 +16,20 @@ vi.mock('../../lib/api', () => {
       this.status = status
     }
   }
-  return { ApiError, api: { hostVulnerabilities: vi.fn(), hostPackages: vi.fn() } }
+  return {
+    ApiError,
+    api: {
+      hostVulnerabilities: vi.fn(),
+      hostPackages: vi.fn(),
+      me: vi.fn(),
+      getDesiredCapabilities: vi.fn(),
+      setDesiredCapabilities: vi.fn(),
+      clearDesiredCapabilities: vi.fn(),
+      fleetDesiredGaps: vi.fn(),
+      listEndpointProcesses: vi.fn(),
+      rebaselineBehavior: vi.fn(),
+    },
+  }
 })
 
 const finding: HostFinding = {
@@ -51,6 +64,9 @@ describe('HostDetail', () => {
   let restoreViewport: () => void
   beforeEach(() => {
     vi.resetAllMocks()
+    // HostDetail fetches the current user on mount to gate operate actions; default it so the
+    // existing tab tests do not need to care.
+    vi.mocked(api.me).mockResolvedValue(null as never)
     restoreViewport = installVirtualViewport()
   })
   afterEach(() => restoreViewport())
@@ -164,6 +180,47 @@ describe('HostDetail', () => {
     expect(screen.getByText(/vulnerability findings for the unread packages are missing/)).toBeInTheDocument()
     expect(screen.getByText('Not collected')).toBeInTheDocument()
     expect(screen.getByText('listening-sockets')).toBeInTheDocument()
+  })
+
+  it('shows declared desired capabilities and the reconciliation on the Capabilities tab', async () => {
+    vi.mocked(api.hostVulnerabilities).mockResolvedValue(host)
+    vi.mocked(api.me).mockResolvedValue({ id: 'u1', name: 'Ana', role: 'admin' } as never)
+    vi.mocked(api.getDesiredCapabilities).mockResolvedValue({ assetId: 'asset-1', policyId: '', capabilities: ['edr.process'], version: 2, updatedBy: 'ana', updatedAt: '2026-09-05T09:00:00Z' } as never)
+    vi.mocked(api.fleetDesiredGaps).mockResolvedValue([
+      { assetId: 'asset-1', capability: 'edr.process', covered: true, agentId: 'agent-1', agentHealth: 'healthy', gapReason: '', detail: '', lastSeen: '2026-09-05T09:00:00Z' },
+      { assetId: 'asset-1', capability: 'edr.network', covered: false, agentId: '', agentHealth: '', gapReason: 'capability_missing', detail: '', lastSeen: '' },
+      { assetId: 'other', capability: 'edr.file', covered: false, agentId: '', agentHealth: '', gapReason: 'agent_missing', detail: '', lastSeen: '' },
+    ] as never)
+    renderPage()
+    await screen.findByRole('heading', { name: 'web01' })
+    fireEvent.click(screen.getByRole('tab', { name: /Capabilities/ }))
+    expect(await screen.findByText('edr.process')).toBeInTheDocument()
+    // reconciliation shows this asset's rows only, with the gap reason label
+    expect(screen.getByText('edr.network')).toBeInTheDocument()
+    expect(screen.getByText('covered')).toBeInTheDocument()
+    expect(screen.getByText('Capability not run')).toBeInTheDocument()
+    // an other-asset row is filtered out
+    expect(screen.queryByText('edr.file')).not.toBeInTheDocument()
+    // an admin sees the editor Save control
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+  })
+
+  it('lists running processes and offers a rebaseline to an operator', async () => {
+    vi.mocked(api.hostVulnerabilities).mockResolvedValue(host)
+    vi.mocked(api.me).mockResolvedValue({ id: 'u1', name: 'Ana', role: 'admin' } as never)
+    vi.mocked(api.listEndpointProcesses).mockResolvedValue([
+      { entityId: 'e1', pid: 1234, comm: 'nginx', path: '/usr/sbin/nginx', running: true, lastSeenAt: '2026-09-05T09:00:00Z' },
+      { entityId: 'e2', pid: 22, comm: 'sshd', path: '/usr/sbin/sshd', running: false, lastSeenAt: '2026-09-05T08:00:00Z' },
+    ] as never)
+    renderPage()
+    await screen.findByRole('heading', { name: 'web01' })
+    fireEvent.click(screen.getByRole('tab', { name: /Processes/ }))
+    expect(await screen.findByText('nginx')).toBeInTheDocument()
+    expect(screen.getByText('sshd')).toBeInTheDocument()
+    expect(vi.mocked(api.listEndpointProcesses)).toHaveBeenCalledWith('asset-1')
+    expect(screen.getByText('running')).toBeInTheDocument()
+    expect(screen.getByText('exited')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Rebaseline/ })).toBeInTheDocument()
   })
 })
 

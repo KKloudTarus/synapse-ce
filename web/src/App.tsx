@@ -32,6 +32,8 @@ const Hosts = lazy(() => import('./pages/Fleet/Hosts').then(m => ({ default: m.H
 const CoverageWindows = lazy(() => import('./pages/Fleet/CoverageWindows').then(m => ({ default: m.CoverageWindows })))
 const Workloads = lazy(() => import('./pages/Fleet/Workloads').then(m => ({ default: m.Workloads })))
 const HostDetail = lazy(() => import('./pages/Fleet/HostDetail').then(m => ({ default: m.HostDetail })))
+const FleetAgents = lazy(() => import('./pages/Fleet/FleetAgents').then(m => ({ default: m.FleetAgents })))
+const AssetGraph = lazy(() => import('./pages/Fleet/AssetGraph').then(m => ({ default: m.AssetGraph })))
 const IncidentDetail = lazy(() => import('./pages/Fleet/IncidentDetail').then(m => ({ default: m.IncidentDetail })))
 const Rules = lazy(() => import('./pages/Rules/index'))
 const RuleDetail = lazy(() => import('./pages/Rules/RuleDetail'))
@@ -104,10 +106,11 @@ function Gate() {
           <Route path="activity" element={<ProjectActivityPage />} />
         </Route>
         <Route path="fleet" element={<FleetCoverage />} />
-        <Route path="fleet/agents" element={<Navigate to="/fleet" replace />} />
+        <Route path="fleet/agents" element={<FleetAgents />} />
         <Route path="fleet/hosts" element={<Hosts />} />
         <Route path="fleet/coverage-windows" element={<CoverageWindows />} />
         <Route path="fleet/workloads" element={<Workloads />} />
+        <Route path="fleet/asset-graph" element={<AssetGraph />} />
         <Route path="fleet/hosts/:id" element={<HostDetail />} />
         <Route path="fleet/incidents" element={<Incidents />} />
         <Route path="blueteam/response" element={<ResponseOps />} />

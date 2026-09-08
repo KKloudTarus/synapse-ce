@@ -21,6 +21,8 @@ export function JudgmentReviewTab({ engagementId }: { engagementId: string }) {
   const [selected, setSelected] = useState<Judgment | null>(null)
   const [err, setErr] = useState('')
   const [notice, setNotice] = useState('')
+  const [autoVerifyBusy, setAutoVerifyBusy] = useState(false)
+  const [autoVerifyMsg, setAutoVerifyMsg] = useState('')
   const reviewHeadingRef = useRef<HTMLHeadingElement>(null)
   const pendingReviewFocus = useRef<string | null>(null)
 
@@ -65,6 +67,27 @@ export function JudgmentReviewTab({ engagementId }: { engagementId: string }) {
     focusReviewTrigger(id)
   }
 
+  const canReview = !!me && (me.role === 'admin' || me.role === 'reviewer')
+
+  // Batch auto-verify runs the verifier model over every proposed judgment it can, without a human.
+  async function runAutoVerify() {
+    setAutoVerifyBusy(true)
+    setAutoVerifyMsg('')
+    try {
+      const r = await api.autoVerifyJudgments(engagementId)
+      setAutoVerifyMsg(`Auto-verify: ${r.confirmed} confirmed, ${r.refuted} refuted, ${r.skipped} skipped${r.errors ? `, ${r.errors} errors` : ''} of ${r.attempted} attempted.`)
+      await load()
+    } catch (e) {
+      setAutoVerifyMsg(
+        e instanceof ApiError && e.status === 404
+          ? 'Auto-verify is not configured for this deployment (it needs a verifier model distinct from the proposer).'
+          : e instanceof Error ? e.message : 'Auto-verify failed',
+      )
+    } finally {
+      setAutoVerifyBusy(false)
+    }
+  }
+
   if (judgments === null && !err) return <Spinner label="Loading judgments…" />
   if (err)
     return (
@@ -83,12 +106,20 @@ export function JudgmentReviewTab({ engagementId }: { engagementId: string }) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 ref={reviewHeadingRef} tabIndex={-1} className="text-lg font-semibold text-primary">Judgments awaiting review</h2>
-        <p className="mt-1 text-sm text-tertiary">
-          Verify evidence-gated claims or accept descriptive claims. The server records every decision in the evidence chain.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 ref={reviewHeadingRef} tabIndex={-1} className="text-lg font-semibold text-primary">Judgments awaiting review</h2>
+          <p className="mt-1 text-sm text-tertiary">
+            Verify evidence-gated claims or accept descriptive claims. The server records every decision in the evidence chain.
+          </p>
+        </div>
+        {canReview && (
+          <Button variant="secondary" loading={autoVerifyBusy} disabled={autoVerifyBusy} onClick={runAutoVerify} title="Run the verifier model over every proposed judgment it can">
+            <Shield01 className="size-4" /> Auto-verify all
+          </Button>
+        )}
       </div>
+      {autoVerifyMsg && <p role="status" className="text-sm text-accent">{autoVerifyMsg}</p>}
       {notice && <p role="status" className="text-sm text-accent">{notice}</p>}
       {!ledger?.intact && (
         <p role="alert" className="flex items-center gap-2 text-sm text-critical">

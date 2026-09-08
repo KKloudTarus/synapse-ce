@@ -1611,6 +1611,123 @@ export const handlers = [
     })
   }),
 
+  // --- Fleet management: desired capabilities, processes, agent admin, rollout ---
+  // State and ProcessSnapshot have no Go json tags, so they answer PascalCase; keys/rollout are snake_case.
+  http.get('/api/v1/fleet/assets/:id/desired-capabilities', ({ params }) =>
+    HttpResponse.json({ TenantID: 'default', AssetID: params.id, PolicyID: 'pol-fleet', Capabilities: ['edr.process', 'edr.network'], Version: 3, Audit: { UpdatedBy: 'ana', UpdatedAt: '2026-09-05T09:00:00Z' } }),
+  ),
+  http.put('/api/v1/fleet/assets/:id/desired-capabilities', async ({ params, request }) => {
+    const body = (await request.json()) as { capabilities?: string[] }
+    return HttpResponse.json({ TenantID: 'default', AssetID: params.id, PolicyID: 'pol-fleet', Capabilities: body.capabilities ?? [], Version: 4, Audit: { UpdatedBy: 'ana', UpdatedAt: new Date().toISOString() } })
+  }),
+  http.delete('/api/v1/fleet/assets/:id/desired-capabilities', () => new HttpResponse(null, { status: 204 })),
+  http.get('/api/v1/fleet/assets/:id/processes', ({ params }) =>
+    HttpResponse.json({ processes: [
+      { TenantID: 'default', AssetID: params.id, EntityID: 'e-4821', PID: 4821, Comm: 'nginx', Path: '/usr/sbin/nginx', Running: true, LastSeenAt: '2026-09-05T09:00:00Z' },
+      { TenantID: 'default', AssetID: params.id, EntityID: 'e-22', PID: 22, Comm: 'sshd', Path: '/usr/sbin/sshd', Running: true, LastSeenAt: '2026-09-05T09:00:00Z' },
+      { TenantID: 'default', AssetID: params.id, EntityID: 'e-991', PID: 991, Comm: 'cron', Path: '/usr/sbin/cron', Running: false, LastSeenAt: '2026-09-05T08:30:00Z' },
+    ] }),
+  ),
+  http.post('/api/v1/fleet/assets/:id/behavior-baseline/rebaseline', ({ params }) => HttpResponse.json({ asset_id: params.id, rebaselined: true })),
+  http.post('/api/v1/agents/enrolment-tokens', () => HttpResponse.json({ enrolment_token: `enrol_${Math.random().toString(36).slice(2, 10)}` }, { status: 201 })),
+  http.post('/api/v1/agents/:id/revoke', ({ params }) => HttpResponse.json({ agent_id: params.id, state: 'revoked' })),
+  http.get('/api/v1/agents/:id/keys', ({ params }) =>
+    HttpResponse.json({ agent_id: params.id, keys: [
+      { key_id: 'key-sign-2', purpose: 'signing', algorithm: 'ed25519', not_before: '2026-08-01T00:00:00Z', not_after: '2027-08-01T00:00:00Z', revoked: false, replaced_by: '' },
+      { key_id: 'key-sign-1', purpose: 'signing', algorithm: 'ed25519', not_before: '2026-01-01T00:00:00Z', not_after: '2026-08-01T00:00:00Z', revoked: true, replaced_by: 'key-sign-2' },
+    ] }),
+  ),
+  http.post('/api/v1/agents/:id/keys/:keyID/revoke', ({ params }) => HttpResponse.json({ agent_id: params.id, key_id: params.keyID, state: 'revoked' })),
+  http.get('/api/v1/agents/rollout', ({ request }) => {
+    const channel = new URL(request.url).searchParams.get('channel') || 'stable'
+    return HttpResponse.json({ configured: true, rollout: { channel, target_version: '1.4.2', canary_groups: ['canary-a'], promoted_to_all: false, paused: false, updated_by: 'ana', updated_at: '2026-09-05T09:00:00Z' } })
+  }),
+  http.put('/api/v1/agents/rollout', async ({ request }) => {
+    const channel = new URL(request.url).searchParams.get('channel') || 'stable'
+    const body = (await request.json()) as { target_version?: string; canary_groups?: string[] }
+    return HttpResponse.json({ configured: true, rollout: { channel, target_version: body.target_version ?? '1.4.2', canary_groups: body.canary_groups ?? [], promoted_to_all: false, paused: false, updated_by: 'ana', updated_at: new Date().toISOString() } })
+  }),
+  ...['promote', 'pause', 'resume'].map((verb) =>
+    http.post(`/api/v1/agents/rollout/${verb}`, ({ request }) => {
+      const channel = new URL(request.url).searchParams.get('channel') || 'stable'
+      return HttpResponse.json({ configured: true, rollout: { channel, target_version: '1.4.2', canary_groups: ['canary-a'], promoted_to_all: verb === 'promote', paused: verb === 'pause', pause_reason: verb === 'pause' ? 'held for review' : '', updated_by: 'ana', updated_at: new Date().toISOString() } })
+    }),
+  ),
+
+  // --- Technical asset relationship graph. Edge has no Go json tags: PascalCase wire. ---
+  http.get('/api/v1/assets/edges', () =>
+    HttpResponse.json([
+      { TenantID: 'default', From: 'ta-host-web01', To: 'ta-wl-checkout', Kind: 'runs', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-wl-checkout', To: 'ta-img-checkout', Kind: 'depends_on', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-exposure-lb', To: 'ta-wl-checkout', Kind: 'exposes', Provenance: 'recon-1', Confidence: 'inferred' },
+    ]),
+  ),
+  http.post('/api/v1/assets/edges', () => new HttpResponse(null, { status: 204 })),
+
+  // --- DAST scan + runtime verification. Proposal/Decision/Result have no Go json tags: PascalCase. ---
+  http.post('/api/v1/engagements/:id/dast/proposals', () =>
+    HttpResponse.json({ Action: { ID: 'dast-act-1', Tool: 'dast', Action: 'scan', Target: { Kind: 'url', Value: 'https://staging.example.internal' }, EgressPreview: 'GET https://staging.example.internal (rate 2/s, <=200 req)', Risk: 'medium', Rationale: 'authenticated crawl and probe', ProposedAt: '2026-09-05T09:00:00Z' }, Decision: { State: 'pending' } }, { status: 202 }),
+  ),
+  http.post('/api/v1/engagements/:id/dast/proposals/:aid/run', () =>
+    HttpResponse.json({ config_sha256: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', incomplete: false, surface: { Requests: [{}, {}, {}] }, coverage: { Entries: [{}, {}] }, proofs: [
+      { check_id: 'xss.reflected', version: '1', normalized_endpoint: 'GET /search?q=', hash: 'deadbeefdeadbeefdeadbeef' },
+      { check_id: 'headers.missing_csp', version: '1', normalized_endpoint: 'GET /', hash: 'cafebabecafebabecafebabe' },
+    ] }),
+  ),
+  http.get('/api/v1/engagements/:id/dast/runs/:rid', ({ params }) =>
+    HttpResponse.json({ id: params.rid, engagement_id: params.id, status: 'succeeded', verdict: 'runtime_confirmed', http_status: 200, evidence_id: 'ev-dast-1', started_at: '2026-09-05T09:00:00Z', finished_at: '2026-09-05T09:01:00Z' }),
+  ),
+  http.post('/api/v1/engagements/:id/dast/approvals/:aid/decide', async ({ params, request }) => {
+    const body = (await request.json()) as { approve?: boolean; reason?: string }
+    return HttpResponse.json({ ActionID: params.aid, State: body.approve ? 'approved' : 'denied', DecidedBy: 'you', Reason: body.reason ?? '', DecidedAt: new Date().toISOString() })
+  }),
+  http.post('/api/v1/engagements/:id/judgments/:jid/runtime-verification/proposals', () =>
+    HttpResponse.json({ Action: { ID: 'rtv-act-1', Tool: 'dast', Action: 'probe', Target: { Kind: 'url', Value: 'https://staging.example.internal/admin' }, EgressPreview: 'GET https://staging.example.internal/admin', Risk: 'low', Rationale: 'confirm exploitability of the SAST claim', ProposedAt: '2026-09-05T09:00:00Z' }, Decision: { State: 'pending' } }, { status: 202 }),
+  ),
+  http.post('/api/v1/engagements/:id/judgments/:jid/runtime-verification/proposals/:aid/run', () =>
+    HttpResponse.json({ Proof: 'runtime_confirmed', Status: 200, Evidence: 'ev-rtv-1' }),
+  ),
+  http.post('/api/v1/engagements/:id/judgments/auto-verify', () =>
+    HttpResponse.json({ attempted: 4, confirmed: 2, refuted: 1, skipped: 1, errors: 0 }),
+  ),
+  http.get('/api/v1/engagements/:id/judgments', ({ params }) =>
+    HttpResponse.json({ judgments: [
+      { ID: 'jud-sast-1', EngagementID: params.id, Capability: 'sast', SubjectKind: 'finding', SubjectID: 'f-1', State: 'proposed', EvidenceScore: 0, proposed_by: 'model:proposer', Version: 2, Claim: {} },
+      { ID: 'jud-reach-1', EngagementID: params.id, Capability: 'reachability', SubjectKind: 'finding', SubjectID: 'f-2', State: 'proposed', EvidenceScore: 0, proposed_by: 'model:proposer', Version: 1, Claim: {} },
+    ] }),
+  ),
+
+  // --- Detection provenance (snake_case-tagged) ---
+  http.get('/api/v1/engagements/:id/detection-provenance', () =>
+    HttpResponse.json({ provenance: [
+      { tenant_id: 'default', engagement_id: 'eng', detection_id: 'det-a1b2c3', status: 'complete', evidence_id: 'ev-det-1', updated_at: '2026-09-05T09:00:00Z' },
+      { tenant_id: 'default', engagement_id: 'eng', detection_id: 'det-d4e5f6', status: 'pending', evidence_id: '', updated_at: '2026-09-05T08:30:00Z' },
+    ] }),
+  ),
+  http.get('/api/v1/engagements/:id/detections/:did/provenance', ({ params }) =>
+    HttpResponse.json({ transitions: [
+      { detection_id: params.did, sequence: 1, kind: 'received', status: 'pending', evidence_id: '', agent_id: 'agent-1', asset_id: 'asset-1', previous_hash: '', hash: '1111111111111111', occurred_at: '2026-09-05T08:59:00Z' },
+      { detection_id: params.did, sequence: 2, kind: 'telemetry_durable', status: 'pending', evidence_id: '', agent_id: 'agent-1', asset_id: 'asset-1', previous_hash: '1111111111111111', hash: '2222222222222222', occurred_at: '2026-09-05T08:59:30Z' },
+      { detection_id: params.did, sequence: 3, kind: 'commitment_sealed', status: 'complete', evidence_id: 'ev-det-1', agent_id: 'agent-1', asset_id: 'asset-1', previous_hash: '2222222222222222', hash: '3333333333333333', occurred_at: '2026-09-05T09:00:00Z' },
+    ] }),
+  ),
+
+  // --- Vulnerability occurrence drill-down (events + risk are PascalCase; history is {items}) ---
+  http.get('/api/v1/engagements/:id/vulnerability/occurrences/:oid/events', ({ params }) =>
+    HttpResponse.json([
+      { ID: 'occev-1', OccurrenceID: params.oid, EventType: 'detected', AdvisoryRevision: 1, FromState: '', ToState: 'detected', CreatedAt: '2026-09-01T09:00:00Z' },
+      { ID: 'occev-2', OccurrenceID: params.oid, EventType: 'updated', AdvisoryRevision: 2, FromState: 'detected', ToState: 'detected', CreatedAt: '2026-09-04T09:00:00Z' },
+    ]),
+  ),
+  http.get('/api/v1/engagements/:id/vulnerability/occurrences/:oid/risk', ({ params }) =>
+    HttpResponse.json({ ID: 'occrisk-1', OccurrenceID: params.oid, Severity: 'high', CVSSScore: 7.5, KEV: true, EPSS: 0.42, Scope: 'runtime', Reachability: 'reachable', RiskScore: 8.1, Priority: 1, ReasonCodes: ['kev', 'reachable'], AssessedAt: '2026-09-05T09:00:00Z' }),
+  ),
+  http.get('/api/v1/engagements/:id/vulnerability/occurrences/:oid/risk/history', ({ params }) =>
+    HttpResponse.json({ items: [
+      { ID: 'occrisk-0', OccurrenceID: params.oid, Severity: 'high', CVSSScore: 7.5, KEV: false, EPSS: 0.1, RiskScore: 6.0, Priority: 2, ReasonCodes: [], AssessedAt: '2026-09-01T09:00:00Z' },
+    ], next: null }),
+  ),
+
   // --- Catch-all fallback ---
   http.get('/api/v1/*', ({ request }) => {
     console.warn('[MSW] Unhandled GET:', new URL(request.url).pathname)
