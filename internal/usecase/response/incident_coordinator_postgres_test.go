@@ -56,12 +56,13 @@ func TestIncidentCoordinatorPreparesPostgresActionBeforeRequestProjection(t *tes
 		t.Fatal(err)
 	}
 	if _, err := incidentService.Append(tenantCtx, incidentID, 0, []incident.IncidentEvent{{
-		IncidentID: incidentID,
-		Kind:       incident.EventCreated,
-		At:         clock.Now(),
-		Actor:      "correlator",
-		AssetID:    "host-1",
-		Severity:   shared.SeverityHigh,
+		IncidentID:   incidentID,
+		Kind:         incident.EventCreated,
+		At:           clock.Now(),
+		Actor:        "correlator",
+		AssetID:      "host-1",
+		EngagementID: "eng-1",
+		Severity:     shared.SeverityHigh,
 	}}); err != nil {
 		t.Fatalf("seed incident: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestIncidentCoordinatorPreparesPostgresActionBeforeRequestProjection(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := coordinator.Apply(tenantCtx, incidentID, engagementID, action, target, fingerprint, "alice"); !errors.Is(err, safety.ErrPendingApproval) {
+	if _, err := coordinator.Apply(tenantCtx, incidentID, action, target, fingerprint, "alice"); !errors.Is(err, safety.ErrPendingApproval) {
 		t.Fatalf("unapproved incident response error=%v, want pending approval", err)
 	}
 	if executor.count() != 0 {

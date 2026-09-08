@@ -369,6 +369,10 @@ type Config struct {
 	// pass the verified client certificate to the agent plane. Empty = certificate auth disabled
 	// (bearer token only). Trust it ONLY behind a proxy that strips any client-supplied value.
 	FleetClientCertHeader string
+	// FleetClientCertHost and FleetEnrollmentHost isolate mTLS agent traffic from the one-time
+	// bearer enrollment exchange. Both are mandatory and distinct for production fleet transport.
+	FleetClientCertHost string
+	FleetEnrollmentHost string
 	// LeaderElectionEnabled runs the fenced-lease leader elector (#406). Off by default. Postgres
 	// only (a single in-memory process is trivially the leader). Renewing < Term/2 is enforced.
 	LeaderElectionEnabled bool
@@ -830,6 +834,8 @@ func Load() Config {
 		FleetCAKeyPEM:                               getenv("SYNAPSE_FLEET_CA_KEY", ""),
 		FleetCertTTL:                                getduration("SYNAPSE_FLEET_CERT_TTL", 720*time.Hour),
 		FleetClientCertHeader:                       getenv("SYNAPSE_FLEET_CLIENT_CERT_HEADER", ""),
+		FleetClientCertHost:                         getenv("SYNAPSE_FLEET_CLIENT_CERT_HOST", ""),
+		FleetEnrollmentHost:                         getenv("SYNAPSE_FLEET_ENROLLMENT_HOST", ""),
 		LeaderElectionEnabled:                       getbool("SYNAPSE_LEADER_ENABLED", false),
 		LeaderResource:                              getenv("SYNAPSE_LEADER_RESOURCE", "scheduler"),
 		LeaderTerm:                                  getduration("SYNAPSE_LEADER_TERM", 15*time.Second),
@@ -1053,6 +1059,23 @@ func (c Config) IsProduction() bool {
 	default: // production, prod, staging, or any unrecognized/misspelled value → fail closed
 		return true
 	}
+}
+
+// ValidateFleetTransportPosture rejects a production fleet transport that shares its client-certificate
+// and bearer enrollment virtual hosts, or has no trusted certificate forwarding boundary.
+func (c Config) ValidateFleetTransportPosture() error {
+	if !c.FleetEnabled || !c.IsProduction() {
+		return nil
+	}
+	certHost := strings.ToLower(strings.TrimSpace(c.FleetClientCertHost))
+	enrollmentHost := strings.ToLower(strings.TrimSpace(c.FleetEnrollmentHost))
+	if strings.TrimSpace(c.FleetClientCertHeader) == "" || certHost == "" || enrollmentHost == "" {
+		return errors.New("production fleet requires SYNAPSE_FLEET_CLIENT_CERT_HEADER, SYNAPSE_FLEET_CLIENT_CERT_HOST, and SYNAPSE_FLEET_ENROLLMENT_HOST")
+	}
+	if certHost == enrollmentHost {
+		return errors.New("SYNAPSE_FLEET_CLIENT_CERT_HOST and SYNAPSE_FLEET_ENROLLMENT_HOST must be distinct")
+	}
+	return nil
 }
 
 // ValidateCorrelationPosture rejects unbounded correlation settings at startup.

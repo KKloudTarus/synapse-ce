@@ -24,9 +24,31 @@ SET reversibility_class = CASE kind
 END;
 ALTER TABLE response_actions FORCE ROW LEVEL SECURITY;
 
+-- Keep this column nullable during the expand phase: pre-0138 API binaries omit it from
+-- their INSERT list while the database has already migrated. The trigger fills only that
+-- omission from the immutable response catalogue; explicit values remain constrained below.
+-- +goose StatementBegin
+CREATE FUNCTION synapse_response_actions_default_reversibility_class() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.reversibility_class IS NULL THEN
+        NEW.reversibility_class = CASE NEW.kind
+            WHEN 'stop_process' THEN 'best_effort'
+            WHEN 'isolate_host' THEN 'compensating'
+            WHEN 'quarantine_file' THEN 'compensating'
+        END;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+-- +goose StatementEnd
+CREATE TRIGGER response_actions_default_reversibility_class
+    BEFORE INSERT ON response_actions
+    FOR EACH ROW EXECUTE FUNCTION synapse_response_actions_default_reversibility_class();
+
 ALTER TABLE response_actions
-    ALTER COLUMN reversibility_class SET NOT NULL,
     ADD CONSTRAINT response_actions_reversibility_class_check CHECK (
+        reversibility_class IS NULL OR
         (kind = 'stop_process' AND reversibility_class = 'best_effort') OR
         (kind IN ('isolate_host', 'quarantine_file') AND reversibility_class = 'compensating')
     );
@@ -164,8 +186,10 @@ DROP FUNCTION IF EXISTS response_halt_fences_no_truncate();
 DROP TRIGGER IF EXISTS response_halt_fences_guard_trigger ON response_halt_fences;
 DROP FUNCTION IF EXISTS response_halt_fences_guard();
 DROP TABLE response_halt_fences;
+DROP TRIGGER IF EXISTS response_actions_default_reversibility_class ON response_actions;
+DROP FUNCTION IF EXISTS synapse_response_actions_default_reversibility_class();
 ALTER TABLE response_actions
-    DROP CONSTRAINT response_actions_reversibility_class_check,
+    DROP CONSTRAINT IF EXISTS response_actions_reversibility_class_check,
     DROP COLUMN reversal_requested_by,
     DROP COLUMN submitted_by,
     DROP COLUMN target_fingerprint,

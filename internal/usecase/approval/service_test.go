@@ -74,6 +74,35 @@ func TestRequestManualSuspends(t *testing.T) {
 	}
 }
 
+func TestDecideRejectsBlankOrMachineActorWithoutSideEffects(t *testing.T) {
+	cases := []string{"", "   ", "agent:approver", "system"}
+	for _, actor := range cases {
+		t.Run(actor, func(t *testing.T) {
+			store := memory.NewApprovalStore()
+			audit := &fakeAudit{}
+			svc, err := approval.NewService(store, audit, fixedClock{now}, agent.ModeManual, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := proposal("a1", agent.RiskActive, now)
+			if _, err := svc.Request(context.Background(), p); err != nil {
+				t.Fatal(err)
+			}
+			beforeAudit := audit.n
+			if _, err := svc.Decide(context.Background(), actor, p.ID, true, "no"); !errors.Is(err, shared.ErrForbidden) {
+				t.Fatalf("Decide(%q) error = %v, want ErrForbidden", actor, err)
+			}
+			_, decision, err := store.Get(context.Background(), p.ID)
+			if err != nil || decision.State != agent.ApprovalPending {
+				t.Fatalf("forbidden actor persisted a decision: %+v err=%v", decision, err)
+			}
+			if audit.n != beforeAudit {
+				t.Fatalf("forbidden actor appended audit record: before=%d after=%d", beforeAudit, audit.n)
+			}
+		})
+	}
+}
+
 func TestDecideFirstWinsConcurrent(t *testing.T) {
 	svc, _ := newSvc(t, agent.ModeManual)
 	ctx := context.Background()

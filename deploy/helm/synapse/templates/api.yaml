@@ -80,6 +80,12 @@ spec:
               value: {{ .Values.fleet.detectionIngestEnabled | quote }}
             - name: SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED
               value: {{ .Values.fleet.keyRegistrationEnabled | quote }}
+            - name: SYNAPSE_FLEET_CLIENT_CERT_HEADER
+              value: {{ .Values.fleet.clientCertHeader | quote }}
+            - name: SYNAPSE_FLEET_CLIENT_CERT_HOST
+              value: {{ .Values.fleet.clientCertHost | quote }}
+            - name: SYNAPSE_FLEET_ENROLLMENT_HOST
+              value: {{ .Values.fleet.enrollmentHost | quote }}
             - name: SYNAPSE_FLEET_STALE_AFTER
               value: {{ .Values.fleet.staleAfter | quote }}
             - name: SYNAPSE_FLEET_CORRELATION_ENABLED

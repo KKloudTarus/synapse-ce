@@ -182,6 +182,10 @@ CALL synapse_enable_tenant_rls('response_observer_bindings');
 
 -- +goose Down
 -- Preserve append-only audit and halt history: reject the rollback before removing any dependent runtime schema.
+-- The migration owner normally remains subject to FORCE RLS, so temporarily restore owner visibility.
+-- A rejected transactional Goose migration rolls these changes back together with the raised exception.
+ALTER TABLE response_halt_dispatches NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE response_audit_intents NO FORCE ROW LEVEL SECURITY;
 -- +goose StatementBegin
 DO $$
 BEGIN
@@ -194,6 +198,8 @@ BEGIN
 END;
 $$;
 -- +goose StatementEnd
+ALTER TABLE response_halt_dispatches FORCE ROW LEVEL SECURITY;
+ALTER TABLE response_audit_intents FORCE ROW LEVEL SECURITY;
 DROP TABLE response_observer_bindings;
 ALTER TABLE work_orders DROP CONSTRAINT work_orders_response_result_check;
 ALTER TABLE work_orders DROP CONSTRAINT work_orders_response_command_check;

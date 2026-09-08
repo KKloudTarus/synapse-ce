@@ -44,30 +44,37 @@ func NewIncidentCoordinator(responses incidentResponseApplier, incidents inciden
 
 // Apply records the request before admission/execution, then records verification only after the response
 // service accepts independently attested telemetry evidence. Retries do not duplicate incident events.
-func (c *IncidentCoordinator) Apply(ctx context.Context, incidentID, engagementID shared.ID, action rdom.Action, target engagement.Target, fingerprint responsesaga.TargetFingerprint, actor string) (Record, error) {
-	if incidentID.IsZero() || engagementID.IsZero() || strings.TrimSpace(actor) == "" {
-		return Record{}, fmt.Errorf("%w: incident response requires incident, engagement, and actor", shared.ErrValidation)
+func (c *IncidentCoordinator) Apply(ctx context.Context, incidentID shared.ID, action rdom.Action, target engagement.Target, fingerprint responsesaga.TargetFingerprint, actor string) (Record, error) {
+	if incidentID.IsZero() || strings.TrimSpace(actor) == "" {
+		return Record{}, fmt.Errorf("%w: incident response requires incident and actor", shared.ErrValidation)
+	}
+	inc, err := c.incidents.Get(ctx, incidentID)
+	if err != nil {
+		return Record{}, fmt.Errorf("load incident response provenance: %w", err)
+	}
+	if inc.EngagementID.IsZero() || inc.AssetID.IsZero() {
+		return Record{}, fmt.Errorf("%w: incident lacks authoritative engagement or asset provenance", shared.ErrForbidden)
 	}
 	if err := action.Validate(); err != nil {
 		return Record{}, err
 	}
-	if err := bindFingerprint(action, fingerprint); err != nil {
+	if err := bindIncidentTarget(inc, action, fingerprint); err != nil {
 		return Record{}, err
 	}
 	if target.Value != action.Target.String() {
 		return Record{}, fmt.Errorf("%w: admitted target %q does not match the action target %q", shared.ErrForbidden, target.Value, action.Target)
 	}
 	requested := incident.ResponseRef{
-		ActionID: action.ID, EngagementID: engagementID, ActionDigest: responseActionDigest(action), Target: fingerprint,
+		ActionID: action.ID, EngagementID: inc.EngagementID, ActionDigest: responseActionDigest(action), Target: fingerprint,
 	}
-	if _, err := c.responses.PrepareIncidentResponse(ctx, engagementID, action, target, fingerprint, actor); err != nil {
+	if _, err := c.responses.PrepareIncidentResponse(ctx, inc.EngagementID, action, target, fingerprint, actor); err != nil {
 		return Record{}, fmt.Errorf("prepare incident response action: %w", err)
 	}
 	if err := c.appendResponseEvent(ctx, incidentID, requested, incident.EventResponseRequested, strings.TrimSpace(actor)); err != nil {
 		return Record{}, fmt.Errorf("record incident response request: %w", err)
 	}
 
-	rec, applyErr := c.responses.Apply(ctx, engagementID, action, target, fingerprint, actor)
+	rec, applyErr := c.responses.Apply(ctx, inc.EngagementID, action, target, fingerprint, actor)
 	if rec.Verification != VerificationSucceeded {
 		return rec, applyErr
 	}
@@ -176,6 +183,24 @@ func (c *IncidentCoordinator) appendResponseEvent(ctx context.Context, incidentI
 		}
 		return nil
 	}
+}
+
+func bindIncidentTarget(inc incident.Incident, action rdom.Action, fingerprint responsesaga.TargetFingerprint) error {
+	switch action.Kind {
+	case rdom.KindStopProcess:
+		if fingerprint.Kind != responsesaga.FingerprintProcess || fingerprint.ProcessAssetID != inc.AssetID || fingerprint.ProcessEntityID != action.Target {
+			return fmt.Errorf("%w: stop_process must bind the incident asset and process entity", shared.ErrForbidden)
+		}
+	case rdom.KindIsolateHost:
+		if fingerprint.Kind != responsesaga.FingerprintHost || fingerprint.HostID != inc.AssetID || action.Target != inc.AssetID {
+			return fmt.Errorf("%w: isolate_host must bind the incident host asset", shared.ErrForbidden)
+		}
+	case rdom.KindQuarantineFile:
+		return fmt.Errorf("%w: quarantine_file is not supported for incident-scoped response without authoritative file asset provenance", shared.ErrForbidden)
+	default:
+		return fmt.Errorf("%w: unsupported incident response kind %q", shared.ErrForbidden, action.Kind)
+	}
+	return bindFingerprint(action, fingerprint)
 }
 
 func sameIncidentResponseBinding(left, right incident.ResponseRef) bool {

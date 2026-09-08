@@ -231,7 +231,7 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 	}
 	if _, err := incidentService.Append(ctx, "native-incident", 0, []incident.IncidentEvent{{
 		IncidentID: "native-incident", Kind: incident.EventCreated, At: clock.Now(), Actor: "correlator",
-		AssetID: assetID, Title: "native test process", Severity: shared.SeverityHigh,
+		AssetID: assetID, EngagementID: eng.ID, Title: "native test process", Severity: shared.SeverityHigh,
 	}}); err != nil {
 		t.Fatalf("create incident: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 		Kind: responsesaga.FingerprintProcess, ProcessAssetID: assetID, ProcessEntityID: processID,
 	}
 
-	if _, err := coordinator.Apply(ctx, "native-incident", eng.ID, action, target, fingerprint, "operator-alice"); !errors.Is(err, safety.ErrPendingApproval) {
+	if _, err := coordinator.Apply(ctx, "native-incident", action, target, fingerprint, "operator-alice"); !errors.Is(err, safety.ErrPendingApproval) {
 		t.Fatalf("unapproved response error=%v, want pending approval", err)
 	}
 	if _, err := approvalService.Decide(ctx, "operator-bob", action.ID, true, "confirmed test containment"); err != nil {
@@ -289,7 +289,7 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 	exitEvent.Kind = "exit"
 	registry.ObserveProcess(assetID, "native-boot", exitEvent)
 
-	record, err = coordinator.Apply(ctx, "native-incident", eng.ID, action, target, fingerprint, "operator-alice")
+	record, err = coordinator.Apply(ctx, "native-incident", action, target, fingerprint, "operator-alice")
 	if err != nil {
 		t.Fatalf("verify response saga: %v", err)
 	}

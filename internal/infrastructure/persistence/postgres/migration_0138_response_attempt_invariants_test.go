@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pressly/goose/v3"
 
+	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
@@ -132,6 +134,60 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 	}
 	if err := readTx.Commit(); err != nil {
 		t.Fatal(err)
+	}
+
+	// This is the exact response_actions INSERT list from upstream/main before 0138.
+	// A main API binary must keep writing safely after the database has expanded.
+	compatibilityActions := []struct {
+		kind          rdom.Kind
+		reversibility string
+	}{
+		{kind: rdom.KindIsolateHost, reversibility: "compensating"},
+		{kind: rdom.KindQuarantineFile, reversibility: "compensating"},
+		{kind: rdom.KindStopProcess, reversibility: "best_effort"},
+	}
+	compatTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = compatTx.Rollback() }()
+	if _, err := compatTx.ExecContext(ctx, `SELECT set_config('app.current_tenant',$1,true)`, tenantID); err != nil {
+		t.Fatalf("scope main compatibility transaction: %v", err)
+	}
+	for _, action := range compatibilityActions {
+		actionID := "rsp-main-" + id + "-" + string(action.kind)
+		if _, err := compatTx.ExecContext(ctx, `INSERT INTO response_actions
+			(tenant_id, id, engagement_id, kind, target, blast_radius, argv, reversal, state, approved_by, approval_evidence_id, applied_at, updated_at, verification)
+			VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14)`,
+			tenantID, actionID, engagementID, string(action.kind), "host-main-compat", "state_changing",
+			`["synapse-agent-response","compat"]`, `{"kind":"restore_host","argv":["synapse-agent-response","restore-host"]}`,
+			"pending", "", nil, nil, time.Now().UTC(), "unknown"); err != nil {
+			t.Fatalf("insert upstream/main response action %s after 0138: %v", action.kind, err)
+		}
+		var got string
+		if err := compatTx.QueryRowContext(ctx, `SELECT reversibility_class FROM response_actions WHERE tenant_id=$1 AND id=$2`, tenantID, actionID).Scan(&got); err != nil {
+			t.Fatalf("read derived reversibility for %s: %v", action.kind, err)
+		}
+		if got != action.reversibility {
+			t.Fatalf("derived reversibility for %s=%q, want %q", action.kind, got, action.reversibility)
+		}
+	}
+	if err := compatTx.Commit(); err != nil {
+		t.Fatalf("commit main compatibility response actions: %v", err)
+	}
+
+	pool, err := Connect(ctx, dsnForMigrate(isolated.String()))
+	if err != nil {
+		t.Fatalf("connect repository to isolated database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	compatibilityID := shared.ID("rsp-main-" + id + "-" + string(rdom.KindStopProcess))
+	record, found, err := NewResponseRepository(pool).Get(shared.WithTenant(ctx, shared.ID(tenantID)), compatibilityID)
+	if err != nil || !found {
+		t.Fatalf("read upstream/main response action through repository: found=%t err=%v", found, err)
+	}
+	if record.Action.Kind != rdom.KindStopProcess || string(record.Action.Reversibility) != "best_effort" {
+		t.Fatalf("repository read incompatible response action: %+v", record.Action)
 	}
 
 	constraints := map[string]string{

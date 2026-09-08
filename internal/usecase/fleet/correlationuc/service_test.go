@@ -129,6 +129,7 @@ func correlateSnapshot(t *testing.T, svc *Service, ctx context.Context) Result {
 		total.Updated = append(total.Updated, result.Updated...)
 		total.Reassessed += result.Reassessed
 		total.ReassessFailed += result.ReassessFailed
+		total.Evicted += result.Evicted
 		state, err := svc.state.LoadCorrelationState(ctx, "eng-1", nil, 100)
 		if err != nil {
 			t.Fatal(err)
@@ -204,10 +205,8 @@ func TestCorrelationSnapshotIsIndependentOfSourceOrderAndPageSize(t *testing.T) 
 		t.Fatalf("event count varies with page/order: %d != %d", len(forward), len(reverse))
 	}
 	for i := range forward {
-		left, right := forward[i], reverse[i]
-		left.At, right.At = time.Time{}, time.Time{} // page execution time is deliberately not graph identity.
-		if left != right {
-			t.Fatalf("event %d varies with page/order: %+v != %+v", i, left, right)
+		if forward[i] != reverse[i] {
+			t.Fatalf("event %d varies with page/order: %+v != %+v", i, forward[i], reverse[i])
 		}
 	}
 }
@@ -282,35 +281,34 @@ func TestCorrelationFanoutSaturationDoesNotAdvanceMaterialization(t *testing.T) 
 	}
 }
 
-func TestCorrelationSaturationDoesNotAdvanceConsumeStateOrRecordIncidents(t *testing.T) {
+func TestCorrelationActiveSessionEvictionMakesTerminalForwardProgress(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0).UTC()
-	records := []detection.Record{rec("d1", "host-1", base), rec("d2", "host-2", base)}
+	records := []detection.Record{rec("d1", "host-1", base), rec("d2", "host-2", base.Add(time.Second)), rec("d3", "host-3", base.Add(2*time.Second))}
 	for i := range records {
-		records[i].RecordedAt = base
+		records[i].RecordedAt = base.Add(time.Duration(i) * time.Second)
 	}
 	recorder := &fakeIncidents{}
 	state := memory.NewCorrelationStateStore()
-	svc, err := NewService(fakeDetections{recs: records}, memory.NewDetectionProvenanceStore(), memory.NewEndpointTimelineStore(), state, recorder, nil, correlation.Config{Window: time.Hour, MaxPerIncident: 10, PageSize: 2, MaxActiveSessions: 1}, &fakeAudit{}, func() time.Time { return base.Add(time.Hour) })
+	svc, err := NewService(fakeDetections{recs: records}, memory.NewDetectionProvenanceStore(), memory.NewEndpointTimelineStore(), state, recorder, nil, correlation.Config{Window: time.Hour, MaxPerIncident: 10, PageSize: 1, MaxActiveSessions: 1}, &fakeAudit{}, func() time.Time { return base.Add(time.Hour) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := testCtx()
-	if _, err := svc.CorrelateEngagement(ctx, "operator", "eng-1"); err != nil {
-		t.Fatal(err)
+	result := correlateSnapshot(t, svc, testCtx())
+	if result.Evicted != 2 || len(result.Created) != 3 {
+		t.Fatalf("correlation must assign all signals and evict overflow sessions: %+v", result)
 	}
-	if _, err := svc.CorrelateEngagement(ctx, "operator", "eng-1"); err != nil {
-		t.Fatal(err)
+	stateAfter, err := state.LoadCorrelationState(testCtx(), "eng-1", nil, 1)
+	if err != nil || stateAfter.Checkpoint.Phase != "" || len(stateAfter.ActiveSessions) != 1 {
+		t.Fatalf("correlation did not complete with bounded active sessions: state=%+v err=%v", stateAfter, err)
 	}
-	before, err := state.LoadCorrelationState(ctx, "eng-1", nil, 10)
-	if err != nil {
-		t.Fatal(err)
+	comments := 0
+	for _, event := range recorder.events {
+		if event.Kind == incident.EventAnalystCommented && event.CorrelationKey != "" {
+			comments++
+		}
 	}
-	if _, err := svc.CorrelateEngagement(ctx, "operator", "eng-1"); !errors.Is(err, shared.ErrSaturated) {
-		t.Fatalf("consume saturation error=%v", err)
-	}
-	after, err := state.LoadCorrelationState(ctx, "eng-1", nil, 10)
-	if err != nil || after.Checkpoint != before.Checkpoint || len(recorder.events) != 0 {
-		t.Fatalf("saturation mutated state=%+v before=%+v events=%+v err=%v", after.Checkpoint, before.Checkpoint, recorder.events, err)
+	if comments != 2 {
+		t.Fatalf("evictions must produce visible coverage comments: %+v", recorder.events)
 	}
 }
 

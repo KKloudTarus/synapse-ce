@@ -152,6 +152,13 @@ type IncrementalPlan struct {
 	Next           Checkpoint
 	TooLate        int
 	Suppressed     int
+	Evicted        int
+}
+
+type activeSessionEviction struct {
+	Session   ActiveSession
+	TriggerID shared.ID
+	At        time.Time
 }
 
 func (p IncrementalPlan) Changed(previous Checkpoint) bool {
@@ -166,13 +173,13 @@ func CorrelateIncremental(cfg Config, state State, signals []Signal, processedAt
 // CorrelateIncrementalPage applies a globally event-ordered staged page. Only the
 // final page advances the finalized watermark and prunes active sessions.
 func CorrelateIncrementalPage(cfg Config, state State, signals []Signal, processedAt time.Time, finalPage bool) (IncrementalPlan, error) {
-	if cfg.Window <= 0 || cfg.MaxPerIncident <= 0 || cfg.AllowedLateness < 0 || processedAt.IsZero() {
+	cfg = cfg.Normalize()
+	if cfg.Window <= 0 || cfg.MaxPerIncident <= 0 || cfg.MaxActiveSessions <= 0 || cfg.AllowedLateness < 0 || processedAt.IsZero() {
 		return IncrementalPlan{}, fmt.Errorf("%w: invalid incremental correlation configuration", shared.ErrValidation)
 	}
 	if err := state.Validate(); err != nil {
 		return IncrementalPlan{}, err
 	}
-	cfg = cfg.Normalize()
 	ordered, err := dedupeAndOrder(signals)
 	if err != nil {
 		return IncrementalPlan{}, err
@@ -188,12 +195,25 @@ func CorrelateIncrementalPage(cfg Config, state State, signals []Signal, process
 		maxBefore[session.IncidentID] = session.MaxSeverity
 	}
 	merges := make(map[shared.ID]shared.ID)
+	activeSessionCount := len(state.ActiveSessions)
+	var evictions []activeSessionEviction
+	recordEvictions := func(signal Signal) {
+		if activeSessionCount <= cfg.MaxActiveSessions {
+			return
+		}
+		reduced := reduceActiveSessions(sessions, cfg.MaxActiveSessions)
+		activeSessionCount -= len(reduced)
+		for _, session := range reduced {
+			evictions = append(evictions, activeSessionEviction{Session: session, TriggerID: signal.ID, At: maxTime(signal.OccurredAt.UTC(), session.MaxOccurredAt)})
+		}
+	}
 	for _, signal := range ordered {
 		signalsByID[signal.ID] = signal
 		if signal.OccurredAt.After(plan.Next.MaxObservedAt) {
 			plan.Next.MaxObservedAt = signal.OccurredAt.UTC()
 		}
 		if _, known := state.KnownSignalIDs[signal.ID]; known {
+			recordEvictions(signal)
 			continue
 		}
 		assignment := Assignment{SignalID: signal.ID, AssetID: signal.AssetID, EntityID: signal.EntityID, OccurredAt: signal.OccurredAt.UTC(), Severity: signal.Severity}
@@ -201,6 +221,7 @@ func CorrelateIncrementalPage(cfg Config, state State, signals []Signal, process
 			assignment.IncidentID, assignment.Outcome = incidentID(signal.AssetID, signal.EntityID, signal.ID), AssignmentTooLate
 			plan.TooLate++
 			plan.Added = append(plan.Added, assignment)
+			recordEvictions(signal)
 			continue
 		}
 		key := signal.key()
@@ -208,11 +229,13 @@ func CorrelateIncrementalPage(cfg Config, state State, signals []Signal, process
 		if matched == nil {
 			matched = &ActiveSession{AssetID: signal.AssetID, EntityID: signal.EntityID, IncidentID: incidentID(signal.AssetID, signal.EntityID, signal.ID), MinOccurredAt: signal.OccurredAt.UTC(), MaxOccurredAt: signal.OccurredAt.UTC()}
 			sessions[key] = append(sessions[key], matched)
+			activeSessionCount++
 		} else {
 			for _, old := range merged {
 				if old.IncidentID == matched.IncidentID {
 					continue
 				}
+				activeSessionCount--
 				merges[old.IncidentID] = matched.IncidentID
 				matched.MinOccurredAt = minTime(matched.MinOccurredAt, old.MinOccurredAt)
 				matched.MaxOccurredAt = maxTime(matched.MaxOccurredAt, old.MaxOccurredAt)
@@ -233,9 +256,10 @@ func CorrelateIncrementalPage(cfg Config, state State, signals []Signal, process
 		matched.MaxOccurredAt = maxTime(matched.MaxOccurredAt, assignment.OccurredAt)
 		matched.MaxSeverity = higherSeverity(matched.MaxSeverity, assignment.Severity)
 		plan.Added = append(plan.Added, assignment)
+		recordEvictions(signal)
 	}
 	if finalPage && !plan.Next.MaxObservedAt.IsZero() {
-		candidate := plan.Next.MaxObservedAt.Add(-cfg.AllowedLateness).UTC()
+		candidate := minTime(plan.Next.MaxObservedAt, processedAt).Add(-cfg.AllowedLateness).UTC()
 		if candidate.After(plan.Next.Watermark) {
 			plan.Next.Watermark = candidate
 		}
@@ -248,7 +272,8 @@ func CorrelateIncrementalPage(cfg Config, state State, signals []Signal, process
 	} else {
 		plan.ActiveSessions = flattenActive(sessions, time.Time{})
 	}
-	plan.Events = incrementalEvents(cfg, plan.Added, signalsByID, prior, maxBefore, merges, processedAt.UTC(), state.Checkpoint.Watermark)
+	plan.Evicted = len(evictions)
+	plan.Events = incrementalEvents(cfg, plan.Added, signalsByID, prior, maxBefore, merges, evictions, processedAt.UTC(), state.Checkpoint.Watermark)
 	return plan, nil
 }
 
@@ -287,6 +312,48 @@ func removeMerged(items []*ActiveSession, canonical shared.ID, merges map[shared
 	}
 	return out
 }
+
+// reduceActiveSessions keeps the K most recently active sessions. Its total ordering makes
+// the post-signal prefix state independent of how the globally ordered stream is paged.
+func reduceActiveSessions(byKey map[correlationKey][]*ActiveSession, limit int) []ActiveSession {
+	all := flattenActive(byKey, time.Time{})
+	if len(all) <= limit {
+		return nil
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if !all[i].MaxOccurredAt.Equal(all[j].MaxOccurredAt) {
+			return all[i].MaxOccurredAt.Before(all[j].MaxOccurredAt)
+		}
+		if !all[i].MinOccurredAt.Equal(all[j].MinOccurredAt) {
+			return all[i].MinOccurredAt.Before(all[j].MinOccurredAt)
+		}
+		if all[i].AssetID != all[j].AssetID {
+			return all[i].AssetID < all[j].AssetID
+		}
+		if all[i].EntityID != all[j].EntityID {
+			return all[i].EntityID < all[j].EntityID
+		}
+		return all[i].IncidentID < all[j].IncidentID
+	})
+	evicted := append([]ActiveSession(nil), all[:len(all)-limit]...)
+	for _, session := range evicted {
+		key := correlationKey{asset: session.AssetID, entity: session.EntityID}
+		items := byKey[key]
+		out := items[:0]
+		for _, item := range items {
+			if item.IncidentID != session.IncidentID {
+				out = append(out, item)
+			}
+		}
+		if len(out) == 0 {
+			delete(byKey, key)
+		} else {
+			byKey[key] = out
+		}
+	}
+	return evicted
+}
+
 func flattenActive(byKey map[correlationKey][]*ActiveSession, cutoff time.Time) []ActiveSession {
 	var out []ActiveSession
 	for _, list := range byKey {
@@ -323,16 +390,23 @@ func activeSessionID(asset, entity, incidentID shared.ID) shared.ID {
 	return asset + "\x00" + entity + "\x00" + incidentID
 }
 
-func incrementalEvents(cfg Config, added []Assignment, signals map[shared.ID]Signal, prior map[shared.ID]struct{}, maxBefore map[shared.ID]shared.Severity, merges map[shared.ID]shared.ID, processedAt, priorWatermark time.Time) []incident.IncidentEvent {
+func incrementalEvents(cfg Config, added []Assignment, signals map[shared.ID]Signal, prior map[shared.ID]struct{}, maxBefore map[shared.ID]shared.Severity, merges map[shared.ID]shared.ID, evictions []activeSessionEviction, processedAt, priorWatermark time.Time) []incident.IncidentEvent {
 	byIncident := make(map[shared.ID][]Assignment)
-	var ids []shared.ID
+	evictedByIncident := make(map[shared.ID][]activeSessionEviction)
+	ids := make(map[shared.ID]struct{})
 	for _, assignment := range added {
-		if _, ok := byIncident[assignment.IncidentID]; !ok {
-			ids = append(ids, assignment.IncidentID)
-		}
+		ids[assignment.IncidentID] = struct{}{}
 		byIncident[assignment.IncidentID] = append(byIncident[assignment.IncidentID], assignment)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, eviction := range evictions {
+		ids[eviction.Session.IncidentID] = struct{}{}
+		evictedByIncident[eviction.Session.IncidentID] = append(evictedByIncident[eviction.Session.IncidentID], eviction)
+	}
+	orderedIDs := make([]shared.ID, 0, len(ids))
+	for id := range ids {
+		orderedIDs = append(orderedIDs, id)
+	}
+	sort.Slice(orderedIDs, func(i, j int) bool { return orderedIDs[i] < orderedIDs[j] })
 	var events []incident.IncidentEvent
 	var mergedIDs []shared.ID
 	for id := range merges {
@@ -342,7 +416,7 @@ func incrementalEvents(cfg Config, added []Assignment, signals map[shared.ID]Sig
 	for _, id := range mergedIDs {
 		events = append(events, incident.IncidentEvent{IncidentID: id, Kind: incident.EventMerged, At: processedAt, Actor: cfg.Actor, CorrelationKey: eventKey("merged", merges[id].String()), MergedInto: merges[id]})
 	}
-	for _, id := range ids {
+	for _, id := range orderedIDs {
 		assignments := byIncident[id]
 		sort.Slice(assignments, func(i, j int) bool {
 			if !assignments[i].OccurredAt.Equal(assignments[j].OccurredAt) {
@@ -360,7 +434,7 @@ func incrementalEvents(cfg Config, added []Assignment, signals map[shared.ID]Sig
 			for _, a := range assignments {
 				severity = higherSeverity(severity, a.Severity)
 			}
-			created := incident.IncidentEvent{IncidentID: id, Kind: incident.EventCreated, At: first.OccurredAt, Actor: cfg.Actor, CorrelationKey: eventKey("created", first.SignalID.String()), AssetID: first.AssetID, Title: signalTitle(signal), Severity: severity}
+			created := incident.IncidentEvent{IncidentID: id, Kind: incident.EventCreated, At: first.OccurredAt, Actor: cfg.Actor, CorrelationKey: eventKey("created", first.SignalID.String()), AssetID: first.AssetID, EngagementID: cfg.EngagementID, Title: signalTitle(signal), Severity: severity}
 			if signal.Timeline == nil {
 				created.DetectionID = first.SignalID
 			}
@@ -374,15 +448,11 @@ func incrementalEvents(cfg Config, added []Assignment, signals map[shared.ID]Sig
 			if a.Outcome != AssignmentAttached {
 				continue
 			}
-			at := a.OccurredAt
-			if existed {
-				at = processedAt
-			}
 			signal := signals[a.SignalID]
 			if signal.Timeline != nil {
-				local = append(local, timelineAttached(cfg, id, a.SignalID, *signal.Timeline, at))
+				local = append(local, timelineAttached(cfg, id, a.SignalID, *signal.Timeline, a.OccurredAt))
 			} else {
-				local = append(local, incident.IncidentEvent{IncidentID: id, Kind: incident.EventDetectionAttached, At: at, Actor: cfg.Actor, CorrelationKey: eventKey("detection", a.SignalID.String()), DetectionID: a.SignalID})
+				local = append(local, incident.IncidentEvent{IncidentID: id, Kind: incident.EventDetectionAttached, At: a.OccurredAt, Actor: cfg.Actor, CorrelationKey: eventKey("detection", a.SignalID.String()), DetectionID: a.SignalID})
 			}
 		}
 		maxAfter := maxBefore[id]
@@ -406,14 +476,18 @@ func incrementalEvents(cfg Config, added []Assignment, signals map[shared.ID]Sig
 				local = append(local, incident.IncidentEvent{IncidentID: id, Kind: incident.EventAnalystCommented, At: a.OccurredAt, Actor: cfg.Actor, CorrelationKey: eventKey("too-late", a.SignalID.String()), Comment: fmt.Sprintf("correlation lateness coverage: detection %s at %s arrived behind watermark %s and was isolated", a.SignalID, a.OccurredAt.Format(time.RFC3339Nano), priorWatermark.Format(time.RFC3339Nano))})
 			}
 		}
-		for i := range local {
-			if existed && local[i].At.Before(processedAt) {
-				local[i].At = processedAt
-			}
-			if i > 0 && local[i].At.Before(local[i-1].At) {
-				local[i].At = local[i-1].At
-			}
+		for _, eviction := range evictedByIncident[id] {
+			local = append(local, incident.IncidentEvent{IncidentID: id, Kind: incident.EventAnalystCommented, At: eviction.At, Actor: cfg.Actor, CorrelationKey: eventKey("active-session-evicted", string(eviction.Session.AssetID)+"\x00"+string(eviction.Session.EntityID)+"\x00"+string(eviction.Session.IncidentID)+"\x00"+string(eviction.TriggerID)), Comment: fmt.Sprintf("correlation active-session coverage: session evicted while processing signal %s", eviction.TriggerID)})
 		}
+		sort.SliceStable(local, func(i, j int) bool {
+			if local[i].Kind == incident.EventCreated {
+				return true
+			}
+			if local[j].Kind == incident.EventCreated {
+				return false
+			}
+			return local[i].At.Before(local[j].At)
+		})
 		events = append(events, local...)
 	}
 	return events

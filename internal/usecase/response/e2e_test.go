@@ -355,7 +355,7 @@ func TestGovernedResponseEndToEnd(t *testing.T) {
 	}
 	if _, err := incidentSvc.Append(ctx, "inc-1", 0, []incident.IncidentEvent{{
 		IncidentID: "inc-1", Kind: incident.EventCreated, At: now, Actor: "correlator",
-		AssetID: "host-1", Title: "malicious process", Severity: shared.SeverityHigh,
+		AssetID: "asset-1", EngagementID: "eng-1", Title: "malicious process", Severity: shared.SeverityHigh,
 	}}); err != nil {
 		t.Fatalf("seed incident: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestGovernedResponseEndToEnd(t *testing.T) {
 	fingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "app.acme.io"}
 
 	// 1) Even ModeAuto suspends an intrusive response action until a human decides it.
-	if _, err := coordinator.Apply(ctx, "inc-1", "eng-1", action, target, fingerprint, "alice"); !errors.Is(err, safety.ErrPendingApproval) {
+	if _, err := coordinator.Apply(ctx, "inc-1", action, target, fingerprint, "alice"); !errors.Is(err, safety.ErrPendingApproval) {
 		t.Fatalf("unapproved apply must suspend with ErrPendingApproval, got %v", err)
 	}
 	if exec.count() != 0 {
@@ -385,7 +385,7 @@ func TestGovernedResponseEndToEnd(t *testing.T) {
 	}
 
 	// 3) Re-apply: admitted → journaled → simulated execute → observer dispatch → pending.
-	rec, err := coordinator.Apply(ctx, "inc-1", "eng-1", action, target, fingerprint, "alice")
+	rec, err := coordinator.Apply(ctx, "inc-1", action, target, fingerprint, "alice")
 	if !errors.Is(err, ErrVerificationPending) {
 		t.Fatalf("approved response must await the dispatched observation, got %v", err)
 	}
@@ -398,7 +398,7 @@ func TestGovernedResponseEndToEnd(t *testing.T) {
 
 	// 4) Retry: the production verifier derives success from the accepted timeline and coverage without
 	// reissuing the side effect.
-	rec, err = coordinator.Apply(ctx, "inc-1", "eng-1", action, target, fingerprint, "alice")
+	rec, err = coordinator.Apply(ctx, "inc-1", action, target, fingerprint, "alice")
 	if err != nil {
 		t.Fatalf("approved response must verify from telemetry: %v", err)
 	}

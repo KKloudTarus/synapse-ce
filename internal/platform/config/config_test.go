@@ -29,6 +29,28 @@ func TestIsProductionFailsClosed(t *testing.T) {
 	}
 }
 
+func TestValidateFleetTransportPosture(t *testing.T) {
+	valid := Config{Environment: "production", FleetEnabled: true, FleetClientCertHeader: "X-Fleet-Cert", FleetClientCertHost: "fleet.example.test", FleetEnrollmentHost: "enrol.example.test"}
+	if err := valid.ValidateFleetTransportPosture(); err != nil {
+		t.Fatalf("valid production fleet posture: %v", err)
+	}
+	for _, mutate := range []func(*Config){
+		func(c *Config) { c.FleetClientCertHeader = "" },
+		func(c *Config) { c.FleetClientCertHost = "" },
+		func(c *Config) { c.FleetEnrollmentHost = "" },
+		func(c *Config) { c.FleetEnrollmentHost = c.FleetClientCertHost },
+	} {
+		candidate := valid
+		mutate(&candidate)
+		if err := candidate.ValidateFleetTransportPosture(); err == nil {
+			t.Fatal("invalid production fleet posture was accepted")
+		}
+	}
+	if err := (Config{Environment: "development", FleetEnabled: true}).ValidateFleetTransportPosture(); err != nil {
+		t.Fatalf("development fleet may use bearer-only transport: %v", err)
+	}
+}
+
 func TestValidateCorrelationPosture(t *testing.T) {
 	valid := Config{FleetCorrelationEnabled: true, FleetCorrelationWindow: time.Hour, FleetCorrelationMaxPerIncident: 1, FleetCorrelationPageSize: 100, FleetCorrelationMaxActiveSessions: 10, FleetCorrelationMaxTimelineRefsPerDetection: 1, FleetCorrelationMaxTimelineRefsPerPage: 1}
 	if err := valid.ValidateCorrelationPosture(); err != nil {

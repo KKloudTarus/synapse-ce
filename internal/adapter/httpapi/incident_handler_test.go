@@ -22,18 +22,17 @@ import (
 // test can assert the actor came from the authenticated principal (not the body) and that the honest
 // limit+1 truncation probe reached the store.
 type fakeIncidentResponseCoordinator struct {
-	incidentID   shared.ID
-	engagementID shared.ID
-	action       rdom.Action
-	target       engagement.Target
-	fingerprint  responsesaga.TargetFingerprint
-	actor        string
-	record       responseuc.Record
-	err          error
+	incidentID  shared.ID
+	action      rdom.Action
+	target      engagement.Target
+	fingerprint responsesaga.TargetFingerprint
+	actor       string
+	record      responseuc.Record
+	err         error
 }
 
-func (f *fakeIncidentResponseCoordinator) Apply(_ context.Context, incidentID, engagementID shared.ID, action rdom.Action, target engagement.Target, fingerprint responsesaga.TargetFingerprint, actor string) (responseuc.Record, error) {
-	f.incidentID, f.engagementID, f.action, f.target, f.fingerprint, f.actor = incidentID, engagementID, action, target, fingerprint, actor
+func (f *fakeIncidentResponseCoordinator) Apply(_ context.Context, incidentID shared.ID, action rdom.Action, target engagement.Target, fingerprint responsesaga.TargetFingerprint, actor string) (responseuc.Record, error) {
+	f.incidentID, f.action, f.target, f.fingerprint, f.actor = incidentID, action, target, fingerprint, actor
 	return f.record, f.err
 }
 
@@ -159,14 +158,14 @@ func TestApplyIncidentResponseUsesServerInputsAndHumanRoute(t *testing.T) {
 	rt.SetIncidents(incidents)
 	rt.SetResponse(&fakeResponseSvc{}, oneID{id: "act-1"})
 	rt.SetIncidentResponseCoordinator(coordinator)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/incidents/inc-1/response/apply", strings.NewReader(`{"engagement_id":"eng-1","kind":"stop_process","target":"asset-9","target_kind":"ip","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"asset-9"},"verifier_id":"attacker","evidence_id":"attacker"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/incidents/inc-1/response/apply", strings.NewReader(`{"kind":"stop_process","target":"asset-9","target_kind":"ip","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"asset-9"},"verifier_id":"attacker","evidence_id":"attacker"}`))
 	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "operator-1", Role: "consultant"}))
 	rec := httptest.NewRecorder()
 	rt.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("apply incident response: code=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if coordinator.incidentID != "inc-1" || coordinator.engagementID != "eng-1" || coordinator.action.ID != "act-1" || coordinator.actor != "operator-1" {
+	if coordinator.incidentID != "inc-1" || coordinator.action.ID != "act-1" || coordinator.actor != "operator-1" {
 		t.Fatalf("coordinator server inputs = %+v", coordinator)
 	}
 	if coordinator.target != (engagement.Target{Kind: engagement.TargetIP, Value: "asset-9"}) || coordinator.fingerprint.ProcessEntityID != "asset-9" {
@@ -189,7 +188,7 @@ func TestApplyIncidentResponseReturnsPendingRecord(t *testing.T) {
 	rt.SetIncidents(incidents)
 	rt.SetResponse(&fakeResponseSvc{}, oneID{id: "act-1"})
 	rt.SetIncidentResponseCoordinator(coordinator)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/incidents/inc-1/response/apply", strings.NewReader(`{"engagement_id":"eng-1","kind":"stop_process","target":"asset-9","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"asset-9"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/incidents/inc-1/response/apply", strings.NewReader(`{"kind":"stop_process","target":"asset-9","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"asset-9"}}`))
 	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "operator-1", Role: "consultant"}))
 	rec := httptest.NewRecorder()
 	rt.routes().ServeHTTP(rec, req)
@@ -222,7 +221,7 @@ func TestApplyIncidentResponseRejectsMachineRole(t *testing.T) {
 	rt.SetIncidents(incidents)
 	rt.SetResponse(&fakeResponseSvc{}, oneID{id: "act-1"})
 	rt.SetIncidentResponseCoordinator(coordinator)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/incidents/inc-1/response/apply", strings.NewReader(`{"engagement_id":"eng-1","kind":"stop_process","target":"asset-9","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"asset-9"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/incidents/inc-1/response/apply", strings.NewReader(`{"kind":"stop_process","target":"asset-9","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"asset-9"}}`))
 	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "agent:operator", Role: "agent", TenantID: shared.DefaultTenant.String()}))
 	rec := httptest.NewRecorder()
 	rt.routes().ServeHTTP(rec, req)

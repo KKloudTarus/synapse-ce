@@ -45,9 +45,10 @@ type IncidentEvent struct {
 	CorrelationKey string
 
 	// Created
-	AssetID  shared.ID
-	Title    string
-	Severity shared.Severity
+	AssetID      shared.ID
+	EngagementID shared.ID // authoritative correlation scope; legacy incidents may not carry it
+	Title        string
+	Severity     shared.Severity
 	// Created (optional first detection) + DetectionAttached/Detached
 	DetectionID shared.ID
 	// TimelineAttached

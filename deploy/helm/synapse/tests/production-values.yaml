@@ -29,6 +29,9 @@ fleet:
   telemetryIngestEnabled: true
   detectionIngestEnabled: true
   keyRegistrationEnabled: true
+  clientCertHeader: X-Synapse-Client-Cert
+  clientCertHost: fleet.synapse.example.com
+  enrollmentHost: enroll.synapse.example.com
   staleAfter: 10m
   correlation:
     enabled: true

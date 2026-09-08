@@ -39,7 +39,10 @@ func SameSignal(left, right Signal) bool {
 	if left.Timeline == nil || right.Timeline == nil {
 		return left.Timeline == nil && right.Timeline == nil
 	}
-	return *left.Timeline == *right.Timeline
+	return left.Timeline.EventID == right.Timeline.EventID &&
+		left.Timeline.OccurredAt.Equal(right.Timeline.OccurredAt) &&
+		left.Timeline.Kind == right.Timeline.Kind &&
+		left.Timeline.Summary == right.Timeline.Summary
 }
 
 // Validate enforces a well-formed signal.

@@ -41,6 +41,9 @@ func (s *Service) Get(ctx context.Context, id shared.ID) (incident.Incident, err
 		if err != nil {
 			return incident.Incident{}, err
 		}
+		if base.AssetID != member.AssetID || base.EngagementID != member.EngagementID {
+			return incident.Incident{}, fmt.Errorf("%w: canonical incident members have conflicting asset or engagement provenance", shared.ErrConflict)
+		}
 		base = mergeEvidence(base, member)
 		copy := edge
 		members = append(members, incident.Member{ID: edge.SourceID, Edge: &copy})

@@ -68,6 +68,11 @@ fleet:
   telemetryIngestEnabled: false
   detectionIngestEnabled: false
   keyRegistrationEnabled: false
+  # Dedicated virtual hosts for certificate-authenticated traffic and the bearer enrollment exchange.
+  # Required and distinct when fleet is enabled in a production execution mode.
+  clientCertHeader: ""
+  clientCertHost: ""
+  enrollmentHost: ""
   staleAfter: 10m
   correlation:
     enabled: false

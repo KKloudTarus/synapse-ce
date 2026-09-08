@@ -32,6 +32,7 @@ type Result struct {
 	Updated        []incident.Incident
 	Reassessed     int
 	ReassessFailed int
+	Evicted        int
 	Phase          correlation.Phase
 	HasMore        bool
 }
@@ -88,7 +89,7 @@ func (s *Service) CorrelateEngagement(ctx context.Context, actor string, engagem
 				return Result{}, fmt.Errorf("read correlation high-water: %w", err)
 			}
 			if !found {
-				return s.auditResult(ctx, actor, engagementID, result, 0, 0)
+				return s.auditResult(ctx, actor, engagementID, result, 0, 0, 0)
 			}
 			if _, err := s.state.BeginCorrelationSnapshot(ctx, engagementID, state.Checkpoint.Revision, upper, s.now().UTC(), policyDigest(s.cfg)); err != nil {
 				if errors.Is(err, shared.ErrConflict) {
@@ -96,7 +97,7 @@ func (s *Service) CorrelateEngagement(ctx context.Context, actor string, engagem
 				}
 				return Result{}, fmt.Errorf("begin correlation snapshot: %w", err)
 			}
-			return s.auditResult(ctx, actor, engagementID, Result{Phase: correlation.PhaseSource, HasMore: true}, 0, 0)
+			return s.auditResult(ctx, actor, engagementID, Result{Phase: correlation.PhaseSource, HasMore: true}, 0, 0, 0)
 		case correlation.PhaseSource:
 			result, err = s.materialize(ctx, actor, engagementID, state)
 		case correlation.PhaseConsume:
@@ -141,7 +142,7 @@ func (s *Service) materialize(ctx context.Context, actor string, engagementID sh
 	if err := s.state.StageCorrelationSignals(ctx, engagementID, cp.Revision, next, signals); err != nil {
 		return Result{}, fmt.Errorf("stage correlation source page: %w", err)
 	}
-	return s.auditResult(ctx, actor, engagementID, Result{Phase: next.Phase, HasMore: next.Phase != ""}, 0, 0)
+	return s.auditResult(ctx, actor, engagementID, Result{Phase: next.Phase, HasMore: next.Phase != ""}, 0, 0, 0)
 }
 
 func validateSourcePage(records []detection.Record, engagementID shared.ID, after, through correlation.SourcePosition, limit int) error {
@@ -239,7 +240,9 @@ func (s *Service) consume(ctx context.Context, actor string, engagementID shared
 		return Result{}, fmt.Errorf("%w: correlation policy changed during snapshot", shared.ErrConflict)
 	}
 	final := !more
-	plan, err := correlation.CorrelateIncrementalPage(s.cfg, state, signals, s.now().UTC(), final)
+	cfg := s.cfg
+	cfg.EngagementID = engagementID
+	plan, err := correlation.CorrelateIncrementalPage(cfg, state, signals, s.now().UTC(), final)
 	if err != nil {
 		return Result{}, fmt.Errorf("correlate staged page: %w", err)
 	}
@@ -254,9 +257,6 @@ func (s *Service) consume(ctx context.Context, actor string, engagementID shared
 	next.Revision = state.Checkpoint.Revision + 1
 	if final {
 		next.Phase = ""
-	}
-	if len(plan.ActiveSessions) > s.cfg.MaxActiveSessions {
-		return Result{}, fmt.Errorf("%w: correlation active-session limit exceeded", shared.ErrSaturated)
 	}
 	var created, updated []incident.Incident
 	commit := func(commitCtx context.Context) error {
@@ -282,7 +282,7 @@ func (s *Service) consume(ctx context.Context, actor string, engagementID shared
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{Created: created, Updated: updated, Phase: next.Phase, HasMore: !final}
+	result := Result{Created: created, Updated: updated, Evicted: plan.Evicted, Phase: next.Phase, HasMore: !final}
 	for _, inc := range append(append([]incident.Incident(nil), created...), updated...) {
 		if s.reassessor == nil {
 			break
@@ -300,11 +300,11 @@ func (s *Service) consume(ctx context.Context, actor string, engagementID shared
 	if s.notifier != nil && len(result.Created) > 0 {
 		s.notifier.IncidentsCreated(ctx, actor, engagementID, result.Created)
 	}
-	return s.auditResult(ctx, actor, engagementID, result, plan.TooLate, plan.Suppressed)
+	return s.auditResult(ctx, actor, engagementID, result, plan.TooLate, plan.Suppressed, plan.Evicted)
 }
 
-func (s *Service) auditResult(ctx context.Context, actor string, engagementID shared.ID, result Result, late, suppressed int) (Result, error) {
-	if err := s.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: "fleet.correlate_engagement", Target: engagementID.String(), At: s.now().UTC(), Metadata: map[string]string{"created": strconv.Itoa(len(result.Created)), "updated": strconv.Itoa(len(result.Updated)), "too_late": strconv.Itoa(late), "suppressed": strconv.Itoa(suppressed)}}); err != nil {
+func (s *Service) auditResult(ctx context.Context, actor string, engagementID shared.ID, result Result, late, suppressed, evicted int) (Result, error) {
+	if err := s.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: "fleet.correlate_engagement", Target: engagementID.String(), At: s.now().UTC(), Metadata: map[string]string{"created": strconv.Itoa(len(result.Created)), "updated": strconv.Itoa(len(result.Updated)), "too_late": strconv.Itoa(late), "suppressed": strconv.Itoa(suppressed), "evicted": strconv.Itoa(evicted)}}); err != nil {
 		return result, fmt.Errorf("audit correlate: %w", err)
 	}
 	return result, nil

@@ -1,6 +1,7 @@
 package incidentuc
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
@@ -52,6 +53,21 @@ func TestCanonicalGetAndAliasAppend(t *testing.T) {
 	oldEvents, _ := svc.store.LoadEvents(ctx, "old")
 	if len(oldEvents) != 2 {
 		t.Fatalf("alias log mutated: %+v", oldEvents)
+	}
+}
+
+func TestCanonicalGetRejectsConflictingProvenance(t *testing.T) {
+	svc, ctx := newSvc(t)
+	for id, engagementID := range map[shared.ID]shared.ID{"root": "eng-1", "member": "eng-2"} {
+		if _, err := svc.Append(ctx, id, 0, []incident.IncidentEvent{{IncidentID: id, Kind: incident.EventCreated, At: base, Actor: "correlator", AssetID: asset, EngagementID: engagementID, Severity: shared.SeverityLow}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := svc.store.AppendEvents(ctx, "member", 1, []incident.IncidentEvent{{IncidentID: "member", Kind: incident.EventMerged, At: base.Add(1), Actor: "correlator", CorrelationKey: "bridge", MergedInto: "root"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Get(ctx, "root"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("canonical conflicting provenance error = %v, want ErrConflict", err)
 	}
 }
 

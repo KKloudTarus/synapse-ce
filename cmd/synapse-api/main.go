@@ -307,6 +307,10 @@ func main() {
 		log.Error("correlation posture invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateFleetTransportPosture(); err != nil {
+		log.Error("fleet transport posture invalid", "err", err)
+		os.Exit(1)
+	}
 
 	// Fail closed: no anonymous access. The token is never logged.
 	if cfg.APIToken == "" {
@@ -2305,6 +2309,8 @@ func main() {
 			log.Info("fleet agent certificate identity ENABLED (CSR enrolment issues client certs)")
 		}
 		router.SetFleet(agentSvc, workSvc, clock.Now, cfg.FleetClientCertHeader)
+		router.SetFleetClientCertHost(cfg.FleetClientCertHost)
+		router.SetFleetEnrollmentHost(cfg.FleetEnrollmentHost)
 		if fleetProcessReportSvc != nil {
 			router.SetFleetProcessReport(fleetProcessReportSvc)
 			log.Info("agent process reporting ENABLED", "route", "POST /api/v1/fleet/processes", "baseline_learn", true)
@@ -2471,9 +2477,13 @@ func main() {
 			if incidentCorrelator != nil {
 				// Correlate on ingest: the batch that seals new detections folds them into incidents at once.
 				corr := incidentCorrelator
-				detectSvc.SetCorrelator(func(ctx context.Context, actor string, engagementID shared.ID) (int, error) {
+				detectSvc.SetCorrelator(func(ctx context.Context, actor string, engagementID shared.ID) (detectledger.CorrelationProgress, error) {
 					res, err := corr.CorrelateEngagement(ctx, actor, engagementID)
-					return len(res.Created), err
+					return detectledger.CorrelationProgress{
+						Created: len(res.Created),
+						Phase:   string(res.Phase),
+						HasMore: res.HasMore,
+					}, err
 				})
 			}
 			router.SetFleetDetectionIngest(detectSvc)

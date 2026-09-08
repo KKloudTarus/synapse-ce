@@ -2,6 +2,7 @@ package correlation
 
 import (
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -52,8 +53,53 @@ func TestCorrelateIncrementalRevisesIncidentWithinAllowedLateness(t *testing.T) 
 	if len(late.Events) != 2 || late.Events[0].Kind != incident.EventDetectionAttached || late.Events[1].Kind != incident.EventSeverityChanged {
 		t.Fatalf("late high-severity signal must attach and revise severity: %+v", late.Events)
 	}
-	if !late.Events[0].At.Equal(processed.Add(time.Second)) {
-		t.Fatalf("revision must use causal processing time, got %s", late.Events[0].At)
+	if !late.Events[0].At.Equal(at(115)) {
+		t.Fatalf("detection attachment must retain the signal event time, got %s", late.Events[0].At)
+	}
+}
+
+func TestCorrelateIncrementalFinalWatermarkClampsFutureSignalToProcessedAt(t *testing.T) {
+	cfg := incrementalCfg()
+	processed := at(100)
+	future := sig("future", at(200), shared.SeverityLow)
+	first, err := CorrelateIncremental(cfg, State{}, []Signal{future}, processed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Next.MaxObservedAt.Equal(future.OccurredAt) {
+		t.Fatalf("max observed=%s, want actual future signal time %s", first.Next.MaxObservedAt, future.OccurredAt)
+	}
+	wantWatermark := processed.Add(-cfg.AllowedLateness)
+	if !first.Next.Watermark.Equal(wantWatermark) {
+		t.Fatalf("watermark=%s, want processed-time clamp %s", first.Next.Watermark, wantWatermark)
+	}
+
+	state := applyPlan(State{}, first)
+	second, err := CorrelateIncremental(cfg, state, []Signal{sig("later", at(120), shared.SeverityLow)}, at(130))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.TooLate != 0 || len(second.Added) != 1 || second.Added[0].Outcome != AssignmentAttached {
+		t.Fatalf("future signal must not poison a later eligible signal: %+v", second)
+	}
+	wantAdvanced := at(130).Add(-cfg.AllowedLateness)
+	if !second.Next.Watermark.Equal(wantAdvanced) {
+		t.Fatalf("watermark=%s, want later processed-time clamp %s", second.Next.Watermark, wantAdvanced)
+	}
+}
+
+func TestSameSignalComparesTimelineSemantically(t *testing.T) {
+	occurred := at(10)
+	leftTimeline := &incident.TimelineRef{EventID: "timeline-1", OccurredAt: occurred, Kind: "process_exec", Summary: "started"}
+	rightTimeline := &incident.TimelineRef{EventID: "timeline-1", OccurredAt: occurred.In(time.FixedZone("offset", 3600)), Kind: "process_exec", Summary: "started"}
+	left := Signal{ID: "signal-1", AssetID: asset, EntityID: entity, OccurredAt: occurred, Severity: shared.SeverityLow, Timeline: leftTimeline}
+	right := Signal{ID: "signal-1", AssetID: asset, EntityID: entity, OccurredAt: occurred.In(time.FixedZone("offset", 3600)), Severity: shared.SeverityLow, Timeline: rightTimeline}
+	if !SameSignal(left, right) {
+		t.Fatal("equal timeline values with equivalent time instants must compare equal")
+	}
+	right.Timeline.Summary = "exited"
+	if SameSignal(left, right) {
+		t.Fatal("timeline summary change must make signals distinct")
 	}
 }
 
@@ -182,6 +228,104 @@ func TestCorrelateIncrementalBridgeSelectionIsDeterministic(t *testing.T) {
 		if event.Kind == incident.EventMerged {
 			t.Fatalf("persisted assignments must not repeat a logical merge: %+v", after.Events)
 		}
+	}
+}
+
+func TestCorrelateIncrementalTimelineAttachmentUsesSignalEventTime(t *testing.T) {
+	cfg := incrementalCfg()
+	occurred := at(20)
+	ref := &incident.TimelineRef{EventID: "event-1", OccurredAt: occurred, Kind: "process_exec", Summary: "started"}
+	plan, err := CorrelateIncremental(cfg, State{}, []Signal{{ID: "timeline-1", AssetID: asset, EntityID: entity, OccurredAt: occurred, Severity: shared.SeverityLow, Timeline: ref}}, at(200))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Events) != 2 || plan.Events[1].Kind != incident.EventTimelineAttached || !plan.Events[1].At.Equal(occurred) {
+		t.Fatalf("timeline attachment must use event time: %+v", plan.Events)
+	}
+}
+
+func TestCorrelateIncrementalActiveSessionEvictionIsVisibleAndReplaySafe(t *testing.T) {
+	cfg := incrementalCfg()
+	cfg.MaxActiveSessions = 1
+	signals := []Signal{
+		{ID: "a", AssetID: "asset-a", EntityID: "entity", OccurredAt: at(1), Severity: shared.SeverityLow},
+		{ID: "b", AssetID: "asset-b", EntityID: "entity", OccurredAt: at(2), Severity: shared.SeverityHigh},
+	}
+	plan, err := CorrelateIncrementalPage(cfg, State{}, signals, at(10), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Added) != 2 || plan.Evicted != 1 || len(plan.ActiveSessions) != 1 {
+		t.Fatalf("all signals must be assigned while active state is bounded: %+v", plan)
+	}
+	if plan.ActiveSessions[0].AssetID != "asset-b" {
+		t.Fatalf("most recently active session must remain: %+v", plan.ActiveSessions)
+	}
+	var comment *incident.IncidentEvent
+	for i := range plan.Events {
+		if plan.Events[i].Kind == incident.EventAnalystCommented {
+			comment = &plan.Events[i]
+			break
+		}
+	}
+	if comment == nil || comment.IncidentID != plan.Added[0].IncidentID || comment.CorrelationKey == "" || !comment.At.Equal(at(2)) {
+		t.Fatalf("eviction must append stable visible coverage to evicted incident: %+v", plan.Events)
+	}
+	replayed, err := CorrelateIncrementalPage(cfg, applyPlan(State{}, plan), signals, at(11), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(replayed.Added) != 0 || replayed.Evicted != 0 || len(replayed.Events) != 0 {
+		t.Fatalf("replay must not duplicate assignments or eviction comments: %+v", replayed)
+	}
+}
+
+func TestCorrelateIncrementalActiveSessionBoundIsPageIndependent(t *testing.T) {
+	cfg := incrementalCfg()
+	cfg.MaxActiveSessions = 2
+	signals := []Signal{
+		{ID: "a", AssetID: "asset-a", EntityID: "entity", OccurredAt: at(1), Severity: shared.SeverityLow},
+		{ID: "b", AssetID: "asset-b", EntityID: "entity", OccurredAt: at(2), Severity: shared.SeverityLow},
+		{ID: "c", AssetID: "asset-c", EntityID: "entity", OccurredAt: at(3), Severity: shared.SeverityLow},
+		{ID: "d", AssetID: "asset-d", EntityID: "entity", OccurredAt: at(4), Severity: shared.SeverityLow},
+	}
+	run := func(pageSize int) (State, []Assignment, []incident.IncidentEvent) {
+		state := State{}
+		var assignments []Assignment
+		var events []incident.IncidentEvent
+		for start := 0; start < len(signals); start += pageSize {
+			end := start + pageSize
+			if end > len(signals) {
+				end = len(signals)
+			}
+			plan, err := CorrelateIncrementalPage(cfg, state, signals[start:end], at(20), end == len(signals))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.ActiveSessions) > cfg.MaxActiveSessions {
+				t.Fatalf("page %d exceeded active-session bound: %+v", start/pageSize, plan.ActiveSessions)
+			}
+			assignments = append(assignments, plan.Added...)
+			events = append(events, plan.Events...)
+			state = applyPlan(state, plan)
+		}
+		return state, assignments, events
+	}
+	oneState, oneAssignments, oneEvents := run(len(signals))
+	pageState, pageAssignments, pageEvents := run(1)
+	if !reflect.DeepEqual(oneState.ActiveSessions, pageState.ActiveSessions) || !reflect.DeepEqual(oneAssignments, pageAssignments) {
+		t.Fatalf("top-K prefix state or assignments varied by page partition:\none=%+v/%+v\npaged=%+v/%+v", oneState.ActiveSessions, oneAssignments, pageState.ActiveSessions, pageAssignments)
+	}
+	keys := func(events []incident.IncidentEvent) []string {
+		out := make([]string, 0, len(events))
+		for _, event := range events {
+			out = append(out, string(event.IncidentID)+"/"+event.CorrelationKey)
+		}
+		sort.Strings(out)
+		return out
+	}
+	if !reflect.DeepEqual(keys(oneEvents), keys(pageEvents)) {
+		t.Fatalf("visible event set varied by page partition:\none=%+v\npaged=%+v", oneEvents, pageEvents)
 	}
 }
 

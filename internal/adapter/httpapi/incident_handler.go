@@ -42,13 +42,10 @@ type incidentTriager interface {
 // action ID and authenticated actor; only the coordinator may append incident linkage or retrieve trusted
 // response verification provenance.
 type incidentResponseCoordinator interface {
-	Apply(context.Context, shared.ID, shared.ID, rdom.Action, engagement.Target, responsesaga.TargetFingerprint, string) (responseuc.Record, error)
+	Apply(context.Context, shared.ID, rdom.Action, engagement.Target, responsesaga.TargetFingerprint, string) (responseuc.Record, error)
 }
 
-type incidentResponseApplyRequest struct {
-	EngagementID string `json:"engagement_id"`
-	responseActionRequest
-}
+type incidentResponseApplyRequest struct{ responseActionRequest }
 
 // incidentRiskReassessor runs the tri-score assembler for one incident (#594 C3/D/X5):
 // re-gather Threat + Exposure + Behavior + telemetry Coverage, run the deterministic Scorer, and
@@ -202,20 +199,14 @@ func (rt *Router) applyIncidentResponse(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
 		return
 	}
-	engagementID := shared.ID(req.EngagementID)
-	eng, err := rt.eng.Get(r.Context(), requestTenant(r), engagementID)
-	if err != nil {
-		writeError(w, rt.log, err)
-		return
-	}
 	action, err := rdom.NewAction(rt.responseIDs.NewID(), rdom.Kind(req.Kind), shared.ID(req.Target))
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
 	target := engagement.Target{Kind: targetKindOrDefault(req.TargetKind), Value: req.Target}
-	ctx := shared.WithTenant(r.Context(), shared.TenantOrDefault(eng.TenantID))
-	rec, err := rt.incidentResponses.Apply(ctx, incidentID, engagementID, action, target, req.Fingerprint.targetFingerprint(), PrincipalFrom(r.Context()))
+	ctx := incidentTenantContext(r)
+	rec, err := rt.incidentResponses.Apply(ctx, incidentID, action, target, req.Fingerprint.targetFingerprint(), PrincipalFrom(r.Context()))
 	if errors.Is(err, safety.ErrPendingApproval) || errors.Is(err, responseuc.ErrVerificationPending) {
 		dto := toResponseRecordDTO(rec)
 		if errors.Is(err, responseuc.ErrVerificationPending) {
@@ -279,6 +270,7 @@ type correlationResponse struct {
 	Updated        []incident.Incident `json:"updated"`
 	Reassessed     int                 `json:"reassessed"`
 	ReassessFailed int                 `json:"reassess_failed"`
+	Evicted        int                 `json:"evicted"`
 	Phase          string              `json:"phase"`
 	HasMore        bool                `json:"has_more"`
 }
@@ -291,7 +283,7 @@ func (rt *Router) correlateEngagement(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, correlationResponse{Created: res.Created, Updated: res.Updated, Reassessed: res.Reassessed, ReassessFailed: res.ReassessFailed, Phase: string(res.Phase), HasMore: res.HasMore})
+	writeJSON(w, http.StatusOK, correlationResponse{Created: res.Created, Updated: res.Updated, Reassessed: res.Reassessed, ReassessFailed: res.ReassessFailed, Evicted: res.Evicted, Phase: string(res.Phase), HasMore: res.HasMore})
 }
 
 // reassessIncidentRisk runs the tri-score assembler for the incident and returns the updated incident

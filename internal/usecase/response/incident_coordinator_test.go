@@ -68,7 +68,7 @@ func seededIncidentService(t *testing.T, now time.Time) *incidentuc.Service {
 	}
 	if _, err := service.Append(tctx(), "inc-1", 0, []incident.IncidentEvent{{
 		IncidentID: "inc-1", Kind: incident.EventCreated, At: now, Actor: "correlator",
-		AssetID: "asset-1", Title: "malicious process", Severity: shared.SeverityHigh,
+		AssetID: "asset-1", EngagementID: "eng-1", Title: "malicious process", Severity: shared.SeverityHigh,
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestIncidentCoordinatorPersistsRequestBeforeApplyAndVerifiedProvenance(t *t
 	}
 
 	for i := 0; i < 2; i++ {
-		if _, err := coordinator.Apply(tctx(), "inc-1", "eng-1", action, target, fingerprint, "alice"); err != nil {
+		if _, err := coordinator.Apply(tctx(), "inc-1", action, target, fingerprint, "alice"); err != nil {
 			t.Fatalf("apply attempt %d: %v", i+1, err)
 		}
 	}
@@ -159,7 +159,7 @@ func TestIncidentCoordinatorDoesNotAppendRequestWhenActionPreparationFails(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := coordinator.Apply(tctx(), "inc-1", "eng-1", action, target, fingerprint, "alice"); !errors.Is(err, prepareErr) {
+	if _, err := coordinator.Apply(tctx(), "inc-1", action, target, fingerprint, "alice"); !errors.Is(err, prepareErr) {
 		t.Fatalf("preparation error=%v, want %v", err, prepareErr)
 	}
 	current, err := incidents.Get(tctx(), "inc-1")
@@ -168,6 +168,47 @@ func TestIncidentCoordinatorDoesNotAppendRequestWhenActionPreparationFails(t *te
 	}
 	if current.Revision != 1 || len(current.Responses) != 0 {
 		t.Fatalf("failed preparation appended an incident response request: %+v", current)
+	}
+}
+
+func TestIncidentCoordinatorRejectsIncidentBindingViolationsWithoutSideEffects(t *testing.T) {
+	now := time.Unix(2_000_000, 0).UTC()
+	cases := []struct {
+		name        string
+		kind        rdom.Kind
+		target      shared.ID
+		fingerprint responsesaga.TargetFingerprint
+	}{
+		{"process wrong asset", rdom.KindStopProcess, "process-1", responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-2", ProcessEntityID: "process-1"}},
+		{"process wrong entity", rdom.KindStopProcess, "process-1", responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-2"}},
+		{"host wrong asset", rdom.KindIsolateHost, "asset-1", responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintHost, HostID: "asset-2", NetpolGeneration: 1}},
+		{"file unsupported", rdom.KindQuarantineFile, "file-1", responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintFile, FilePath: "/tmp/file", FileHash: "hash"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			incidents := seededIncidentService(t, now)
+			prepared := false
+			fake := &fakeIncidentResponseApplier{prepare: func(context.Context, shared.ID, rdom.Action, engagement.Target, responsesaga.TargetFingerprint, string) (Record, error) {
+				prepared = true
+				return Record{}, nil
+			}}
+			coordinator, err := NewIncidentCoordinator(fake, incidents, fixedClock{t: now})
+			if err != nil {
+				t.Fatal(err)
+			}
+			action, err := rdom.NewAction("response-1", tc.kind, tc.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = coordinator.Apply(tctx(), "inc-1", action, engagement.Target{Kind: engagement.TargetDomain, Value: action.Target.String()}, tc.fingerprint, "alice")
+			if !errors.Is(err, shared.ErrForbidden) {
+				t.Fatalf("Apply error = %v, want ErrForbidden", err)
+			}
+			current, err := incidents.Get(tctx(), "inc-1")
+			if err != nil || prepared || current.Revision != 1 || len(current.Responses) != 0 {
+				t.Fatalf("binding violation had side effect: prepared=%t incident=%+v err=%v", prepared, current, err)
+			}
+		})
 	}
 }
 
@@ -193,7 +234,7 @@ func TestIncidentCoordinatorReconcilesOnlyPersistedVerifiedResponse(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := coordinator.Apply(tctx(), "inc-1", "eng-1", action, target, fingerprint, "alice"); err != nil {
+	if _, err := coordinator.Apply(tctx(), "inc-1", action, target, fingerprint, "alice"); err != nil {
 		t.Fatalf("request-only apply: %v", err)
 	}
 	before, err := incidents.Get(tctx(), "inc-1")
@@ -242,7 +283,7 @@ func TestIncidentCoordinatorRejectsMachineVerificationProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := coordinator.Apply(tctx(), "inc-1", "eng-1", action, target, fingerprint, "alice"); !errors.Is(err, shared.ErrForbidden) {
+	if _, err := coordinator.Apply(tctx(), "inc-1", action, target, fingerprint, "alice"); !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("machine verifier must be rejected, got %v", err)
 	}
 	linked, err := incidents.Get(tctx(), "inc-1")
@@ -269,7 +310,7 @@ func TestIncidentCoordinatorDoesNotVerifyUnknownResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := coordinator.Apply(tctx(), "inc-1", "eng-1", action, target, fingerprint, "alice"); !errors.Is(err, applyErr) {
+	if _, err := coordinator.Apply(tctx(), "inc-1", action, target, fingerprint, "alice"); !errors.Is(err, applyErr) {
 		t.Fatalf("Apply error must be preserved, got %v", err)
 	}
 	linked, err := incidents.Get(tctx(), "inc-1")

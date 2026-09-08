@@ -30,6 +30,8 @@ type Config struct {
 	AllowedLateness time.Duration
 	// Actor is the attribution for emitted events; defaults to "correlator".
 	Actor string
+	// EngagementID is the authoritative scope stamped on newly created incidents.
+	EngagementID shared.ID
 	// PageSize bounds each source-materialization and staged-consumption invocation.
 	// Zero uses the conservative default.
 	PageSize int

@@ -39,8 +39,8 @@ type ResponseLink struct {
 }
 
 // TimelineRef is one endpoint State Timeline transition causally linked to the incident by signed
-// detection provenance. OccurredAt remains the transition's event time even when the append-only incident
-// event carrying it is timestamped later at correlation processing time.
+// detection provenance. Both OccurredAt and the append-only incident event carrying it preserve the
+// transition's event time; storage may clamp a late append to retain a nondecreasing incident log.
 type TimelineRef struct {
 	EventID    shared.ID
 	OccurredAt time.Time
@@ -83,6 +83,7 @@ type Member struct {
 type Incident struct {
 	ID           shared.ID
 	AssetID      shared.ID
+	EngagementID shared.ID
 	Title        string
 	Severity     shared.Severity
 	State        State
@@ -149,6 +150,7 @@ func Project(events []IncidentEvent) (Incident, error) {
 func applyCreated(inc *Incident, e IncidentEvent) error {
 	inc.ID = e.IncidentID
 	inc.AssetID = e.AssetID
+	inc.EngagementID = e.EngagementID
 	inc.Title = e.Title
 	inc.Severity = e.Severity
 	inc.State = StateNew

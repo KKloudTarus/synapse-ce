@@ -3657,9 +3657,9 @@ paths:
       operationId: applyFleetIncidentResponse
       summary: Apply a governed defensive response action from an incident
       description: >
-        Resolves the incident and engagement in the authenticated tenant, mints the response action id
-        server-side, and applies the action through the same scope, approval, execution, and independent
-        verification gates as engagement response. The request carries no provenance fields.
+        Resolves the incident's authoritative engagement and asset provenance in the authenticated tenant,
+        mints the response action id server-side, and applies the action through the same scope, approval,
+        execution, and independent verification gates as engagement response. The request carries no provenance fields.
       security:
       - bearerAuth: []
       requestBody:
@@ -5036,10 +5036,11 @@ components:
       description: >
         Serialized from the domain struct (PascalCase keys). The projection folded from the incident's
         append-only event log, which remains the source of truth.
-      required: [ID, AssetID, Title, Severity, State, Disposition, OwnerID, DetectionIDs, Risk, MergedInto, Comments, Responses, Revision, CreatedAt, UpdatedAt]
+      required: [ID, AssetID, EngagementID, Title, Severity, State, Disposition, OwnerID, DetectionIDs, Risk, MergedInto, Comments, Responses, Revision, CreatedAt, UpdatedAt]
       properties:
         ID: {type: string}
         AssetID: {type: string}
+        EngagementID: {type: string, description: Authoritative engagement scope stamped by correlation; empty only on legacy incidents.}
         Title: {type: string}
         Severity: {type: string, enum: ["", critical, high, medium, low, info, unknown], description: Empty when the created event carried no severity; the fold accepts that and the scorer abstains on it.}
         State: {$ref: '#/components/schemas/FleetIncidentState'}
@@ -5075,7 +5076,7 @@ components:
 
     FleetCorrelationResult:
       type: object
-      required: [created, updated, reassessed, reassess_failed, phase, has_more]
+      required: [created, updated, reassessed, reassess_failed, evicted, phase, has_more]
       properties:
         created:
           type: [array, "null"]
@@ -5087,6 +5088,7 @@ components:
           items: {$ref: '#/components/schemas/FleetIncident'}
         reassessed: {type: integer, minimum: 0, description: How many of the created or updated incidents were tri-scored.}
         reassess_failed: {type: integer, minimum: 0, description: How many scoring attempts failed; the incidents are still recorded.}
+        evicted: {type: integer, minimum: 0, description: Active correlation sessions removed by the deterministic state bound; each eviction remains visible on its incident.}
         phase: {type: string, enum: ["", source, consume], description: Current bounded correlation phase; empty means idle.}
         has_more: {type: boolean, description: Whether another bounded correlate invocation is required.}
 
@@ -6149,12 +6151,7 @@ components:
         target_kind: {type: string}
         fingerprint: {$ref: '#/components/schemas/ResponseTargetFingerprint'}
     IncidentResponseApplyRequest:
-      allOf:
-      - $ref: '#/components/schemas/ResponseActionRequest'
-      - type: object
-        required: [engagement_id]
-        properties:
-          engagement_id: {type: string}
+      $ref: '#/components/schemas/ResponseActionRequest'
     ResponsePlanStep:
       type: object
       properties:

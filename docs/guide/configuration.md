@@ -453,7 +453,9 @@ not operator settings and must not be injected manually.
 | --- | --- | --- |
 | `SYNAPSE_FLEET_CA_KEY` | empty | Private key for the fleet client-certificate CA. Required with the fleet CA certificate; treat as a production secret. |
 | `SYNAPSE_FLEET_CERT_TTL` | `24h` | Lifetime of issued fleet client certificates. |
-| `SYNAPSE_FLEET_CLIENT_CERT_HEADER` | empty | Trusted reverse-proxy header carrying the verified client certificate. Enable only behind a proxy that strips all client-supplied copies and sets the header after mTLS verification. |
+| `SYNAPSE_FLEET_CLIENT_CERT_HEADER` | empty | Trusted reverse-proxy header carrying the verified client certificate. Enable only behind a proxy that strips all client-supplied copies and sets the header after mTLS verification. Required when fleet is enabled in production. |
+| `SYNAPSE_FLEET_CLIENT_CERT_HOST` | empty | Dedicated mTLS virtual host for post-enrollment fleet transport. Required and distinct from the enrollment host in production. |
+| `SYNAPSE_FLEET_ENROLLMENT_HOST` | empty | Dedicated TLS-only virtual host for one-time bearer enrollment. Required and distinct from the mTLS host in production. |
 | `SYNAPSE_UPDATE_PUBLIC_KEY` | built-in release key | Hex Ed25519 public-key override for fleet self-update verification. Use only for a controlled private release channel. |
 | `SYNAPSE_AGENT_CONCURRENCY` | `8` | Total server-side agent work concurrency. |
 | `SYNAPSE_AGENT_QUEUE_DEPTH` | `256` | Pending agent-work queue depth. |
