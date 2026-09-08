@@ -26,6 +26,7 @@ func TestMigration0066PreservesLegacyAssessmentGraph(t *testing.T) {
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatal(err)
 	}
+	deleteV2AuditRowsForMigrationRollback(t, db)
 	if err := goose.DownTo(db, ".", 65); err != nil {
 		t.Fatalf("down to 65: %v", err)
 	}

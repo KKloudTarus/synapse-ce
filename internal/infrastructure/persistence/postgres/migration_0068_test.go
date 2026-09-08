@@ -27,6 +27,7 @@ func TestMigration0068EdgeConfidence(t *testing.T) {
 	}
 	// One below THIS migration (renumbered 0067 -> 0068 after #481 took 0067); going lower would
 	// also revert an unrelated feature and change what this test exercises.
+	deleteV2AuditRowsForMigrationRollback(t, db)
 	if err := goose.DownTo(db, ".", 67); err != nil {
 		t.Fatalf("down to 66: %v", err)
 	}

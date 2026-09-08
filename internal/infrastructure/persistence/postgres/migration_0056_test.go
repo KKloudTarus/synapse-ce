@@ -34,6 +34,7 @@ func TestMigration0056BackfillsOnlyCanonicalRelativePaths(t *testing.T) {
 			t.Errorf("restore latest schema: %v", err)
 		}
 	})
+	deleteV2AuditRowsForMigrationRollback(t, db)
 	if err := goose.DownTo(db, ".", 55); err != nil {
 		t.Fatalf("goose down to 55: %v", err)
 	}
@@ -119,6 +120,7 @@ func TestMigration0056BackfillsOnlyCanonicalRelativePaths(t *testing.T) {
 			}
 		}
 	}
+	deleteV2AuditRowsForMigrationRollback(t, db)
 	if err := goose.DownTo(db, ".", 55); err != nil {
 		t.Fatalf("goose down to 55: %v", err)
 	}
