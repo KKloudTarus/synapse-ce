@@ -65,7 +65,9 @@ func (r *runner) startDetectionDelivery(ctx context.Context, durable *spool.Spoo
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if err := shipper.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		// Run only returns on a terminal error (its loop never yields nil); a clean
+		// shutdown surfaces as context.Canceled and is not worth logging.
+		if err := shipper.Run(ctx); !errors.Is(err, context.Canceled) {
 			log.Printf("detection delivery stopped with P1 WAL retained: %v", err)
 		}
 	}()
