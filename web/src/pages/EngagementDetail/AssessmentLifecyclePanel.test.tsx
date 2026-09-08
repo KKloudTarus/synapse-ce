@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '../../lib/api'
 import type { AssessmentClosureManifest, AssessmentLifecycle } from '../../lib/types'
@@ -46,6 +47,10 @@ function renderPanel(status = 'completed') {
   return render(<MemoryRouter><AssessmentLifecyclePanel assessmentId="assessment-2" engagementStatus={status} /></MemoryRouter>)
 }
 
+async function openHistory() {
+  fireEvent.click(await screen.findByRole('button', { name: /Details & history/ }))
+}
+
 describe('AssessmentLifecyclePanel', () => {
   beforeEach(() => {
     vi.resetAllMocks()
@@ -64,6 +69,7 @@ describe('AssessmentLifecyclePanel', () => {
 
   it('renders a deterministic branched tree with distinct lifecycle badges', async () => {
     renderPanel()
+    await openHistory()
 
     expect(await screen.findByRole('list', { name: 'Assessment Cycle history' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Initial · assessment-0' })).toBeInTheDocument()
@@ -82,6 +88,7 @@ describe('AssessmentLifecyclePanel', () => {
     })
     vi.mocked(api.listAssessmentClosureManifests).mockResolvedValue([closureManifest()])
     renderPanel()
+    await openHistory()
 
     expect(await screen.findAllByText('Final')).toHaveLength(2)
     expect(screen.getByText(/Snapshot snapshot-2/)).toBeInTheDocument()
@@ -114,7 +121,7 @@ describe('AssessmentLifecyclePanel', () => {
       members: lifecycle.members.map((member) => ({ ...member, assessmentStatus: 'active' })),
     })
     const view = renderPanel('active')
-    await screen.findByRole('list', { name: 'Assessment Cycle history' })
+    await screen.findByRole('button', { name: /Details & history/ })
     expect(screen.getByRole('button', { name: 'Create Re-test' })).toBeDisabled()
     view.rerender(<MemoryRouter><AssessmentLifecyclePanel assessmentId="assessment-2" engagementStatus="completed" /></MemoryRouter>)
     await waitFor(() => expect(api.assessmentLifecycle).toHaveBeenCalledTimes(2))
@@ -134,7 +141,8 @@ describe('AssessmentLifecyclePanel', () => {
     vi.mocked(api.commitAssessmentRelationshipChange).mockRejectedValue(new ApiError(409, 'stale'))
     renderPanel()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'More · Change relationship' }))
+    await openHistory()
+    fireEvent.click(screen.getByRole('button', { name: 'Change relationship' }))
     fireEvent.click(screen.getByRole('button', { name: 'Preview server impact' }))
     expect(await screen.findByText('1 members · 1 snapshots · 1 identities · 1 comparisons · 1 projections')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Commit authoritative preview' })).toBeDisabled()
@@ -148,6 +156,48 @@ describe('AssessmentLifecyclePanel', () => {
       { command: 'reparent_within_cycle', assessmentId: 'assessment-2', newPredecessorAssessmentId: 'assessment-0' },
       'signed-preview', 'Correct imported ancestry', expect.any(String),
     )
+  })
+
+  it('keeps the summary compact and reveals full history with the keyboard', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    const toggle = await screen.findByRole('button', { name: /4 members · 2 branch heads.*Details & history/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('list', { name: 'Assessment Cycle history' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Assessment lifecycle breadcrumb' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Compare' })).toHaveAttribute('href', '/engagements/assessment-2/comparison')
+    expect(screen.getByRole('link', { name: 'Payments lifecycle' })).toHaveAttribute('href', '/assessment-cycles/cycle-1')
+
+    toggle.focus()
+    await user.keyboard('{Enter}')
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('list', { name: 'Assessment Cycle history' })).toBeVisible()
+    expect(screen.getByRole('navigation', { name: 'Assessment lifecycle breadcrumb' })).toHaveTextContent('assessment-2')
+    await user.keyboard(' ')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveFocus()
+    expect(screen.queryByRole('link', { name: 'Initial · assessment-0' })).not.toBeInTheDocument()
+    expect(api.assessmentLifecycle).toHaveBeenCalledTimes(1)
+  })
+
+  it('explains disabled Re-test access without exposing reviewer actions', async () => {
+    vi.mocked(api.me).mockResolvedValue({ id: 'viewer-1', name: 'Viewer', role: 'viewer', features: { assessmentLifecycleRead: true, assessmentLifecycleUIDefault: true } })
+    renderPanel('draft')
+    fireEvent.click(await screen.findByRole('button', { name: 'Re-test requirements' }))
+    expect(screen.getByRole('list', { name: 'Assessment Cycle history' })).toBeVisible()
+    expect(screen.getByText(/Re-test creation requires operate permission/, { selector: 'span' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Create Re-test' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Change relationship' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Select Cycle head' })).not.toBeInTheDocument()
+  })
+
+  it('navigates to Compare within the app without losing the in-memory session', async () => {
+    render(<MemoryRouter><Routes>
+      <Route path="/" element={<AssessmentLifecyclePanel assessmentId="assessment-2" engagementStatus="completed" />} />
+      <Route path="/engagements/assessment-2/comparison" element={<h1>Comparison opened</h1>} />
+    </Routes></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('link', { name: 'Compare' }))
+    expect(await screen.findByRole('heading', { name: 'Comparison opened' })).toBeInTheDocument()
   })
 
 	it('renders loading, migration-pending, and permission error states', async () => {

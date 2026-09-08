@@ -1,20 +1,27 @@
-import { AlertCircle, GitBranch01, Link01, Plus, RefreshCw01 } from '@untitledui/icons'
-import { useMemo, useState, type ReactNode } from 'react'
+import { AlertCircle, ChevronDown, GitBranch01, InfoCircle, Link01, Plus, RefreshCw01 } from '@untitledui/icons'
+import { useId, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { SlideoutMenu } from '../../components/application/slideout-menus/slideout-menu'
-import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../../components/ui'
+import { styles as buttonStyles } from '../../components/base/buttons/button'
+import { Tooltip, TooltipTrigger } from '../../components/base/tooltip/tooltip'
+import { Button, Card, cn, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../../components/ui'
 import { useFetch } from '../../hooks'
 import { api, ApiError } from '../../lib/api'
 import { newIdempotencyKey } from '../../lib/api/client'
 import type { AssessmentClosureManifest, AssessmentCycleMember, AssessmentLifecycle, AssessmentRelationshipChangeRequest, AssessmentRelationshipPreview } from '../../lib/types'
 
 type Drawer = 'retest' | 'reparent' | 'select_head' | null
+const RETEST_REQUIREMENTS = 'Re-test creation requires operate permission and a completed Assessment in an open Cycle. Completed Cycles must be reopened first; authorization is always entered again.'
+const actionLinkClass = cn(buttonStyles.common.root, buttonStyles.sizes.sm.root, buttonStyles.colors.secondary.root)
 
 export function AssessmentLifecyclePanel({ assessmentId, engagementStatus }: { assessmentId: string; engagementStatus: string }) {
   const meFetch = useFetch(() => api.me().catch(() => null), { deps: [] })
   const lifecycleUIEnabled = meFetch.data?.features?.assessmentLifecycleUIDefault === true
   const lifecycleFetch = useFetch(() => api.assessmentLifecycle(assessmentId), { enabled: lifecycleUIEnabled, deps: [assessmentId, lifecycleUIEnabled, engagementStatus] })
   const [drawer, setDrawer] = useState<Drawer>(null)
+  const [expandedAssessmentId, setExpandedAssessmentId] = useState<string | null>(null)
+  const detailsId = useId()
+  const detailsExpanded = expandedAssessmentId === assessmentId
   const lifecycle = lifecycleFetch.data
   const manifestFetch = useFetch(() => api.listAssessmentClosureManifests(lifecycle?.cycle.id ?? ''), {
     enabled: lifecycleUIEnabled && Boolean(lifecycle?.cycle.activeClosureManifestId), deps: [lifecycleUIEnabled, lifecycle?.cycle.activeClosureManifestId, lifecycle?.cycle.id],
@@ -34,26 +41,57 @@ export function AssessmentLifecyclePanel({ assessmentId, engagementStatus }: { a
   const activeManifest = manifestFetch.data?.find((manifest) => manifest.lifecycle === 'active') ?? null
   const finalAssessmentId = activeManifest?.finalAssessmentId ?? ''
   return <>
-    <Card title="Assessment lifecycle" actions={<div className="flex flex-wrap gap-2">
-      <Link to={`/engagements/${encodeURIComponent(assessmentId)}/comparison`}><Button variant="secondary">Compare</Button></Link>
-      {canOperate ? <Button disabled={!canCreateRetest} onClick={() => setDrawer('retest')}><Plus className="size-4" />Create Re-test</Button> : null}
-      {canReview && current?.assessmentType === 'retest' && !current.archivedAt && lifecycle.cycle.status === 'open' ? <Button variant="secondary" onClick={() => setDrawer('reparent')}><Link01 className="size-4" />More · Change relationship</Button> : null}
-      {canReview && selectableHeads.length ? <Button variant="secondary" onClick={() => setDrawer('select_head')}><GitBranch01 className="size-4" />Select Cycle head</Button> : null}
-      {canReview && lifecycle.cycle.status === 'completed' ? <Link to={`/assessment-cycles/${encodeURIComponent(lifecycle.cycle.id)}`}><Button variant="secondary"><RefreshCw01 className="size-4" />Review reopen</Button></Link> : null}
-    </div>}>
-      <nav aria-label="Assessment lifecycle breadcrumb" className="mb-3 flex flex-wrap items-center gap-2 text-xs text-tertiary">
-        {boundaryParts(lifecycle).map((part, index) => <span key={part} className="contents">{index ? <span aria-hidden="true">/</span> : null}<span>{part}</span></span>)}
-        <span aria-hidden="true">/</span><span>{lifecycle.cycle.name}</span><span aria-hidden="true">/</span><span className="font-mono">{assessmentId}</span>
-      </nav>
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Pill>{current?.assessmentType === 'retest' ? `Re-test #${current.retestNumber}` : 'Initial'}</Pill>
-        <Pill>{engagementStatus || 'unknown'} Assessment</Pill><Pill>{lifecycle.cycle.status} Cycle</Pill>
-        {assessmentId === lifecycle.cycle.selectedHeadAssessmentId ? <Pill className="text-brand-secondary">Selected head</Pill> : null}
-        {assessmentId === displayLatest(lifecycle)?.assessmentId ? <span title="Display-only recency; not semantic precedence."><Pill>Display latest</Pill></span> : null}
-        {assessmentId === finalAssessmentId ? <Pill className="text-success">Final</Pill> : null}
+    <Card bodyClass="p-0">
+      <div className="space-y-2 px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-primary">
+              <GitBranch01 className="size-4 text-fg-brand-primary" aria-hidden="true" />Assessment lifecycle
+            </h2>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Pill>{current?.assessmentType === 'retest' ? `Re-test #${current.retestNumber}` : 'Initial'}</Pill>
+              <span className="text-xs capitalize text-tertiary">{engagementStatus || 'unknown'} Assessment</span>
+              <span aria-hidden="true" className="text-quaternary">·</span>
+              <span className="text-xs capitalize text-secondary">{lifecycle.cycle.status} Cycle</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to={`/engagements/${encodeURIComponent(assessmentId)}/comparison`} className={actionLinkClass}>Compare</Link>
+            {canOperate ? <Button disabled={!canCreateRetest} aria-describedby={!canCreateRetest ? `${detailsId}-eligibility` : undefined} onClick={() => setDrawer('retest')}>
+              <Plus className="size-4" aria-hidden="true" />Create Re-test
+            </Button> : null}
+            {!canCreateRetest ? <Tooltip title="Re-test requirements" description={RETEST_REQUIREMENTS} placement="bottom end">
+              <TooltipTrigger aria-label="Re-test requirements" onPress={() => setExpandedAssessmentId(assessmentId)} className="flex items-center justify-center rounded-lg p-2 text-tertiary hover:bg-secondary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"><InfoCircle className="size-4" aria-hidden="true" /></TooltipTrigger>
+            </Tooltip> : null}
+            {canReview && lifecycle.cycle.status === 'completed' ? <Link to={`/assessment-cycles/${encodeURIComponent(lifecycle.cycle.id)}`} className={actionLinkClass}><RefreshCw01 className="size-4" aria-hidden="true" />Review reopen</Link> : null}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+            <Link to={`/assessment-cycles/${encodeURIComponent(lifecycle.cycle.id)}`} className="max-w-full break-all rounded font-medium text-secondary hover:text-brand-secondary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">{lifecycle.cycle.name}</Link>
+            {assessmentId === lifecycle.cycle.selectedHeadAssessmentId ? <span className="inline-flex items-center gap-1.5 font-medium text-brand-secondary"><span aria-hidden="true" className="size-1.5 rounded-full bg-brand-solid" />Selected head</span> : null}
+            {assessmentId === displayLatest(lifecycle)?.assessmentId ? <span className="text-tertiary" title="Display-only recency; not semantic precedence.">Display latest</span> : null}
+            {assessmentId === finalAssessmentId ? <Pill className="text-success">Final</Pill> : null}
+          </div>
+          <button type="button" aria-expanded={detailsExpanded} aria-controls={detailsId} onClick={() => setExpandedAssessmentId(detailsExpanded ? null : assessmentId)} className="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg text-xs text-tertiary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
+            <span className="tabular-nums">{lifecycle.members.length} {lifecycle.members.length === 1 ? 'member' : 'members'} · {lifecycle.branchHeads.length} {lifecycle.branchHeads.length === 1 ? 'branch head' : 'branch heads'}</span>
+            <span className="flex items-center gap-1.5 font-semibold text-secondary">Details &amp; history<ChevronDown className={cn('size-4 transition-transform motion-reduce:transition-none', detailsExpanded && 'rotate-180')} aria-hidden="true" /></span>
+          </button>
+        </div>
+        {!canCreateRetest ? <p id={`${detailsId}-eligibility`} className="sr-only">{RETEST_REQUIREMENTS} Open Details &amp; history for more information.</p> : null}
       </div>
-      {!canCreateRetest ? <p className="mt-3 text-xs text-tertiary">Re-test creation requires operate permission and a completed Assessment in an open Cycle. Completed Cycles must be reopened first; authorization is always entered again.</p> : null}
-      <LifecycleTree lifecycle={lifecycle} currentAssessmentId={assessmentId} activeManifest={activeManifest} />
+      <div id={detailsId} hidden={!detailsExpanded} className="space-y-4 border-t border-secondary px-4 py-4 sm:px-5">
+        <nav aria-label="Assessment lifecycle breadcrumb" className="flex flex-wrap items-center gap-2 text-xs text-tertiary">
+          {boundaryParts(lifecycle).map((part, index) => <span key={part} className="contents">{index ? <span aria-hidden="true">/</span> : null}<span className="break-all">{part}</span></span>)}
+          <span aria-hidden="true">/</span><span className="break-all">{lifecycle.cycle.name}</span><span aria-hidden="true">/</span><span className="break-all font-mono">{assessmentId}</span>
+        </nav>
+        {!canCreateRetest ? <p className="flex items-start gap-2 text-xs leading-relaxed text-tertiary"><AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>{RETEST_REQUIREMENTS}</span></p> : null}
+        <LifecycleTree lifecycle={lifecycle} currentAssessmentId={assessmentId} activeManifest={activeManifest} />
+        {canReview && ((current?.assessmentType === 'retest' && !current.archivedAt && lifecycle.cycle.status === 'open') || selectableHeads.length > 0) ? <div className="flex flex-wrap gap-2 border-t border-secondary pt-3">
+          {current?.assessmentType === 'retest' && !current.archivedAt && lifecycle.cycle.status === 'open' ? <Button variant="secondary" onClick={() => setDrawer('reparent')}><Link01 className="size-4" aria-hidden="true" />Change relationship</Button> : null}
+          {selectableHeads.length ? <Button variant="secondary" onClick={() => setDrawer('select_head')}><GitBranch01 className="size-4" aria-hidden="true" />Select Cycle head</Button> : null}
+        </div> : null}
+      </div>
     </Card>
     {drawer === 'retest' ? <RetestDrawer lifecycle={lifecycle} assessmentId={assessmentId} onClose={() => setDrawer(null)} onCreated={() => lifecycleFetch.refetch()} /> : null}
     {drawer === 'reparent' && current ? <RelationshipDrawer lifecycle={lifecycle} member={current} command="reparent_within_cycle" onClose={() => setDrawer(null)} onCommitted={() => { setDrawer(null); lifecycleFetch.refetch() }} /> : null}
@@ -74,20 +112,20 @@ function LifecycleTree({ lifecycle, currentAssessmentId, activeManifest }: { lif
   const finalPath = new Map(activeManifest?.path.map((member) => [member.assessmentId, member.snapshotId]) ?? [])
   function render(parentId: string, depth: number): ReactNode {
     return (children.get(parentId) ?? []).map((member) => <li key={member.assessmentId} className="relative">
-      <Link to={`/engagements/${encodeURIComponent(member.assessmentId)}`} aria-label={memberLabel(member)} aria-current={member.assessmentId === currentAssessmentId ? 'page' : undefined} className="flex flex-wrap items-center gap-2 rounded-lg border border-secondary px-3 py-2 text-sm hover:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand" style={{ marginLeft: depth * 20 }}>
-        <span className="font-semibold text-primary">{member.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial'}</span><span className="font-mono text-xs text-tertiary">{member.assessmentId}</span>
+      <Link to={`/engagements/${encodeURIComponent(member.assessmentId)}`} aria-label={memberLabel(member)} aria-current={member.assessmentId === currentAssessmentId ? 'page' : undefined} className={cn('flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg px-3 py-2 text-sm hover:bg-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand', member.assessmentId === currentAssessmentId && 'bg-secondary')} style={{ marginLeft: Math.min(depth, 4) * 12 }}>
+        <span className="font-semibold text-primary">{member.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial'}</span><span className="break-all font-mono text-xs text-tertiary">{member.assessmentId}</span>
         {member.assessmentId === lifecycle.cycle.selectedHeadAssessmentId ? <Pill className="text-brand-secondary">Selected head</Pill> : null}
         {lifecycle.branchHeads.some((head) => head.assessmentId === member.assessmentId) ? <Pill>Branch head</Pill> : null}
         {member.assessmentId === displayLatest(lifecycle)?.assessmentId ? <Pill>Display latest</Pill> : null}
         {member.assessmentId === activeManifest?.finalAssessmentId ? <Pill className="text-success">Final</Pill> : null}
         {member.archivedAt ? <Pill className="text-warning">Archived</Pill> : null}
         {member.plannedDate ? <Pill>Planned {member.plannedDate}</Pill> : null}
-        <span className="ml-auto text-xs text-quaternary">{finalPath.get(member.assessmentId) ? `Snapshot ${finalPath.get(member.assessmentId)} · ` : ''}{formatDate(member.createdAt)} · Relationship v{member.relationshipVersion}</span>
+        <span className="ml-auto break-all text-xs text-tertiary">{finalPath.get(member.assessmentId) ? `Snapshot ${finalPath.get(member.assessmentId)} · ` : ''}{formatDate(member.createdAt)} · Relationship v{member.relationshipVersion}</span>
       </Link>
-      {(children.get(member.assessmentId)?.length ?? 0) > 0 ? <ul role="list" className="mt-2 space-y-2">{render(member.assessmentId, depth + 1)}</ul> : null}
+      {(children.get(member.assessmentId)?.length ?? 0) > 0 ? <ul role="list" className="mt-1 space-y-1">{render(member.assessmentId, depth + 1)}</ul> : null}
     </li>)
   }
-  return <div className="mt-5 border-t border-secondary pt-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-semibold text-primary">Cycle history</h3><span className="text-xs text-tertiary">{lifecycle.members.length} member(s) · {lifecycle.branchHeads.length} branch head(s)</span></div><ul role="list" aria-label="Assessment Cycle history" className="space-y-2">{render('', 0)}</ul></div>
+  return <div><h3 className="mb-2 text-xs font-semibold text-secondary">Cycle history</h3><ul role="list" aria-label="Assessment Cycle history" className="space-y-1">{render('', 0)}</ul></div>
 }
 
 function boundaryParts(lifecycle: AssessmentLifecycle) {
