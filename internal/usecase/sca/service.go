@@ -93,6 +93,7 @@ type Service struct {
 	vexLoader                        ports.VEXLoader                       // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
 	complianceOn                     bool                                  // when set, attach the AppSec-baseline compliance report to a scan
 	dbMaxAgeDays                     int                                   // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
+	strictSources                    bool                                  // when true, any detection-source error aborts the scan; default degrades (skip + warn)
 	detectionPriority                string                                // server default detection priority (comprehensive|precise); empty = comprehensive
 	reachability                     ports.ReachabilityRecorder            // optional deterministic Tier-2 reachability proof (Go call-graph)
 	pyReachability                   ports.ReachabilityRecorder            // optional deterministic Tier-1 Python import-reachability proof
@@ -369,6 +370,37 @@ func (s *Service) SetComplianceEnabled(on bool) { s.complianceOn = on }
 // SetDBMaxAgeDays sets the reference-DB freshness policy: a scan warns (SourceWarning) when a dated DB
 // (KEV/EPSS catalog, vuln-DB build) is older than this many days. 0 (default) disables the check.
 func (s *Service) SetDBMaxAgeDays(days int) { s.dbMaxAgeDays = days }
+
+// SetStrictSources selects fail-closed detection when true: a detection-source error aborts the scan.
+// The default (false) degrades instead — a source that errors is skipped with a SourceWarning and the
+// remaining sources still run, so a transient OSV.dev outage or an advisory-store read blip does not
+// fail an otherwise-good scan (Grype already self-degrades to a no-op when its binary/DB is absent).
+func (s *Service) SetStrictSources(strict bool) { s.strictSources = strict }
+
+// scanWithSources runs every configured detection source over the SBOM and collects their raw
+// findings. On a source error it aborts only in strict mode; otherwise it records a warning and skips
+// that source so the scan continues (end of the fail-hard asymmetry where OSV/advisory aborted the
+// whole scan while Grype degraded silently). Warnings are returned for the caller to fold into the
+// result's SourceWarnings.
+func (s *Service) scanWithSources(ctx context.Context, doc *sbom.SBOM, trace *scanDebugTrace) ([]vulnerability.RawFinding, []string, error) {
+	var raws []vulnerability.RawFinding
+	var warnings []string
+	for _, src := range s.sources {
+		step := trace.start(stageVulns, src.Name(), src.Name(), "Scan vulnerabilities with "+src.Name(), map[string]int{"components": countComponents(doc)})
+		rfs, err := src.Scan(ctx, doc)
+		if err != nil {
+			trace.fail(step, err)
+			if s.strictSources {
+				return nil, nil, fmt.Errorf("scan vulnerabilities (%s): %w", src.Name(), err)
+			}
+			warnings = append(warnings, fmt.Sprintf("detection source %q errored and was skipped (its vulnerabilities are NOT included); set SYNAPSE_STRICT_SOURCES=true to fail closed instead: %v", src.Name(), err))
+			continue
+		}
+		raws = append(raws, rfs...)
+		trace.succeed(step, "Vulnerability source completed", map[string]int{"components": countComponents(doc), "raw_findings": len(rfs)})
+	}
+	return raws, warnings, nil
+}
 
 // SetDetectionPriority sets the server-level default detection priority (comprehensive|precise) applied
 // when a scan request does not specify one – so a server-configured SYNAPSE_DETECTION_PRIORITY reaches
@@ -2080,19 +2112,16 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	var vulns []vulnerability.Vulnerability
 	var riskVersions map[string]string
 	var riskMatches map[string]int
+	var detectionSourceWarnings []string
 	if opts.scansVulnerabilities() {
 		stage, pct = stageVulns, 55
 		report(stage, pct, trace.snapshot())
-		for _, src := range s.sources {
-			step = trace.start(stageVulns, src.Name(), src.Name(), "Scan vulnerabilities with "+src.Name(), map[string]int{"components": countComponents(doc)})
-			rfs, err := src.Scan(ctx, doc)
-			if err != nil {
-				trace.fail(step, err)
-				return nil, fmt.Errorf("scan vulnerabilities (%s): %w", src.Name(), err)
-			}
-			raws = append(raws, rfs...)
-			trace.succeed(step, "Vulnerability source completed", map[string]int{"components": countComponents(doc), "raw_findings": len(rfs)})
+		srcRaws, srcWarnings, srcErr := s.scanWithSources(ctx, doc, trace)
+		if srcErr != nil {
+			return nil, srcErr
 		}
+		raws = append(raws, srcRaws...)
+		detectionSourceWarnings = srcWarnings
 		step = trace.start(stageVulns, "correlate", "", "Correlate and deduplicate vulnerability findings", map[string]int{"raw_findings": len(raws)})
 		vulns = vulnerability.Correlate(raws)
 		trace.succeed(step, "Vulnerabilities correlated", map[string]int{"raw_findings": len(raws), "vulnerabilities": len(vulns)})
@@ -2177,6 +2206,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	}
 	snap := ports.ScanSnapshot{ToolVersions: toolVersions, VulnDBSnapshot: vulnDBSnapshot(s.prov.VulnDBSource, now), GrypeDBVersion: grypeDB}
 	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
+	sourceWarnings = append(sourceWarnings, detectionSourceWarnings...)                                // sources skipped by the non-strict degrade policy
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
 	manifest.SBOMSHA256 = record.SHA256
 	result := &ScanResult{
@@ -2703,22 +2733,19 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	var vulns []vulnerability.Vulnerability
 	var riskVersions map[string]string
 	var riskMatches map[string]int
+	var detectionSourceWarnings []string
 	if opts.scansVulnerabilities() {
 		stage, pct = stageVulns, 55
 		report(stage, pct, trace.snapshot())
-		// Run every detection source against the SAME SBOM, then correlate: OSV + Grype
-		// augment each other. The correlator dedups by advisory id and
-		// derives multi-source confidence.
-		for _, src := range s.sources {
-			step = trace.start(stageVulns, src.Name(), src.Name(), "Scan vulnerabilities with "+src.Name(), map[string]int{"components": countComponents(doc)})
-			rfs, err := src.Scan(ctx, doc)
-			if err != nil {
-				trace.fail(step, err)
-				return nil, fmt.Errorf("scan vulnerabilities (%s): %w", src.Name(), err)
-			}
-			raws = append(raws, rfs...)
-			trace.succeed(step, "Vulnerability source completed", map[string]int{"components": countComponents(doc), "raw_findings": len(rfs)})
+		// Run every detection source against the SAME SBOM, then correlate: OSV + Grype (+ Trivy,
+		// advisory-store) augment each other. The correlator dedups by advisory id and derives
+		// multi-source confidence. A source that errors is skipped (SourceWarning) unless strict.
+		srcRaws, srcWarnings, srcErr := s.scanWithSources(ctx, doc, trace)
+		if srcErr != nil {
+			return nil, srcErr
 		}
+		raws = append(raws, srcRaws...)
+		detectionSourceWarnings = srcWarnings
 		step = trace.start(stageVulns, "correlate", "", "Correlate and deduplicate vulnerability findings", map[string]int{"raw_findings": len(raws)})
 		vulns = vulnerability.Correlate(raws)
 		trace.succeed(step, "Vulnerabilities correlated", map[string]int{"raw_findings": len(raws), "vulnerabilities": len(vulns)})
@@ -2888,6 +2915,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		GrypeDBVersion: grypeDB,
 	}
 	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
+	sourceWarnings = append(sourceWarnings, detectionSourceWarnings...)                                // sources skipped by the non-strict degrade policy
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
 
 	// Maven, once its full tree is resolved (mvn dependency:list), is no longer an under-reporting

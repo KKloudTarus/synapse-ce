@@ -80,6 +80,17 @@ type Config struct {
 	// disables auto-update (E7/CRA): offline + reproducible scans against a fixed DB
 	// build. Empty = Grype's default (online).
 	GrypeDBDir string
+	// DetectionSources selects and orders the scan-time vulnerability detection sources as a comma
+	// list from {grype, osv, advisory-store}. Empty preserves the legacy behavior (osv unless
+	// SYNAPSE_OFFLINE, then grype, then advisory-store when SYNAPSE_OWNED_ADVISORY). When set it is
+	// authoritative, so an operator can drop grype entirely (e.g. "osv,advisory-store") and run on
+	// Synapse's own advisory store + live OSV for an Anchore-free posture. Unknown names fail closed.
+	DetectionSources string
+	// StrictSources, when true, restores fail-closed detection: any source error aborts the scan.
+	// Default false: a source that errors (a transient OSV.dev outage, an advisory-store read blip)
+	// is skipped with a SourceWarning and the scan continues on the remaining sources, matching how
+	// Grype already self-degrades to a no-op when its binary/DB is absent.
+	StrictSources bool
 	// OSVBaseURL overrides the OSV.dev API base (mainly for tests); empty = OSV.dev.
 	OSVBaseURL string
 	// OSVBulkURL overrides the OSV bulk-data bucket base for the owned-advisory ingester;
@@ -672,6 +683,8 @@ func Load() Config {
 		SBOMProducer:                     getenv("SYNAPSE_SBOM_PRODUCER", "syft"),
 		GrypeBin:                         getenv("SYNAPSE_GRYPE_BIN", "grype"),
 		GrypeDBDir:                       getenv("SYNAPSE_GRYPE_DB_DIR", ""),
+		DetectionSources:                 getenv("SYNAPSE_DETECTION_SOURCES", ""),
+		StrictSources:                    getbool("SYNAPSE_STRICT_SOURCES", false),
 		OSVBaseURL:                       getenv("SYNAPSE_OSV_URL", ""),
 		OSVBulkURL:                       getenv("SYNAPSE_OSV_BULK_URL", ""),
 		DepsDevURL:                       getenv("SYNAPSE_DEPSDEV_URL", ""),

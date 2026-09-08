@@ -141,20 +141,98 @@ func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.Adv
 	default:
 		return Execution{}, fmt.Errorf("invalid SYNAPSE_SBOM_PRODUCER (want 'syft' or 'ownsbom'): %s", cfg.SBOMProducer)
 	}
-	// Detection sources: Grype (offline DB) always; live OSV unless SYNAPSE_OFFLINE (air-gapped /
-	// fast path – no per-scan network egress). The owned advisory store is opt-in
-	// and offline, so it runs in both modes (detection independence).
-	detectionSources = []ports.DetectionSource{grypeSrc}
+	// Detection sources are config-driven (SYNAPSE_DETECTION_SOURCES). Each name maps to one of
+	// Synapse's own source instances; the resolved list is ordered and, when the var is set,
+	// authoritative — so an operator can drop Grype entirely (e.g. "osv,advisory-store") and run on
+	// the owned advisory store + live OSV for an Anchore-free posture, instead of relying on binary
+	// absence. Empty preserves the legacy default derived from the flags.
+	var osvSrc ports.DetectionSource // nil under offline: a requested "osv" is then skipped, not run
 	if !cfg.Offline {
-		detectionSources = append([]ports.DetectionSource{osv.New(cfg.OSVBaseURL, nil)}, detectionSources...)
-	} else {
-		log.Info("SYNAPSE_OFFLINE: live OSV source disabled; detecting with offline sources only", "grype", true, "owned_advisory", cfg.OwnedAdvisoryEnabled)
+		osvSrc = osv.New(cfg.OSVBaseURL, nil)
 	}
-	if cfg.OwnedAdvisoryEnabled {
-		detectionSources = append(detectionSources, ownadvisory.New(advisoryStore))
-		log.Info("owned advisory DetectionSource ENABLED (offline match against the owned store, alongside OSV/Grype) – ensure the store is populated; an empty store yields no findings until the advisory ingester runs")
+	var advSrc ports.DetectionSource
+	if advisoryStore != nil {
+		advSrc = ownadvisory.New(advisoryStore)
+	}
+	detectionSources, derr := ResolveDetectionSources(cfg, DetectionCandidates{Grype: grypeSrc, OSV: osvSrc, AdvisoryStore: advSrc}, log)
+	if derr != nil {
+		return Execution{}, derr
 	}
 	return Execution{Sandbox: scaSandbox, SyftGen: syftGen, Acquirer: acquirer, SBOMGen: sbomGen, Sources: detectionSources}, nil
+}
+
+// DetectionCandidates are the detection-source instances a caller offers. A nil entry means the caller
+// does not provide that source in the current posture (e.g. OSV under --offline, or advisory-store with
+// no store wired), so a request for it is skipped rather than treated as an error.
+type DetectionCandidates struct {
+	Grype         ports.DetectionSource
+	OSV           ports.DetectionSource
+	AdvisoryStore ports.DetectionSource
+}
+
+// ResolveDetectionSources turns SYNAPSE_DETECTION_SOURCES (or the legacy default) into the ordered list
+// of detection sources, drawing from the caller's candidates. It is shared by the server (BuildExecution)
+// and the CLI so the source posture is identical across binaries. Unknown names fail closed at startup;
+// a requested name whose candidate is nil is skipped with a log line.
+func ResolveDetectionSources(cfg config.Config, c DetectionCandidates, log *slog.Logger) ([]ports.DetectionSource, error) {
+	names, err := resolveDetectionSourceNames(cfg)
+	if err != nil {
+		return nil, err
+	}
+	byName := map[string]ports.DetectionSource{"grype": c.Grype, "osv": c.OSV, "advisory-store": c.AdvisoryStore}
+	out := make([]ports.DetectionSource, 0, len(names))
+	for _, name := range names {
+		src, known := byName[name]
+		if !known {
+			return nil, fmt.Errorf("unknown SYNAPSE_DETECTION_SOURCES entry %q (want any of: grype, osv, advisory-store)", name)
+		}
+		if src == nil {
+			if log != nil {
+				log.Info("detection source requested but not available in this posture; skipping", "source", name)
+			}
+			continue
+		}
+		out = append(out, src)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no detection sources resolved (SYNAPSE_DETECTION_SOURCES=%q); scanning would run zero vulnerability matching", cfg.DetectionSources)
+	}
+	if log != nil {
+		built := make([]string, len(out))
+		for i, s := range out {
+			built[i] = s.Name()
+		}
+		log.Info("detection sources wired", "sources", strings.Join(built, ","), "strict", cfg.StrictSources, "owned_advisory_store_must_be_populated", slices.Contains(built, "advisory-store"))
+	}
+	return out, nil
+}
+
+// resolveDetectionSourceNames turns SYNAPSE_DETECTION_SOURCES into an ordered source list. When the
+// var is set it is authoritative (lowercased, comma-split, blanks dropped). When empty it reproduces
+// the legacy default exactly: live OSV first (unless SYNAPSE_OFFLINE), then Grype, then the owned
+// advisory store when SYNAPSE_OWNED_ADVISORY is on.
+func resolveDetectionSourceNames(cfg config.Config) ([]string, error) {
+	if raw := strings.TrimSpace(cfg.DetectionSources); raw != "" {
+		out := make([]string, 0, 4)
+		for _, p := range strings.Split(raw, ",") {
+			if p = strings.ToLower(strings.TrimSpace(p)); p != "" {
+				out = append(out, p)
+			}
+		}
+		if len(out) == 0 {
+			return nil, fmt.Errorf("SYNAPSE_DETECTION_SOURCES is set (%q) but lists no sources", raw)
+		}
+		return out, nil
+	}
+	names := make([]string, 0, 3)
+	if !cfg.Offline {
+		names = append(names, "osv")
+	}
+	names = append(names, "grype")
+	if cfg.OwnedAdvisoryEnabled {
+		names = append(names, "advisory-store")
+	}
+	return names, nil
 }
 
 // Configure applies every scan-pipeline setting that must match between an in-process
@@ -356,7 +434,8 @@ func Configure(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, log *s
 		svc.SetVEXLoader(vexfile.New()) // in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
 		log.Info("in-scan VEX ENABLED (.synapse.vex.json; not_affected/fixed gate-exempt, still reported + sealed)")
 	}
-	svc.SetDBMaxAgeDays(cfg.DBMaxAgeDays) // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
+	svc.SetDBMaxAgeDays(cfg.DBMaxAgeDays)   // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
+	svc.SetStrictSources(cfg.StrictSources) // fail-closed on a source error; default degrades (skip + warn)
 	// Validate the configured detection priority once at startup: an invalid value would otherwise make
 	// EVERY API scan return 400. Warn + fall back to comprehensive rather than crash a long-running server.
 	detPriority := cfg.DetectionPriority

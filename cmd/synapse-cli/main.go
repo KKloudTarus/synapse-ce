@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -1375,17 +1376,27 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	// One policy decides every network-capable part of this scan, so --offline cannot mean "offline
 	// except the resolvers" again.
 	egress := newScanEgress(cfg, offline, os.LookupEnv)
-	// Grype (offline DB) always; live OSV unless --offline / SYNAPSE_OFFLINE (air-gapped / fast path).
-	detectionSources := []ports.DetectionSource{grype.New(cfg.GrypeBin, cfg.GrypeDBDir)}
+	// Detection sources are config-driven (SYNAPSE_DETECTION_SOURCES), resolved through the SAME helper
+	// the server uses so the posture is identical across binaries. Grype is the offline matcher; live
+	// OSV runs only when the egress policy allows it. An operator can drop Grype (e.g.
+	// SYNAPSE_DETECTION_SOURCES=osv) for an Anchore-free CLI scan.
+	var osvSrc ports.DetectionSource
 	if egress.OSV {
 		prov.VulnDBSource = "osv.dev"
-		detectionSources = append([]ports.DetectionSource{osv.New(cfg.OSVBaseURL, nil)}, detectionSources...)
+		osvSrc = osv.New(cfg.OSVBaseURL, nil)
+	}
+	detectionSources, detErr := scacompose.ResolveDetectionSources(cfg, scacompose.DetectionCandidates{
+		Grype: grype.New(cfg.GrypeBin, cfg.GrypeDBDir),
+		OSV:   osvSrc,
+	}, nil)
+	if detErr != nil {
+		return fmt.Errorf("resolve detection sources: %w", detErr)
 	}
 	if egress.offline() {
 		// Make the reduced-coverage mode visible: the operator chose lower recall for no egress. Leaving
 		// VulnDBSource empty keeps the evidence snapshot from claiming osv.dev was queried when it wasn't
-		// (Grype's DB version is recorded separately in GrypeDBVersion).
-		fmt.Fprintln(os.Stderr, "synapse-cli: offline mode – no network egress: live OSV, the npm/composer/poetry/bundler/maven/gradle resolvers, KEV/EPSS, online NVD, deps.dev + PyPI license metadata and AI triage are all disabled; detecting with Grype's offline DB only")
+		// (each source's DB version is recorded separately as evidence).
+		fmt.Fprintln(os.Stderr, "synapse-cli: offline mode – no network egress: live OSV, the npm/composer/poetry/bundler/maven/gradle resolvers, KEV/EPSS, online NVD, deps.dev + PyPI license metadata and AI triage are all disabled; detecting with the offline sources only")
 	}
 	// KEV + EPSS and the deps.dev/PyPI license metadata are HTTP feeds. Offline drops the risk enricher
 	// entirely (the service nil-checks it) and keeps only the local OS-metadata license enricher.
@@ -1523,7 +1534,8 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		// resolvers; best-effort (a non-Go target / no module cache adds no edges, never fails the scan).
 		sca.SetGraphResolver(gomodgraph.New(cfg.GoBin))
 	}
-	sca.SetDBMaxAgeDays(cfg.DBMaxAgeDays) // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
+	sca.SetDBMaxAgeDays(cfg.DBMaxAgeDays)   // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
+	sca.SetStrictSources(cfg.StrictSources) // fail-closed on a source error; default degrades (skip + warn)
 	if cfg.ScanCacheEnabled {
 		if dir := cfg.ResolveScanCacheDir(); dir != "" {
 			sca.SetSBOMCache(sbomcache.New(dir)) // content+version-addressed generated-SBOM cache (CI-friendly)
