@@ -264,6 +264,23 @@ func (service *Service) Correlate(ctx context.Context, input CorrelateInput) (Re
 			}
 			identities = withoutExcluded(identities, excluded)
 			if len(identities) == 1 {
+				if input.ProvisionalIdentity {
+					// A repeated source finding can reuse its provisional identity,
+					// but an exact coarse fingerprint does not supply a missing
+					// resource anchor. Keep review visible in every new snapshot.
+					observation, observationErr := service.observation(input, identities[0].ID)
+					if observationErr != nil {
+						return observationErr
+					}
+					if appendErr := service.repository.AppendObservation(txCtx, observation); appendErr != nil {
+						return appendErr
+					}
+					result, err = service.review(txCtx, input, sourceHash, fingerprint, input.ReviewReason, domain.MethodFingerprint, identities, input.ReviewRefs)
+					if err == nil {
+						result.Identity, result.Observation = &identities[0], &observation
+					}
+					return err
+				}
 				result, err = service.link(txCtx, input, identities[0], domain.MethodFingerprint, "exact_fingerprint", sourceHash)
 				return err
 			}

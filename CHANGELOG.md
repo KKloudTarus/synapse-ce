@@ -304,6 +304,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **Assessment Cycle scans retain every supported IaC family.** Native observation
+  preparation now accepts Dockerfile, Compose, GitHub Actions and ARM findings in
+  addition to Terraform, CloudFormation and Kubernetes (including rendered Helm).
+  Findings without approved resource identity remain provisional and require review
+  on every re-scan, including repeated source fingerprints;
+  incomplete IaC coverage cannot imply Fixed. Repository paths reject URL locators
+  before normalization so embedded credentials cannot enter source identities.
+
 - **The running-process projection retires exited processes.** The agent reports only live processes
   and the store upserted them, so a process that exited between reports lingered as running forever and
   the behavior baseline's process-count feature climbed every sweep, self-poisoning into false drift. A

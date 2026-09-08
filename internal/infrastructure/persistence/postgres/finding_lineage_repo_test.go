@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -650,6 +651,113 @@ func TestPostgresIaCMatcherAddressParityAndTenantIsolation(t *testing.T) {
 	}
 	if provisional.Candidate.Reason != findinglineage.ReasonInsufficientAnchor {
 		t.Fatalf("provisional IaC candidate=%+v", provisional.Candidate)
+	}
+
+	// The same unsupported semantic anchor must remain reviewable in every
+	// snapshot, even when the source-scoped provisional fingerprint matches.
+	assessmentID := shared.ID(fmt.Sprintf("lineage-assessment-iac-%d", suffix))
+	snapshotIDs := []shared.ID{snapshotID}
+	for number := 2; number <= 3; number++ {
+		runID := shared.ID(fmt.Sprintf("iac-repeat-run-%d-%d", suffix, number))
+		run := postgresNativeRun(t, tenantID, assessmentID, runID, strings.Repeat(fmt.Sprint(number), 64))
+		sealPostgresNativeRun(t, ctx, NewScanRunStore(pool), &run, time.Now().UTC())
+		snapshot := postgresAssessmentSnapshot(t, tenantID, cycleID, assessmentID,
+			fmt.Sprintf("iac-repeat-snapshot-%d-%d", suffix, number), fmt.Sprintf("iac-repeat-request-%d-%d", suffix, number), run)
+		stored, created, err := NewAssessmentSnapshotRepository(pool).CreateFinalizedCAS(ctx, snapshot, int64(number-1))
+		if err != nil || !created || stored.SnapshotNumber != number {
+			t.Fatalf("create repeated IaC snapshot=%+v created=%v err=%v", stored, created, err)
+		}
+		snapshotIDs = append(snapshotIDs, stored.ID)
+	}
+	for _, config := range []struct {
+		kind lineageuc.IaCConfigKind
+		rule string
+		path string
+	}{
+		{lineageuc.IaCDockerfile, "dockerfile-user-root", "Dockerfile"},
+		{lineageuc.IaCCompose, "compose-privileged", "compose.yaml"},
+		{lineageuc.IaCGitHubActions, "gha-permissions-write-all", ".github/workflows/ci.yml"},
+		{lineageuc.IaCARM, "arm-storage-public-blob", "azuredeploy.json"},
+	} {
+		t.Run(string(config.kind), func(t *testing.T) {
+			plan, err := matcher.Build(lineageuc.IaCFingerprintInputV1{
+				TargetIdentityCanonical: "repo:example", RuleKey: config.rule, RepoPath: config.path,
+			})
+			if err != nil || !plan.ProvisionalIdentity || plan.ReasonCode != "resource_identity_unavailable" {
+				t.Fatalf("unadapted IaC family plan=%+v err=%v", plan, err)
+			}
+			var identityID shared.ID
+			observationIDs, candidateIDs := make(map[shared.ID]bool), make(map[shared.ID]bool)
+			for index, currentSnapshotID := range snapshotIDs {
+				input := plan.Apply(lineageuc.CorrelateInput{
+					TenantID: tenantID, CycleID: cycleID, SnapshotID: currentSnapshotID,
+					InputTrusted: true, OwnershipValidated: true, RedactionComplete: true,
+					Observation: lineageuc.ObservationInput{
+						SourceFindingID: "iac-repeat-" + string(config.kind), Severity: shared.SeverityHigh,
+						Location: config.path + ":2", ObservedAt: clock.now.Add(time.Duration(index) * time.Second),
+						ScannerProvenance: findinglineage.ScannerProvenance{ToolName: "iac-matcher-test"},
+					}, Actor: "integration-test",
+				})
+				result, err := service.Correlate(ctx, input)
+				if err != nil || result.Outcome != lineageuc.OutcomeReview || result.Identity == nil || result.Observation == nil || result.Candidate == nil {
+					t.Fatalf("snapshot %d lost provisional review: result=%+v err=%v", index+1, result, err)
+				}
+				if index == 0 {
+					identityID = result.Identity.ID
+				}
+				if result.Identity.ID != identityID || observationIDs[result.Observation.ID] || candidateIDs[result.Candidate.ID] {
+					t.Fatalf("snapshot %d must reuse identity but retain distinct observation/review: %+v", index+1, result)
+				}
+				observationIDs[result.Observation.ID], candidateIDs[result.Candidate.ID] = true, true
+				storedIdentity, err := repository.GetIdentity(ctx, tenantID, cycleID, identityID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var fields struct {
+					ConfigKind string `json:"config_kind"`
+				}
+				if err := json.Unmarshal(storedIdentity.CanonicalIdentityFields, &fields); err != nil || fields.ConfigKind != string(config.kind) {
+					t.Fatalf("config family lost on PostgreSQL roundtrip: kind=%q err=%v", fields.ConfigKind, err)
+				}
+				storedObservation, err := repository.GetObservation(ctx, tenantID, cycleID, result.Observation.ID)
+				if err != nil || storedObservation.SnapshotID != currentSnapshotID || storedObservation.IdentityID != identityID || storedObservation.SourceFindingID != input.Observation.SourceFindingID {
+					t.Fatalf("observation retention=%+v err=%v", storedObservation, err)
+				}
+				for range 2 {
+					replay, err := service.Correlate(ctx, input)
+					if err != nil || replay.Identity == nil || replay.Identity.ID != identityID || replay.Observation == nil || replay.Observation.ID != result.Observation.ID {
+						t.Fatalf("snapshot %d replay=%+v err=%v", index+1, replay, err)
+					}
+				}
+				storedCandidate, err := repository.GetCandidate(ctx, tenantID, cycleID, result.Candidate.ID)
+				if err != nil || storedCandidate.SnapshotID != currentSnapshotID || storedCandidate.Status != findinglineage.CandidateOpen || storedCandidate.Reason != findinglineage.ReasonInsufficientAnchor {
+					t.Fatalf("review must remain open after observation replay: %+v err=%v", storedCandidate, err)
+				}
+				if _, err := repository.GetIdentity(ctx, otherTenantID, cycleID, identityID); !errors.Is(err, shared.ErrNotFound) {
+					t.Fatalf("cross-tenant provisional identity read=%v", err)
+				}
+				if _, err := repository.GetObservation(ctx, otherTenantID, cycleID, result.Observation.ID); !errors.Is(err, shared.ErrNotFound) {
+					t.Fatalf("cross-tenant provisional observation read=%v", err)
+				}
+				if _, err := repository.GetCandidate(ctx, otherTenantID, cycleID, result.Candidate.ID); !errors.Is(err, shared.ErrNotFound) {
+					t.Fatalf("cross-tenant provisional candidate read=%v", err)
+				}
+			}
+		})
+	}
+	for index, currentSnapshotID := range snapshotIDs {
+		wantObservations, wantCandidates := 4, 4
+		if index == 0 {
+			wantObservations, wantCandidates = 6, 5 // Original Terraform and Kubernetes cases above.
+		}
+		observations, err := repository.ListObservationsBySnapshot(ctx, tenantID, cycleID, currentSnapshotID)
+		if err != nil || len(observations) != wantObservations {
+			t.Fatalf("snapshot %d replay duplicated/lost observations: count=%d want=%d err=%v", index+1, len(observations), wantObservations, err)
+		}
+		candidates, err := repository.ListOpenCandidatesBySnapshot(ctx, tenantID, cycleID, currentSnapshotID)
+		if err != nil || len(candidates) != wantCandidates {
+			t.Fatalf("snapshot %d replay duplicated/lost review candidates: count=%d want=%d err=%v", index+1, len(candidates), wantCandidates, err)
+		}
 	}
 }
 

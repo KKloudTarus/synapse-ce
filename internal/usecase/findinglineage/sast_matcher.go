@@ -427,7 +427,9 @@ func normalizeSourceRepoPath(producer, value string) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("%w: %s repository path is required", shared.ErrValidation, producer)
 	}
-	if !utf8.ValidString(value) || len(value) > 2048 || strings.Contains(value, "\\") || path.IsAbs(value) || len(value) >= 2 && value[1] == ':' {
+	// Reject URL locators before path.Clean collapses the scheme separator and
+	// obscures URL userinfo. Source identities accept repository-relative paths.
+	if !utf8.ValidString(value) || len(value) > 2048 || strings.Contains(value, "\\") || strings.Contains(value, "://") || path.IsAbs(value) || len(value) >= 2 && value[1] == ':' {
 		return "", fmt.Errorf("%w: %s repository path must be a bounded relative slash path", shared.ErrValidation, producer)
 	}
 	for _, part := range strings.Split(value, "/") {

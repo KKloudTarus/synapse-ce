@@ -108,6 +108,28 @@ and permits **Upload new source** for a new child. This does not repair or relab
 older runs. If metadata exists but its archive is missing or corrupt, reuse and
 scanning fail closed; upload another archive to a new Re-test rather than replacing
 the old Assessment's source.
+### Troubleshooting IaC scan finalization
+
+The error `prepare redacted native observation: validation error: IaC config kind is unsupported`
+can occur on pre-fix builds with native Snapshot capture enabled: the scanner emits
+Dockerfile, Compose, GitHub Actions and ARM findings, but the original lineage
+adapter recognized only Terraform, CloudFormation and Kubernetes. The failure can
+mark a job failed at 100% after detection, before the scan result and Findings are
+saved; an earlier immutable evidence-ledger append may already exist.
+
+The fixed adapter retains all seven scanner families (Helm findings use Kubernetes).
+The four newly accepted families have no approved resource-identity adapter yet,
+so their observations are provisional and produce `needs_review` candidates, not
+trusted cross-Snapshot matches. Repeated source fingerprints retain a review
+candidate in each new Snapshot; same-Snapshot replay does not duplicate evidence
+or reopen an explicitly resolved candidate. IaC coverage remains partial; a later
+scan with no IaC finding does not prove Fixed. Unknown families and unsafe paths still fail
+validation instead of silently dropping findings.
+
+After upgrading the API and worker, start a new scan in the same non-completed
+Engagement using available source input and valid scan authorization. Do not rewrite
+the failed job or delete sealed evidence. No migration or new Re-test Engagement is
+required for this fix. Disabling Snapshot capture is not a data-repair step.
 
 Large closure reference cohorts (over 256 per kind) are represented as hashed
 `*_set` references with source kind, exact count and earliest expiry. Report
