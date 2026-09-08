@@ -71,8 +71,16 @@ export function ScanPanel({
   const running = job?.status === 'running'
   const archived = isReadOnly(eng)
   const completed = eng.status === 'completed'
-  const scanBlocked = archived || completed
-  const scanBlockedReason = archived ? ARCHIVED_REASON : 'Completed Assessments keep their finalized Snapshots. Create a Re-test to run another assessment.'
+  const authorizationWindowConfigured = Boolean(eng.authorizedFrom && eng.authorizedTo)
+  const scaAllowed = eng.roe.allowedToolClasses.includes('sca')
+  const explicitAuthorizationIncomplete = eng.requiresExplicitExecutionAuthorization && (!authorizationWindowConfigured || !scaAllowed)
+  const lifecycleBlocked = archived || completed
+  const scanBlocked = lifecycleBlocked || explicitAuthorizationIncomplete
+  const scanBlockedReason = archived
+    ? ARCHIVED_REASON
+    : completed
+      ? 'Completed Assessments keep their finalized Snapshots. Create a Re-test to run another assessment.'
+      : 'Configure the Re-test authorization window and allow SCA tools before running a scan.'
   const debugEvents = job?.debugEvents?.length ? job.debugEvents : (summary?.debugEvents ?? [])
   const usingImportedSBOM = Boolean(importedSBOM) && !usingUploadedSource
 
@@ -226,7 +234,7 @@ export function ScanPanel({
             type="button"
             variant="secondary"
             onClick={() => setConfigOpen(true)}
-            disabled={scanBlocked}
+            disabled={lifecycleBlocked}
             aria-describedby={completed ? 'engagement-completed-note' : archived ? 'engagement-archived-note' : undefined}
             className="h-10 px-5 text-sm font-semibold rounded-xl shadow-xs transition-transform active:scale-[0.98]"
           >
@@ -285,6 +293,27 @@ export function ScanPanel({
         >
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-fg-quaternary" />
           <span>{ARCHIVED_REASON} Scans, new findings and triage changes are disabled.</span>
+        </div>
+      )}
+
+      {!lifecycleBlocked && explicitAuthorizationIncomplete && (
+        <div role="status" className="flex items-start justify-between gap-3 rounded-lg border border-medium/40 bg-medium/10 p-3 text-xs text-medium">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <div>
+              <p className="font-semibold">Scan authorization required.</p>
+              <p className="mt-1 text-secondary">
+                {!authorizationWindowConfigured && !scaAllowed
+                  ? 'Set both authorization window bounds and allow SCA tools before scanning this Re-test.'
+                  : !authorizationWindowConfigured
+                    ? 'Set both authorization window bounds before scanning this Re-test.'
+                    : 'Allow SCA tools before scanning this Re-test.'}
+              </p>
+            </div>
+          </div>
+          <Link to={`/engagements/${encodeURIComponent(eng.id)}/settings`} className="shrink-0 font-semibold text-brand-secondary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
+            Configure in Settings
+          </Link>
         </div>
       )}
 

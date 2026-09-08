@@ -315,6 +315,41 @@ describe('EngagementDetail Page Shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save & Run scan' }))
     await waitFor(() => expect(api.startScan).toHaveBeenCalledWith('eng-123456', '', 'upload', '', 'full', false))
   })
+
+  it('guides an unauthorized Re-test to Settings without starting a scan', async () => {
+    vi.mocked(api.getEngagement).mockResolvedValue({ ...mockEngagement, requiresExplicitExecutionAuthorization: true } as never)
+    render(<MemoryRouter initialEntries={['/engagements/eng-123456']}><Routes>
+      <Route path="/engagements/:id" element={<EngagementDetail />} />
+      <Route path="/engagements/:id/:tabSlug" element={<EngagementDetail />} />
+    </Routes></MemoryRouter>)
+
+    expect(await screen.findByText('Scan authorization required.')).toBeVisible()
+    expect(screen.getByText('Set both authorization window bounds and allow SCA tools before scanning this Re-test.')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Run scan' })).toBeDisabled()
+    expect(api.startScan).not.toHaveBeenCalled()
+
+    const settings = screen.getByRole('link', { name: 'Configure in Settings' })
+    expect(settings).toHaveAttribute('href', '/engagements/eng-123456/settings')
+    fireEvent.click(settings)
+    expect(await screen.findByText('Authorization window')).toBeVisible()
+    expect(screen.getByText('Rules of engagement')).toBeVisible()
+  })
+
+  it('names only the missing SCA permission for a partially configured Re-test', async () => {
+    vi.mocked(api.getEngagement).mockResolvedValue({
+      ...mockEngagement,
+      requiresExplicitExecutionAuthorization: true,
+      authorizedFrom: '2026-09-01T00:00:00Z',
+      authorizedTo: '2026-10-01T00:00:00Z',
+    } as never)
+    render(<MemoryRouter initialEntries={['/engagements/eng-123456']}><Routes>
+      <Route path="/engagements/:id" element={<EngagementDetail />} />
+    </Routes></MemoryRouter>)
+
+    expect(await screen.findByText('Allow SCA tools before scanning this Re-test.')).toBeVisible()
+    expect(screen.queryByText('Set both authorization window bounds before scanning this Re-test.')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run scan' })).toBeDisabled()
+  })
 })
 
 it('disables scan actions for a completed Assessment and explains the Re-test path', async () => {
