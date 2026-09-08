@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	AlgorithmVersionV1      = 1
-	CoveragePolicyVersionV1 = 1
+	AlgorithmVersionV1         = 1
+	CoveragePolicyVersionV1    = 1
+	maxInlineMatchCandidateIDs = 256
 )
 
 type Mode string
@@ -596,7 +597,16 @@ func HashGenerationInput(input GenerationInput) ([]byte, string, error) {
 		fields["active_override_ids"] = findinglineage.StringSet(values...)
 	}
 	if values := canonicalIDs(input.MatchCandidateIDs); len(values) > 0 {
-		fields["match_candidate_ids"] = findinglineage.StringSet(values...)
+		if len(values) <= maxInlineMatchCandidateIDs {
+			fields["match_candidate_ids"] = findinglineage.StringSet(values...)
+		} else {
+			// A comparison may legitimately span more than the canonical collection
+			// limit of unresolved candidates. Preserve the full, stable dependency in
+			// the input fingerprint without making lifecycle projection depend on the
+			// serialization limit for a single canonical value.
+			fields["match_candidate_count"] = findinglineage.Integer(int64(len(values)))
+			fields["match_candidate_ids_digest"] = findinglineage.Text(canonicalIDSetDigest(values))
+		}
 	}
 	if values := canonicalIDs(input.VerificationDecisionIDs); len(values) > 0 {
 		fields["verification_decision_ids"] = findinglineage.StringSet(values...)
@@ -626,6 +636,18 @@ func canonicalIDs(values []shared.ID) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+func canonicalIDSetDigest(values []string) string {
+	digest := sha256.New()
+	_, _ = digest.Write([]byte("synapse:assessment-comparison:match-candidate-ids:v1\x00"))
+	for _, value := range values {
+		// Length-prefix each value so adjacent IDs cannot produce an ambiguous
+		// byte stream. values are already deduplicated and sorted by canonicalIDs.
+		_, _ = fmt.Fprintf(digest, "%d:", len(value))
+		_, _ = digest.Write([]byte(value))
+	}
+	return hex.EncodeToString(digest.Sum(nil))
 }
 
 func validDigest(value string) bool {

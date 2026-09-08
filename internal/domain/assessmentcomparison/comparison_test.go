@@ -1,6 +1,7 @@
 package assessmentcomparison
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -160,6 +161,75 @@ func TestSummaryAndGenerationHashAreStable(t *testing.T) {
 	_, replayDigest, err := HashGenerationInput(reordered)
 	if err != nil || replayDigest != digest {
 		t.Fatalf("replay digest=%s err=%v", replayDigest, err)
+	}
+}
+
+func TestGenerationHashSupportsLargeMatchCandidateSets(t *testing.T) {
+	candidates := make([]shared.ID, 257)
+	for index := range candidates {
+		candidates[index] = shared.ID("candidate-" + strconv.Itoa(index))
+	}
+	input := GenerationInput{
+		Mode:                  ModeLifecycle,
+		Baseline:              SnapshotHashRef{ID: "baseline", ContentHash: strings.Repeat("a", 64)},
+		Current:               SnapshotHashRef{ID: "current", ContentHash: strings.Repeat("b", 64)},
+		AlgorithmVersion:      1,
+		FingerprintVersion:    1,
+		RiskModelVersion:      1,
+		CoveragePolicyVersion: 1,
+		MatchCandidateIDs:     candidates,
+	}
+
+	canonical, digest, err := HashGenerationInput(input)
+	if err != nil {
+		t.Fatalf("large candidate set must be supported: %v", err)
+	}
+	if !strings.Contains(string(canonical), `"match_candidate_count":257`) || !strings.Contains(string(canonical), `"match_candidate_ids_digest":"`) {
+		t.Fatalf("canonical payload must retain a bounded candidate-set summary: %s", canonical)
+	}
+	if strings.Contains(string(canonical), `"match_candidate_ids":`) {
+		t.Fatalf("canonical payload must not embed an unbounded candidate set: %s", canonical)
+	}
+
+	reordered := input
+	reordered.MatchCandidateIDs = append([]shared.ID(nil), candidates...)
+	for left, right := 0, len(reordered.MatchCandidateIDs)-1; left < right; left, right = left+1, right-1 {
+		reordered.MatchCandidateIDs[left], reordered.MatchCandidateIDs[right] = reordered.MatchCandidateIDs[right], reordered.MatchCandidateIDs[left]
+	}
+	_, replayDigest, err := HashGenerationInput(reordered)
+	if err != nil || replayDigest != digest {
+		t.Fatalf("candidate order must not affect fingerprint: digest=%s replay=%s err=%v", digest, replayDigest, err)
+	}
+
+	changed := input
+	changed.MatchCandidateIDs = append([]shared.ID(nil), candidates...)
+	changed.MatchCandidateIDs[len(changed.MatchCandidateIDs)-1] = "candidate-replaced"
+	_, changedDigest, err := HashGenerationInput(changed)
+	if err != nil || changedDigest == digest {
+		t.Fatalf("candidate-set change must affect fingerprint: digest=%s changed=%s err=%v", digest, changedDigest, err)
+	}
+}
+
+func TestGenerationHashKeepsBoundedMatchCandidateSetsInline(t *testing.T) {
+	input := GenerationInput{
+		Mode:                  ModeLifecycle,
+		Baseline:              SnapshotHashRef{ID: "baseline", ContentHash: strings.Repeat("a", 64)},
+		Current:               SnapshotHashRef{ID: "current", ContentHash: strings.Repeat("b", 64)},
+		AlgorithmVersion:      1,
+		FingerprintVersion:    1,
+		RiskModelVersion:      1,
+		CoveragePolicyVersion: 1,
+		MatchCandidateIDs:     []shared.ID{"candidate-1"},
+	}
+	canonical, _, err := HashGenerationInput(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(canonical), `"match_candidate_ids":["candidate-1"]`) {
+		t.Fatalf("bounded candidate set must retain the existing canonical representation: %s", canonical)
+	}
+	if strings.Contains(string(canonical), `"match_candidate_ids_digest":`) {
+		t.Fatalf("bounded candidate set must not change fingerprint representation: %s", canonical)
 	}
 }
 
