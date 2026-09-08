@@ -1,0 +1,16 @@
+[
+  {
+    "name": "crates-time-segfault",
+    "group": "crates.io",
+    "notes": "RUSTSEC-2020-0071 / CVE-2020-26235 affects time <0.2.23.",
+    "components": [
+      {"name": "time", "version": "0.2.10", "purl": "pkg:cargo/time@0.2.10"},
+      {"name": "time", "version": "0.3.20", "purl": "pkg:cargo/time@0.3.20"}
+    ],
+    "advisories": [
+      {"id": "RUSTSEC-2020-0071", "aliases": ["CVE-2020-26235"], "summary": "Potential segfault in the time crate", "cvss_score": 6.2, "ecosystem": "crates.io", "package": "time",
+       "ranges": [{"type": "SEMVER", "introduced": "0", "fixed": "0.2.23"}], "fixed_version": "0.2.23"}
+    ],
+    "expected": [{"component": "time", "version": "0.2.10", "cve": "CVE-2020-26235"}]
+  }
+]

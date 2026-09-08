@@ -1,0 +1,16 @@
+[
+  {
+    "name": "alpine-openssl-r-suffix",
+    "group": "Alpine:v3.18",
+    "notes": "Alpine apk revision suffix; 3.1.0-r0 affected, 3.1.4-r1 patched.",
+    "components": [
+      {"name": "openssl", "version": "3.1.0-r0", "purl": "pkg:apk/alpine/openssl@3.1.0-r0?arch=x86_64&distro=alpine-3.18.4"},
+      {"name": "openssl", "version": "3.1.4-r1", "purl": "pkg:apk/alpine/openssl@3.1.4-r1?arch=x86_64&distro=alpine-3.18.4"}
+    ],
+    "advisories": [
+      {"id": "CVE-2023-5678", "summary": "OpenSSL DH key/parameter check", "cvss_score": 5.3, "ecosystem": "Alpine:v3.18", "package": "openssl",
+       "ranges": [{"type": "ECOSYSTEM", "introduced": "0", "fixed": "3.1.4-r1"}], "fixed_version": "3.1.4-r1"}
+    ],
+    "expected": [{"component": "openssl", "version": "3.1.0-r0", "cve": "CVE-2023-5678"}]
+  }
+]

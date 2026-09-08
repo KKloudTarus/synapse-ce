@@ -1,0 +1,30 @@
+[
+  {
+    "name": "pypi-pyyaml-full-load",
+    "group": "PyPI",
+    "notes": "CVE-2020-14343 affects PyYAML <5.4; component name PyYAML normalizes to pyyaml.",
+    "components": [
+      {"name": "PyYAML", "version": "5.3.1", "purl": "pkg:pypi/pyyaml@5.3.1"},
+      {"name": "PyYAML", "version": "6.0", "purl": "pkg:pypi/pyyaml@6.0"}
+    ],
+    "advisories": [
+      {"id": "GHSA-8q59-q68h-6hv4", "aliases": ["CVE-2020-14343"], "summary": "Arbitrary code execution in PyYAML full_load", "cvss_score": 9.8, "ecosystem": "PyPI", "package": "pyyaml",
+       "ranges": [{"type": "ECOSYSTEM", "introduced": "0", "fixed": "5.4"}], "fixed_version": "5.4"}
+    ],
+    "expected": [{"component": "PyYAML", "version": "5.3.1", "cve": "CVE-2020-14343"}]
+  },
+  {
+    "name": "pypi-django-sqli",
+    "group": "PyPI",
+    "notes": "CVE-2021-35042 affects Django <3.2.5.",
+    "components": [
+      {"name": "django", "version": "3.2.4", "purl": "pkg:pypi/django@3.2.4"},
+      {"name": "django", "version": "3.2.5", "purl": "pkg:pypi/django@3.2.5"}
+    ],
+    "advisories": [
+      {"id": "GHSA-v6rh-hp5x-86rv", "aliases": ["CVE-2021-35042"], "summary": "Potential SQL injection via QuerySet.order_by", "cvss_score": 9.8, "ecosystem": "PyPI", "package": "django",
+       "ranges": [{"type": "ECOSYSTEM", "introduced": "3.2", "fixed": "3.2.5"}], "fixed_version": "3.2.5"}
+    ],
+    "expected": [{"component": "django", "version": "3.2.4", "cve": "CVE-2021-35042"}]
+  }
+]

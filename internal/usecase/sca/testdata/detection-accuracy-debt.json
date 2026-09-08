@@ -1,0 +1,14 @@
+{
+  "_comment": "Accuracy ratchet for the owned advisory-store engine (ownadvisory.Source) over detection-golden-v1. Floors may only RISE (a ratchet): the gate fails if a measured precision/recall drops below a floor, catching a matcher or feed regression. Baseline is 1.0/1.0 on this curated corpus (patched versions must never be flagged; known-vulnerable versions must always be flagged). To ADD corpus cases that a current matcher cannot yet satisfy, either fix the matcher or file the gap; do not lower a floor.",
+  "overall": {"precision_floor": 1.0, "recall_floor": 1.0},
+  "groups": {
+    "npm": {"precision_floor": 1.0, "recall_floor": 1.0},
+    "PyPI": {"precision_floor": 1.0, "recall_floor": 1.0},
+    "Go": {"precision_floor": 1.0, "recall_floor": 1.0},
+    "Maven": {"precision_floor": 1.0, "recall_floor": 1.0},
+    "RubyGems": {"precision_floor": 1.0, "recall_floor": 1.0},
+    "crates.io": {"precision_floor": 1.0, "recall_floor": 1.0},
+    "Debian:11": {"precision_floor": 1.0, "recall_floor": 1.0},
+    "Alpine:v3.18": {"precision_floor": 1.0, "recall_floor": 1.0}
+  }
+}
