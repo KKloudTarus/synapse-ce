@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -101,18 +101,69 @@ describe('AssessmentLifecyclePanel', () => {
     renderPanel()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Create Re-test' }))
-    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Payments verification' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save non-executable draft' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
     expect(await screen.findByText('temporary network failure')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Save non-executable draft' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
 
     await waitFor(() => expect(api.createRetest).toHaveBeenCalledTimes(2))
     const first = vi.mocked(api.createRetest).mock.calls[0]?.[1]
     const second = vi.mocked(api.createRetest).mock.calls[1]?.[1]
     if (!first || !second) throw new Error('expected two Create Re-test calls')
-    expect(first).toMatchObject({ name: 'Payments verification', authorizedFrom: '', authorizedTo: '', roe: undefined })
+    expect(first).toEqual({ predecessorAssessmentId: 'assessment-2', source: undefined, scopeStrategy: 'copy', profileStrategy: 'none', idempotencyKey: expect.any(String) })
     expect(first.idempotencyKey).toBeTruthy()
     expect(second.idempotencyKey).toBe(first.idempotencyKey)
+  })
+
+  it('creates a draft without typing a name, dates, timezone, or authorization and opens it within the app', async () => {
+    vi.mocked(api.createRetest).mockResolvedValue({
+      engagement: { id: 'assessment-new', name: 'Payments Re-test' },
+      cycle: lifecycle.cycle,
+      member: { ...lifecycle.members[2], assessmentId: 'assessment-new', assessmentStatus: 'draft', retestNumber: 4 },
+      inheritanceDiff: { scope: 'copy', authorization: 'explicit_only', roe: 'explicit_only', scannerProfile: 'none' },
+      warnings: ['authorization_not_copied'],
+    } as never)
+    render(<MemoryRouter><Routes>
+      <Route path="/" element={<AssessmentLifecyclePanel assessmentId="assessment-2" engagementStatus="completed" />} />
+      <Route path="/engagements/assessment-new" element={<h1>New Re-test opened</h1>} />
+    </Routes></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Re-test' }))
+    const drawer = within(screen.getByRole('dialog'))
+    expect(drawer.queryByRole('textbox')).not.toBeInTheDocument()
+    for (const label of ['Name', 'Planned date', 'Authorized from', 'Authorized to', 'Timezone', 'Allowed tool classes']) {
+      expect(drawer.queryByLabelText(label)).not.toBeInTheDocument()
+    }
+    expect(drawer.getByRole('combobox', { name: 'Based on Assessment' })).toHaveTextContent('Re-test #2 · assessment-2')
+    fireEvent.click(drawer.getByRole('button', { name: 'Create Re-test' }))
+    expect(await screen.findByText('Re-test created')).toBeInTheDocument()
+    expect(api.createRetest).toHaveBeenCalledTimes(1)
+    expect(api.createRetest).toHaveBeenCalledWith('assessment-2', {
+      predecessorAssessmentId: 'assessment-2', source: undefined, scopeStrategy: 'copy', profileStrategy: 'none', idempotencyKey: expect.any(String),
+    })
+    expect(screen.getByText('Payments Re-test')).toBeInTheDocument()
+    expect(screen.getByText(/Configure execution authorization in Re-test Settings/)).toBeInTheDocument()
+    expect(screen.getByText('Authorization Not Copied')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Create Re-test' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Re-test' }))
+    expect(await screen.findByRole('heading', { name: 'New Re-test opened' })).toBeInTheDocument()
+  })
+
+  it('keeps source archive validation and lets the operator correct a missing revision without entering text', async () => {
+    vi.mocked(api.createRetest).mockRejectedValue(new Error('source_package_required_for_retest'))
+    renderPanel()
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Re-test' }))
+    const upload = screen.getByLabelText('Re-test source archive')
+    fireEvent.change(upload, { target: { files: [new File(['wrong type'], 'source.exe')] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
+    expect(await screen.findByText('Choose a non-empty ZIP or TAR source archive up to 512 MiB.')).toBeInTheDocument()
+    expect(api.createRetest).not.toHaveBeenCalled()
+    fireEvent.change(upload, { target: { files: [] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
+    expect(await screen.findByText(/Choose the source revision to evaluate in this Re-test/)).toBeInTheDocument()
+    const source = new File(['new revision'], 'source.zip', { type: 'application/zip' })
+    fireEvent.change(upload, { target: { files: [source] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Re-test' }))
+    await waitFor(() => expect(api.createRetest).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(api.createRetest).mock.calls[1]?.[1]?.source).toBe(source)
   })
 
   it('refreshes eligible predecessors when the current Assessment completes without navigation', async () => {

@@ -15,6 +15,22 @@ const manifest = {
 }
 
 describe('assessmentCyclesApi closure workflow', () => {
+  it('creates a default Re-test draft without a name, dates, or execution authorization', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      engagement: { id: 'retest', name: 'Payments Re-test', status: 'draft', requires_explicit_execution_authorization: true },
+      cycle: cycle('open', 2), member: { assessment_id: 'retest', assessment_status: 'draft' },
+    }, 201))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await assessmentCyclesApi.createRetest('root', { predecessorAssessmentId: 'root', idempotencyKey: 'draft-key' })
+    const request = fetchMock.mock.calls[0]?.[1]
+    expect(JSON.parse(request.body)).toEqual({
+      name: '', planned_date: '', predecessor_assessment_id: 'root', scope_strategy: 'copy', profile_strategy: 'none',
+      authorized_from: '', authorized_to: '', timezone: '',
+    })
+    expect(new Headers(request.headers).get('Idempotency-Key')).toBe('draft-key')
+    expect(result.engagement).toMatchObject({ name: 'Payments Re-test', status: 'draft', requiresExplicitExecutionAuthorization: true })
+  })
+
   it('uploads an explicit Re-test revision with bounded metadata and the same retry key', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({engagement: {id: 'retest'}, cycle: cycle('open', 2), member: {assessment_id: 'retest'}}, 201))
     vi.stubGlobal('fetch', fetchMock)
