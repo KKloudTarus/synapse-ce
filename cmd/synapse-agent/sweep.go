@@ -143,5 +143,5 @@ func sweepBootJitter(interval time.Duration) time.Duration {
 	if cap <= 0 {
 		return 0
 	}
-	return time.Duration(rand.Int63n(int64(cap)))
+	return time.Duration(rand.Int63n(int64(cap))) //nolint:gosec // Boot jitter is intentionally non-cryptographic.
 }

@@ -20,11 +20,7 @@ const (
 	maxCPPCandidates = 2_000
 )
 
-var (
-	cppCommentedCodeRE   = regexp.MustCompile(`^\s*(?:class|struct|template|namespace|void|int|auto|for|if|while)\b`)
-	cppSQLPatternRE      = regexp.MustCompile(`(?i)(?:SELECT|INSERT|UPDATE|DELETE)\s+.*(?:FROM|INTO|SET|WHERE)`)
-	cppSensitiveSecretRE = regexp.MustCompile(`(?i)(?:password|secret|token|api[_-]?key|private[_-]?key)`)
-)
+var cppSQLPatternRE = regexp.MustCompile(`(?i)(?:SELECT|INSERT|UPDATE|DELETE)\s+.*(?:FROM|INTO|SET|WHERE)`)
 
 func cppFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 	findings, _ := cppFindingsLimit(root, src, rel, maxCPPTotal)
