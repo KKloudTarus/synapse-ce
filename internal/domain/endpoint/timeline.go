@@ -36,6 +36,7 @@ const (
 	// Process lifecycle (B1). A fork creates a child; an exec replaces the image of an existing entity.
 	TimelineProcessStart TimelineEntryKind = "process_start"
 	TimelineProcessExec  TimelineEntryKind = "process_exec"
+	TimelineProcessExit  TimelineEntryKind = "process_exit"
 	// Network (B2): one entry per connect event; the connection entity deduplicates the flow.
 	TimelineNetworkConnect TimelineEntryKind = "network_connect"
 	// File (B3): one entry per file access event, tagged with the observed op.
@@ -53,12 +54,14 @@ const (
 // envelopes yields byte-identical entries regardless of fold order — the property Phase C evidence sealing
 // depends on.
 type TimelineEntry struct {
-	OccurredAt time.Time
-	TenantID   shared.ID
-	AssetID    shared.ID
-	EntityKind EntityKind
-	EntityID   shared.ID
-	Kind       TimelineEntryKind
+	OccurredAt           time.Time
+	TenantID             shared.ID
+	AssetID              shared.ID
+	SourceAgentID        shared.ID
+	SourceAgentSessionID shared.ID
+	EntityKind           EntityKind
+	EntityID             shared.ID
+	Kind                 TimelineEntryKind
 	// EventID is the source envelope's event id; it is the dedupe key so a replayed envelope never adds
 	// a duplicate transition, and the tiebreak that orders transitions sharing an OccurredAt.
 	EventID shared.ID

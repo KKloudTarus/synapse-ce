@@ -74,6 +74,7 @@ func TestEndpointTimelineRepository(t *testing.T) {
 		}
 		return endpoint.TimelineEntry{
 			OccurredAt: occ, TenantID: tenant, AssetID: assetT,
+			SourceAgentID: "agent-1", SourceAgentSessionID: "session-1",
 			EntityKind: ek, EntityID: shared.ID(entity), Kind: kind, EventID: shared.ID(eventID), Summary: eventID,
 		}
 	}
@@ -96,8 +97,13 @@ func TestEndpointTimelineRepository(t *testing.T) {
 	if len(got) != 3 || got[0].EventID != "a" || got[1].EventID != "b" || got[2].EventID != "c" {
 		t.Fatalf("append/query not event-time ordered + idempotent: %+v", got)
 	}
-	if got[0].EntityID != "pe1" || got[0].Kind != endpoint.TimelineProcessStart || got[0].Summary != "a" {
+	if got[0].EntityID != "pe1" || got[0].Kind != endpoint.TimelineProcessStart || got[0].Summary != "a" ||
+		got[0].SourceAgentID != "agent-1" || got[0].SourceAgentSessionID != "session-1" {
 		t.Fatalf("row round-trip wrong: %+v", got[0])
+	}
+	exact, err := repo.LoadTimelineEntries(tctx, assetT, []shared.ID{"c", "missing", "a", "a"})
+	if err != nil || len(exact) != 2 || exact[0].EventID != "a" || exact[1].EventID != "c" {
+		t.Fatalf("exact timeline load wrong: %+v err=%v", exact, err)
 	}
 
 	// Filters.
@@ -109,6 +115,12 @@ func TestEndpointTimelineRepository(t *testing.T) {
 	}
 	if e, _ := repo.QueryTimeline(tctx, ports.EndpointTimelineQuery{AssetID: assetT, EntityID: "pe1"}); len(e) != 2 {
 		t.Fatalf("entity filter wrong: %+v", e)
+	}
+	if p, _ := repo.QueryTimeline(tctx, ports.EndpointTimelineQuery{AssetID: assetT, SourceAgentID: "agent-1", SourceAgentSessionID: "session-1"}); len(p) != 3 {
+		t.Fatalf("source provenance filter wrong: %+v", p)
+	}
+	if p, _ := repo.QueryTimeline(tctx, ports.EndpointTimelineQuery{AssetID: assetT, SourceAgentID: "agent-2"}); len(p) != 0 {
+		t.Fatalf("source provenance filter admitted another agent: %+v", p)
 	}
 	if l, _ := repo.QueryTimeline(tctx, ports.EndpointTimelineQuery{AssetID: assetT, Limit: 2}); len(l) != 2 {
 		t.Fatalf("limit wrong: %+v", l)

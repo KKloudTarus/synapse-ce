@@ -7,6 +7,7 @@ package slo
 import (
 	"context"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/correlationuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -49,7 +51,7 @@ func makeSignals(base time.Time) []correlation.Signal {
 func TestSLO_CorrelatorScaleAndDeterminism(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0).UTC()
 	signals := makeSignals(base)
-	cfg := correlation.Config{Window: time.Hour, MaxPerIncident: 100000}
+	cfg := correlation.Config{Window: time.Hour, MaxPerIncident: 100000, PageSize: 1000}
 
 	start := time.Now()
 	events, err := correlation.Correlate(cfg, signals)
@@ -79,23 +81,21 @@ func TestSLO_CorrelationPipelineIdempotent(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0).UTC()
 	dets := makeDetections(base)
 	incs := &countingIncidents{seen: map[shared.ID]bool{}}
-	svc, err := correlationuc.NewService(fixedDetections{recs: dets}, incs, nil, correlation.Config{Window: time.Hour, MaxPerIncident: 100000}, noopAudit{}, func() time.Time { return base })
+	svc, err := correlationuc.NewService(fixedDetections{recs: dets}, memory.NewDetectionProvenanceStore(), memory.NewEndpointTimelineStore(), memory.NewCorrelationStateStore(), incs, nil, correlation.Config{Window: time.Hour, MaxPerIncident: 100000, PageSize: 1000}, noopAudit{}, func() time.Time { return base })
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	res, err := svc.CorrelateEngagement(context.Background(), "slo", "eng-1")
+	ctx := shared.WithTenant(context.Background(), "tenant-slo")
+	res := driveCorrelationSnapshot(t, svc, ctx)
 	elapsed := time.Since(start)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if elapsed > sloCorrelateBudget {
 		t.Fatalf("SLO VIOLATION: pipeline correlation took %s (budget %s)", elapsed, sloCorrelateBudget)
 	}
 	if len(res.Created) != sloSessions {
 		t.Fatalf("correctness: expected %d incidents, got %d", sloSessions, len(res.Created))
 	}
-	res2, err := svc.CorrelateEngagement(context.Background(), "slo", "eng-1")
+	res2, err := svc.CorrelateEngagement(ctx, "slo", "eng-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +119,24 @@ func makeDetections(base time.Time) []detection.Record {
 		})
 	}
 	return out
+}
+
+func driveCorrelationSnapshot(t *testing.T, svc *correlationuc.Service, ctx context.Context) correlationuc.Result {
+	t.Helper()
+	var total correlationuc.Result
+	for range 1024 {
+		step, err := svc.CorrelateEngagement(ctx, "slo", "eng-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		total.Created = append(total.Created, step.Created...)
+		total.Updated = append(total.Updated, step.Updated...)
+		if !step.HasMore && step.Phase == "" {
+			return total
+		}
+	}
+	t.Fatal("correlation snapshot did not complete")
+	return total
 }
 
 func distinctIncidents(events []incident.IncidentEvent) int {
@@ -150,13 +168,55 @@ func sameIncidentIDs(a, b []incident.IncidentEvent) bool {
 
 type fixedDetections struct{ recs []detection.Record }
 
-func (f fixedDetections) ListDetections(context.Context, shared.ID) ([]detection.Record, error) {
-	return f.recs, nil
+func (f fixedDetections) CorrelationHighWater(_ context.Context, _ shared.ID, completed correlation.SourcePosition, _ time.Time) (correlation.SourcePosition, bool, error) {
+	var high correlation.SourcePosition
+	for _, r := range f.recs {
+		p := correlation.SourcePosition{RecordedAt: r.RecordedAt, ID: r.ID}
+		if p.RecordedAt.IsZero() {
+			p.RecordedAt = r.Detection.Observed
+		}
+		if !completed.RecordedAt.IsZero() && (p.RecordedAt.Before(completed.RecordedAt) || (p.RecordedAt.Equal(completed.RecordedAt) && p.ID <= completed.ID)) {
+			continue
+		}
+		if high.RecordedAt.IsZero() || p.RecordedAt.After(high.RecordedAt) || (p.RecordedAt.Equal(high.RecordedAt) && p.ID > high.ID) {
+			high = p
+		}
+	}
+	return high, !high.RecordedAt.IsZero(), nil
+}
+func (f fixedDetections) ListCorrelationSourcePage(_ context.Context, _ shared.ID, after, through correlation.SourcePosition, _ time.Time, limit int) ([]detection.Record, bool, error) {
+	// makeDetections supplies recorded-order input, so keyset seek avoids repeatedly sorting/scanning 20k rows.
+	at := func(i int) time.Time {
+		if f.recs[i].RecordedAt.IsZero() {
+			return f.recs[i].Detection.Observed
+		}
+		return f.recs[i].RecordedAt
+	}
+	start := sort.Search(len(f.recs), func(i int) bool {
+		return after.RecordedAt.IsZero() || at(i).After(after.RecordedAt) || (at(i).Equal(after.RecordedAt) && f.recs[i].ID > after.ID)
+	})
+	end := sort.Search(len(f.recs), func(i int) bool {
+		return at(i).After(through.RecordedAt) || (at(i).Equal(through.RecordedAt) && f.recs[i].ID > through.ID)
+	})
+	if end < start {
+		end = start
+	}
+	more := end-start > limit
+	if more {
+		end = start + limit
+	}
+	out := append([]detection.Record(nil), f.recs[start:end]...)
+	for i := range out {
+		if out[i].RecordedAt.IsZero() {
+			out[i].RecordedAt = out[i].Detection.Observed
+		}
+	}
+	return out, more, nil
 }
 
 type countingIncidents struct{ seen map[shared.ID]bool }
 
-func (c *countingIncidents) RecordCorrelation(_ context.Context, events []incident.IncidentEvent) ([]incident.Incident, error) {
+func (c *countingIncidents) RecordCorrelation(_ context.Context, events []incident.IncidentEvent) ([]incident.Incident, []incident.Incident, error) {
 	var created []incident.Incident
 	for _, e := range events {
 		if c.seen[e.IncidentID] {
@@ -165,7 +225,7 @@ func (c *countingIncidents) RecordCorrelation(_ context.Context, events []incide
 		c.seen[e.IncidentID] = true
 		created = append(created, incident.Incident{ID: e.IncidentID, State: incident.StateOpen})
 	}
-	return created, nil
+	return created, nil, nil
 }
 
 type noopAudit struct{}
@@ -175,8 +235,8 @@ func (noopAudit) Record(context.Context, ports.AuditEntry) error { return nil }
 // failingIncidents fails RecordCorrelation, standing in for a store outage mid-pipeline (chaos).
 type failingIncidents struct{}
 
-func (failingIncidents) RecordCorrelation(context.Context, []incident.IncidentEvent) ([]incident.Incident, error) {
-	return nil, fmt.Errorf("injected store outage")
+func (failingIncidents) RecordCorrelation(context.Context, []incident.IncidentEvent) ([]incident.Incident, []incident.Incident, error) {
+	return nil, nil, fmt.Errorf("injected store outage")
 }
 
 // TestSLO_ChaosStoreOutageFailsClosed: a correlation whose incident store fails mid-pipeline must fail
@@ -184,16 +244,21 @@ func (failingIncidents) RecordCorrelation(context.Context, []incident.IncidentEv
 // (coverage honesty under chaos).
 func TestSLO_ChaosStoreOutageFailsClosed(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0).UTC()
-	svc, err := correlationuc.NewService(fixedDetections{recs: makeDetections(base)}, failingIncidents{}, nil, correlation.Config{Window: time.Hour, MaxPerIncident: 100000}, noopAudit{}, func() time.Time { return base })
+	svc, err := correlationuc.NewService(fixedDetections{recs: makeDetections(base)}, memory.NewDetectionProvenanceStore(), memory.NewEndpointTimelineStore(), memory.NewCorrelationStateStore(), failingIncidents{}, nil, correlation.Config{Window: time.Hour, MaxPerIncident: 100000, PageSize: 1000}, noopAudit{}, func() time.Time { return base })
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := svc.CorrelateEngagement(context.Background(), "slo", "eng-1")
-	if err == nil {
-		t.Fatal("chaos: a store outage must surface as an error, not a silent success")
+	ctx := shared.WithTenant(context.Background(), "tenant-slo")
+	for range 64 {
+		res, err := svc.CorrelateEngagement(ctx, "slo", "eng-1")
+		if err != nil {
+			if len(res.Created) != 0 {
+				t.Fatalf("chaos: no incident may be reported created on a failed pipeline, got %d", len(res.Created))
+			}
+			t.Log("OK: store outage failed closed (error surfaced, no partial incidents)")
+			return
+		}
 	}
-	if len(res.Created) != 0 {
-		t.Fatalf("chaos: no incident may be reported created on a failed pipeline, got %d", len(res.Created))
-	}
+	t.Fatal("chaos: a store outage must surface during bounded consume steps")
 	t.Log("OK: store outage failed closed (error surfaced, no partial incidents)")
 }

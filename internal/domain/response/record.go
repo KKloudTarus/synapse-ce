@@ -3,6 +3,8 @@ package response
 import (
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -14,7 +16,7 @@ const (
 	StateApplied   State = "applied"   // executed
 	StateReverted  State = "reverted"  // its reversal was applied
 	StateCancelled State = "cancelled" // halted by the kill switch before applying
-	StateViolation State = "violation" // halted: actual effect exceeded the declared blast radius
+	StateViolation State = "violation" // fail-closed: unsafe effect or unresolved execution/rollback requires intervention
 )
 
 // Valid reports whether s is a known state.
@@ -54,14 +56,18 @@ func (v Verification) Valid() bool {
 // Record is the persisted state of a response action, including the approval that authorized it (sealed
 // into the evidence chain by the admission gate).
 type Record struct {
-	ID                 shared.ID
-	TenantID           shared.ID
-	EngagementID       shared.ID
-	Action             Action
-	State              State
-	Verification       Verification // post-condition: was the effect confirmed via telemetry? (#638)
-	ApprovedBy         string
-	ApprovalEvidenceID shared.ID
-	AppliedAt          time.Time
-	UpdatedAt          time.Time
+	ID                  shared.ID
+	TenantID            shared.ID
+	EngagementID        shared.ID
+	Action              Action
+	AuthorizationTarget engagement.Target
+	TargetFingerprint   responsesaga.TargetFingerprint
+	SubmittedBy         string
+	ReversalRequestedBy string
+	State               State
+	Verification        Verification // post-condition: was the effect confirmed via telemetry? (#638)
+	ApprovedBy          string
+	ApprovalEvidenceID  shared.ID
+	AppliedAt           time.Time
+	UpdatedAt           time.Time
 }

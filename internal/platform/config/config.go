@@ -64,6 +64,9 @@ type Config struct {
 	// DBMigrationDSN, when set, is used only for schema migrations and runtime-role grants.
 	// It must be a DDL owner credential; DBDSN remains the least-privilege application credential.
 	DBMigrationDSN string
+	// DBHaltWriterDSN is the separate, narrowly privileged identity permitted to manufacture
+	// response halt fences and immutable halt dispatches.
+	DBHaltWriterDSN string
 	// DBAutoMigrate controls embedded migrations for long-running services. A dedicated
 	// synapse-migrate job may own migrations while services rely on readiness instead.
 	DBAutoMigrate bool
@@ -350,6 +353,12 @@ type Config struct {
 	// FleetSignerKey is the HMAC key that signs agent work orders. Required and at least 32 bytes
 	// when FleetEnabled; a missing/short key fails startup closed rather than boot a forgeable signer.
 	FleetSignerKey string
+	// ResponseExecutionEnabled replaces the simulation executor with the signed fleet response lane.
+	// It requires fleet identity, telemetry, and key registration so execution fails closed.
+	ResponseExecutionEnabled      bool
+	ResponseCommandSigningKeyFile string
+	ResponseCommandTTL            time.Duration
+	ResponseExecutionPollInterval time.Duration
 	// FleetCACertPEM / FleetCAKeyPEM are the control-plane CA that issues agent client certificates
 	// (#408). When both are set and FleetEnabled, enrolment with a CSR returns a client certificate.
 	FleetCACertPEM string
@@ -487,9 +496,15 @@ type Config struct {
 	// FleetCorrelationWindow is the session gap for correlation: detections on one (asset, host) more than
 	// this apart start a new incident.
 	FleetCorrelationWindow time.Duration
+	// FleetCorrelationAllowedLateness controls how far the event-time watermark trails the newest detection.
+	FleetCorrelationAllowedLateness time.Duration
 	// FleetCorrelationMaxPerIncident caps how many detections one incident reflects individually before a
 	// storm is suppressed to a single note.
-	FleetCorrelationMaxPerIncident int
+	FleetCorrelationMaxPerIncident              int
+	FleetCorrelationPageSize                    int
+	FleetCorrelationMaxActiveSessions           int
+	FleetCorrelationMaxTimelineRefsPerDetection int
+	FleetCorrelationMaxTimelineRefsPerPage      int
 	// AlertWebhookURL, when set, enables operator alerting: every incident correlation opens (and any
 	// other alert-producing event) is posted as signed JSON to this URL. Empty disables alerting.
 	AlertWebhookURL string
@@ -678,6 +693,7 @@ func Load() Config {
 		AuditFile:                        getenv("SYNAPSE_AUDIT_FILE", "data/audit.jsonl"),
 		DBDSN:                            getenv("SYNAPSE_DB_DSN", ""),
 		DBMigrationDSN:                   getenv("SYNAPSE_DB_MIGRATION_DSN", ""),
+		DBHaltWriterDSN:                  getenv("SYNAPSE_DB_HALT_WRITER_DSN", ""),
 		DBAutoMigrate:                    getbool("SYNAPSE_DB_AUTO_MIGRATE", true),
 		SyftBin:                          getenv("SYNAPSE_SYFT_BIN", "syft"),
 		SBOMProducer:                     getenv("SYNAPSE_SBOM_PRODUCER", "syft"),
@@ -752,141 +768,150 @@ func Load() Config {
 		// absent. Set the flag to false to opt out. Capabilities that need external setup or would be
 		// unsafe unsandboxed stay OFF by default (sandbox, agent/LLM, taint, maven/gradle resolvers,
 		// jarhash egress) – see their fields below.
-		JudgmentsEnabled:                       getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
-		SASTEnabled:                            getbool("SYNAPSE_SAST_ENABLED", true),
-		SecretScanEnabled:                      getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
-		MisconfigEnabled:                       getbool("SYNAPSE_MISCONFIG_ENABLED", true),
-		SuppressionEnabled:                     getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
-		VEXEnabled:                             getbool("SYNAPSE_VEX_ENABLED", true),
-		ComplianceEnabled:                      getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
-		DetectionPriority:                      os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
-		DBMaxAgeDays:                           getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
-		ScanCacheEnabled:                       getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
-		ScanCacheDir:                           os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
-		ImageRootFSEnabled:                     getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
-		OwnedAdvisoryEnabled:                   getbool("SYNAPSE_OWNED_ADVISORY", true),
-		ReachabilityEnabled:                    getbool("SYNAPSE_REACHABILITY_ENABLED", true),
-		PyReachabilityEnabled:                  getbool("SYNAPSE_PYREACH_ENABLED", false),
-		PySemanticReachabilityEnabled:          getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
-		ASTBin:                                 os.Getenv("SYNAPSE_AST_BIN"),
-		PythonTaintEnabled:                     getbool("SYNAPSE_PYTAINT_ENABLED", false),
-		TriScoreReassessEnabled:                getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
-		FleetCorrelationEnabled:                getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
-		FleetCorrelationWindow:                 getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
-		FleetCorrelationMaxPerIncident:         getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
-		JSReachabilityEnabled:                  getbool("SYNAPSE_JSREACH_ENABLED", false),
-		JSSymbolReachabilityEnabled:            getbool("SYNAPSE_JSREACH_TIER2_ENABLED", false),
-		RustReachabilityEnabled:                getbool("SYNAPSE_REACH_RUST", false),
-		PHPReachabilityEnabled:                 getbool("SYNAPSE_REACH_PHP", false),
-		RubyReachabilityEnabled:                getbool("SYNAPSE_REACH_RUBY", false),
-		CrossCheckEnabled:                      getbool("SYNAPSE_CROSSCHECK_ENABLED", true),
-		SBOMCrossCheckEnabled:                  getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
-		WriteupDraftsEnabled:                   getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in
-		FleetAssetsEnabled:                     getbool("SYNAPSE_FLEET_ASSETS_ENABLED", false),
-		CSPMEnabled:                            getbool("SYNAPSE_CSPM_ENABLED", false),
-		CSPMProviders:                          splitList(getenv("SYNAPSE_CSPM_PROVIDERS", "")),
-		CSPMRate:                               boundedNonNegative(getint("SYNAPSE_CSPM_RATE", 0), 100),
-		CSPMEgressHosts:                        splitList(getenv("SYNAPSE_CSPM_EGRESS_HOSTS", "")),
-		CSPMHelperBin:                          getenv("SYNAPSE_CSPM_HELPER_BIN", "synapse-cspm"),
-		AttackPathMaxLen:                       getint("SYNAPSE_ATTACKPATH_MAX_LEN", 12),
-		AttackPathMaxPaths:                     getint("SYNAPSE_ATTACKPATH_MAX_PATHS", 100),
-		AttackPathWallClock:                    getduration("SYNAPSE_ATTACKPATH_WALLCLOCK", 2*time.Second),
-		FleetEnabled:                           getbool("SYNAPSE_FLEET_ENABLED", false),
-		FleetClusterIngestEnabled:              getbool("SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED", false),
-		FleetHostIngestEnabled:                 getbool("SYNAPSE_FLEET_HOST_INGEST_ENABLED", false),
-		FleetTelemetryIngestEnabled:            getbool("SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED", false),
-		FleetDetectionIngestEnabled:            getbool("SYNAPSE_FLEET_DETECTION_INGEST_ENABLED", false),
-		FleetKeyRegistrationEnabled:            getbool("SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED", false),
-		FleetMinAgentVersion:                   strings.TrimSpace(os.Getenv("SYNAPSE_FLEET_MIN_AGENT_VERSION")),
-		FleetAgentStaleAfter:                   getduration("SYNAPSE_FLEET_STALE_AFTER", 10*time.Minute),
-		FleetCoverageFreshnessTarget:           getduration("SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET", 24*time.Hour),
-		FleetSignerKey:                         getenv("SYNAPSE_FLEET_SIGNER_KEY", ""),
-		FleetCACertPEM:                         getenv("SYNAPSE_FLEET_CA_CERT", ""),
-		FleetCAKeyPEM:                          getenv("SYNAPSE_FLEET_CA_KEY", ""),
-		FleetCertTTL:                           getduration("SYNAPSE_FLEET_CERT_TTL", 720*time.Hour),
-		FleetClientCertHeader:                  getenv("SYNAPSE_FLEET_CLIENT_CERT_HEADER", ""),
-		LeaderElectionEnabled:                  getbool("SYNAPSE_LEADER_ENABLED", false),
-		LeaderResource:                         getenv("SYNAPSE_LEADER_RESOURCE", "scheduler"),
-		LeaderTerm:                             getduration("SYNAPSE_LEADER_TERM", 15*time.Second),
-		LeaderRenew:                            getduration("SYNAPSE_LEADER_RENEW", 5*time.Second),
-		WorkerConcurrency:                      getint("SYNAPSE_WORKER_CONCURRENCY", defaultWorkerConcurrency),
-		WorkerProfile:                          WorkerProfile(normalizeEnv(getenv("SYNAPSE_WORKER_PROFILE", string(WorkerProfileAll)))),
-		VulnerabilitySchedulerEnabled:          getbool("SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED", false),
-		VulnerabilitySchedulerPollInterval:     getduration("SYNAPSE_VULNERABILITY_SCHEDULER_POLL", time.Minute),
-		VulnerabilitySchedulerStaleAfter:       getduration("SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER", 30*time.Minute),
-		VulnerabilitySchedulerJitter:           getint("SYNAPSE_VULNERABILITY_SCHEDULER_JITTER_PERCENT", 10),
-		VulnerabilitySchedulerDispatch:         getint("SYNAPSE_VULNERABILITY_SCHEDULER_DISPATCH_LIMIT", 10),
-		VulnerabilitySchedulerQueueDepth:       getint("SYNAPSE_VULNERABILITY_SCHEDULER_MAX_QUEUE_DEPTH", 100),
-		VulnerabilitySchedulerRecovery:         getint("SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT", 10),
-		IntegrationSchedulerEnabled:            getbool("SYNAPSE_INTEGRATION_SCHEDULER_ENABLED", false),
-		IntegrationSchedulerInterval:           getduration("SYNAPSE_INTEGRATION_SCHEDULER_POLL", time.Minute),
-		IntegrationSchedulerDispatch:           getint("SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT", 10),
-		IntegrationSchedulerQueueDepth:         getint("SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH", 100),
-		IntegrationAllowPrivateNetwork:         getbool("SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK", false),
-		VulnerabilityProviderSyncEnabled:       getbool("SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", false),
-		VulnerabilityOccurrenceWritesEnabled:   getbool("SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED", false),
-		VulnerabilityFindingProjectionEnabled:  getbool("SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED", false),
-		VulnerabilityActionsEnabled:            getbool("SYNAPSE_VULNERABILITY_ACTIONS_ENABLED", false),
-		VulnerabilityNotificationsEnabled:      getbool("SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED", false),
-		VulnerabilityDryRunEnabled:             getbool("SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED", true),
-		VulnerabilityTenantAllowlist:           splitList(getenv("SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "")),
-		SLAEnabled:                             getbool("SYNAPSE_SLA_ENABLED", false),
-		GovulncheckBin:                         getenv("SYNAPSE_GOVULNCHECK_BIN", "govulncheck"),
-		GoModGraphEnabled:                      getbool("SYNAPSE_GOMODGRAPH_ENABLED", true),
-		GoBin:                                  getenv("SYNAPSE_GO_BIN", "go"),
-		MavenResolveEnabled:                    getbool("SYNAPSE_MAVEN_RESOLVE_ENABLED", false),
-		MvnBin:                                 getenv("SYNAPSE_MVN_BIN", "mvn"),
-		MavenRepoHosts:                         splitList(getenv("SYNAPSE_MAVEN_REPO_HOSTS", "")),
-		MavenLocalRepo:                         getenv("SYNAPSE_MAVEN_LOCAL_REPO", ""),
-		GradleResolveEnabled:                   getbool("SYNAPSE_GRADLE_RESOLVE_ENABLED", false),
-		GradleBin:                              getenv("SYNAPSE_GRADLE_BIN", "gradle"),
-		GradleHome:                             getenv("SYNAPSE_GRADLE_HOME", ""),
-		NPMResolveEnabled:                      getbool("SYNAPSE_NPM_RESOLVE_ENABLED", false),
-		NPMBin:                                 getenv("SYNAPSE_NPM_BIN", "npm"),
-		NPMRegistryHosts:                       splitList(getenv("SYNAPSE_NPM_REGISTRY_HOSTS", "")),
-		ManifestResolveEnabled:                 getbool("SYNAPSE_MANIFEST_RESOLVE_ENABLED", false),
-		ComposerBin:                            getenv("SYNAPSE_COMPOSER_BIN", "composer"),
-		BundleBin:                              getenv("SYNAPSE_BUNDLE_BIN", "bundle"),
-		PoetryBin:                              getenv("SYNAPSE_POETRY_BIN", "poetry"),
-		ManifestRegistryHosts:                  splitList(getenv("SYNAPSE_MANIFEST_REGISTRY_HOSTS", "")),
-		BundlerResolveEnabled:                  getbool("SYNAPSE_BUNDLER_RESOLVE_ENABLED", false),
-		JVMReachabilityEnabled:                 getbool("SYNAPSE_JVM_REACHABILITY_ENABLED", true),
-		JarHashOnlineEnabled:                   getbool("SYNAPSE_JARHASH_ONLINE_ENABLED", false),
-		JarHashBaseURL:                         getenv("SYNAPSE_JARHASH_BASE_URL", ""),
-		JarHashDBPath:                          getenv("SYNAPSE_JARHASH_DB_PATH", ""),
-		TaintCallgraphBin:                      getenv("SYNAPSE_TAINT_CALLGRAPH_BIN", "synapse-callgraph"),
-		TaintEnabled:                           getbool("SYNAPSE_TAINT_ENABLED", false),
-		LLMBaseURL:                             getenv("SYNAPSE_LLM_BASE_URL", "http://localhost:20128/v1"),
-		LLMAPIKey:                              getenv("SYNAPSE_LLM_API_KEY", ""),
-		LLMModel:                               getenv("SYNAPSE_LLM_MODEL", ""),
-		LLMProvider:                            normalizeProvider(getenv("SYNAPSE_LLM_PROVIDER", "openai-compatible")),
-		LLMTimeout:                             getduration("SYNAPSE_LLM_TIMEOUT", 60*time.Second),
-		FPTriageEnabled:                        getbool("SYNAPSE_FP_TRIAGE_ENABLED", false),
-		FPTriageModel:                          getenv("SYNAPSE_FP_TRIAGE_MODEL", getenv("SYNAPSE_LLM_MODEL", "")),
-		FPTriageProvider:                       normalizeProvider(getenv("SYNAPSE_FP_TRIAGE_PROVIDER", getenv("SYNAPSE_LLM_PROVIDER", "openai-compatible"))),
-		FPTriageMode:                           normalizeFPTriageMode(getenv("SYNAPSE_FP_TRIAGE_MODE", "shadow")),
-		FPTriageMaxFindings:                    boundedPositive(getint("SYNAPSE_FP_TRIAGE_MAX_FINDINGS", defaultFPTriageMaxFindings), defaultFPTriageMaxFindings, maxFPTriageMaxFindings),
-		FPTriageConcurrency:                    boundedPositive(getint("SYNAPSE_FP_TRIAGE_CONCURRENCY", defaultFPTriageConcurrency), defaultFPTriageConcurrency, maxFPTriageConcurrency),
-		FPTriageMaxTokens:                      boundedPositive64(getint64("SYNAPSE_FP_TRIAGE_MAX_TOKENS", defaultFPTriageMaxTokens), defaultFPTriageMaxTokens, maxFPTriageMaxTokens),
-		FPTriageMaxCostMicroUSD:                boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_MAX_COST_MICRO_USD", 0), 1_000_000_000_000),
-		FPTriageProposerInputRate:              boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_PROPOSER_INPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
-		FPTriageProposerOutputRate:             boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_PROPOSER_OUTPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
-		FPTriageVerifierInputRate:              boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_VERIFIER_INPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
-		FPTriageVerifierOutputRate:             boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_VERIFIER_OUTPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
-		FPTriageCircuitFailures:                boundedPositive(getint("SYNAPSE_FP_TRIAGE_CIRCUIT_FAILURES", defaultFPTriageCircuitFailures), defaultFPTriageCircuitFailures, maxFPTriageCircuitFailures),
-		FPTriageCircuitCooldown:                boundedPositiveDuration(getduration("SYNAPSE_FP_TRIAGE_CIRCUIT_COOLDOWN", time.Minute), time.Minute, 24*time.Hour),
-		FPTriageAlertMinSamples:                boundedPositive(getint("SYNAPSE_FP_TRIAGE_ALERT_MIN_SAMPLES", 10), 10, 10000),
-		FPTriageDisagreeBaseBPS:                boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_DISAGREEMENT_BASELINE_BPS", 1500), 10000),
-		FPTriageExemptBaseBPS:                  boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_EXEMPTION_BASELINE_BPS", 1000), 10000),
-		FPTriageParseFailBaseBPS:               boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_PARSE_FAILURE_BASELINE_BPS", 200), 10000),
-		FPTriageAlertDeltaBPS:                  boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_ALERT_DEVIATION_BPS", 1000), 10000),
-		FPTriageIndependence:                   normalizeFPTriageIndependence(getenv("SYNAPSE_FP_TRIAGE_INDEPENDENCE", "model_family")),
-		AlertWebhookURL:                        getenv("SYNAPSE_ALERT_WEBHOOK_URL", ""),
-		AlertWebhookSecret:                     getenv("SYNAPSE_ALERT_WEBHOOK_SECRET", ""),
-		AlertMinSeverity:                       getenv("SYNAPSE_ALERT_MIN_SEVERITY", "medium"),
-		AlertWebhookAllowPrivate:               getbool("SYNAPSE_ALERT_WEBHOOK_ALLOW_PRIVATE", false),
-		AlertWebhookAllowUnsigned:              getbool("SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED", false),
-		VulnerabilitySourceAllowPrivateNetwork: getbool("SYNAPSE_VULNERABILITY_SOURCE_ALLOW_PRIVATE_NETWORK", false),
+		JudgmentsEnabled:                            getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
+		SASTEnabled:                                 getbool("SYNAPSE_SAST_ENABLED", true),
+		SecretScanEnabled:                           getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
+		MisconfigEnabled:                            getbool("SYNAPSE_MISCONFIG_ENABLED", true),
+		SuppressionEnabled:                          getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
+		VEXEnabled:                                  getbool("SYNAPSE_VEX_ENABLED", true),
+		ComplianceEnabled:                           getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
+		DetectionPriority:                           os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
+		DBMaxAgeDays:                                getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
+		ScanCacheEnabled:                            getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
+		ScanCacheDir:                                os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
+		ImageRootFSEnabled:                          getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
+		OwnedAdvisoryEnabled:                        getbool("SYNAPSE_OWNED_ADVISORY", true),
+		ReachabilityEnabled:                         getbool("SYNAPSE_REACHABILITY_ENABLED", true),
+		PyReachabilityEnabled:                       getbool("SYNAPSE_PYREACH_ENABLED", false),
+		PySemanticReachabilityEnabled:               getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
+		ASTBin:                                      os.Getenv("SYNAPSE_AST_BIN"),
+		PythonTaintEnabled:                          getbool("SYNAPSE_PYTAINT_ENABLED", false),
+		TriScoreReassessEnabled:                     getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
+		FleetCorrelationEnabled:                     getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
+		FleetCorrelationWindow:                      getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
+		FleetCorrelationAllowedLateness:             getduration("SYNAPSE_FLEET_CORRELATION_ALLOWED_LATENESS", 5*time.Minute),
+		FleetCorrelationMaxPerIncident:              getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
+		FleetCorrelationPageSize:                    getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
+		FleetCorrelationMaxActiveSessions:           getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
+		FleetCorrelationMaxTimelineRefsPerDetection: getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_DETECTION", 32),
+		FleetCorrelationMaxTimelineRefsPerPage:      getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE", 500),
+		JSReachabilityEnabled:                       getbool("SYNAPSE_JSREACH_ENABLED", false),
+		JSSymbolReachabilityEnabled:                 getbool("SYNAPSE_JSREACH_TIER2_ENABLED", false),
+		RustReachabilityEnabled:                     getbool("SYNAPSE_REACH_RUST", false),
+		PHPReachabilityEnabled:                      getbool("SYNAPSE_REACH_PHP", false),
+		RubyReachabilityEnabled:                     getbool("SYNAPSE_REACH_RUBY", false),
+		CrossCheckEnabled:                           getbool("SYNAPSE_CROSSCHECK_ENABLED", true),
+		SBOMCrossCheckEnabled:                       getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
+		WriteupDraftsEnabled:                        getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in
+		FleetAssetsEnabled:                          getbool("SYNAPSE_FLEET_ASSETS_ENABLED", false),
+		CSPMEnabled:                                 getbool("SYNAPSE_CSPM_ENABLED", false),
+		CSPMProviders:                               splitList(getenv("SYNAPSE_CSPM_PROVIDERS", "")),
+		CSPMRate:                                    boundedNonNegative(getint("SYNAPSE_CSPM_RATE", 0), 100),
+		CSPMEgressHosts:                             splitList(getenv("SYNAPSE_CSPM_EGRESS_HOSTS", "")),
+		CSPMHelperBin:                               getenv("SYNAPSE_CSPM_HELPER_BIN", "synapse-cspm"),
+		AttackPathMaxLen:                            getint("SYNAPSE_ATTACKPATH_MAX_LEN", 12),
+		AttackPathMaxPaths:                          getint("SYNAPSE_ATTACKPATH_MAX_PATHS", 100),
+		AttackPathWallClock:                         getduration("SYNAPSE_ATTACKPATH_WALLCLOCK", 2*time.Second),
+		FleetEnabled:                                getbool("SYNAPSE_FLEET_ENABLED", false),
+		FleetClusterIngestEnabled:                   getbool("SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED", false),
+		FleetHostIngestEnabled:                      getbool("SYNAPSE_FLEET_HOST_INGEST_ENABLED", false),
+		FleetTelemetryIngestEnabled:                 getbool("SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED", false),
+		FleetDetectionIngestEnabled:                 getbool("SYNAPSE_FLEET_DETECTION_INGEST_ENABLED", false),
+		FleetKeyRegistrationEnabled:                 getbool("SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED", false),
+		FleetMinAgentVersion:                        strings.TrimSpace(os.Getenv("SYNAPSE_FLEET_MIN_AGENT_VERSION")),
+		FleetAgentStaleAfter:                        getduration("SYNAPSE_FLEET_STALE_AFTER", 10*time.Minute),
+		FleetCoverageFreshnessTarget:                getduration("SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET", 24*time.Hour),
+		FleetSignerKey:                              getenv("SYNAPSE_FLEET_SIGNER_KEY", ""),
+		ResponseExecutionEnabled:                    getbool("SYNAPSE_RESPONSE_EXECUTION_ENABLED", false),
+		ResponseCommandSigningKeyFile:               strings.TrimSpace(os.Getenv("SYNAPSE_RESPONSE_COMMAND_SIGNING_KEY_FILE")),
+		ResponseCommandTTL:                          getduration("SYNAPSE_RESPONSE_COMMAND_TTL", 2*time.Minute),
+		ResponseExecutionPollInterval:               getduration("SYNAPSE_RESPONSE_EXECUTION_POLL_INTERVAL", 100*time.Millisecond),
+		FleetCACertPEM:                              getenv("SYNAPSE_FLEET_CA_CERT", ""),
+		FleetCAKeyPEM:                               getenv("SYNAPSE_FLEET_CA_KEY", ""),
+		FleetCertTTL:                                getduration("SYNAPSE_FLEET_CERT_TTL", 720*time.Hour),
+		FleetClientCertHeader:                       getenv("SYNAPSE_FLEET_CLIENT_CERT_HEADER", ""),
+		LeaderElectionEnabled:                       getbool("SYNAPSE_LEADER_ENABLED", false),
+		LeaderResource:                              getenv("SYNAPSE_LEADER_RESOURCE", "scheduler"),
+		LeaderTerm:                                  getduration("SYNAPSE_LEADER_TERM", 15*time.Second),
+		LeaderRenew:                                 getduration("SYNAPSE_LEADER_RENEW", 5*time.Second),
+		WorkerConcurrency:                           getint("SYNAPSE_WORKER_CONCURRENCY", defaultWorkerConcurrency),
+		WorkerProfile:                               WorkerProfile(normalizeEnv(getenv("SYNAPSE_WORKER_PROFILE", string(WorkerProfileAll)))),
+		VulnerabilitySchedulerEnabled:               getbool("SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED", false),
+		VulnerabilitySchedulerPollInterval:          getduration("SYNAPSE_VULNERABILITY_SCHEDULER_POLL", time.Minute),
+		VulnerabilitySchedulerStaleAfter:            getduration("SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER", 30*time.Minute),
+		VulnerabilitySchedulerJitter:                getint("SYNAPSE_VULNERABILITY_SCHEDULER_JITTER_PERCENT", 10),
+		VulnerabilitySchedulerDispatch:              getint("SYNAPSE_VULNERABILITY_SCHEDULER_DISPATCH_LIMIT", 10),
+		VulnerabilitySchedulerQueueDepth:            getint("SYNAPSE_VULNERABILITY_SCHEDULER_MAX_QUEUE_DEPTH", 100),
+		VulnerabilitySchedulerRecovery:              getint("SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT", 10),
+		IntegrationSchedulerEnabled:                 getbool("SYNAPSE_INTEGRATION_SCHEDULER_ENABLED", false),
+		IntegrationSchedulerInterval:                getduration("SYNAPSE_INTEGRATION_SCHEDULER_POLL", time.Minute),
+		IntegrationSchedulerDispatch:                getint("SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT", 10),
+		IntegrationSchedulerQueueDepth:              getint("SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH", 100),
+		IntegrationAllowPrivateNetwork:              getbool("SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK", false),
+		VulnerabilityProviderSyncEnabled:            getbool("SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", false),
+		VulnerabilityOccurrenceWritesEnabled:        getbool("SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED", false),
+		VulnerabilityFindingProjectionEnabled:       getbool("SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED", false),
+		VulnerabilityActionsEnabled:                 getbool("SYNAPSE_VULNERABILITY_ACTIONS_ENABLED", false),
+		VulnerabilityNotificationsEnabled:           getbool("SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED", false),
+		VulnerabilityDryRunEnabled:                  getbool("SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED", true),
+		VulnerabilityTenantAllowlist:                splitList(getenv("SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "")),
+		SLAEnabled:                                  getbool("SYNAPSE_SLA_ENABLED", false),
+		GovulncheckBin:                              getenv("SYNAPSE_GOVULNCHECK_BIN", "govulncheck"),
+		GoModGraphEnabled:                           getbool("SYNAPSE_GOMODGRAPH_ENABLED", true),
+		GoBin:                                       getenv("SYNAPSE_GO_BIN", "go"),
+		MavenResolveEnabled:                         getbool("SYNAPSE_MAVEN_RESOLVE_ENABLED", false),
+		MvnBin:                                      getenv("SYNAPSE_MVN_BIN", "mvn"),
+		MavenRepoHosts:                              splitList(getenv("SYNAPSE_MAVEN_REPO_HOSTS", "")),
+		MavenLocalRepo:                              getenv("SYNAPSE_MAVEN_LOCAL_REPO", ""),
+		GradleResolveEnabled:                        getbool("SYNAPSE_GRADLE_RESOLVE_ENABLED", false),
+		GradleBin:                                   getenv("SYNAPSE_GRADLE_BIN", "gradle"),
+		GradleHome:                                  getenv("SYNAPSE_GRADLE_HOME", ""),
+		NPMResolveEnabled:                           getbool("SYNAPSE_NPM_RESOLVE_ENABLED", false),
+		NPMBin:                                      getenv("SYNAPSE_NPM_BIN", "npm"),
+		NPMRegistryHosts:                            splitList(getenv("SYNAPSE_NPM_REGISTRY_HOSTS", "")),
+		ManifestResolveEnabled:                      getbool("SYNAPSE_MANIFEST_RESOLVE_ENABLED", false),
+		ComposerBin:                                 getenv("SYNAPSE_COMPOSER_BIN", "composer"),
+		BundleBin:                                   getenv("SYNAPSE_BUNDLE_BIN", "bundle"),
+		PoetryBin:                                   getenv("SYNAPSE_POETRY_BIN", "poetry"),
+		ManifestRegistryHosts:                       splitList(getenv("SYNAPSE_MANIFEST_REGISTRY_HOSTS", "")),
+		BundlerResolveEnabled:                       getbool("SYNAPSE_BUNDLER_RESOLVE_ENABLED", false),
+		JVMReachabilityEnabled:                      getbool("SYNAPSE_JVM_REACHABILITY_ENABLED", true),
+		JarHashOnlineEnabled:                        getbool("SYNAPSE_JARHASH_ONLINE_ENABLED", false),
+		JarHashBaseURL:                              getenv("SYNAPSE_JARHASH_BASE_URL", ""),
+		JarHashDBPath:                               getenv("SYNAPSE_JARHASH_DB_PATH", ""),
+		TaintCallgraphBin:                           getenv("SYNAPSE_TAINT_CALLGRAPH_BIN", "synapse-callgraph"),
+		TaintEnabled:                                getbool("SYNAPSE_TAINT_ENABLED", false),
+		LLMBaseURL:                                  getenv("SYNAPSE_LLM_BASE_URL", "http://localhost:20128/v1"),
+		LLMAPIKey:                                   getenv("SYNAPSE_LLM_API_KEY", ""),
+		LLMModel:                                    getenv("SYNAPSE_LLM_MODEL", ""),
+		LLMProvider:                                 normalizeProvider(getenv("SYNAPSE_LLM_PROVIDER", "openai-compatible")),
+		LLMTimeout:                                  getduration("SYNAPSE_LLM_TIMEOUT", 60*time.Second),
+		FPTriageEnabled:                             getbool("SYNAPSE_FP_TRIAGE_ENABLED", false),
+		FPTriageModel:                               getenv("SYNAPSE_FP_TRIAGE_MODEL", getenv("SYNAPSE_LLM_MODEL", "")),
+		FPTriageProvider:                            normalizeProvider(getenv("SYNAPSE_FP_TRIAGE_PROVIDER", getenv("SYNAPSE_LLM_PROVIDER", "openai-compatible"))),
+		FPTriageMode:                                normalizeFPTriageMode(getenv("SYNAPSE_FP_TRIAGE_MODE", "shadow")),
+		FPTriageMaxFindings:                         boundedPositive(getint("SYNAPSE_FP_TRIAGE_MAX_FINDINGS", defaultFPTriageMaxFindings), defaultFPTriageMaxFindings, maxFPTriageMaxFindings),
+		FPTriageConcurrency:                         boundedPositive(getint("SYNAPSE_FP_TRIAGE_CONCURRENCY", defaultFPTriageConcurrency), defaultFPTriageConcurrency, maxFPTriageConcurrency),
+		FPTriageMaxTokens:                           boundedPositive64(getint64("SYNAPSE_FP_TRIAGE_MAX_TOKENS", defaultFPTriageMaxTokens), defaultFPTriageMaxTokens, maxFPTriageMaxTokens),
+		FPTriageMaxCostMicroUSD:                     boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_MAX_COST_MICRO_USD", 0), 1_000_000_000_000),
+		FPTriageProposerInputRate:                   boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_PROPOSER_INPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
+		FPTriageProposerOutputRate:                  boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_PROPOSER_OUTPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
+		FPTriageVerifierInputRate:                   boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_VERIFIER_INPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
+		FPTriageVerifierOutputRate:                  boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_VERIFIER_OUTPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
+		FPTriageCircuitFailures:                     boundedPositive(getint("SYNAPSE_FP_TRIAGE_CIRCUIT_FAILURES", defaultFPTriageCircuitFailures), defaultFPTriageCircuitFailures, maxFPTriageCircuitFailures),
+		FPTriageCircuitCooldown:                     boundedPositiveDuration(getduration("SYNAPSE_FP_TRIAGE_CIRCUIT_COOLDOWN", time.Minute), time.Minute, 24*time.Hour),
+		FPTriageAlertMinSamples:                     boundedPositive(getint("SYNAPSE_FP_TRIAGE_ALERT_MIN_SAMPLES", 10), 10, 10000),
+		FPTriageDisagreeBaseBPS:                     boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_DISAGREEMENT_BASELINE_BPS", 1500), 10000),
+		FPTriageExemptBaseBPS:                       boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_EXEMPTION_BASELINE_BPS", 1000), 10000),
+		FPTriageParseFailBaseBPS:                    boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_PARSE_FAILURE_BASELINE_BPS", 200), 10000),
+		FPTriageAlertDeltaBPS:                       boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_ALERT_DEVIATION_BPS", 1000), 10000),
+		FPTriageIndependence:                        normalizeFPTriageIndependence(getenv("SYNAPSE_FP_TRIAGE_INDEPENDENCE", "model_family")),
+		AlertWebhookURL:                             getenv("SYNAPSE_ALERT_WEBHOOK_URL", ""),
+		AlertWebhookSecret:                          getenv("SYNAPSE_ALERT_WEBHOOK_SECRET", ""),
+		AlertMinSeverity:                            getenv("SYNAPSE_ALERT_MIN_SEVERITY", "medium"),
+		AlertWebhookAllowPrivate:                    getbool("SYNAPSE_ALERT_WEBHOOK_ALLOW_PRIVATE", false),
+		AlertWebhookAllowUnsigned:                   getbool("SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED", false),
+		VulnerabilitySourceAllowPrivateNetwork:      getbool("SYNAPSE_VULNERABILITY_SOURCE_ALLOW_PRIVATE_NETWORK", false),
 
 		AgentApprovalMode:    getenv("SYNAPSE_AGENT_APPROVAL_MODE", "manual"),
 		AgentApprovalTimeout: getduration("SYNAPSE_AGENT_APPROVAL_TIMEOUT", 30*time.Minute),
@@ -1030,6 +1055,32 @@ func (c Config) IsProduction() bool {
 	}
 }
 
+// ValidateCorrelationPosture rejects unbounded correlation settings at startup.
+func (c Config) ValidateCorrelationPosture() error {
+	if !c.FleetCorrelationEnabled {
+		return nil
+	}
+	switch {
+	case c.FleetCorrelationWindow <= 0:
+		return errors.New("SYNAPSE_FLEET_CORRELATION_WINDOW must be positive")
+	case c.FleetCorrelationAllowedLateness < 0:
+		return errors.New("SYNAPSE_FLEET_CORRELATION_ALLOWED_LATENESS must not be negative")
+	case c.FleetCorrelationMaxPerIncident <= 0:
+		return errors.New("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT must be positive")
+	case c.FleetCorrelationPageSize <= 0 || c.FleetCorrelationPageSize > 1000:
+		return errors.New("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE must be between 1 and 1000")
+	case c.FleetCorrelationMaxActiveSessions <= 0 || c.FleetCorrelationMaxActiveSessions > 10000:
+		return errors.New("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS must be between 1 and 10000")
+	case c.FleetCorrelationMaxTimelineRefsPerDetection <= 0 || c.FleetCorrelationMaxTimelineRefsPerDetection > 1000:
+		return errors.New("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_DETECTION must be between 1 and 1000")
+	case c.FleetCorrelationMaxTimelineRefsPerPage <= 0 || c.FleetCorrelationMaxTimelineRefsPerPage > 10000:
+		return errors.New("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE must be between 1 and 10000")
+	case c.FleetCorrelationMaxTimelineRefsPerDetection > c.FleetCorrelationMaxTimelineRefsPerPage:
+		return errors.New("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_DETECTION must not exceed per-page limit")
+	}
+	return nil
+}
+
 // ValidateSandboxPosture rejects a production configuration that would execute tools without containment.
 func (c Config) ValidateSandboxPosture() error {
 	if c.IsProduction() && !c.SandboxEnabled {
@@ -1151,6 +1202,32 @@ func (c Config) ResolveToolExecution(role ProcessRole) (ToolExecution, error) {
 	}
 }
 
+// ValidateResponseExecutionPosture rejects a partially wired live response boundary.
+func (c Config) ValidateResponseExecutionPosture() error {
+	if !c.ResponseExecutionEnabled {
+		return nil
+	}
+	if !c.FleetEnabled || !c.FleetAssetsEnabled || !c.FleetHostIngestEnabled || !c.FleetTelemetryIngestEnabled || !c.FleetKeyRegistrationEnabled {
+		return errors.New("SYNAPSE_RESPONSE_EXECUTION_ENABLED requires fleet transport, assets, host ingest, telemetry ingest, and key registration")
+	}
+	if strings.TrimSpace(c.ResponseCommandSigningKeyFile) == "" {
+		return errors.New("SYNAPSE_RESPONSE_COMMAND_SIGNING_KEY_FILE is required when live response execution is enabled")
+	}
+	if c.ResponseCommandTTL <= 0 || c.ResponseCommandTTL > 10*time.Minute {
+		return errors.New("SYNAPSE_RESPONSE_COMMAND_TTL must be greater than zero and at most 10m")
+	}
+	if c.ResponseExecutionPollInterval <= 0 || c.ResponseExecutionPollInterval > time.Second {
+		return errors.New("SYNAPSE_RESPONSE_EXECUTION_POLL_INTERVAL must be greater than zero and at most 1s")
+	}
+	if c.DBDSN == "" || c.DBHaltWriterDSN == "" {
+		return errors.New("SYNAPSE_DB_DSN and SYNAPSE_DB_HALT_WRITER_DSN are required when live response execution is enabled")
+	}
+	if err := validateResponseDatabaseRoleSeparation(c.MigrationDSN(), c.DBDSN, c.DBHaltWriterDSN); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ValidateEgressGrantPosture fails closed unless production APIs and workers use
 // a distinct machine credential and a dedicated signing authority.
 func (c Config) ValidateEgressGrantPosture(role ProcessRole) error {
@@ -1236,6 +1313,36 @@ func (c Config) ValidateOIDCPosture() error {
 func validOIDCFrontendURL(value string) bool {
 	u, err := url.Parse(strings.TrimSpace(value))
 	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
+}
+
+func validateResponseDatabaseRoleSeparation(migrationDSN, runtimeDSN, haltWriterDSN string) error {
+	migrationUser, err := postgresDSNUser(migrationDSN)
+	if err != nil {
+		return fmt.Errorf("parse migration database DSN: %w", err)
+	}
+	runtimeUser, err := postgresDSNUser(runtimeDSN)
+	if err != nil {
+		return fmt.Errorf("parse runtime database DSN: %w", err)
+	}
+	haltUser, err := postgresDSNUser(haltWriterDSN)
+	if err != nil {
+		return fmt.Errorf("parse halt-writer database DSN: %w", err)
+	}
+	if migrationUser == runtimeUser || migrationUser == haltUser || runtimeUser == haltUser {
+		return errors.New("migration, runtime, and halt-writer DSNs must use distinct database users")
+	}
+	return nil
+}
+
+func postgresDSNUser(dsn string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", err
+	}
+	if u.User == nil || strings.TrimSpace(u.User.Username()) == "" {
+		return "", errors.New("DSN has no user")
+	}
+	return u.User.Username(), nil
 }
 
 // MigrationDSN returns the DDL credential when configured, falling back to the runtime

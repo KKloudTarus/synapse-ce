@@ -42,34 +42,7 @@ func (r *FleetAuditRepository) insertFleetAudit(ctx context.Context, intent port
 	if err != nil {
 		return ports.FleetAuditIntent{}, err
 	}
-	insert := func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `INSERT INTO fleet_audit_intents
-			(tenant_id,intent_id,actor,action,target,metadata,occurred_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (tenant_id,intent_id) DO NOTHING`,
-			tenantID.String(), intent.ID, intent.Entry.Actor, intent.Entry.Action,
-			intent.Entry.Target, metadata, intent.Entry.At)
-		if err != nil {
-			return fmt.Errorf("insert fleet audit intention: %w", err)
-		}
-		if tag.RowsAffected() == 1 {
-			return nil
-		}
-		var actor, action, target string
-		var metadataEqual bool
-		var at time.Time
-		// Compare metadata by PostgreSQL jsonb semantics, not by serialized bytes: Go map
-		// ordering must not turn an identical retry into a false equivocation.
-		if err := tx.QueryRow(ctx, `SELECT actor,action,target,metadata=$3::jsonb,occurred_at
-			FROM fleet_audit_intents WHERE tenant_id=$1 AND intent_id=$2`,
-			tenantID.String(), intent.ID, string(metadata)).Scan(&actor, &action, &target, &metadataEqual, &at); err != nil {
-			return fmt.Errorf("read fleet audit intention collision: %w", err)
-		}
-		if actor != intent.Entry.Actor || action != intent.Entry.Action || target != intent.Entry.Target ||
-			!at.Equal(intent.Entry.At) || !metadataEqual {
-			return fmt.Errorf("%w: fleet audit intention id is already committed to different content", shared.ErrConflict)
-		}
-		return nil
-	}
+	insert := func(tx pgx.Tx) error { return insertFleetAuditTx(ctx, tx, tenantID, intent, metadata) }
 	if tx, bound, err := contextTenantTx(ctx, tenantID); bound || err != nil {
 		if err != nil {
 			return ports.FleetAuditIntent{}, err
@@ -83,6 +56,35 @@ func (r *FleetAuditRepository) insertFleetAudit(ctx context.Context, intent port
 		return ports.FleetAuditIntent{}, err
 	}
 	return intent, nil
+}
+
+// insertFleetAuditTx makes a normalized fleet-audit intent durable within a caller-owned
+// tenant transaction. It keeps the mutation and its delivery obligation inseparable.
+func insertFleetAuditTx(ctx context.Context, tx pgx.Tx, tenantID shared.ID, intent ports.FleetAuditIntent, metadata []byte) error {
+	tag, err := tx.Exec(ctx, `INSERT INTO fleet_audit_intents
+		(tenant_id,intent_id,actor,action,target,metadata,occurred_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (tenant_id,intent_id) DO NOTHING`,
+		tenantID.String(), intent.ID, intent.Entry.Actor, intent.Entry.Action,
+		intent.Entry.Target, metadata, intent.Entry.At)
+	if err != nil {
+		return fmt.Errorf("insert fleet audit intention: %w", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+	var actor, action, target string
+	var metadataEqual bool
+	var at time.Time
+	if err := tx.QueryRow(ctx, `SELECT actor,action,target,metadata=$3::jsonb,occurred_at
+		FROM fleet_audit_intents WHERE tenant_id=$1 AND intent_id=$2`,
+		tenantID.String(), intent.ID, string(metadata)).Scan(&actor, &action, &target, &metadataEqual, &at); err != nil {
+		return fmt.Errorf("read fleet audit intention collision: %w", err)
+	}
+	if actor != intent.Entry.Actor || action != intent.Entry.Action || target != intent.Entry.Target ||
+		!at.Equal(intent.Entry.At) || !metadataEqual {
+		return fmt.Errorf("%w: fleet audit intention id is already committed to different content", shared.ErrConflict)
+	}
+	return nil
 }
 
 // ListPendingFleetAudits returns the calling tenant's committed-but-undelivered

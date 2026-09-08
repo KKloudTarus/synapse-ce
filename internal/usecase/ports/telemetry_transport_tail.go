@@ -37,6 +37,12 @@ type TelemetryAssetBindingStore interface {
 	ResolveTelemetryAsset(ctx context.Context, agentID shared.ID) (shared.ID, error)
 }
 
+// TelemetryAssetBindingLister exposes the current tenant's canonical agent-to-asset bindings.
+// It is separate from the mutation port so observer assignment can verify independent ownership.
+type TelemetryAssetBindingLister interface {
+	ListTelemetryAssetBindings(ctx context.Context) ([]TelemetryAssetBinding, error)
+}
+
 // TelemetryAgentGap is server-persisted provenance for a durable gap discovered
 // by the agent spool itself (quota eviction, corruption, torn write, etc.). It is
 // distinct from delivery gaps inferred by AckLedger: a later sequence fill must

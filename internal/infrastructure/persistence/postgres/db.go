@@ -418,9 +418,34 @@ func quoteIdentifier(identifier string) string {
 	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 }
 
-// GrantRuntimePrivileges grants the runtime role the DML privileges required by the
-// application after migrations have completed under the separate owner credential.
-func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string) error {
+// ValidateResponseRoleSeparation ensures the DDL, normal runtime, and halt-writer
+// identities cannot be confused in a governed response deployment.
+func ValidateResponseRoleSeparation(migrationDSN, runtimeDSN, haltWriterDSN string) error {
+	migrationConfig, err := pgxpool.ParseConfig(migrationDSN)
+	if err != nil {
+		return fmt.Errorf("parse migration dsn: %w", err)
+	}
+	runtimeConfig, err := pgxpool.ParseConfig(runtimeDSN)
+	if err != nil {
+		return fmt.Errorf("parse runtime dsn: %w", err)
+	}
+	haltConfig, err := pgxpool.ParseConfig(haltWriterDSN)
+	if err != nil {
+		return fmt.Errorf("parse halt-writer dsn: %w", err)
+	}
+	if migrationConfig.ConnConfig.User == "" || runtimeConfig.ConnConfig.User == "" || haltConfig.ConnConfig.User == "" {
+		return fmt.Errorf("migration, runtime, and halt-writer DSNs must each name a database user")
+	}
+	if migrationConfig.ConnConfig.User == runtimeConfig.ConnConfig.User || migrationConfig.ConnConfig.User == haltConfig.ConnConfig.User || runtimeConfig.ConnConfig.User == haltConfig.ConnConfig.User {
+		return fmt.Errorf("migration, runtime, and halt-writer DSNs must use distinct database users")
+	}
+	return nil
+}
+
+// GrantRuntimePrivileges grants ordinary runtime DML, then removes its ability to create
+// response halt fences or dispatches. When configured, the halt writer receives only the
+// small table/sequence privileges necessary for its one atomic transaction.
+func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, haltWriterDSNs ...string) error {
 	runtimeConfig, err := pgxpool.ParseConfig(runtimeDSN)
 	if err != nil {
 		return fmt.Errorf("parse runtime dsn: %w", err)
@@ -435,14 +460,44 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string) er
 	}
 	defer func() { _ = adminDB.Close() }()
 
-	quotedRole := `"` + strings.ReplaceAll(role, `"`, `""`) + `"`
-	for _, statement := range []string{
+	quotedRole := quoteIdentifier(role)
+	statements := []string{
+		"ALTER ROLE " + quotedRole + " NOINHERIT",
 		"REVOKE CREATE ON SCHEMA public FROM " + quotedRole,
 		"REVOKE CREATE ON DATABASE " + quoteIdentifier(runtimeConfig.ConnConfig.Database) + " FROM " + quotedRole,
 		"GRANT USAGE ON SCHEMA public TO " + quotedRole,
 		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO " + quotedRole,
 		"GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO " + quotedRole,
-	} {
+		"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON response_halt_fences, response_halt_dispatches FROM " + quotedRole,
+	}
+	if len(haltWriterDSNs) > 1 {
+		return fmt.Errorf("grant runtime privileges accepts at most one halt-writer DSN")
+	}
+	if len(haltWriterDSNs) == 1 && haltWriterDSNs[0] != "" {
+		haltConfig, err := pgxpool.ParseConfig(haltWriterDSNs[0])
+		if err != nil {
+			return fmt.Errorf("parse halt-writer dsn: %w", err)
+		}
+		haltRole := haltConfig.ConnConfig.User
+		if haltRole == "" {
+			return fmt.Errorf("halt-writer dsn has no user")
+		}
+		quotedHaltRole := quoteIdentifier(haltRole)
+		statements = append(statements,
+			"ALTER ROLE "+quotedHaltRole+" NOINHERIT",
+			"REVOKE "+quotedHaltRole+" FROM "+quotedRole,
+			"REVOKE "+quotedRole+" FROM "+quotedHaltRole,
+			"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM "+quotedHaltRole,
+			"REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM "+quotedHaltRole,
+			"REVOKE CREATE ON SCHEMA public FROM "+quotedHaltRole,
+			"REVOKE CREATE ON DATABASE "+quoteIdentifier(runtimeConfig.ConnConfig.Database)+" FROM "+quotedHaltRole,
+			"GRANT USAGE ON SCHEMA public TO "+quotedHaltRole,
+			"GRANT SELECT, INSERT, UPDATE ON response_halt_fences TO "+quotedHaltRole,
+			"GRANT SELECT, INSERT ON response_halt_dispatches TO "+quotedHaltRole,
+			"GRANT SELECT, INSERT ON response_audit_intents TO "+quotedHaltRole,
+		)
+	}
+	for _, statement := range statements {
 		if _, err := adminDB.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("grant runtime privileges: %w", err)
 		}

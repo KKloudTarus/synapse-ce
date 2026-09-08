@@ -8,14 +8,35 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
+	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	responseuc "github.com/KKloudTarus/synapse-ce/internal/usecase/response"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 )
 
 // fakeIncidentStore is an in-test double satisfying BOTH incidentReader and incidentTriager, so the
 // incident handler tests stay free of infrastructure/usecase imports. It records the last call so a
 // test can assert the actor came from the authenticated principal (not the body) and that the honest
 // limit+1 truncation probe reached the store.
+type fakeIncidentResponseCoordinator struct {
+	incidentID   shared.ID
+	engagementID shared.ID
+	action       rdom.Action
+	target       engagement.Target
+	fingerprint  responsesaga.TargetFingerprint
+	actor        string
+	record       responseuc.Record
+	err          error
+}
+
+func (f *fakeIncidentResponseCoordinator) Apply(_ context.Context, incidentID, engagementID shared.ID, action rdom.Action, target engagement.Target, fingerprint responsesaga.TargetFingerprint, actor string) (responseuc.Record, error) {
+	f.incidentID, f.engagementID, f.action, f.target, f.fingerprint, f.actor = incidentID, engagementID, action, target, fingerprint, actor
+	return f.record, f.err
+}
+
 type fakeIncidentStore struct {
 	get    map[shared.ID]incident.Incident
 	list   []incident.Incident
@@ -84,7 +105,7 @@ func (f *fakeIncidentStore) SetDisposition(_ context.Context, actor string, id s
 }
 
 func newIncidentRouter(f *fakeIncidentStore) *http.ServeMux {
-	rt := &Router{log: discardLog(), incidents: f, incidentTriage: f}
+	rt := &Router{log: discardLog(), incidents: f, incidentTriage: f, vulnerabilityAudit: &fakeAudit{}}
 	return rt.routes()
 }
 
@@ -130,8 +151,86 @@ func TestIncidentRoutesRBAC(t *testing.T) {
 	}
 }
 
-// TestIncidentTriageActorIsPrincipal proves the actor is the authenticated principal, never a body
-// field — the security-critical property of an attributable triage mutation.
+func TestApplyIncidentResponseUsesServerInputsAndHumanRoute(t *testing.T) {
+	rt, repo, _ := newEngRouter(t)
+	repo.data["eng-1"].TenantID = shared.DefaultTenant
+	incidents := &fakeIncidentStore{get: map[shared.ID]incident.Incident{"inc-1": {ID: "inc-1", State: incident.StateOpen}}}
+	coordinator := &fakeIncidentResponseCoordinator{}
+	rt.SetIncidents(incidents)
+	rt.SetResponse(&fakeResponseSvc{}, oneID{id: "act-1"})
+	rt.SetIncidentResponseCoordinator(coordinator)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/incidents/inc-1/response/apply", strings.NewReader(`{"engagement_id":"eng-1","kind":"stop_process","target":"asset-9","target_kind":"ip","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"asset-9"},"verifier_id":"attacker","evidence_id":"attacker"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "operator-1", Role: "consultant"}))
+	rec := httptest.NewRecorder()
+	rt.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply incident response: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if coordinator.incidentID != "inc-1" || coordinator.engagementID != "eng-1" || coordinator.action.ID != "act-1" || coordinator.actor != "operator-1" {
+		t.Fatalf("coordinator server inputs = %+v", coordinator)
+	}
+	if coordinator.target != (engagement.Target{Kind: engagement.TargetIP, Value: "asset-9"}) || coordinator.fingerprint.ProcessEntityID != "asset-9" {
+		t.Fatalf("coordinator target inputs = target=%+v fingerprint=%+v", coordinator.target, coordinator.fingerprint)
+	}
+}
+
+func TestApplyIncidentResponseReturnsPendingRecord(t *testing.T) {
+	rt, repo, _ := newEngRouter(t)
+	repo.data["eng-1"].TenantID = shared.DefaultTenant
+	incidents := &fakeIncidentStore{get: map[shared.ID]incident.Incident{"inc-1": {ID: "inc-1", State: incident.StateOpen}}}
+	action, err := rdom.NewAction("act-1", rdom.KindStopProcess, "asset-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := &fakeIncidentResponseCoordinator{
+		record: responseuc.Record{Action: action, State: rdom.StatePending, Verification: rdom.VerificationPending},
+		err:    safety.ErrPendingApproval,
+	}
+	rt.SetIncidents(incidents)
+	rt.SetResponse(&fakeResponseSvc{}, oneID{id: "act-1"})
+	rt.SetIncidentResponseCoordinator(coordinator)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/incidents/inc-1/response/apply", strings.NewReader(`{"engagement_id":"eng-1","kind":"stop_process","target":"asset-9","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"asset-9"}}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "operator-1", Role: "consultant"}))
+	rec := httptest.NewRecorder()
+	rt.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("pending incident response: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestApplyIncidentResponseRejectsOversizedBody(t *testing.T) {
+	rt, repo, _ := newEngRouter(t)
+	repo.data["eng-1"].TenantID = shared.DefaultTenant
+	incidents := &fakeIncidentStore{get: map[shared.ID]incident.Incident{"inc-1": {ID: "inc-1", State: incident.StateOpen}}}
+	coordinator := &fakeIncidentResponseCoordinator{}
+	rt.SetIncidents(incidents)
+	rt.SetResponse(&fakeResponseSvc{}, oneID{id: "act-1"})
+	rt.SetIncidentResponseCoordinator(coordinator)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/incidents/inc-1/response/apply", strings.NewReader(strings.Repeat(" ", responseBodyLimit)+`{}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "operator-1", Role: "consultant"}))
+	rec := httptest.NewRecorder()
+	rt.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !coordinator.incidentID.IsZero() {
+		t.Fatalf("oversized incident response must be rejected before coordination: code=%d call=%+v", rec.Code, coordinator)
+	}
+}
+
+func TestApplyIncidentResponseRejectsMachineRole(t *testing.T) {
+	rt, _, _ := newEngRouter(t)
+	incidents := &fakeIncidentStore{get: map[shared.ID]incident.Incident{"inc-1": {ID: "inc-1", State: incident.StateOpen}}}
+	coordinator := &fakeIncidentResponseCoordinator{}
+	rt.SetIncidents(incidents)
+	rt.SetResponse(&fakeResponseSvc{}, oneID{id: "act-1"})
+	rt.SetIncidentResponseCoordinator(coordinator)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/incidents/inc-1/response/apply", strings.NewReader(`{"engagement_id":"eng-1","kind":"stop_process","target":"asset-9","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"asset-9"}}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "agent:operator", Role: "agent", TenantID: shared.DefaultTenant.String()}))
+	rec := httptest.NewRecorder()
+	rt.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !coordinator.incidentID.IsZero() {
+		t.Fatalf("machine role must not reach incident response: code=%d call=%+v", rec.Code, coordinator)
+	}
+}
+
 func TestIncidentTriageActorIsPrincipal(t *testing.T) {
 	f := &fakeIncidentStore{}
 	mux := newIncidentRouter(f)

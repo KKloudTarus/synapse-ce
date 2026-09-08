@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/riskassessment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
@@ -18,8 +19,41 @@ type Comment struct {
 // ResponseRef links an incident to a governed response action (the saga itself lives in domain/response,
 // C6) and records whether its post-condition has been telemetry-verified.
 type ResponseRef struct {
-	ActionID shared.ID
-	Verified bool
+	ActionID     shared.ID
+	EngagementID shared.ID
+	ActionDigest string
+	Target       responsesaga.TargetFingerprint
+	AttemptKey   string
+	ExecutorID   string
+	VerifierID   string
+	EvidenceID   shared.ID
+	Verified     bool
+}
+
+// ResponseLink is one durable, not-yet-verified incident response binding. It is derived only from the
+// append-only incident log, so a reconciliation pass can recover a crash after the response saga persists
+// independently verified evidence but before its ResponseVerified event reaches the incident.
+type ResponseLink struct {
+	IncidentID shared.ID
+	Response   ResponseRef
+}
+
+// TimelineRef is one endpoint State Timeline transition causally linked to the incident by signed
+// detection provenance. OccurredAt remains the transition's event time even when the append-only incident
+// event carrying it is timestamped later at correlation processing time.
+type TimelineRef struct {
+	EventID    shared.ID
+	OccurredAt time.Time
+	Kind       string
+	Summary    string
+}
+
+// Validate rejects an incomplete timeline reference before it enters the incident log.
+func (r TimelineRef) Validate() error {
+	if r.EventID.IsZero() || r.OccurredAt.IsZero() || r.Kind == "" || r.Summary == "" {
+		return fmt.Errorf("%w: invalid incident timeline reference", shared.ErrValidation)
+	}
+	return nil
 }
 
 // Incident is the projection folded from an incident's event log. It is a VIEW over the events, which
@@ -29,6 +63,23 @@ type ResponseRef struct {
 // This is DISTINCT from detection.Incident (internal/domain/detection/record.go), which is a lightweight
 // rule+asset rollup view of raw detections. This incident.Incident is the richer, event-sourced Phase-C
 // case object an analyst triages; a detection.Incident rollup may seed one but does not replace it.
+// MergeEdge is an immutable tenant-scoped canonicalization proof. Source event sequence binds the edge
+// to the append-only log; BridgeKey is the correlator correlation key that proved the merge.
+type MergeEdge struct {
+	SourceID       shared.ID
+	CanonicalID    shared.ID
+	BridgeKey      string
+	SourceEventSeq int
+	Actor          string
+	At             time.Time
+}
+
+// Member records the original identity and merge proof for one incident represented by a canonical view.
+type Member struct {
+	ID   shared.ID
+	Edge *MergeEdge
+}
+
 type Incident struct {
 	ID           shared.ID
 	AssetID      shared.ID
@@ -38,13 +89,16 @@ type Incident struct {
 	Disposition  Disposition
 	OwnerID      string
 	DetectionIDs []shared.ID
+	Timeline     []TimelineRef
 	Risk         *riskassessment.RiskAssessment
 	MergedInto   shared.ID
-	Comments     []Comment
-	Responses    []ResponseRef
-	Revision     int
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// Members is only populated on canonical logical projections; event-sourced per-ID projections leave it empty.
+	Members   []Member
+	Comments  []Comment
+	Responses []ResponseRef
+	Revision  int
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // IsMerged reports whether the incident was merged into another.
@@ -114,6 +168,12 @@ func apply(inc *Incident, e IncidentEvent) error {
 		}
 	case EventDetectionDetached:
 		inc.DetectionIDs = removeID(inc.DetectionIDs, e.DetectionID)
+	case EventTimelineAttached:
+		if !hasTimelineRef(inc.Timeline, e.Timeline.EventID) {
+			inc.Timeline = append(inc.Timeline, e.Timeline)
+		}
+	case EventSeverityChanged:
+		inc.Severity = e.Severity
 	case EventStatusChanged:
 		if err := requireTransition(inc.State, e.To); err != nil {
 			return err
@@ -131,13 +191,27 @@ func apply(inc *Incident, e IncidentEvent) error {
 	case EventMerged:
 		inc.MergedInto = e.MergedInto
 	case EventResponseRequested:
-		if !hasResponse(inc.Responses, e.ResponseActionID) {
-			inc.Responses = append(inc.Responses, ResponseRef{ActionID: e.ResponseActionID})
+		ref := responseRef(e)
+		if existing, found := findResponse(inc.Responses, e.ResponseActionID); found {
+			if !sameResponseBinding(existing, ref) {
+				return fmt.Errorf("%w: response action %s was requested with conflicting provenance", shared.ErrConflict, e.ResponseActionID)
+			}
+		} else {
+			inc.Responses = append(inc.Responses, ref)
 		}
 	case EventResponseVerified:
-		if !setResponseVerified(inc.Responses, e.ResponseActionID) {
-			inc.Responses = append(inc.Responses, ResponseRef{ActionID: e.ResponseActionID, Verified: true})
+		ref := responseRef(e)
+		index, found := findResponseIndex(inc.Responses, e.ResponseActionID)
+		if !found {
+			return fmt.Errorf("%w: response action %s was verified before it was requested", shared.ErrValidation, e.ResponseActionID)
 		}
+		if !sameResponseBinding(inc.Responses[index], ref) {
+			return fmt.Errorf("%w: response action %s verification provenance does not match its request", shared.ErrConflict, e.ResponseActionID)
+		}
+		if inc.Responses[index].Verified && inc.Responses[index] != ref {
+			return fmt.Errorf("%w: response action %s has conflicting verification provenance", shared.ErrConflict, e.ResponseActionID)
+		}
+		inc.Responses[index] = ref
 	default:
 		return fmt.Errorf("%w: unhandled incident event kind %q", shared.ErrValidation, e.Kind)
 	}
@@ -163,21 +237,42 @@ func removeID(ids []shared.ID, id shared.ID) []shared.ID {
 	return out
 }
 
-func hasResponse(refs []ResponseRef, id shared.ID) bool {
-	for _, r := range refs {
-		if r.ActionID == id {
+func hasTimelineRef(refs []TimelineRef, id shared.ID) bool {
+	for _, ref := range refs {
+		if ref.EventID == id {
 			return true
 		}
 	}
 	return false
 }
 
-func setResponseVerified(refs []ResponseRef, id shared.ID) bool {
+func responseRef(e IncidentEvent) ResponseRef {
+	return ResponseRef{
+		ActionID: e.ResponseActionID, EngagementID: e.ResponseEngagementID,
+		ActionDigest: e.ResponseActionDigest, Target: e.ResponseTarget,
+		AttemptKey: e.ResponseAttemptKey, ExecutorID: e.ResponseExecutorID,
+		VerifierID: e.ResponseVerifierID, EvidenceID: e.ResponseEvidenceID, Verified: e.Verified,
+	}
+}
+
+func findResponse(refs []ResponseRef, id shared.ID) (ResponseRef, bool) {
+	index, found := findResponseIndex(refs, id)
+	if !found {
+		return ResponseRef{}, false
+	}
+	return refs[index], true
+}
+
+func findResponseIndex(refs []ResponseRef, id shared.ID) (int, bool) {
 	for i := range refs {
 		if refs[i].ActionID == id {
-			refs[i].Verified = true
-			return true
+			return i, true
 		}
 	}
-	return false
+	return 0, false
+}
+
+func sameResponseBinding(left, right ResponseRef) bool {
+	return left.ActionID == right.ActionID && left.EngagementID == right.EngagementID &&
+		left.ActionDigest == right.ActionDigest && left.Target == right.Target
 }

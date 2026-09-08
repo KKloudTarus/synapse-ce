@@ -1662,6 +1662,29 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
 
+  /api/v1/blueteam/response/{id}/decide:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}, description: The response action id to decide}]
+    post:
+      tags: [blueteam]
+      operationId: decideResponse
+      summary: Approve or reject a pending defensive response action
+      description: >
+        Records the reviewer's decision. Approval resumes the exact pending action; a response awaiting
+        independent post-condition verification remains pending and returns 202. The reviewer is the
+        authenticated principal, never a request field.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ResponseDecisionRequest'}}}
+      responses:
+        '200': {description: The decided response action record, content: {application/json: {schema: {$ref: '#/components/schemas/ResponseRecord'}}}}
+        '202': {description: The action remains pending independent verification, content: {application/json: {schema: {$ref: '#/components/schemas/ResponseRecord'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
   /api/v1/blueteam/response/{id}/revert:
     parameters: [{name: id, in: path, required: true, schema: {type: string}, description: The response action id to revert}]
     post:
@@ -2506,6 +2529,44 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
 
+  /api/v1/fleet/response-verifications:
+    post:
+      tags: [fleet]
+      operationId: ingestFleetResponseVerification
+      summary: Verify and ingest a signed response post-condition observation
+      description: >
+        Agent-plane endpoint for an independent response observer's verdict-free readiness observation.
+        It strictly decodes a purpose-signed report, authenticates the enrolled observer, and leaves the
+        control plane to derive the response post-condition from accepted telemetry and coverage records.
+      security:
+      - fleetAgentAuth: []
+      parameters:
+      - $ref: '#/components/parameters/FleetProtocolVersion'
+      - name: Content-Encoding
+        in: header
+        required: false
+        description: Optional wire compression. Omit for raw JSON.
+        schema: {type: string, enum: [gzip]}
+      requestBody:
+        required: true
+        content:
+          application/vnd.synapse.response-verification+json:
+            schema: {$ref: '#/components/schemas/ResponseVerificationReport'}
+      responses:
+        '200':
+          description: Response-verification report durably acknowledged or idempotently observed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ResponseVerificationAcknowledgement'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {description: Fleet agent authentication failed, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '413': {description: Encoded or decoded response-verification body exceeds the bounded transport limit, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '415': {description: Unsupported content encoding or media type, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
   /api/v1/fleet/detections:
     post:
       tags: [fleet]
@@ -3267,6 +3328,40 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/fleet/assets/{id}/response-observers/{agentID}:
+    parameters:
+    - $ref: '#/components/parameters/FleetAssetId'
+    - name: agentID
+      in: path
+      required: true
+      description: Independently enrolled response-observer agent identifier
+      schema: {type: string, minLength: 1}
+    put:
+      tags: [fleet]
+      operationId: assignFleetResponseObserver
+      summary: Assign an independent response observer to an asset
+      description: >
+        Creates or replaces a versioned, operator-owned secondary observation assignment. The assigned
+        agent must be active, response-observer capable, and distinct from the asset's primary telemetry
+        owner. The authenticated human is recorded as the assigner; neither tenant nor actor is supplied
+        in the request.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ResponseObserverAssignmentRequest'}
+      responses:
+        '200': {description: Updated response-observer assignment, content: {application/json: {schema: {$ref: '#/components/schemas/ResponseObserverAssignment'}}}}
+        '201': {description: Created response-observer assignment, content: {application/json: {schema: {$ref: '#/components/schemas/ResponseObserverAssignment'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
   /api/v1/fleet/assets/{id}/behavior-baseline/rebaseline:
     parameters: [{$ref: '#/components/parameters/FleetAssetId'}]
     post:
@@ -3553,6 +3648,31 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/incidents/{id}/response/apply:
+    parameters: [{$ref: '#/components/parameters/FleetIncidentId'}]
+    post:
+      tags: [fleet]
+      operationId: applyFleetIncidentResponse
+      summary: Apply a governed defensive response action from an incident
+      description: >
+        Resolves the incident and engagement in the authenticated tenant, mints the response action id
+        server-side, and applies the action through the same scope, approval, execution, and independent
+        verification gates as engagement response. The request carries no provenance fields.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/IncidentResponseApplyRequest'}}}
+      responses:
+        '200': {description: The applied action record, content: {application/json: {schema: {$ref: '#/components/schemas/ResponseRecord'}}}}
+        '202': {description: Recorded pending a second human approval or independent verification, content: {application/json: {schema: {$ref: '#/components/schemas/ResponseRecord'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
   /api/v1/fleet/incidents/{id}/risk/reassess:
@@ -4330,6 +4450,64 @@ components:
         Reason: {type: string}
         Since: {type: string, format: date-time}
 
+    ResponseObserverAssignmentRequest:
+      type: object
+      required: [expires_at, expected_version]
+      properties:
+        expires_at: {type: string, format: date-time}
+        expected_version: {type: integer, minimum: 0}
+
+    ResponseObserverAssignment:
+      type: object
+      required: [agent_id, asset_id, assigned_by, assigned_at, expires_at, version]
+      properties:
+        agent_id: {type: string}
+        asset_id: {type: string}
+        assigned_by: {type: string}
+        assigned_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+
+    ResponseVerificationTargetFingerprint:
+      type: object
+      additionalProperties: false
+      required: [Kind, ProcessAssetID, ProcessEntityID]
+      properties:
+        Kind: {type: string, const: process}
+        ProcessAssetID: {type: string, minLength: 1}
+        ProcessEntityID: {type: string, minLength: 1}
+
+    ResponseVerificationReport:
+      type: object
+      additionalProperties: false
+      required: [ProtocolVersion, ReportID, AgentID, HostID, AgentSessionID, AssetID, EngagementID, ActionID, ActionDigest, AttemptKey, VerificationChallenge, Target, Reversal, ObservedAt, KeyID, Signature]
+      properties:
+        ProtocolVersion: {type: integer, const: 1}
+        ReportID: {type: string, minLength: 1}
+        AgentID: {type: string, minLength: 1, description: Must equal the authenticated fleet-agent identity}
+        HostID: {type: string, minLength: 1, description: Must equal the enrolled agent host identity}
+        AgentSessionID: {type: string, minLength: 1, description: Must equal the current enrollment session}
+        AssetID: {type: string, minLength: 1, description: Must equal the server-authoritative secondary observation binding}
+        EngagementID: {type: string, minLength: 1}
+        ActionID: {type: string, minLength: 1}
+        ActionDigest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        AttemptKey: {type: string, minLength: 1}
+        VerificationChallenge: {type: string, pattern: '^[0-9a-f]{64}$'}
+        Target: {$ref: '#/components/schemas/ResponseVerificationTargetFingerprint'}
+        Reversal: {type: boolean}
+        ObservedAt: {type: string, format: date-time}
+        ReplacementProcessEntityID: {type: string, description: Present only for a reversal when observing a distinct replacement process entity.}
+        KeyID: {type: string, minLength: 1}
+        Signature: {type: string, contentEncoding: base64}
+
+    ResponseVerificationAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [acknowledged, report_id]
+      properties:
+        acknowledged: {type: boolean, const: true}
+        report_id: {type: string, minLength: 1}
+
     SensorStateReport:
       type: object
       additionalProperties: false
@@ -4897,7 +5075,7 @@ components:
 
     FleetCorrelationResult:
       type: object
-      required: [created, reassessed, reassess_failed]
+      required: [created, updated, reassessed, reassess_failed, phase, has_more]
       properties:
         created:
           type: [array, "null"]
@@ -4905,6 +5083,8 @@ components:
           items: {$ref: '#/components/schemas/FleetIncident'}
         reassessed: {type: integer, minimum: 0, description: How many of the created incidents were tri-scored.}
         reassess_failed: {type: integer, minimum: 0, description: How many scoring attempts failed; the incidents are still recorded.}
+        phase: {type: string, enum: ["", source, consume], description: Current bounded correlation phase; empty means idle.}
+        has_more: {type: boolean, description: Whether another bounded correlate invocation is required.}
 
     EngagementTransitionRequest:
       type: object
@@ -5931,19 +6111,46 @@ components:
         delivered: {type: integer}
         failed: {type: integer}
         audit_failed: {type: integer}
+    ResponseTargetFingerprint:
+      type: object
+      properties:
+        kind: {type: string, enum: [process, file, host]}
+        process_asset_id: {type: string}
+        process_entity_id: {type: string}
+        file_path: {type: string}
+        file_device: {type: integer, minimum: 0}
+        file_inode: {type: integer, minimum: 0}
+        file_hash: {type: string}
+        host_id: {type: string}
+        netpol_generation: {type: integer}
     ResponseActionRequest:
       type: object
       required: [kind, target]
       properties:
         kind: {type: string, enum: [isolate_host, quarantine_file, stop_process], description: The response action kind; each has a mandatory typed reversal.}
         target: {type: string, description: The asset id the action affects; must be in the engagement scope.}
+        fingerprint: {$ref: '#/components/schemas/ResponseTargetFingerprint'}
         target_kind: {type: string, description: 'The scope-entry kind the target is authorized as (default: ip).'}
+    ResponseDecisionRequest:
+      type: object
+      required: [approve]
+      properties:
+        approve: {type: boolean}
+        reason: {type: string}
     ResponseRevertRequest:
       type: object
       required: [target]
       properties:
         target: {type: string}
         target_kind: {type: string}
+        fingerprint: {$ref: '#/components/schemas/ResponseTargetFingerprint'}
+    IncidentResponseApplyRequest:
+      allOf:
+      - $ref: '#/components/schemas/ResponseActionRequest'
+      - type: object
+        required: [engagement_id]
+        properties:
+          engagement_id: {type: string}
     ResponsePlanStep:
       type: object
       properties:

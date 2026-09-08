@@ -3,13 +3,19 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
+	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/correlationuc"
+	responseuc "github.com/KKloudTarus/synapse-ce/internal/usecase/response"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 )
 
 // incidentReader is the read side of the Phase-C incident store this API surfaces (#594 C7):
@@ -30,6 +36,18 @@ type incidentTriager interface {
 	Comment(ctx context.Context, actor string, id shared.ID, text string) (incident.Incident, error)
 	ChangeStatus(ctx context.Context, actor string, id shared.ID, to incident.State) (incident.Incident, error)
 	SetDisposition(ctx context.Context, actor string, id shared.ID, disposition incident.Disposition) (incident.Incident, error)
+}
+
+// incidentResponseCoordinator is the narrow incident-bound response apply seam. The adapter creates the
+// action ID and authenticated actor; only the coordinator may append incident linkage or retrieve trusted
+// response verification provenance.
+type incidentResponseCoordinator interface {
+	Apply(context.Context, shared.ID, shared.ID, rdom.Action, engagement.Target, responsesaga.TargetFingerprint, string) (responseuc.Record, error)
+}
+
+type incidentResponseApplyRequest struct {
+	EngagementID string `json:"engagement_id"`
+	responseActionRequest
 }
 
 // incidentRiskReassessor runs the tri-score assembler for one incident (#594 C3/D/X5):
@@ -58,6 +76,12 @@ func (rt *Router) SetIncidentRiskReassessor(r incidentRiskReassessor) { rt.incid
 
 // SetIncidentTriage wires the incident triage surface (nil ⇒ the triage routes are not registered).
 func (rt *Router) SetIncidentTriage(t incidentTriager) { rt.incidentTriage = t }
+
+// SetIncidentResponseCoordinator wires the incident-scoped governed response apply route. The action ID
+// generator is supplied with the standard response service, so this setter cannot expose a client-chosen ID.
+func (rt *Router) SetIncidentResponseCoordinator(c incidentResponseCoordinator) {
+	rt.incidentResponses = c
+}
 
 const (
 	defaultIncidentPageLimit = 200
@@ -164,6 +188,49 @@ func (rt *Router) getIncident(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, inc)
 }
 
+// applyIncidentResponse mints the response action ID on the server, confirms the engagement is visible to
+// the authenticated tenant, and delegates event ordering, admission, approval, execution, and trusted
+// verification linkage to the coordinator. The request contains no provenance fields.
+func (rt *Router) applyIncidentResponse(w http.ResponseWriter, r *http.Request) {
+	incidentID := shared.ID(r.PathValue("id"))
+	if _, err := rt.incidents.Get(incidentTenantContext(r), incidentID); err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	var req incidentResponseApplyRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, responseBodyLimit)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
+		return
+	}
+	engagementID := shared.ID(req.EngagementID)
+	eng, err := rt.eng.Get(r.Context(), requestTenant(r), engagementID)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	action, err := rdom.NewAction(rt.responseIDs.NewID(), rdom.Kind(req.Kind), shared.ID(req.Target))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	target := engagement.Target{Kind: targetKindOrDefault(req.TargetKind), Value: req.Target}
+	ctx := shared.WithTenant(r.Context(), shared.TenantOrDefault(eng.TenantID))
+	rec, err := rt.incidentResponses.Apply(ctx, incidentID, engagementID, action, target, req.Fingerprint.targetFingerprint(), PrincipalFrom(r.Context()))
+	if errors.Is(err, safety.ErrPendingApproval) || errors.Is(err, responseuc.ErrVerificationPending) {
+		dto := toResponseRecordDTO(rec)
+		if errors.Is(err, responseuc.ErrVerificationPending) {
+			dto.Verification = "pending"
+		}
+		writeJSON(w, http.StatusAccepted, dto)
+		return
+	}
+	if err != nil {
+		writeResponseError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toResponseRecordDTO(rec))
+}
+
 func (rt *Router) assignIncidentOwner(w http.ResponseWriter, r *http.Request) {
 	var req assignIncidentOwnerRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, incidentBodyLimit)).Decode(&req); err != nil {
@@ -209,8 +276,11 @@ func (rt *Router) changeIncidentStatus(w http.ResponseWriter, r *http.Request) {
 // correlationResponse renders a correlation pass: the incidents created + how many were tri-scored.
 type correlationResponse struct {
 	Created        []incident.Incident `json:"created"`
+	Updated        []incident.Incident `json:"updated"`
 	Reassessed     int                 `json:"reassessed"`
 	ReassessFailed int                 `json:"reassess_failed"`
+	Phase          string              `json:"phase"`
+	HasMore        bool                `json:"has_more"`
 }
 
 // correlateEngagement folds the engagement's detections into incidents (auto-scoring each when tri-score
@@ -221,7 +291,7 @@ func (rt *Router) correlateEngagement(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, correlationResponse{Created: res.Created, Reassessed: res.Reassessed, ReassessFailed: res.ReassessFailed})
+	writeJSON(w, http.StatusOK, correlationResponse{Created: res.Created, Updated: res.Updated, Reassessed: res.Reassessed, ReassessFailed: res.ReassessFailed, Phase: string(res.Phase), HasMore: res.HasMore})
 }
 
 // reassessIncidentRisk runs the tri-score assembler for the incident and returns the updated incident

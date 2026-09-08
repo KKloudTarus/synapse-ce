@@ -131,6 +131,54 @@ func (r *CoverageWindowRepository) ListCoverageWindows(ctx context.Context, q po
 	return out, nil
 }
 
+var _ ports.BoundedCoverageWindowReader = (*CoverageWindowRepository)(nil)
+
+func (r *CoverageWindowRepository) ListCoverageWindowsBounded(ctx context.Context, q ports.CoverageWindowQuery, limit int) ([]sensorstate.CoverageWindow, error) {
+	if limit <= 0 || limit > ports.MaxCoverageWindowLimit+1 || !q.Valid() {
+		return nil, shared.ErrValidation
+	}
+	out := make([]sensorstate.CoverageWindow, 0)
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		tenant, _ := shared.TenantFrom(ctx)
+		args := []any{tenant.String()}
+		conditions := []string{"tenant_id=$1"}
+		add := func(format string, value any) {
+			args = append(args, value)
+			conditions = append(conditions, fmt.Sprintf(format, len(args)))
+		}
+		if !q.AgentID.IsZero() {
+			add("agent_id=$%d", q.AgentID.String())
+		}
+		if !q.AssetID.IsZero() {
+			add("asset_id=$%d", q.AssetID.String())
+		}
+		if !q.HostID.IsZero() {
+			add("host_id=$%d", q.HostID.String())
+		}
+		if !q.Since.IsZero() {
+			add("until_at > $%d", q.Since.UTC())
+		}
+		if !q.Until.IsZero() {
+			add("since_at < $%d", q.Until.UTC())
+		}
+		args = append(args, limit)
+		rows, err := tx.Query(ctx, `SELECT revision,asset_id,agent_id,host_id,since_at,until_at,input_digest,created_at,states,sampled_count,truncated_count,dropped_count,gap_count,batch_count,coverage_vector FROM coverage_windows WHERE `+strings.Join(conditions, " AND ")+fmt.Sprintf(" ORDER BY since_at DESC,until_at DESC,revision DESC LIMIT $%d", len(args)), args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			w, err := scanCoverageWindow(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, w)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 type coverageWindowScanner interface {
 	Scan(dest ...any) error
 }

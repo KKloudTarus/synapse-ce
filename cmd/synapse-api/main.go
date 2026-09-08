@@ -57,6 +57,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	recontools "github.com/KKloudTarus/synapse-ce/internal/infrastructure/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/report"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/responsefleet"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/responsekey"
+	responseobserverinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/responseobserver"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/rulecatalog"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
@@ -139,10 +142,10 @@ import (
 	incidenttriage "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidenttriage"
 	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
-	legalholduc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/legalholduc"
-	privacyexport "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacyexport"
 	privacypolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacypolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/processreport"
+	responseobserveruc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/responseobserver"
+	responseverificationingest "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/responseverificationingest"
 	retrohunt "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/retrohunt"
 	riskscorebridge "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscorebridge"
 	riskscoreuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscoreuc"
@@ -296,6 +299,14 @@ func main() {
 		log.Error("network execution posture invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateResponseExecutionPosture(); err != nil {
+		log.Error("response execution posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateCorrelationPosture(); err != nil {
+		log.Error("correlation posture invalid", "err", err)
+		os.Exit(1)
+	}
 
 	// Fail closed: no anonymous access. The token is never logged.
 	if cfg.APIToken == "" {
@@ -312,13 +323,19 @@ func main() {
 
 	// Persistence: PostgreSQL when configured, else file + in-memory (dev).
 	var databasePool *pgxpool.Pool
+	var haltWriter ports.ResponseHaltWriter
 	var repo ports.EngagementRepository
 	var projectRepo ports.ProjectRepository
 	var assetStore ports.AssetRepository
 	var attackPathStore ports.AttackPathStore
 	var scannedImageStore ports.ScannedImageStore
-	var workOrderStore ports.WorkOrderStore
-	var responseStore ports.ResponseStore
+	var workOrderStore ports.WorkOrderAuditStore
+	var responseStore ports.ResponseAuditStore
+	var responseVerificationStore interface {
+		ports.ResponseVerificationAuditStore
+		ports.ResponseTargetEvidenceReceiptStore
+	}
+	var responseObserverBindingStore ports.ResponseObserverBindingAuditStore
 	var fleetAgentStore ports.FleetAgentStore
 	var agentSigningKeyStore ports.AgentSigningKeyStore // A0.2 signing-key registry (A3 resolve+verify)
 	var telemetryTransportStore interface {
@@ -327,19 +344,22 @@ func main() {
 		ports.TelemetryBatchAccountingReader
 		ports.CoverageGapReader
 		ports.TelemetryAssetBindingStore
+		ports.TelemetryAssetBindingLister
 	} // A3 telemetry transport sequencing state, #610 causal-reference resolver, agent→asset binding
 	var sensorStateStore interface {
 		ports.SensorStateAuditStore
 		ports.CoverageSensorStateReader
 	} // #611 append-only signed P0 health history
-	var privacyPolicyStore ports.PrivacyPolicyAuditStore  // #611 immutable source-redaction policy history
-	var coverageWindowStore ports.CoverageWindowStore     // #611 immutable coverage-window revisions
+	var privacyPolicyStore ports.PrivacyPolicyAuditStore // #611 immutable source-redaction policy history
+	var coverageWindowStore interface {
+		ports.CoverageWindowStore
+		ports.BoundedCoverageWindowReader
+	} // #611 immutable coverage-window revisions
 	var endpointProcessStore ports.EndpointProcessStore   // #594 B5 per-host running-process projection
 	var fleetProcessReportSvc *processreport.Service      // #594 D: agent running-process report -> behavior baseline
 	var fleetDesiredStore ports.FleetDesiredStore         // #633 desired-vs-observed capability state
 	var endpointTimelineStore ports.EndpointTimelineStore // #594 B7 State Timeline projection
 	var baselineStore ports.BaselineStore                 // #594 D behavioral baseline state
-	var legalHoldStore ports.LegalHoldStore               // #635 legal holds (suspend retention expiry)
 	var telemetrySvc *telemetryingest.Service             // wired to detection repair after both services exist
 	var endpointStateSvc *endpointstate.Service           // #594 B7 State-Timeline projector; fed by telemetry ingest
 	var detectSvc *detectledger.Service                   // tenant-scoped startup and periodic provenance repair
@@ -362,15 +382,22 @@ func main() {
 	var aiTriageReviewStore ports.AITriageReviewStore
 	var importedSBOMStore ports.ImportedSBOMStore
 	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
-	var detectionRecordStore ports.DetectionRecordStore // #423 detection ledger projection
-	var purpleCoverageStore ports.PurpleCoverageStore   // #426 emulated technique vs observed detection
-	var emulationRunStore emulationuc.RunStore          // #426 adversary-emulation run producer
-	var exploitChainStore exploitationuc.ChainStore     // governed exploitation chain rehearsal store
+	var detectionRecordStore interface {
+		ports.DetectionRecordStore
+		ports.CorrelationDetectionSource
+	} // #423 detection ledger projection
+	var purpleCoverageStore ports.PurpleCoverageStore // #426 emulated technique vs observed detection
+	var emulationRunStore emulationuc.RunStore        // #426 adversary-emulation run producer
+	var exploitChainStore exploitationuc.ChainStore   // governed exploitation chain rehearsal store
 	// Registry of the LLM agent runs executing in this process, so the offensive kill switch can cancel
 	// one mid-decision. Declared here because the kill switch is built before the orchestrator is.
 	agentRunRegistry := orchestrator.NewRunRegistry()
-	var detectionProvenanceStore ports.DetectionProvenanceStore // #610 durable detection lifecycle facts
-	var incidentEventStore ports.IncidentEventStore             // #594 C7 incident append-only event log
+	var detectionProvenanceStore interface {
+		ports.DetectionProvenanceStore
+		ports.CorrelationProvenanceSource
+	} // #610 durable detection lifecycle facts
+	var incidentEventStore ports.IncidentEventStore       // #594 C7 incident append-only event log
+	var correlationStateStore ports.CorrelationStateStore // #594 C2 event-time watermark + assignments
 	var promotionStore ports.PendingPromotionAuditStore
 	var scanJobStore ports.ScanJobStore
 	var scanRunStore ports.ScanRunStore
@@ -454,6 +481,12 @@ func main() {
 		defer cancel()
 		if cfg.DBAutoMigrate {
 			migrationDSN := cfg.MigrationDSN()
+			if cfg.ResponseExecutionEnabled {
+				if err := postgres.ValidateResponseRoleSeparation(migrationDSN, cfg.DBDSN, cfg.DBHaltWriterDSN); err != nil {
+					log.Error("response database role configuration invalid", "err", err)
+					os.Exit(1)
+				}
+			}
 			migrationStarted := time.Now()
 			if err := postgres.MigrateLocked(startup, migrationDSN); err != nil {
 				log.Error("db migrate failed", "err", err)
@@ -461,7 +494,7 @@ func main() {
 			}
 			log.Info("db migrations complete", "duration", time.Since(migrationStarted))
 			if migrationDSN != cfg.DBDSN {
-				if err := postgres.GrantRuntimePrivileges(startup, migrationDSN, cfg.DBDSN); err != nil {
+				if err := postgres.GrantRuntimePrivileges(startup, migrationDSN, cfg.DBDSN, cfg.DBHaltWriterDSN); err != nil {
 					log.Error("db runtime role grant failed", "err", err)
 					os.Exit(1)
 				}
@@ -479,6 +512,15 @@ func main() {
 		}
 		defer pool.Close()
 		databasePool = pool
+		{
+			haltPool, err := postgres.ConnectPool(startup, cfg.DBHaltWriterDSN, postgres.PoolConfig{MaxConns: 2, MinConns: 0, MaxConnLifetime: cfg.DBMaxConnLifetime, MaxConnIdleTime: cfg.DBMaxConnIdleTime})
+			if err != nil {
+				log.Error("halt-writer database connect failed", "err", err)
+				os.Exit(1)
+			}
+			defer haltPool.Close()
+			haltWriter = postgres.NewResponseHaltWriterRepository(haltPool)
+		}
 		readinessChecks["database"] = func(ctx context.Context) error {
 			return postgres.CheckDatabaseReady(ctx, pool)
 		}
@@ -513,6 +555,7 @@ func main() {
 			os.Exit(1)
 		}
 		incidentEventStore = postgres.NewIncidentEventRepository(pool)
+		correlationStateStore = postgres.NewCorrelationStateRepository(pool)
 		promotionStore, err = postgres.NewPromotionStore(pool)
 		if err != nil {
 			log.Error("postgres promotion store init failed", "err", err)
@@ -536,6 +579,20 @@ func main() {
 		scannedImageStore = postgres.NewScannedImageStore(pool)
 		workOrderStore = postgres.NewWorkOrderRepository(pool)
 		responseStore = postgres.NewResponseRepository(pool)
+		if haltWriter == nil {
+			log.Error("response halt writer is required for PostgreSQL response composition")
+			os.Exit(1)
+		}
+		responseVerificationStore, err = postgres.NewResponseVerificationRepository(pool)
+		if err != nil {
+			log.Error("postgres response-verification store init failed", "err", err)
+			os.Exit(1)
+		}
+		responseObserverBindingStore, err = postgres.NewResponseObserverBindingRepository(pool)
+		if err != nil {
+			log.Error("postgres response-observer binding store init failed", "err", err)
+			os.Exit(1)
+		}
 		fleetAgentStore = postgres.NewFleetAgentRepository(pool)
 		agentSigningKeyStore = postgres.NewAgentSigningKeyRepository(pool)
 		telemetryTransportStore, err = postgres.NewTelemetryTransportRepository(pool)
@@ -562,7 +619,6 @@ func main() {
 		fleetDesiredStore = postgres.NewFleetDesiredRepository(pool)
 		endpointTimelineStore = postgres.NewEndpointTimelineRepository(pool)
 		baselineStore = postgres.NewBaselineRepository(pool)
-		legalHoldStore = postgres.NewLegalHoldRepository(pool)
 		fleetRolloutStore = postgres.NewFleetRolloutRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
@@ -618,19 +674,29 @@ func main() {
 		assetStore = memory.NewAssetStore()
 		attackPathStore = memory.NewAttackPathStore()
 		scannedImageStore = memory.NewScannedImageStore()
-		workOrderStore = memory.NewWorkOrderStore()
-		responseStore = memory.NewResponseStore()
+		memoryWorkOrders := memory.NewWorkOrderStore()
+		memoryResponses := memory.NewResponseStore()
+		memoryResponseVerifications := memory.NewResponseVerificationStore()
+		memoryResponseObserverBindings := memory.NewResponseObserverBindingStore()
+		workOrderStore = memoryWorkOrders
+		responseStore = memoryResponses
+		haltWriter = memoryResponses
+
+		responseVerificationStore = memoryResponseVerifications
+		responseObserverBindingStore = memoryResponseObserverBindings
 		fleetAgentStore = memory.NewFleetAgentStore()
 		agentSigningKeyStore = memory.NewAgentSigningKeyStore()
-		telemetryTransportStore = memory.NewTelemetryTransportStore()
+		memoryTelemetryTransport := memory.NewTelemetryTransportStore()
+		telemetryTransportStore = memoryTelemetryTransport
 		privacyPolicyStore = memory.NewPrivacyPolicyStore()
 		sensorStateStore = memory.NewSensorStateStore()
 		coverageWindowStore = memory.NewCoverageWindowStore()
-		endpointProcessStore = memory.NewEndpointProcessStore()
+		memoryEndpointProcesses := memory.NewEndpointProcessStore()
+		endpointProcessStore = memoryEndpointProcesses
 		fleetDesiredStore = memory.NewFleetDesiredStore()
-		endpointTimelineStore = memory.NewEndpointTimelineStore()
+		memoryTimeline := memory.NewEndpointTimelineStore()
+		endpointTimelineStore = memoryTimeline
 		baselineStore = memory.NewBaselineStore()
-		legalHoldStore = memory.NewLegalHoldStore()
 		fleetRolloutStore = memory.NewFleetRolloutStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
@@ -650,12 +716,17 @@ func main() {
 		aiTriageReviewStore = memory.NewAITriageReviewStore()
 		importedSBOMStore = memory.NewImportedSBOMStore()
 		importedFindingStore = memory.NewImportedFindingStore()
-		detectionRecordStore = memory.NewDetectionRecordStore()
+		memoryDetectionRecords := memory.NewDetectionRecordStore()
+		detectionRecordStore = memoryDetectionRecords
 		purpleCoverageStore = memory.NewPurpleStore()
 		emulationRunStore = memory.NewEmulationRunStore()
 		exploitChainStore = memory.NewExploitationChainStore()
 		detectionProvenanceStore = memory.NewDetectionProvenanceStore()
-		incidentEventStore = memory.NewIncidentEventStore()
+		memoryIncidents := memory.NewIncidentEventStore()
+		memoryCorrelation := memory.NewCorrelationStateStore()
+		incidentEventStore = memoryIncidents
+		correlationStateStore = memoryCorrelation
+
 		memoryFindings, ok := findingRepo.(*memory.FindingRepository)
 		if !ok {
 			log.Error("memory finding repository type mismatch")
@@ -681,7 +752,8 @@ func main() {
 		cloudRunStore = memory.NewCloudRunStore()
 		dastRunStore = memory.NewDASTRunStore()
 		cloudObservationStore = memory.NewCloudObservationStore()
-		evidenceStore = memory.NewEvidenceStore()
+		memoryEvidence := memory.NewEvidenceStore()
+		evidenceStore = memoryEvidence
 		advisoryStore = memory.NewAdvisoryStore()
 		threatModelStore = memory.NewThreatModelStore()
 		writeupDraftStore = memory.NewWriteupDraftStore()
@@ -704,13 +776,14 @@ func main() {
 		vulnerabilityActions = memory.NewVulnerabilityActionStore()
 		vulnerabilityReconcileRuns = memory.NewVulnerabilityReconcileRunStore(ids, clock, vulnerabilityQueue)
 		slaStore = memory.NewSLAStore()
-		agentSessionStore = memory.NewAgentSessionStore()
-		approvalStore = memory.NewApprovalStore()
-		planStore = memory.NewPlanStore()
-		decisionStore = memory.NewDecisionStore()
+		memoryAgentSessions := memory.NewAgentSessionStore()
+		memoryApprovals := memory.NewApprovalStore()
+		memoryPlans := memory.NewPlanStore()
+		memoryDecisions := memory.NewDecisionStore()
+		agentSessionStore, approvalStore, planStore, decisionStore = memoryAgentSessions, memoryApprovals, memoryPlans, memoryDecisions
+
 		log.Info("persistence: in-memory + file (set SYNAPSE_DB_DSN for postgres)")
 	}
-
 	// Reproducibility provenance: tool/lib versions captured at startup;
 	// Syft's version is read per scan from the SBOM, the OSV snapshot from scan time.
 	prov := ports.Provenance{
@@ -808,8 +881,6 @@ func main() {
 		}
 		blobStore = bs
 		objectStore = bs
-		readinessChecks["object_store"] = bs.CheckReady
-		log.Info("blob store: minio/s3", "bucket", cfg.BlobBucket)
 	} else {
 		memoryStore := blob.NewMemory()
 		blobStore = memoryStore
@@ -833,6 +904,8 @@ func main() {
 	// distinct domain-separation tag) so an evidence-head attestation can never be
 	// replayed as an audit-head one. Assigned alongside the evidence signer below.
 	var auditSigner ports.ChainSigner
+	var evidenceSigner ports.ChainSigner
+	var evidencePublicKey string
 	if seed, serr := signing.DecodeSeed(cfg.EvidenceSigningSeed); serr != nil {
 		log.Error("evidence signing seed invalid", "err", serr) // never log the seed itself
 		os.Exit(1)
@@ -846,8 +919,10 @@ func main() {
 			log.Error("SYNAPSE_EVIDENCE_SIGNING_SEED is required in production for a stable attestation key")
 			os.Exit(1)
 		}
-		evidenceService.SetSigner(signer.WithContext(evidence.AttestationContextEvidence))
+		evidenceSigner = signer.WithContext(evidence.AttestationContextEvidence)
+		evidenceService.SetSigner(evidenceSigner)
 		auditSigner = signer.WithContext(evidence.AttestationContextAudit)
+		evidencePublicKey = signer.PublicKey()
 		if signer.Ephemeral() {
 			log.Warn("chain-head signing key is ephemeral – set SYNAPSE_EVIDENCE_SIGNING_SEED for a stable attestation key", "key_id", signer.KeyID())
 		} else {
@@ -948,6 +1023,7 @@ func main() {
 		os.Exit(1)
 	}
 	reportService := reportuc.NewService(repo, findingRepo, retestRepo, evidenceService, report.NewRenderer(), scaService, clock, buildinfo.App())
+
 	// Report builder formats: deterministic HTML/DOCX renderers consume the
 	// same assembled document; PDF keeps its own typed maroto path.
 	reportService.RegisterFormat(reportuc.FormatHTML, report.NewHTMLRenderer())
@@ -959,6 +1035,7 @@ func main() {
 		log.Error("transfer service init failed", "err", err)
 		os.Exit(1)
 	}
+
 	// VEX consume: apply client OpenVEX statements to findings (CRA-aligned).
 	vexService, err := vexuc.NewService(repo, findingRepo, auditLog, clock)
 	if err != nil {
@@ -980,7 +1057,7 @@ func main() {
 		log.Error("recon guard init failed", "err", err)
 		os.Exit(1)
 	}
-	var egressGrantHandler http.Handler
+	var privateAuthorityHandler http.Handler
 	if cfg.EgressGrantAuthorityAddr != "" {
 		seed, serr := signing.DecodeSeed(cfg.EgressGrantSigningSeed)
 		if serr != nil {
@@ -1002,11 +1079,14 @@ func main() {
 			log.Error("egress grant service init failed", "err", serr)
 			os.Exit(1)
 		}
-		egressGrantHandler, serr = httpapi.NewEgressGrantHandler(cfg.EgressGrantIssuerToken, grantService)
+		egressGrantHandler, serr := httpapi.NewEgressGrantHandler(cfg.EgressGrantIssuerToken, grantService)
 		if serr != nil {
 			log.Error("egress grant HTTP handler init failed", "err", serr)
 			os.Exit(1)
 		}
+		privateMux := http.NewServeMux()
+		privateMux.Handle(httpapi.EgressGrantPath, egressGrantHandler)
+		privateAuthorityHandler = privateMux
 	}
 	logBroker := logstream.NewBroker(0)
 	var reconRunner ports.ToolRunner
@@ -1161,6 +1241,11 @@ func main() {
 		router.SetFindingSummaries(summaries)
 	}
 	router.SetScanJobs(scanJobStore)
+	observerAwareBindings, err := responseobserverinfra.NewBindingResolver(telemetryTransportStore, responseObserverBindingStore, clock)
+	if err != nil {
+		log.Error("response-observer telemetry binding resolver init failed", "err", err)
+		os.Exit(1)
+	}
 	coverageWindowSvc, err := coveragewindow.NewService(sensorStateStore, telemetryTransportStore, telemetryTransportStore, coverageWindowStore, clock)
 	if err != nil {
 		log.Error("coverage window service init failed", "err", err)
@@ -1189,11 +1274,97 @@ func main() {
 		log.Error("fleet audit reconciliation requires tenant enumeration from the engagement repository – refusing to serve")
 		os.Exit(1)
 	}
+
+	var agentSvc *fleetagentuc.Service
+	var workSvc *fleetwork.Service
+	var responseObserverSvc *responseobserveruc.Service
+	if cfg.FleetEnabled {
+		// SECURITY: a missing/short signer key fails startup closed rather than boot a forgeable
+		// work-order signer (worksign.New rejects keys under 32 bytes).
+		fleetSigner, signerErr := worksign.New([]byte(cfg.FleetSignerKey))
+		if signerErr != nil {
+			log.Error("fleet enabled but the work-order signer key is missing or too short - set SYNAPSE_FLEET_SIGNER_KEY (>=32 bytes)", "err", signerErr)
+			os.Exit(1)
+		}
+		agentSvc, err = fleetagentuc.NewService(fleetAgentStore, auditLog, clock, ids)
+		if err != nil {
+			log.Error("fleet agent service init failed", "err", err)
+			os.Exit(1)
+		}
+		workSvc, err = fleetwork.NewService(workOrderStore, fleetSigner, auditLog, clock, ids)
+		if err != nil {
+			log.Error("fleet work service init failed", "err", err)
+			os.Exit(1)
+		}
+		workSvc.SetExecutionAuthorizer(reconGuard)
+		agentSvc.SetWorkOrders(workOrderStore)
+		responseObserverSvc, err = responseobserveruc.NewService(responseObserverBindingStore, fleetAgentStore, telemetryTransportStore, auditLog, clock)
+		if err != nil {
+			log.Error("response-observer assignment service init failed", "err", err)
+			os.Exit(1)
+		}
+	}
+	responseVerifier, err := responseuc.NewTelemetryEffectVerifier(
+		"control-plane:response-verifier", responseVerificationStore, responseVerificationStore, endpointTimelineStore, coverageWindowStore, evidenceService,
+	)
+	if err != nil {
+		log.Error("response telemetry verifier init failed", "err", err)
+		os.Exit(1)
+	}
+	var responseExecutor responseuc.Executor = responseuc.SimulationExecutor{}
+	if cfg.ResponseExecutionEnabled {
+		commandSigner, signerErr := responsekey.LoadSignerFile(cfg.ResponseCommandSigningKeyFile)
+		if signerErr != nil {
+			log.Error("response command signer init failed", "err", signerErr)
+			os.Exit(1)
+		}
+		responseExecutor, err = responsefleet.New(workSvc, fleetAgentStore, telemetryTransportStore, commandSigner, clock, responsefleet.Config{
+			CommandTTL: cfg.ResponseCommandTTL, PollInterval: cfg.ResponseExecutionPollInterval, AgentStaleAfter: cfg.FleetAgentStaleAfter,
+		})
+		if err != nil {
+			log.Error("fleet response executor init failed", "err", err)
+			os.Exit(1)
+		}
+		observerDispatcher, observerErr := responsefleet.NewObserverDispatcher(
+			workSvc, fleetAgentStore, responseObserverBindingStore, clock, cfg.ResponseCommandTTL, cfg.FleetAgentStaleAfter,
+		)
+		if observerErr != nil {
+			log.Error("fleet response observer dispatcher init failed", "err", observerErr)
+			os.Exit(1)
+		}
+		receiptBuilder, receiptErr := responsefleet.NewTargetEvidenceReceiptBuilder(telemetryTransportStore, endpointTimelineStore, coverageWindowStore, responseVerificationStore, clock)
+		if receiptErr != nil {
+			log.Error("response target evidence receipt builder init failed", "err", receiptErr)
+			os.Exit(1)
+		}
+		observerDispatcher.SetTargetEvidenceReceiptBuilder(receiptBuilder)
+		responseVerifier.SetObservationDispatcher(observerDispatcher)
+		log.Warn("live fleet response execution ENABLED", "signing_key_id", commandSigner.PublicKey().KeyID)
+	}
+	responseService, err := responseuc.NewService(
+		safetyGate, responseExecutor, responseStore, auditLog, clock,
+		responseVerifier, evidenceService, evidencePublicKey, responseVerificationStore, responseVerificationStore, agentSigningKeyStore,
+	)
+	if err != nil {
+		log.Error("governed response service init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := responseService.SetHaltWriter(haltWriter); err != nil {
+		log.Error("governed response halt writer init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := responseService.SetVerificationTimeout(cfg.ResponseCommandTTL); err != nil {
+		log.Error("governed response verification timeout invalid", "err", err)
+		os.Exit(1)
+	}
+	responseService.SetApprovalDecider(approvalSvc)
+	var incidentResponseCoordinator *responseuc.IncidentCoordinator
+	var responseRunner *responseuc.ReconciliationRunner
 	// In Postgres mode all three repositories embed one *FleetAuditRepository over the
 	// single fleet_audit_intents table, so registering all three would sweep the same
 	// rows three times. In memory mode each store owns a private map and must be swept
 	// on its own.
-	fleetAuditStores := []ports.FleetAuditIntentStore{privacyPolicyStore, telemetryTransportStore, sensorStateStore}
+	fleetAuditStores := []ports.FleetAuditIntentStore{privacyPolicyStore, telemetryTransportStore, sensorStateStore, responseVerificationStore, responseObserverBindingStore}
 	if cfg.DBDSN != "" {
 		fleetAuditStores = []ports.FleetAuditIntentStore{privacyPolicyStore}
 	}
@@ -1904,6 +2075,16 @@ func main() {
 			os.Exit(1)
 		}
 		router.SetIncidents(incidentSvc)
+		incidentResponseCoordinator, ierr = responseuc.NewIncidentCoordinator(responseService, incidentSvc, clock)
+		if ierr != nil {
+			log.Error("incident response coordinator init failed", "err", ierr)
+			os.Exit(1)
+		}
+		responseRunner, ierr = responseuc.NewReconciliationRunner(tenantLister, responseService, log, incidentResponseCoordinator)
+		if ierr != nil {
+			log.Error("response reconciliation runner incident-link init failed", "err", ierr)
+			os.Exit(1)
+		}
 		triageSvc, terr := incidenttriage.NewService(incidentSvc, auditLog, func() time.Time { return clock.Now().UTC() })
 		if terr != nil {
 			log.Error("incident triage service init failed", "err", terr)
@@ -2047,13 +2228,16 @@ func main() {
 			if triScore != nil {
 				reassessor = triScore
 			}
-			corr, cerr := correlationuc.NewService(detectionRecordStore, incidentSvc, reassessor, correlation.Config{Window: cfg.FleetCorrelationWindow, MaxPerIncident: cfg.FleetCorrelationMaxPerIncident}, auditLog, func() time.Time { return clock.Now().UTC() })
+			corr, cerr := correlationuc.NewService(detectionRecordStore, detectionProvenanceStore, endpointTimelineStore, correlationStateStore, incidentSvc, reassessor, correlation.Config{Window: cfg.FleetCorrelationWindow, AllowedLateness: cfg.FleetCorrelationAllowedLateness, MaxPerIncident: cfg.FleetCorrelationMaxPerIncident, PageSize: cfg.FleetCorrelationPageSize, MaxActiveSessions: cfg.FleetCorrelationMaxActiveSessions, MaxTimelineRefsPerDetection: cfg.FleetCorrelationMaxTimelineRefsPerDetection, MaxTimelineRefsPerPage: cfg.FleetCorrelationMaxTimelineRefsPerPage}, auditLog, func() time.Time { return clock.Now().UTC() })
 			if cerr != nil {
 				log.Error("correlation service init failed", "err", cerr)
 				os.Exit(1)
 			}
 			if alertSvc != nil {
 				corr.SetNotifier(alertSvc)
+			}
+			if vulnerabilityTransactions != nil {
+				corr.SetTransactionRunner(vulnerabilityTransactions)
 			}
 			incidentCorrelator = corr
 			router.SetIncidentCorrelator(corr)
@@ -2062,47 +2246,22 @@ func main() {
 	}
 
 	if cfg.FleetEnabled {
-		// SECURITY: a missing/short signer key fails startup closed rather than boot a forgeable
-		// work-order signer (worksign.New rejects keys under 32 bytes).
-		signer, serr := worksign.New([]byte(cfg.FleetSignerKey))
-		if serr != nil {
-			log.Error("fleet enabled but the work-order signer key is missing or too short – set SYNAPSE_FLEET_SIGNER_KEY (>=32 bytes)", "err", serr)
-			os.Exit(1)
-		}
-		agentSvc, aerr := fleetagentuc.NewService(fleetAgentStore, auditLog, clock, ids)
-		if aerr != nil {
-			log.Error("fleet agent service init failed", "err", aerr)
-			os.Exit(1)
-		}
-		workSvc, werr := fleetwork.NewService(workOrderStore, signer, auditLog, clock, ids)
-		if werr != nil {
-			log.Error("fleet work service init failed", "err", werr)
-			os.Exit(1)
-		}
-		// Revoking an agent cancels its in-flight work orders (#408).
-		agentSvc.SetWorkOrders(workOrderStore)
-
 		// Offensive kill switch (#418, offensive policy document 8): one operator action halts every
 		// in-flight offensive work order. Wired only where a work order store exists, because a halt
 		// endpoint that accepts a request and stops nothing is the worst possible failure for this
 		// control -- an unwired route 404s instead, which an operator can see.
 		// Governed defensive response (#425): the SAME admission gate exploitation and DAST use, an
-		// argv-only executor, and an append-only ledger. The executor is the SimulationExecutor by
-		// default: it drives the full admission -> human approval -> apply -> telemetry-verify -> revert
-		// loop and records every state, but executes NOTHING on a host. A real host executor is a
-		// deliberate, review-gated extension point (see internal/usecase/response/simulation.go); wiring
-		// it crosses the execution-safety boundary and is left to an explicit operator decision.
-		var responseSvc *responseuc.Service
-		if responseStore != nil {
-			rs, rerr := responseuc.NewService(safetyGate, responseuc.SimulationExecutor{}, responseStore, auditLog, clock)
-			if rerr != nil {
-				log.Error("response service init failed", "err", rerr)
-				os.Exit(1)
-			}
-			responseSvc = rs
-			router.SetResponse(responseSvc, ids)
-			log.Info("governed defensive response ENABLED", "routes", "POST /api/v1/blueteam/engagements/{id}/response/{plan,apply}, POST /api/v1/blueteam/response/{id}/revert", "executor", "simulation (no host effect)")
+		// append-only ledger, independent telemetry verification, and durable reconciliation. The
+		// executor remains the no-host-effect simulation unless live fleet execution is explicitly enabled.
+		router.SetResponse(responseService, ids)
+		if incidentResponseCoordinator != nil {
+			router.SetIncidentResponseCoordinator(incidentResponseCoordinator)
 		}
+		responseExecutorMode := "simulation (no host effect)"
+		if cfg.ResponseExecutionEnabled {
+			responseExecutorMode = "signed fleet response"
+		}
+		log.Info("governed defensive response ENABLED", "routes", "POST /api/v1/blueteam/engagements/{id}/response/{plan,apply}, POST /api/v1/blueteam/response/{id}/{decide,revert}", "executor", responseExecutorMode)
 		if killSwitch, kerr := offensivepolicyuc.NewKillSwitch(workOrderStore, auditLog, nil, func() time.Time { return clock.Now().UTC() }); kerr != nil {
 			log.Error("offensive kill switch init failed", "err", kerr)
 			os.Exit(1)
@@ -2136,14 +2295,12 @@ func main() {
 			killSwitch.SetAgentHalter(agentRunRegistry)
 			// Fourth layer: pending defensive-response actions. A halt cancels admitted-but-not-applied
 			// responses so the switch stops the whole estate, offensive and defensive, in one action.
-			if responseSvc != nil {
-				killSwitch.SetResponseHalter(responseSvc)
-			}
+			killSwitch.SetResponseHalter(responseService)
 			router.SetOffensiveKillSwitch(killSwitch)
-			log.Info("offensive kill switch ENABLED", "route", "POST /api/v1/redteam/halt", "bound", offensivepolicyuc.HaltBound.String(), "chain_registry", true, "agent_registry", true, "response_registry", responseSvc != nil)
+			log.Info("offensive kill switch ENABLED", "route", "POST /api/v1/redteam/halt", "bound", offensivepolicyuc.HaltBound.String(), "chain_registry", true, "agent_registry", true, "response_registry", true)
 		}
-		// Optional certificate identity (#408): when a control-plane CA is configured, enrolment
-		// with a CSR issues a client certificate. Fail closed on a misconfigured CA.
+		// Certificate identity (#408): when a control-plane CA is configured, enrolment with a CSR
+		// issues a client certificate. Production posture validation requires this configuration.
 		if cfg.FleetCACertPEM != "" && cfg.FleetCAKeyPEM != "" {
 			ca, cerr := fleetca.New([]byte(cfg.FleetCACertPEM), []byte(cfg.FleetCAKeyPEM), cfg.FleetCertTTL)
 			if cerr != nil {
@@ -2157,6 +2314,11 @@ func main() {
 		if fleetProcessReportSvc != nil {
 			router.SetFleetProcessReport(fleetProcessReportSvc)
 			log.Info("agent process reporting ENABLED", "route", "POST /api/v1/fleet/processes", "baseline_learn", true)
+		}
+		router.SetFleetResponseObserverBindings(responseObserverBindingStore)
+		router.SetResponseObserverAdmin(responseObserverSvc)
+		if cfg.ResponseExecutionEnabled {
+			router.SetFleetResponseHaltReader(responseStore)
 		}
 		router.SetFleetPrivacyPolicyReader(privacyPolicySvc)
 		router.SetFleetAdmin(agentSvc)
@@ -2244,12 +2406,23 @@ func main() {
 				log.Error("fleet telemetry ingest init failed", "err", terr)
 				os.Exit(1)
 			}
+			telemetrySvc.SetAssetBindingResolver(observerAwareBindings)
+
 			telemetrySvc.SetSensorStateStore(sensorStateStore)
 			telemetrySvc.SetCoverageReconciler(coverageReconciler)
 			if endpointStateSvc != nil { // #594 B7: project accepted telemetry into the State Timeline
 				telemetrySvc.SetEndpointTimeline(endpointStateSvc)
 			}
 			router.SetFleetTelemetry(telemetrySvc)
+			responseVerificationSvc, responseVerificationErr := responseverificationingest.NewService(
+				responseVerificationStore, responseVerificationStore, responseStore, workOrderStore, observerAwareBindings, agentSigningKeyStore, auditLog, clock,
+			)
+			if responseVerificationErr != nil {
+				log.Error("fleet response-verification ingest init failed", "err", responseVerificationErr)
+				os.Exit(1)
+			}
+
+			router.SetFleetResponseVerification(responseVerificationSvc)
 			if cfg.DBDSN != "" {
 				log.Info("fleet telemetry ingest ENABLED (durable; server-side identity/key/schema verification, idempotent, acked)")
 			} else {
@@ -2296,7 +2469,7 @@ func main() {
 			}
 			// retention 0 = keep the projection forever; the evidence chain is always permanent regardless.
 			var derr error
-			detectSvc, derr = detectledger.NewServiceWithProvenance(detectionRecordStore, detectionProvenanceStore, telemetryTransportStore, chainBridge, agentSigningKeyStore, auditLog, clock, ids, 0)
+			detectSvc, derr = detectledger.NewServiceWithProvenance(detectionRecordStore, detectionProvenanceStore, observerAwareBindings, chainBridge, agentSigningKeyStore, auditLog, clock, ids, 0)
 			if derr != nil {
 				log.Error("fleet detection ingest init failed", "err", derr)
 				os.Exit(1)
@@ -2313,32 +2486,7 @@ func main() {
 			if telemetrySvc != nil {
 				telemetrySvc.SetDetectionReconciler(detectSvc)
 			}
-			// Legal holds (#635): a held engagement's data is exempt from retention expiry. Wire the guard
-			// into the detection ledger's Expire path + expose the operator surface.
-			if legalHoldSvc, lherr := legalholduc.NewService(legalHoldStore, auditLog, func() time.Time { return clock.Now().UTC() }); lherr != nil {
-				log.Error("legal-hold service init failed", "err", lherr)
-				os.Exit(1)
-			} else {
-				detectSvc.SetLegalHoldChecker(legalHoldSvc)
-				router.SetLegalHolds(legalHoldSvc)
-				log.Info("legal holds ENABLED (#635): a held engagement's retention-bounded data is preserved until released")
-				// On-demand data deletion / right-to-erasure (#635): destructive (drops the engagement's
-				// detection projection, chain preserved), so it is OPT-IN. The Purge path is still
-				// legal-hold-checked + audited; the env flag only governs whether the HTTP surface exists.
-				if os.Getenv("SYNAPSE_DATA_DELETION_ENABLED") == "true" {
-					router.SetDataPurge(detectSvc)
-					log.Info("on-demand data deletion ENABLED (#635): DELETE /api/v1/fleet/engagements/{id}/detection-data (PermReview, legal-hold-checked)")
-				}
-				// Data-subject / DPO export (#635): a read-only, audited bundle of an engagement's detections
-				// + active legal holds.
-				if exportSvc, xerr := privacyexport.NewService(detectionRecordStore, legalHoldSvc, auditLog, func() time.Time { return clock.Now().UTC() }); xerr != nil {
-					log.Error("privacy data-export service init failed", "err", xerr)
-					os.Exit(1)
-				} else {
-					router.SetPrivacyExport(exportSvc)
-					log.Info("privacy data-export ENABLED (#635): GET /api/v1/fleet/engagements/{id}/privacy-export")
-				}
-			}
+
 			tenantStore, ok := repo.(ports.DetectionReconciliationTenantStore)
 			if !ok {
 				log.Error("fleet detection ingest requires tenant enumeration for provenance reconciliation")
@@ -2621,6 +2769,22 @@ func main() {
 		cancelFleetAuditStartup()
 		go fleetAuditRunner.RunPeriodic(ctx, fleetaudit.DefaultInterval)
 	}
+	if responseRunner != nil {
+		startupCtx, cancelResponseStartup := context.WithTimeout(ctx, responseuc.DefaultReconciliationInterval)
+		startupErr := responseRunner.RunOnce(startupCtx)
+		if startupErr == nil {
+			startupErr = startupCtx.Err()
+		}
+		cancelResponseStartup()
+		if startupErr != nil {
+			if cfg.ResponseExecutionEnabled {
+				log.Error("response reconciliation startup run failed with live execution enabled", "err", startupErr)
+				os.Exit(1)
+			}
+			log.Warn("response reconciliation startup run failed", "err", startupErr)
+		}
+		go responseRunner.RunPeriodic(ctx, responseuc.DefaultReconciliationInterval)
+	}
 	go approvalSvc.RunSweeper(ctx, cfg.ApprovalSweepInterval) // fail-closed HITL approval timeouts for agent + DAST
 
 	// AI agent orchestration. Off unless SYNAPSE_AGENT_ENABLED.
@@ -2794,8 +2958,11 @@ func main() {
 	if metricsHandler != nil {
 		listeners = append(listeners, httpserver.Listener{Name: "metrics server", Addr: cfg.MetricsAddr, Handler: metricsHandler})
 	}
-	if egressGrantHandler != nil {
-		listeners = append(listeners, httpserver.Listener{Name: "egress grant authority", Addr: cfg.EgressGrantAuthorityAddr, Handler: egressGrantHandler})
+	if privateAuthorityHandler != nil {
+		listeners = append(listeners, httpserver.Listener{
+			Name: "private worker authority", Addr: cfg.EgressGrantAuthorityAddr, Handler: privateAuthorityHandler,
+			Timeouts: httpserver.Timeouts{ReadHeader: 5 * time.Second, Write: 15 * time.Second, Idle: 30 * time.Second},
+		})
 	}
 	if err := httpserver.RunListeners(ctx, listeners, log); err != nil {
 		log.Error("server error", "err", err)

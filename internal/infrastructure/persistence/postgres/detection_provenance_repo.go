@@ -285,6 +285,77 @@ func (r *DetectionProvenanceRepository) ListPending(ctx context.Context) ([]dete
 	return out, err
 }
 
+func (r *DetectionProvenanceRepository) LoadReceivedTransitions(ctx context.Context, engagementID shared.ID, detectionIDs []shared.ID) ([]detectionprovenance.Transition, error) {
+	if len(detectionIDs) == 0 {
+		return nil, nil
+	}
+	tenant, err := requireProvenanceTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(detectionIDs))
+	for i, id := range detectionIDs {
+		ids[i] = id.String()
+	}
+	out := make([]detectionprovenance.Transition, 0, len(ids))
+	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT detection_id,sequence,kind,status,COALESCE(evidence_id,''),COALESCE(agent_id,''),COALESCE(asset_id,''),telemetry_refs,reason,previous_hash,entry_hash,occurred_at FROM detection_provenance_transitions WHERE tenant_id=$1 AND engagement_id=$2 AND kind=$3 AND detection_id=ANY($4::text[]) ORDER BY detection_id,sequence`, tenant.String(), engagementID.String(), string(detectionprovenance.Received), ids)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var t detectionprovenance.Transition
+			var refs []byte
+			if err := rows.Scan(&t.DetectionID, &t.Sequence, &t.Kind, &t.Status, &t.EvidenceID, &t.AgentID, &t.AssetID, &refs, &t.Reason, &t.PreviousHash, &t.Hash, &t.OccurredAt); err != nil {
+				return err
+			}
+			if err := json.Unmarshal(refs, &t.TelemetryRefs); err != nil {
+				return err
+			}
+			t.TenantID, t.EngagementID = tenant, engagementID
+			if t.Sequence != 1 || t.PreviousHash != "" || detectionprovenance.VerifyChain([]detectionprovenance.Transition{t}) != nil {
+				return fmt.Errorf("%w: received detection provenance is corrupt", shared.ErrConflict)
+			}
+			out = append(out, t)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+func (r *DetectionProvenanceRepository) ListReceivedTransitions(ctx context.Context, engagementID shared.ID) ([]detectionprovenance.Transition, error) {
+	tenant, err := requireProvenanceTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]detectionprovenance.Transition, 0)
+	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT detection_id,sequence,kind,status,COALESCE(evidence_id,''),COALESCE(agent_id,''),COALESCE(asset_id,''),telemetry_refs,reason,previous_hash,entry_hash,occurred_at FROM detection_provenance_transitions WHERE tenant_id=$1 AND engagement_id=$2 AND kind=$3 ORDER BY detection_id,sequence`, tenant.String(), engagementID.String(), string(detectionprovenance.Received))
+		if err != nil {
+			return fmt.Errorf("list received provenance transitions: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var transition detectionprovenance.Transition
+			var refs []byte
+			if err := rows.Scan(&transition.DetectionID, &transition.Sequence, &transition.Kind, &transition.Status, &transition.EvidenceID, &transition.AgentID, &transition.AssetID, &refs, &transition.Reason, &transition.PreviousHash, &transition.Hash, &transition.OccurredAt); err != nil {
+				return fmt.Errorf("scan received provenance transition: %w", err)
+			}
+			if err := json.Unmarshal(refs, &transition.TelemetryRefs); err != nil {
+				return fmt.Errorf("decode received provenance telemetry references: %w", err)
+			}
+			transition.TenantID, transition.EngagementID = tenant, engagementID
+			if transition.Sequence != 1 || transition.PreviousHash != "" || detectionprovenance.VerifyChain([]detectionprovenance.Transition{transition}) != nil {
+				return fmt.Errorf("%w: received detection provenance is corrupt", shared.ErrConflict)
+			}
+			out = append(out, transition)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 func (r *DetectionProvenanceRepository) ListTransitions(ctx context.Context, engagementID, detectionID shared.ID) ([]detectionprovenance.Transition, error) {
 	tenant, err := requireProvenanceTenant(ctx)
 	if err != nil {

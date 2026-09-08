@@ -84,6 +84,18 @@ type sealedAdmission struct {
 // the admission as evidence and returns an AdmittedAction. Returns ErrForbidden (scope/
 // window/RoE failure – already audited by the guard, or a deny/timeout), or ErrPendingApproval
 // (awaiting a human). actor is the human who owns the agent session (attribution).
+// Reauthorize repeats the engagement execution authorization immediately before dispatch. Approval
+// evidence remains bound in the opaque token; this prevents a decision made inside an authorization window
+// from being dispatched after the window closes.
+func (g *Gate) Reauthorize(ctx context.Context, admitted AdmittedAction) error {
+	p := admitted.Action()
+	_, err := g.guard.Authorize(ctx, execution.Request{
+		Actor: admitted.DecidedBy(), EngagementID: p.EngagementID, Action: p.Action, Target: p.Target,
+		Metadata: map[string]string{"agent_action_id": p.ID.String(), "agent_session": p.SessionID.String()},
+	})
+	return err
+}
+
 func (g *Gate) Admit(ctx context.Context, p agent.ProposedAction, actor string) (AdmittedAction, error) {
 	// 1) Scope + authorization window + RoE – the SAME server-side chokepoint recon/SCA use.
 	// A failure here is ErrForbidden and is already audited (agent.<tool>.denied).

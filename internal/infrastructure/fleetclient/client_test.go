@@ -3,6 +3,8 @@ package fleetclient
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -76,11 +79,132 @@ func TestClientRoundTrips(t *testing.T) {
 	if gotAuth != "Bearer tok" {
 		t.Fatalf("post-enrol calls must use the agent token, got %q", gotAuth)
 	}
-	if err := c.Progress(ctx, enr.Token, "o1"); err != nil {
+	if err := c.Progress(ctx, enr.Token, "o1", "lease-1"); err != nil {
 		t.Fatalf("progress: %v", err)
 	}
-	if err := c.SubmitResult(ctx, enr.Token, "o1", "succeeded", "12 packages"); err != nil {
+	if err := c.SubmitResult(ctx, enr.Token, "o1", "lease-1", "succeeded", "12 packages"); err != nil {
 		t.Fatalf("result: %v", err)
+	}
+}
+
+func TestClientUsesDedicatedEnrollmentURL(t *testing.T) {
+	var enrollmentCalls, fleetCalls int
+	enrollment := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/fleet/enrol" {
+			http.NotFound(w, r)
+			return
+		}
+		enrollmentCalls++
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(EnrolResponse{AgentID: "a1", Token: "agent-token"})
+	}))
+	t.Cleanup(enrollment.Close)
+	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/fleet/heartbeat" {
+			http.NotFound(w, r)
+			return
+		}
+		fleetCalls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(fleet.Close)
+
+	client := NewWithEnrollmentURL(fleet.URL, enrollment.URL, time.Second)
+	credential, err := client.Enrol(context.Background(), "one-time-token", EnrolRequest{Name: "agent"})
+	if err != nil {
+		t.Fatalf("enroll through bootstrap host: %v", err)
+	}
+	if _, err := client.Heartbeat(context.Background(), credential.Token, EnrolRequest{}); err != nil {
+		t.Fatalf("heartbeat through fleet host: %v", err)
+	}
+	if enrollmentCalls != 1 || fleetCalls != 1 {
+		t.Fatalf("calls enrollment=%d fleet=%d, want 1 each", enrollmentCalls, fleetCalls)
+	}
+}
+
+func TestClientPostEnrollmentUsesMTLSWithoutBearer(t *testing.T) {
+	now := time.Now().UTC()
+	caCertPEM, caKeyPEM, err := fleetca.GenerateCA("fleet-test-ca", time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := fleetca.New(caCertPEM, caKeyPEM, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrPEM, keyPEM, err := GenerateKeyAndCSR("agent-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM, _, err := ca.Issue(csrPEM, "agent-1", "tenant-1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientRoots := x509.NewCertPool()
+	if !clientRoots.AppendCertsFromPEM(caCertPEM) {
+		t.Fatal("append client CA")
+	}
+
+	var heartbeatCalls, keyRegistrationCalls int
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS == nil || len(r.TLS.VerifiedChains) == 0 || len(r.TLS.PeerCertificates) == 0 {
+			t.Error("request did not carry a verified client certificate")
+		} else if got := r.TLS.PeerCertificates[0].Subject.CommonName; got != "agent-1" {
+			t.Errorf("client certificate identity = %q, want agent-1", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("post-enrollment request retained bearer fallback: %q", got)
+		}
+		switch r.URL.Path {
+		case "/api/v1/fleet/heartbeat":
+			heartbeatCalls++
+		case "/api/v1/fleet/keys":
+			keyRegistrationCalls++
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	srv.TLS = &tls.Config{
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  clientRoots,
+		MinVersion: tls.VersionTLS12,
+	}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+
+	client := New(srv.URL, 5*time.Second)
+	client.http.Transport = srv.Client().Transport
+	if err := client.ActivateCredential(Credential{CertificatePEM: string(certPEM)}, keyPEM); err != nil {
+		t.Fatalf("activate mTLS credential: %v", err)
+	}
+	if _, err := client.Heartbeat(context.Background(), "legacy-bearer", EnrolRequest{}); err != nil {
+		t.Fatalf("mTLS heartbeat: %v", err)
+	}
+	pub, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signingKey, err := fleetagent.NewSigningKey("agent-1", fleetagent.PurposeTelemetryBatch, pub, now.Add(-time.Minute), now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.RegisterTelemetrySigningKey(context.Background(), "legacy-bearer", signingKey, fleetagent.ProveKeyPossession(privateKey, signingKey)); err != nil {
+		t.Fatalf("mTLS signing-key rotation registration: %v", err)
+	}
+	if heartbeatCalls != 1 || keyRegistrationCalls != 1 {
+		t.Fatalf("mTLS calls = heartbeat:%d key-registration:%d", heartbeatCalls, keyRegistrationCalls)
+	}
+}
+
+func TestActivateCredentialRejectsMissingCertificateOutsideLoopback(t *testing.T) {
+	client := New("https://control.example", time.Second)
+	if err := client.ActivateCredential(Credential{Token: "bearer"}, nil); err == nil {
+		t.Fatal("non-loopback post-enrollment transport accepted a bearer-only credential")
+	}
+
+	local := New("http://127.0.0.1:8080", time.Second)
+	if err := local.ActivateCredential(Credential{Token: "bearer"}, nil); err != nil {
+		t.Fatalf("explicit loopback development transport should retain bearer auth: %v", err)
 	}
 }
 

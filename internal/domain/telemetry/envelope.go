@@ -98,6 +98,12 @@ func (e TelemetryEnvelope) Validate() error {
 	if err := e.Event.Validate(); err != nil {
 		return err
 	}
+	if e.SchemaVersion >= 2 && e.Event.Process != nil && e.Event.Process.StartTimeNanos != 0 {
+		want := ProcessEntityID(e.AssetID, e.BootID, e.Event.Process.PID, e.Event.Process.StartTimeNanos)
+		if e.Event.Process.EntityID != want {
+			return fmt.Errorf("%w: process entity id is not bound to asset, boot, pid, and start time", shared.ErrValidation)
+		}
+	}
 	if e.OccurredAt.IsZero() {
 		return fmt.Errorf("%w: telemetry envelope has no occurred-at timestamp", shared.ErrValidation)
 	}

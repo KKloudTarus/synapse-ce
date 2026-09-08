@@ -22,6 +22,23 @@ api:
       service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "443"
       service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
     networkPolicySourceCIDRs: ["10.64.255.0/28", "10.64.255.16/28", "10.64.255.32/28"]
+fleet:
+  enabled: true
+  assetsEnabled: true
+  hostIngestEnabled: true
+  telemetryIngestEnabled: true
+  detectionIngestEnabled: true
+  keyRegistrationEnabled: true
+  staleAfter: 10m
+  correlation:
+    enabled: true
+    window: 30m
+    allowedLateness: 5m
+    maxPerIncident: 100
+responseExecution:
+  enabled: true
+  commandTTL: 2m
+  pollInterval: 100ms
 worker:
   enabled: false
   nodeSelector:

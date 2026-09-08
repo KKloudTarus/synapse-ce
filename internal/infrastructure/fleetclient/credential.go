@@ -54,7 +54,11 @@ type Credential struct {
 	AgentID        string `json:"agent_id"`
 	Token          string `json:"token"`
 	CertificatePEM string `json:"certificate_pem,omitempty"`
-	AssetID        string `json:"asset_id,omitempty"`
+	// AssetID is this enrolled agent's immutable primary telemetry host binding.
+	AssetID string `json:"asset_id,omitempty"`
+	// ResponseObserverAssetID is a server-assigned secondary target for bounded
+	// response-observation telemetry. It never replaces AssetID.
+	ResponseObserverAssetID string `json:"response_observer_asset_id,omitempty"`
 }
 
 // CredentialStore persists an agent credential + private key under a state directory. It is shared by
@@ -66,6 +70,15 @@ func NewCredentialStore(dir string) *CredentialStore { return &CredentialStore{d
 
 func (s *CredentialStore) credentialPath() string { return filepath.Join(s.dir, "credential.json") }
 func (s *CredentialStore) keyPath() string        { return filepath.Join(s.dir, "agent.key") }
+
+// LoadPrivateKey reads the enrolled agent's private key for client-certificate authentication.
+func (s *CredentialStore) LoadPrivateKey() ([]byte, error) {
+	b, err := os.ReadFile(s.keyPath())
+	if err != nil {
+		return nil, fmt.Errorf("fleetclient: read enrolled private key: %w", err)
+	}
+	return b, nil
+}
 
 // Load returns a stored credential, or ok=false when none is present/usable.
 func (s *CredentialStore) Load() (Credential, bool) {
@@ -109,6 +122,20 @@ func (s *CredentialStore) PersistAssetBinding(cred Credential, assetID string) (
 		return Credential{}, errors.New("fleetclient: canonical asset binding is incomplete")
 	}
 	cred.AssetID = assetID
+	if err := s.Persist(cred, nil); err != nil {
+		return Credential{}, err
+	}
+	return cred, nil
+}
+
+// PersistResponseObserverAssetBinding records a server-assigned observation target without altering
+// the agent's primary telemetry host identity.
+func (s *CredentialStore) PersistResponseObserverAssetBinding(cred Credential, assetID string) (Credential, error) {
+	assetID = strings.TrimSpace(assetID)
+	if strings.TrimSpace(cred.AgentID) == "" || cred.Token == "" || assetID == "" {
+		return Credential{}, errors.New("fleetclient: response observer asset binding is incomplete")
+	}
+	cred.ResponseObserverAssetID = assetID
 	if err := s.Persist(cred, nil); err != nil {
 		return Credential{}, err
 	}
@@ -181,6 +208,7 @@ func ReadEnrolTokenFile(path string) (string, error) {
 // test fake can too.
 type Enroller interface {
 	Enrol(ctx context.Context, enrolToken string, req EnrolRequest) (EnrolResponse, error)
+	ActivateCredential(cred Credential, keyPEM []byte) error
 }
 
 // EnsureEnrolled returns a stored credential, or on first run generates a P-256 key + CSR, enrols via
@@ -189,6 +217,17 @@ type Enroller interface {
 // sent). It errors when there is neither a stored credential nor an enrolment token.
 func EnsureEnrolled(ctx context.Context, e Enroller, store *CredentialStore, enrolToken string, req EnrolRequest) (Credential, error) {
 	if cred, ok := store.Load(); ok {
+		var keyPEM []byte
+		if cred.CertificatePEM != "" {
+			var err error
+			keyPEM, err = store.LoadPrivateKey()
+			if err != nil {
+				return Credential{}, err
+			}
+		}
+		if err := e.ActivateCredential(cred, keyPEM); err != nil {
+			return Credential{}, err
+		}
 		return cred, nil
 	}
 	if enrolToken == "" {
@@ -205,6 +244,9 @@ func EnsureEnrolled(ctx context.Context, e Enroller, store *CredentialStore, enr
 	}
 	cred := Credential{AgentID: resp.AgentID, Token: resp.Token, CertificatePEM: resp.CertificatePEM}
 	if err := store.Persist(cred, keyPEM); err != nil {
+		return Credential{}, err
+	}
+	if err := e.ActivateCredential(cred, keyPEM); err != nil {
 		return Credential{}, err
 	}
 	return cred, nil

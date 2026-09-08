@@ -79,6 +79,19 @@ func TestEnvelopeV1CompatibilityDoesNotRequireV2IncarnationFields(t *testing.T) 
 	}
 }
 
+func TestEnvelopeBindsKnownProcessStartIdentity(t *testing.T) {
+	e := baseEnvelope()
+	e.Event.Process.StartTimeNanos = 42
+	e.Event.Process.EntityID = ProcessEntityID(e.AssetID, e.BootID, e.Event.Process.PID, e.Event.Process.StartTimeNanos)
+	if err := e.Validate(); err != nil {
+		t.Fatalf("bound process identity must validate: %v", err)
+	}
+	e.Event.Process.EntityID = "pe_forged"
+	if err := e.Validate(); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("entity id not derived from signed envelope coordinates must fail, got %v", err)
+	}
+}
+
 func TestEnvelopeTimestampOrdering(t *testing.T) {
 	e := baseEnvelope()
 	if err := e.StampReceived(e.ObservedAt.Add(5 * time.Millisecond)); err != nil {

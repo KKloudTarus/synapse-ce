@@ -31,6 +31,16 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	if cfg.ResponseExecutionEnabled {
+		if cfg.DBHaltWriterDSN == "" {
+			log.Error("SYNAPSE_DB_HALT_WRITER_DSN is required when live response execution is enabled")
+			os.Exit(1)
+		}
+		if err := postgres.ValidateResponseRoleSeparation(migrationDSN, cfg.DBDSN, cfg.DBHaltWriterDSN); err != nil {
+			log.Error("response database role configuration invalid", "err", err)
+			os.Exit(1)
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -40,7 +50,7 @@ func main() {
 		os.Exit(1)
 	}
 	if migrationDSN != cfg.DBDSN {
-		if err := postgres.GrantRuntimePrivileges(ctx, migrationDSN, cfg.DBDSN); err != nil {
+		if err := postgres.GrantRuntimePrivileges(ctx, migrationDSN, cfg.DBDSN, cfg.DBHaltWriterDSN); err != nil {
 			log.Error("db runtime role grant failed", "err", err)
 			os.Exit(1)
 		}

@@ -28,6 +28,7 @@ func TestTelemetryEventValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid process", TelemetryEvent{Class: detection.ClassProcess, Process: validProcess()}, false},
+		{"valid process exit", TelemetryEvent{Class: detection.ClassProcess, Process: &ProcessObservation{Kind: "exit", PID: 10, StartTimeNanos: 42, EntityID: "pe_x", Comm: "sh"}}, false},
 		{"valid network", TelemetryEvent{Class: detection.ClassNetwork, Network: validNetwork()}, false},
 		{"valid file", TelemetryEvent{Class: detection.ClassFile, File: validFile()}, false},
 		{"valid privilege", TelemetryEvent{Class: detection.ClassPrivilege, Privilege: validPriv()}, false},
@@ -39,6 +40,7 @@ func TestTelemetryEventValidate(t *testing.T) {
 		{"process no pid", TelemetryEvent{Class: detection.ClassProcess, Process: &ProcessObservation{Kind: "exec", PID: 0, EntityID: "pe_x", Comm: "x"}}, true},
 		{"process no entity id", TelemetryEvent{Class: detection.ClassProcess, Process: &ProcessObservation{Kind: "exec", PID: 1, Comm: "x"}}, true},
 		{"process no comm/path", TelemetryEvent{Class: detection.ClassProcess, Process: &ProcessObservation{Kind: "exec", PID: 1, EntityID: "pe_x"}}, true},
+		{"process exit no start time", TelemetryEvent{Class: detection.ClassProcess, Process: &ProcessObservation{Kind: "exit", PID: 1, EntityID: "pe_x", Comm: "x"}}, true},
 		{"network bad proto", TelemetryEvent{Class: detection.ClassNetwork, Network: &NetworkObservation{Kind: "connect", Proto: "sctp", Direction: "egress", RemoteAddr: "1.1.1.1", RemotePort: 1}}, true},
 		{"network bad direction", TelemetryEvent{Class: detection.ClassNetwork, Network: &NetworkObservation{Kind: "connect", Proto: "tcp", Direction: "sideways", RemoteAddr: "1.1.1.1", RemotePort: 1}}, true},
 		{"network no remote", TelemetryEvent{Class: detection.ClassNetwork, Network: &NetworkObservation{Kind: "connect", Proto: "tcp", Direction: "egress", RemotePort: 1}}, true},
@@ -68,6 +70,7 @@ func TestTelemetryEventEventType(t *testing.T) {
 	}{
 		{TelemetryEvent{Class: detection.ClassProcess, Process: &ProcessObservation{Kind: "exec"}}, "process.exec"},
 		{TelemetryEvent{Class: detection.ClassProcess, Process: &ProcessObservation{Kind: "fork"}}, "process.fork"},
+		{TelemetryEvent{Class: detection.ClassProcess, Process: &ProcessObservation{Kind: "exit"}}, "process.exit"},
 		{TelemetryEvent{Class: detection.ClassNetwork, Network: &NetworkObservation{Kind: "connect"}}, "network.connect"},
 		{TelemetryEvent{Class: detection.ClassFile, File: &FileObservation{Op: "write"}}, "file.write"},
 		{TelemetryEvent{Class: detection.ClassPrivilege, Privilege: &PrivilegeObservation{Kind: "capset"}}, "privilege.capset"},

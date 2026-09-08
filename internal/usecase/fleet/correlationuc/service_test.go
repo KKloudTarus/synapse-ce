@@ -3,39 +3,88 @@ package correlationuc
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/correlation"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/detectionprovenance"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/endpoint"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 type fakeDetections struct{ recs []detection.Record }
 
-func (f fakeDetections) ListDetections(context.Context, shared.ID) ([]detection.Record, error) {
-	return f.recs, nil
+func (f fakeDetections) CorrelationHighWater(_ context.Context, _ shared.ID, completed correlation.SourcePosition, _ time.Time) (correlation.SourcePosition, bool, error) {
+	var high correlation.SourcePosition
+	for _, r := range f.recs {
+		at := r.RecordedAt
+		if at.IsZero() {
+			at = r.Detection.Observed
+		}
+		p := correlation.SourcePosition{RecordedAt: at, ID: r.ID}
+		if !completed.RecordedAt.IsZero() && !sourcePositionAfter(p, completed) {
+			continue
+		}
+		if high.RecordedAt.IsZero() || sourcePositionAfter(p, high) {
+			high = p
+		}
+	}
+	return high, !high.RecordedAt.IsZero(), nil
+}
+func (f fakeDetections) ListCorrelationSourcePage(_ context.Context, _ shared.ID, after, through correlation.SourcePosition, _ time.Time, limit int) ([]detection.Record, bool, error) {
+	var out []detection.Record
+	for _, r := range f.recs {
+		if r.RecordedAt.IsZero() {
+			r.RecordedAt = r.Detection.Observed
+		}
+		if (after.RecordedAt.IsZero() || r.RecordedAt.After(after.RecordedAt) || (r.RecordedAt.Equal(after.RecordedAt) && r.ID > after.ID)) && (r.RecordedAt.Before(through.RecordedAt) || (r.RecordedAt.Equal(through.RecordedAt) && r.ID <= through.ID)) {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].RecordedAt.Equal(out[j].RecordedAt) {
+			return out[i].RecordedAt.Before(out[j].RecordedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	more := len(out) > limit
+	if more {
+		out = out[:limit]
+	}
+	return out, more, nil
 }
 
-// fakeIncidents records correlator output into an in-memory map, honoring RecordCorrelation's batch
-// idempotency (an incident id seen before is skipped).
-type fakeIncidents struct{ seen map[shared.ID]bool }
+type fakeIncidents struct {
+	seen   map[shared.ID]bool
+	events []incident.IncidentEvent
+}
 
-func (f *fakeIncidents) RecordCorrelation(_ context.Context, events []incident.IncidentEvent) ([]incident.Incident, error) {
+func (f *fakeIncidents) RecordCorrelation(_ context.Context, events []incident.IncidentEvent) ([]incident.Incident, []incident.Incident, error) {
 	if f.seen == nil {
 		f.seen = map[shared.ID]bool{}
 	}
-	var created []incident.Incident
-	for _, e := range events {
-		if f.seen[e.IncidentID] {
-			continue
-		}
-		f.seen[e.IncidentID] = true
-		created = append(created, incident.Incident{ID: e.IncidentID, State: incident.StateOpen})
+	incidentIDs := map[shared.ID]struct{}{}
+	f.events = append(f.events, events...)
+	for _, event := range events {
+		incidentIDs[event.IncidentID] = struct{}{}
 	}
-	return created, nil
+	var created, updated []incident.Incident
+	for id := range incidentIDs {
+		projection := incident.Incident{ID: id, State: incident.StateOpen}
+		if f.seen[id] {
+			updated = append(updated, projection)
+		} else {
+			f.seen[id] = true
+			created = append(created, projection)
+		}
+	}
+	return created, updated, nil
 }
 
 type fakeReassessor struct {
@@ -56,107 +105,250 @@ type fakeAudit struct{ n int }
 func (f *fakeAudit) Record(context.Context, ports.AuditEntry) error { f.n++; return nil }
 
 func rec(id, host string, at time.Time) detection.Record {
-	return detection.Record{
-		ID: shared.ID(id), AssetID: "asset-1",
-		Detection: detection.Detection{RuleID: "r1", RuleVersion: 1, Class: detection.ClassProcess, Severity: shared.SeverityHigh, HostID: shared.ID(host), Observed: at},
-	}
+	return detection.Record{ID: shared.ID(id), AssetID: "asset-1", Detection: detection.Detection{RuleID: "r1", RuleVersion: 1, Class: detection.ClassProcess, Severity: shared.SeverityHigh, HostID: shared.ID(host), Observed: at}}
 }
-
-func newSvc(t *testing.T, dets []detection.Record, re RiskReassessor) (*Service, *fakeAudit) {
+func newSvc(t *testing.T, dets []detection.Record, reassessor RiskReassessor) (*Service, *fakeAudit) {
 	t.Helper()
 	audit := &fakeAudit{}
-	s, err := NewService(fakeDetections{recs: dets}, &fakeIncidents{}, re, correlation.Config{Window: time.Hour, MaxPerIncident: 50}, audit, func() time.Time { return time.Unix(0, 0).UTC() })
+	service, err := NewService(fakeDetections{recs: dets}, memory.NewDetectionProvenanceStore(), memory.NewEndpointTimelineStore(), memory.NewCorrelationStateStore(), &fakeIncidents{}, reassessor, correlation.Config{Window: time.Hour, AllowedLateness: time.Minute, MaxPerIncident: 50}, audit, func() time.Time { return time.Unix(1_700_000_100, 0).UTC() })
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s, audit
+	return service, audit
+}
+func testCtx() context.Context { return shared.WithTenant(context.Background(), "tenant-1") }
+func correlateSnapshot(t *testing.T, svc *Service, ctx context.Context) Result {
+	t.Helper()
+	var total Result
+	for range 32 {
+		result, err := svc.CorrelateEngagement(ctx, "operator", "eng-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		total.Created = append(total.Created, result.Created...)
+		total.Updated = append(total.Updated, result.Updated...)
+		total.Reassessed += result.Reassessed
+		total.ReassessFailed += result.ReassessFailed
+		state, err := svc.state.LoadCorrelationState(ctx, "eng-1", nil, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Checkpoint.Phase == "" {
+			return total
+		}
+	}
+	t.Fatal("correlation snapshot did not finish")
+	return Result{}
 }
 
 func TestCorrelateCreatesAndReassesses(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0).UTC()
-	// Two detections on the same host within the window → one incident.
-	dets := []detection.Record{rec("d1", "host-1", base), rec("d2", "host-1", base.Add(time.Minute))}
-	re := &fakeReassessor{}
-	s, audit := newSvc(t, dets, re)
-
-	res, err := s.CorrelateEngagement(context.Background(), "operator", "eng-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Created) != 1 {
-		t.Fatalf("two same-host detections in-window must yield one incident, got %d", len(res.Created))
-	}
-	if res.Reassessed != 1 || res.ReassessFailed != 0 || re.calls != 1 {
-		t.Fatalf("the created incident must be auto-reassessed once: %+v calls=%d", res, re.calls)
-	}
-	if audit.n != 1 {
-		t.Fatalf("correlation must be audited once, got %d", audit.n)
+	reassessor := &fakeReassessor{}
+	service, audit := newSvc(t, []detection.Record{rec("d1", "host-1", base), rec("d2", "host-1", base.Add(time.Minute))}, reassessor)
+	result := correlateSnapshot(t, service, testCtx())
+	if len(result.Created) != 1 || result.Reassessed != 1 || result.ReassessFailed != 0 || reassessor.calls != 1 || audit.n != 3 {
+		t.Fatalf("unexpected result: %+v calls=%d audit=%d", result, reassessor.calls, audit.n)
 	}
 }
-
 func TestReassessFailureIsCountedNotFatal(t *testing.T) {
-	base := time.Unix(1_700_000_000, 0).UTC()
-	s, _ := newSvc(t, []detection.Record{rec("d1", "host-1", base)}, &fakeReassessor{err: errors.New("scorer down")})
-	res, err := s.CorrelateEngagement(context.Background(), "operator", "eng-1")
-	if err != nil {
-		t.Fatalf("a reassess failure must NOT fail correlation (the incident is durably recorded): %v", err)
+	service, _ := newSvc(t, []detection.Record{rec("d1", "host-1", time.Unix(1_700_000_000, 0).UTC())}, &fakeReassessor{err: errors.New("scorer down")})
+	result := correlateSnapshot(t, service, testCtx())
+	if len(result.Created) != 1 || result.ReassessFailed != 1 {
+		t.Fatalf("result=%+v", result)
 	}
-	if len(res.Created) != 1 || res.Reassessed != 0 || res.ReassessFailed != 1 {
-		t.Fatalf("a scoring failure must be counted, not fatal: %+v", res)
+}
+func TestIncrementalRerunIsNoOp(t *testing.T) {
+	service, _ := newSvc(t, []detection.Record{rec("d1", "host-1", time.Unix(1_700_000_000, 0).UTC())}, nil)
+	_ = correlateSnapshot(t, service, testCtx())
+	result, err := service.CorrelateEngagement(testCtx(), "operator", "eng-1")
+	if err != nil || len(result.Created) != 0 || len(result.Updated) != 0 {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 
-func TestNilReassessorRecordsWithoutScoring(t *testing.T) {
+func TestCorrelationSnapshotIsIndependentOfSourceOrderAndPageSize(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0).UTC()
-	s, _ := newSvc(t, []detection.Record{rec("d1", "host-1", base)}, nil)
-	res, err := s.CorrelateEngagement(context.Background(), "operator", "eng-1")
+	run := func(pageSize int, reverseRecorded bool) []incident.IncidentEvent {
+		left := rec("d-a", "host-1", base)
+		right := rec("d-c", "host-1", base.Add(2*time.Hour))
+		// Source ordering is intentionally opposite event time, with an equal-time ID tie.
+		left.RecordedAt, right.RecordedAt = base.Add(time.Second), base
+		if reverseRecorded {
+			left.RecordedAt, right.RecordedAt = right.RecordedAt, left.RecordedAt
+		}
+		source := &mutableDetections{recs: []detection.Record{right, left}}
+		recorder := &fakeIncidents{}
+		svc, err := NewService(source, memory.NewDetectionProvenanceStore(), memory.NewEndpointTimelineStore(), memory.NewCorrelationStateStore(), recorder, nil, correlation.Config{Window: time.Hour, AllowedLateness: 3 * time.Hour, MaxPerIncident: 10, PageSize: pageSize}, &fakeAudit{}, func() time.Time { return base.Add(4 * time.Hour) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result := correlateSnapshot(t, svc, testCtx()); len(result.Created) != 2 {
+			t.Fatalf("initial sessions page size %d: %+v", pageSize, result)
+		}
+		bridge := rec("d-b", "host-1", base.Add(time.Hour))
+		bridge.RecordedAt = base.Add(2 * time.Second) // newer source frontier, between the two event-time sessions.
+		source.recs = append(source.recs, bridge)
+		_ = correlateSnapshot(t, svc, testCtx())
+		merged := false
+		for _, event := range recorder.events {
+			merged = merged || event.Kind == incident.EventMerged
+		}
+		if !merged {
+			t.Fatalf("bridge did not merge prior sessions: %+v", recorder.events)
+		}
+		return recorder.events
+	}
+	forward := run(1, false)
+	reverse := run(3, true)
+	if len(forward) != len(reverse) {
+		t.Fatalf("event count varies with page/order: %d != %d", len(forward), len(reverse))
+	}
+	for i := range forward {
+		left, right := forward[i], reverse[i]
+		left.At, right.At = time.Time{}, time.Time{} // page execution time is deliberately not graph identity.
+		if left != right {
+			t.Fatalf("event %d varies with page/order: %+v != %+v", i, left, right)
+		}
+	}
+}
+
+type mutableDetections struct{ recs []detection.Record }
+
+func (f *mutableDetections) CorrelationHighWater(ctx context.Context, engagement shared.ID, completed correlation.SourcePosition, asOf time.Time) (correlation.SourcePosition, bool, error) {
+	return fakeDetections{recs: f.recs}.CorrelationHighWater(ctx, engagement, completed, asOf)
+}
+func (f *mutableDetections) ListCorrelationSourcePage(ctx context.Context, engagement shared.ID, after, through correlation.SourcePosition, asOf time.Time, limit int) ([]detection.Record, bool, error) {
+	return fakeDetections{recs: f.recs}.ListCorrelationSourcePage(ctx, engagement, after, through, asOf, limit)
+}
+
+func TestCorrelationSnapshotExcludesConcurrentDetectionUntilNextSnapshot(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	source := &mutableDetections{recs: []detection.Record{rec("d1", "host-1", base)}}
+	source.recs[0].RecordedAt = base
+	recorder := &fakeIncidents{}
+	svc, err := NewService(source, memory.NewDetectionProvenanceStore(), memory.NewEndpointTimelineStore(), memory.NewCorrelationStateStore(), recorder, nil, correlation.Config{Window: time.Hour, MaxPerIncident: 10, PageSize: 1}, &fakeAudit{}, func() time.Time { return base.Add(time.Hour) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Created) != 1 || res.Reassessed != 0 || res.ReassessFailed != 0 {
-		t.Fatalf("nil reassessor must record incidents without scoring: %+v", res)
+	ctx := testCtx()
+	if _, err := svc.CorrelateEngagement(ctx, "operator", "eng-1"); err != nil { // captures high water.
+		t.Fatal(err)
+	}
+	source.recs = append(source.recs, rec("d2", "host-2", base.Add(time.Second)))
+	source.recs[1].RecordedAt = base.Add(time.Second)
+	_ = correlateSnapshot(t, svc, ctx)
+	if len(recorder.events) != 1 || recorder.events[0].DetectionID != "d1" {
+		t.Fatalf("first snapshot included post-high-water detection: %+v", recorder.events)
+	}
+	_ = correlateSnapshot(t, svc, ctx)
+	seenD2 := false
+	for _, event := range recorder.events {
+		seenD2 = seenD2 || event.DetectionID == "d2"
+	}
+	if !seenD2 {
+		t.Fatalf("next snapshot did not consume post-high-water detection: %+v", recorder.events)
 	}
 }
 
-func TestValidation(t *testing.T) {
-	if _, err := NewService(fakeDetections{}, &fakeIncidents{}, nil, correlation.Config{Window: 0, MaxPerIncident: 1}, &fakeAudit{}, func() time.Time { return time.Now() }); err == nil {
-		t.Fatal("a non-positive window must be rejected")
-	}
-}
-
-type fakeNotifier struct {
-	calls    int
-	engID    shared.ID
-	actor    string
-	incident []incident.Incident
-}
-
-func (n *fakeNotifier) IncidentsCreated(_ context.Context, actor string, engagementID shared.ID, created []incident.Incident) {
-	n.calls++
-	n.actor, n.engID, n.incident = actor, engagementID, created
-}
-
-// A wired notifier hears about every incident a pass creates, with the scored projection when tri-score
-// ran, and hears nothing on an idempotent re-run that creates none.
-func TestNotifierHearsCreatedIncidentsOnce(t *testing.T) {
+func TestCorrelationFanoutSaturationDoesNotAdvanceMaterialization(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0).UTC()
-	svc, _ := newSvc(t, []detection.Record{rec("d1", "host-1", base), rec("d2", "host-1", base.Add(time.Minute))}, &fakeReassessor{})
-	n := &fakeNotifier{}
-	svc.SetNotifier(n)
-	res, err := svc.CorrelateEngagement(context.Background(), "analyst", "eng-1")
+	ctx := testCtx()
+	provenance := memory.NewDetectionProvenanceStore()
+	record := rec("d1", "host-1", base)
+	record.AgentID, record.RecordedAt = "agent-1", base
+	transition := detectionprovenance.Transition{TenantID: "tenant-1", EngagementID: "eng-1", DetectionID: record.ID, Sequence: 1, Kind: detectionprovenance.Received, Status: detectionprovenance.StatusPending, AgentID: record.AgentID, AssetID: record.AssetID, OccurredAt: base, TelemetryRefs: []fleetagent.TelemetryReference{{StreamID: "stream", Epoch: 1, Sequence: 1, EventID: "event-1", Digest: "a"}, {StreamID: "stream", Epoch: 1, Sequence: 2, EventID: "event-2", Digest: "b"}}}
+	transition = detectionprovenance.SealTransition(transition, "")
+	if err := provenance.AdmitPending(ctx, detectionprovenance.Current{TenantID: "tenant-1", EngagementID: "eng-1", DetectionID: record.ID, Status: detectionprovenance.StatusPending, PendingInput: []byte("x"), UpdatedAt: base}, transition); err != nil {
+		t.Fatal(err)
+	}
+	state, recorder := memory.NewCorrelationStateStore(), &fakeIncidents{}
+	svc, err := NewService(fakeDetections{recs: []detection.Record{record}}, provenance, memory.NewEndpointTimelineStore(), state, recorder, nil, correlation.Config{Window: time.Hour, MaxPerIncident: 10, MaxTimelineRefsPerDetection: 1, MaxTimelineRefsPerPage: 1}, &fakeAudit{}, func() time.Time { return base.Add(time.Hour) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Created) == 0 {
-		t.Fatal("fixture created no incident")
-	}
-	if n.calls != 1 || n.actor != "analyst" || n.engID != "eng-1" || len(n.incident) != len(res.Created) {
-		t.Fatalf("notifier call = %+v", n)
-	}
-	if _, err := svc.CorrelateEngagement(context.Background(), "analyst", "eng-1"); err != nil {
+	if _, err := svc.CorrelateEngagement(ctx, "operator", "eng-1"); err != nil {
 		t.Fatal(err)
 	}
-	if n.calls != 1 {
-		t.Fatalf("re-run notified again: %d", n.calls)
+	before, err := state.LoadCorrelationState(ctx, "eng-1", nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CorrelateEngagement(ctx, "operator", "eng-1"); !errors.Is(err, shared.ErrSaturated) {
+		t.Fatalf("fanout saturation error=%v", err)
+	}
+	after, err := state.LoadCorrelationState(ctx, "eng-1", nil, 10)
+	if err != nil || after.Checkpoint != before.Checkpoint || len(recorder.events) != 0 {
+		t.Fatalf("fanout saturation mutated state=%+v before=%+v events=%+v err=%v", after.Checkpoint, before.Checkpoint, recorder.events, err)
+	}
+}
+
+func TestCorrelationSaturationDoesNotAdvanceConsumeStateOrRecordIncidents(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	records := []detection.Record{rec("d1", "host-1", base), rec("d2", "host-2", base)}
+	for i := range records {
+		records[i].RecordedAt = base
+	}
+	recorder := &fakeIncidents{}
+	state := memory.NewCorrelationStateStore()
+	svc, err := NewService(fakeDetections{recs: records}, memory.NewDetectionProvenanceStore(), memory.NewEndpointTimelineStore(), state, recorder, nil, correlation.Config{Window: time.Hour, MaxPerIncident: 10, PageSize: 2, MaxActiveSessions: 1}, &fakeAudit{}, func() time.Time { return base.Add(time.Hour) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := testCtx()
+	if _, err := svc.CorrelateEngagement(ctx, "operator", "eng-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CorrelateEngagement(ctx, "operator", "eng-1"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := state.LoadCorrelationState(ctx, "eng-1", nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CorrelateEngagement(ctx, "operator", "eng-1"); !errors.Is(err, shared.ErrSaturated) {
+		t.Fatalf("consume saturation error=%v", err)
+	}
+	after, err := state.LoadCorrelationState(ctx, "eng-1", nil, 10)
+	if err != nil || after.Checkpoint != before.Checkpoint || len(recorder.events) != 0 {
+		t.Fatalf("saturation mutated state=%+v before=%+v events=%+v err=%v", after.Checkpoint, before.Checkpoint, recorder.events, err)
+	}
+}
+
+func TestSignalsLoadsOnlyCausalTimelineAndRejectsContradictions(t *testing.T) {
+	ctx := testCtx()
+	base := time.Unix(1_700_000_000, 0).UTC()
+	records := []detection.Record{{ID: "d1", AgentID: "agent-1", AssetID: "asset-1", Detection: detection.Detection{HostID: "host-1", Observed: base, Severity: shared.SeverityHigh, RuleID: "r"}}}
+	provenance := memory.NewDetectionProvenanceStore()
+	timeline := memory.NewEndpointTimelineStore()
+	transition := detectionprovenance.Transition{TenantID: "tenant-1", EngagementID: "eng-1", DetectionID: "d1", Sequence: 1, Kind: detectionprovenance.Received, Status: detectionprovenance.StatusPending, AgentID: "agent-1", AssetID: "asset-1", TelemetryRefs: []fleetagent.TelemetryReference{{StreamID: "stream", Epoch: 1, Sequence: 1, EventID: "event-causal", Digest: "digest"}}, OccurredAt: base}
+	transition = detectionprovenance.SealTransition(transition, "")
+	current := detectionprovenance.Current{TenantID: "tenant-1", EngagementID: "eng-1", DetectionID: "d1", Status: detectionprovenance.StatusPending, PendingInput: []byte("x"), UpdatedAt: base}
+	if err := provenance.AdmitPending(ctx, current, transition); err != nil {
+		t.Fatal(err)
+	}
+	entries := []endpoint.TimelineEntry{{TenantID: "tenant-1", AssetID: "asset-1", SourceAgentID: "agent-1", EntityID: "host-1", EventID: "event-causal", OccurredAt: base, Kind: endpoint.TimelineProcessExit, Summary: "causal exit"}, {TenantID: "tenant-1", AssetID: "asset-1", SourceAgentID: "agent-1", EntityID: "host-1", EventID: "event-unrelated", OccurredAt: base, Kind: endpoint.TimelineProcessExit, Summary: "unrelated"}}
+	if err := timeline.AppendTimeline(ctx, entries); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := NewService(fakeDetections{recs: records}, provenance, timeline, memory.NewCorrelationStateStore(), &fakeIncidents{}, nil, correlation.Config{Window: time.Hour, MaxPerIncident: 10}, &fakeAudit{}, func() time.Time { return base.Add(time.Minute) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := correlateSnapshot(t, svc, ctx)
+	if len(result.Created) != 1 {
+		t.Fatalf("correlate result=%+v err=%v", result, err)
+	}
+	state, err := svc.state.LoadCorrelationState(ctx, "eng-1", []shared.ID{timelineSignalID("d1", "event-causal"), timelineSignalID("d1", "event-unrelated")}, 100)
+	if err != nil || len(state.KnownSignalIDs) != 1 {
+		t.Fatalf("causal timeline selection=%+v err=%v", state, err)
+	}
+	entries[0].SourceAgentID = "wrong-agent"
+	timeline = memory.NewEndpointTimelineStore()
+	if err := timeline.AppendTimeline(ctx, entries[:1]); err != nil {
+		t.Fatal(err)
+	}
+	svc.timeline = timeline
+	if _, err := svc.sourceSignals(ctx, "eng-1", records); err == nil {
+		t.Fatal("wrong timeline agent must fail closed")
 	}
 }

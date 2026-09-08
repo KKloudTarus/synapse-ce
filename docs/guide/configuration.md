@@ -258,7 +258,12 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_FLEET_DETECTION_RECONCILE_INTERVAL` | `1m` | How often the tenant-scoped reconciler repairs pending attributed detections. |
 | `SYNAPSE_FLEET_CORRELATION_ENABLED` | `false` | Correlation orchestration: folds an engagement's sealed detections into incidents, auto-scoring each when tri-score is enabled. Runs on every detection batch that seals new detections, and on demand through `POST /api/v1/fleet/engagements/{id}/correlate`. |
 | `SYNAPSE_FLEET_CORRELATION_WINDOW` | `30m` | Session gap for correlation — detections on one (asset, host) more than this apart start a new incident. |
+| `SYNAPSE_FLEET_CORRELATION_ALLOWED_LATENESS` | `5m` | Delay between maximum observed event time and the monotonic watermark. A newly seen detection behind the previous watermark is isolated with a visible coverage note rather than silently rewriting a finalized session. |
 | `SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT` | `100` | Cap on detections one incident reflects individually before a storm is suppressed to a single note. |
+| `SYNAPSE_FLEET_CORRELATION_PAGE_SIZE` | `100` | Source materialization and staged consumption rows per bounded invocation (1–1000). |
+| `SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS` | `500` | Maximum active session summaries loaded into one correlation transaction (1–10000). |
+| `SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_DETECTION` | `32` | Maximum causal timeline references fetched for one detection (1–1000). |
+| `SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE` | `500` | Maximum causal timeline references fetched by one materialization page; at least the per-detection cap (1–10000). |
 | `SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED` | `false` | Serve agent signing-key registration (`POST /api/v1/fleet/keys`) + operator key list/revoke (A4, A0.2). |
 | `SYNAPSE_FLEET_STALE_AFTER` | `10m` | An agent older than this reads as stale (`<=0` disables the staleness view). |
 | `SYNAPSE_ALERT_WEBHOOK_URL` | (unset) | Enables operator alerting: each incident correlation opens is posted as signed JSON to this URL. `https` required, `http` only for a loopback host. `POST /api/v1/alerts/test` sends a test alert. |
@@ -268,8 +273,16 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED` | `false` | Allow UNSIGNED alert delivery when no secret is set. Default false: a configured webhook requires `SYNAPSE_ALERT_WEBHOOK_SECRET` so a receiver can trust the alert is genuine. Set true only for a development receiver that does not verify the signature. |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |
 | `SYNAPSE_FLEET_MIN_AGENT_VERSION` | empty | Reject agents below this version (empty = no floor). |
+| `SYNAPSE_FLEET_ENROL_URL` | `SYNAPSE_FLEET_URL` | One-time enrollment API base URL for `synapse-agent`; after enrollment, the agent uses `SYNAPSE_FLEET_URL`. HTTPS is required except for a loopback host. |
 | `SYNAPSE_FLEET_CA_CERT` / `_CA_KEY` / `_CERT_TTL` | empty | Enrolment PKI for agent client certificates (never logged). |
 | `SYNAPSE_FLEET_SIGNER_KEY` | empty | Signing key for agent packages/updates (never logged). |
+| `SYNAPSE_RESPONSE_EXECUTION_ENABLED` | `false` | Opt in to live governed response. The API requires fleet transport, assets, host ingest, telemetry ingest, key registration, and the command-signing key. An endpoint agent additionally requires process detection and a pinned command trust bundle. |
+| `SYNAPSE_RESPONSE_COMMAND_SIGNING_KEY_FILE` | empty | API-only owner-readable Ed25519 response-command private-key document. Never mount it into an endpoint agent. |
+| `SYNAPSE_RESPONSE_COMMAND_TRUST_FILE` | empty | Agent-only owner-readable bundle of pinned response-command public keys. Unknown, expired, revoked, or incorrectly purposed keys fail closed. |
+| `SYNAPSE_RESPONSE_COMMAND_TTL` | `2m` | API-issued response command lifetime; must be greater than zero and at most `10m`. |
+| `SYNAPSE_RESPONSE_EXECUTION_POLL_INTERVAL` | `100ms` | API polling interval for a durable response work-order result; must be greater than zero and at most `1s`. |
+| `SYNAPSE_RESPONSE_OBSERVER_ENABLED` | `false` | Enable the independent non-executing process observer. It cannot execute response commands. |
+| `SYNAPSE_RESPONSE_OBSERVER_DELAY` | `5s` | Delay before the observer seals its verdict-free readiness report. |
 | `SYNAPSE_LEADER_ENABLED` | `false` | Fence scheduled dispatch to one node via a Postgres lease. |
 | `SYNAPSE_LEADER_RESOURCE` | `scheduler` | Lease name. |
 | `SYNAPSE_LEADER_TERM` | `15s` | Lease term. |

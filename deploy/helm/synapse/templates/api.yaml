@@ -50,6 +50,8 @@ spec:
             {{- end }}
           env:
             {{- include "synapse.runtimeEnv" . | nindent 12 }}
+            - name: SYNAPSE_DB_HALT_WRITER_DSN
+              valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.database.haltWriter.name is required" .Values.existingSecrets.database.haltWriter.name }}, key: {{ required "existingSecrets.database.haltWriter.key is required" .Values.existingSecrets.database.haltWriter.key }}}}
             # A production Helm release is a single-tenant regional cell: tenant
             # routing cannot move data across residency boundaries inside one cell.
             - name: SYNAPSE_SINGLE_TENANT
@@ -62,6 +64,42 @@ spec:
             - name: SYNAPSE_METRICS_ADDR
               value: {{ printf "0.0.0.0:%d" (.Values.api.metrics.port | int) | quote }}
             {{- end }}
+            - name: SYNAPSE_FLEET_ENABLED
+              value: {{ .Values.fleet.enabled | quote }}
+            {{- if .Values.fleet.enabled }}
+            - name: SYNAPSE_FLEET_SIGNER_KEY
+              valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.cryptography.fleetSignerKey.name is required when fleet.enabled" .Values.existingSecrets.cryptography.fleetSignerKey.name }}, key: {{ required "existingSecrets.cryptography.fleetSignerKey.key is required when fleet.enabled" .Values.existingSecrets.cryptography.fleetSignerKey.key }}}}
+            {{- end }}
+            - name: SYNAPSE_FLEET_ASSETS_ENABLED
+              value: {{ .Values.fleet.assetsEnabled | quote }}
+            - name: SYNAPSE_FLEET_HOST_INGEST_ENABLED
+              value: {{ .Values.fleet.hostIngestEnabled | quote }}
+            - name: SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED
+              value: {{ .Values.fleet.telemetryIngestEnabled | quote }}
+            - name: SYNAPSE_FLEET_DETECTION_INGEST_ENABLED
+              value: {{ .Values.fleet.detectionIngestEnabled | quote }}
+            - name: SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED
+              value: {{ .Values.fleet.keyRegistrationEnabled | quote }}
+            - name: SYNAPSE_FLEET_STALE_AFTER
+              value: {{ .Values.fleet.staleAfter | quote }}
+            - name: SYNAPSE_FLEET_CORRELATION_ENABLED
+              value: {{ .Values.fleet.correlation.enabled | quote }}
+            - name: SYNAPSE_FLEET_CORRELATION_WINDOW
+              value: {{ .Values.fleet.correlation.window | quote }}
+            - name: SYNAPSE_FLEET_CORRELATION_ALLOWED_LATENESS
+              value: {{ .Values.fleet.correlation.allowedLateness | quote }}
+            - name: SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT
+              value: {{ .Values.fleet.correlation.maxPerIncident | quote }}
+            - name: SYNAPSE_RESPONSE_EXECUTION_ENABLED
+              value: {{ .Values.responseExecution.enabled | quote }}
+            {{- if .Values.responseExecution.enabled }}
+            - name: SYNAPSE_RESPONSE_COMMAND_SIGNING_KEY_FILE
+              value: /etc/synapse/response-command-signing/key
+            {{- end }}
+            - name: SYNAPSE_RESPONSE_COMMAND_TTL
+              value: {{ .Values.responseExecution.commandTTL | quote }}
+            - name: SYNAPSE_RESPONSE_EXECUTION_POLL_INTERVAL
+              value: {{ .Values.responseExecution.pollInterval | quote }}
             {{- if .Values.api.grantAuthority.enabled }}
             - name: SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR
               value: {{ printf "0.0.0.0:%d" (.Values.api.grantAuthority.port | int) | quote }}
@@ -88,6 +126,9 @@ spec:
             - {name: synapse-data, mountPath: /var/lib/synapse}
             - {name: tmp, mountPath: /tmp}
             - {name: database-ca, mountPath: /etc/synapse/database-ca, readOnly: true}
+            {{- if .Values.responseExecution.enabled }}
+            - {name: response-command-signing-key, mountPath: /etc/synapse/response-command-signing, readOnly: true}
+            {{- end }}
       volumes:
         - name: synapse-data
           emptyDir: {}
@@ -99,3 +140,11 @@ spec:
             items:
               - key: {{ required "externalDatabase.caBundle.key is required" .Values.externalDatabase.caBundle.key }}
                 path: ca.crt
+        {{- if .Values.responseExecution.enabled }}
+        - name: response-command-signing-key
+          secret:
+            secretName: {{ required "existingSecrets.cryptography.responseCommandSigningKey.name is required when responseExecution.enabled" .Values.existingSecrets.cryptography.responseCommandSigningKey.name }}
+            items:
+              - key: {{ required "existingSecrets.cryptography.responseCommandSigningKey.key is required when responseExecution.enabled" .Values.existingSecrets.cryptography.responseCommandSigningKey.key }}
+                path: key
+        {{- end }}

@@ -190,6 +190,15 @@ func dsnWithApplicationName(dsn, applicationName string) (string, error) {
 	return u.String(), nil
 }
 
+func TestValidateResponseRoleSeparation(t *testing.T) {
+	if err := ValidateResponseRoleSeparation("postgres://owner@example.test/db", "postgres://runtime@example.test/db", "postgres://halt@example.test/db"); err != nil {
+		t.Fatalf("distinct response roles rejected: %v", err)
+	}
+	if err := ValidateResponseRoleSeparation("postgres://owner@example.test/db", "postgres://runtime@example.test/db", "postgres://runtime@example.test/db"); err == nil {
+		t.Fatal("shared runtime/halt writer role accepted")
+	}
+}
+
 func TestValidateMigrationRoleSeparation(t *testing.T) {
 	tests := []struct {
 		name         string

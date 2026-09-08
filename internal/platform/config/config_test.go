@@ -29,6 +29,27 @@ func TestIsProductionFailsClosed(t *testing.T) {
 	}
 }
 
+func TestValidateCorrelationPosture(t *testing.T) {
+	valid := Config{FleetCorrelationEnabled: true, FleetCorrelationWindow: time.Hour, FleetCorrelationMaxPerIncident: 1, FleetCorrelationPageSize: 100, FleetCorrelationMaxActiveSessions: 10, FleetCorrelationMaxTimelineRefsPerDetection: 1, FleetCorrelationMaxTimelineRefsPerPage: 1}
+	if err := valid.ValidateCorrelationPosture(); err != nil {
+		t.Fatalf("valid correlation posture: %v", err)
+	}
+	if err := (Config{}).ValidateCorrelationPosture(); err != nil {
+		t.Fatalf("disabled correlation must ignore bounds: %v", err)
+	}
+	for _, mutate := range []func(*Config){
+		func(c *Config) { c.FleetCorrelationPageSize = 1001 },
+		func(c *Config) { c.FleetCorrelationMaxActiveSessions = 10001 },
+		func(c *Config) { c.FleetCorrelationMaxTimelineRefsPerDetection = 2 },
+	} {
+		candidate := valid
+		mutate(&candidate)
+		if err := candidate.ValidateCorrelationPosture(); err == nil {
+			t.Fatal("invalid correlation posture was accepted")
+		}
+	}
+}
+
 func TestValidateSandboxPosture(t *testing.T) {
 	tests := []struct {
 		name string
@@ -747,8 +768,33 @@ func TestLoadDASTCeilingsFailClosed(t *testing.T) {
 func TestLoadDatabaseMigrationDSN(t *testing.T) {
 	t.Setenv("SYNAPSE_DB_DSN", "postgres://app@example/app")
 	t.Setenv("SYNAPSE_DB_MIGRATION_DSN", "postgres://owner@example/app")
-	if got := Load().DBMigrationDSN; got != "postgres://owner@example/app" {
+	t.Setenv("SYNAPSE_DB_HALT_WRITER_DSN", "postgres://halt@example/app")
+	cfg := Load()
+	if got := cfg.DBMigrationDSN; got != "postgres://owner@example/app" {
 		t.Fatalf("migration DSN = %q", got)
+	}
+	if got := cfg.DBHaltWriterDSN; got != "postgres://halt@example/app" {
+		t.Fatalf("halt writer DSN = %q", got)
+	}
+}
+
+func TestValidateResponseExecutionPostureRequiresSeparatedHaltWriter(t *testing.T) {
+	cfg := Config{
+		ResponseExecutionEnabled: true, FleetEnabled: true, FleetAssetsEnabled: true,
+		FleetHostIngestEnabled: true, FleetTelemetryIngestEnabled: true, FleetKeyRegistrationEnabled: true,
+		ResponseCommandSigningKeyFile: "key.json", ResponseCommandTTL: time.Minute, ResponseExecutionPollInterval: time.Millisecond,
+		DBDSN: "postgres://runtime@db.example/synapse", DBMigrationDSN: "postgres://owner@db.example/synapse",
+	}
+	if err := cfg.ValidateResponseExecutionPosture(); err == nil {
+		t.Fatal("response execution without SYNAPSE_DB_HALT_WRITER_DSN must fail")
+	}
+	cfg.DBHaltWriterDSN = "postgres://halt@db.example/synapse"
+	if err := cfg.ValidateResponseExecutionPosture(); err != nil {
+		t.Fatalf("separate response database identities rejected: %v", err)
+	}
+	cfg.DBHaltWriterDSN = cfg.DBDSN
+	if err := cfg.ValidateResponseExecutionPosture(); err == nil {
+		t.Fatal("runtime and halt-writer database users must be distinct")
 	}
 }
 

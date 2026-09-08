@@ -148,6 +148,7 @@ func TestTelemetryManifestSignVerifyRoundTrip(t *testing.T) {
 	// Tamper: any bound field change breaks the signature.
 	for _, mut := range []func(*TelemetryBatchManifest){
 		func(m *TelemetryBatchManifest) { m.HostID = "other-host" },
+		func(m *TelemetryBatchManifest) { m.ResponseObservationID = "observation-1" },
 		func(m *TelemetryBatchManifest) { m.Position.Sequence = 6 },
 		func(m *TelemetryBatchManifest) { m.PayloadDigest = "other" },
 		func(m *TelemetryBatchManifest) { m.Events[0].Digest = "tampered" },

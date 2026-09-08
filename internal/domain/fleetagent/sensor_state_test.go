@@ -51,6 +51,12 @@ func TestSensorStateReportSignatureUsesBoundFields(t *testing.T) {
 		t.Fatalf("verify signed report: %v", err)
 	}
 
+	report.ResponseObservationID = shared.ID("observation-1")
+	if err := VerifySensorStateWithKey(key, report.ObservedAt, report); !errors.Is(err, ErrBadSensorStateSignature) {
+		t.Fatalf("verify altered report error = %v, want bad signature", err)
+	}
+
+	report, _, key = testSensorStateReport(t)
 	report.AssetID = shared.ID("other-asset")
 	if err := VerifySensorStateWithKey(key, report.ObservedAt, report); !errors.Is(err, ErrBadSensorStateSignature) {
 		t.Fatalf("verify altered report error = %v, want bad signature", err)

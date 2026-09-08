@@ -29,10 +29,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/adapter/agentspool"
+	"github.com/KKloudTarus/synapse-ce/internal/composition/responseobserver"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetversion"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/hostinv"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
@@ -47,6 +51,10 @@ var agentVersion = buildinfo.App()
 // dotted capability namespace (cf. scan.source, detect.rules — workorder.WorkOrder.Capability).
 const hostInventoryCapability = "scan.host"
 
+const responseProcessCapability = workorder.CapabilityResponseProcess
+const responseHaltCapability = workorder.CapabilityResponseHalt
+const responseObserveCapability = workorder.CapabilityResponseObserve
+
 // minControlPlaneVersion is the minimum control-plane version this agent requires (#412 version skew).
 // If the heartbeat reports an older control plane, the agent refuses to claim work this cycle rather
 // than risk acting against an incompatible transport contract.
@@ -55,11 +63,13 @@ const minControlPlaneVersion = "0.1.0"
 // fleetAPI is the subset of the fleet client the run loop needs; a fake implements it in tests.
 type fleetAPI interface {
 	Enrol(ctx context.Context, enrolToken string, req fleetclient.EnrolRequest) (fleetclient.EnrolResponse, error)
+	ActivateCredential(cred fleetclient.Credential, keyPEM []byte) error
 	Heartbeat(ctx context.Context, token string, req fleetclient.EnrolRequest) (fleetclient.HeartbeatResponse, error)
 	ActivePrivacyPolicy(ctx context.Context, token string) (fleetclient.PrivacyPolicyResponse, error)
 	ClaimWork(ctx context.Context, token string, max int) ([]fleetclient.Order, error)
-	Progress(ctx context.Context, token, orderID string) error
-	SubmitResult(ctx context.Context, token, orderID, status, reason string) error
+	Progress(ctx context.Context, token, orderID, leaseID string) error
+	SubmitResult(ctx context.Context, token, orderID, leaseID, status, reason string) error
+	SubmitResponseResult(ctx context.Context, token, orderID string, request fleetclient.ResponseResultRequest) error
 	SendHostInventory(ctx context.Context, token string, inv any) error
 }
 
@@ -68,6 +78,18 @@ type fleetAPI interface {
 // the canonical asset identity reconciled by the authenticated control plane.
 type hostInventoryResolvedAPI interface {
 	SendHostInventoryResolved(ctx context.Context, token string, inv any) (fleetclient.HostInventoryResponse, error)
+}
+
+type responseCommandExecutor interface {
+	Execute(context.Context, fleetagent.ResponseCommand, string, time.Time) (fleetagent.ResponseExecutionResult, error)
+	ExecuteHaltCommand(context.Context, fleetagent.ResponseHaltCommand, string, time.Time) error
+	Halt(context.Context, int64) error
+	PendingResults(context.Context) ([]fleetagent.ResponseExecutionJournalEntry, error)
+	AcknowledgeResult(context.Context, string, string) error
+}
+
+type responseObservationRunner interface {
+	Observe(context.Context, fleetclient.Credential, fleetclient.Order) error
 }
 
 // producerController owns the source-observation lifetime. Durable telemetry
@@ -171,6 +193,7 @@ func privacyPolicyCacheFallbackAllowed(err error) bool {
 
 type config struct {
 	baseURL       string
+	enrollmentURL string
 	enrolToken    string
 	stateDir      string
 	root          string
@@ -188,8 +211,12 @@ type config struct {
 	inventorySweepInterval time.Duration
 	// processReportEnabled ships the host's running-process snapshot to the behavior baseline (#594 D)
 	// on the inventory-sweep cadence. Read-only /proc metadata; on by default, operator-disableable.
-	processReportEnabled bool
-	procRoot             string
+	processReportEnabled    bool
+	procRoot                string
+	responseEnabled         bool
+	responseTrustFile       string
+	responseObserverEnabled bool
+	responseObserverDelay   time.Duration
 }
 
 func main() {
@@ -206,11 +233,41 @@ func main() {
 	if err := fleetclient.ValidateControlPlaneURL(cfg.baseURL); err != nil {
 		log.Fatalf("synapse-agent: %v", err)
 	}
+	if cfg.enrollmentURL == "" {
+		cfg.enrollmentURL = cfg.baseURL
+	}
+	if err := fleetclient.ValidateControlPlaneURL(cfg.enrollmentURL); err != nil {
+		log.Fatalf("synapse-agent: enrollment endpoint: %v", err)
+	}
+	responseRuntime, err := newEndpointResponseRuntime(cfg)
+	if err != nil {
+		log.Fatalf("synapse-agent: configure live response execution: %v", err)
+	}
+	defer func() {
+		if err := responseRuntime.Close(); err != nil {
+			log.Printf("synapse-agent: close response runtime: %v", err)
+		}
+	}()
 	r := &runner{
-		api:     fleetclient.New(cfg.baseURL, 30*time.Second),
+		api:     fleetclient.NewWithEnrollmentURL(cfg.baseURL, cfg.enrollmentURL, 30*time.Second),
 		collect: hostinv.Collect,
 		cfg:     cfg,
 		store:   fleetclient.NewCredentialStore(cfg.stateDir),
+	}
+	if cfg.responseObserverEnabled {
+		observerAPI, ok := r.api.(responseobserver.API)
+		if !ok {
+			log.Fatalf("synapse-agent: response observer fleet transport is not configured")
+		}
+		responseRuntime, err := responseobserver.New(r.store, observerAPI, cfg.responseObserverDelay)
+		if err != nil {
+			log.Fatalf("synapse-agent: configure response observer: %v", err)
+		}
+		r.responseObserver = responseRuntime
+	}
+	if responseRuntime != nil {
+		r.responseFactory = responseRuntime.executorFor
+		r.responseProcesses = responseRuntime.registry
 	}
 
 	// On Windows the Service Control Manager starts the binary and expects a status handshake; a
@@ -231,6 +288,7 @@ func parseConfig() config {
 	var cfg config
 	var enrolTokenFile string
 	flag.StringVar(&cfg.baseURL, "url", os.Getenv("SYNAPSE_FLEET_URL"), "control plane fleet API base URL (https required, except a loopback host)")
+	flag.StringVar(&cfg.enrollmentURL, "enrol-url", os.Getenv("SYNAPSE_FLEET_ENROL_URL"), "one-time enrollment API base URL; defaults to -url (https required except loopback)")
 	// The enrolment token is a one-time secret. Prefer the env var or -enrol-token-file; the -enrol-token
 	// flag is DISCOURAGED because it is visible in the process listing (ps) and shell history.
 	flag.StringVar(&cfg.enrolToken, "enrol-token", os.Getenv("SYNAPSE_FLEET_ENROL_TOKEN"), "one-time enrolment token, first run only (DISCOURAGED: visible in ps; prefer -enrol-token-file)")
@@ -249,7 +307,26 @@ func parseConfig() config {
 	flag.DurationVar(&cfg.inventorySweepInterval, "inventory-sweep-interval", parsePositiveDuration(os.Getenv("SYNAPSE_INVENTORY_SWEEP_INTERVAL"), time.Hour), "cadence of the continuous host-inventory sweep (clamped to a floor)")
 	flag.BoolVar(&cfg.processReportEnabled, "process-report", envEnabledDefaultTrue(os.Getenv("SYNAPSE_PROCESS_REPORT_ENABLED")), "report the host's running processes to the behavior baseline on the sweep cadence (read-only /proc; #594 D); on by default")
 	flag.StringVar(&cfg.procRoot, "proc-root", envOr("SYNAPSE_AGENT_PROC_ROOT", "/proc"), "procfs root to enumerate running processes from")
+	flag.BoolVar(&cfg.responseEnabled, "response-execution", envEnabled(os.Getenv("SYNAPSE_RESPONSE_EXECUTION_ENABLED")), "enable governed Linux process response (requires root, process detection, and a pinned command trust bundle)")
+	flag.StringVar(&cfg.responseTrustFile, "response-command-trust-file", os.Getenv("SYNAPSE_RESPONSE_COMMAND_TRUST_FILE"), "path to the pinned control-plane response-command public-key bundle")
+	flag.BoolVar(&cfg.responseObserverEnabled, "response-observer", envEnabled(os.Getenv("SYNAPSE_RESPONSE_OBSERVER_ENABLED")), "enable independent response post-condition observation (requires process detection and a server-assigned asset)")
+	flag.DurationVar(&cfg.responseObserverDelay, "response-observer-delay", parsePositiveDuration(os.Getenv("SYNAPSE_RESPONSE_OBSERVER_DELAY"), 5*time.Second), "delay before emitting a verdict-free response readiness report")
 	flag.Parse()
+	if cfg.responseObserverEnabled {
+		classes, err := parseDetectClasses(cfg.detectClasses)
+		if err != nil {
+			log.Fatalf("synapse-agent: response observer: %v", err)
+		}
+		hasProcess := false
+		for _, class := range classes {
+			if class == "process" {
+				hasProcess = true
+			}
+		}
+		if cfg.responseEnabled || !hasProcess {
+			log.Fatal("synapse-agent: response observer must be a distinct non-executor agent with process detection enabled")
+		}
+	}
 	if cfg.enrolToken == "" {
 		// An absent token file is NOT fatal: it is the normal state after enrolment, once the
 		// one-time secret has been cleaned up. EnsureEnrolled decides from the stored credential.
@@ -264,10 +341,14 @@ func parseConfig() config {
 
 // runner holds the run-loop dependencies so the loop can be tested with a fake API + collector.
 type runner struct {
-	api     fleetAPI
-	collect func(ctx context.Context, root string) (hostinventory.HostInventory, error)
-	cfg     config
-	store   *fleetclient.CredentialStore
+	api               fleetAPI
+	collect           func(ctx context.Context, root string) (hostinventory.HostInventory, error)
+	response          responseCommandExecutor
+	responseFactory   func(shared.ID, shared.ID) (responseCommandExecutor, error)
+	responseProcesses agentspool.ProcessLifecycleObserver
+	responseObserver  responseObservationRunner
+	cfg               config
+	store             *fleetclient.CredentialStore
 }
 
 func (r *runner) run(ctx context.Context) error {
@@ -275,9 +356,14 @@ func (r *runner) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := r.configureResponse(cred); err != nil {
+		return err
+	}
 	// A8 continuous host-inventory sweep is best-effort and independent from the
 	// scan.host work-order loop. A3 still gates telemetry observation/signing on
 	// the canonical server-provided AssetID below.
+	// Every observer retains an independently enrolled primary host identity. Its secondary target is
+	// applied only to a bounded response-observation telemetry session.
 	r.startInventorySweep(ctx, cred)
 
 	var transport *detectionTransport
@@ -289,6 +375,9 @@ func (r *runner) run(ctx context.Context) error {
 	policyDigest := ""
 
 	for {
+		if err := r.configureResponse(cred); err != nil {
+			return err
+		}
 		// A0.1 requires the canonical server-provided asset binding before telemetry
 		// transport starts. The transport owns historical durable WAL independently of
 		// whether current source observation is authorized by an active privacy policy.
@@ -350,13 +439,40 @@ func (r *runner) ensureEnrolled(ctx context.Context) (fleetclient.Credential, er
 		Name:         r.cfg.name,
 		Platform:     runtime.GOOS,
 		AgentVersion: agentVersion,
-		Capabilities: []string{hostInventoryCapability},
+		Capabilities: r.capabilities(),
 	})
+}
+
+func (r *runner) configureResponse(cred fleetclient.Credential) error {
+	if r.response != nil || r.responseFactory == nil || strings.TrimSpace(cred.AssetID) == "" {
+		return nil
+	}
+	executor, err := r.responseFactory(shared.ID(strings.TrimSpace(cred.AgentID)), shared.ID(strings.TrimSpace(cred.AssetID)))
+	if err != nil {
+		return fmt.Errorf("configure response executor: %w", err)
+	}
+	r.response = executor
+	return nil
+}
+
+func (r *runner) capabilities() []string {
+	capabilities := make([]string, 0, 3)
+	if !r.cfg.responseObserverEnabled {
+		capabilities = append(capabilities, hostInventoryCapability)
+	}
+	if r.cfg.responseObserverEnabled {
+		capabilities = append(capabilities, responseObserveCapability)
+	}
+	if r.response != nil {
+		capabilities = append(capabilities, responseProcessCapability, responseHaltCapability)
+	}
+	return capabilities
 }
 
 func (r *runner) cycle(ctx context.Context, cred fleetclient.Credential) error {
 	hb, err := r.api.Heartbeat(ctx, cred.Token, fleetclient.EnrolRequest{
 		Name: r.cfg.name, Platform: runtime.GOOS, AgentVersion: agentVersion,
+		Capabilities: r.capabilities(),
 	})
 	if err != nil {
 		return fmt.Errorf("heartbeat: %w", err)
@@ -376,6 +492,32 @@ func (r *runner) cycle(ctx context.Context, cred fleetclient.Credential) error {
 			return nil
 		}
 	}
+	if hb.ResponseHalted && r.response != nil {
+		if hb.ResponseHaltGeneration <= 0 {
+			return fmt.Errorf("heartbeat returned an invalid response halt generation")
+		}
+		if err := r.response.Halt(ctx, hb.ResponseHaltGeneration); err != nil {
+			return fmt.Errorf("apply control-plane response halt fence: %w", err)
+		}
+	}
+	if r.cfg.responseObserverEnabled {
+		if strings.TrimSpace(cred.AssetID) == "" {
+			return fmt.Errorf("response observer has no established primary telemetry asset")
+		}
+		if strings.TrimSpace(hb.ResponseObserverAssetID) == "" {
+			return fmt.Errorf("response observer has no active server-assigned asset")
+		}
+		if cred.ResponseObserverAssetID != hb.ResponseObserverAssetID {
+			updated, err := r.store.PersistResponseObserverAssetBinding(cred, hb.ResponseObserverAssetID)
+			if err != nil {
+				return fmt.Errorf("persist response observer target assignment: %w", err)
+			}
+			cred = updated
+		}
+	}
+	if err := r.flushResponseResults(ctx, cred); err != nil {
+		return err
+	}
 	orders, err := r.api.ClaimWork(ctx, cred.Token, r.cfg.maxOrders)
 	if err != nil {
 		return fmt.Errorf("claim: %w", err)
@@ -391,23 +533,36 @@ func (r *runner) cycle(ctx context.Context, cred fleetclient.Credential) error {
 
 // handle runs one order to completion, reporting a terminal result either way.
 func (r *runner) handle(ctx context.Context, cred fleetclient.Credential, o fleetclient.Order) {
-	if o.Capability != "" && o.Capability != hostInventoryCapability {
-		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "unsupported capability: "+o.Capability)
+	if o.Capability == responseHaltCapability {
+		r.handleResponseHalt(ctx, cred, o)
 		return
 	}
-	if err := r.api.Progress(ctx, cred.Token, o.ID); err != nil {
+	if o.Capability == responseProcessCapability {
+		r.handleResponse(ctx, cred, o)
+		return
+	}
+	if o.Capability == responseObserveCapability {
+		r.handleResponseObservation(ctx, cred, o)
+		return
+	}
+	if o.Capability != "" && o.Capability != hostInventoryCapability {
+		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, o.LeaseID, "failed", "unsupported capability: "+o.Capability)
+		return
+	}
+	if err := r.api.Progress(ctx, cred.Token, o.ID, o.LeaseID); err != nil {
 		log.Printf("order %s: progress: %v", o.ID, err)
+		return
 	}
 	inv, err := r.collect(ctx, r.cfg.root)
 	if err != nil {
-		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "collect: "+err.Error())
+		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, o.LeaseID, "failed", "collect: "+err.Error())
 		return
 	}
 	// Keep a durable local copy first (the buffer survives a transient reporting failure). If buffering
 	// fails the inventory is lost, so the order is not a success.
 	if err := r.buffer(o.ID, inv); err != nil {
 		log.Printf("order %s: buffer: %v", o.ID, err)
-		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "buffer inventory: "+err.Error())
+		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, o.LeaseID, "failed", "buffer inventory: "+err.Error())
 		return
 	}
 	// Production uses the resolved response path: the authenticated control plane
@@ -417,21 +572,21 @@ func (r *runner) handle(ctx context.Context, cred fleetclient.Credential, o flee
 		resp, reportErr := resolved.SendHostInventoryResolved(ctx, cred.Token, inv)
 		if reportErr != nil {
 			log.Printf("order %s: report inventory: %v", o.ID, reportErr)
-			_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "report inventory: "+reportErr.Error())
+			_ = r.api.SubmitResult(ctx, cred.Token, o.ID, o.LeaseID, "failed", "report inventory: "+reportErr.Error())
 			return
 		}
 		if resp.AssetID == "" {
-			_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "report inventory: control plane returned no canonical asset id")
+			_ = r.api.SubmitResult(ctx, cred.Token, o.ID, o.LeaseID, "failed", "report inventory: control plane returned no canonical asset id")
 			return
 		}
 		if _, err := r.store.PersistAssetBinding(cred, resp.AssetID); err != nil {
 			log.Printf("order %s: persist canonical asset binding: %v", o.ID, err)
-			_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "persist canonical asset binding: "+err.Error())
+			_ = r.api.SubmitResult(ctx, cred.Token, o.ID, o.LeaseID, "failed", "persist canonical asset binding: "+err.Error())
 			return
 		}
 	} else if err := r.api.SendHostInventory(ctx, cred.Token, inv); err != nil {
 		log.Printf("order %s: report inventory: %v", o.ID, err)
-		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "report inventory: "+err.Error())
+		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, o.LeaseID, "failed", "report inventory: "+err.Error())
 		return
 	}
 	// Fail closed when the collected package data is untrustworthy (a package DB that exists but could
@@ -442,9 +597,104 @@ func (r *runner) handle(ctx context.Context, cred fleetclient.Credential, o flee
 	if inv.Degraded() {
 		status = "failed"
 	}
-	if err := r.api.SubmitResult(ctx, cred.Token, o.ID, status, summary(inv)); err != nil {
+	if err := r.api.SubmitResult(ctx, cred.Token, o.ID, o.LeaseID, status, summary(inv)); err != nil {
 		log.Printf("order %s: submit result: %v", o.ID, err)
 	}
+}
+
+func (r *runner) handleResponseHalt(ctx context.Context, cred fleetclient.Credential, order fleetclient.Order) {
+	if r.response == nil || order.ResponseHalt == nil || order.AssetID == "" || cred.AssetID == "" || order.AssetID != cred.AssetID ||
+		order.ResponseHalt.CommandID.String() != order.ID || order.ResponseHalt.AttemptKey != order.IdempotencyKey ||
+		order.ResponseHalt.AgentID.String() != cred.AgentID || order.ResponseHalt.AssetID.String() != cred.AssetID {
+		_ = r.api.SubmitResult(ctx, cred.Token, order.ID, order.LeaseID, "failed", "response halt identity binding mismatch")
+		return
+	}
+	if err := r.api.Progress(ctx, cred.Token, order.ID, order.LeaseID); err != nil {
+		log.Printf("order %s: response halt progress: %v", order.ID, err)
+		return
+	}
+	if err := r.response.ExecuteHaltCommand(ctx, *order.ResponseHalt, order.LeaseID, order.LeaseUntil); err != nil {
+		_ = r.api.SubmitResult(ctx, cred.Token, order.ID, order.LeaseID, "failed", "response halt rejected")
+		return
+	}
+	if err := r.api.SubmitResult(ctx, cred.Token, order.ID, order.LeaseID, "succeeded", "response halt fence persisted"); err != nil {
+		log.Printf("order %s: submit response halt result: %v", order.ID, err)
+	}
+}
+
+func (r *runner) handleResponse(ctx context.Context, cred fleetclient.Credential, order fleetclient.Order) {
+	if r.response == nil || order.ResponseCommand == nil {
+		_ = r.api.SubmitResult(ctx, cred.Token, order.ID, order.LeaseID, "failed", "response execution capability is not configured")
+		return
+	}
+	if order.AssetID == "" || cred.AssetID == "" || order.AssetID != cred.AssetID ||
+		order.ResponseCommand.CommandID.String() != order.ID || order.ResponseCommand.AttemptKey != order.IdempotencyKey ||
+		order.ResponseCommand.AgentID.String() != cred.AgentID || order.ResponseCommand.AssetID.String() != cred.AssetID {
+		_ = r.api.SubmitResult(ctx, cred.Token, order.ID, order.LeaseID, "failed", "response command identity binding mismatch")
+		return
+	}
+	// Unlike inventory collection, a response command must not cross the side-effect boundary unless the
+	// control plane has durably moved this exact addressed order to running.
+	if err := r.api.Progress(ctx, cred.Token, order.ID, order.LeaseID); err != nil {
+		log.Printf("order %s: response progress: %v", order.ID, err)
+		return
+	}
+	result, err := r.response.Execute(ctx, *order.ResponseCommand, order.LeaseID, order.LeaseUntil)
+	if err != nil {
+		if result.State == fleetagent.ResponseExecutionOutcomeUnknown {
+			if submitErr := r.submitResponseResult(ctx, cred, order.ID, result); submitErr != nil {
+				log.Printf("order %s: submit ambiguous response result: %v", order.ID, submitErr)
+			}
+		}
+		return
+	}
+	if result.State != fleetagent.ResponseExecutionApplied {
+		_ = r.api.SubmitResult(ctx, cred.Token, order.ID, order.LeaseID, "failed", "response execution did not produce an applied outcome")
+		return
+	}
+	if err := r.submitResponseResult(ctx, cred, order.ID, result); err != nil {
+		log.Printf("order %s: submit response result: %v", order.ID, err)
+	}
+}
+
+func (r *runner) flushResponseResults(ctx context.Context, cred fleetclient.Credential) error {
+	if r.response == nil {
+		return nil
+	}
+	entries, err := r.response.PendingResults(ctx)
+	if err != nil {
+		return fmt.Errorf("load response result outbox: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.Result == nil {
+			return fmt.Errorf("response result outbox contains no terminal result for %s", entry.Command.AttemptKey)
+		}
+		if err := r.submitResponseResult(ctx, cred, entry.Command.CommandID.String(), *entry.Result); err != nil {
+			return fmt.Errorf("submit response result outbox %s: %w", entry.Command.AttemptKey, err)
+		}
+	}
+	return nil
+}
+
+func (r *runner) submitResponseResult(ctx context.Context, cred fleetclient.Credential, orderID string, result fleetagent.ResponseExecutionResult) error {
+	status := string(workorder.StateFailed)
+	reason := "response execution outcome requires reconciliation"
+	if result.State == fleetagent.ResponseExecutionApplied {
+		status = string(workorder.StateSucceeded)
+		reason = "response command applied; awaiting independent verification"
+	} else if result.State != fleetagent.ResponseExecutionOutcomeUnknown {
+		return fmt.Errorf("response result is not terminal")
+	}
+	request := fleetclient.ResponseResultRequest{
+		Status: status, Reason: reason, AttemptKey: result.AttemptKey,
+		CommandDigest: result.CommandDigest, ExecutionState: result.State, ObservedRadius: result.ObservedRadius,
+		AffectedCount: result.AffectedCount, AlreadyApplied: result.AlreadyApplied, CompletedAt: result.CompletedAt,
+		LeaseID: result.LeaseID,
+	}
+	if err := r.api.SubmitResponseResult(ctx, cred.Token, orderID, request); err != nil {
+		return err
+	}
+	return r.response.AcknowledgeResult(ctx, result.AttemptKey, result.CommandDigest)
 }
 
 // summary is a coverage-honest, secret-free one-liner for the result reason.

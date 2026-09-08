@@ -26,12 +26,15 @@ type Event struct {
 
 // ProcessEvent is an exec/fork observation.
 type ProcessEvent struct {
-	PID  int
-	PPID int
-	Comm string   // short command name (kernel comm)
-	Path string   // resolved executable path
-	Args []string // bounded argv
-	UID  int
+	Kind                 string // exec | fork | exit; empty means legacy exec
+	PID                  int
+	PPID                 int
+	StartTimeNanos       uint64
+	ParentStartTimeNanos uint64
+	Comm                 string   // short command name (kernel comm)
+	Path                 string   // resolved executable path
+	Args                 []string // bounded argv
+	UID                  int
 }
 
 // NetworkEvent is a connect observation.

@@ -26,13 +26,16 @@ type SensorStateReport struct {
 	HostID          shared.ID
 	AgentSessionID  SessionID
 	AssetID         shared.ID
-	Kind            string
-	ObservedAt      time.Time
-	SchemaVersion   int
-	PayloadDigest   string
-	States          []detection.ClassCoverage
-	KeyID           string
-	Signature       string
+	// ResponseObservationID is optional and permits target sensor state only for a live,
+	// addressed response-observation work order; it never changes general host ownership.
+	ResponseObservationID shared.ID `json:"response_observation_id,omitempty"`
+	Kind                  string
+	ObservedAt            time.Time
+	SchemaVersion         int
+	PayloadDigest         string
+	States                []detection.ClassCoverage
+	KeyID                 string
+	Signature             string
 }
 
 func (r SensorStateReport) Validate() error {
@@ -77,6 +80,7 @@ func SensorStateMessage(r SensorStateReport) []byte {
 	write(r.HostID.String())
 	write(string(r.AgentSessionID))
 	write(r.AssetID.String())
+	write(r.ResponseObservationID.String())
 	write(r.Kind)
 	write(strconv.FormatInt(r.ObservedAt.UTC().UnixNano(), 10))
 	write(strconv.Itoa(r.SchemaVersion))

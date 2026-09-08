@@ -53,11 +53,11 @@ func TestNewServiceRequiresStore(t *testing.T) {
 func TestRecordCorrelationCreatesAndIsIdempotent(t *testing.T) {
 	svc, ctx := newSvc(t)
 	events := correlate(t)
-	created, err := svc.RecordCorrelation(ctx, events)
+	created, updated, err := svc.RecordCorrelation(ctx, events)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(created) != 1 {
+	if len(created) != 1 || len(updated) != 0 {
 		t.Fatalf("one incident expected, got %d", len(created))
 	}
 	inc := created[0]
@@ -65,14 +65,42 @@ func TestRecordCorrelationCreatesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("recorded incident wrong: %+v", inc)
 	}
 	// Re-recording the same correlation is a no-op (batch idempotency).
-	again, err := svc.RecordCorrelation(ctx, events)
-	if err != nil || len(again) != 0 {
-		t.Fatalf("re-record must create nothing: created=%d err=%v", len(again), err)
+	again, revised, err := svc.RecordCorrelation(ctx, events)
+	if err != nil || len(again) != 0 || len(revised) != 0 {
+		t.Fatalf("re-record must change nothing: created=%d updated=%d err=%v", len(again), len(revised), err)
 	}
 	// Get reconstructs the same projection.
 	got, err := svc.Get(ctx, inc.ID)
 	if err != nil || got.Revision != inc.Revision || len(got.DetectionIDs) != 2 {
 		t.Fatalf("get after record: %+v err=%v", got, err)
+	}
+}
+
+func TestRecordCorrelationAppendsKeyedLateRevisionIdempotently(t *testing.T) {
+	svc, ctx := newSvc(t)
+	createdEvent := incident.IncidentEvent{
+		IncidentID: "inc-late", Kind: incident.EventCreated, At: base, Actor: "correlator",
+		CorrelationKey: "corr-created", AssetID: asset, Title: "late", Severity: shared.SeverityLow, DetectionID: "d1",
+	}
+	created, updated, err := svc.RecordCorrelation(ctx, []incident.IncidentEvent{createdEvent})
+	if err != nil || len(created) != 1 || len(updated) != 0 {
+		t.Fatalf("create keyed incident: created=%d updated=%d err=%v", len(created), len(updated), err)
+	}
+	late := []incident.IncidentEvent{
+		createdEvent,
+		{IncidentID: "inc-late", Kind: incident.EventDetectionAttached, At: base.Add(-time.Minute), Actor: "correlator", CorrelationKey: "corr-d2", DetectionID: "d2"},
+		{IncidentID: "inc-late", Kind: incident.EventSeverityChanged, At: base.Add(-time.Minute), Actor: "correlator", CorrelationKey: "corr-severity-high", Severity: shared.SeverityHigh},
+	}
+	created, updated, err = svc.RecordCorrelation(ctx, late)
+	if err != nil || len(created) != 0 || len(updated) != 1 {
+		t.Fatalf("late revision: created=%d updated=%d err=%v", len(created), len(updated), err)
+	}
+	if got := updated[0]; len(got.DetectionIDs) != 2 || got.Severity != shared.SeverityHigh || got.Revision != 3 {
+		t.Fatalf("late revision did not project: %+v", got)
+	}
+	created, updated, err = svc.RecordCorrelation(ctx, late)
+	if err != nil || len(created) != 0 || len(updated) != 0 {
+		t.Fatalf("late revision retry must be a no-op: created=%d updated=%d err=%v", len(created), len(updated), err)
 	}
 }
 
@@ -85,7 +113,7 @@ func TestGetNotFound(t *testing.T) {
 
 func TestAppendOptimisticConcurrencyAndProjectValidation(t *testing.T) {
 	svc, ctx := newSvc(t)
-	created, err := svc.RecordCorrelation(ctx, correlate(t))
+	created, _, err := svc.RecordCorrelation(ctx, correlate(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +147,7 @@ func TestAppendOptimisticConcurrencyAndProjectValidation(t *testing.T) {
 
 func TestListByAsset(t *testing.T) {
 	svc, ctx := newSvc(t)
-	if _, err := svc.RecordCorrelation(ctx, correlate(t)); err != nil {
+	if _, _, err := svc.RecordCorrelation(ctx, correlate(t)); err != nil {
 		t.Fatal(err)
 	}
 	incs, err := svc.ListByAsset(ctx, asset, 0)

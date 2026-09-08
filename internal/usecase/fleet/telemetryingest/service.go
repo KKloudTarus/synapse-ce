@@ -80,6 +80,14 @@ type EnvelopeRecorder interface {
 // existing telemetry-only compositions are unchanged, mirroring SetSensorStateStore.
 func (s *Service) SetEndpointTimeline(r EnvelopeRecorder) { s.timeline = r }
 
+// SetAssetBindingResolver overrides general telemetry admission identity resolution. It must always
+// resolve the reporting agent's immutable primary host binding.
+func (s *Service) SetAssetBindingResolver(bindings ports.TelemetryAssetBindingStore) {
+	if bindings != nil {
+		s.bindings = bindings
+	}
+}
+
 func NewService(
 	transport ports.TelemetryAuditStore,
 	keys SigningKeyResolver,
@@ -215,7 +223,7 @@ func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, req IngestR
 		}
 		return IngestResult{}, fmt.Errorf("%w: manifest stream is not server-derived for the authenticated agent/session/lane", shared.ErrForbidden)
 	}
-	assetID, err := s.bindings.ResolveTelemetryAsset(ctx, authAgentID)
+	primaryAssetID, err := s.bindings.ResolveTelemetryAsset(ctx, authAgentID)
 	if err != nil {
 		if errors.Is(err, shared.ErrNotFound) {
 			err = fmt.Errorf("%w: telemetry asset binding is not established", shared.ErrForbidden)
@@ -225,11 +233,23 @@ func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, req IngestR
 		}
 		return IngestResult{}, err
 	}
-	if assetID.IsZero() || m.AssetID != assetID {
+	assetID := primaryAssetID
+	if assetID.IsZero() {
+		if auditErr := s.reject(ctx, authAgentID, m, "asset_binding_missing", now); auditErr != nil {
+			return IngestResult{}, auditErr
+		}
+		return IngestResult{}, fmt.Errorf("%w: telemetry asset binding is not established", shared.ErrForbidden)
+	}
+	if m.AssetID != primaryAssetID {
 		if auditErr := s.reject(ctx, authAgentID, m, "asset_mismatch", now); auditErr != nil {
 			return IngestResult{}, auditErr
 		}
 		return IngestResult{}, fmt.Errorf("%w: manifest asset does not match the server-authoritative host binding", shared.ErrForbidden)
+	} else if !m.ResponseObservationID.IsZero() {
+		if auditErr := s.reject(ctx, authAgentID, m, "unexpected_response_observation", now); auditErr != nil {
+			return IngestResult{}, auditErr
+		}
+		return IngestResult{}, fmt.Errorf("%w: primary host telemetry cannot carry a response-observation target reference", shared.ErrForbidden)
 	}
 
 	// Authenticate the compact manifest before parsing potentially expensive event payloads.

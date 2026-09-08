@@ -168,6 +168,11 @@ type CoverageWindowStore interface {
 	ListCoverageWindows(ctx context.Context, q CoverageWindowQuery) ([]sensorstate.CoverageWindow, error)
 }
 
+// BoundedCoverageWindowReader is the receipt-only sentinel read. Its limit permits one row beyond the public list maximum.
+type BoundedCoverageWindowReader interface {
+	ListCoverageWindowsBounded(ctx context.Context, q CoverageWindowQuery, limit int) ([]sensorstate.CoverageWindow, error)
+}
+
 // CoverageReconcileRequest identifies the closed source-time span whose fixed
 // half-open coverage windows must be recomposed after the source fact is durable.
 // Point facts use Since == Until.
