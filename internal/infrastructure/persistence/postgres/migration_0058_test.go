@@ -121,6 +121,7 @@ func TestMigration0058(t *testing.T) {
 		t.Fatalf("dialect: %v", err)
 	}
 
+	deleteV2AuditRowsForMigrationRollback(t, db)
 	if err := goose.DownTo(db, ".", 57); err != nil {
 		t.Fatalf("down to 57: %v", err)
 	}
