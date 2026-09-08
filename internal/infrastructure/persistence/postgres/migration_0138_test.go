@@ -45,7 +45,7 @@ func TestMigrationInventoryNoDuplicateGooseVersions(t *testing.T) {
 
 // TestMigration0138ProductionOwnerPath reproduces the production migration
 // credential: the database and tables are owned by a login that is neither a
-// superuser nor BYPASSRLS. A legacy row at 0133 must be backfilled even though
+// superuser nor BYPASSRLS. A legacy row at 0137 must be backfilled even though
 // engagements is already under FORCE ROW LEVEL SECURITY.
 func TestMigration0138ProductionOwnerPath(t *testing.T) {
 	dsn := isolatedMigrationOwnerDSN(t)
@@ -60,8 +60,8 @@ func TestMigration0138ProductionOwnerPath(t *testing.T) {
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.UpTo(db, ".", 133); err != nil {
-		t.Fatalf("migrate owner database to 0133: %v", err)
+	if err := goose.UpTo(db, ".", 137); err != nil {
+		t.Fatalf("migrate owner database to 0137: %v", err)
 	}
 
 	pool, err := Connect(ctx, dsn)
@@ -190,7 +190,7 @@ func TestMigration0138ProductionOwnerPath(t *testing.T) {
 		t.Fatalf("new tenant-scoped reader missed legacy overlap run %q", overlapRunID)
 	}
 
-	if err := goose.DownTo(db, ".", 133); err != nil {
+	if err := goose.DownTo(db, ".", 137); err != nil {
 		t.Fatalf("roll back unsealed 0138 data: %v", err)
 	}
 	var childTables int
