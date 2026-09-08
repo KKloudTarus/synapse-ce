@@ -47,15 +47,16 @@ func (s Status) canTransitionTo(to Status) bool {
 
 // Engagement is the aggregate root for a pentest/security assessment.
 type Engagement struct {
-	ID              shared.ID
-	TenantID        shared.ID // multi-tenant-ready; zero value = default tenant in single-tenant mode
-	ProjectID       shared.ID // non-zero for an internal Project analysis context; hidden from engagement lists
-	HostAssetID     shared.ID // non-zero for an internal fleet host vulnerability context; hidden from engagement lists
-	BusinessAssetID shared.ID // optional primary business-level Asset; zero means Unassigned
-	Name            string
-	Client          string
-	Status          Status
-	Scope           Scope
+	ID                  shared.ID
+	TenantID            shared.ID // multi-tenant-ready; zero value = default tenant in single-tenant mode
+	ProjectID           shared.ID // non-zero for an internal Project analysis context; hidden from engagement lists
+	AssessmentProjectID shared.ID // optional visible Assessment association; never makes an Engagement internal
+	HostAssetID         shared.ID // non-zero for an internal fleet host vulnerability context; hidden from engagement lists
+	BusinessAssetID     shared.ID // optional primary business-level Asset; zero means Unassigned
+	Name                string
+	Client              string
+	Status              Status
+	Scope               Scope
 	// RoE holds the minimal rules of engagement (allowed tool classes + blackout
 	// windows) the execution gate enforces alongside scope + the auth window.
 	RoE RoE
@@ -72,6 +73,9 @@ type Engagement struct {
 	// sandbox + egress allowlist exist, active recon is lab-only and must be
 	// explicitly enabled per engagement. Default false (off).
 	LiveReconEnabled bool
+	// RequiresExplicitExecutionAuthorization is set on Assessment Re-tests so
+	// legacy open-window/empty-RoE defaults cannot authorize execution.
+	RequiresExplicitExecutionAuthorization bool
 
 	// Offensive rules of engagement. The offensive governance policy (adversary emulation, exploitation
 	// chains) refuses ANY offensive action until these are set, so they gate the whole offensive pillar,
@@ -184,7 +188,17 @@ func (e *Engagement) IsAuthorizedAt(t time.Time) bool {
 // no tool may run regardless of the authorization window. Draft + Active are both
 // permitted. Enforced by the execution guard before any tool starts.
 func (e *Engagement) AllowsExecution() bool {
-	return e.Status != StatusCompleted && e.Status != StatusArchived
+	if e.Status == StatusCompleted || e.Status == StatusArchived {
+		return false
+	}
+	if !e.RequiresExplicitExecutionAuthorization {
+		return true
+	}
+	// A Re-test must positively name at least one executable tool class. A
+	// blackout-only RoE is merely a negative constraint and, because an empty
+	// allowlist means "all" for legacy engagements, cannot serve as explicit
+	// execution authorization.
+	return e.AuthorizedFrom != nil && e.AuthorizedTo != nil && len(e.RoE.AllowedToolClasses) > 0
 }
 
 // Transition validates and applies a lifecycle status change, stamping UpdatedAt.

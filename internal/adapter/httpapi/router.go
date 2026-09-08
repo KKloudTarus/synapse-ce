@@ -17,6 +17,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
+	comparisonuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcomparison"
+	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
+	relationshipuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentrelationship"
+	snapshotuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentsnapshot"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
@@ -82,6 +86,7 @@ type Router struct {
 	hostVulns              hostVulnerabilityService   // optional; nil ⇒ host vulnerability routes are not registered (#820)
 	findingSummaries       ports.FindingSummaryReader // optional; nil ⇒ engagement list rows carry no finding counts
 	scanJobs               ports.ScanJobStore         // optional; nil ⇒ engagement list rows carry no last scan
+	scanRunHistory         scanRunHistoryReader       // optional; normalized provenance read side for the existing scan-runs route
 	alerts                 alertService               // optional; nil ⇒ operator alerting routes are not registered
 	offensivePolicy        *offensivepolicy.Register  // optional; nil ⇒ the policy register route is not registered
 	responses              responseService            // optional; nil ⇒ governed defensive-response routes are not registered (#425)
@@ -133,6 +138,14 @@ type Router struct {
 	sla                    *slauc.Service
 	capabilities           capabilityCatalog // optional; nil ⇒ the capability catalog route is not registered
 	readiness              readinessConfig
+	assessmentCycles         *cycleuc.APIService
+	assessmentSnapshots      *snapshotuc.Service
+	assessmentComparisons    *comparisonuc.Service
+	assessmentRelationships  *relationshipuc.Service
+	assessmentCycleAPI       bool
+	assessmentCycleDualWrite func(string) bool
+	assessmentLifecycleRead  func(string) bool
+	assessmentLifecycleUI    func(string) bool
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -259,6 +272,49 @@ func (rt *Router) SetVulnerabilityReadModel(service *vulnerabilityinteluc.Servic
 
 func (rt *Router) SetVulnerabilityActions(actions *vulnerabilityactionuc.Service) {
 	rt.vulnerabilityActions = actions
+}
+
+func (rt *Router) SetAssessmentCycles(service *cycleuc.APIService, apiEnabled bool, dualWrite func(string) bool) {
+	rt.assessmentCycles = service
+	rt.assessmentCycleAPI = apiEnabled
+	rt.assessmentCycleDualWrite = dualWrite
+}
+
+func (rt *Router) SetAssessmentLifecycleRollout(readEnabled, uiEnabled func(string) bool) {
+	rt.assessmentLifecycleRead = readEnabled
+	rt.assessmentLifecycleUI = uiEnabled
+}
+
+func (rt *Router) SetAssessmentSnapshots(service *snapshotuc.Service) {
+	rt.assessmentSnapshots = service
+}
+
+func (rt *Router) SetAssessmentComparisons(service *comparisonuc.Service) {
+	rt.assessmentComparisons = service
+}
+
+func (rt *Router) SetAssessmentRelationships(service *relationshipuc.Service) {
+	rt.assessmentRelationships = service
+}
+
+func (rt *Router) requireAssessmentLifecycleRead(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if rt.assessmentLifecycleRead != nil && !rt.assessmentLifecycleRead(TenantFrom(r.Context())) {
+			writeJSON(w, http.StatusNotFound, errorBody{Error: "assessment_lifecycle_read_disabled"})
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (rt *Router) requireAssessmentLifecycleWrite(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if rt.assessmentLifecycleRead == nil || !rt.assessmentLifecycleRead(TenantFrom(r.Context())) {
+			writeJSON(w, http.StatusNotFound, errorBody{Error: "assessment_lifecycle_write_disabled"})
+			return
+		}
+		next(w, r)
+	}
 }
 
 // SetSLA wires the opt-in risk-based remediation governance API.
@@ -577,6 +633,42 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/projects/{key}/analysis", rt.authz(userdom.PermView, rt.latestProjectAnalysis))
 	}
 	mux.HandleFunc("POST /api/v1/engagements", rt.authz(userdom.PermOperate, rt.createEngagement))
+	if rt.assessmentCycles != nil && rt.assessmentCycleAPI {
+		mux.HandleFunc("POST /api/v1/engagements/{assessmentId}/retests", rt.authz(userdom.PermOperate, rt.requireAssessmentLifecycleWrite(rt.createAssessmentRetest)))
+		mux.HandleFunc("GET /api/v1/engagements/{assessmentId}/lifecycle", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentLifecycle)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentCycle)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}/members", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentCycleMembers)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentCycles)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/archive", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleWrite(rt.archiveAssessmentCycle)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/reopen", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleWrite(rt.reopenAssessmentCycle)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/relationship-previews", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleWrite(rt.previewAssessmentRelationshipChange)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/relationship-commits", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleWrite(rt.commitAssessmentRelationshipChange)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/closure-previews", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleWrite(rt.previewAssessmentClosure)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/closure-commits", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleWrite(rt.commitAssessmentClosure)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/reopen-previews", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleWrite(rt.previewAssessmentReopen)))
+		mux.HandleFunc("POST /api/v1/assessment-cycles/{cycleId}/reopen-commits", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleWrite(rt.commitAssessmentReopen)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}/closure-manifests", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentClosureManifests)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}/closure-manifests/{manifestId}", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentClosureManifest)))
+		mux.HandleFunc("GET /api/v1/assessment-cycles/{cycleId}/closure-manifests/{manifestId}/report", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.downloadAssessmentClosureReport)))
+	}
+	if rt.assessmentSnapshots != nil {
+		mux.HandleFunc("POST /api/v1/engagements/{id}/snapshots/finalize", rt.authz(userdom.PermOperate, rt.requireAssessmentLifecycleWrite(rt.withEngTenant(rt.finalizeAssessmentSnapshot))))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/snapshots", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.withEngTenant(rt.listAssessmentSnapshots))))
+		mux.HandleFunc("GET /api/v1/assessment-snapshots/{snapshotId}", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentSnapshot)))
+	}
+	if rt.assessmentComparisons != nil {
+		mux.HandleFunc("POST /api/v1/assessment-comparisons", rt.authz(userdom.PermOperate, rt.requireAssessmentLifecycleRead(rt.createAssessmentComparison)))
+		mux.HandleFunc("GET /api/v1/assessment-comparisons/{comparisonId}", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.getAssessmentComparison)))
+		mux.HandleFunc("GET /api/v1/assessment-comparisons/{comparisonId}/items", rt.authz(userdom.PermView, rt.requireAssessmentLifecycleRead(rt.listAssessmentComparisonItems)))
+		mux.HandleFunc("POST /api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/confirm", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.confirmAssessmentComparisonItem)))
+		mux.HandleFunc("POST /api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/unlink", rt.authz(userdom.PermReview, rt.requireAssessmentLifecycleRead(rt.unlinkAssessmentComparisonItem)))
+	}
+	if rt.assessmentRelationships != nil {
+		mux.HandleFunc("POST /api/v1/assessment-relationship-candidates/generate", rt.authz(userdom.PermReview, rt.generateAssessmentRelationshipCandidate))
+		mux.HandleFunc("GET /api/v1/assessment-relationship-candidates", rt.authz(userdom.PermReview, rt.listAssessmentRelationshipCandidates))
+		mux.HandleFunc("GET /api/v1/assessment-relationship-candidates/{candidateId}", rt.authz(userdom.PermReview, rt.getAssessmentRelationshipCandidate))
+		mux.HandleFunc("POST /api/v1/assessment-relationship-candidates/{candidateId}/decisions", rt.authz(userdom.PermReview, rt.decideAssessmentRelationshipCandidate))
+	}
 	if rt.fleetRolloutAdmin != nil {
 		// These are OPERATOR routes and they live under /api/v1/agents, not /api/v1/fleet.
 		// Handler() mounts /api/v1/fleet/ on the untrusted AGENT auth plane, which deliberately

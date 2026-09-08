@@ -234,6 +234,9 @@ func TestAuthorizeFailsClosedBeforeSigning(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			f := newFixture(t)
 			test.mutate(t, f)
+			if err := f.engagements.Update(f.ctx, f.engagement); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := f.service.Authorize(f.ctx, f.request); err == nil {
 				t.Fatal("expected authorization failure")
 			}

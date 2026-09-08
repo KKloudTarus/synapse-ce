@@ -19,8 +19,8 @@ import (
 // or renaming one all fail here and force the web client and the OpenAPI document to move with it.
 var wireContract = map[string][]string{
 	"engagementView": {
-		"id", "tenant_id", "project_id", "business_asset_id", "name", "client", "status",
-		"scope", "roe", "authorized_from", "authorized_to", "timezone", "live_recon_enabled",
+		"id", "tenant_id", "project_id", "assessment_project_id", "business_asset_id", "name", "client", "status",
+		"scope", "roe", "authorized_from", "authorized_to", "timezone", "live_recon_enabled", "requires_explicit_execution_authorization",
 		"offensive_roe", "created_at", "updated_at",
 		// list enrichment, present only on listEngagements rows with the stores wired
 		"findings_count", "last_scan_date", "last_scan_status",

@@ -25,6 +25,24 @@ web:
 
 api:
   replicaCount: 2
+  assessmentCycleApi:
+    enabled: false
+    dualWriteEnabled: false
+    dualWriteTenants: []
+    snapshotEnabled: false
+    snapshotCompletionEnabled: false
+    snapshotCompletionTenants: []
+    identityComparisonShadowEnabled: false
+    identityComparisonShadowTenants: []
+    lifecycleReadEnabled: false
+    lifecycleReadTenants: []
+    lifecycleUiDefaultEnabled: false
+    lifecycleUiDefaultTenants: []
+    closureReportEnabled: false
+    migrationBatchSize: 500
+    processTenantJobs: 4
+    comparisonBacklogWarning: 500
+    comparisonBacklogHardLimit: 1000
   nodeSelector: {}
   tolerations: []
   affinity: {}

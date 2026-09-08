@@ -37,7 +37,13 @@ func actorFrom(r *http.Request) usersuc.Actor {
 // the logged-in consultant and gate admin-only surfaces.
 func (rt *Router) currentUser(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalObj(r.Context())
-	writeJSON(w, http.StatusOK, map[string]any{"id": p.ID, "name": p.Name, "role": p.Role})
+	tenantID := TenantFrom(r.Context())
+	readEnabled := rt.assessmentLifecycleRead != nil && rt.assessmentLifecycleRead(tenantID)
+	uiEnabled := rt.assessmentLifecycleUI != nil && rt.assessmentLifecycleUI(tenantID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": p.ID, "name": p.Name, "role": p.Role,
+		"features": map[string]bool{"assessment_lifecycle_read": readEnabled, "assessment_lifecycle_ui_default": uiEnabled},
+	})
 }
 
 // listUsers returns the team roster of the caller's own tenant (admin only).

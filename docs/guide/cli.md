@@ -8,6 +8,50 @@ enforcement is exercised, not bypassed. Nothing is persisted.
 
 Build it with `make build`. The binary lands at `./bin/synapse-cli`.
 
+## Assessment lifecycle administration
+
+These are separate operator binaries, not `synapse-cli` subcommands. `make build`
+places them in `bin/`; the production image includes them in `/opt/synapse/`.
+Follow [Assessment lifecycle rollout operations](assessment-lifecycle-operations.md)
+for migration order, dry-run examples, checkpoints, approval and rollback gates.
+
+| Binary | Purpose |
+| --- | --- |
+| `synapse-assessment-backfill` | Create historical singleton Cycles with durable checkpoints. |
+| `synapse-assessment-snapshot-backfill` | Append immutable legacy Snapshots after Cycle backfill. |
+| `synapse-finding-lineage-backfill` | Project source Findings into Identities, Observations, review candidates or explicit skips. |
+| `synapse-assessment-integrity` | Verify membership, boundaries and source reconciliation without repairing source data. |
+| `synapse-assessment-comparison-backfill` | Queue root-to-selected-head comparisons and optionally repair failed artifacts. |
+| `synapse-assessment-rollout-gate` | Evaluate supplied JSON rollout evidence; it does not enable feature flags or collect metrics. |
+
+The first five commands require `SYNAPSE_DB_DSN` and a non-superuser role that
+cannot bypass RLS. They do not run schema migrations. Integrity verification
+persists its run/checkpoints/findings but never changes the assessed source data.
+
+| Flag | Applies to / behavior |
+| --- | --- |
+| `--tenants` | All database commands; required comma-separated list of one to four unique tenant IDs. |
+| `--actor` | All database commands; audit actor, 1–256 characters, defaults to the command-specific service actor. |
+| `--dry-run` | All backfills; default `false`, so pass it explicitly to preview. Integrity defaults to `true` and rejects `false`. |
+| `--batch-size` | All database commands; 1–2000 rows/items per batch. Default 500, except comparison uses `SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE`. |
+| `--timeout` | All database commands; positive duration. Default `30m`, or `2h` for comparison backfill. |
+| `--lease-duration` | Cycle/Snapshot/Lineage backfill and integrity; positive per-tenant lease, default `10m`. |
+| `--resume-after` | Cycle/Snapshot backfill: initial Assessment ID; Lineage: initial Finding ID. Exactly one tenant required. Durable existing runs resume their own checkpoint. |
+| `--producers` | Lineage only; optional comma-separated producer filter. See the operations guide for supported names and deferred matcher skips. |
+| `--repair-failed` | Comparison only; default `false`. Repair one deterministic failed batch before queueing missing comparisons. |
+| `--backlog-warning` | Comparison only; default from configuration (500), allowed 1–500. |
+| `--backlog-hard-limit` | Comparison only; default from configuration (1000), between the warning threshold and 1000. |
+| `--oldest-active-limit` | Comparison only; positive age gate for queued/generating artifacts, default `15m`. |
+| `--after-updated-at`, `--after-cycle-id` | Comparison only; paired RFC3339 timestamp / Cycle ID checkpoint, exactly one tenant required. |
+| `--phase` | Rollout gate only; required `internal_canary`, `opt_in_canary`, `read_cutover`, `ui_default` or `rollback_drill`. |
+| `--input` | Rollout gate only; JSON file or `-` for stdin (default), at most 1 MiB, exactly one object with no unknown fields. |
+
+Successful runs exit `0`; invalid input, runtime errors, integrity findings or a
+rejected rollout gate exit `1` and explain the failure on stderr. The rollout gate
+also emits the evaluated decision JSON on stdout when policy rejects valid input.
+Do not use process success alone as production approval: the operations guide
+requires retained evidence and explicit operator/security sign-off.
+
 ## RulePack release commands
 
 The `rulepack` command group verifies signed detection-content artifacts, replays their deterministic

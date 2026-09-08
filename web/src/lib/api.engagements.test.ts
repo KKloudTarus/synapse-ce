@@ -26,12 +26,13 @@ describe('Engagements API', () => {
       inScope: [],
       outOfScope: [],
       timezone: 'Asia/Ho_Chi_Minh',
-    }, source)
+    }, source, 'stable-upload-request')
 
     const init = fetchSpy.mock.calls[0][1] as RequestInit
     expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/engagements')
     expect(init.body).toBeInstanceOf(FormData)
     expect(init.headers).not.toHaveProperty('content-type')
+		expect(init.headers).toHaveProperty('Idempotency-Key', 'stable-upload-request')
     const form = init.body as FormData
     expect(form.get('source')).toBe(source)
     expect(JSON.parse(String(form.get('metadata')))).toMatchObject({

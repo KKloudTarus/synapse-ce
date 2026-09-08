@@ -9,6 +9,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Scan runs now support tenant-owned, sealed provenance v1.** Native execution headers can be
+  sealed once with normalized producer lanes, versions, stages, canonical target identities, and
+  reproducible SHA-256 manifests. Migration 0134 is expand-only for migrate-first rollouts,
+  keeps legacy writers visible through a transitional tenant bridge, protects retained engagement
+  history, and enables forced tenant RLS on the new child provenance tables.
+
 - **Provider-neutral external CI/CD integrations.** Adds tenant-isolated, write-only encrypted Jenkins
   credentials; bounded SSRF-resistant test, discovery, and polling operations; Project bindings and
   exact-commit correlation; durable scheduled work; normalized run history; and an operator-controlled,

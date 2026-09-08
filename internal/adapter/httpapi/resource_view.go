@@ -34,20 +34,22 @@ type roeView struct {
 
 // engagementView is the serialized shape of an engagement.
 type engagementView struct {
-	ID              string    `json:"id"`
-	TenantID        string    `json:"tenant_id"`
-	ProjectID       string    `json:"project_id,omitempty"`
-	BusinessAssetID string    `json:"business_asset_id,omitempty"`
-	Name            string    `json:"name"`
-	Client          string    `json:"client"`
-	Status          string    `json:"status"`
-	Scope           scopeView `json:"scope"`
-	RoE             roeView   `json:"roe"`
+	ID                  string    `json:"id"`
+	TenantID            string    `json:"tenant_id"`
+	ProjectID           string    `json:"project_id,omitempty"`
+	AssessmentProjectID string    `json:"assessment_project_id,omitempty"`
+	BusinessAssetID     string    `json:"business_asset_id,omitempty"`
+	Name                string    `json:"name"`
+	Client              string    `json:"client"`
+	Status              string    `json:"status"`
+	Scope               scopeView `json:"scope"`
+	RoE                 roeView   `json:"roe"`
 	// AuthorizedFrom and AuthorizedTo bound legal testing. A null bound is open on that side.
-	AuthorizedFrom   *time.Time `json:"authorized_from"`
-	AuthorizedTo     *time.Time `json:"authorized_to"`
-	Timezone         string     `json:"timezone,omitempty"`
-	LiveReconEnabled bool       `json:"live_recon_enabled"`
+	AuthorizedFrom                         *time.Time `json:"authorized_from"`
+	AuthorizedTo                           *time.Time `json:"authorized_to"`
+	Timezone                               string     `json:"timezone,omitempty"`
+	LiveReconEnabled                       bool       `json:"live_recon_enabled"`
+	RequiresExplicitExecutionAuthorization bool       `json:"requires_explicit_execution_authorization"`
 	// OffensiveRoE is the rules of engagement the offensive governance policy requires before adversary
 	// emulation or exploitation chains may run. Distinct from RoE above (allowed tool classes + blackouts).
 	OffensiveRoE offensiveRoEView `json:"offensive_roe"`
@@ -104,22 +106,24 @@ func toEngagementView(e *engdom.Engagement) engagementView {
 		return engagementView{}
 	}
 	return engagementView{
-		ID:              e.ID.String(),
-		TenantID:        e.TenantID.String(),
-		ProjectID:       e.ProjectID.String(),
-		BusinessAssetID: e.BusinessAssetID.String(),
-		Name:            e.Name,
-		Client:          e.Client,
-		Status:          string(e.Status),
+		AssessmentProjectID: e.AssessmentProjectID.String(),
+		ID:                  e.ID.String(),
+		TenantID:            e.TenantID.String(),
+		ProjectID:           e.ProjectID.String(),
+		BusinessAssetID:     e.BusinessAssetID.String(),
+		Name:                e.Name,
+		Client:              e.Client,
+		Status:              string(e.Status),
 		Scope: scopeView{
 			InScope:    toTargetViews(e.Scope.InScope),
 			OutOfScope: toTargetViews(e.Scope.OutOfScope),
 		},
-		RoE:              toRoEView(e.RoE),
-		AuthorizedFrom:   e.AuthorizedFrom,
-		AuthorizedTo:     e.AuthorizedTo,
-		Timezone:         e.Timezone,
-		LiveReconEnabled: e.LiveReconEnabled,
+		RoE:                                    toRoEView(e.RoE),
+		AuthorizedFrom:                         e.AuthorizedFrom,
+		AuthorizedTo:                           e.AuthorizedTo,
+		Timezone:                               e.Timezone,
+		LiveReconEnabled:                       e.LiveReconEnabled,
+		RequiresExplicitExecutionAuthorization: e.RequiresExplicitExecutionAuthorization,
 		OffensiveRoE: offensiveRoEView{
 			CustomerContact:   e.CustomerContact,
 			EmergencyContact:  e.EmergencyContact,

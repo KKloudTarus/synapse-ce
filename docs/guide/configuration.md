@@ -75,8 +75,18 @@ Metric names and label cardinality:
 | `synapse_job_queue_scrape_errors_total` | counter | none | Failed attempts to read aggregate durable job queue stats for a scrape. The three `synapse_job_queue_*` gauges above are omitted from that scrape (never a stale or bogus value) when this increments. |
 | `synapse_sca_scan_duration_seconds` | histogram | `outcome` | Completed synchronous or asynchronous SCA execution duration. For an async scan, measured from worker execution start, not from `StartScan`/enqueue time. Queue failures, dead letters, stale sweeps, and blocked gates do not record a duration. |
 | `synapse_sca_scan_outcomes_total` | counter | `outcome` | Terminal SCA outcomes: `success`, `failed`, or `blocked`. Queue failures, dead letters, and stale sweeps count as `failed` without a duration. `blocked` is recorded only for an execution-gate denial reached after a genuine scan attempt — never for a pre-gate validation failure. |
+| `synapse_finding_lineage_operations_total` | counter | `outcome`, `method`, `reason` | Finding correlation and human-review outcomes. Every label is reduced to a fixed allowlist. |
+| `synapse_finding_lineage_backfill_items_total` | counter | `outcome` | Backfill item outcomes: `observation_created`, `provisional_candidate_created`, `skipped`, or `unknown`. |
+| `synapse_finding_lineage_backfill_runs_total` | counter | `state` | Backfill terminal states: `completed`, `cancelled`, `failed`, or `unknown`. |
+| `synapse_assessment_comparison_operations_total` | counter | `status`, `mode`, `reason` | Comparison generation outcomes with allowlisted status, mode, and reason values. |
+| `synapse_assessment_comparison_backlog` | gauge | `tenant_id`, `state` | Per-tenant queued, generating, failed, and dead-lettered Comparison backlog used by rollout gates. |
+| `synapse_assessment_comparison_oldest_active_age_seconds` | gauge | `tenant_id` | Age of the oldest queued or generating Comparison for a tenant. |
+| `synapse_assessment_comparison_generation_duration_seconds` | histogram | `tenant_id`, `mode`, `status`, `fingerprint_version`, `risk_model_version`, `item_count_band` | Worker generation latency; item counts are reduced to bounded bands. |
+| `synapse_assessment_relationship_candidates_total` | counter | `outcome`, `confidence` | Historical relationship candidate generation outcomes. |
+| `synapse_assessment_relationship_decisions_total` | counter | `action`, `outcome` | Relationship review decision outcomes. |
+| `synapse_assessment_closure_reports_total` | counter | `outcome`, `reason` | Deterministic closure-report generation outcomes with bounded reasons. |
 
-No metric or access-log field ever carries a tenant id, engagement id, target, raw path, or free-form error text — the label sets above are exhaustive and deliberately bounded (unlike, for example, embedding a full URL path) to avoid unbounded label cardinality on the collector.
+Only the explicitly documented Assessment Comparison rollout series carry `tenant_id`; access logs and every other metric omit tenant, engagement, target, raw path, and free-form error text. All non-tenant label values are fixed allowlists or bounded bands.
 
 Example Prometheus scrape config:
 
@@ -295,6 +305,23 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED` | `true` | Persist reconciliation diffs and counts without occurrence, finding, action, or notification mutations. |
 | `SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST` | empty | Comma-separated tenant IDs allowed to use tenant-scoped gates and dry-run; `*` enables every tenant. Empty fails closed. |
 | `SYNAPSE_SLA_ENABLED` | `false` | Enable versioned risk-based remediation deadlines, immutable assessment history, human-only lifecycle transitions, and continuous-intelligence reassessment. See [Remediation SLA governance](sla-governance.md). |
+| `SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED` | `false` | Atomically create initial Assessment Cycles and enable tenant-scoped lifecycle, Re-test, list, and archive APIs. Create/archive requests require `Idempotency-Key`; archive also requires `If-Match`. |
+| `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED` | `false` | Enable the independently gated new-Assessment Cycle/root dual-write path after schema readiness and tenant rollout checks. |
+| `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS` | empty | Comma-separated tenant allowlist for Cycle dual-write; `*` enables all tenants. Required when the dual-write gate is enabled. |
+| `SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED` | `false` | Enable immutable Assessment Snapshot generation and reads. |
+| `SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED` | `false` | Enable finding Identity/Observation and Comparison shadow generation without changing legacy reads. Requires Snapshot generation. |
+| `SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS` | empty | Comma-separated tenant allowlist for Identity/Observation and Comparison shadow generation; `*` enables all tenants. Required when shadow generation is enabled. |
+| `SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED` | `false` | Require a finalized default Snapshot before Assessment completion for an explicit rollout cohort. Disabled preserves legacy completion behavior. |
+| `SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS` | empty | Comma-separated Snapshot-completion enforcement allowlist; it must be a subset of the lifecycle-read allowlist. |
+| `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED` | `false` | Enable lifecycle read projections after backfill and integrity verification. |
+| `SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS` | empty | Comma-separated tenant allowlist for lifecycle reads; must be a subset of the shadow-generation allowlist. |
+| `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED` | `false` | Make lifecycle UI the default; startup rejects this unless lifecycle reads are enabled. |
+| `SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS` | empty | Comma-separated tenant allowlist for lifecycle UI; must be a subset of the lifecycle-read allowlist. |
+| `SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED` | `false` | Enable closure and report paths; requires lifecycle reads, Snapshots, and Identity/Comparison generation. |
+| `SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE` | `500` | Rows per committed lifecycle migration/backfill batch; maximum `2000`. |
+| `SYNAPSE_ASSESSMENT_PROCESS_TENANT_JOBS` | `4` | Maximum tenants processed concurrently by one lifecycle runner process; maximum `4`. |
+| `SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_WARNING` | `500` | Per-tenant queued/generating Comparison warning threshold; maximum `500`. |
+| `SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT` | `1000` | Per-tenant Comparison rollout gate; must be at least the warning threshold and no more than `1000`. |
 | `SYNAPSE_DAST_RATE_PER_SEC` | `5` | DAST crawler request rate. |
 | `SYNAPSE_DAST_CONCURRENCY` | `4` | DAST crawler concurrency. |
 | `SYNAPSE_DAST_MAX_DEPTH` | `8` | Maximum crawl depth. |

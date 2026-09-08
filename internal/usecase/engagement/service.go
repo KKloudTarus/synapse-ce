@@ -3,12 +3,14 @@ package engagement
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentsnapshot"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
@@ -17,11 +19,13 @@ import (
 
 // Service implements engagement use cases.
 type Service struct {
-	repo    ports.EngagementRepository
-	clock   ports.Clock
-	ids     ports.IDGenerator
-	audit   ports.AuditLogger
-	sources ports.EngagementSourceStore
+	repo                      ports.EngagementRepository
+	clock                     ports.Clock
+	ids                       ports.IDGenerator
+	audit                     ports.AuditLogger
+	sources                   ports.EngagementSourceStore
+	snapshots                 ports.AssessmentSnapshotDefaultReader
+	requireCompletionSnapshot func(string) bool
 }
 
 // NewService wires the engagement use case with its driven ports.
@@ -31,18 +35,34 @@ func NewService(repo ports.EngagementRepository, clock ports.Clock, ids ports.ID
 
 func (s *Service) SetSourceStore(store ports.EngagementSourceStore) { s.sources = store }
 
+func (s *Service) SetCompletionSnapshotReader(reader ports.AssessmentSnapshotDefaultReader) {
+	s.snapshots = reader
+	s.requireCompletionSnapshot = func(string) bool { return true }
+}
+
+// SetCompletionSnapshotPolicy enables the finalized-Snapshot completion guard
+// only for tenants that have passed the lifecycle rollout. A disabled policy
+// preserves legacy completion behavior.
+func (s *Service) SetCompletionSnapshotPolicy(reader ports.AssessmentSnapshotDefaultReader, required func(string) bool) {
+	s.snapshots = reader
+	s.requireCompletionSnapshot = required
+}
+
 // CreateInput is the input for creating an engagement.
 type CreateInput struct {
-	TenantID        shared.ID
-	BusinessAssetID shared.ID
-	CreatedBy       string // the authenticated actor that owns the engagement (ownership)
-	Name            string
-	Client          string
-	InScope         []domain.Target
-	OutOfScope      []domain.Target
-	AuthorizedFrom  *time.Time
-	AuthorizedTo    *time.Time
-	Timezone        string
+	AssessmentProjectID                    shared.ID
+	TenantID                               shared.ID
+	BusinessAssetID                        shared.ID
+	CreatedBy                              string // the authenticated actor that owns the engagement (ownership)
+	Name                                   string
+	Client                                 string
+	InScope                                []domain.Target
+	OutOfScope                             []domain.Target
+	AuthorizedFrom                         *time.Time
+	AuthorizedTo                           *time.Time
+	Timezone                               string
+	RoE                                    *domain.RoE
+	RequiresExplicitExecutionAuthorization bool
 }
 
 // Create validates and persists a new engagement with its scope.
@@ -73,9 +93,20 @@ func (s *Service) CreateFromSourcePackage(ctx context.Context, in CreateInput, f
 		"sha256":   item.SHA256,
 		"size":     strconv.FormatInt(item.Size, 10),
 	}, s.clock.Now()); err != nil {
-		return nil, sourcepackage.Package{}, err
+		// Reject an unaudited upload and remove both the newly created engagement
+		// and external source bytes, including when the request was cancelled.
+		return nil, sourcepackage.Package{}, errors.Join(err, s.CompensateCreate(context.WithoutCancel(ctx), item.TenantID, id))
 	}
 	return engagement, item, nil
+}
+
+func (s *Service) CompensateCreate(ctx context.Context, tenantID, engagementID shared.ID) error {
+	var cleanupErr error
+	if s.sources != nil {
+		cleanupErr = s.sources.Delete(context.WithoutCancel(ctx), shared.TenantOrDefault(tenantID), engagementID)
+	}
+	deleteErr := s.repo.Delete(ctx, engagementID)
+	return errors.Join(cleanupErr, deleteErr)
 }
 
 func (s *Service) create(ctx context.Context, in CreateInput, id shared.ID) (*domain.Engagement, error) {
@@ -85,11 +116,18 @@ func (s *Service) create(ctx context.Context, in CreateInput, id shared.ID) (*do
 		return nil, err
 	}
 	e.BusinessAssetID = in.BusinessAssetID
+	e.AssessmentProjectID = in.AssessmentProjectID
+	e.RequiresExplicitExecutionAuthorization = in.RequiresExplicitExecutionAuthorization
 	if err := e.SetScope(in.InScope, in.OutOfScope, now); err != nil {
 		return nil, err
 	}
 	if err := e.SetAuthorizationWindow(in.AuthorizedFrom, in.AuthorizedTo, in.Timezone, now); err != nil {
 		return nil, err
+	}
+	if in.RoE != nil {
+		if err := e.SetRoE(*in.RoE, now); err != nil {
+			return nil, err
+		}
 	}
 	// Ownership: the creating actor owns the engagement; updated_by starts equal.
 	e.Audit.CreatedBy = in.CreatedBy
@@ -177,6 +215,25 @@ func (s *Service) Transition(ctx context.Context, actor string, tenantID, id sha
 	if err != nil {
 		return nil, err
 	}
+	if to == domain.StatusCompleted && e.Status != domain.StatusCompleted {
+		required := s.requireCompletionSnapshot != nil && s.requireCompletionSnapshot(shared.TenantOrDefault(tenantID).String())
+		if required {
+			if s.snapshots == nil {
+				return nil, fmt.Errorf("%w: assessment snapshot completion guard is not configured", shared.ErrValidation)
+			}
+			snapshot, _, err := s.snapshots.GetDefault(ctx, shared.TenantOrDefault(tenantID), id)
+			if err != nil {
+				if errors.Is(err, shared.ErrNotFound) {
+					return nil, fmt.Errorf("%w: engagement requires a default finalized assessment snapshot before completion", shared.ErrValidation)
+				}
+				return nil, fmt.Errorf("load default assessment snapshot: %w", err)
+			}
+			if snapshot.Lifecycle != assessmentsnapshot.LifecycleFinalized {
+				return nil, fmt.Errorf("%w: engagement default assessment snapshot is not finalized", shared.ErrValidation)
+			}
+		}
+	}
+
 	now := s.clock.Now()
 	cp := *e
 	if err := cp.Transition(to, now); err != nil {

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
@@ -35,6 +37,66 @@ type uploadedSourceResponse struct {
 	Target     string    `json:"target"`
 	UploadedBy string    `json:"uploaded_by"`
 	UploadedAt time.Time `json:"uploaded_at"`
+}
+
+
+// scanRunHistoryReader is the normalized, tenant-scoped provenance read side.
+// It deliberately excludes mutation methods: this existing HTTP route is view-only.
+type scanRunHistoryReader interface {
+	ListScanRuns(ctx context.Context, tenantID, engagementID shared.ID) ([]scanrun.ScanRun, error)
+}
+
+// SetScanRunHistory wires normalized provenance into the existing scan-run history route.
+func (rt *Router) SetScanRunHistory(history scanRunHistoryReader) { rt.scanRunHistory = history }
+
+type scanRunHistoryResponse struct {
+	ID               string            `json:"id"`
+	EngagementID     string            `json:"engagement_id"`
+	CreatedAt        time.Time         `json:"created_at"`
+	Manifest         ports.ScanManifest `json:"manifest"`
+	FindingKeys      []string          `json:"finding_keys"`
+	Provenance       string            `json:"provenance"`
+	TerminalStatus   string            `json:"terminal_status"`
+	SealedAt         *time.Time        `json:"sealed_at,omitempty"`
+	ManifestHash     string            `json:"manifest_hash,omitempty"`
+	LaneCount        int               `json:"lane_count"`
+	CompleteCoverage bool              `json:"complete_coverage"`
+}
+
+func legacyScanRunResponse(run ports.ScanRun) scanRunHistoryResponse {
+	return scanRunHistoryResponse{
+		ID: run.ID, EngagementID: run.EngagementID, CreatedAt: run.CreatedAt,
+		Manifest: run.Manifest, FindingKeys: run.FindingKeys,
+		Provenance: "legacy", TerminalStatus: "unknown",
+	}
+}
+
+func mergeScanRunHistory(legacy []ports.ScanRun, normalized []scanrun.ScanRun) []scanRunHistoryResponse {
+	legacyByID := make(map[string]ports.ScanRun, len(legacy))
+	for _, run := range legacy {
+		legacyByID[run.ID] = run
+	}
+	out := make([]scanRunHistoryResponse, 0, len(legacy)+len(normalized))
+	seen := make(map[string]struct{}, len(normalized))
+	for _, run := range normalized {
+		view := scanRunHistoryResponse{
+			ID: run.ID, EngagementID: run.EngagementID.String(), CreatedAt: run.CreatedAt,
+			Provenance: string(run.Provenance), TerminalStatus: string(run.TerminalStatus),
+			SealedAt: run.SealedAt, ManifestHash: run.ManifestHash, LaneCount: len(run.Lanes),
+			CompleteCoverage: run.IsCompleteCoverage(),
+		}
+		if legacyRun, ok := legacyByID[run.ID]; ok {
+			view.Manifest, view.FindingKeys = legacyRun.Manifest, legacyRun.FindingKeys
+		}
+		out = append(out, view)
+		seen[run.ID] = struct{}{}
+	}
+	for _, run := range legacy {
+		if _, ok := seen[run.ID]; !ok {
+			out = append(out, legacyScanRunResponse(run))
+		}
+	}
+	return out
 }
 
 // validateScanTarget rejects a malformed target synchronously. Returns
@@ -198,12 +260,21 @@ func (rt *Router) scanRuns(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "engagement id is required"})
 		return
 	}
-	runs, err := rt.sca.ScanRuns(r.Context(), shared.ID(id))
+	legacy, err := rt.sca.ScanRuns(r.Context(), shared.ID(id))
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, runs)
+	if rt.scanRunHistory == nil {
+		writeJSON(w, http.StatusOK, legacy)
+		return
+	}
+	normalized, err := rt.scanRunHistory.ListScanRuns(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(id))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, mergeScanRunHistory(legacy, normalized))
 }
 
 // compareScanRuns returns the drift between two scan runs + the manifest deltas
@@ -214,7 +285,7 @@ func (rt *Router) compareScanRuns(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "both run ids (a, b) are required"})
 		return
 	}
-	drift, err := rt.sca.CompareRuns(r.Context(), a, b)
+	drift, err := rt.sca.CompareRuns(r.Context(), shared.ID(r.PathValue("id")), a, b)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return

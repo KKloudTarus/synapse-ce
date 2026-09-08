@@ -302,6 +302,12 @@ function mapScanRun(r: any): ScanRun {
     createdAt: r?.created_at ?? '',
     manifest: mapScanManifest(r?.manifest),
     findingKeys: r?.finding_keys ?? [],
+    provenance: r?.provenance ?? 'legacy',
+    terminalStatus: r?.terminal_status ?? 'unknown',
+    sealedAt: r?.sealed_at ?? null,
+    manifestHash: r?.manifest_hash ?? '',
+    laneCount: r?.lane_count ?? 0,
+    completeCoverage: r?.complete_coverage === true,
   }
 }
 

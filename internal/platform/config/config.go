@@ -15,6 +15,13 @@ import (
 const (
 	defaultWorkerConcurrency       = 1
 	maxWorkerConcurrency           = 64
+	defaultAssessmentBatchSize     = 500
+	maxAssessmentBatchSize         = 2000
+	defaultAssessmentTenantJobs    = 4
+	maxAssessmentTenantJobs        = 4
+	defaultComparisonBacklogWarn   = 500
+	defaultComparisonBacklogHard   = 1000
+	maxComparisonBacklogHard       = 1000
 	defaultFPTriageMaxFindings     = 100
 	maxFPTriageMaxFindings         = 1000
 	defaultFPTriageConcurrency     = 6
@@ -400,6 +407,24 @@ type Config struct {
 	// SLAEnabled turns on durable risk-based remediation deadlines, versioned tenant policy, and
 	// human lifecycle APIs. Default false until an operator explicitly opts into the new schema/path.
 	SLAEnabled bool
+	// Assessment lifecycle gates default off and use explicit tenant allowlists for staged rollout.
+	AssessmentCycleAPIEnabled           bool
+	AssessmentCycleDualWriteEnabled     bool
+	AssessmentCycleDualWriteTenants     []string
+	AssessmentSnapshotEnabled           bool
+	AssessmentSnapshotCompletionEnabled bool
+	AssessmentSnapshotCompletionTenants []string
+	AssessmentShadowEnabled             bool
+	AssessmentShadowTenants             []string
+	AssessmentLifecycleReadEnabled      bool
+	AssessmentLifecycleReadTenants      []string
+	AssessmentLifecycleUIDefault        bool
+	AssessmentLifecycleUITenants        []string
+	AssessmentClosureEnabled            bool
+	AssessmentBatchSize                 int
+	AssessmentTenantJobs                int
+	AssessmentBacklogWarning            int
+	AssessmentBacklogHardLimit          int
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
@@ -874,6 +899,23 @@ func Load() Config {
 		AlertWebhookAllowPrivate:               getbool("SYNAPSE_ALERT_WEBHOOK_ALLOW_PRIVATE", false),
 		AlertWebhookAllowUnsigned:              getbool("SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED", false),
 		VulnerabilitySourceAllowPrivateNetwork: getbool("SYNAPSE_VULNERABILITY_SOURCE_ALLOW_PRIVATE_NETWORK", false),
+		AssessmentCycleAPIEnabled:              getbool("SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED", false),
+		AssessmentCycleDualWriteEnabled:        getbool("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED", false),
+		AssessmentCycleDualWriteTenants:        splitList(getenv("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS", "")),
+		AssessmentSnapshotEnabled:              getbool("SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED", false),
+		AssessmentSnapshotCompletionEnabled:    getbool("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED", false),
+		AssessmentSnapshotCompletionTenants:    splitList(getenv("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS", "")),
+		AssessmentShadowEnabled:                getbool("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED", false),
+		AssessmentShadowTenants:                splitList(getenv("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS", "")),
+		AssessmentLifecycleReadEnabled:         getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED", false),
+		AssessmentLifecycleReadTenants:         splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS", "")),
+		AssessmentLifecycleUIDefault:           getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED", false),
+		AssessmentLifecycleUITenants:           splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS", "")),
+		AssessmentClosureEnabled:               getbool("SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED", false),
+		AssessmentBatchSize:                    getint("SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE", defaultAssessmentBatchSize),
+		AssessmentTenantJobs:                   getint("SYNAPSE_ASSESSMENT_PROCESS_TENANT_JOBS", defaultAssessmentTenantJobs),
+		AssessmentBacklogWarning:               getint("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_WARNING", defaultComparisonBacklogWarn),
+		AssessmentBacklogHardLimit:             getint("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT", defaultComparisonBacklogHard),
 
 		AgentApprovalMode:    getenv("SYNAPSE_AGENT_APPROVAL_MODE", "manual"),
 		AgentApprovalTimeout: getduration("SYNAPSE_AGENT_APPROVAL_TIMEOUT", 30*time.Minute),
@@ -1204,6 +1246,116 @@ func (c Config) ValidateWorkerConcurrency() error {
 		return fmt.Errorf("SYNAPSE_WORKER_CONCURRENCY must be between 1 and %d (got %d)", maxWorkerConcurrency, c.WorkerConcurrency)
 	}
 	return nil
+}
+
+// ValidateAssessmentLifecycleRollout rejects rollout settings that can create
+// unbounded migration work or expose UI/closure paths before their read inputs.
+func (c Config) ValidateAssessmentLifecycleRollout() error {
+	if c.AssessmentCycleDualWriteEnabled && len(c.AssessmentCycleDualWriteTenants) == 0 {
+		return errors.New("SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED requires SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS")
+	}
+	if c.AssessmentBatchSize < 1 || c.AssessmentBatchSize > maxAssessmentBatchSize {
+		return fmt.Errorf("SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE must be between 1 and %d (got %d)", maxAssessmentBatchSize, c.AssessmentBatchSize)
+	}
+	if c.AssessmentTenantJobs < 1 || c.AssessmentTenantJobs > maxAssessmentTenantJobs {
+		return fmt.Errorf("SYNAPSE_ASSESSMENT_PROCESS_TENANT_JOBS must be between 1 and %d (got %d)", maxAssessmentTenantJobs, c.AssessmentTenantJobs)
+	}
+	if c.AssessmentBacklogWarning < 1 || c.AssessmentBacklogWarning > defaultComparisonBacklogWarn {
+		return fmt.Errorf("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_WARNING must be between 1 and %d (got %d)", defaultComparisonBacklogWarn, c.AssessmentBacklogWarning)
+	}
+	if c.AssessmentBacklogHardLimit < c.AssessmentBacklogWarning || c.AssessmentBacklogHardLimit > maxComparisonBacklogHard {
+		return fmt.Errorf("SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT must be between warning threshold %d and %d (got %d)", c.AssessmentBacklogWarning, maxComparisonBacklogHard, c.AssessmentBacklogHardLimit)
+	}
+	if c.AssessmentShadowEnabled && !c.AssessmentSnapshotEnabled {
+		return errors.New("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED requires SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED=true")
+	}
+	if c.AssessmentShadowEnabled && len(c.AssessmentShadowTenants) == 0 {
+		return errors.New("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED requires SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS")
+	}
+	if c.AssessmentLifecycleReadEnabled && (!c.AssessmentShadowEnabled || len(c.AssessmentLifecycleReadTenants) == 0) {
+		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED requires shadow generation and SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
+	}
+	if !tenantAllowlistCovers(c.AssessmentShadowTenants, c.AssessmentLifecycleReadTenants) {
+		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS must be a subset of SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS")
+	}
+	if c.AssessmentSnapshotCompletionEnabled && !c.AssessmentSnapshotEnabled {
+		return errors.New("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED requires SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED=true")
+	}
+	if c.AssessmentSnapshotCompletionEnabled && len(c.AssessmentSnapshotCompletionTenants) == 0 {
+		return errors.New("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED requires SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS")
+	}
+	if c.AssessmentSnapshotCompletionEnabled && !c.AssessmentLifecycleReadEnabled {
+		return errors.New("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED=true")
+	}
+	if !tenantAllowlistCovers(c.AssessmentLifecycleReadTenants, c.AssessmentSnapshotCompletionTenants) {
+		return errors.New("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS must be a subset of SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
+	}
+	if c.AssessmentLifecycleUIDefault && !c.AssessmentLifecycleReadEnabled {
+		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED=true")
+	}
+	if c.AssessmentLifecycleUIDefault && len(c.AssessmentLifecycleUITenants) == 0 {
+		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED requires SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS")
+	}
+	if !tenantAllowlistCovers(c.AssessmentLifecycleReadTenants, c.AssessmentLifecycleUITenants) {
+		return errors.New("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS must be a subset of SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS")
+	}
+	if c.AssessmentClosureEnabled && (!c.AssessmentLifecycleReadEnabled || !c.AssessmentSnapshotEnabled || !c.AssessmentShadowEnabled) {
+		return errors.New("SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED requires lifecycle read, snapshots, and identity/comparison shadow generation")
+	}
+	return nil
+}
+
+func (c Config) AssessmentCycleDualWriteForTenant(tenantID string) bool {
+	return tenantFeatureEnabled(c.AssessmentCycleDualWriteEnabled, c.AssessmentCycleDualWriteTenants, tenantID)
+}
+
+func (c Config) AssessmentShadowForTenant(tenantID string) bool {
+	return tenantFeatureEnabled(c.AssessmentShadowEnabled, c.AssessmentShadowTenants, tenantID)
+}
+
+func (c Config) AssessmentLifecycleReadForTenant(tenantID string) bool {
+	return tenantFeatureEnabled(c.AssessmentLifecycleReadEnabled, c.AssessmentLifecycleReadTenants, tenantID)
+}
+
+func (c Config) AssessmentSnapshotCompletionForTenant(tenantID string) bool {
+	return tenantFeatureEnabled(c.AssessmentSnapshotCompletionEnabled, c.AssessmentSnapshotCompletionTenants, tenantID)
+}
+
+func (c Config) AssessmentLifecycleUIForTenant(tenantID string) bool {
+	return tenantFeatureEnabled(c.AssessmentLifecycleUIDefault, c.AssessmentLifecycleUITenants, tenantID)
+}
+
+func tenantFeatureEnabled(enabled bool, allowlist []string, tenantID string) bool {
+	if !enabled {
+		return false
+	}
+	tenantID = strings.TrimSpace(tenantID)
+	for _, allowed := range allowlist {
+		if allowed == "*" || strings.TrimSpace(allowed) == tenantID {
+			return true
+		}
+	}
+	return false
+}
+
+func tenantAllowlistCovers(superset, subset []string) bool {
+	if len(subset) == 0 {
+		return true
+	}
+	allowed := make(map[string]struct{}, len(superset))
+	for _, tenantID := range superset {
+		tenantID = strings.TrimSpace(tenantID)
+		if tenantID == "*" {
+			return true
+		}
+		allowed[tenantID] = struct{}{}
+	}
+	for _, tenantID := range subset {
+		if _, ok := allowed[strings.TrimSpace(tenantID)]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidateOIDCPosture fails closed when the browser OIDC BFF cannot bind identity/session state to a fixed tenant.

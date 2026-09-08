@@ -298,6 +298,23 @@ func (r *AssetRepository) listBusinessAssetLinks(ctx context.Context, tenantID, 
 
 func (r *AssetRepository) AssignEngagementBusinessAsset(ctx context.Context, tenantID, engagementID, assetID shared.ID) error {
 	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		var currentAssetID string
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(business_asset_id,'') FROM engagements
+			WHERE tenant_id=$1 AND id=$2 AND project_id IS NULL AND host_asset_id IS NULL FOR UPDATE`, tenantID.String(), engagementID.String()).Scan(&currentAssetID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return shared.ErrNotFound
+			}
+			return err
+		}
+		if currentAssetID != assetID.String() {
+			var frozen bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM assessment_cycle_members WHERE tenant_id=$1 AND assessment_id=$2)`, tenantID.String(), engagementID.String()).Scan(&frozen); err != nil {
+				return err
+			}
+			if frozen {
+				return fmt.Errorf("%w: an Assessment Cycle freezes its Business Asset boundary", shared.ErrConflict)
+			}
+		}
 		ct, err := tx.Exec(ctx, `UPDATE engagements SET business_asset_id=NULLIF($3,''), updated_at=now() WHERE tenant_id=$1 AND id=$2 AND project_id IS NULL AND host_asset_id IS NULL`, tenantID.String(), engagementID.String(), assetID.String())
 		if err != nil {
 			return err

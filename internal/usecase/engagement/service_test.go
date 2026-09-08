@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentsnapshot"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
@@ -87,6 +88,12 @@ type fixedIDs struct{}
 
 func (fixedIDs) NewID() shared.ID { return shared.ID("eng-1") }
 
+type finalizedSnapshotReader struct{}
+
+func (finalizedSnapshotReader) GetDefault(context.Context, shared.ID, shared.ID) (*assessmentsnapshot.Snapshot, ports.AssessmentSnapshotDefault, error) {
+	return &assessmentsnapshot.Snapshot{Lifecycle: assessmentsnapshot.LifecycleFinalized}, ports.AssessmentSnapshotDefault{}, nil
+}
+
 type capAudit struct{ entries []ports.AuditEntry }
 
 func (a *capAudit) Record(_ context.Context, e ports.AuditEntry) error {
@@ -106,6 +113,27 @@ type sourceStoreFake struct {
 	item    sourcepackage.Package
 	saved   []byte
 	deleted bool
+}
+
+type failedUploadAudit struct{ err error }
+
+func (a failedUploadAudit) Record(context.Context, ports.AuditEntry) error { return a.err }
+
+func TestSourceUploadAuditFailureCompensatesEngagementAndArchive(t *testing.T) {
+	ctx := context.Background()
+	repo, sources := newMemRepo(), &sourceStoreFake{}
+	auditErr := errors.New("audit unavailable")
+	svc := NewService(repo, fixedClock{time.Now()}, fixedIDs{}, failedUploadAudit{auditErr})
+	svc.SetSourceStore(sources)
+	_, _, err := svc.CreateFromSourcePackage(ctx, CreateInput{
+		TenantID: "tenant-a", Name: "Unaudited upload", CreatedBy: "alice",
+	}, "source.zip", 7, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", bytes.NewBufferString("archive"))
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("expected original audit failure, got %v", err)
+	}
+	if !sources.deleted || len(repo.data) != 0 {
+		t.Fatalf("unaudited upload left durable state: deleted=%v engagements=%d", sources.deleted, len(repo.data))
+	}
 }
 
 func (s *sourceStoreFake) Save(_ context.Context, tenantID, engagementID shared.ID, filename, actor string, createdAt time.Time, size int64, sha256hex string, src io.Reader) (sourcepackage.Package, error) {
@@ -269,6 +297,7 @@ func TestEngagementMutationsAndGatePickup(t *testing.T) {
 	}
 
 	// Lifecycle: draft -> active -> completed; completed blocks execution.
+	svc.SetCompletionSnapshotReader(finalizedSnapshotReader{})
 	if _, err := svc.Transition(ctx, "operator", "", id, domain.StatusActive); err != nil {
 		t.Fatalf("activate: %v", err)
 	}
@@ -288,6 +317,37 @@ func TestEngagementMutationsAndGatePickup(t *testing.T) {
 	}
 	if _, err := svc.UpdateScope(ctx, "  ", "", id, nil, nil); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("empty actor should be ErrValidation, got %v", err)
+	}
+}
+
+func TestCompletionRequiresDefaultFinalizedSnapshot(t *testing.T) {
+	repo := newMemRepo()
+	svc := NewService(repo, fixedClock{time.Now().UTC()}, fixedIDs{}, &capAudit{})
+	item, err := svc.Create(context.Background(), CreateInput{Name: "Assessment", CreatedBy: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusActive); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetCompletionSnapshotPolicy(nil, func(string) bool { return true })
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusCompleted); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("completion without default snapshot=%v", err)
+	}
+}
+
+func TestCompletionSnapshotPolicyDefaultsToLegacyCompatible(t *testing.T) {
+	repo := newMemRepo()
+	svc := NewService(repo, fixedClock{time.Now().UTC()}, fixedIDs{}, &capAudit{})
+	item, err := svc.Create(context.Background(), CreateInput{Name: "Legacy Assessment", CreatedBy: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusActive); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusCompleted); err != nil {
+		t.Fatalf("default-off completion must preserve legacy behavior: %v", err)
 	}
 }
 

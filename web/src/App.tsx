@@ -1,5 +1,5 @@
 import { Menu01 } from '@untitledui/icons'
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
@@ -12,6 +12,8 @@ import { NotFound } from './pages/NotFound'
 // --- Lazy-loaded page components ---
 const Dashboard = lazy(() => import('./pages/Dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })))
 const Engagements = lazy(() => import('./pages/Engagements/EngagementsPage').then(m => ({ default: m.EngagementsPage })))
+const AssessmentCycles = lazy(() => import('./pages/AssessmentCycles/AssessmentCyclesPage').then(m => ({ default: m.AssessmentCyclesPage })))
+const AssessmentCycleDetail = lazy(() => import('./pages/AssessmentCycles/AssessmentCycleDetailPage').then(m => ({ default: m.AssessmentCycleDetailPage })))
 const NewEngagement = lazy(() => import('./pages/Engagements/NewEngagementPage').then(m => ({ default: m.NewEngagementPage })))
 const EngagementDetail = lazy(() => import('./pages/EngagementDetail').then(m => ({ default: m.EngagementDetail })))
 const Assets = lazy(() => import('./pages/Assets/Assets').then(m => ({ default: m.Assets })))
@@ -42,6 +44,8 @@ const Integrations = lazy(() => import('./pages/Settings/Integrations').then(m =
 const Connectors = lazy(() => import('./pages/Settings/Connectors').then(m => ({ default: m.Connectors })))
 const TelemetryPrivacy = lazy(() => import('./pages/Settings/TelemetryPrivacy').then(m => ({ default: m.TelemetryPrivacy })))
 const ResponseOps = lazy(() => import('./pages/BlueTeam/ResponseOps').then(m => ({ default: m.ResponseOps })))
+
+const AssessmentRelationships = lazy(() => import('./pages/Settings/AssessmentRelationships').then(m => ({ default: m.AssessmentRelationships })))
 const AITriageReviews = lazy(() => import('./pages/AITriage/AITriageReviews').then(m => ({ default: m.AITriageReviews })))
 const AITriageObservability = lazy(() => import('./pages/AITriage/AITriageObservability').then(m => ({ default: m.AITriageObservability })))
 const VulnerabilityIntelligence = lazy(() => import('./pages/VulnerabilityIntelligence').then(m => ({ default: m.VulnerabilityIntelligence })))
@@ -78,6 +82,8 @@ function Gate() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="engagements" element={<Engagements />} />
+        <Route path="assessment-cycles" element={<AssessmentLifecycleRoute><AssessmentCycles /></AssessmentLifecycleRoute>} />
+        <Route path="assessment-cycles/:cycleId" element={<AssessmentLifecycleRoute><AssessmentCycleDetail /></AssessmentLifecycleRoute>} />
         <Route path="engagements/new" element={<NewEngagement />} />
         <Route path="engagements/:id" element={<EngagementDetail />} />
         <Route path="engagements/:id/:tabSlug" element={<EngagementDetail />} />
@@ -120,6 +126,8 @@ function Gate() {
           <Route path="integrations" element={<Integrations />} />
           <Route path="connectors" element={<Connectors />} />
           <Route path="privacy" element={<TelemetryPrivacy />} />
+
+          <Route path="relationships" element={<AssessmentRelationships />} />
           <Route path="config" element={<SettingsConfig />} />
           <Route path="sla" element={<SLAPolicy />} />
           <Route path="offensive-policy" element={<OffensivePolicy />} />
@@ -135,6 +143,12 @@ function Gate() {
       </Route>
     </Routes>
   )
+}
+
+function AssessmentLifecycleRoute({ children }: { children: ReactNode }) {
+  const { currentUser } = useAuth()
+  if (currentUser?.features?.assessmentLifecycleUIDefault !== true) return <Navigate to="/engagements" replace />
+  return children
 }
 
 function Shell() {

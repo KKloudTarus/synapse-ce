@@ -64,8 +64,10 @@ export function ScanPanel({
   )
 
   const running = job?.status === 'running'
-  // Archived is terminal: no scan may start against it.
   const archived = isReadOnly(eng)
+  const completed = eng.status === 'completed'
+  const scanBlocked = archived || completed
+  const scanBlockedReason = archived ? ARCHIVED_REASON : 'Completed Assessments keep their finalized Snapshots. Create a Re-test to run another assessment.'
   const debugEvents = job?.debugEvents?.length ? job.debugEvents : (summary?.debugEvents ?? [])
   const usingImportedSBOM = Boolean(importedSBOM) && !usingUploadedSource
 
@@ -126,6 +128,10 @@ export function ScanPanel({
   }, [eng.id])
 
   async function run() {
+    if (scanBlocked) {
+      setError(scanBlockedReason)
+      return
+    }
     if (!usingUploadedSource && !usingImportedSBOM && !target.trim()) {
       setError('Enter a target in Scan Settings.')
       setConfigOpen(true)
@@ -215,18 +221,20 @@ export function ScanPanel({
             type="button"
             variant="secondary"
             onClick={() => setConfigOpen(true)}
+            disabled={scanBlocked}
+            aria-describedby={completed ? 'engagement-completed-note' : archived ? 'engagement-archived-note' : undefined}
             className="h-10 px-5 text-sm font-semibold rounded-xl shadow-xs transition-transform active:scale-[0.98]"
           >
             <Settings01 className="size-4 text-secondary" />
             <span>Scan settings</span>
           </Button>
 
-          <span title={archived ? ARCHIVED_REASON : undefined}>
+          <span title={scanBlocked ? scanBlockedReason : undefined}>
             <Button
               onClick={run}
               loading={running}
-              disabled={running || outsideWindow || archived}
-              aria-describedby={archived ? 'engagement-archived-note' : undefined}
+              disabled={running || outsideWindow || scanBlocked}
+              aria-describedby={completed ? 'engagement-completed-note' : archived ? 'engagement-archived-note' : undefined}
               variant="primary"
               className="h-10 px-6 text-sm font-bold rounded-xl shadow-xs transition-transform active:scale-[0.98]"
             >
@@ -247,6 +255,12 @@ export function ScanPanel({
         >
           {sbomError ? <AlertTriangle className="size-3.5" /> : <CheckCircle className="size-3.5" />}
           {sbomError || sbomMessage}
+        </div>
+      )}
+
+      {completed && (
+        <div id="engagement-completed-note" className="rounded-lg border border-secondary bg-secondary p-3 text-xs text-tertiary">
+          {scanBlockedReason}
         </div>
       )}
 

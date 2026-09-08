@@ -60,6 +60,18 @@ func (s *JudgmentStore) ListByEngagement(_ context.Context, engagementID shared.
 	return out, nil
 }
 
+// GetByID provides a bounded lookup for migration/backfill consumers.
+func (s *JudgmentStore) GetByID(_ context.Context, engagementID, id shared.ID) (judgment.Judgment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.byEng[engagementID] {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return judgment.Judgment{}, shared.ErrNotFound
+}
+
 // ListBySubject returns the engagement's judgments about a given subject id.
 func (s *JudgmentStore) ListBySubject(_ context.Context, engagementID, subjectID shared.ID) ([]judgment.Judgment, error) {
 	s.mu.Lock()

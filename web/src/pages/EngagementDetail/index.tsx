@@ -51,6 +51,9 @@ import { SettingsTab } from './SettingsTab'
 import { JudgmentReviewTab } from './ReviewsTab'
 import { ARCHIVED_REASON, isReadOnly } from './readOnly'
 
+import { AssessmentComparisonTab } from './AssessmentComparisonTab'
+import { AssessmentLifecyclePanel } from './AssessmentLifecyclePanel'
+
 // Lazy-loaded so React Flow stays out of the initial bundle (only the Graph tab needs it).
 const DependencyGraphTab = lazy(() => import('../DependencyGraph').then((m) => ({ default: m.DependencyGraphTab })))
 
@@ -58,6 +61,8 @@ export type Tab =
   | 'overview'
   | 'findings'
   | 'imported'
+
+  | 'comparison'
   | 'sla'
   | 'risk-stories'
   | 'vuln-posture'
@@ -110,6 +115,7 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'risk-stories', label: 'Risk Stories' },
       { id: 'vuln-posture', label: 'Vuln Posture' },
       { id: 'sla', label: 'Remediation SLA' },
+      { id: 'comparison', label: 'Comparison' },
     ],
   },
   {
@@ -388,6 +394,7 @@ export function EngagementDetail() {
       </div>
 
       {/* Single Unified Hero Card for Engagement Details and Scan Console */}
+      <AssessmentLifecyclePanel assessmentId={id} engagementStatus={eng.status} />
       <div className="bg-hero rounded-2xl border border-secondary p-5 sm:p-6 shadow-xs space-y-4">
         <ScanPanel
           eng={eng}
@@ -521,6 +528,8 @@ export function EngagementDetail() {
         {tab === 'sla' && <SLATab key={id} engagementId={id} findings={findings} />}
         {tab === 'risk-stories' && <RiskStoriesTab key={id} engagementId={id} />}
         {tab === 'vuln-posture' && <VulnPostureTab key={id} engagementId={id} />}
+
+        {tab === 'comparison' && <AssessmentComparisonTab assessmentId={id} />}
         {tab === 'components' && <ComponentsTab scan={scan} />}
         {tab === 'vulns' && <VulnsTab scan={scan} />}
         {tab === 'graph' && (
