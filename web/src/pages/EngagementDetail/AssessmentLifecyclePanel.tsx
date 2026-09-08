@@ -41,7 +41,7 @@ export function AssessmentLifecyclePanel({ assessmentId, engagementStatus }: { a
   const activeManifest = manifestFetch.data?.find((manifest) => manifest.lifecycle === 'active') ?? null
   const finalAssessmentId = activeManifest?.finalAssessmentId ?? ''
   return <>
-    <Card bodyClass="p-0">
+    <Card bodyClass="p-0!">
       <div className="space-y-2 px-4 py-3 sm:px-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
