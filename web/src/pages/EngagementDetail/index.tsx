@@ -393,9 +393,8 @@ export function EngagementDetail() {
         <ExportButtons engagementId={eng.id} scan={scan} onChanged={refreshAll} />
       </div>
 
-      {/* Single Unified Hero Card for Engagement Details and Scan Console */}
-      <AssessmentLifecyclePanel assessmentId={id} engagementStatus={eng.status} />
-      <div className="bg-hero rounded-2xl border border-secondary p-5 sm:p-6 shadow-xs space-y-4">
+      {/* Keep the Engagement identity first; lifecycle is supporting context below the scan console. */}
+      <section aria-label="Engagement summary" className="bg-hero rounded-2xl border border-secondary p-5 sm:p-6 shadow-xs space-y-4">
         <ScanPanel
           eng={eng}
           importedSBOM={importedSBOM}
@@ -415,7 +414,8 @@ export function EngagementDetail() {
             }
           }}
         />
-      </div>
+        <AssessmentLifecyclePanel assessmentId={id} engagementStatus={eng.status} />
+      </section>
 
       {/* 2-Tier Navigation Section. Sticky so a tab switch does not leave the
           reader hunting for the content below a tall hero. */}

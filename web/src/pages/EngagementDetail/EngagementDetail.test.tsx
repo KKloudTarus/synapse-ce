@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../lib/api'
@@ -119,6 +119,43 @@ describe('EngagementDetail Page Shell', () => {
     expect(screen.getByText('Engagements')).toBeInTheDocument()
     expect(screen.getByText('Active')).toBeInTheDocument()
     expect(screen.getAllByTitle('github.com/acme/core-service').length).toBeGreaterThan(0)
+  })
+
+  it('groups lifecycle below scan controls in the Engagement summary, before the content tabs', async () => {
+    vi.mocked(api.me).mockResolvedValue({ id: 'operator', name: 'Operator', role: 'member', features: { assessmentLifecycleRead: true, assessmentLifecycleUIDefault: true } })
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456']}>
+        <Routes><Route path="/engagements/:id" element={<EngagementDetail />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    const lifecycle = await screen.findByRole('region', { name: 'Assessment lifecycle' })
+    const summary = screen.getByRole('region', { name: 'Engagement summary' })
+    expect(summary).toContainElement(screen.getByRole('heading', { level: 1, name: mockEngagement.name }))
+    expect(summary).toContainElement(lifecycle)
+    const scanButton = within(summary).getByRole('button', { name: 'Run scan' })
+    expect(scanButton.compareDocumentPosition(lifecycle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(lifecycle.compareDocumentPosition(screen.getByRole('tablist', { name: 'Engagement Views' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(lifecycle).getByRole('link', { name: 'Compare' })).toHaveAttribute('href', '/engagements/eng-123456/comparison')
+    const disclosure = within(lifecycle).getByRole('button', { name: /Details & history/ })
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('list', { name: 'Assessment Cycle history' })).not.toBeInTheDocument()
+    fireEvent.click(disclosure)
+    expect(within(lifecycle).getByRole('list', { name: 'Assessment Cycle history' })).toBeInTheDocument()
+  })
+
+  it('does not add an empty lifecycle section when tenant UI rollout is disabled', async () => {
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456']}>
+        <Routes><Route path="/engagements/:id" element={<EngagementDetail />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('region', { name: 'Engagement summary' })).toBeInTheDocument()
+    await waitFor(() => expect(api.me).toHaveBeenCalled())
+    expect(screen.queryByRole('region', { name: 'Assessment lifecycle' })).not.toBeInTheDocument()
+    expect(api.assessmentLifecycle).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Run scan' })).toBeInTheDocument()
   })
 
   it('renders tab list with accessible roles and switches tabs', async () => {

@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { SlideoutMenu } from '../../components/application/slideout-menus/slideout-menu'
 import { styles as buttonStyles } from '../../components/base/buttons/button'
 import { Tooltip, TooltipTrigger } from '../../components/base/tooltip/tooltip'
-import { Button, Card, cn, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../../components/ui'
+import { Button, cn, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../../components/ui'
 import { useFetch } from '../../hooks'
 import { api, ApiError } from '../../lib/api'
 import { newIdempotencyKey } from '../../lib/api/client'
@@ -41,11 +41,11 @@ export function AssessmentLifecyclePanel({ assessmentId, engagementStatus }: { a
   const activeManifest = manifestFetch.data?.find((manifest) => manifest.lifecycle === 'active') ?? null
   const finalAssessmentId = activeManifest?.finalAssessmentId ?? ''
   return <>
-    <Card bodyClass="p-0!">
-      <div className="space-y-2 px-4 py-3 sm:px-5">
+    <section aria-labelledby={`${detailsId}-title`} className="border-t border-secondary pt-4">
+      <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-primary">
+            <h2 id={`${detailsId}-title`} className="flex items-center gap-2 text-sm font-semibold text-primary">
               <GitBranch01 className="size-4 text-fg-brand-primary" aria-hidden="true" />Assessment lifecycle
             </h2>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -80,7 +80,7 @@ export function AssessmentLifecyclePanel({ assessmentId, engagementStatus }: { a
         </div>
         {!canCreateRetest ? <p id={`${detailsId}-eligibility`} className="sr-only">{RETEST_REQUIREMENTS} Open Details &amp; history for more information.</p> : null}
       </div>
-      <div id={detailsId} hidden={!detailsExpanded} className="space-y-4 border-t border-secondary px-4 py-4 sm:px-5">
+      <div id={detailsId} hidden={!detailsExpanded} className="mt-3 space-y-4 border-t border-secondary pt-4">
         <nav aria-label="Assessment lifecycle breadcrumb" className="flex flex-wrap items-center gap-2 text-xs text-tertiary">
           {boundaryParts(lifecycle).map((part, index) => <span key={part} className="contents">{index ? <span aria-hidden="true">/</span> : null}<span className="break-all">{part}</span></span>)}
           <span aria-hidden="true">/</span><span className="break-all">{lifecycle.cycle.name}</span><span aria-hidden="true">/</span><span className="break-all font-mono">{assessmentId}</span>
@@ -92,7 +92,7 @@ export function AssessmentLifecyclePanel({ assessmentId, engagementStatus }: { a
           {selectableHeads.length ? <Button variant="secondary" onClick={() => setDrawer('select_head')}><GitBranch01 className="size-4" aria-hidden="true" />Select Cycle head</Button> : null}
         </div> : null}
       </div>
-    </Card>
+    </section>
     {drawer === 'retest' ? <RetestDrawer lifecycle={lifecycle} assessmentId={assessmentId} onClose={() => setDrawer(null)} onCreated={() => lifecycleFetch.refetch()} /> : null}
     {drawer === 'reparent' && current ? <RelationshipDrawer lifecycle={lifecycle} member={current} command="reparent_within_cycle" onClose={() => setDrawer(null)} onCommitted={() => { setDrawer(null); lifecycleFetch.refetch() }} /> : null}
     {drawer === 'select_head' ? <RelationshipDrawer lifecycle={lifecycle} command="select_head" onClose={() => setDrawer(null)} onCommitted={() => { setDrawer(null); lifecycleFetch.refetch() }} /> : null}
