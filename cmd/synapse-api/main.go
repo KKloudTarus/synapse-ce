@@ -512,15 +512,13 @@ func main() {
 		}
 		defer pool.Close()
 		databasePool = pool
-		{
-			haltPool, err := postgres.ConnectPool(startup, cfg.DBHaltWriterDSN, postgres.PoolConfig{MaxConns: 2, MinConns: 0, MaxConnLifetime: cfg.DBMaxConnLifetime, MaxConnIdleTime: cfg.DBMaxConnIdleTime})
-			if err != nil {
-				log.Error("halt-writer database connect failed", "err", err)
-				os.Exit(1)
-			}
-			defer haltPool.Close()
-			haltWriter = postgres.NewResponseHaltWriterRepository(haltPool)
+		haltPool, err := postgres.ConnectPool(startup, cfg.DBHaltWriterDSN, postgres.PoolConfig{MaxConns: 2, MinConns: 0, MaxConnLifetime: cfg.DBMaxConnLifetime, MaxConnIdleTime: cfg.DBMaxConnIdleTime})
+		if err != nil {
+			log.Error("halt-writer database connect failed", "err", err)
+			os.Exit(1)
 		}
+		defer haltPool.Close()
+		haltWriter = postgres.NewResponseHaltWriterRepository(haltPool)
 		readinessChecks["database"] = func(ctx context.Context) error {
 			return postgres.CheckDatabaseReady(ctx, pool)
 		}
@@ -579,10 +577,6 @@ func main() {
 		scannedImageStore = postgres.NewScannedImageStore(pool)
 		workOrderStore = postgres.NewWorkOrderRepository(pool)
 		responseStore = postgres.NewResponseRepository(pool)
-		if haltWriter == nil {
-			log.Error("response halt writer is required for PostgreSQL response composition")
-			os.Exit(1)
-		}
 		responseVerificationStore, err = postgres.NewResponseVerificationRepository(pool)
 		if err != nil {
 			log.Error("postgres response-verification store init failed", "err", err)

@@ -498,6 +498,7 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 		)
 	}
 	for _, statement := range statements {
+		// #nosec G701 -- SQL is fixed apart from quoteIdentifier-escaped DSN identifiers; PostgreSQL cannot bind identifiers as parameters.
 		if _, err := adminDB.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("grant runtime privileges: %w", err)
 		}

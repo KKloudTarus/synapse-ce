@@ -10,6 +10,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/fssecurity"
 )
 
 func TestResponseVerificationSignerPersistsAndRotatesByPurpose(t *testing.T) {
@@ -30,7 +31,7 @@ func TestResponseVerificationSignerPersistsAndRotatesByPurpose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if fssecurity.UnixModeEnforced() && info.Mode().Perm() != 0o600 {
 		t.Fatalf("signer mode=%o", info.Mode().Perm())
 	}
 }
@@ -62,7 +63,7 @@ func TestResponseVerificationOutboxIsDurableAndRejectsEquivocation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if fssecurity.UnixModeEnforced() && info.Mode().Perm() != 0o600 {
 		t.Fatalf("outbox mode=%o", info.Mode().Perm())
 	}
 	equivocation := report

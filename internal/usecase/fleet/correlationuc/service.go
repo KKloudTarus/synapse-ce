@@ -162,11 +162,6 @@ func sourcePositionAfter(left, right correlation.SourcePosition) bool {
 	return left.RecordedAt.After(right.RecordedAt) || (left.RecordedAt.Equal(right.RecordedAt) && left.ID > right.ID)
 }
 
-// signals is retained as the narrow page-normalization seam for focused tests.
-func (s *Service) signals(ctx context.Context, engagementID shared.ID, records []detection.Record) ([]correlation.Signal, error) {
-	return s.sourceSignals(ctx, engagementID, records)
-}
-
 func (s *Service) sourceSignals(ctx context.Context, engagementID shared.ID, records []detection.Record) ([]correlation.Signal, error) {
 	ids := make([]shared.ID, len(records))
 	byID := make(map[shared.ID]detection.Record, len(records))

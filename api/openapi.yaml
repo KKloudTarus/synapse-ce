@@ -5081,7 +5081,11 @@ components:
           type: [array, "null"]
           description: The incidents this pass recorded. Null when the pass created none.
           items: {$ref: '#/components/schemas/FleetIncident'}
-        reassessed: {type: integer, minimum: 0, description: How many of the created incidents were tri-scored.}
+        updated:
+          type: [array, "null"]
+          description: Existing canonical incidents revised by allowed-late or bridge signals. Null when none changed.
+          items: {$ref: '#/components/schemas/FleetIncident'}
+        reassessed: {type: integer, minimum: 0, description: How many of the created or updated incidents were tri-scored.}
         reassess_failed: {type: integer, minimum: 0, description: How many scoring attempts failed; the incidents are still recorded.}
         phase: {type: string, enum: ["", source, consume], description: Current bounded correlation phase; empty means idle.}
         has_more: {type: boolean, description: Whether another bounded correlate invocation is required.}

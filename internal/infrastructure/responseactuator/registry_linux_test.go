@@ -5,7 +5,6 @@ package responseactuator
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -357,6 +356,6 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) {
 func requireRoot(t *testing.T) {
 	t.Helper()
 	if os.Geteuid() != 0 {
-		t.Skip(fmt.Sprintf("descriptor-pinned restart needs root; uid=%d", os.Geteuid()))
+		t.Skipf("descriptor-pinned restart needs root; uid=%d", os.Geteuid())
 	}
 }
