@@ -17,7 +17,9 @@ CREATE TABLE incident_response_links (
     PRIMARY KEY (tenant_id, incident_id, action_id),
     UNIQUE (tenant_id, incident_id, source_request_seq),
     FOREIGN KEY (tenant_id, incident_id, source_request_seq)
-        REFERENCES incident_events(tenant_id, incident_id, seq) ON DELETE RESTRICT
+        REFERENCES incident_events(tenant_id, incident_id, seq) ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, action_id)
+        REFERENCES response_actions(tenant_id, id) ON DELETE RESTRICT
 );
 CREATE INDEX idx_incident_response_links_pending
     ON incident_response_links (tenant_id, incident_id COLLATE "C", action_id COLLATE "C")

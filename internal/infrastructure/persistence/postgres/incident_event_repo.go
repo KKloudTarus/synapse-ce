@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
+	response "github.com/KKloudTarus/synapse-ce/internal/domain/response"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -83,6 +85,22 @@ func (r *IncidentEventRepository) AppendEvents(ctx context.Context, incidentID s
 			}
 		}
 		for i, e := range events {
+			if e.Kind == incident.EventResponseRequested {
+				var prepared response.Record
+				row := tx.QueryRow(ctx, `SELECT tenant_id, id, engagement_id, kind, target, blast_radius, reversibility_class, argv, reversal, authorization_target, target_fingerprint, submitted_by, reversal_requested_by, state, approved_by, approval_evidence_id, applied_at, verification FROM response_actions WHERE tenant_id=$1 AND id=$2`, tenant.String(), e.ResponseActionID.String())
+				if err := scanResponse(row, &prepared); errors.Is(err, pgx.ErrNoRows) {
+					return fmt.Errorf("%w: response action %s was not prepared", shared.ErrNotFound, e.ResponseActionID)
+				} else if err != nil {
+					return fmt.Errorf("validate prepared response action: %w", err)
+				}
+				digest, err := response.CanonicalDigest(prepared.Action)
+				if err != nil {
+					return fmt.Errorf("digest prepared response action: %w", err)
+				}
+				if prepared.EngagementID != e.ResponseEngagementID || digest != e.ResponseActionDigest || prepared.TargetFingerprint != e.ResponseTarget {
+					return fmt.Errorf("%w: response request provenance does not match prepared action %s", shared.ErrConflict, e.ResponseActionID)
+				}
+			}
 			payload, err := json.Marshal(e)
 			if err != nil {
 				return fmt.Errorf("marshal incident event: %w", err)
@@ -247,7 +265,27 @@ func (r *IncidentEventRepository) ListPendingResponseLinks(ctx context.Context) 
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		var records []struct {
+			id      shared.ID
+			payload []byte
+		}
+		for rows.Next() {
+			var id string
+			var payload []byte
+			if err := rows.Scan(&id, &payload); err != nil {
+				rows.Close()
+				return err
+			}
+			records = append(records, struct {
+				id      shared.ID
+				payload []byte
+			}{id: shared.ID(id), payload: payload})
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
 		var current shared.ID
 		var events []incident.IncidentEvent
 		project := func() error {
@@ -269,28 +307,19 @@ func (r *IncidentEventRepository) ListPendingResponseLinks(ctx context.Context) 
 			}
 			return nil
 		}
-		for rows.Next() {
-			var id string
-			var payload []byte
-			if err := rows.Scan(&id, &payload); err != nil {
-				return err
-			}
-			next := shared.ID(id)
-			if !current.IsZero() && next != current {
+		for _, record := range records {
+			if !current.IsZero() && record.id != current {
 				if err := project(); err != nil {
 					return err
 				}
 				events = nil
 			}
-			current = next
+			current = record.id
 			var e incident.IncidentEvent
-			if err := json.Unmarshal(payload, &e); err != nil {
+			if err := json.Unmarshal(record.payload, &e); err != nil {
 				return err
 			}
 			events = append(events, e)
-		}
-		if err := rows.Err(); err != nil {
-			return err
 		}
 		return project()
 	})

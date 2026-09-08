@@ -30,6 +30,7 @@ func postgresResponseVerificationFixture(t *testing.T, f responseAuditFixture) p
 		ProtocolVersion: fleetagent.TelemetryProtocolVersion, ReportID: "report-1", AgentID: "observer-1", HostID: "observer-1",
 		AgentSessionID: fleetagent.CanonicalSessionID("observer-1"), AssetID: "asset-1", EngagementID: f.engage, ActionID: "action-1",
 		ActionDigest: strings.Repeat("a", 64), AttemptKey: "attempt-1", VerificationChallenge: strings.Repeat("b", 64),
+		ReceiptID: "receipt-1", ReceiptDigest: strings.Repeat("c", 64),
 		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
 		ObservedAt: f.at, KeyID: key.KeyID,
 	}

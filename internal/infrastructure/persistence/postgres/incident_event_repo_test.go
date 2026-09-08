@@ -6,13 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
+	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/riskassessment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -141,6 +142,9 @@ func TestIncidentEventRepositoryListsPendingResponseLinksBeyondOperatorPage(t *t
 	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES($1,$1)`, tenant.String()); err != nil {
 		t.Fatalf("seed tenant: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `INSERT INTO engagements(id,tenant_id,name) VALUES('eng-1',$1,'eng-1')`, tenant.String()); err != nil {
+		t.Fatalf("seed engagement: %v", err)
+	}
 	t.Cleanup(func() {
 		conn, err := pool.Acquire(context.Background())
 		if err != nil {
@@ -152,6 +156,8 @@ func TestIncidentEventRepositoryListsPendingResponseLinksBeyondOperatorPage(t *t
 		}
 		defer conn.Exec(context.Background(), `SET session_replication_role = origin`)
 		_, _ = conn.Exec(context.Background(), `DELETE FROM incident_events WHERE tenant_id=$1`, tenant.String())
+		_, _ = conn.Exec(context.Background(), `DELETE FROM response_actions WHERE tenant_id=$1`, tenant.String())
+		_, _ = conn.Exec(context.Background(), `DELETE FROM engagements WHERE tenant_id=$1`, tenant.String())
 		_, _ = conn.Exec(context.Background(), `DELETE FROM tenants WHERE id=$1`, tenant.String())
 	})
 
@@ -161,7 +167,21 @@ func TestIncidentEventRepositoryListsPendingResponseLinksBeyondOperatorPage(t *t
 	targetIncident := shared.ID("zzzz-pending-" + suffix)
 	targetAction := shared.ID("response-" + suffix)
 	target := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"}
-	digest := strings.Repeat("a", 64)
+	action, err := rdom.NewAction(targetAction, rdom.KindStopProcess, "asset-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := NewResponseRepository(pool).Put(tctx, rdom.Record{
+		ID: targetAction, TenantID: tenant, EngagementID: "eng-1", Action: action,
+		AuthorizationTarget: engagement.Target{Kind: engagement.TargetDomain, Value: "asset-1.example"}, TargetFingerprint: target,
+		SubmittedBy: "alice", State: rdom.StatePending, UpdatedAt: base,
+	}); err != nil {
+		t.Fatalf("seed prepared response: %v", err)
+	}
+	digest, err := rdom.CanonicalDigest(action)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	err = WithContextTenant(tctx, pool, func(tx pgx.Tx) error {
 		for i := 0; i < defaultIncidentListLimit; i++ {
