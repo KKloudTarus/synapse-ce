@@ -1,0 +1,16 @@
+[
+  {
+    "name": "maven-log4shell",
+    "group": "Maven",
+    "notes": "CVE-2021-44228 affects log4j-core >=2.0 <2.15.0.",
+    "components": [
+      {"name": "org.apache.logging.log4j:log4j-core", "version": "2.14.1", "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"},
+      {"name": "org.apache.logging.log4j:log4j-core", "version": "2.17.1", "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.1"}
+    ],
+    "advisories": [
+      {"id": "GHSA-jfh8-c2jp-5v3q", "aliases": ["CVE-2021-44228"], "summary": "Log4Shell remote code execution", "cvss_score": 10.0, "ecosystem": "Maven", "package": "org.apache.logging.log4j:log4j-core",
+       "ranges": [{"type": "ECOSYSTEM", "introduced": "2.0", "fixed": "2.15.0"}], "fixed_version": "2.15.0"}
+    ],
+    "expected": [{"component": "org.apache.logging.log4j:log4j-core", "version": "2.14.1", "cve": "CVE-2021-44228"}]
+  }
+]
