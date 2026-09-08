@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -65,15 +66,19 @@ func TestGitAuthInjectsTokenViaAskpassNotArgv(t *testing.T) {
 	if len(roPaths) != 1 {
 		t.Fatalf("roPaths must carry the credential dir for the sandbox bind: %v", roPaths)
 	}
-	// Running the helper with the token-file env (as git will) must emit exactly the token.
-	cmd := exec.Command(askpass, "Password: ")
-	cmd.Env = append(os.Environ(), tokenFileEnv)
-	got, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("askpass with token-file env: %v", err)
-	}
-	if strings.TrimSpace(string(got)) != token {
-		t.Fatalf("askpass emitted %q, want the token", strings.TrimSpace(string(got)))
+	// Running the helper with the token-file env (as git will) must emit exactly the token. The
+	// helper is a POSIX /bin/sh script and the git-acquire pipeline runs only in the Linux sandbox,
+	// so exec the shebang directly on non-Windows only; Windows cannot run a shebang script via exec.
+	if runtime.GOOS != "windows" {
+		cmd := exec.Command(askpass, "Password: ")
+		cmd.Env = append(os.Environ(), tokenFileEnv)
+		got, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("askpass with token-file env: %v", err)
+		}
+		if strings.TrimSpace(string(got)) != token {
+			t.Fatalf("askpass emitted %q, want the token", strings.TrimSpace(string(got)))
+		}
 	}
 }
 
