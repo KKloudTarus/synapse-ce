@@ -124,7 +124,7 @@ ENTRYPOINT ["/synapse-api"]
 FROM debian:trixie-slim AS production
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-         bubblewrap ca-certificates git tini \
+         bubblewrap ca-certificates curl git tini \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 synapse \
     && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/synapse --shell /usr/sbin/nologin synapse \
