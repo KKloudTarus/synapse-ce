@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -69,6 +70,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ospkg"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/osv"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/qualityprofile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
@@ -1344,6 +1346,24 @@ func scopeToNewCode(findings []finding.Finding, changed gitdiff.ChangedLines) []
 	return out
 }
 
+// selectSBOMGenerator picks the SBOM producer from config, mirroring the server (scacompose): syft
+// (default) or Synapse's own pure-Go parsers (ownsbom). An unknown value fails closed, matching the
+// server rather than silently defaulting.
+func selectSBOMGenerator(cfg config.Config) (ports.SBOMGenerator, error) {
+	switch cfg.SBOMProducer {
+	case "", "syft":
+		return syft.New(cfg.SyftBin), nil
+	case "ownsbom":
+		reg, err := ownsbom.DefaultRegistry()
+		if err != nil {
+			return nil, fmt.Errorf("build ownsbom SBOM producer: %w", err)
+		}
+		return reg, nil
+	default:
+		return nil, fmt.Errorf("invalid SYNAPSE_SBOM_PRODUCER (want 'syft' or 'ownsbom'): %s", cfg.SBOMProducer)
+	}
+}
+
 func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest bool, push pushTarget) error {
 	// An image target is an OCI reference (acquired via crane → OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
@@ -1375,17 +1395,40 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	// One policy decides every network-capable part of this scan, so --offline cannot mean "offline
 	// except the resolvers" again.
 	egress := newScanEgress(cfg, offline, os.LookupEnv)
-	// Grype (offline DB) always; live OSV unless --offline / SYNAPSE_OFFLINE (air-gapped / fast path).
-	detectionSources := []ports.DetectionSource{grype.New(cfg.GrypeBin, cfg.GrypeDBDir)}
+	// Detection sources are config-driven (SYNAPSE_DETECTION_SOURCES), resolved through the SAME helper
+	// the server uses so the posture is identical across binaries. Grype is the offline matcher; live
+	// OSV runs only when the egress policy allows it. An operator can drop Grype (e.g.
+	// SYNAPSE_DETECTION_SOURCES=osv) for an Anchore-free CLI scan.
+	var osvSrc ports.DetectionSource
 	if egress.OSV {
 		prov.VulnDBSource = "osv.dev"
-		detectionSources = append([]ports.DetectionSource{osv.New(cfg.OSVBaseURL, nil)}, detectionSources...)
+		osvSrc = osv.New(cfg.OSVBaseURL, nil)
+	}
+	// advisory-store is Synapse's OWNED matcher over its own advisory corpus; it is available when a
+	// populated Postgres corpus is configured (SYNAPSE_DB_DSN, synced via `synapse-cli sync-advisories`).
+	// Without it the candidate stays nil and a request for it is skipped, so an owned-only scan needs
+	// the corpus present. This is what lets the CLI run first-party (SYNAPSE_DETECTION_SOURCES=advisory-store).
+	var advStore ports.DetectionSource
+	if cfg.DBDSN != "" {
+		pool, perr := postgres.Connect(ctx, cfg.DBDSN)
+		if perr != nil {
+			return fmt.Errorf("connect owned advisory store: %w", perr)
+		}
+		advStore = ownadvisory.New(postgres.NewAdvisoryRepository(pool))
+	}
+	detectionSources, detErr := scacompose.ResolveDetectionSources(cfg, scacompose.DetectionCandidates{
+		Grype:         grype.New(cfg.GrypeBin, cfg.GrypeDBDir),
+		OSV:           osvSrc,
+		AdvisoryStore: advStore,
+	}, nil)
+	if detErr != nil {
+		return fmt.Errorf("resolve detection sources: %w", detErr)
 	}
 	if egress.offline() {
 		// Make the reduced-coverage mode visible: the operator chose lower recall for no egress. Leaving
 		// VulnDBSource empty keeps the evidence snapshot from claiming osv.dev was queried when it wasn't
-		// (Grype's DB version is recorded separately in GrypeDBVersion).
-		fmt.Fprintln(os.Stderr, "synapse-cli: offline mode – no network egress: live OSV, the npm/composer/poetry/bundler/maven/gradle resolvers, KEV/EPSS, online NVD, deps.dev + PyPI license metadata and AI triage are all disabled; detecting with Grype's offline DB only")
+		// (each source's DB version is recorded separately as evidence).
+		fmt.Fprintln(os.Stderr, "synapse-cli: offline mode – no network egress: live OSV, the npm/composer/poetry/bundler/maven/gradle resolvers, KEV/EPSS, online NVD, deps.dev + PyPI license metadata and AI triage are all disabled; detecting with the offline sources only")
 	}
 	// KEV + EPSS and the deps.dev/PyPI license metadata are HTTP feeds. Offline drops the risk enricher
 	// entirely (the service nil-checks it) and keeps only the local OS-metadata license enricher.
@@ -1397,10 +1440,19 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	if egress.LicenseMetadata {
 		licenseEnrichers = append(licenseEnrichers, licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil))
 	}
+	// SBOM producer: syft (default) or Synapse's OWN pure-Go parsers (SYNAPSE_SBOM_PRODUCER=ownsbom),
+	// mirroring the server so the first-party engine is reachable from the CLI, not just synapse-api.
+	sbomGen, sberr := selectSBOMGenerator(cfg)
+	if sberr != nil {
+		return sberr
+	}
+	if cfg.SBOMProducer == "ownsbom" {
+		fmt.Fprintln(os.Stderr, "synapse-cli: SBOM producer = ownsbom (owned pure-Go parsers; no third-party SBOM scanner)")
+	}
 	sca := scauc.NewService(
 		engRepo, memory.NewFindingRepository(), memory.NewScanRepository(), nil, nil, nil, nil, nil, prov, clock, stderrAudit{},
 		shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled),
-		enry.New(), syft.New(cfg.SyftBin),
+		enry.New(), sbomGen,
 		detectionSources,
 		riskEnricher, license.New(), licensemeta.NewChain(licenseEnrichers...),
 	)
@@ -1523,7 +1575,8 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		// resolvers; best-effort (a non-Go target / no module cache adds no edges, never fails the scan).
 		sca.SetGraphResolver(gomodgraph.New(cfg.GoBin))
 	}
-	sca.SetDBMaxAgeDays(cfg.DBMaxAgeDays) // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
+	sca.SetDBMaxAgeDays(cfg.DBMaxAgeDays)   // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
+	sca.SetStrictSources(cfg.StrictSources) // fail-closed on a source error; default degrades (skip + warn)
 	if cfg.ScanCacheEnabled {
 		if dir := cfg.ResolveScanCacheDir(); dir != "" {
 			sca.SetSBOMCache(sbomcache.New(dir)) // content+version-addressed generated-SBOM cache (CI-friendly)

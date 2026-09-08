@@ -1,6 +1,7 @@
 package scacompose
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -51,6 +52,63 @@ func TestValidateProductionNetworkedTools(t *testing.T) {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q does not contain %q", err, want)
 				}
+			}
+		})
+	}
+}
+
+func TestResolveDetectionSourceNames(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     config.Config
+		want    []string
+		wantErr bool
+	}{
+		{
+			name: "legacy default: online with owned advisory on",
+			cfg:  config.Config{DetectionSources: "", Offline: false, OwnedAdvisoryEnabled: true},
+			want: []string{"osv", "grype", "advisory-store"},
+		},
+		{
+			name: "legacy default: offline drops live osv",
+			cfg:  config.Config{DetectionSources: "", Offline: true, OwnedAdvisoryEnabled: true},
+			want: []string{"grype", "advisory-store"},
+		},
+		{
+			name: "legacy default: owned advisory off",
+			cfg:  config.Config{DetectionSources: "", Offline: false, OwnedAdvisoryEnabled: false},
+			want: []string{"osv", "grype"},
+		},
+		{
+			name: "explicit list is authoritative and can drop grype (Anchore-free)",
+			cfg:  config.Config{DetectionSources: "osv,advisory-store", OwnedAdvisoryEnabled: false},
+			want: []string{"osv", "advisory-store"},
+		},
+		{
+			name: "explicit list is lowercased and trimmed",
+			cfg:  config.Config{DetectionSources: " OSV , Grype "},
+			want: []string{"osv", "grype"},
+		},
+		{
+			name:    "explicit but empty after trimming is an error",
+			cfg:     config.Config{DetectionSources: " , , "},
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveDetectionSourceNames(tc.cfg)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error, got %v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
 	}

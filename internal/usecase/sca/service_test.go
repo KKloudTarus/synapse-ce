@@ -782,14 +782,32 @@ func TestScanDebugTraceCapturesVulnerabilitySourceFailure(t *testing.T) {
 	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
 	svc := newSvcWithSources(repo, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, []ports.DetectionSource{failingVuln{err: errors.New("database unavailable")}})
 
+	// Default (non-strict): a source failure DEGRADES – the scan still completes, the debug trace
+	// records the failed source, and the result carries a SourceWarning naming it (matching how Grype
+	// already self-degrades). A transient OSV/advisory outage must not abort an otherwise-good scan.
 	var events []ports.ScanDebugEvent
-	_, err := svc.runPipeline(context.Background(), "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull}, func(_ string, _ int, evs []ports.ScanDebugEvent) {
+	res, err := svc.runPipeline(context.Background(), "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull}, func(_ string, _ int, evs []ports.ScanDebugEvent) {
 		events = evs
 	}, "")
-	if err == nil {
-		t.Fatal("runPipeline should fail when a vulnerability source fails")
+	if err != nil {
+		t.Fatalf("a non-strict source failure must not abort the scan: %v", err)
 	}
 	assertDebugEvent(t, events, stageVulns, "failing-source", ports.ScanDebugFailed)
+	var warned bool
+	for _, w := range res.SourceWarnings {
+		if strings.Contains(w, "failing-source") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatalf("expected a SourceWarning naming the skipped source; got %v", res.SourceWarnings)
+	}
+
+	// Strict mode (SYNAPSE_STRICT_SOURCES): the same source failure aborts the scan.
+	svc.SetStrictSources(true)
+	if _, err := svc.runPipeline(context.Background(), "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull}, func(string, int, []ports.ScanDebugEvent) {}, ""); err == nil {
+		t.Fatal("strict mode must abort the scan when a vulnerability source fails")
+	}
 }
 
 func TestScanResultIncludesComponentLicenseAuditAndCoverageBreakdown(t *testing.T) {
