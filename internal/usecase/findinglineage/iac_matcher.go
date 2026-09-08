@@ -23,10 +23,18 @@ const (
 	IaCTerraform      IaCConfigKind = "terraform"
 	IaCCloudFormation IaCConfigKind = "cloudformation"
 	IaCKubernetes     IaCConfigKind = "kubernetes"
+	IaCDockerfile     IaCConfigKind = "dockerfile"
+	IaCCompose        IaCConfigKind = "compose"
+	IaCGitHubActions  IaCConfigKind = "github_actions"
+	IaCARM            IaCConfigKind = "arm"
 )
 
 func (kind IaCConfigKind) Valid() bool {
-	return kind == IaCTerraform || kind == IaCCloudFormation || kind == IaCKubernetes
+	switch kind {
+	case IaCTerraform, IaCCloudFormation, IaCKubernetes, IaCDockerfile, IaCCompose, IaCGitHubActions, IaCARM:
+		return true
+	}
+	return false
 }
 
 type IaCRuleAliasSetV1 struct {
@@ -106,7 +114,7 @@ func (matcher IaCMatcherV1) Build(input IaCFingerprintInputV1) (IaCMatchPlanV1, 
 		}
 	}
 	configKind := input.ConfigKind
-	if !configKind.Valid() {
+	if configKind == "" {
 		configKind = inferIaCConfigKind(ruleKey)
 	}
 	if !configKind.Valid() {
@@ -130,11 +138,14 @@ func (matcher IaCMatcherV1) Build(input IaCFingerprintInputV1) (IaCMatchPlanV1, 
 	}
 
 	fields := map[string]domain.CanonicalValue{
-		"config_kind":               domain.Text(string(configKind)),
-		"producer_matcher_version":  domain.Integer(IaCMatcherVersionV1),
-		"rule_alias_graph_version":  domain.Integer(SASTRuleAliasSchemaVersionV1),
-		"resource_adapter_version":  domain.Integer(1),
-		"resource_identity_grammar": domain.Text(string(configKind) + "_v1"),
+		"config_kind":              domain.Text(string(configKind)),
+		"producer_matcher_version": domain.Integer(IaCMatcherVersionV1),
+		"rule_alias_graph_version": domain.Integer(SASTRuleAliasSchemaVersionV1),
+	}
+	resourceIdentityUnavailable := resourceReason == "resource_identity_unavailable"
+	if !resourceIdentityUnavailable {
+		fields["resource_adapter_version"] = domain.Integer(1)
+		fields["resource_identity_grammar"] = domain.Text(string(configKind) + "_v1")
 	}
 	if normalizedPath != "" {
 		fields["repo_path"] = domain.Text(normalizedPath)
@@ -170,12 +181,19 @@ func (matcher IaCMatcherV1) Build(input IaCFingerprintInputV1) (IaCMatchPlanV1, 
 		plan.ReviewReason, plan.ReasonCode, plan.Ambiguous, plan.ProvisionalIdentity = domain.ReasonInsufficientAnchor, "missing_repo_path", true, true
 	case primaryRule == "":
 		plan.ReviewReason, plan.ReasonCode, plan.Ambiguous, plan.ProvisionalIdentity = domain.ReasonInsufficientAnchor, "missing_rule_key", true, true
+	case resourceIdentityUnavailable:
+		plan.ReviewReason, plan.ReasonCode, plan.Ambiguous, plan.ProvisionalIdentity = domain.ReasonInsufficientAnchor, resourceReason, true, true
 	case semanticAnchor == "":
 		plan.ReviewReason, plan.ReasonCode, plan.Ambiguous, plan.ProvisionalIdentity = domain.ReasonInsufficientAnchor, "missing_semantic_config_anchor", true, true
 	case resourceReason != "":
 		plan.ReviewReason, plan.ReasonCode, plan.Ambiguous, plan.ProvisionalIdentity = domain.ReasonInsufficientAnchor, resourceReason, true, true
 	case legacy.kind == iacLegacyValid:
 		plan.ReasonCode = "legacy_iac_structured"
+	}
+	if resourceIdentityUnavailable && !plan.SkipInput {
+		// Even a caller-supplied semantic digest or alias conflict cannot promote
+		// an unadapted config family to a trusted cross-snapshot identity.
+		plan.ProvisionalIdentity, plan.Ambiguous = true, true
 	}
 	return plan, nil
 }
@@ -196,6 +214,11 @@ func (plan IaCMatchPlanV1) Apply(input CorrelateInput) CorrelateInput {
 
 func normalizeIaCResourceAnchor(kind IaCConfigKind, input IaCFingerprintInputV1) (domain.CanonicalValue, string, error) {
 	switch kind {
+	case IaCDockerfile, IaCCompose, IaCGitHubActions, IaCARM:
+		// These are supported scan producers, but their native findings do not yet
+		// expose approved semantic resource identities. Retain the redacted
+		// observation for review without inventing resource anchors or grammar.
+		return domain.CanonicalValue{}, "resource_identity_unavailable", nil
 	case IaCTerraform:
 		if strings.TrimSpace(input.TerraformAddress) == "" {
 			return domain.CanonicalValue{}, "missing_terraform_address", nil
@@ -438,6 +461,14 @@ func inferIaCConfigKind(rule string) IaCConfigKind {
 		return IaCCloudFormation
 	case strings.HasPrefix(rule, "kubernetes-"):
 		return IaCKubernetes
+	case strings.HasPrefix(rule, "dockerfile-"):
+		return IaCDockerfile
+	case strings.HasPrefix(rule, "compose-"):
+		return IaCCompose
+	case strings.HasPrefix(rule, "gha-"):
+		return IaCGitHubActions
+	case strings.HasPrefix(rule, "arm-"):
+		return IaCARM
 	}
 	return ""
 }

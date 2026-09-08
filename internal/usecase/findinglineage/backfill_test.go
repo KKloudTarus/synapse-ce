@@ -154,6 +154,91 @@ func TestFindingLineageBackfillDryRunIsResumableAndWriteFree(t *testing.T) {
 	}
 }
 
+func TestFindingLineageBackfillRetainsAllNativeIaCFamiliesForReview(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 8, 6, 0, 0, 0, time.UTC)
+	clock, ids, audit := fixedBackfillClock{now}, &backfillIDs{}, noOpBackfillAudit{}
+	snapshots := memory.NewAssessmentSnapshotRepository()
+	snapshot := backfillSnapshot(t, now)
+	if _, _, err := snapshots.CreateLegacyProjection(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	repository := memory.NewFindingLineageRepository()
+	lineage, err := lineageuc.NewService(repository, memory.NewTenantTransactionRunner(), audit, clock, ids, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := memory.NewFindingLineageBackfillRepository()
+	var rows []ports.FindingLineageBackfillSourceRow
+	for index, test := range []struct{ rule, path string }{
+		{"dockerfile-run-as-root", "Dockerfile"},
+		{"compose-privileged", "compose.yaml"},
+		{"gha-permissions-write-all", ".github/workflows/ci.yaml"},
+		{"arm-storage-https-only-off", "azure/template.json"},
+	} {
+		rows = append(rows, backfillSource(shared.ID(fmt.Sprintf("iac-%d", index)), finding.KindMisconfig,
+			"misconfig:"+test.rule+":"+test.path+":42", test.rule, "", now, snapshot))
+	}
+	store.SetSources("tenant", rows)
+	runner, err := lineageuc.NewFindingLineageBackfillRunner(lineage, store, store, snapshots, occurrenceBackfillStore{}, emptyJudgmentStore{}, ids, clock, audit, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := runner.RunBackfill(ctx, lineageuc.FindingLineageBackfillRequest{TenantID: "tenant", Actor: "operator", LeaseOwner: "worker", BatchSize: 2})
+	if err != nil {
+		t.Fatalf("scanner-supported IaC findings aborted backfill: %v", err)
+	}
+	if run.State != ports.FindingLineageBackfillCompleted || run.ProcessedCount != len(rows) || run.ProvisionalCandidateCount != len(rows) || run.ObservationCreatedCount != 0 || run.SkippedCount != 0 {
+		t.Fatalf("scanner-supported findings were discarded or declared fully matched: %+v", run)
+	}
+	observations, err := repository.ListObservationsBySnapshot(ctx, "tenant", "cycle", snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := repository.ListOpenCandidatesBySnapshot(ctx, "tenant", "cycle", snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observations) != len(rows) || len(candidates) != len(rows) {
+		t.Fatalf("provisional evidence was not retained: observations=%d candidates=%d", len(observations), len(candidates))
+	}
+	for _, row := range rows {
+		item, err := store.GetFindingLineageBackfillItem(ctx, "tenant", run.ID, row.FindingID)
+		if err != nil || item.Outcome != lineageuc.BackfillOutcomeProvisionalCandidate || item.ReasonCode != "resource_identity_unavailable" {
+			t.Fatalf("finding %s did not retain an explicit review outcome: item=%+v err=%v", row.FindingID, item, err)
+		}
+		found := false
+		for _, observation := range observations {
+			if observation.SourceFindingID == row.FindingID.String() {
+				found = true
+				if observation.ProducerKind != "iac" || observation.FindingKind != "misconfig" || !strings.HasSuffix(observation.Location, ":42") || observation.IdentityID.IsZero() {
+					t.Fatalf("wrong retained observation: %+v", observation)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("finding %s lost its immutable observation", row.FindingID)
+		}
+	}
+	for _, candidate := range candidates {
+		if candidate.Reason != "insufficient_anchor" {
+			t.Fatalf("unsupported semantic matching must remain needs_review: %+v", candidate)
+		}
+	}
+	replayed, err := runner.RunBackfill(ctx, lineageuc.FindingLineageBackfillRequest{TenantID: "tenant", Actor: "operator", LeaseOwner: "replay-worker", BatchSize: 3})
+	if err != nil || replayed.ProvisionalCandidateCount != len(rows) || replayed.SkippedCount != 0 {
+		t.Fatalf("replay changed backfill outcomes: %+v err=%v", replayed, err)
+	}
+	observations, err = repository.ListObservationsBySnapshot(ctx, "tenant", "cycle", snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err = repository.ListOpenCandidatesBySnapshot(ctx, "tenant", "cycle", snapshot.ID)
+	if err != nil || len(observations) != len(rows) || len(candidates) != len(rows) {
+		t.Fatalf("replay duplicated lineage records: observations=%d candidates=%d err=%v", len(observations), len(candidates), err)
+	}
+}
+
 func TestFindingLineageBackfillRedactsMalformedSecretBeforePersistence(t *testing.T) {
 	now := time.Date(2026, 9, 1, 4, 0, 0, 0, time.UTC)
 	clock, ids, audit := fixedBackfillClock{now}, &backfillIDs{}, &recordingBackfillAudit{}
