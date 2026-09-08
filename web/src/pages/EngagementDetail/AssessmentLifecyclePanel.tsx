@@ -1,6 +1,7 @@
-import { AlertCircle, ChevronDown, GitBranch01, InfoCircle, Link01, Plus, RefreshCw01 } from '@untitledui/icons'
+import { AlertCircle, ChevronDown, GitBranch01, InfoCircle, Link01, Plus, RefreshCw01, XClose } from '@untitledui/icons'
 import { useId, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Dialog, Modal, ModalOverlay } from '../../components/application/modals/modal'
 import { SlideoutMenu } from '../../components/application/slideout-menus/slideout-menu'
 import { styles as buttonStyles } from '../../components/base/buttons/button'
 import { Tooltip, TooltipTrigger } from '../../components/base/tooltip/tooltip'
@@ -153,6 +154,7 @@ function RetestDrawer({ lifecycle, assessmentId, onClose, onCreated }: { lifecyc
   const [created, setCreated] = useState<Awaited<ReturnType<typeof api.createRetest>> | null>(null)
   const requestKey = useRequestIdempotency()
   const effectiveScopeStrategy = sourceSelection.hasUploadedSource ? 'copy' : scopeStrategy
+  const sourceInvalid = Boolean(sourceSelection.validationError(effectiveScopeStrategy))
   async function submit() {
     if (submitting || created) return
     if (!predecessor) { setError('Choose a completed predecessor Assessment.'); return }
@@ -168,36 +170,49 @@ function RetestDrawer({ lifecycle, assessmentId, onClose, onCreated }: { lifecyc
     } catch (cause) { setError(cause instanceof Error && cause.message.includes('source_package_required_for_retest') ? 'The predecessor source is unavailable. Retry the source lookup or upload a new source archive.' : cause instanceof Error ? cause.message : 'Re-test creation failed.') }
     finally { setSubmitting(false) }
   }
-  return <SlideoutMenu isOpen onOpenChange={(open) => { if (!open) onClose() }}>
-    <SlideoutMenu.Header onClose={onClose}>
-      <h2 className="text-lg font-semibold text-primary">Create Re-test</h2>
-      <p className="mt-1 text-sm text-tertiary">Create a draft with an automatic name. No dates or authorization details are needed now.</p>
-    </SlideoutMenu.Header>
-    <SlideoutMenu.Content>
-      {created ? <div role="status" className="space-y-4">
-        <div className="rounded-lg border border-success/30 bg-success/10 p-4">
-          <p className="font-semibold text-primary">Re-test created</p>
-          <p className="mt-1 break-words text-sm text-secondary">{created.engagement.name}</p>
-          <p className="mt-1 text-sm text-secondary">Scope: {created.inheritanceDiff.scope} · Authorization: {created.inheritanceDiff.authorization} · RoE: {created.inheritanceDiff.roe} · Scanner profile: {created.inheritanceDiff.scannerProfile}</p>
-          {created.sourceSelection ? <p className="mt-1 break-words text-sm text-secondary">Source: {created.sourceSelection.filename} · {created.sourceSelection.strategy === 'reuse_current' ? 'Current archive reused' : 'New archive uploaded'}</p> : null}
+  const selectedPredecessor = activeMembers.find((member) => member.assessmentId === predecessor)
+  return <ModalOverlay isOpen onOpenChange={(open) => { if (!open) onClose() }}>
+    <Modal className="w-full max-w-2xl overflow-hidden rounded-2xl border border-secondary bg-primary shadow-2xl">
+      <Dialog aria-label="Create Re-test" className="flex max-h-[85vh] flex-col overflow-hidden">
+        <header className="flex shrink-0 items-start justify-between border-b border-secondary px-6 py-5">
+          <div className="min-w-0 pr-4">
+            <h2 className="text-lg font-semibold text-primary">Create Re-test</h2>
+            <p className="mt-1 text-sm leading-relaxed text-tertiary">Create a new assessment to verify remediation from a previous assessment.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close dialog" className="flex size-10 shrink-0 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-secondary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"><XClose className="size-4" aria-hidden="true" /></button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          {created ? <div role="status" className="space-y-4">
+            <div className="rounded-xl border border-success/30 bg-success/10 p-4">
+              <p className="font-semibold text-primary">Re-test created</p>
+              <p className="mt-1 break-words text-sm text-secondary">{created.engagement.name}</p>
+              <p className="mt-1 text-sm text-secondary">Scope: {created.inheritanceDiff.scope} · Authorization: {created.inheritanceDiff.authorization} · RoE: {created.inheritanceDiff.roe} · Scanner profile: {created.inheritanceDiff.scannerProfile}</p>
+              {created.sourceSelection ? <p className="mt-1 break-words text-sm text-secondary">Source: {created.sourceSelection.filename} · {created.sourceSelection.strategy === 'reuse_current' ? 'Previous archive reused' : 'New archive uploaded'}</p> : null}
+            </div>
+            <p className="text-sm text-tertiary">The draft is ready. Configure execution authorization in Re-test Settings before running a scan.</p>
+            {created.warnings.map((warning) => <p key={warning} className="flex gap-2 text-sm text-warning"><AlertCircle className="size-4 shrink-0" aria-hidden="true" />{labelize(warning)}</p>)}
+          </div> : <div className="space-y-7">
+            <section aria-labelledby="retest-context-title" className="rounded-xl border border-secondary bg-secondary/20 p-4">
+              <p id="retest-context-title" className="text-xs font-semibold uppercase tracking-wide text-tertiary">Based on</p>
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <p className="font-semibold text-primary">{lifecycle.cycle.name}</p>
+                <span aria-hidden="true" className="text-quaternary">·</span>
+                <span className="text-sm text-secondary">{selectedPredecessor ? memberShortLabel(selectedPredecessor) : 'Choose an assessment'} · Completed</span>
+              </div>
+              <div className="mt-4 max-w-md"><Field label="Based on assessment"><Select disabled={submitting} ariaLabel="Based on Assessment" value={predecessor} onValueChange={(value) => { setPredecessor(value); setError('') }} options={activeMembers.map((member) => ({ value: member.assessmentId, label: memberShortLabel(member) }))} className="w-full" /></Field></div>
+            </section>
+            <RetestSourceChoice selection={sourceSelection} disabled={submitting} onChange={() => setError('')} />
+            <section className="border-t border-secondary pt-6"><Field label="Assessment scope" hint={sourceSelection.hasUploadedSource ? 'This Re-test uses the same targets and scope as the previous assessment.' : 'Choose which targets and scope to carry forward.'}><Select disabled={submitting || sourceSelection.loading || sourceSelection.hasUploadedSource} ariaLabel="Assessment scope" value={effectiveScopeStrategy} onValueChange={(value) => setScopeStrategy(value as 'copy' | 'empty')} options={[{ value: 'copy', label: 'Copy previous scope' }, { value: 'empty', label: 'Start with empty scope' }]} className="w-full" /></Field></section>
+            <p className="text-xs leading-relaxed text-tertiary">Creating a Re-test does not start a scan. Configure execution authorization later in Settings.</p>
+            {error ? <ErrorState message={error} /> : null}
+          </div>}
         </div>
-        <p className="text-sm text-tertiary">The draft is ready. Configure execution authorization in Re-test Settings before running a scan.</p>
-        {created.warnings.map((warning) => <p key={warning} className="flex gap-2 text-sm text-warning"><AlertCircle className="size-4 shrink-0" aria-hidden="true" />{labelize(warning)}</p>)}
-        <Button onClick={() => navigate(`/engagements/${encodeURIComponent(created.engagement.id)}`)}>Open Re-test</Button>
-      </div> : <div className="space-y-4">
-        <div className="rounded-lg bg-secondary p-3 text-sm text-secondary">
-          <p className="break-words font-medium text-primary">{lifecycle.cycle.name}</p>
-          <p className="mt-1 text-xs text-tertiary">Same Cycle and boundary · Scope copied by default</p>
-        </div>
-        <Field label="Based on Assessment"><Select disabled={submitting} ariaLabel="Based on Assessment" value={predecessor} onValueChange={(value) => { setPredecessor(value); setError('') }} options={activeMembers.map((member) => ({ value: member.assessmentId, label: memberLabel(member) }))} className="w-full" /></Field>
-        <RetestSourceChoice selection={sourceSelection} disabled={submitting} onChange={() => setError('')} />
-        <Field label="Scope strategy" hint={sourceSelection.hasUploadedSource ? 'Uploaded-source Re-tests retain the frozen scope. Only the source revision changes.' : undefined}><Select disabled={submitting || sourceSelection.loading || sourceSelection.hasUploadedSource} ariaLabel="Scope strategy" value={effectiveScopeStrategy} onValueChange={(value) => setScopeStrategy(value as 'copy' | 'empty')} options={[{ value: 'copy', label: 'Copy frozen scope' }, { value: 'empty', label: 'Start with empty scope' }]} className="w-full" /></Field>
-        <p className="text-xs leading-relaxed text-tertiary">Creating a Re-test does not start a scan. Configure execution authorization later in Settings.</p>
-        {error ? <ErrorState message={error} /> : null}
-        <Button loading={submitting} disabled={sourceSelection.loading || Boolean(sourceSelection.error)} onClick={submit}>Create Re-test</Button>
-      </div>}
-    </SlideoutMenu.Content>
-  </SlideoutMenu>
+        <footer className="flex shrink-0 items-center justify-end gap-3 border-t border-secondary bg-primary px-6 py-4">
+          {created ? <><Button variant="secondary" onClick={onClose}>Close</Button><Button onClick={() => navigate(`/engagements/${encodeURIComponent(created.engagement.id)}`)}>Open Re-test</Button></> : <><Button variant="ghost" disabled={submitting} onClick={onClose}>Cancel</Button><Button loading={submitting} disabled={sourceSelection.loading || Boolean(sourceSelection.error) || sourceInvalid} onClick={submit}>Create Re-test</Button></>}
+        </footer>
+      </Dialog>
+    </Modal>
+  </ModalOverlay>
 }
 
 function RelationshipDrawer({ lifecycle, member, command, onClose, onCommitted }: { lifecycle: AssessmentLifecycle; member?: AssessmentCycleMember; command: 'reparent_within_cycle' | 'select_head'; onClose: () => void; onCommitted: () => void }) {
@@ -231,5 +246,6 @@ function RelationshipDrawer({ lifecycle, member, command, onClose, onCommitted }
 }
 
 function displayLatest(lifecycle: AssessmentLifecycle) { return [...lifecycle.members].filter((member) => !member.archivedAt).sort((left, right) => right.retestNumber - left.retestNumber || right.assessmentId.localeCompare(left.assessmentId))[0] }
-function memberLabel(member: AssessmentCycleMember) { return member.assessmentType === 'retest' ? `Re-test #${member.retestNumber} · ${member.assessmentId}` : `Initial · ${member.assessmentId}` }
+function memberLabel(member: AssessmentCycleMember) { return `${memberShortLabel(member)} · ${member.assessmentId}` }
+function memberShortLabel(member: AssessmentCycleMember) { return member.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial' }
 function labelize(value: string) { return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) }
