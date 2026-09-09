@@ -720,5 +720,35 @@ func defaultRules() []rule {
 			keywords: []string{"figd_"},
 			re:       regexp.MustCompile(`\bfigd_[A-Za-z0-9_-]{40,}`),
 		},
+		{
+			id: "atlassian-api-token", category: "Atlassian", title: "Atlassian API token", severity: shared.SeverityHigh,
+			keywords: []string{"ATATT3xFfGF0"},
+			re:       regexp.MustCompile(`\bATATT3xFfGF0[A-Za-z0-9_=-]{40,}`),
+		},
+		{
+			id: "openshift-token", category: "OpenShift", title: "OpenShift ServiceAccount token", severity: shared.SeverityHigh,
+			keywords: []string{"sha256~"},
+			re:       regexp.MustCompile(`\bsha256~[A-Za-z0-9_-]{43}`),
+		},
+		{
+			id: "duffel-api-token", category: "Duffel", title: "Duffel API token", severity: shared.SeverityHigh,
+			keywords: []string{"duffel_test_", "duffel_live_"},
+			re:       regexp.MustCompile(`\bduffel_(?:test|live)_[A-Za-z0-9_-]{43}`),
+		},
+		{
+			id: "frameio-token", category: "Frame.io", title: "Frame.io developer token", severity: shared.SeverityHigh,
+			keywords: []string{"fio-u-"},
+			re:       regexp.MustCompile(`\bfio-u-[A-Za-z0-9_=-]{64}`),
+		},
+		{
+			id: "definednetworking-token", category: "DefinedNetworking", title: "Defined Networking nebula API key", severity: shared.SeverityHigh,
+			keywords: []string{"dnkey-"},
+			re:       regexp.MustCompile(`\bdnkey-[A-Za-z0-9=_-]{26}-[A-Za-z0-9=_-]{52}`),
+		},
+		{
+			id: "typeform-token", category: "Typeform", title: "Typeform personal access token", severity: shared.SeverityHigh,
+			keywords: []string{"tfp_"},
+			re:       regexp.MustCompile(`\btfp_[A-Za-z0-9_-]{40,}`),
+		},
 	}
 }
