@@ -1,6 +1,6 @@
 // Package vexfile loads an in-repo OpenVEX document (.synapse.vex.json) from a prepared workspace. It is the
 // thin infrastructure adapter over the pure domain parser (internal/domain/vex): read the file, hand the
-// bytes to vex.Parse. Matching statements to findings and applying them (annotate accepted-risk, never
+// bytes to vex.ParseAny (OpenVEX or CSAF 2.0). Matching statements to findings and applying them (annotate accepted-risk, never
 // remove) is the SCA pipeline's job.
 package vexfile
 
@@ -46,5 +46,5 @@ func (l *Loader) Load(_ context.Context, dir string) (vex.Document, error) {
 	if err != nil {
 		return vex.Document{}, fmt.Errorf("read .synapse.vex.json: %w", err) // surfaced as a SourceWarning, not swallowed
 	}
-	return vex.Parse(data)
+	return vex.ParseAny(data)
 }
