@@ -418,3 +418,37 @@ func TestPrefixedProviderTokensNearMissNoMatch(t *testing.T) {
 		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
 	}
 }
+
+func TestDetectsMoreProviderTokens(t *testing.T) {
+	// Prefix + body concatenations so no contiguous secret-shaped literal exists in this test source.
+	an := strings.Repeat("aB3cD4eF5g", 9)   // 90 varied alnum chars
+	b64 := strings.Repeat("aB3cD4eF5g", 25) // 250 base64-charset chars (1Password bodies are long JWTs)
+	hx := strings.Repeat("abcdef0123", 4)   // 40 hex chars
+	rs := scanDir(t, map[string]string{
+		"prefect.env":      "PREFECT_API_KEY=" + "pnb_" + an[:36] + "\n", // service-account form covered by pn[ub]_
+		"contentful.env":   "CONTENTFUL_TOKEN=" + "CFPAT-" + an[:43] + "\n",
+		"shippo.env":       "SHIPPO_TOKEN=" + "shippo_live_" + hx[:40] + "\n",
+		"onepassword.env":  "OP_SERVICE_ACCOUNT_TOKEN=" + "ops_eyJ" + b64[:250] + "\n",
+		"gitlabrunner.env": "GITLAB_RUNNER_TOKEN=" + "GR1348941" + an[:20] + "\n",
+		"easypost.env":     "EASYPOST_API_KEY=" + "EZAK" + an[:54] + "\n",
+	})
+	for _, id := range []string{"prefect-api-key", "contentful-token", "shippo-token", "onepassword-service-account", "gitlab-runner-token", "easypost-token"} {
+		if hasRule(rs, id) == nil {
+			t.Errorf("expected a %q finding, got %+v", id, rs)
+		}
+	}
+}
+
+func TestMoreProviderTokensNearMissNoMatch(t *testing.T) {
+	rs := scanDir(t, map[string]string{
+		"a.env": "K=" + "pnu_" + "short\n",
+		"b.env": "K=" + "CFPAT-" + "short\n",
+		"c.env": "K=" + "shippo_live_" + "nothex\n",
+		"d.env": "K=" + "ops_eyJ" + "short\n",
+		"e.env": "K=" + "GR1348941" + "short\n",
+		"f.env": "K=" + "EZAK" + "short\n",
+	})
+	if len(rs) != 0 {
+		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
+	}
+}

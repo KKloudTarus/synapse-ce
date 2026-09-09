@@ -84,6 +84,12 @@ func TestCatalogParity(t *testing.T) {
 		"frameio-token":                 "CWE-798",
 		"definednetworking-token":       "CWE-798",
 		"typeform-token":                "CWE-798",
+		"prefect-api-key":               "CWE-798",
+		"contentful-token":              "CWE-798",
+		"shippo-token":                  "CWE-798",
+		"onepassword-service-account":   "CWE-798",
+		"gitlab-runner-token":           "CWE-798",
+		"easypost-token":                "CWE-798",
 	}
 	builtin := defaultRules()
 	seenInBuiltin := make(map[string]bool, len(builtin))

@@ -750,5 +750,35 @@ func defaultRules() []rule {
 			keywords: []string{"tfp_"},
 			re:       regexp.MustCompile(`\btfp_[A-Za-z0-9_-]{40,}`),
 		},
+		{
+			id: "prefect-api-key", category: "Prefect", title: "Prefect Cloud API key", severity: shared.SeverityHigh,
+			keywords: []string{"pnu_", "pnb_"},
+			re:       regexp.MustCompile(`\bpn[ub]_[A-Za-z0-9]{36}`),
+		},
+		{
+			id: "contentful-token", category: "Contentful", title: "Contentful personal access token", severity: shared.SeverityHigh,
+			keywords: []string{"CFPAT-"},
+			re:       regexp.MustCompile(`\bCFPAT-[A-Za-z0-9_-]{43}`),
+		},
+		{
+			id: "shippo-token", category: "Shippo", title: "Shippo API token", severity: shared.SeverityHigh,
+			keywords: []string{"shippo_live_", "shippo_test_"},
+			re:       regexp.MustCompile(`\bshippo_(?:live|test)_[A-Fa-f0-9]{40}`),
+		},
+		{
+			id: "onepassword-service-account", category: "1Password", title: "1Password service account token", severity: shared.SeverityCritical,
+			keywords: []string{"ops_eyJ"},
+			re:       regexp.MustCompile(`\bops_eyJ[A-Za-z0-9+/]{250,}={0,3}`),
+		},
+		{
+			id: "gitlab-runner-token", category: "GitLab", title: "GitLab runner registration token", severity: shared.SeverityHigh,
+			keywords: []string{"GR1348941"},
+			re:       regexp.MustCompile(`\bGR1348941[0-9A-Za-z_-]{20}`),
+		},
+		{
+			id: "easypost-token", category: "EasyPost", title: "EasyPost API token", severity: shared.SeverityHigh,
+			keywords: []string{"EZAK", "EZTK"},
+			re:       regexp.MustCompile(`\bEZ(?:AK|TK)[A-Za-z0-9]{54}`),
+		},
 	}
 }
