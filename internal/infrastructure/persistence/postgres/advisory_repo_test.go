@@ -50,6 +50,12 @@ func TestAdvisoryRepository(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
+	// D1.7: the corpus reports its freshness (newest timestamp + count) after an upsert, so a stale owned
+	// store can be warned. At least this advisory is present, so count >= 1 and the latest date is set.
+	if latest, count, ferr := repo.AdvisoryFreshness(ctx); ferr != nil || count < 1 || latest.IsZero() {
+		t.Fatalf("AdvisoryFreshness after upsert: latest=%v count=%d err=%v", latest, count, ferr)
+	}
+
 	// round-trip: the full advisory decodes back from the JSONB blob, found via the affect index
 	got, err := repo.ByPackage(ctx, "Go", "github.com/foo/bar")
 	if err != nil || len(got) != 1 {
