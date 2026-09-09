@@ -87,20 +87,45 @@ func uvRegistrySource(value string) bool {
 // uvDependencyNames extracts the dependency package names from a uv.lock `dependencies` inline-table array
 // (`[{ name = "a" }, { name = "b", marker = "..." }]`), which may span several lines. Each entry's name is
 // uv's always-first field, read as the first quoted string of the object, so an `extra = [...]` or `marker`
-// field on the same entry is ignored. `{`/`}` depth delimits entries; the array's own `[]` are not counted
-// here (the caller handles multi-line accumulation).
+// field on the same entry is ignored. The scan is TOML comment- and string-aware: a `{`/`}` (or a `name`
+// token) inside a basic ("...") or literal ('...') string, or after an unquoted `#` comment, is NOT treated
+// as structure, so a commented-out `# { name = "x" }` entry or a marker string containing a brace never
+// produces a false edge. `{`/`}` depth delimits top-level entries; the array's own `[]` are ignored here (the
+// caller handles multi-line accumulation).
 func uvDependencyNames(arrayText string) []string {
 	var names []string
+	var inBasic, inLiteral bool
 	depth := 0
 	start := -1
 	for i := 0; i < len(arrayText); i++ {
-		switch arrayText[i] {
-		case '{':
+		c := arrayText[i]
+		switch {
+		case inBasic:
+			if c == '\\' { // skip an escaped char inside a basic string
+				i++
+				continue
+			}
+			if c == '"' {
+				inBasic = false
+			}
+		case inLiteral:
+			if c == '\'' {
+				inLiteral = false
+			}
+		case c == '#': // a comment runs to end of line; its bytes are not structure
+			for i < len(arrayText) && arrayText[i] != '\n' {
+				i++
+			}
+		case c == '"':
+			inBasic = true
+		case c == '\'':
+			inLiteral = true
+		case c == '{':
 			if depth == 0 {
 				start = i + 1
 			}
 			depth++
-		case '}':
+		case c == '}':
 			if depth > 0 {
 				depth--
 				if depth == 0 && start >= 0 {
@@ -113,6 +138,43 @@ func uvDependencyNames(arrayText string) []string {
 		}
 	}
 	return names
+}
+
+// uvNetBrackets returns the net count of '[' minus ']' in one line, ignoring brackets inside a basic
+// ("...") or literal ('...') string and after an unquoted '#' comment. It drives multi-line array
+// termination so a marker/comment containing a bracket cannot end the array early or hold it open. TOML
+// basic/literal strings do not span lines in a dependency array, so string state is per line.
+func uvNetBrackets(line string) int {
+	net := 0
+	var inBasic, inLiteral bool
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case inBasic:
+			if c == '\\' {
+				i++
+				continue
+			}
+			if c == '"' {
+				inBasic = false
+			}
+		case inLiteral:
+			if c == '\'' {
+				inLiteral = false
+			}
+		case c == '#':
+			return net // comment to end of line
+		case c == '"':
+			inBasic = true
+		case c == '\'':
+			inLiteral = true
+		case c == '[':
+			net++
+		case c == ']':
+			net--
+		}
+	}
+	return net
 }
 
 // uvFirstName reads the `name = "..."` value from a dependency inline-table object's content. uv always
@@ -186,7 +248,7 @@ func (UV) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.De
 		if collectingDeps {
 			depsText.WriteString(raw)
 			depsText.WriteByte('\n')
-			bracket += strings.Count(raw, "[") - strings.Count(raw, "]")
+			bracket += uvNetBrackets(raw)
 			if bracket <= 0 {
 				finishDeps()
 			}
@@ -220,7 +282,7 @@ func (UV) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.De
 				depsText.Reset()
 				depsText.WriteString(value)
 				depsText.WriteByte('\n')
-				bracket = strings.Count(value, "[") - strings.Count(value, "]")
+				bracket = uvNetBrackets(value)
 				if bracket <= 0 {
 					finishDeps()
 				} else {
