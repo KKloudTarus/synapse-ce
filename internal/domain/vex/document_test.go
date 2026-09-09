@@ -71,3 +71,33 @@ func TestMatchesFinding(t *testing.T) {
 		t.Error("a different component must NOT match")
 	}
 }
+
+func TestComponentMatchScopeAware(t *testing.T) {
+	// A scoped npm product must match its own scoped finding and NOT collapse onto a different unscoped one.
+	st := Statement{Vulnerability: "CVE-1", Status: "not_affected", Products: []string{"pkg:npm/%40safe/lodash@4.17.21"}}
+	if st.MatchesFinding("CVE-1", "lodash", "4.17.21") {
+		t.Error("scoped @safe/lodash must NOT match unscoped lodash (false suppression)")
+	}
+	if !st.MatchesFinding("CVE-1", "@safe/lodash", "4.17.21") {
+		t.Error("scoped product must match its own @safe/lodash finding")
+	}
+	// A literal-@ scope (non-percent-encoded, e.g. from an OpenVEX doc) behaves the same.
+	st2 := Statement{Vulnerability: "CVE-1", Status: "not_affected", Products: []string{"pkg:npm/@acme/util@1.0.0"}}
+	if st2.MatchesFinding("CVE-1", "util", "1.0.0") {
+		t.Error("scoped @acme/util must NOT match unscoped util")
+	}
+	// A non-scoped namespaced purl (Go, Debian) still collapses to its bare leaf, as findings are keyed.
+	st3 := Statement{Vulnerability: "CVE-1", Status: "fixed", Products: []string{"pkg:golang/github.com/gin-gonic/gin@v1.9.1"}}
+	if !st3.MatchesFinding("CVE-1", "gin", "v1.9.1") {
+		t.Error("Go module must still match its bare-name finding")
+	}
+	// Scope reconstruction is npm-ONLY: a %40 segment under a non-npm type is an ordinary namespace and
+	// must collapse to the bare leaf, never matching an npm scoped finding.
+	st4 := Statement{Vulnerability: "CVE-1", Status: "not_affected", Products: []string{"pkg:generic/%40safe/lodash@4.17.21"}}
+	if st4.MatchesFinding("CVE-1", "@safe/lodash", "4.17.21") {
+		t.Error("a non-npm purl must NOT reconstruct an @scope name and match an npm scoped finding")
+	}
+	if !st4.MatchesFinding("CVE-1", "lodash", "4.17.21") {
+		t.Error("a non-npm namespaced purl still collapses to its bare leaf")
+	}
+}

@@ -50,12 +50,12 @@ type ApplyResult struct {
 	Applied    int `json:"applied"`    // findings whose status actually changed
 }
 
-// Apply parses an OpenVEX document and applies each statement to the matching
+// Apply parses a VEX document (OpenVEX or CSAF 2.0, auto-detected) and applies each statement to the matching
 // findings of the engagement, returning what changed. A statement matches a finding
 // by advisory id + component (+ version when the product carries one); the optimistic
 // version guards each update.
 func (s *Service) Apply(ctx context.Context, actor string, tenantID, engagementID shared.ID, vexJSON []byte) (ApplyResult, error) {
-	doc, err := vex.Parse(vexJSON)
+	doc, err := vex.ParseAny(vexJSON)
 	if err != nil {
 		return ApplyResult{}, err
 	}
