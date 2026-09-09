@@ -355,6 +355,9 @@ func secretRules() []rule.Rule {
 		secretRule("cloudinary-url", "Cloudinary URL credential", shared.SeverityHigh, "CWE-798", "cloudinary", "Detects a hardcoded Cloudinary URL that embeds the API key and secret.",
 			"A Cloudinary URL embeds the API key and secret, which manage and delete the account's media assets.", "https://cloudinary.com/documentation/finding_your_credentials",
 			"url := os.Getenv(\"CLOUDINARY_URL\")", "url := \"<REDACTED_CLOUDINARY_URL>\""),
+		secretRule("discord-webhook-url", "Discord webhook URL", shared.SeverityMedium, "CWE-798", "discord", "Detects a hardcoded Discord webhook URL.",
+			"A Discord webhook URL lets anyone post messages into the channel it targets, enabling spam or phishing in that server.", "https://discord.com/developers/docs/resources/webhook",
+			"url := os.Getenv(\"DISCORD_WEBHOOK_URL\")", "url := \"<REDACTED_DISCORD_WEBHOOK>\""),
 		{
 			Key: "putty-private-key", Name: "PuTTY private key", Language: "Secrets", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityCritical, Tags: []string{"credentials", "cryptography"}, CWE: []string{"CWE-321"}, OWASP: []string{"A07:2021"}, Detection: rule.DetectionPattern,
 			Description:         "Detects a hardcoded PuTTY-format private key (.ppk).",

@@ -835,6 +835,7 @@ db-connection-string
 debug-mode-enabled
 definednetworking-token
 digitalocean-token
+discord-webhook-url
 dockerfile-add-instead-of-copy
 dockerfile-add-remote-url
 dockerfile-apk-no-cache
