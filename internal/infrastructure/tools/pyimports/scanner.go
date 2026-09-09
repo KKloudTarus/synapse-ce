@@ -70,10 +70,12 @@ func (s *Scanner) ScanImports(ctx context.Context, dir string) (ports.PyImportGr
 	firstParty := map[string]bool{}
 	dynamic := false
 	files := 0
+	degraded := false // some first-party source could not be fully observed → refuse a not-reachable verdict
 
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil // skip unreadable entries; never abort the whole walk
+			degraded = true // an unreadable entry may hide first-party source; do not conclude "not imported"
+			return nil       // skip unreadable entries; never abort the whole walk
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -88,6 +90,7 @@ func (s *Scanner) ScanImports(ctx context.Context, dir string) (ports.PyImportGr
 			return nil // don't follow symlinks (escape guard); only .py
 		}
 		if files >= s.maxFiles {
+			degraded = true // hit the file-count cap: source beyond it is unscanned
 			return fs.SkipAll
 		}
 		files++
@@ -97,7 +100,9 @@ func (s *Scanner) ScanImports(ctx context.Context, dir string) (ports.PyImportGr
 				firstParty[top] = true
 			}
 		}
-		scanFile(path, s.maxFileLen, imported, &dynamic)
+		if !scanFile(path, s.maxFileLen, imported, &dynamic) {
+			degraded = true // the file was unreadable or byte-truncated: an import past the cut is unseen
+		}
 		return nil
 	})
 	if err != nil {
@@ -111,18 +116,20 @@ func (s *Scanner) ScanImports(ctx context.Context, dir string) (ports.PyImportGr
 		FirstPartyModules: sortedKeys(firstParty),
 		DynamicImports:    dynamic,
 		FilesScanned:      files,
+		CoverageDegraded:  degraded,
 	}, nil
 }
 
 // scanFile line-scans one .py file, adding top-level imported module names to imported and flipping dynamic
 // when a dynamic-import mechanism appears. It JOINS backslash line-continuations and SPLITS compound
 // statements on ";" so `import a, \<newline> b` and `import a; import b` are both fully counted — a MISSED
-// import is the dangerous direction (it can yield a false "not imported"). Best-effort: an unreadable file
-// is skipped (never a hard error).
-func scanFile(path string, maxLen int64, imported map[string]bool, dynamic *bool) {
+// import is the dangerous direction (it can yield a false "not imported"). It returns false when the file
+// could not be FULLY observed (unreadable, or truncated at the per-file byte cap), so the caller can mark
+// the whole scan coverage-degraded and refuse a not-reachable verdict.
+func scanFile(path string, maxLen int64, imported map[string]bool, dynamic *bool) (fullyRead bool) {
 	f, err := os.Open(path) //nolint:gosec // path from a bounded first-party walk under the scan root
 	if err != nil {
-		return
+		return false // unreadable: its imports are unseen
 	}
 	defer func() { _ = f.Close() }()
 	sc := bufio.NewScanner(f)
@@ -138,7 +145,7 @@ func scanFile(path string, maxLen int64, imported map[string]bool, dynamic *bool
 		line := sc.Text()
 		read += int64(len(line)) + 1
 		if read > maxLen {
-			break // bound per-file work
+			return false // truncated at the byte cap: an import past the cut would be missed
 		}
 		joined := cont + line
 		if t := strings.TrimRight(joined, " \t"); strings.HasSuffix(t, "\\") {
@@ -151,6 +158,10 @@ func scanFile(path string, maxLen int64, imported map[string]bool, dynamic *bool
 	if cont != "" {
 		process(cont) // a trailing dangling continuation
 	}
+	if sc.Err() != nil {
+		return false // a line longer than the 1 MiB buffer (or a read error) left the rest of the file unseen
+	}
+	return true
 }
 
 // scanStmt extracts the top-level imported modules from ONE statement (already split off a logical line)

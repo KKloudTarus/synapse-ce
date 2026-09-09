@@ -71,6 +71,13 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*
 		// unsafe false negative. Refuse the whole analysis (no coverage) rather than risk suppressing a vuln.
 		return nil, fmt.Errorf("%w: target uses dynamic imports – python reachability is inconclusive (no coverage)", shared.ErrValidation)
 	}
+	if g.CoverageDegraded {
+		// Some first-party source was skipped or truncated (unreadable entry, per-file byte cap, or the
+		// file-count cap), so an import in the unseen region could make a "not imported" conclusion a false
+		// negative. Refuse the whole analysis rather than risk a false not-reachable – matching the
+		// Complete()/Coverage refusal the Rust/PHP/Ruby and JS scanners perform.
+		return nil, fmt.Errorf("%w: first-party python source was partially unscanned – reachability is inconclusive (no coverage)", shared.ErrValidation)
+	}
 	// Without a readable declaration manifest there is no way to tell a direct dependency from a transitive
 	// one, so no not-reachable is safe for any subject. Refuse the whole analysis (no coverage).
 	direct, ok := a.directDeps(ctx, dir)

@@ -76,6 +76,16 @@ func TestAnalyzeScanErrorIsNoCoverage(t *testing.T) {
 	}
 }
 
+// Partially-unscanned first-party source (an unreadable entry, a byte-truncated file, or the file-count cap)
+// must yield a no-coverage error, never a false not_reachable: an import in the unseen region would make
+// "not imported" wrong. This matches the Rust/PHP/Ruby Complete() and JS Coverage refusals.
+func TestAnalyzeCoverageDegradedIsNoCoverage(t *testing.T) {
+	a, _ := New(fakeScanner{g: ports.PyImportGraph{ImportedModules: []string{"requests"}, FirstPartyModules: []string{"app"}, CoverageDegraded: true}}, directReader("jinja2"))
+	if _, err := a.Analyze(context.Background(), "/x", []string{"jinja2"}); err == nil {
+		t.Fatal("degraded coverage must yield a no-coverage error (never a false not_reachable)")
+	}
+}
+
 // A subject that is NOT a declared direct dependency must yield a no-coverage error, never a false
 // not_reachable — a transitive package is loaded by its parent, so a first-party import scan cannot prove it
 // unused. This is the review-verified gap that made defaulting Python Tier-1 ON unsafe before this guard.

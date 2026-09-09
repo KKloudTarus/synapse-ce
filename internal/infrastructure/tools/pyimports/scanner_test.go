@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -139,4 +140,48 @@ func TestScanEmptyDirRejected(t *testing.T) {
 	if _, err := New().ScanImports(context.Background(), ""); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("empty dir must be rejected, got %v", err)
 	}
+}
+
+// TestScanImportsCoverageDegraded pins that a partially-observed tree sets CoverageDegraded, so the analyzer
+// refuses a not-reachable verdict rather than concluding "not imported" from source it could not fully read.
+func TestScanImportsCoverageDegraded(t *testing.T) {
+	// A file longer than the per-file byte cap is truncated → degraded.
+	t.Run("byte-truncation", func(t *testing.T) {
+		dir := writeTree(t, map[string]string{
+			"app/big.py": "import os\n" + strings.Repeat("# padding line\n", 50),
+		})
+		s := &Scanner{maxFiles: 20000, maxFileLen: 16} // cap below the file size
+		g, err := s.ScanImports(context.Background(), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !g.CoverageDegraded {
+			t.Error("a byte-truncated file must set CoverageDegraded")
+		}
+	})
+	// Hitting the file-count cap leaves later files unscanned → degraded.
+	t.Run("file-cap", func(t *testing.T) {
+		dir := writeTree(t, map[string]string{
+			"a.py": "import os\n", "b.py": "import sys\n", "c.py": "import json\n",
+		})
+		s := &Scanner{maxFiles: 1, maxFileLen: 1 << 20}
+		g, err := s.ScanImports(context.Background(), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !g.CoverageDegraded {
+			t.Error("hitting the file-count cap must set CoverageDegraded")
+		}
+	})
+	// A fully-observed small tree is NOT degraded.
+	t.Run("clean", func(t *testing.T) {
+		dir := writeTree(t, map[string]string{"app/main.py": "import requests\n"})
+		g, err := New().ScanImports(context.Background(), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g.CoverageDegraded {
+			t.Error("a fully-scanned tree must not be degraded")
+		}
+	})
 }
