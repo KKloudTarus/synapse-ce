@@ -27,6 +27,11 @@ func ParseOSV(data []byte) (advisory.Advisory, error) {
 	// A non-empty OSV "withdrawn" timestamp means the advisory was retracted; carry it so the matcher
 	// skips it (a withdrawn advisory is a guaranteed false positive).
 	adv.Withdrawn = strings.TrimSpace(doc.Withdrawn) != ""
+	// A curated database_specific.severity label (GHSA/OSV) gives a band for advisories that carry no
+	// CVSS vector to score, so an offline scan can still order them. Mirrors the live OSV adapter.
+	if lbl, ok := doc.DatabaseSpecific["severity"].(string); ok {
+		adv.Severity = shared.SeverityFromLabel(lbl)
+	}
 	// Prefer a CVSS v3.x vector; compute the base score from it (the canonical band source).
 	for _, sev := range doc.Severity {
 		if strings.HasPrefix(sev.Type, "CVSS_V") && strings.HasPrefix(sev.Score, "CVSS:3.") {
@@ -101,13 +106,14 @@ func firstNonEmpty(a, b string) string {
 // --- OSV JSON shape (the subset the owned store needs) ---
 
 type osvDoc struct {
-	ID        string        `json:"id"`
-	Aliases   []string      `json:"aliases"`
-	Summary   string        `json:"summary"`
-	Details   string        `json:"details"`
-	Withdrawn string        `json:"withdrawn"` // RFC3339 timestamp when the advisory was retracted; empty when active
-	Severity  []osvSeverity `json:"severity"`
-	Affected  []osvAffected `json:"affected"`
+	ID               string         `json:"id"`
+	Aliases          []string       `json:"aliases"`
+	Summary          string         `json:"summary"`
+	Details          string         `json:"details"`
+	Withdrawn        string         `json:"withdrawn"` // RFC3339 timestamp when the advisory was retracted; empty when active
+	Severity         []osvSeverity  `json:"severity"`
+	DatabaseSpecific map[string]any `json:"database_specific"` // GHSA/OSV carry a curated "severity" label here
+	Affected         []osvAffected  `json:"affected"`
 }
 
 type osvSeverity struct {

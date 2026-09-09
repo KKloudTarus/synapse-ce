@@ -87,3 +87,18 @@ func TestSeverityFromScore(t *testing.T) {
 		}
 	}
 }
+
+func TestSeverityFromLabel(t *testing.T) {
+	cases := map[string]Severity{
+		"CRITICAL": SeverityCritical, "critical": SeverityCritical,
+		"HIGH": SeverityHigh, "High": SeverityHigh,
+		"MODERATE": SeverityMedium, "MEDIUM": SeverityMedium,
+		"LOW": SeverityLow, " low ": SeverityLow,
+		"": SeverityUnknown, "bogus": SeverityUnknown,
+	}
+	for label, want := range cases {
+		if got := SeverityFromLabel(label); got != want {
+			t.Errorf("SeverityFromLabel(%q) = %q, want %q", label, got, want)
+		}
+	}
+}

@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 var (
@@ -70,6 +72,7 @@ func Merge(observations []Observation) (Canonical, error) {
 	}
 	canonical.Advisory.Summary = selectSummary(observations)
 	canonical.Advisory.CVSSVector, canonical.Advisory.CVSSScore = selectCVSS(observations)
+	canonical.Advisory.Severity = selectSeverityBand(observations)
 	canonical.Advisory.Affected = mergeAffected(observations)
 	canonical.Advisory.CPEs = mergeCPEs(observations)
 	canonical.PublishedAt, canonical.ModifiedAt = mergeDates(observations)
@@ -378,6 +381,35 @@ func selectFloat(observations []Observation, value func(Observation) *float64) *
 	})
 	result := candidates[0].value
 	return &result
+}
+
+// selectSeverityBand picks the most severe curated label band across observations (Unknown when none
+// carry one), so a label-only advisory keeps a band through materialization.
+func selectSeverityBand(observations []Observation) shared.Severity {
+	best := shared.SeverityUnknown
+	for _, observation := range observations {
+		if severityRank(observation.Advisory.Severity) > severityRank(best) {
+			best = observation.Advisory.Severity
+		}
+	}
+	return best
+}
+
+func severityRank(s shared.Severity) int {
+	switch s {
+	case shared.SeverityCritical:
+		return 5
+	case shared.SeverityHigh:
+		return 4
+	case shared.SeverityMedium:
+		return 3
+	case shared.SeverityLow:
+		return 2
+	case shared.SeverityInfo:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func mergeAffected(observations []Observation) []AffectedPackage {
