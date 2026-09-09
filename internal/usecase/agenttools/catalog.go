@@ -716,71 +716,71 @@ func verifierRecipeForCWE(cwe, fallbackRisk string) (strategy, evidence []string
 	switch cwe {
 	case "CWE-89":
 		return []string{
-				"reconstruct only the affected route and parameter from the SAST envelope; do not infer new targets",
-				"use non-destructive SQLi probes against a disposable/staging dataset or an operator-approved canary record",
-				"compare baseline vs probe response shape, status, timing, and server-side error evidence without dumping table data",
-				"prefer a parameterization/blocked-control proof over extracting data",
-			}, []string{
-				"baseline request/response metadata",
-				"probe request/response metadata with sensitive values redacted",
-				"database/error/timing signal sufficient to distinguish parameterized vs injectable behavior",
-				"verifier verdict explaining why the proof is or is not exploitable",
-			}, "active"
+			"reconstruct only the affected route and parameter from the SAST envelope; do not infer new targets",
+			"use non-destructive SQLi probes against a disposable/staging dataset or an operator-approved canary record",
+			"compare baseline vs probe response shape, status, timing, and server-side error evidence without dumping table data",
+			"prefer a parameterization/blocked-control proof over extracting data",
+		}, []string{
+			"baseline request/response metadata",
+			"probe request/response metadata with sensitive values redacted",
+			"database/error/timing signal sufficient to distinguish parameterized vs injectable behavior",
+			"verifier verdict explaining why the proof is or is not exploitable",
+		}, "active"
 	case "CWE-79":
 		return []string{
-				"probe with a harmless unique marker first; only test script execution in an isolated browser profile",
-				"capture rendered DOM and execution/no-execution signal; do not steal cookies, tokens, or user data",
-				"check framework escaping and CSP as counterevidence before promotion",
-			}, []string{
-				"baseline rendered response or DOM snapshot metadata",
-				"marker reflection/rendering evidence",
-				"isolated-browser execution signal or clear counterevidence",
-				"CSP/escaping observations and verifier verdict",
-			}, "active"
+			"probe with a harmless unique marker first; only test script execution in an isolated browser profile",
+			"capture rendered DOM and execution/no-execution signal; do not steal cookies, tokens, or user data",
+			"check framework escaping and CSP as counterevidence before promotion",
+		}, []string{
+			"baseline rendered response or DOM snapshot metadata",
+			"marker reflection/rendering evidence",
+			"isolated-browser execution signal or clear counterevidence",
+			"CSP/escaping observations and verifier verdict",
+		}, "active"
 	case "CWE-918":
 		return []string{
-				"use only an operator-controlled callback/canary endpoint; do not probe cloud metadata or private networks by default",
-				"verify whether the server performs the outbound request and whether redirects/private-IP blocking exists",
-				"stop at canary reachability; do not pivot to internal service enumeration",
-			}, []string{
-				"baseline application request metadata",
-				"operator-controlled callback hit metadata",
-				"redirect/private-network guard observations",
-				"verifier verdict on impact and reachable boundary",
-			}, "active"
+			"use only an operator-controlled callback/canary endpoint; do not probe cloud metadata or private networks by default",
+			"verify whether the server performs the outbound request and whether redirects/private-IP blocking exists",
+			"stop at canary reachability; do not pivot to internal service enumeration",
+		}, []string{
+			"baseline application request metadata",
+			"operator-controlled callback hit metadata",
+			"redirect/private-network guard observations",
+			"verifier verdict on impact and reachable boundary",
+		}, "active"
 	case "CWE-22":
 		return []string{
-				"use an approved canary file inside a verifier fixture or disposable staging filesystem",
-				"attempt traversal only toward the canary path; do not read OS secrets such as /etc/passwd or production config",
-				"record normalization/base-directory controls as counterevidence",
-			}, []string{
-				"baseline file request metadata",
-				"canary-file read/no-read result with content hash only",
-				"path normalization/base-directory evidence",
-				"verifier verdict on file boundary impact",
-			}, "active"
+			"use an approved canary file inside a verifier fixture or disposable staging filesystem",
+			"attempt traversal only toward the canary path; do not read OS secrets such as /etc/passwd or production config",
+			"record normalization/base-directory controls as counterevidence",
+		}, []string{
+			"baseline file request metadata",
+			"canary-file read/no-read result with content hash only",
+			"path normalization/base-directory evidence",
+			"verifier verdict on file boundary impact",
+		}, "active"
 	case "CWE-78":
 		return []string{
-				"default to staging/sandbox only; production command-injection proof is intrusive",
-				"use a harmless canary command or argument-boundary probe approved by the operator",
-				"prove argument injection vs shell execution without destructive commands, persistence, or outbound callbacks unless explicitly authorized",
-			}, []string{
-				"baseline request/response metadata",
-				"approved canary command signal or safe argument-boundary evidence",
-				"execution context and sandbox/staging confirmation",
-				"verifier verdict on command execution impact",
-			}, "intrusive"
+			"default to staging/sandbox only; production command-injection proof is intrusive",
+			"use a harmless canary command or argument-boundary probe approved by the operator",
+			"prove argument injection vs shell execution without destructive commands, persistence, or outbound callbacks unless explicitly authorized",
+		}, []string{
+			"baseline request/response metadata",
+			"approved canary command signal or safe argument-boundary evidence",
+			"execution context and sandbox/staging confirmation",
+			"verifier verdict on command execution impact",
+		}, "intrusive"
 	default:
 		return []string{
-				"derive the minimal proof from the SAST source/sink/control envelope",
-				"use a non-destructive canary and capture only metadata needed to accept or refute exploitability",
-				"prefer counterevidence and safe negative proof over impact escalation",
-			}, []string{
-				"baseline observation",
-				"safe canary probe observation",
-				"counterevidence review",
-				"distinct verifier verdict",
-			}, risk
+			"derive the minimal proof from the SAST source/sink/control envelope",
+			"use a non-destructive canary and capture only metadata needed to accept or refute exploitability",
+			"prefer counterevidence and safe negative proof over impact escalation",
+		}, []string{
+			"baseline observation",
+			"safe canary probe observation",
+			"counterevidence review",
+			"distinct verifier verdict",
+		}, risk
 	}
 }
 
@@ -991,6 +991,7 @@ type reachabilityView struct {
 	Direct            bool     `json:"direct"`
 	Depth             int      `json:"depth"`
 	Path              []string `json:"path,omitempty"`
+	Introducers       []string `json:"introducers,omitempty"` // ALL direct deps that pull this component in
 	Scope             string   `json:"scope,omitempty"`
 	BackgroundScope   bool     `json:"background_scope"`
 	Location          string   `json:"location,omitempty"`
@@ -1097,6 +1098,15 @@ func fillReachability(v *reachabilityView, doc *sbom.SBOM, component, version st
 			break
 		}
 		v.Path = append(v.Path, clampStr(p))
+	}
+	// The COMPLETE set of direct deps that introduce this component (Path is one chain), so an agent sees
+	// every parent to bump for a transitive vuln. Bounded + clamped like Path.
+	for i, r := range sbom.IntroducedBy(doc.Dependencies, sbom.ComponentID(comp.Name, comp.Version, comp.PURL)) {
+		if i >= maxReachPathElems {
+			v.Introducers = append(v.Introducers, "…")
+			break
+		}
+		v.Introducers = append(v.Introducers, clampStr(r))
 	}
 	if v.Direct {
 		v.SuggestedTier = string(judgment.Tier1)
