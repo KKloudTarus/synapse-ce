@@ -359,6 +359,10 @@ func Configure(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, log *s
 	if cfg.SecretScanEnabled {
 		svc.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan in the scan pipeline
 		log.Info("secret scanning ENABLED (hardcoded credentials; matches redacted)")
+		if cfg.SecretHistoryEnabled {
+			svc.SetSecretHistoryEnabled(true) // also scan git history for committed-then-removed secrets
+			log.Info("git-history secret scanning ENABLED (blobs from all refs; best-effort on a git repo)")
+		}
 	}
 	if cfg.ImageRootFSEnabled {
 		svc.SetOSPackageCataloger(ospkg.New())         // owned dpkg/apk cataloging from the materialized image rootfs

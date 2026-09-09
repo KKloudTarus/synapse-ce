@@ -429,6 +429,11 @@ type Config struct {
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
 	// It reads workspace files and redacts every match, so nothing sensitive reaches logs or the report.
 	SecretScanEnabled bool
+	// SecretHistoryEnabled additionally scans the git history (every blob reachable from all refs) for a
+	// secret committed and later removed, which the working-tree scan cannot see. Off by default: it is
+	// heavier and reports credentials no longer in the tree. Requires the workspace to be a git repository;
+	// otherwise it is a best-effort no-op with a warning. Redacts every match like the working-tree scan.
+	SecretHistoryEnabled bool
 	// MisconfigEnabled turns on the deterministic IaC/config misconfig scanner (Dockerfile, Kubernetes
 	// manifests) in the scan pipeline; off by default. Read-only, first-party checks, no policy engine.
 	MisconfigEnabled bool
@@ -781,6 +786,7 @@ func Load() Config {
 		JudgmentsEnabled:                            getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
 		SASTEnabled:                                 getbool("SYNAPSE_SAST_ENABLED", true),
 		SecretScanEnabled:                           getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
+		SecretHistoryEnabled:                        getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
 		MisconfigEnabled:                            getbool("SYNAPSE_MISCONFIG_ENABLED", true),
 		SuppressionEnabled:                          getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
 		VEXEnabled:                                  getbool("SYNAPSE_VEX_ENABLED", true),

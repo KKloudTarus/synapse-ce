@@ -1548,8 +1548,9 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		fmt.Fprintln(os.Stderr, "synapse-cli: image mode – source SAST skipped (run SAST at source; image scan covers SCA/OS-CVE + secret + misconfig)")
 	}
 	if cfg.SecretScanEnabled {
-		sca.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan (CI-friendly)
-		sca.SetIncludeTestSecrets(includeTest) // by default suppress test/fixture/docs/detector-pattern secrets (fake creds)
+		sca.SetSecretScanner(secretscan.New())                // deterministic, redacted secret scan (CI-friendly)
+		sca.SetIncludeTestSecrets(includeTest)                // by default suppress test/fixture/docs/detector-pattern secrets (fake creds)
+		sca.SetSecretHistoryEnabled(cfg.SecretHistoryEnabled) // opt-in: also scan git history for committed-then-removed secrets
 	}
 	if cfg.MisconfigEnabled {
 		// Trusted-local model (like the CLI's maven/gradle resolvers): render Helm charts via a direct
