@@ -90,6 +90,10 @@ func TestCatalogParity(t *testing.T) {
 		"onepassword-service-account":   "CWE-798",
 		"gitlab-runner-token":           "CWE-798",
 		"easypost-token":                "CWE-798",
+		"slack-app-token":               "CWE-798",
+		"intra42-client-secret":         "CWE-798",
+		"yandex-api-key":                "CWE-798",
+		"notion-token":                  "CWE-798",
 	}
 	builtin := defaultRules()
 	seenInBuiltin := make(map[string]bool, len(builtin))

@@ -994,6 +994,7 @@ insecure-cookie-flags
 insecure-randomness-security-context
 insecure-temp-file
 insecure-tls-verify-disabled
+intra42-client-secret
 ipynb-aws-access-key-in-output
 ipynb-bash-cell-magic-injection
 ipynb-bearer-token-in-output
@@ -2062,6 +2063,7 @@ node-vm-run-dynamic
 node-vm2-usage
 node-weak-tls-protocol
 nosql-injection-request
+notion-token
 npm-token
 onepassword-service-account
 open-redirect-user-url
@@ -2835,6 +2837,7 @@ sentry-dsn
 server-template-injection
 shippo-token
 shopify-token
+slack-app-token
 slack-token
 slack-webhook-url
 sqlalchemy-raw-sql-dynamic
@@ -3236,3 +3239,4 @@ xml:unused-schema-location
 xml:xinclude
 xpath-injection
 xxe-insecure-xml-parsing
+yandex-api-key
