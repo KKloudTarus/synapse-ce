@@ -50,7 +50,9 @@ func TestLiveAIPyReachAuthoritative(t *testing.T) {
 	})
 
 	// DETERMINISTIC proof (no AI): jinja2 not_reachable, requests reachable.
-	analyzer, err := pyreach.New(pyimports.New())
+	analyzer, err := pyreach.New(pyimports.New(), func(context.Context, string) (map[string]bool, bool) {
+		return map[string]bool{"requests": true, "jinja2": true}, true
+	})
 	if err != nil {
 		t.Fatalf("analyzer: %v", err)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/pyimports"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/srcimports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -64,6 +65,7 @@ func TestPyReachToOpenVEXEndToEnd(t *testing.T) {
 	dir := writePy(t, map[string]string{
 		"app/__init__.py": "",
 		"app/main.py":     "import requests\n\ndef run():\n    return requests.get('https://x')\n",
+		"pyproject.toml":  "[project]\ndependencies = [\"requests\", \"jinja2\"]\n",
 	})
 
 	store := memory.NewJudgmentStore()
@@ -71,7 +73,9 @@ func TestPyReachToOpenVEXEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
 	}
-	analyzer, err := pyreach.New(pyimports.New())
+	analyzer, err := pyreach.New(pyimports.New(), func(ctx context.Context, d string) (map[string]bool, bool) {
+		return srcimports.DirectDependencies(ctx, d, "pypi")
+	})
 	if err != nil {
 		t.Fatalf("analyzer: %v", err)
 	}
