@@ -180,6 +180,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sbomcrosscheckjudge"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
+	scanrunuc "github.com/KKloudTarus/synapse-ce/internal/usecase/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/scmconnectoruc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/srcreach"
@@ -405,6 +406,7 @@ func main() {
 	var promotionStore ports.PendingPromotionAuditStore
 	var scanJobStore ports.ScanJobStore
 	var scanRunStore ports.ScanRunStore
+	var scanRunTransactions ports.TenantTransactionRunner
 	var projectAnalysisStore ports.ProjectAnalysisStore
 	var qualityGateStore ports.QualityGateStore
 	var qualityProfileStore ports.QualityProfileStore
@@ -655,6 +657,7 @@ func main() {
 		vulnerabilityActions = postgres.NewVulnerabilityActionStore(pool)
 		vulnerabilityReconcileRuns = postgres.NewVulnerabilityReconcileRunStore(pool, ids)
 		vulnerabilityTransactions = postgres.NewTenantTransactionRunner(pool)
+		scanRunTransactions = vulnerabilityTransactions
 		slaStore = postgres.NewSLAStore(pool)
 		// Shared by recon AND the in-process SCA worker, so the base lease TTL must cover the
 		// longer of the two timeouts (the renewer extends it while live, but the base must not
@@ -743,6 +746,7 @@ func main() {
 		}
 		scanJobStore = memory.NewScanJobStore()
 		scanRunStore = memory.NewScanRunStore()
+		scanRunTransactions = memory.NewTenantTransactionRunner()
 		projectAnalysisStore = memory.NewProjectAnalysisStore()
 		qualityGateStore = memory.NewQualityGateStore()
 		qualityProfileStore = memory.NewQualityProfileStore()
@@ -969,6 +973,16 @@ func main() {
 		enry.New(), sbomGen,
 		detectionSources,
 		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)))
+	provenanceStore, ok := scanRunStore.(ports.ScanRunProvenanceStore)
+	if !ok || scanRunTransactions == nil {
+		log.Error("scan-run provenance dependencies are not configured")
+		os.Exit(1)
+	}
+	scanRunService, err := scanrunuc.NewService(provenanceStore, repo, scanRunTransactions, ids, clock, auditLog)
+	if err != nil {
+		log.Error("scan-run provenance service init failed", "err", err)
+		os.Exit(1)
+	}
 	var slaService *slauc.Service
 	if cfg.SLAEnabled {
 		var slaErr error
@@ -1244,6 +1258,7 @@ func main() {
 		log.Error("response-observer telemetry binding resolver init failed", "err", err)
 		os.Exit(1)
 	}
+	router.SetScanRunHistory(scanRunService)
 	coverageWindowSvc, err := coveragewindow.NewService(sensorStateStore, telemetryTransportStore, telemetryTransportStore, coverageWindowStore, clock)
 	if err != nil {
 		log.Error("coverage window service init failed", "err", err)
