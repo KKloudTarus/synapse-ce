@@ -659,3 +659,33 @@ source = { registry = "https://pypi.org/simple" }`
 		t.Errorf("want 0 dependencies, got %+v", doc.Dependencies)
 	}
 }
+
+// A commented-out dependency entry, or a marker string containing brace/bracket bytes, must not produce a
+// false edge or break array termination (TOML comment/string awareness).
+func TestUVParseIgnoresCommentedAndQuotedDependencies(t *testing.T) {
+	fixture := `[[package]]
+name = "app"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    # { name = "evil" }
+    { name = "real", marker = "platform_release == '{'" },
+]
+
+[[package]]
+name = "evil"
+version = "9.9.9"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "real"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }`
+	_, deps := parseUVTest(t, "uv.lock", fixture)
+	if len(deps) != 1 || deps[0].Ref != "pkg:pypi/app@1.0.0" {
+		t.Fatalf("want one edge from app, got %+v", deps)
+	}
+	if len(deps[0].DependsOn) != 1 || deps[0].DependsOn[0] != "pkg:pypi/real@2.0.0" {
+		t.Errorf("want app -> real@2.0.0 only (evil is commented out), got %v", deps[0].DependsOn)
+	}
+}
