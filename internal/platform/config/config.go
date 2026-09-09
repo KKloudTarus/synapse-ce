@@ -795,7 +795,7 @@ func Load() Config {
 		PyReachabilityEnabled:                       getbool("SYNAPSE_PYREACH_ENABLED", false),
 		PySemanticReachabilityEnabled:               getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
 		ASTBin:                                      os.Getenv("SYNAPSE_AST_BIN"),
-		PythonTaintEnabled:                          getbool("SYNAPSE_PYTAINT_ENABLED", false),
+		PythonTaintEnabled:                          getbool("SYNAPSE_PYTAINT_ENABLED", true),
 		TriScoreReassessEnabled:                     getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
 		FleetCorrelationEnabled:                     getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
 		FleetCorrelationWindow:                      getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),

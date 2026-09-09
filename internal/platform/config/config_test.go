@@ -588,16 +588,19 @@ func TestAnalysisDefaultsOn(t *testing.T) {
 func TestExternalSetupDefaultsOff(t *testing.T) {
 	for _, k := range []string{
 		"SYNAPSE_SANDBOX_ENABLED", "SYNAPSE_AGENT_ENABLED", "SYNAPSE_TAINT_ENABLED",
-		"SYNAPSE_PYREACH_TIER2_ENABLED", "SYNAPSE_PYTAINT_ENABLED",
+		"SYNAPSE_PYREACH_TIER2_ENABLED",
 		"SYNAPSE_MAVEN_RESOLVE_ENABLED", "SYNAPSE_GRADLE_RESOLVE_ENABLED", "SYNAPSE_JARHASH_ONLINE_ENABLED",
 		"SYNAPSE_WRITEUP_DRAFTS_ENABLED", "SYNAPSE_OFFLINE", "SYNAPSE_IGNORE_UNFIXED",
 	} {
 		t.Setenv(k, "")
 	}
 	c := Load()
+	// Python semantic taint is deliberately NOT in this off-by-default set: it is source-only (synapse-ast
+	// parses target code with tree-sitter, never compiling or executing it) and degrades to a clean no-op
+	// when the sidecar is absent, so it is safe to run in the default scan (see TestPythonTaintDefaultsOn).
 	off := map[string]bool{
 		"Sandbox": c.SandboxEnabled, "Agent": c.AgentEnabled, "Taint": c.TaintEnabled,
-		"PythonTier2": c.PySemanticReachabilityEnabled, "PythonTaint": c.PythonTaintEnabled,
+		"PythonTier2": c.PySemanticReachabilityEnabled,
 		"MavenResolve": c.MavenResolveEnabled, "GradleResolve": c.GradleResolveEnabled,
 		"JarHashOnline": c.JarHashOnlineEnabled, "WriteupDrafts": c.WriteupDraftsEnabled,
 		"Offline": c.Offline, "IgnoreUnfixed": c.IgnoreUnfixed,
@@ -885,5 +888,19 @@ func TestProductionOIDCRequiresPostgres(t *testing.T) {
 	cfg.DBDSN = "postgres://synapse"
 	if err := cfg.ValidateMigrationPosture(); err != nil {
 		t.Fatalf("production OIDC with database: %v", err)
+	}
+}
+
+// TestPythonTaintDefaultsOn pins that source-only Python value-flow taint runs in the default scan (D5.1):
+// it is safe by default because synapse-ast only parses the target (never builds/executes it) and degrades
+// to a clean no-op when the sidecar is absent. An explicit false still disables it.
+func TestPythonTaintDefaultsOn(t *testing.T) {
+	t.Setenv("SYNAPSE_PYTAINT_ENABLED", "")
+	if !Load().PythonTaintEnabled {
+		t.Error("Python semantic taint must be ON by default (source-only, sidecar-gated)")
+	}
+	t.Setenv("SYNAPSE_PYTAINT_ENABLED", "false")
+	if Load().PythonTaintEnabled {
+		t.Error("SYNAPSE_PYTAINT_ENABLED=false must disable Python taint")
 	}
 }
