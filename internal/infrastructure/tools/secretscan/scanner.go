@@ -662,5 +662,33 @@ func defaultRules() []rule {
 			minEnt: 3.5,
 			allow:  compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
 		},
+		// ── additional distinctive-prefix provider tokens (near-zero false positive: the unique prefix is the signal) ──
+		{
+			id: "dockerhub-pat", category: "Docker", title: "Docker Hub personal access token", severity: shared.SeverityHigh,
+			keywords: []string{"dckr_pat_"},
+			// No trailing \b: the token body is base64url and may end in '-' or '_', where \b would not
+			// match. The character class is its own right boundary (it stops at a quote/space).
+			re: regexp.MustCompile(`\bdckr_pat_[A-Za-z0-9_-]{20,}`),
+		},
+		{
+			id: "stripe-restricted-key", category: "Stripe", title: "Stripe restricted key", severity: shared.SeverityHigh,
+			keywords: []string{"rk_live_", "rk_test_"},
+			re:       regexp.MustCompile(`\brk_(?:live|test)_[A-Za-z0-9]{24,}\b`),
+		},
+		{
+			id: "gitlab-pipeline-trigger-token", category: "GitLab", title: "GitLab pipeline trigger token", severity: shared.SeverityHigh,
+			keywords: []string{"glptt-"},
+			re:       regexp.MustCompile(`\bglptt-[0-9a-f]{40}\b`),
+		},
+		{
+			id: "pulumi-access-token", category: "Pulumi", title: "Pulumi access token", severity: shared.SeverityHigh,
+			keywords: []string{"pul-"},
+			re:       regexp.MustCompile(`\bpul-[0-9a-f]{40}\b`),
+		},
+		{
+			id: "clojars-deploy-token", category: "Clojars", title: "Clojars deploy token", severity: shared.SeverityHigh,
+			keywords: []string{"CLOJARS_"},
+			re:       regexp.MustCompile(`\bCLOJARS_[A-Za-z0-9]{60}\b`),
+		},
 	}
 }
