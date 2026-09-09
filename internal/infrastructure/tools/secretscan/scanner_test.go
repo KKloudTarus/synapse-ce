@@ -544,3 +544,21 @@ func TestMoreProviderTokens4NearMissNoMatch(t *testing.T) {
 		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
 	}
 }
+
+func TestDetectsDiscordWebhook(t *testing.T) {
+	an := strings.Repeat("aB3cD4eF5g", 8) // 80 alnum for the token body (60-110)
+	rs := scanDir(t, map[string]string{
+		"hook.env":   "DISCORD_WEBHOOK=https://discord.com/api/webhooks/123456789012345678/" + an[:70] + "\n",
+		"canary.env": "H=https://canary.discordapp.com/api/webhooks/12345678901234567/" + an[:64] + "\n",
+	})
+	if hasRule(rs, "discord-webhook-url") == nil {
+		t.Errorf("expected a discord-webhook-url finding, got %+v", rs)
+	}
+	// A bare discord URL with a too-short token must not match.
+	rs2 := scanDir(t, map[string]string{
+		"a.env": "K=https://discord.com/api/webhooks/123/short\n",
+	})
+	if len(rs2) != 0 {
+		t.Errorf("near-miss discord URL must not match, got %+v", rs2)
+	}
+}

@@ -103,6 +103,7 @@ func TestCatalogParity(t *testing.T) {
 		"sonarqube-token":               "CWE-798",
 		"dropbox-token":                 "CWE-798",
 		"cloudinary-url":                "CWE-798",
+		"discord-webhook-url":           "CWE-798",
 	}
 	builtin := defaultRules()
 	seenInBuiltin := make(map[string]bool, len(builtin))

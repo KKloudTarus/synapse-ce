@@ -854,5 +854,11 @@ func defaultRules() []rule {
 			// cloudinary://<15-digit api key>:<27-char api secret>@<cloud name: letter then 1-127 [A-Za-z0-9-]>.
 			re: regexp.MustCompile(`cloudinary://[0-9]{15}:[A-Za-z0-9_-]{27}@[A-Za-z][A-Za-z0-9-]{1,127}`),
 		},
+		{
+			id: "discord-webhook-url", category: "Discord", title: "Discord webhook URL", severity: shared.SeverityMedium,
+			keywords: []string{"discord.com/api/webhooks/", "discordapp.com/api/webhooks/"},
+			// The webhook id (17-20 digits) plus its token (60-110 url-safe base64 chars); ptb./canary. hosts too.
+			re: regexp.MustCompile(`https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/[0-9]{17,20}/[A-Za-z0-9_-]{60,110}`),
+		},
 	}
 }
