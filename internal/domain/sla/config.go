@@ -30,6 +30,10 @@ type Weights struct {
 	Exposure          float64 `json:"exposure"`
 	Criticality       float64 `json:"criticality"`
 	FeasibilityRelief float64 `json:"feasibility_relief"`
+	// Reachability is the maximum magnitude of the reachability adjustment (added when reachable, subtracted
+	// when proven not-reachable, scaled by tier). Like FeasibilityRelief it sits OUTSIDE the sum-to-100 core
+	// factors; it is bounded so reachability orders comparably-risky findings without overriding severity.
+	Reachability float64 `json:"reachability"`
 }
 
 // Thresholds are the inclusive lower score bounds for each ladder tier, strictly descending
@@ -73,6 +77,7 @@ func DefaultConfig() Config {
 			Exposure:          15,
 			Criticality:       15,
 			FeasibilityRelief: 15,
+			Reachability:      15,
 		},
 		Thresholds: Thresholds{
 			Emergency: 85,
@@ -105,6 +110,7 @@ func (c Config) Validate() error {
 	for name, v := range map[string]float64{
 		"severity": w.Severity, "exploitability": w.Exploitability, "threat_intel": w.ThreatIntel,
 		"exposure": w.Exposure, "criticality": w.Criticality, "feasibility_relief": w.FeasibilityRelief,
+		"reachability": w.Reachability,
 	} {
 		if v < 0 {
 			return fmt.Errorf("%w: sla weight %q is negative", shared.ErrValidation, name)

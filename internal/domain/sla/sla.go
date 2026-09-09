@@ -96,6 +96,20 @@ const (
 	FeasibilityNoPatch             Feasibility = "no_patch"
 )
 
+// Reachability is the authoritative call/import reachability VERDICT for the vulnerable symbol, distinct
+// from any heuristic confidence. Unknown is the neutral default (the common case: no publishable verdict),
+// so a finding without a verdict is scored exactly as before. Reachable ADDS urgency (the vulnerable code
+// is actually used); NotReachable SUBTRACTS it (proven dead code). The caller MUST set NotReachable only
+// for a PUBLISHABLE, DETERMINISTIC not-reachable judgment and Reachable only for a publishable reachable
+// one, so a heuristic or an inconclusive scan never moves the score.
+type Reachability string
+
+const (
+	ReachabilityUnknown      Reachability = ""
+	ReachabilityReachable    Reachability = "reachable"
+	ReachabilityNotReachable Reachability = "not_reachable"
+)
+
 // EPSS bands. EPSS is a 0..1 probability; the score model uses coarse bands so a decision does not swing
 // on noise in the third decimal place.
 const (
@@ -117,6 +131,11 @@ type Inputs struct {
 	Criticality        Criticality     `json:"criticality,omitempty"`
 	Exposure           Exposure        `json:"exposure,omitempty"`
 	Feasibility        Feasibility     `json:"feasibility,omitempty"`
+	// Reachability is the authoritative reachability verdict (see the Reachability type); ReachabilityTier
+	// is the proving tier's rank (1 = import-level, 2 = deterministic call-graph, 0/absent = no verdict) and
+	// scales the adjustment so a stronger proof moves the score more. Both default to the neutral zero value.
+	Reachability     Reachability `json:"reachability,omitempty"`
+	ReachabilityTier int          `json:"reachability_tier,omitempty"`
 }
 
 // Validate rejects inputs that would make a persisted SLA assessment ambiguous or impossible to
@@ -135,7 +154,17 @@ func (in Inputs) Validate() error {
 	if !validExposure(in.Exposure) || !validCriticality(in.Criticality) || !validFeasibility(in.Feasibility) {
 		return fmt.Errorf("%w: sla context contains an unknown closed-vocabulary value", shared.ErrValidation)
 	}
+	if !validReachability(in.Reachability) {
+		return fmt.Errorf("%w: sla reachability %q is invalid", shared.ErrValidation, in.Reachability)
+	}
+	if in.ReachabilityTier < 0 || in.ReachabilityTier > 2 {
+		return fmt.Errorf("%w: sla reachability tier must be 0, 1, or 2", shared.ErrValidation)
+	}
 	return nil
+}
+
+func validReachability(v Reachability) bool {
+	return v == ReachabilityUnknown || v == ReachabilityReachable || v == ReachabilityNotReachable
 }
 
 func validExposure(v Exposure) bool {
@@ -159,7 +188,8 @@ type Breakdown struct {
 	ThreatIntel    float64  `json:"threat_intel"`
 	Exposure       float64  `json:"exposure"`
 	Criticality    float64  `json:"criticality"`
-	Feasibility    float64  `json:"feasibility"` // an adjustment; may be negative
+	Feasibility    float64  `json:"feasibility"`  // an adjustment; may be negative
+	Reachability   float64  `json:"reachability"` // a reachability adjustment; positive if reachable, negative if proven not-reachable
 	Overrides      []string `json:"overrides,omitempty"`
 }
 
@@ -188,11 +218,15 @@ func Compute(in Inputs, cfg Config, now time.Time) Result {
 		Exposure:       exposureFactor(in, cfg),
 		Criticality:    criticalityFactor(in, cfg),
 		Feasibility:    feasibilityFactor(in, cfg),
+		Reachability:   reachabilityFactor(in, cfg),
 	}
-	score := clamp(b.Severity+b.Exploitability+b.ThreatIntel+b.Exposure+b.Criticality+b.Feasibility, 0, 100)
+	score := clamp(b.Severity+b.Exploitability+b.ThreatIntel+b.Exposure+b.Criticality+b.Feasibility+b.Reachability, 0, 100)
 
 	tier := tierForScore(score, cfg)
 	tier, b.Overrides = applyOverrides(tier, in, cfg)
+	if note := reachabilityNote(in, b.Reachability); note != "" {
+		b.Overrides = append(b.Overrides, note) // audit trail: record the reachability adjustment that moved the score
+	}
 
 	due := cfg.dueRange(tier)
 	return Result{
@@ -287,6 +321,49 @@ func feasibilityFactor(in Inputs, cfg Config) float64 {
 	default:
 		return 0
 	}
+}
+
+// reachabilityFactor folds the authoritative reachability verdict into the score: a Reachable verdict adds
+// urgency, a NotReachable verdict subtracts it, each bounded by cfg.Weights.Reachability and scaled by the
+// proving tier (Tier 2 deterministic call-graph = full weight, Tier 1 import-level = half, no tier = none).
+// Unknown contributes nothing. The caller gates publishability/determinism, so an inconclusive or heuristic
+// signal is passed as Unknown and never moves the score. The magnitude is bounded so reachability tunes the
+// order of comparably-risky findings without ever overriding severity.
+func reachabilityFactor(in Inputs, cfg Config) float64 {
+	scale := reachabilityTierScale(in.ReachabilityTier)
+	if scale == 0 {
+		return 0
+	}
+	switch in.Reachability {
+	case ReachabilityReachable:
+		return cfg.Weights.Reachability * scale
+	case ReachabilityNotReachable:
+		return -cfg.Weights.Reachability * scale
+	default:
+		return 0
+	}
+}
+
+// reachabilityTierScale maps the proving tier rank to a magnitude multiplier. A verdict with no tier (0)
+// does not move the score even if a state is set, so a caller must supply the tier for the adjustment to fire.
+func reachabilityTierScale(tier int) float64 {
+	switch {
+	case tier >= 2:
+		return 1.0
+	case tier == 1:
+		return 0.5
+	default:
+		return 0
+	}
+}
+
+// reachabilityNote records the reachability adjustment in the breakdown's override list for auditability,
+// so a tier that moved on reachability can be justified. Empty when reachability did not move the score.
+func reachabilityNote(in Inputs, contribution float64) string {
+	if contribution == 0 {
+		return ""
+	}
+	return fmt.Sprintf("reachability:%s(tier%d,%+.1f)", in.Reachability, in.ReachabilityTier, contribution)
 }
 
 func tierForScore(score float64, cfg Config) Tier {
