@@ -1,5 +1,6 @@
-import { ChevronRight, CheckVerified01, Shield01, ShieldTick } from '@untitledui/icons'
+import { ChevronRight, CheckVerified01, HelpCircle, Shield01, ShieldTick } from '@untitledui/icons'
 import { useState } from 'react'
+import { Tooltip, TooltipTrigger } from '../../../components/base/tooltip/tooltip'
 import { Button, cn } from '../../../components/ui'
 import { ApiError, api } from '../../../lib/api'
 import type { Finding, Vulnerability } from '../../../lib/types'
@@ -244,6 +245,26 @@ export function FindingDetail({
                       <span className={i === vuln.path.length - 1 ? 'font-bold text-primary' : ''}>
                         {shortPkg(p)}
                       </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(vuln.introducers?.length ?? 0) > 1 && (
+              <div className="border-t border-secondary pt-2.5 text-xs">
+                <span className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-tertiary">Introduced By:</span>
+                  <Tooltip title="Every direct dependency that pulls this transitive package in. Bump all of them to remove the vulnerability.">
+                    <TooltipTrigger aria-label="What Introduced By means">
+                      <HelpCircle className="size-3.5 text-fg-quaternary" />
+                    </TooltipTrigger>
+                  </Tooltip>
+                </span>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  {vuln.introducers!.map((p, i) => (
+                    <span key={i} className="rounded bg-secondary px-1.5 py-0.5 font-mono text-xs text-secondary">
+                      {shortPkg(p)}
                     </span>
                   ))}
                 </div>
