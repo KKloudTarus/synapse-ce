@@ -35,7 +35,7 @@ function mapComponent(r: any): Component {
   }
 }
 
-function mapVuln(r: any): Vulnerability {
+export function mapVuln(r: any): Vulnerability {
   return {
     id: r.ID,
     source: r.Source ?? '',
@@ -59,6 +59,7 @@ function mapVuln(r: any): Vulnerability {
     epss: r.EPSS ?? 0,
     path: r.Path ?? [],
     direct: r.Direct ?? false,
+    introducers: r.Introducers ?? undefined,
     sources: r.Sources ?? [],
     confidence: r.Confidence ?? '',
     detections: (r.Detections ?? []).map((d: any) => ({
