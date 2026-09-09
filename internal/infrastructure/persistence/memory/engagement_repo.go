@@ -166,6 +166,31 @@ func (r *EngagementRepository) List(_ context.Context, tenantID shared.ID) ([]*e
 	return out, nil
 }
 
+func (r *EngagementRepository) ListAssessmentCycleBackfillEngagements(_ context.Context, tenantID, after shared.ID, snapshotAt time.Time, limit int) ([]*engagement.Engagement, error) {
+	if snapshotAt.IsZero() || limit < 1 || limit > 2000 {
+		return nil, fmt.Errorf("%w: assessment cycle backfill page is invalid", shared.ErrValidation)
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := make([]shared.ID, 0, limit)
+	for id, item := range r.data {
+		if item.TenantID == tenantID && !item.Internal() && id > after && !item.Audit.CreatedAt.After(snapshotAt) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(left, right int) bool { return ids[left] < ids[right] })
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	items := make([]*engagement.Engagement, 0, len(ids))
+	for _, id := range ids {
+		copy := *r.data[id]
+		items = append(items, &copy)
+	}
+	return items, nil
+}
+
 func (r *EngagementRepository) ListProjectEngagements(_ context.Context, tenantID shared.ID) ([]*engagement.Engagement, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

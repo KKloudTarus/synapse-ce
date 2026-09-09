@@ -9,6 +9,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Assessment Cycle historical backfill.** The previously shipped tenant-owned
+  Cycle schema is now backed by its domain, persistence, and a resumable operator
+  command that creates deterministic singleton Cycles for eligible historical
+  Assessments. Durable leases, checkpoints, per-item outcomes, dry-run support,
+  and atomic audit publication make reruns safe; hidden Project/host contexts are
+  excluded and PostgreSQL RLS remains enforced.
+
 - **Bounded automatic correlation and incident-scoped governed response.** Sealed detection batches now drain deterministic, bounded correlation state to forward progress, and incident response derives authoritative incident provenance before preparing a governed action.
 - **Scan runs now support tenant-owned, sealed provenance v1.** Native execution headers can be
   sealed once with normalized producer lanes, versions, stages, canonical target identities, and

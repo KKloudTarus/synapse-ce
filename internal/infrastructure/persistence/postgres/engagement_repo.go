@@ -293,6 +293,29 @@ func (r *EngagementRepository) ListHostEngagements(ctx context.Context, tenantID
 	return r.listInternal(ctx, tenantID, `host_asset_id IS NOT NULL`, "host")
 }
 
+func (r *EngagementRepository) ListAssessmentCycleBackfillEngagements(ctx context.Context, tenantID, after shared.ID, snapshotAt time.Time, limit int) (out []*engagement.Engagement, err error) {
+	if snapshotAt.IsZero() || limit < 1 || limit > 2000 {
+		return nil, fmt.Errorf("%w: assessment cycle backfill page is invalid", shared.ErrValidation)
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	err = WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND project_id IS NULL AND host_asset_id IS NULL AND id COLLATE "C">$2 AND created_at<=$3 ORDER BY id COLLATE "C" LIMIT $4`, tenantID.String(), after.String(), snapshotAt.UTC(), limit)
+		if err != nil {
+			return fmt.Errorf("list assessment cycle backfill engagements: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			item, err := scanEngagement(rows)
+			if err != nil {
+				return fmt.Errorf("scan assessment cycle backfill engagement: %w", err)
+			}
+			out = append(out, item)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // ListProjectEngagements returns the tenant's hidden Project analysis contexts for operational
 // aggregation. Normal engagement lists remain unchanged and continue to hide these rows.
 func (r *EngagementRepository) ListProjectEngagements(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error) {
