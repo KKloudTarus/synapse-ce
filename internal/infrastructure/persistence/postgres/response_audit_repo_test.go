@@ -238,7 +238,7 @@ func TestMigration0145ResponseHaltDispatchGuards(t *testing.T) {
 	}
 }
 
-func TestMigration0138ResponseHaltFenceGuards(t *testing.T) {
+func TestMigration0139ResponseHaltFenceGuards(t *testing.T) {
 	f := newResponseAuditFixture(t)
 	intent := responseAuditIntent("halt-fence-guard:1", "response.halt_intent", f.tenant.String(), f.at)
 	generation, _, _, err := f.halt.AdvanceHaltGenerationWithAudit(f.ctx, 0, intent)

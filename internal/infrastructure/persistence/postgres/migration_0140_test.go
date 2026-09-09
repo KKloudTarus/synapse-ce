@@ -2,51 +2,59 @@ package postgres
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 
 	"github.com/pressly/goose/v3"
 )
 
-func TestMigration0140CorrelationEventTimeState(t *testing.T) {
+func TestMigration0140ResponseExecutionRuntime(t *testing.T) {
 	isolated := newIsolatedMigrationDB(t, 140, 139)
 	db := isolated.db
 	if err := goose.UpTo(db, ".", 140); err != nil {
 		t.Fatalf("apply 0140: %v", err)
 	}
 
-	for _, table := range []string{"correlation_checkpoints", "correlation_staged_signals", "correlation_assignments", "correlation_active_sessions"} {
+	for _, table := range []string{
+		"response_audit_intents", "response_halt_dispatches", "response_verification_observations", "response_observer_bindings",
+	} {
 		requireMigrationTable(t, db, table, true)
 		requireMigrationRLS(t, db, table)
 	}
-	requireMigrationIndexes(t, db, "idx_correlation_staged_signals_consume", "idx_correlation_assignments_incident", "idx_correlation_active_sessions_match")
+	requireMigrationPolicies(t, db, "response_audit_intents", "response_audit_intents_tenant_insert", "response_audit_intents_tenant_select", "response_audit_intents_tenant_update")
+	requireMigrationPolicies(t, db, "response_halt_dispatches", "response_halt_dispatches_tenant_insert", "response_halt_dispatches_tenant_select")
+	requireMigrationIndexes(t, db, "rai_pending_idx", "rhd_dispatch_idx", "idx_response_verification_action", "response_observer_bindings_asset_idx")
+
+	// A clean runtime migration can return to 0139 and restore all its objects on reapply.
+	if err := goose.DownTo(db, ".", 139); err != nil {
+		t.Fatalf("roll back clean 0140: %v", err)
+	}
+	requireMigrationTable(t, db, "response_audit_intents", false)
+	if err := goose.UpTo(db, ".", 140); err != nil {
+		t.Fatalf("reapply 0140: %v", err)
+	}
 
 	const tenant = "migration-0140-tenant"
-	const engagement = "migration-0140-engagement"
 	withMigrationTenant(t, db, tenant, func(tx *sql.Tx) {
 		if _, err := tx.Exec(`INSERT INTO tenants(id,name) VALUES($1,$1)`, tenant); err != nil {
 			t.Fatalf("seed tenant: %v", err)
 		}
-		if _, err := tx.Exec(`INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,$1)`, engagement, tenant); err != nil {
-			t.Fatalf("seed engagement: %v", err)
+		if _, err := tx.Exec(`INSERT INTO response_audit_intents(tenant_id,intent_id,actor,action,target,metadata,occurred_at)
+			VALUES($1,'intent-1','operator','response.halt','host-1','{"idempotency_key":"intent-1"}'::jsonb,now())`, tenant); err != nil {
+			t.Fatalf("insert audit intent: %v", err)
 		}
-		requireMigrationWriteRejected(t, tx, `INSERT INTO correlation_checkpoints(tenant_id,engagement_id,max_observed_at,watermark)
-			VALUES($1,$2,now(),now()+interval '1 second')`, tenant, engagement)
-		if _, err := tx.Exec(`INSERT INTO correlation_checkpoints(tenant_id,engagement_id) VALUES($1,$2)`, tenant, engagement); err != nil {
-			t.Fatalf("insert checkpoint: %v", err)
+		requireMigrationWriteRejected(t, tx, `UPDATE response_audit_intents SET action='forged' WHERE tenant_id=$1 AND intent_id='intent-1'`, tenant)
+		requireMigrationWriteRejected(t, tx, `INSERT INTO response_audit_intents(tenant_id,intent_id,actor,action,target,metadata,occurred_at)
+			VALUES($1,'intent-2','operator','response.halt','host-1','{"idempotency_key":"different"}'::jsonb,now())`, tenant)
+		if _, err := tx.Exec(`INSERT INTO work_orders(id,tenant_id,asset_id,agent_id,capability,authorization_id,idempotency_key,not_after,time_bucket,state,signature)
+			VALUES('normal-1',$1,'asset-1','agent-1','inventory','auth-1','idem-1',now()+interval '1 hour',1,'issued','signature')`, tenant); err != nil {
+			t.Fatalf("insert normal work order: %v", err)
 		}
-		if _, err := tx.Exec(`INSERT INTO correlation_assignments(tenant_id,engagement_id,signal_id,incident_id,asset_id,occurred_at,outcome)
-			VALUES($1,$2,'signal-1','incident-1','asset-1',now(),'attached')`, tenant, engagement); err != nil {
-			t.Fatalf("insert immutable assignment: %v", err)
-		}
-		requireMigrationWriteRejected(t, tx, `UPDATE correlation_assignments SET incident_id='forged' WHERE tenant_id=$1 AND engagement_id=$2 AND signal_id='signal-1'`, tenant, engagement)
+		requireMigrationWriteRejected(t, tx, `INSERT INTO work_orders(id,tenant_id,asset_id,agent_id,capability,authorization_id,idempotency_key,not_after,time_bucket,state,signature,priority,response_command)
+			VALUES('invalid-1',$1,'asset-1','agent-1','inventory','auth-2','idem-2',now()+interval '1 hour',2,'issued','signature',100,'{}'::jsonb)`, tenant)
 	})
 
-	if err := goose.DownTo(db, ".", 139); err != nil {
-		t.Fatalf("roll back 0140: %v", err)
+	if err := goose.DownTo(db, ".", 139); err == nil || !strings.Contains(err.Error(), "response audit intention history exists") {
+		t.Fatalf("0140 rollback with audit history err=%v, want append-only history guard", err)
 	}
-	requireMigrationTable(t, db, "correlation_checkpoints", false)
-	if err := goose.UpTo(db, ".", 140); err != nil {
-		t.Fatalf("reapply 0140: %v", err)
-	}
-	requireMigrationTable(t, db, "correlation_checkpoints", true)
 }

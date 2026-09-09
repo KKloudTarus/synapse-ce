@@ -18,7 +18,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
-func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
+func TestMigration0139ResponseAttemptInvariants(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -30,7 +30,7 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 	}
 	id := fmt.Sprint(time.Now().UnixNano())
 	role := "rsp_migrator_" + id
-	database := "rsp_migration_0138_" + id
+	database := "rsp_migration_0139_" + id
 	password := "migration-test-password"
 	admin, err := Connect(ctx, dsn)
 	if err != nil {
@@ -72,18 +72,18 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.UpTo(db, ".", 137); err != nil {
-		t.Fatalf("migrate isolated database to 0137: %v", err)
+	if err := goose.UpTo(db, ".", 138); err != nil {
+		t.Fatalf("migrate isolated database to 0138: %v", err)
 	}
 	var haltFencesExist bool
 	if err := db.QueryRow(`SELECT EXISTS (
 		SELECT 1 FROM information_schema.tables
 		WHERE table_schema='public' AND table_name='response_halt_fences'
 	)`).Scan(&haltFencesExist); err != nil {
-		t.Fatalf("inspect 0137 response halt fences: %v", err)
+		t.Fatalf("inspect 0138 response halt fences: %v", err)
 	}
 	if haltFencesExist {
-		t.Fatal("0137 unexpectedly defines response_halt_fences; 0138 must remain its owner")
+		t.Fatal("0138 unexpectedly defines response_halt_fences; 0139 must remain its owner")
 	}
 
 	tenantID := "rsp-upgrade-tenant-" + id
@@ -114,8 +114,8 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 		t.Fatalf("commit legacy response seed: %v", err)
 	}
 
-	if err := goose.UpTo(db, ".", 138); err != nil {
-		t.Fatalf("migrate legacy response action through 0138: %v", err)
+	if err := goose.UpTo(db, ".", 139); err != nil {
+		t.Fatalf("migrate legacy response action through 0139: %v", err)
 	}
 	readTx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -136,7 +136,7 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// This is the exact response_actions INSERT list from upstream/main before 0138.
+	// This is the exact response_actions INSERT list from upstream/main before 0139.
 	// A main API binary must keep writing safely after the database has expanded.
 	compatibilityActions := []struct {
 		kind          rdom.Kind
@@ -162,7 +162,7 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 			tenantID, actionID, engagementID, string(action.kind), "host-main-compat", "state_changing",
 			`["synapse-agent-response","compat"]`, `{"kind":"restore_host","argv":["synapse-agent-response","restore-host"]}`,
 			"pending", "", nil, nil, time.Now().UTC(), "unknown"); err != nil {
-			t.Fatalf("insert upstream/main response action %s after 0138: %v", action.kind, err)
+			t.Fatalf("insert upstream/main response action %s after 0139: %v", action.kind, err)
 		}
 		var got string
 		if err := compatTx.QueryRowContext(ctx, `SELECT reversibility_class FROM response_actions WHERE tenant_id=$1 AND id=$2`, tenantID, actionID).Scan(&got); err != nil {
@@ -214,7 +214,7 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(constraints) != 0 {
-		t.Fatalf("0138 did not install response attempt constraints: %v", constraints)
+		t.Fatalf("0139 did not install response attempt constraints: %v", constraints)
 	}
 	var triggerCount int
 	if err := db.QueryRow(`SELECT count(*) FROM pg_trigger WHERE tgrelid='response_attempts'::regclass AND tgname='response_attempt_deadline_immutable' AND NOT tgisinternal`).Scan(&triggerCount); err != nil {
@@ -282,8 +282,8 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 		t.Fatalf("correlation assignment mutation trigger count=%d, want 2", assignmentMutationTriggers)
 	}
 
-	if err := goose.DownTo(db, ".", 137); err != nil {
-		t.Fatalf("roll back consolidated migrations to 0137: %v", err)
+	if err := goose.DownTo(db, ".", 138); err != nil {
+		t.Fatalf("roll back consolidated response migrations to 0138: %v", err)
 	}
 	for _, table := range []string{
 		"response_halt_fences", "response_attempts", "response_audit_intents", "response_halt_dispatches",
@@ -295,7 +295,7 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 			t.Fatalf("inspect rolled-back table %s: %v", table, err)
 		}
 		if exists {
-			t.Fatalf("rollback through 0138-0141 retained table %s", table)
+			t.Fatalf("rollback through 0139-0144 retained table %s", table)
 		}
 	}
 	for _, column := range []string{"reversibility_class", "authorization_target", "target_fingerprint", "submitted_by", "reversal_requested_by"} {
@@ -307,7 +307,7 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 			t.Fatalf("inspect rolled-back response action column %s: %v", column, err)
 		}
 		if exists {
-			t.Fatalf("rollback through 0138 retained response_actions.%s", column)
+			t.Fatalf("rollback through 0139 retained response_actions.%s", column)
 		}
 	}
 	for _, column := range []string{"source_agent_id", "source_agent_session_id"} {
@@ -319,7 +319,7 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 			t.Fatalf("inspect rolled-back endpoint timeline column %s: %v", column, err)
 		}
 		if exists {
-			t.Fatalf("rollback through 0141 retained endpoint_timeline.%s", column)
+			t.Fatalf("rollback through 0142 retained endpoint_timeline.%s", column)
 		}
 	}
 }

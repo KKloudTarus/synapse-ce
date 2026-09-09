@@ -1,53 +1,56 @@
 package postgres
 
 import (
-	"context"
-	"os"
+	"database/sql"
 	"testing"
 
 	"github.com/pressly/goose/v3"
-
-	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
-func TestMigration0142RollbackAndReapply(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+func TestMigration0142IncidentResponseProvenance(t *testing.T) {
+	isolated := newIsolatedMigrationDB(t, 142, 141)
+	db := isolated.db
+	if err := goose.UpTo(db, ".", 142); err != nil {
+		t.Fatalf("apply 0142: %v", err)
 	}
-	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
+
+	for _, table := range []string{"incident_response_links", "incident_merge_edges"} {
+		requireMigrationTable(t, db, table, true)
+		requireMigrationRLS(t, db, table)
 	}
-	t.Cleanup(func() { _ = MigrateLocked(context.Background(), dsn) })
-	db := openLockedGooseDB(t, dsn)
-	defer db.Close()
-	goose.SetBaseFS(migrations.FS)
-	if err := goose.SetDialect("postgres"); err != nil {
-		t.Fatal(err)
-	}
+	requireMigrationIndexes(t, db, "endpoint_timeline_source_idx", "idx_incident_response_links_pending", "idx_incident_merge_edges_target")
+
+	const tenant = "migration-0142-tenant"
+	withMigrationTenant(t, db, tenant, func(tx *sql.Tx) {
+		if _, err := tx.Exec(`INSERT INTO tenants(id,name) VALUES($1,$1)`, tenant); err != nil {
+			t.Fatalf("seed tenant: %v", err)
+		}
+		if _, err := tx.Exec(`INSERT INTO incident_events(tenant_id,incident_id,seq,kind,occurred_at,actor,payload)
+			VALUES($1,'incident-1',1,'created',now(),'correlator','{}'::jsonb)`, tenant); err != nil {
+			t.Fatalf("seed incident event: %v", err)
+		}
+		requireMigrationWriteRejected(t, tx, `INSERT INTO incident_merge_edges(tenant_id,source_incident_id,canonical_incident_id,bridge_key,source_event_seq,actor,merged_at)
+			VALUES($1,'incident-1','incident-1','bridge',1,'correlator',now())`, tenant)
+		if _, err := tx.Exec(`INSERT INTO incident_merge_edges(tenant_id,source_incident_id,canonical_incident_id,bridge_key,source_event_seq,actor,merged_at)
+			VALUES($1,'incident-1','incident-2','bridge',1,'correlator',now())`, tenant); err != nil {
+			t.Fatalf("insert immutable merge edge: %v", err)
+		}
+		requireMigrationWriteRejected(t, tx, `DELETE FROM incident_merge_edges WHERE tenant_id=$1 AND source_incident_id='incident-1'`, tenant)
+	})
+
 	if err := goose.DownTo(db, ".", 141); err != nil {
-		t.Fatalf("down to 141: %v", err)
+		t.Fatalf("roll back 0142: %v", err)
 	}
-	pool, err := Connect(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
+	requireMigrationTable(t, db, "incident_merge_edges", false)
+	var sourceColumn bool
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='endpoint_timeline' AND column_name='source_agent_id')`).Scan(&sourceColumn); err != nil {
+		t.Fatalf("inspect endpoint source column: %v", err)
 	}
-	defer pool.Close()
-	var exists bool
-	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='response_target_evidence_receipts')`).Scan(&exists); err != nil {
-		t.Fatal(err)
-	}
-	if exists {
-		t.Fatal("target evidence receipt table still exists after migration rollback")
+	if sourceColumn {
+		t.Fatal("rollback 0142 retained endpoint source provenance column")
 	}
 	if err := goose.UpTo(db, ".", 142); err != nil {
-		t.Fatalf("up to 142: %v", err)
+		t.Fatalf("reapply 0142: %v", err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='response_target_evidence_receipts')`).Scan(&exists); err != nil {
-		t.Fatal(err)
-	}
-	if !exists {
-		t.Fatal("target evidence receipt table missing after migration reapply")
-	}
+	requireMigrationTable(t, db, "incident_merge_edges", true)
 }
