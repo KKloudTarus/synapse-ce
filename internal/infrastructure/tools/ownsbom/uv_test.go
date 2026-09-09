@@ -484,7 +484,9 @@ source = { registry = "https://pypi.org/simple" }`
 	}
 }
 
-func TestUVParseDoesNotInferDependencyEdges(t *testing.T) {
+func TestUVParseDependencyEdges(t *testing.T) {
+	// A multi-line dependencies array; local-only is an editable (non-registry) source, so it is not an
+	// emitted component and its edge from anyio is dropped by resolution-as-filter.
 	fixture := `[[package]]
 name = "anyio"
 version = "4.4.0"
@@ -492,16 +494,58 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "idna" },
     { name = "typing-extensions", marker = "python_version < '3.13'" },
-]`
+    { name = "local-only" },
+]
+
+[[package]]
+name = "idna"
+version = "3.7"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "typing-extensions"
+version = "4.12.2"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "local-only"
+version = "0.1.0"
+source = { editable = "." }`
 	comps, deps := parseUVTest(t, "uv.lock", fixture)
-	if len(comps) != 1 {
-		t.Fatalf("want 1 component, got %d", len(comps))
+	if len(comps) != 3 {
+		t.Fatalf("want 3 registry components (local-only is editable), got %d: %+v", len(comps), comps)
 	}
-	if comps[0].PURL != "pkg:pypi/anyio@4.4.0" {
-		t.Errorf("want anyio, got %s", comps[0].PURL)
+	if len(deps) != 1 || deps[0].Ref != "pkg:pypi/anyio@4.4.0" {
+		t.Fatalf("want exactly one edge, from anyio, got %+v", deps)
 	}
+	if len(deps[0].DependsOn) != 2 ||
+		!contains(deps[0].DependsOn, "pkg:pypi/idna@3.7") ||
+		!contains(deps[0].DependsOn, "pkg:pypi/typing-extensions@4.12.2") {
+		t.Errorf("anyio edges = %v; want idna@3.7 + typing-extensions@4.12.2, local-only filtered", deps[0].DependsOn)
+	}
+}
+
+func TestUVParseAmbiguousDependencyDropped(t *testing.T) {
+	// A single-line dependencies array; "dupe" resolves to two versions (a universal lock), so the edge to
+	// it is dropped rather than guessed.
+	fixture := `[[package]]
+name = "app"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [{ name = "dupe" }]
+
+[[package]]
+name = "dupe"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "dupe"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }`
+	_, deps := parseUVTest(t, "uv.lock", fixture)
 	if deps != nil {
-		t.Errorf("want nil deps, got %+v", deps)
+		t.Errorf("an edge to an ambiguously-versioned name must be dropped, got %+v", deps)
 	}
 }
 
