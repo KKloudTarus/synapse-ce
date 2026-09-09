@@ -187,3 +187,28 @@ func TestEcosystemRangeAffected(t *testing.T) {
 		t.Error("NuGet 4.3.1 (the fix) must NOT be affected")
 	}
 }
+
+// TestCompareMavenNesting covers the Apache ComparableVersion '-' sub-list nesting a flat token comparison
+// gets wrong. Vectors are Apache ComparableVersion identities.
+func TestCompareMavenNesting(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"1-1", "1.1", -1},         // "-" after a digit nests: [1,[1]] < [1,1]
+		{"1-1", "1-2", -1},         // within the nested list, numeric order holds
+		{"1-0.1", "1.0.1", -1},     // a nested list sorts before an integer at the same position
+		{"1-0.1", "1", 1},          // MNG-6964: the whole nested list is compared to the padded null, not just its head
+		{"1.0.0-1", "1.0.0.1", -1}, // trailing zeros trimmed, then the nested "-1" sorts before ".1"
+		{"1-0", "1", 0},            // "-0" nests an empty/zero list that normalizes away: 1-0 == 1
+		{"1a1", "1-alpha-1", 0},    // the a/b/m shorthand + digit<->letter nesting: 1a1 == 1-alpha-1
+	}
+	for _, c := range cases {
+		if got := sign(compareMaven(c.a, c.b)); got != c.want {
+			t.Errorf("compareMaven(%q,%q)=%d want %d", c.a, c.b, got, c.want)
+		}
+		if got := sign(compareMaven(c.b, c.a)); got != -c.want {
+			t.Errorf("compareMaven(%q,%q)=%d want %d (antisymmetry)", c.b, c.a, got, -c.want)
+		}
+	}
+}
