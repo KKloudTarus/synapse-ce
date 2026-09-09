@@ -1,6 +1,6 @@
 -- +goose Up
 -- #680 governed response attempt/action identity, terminal-claim safety, and deadlines.
--- This is the first unpublished migration after immutable 0137, so it incorporates the
+-- This is the first response migration after scan-run provenance 0138, so it incorporates the
 -- complete response-attempt runtime while explicitly downgrading pre-journal 0076 actions.
 ALTER TABLE response_actions NO FORCE ROW LEVEL SECURITY;
 UPDATE response_actions
@@ -24,7 +24,7 @@ SET reversibility_class = CASE kind
 END;
 ALTER TABLE response_actions FORCE ROW LEVEL SECURITY;
 
--- Keep this column nullable during the expand phase: pre-0138 API binaries omit it from
+-- Keep this column nullable during the expand phase: pre-0139 API binaries omit it from
 -- their INSERT list while the database has already migrated. The trigger fills only that
 -- omission from the immutable response catalogue; explicit values remain constrained below.
 -- +goose StatementBegin

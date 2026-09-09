@@ -190,10 +190,10 @@ ALTER TABLE response_audit_intents NO FORCE ROW LEVEL SECURITY;
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM response_halt_dispatches) THEN
-        RAISE EXCEPTION 'cannot roll back 0139: response halt dispatch history exists';
+        RAISE EXCEPTION 'cannot roll back 0140: response halt dispatch history exists';
     END IF;
     IF EXISTS (SELECT 1 FROM response_audit_intents) THEN
-        RAISE EXCEPTION 'cannot roll back 0139: response audit intention history exists';
+        RAISE EXCEPTION 'cannot roll back 0140: response audit intention history exists';
     END IF;
 END;
 $$;
