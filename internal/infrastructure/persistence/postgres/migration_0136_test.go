@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -89,8 +90,14 @@ func TestMigration0136ProjectAnalysesBranch(t *testing.T) {
 
 	// LatestWithResult honors the branch filter.
 	latest, result, err := store.LatestWithResult(ctx, tenant, projectID, "main")
-	if err != nil || latest.ID != mainAnalysis.ID || string(result) != `{"r":"main"}` {
-		t.Fatalf("latest for main = %+v result=%q err=%v", latest, result, err)
+	if err != nil || latest.ID != mainAnalysis.ID {
+		t.Fatalf("latest for main = %+v err=%v", latest, err)
+	}
+	// result is a jsonb column, so Postgres returns canonical JSON (a space after the colon).
+	// Compare the decoded value, not the raw bytes.
+	var gotResult map[string]string
+	if uerr := json.Unmarshal(result, &gotResult); uerr != nil || gotResult["r"] != "main" {
+		t.Fatalf("latest result = %q (decode err %v), want JSON {\"r\":\"main\"}", result, uerr)
 	}
 
 	// Branches returns the distinct set, sorted.

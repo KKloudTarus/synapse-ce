@@ -46,6 +46,8 @@ import { ImportedFindingsTab } from './ImportedFindingsTab'
 import { DataGovernanceTab } from './DataGovernanceTab'
 import { WriteupDraftsTab } from './WriteupDraftsTab'
 import { CloudPostureTab } from './CloudPostureTab'
+import { DASTTab } from './DASTTab'
+import { DetectionProvenanceTab } from './DetectionProvenanceTab'
 import { EvidenceTab } from './EvidenceTab'
 import { SettingsTab } from './SettingsTab'
 import { JudgmentReviewTab } from './ReviewsTab'
@@ -79,7 +81,9 @@ export type Tab =
   | 'rehearsal'
   | 'agent'
   | 'cspm'
+  | 'dast'
   | 'detections'
+  | 'detection-provenance'
   | 'reviews'
   | 'evidence'
   | 'data-governance'
@@ -141,13 +145,17 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'rehearsal', label: 'Chain Rehearsal' },
       { id: 'agent', label: 'Agent' },
       { id: 'cspm', label: 'Cloud Posture' },
+      { id: 'dast', label: 'DAST' },
     ],
   },
   {
     id: 'runtime',
     label: 'Runtime',
     icon: Activity,
-    sub: [{ id: 'detections', label: 'Detections' }],
+    sub: [
+      { id: 'detections', label: 'Detections' },
+      { id: 'detection-provenance', label: 'Provenance' },
+    ],
   },
   {
     id: 'governance',
@@ -550,7 +558,9 @@ export function EngagementDetail() {
         {tab === 'purple' && <PurpleCoverageTab key={id} engagementId={id} />}
         {tab === 'rehearsal' && <ChainRehearsalTab key={id} engagementId={id} />}
         {tab === 'agent' && <AgentTab engagementId={id} />}
+        {tab === 'dast' && <DASTTab key={id} engagementId={id} />}
         {tab === 'detections' && <DetectionsTab key={id} engagementId={id} />}
+        {tab === 'detection-provenance' && <DetectionProvenanceTab key={id} engagementId={id} />}
         {tab === 'imported' && <ImportedFindingsTab key={id} engagementId={id} />}
         {tab === 'data-governance' && <DataGovernanceTab key={id} engagementId={id} />}
         {tab === 'writeup-drafts' && <WriteupDraftsTab key={id} engagementId={id} />}

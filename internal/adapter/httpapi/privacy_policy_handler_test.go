@@ -178,12 +178,12 @@ func TestPrivacyPolicyHumanRoutesRequireServiceAndTenantContext(t *testing.T) {
 }
 
 func TestFleetPrivacyPolicyRouteAuthenticatesAndIsolatesTenant(t *testing.T) {
-	h, agentSvc, _ := setupFleet(t)
+	_, agentSvc, _ := setupFleet(t)
 	service, _ := newPrivacyPolicyHTTPService(t)
 	rt := &Router{log: discardLog()}
 	rt.SetFleet(agentSvc, nil, func() time.Time { return time.Now().UTC() }, "")
 	rt.SetFleetPrivacyPolicyReader(service)
-	h = rt.fleet.handler()
+	h := rt.fleet.handler()
 
 	if rec := fleetCall(h, http.MethodGet, "/api/v1/fleet/privacy-policy", "", nil, true); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated policy read status = %d, want 401", rec.Code)
@@ -317,11 +317,11 @@ func TestPrivacyPolicyHashSaltNeverLeavesTheAgentPlane(t *testing.T) {
 
 	// Agent plane: the salt MUST still be delivered, or source-side hashing breaks.
 	t.Run("agent plane still receives the salt", func(t *testing.T) {
-		fleetHandler, agentSvc, _ := setupFleet(t)
+		_, agentSvc, _ := setupFleet(t)
 		agentRouter := &Router{log: discardLog()}
 		agentRouter.SetFleet(agentSvc, nil, func() time.Time { return time.Now().UTC() }, "")
 		agentRouter.SetFleetPrivacyPolicyReader(service)
-		fleetHandler = agentRouter.fleet.handler()
+		fleetHandler := agentRouter.fleet.handler()
 
 		token, err := agentSvc.MintEnrolToken(context.Background(), "operator", "tenant-a", time.Hour)
 		if err != nil {

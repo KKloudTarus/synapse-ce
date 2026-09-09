@@ -166,6 +166,8 @@ as intact.
 | `SYNAPSE_SYFT_BIN` | `syft` | Syft executable, resolved on PATH. |
 | `SYNAPSE_GRYPE_BIN` | `grype` | Grype executable. Missing means detection degrades to the live source only. |
 | `SYNAPSE_GRYPE_DB_DIR` | (online) | Pin Grype's vulnerability database to a pre-synced directory for offline, reproducible scans. |
+| `SYNAPSE_DETECTION_SOURCES` | (legacy) | Comma list selecting and ordering the vulnerability detection sources from `grype`, `osv`, `advisory-store` (Synapse's own advisory corpus). Empty keeps the legacy default (`osv` unless offline, then `grype`, then `advisory-store` when `SYNAPSE_OWNED_ADVISORY`). When set it is authoritative, so an operator can drop Grype entirely (e.g. `osv,advisory-store`) and run on the owned sources for an Anchore-free posture. Unknown names fail closed at startup. |
+| `SYNAPSE_STRICT_SOURCES` | `false` | Fail closed on a detection-source error. Default degrades: a source that errors (a transient OSV.dev outage, an advisory-store read blip) is skipped with a warning and the remaining sources still run, matching how Grype self-degrades when its binary or database is absent. |
 | `SYNAPSE_SCAN_TIMEOUT` | `10m` | Per-scan timeout. 0 disables. |
 | `SYNAPSE_FINDING_MIN_SEVERITY` | `info` | Lowest severity promoted to a finding: critical, high, medium, low, info. The default promotes everything; set `high` to tighten the floor and drop medium/low/info. |
 | `SYNAPSE_MAX_WORKSPACE_BYTES` | `2147483648` | Maximum prepared workspace size. A bigger target or archive is rejected. |

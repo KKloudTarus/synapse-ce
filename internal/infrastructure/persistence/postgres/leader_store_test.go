@@ -93,6 +93,7 @@ func TestMigration0061(t *testing.T) {
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("dialect: %v", err)
 	}
+	deleteV2AuditRowsForMigrationRollback(t, db)
 	if err := goose.DownTo(db, ".", 60); err != nil {
 		t.Fatalf("down to 60: %v", err)
 	}

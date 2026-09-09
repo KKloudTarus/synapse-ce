@@ -1,0 +1,30 @@
+[
+  {
+    "name": "go-gin-header-injection",
+    "group": "Go",
+    "notes": "CVE-2020-28483 affects gin <1.7.0.",
+    "components": [
+      {"name": "github.com/gin-gonic/gin", "version": "1.6.3", "purl": "pkg:golang/github.com/gin-gonic/gin@1.6.3"},
+      {"name": "github.com/gin-gonic/gin", "version": "1.9.1", "purl": "pkg:golang/github.com/gin-gonic/gin@1.9.1"}
+    ],
+    "advisories": [
+      {"id": "GHSA-h395-qcrw-5vmq", "aliases": ["CVE-2020-28483"], "summary": "Gin default Formatter allows header injection", "cvss_score": 7.1, "ecosystem": "Go", "package": "github.com/gin-gonic/gin",
+       "ranges": [{"type": "SEMVER", "introduced": "0", "fixed": "1.7.0"}], "fixed_version": "1.7.0"}
+    ],
+    "expected": [{"component": "github.com/gin-gonic/gin", "version": "1.6.3", "cve": "CVE-2020-28483"}]
+  },
+  {
+    "name": "go-below-introduced-boundary",
+    "group": "Go",
+    "notes": "Version below the introduced boundary must not be flagged (introduced 1.5.0).",
+    "components": [
+      {"name": "github.com/example/lib", "version": "1.4.9", "purl": "pkg:golang/github.com/example/lib@1.4.9"},
+      {"name": "github.com/example/lib", "version": "1.5.2", "purl": "pkg:golang/github.com/example/lib@1.5.2"}
+    ],
+    "advisories": [
+      {"id": "GHSA-example-1", "aliases": ["CVE-2023-00001"], "summary": "Bug introduced in 1.5.0", "cvss_score": 5.3, "ecosystem": "Go", "package": "github.com/example/lib",
+       "ranges": [{"type": "SEMVER", "introduced": "1.5.0", "fixed": "1.6.0"}], "fixed_version": "1.6.0"}
+    ],
+    "expected": [{"component": "github.com/example/lib", "version": "1.5.2", "cve": "CVE-2023-00001"}]
+  }
+]

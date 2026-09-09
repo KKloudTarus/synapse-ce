@@ -534,7 +534,7 @@
           "minLength": 1
         },
         "useSSL": {
-          "type": "boolean"
+          "const": true
         }
       }
     },

@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
@@ -26,6 +28,14 @@ const (
 	defaultBaseURL = "https://api.osv.dev"
 	maxBatch       = 1000     // OSV querybatch limit
 	maxRespBytes   = 32 << 20 // cap a single response body
+
+	// Resilience for the live source: a transient 429/5xx or network blip is retried with bounded
+	// exponential backoff (honoring Retry-After) instead of failing the request, and the per-advisory
+	// detail fetch runs bounded-concurrently so latency does not scale linearly with the vuln count.
+	maxRetries        = 3
+	baseBackoff       = 300 * time.Millisecond
+	maxBackoff        = 10 * time.Second
+	detailConcurrency = 8
 )
 
 // Scanner queries OSV.dev for vulnerabilities affecting SBOM components.
@@ -130,12 +140,17 @@ func (s *Scanner) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.Raw
 		}
 	}
 
+	// Fetch every advisory's detail concurrently (bounded), so latency does not scale linearly with the
+	// vuln count. Results are collected into a map and consumed in the deterministic `order` below, so
+	// output ordering is unchanged. The first error cancels the rest and fails the fetch (the pipeline's
+	// degrade policy then decides whether to skip OSV or abort).
+	details, err := s.fetchDetails(ctx, order)
+	if err != nil {
+		return nil, err
+	}
 	var out []vulnerability.RawFinding
 	for _, id := range order {
-		detail, err := s.vulnDetail(ctx, id)
-		if err != nil {
-			return nil, err
-		}
+		detail := details[id]
 		cis := make([]int, 0, len(idToComps[id]))
 		for ci := range idToComps[id] {
 			cis = append(cis, ci)
@@ -170,15 +185,17 @@ func (s *Scanner) queryBatch(ctx context.Context, queries []batchQuery) ([]batch
 	if err != nil {
 		return nil, fmt.Errorf("osv querybatch: marshal: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/v1/querybatch", bytes.NewReader(body))
+	resp, err := s.doRetry(ctx, "osv querybatch", func() (*http.Request, error) {
+		r, rerr := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/v1/querybatch", bytes.NewReader(body))
+		if rerr != nil {
+			return nil, rerr
+		}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Accept", "application/json")
+		return r, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("osv querybatch: new request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("osv querybatch: %w", err)
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -193,14 +210,16 @@ func (s *Scanner) queryBatch(ctx context.Context, queries []batchQuery) ([]batch
 
 func (s *Scanner) vulnDetail(ctx context.Context, id string) (osvVuln, error) {
 	var v osvVuln
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/v1/vulns/"+url.PathEscape(id), nil)
+	resp, err := s.doRetry(ctx, "osv vuln "+id, func() (*http.Request, error) {
+		r, rerr := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/v1/vulns/"+url.PathEscape(id), nil)
+		if rerr != nil {
+			return nil, rerr
+		}
+		r.Header.Set("Accept", "application/json")
+		return r, nil
+	})
 	if err != nil {
-		return v, fmt.Errorf("osv vuln %s: new request: %w", id, err)
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return v, fmt.Errorf("osv vuln %s: %w", id, err)
+		return v, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -210,6 +229,116 @@ func (s *Scanner) vulnDetail(ctx context.Context, id string) (osvVuln, error) {
 		return v, fmt.Errorf("osv vuln %s decode: %w", id, err)
 	}
 	return v, nil
+}
+
+// doRetry runs an HTTP request with bounded exponential backoff, retrying network errors and transient
+// statuses (429, 500, 502, 503, 504) and honoring Retry-After. The request is rebuilt each attempt (a
+// consumed body is not reusable). A non-retryable response is returned as-is for the caller to inspect.
+func (s *Scanner) doRetry(ctx context.Context, what string, mkReq func() (*http.Request, error)) (*http.Response, error) {
+	backoff := baseBackoff
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+			if backoff *= 2; backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+		req, err := mkReq()
+		if err != nil {
+			return nil, err
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if isRetryableStatus(resp.StatusCode) {
+			if ra := retryAfter(resp.Header.Get("Retry-After")); ra > 0 {
+				backoff = ra
+			}
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("%s: transient status %d", what, resp.StatusCode)
+			continue
+		}
+		return resp, nil
+	}
+	return nil, fmt.Errorf("%s: after %d attempts: %w", what, maxRetries+1, lastErr)
+}
+
+func isRetryableStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// retryAfter parses a Retry-After header expressed as an integer number of seconds, capped at maxBackoff.
+func retryAfter(h string) time.Duration {
+	secs, err := strconv.Atoi(strings.TrimSpace(h))
+	if err != nil || secs <= 0 {
+		return 0
+	}
+	d := time.Duration(secs) * time.Second
+	if d > maxBackoff {
+		return maxBackoff
+	}
+	return d
+}
+
+// fetchDetails resolves every advisory id's detail with bounded concurrency, returning them keyed by id.
+// The first error cancels the remaining fetches and is returned, so a persistent OSV failure surfaces
+// (the caller's degrade policy then decides skip-vs-abort). Ordering is the caller's concern: it consumes
+// the map in a deterministic order.
+func (s *Scanner) fetchDetails(ctx context.Context, ids []string) (map[string]osvVuln, error) {
+	details := make(map[string]osvVuln, len(ids))
+	if len(ids) == 0 {
+		return details, nil
+	}
+	dctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		mu       sync.Mutex
+		firstErr error
+		wg       sync.WaitGroup
+	)
+	sem := make(chan struct{}, detailConcurrency)
+	for _, id := range ids {
+		mu.Lock()
+		stop := firstErr != nil
+		mu.Unlock()
+		if stop {
+			break
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			v, err := s.vulnDetail(dctx, id)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+					cancel()
+				}
+				return
+			}
+			details[id] = v
+		}(id)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return details, nil
 }
 
 // --- OSV API JSON (minimal subset we consume) ---
@@ -426,18 +555,7 @@ func preferCVE(id string, aliases []string) string {
 }
 
 func mapSeverityLabel(s string) shared.Severity {
-	switch strings.ToUpper(strings.TrimSpace(s)) {
-	case "CRITICAL":
-		return shared.SeverityCritical
-	case "HIGH":
-		return shared.SeverityHigh
-	case "MODERATE", "MEDIUM":
-		return shared.SeverityMedium
-	case "LOW":
-		return shared.SeverityLow
-	default:
-		return shared.SeverityUnknown
-	}
+	return shared.SeverityFromLabel(s) // shared with the owned advisory parser so both agree on bands
 }
 
 func firstNonEmpty(vals ...string) string {

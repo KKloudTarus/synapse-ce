@@ -1,6 +1,6 @@
 module github.com/KKloudTarus/synapse-ce
 
-go 1.26.4
+go 1.27.0
 
 require (
 	cloud.google.com/go/auth v0.23.2

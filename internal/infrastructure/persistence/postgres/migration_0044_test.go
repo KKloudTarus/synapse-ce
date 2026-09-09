@@ -40,6 +40,7 @@ func TestMigration0044(t *testing.T) {
 		}
 	})
 
+	deleteV2AuditRowsForMigrationRollback(t, db)
 	if err := goose.DownTo(db, ".", 43); err != nil {
 		t.Fatalf("goose down to 43: %v", err)
 	}
@@ -118,6 +119,7 @@ func TestMigration0044(t *testing.T) {
 		}
 	}
 
+	deleteV2AuditRowsForMigrationRollback(t, db)
 	if err := goose.DownTo(db, ".", 43); err != nil {
 		t.Fatalf("goose down to 43: %v", err)
 	}

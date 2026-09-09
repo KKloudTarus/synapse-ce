@@ -39,7 +39,7 @@ function mapWorkload(r: any): Workload {
   }
 }
 import { mapTechnicalAsset } from './assets'
-import { blobDownload, req } from './client'
+import { ApiError, blobDownload, req } from './client'
 import { mapFinding } from './findings'
 
 function mapHostScan(raw: any): HostScan | null {
@@ -236,6 +236,113 @@ export const fleetApi = {
       }),
     )
   },
+
+  // Per-asset desired capabilities (#633). The State DTO has no json tags, so it is PascalCase on the
+  // wire. An asset with nothing declared answers 404; that is an empty state, not an error, so the
+  // reader degrades a 404 to null.
+  getDesiredCapabilities: async (assetId: string): Promise<DesiredCapabilities | null> => {
+    try {
+      return mapDesiredCapabilities(await req(`/fleet/assets/${encodeURIComponent(assetId)}/desired-capabilities`))
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null
+      throw e
+    }
+  },
+
+  setDesiredCapabilities: async (assetId: string, capabilities: string[]): Promise<DesiredCapabilities> =>
+    mapDesiredCapabilities(
+      await req(`/fleet/assets/${encodeURIComponent(assetId)}/desired-capabilities`, {
+        method: 'PUT',
+        body: JSON.stringify({ capabilities }),
+      }),
+    ),
+
+  clearDesiredCapabilities: async (assetId: string): Promise<void> => {
+    await req(`/fleet/assets/${encodeURIComponent(assetId)}/desired-capabilities`, { method: 'DELETE' })
+  },
+
+  // Running-process projection for a host (#822). ProcessSnapshot has no json tags: PascalCase wire.
+  listEndpointProcesses: async (assetId: string): Promise<EndpointProcess[]> => {
+    const res = await req(`/fleet/assets/${encodeURIComponent(assetId)}/processes`)
+    return (Array.isArray(res?.processes) ? res.processes : []).map(mapEndpointProcess)
+  },
+
+  // Reset the statistical behavior baseline for a host so anomaly scoring re-learns from scratch.
+  rebaselineBehavior: async (assetId: string): Promise<{ assetId: string; rebaselined: boolean }> => {
+    const res = await req(`/fleet/assets/${encodeURIComponent(assetId)}/behavior-baseline/rebaseline`, { method: 'POST' })
+    return { assetId: res?.asset_id ?? assetId, rebaselined: Boolean(res?.rebaselined) }
+  },
+
+  // Mint a single-use agent enrolment token (201). Returned exactly once and never re-fetchable.
+  mintEnrolToken: async (ttlSeconds?: number): Promise<string> => {
+    const res = await req('/agents/enrolment-tokens', {
+      method: 'POST',
+      body: JSON.stringify(ttlSeconds && ttlSeconds > 0 ? { ttl_seconds: Math.round(ttlSeconds) } : {}),
+    })
+    return res?.enrolment_token ?? ''
+  },
+
+  revokeFleetAgent: async (agentId: string, reason: string): Promise<void> => {
+    await req(`/agents/${encodeURIComponent(agentId)}/revoke`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    })
+  },
+
+  listAgentKeys: async (agentId: string): Promise<AgentKey[]> => {
+    const res = await req(`/agents/${encodeURIComponent(agentId)}/keys`)
+    return (Array.isArray(res?.keys) ? res.keys : []).map(mapAgentKey)
+  },
+
+  revokeAgentKey: async (agentId: string, keyId: string): Promise<void> => {
+    await req(`/agents/${encodeURIComponent(agentId)}/keys/${encodeURIComponent(keyId)}/revoke`, { method: 'POST' })
+  },
+
+  // Staged agent binary rollout per channel. The GET answers one of two shapes (configured or not).
+  getFleetRollout: async (channel?: string): Promise<RolloutStatus> =>
+    mapRolloutStatus(await req(`/agents/rollout${rolloutQuery(channel)}`), channel),
+
+  setFleetRolloutTarget: async (targetVersion: string, canaryGroups: string[], channel?: string): Promise<RolloutStatus> =>
+    mapRolloutStatus(
+      await req(`/agents/rollout${rolloutQuery(channel)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ target_version: targetVersion, canary_groups: canaryGroups }),
+      }),
+      channel,
+    ),
+
+  promoteFleetRollout: async (channel?: string): Promise<RolloutStatus> =>
+    mapRolloutStatus(await req(`/agents/rollout/promote${rolloutQuery(channel)}`, { method: 'POST' }), channel),
+
+  pauseFleetRollout: async (reason: string, channel?: string): Promise<RolloutStatus> =>
+    mapRolloutStatus(
+      await req(`/agents/rollout/pause${rolloutQuery(channel)}`, { method: 'POST', body: JSON.stringify({ reason }) }),
+      channel,
+    ),
+
+  resumeFleetRollout: async (channel?: string): Promise<RolloutStatus> =>
+    mapRolloutStatus(await req(`/agents/rollout/resume${rolloutQuery(channel)}`, { method: 'POST' }), channel),
+
+  // Technical asset relationship graph. The Edge DTO has no json tags, so it is PascalCase on the wire.
+  // GET returns the whole tenant's edge set (no server-side filter); scope client-side.
+  fleetAssetEdges: async (): Promise<AssetEdge[]> => {
+    const res = await req('/assets/edges')
+    return (Array.isArray(res) ? res : []).map(mapAssetEdge)
+  },
+
+  // Idempotent create by natural key (tenant, from, to, kind, provenance). The route answers 204.
+  createAssetEdge: async (input: AssetEdgeInput): Promise<void> => {
+    await req('/assets/edges', {
+      method: 'POST',
+      body: JSON.stringify({
+        from: input.from,
+        to: input.to,
+        kind: input.kind,
+        provenance: input.provenance,
+        confidence: input.confidence,
+      }),
+    })
+  },
 }
 
 // --- Coverage windows (#611 immutable telemetry coverage revisions) ---
@@ -366,5 +473,152 @@ export function mapRetroHuntResult(r: any): RetroHuntResult {
     to: r?.To ?? r?.to ?? '',
     entries: Array.isArray(r?.Entries) ? r.Entries.map(mapTimelineEntry) : Array.isArray(r?.entries) ? r.entries.map(mapTimelineEntry) : [],
     truncated: r?.Truncated ?? r?.truncated ?? false,
+  }
+}
+
+// --- Desired capabilities, endpoint processes, agent admin, rollout ---
+// These back the fleet management surfaces. The State and ProcessSnapshot DTOs carry no Go json tags,
+// so they arrive PascalCase; the agent-key, revoke, token, and rollout payloads are snake_case.
+
+export interface DesiredCapabilities {
+  assetId: string
+  policyId: string
+  capabilities: string[]
+  version: number
+  updatedBy: string
+  updatedAt: string
+}
+
+function mapDesiredCapabilities(raw: any): DesiredCapabilities {
+  return {
+    assetId: raw?.AssetID ?? raw?.asset_id ?? '',
+    policyId: raw?.PolicyID ?? raw?.policy_id ?? '',
+    capabilities: Array.isArray(raw?.Capabilities) ? raw.Capabilities : Array.isArray(raw?.capabilities) ? raw.capabilities : [],
+    version: raw?.Version ?? raw?.version ?? 0,
+    updatedBy: raw?.Audit?.UpdatedBy ?? raw?.UpdatedBy ?? '',
+    updatedAt: raw?.Audit?.UpdatedAt ?? raw?.updated_at ?? '',
+  }
+}
+
+export interface EndpointProcess {
+  entityId: string
+  pid: number
+  comm: string
+  path: string
+  running: boolean
+  lastSeenAt: string
+}
+
+function mapEndpointProcess(raw: any): EndpointProcess {
+  return {
+    entityId: raw?.EntityID ?? raw?.entity_id ?? '',
+    pid: raw?.PID ?? raw?.pid ?? 0,
+    comm: raw?.Comm ?? raw?.comm ?? '',
+    path: raw?.Path ?? raw?.path ?? '',
+    running: Boolean(raw?.Running ?? raw?.running),
+    lastSeenAt: raw?.LastSeenAt ?? raw?.last_seen_at ?? '',
+  }
+}
+
+export interface AgentKey {
+  keyId: string
+  purpose: string
+  algorithm: string
+  notBefore: string
+  notAfter: string
+  revoked: boolean
+  replacedBy: string
+}
+
+function mapAgentKey(raw: any): AgentKey {
+  return {
+    keyId: raw?.key_id ?? '',
+    purpose: raw?.purpose ?? '',
+    algorithm: raw?.algorithm ?? '',
+    notBefore: raw?.not_before ?? '',
+    notAfter: raw?.not_after ?? '',
+    revoked: Boolean(raw?.revoked),
+    replacedBy: raw?.replaced_by ?? '',
+  }
+}
+
+export interface RolloutView {
+  channel: string
+  targetVersion: string
+  canaryGroups: string[]
+  promotedToAll: boolean
+  paused: boolean
+  pauseReason: string
+  updatedBy: string
+  updatedAt: string
+}
+
+/** The rollout plan for one channel, or a not-configured marker when no plan exists yet. */
+export interface RolloutStatus {
+  channel: string
+  configured: boolean
+  reason: string
+  rollout: RolloutView | null
+}
+
+function rolloutQuery(channel?: string): string {
+  const c = (channel ?? '').trim()
+  return c ? `?channel=${encodeURIComponent(c)}` : ''
+}
+
+function mapRolloutView(raw: any): RolloutView {
+  return {
+    channel: raw?.channel ?? '',
+    targetVersion: raw?.target_version ?? '',
+    canaryGroups: Array.isArray(raw?.canary_groups) ? raw.canary_groups : [],
+    promotedToAll: Boolean(raw?.promoted_to_all),
+    paused: Boolean(raw?.paused),
+    pauseReason: raw?.pause_reason ?? '',
+    updatedBy: raw?.updated_by ?? '',
+    updatedAt: raw?.updated_at ?? '',
+  }
+}
+
+function mapRolloutStatus(raw: any, channel?: string): RolloutStatus {
+  const configured = Boolean(raw?.configured)
+  const rollout = configured && raw?.rollout ? mapRolloutView(raw.rollout) : null
+  return {
+    channel: rollout?.channel || raw?.channel || (channel ?? '').trim() || 'stable',
+    configured,
+    reason: raw?.reason ?? '',
+    rollout,
+  }
+}
+
+// --- Technical asset relationship graph (#asset edges) ---
+
+export type AssetEdgeKind = 'runs' | 'exposes' | 'depends_on' | 'can_assume' | 'reaches' | 'affected_by' | 'mounts'
+export type AssetEdgeConfidence = 'observed' | 'inferred'
+
+export interface AssetEdge {
+  tenantId: string
+  from: string
+  to: string
+  kind: string
+  provenance: string
+  confidence: string
+}
+
+export interface AssetEdgeInput {
+  from: string
+  to: string
+  kind: AssetEdgeKind
+  provenance: string
+  confidence: AssetEdgeConfidence
+}
+
+function mapAssetEdge(r: any): AssetEdge {
+  return {
+    tenantId: r?.TenantID ?? r?.tenant_id ?? '',
+    from: r?.From ?? r?.from ?? '',
+    to: r?.To ?? r?.to ?? '',
+    kind: r?.Kind ?? r?.kind ?? '',
+    provenance: r?.Provenance ?? r?.provenance ?? '',
+    confidence: r?.Confidence ?? r?.confidence ?? '',
   }
 }

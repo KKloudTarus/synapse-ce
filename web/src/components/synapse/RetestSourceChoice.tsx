@@ -45,8 +45,8 @@ export function RetestSourceChoice({ selection, disabled = false, onChange }: { 
         <span className="flex items-start gap-3">
           <span aria-hidden="true" className={cn('mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border', usePrevious ? 'border-brand-solid bg-brand-solid ring-2 ring-brand-primary' : 'border-secondary')}><span className={cn('size-1.5 rounded-full bg-white', !usePrevious && 'hidden')} /></span>
           <span className="min-w-0">
-            <span className="block text-sm font-semibold text-primary">Use previous source</span>
-            <span className="mt-1 block text-xs leading-relaxed text-tertiary">Continue using the source from the previous assessment.</span>
+            <span className="block text-sm font-semibold text-primary">Use current source</span>
+            <span className="mt-1 block text-xs leading-relaxed text-tertiary">Continue using the current source retained by the previous assessment.</span>
           </span>
         </span>
       </label>

@@ -102,6 +102,55 @@ export interface ListIncidentsOptions {
   limit?: number
 }
 
+// Detection provenance: the hash-chained lifecycle of a sealed detection (received -> telemetry durable
+// -> commitment pending -> commitment sealed -> acknowledged, or expired / broken). Current and
+// Transition carry json tags, so both are snake_case on the wire.
+export interface DetectionProvenanceCurrent {
+  detectionId: string
+  status: string
+  evidenceId: string
+  updatedAt: string
+}
+
+export interface DetectionProvenanceTransition {
+  detectionId: string
+  sequence: number
+  kind: string
+  status: string
+  evidenceId: string
+  agentId: string
+  assetId: string
+  reason: string
+  previousHash: string
+  hash: string
+  occurredAt: string
+}
+
+function mapProvenanceCurrent(r: any): DetectionProvenanceCurrent {
+  return {
+    detectionId: r?.detection_id ?? '',
+    status: r?.status ?? '',
+    evidenceId: r?.evidence_id ?? '',
+    updatedAt: r?.updated_at ?? '',
+  }
+}
+
+function mapProvenanceTransition(r: any): DetectionProvenanceTransition {
+  return {
+    detectionId: r?.detection_id ?? '',
+    sequence: r?.sequence ?? 0,
+    kind: r?.kind ?? '',
+    status: r?.status ?? '',
+    evidenceId: r?.evidence_id ?? '',
+    agentId: r?.agent_id ?? '',
+    assetId: r?.asset_id ?? '',
+    reason: r?.reason ?? '',
+    previousHash: r?.previous_hash ?? '',
+    hash: r?.hash ?? '',
+    occurredAt: r?.occurred_at ?? '',
+  }
+}
+
 export const incidentsApi = {
   listIncidents: async (opts: ListIncidentsOptions = {}): Promise<IncidentList> => {
     const q = new URLSearchParams()
@@ -191,6 +240,18 @@ export const incidentsApi = {
       reassessed: res?.reassessed ?? 0,
       reassessFailed: res?.reassess_failed ?? 0,
     }
+  },
+
+  // The current provenance state of every sealed detection in an engagement.
+  detectionProvenance: async (engagementId: string): Promise<DetectionProvenanceCurrent[]> => {
+    const res = await req(`/engagements/${encodeURIComponent(engagementId)}/detection-provenance`)
+    return (Array.isArray(res?.provenance) ? res.provenance : []).map(mapProvenanceCurrent)
+  },
+
+  // The ordered, hash-chained transitions for one detection.
+  detectionProvenanceTransitions: async (engagementId: string, detectionId: string): Promise<DetectionProvenanceTransition[]> => {
+    const res = await req(`/engagements/${encodeURIComponent(engagementId)}/detections/${encodeURIComponent(detectionId)}/provenance`)
+    return (Array.isArray(res?.transitions) ? res.transitions : []).map(mapProvenanceTransition)
   },
 }
 

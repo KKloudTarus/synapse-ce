@@ -468,7 +468,7 @@ const (
 	TacticLateralMovement     InvestigationTactic = "lateral_movement"
 	TacticDataExfiltration    InvestigationTactic = "data_exfiltration"
 	TacticPrivilegeEscalation InvestigationTactic = "privilege_escalation"
-	TacticCredentialAccess    InvestigationTactic = "credential_access"
+	TacticCredentialAccess    InvestigationTactic = "credential_access" //nolint:gosec // G101 false positive: MITRE ATT&CK tactic name, not a credential.
 	TacticPersistence         InvestigationTactic = "persistence"
 	TacticCommandAndControl   InvestigationTactic = "command_and_control"
 	TacticDefenseEvasion      InvestigationTactic = "defense_evasion"
