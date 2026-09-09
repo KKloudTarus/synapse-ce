@@ -356,8 +356,8 @@ func Configure(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, log *s
 	}
 	if cfg.ImageRootFSEnabled {
 		svc.SetOSPackageCataloger(ospkg.New())         // owned dpkg/apk cataloging from the materialized image rootfs
-		svc.SetInstalledPackageCataloger(bincat.New()) // owned Go-binary + Python dist-info cataloging from the rootfs
-		log.Info("image-rootfs cataloging ENABLED (dpkg + apk OS packages; Go binaries + Python dist-info)")
+		svc.SetInstalledPackageCataloger(bincat.New()) // owned Go-binary, Python dist-info, Java jar, Node.js, and Ruby gem cataloging from the rootfs
+		log.Info("image-rootfs cataloging ENABLED (dpkg + apk OS packages; Go binaries, Python dist-info, Java jars, Node.js packages, Ruby gems)")
 	}
 	if cfg.MisconfigEnabled {
 		// Helm chart rendering shells out `helm template` over an UNTRUSTED chart; like the maven/gradle

@@ -87,7 +87,7 @@ type Service struct {
 	fpTriageIndependence             ports.AIIndependencePolicy            // deterministic verifier separation-of-duties requirement
 	fpTriageAlerts                   aiTriageAlertPolicy                   // scan-local safety metric baselines
 	osPkgCataloger                   ports.OSPackageCataloger              // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
-	instCataloger                    ports.InstalledPackageCataloger       // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
+	instCataloger                    ports.InstalledPackageCataloger       // optional owned installed-package cataloging (Go binaries, Python dist-info, Java jars, Node.js, Ruby gems) from an image rootfs
 	artifactCataloger                ports.ArtifactCataloger               // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
 	suppression                      ports.SuppressionLoader               // optional repo-committed .synapseignore accepted-risk policy
 	vexLoader                        ports.VEXLoader                       // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
