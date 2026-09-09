@@ -47,6 +47,7 @@ type corpusAdvisory struct {
 	Ranges     []corpusRange `json:"ranges,omitempty"`
 	Versions   []string      `json:"versions,omitempty"`
 	Fixed      string        `json:"fixed_version,omitempty"`
+	Withdrawn  bool          `json:"withdrawn,omitempty"`
 }
 
 // corpusComponent is one SBOM component in a case.
@@ -105,6 +106,7 @@ func toAdvisory(a corpusAdvisory) advisory.Advisory {
 	}
 	return advisory.Advisory{
 		ID: a.ID, Aliases: a.Aliases, Summary: a.Summary, CVSSScore: a.CVSSScore, CVSSVector: a.CVSSVector,
+		Withdrawn: a.Withdrawn,
 		Affected: []advisory.AffectedPackage{{
 			Ecosystem: a.Ecosystem, Package: a.Package, Ranges: ranges, Versions: a.Versions, FixedVersion: a.Fixed,
 		}},
