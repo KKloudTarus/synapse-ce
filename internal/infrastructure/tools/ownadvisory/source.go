@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -25,6 +26,8 @@ const sourceName = "advisory-store"
 type Source struct {
 	store   ports.AdvisoryStore
 	overlay SymbolOverlay
+	mu      sync.Mutex // guards provDB (written during Scan, read by Provenance)
+	provDB  string     // "<count> advisories@<date>" corpus-freshness marker, captured during the last Scan
 }
 
 // New returns a detection source over the given owned advisory store.
@@ -54,6 +57,35 @@ var _ ports.DetectionSource = (*Source)(nil)
 // Name identifies the source.
 func (s *Source) Name() string { return sourceName }
 
+// Provenance reports the owned source's corpus-freshness marker (D1.7). The version is empty (there is no
+// tool binary, this is an in-process matcher); the db marker is "<count> advisories@<date>" from the last
+// Scan, which the SCA freshness policy parses (the trailing "@<date>") to warn when the corpus is stale and
+// which the report lists as this feed's provenance. Empty when the store cannot report freshness or is
+// empty, so no false freshness claim is made. Implements ports.SourceProvenance.
+func (s *Source) Provenance() (version, dbVersion string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return "", s.provDB
+}
+
+// captureFreshness queries the store's corpus freshness (if it supports it) and records the marker. A store
+// that does not implement the capability, an error, or an empty corpus leaves the marker empty (no false
+// freshness). It runs once per Scan; the query is a single indexed MAX/COUNT, cheap on the scan path.
+func (s *Source) captureFreshness(ctx context.Context) {
+	fr, ok := s.store.(ports.AdvisoryCorpusFreshness)
+	if !ok {
+		return
+	}
+	latest, count, err := fr.AdvisoryFreshness(ctx)
+	marker := ""
+	if err == nil && count > 0 && !latest.IsZero() {
+		marker = fmt.Sprintf("%d advisories@%s", count, latest.UTC().Format("2006-01-02"))
+	}
+	s.mu.Lock()
+	s.provDB = marker
+	s.mu.Unlock()
+}
+
 // Scan matches every component with a resolvable version against the owned store and emits a RawFinding
 // per affected advisory. A component whose PURL ecosystem is unmapped, or with no resolvable version, is
 // skipped (it can't be soundly matched) – never a false hit. A store error fails the WHOLE scan (the SCA
@@ -67,6 +99,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 	if doc == nil {
 		return nil, nil
 	}
+	s.captureFreshness(ctx) // record the corpus-freshness marker so a stale owned store warns (D1.7)
 	// A withdrawn advisory is a guaranteed false positive; skip it on every path.
 	// cpeStore is the same store when it also serves NVD/CSAF CPE applicability (the Postgres repo does).
 	cpeStore, hasCPE := s.store.(ports.CPEAdvisoryStore)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -18,6 +19,23 @@ import (
 // GLOBAL reference data (NOT tenant-scoped): the full advisory is a JSONB blob in `advisories`, with one
 // `advisory_affects` row per affected (ecosystem, package) for the indexed ByPackage lookup.
 type AdvisoryRepository struct{ pool *pgxpool.Pool }
+
+var _ ports.AdvisoryCorpusFreshness = (*AdvisoryRepository)(nil)
+
+// AdvisoryFreshness reports the newest advisory timestamp and the corpus row count so a scan can warn when
+// the owned advisory store is stale. Advisories are global reference data (not tenant-scoped), so the query
+// is unfiltered. An empty corpus yields the zero time and count 0.
+func (r *AdvisoryRepository) AdvisoryFreshness(ctx context.Context) (time.Time, int, error) {
+	var latest time.Time
+	var count int
+	if err := r.pool.QueryRow(ctx, `SELECT COALESCE(MAX(updated_at), to_timestamp(0)), COUNT(*) FROM advisories`).Scan(&latest, &count); err != nil {
+		return time.Time{}, 0, fmt.Errorf("advisory corpus freshness: %w", err)
+	}
+	if count == 0 {
+		return time.Time{}, 0, nil // empty corpus: no meaningful date
+	}
+	return latest, count, nil
+}
 
 // NewAdvisoryRepository returns a repository backed by the given pool.
 func NewAdvisoryRepository(pool *pgxpool.Pool) *AdvisoryRepository {

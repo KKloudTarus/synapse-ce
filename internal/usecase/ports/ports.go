@@ -1697,6 +1697,15 @@ type CPEAdvisoryStore interface {
 	ByCPE(ctx context.Context, part, vendor, product string) ([]advisory.Advisory, error)
 }
 
+// AdvisoryCorpusFreshness is an OPTIONAL capability of an AdvisoryStore: it reports how current the owned
+// advisory corpus is, so a scan can WARN when the store is stale instead of silently under-reporting
+// against a six-month-old corpus. Latest is the newest advisory row's timestamp (zero when the corpus is
+// empty); Count is the number of stored advisories. A store that cannot report this (memory/file) simply
+// does not implement it, and the owned source emits no freshness marker.
+type AdvisoryCorpusFreshness interface {
+	AdvisoryFreshness(ctx context.Context) (latest time.Time, count int, err error)
+}
+
 // CorrelationRecorder turns a cross-check DISAGREEMENT report into Judgments for human review.
 // The SCA pipeline computes the report (vulnerability.CrossCheck over its multi-source
 // RawFindings) and hands it here; the recorder proposes one UNGATED CapCorrelation judgment per NEW

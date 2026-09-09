@@ -75,3 +75,18 @@ func TestDBFreshnessDeterministicOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestDBFreshnessWarnsOwnedCorpus is D1.7: the owned advisory store's "advisory-store-db" freshness marker
+// (from ownadvisory.Source.Provenance) triggers a stale warning like any other dated DB, so a six-month-old
+// owned corpus is never silent, while a fresh one warns not at all.
+func TestDBFreshnessWarnsOwnedCorpus(t *testing.T) {
+	now := time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	stale := dbFreshnessWarnings(map[string]string{"advisory-store-db": "4321 advisories@2026-01-01"}, now, 30)
+	if len(stale) != 1 || !strings.Contains(stale[0], "advisory-store-db") {
+		t.Fatalf("a stale owned corpus must warn, got %v", stale)
+	}
+	fresh := dbFreshnessWarnings(map[string]string{"advisory-store-db": "4321 advisories@2026-07-05"}, now, 30)
+	if len(fresh) != 0 {
+		t.Errorf("a fresh owned corpus must not warn, got %v", fresh)
+	}
+}
