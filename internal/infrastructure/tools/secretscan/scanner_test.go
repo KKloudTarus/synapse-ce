@@ -340,3 +340,19 @@ func TestDistinctivePrefixNearMissNoMatch(t *testing.T) {
 		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
 	}
 }
+
+func TestInlineAllowSuppressesLine(t *testing.T) {
+	// Control: the AWS key is reported without an annotation.
+	reported := scanDir(t, map[string]string{"a.env": "aws_access_key_id=\"" + awsID + "\"\n"})
+	if hasRule(reported, "aws-access-key-id") == nil {
+		t.Fatalf("control: the key must be reported without an annotation, got %+v", reported)
+	}
+	// An inline allow annotation on the same line suppresses the finding (synapse:allow or, for drop-in
+	// compatibility, gitleaks:allow).
+	for _, marker := range []string{"synapse:allow", "gitleaks:allow", "SYNAPSE:ALLOW"} {
+		rs := scanDir(t, map[string]string{"b.env": "aws_access_key_id=\"" + awsID + "\" # " + marker + "\n"})
+		if len(rs) != 0 {
+			t.Errorf("%q must suppress the finding, got %+v", marker, rs)
+		}
+	}
+}
