@@ -326,6 +326,20 @@ func main() {
 	scaService.SetUploadedSourceStore(uploadedSources)
 	configureCleanup := scacompose.Configure(scaService, cfg, scaExecution.Sandbox, log)
 	defer configureCleanup()
+	// Source-only judgment-minting scanners in the default scan path (Python value-flow taint today), shared
+	// with synapse-api via scacompose. The worker runs queued SCA scans, so without this a worker-run scan
+	// would be regex-only. Gated on the judgment lifecycle (it mints CapSAST proposals).
+	if cfg.PythonTaintEnabled && cfg.JudgmentsEnabled {
+		scaJudgmentSvc, jerr := analysisuc.NewService(postgres.NewJudgmentRepository(pool), evidenceService, auditLog, clock, ids)
+		if jerr != nil {
+			log.Error("worker SCA judgment service init failed", "err", jerr)
+			os.Exit(1)
+		}
+		if err := scacompose.ConfigureJudgmentScanners(scaService, cfg, scaExecution.Sandbox, scaJudgmentSvc, auditLog, clock, log); err != nil {
+			log.Error("worker python semantic taint init failed", "err", err)
+			os.Exit(1)
+		}
+	}
 	if cfg.ComplianceEnabled {
 		scaService.SetComplianceEnabled(true) // attach the AppSec-baseline benchmark (per-control PASS/FAIL)
 		log.Info("compliance report ENABLED (Synapse AppSec Baseline; deterministic, LLM-free)")

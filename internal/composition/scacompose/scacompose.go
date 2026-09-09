@@ -2,6 +2,7 @@
 package scacompose
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -9,12 +10,16 @@ import (
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/fptriagecache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourcesnippet"
+	asttool "github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gomodgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
@@ -47,6 +52,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/taintscan"
 )
 
 // Execution holds the concrete SCA execution adapters. Sandbox and SyftGen are
@@ -453,4 +459,51 @@ func Configure(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, log *s
 		}
 	}
 	return cleanup
+}
+
+// TaintProposer is the judgment proposer a source-only taint scanner needs to mint gated CapSAST proposals.
+// It is satisfied by analysis.Service and matches the proposer the taintscan coordinator consumes, so this
+// composition package can wire the coordinator without importing the analysis service concretely.
+type TaintProposer interface {
+	Propose(ctx context.Context, proposer string, engagementID shared.ID, capability judgment.Capability, subjectKind judgment.SubjectKind, subjectID shared.ID, claim judgment.Claim) (judgment.Judgment, error)
+}
+
+// ConfigureJudgmentScanners attaches the source-only, judgment-minting analyzers that run in the DEFAULT scan
+// path onto svc, so synapse-api and synapse-worker run the same default-scan analysis rather than a
+// regex-only scan. Python semantic value-flow taint is wired today (JS/Java as they land). The synapse-ast
+// sidecar it uses only PARSES target source (tree-sitter); it never compiles or executes the target, and it
+// degrades to a clean no-op when the sidecar is not installed, so it is safe to attach by default. A nil
+// proposer (judgments disabled) attaches nothing. A coordinator init error is returned so a misconfigured
+// analyzer is a loud startup failure at the composition root, never a silently degraded scan.
+func ConfigureJudgmentScanners(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, proposer TaintProposer, audit ports.AuditLogger, clock ports.Clock, log *slog.Logger) error {
+	pythonTaint, err := pythonTaintScanner(cfg, sb, proposer, audit, clock, log)
+	if err != nil {
+		return err
+	}
+	if pythonTaint != nil {
+		svc.SetPythonTaint(pythonTaint)
+		log.Info("Python semantic taint ENABLED (source-only interprocedural value flow; propose-only, a distinct verifier gates)")
+	}
+	return nil
+}
+
+// pythonTaintScanner builds the Python value-flow taint coordinator when Python taint is enabled and a
+// judgment proposer is present; it returns (nil, nil) when either is absent. Split from the svc wiring so the
+// attach decision is unit-testable without constructing a full SCA service. The sidecar runs inside the SCA
+// sandbox when one is set; without a sandbox it parses target source unsandboxed (dev only, never executed).
+func pythonTaintScanner(cfg config.Config, sb *sandbox.Runner, proposer TaintProposer, audit ports.AuditLogger, clock ports.Clock, log *slog.Logger) (ports.TaintScanner, error) {
+	if proposer == nil || !cfg.PythonTaintEnabled {
+		return nil, nil
+	}
+	factsProvider := asttool.New(cfg.ASTBin)
+	if sb != nil {
+		factsProvider = factsProvider.WithRunner(sb)
+	} else {
+		log.Warn("python taint: synapse-ast runs unsandboxed (dev only); target source is parsed but never executed")
+	}
+	coordinator, err := taintscan.NewPythonCoordinator(factsProvider, proposer, taint.DefaultPythonCatalog(), audit, clock)
+	if err != nil {
+		return nil, fmt.Errorf("python semantic taint coordinator init: %w", err)
+	}
+	return coordinator, nil
 }

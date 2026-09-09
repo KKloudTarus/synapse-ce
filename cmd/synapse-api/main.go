@@ -2710,22 +2710,14 @@ func main() {
 	}
 
 	// Python Tier-2 taint is source-only: synapse-ast parses bounded semantic/value facts and never imports,
-	// executes, or compiles target Python. It therefore does not require the compile sandbox, though it uses
-	// the sandbox runner when available. Findings enter the same gated CapSAST lifecycle at score zero.
+	// executes, or compiles target Python. It runs in the default scan (shared with synapse-worker via
+	// scacompose.ConfigureJudgmentScanners); requireJudgmentsOrSkip preserves the loud error when the flag is
+	// set explicitly without the judgment lifecycle.
 	if cfg.PythonTaintEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_PYTAINT_ENABLED", "python semantic taint") {
-		factsProvider := asttool.New(cfg.ASTBin)
-		if scaSandbox != nil {
-			factsProvider = factsProvider.WithRunner(scaSandbox)
-		} else {
-			log.Warn("python taint: synapse-ast runs unsandboxed (dev only); target code is parsed but never executed")
-		}
-		pythonTaint, perr := taintscan.NewPythonCoordinator(factsProvider, judgmentSvc, taint.DefaultPythonCatalog(), auditLog, clock)
-		if perr != nil {
-			log.Error("python semantic taint coordinator init failed", "err", perr)
+		if err := scacompose.ConfigureJudgmentScanners(scaService, cfg, scaSandbox, judgmentSvc, auditLog, clock, log); err != nil {
+			log.Error("python semantic taint coordinator init failed", "err", err)
 			os.Exit(1)
 		}
-		scaService.SetPythonTaint(pythonTaint)
-		log.Info("Python semantic taint ENABLED (source-only interprocedural value flow; propose-only, a distinct verifier gates)")
 	}
 
 	// Cross-check disagreement judgments, opt-in. Like reachability it mints judgments, so it needs
