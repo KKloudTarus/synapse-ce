@@ -235,6 +235,7 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_REACHABILITY_ENABLED` | `true` | Go Tier-2 call-graph reachability proof (best-effort). |
+| `SYNAPSE_REACHABILITY_BUILDER` | `owned` | Go Tier-2 call-graph producer: `owned` (Synapse's own go/ssa builder, no third-party engine) or `govulncheck`. |
 | `SYNAPSE_JVM_REACHABILITY_ENABLED` | `true` | JVM (Java/Kotlin) reachability. |
 | `SYNAPSE_PYREACH_ENABLED` | `false` | Python Tier-1 import-reachability: a declared DIRECT dependency never imported by first-party source becomes an OpenVEX `not_affected` (transitive deps are refused, not answered). |
 | `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python Tier-2 affected-symbol semantic reachability. Requires Tier-1, judgments, and a CGO-enabled `synapse-ast`. |
@@ -378,6 +379,7 @@ All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 | `SYNAPSE_JUDGMENTS_ENABLED` | `true` | Judgment lifecycle routes (verify, accept, list). |
 | `SYNAPSE_SAST_ENABLED` | `true` | Pattern SAST in the scan pipeline. |
 | `SYNAPSE_REACHABILITY_ENABLED` | `true` | Call-graph reachability proof (Go, Tier-2). Needs judgments. |
+| `SYNAPSE_REACHABILITY_BUILDER` | `owned` | Reachability call-graph producer: `owned` (go/ssa, default) or `govulncheck`. |
 | `SYNAPSE_PYREACH_ENABLED` | `false` | Python import-reachability (Tier-1 direct dead-dependency → OpenVEX). Needs judgments. |
 | `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python semantic call-graph reachability (Tier-2). Requires Python Tier-1 and `synapse-ast`. |
 | `SYNAPSE_TAINT_ENABLED` | `false` | Go call-graph taint proposals. Needs judgments and the target-compilation sandbox. |
