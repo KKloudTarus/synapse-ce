@@ -65,6 +65,7 @@ type AssessmentComparisonRepairRepository interface {
 type AssessmentComparisonItemFilter struct {
 	AfterPosition int
 	Limit         int
+	Scope         assessmentcomparison.Scope
 	Presence      string
 	ChangeFlag    assessmentcomparison.ChangeFlag
 	Severity      shared.Severity
@@ -87,6 +88,7 @@ type AssessmentComparisonRepository interface {
 	GetByInputHash(context.Context, shared.ID, string) (assessmentcomparison.Comparison, error)
 	ListMetadataByCycle(context.Context, shared.ID, shared.ID) ([]assessmentcomparison.Comparison, error)
 	GetItem(context.Context, shared.ID, shared.ID, shared.ID) (assessmentcomparison.Item, error)
+	SummarizeItems(context.Context, shared.ID, shared.ID, assessmentcomparison.Scope) (assessmentcomparison.Summary, error)
 	ListItems(context.Context, shared.ID, shared.ID, AssessmentComparisonItemFilter) (AssessmentComparisonItemPage, error)
 	UpdateCAS(context.Context, assessmentcomparison.Comparison, int64) error
 }

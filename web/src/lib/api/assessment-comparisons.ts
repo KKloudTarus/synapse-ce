@@ -4,6 +4,8 @@ import type {
   AssessmentComparisonItem,
   AssessmentComparisonItemPage,
   AssessmentComparisonMode,
+  AssessmentComparisonScope,
+  AssessmentComparisonSummary,
   AssessmentComparisonReviewResult,
   AssessmentComparisonStatus,
 } from '../types'
@@ -145,6 +147,9 @@ export const assessmentComparisonsApi = {
   assessmentComparison: async (comparisonId: string): Promise<AssessmentComparison> =>
     mapAssessmentComparison(await req(`/assessment-comparisons/${id(comparisonId)}`)),
 
+  assessmentComparisonSummary: async (comparisonId: string, scope: AssessmentComparisonScope): Promise<AssessmentComparisonSummary> =>
+    mapAssessmentComparisonSummary(await req(`/assessment-comparisons/${id(comparisonId)}/summary?scope=${id(scope)}`)),
+
   assessmentComparisonItems: async (comparisonId: string, input: {
     cursor?: string
     limit?: number
@@ -155,6 +160,7 @@ export const assessmentComparisonsApi = {
     findingKind?: string
     disposition?: string
     reviewState?: string
+    scope?: AssessmentComparisonScope
   } = {}): Promise<AssessmentComparisonItemPage> => {
     const query = new URLSearchParams()
     if (input.cursor) query.set('cursor', input.cursor)
@@ -166,6 +172,7 @@ export const assessmentComparisonsApi = {
     if (input.findingKind) query.set('finding_kind', input.findingKind)
     if (input.disposition) query.set('disposition', input.disposition)
     if (input.reviewState) query.set('review_state', input.reviewState)
+    if (input.scope) query.set('scope', input.scope)
     const value = await req(`/assessment-comparisons/${id(comparisonId)}/items${query.size ? `?${query}` : ''}`)
     return { items: (value?.items ?? []).map(mapItem), nextCursor: value?.next_cursor ?? '' }
   },

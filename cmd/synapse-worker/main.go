@@ -218,6 +218,13 @@ func main() {
 		log.Error("assessment closure report service init failed", "err", err)
 		os.Exit(1)
 	}
+	if cfg.WorkerProfile == config.WorkerProfileLifecycle {
+		runWorkerRuntime(ctx, cfg, queue, map[string]worker.Handler{
+			comparisonuc.JobKind:                   assessmentComparisonJobHandler{svc: assessmentComparisonService},
+			cycleuc.AssessmentClosureReportJobKind: assessmentClosureReportJobHandler{svc: assessmentClosureReportService},
+		}, nil, postgres.NewLeaderStore(pool), auditLog, clock, ids, 6*time.Minute, log)
+		return
+	}
 	vulnerabilitySources := postgres.NewVulnerabilitySourceStore(pool)
 	vulnerabilityRuns := postgres.NewSyncRunStore(pool, ids)
 	vulnerabilityMaterializer := postgres.NewAdvisoryMaterializer(pool)

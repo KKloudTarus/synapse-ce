@@ -75,6 +75,13 @@ func TestComparisonAPIIdempotencyPaginationAndReviewReplacement(t *testing.T) {
 	if err != nil || completed.Status != domain.StatusNeedsReview {
 		t.Fatalf("completed=%+v err=%v", completed, err)
 	}
+	vulnerabilitySummary, err := harness.service.GetSummary(ctx, harness.tenantID, completed.ID, domain.ScopeVulnerability)
+	if err != nil || vulnerabilitySummary.ComparisonID != completed.ID || vulnerabilitySummary.BaselineSnapshotID != completed.BaselineSnapshotID || vulnerabilitySummary.CurrentSnapshotID != completed.CurrentSnapshotID {
+		t.Fatalf("vulnerability summary=%+v err=%v", vulnerabilitySummary, err)
+	}
+	if _, err := harness.service.GetSummary(ctx, harness.tenantID, completed.ID, domain.Scope("quality")); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("invalid scope error=%v", err)
+	}
 	firstPage, err := harness.service.ListItems(ctx, ListItemsInput{TenantID: harness.tenantID, ComparisonID: completed.ID, Limit: 2})
 	if err != nil || len(firstPage.Items) != 2 || firstPage.NextCursor == "" {
 		t.Fatalf("first page=%+v err=%v", firstPage, err)

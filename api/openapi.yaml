@@ -696,6 +696,27 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/assessment-comparisons/{comparisonId}/summary:
+    parameters:
+    - {$ref: "#/components/parameters/AssessmentComparisonId"}
+    get:
+      tags: [assessment-comparisons]
+      operationId: getAssessmentComparisonSummary
+      summary: Summarize an immutable comparison for a finding scope
+      parameters:
+      - name: scope
+        in: query
+        required: true
+        description: Scope used consistently by the summary and item explorer
+        schema: {type: string, enum: [vulnerability, security, all]}
+      responses:
+        "200": {description: Scope-specific before and after metrics, content: {application/json: {schema: {$ref: "#/components/schemas/AssessmentComparisonSummary"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Comparison is not complete enough to summarize}
+
   /api/v1/assessment-comparisons/{comparisonId}/items:
     parameters:
     - {$ref: "#/components/parameters/AssessmentComparisonId"}
@@ -713,6 +734,7 @@ paths:
       - {name: finding_kind, in: query, schema: {type: string, maxLength: 256}}
       - {name: disposition, in: query, schema: {type: string, enum: [current_actionable, baseline_only, non_actionable]}}
       - {name: review_state, in: query, schema: {type: string, enum: [needs_review, verified, clear]}}
+      - {name: scope, in: query, schema: {type: string, enum: [vulnerability, security, all], default: all}}
       responses:
         "200": {description: Stable item page, content: {application/json: {schema: {$ref: "#/components/schemas/AssessmentComparisonItemPage"}}}}
         "400": {$ref: "#/components/responses/BadRequest"}

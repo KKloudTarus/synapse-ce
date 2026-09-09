@@ -194,10 +194,30 @@ func (repository *AssessmentComparisonRepository) GetItem(ctx context.Context, t
 	return assessmentcomparison.Item{}, shared.ErrNotFound
 }
 
+func (repository *AssessmentComparisonRepository) SummarizeItems(ctx context.Context, tenantID, comparisonID shared.ID, scope assessmentcomparison.Scope) (assessmentcomparison.Summary, error) {
+	if !scope.Valid() {
+		return assessmentcomparison.Summary{}, fmt.Errorf("%w: comparison summary scope is invalid", shared.ErrValidation)
+	}
+	comparison, err := repository.Get(ctx, tenantID, comparisonID)
+	if err != nil {
+		return assessmentcomparison.Summary{}, err
+	}
+	items := make([]assessmentcomparison.Item, 0, len(comparison.Items))
+	for _, item := range comparison.Items {
+		if scope.Matches(item) {
+			items = append(items, item)
+		}
+	}
+	return assessmentcomparison.Summarize(items), nil
+}
+
 func (repository *AssessmentComparisonRepository) ListItems(ctx context.Context, tenantID, comparisonID shared.ID, filter ports.AssessmentComparisonItemFilter) (ports.AssessmentComparisonItemPage, error) {
 	comparison, err := repository.Get(ctx, tenantID, comparisonID)
 	if err != nil {
 		return ports.AssessmentComparisonItemPage{}, err
+	}
+	if filter.Scope == "" {
+		filter.Scope = assessmentcomparison.ScopeAll
 	}
 	items := make([]assessmentcomparison.Item, 0, filter.Limit)
 	for _, item := range comparison.Items {
@@ -205,7 +225,7 @@ func (repository *AssessmentComparisonRepository) ListItems(ctx context.Context,
 		if item.CurrentObservationID.IsZero() {
 			severity = item.BaselineObservation.Severity
 		}
-		if item.Position <= filter.AfterPosition || filter.Presence != "" && filter.Presence != string(item.Presence) && filter.Presence != string(item.NeutralPresence) ||
+		if !filter.Scope.Matches(item) || item.Position <= filter.AfterPosition || filter.Presence != "" && filter.Presence != string(item.Presence) && filter.Presence != string(item.NeutralPresence) ||
 			filter.ChangeFlag != "" && !comparisonItemHasFlag(item, filter.ChangeFlag) || filter.Severity != "" && filter.Severity != severity ||
 			filter.ProducerKind != "" && filter.ProducerKind != item.ProducerKind || filter.FindingKind != "" && filter.FindingKind != item.FindingKind ||
 			filter.Disposition != "" && filter.Disposition != comparisonItemDisposition(item) || filter.ReviewState != "" && filter.ReviewState != comparisonItemReviewState(item) {

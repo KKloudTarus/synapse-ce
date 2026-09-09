@@ -172,6 +172,10 @@ describe('EngagementDetail Page Shell', () => {
 
     const findingsTab = screen.getByRole('tab', { name: /Findings/i })
     expect(findingsTab).toBeInTheDocument()
+    const comparisonTab = screen.getByRole('tab', { name: 'Comparison' })
+    const supplyChainTab = screen.getByRole('tab', { name: /Supply Chain/i })
+    expect(findingsTab.compareDocumentPosition(comparisonTab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(comparisonTab.compareDocumentPosition(supplyChainTab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     fireEvent.click(findingsTab)
 
@@ -182,6 +186,7 @@ describe('EngagementDetail Page Shell', () => {
       expect(panel).toHaveAttribute('id', 'engagement-tabpanel')
       expect(panel).toHaveAttribute('aria-labelledby', 'tab-findings')
     })
+    expect(screen.queryByRole('button', { name: 'Comparison' })).not.toBeInTheDocument()
   })
 
   it('moves between tabs with the arrow keys and keeps one tab stop', async () => {

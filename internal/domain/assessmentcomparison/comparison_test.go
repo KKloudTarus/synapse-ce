@@ -164,6 +164,33 @@ func TestSummaryAndGenerationHashAreStable(t *testing.T) {
 	}
 }
 
+func TestScopeMatchesSecurityFindingKinds(t *testing.T) {
+	items := []Item{
+		{FindingKind: "vulnerability"},
+		{FindingKind: "sast"},
+		{FindingKind: "secret"},
+		{FindingKind: "misconfig"},
+		{FindingKind: "quality"},
+		{FindingKind: "reliability"},
+	}
+	wantVulnerability := []bool{true, false, false, false, false, false}
+	wantSecurity := []bool{true, true, true, true, false, false}
+	for index, item := range items {
+		if got := ScopeVulnerability.Matches(item); got != wantVulnerability[index] {
+			t.Errorf("vulnerability scope for %q=%v, want %v", item.FindingKind, got, wantVulnerability[index])
+		}
+		if got := ScopeSecurity.Matches(item); got != wantSecurity[index] {
+			t.Errorf("security scope for %q=%v, want %v", item.FindingKind, got, wantSecurity[index])
+		}
+		if !ScopeAll.Matches(item) {
+			t.Errorf("all scope excluded %q", item.FindingKind)
+		}
+	}
+	if Scope("quality").Valid() {
+		t.Fatal("unexpected custom scope accepted")
+	}
+}
+
 func TestGenerationHashSupportsLargeMatchCandidateSets(t *testing.T) {
 	candidates := make([]shared.ID, 257)
 	for index := range candidates {

@@ -72,9 +72,19 @@ func TestAssessmentComparisonRoutesContractPermissionsAndIsolation(t *testing.T)
 	if get.Code != http.StatusOK || get.Header().Get("ETag") != `"3"` {
 		t.Fatalf("get=%d headers=%v body=%s", get.Code, get.Header(), get.Body.String())
 	}
+	summary := httptest.NewRecorder()
+	handler.ServeHTTP(summary, cycleRequest(http.MethodGet, "/api/v1/assessment-comparisons/"+completed.ID.String()+"/summary?scope=vulnerability", "", userdom.RoleReadOnly, "tenant-comparison-http"))
+	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"baseline_count":1`) || !strings.Contains(summary.Body.String(), `"current_count":1`) {
+		t.Fatalf("summary=%d body=%s", summary.Code, summary.Body.String())
+	}
+	invalidScope := httptest.NewRecorder()
+	handler.ServeHTTP(invalidScope, cycleRequest(http.MethodGet, "/api/v1/assessment-comparisons/"+completed.ID.String()+"/summary?scope=quality", "", userdom.RoleReadOnly, "tenant-comparison-http"))
+	if invalidScope.Code != http.StatusBadRequest {
+		t.Fatalf("invalid scope=%d body=%s", invalidScope.Code, invalidScope.Body.String())
+	}
 
 	items := httptest.NewRecorder()
-	handler.ServeHTTP(items, cycleRequest(http.MethodGet, "/api/v1/assessment-comparisons/"+completed.ID.String()+"/items?limit=1", "", userdom.RoleReadOnly, "tenant-comparison-http"))
+	handler.ServeHTTP(items, cycleRequest(http.MethodGet, "/api/v1/assessment-comparisons/"+completed.ID.String()+"/items?limit=1&scope=vulnerability", "", userdom.RoleReadOnly, "tenant-comparison-http"))
 	if items.Code != http.StatusOK || !strings.Contains(items.Body.String(), "comparison-item-") {
 		t.Fatalf("items=%d body=%s", items.Code, items.Body.String())
 	}

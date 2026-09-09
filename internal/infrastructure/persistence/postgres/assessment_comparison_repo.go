@@ -190,8 +190,64 @@ func (repository *AssessmentComparisonRepository) GetItem(ctx context.Context, t
 	return item, err
 }
 
+func (repository *AssessmentComparisonRepository) SummarizeItems(ctx context.Context, tenantID, comparisonID shared.ID, scope assessmentcomparison.Scope) (assessmentcomparison.Summary, error) {
+	tenantID = shared.TenantOrDefault(tenantID)
+	if !scope.Valid() {
+		return assessmentcomparison.Summary{}, fmt.Errorf("%w: comparison summary scope is invalid", shared.ErrValidation)
+	}
+	var summary assessmentcomparison.Summary
+	err := WithTenant(ctx, repository.pool, tenantID.String(), func(tx pgx.Tx) error {
+		if _, err := loadAssessmentComparisonMetadata(ctx, tx, tenantID, comparisonID, false); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT presence,neutral_presence,baseline_actionable,current_actionable,comparable_baseline,
+ baseline_risk_milli,current_risk_milli,
+ COALESCE(NULLIF(baseline_observation->>'severity',''),'unknown'),
+ COALESCE(NULLIF(current_observation->>'severity',''),'unknown'),
+ jsonb_array_length(review_candidate_ids)>0
+ FROM assessment_comparison_items
+ WHERE tenant_id=$1 AND comparison_id=$2
+   AND ($3='all'
+        OR ($3='vulnerability' AND finding_kind='vulnerability')
+        OR ($3='security' AND finding_kind IN ('vulnerability','sast','secret','misconfig')))
+ ORDER BY position`, tenantID.String(), comparisonID.String(), string(scope))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		items := make([]assessmentcomparison.Item, 0)
+		for rows.Next() {
+			var item assessmentcomparison.Item
+			var presence, neutral string
+			var baselineSeverity, currentSeverity shared.Severity
+			var hasReviewCandidates bool
+			if err := rows.Scan(
+				&presence, &neutral, &item.BaselineActionable, &item.CurrentActionable, &item.ComparableBaseline,
+				&item.BaselineRiskMilli, &item.CurrentRiskMilli, &baselineSeverity, &currentSeverity, &hasReviewCandidates,
+			); err != nil {
+				return err
+			}
+			item.Presence, item.NeutralPresence = assessmentcomparison.Presence(presence), assessmentcomparison.NeutralPresence(neutral)
+			item.BaselineObservation.Severity, item.CurrentObservation.Severity = baselineSeverity, currentSeverity
+			if hasReviewCandidates {
+				item.ReviewCandidateIDs = []shared.ID{"scoped-summary-review"}
+			}
+			items = append(items, item)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		summary = assessmentcomparison.Summarize(items)
+		return nil
+	})
+	return summary, err
+}
+
 func (repository *AssessmentComparisonRepository) ListItems(ctx context.Context, tenantID, comparisonID shared.ID, filter ports.AssessmentComparisonItemFilter) (ports.AssessmentComparisonItemPage, error) {
 	tenantID = shared.TenantOrDefault(tenantID)
+	if filter.Scope == "" {
+		filter.Scope = assessmentcomparison.ScopeAll
+	}
 	var page ports.AssessmentComparisonItemPage
 	err := WithTenant(ctx, repository.pool, tenantID.String(), func(tx pgx.Tx) error {
 		if _, err := loadAssessmentComparisonMetadata(ctx, tx, tenantID, comparisonID, false); err != nil {
@@ -208,7 +264,10 @@ func (repository *AssessmentComparisonRepository) ListItems(ctx context.Context,
 	   AND ($8='' OR finding_kind=$8)
 	   AND ($9='' OR CASE WHEN current_actionable THEN 'current_actionable' WHEN baseline_actionable THEN 'baseline_only' ELSE 'non_actionable' END=$9)
 	   AND ($10='' OR CASE WHEN presence='needs_review' OR neutral_presence='needs_review' OR jsonb_array_length(review_candidate_ids)>0 THEN 'needs_review' WHEN verification_id IS NOT NULL THEN 'verified' ELSE 'clear' END=$10)
-	 ORDER BY position LIMIT $11`, tenantID.String(), comparisonID.String(), filter.AfterPosition, filter.Presence, string(filter.ChangeFlag), string(filter.Severity), filter.ProducerKind, filter.FindingKind, filter.Disposition, filter.ReviewState, filter.Limit+1)
+	   AND ($11='all'
+	        OR ($11='vulnerability' AND finding_kind='vulnerability')
+	        OR ($11='security' AND finding_kind IN ('vulnerability','sast','secret','misconfig')))
+	 ORDER BY position LIMIT $12`, tenantID.String(), comparisonID.String(), filter.AfterPosition, filter.Presence, string(filter.ChangeFlag), string(filter.Severity), filter.ProducerKind, filter.FindingKind, filter.Disposition, filter.ReviewState, string(filter.Scope), filter.Limit+1)
 		if err != nil {
 			return err
 		}

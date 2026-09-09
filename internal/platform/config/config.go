@@ -1116,22 +1116,23 @@ type WorkerProfile string
 const (
 	WorkerProfileAll          WorkerProfile = "all"
 	WorkerProfileIntegrations WorkerProfile = "integrations"
+	WorkerProfileLifecycle    WorkerProfile = "lifecycle"
 )
 
 func (c Config) ValidateWorkerProfile() error {
 	switch c.WorkerProfile {
-	case WorkerProfileAll, WorkerProfileIntegrations:
+	case WorkerProfileAll, WorkerProfileIntegrations, WorkerProfileLifecycle:
 		return nil
 	default:
-		return fmt.Errorf("SYNAPSE_WORKER_PROFILE must be %q or %q (got %q)", WorkerProfileAll, WorkerProfileIntegrations, c.WorkerProfile)
+		return fmt.Errorf("SYNAPSE_WORKER_PROFILE must be %q, %q, or %q (got %q)", WorkerProfileAll, WorkerProfileIntegrations, WorkerProfileLifecycle, c.WorkerProfile)
 	}
 }
 
 // ValidateWorkerSandboxPosture preserves the scanner worker's production fail-closed
-// sandbox gate while allowing the integration-only worker, which never constructs or
-// claims an executable-tool handler.
+// sandbox gate while allowing data-only workers, which never construct or claim an
+// executable-tool handler.
 func (c Config) ValidateWorkerSandboxPosture() error {
-	if c.WorkerProfile == WorkerProfileIntegrations {
+	if c.WorkerProfile == WorkerProfileIntegrations || c.WorkerProfile == WorkerProfileLifecycle {
 		return nil
 	}
 	return c.ValidateSandboxPosture()
@@ -1154,7 +1155,7 @@ func (c Config) ResolveToolExecution(role ProcessRole) (ToolExecution, error) {
 		if c.DBDSN == "" {
 			return "", errors.New("synapse-worker requires SYNAPSE_DB_DSN: queued execution cannot use process-local persistence")
 		}
-		if c.IsProduction() && !c.SandboxEnabled && c.WorkerProfile != WorkerProfileIntegrations {
+		if c.IsProduction() && !c.SandboxEnabled && c.WorkerProfile != WorkerProfileIntegrations && c.WorkerProfile != WorkerProfileLifecycle {
 			return "", errors.New("production synapse-worker requires SYNAPSE_SANDBOX_ENABLED=true")
 		}
 		return ToolExecutionWorker, nil

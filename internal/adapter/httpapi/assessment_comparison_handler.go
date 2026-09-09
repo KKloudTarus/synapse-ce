@@ -49,6 +49,20 @@ func (rt *Router) getAssessmentComparison(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (rt *Router) getAssessmentComparisonSummary(w http.ResponseWriter, r *http.Request) {
+	summary, err := rt.assessmentComparisons.GetSummary(
+		r.Context(),
+		shared.ID(TenantFrom(r.Context())),
+		shared.ID(r.PathValue("comparisonId")),
+		domain.Scope(strings.TrimSpace(r.URL.Query().Get("scope"))),
+	)
+	if err != nil {
+		writeAssessmentComparisonError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, summary)
+}
+
 func (rt *Router) listAssessmentComparisonItems(w http.ResponseWriter, r *http.Request) {
 	limit := 0
 	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
@@ -61,6 +75,7 @@ func (rt *Router) listAssessmentComparisonItems(w http.ResponseWriter, r *http.R
 	}
 	page, err := rt.assessmentComparisons.ListItems(r.Context(), comparisonuc.ListItemsInput{
 		TenantID: shared.ID(TenantFrom(r.Context())), ComparisonID: shared.ID(r.PathValue("comparisonId")), Cursor: r.URL.Query().Get("cursor"), Limit: limit,
+		Scope:    domain.Scope(strings.TrimSpace(r.URL.Query().Get("scope"))),
 		Presence: strings.TrimSpace(r.URL.Query().Get("presence")), ChangeFlag: domain.ChangeFlag(strings.TrimSpace(r.URL.Query().Get("change_flag"))),
 		Severity: shared.Severity(strings.TrimSpace(r.URL.Query().Get("severity"))), ProducerKind: r.URL.Query().Get("producer"), FindingKind: r.URL.Query().Get("finding_kind"),
 		Disposition: strings.TrimSpace(r.URL.Query().Get("disposition")), ReviewState: strings.TrimSpace(r.URL.Query().Get("review_state")),

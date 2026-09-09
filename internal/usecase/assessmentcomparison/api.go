@@ -106,6 +106,7 @@ type ListItemsInput struct {
 	ComparisonID shared.ID
 	Cursor       string
 	Limit        int
+	Scope        domain.Scope
 	Presence     string
 	ChangeFlag   domain.ChangeFlag
 	Severity     shared.Severity
@@ -174,6 +175,38 @@ func (service *Service) Get(ctx context.Context, tenantID, comparisonID shared.I
 	return projectComparison(comparison), nil
 }
 
+func (service *Service) GetSummary(ctx context.Context, tenantID, comparisonID shared.ID, scope domain.Scope) (domain.Summary, error) {
+	tenantID = shared.TenantOrDefault(tenantID)
+	if comparisonID.IsZero() {
+		return domain.Summary{}, fmt.Errorf("%w: comparison id is required", shared.ErrValidation)
+	}
+	if scope == "" {
+		scope = domain.ScopeAll
+	}
+	if !scope.Valid() {
+		return domain.Summary{}, fmt.Errorf("%w: comparison summary scope is invalid", shared.ErrValidation)
+	}
+	comparison, err := service.comparisons.GetMetadata(ctx, tenantID, comparisonID)
+	if err != nil {
+		return domain.Summary{}, err
+	}
+	if !isTerminal(comparison.Status) {
+		return domain.Summary{}, fmt.Errorf("%w: comparison summary is not ready", shared.ErrConflict)
+	}
+	if scope == domain.ScopeAll {
+		return comparison.Summary, nil
+	}
+	summary, err := service.comparisons.SummarizeItems(ctx, tenantID, comparisonID, scope)
+	if err != nil {
+		return domain.Summary{}, err
+	}
+	summary.ComparisonID = comparison.ID
+	summary.BaselineSnapshotID = comparison.BaselineSnapshotID
+	summary.CurrentSnapshotID = comparison.CurrentSnapshotID
+	summary.RiskModelVersion = comparison.RiskModelVersion
+	return summary, nil
+}
+
 func (service *Service) ListItems(ctx context.Context, input ListItemsInput) (ItemPage, error) {
 	input.TenantID = shared.TenantOrDefault(input.TenantID)
 	if input.ComparisonID.IsZero() {
@@ -182,8 +215,11 @@ func (service *Service) ListItems(ctx context.Context, input ListItemsInput) (It
 	if input.Limit == 0 {
 		input.Limit = DefaultAssessmentItemPageLimit
 	}
+	if input.Scope == "" {
+		input.Scope = domain.ScopeAll
+	}
 	input.ProducerKind, input.FindingKind = strings.TrimSpace(input.ProducerKind), strings.TrimSpace(input.FindingKind)
-	if input.Limit < 1 || input.Limit > MaxAssessmentItemPageLimit || input.ChangeFlag != "" && !input.ChangeFlag.Valid() || !validPresenceFilter(input.Presence) ||
+	if input.Limit < 1 || input.Limit > MaxAssessmentItemPageLimit || !input.Scope.Valid() || input.ChangeFlag != "" && !input.ChangeFlag.Valid() || !validPresenceFilter(input.Presence) ||
 		input.Severity != "" && !input.Severity.Valid() || !validItemTokenFilter(input.ProducerKind) || !validItemTokenFilter(input.FindingKind) ||
 		input.Disposition != "" && input.Disposition != "current_actionable" && input.Disposition != "baseline_only" && input.Disposition != "non_actionable" ||
 		input.ReviewState != "" && input.ReviewState != "needs_review" && input.ReviewState != "verified" && input.ReviewState != "clear" {
@@ -194,7 +230,7 @@ func (service *Service) ListItems(ctx context.Context, input ListItemsInput) (It
 		return ItemPage{}, &APIError{Code: "invalid_cursor", Cause: shared.ErrValidation}
 	}
 	page, err := service.comparisons.ListItems(ctx, input.TenantID, input.ComparisonID, ports.AssessmentComparisonItemFilter{
-		AfterPosition: after, Limit: input.Limit, Presence: input.Presence, ChangeFlag: input.ChangeFlag, Severity: input.Severity,
+		AfterPosition: after, Limit: input.Limit, Scope: input.Scope, Presence: input.Presence, ChangeFlag: input.ChangeFlag, Severity: input.Severity,
 		ProducerKind: input.ProducerKind, FindingKind: input.FindingKind, Disposition: input.Disposition, ReviewState: input.ReviewState,
 	})
 	if err != nil {

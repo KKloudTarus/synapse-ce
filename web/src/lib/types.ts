@@ -589,6 +589,7 @@ export interface AssessmentSnapshotListResponse {
 }
 
 export type AssessmentComparisonMode = 'lifecycle' | 'neutral_diff'
+export type AssessmentComparisonScope = 'vulnerability' | 'security' | 'all'
 export type AssessmentComparisonStatus = 'queued' | 'generating' | 'complete' | 'needs_review' | 'failed' | 'superseded'
 export type AssessmentComparisonPresence = 'new' | 'still_detected' | 'not_detected_under_comparable_coverage' | 'not_evaluated' | 'reopened' | 'needs_review'
 export type AssessmentComparisonNeutralPresence = 'only_in_a' | 'both' | 'only_in_b' | 'needs_review'

@@ -9,6 +9,7 @@ import {
   ShieldTick,
   ShieldZap,
   Sliders04,
+  SwitchHorizontal01,
   Target04,
 } from '@untitledui/icons'
 import { Button, cn, EmptyState, Spinner } from '../../components/ui'
@@ -119,8 +120,12 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'risk-stories', label: 'Risk Stories' },
       { id: 'vuln-posture', label: 'Vuln Posture' },
       { id: 'sla', label: 'Remediation SLA' },
-      { id: 'comparison', label: 'Comparison' },
     ],
+  },
+  {
+    id: 'comparison',
+    label: 'Comparison',
+    icon: SwitchHorizontal01,
   },
   {
     id: 'supply-chain',

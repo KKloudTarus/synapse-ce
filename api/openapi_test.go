@@ -397,6 +397,7 @@ func TestAssessmentComparisonOpenAPIContract(t *testing.T) {
 	for path, methods := range map[string]map[string]string{
 		"/api/v1/assessment-comparisons":                                       {"post": "createAssessmentComparison"},
 		"/api/v1/assessment-comparisons/{comparisonId}":                        {"get": "getAssessmentComparison"},
+		"/api/v1/assessment-comparisons/{comparisonId}/summary":                {"get": "getAssessmentComparisonSummary"},
 		"/api/v1/assessment-comparisons/{comparisonId}/items":                  {"get": "listAssessmentComparisonItems"},
 		"/api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/confirm": {"post": "confirmAssessmentComparisonItem"},
 		"/api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/unlink":  {"post": "unlinkAssessmentComparisonItem"},

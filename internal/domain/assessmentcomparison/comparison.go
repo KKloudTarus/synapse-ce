@@ -30,6 +30,36 @@ const (
 
 func (mode Mode) Valid() bool { return mode == ModeLifecycle || mode == ModeNeutral }
 
+// Scope constrains a read-model summary without changing the immutable comparison artifact.
+// The persisted comparison remains the authoritative all-finding projection; scoped summaries
+// are deterministic views over its immutable items.
+type Scope string
+
+const (
+	ScopeAll           Scope = "all"
+	ScopeVulnerability Scope = "vulnerability"
+	ScopeSecurity      Scope = "security"
+)
+
+func (scope Scope) Valid() bool {
+	return scope == ScopeAll || scope == ScopeVulnerability || scope == ScopeSecurity
+}
+
+func (scope Scope) Matches(item Item) bool {
+	switch scope {
+	case ScopeAll:
+		return true
+	case ScopeVulnerability:
+		return item.FindingKind == "vulnerability"
+	case ScopeSecurity:
+		switch item.FindingKind {
+		case "vulnerability", "sast", "secret", "misconfig":
+			return true
+		}
+	}
+	return false
+}
+
 const (
 	ReasonDirected                    = "directed"
 	ReasonNeutralSibling              = "neutral_sibling"

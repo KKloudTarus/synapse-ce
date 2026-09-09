@@ -72,6 +72,7 @@ func TestResolveToolExecution(t *testing.T) {
 		{name: "production worker requires sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "production worker accepts sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", SandboxEnabled: true}, role: ProcessRoleWorker, want: ToolExecutionWorker},
 		{name: "production integration worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileIntegrations}, role: ProcessRoleWorker, want: ToolExecutionWorker},
+		{name: "production lifecycle worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileLifecycle}, role: ProcessRoleWorker, want: ToolExecutionWorker},
 		{name: "worker refuses other mode", cfg: Config{Environment: "development", DBDSN: "postgres://runtime", ToolExecutionMode: "dispatch-only"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "CLI defaults in process", cfg: Config{}, role: ProcessRoleCLI, want: ToolExecutionInProcess},
 		{name: "CLI refuses other mode", cfg: Config{ToolExecutionMode: "worker"}, role: ProcessRoleCLI, wantErr: true},
@@ -99,6 +100,7 @@ func TestWorkerProfileValidation(t *testing.T) {
 		{value: "", valid: true},
 		{value: "all", valid: true},
 		{value: " INTEGRATIONS ", valid: true},
+		{value: " LIFECYCLE ", valid: true},
 		{value: "scanner", valid: false},
 	} {
 		t.Run(test.value, func(t *testing.T) {
@@ -114,6 +116,9 @@ func TestWorkerProfileValidation(t *testing.T) {
 func TestValidateWorkerSandboxPosture(t *testing.T) {
 	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileIntegrations}).ValidateWorkerSandboxPosture(); err != nil {
 		t.Fatalf("integration-only worker must not require executable-tool sandbox: %v", err)
+	}
+	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileLifecycle}).ValidateWorkerSandboxPosture(); err != nil {
+		t.Fatalf("lifecycle-only worker must not require executable-tool sandbox: %v", err)
 	}
 	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileAll}).ValidateWorkerSandboxPosture(); err == nil {
 		t.Fatal("full production worker must still require the sandbox")
