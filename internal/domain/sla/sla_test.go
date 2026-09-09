@@ -263,3 +263,88 @@ func contains(xs []string, want string) bool {
 	}
 	return false
 }
+
+// TestReachabilityFoldsIntoScore is EPIC #860 D4.5: the SAME finding scores DISTINCT tiers by its
+// authoritative reachability verdict — a publishable reachable verdict adds urgency, a publishable
+// deterministic not-reachable subtracts it — with the adjustment recorded in the breakdown. An absent
+// verdict (Unknown, the default) leaves the score exactly as it was, so a finding with no reachability
+// evidence is never moved.
+func TestReachabilityFoldsIntoScore(t *testing.T) {
+	cfg := DefaultConfig()
+	// A mid-band finding whose score sits near a tier boundary so the reachability adjustment crosses it.
+	base := Inputs{CVSSScore: 7.5, Exposure: ExposureInternal, Criticality: CriticalityMedium, Feasibility: FeasibilityPatchAvailable}
+
+	unknown := Compute(base, cfg, epoch)
+
+	reach := base
+	reach.Reachability, reach.ReachabilityTier = ReachabilityReachable, 2
+	reachable := Compute(reach, cfg, epoch)
+
+	dead := base
+	dead.Reachability, dead.ReachabilityTier = ReachabilityNotReachable, 2
+	notReachable := Compute(dead, cfg, epoch)
+
+	// The verdict must move the score: reachable strictly up, not-reachable strictly down, vs the neutral case.
+	if !(reachable.Score > unknown.Score) {
+		t.Errorf("reachable must add urgency: reachable=%.1f unknown=%.1f", reachable.Score, unknown.Score)
+	}
+	if !(notReachable.Score < unknown.Score) {
+		t.Errorf("proven not-reachable must subtract urgency: notReachable=%.1f unknown=%.1f", notReachable.Score, unknown.Score)
+	}
+	// The reachable and not-reachable verdicts must land on DISTINCT tiers (the acceptance criterion).
+	if reachable.Tier == notReachable.Tier {
+		t.Errorf("reachable and not-reachable must produce distinct tiers, both = %s", reachable.Tier)
+	}
+	if !moreUrgent(reachable.Tier, notReachable.Tier) {
+		t.Errorf("reachable tier %s must be more urgent than not-reachable tier %s", reachable.Tier, notReachable.Tier)
+	}
+	// The adjustment is recorded in the breakdown and audit trail.
+	if reachable.Breakdown.Reachability <= 0 {
+		t.Errorf("reachable breakdown contribution must be positive, got %.1f", reachable.Breakdown.Reachability)
+	}
+	if notReachable.Breakdown.Reachability >= 0 {
+		t.Errorf("not-reachable breakdown contribution must be negative, got %.1f", notReachable.Breakdown.Reachability)
+	}
+	if !hasOverridePrefix(reachable.Breakdown.Overrides, "reachability:reachable") {
+		t.Errorf("reachable must record an audit note, got %v", reachable.Breakdown.Overrides)
+	}
+	if !hasOverridePrefix(notReachable.Breakdown.Overrides, "reachability:not_reachable") {
+		t.Errorf("not-reachable must record an audit note, got %v", notReachable.Breakdown.Overrides)
+	}
+
+	// Tier scales the magnitude: a Tier-1 (import-level) verdict moves the score less than Tier-2.
+	t1 := base
+	t1.Reachability, t1.ReachabilityTier = ReachabilityReachable, 1
+	tier1 := Compute(t1, cfg, epoch)
+	if !(tier1.Breakdown.Reachability > 0 && tier1.Breakdown.Reachability < reachable.Breakdown.Reachability) {
+		t.Errorf("tier-1 adjustment %.1f must be positive but smaller than tier-2 %.1f", tier1.Breakdown.Reachability, reachable.Breakdown.Reachability)
+	}
+
+	// A verdict with no tier (rank 0) does not move the score, matching the neutral Unknown case.
+	notier := base
+	notier.Reachability = ReachabilityReachable // but ReachabilityTier stays 0
+	if got := Compute(notier, cfg, epoch); got.Breakdown.Reachability != 0 || got.Score != unknown.Score {
+		t.Errorf("a verdict with no tier must not move the score: contribution=%.1f score=%.1f", got.Breakdown.Reachability, got.Score)
+	}
+}
+
+func hasOverridePrefix(overrides []string, prefix string) bool {
+	for _, o := range overrides {
+		if len(o) >= len(prefix) && o[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+func TestConfigValidateBoundsReachabilityWeight(t *testing.T) {
+	cfg := DefaultConfig()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("default config must validate: %v", err)
+	}
+	// A reachability weight above the severity weight is rejected: reachability must never outweigh severity.
+	cfg.Weights.Reachability = cfg.Weights.Severity + 1
+	if err := cfg.Validate(); err == nil {
+		t.Error("a reachability weight exceeding the severity weight must be rejected")
+	}
+}
