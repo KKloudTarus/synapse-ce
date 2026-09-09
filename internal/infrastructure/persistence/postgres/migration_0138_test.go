@@ -89,8 +89,8 @@ func TestMigration0138ProductionOwnerPath(t *testing.T) {
 		t.Fatalf("seed pre-0138 legacy row: %v", err)
 	}
 
-	if err := goose.UpTo(db, ".", 138); err != nil {
-		t.Fatalf("apply 0138 as non-bypass owner: %v", err)
+	if err := goose.UpTo(db, ".", 144); err != nil {
+		t.Fatalf("apply 0144 as non-bypass owner: %v", err)
 	}
 
 	var superuser, bypassRLS bool
@@ -210,8 +210,8 @@ func TestMigration0138ProductionOwnerPath(t *testing.T) {
 	if bridgeExists {
 		t.Fatal("rollback left the transitional scan-run tenant bridge")
 	}
-	if err := goose.UpTo(db, ".", 138); err != nil {
-		t.Fatalf("reapply 0138: %v", err)
+	if err := goose.UpTo(db, ".", 144); err != nil {
+		t.Fatalf("reapply 0144: %v", err)
 	}
 }
 
