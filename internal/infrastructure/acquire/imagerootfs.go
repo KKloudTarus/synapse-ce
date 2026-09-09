@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -88,8 +90,15 @@ func ociLayerBlobs(layoutDir string) ([]string, error) {
 	return paths, nil
 }
 
-// applyLayer opens a layer blob, detects its compression by magic (gzip; zstd is rejected with a clear reason
-// since it is unsupported; anything else is treated as a raw tar), and applies it onto dest.
+// maxZstdWindow caps the zstd decoder's decompression window so a frame declaring a huge window is
+// refused BEFORE any large allocation (real OCI layers use windows well under this). It bounds the
+// decoder's own memory the way applyTar's caps bound the decompressed OUTPUT.
+const maxZstdWindow = 64 << 20 // 64 MiB
+
+// applyLayer opens a layer blob, detects its compression by magic (gzip or zstd, the two OCI layer
+// compressions; anything else is treated as a raw tar), and applies it onto dest. The per-entry byte
+// and count caps in applyTar bound the DECOMPRESSED output, so a compression bomb is caught for either
+// codec; the zstd decoder is capped to maxZstdWindow so its own window allocation is bounded too.
 func (x *rootfsExtractor) applyLayer(blob string) error {
 	f, err := os.Open(blob)
 	if err != nil {
@@ -108,7 +117,12 @@ func (x *rootfsExtractor) applyLayer(blob string) error {
 		defer func() { _ = gz.Close() }()
 		return x.applyTar(tar.NewReader(gz))
 	case len(magic) == 4 && magic[0] == 0x28 && magic[1] == 0xb5 && magic[2] == 0x2f && magic[3] == 0xfd: // zstd
-		return fmt.Errorf("%w: unsupported layer compression (zstd); rootfs not materialized", shared.ErrValidation)
+		zr, zerr := zstd.NewReader(br, zstd.WithDecoderMaxWindow(maxZstdWindow))
+		if zerr != nil {
+			return fmt.Errorf("%w: layer zstd: %v", shared.ErrValidation, zerr)
+		}
+		defer zr.Close()
+		return x.applyTar(tar.NewReader(zr))
 	default:
 		return x.applyTar(tar.NewReader(br)) // uncompressed tar (garbage bytes surface as a tar error)
 	}
