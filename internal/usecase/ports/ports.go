@@ -1551,6 +1551,11 @@ type PyImportGraph struct {
 	FirstPartyModules []string // the project's own top-level modules (import roots), for provenance
 	DynamicImports    bool     // first-party code uses __import__ / importlib – a not-imported conclusion is unsafe
 	FilesScanned      int
+	// CoverageDegraded is true when some first-party source could not be fully observed (an unreadable entry,
+	// the per-file byte cap truncated a file, or the file-count cap stopped the walk). A missed import in the
+	// unscanned region would be a false "not imported", so the analyzer must refuse a not-reachable verdict
+	// when this is set – matching the Complete()/Coverage refusal the Rust/PHP/Ruby and JS scanners already do.
+	CoverageDegraded bool
 }
 
 // PyImportScanner reads a target's FIRST-PARTY Python source and returns its import surface. It is

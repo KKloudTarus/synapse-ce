@@ -239,12 +239,12 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | `SYNAPSE_REACHABILITY_ENABLED` | `true` | Go Tier-2 call-graph reachability proof (best-effort). |
 | `SYNAPSE_REACHABILITY_BUILDER` | `owned` | Go Tier-2 call-graph producer: `owned` (Synapse's own go/ssa builder, no third-party engine) or `govulncheck`. |
 | `SYNAPSE_JVM_REACHABILITY_ENABLED` | `true` | JVM (Java/Kotlin) reachability. |
-| `SYNAPSE_PYREACH_ENABLED` | `false` | Python Tier-1 import-reachability: a declared DIRECT dependency never imported by first-party source becomes an OpenVEX `not_affected` (transitive deps are refused, not answered). |
+| `SYNAPSE_PYREACH_ENABLED` | `true` | Python Tier-1 import-reachability: a declared DIRECT dependency never imported by first-party source becomes an OpenVEX `not_affected` (transitive deps are refused, not answered). Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python Tier-2 affected-symbol semantic reachability. Requires Tier-1, judgments, and a CGO-enabled `synapse-ast`. |
 | `SYNAPSE_PYTAINT_ENABLED` | `true` | Python interprocedural semantic taint proposals (default-on when the synapse-ast sidecar resolves; a clean no-op otherwise). Requires judgments and a CGO-enabled `synapse-ast`; it does not require the target-compilation sandbox. |
 | `SYNAPSE_TRISCORE_REASSESS_ENABLED` | `false` | Tri-score risk reassessment surface (`POST /api/v1/fleet/incidents/{id}/risk/reassess`): re-scores an incident's RiskAssessment via the deterministic Scorer. Threat is live; Exposure/Behavior/Coverage abstain until their producers are wired. |
 | `SYNAPSE_AST_BIN` | bundled / `PATH` | Optional path to the `synapse-ast` sidecar used by Python Tier-2 reachability, Python taint, and code-quality analysis. |
-| `SYNAPSE_JSREACH_ENABLED` | `false` | JS/TS Tier-1 import-level reachability. |
+| `SYNAPSE_JSREACH_ENABLED` | `true` | JS/TS Tier-1 import-level reachability. Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_JSREACH_TIER2_ENABLED` | `false` | JS/TS Tier-2 symbol-level reachability. |
 
 ## Fleet, leader election, and DAST
@@ -382,7 +382,7 @@ All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 | `SYNAPSE_SAST_ENABLED` | `true` | Pattern SAST in the scan pipeline. |
 | `SYNAPSE_REACHABILITY_ENABLED` | `true` | Call-graph reachability proof (Go, Tier-2). Needs judgments. |
 | `SYNAPSE_REACHABILITY_BUILDER` | `owned` | Reachability call-graph producer: `owned` (go/ssa, default) or `govulncheck`. |
-| `SYNAPSE_PYREACH_ENABLED` | `false` | Python import-reachability (Tier-1 direct dead-dependency → OpenVEX). Needs judgments. |
+| `SYNAPSE_PYREACH_ENABLED` | `true` | Python import-reachability (Tier-1 direct dead-dependency → OpenVEX). Default ON. Needs judgments. |
 | `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python semantic call-graph reachability (Tier-2). Requires Python Tier-1 and `synapse-ast`. |
 | `SYNAPSE_TAINT_ENABLED` | `false` | Go call-graph taint proposals. Needs judgments and the target-compilation sandbox. |
 | `SYNAPSE_PYTAINT_ENABLED` | `true` | Python value-flow taint proposals (default-on when synapse-ast resolves). Needs judgments and `synapse-ast`; source-only, so the sandbox is optional. |
@@ -497,9 +497,9 @@ The following variables are read by `synapse-agent` and `synapse-cluster-agent`,
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_API_URL` | empty | Server base URL used by `synapse-cli publish-source`; overridden by `--server`. |
-| `SYNAPSE_REACH_RUST` | `false` | Enable conservative Rust manifest/import reachability. |
-| `SYNAPSE_REACH_RUBY` | `false` | Enable conservative Ruby manifest/import reachability. |
-| `SYNAPSE_REACH_PHP` | `false` | Enable conservative PHP manifest/import reachability. |
+| `SYNAPSE_REACH_RUST` | `true` | Conservative Rust manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |
+| `SYNAPSE_REACH_RUBY` | `true` | Conservative Ruby manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |
+| `SYNAPSE_REACH_PHP` | `true` | Conservative PHP manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |
 
 ## MCP server (synapse-mcp)
 

@@ -552,6 +552,8 @@ var analysisDefaultOnEnv = []string{
 	"SYNAPSE_COMPLIANCE_ENABLED", "SYNAPSE_SCAN_CACHE_ENABLED", "SYNAPSE_IMAGE_ROOTFS_ENABLED",
 	"SYNAPSE_OWNED_ADVISORY", "SYNAPSE_REACHABILITY_ENABLED", "SYNAPSE_CROSSCHECK_ENABLED",
 	"SYNAPSE_SBOM_CROSSCHECK_ENABLED", "SYNAPSE_GOMODGRAPH_ENABLED", "SYNAPSE_JVM_REACHABILITY_ENABLED",
+	"SYNAPSE_PYREACH_ENABLED", "SYNAPSE_JSREACH_ENABLED", "SYNAPSE_REACH_RUST",
+	"SYNAPSE_REACH_PHP", "SYNAPSE_REACH_RUBY",
 }
 
 // TestAnalysisDefaultsOn pins the effective-by-default policy: every deterministic, best-effort
@@ -569,6 +571,12 @@ func TestAnalysisDefaultsOn(t *testing.T) {
 		"OwnedAdvisory": c.OwnedAdvisoryEnabled, "Reachability": c.ReachabilityEnabled,
 		"CrossCheck": c.CrossCheckEnabled, "SBOMCrossCheck": c.SBOMCrossCheckEnabled,
 		"GoModGraph": c.GoModGraphEnabled, "JVMReachability": c.JVMReachabilityEnabled,
+		// Source-only Tier-1 import reachability (D4.2): default ON. Each fails to "unknown" on any coverage
+		// gap and only ever produces a bounded, independently-confirmed priority de-escalation, never a
+		// suppression, so default-on cannot hide a real vulnerability.
+		"PyReach": c.PyReachabilityEnabled, "JSReach": c.JSReachabilityEnabled,
+		"RustReach": c.RustReachabilityEnabled, "PHPReach": c.PHPReachabilityEnabled,
+		"RubyReach": c.RubyReachabilityEnabled,
 	}
 	for name, v := range on {
 		if !v {
@@ -579,6 +587,10 @@ func TestAnalysisDefaultsOn(t *testing.T) {
 	t.Setenv("SYNAPSE_SAST_ENABLED", "false")
 	if Load().SASTEnabled {
 		t.Error("SYNAPSE_SAST_ENABLED=false must disable it")
+	}
+	t.Setenv("SYNAPSE_PYREACH_ENABLED", "false")
+	if Load().PyReachabilityEnabled {
+		t.Error("SYNAPSE_PYREACH_ENABLED=false must disable Tier-1 python reachability")
 	}
 }
 
