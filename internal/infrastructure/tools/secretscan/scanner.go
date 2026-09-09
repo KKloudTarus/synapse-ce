@@ -704,5 +704,21 @@ func defaultRules() []rule {
 			keywords: []string{"CLOJARS_"},
 			re:       regexp.MustCompile(`\bCLOJARS_[A-Za-z0-9]{60}\b`),
 		},
+		// ── AI/dev SaaS provider tokens (distinctive prefixes; lower-bound lengths since exact bodies vary) ──
+		{
+			id: "sentry-auth-token", category: "Sentry", title: "Sentry auth token", severity: shared.SeverityHigh,
+			keywords: []string{"sntrys_"},
+			re:       regexp.MustCompile(`\bsntrys_[A-Za-z0-9_=-]{40,}`),
+		},
+		{
+			id: "readme-api-key", category: "ReadMe", title: "ReadMe API key", severity: shared.SeverityHigh,
+			keywords: []string{"rdme_"},
+			re:       regexp.MustCompile(`\brdme_[A-Za-z0-9]{40,}\b`),
+		},
+		{
+			id: "figma-token", category: "Figma", title: "Figma personal access token", severity: shared.SeverityHigh,
+			keywords: []string{"figd_"},
+			re:       regexp.MustCompile(`\bfigd_[A-Za-z0-9_-]{40,}`),
+		},
 	}
 }

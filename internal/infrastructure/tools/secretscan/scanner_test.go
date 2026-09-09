@@ -356,3 +356,30 @@ func TestInlineAllowSuppressesLine(t *testing.T) {
 		}
 	}
 }
+
+func TestDetectsSaaSProviderTokens(t *testing.T) {
+	// Tokens split into prefix + body concatenations so no contiguous secret-shaped literal exists here.
+	body := "aB3cD4eF5gH6iJ7kL8mN9oP0qR1sT2uV3wX4yZ5a" // 40 chars, meets each detector's minimum
+	rs := scanDir(t, map[string]string{
+		"sentry.env": "SENTRY_AUTH_TOKEN=sntrys_" + body + "\n",
+		"readme.env": "README_API_KEY=rdme_" + body + "\n",
+		"figma.env":  "FIGMA_TOKEN=figd_" + body + "\n",
+	})
+	for _, id := range []string{"sentry-auth-token", "readme-api-key", "figma-token"} {
+		if hasRule(rs, id) == nil {
+			t.Errorf("expected a %q finding, got %+v", id, rs)
+		}
+	}
+}
+
+func TestSaaSProviderTokensNearMissNoMatch(t *testing.T) {
+	// Prefix present but the body is far too short: no match, so a lookalike is not a false positive.
+	rs := scanDir(t, map[string]string{
+		"a.env": "K=sntrys_short\n",
+		"b.env": "K=rdme_short\n",
+		"c.env": "K=figd_short\n",
+	})
+	if len(rs) != 0 {
+		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
+	}
+}

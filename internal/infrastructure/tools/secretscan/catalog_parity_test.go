@@ -75,6 +75,9 @@ func TestCatalogParity(t *testing.T) {
 		"gitlab-pipeline-trigger-token": "CWE-798",
 		"pulumi-access-token":           "CWE-798",
 		"clojars-deploy-token":          "CWE-798",
+		"sentry-auth-token":             "CWE-798",
+		"readme-api-key":                "CWE-798",
+		"figma-token":                   "CWE-798",
 	}
 	builtin := defaultRules()
 	seenInBuiltin := make(map[string]bool, len(builtin))
