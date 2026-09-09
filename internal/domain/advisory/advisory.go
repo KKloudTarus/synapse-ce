@@ -1,5 +1,7 @@
 package advisory
 
+import "github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+
 // Advisory is one normalized vulnerability advisory in the OWNED store: a stable id, cross-feed
 // aliases, severity, and the affected packages each with their version ranges / explicit versions. It is
 // the feed-agnostic shape an OSV/CSAF/NVD ingester normalizes into, and the unit the owned matcher +
@@ -17,6 +19,11 @@ type Advisory struct {
 	// it. omitempty keeps it out of existing stored blobs. Set by the parser (ownadvisory.ParseOSV)
 	// and by the materializer projection from the canonical Status.
 	Withdrawn bool `json:"Withdrawn,omitempty"`
+	// Severity is a curated qualitative band carried from the feed (GHSA/OSV
+	// database_specific.severity, an NVD/distro label) for advisories that have no CVSS vector to
+	// score. omitempty; the matcher prefers a score-derived band and falls back to this, mirroring the
+	// live OSV adapter where a curated label overrides the computed band. Set by ownadvisory.ParseOSV.
+	Severity shared.Severity `json:"Severity,omitempty"`
 }
 
 type CPEMatch struct {

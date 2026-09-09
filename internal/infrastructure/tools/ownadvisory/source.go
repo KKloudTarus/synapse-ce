@@ -168,6 +168,11 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string) vulnerabili
 	if score > 0 {
 		rf.Severity = shared.SeverityFromScore(score)
 	}
+	// A curated feed label overrides the score-derived band (parity with the live OSV adapter), and is
+	// the only band for a label-only advisory with no CVSS vector - so an offline scan still orders it.
+	if a.Severity != "" && a.Severity != shared.SeverityUnknown {
+		rf.Severity = a.Severity
+	}
 	return rf
 }
 
