@@ -92,3 +92,136 @@ func TestAdvisoryRepository(t *testing.T) {
 		t.Fatalf("empty advisory id: want ErrValidation, got %v", err)
 	}
 }
+
+// TestAdvisoryRepositoryUpsertPreservesEnrichment is the D1.2 corpus-clobber guard at the Postgres layer:
+// the canonical materializer merges KEV/EPSS/PublicExploit onto an advisory's JSONB, then a bulk-feed re-sync
+// via Upsert (which carries none) must NOT lower them. Base fields still refresh. Runs only under a real DB.
+func TestAdvisoryRepositoryUpsertPreservesEnrichment(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	repo := NewAdvisoryRepository(pool)
+	id := "CVE-" + randHex(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM advisories WHERE id=$1", id); err != nil {
+			t.Errorf("cleanup advisory %s: %v", id, err)
+		}
+	})
+
+	// First write carries the risk enrichment the materializer would have merged in.
+	enriched := advisory.Advisory{
+		ID: id, Summary: "enriched", CVSSScore: 9.8,
+		KEV: true, PublicExploit: true, EPSS: 0.88, EPSSPercentile: 0.97,
+		Affected: []advisory.AffectedPackage{{Ecosystem: "npm", Package: "left-pad", FixedVersion: "1.3.0"}},
+	}
+	if err := repo.Upsert(ctx, enriched); err != nil {
+		t.Fatalf("upsert enriched: %v", err)
+	}
+
+	// Bulk-feed re-sync: refreshed base fields, zero risk signals.
+	bare := advisory.Advisory{
+		ID: id, Summary: "refreshed base", CVSSScore: 9.8,
+		Affected: []advisory.AffectedPackage{{Ecosystem: "npm", Package: "left-pad", FixedVersion: "1.3.0"}},
+	}
+	if err := repo.Upsert(ctx, bare); err != nil {
+		t.Fatalf("re-upsert bare: %v", err)
+	}
+
+	got, err := repo.ByPackage(ctx, "npm", "left-pad")
+	if err != nil {
+		t.Fatalf("ByPackage: %v", err)
+	}
+	var found *advisory.Advisory
+	for i := range got {
+		if got[i].ID == id {
+			found = &got[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("advisory %s not found after re-sync", id)
+	}
+	if !found.KEV || !found.PublicExploit || found.EPSS != 0.88 || found.EPSSPercentile != 0.97 {
+		t.Errorf("risk enrichment clobbered: KEV=%v PublicExploit=%v EPSS=%v EPSSPct=%v",
+			found.KEV, found.PublicExploit, found.EPSS, found.EPSSPercentile)
+	}
+	if found.Summary != "refreshed base" {
+		t.Errorf("base summary not refreshed: got %q", found.Summary)
+	}
+}
+
+// TestAdvisoryRepositoryUpsertConcurrentInsertKeepsEnrichment proves the advisory-lock race fix: two
+// concurrent Upserts of the SAME new id (one enriched, one bare) must not clobber the enrichment, regardless
+// of which commits first. A plain SELECT ... FOR UPDATE cannot lock a not-yet-inserted row, so without the
+// pg_advisory_xact_lock both inserts could each see no prior row and the bare one could land last, dropping
+// KEV/EPSS. Under the lock the two writers serialize and the enrichment survives. Runs only under a real DB.
+func TestAdvisoryRepositoryUpsertConcurrentInsertKeepsEnrichment(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	repo := NewAdvisoryRepository(pool)
+	// Repeat to exercise both commit orderings under contention.
+	for i := 0; i < 8; i++ {
+		id := "CVE-" + randHex(t)
+		func() {
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), "DELETE FROM advisories WHERE id=$1", id)
+			})
+			enriched := advisory.Advisory{
+				ID: id, Summary: "enriched", CVSSScore: 9.8, KEV: true, EPSS: 0.9,
+				Affected: []advisory.AffectedPackage{{Ecosystem: "npm", Package: "left-pad", FixedVersion: "1.3.0"}},
+			}
+			bare := advisory.Advisory{
+				ID: id, Summary: "bare", CVSSScore: 9.8,
+				Affected: []advisory.AffectedPackage{{Ecosystem: "npm", Package: "left-pad", FixedVersion: "1.3.0"}},
+			}
+			start := make(chan struct{})
+			done := make(chan error, 2)
+			go func() { <-start; done <- repo.Upsert(ctx, enriched) }()
+			go func() { <-start; done <- repo.Upsert(ctx, bare) }()
+			close(start)
+			for j := 0; j < 2; j++ {
+				if err := <-done; err != nil {
+					t.Fatalf("concurrent upsert: %v", err)
+				}
+			}
+			got, err := repo.ByPackage(ctx, "npm", "left-pad")
+			if err != nil {
+				t.Fatalf("ByPackage: %v", err)
+			}
+			var found *advisory.Advisory
+			for k := range got {
+				if got[k].ID == id {
+					found = &got[k]
+				}
+			}
+			if found == nil {
+				t.Fatalf("advisory %s missing after concurrent upsert", id)
+			}
+			if !found.KEV || found.EPSS != 0.9 {
+				t.Fatalf("enrichment lost to a concurrent bare insert (iter %d): KEV=%v EPSS=%v", i, found.KEV, found.EPSS)
+			}
+		}()
+	}
+}

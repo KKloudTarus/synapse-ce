@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
@@ -55,15 +57,39 @@ func (r *AdvisoryRepository) Upsert(ctx context.Context, a advisory.Advisory) er
 	if a.ID == "" {
 		return fmt.Errorf("%w: advisory id is empty", shared.ErrValidation)
 	}
-	blob, err := json.Marshal(a)
-	if err != nil {
-		return fmt.Errorf("marshal advisory: %w", err)
-	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin advisory upsert: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op once Commit succeeds; matches the package norm
+	// Serialize every writer of this advisory identity on a transaction-scoped advisory lock, then carry the
+	// prior row's exploitation-risk enrichment forward instead of overwriting it to zero. The bulk feed this
+	// writer serves has no KEV/EPSS/PublicExploit, so a blind `data = EXCLUDED.data` would LOWER the signals
+	// the canonical materializer merged in (the corpus clobber). The advisory lock is the same primitive
+	// advisory_materializer.Materialize takes per identity, keyed on the normalized id via the identical
+	// hashtextextended($1,0), so it holds regardless of whether the row already exists - a plain
+	// SELECT ... FOR UPDATE cannot lock a not-yet-inserted row, so two concurrent inserts of a new id would
+	// still clobber. Under the lock the read-then-write cannot lose an update.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, strings.ToUpper(strings.TrimSpace(a.ID))); err != nil {
+		return fmt.Errorf("lock advisory identity %s: %w", a.ID, err)
+	}
+	var priorBlob []byte
+	switch err := tx.QueryRow(ctx, `SELECT data FROM advisories WHERE id = $1`, a.ID).Scan(&priorBlob); {
+	case err == nil:
+		var prior advisory.Advisory
+		if uerr := json.Unmarshal(priorBlob, &prior); uerr != nil {
+			return fmt.Errorf("decode prior advisory %s: %w", a.ID, uerr)
+		}
+		a = a.PreserveEnrichment(prior)
+	case errors.Is(err, pgx.ErrNoRows):
+		// New advisory: nothing to preserve.
+	default:
+		return fmt.Errorf("load prior advisory %s: %w", a.ID, err)
+	}
+	blob, err := json.Marshal(a)
+	if err != nil {
+		return fmt.Errorf("marshal advisory: %w", err)
+	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO advisories (id, data, created_at, updated_at) VALUES ($1, $2, now(), now())
 		 ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,

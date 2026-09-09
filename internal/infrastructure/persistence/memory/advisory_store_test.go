@@ -80,3 +80,42 @@ func TestAdvisoryStoreSkipsEmptyKeys(t *testing.T) {
 		t.Fatalf("the valid block must still index, got %+v", got)
 	}
 }
+
+// TestAdvisoryStoreReSyncPreservesRiskEnrichment pins the corpus-clobber guard (D1.2 enrichment half): the
+// canonical materializer merges KEV/EPSS/PublicExploit onto an advisory, then a bulk-feed re-sync (which
+// carries none) must NOT lower them. Base fields still refresh; a narrowed affected set still takes effect.
+func TestAdvisoryStoreReSyncPreservesRiskEnrichment(t *testing.T) {
+	ctx := context.Background()
+	s := NewAdvisoryStore()
+	enriched := advisory.Advisory{
+		ID:            "CVE-2026-9000",
+		Summary:       "enriched by the risk pipeline",
+		KEV:           true,
+		PublicExploit: true,
+		EPSS:          0.88,
+		Affected:      []advisory.AffectedPackage{ap("npm", "left-pad")},
+	}
+	if err := s.Upsert(ctx, enriched); err != nil {
+		t.Fatal(err)
+	}
+	// Bulk feed re-sync: fresh base fields, zero risk signals.
+	bare := advisory.Advisory{
+		ID:       "CVE-2026-9000",
+		Summary:  "refreshed base summary",
+		Affected: []advisory.AffectedPackage{ap("npm", "left-pad")},
+	}
+	if err := s.Upsert(ctx, bare); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.ByPackage(ctx, "npm", "left-pad")
+	if len(got) != 1 {
+		t.Fatalf("want 1 advisory, got %d", len(got))
+	}
+	a := got[0]
+	if !a.KEV || !a.PublicExploit || a.EPSS != 0.88 {
+		t.Errorf("risk enrichment clobbered on re-sync: KEV=%v PublicExploit=%v EPSS=%v", a.KEV, a.PublicExploit, a.EPSS)
+	}
+	if a.Summary != "refreshed base summary" {
+		t.Errorf("base summary not refreshed: got %q", a.Summary)
+	}
+}
