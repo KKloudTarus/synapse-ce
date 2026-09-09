@@ -868,6 +868,7 @@ dom-xss-inner-html
 doppler-token
 dynamic-code-eval
 dynatrace-token
+figma-token
 gcp-service-account-key
 generic-command-injection-sink
 generic-secret
@@ -2603,6 +2604,7 @@ rb:weak-hash
 rb:xss-html-safe
 rb:xss-raw
 react-dangerous-html
+readme-api-key
 redos-vulnerable-regex
 reflected-response-write
 reliability-constant-condition
@@ -2818,6 +2820,7 @@ scala:var-in-functional
 scala:wildcard-import
 sendgrid-api-key
 sensitive-data-logging
+sentry-auth-token
 sentry-dsn
 server-template-injection
 shopify-token
