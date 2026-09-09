@@ -1,12 +1,13 @@
 // Package fleetclient is the agent-side HTTP client for the fleet transport (#410): it enrols,
 // heartbeats, claims work and reports results against the control plane's /api/v1/fleet API. It is
-// used by the synapse-agent binary. All requests carry the protocol version header and a bearer
-// credential; the agent's certificate/token is supplied by the caller and never logged here.
+// used by the synapse-agent binary. Enrollment uses its one-time bearer credential; subsequent
+// production traffic uses the issued client certificate and private key, which are never logged.
 package fleetclient
 
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -29,8 +31,10 @@ const maxResponseBytes = 8 << 20
 
 // Client talks to the control plane fleet API.
 type Client struct {
-	baseURL string
-	http    *http.Client
+	baseURL           string
+	enrollmentURL     string
+	http              *http.Client
+	clientCertificate bool
 }
 
 // HTTPError preserves the response metadata the durable delivery loop needs to distinguish retryable
@@ -81,10 +85,57 @@ func IsNetworkError(err error) bool {
 
 // New builds a client for baseURL (e.g. https://control-plane). timeout bounds each request.
 func New(baseURL string, timeout time.Duration) *Client {
+	return NewWithEnrollmentURL(baseURL, baseURL, timeout)
+}
+
+// NewWithEnrollmentURL separates the TLS-only one-time enrollment endpoint from the strict mTLS
+// endpoint used after enrollment. Both URLs must identify the same control plane trust domain.
+func NewWithEnrollmentURL(baseURL, enrollmentURL string, timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	return &Client{baseURL: baseURL, http: &http.Client{Timeout: timeout}}
+	return &Client{baseURL: baseURL, enrollmentURL: enrollmentURL, http: &http.Client{Timeout: timeout}}
+}
+
+// ActivateCredential installs the enrolled agent's client certificate on the HTTP transport. A
+// certificate-less bearer transport is retained only for an explicitly configured loopback control
+// plane used by local development and tests.
+func (c *Client) ActivateCredential(cred Credential, keyPEM []byte) error {
+	if strings.TrimSpace(cred.CertificatePEM) == "" {
+		u, err := url.Parse(c.baseURL)
+		if err == nil && isLoopbackHost(u.Hostname()) {
+			return nil
+		}
+		return errors.New("fleetclient: enrolled control-plane credential has no client certificate")
+	}
+	pair, err := tls.X509KeyPair([]byte(cred.CertificatePEM), keyPEM)
+	if err != nil {
+		return fmt.Errorf("fleetclient: load enrolled client certificate: %w", err)
+	}
+
+	var transport *http.Transport
+	current := c.http.Transport
+	if current == nil {
+		current = http.DefaultTransport
+	}
+	switch current := current.(type) {
+	case *http.Transport:
+		transport = current.Clone()
+	default:
+		return fmt.Errorf("fleetclient: client certificate requires an HTTP transport, got %T", current)
+	}
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	} else {
+		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+		if transport.TLSClientConfig.MinVersion < tls.VersionTLS12 {
+			transport.TLSClientConfig.MinVersion = tls.VersionTLS12
+		}
+	}
+	transport.TLSClientConfig.Certificates = []tls.Certificate{pair}
+	c.http.Transport = transport
+	c.clientCertificate = true
+	return nil
 }
 
 // EnrolRequest is the agent's enrolment payload; CSRPEM is optional (certificate identity).
@@ -131,15 +182,21 @@ type PrivacyPolicyResponse struct {
 }
 
 type Order struct {
-	ID         string `json:"ID"`
-	Capability string `json:"Capability"`
-	AssetID    string `json:"AssetID"`
+	ID              string                                 `json:"ID"`
+	Capability      string                                 `json:"Capability"`
+	AssetID         string                                 `json:"AssetID"`
+	IdempotencyKey  string                                 `json:"IdempotencyKey"`
+	LeaseID         string                                 `json:"LeaseID"`
+	LeaseUntil      time.Time                              `json:"LeaseUntil"`
+	ResponseCommand *fleetagent.ResponseCommand            `json:"ResponseCommand,omitempty"`
+	ResponseHalt    *fleetagent.ResponseHaltCommand        `json:"ResponseHalt,omitempty"`
+	ResponseObserve *fleetagent.ResponseObservationRequest `json:"ResponseObserve,omitempty"`
 }
 
 // Enrol exchanges an enrolment token for an agent credential.
 func (c *Client) Enrol(ctx context.Context, enrolToken string, req EnrolRequest) (EnrolResponse, error) {
 	var out EnrolResponse
-	err := c.do(ctx, http.MethodPost, "/api/v1/fleet/enrol", enrolToken, req, &out)
+	err := c.doAtBase(ctx, c.enrollmentURL, http.MethodPost, "/api/v1/fleet/enrol", enrolToken, req, &out)
 	return out, err
 }
 
@@ -150,6 +207,9 @@ type HeartbeatResponse struct {
 	Proto                    string `json:"proto"`
 	ControlPlaneVersion      string `json:"control_plane_version"`
 	MinSupportedAgentVersion string `json:"min_supported_agent_version"`
+	ResponseHalted           bool   `json:"response_halted"`
+	ResponseHaltGeneration   int64  `json:"response_halt_generation"`
+	ResponseObserverAssetID  string `json:"response_observer_asset_id"`
 }
 
 // Heartbeat reports liveness and current attributes and returns the control plane's version-skew
@@ -175,14 +235,31 @@ func (c *Client) ClaimWork(ctx context.Context, token string, max int) ([]Order,
 }
 
 // Progress moves an order into the running state.
-func (c *Client) Progress(ctx context.Context, token, orderID string) error {
-	return c.do(ctx, http.MethodPost, "/api/v1/fleet/work/"+url.PathEscape(orderID)+"/progress", token, nil, nil)
+func (c *Client) Progress(ctx context.Context, token, orderID, leaseID string) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/fleet/work/"+url.PathEscape(orderID)+"/progress", token, map[string]string{"lease_id": leaseID}, nil)
 }
 
 // SubmitResult reports the terminal outcome of an order.
-func (c *Client) SubmitResult(ctx context.Context, token, orderID, status, reason string) error {
+func (c *Client) SubmitResult(ctx context.Context, token, orderID, leaseID, status, reason string) error {
 	return c.do(ctx, http.MethodPost, "/api/v1/fleet/work/"+url.PathEscape(orderID)+"/result", token,
-		map[string]string{"status": status, "reason": reason}, nil)
+		map[string]string{"status": status, "reason": reason, "lease_id": leaseID}, nil)
+}
+
+type ResponseResultRequest struct {
+	Status         string                            `json:"status"`
+	Reason         string                            `json:"reason"`
+	AttemptKey     string                            `json:"attempt_key"`
+	CommandDigest  string                            `json:"command_digest"`
+	ExecutionState fleetagent.ResponseExecutionState `json:"execution_state"`
+	ObservedRadius offensivepolicy.Radius            `json:"observed_radius"`
+	AffectedCount  int                               `json:"affected_count"`
+	AlreadyApplied bool                              `json:"already_applied"`
+	CompletedAt    time.Time                         `json:"completed_at"`
+	LeaseID        string                            `json:"lease_id"`
+}
+
+func (c *Client) SubmitResponseResult(ctx context.Context, token, orderID string, request ResponseResultRequest) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/fleet/work/"+url.PathEscape(orderID)+"/result", token, request, nil)
 }
 
 // SendClusterInventory posts a collected Kubernetes cluster snapshot to the control plane, which maps
@@ -218,16 +295,20 @@ func (c *Client) ReportProcesses(ctx context.Context, token string, procs []Repo
 	return c.do(ctx, http.MethodPost, "/api/v1/fleet/processes", token, body, nil)
 }
 
-// RegisterDetectionKey registers an agent-owned detection signing key with proof-of-possession. The
+// RegisterSigningKey registers an agent-owned purpose-scoped signing key with proof-of-possession. The
 // private key never enters this adapter; only the public lifecycle record and its PoP signature cross
 // the wire. Registration is idempotent server-side.
-func (c *Client) RegisterDetectionKey(ctx context.Context, token string, key fleetagent.AgentSigningKey, proof string) error {
+func (c *Client) RegisterSigningKey(ctx context.Context, token string, key fleetagent.AgentSigningKey, proof string) error {
 	body := map[string]any{
 		"public_key": base64.StdEncoding.EncodeToString(key.PublicKey),
 		"purpose":    string(key.Purpose), "not_before": key.NotBefore, "not_after": key.NotAfter,
 		"proof": proof,
 	}
 	return c.do(ctx, http.MethodPost, "/api/v1/fleet/keys", token, body, nil)
+}
+
+func (c *Client) RegisterDetectionKey(ctx context.Context, token string, key fleetagent.AgentSigningKey, proof string) error {
+	return c.RegisterSigningKey(ctx, token, key, proof)
 }
 
 // SendDetectionBatch posts one signed detection batch. A 2xx response means the complete membership was
@@ -259,6 +340,10 @@ func translateDetectionBatchError(err error) error {
 }
 
 func (c *Client) do(ctx context.Context, method, path, token string, body, out any) error {
+	return c.doAtBase(ctx, c.baseURL, method, path, token, body, out)
+}
+
+func (c *Client) doAtBase(ctx context.Context, baseURL, method, path, token string, body, out any) error {
 	var reader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -267,15 +352,13 @@ func (c *Client) do(ctx context.Context, method, path, token string, body, out a
 		}
 		reader = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, reader)
 	if err != nil {
 		return fmt.Errorf("fleetclient: request: %w", err)
 	}
 	req.Header.Set(protoHeader, protoVersion)
 	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	c.setAuthorization(req, token, path == "/api/v1/fleet/enrol")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return &NetworkError{Method: method, Path: path, Err: err}
@@ -295,6 +378,12 @@ func (c *Client) do(ctx context.Context, method, path, token string, body, out a
 		}
 	}
 	return nil
+}
+
+func (c *Client) setAuthorization(req *http.Request, token string, enrollment bool) {
+	if token != "" && (enrollment || !c.clientCertificate) {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 }
 
 var _ ports.DetectionTransport = (*Client)(nil)

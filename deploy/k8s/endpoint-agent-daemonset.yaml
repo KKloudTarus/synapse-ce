@@ -43,6 +43,8 @@ spec:
               valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
             - name: SYNAPSE_FLEET_URL
               value: "https://REPLACE-with-control-plane"
+            - name: SYNAPSE_FLEET_ENROL_URL
+              value: "https://REPLACE-with-enrollment-endpoint"
             - name: SYNAPSE_FLEET_ENROL_TOKEN_FILE
               value: /var/run/synapse/enrol-token
             - name: SYNAPSE_AGENT_STATE_DIR
@@ -52,6 +54,10 @@ spec:
             # eBPF runtime detection (#422) is OFF here; enabling it needs the privileged block below.
             - name: SYNAPSE_DETECT_CLASSES
               value: ""
+            # Governed process response is separately opt-in. It additionally requires process detection,
+            # hostPID, root/CAP_KILL, and a read-only response-command trust bundle mount.
+            - name: SYNAPSE_RESPONSE_EXECUTION_ENABLED
+              value: "false"
           volumeMounts:
             - { name: host-root, mountPath: /host, readOnly: true } # inventory reads the host FS read-only
             - { name: state, mountPath: /var/lib/synapse-agent }

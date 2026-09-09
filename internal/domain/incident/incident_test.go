@@ -3,9 +3,11 @@ package incident
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/riskassessment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
@@ -22,6 +24,23 @@ func at(n int) time.Time { return base.Add(time.Duration(n) * time.Second) }
 func created(det shared.ID) IncidentEvent {
 	return IncidentEvent{IncidentID: incID, Kind: EventCreated, At: at(0), Actor: "correlator",
 		AssetID: assetID, Title: "suspicious exec", Severity: shared.SeverityHigh, DetectionID: det}
+}
+
+func responseEvent(kind EventKind, timestamp time.Time, actionID shared.ID) IncidentEvent {
+	e := IncidentEvent{
+		IncidentID: incID, Kind: kind, At: timestamp, Actor: "analyst", ResponseActionID: actionID,
+		ResponseEngagementID: "eng-1", ResponseActionDigest: strings.Repeat("a", 64),
+		ResponseTarget: responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
+	}
+	if kind == EventResponseVerified {
+		e.Actor = "control-plane:response-verifier"
+		e.ResponseAttemptKey = "attempt-1"
+		e.ResponseExecutorID = "agent:executor"
+		e.ResponseVerifierID = "control-plane:response-verifier"
+		e.ResponseEvidenceID = "evidence-1"
+		e.Verified = true
+	}
+	return e
 }
 
 func TestProjectCreatedOpensIncident(t *testing.T) {
@@ -48,14 +67,15 @@ func TestProjectFullLifecycle(t *testing.T) {
 	events := []IncidentEvent{
 		created("det-1"),
 		{IncidentID: incID, Kind: EventDetectionAttached, At: at(1), Actor: "correlator", DetectionID: "det-2"},
-		{IncidentID: incID, Kind: EventStatusChanged, At: at(2), Actor: "alice", To: StateInvestigating},
-		{IncidentID: incID, Kind: EventOwnerChanged, At: at(3), Actor: "alice", Owner: "alice"},
-		{IncidentID: incID, Kind: EventRiskReassessed, At: at(4), Actor: "scorer", Risk: risk},
-		{IncidentID: incID, Kind: EventAnalystCommented, At: at(5), Actor: "alice", Comment: "looks real"},
-		{IncidentID: incID, Kind: EventStatusChanged, At: at(6), Actor: "alice", To: StateContained},
-		{IncidentID: incID, Kind: EventDispositionSet, At: at(7), Actor: "alice", Disposition: DispositionTruePositive},
-		{IncidentID: incID, Kind: EventStatusChanged, At: at(8), Actor: "alice", To: StateResolved},
-		{IncidentID: incID, Kind: EventStatusChanged, At: at(9), Actor: "alice", To: StateClosed},
+		{IncidentID: incID, Kind: EventTimelineAttached, At: at(2), Actor: "correlator", Timeline: TimelineRef{EventID: "event-1", OccurredAt: at(1), Kind: "process_exec", Summary: "executed binary"}},
+		{IncidentID: incID, Kind: EventStatusChanged, At: at(3), Actor: "alice", To: StateInvestigating},
+		{IncidentID: incID, Kind: EventOwnerChanged, At: at(4), Actor: "alice", Owner: "alice"},
+		{IncidentID: incID, Kind: EventRiskReassessed, At: at(5), Actor: "scorer", Risk: risk},
+		{IncidentID: incID, Kind: EventAnalystCommented, At: at(6), Actor: "alice", Comment: "looks real"},
+		{IncidentID: incID, Kind: EventStatusChanged, At: at(7), Actor: "alice", To: StateContained},
+		{IncidentID: incID, Kind: EventDispositionSet, At: at(8), Actor: "alice", Disposition: DispositionTruePositive},
+		{IncidentID: incID, Kind: EventStatusChanged, At: at(9), Actor: "alice", To: StateResolved},
+		{IncidentID: incID, Kind: EventStatusChanged, At: at(10), Actor: "alice", To: StateClosed},
 	}
 	inc, err := Project(events)
 	if err != nil {
@@ -70,7 +90,10 @@ func TestProjectFullLifecycle(t *testing.T) {
 	if len(inc.Comments) != 1 || inc.Comments[0].Actor != "alice" {
 		t.Fatalf("comments wrong: %+v", inc.Comments)
 	}
-	if inc.Revision != len(events) || !inc.UpdatedAt.Equal(at(9)) {
+	if len(inc.Timeline) != 1 || inc.Timeline[0].EventID != "event-1" || !inc.Timeline[0].OccurredAt.Equal(at(1)) {
+		t.Fatalf("timeline wrong: %+v", inc.Timeline)
+	}
+	if inc.Revision != len(events) || !inc.UpdatedAt.Equal(at(10)) {
 		t.Fatalf("revision/updated wrong: rev=%d", inc.Revision)
 	}
 	// State, Disposition, and Risk are independent: closed + true_positive + risk still 88.
@@ -122,26 +145,54 @@ func TestProjectDetachAndDedupDetections(t *testing.T) {
 	}
 }
 
-func TestProjectResponseRefs(t *testing.T) {
+func TestProjectDedupTimelineReferences(t *testing.T) {
+	ref := TimelineRef{EventID: "event-1", OccurredAt: at(1), Kind: "process_exec", Summary: "executed binary"}
 	events := []IncidentEvent{
 		created("det-1"),
-		{IncidentID: incID, Kind: EventStatusChanged, At: at(1), Actor: "a", To: StateInvestigating},
-		{IncidentID: incID, Kind: EventResponseRequested, At: at(2), Actor: "a", ResponseActionID: "act-1"},
-		{IncidentID: incID, Kind: EventResponseVerified, At: at(3), Actor: "agent", ResponseActionID: "act-1"},
-		{IncidentID: incID, Kind: EventResponseVerified, At: at(4), Actor: "agent", ResponseActionID: "act-2"}, // verify w/o request → upsert
+		{IncidentID: incID, Kind: EventTimelineAttached, At: at(1), Actor: "correlator", Timeline: ref},
+		{IncidentID: incID, Kind: EventTimelineAttached, At: at(2), Actor: "correlator", Timeline: ref},
 	}
 	inc, err := Project(events)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inc.Responses) != 2 {
+	if len(inc.Timeline) != 1 || inc.Timeline[0] != ref {
+		t.Fatalf("timeline references must dedupe by event id: %+v", inc.Timeline)
+	}
+}
+
+func TestProjectResponseRefs(t *testing.T) {
+	events := []IncidentEvent{
+		created("det-1"),
+		{IncidentID: incID, Kind: EventStatusChanged, At: at(1), Actor: "a", To: StateInvestigating},
+		responseEvent(EventResponseRequested, at(2), "act-1"),
+		responseEvent(EventResponseVerified, at(3), "act-1"),
+	}
+	inc, err := Project(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inc.Responses) != 1 {
 		t.Fatalf("responses wrong: %+v", inc.Responses)
 	}
-	if !inc.Responses[0].Verified || inc.Responses[0].ActionID != "act-1" {
+	if !inc.Responses[0].Verified || inc.Responses[0].ActionID != "act-1" ||
+		inc.Responses[0].VerifierID != "control-plane:response-verifier" || inc.Responses[0].EvidenceID != "evidence-1" {
 		t.Fatalf("act-1 must be verified: %+v", inc.Responses)
 	}
-	if !inc.Responses[1].Verified || inc.Responses[1].ActionID != "act-2" {
-		t.Fatalf("act-2 upsert-verified: %+v", inc.Responses)
+	if inc.Responses[0].AttemptKey != "attempt-1" || inc.Responses[0].ExecutorID != "agent:executor" {
+		t.Fatalf("act-1 must retain execution provenance: %+v", inc.Responses)
+	}
+}
+
+func TestProjectRejectsUnrequestedOrMismatchedResponseVerification(t *testing.T) {
+	if _, err := Project([]IncidentEvent{created("det-1"), responseEvent(EventResponseVerified, at(1), "act-1")}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("verification without a durable request must fail, got %v", err)
+	}
+	requested := responseEvent(EventResponseRequested, at(1), "act-1")
+	verified := responseEvent(EventResponseVerified, at(2), "act-1")
+	verified.ResponseActionDigest = strings.Repeat("b", 64)
+	if _, err := Project([]IncidentEvent{created("det-1"), requested, verified}); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("verification for a different action digest must fail, got %v", err)
 	}
 }
 
@@ -192,6 +243,7 @@ func TestIncidentEventValidatePerKind(t *testing.T) {
 		"created no asset":     ok(IncidentEvent{Kind: EventCreated}),
 		"created bad severity": ok(IncidentEvent{Kind: EventCreated, AssetID: assetID, Severity: "nope"}),
 		"attach no detection":  ok(IncidentEvent{Kind: EventDetectionAttached}),
+		"timeline incomplete":  ok(IncidentEvent{Kind: EventTimelineAttached, Timeline: TimelineRef{EventID: "event-1"}}),
 		"status invalid":       ok(IncidentEvent{Kind: EventStatusChanged, To: "nope"}),
 		"owner empty":          ok(IncidentEvent{Kind: EventOwnerChanged}),
 		"disposition invalid":  ok(IncidentEvent{Kind: EventDispositionSet, Disposition: "nope"}),

@@ -11,6 +11,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -60,6 +61,81 @@ func TestDurableSensorRedactsSecretsAtSource(t *testing.T) {
 	if err := wrapper.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestDurableSensorObservesProcessOnlyAfterDurablePersist(t *testing.T) {
+	source := newFakeSensor()
+	durable := &captureSpool{}
+	wrapper := mustSensor(t, source, durable)
+	observer := &captureProcessObserver{}
+	observedBeforePersist := false
+	durable.afterSuccess = func() { observedBeforePersist = len(observer.snapshot()) != 0 }
+	if err := wrapper.SetProcessLifecycleObserver(observer); err != nil {
+		t.Fatal(err)
+	}
+	wrapper.now = func() time.Time { return adapterNow }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := wrapper.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	event := processEvent()
+	event.Process.Kind = "fork"
+	event.Process.StartTimeNanos = 42
+	event.Process.ParentStartTimeNanos = 21
+	source.events <- event
+	select {
+	case <-wrapper.Events():
+	case <-time.After(time.Second):
+		t.Fatal("event not forwarded")
+	}
+	got := observer.snapshot()
+	if len(got) != 1 || got[0].assetID != "asset-1" || got[0].bootID != "boot-1" || got[0].event.StartTimeNanos != 42 {
+		t.Fatalf("process lifecycle observations = %#v", got)
+	}
+	if observedBeforePersist {
+		t.Fatal("process identity was observed before the spool accepted it")
+	}
+	if durable.calls != 1 {
+		t.Fatalf("spool calls = %d, want 1", durable.calls)
+	}
+	var envelope telemetry.TelemetryEnvelope
+	if err := json.Unmarshal(durable.snapshot()[0].Payload, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Event.Process.Kind != "fork" || envelope.Event.Process.StartTimeNanos != 42 || envelope.Event.Process.ParentEntityID.IsZero() {
+		t.Fatalf("canonical process identity = %#v", envelope.Event.Process)
+	}
+	cancel()
+	if err := wrapper.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDurableSensorDoesNotObserveSheddedProcess(t *testing.T) {
+	source := newFakeSensor()
+	durable := &captureSpool{errors: []error{ports.ErrTelemetrySpoolSaturated}}
+	wrapper := mustSensor(t, source, durable)
+	observer := &captureProcessObserver{}
+	if err := wrapper.SetProcessLifecycleObserver(observer); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := wrapper.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	source.events <- processEvent()
+	select {
+	case <-wrapper.Events():
+	case <-time.After(time.Second):
+		t.Fatal("event not forwarded")
+	}
+	if got := observer.snapshot(); len(got) != 0 {
+		t.Fatalf("observed non-durable process events = %#v", got)
+	}
+	cancel()
+	_ = wrapper.Close()
 }
 
 func TestDurableSensorNormalizesAndPersistsBeforeForwarding(t *testing.T) {
@@ -372,10 +448,11 @@ func (f *fakeSensor) Close() error {
 }
 
 type captureSpool struct {
-	mu     sync.Mutex
-	items  []ports.SpoolItem
-	errors []error
-	calls  int
+	mu           sync.Mutex
+	items        []ports.SpoolItem
+	errors       []error
+	calls        int
+	afterSuccess func()
 }
 
 func (c *captureSpool) Enqueue(_ context.Context, item ports.SpoolItem) (fleetagent.StreamPosition, error) {
@@ -391,7 +468,14 @@ func (c *captureSpool) Enqueue(_ context.Context, item ports.SpoolItem) (fleetag
 	}
 	item.Payload = append([]byte(nil), item.Payload...)
 	c.items = append(c.items, item)
-	return fleetagent.StreamPosition{Priority: item.Priority, Epoch: 1, Sequence: uint64(len(c.items)), Session: "s", Boot: "b"}, nil
+	position := fleetagent.StreamPosition{Priority: item.Priority, Epoch: 1, Sequence: uint64(len(c.items)), Session: "s", Boot: "b"}
+	callback := c.afterSuccess
+	c.mu.Unlock()
+	if callback != nil {
+		callback()
+	}
+	c.mu.Lock()
+	return position, nil
 }
 func (c *captureSpool) snapshot() []ports.SpoolItem {
 	c.mu.Lock()
@@ -410,3 +494,26 @@ func (c *captureSpool) Stats(context.Context) (ports.SpoolStats, error) {
 	return ports.SpoolStats{}, nil
 }
 func (c *captureSpool) Close() error { return nil }
+
+type processObservation struct {
+	assetID shared.ID
+	bootID  shared.ID
+	event   detection.ProcessEvent
+}
+
+type captureProcessObserver struct {
+	mu           sync.Mutex
+	observations []processObservation
+}
+
+func (c *captureProcessObserver) ObserveProcess(assetID, bootID shared.ID, event detection.ProcessEvent) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.observations = append(c.observations, processObservation{assetID: assetID, bootID: bootID, event: event})
+}
+
+func (c *captureProcessObserver) snapshot() []processObservation {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]processObservation(nil), c.observations...)
+}

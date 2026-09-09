@@ -18,6 +18,7 @@ type DetectionProvenanceStore interface {
 	ListCurrent(ctx context.Context, engagementID shared.ID) ([]detectionprovenance.Current, error)
 	ListPending(ctx context.Context) ([]detectionprovenance.Current, error)
 	ListTransitions(ctx context.Context, engagementID, detectionID shared.ID) ([]detectionprovenance.Transition, error)
+	ListReceivedTransitions(ctx context.Context, engagementID shared.ID) ([]detectionprovenance.Transition, error)
 }
 
 // PendingDetectionReconciler repairs attributed detections after their referenced telemetry becomes durable.

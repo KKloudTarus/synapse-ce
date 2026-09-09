@@ -12,6 +12,10 @@ func IsMachineActor(actor string) bool {
 	if actor == "" {
 		return true
 	}
+	switch actor {
+	case "auto", "agent", "llm", "mcp", "system", "machine", "bot", "service":
+		return true
+	}
 	for _, prefix := range []string{"agent:", "llm:", "mcp:", "system:", "machine:", "bot:", "service:"} {
 		if strings.HasPrefix(actor, prefix) {
 			return true

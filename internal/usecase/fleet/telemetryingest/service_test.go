@@ -101,6 +101,15 @@ func (a *fakeAudit) count() int {
 	return a.n
 }
 
+type fakeObservationTelemetryAuthorizer struct {
+	assetID shared.ID
+	err     error
+}
+
+func (a fakeObservationTelemetryAuthorizer) ResolveResponseObservationTelemetryAsset(context.Context, shared.ID, shared.ID) (shared.ID, error) {
+	return a.assetID, a.err
+}
+
 type fakeKeys struct{ key fleetagent.AgentSigningKey }
 
 func (k fakeKeys) ResolveSigningKey(_ context.Context, agentID shared.ID, keyID string) (fleetagent.AgentSigningKey, error) {
@@ -250,6 +259,41 @@ func (h *harness) resignPayload(req *IngestRequest, index int, mutate func(*tele
 	req.Manifest.Signature = fleetagent.SignTelemetryManifest(h.priv, req.Manifest)
 }
 
+func TestIngestRejectsObserverTargetTelemetryShipment(t *testing.T) {
+	h := newHarness(t)
+	req := h.signedBatch(1, 1, 0, "observation-event")
+	req.Manifest.AssetID = "target-asset"
+	req.Manifest.ResponseObservationID = "observation-1"
+	for i := range req.Events {
+		var envelope telemetry.TelemetryEnvelope
+		if err := json.Unmarshal(req.Events[i].Payload, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		envelope.AssetID = "target-asset"
+		payload, err := json.Marshal(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Events[i].Payload = payload
+		req.Manifest.Events[i].Digest = fleetagent.TelemetryEventDigest(payload, req.Manifest.AssetID)
+	}
+	req.Manifest.PayloadDigest = fleetagent.TelemetryPayloadDigest(req.Manifest.Events)
+	req.Manifest.Signature = fleetagent.SignTelemetryManifest(h.priv, req.Manifest)
+	if _, err := h.svc.Ingest(h.ctx, "agent-1", req); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("observer target telemetry error=%v, want forbidden", err)
+	}
+
+	generic := req
+	generic.Manifest.BatchID = "generic-target-batch"
+	generic.Manifest.Position.Sequence = 2
+	generic.Manifest.PreviousSequence = 1
+	generic.Manifest.ResponseObservationID = ""
+	generic.Manifest.Signature = fleetagent.SignTelemetryManifest(h.priv, generic.Manifest)
+	if _, err := h.svc.Ingest(h.ctx, "agent-1", generic); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("generic target telemetry error=%v, want forbidden", err)
+	}
+}
+
 func (h *harness) retimeBatch(req *IngestRequest, minAt, maxAt time.Time) {
 	h.t.Helper()
 	minAt = minAt.UTC()
@@ -347,6 +391,24 @@ func TestIngestSensorStateRejectsForgedAsset(t *testing.T) {
 	report.Signature = fleetagent.SignSensorState(h.priv, report)
 	if _, err := h.svc.IngestSensorState(h.ctx, "agent-1", report); !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("forged asset error = %v, want forbidden", err)
+	}
+}
+
+func TestIngestSensorStateRejectsObserverTargetShipment(t *testing.T) {
+	h := newHarness(t)
+	report := h.signedSensorState()
+	report.AssetID = "target-asset"
+	report.ResponseObservationID = "observation-1"
+	report.Signature = fleetagent.SignSensorState(h.priv, report)
+	if _, err := h.svc.IngestSensorState(h.ctx, "agent-1", report); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("observer target sensor state error=%v, want forbidden", err)
+	}
+
+	generic := h.signedSensorState()
+	generic.AssetID = "target-asset"
+	generic.Signature = fleetagent.SignSensorState(h.priv, generic)
+	if _, err := h.svc.IngestSensorState(h.ctx, "agent-1", generic); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("generic target sensor state error=%v, want forbidden", err)
 	}
 }
 

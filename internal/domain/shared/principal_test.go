@@ -4,7 +4,7 @@ import "testing"
 
 func TestIsMachineActor(t *testing.T) {
 	cases := map[string]bool{
-		"": true, "  ": true, "agent:scan": true, "LLM:GPT": true, "mcp:tool": true,
+		"": true, "  ": true, "auto": true, "system": true, "agent:scan": true, "LLM:GPT": true, "mcp:tool": true,
 		"system:worker": true, "machine:job": true, "bot:renovate": true, "service:sync": true,
 		"alice": false, "alice@example.com": false, "reviewer:alice": false, "human:system:operator": false,
 	}

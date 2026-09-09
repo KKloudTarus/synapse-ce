@@ -56,9 +56,7 @@ func (c *Client) RegisterTelemetrySigningKey(ctx context.Context, token string, 
 	}
 	req.Header.Set(protoHeader, protoVersion)
 	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	c.setAuthorization(req, token, false)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("fleetclient: telemetry signing-key registration: %w", err)
@@ -109,6 +107,9 @@ type HTTPStatusError struct {
 	RetryAfter time.Duration
 }
 
+// ResponseStatusCode exposes only retry classification to use cases without coupling them to HTTP.
+func (e *HTTPStatusError) ResponseStatusCode() int { return e.StatusCode }
+
 func (e *HTTPStatusError) Error() string {
 	return fmt.Sprintf("fleetclient: telemetry status %d", e.StatusCode)
 }
@@ -150,9 +151,7 @@ func (c *Client) ShipTelemetry(ctx context.Context, token string, in TelemetryIn
 	req.Header.Set(protoHeader, protoVersion)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	c.setAuthorization(req, token, false)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return out, fmt.Errorf("fleetclient: telemetry: %w", err)

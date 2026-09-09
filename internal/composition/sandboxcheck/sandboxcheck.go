@@ -260,6 +260,7 @@ func redactionSpec(self string) checkSpec {
 	const redactionMarker = "synapse-conformance-redaction-marker"
 	spec := BaseSpec(self)
 	spec.Args = []string{"-probe=redaction"}
+	spec.EngagementID = shared.ID("sandbox-conformance")
 	spec.Env = []string{"SYNAPSE_PROBE_SECRET={{secret:REDACTION_MARKER}}"}
 	return checkSpec{name: "secret-redaction", category: "output", spec: spec, evaluate: func(res ports.ToolResult, err error) CheckResult {
 		output := append(append([]byte(nil), res.Stdout...), res.Stderr...)

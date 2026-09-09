@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
@@ -12,14 +13,20 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetrollout"
+	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
@@ -43,6 +50,12 @@ type ftAudit struct{}
 func (ftAudit) Record(context.Context, ports.AuditEntry) error     { return nil }
 func (ftAudit) RecordOnce(context.Context, ports.AuditEntry) error { return nil }
 
+type ftAuthorizer struct{}
+
+func (ftAuthorizer) Authorize(context.Context, ports.ExecutionRequest) (time.Time, error) {
+	return time.Now().UTC(), nil
+}
+
 func setupFleet(t *testing.T) (http.Handler, *fleetagentuc.Service, *fleetwork.Service) {
 	t.Helper()
 	agentSvc, err := fleetagentuc.NewService(memory.NewFleetAgentStore(), ftAudit{}, ftClock{}, &ftIDs{})
@@ -57,6 +70,7 @@ func setupFleet(t *testing.T) (http.Handler, *fleetagentuc.Service, *fleetwork.S
 	if err != nil {
 		t.Fatalf("work svc: %v", err)
 	}
+	workSvc.SetExecutionAuthorizer(ftAuthorizer{})
 	rt := &Router{log: discardLog()}
 	rt.SetFleet(agentSvc, workSvc, func() time.Time { return time.Now().UTC() }, "")
 	rt.SetFleetAdmin(agentSvc)
@@ -147,21 +161,108 @@ func TestFleetAPIEndToEnd(t *testing.T) {
 	if len(claimed) != 1 || claimed[0]["ID"] != mine.ID.String() {
 		t.Fatalf("claim must return only the addressed order, got %v", claimed)
 	}
+	leaseID, ok := claimed[0]["LeaseID"].(string)
+	if !ok || leaseID == "" {
+		t.Fatalf("claim must return a lease, got %v", claimed[0])
+	}
 
 	// Progress claimed -> running, then result running -> succeeded, idempotent on repeat.
-	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+mine.ID.String()+"/progress", agentTok, nil, true); w.Code != http.StatusOK {
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+mine.ID.String()+"/progress", agentTok, map[string]string{"lease_id": "stale-lease"}, true); w.Code != http.StatusConflict {
+		t.Fatalf("stale progress lease should be 409, got %d (%s)", w.Code, w.Body.String())
+	}
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+mine.ID.String()+"/progress", agentTok, map[string]string{"lease_id": leaseID}, true); w.Code != http.StatusOK {
 		t.Fatalf("progress should be 200, got %d (%s)", w.Code, w.Body.String())
 	}
-	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+mine.ID.String()+"/result", agentTok, map[string]string{"status": "succeeded"}, true); w.Code != http.StatusOK {
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+mine.ID.String()+"/result", agentTok, map[string]string{"status": "succeeded", "lease_id": leaseID}, true); w.Code != http.StatusOK {
 		t.Fatalf("result should be 200, got %d (%s)", w.Code, w.Body.String())
 	}
-	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+mine.ID.String()+"/result", agentTok, map[string]string{"status": "succeeded"}, true); w.Code != http.StatusOK {
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+mine.ID.String()+"/result", agentTok, map[string]string{"status": "succeeded", "lease_id": leaseID}, true); w.Code != http.StatusOK {
 		t.Fatalf("repeat result should be idempotent 200, got %d", w.Code)
+	}
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+mine.ID.String()+"/result", agentTok, map[string]string{"status": "succeeded", "lease_id": "stale-lease"}, true); w.Code != http.StatusConflict {
+		t.Fatalf("stale terminal lease should be 409, got %d", w.Code)
 	}
 
 	// An order addressed to another agent is not_found for us (no existence leak).
 	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+other.ID.String()+"/result", agentTok, map[string]string{"status": "succeeded"}, true); w.Code != http.StatusNotFound {
 		t.Fatalf("mis-addressed order must be 404, got %d", w.Code)
+	}
+
+	// Response results are accepted only when they correlate to the exact signed command.
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, err := rdom.NewAction("response-action", rdom.KindStopProcess, "process-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actionDigest, err := rdom.CanonicalDigest(action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseExpiry := time.Now().Add(time.Hour)
+	command := fleetagent.ResponseCommand{
+		ProtocolVersion: fleetagent.ResponseCommandProtocolVersion, CommandID: "response-order", TenantID: "default",
+		AgentID: agentID, AssetID: "as1", EngagementID: "eng1", Action: action, ActionDigest: actionDigest,
+		AttemptKey: "response-attempt", VerificationChallenge: strings.Repeat("a", 64),
+		AuthorizationTarget: engagement.Target{Kind: engagement.TargetDomain, Value: "process-1"},
+		Target: responsesaga.TargetFingerprint{
+			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "as1", ProcessEntityID: "process-1",
+		},
+		IssuedAt: time.Now().Add(-time.Minute), NotAfter: responseExpiry, SigningKeyID: evidence.KeyFingerprint(public),
+	}
+	command.Signature = fleetagent.SignResponseCommand(private, command)
+	responseOrder, err := workSvc.Issue(ctx, "op", fleetwork.IssueInput{
+		TenantID: "default", AssetID: "as1", AgentID: agentID, Capability: workorder.CapabilityResponseProcess,
+		AuthorizationID: "eng1", IdempotencyKey: command.AttemptKey, NotAfter: responseExpiry,
+		TimeBucket: 2, ResponseCommand: &command,
+	})
+	if err != nil {
+		t.Fatalf("issue response order: %v", err)
+	}
+	w = fleetCall(h, http.MethodPost, "/api/v1/fleet/work/claim", agentTok, map[string]int{"max": 10}, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("claim response order: %d (%s)", w.Code, w.Body.String())
+	}
+	claimed = nil
+	if err := json.Unmarshal(w.Body.Bytes(), &claimed); err != nil || len(claimed) != 1 {
+		t.Fatalf("decode response order claim: orders=%v err=%v", claimed, err)
+	}
+	responseLeaseID, ok := claimed[0]["LeaseID"].(string)
+	if !ok || responseLeaseID == "" {
+		t.Fatalf("response claim must return a lease, got %v", claimed[0])
+	}
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+responseOrder.ID.String()+"/progress", agentTok, map[string]string{"lease_id": responseLeaseID}, true); w.Code != http.StatusOK {
+		t.Fatalf("progress response order: %d (%s)", w.Code, w.Body.String())
+	}
+	completedAt := time.Now().UTC()
+	resultBody := map[string]any{
+		"status": "succeeded", "attempt_key": command.AttemptKey,
+		"command_digest": fleetagent.ResponseCommandDigest(command), "execution_state": string(fleetagent.ResponseExecutionApplied),
+		"observed_radius": "state_changing", "affected_count": 1, "already_applied": false,
+		"completed_at": completedAt, "lease_id": responseLeaseID,
+	}
+	mismatched := maps.Clone(resultBody)
+	mismatched["command_digest"] = strings.Repeat("0", 64)
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+responseOrder.ID.String()+"/result", agentTok, mismatched, true); w.Code != http.StatusConflict {
+		t.Fatalf("mismatched response result must be 409, got %d (%s)", w.Code, w.Body.String())
+	}
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+responseOrder.ID.String()+"/result", agentTok, resultBody, true); w.Code != http.StatusOK {
+		t.Fatalf("correlated response result must be 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+responseOrder.ID.String()+"/result", agentTok, resultBody, true); w.Code != http.StatusOK {
+		t.Fatalf("response result retry must be idempotent 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	storedResponse, err := workSvc.GetByID(ctx, "default", responseOrder.ID)
+	if err != nil || storedResponse.ResponseResult == nil || storedResponse.ResponseResult.AffectedCount != 1 ||
+		!storedResponse.ResponseResult.CompletedAt.Equal(completedAt) {
+		t.Fatalf("stored response result=%+v err=%v", storedResponse, err)
+	}
+	changedResult := maps.Clone(resultBody)
+	changedResult["affected_count"] = 2
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/work/"+responseOrder.ID.String()+"/result", agentTok, changedResult, true); w.Code != http.StatusConflict {
+		t.Fatalf("changed response result retry must conflict, got %d (%s)", w.Code, w.Body.String())
 	}
 
 	// Revoke the agent; its credential no longer authenticates.
@@ -191,17 +292,92 @@ func TestFleetAuthByClientCert(t *testing.T) {
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	csrDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "agent"}}, key)
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
-	agent, _, certPEM, err := agentSvc.Enrol(ctx, enrolTok, fleetagentuc.EnrolInput{Name: "a", CSRPEM: csrPEM})
+	agent, agentToken, certPEM, err := agentSvc.Enrol(ctx, enrolTok, fleetagentuc.EnrolInput{Name: "a", CSRPEM: csrPEM})
 	if err != nil || len(certPEM) == 0 {
 		t.Fatalf("enrol with csr: err=%v certlen=%d", err, len(certPEM))
 	}
 
-	f := &fleetRouter{agents: agentSvc, clientCertHeader: "X-Client-Cert", log: discardLog()}
+	f := &fleetRouter{
+		agents: agentSvc, clientCertHeader: "X-Client-Cert", log: discardLog(),
+		agentLim: newKeyedLimiter(fleetRatePerMin, func() time.Time { return time.Now().UTC() }),
+		ipLim:    newKeyedLimiter(fleetIPRatePerMin, func() time.Time { return time.Now().UTC() }),
+	}
 
 	// The issued certificate authenticates the agent.
 	got, err := f.authByClientCert(ctx, string(certPEM))
 	if err != nil || got.ID != agent.ID {
 		t.Fatalf("cert auth should succeed: got=%v err=%v", got, err)
+	}
+
+	call := func(cert, bearer string) (*httptest.ResponseRecorder, shared.ID) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/heartbeat", nil)
+		if cert != "" {
+			req.Header.Set("X-Client-Cert", cert)
+		}
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		var authenticatedID shared.ID
+		w := httptest.NewRecorder()
+		f.authed(func(w http.ResponseWriter, r *http.Request) {
+			authenticated, ok := agentFrom(r.Context())
+			if !ok {
+				t.Fatal("authenticated request has no agent identity")
+			}
+			authenticatedID = authenticated.ID
+			w.WriteHeader(http.StatusNoContent)
+		})(w, req)
+		return w, authenticatedID
+	}
+
+	if w, _ := call("", ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("strict mTLS without a certificate should be 401, got %d", w.Code)
+	}
+	if w, _ := call("", agentToken); w.Code != http.StatusUnauthorized {
+		t.Fatalf("strict mTLS must reject bearer fallback, got %d", w.Code)
+	}
+	if w, _ := call("not a cert", agentToken); w.Code != http.StatusUnauthorized {
+		t.Fatalf("strict mTLS must not fall back after an invalid certificate, got %d", w.Code)
+	}
+	if w, id := call(string(certPEM), "wrong-bearer"); w.Code != http.StatusNoContent || id != agent.ID {
+		t.Fatalf("valid mTLS identity should succeed independently of bearer auth: status=%d id=%q", w.Code, id)
+	}
+	// A valid public certificate forwarded through the browser virtual host is still rejected. Only the
+	// dedicated host whose ingress performs mTLS may assert the certificate header.
+	f.clientCertHost = "fleet.example.test"
+	protected := f.entry(f.authed(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	request := func(host string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "https://"+host+"/api/v1/fleet/heartbeat", nil)
+		req.Host = host
+		req.Header.Set("X-Synapse-Fleet-Proto", FleetProtoVersion)
+		req.Header.Set("X-Client-Cert", string(certPEM))
+		w := httptest.NewRecorder()
+		protected(w, req)
+		return w
+	}
+	if w := request("synapse.example.test"); w.Code != http.StatusUnauthorized {
+		t.Fatalf("browser virtual host must not authenticate a forwarded certificate, got %d", w.Code)
+	}
+	if w := request("fleet.example.test"); w.Code != http.StatusNoContent {
+		t.Fatalf("dedicated fleet mTLS host should authenticate the certificate, got %d", w.Code)
+	}
+	// Bootstrap enrollment is host-isolated from the strict mTLS plane. This permits the one-time
+	// bearer exchange without weakening any post-enrollment route.
+	f.enrollmentHost = "enroll.example.test"
+	enrollment := f.entryForHost(f.enrollmentHost, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	enrollRequest := func(host string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "https://"+host+"/api/v1/fleet/enrol", nil)
+		req.Host = host
+		req.Header.Set("X-Synapse-Fleet-Proto", FleetProtoVersion)
+		w := httptest.NewRecorder()
+		enrollment(w, req)
+		return w
+	}
+	if w := enrollRequest("fleet.example.test"); w.Code != http.StatusUnauthorized {
+		t.Fatalf("mTLS host must not accept enrollment bootstrap, got %d", w.Code)
+	}
+	if w := enrollRequest("enroll.example.test"); w.Code != http.StatusNoContent {
+		t.Fatalf("dedicated enrollment host should accept the bootstrap route, got %d", w.Code)
 	}
 	// A malformed header is unauthenticated, never a 500.
 	if _, err := f.authByClientCert(ctx, "not a cert"); !errors.Is(err, fleetagentuc.ErrUnauthenticated) {

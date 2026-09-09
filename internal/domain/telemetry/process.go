@@ -6,13 +6,13 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// ProcessObservation is a raw process exec/fork observation — telemetry's OWN type, distinct from
+// ProcessObservation is a raw process exec/fork/exit observation — telemetry's OWN type, distinct from
 // detection.ProcessEvent (which is the thin, single-timestamp shape the detection tier matches over). It
 // carries the fields D4 was missing: the parent pid, the kernel start time, and stable entity ids for
 // both the process and its parent, so a downstream reader can build a process tree without racing PID
 // reuse.
 type ProcessObservation struct {
-	// Kind is "exec" or "fork".
+	// Kind is "exec", "fork", or "exit".
 	Kind string
 	PID  int
 	PPID int
@@ -37,7 +37,7 @@ type ProcessObservation struct {
 // Validate enforces a well-formed process observation.
 func (p ProcessObservation) Validate() error {
 	switch p.Kind {
-	case "exec", "fork":
+	case "exec", "fork", "exit":
 	default:
 		return fmt.Errorf("%w: process observation has unknown kind %q", shared.ErrValidation, p.Kind)
 	}
@@ -46,6 +46,9 @@ func (p ProcessObservation) Validate() error {
 	}
 	if p.EntityID.IsZero() {
 		return fmt.Errorf("%w: process observation has no entity id", shared.ErrValidation)
+	}
+	if p.Kind == "exit" && p.StartTimeNanos == 0 {
+		return fmt.Errorf("%w: process exit requires a kernel start time for stable identity", shared.ErrValidation)
 	}
 	if p.Comm == "" && p.Path == "" {
 		return fmt.Errorf("%w: process observation has neither comm nor path", shared.ErrValidation)

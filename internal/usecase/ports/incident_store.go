@@ -7,30 +7,25 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// IncidentEventStore persists the event-sourced incident log for Phase C (#594, C7 #681). The event log
-// is the source of truth and is APPEND-ONLY (golden rule 6): an incident is reconstructed by folding its
-// events with incident.Project. Every method is tenant-scoped from the context.
+// IncidentEventStore persists the append-only incident log and its immutable canonical-merge index.
+// Every method is tenant-scoped from the context.
 type IncidentEventStore interface {
-	// AppendEvents appends events to one incident's log under OPTIMISTIC CONCURRENCY: expectedRevision must
-	// equal the incident's current event count (0 for a brand-new incident), otherwise it returns
-	// shared.ErrConflict and the caller reloads and retries. Events are assigned sequential positions after
-	// expectedRevision. A duplicate concurrent append at the same position also yields ErrConflict (the log
-	// position is unique), so an incident's history can never fork or lose an event. Appending zero events
-	// is a no-op.
-	//
-	// The store validates each event and its incident binding but NOT projectability of the resulting log:
-	// a caller MUST fold-validate (incident.Project over current+new) before appending, so an unprojectable
-	// log — e.g. an illegal state transition — is never persisted. incidentuc.Service does this; any other
-	// writer must too.
+	// AppendEvents appends events under optimistic concurrency. A merged event also creates its immutable
+	// merge edge in the same persistence operation; callers must fold-validate the resulting log first.
 	AppendEvents(ctx context.Context, incidentID shared.ID, expectedRevision int, events []incident.IncidentEvent) error
-	// LoadEvents returns one incident's full event log in log order (empty if the incident is unknown).
 	LoadEvents(ctx context.Context, incidentID shared.ID) ([]incident.IncidentEvent, error)
-	// ListIncidentIDs returns the incident ids matching the query, ordered by id for stability.
+	// ListIncidentIDs returns IDs in stable order. Limit 0 uses the operational default; a negative limit is
+	// intentionally unbounded for canonicalization, which must deduplicate before applying a caller limit.
 	ListIncidentIDs(ctx context.Context, q IncidentQuery) ([]shared.ID, error)
+	// ResolveCanonicalID follows immutable merge edges to the root, rejecting malformed cyclic storage.
+	ResolveCanonicalID(ctx context.Context, incidentID shared.ID) (shared.ID, error)
+	// ListMergeEdges returns immutable edges whose source resolves to canonicalID, in source order.
+	ListMergeEdges(ctx context.Context, canonicalID shared.ID) ([]incident.MergeEdge, error)
+	ListPendingResponseLinks(ctx context.Context) ([]incident.ResponseLink, error)
 }
 
 // IncidentQuery selects incidents. An empty AssetID matches all incidents in the tenant; Limit caps the
-// result (0 means the store default).
+// result (0 means the store default, negative means unbounded for internal canonicalization).
 type IncidentQuery struct {
 	AssetID shared.ID
 	Limit   int

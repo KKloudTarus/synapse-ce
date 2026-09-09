@@ -30,13 +30,17 @@ const (
 	StateExecuting           SagaState = "executing"
 	StateCommandApplied      SagaState = "command_applied"
 	StateCommandFailed       SagaState = "command_failed"
+	StateOutcomeUnknown      SagaState = "outcome_unknown"
 	StateVerifying           SagaState = "verifying"
 	StateVerifiedSucceeded   SagaState = "verified_succeeded"
 	StateVerificationFailed  SagaState = "verification_failed"
 	StateVerificationUnknown SagaState = "verification_unknown"
 	StateTimedOut            SagaState = "timed_out"
+	StateManualIntervention  SagaState = "manual_intervention_required"
 	StateRollbackRequested   SagaState = "rollback_requested"
 	StateRollingBack         SagaState = "rolling_back"
+	StateRollbackVerifying   SagaState = "rollback_verifying"
+	StateRollbackUnknown     SagaState = "rollback_outcome_unknown"
 	StateRolledBack          SagaState = "rolled_back"
 	StateRollbackFailed      SagaState = "rollback_failed"
 	// StateCompleted is the terminal state of a telemetry-verified response that was accepted and NOT
@@ -53,21 +57,25 @@ var transitions = map[SagaState][]SagaState{
 	StateAwaitingApproval:    {StateApproved, StateRejected},
 	StateApproved:            {StateIssued},
 	StateRejected:            {},
-	StateIssued:              {StateClaimed},
-	StateClaimed:             {StateExecuting},
-	StateExecuting:           {StateCommandApplied, StateCommandFailed},
-	StateCommandApplied:      {StateVerifying},
-	StateCommandFailed:       {StateRollbackRequested},
+	StateIssued:              {StateClaimed, StateExecuting, StateCommandFailed},
+	StateClaimed:             {StateExecuting, StateCommandFailed, StateManualIntervention},
+	StateExecuting:           {StateCommandApplied, StateCommandFailed, StateOutcomeUnknown, StateManualIntervention},
+	StateOutcomeUnknown:      {StateCommandFailed, StateVerifying, StateRollbackRequested, StateManualIntervention},
+	StateCommandApplied:      {StateVerifying, StateTimedOut},
+	StateCommandFailed:       {},
 	StateVerifying:           {StateVerifiedSucceeded, StateVerificationFailed, StateVerificationUnknown, StateTimedOut},
 	StateVerifiedSucceeded:   {StateCompleted, StateRollbackRequested},
 	StateVerificationFailed:  {StateRollbackRequested},
 	StateVerificationUnknown: {StateRollbackRequested},
 	StateTimedOut:            {StateRollbackRequested},
-	StateRollbackRequested:   {StateRollingBack},
-	StateRollingBack:         {StateRolledBack, StateRollbackFailed},
+	StateRollbackRequested:   {StateRollingBack, StateRollbackFailed, StateManualIntervention},
+	StateRollingBack:         {StateRollbackVerifying, StateRollbackFailed, StateRollbackUnknown},
+	StateRollbackVerifying:   {StateRolledBack, StateRollbackFailed, StateRollbackUnknown},
+	StateRollbackUnknown:     {StateRollbackVerifying, StateRollbackFailed},
 	StateCompleted:           {},
 	StateRolledBack:          {},
 	StateRollbackFailed:      {},
+	StateManualIntervention:  {},
 }
 
 // Valid reports whether s is a known state.

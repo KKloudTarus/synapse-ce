@@ -1,11 +1,21 @@
 package responsesaga
 
 import (
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
+
+// ErrStaleHaltGeneration means a kill-switch fence advanced after an operation began admission.
+var ErrStaleHaltGeneration = errors.New("stale response halt generation")
+
+// ErrHaltLatched means tenant response dispatch remains disabled until a separately governed resume.
+var ErrHaltLatched = errors.New("response halt is latched")
 
 // VerificationOutcome is the result of checking a response's post-condition via telemetry. Note the
 // explicit "unknown, insufficient coverage" — the honest answer when the telemetry needed to confirm the
@@ -51,19 +61,31 @@ func (r ReversibilityClass) Valid() bool {
 	}
 }
 
-// ResponseAttempt is one at-least-once execution attempt, journaled by the agent BEFORE the side effect so
-// a re-delivery is idempotent: the IdempotencyKey dedups a repeated issue of the same attempt, and the
-// TargetFingerprint pins exactly what was acted on. It records the command and (once verified) the
-// verification outcome.
+// ResponseAttempt is one control-plane execution attempt persisted before dispatch. The endpoint executor
+// must additionally journal the IdempotencyKey locally before crossing its side-effect boundary; this
+// record alone cannot make delivery idempotent. TargetFingerprint pins exactly what was acted on.
 type ResponseAttempt struct {
-	ActionID            shared.ID
-	Attempt             int
-	IdempotencyKey      string
-	Target              TargetFingerprint
-	State               SagaState
-	CommandOutcome      string
-	VerificationOutcome VerificationOutcome
-	At                  time.Time
+	ActionID               shared.ID
+	Attempt                int
+	IdempotencyKey         string
+	Target                 TargetFingerprint
+	IsReversal             bool
+	State                  SagaState
+	CommandOutcome         string
+	VerificationOutcome    VerificationOutcome
+	HaltGeneration         int64
+	ObservedRadius         offensivepolicy.Radius
+	AffectedCount          int
+	AlreadyApplied         bool
+	DecidedBy              string
+	ExecutorID             string
+	ExecutorAgentID        shared.ID
+	VerificationChallenge  string
+	VerifierID             string
+	VerificationEvidenceID shared.ID
+	At                     time.Time
+	DeadlineAt             time.Time
+	TerminalReason         string
 }
 
 // Validate enforces a well-formed attempt.
@@ -83,7 +105,66 @@ func (a ResponseAttempt) Validate() error {
 	if !a.VerificationOutcome.Valid() {
 		return fmt.Errorf("%w: response attempt has unknown verification outcome %q", shared.ErrValidation, a.VerificationOutcome)
 	}
+	if a.ObservedRadius != "" && !a.ObservedRadius.Valid() {
+		return fmt.Errorf("%w: response attempt has invalid observed radius %q", shared.ErrValidation, a.ObservedRadius)
+	}
+	if a.AffectedCount < 0 {
+		return fmt.Errorf("%w: response attempt has a negative affected count", shared.ErrValidation)
+	}
+	if a.HaltGeneration < 0 {
+		return fmt.Errorf("%w: response attempt has a negative halt generation", shared.ErrValidation)
+	}
+	if a.DeadlineAt.IsZero() || a.At.IsZero() || !a.DeadlineAt.After(a.At) {
+		return fmt.Errorf("%w: response attempt deadline must follow its creation time", shared.ErrValidation)
+	}
+	if a.State == StateManualIntervention && strings.TrimSpace(a.TerminalReason) == "" {
+		return fmt.Errorf("%w: manual intervention requires a terminal reason", shared.ErrValidation)
+	}
+	if requiresVerificationChallenge(a.State) {
+		challenge, err := hex.DecodeString(strings.TrimSpace(a.VerificationChallenge))
+		if err != nil || len(challenge) != 32 {
+			return fmt.Errorf("%w: response attempt state %s requires a post-command verification challenge", shared.ErrValidation, a.State)
+		}
+	}
+	if requiresObservedEffect(a.State) {
+		if a.ObservedRadius == "" || a.AffectedCount > 1 || strings.TrimSpace(a.ExecutorID) == "" || a.ExecutorAgentID.IsZero() {
+			return fmt.Errorf("%w: response attempt state %s requires a complete single-target observed effect", shared.ErrValidation, a.State)
+		}
+	}
+	if requiresVerifiedReceipt(a.State) {
+		executorID := strings.TrimSpace(a.ExecutorID)
+		verifierID := strings.TrimSpace(a.VerifierID)
+		if a.VerificationOutcome != VerificationSucceeded || strings.TrimSpace(a.VerificationEvidenceID.String()) == "" ||
+			executorID == "" || verifierID == "" || strings.EqualFold(executorID, verifierID) {
+			return fmt.Errorf("%w: response attempt state %s requires successful evidence from an independent verifier", shared.ErrValidation, a.State)
+		}
+	}
 	return a.Target.Validate()
+}
+
+func requiresVerificationChallenge(state SagaState) bool {
+	switch state {
+	case StateCommandApplied, StateOutcomeUnknown, StateVerifying, StateVerifiedSucceeded,
+		StateVerificationFailed, StateVerificationUnknown, StateTimedOut, StateRollbackVerifying,
+		StateRollbackUnknown, StateRolledBack, StateCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
+func requiresObservedEffect(state SagaState) bool {
+	switch state {
+	case StateCommandApplied, StateVerifying, StateVerifiedSucceeded, StateVerificationFailed,
+		StateVerificationUnknown, StateTimedOut, StateRollbackVerifying, StateRolledBack, StateCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
+func requiresVerifiedReceipt(state SagaState) bool {
+	return state == StateVerifiedSucceeded || state == StateRolledBack || state == StateCompleted
 }
 
 // Saga is the governed-response state machine for one action: its target, declared reversibility, current

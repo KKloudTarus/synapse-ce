@@ -15,6 +15,11 @@ import (
 // unbounded result set; mirrors the Postgres tier.
 const defaultEndpointTimelineLimit = 10000
 
+// maximumEndpointTimelineLimit permits one bounded sentinel row so callers that
+// require an exact result can distinguish a complete 10,000-row result from a
+// saturated page.
+const maximumEndpointTimelineLimit = defaultEndpointTimelineLimit + 1
+
 // EndpointTimelineStore is the in-memory twin of the durable endpoint State Timeline (Phase B / B7). It
 // is tenant-bucketed and idempotent by (tenant, asset, EventID), upholding the same contract as the
 // Postgres tier. Reached only through ports.EndpointTimelineStore.
@@ -99,6 +104,12 @@ func (s *EndpointTimelineStore) QueryTimeline(ctx context.Context, q ports.Endpo
 		if !q.EntityID.IsZero() && e.EntityID != q.EntityID {
 			continue
 		}
+		if !q.SourceAgentID.IsZero() && e.SourceAgentID != q.SourceAgentID {
+			continue
+		}
+		if !q.SourceAgentSessionID.IsZero() && e.SourceAgentSessionID != q.SourceAgentSessionID {
+			continue
+		}
 		if q.Kind != "" && e.Kind != q.Kind {
 			continue
 		}
@@ -113,11 +124,48 @@ func (s *EndpointTimelineStore) QueryTimeline(ctx context.Context, q ports.Endpo
 		return out[i].EventID < out[j].EventID
 	})
 	limit := q.Limit
-	if limit <= 0 || limit > defaultEndpointTimelineLimit {
+	if limit <= 0 || limit > maximumEndpointTimelineLimit {
 		limit = defaultEndpointTimelineLimit
 	}
 	if len(out) > limit {
 		out = out[:limit]
 	}
+	return out, nil
+}
+
+// LoadTimelineEntries returns the requested source entries without widening correlation reads to a time range.
+func (s *EndpointTimelineStore) LoadTimelineEntries(ctx context.Context, assetID shared.ID, eventIDs []shared.ID) ([]endpoint.TimelineEntry, error) {
+	tenant, err := requireEndpointTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if assetID.IsZero() {
+		return nil, fmt.Errorf("%w: timeline entry load requires an asset id", shared.ErrValidation)
+	}
+	requested := make(map[shared.ID]struct{}, len(eventIDs))
+	for _, eventID := range eventIDs {
+		if eventID.IsZero() {
+			return nil, fmt.Errorf("%w: timeline entry load contains an empty event id", shared.ErrValidation)
+		}
+		requested[eventID] = struct{}{}
+	}
+	if len(requested) == 0 {
+		return nil, nil
+	}
+	s.mu.Lock()
+	byEvent := s.entries[tenant][assetID]
+	out := make([]endpoint.TimelineEntry, 0, len(requested))
+	for eventID := range requested {
+		if entry, found := byEvent[eventID]; found {
+			out = append(out, entry)
+		}
+	}
+	s.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].OccurredAt.Equal(out[j].OccurredAt) {
+			return out[i].OccurredAt.Before(out[j].OccurredAt)
+		}
+		return out[i].EventID < out[j].EventID
+	})
 	return out, nil
 }

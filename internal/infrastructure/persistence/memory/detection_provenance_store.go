@@ -191,6 +191,46 @@ func (s *DetectionProvenanceStore) ListPending(ctx context.Context) ([]detection
 	return out, nil
 }
 
+func (s *DetectionProvenanceStore) LoadReceivedTransitions(ctx context.Context, engagementID shared.ID, detectionIDs []shared.ID) ([]detectionprovenance.Transition, error) {
+	wanted := make(map[shared.ID]struct{}, len(detectionIDs))
+	for _, id := range detectionIDs {
+		wanted[id] = struct{}{}
+	}
+	all, err := s.ListReceivedTransitions(ctx, engagementID)
+	if err != nil {
+		return nil, err
+	}
+	out := all[:0]
+	for _, transition := range all {
+		if _, ok := wanted[transition.DetectionID]; ok {
+			out = append(out, transition)
+		}
+	}
+	return out, nil
+}
+
+func (s *DetectionProvenanceStore) ListReceivedTransitions(ctx context.Context, engagementID shared.ID) ([]detectionprovenance.Transition, error) {
+	tenant, err := provenanceTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []detectionprovenance.Transition
+	for key, history := range s.transitions[tenant] {
+		if key.engagement != engagementID || len(history) == 0 || history[0].Kind != detectionprovenance.Received {
+			continue
+		}
+		transition := cloneProvenanceTransition(history[0])
+		if transition.Sequence != 1 || transition.PreviousHash != "" || detectionprovenance.VerifyChain([]detectionprovenance.Transition{transition}) != nil {
+			return nil, fmt.Errorf("%w: received detection provenance is corrupt", shared.ErrConflict)
+		}
+		out = append(out, transition)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].DetectionID < out[j].DetectionID })
+	return out, nil
+}
+
 func (s *DetectionProvenanceStore) ListTransitions(ctx context.Context, engagementID, detectionID shared.ID) ([]detectionprovenance.Transition, error) {
 	tenant, err := provenanceTenant(ctx)
 	if err != nil {

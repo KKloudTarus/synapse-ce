@@ -51,6 +51,13 @@ func procEnv(eventID string, occ time.Time, entityID, parentID shared.ID, pid, p
 	}
 }
 
+func procExitEnv(eventID string, occ time.Time, pid int, startNanos uint64, comm string) telemetry.TelemetryEnvelope {
+	entityID := procEntityID(pid, startNanos)
+	env := procEnv(eventID, occ, entityID, "", pid, 0, "exit", comm, "")
+	env.Event.Process.StartTimeNanos = startNanos
+	return env
+}
+
 func netEnv(eventID string, occ time.Time, procEntity shared.ID, proto, dir, laddr string, lport int, raddr string, rport int) telemetry.TelemetryEnvelope {
 	return telemetry.TelemetryEnvelope{
 		SchemaVersion:  telemetry.SchemaVersion,
@@ -120,6 +127,10 @@ func TestObserveIsIdempotentByEventID(t *testing.T) {
 	if got := len(s.Timeline()); got != 1 {
 		t.Fatalf("timeline must hold exactly one entry after a duplicate, got %d", got)
 	}
+	entry := s.Timeline()[0]
+	if entry.SourceAgentID != testAgent || entry.SourceAgentSessionID != testSession {
+		t.Fatalf("timeline must retain authenticated source provenance, got %+v", entry)
+	}
 	if got := len(s.Processes()); got != 1 {
 		t.Fatalf("processes must hold exactly one entity after a duplicate, got %d", got)
 	}
@@ -165,6 +176,59 @@ func TestPIDReuseYieldsDistinctEntities(t *testing.T) {
 	}
 	if got := len(s.Processes()); got != 2 {
 		t.Fatalf("PID reuse must yield two distinct entities, got %d", got)
+	}
+}
+
+func TestProcessExitIsTerminalAndPIDReuseCreatesNewEntity(t *testing.T) {
+	s := mustState(t)
+	firstStart := uint64(10)
+	first := procEntityID(200, firstStart)
+	start := procEnv("e1", base, first, "", 200, 1, "exec", "a", "/a")
+	start.Event.Process.StartTimeNanos = firstStart
+	if _, err := s.Observe(start); err != nil {
+		t.Fatal(err)
+	}
+	exitAt := base.Add(time.Second)
+	entries, err := s.Observe(procExitEnv("e2", exitAt, 200, firstStart, "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exited, _ := s.Process(first)
+	if exited.State != ProcessExited || exited.ExitedAt == nil || !exited.ExitedAt.Equal(exitAt) || len(entries) != 1 || entries[0].Kind != TimelineProcessExit {
+		t.Fatalf("exit was not projected as a terminal transition: process=%+v entries=%+v", exited, entries)
+	}
+
+	reusedStart := uint64(99)
+	reused := procEntityID(200, reusedStart)
+	restarted := procEnv("e3", base.Add(2*time.Second), reused, "", 200, 1, "exec", "b", "/b")
+	restarted.Event.Process.StartTimeNanos = reusedStart
+	if _, err := s.Observe(restarted); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(s.Processes()); got != 2 {
+		t.Fatalf("same PID with a new start time must create a new entity, got %d", got)
+	}
+	old, _ := s.Process(first)
+	newProcess, _ := s.Process(reused)
+	if old.State != ProcessExited || newProcess.State != ProcessRunning {
+		t.Fatalf("PID reuse revived the old entity: old=%+v new=%+v", old, newProcess)
+	}
+}
+
+func TestProcessCannotRunAfterItsObservedExit(t *testing.T) {
+	s := mustState(t)
+	startNanos := uint64(10)
+	if _, err := s.Observe(procExitEnv("e1", base.Add(time.Second), 200, startNanos, "a")); err != nil {
+		t.Fatal(err)
+	}
+	contradiction := procEnv("e2", base.Add(2*time.Second), procEntityID(200, startNanos), "", 200, 1, "exec", "a", "/a")
+	contradiction.Event.Process.StartTimeNanos = startNanos
+	if _, err := s.Observe(contradiction); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("same entity running after exit must fail, got %v", err)
+	}
+	process, _ := s.Process(procEntityID(200, startNanos))
+	if process.State != ProcessExited || len(s.Timeline()) != 1 {
+		t.Fatalf("rejected contradiction mutated terminal state: %+v", process)
 	}
 }
 
@@ -264,6 +328,8 @@ func TestProcessEntityValidate(t *testing.T) {
 		"no asset id":    {ProcessEntity{EntityID: "pe_a", State: ProcessRunning}, false},
 		"bad state":      {ProcessEntity{EntityID: "pe_a", AssetID: testAsset, State: "zombie"}, false},
 		"exit w/o state": {ProcessEntity{EntityID: "pe_a", AssetID: testAsset, State: ProcessRunning, ExitedAt: &exitedAt}, false},
+		"exited no time": {ProcessEntity{EntityID: "pe_a", AssetID: testAsset, State: ProcessExited}, false},
+		"ok exited":      {ProcessEntity{EntityID: "pe_a", AssetID: testAsset, State: ProcessExited, ExitedAt: &exitedAt}, true},
 	}
 	for name, tc := range cases {
 		err := tc.p.Validate()

@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -28,7 +29,11 @@ import (
 
 // evidenceKindDetection is the chain kind for a sealed detection. It sits alongside "finding",
 // "judgment_*", "exploitation_step", etc. in the one evidence chain.
-const evidenceKindDetection = "detection"
+const (
+	evidenceKindDetection         = "detection"
+	correlationIterationBudget    = 16
+	correlationExhaustedAuditName = "detection.correlate_on_ingest_exhausted"
+)
 
 // EvidenceChain is the narrow slice of the evidence vault this package needs: seal a detection into the
 // chain, and verify the chain. It is a consumer-side interface bridged to *evidence.Service at the
@@ -81,9 +86,17 @@ type IngestResult struct {
 	CorrelationScheduled bool
 }
 
-// CorrelateFunc folds an engagement's sealed detections into incidents and returns how many it created.
+// CorrelationProgress is the result of one bounded correlation step. Phase is intentionally represented
+// locally so detectledger does not import correlationuc or its domain dependencies.
+type CorrelationProgress struct {
+	Created int
+	Phase   string
+	HasMore bool
+}
+
+// CorrelateFunc performs one bounded correlation step for an engagement.
 // correlationuc.Service.CorrelateEngagement is adapted to it in the composition root.
-type CorrelateFunc func(ctx context.Context, actor string, engagementID shared.ID) (created int, err error)
+type CorrelateFunc func(ctx context.Context, actor string, engagementID shared.ID) (CorrelationProgress, error)
 
 // Service ingests agent detection batches into the evidence ledger.
 type Service struct {
@@ -240,13 +253,17 @@ func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, batch fleet
 		}
 		return IngestResult{}, fmt.Errorf("%w: no signing key %s for agent %s: %v", shared.ErrForbidden, batch.KeyID, batch.AgentID, err)
 	}
-	if err := fleetagent.VerifyBatchWithKey(key, fleetagent.PurposeDetectionBatch, s.clock.Now().UTC(), batch); err != nil {
+	receiptAt := s.clock.Now().UTC()
+	if err := fleetagent.VerifyBatchWithKey(key, fleetagent.PurposeDetectionBatch, receiptAt, batch); err != nil {
 		if auditErr := s.recordAudit(ctx, "detection.batch_rejected", batch.AgentID.String(), map[string]string{
 			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
 			"key_id": batch.KeyID, "reason": "unverified",
 		}); auditErr != nil {
 			return IngestResult{}, fmt.Errorf("%w: audit rejected detection batch: %v", shared.ErrSaturated, auditErr)
 		}
+		return IngestResult{}, err
+	}
+	if err := s.rejectFutureObservations(ctx, "detection.batch_rejected", batch.AgentID, batch.EngagementID, batch.Sequence, receiptAt, detectionObservations(items)); err != nil {
 		return IngestResult{}, err
 	}
 
@@ -275,7 +292,7 @@ func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, batch fleet
 	// seals nothing new. The gap is already reported above.
 
 	result := IngestResult{EngagementID: batch.EngagementID, Gap: gap}
-	now := s.clock.Now().UTC()
+	now := receiptAt
 	for _, it := range items {
 		if err := it.Detection.Validate(); err != nil {
 			return result, fmt.Errorf("%w: batch detection %s is malformed: %v", shared.ErrValidation, it.ID, err)
@@ -364,11 +381,27 @@ func (s *Service) correlateAfterIngest(ctx context.Context, actor string, engage
 	result.CorrelationScheduled = true
 	sealed := len(result.SealedRecords)
 	s.runs.schedule(context.WithoutCancel(ctx), actor, engagementID, func(runCtx context.Context, runActor string) {
-		if _, err := s.correlate(runCtx, runActor, engagementID); err != nil {
-			_ = s.recordAudit(runCtx, "detection.correlate_on_ingest_failed", runActor, map[string]string{
-				"engagement": engagementID.String(), "sealed": fmt.Sprint(sealed), "error": err.Error(),
-			})
+		for iteration := 1; iteration <= correlationIterationBudget; iteration++ {
+			progress, err := s.correlate(runCtx, runActor, engagementID)
+			if err != nil {
+				if errors.Is(err, shared.ErrConflict) {
+					continue
+				}
+				_ = s.recordAudit(runCtx, "detection.correlate_on_ingest_failed", runActor, map[string]string{
+					"engagement": engagementID.String(), "sealed": fmt.Sprint(sealed), "error": err.Error(),
+				})
+				return
+			}
+			if !progress.HasMore && progress.Phase == "" {
+				return
+			}
 		}
+		_ = s.recordAudit(runCtx, correlationExhaustedAuditName, runActor, map[string]string{
+			"engagement": engagementID.String(),
+			"sealed":     fmt.Sprint(sealed),
+			"reason":     "iteration_budget_exhausted",
+			"budget":     fmt.Sprint(correlationIterationBudget),
+		})
 	})
 }
 
@@ -408,13 +441,17 @@ func (s *Service) IngestV2(ctx context.Context, authAgentID shared.ID, batch fle
 		}
 		return IngestResult{}, fmt.Errorf("%w: no signing key %s for agent %s: %v", shared.ErrForbidden, batch.KeyID, batch.AgentID, err)
 	}
-	if err := fleetagent.VerifyBatchV2WithKey(key, fleetagent.PurposeDetectionBatch, s.clock.Now().UTC(), batch); err != nil {
+	receiptAt := s.clock.Now().UTC()
+	if err := fleetagent.VerifyBatchV2WithKey(key, fleetagent.PurposeDetectionBatch, receiptAt, batch); err != nil {
 		if auditErr := s.recordAudit(ctx, "detection.v2_batch_rejected", batch.AgentID.String(), map[string]string{
 			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
 			"key_id": batch.KeyID, "reason": "unverified",
 		}); auditErr != nil {
 			return IngestResult{}, fmt.Errorf("%w: audit rejected attributed detection batch: %v", shared.ErrSaturated, auditErr)
 		}
+		return IngestResult{}, err
+	}
+	if err := s.rejectFutureObservations(ctx, "detection.v2_batch_rejected", batch.AgentID, batch.EngagementID, batch.Sequence, receiptAt, detectionObservationsV2(items)); err != nil {
 		return IngestResult{}, err
 	}
 	last, err := s.records.LastBatchSequence(ctx, batch.AgentID)
@@ -993,6 +1030,40 @@ func membership(batch fleetagent.AgentBatch, items []IngestItem) (map[shared.ID]
 		seen[it.ID] = struct{}{}
 	}
 	return refByID, nil
+}
+
+func detectionObservations(items []IngestItem) []time.Time {
+	observations := make([]time.Time, len(items))
+	for i, item := range items {
+		observations[i] = item.Detection.Observed
+	}
+	return observations
+}
+
+func detectionObservationsV2(items []fleetagent.DetectionBatchItemV2) []time.Time {
+	observations := make([]time.Time, len(items))
+	for i, item := range items {
+		observations[i] = item.Detection.Observed
+	}
+	return observations
+}
+
+// rejectFutureObservations validates an entire admitted batch against one server receipt time before any
+// durable ingest side effect. Signed detection timestamps stay untouched; the receipt establishes only
+// whether the batch can be admitted.
+func (s *Service) rejectFutureObservations(ctx context.Context, action string, agentID, engagementID shared.ID, sequence uint64, receiptAt time.Time, observations []time.Time) error {
+	for _, observedAt := range observations {
+		if !observedAt.After(receiptAt) {
+			continue
+		}
+		if err := s.recordAudit(ctx, action, agentID.String(), map[string]string{
+			"engagement": engagementID.String(), "sequence": fmt.Sprint(sequence), "reason": "future_observation",
+		}); err != nil {
+			return fmt.Errorf("%w: audit rejected detection batch: %v", shared.ErrSaturated, err)
+		}
+		return fmt.Errorf("%w: batch contains an observation after receipt time", shared.ErrValidation)
+	}
+	return nil
 }
 
 func detectionBatchAuditKey(action string, agentID, engagementID shared.ID, sequence uint64) string {

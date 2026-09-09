@@ -9,6 +9,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Bounded automatic correlation and incident-scoped governed response.** Sealed detection batches now drain deterministic, bounded correlation state to forward progress, and incident response derives authoritative incident provenance before preparing a governed action.
 - **Scan runs now support tenant-owned, sealed provenance v1.** Native execution headers can be
   sealed once with normalized producer lanes, versions, stages, canonical target identities, and
   reproducible SHA-256 manifests. Migration 0134 is expand-only for migrate-first rollouts,

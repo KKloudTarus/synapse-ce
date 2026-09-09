@@ -81,7 +81,7 @@ func TestCanTransition(t *testing.T) {
 	legal := map[State][]State{
 		StateIssued:  {StateClaimed, StateExpired, StateCancelled},
 		StateClaimed: {StateRunning, StateRefused, StateExpired, StateCancelled},
-		StateRunning: {StateSucceeded, StateFailed, StateCancelled},
+		StateRunning: {StateSucceeded, StateFailed, StateExpired, StateCancelled},
 	}
 	all := []State{StateIssued, StateClaimed, StateRunning, StateSucceeded, StateFailed, StateExpired, StateCancelled, StateRefused}
 	for _, from := range all {

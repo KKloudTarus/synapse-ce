@@ -81,7 +81,11 @@ func (s *EndpointState) Observe(env telemetry.TelemetryEnvelope) ([]TimelineEntr
 	var entries []TimelineEntry
 	switch env.EventClass {
 	case detection.ClassProcess:
-		entries = s.applyProcess(env)
+		var err error
+		entries, err = s.applyProcess(env)
+		if err != nil {
+			return nil, err
+		}
 	case detection.ClassNetwork:
 		entries = s.applyNetwork(env)
 	case detection.ClassFile:
@@ -99,28 +103,45 @@ func (s *EndpointState) Observe(env telemetry.TelemetryEnvelope) ([]TimelineEntr
 
 // applyProcess folds a validated process envelope. env is already telemetry-validated by Observe, so the
 // process payload is present and well-formed.
-func (s *EndpointState) applyProcess(env telemetry.TelemetryEnvelope) []TimelineEntry {
+func (s *EndpointState) applyProcess(env telemetry.TelemetryEnvelope) ([]TimelineEntry, error) {
 	obs := env.Event.Process
 
 	pe, existed := s.processes[obs.EntityID]
+	if existed && obs.Kind == "exit" && !pe.StartedAt.IsZero() && env.OccurredAt.Before(pe.StartedAt) {
+		return nil, fmt.Errorf("%w: process exit predates the observed start for entity %s", shared.ErrValidation, obs.EntityID)
+	}
+	if existed && pe.State == ProcessExited && obs.Kind != "exit" && pe.ExitedAt != nil && !env.OccurredAt.Before(*pe.ExitedAt) {
+		return nil, fmt.Errorf("%w: process entity %s cannot run after its observed exit", shared.ErrValidation, obs.EntityID)
+	}
 	if !existed {
+		state := ProcessRunning
+		if obs.Kind == "exit" {
+			state = ProcessExited
+		}
 		pe = &ProcessEntity{
 			EntityID: obs.EntityID,
 			TenantID: s.tenantID,
 			AssetID:  s.assetID,
-			State:    ProcessRunning,
+			State:    state,
 		}
 		s.processes[obs.EntityID] = pe
-	} else if pe.State == ProcessUnknown {
+	} else if pe.State == ProcessUnknown && obs.Kind != "exit" {
 		// A parent stub is now directly observed: promote it (its real start is set by the min below).
 		pe.State = ProcessRunning
+	}
+	if obs.Kind == "exit" {
+		pe.State = ProcessExited
+		exitedAt := env.OccurredAt
+		if pe.ExitedAt == nil || exitedAt.Before(*pe.ExitedAt) {
+			pe.ExitedAt = &exitedAt
+		}
 	}
 
 	// Descriptor fields are resolved by EVENT time: an observation only overwrites them when it is the
 	// latest one seen for this entity, with EventID breaking an exact-timestamp tie. This makes the
 	// projection invariant to the order envelopes are folded in — an out-of-order (or same-instant, lower
 	// EventID) envelope never clobbers newer descriptors. An exec replaces the image.
-	descriptorIsLatest := !existed || laterEvent(env.OccurredAt, env.EventID, pe.LastSeenAt, pe.descEventID)
+	descriptorIsLatest := obs.Kind != "exit" && (!existed || laterEvent(env.OccurredAt, env.EventID, pe.LastSeenAt, pe.descEventID))
 	if descriptorIsLatest {
 		pe.PID = obs.PID
 		pe.PPID = obs.PPID
@@ -140,7 +161,7 @@ func (s *EndpointState) applyProcess(env telemetry.TelemetryEnvelope) []Timeline
 	}
 	// StartedAt is the EARLIEST event time observed for the entity; LastSeenAt the latest. Both take a
 	// min/max so they are order-independent (a stub's zero StartedAt is filled by its first real event).
-	if pe.StartedAt.IsZero() || env.OccurredAt.Before(pe.StartedAt) {
+	if obs.Kind != "exit" && (pe.StartedAt.IsZero() || env.OccurredAt.Before(pe.StartedAt)) {
 		pe.StartedAt = env.OccurredAt
 	}
 	if env.OccurredAt.After(pe.LastSeenAt) {
@@ -154,7 +175,7 @@ func (s *EndpointState) applyProcess(env telemetry.TelemetryEnvelope) []Timeline
 
 	s.ensureParentStub(obs)
 
-	return s.appendTimeline(env)
+	return s.appendTimeline(env), nil
 }
 
 // appendTimeline appends the envelope's timeline transition (built by the shared timelineEntryFor) and
@@ -326,7 +347,10 @@ func (s *EndpointState) Ancestors(id shared.ID) []ProcessEntity {
 // yields the same entry, and both the live fold (Observe) and the persistence path (TimelineEntriesFor)
 // build entries through this one function, so they can never drift. The envelope must already be validated.
 func timelineEntryFor(tenantID shared.ID, env telemetry.TelemetryEnvelope) (TimelineEntry, bool) {
-	e := TimelineEntry{OccurredAt: env.OccurredAt, TenantID: tenantID, AssetID: env.AssetID, EventID: env.EventID}
+	e := TimelineEntry{
+		OccurredAt: env.OccurredAt, TenantID: tenantID, AssetID: env.AssetID,
+		SourceAgentID: env.AgentID, SourceAgentSessionID: env.AgentSessionID, EventID: env.EventID,
+	}
 	switch env.EventClass {
 	case detection.ClassProcess:
 		obs := env.Event.Process
@@ -334,6 +358,8 @@ func timelineEntryFor(tenantID shared.ID, env telemetry.TelemetryEnvelope) (Time
 		e.Kind = TimelineProcessStart
 		if obs.Kind == "exec" {
 			e.Kind = TimelineProcessExec
+		} else if obs.Kind == "exit" {
+			e.Kind = TimelineProcessExit
 		}
 		return e, true
 	case detection.ClassNetwork:

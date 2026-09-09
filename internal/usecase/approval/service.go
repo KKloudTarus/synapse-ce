@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
@@ -87,11 +88,17 @@ func (s *Service) Request(ctx context.Context, p agent.ProposedAction) (agent.Ap
 	return dec, err // pending
 }
 
+// Get returns the immutable proposal and current decision for an existing approval request.
+func (s *Service) Get(ctx context.Context, actionID shared.ID) (agent.ProposedAction, agent.ApprovalDecision, error) {
+	return s.store.Get(ctx, actionID)
+}
+
 // Decide records a human's approve/deny (idempotent – a 2nd decision returns ErrConflict),
 // audited under the HUMAN actor.
 func (s *Service) Decide(ctx context.Context, human string, actionID shared.ID, approve bool, reason string) (agent.ApprovalDecision, error) {
-	if human == "" {
-		return agent.ApprovalDecision{}, fmt.Errorf("%w: a decision must be attributed to a human", shared.ErrValidation)
+	human = strings.TrimSpace(human)
+	if human == "" || shared.IsMachineActor(human) {
+		return agent.ApprovalDecision{}, fmt.Errorf("%w: a decision must be attributed to an authenticated human", shared.ErrForbidden)
 	}
 	state := agent.ApprovalApproved
 	if !approve {

@@ -2,9 +2,11 @@ package responsesaga
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -13,7 +15,7 @@ const actionID = shared.ID("act-1")
 var base = time.Unix(1_800_000_000, 0).UTC()
 
 func procTarget() TargetFingerprint {
-	return TargetFingerprint{Kind: FingerprintProcess, ProcessEntityID: "pe_abc"}
+	return TargetFingerprint{Kind: FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_abc"}
 }
 
 func mustSaga(t *testing.T) *Saga {
@@ -76,13 +78,24 @@ func TestCommandAppliedIsNotVerifiedSucceeded(t *testing.T) {
 func TestSagaVerificationOutcomesToRollback(t *testing.T) {
 	for _, outcome := range []SagaState{StateVerificationFailed, StateVerificationUnknown, StateTimedOut} {
 		s := mustSaga(t)
-		advance(t, s, StateAwaitingApproval, StateApproved, StateIssued, StateClaimed, StateExecuting, StateCommandApplied, StateVerifying, outcome, StateRollbackRequested, StateRollingBack, StateRolledBack)
+		advance(t, s, StateAwaitingApproval, StateApproved, StateIssued, StateClaimed, StateExecuting, StateCommandApplied, StateVerifying, outcome, StateRollbackRequested, StateRollingBack, StateRollbackVerifying, StateRolledBack)
 		if !s.State().Terminal() {
 			t.Fatalf("rolled_back must be terminal (via %s)", outcome)
 		}
 		if s.Contained() {
 			t.Fatalf("a non-succeeded verification (%s) must not report contained", outcome)
 		}
+	}
+}
+
+func TestSagaAmbiguousExecutionRequiresManualIntervention(t *testing.T) {
+	for _, from := range []SagaState{StateClaimed, StateExecuting, StateOutcomeUnknown, StateRollbackRequested} {
+		if !CanTransition(from, StateManualIntervention) {
+			t.Fatalf("%s must be able to terminate for manual intervention", from)
+		}
+	}
+	if !StateManualIntervention.Terminal() {
+		t.Fatal("manual intervention must be terminal so reconcilers cannot reissue an ambiguous command")
 	}
 }
 
@@ -108,7 +121,7 @@ func TestSagaRejectsIllegalTransitions(t *testing.T) {
 
 func TestTargetFingerprintValidate(t *testing.T) {
 	ok := []TargetFingerprint{
-		{Kind: FingerprintProcess, ProcessEntityID: "pe_x"},
+		{Kind: FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_x"},
 		{Kind: FingerprintFile, FilePath: "/etc/x", FileDevice: 1, FileInode: 2},
 		{Kind: FingerprintFile, FilePath: "/etc/x", FileHash: "abc"},
 		{Kind: FingerprintHost, HostID: "host-1", NetpolGeneration: 3},
@@ -120,6 +133,8 @@ func TestTargetFingerprintValidate(t *testing.T) {
 	}
 	bad := []TargetFingerprint{
 		{Kind: FingerprintProcess},                                 // no stable entity id (bare PID not allowed)
+		{Kind: FingerprintProcess, ProcessEntityID: "pe_x"},        // no authoritative process asset
+		{Kind: FingerprintProcess, ProcessAssetID: "asset-1"},      // no stable process entity
 		{Kind: FingerprintFile, FilePath: "/etc/x"},                // path alone is rebindable
 		{Kind: FingerprintFile, FilePath: "/etc/x", FileDevice: 1}, // device-only is not a stable identity
 		{Kind: FingerprintFile, FilePath: "/etc/x", FileInode: 2},  // inode-only is ambiguous across filesystems
@@ -137,7 +152,7 @@ func TestTargetFingerprintValidate(t *testing.T) {
 
 func TestRecordAttemptIdempotentAndValidated(t *testing.T) {
 	s := mustSaga(t)
-	a := ResponseAttempt{ActionID: actionID, Attempt: 1, IdempotencyKey: "k1", Target: procTarget(), State: StateExecuting, CommandOutcome: "applied", At: base}
+	a := ResponseAttempt{ActionID: actionID, Attempt: 1, IdempotencyKey: "k1", Target: procTarget(), State: StateExecuting, CommandOutcome: "applied", At: base, DeadlineAt: base.Add(time.Minute)}
 	if err := s.RecordAttempt(a); err != nil {
 		t.Fatal(err)
 	}
@@ -189,5 +204,75 @@ func TestOutcomeAndReversibilityValidity(t *testing.T) {
 	}
 	if !ReversibilityGuaranteed.Valid() || !ReversibilityIrreversible.Valid() || ReversibilityClass("x").Valid() {
 		t.Fatal("reversibility validity wrong")
+	}
+}
+
+func TestResponseAttemptRequiresEffectAndIndependentReceipt(t *testing.T) {
+	valid := ResponseAttempt{
+		ActionID: actionID, Attempt: 1, IdempotencyKey: "verified", Target: procTarget(),
+		State: StateVerifiedSucceeded, VerificationOutcome: VerificationSucceeded,
+		ObservedRadius: offensivepolicy.RadiusStateChanging, AffectedCount: 1,
+		ExecutorID: "agent:executor", ExecutorAgentID: "executor-agent", VerificationChallenge: strings.Repeat("a", 64),
+		VerifierID: "sensor:verifier", VerificationEvidenceID: "evidence-1",
+		At: base, DeadlineAt: base.Add(time.Minute),
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid verified attempt rejected: %v", err)
+	}
+	for _, mutate := range []func(*ResponseAttempt){
+		func(a *ResponseAttempt) { a.ObservedRadius = "" },
+		func(a *ResponseAttempt) { a.AffectedCount = 2 },
+		func(a *ResponseAttempt) { a.ExecutorID = "" },
+		func(a *ResponseAttempt) { a.ExecutorAgentID = "" },
+		func(a *ResponseAttempt) { a.VerifierID = " " },
+		func(a *ResponseAttempt) { a.VerifierID = " AGENT:EXECUTOR " },
+		func(a *ResponseAttempt) { a.VerificationEvidenceID = " " },
+		func(a *ResponseAttempt) { a.VerificationOutcome = VerificationUnknown },
+		func(a *ResponseAttempt) { a.VerificationChallenge = "" },
+	} {
+		candidate := valid
+		mutate(&candidate)
+		if err := candidate.Validate(); !errors.Is(err, shared.ErrValidation) {
+			t.Fatalf("invalid verified attempt accepted: %+v, err=%v", candidate, err)
+		}
+	}
+	completed := valid
+	completed.State = StateCompleted
+	if err := completed.Validate(); err != nil {
+		t.Fatalf("valid completed attempt rejected: %v", err)
+	}
+	rolledBack := valid
+	rolledBack.State = StateRolledBack
+	rolledBack.IsReversal = true
+	if err := rolledBack.Validate(); err != nil {
+		t.Fatalf("valid rolled-back attempt rejected: %v", err)
+	}
+}
+
+func TestResponseAttemptRequiresBoundedDeadlineAndManualReason(t *testing.T) {
+	valid := ResponseAttempt{
+		ActionID: actionID, Attempt: 1, IdempotencyKey: "bounded", Target: procTarget(),
+		State: StateExecuting, At: base, DeadlineAt: base.Add(time.Minute),
+	}
+	for name, mutate := range map[string]func(*ResponseAttempt){
+		"missing deadline":         func(a *ResponseAttempt) { a.DeadlineAt = time.Time{} },
+		"deadline before creation": func(a *ResponseAttempt) { a.DeadlineAt = a.At.Add(-time.Second) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := valid
+			mutate(&candidate)
+			if err := candidate.Validate(); !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("invalid deadline accepted: %+v, err=%v", candidate, err)
+			}
+		})
+	}
+	valid.State = StateManualIntervention
+	valid.VerificationChallenge = strings.Repeat("a", 64)
+	if err := valid.Validate(); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("manual intervention without reason accepted: %v", err)
+	}
+	valid.TerminalReason = "execution_outcome_deadline_exceeded"
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid manual-intervention attempt rejected: %v", err)
 	}
 }

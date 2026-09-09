@@ -15,6 +15,7 @@ func TestTimelineEntriesForMatchesObserve(t *testing.T) {
 	proc := procEntityID(10, 1)
 	cases := map[string]telemetry.TelemetryEnvelope{
 		"process":   procEnv("e1", base, proc, "", 10, 1, "exec", "app", "/usr/bin/app", "app", "-x"),
+		"exit":      procExitEnv("e5", base, 10, 1, "app"),
 		"network":   netEnv("e2", base, proc, "tcp", "egress", "10.0.0.1", 1000, "1.2.3.4", 443),
 		"file":      fileEnv("e3", base, proc, "write", "/etc/x", 1, 2, ""),
 		"privilege": privEnv("e4", base, proc, "setuid", 1000, 0, ""),

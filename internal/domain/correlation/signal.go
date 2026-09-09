@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -26,6 +27,22 @@ type Signal struct {
 	Severity   shared.Severity
 	RuleID     string
 	Title      string
+	// Timeline is set only for a causally referenced endpoint transition.
+	Timeline *incident.TimelineRef
+}
+
+// SameSignal compares staged signal values including TimelineRef contents rather than pointer identity.
+func SameSignal(left, right Signal) bool {
+	if left.ID != right.ID || left.AssetID != right.AssetID || left.EntityID != right.EntityID || !left.OccurredAt.Equal(right.OccurredAt) || left.Severity != right.Severity || left.RuleID != right.RuleID || left.Title != right.Title {
+		return false
+	}
+	if left.Timeline == nil || right.Timeline == nil {
+		return left.Timeline == nil && right.Timeline == nil
+	}
+	return left.Timeline.EventID == right.Timeline.EventID &&
+		left.Timeline.OccurredAt.Equal(right.Timeline.OccurredAt) &&
+		left.Timeline.Kind == right.Timeline.Kind &&
+		left.Timeline.Summary == right.Timeline.Summary
 }
 
 // Validate enforces a well-formed signal.

@@ -7,10 +7,13 @@
 #
 # /etc/synapse-agent/agent.env (0600):
 #   SYNAPSE_FLEET_URL=https://control-plane.example
+#   SYNAPSE_FLEET_ENROL_URL=https://enroll.control-plane.example
 #   SYNAPSE_FLEET_ENROL_TOKEN_FILE=/etc/synapse-agent/enrol-token
 #   SYNAPSE_AGENT_STATE_DIR=/var/lib/synapse-agent
 #   SYNAPSE_INVENTORY_SWEEP_ENABLED=true      # A8 continuous inventory (default on)
 #   SYNAPSE_DETECT_CLASSES=                    # empty = detection off; set e.g. process,network to enable (Linux+root)
+#   SYNAPSE_RESPONSE_EXECUTION_ENABLED=false   # opt-in; requires process detection + root/CAP_KILL
+#   SYNAPSE_RESPONSE_COMMAND_TRUST_FILE=/etc/synapse-agent/response-command-trust.json
 
 [Unit]
 Description=Synapse fleet endpoint agent (host inventory + optional runtime detection)
@@ -29,6 +32,7 @@ Restart=always
 RestartSec=10
 # Hardening (inventory-only). If you enable eBPF detection (SYNAPSE_DETECT_CLASSES), remove DynamicUser,
 # run as root, and grant AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_NET_ADMIN instead of NoNewPrivileges.
+# Governed process response additionally requires CAP_KILL and a read-only, root-managed command trust file.
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only

@@ -59,6 +59,32 @@ api:
     requests: {cpu: 500m, memory: 1Gi}
     limits: {cpu: "2", memory: 2Gi}
 
+# Agent fleet and live response are opt-in. The response signer remains API-only and is mounted
+# from an existing Secret only when live response is explicitly enabled.
+fleet:
+  enabled: false
+  assetsEnabled: false
+  hostIngestEnabled: false
+  telemetryIngestEnabled: false
+  detectionIngestEnabled: false
+  keyRegistrationEnabled: false
+  # Dedicated virtual hosts for certificate-authenticated traffic and the bearer enrollment exchange.
+  # Required and distinct when fleet is enabled in a production execution mode.
+  clientCertHeader: ""
+  clientCertHost: ""
+  enrollmentHost: ""
+  staleAfter: 10m
+  correlation:
+    enabled: false
+    window: 30m
+    allowedLateness: 5m
+    maxPerIncident: 100
+
+responseExecution:
+  enabled: false
+  commandTTL: 2m
+  pollInterval: 100ms
+
 worker:
   # Disable this Deployment when execution workers run on the hardened external EC2 tier.
   enabled: true
@@ -109,6 +135,8 @@ existingSecrets:
   database:
     runtime: {name: synapse-db-runtime, key: dsn}
     migration: {name: synapse-db-migration, key: dsn}
+    # Narrow identity used only by synapse-api to manufacture response halt fences/dispatches.
+    haltWriter: {name: synapse-db-halt-writer, key: dsn}
   objectStore:
     accessKey: {name: synapse-s3-access, key: access-key}
     secretKey: {name: synapse-s3-secret, key: secret-key}
@@ -116,6 +144,9 @@ existingSecrets:
     vaultMasterKey: {name: synapse-vault-key, key: key}
     evidenceSigningSeed: {name: synapse-evidence-signing, key: seed}
     measureCursorSecret: {name: synapse-cursor-secret, key: secret}
+    fleetSignerKey: {name: synapse-fleet-signer, key: key}
+    # API-only Ed25519 response-command signer. Used only when responseExecution.enabled is true.
+    responseCommandSigningKey: {name: synapse-response-command-signing, key: key.json}
   egressGrant:
     issuerToken: {name: synapse-egress-grant-issuer, key: token}
     signingSeed: {name: synapse-egress-grant-signing, key: seed}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	responseuc "github.com/KKloudTarus/synapse-ce/internal/usecase/response"
@@ -21,8 +22,9 @@ import (
 // DAST probe and an exploitation step use, so a response action is not a privileged side path.
 type responseService interface {
 	DryRun(action rdom.Action) ([]responseuc.PlanStep, error)
-	Apply(ctx context.Context, engagementID shared.ID, action rdom.Action, target engagement.Target, approver string) (responseuc.Record, error)
-	Revert(ctx context.Context, actionID shared.ID, target engagement.Target, approver string) (responseuc.Record, error)
+	Apply(ctx context.Context, engagementID shared.ID, action rdom.Action, target engagement.Target, fingerprint responsesaga.TargetFingerprint, approver string) (responseuc.Record, error)
+	Decide(ctx context.Context, actionID shared.ID, reviewer string, approve bool, reason string) (responseuc.Record, error)
+	Revert(ctx context.Context, actionID shared.ID, target engagement.Target, fingerprint responsesaga.TargetFingerprint, approver string) (responseuc.Record, error)
 	ListByState(ctx context.Context, state rdom.State) ([]responseuc.Record, error)
 }
 
@@ -36,17 +38,52 @@ func (rt *Router) SetResponse(svc responseService, ids ports.IDGenerator) {
 	}
 }
 
+const responseBodyLimit = 64 << 10
+
 type responseActionRequest struct {
-	Kind   string `json:"kind"`   // isolate_host | quarantine_file | stop_process
-	Target string `json:"target"` // the asset id the action affects; must be in the engagement scope
+	Kind        string                           `json:"kind"`   // isolate_host | quarantine_file | stop_process
+	Target      string                           `json:"target"` // the stable response target; must be in the engagement scope
+	Fingerprint responseTargetFingerprintRequest `json:"fingerprint"`
 	// TargetKind names the scope entry kind the target is authorized as (default: ip). The admission
 	// gate matches it against the engagement's scope, so a target outside scope is refused.
 	TargetKind string `json:"target_kind"`
 }
 
+type responseTargetFingerprintRequest struct {
+	Kind             string `json:"kind"`
+	ProcessAssetID   string `json:"process_asset_id,omitempty"`
+	ProcessEntityID  string `json:"process_entity_id,omitempty"`
+	FilePath         string `json:"file_path,omitempty"`
+	FileDevice       uint64 `json:"file_device,omitempty"`
+	FileInode        uint64 `json:"file_inode,omitempty"`
+	FileHash         string `json:"file_hash,omitempty"`
+	HostID           string `json:"host_id,omitempty"`
+	NetpolGeneration int64  `json:"netpol_generation,omitempty"`
+}
+
+func (r responseTargetFingerprintRequest) targetFingerprint() responsesaga.TargetFingerprint {
+	return responsesaga.TargetFingerprint{
+		Kind:             responsesaga.FingerprintKind(r.Kind),
+		ProcessAssetID:   shared.ID(r.ProcessAssetID),
+		ProcessEntityID:  shared.ID(r.ProcessEntityID),
+		FilePath:         r.FilePath,
+		FileDevice:       r.FileDevice,
+		FileInode:        r.FileInode,
+		FileHash:         r.FileHash,
+		HostID:           shared.ID(r.HostID),
+		NetpolGeneration: r.NetpolGeneration,
+	}
+}
+
 type responseRevertRequest struct {
-	Target     string `json:"target"`
-	TargetKind string `json:"target_kind"`
+	Target      string                           `json:"target"`
+	TargetKind  string                           `json:"target_kind"`
+	Fingerprint responseTargetFingerprintRequest `json:"fingerprint"`
+}
+
+type responseDecisionRequest struct {
+	Approve *bool  `json:"approve"`
+	Reason  string `json:"reason"`
 }
 
 type responsePlanStepDTO struct {
@@ -100,7 +137,7 @@ func (rt *Router) planResponse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req responseActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, responseBodyLimit)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
 		return
 	}
@@ -135,7 +172,7 @@ func (rt *Router) applyResponse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req responseActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, responseBodyLimit)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
 		return
 	}
@@ -146,11 +183,42 @@ func (rt *Router) applyResponse(w http.ResponseWriter, r *http.Request) {
 	}
 	target := engagement.Target{Kind: targetKindOrDefault(req.TargetKind), Value: req.Target}
 	ctx := shared.WithTenant(r.Context(), shared.TenantOrDefault(eng.TenantID))
-	rec, err := rt.responses.Apply(ctx, engID, action, target, PrincipalFrom(r.Context()))
-	if errors.Is(err, safety.ErrPendingApproval) {
+	rec, err := rt.responses.Apply(ctx, engID, action, target, req.Fingerprint.targetFingerprint(), PrincipalFrom(r.Context()))
+	if errors.Is(err, safety.ErrPendingApproval) || errors.Is(err, responseuc.ErrVerificationPending) {
 		// The action is recorded pending a second human; hand back its server-minted id so the operator
-		// can find it in the list and the kill switch can cancel it.
-		writeJSON(w, http.StatusAccepted, toResponseRecordDTO(rec))
+		// can find it in the list. A command awaiting independent verification is also durable and must
+		// not be reported as a server failure.
+		dto := toResponseRecordDTO(rec)
+		if errors.Is(err, responseuc.ErrVerificationPending) {
+			dto.Verification = "pending"
+		}
+		writeJSON(w, http.StatusAccepted, dto)
+		return
+	}
+	if err != nil {
+		writeResponseError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toResponseRecordDTO(rec))
+}
+
+// decideResponse records a reviewer's decision and resumes the exact pending action on approval.
+func (rt *Router) decideResponse(w http.ResponseWriter, r *http.Request) {
+	var req responseDecisionRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, responseBodyLimit)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
+		return
+	}
+	if req.Approve == nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "approve is required"})
+		return
+	}
+	ctx := shared.WithTenant(r.Context(), requestTenant(r))
+	rec, err := rt.responses.Decide(ctx, shared.ID(r.PathValue("id")), PrincipalFrom(r.Context()), *req.Approve, req.Reason)
+	if errors.Is(err, responseuc.ErrVerificationPending) {
+		dto := toResponseRecordDTO(rec)
+		dto.Verification = "pending"
+		writeJSON(w, http.StatusAccepted, dto)
 		return
 	}
 	if err != nil {
@@ -165,13 +233,21 @@ func (rt *Router) applyResponse(w http.ResponseWriter, r *http.Request) {
 func (rt *Router) revertResponse(w http.ResponseWriter, r *http.Request) {
 	actionID := shared.ID(r.PathValue("id"))
 	var req responseRevertRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, responseBodyLimit)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
 		return
 	}
 	target := engagement.Target{Kind: targetKindOrDefault(req.TargetKind), Value: req.Target}
 	ctx := shared.WithTenant(r.Context(), requestTenant(r))
-	rec, err := rt.responses.Revert(ctx, actionID, target, PrincipalFrom(r.Context()))
+	rec, err := rt.responses.Revert(ctx, actionID, target, req.Fingerprint.targetFingerprint(), PrincipalFrom(r.Context()))
+	if errors.Is(err, safety.ErrPendingApproval) || errors.Is(err, responseuc.ErrVerificationPending) {
+		dto := toResponseRecordDTO(rec)
+		if errors.Is(err, responseuc.ErrVerificationPending) {
+			dto.Verification = "pending"
+		}
+		writeJSON(w, http.StatusAccepted, dto)
+		return
+	}
 	if err != nil {
 		writeResponseError(w, rt.log, err)
 		return

@@ -26,6 +26,9 @@ type EndpointTimelineStore interface {
 	// bytewise) — the SAME total order the in-memory timeline uses — so a persisted read reads back in the
 	// same order as the in-memory projection. It is tenant-scoped from the context.
 	QueryTimeline(ctx context.Context, q EndpointTimelineQuery) ([]endpoint.TimelineEntry, error)
+	// LoadTimelineEntries returns only the requested source EventIDs for one asset, ordered by event time
+	// and EventID. Missing IDs are omitted because not every telemetry event projects a timeline transition.
+	LoadTimelineEntries(ctx context.Context, assetID shared.ID, eventIDs []shared.ID) ([]endpoint.TimelineEntry, error)
 }
 
 // EndpointTimelineQuery selects a window of the State Timeline. AssetID is required (the timeline is
@@ -33,10 +36,12 @@ type EndpointTimelineStore interface {
 // or Kind does not filter on that field. Limit caps the number of rows returned (0 means the store's
 // default cap); results are always ordered by (OccurredAt, EventID).
 type EndpointTimelineQuery struct {
-	AssetID  shared.ID
-	From     time.Time
-	To       time.Time
-	EntityID shared.ID
-	Kind     endpoint.TimelineEntryKind
-	Limit    int
+	AssetID              shared.ID
+	SourceAgentID        shared.ID
+	SourceAgentSessionID shared.ID
+	From                 time.Time
+	To                   time.Time
+	EntityID             shared.ID
+	Kind                 endpoint.TimelineEntryKind
+	Limit                int
 }

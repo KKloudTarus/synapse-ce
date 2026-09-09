@@ -100,6 +100,25 @@ broker DaemonSet enabled and an execution node selector.
 {{- fail "objectStore.useSSL must be true in a production execution.mode; plaintext blob transport is only permitted in controlPlaneOnly (local/dev)" -}}
 {{- end -}}
 {{- end -}}
+{{- if and .Values.fleet.enabled (or (eq $mode "externalNative") (eq $mode "inClusterBroker")) -}}
+{{- if or (not .Values.fleet.clientCertHeader) (not .Values.fleet.clientCertHost) (not .Values.fleet.enrollmentHost) -}}
+{{- fail "production fleet.enabled requires fleet.clientCertHeader, fleet.clientCertHost, and fleet.enrollmentHost" -}}
+{{- end -}}
+{{- if eq (lower .Values.fleet.clientCertHost) (lower .Values.fleet.enrollmentHost) -}}
+{{- fail "fleet.clientCertHost and fleet.enrollmentHost must be distinct" -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.responseExecution.enabled -}}
+{{- if not (and .Values.fleet.enabled .Values.fleet.assetsEnabled .Values.fleet.hostIngestEnabled .Values.fleet.telemetryIngestEnabled .Values.fleet.keyRegistrationEnabled) -}}
+{{- fail "responseExecution.enabled requires fleet transport, assets, host ingest, telemetry ingest, and key registration" -}}
+{{- end -}}
+{{- if not .Values.existingSecrets.cryptography.responseCommandSigningKey.name -}}
+{{- fail "existingSecrets.cryptography.responseCommandSigningKey.name is required when responseExecution.enabled" -}}
+{{- end -}}
+{{- if not .Values.existingSecrets.cryptography.responseCommandSigningKey.key -}}
+{{- fail "existingSecrets.cryptography.responseCommandSigningKey.key is required when responseExecution.enabled" -}}
+{{- end -}}
+{{- end -}}
 {{- if eq $mode "inClusterBroker" -}}
 {{- if not .Values.egressBroker.enabled -}}
 {{- fail "execution.mode=inClusterBroker requires egressBroker.enabled=true (the privileged per-run egress broker DaemonSet)" -}}

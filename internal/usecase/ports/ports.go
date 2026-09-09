@@ -136,8 +136,12 @@ type BusinessAssetRepository interface {
 type WorkOrderStore interface {
 	Issue(ctx context.Context, wo *workorder.WorkOrder) (*workorder.WorkOrder, error)
 	GetByID(ctx context.Context, tenantID, id shared.ID) (*workorder.WorkOrder, error)
-	Claim(ctx context.Context, tenantID, agentID shared.ID, max int, now time.Time) ([]*workorder.WorkOrder, error)
+	GetByIdempotencyKey(ctx context.Context, tenantID shared.ID, idempotencyKey string) (*workorder.WorkOrder, error)
+	Claim(ctx context.Context, tenantID, agentID shared.ID, max int, now time.Time, leaseID string, leaseUntil time.Time) ([]*workorder.WorkOrder, error)
 	Transition(ctx context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State, now time.Time) error
+	TransitionLeased(ctx context.Context, tenantID, id shared.ID, leaseID string, to workorder.State, reason string, expected workorder.State, now time.Time) error
+	CompleteResponse(ctx context.Context, tenantID, id shared.ID, result fleetagent.ResponseExecutionResult, reason string, now time.Time) (bool, error)
+	CancelResponsesBelowGeneration(ctx context.Context, tenantID shared.ID, generation int64, reason string, now time.Time) (int, error)
 	// CancelForAgent moves every live (issued/claimed/running) order addressed to agentID into the
 	// cancelled state, returning how many were cancelled. Used when an agent is revoked.
 	CancelForAgent(ctx context.Context, tenantID, agentID shared.ID, reason string, now time.Time) (int, error)

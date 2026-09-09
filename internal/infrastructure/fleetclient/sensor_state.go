@@ -47,9 +47,7 @@ func (c *Client) ShipSensorState(ctx context.Context, token string, report fleet
 	req.Header.Set(protoHeader, protoVersion)
 	req.Header.Set("Content-Type", sensorStateMediaType)
 	req.Header.Set("Content-Encoding", "gzip")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	c.setAuthorization(req, token, false)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return out, fmt.Errorf("fleetclient: sensor-state: %w", err)

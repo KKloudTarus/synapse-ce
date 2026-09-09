@@ -57,7 +57,8 @@ func TestMigration0076ResponseActions(t *testing.T) {
 	rec := rdom.Record{
 		ID: shared.ID("rec-" + id), TenantID: tenantA, EngagementID: shared.ID(engA),
 		Action: rdom.Action{ID: shared.ID("rec-" + id), Kind: rdom.KindIsolateHost, Target: "host-1",
-			BlastRadius: offensivepolicy.RadiusStateChanging, Argv: []string{"synapse-agent-response", "isolate-host", "host-1"}, Reversal: sp.Reversal},
+			BlastRadius: offensivepolicy.RadiusStateChanging, Reversibility: sp.Reversibility,
+			Argv: []string{"synapse-agent-response", "isolate-host", "host-1"}, Reversal: sp.Reversal},
 		State: rdom.StatePending, ApprovedBy: "alice", UpdatedAt: time.Unix(1000, 0).UTC(),
 	}
 	if err := repo.Put(tctx, rec); err != nil {
@@ -71,11 +72,12 @@ func TestMigration0076ResponseActions(t *testing.T) {
 	if got.Action.Reversal.Kind != rdom.ReversalRestoreHost || len(got.Action.Argv) != 3 {
 		t.Fatalf("round-trip lost action detail: %+v", got.Action)
 	}
-	// State transition upsert.
+	// State changes use the repository's conditional transition path.
 	rec.State = rdom.StateApplied
 	rec.AppliedAt = time.Unix(1001, 0).UTC()
-	if err := repo.Put(tctx, rec); err != nil {
-		t.Fatalf("upsert: %v", err)
+	transitioned, err := repo.Transition(tctx, rec, rdom.StatePending)
+	if err != nil || !transitioned {
+		t.Fatalf("transition: transitioned=%t err=%v", transitioned, err)
 	}
 	if applied, _ := repo.ListByState(tctx, rdom.StateApplied); len(applied) != 1 {
 		t.Fatalf("want 1 applied record, got %d", len(applied))

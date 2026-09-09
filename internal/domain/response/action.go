@@ -10,11 +10,16 @@
 package response
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -54,12 +59,13 @@ func (r ReversalSpec) valid() bool {
 // Action is one governed response. It is state-changing by nature, declares its blast radius (enforced
 // at execution), and carries its mandatory reversal. Argv is the exact argv-only command.
 type Action struct {
-	ID          shared.ID
-	Kind        Kind
-	Target      shared.ID // the asset the action affects
-	BlastRadius offensivepolicy.Radius
-	Argv        []string // argv-only; no shell
-	Reversal    ReversalSpec
+	ID            shared.ID
+	Kind          Kind
+	Target        shared.ID // the asset the action affects
+	BlastRadius   offensivepolicy.Radius
+	Reversibility responsesaga.ReversibilityClass
+	Argv          []string // argv-only; no shell
+	Reversal      ReversalSpec
 }
 
 // NewAction builds a complete, valid action for a kind + target from the catalogue: the argv-only
@@ -73,12 +79,13 @@ func NewAction(id shared.ID, kind Kind, target shared.ID) (Action, error) {
 		return Action{}, fmt.Errorf("%w: unknown response kind %q", shared.ErrValidation, kind)
 	}
 	a := Action{
-		ID:          id,
-		Kind:        kind,
-		Target:      target,
-		BlastRadius: spec.Radius,
-		Argv:        []string{"synapse-agent-response", strings.ReplaceAll(string(kind), "_", "-"), target.String()},
-		Reversal:    spec.Reversal,
+		ID:            id,
+		Kind:          kind,
+		Target:        target,
+		BlastRadius:   spec.Radius,
+		Reversibility: spec.Reversibility,
+		Argv:          []string{"synapse-agent-response", strings.ReplaceAll(string(kind), "_", "-"), target.String()},
+		Reversal:      spec.Reversal,
 	}
 	if err := a.Validate(); err != nil {
 		return Action{}, err
@@ -102,17 +109,41 @@ func (a Action) Validate() error {
 	if !a.BlastRadius.Valid() {
 		return fmt.Errorf("%w: response action %s has an invalid blast radius %q", shared.ErrValidation, a.ID, a.BlastRadius)
 	}
+	if a.BlastRadius != catalogue[a.Kind].Radius {
+		return fmt.Errorf("%w: response action %s blast radius does not match the immutable catalogue", shared.ErrValidation, a.ID)
+	}
+	if !a.Reversibility.Valid() || a.Reversibility != catalogue[a.Kind].Reversibility {
+		return fmt.Errorf("%w: response action %s reversibility does not match the immutable catalogue", shared.ErrValidation, a.ID)
+	}
 	if len(a.Argv) == 0 || containsShell(a.Argv) {
 		return fmt.Errorf("%w: response action %s must be argv-only with no shell", shared.ErrValidation, a.ID)
+	}
+	expectedArgv := []string{"synapse-agent-response", strings.ReplaceAll(string(a.Kind), "_", "-"), a.Target.String()}
+	if !slices.Equal(a.Argv, expectedArgv) {
+		return fmt.Errorf("%w: response action %s argv does not match the immutable catalogue command", shared.ErrValidation, a.ID)
 	}
 	if !a.Reversal.valid() {
 		return fmt.Errorf("%w: response action %s has no valid reversal — reversibility is mandatory", shared.ErrValidation, a.ID)
 	}
 	// The reversal for this kind must be the catalogued one, so an action cannot declare a bogus reversal.
-	if want := catalogue[a.Kind].Reversal.Kind; a.Reversal.Kind != want {
-		return fmt.Errorf("%w: response %s reversal must be %q, got %q", shared.ErrValidation, a.Kind, want, a.Reversal.Kind)
+	want := catalogue[a.Kind].Reversal
+	if a.Reversal.Kind != want.Kind || a.Reversal.Description != want.Description || !slices.Equal(a.Reversal.Argv, want.Argv) {
+		return fmt.Errorf("%w: response %s reversal does not match the immutable catalogue command", shared.ErrValidation, a.Kind)
 	}
 	return nil
+}
+
+// CanonicalDigest binds signed execution and verification records to the complete validated action.
+func CanonicalDigest(a Action) (string, error) {
+	if err := a.Validate(); err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(a)
+	if err != nil {
+		return "", fmt.Errorf("marshal response action: %w", err)
+	}
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:]), nil
 }
 
 func (k Kind) valid() bool {
@@ -123,9 +154,10 @@ func (k Kind) valid() bool {
 // Spec is the catalogued contract for a Kind: its blast radius and the required reversal kind. It is the
 // single source of truth the drift test guards.
 type Spec struct {
-	Kind     Kind
-	Radius   offensivepolicy.Radius
-	Reversal ReversalSpec
+	Kind          Kind
+	Radius        offensivepolicy.Radius
+	Reversibility responsesaga.ReversibilityClass
+	Reversal      ReversalSpec
 }
 
 // catalogue maps each response Kind to its contract. EVERY entry carries a reversal; the drift test
@@ -133,15 +165,15 @@ type Spec struct {
 // CI check, not a runtime check" requirement.
 var catalogue = map[Kind]Spec{
 	KindIsolateHost: {
-		Kind: KindIsolateHost, Radius: offensivepolicy.RadiusStateChanging,
+		Kind: KindIsolateHost, Radius: offensivepolicy.RadiusStateChanging, Reversibility: responsesaga.ReversibilityCompensating,
 		Reversal: ReversalSpec{Kind: ReversalRestoreHost, Description: "restore host network connectivity", Argv: []string{"synapse-agent-response", "restore-host"}},
 	},
 	KindQuarantineFile: {
-		Kind: KindQuarantineFile, Radius: offensivepolicy.RadiusStateChanging,
+		Kind: KindQuarantineFile, Radius: offensivepolicy.RadiusStateChanging, Reversibility: responsesaga.ReversibilityCompensating,
 		Reversal: ReversalSpec{Kind: ReversalRestoreFile, Description: "restore the quarantined file to its path", Argv: []string{"synapse-agent-response", "restore-file"}},
 	},
 	KindStopProcess: {
-		Kind: KindStopProcess, Radius: offensivepolicy.RadiusStateChanging,
+		Kind: KindStopProcess, Radius: offensivepolicy.RadiusStateChanging, Reversibility: responsesaga.ReversibilityBestEffort,
 		Reversal: ReversalSpec{Kind: ReversalRestartProcess, Description: "restart the stopped process (best-effort)", Argv: []string{"synapse-agent-response", "restart-process"}},
 	},
 }
@@ -155,13 +187,21 @@ func Catalogue() []Spec {
 	sort.Slice(kinds, func(i, j int) bool { return kinds[i] < kinds[j] })
 	out := make([]Spec, 0, len(kinds))
 	for _, k := range kinds {
-		out = append(out, catalogue[k])
+		out = append(out, cloneSpec(catalogue[k]))
 	}
 	return out
 }
 
 // SpecFor returns the catalogued contract for a kind.
-func SpecFor(k Kind) (Spec, bool) { s, ok := catalogue[k]; return s, ok }
+func SpecFor(k Kind) (Spec, bool) {
+	s, ok := catalogue[k]
+	return cloneSpec(s), ok
+}
+
+func cloneSpec(s Spec) Spec {
+	s.Reversal.Argv = slices.Clone(s.Reversal.Argv)
+	return s
+}
 
 // containsShell reports whether any argv token carries a shell metacharacter — a coarse guard so a
 // caller cannot smuggle a shell fragment into an "argv-only" command.

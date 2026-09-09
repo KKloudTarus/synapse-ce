@@ -6,6 +6,9 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/platform/redact"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 func TestBaseSpecRequestsConstrainedPosture(t *testing.T) {
@@ -86,6 +89,21 @@ func TestProbeSpecHasNoBroadCapabilities(t *testing.T) {
 	}
 	if spec.EgressPolicy != nil || spec.HostNetwork {
 		t.Fatalf("network denial probe must use the isolated default: %#v", spec)
+	}
+}
+
+func TestRedactionSpecCarriesSyntheticEngagement(t *testing.T) {
+	check := redactionSpec("probe")
+	spec := check.spec
+	if spec.EngagementID.IsZero() {
+		t.Fatal("redaction probe must set an engagement ID before resolving its secret placeholder")
+	}
+	if len(spec.Env) != 1 || spec.Env[0] != "SYNAPSE_PROBE_SECRET={{secret:REDACTION_MARKER}}" {
+		t.Fatalf("redaction probe must retain its secret placeholder: %#v", spec.Env)
+	}
+	result := check.evaluate(ports.ToolResult{ExitCode: 0, Stdout: []byte(redact.Placeholder)}, nil)
+	if result.Status != StatusPass {
+		t.Fatalf("redacted secret probe result = %#v, want pass", result)
 	}
 }
 

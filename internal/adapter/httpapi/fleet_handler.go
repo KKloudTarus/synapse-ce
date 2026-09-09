@@ -20,6 +20,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetrollout"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetversion"
 	dhi "github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
@@ -59,7 +60,8 @@ type fleetAgentService interface {
 // fleetWorkService is the narrow view of the work order lifecycle the transport needs.
 type fleetWorkService interface {
 	Claim(ctx context.Context, actor string, tenantID, agentID shared.ID, max int) ([]*workorder.WorkOrder, error)
-	Transition(ctx context.Context, actor string, tenantID, id shared.ID, to workorder.State, reason string) error
+	Transition(ctx context.Context, actor string, tenantID, id shared.ID, leaseID string, to workorder.State, reason string) error
+	CompleteResponse(ctx context.Context, actor string, tenantID, id shared.ID, result fleetagent.ResponseExecutionResult, reason string) error
 	GetByID(ctx context.Context, tenantID, id shared.ID) (*workorder.WorkOrder, error)
 }
 
@@ -88,28 +90,59 @@ type fleetRolloutDecider interface {
 	DecideFor(ctx context.Context, tenantID shared.ID, channel, agentGroup, agentVersion string) fleetrollout.Decision
 }
 
+type fleetResponseHaltReader interface {
+	CurrentHaltGeneration(context.Context) (int64, error)
+}
+
+type fleetResponseObserverBindingReader interface {
+	GetResponseObserverBinding(context.Context, shared.ID) (fleetagent.ResponseObserverBinding, error)
+}
+
 type fleetRouter struct {
-	agents           fleetAgentService
-	work             fleetWorkService
-	clusterInv       fleetClusterInventory    // optional; nil ⇒ cluster inventory ingest is not served
-	hostInv          fleetHostInventory       // optional; nil ⇒ host inventory ingest is not served
-	procReport       fleetProcessReport       // optional; nil ⇒ agent process reporting is not served (#594 D input)
-	telemetry        fleetTelemetryIngest     // optional; nil ⇒ telemetry ingest is not served (A3 #624)
-	detections       fleetDetectionIngest     // optional; nil ⇒ detection ingest is not served (A4 #625)
-	keyReg           fleetKeyRegistration     // optional; nil ⇒ signing-key registration is not served (A4 #625)
-	privacyPolicies  fleetPrivacyPolicyReader // optional; nil ⇒ active source-privacy policy delivery is not served
-	minAgentVersion  string                   // #412 version skew: agents below this are refused work; "" = no floor
-	cpVersion        string                   // control-plane version advertised to agents (min_control_plane check)
-	rollout          fleetRolloutDecider      // optional; nil ⇒ no update is ever offered (#412 req 9)
-	log              *slog.Logger
-	agentLim         *keyedLimiter // post-auth, keyed by agent id
-	ipLim            *keyedLimiter // pre-auth, keyed by client IP (throttles enrol + failed auth)
-	clientCertHeader string        // when set, a trusted proxy passes the verified client cert here
+	agents            fleetAgentService
+	work              fleetWorkService
+	clusterInv        fleetClusterInventory              // optional; nil ⇒ cluster inventory ingest is not served
+	hostInv           fleetHostInventory                 // optional; nil ⇒ host inventory ingest is not served
+	procReport        fleetProcessReport                 // optional; nil ⇒ agent process reporting is not served (#594 D input)
+	telemetry         fleetTelemetryIngest               // optional; nil ⇒ telemetry ingest is not served (A3 #624)
+	responseVerify    fleetResponseVerificationIngest    // optional; nil ⇒ response-verification ingest is not served
+	detections        fleetDetectionIngest               // optional; nil ⇒ detection ingest is not served (A4 #625)
+	keyReg            fleetKeyRegistration               // optional; nil ⇒ signing-key registration is not served (A4 #625)
+	privacyPolicies   fleetPrivacyPolicyReader           // optional; nil ⇒ active source-privacy policy delivery is not served
+	minAgentVersion   string                             // #412 version skew: agents below this are refused work; "" = no floor
+	cpVersion         string                             // control-plane version advertised to agents (min_control_plane check)
+	rollout           fleetRolloutDecider                // optional; nil ⇒ no update is ever offered (#412 req 9)
+	responseHalt      fleetResponseHaltReader            // optional; repeats the durable endpoint halt fence on heartbeat
+	responseObservers fleetResponseObserverBindingReader // optional; returns server-assigned secondary observation scope
+	now               func() time.Time
+	log               *slog.Logger
+	agentLim          *keyedLimiter // post-auth, keyed by agent id
+	ipLim             *keyedLimiter // pre-auth, keyed by client IP (throttles enrol + failed auth)
+	clientCertHeader  string        // when set, a trusted proxy passes the verified client cert here
+	clientCertHost    string        // dedicated mTLS virtual host; empty only in development/tests
+	enrollmentHost    string        // dedicated TLS-only enrollment host; empty only in development/tests
+}
+
+// SetFleetClientCertHost binds fleet traffic to a dedicated virtual host whose ingress verifies client
+// certificates and overwrites the forwarded certificate header.
+func (rt *Router) SetFleetClientCertHost(host string) {
+	if rt.fleet != nil {
+		rt.fleet.clientCertHost = strings.ToLower(strings.TrimSpace(host))
+	}
+}
+
+// SetFleetEnrollmentHost binds the one-time bearer enrollment exchange to a TLS-only virtual host
+// separate from the mTLS host. ingress-nginx applies client-certificate authentication per host.
+func (rt *Router) SetFleetEnrollmentHost(host string) {
+	if rt.fleet != nil {
+		rt.fleet.enrollmentHost = strings.ToLower(strings.TrimSpace(host))
+	}
 }
 
 // SetFleet wires the untrusted agent transport plane. When nil, /api/v1/fleet is not served.
 // clientCertHeader, when non-empty, is the header a trusted mutual-TLS-terminating proxy uses to
-// pass the verified client certificate; empty disables certificate auth and uses the bearer token.
+// pass the verified client certificate. Configuring it makes post-enrollment routes certificate-only;
+// empty permits bearer authentication for explicitly non-production development and tests.
 func (rt *Router) SetFleet(agents fleetAgentService, work fleetWorkService, now func() time.Time, clientCertHeader string) {
 	rt.fleet = &fleetRouter{
 		agents:           agents,
@@ -117,7 +150,22 @@ func (rt *Router) SetFleet(agents fleetAgentService, work fleetWorkService, now 
 		log:              rt.log,
 		agentLim:         newKeyedLimiter(fleetRatePerMin, now),
 		ipLim:            newKeyedLimiter(fleetIPRatePerMin, now),
+		now:              now,
 		clientCertHeader: clientCertHeader,
+	}
+}
+
+// SetFleetResponseHaltReader makes the durable tenant halt generation available before every claim.
+func (rt *Router) SetFleetResponseHaltReader(reader fleetResponseHaltReader) {
+	if rt.fleet != nil {
+		rt.fleet.responseHalt = reader
+	}
+}
+
+// SetFleetResponseObserverBindings makes a server-owned secondary asset assignment available at heartbeat.
+func (rt *Router) SetFleetResponseObserverBindings(reader fleetResponseObserverBindingReader) {
+	if rt.fleet != nil {
+		rt.fleet.responseObservers = reader
 	}
 }
 
@@ -205,6 +253,13 @@ func (rt *Router) SetFleetProcessReport(s fleetProcessReport) {
 func (rt *Router) SetFleetTelemetry(s fleetTelemetryIngest) {
 	if rt.fleet != nil {
 		rt.fleet.telemetry = s
+	}
+}
+
+// SetFleetResponseVerification wires the purpose-signed response post-condition ingest route.
+func (rt *Router) SetFleetResponseVerification(s fleetResponseVerificationIngest) {
+	if rt.fleet != nil {
+		rt.fleet.responseVerify = s
 	}
 }
 
@@ -346,7 +401,7 @@ type fleetAgentPlaneRoute struct {
 func fleetAgentPlaneRoutes() []fleetAgentPlaneRoute {
 	return []fleetAgentPlaneRoute{
 		{"POST /api/v1/fleet/enrol", "/api/v1/fleet/enrol",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.enrol) }},
+			func(f *fleetRouter) http.HandlerFunc { return f.entryForHost(f.enrollmentHost, f.enrol) }},
 		{"POST /api/v1/fleet/heartbeat", "/api/v1/fleet/heartbeat",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.heartbeat)) }},
 		{"GET /api/v1/fleet/privacy-policy", "/api/v1/fleet/privacy-policy",
@@ -369,6 +424,8 @@ func fleetAgentPlaneRoutes() []fleetAgentPlaneRoute {
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestTelemetry)) }},
 		{"POST /api/v1/fleet/sensor-states", "/api/v1/fleet/sensor-states",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestSensorState)) }},
+		{"POST /api/v1/fleet/response-verifications", "/api/v1/fleet/response-verifications",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestResponseVerification)) }},
 		{"POST /api/v1/fleet/detections", "/api/v1/fleet/detections",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestDetections)) }},
 		{"POST /api/v1/fleet/keys", "/api/v1/fleet/keys",
@@ -391,7 +448,7 @@ func fleetAgentPlaneMounts() []string {
 }
 
 // handler builds the agent-plane mux. Every route checks the protocol version; every route except
-// enrol requires a valid agent bearer credential (agent-auth, NOT the human RBAC plane).
+// enrol requires the configured agent transport identity (agent-auth, NOT the human RBAC plane).
 func (f *fleetRouter) handler() http.Handler {
 	mux := http.NewServeMux()
 	for _, route := range fleetAgentPlaneRoutes() {
@@ -404,7 +461,15 @@ func (f *fleetRouter) handler() http.Handler {
 // database work (so unauthenticated enrol and failed-auth attempts cannot amplify into unbounded
 // DB lookups on this untrusted plane), then enforces the supported protocol version.
 func (f *fleetRouter) entry(next http.HandlerFunc) http.HandlerFunc {
+	return f.entryForHost(f.clientCertHost, next)
+}
+
+func (f *fleetRouter) entryForHost(host string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if host != "" && !strings.EqualFold(requestHostname(r.Host), host) {
+			writeJSON(w, http.StatusUnauthorized, errorBody{Error: "unauthenticated"})
+			return
+		}
 		if !f.ipLim.allow(clientIP(r)) {
 			w.Header().Set("Retry-After", "1")
 			writeJSON(w, http.StatusTooManyRequests, errorBody{Error: "rate_limited"})
@@ -418,6 +483,13 @@ func (f *fleetRouter) entry(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func requestHostname(hostport string) string {
+	if host, _, err := net.SplitHostPort(hostport); err == nil {
+		return strings.TrimSuffix(host, ".")
+	}
+	return strings.TrimSuffix(hostport, ".")
+}
+
 // clientIP returns the request's source host (no port). RemoteAddr is used rather than a spoofable
 // X-Forwarded-For header, because this is a throttling key, not an authorization input.
 func clientIP(r *http.Request) string {
@@ -428,24 +500,24 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// authed resolves the agent bearer credential, rate-limits per agent, and stamps the agent into
-// the context. The tenant comes from the authenticated agent, never from the request.
+// authed resolves the configured agent transport identity, rate-limits per agent, and stamps the
+// agent into the context. The tenant comes from the authenticated agent, never from the request.
 func (f *fleetRouter) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var (
 			agent *fleetagent.Agent
 			err   error
 		)
-		// Certificate identity takes precedence when the mutual-TLS-terminating proxy is configured
-		// to pass the verified client certificate in clientCertHeader. SECURITY: this header is
-		// trusted only because the operator asserts (via config) that a trusted proxy verifies mTLS
-		// and STRIPS any client-supplied value; the app must not be directly reachable. When the
-		// header is absent we fall back to the bearer credential.
-		// When the cert header is configured but absent, we fall back to the bearer token (a
-		// reasonable migration posture). A strict certificate-required mode that refuses the bearer
-		// fallback is a documented follow-up for deployments where mTLS supersedes the token.
-		if f.clientCertHeader != "" && r.Header.Get(f.clientCertHeader) != "" {
-			agent, err = f.authByClientCert(r.Context(), r.Header.Get(f.clientCertHeader))
+		// SECURITY: this header is trusted only because configuration asserts that a trusted proxy
+		// verifies mTLS and strips any client-supplied value. Once configured, absence or invalidity
+		// is terminal; a bearer credential must never become a fallback around mTLS.
+		if f.clientCertHeader != "" {
+			headerVal := r.Header.Get(f.clientCertHeader)
+			if headerVal == "" {
+				writeJSON(w, http.StatusUnauthorized, errorBody{Error: "unauthenticated"})
+				return
+			}
+			agent, err = f.authByClientCert(r.Context(), headerVal)
 		} else {
 			token, ok := bearerToken(r)
 			if !ok {
@@ -550,12 +622,47 @@ func (f *fleetRouter) heartbeat(w http.ResponseWriter, r *http.Request) {
 		"control_plane_version":       f.cpVersion,
 		"min_supported_agent_version": f.minAgentVersion,
 	}
+	if f.responseHalt != nil {
+		generation, err := f.responseHalt.CurrentHaltGeneration(r.Context())
+		if err != nil {
+			writeError(w, f.log, fmt.Errorf("read response halt generation: %w", err))
+			return
+		}
+		out["response_halted"] = generation > 0
+		out["response_halt_generation"] = generation
+	}
+	if f.responseObservers != nil && hasFleetCapability(req.Capabilities, workorder.CapabilityResponseObserve) {
+		binding, err := f.responseObservers.GetResponseObserverBinding(r.Context(), agent.ID)
+		if err == nil {
+			now := time.Now().UTC()
+			if f.now != nil {
+				now = f.now().UTC()
+			}
+			if binding.AgentID != agent.ID || binding.TenantID != agent.TenantID || !binding.ActiveAt(now) {
+				writeError(w, f.log, fmt.Errorf("%w: response observer binding is invalid or expired", shared.ErrForbidden))
+				return
+			}
+			out["response_observer_asset_id"] = binding.AssetID.String()
+		} else if !errors.Is(err, shared.ErrNotFound) {
+			writeError(w, f.log, fmt.Errorf("read response observer binding: %w", err))
+			return
+		}
+	}
 	// The update offer (#412 req 9). It is computed from the OPERATOR's rollout plan and the agent's
 	// operator-assigned group — never from anything the agent just reported about itself, which is why
 	// the group comes off the stored agent rather than out of the heartbeat body. With no rollout
 	// service wired, no update is ever offered: the absence of a decider is not permission.
 	out["update"] = f.updateOffer(r.Context(), agent, req.AgentVersion)
 	writeJSON(w, http.StatusOK, out)
+}
+
+func hasFleetCapability(capabilities []string, want string) bool {
+	for _, capability := range capabilities {
+		if strings.TrimSpace(capability) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *fleetRouter) activePrivacyPolicy(w http.ResponseWriter, r *http.Request) {
@@ -648,15 +755,30 @@ func (f *fleetRouter) claim(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fleetRouter) progress(w http.ResponseWriter, r *http.Request) {
-	f.transitionTo(w, r, workorder.StateRunning, "")
+	var req struct {
+		LeaseID string `json:"lease_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetBodyCap)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid progress body"})
+		return
+	}
+	f.transitionTo(w, r, req.LeaseID, workorder.StateRunning, "")
 }
 
 func (f *fleetRouter) result(w http.ResponseWriter, r *http.Request) {
 	agent, _ := agentFrom(r.Context())
 	id := shared.ID(r.PathValue("id"))
 	var req struct {
-		Status string `json:"status"` // "succeeded" | "failed"
-		Reason string `json:"reason"`
+		Status         string                            `json:"status"` // "succeeded" | "failed"
+		Reason         string                            `json:"reason"`
+		AttemptKey     string                            `json:"attempt_key"`
+		CommandDigest  string                            `json:"command_digest"`
+		ExecutionState fleetagent.ResponseExecutionState `json:"execution_state"`
+		ObservedRadius offensivepolicy.Radius            `json:"observed_radius"`
+		AffectedCount  int                               `json:"affected_count"`
+		AlreadyApplied bool                              `json:"already_applied"`
+		CompletedAt    time.Time                         `json:"completed_at"`
+		LeaseID        string                            `json:"lease_id"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetBodyCap)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid result body"})
@@ -667,7 +789,50 @@ func (f *fleetRouter) result(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "result status must be succeeded or failed"})
 		return
 	}
-	f.applyTransition(w, r, agent, id, to, req.Reason)
+	wo, err := f.work.GetByID(r.Context(), agent.TenantID, id)
+	if err != nil || wo.AgentID != agent.ID {
+		if err == nil || errors.Is(err, shared.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, errorBody{Error: "not_found"})
+			return
+		}
+		writeError(w, f.log, err)
+		return
+	}
+	if wo.ResponseCommand != nil {
+		if strings.TrimSpace(req.LeaseID) == "" || wo.LeaseID != req.LeaseID {
+			writeJSON(w, http.StatusConflict, errorBody{Error: "stale_lease"})
+			return
+		}
+		expectedState := fleetagent.ResponseExecutionOutcomeUnknown
+		if to == workorder.StateSucceeded {
+			expectedState = fleetagent.ResponseExecutionApplied
+		}
+		if wo.ID != wo.ResponseCommand.CommandID || req.AttemptKey != wo.ResponseCommand.AttemptKey ||
+			req.CommandDigest != fleetagent.ResponseCommandDigest(*wo.ResponseCommand) || req.ExecutionState != expectedState {
+			writeJSON(w, http.StatusConflict, errorBody{Error: "response_result_binding_mismatch"})
+			return
+		}
+		result := fleetagent.ResponseExecutionResult{
+			AttemptKey: req.AttemptKey, CommandDigest: req.CommandDigest, LeaseID: req.LeaseID,
+			State: req.ExecutionState, ObservedRadius: req.ObservedRadius, AffectedCount: req.AffectedCount,
+			AlreadyApplied: req.AlreadyApplied, CompletedAt: req.CompletedAt,
+		}
+		if err := result.Validate(); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid_response_execution_result"})
+			return
+		}
+		if err := f.work.CompleteResponse(r.Context(), agent.ID.String(), agent.TenantID, id, result, req.Reason); err != nil {
+			writeError(w, f.log, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"state": string(to)})
+		return
+	} else if req.AttemptKey != "" || req.CommandDigest != "" || req.ExecutionState != "" || req.ObservedRadius != "" ||
+		req.AffectedCount != 0 || req.AlreadyApplied || !req.CompletedAt.IsZero() {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "response result binding is only valid for response work"})
+		return
+	}
+	f.applyTransition(w, r, agent, id, req.LeaseID, to, req.Reason)
 }
 
 // clusterInventory ingests a Kubernetes cluster snapshot the agent collected and persists it into the
@@ -796,16 +961,16 @@ type fleetProcessDTO struct {
 	Running bool   `json:"running"`
 }
 
-func (f *fleetRouter) transitionTo(w http.ResponseWriter, r *http.Request, to workorder.State, reason string) {
+func (f *fleetRouter) transitionTo(w http.ResponseWriter, r *http.Request, leaseID string, to workorder.State, reason string) {
 	agent, _ := agentFrom(r.Context())
 	id := shared.ID(r.PathValue("id"))
-	f.applyTransition(w, r, agent, id, to, reason)
+	f.applyTransition(w, r, agent, id, leaseID, to, reason)
 }
 
 // applyTransition enforces that the order is addressed to the calling agent (cross-tenant or
 // mis-addressed => not_found, never leaking existence) and is idempotent: a transition to a state
 // the order is already in is a no-op 200.
-func (f *fleetRouter) applyTransition(w http.ResponseWriter, r *http.Request, agent *fleetagent.Agent, id shared.ID, to workorder.State, reason string) {
+func (f *fleetRouter) applyTransition(w http.ResponseWriter, r *http.Request, agent *fleetagent.Agent, id shared.ID, leaseID string, to workorder.State, reason string) {
 	wo, err := f.work.GetByID(r.Context(), agent.TenantID, id)
 	if err != nil {
 		if errors.Is(err, shared.ErrNotFound) {
@@ -820,11 +985,15 @@ func (f *fleetRouter) applyTransition(w http.ResponseWriter, r *http.Request, ag
 		writeJSON(w, http.StatusNotFound, errorBody{Error: "not_found"})
 		return
 	}
+	if strings.TrimSpace(leaseID) == "" || wo.LeaseID != leaseID {
+		writeJSON(w, http.StatusConflict, errorBody{Error: "stale_lease"})
+		return
+	}
 	if wo.State == to {
 		writeJSON(w, http.StatusOK, map[string]string{"state": string(to)})
 		return
 	}
-	if err := f.work.Transition(r.Context(), agent.ID.String(), agent.TenantID, id, to, reason); err != nil {
+	if err := f.work.Transition(r.Context(), agent.ID.String(), agent.TenantID, id, leaseID, to, reason); err != nil {
 		if errors.Is(err, shared.ErrValidation) {
 			writeJSON(w, http.StatusConflict, errorBody{Error: "illegal_transition"})
 			return

@@ -25,13 +25,41 @@ type Config struct {
 	// attaches). Beyond it, further signals are suppressed as a storm and recorded as a single note
 	// (coverage-honest). Must be > 0.
 	MaxPerIncident int
+	// AllowedLateness is subtracted from the maximum observed event time to produce the
+	// monotonic watermark used by incremental correlation. It must not be negative.
+	AllowedLateness time.Duration
 	// Actor is the attribution for emitted events; defaults to "correlator".
 	Actor string
+	// EngagementID is the authoritative scope stamped on newly created incidents.
+	EngagementID shared.ID
+	// PageSize bounds each source-materialization and staged-consumption invocation.
+	// Zero uses the conservative default.
+	PageSize int
+	// MaxActiveSessions bounds the mutable state loaded into one correlation transaction.
+	// Zero uses the conservative default.
+	MaxActiveSessions int
+	// MaxTimelineRefsPerDetection and MaxTimelineRefsPerPage bound causal fanout during source materialization.
+	// Zero values use conservative defaults.
+	MaxTimelineRefsPerDetection int
+	MaxTimelineRefsPerPage      int
 }
 
-func (c Config) withDefaults() Config {
+// Normalize applies conservative operational defaults shared by batch and incremental callers.
+func (c Config) Normalize() Config {
 	if c.Actor == "" {
 		c.Actor = defaultActor
+	}
+	if c.PageSize == 0 {
+		c.PageSize = 100
+	}
+	if c.MaxActiveSessions == 0 {
+		c.MaxActiveSessions = 500
+	}
+	if c.MaxTimelineRefsPerDetection == 0 {
+		c.MaxTimelineRefsPerDetection = 32
+	}
+	if c.MaxTimelineRefsPerPage == 0 {
+		c.MaxTimelineRefsPerPage = 500
 	}
 	return c
 }
@@ -49,11 +77,10 @@ func (c Config) withDefaults() Config {
 // incident.Project would fail on the second Created.
 //
 // This is BATCH correlation over a complete signal set. Incident identity is seeded on a session's
-// earliest signal, so an incremental re-run over a backfilled window whose earliest signal changed would
-// mint a different incident id; C7 should correlate over stable/complete windows (streaming watermark +
-// late-event revision are a documented extension, not implemented here).
+// earliest signal, so callers requiring durable event-time cursors, watermarks, and bounded late-event
+// handling use CorrelateIncrementalPage rather than re-running a backfilled batch window.
 func Correlate(cfg Config, signals []Signal) ([]incident.IncidentEvent, error) {
-	cfg = cfg.withDefaults()
+	cfg = cfg.Normalize()
 	if cfg.Window <= 0 {
 		return nil, fmt.Errorf("%w: correlation window must be positive", shared.ErrValidation)
 	}
