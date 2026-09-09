@@ -106,9 +106,40 @@ func componentMatches(findingComp, productComp string) bool {
 	return findingComp == productComp || purlName(productComp) == findingComp
 }
 
+// purlName reduces a product identifier to the package name a finding is keyed by. For most ecosystems the
+// finding component is the bare last path segment (Debian "bash", Go "gin"), so that segment is returned.
+// The exception is an npm SCOPED package: its purl carries the scope as a leading namespace segment
+// ("@scope", percent-encoded "%40scope"), and the finding component keeps the full "@scope/name" (see the
+// ownsbom npm parser). Collapsing it to the bare name would let a statement about "@scope/name" match — and
+// wrongly suppress — a DIFFERENT, unscoped package of the same leaf name, so the scope is reconstructed.
 func purlName(product string) string {
-	if i := strings.LastIndex(product, "/"); i >= 0 {
-		return product[i+1:]
+	i := strings.LastIndex(product, "/")
+	if i < 0 {
+		return product
 	}
-	return product
+	leaf := product[i+1:]
+	// Scope reconstruction is npm-only: a "%40scope" segment is an npm scope solely under the npm purl type.
+	// The same segment under another type (pkg:generic/%40safe/lodash) is an ordinary namespace and must
+	// still collapse to the bare leaf, or a non-npm product would wrongly match an npm scoped finding.
+	if strings.HasPrefix(strings.ToLower(product), "pkg:npm/") {
+		if j := strings.LastIndex(product[:i], "/"); j >= 0 {
+			if scope, ok := npmScopeSegment(product[j+1 : i]); ok {
+				return scope + "/" + leaf
+			}
+		}
+	}
+	return leaf
+}
+
+// npmScopeSegment recognizes an npm scope namespace segment ("@scope" or its percent-encoded "%40scope"
+// form) and returns it in canonical "@scope" shape. A non-npm namespace segment (a Debian/Go/Maven path
+// component) is not a scope, so it returns ok=false and the bare-leaf collapse stands.
+func npmScopeSegment(seg string) (string, bool) {
+	if len(seg) > 1 && seg[0] == '@' {
+		return seg, true
+	}
+	if len(seg) > 3 && strings.EqualFold(seg[:3], "%40") {
+		return "@" + seg[3:], true
+	}
+	return "", false
 }
