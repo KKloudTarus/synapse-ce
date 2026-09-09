@@ -17,6 +17,16 @@ func (f fakeScanner) ScanImports(context.Context, string) (ports.PyImportGraph, 
 	return f.g, f.err
 }
 
+// directReader returns a DirectDependencyReader that reports the given names as declared direct
+// dependencies (found=true). It is the test double for the manifest guard.
+func directReader(names ...string) DirectDependencyReader {
+	set := map[string]bool{}
+	for _, n := range names {
+		set[n] = true
+	}
+	return func(context.Context, string) (map[string]bool, bool) { return set, true }
+}
+
 func resultFor(a *Analyzer, symbols []string) map[string]bool {
 	an, err := a.Analyze(context.Background(), "/x", symbols)
 	if err != nil {
@@ -33,7 +43,7 @@ func TestAnalyzeImportReachability(t *testing.T) {
 	a, err := New(fakeScanner{g: ports.PyImportGraph{
 		ImportedModules:   []string{"requests", "yaml", "PIL"}, // PyYAML→yaml, Pillow→PIL (case-insensitive)
 		FirstPartyModules: []string{"app"},
-	}})
+	}}, directReader("requests", "pyyaml", "pillow", "jinja2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,16 +63,38 @@ func TestAnalyzeImportReachability(t *testing.T) {
 }
 
 func TestAnalyzeDynamicImportsIsNoCoverage(t *testing.T) {
-	a, _ := New(fakeScanner{g: ports.PyImportGraph{ImportedModules: []string{"requests"}, DynamicImports: true}})
+	a, _ := New(fakeScanner{g: ports.PyImportGraph{ImportedModules: []string{"requests"}, DynamicImports: true}}, directReader("jinja2"))
 	if _, err := a.Analyze(context.Background(), "/x", []string{"jinja2"}); err == nil {
 		t.Fatal("dynamic imports must yield a no-coverage error (never a false not_reachable)")
 	}
 }
 
 func TestAnalyzeScanErrorIsNoCoverage(t *testing.T) {
-	a, _ := New(fakeScanner{err: errors.New("no python")})
+	a, _ := New(fakeScanner{err: errors.New("no python")}, directReader("jinja2"))
 	if _, err := a.Analyze(context.Background(), "/x", []string{"jinja2"}); err == nil {
 		t.Fatal("a scan error must propagate as no-coverage")
+	}
+}
+
+// A subject that is NOT a declared direct dependency must yield a no-coverage error, never a false
+// not_reachable — a transitive package is loaded by its parent, so a first-party import scan cannot prove it
+// unused. This is the review-verified gap that made defaulting Python Tier-1 ON unsafe before this guard.
+func TestAnalyzeTransitiveSubjectIsNoCoverage(t *testing.T) {
+	a, _ := New(fakeScanner{g: ports.PyImportGraph{ImportedModules: []string{"requests"}, FirstPartyModules: []string{"app"}}}, directReader("requests"))
+	if _, err := a.Analyze(context.Background(), "/x", []string{"jinja2"}); err == nil {
+		t.Fatal("a transitive (non-direct) subject must be no-coverage, not a false not_reachable")
+	}
+	// The direct subject alone still resolves.
+	if got := resultFor(a, []string{"requests"}); !got["requests"] {
+		t.Error("a declared direct + imported package is still reachable")
+	}
+}
+
+// No declaration manifest → direct deps unknown → refuse (no coverage), never answer.
+func TestAnalyzeNoManifestIsNoCoverage(t *testing.T) {
+	a, _ := New(fakeScanner{g: ports.PyImportGraph{ImportedModules: []string{"requests"}}}, func(context.Context, string) (map[string]bool, bool) { return nil, false })
+	if _, err := a.Analyze(context.Background(), "/x", []string{"requests"}); err == nil {
+		t.Fatal("a missing manifest must yield a no-coverage error")
 	}
 }
 

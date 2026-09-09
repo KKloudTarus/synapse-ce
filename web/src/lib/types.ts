@@ -994,6 +994,7 @@ export interface Vulnerability {
   epss: number
   path: string[]
   direct: boolean
+  introducers?: string[] // ALL direct deps that pull this (transitive) component in
   // Multi-source detection.
   sources: string[]
   confidence: string
