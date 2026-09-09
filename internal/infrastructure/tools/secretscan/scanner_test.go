@@ -383,3 +383,38 @@ func TestSaaSProviderTokensNearMissNoMatch(t *testing.T) {
 		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
 	}
 }
+
+func TestDetectsPrefixedProviderTokens(t *testing.T) {
+	// Tokens split into prefix + body so no contiguous secret-shaped literal exists in this test source.
+	// Each body is the exact length the detector's format requires (openshift/duffel 43, frame.io 64,
+	// dnkey two base32-shaped chunks 26+52, atlassian/typeform a >=40 body).
+	b := strings.Repeat("aB3cD4eF5g", 7) // 70 varied chars to slice from
+	rs := scanDir(t, map[string]string{
+		"atlassian.env": "ATLASSIAN_API_TOKEN=" + "ATATT3xFfGF0" + b[:40] + "\n",
+		"openshift.env": "OC_TOKEN=" + "sha256~" + b[:43] + "\n",
+		"duffel.env":    "DUFFEL_TOKEN=" + "duffel_live_" + b[:43] + "\n",
+		"frameio.env":   "FRAMEIO_TOKEN=" + "fio-u-" + b[:64] + "\n",
+		"dn.env":        "DN_API_KEY=" + "dnkey-" + b[:26] + "-" + b[:52] + "\n",
+		"typeform.env":  "TYPEFORM_TOKEN=" + "tfp_" + b[:40] + "\n",
+	})
+	for _, id := range []string{"atlassian-api-token", "openshift-token", "duffel-api-token", "frameio-token", "definednetworking-token", "typeform-token"} {
+		if hasRule(rs, id) == nil {
+			t.Errorf("expected a %q finding, got %+v", id, rs)
+		}
+	}
+}
+
+func TestPrefixedProviderTokensNearMissNoMatch(t *testing.T) {
+	// Prefix present but the body is far too short: a lookalike is not a false positive.
+	rs := scanDir(t, map[string]string{
+		"a.env": "K=" + "ATATT3xFfGF0" + "short\n",
+		"b.env": "K=" + "sha256~" + "short\n",
+		"c.env": "K=" + "duffel_live_" + "short\n",
+		"d.env": "K=" + "fio-u-" + "short\n",
+		"e.env": "K=" + "dnkey-" + "s\n",
+		"f.env": "K=" + "tfp_" + "short\n",
+	})
+	if len(rs) != 0 {
+		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
+	}
+}

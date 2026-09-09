@@ -78,6 +78,12 @@ func TestCatalogParity(t *testing.T) {
 		"sentry-auth-token":             "CWE-798",
 		"readme-api-key":                "CWE-798",
 		"figma-token":                   "CWE-798",
+		"atlassian-api-token":           "CWE-798",
+		"openshift-token":               "CWE-798",
+		"duffel-api-token":              "CWE-798",
+		"frameio-token":                 "CWE-798",
+		"definednetworking-token":       "CWE-798",
+		"typeform-token":                "CWE-798",
 	}
 	builtin := defaultRules()
 	seenInBuiltin := make(map[string]bool, len(builtin))

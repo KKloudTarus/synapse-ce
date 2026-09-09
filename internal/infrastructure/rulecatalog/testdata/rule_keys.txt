@@ -35,6 +35,7 @@ arm-unused-variable
 arm-vm-encryption-at-host-disabled
 arm-webapp-min-tls-below-12
 arm-webapp-public-network
+atlassian-api-token
 aws-access-key-id
 aws-secret-access-key
 azure-storage-key
@@ -827,6 +828,7 @@ databricks-token
 datadog-api-key
 db-connection-string
 debug-mode-enabled
+definednetworking-token
 digitalocean-token
 dockerfile-add-instead-of-copy
 dockerfile-add-remote-url
@@ -866,9 +868,11 @@ dockerfile-yum-no-yes
 dockerhub-pat
 dom-xss-inner-html
 doppler-token
+duffel-api-token
 dynamic-code-eval
 dynatrace-token
 figma-token
+frameio-token
 gcp-service-account-key
 generic-command-injection-sink
 generic-secret
@@ -2058,6 +2062,7 @@ nosql-injection-request
 npm-token
 open-redirect-user-url
 openai-api-key
+openshift-token
 password-md5-hash
 password-reset-token-disclosure
 path-traversal-file-access
@@ -3043,6 +3048,7 @@ ts-ts-ignore
 ts-unnecessary-type-constraint
 ts-unsafe-function-type
 twilio-api-key
+typeform-token
 unsafe-c-string-function
 unsafe-deserialization-generic
 unsafe-deserialization-node-serialize
