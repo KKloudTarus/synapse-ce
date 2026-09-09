@@ -338,6 +338,13 @@ func (v csafVulnDoc) affected(cpeByProduct, purlByProduct map[string]string, rel
 			if g.lastAffected == "" || rpmLess(g.ecosystem, g.lastAffected, evr) {
 				g.lastAffected = evr
 			}
+			continue
+		}
+		if eco, pkg, ver, ok := resolveLanguagePURL(purlByProduct, pid); ok {
+			// A language-ecosystem product (npm/PyPI/Maven/Go/…) named by PURL contributes an explicit affected
+			// version, exactly like a CPE-resolved one. GitHub and other CSAF exports key affected products by
+			// PURL rather than CPE, so this is the path most of their advisories match on.
+			getGroup(eco, pkg, false).versions[ver] = true
 		}
 	}
 	for _, pid := range v.fixedProductIDs() {
@@ -357,6 +364,13 @@ func (v csafVulnDoc) affected(cpeByProduct, purlByProduct map[string]string, rel
 			// above it is never falsely flagged (the trade is a possible miss, the safe direction).
 			if g.fixed == "" || rpmLess(g.ecosystem, evr, g.fixed) {
 				g.fixed = evr
+			}
+			continue
+		}
+		if eco, pkg, ver, ok := resolveLanguagePURL(purlByProduct, pid); ok {
+			// The fixed version of a language-ecosystem product named by PURL (mirrors the CPE fixed path).
+			if g := groups[key(eco, pkg)]; g != nil && g.fixed == "" {
+				g.fixed = ver
 			}
 		}
 	}
