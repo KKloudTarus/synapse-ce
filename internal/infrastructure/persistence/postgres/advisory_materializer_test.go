@@ -148,3 +148,72 @@ func TestAdvisoryMaterializerPostgresReplayAndConcurrency(t *testing.T) {
 		t.Fatalf("canonical=%+v err=%v", canonical, err)
 	}
 }
+
+// D1.3: the materializer projects the canonical's merged risk signals (KEV/EPSS) into the scan-time
+// `advisories` projection, so an offline scan reading ByPackage gets exploitation-priority data with no
+// network.
+func TestAdvisoryMaterializerProjectsRisk(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	sourceID := shared.ID("src-risk-" + randHex(t))
+	tenantID := shared.ID("tenant-risk-" + randHex(t))
+	jobID := "job-risk-" + randHex(t)
+	runID := "run-risk-" + randHex(t)
+	sourceKey := "osv-risk-" + randHex(t)
+	if _, err := pool.Exec(ctx, `INSERT INTO vulnerability_sources
+		(id, source_key, display_name, adapter_type, endpoint, cadence_seconds, stale_after_seconds, sync_mode)
+		VALUES ($1,$2,'OSV risk test','osv',$3,3600,7200,'incremental')`, sourceID.String(), sourceKey, "https://osv.dev/"+sourceID.String()); err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES($1,$1)`, tenantID.String()); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO jobs(id,tenant_id,kind,payload,status) VALUES($1,$2,'vulnerability_sync','{}','queued')`, jobID, tenantID.String()); err != nil {
+		t.Fatalf("seed job: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO vulnerability_sync_runs(id,source_id,adapter_type,mode,trigger,actor,durable_job_id,state) VALUES($1,$2,'osv','incremental','manual','test',$3,'queued')`, runID, sourceID.String(), jobID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	advisoryID := "CVE-2026-RISK-" + strings.ToUpper(randHex(t))
+	pkg := "example.com/risk-" + randHex(t)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM advisory_observations WHERE source_id=$1`, sourceID.String())
+		_, _ = pool.Exec(ctx, `DELETE FROM advisories WHERE id=$1`, advisoryID)
+		_, _ = pool.Exec(ctx, `DELETE FROM vulnerability_sync_runs WHERE id=$1`, runID)
+		_, _ = pool.Exec(ctx, `DELETE FROM jobs WHERE id=$1`, jobID)
+		_, _ = pool.Exec(ctx, `DELETE FROM tenants WHERE id=$1`, tenantID.String())
+		_, _ = pool.Exec(ctx, `DELETE FROM vulnerability_sources WHERE id=$1`, sourceID.String())
+	})
+
+	kev := true
+	epss := 0.91
+	record := advisory.ObservationRecord{Observation: advisory.Observation{
+		SourceType: sourceID.String(), SourceID: sourceID.String(), RecordID: "record-risk",
+		Status: advisory.StatusActive, ModifiedAt: time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC),
+		KEV: &kev, EPSS: &epss,
+		Advisory: advisory.Advisory{ID: advisoryID, Summary: "risky", Affected: []advisory.AffectedPackage{{Ecosystem: "Go", Package: pkg, Versions: []string{"1.0.0"}}}},
+	}}
+	record.SyncRunID = runID
+	if _, err := NewAdvisoryMaterializer(pool).Materialize(shared.WithTenant(ctx, tenantID), []advisory.ObservationRecord{record}); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	matches, err := NewAdvisoryRepository(pool).ByPackage(ctx, "Go", pkg)
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("ByPackage = %+v err=%v", matches, err)
+	}
+	if !matches[0].KEV || matches[0].EPSS != 0.91 {
+		t.Errorf("projection must carry the merged KEV/EPSS, got KEV=%v EPSS=%v", matches[0].KEV, matches[0].EPSS)
+	}
+}

@@ -27,7 +27,7 @@ type Event struct {
 // explicit versions list is the only signal there (a guessed order would risk a false match). This is what
 // the owned DetectionSource calls; it queries the owned store, no third-party service.
 func Affected(ecosystem, version string, ranges []Range, versions []string) bool {
-	return AffectedVersionList(version, versions) || affectedRanges(ecosystem, version, ranges)
+	return AffectedVersionList(ecosystem, version, versions) || affectedRanges(ecosystem, version, ranges)
 }
 
 // RangesEvaluable reports whether every range has a sound comparator for the
@@ -43,17 +43,25 @@ func RangesEvaluable(ecosystem, version string, ranges []Range) bool {
 	return true
 }
 
-// AffectedVersionList reports whether version is in an OSV `affected[].versions` explicit enumeration. This
-// is an EXACT, ecosystem-agnostic match (zero false positives/negatives) – the most authoritative signal
-// an advisory carries, complementing the range match. A leading 'v' is normalized on both sides so a
-// "1.2.3" component matches a "v1.2.3" listing and vice-versa; otherwise the published string must match.
-func AffectedVersionList(version string, versions []string) bool {
+// AffectedVersionList reports whether version is in an OSV `affected[].versions` explicit enumeration –
+// the most authoritative signal an advisory carries, complementing the range match. It first tries an
+// exact token match (a leading 'v' normalized on both sides so "1.2.3" matches "v1.2.3"), then, when the
+// ecosystem has an owned comparator, ecosystem-CANONICAL equality, so a PyPI advisory listing "1.0"
+// matches a "1.0.0" component (PEP 440 trailing zeros), Maven folds qualifiers, and so on. An empty or
+// comparator-less ecosystem falls back to the exact token match only (fail-closed, no guessed order).
+func AffectedVersionList(ecosystem, version string, versions []string) bool {
 	if version == "" {
 		return false
 	}
 	v := normalizeVersionToken(version)
 	for _, x := range versions {
+		// Fast path: an exact match after trimming a leading v. Then ecosystem-canonical equality via the
+		// per-ecosystem comparator, so a PyPI advisory listing "1.0" matches component "1.0.0" (PEP 440
+		// trailing zeros), Maven folds qualifiers, etc. — instead of only the raw string form.
 		if normalizeVersionToken(x) == v {
+			return true
+		}
+		if cmp, ok := CompareVersions(ecosystem, version, x); ok && cmp == 0 {
 			return true
 		}
 	}

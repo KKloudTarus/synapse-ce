@@ -47,30 +47,87 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 	if doc == nil {
 		return nil, nil
 	}
+	// A withdrawn advisory is a guaranteed false positive; skip it on every path.
+	// cpeStore is the same store when it also serves NVD/CSAF CPE applicability (the Postgres repo does).
+	cpeStore, hasCPE := s.store.(ports.CPEAdvisoryStore)
 	var out []vulnerability.RawFinding
+	emitted := map[string]struct{}{}
+	emit := func(a advisory.Advisory, c sbom.Component, fixed string) {
+		key := a.ID + "\x00" + c.PURL // one finding per (advisory, component), so package + CPE hits don't double
+		if _, done := emitted[key]; done {
+			return
+		}
+		emitted[key] = struct{}{}
+		out = append(out, rawFinding(a, c, fixed))
+	}
 	for _, c := range doc.Components {
+		// 1) Package-key matching against OSV/distro ecosystems.
 		eco := osvEcosystem(purlType(c.PURL))
 		if eco == "" {
 			// OS-package PURL (deb/apk/rpm): derive the release-versioned OSV ecosystem
 			// ("Debian:9", "Alpine:v3.18") from the distro qualifier (Epic B).
 			eco = osDistroEcosystem(c.PURL)
 		}
-		if eco == "" || c.Name == "" || !sbom.IsResolvedVersion(c.Version) {
-			continue
-		}
-		// Normalize to the ecosystem-canonical key on the lookup side too, so a component name that isn't
-		// already normalized (e.g. a Syft-produced PyPI name) still meets the stored advisory key.
-		name := canonicalName(eco, c.Name)
-		advs, err := s.store.ByPackage(ctx, eco, name)
-		if err != nil {
-			return nil, err
-		}
-		for _, a := range advs {
-			affected, fixed := a.Match(eco, name, c.Version)
-			if !affected {
-				continue
+		if eco != "" && c.Name != "" && sbom.IsResolvedVersion(c.Version) {
+			// Normalize to the ecosystem-canonical key on the lookup side too, so a component name that
+			// isn't already normalized (e.g. a Syft-produced PyPI name) still meets the stored advisory key.
+			name := canonicalName(eco, c.Name)
+			advs, err := s.store.ByPackage(ctx, eco, name)
+			if err != nil {
+				return nil, err
 			}
-			out = append(out, rawFinding(a, c, fixed))
+			for _, a := range advs {
+				if a.Withdrawn {
+					continue
+				}
+				if affected, fixed := a.Match(eco, name, c.Version); affected {
+					emit(a, c, fixed)
+				}
+			}
+		}
+		// 2) CPE matching against NVD/CSAF applicability. Runs for ANY component carrying a CPE,
+		// independent of the package-ecosystem gate, so an NVD-only CVE on a system/OS library that the
+		// OSV feeds do not key by package is still found on the default scan (the single largest recall
+		// gap vs Grype's NVD matcher). Shares the fuzzy comparator via advisory.CPEMatches.
+		if hasCPE && c.CPE != "" {
+			componentCPE, err := sbom.ParseCPE23(c.CPE)
+			if err != nil {
+				continue // an unparseable component CPE can't be soundly matched; never a false hit
+			}
+			advs, err := cpeStore.ByCPE(ctx, componentCPE.Part, componentCPE.Vendor, componentCPE.Product)
+			if err != nil {
+				return nil, err
+			}
+			for _, a := range advs {
+				if a.Withdrawn {
+					continue
+				}
+				// An advisory is a hit only when the component matches a VULNERABLE applicability
+				// statement AND no NON-vulnerable one. NVD lists explicit non-vulnerable configurations
+				// (a fixed build, an unaffected edition); matching one of those excludes the component,
+				// so honoring exclusions avoids a false positive.
+				vulnerable, excluded := false, false
+				fixedHint := ""
+				for _, current := range a.CPEs {
+					criteria, perr := sbom.ParseCPE23(current.Criteria)
+					if perr != nil {
+						continue
+					}
+					if matched, _, _ := advisory.CPEMatches(criteria, componentCPE, current); matched {
+						if current.Vulnerable {
+							if !vulnerable {
+								fixedHint = current.VersionEndExcluding
+								vulnerable = true
+							}
+						} else {
+							excluded = true
+						}
+					}
+				}
+				if vulnerable && !excluded {
+					emit(a, c, fixedHint)
+				}
+			}
 		}
 	}
 	return out, nil
@@ -94,6 +151,10 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string) vulnerabili
 		FixedVersions:         fixedVersions,
 		RejectedFixedVersions: rejectedFixedVersions,
 		Description:           a.Summary,
+		// Exploitation-risk signals projected onto the corpus advisory (D1.3): carry them so an OFFLINE scan
+		// orders findings by KEV/EPSS without the live network enricher (which still runs online and raises).
+		KEV:  a.KEV,
+		EPSS: a.EPSS,
 	}
 	if len(fixedVersions) > 0 {
 		rf.FixedVersion = fixedVersions[0]
@@ -110,6 +171,11 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string) vulnerabili
 	}
 	if score > 0 {
 		rf.Severity = shared.SeverityFromScore(score)
+	}
+	// A curated feed label overrides the score-derived band (parity with the live OSV adapter), and is
+	// the only band for a label-only advisory with no CVSS vector - so an offline scan still orders it.
+	if a.Severity != "" && a.Severity != shared.SeverityUnknown {
+		rf.Severity = a.Severity
 	}
 	return rf
 }

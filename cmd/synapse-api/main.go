@@ -2404,7 +2404,9 @@ func main() {
 	// a dead dependency becomes a not_reachable judgment → an OpenVEX not_affected justification. Requires the
 	// judgment lifecycle. Never on an agent-reachable surface (composition-root only).
 	if cfg.PyReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_PYREACH_ENABLED", "python reachability") {
-		pyAnalyzer, perr := pyreach.New(pyimports.New())
+		pyAnalyzer, perr := pyreach.New(pyimports.New(), func(ctx context.Context, dir string) (map[string]bool, bool) {
+			return srcimports.DirectDependencies(ctx, dir, "pypi")
+		})
 		if perr != nil {
 			log.Error("python reachability analyzer init failed", "err", perr)
 			os.Exit(1)

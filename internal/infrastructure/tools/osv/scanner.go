@@ -555,18 +555,7 @@ func preferCVE(id string, aliases []string) string {
 }
 
 func mapSeverityLabel(s string) shared.Severity {
-	switch strings.ToUpper(strings.TrimSpace(s)) {
-	case "CRITICAL":
-		return shared.SeverityCritical
-	case "HIGH":
-		return shared.SeverityHigh
-	case "MODERATE", "MEDIUM":
-		return shared.SeverityMedium
-	case "LOW":
-		return shared.SeverityLow
-	default:
-		return shared.SeverityUnknown
-	}
+	return shared.SeverityFromLabel(s) // shared with the owned advisory parser so both agree on bands
 }
 
 func firstNonEmpty(vals ...string) string {

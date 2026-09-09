@@ -6,9 +6,11 @@
 //
 // SAFETY: a not-reachable verdict must never be a false negative (it can suppress a real vuln downstream).
 // So the analyzer REFUSES a conclusion (returns a no-coverage error → the coordinator mints nothing and the
-// prior tier stands) when the target has no Python source or uses DYNAMIC imports (importlib/__import__),
-// under which a package could be imported invisibly. Candidate import names are generous (a package matches
-// on any plausible name), biasing an uncertain case toward the safe "reachable".
+// prior tier stands) when the target has no Python source, uses DYNAMIC imports (importlib/__import__) under
+// which a package could be imported invisibly, or when a queried package is NOT a declared direct dependency
+// (a transitive package is loaded by its parent, so a first-party import scan cannot prove it unused).
+// Candidate import names are generous (a package matches on any plausible name), biasing an uncertain case
+// toward the safe "reachable".
 package pyreach
 
 import (
@@ -26,18 +28,32 @@ type importScanner interface {
 	ScanImports(ctx context.Context, dir string) (ports.PyImportGraph, error)
 }
 
+// DirectDependencyReader reports the distribution names a Python declaration manifest declares DIRECTLY, and
+// whether such a manifest was found. It is the guard that keeps a TRANSITIVE package out of a Tier-1 answer:
+// a lockfile-resolved SBOM is a fully-resolved graph, so most PyPI components are transitive, and first-party
+// source never writes an import for a package it receives through a parent. Marking those unreferenced would
+// suppress the majority of real findings, so a subject that is not a declared direct dependency is refused
+// (a no-coverage abort) rather than answered.
+type DirectDependencyReader func(ctx context.Context, dir string) (map[string]bool, bool)
+
 // Analyzer implements the reachproof analyzer contract (Analyze → *reachability.Analysis) over a Python
 // import scan. Injected into reachproof.NewCoordinatorForTier(..., Tier1) from the composition root.
 type Analyzer struct {
-	scanner importScanner
+	scanner    importScanner
+	directDeps DirectDependencyReader
 }
 
-// New validates and returns the analyzer.
-func New(s importScanner) (*Analyzer, error) {
+// New validates and returns the analyzer. directDeps guards Tier-1 answers to DIRECT dependencies only,
+// mirroring the srcreach (Rust/PHP/Ruby) analyzer; without it a transitive PyPI package could be marked
+// not-reachable and its finding wrongly suppressed.
+func New(s importScanner, directDeps DirectDependencyReader) (*Analyzer, error) {
 	if s == nil {
 		return nil, fmt.Errorf("%w: pyreach analyzer needs an import scanner", shared.ErrValidation)
 	}
-	return &Analyzer{scanner: s}, nil
+	if directDeps == nil {
+		return nil, fmt.Errorf("%w: pyreach analyzer needs a direct-dependency reader", shared.ErrValidation)
+	}
+	return &Analyzer{scanner: s, directDeps: directDeps}, nil
 }
 
 // Analyze scans dir's first-party Python imports once and resolves each queried PyPI DISTRIBUTION name to a
@@ -55,6 +71,16 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*
 		// unsafe false negative. Refuse the whole analysis (no coverage) rather than risk suppressing a vuln.
 		return nil, fmt.Errorf("%w: target uses dynamic imports – python reachability is inconclusive (no coverage)", shared.ErrValidation)
 	}
+	// Without a readable declaration manifest there is no way to tell a direct dependency from a transitive
+	// one, so no not-reachable is safe for any subject. Refuse the whole analysis (no coverage).
+	direct, ok := a.directDeps(ctx, dir)
+	if !ok {
+		return nil, fmt.Errorf("%w: no Python declaration manifest (pyproject.toml/Pipfile) found, so direct dependencies are unknown (no coverage)", shared.ErrValidation)
+	}
+	directNorm := make(map[string]bool, len(direct))
+	for name := range direct {
+		directNorm[normalizeDistribution(name)] = true
+	}
 	// Match case-INSENSITIVELY: a package imported as "PIL" must match the candidate "pil". Python import
 	// names are technically case-sensitive, but folding case here only ever OVER-matches, biasing toward
 	// the safe "reachable" — never a false not-reachable.
@@ -69,6 +95,12 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*
 			continue
 		}
 		seen[sym] = true
+		if !directNorm[normalizeDistribution(sym)] {
+			// A transitive package is loaded by its parent, so the absence of a first-party import proves
+			// nothing about it. Refuse the whole analysis rather than mint a false not-reachable — matching
+			// the srcreach (Rust/PHP/Ruby) guard.
+			return nil, fmt.Errorf("%w: %q is not a declared direct dependency, so a first-party import scan cannot prove it unused (no coverage)", shared.ErrValidation, sym)
+		}
 		r := reachability.Result{Symbol: sym}
 		for _, cand := range ImportCandidates(sym) { // reachable iff ANY plausible import name is imported
 			if imported[cand] {

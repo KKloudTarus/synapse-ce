@@ -1,5 +1,7 @@
 package advisory
 
+import "github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+
 // Advisory is one normalized vulnerability advisory in the OWNED store: a stable id, cross-feed
 // aliases, severity, and the affected packages each with their version ranges / explicit versions. It is
 // the feed-agnostic shape an OSV/CSAF/NVD ingester normalizes into, and the unit the owned matcher +
@@ -12,6 +14,28 @@ type Advisory struct {
 	CVSSScore  float64           // computed base score
 	Affected   []AffectedPackage // the packages this advisory affects
 	CPEs       []CPEMatch        // NVD/CSAF product applicability retained for CPE correlation
+	// Withdrawn marks an advisory the upstream feed retracted (OSV "withdrawn", NVD REJECTED). A
+	// withdrawn advisory is a guaranteed false positive, so the matcher must never emit a finding for
+	// it. omitempty keeps it out of existing stored blobs. Set by the parser (ownadvisory.ParseOSV)
+	// and by the materializer projection from the canonical Status.
+	Withdrawn bool `json:"Withdrawn,omitempty"`
+	// Severity is a curated qualitative band carried from the feed (GHSA/OSV
+	// database_specific.severity, an NVD/distro label) for advisories that have no CVSS vector to
+	// score. omitempty; the matcher prefers a score-derived band and falls back to this, mirroring the
+	// live OSV adapter where a curated label overrides the computed band. Set by ownadvisory.ParseOSV.
+	Severity shared.Severity `json:"Severity,omitempty"`
+
+	// Risk-priority signals projected from the canonical advisory so an OFFLINE scan can order findings by
+	// exploitability without the live risk enricher's network fetch (CISA KEV / FIRST EPSS): KEV (actively
+	// exploited, ranks above all else), EPSS (0..1 exploit-prediction probability) and its percentile, and
+	// PublicExploit (a public exploit exists). The materializer sets these from the canonical merge; the
+	// owned matcher carries KEV/EPSS onto the finding. omitempty keeps them out of existing stored blobs and
+	// out of an advisory that carries no risk signal. The online risk enricher still runs and only RAISES
+	// these, so it refreshes them when the network is available and never lowers a corpus value.
+	KEV            bool    `json:"KEV,omitempty"`
+	EPSS           float64 `json:"EPSS,omitempty"`
+	EPSSPercentile float64 `json:"EPSSPercentile,omitempty"`
+	PublicExploit  bool    `json:"PublicExploit,omitempty"`
 }
 
 type CPEMatch struct {

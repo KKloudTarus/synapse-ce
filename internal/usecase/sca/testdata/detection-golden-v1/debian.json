@@ -1,0 +1,16 @@
+[
+  {
+    "name": "debian-openssl-backport",
+    "group": "Debian:11",
+    "notes": "Backported fix 1.1.1n-0+deb11u1 on Debian 11; 1.1.1k-1 is affected.",
+    "components": [
+      {"name": "openssl", "version": "1.1.1k-1", "purl": "pkg:deb/debian/openssl@1.1.1k-1?arch=amd64&distro=debian-11"},
+      {"name": "openssl", "version": "1.1.1n-0+deb11u1", "purl": "pkg:deb/debian/openssl@1.1.1n-0+deb11u1?arch=amd64&distro=debian-11"}
+    ],
+    "advisories": [
+      {"id": "CVE-2022-0778", "summary": "OpenSSL BN_mod_sqrt infinite loop", "cvss_score": 7.5, "ecosystem": "Debian:11", "package": "openssl",
+       "ranges": [{"type": "ECOSYSTEM", "introduced": "0", "fixed": "1.1.1n-0+deb11u1"}], "fixed_version": "1.1.1n-0+deb11u1"}
+    ],
+    "expected": [{"component": "openssl", "version": "1.1.1k-1", "cve": "CVE-2022-0778"}]
+  }
+]

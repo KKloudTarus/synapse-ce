@@ -141,6 +141,24 @@ func roundUpCVSS(x float64, v31 bool) float64 {
 	return (math.Floor(float64(i)/10000) + 1) / 10.0
 }
 
+// SeverityFromLabel maps a curated qualitative severity label (GHSA/OSV database_specific.severity,
+// NVD/distro labels) to a band. Case-insensitive; MODERATE and MEDIUM both map to medium. An
+// unrecognized or empty label returns SeverityUnknown, so a caller can fall back to a score-derived band.
+func SeverityFromLabel(label string) Severity {
+	switch strings.ToUpper(strings.TrimSpace(label)) {
+	case "CRITICAL":
+		return SeverityCritical
+	case "HIGH":
+		return SeverityHigh
+	case "MODERATE", "MEDIUM":
+		return SeverityMedium
+	case "LOW":
+		return SeverityLow
+	default:
+		return SeverityUnknown
+	}
+}
+
 // SeverityFromScore maps a CVSS base score to the qualitative severity band.
 func SeverityFromScore(score float64) Severity {
 	switch {

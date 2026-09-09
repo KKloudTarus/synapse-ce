@@ -213,6 +213,9 @@ func stableFileSnapshot(before, after fs.FileInfo, bytesRead int64) bool {
 func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out *[]ports.SecretRawFinding, limit int) bool {
 	// Blank comment regions (VB, #-family, //-and-/* */-family) before the rules run, so a secret that
 	// lives only in a comment is not reported as a live finding. Offsets/newlines are preserved.
+	// Keep the pre-mask text: an inline "synapse:allow" annotation lives in the trailing comment that
+	// maskComments blanks, and maskComments preserves byte offsets, so a match offset indexes both.
+	original := string(data)
 	data = maskComments(rel, data)
 	text := string(data)
 	for i := range s.rules {
@@ -235,6 +238,9 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			if r.lineSkip != nil && r.lineSkip(lineOf(text, start)) {
 				continue
 			}
+			if inlineAllow(lineOf(original, start)) {
+				continue // an inline "synapse:allow" / "gitleaks:allow" annotation suppresses this line
+			}
 			if r.minEnt > 0 && shannon(secret) < r.minEnt {
 				continue
 			}
@@ -256,6 +262,14 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 		}
 	}
 	return false
+}
+
+// inlineAllow reports whether a line carries an inline suppression annotation ("synapse:allow", or
+// "gitleaks:allow" for drop-in compatibility), so an intentional test or example secret on that line is
+// not reported. Matched case-insensitively anywhere on the line, since it lives in a trailing comment.
+func inlineAllow(line string) bool {
+	lower := strings.ToLower(line)
+	return strings.Contains(lower, "synapse:allow") || strings.Contains(lower, "gitleaks:allow")
 }
 
 // lineOf returns the full line containing byte offset at.
@@ -661,6 +675,50 @@ func defaultRules() []rule {
 			group:  1,
 			minEnt: 3.5,
 			allow:  compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
+		},
+		// ── additional distinctive-prefix provider tokens (near-zero false positive: the unique prefix is the signal) ──
+		{
+			id: "dockerhub-pat", category: "Docker", title: "Docker Hub personal access token", severity: shared.SeverityHigh,
+			keywords: []string{"dckr_pat_"},
+			// No trailing \b: the token body is base64url and may end in '-' or '_', where \b would not
+			// match. The character class is its own right boundary (it stops at a quote/space).
+			re: regexp.MustCompile(`\bdckr_pat_[A-Za-z0-9_-]{20,}`),
+		},
+		{
+			id: "stripe-restricted-key", category: "Stripe", title: "Stripe restricted key", severity: shared.SeverityHigh,
+			keywords: []string{"rk_live_", "rk_test_"},
+			re:       regexp.MustCompile(`\brk_(?:live|test)_[A-Za-z0-9]{24,}\b`),
+		},
+		{
+			id: "gitlab-pipeline-trigger-token", category: "GitLab", title: "GitLab pipeline trigger token", severity: shared.SeverityHigh,
+			keywords: []string{"glptt-"},
+			re:       regexp.MustCompile(`\bglptt-[0-9a-f]{40}\b`),
+		},
+		{
+			id: "pulumi-access-token", category: "Pulumi", title: "Pulumi access token", severity: shared.SeverityHigh,
+			keywords: []string{"pul-"},
+			re:       regexp.MustCompile(`\bpul-[0-9a-f]{40}\b`),
+		},
+		{
+			id: "clojars-deploy-token", category: "Clojars", title: "Clojars deploy token", severity: shared.SeverityHigh,
+			keywords: []string{"CLOJARS_"},
+			re:       regexp.MustCompile(`\bCLOJARS_[A-Za-z0-9]{60}\b`),
+		},
+		// ── AI/dev SaaS provider tokens (distinctive prefixes; lower-bound lengths since exact bodies vary) ──
+		{
+			id: "sentry-auth-token", category: "Sentry", title: "Sentry auth token", severity: shared.SeverityHigh,
+			keywords: []string{"sntrys_"},
+			re:       regexp.MustCompile(`\bsntrys_[A-Za-z0-9_=-]{40,}`),
+		},
+		{
+			id: "readme-api-key", category: "ReadMe", title: "ReadMe API key", severity: shared.SeverityHigh,
+			keywords: []string{"rdme_"},
+			re:       regexp.MustCompile(`\brdme_[A-Za-z0-9]{40,}\b`),
+		},
+		{
+			id: "figma-token", category: "Figma", title: "Figma personal access token", severity: shared.SeverityHigh,
+			keywords: []string{"figd_"},
+			re:       regexp.MustCompile(`\bfigd_[A-Za-z0-9_-]{40,}`),
 		},
 	}
 }

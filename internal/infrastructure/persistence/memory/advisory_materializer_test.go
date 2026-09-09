@@ -103,3 +103,39 @@ func TestAdvisoryMaterializerRejectsAliasConflictWithoutPartialWrite(t *testing.
 		t.Fatalf("existing canonical lost after conflict: %v", err)
 	}
 }
+
+// D1.3: the in-memory store projects the same risk (KEV/EPSS) and status (Withdrawn) fields as Postgres, so
+// a blank-DSN/in-memory scan has parity — an offline scan orders by exploitation risk and skips retractions.
+func TestAdvisoryMaterializerProjectsRiskAndStatus(t *testing.T) {
+	store := NewAdvisoryMaterializer()
+	kev := true
+	epss := 0.77
+	rec := advisory.ObservationRecord{Observation: advisory.Observation{
+		SourceType: "osv", SourceID: "osv", RecordID: "r1", Status: advisory.StatusActive,
+		KEV: &kev, EPSS: &epss,
+		Advisory: advisory.Advisory{ID: "CVE-2026-RISK", Affected: []advisory.AffectedPackage{{Ecosystem: "npm", Package: "left-pad", Versions: []string{"1.0.0"}}}},
+	}}
+	if _, err := store.Materialize(context.Background(), []advisory.ObservationRecord{rec}); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	got, err := store.ByPackage(context.Background(), "npm", "left-pad")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("ByPackage = %+v err=%v", got, err)
+	}
+	if !got[0].KEV || got[0].EPSS != 0.77 {
+		t.Errorf("in-memory projection must carry KEV/EPSS, got KEV=%v EPSS=%v", got[0].KEV, got[0].EPSS)
+	}
+
+	// A withdrawn advisory projects Withdrawn=true (parity with postgres, so the matcher skips it).
+	wrec := advisory.ObservationRecord{Observation: advisory.Observation{
+		SourceType: "osv", SourceID: "osv", RecordID: "r2", Status: advisory.StatusWithdrawn,
+		Advisory: advisory.Advisory{ID: "CVE-2026-GONE", Affected: []advisory.AffectedPackage{{Ecosystem: "npm", Package: "gone-pkg", Versions: []string{"1.0.0"}}}},
+	}}
+	if _, err := store.Materialize(context.Background(), []advisory.ObservationRecord{wrec}); err != nil {
+		t.Fatalf("materialize withdrawn: %v", err)
+	}
+	w, _ := store.ByPackage(context.Background(), "npm", "gone-pkg")
+	if len(w) != 1 || !w[0].Withdrawn {
+		t.Errorf("withdrawn advisory must project Withdrawn=true, got %+v", w)
+	}
+}

@@ -2,6 +2,7 @@
 package sbom
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -390,6 +391,91 @@ func PathToRoot(deps []Dependency, target string) []string {
 		}
 	}
 	return []string{target} // only reachable via a cycle; report the package itself
+}
+
+// IsDirect reports whether target is a DIRECT (top-level) dependency: it is present in the dependency graph
+// and no real COMPONENT depends on it. componentIDs is the set of emitted component ids (ComponentID of each
+// SBOM component); a dependent that is NOT a component is a synthetic project-root node (the metadata
+// component of an imported CycloneDX SBOM, say), and it does not make target transitive.
+//
+// This single rule is correct for both graph shapes the scanner produces: the native lockfile parsers emit
+// NO synthetic root node, so a direct dependency is a graph root (nothing depends on it); an imported SBOM
+// carries a project-root node, so a direct dependency's only dependent is that root. A naive "path length
+// <= 2" rule mislabels a depth-1 transitive (a dependency of a direct dependency) as direct in the rootless
+// case; a naive "no dependents" rule mislabels an imported direct dependency (child of the project root) as
+// transitive. Checking "no COMPONENT dependent" handles both. A target absent from the graph is not direct.
+func IsDirect(deps []Dependency, componentIDs map[string]bool, target string) bool {
+	inGraph := false
+	hasComponentDependent := false
+	for _, d := range deps {
+		if d.Ref == target {
+			inGraph = true
+		}
+		for _, on := range d.DependsOn {
+			if on == target {
+				inGraph = true
+				if componentIDs[d.Ref] {
+					hasComponentDependent = true
+				}
+			}
+		}
+	}
+	return inGraph && !hasComponentDependent
+}
+
+// IntroducedBy returns the COMPLETE set of direct (top-level) dependencies through which target is reachable
+// — every root of the dependency graph that has a path down to target. Where PathToRoot returns a single
+// chain, this returns every introducer, because removing a transitive vulnerable package requires bumping
+// ALL the direct dependencies that pull it in (a package can arrive through several). It walks the reverse
+// edges from target and collects each root reached; roots are nodes nothing depends on. The result is sorted
+// and unique. Returns nil when target is not in the graph, or is reachable only through a cycle (no root
+// above it); returns [target] when target is itself a direct/top-level dependency. Cycle-safe via a visited
+// set.
+func IntroducedBy(deps []Dependency, target string) []string {
+	dependents := map[string][]string{} // who depends on X
+	hasDependent := map[string]bool{}
+	inGraph := map[string]bool{}
+	for _, d := range deps {
+		inGraph[d.Ref] = true
+		for _, on := range d.DependsOn {
+			dependents[on] = append(dependents[on], d.Ref)
+			hasDependent[on] = true
+			inGraph[on] = true
+		}
+	}
+	if !inGraph[target] {
+		return nil
+	}
+	if !hasDependent[target] {
+		return []string{target} // already a root (direct dependency)
+	}
+	roots := map[string]bool{}
+	visited := map[string]bool{target: true}
+	queue := []string{target}
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		for _, p := range dependents[n] {
+			if visited[p] {
+				continue
+			}
+			visited[p] = true
+			if hasDependent[p] {
+				queue = append(queue, p) // keep walking up toward the roots
+			} else {
+				roots[p] = true // a top-level dependency that introduces target
+			}
+		}
+	}
+	if len(roots) == 0 {
+		return nil // reachable only via a cycle: no clean introducer
+	}
+	out := make([]string, 0, len(roots))
+	for r := range roots {
+		out = append(out, r)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ComponentID is the stable identity of a component for the dependency graph and

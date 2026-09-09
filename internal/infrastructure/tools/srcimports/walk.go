@@ -375,6 +375,8 @@ func DirectDependencies(ctx context.Context, dir, purlType string) (map[string]b
 			return nil, false
 		}
 		return gemfileDirectDependencies(string(content)), true
+	case "pypi":
+		return pypiDirectDependencies(ctx, dir)
 	}
 	return nil, false
 }

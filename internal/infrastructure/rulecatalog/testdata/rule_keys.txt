@@ -206,6 +206,7 @@ c:unreachable-code-after-return
 c:vla-stack-allocation
 c:volatile-used-for-synchronization
 child-process-exec-template
+clojars-deploy-token
 cloudformation-api-no-auth
 cloudformation-apigw-no-logging
 cloudformation-cloudfront-no-default-root
@@ -862,10 +863,12 @@ dockerfile-workdir-relative
 dockerfile-world-writable
 dockerfile-yum-no-clean
 dockerfile-yum-no-yes
+dockerhub-pat
 dom-xss-inner-html
 doppler-token
 dynamic-code-eval
 dynatrace-token
+figma-token
 gcp-service-account-key
 generic-command-injection-sink
 generic-secret
@@ -878,6 +881,7 @@ gha-unpinned-action
 github-fine-grained-pat
 github-token
 gitlab-pat
+gitlab-pipeline-trigger-token
 go-append-result-ignored
 go-bool-literal-compare
 go-command-dynamic
@@ -2244,6 +2248,7 @@ postman-api-key
 prisma-raw-sql-unsafe
 private-key
 private-key-material
+pulumi-access-token
 putty-private-key
 pypi-token
 python-abstractproperty
@@ -2599,6 +2604,7 @@ rb:weak-hash
 rb:xss-html-safe
 rb:xss-raw
 react-dangerous-html
+readme-api-key
 redos-vulnerable-regex
 reflected-response-write
 reliability-constant-condition
@@ -2814,6 +2820,7 @@ scala:var-in-functional
 scala:wildcard-import
 sendgrid-api-key
 sensitive-data-logging
+sentry-auth-token
 sentry-dsn
 server-template-injection
 shopify-token
@@ -2822,6 +2829,7 @@ slack-webhook-url
 sqlalchemy-raw-sql-dynamic
 square-token
 ssrf-fetch-user-url
+stripe-restricted-key
 stripe-secret-key
 swift:actor-blocking-call
 swift:any-without-protocol

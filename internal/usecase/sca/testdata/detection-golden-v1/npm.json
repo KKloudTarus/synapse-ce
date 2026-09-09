@@ -1,0 +1,43 @@
+[
+  {
+    "name": "npm-lodash-prototype-pollution",
+    "group": "npm",
+    "notes": "CVE-2019-10744 affects lodash <4.17.12; 4.17.21 is patched.",
+    "components": [
+      {"name": "lodash", "version": "4.17.11", "purl": "pkg:npm/lodash@4.17.11"},
+      {"name": "lodash", "version": "4.17.21", "purl": "pkg:npm/lodash@4.17.21"}
+    ],
+    "advisories": [
+      {"id": "GHSA-jf85-cpcp-j695", "aliases": ["CVE-2019-10744"], "summary": "Prototype pollution in lodash", "cvss_score": 9.1, "ecosystem": "npm", "package": "lodash",
+       "ranges": [{"type": "SEMVER", "introduced": "0", "fixed": "4.17.12"}], "fixed_version": "4.17.12"}
+    ],
+    "expected": [{"component": "lodash", "version": "4.17.11", "cve": "CVE-2019-10744"}]
+  },
+  {
+    "name": "npm-minimist-cve-only-id",
+    "group": "npm",
+    "notes": "CVE-2021-44906 affects minimist <1.2.6; advisory primary id is the CVE (no GHSA).",
+    "components": [
+      {"name": "minimist", "version": "1.2.5", "purl": "pkg:npm/minimist@1.2.5"},
+      {"name": "minimist", "version": "1.2.6", "purl": "pkg:npm/minimist@1.2.6"}
+    ],
+    "advisories": [
+      {"id": "CVE-2021-44906", "summary": "Prototype pollution in minimist", "cvss_score": 9.8, "ecosystem": "npm", "package": "minimist",
+       "ranges": [{"type": "SEMVER", "introduced": "0", "fixed": "1.2.6"}], "fixed_version": "1.2.6"}
+    ],
+    "expected": [{"component": "minimist", "version": "1.2.5", "cve": "CVE-2021-44906"}]
+  },
+  {
+    "name": "npm-express-not-in-range",
+    "group": "npm",
+    "notes": "Advisory present but express 4.18.2 is above the fixed boundary; must not be flagged.",
+    "components": [
+      {"name": "express", "version": "4.18.2", "purl": "pkg:npm/express@4.18.2"}
+    ],
+    "advisories": [
+      {"id": "GHSA-express-old", "aliases": ["CVE-2022-24999"], "summary": "qs vuln reachable via express", "cvss_score": 7.5, "ecosystem": "npm", "package": "express",
+       "ranges": [{"type": "SEMVER", "introduced": "0", "fixed": "4.17.3"}], "fixed_version": "4.17.3"}
+    ],
+    "expected": []
+  }
+]

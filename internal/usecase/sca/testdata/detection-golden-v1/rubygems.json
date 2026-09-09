@@ -1,0 +1,16 @@
+[
+  {
+    "name": "rubygems-rake-command-injection",
+    "group": "RubyGems",
+    "notes": "CVE-2020-8130 affects rake <12.3.3.",
+    "components": [
+      {"name": "rake", "version": "12.3.0", "purl": "pkg:gem/rake@12.3.0"},
+      {"name": "rake", "version": "13.0.6", "purl": "pkg:gem/rake@13.0.6"}
+    ],
+    "advisories": [
+      {"id": "GHSA-jppv-gw3r-w3q8", "aliases": ["CVE-2020-8130"], "summary": "OS command injection in rake", "cvss_score": 6.4, "ecosystem": "RubyGems", "package": "rake",
+       "ranges": [{"type": "ECOSYSTEM", "introduced": "0", "fixed": "12.3.3"}], "fixed_version": "12.3.3"}
+    ],
+    "expected": [{"component": "rake", "version": "12.3.0", "cve": "CVE-2020-8130"}]
+  }
+]

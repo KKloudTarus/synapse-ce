@@ -17,9 +17,14 @@ import (
 // owned parsers stay vendor-neutral + dependency-light), it scans for the `packages:` block and reads its
 // indent-2 key lines (values, at deeper indent, are ignored – only the keys carry the identity we need).
 //
-// Components only (edges are not emitted yet). Scope is the manifest path's base scope; the per-workspace
-// dev/prod refinement (pnpm hoists all workspaces into one root lock) is applied post-SBOM by the manifest
-// enricher's pnpm pass, which runs regardless of the SBOM producer.
+// Dependency EDGES are emitted from each package's `dependencies:`/`optionalDependencies:` sub-maps, which
+// live in the `packages:` block (v5/v6) or the `snapshots:` block (v9). Each edge is package→package,
+// resolved against the emitted-component index (resolution-as-filter: an edge is kept only when both
+// endpoints are emitted components), matching npm.go. There is no synthetic project-root node, so a direct
+// (top-level) dependency is simply one nothing else depends on (see sbom.PathToRoot); the `importers:` block
+// is not turned into edges here (it would need the root node). Scope is the manifest path's base scope; the
+// per-workspace dev/prod refinement (pnpm hoists all workspaces into one root lock) is applied post-SBOM by
+// the manifest enricher's pnpm pass, which runs regardless of the SBOM producer.
 type Pnpm struct{}
 
 // Ecosystem identifies this parser's package ecosystem (pnpm resolves npm packages).
@@ -28,23 +33,45 @@ func (Pnpm) Ecosystem() string { return "npm" }
 // Markers are the lockfile basenames Pnpm claims.
 func (Pnpm) Markers() []string { return []string{"pnpm-lock.yaml"} }
 
-// Parse extracts the resolved npm packages from a pnpm-lock.yaml `packages:` block as npm components.
+// pnpmRawEdge is one package's accumulated dependency keys, resolved to PURLs after the full scan (so a
+// forward reference to a package defined later in the file still resolves).
+type pnpmRawEdge struct {
+	parent string   // the package/snapshot key spec (edge source)
+	deps   []string // "name@version" dependency keys (edge targets)
+}
+
+// Parse extracts the resolved npm packages from a pnpm-lock.yaml `packages:` block as npm components, and the
+// dependency edges from every package's `dependencies:`/`optionalDependencies:` sub-map (in `packages:` for
+// v5/v6, in `snapshots:` for v9).
 func (Pnpm) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
 	baseScope := sbom.ClassifyScope(in.Path, "")
 	set := newComponentSet()
-	inPackages := false
-	// Emission is DEFERRED per package: hold the current component while its deeper `resolution:` block is
-	// read so its integrity (SRI) checksum attaches, then flush on the next key / section / EOF.
-	var cur *sbom.Component
+	purlByKey := map[string]string{} // "name@version" → PURL: the emitted-component index for edge resolution
+
+	section := ""           // current top-level section
+	var cur *sbom.Component // current component (packages section only), held so its integrity (SRI) attaches
+	curKey := ""            // current package/snapshot key spec (edge source), set in packages AND snapshots
+	inDeps := false         // inside a dependencies:/optionalDependencies: sub-block
+	var curDeps []string    // "name@version" dep keys accumulated for curKey
+	var rawEdges []pnpmRawEdge
+
+	// flush completes the current package block: emit its component (packages only), index it, and record its
+	// accumulated edge. Called on the next indent-2 key, a new section, and EOF.
 	flush := func() {
 		if cur != nil {
 			set.add(*cur)
+			purlByKey[cur.Name+"@"+cur.Version] = cur.PURL
 			cur = nil
 		}
+		if curKey != "" && len(curDeps) > 0 {
+			rawEdges = append(rawEdges, pnpmRawEdge{parent: curKey, deps: curDeps})
+		}
+		curKey, curDeps, inDeps = "", nil, false
 	}
+
 	sc := bufio.NewScanner(bytes.NewReader(in.Content))
 	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
 	for sc.Scan() {
@@ -52,52 +79,155 @@ func (Pnpm) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 		if strings.TrimSpace(raw) == "" || strings.HasPrefix(strings.TrimSpace(raw), "#") {
 			continue // blank/comment lines don't delimit sections (pnpm-lock blank-separates entries)
 		}
-		if !indented(raw) { // a col-0 line: a new top-level section. Only `packages:` is ours.
+		if !indented(raw) { // a col-0 line: a new top-level section.
 			flush()
-			inPackages = strings.TrimSpace(raw) == "packages:"
+			section = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(raw), ":"))
 			continue
 		}
-		if !inPackages {
+		// Components come only from `packages:`; edges from the dependency sub-maps in `packages:` (v5/v6) and
+		// `snapshots:` (v9). Other sections (importers/settings/…) carry no package→package edges.
+		if section != "packages" && section != "snapshots" {
 			continue
 		}
-		if leadingIndent(raw) != 2 {
-			// A deeper value line of the current package: capture its resolution integrity (tamper evidence);
-			// everything else (engines/…) is ignored. Only the first integrity seen is kept.
-			if cur != nil && cur.Checksums == nil {
+		line := strings.TrimSpace(raw)
+		switch leadingIndent(raw) {
+		case 2:
+			// An indent-2 key line: the previous package's block is complete.
+			flush()
+			if !strings.HasSuffix(line, ":") {
+				continue
+			}
+			spec := strings.Trim(strings.TrimSuffix(line, ":"), `'"`) // the package key, unquoted (scoped keys quote)
+			name, version, ok := pnpmSpecNameVersion(spec)
+			if !ok {
+				continue
+			}
+			curKey = spec
+			if section == "packages" { // the sole source of components
+				purlName := name
+				if strings.HasPrefix(purlName, "@") {
+					purlName = "%40" + purlName[1:] // PURL spec: scoped @ → %40 (matches the npm/yarn parsers)
+				}
+				cur = &sbom.Component{
+					Name:     name,
+					Version:  version,
+					PURL:     "pkg:npm/" + purlName + "@" + version,
+					Location: in.Path,
+					Scope:    baseScope,
+				}
+			}
+		case 4:
+			// A sub-key of the current package: dependencies:/optionalDependencies: open a deps block; any
+			// other sub-key (resolution:/engines:/…) closes it, and may carry the integrity (tamper evidence).
+			key := strings.TrimSuffix(line, ":")
+			inDeps = key == "dependencies" || key == "optionalDependencies"
+			if !inDeps && cur != nil && cur.Checksums == nil {
 				if v := pnpmIntegrityFromLine(raw); v != "" {
 					cur.Checksums = parseSubresourceIntegrity(v)
 				}
 			}
-			continue
-		}
-		// An indent-2 key line: the previous package's block is complete.
-		flush()
-		line := strings.TrimSpace(raw)
-		if !strings.HasSuffix(line, ":") {
-			continue
-		}
-		spec := strings.Trim(strings.TrimSuffix(line, ":"), `'"`) // the package key, unquoted (scoped keys quote)
-		name, version, ok := pnpmSpecNameVersion(spec)
-		if !ok {
-			continue
-		}
-		purlName := name
-		if strings.HasPrefix(purlName, "@") {
-			purlName = "%40" + purlName[1:] // PURL spec: scoped @ → %40 (matches the npm/yarn parsers)
-		}
-		cur = &sbom.Component{
-			Name:     name,
-			Version:  version,
-			PURL:     "pkg:npm/" + purlName + "@" + version,
-			Location: in.Path,
-			Scope:    baseScope,
+		default: // indent >= 6: a dep entry inside a deps block, or a block-form integrity line
+			if inDeps && curKey != "" {
+				if dk, ok := pnpmDepKey(line); ok {
+					curDeps = append(curDeps, dk)
+				}
+			} else if cur != nil && cur.Checksums == nil {
+				if v := pnpmIntegrityFromLine(raw); v != "" {
+					cur.Checksums = parseSubresourceIntegrity(v)
+				}
+			}
 		}
 	}
 	flush() // the last package in the file
 	if err := sc.Err(); err != nil {
 		return nil, nil, fmt.Errorf("scan pnpm-lock.yaml: %w", err)
 	}
-	return set.components(), nil, nil
+	return set.components(), pnpmResolveEdges(rawEdges, purlByKey), nil
+}
+
+// pnpmDepKey parses one dependency entry line from a `dependencies:`/`optionalDependencies:` sub-map into the
+// "name@version" component key it targets. The value takes one of two forms after its `(peers…)` suffix and
+// any `npm:` prefix are stripped: a bare resolved version, in which case the target is `<mapKey>@<version>`;
+// or a full `name@version` package id (an ALIAS, where the map key is only the local import name), in which
+// case the target is that package. A value that is a range, a `link:`/`file:` path, or otherwise not a
+// resolved version/package id yields ok=false and is dropped by the resolution-as-filter.
+//
+// A v5 `_<peers>` value form is not decoded: any value containing `_` is dropped, so a v5 peer-suffixed value
+// (whose peer part can itself contain `@`) is never misread as an alias package id. That makes this path emit
+// a safe missed edge for such legacy values, never a wrong edge. v6/v9, which use the `(peers)` form, are full.
+func pnpmDepKey(line string) (string, bool) {
+	i := strings.IndexByte(line, ':')
+	if i <= 0 {
+		return "", false
+	}
+	val := strings.Trim(strings.TrimSpace(line[i+1:]), `'"`)
+	val = strings.TrimPrefix(val, "npm:") // an npm: alias value is the real package id
+	if j := strings.IndexByte(val, '('); j >= 0 {
+		val = val[:j] // drop the (peers) suffix (v6/v9)
+	}
+	if val == "" {
+		return "", false
+	}
+	// A v5 peer suffix is `_<peers>` (which may contain '@'); a bare resolved version and a v6/v9 value never
+	// contain '_'. Dropping any '_'-bearing value keeps a v5 peer value from being misread as an alias
+	// package id, so this path never emits a wrong edge — a v5 peer-suffixed value is a safe missed edge.
+	if strings.IndexByte(val, '_') >= 0 {
+		return "", false
+	}
+	if strings.LastIndexByte(val, '@') > 0 {
+		// The value carries its own version separator → it is a package id (alias); it IS the target.
+		tn, tv, ok := pnpmSpecNameVersion(val)
+		if !ok {
+			return "", false
+		}
+		return tn + "@" + tv, true
+	}
+	name := strings.Trim(strings.TrimSpace(line[:i]), `'"`)
+	if name == "" || !sbom.IsResolvedVersion(val) {
+		return "", false
+	}
+	return name + "@" + val, true
+}
+
+// pnpmResolveEdges turns the raw per-package dependency keys into sbom.Dependency edges, resolved against the
+// emitted-component index. An edge (and each target) is kept only when it names an emitted component
+// (resolution-as-filter); self-edges and duplicate targets are dropped. Because components are deduped at
+// name/version granularity, several peer-context snapshot variants of one package (e.g.
+// `plugin@1.0.0(react@17)` and `plugin@1.0.0(react@18)`) collapse to the same Ref; their targets are MERGED
+// into a single Dependency, preserving first-seen order, so the graph has one edge object per Ref.
+func pnpmResolveEdges(rawEdges []pnpmRawEdge, purlByKey map[string]string) []sbom.Dependency {
+	var order []string                   // Refs in first-seen order (deterministic output)
+	targets := map[string][]string{}     // Ref → ordered target PURLs
+	seen := map[string]map[string]bool{} // Ref → set of already-added targets (+ the Ref itself)
+	for _, re := range rawEdges {
+		pn, pv, ok := pnpmSpecNameVersion(re.parent)
+		if !ok {
+			continue
+		}
+		ref := purlByKey[pn+"@"+pv]
+		if ref == "" {
+			continue // the source package is not an emitted component (e.g. a snapshot with no packages entry)
+		}
+		if seen[ref] == nil {
+			seen[ref] = map[string]bool{ref: true} // no self-edge
+			order = append(order, ref)
+		}
+		for _, dk := range re.deps {
+			t := purlByKey[dk]
+			if t == "" || seen[ref][t] {
+				continue
+			}
+			seen[ref][t] = true
+			targets[ref] = append(targets[ref], t)
+		}
+	}
+	var edges []sbom.Dependency
+	for _, ref := range order {
+		if on := targets[ref]; len(on) > 0 {
+			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: on})
+		}
+	}
+	return edges
 }
 
 // pnpmIntegrityFromLine extracts the Subresource Integrity value from a pnpm-lock resolution line, inline

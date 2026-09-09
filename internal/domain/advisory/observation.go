@@ -146,6 +146,36 @@ type Canonical struct {
 	Sources            []string
 }
 
+// Project returns the SCAN-FACING Advisory projection for this canonical: the base Advisory with the
+// canonical's status-derived Withdrawn flag and its merged exploitation-risk signals (KEV / EPSS / EPSS
+// percentile / public exploit) copied in. Both the Postgres and in-memory materializers project through
+// this, so their scan-time reads (ByPackage/ByCPE) carry the same fields and an OFFLINE scan sees the same
+// retraction and exploitation-priority data regardless of the store. A nil risk pointer projects as the
+// zero value (unknown = "not known exploited" / EPSS 0), never a false positive risk boost.
+func (c Canonical) Project() Advisory {
+	a := c.Advisory
+	a.Withdrawn = c.Status == StatusWithdrawn || c.Status == StatusRejected
+	a.KEV = derefBool(c.KEV)
+	a.PublicExploit = derefBool(c.PublicExploit)
+	a.EPSS = derefFloat(c.EPSS)
+	a.EPSSPercentile = derefFloat(c.EPSSPercentile)
+	return a
+}
+
+func derefBool(p *bool) bool {
+	if p == nil {
+		return false
+	}
+	return *p
+}
+
+func derefFloat(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
 // MaterializationResult describes the committed canonical transition.
 type MaterializationResult struct {
 	Canonical       Canonical

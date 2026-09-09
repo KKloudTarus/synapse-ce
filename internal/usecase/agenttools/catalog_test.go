@@ -513,6 +513,9 @@ func TestReachabilityContext(t *testing.T) {
 			{Name: "lodash", Version: "4.17.21", PURL: "pkg:npm/lodash@4.17.21", Scope: sbom.ScopeProduction, Location: "package.json"},
 			{Name: "deep", Version: "1.0.0", PURL: "pkg:npm/deep@1.0.0", Scope: sbom.ScopeTest, Location: "test/package.json"},
 		},
+		// A project-root graph (as an imported CycloneDX SBOM carries): "root" is a non-component project
+		// node, so lodash (its child, only a non-component depends on it) is DIRECT, and deep (lodash, a real
+		// component, depends on it) is transitive.
 		Dependencies: []sbom.Dependency{
 			{Ref: "root", DependsOn: []string{"pkg:npm/lodash@4.17.21"}},
 			{Ref: "pkg:npm/lodash@4.17.21", DependsOn: []string{"pkg:npm/deep@1.0.0"}},
@@ -539,14 +542,15 @@ func TestReachabilityContext(t *testing.T) {
 		return v
 	}
 
-	// direct production dependency → present, direct, depth 2, tier-1, not background
+	// direct production dependency → present, direct (only the non-component root depends on it), depth 2,
+	// tier-1, not background
 	if d := get(`{"component":"lodash","version":"4.17.21"}`); !d.PresentInSBOM || !d.InDependencyGraph || !d.Direct ||
 		d.Depth != 2 || d.SuggestedTier != string(judgment.Tier1) || d.Scope != sbom.ScopeProduction || d.BackgroundScope ||
 		len(d.AffectedSymbols) != 1 || d.AffectedSymbols[0] != "lodash.template" {
 		t.Fatalf("direct prod dep facts wrong: %+v", d)
 	}
-	// transitive test-only dependency → present, NOT direct, depth 3, tier-0, background scope,
-	// and the manifest location is basenamed ("test/package.json" → "package.json", data-minimization)
+	// transitive test-only dependency → present, NOT direct (the real component lodash depends on it),
+	// depth 3, tier-0, background scope, and the manifest location is basenamed.
 	if tr := get(`{"component":"deep","version":"1.0.0"}`); !tr.PresentInSBOM || tr.Direct ||
 		tr.Depth != 3 || tr.SuggestedTier != string(judgment.Tier0) || !tr.BackgroundScope || tr.Location != "package.json" {
 		t.Fatalf("transitive test dep facts wrong: %+v", tr)
