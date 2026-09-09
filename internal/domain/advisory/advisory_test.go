@@ -128,12 +128,12 @@ func TestAffectedVersionList(t *testing.T) {
 		{"", false},         // empty fail-closed
 	}
 	for _, c := range cases {
-		if got := AffectedVersionList(c.version, list); got != c.want {
+		if got := AffectedVersionList("", c.version, list); got != c.want {
 			t.Errorf("AffectedVersionList(%q) = %v, want %v", c.version, got, c.want)
 		}
 	}
 	// leading v on the LISTED side is also normalized
-	if !AffectedVersionList("1.5.0", []string{"v1.5.0"}) {
+	if !AffectedVersionList("", "1.5.0", []string{"v1.5.0"}) {
 		t.Error("a listed 'v1.5.0' must match a '1.5.0' query")
 	}
 }
@@ -162,5 +162,22 @@ func TestAffectedSemverSkipsNonSemver(t *testing.T) {
 	}
 	if AffectedSemver("1.1.0", nil) {
 		t.Error("no ranges -> not affected")
+	}
+}
+
+func TestAffectedVersionListEcosystemCanonical(t *testing.T) {
+	// A PyPI advisory listing "1.0" must match a "1.0.0" component via PEP 440 trailing-zero equality,
+	// through the explicit-versions path (D2.7). Ecosystem-less matching stays exact.
+	if !AffectedVersionList("PyPI", "1.0.0", []string{"1.0"}) {
+		t.Error("PyPI: component 1.0.0 must match a listed 1.0 (PEP 440 canonical equality)")
+	}
+	if !AffectedVersionList("PyPI", "1.0", []string{"1.0.0"}) {
+		t.Error("PyPI: component 1.0 must match a listed 1.0.0 (symmetric)")
+	}
+	if AffectedVersionList("PyPI", "2.0.0", []string{"1.0"}) {
+		t.Error("PyPI: 2.0.0 must NOT match a listed 1.0")
+	}
+	if AffectedVersionList("", "1.0.0", []string{"1.0"}) {
+		t.Error("no ecosystem: 1.0.0 must NOT match 1.0 (exact token only, no canonical folding)")
 	}
 }
