@@ -28,6 +28,12 @@ function run(id: string, createdAt: string, repro: number, keys: string[], grype
       unpinnedInputs: ['osv.dev'],
     },
     findingKeys: keys,
+    provenance: 'native',
+    terminalStatus: 'succeeded',
+    sealedAt: createdAt,
+    manifestHash: 'manifest-hash',
+    laneCount: 1,
+    completeCoverage: true,
   }
 }
 
