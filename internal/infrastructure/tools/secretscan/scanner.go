@@ -827,5 +827,32 @@ func defaultRules() []rule {
 			// The whole token is 40 characters: the "r8_" prefix plus 37 alphanumerics.
 			re: regexp.MustCompile(`\br8_[A-Za-z0-9]{37}\b`),
 		},
+		{
+			id: "airtable-pat", category: "Airtable", title: "Airtable personal access token", severity: shared.SeverityHigh,
+			keywords: []string{"pat"},
+			// pat + 14 alphanumerics + '.' + 64 lowercase hex.
+			re: regexp.MustCompile(`\bpat[A-Za-z0-9]{14}\.[a-f0-9]{64}\b`),
+		},
+		{
+			id: "sonarqube-token", category: "SonarQube", title: "SonarQube token", severity: shared.SeverityHigh,
+			keywords: []string{"sqp_", "squ_", "sqa_"},
+			// user (squ_), project (sqp_), and global-analysis (sqa_) tokens: prefix plus 40 lowercase hex.
+			re: regexp.MustCompile(`\bsq[apu]_[0-9a-f]{40}\b`),
+		},
+		{
+			id: "dropbox-token", category: "Dropbox", title: "Dropbox access token", severity: shared.SeverityHigh,
+			keywords: []string{"sl."},
+			// Short-lived token: "sl." + a 135-char base64url body (may end in '='), bounded by a
+			// non-token character or end-of-line (a trailing \b is unreliable when the body ends in '=' or '-').
+			// The reported secret is capture group 1 (the token without the trailing boundary character).
+			re:    regexp.MustCompile(`\b(sl\.[A-Za-z0-9=_-]{135})(?:[^A-Za-z0-9=_-]|$)`),
+			group: 1,
+		},
+		{
+			id: "cloudinary-url", category: "Cloudinary", title: "Cloudinary URL credential", severity: shared.SeverityHigh,
+			keywords: []string{"cloudinary://"},
+			// cloudinary://<15-digit api key>:<27-char api secret>@<cloud name: letter then 1-127 [A-Za-z0-9-]>.
+			re: regexp.MustCompile(`cloudinary://[0-9]{15}:[A-Za-z0-9_-]{27}@[A-Za-z][A-Za-z0-9-]{1,127}`),
+		},
 	}
 }

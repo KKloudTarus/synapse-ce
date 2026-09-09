@@ -99,6 +99,10 @@ func TestCatalogParity(t *testing.T) {
 		"adafruit-io-key":               "CWE-798",
 		"sourcegraph-access-token":      "CWE-798",
 		"replicate-api-token":           "CWE-798",
+		"airtable-pat":                  "CWE-798",
+		"sonarqube-token":               "CWE-798",
+		"dropbox-token":                 "CWE-798",
+		"cloudinary-url":                "CWE-798",
 	}
 	builtin := defaultRules()
 	seenInBuiltin := make(map[string]bool, len(builtin))

@@ -510,3 +510,37 @@ func TestMoreProviderTokens3NearMissNoMatch(t *testing.T) {
 		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
 	}
 }
+
+func TestDetectsMoreProviderTokens4(t *testing.T) {
+	an := strings.Repeat("aB3cD4eF5g", 6)          // 60 alnum
+	hx := strings.Repeat("abcdef0123", 7)          // 70 hex
+	d135 := strings.Repeat("aB3cD4eF5g", 14)[:135] // 135 base64url-ish
+	rs := scanDir(t, map[string]string{
+		"airtable.env":   "AIRTABLE_TOKEN=" + "pat" + an[:14] + "." + hx[:64] + "\n",
+		"sonar.env":      "SONAR_TOKEN=" + "sqp_" + hx[:40] + "\n",
+		"dropbox.env":    "DROPBOX_TOKEN=" + "sl." + d135 + "\n",
+		"cloudinary.env": "CLOUDINARY_URL=" + "cloudinary://123456789012345:" + an[:27] + "@democloud" + "\n",
+	})
+	for _, id := range []string{"airtable-pat", "sonarqube-token", "dropbox-token", "cloudinary-url"} {
+		if hasRule(rs, id) == nil {
+			t.Errorf("expected a %q finding, got %+v", id, rs)
+		}
+	}
+	// The Dropbox rule reports capture group 1 (the token without the trailing boundary char); it must be
+	// redacted, never the raw body.
+	if f := hasRule(rs, "dropbox-token"); f != nil && strings.Contains(f.match, d135) {
+		t.Errorf("dropbox token not redacted: %q", f.match)
+	}
+}
+
+func TestMoreProviderTokens4NearMissNoMatch(t *testing.T) {
+	rs := scanDir(t, map[string]string{
+		"a.env": "K=" + "patSHORT.short\n",
+		"b.env": "K=" + "sqp_short\n",
+		"c.env": "K=" + "sl.short\n",
+		"d.env": "K=" + "cloudinary://short\n",
+	})
+	if len(rs) != 0 {
+		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
+	}
+}
