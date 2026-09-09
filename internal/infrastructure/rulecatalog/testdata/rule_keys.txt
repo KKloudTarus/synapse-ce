@@ -1,5 +1,6 @@
 adafruit-io-key
 age-secret-key
+airtable-pat
 alibaba-access-key-id
 anthropic-api-key
 arm-aks-private-cluster-disabled
@@ -244,6 +245,7 @@ cloudformation-sns-no-encryption
 cloudformation-sqs-no-dlq
 cloudformation-sqs-no-encryption
 cloudformation-wildcard-principal
+cloudinary-url
 compose-dangerous-capability
 compose-docker-socket-mount
 compose-host-ipc
@@ -871,6 +873,7 @@ dockerfile-yum-no-yes
 dockerhub-pat
 dom-xss-inner-html
 doppler-token
+dropbox-token
 duffel-api-token
 dynamic-code-eval
 dynatrace-token
@@ -2844,6 +2847,7 @@ shopify-token
 slack-app-token
 slack-token
 slack-webhook-url
+sonarqube-token
 sourcegraph-access-token
 sqlalchemy-raw-sql-dynamic
 square-token
