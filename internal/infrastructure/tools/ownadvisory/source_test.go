@@ -222,3 +222,22 @@ func TestScanNilStoreFailsLoud(t *testing.T) {
 		t.Error("a nil store must fail loud, not nil-deref panic / silent no-findings")
 	}
 }
+
+// D1.3: the owned matcher carries KEV/EPSS projected on the corpus advisory onto the finding, so an offline
+// scan orders by exploitation risk without the live network enricher.
+func TestScanCarriesRisk(t *testing.T) {
+	adv := goAdv()
+	adv.KEV = true
+	adv.EPSS = 0.87
+	store := memStore{byKey: map[string][]advisory.Advisory{"Go|github.com/foo/bar": {adv}}}
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "github.com/foo/bar", Version: "1.1.0", PURL: "pkg:golang/github.com/foo/bar@1.1.0"},
+	}}
+	raws, err := New(store).Scan(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(raws) != 1 || !raws[0].KEV || raws[0].EPSS != 0.87 {
+		t.Fatalf("finding must carry KEV/EPSS from the corpus advisory, got %+v", raws)
+	}
+}
