@@ -80,3 +80,45 @@ func TestIntroducedBy(t *testing.T) {
 		t.Errorf("IntroducedBy on a pure cycle = %v, want nil", got)
 	}
 }
+
+func TestIsDirect(t *testing.T) {
+	// Rootless native model: a, b, c are all real components; a is a graph root (direct).
+	deps := []Dependency{
+		{Ref: "a", DependsOn: []string{"b"}},
+		{Ref: "b", DependsOn: []string{"c"}},
+	}
+	comp := map[string]bool{"a": true, "b": true, "c": true}
+	if !IsDirect(deps, comp, "a") {
+		t.Error("a has no component dependent -> direct")
+	}
+	// b is a depth-1 transitive (the real component a depends on it); the old len<=2 rule mislabeled it direct.
+	if IsDirect(deps, comp, "b") {
+		t.Error("b is a depth-1 transitive -> NOT direct")
+	}
+	if IsDirect(deps, comp, "c") {
+		t.Error("c is a depth-2 transitive -> NOT direct")
+	}
+	if IsDirect(deps, comp, "ghost") {
+		t.Error("ghost is not in the graph -> not direct")
+	}
+	// A pure cycle node has a component dependent -> not direct (unlike len(PathToRoot)==1, which returns
+	// [target] for a cycle-only node).
+	cyc := []Dependency{{Ref: "x", DependsOn: []string{"y"}}, {Ref: "y", DependsOn: []string{"x"}}}
+	if IsDirect(cyc, map[string]bool{"x": true, "y": true}, "x") {
+		t.Error("a cycle node has a component dependent -> not direct")
+	}
+
+	// Project-root model (imported CycloneDX SBOM): "root" is NOT a component. lodash (its child) is DIRECT
+	// because only the non-component root depends on it; deep (lodash depends on it) is transitive.
+	rooted := []Dependency{
+		{Ref: "root", DependsOn: []string{"lodash"}},
+		{Ref: "lodash", DependsOn: []string{"deep"}},
+	}
+	rc := map[string]bool{"lodash": true, "deep": true} // root is not a component
+	if !IsDirect(rooted, rc, "lodash") {
+		t.Error("in a project-root graph, a child of the non-component root is direct")
+	}
+	if IsDirect(rooted, rc, "deep") {
+		t.Error("deep has a real-component dependent (lodash) -> transitive")
+	}
+}

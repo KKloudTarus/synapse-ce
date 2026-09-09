@@ -1202,6 +1202,10 @@ func buildComponentLicenseAudit(doc *sbom.SBOM, findings []ports.LicenseFinding)
 		policy[f.License] = f
 	}
 	out := make([]ComponentLicenseAudit, 0, len(doc.Components))
+	componentIDs := make(map[string]bool, len(doc.Components))
+	for _, c := range doc.Components {
+		componentIDs[sbom.ComponentID(c.Name, c.Version, c.PURL)] = true
+	}
 	for _, c := range doc.Components {
 		licenses := make([]string, 0, len(c.Licenses))
 		for _, current := range c.Licenses {
@@ -1213,7 +1217,7 @@ func buildComponentLicenseAudit(doc *sbom.SBOM, findings []ports.LicenseFinding)
 		expression := strings.Join(licenses, " OR ")
 		recommendedChoice, effectiveSeverity, policyRuleID, selectionReason := componentLicensePolicy(licenses, policy)
 		locations := componentLocations(c)
-		dependencyType, evidenceStatus := componentDependencyEvidence(doc.Dependencies, c, locations)
+		dependencyType, evidenceStatus := componentDependencyEvidence(doc.Dependencies, componentIDs, c, locations)
 		versionStatus := vulnerability.VersionResolved
 		if !sbom.IsResolvedVersion(c.Version) {
 			versionStatus = vulnerability.VersionUnresolved
@@ -1292,7 +1296,7 @@ func componentLocations(component sbom.Component) []string {
 	return uniqueStrings(append(append([]string(nil), component.Locations...), component.Location))
 }
 
-func componentDependencyEvidence(dependencies []sbom.Dependency, component sbom.Component, locations []string) (string, string) {
+func componentDependencyEvidence(dependencies []sbom.Dependency, componentIDs map[string]bool, component sbom.Component, locations []string) (string, string) {
 	if component.FirstParty {
 		return "INTERNAL_MODULE", "INTERNAL_SOURCE"
 	}
@@ -1302,11 +1306,11 @@ func componentDependencyEvidence(dependencies []sbom.Dependency, component sbom.
 			return "PACKAGED_JAR", "CONFIRMED_PACKAGED"
 		}
 	}
-	path := sbom.PathToRoot(dependencies, sbom.ComponentID(component.Name, component.Version, component.PURL))
-	if len(path) == 1 {
+	id := sbom.ComponentID(component.Name, component.Version, component.PURL)
+	if sbom.IsDirect(dependencies, componentIDs, id) {
 		return "DECLARED_DIRECT", "CONFIRMED_DEPENDENCY"
 	}
-	if len(path) > 1 {
+	if len(sbom.PathToRoot(dependencies, id)) > 0 {
 		return "RESOLVED_TRANSITIVE", "CONFIRMED_DEPENDENCY"
 	}
 	return "UNVERIFIED_INVENTORY", "UNVERIFIED_INVENTORY"
@@ -3651,8 +3655,11 @@ func attachDependencyPaths(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) 
 		return
 	}
 	idByNV := make(map[string]string, len(doc.Components))
+	componentIDs := make(map[string]bool, len(doc.Components))
 	for _, c := range doc.Components {
-		idByNV[c.Name+"@"+c.Version] = sbom.ComponentID(c.Name, c.Version, c.PURL)
+		id := sbom.ComponentID(c.Name, c.Version, c.PURL)
+		idByNV[c.Name+"@"+c.Version] = id
+		componentIDs[id] = true
 	}
 	for i := range vulns {
 		id := idByNV[vulns[i].Component+"@"+vulns[i].Version]
@@ -3661,7 +3668,7 @@ func attachDependencyPaths(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) 
 		}
 		path := sbom.PathToRoot(doc.Dependencies, id)
 		vulns[i].Path = path
-		vulns[i].Direct = len(path) > 0 && len(path) <= 2
+		vulns[i].Direct = sbom.IsDirect(doc.Dependencies, componentIDs, id) // no COMPONENT depends on it: the one canonical rule
 		// The complete set of direct deps that introduce this component (Path is only one of them), so
 		// remediation lists every parent to bump for a transitive vuln reachable through several.
 		vulns[i].Introducers = sbom.IntroducedBy(doc.Dependencies, id)
