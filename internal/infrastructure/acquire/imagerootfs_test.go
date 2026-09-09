@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -264,4 +266,67 @@ func TestExtractOCIRootFSGarbageBlob(t *testing.T) {
 	if _, err := extractToTemp(t, layout); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("a non-tar garbage blob must fail closed with ErrValidation, got %v", err)
 	}
+}
+
+// addZstdLayer writes a zstd-compressed layer tar as a blob (OCI zstd layers, e.g. Wolfi/Chainguard).
+func addZstdLayer(t *testing.T, layoutDir string, entries []layerEntry) string {
+	t.Helper()
+	var buf bytes.Buffer
+	zw, err := zstd.NewWriter(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tw := tar.NewWriter(zw)
+	for _, e := range entries {
+		hdr := &tar.Header{Name: e.name, Typeflag: e.typ, Mode: 0o644}
+		switch e.typ {
+		case tar.TypeDir:
+			hdr.Mode = 0o755
+		case tar.TypeReg:
+			hdr.Size = int64(len(e.body))
+		case tar.TypeSymlink:
+			hdr.Linkname = e.linkname
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if e.typ == tar.TypeReg {
+			if _, err := tw.Write([]byte(e.body)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return writeBlob(t, layoutDir, buf.Bytes())
+}
+
+func TestExtractOCIRootFSZstdLayer(t *testing.T) {
+	layout := t.TempDir()
+	// A zstd-compressed layer (magic 28 b5 2f fd) must decompress and extract, not be rejected.
+	l1 := addZstdLayer(t, layout, []layerEntry{dir("etc"), reg("etc/os-release", "ID=wolfi\n")})
+	finishLayout(t, layout, []string{l1})
+	dest, err := extractToTemp(t, layout)
+	if err != nil {
+		t.Fatalf("extract zstd layer: %v", err)
+	}
+	mustContain(t, filepath.Join(dest, "etc/os-release"), "ID=wolfi\n")
+}
+
+func TestExtractOCIRootFSZstdLayeredOverGzip(t *testing.T) {
+	layout := t.TempDir()
+	// Mixed-codec image: a gzip base layer with a zstd layer applied on top (both must extract in order).
+	base := addLayer(t, layout, true, []layerEntry{reg("app/version", "1.0\n")})
+	top := addZstdLayer(t, layout, []layerEntry{reg("app/patch", "applied\n")})
+	finishLayout(t, layout, []string{base, top})
+	dest, err := extractToTemp(t, layout)
+	if err != nil {
+		t.Fatalf("extract mixed-codec image: %v", err)
+	}
+	mustContain(t, filepath.Join(dest, "app/version"), "1.0\n")
+	mustContain(t, filepath.Join(dest, "app/patch"), "applied\n")
 }
