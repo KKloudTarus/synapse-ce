@@ -10,7 +10,7 @@
 # linux/amd64. Its Kubernetes workload must also permit unprivileged user namespaces
 # for bubblewrap; it does not require privileged mode, SYS_ADMIN, or added capabilities.
 
-FROM golang:1.26.6-alpine AS build
+FROM golang:1.27.0-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -35,7 +35,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-api ./cmd/synapse-api \
 
 # The tree-sitter helper is CGO-linked, so build it against Debian glibc for the
 # Debian production runtime rather than copying an Alpine/musl-linked executable.
-FROM golang:1.26.6-trixie AS ast-build
+FROM golang:1.27.0-trixie AS ast-build
 WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 COPY go.mod go.sum ./
