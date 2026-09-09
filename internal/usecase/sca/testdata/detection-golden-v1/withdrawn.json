@@ -1,0 +1,15 @@
+[
+  {
+    "name": "npm-withdrawn-advisory-no-match",
+    "group": "npm",
+    "notes": "A withdrawn advisory must produce no finding even though the version falls in its affected range.",
+    "components": [
+      {"name": "event-stream", "version": "3.3.5", "purl": "pkg:npm/event-stream@3.3.5"}
+    ],
+    "advisories": [
+      {"id": "GHSA-withdrawn-xxxx", "aliases": ["CVE-2018-16487"], "summary": "Retracted advisory", "cvss_score": 9.8, "ecosystem": "npm", "package": "event-stream",
+       "ranges": [{"type": "SEMVER", "introduced": "0", "fixed": "4.0.0"}], "fixed_version": "4.0.0", "withdrawn": true}
+    ],
+    "expected": []
+  }
+]

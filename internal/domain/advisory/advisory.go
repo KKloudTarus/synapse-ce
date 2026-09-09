@@ -12,6 +12,11 @@ type Advisory struct {
 	CVSSScore  float64           // computed base score
 	Affected   []AffectedPackage // the packages this advisory affects
 	CPEs       []CPEMatch        // NVD/CSAF product applicability retained for CPE correlation
+	// Withdrawn marks an advisory the upstream feed retracted (OSV "withdrawn", NVD REJECTED). A
+	// withdrawn advisory is a guaranteed false positive, so the matcher must never emit a finding for
+	// it. omitempty keeps it out of existing stored blobs. Set by the parser (ownadvisory.ParseOSV)
+	// and by the materializer projection from the canonical Status.
+	Withdrawn bool `json:"Withdrawn,omitempty"`
 }
 
 type CPEMatch struct {

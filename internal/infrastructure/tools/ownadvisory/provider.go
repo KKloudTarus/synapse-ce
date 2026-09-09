@@ -57,11 +57,15 @@ func (p *FeedProvider) Fetch(ctx context.Context, _ []byte, emit func(advisory.O
 		if strings.TrimSpace(value.ID) == "" {
 			return nil
 		}
+		status := advisory.StatusActive
+		if value.Withdrawn {
+			status = advisory.StatusWithdrawn // carry retraction into the observation so the canonical status reflects it
+		}
 		record := advisory.ObservationRecord{Observation: advisory.Observation{
 			SourceType: p.typeName,
 			SourceID:   p.sourceID.String(),
 			RecordID:   value.ID,
-			Status:     advisory.StatusActive,
+			Status:     status,
 			Advisory:   value,
 		}}
 		if err := emit(record); err != nil {

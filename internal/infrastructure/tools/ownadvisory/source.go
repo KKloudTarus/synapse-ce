@@ -66,6 +66,9 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 			return nil, err
 		}
 		for _, a := range advs {
+			if a.Withdrawn {
+				continue // a retracted advisory is a guaranteed false positive; never emit a finding
+			}
 			affected, fixed := a.Match(eco, name, c.Version)
 			if !affected {
 				continue
