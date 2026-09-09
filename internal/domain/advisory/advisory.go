@@ -55,6 +55,26 @@ type AffectedPackage struct {
 	Ranges       []Range  // SEMVER/ECOSYSTEM/GIT version ranges
 	Versions     []string // explicit affected versions (OSV affected[].versions)
 	FixedVersion string   // first fixed version, for the finding's remediation hint
+	// AffectedSymbols are the specific vulnerable functions/symbols this advisory marks for this package, as
+	// "importPath.Symbol" (the form the Go vuln DB publishes via ecosystem_specific.imports and the form the
+	// reachability engine matches against a call graph). Carried on the OWNED store so an OFFLINE scan drives
+	// symbol-level Tier-2 reachability, not only the live OSV path. omitempty keeps it out of stored blobs
+	// that carry none.
+	AffectedSymbols []string `json:"AffectedSymbols,omitempty"`
+}
+
+// AffectedSymbolsFor returns the deduplicated affected symbols this advisory marks for (ecosystem, name),
+// aggregated across every matching affected block. Empty when the advisory carries no symbol data for that
+// package (the common case outside the Go vuln DB). The caller keys with the same ecosystem-canonical name it
+// used to match the package, so the symbol lookup meets the same stored key.
+func (a Advisory) AffectedSymbolsFor(ecosystem, name string) []string {
+	var out []string
+	for _, aff := range a.Affected {
+		if aff.Ecosystem == ecosystem && aff.Package == name {
+			out = append(out, aff.AffectedSymbols...)
+		}
+	}
+	return uniqueSorted(out)
 }
 
 // FixedVersions returns the deduplicated, non-empty "fixed" versions an affected package declares — the

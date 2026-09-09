@@ -52,13 +52,13 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 	cpeStore, hasCPE := s.store.(ports.CPEAdvisoryStore)
 	var out []vulnerability.RawFinding
 	emitted := map[string]struct{}{}
-	emit := func(a advisory.Advisory, c sbom.Component, fixed string) {
+	emit := func(a advisory.Advisory, c sbom.Component, fixed string, symbols []string) {
 		key := a.ID + "\x00" + c.PURL // one finding per (advisory, component), so package + CPE hits don't double
 		if _, done := emitted[key]; done {
 			return
 		}
 		emitted[key] = struct{}{}
-		out = append(out, rawFinding(a, c, fixed))
+		out = append(out, rawFinding(a, c, fixed, symbols))
 	}
 	for _, c := range doc.Components {
 		// 1) Package-key matching against OSV/distro ecosystems.
@@ -81,7 +81,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 					continue
 				}
 				if affected, fixed := a.Match(eco, name, c.Version); affected {
-					emit(a, c, fixed)
+					emit(a, c, fixed, a.AffectedSymbolsFor(eco, name))
 				}
 			}
 		}
@@ -125,7 +125,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 					}
 				}
 				if vulnerable && !excluded {
-					emit(a, c, fixedHint)
+					emit(a, c, fixedHint, nil)
 				}
 			}
 		}
@@ -134,7 +134,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 }
 
 // rawFinding builds the normalized finding from a matched advisory + component.
-func rawFinding(a advisory.Advisory, c sbom.Component, fixed string) vulnerability.RawFinding {
+func rawFinding(a advisory.Advisory, c sbom.Component, fixed string, symbols []string) vulnerability.RawFinding {
 	identity := sbom.IdentityFromComponent(c)
 	fixedVersions, rejectedFixedVersions := ownedFixedVersions(a, identity, fixed)
 	rf := vulnerability.RawFinding{
@@ -153,8 +153,9 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string) vulnerabili
 		Description:           a.Summary,
 		// Exploitation-risk signals projected onto the corpus advisory (D1.3): carry them so an OFFLINE scan
 		// orders findings by KEV/EPSS without the live network enricher (which still runs online and raises).
-		KEV:  a.KEV,
-		EPSS: a.EPSS,
+		KEV:             a.KEV,
+		EPSS:            a.EPSS,
+		AffectedSymbols: symbols,
 	}
 	if len(fixedVersions) > 0 {
 		rf.FixedVersion = fixedVersions[0]
