@@ -109,7 +109,9 @@ func TestOsDistroEcosystem(t *testing.T) {
 		"pkg:rpm/rocky/bash@4.4-1?distro=rocky-9.3":              "Rocky Linux:9", // mapped: OSV keys "<Name>:<major>"
 		"pkg:rpm/almalinux/openssl@3?distro=almalinux-8.9":       "AlmaLinux:8",
 		"pkg:rpm/ol/glibc@2?distro=ol-9":                         "Oracle Linux:9",
-		"pkg:rpm/redhat/bash@4.4?distro=rhel-9":                  "", // rhel/centos/fedora: module-qualified/uncertain OSV keys → unmapped (flagged, not silent)
+		"pkg:rpm/redhat/bash@4.4?distro=rhel-9":                  "Red Hat:9",   // mapped: owned RedHat CSAF feed keys "Red Hat:<major>"
+		"pkg:rpm/redhat/bash@4.4?distro=redhat-8.9":              "Red Hat:8",   // the "redhat" distro id maps the same
+		"pkg:rpm/centos/bash@4.4?distro=centos-9":                "",            // CentOS Stream drifts ahead of RHEL → deliberately unmapped
 		"pkg:rpm/fedora/bash@5?distro=fedora-39":                 "",
 		"pkg:deb/debian/openssl@1.1":                             "", // no distro qualifier
 		"pkg:npm/lodash@4.0.0":                                   "", // not an OS package

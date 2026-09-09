@@ -14,6 +14,8 @@ func TestIdentityFromComponentUsesAdvisoryKeys(t *testing.T) {
 		{"debian", "pkg:deb/debian/openssl@1.0?distro=debian-12", "1.0", "Debian:12", "openssl"},
 		{"alpine", "pkg:apk/alpine/musl@1.2?distro=alpine-3.19", "1.2", "Alpine:v3.19", "musl"},
 		{"oracle linux", "pkg:rpm/ol/openssl@3.0-1?distro=ol-9", "3.0-1", "Oracle Linux:9", "openssl"},
+		{"rhel", "pkg:rpm/rhel/openssl@3.0.7-6.el9_2?arch=x86_64&distro=rhel-9.2&epoch=1", "3.0.7-6.el9_2", "Red Hat:9", "openssl"},
+		{"redhat id", "pkg:rpm/redhat/kernel@5.14.0-70.el9?distro=redhat-9", "5.14.0-70.el9", "Red Hat:9", "kernel"},
 	}
 	for _, test := range tests {
 		identity := IdentityFromComponent(Component{PURL: test.purl, Version: test.version})

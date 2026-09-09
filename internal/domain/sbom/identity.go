@@ -161,6 +161,12 @@ func distroEcosystem(typ, purl string) string {
 	case "rpm":
 		major := parts[0]
 		switch id {
+		case "rhel", "redhat":
+			// RHEL keys to "Red Hat:<major>", matching the owned RedHat CSAF feed (which derives the major
+			// from the platform CPE). CentOS is deliberately excluded: CentOS Stream runs ahead of RHEL, so a
+			// RHEL fixed NEVR would false-match a Stream package. Rocky/Alma/Oracle key to their own rebuild
+			// ecosystems. This mapping MUST stay in lockstep with osDistroEcosystem in the ownadvisory feed.
+			return "Red Hat:" + major
 		case "rocky":
 			return "Rocky Linux:" + major
 		case "almalinux", "alma":

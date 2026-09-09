@@ -91,7 +91,21 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 			// ("Debian:9", "Alpine:v3.18") from the distro qualifier (Epic B).
 			eco = osDistroEcosystem(c.PURL)
 		}
-		if eco != "" && c.Name != "" && sbom.IsResolvedVersion(c.Version) {
+		// For rpm components, fold the PURL "epoch=" qualifier into the version and percent-decode it so it
+		// matches the feed's canonical EVR (the RedHat CSAF feed does the same). Decoding is idempotent for an
+		// already-decoded version and guards against a producer that carries the encoded PURL version verbatim
+		// (e.g. a module build's "%2B"). An AppStream module build's stream is a parallel version line, so it is
+		// excluded from the linear-range distro matcher (the feed emits no modular range either); it can still
+		// match via CPE below. Other ecosystems compare the version as-is.
+		matchVersion := c.Version
+		distroPackageMatchable := true
+		if purlType(c.PURL) == "rpm" {
+			matchVersion = rpmCanonicalEVR(decodePURLSegment(c.Version), decodePURLSegment(purlQualifier(c.PURL, "epoch")))
+			if isModularEVR(matchVersion) {
+				distroPackageMatchable = false
+			}
+		}
+		if distroPackageMatchable && eco != "" && c.Name != "" && sbom.IsResolvedVersion(c.Version) {
 			// Normalize to the ecosystem-canonical key on the lookup side too, so a component name that
 			// isn't already normalized (e.g. a Syft-produced PyPI name) still meets the stored advisory key.
 			name := canonicalName(eco, c.Name)
@@ -103,7 +117,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 				if a.Withdrawn {
 					continue
 				}
-				if affected, fixed := a.Match(eco, name, c.Version); affected {
+				if affected, fixed := a.Match(eco, name, matchVersion); affected {
 					emit(a, c, fixed, a.AffectedSymbolsFor(eco, name))
 				}
 			}
@@ -280,6 +294,27 @@ func purlQualifier(purl, key string) string {
 	return ""
 }
 
+// rpmCanonicalEVR normalizes an rpm version to an explicit "epoch:version-release" form so BOTH the advisory
+// feed (which reads a RedHat PURL's version + "epoch=" qualifier) and the scan side (which reads a component
+// PURL the same way) compare on identical strings. rpm's own comparator defaults a missing epoch to 0, but
+// an ASYMMETRIC epoch (one side "1:x", the other "x") would compare across the epoch and either miss (safe)
+// or, worse, over-match every version (a false positive). Making epoch explicit on both sides removes that
+// hazard. A version that already embeds an epoch (contains ':') is trusted as-is.
+func rpmCanonicalEVR(version, epoch string) string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return ""
+	}
+	if strings.IndexByte(version, ':') >= 0 {
+		return version // epoch already embedded
+	}
+	epoch = strings.TrimSpace(epoch)
+	if epoch == "" {
+		epoch = "0"
+	}
+	return epoch + ":" + version
+}
+
 // osDistroEcosystem derives the release-versioned ecosystem key for an OS-package PURL from its "distro"
 // qualifier (Syft emits e.g. distro=debian-9 / ubuntu-22.04 / alpine-3.18.12). Debian keys by major
 // ("Debian:<major>", from OSV); Alpine by "Alpine:v<major>.<minor>" (OSV); Ubuntu by its full VERSION_ID
@@ -324,9 +359,12 @@ func osDistroEcosystem(purl string) string {
 			}
 		}
 	case "rpm":
-		// The rpm distros OSV keys by "<Name>:<major>". RHEL/CentOS/Fedora use module-qualified or uncertain
-		// keys (e.g. "Red Hat:enterprise_linux:9::baseos"), so they are intentionally NOT mapped here – the
-		// cataloger flags them DistroResolved=false so an unmatched OS-package set is surfaced, never silent.
+		// The rpm distros key by "<Name>:<major>", the major taken from the distro qualifier's VERSION_ID.
+		// The owned RedHat CSAF feed writes "Red Hat:<major>" (the RHEL major from the platform CPE), so a
+		// RHEL component (Syft distro id "rhel"/"redhat") keys the same way. CentOS is deliberately NOT mapped
+		// to Red Hat: CentOS Stream runs ahead of RHEL, so a RHEL fixed NEVR would false-match a Stream
+		// package at a different version. Rocky/AlmaLinux/Oracle key to their OWN rebuild ecosystems (their
+		// errata feeds), never Red Hat, for the same version-drift reason. Fedora stays unmapped (no feed).
 		major := ver
 		if i := strings.IndexByte(ver, '.'); i >= 0 {
 			major = ver[:i]
@@ -335,6 +373,8 @@ func osDistroEcosystem(purl string) string {
 			return ""
 		}
 		switch id {
+		case "rhel", "redhat":
+			return "Red Hat:" + major
 		case "rocky":
 			return "Rocky Linux:" + major
 		case "almalinux", "alma":
