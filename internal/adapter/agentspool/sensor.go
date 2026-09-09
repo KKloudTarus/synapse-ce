@@ -25,6 +25,18 @@ import (
 
 const telemetryContentType = "application/vnd.synapse.telemetry-envelope+json;version=1"
 
+// ProcessLifecycleObserver receives process identity only after the matching
+// canonical telemetry envelope is durable in the local WAL.
+type ProcessLifecycleObserver interface {
+	ObserveProcess(assetID, bootID shared.ID, event detection.ProcessEvent)
+}
+
+// ProcessLifecycleTimestampObserver preserves the local sensor timestamp for
+// consumers that need to bound post-condition observation windows.
+type ProcessLifecycleTimestampObserver interface {
+	ObserveProcessAt(assetID, bootID shared.ID, observedAt time.Time, event detection.ProcessEvent)
+}
+
 // SensorIdentity contains the stable attribution needed to turn the legacy
 // detection sensor's decoded event into A1's canonical envelope.
 type SensorIdentity struct {
@@ -56,6 +68,7 @@ type DurableSensor struct {
 	policy   privacy.Policy
 	now      func() time.Time
 	runID    string
+	observer ProcessLifecycleObserver
 
 	mu       sync.Mutex
 	started  bool
@@ -97,6 +110,22 @@ func (s *DurableSensor) SetRedactionPolicy(p privacy.Policy) error {
 		return fmt.Errorf("%w: cannot change the redaction policy after the sensor has started", shared.ErrValidation)
 	}
 	s.policy = p
+	return nil
+}
+
+// SetProcessLifecycleObserver wires the descriptor-pinning boundary before the
+// sensor starts. The observer is invoked only after the telemetry WAL accepts
+// the event, so response can never target identity that lacks durable telemetry.
+func (s *DurableSensor) SetProcessLifecycleObserver(observer ProcessLifecycleObserver) error {
+	if observer == nil {
+		return fmt.Errorf("%w: process lifecycle observer is required", shared.ErrValidation)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.started {
+		return fmt.Errorf("%w: cannot change the process lifecycle observer after the sensor has started", shared.ErrValidation)
+	}
+	s.observer = observer
 	return nil
 }
 
@@ -186,6 +215,7 @@ func (s *DurableSensor) persist(ctx context.Context, event detection.Event) bool
 	}
 	for {
 		if _, err := s.spool.Enqueue(ctx, item); err == nil {
+			s.observeProcess(event)
 			return true
 		} else if !errors.Is(err, ports.ErrTelemetrySpoolSaturated) {
 			s.recordFailure(event.Class)
@@ -208,6 +238,23 @@ func (s *DurableSensor) persist(ctx context.Context, event detection.Event) bool
 	}
 }
 
+func (s *DurableSensor) observeProcess(event detection.Event) {
+	if event.Class != detection.ClassProcess || event.Process == nil {
+		return
+	}
+	s.mu.Lock()
+	observer := s.observer
+	s.mu.Unlock()
+	if observer == nil {
+		return
+	}
+	if timestamped, ok := observer.(ProcessLifecycleTimestampObserver); ok {
+		timestamped.ObserveProcessAt(s.identity.AssetID, s.identity.BootID, event.At.UTC(), *event.Process)
+		return
+	}
+	observer.ObserveProcess(s.identity.AssetID, s.identity.BootID, *event.Process)
+}
+
 func (s *DurableSensor) decoded(event detection.Event, sequence uint64) (normalize.DecodedEvent, error) {
 	if err := event.Validate(); err != nil {
 		return normalize.DecodedEvent{}, err
@@ -225,8 +272,13 @@ func (s *DurableSensor) decoded(event detection.Event, sequence uint64) (normali
 	}
 	switch event.Class {
 	case detection.ClassProcess:
+		kind := event.Process.Kind
+		if kind == "" {
+			kind = "exec"
+		}
 		d.Process = &normalize.DecodedProcess{
-			Kind: "exec", PID: event.Process.PID, PPID: event.Process.PPID,
+			Kind: kind, PID: event.Process.PID, PPID: event.Process.PPID,
+			StartTimeNanos: event.Process.StartTimeNanos, ParentStartTimeNanos: event.Process.ParentStartTimeNanos,
 			Comm: event.Process.Comm, Path: event.Process.Path,
 			Args: append([]string(nil), event.Process.Args...), UID: event.Process.UID,
 		}

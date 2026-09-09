@@ -15,6 +15,7 @@ import (
 
 // defaultEndpointTimelineLimit caps an unbounded QueryTimeline; mirrors the memory tier.
 const defaultEndpointTimelineLimit = 10000
+const maximumEndpointTimelineLimit = defaultEndpointTimelineLimit + 1
 
 // EndpointTimelineRepository is the Postgres tier for the durable endpoint State Timeline (Phase B / B7).
 // Every method runs under the authenticated ctx tenant via WithContextTenant, so RLS binds the partition,
@@ -59,11 +60,11 @@ func (r *EndpointTimelineRepository) AppendTimeline(ctx context.Context, list []
 	return WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		for _, e := range list {
 			if _, err := tx.Exec(ctx, `INSERT INTO endpoint_timeline
-				(tenant_id, asset_id, event_id, occurred_at, entity_kind, entity_id, kind, summary)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-				ON CONFLICT (tenant_id, asset_id, event_id) DO NOTHING`,
+				(tenant_id, asset_id, event_id, occurred_at, source_agent_id, source_agent_session_id, entity_kind, entity_id, kind, summary)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+				ON CONFLICT DO NOTHING`,
 				tenant.String(), e.AssetID.String(), e.EventID.String(), e.OccurredAt,
-				string(e.EntityKind), e.EntityID.String(), string(e.Kind), e.Summary); err != nil {
+				e.SourceAgentID.String(), e.SourceAgentSessionID.String(), string(e.EntityKind), e.EntityID.String(), string(e.Kind), e.Summary); err != nil {
 				return fmt.Errorf("append endpoint timeline entry: %w", err)
 			}
 		}
@@ -81,11 +82,11 @@ func (r *EndpointTimelineRepository) QueryTimeline(ctx context.Context, q ports.
 		return nil, fmt.Errorf("%w: timeline query requires an asset id", shared.ErrValidation)
 	}
 	limit := q.Limit
-	if limit <= 0 || limit > defaultEndpointTimelineLimit {
+	if limit <= 0 || limit > maximumEndpointTimelineLimit {
 		limit = defaultEndpointTimelineLimit
 	}
 
-	sql := `SELECT event_id, occurred_at, entity_kind, entity_id, kind, summary FROM endpoint_timeline
+	sql := `SELECT event_id, occurred_at, source_agent_id, source_agent_session_id, entity_kind, entity_id, kind, summary FROM endpoint_timeline
 		WHERE tenant_id=$1 AND asset_id=$2`
 	args := []any{tenant.String(), q.AssetID.String()}
 	add := func(clause string, val any) {
@@ -100,6 +101,12 @@ func (r *EndpointTimelineRepository) QueryTimeline(ctx context.Context, q ports.
 	}
 	if !q.EntityID.IsZero() {
 		add("entity_id = ", q.EntityID.String())
+	}
+	if !q.SourceAgentID.IsZero() {
+		add("source_agent_id = ", q.SourceAgentID.String())
+	}
+	if !q.SourceAgentSessionID.IsZero() {
+		add("source_agent_session_id = ", q.SourceAgentSessionID.String())
 	}
 	if q.Kind != "" {
 		add("kind = ", string(q.Kind))
@@ -118,11 +125,13 @@ func (r *EndpointTimelineRepository) QueryTimeline(ctx context.Context, q ports.
 		defer rows.Close()
 		for rows.Next() {
 			e := endpoint.TimelineEntry{TenantID: tenant, AssetID: q.AssetID}
-			var eventID, entityKind, entityID, kind, summary string
-			if err := rows.Scan(&eventID, &e.OccurredAt, &entityKind, &entityID, &kind, &summary); err != nil {
+			var eventID, sourceAgentID, sourceAgentSessionID, entityKind, entityID, kind, summary string
+			if err := rows.Scan(&eventID, &e.OccurredAt, &sourceAgentID, &sourceAgentSessionID, &entityKind, &entityID, &kind, &summary); err != nil {
 				return fmt.Errorf("scan endpoint timeline row: %w", err)
 			}
 			e.EventID = shared.ID(eventID)
+			e.SourceAgentID = shared.ID(sourceAgentID)
+			e.SourceAgentSessionID = shared.ID(sourceAgentSessionID)
 			e.EntityKind = endpoint.EntityKind(entityKind)
 			e.EntityID = shared.ID(entityID)
 			e.Kind = endpoint.TimelineEntryKind(kind)
@@ -135,4 +144,53 @@ func (r *EndpointTimelineRepository) QueryTimeline(ctx context.Context, q ports.
 		return nil, err
 	}
 	return out, nil
+}
+
+// LoadTimelineEntries returns exact source events without widening the correlation read to a time range.
+func (r *EndpointTimelineRepository) LoadTimelineEntries(ctx context.Context, assetID shared.ID, eventIDs []shared.ID) ([]endpoint.TimelineEntry, error) {
+	tenant, err := requireEndpointTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if assetID.IsZero() {
+		return nil, fmt.Errorf("%w: timeline entry load requires an asset id", shared.ErrValidation)
+	}
+	ids := make([]string, 0, len(eventIDs))
+	seen := make(map[shared.ID]struct{}, len(eventIDs))
+	for _, eventID := range eventIDs {
+		if eventID.IsZero() {
+			return nil, fmt.Errorf("%w: timeline entry load contains an empty event id", shared.ErrValidation)
+		}
+		if _, duplicate := seen[eventID]; duplicate {
+			continue
+		}
+		seen[eventID] = struct{}{}
+		ids = append(ids, eventID.String())
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var out []endpoint.TimelineEntry
+	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT event_id,occurred_at,source_agent_id,source_agent_session_id,entity_kind,entity_id,kind,summary FROM endpoint_timeline WHERE tenant_id=$1 AND asset_id=$2 AND event_id=ANY($3::text[]) ORDER BY occurred_at,event_id COLLATE "C"`, tenant.String(), assetID.String(), ids)
+		if err != nil {
+			return fmt.Errorf("load exact endpoint timeline entries: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			entry := endpoint.TimelineEntry{TenantID: tenant, AssetID: assetID}
+			var eventID, sourceAgentID, sourceAgentSessionID, entityKind, entityID, kind string
+			if err := rows.Scan(&eventID, &entry.OccurredAt, &sourceAgentID, &sourceAgentSessionID, &entityKind, &entityID, &kind, &entry.Summary); err != nil {
+				return fmt.Errorf("scan exact endpoint timeline entry: %w", err)
+			}
+			entry.EventID = shared.ID(eventID)
+			entry.SourceAgentID = shared.ID(sourceAgentID)
+			entry.SourceAgentSessionID = shared.ID(sourceAgentSessionID)
+			entry.EntityKind, entry.EntityID = endpoint.EntityKind(entityKind), shared.ID(entityID)
+			entry.Kind = endpoint.TimelineEntryKind(kind)
+			out = append(out, entry)
+		}
+		return rows.Err()
+	})
+	return out, err
 }

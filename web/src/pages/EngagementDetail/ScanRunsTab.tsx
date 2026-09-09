@@ -102,6 +102,12 @@ function RunRow({
             {run.manifest.grypeDBVersion}
           </Pill>
         )}
+        <Pill className={run.provenance === 'native' ? 'text-success-primary' : 'text-tertiary'}>
+          {run.provenance === 'native' ? 'Native provenance' : 'Legacy provenance'}
+        </Pill>
+        {run.sealedAt && <Pill className="text-success-primary">Sealed</Pill>}
+        {run.laneCount > 0 && <Pill>{run.laneCount} lane{run.laneCount === 1 ? '' : 's'}</Pill>}
+        {run.completeCoverage && <Pill className="text-success-primary">Complete coverage</Pill>}
         <Pill>{pinned} pinned</Pill>
         {unpinned > 0 && <Pill className="text-warning-primary">{unpinned} live</Pill>}
       </span>

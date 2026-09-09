@@ -98,6 +98,21 @@ grep -q 'kind: NetworkPolicy' "$out"
 # an internal TLS-terminating NLB with a dedicated frontend security group. Its dedicated
 # subnet CIDRs are the only NetworkPolicy sources, and the browser Ingress never publishes it.
 grep -q 'name: SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR' "$out"
+# The halt writer is an API-only narrow database identity; workers receive only the normal runtime DSN.
+grep -q 'name: SYNAPSE_DB_HALT_WRITER_DSN' "$out"
+if awk '/app\.kubernetes\.io\/component: worker/{worker=1} /^---$/{worker=0} worker && /SYNAPSE_DB_HALT_WRITER_DSN/{found=1} END{exit found ? 0 : 1}' "$in_cluster"; then
+  printf '%s\n' 'worker must not receive SYNAPSE_DB_HALT_WRITER_DSN' >&2
+  exit 1
+fi
+# Fleet ingestion, bounded correlation, and signed live response use only configuration values
+# and existing-Secret references. The command signing key is an API-only read-only volume.
+for name in SYNAPSE_FLEET_ENABLED SYNAPSE_FLEET_ASSETS_ENABLED SYNAPSE_FLEET_HOST_INGEST_ENABLED SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED SYNAPSE_FLEET_DETECTION_INGEST_ENABLED SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED SYNAPSE_FLEET_STALE_AFTER SYNAPSE_FLEET_CORRELATION_ENABLED SYNAPSE_FLEET_CORRELATION_WINDOW SYNAPSE_FLEET_CORRELATION_ALLOWED_LATENESS SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT SYNAPSE_RESPONSE_EXECUTION_ENABLED SYNAPSE_RESPONSE_COMMAND_SIGNING_KEY_FILE SYNAPSE_RESPONSE_COMMAND_TTL SYNAPSE_RESPONSE_EXECUTION_POLL_INTERVAL; do
+  grep -q "name: $name" "$out"
+done
+grep -q 'mountPath: /etc/synapse/response-command-signing' "$out"
+grep -q 'readOnly: true' "$out"
+grep -q 'secretName: synapse-response-command-signing' "$out"
+! awk '/^kind: (Secret|SealedSecret|ExternalSecret)$/{bad=1} END{exit bad?0:1}' "$out"
 grep -q 'name: SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN' "$out"
 grep -q 'name: SYNAPSE_EGRESS_GRANT_SIGNING_SEED' "$out"
 grep -q 'name: grant-authority' "$out"

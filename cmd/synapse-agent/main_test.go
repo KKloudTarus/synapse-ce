@@ -14,23 +14,29 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/fssecurity"
 )
 
 type fakeAPI struct {
-	enrolCalled bool
-	enrolResp   fleetclient.EnrolResponse
-	orders      []fleetclient.Order
-	results     []result
-	progressed  []string
-	heartbeats  int
-	sent        int
-	sendErr     error
-	hbResp      fleetclient.HeartbeatResponse
-	claims      int
-	policyResp  fleetclient.PrivacyPolicyResponse
-	policyErr   error
+	enrolCalled       bool
+	activated         int
+	enrolResp         fleetclient.EnrolResponse
+	orders            []fleetclient.Order
+	results           []result
+	progressed        []string
+	progressErr       error
+	heartbeats        int
+	heartbeatRequests []fleetclient.EnrolRequest
+	sent              int
+	sendErr           error
+	hbResp            fleetclient.HeartbeatResponse
+	claims            int
+	policyResp        fleetclient.PrivacyPolicyResponse
+	policyErr         error
+	responseResults   []fleetclient.ResponseResultRequest
+	responseResultErr error
 }
 
 type result struct{ orderID, status, reason string }
@@ -39,8 +45,13 @@ func (f *fakeAPI) Enrol(_ context.Context, _ string, _ fleetclient.EnrolRequest)
 	f.enrolCalled = true
 	return f.enrolResp, nil
 }
-func (f *fakeAPI) Heartbeat(_ context.Context, _ string, _ fleetclient.EnrolRequest) (fleetclient.HeartbeatResponse, error) {
+func (f *fakeAPI) ActivateCredential(fleetclient.Credential, []byte) error {
+	f.activated++
+	return nil
+}
+func (f *fakeAPI) Heartbeat(_ context.Context, _ string, request fleetclient.EnrolRequest) (fleetclient.HeartbeatResponse, error) {
 	f.heartbeats++
+	f.heartbeatRequests = append(f.heartbeatRequests, request)
 	return f.hbResp, nil
 }
 func (f *fakeAPI) ActivePrivacyPolicy(context.Context, string) (fleetclient.PrivacyPolicyResponse, error) {
@@ -54,14 +65,69 @@ func (f *fakeAPI) ActivePrivacyPolicy(context.Context, string) (fleetclient.Priv
 }
 func (f *fakeAPI) ClaimWork(_ context.Context, _ string, _ int) ([]fleetclient.Order, error) {
 	f.claims++
+	for i := range f.orders {
+		if f.orders[i].LeaseID == "" {
+			f.orders[i].LeaseID = "lease-1"
+		}
+		if f.orders[i].LeaseUntil.IsZero() {
+			f.orders[i].LeaseUntil = time.Now().Add(time.Minute)
+		}
+	}
 	return f.orders, nil
 }
-func (f *fakeAPI) Progress(_ context.Context, _, orderID string) error {
+func (f *fakeAPI) Progress(_ context.Context, _, orderID, _ string) error {
 	f.progressed = append(f.progressed, orderID)
+	return f.progressErr
+}
+func (f *fakeAPI) SubmitResult(_ context.Context, _, orderID, _ string, status, reason string) error {
+	f.results = append(f.results, result{orderID, status, reason})
 	return nil
 }
-func (f *fakeAPI) SubmitResult(_ context.Context, _, orderID, status, reason string) error {
-	f.results = append(f.results, result{orderID, status, reason})
+
+type fakeResponseExecutor struct {
+	calls        int
+	err          error
+	pending      []fleetagent.ResponseExecutionJournalEntry
+	acked        int
+	halts        []int64
+	haltCommands int
+}
+
+func (e *fakeResponseExecutor) Execute(_ context.Context, command fleetagent.ResponseCommand, leaseID string, _ time.Time) (fleetagent.ResponseExecutionResult, error) {
+	e.calls++
+	return fleetagent.ResponseExecutionResult{
+		AttemptKey: command.AttemptKey, CommandDigest: fleetagent.ResponseCommandDigest(command), LeaseID: leaseID,
+		State: fleetagent.ResponseExecutionApplied, ObservedRadius: "state_changing", AffectedCount: 1,
+		CompletedAt: time.Now().UTC(),
+	}, e.err
+}
+func (e *fakeResponseExecutor) ExecuteHaltCommand(context.Context, fleetagent.ResponseHaltCommand, string, time.Time) error {
+	e.haltCommands++
+	return nil
+}
+func (e *fakeResponseExecutor) Halt(_ context.Context, generation int64) error {
+	e.halts = append(e.halts, generation)
+	return nil
+}
+func (e *fakeResponseExecutor) PendingResults(context.Context) ([]fleetagent.ResponseExecutionJournalEntry, error) {
+	return append([]fleetagent.ResponseExecutionJournalEntry(nil), e.pending...), nil
+}
+func (e *fakeResponseExecutor) AcknowledgeResult(_ context.Context, attemptKey, digest string) error {
+	for i, entry := range e.pending {
+		if entry.Command.AttemptKey == attemptKey && entry.CommandDigest == digest {
+			e.pending = append(e.pending[:i], e.pending[i+1:]...)
+			e.acked++
+			return nil
+		}
+	}
+	return nil
+}
+func (f *fakeAPI) SubmitResponseResult(_ context.Context, _ string, orderID string, request fleetclient.ResponseResultRequest) error {
+	if f.responseResultErr != nil {
+		return f.responseResultErr
+	}
+	f.responseResults = append(f.responseResults, request)
+	f.results = append(f.results, result{orderID, request.Status, request.Reason})
 	return nil
 }
 func (f *fakeAPI) SendHostInventory(_ context.Context, _ string, _ any) error {
@@ -213,6 +279,9 @@ func TestFirstRunEnrolsAndPersists(t *testing.T) {
 	if !api.enrolCalled {
 		t.Fatalf("first run must enrol")
 	}
+	if api.activated != 1 {
+		t.Fatalf("first run must activate the enrolled transport identity, got %d activations", api.activated)
+	}
 	// Credential + key persisted, key is 0600 and the token is not in the key file.
 	if _, err := os.Stat(filepath.Join(r.cfg.stateDir, "agent.key")); err != nil {
 		t.Fatalf("key must be persisted: %v", err)
@@ -256,6 +325,9 @@ func TestSecondRunReusesCredentialNoEnrol(t *testing.T) {
 	if api.enrolCalled {
 		t.Fatalf("a stored credential must not re-enrol")
 	}
+	if api.activated != 1 {
+		t.Fatalf("a stored credential must reactivate the transport identity, got %d activations", api.activated)
+	}
 	if api.heartbeats != 1 {
 		t.Fatalf("expected one heartbeat, got %d", api.heartbeats)
 	}
@@ -272,6 +344,154 @@ func TestUnsupportedCapabilityFails(t *testing.T) {
 	}
 	if len(api.progressed) != 0 {
 		t.Fatalf("an unsupported order must not be progressed")
+	}
+}
+
+func TestInventoryDoesNotRunAfterLeaseProgressFailure(t *testing.T) {
+	api := &fakeAPI{progressErr: errors.New("stale lease")}
+	collections := 0
+	r := newRunner(t, api, nil, func(context.Context, string) (hostinventory.HostInventory, error) {
+		collections++
+		return hostinventory.HostInventory{}, nil
+	})
+	r.handle(context.Background(), fleetclient.Credential{Token: "token"}, fleetclient.Order{
+		ID: "order-1", Capability: hostInventoryCapability, LeaseID: "lease-1", LeaseUntil: time.Now().Add(time.Minute),
+	})
+	if collections != 0 || len(api.results) != 0 {
+		t.Fatalf("failed progress crossed work boundary: collections=%d results=%+v", collections, api.results)
+	}
+}
+
+func TestHandleResponseUsesExistingClaimLoopAndRequiresProgress(t *testing.T) {
+	api := &fakeAPI{}
+	executor := &fakeResponseExecutor{}
+	r := newRunner(t, api, nil, nil)
+	r.response = executor
+	command := &fleetagent.ResponseCommand{CommandID: "response-order-1", AttemptKey: "attempt-1", AgentID: "agent-1", AssetID: "asset-1"}
+	order := fleetclient.Order{ID: "response-order-1", Capability: responseProcessCapability, AssetID: "asset-1", IdempotencyKey: "attempt-1", LeaseID: "lease-1", LeaseUntil: time.Now().Add(time.Minute), ResponseCommand: command}
+	cred := fleetclient.Credential{AgentID: "agent-1", AssetID: "asset-1", Token: "token"}
+
+	r.handle(context.Background(), cred, order)
+	if executor.calls != 1 || len(api.progressed) != 1 || len(api.results) != 1 || api.results[0].status != "succeeded" {
+		t.Fatalf("response dispatch calls=%d progressed=%v results=%+v", executor.calls, api.progressed, api.results)
+	}
+
+	api.progressErr = errors.New("control plane unavailable")
+	command2 := *command
+	command2.CommandID = "response-order-2"
+	r.handle(context.Background(), cred, fleetclient.Order{ID: "response-order-2", Capability: responseProcessCapability, AssetID: "asset-1", IdempotencyKey: "attempt-1", LeaseID: "lease-2", LeaseUntil: time.Now().Add(time.Minute), ResponseCommand: &command2})
+	if executor.calls != 1 {
+		t.Fatalf("response side effect crossed boundary after progress failure; calls=%d", executor.calls)
+	}
+}
+
+func TestResponseCapabilityWaitsForCanonicalAssetBinding(t *testing.T) {
+	r := newRunner(t, &fakeAPI{}, nil, nil)
+	executor := &fakeResponseExecutor{}
+	calls := 0
+	r.responseFactory = func(agentID, assetID shared.ID) (responseCommandExecutor, error) {
+		calls++
+		if agentID != "agent-1" || assetID != "asset-1" {
+			t.Fatalf("response identity=%s/%s", agentID, assetID)
+		}
+		return executor, nil
+	}
+	if err := r.configureResponse(fleetclient.Credential{AgentID: "agent-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 || len(r.capabilities()) != 1 {
+		t.Fatal("response capability advertised before canonical asset binding")
+	}
+	if err := r.configureResponse(fleetclient.Credential{AgentID: "agent-1", AssetID: "asset-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || r.response != executor || len(r.capabilities()) != 3 || r.capabilities()[1] != responseProcessCapability || r.capabilities()[2] != responseHaltCapability {
+		t.Fatalf("response runtime was not bound once: calls=%d capabilities=%v", calls, r.capabilities())
+	}
+}
+
+func TestHeartbeatRefreshesReadyCapabilities(t *testing.T) {
+	api := &fakeAPI{}
+	r := newRunner(t, api, nil, nil)
+	r.response = &fakeResponseExecutor{}
+	if err := r.cycle(context.Background(), fleetclient.Credential{Token: "token"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.heartbeatRequests) != 1 || len(api.heartbeatRequests[0].Capabilities) != 3 ||
+		api.heartbeatRequests[0].Capabilities[1] != responseProcessCapability || api.heartbeatRequests[0].Capabilities[2] != responseHaltCapability {
+		t.Fatalf("heartbeat capabilities=%+v", api.heartbeatRequests)
+	}
+}
+
+func TestHeartbeatAppliesResponseHaltBeforeClaim(t *testing.T) {
+	api := &fakeAPI{hbResp: fleetclient.HeartbeatResponse{ResponseHalted: true, ResponseHaltGeneration: 4}}
+	executor := &fakeResponseExecutor{}
+	r := newRunner(t, api, nil, nil)
+	r.response = executor
+	if err := r.cycle(context.Background(), fleetclient.Credential{Token: "token"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.halts) != 1 || executor.halts[0] != 4 || api.claims != 1 {
+		t.Fatalf("halt generations=%v claims=%d", executor.halts, api.claims)
+	}
+}
+
+func TestHandleResponseHaltPersistsFenceAndReportsSuccess(t *testing.T) {
+	api := &fakeAPI{}
+	executor := &fakeResponseExecutor{}
+	r := newRunner(t, api, nil, nil)
+	r.response = executor
+	command := &fleetagent.ResponseHaltCommand{
+		CommandID: "halt-order-1", AgentID: "agent-1", AssetID: "asset-1", AttemptKey: "halt-attempt-1", Generation: 2,
+	}
+	r.handle(context.Background(), fleetclient.Credential{AgentID: "agent-1", AssetID: "asset-1", Token: "token"}, fleetclient.Order{
+		ID: "halt-order-1", Capability: responseHaltCapability, AssetID: "asset-1", IdempotencyKey: "halt-attempt-1",
+		LeaseID: "lease-1", LeaseUntil: time.Now().Add(time.Minute), ResponseHalt: command,
+	})
+	if executor.haltCommands != 1 || len(api.progressed) != 1 || len(api.results) != 1 || api.results[0].status != "succeeded" {
+		t.Fatalf("halt commands=%d progressed=%v results=%+v", executor.haltCommands, api.progressed, api.results)
+	}
+}
+
+func TestHandleResponseRejectsCrossAssetBeforeProgress(t *testing.T) {
+	api := &fakeAPI{}
+	executor := &fakeResponseExecutor{}
+	r := newRunner(t, api, nil, nil)
+	r.response = executor
+	r.handle(context.Background(), fleetclient.Credential{AgentID: "agent-1", AssetID: "asset-1", Token: "token"}, fleetclient.Order{
+		ID: "response-order-1", Capability: responseProcessCapability, AssetID: "asset-2", IdempotencyKey: "attempt-1", LeaseID: "lease-1", LeaseUntil: time.Now().Add(time.Minute),
+		ResponseCommand: &fleetagent.ResponseCommand{CommandID: "response-order-1", AttemptKey: "attempt-1", AgentID: "agent-1", AssetID: "asset-2"},
+	})
+	if executor.calls != 0 || len(api.progressed) != 0 || len(api.results) != 1 || api.results[0].status != "failed" {
+		t.Fatalf("cross-asset response reached execution: calls=%d progressed=%v results=%+v", executor.calls, api.progressed, api.results)
+	}
+}
+
+func TestFlushResponseResultsRetriesDurableOutboxBeforeClaim(t *testing.T) {
+	digest := strings.Repeat("d", 64)
+	terminal := fleetagent.ResponseExecutionResult{
+		AttemptKey: "attempt-1", CommandDigest: digest, LeaseID: "lease-1", State: fleetagent.ResponseExecutionApplied,
+		ObservedRadius: "state_changing", AffectedCount: 1, CompletedAt: time.Now().UTC(),
+	}
+	executor := &fakeResponseExecutor{pending: []fleetagent.ResponseExecutionJournalEntry{{
+		Command:       fleetagent.ResponseCommand{CommandID: "order-1", AttemptKey: terminal.AttemptKey},
+		CommandDigest: digest, LeaseID: terminal.LeaseID, LeaseUntil: time.Now().Add(time.Minute), State: terminal.State, Result: &terminal,
+	}}}
+	api := &fakeAPI{responseResultErr: errors.New("control plane unavailable")}
+	r := newRunner(t, api, nil, nil)
+	r.response = executor
+	cred := fleetclient.Credential{Token: "token"}
+	if err := r.flushResponseResults(context.Background(), cred); err == nil || executor.acked != 0 || len(executor.pending) != 1 {
+		t.Fatalf("failed delivery err=%v acked=%d pending=%d", err, executor.acked, len(executor.pending))
+	}
+	api.responseResultErr = nil
+	if err := r.flushResponseResults(context.Background(), cred); err != nil || executor.acked != 1 || len(executor.pending) != 0 {
+		t.Fatalf("retry err=%v acked=%d pending=%d", err, executor.acked, len(executor.pending))
+	}
+	if len(api.responseResults) != 1 || api.responseResults[0].AttemptKey != terminal.AttemptKey || api.responseResults[0].CommandDigest != digest ||
+		api.responseResults[0].ObservedRadius != terminal.ObservedRadius || api.responseResults[0].AffectedCount != terminal.AffectedCount ||
+		!api.responseResults[0].CompletedAt.Equal(terminal.CompletedAt) {
+		t.Fatalf("submitted response results=%+v", api.responseResults)
 	}
 }
 

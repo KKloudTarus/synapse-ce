@@ -8,6 +8,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/correlation"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/correlationuc"
 )
 
@@ -24,23 +25,27 @@ func TestSOAK_CorrelationSustainedStability(t *testing.T) {
 	}
 	base := time.Unix(1_700_000_000, 0).UTC()
 	dets := makeDetections(base)
-	cfg := correlation.Config{Window: time.Hour, MaxPerIncident: 100000}
+	cfg := correlation.Config{Window: time.Hour, MaxPerIncident: 100000, PageSize: 1000}
 
 	var m0 runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&m0)
 
+	svc, err := correlationuc.NewService(fixedDetections{recs: dets}, memory.NewDetectionProvenanceStore(), memory.NewEndpointTimelineStore(), memory.NewCorrelationStateStore(), &countingIncidents{seen: map[shared.ID]bool{}}, nil, cfg, noopAudit{}, func() time.Time { return base })
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := shared.WithTenant(context.Background(), "tenant-soak")
+	if res := driveCorrelationSnapshot(t, svc, ctx); len(res.Created) != sloSessions {
+		t.Fatalf("initial correctness drifted — expected %d incidents, got %d", sloSessions, len(res.Created))
+	}
 	for i := 0; i < soakIterations; i++ {
-		svc, err := correlationuc.NewService(fixedDetections{recs: dets}, &countingIncidents{seen: map[shared.ID]bool{}}, nil, cfg, noopAudit{}, func() time.Time { return base })
-		if err != nil {
-			t.Fatal(err)
-		}
-		res, err := svc.CorrelateEngagement(context.Background(), "soak", "eng-1")
+		res, err := svc.CorrelateEngagement(ctx, "soak", "eng-1")
 		if err != nil {
 			t.Fatalf("iteration %d: %v", i, err)
 		}
-		if len(res.Created) != sloSessions {
-			t.Fatalf("iteration %d: correctness drifted — expected %d incidents, got %d", i, sloSessions, len(res.Created))
+		if len(res.Created) != 0 || res.HasMore || res.Phase != "" {
+			t.Fatalf("iteration %d: completed snapshot was reprocessed: %+v", i, res)
 		}
 	}
 

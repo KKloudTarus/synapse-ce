@@ -54,7 +54,10 @@ type TelemetryBatchManifest struct {
 	AgentID         shared.ID
 	HostID          shared.ID
 	AssetID         shared.ID
-	StreamID        shared.ID
+	// ResponseObservationID is optional and, when present, binds target telemetry to one live,
+	// addressed response-observation work order. It is never used to relabel general host telemetry.
+	ResponseObservationID shared.ID `json:"response_observation_id,omitempty"`
+	StreamID              shared.ID
 	// Position carries Priority, Epoch, Sequence, Session (== the AgentSessionID) and Boot — the
 	// incarnation-aware stream coordinate ClassifyDelivery/AckLedger reason over.
 	Position         StreamPosition
@@ -199,6 +202,7 @@ func TelemetryManifestMessage(m TelemetryBatchManifest) []byte {
 	write(m.AgentID.String())
 	write(m.HostID.String())
 	write(m.AssetID.String())
+	write(m.ResponseObservationID.String())
 	write(m.StreamID.String())
 	writeU(uint64(m.Position.Priority))
 	writeU(m.Position.Epoch)

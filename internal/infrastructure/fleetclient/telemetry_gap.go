@@ -51,9 +51,7 @@ func (c *Client) ShipTelemetryGap(ctx context.Context, token string, report flee
 	req.Header.Set(protoHeader, protoVersion)
 	req.Header.Set("Content-Type", telemetryGapMediaType)
 	req.Header.Set("Content-Encoding", "gzip")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	c.setAuthorization(req, token, false)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return out, fmt.Errorf("fleetclient: telemetry gap: %w", err)

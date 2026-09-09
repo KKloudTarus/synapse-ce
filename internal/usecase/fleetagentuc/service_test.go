@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
@@ -239,11 +240,23 @@ func (f *fakeCanceller) Issue(context.Context, *workorder.WorkOrder) (*workorder
 func (f *fakeCanceller) GetByID(context.Context, shared.ID, shared.ID) (*workorder.WorkOrder, error) {
 	return nil, shared.ErrNotFound
 }
-func (f *fakeCanceller) Claim(context.Context, shared.ID, shared.ID, int, time.Time) ([]*workorder.WorkOrder, error) {
+func (f *fakeCanceller) GetByIdempotencyKey(context.Context, shared.ID, string) (*workorder.WorkOrder, error) {
+	return nil, shared.ErrNotFound
+}
+func (f *fakeCanceller) Claim(context.Context, shared.ID, shared.ID, int, time.Time, string, time.Time) ([]*workorder.WorkOrder, error) {
 	return nil, nil
 }
 func (f *fakeCanceller) Transition(context.Context, shared.ID, shared.ID, workorder.State, string, workorder.State, time.Time) error {
 	return nil
+}
+func (f *fakeCanceller) TransitionLeased(context.Context, shared.ID, shared.ID, string, workorder.State, string, workorder.State, time.Time) error {
+	return nil
+}
+func (f *fakeCanceller) CompleteResponse(context.Context, shared.ID, shared.ID, fleetagent.ResponseExecutionResult, string, time.Time) (bool, error) {
+	return false, nil
+}
+func (f *fakeCanceller) CancelResponsesBelowGeneration(context.Context, shared.ID, int64, string, time.Time) (int, error) {
+	return 0, nil
 }
 func (f *fakeCanceller) ListByTenant(context.Context, shared.ID) ([]*workorder.WorkOrder, error) {
 	return nil, nil

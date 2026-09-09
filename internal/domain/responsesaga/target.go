@@ -23,6 +23,7 @@ const (
 type TargetFingerprint struct {
 	Kind FingerprintKind
 	// process
+	ProcessAssetID  shared.ID
 	ProcessEntityID shared.ID
 	// file
 	FilePath   string
@@ -38,8 +39,8 @@ type TargetFingerprint struct {
 func (f TargetFingerprint) Validate() error {
 	switch f.Kind {
 	case FingerprintProcess:
-		if f.ProcessEntityID.IsZero() {
-			return fmt.Errorf("%w: process target requires a stable ProcessEntityID (never a bare PID)", shared.ErrValidation)
+		if f.ProcessAssetID.IsZero() || f.ProcessEntityID.IsZero() {
+			return fmt.Errorf("%w: process target requires its authoritative asset and stable ProcessEntityID (never a bare PID)", shared.ErrValidation)
 		}
 	case FingerprintFile:
 		if f.FilePath == "" {

@@ -428,6 +428,12 @@ export interface ScanRun {
   createdAt: string
   manifest: ScanManifest
   findingKeys: string[]
+  provenance: 'native' | 'legacy' | string
+  terminalStatus: string
+  sealedAt: string | null
+  manifestHash: string
+  laneCount: number
+  completeCoverage: boolean
 }
 
 // The difference between two scan runs: which finding keys appeared or disappeared,

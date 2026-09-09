@@ -14,9 +14,7 @@ type ProcessState string
 const (
 	// ProcessRunning is the state of a process observed to start (fork/exec) and not yet observed to exit.
 	ProcessRunning ProcessState = "running"
-	// ProcessExited is set once an exit is observed. A1's ProcessObservation carries only exec/fork today,
-	// so this state is reserved for the sensor-side exit-event tail; the projection already models it so
-	// that leg is a data change, not a schema change.
+	// ProcessExited is terminal once a stable-identity exit observation is folded.
 	ProcessExited ProcessState = "exited"
 	// ProcessUnknown is a process referenced only as a parent (by ParentEntityID) that was never itself
 	// observed — its lineage link is real but its own start was missed (a coverage gap, not a guess).
@@ -74,6 +72,9 @@ func (p ProcessEntity) Validate() error {
 	}
 	if p.ExitedAt != nil && p.State != ProcessExited {
 		return fmt.Errorf("%w: process entity has an exit time but state %q", shared.ErrValidation, p.State)
+	}
+	if p.State == ProcessExited && p.ExitedAt == nil {
+		return fmt.Errorf("%w: exited process entity has no exit time", shared.ErrValidation)
 	}
 	return nil
 }

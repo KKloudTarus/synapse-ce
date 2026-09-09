@@ -7,9 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sensorstate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 )
 
 // FleetAuditIntent is an exact immutable audit payload committed with the
@@ -67,6 +69,18 @@ func SameFleetAuditIntent(left, right FleetAuditIntent) bool {
 type FleetAuditIntentStore interface {
 	ListPendingFleetAudits(ctx context.Context) ([]FleetAuditIntent, error)
 	AcknowledgeFleetAudit(ctx context.Context, id string) error
+}
+
+// WorkOrderAuditStore commits a signed work order and its exact issuance audit
+// obligation in one local transaction or memory critical section.
+type WorkOrderAuditStore interface {
+	WorkOrderStore
+	FleetAuditIntentStore
+	IssueWithAudit(ctx context.Context, order *workorder.WorkOrder, intent FleetAuditIntent) (*workorder.WorkOrder, FleetAuditIntent, error)
+	ClaimWithAudit(ctx context.Context, tenantID, agentID shared.ID, max int, now time.Time, leaseID string, leaseUntil time.Time, actor string) ([]*workorder.WorkOrder, []FleetAuditIntent, error)
+	TransitionLeasedWithAudit(ctx context.Context, tenantID, id shared.ID, leaseID string, to workorder.State, reason string, expected workorder.State, now time.Time, actor string) (FleetAuditIntent, error)
+	CompleteResponseWithAudit(ctx context.Context, tenantID, id shared.ID, result fleetagent.ResponseExecutionResult, reason string, now time.Time, actor string) (bool, FleetAuditIntent, error)
+	CancelResponsesBelowGenerationWithAudit(ctx context.Context, tenantID shared.ID, generation int64, reason string, now time.Time, actor string) (int, FleetAuditIntent, error)
 }
 
 // PrivacyPolicyAuditStore commits an activation and its exact audit intention

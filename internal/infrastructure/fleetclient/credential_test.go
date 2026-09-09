@@ -13,15 +13,25 @@ import (
 )
 
 type fakeEnroller struct {
-	calls  int
-	resp   EnrolResponse
-	gotReq EnrolRequest
+	calls       int
+	activations int
+	resp        EnrolResponse
+	gotReq      EnrolRequest
+	activated   Credential
+	keyPEM      []byte
 }
 
 func (f *fakeEnroller) Enrol(_ context.Context, _ string, req EnrolRequest) (EnrolResponse, error) {
 	f.calls++
 	f.gotReq = req
 	return f.resp, nil
+}
+
+func (f *fakeEnroller) ActivateCredential(cred Credential, keyPEM []byte) error {
+	f.activations++
+	f.activated = cred
+	f.keyPEM = append([]byte(nil), keyPEM...)
+	return nil
 }
 
 func TestEnsureEnrolledFirstRunThenReuse(t *testing.T) {
@@ -36,6 +46,9 @@ func TestEnsureEnrolledFirstRunThenReuse(t *testing.T) {
 	}
 	if cred.Token != "secret" || enr.calls != 1 {
 		t.Fatalf("first run must enrol once, got cred=%+v calls=%d", cred, enr.calls)
+	}
+	if enr.activations != 1 || enr.activated.AgentID != "a1" || len(enr.keyPEM) == 0 {
+		t.Fatalf("first run must activate the issued certificate and private key")
 	}
 	// A CSR was generated and sent (private key stays local).
 	if enr.gotReq.CSRPEM == "" {
@@ -62,6 +75,9 @@ func TestEnsureEnrolledFirstRunThenReuse(t *testing.T) {
 	}
 	if enr.calls != 1 {
 		t.Fatalf("a stored credential must not re-enrol, calls=%d", enr.calls)
+	}
+	if enr.activations != 2 || len(enr.keyPEM) == 0 {
+		t.Fatalf("a stored credential must reactivate its certificate and private key")
 	}
 	if cred2.Token != "secret" {
 		t.Fatalf("second call must return the stored credential")

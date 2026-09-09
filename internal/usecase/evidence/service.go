@@ -151,6 +151,24 @@ func (s *Service) LookupSealedByID(ctx context.Context, engagementID, evidenceID
 	return evdom.Evidence{}, false, nil
 }
 
+// LookupAttestedByID verifies the complete chain before returning one link and the
+// detached signature over the current chain head. Callers must pin Attestation.PublicKey.
+func (s *Service) LookupAttestedByID(ctx context.Context, engagementID, evidenceID shared.ID) (evdom.Evidence, *evdom.Attestation, bool, error) {
+	rep, err := s.Verify(ctx, engagementID)
+	if err != nil {
+		return evdom.Evidence{}, nil, false, err
+	}
+	if !rep.Intact {
+		return evdom.Evidence{}, nil, false, fmt.Errorf("%w: %s", evdom.ErrChainBroken, rep.Error)
+	}
+	for _, item := range rep.Items {
+		if item.ID == evidenceID {
+			return item, rep.Attestation, true, nil
+		}
+	}
+	return evdom.Evidence{}, rep.Attestation, false, nil
+}
+
 // appendReserved appends a deterministic reserved evidence ID exactly once.
 // A retry compares the existing complete payload before accepting it; a
 // conflicting reuse fails closed without adding another chain link.

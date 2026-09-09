@@ -42,6 +42,12 @@ Eight Secrets must already exist in the release namespace. The chart references 
 
 Two more Secrets are referenced outside `existingSecrets`: `externalDatabase.caBundle.secretName` (`synapse-database-ca`, key `ca.crt`) supplies the database trust anchor, and `ingress.tls.secretName` (`synapse-tls`) supplies the ingress certificate. Enabling `oidc.enabled` or `api.grantAuthority.enabled` adds `existingSecrets.oidc.clientSecret` and the two `existingSecrets.egressGrant` entries.
 
+## Fleet and live response
+
+`fleet` is disabled by default. Enable its transport, asset/host/telemetry/detection ingestion, and signing-key registration deliberately; `staleAfter` controls the agent-health timeout. Optional `fleet.correlation` has bounded session and lateness durations and caps incident expansion with `maxPerIncident` (1–1000).
+
+`responseExecution.enabled` is additionally disabled by default. Helm refuses it unless fleet transport, assets, host ingest, telemetry ingest, and key registration are all enabled. It renders the exact runtime variables `SYNAPSE_RESPONSE_COMMAND_TTL` (positive, no more than 10m) and `SYNAPSE_RESPONSE_EXECUTION_POLL_INTERVAL` (positive, no more than 1s). Its private signing key comes only from `existingSecrets.cryptography.responseCommandSigningKey`, mounted read-only into the API at `/etc/synapse/response-command-signing/key`; no Secret object or Secret data is rendered by this chart. The key must never be mounted into an endpoint agent.
+
 `values-dev.yaml` supplies the three CIDR lists and a local ingress host so the chart renders and installs on a development cluster without touching the production defaults:
 
 ```bash

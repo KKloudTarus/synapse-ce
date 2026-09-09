@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -393,6 +394,10 @@ func (a *Acquirer) gitAuth(ctx context.Context, rawURL string) (cloneURL string,
 	// repo-provided `cat` on an inherited PATH (cwd is the cloned repo during the comparison fetch) from
 	// running in place of the system one. /bin/sh is on the host and, in the sandbox, under the ro-bound /bin.
 	script := "#!/bin/sh\nPATH=/usr/bin:/bin\nexec cat \"$SYNAPSE_GIT_TOKEN_FILE\"\n"
+	if runtime.GOOS == "windows" {
+		askpass += ".cmd"
+		script = "@echo off\r\ntype \"%SYNAPSE_GIT_TOKEN_FILE%\"\r\n"
+	}
 	if werr := os.WriteFile(askpass, []byte(script), 0o700); werr != nil {
 		cleanup()
 		return "", nil, nil, noop, fmt.Errorf("write askpass: %w", werr)

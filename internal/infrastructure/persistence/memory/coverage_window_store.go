@@ -48,6 +48,44 @@ func (s *CoverageWindowStore) AppendCoverageWindow(ctx context.Context, window s
 	return cloneCoverageWindow(window), nil
 }
 
+var _ ports.BoundedCoverageWindowReader = (*CoverageWindowStore)(nil)
+
+func (s *CoverageWindowStore) ListCoverageWindowsBounded(ctx context.Context, q ports.CoverageWindowQuery, limit int) ([]sensorstate.CoverageWindow, error) {
+	if limit <= 0 || limit > ports.MaxCoverageWindowLimit+1 {
+		return nil, shared.ErrValidation
+	}
+	q.Limit = 0
+	if !q.Valid() {
+		return nil, fmt.Errorf("%w: coverage window query has invalid interval", shared.ErrValidation)
+	}
+	tenant, err := requireTelemetryTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]sensorstate.CoverageWindow, 0)
+	for _, window := range s.rows[tenant] {
+		if (!q.AgentID.IsZero() && window.AgentID != q.AgentID) || (!q.AssetID.IsZero() && window.AssetID != q.AssetID) || (!q.HostID.IsZero() && window.HostID != q.HostID) || (!q.Since.IsZero() && !window.Until.After(q.Since.UTC())) || (!q.Until.IsZero() && !window.Since.Before(q.Until.UTC())) {
+			continue
+		}
+		out = append(out, cloneCoverageWindow(window))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].Since.Equal(out[j].Since) {
+			return out[i].Since.After(out[j].Since)
+		}
+		if !out[i].Until.Equal(out[j].Until) {
+			return out[i].Until.After(out[j].Until)
+		}
+		return out[i].Revision > out[j].Revision
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (s *CoverageWindowStore) ListCoverageWindows(ctx context.Context, q ports.CoverageWindowQuery) ([]sensorstate.CoverageWindow, error) {
 	if !q.Valid() {
 		return nil, fmt.Errorf("%w: coverage window query has invalid interval or limit", shared.ErrValidation)

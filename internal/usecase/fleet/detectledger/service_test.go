@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -506,6 +507,45 @@ func TestIngestRefusesContentTamper(t *testing.T) {
 	}
 }
 
+func TestIngestRefusesFutureObservationBeforeAnyBatchEffects(t *testing.T) {
+	h := newHarness(t, 0)
+	items := []IngestItem{
+		{ID: "d-past", Detection: mkDetection(t, "ps"), AssetID: "asset-1"},
+		{ID: "d-future", Detection: mkDetection(t, "top"), AssetID: "asset-1"},
+	}
+	items[1].Detection.Observed = time.Unix(1001, 0).UTC()
+	batch := h.signedBatch(t, 1, items)
+
+	if _, err := h.svc.Ingest(tctx(), batch.AgentID, batch, items); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("future observation error = %v, want validation", err)
+	}
+	if got := len(h.chain.kinds()); got != 0 {
+		t.Fatalf("future batch sealed %d records, want none", got)
+	}
+	if records, err := h.store.ListDetections(tctx(), batch.EngagementID); err != nil || len(records) != 0 {
+		t.Fatalf("future batch persisted %d records, err=%v", len(records), err)
+	}
+	audit, ok := h.audit.last["detection.batch_rejected"]
+	if !ok || audit.Metadata["reason"] != "future_observation" {
+		t.Fatalf("future batch rejection audit = %+v", audit)
+	}
+}
+
+func TestIngestFutureObservationAuditFailureFailsClosed(t *testing.T) {
+	h := newHarness(t, 0)
+	h.audit.failAction = "detection.batch_rejected"
+	items := []IngestItem{{ID: "d-future", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
+	items[0].Detection.Observed = time.Unix(1001, 0).UTC()
+	batch := h.signedBatch(t, 1, items)
+
+	if _, err := h.svc.Ingest(tctx(), batch.AgentID, batch, items); !errors.Is(err, shared.ErrSaturated) {
+		t.Fatalf("future rejection audit failure = %v, want saturated", err)
+	}
+	if got := len(h.chain.kinds()); got != 0 {
+		t.Fatalf("future rejection audit failure sealed %d records, want none", got)
+	}
+}
+
 func TestIngestRefusesUnknownAgent(t *testing.T) {
 	h := newHarness(t, 0)
 	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
@@ -939,6 +979,60 @@ func TestIngestV2RejectionAuditFailureSurfaces(t *testing.T) {
 	}
 	if recs, err := records.ListDetections(tctx(), batch.EngagementID); err != nil || len(recs) != 0 {
 		t.Fatalf("attributed rejection audit failure persisted records=%d err=%v", len(recs), err)
+	}
+}
+
+func TestIngestV2RefusesFutureObservationBeforeAnyBatchEffects(t *testing.T) {
+	records := memory.NewDetectionRecordStore()
+	provenance := memory.NewDetectionProvenanceStore()
+	chain := &fakeChain{}
+	svc, key, priv, audit := newV2HarnessWithAudit(t, records, provenance, &mutableTelemetryResolver{status: ports.TelemetryReferencesDurable}, chain, fixedClock{t: time.Unix(1000, 0)}, &seqIDs{}, 0)
+	batch, items := signedV2Batch(t, priv, key)
+	items[0].Detection.Observed = time.Unix(1001, 0).UTC()
+	ref, err := items[0].Reference()
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch.Detections = []fleetagent.DetectionRefV2{ref}
+	batch.Signature = fleetagent.SignBatchV2(priv, batch)
+
+	if _, err := svc.IngestV2(tctx(), batch.AgentID, batch, items); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("future attributed observation error = %v, want validation", err)
+	}
+	if got := len(chain.kinds()); got != 0 {
+		t.Fatalf("future attributed batch sealed %d records, want none", got)
+	}
+	if got, err := records.ListDetections(tctx(), batch.EngagementID); err != nil || len(got) != 0 {
+		t.Fatalf("future attributed batch persisted %d records, err=%v", len(got), err)
+	}
+	if current, found, err := provenance.Current(tctx(), batch.EngagementID, items[0].ID); err != nil || found || current.Status != "" {
+		t.Fatalf("future attributed batch wrote provenance=%+v found=%t err=%v", current, found, err)
+	}
+	rejection, ok := audit.last["detection.v2_batch_rejected"]
+	if !ok || rejection.Metadata["reason"] != "future_observation" {
+		t.Fatalf("future attributed rejection audit = %+v", rejection)
+	}
+}
+
+func TestIngestV2FutureObservationAuditFailureFailsClosed(t *testing.T) {
+	records := memory.NewDetectionRecordStore()
+	chain := &fakeChain{}
+	svc, key, priv, audit := newV2HarnessWithAudit(t, records, memory.NewDetectionProvenanceStore(), &mutableTelemetryResolver{}, chain, fixedClock{t: time.Unix(1000, 0)}, &seqIDs{}, 0)
+	batch, items := signedV2Batch(t, priv, key)
+	items[0].Detection.Observed = time.Unix(1001, 0).UTC()
+	ref, err := items[0].Reference()
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch.Detections = []fleetagent.DetectionRefV2{ref}
+	batch.Signature = fleetagent.SignBatchV2(priv, batch)
+	audit.failAction = "detection.v2_batch_rejected"
+
+	if _, err := svc.IngestV2(tctx(), batch.AgentID, batch, items); !errors.Is(err, shared.ErrSaturated) {
+		t.Fatalf("future attributed rejection audit failure = %v, want saturated", err)
+	}
+	if got := len(chain.kinds()); got != 0 {
+		t.Fatalf("future attributed audit failure sealed %d records, want none", got)
 	}
 }
 
@@ -1415,17 +1509,17 @@ func TestPurgeDeletesOnDemandAuditedAndHoldChecked(t *testing.T) {
 
 // ---- correlation on ingest ------------------------------------------------------------------------------
 
-// A wired correlator runs as soon as a batch seals new detections, with the agent as actor, and its count
-// lands in the result. A replayed batch seals nothing and does not correlate again.
+// A wired correlator runs as soon as a batch seals new detections, with the agent as actor. A replayed
+// batch seals nothing and does not correlate again.
 func TestIngestCorrelatesSealedDetectionsOnce(t *testing.T) {
 	h := newHarness(t, 0)
 	var calls int
 	var gotActor string
 	var gotEng shared.ID
-	h.svc.SetCorrelator(func(_ context.Context, actor string, engagementID shared.ID) (int, error) {
+	h.svc.SetCorrelator(func(_ context.Context, actor string, engagementID shared.ID) (CorrelationProgress, error) {
 		calls++
 		gotActor, gotEng = actor, engagementID
-		return 2, nil
+		return CorrelationProgress{Created: 2}, nil
 	})
 	items := []IngestItem{{ID: "d1", AssetID: "asset-1", Detection: mkDetection(t, "ps")}}
 	b := h.signedBatch(t, 1, items)
@@ -1452,13 +1546,86 @@ func TestIngestCorrelatesSealedDetectionsOnce(t *testing.T) {
 
 // Batches that land while a run is in flight cost one rerun, not one run each, and the run uses a
 // context that outlives the requests.
+func TestIngestDrainsBoundedCorrelationProgress(t *testing.T) {
+	h := newHarness(t, 0)
+	var calls int
+	h.svc.SetCorrelator(func(context.Context, string, shared.ID) (CorrelationProgress, error) {
+		calls++
+		switch calls {
+		case 1:
+			return CorrelationProgress{Phase: "source", HasMore: true}, nil
+		case 2:
+			return CorrelationProgress{Phase: "consume", HasMore: true}, nil
+		case 3:
+			return CorrelationProgress{Phase: "consume"}, nil
+		default:
+			return CorrelationProgress{}, nil
+		}
+	})
+	items := []IngestItem{{ID: "d1", AssetID: "asset-1", Detection: mkDetection(t, "ps")}}
+	batch := h.signedBatch(t, 1, items)
+	if _, err := h.svc.Ingest(tctx(), batch.AgentID, batch, items); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.WaitCorrelation()
+	if calls != 4 {
+		t.Fatalf("correlator calls = %d, want all four progress steps", calls)
+	}
+}
+
+func TestIngestCorrelationRetriesConflictsWithinBudget(t *testing.T) {
+	h := newHarness(t, 0)
+	var calls int
+	h.svc.SetCorrelator(func(context.Context, string, shared.ID) (CorrelationProgress, error) {
+		calls++
+		if calls <= 2 {
+			return CorrelationProgress{}, fmt.Errorf("state update: %w", shared.ErrConflict)
+		}
+		return CorrelationProgress{}, nil
+	})
+	items := []IngestItem{{ID: "d1", AssetID: "asset-1", Detection: mkDetection(t, "ps")}}
+	batch := h.signedBatch(t, 1, items)
+	if _, err := h.svc.Ingest(tctx(), batch.AgentID, batch, items); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.WaitCorrelation()
+	if calls != 3 {
+		t.Fatalf("correlator calls = %d, want 3 including conflict retries", calls)
+	}
+	if h.audit.has("detection.correlate_on_ingest_failed") || h.audit.has(correlationExhaustedAuditName) {
+		t.Fatalf("successful conflict retries must not audit a failure: %v", h.audit.actions)
+	}
+}
+
+func TestIngestCorrelationProgressExhaustionIsAudited(t *testing.T) {
+	h := newHarness(t, 0)
+	var calls int
+	h.svc.SetCorrelator(func(context.Context, string, shared.ID) (CorrelationProgress, error) {
+		calls++
+		return CorrelationProgress{Phase: "consume", HasMore: true}, nil
+	})
+	items := []IngestItem{{ID: "d1", AssetID: "asset-1", Detection: mkDetection(t, "ps")}}
+	batch := h.signedBatch(t, 1, items)
+	if _, err := h.svc.Ingest(tctx(), batch.AgentID, batch, items); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.WaitCorrelation()
+	if calls != correlationIterationBudget {
+		t.Fatalf("correlator calls = %d, want budget %d", calls, correlationIterationBudget)
+	}
+	e, ok := h.audit.last[correlationExhaustedAuditName]
+	if !ok || e.Metadata["reason"] != "iteration_budget_exhausted" || e.Metadata["budget"] != fmt.Sprint(correlationIterationBudget) || e.Metadata["engagement"] != "eng-1" {
+		t.Fatalf("progress exhaustion not auditable: %+v (actions %v)", e, h.audit.actions)
+	}
+}
+
 func TestIngestCoalescesConcurrentCorrelation(t *testing.T) {
 	h := newHarness(t, 0)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var mu sync.Mutex
 	calls := 0
-	h.svc.SetCorrelator(func(ctx context.Context, _ string, _ shared.ID) (int, error) {
+	h.svc.SetCorrelator(func(ctx context.Context, _ string, _ shared.ID) (CorrelationProgress, error) {
 		mu.Lock()
 		calls++
 		first := calls == 1
@@ -1470,7 +1637,7 @@ func TestIngestCoalescesConcurrentCorrelation(t *testing.T) {
 		if ctx.Err() != nil {
 			t.Errorf("correlation ran with a cancelled context")
 		}
-		return 0, nil
+		return CorrelationProgress{}, nil
 	})
 	for i := 1; i <= 4; i++ {
 		items := []IngestItem{{ID: shared.ID("d" + strconv.Itoa(i)), AssetID: "asset-1", Detection: mkDetection(t, "ps")}}
@@ -1497,7 +1664,9 @@ func TestIngestCoalescesConcurrentCorrelation(t *testing.T) {
 // result says correlation did not happen.
 func TestIngestCorrelatorFailureIsAuditedNotFatal(t *testing.T) {
 	h := newHarness(t, 0)
-	h.svc.SetCorrelator(func(context.Context, string, shared.ID) (int, error) { return 0, errors.New("incident store down") })
+	h.svc.SetCorrelator(func(context.Context, string, shared.ID) (CorrelationProgress, error) {
+		return CorrelationProgress{}, errors.New("incident store down")
+	})
 	items := []IngestItem{{ID: "d1", AssetID: "asset-1", Detection: mkDetection(t, "ps")}}
 	b := h.signedBatch(t, 1, items)
 	res, err := h.svc.Ingest(tctx(), b.AgentID, b, items)

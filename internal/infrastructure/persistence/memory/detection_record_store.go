@@ -2,10 +2,12 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/correlation"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -60,6 +62,64 @@ func (s *DetectionRecordStore) AppendDetection(ctx context.Context, r detection.
 }
 
 // ListDetections returns the non-expired records for an engagement under the ctx tenant, oldest first.
+func (s *DetectionRecordStore) CorrelationHighWater(ctx context.Context, engagementID shared.ID, completed correlation.SourcePosition, retentionAsOf time.Time) (correlation.SourcePosition, bool, error) {
+	tenant := shared.TenantOrDefault(tenantFromCtx(ctx))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var high correlation.SourcePosition
+	for _, r := range s.byTenant[tenant] {
+		if r.EngagementID != engagementID || r.Expired(retentionAsOf) {
+			continue
+		}
+		if r.RecordedAt.IsZero() {
+			return correlation.SourcePosition{}, false, fmt.Errorf("%w: correlation source record has no recorded-at", shared.ErrValidation)
+		}
+		p := correlation.SourcePosition{RecordedAt: r.RecordedAt.UTC(), ID: r.ID}
+		if !completed.RecordedAt.IsZero() && !sourceAfter(p, completed) {
+			continue
+		}
+		if high.RecordedAt.IsZero() || p.RecordedAt.After(high.RecordedAt) || (p.RecordedAt.Equal(high.RecordedAt) && p.ID > high.ID) {
+			high = p
+		}
+	}
+	return high, !high.RecordedAt.IsZero(), nil
+}
+
+func (s *DetectionRecordStore) ListCorrelationSourcePage(ctx context.Context, engagementID shared.ID, after, through correlation.SourcePosition, retentionAsOf time.Time, limit int) ([]detection.Record, bool, error) {
+	if limit <= 0 {
+		return nil, false, fmt.Errorf("%w: invalid correlation page limit", shared.ErrValidation)
+	}
+	tenant := shared.TenantOrDefault(tenantFromCtx(ctx))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []detection.Record
+	for _, r := range s.byTenant[tenant] {
+		if r.RecordedAt.IsZero() {
+			return nil, false, fmt.Errorf("%w: correlation source record has no recorded-at", shared.ErrValidation)
+		}
+		p := correlation.SourcePosition{RecordedAt: r.RecordedAt.UTC(), ID: r.ID}
+		if r.EngagementID != engagementID || r.Expired(retentionAsOf) || !sourceAfter(p, after) || sourceAfter(p, through) {
+			continue
+		}
+		out = append(out, cloneRecord(r))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return sourceAfter(correlation.SourcePosition{RecordedAt: out[j].RecordedAt, ID: out[j].ID}, correlation.SourcePosition{RecordedAt: out[i].RecordedAt, ID: out[i].ID})
+	})
+	more := len(out) > limit
+	if more {
+		out = out[:limit]
+	}
+	return out, more, nil
+}
+
+func sourceAfter(p, cursor correlation.SourcePosition) bool {
+	if cursor.RecordedAt.IsZero() {
+		return true
+	}
+	return p.RecordedAt.After(cursor.RecordedAt) || (p.RecordedAt.Equal(cursor.RecordedAt) && p.ID > cursor.ID)
+}
+
 func (s *DetectionRecordStore) ListDetections(ctx context.Context, engagementID shared.ID) ([]detection.Record, error) {
 	tenant := shared.TenantOrDefault(tenantFromCtx(ctx))
 	s.mu.Lock()

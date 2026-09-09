@@ -3,12 +3,14 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/correlation"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -58,6 +60,67 @@ func (r *DetectionRecordRepository) AppendDetection(ctx context.Context, rec det
 		}
 		return nil
 	})
+}
+
+func (r *DetectionRecordRepository) CorrelationHighWater(ctx context.Context, engagementID shared.ID, completed correlation.SourcePosition, retentionAsOf time.Time) (correlation.SourcePosition, bool, error) {
+	var out correlation.SourcePosition
+	found := false
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		var recorded time.Time
+		var id string
+		err := tx.QueryRow(ctx, `SELECT recorded_at,id FROM detections WHERE engagement_id=$1 AND (expires_at IS NULL OR expires_at>$2) AND ($3::timestamptz IS NULL OR (recorded_at,id)>($3,$4)) ORDER BY recorded_at DESC,id DESC LIMIT 1`, engagementID.String(), retentionAsOf.UTC(), nullableCorrelationTime(completed.RecordedAt), completed.ID.String()).Scan(&recorded, &id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		out, found = correlation.SourcePosition{RecordedAt: recorded.UTC(), ID: shared.ID(id)}, true
+		return nil
+	})
+	return out, found, err
+}
+
+func (r *DetectionRecordRepository) ListCorrelationSourcePage(ctx context.Context, engagementID shared.ID, after, through correlation.SourcePosition, retentionAsOf time.Time, limit int) ([]detection.Record, bool, error) {
+	if limit <= 0 {
+		return nil, false, fmt.Errorf("%w: invalid correlation page limit", shared.ErrValidation)
+	}
+	var out []detection.Record
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT tenant_id,id,engagement_id,asset_id,agent_id,evidence_id,batch_seq,detection,recorded_at,expires_at FROM detections WHERE engagement_id=$1 AND (expires_at IS NULL OR expires_at>$2) AND ($3::timestamptz IS NULL OR (recorded_at,id)>($3,$4)) AND (recorded_at,id)<=($5,$6) ORDER BY recorded_at,id LIMIT $7`, engagementID.String(), retentionAsOf.UTC(), nullableCorrelationTime(after.RecordedAt), after.ID.String(), through.RecordedAt.UTC(), through.ID.String(), limit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var rec detection.Record
+			var tenant, id, eng, asset, agent, evidence string
+			var batch int64
+			var payload []byte
+			var expires *time.Time
+			if err := rows.Scan(&tenant, &id, &eng, &asset, &agent, &evidence, &batch, &payload, &rec.RecordedAt, &expires); err != nil {
+				return err
+			}
+			if err := json.Unmarshal(payload, &rec.Detection); err != nil {
+				return err
+			}
+			rec.ID, rec.TenantID, rec.EngagementID, rec.AssetID, rec.AgentID, rec.EvidenceID = shared.ID(id), shared.ID(tenant), shared.ID(eng), shared.ID(asset), shared.ID(agent), shared.ID(evidence)
+			rec.BatchSeq = uint64(batch)
+			if expires != nil {
+				rec.ExpiresAt = *expires
+			}
+			out = append(out, rec)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	more := len(out) > limit
+	if more {
+		out = out[:limit]
+	}
+	return out, more, nil
 }
 
 // ListDetections returns the non-expired records for an engagement, oldest first, tenant-scoped by RLS.

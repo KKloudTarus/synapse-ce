@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -52,9 +53,13 @@ func isolatedIntegrationDatabase(t *testing.T, ctx context.Context, sharedDSN st
 		_, _ = admin.Exec(cleanup, "DROP DATABASE IF EXISTS "+quotedDatabase)
 		_ = admin.Close(cleanup)
 	})
-	isolationConfig := adminConfig.Copy()
-	isolationConfig.Database = databaseName
-	return isolationConfig.ConnString()
+	isolationURL, err := url.Parse(sharedDSN)
+	if err != nil {
+		t.Fatalf("parse shared PostgreSQL DSN: %v", err)
+	}
+	isolationURL.Path = "/" + databaseName
+	isolationURL.RawPath = ""
+	return isolationURL.String()
 }
 
 func TestMigration0137DefinesBoundedProviderNeutralRLSSchema(t *testing.T) {

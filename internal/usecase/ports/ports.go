@@ -31,6 +31,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualityprofile"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
@@ -135,8 +136,12 @@ type BusinessAssetRepository interface {
 type WorkOrderStore interface {
 	Issue(ctx context.Context, wo *workorder.WorkOrder) (*workorder.WorkOrder, error)
 	GetByID(ctx context.Context, tenantID, id shared.ID) (*workorder.WorkOrder, error)
-	Claim(ctx context.Context, tenantID, agentID shared.ID, max int, now time.Time) ([]*workorder.WorkOrder, error)
+	GetByIdempotencyKey(ctx context.Context, tenantID shared.ID, idempotencyKey string) (*workorder.WorkOrder, error)
+	Claim(ctx context.Context, tenantID, agentID shared.ID, max int, now time.Time, leaseID string, leaseUntil time.Time) ([]*workorder.WorkOrder, error)
 	Transition(ctx context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State, now time.Time) error
+	TransitionLeased(ctx context.Context, tenantID, id shared.ID, leaseID string, to workorder.State, reason string, expected workorder.State, now time.Time) error
+	CompleteResponse(ctx context.Context, tenantID, id shared.ID, result fleetagent.ResponseExecutionResult, reason string, now time.Time) (bool, error)
+	CancelResponsesBelowGeneration(ctx context.Context, tenantID shared.ID, generation int64, reason string, now time.Time) (int, error)
 	// CancelForAgent moves every live (issued/claimed/running) order addressed to agentID into the
 	// cancelled state, returning how many were cancelled. Used when an agent is revoked.
 	CancelForAgent(ctx context.Context, tenantID, agentID shared.ID, reason string, now time.Time) (int, error)
@@ -635,11 +640,30 @@ type ScanRun struct {
 	FindingKeys  []string     `json:"finding_keys"` // dedup keys present in this run
 }
 
-// ScanRunStore persists scan-run manifests + finding keys for history + drift.
+// ScanRunStore persists legacy scan-run manifests + finding keys for history + drift.
 type ScanRunStore interface {
 	Save(ctx context.Context, run ScanRun) error
 	List(ctx context.Context, engagementID shared.ID) ([]ScanRun, error)
 	Get(ctx context.Context, runID string) (ScanRun, error)
+}
+
+// SealScanRunCommand carries the complete, precomputed state for one atomic seal.
+type SealScanRunCommand struct {
+	TenantID              shared.ID
+	RunID                 string
+	TerminalStatus        scanrun.TerminalStatus
+	Lanes                 []scanrun.Lane
+	ManifestSchemaVersion int
+	ManifestHash          string
+	SealedAt              time.Time
+}
+
+// ScanRunProvenanceStore persists tenant-scoped, sealed provenance (Issue #708).
+type ScanRunProvenanceStore interface {
+	SaveScanRun(ctx context.Context, run scanrun.ScanRun) error
+	GetScanRun(ctx context.Context, tenantID shared.ID, runID string) (scanrun.ScanRun, error)
+	ListScanRuns(ctx context.Context, tenantID, engagementID shared.ID) ([]scanrun.ScanRun, error)
+	SealScanRun(ctx context.Context, command SealScanRunCommand) error
 }
 
 // ScanRepository persists an SCA scan's SBOM (with its components) and the

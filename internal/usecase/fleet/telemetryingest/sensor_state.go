@@ -51,7 +51,7 @@ func (s *Service) IngestSensorState(ctx context.Context, authAgentID shared.ID, 
 		}
 		return SensorStateIngestResult{}, fmt.Errorf("%w: sensor-state report session is not the authenticated enrollment session", shared.ErrForbidden)
 	}
-	assetID, err := s.bindings.ResolveTelemetryAsset(ctx, authAgentID)
+	primaryAssetID, err := s.bindings.ResolveTelemetryAsset(ctx, authAgentID)
 	if err != nil {
 		if errors.Is(err, shared.ErrNotFound) {
 			err = fmt.Errorf("%w: telemetry asset binding is not established", shared.ErrForbidden)
@@ -61,11 +61,23 @@ func (s *Service) IngestSensorState(ctx context.Context, authAgentID shared.ID, 
 		}
 		return SensorStateIngestResult{}, err
 	}
-	if assetID.IsZero() || report.AssetID != assetID {
+	assetID := primaryAssetID
+	if assetID.IsZero() {
+		if auditErr := s.rejectSensorState(ctx, authAgentID, report, "asset_binding_missing", now); auditErr != nil {
+			return SensorStateIngestResult{}, auditErr
+		}
+		return SensorStateIngestResult{}, fmt.Errorf("%w: telemetry asset binding is not established", shared.ErrForbidden)
+	}
+	if report.AssetID != primaryAssetID {
 		if auditErr := s.rejectSensorState(ctx, authAgentID, report, "asset_mismatch", now); auditErr != nil {
 			return SensorStateIngestResult{}, auditErr
 		}
 		return SensorStateIngestResult{}, fmt.Errorf("%w: sensor-state report asset does not match server-authoritative host binding", shared.ErrForbidden)
+	} else if !report.ResponseObservationID.IsZero() {
+		if auditErr := s.rejectSensorState(ctx, authAgentID, report, "unexpected_response_observation", now); auditErr != nil {
+			return SensorStateIngestResult{}, auditErr
+		}
+		return SensorStateIngestResult{}, fmt.Errorf("%w: primary host sensor state cannot carry a response-observation target reference", shared.ErrForbidden)
 	}
 	key, err := s.keys.ResolveSigningKey(ctx, report.AgentID, report.KeyID)
 	if err != nil {

@@ -89,14 +89,15 @@ func TestWorkOrderRepository(t *testing.T) {
 	}
 
 	// Claim addressed to the agent; another agent claims nothing.
-	none, err := repo.Claim(ctx, "wt", "other-agent", 10, time.Now().UTC())
+	claimNow := time.Now().UTC()
+	none, err := repo.Claim(ctx, "wt", "other-agent", 10, claimNow, "lease-other", claimNow.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("claim other: %v", err)
 	}
 	if len(none) != 0 {
 		t.Fatalf("other agent must claim nothing, got %d", len(none))
 	}
-	claimed, err := repo.Claim(ctx, "wt", "ag1", 10, time.Now().UTC())
+	claimed, err := repo.Claim(ctx, "wt", "ag1", 10, claimNow, "lease-1", claimNow.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("claim ag1: %v", err)
 	}
@@ -106,11 +107,11 @@ func TestWorkOrderRepository(t *testing.T) {
 
 	// Transition CAS: claimed -> running with correct expected state.
 	tnow := time.Now().UTC()
-	if err := repo.Transition(ctx, "wt", wo.ID, workorder.StateRunning, "", workorder.StateClaimed, tnow); err != nil {
+	if err := repo.TransitionLeased(ctx, "wt", wo.ID, "lease-1", workorder.StateRunning, "", workorder.StateClaimed, tnow); err != nil {
 		t.Fatalf("claimed->running: %v", err)
 	}
 	// Stale expected state now conflicts.
-	if err := repo.Transition(ctx, "wt", wo.ID, workorder.StateSucceeded, "", workorder.StateClaimed, tnow); !errors.Is(err, shared.ErrConflict) {
+	if err := repo.TransitionLeased(ctx, "wt", wo.ID, "lease-1", workorder.StateSucceeded, "", workorder.StateClaimed, tnow); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("stale expected state must ErrConflict, got %v", err)
 	}
 	// A transition on a non-existent order is ErrNotFound, not ErrConflict.

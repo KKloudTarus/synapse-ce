@@ -136,6 +136,11 @@ func (r *runner) startDetectionProducer(
 	if err != nil {
 		return nil, fmt.Errorf("wire durable telemetry sensor: %w", err)
 	}
+	if r.responseProcesses != nil {
+		if err := sensor.SetProcessLifecycleObserver(r.responseProcesses); err != nil {
+			return nil, fmt.Errorf("wire response process identity tracker: %w", err)
+		}
+	}
 	if err := sensor.SetRedactionPolicy(assignment.Policy); err != nil {
 		return nil, fmt.Errorf("apply telemetry source-privacy policy: %w", err)
 	}
