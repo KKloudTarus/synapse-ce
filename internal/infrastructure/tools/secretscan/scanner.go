@@ -800,5 +800,32 @@ func defaultRules() []rule {
 			keywords: []string{"ntn_"},
 			re:       regexp.MustCompile(`\bntn_[0-9]{11}[A-Za-z0-9]{35}`),
 		},
+		{
+			id: "flutterwave-secret-key", category: "Flutterwave", title: "Flutterwave secret key", severity: shared.SeverityHigh,
+			keywords: []string{"FLWSECK"},
+			re:       regexp.MustCompile(`\bFLWSECK(?:_TEST|_LIVE)?-[0-9a-fA-F]{32}-X\b`),
+		},
+		{
+			id: "alibaba-access-key-id", category: "Alibaba", title: "Alibaba Cloud AccessKey ID", severity: shared.SeverityHigh,
+			keywords: []string{"LTAI"},
+			re:       regexp.MustCompile(`\bLTAI[A-Za-z0-9]{20}\b`),
+		},
+		{
+			id: "adafruit-io-key", category: "Adafruit", title: "Adafruit IO key", severity: shared.SeverityHigh,
+			keywords: []string{"aio_"},
+			re:       regexp.MustCompile(`\baio_[A-Za-z0-9]{28}\b`),
+		},
+		{
+			id: "sourcegraph-access-token", category: "Sourcegraph", title: "Sourcegraph access token", severity: shared.SeverityHigh,
+			keywords: []string{"sgp_"},
+			// v2 (sgp_<40hex>) plus v3 (sgp_<16hex>_<40hex> instance-scoped, and sgp_local_<40hex>).
+			re: regexp.MustCompile(`\bsgp_(?:[0-9a-fA-F]{40}|(?:[0-9a-fA-F]{16}|local)_[0-9a-fA-F]{40})\b`),
+		},
+		{
+			id: "replicate-api-token", category: "Replicate", title: "Replicate API token", severity: shared.SeverityHigh,
+			keywords: []string{"r8_"},
+			// The whole token is 40 characters: the "r8_" prefix plus 37 alphanumerics.
+			re: regexp.MustCompile(`\br8_[A-Za-z0-9]{37}\b`),
+		},
 	}
 }

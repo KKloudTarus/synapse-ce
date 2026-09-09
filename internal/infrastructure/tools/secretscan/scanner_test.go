@@ -480,3 +480,33 @@ func TestMoreProviderTokens2NearMissNoMatch(t *testing.T) {
 		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
 	}
 }
+
+func TestDetectsMoreProviderTokens3(t *testing.T) {
+	an := strings.Repeat("aB3cD4eF5g", 6) // 60 alnum
+	hx := strings.Repeat("abcdef0123", 7) // 70 hex
+	rs := scanDir(t, map[string]string{
+		"flw.env": "FLW_SECRET_KEY=" + "FLWSECK_TEST-" + hx[:32] + "-X" + "\n",
+		"ali.env": "ALIBABA_CLOUD_ACCESS_KEY_ID=" + "LTAI" + an[:20] + "\n",
+		"aio.env": "ADAFRUIT_IO_KEY=" + "aio_" + an[:28] + "\n",
+		"sg.env":  "SRC_ACCESS_TOKEN=" + "sgp_" + hx[:16] + "_" + hx[:40] + "\n", // v3 instance-scoped form
+		"rep.env": "REPLICATE_API_TOKEN=" + "r8_" + an[:37] + "\n",
+	})
+	for _, id := range []string{"flutterwave-secret-key", "alibaba-access-key-id", "adafruit-io-key", "sourcegraph-access-token", "replicate-api-token"} {
+		if hasRule(rs, id) == nil {
+			t.Errorf("expected a %q finding, got %+v", id, rs)
+		}
+	}
+}
+
+func TestMoreProviderTokens3NearMissNoMatch(t *testing.T) {
+	rs := scanDir(t, map[string]string{
+		"a.env": "K=" + "FLWSECK_TEST-short\n",
+		"b.env": "K=" + "LTAIshort\n",
+		"c.env": "K=" + "aio_short\n",
+		"d.env": "K=" + "sgp_short\n",
+		"e.env": "K=" + "r8_short\n",
+	})
+	if len(rs) != 0 {
+		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
+	}
+}

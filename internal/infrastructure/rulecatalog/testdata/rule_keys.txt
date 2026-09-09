@@ -1,4 +1,6 @@
+adafruit-io-key
 age-secret-key
+alibaba-access-key-id
 anthropic-api-key
 arm-aks-private-cluster-disabled
 arm-aks-rbac-disabled
@@ -874,6 +876,7 @@ dynamic-code-eval
 dynatrace-token
 easypost-token
 figma-token
+flutterwave-secret-key
 frameio-token
 gcp-service-account-key
 generic-command-injection-sink
@@ -2624,6 +2627,7 @@ reliability-empty-catch
 reliability-self-assignment
 reliability-self-comparison
 reliability-unreachable-code
+replicate-api-token
 rubygems-token
 rust:allow-unused
 rust:approx-constant
@@ -2840,6 +2844,7 @@ shopify-token
 slack-app-token
 slack-token
 slack-webhook-url
+sourcegraph-access-token
 sqlalchemy-raw-sql-dynamic
 square-token
 ssrf-fetch-user-url
