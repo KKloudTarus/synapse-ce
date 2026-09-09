@@ -530,6 +530,14 @@ func TestLoadReachability(t *testing.T) {
 	if got := Load().GovulncheckBin; got != "govulncheck" {
 		t.Errorf("GovulncheckBin default = %q, want govulncheck", got)
 	}
+	if got := Load().ReachabilityBuilder; got != "owned" {
+		t.Errorf("ReachabilityBuilder default = %q, want owned (owned engine, no third-party govulncheck)", got)
+	}
+	t.Setenv("SYNAPSE_REACHABILITY_BUILDER", "GOVULNCHECK")
+	if got := Load().ReachabilityBuilder; got != "govulncheck" {
+		t.Errorf("SYNAPSE_REACHABILITY_BUILDER must normalize + override, got %q", got)
+	}
+	t.Setenv("SYNAPSE_REACHABILITY_BUILDER", "owned")
 	t.Setenv("SYNAPSE_REACHABILITY_ENABLED", "false")
 	if Load().ReachabilityEnabled {
 		t.Error("SYNAPSE_REACHABILITY_ENABLED=false must disable it")

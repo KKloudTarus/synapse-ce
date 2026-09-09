@@ -471,6 +471,12 @@ type Config struct {
 	// leaves the prior tier standing). GovulncheckBin is the pinned builder binary.
 	ReachabilityEnabled bool
 	GovulncheckBin      string
+	// ReachabilityBuilder selects the Go Tier-2 call-graph producer: "owned" (default) runs Synapse's own
+	// go/ssa builder through the sandboxed synapse-callgraph binary (TaintCallgraphBin); "govulncheck" runs
+	// the third-party govulncheck (GovulncheckBin). The owned CHA graph over-approximates the call set, which
+	// is sound for reachability (it never reports a genuinely-reachable symbol as not-reachable), so it is the
+	// default and drops the last third-party engine from the default scan.
+	ReachabilityBuilder string
 
 	// PyReachabilityEnabled turns on deterministic Tier-1 Python import-reachability: post-scan, it mints a
 	// not_reachable judgment for a declared PyPI package that first-party code never imports (a dead
@@ -863,6 +869,7 @@ func Load() Config {
 		VulnerabilityTenantAllowlist:                splitList(getenv("SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "")),
 		SLAEnabled:                                  getbool("SYNAPSE_SLA_ENABLED", false),
 		GovulncheckBin:                              getenv("SYNAPSE_GOVULNCHECK_BIN", "govulncheck"),
+		ReachabilityBuilder:                         normalizeEnv(getenv("SYNAPSE_REACHABILITY_BUILDER", "owned")),
 		GoModGraphEnabled:                           getbool("SYNAPSE_GOMODGRAPH_ENABLED", true),
 		GoBin:                                       getenv("SYNAPSE_GO_BIN", "go"),
 		MavenResolveEnabled:                         getbool("SYNAPSE_MAVEN_RESOLVE_ENABLED", false),

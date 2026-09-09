@@ -2529,15 +2529,35 @@ func main() {
 	// (the prior tier stands). Injected here at the composition root only – never on an agent-reachable
 	// surface (the reachproof architecture tripwire enforces it).
 	if cfg.ReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACHABILITY_ENABLED", "reachability") {
-		gvBuilder := govulncheck.New(cfg.GovulncheckBin)
-		if scaSandbox != nil {
-			gvBuilder = gvBuilder.WithRunner(scaSandbox) // same containment as syft/grype; required in production
-		} else {
-			// dev only (prod forces the sandbox above): govulncheck SOURCE-mode does a real build of the
-			// target unsandboxed – make that posture explicit rather than silent.
-			log.Warn("reachability: govulncheck runs UNSANDBOXED (sandbox off; dev only) – it builds the target")
+		// Select the Go Tier-2 call-graph producer. Both builders satisfy ports.CallGraphBuilder and emit the
+		// same normalized "importPath.Symbol" callgraph.Graph, so reachability.Service consumes either
+		// unchanged. "owned" (the default) runs Synapse's own go/ssa builder through the sandboxed
+		// synapse-callgraph binary, dropping the last third-party engine from the default scan; its CHA graph
+		// over-approximates the call set, which is sound for reachability (never a false not-reachable).
+		var reachBuilder ports.CallGraphBuilder
+		switch cfg.ReachabilityBuilder {
+		case "owned":
+			ownedBuilder := taintcallgraph.New(cfg.TaintCallgraphBin)
+			if scaSandbox != nil {
+				ownedBuilder = ownedBuilder.WithRunner(scaSandbox)
+			}
+			reachBuilder = ownedBuilder
+		case "govulncheck":
+			gvBuilder := govulncheck.New(cfg.GovulncheckBin)
+			if scaSandbox != nil {
+				gvBuilder = gvBuilder.WithRunner(scaSandbox) // same containment as syft/grype; required in production
+			}
+			reachBuilder = gvBuilder
+		default:
+			log.Error("invalid SYNAPSE_REACHABILITY_BUILDER (want owned or govulncheck)", "value", cfg.ReachabilityBuilder)
+			os.Exit(1)
 		}
-		reachSvc, rerr := reachability.NewService(gvBuilder)
+		if scaSandbox == nil {
+			// dev only (prod forces the sandbox above): the builder does a real build/load of the target
+			// unsandboxed – make that posture explicit rather than silent.
+			log.Warn("reachability: call-graph builder runs UNSANDBOXED (sandbox off; dev only) – it builds the target")
+		}
+		reachSvc, rerr := reachability.NewService(reachBuilder)
 		if rerr != nil {
 			log.Error("reachability service init failed", "err", rerr)
 			os.Exit(1)
@@ -2548,7 +2568,7 @@ func main() {
 			os.Exit(1)
 		}
 		scaService.SetReachability(coord)
-		log.Info("Tier-2 reachability proof ENABLED (govulncheck call-graph; best-effort, deterministic overrides LLM Tier-1.5)")
+		log.Info("Tier-2 reachability proof ENABLED (deterministic overrides LLM Tier-1.5)", "builder", cfg.ReachabilityBuilder)
 	}
 
 	// Deterministic Tier-1 Python import-reachability, opt-in. A SOURCE-ONLY scanner (no compile/execute, so
