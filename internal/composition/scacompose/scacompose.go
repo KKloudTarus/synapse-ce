@@ -158,7 +158,16 @@ func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.Adv
 	}
 	var advSrc ports.DetectionSource
 	if advisoryStore != nil {
-		advSrc = ownadvisory.New(advisoryStore)
+		owned := ownadvisory.New(advisoryStore)
+		// A curated advisory-id -> affected-symbol overlay enriches findings so non-Go / NVD-CSAF-only
+		// advisories can drive symbol reachability. Best-effort: a load error is a warning, not a scan failure.
+		if overlay, oerr := ownadvisory.LoadSymbolOverlay(cfg.SymbolOverlayDir); oerr != nil {
+			log.Warn("advisory symbol overlay not loaded", "dir", cfg.SymbolOverlayDir, "err", oerr)
+		} else if len(overlay) > 0 {
+			owned = owned.WithSymbolOverlay(overlay)
+			log.Info("advisory symbol overlay loaded", "advisories", len(overlay))
+		}
+		advSrc = owned
 	}
 	detectionSources, derr := ResolveDetectionSources(cfg, DetectionCandidates{Grype: grypeSrc, OSV: osvSrc, AdvisoryStore: advSrc}, log)
 	if derr != nil {

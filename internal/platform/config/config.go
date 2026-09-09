@@ -470,6 +470,11 @@ type Config struct {
 	// default; opt-in. An empty store yields no findings (a harmless no-op) until the advisory ingester
 	// populates it – so enabling it without a populated store changes nothing.
 	OwnedAdvisoryEnabled bool
+	// SymbolOverlayDir points at a directory of curated advisory-id -> affected-symbol JSON files. The owned
+	// advisory matcher merges these symbols onto findings so advisories whose feed carries none (non-Go,
+	// NVD/CSAF-only) can still drive symbol-level reachability. Empty (default) disables it; a load error is
+	// a warning, never a scan failure.
+	SymbolOverlayDir string
 	// ReachabilityEnabled turns on deterministic Tier-2 call-graph reachability proof: post-scan,
 	// it proves which findings' affected symbols are actually called and mints Tier-2 judgments that
 	// supersede weaker LLM claims. Off by default; opt-in + best-effort (a no-coverage/un-buildable target
@@ -797,6 +802,7 @@ func Load() Config {
 		ScanCacheDir:                                os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
 		ImageRootFSEnabled:                          getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
 		OwnedAdvisoryEnabled:                        getbool("SYNAPSE_OWNED_ADVISORY", true),
+		SymbolOverlayDir:                            getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
 		ReachabilityEnabled:                         getbool("SYNAPSE_REACHABILITY_ENABLED", true),
 		PyReachabilityEnabled:                       getbool("SYNAPSE_PYREACH_ENABLED", false),
 		PySemanticReachabilityEnabled:               getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
