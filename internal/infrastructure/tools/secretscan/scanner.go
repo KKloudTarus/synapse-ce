@@ -213,6 +213,9 @@ func stableFileSnapshot(before, after fs.FileInfo, bytesRead int64) bool {
 func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out *[]ports.SecretRawFinding, limit int) bool {
 	// Blank comment regions (VB, #-family, //-and-/* */-family) before the rules run, so a secret that
 	// lives only in a comment is not reported as a live finding. Offsets/newlines are preserved.
+	// Keep the pre-mask text: an inline "synapse:allow" annotation lives in the trailing comment that
+	// maskComments blanks, and maskComments preserves byte offsets, so a match offset indexes both.
+	original := string(data)
 	data = maskComments(rel, data)
 	text := string(data)
 	for i := range s.rules {
@@ -235,6 +238,9 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			if r.lineSkip != nil && r.lineSkip(lineOf(text, start)) {
 				continue
 			}
+			if inlineAllow(lineOf(original, start)) {
+				continue // an inline "synapse:allow" / "gitleaks:allow" annotation suppresses this line
+			}
 			if r.minEnt > 0 && shannon(secret) < r.minEnt {
 				continue
 			}
@@ -256,6 +262,14 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 		}
 	}
 	return false
+}
+
+// inlineAllow reports whether a line carries an inline suppression annotation ("synapse:allow", or
+// "gitleaks:allow" for drop-in compatibility), so an intentional test or example secret on that line is
+// not reported. Matched case-insensitively anywhere on the line, since it lives in a trailing comment.
+func inlineAllow(line string) bool {
+	lower := strings.ToLower(line)
+	return strings.Contains(lower, "synapse:allow") || strings.Contains(lower, "gitleaks:allow")
 }
 
 // lineOf returns the full line containing byte offset at.
