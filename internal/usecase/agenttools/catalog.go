@@ -1088,11 +1088,16 @@ func fillReachability(v *reachabilityView, doc *sbom.SBOM, component, version st
 		v.Location = clampStr(filepath.Base(comp.Location)) // basename only (data-minimization) + bounded
 	}
 	v.FirstParty = comp.FirstParty
-	path := sbom.PathToRoot(doc.Dependencies, sbom.ComponentID(comp.Name, comp.Version, comp.PURL))
+	id := sbom.ComponentID(comp.Name, comp.Version, comp.PURL)
+	path := sbom.PathToRoot(doc.Dependencies, id)
 	v.Depth = len(path) // true depth, even if the reflected Path below is capped
 	v.InDependencyGraph = len(path) > 0
-	v.Direct = len(path) > 0 && len(path) <= 2
-	for i, p := range path { // reflect a BOUNDED copy (each element clamped, depth capped)
+	componentIDs := make(map[string]bool, len(doc.Components))
+	for _, c := range doc.Components {
+		componentIDs[sbom.ComponentID(c.Name, c.Version, c.PURL)] = true
+	}
+	v.Direct = sbom.IsDirect(doc.Dependencies, componentIDs, id) // no COMPONENT depends on it: the one canonical rule
+	for i, p := range path {                                     // reflect a BOUNDED copy (each element clamped, depth capped)
 		if i >= maxReachPathElems {
 			v.Path = append(v.Path, "…")
 			break
@@ -1101,7 +1106,7 @@ func fillReachability(v *reachabilityView, doc *sbom.SBOM, component, version st
 	}
 	// The COMPLETE set of direct deps that introduce this component (Path is one chain), so an agent sees
 	// every parent to bump for a transitive vuln. Bounded + clamped like Path.
-	for i, r := range sbom.IntroducedBy(doc.Dependencies, sbom.ComponentID(comp.Name, comp.Version, comp.PURL)) {
+	for i, r := range sbom.IntroducedBy(doc.Dependencies, id) {
 		if i >= maxReachPathElems {
 			v.Introducers = append(v.Introducers, "…")
 			break
