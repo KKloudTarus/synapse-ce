@@ -151,6 +151,10 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string) vulnerabili
 		FixedVersions:         fixedVersions,
 		RejectedFixedVersions: rejectedFixedVersions,
 		Description:           a.Summary,
+		// Exploitation-risk signals projected onto the corpus advisory (D1.3): carry them so an OFFLINE scan
+		// orders findings by KEV/EPSS without the live network enricher (which still runs online and raises).
+		KEV:  a.KEV,
+		EPSS: a.EPSS,
 	}
 	if len(fixedVersions) > 0 {
 		rf.FixedVersion = fixedVersions[0]

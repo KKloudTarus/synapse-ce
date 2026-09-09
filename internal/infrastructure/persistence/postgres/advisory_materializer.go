@@ -133,10 +133,11 @@ func (r *AdvisoryMaterializer) Materialize(ctx context.Context, records []adviso
 		result.ChangedFields = advisory.Diff(previous, canonical)
 	}
 
-	// Carry a retraction into the scan-time projection so the matcher skips it (a withdrawn or rejected
-	// advisory is a guaranteed false positive). The canonical Status is the authoritative signal.
-	canonical.Advisory.Withdrawn = canonical.Status == advisory.StatusWithdrawn || canonical.Status == advisory.StatusRejected
-	projection, err := json.Marshal(canonical.Advisory)
+	// Marshal the SCAN-FACING projection: the base Advisory plus the canonical's status-derived retraction and
+	// merged risk signals (KEV/EPSS/…), via canonical.Project() so this and the in-memory store project the
+	// same fields. Withdrawn keeps a retracted advisory (a guaranteed false positive) out of the matcher, and
+	// KEV/EPSS let an OFFLINE scan order by exploitation risk without the live network enricher.
+	projection, err := json.Marshal(canonical.Project())
 	if err != nil {
 		return advisory.MaterializationResult{}, fmt.Errorf("marshal canonical projection: %w", err)
 	}

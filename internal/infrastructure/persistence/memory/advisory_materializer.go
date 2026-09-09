@@ -329,7 +329,7 @@ func (m *AdvisoryMaterializer) ByPackage(_ context.Context, ecosystem, packageNa
 	for _, canonical := range m.canonicals {
 		for _, affected := range canonical.Advisory.Affected {
 			if affected.Ecosystem == ecosystem && affected.Package == packageName {
-				out = append(out, canonical.Advisory)
+				out = append(out, canonical.Project()) // carry Withdrawn + KEV/EPSS, matching the postgres store
 				break
 			}
 		}
@@ -347,7 +347,7 @@ func (m *AdvisoryMaterializer) ByCPE(_ context.Context, part, vendor, product st
 		for _, current := range canonical.Advisory.CPEs {
 			parsed, err := sbom.ParseCPE23(current.Criteria)
 			if err == nil && parsed.Part == part && parsed.Vendor == vendor && parsed.Product == product {
-				out = append(out, canonical.Advisory)
+				out = append(out, canonical.Project()) // carry Withdrawn + KEV/EPSS, matching the postgres store
 				break
 			}
 		}

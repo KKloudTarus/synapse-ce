@@ -24,6 +24,18 @@ type Advisory struct {
 	// score. omitempty; the matcher prefers a score-derived band and falls back to this, mirroring the
 	// live OSV adapter where a curated label overrides the computed band. Set by ownadvisory.ParseOSV.
 	Severity shared.Severity `json:"Severity,omitempty"`
+
+	// Risk-priority signals projected from the canonical advisory so an OFFLINE scan can order findings by
+	// exploitability without the live risk enricher's network fetch (CISA KEV / FIRST EPSS): KEV (actively
+	// exploited, ranks above all else), EPSS (0..1 exploit-prediction probability) and its percentile, and
+	// PublicExploit (a public exploit exists). The materializer sets these from the canonical merge; the
+	// owned matcher carries KEV/EPSS onto the finding. omitempty keeps them out of existing stored blobs and
+	// out of an advisory that carries no risk signal. The online risk enricher still runs and only RAISES
+	// these, so it refreshes them when the network is available and never lowers a corpus value.
+	KEV            bool    `json:"KEV,omitempty"`
+	EPSS           float64 `json:"EPSS,omitempty"`
+	EPSSPercentile float64 `json:"EPSSPercentile,omitempty"`
+	PublicExploit  bool    `json:"PublicExploit,omitempty"`
 }
 
 type CPEMatch struct {
