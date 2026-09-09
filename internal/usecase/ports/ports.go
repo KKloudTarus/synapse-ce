@@ -1420,11 +1420,13 @@ type OSPackageCataloger interface {
 }
 
 // InstalledPackageCataloger reads a materialized image root filesystem for installed LANGUAGE packages a
-// lockfile would miss: Go module dependencies embedded in compiled binaries (debug/buildinfo) and Python
-// distributions installed on disk (dist-info/egg-info). Components carry the language PURL (pkg:golang /
-// pkg:pypi) so the advisory matcher keys them. It is the owned, detection-independent inventory of what a
-// SHIPPED image actually contains (e.g. a scratch image with one static Go binary and no go.mod). Empty when
-// the rootfs has no such artifacts.
+// lockfile would miss: Go module dependencies embedded in compiled binaries (debug/buildinfo), Python
+// distributions installed on disk (dist-info/egg-info), Java archives (embedded Maven pom.properties),
+// installed Node.js packages (node_modules package.json), and installed Ruby gems (serialized gemspec).
+// Components carry the language PURL (pkg:golang / pkg:pypi / pkg:maven / pkg:npm / pkg:gem) so the advisory
+// matcher keys them. It is the owned, detection-independent inventory of what a SHIPPED image actually
+// contains (e.g. a scratch image with one static Go binary and no go.mod, or a runtime image of installed
+// jars and gems with no lockfile). Empty when the rootfs has no such artifacts.
 type InstalledPackageCataloger interface {
 	CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom.Component, error)
 }

@@ -1,10 +1,14 @@
 // Package bincat catalogs installed language packages from a materialized image root filesystem that a
-// lockfile would miss: Go module dependencies embedded in compiled Go binaries (via stdlib debug/buildinfo)
-// and Python distributions installed on disk (*.dist-info / *.egg-info metadata). It is the OWNED
-// (detection-independent) counterpart to the generator for a SHIPPED artifact – a Go image is frequently just
-// a scratch/distroless base plus one static binary with no go.mod present, so the binary's embedded build
-// info is the only inventory. Emitted components carry the language PURL (pkg:golang / pkg:pypi) so the
-// existing OSV advisory source matches them. It only READS the rootfs (assembled + symlink-free within the
+// lockfile would miss: Go module dependencies embedded in compiled Go binaries (via stdlib debug/buildinfo),
+// Python distributions installed on disk (*.dist-info / *.egg-info metadata), Java archives (the embedded
+// Maven META-INF/maven/.../pom.properties), installed Node.js packages (node_modules/<pkg>/package.json), and
+// installed Ruby gems (the serialized specifications/*.gemspec). It is the OWNED (detection-independent)
+// counterpart to the generator for a SHIPPED artifact – a Go image is frequently just a scratch/distroless
+// base plus one static binary with no go.mod present, so the binary's embedded build info is the only
+// inventory; likewise a runtime image ships installed jars/gems/node_modules with no lockfile. Emitted
+// components carry the language PURL (pkg:golang / pkg:pypi / pkg:maven / pkg:npm / pkg:gem) keyed exactly as
+// the owned advisory matcher expects, so the existing OSV advisory source matches them with no producer
+// change. It only READS the rootfs (assembled + symlink-free within the
 // workspace); the walk is bounded (file + component caps) and cancellable, and package identifiers are
 // validated before entering a PURL.
 package bincat
@@ -75,6 +79,14 @@ func (Cataloger) CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom
 		switch {
 		case isPythonMetadata(path):
 			add(pythonComponent(path))
+		case isNodePackageManifest(path):
+			add(nodeComponent(path))
+		case isInstalledGemspec(path):
+			add(gemComponent(path))
+		case isJar(path):
+			for _, c := range jarComponents(path) {
+				add(c, true)
+			}
 		case looksLikeBinary(path):
 			for _, c := range goBinaryComponents(path) {
 				add(c, true)
