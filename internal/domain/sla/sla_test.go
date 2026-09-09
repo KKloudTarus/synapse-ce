@@ -336,3 +336,15 @@ func hasOverridePrefix(overrides []string, prefix string) bool {
 	}
 	return false
 }
+
+func TestConfigValidateBoundsReachabilityWeight(t *testing.T) {
+	cfg := DefaultConfig()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("default config must validate: %v", err)
+	}
+	// A reachability weight above the severity weight is rejected: reachability must never outweigh severity.
+	cfg.Weights.Reachability = cfg.Weights.Severity + 1
+	if err := cfg.Validate(); err == nil {
+		t.Error("a reachability weight exceeding the severity weight must be rejected")
+	}
+}

@@ -116,6 +116,11 @@ func (c Config) Validate() error {
 			return fmt.Errorf("%w: sla weight %q is negative", shared.ErrValidation, name)
 		}
 	}
+	// Reachability is a tie-breaker among comparably-risky findings, not a primary factor: bound it to the
+	// severity weight so a reachability adjustment can never outweigh severity and invert the ordering.
+	if w.Reachability > w.Severity {
+		return fmt.Errorf("%w: sla reachability weight %.0f must not exceed the severity weight %.0f", shared.ErrValidation, w.Reachability, w.Severity)
+	}
 	th := c.Thresholds
 	if !(th.Emergency > th.Critical && th.Critical > th.High && th.High > th.Medium && th.Medium > 0) {
 		return fmt.Errorf("%w: sla thresholds must be strictly descending and positive", shared.ErrValidation)
