@@ -69,6 +69,12 @@ func TestCatalogParity(t *testing.T) {
 		"databricks-token":        "CWE-798",
 		"linear-api-key":          "CWE-798",
 		"jfrog-token":             "CWE-798",
+		"dockerhub-pat":           "CWE-798",
+		"stripe-restricted-key":   "CWE-798",
+
+		"gitlab-pipeline-trigger-token": "CWE-798",
+		"pulumi-access-token":           "CWE-798",
+		"clojars-deploy-token":          "CWE-798",
 	}
 	builtin := defaultRules()
 	seenInBuiltin := make(map[string]bool, len(builtin))

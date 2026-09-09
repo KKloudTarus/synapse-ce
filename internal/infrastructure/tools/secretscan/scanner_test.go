@@ -296,3 +296,47 @@ func TestGenericSecretKeyShapes(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectsDistinctivePrefixTokens(t *testing.T) {
+	// Each fixture token is split into a prefix + body concatenation so no contiguous secret-shaped
+	// literal exists in this source file (that would trip repository push-protection). Go joins the
+	// literals at compile time, so the file the scanner reads still holds the whole token.
+	rs := scanDir(t, map[string]string{
+		"dockerhub.env": "DOCKERHUB_TOKEN=dckr_pat_" + "kQ9mZ2vX7bN4jH1pL6rT8wY3sD5" + "\n",
+		"stripe.env":    "STRIPE_KEY=rk_live_" + "9pQ2mZ7vX4bN1jH6rT8wY3sD" + "\n",
+		"gitlab.yml":    "trigger: glptt-" + "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0" + "\n",
+		"pulumi.env":    "PULUMI_ACCESS_TOKEN=pul-" + "f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d" + "\n",
+		"clojars.env":   "CLOJARS_TOKEN=CLOJARS_" + "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567" + "\n", // 60 chars after the prefix
+	})
+	for _, id := range []string{"dockerhub-pat", "stripe-restricted-key", "gitlab-pipeline-trigger-token", "pulumi-access-token", "clojars-deploy-token"} {
+		if hasRule(rs, id) == nil {
+			t.Errorf("expected a %q finding, got %+v", id, rs)
+		}
+	}
+}
+
+func TestDistinctivePrefixPlaceholdersAllowlisted(t *testing.T) {
+	// A docs placeholder that MATCHES the pattern but embeds a global allow-list term (EXAMPLE) must be
+	// suppressed. This applies to the variable-length base64/alnum tokens; the fixed hex tokens cannot
+	// embed a word and are covered by the near-miss test below.
+	rs := scanDir(t, map[string]string{
+		"dockerhub.md": "token: dckr_pat_" + "EXAMPLE00000000000000000000" + "\n",
+		"stripe.md":    "key: rk_live_" + "EXAMPLE0000000000000000000" + "\n",
+	})
+	if len(rs) != 0 {
+		t.Errorf("allow-listed placeholders must be suppressed, got %+v", rs)
+	}
+}
+
+func TestDistinctivePrefixNearMissNoMatch(t *testing.T) {
+	// Values that share the prefix but not the exact token shape must NOT match, so a lookalike is not a
+	// false positive.
+	rs := scanDir(t, map[string]string{
+		"gitlab.yml":  "trigger: glptt-abcdef\n",       // far short of 40 hex
+		"pulumi.env":  "PULUMI=pul-notlonghex\n",       // not 40 hex (non-hex chars)
+		"clojars.env": "CLOJARS_TOKEN=CLOJARS_short\n", // not 60 alnum
+	})
+	if len(rs) != 0 {
+		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
+	}
+}
