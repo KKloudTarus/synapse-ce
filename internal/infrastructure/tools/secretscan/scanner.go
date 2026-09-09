@@ -780,5 +780,25 @@ func defaultRules() []rule {
 			keywords: []string{"EZAK", "EZTK"},
 			re:       regexp.MustCompile(`\bEZ(?:AK|TK)[A-Za-z0-9]{54}`),
 		},
+		{
+			id: "slack-app-token", category: "Slack", title: "Slack app-level token", severity: shared.SeverityHigh,
+			keywords: []string{"xapp-"},
+			re:       regexp.MustCompile(`\bxapp-\d-[A-Z0-9]{11}-\d{13}-[a-f0-9]{64}`),
+		},
+		{
+			id: "intra42-client-secret", category: "Intra42", title: "42 (Intra) client secret", severity: shared.SeverityHigh,
+			keywords: []string{"s-s4t2ud-", "s-s4t2af-"},
+			re:       regexp.MustCompile(`\bs-s4t2(?:ud|af)-[a-f0-9]{64}`),
+		},
+		{
+			id: "yandex-api-key", category: "Yandex", title: "Yandex API key", severity: shared.SeverityHigh,
+			keywords: []string{"AQVN"},
+			re:       regexp.MustCompile(`\bAQVN[A-Za-z0-9_-]{35,38}`),
+		},
+		{
+			id: "notion-token", category: "Notion", title: "Notion integration token", severity: shared.SeverityHigh,
+			keywords: []string{"ntn_"},
+			re:       regexp.MustCompile(`\bntn_[0-9]{11}[A-Za-z0-9]{35}`),
+		},
 	}
 }

@@ -452,3 +452,31 @@ func TestMoreProviderTokensNearMissNoMatch(t *testing.T) {
 		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
 	}
 }
+
+func TestDetectsMoreProviderTokens2(t *testing.T) {
+	an := strings.Repeat("aB3cD4eF5g", 6) // 60 alnum
+	hx := strings.Repeat("abcdef0123", 7) // 70 hex
+	rs := scanDir(t, map[string]string{
+		"slack.env":   "SLACK_APP_TOKEN=" + "xapp-1-ABCDE12345F-1234567890123-" + hx[:64] + "\n",
+		"intra42.env": "INTRA42_SECRET=" + "s-s4t2ud-" + hx[:64] + "\n",
+		"yandex.env":  "YANDEX_API_KEY=" + "AQVN" + an[:36] + "\n",
+		"notion.env":  "NOTION_TOKEN=" + "ntn_" + "12345678901" + an[:35] + "\n",
+	})
+	for _, id := range []string{"slack-app-token", "intra42-client-secret", "yandex-api-key", "notion-token"} {
+		if hasRule(rs, id) == nil {
+			t.Errorf("expected a %q finding, got %+v", id, rs)
+		}
+	}
+}
+
+func TestMoreProviderTokens2NearMissNoMatch(t *testing.T) {
+	rs := scanDir(t, map[string]string{
+		"a.env": "K=" + "xapp-1-short\n",
+		"b.env": "K=" + "s-s4t2ud-short\n",
+		"c.env": "K=" + "AQVNshort\n",
+		"d.env": "K=" + "ntn_short\n",
+	})
+	if len(rs) != 0 {
+		t.Errorf("near-miss lookalikes must not match, got %+v", rs)
+	}
+}
