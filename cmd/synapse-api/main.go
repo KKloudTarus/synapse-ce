@@ -1536,6 +1536,11 @@ func main() {
 	vulnerabilityEvaluator.SetRollout(vulnerabilityRollout)
 	if slaService != nil {
 		vulnerabilityEvaluator.SetSLAAssessor(slaService)
+		if judgmentStore != nil {
+			// Fold the authoritative reachability verdict into the SLA urgency score (D4.5). The reader
+			// returns empty (neutral) until reachability judgments exist, so this is safe with judgments off.
+			vulnerabilityEvaluator.SetReachabilityReader(judgmentStore)
+		}
 	}
 	vulnerabilityActionService, err := vulnerabilityactionuc.NewService(vulnerabilityActions, auditLog, clock)
 	if err != nil {
