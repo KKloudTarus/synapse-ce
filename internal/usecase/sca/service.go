@@ -3662,6 +3662,9 @@ func attachDependencyPaths(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) 
 		path := sbom.PathToRoot(doc.Dependencies, id)
 		vulns[i].Path = path
 		vulns[i].Direct = len(path) > 0 && len(path) <= 2
+		// The complete set of direct deps that introduce this component (Path is only one of them), so
+		// remediation lists every parent to bump for a transitive vuln reachable through several.
+		vulns[i].Introducers = sbom.IntroducedBy(doc.Dependencies, id)
 	}
 }
 
