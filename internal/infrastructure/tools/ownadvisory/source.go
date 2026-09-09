@@ -23,11 +23,31 @@ const sourceName = "advisory-store"
 
 // Source matches SBOM components against the owned advisory store.
 type Source struct {
-	store ports.AdvisoryStore
+	store   ports.AdvisoryStore
+	overlay SymbolOverlay
 }
 
 // New returns a detection source over the given owned advisory store.
 func New(store ports.AdvisoryStore) *Source { return &Source{store: store} }
+
+// WithSymbolOverlay attaches a curated advisory-id -> affected-symbols overlay, merged onto each finding's
+// AffectedSymbols so advisories whose feed carries no symbols (non-Go, NVD/CSAF-only) can still drive
+// symbol-level reachability. nil disables it. Returns the Source for chaining.
+func (s *Source) WithSymbolOverlay(o SymbolOverlay) *Source { s.overlay = o; return s }
+
+// overlaySymbols returns the curated overlay symbols for an advisory, looked up by its primary id and every
+// alias (so an overlay keyed by the CVE reaches a finding whose primary id is the GHSA, and vice versa).
+func (s *Source) overlaySymbols(a advisory.Advisory) []string {
+	if s.overlay == nil {
+		return nil
+	}
+	var out []string
+	out = append(out, s.overlay.symbolsFor(a.ID)...)
+	for _, alias := range a.Aliases {
+		out = append(out, s.overlay.symbolsFor(alias)...)
+	}
+	return out
+}
 
 var _ ports.DetectionSource = (*Source)(nil)
 
@@ -58,6 +78,9 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 			return
 		}
 		emitted[key] = struct{}{}
+		if ov := s.overlaySymbols(a); len(ov) > 0 {
+			symbols = dedupSymbols(append(append([]string(nil), symbols...), ov...))
+		}
 		out = append(out, rawFinding(a, c, fixed, symbols))
 	}
 	for _, c := range doc.Components {
