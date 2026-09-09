@@ -117,3 +117,53 @@ func TestParseOSVSkipsPackagelessEntry(t *testing.T) {
 		t.Errorf("a package-less affected entry must be skipped, got %+v", adv.Affected)
 	}
 }
+
+// symbolsPresent reports whether every want symbol is in got (order-independent).
+func symbolsPresent(got, want []string) bool {
+	set := map[string]bool{}
+	for _, g := range got {
+		set[g] = true
+	}
+	for _, w := range want {
+		if !set[w] {
+			return false
+		}
+	}
+	return len(got) == len(want)
+}
+
+// TestParseOSVGoSymbolsCarry is the D4.1 core: the owned OSV ingester parses the Go vuln DB's
+// ecosystem_specific.imports symbols (qualified importPath.Symbol) onto the advisory, and the owned matcher
+// carries them onto the finding, so an OFFLINE scan drives symbol-level reachability, not only the live path.
+func TestParseOSVGoSymbolsCarry(t *testing.T) {
+	const j = `{
+	  "id": "GO-2024-0001", "aliases": ["CVE-2024-9999"],
+	  "affected": [{
+	    "package": {"ecosystem": "Go", "name": "github.com/foo/bar"},
+	    "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "1.2.0"}]}],
+	    "ecosystem_specific": {"imports": [{"path": "github.com/foo/bar", "symbols": ["Vuln", "T.Method"]}]}
+	  }]
+	}`
+	adv, err := ParseOSV([]byte(j))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"github.com/foo/bar.Vuln", "github.com/foo/bar.T.Method"}
+	if !symbolsPresent(adv.Affected[0].AffectedSymbols, want) {
+		t.Fatalf("ingested affected symbols = %v, want %v (qualified importPath.Symbol)", adv.Affected[0].AffectedSymbols, want)
+	}
+	store := memStore{byKey: map[string][]advisory.Advisory{"Go|github.com/foo/bar": {adv}}}
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "github.com/foo/bar", Version: "1.1.0", PURL: "pkg:golang/github.com/foo/bar@1.1.0"},
+	}}
+	raws, err := New(store).Scan(context.Background(), doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raws) != 1 {
+		t.Fatalf("want 1 finding, got %d: %+v", len(raws), raws)
+	}
+	if !symbolsPresent(raws[0].AffectedSymbols, want) {
+		t.Errorf("finding must carry the affected symbols offline, got %v", raws[0].AffectedSymbols)
+	}
+}

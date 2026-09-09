@@ -50,10 +50,11 @@ func ParseOSV(data []byte) (advisory.Advisory, error) {
 			Ecosystem: aff.Package.Ecosystem, // OSV ecosystem is the canonical form the matcher keys on
 			// Normalize the package name to the ecosystem-canonical key (PEP 503 for PyPI) so the stored key
 			// matches the SBOM-side lookup – OSV PyPI advisories carry non-normalized names ("Django").
-			Package:      canonicalName(aff.Package.Ecosystem, aff.Package.Name),
-			Ranges:       mapRanges(aff.Ranges),
-			Versions:     aff.Versions,
-			FixedVersion: firstFixed(aff.Ranges),
+			Package:         canonicalName(aff.Package.Ecosystem, aff.Package.Name),
+			Ranges:          mapRanges(aff.Ranges),
+			Versions:        aff.Versions,
+			FixedVersion:    firstFixed(aff.Ranges),
+			AffectedSymbols: osvImportSymbols(aff),
 		})
 	}
 	return adv, nil
@@ -126,8 +127,34 @@ type osvAffected struct {
 		Ecosystem string `json:"ecosystem"`
 		Name      string `json:"name"`
 	} `json:"package"`
-	Ranges   []osvRange `json:"ranges"`
-	Versions []string   `json:"versions"`
+	Ranges            []osvRange `json:"ranges"`
+	Versions          []string   `json:"versions"`
+	EcosystemSpecific struct {
+		Imports []struct {
+			Path    string   `json:"path"`
+			Symbols []string `json:"symbols"`
+		} `json:"imports"`
+	} `json:"ecosystem_specific"`
+}
+
+// osvImportSymbols collects the affected symbols an OSV entry carries (the Go vuln DB publishes them via
+// affected[].ecosystem_specific.imports[].symbols), qualified as "importPath.Symbol" when a path is set —
+// the exact form the live OSV adapter and the reachability engine use, so the offline owned path agrees.
+func osvImportSymbols(aff osvAffected) []string {
+	var out []string
+	for _, imp := range aff.EcosystemSpecific.Imports {
+		for _, s := range imp.Symbols {
+			if s == "" {
+				continue
+			}
+			if imp.Path != "" {
+				out = append(out, imp.Path+"."+s)
+			} else {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
 }
 
 type osvRange struct {
