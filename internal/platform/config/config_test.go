@@ -588,7 +588,7 @@ func TestAnalysisDefaultsOn(t *testing.T) {
 func TestExternalSetupDefaultsOff(t *testing.T) {
 	for _, k := range []string{
 		"SYNAPSE_SANDBOX_ENABLED", "SYNAPSE_AGENT_ENABLED", "SYNAPSE_TAINT_ENABLED",
-		"SYNAPSE_PYREACH_TIER2_ENABLED",
+		"SYNAPSE_PYREACH_TIER2_ENABLED", "SYNAPSE_SECRET_HISTORY_ENABLED",
 		"SYNAPSE_MAVEN_RESOLVE_ENABLED", "SYNAPSE_GRADLE_RESOLVE_ENABLED", "SYNAPSE_JARHASH_ONLINE_ENABLED",
 		"SYNAPSE_WRITEUP_DRAFTS_ENABLED", "SYNAPSE_OFFLINE", "SYNAPSE_IGNORE_UNFIXED",
 	} {
@@ -600,7 +600,7 @@ func TestExternalSetupDefaultsOff(t *testing.T) {
 	// when the sidecar is absent, so it is safe to run in the default scan (see TestPythonTaintDefaultsOn).
 	off := map[string]bool{
 		"Sandbox": c.SandboxEnabled, "Agent": c.AgentEnabled, "Taint": c.TaintEnabled,
-		"PythonTier2": c.PySemanticReachabilityEnabled,
+		"PythonTier2": c.PySemanticReachabilityEnabled, "SecretHistory": c.SecretHistoryEnabled,
 		"MavenResolve": c.MavenResolveEnabled, "GradleResolve": c.GradleResolveEnabled,
 		"JarHashOnline": c.JarHashOnlineEnabled, "WriteupDrafts": c.WriteupDraftsEnabled,
 		"Offline": c.Offline, "IgnoreUnfixed": c.IgnoreUnfixed,

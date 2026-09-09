@@ -1953,6 +1953,16 @@ type SecretScanner interface {
 	ScanFiles(ctx context.Context, root string) (SecretScanReport, error)
 }
 
+// SecretHistoryScanner is the OPTIONAL git-history extension of a SecretScanner: it scans every blob reachable
+// from all refs in a git repository, catching a secret that was committed and later removed (gone from the
+// working tree but still recoverable from the object database). A secret scanner may implement it; the SCA
+// pipeline type-asserts it and runs it only when history scanning is enabled and the workspace is a git repo.
+// Findings are redacted like the working-tree scan. root need not be a git repository; a non-repo returns an
+// error the caller treats as best-effort.
+type SecretHistoryScanner interface {
+	ScanHistory(ctx context.Context, root string) (SecretScanReport, error)
+}
+
 // MisconfigRawFinding is one insecure infrastructure-as-code / config setting located at file:line, tied
 // to the resource it applies to (e.g. "Deployment/api" or "Dockerfile").
 type MisconfigRawFinding struct {

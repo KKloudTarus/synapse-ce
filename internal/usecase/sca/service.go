@@ -78,6 +78,7 @@ type Service struct {
 	licFile                          ports.LicenseFileResolver             // optional offline license-text fallback from JAR LICENSE files
 	sastAnalyzer                     ports.SASTAnalyzer                    // optional deterministic pattern-SAST over the live workspace
 	secretScanner                    ports.SecretScanner                   // optional deterministic secret scan over the live workspace
+	secretHistory                    bool                                  // also scan git history for committed-then-removed secrets
 	includeTestSecrets               bool                                  // report secrets in test/fixture/docs paths (default false: suppress)
 	misconfig                        ports.MisconfigScanner                // optional deterministic IaC/config misconfig scan over the live workspace
 	fpTriager                        ports.FPTriager                       // optional LLM false-positive critique of production-scope source findings
@@ -260,6 +261,12 @@ func (s *Service) SetSASTAnalyzer(a ports.SASTAnalyzer) { s.sastAnalyzer = a }
 
 // SetSecretScanner configures the optional deterministic secret scanner. nil ⇒ no secret scanning.
 func (s *Service) SetSecretScanner(sc ports.SecretScanner) { s.secretScanner = sc }
+
+// SetSecretHistoryEnabled turns on git-history secret scanning: when the workspace is a git repository and the
+// secret scanner supports it, every blob in the repository's history is scanned so a committed-then-removed
+// secret is caught, not just the working tree. Off by default (heavier, and it reports secrets no longer in
+// the tree).
+func (s *Service) SetSecretHistoryEnabled(enabled bool) { s.secretHistory = enabled }
 
 // SetIncludeTestSecrets controls whether secret hits in test/fixture/docs/detector-pattern paths are
 // reported. Default false: they are suppressed (they are overwhelmingly fake credentials, not leaked
@@ -3022,6 +3029,23 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			result.SourceWarnings = append(result.SourceWarnings, "secret scan incomplete or truncated; secret findings are a lower bound")
 		}
 		result.Findings = append(result.Findings, buildSecretFindings(engagementID, secretReport.Findings, now, s.minSeverity, s.includeTestSecrets)...)
+		// Git-history secret scan (opt-in): catch a secret committed then removed, which the working-tree scan
+		// above cannot see. Best-effort: a non-git workspace or a git failure is a warning, never a scan
+		// failure, and the secret is redacted like any other finding.
+		if s.secretHistory {
+			if hist, ok := s.secretScanner.(ports.SecretHistoryScanner); ok {
+				historyReport, herr := hist.ScanHistory(ctx, ws.Dir)
+				switch {
+				case herr != nil:
+					result.SourceWarnings = append(result.SourceWarnings, "git-history secret scan skipped: "+herr.Error())
+				default:
+					if historyReport.Truncated {
+						result.SourceWarnings = append(result.SourceWarnings, "git-history secret scan incomplete or truncated; secret findings are a lower bound")
+					}
+					result.Findings = append(result.Findings, buildSecretFindings(engagementID, historyReport.Findings, now, s.minSeverity, s.includeTestSecrets)...)
+				}
+			}
+		}
 	}
 	if opts.scansVulnerabilities() && s.misconfig != nil {
 		misRaws, merr := s.misconfig.ScanConfigs(ctx, ws.Dir)

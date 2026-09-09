@@ -161,6 +161,7 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_SECRET_SCAN_ENABLED` | `true` | Secret scanning over the workspace (regex plus entropy). Matches are redacted; the raw secret never reaches logs, evidence, or the report. |
+| `SYNAPSE_SECRET_HISTORY_ENABLED` | `false` | Also scan git history (every blob reachable from all refs) for a secret committed then removed. Best-effort on a git repository; matches redacted. |
 | `SYNAPSE_MISCONFIG_ENABLED` | `true` | Misconfiguration and IaC scanning of Dockerfiles and Kubernetes manifests. |
 | `SYNAPSE_CSPM_ENABLED` | `false` | Enable durable read-only cloud posture runs. Requires PostgreSQL, fleet assets, `synapse-worker`, sandbox, and kernel egress enforcement. |
 | `SYNAPSE_CSPM_PROVIDERS` | empty | Comma-separated provider allowlist: `aws`, `azure`, `gcp`. |
