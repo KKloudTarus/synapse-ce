@@ -317,3 +317,31 @@ func xpathPythonDocument(parameterized bool) pythonprogram.Document {
 	document.Entrypoints = []pythonprogram.EntrypointHint{{SymbolID: route.ID, Kind: "framework_route", Pos: route.Pos}}
 	return document
 }
+
+// The deserialization class covers the wider pickle-backed loader ecosystem, and continues to EXCLUDE the
+// safe alternatives (json.load, numpy.load without allow_pickle).
+func TestPythonCatalogBroadDeserialization(t *testing.T) {
+	catalog := DefaultPythonCatalog()
+	isSink := func(callee string) bool {
+		for _, sink := range catalog.Sinks {
+			if sink.Class == TaintDeserialization && callMatches(sink.Pattern, []string{callee}, "") {
+				return true
+			}
+		}
+		return false
+	}
+	for _, callee := range []string{
+		"python:pandas:read_pickle", "python:torch:load", "python:joblib:load",
+		"python:shelve:open", "python:pickle:Unpickler",
+	} {
+		if !isSink(callee) {
+			t.Errorf("%q must be a deserialization sink", callee)
+		}
+	}
+	// The safe loaders must NOT be deserialization sinks.
+	for _, callee := range []string{"python:json:load", "python:json:loads", "python:numpy:load"} {
+		if isSink(callee) {
+			t.Errorf("%q is a safe loader and must not be a deserialization sink", callee)
+		}
+	}
+}

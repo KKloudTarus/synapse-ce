@@ -66,10 +66,18 @@ func DefaultPythonCatalog() PythonCatalog {
 			pySink([]string{"django.http"}, []string{"HttpResponse"}, TaintXSS, "CWE-79", "python-taint-xss", 0, "content"),
 			pySink([]string{"fastapi.responses", "starlette.responses"}, []string{"HTMLResponse"}, TaintXSS, "CWE-79", "python-taint-xss", 0, "content"),
 
-			// CWE-502: unsafe object/data loaders.
-			pySink([]string{"pickle", "_pickle", "dill", "cloudpickle", "marshal"}, []string{"load", "loads"}, TaintDeserialization, "CWE-502", "python-taint-deserialization", 0, "file", "data", "bytes_object"),
+			// CWE-502: unsafe object/data loaders. Every entry is a pickle- or exec-backed loader that runs
+			// attacker-controllable code on untrusted input; the safe alternatives (json.load, yaml.safe_load,
+			// numpy.load without allow_pickle) are deliberately NOT listed. pickle.Unpickler and shelve.open
+			// are constructors whose file argument feeds a later .load()/read, so the file itself is modeled.
+			pySink([]string{"pickle", "_pickle", "dill", "cloudpickle", "marshal"}, []string{"load", "loads", "Unpickler"}, TaintDeserialization, "CWE-502", "python-taint-deserialization", 0, "file", "data", "bytes_object"),
 			pySink([]string{"jsonpickle"}, []string{"decode", "loads"}, TaintDeserialization, "CWE-502", "python-taint-deserialization", 0, "string", "data"),
 			pySink([]string{"yaml"}, []string{"load", "unsafe_load", "full_load"}, TaintDeserialization, "CWE-502", "python-taint-deserialization", 0, "stream"),
+			// Pickle-backed loaders in the wider data-science and stdlib ecosystem.
+			pySink([]string{"pandas"}, []string{"read_pickle"}, TaintDeserialization, "CWE-502", "python-taint-deserialization", 0, "filepath_or_buffer"),
+			pySink([]string{"torch"}, []string{"load"}, TaintDeserialization, "CWE-502", "python-taint-deserialization", 0, "f"),
+			pySink([]string{"joblib"}, []string{"load"}, TaintDeserialization, "CWE-502", "python-taint-deserialization", 0, "filename"),
+			pySink([]string{"shelve"}, []string{"open"}, TaintDeserialization, "CWE-502", "python-taint-deserialization", 0, "filename"),
 
 			// CWE-601: untrusted redirect targets.
 			pySink([]string{"flask", "werkzeug.utils", "django.shortcuts", "starlette.responses", "fastapi.responses"}, []string{"redirect", "RedirectResponse"}, TaintRedirect, "CWE-601", "python-taint-open-redirect", 0, "location", "to", "url"),
