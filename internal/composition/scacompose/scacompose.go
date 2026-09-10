@@ -46,6 +46,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/syft"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/taintrules"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vexfile"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/binregistry"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
@@ -514,7 +515,18 @@ func pythonTaintScanner(cfg config.Config, sb *sandbox.Runner, proposer TaintPro
 	} else {
 		log.Warn("python taint: synapse-ast runs unsandboxed (dev only); target source is parsed but never executed")
 	}
-	coordinator, err := taintscan.NewPythonCoordinator(factsProvider, proposer, taint.DefaultPythonCatalog(), audit, clock)
+	catalog := taint.DefaultPythonCatalog()
+	if cfg.TaintRulesFile != "" {
+		custom, found, cerr := taintrules.Load(cfg.TaintRulesFile)
+		if cerr != nil {
+			return nil, fmt.Errorf("load custom taint rules %q: %w", cfg.TaintRulesFile, cerr)
+		}
+		if found && !custom.Empty() {
+			catalog = catalog.WithCustomPython(custom.Python)
+			log.Info("custom python taint rules loaded", "sources", len(custom.Python.Sources), "sinks", len(custom.Python.Sinks))
+		}
+	}
+	coordinator, err := taintscan.NewPythonCoordinator(factsProvider, proposer, catalog, audit, clock)
 	if err != nil {
 		return nil, fmt.Errorf("python semantic taint coordinator init: %w", err)
 	}
