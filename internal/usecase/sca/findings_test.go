@@ -324,3 +324,35 @@ func TestClassifyVulns_UnversionedClearsFix(t *testing.T) {
 		t.Errorf("next FixedVersion should be preserved, got %q", vulns[1].FixedVersion)
 	}
 }
+
+func TestClassifyVulns_GraphScopeDowngradesProvidedOnlyTransitive(t *testing.T) {
+	// A Maven-style graph: a direct compile dep pulls in a compile transitive AND a provided-only transitive.
+	// The provided-only one is reachable from the root only through a provided edge, so classifyVulns must
+	// downgrade its scope below production even though its component scope reads production.
+	starter := "pkg:maven/org.springframework.boot/spring-boot-starter@2.7.5"
+	snake := "pkg:maven/org.yaml/snakeyaml@1.30"
+	tomcat := "pkg:maven/org.apache.tomcat/tomcat-embed-el@9.0.68"
+	doc := &sbom.SBOM{
+		Components: []sbom.Component{
+			{Name: "org.springframework.boot:spring-boot-starter", Version: "2.7.5", PURL: starter, Scope: sbom.ScopeProduction},
+			{Name: "org.yaml:snakeyaml", Version: "1.30", PURL: snake, Scope: sbom.ScopeProduction},
+			{Name: "org.apache.tomcat:tomcat-embed-el", Version: "9.0.68", PURL: tomcat, Scope: sbom.ScopeProduction},
+		},
+		Dependencies: []sbom.Dependency{
+			{Ref: starter, DependsOn: []string{snake}, Scope: "compile"},
+			{Ref: starter, DependsOn: []string{tomcat}, Scope: "provided"},
+		},
+	}
+	vulns := []vulnerability.Vulnerability{
+		{ID: "CVE-A", Component: "org.yaml:snakeyaml", Version: "1.30", Severity: shared.SeverityHigh},
+		{ID: "CVE-B", Component: "org.apache.tomcat:tomcat-embed-el", Version: "9.0.68", Severity: shared.SeverityHigh},
+	}
+	classifyVulns(doc, vulns)
+
+	if vulns[0].Scope != sbom.ScopeProduction {
+		t.Errorf("compile-path snakeyaml must stay production, got %q", vulns[0].Scope)
+	}
+	if vulns[1].Scope == sbom.ScopeProduction {
+		t.Errorf("provided-only tomcat-embed-el must be downgraded below production, got %q", vulns[1].Scope)
+	}
+}

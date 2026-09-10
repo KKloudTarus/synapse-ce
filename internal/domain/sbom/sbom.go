@@ -341,9 +341,18 @@ func ComputeLicenseCoverage(comps []Component) LicenseCoverage {
 
 // Dependency is one edge of the dependency graph: Ref depends on each of
 // DependsOn. Identities are PURLs (or name@version when a component has no PURL).
+//
+// Scope is the dependency scope shared by every edge in this entry (Maven compile/runtime/provided/test/
+// system, or "" for the parser default of production). A parser that resolves different scopes for a
+// parent's children emits one Dependency per scope group, so Scope stays per-edge. Optional marks an
+// optional dependency (Maven <optional>true</optional>, npm optionalDependencies), which a consumer never
+// counts as a required path. Both are omitempty so existing stored graphs and the CycloneDX import are
+// unaffected.
 type Dependency struct {
 	Ref       string
 	DependsOn []string
+	Scope     string `json:",omitempty"`
+	Optional  bool   `json:",omitempty"`
 }
 
 // PathToRoot returns the dependency path from a top-level dependency (a node that
@@ -475,6 +484,136 @@ func IntroducedBy(deps []Dependency, target string) []string {
 		out = append(out, r)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// Dependency-scope risk ranks. A path's effective scope is the MOST restrictive scope on it (Maven scope
+// narrowing): a compile dependency reached only through a test edge is test-only. Higher rank is more
+// restrictive. Empty and the production scopes rank 0, so a parser that records no scope defaults to
+// production and nothing regresses.
+const (
+	scopeRankProduction = 0 // compile, runtime, "" (default)
+	scopeRankProvided   = 1 // provided, system: present at build but not shipped
+	scopeRankTest       = 2 // test: never shipped, never transitive to a consumer
+)
+
+// scopeRank maps a raw edge scope (a Maven scope, or the domain Scope* labels) to its restriction rank.
+// Unknown scopes are treated as production so an unrecognized value never hides a real dependency.
+func scopeRank(scope string) int {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case ScopeTest, ScopeDevelopment:
+		return scopeRankTest
+	case "provided", "system":
+		return scopeRankProvided
+	default: // compile, runtime, "", production, or anything unrecognized
+		return scopeRankProduction
+	}
+}
+
+// scopeLabel is the normalized risk label for a restriction rank, the value ReachableScopes reports.
+func scopeLabel(rank int) string {
+	switch rank {
+	case scopeRankTest:
+		return ScopeTest
+	case scopeRankProvided:
+		return "provided"
+	default:
+		return ScopeProduction
+	}
+}
+
+// ReachableScopes returns, for every node in the dependency graph, the set of normalized scope labels by
+// which it is reachable from a root (a node nothing depends on). Traversal seeds each root at production and
+// NARROWS along every edge to the more restrictive of the path scope so far and the edge's Scope, so a node
+// reached only through test edges is reported test-only while a node with at least one all-production path is
+// production-reachable. This turns dependency scope into a GRAPH property: a transitive package pulled in
+// solely by a test dependency can be deprioritized even though its own file path looks like production. The
+// result never omits a node in the graph; a node with no recorded scopes on any path is production. Empty
+// edge scope is production, and the walk is cycle-safe (each (node, scope) is visited once).
+func ReachableScopes(deps []Dependency) map[string]map[string]bool {
+	type edge struct {
+		child string
+		rank  int
+	}
+	edges := map[string][]edge{}
+	hasDependent := map[string]bool{}
+	inGraph := map[string]bool{}
+	for _, d := range deps {
+		inGraph[d.Ref] = true
+		rank := scopeRank(d.Scope)
+		for _, child := range d.DependsOn {
+			edges[d.Ref] = append(edges[d.Ref], edge{child: child, rank: rank})
+			hasDependent[child] = true
+			inGraph[child] = true
+		}
+	}
+	result := map[string]map[string]bool{}
+	seen := map[string]map[int]bool{} // node -> visited ranks, for cycle safety
+	visit := func(node string, rank int) bool {
+		if seen[node] == nil {
+			seen[node] = map[int]bool{}
+		}
+		if seen[node][rank] {
+			return false
+		}
+		seen[node][rank] = true
+		if result[node] == nil {
+			result[node] = map[string]bool{}
+		}
+		result[node][scopeLabel(rank)] = true
+		return true
+	}
+	type item struct {
+		node string
+		rank int
+	}
+	var roots []string
+	for id := range inGraph {
+		if !hasDependent[id] {
+			roots = append(roots, id)
+		}
+	}
+	sort.Strings(roots)
+	var queue []item
+	for _, r := range roots {
+		if visit(r, scopeRankProduction) {
+			queue = append(queue, item{r, scopeRankProduction})
+		}
+	}
+	for len(queue) > 0 {
+		it := queue[0]
+		queue = queue[1:]
+		for _, e := range edges[it.node] {
+			narrowed := it.rank
+			if e.rank > narrowed {
+				narrowed = e.rank // most restrictive scope on the path wins
+			}
+			if visit(e.child, narrowed) {
+				queue = append(queue, item{e.child, narrowed})
+			}
+		}
+	}
+	// A component with no root (every node reachable only inside a cycle) is never reached by the BFS above.
+	// Report those nodes as production rather than omitting them: with no clean root path we cannot prove a
+	// non-production scope, and omission would silently exclude them from a caller iterating the result.
+	for id := range inGraph {
+		if result[id] == nil {
+			result[id] = map[string]bool{scopeLabel(scopeRankProduction): true}
+		}
+	}
+	return result
+}
+
+// ProductionReachable reports, per node, whether it is reachable by at least one all-production path from a
+// root. It is the boolean a risk consumer wants: a node NOT production-reachable is dev/test/provided-only
+// and can be deprioritized. A node absent from the graph is reported false (not production-reachable) only if
+// it is truly absent; a node in the graph with no edges is a root and is production.
+func ProductionReachable(deps []Dependency) map[string]bool {
+	scopes := ReachableScopes(deps)
+	out := make(map[string]bool, len(scopes))
+	for node, set := range scopes {
+		out[node] = set[ScopeProduction]
+	}
 	return out
 }
 
