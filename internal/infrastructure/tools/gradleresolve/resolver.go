@@ -95,6 +95,7 @@ func (r *Resolver) WithGradleHome(dir string) *Resolver {
 }
 
 var _ ports.GradleResolver = (*Resolver)(nil)
+var _ ports.GradleGraphResolver = (*Resolver)(nil)
 
 // Resolve resolves every Gradle build under dir and returns the union of their Maven-coordinate
 // components, deduped by PURL. When dir is itself a Gradle build it resolves that one; when dir is a
@@ -161,6 +162,60 @@ func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, e
 		return all, fmt.Errorf("gradle resolve: %w", firstErr)
 	}
 	return all, nil
+}
+
+// ResolveGraph resolves every Gradle build under dir and returns the union of their Maven-coordinate
+// components AND the dependency EDGES (from the resolution-result graph the init script now prints), with
+// per-edge scope. It is the graph-aware companion to Resolve, letting the SCA pipeline attach a dependency
+// path and the introducing direct deps to a transitive Gradle CVE. Same best-effort, partial-tolerant, and
+// fail-closed semantics as Resolve; every edge is `runtime` scope (the init script resolves only
+// runtimeClasspath).
+func (r *Resolver) ResolveGraph(ctx context.Context, dir string) ([]sbom.Component, []sbom.Dependency, error) {
+	roots := buildRoots(dir)
+	if len(roots) == 0 {
+		return nil, nil, nil
+	}
+	initDir, err := os.MkdirTemp("", "synapse-gradleinit-")
+	if err != nil {
+		return nil, nil, fmt.Errorf("gradle resolve: init script: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(initDir) }()
+	initPath := filepath.Join(initDir, "synapse-resolve.init.gradle")
+	if err := os.WriteFile(initPath, []byte(initScript), 0o600); err != nil {
+		return nil, nil, fmt.Errorf("gradle resolve: write init script: %w", err)
+	}
+	seen := map[string]bool{}
+	var allComps []sbom.Component
+	var allDeps []sbom.Dependency
+	var firstErr error
+	for _, root := range roots {
+		if ctx.Err() != nil {
+			break
+		}
+		out, err := r.run(ctx, root, initPath)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %w", relOrBase(dir, root), err)
+			}
+			continue
+		}
+		comps, deps, unresolved := parseGradleGraph(out)
+		for _, c := range comps {
+			if !seen[c.PURL] {
+				seen[c.PURL] = true
+				allComps = append(allComps, c)
+			}
+		}
+		allDeps = append(allDeps, deps...)
+		if len(unresolved) > 0 && firstErr == nil {
+			firstErr = fmt.Errorf("%s: %d dependency(ies) NOT resolved (e.g. %q — repository unreachable or artifact missing)",
+				relOrBase(dir, root), len(unresolved), unresolved[0])
+		}
+	}
+	if firstErr != nil {
+		return allComps, allDeps, fmt.Errorf("gradle resolve: %w", firstErr)
+	}
+	return allComps, allDeps, nil
 }
 
 // relOrBase labels a failing build root by its path relative to the scan dir (so same-named sub-builds
@@ -289,6 +344,14 @@ const initScript = `gradle.projectsEvaluated {
                 rr.allDependencies { d ->
                     if (d instanceof org.gradle.api.artifacts.result.UnresolvedDependencyResult) {
                         println "SYNAPSE_RESOLVE_ERROR ${d.requested.displayName}"
+                    } else if (d instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult) {
+                        def sel = d.selected.id
+                        if (sel instanceof org.gradle.api.artifacts.component.ModuleComponentIdentifier) {
+                            def from = d.from.id
+                            def parent = (from instanceof org.gradle.api.artifacts.component.ModuleComponentIdentifier) ?
+                                "${from.group}:${from.module}:${from.version}" : "SYNAPSE_ROOT"
+                            println "SYNAPSE_EDGE ${parent}|${sel.group}:${sel.module}:${sel.version}"
+                        }
                     }
                 }
             } catch (Throwable t) {

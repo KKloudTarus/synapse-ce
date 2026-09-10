@@ -2665,10 +2665,20 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	gradleResolved := false
 	if s.gradleResolver != nil {
 		step = trace.start(stageSBOM, "gradle-resolve", "gradle-resolver", "Resolve Gradle dependency tree", map[string]int{"components": countComponents(doc)})
-		resolvedComps, grr := s.gradleResolver.Resolve(ctx, ws.Dir)
+		// Prefer the graph-aware resolver: it returns the resolution-graph EDGES, so a transitive Gradle CVE
+		// gets a dependency path + its introducing direct deps. A components-only resolver still works.
+		var resolvedComps []sbom.Component
+		var resolvedDeps []sbom.Dependency
+		var grr error
+		if gr, ok := s.gradleResolver.(ports.GradleGraphResolver); ok {
+			resolvedComps, resolvedDeps, grr = gr.ResolveGraph(ctx, ws.Dir)
+		} else {
+			resolvedComps, grr = s.gradleResolver.Resolve(ctx, ws.Dir)
+		}
 		before := countComponents(doc)
 		if len(resolvedComps) > 0 {
 			mergeResolvedJVM(doc, resolvedComps, false) // runtimeClasspath only → keep syft's provided/compileOnly jars
+			mergeResolvedJVMDeps(doc, resolvedDeps)     // fold the resolved edges over syft's maven subgraph
 			gradleResolved = true
 		}
 		switch {

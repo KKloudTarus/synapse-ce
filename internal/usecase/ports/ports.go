@@ -1627,6 +1627,14 @@ type GradleResolver interface {
 	Resolve(ctx context.Context, dir string) ([]sbom.Component, error)
 }
 
+// GradleGraphResolver is the optional graph-aware capability of a GradleResolver: it returns the resolved
+// components AND the dependency EDGES (with per-edge scope) from the resolution-result graph. A resolver
+// implementing it lets the SCA pipeline attach a dependency path and the introducing direct deps to a
+// transitive Gradle CVE. Separate from GradleResolver so a components-only resolver still satisfies the base.
+type GradleGraphResolver interface {
+	ResolveGraph(ctx context.Context, dir string) ([]sbom.Component, []sbom.Dependency, error)
+}
+
 // NPMResolver resolves an npm project's FULL dependency tree (direct + transitive, with pinned versions)
 // from a package.json that has NO committed lockfile — the common raw-source state where the manifest
 // declares only semver RANGES and the SBOM otherwise sees no resolvable version to advisory-match. It
