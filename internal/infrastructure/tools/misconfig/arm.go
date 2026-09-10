@@ -200,7 +200,7 @@ func (s *armScanner) scanResource(res armResource) {
 				"minimumTlsVersion is below TLS 1.2. Set it to TLS1_2 or a newer supported version.")
 		}
 		enc := mapValue(props, "encryption")
-		if armBool(mapValue(enc, "requireInfrastructureEncryption"), false) != armTrue {
+		if !armDynamicNode(enc) && armBool(mapValue(enc, "requireInfrastructureEncryption"), false) != armTrue {
 			s.add(res, "arm-storage-infrastructure-encryption-disabled", "Storage infrastructure encryption is not enabled", shared.SeverityMedium, res.line,
 				"The storage account does not require infrastructure encryption, so data is protected by only one encryption layer. Set encryption.requireInfrastructureEncryption to true where supported.")
 		}
@@ -229,8 +229,9 @@ func (s *armScanner) scanResource(res armResource) {
 			s.add(res, "arm-aks-rbac-disabled", "AKS role-based access control is disabled", shared.SeverityHigh, armLine(mapValue(props, "enableRBAC"), res.line),
 				"enableRBAC is false, so Kubernetes authorization is not enforced through RBAC. Enable RBAC and grant only the required roles.")
 		}
-		private := mapValue(mapValue(props, "apiServerAccessProfile"), "enablePrivateCluster")
-		if armBool(private, false) == armFalse {
+		apiAccess := mapValue(props, "apiServerAccessProfile")
+		private := mapValue(apiAccess, "enablePrivateCluster")
+		if !armDynamicNode(apiAccess) && armBool(private, false) == armFalse {
 			s.add(res, "arm-aks-private-cluster-disabled", "AKS API server is not private", shared.SeverityMedium, res.line,
 				"The cluster does not enable a private API server. Enable apiServerAccessProfile.enablePrivateCluster or tightly restrict authorized IP ranges.")
 		}
@@ -285,8 +286,9 @@ func (s *armScanner) scanResource(res armResource) {
 		s.scanManagedIdentity(res)
 
 	case "microsoft.compute/virtualmachines":
-		enc := mapValue(mapValue(props, "securityProfile"), "encryptionAtHost")
-		if armBool(enc, false) == armFalse {
+		secProfile := mapValue(props, "securityProfile")
+		enc := mapValue(secProfile, "encryptionAtHost")
+		if !armDynamicNode(secProfile) && armBool(enc, false) == armFalse {
 			s.add(res, "arm-vm-encryption-at-host-disabled", "Virtual machine host encryption is not enabled", shared.SeverityMedium, res.line,
 				"securityProfile.encryptionAtHost is not true. Enable encryption at host where supported so temporary disks and host caches are encrypted.")
 		}
@@ -373,6 +375,9 @@ func (s *armScanner) scanNSGRule(res armResource, props *yaml.Node) {
 }
 
 func (s *armScanner) scanManagedIdentity(res armResource) {
+	if armDynamicNode(res.identity) {
+		return // a dynamically assigned identity is unknown, not a missing one
+	}
 	if res.identity == nil || res.identity.Kind != yaml.MappingNode {
 		s.add(res, "arm-managed-identity-missing", "Resource has no managed identity", shared.SeverityLow, res.line,
 			"The resource declares no managed identity. Prefer a system-assigned or user-assigned identity over embedded application credentials where the service supports it.")
@@ -568,6 +573,15 @@ func armLine(n *yaml.Node, fallback int) int {
 func armExpression(v string) bool {
 	v = strings.TrimSpace(v)
 	return strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]")
+}
+
+// armDynamicNode reports whether n is present but a dynamic expression, i.e. a scalar the scanner cannot
+// resolve (an ARM `[...]` expression, or a Bicep expression represented as the same-shaped sentinel). A
+// nested lookup into such a node returns nil, which would otherwise read as "absent" and drive a false
+// "hardening absent" finding, so callers must treat a dynamic object/value as unknown and not flag it.
+func armDynamicNode(n *yaml.Node) bool {
+	v, ok := armLiteral(n)
+	return ok && armExpression(v)
 }
 
 func armSensitiveLiteral(v string) bool {

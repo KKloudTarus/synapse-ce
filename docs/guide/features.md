@@ -42,10 +42,13 @@ keyword prefilters, per-rule regular expressions, and a Shannon-entropy gate for
 secrets. Every match is redacted before it is stored, so the raw secret never reaches a log,
 the evidence ledger, or a report.
 
-**Misconfiguration and IaC scanning.** Owned checks over parsed Dockerfiles and Kubernetes
-manifests flag issues such as running as root, unpinned base images, pipe-to-shell installs,
-privileged or host-namespace pods, host-path mounts, and dangerous capabilities. The rules are
-precision-biased: an unset default is not flagged, only an explicit unsafe setting.
+**Misconfiguration and IaC scanning.** Owned checks over parsed Dockerfiles, Kubernetes
+manifests, Helm charts, Docker Compose, GitHub Actions workflows, Terraform (HCL),
+CloudFormation, and Azure Resource Manager and Bicep templates flag issues such as running as
+root, unpinned base images, pipe-to-shell installs, privileged or host-namespace pods, host-path
+mounts, dangerous capabilities, public storage, and open network rules. The rules are
+precision-biased: a dynamic or templated value is treated as unknown, so only an explicit unsafe
+literal is flagged.
 
 ## Container image and OS-package analysis
 
