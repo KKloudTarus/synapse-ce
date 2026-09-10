@@ -146,7 +146,10 @@ func DefaultCatalog() Catalog {
 			"net/http.Request.PostFormValue",
 			"net/http.Request.FormFile",
 			"net/http.Request.Cookie",
-			"net/http.Header.Get", // request headers (r.Header.Get) – header-driven injection
+			"net/http.Request.PathValue", // Go 1.22 routing: a path parameter (r.PathValue("id")) is user-controlled
+			"net/http.Request.Referer",   // the Referer header
+			"net/http.Request.UserAgent", // the User-Agent header
+			"net/http.Header.Get",        // request headers (r.Header.Get) – header-driven injection
 			"net/url.Values.Get",
 			// Process environment / argv are attacker-influenced in many deployment models.
 			"os.Getenv",

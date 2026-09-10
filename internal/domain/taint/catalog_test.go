@@ -213,3 +213,19 @@ func TestWriteFileNotAPathSink(t *testing.T) {
 		}
 	}
 }
+
+// The Go source set includes the Go 1.22 path parameter and the header accessors, so a flow from a path
+// parameter (or Referer/User-Agent) into a sink is detected.
+func TestAssembleExpandedSources(t *testing.T) {
+	for _, src := range []string{"net/http.Request.PathValue", "net/http.Request.Referer", "net/http.Request.UserAgent"} {
+		g := callgraph.Graph{Edges: []callgraph.Edge{
+			{Caller: "app.handler", Callees: []string{src, "app.op"}},
+			{Caller: "app.op", Callees: []string{"os/exec.Command"}},
+		}}
+		fg, _ := Assemble(g, DefaultCatalog())
+		vulns := fg.Vulnerabilities()
+		if len(vulns) != 1 || vulns[0].Source != "app.handler" || vulns[0].Sink != "app.op" {
+			t.Errorf("%s: expected a source->sink flow, got %+v", src, vulns)
+		}
+	}
+}
