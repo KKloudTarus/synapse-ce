@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcomparison"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/findinglineage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
@@ -25,6 +26,19 @@ func (repository *FindingLineageRepository) registerRollback(ctx context.Context
 			resolutions()
 			overrides()
 			skips()
+		}
+	})
+}
+
+func (repository *AssessmentComparisonRepository) registerRollback(ctx context.Context) {
+	registerTenantCheckpoint(ctx, repository, func(tenantID shared.ID) func() {
+		comparisons := captureTenantEntries(repository.comparisons, func(k comparisonKey, _ assessmentcomparison.Comparison) bool { return k.tenantID == tenantID })
+		hashes := captureTenantEntries(repository.byInputHash, func(_ string, k comparisonKey) bool { return k.tenantID == tenantID })
+		return func() {
+			repository.mu.Lock()
+			defer repository.mu.Unlock()
+			comparisons()
+			hashes()
 		}
 	})
 }
