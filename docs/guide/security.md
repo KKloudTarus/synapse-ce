@@ -88,6 +88,10 @@ admin, consultant, reviewer, and read-only. Separation of duties means a machine
 never verify or accept its own claim. Tenant isolation is enforced at the service layer, so a
 caller cannot read another tenant's engagement even if a route wrapper is bypassed.
 
+Assessment lifecycle projections are additive and fail closed behind independent rollout gates. Cycle, member, request, backfill, integrity, Snapshot, Finding-lineage, Comparison, relationship-review, closure-manifest, and report tables use composite tenant ownership constraints and forced PostgreSQL RLS. Native Snapshot finalization recomputes aggregate and lane manifest hashes from server-stored Scan Runs; callers submit identifiers only and cannot forge target, coverage, version, or evidence fields. Retained writes use idempotency keys, lease-token fencing, and optimistic concurrency.
+
+Closure manifests use bounded canonical inputs and SHA-256 hashes, immutable path/reference rows, one active manifest per Cycle, and a Cycle-version binding that blocks silent post-closure drift. Historical relationship review accepts only exact frozen boundaries plus deterministic evidence; imported references are hash-only, reasons reject credential material, and confirmation emits only an append-only repair plan marked `execution: blocked`. No endpoint in this slice can move or merge Cycle members.
+
 External CI/CD integrations add a write-only encrypted credential boundary and an SSRF-resistant outbound connector. HTTPS, redirect rejection, per-dial address validation, tenant RLS, bounded responses, and exact-commit-only correlation are documented in [External CI/CD integrations](integrations.md).
 ## Operator identities and key revocation
 
@@ -133,6 +137,7 @@ that controls each, never a variable's value. That is deployment topology, and i
 deliberately so the dashboard can explain a disabled feature to the person looking at it rather than
 showing a bare `404`.
 
+Assessment lifecycle projections are additive and fail closed behind independent rollout gates. Cycle, member, request, backfill, integrity, and Snapshot tables use tenant ownership constraints and forced PostgreSQL RLS. Native Snapshot finalization recomputes aggregate and lane manifest hashes from server-stored Scan Runs; callers submit identifiers only and cannot forge target, coverage, version, or evidence fields. Retained writes use idempotency keys, and pointer changes use optimistic concurrency.
 ## Browser OIDC access
 
 Browser OIDC uses a backend-for-frontend model. The server accepts an identity only for an exact approved

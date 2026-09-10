@@ -276,7 +276,7 @@ Required, by variable name. Any `SYNAPSE_ENV` value other than `development`, `d
 | `SYNAPSE_EVIDENCE_SIGNING_SEED` | Ed25519 seed giving the evidence and audit chain a stable key ID |
 | `SYNAPSE_MEASURE_CURSOR_SECRET` | HMAC key signing measure pagination cursors |
 | `SYNAPSE_SANDBOX_ENABLED` | `true` on a Linux host. If set and bubblewrap is missing, startup fails closed |
-| `SYNAPSE_BLOB_ENDPOINT` | Object store for evidence artifacts |
+| `SYNAPSE_BLOB_ENDPOINT` | Shared object store for evidence artifacts and immutable uploaded source; API and workers use the same endpoint and bucket |
 
 Recommended hardening:
 
@@ -289,7 +289,18 @@ Recommended hardening:
 - Enable `SYNAPSE_LEADER_ENABLED` when running more than one API or worker, so scheduled dispatch runs
   exactly once.
 - Terminate TLS at your load balancer or reverse proxy in front of the API.
-- Back up the database and the evidence object store together; a report depends on both.
+- Back up the database and artifact store together, including uploaded-source archives; reports and
+  reproducible source scans depend on their retained objects and metadata.
+
+In local deployments without S3/MinIO, uploaded source uses the persistent
+`SYNAPSE_ENGAGEMENT_SOURCE_DIR` filesystem fallback. API and workers must share its mounted volume;
+matching path strings in separate containers are insufficient. Keep this directory outside source
+checkouts and temporary scan workspaces. An in-memory database still loses source associations on
+restart, so use PostgreSQL for durable local deployments too. Before rollout, verify that a restart
+preserves the original archive's filename, SHA-256 and attribution, and that the worker can read it.
+Changing a root or bucket does not transfer existing archives. Follow the
+[uploaded-source upgrade and recovery steps](assessment-lifecycle-operations.md#storage-upgrades-and-unavailable-archives)
+for migrations `0159`/`0160` and missing legacy data.
 
 `GET /healthz` and `GET /readyz` are unauthenticated by design. Every other API route requires the bearer token.
 
