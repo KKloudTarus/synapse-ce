@@ -8,6 +8,28 @@ enforcement is exercised, not bypassed. Nothing is persisted.
 
 Build it with `make build`. The binary lands at `./bin/synapse-cli`.
 
+## Assessment Cycle historical backfill
+
+`synapse-assessment-backfill` creates one deterministic singleton Cycle for each
+eligible historical Assessment. It excludes hidden Project and fleet-host contexts,
+uses tenant-scoped RLS transactions, and persists leases, checkpoints, audit records,
+and stable per-item outcomes so interrupted runs can resume safely.
+
+Run a dry-run first:
+
+```bash
+synapse-assessment-backfill \
+  --tenants tenant-a \
+  --actor migration-operator \
+  --dry-run
+```
+
+Remove `--dry-run` only after reviewing the result. `--tenants` accepts one to four
+unique tenant IDs; `--batch-size` is limited to 1–2000; `--timeout` and
+`--lease-duration` must be positive. `--resume-after` accepts an Assessment ID and
+requires exactly one tenant. The command requires `SYNAPSE_DB_DSN` and refuses a
+PostgreSQL role that can bypass RLS. It never runs schema migrations itself.
+
 ## RulePack release commands
 
 The `rulepack` command group verifies signed detection-content artifacts, replays their deterministic
