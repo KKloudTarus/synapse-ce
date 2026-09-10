@@ -13,6 +13,7 @@ func (rt *Router) exportSARIF(w http.ResponseWriter, r *http.Request) { rt.write
 func (rt *Router) exportOpenVEX(w http.ResponseWriter, r *http.Request) {
 	rt.writeExport(w, r, "openvex")
 }
+func (rt *Router) exportCSAF(w http.ResponseWriter, r *http.Request) { rt.writeExport(w, r, "csaf") }
 
 // exportSPDX renders the engagement's latest scan SBOM as a downloadable SPDX
 // document (deterministic, from stored data). Defaults to SPDX 3.0.1 (CRA-aligned);
@@ -145,8 +146,12 @@ func (rt *Router) writeExport(w http.ResponseWriter, r *http.Request, format str
 	case "sarif":
 		doc, err = rt.export.SARIF(r.Context(), shared.ID(id))
 		ctype, filename = "application/sarif+json", "synapse-"+safeID(id)+".sarif.json"
+	case "csaf":
+		doc, err = rt.export.CSAFVEX(r.Context(), shared.ID(id))
+		ctype, filename = "application/json", "synapse-"+safeID(id)+".csaf.json"
 	default:
-		doc, err = rt.export.OpenVEX(r.Context(), shared.ID(id))
+		// ?supersedes=<prior @id> lets a re-exporter declare which document this one replaces.
+		doc, err = rt.export.OpenVEX(r.Context(), shared.ID(id), r.URL.Query().Get("supersedes"))
 		ctype, filename = "application/json", "synapse-"+safeID(id)+".openvex.json"
 	}
 	if err != nil {

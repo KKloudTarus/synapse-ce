@@ -75,23 +75,46 @@ func (s *Service) SARIF(ctx context.Context, engagementID shared.ID) (*SARIFLog,
 	}}), nil
 }
 
-// OpenVEX returns the engagement's vulnerability findings as an OpenVEX document. It
-// reads through the publishability gate – consistent with SARIF and the
-// report path – so an unproven exploitation finding is never asserted in a VEX statement.
-func (s *Service) OpenVEX(ctx context.Context, engagementID shared.ID) (*VEXDoc, error) {
-	fs, err := s.findings.ListPublishableByEngagement(ctx, engagementID)
+// OpenVEX returns the engagement's vulnerability findings as an OpenVEX 0.2 document. It reads through the
+// publishability gate – consistent with SARIF and the report path – so an unproven exploitation finding is
+// never asserted in a VEX statement. supersedes, when non-empty, is the @id of a prior document this one
+// replaces (the caller who re-exports knows it); the document's own @id is content-addressed, so an
+// unchanged re-export is idempotent.
+func (s *Service) OpenVEX(ctx context.Context, engagementID shared.ID, supersedes string) (*VEXDoc, error) {
+	fs, notReachable, vexJust, err := s.vexInputs(ctx, engagementID)
 	if err != nil {
 		return nil, err
+	}
+	return buildOpenVEX(engagementID, fs, notReachable, vexJust, s.clock.Now().UTC(), s.version, supersedes), nil
+}
+
+// CSAFVEX returns the same publishable findings as a CSAF 2.0 VEX document, the enterprise-standard
+// companion to OpenVEX. It asserts exactly what OpenVEX asserts, reshaped into CSAF's product-tree +
+// per-vulnerability product-status model.
+func (s *Service) CSAFVEX(ctx context.Context, engagementID shared.ID) (*CSAFDoc, error) {
+	fs, notReachable, vexJust, err := s.vexInputs(ctx, engagementID)
+	if err != nil {
+		return nil, err
+	}
+	return buildCSAFVEX(engagementID, fs, notReachable, vexJust, s.clock.Now().UTC(), s.version), nil
+}
+
+// vexInputs gathers the shared inputs both VEX emitters read: the publishable findings, the not-reachable
+// tier map, and the human VEX justifications.
+func (s *Service) vexInputs(ctx context.Context, engagementID shared.ID) ([]finding.Finding, map[string]judgment.ReachabilityTier, map[string]string, error) {
+	fs, err := s.findings.ListPublishableByEngagement(ctx, engagementID)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	notReachable, err := s.notReachableTiers(ctx, engagementID)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	vexJust, err := s.vexJustifications(ctx, engagementID)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	return buildOpenVEX(engagementID, fs, notReachable, vexJust, s.clock.Now().UTC(), s.version), nil
+	return fs, notReachable, vexJust, nil
 }
 
 // vexJustifications maps a finding id → the OpenVEX justification of a PUBLISHABLE (confirmed + verified

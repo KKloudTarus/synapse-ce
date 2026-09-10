@@ -68,7 +68,7 @@ func TestOpenVEXJustificationByTier(t *testing.T) {
 		mkJudg("f1", judgment.StateConfirmed, 90, judgment.NotReachable, judgment.Tier2), // f1 is affected -> not overridden
 	}})
 
-	vex, err := svc.OpenVEX(ctx, "e1")
+	vex, err := svc.OpenVEX(ctx, "e1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestOpenVEXJustificationFromVexJudgment(t *testing.T) {
 		mkVexJudg("fc", judgment.StateProposed, 0, vex.ComponentNotPresent),              // proposed -> unpublishable -> ignored
 	}})
 
-	doc, err := svc.OpenVEX(ctx, "e1")
+	doc, err := svc.OpenVEX(ctx, "e1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestBuildSARIF(t *testing.T) {
 
 func TestBuildOpenVEX(t *testing.T) {
 	now := time.Unix(0, 0).UTC()
-	doc := buildOpenVEX("e1", sampleFindings(), nil, nil, now, "v1.2.3")
+	doc := buildOpenVEX("e1", sampleFindings(), nil, nil, now, "v1.2.3", "")
 	if doc.Context != vexContext || doc.Version != 1 || doc.Author != "Synapse" {
 		t.Fatalf("bad header: %+v", doc)
 	}
@@ -216,7 +216,7 @@ func TestExportsApplyPublishabilityGate(t *testing.T) {
 		}
 	}
 
-	vex, err := svc.OpenVEX(ctx, "e1")
+	vex, err := svc.OpenVEX(ctx, "e1", "")
 	if err != nil {
 		t.Fatalf("openvex: %v", err)
 	}
