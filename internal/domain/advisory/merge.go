@@ -82,7 +82,29 @@ func Merge(observations []Observation) (Canonical, error) {
 	canonical.ActiveExploitation = mergeBool(observations, func(observation Observation) *bool { return observation.ActiveExploitation })
 	canonical.EPSS = selectFloat(observations, func(observation Observation) *float64 { return observation.EPSS })
 	canonical.EPSSPercentile = selectFloat(observations, func(observation Observation) *float64 { return observation.EPSSPercentile })
+	canonical.Advisory.CWEs = mergeAdvisoryStrings(observations, func(o Observation) []string { return o.Advisory.CWEs })
+	canonical.Advisory.References = mergeAdvisoryStrings(observations, func(o Observation) []string { return o.Advisory.References })
 	return canonical, nil
+}
+
+// mergeAdvisoryStrings unions a string-valued advisory field (CWEs, References) across observations, trimmed,
+// deduped, and sorted for a deterministic canonical. Returns nil when no observation carries a value, so an
+// advisory without the field keeps it out of the stored blob.
+func mergeAdvisoryStrings(observations []Observation, extract func(Observation) []string) []string {
+	set := map[string]struct{}{}
+	for _, observation := range observations {
+		for _, value := range extract(observation) {
+			if value = strings.TrimSpace(value); value != "" {
+				set[value] = struct{}{}
+			}
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	out := mapKeys(set)
+	sort.Strings(out)
+	return out
 }
 
 func observationIDs(observation Observation) []string {

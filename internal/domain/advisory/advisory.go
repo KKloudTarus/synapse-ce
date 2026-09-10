@@ -36,6 +36,13 @@ type Advisory struct {
 	EPSS           float64 `json:"EPSS,omitempty"`
 	EPSSPercentile float64 `json:"EPSSPercentile,omitempty"`
 	PublicExploit  bool    `json:"PublicExploit,omitempty"`
+
+	// CWEs are the weakness ids the feed assigns (e.g. "CWE-79"), and References are the advisory's reference
+	// URLs, carried verbatim from the source feed (GHSA today) so a report can cite the weakness class and the
+	// upstream links the OSV mirror drops. Both are unioned across feeds by the materializer. omitempty keeps
+	// them out of existing stored blobs and out of an advisory that carries neither.
+	CWEs       []string `json:"CWEs,omitempty"`
+	References []string `json:"References,omitempty"`
 }
 
 type CPEMatch struct {
