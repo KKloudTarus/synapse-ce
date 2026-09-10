@@ -21,14 +21,16 @@ type scanRunKey struct {
 
 // ScanRunStore is an in-memory store of scan-run manifests and sealed provenance.
 type ScanRunStore struct {
-	mu   sync.RWMutex
-	runs map[scanRunKey]scanrun.ScanRun
+	mu       sync.RWMutex
+	runs     map[scanRunKey]scanrun.ScanRun
+	evidence map[scanRunKey]ports.ScanRunEvidence
 }
 
 // NewScanRunStore returns an empty in-memory scan-run store.
 func NewScanRunStore() *ScanRunStore {
 	return &ScanRunStore{
-		runs: make(map[scanRunKey]scanrun.ScanRun),
+		runs:     make(map[scanRunKey]scanrun.ScanRun),
+		evidence: make(map[scanRunKey]ports.ScanRunEvidence),
 	}
 }
 
@@ -41,6 +43,7 @@ var (
 func (s *ScanRunStore) Save(ctx context.Context, run ports.ScanRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.registerRollback(ctx)
 
 	tenantID, ok := shared.TenantFrom(ctx)
 	if !ok || tenantID.IsZero() {
@@ -134,6 +137,7 @@ func (s *ScanRunStore) SaveScanRun(ctx context.Context, run scanrun.ScanRun) err
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.registerRollback(ctx)
 
 	key := scanRunKey{TenantID: run.TenantID, ID: run.ID}
 	if _, ok := s.runs[key]; ok {
@@ -187,7 +191,7 @@ func (s *ScanRunStore) ListScanRuns(_ context.Context, tenantID, engagementID sh
 }
 
 // SealScanRun atomically seals a scan run and records its normalized lanes, versions, and stages.
-func (s *ScanRunStore) SealScanRun(_ context.Context, command ports.SealScanRunCommand) error {
+func (s *ScanRunStore) SealScanRun(ctx context.Context, command ports.SealScanRunCommand) error {
 	tenantID := command.TenantID
 	runID := command.RunID
 	terminalStatus := command.TerminalStatus
@@ -217,6 +221,7 @@ func (s *ScanRunStore) SealScanRun(_ context.Context, command ports.SealScanRunC
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.registerRollback(ctx)
 
 	key := scanRunKey{TenantID: tenantID, ID: runID}
 	existing, ok := s.runs[key]
