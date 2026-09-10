@@ -22,6 +22,8 @@ describe('Settings Layout', () => {
     expect(screen.getByRole('link', { name: 'Audit' })).toHaveAttribute('href', '/settings')
     expect(screen.getByRole('link', { name: 'Team' })).toHaveAttribute('href', '/settings/team')
     expect(screen.getByRole('link', { name: 'Integrations' })).toHaveAttribute('href', '/settings/integrations')
+
+    expect(screen.getByRole('link', { name: 'Relationships' })).toHaveAttribute('href', '/settings/relationships')
     expect(screen.getByRole('link', { name: 'Config' })).toHaveAttribute('href', '/settings/config')
     expect(screen.getByText('Audit Log Content')).toBeInTheDocument()
   })

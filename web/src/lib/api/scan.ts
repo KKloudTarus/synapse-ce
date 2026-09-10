@@ -1,3 +1,4 @@
+import { mapUploadedSource } from './engagements'
 import type {
   AITriage,
   CodeQualityReport,
@@ -309,6 +310,9 @@ function mapScanRun(r: any): ScanRun {
     manifestHash: r?.manifest_hash ?? '',
     laneCount: r?.lane_count ?? 0,
     completeCoverage: r?.complete_coverage === true,
+    sourcePackage: r?.source_package ? mapUploadedSource(r.source_package) : undefined,
+    targetKind: r?.target_kind || undefined,
+    target: r?.target || undefined,
   }
 }
 

@@ -1,0 +1,251 @@
+import { AlertCircle, ChevronDown, GitBranch01, InfoCircle, Link01, Plus, RefreshCw01, XClose } from '@untitledui/icons'
+import { useId, useMemo, useState, type ReactNode } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Dialog, Modal, ModalOverlay } from '../../components/application/modals/modal'
+import { SlideoutMenu } from '../../components/application/slideout-menus/slideout-menu'
+import { styles as buttonStyles } from '../../components/base/buttons/button'
+import { Tooltip, TooltipTrigger } from '../../components/base/tooltip/tooltip'
+import { Button, cn, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../../components/ui'
+import { useFetch } from '../../hooks'
+import { api, ApiError } from '../../lib/api'
+import { newIdempotencyKey } from '../../lib/api/client'
+import { useRequestIdempotency } from '../../hooks/useRequestIdempotency'
+import { useRetestSource } from '../../hooks/useRetestSource'
+import { RetestSourceChoice } from '../../components/synapse/RetestSourceChoice'
+import type { AssessmentClosureManifest, AssessmentCycleMember, AssessmentLifecycle, AssessmentRelationshipChangeRequest, AssessmentRelationshipPreview } from '../../lib/types'
+
+type Drawer = 'retest' | 'reparent' | 'select_head' | null
+const RETEST_REQUIREMENTS = 'Re-test creation requires operate permission and a completed Assessment in an open Cycle. Completed Cycles must be reopened first. No dates or authorization details are needed to create the draft; configure execution authorization before scanning.'
+const actionLinkClass = cn(buttonStyles.common.root, buttonStyles.sizes.sm.root, buttonStyles.colors.secondary.root)
+
+export function AssessmentLifecyclePanel({ assessmentId, engagementStatus }: { assessmentId: string; engagementStatus: string }) {
+  const meFetch = useFetch(() => api.me().catch(() => null), { deps: [] })
+  const lifecycleUIEnabled = meFetch.data?.features?.assessmentLifecycleUIDefault === true
+  const lifecycleFetch = useFetch(() => api.assessmentLifecycle(assessmentId), { enabled: lifecycleUIEnabled, deps: [assessmentId, lifecycleUIEnabled, engagementStatus] })
+  const [drawer, setDrawer] = useState<Drawer>(null)
+  const [expandedAssessmentId, setExpandedAssessmentId] = useState<string | null>(null)
+  const detailsId = useId()
+  const detailsExpanded = expandedAssessmentId === assessmentId
+  const lifecycle = lifecycleFetch.data
+  const manifestFetch = useFetch(() => api.listAssessmentClosureManifests(lifecycle?.cycle.id ?? ''), {
+    enabled: lifecycleUIEnabled && Boolean(lifecycle?.cycle.activeClosureManifestId), deps: [lifecycleUIEnabled, lifecycle?.cycle.activeClosureManifestId, lifecycle?.cycle.id],
+  })
+  const current = lifecycle?.members.find((member) => member.assessmentId === assessmentId)
+
+  if (meFetch.loading || !lifecycleUIEnabled) return null
+  if (lifecycleFetch.loading && !lifecycle) return <Spinner label="Loading Assessment lifecycle…" />
+  if (lifecycleFetch.error) return <ErrorState message={lifecycleFetch.error} />
+  if (!lifecycle) return <EmptyState icon={GitBranch01} title="Lifecycle migration pending" hint="This Assessment does not yet have a readable Cycle projection." />
+
+  const role = meFetch.data?.role ?? ''
+  const canOperate = ['admin', 'consultant', 'member'].includes(role)
+  const canReview = role === 'admin' || role === 'reviewer'
+  const canCreateRetest = canOperate && !lifecycleFetch.loading && lifecycle.cycle.status === 'open' && engagementStatus === 'completed'
+  const selectableHeads = lifecycle.branchHeads.filter((member) => member.assessmentId !== lifecycle.cycle.selectedHeadAssessmentId && !member.archivedAt)
+  const activeManifest = manifestFetch.data?.find((manifest) => manifest.lifecycle === 'active') ?? null
+  const finalAssessmentId = activeManifest?.finalAssessmentId ?? ''
+  return <>
+    <section aria-labelledby={`${detailsId}-title`} className="border-t border-secondary pt-4">
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+            <h2 id={`${detailsId}-title`} className="flex items-center gap-2 text-sm font-semibold text-primary">
+              <GitBranch01 className="size-4 text-fg-brand-primary" aria-hidden="true" />Assessment lifecycle
+            </h2>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Pill>{current?.assessmentType === 'retest' ? `Re-test #${current.retestNumber}` : 'Initial'}</Pill>
+              <span className="text-xs capitalize text-tertiary">{engagementStatus || 'unknown'} Assessment</span>
+              <span aria-hidden="true" className="text-quaternary">·</span>
+              <span className="text-xs capitalize text-secondary">{lifecycle.cycle.status} Cycle</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to={`/engagements/${encodeURIComponent(assessmentId)}/comparison`} className={actionLinkClass}>Compare</Link>
+            {canOperate ? <Button disabled={!canCreateRetest} aria-describedby={!canCreateRetest ? `${detailsId}-eligibility` : undefined} onClick={() => setDrawer('retest')}>
+              <Plus className="size-4" aria-hidden="true" />Create Re-test
+            </Button> : null}
+            {!canCreateRetest ? <Tooltip title="Re-test requirements" description={RETEST_REQUIREMENTS} placement="bottom end">
+              <TooltipTrigger aria-label="Re-test requirements" onPress={() => setExpandedAssessmentId(assessmentId)} className="flex items-center justify-center rounded-lg p-2 text-tertiary hover:bg-secondary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"><InfoCircle className="size-4" aria-hidden="true" /></TooltipTrigger>
+            </Tooltip> : null}
+            {canReview && lifecycle.cycle.status === 'completed' ? <Link to={`/assessment-cycles/${encodeURIComponent(lifecycle.cycle.id)}`} className={actionLinkClass}><RefreshCw01 className="size-4" aria-hidden="true" />Review reopen</Link> : null}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+            <Link to={`/assessment-cycles/${encodeURIComponent(lifecycle.cycle.id)}`} className="max-w-full break-all rounded font-medium text-secondary hover:text-brand-secondary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">{lifecycle.cycle.name}</Link>
+            {assessmentId === lifecycle.cycle.selectedHeadAssessmentId ? <span className="inline-flex items-center gap-1.5 font-medium text-brand-secondary"><span aria-hidden="true" className="size-1.5 rounded-full bg-brand-solid" />Selected head</span> : null}
+            {assessmentId === displayLatest(lifecycle)?.assessmentId ? <span className="text-tertiary" title="Display-only recency; not semantic precedence.">Display latest</span> : null}
+            {assessmentId === finalAssessmentId ? <Pill className="text-success">Final</Pill> : null}
+          </div>
+          <button type="button" aria-expanded={detailsExpanded} aria-controls={detailsId} onClick={() => setExpandedAssessmentId(detailsExpanded ? null : assessmentId)} className="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg text-xs text-tertiary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
+            <span className="tabular-nums">{lifecycle.members.length} {lifecycle.members.length === 1 ? 'member' : 'members'} · {lifecycle.branchHeads.length} {lifecycle.branchHeads.length === 1 ? 'branch head' : 'branch heads'}</span>
+            <span className="flex items-center gap-1.5 font-semibold text-secondary">Details &amp; history<ChevronDown className={cn('size-4 transition-transform motion-reduce:transition-none', detailsExpanded && 'rotate-180')} aria-hidden="true" /></span>
+          </button>
+        </div>
+        {!canCreateRetest ? <p id={`${detailsId}-eligibility`} className="sr-only">{RETEST_REQUIREMENTS} Open Details &amp; history for more information.</p> : null}
+      </div>
+      <div id={detailsId} hidden={!detailsExpanded} className="mt-3 space-y-4 border-t border-secondary pt-4">
+        <nav aria-label="Assessment lifecycle breadcrumb" className="flex flex-wrap items-center gap-2 text-xs text-tertiary">
+          {boundaryParts(lifecycle).map((part, index) => <span key={part} className="contents">{index ? <span aria-hidden="true">/</span> : null}<span className="break-all">{part}</span></span>)}
+          <span aria-hidden="true">/</span><span className="break-all">{lifecycle.cycle.name}</span><span aria-hidden="true">/</span><span className="break-all font-mono">{assessmentId}</span>
+        </nav>
+        {!canCreateRetest ? <p className="flex items-start gap-2 text-xs leading-relaxed text-tertiary"><AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>{RETEST_REQUIREMENTS}</span></p> : null}
+        <LifecycleTree lifecycle={lifecycle} currentAssessmentId={assessmentId} activeManifest={activeManifest} />
+        {canReview && ((current?.assessmentType === 'retest' && !current.archivedAt && lifecycle.cycle.status === 'open') || selectableHeads.length > 0) ? <div className="flex flex-wrap gap-2 border-t border-secondary pt-3">
+          {current?.assessmentType === 'retest' && !current.archivedAt && lifecycle.cycle.status === 'open' ? <Button variant="secondary" onClick={() => setDrawer('reparent')}><Link01 className="size-4" aria-hidden="true" />Change relationship</Button> : null}
+          {selectableHeads.length ? <Button variant="secondary" onClick={() => setDrawer('select_head')}><GitBranch01 className="size-4" aria-hidden="true" />Select Cycle head</Button> : null}
+        </div> : null}
+      </div>
+    </section>
+    {drawer === 'retest' ? <RetestDrawer lifecycle={lifecycle} assessmentId={assessmentId} onClose={() => setDrawer(null)} onCreated={() => lifecycleFetch.refetch()} /> : null}
+    {drawer === 'reparent' && current ? <RelationshipDrawer lifecycle={lifecycle} member={current} command="reparent_within_cycle" onClose={() => setDrawer(null)} onCommitted={() => { setDrawer(null); lifecycleFetch.refetch() }} /> : null}
+    {drawer === 'select_head' ? <RelationshipDrawer lifecycle={lifecycle} command="select_head" onClose={() => setDrawer(null)} onCommitted={() => { setDrawer(null); lifecycleFetch.refetch() }} /> : null}
+  </>
+}
+
+function LifecycleTree({ lifecycle, currentAssessmentId, activeManifest }: { lifecycle: AssessmentLifecycle; currentAssessmentId: string; activeManifest: AssessmentClosureManifest | null }) {
+  const children = useMemo(() => {
+    const result = new Map<string, AssessmentCycleMember[]>()
+    for (const member of lifecycle.members) {
+      const key = member.predecessorAssessmentId
+      result.set(key, [...(result.get(key) ?? []), member])
+    }
+    for (const values of result.values()) values.sort((left, right) => left.retestNumber - right.retestNumber || left.assessmentId.localeCompare(right.assessmentId))
+    return result
+  }, [lifecycle.members])
+  const finalPath = new Map(activeManifest?.path.map((member) => [member.assessmentId, member.snapshotId]) ?? [])
+  function render(parentId: string, depth: number): ReactNode {
+    return (children.get(parentId) ?? []).map((member) => <li key={member.assessmentId} className="relative">
+      <Link to={`/engagements/${encodeURIComponent(member.assessmentId)}`} aria-label={memberLabel(member)} aria-current={member.assessmentId === currentAssessmentId ? 'page' : undefined} className={cn('flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg px-3 py-2 text-sm hover:bg-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand', member.assessmentId === currentAssessmentId && 'bg-secondary')} style={{ marginLeft: Math.min(depth, 4) * 12 }}>
+        <span className="font-semibold text-primary">{member.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial'}</span><span className="break-all font-mono text-xs text-tertiary">{member.assessmentId}</span>
+        {member.assessmentId === lifecycle.cycle.selectedHeadAssessmentId ? <Pill className="text-brand-secondary">Selected head</Pill> : null}
+        {lifecycle.branchHeads.some((head) => head.assessmentId === member.assessmentId) ? <Pill>Branch head</Pill> : null}
+        {member.assessmentId === displayLatest(lifecycle)?.assessmentId ? <Pill>Display latest</Pill> : null}
+        {member.assessmentId === activeManifest?.finalAssessmentId ? <Pill className="text-success">Final</Pill> : null}
+        {member.archivedAt ? <Pill className="text-warning">Archived</Pill> : null}
+        {member.plannedDate ? <Pill>Planned {member.plannedDate}</Pill> : null}
+        <span className="ml-auto break-all text-xs text-tertiary">{finalPath.get(member.assessmentId) ? `Snapshot ${finalPath.get(member.assessmentId)} · ` : ''}{formatDate(member.createdAt)} · Relationship v{member.relationshipVersion}</span>
+      </Link>
+      {(children.get(member.assessmentId)?.length ?? 0) > 0 ? <ul role="list" className="mt-1 space-y-1">{render(member.assessmentId, depth + 1)}</ul> : null}
+    </li>)
+  }
+  return <div><h3 className="mb-2 text-xs font-semibold text-secondary">Cycle history</h3><ul role="list" aria-label="Assessment Cycle history" className="space-y-1">{render('', 0)}</ul></div>
+}
+
+function boundaryParts(lifecycle: AssessmentLifecycle) {
+  const parts: string[] = []
+  if (lifecycle.cycle.businessAssetId) parts.push(`Asset ${lifecycle.cycle.businessAssetId}`)
+  if (lifecycle.cycle.projectId) parts.push(`Project ${lifecycle.cycle.projectId}`)
+  return parts.length ? parts : ['Standalone']
+}
+
+function formatDate(value: string) {
+  return value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : 'Unknown date'
+}
+
+function RetestDrawer({ lifecycle, assessmentId, onClose, onCreated }: { lifecycle: AssessmentLifecycle; assessmentId: string; onClose: () => void; onCreated: () => void }) {
+  const navigate = useNavigate()
+  const activeMembers = lifecycle.members.filter((member) => !member.archivedAt && member.assessmentStatus === 'completed')
+  const [predecessor, setPredecessor] = useState(activeMembers.some((member) => member.assessmentId === assessmentId) ? assessmentId : activeMembers[0]?.assessmentId ?? '')
+  const sourceSelection = useRetestSource(predecessor)
+  const [scopeStrategy, setScopeStrategy] = useState<'copy' | 'empty'>('copy')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [created, setCreated] = useState<Awaited<ReturnType<typeof api.createRetest>> | null>(null)
+  const requestKey = useRequestIdempotency()
+  const effectiveScopeStrategy = sourceSelection.hasUploadedSource ? 'copy' : scopeStrategy
+  const sourceInvalid = Boolean(sourceSelection.validationError(effectiveScopeStrategy))
+  async function submit() {
+    if (submitting || created) return
+    if (!predecessor) { setError('Choose a completed predecessor Assessment.'); return }
+    const sourceError = sourceSelection.validationError(effectiveScopeStrategy)
+    if (sourceError) { setError(sourceError); return }
+    setSubmitting(true); setError('')
+    try {
+      const input = {
+        source: undefined, ...sourceSelection.input, predecessorAssessmentId: predecessor, scopeStrategy: effectiveScopeStrategy, profileStrategy: 'none' as const,
+      }
+      const result = await api.createRetest(predecessor, { ...input, idempotencyKey: requestKey(input, input.source) })
+      setCreated(result); onCreated()
+    } catch (cause) { setError(cause instanceof Error && cause.message.includes('source_package_required_for_retest') ? 'The predecessor source is unavailable. Retry the source lookup or upload a new source archive.' : cause instanceof Error ? cause.message : 'Re-test creation failed.') }
+    finally { setSubmitting(false) }
+  }
+  const selectedPredecessor = activeMembers.find((member) => member.assessmentId === predecessor)
+  return <ModalOverlay isOpen onOpenChange={(open) => { if (!open) onClose() }}>
+    <Modal className="w-full max-w-2xl overflow-hidden rounded-2xl border border-secondary bg-primary shadow-2xl">
+      <Dialog aria-label="Create Re-test" className="flex max-h-[85vh] flex-col overflow-hidden">
+        <header className="flex shrink-0 items-start justify-between border-b border-secondary px-6 py-5">
+          <div className="min-w-0 pr-4">
+            <h2 className="text-lg font-semibold text-primary">Create Re-test</h2>
+            <p className="mt-1 text-sm leading-relaxed text-tertiary">Create a new assessment to verify remediation from a previous assessment.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close dialog" className="flex size-10 shrink-0 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-secondary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"><XClose className="size-4" aria-hidden="true" /></button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          {created ? <div role="status" className="space-y-4">
+            <div className="rounded-xl border border-success/30 bg-success/10 p-4">
+              <p className="font-semibold text-primary">Re-test created</p>
+              <p className="mt-1 break-words text-sm text-secondary">{created.engagement.name}</p>
+              <p className="mt-1 text-sm text-secondary">Scope: {created.inheritanceDiff.scope} · Authorization: {created.inheritanceDiff.authorization} · RoE: {created.inheritanceDiff.roe} · Scanner profile: {created.inheritanceDiff.scannerProfile}</p>
+              {created.sourceSelection ? <p className="mt-1 break-words text-sm text-secondary">Source: {created.sourceSelection.filename} · {created.sourceSelection.strategy === 'reuse_current' ? 'Previous archive reused' : 'New archive uploaded'}</p> : null}
+            </div>
+            <p className="text-sm text-tertiary">The draft is ready. Configure execution authorization in Re-test Settings before running a scan.</p>
+            {created.warnings.map((warning) => <p key={warning} className="flex gap-2 text-sm text-warning"><AlertCircle className="size-4 shrink-0" aria-hidden="true" />{labelize(warning)}</p>)}
+          </div> : <div className="space-y-7">
+            <section aria-labelledby="retest-context-title" className="rounded-xl border border-secondary bg-secondary/20 p-4">
+              <p id="retest-context-title" className="text-xs font-semibold uppercase tracking-wide text-tertiary">Based on</p>
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <p className="font-semibold text-primary">{lifecycle.cycle.name}</p>
+                <span aria-hidden="true" className="text-quaternary">·</span>
+                <span className="text-sm text-secondary">{selectedPredecessor ? memberShortLabel(selectedPredecessor) : 'Choose an assessment'} · Completed</span>
+              </div>
+              <div className="mt-4 max-w-md"><Field label="Based on assessment"><Select disabled={submitting} ariaLabel="Based on Assessment" value={predecessor} onValueChange={(value) => { setPredecessor(value); setError('') }} options={activeMembers.map((member) => ({ value: member.assessmentId, label: memberShortLabel(member) }))} className="w-full" /></Field></div>
+            </section>
+            <RetestSourceChoice selection={sourceSelection} disabled={submitting} onChange={() => setError('')} />
+            <section className="border-t border-secondary pt-6"><Field label="Assessment scope" hint={sourceSelection.hasUploadedSource ? 'This Re-test uses the same targets and scope as the previous assessment.' : 'Choose which targets and scope to carry forward.'}><Select disabled={submitting || sourceSelection.loading || sourceSelection.hasUploadedSource} ariaLabel="Assessment scope" value={effectiveScopeStrategy} onValueChange={(value) => setScopeStrategy(value as 'copy' | 'empty')} options={[{ value: 'copy', label: 'Copy previous scope' }, { value: 'empty', label: 'Start with empty scope' }]} className="w-full" /></Field></section>
+            <p className="text-xs leading-relaxed text-tertiary">Creating a Re-test does not start a scan. Configure execution authorization later in Settings.</p>
+            {error ? <ErrorState message={error} /> : null}
+          </div>}
+        </div>
+        <footer className="flex shrink-0 items-center justify-end gap-3 border-t border-secondary bg-primary px-6 py-4">
+          {created ? <><Button variant="secondary" onClick={onClose}>Close</Button><Button onClick={() => navigate(`/engagements/${encodeURIComponent(created.engagement.id)}`)}>Open Re-test</Button></> : <><Button variant="ghost" disabled={submitting} onClick={onClose}>Cancel</Button><Button loading={submitting} disabled={sourceSelection.loading || Boolean(sourceSelection.error) || sourceInvalid} onClick={submit}>Create Re-test</Button></>}
+        </footer>
+      </Dialog>
+    </Modal>
+  </ModalOverlay>
+}
+
+function RelationshipDrawer({ lifecycle, member, command, onClose, onCommitted }: { lifecycle: AssessmentLifecycle; member?: AssessmentCycleMember; command: 'reparent_within_cycle' | 'select_head'; onClose: () => void; onCommitted: () => void }) {
+  const options = command === 'reparent_within_cycle'
+    ? lifecycle.members.filter((value) => !value.archivedAt && value.assessmentId !== member?.assessmentId).map((value) => ({ value: value.assessmentId, label: memberLabel(value) }))
+    : lifecycle.branchHeads.filter((value) => !value.archivedAt && value.assessmentId !== lifecycle.cycle.selectedHeadAssessmentId).map((value) => ({ value: value.assessmentId, label: memberLabel(value) }))
+  const [target, setTarget] = useState(options[0]?.value ?? '')
+  const [preview, setPreview] = useState<AssessmentRelationshipPreview | null>(null)
+  const [reason, setReason] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [idempotencyKey, setIdempotencyKey] = useState('')
+  const change: AssessmentRelationshipChangeRequest = command === 'reparent_within_cycle'
+    ? { command, assessmentId: member?.assessmentId, newPredecessorAssessmentId: target }
+    : { command, selectedHeadAssessmentId: target }
+  async function loadPreview() {
+    if (!target) return
+    setLoading(true); setError('')
+    try { setPreview(await api.previewAssessmentRelationshipChange(lifecycle.cycle.id, change)); setIdempotencyKey(newIdempotencyKey()) }
+    catch (cause) { setError(cause instanceof ApiError && cause.status === 403 ? 'Review permission is required.' : cause instanceof Error ? cause.message : 'Preview failed.') }
+    finally { setLoading(false) }
+  }
+  async function commit() {
+    if (!preview?.commitAllowed || !preview.previewToken || preview.reasonRequired && !reason.trim()) return
+    setLoading(true); setError('')
+    try { await api.commitAssessmentRelationshipChange(lifecycle.cycle.id, preview.cycleVersion, change, preview.previewToken, reason.trim(), idempotencyKey); onCommitted() }
+    catch (cause) { setError(cause instanceof ApiError && cause.status === 409 ? 'Preview is stale, expired, or already used. Refresh the authoritative preview; your selection and reason are preserved.' : cause instanceof Error ? cause.message : 'Commit failed.') }
+    finally { setLoading(false) }
+  }
+  return <SlideoutMenu isOpen onOpenChange={(open) => { if (!open) onClose() }}><SlideoutMenu.Header onClose={onClose}><h2 className="text-lg font-semibold text-primary">{command === 'reparent_within_cycle' ? 'Change relationship' : 'Select Cycle head'}</h2><p className="mt-1 text-sm text-tertiary">Only supported same-Cycle commands are exposed. Raw scans and evidence are never deleted.</p></SlideoutMenu.Header><SlideoutMenu.Content><div className="space-y-4"><Field label={command === 'reparent_within_cycle' ? 'New predecessor' : 'Eligible branch head'}><Select ariaLabel="Relationship target" value={target} onValueChange={(value) => { setTarget(value); setPreview(null) }} options={options} className="w-full" /></Field><Button variant="secondary" loading={loading} disabled={!target} onClick={loadPreview}><RefreshCw01 className="size-4" aria-hidden="true" />Preview server impact</Button>{preview ? <div role="status" aria-live="polite" className="space-y-3 rounded-lg border border-secondary p-4 text-sm"><p><strong>Selected head:</strong> {preview.oldSelectedHeadAssessmentId} → {preview.newSelectedHeadAssessmentId}</p>{command === 'reparent_within_cycle' ? <p><strong>Predecessor:</strong> {preview.oldPredecessorAssessmentId} → {preview.newPredecessorAssessmentId}</p> : null}<p><strong>Descendants:</strong> {preview.descendantAssessmentIds.join(', ') || 'None'}</p><p><strong>Impacted:</strong> {preview.impact.memberIds.length} members · {preview.impact.snapshotIds.length} snapshots · {preview.impact.identityIds.length} identities · {preview.impact.comparisonIds.length} comparisons · {preview.impact.projectionIds.length} projections</p>{preview.locks.length ? <div className="rounded-lg bg-warning/10 p-3 text-warning"><strong>Commit locked:</strong> {preview.locks.map(labelize).join(', ')}</div> : <p className="text-success">No server lock is active.</p>}<p className="font-mono text-xs text-tertiary">Preview v{preview.cycleVersion} · expires {preview.expiresAt || 'not issued'}</p></div> : null}{preview?.reasonRequired ? <Field label="Reason"><Input aria-label="Reason" value={reason} maxLength={512} onChange={(event) => setReason(event.target.value)} /></Field> : null}{error ? <ErrorState message={error} /> : null}<Button loading={loading} disabled={!preview?.commitAllowed || !preview.previewToken || Boolean(preview.reasonRequired && !reason.trim())} onClick={commit}>Commit authoritative preview</Button></div></SlideoutMenu.Content></SlideoutMenu>
+}
+
+function displayLatest(lifecycle: AssessmentLifecycle) { return [...lifecycle.members].filter((member) => !member.archivedAt).sort((left, right) => right.retestNumber - left.retestNumber || right.assessmentId.localeCompare(left.assessmentId))[0] }
+function memberLabel(member: AssessmentCycleMember) { return `${memberShortLabel(member)} · ${member.assessmentId}` }
+function memberShortLabel(member: AssessmentCycleMember) { return member.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial' }
+function labelize(value: string) { return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) }

@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Cube01,
   Dataflow03,
+  GitBranch01,
   Key01,
   LogOut01,
   Plus,
@@ -59,6 +60,7 @@ const NAV_GROUPS: Array<{
       label: 'Security operations',
       items: [
         { icon: Target04, label: 'Engagements', to: '/engagements' },
+        { icon: GitBranch01, label: 'Assessment Cycles', to: '/assessment-cycles' },
         { icon: ShieldTick, label: 'Review Queue', to: '/ai-triage/reviews', capability: 'ai_triage' },
       ],
     },
@@ -155,6 +157,7 @@ function renderDisabledItem({
 
 function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const auth = useOptionalAuth()
+  const lifecycleUIEnabled = auth?.currentUser?.features?.assessmentLifecycleUIDefault === true
   const [signingOut, setSigningOut] = useState(false)
   async function onSignOut() {
     if (!auth) return
@@ -180,7 +183,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
   }
 
   function renderItems(items: NavItem[]) {
-    return items.map(({ icon: Icon, label, to, end, children, capability }) => {
+    return items.filter((item) => item.to !== '/assessment-cycles' || lifecycleUIEnabled).map(({ icon: Icon, label, to, end, children, capability }) => {
       const offline = disabledCapability(capabilities, capability)
       if (offline) return renderDisabledItem({ icon: Icon, label, to, capability: offline, collapsed })
       const hasChildren = Boolean(children && children.length > 0)
