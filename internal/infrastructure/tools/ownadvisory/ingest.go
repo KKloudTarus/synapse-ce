@@ -32,14 +32,40 @@ func ParseOSV(data []byte) (advisory.Advisory, error) {
 	if lbl, ok := doc.DatabaseSpecific["severity"].(string); ok {
 		adv.Severity = shared.SeverityFromLabel(lbl)
 	}
-	// Prefer a CVSS v3.x vector; compute the base score from it (the canonical band source).
+	// Prefer a CVSS v3.x vector, falling back to a CVSS v4.0 vector when no v3 is present; compute the
+	// base score from the vector (the canonical band source). A v3 vector wins over a v4 one so the
+	// offline band matches the historically published v3 score for advisories that carry both.
+	var v3vec, v4vec string
 	for _, sev := range doc.Severity {
-		if strings.HasPrefix(sev.Type, "CVSS_V") && strings.HasPrefix(sev.Score, "CVSS:3.") {
-			adv.CVSSVector = sev.Score
-			if score, ok := shared.CVSSv3BaseScore(sev.Score); ok {
-				adv.CVSSScore = score
-			}
+		if !strings.HasPrefix(sev.Type, "CVSS_V") {
+			continue
+		}
+		switch {
+		case v3vec == "" && strings.HasPrefix(sev.Score, "CVSS:3."):
+			v3vec = sev.Score
+		case v4vec == "" && strings.HasPrefix(sev.Score, "CVSS:4.0"):
+			v4vec = sev.Score
+		}
+	}
+	// Prefer the first SCORABLE vector, not merely the first v3-looking string: a malformed v3 entry
+	// must not suppress a valid v4 one (that would band a real vuln as Unknown).
+	switch {
+	case v3vec != "":
+		if score, ok := shared.CVSSv3BaseScore(v3vec); ok {
+			adv.CVSSVector, adv.CVSSScore = v3vec, score
 			break
+		}
+		if v4vec != "" {
+			if score, ok := shared.CVSSv40BaseScore(v4vec); ok {
+				adv.CVSSVector, adv.CVSSScore = v4vec, score
+				break
+			}
+		}
+		adv.CVSSVector = v3vec // keep the v3 vector even if unscorable; the band is derived downstream
+	case v4vec != "":
+		adv.CVSSVector = v4vec
+		if score, ok := shared.CVSSv40BaseScore(v4vec); ok {
+			adv.CVSSScore = score
 		}
 	}
 	for _, aff := range doc.Affected {

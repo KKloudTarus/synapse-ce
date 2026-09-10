@@ -94,3 +94,64 @@ func TestOfflineEnrich(t *testing.T) {
 		t.Errorf("want source nvd-offline, got %q", res.Source)
 	}
 }
+
+// TestBuildDBIngestsV4Only covers the compact-DB path for D1.6: a v4-only CVE (no v3 group) is stored
+// with its CVSS:4.0 vector and score instead of being skipped.
+func TestBuildDBIngestsV4Only(t *testing.T) {
+	feed := `{"vulnerabilities":[
+	 {"cve":{"id":"CVE-2026-50000","metrics":{"cvssMetricV40":[{"cvssData":{"vectorString":"CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N","baseScore":9.3}}]}}}
+	]}`
+	dir := t.TempDir()
+	f := filepath.Join(dir, "v4.json")
+	os.WriteFile(f, []byte(feed), 0o600)
+	var buf bytes.Buffer
+	n, err := BuildDB([]string{f}, &buf)
+	if err != nil {
+		t.Fatalf("BuildDB: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want 1 entry, got %d\n%s", n, buf.String())
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(`CVSS:4.0/`)) || !bytes.Contains(buf.Bytes(), []byte(`"id":"CVE-2026-50000"`)) {
+		t.Errorf("expected v4 CVE stored, got: %s", buf.String())
+	}
+}
+
+// TestBuildDBPrefersV3OverV4 asserts a CVE carrying both v3.1 and v4 keeps the v3.1 vector, so the
+// stored corpus does not shift for records that already had a v3 band.
+func TestBuildDBPrefersV3OverV4(t *testing.T) {
+	feed := `{"vulnerabilities":[
+	 {"cve":{"id":"CVE-2026-50001","metrics":{
+		"cvssMetricV40":[{"cvssData":{"vectorString":"CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N","baseScore":9.3}}],
+		"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N","baseScore":3.7}}]}}}
+	]}`
+	dir := t.TempDir()
+	f := filepath.Join(dir, "both.json")
+	os.WriteFile(f, []byte(feed), 0o600)
+	var buf bytes.Buffer
+	if _, err := BuildDB([]string{f}, &buf); err != nil {
+		t.Fatalf("BuildDB: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(`CVSS:3.1/`)) || bytes.Contains(buf.Bytes(), []byte(`CVSS:4.0/`)) {
+		t.Errorf("v3.1 must be preferred over v4, got: %s", buf.String())
+	}
+}
+
+// TestBuildDBComputesV4ScoreWhenAbsent covers the compact-DB path when the feed omits the v4 baseScore:
+// the score is computed from the vector so the stored entry is not a vectored 0 (which the enricher
+// would band as Info).
+func TestBuildDBComputesV4ScoreWhenAbsent(t *testing.T) {
+	feed := `{"vulnerabilities":[
+	 {"cve":{"id":"CVE-2026-50002","metrics":{"cvssMetricV40":[{"cvssData":{"vectorString":"CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"}}]}}}
+	]}`
+	dir := t.TempDir()
+	f := filepath.Join(dir, "v4noscore.json")
+	os.WriteFile(f, []byte(feed), 0o600)
+	var buf bytes.Buffer
+	if _, err := BuildDB([]string{f}, &buf); err != nil {
+		t.Fatalf("BuildDB: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(`"s":9.3`)) {
+		t.Errorf("expected computed v4 score 9.3 stored (field s), got: %s", buf.String())
+	}
+}

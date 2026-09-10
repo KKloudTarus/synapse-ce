@@ -266,7 +266,9 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string, symbols []s
 	// may store only the vector) – mirrors the OSV adapter so a vuln found by both correlates to one band.
 	score := a.CVSSScore
 	if score == 0 && a.CVSSVector != "" {
-		if s, ok := shared.CVSSv3BaseScore(a.CVSSVector); ok {
+		// CVSSBaseScore scores a v4.0, v3.x, or v2 vector, so a stored v4-only vector still yields a band
+		// instead of falling to Unknown.
+		if s, ok := shared.CVSSBaseScore(a.CVSSVector); ok {
 			score = s
 			rf.CVSSScore = s
 		}
