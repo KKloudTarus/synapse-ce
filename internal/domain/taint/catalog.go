@@ -166,18 +166,33 @@ func DefaultCatalog() Catalog {
 			// CWE-78 – OS command injection.
 			{Symbol: "os/exec.Command", CWE: "CWE-78", Rule: "taint-command-injection"},
 			{Symbol: "os/exec.CommandContext", CWE: "CWE-78", Rule: "taint-command-injection"},
-			// CWE-22 – path traversal: an attacker-controlled path opened on the host filesystem.
+			// CWE-22 – path traversal: an attacker-controlled path opened on the host filesystem. Only
+			// symbols whose sole meaningful argument is a PATH are listed, so a class-blind function-level
+			// match cannot fire on a tainted content/mode argument (os.WriteFile's data, for example, is
+			// deliberately excluded); os.Rename and os.Symlink take two paths, both of which are the risk.
 			{Symbol: "os.Open", CWE: "CWE-22", Rule: "taint-path-traversal"},
 			{Symbol: "os.OpenFile", CWE: "CWE-22", Rule: "taint-path-traversal"},
 			{Symbol: "os.ReadFile", CWE: "CWE-22", Rule: "taint-path-traversal"},
 			{Symbol: "os.Create", CWE: "CWE-22", Rule: "taint-path-traversal"},
-			// CWE-918 – SSRF: an attacker-controlled URL fetched server-side.
+			{Symbol: "os.Remove", CWE: "CWE-22", Rule: "taint-path-traversal"},
+			{Symbol: "os.RemoveAll", CWE: "CWE-22", Rule: "taint-path-traversal"},
+			{Symbol: "os.Mkdir", CWE: "CWE-22", Rule: "taint-path-traversal"},
+			{Symbol: "os.MkdirAll", CWE: "CWE-22", Rule: "taint-path-traversal"},
+			{Symbol: "os.ReadDir", CWE: "CWE-22", Rule: "taint-path-traversal"},
+			{Symbol: "os.Rename", CWE: "CWE-22", Rule: "taint-path-traversal"},
+			{Symbol: "os.Symlink", CWE: "CWE-22", Rule: "taint-path-traversal"},
+			// CWE-918 – SSRF: an attacker-controlled URL fetched server-side. Each listed helper takes the
+			// destination URL as its leading argument (Post/PostForm also take a body, but the URL is the
+			// argument that decides the destination), so a tainted URL reaching one is a server-side request.
 			{Symbol: "net/http.Get", CWE: "CWE-918", Rule: "taint-ssrf"},
 			{Symbol: "net/http.Post", CWE: "CWE-918", Rule: "taint-ssrf"},
 			{Symbol: "net/http.Head", CWE: "CWE-918", Rule: "taint-ssrf"},
+			{Symbol: "net/http.PostForm", CWE: "CWE-918", Rule: "taint-ssrf"},
 			{Symbol: "net/http.Client.Do", CWE: "CWE-918", Rule: "taint-ssrf"},
 			{Symbol: "net/http.Client.Get", CWE: "CWE-918", Rule: "taint-ssrf"},
 			{Symbol: "net/http.Client.Post", CWE: "CWE-918", Rule: "taint-ssrf"},
+			{Symbol: "net/http.Client.Head", CWE: "CWE-918", Rule: "taint-ssrf"},
+			{Symbol: "net/http.Client.PostForm", CWE: "CWE-918", Rule: "taint-ssrf"},
 			// CWE-79 – reflected XSS. text/template does NOT auto-escape (unlike html/template); and the
 			// dominant Go reflected-XSS sink is writing untrusted bytes straight to the response. NOTE:
 			// ResponseWriter is an INTERFACE, so whether this fires depends on how the call graph resolves
