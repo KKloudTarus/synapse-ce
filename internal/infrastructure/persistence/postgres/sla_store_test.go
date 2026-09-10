@@ -170,6 +170,25 @@ func TestPostgresSLAStore(t *testing.T) {
 	if err != nil || len(events) != 1 || events[0].ID != event.ID {
 		t.Fatalf("events=%+v err=%v", events, err)
 	}
+	batch, err := store.SLAHistories(ctx, tenantID, engagementID, []shared.ID{findingID, "missing"})
+	if err != nil || len(batch.Assessments) != 1 || len(batch.Assessments[findingID]) != len(history) || len(batch.Events[findingID]) != len(events) {
+		t.Fatalf("closure history batch=%+v err=%v", batch, err)
+	}
+	for i := range history {
+		if batch.Assessments[findingID][i].ID != history[i].ID || batch.Assessments[findingID][i].InputHash != history[i].InputHash {
+			t.Fatal("batch lost immutable SLA provenance")
+		}
+	}
+	if batch.Events[findingID][0].Reason != events[0].Reason || !batch.Events[findingID][0].AcceptanceExpiresAt.Equal(*events[0].AcceptanceExpiresAt) {
+		t.Fatal("batch lost SLA decision/expiry")
+	}
+	foreignBatch, err := store.SLAHistories(shared.WithTenant(ctx, "other"), "other", engagementID, []shared.ID{findingID})
+	if err != nil || len(foreignBatch.Assessments)+len(foreignBatch.Events) != 0 {
+		t.Fatalf("cross-tenant SLA batch=%+v err=%v", foreignBatch, err)
+	}
+	if _, err := store.SLAHistories(ctx, tenantID, engagementID, make([]shared.ID, 1001)); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("unbounded SLA batch=%v", err)
+	}
 	third, err := sla.Evaluate(sla.AssessmentInput{
 		TenantID: tenantID, EngagementID: engagementID, FindingID: findingID,
 		Risk: sla.Inputs{Severity: shared.SeverityMedium, CVSSScore: 5.5, EPSS: 0.04, PublicPoC: true, Feasibility: sla.FeasibilityChangeWindow},

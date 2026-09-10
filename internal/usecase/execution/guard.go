@@ -50,7 +50,11 @@ func (g *Guard) Authorize(ctx context.Context, req Request) (time.Time, error) {
 	}
 	now := g.clock.Now()
 	if !eng.AllowsExecution() {
-		g.auditDenied(ctx, req, now, "engagement_inactive")
+		reason := "engagement_inactive"
+		if eng.RequiresExplicitExecutionAuthorization && eng.Status != engagement.StatusCompleted && eng.Status != engagement.StatusArchived {
+			reason = "explicit_authorization_required"
+		}
+		g.auditDenied(ctx, req, now, reason)
 		return time.Time{}, fmt.Errorf("%w: engagement %s is not in an executable state", shared.ErrForbidden, req.EngagementID)
 	}
 	if !eng.IsAuthorizedAt(now) {
@@ -90,7 +94,11 @@ func (g *Guard) AuthorizeEngagementArtifact(ctx context.Context, req Request) (t
 	}
 	now := g.clock.Now()
 	if !eng.AllowsExecution() {
-		g.auditDenied(ctx, req, now, "engagement_inactive")
+		reason := "engagement_inactive"
+		if eng.RequiresExplicitExecutionAuthorization && eng.Status != engagement.StatusCompleted && eng.Status != engagement.StatusArchived {
+			reason = "explicit_authorization_required"
+		}
+		g.auditDenied(ctx, req, now, reason)
 		return time.Time{}, fmt.Errorf("%w: engagement %s is not in an executable state", shared.ErrForbidden, req.EngagementID)
 	}
 	if !eng.IsAuthorizedAt(now) {

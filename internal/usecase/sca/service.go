@@ -125,11 +125,16 @@ type Service struct {
 	projectAnalysisRecorder interface {
 		RecordProjectAnalysis(context.Context, shared.ID, string, time.Time, *ScanResult) error
 	}
-	sourceArtifacts  ports.ProjectSourceArtifactStore
-	comparisonSource ports.ProjectComparisonSource
-	log              *slog.Logger
-	gateDecoder      ports.GateDecoder
-	slaAssessor      ports.FindingSLAAssessor // optional; nil while SYNAPSE_SLA_ENABLED=false
+	sourceArtifacts     ports.ProjectSourceArtifactStore
+	comparisonSource    ports.ProjectComparisonSource
+	log                 *slog.Logger
+	gateDecoder         ports.GateDecoder
+	slaAssessor         ports.FindingSLAAssessor // optional; nil while SYNAPSE_SLA_ENABLED=false
+	scanRunObserver     ScanRunObserver          // optional; tenant-gated assessment lifecycle shadow writer
+	runProvenance       ports.ScanRunProvenanceStore
+	scanRunTransactions ports.TenantTransactionRunner
+	assessmentCycles    ports.AssessmentCycleRepository
+	assessmentSnapshots ports.AssessmentSnapshotDefaultReader
 }
 
 // SetSeverityEnricher configures optional severity backfill (NVD CVSS) for vulnerabilities the
@@ -156,13 +161,7 @@ func (s *Service) UploadedSourceMetadata(ctx context.Context, tenantID, engageme
 }
 
 func (s *Service) StartUploadedSourceScanWithOptions(ctx context.Context, actor string, tenantID, engagementID shared.ID, opts ScanOptions) (ports.ScanJob, error) {
-	item, err := s.UploadedSourceMetadata(ctx, tenantID, engagementID)
-	if err != nil {
-		return ports.ScanJob{}, err
-	}
-	return s.StartScanWithOptions(ctx, actor, engagementID, ports.AcquireRequest{
-		Kind: ports.TargetUpload, Value: item.Target(), Locator: item.Locator,
-	}, opts)
+	return s.StartUploadedSourceVersionScanWithOptions(ctx, actor, tenantID, engagementID, "", opts)
 }
 
 // SetScannedImageRecorder wires the scanned-image digest index (#446). When set, a completed image
@@ -1592,6 +1591,10 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 		return nil, err
 	}
 	req = normalizeLocalTarget(req)
+	req, err = s.pinUploadedSource(ctx, engagementID, req)
+	if err != nil {
+		return nil, err
+	}
 	if s.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.timeout)
@@ -1638,6 +1641,10 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 	}
 	req = normalizeLocalTarget(req)
 	var imported importedsbom.Record
+	req, err = s.pinUploadedSource(ctx, engagementID, req)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
 	var importedDoc *sbom.SBOM
 	var useImported bool
 	if imported, importedDoc, useImported, err = s.loadImportedSBOMForRequest(ctx, engagementID, req, opts); err != nil {
@@ -1661,14 +1668,15 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		_ = importedDoc // loaded now to fail fast; worker reloads the active artifact when executing.
 	}
 	job := ports.ScanJob{
-		ID:           s.ids.NewID().String(),
-		EngagementID: engagementID.String(),
-		Target:       target,
-		Kind:         kind,
-		Status:       ports.ScanRunning,
-		Stage:        "queued",
-		StartedAt:    now,
-		DebugEvents:  []ports.ScanDebugEvent{},
+		SourcePackage: publicSourcePackage(req.SourcePackage),
+		ID:            s.ids.NewID().String(),
+		EngagementID:  engagementID.String(),
+		Target:        target,
+		Kind:          kind,
+		Status:        ports.ScanRunning,
+		Stage:         "queued",
+		StartedAt:     now,
+		DebugEvents:   []ports.ScanDebugEvent{},
 	}
 	if s.jobs != nil {
 		if err := s.jobs.CreateRunning(ctx, job); err != nil {
@@ -1882,10 +1890,25 @@ func (s *Service) SweepStaleScans(ctx context.Context, staleFor time.Duration) (
 			release()
 			continue
 		}
+		jobCtx := ctx
+		if source := job.SourcePackage; source != nil {
+			if source.TenantID.IsZero() || source.EngagementID.String() != job.EngagementID || job.Kind != ports.TargetUpload || job.Target != source.Target() {
+				release()
+				return n, fmt.Errorf("%w: stranded scan source ownership is invalid", shared.ErrValidation)
+			}
+			// The daemon sweeps across tenants. Derive each write's tenant from
+			// the frozen source binding, then verify its engagement owner before
+			// using tenant-scoped persistence; do not weaken the store's checks.
+			jobCtx = shared.WithTenant(ctx, source.TenantID)
+			if _, err := s.engagements.GetByIDInTenant(jobCtx, source.TenantID, source.EngagementID); err != nil {
+				release()
+				return n, fmt.Errorf("verify stranded scan source owner: %w", err)
+			}
+		}
 		fin := s.clock.Now()
 		job.FinishedAt, job.Progress = &fin, 100
 		job.Status, job.Stage, job.Error = ports.ScanFailed, "swept", "scan stranded running past staleFor with no live owner – reclaimed by sweeper"
-		if err := s.jobs.Save(ctx, job); err != nil {
+		if err := s.jobs.Save(jobCtx, job); err != nil {
 			release()
 			return n, fmt.Errorf("save swept scan job %s: %w", job.ID, err)
 		}
@@ -1933,12 +1956,20 @@ func (s *Service) gateAndAudit(ctx context.Context, actor string, engagementID s
 	if req.Kind == ports.TargetImage {
 		targetKind = engagement.TargetImage
 	}
+	metadata := map[string]string{"kind": kindOrLocal(req.Kind), "engagement": engagementID.String(), "mode": opts.Mode}
+	if req.SourcePackage != nil {
+		metadata["source_version_id"] = req.SourcePackage.VersionID.String()
+		metadata["source_sha256"] = req.SourcePackage.SHA256
+		if !req.SourcePackage.ReusedFromVersionID.IsZero() {
+			metadata["reused_from_version_id"] = req.SourcePackage.ReusedFromVersionID.String()
+		}
+	}
 	return s.guard.Authorize(ctx, execution.Request{
 		Actor:        actor,
 		EngagementID: engagementID,
 		Action:       "sca.scan",
 		Target:       engagement.Target{Kind: targetKind, Value: req.Value},
-		Metadata:     map[string]string{"kind": kindOrLocal(req.Kind), "engagement": engagementID.String(), "mode": opts.Mode},
+		Metadata:     metadata,
 	})
 }
 
@@ -2282,6 +2313,9 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 			_, _ = s.correlation.Record(ctx, engagementID, report)
 		}
 	}
+	// The UI cache may combine different scan modes. Native comparison evidence
+	// must contain only the detections from this execution, captured beforehand.
+	assessmentResult := s.copyAssessmentScanResult(result)
 	if s.results != nil {
 		if previousData, loadErr := s.results.LatestResult(ctx, engagementID); loadErr == nil {
 			var previous ScanResult
@@ -2300,14 +2334,9 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	if err != nil {
 		return nil, err
 	}
-	if s.runs != nil {
-		keys := make([]string, 0, len(result.Findings))
-		for _, f := range result.Findings {
-			keys = append(keys, f.DedupKey)
-		}
-		if err := s.runs.Save(ctx, ports.ScanRun{ID: s.newRunID(), EngagementID: engagementID.String(), CreatedAt: now, Manifest: manifest, FindingKeys: keys}); err != nil {
-			return nil, fmt.Errorf("persist scan run: %w", err)
-		}
+	assessmentRunID, err := s.persistAssessmentScanRun(ctx, engagementID, evidenceID, now, ports.AcquireRequest{Kind: ports.TargetUpload, Value: record.TargetRef}, assessmentResult, record.SHA256)
+	if err != nil {
+		return nil, err
 	}
 	if s.scans != nil {
 		skipped, err := s.scans.SaveScan(ctx, engagementID, doc, vulns, snap)
@@ -2343,6 +2372,9 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		if data, mErr := json.Marshal(result); mErr == nil {
 			_ = s.results.SaveResult(ctx, engagementID, data)
 		}
+	}
+	if err := s.notifyAssessmentScanRun(ctx, engagementID, assessmentRunID); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -2476,6 +2508,11 @@ func importedCompleteness(doc *sbom.SBOM) ports.Completeness {
 }
 
 func (s *Service) runPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (*ScanResult, error) {
+	var err error
+	req, err = s.pinUploadedSource(ctx, engagementID, req)
+	if err != nil {
+		return nil, err
+	}
 	stage, pct := stageAcquire, 5
 	trace := newScanDebugTrace(func(events []ports.ScanDebugEvent) { report(stage, pct, events) })
 	report(stage, pct, trace.snapshot())
@@ -2980,6 +3017,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
 	sourceWarnings = append(sourceWarnings, detectionSourceWarnings...)                                // sources skipped by the non-strict degrade policy
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
+	manifest.SourcePackage = publicSourcePackage(req.SourcePackage)
 
 	// Maven, once its full tree is resolved (mvn dependency:list), is no longer an under-reporting
 	// unresolved ecosystem – drop it from the completeness signal so the scan reads as complete.
@@ -3260,6 +3298,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 	}
 
+	assessmentResult := s.copyAssessmentScanResult(result)
 	if s.results != nil {
 		if previousData, loadErr := s.results.LatestResult(ctx, engagementID); loadErr == nil {
 			var previous ScanResult
@@ -3283,20 +3322,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if err != nil {
 		return nil, err
 	}
-	if s.runs != nil {
-		keys := make([]string, 0, len(result.Findings))
-		for _, f := range result.Findings {
-			keys = append(keys, f.DedupKey)
-		}
-		if err := s.runs.Save(ctx, ports.ScanRun{
-			ID:           s.newRunID(),
-			EngagementID: engagementID.String(),
-			CreatedAt:    now,
-			Manifest:     manifest,
-			FindingKeys:  keys,
-		}); err != nil {
-			return nil, fmt.Errorf("persist scan run: %w", err)
-		}
+	assessmentRunID, err := s.persistAssessmentScanRun(ctx, engagementID, evidenceID, now, req, assessmentResult, "")
+	if err != nil {
+		return nil, err
 	}
 
 	// The scan snapshot and the findings are written in SEPARATE transactions. A
@@ -3358,6 +3386,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Record the image's manifest digest so the fleet cluster agent can correlate a running digest
 	// with this scan (#446). This is the pipeline that populates result.Image (image scans).
 	s.recordScannedImage(ctx, engagementID, result)
+	if err := s.notifyAssessmentScanRun(ctx, engagementID, assessmentRunID); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -3455,10 +3486,12 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 	preserved := false
 	preservedVulnerabilities := false
 	if !opts.scansVulnerabilities() {
+		source := current.Manifest.SourcePackage
 		current.Vulnerabilities = previous.Vulnerabilities
 		current.VulnDBSnapshot = previous.VulnDBSnapshot
 		current.ToolVersions = previous.ToolVersions
 		current.Manifest = previous.Manifest
+		current.Manifest.SourcePackage = source
 		current.RiskMatches = previous.RiskMatches
 		current.Findings = mergeFindingsByKind(previous.Findings, current.Findings, true)
 		current.AnalysisCoverage = cloneAnalysisCoverage(previous.AnalysisCoverage)
@@ -4312,7 +4345,7 @@ type ScanDrift struct {
 
 // CompareRuns computes the drift between two runs and explains it from the
 // manifest deltas (chain-of-custody: "why does this differ from last month?").
-func (s *Service) CompareRuns(ctx context.Context, runA, runB string) (ScanDrift, error) {
+func (s *Service) CompareRuns(ctx context.Context, engagementID shared.ID, runA, runB string) (ScanDrift, error) {
 	if s.runs == nil {
 		return ScanDrift{}, fmt.Errorf("scan runs: %w", shared.ErrNotFound)
 	}
@@ -4323,6 +4356,9 @@ func (s *Service) CompareRuns(ctx context.Context, runA, runB string) (ScanDrift
 	b, err := s.runs.Get(ctx, runB)
 	if err != nil {
 		return ScanDrift{}, err
+	}
+	if a.EngagementID != engagementID.String() || b.EngagementID != engagementID.String() {
+		return ScanDrift{}, fmt.Errorf("scan runs: %w", shared.ErrNotFound)
 	}
 	return diffRuns(a, b), nil
 }

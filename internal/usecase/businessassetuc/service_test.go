@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -108,6 +109,50 @@ func TestCoverageAndRetiredAssignment(t *testing.T) {
 	}
 	if err := service.AssignEngagement(ctx, "t1", e.ID, updated.ID, "alice"); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("retired assignment error=%v", err)
+	}
+}
+
+func TestAssignEngagementRejectsFrozenAssessmentCycleBoundary(t *testing.T) {
+	service, _, engagements, _, _, _, clock := newBusinessAssetService(t)
+	ctx := context.Background()
+	first, err := service.Create(ctx, CreateInput{TenantID: "t1", Key: "first", Name: "First", Type: asset.BusinessAssetApplication, Criticality: asset.CriticalityHigh, Owner: "team", Actor: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.Create(ctx, CreateInput{TenantID: "t1", Key: "second", Name: "Second", Type: asset.BusinessAssetApplication, Criticality: asset.CriticalityHigh, Owner: "team", Actor: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment, err := engagement.New("assessment-frozen", "t1", "Frozen", "", clock.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment.BusinessAssetID = first.ID
+	if err := engagements.Create(ctx, assessment); err != nil {
+		t.Fatal(err)
+	}
+	cycles := memory.NewAssessmentCycleRepository()
+	cycle, err := assessmentcycle.NewAssessmentCycle("cycle-frozen", "t1", "Frozen", assessmentcycle.BoundaryAsset, first.ID, "", assessment.ID, "alice", clock.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := assessmentcycle.NewInitialMember("t1", cycle.ID, assessment.ID, "alice", clock.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cycles.CreateCycle(ctx, cycle); err != nil {
+		t.Fatal(err)
+	}
+	if err := cycles.CreateMember(ctx, member); err != nil {
+		t.Fatal(err)
+	}
+	service.SetAssessmentCycleReader(cycles)
+	if err := service.AssignEngagement(ctx, "t1", assessment.ID, second.ID, "alice"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("frozen boundary reassignment=%v", err)
+	}
+	stored, err := engagements.GetByIDInTenant(ctx, "t1", assessment.ID)
+	if err != nil || stored.BusinessAssetID != first.ID {
+		t.Fatalf("frozen boundary changed: assessment=%+v err=%v", stored, err)
 	}
 }
 
