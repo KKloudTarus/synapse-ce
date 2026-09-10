@@ -73,12 +73,51 @@ func DefaultPythonCatalog() PythonCatalog {
 
 			// CWE-601: untrusted redirect targets.
 			pySink([]string{"flask", "werkzeug.utils", "django.shortcuts", "starlette.responses", "fastapi.responses"}, []string{"redirect", "RedirectResponse"}, TaintRedirect, "CWE-601", "python-taint-open-redirect", 0, "location", "to", "url"),
+
+			// CWE-1336: server-side template injection. The DANGEROUS argument is the template TEXT itself
+			// (compiling attacker-controlled markup is code execution), not a render VARIABLE, which the
+			// engine auto-escapes. Only the template-source argument is modeled, so passing user input as a
+			// render keyword is not flagged.
+			pySink([]string{"jinja2", "mako.template", "django.template", "tornado.template"}, []string{"Template"}, TaintSSTI, "CWE-1336", "python-taint-ssti", 0, "source", "template_string", "template", "text"),
+			// from_string is a bound method whose FIRST argument is the template text; the Environment
+			// receiver is not the taint, so only the argument is modeled.
+			pySinkIndexes([]string{"jinja2"}, []string{"from_string"}, TaintSSTI, "CWE-1336", "python-taint-ssti", []int{0}, "source"),
+
+			// CWE-611: XML external entity. lxml (with entity resolution) and the SAX/DOM parsers can expand
+			// external entities on untrusted input; the safe shape is the drop-in defusedxml module, which is
+			// deliberately NOT a sink, so swapping to it removes the finding (there is no in-place sanitizer to
+			// model). xml.etree.ElementTree is intentionally excluded: it does not resolve external entities,
+			// so flagging it as XXE would be a false positive (its risk is entity-expansion DoS, not modeled
+			// here).
+			pySink([]string{"lxml.etree"}, []string{"parse", "fromstring", "XML", "fromstringlist"}, TaintXXE, "CWE-611", "python-taint-xxe", 0, "source", "text"),
+			pySink([]string{"xml.dom.minidom", "xml.dom.pulldom", "xml.sax"}, []string{"parse", "parseString"}, TaintXXE, "CWE-611", "python-taint-xxe", 0, "source", "string", "data", "text"),
+
+			// CWE-90: LDAP injection. python-ldap keeps the filter in a positional argument; ldap3 exposes
+			// search as a bound method whose search_filter is argument one.
+			pySink([]string{"ldap"}, []string{"search", "search_s", "search_st", "search_ext", "search_ext_s"}, TaintLDAP, "CWE-90", "python-taint-ldap", 2, "filterstr"),
+			// ldap3 Connection.search(search_base, search_filter, ...): the second positional argument is the
+			// filter (the receiver connection is not the taint), so only that argument is modeled.
+			pySinkIndexes([]string{"ldap3"}, []string{"search"}, TaintLDAP, "CWE-90", "python-taint-ldap", []int{1}, "search_filter"),
+
+			// CWE-643: XPath injection. lxml exposes xpath as a bound method on a parsed tree; the dangerous
+			// argument is the expression text. Passing user input through the parameterized `var=value` form
+			// keeps it out of the expression, which is why only the expression argument is modeled.
+			// xpath is a bound method whose FIRST POSITIONAL argument is the expression text. No keyword is
+			// modeled: lxml's `xpath(expr, name=value)` keywords are safe XPath VARIABLE bindings (the
+			// parameterized form), so tainting a keyword argument would flag exactly the safe shape.
+			pySinkIndexes([]string{"lxml.etree"}, []string{"xpath"}, TaintXPath, "CWE-643", "python-taint-xpath", []int{0}),
+			// ElementTree.find/findall take the path as the first positional argument or the `match` keyword.
+			pySink([]string{"xml.etree.ElementTree"}, []string{"find", "findall", "findtext", "iterfind"}, TaintXPath, "CWE-643", "python-taint-xpath", 0, "match"),
 		},
 		Sanitizers: []PythonSanitizerModel{
 			{Pattern: pyCall([]string{"html", "markupsafe", "bleach"}, []string{"escape", "clean"}), Classes: []TaintClass{TaintXSS}},
 			{Pattern: pyCall([]string{"shlex"}, []string{"quote"}), Classes: []TaintClass{TaintCommand}},
 			{Pattern: pyCall([]string{"werkzeug.utils"}, []string{"secure_filename"}), Classes: []TaintClass{TaintPathTraversal}},
 			{Pattern: pyCall([]string{"yaml"}, []string{"safe_load"}), Classes: []TaintClass{TaintDeserialization}},
+			// LDAP FILTER escaping neutralizes only the LDAP class; it does nothing for SQL or a URL. DN
+			// escaping (escape_dn_chars) is deliberately excluded: it escapes distinguished-name components,
+			// not filter metacharacters, so it must not neutralize a search-filter injection finding.
+			{Pattern: pyCall([]string{"ldap.filter", "ldap3.utils.conv"}, []string{"escape_filter_chars"}), Classes: []TaintClass{TaintLDAP}},
 			{Pattern: pyCall([]string{"builtins"}, []string{"int", "float", "bool", "len"}), Classes: all},
 		},
 	}
