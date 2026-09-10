@@ -69,6 +69,10 @@ func TestCatalogDebian(t *testing.T) {
 	if bash.Scope != sbom.ScopeProduction {
 		t.Errorf("OS packages should be production scope, got %q", bash.Scope)
 	}
+	// Location is the package DB path, so the component can be attributed to the image layer that wrote the DB.
+	if want := filepath.Join(rootfs, "var/lib/dpkg/status"); bash.Location != want {
+		t.Errorf("bash Location = %q, want the dpkg DB path %q", bash.Location, want)
+	}
 	if _, ok := byName(res.Components)["halfconf"]; ok {
 		t.Error("a half-configured (not installed) package must be skipped")
 	}

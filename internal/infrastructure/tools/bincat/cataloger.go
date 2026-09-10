@@ -54,10 +54,12 @@ func (Cataloger) CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom
 	}
 	var out []sbom.Component
 	seen := map[string]bool{} // dedup within this catalog by PURL
+	var curPath string        // the evidence file of the component(s) being added, for layer attribution
 	add := func(c sbom.Component, ok bool) {
 		if !ok || seen[c.PURL] || len(out) >= maxComponents {
 			return
 		}
+		c.Location = curPath // the on-disk artifact, so the component attributes to the layer that wrote it
 		seen[c.PURL] = true
 		out = append(out, c)
 	}
@@ -76,6 +78,7 @@ func (Cataloger) CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom
 		if files > maxFilesWalked || len(out) >= maxComponents {
 			return fs.SkipAll
 		}
+		curPath = path
 		switch {
 		case isPythonMetadata(path):
 			add(pythonComponent(path))

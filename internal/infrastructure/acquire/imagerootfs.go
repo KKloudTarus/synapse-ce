@@ -33,10 +33,12 @@ const (
 
 // rootfsExtractor assembles OCI layers into dest, accumulating the resource caps across ALL layers.
 type rootfsExtractor struct {
-	dest     string
-	maxBytes int64
-	total    int64 // bytes written across all layers (bomb guard)
-	entries  int   // tar entries seen across all layers (bomb guard)
+	dest      string
+	maxBytes  int64
+	total     int64             // bytes written across all layers (bomb guard)
+	entries   int               // tar entries seen across all layers (bomb guard)
+	layers    map[string]string // rootfs-relative (slash) path -> introducing layer diff_id; nil disables attribution
+	curDiffID string            // diff_id of the layer currently being applied
 }
 
 // extractOCIRootFS materializes the assembled root filesystem of the image in the OCI layout at layoutDir into
@@ -46,48 +48,64 @@ type rootfsExtractor struct {
 // Symlinks are not materialized, so a path behind a symlinked directory will be absent; the target OS-package
 // DBs (/var/lib/dpkg/status, /lib/apk/db/installed) and /etc/os-release are regular files at real paths, so
 // this is sufficient for OS-package cataloging.
-func extractOCIRootFS(ctx context.Context, layoutDir, dest string, maxBytes int64) error {
+// The returned map attributes each materialized file (rootfs-relative, slash-separated) to the diff_id of the
+// layer that last wrote it (the squashed view). It is nil when the image config's diff_ids are unavailable or
+// inconsistent, in which case extraction still succeeds without attribution.
+func extractOCIRootFS(ctx context.Context, layoutDir, dest string, maxBytes int64) (map[string]string, error) {
 	if maxBytes <= 0 {
 		maxBytes = MaxWorkspaceBytes
 	}
-	layers, err := ociLayerBlobs(layoutDir)
+	layers, diffIDs, err := ociLayerBlobs(layoutDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(layers) == 0 {
-		return fmt.Errorf("%w: OCI image has no layers", shared.ErrValidation)
+		return nil, fmt.Errorf("%w: OCI image has no layers", shared.ErrValidation)
 	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return fmt.Errorf("create rootfs dir: %w", err)
+		return nil, fmt.Errorf("create rootfs dir: %w", err)
 	}
 	x := &rootfsExtractor{dest: dest, maxBytes: maxBytes}
-	for _, blob := range layers {
+	if diffIDs != nil {
+		x.layers = make(map[string]string) // per-file layer attribution is available for this image
+	}
+	for i, blob := range layers {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
+		}
+		if diffIDs != nil {
+			x.curDiffID = diffIDs[i]
 		}
 		if err := x.applyLayer(blob); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return x.layers, nil
 }
 
 // ociLayerBlobs resolves the layout's image manifest to the ORDERED on-disk paths of its layer blobs. Each
 // layer digest is validated (bare algo:hex) so it cannot escape the blobs directory.
-func ociLayerBlobs(layoutDir string) ([]string, error) {
+func ociLayerBlobs(layoutDir string) (paths, diffIDs []string, err error) {
 	man, ok := readManifest(layoutDir)
 	if !ok {
-		return nil, fmt.Errorf("%w: cannot read OCI image manifest", shared.ErrValidation)
+		return nil, nil, fmt.Errorf("%w: cannot read OCI image manifest", shared.ErrValidation)
 	}
-	paths := make([]string, 0, len(man.Layers))
+	paths = make([]string, 0, len(man.Layers))
 	for _, l := range man.Layers {
 		p, ok := blobPath(layoutDir, l.Digest)
 		if !ok {
-			return nil, fmt.Errorf("%w: invalid layer digest %q", shared.ErrValidation, l.Digest)
+			return nil, nil, fmt.Errorf("%w: invalid layer digest %q", shared.ErrValidation, l.Digest)
 		}
 		paths = append(paths, p)
 	}
-	return paths, nil
+	// Layer diff_ids (uncompressed digests) come from the image config, index-aligned with the manifest layers
+	// per the OCI spec, and match ImageInfo.Layers[].DiffID. They enable per-layer attribution; if the config
+	// is missing or its count disagrees with the layer count, attribution is disabled (diffIDs stays nil) while
+	// extraction proceeds unchanged.
+	if cfg, ok := readBlobJSON[ociConfig](layoutDir, man.Config.Digest); ok && len(cfg.RootFS.DiffIDs) == len(paths) {
+		diffIDs = cfg.RootFS.DiffIDs
+	}
+	return paths, diffIDs, nil
 }
 
 // maxZstdWindow caps the zstd decoder's decompression window so a frame declaring a huge window is
@@ -182,6 +200,12 @@ func (x *rootfsExtractor) applyTar(tr *tar.Reader) error {
 			x.total += n
 			if x.total > x.maxBytes {
 				return fmt.Errorf("%w: image rootfs exceeds the %d-byte cap", shared.ErrValidation, x.maxBytes)
+			}
+			if x.layers != nil && x.curDiffID != "" {
+				// Attribute the file to the current layer. Last writer wins, so a file replaced by a higher
+				// layer is credited to that higher layer, matching the squashed view producers read.
+				rel := filepath.ToSlash(strings.TrimPrefix(target, x.dest+string(os.PathSeparator)))
+				x.layers[rel] = x.curDiffID
 			}
 		default:
 			// symlink / hardlink / device / fifo: skipped (a link could redirect a later read/write outside dest).

@@ -70,10 +70,26 @@ func addLayer(t *testing.T, layoutDir string, gzipped bool, entries []layerEntry
 	return writeBlob(t, layoutDir, buf.Bytes())
 }
 
-// finishLayout writes the image manifest (referencing the layers in order) + index.json.
+// finishLayout writes the image manifest (referencing the layers in order) + index.json, with an empty
+// diff_ids array (per-layer attribution disabled).
 func finishLayout(t *testing.T, layoutDir string, layerDigests []string) {
 	t.Helper()
-	cfg := writeBlob(t, layoutDir, []byte(`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}`))
+	finishLayoutWithDiffIDs(t, layoutDir, layerDigests, nil)
+}
+
+// finishLayoutWithDiffIDs is finishLayout with an explicit rootfs.diff_ids array in the image config, so a
+// test can exercise per-layer attribution. The extractor pairs a diff_id to a layer BY INDEX and never hashes
+// content, so sentinel diff_ids (e.g. "sha256:layer0") are sufficient.
+func finishLayoutWithDiffIDs(t *testing.T, layoutDir string, layerDigests, diffIDs []string) {
+	t.Helper()
+	var ds strings.Builder
+	for i, d := range diffIDs {
+		if i > 0 {
+			ds.WriteString(",")
+		}
+		fmt.Fprintf(&ds, "%q", d)
+	}
+	cfg := writeBlob(t, layoutDir, []byte(fmt.Sprintf(`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[%s]}}`, ds.String())))
 	var ls strings.Builder
 	for i, d := range layerDigests {
 		if i > 0 {
@@ -92,7 +108,8 @@ func finishLayout(t *testing.T, layoutDir string, layerDigests []string) {
 func extractToTemp(t *testing.T, layoutDir string) (string, error) {
 	t.Helper()
 	dest := filepath.Join(t.TempDir(), "rootfs")
-	return dest, extractOCIRootFS(context.Background(), layoutDir, dest, MaxWorkspaceBytes)
+	_, err := extractOCIRootFS(context.Background(), layoutDir, dest, MaxWorkspaceBytes)
+	return dest, err
 }
 
 func mustNotExist(t *testing.T, p string) {
@@ -228,7 +245,7 @@ func TestExtractOCIRootFSCapsAcrossLayers(t *testing.T) {
 	finishLayout(t, layout, []string{l1, l2})
 	dest := filepath.Join(t.TempDir(), "rootfs")
 	// A 10-byte total cap is exceeded only after the SECOND layer, proving the cap accumulates across layers.
-	if err := extractOCIRootFS(context.Background(), layout, dest, 10); !errors.Is(err, shared.ErrValidation) {
+	if _, err := extractOCIRootFS(context.Background(), layout, dest, 10); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("the byte cap must be enforced across layers, got %v", err)
 	}
 }
@@ -329,4 +346,112 @@ func TestExtractOCIRootFSZstdLayeredOverGzip(t *testing.T) {
 	}
 	mustContain(t, filepath.Join(dest, "app/version"), "1.0\n")
 	mustContain(t, filepath.Join(dest, "app/patch"), "applied\n")
+}
+
+// TestExtractOCIRootFSPerLayerAttribution asserts the extractor maps each materialized file to the diff_id of
+// the layer that last wrote it (the squashed view): a base-layer file gets the base diff_id, an upper-layer
+// file gets the upper diff_id, and a file rewritten by an upper layer is attributed to that upper layer.
+func TestExtractOCIRootFSPerLayerAttribution(t *testing.T) {
+	layout := t.TempDir()
+	l0 := addLayer(t, layout, true, []layerEntry{
+		reg("etc/os-release", "ID=debian\n"),
+		reg("app/base.txt", "base"),
+	})
+	l1 := addLayer(t, layout, true, []layerEntry{
+		reg("app/top.txt", "top"),
+		reg("app/base.txt", "overwritten"), // an upper layer rewrites base.txt -> attributed to l1
+	})
+	finishLayoutWithDiffIDs(t, layout, []string{l0, l1}, []string{"sha256:layer0", "sha256:layer1"})
+
+	dest := filepath.Join(t.TempDir(), "rootfs")
+	layers, err := extractOCIRootFS(context.Background(), layout, dest, MaxWorkspaceBytes)
+	if err != nil {
+		t.Fatalf("extractOCIRootFS: %v", err)
+	}
+	want := map[string]string{
+		"etc/os-release": "sha256:layer0",
+		"app/top.txt":    "sha256:layer1",
+		"app/base.txt":   "sha256:layer1", // last writer wins
+	}
+	for path, diff := range want {
+		if got := layers[path]; got != diff {
+			t.Errorf("%s attributed to %q, want %q (map=%v)", path, got, diff, layers)
+		}
+	}
+}
+
+// TestExtractOCIRootFSAttributionDisabledOnMismatch confirms that when the image config's diff_ids count does
+// not match the layer count, attribution is disabled (nil map) but extraction still succeeds.
+func TestExtractOCIRootFSAttributionDisabledOnMismatch(t *testing.T) {
+	layout := t.TempDir()
+	l0 := addLayer(t, layout, true, []layerEntry{reg("a.txt", "x")})
+	finishLayoutWithDiffIDs(t, layout, []string{l0}, []string{"sha256:layer0", "sha256:extra"}) // 1 layer, 2 diff_ids
+
+	dest := filepath.Join(t.TempDir(), "rootfs")
+	layers, err := extractOCIRootFS(context.Background(), layout, dest, MaxWorkspaceBytes)
+	if err != nil {
+		t.Fatalf("extraction must still succeed with attribution disabled: %v", err)
+	}
+	if layers != nil {
+		t.Errorf("attribution must be disabled (nil map) on a diff_id count mismatch, got %v", layers)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "a.txt")); err != nil {
+		t.Errorf("file must still be extracted: %v", err)
+	}
+}
+
+// TestExtractOCIRootFSAttributionMatchesImageInfo locks the core join contract: every diff_id the extractor
+// records is a diff_id readImageInfo exposes in ImageInfo.Layers, so attributeImageLayers' by-diff join
+// resolves. Both derive from the same image config, so they must agree.
+func TestExtractOCIRootFSAttributionMatchesImageInfo(t *testing.T) {
+	layout := t.TempDir()
+	l0 := addLayer(t, layout, true, []layerEntry{reg("etc/os-release", "ID=debian\n")})
+	l1 := addLayer(t, layout, true, []layerEntry{reg("app/x.jar", "x")})
+	finishLayoutWithDiffIDs(t, layout, []string{l0, l1}, []string{"sha256:layer0", "sha256:layer1"})
+
+	dest := filepath.Join(t.TempDir(), "rootfs")
+	layers, err := extractOCIRootFS(context.Background(), layout, dest, MaxWorkspaceBytes)
+	if err != nil {
+		t.Fatalf("extractOCIRootFS: %v", err)
+	}
+	info := readImageInfo(layout, "example.com/img:tag")
+	if info == nil {
+		t.Fatal("readImageInfo returned nil")
+	}
+	valid := map[string]bool{}
+	for _, l := range info.Layers {
+		valid[l.DiffID] = true
+	}
+	if len(layers) == 0 {
+		t.Fatal("expected a non-empty attribution map")
+	}
+	for path, diff := range layers {
+		if !valid[diff] {
+			t.Errorf("%s attributed to diff_id %q, absent from ImageInfo.Layers %+v", path, diff, info.Layers)
+		}
+	}
+}
+
+// TestExtractOCIRootFSAttributionEmptyDiffIDSkipsLayer confirms a layer with an empty diff_id contributes no
+// attribution (its files stay unmapped) while the layer still extracts and other layers attribute normally.
+func TestExtractOCIRootFSAttributionEmptyDiffIDSkipsLayer(t *testing.T) {
+	layout := t.TempDir()
+	l0 := addLayer(t, layout, true, []layerEntry{reg("base.txt", "b")})
+	l1 := addLayer(t, layout, true, []layerEntry{reg("top.txt", "t")})
+	finishLayoutWithDiffIDs(t, layout, []string{l0, l1}, []string{"", "sha256:layer1"}) // layer0 has no diff_id
+
+	dest := filepath.Join(t.TempDir(), "rootfs")
+	layers, err := extractOCIRootFS(context.Background(), layout, dest, MaxWorkspaceBytes)
+	if err != nil {
+		t.Fatalf("extractOCIRootFS: %v", err)
+	}
+	if diff, ok := layers["base.txt"]; ok {
+		t.Errorf("a file from a layer with an empty diff_id must not be attributed, got %q", diff)
+	}
+	if layers["top.txt"] != "sha256:layer1" {
+		t.Errorf("top.txt should attribute to layer1, got %q", layers["top.txt"])
+	}
+	if _, err := os.Stat(filepath.Join(dest, "base.txt")); err != nil {
+		t.Errorf("base.txt must still be extracted: %v", err)
+	}
 }
