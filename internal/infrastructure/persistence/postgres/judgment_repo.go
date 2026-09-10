@@ -90,6 +90,24 @@ func (r *JudgmentRepository) ListByEngagement(ctx context.Context, engagementID 
 	return out, err
 }
 
+// GetByID provides a bounded engagement-scoped lookup for migration/backfill
+// consumers without loading every judgment into process memory.
+func (r *JudgmentRepository) GetByID(ctx context.Context, engagementID, id shared.ID) (out judgment.Judgment, err error) {
+	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		var scanErr error
+		out, scanErr = scanJudgment(tx.QueryRow(ctx,
+			`SELECT `+judgmentCols+` FROM judgments WHERE engagement_id=$1 AND id=$2`, engagementID.String(), id.String()))
+		if errors.Is(scanErr, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if scanErr != nil {
+			return fmt.Errorf("get judgment: %w", scanErr)
+		}
+		return nil
+	})
+	return out, err
+}
+
 // ListBySubject returns the engagement's judgments about a given subject id, oldest first.
 // RLS scopes the query to the context tenant.
 func (r *JudgmentRepository) ListBySubject(ctx context.Context, engagementID, subjectID shared.ID) ([]judgment.Judgment, error) {

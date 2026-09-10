@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net"
@@ -100,6 +101,11 @@ import (
 	alertinguc "github.com/KKloudTarus/synapse-ce/internal/usecase/alerting"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
+	comparisonuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcomparison"
+	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
+	lifecycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentlifecycle"
+	relationshipuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentrelationship"
+	snapshotuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentsnapshot"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
 	attackpathuc "github.com/KKloudTarus/synapse-ce/internal/usecase/attackpath"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
@@ -124,6 +130,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
+	lineageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findinglineage"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
 	baselineuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/baselineuc"
 	behaviorbaseline "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/behaviorbaseline"
@@ -300,6 +307,10 @@ func main() {
 		log.Error("network execution posture invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateAssessmentLifecycleRollout(); err != nil {
+		log.Error("assessment lifecycle rollout invalid", "err", err)
+		os.Exit(1)
+	}
 	if err := cfg.ValidateResponseExecutionPosture(); err != nil {
 		log.Error("response execution posture invalid", "err", err)
 		os.Exit(1)
@@ -405,8 +416,10 @@ func main() {
 	var correlationStateStore ports.CorrelationStateStore // #594 C2 event-time watermark + assignments
 	var promotionStore ports.PendingPromotionAuditStore
 	var scanJobStore ports.ScanJobStore
+	var engagementSourceRepo ports.EngagementSourceRepository
 	var scanRunStore ports.ScanRunStore
 	var scanRunTransactions ports.TenantTransactionRunner
+	var assessmentSnapshotStore ports.AssessmentSnapshotRepository
 	var projectAnalysisStore ports.ProjectAnalysisStore
 	var qualityGateStore ports.QualityGateStore
 	var qualityProfileStore ports.QualityProfileStore
@@ -438,6 +451,20 @@ func main() {
 	var vulnerabilityTransactions ports.TenantTransactionRunner
 	var integrationStore ports.IntegrationStore
 	var integrationMatcher ports.IntegrationAnalysisMatcher
+	var assessmentCycleStore interface {
+		ports.AssessmentCycleRepository
+		ports.AssessmentCycleListRepository
+		ports.AssessmentClosureRepository
+		ports.AssessmentClosureReportStore
+	}
+	var assessmentCycleRequests ports.AssessmentCycleRequestStore
+	var assessmentCycleTransactions ports.TenantTransactionRunner
+	var assessmentComparisonStore ports.AssessmentComparisonRepository
+	var findingLineageStore ports.FindingLineageRepository
+	var assessmentRelationshipStore ports.AssessmentRelationshipRepository
+	var assessmentComparisonService *comparisonuc.Service
+	var assessmentClosureReportService *cycleuc.ClosureReportService
+	var closureDecisionReader ports.AssessmentClosureDecisionReader
 	var slaStore ports.SLAStore
 	var vulnerabilityWorker *worker.Worker
 	var reconRunLock ports.RunLocker              // recon run lease (Postgres only); row-lease, no pinned conn
@@ -566,7 +593,15 @@ func main() {
 			os.Exit(1)
 		}
 		scanJobStore = postgres.NewScanJobStore(pool)
+		engagementSourceRepo = postgres.NewEngagementSourceRepository(pool)
 		scanRunStore = postgres.NewScanRunStore(pool)
+		assessmentSnapshotStore = postgres.NewAssessmentSnapshotRepository(pool)
+		assessmentComparisonStore = postgres.NewAssessmentComparisonRepository(pool)
+		assessmentCycleStore = postgres.NewAssessmentCycleRepository(pool)
+		assessmentCycleRequests = postgres.NewAssessmentCycleRequestRepository(pool)
+		assessmentCycleTransactions = postgres.NewTenantTransactionRunner(pool)
+		findingLineageStore = postgres.NewFindingLineageRepository(pool)
+		assessmentRelationshipStore = postgres.NewAssessmentRelationshipRepository(pool)
 		projectAnalysisStore = postgres.NewProjectAnalysisStore(pool)
 		qualityGateStore = postgres.NewQualityGateStore(pool)
 		qualityProfileStore = postgres.NewQualityProfileStore(pool)
@@ -745,8 +780,19 @@ func main() {
 			os.Exit(1)
 		}
 		scanJobStore = memory.NewScanJobStore()
-		scanRunStore = memory.NewScanRunStore()
+		engagementSourceRepo = memory.NewEngagementSourceRepository()
+		memoryScanRuns := memory.NewScanRunStore()
+		scanRunStore = memoryScanRuns
 		scanRunTransactions = memory.NewTenantTransactionRunner()
+		assessmentSnapshotStore = memory.NewAssessmentSnapshotRepository()
+		assessmentComparisonStore = memory.NewAssessmentComparisonRepository()
+		assessmentCycleStore = memory.NewAssessmentCycleRepository(memory.AssessmentCycleReaders{
+			Engagements: repo, Snapshots: assessmentSnapshotStore, Comparisons: assessmentComparisonStore, Runs: memoryScanRuns,
+		})
+		assessmentCycleRequests = memory.NewAssessmentCycleRequestRepository()
+		assessmentCycleTransactions = memory.NewTenantTransactionRunner()
+		findingLineageStore = memory.NewFindingLineageRepository()
+		assessmentRelationshipStore = memory.NewAssessmentRelationshipRepository()
 		projectAnalysisStore = memory.NewProjectAnalysisStore()
 		qualityGateStore = memory.NewQualityGateStore()
 		qualityProfileStore = memory.NewQualityProfileStore()
@@ -795,9 +841,13 @@ func main() {
 		},
 		VulnDBSource: "osv.dev",
 	}
+	if cfg.Offline {
+		prov.VulnDBSource = "" // No live OSV query: do not invent a per-scan feed revision.
+	}
 
 	// Use cases.
 	engService := enguc.NewService(repo, clock, ids, auditLog)
+	engService.SetCompletionSnapshotPolicy(assessmentSnapshotStore, cfg.AssessmentSnapshotCompletionForTenant)
 	projectService := projectuc.NewService(projectRepo, repo, clock, ids, auditLog, !cfg.IsProduction())
 	integrationRegistry := integrationdom.NewRegistry()
 	if err := jenkinsintegration.Register(integrationRegistry); err != nil {
@@ -889,7 +939,20 @@ func main() {
 		objectStore = memoryStore
 		log.Info("blob store: in-memory (set SYNAPSE_BLOB_ENDPOINT for MinIO/S3)")
 	}
-	uploadedSources := sourceupload.NewStore(objectStore, 0)
+	// Raw source archives must survive an API restart and be readable by a
+	// separate worker. Evidence's development memory fallback is not suitable.
+	sourceObjects := objectStore
+	if cfg.BlobEndpoint == "" {
+		localSources, err := blob.NewFilesystem(cfg.EngagementSourceDir)
+		if err != nil {
+			log.Error("durable engagement source store init failed", "err", err)
+			os.Exit(1)
+		}
+		defer func() { _ = localSources.Close() }()
+		sourceObjects = localSources
+		log.Info("engagement source archives: durable filesystem")
+	}
+	uploadedSources := sourceupload.NewStoreWithRepository(sourceObjects, engagementSourceRepo, 0)
 	engService.SetSourceStore(uploadedSources)
 	// Evidence vault: the one tamper-evident chain + verify-on-read path per engagement.
 	evidenceService, err := evidenceuc.NewService(evidenceStore, blobStore, auditLog, clock, ids)
@@ -977,6 +1040,10 @@ func main() {
 	if !ok || scanRunTransactions == nil {
 		log.Error("scan-run provenance dependencies are not configured")
 		os.Exit(1)
+	}
+	if cfg.AssessmentSnapshotEnabled {
+		scaService.SetScanRunProvenance(provenanceStore, assessmentCycleTransactions)
+		scaService.SetAssessmentCycleMembership(assessmentCycleStore, assessmentSnapshotStore)
 	}
 	scanRunService, err := scanrunuc.NewService(provenanceStore, repo, scanRunTransactions, ids, clock, auditLog)
 	if err != nil {
@@ -1488,6 +1555,89 @@ func main() {
 		}
 	}
 	router.SetObservability(cfg.AccessLogEnabled, httpObserver)
+	router.SetAssessmentLifecycleRollout(cfg.AssessmentLifecycleReadForTenant, cfg.AssessmentLifecycleUIForTenant)
+	var snapshotService *snapshotuc.Service
+	if cfg.AssessmentSnapshotEnabled {
+		snapshotService, err = snapshotuc.NewService(assessmentSnapshotStore, assessmentCycleStore, repo, provenanceStore, assessmentCycleTransactions, ids, clock, auditLog)
+		if err != nil {
+			log.Error("assessment snapshot service init failed", "err", err)
+			os.Exit(1)
+		}
+		snapshotService.SetScanJobStore(scanJobStore)
+	}
+	if cfg.AssessmentShadowEnabled {
+		var lineageObserver ports.FindingLineageObserver
+		if metrics != nil {
+			lineageObserver = metrics
+		}
+		lineageService, lineageErr := lineageuc.NewService(findingLineageStore, assessmentCycleTransactions, auditLog, clock, ids, lineageObserver)
+		if lineageErr != nil {
+			log.Error("finding lineage service init failed", "err", lineageErr)
+			os.Exit(1)
+		}
+		shadowProjector, shadowErr := lineageuc.NewShadowProjector(lineageService, assessmentCycleStore, assessmentSnapshotStore, findingRepo, cfg.AssessmentShadowForTenant)
+		if shadowErr != nil {
+			log.Error("finding lineage shadow projector init failed", "err", shadowErr)
+			os.Exit(1)
+		}
+		if evidenceStore, ok := provenanceStore.(ports.ScanRunEvidenceStore); ok {
+			shadowProjector.SetNativeEvidence(evidenceStore, provenanceStore)
+		}
+		if err := findingsService.SetLifecycleShadow(assessmentCycleTransactions, shadowProjector, cfg.AssessmentShadowForTenant); err != nil {
+			log.Error("manual finding lineage shadow init failed", "err", err)
+			os.Exit(1)
+		}
+		if err := exploitationService.SetLifecycleShadow(assessmentCycleTransactions, shadowProjector, cfg.AssessmentShadowForTenant, repo); err != nil {
+			log.Error("offensive finding lineage shadow init failed", "err", err)
+			os.Exit(1)
+		}
+		snapshotService.SetFinalizationObserver(shadowProjector)
+		comparisonVerification, verificationErr := comparisonuc.NewRetestVerificationReader(findingLineageStore, assessmentSnapshotStore, retestRepo)
+		if verificationErr != nil {
+			log.Error("assessment comparison verification reader init failed", "err", verificationErr)
+			os.Exit(1)
+		}
+		assessmentComparisonService, err = comparisonuc.NewService(assessmentComparisonStore, assessmentSnapshotStore, assessmentCycleStore, findingLineageStore, assessmentCycleTransactions, auditLog, clock, ids, comparisonVerification, nil)
+		if err != nil {
+			log.Error("assessment comparison service init failed", "err", err)
+			os.Exit(1)
+		}
+		if metrics != nil {
+			assessmentComparisonService.SetObserver(metrics)
+		}
+		assessmentComparisonService.SetAPIStores(assessmentCycleRequests, vulnerabilityQueue, lineageService)
+		shadowSnapshotService, shadowErr := snapshotuc.NewService(assessmentSnapshotStore, assessmentCycleStore, repo, provenanceStore, assessmentCycleTransactions, ids, clock, auditLog)
+		if shadowErr != nil {
+			log.Error("assessment lifecycle shadow snapshot writer init failed", "err", shadowErr)
+			os.Exit(1)
+		}
+		shadowSnapshotService.SetFinalizationObserver(shadowProjector)
+		shadowCoordinator, shadowErr := lifecycleuc.NewShadowCoordinator(assessmentCycleStore, assessmentSnapshotStore, shadowSnapshotService, assessmentComparisonService, cfg.AssessmentShadowForTenant)
+		if shadowErr != nil {
+			log.Error("assessment lifecycle shadow coordinator init failed", "err", shadowErr)
+			os.Exit(1)
+		}
+		scaService.SetScanRunObserver(shadowCoordinator)
+		if cfg.AssessmentLifecycleReadEnabled {
+			router.SetAssessmentComparisons(assessmentComparisonService)
+		}
+		if cfg.AssessmentClosureEnabled {
+			closureDecisionReader, err = cycleuc.NewClosureDecisionReader(findingLineageStore, assessmentSnapshotStore, retestRepo, slaStore)
+			if err != nil {
+				log.Error("assessment closure decision reader init failed", "err", err)
+				os.Exit(1)
+			}
+			assessmentClosureReportService, err = cycleuc.NewClosureReportService(assessmentCycleStore, assessmentCycleStore, assessmentSnapshotStore, assessmentComparisonStore, closureDecisionReader, auditLog)
+			if err != nil {
+				log.Error("assessment closure report service init failed", "err", err)
+				os.Exit(1)
+			}
+			if metrics != nil {
+				assessmentClosureReportService.SetObserver(metrics)
+			}
+		}
+		log.Info("assessment lifecycle shadow writers configured", "tenant_count", len(cfg.AssessmentShadowTenants))
+	}
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
 		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
 		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
@@ -1632,11 +1782,18 @@ func main() {
 	router.SetVulnerabilityReadModel(vulnerabilityRead)
 	router.SetVulnerabilityActions(vulnerabilityActionService)
 	if cfg.DBDSN == "" {
-		vulnerabilityWorker = worker.New(vulnerabilityQueue, map[string]worker.Handler{
+		handlers := map[string]worker.Handler{
 			vulnerabilitymonitor.JobKind:   vulnerabilitySyncJobHandler{svc: vulnerabilityMonitor},
 			vulnerabilityreconcile.JobKind: vulnerabilityReconcileJobHandler{svc: vulnerabilityReconciliation},
 			integrationuc.JobKind:          integrationJobHandler{svc: integrationService},
-		}, worker.Config{Visibility: 2 * time.Minute, Poll: 100 * time.Millisecond, MaxAttempts: 3}, log)
+		}
+		if assessmentComparisonService != nil {
+			handlers[comparisonuc.JobKind] = assessmentComparisonJobHandler{svc: assessmentComparisonService}
+		}
+		if assessmentClosureReportService != nil {
+			handlers[cycleuc.AssessmentClosureReportJobKind] = assessmentClosureReportJobHandler{svc: assessmentClosureReportService}
+		}
+		vulnerabilityWorker = worker.New(vulnerabilityQueue, handlers, worker.Config{Visibility: 2 * time.Minute, Poll: 100 * time.Millisecond, MaxAttempts: 3}, log)
 	}
 	router.SetAITriageReviews(aiTriageReviewService)
 	projectService.SetScanner(scaService)
@@ -1682,7 +1839,67 @@ func main() {
 		log.Error("business asset service init failed", "err", err)
 		os.Exit(1)
 	}
+	businessAssetService.SetAssessmentCycleReader(assessmentCycleStore)
 	router.SetBusinessAssets(businessAssetService)
+	if cfg.AssessmentCycleAPIEnabled || cfg.AssessmentCycleDualWriteEnabled {
+		cycleService, cycleErr := cycleuc.NewService(assessmentCycleStore, repo, businessAssetStore, projectRepo, assessmentCycleTransactions, ids, clock, auditLog)
+		if cycleErr != nil {
+			log.Error("assessment cycle service init failed", "err", cycleErr)
+			os.Exit(1)
+		}
+		cycleAPI, cycleErr := cycleuc.NewAPIService(cycleService, assessmentCycleStore, assessmentCycleRequests, engService, assessmentCycleTransactions, clock, auditLog)
+		if cycleErr != nil {
+			log.Error("assessment cycle API init failed", "err", cycleErr)
+			os.Exit(1)
+		}
+		if assessmentComparisonService != nil {
+			relationshipTokenKey := make([]byte, 32)
+			if cfg.MeasureCursorSecret != "" {
+				digest := sha256.Sum256([]byte("synapse:assessment-relationship-preview:v1\x00" + cfg.MeasureCursorSecret))
+				relationshipTokenKey = digest[:]
+			} else if _, keyErr := rand.Read(relationshipTokenKey); keyErr != nil {
+				log.Error("assessment relationship preview key generation failed", "err", keyErr)
+				os.Exit(1)
+			}
+			if cycleErr := cycleAPI.SetRelationshipChangeDependencies(assessmentSnapshotStore, assessmentComparisonStore, findingLineageStore, scanJobStore, assessmentComparisonService, relationshipTokenKey); cycleErr != nil {
+				log.Error("assessment relationship change service init failed", "err", cycleErr)
+				os.Exit(1)
+			}
+		}
+		if cfg.AssessmentClosureEnabled {
+			closureTokenKey := make([]byte, 32)
+			if cfg.MeasureCursorSecret != "" {
+				digest := sha256.Sum256([]byte("synapse:assessment-closure-preview:v1\x00" + cfg.MeasureCursorSecret))
+				closureTokenKey = digest[:]
+			} else if _, keyErr := rand.Read(closureTokenKey); keyErr != nil {
+				log.Error("assessment closure preview key generation failed", "err", keyErr)
+				os.Exit(1)
+			}
+			if cycleErr := cycleAPI.SetClosureDependencies(assessmentCycleStore, assessmentSnapshotStore, assessmentComparisonStore, closureDecisionReader, vulnerabilityQueue, closureTokenKey); cycleErr != nil {
+				log.Error("assessment closure service init failed", "err", cycleErr)
+				os.Exit(1)
+			}
+			if metrics != nil {
+				cycleAPI.SetClosureReportObserver(metrics)
+			}
+		}
+		router.SetAssessmentCycles(cycleAPI, cfg.AssessmentCycleAPIEnabled, cfg.AssessmentCycleDualWriteForTenant)
+		log.Info("assessment cycle services configured", "api_enabled", cfg.AssessmentCycleAPIEnabled, "dual_write_enabled", cfg.AssessmentCycleDualWriteEnabled, "dual_write_tenant_count", len(cfg.AssessmentCycleDualWriteTenants))
+	}
+	if snapshotService != nil {
+		router.SetAssessmentSnapshots(snapshotService)
+		log.Info("assessment snapshot API configured")
+	}
+	var relationshipObserver ports.AssessmentRelationshipObserver
+	if metrics != nil {
+		relationshipObserver = metrics
+	}
+	assessmentRelationshipService, relationshipErr := relationshipuc.NewService(assessmentRelationshipStore, assessmentCycleStore, assessmentSnapshotStore, findingLineageStore, assessmentCycleTransactions, ids, clock, auditLog, relationshipObserver)
+	if relationshipErr != nil {
+		log.Error("assessment relationship review service init failed", "err", relationshipErr)
+		os.Exit(1)
+	}
+	router.SetAssessmentRelationships(assessmentRelationshipService)
 	router.SetExploitation(exploitationService) // evidence-gated finding verify endpoint
 	// Read-only code-quality dashboard. Server-side analysis is PURE-GO and memory-safe only (pattern
 	// rules + duplication + Go-parser inventory); tree-sitter complexity is intentionally NOT wired here
@@ -3042,6 +3259,21 @@ func (handler integrationJobHandler) OnDeadLetter(ctx context.Context, job ports
 	return handler.svc.OnDeadLetter(ctx, job.Payload)
 }
 
+type assessmentComparisonJobHandler struct{ svc *comparisonuc.Service }
+
+type assessmentClosureReportJobHandler struct{ svc *cycleuc.ClosureReportService }
+
+func (handler assessmentClosureReportJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	return handler.svc.HandleJob(ctx, job)
+}
+
+func (handler assessmentComparisonJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	return handler.svc.HandleJob(ctx, job.Payload)
+}
+
+func (handler assessmentComparisonJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, _ error) error {
+	return handler.svc.OnDeadLetter(ctx, job.Payload)
+}
 func (h vulnerabilityReconcileJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
 	_, err := h.svc.ExecuteJob(ctx, job.ID)
 	return err

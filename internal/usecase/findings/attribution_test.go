@@ -74,6 +74,40 @@ func TestCreateAttributedRetryUsesCanonicalFinding(t *testing.T) {
 	}
 }
 
+func TestCreateAttributedReportsPartialWriteOutsideShadowTransaction(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := newSvc(repo, &fakeComments{}, &fakeAudit{})
+	svc.SetAttributor(&projectionAttributor{asset: "asset-1", recordErr: errors.New("attribution unavailable")})
+	created, err := svc.CreateAttributed(context.Background(), "human:alice", "eng-1", "asset-1", finding.ManualInput{Title: "manual"})
+	var partial *ports.PartialWriteError
+	if !errors.As(err, &partial) || len(partial.IDs) != 1 || partial.IDs[0] != created.ID || len(repo.upserted) != 1 {
+		t.Fatalf("created=%+v partial=%+v err=%v upserts=%d", created, partial, err, len(repo.upserted))
+	}
+}
+
+func TestCreateAttributedDedupReplayDoesNotReproject(t *testing.T) {
+	repository := &fakeRepo{}
+	projector := &lifecycleProjector{}
+	service := newSvc(repository, &fakeComments{}, &fakeAudit{})
+	service.SetAttributor(&projectionAttributor{asset: "asset-1"})
+	service.SetEngagementTenantResolver(lifecycleEngagementResolver{tenantID: "tenant"})
+	if err := service.SetLifecycleShadow(rollbackFindingTransaction{repository: repository}, projector, func(string) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	input := finding.ManualInput{Title: "manual", Severity: shared.SeverityHigh}
+	first, err := service.CreateAttributed(context.Background(), "human:alice", "eng-1", "asset-1", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := service.CreateAttributed(context.Background(), "human:alice", "eng-1", "asset-1", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != replayed.ID || projector.calls != 1 || len(repository.upserted) != 1 {
+		t.Fatalf("first=%s replay=%s projection calls=%d upserts=%d", first.ID, replayed.ID, projector.calls, len(repository.upserted))
+	}
+}
+
 func TestVerifiedProjectionRetryUsesCanonicalFinding(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {

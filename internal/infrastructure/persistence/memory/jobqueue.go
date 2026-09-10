@@ -55,10 +55,16 @@ func (q *JobQueue) Enqueue(ctx context.Context, kind string, payload []byte) (st
 		return "", fmt.Errorf("%w: tenant context is required for durable job", shared.ErrValidation)
 	}
 	id := q.ids.NewID().String()
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.jobs[id] = &memJob{id: id, tenantID: tenantID, kind: kind, payload: payload, status: "queued", availableAt: q.now()}
-	q.order = append(q.order, id)
+	job := &memJob{id: id, tenantID: tenantID, kind: kind, payload: append([]byte(nil), payload...), status: "queued", availableAt: q.now()}
+	publish := func() {
+		q.mu.Lock()
+		defer q.mu.Unlock()
+		q.jobs[id] = job
+		q.order = append(q.order, id)
+	}
+	if !registerTenantCommit(ctx, publish) {
+		publish()
+	}
 	return id, nil
 }
 

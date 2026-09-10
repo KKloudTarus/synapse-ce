@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -112,8 +113,71 @@ func (g *fakeIDs) NewID() shared.ID {
 	return shared.ID("id-" + strconv.Itoa(g.n))
 }
 
+type lifecycleEngagementResolver struct{ tenantID shared.ID }
+
+func (resolver lifecycleEngagementResolver) GetByID(context.Context, shared.ID) (*engagement.Engagement, error) {
+	return &engagement.Engagement{TenantID: resolver.tenantID}, nil
+}
+
+type lifecycleProjector struct {
+	calls int
+	err   error
+}
+
+func (projector *lifecycleProjector) ProjectCreatedFinding(context.Context, shared.ID, finding.Finding, string) error {
+	projector.calls++
+	return projector.err
+}
+
+type rollbackFindingTransaction struct{ repository *fakeRepo }
+
+func (transaction rollbackFindingTransaction) Run(ctx context.Context, _ shared.ID, write func(context.Context) error) error {
+	upserted := append([]finding.Finding(nil), transaction.repository.upserted...)
+	listed := append([]finding.Finding(nil), transaction.repository.list...)
+	if err := write(ctx); err != nil {
+		transaction.repository.upserted = upserted
+		transaction.repository.list = listed
+		return err
+	}
+	return nil
+}
+
 func newSvc(repo ports.FindingRepository, comments ports.CommentRepository, audit ports.AuditLogger) *Service {
 	return NewService(repo, comments, &fakeRetests{}, audit, fixedClock{t: testNow}, &fakeIDs{})
+}
+
+func TestFindingLifecycleShadowHonorsAllowlistAndRollsBackProjectionFailure(t *testing.T) {
+	t.Run("disabled tenant skips projection", func(t *testing.T) {
+		repository := &fakeRepo{}
+		projector := &lifecycleProjector{}
+		service := newSvc(repository, &fakeComments{}, &fakeAudit{})
+		service.SetEngagementTenantResolver(lifecycleEngagementResolver{tenantID: "tenant"})
+		if err := service.SetLifecycleShadow(rollbackFindingTransaction{repository: repository}, projector, func(string) bool { return false }); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Create(context.Background(), "actor", "assessment", finding.ManualInput{Title: "manual", Severity: shared.SeverityHigh}); err != nil {
+			t.Fatal(err)
+		}
+		if projector.calls != 0 || len(repository.upserted) != 1 {
+			t.Fatalf("projection calls=%d persisted=%d", projector.calls, len(repository.upserted))
+		}
+	})
+
+	t.Run("projection failure rolls back finding", func(t *testing.T) {
+		repository := &fakeRepo{}
+		projector := &lifecycleProjector{err: errors.New("projection unavailable")}
+		service := newSvc(repository, &fakeComments{}, &fakeAudit{})
+		service.SetEngagementTenantResolver(lifecycleEngagementResolver{tenantID: "tenant"})
+		if err := service.SetLifecycleShadow(rollbackFindingTransaction{repository: repository}, projector, func(string) bool { return true }); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Create(context.Background(), "actor", "assessment", finding.ManualInput{Title: "manual", Severity: shared.SeverityHigh}); err == nil {
+			t.Fatal("projection failure was ignored")
+		}
+		if projector.calls != 1 || len(repository.upserted) != 0 || len(repository.list) != 0 {
+			t.Fatalf("projection calls=%d persisted=%d listed=%d", projector.calls, len(repository.upserted), len(repository.list))
+		}
+	})
 }
 
 func TestRecordRetest(t *testing.T) {

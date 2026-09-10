@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	cycledom "github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
+	snapshotdom "github.com/KKloudTarus/synapse-ce/internal/domain/assessmentsnapshot"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/dastrun"
@@ -24,12 +26,15 @@ import (
 	projectdom "github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/purplecoverage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
+	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
+	snapshotuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentsnapshot"
 	attackpathuc "github.com/KKloudTarus/synapse-ce/internal/usecase/attackpath"
 	chainrehearsaluc "github.com/KKloudTarus/synapse-ce/internal/usecase/chainrehearsal"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
@@ -418,9 +423,51 @@ func TestHostileHarness(t *testing.T) {
 	if _, _, err := usersSvc.CreateUser(context.Background(), platform, "tenantB", "B Member", userdom.RoleMember); err != nil {
 		t.Fatalf("seed tenantB member: %v", err)
 	}
+	lifecycleClock := fixedClock{t: time.Unix(1, 0).UTC()}
+	lifecycleIDs := engIDs{}
+	lifecycleTransactions := memory.NewTenantTransactionRunner()
+	lifecycleCycles := memory.NewAssessmentCycleRepository()
+	lifecycleCycle, err := cycledom.NewAssessmentCycle("cycle-A", "tenantA", "tenant-A-cycle-marker", cycledom.BoundaryStandalone, "", "", "engA", "p", lifecycleClock.Now())
+	if err != nil {
+		t.Fatalf("seed assessment cycle: %v", err)
+	}
+	lifecycleMember, err := cycledom.NewInitialMember("tenantA", lifecycleCycle.ID, "engA", "p", lifecycleClock.Now())
+	if err != nil {
+		t.Fatalf("seed assessment cycle member: %v", err)
+	}
+	if err := lifecycleCycles.CreateCycle(context.Background(), lifecycleCycle); err != nil {
+		t.Fatalf("store assessment cycle: %v", err)
+	}
+	if err := lifecycleCycles.CreateMember(context.Background(), lifecycleMember); err != nil {
+		t.Fatalf("store assessment cycle member: %v", err)
+	}
+	engagementService := enguc.NewService(engRepo, lifecycleClock, lifecycleIDs, audit)
+	lifecycleService, err := cycleuc.NewService(lifecycleCycles, engRepo, nil, nil, lifecycleTransactions, lifecycleIDs, lifecycleClock, audit)
+	if err != nil {
+		t.Fatalf("assessment cycle service: %v", err)
+	}
+	lifecycleAPI, err := cycleuc.NewAPIService(lifecycleService, lifecycleCycles, memory.NewAssessmentCycleRequestRepository(), engagementService, lifecycleTransactions, lifecycleClock, audit)
+	if err != nil {
+		t.Fatalf("assessment cycle API: %v", err)
+	}
+	lifecycleSnapshots := memory.NewAssessmentSnapshotRepository()
+	lifecycleRuns := memory.NewScanRunStore()
+	lifecycleSnapshotService, err := snapshotuc.NewService(lifecycleSnapshots, lifecycleCycles, engRepo, lifecycleRuns, lifecycleTransactions, lifecycleIDs, lifecycleClock, audit)
+	if err != nil {
+		t.Fatalf("assessment snapshot service: %v", err)
+	}
+	legacySnapshot, err := snapshotdom.NewFinalized("tenantA", "snapshot-A", lifecycleCycle.ID, "engA", snapshotdom.Boundary{Kind: cycledom.BoundaryStandalone}, "legacy-snapshot-A", "p", lifecycleClock.Now(), []snapshotdom.SelectedRun{{
+		ID: "legacy-run-A", ManifestHash: strings.Repeat("a", 64), Provenance: scanrun.ProvenanceLegacy, TerminalStatus: scanrun.StatusUnknown,
+	}})
+	if err != nil {
+		t.Fatalf("seed assessment snapshot: %v", err)
+	}
+	if _, _, err := lifecycleSnapshots.CreateLegacyProjection(context.Background(), legacySnapshot); err != nil {
+		t.Fatalf("store assessment snapshot: %v", err)
+	}
 	rt := &Router{
 		log:      discardLog(),
-		eng:      enguc.NewService(engRepo, fixedClock{}, engIDs{}, &fakeAudit{}),
+		eng:      engagementService,
 		projects: projectSvc,
 		users:    usersSvc,
 	}
@@ -472,6 +519,9 @@ func TestHostileHarness(t *testing.T) {
 	}
 	rt.SetHostVulnerabilities(hostVulns)
 	rt.SetFleetRolloutAdmin(harnessRollout{})
+	rt.SetAssessmentCycles(lifecycleAPI, true, func(string) bool { return true })
+	rt.SetAssessmentLifecycleRollout(func(string) bool { return true }, func(string) bool { return true })
+	rt.SetAssessmentSnapshots(lifecycleSnapshotService)
 	// A real approval store, not nil: the generated sweep below reads the approvals route as the
 	// owning tenant, so the handler must run rather than dereference a nil dependency.
 	rt.EnableAgent(nil, memory.NewAgentSessionStore(), nil, memory.NewApprovalStore(), nil, 1, 8)
@@ -530,6 +580,17 @@ func TestHostileHarness(t *testing.T) {
 	verifyPromotion := func(role, tenant string) (int, string) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements/engA/judgments/eng-1/verify", strings.NewReader(`{"score":75,"rationale":"hostile verification","version":1}`))
 		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "p", Role: role, TenantID: tenant}))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+
+	sendLifecycleWrite := func(role, tenant, method, path, body string, headers map[string]string) (int, string) {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "p", Role: role, TenantID: tenant}))
+		for name, value := range headers {
+			req.Header.Set(name, value)
+		}
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		return rec.Code, rec.Body.String()
@@ -622,6 +683,11 @@ func TestHostileHarness(t *testing.T) {
 		// 403 that would reveal the engagement exists.
 		{"cross-tenant engagement read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA", http.StatusNotFound},
 		{"cross-tenant child resource → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/findings", http.StatusNotFound},
+		{"cross-tenant assessment lifecycle → 404", "readonly", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/lifecycle", http.StatusNotFound},
+		{"cross-tenant assessment cycle → 404", "readonly", "tenantB", true, http.MethodGet, "/api/v1/assessment-cycles/cycle-A", http.StatusNotFound},
+		{"cross-tenant assessment cycle members → 404", "readonly", "tenantB", true, http.MethodGet, "/api/v1/assessment-cycles/cycle-A/members", http.StatusNotFound},
+		{"cross-tenant assessment snapshots → 404", "readonly", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/snapshots", http.StatusNotFound},
+		{"cross-tenant assessment snapshot → 404", "readonly", "tenantB", true, http.MethodGet, "/api/v1/assessment-snapshots/snapshot-A", http.StatusNotFound},
 		// Same-tenant read still works (isolation does not over-block).
 		{"same-tenant engagement read → 200", "consultant", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA", http.StatusOK},
 		{"cross-tenant project read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a", http.StatusNotFound},
@@ -736,6 +802,26 @@ func TestHostileHarness(t *testing.T) {
 		if got, body := send(c.role, c.tenant, c.method, c.path, c.authed); got != c.want {
 			t.Errorf("%s: %s %s (role=%q tenant=%q) → %d, body: %s, want %d", c.name, c.method, c.path, c.role, c.tenant, got, body, c.want)
 		}
+	}
+
+	for _, probe := range []struct {
+		name, role, method, path, body string
+		headers                        map[string]string
+	}{
+		{"cross-tenant assessment retest", "consultant", http.MethodPost, "/api/v1/engagements/engA/retests", `{}`, map[string]string{"Idempotency-Key": "hostile-retest"}},
+		{"cross-tenant assessment cycle archive", "reviewer", http.MethodPost, "/api/v1/assessment-cycles/cycle-A/archive", `{}`, map[string]string{"Idempotency-Key": "hostile-archive", "If-Match": `"1"`}},
+		{"cross-tenant assessment cycle reopen", "reviewer", http.MethodPost, "/api/v1/assessment-cycles/cycle-A/reopen", `{"reason":"hostile probe"}`, map[string]string{"Idempotency-Key": "hostile-reopen", "If-Match": `"1"`}},
+		{"cross-tenant assessment snapshot finalize", "consultant", http.MethodPost, "/api/v1/engagements/engA/snapshots/finalize", `{"selected_run_ids":["legacy-run-A"]}`, map[string]string{"Idempotency-Key": "hostile-finalize", "If-Match": `"0"`}},
+	} {
+		if code, body := sendLifecycleWrite(probe.role, "tenantB", probe.method, probe.path, probe.body, probe.headers); code != http.StatusNotFound || strings.Contains(body, "tenant-A-cycle-marker") || strings.Contains(body, "snapshot-A") {
+			t.Errorf("%s leaked tenantA lifecycle state: code=%d body=%s", probe.name, code, body)
+		}
+	}
+	if code, body := send("readonly", "tenantA", http.MethodGet, "/api/v1/assessment-cycles", true); code != http.StatusOK || !strings.Contains(body, "tenant-A-cycle-marker") {
+		t.Fatalf("tenantA must see its assessment cycle marker (code=%d body=%s)", code, body)
+	}
+	if code, body := send("readonly", "tenantB", http.MethodGet, "/api/v1/assessment-cycles", true); code != http.StatusOK || strings.Contains(body, "tenant-A-cycle-marker") || strings.Contains(body, "cycle-A") {
+		t.Errorf("tenantB assessment cycle list leaked tenantA data (code=%d body=%s)", code, body)
 	}
 
 	if code, body := send("readonly", "tenantA", http.MethodGet, "/api/v1/attack-paths", true); code != http.StatusOK || !strings.Contains(body, "tenant-A-secret-marker") {

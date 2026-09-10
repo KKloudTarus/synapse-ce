@@ -34,6 +34,7 @@ const (
 // runs. An unknown pattern falls back to the default, so a new route is bounded from the
 // moment it is registered.
 var routeBodyLimits = map[string]int64{
+	"POST /api/v1/engagements/{assessmentId}/retests":  sourceUploadBodyLimit,
 	"POST /api/v1/projects/{key}/analyses/{id}/source": sourceUploadBodyLimit,
 	// Engagement and project creation both accept a multipart source archive on the same
 	// route that otherwise takes a small JSON body. The JSON branch of each handler bounds

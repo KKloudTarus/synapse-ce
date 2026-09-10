@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -114,6 +115,7 @@ func TestResolveToolExecution(t *testing.T) {
 		{name: "production worker requires sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "production worker accepts sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", SandboxEnabled: true}, role: ProcessRoleWorker, want: ToolExecutionWorker},
 		{name: "production integration worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileIntegrations}, role: ProcessRoleWorker, want: ToolExecutionWorker},
+		{name: "production lifecycle worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileLifecycle}, role: ProcessRoleWorker, want: ToolExecutionWorker},
 		{name: "worker refuses other mode", cfg: Config{Environment: "development", DBDSN: "postgres://runtime", ToolExecutionMode: "dispatch-only"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "CLI defaults in process", cfg: Config{}, role: ProcessRoleCLI, want: ToolExecutionInProcess},
 		{name: "CLI refuses other mode", cfg: Config{ToolExecutionMode: "worker"}, role: ProcessRoleCLI, wantErr: true},
@@ -141,6 +143,7 @@ func TestWorkerProfileValidation(t *testing.T) {
 		{value: "", valid: true},
 		{value: "all", valid: true},
 		{value: " INTEGRATIONS ", valid: true},
+		{value: " LIFECYCLE ", valid: true},
 		{value: "scanner", valid: false},
 	} {
 		t.Run(test.value, func(t *testing.T) {
@@ -156,6 +159,9 @@ func TestWorkerProfileValidation(t *testing.T) {
 func TestValidateWorkerSandboxPosture(t *testing.T) {
 	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileIntegrations}).ValidateWorkerSandboxPosture(); err != nil {
 		t.Fatalf("integration-only worker must not require executable-tool sandbox: %v", err)
+	}
+	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileLifecycle}).ValidateWorkerSandboxPosture(); err != nil {
+		t.Fatalf("lifecycle-only worker must not require executable-tool sandbox: %v", err)
 	}
 	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileAll}).ValidateWorkerSandboxPosture(); err == nil {
 		t.Fatal("full production worker must still require the sandbox")
@@ -768,6 +774,22 @@ func TestProjectSourceCaptureDefaults(t *testing.T) {
 	}
 }
 
+func TestEngagementSourceArchiveRootIsPersistentAndExplicit(t *testing.T) {
+	t.Setenv("SYNAPSE_ENGAGEMENT_SOURCE_DIR", "")
+	root := Load().EngagementSourceDir
+	if !filepath.IsAbs(root) || !strings.HasSuffix(root, filepath.Join("synapse", "engagement-sources")) {
+		t.Fatalf("uploaded archive root must be persistent absolute application data: %q", root)
+	}
+	t.Setenv("SYNAPSE_ENGAGEMENT_SOURCE_DIR", "/operator/source-archives")
+	if got := Load().EngagementSourceDir; got != "/operator/source-archives" {
+		t.Fatalf("explicit archive root ignored: %q", got)
+	}
+	t.Setenv("SYNAPSE_ENGAGEMENT_SOURCE_DIR", "relative/source-archives")
+	if got := Load().EngagementSourceDir; got != "relative/source-archives" {
+		t.Fatal("unsafe relative configuration must be rejected by the adapter, not silently rebased")
+	}
+}
+
 func TestProjectAnalysisCompletionTimeout(t *testing.T) {
 	t.Setenv("SYNAPSE_SCAN_TIMEOUT", "2m")
 	t.Setenv("SYNAPSE_PROJECT_ANALYSIS_COMPLETION_TIMEOUT", "")
@@ -914,5 +936,137 @@ func TestPythonTaintDefaultsOn(t *testing.T) {
 	t.Setenv("SYNAPSE_PYTAINT_ENABLED", "false")
 	if Load().PythonTaintEnabled {
 		t.Error("SYNAPSE_PYTAINT_ENABLED=false must disable Python taint")
+	}
+}
+
+func TestLoadAssessmentLifecycleDefaultsFailClosed(t *testing.T) {
+	for _, key := range []string{
+		"SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED",
+		"SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED",
+		"SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_TENANTS",
+		"SYNAPSE_ASSESSMENT_SNAPSHOT_ENABLED",
+		"SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_ENABLED",
+		"SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS",
+		"SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED",
+		"SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED",
+		"SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_TENANTS",
+		"SYNAPSE_ASSESSMENT_CLOSURE_REPORT_ENABLED",
+		"SYNAPSE_ASSESSMENT_MIGRATION_BATCH_SIZE",
+		"SYNAPSE_ASSESSMENT_PROCESS_TENANT_JOBS",
+		"SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_WARNING",
+		"SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT",
+	} {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.AssessmentCycleAPIEnabled || cfg.AssessmentCycleDualWriteEnabled || cfg.AssessmentSnapshotEnabled || cfg.AssessmentSnapshotCompletionEnabled || cfg.AssessmentShadowEnabled || cfg.AssessmentLifecycleReadEnabled || cfg.AssessmentLifecycleUIDefault || cfg.AssessmentClosureEnabled {
+		t.Fatal("assessment lifecycle flags must remain disabled by default")
+	}
+	if cfg.AssessmentBatchSize != 500 || cfg.AssessmentTenantJobs != 4 || cfg.AssessmentBacklogWarning != 500 || cfg.AssessmentBacklogHardLimit != 1000 {
+		t.Fatalf("assessment lifecycle limits = (%d,%d,%d,%d)", cfg.AssessmentBatchSize, cfg.AssessmentTenantJobs, cfg.AssessmentBacklogWarning, cfg.AssessmentBacklogHardLimit)
+	}
+}
+
+func TestValidateAssessmentLifecycleRollout(t *testing.T) {
+	valid := Config{
+		AssessmentCycleDualWriteEnabled:     true,
+		AssessmentCycleDualWriteTenants:     []string{"tenant-a"},
+		AssessmentSnapshotEnabled:           true,
+		AssessmentShadowEnabled:             true,
+		AssessmentShadowTenants:             []string{"tenant-a", "tenant-b"},
+		AssessmentLifecycleReadEnabled:      true,
+		AssessmentLifecycleReadTenants:      []string{"tenant-a", "tenant-b"},
+		AssessmentLifecycleUIDefault:        true,
+		AssessmentLifecycleUITenants:        []string{"tenant-a"},
+		AssessmentSnapshotCompletionEnabled: true,
+		AssessmentSnapshotCompletionTenants: []string{"tenant-a"},
+		AssessmentBatchSize:                 500,
+		AssessmentTenantJobs:                4,
+		AssessmentBacklogWarning:            500,
+		AssessmentBacklogHardLimit:          1000,
+		AssessmentClosureEnabled:            true,
+	}
+	if err := valid.ValidateAssessmentLifecycleRollout(); err != nil {
+		t.Fatalf("valid assessment lifecycle rollout: %v", err)
+	}
+
+	invalid := valid
+	invalid.AssessmentCycleDualWriteTenants = nil
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("dual-write without a tenant allowlist must fail")
+	}
+	invalid = valid
+	invalid.AssessmentShadowTenants = nil
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("shadow generation without a tenant allowlist must fail")
+	}
+	invalid = valid
+	invalid.AssessmentSnapshotEnabled = false
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("shadow generation without snapshots must fail")
+	}
+	invalid = valid
+	invalid.AssessmentLifecycleUITenants = []string{"tenant-c"}
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("UI tenant outside read allowlist must fail")
+	}
+	invalid = valid
+	invalid.AssessmentSnapshotCompletionTenants = []string{"tenant-c"}
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("Snapshot completion tenant outside read allowlist must fail")
+	}
+
+	invalid = valid
+	invalid.AssessmentLifecycleReadTenants = []string{"tenant-c"}
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("read tenant outside shadow allowlist must fail")
+	}
+	invalid = valid
+	invalid.AssessmentBatchSize = 2001
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("unbounded assessment batch size must fail")
+	}
+	invalid = valid
+	invalid.AssessmentTenantJobs = 5
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("unbounded assessment tenant concurrency must fail")
+	}
+	invalid = valid
+	invalid.AssessmentBacklogHardLimit = 499
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("hard backlog limit below warning threshold must fail")
+	}
+	invalid = valid
+	invalid.AssessmentSnapshotEnabled = false
+	if err := invalid.ValidateAssessmentLifecycleRollout(); err == nil {
+		t.Fatal("closure without snapshots must fail")
+	}
+}
+
+func TestAssessmentLifecycleTenantGates(t *testing.T) {
+	cfg := Config{
+		AssessmentCycleDualWriteEnabled:     true,
+		AssessmentCycleDualWriteTenants:     []string{"tenant-a"},
+		AssessmentShadowEnabled:             true,
+		AssessmentShadowTenants:             []string{"tenant-a"},
+		AssessmentLifecycleReadEnabled:      true,
+		AssessmentLifecycleReadTenants:      []string{"*"},
+		AssessmentSnapshotCompletionEnabled: true,
+		AssessmentSnapshotCompletionTenants: []string{"tenant-a"},
+	}
+	if !cfg.AssessmentCycleDualWriteForTenant("tenant-a") || cfg.AssessmentCycleDualWriteForTenant("tenant-b") {
+		t.Fatal("tenant-scoped cycle dual-write allowlist mismatch")
+	}
+	if !cfg.AssessmentShadowForTenant("tenant-a") || cfg.AssessmentShadowForTenant("tenant-b") {
+		t.Fatal("tenant-scoped identity shadow allowlist mismatch")
+	}
+	if !cfg.AssessmentLifecycleReadForTenant("tenant-b") || cfg.AssessmentLifecycleUIForTenant("tenant-b") {
+		t.Fatal("read wildcard or fail-closed UI gate mismatch")
+	}
+	if !cfg.AssessmentSnapshotCompletionForTenant("tenant-a") || cfg.AssessmentSnapshotCompletionForTenant("tenant-b") {
+		t.Fatal("Snapshot completion tenant gate mismatch")
 	}
 }

@@ -1309,7 +1309,6 @@ func (s *sequenceIDs) NewID() shared.ID {
 	s.next++
 	return shared.ID(fmt.Sprintf("scan-sequence-%d", s.next))
 }
-
 func newAsyncSvc(repo ports.EngagementRepository, clk ports.Clock, acq ports.Acquirer, audit ports.AuditLogger, det ports.LanguageDetector, jobs ports.ScanJobStore, ids ports.IDGenerator) *Service {
 	return NewService(repo, nil, nil, nil, jobs, nil, nil, ids, ports.Provenance{}, clk, audit, shared.SeverityHigh, 0, acq, det, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
 }

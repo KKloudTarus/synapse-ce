@@ -27,6 +27,11 @@ type Service struct {
 	audit     ports.AuditLogger
 	clock     ports.Clock
 	ids       ports.IDGenerator
+	cycles    ports.AssessmentCycleRepository
+}
+
+func (s *Service) SetAssessmentCycleReader(cycles ports.AssessmentCycleRepository) {
+	s.cycles = cycles
 }
 
 func NewService(repo ports.BusinessAssetRepository, findings ports.FindingRepository, imported ports.ImportedFindingStore, judgments ports.JudgmentStore, retests ports.RetestRepository, audit ports.AuditLogger, clock ports.Clock, ids ports.IDGenerator) (*Service, error) {
@@ -198,6 +203,13 @@ func (s *Service) TechnicalAssets(ctx context.Context, tenantID, id shared.ID) (
 
 func (s *Service) AssignEngagement(ctx context.Context, tenantID, engagementID, assetID shared.ID, actor string) error {
 	tenantID = shared.TenantOrDefault(tenantID)
+	if s.cycles != nil {
+		if _, err := s.cycles.GetCycleByAssessment(ctx, tenantID, engagementID); err == nil {
+			return fmt.Errorf("%w: an Assessment Cycle freezes its Business Asset boundary", shared.ErrConflict)
+		} else if !errors.Is(err, shared.ErrNotFound) {
+			return err
+		}
+	}
 	if !assetID.IsZero() {
 		a, err := s.resolveAsset(ctx, tenantID, assetID)
 		if err != nil {

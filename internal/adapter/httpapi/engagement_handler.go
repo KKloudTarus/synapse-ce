@@ -18,6 +18,7 @@ import (
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
+	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -30,14 +31,15 @@ type scopeTargetDTO struct {
 }
 
 type createEngagementRequest struct {
-	Name           string           `json:"name"`
-	Client         string           `json:"client"`
-	InScope        []scopeTargetDTO `json:"in_scope"`
-	OutOfScope     []scopeTargetDTO `json:"out_of_scope"`
-	AuthorizedFrom string           `json:"authorized_from"` // RFC3339, optional
-	AuthorizedTo   string           `json:"authorized_to"`   // RFC3339, optional
-	Timezone       string           `json:"timezone"`        // IANA, optional (display)
-	AssetID        string           `json:"asset_id"`
+	Name                string           `json:"name"`
+	Client              string           `json:"client"`
+	InScope             []scopeTargetDTO `json:"in_scope"`
+	OutOfScope          []scopeTargetDTO `json:"out_of_scope"`
+	AuthorizedFrom      string           `json:"authorized_from"` // RFC3339, optional
+	AuthorizedTo        string           `json:"authorized_to"`   // RFC3339, optional
+	Timezone            string           `json:"timezone"`        // IANA, optional (display)
+	AssetID             string           `json:"asset_id"`
+	AssessmentProjectID string           `json:"assessment_project_id"`
 }
 
 // parseRFC3339Ptr parses an optional RFC3339 timestamp. Empty -> (nil, nil).
@@ -188,16 +190,73 @@ func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	input := enguc.CreateInput{
-		TenantID:        tenantID,
-		BusinessAssetID: shared.ID(req.AssetID),
-		CreatedBy:       PrincipalFrom(r.Context()), // engagement owner (ownership)
-		Name:            req.Name,
-		Client:          req.Client,
-		InScope:         toTargets(req.InScope),
-		OutOfScope:      toTargets(req.OutOfScope),
-		AuthorizedFrom:  from,
-		AuthorizedTo:    to,
-		Timezone:        req.Timezone,
+		AssessmentProjectID: shared.ID(req.AssessmentProjectID),
+		TenantID:            tenantID,
+		BusinessAssetID:     shared.ID(req.AssetID),
+		CreatedBy:           PrincipalFrom(r.Context()), // engagement owner (ownership)
+		Name:                req.Name,
+		Client:              req.Client,
+		InScope:             toTargets(req.InScope),
+		OutOfScope:          toTargets(req.OutOfScope),
+		AuthorizedFrom:      from,
+		AuthorizedTo:        to,
+		Timezone:            req.Timezone,
+	}
+	dualWrite := rt.assessmentCycles != nil && rt.assessmentCycleDualWrite != nil && rt.assessmentCycleDualWrite(tenantID.String())
+	if req.AssessmentProjectID != "" && !dualWrite {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "assessment_project_association_disabled"})
+		return
+	}
+	if dualWrite {
+		idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if idempotencyKey == "" {
+			canonical, marshalErr := json.Marshal(struct {
+				Engagement     enguc.CreateInput `json:"engagement"`
+				SourceFilename string            `json:"source_filename,omitempty"`
+				SourceSize     int64             `json:"source_size,omitempty"`
+				SourceSHA256   string            `json:"source_sha256,omitempty"`
+			}{Engagement: input, SourceFilename: sourceFilename, SourceSize: sourceSize, SourceSHA256: sourceSHA256})
+			if marshalErr != nil {
+				writeError(w, rt.log, fmt.Errorf("derive assessment creation idempotency key: %w", marshalErr))
+				return
+			}
+			digest := sha256.Sum256(canonical)
+			idempotencyKey = "server-" + hex.EncodeToString(digest[:])
+		}
+		cycleInput := cycleuc.CreateInitialAssessmentInput{
+			Request: cycleuc.RetainedRequest{
+				TenantID: tenantID, Actor: PrincipalFrom(r.Context()), Route: "/api/v1/engagements",
+				IdempotencyKey: idempotencyKey,
+			},
+			Engagement: input,
+		}
+		if sourceFile != nil {
+			cycleInput.Source = &cycleuc.SourceUpload{Filename: sourceFilename, Size: sourceSize, SHA256: sourceSHA256, Reader: sourceFile}
+		}
+		response, err := rt.assessmentCycles.CreateInitialAssessment(r.Context(), cycleInput)
+		if err != nil {
+			rt.observeAssessmentCycleDualWrite("failed")
+			writeAssessmentCycleError(w, rt.log, err)
+			return
+		}
+		if response.Replayed {
+			rt.observeAssessmentCycleDualWrite("replayed")
+		} else {
+			rt.observeAssessmentCycleDualWrite("created")
+		}
+		w.Header().Set("X-Synapse-Assessment-Cycle-Dual-Write", "true")
+		// Retention stores an immutable application result, not the transport
+		// representation. Use the same view as the ordinary engagement endpoints.
+		var assessment engdom.Engagement
+		if err := json.Unmarshal(response.Body, &assessment); err != nil {
+			writeError(w, rt.log, err)
+			return
+		}
+		writeRetainedValue(w, response, toEngagementView(&assessment))
+		return
+	}
+	if rt.assessmentCycles != nil {
+		rt.observeAssessmentCycleDualWrite("legacy")
 	}
 	var e *engdom.Engagement
 	if sourceFile != nil {
@@ -210,6 +269,16 @@ func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toEngagementView(e))
+}
+
+type assessmentCycleDualWriteObserver interface {
+	ObserveAssessmentCycleDualWrite(outcome string)
+}
+
+func (rt *Router) observeAssessmentCycleDualWrite(outcome string) {
+	if observer, ok := rt.httpObserver.(assessmentCycleDualWriteObserver); ok {
+		observer.ObserveAssessmentCycleDualWrite(outcome)
+	}
 }
 
 func (rt *Router) listEngagements(w http.ResponseWriter, r *http.Request) {
