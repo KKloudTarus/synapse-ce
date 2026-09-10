@@ -231,3 +231,34 @@ func TestCatalogRPMUnresolvedMajor(t *testing.T) {
 		t.Error("a VERSION_ID with an empty major must NOT be flagged resolved (osDistroEcosystem maps it to nothing)")
 	}
 }
+
+// TestCatalogRPMRHELResolved covers EPIC #860 D7.5: a RHEL rpm DB resolves its distro (rhel -> "Red Hat:<major>",
+// served by the owned Red Hat CSAF feed), so the cataloger no longer flags a false "release could not be keyed".
+func TestCatalogRPMRHELResolved(t *testing.T) {
+	for _, id := range []string{"rhel", "redhat"} {
+		rootfs := writeRPMRootfs(t, "ID="+id+"\nVERSION_ID=\"9.4\"\n")
+		res, err := New().Catalog(context.Background(), rootfs)
+		if err != nil {
+			t.Fatalf("catalog %s: %v", id, err)
+		}
+		if len(res.Components) != 1 || !res.DistroResolved {
+			t.Fatalf("a %s rpm DB must resolve its distro, got resolved=%v comps=%d", id, res.DistroResolved, len(res.Components))
+		}
+	}
+}
+
+// TestCatalogRPMAmazonUnresolved: Amazon Linux (amzn) has no owned advisory feed yet, so its rpm packages are
+// cataloged for inventory but honestly flagged unresolved (fail-closed: no false DistroResolved without a feed).
+func TestCatalogRPMAmazonUnresolved(t *testing.T) {
+	rootfs := writeRPMRootfs(t, "ID=amzn\nVERSION_ID=\"2023\"\n")
+	res, err := New().Catalog(context.Background(), rootfs)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if len(res.Components) != 1 {
+		t.Fatalf("want the rpm component emitted for inventory, got %d", len(res.Components))
+	}
+	if res.DistroResolved {
+		t.Error("Amazon Linux must NOT be flagged resolved until its feed lands")
+	}
+}
