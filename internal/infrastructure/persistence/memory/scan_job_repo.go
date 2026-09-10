@@ -33,7 +33,7 @@ func (s *ScanJobStore) CreateRunning(_ context.Context, j ports.ScanJob) error {
 			return shared.ErrConflict
 		}
 	}
-	s.byID[j.ID] = j
+	s.byID[j.ID] = cloneScanJobSource(j)
 	s.latest[shared.ID(j.EngagementID)] = j.ID
 	return nil
 }
@@ -42,10 +42,16 @@ func (s *ScanJobStore) CreateRunning(_ context.Context, j ports.ScanJob) error {
 func (s *ScanJobStore) Save(_ context.Context, j ports.ScanJob) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, existed := s.byID[j.ID]; !existed {
+	if stored, existed := s.byID[j.ID]; !existed {
 		s.latest[shared.ID(j.EngagementID)] = j.ID
+	} else {
+		// Match the PostgreSQL status-only upsert: admission identity and source
+		// cannot be rewritten by a later progress/status update.
+		j.EngagementID, j.Target, j.Kind = stored.EngagementID, stored.Target, stored.Kind
+		j.StartedAt = stored.StartedAt
+		j.SourcePackage = stored.SourcePackage
 	}
-	s.byID[j.ID] = j
+	s.byID[j.ID] = cloneScanJobSource(j)
 	return nil
 }
 
@@ -57,7 +63,7 @@ func (s *ScanJobStore) ListStaleRunning(_ context.Context, olderThan time.Time, 
 	out := []ports.ScanJob{}
 	for _, j := range s.byID {
 		if j.Status == ports.ScanRunning && j.StartedAt.Before(olderThan) {
-			out = append(out, j)
+			out = append(out, cloneScanJobSource(j))
 		}
 	}
 	sort.Slice(out, func(i, k int) bool { return out[i].StartedAt.Before(out[k].StartedAt) })
@@ -75,7 +81,7 @@ func (s *ScanJobStore) GetJob(_ context.Context, id string) (ports.ScanJob, erro
 	if !ok {
 		return ports.ScanJob{}, fmt.Errorf("scan job %s: %w", id, shared.ErrNotFound)
 	}
-	return j, nil
+	return cloneScanJobSource(j), nil
 }
 
 // LatestForEngagement returns the engagement's most recent job, or ErrNotFound.
@@ -86,7 +92,7 @@ func (s *ScanJobStore) LatestForEngagement(_ context.Context, engagementID share
 	if !ok {
 		return ports.ScanJob{}, fmt.Errorf("scan job for %s: %w", engagementID, shared.ErrNotFound)
 	}
-	return s.byID[id], nil
+	return cloneScanJobSource(s.byID[id]), nil
 }
 
 func (s *ScanJobStore) LatestForEngagements(_ context.Context, engagementIDs []shared.ID) (map[shared.ID]ports.ScanJob, error) {
@@ -95,8 +101,17 @@ func (s *ScanJobStore) LatestForEngagements(_ context.Context, engagementIDs []s
 	out := map[shared.ID]ports.ScanJob{}
 	for _, engagementID := range engagementIDs {
 		if id, ok := s.latest[engagementID]; ok {
-			out[engagementID] = s.byID[id]
+			out[engagementID] = cloneScanJobSource(s.byID[id])
 		}
 	}
 	return out, nil
+}
+
+func cloneScanJobSource(job ports.ScanJob) ports.ScanJob {
+	if job.SourcePackage != nil {
+		item := *job.SourcePackage
+		item.Locator, item.ObjectKey = "", ""
+		job.SourcePackage = &item
+	}
+	return job
 }

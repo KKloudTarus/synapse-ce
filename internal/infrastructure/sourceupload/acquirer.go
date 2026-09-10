@@ -35,6 +35,14 @@ func (a *Acquirer) Acquire(ctx context.Context, request ports.AcquireRequest) (*
 		_ = cleanupSource()
 		return nil, fmt.Errorf("%w: uploaded source identity does not match stored content", shared.ErrValidation)
 	}
+	if tenantID, ok := shared.TenantFrom(ctx); ok && tenantID != item.TenantID {
+		_ = cleanupSource()
+		return nil, fmt.Errorf("%w: uploaded source belongs to a different tenant", shared.ErrNotFound)
+	}
+	if pinned := request.SourcePackage; pinned != nil && (pinned.VersionID != item.VersionID || pinned.TenantID != item.TenantID || pinned.EngagementID != item.EngagementID || pinned.SHA256 != item.SHA256 || pinned.Size != item.Size) {
+		_ = cleanupSource()
+		return nil, fmt.Errorf("%w: uploaded source does not match the admitted package version", shared.ErrConflict)
+	}
 	workspace, err := a.next.Acquire(ctx, ports.AcquireRequest{Kind: ports.TargetArchive, Value: path})
 	if err != nil {
 		_ = cleanupSource()
