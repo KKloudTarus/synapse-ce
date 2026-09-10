@@ -14,4 +14,9 @@ const (
 	// decompressed-stream cap that fails a bzip2 bomb closed.
 	maxOVALFileBytes    = 128 << 20 // per-file read cap for an OVAL .xml / .xml.bz2
 	maxOVALDecompressed = 1 << 30   // cap on the decompressed OVAL stream (bzip2-bomb guard); a whole release's feed
+
+	// The GitLab gemnasium-db archive is one tar.gz of tens of thousands of small YAML advisories; this caps
+	// the decompressed tar stream (gzip-bomb guard) so a malicious archive cannot expand without bound. The
+	// real archive decompresses to well under this.
+	maxGemnasiumDecompressed = 2 << 30
 )
