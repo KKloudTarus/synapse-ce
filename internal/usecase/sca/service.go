@@ -1201,6 +1201,38 @@ func mergeComponents(doc *sbom.SBOM, extra []sbom.Component) int {
 	return added
 }
 
+// mergeDependencies folds dependency edges from extra into base. A Ref new to base is appended; a Ref already
+// in base has extra's DependsOn UNIONED into it (deduped, order-stable), so a node whose base edge list was
+// empty or partial gains the rootfs pass's real edges rather than losing them. Returns the merged slice.
+func mergeDependencies(base, extra []sbom.Dependency) []sbom.Dependency {
+	if len(extra) == 0 {
+		return base
+	}
+	idx := make(map[string]int, len(base))
+	for i := range base {
+		idx[base[i].Ref] = i
+	}
+	for _, d := range extra {
+		i, ok := idx[d.Ref]
+		if !ok {
+			idx[d.Ref] = len(base)
+			base = append(base, d)
+			continue
+		}
+		existing := make(map[string]bool, len(base[i].DependsOn))
+		for _, dep := range base[i].DependsOn {
+			existing[dep] = true
+		}
+		for _, dep := range d.DependsOn {
+			if !existing[dep] {
+				existing[dep] = true
+				base[i].DependsOn = append(base[i].DependsOn, dep)
+			}
+		}
+	}
+	return base
+}
+
 // purlType returns a PURL's package type ("pkg:deb/..." -> "deb"), or "" if absent. A minimal read-only
 // subset for the OS-package dedup key (the full PURL parser lives in the advisory infra, which usecase cannot
 // import).
@@ -2682,6 +2714,24 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			trace.fail(step, ierr)
 		} else {
 			trace.succeed(step, "Installed-package cataloging completed", map[string]int{"packages_added": mergeComponents(doc, instComps)})
+		}
+	}
+	// Owned SBOM producer over the materialized image ROOTFS (D7.1): an owned producer's scan of the OCI layout
+	// (ws.Dir) is empty because the layout is packed blobs, not a filesystem, so every language manifest/lockfile
+	// BAKED INTO the image (e.g. /app/package-lock.json, /app/requirements.txt) is invisible. Scan the extracted
+	// rootfs too and merge the declared components + dependency edges. It runs AFTER the OS and installed-package
+	// catalogers, so an evidence-backed installed component wins the dedup and a manifest only fills a gap it left.
+	// Only for the owned producer: syft catalogs the squashed image filesystem natively from the layout, so a
+	// second full-rootfs pass would be redundant. Best-effort: a failure is traced, never a scan failure.
+	if doc != nil && doc.Source == "ownsbom" && ws.RootFS != "" && ws.RootFS != ws.Dir {
+		before := countComponents(doc)
+		step = trace.start(stageSBOM, "rootfs-manifest-catalog", "ownsbom-rootfs", "Catalog image rootfs manifests", map[string]int{"components": before})
+		if rootDoc, rerr := s.sbomGen.Generate(ctx, ws.RootFS); rerr != nil {
+			trace.fail(step, rerr)
+		} else if rootDoc != nil {
+			added := mergeComponents(doc, rootDoc.Components)
+			doc.Dependencies = mergeDependencies(doc.Dependencies, rootDoc.Dependencies)
+			trace.succeed(step, "Rootfs manifest cataloging completed", map[string]int{"components_before": before, "components": countComponents(doc), "manifests_added": added})
 		}
 	}
 	// Resolve the FULL Maven dependency tree via `mvn dependency:list` (best-effort + opt-in): a from-source

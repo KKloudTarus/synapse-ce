@@ -1990,3 +1990,94 @@ func TestImageRootFSSecretAndMisconfigScan(t *testing.T) {
 		t.Errorf("a source scan must run each scanner once, secret=%v misconfig=%v", sec2.roots, mis2.roots)
 	}
 }
+
+// rootfsAwareSBOM is an owned-producer stub: it returns an empty SBOM for the OCI layout dir (as ownsbom does
+// over packed blobs) and the baked-in image manifests for the rootfs dir, recording every ref it was asked to
+// scan. producer sets the reported SBOM.Source so the D7.1 owned-producer gate can be exercised for both
+// ownsbom (rootfs pass runs) and syft (rootfs pass skipped).
+type rootfsAwareSBOM struct {
+	rootfs   string
+	producer string
+	refs     []string
+}
+
+func (g *rootfsAwareSBOM) Generate(_ context.Context, ref string) (*sbom.SBOM, error) {
+	g.refs = append(g.refs, ref)
+	doc := &sbom.SBOM{TargetRef: ref, Source: g.producer}
+	if ref == g.rootfs {
+		doc.Components = []sbom.Component{
+			{Name: "left-pad", Version: "1.0.0", PURL: "pkg:npm/left-pad@1.0.0"},
+			{Name: "requests", Version: "2.20.0", PURL: "pkg:pypi/requests@2.20.0"},
+		}
+		doc.Dependencies = []sbom.Dependency{{Ref: "pkg:npm/app@1.0.0", DependsOn: []string{"pkg:npm/left-pad@1.0.0"}}}
+	}
+	return doc, nil
+}
+
+func hasComponentNamed(comps []sbom.Component, name string) bool {
+	for _, c := range comps {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// TestImageRootFSOwnedSBOMManifestMerge covers EPIC #860 D7.1: with the OWNED producer and an image rootfs,
+// language manifests baked into the image (an empty OCI-layout scan misses them) are cataloged from the rootfs
+// and merged. A source scan (no rootfs) never runs the rootfs pass, and the syft producer is not re-scanned
+// over the rootfs (syft catalogs the squashed filesystem from the layout natively).
+func TestImageRootFSOwnedSBOMManifestMerge(t *testing.T) {
+	newSvc := func(gen *rootfsAwareSBOM) *Service {
+		return NewService(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, nil, nil, nil, nil, nil, nil, nil, ports.Provenance{}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAudit{}, shared.SeverityHigh, 0, &fakeAcquirer{dir: t.TempDir(), rootfs: gen.rootfs}, &fakeDetector{}, gen, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
+	}
+
+	// Owned producer + image rootfs: the rootfs manifests are cataloged and merged.
+	rootfs := t.TempDir()
+	gen := &rootfsAwareSBOM{rootfs: rootfs, producer: "ownsbom"}
+	res, err := newSvc(gen).Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatalf("image scan: %v", err)
+	}
+	if res.SBOM == nil || !hasComponentNamed(res.SBOM.Components, "left-pad") || !hasComponentNamed(res.SBOM.Components, "requests") {
+		t.Fatalf("rootfs manifests must be merged into the SBOM, components=%+v", res.SBOM.Components)
+	}
+	if !rootsContain(gen.refs, rootfs) {
+		t.Errorf("the owned producer must be run over the image rootfs, refs=%v", gen.refs)
+	}
+
+	// syft producer: the rootfs pass is skipped (syft already catalogs the squashed filesystem).
+	syftGen := &rootfsAwareSBOM{rootfs: t.TempDir(), producer: "syft"}
+	if _, err := newSvc(syftGen).Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}); err != nil {
+		t.Fatalf("syft image scan: %v", err)
+	}
+	if rootsContain(syftGen.refs, syftGen.rootfs) {
+		t.Errorf("syft must NOT be re-scanned over the rootfs, refs=%v", syftGen.refs)
+	}
+}
+
+// TestMergeDependenciesUnionsEdges: a duplicate Ref unions its DependsOn (no edge lost), a new Ref is appended.
+func TestMergeDependenciesUnionsEdges(t *testing.T) {
+	base := []sbom.Dependency{{Ref: "a", DependsOn: []string{"x"}}}
+	extra := []sbom.Dependency{
+		{Ref: "a", DependsOn: []string{"x", "y"}}, // union: a -> {x,y}
+		{Ref: "b", DependsOn: []string{"z"}},      // new node appended
+	}
+	got := mergeDependencies(base, extra)
+	if len(got) != 2 {
+		t.Fatalf("want 2 nodes, got %d: %+v", len(got), got)
+	}
+	var a *sbom.Dependency
+	for i := range got {
+		if got[i].Ref == "a" {
+			a = &got[i]
+		}
+	}
+	if a == nil || len(a.DependsOn) != 2 || a.DependsOn[0] != "x" || a.DependsOn[1] != "y" {
+		t.Fatalf("node a must union to [x y], got %+v", a)
+	}
+	// Nil/empty extra is a no-op.
+	if out := mergeDependencies(base, nil); len(out) != len(base) {
+		t.Fatalf("nil extra must be a no-op")
+	}
+}
