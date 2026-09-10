@@ -149,3 +149,72 @@ func graphNodesByID(nodes []DependencyGraphNode) map[string]DependencyGraphNode 
 	}
 	return out
 }
+
+func TestBuildProjectDependencyGraphSyntheticRootForDisconnectedMonorepo(t *testing.T) {
+	// Two independent manifests (a-tree and x-tree) share no dependency, so the graph is a disconnected
+	// forest with two roots. D3.9 links them under one synthetic project-root so the graph is connected with
+	// a single true root; the real components keep their Direct/Depth.
+	a := component("a", "1", "pkg:npm/a@1", sbom.ScopeProduction)
+	aChild := component("a-child", "1", "pkg:npm/a-child@1", sbom.ScopeProduction)
+	x := component("x", "1", "pkg:pypi/x@1", sbom.ScopeProduction)
+	xChild := component("x-child", "1", "pkg:pypi/x-child@1", sbom.ScopeProduction)
+	scan := scauc.ScanResult{SBOM: &sbom.SBOM{
+		Components: []sbom.Component{a, aChild, x, xChild},
+		Dependencies: []sbom.Dependency{
+			{Ref: a.PURL, DependsOn: []string{aChild.PURL}},
+			{Ref: x.PURL, DependsOn: []string{xChild.PURL}},
+		},
+	}}
+	graph, err := buildProjectDependencyGraph("mono", scan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One true root: the synthetic project-root.
+	if len(graph.Roots) != 1 || graph.Roots[0] != syntheticProjectRootID {
+		t.Fatalf("disconnected forest must get one synthetic root, got roots=%v", graph.Roots)
+	}
+	byID := graphNodesByID(graph.Nodes)
+	syn, ok := byID[syntheticProjectRootID]
+	if !ok || !syn.Synthetic {
+		t.Fatalf("synthetic root node missing or unmarked: %+v", syn)
+	}
+	// Both manifests' directs are children of the synthetic root, and both keep Direct=true, Depth=0.
+	synChildren := map[string]bool{}
+	for _, e := range graph.Edges {
+		if e.From == syntheticProjectRootID {
+			synChildren[e.To] = true
+		}
+	}
+	if !synChildren[a.PURL] || !synChildren[x.PURL] {
+		t.Fatalf("synthetic root must link both manifest roots, got %v", synChildren)
+	}
+	if n := byID[a.PURL]; !n.Direct || n.Depth != 0 {
+		t.Errorf("real direct a must keep Direct/Depth, got %+v", n)
+	}
+	// The synthetic root is not counted as a component.
+	if graph.Summary.Components != 4 {
+		t.Errorf("synthetic root must not count as a component, got %d", graph.Summary.Components)
+	}
+}
+
+func TestBuildProjectDependencyGraphConnectedGraphHasNoSyntheticRoot(t *testing.T) {
+	// A single connected tree keeps its real root; no synthetic root is added.
+	root := component("app", "1", "pkg:generic/app@1", sbom.ScopeProduction)
+	dep := component("dep", "1", "pkg:npm/dep@1", sbom.ScopeProduction)
+	scan := scauc.ScanResult{SBOM: &sbom.SBOM{
+		Components:   []sbom.Component{root, dep},
+		Dependencies: []sbom.Dependency{{Ref: root.PURL, DependsOn: []string{dep.PURL}}},
+	}}
+	graph, err := buildProjectDependencyGraph("connected", scan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Roots) != 1 || graph.Roots[0] != root.PURL {
+		t.Fatalf("connected graph must keep its real root, got %v", graph.Roots)
+	}
+	for _, n := range graph.Nodes {
+		if n.Synthetic {
+			t.Errorf("connected graph must not get a synthetic root")
+		}
+	}
+}

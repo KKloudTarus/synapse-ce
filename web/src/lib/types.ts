@@ -1154,6 +1154,7 @@ export interface ProjectDependencyNode {
   reachability: string
   direct: boolean
   depth: number
+  synthetic?: boolean
   licenses: ProjectDependencyLicense[]
   licenseRisk: boolean
   licenseVerdict: Verdict | ''

@@ -279,9 +279,11 @@ function DependencyTreeRow({
           riskyPaths.has(node.id) && 'border-l-critical',
         )}
       >
-        <Package className={cn('size-4 shrink-0 text-tertiary', node.vulnerabilityCount > 0 && 'text-critical')} aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">{node.name}</span>
-        {node.version && <span className="max-w-28 truncate font-mono text-[11px] text-quaternary">{node.version}</span>}
+        {node.synthetic
+          ? <GitBranch01 className="size-4 shrink-0 text-brand-secondary" aria-hidden="true" />
+          : <Package className={cn('size-4 shrink-0 text-tertiary', node.vulnerabilityCount > 0 && 'text-critical')} aria-hidden="true" />}
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">{node.synthetic ? 'Project root' : node.name}</span>
+        {!node.synthetic && node.version && <span className="max-w-28 truncate font-mono text-[11px] text-quaternary">{node.version}</span>}
         {node.vulnerabilityCount > 0 && <Pill className="bg-critical/10 text-critical">{node.vulnerabilityCount} vuln</Pill>}
         {node.licenseRisk && <Scale01 className="size-3.5 shrink-0 text-medium" aria-label="License risk" />}
         {node.depth < 0 && <Pill>cycle</Pill>}
@@ -313,16 +315,18 @@ function DependencyDetails({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-tertiary">Package details</p>
-          <h3 className="mt-1 break-words text-lg font-semibold text-primary">{node.name}</h3>
-          <p className="font-mono text-xs text-quaternary">{node.version || 'Version unknown'}</p>
+          <h3 className="mt-1 break-words text-lg font-semibold text-primary">{node.synthetic ? 'Project root' : node.name}</h3>
+          <p className="font-mono text-xs text-quaternary">{node.synthetic ? 'Synthetic node linking every manifest\'s direct dependencies' : (node.version || 'Version unknown')}</p>
         </div>
-        <Button variant="secondary" loading={exporting} onClick={() => onExport(node.id)} title={`Export ${node.name} and its dependencies`}>
-          <Download01 className="size-4" /> Subtree
-        </Button>
+        {!node.synthetic && (
+          <Button variant="secondary" loading={exporting} onClick={() => onExport(node.id)} title={`Export ${node.name} and its dependencies`}>
+            <Download01 className="size-4" /> Subtree
+          </Button>
+        )}
       </div>
 
       <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
-        <Detail label="Relationship" value={node.direct ? 'Direct' : 'Transitive'} />
+        <Detail label="Relationship" value={node.synthetic ? 'Project root' : (node.direct ? 'Direct' : 'Transitive')} />
         <Detail label="Depth" value={node.depth >= 0 ? String(node.depth) : 'Cycle / unrooted'} />
         <Detail label="Scope" value={node.scope || 'Unknown'} />
         <Detail label="Reachability" value={node.reachability || 'Unknown'} />

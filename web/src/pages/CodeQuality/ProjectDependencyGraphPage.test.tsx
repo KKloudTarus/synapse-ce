@@ -85,6 +85,28 @@ describe('ProjectDependencyGraphPage', () => {
     expect(screen.getAllByText('app').length).toBeGreaterThan(0)
     expect(screen.getAllByText('logging').length).toBeGreaterThan(0)
   })
+  it('renders a synthetic project root for a disconnected monorepo graph', async () => {
+    const monorepo: ProjectDependencyGraph = {
+      analysisId: 'a',
+      roots: ['synthetic:project-root'],
+      nodes: [
+        dependency('synthetic:project-root', { name: 'Project', synthetic: true, direct: false, depth: -1, version: '', purl: '' }),
+        dependency('a', { direct: true, depth: 0 }),
+        dependency('x', { direct: true, depth: 0 }),
+      ],
+      edges: [
+        { from: 'synthetic:project-root', to: 'a' },
+        { from: 'synthetic:project-root', to: 'x' },
+      ],
+      summary: { components: 2, direct: 2, transitive: 0, vulnerable: 0, licenseRisk: 0, edges: 2 },
+    }
+    vi.mocked(api.projectDependencyGraph).mockResolvedValue(monorepo)
+    renderPage()
+    expect(await screen.findByText('Dependency explorer')).toBeInTheDocument()
+    // The synthetic node renders as "Project root", not as a package named after its id.
+    expect((await screen.findAllByText('Project root')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('synthetic:project-root')).toBeNull()
+  })
 })
 
 function dependency(id: string, overrides: Partial<ProjectDependencyGraph['nodes'][number]> = {}): ProjectDependencyGraph['nodes'][number] {
