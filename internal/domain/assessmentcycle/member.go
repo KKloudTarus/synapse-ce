@@ -36,10 +36,12 @@ type Member struct {
 	AssessmentType          AssessmentType
 	PredecessorAssessmentID shared.ID
 	RetestNumber            int
-	RelationshipVersion     int64
-	CreatedAt               time.Time
-	CreatedBy               string
-	ArchivedAt              *time.Time
+	// PlannedDate is a date-only planning hint, never an execution authorization.
+	PlannedDate         string
+	RelationshipVersion int64
+	CreatedAt           time.Time
+	CreatedBy           string
+	ArchivedAt          *time.Time
 }
 
 // NewInitialMember creates the root member for an AssessmentCycle.
@@ -59,8 +61,8 @@ func NewInitialMember(tenantID, cycleID, assessmentID shared.ID, actor string, n
 		PredecessorAssessmentID: "",
 		RetestNumber:            0,
 		RelationshipVersion:     1,
-		CreatedAt:               now.UTC(),
-		CreatedBy:               actor,
+		CreatedAt:               now,
+		CreatedBy:               strings.TrimSpace(actor),
 		ArchivedAt:              nil,
 	}
 	return m, m.Validate()
@@ -85,11 +87,11 @@ func NewRetestMember(
 	if retestNumber <= 0 {
 		return nil, fmt.Errorf("%w: retest number must be positive, got %d", shared.ErrValidation, retestNumber)
 	}
+
 	actor = strings.TrimSpace(actor)
 	if actor == "" || utf8.RuneCountInString(actor) > 256 || now.IsZero() {
 		return nil, fmt.Errorf("%w: member actor and creation time are required", shared.ErrValidation)
 	}
-
 	m := &Member{
 		TenantID:                tenantID,
 		CycleID:                 cycleID,
@@ -98,8 +100,8 @@ func NewRetestMember(
 		PredecessorAssessmentID: predecessorID,
 		RetestNumber:            retestNumber,
 		RelationshipVersion:     1,
-		CreatedAt:               now.UTC(),
-		CreatedBy:               actor,
+		CreatedAt:               now,
+		CreatedBy:               strings.TrimSpace(actor),
 		ArchivedAt:              nil,
 	}
 	return m, m.Validate()
@@ -113,11 +115,17 @@ func (m *Member) Validate() error {
 	if !m.AssessmentType.Valid() {
 		return fmt.Errorf("%w: unknown assessment type %q", shared.ErrValidation, m.AssessmentType)
 	}
-	if m.RelationshipVersion < 1 {
-		return fmt.Errorf("%w: member relationship version must be >= 1, got %d", shared.ErrValidation, m.RelationshipVersion)
+	if m.PlannedDate != "" {
+		date, err := time.Parse(time.DateOnly, m.PlannedDate)
+		if err != nil || date.Year() < 1 || date.Format(time.DateOnly) != m.PlannedDate {
+			return fmt.Errorf("%w: planned_date must be a valid YYYY-MM-DD date", shared.ErrValidation)
+		}
 	}
 	if m.CreatedAt.IsZero() || strings.TrimSpace(m.CreatedBy) == "" || utf8.RuneCountInString(strings.TrimSpace(m.CreatedBy)) > 256 {
 		return fmt.Errorf("%w: member actor and creation time are required", shared.ErrValidation)
+	}
+	if m.RelationshipVersion < 1 {
+		return fmt.Errorf("%w: member relationship version must be >= 1, got %d", shared.ErrValidation, m.RelationshipVersion)
 	}
 
 	if m.AssessmentType == AssessmentTypeInitial {

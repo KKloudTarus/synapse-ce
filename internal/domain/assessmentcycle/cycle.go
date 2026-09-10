@@ -45,21 +45,23 @@ func (s Status) CanTransitionTo(to Status) bool {
 // AssessmentCycle is the aggregate root representing a cohesive series of assessment
 // runs (root assessment + retests) with a frozen asset/project boundary.
 type AssessmentCycle struct {
-	TenantID                 shared.ID
-	ID                       shared.ID
-	Name                     string
-	BoundaryKind             BoundaryKind
-	BusinessAssetID          shared.ID
-	ProjectID                shared.ID
-	Status                   Status
-	RootAssessmentID         shared.ID
-	SelectedHeadAssessmentID shared.ID
-	NextRetestNumber         int
-	Version                  int64
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
-	CreatedBy                string
-	UpdatedBy                string
+	TenantID                  shared.ID
+	ID                        shared.ID
+	Name                      string
+	BoundaryKind              BoundaryKind
+	BusinessAssetID           shared.ID
+	ProjectID                 shared.ID
+	Status                    Status
+	RootAssessmentID          shared.ID
+	SelectedHeadAssessmentID  shared.ID
+	ActiveClosureManifestID   shared.ID
+	ActiveClosureCycleVersion int64
+	NextRetestNumber          int
+	Version                   int64
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	CreatedBy                 string
+	UpdatedBy                 string
 }
 
 // NewAssessmentCycle constructs and validates a new AssessmentCycle aggregate in open status.
@@ -93,11 +95,8 @@ func NewAssessmentCycle(
 	}
 
 	actor = strings.TrimSpace(actor)
-	if actor == "" || utf8.RuneCountInString(actor) > 256 {
-		return nil, fmt.Errorf("%w: cycle actor must contain between 1 and 256 characters", shared.ErrValidation)
-	}
-	if now.IsZero() {
-		return nil, fmt.Errorf("%w: cycle creation time is required", shared.ErrValidation)
+	if actor == "" || utf8.RuneCountInString(actor) > 256 || now.IsZero() {
+		return nil, fmt.Errorf("%w: actor and creation time are required", shared.ErrValidation)
 	}
 	now = now.UTC()
 
@@ -150,7 +149,45 @@ func (c *AssessmentCycle) Validate() error {
 		strings.TrimSpace(c.UpdatedBy) == "" || utf8.RuneCountInString(strings.TrimSpace(c.UpdatedBy)) > 256 {
 		return fmt.Errorf("%w: cycle actors must contain between 1 and 256 characters", shared.ErrValidation)
 	}
+	if c.ActiveClosureManifestID.IsZero() != (c.ActiveClosureCycleVersion == 0) ||
+		!c.ActiveClosureManifestID.IsZero() && (c.Status != StatusCompleted || c.ActiveClosureCycleVersion != c.Version) {
+		return fmt.Errorf("%w: active closure manifest must match the completed cycle version", shared.ErrValidation)
+	}
 	return nil
+}
+
+// CompleteWithManifest atomically models the aggregate half of a closure commit.
+func (c *AssessmentCycle) CompleteWithManifest(manifestID shared.ID, expectedVersion int64, actor string, now time.Time) error {
+	if c == nil || c.Status != StatusOpen || manifestID.IsZero() || now.IsZero() || strings.TrimSpace(actor) == "" {
+		return fmt.Errorf("%w: open cycle, manifest, actor, and time are required for closure", shared.ErrValidation)
+	}
+	if expectedVersion != c.Version {
+		return fmt.Errorf("%w: cycle version mismatch (expected %d, current %d)", shared.ErrConflict, expectedVersion, c.Version)
+	}
+	c.Status = StatusCompleted
+	c.Version++
+	c.ActiveClosureManifestID = manifestID
+	c.ActiveClosureCycleVersion = c.Version
+	c.UpdatedAt = now.UTC()
+	c.UpdatedBy = strings.TrimSpace(actor)
+	return c.Validate()
+}
+
+// ReopenFromManifest reopens a completed Cycle while preserving its immutable manifest history.
+func (c *AssessmentCycle) ReopenFromManifest(expectedVersion int64, actor string, now time.Time) error {
+	if c == nil || c.Status != StatusCompleted || c.ActiveClosureManifestID.IsZero() || now.IsZero() || strings.TrimSpace(actor) == "" {
+		return fmt.Errorf("%w: completed cycle with an active closure manifest is required", shared.ErrValidation)
+	}
+	if expectedVersion != c.Version {
+		return fmt.Errorf("%w: cycle version mismatch (expected %d, current %d)", shared.ErrConflict, expectedVersion, c.Version)
+	}
+	c.Status = StatusOpen
+	c.Version++
+	c.ActiveClosureManifestID = ""
+	c.ActiveClosureCycleVersion = 0
+	c.UpdatedAt = now.UTC()
+	c.UpdatedBy = strings.TrimSpace(actor)
+	return c.Validate()
 }
 
 // Transition advances the cycle status according to the lifecycle state machine with CAS checking.
@@ -164,17 +201,18 @@ func (c *AssessmentCycle) Transition(to Status, expectedVersion int64, actor str
 	if c.Status == to {
 		return nil
 	}
-	actor = strings.TrimSpace(actor)
-	if actor == "" || utf8.RuneCountInString(actor) > 256 || now.IsZero() {
-		return fmt.Errorf("%w: actor and transition time are required", shared.ErrValidation)
-	}
 	if !c.Status.CanTransitionTo(to) {
 		return fmt.Errorf("%w: cycle cannot transition from %s to %s", shared.ErrValidation, c.Status, to)
 	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" || utf8.RuneCountInString(actor) > 256 || now.IsZero() {
+		return fmt.Errorf("%w: actor and mutation time are required", shared.ErrValidation)
+	}
+
 	c.Status = to
 	c.Version++
 	c.UpdatedAt = now.UTC()
-	c.UpdatedBy = actor
+	c.UpdatedBy = strings.TrimSpace(actor)
 	return nil
 }
 
@@ -194,12 +232,13 @@ func (c *AssessmentCycle) SelectHead(targetAssessmentID shared.ID, expectedVersi
 	}
 	actor = strings.TrimSpace(actor)
 	if actor == "" || utf8.RuneCountInString(actor) > 256 || now.IsZero() {
-		return fmt.Errorf("%w: actor and selection time are required", shared.ErrValidation)
+		return fmt.Errorf("%w: actor and mutation time are required", shared.ErrValidation)
 	}
+
 	c.SelectedHeadAssessmentID = targetAssessmentID
 	c.Version++
 	c.UpdatedAt = now.UTC()
-	c.UpdatedBy = actor
+	c.UpdatedBy = strings.TrimSpace(actor)
 	return nil
 }
 
@@ -214,9 +253,10 @@ func (c *AssessmentCycle) AdvanceRetest(newAssessmentID, predecessorID shared.ID
 	if newAssessmentID.IsZero() || predecessorID.IsZero() {
 		return 0, fmt.Errorf("%w: new assessment id and predecessor id are required", shared.ErrValidation)
 	}
+
 	actor = strings.TrimSpace(actor)
 	if actor == "" || utf8.RuneCountInString(actor) > 256 || now.IsZero() {
-		return 0, fmt.Errorf("%w: actor and retest time are required", shared.ErrValidation)
+		return 0, fmt.Errorf("%w: actor and mutation time are required", shared.ErrValidation)
 	}
 
 	allocatedRetestNumber := c.NextRetestNumber
@@ -227,7 +267,7 @@ func (c *AssessmentCycle) AdvanceRetest(newAssessmentID, predecessorID shared.ID
 	}
 	c.Version++
 	c.UpdatedAt = now.UTC()
-	c.UpdatedBy = actor
+	c.UpdatedBy = strings.TrimSpace(actor)
 
 	return allocatedRetestNumber, nil
 }

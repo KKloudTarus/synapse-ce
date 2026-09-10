@@ -69,7 +69,6 @@ func TestMemberConstructorsAndValidation(t *testing.T) {
 		if !errors.Is(err, shared.ErrValidation) {
 			t.Errorf("expected ErrValidation for empty predecessor, got %v", err)
 		}
-
 		_, err = assessmentcycle.NewRetestMember(tenantID, cycleID, retestID, rootID, 1, "", now)
 		if !errors.Is(err, shared.ErrValidation) {
 			t.Errorf("expected ErrValidation for empty actor, got %v", err)
