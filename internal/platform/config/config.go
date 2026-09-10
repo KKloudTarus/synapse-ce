@@ -410,6 +410,14 @@ type Config struct {
 	// an explicit tenant allowlist entry; "*" enables all tenants. Dry-run records correlation
 	// differences without mutating occurrences, findings, actions, or notification outbox rows.
 	VulnerabilityProviderSyncEnabled bool
+	// VulnerabilitySyncSchedulerInterval turns on the leader-gated cadence-driven sync scheduler when set
+	// above zero: every interval a single worker enqueues each enabled source whose last successful sync is
+	// older than its Cadence, and reclaims runs stranded past VulnerabilitySyncStaleAfter. Zero (the default)
+	// leaves syncing manual, so the corpus is only as fresh as the last explicit trigger. It has no effect
+	// unless SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED is on.
+	VulnerabilitySyncSchedulerInterval time.Duration
+	VulnerabilitySyncStaleAfter        time.Duration
+	VulnerabilitySyncSchedulerDispatch int
 	// VulnerabilitySourceAllowPrivateNetwork lets a vulnerability source reach RFC1918
 	// addresses. Off by default: a source is a URL the control plane fetches on a schedule,
 	// so private-range egress turns whoever can write a source into a probe of the
@@ -873,6 +881,9 @@ func Load() Config {
 		IntegrationSchedulerQueueDepth:              getint("SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH", 100),
 		IntegrationAllowPrivateNetwork:              getbool("SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK", false),
 		VulnerabilityProviderSyncEnabled:            getbool("SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", false),
+		VulnerabilitySyncSchedulerInterval:          getduration("SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_INTERVAL", 0),
+		VulnerabilitySyncStaleAfter:                 getduration("SYNAPSE_VULNERABILITY_SYNC_STALE_AFTER", 2*time.Hour),
+		VulnerabilitySyncSchedulerDispatch:          getint("SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_DISPATCH_LIMIT", 16),
 		VulnerabilityOccurrenceWritesEnabled:        getbool("SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED", false),
 		VulnerabilityFindingProjectionEnabled:       getbool("SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED", false),
 		VulnerabilityActionsEnabled:                 getbool("SYNAPSE_VULNERABILITY_ACTIONS_ENABLED", false),
