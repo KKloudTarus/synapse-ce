@@ -33,20 +33,21 @@ const (
 	TaintXXE             TaintClass = "xxe"
 	TaintLDAP            TaintClass = "ldap"
 	TaintXPath           TaintClass = "xpath"
+	TaintLog             TaintClass = "log" // CWE-117 log injection: untrusted data written into a log record
 )
 
 func (c TaintClass) Valid() bool {
 	switch c {
 	case TaintSQL, TaintCommand, TaintPathTraversal, TaintSSRF, TaintXSS, TaintDeserialization, TaintRedirect,
-		TaintSSTI, TaintXXE, TaintLDAP, TaintXPath:
+		TaintSSTI, TaintXXE, TaintLDAP, TaintXPath, TaintLog:
 		return true
 	}
 	return false
 }
 
 var allPythonTaintClasses = []TaintClass{
-	TaintCommand, TaintDeserialization, TaintLDAP, TaintPathTraversal, TaintRedirect, TaintSQL, TaintSSRF,
-	TaintSSTI, TaintXPath, TaintXSS, TaintXXE,
+	TaintCommand, TaintDeserialization, TaintLDAP, TaintLog, TaintPathTraversal, TaintRedirect, TaintSQL,
+	TaintSSRF, TaintSSTI, TaintXPath, TaintXSS, TaintXXE,
 }
 
 // PythonCallablePattern matches a resolved Python callable and, when resolution is unavailable, a

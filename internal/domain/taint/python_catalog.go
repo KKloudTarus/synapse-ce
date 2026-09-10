@@ -116,6 +116,19 @@ func DefaultPythonCatalog() PythonCatalog {
 			pySinkIndexes([]string{"lxml.etree"}, []string{"xpath"}, TaintXPath, "CWE-643", "python-taint-xpath", []int{0}),
 			// ElementTree.find/findall take the path as the first positional argument or the `match` keyword.
 			pySink([]string{"xml.etree.ElementTree"}, []string{"find", "findall", "findtext", "iterfind"}, TaintXPath, "CWE-643", "python-taint-xpath", 0, "match"),
+
+			// CWE-117: log injection. Untrusted data written into a log record can forge or split log lines.
+			// Only the stdlib logging MODULE functions are modeled (logging.info(msg), etc.), where the callee
+			// resolves to a known module; a bare `logger.info()` receiver is NOT modeled because `.info` on an
+			// arbitrary object is far too broad and would be noise. logging.log(level, msg) carries the message
+			// in argument ONE; the level-named functions carry it in argument ZERO.
+			pySink([]string{"logging"}, []string{"debug", "info", "warning", "warn", "error", "critical", "exception"}, TaintLog, "CWE-117", "python-taint-log", 0, "msg"),
+			pySinkIndexes([]string{"logging"}, []string{"log"}, TaintLog, "CWE-117", "python-taint-log", []int{1}, "msg"),
+			// Archive-extraction path traversal is deliberately NOT modeled here: tarfile.open / zipfile.ZipFile
+			// accept EITHER a path string OR a file-like object at argument zero, and request.files (an uploaded
+			// file object) is a taint source, so ZipFile(request.files.get("f")) would produce a FALSE CWE-22
+			// path-traversal finding. Distinguishing string-path taint from file-object taint needs kind
+			// resolution the value-flow engine does not have, and a false positive is the one forbidden outcome.
 		},
 		Sanitizers: []PythonSanitizerModel{
 			{Pattern: pyCall([]string{"html", "markupsafe", "bleach"}, []string{"escape", "clean"}), Classes: []TaintClass{TaintXSS}},

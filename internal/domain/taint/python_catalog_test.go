@@ -142,6 +142,9 @@ func TestPythonCatalogModelsInjectionClasses(t *testing.T) {
 		{"python:ldap3:Connection.search", TaintLDAP},
 		{"python:lxml.etree:_Element.xpath", TaintXPath},
 		{"python:xml.etree.ElementTree:ElementTree.find", TaintXPath},
+		{"python:logging:info", TaintLog},
+		{"python:logging:error", TaintLog},
+		{"python:logging:log", TaintLog},
 	}
 	for _, p := range positives {
 		if !isSink(p.callee, p.class) {
@@ -176,6 +179,16 @@ func TestPythonCatalogModelsInjectionClasses(t *testing.T) {
 	// A primitive conversion neutralizes every string class, XPath included, so int(user) is a safe twin.
 	if !neutralizes("python:builtins:int", TaintXPath) {
 		t.Error("twin: int() must neutralize the XPath class")
+	}
+	// Log injection twin: a value coerced to int cannot forge a log line, so int(user) neutralizes the log
+	// class (there is no stdlib newline-escaper to model). A bare logger.info receiver is not a sink.
+	if !neutralizes("python:builtins:int", TaintLog) {
+		t.Error("twin: int() must neutralize the log-injection class")
+	}
+	// A bare `logger.info` receiver on an arbitrary object must NOT be a log sink (only resolvable
+	// module-level logging.* is modeled), so an unrelated `.info()` call is not flagged.
+	if isSink("python:mypkg:Thing.info", TaintLog) {
+		t.Error("twin: a bare .info receiver on an arbitrary object must NOT be a log sink")
 	}
 }
 
