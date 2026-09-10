@@ -93,7 +93,7 @@ func New(parsers ...EcosystemParser) (*Registry, error) {
 // Swift, Dart, Elixir, R (renv), Julia, and Conan. The parsers claim distinct markers, so New does not
 // error here in practice.
 func DefaultRegistry() (*Registry, error) {
-	return New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, PyPI{}, Poetry{}, Pipfile{}, UV{}, Cargo{}, Maven{}, Gradle{}, BuildGradle{}, Gem{}, Composer{}, NuGet{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{})
+	return New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, PyPI{}, Poetry{}, Pipfile{}, UV{}, Cargo{}, Maven{}, Gradle{}, BuildGradle{}, Gem{}, Composer{}, NuGet{}, NuGetAssets{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{})
 }
 
 // MarkerEcosystems returns each registry marker mapped to the ecosystem parser that claims it.
