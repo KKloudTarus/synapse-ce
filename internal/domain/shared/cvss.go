@@ -7,7 +7,7 @@ import (
 
 // CVSSv3BaseScore computes the CVSS v3.0/v3.1 base score from a vector string
 // (e.g. "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"). Returns (score, true) for
-// a well-formed v3 vector, else (0, false). v4.0 vectors are not scored here.
+// a well-formed v3 vector, else (0, false). CVSS:4.0 vectors are scored by CVSSv40BaseScore.
 func CVSSv3BaseScore(vector string) (float64, bool) {
 	vector = strings.TrimSpace(vector)
 	v31 := strings.HasPrefix(vector, "CVSS:3.1/")
@@ -86,13 +86,144 @@ func CVSSv2BaseScore(vector string) (float64, bool) {
 	return math.Round(base*10) / 10, true
 }
 
-// CVSSBaseScore scores a v3.x vector, else a v2 vector. Read paths that only display a number use it;
-// paths that require v3 (the finding vector builder) keep calling CVSSv3BaseScore.
+// CVSSBaseScore scores a v4.0 vector, else a v3.x vector, else a v2 vector. Read paths that only
+// display a number use it; paths that require v3 (the finding vector builder) keep calling
+// CVSSv3BaseScore. The version prefixes are disjoint, so probe order never changes a result.
 func CVSSBaseScore(vector string) (float64, bool) {
+	if score, ok := CVSSv40BaseScore(vector); ok {
+		return score, true
+	}
 	if score, ok := CVSSv3BaseScore(vector); ok {
 		return score, true
 	}
 	return CVSSv2BaseScore(vector)
+}
+
+// CVSSv40BaseScore computes the CVSS v4.0 score from a vector string per the FIRST.org CVSS v4.0
+// specification: the vector is reduced to a six-digit MacroVector (equivalence classes EQ1..EQ6),
+// looked up, then interpolated by the severity distance from the highest-severity vector in the same
+// MacroVector. Returns (score, true) for a well-formed v4.0 vector, else (0, false). Threat (E) and
+// environmental metrics are honored when present; a base-only vector scores with their worst-case
+// defaults (E:A, CR/IR/AR:H), matching the reference calculator. The lookup and max-severity tables
+// are the published FIRST.org constants.
+func CVSSv40BaseScore(vector string) (float64, bool) {
+	sel, ok := parseCVSS40(vector)
+	if !ok {
+		return 0, false
+	}
+	// No impact on any system is score 0, before any lookup (spec shortcut).
+	noImpact := true
+	for _, mtr := range []string{"VC", "VI", "VA", "SC", "SI", "SA"} {
+		if cvss4m(sel, mtr) != "N" {
+			noImpact = false
+			break
+		}
+	}
+	if noImpact {
+		return 0, true
+	}
+
+	macro := cvss4MacroVector(sel)
+	value, ok := cvss4Lookup[macro]
+	if !ok {
+		return 0, false
+	}
+
+	eq1 := int(macro[0] - '0')
+	eq3 := int(macro[2] - '0')
+	eq6 := int(macro[5] - '0')
+
+	// Available distance per EQ: value minus the score of the next-lower MacroVector. A missing next-
+	// lower MacroVector leaves that EQ out of the mean (the reference treats it as NaN).
+	avail1, ok1 := cvss4Diff(value, cvss4Incr(macro, 0))
+	avail2, ok2 := cvss4Diff(value, cvss4Incr(macro, 1))
+	avail4, ok4 := cvss4Diff(value, cvss4Incr(macro, 3))
+	avail5, ok5 := cvss4Diff(value, cvss4Incr(macro, 4))
+
+	// EQ3 and EQ6 are scored jointly. When both are 0 there are two next-lower MacroVectors (increment
+	// EQ3, or increment EQ6); the reference takes the higher-scoring one, with NaN semantics.
+	var avail36 float64
+	var ok36 bool
+	if eq3 == 0 && eq6 == 0 {
+		left, lok := cvss4Lookup[cvss4Incr(macro, 5)]  // increment EQ6
+		right, rok := cvss4Lookup[cvss4Incr(macro, 2)] // increment EQ3
+		// Mirror JS `left > right ? left : right` under NaN: a NaN operand makes `>` false, selecting
+		// the right operand; only when the left strictly exceeds an existing right is the left chosen.
+		var chosen float64
+		var cok bool
+		switch {
+		case lok && rok:
+			if left > right {
+				chosen, cok = left, true
+			} else {
+				chosen, cok = right, true
+			}
+		case !lok && rok:
+			chosen, cok = right, true
+		default: // right missing: JS selects the (missing) right, so no available distance
+			cok = false
+		}
+		if cok {
+			avail36, ok36 = value-chosen, true
+		}
+	} else {
+		if s, e := cvss4Lookup[cvss4IncrEQ3EQ6(macro, eq3, eq6)]; e {
+			avail36, ok36 = value-s, true
+		}
+	}
+
+	// Severity distance of this vector from the nearest dominating maximal vector in its MacroVector.
+	maxVec := cvss4MaxVector(sel, macro)
+	sd := func(metric string) float64 {
+		return cvss4Level(metric, cvss4m(sel, metric)) - cvss4Level(metric, cvss4Extract(metric, maxVec))
+	}
+	distEQ1 := sd("AV") + sd("PR") + sd("UI")
+	distEQ2 := sd("AC") + sd("AT")
+	distEQ36 := sd("VC") + sd("VI") + sd("VA") + sd("CR") + sd("IR") + sd("AR")
+	distEQ4 := sd("SC") + sd("SI") + sd("SA")
+
+	const step = 0.1
+	maxSev1 := float64(cvss4MaxSeverityEQ1[eq1]) * step
+	maxSev2 := float64(cvss4MaxSeverityEQ2[int(macro[1]-'0')]) * step
+	maxSev36 := float64(cvss4MaxSeverityEQ36[eq3][eq6]) * step
+	maxSev4 := float64(cvss4MaxSeverityEQ4[int(macro[3]-'0')]) * step
+
+	var sum float64
+	n := 0
+	if ok1 {
+		sum += avail1 * (distEQ1 / maxSev1)
+		n++
+	}
+	if ok2 {
+		sum += avail2 * (distEQ2 / maxSev2)
+		n++
+	}
+	if ok36 {
+		sum += avail36 * (distEQ36 / maxSev36)
+		n++
+	}
+	if ok4 {
+		sum += avail4 * (distEQ4 / maxSev4)
+		n++
+	}
+	if ok5 {
+		// EQ5's proportional distance is always 0 in the reference (step depth 1, distance 0).
+		sum += avail5 * 0
+		n++
+	}
+
+	var mean float64
+	if n > 0 {
+		mean = sum / float64(n)
+	}
+	value -= mean
+	switch {
+	case value < 0:
+		value = 0
+	case value > 10:
+		value = 10
+	}
+	return math.Round(value*10) / 10, true
 }
 
 var (

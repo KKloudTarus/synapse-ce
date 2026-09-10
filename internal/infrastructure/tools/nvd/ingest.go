@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 // BuildDB parses NVD JSON feed files and writes a compact CVSS database as JSONL (one
@@ -78,12 +80,24 @@ func ingestFile(path string, enc *json.Encoder) (int, error) {
 	return n, nil
 }
 
-// bestAPI2 picks the strongest CVSS metric from an API-2.0 metrics block (v3.1 > v3.0 > v2).
+// bestAPI2 picks the strongest CVSS metric from an API-2.0 metrics block (v3.1 > v3.0 > v4.0 > v2).
+// v3.x is preferred so the existing corpus keeps its published band; v4.0 outranks the far weaker v2
+// so a v4-only CVE (a growing NVD share) is stored with its v4 vector instead of being skipped. When
+// the feed omits the base score, it is computed from the vector so the compact record never stores a
+// vectored entry with a 0 score (which the enricher would band as Info).
 func bestAPI2(m nvdMetrics) (string, float64, bool) {
-	for _, group := range [][]nvdMetric{m.V31, m.V30, m.V2} {
-		if len(group) > 0 && group[0].CVSSData.Vector != "" {
-			return group[0].CVSSData.Vector, group[0].CVSSData.Base, true
+	for _, group := range [][]nvdMetric{m.V31, m.V30, m.V40, m.V2} {
+		if len(group) == 0 || group[0].CVSSData.Vector == "" {
+			continue
 		}
+		vector := group[0].CVSSData.Vector
+		if score := group[0].CVSSData.Base; score > 0 && score <= 10 {
+			return vector, score, true
+		}
+		if computed, ok := shared.CVSSBaseScore(vector); ok {
+			return vector, computed, true
+		}
+		return vector, group[0].CVSSData.Base, true
 	}
 	return "", 0, false
 }
@@ -121,6 +135,7 @@ type nvdFeed struct {
 }
 
 type nvdMetrics struct {
+	V40 []nvdMetric `json:"cvssMetricV40"`
 	V31 []nvdMetric `json:"cvssMetricV31"`
 	V30 []nvdMetric `json:"cvssMetricV30"`
 	V2  []nvdMetric `json:"cvssMetricV2"`

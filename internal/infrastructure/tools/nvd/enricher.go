@@ -170,9 +170,18 @@ func (e *Enricher) fetchOne(ctx context.Context, cve string) (cvss, bool) {
 	}
 	for _, vuln := range body.Vulnerabilities {
 		m := vuln.CVE.Metrics
-		for _, set := range [][]cvssMetric{m.V31, m.V30, m.V2} {
-			if len(set) > 0 && set[0].CVSSData.BaseScore > 0 {
-				return cvss{score: set[0].CVSSData.BaseScore, vector: set[0].CVSSData.VectorString}, true
+		// v3.1 > v3.0 > v4.0 > v2, matching the compact-DB build. A v4-only CVE (no v3 group) is now
+		// enriched instead of skipped; when the feed omits the base score it is computed from the vector.
+		for _, set := range [][]cvssMetric{m.V31, m.V30, m.V40, m.V2} {
+			if len(set) == 0 || set[0].CVSSData.VectorString == "" {
+				continue
+			}
+			vector := set[0].CVSSData.VectorString
+			if score := set[0].CVSSData.BaseScore; score > 0 {
+				return cvss{score: score, vector: vector}, true
+			}
+			if computed, ok := shared.CVSSBaseScore(vector); ok {
+				return cvss{score: computed, vector: vector}, true
 			}
 		}
 	}
@@ -184,6 +193,7 @@ type nvdResponse struct {
 		CVE struct {
 			ID      string `json:"id"`
 			Metrics struct {
+				V40 []cvssMetric `json:"cvssMetricV40"`
 				V31 []cvssMetric `json:"cvssMetricV31"`
 				V30 []cvssMetric `json:"cvssMetricV30"`
 				V2  []cvssMetric `json:"cvssMetricV2"`
