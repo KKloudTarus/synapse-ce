@@ -82,8 +82,9 @@ func New() *Scanner {
 		}),
 		skipDirs: set(".git", "node_modules", "vendor", "dist", "build", "target", ".idea",
 			".gradle", ".venv", "venv", "__pycache__", ".terraform", "bin"),
-		skipExt: set(".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg", ".pdf", ".zip", ".gz",
-			".tar", ".jar", ".war", ".class", ".exe", ".so", ".dll", ".dylib", ".woff", ".woff2",
+		// .zip/.gz/.tar/.jar/.war are NOT skipped: they are routed to the bounded archive scanner (archive.go).
+		skipExt: set(".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg", ".pdf",
+			".class", ".exe", ".so", ".dll", ".dylib", ".woff", ".woff2",
 			".ttf", ".eot", ".mp4", ".mp3", ".mov", ".bin", ".wasm", ".lock", ".sum"),
 		openAndRead: openAndReadRegular,
 	}
@@ -142,7 +143,51 @@ func (s *Scanner) scanFiles(ctx context.Context, root string, limits scanLimits)
 			}
 			return nil
 		}
-		if !d.Type().IsRegular() || s.skipExt[strings.ToLower(filepath.Ext(path))] {
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if archiveExts[ext] {
+			// Bounded archive scan: look inside a .jar/.war/.zip/.tar/.gz for secrets in its members.
+			info, infoErr := d.Info()
+			if infoErr != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+				return nil
+			}
+			visited++
+			if visited > limits.files {
+				report.Truncated = true
+				return fs.SkipAll
+			}
+			if len(report.Findings) >= limits.findings || limits.bytes-bytesRead <= 0 {
+				report.Truncated = true
+				return fs.SkipAll
+			}
+			archData, aerr := openAndReadArchive(rootDir, path, info, limits.bytes-bytesRead)
+			if aerr != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+				report.Truncated = true // an archive too large or unreadable is a lower bound, never silent
+				return nil
+			}
+			bytesRead += int64(len(archData))
+			// Clamp this archive's decompressed budget to the remaining scan-wide byte budget, then charge the
+			// decompressed bytes it consumes back, so a directory of many small bombs cannot collectively
+			// decompress more than limits.bytes.
+			budget := &archiveBudget{maxEntries: maxArchiveEntries, maxBytes: maxArchiveTotalBytes}
+			if remaining := limits.bytes - bytesRead; remaining < budget.maxBytes {
+				budget.maxBytes = remaining
+			}
+			if budget.maxBytes < 0 {
+				budget.maxBytes = 0
+			}
+			if s.scanArchiveData(ctx, filepath.ToSlash(path), archData, ext, seen, &report.Findings, limits.findings, budget, 0) {
+				report.Truncated = true
+			}
+			bytesRead += budget.bytes // charge decompressed bytes against the scan-wide budget
+			return nil
+		}
+		if s.skipExt[ext] {
 			return nil
 		}
 		visited++
