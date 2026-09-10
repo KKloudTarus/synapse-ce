@@ -79,7 +79,7 @@ func TestParseDependencyListEmpty(t *testing.T) {
 
 func TestArgsLocalRepo(t *testing.T) {
 	base := New("mvn")
-	if hasArg(base.args("/x"), "-Dmaven.repo.local") {
+	if hasArg(base.args("/x", "dependency:tree"), "-Dmaven.repo.local") {
 		t.Error("no localRepo configured ⇒ no -Dmaven.repo.local flag")
 	}
 	localRepo, err := filepath.Abs(filepath.FromSlash("/cache/.m2"))
@@ -87,12 +87,12 @@ func TestArgsLocalRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	withRepo := New("mvn").WithLocalRepo(localRepo)
-	if !contains(withRepo.args(filepath.FromSlash("/x")), "-Dmaven.repo.local="+localRepo) {
-		t.Errorf("localRepo set ⇒ flag expected, got %v", withRepo.args(filepath.FromSlash("/x")))
+	if !contains(withRepo.args(filepath.FromSlash("/x"), "dependency:tree"), "-Dmaven.repo.local="+localRepo) {
+		t.Errorf("localRepo set ⇒ flag expected, got %v", withRepo.args(filepath.FromSlash("/x"), "dependency:tree"))
 	}
 	// goal + pom flag always present
-	a := base.args("/proj")
-	if !contains(a, "dependency:list") || !contains(a, "-f") {
+	a := base.args("/proj", "dependency:tree")
+	if !contains(a, "dependency:tree") || !contains(a, "-f") {
 		t.Errorf("args missing goal/pom: %v", a)
 	}
 }
@@ -145,12 +145,12 @@ func TestPomDeclaresModules(t *testing.T) {
 
 func TestArgsMultiModuleOrdering(t *testing.T) {
 	// Single-module (no pom on disk → readBounded nil → single): no `install`, just dependency:list.
-	single := New("mvn").args("/nonexistent-proj")
+	single := New("mvn").args("/nonexistent-proj", "dependency:tree")
 	if hasArg(single, "install") {
 		t.Errorf("single-module must NOT run install: %v", single)
 	}
-	if !contains(single, "dependency:list") {
-		t.Errorf("single-module must run dependency:list: %v", single)
+	if !contains(single, "dependency:tree") {
+		t.Errorf("single-module must run the goal: %v", single)
 	}
 	// Multi-module: write a real aggregator pom so readBounded sees <module>, then assert install
 	// precedes dependency:list (the load-bearing goal order).
@@ -158,10 +158,10 @@ func TestArgsMultiModuleOrdering(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "pom.xml"), []byte("<project><modules><module>a</module></modules></project>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	multi := New("mvn").args(dir)
-	ii, di := indexOf(multi, "install"), indexOf(multi, "dependency:list")
+	multi := New("mvn").args(dir, "dependency:tree")
+	ii, di := indexOf(multi, "install"), indexOf(multi, "dependency:tree")
 	if ii < 0 || di < 0 || ii >= di {
-		t.Errorf("multi-module must run install BEFORE dependency:list: %v", multi)
+		t.Errorf("multi-module must run install BEFORE the goal: %v", multi)
 	}
 	if contains(multi, "-DskipTests") || !contains(multi, "-Dmaven.test.skip=true") {
 		t.Errorf("multi-module should use maven.test.skip (no test compile), not -DskipTests: %v", multi)

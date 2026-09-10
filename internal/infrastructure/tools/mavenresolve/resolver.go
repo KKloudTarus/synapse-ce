@@ -96,6 +96,7 @@ func (r *Resolver) WithLocalRepo(dir string) *Resolver {
 }
 
 var _ ports.MavenResolver = (*Resolver)(nil)
+var _ ports.MavenGraphResolver = (*Resolver)(nil)
 
 // Resolve resolves every Maven project under dir and returns the union of their components (direct +
 // transitive, with versions), deduped by PURL. When dir is itself a Maven project it resolves that one;
@@ -121,7 +122,7 @@ func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, e
 		if ctx.Err() != nil {
 			break
 		}
-		out, err := r.run(ctx, root)
+		out, err := r.run(ctx, root, "dependency:list")
 		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("%s: %w", filepath.Base(root), err)
@@ -143,6 +144,48 @@ func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, e
 		return all, fmt.Errorf("mvn dependency:list: %w", firstErr)
 	}
 	return all, nil
+}
+
+// ResolveGraph resolves the FULL Maven tree via `mvn dependency:tree`, returning both the components and the
+// dependency EDGES with per-edge Maven scope. It is the graph-aware companion to Resolve (which runs the
+// flat `dependency:list`): the edges give a transitive Maven CVE a dependency path and its introducing direct
+// dependencies, and the per-edge scope lets ReachableScopes deprioritize a provided-only transitive. Same
+// safety envelope, opt-in, and best-effort semantics as Resolve. A partial multi-project result returns the
+// projects that succeeded alongside a non-nil error, so the caller keeps the good projects.
+func (r *Resolver) ResolveGraph(ctx context.Context, dir string) ([]sbom.Component, []sbom.Dependency, error) {
+	roots := projectRoots(dir)
+	if len(roots) == 0 {
+		return nil, nil, nil
+	}
+	seen := map[string]bool{}
+	var allComps []sbom.Component
+	var allDeps []sbom.Dependency
+	var firstErr error
+	for _, root := range roots {
+		if ctx.Err() != nil {
+			break
+		}
+		out, err := r.run(ctx, root, "dependency:tree")
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %w", filepath.Base(root), err)
+			}
+			continue
+		}
+		comps, deps := parseDependencyTree(out)
+		r.fillDeclaredLicenses(ctx, comps)
+		for _, c := range comps {
+			if !seen[c.PURL] {
+				seen[c.PURL] = true
+				allComps = append(allComps, c)
+			}
+		}
+		allDeps = append(allDeps, deps...)
+	}
+	if firstErr != nil {
+		return allComps, allDeps, fmt.Errorf("mvn dependency:tree: %w", firstErr)
+	}
+	return allComps, allDeps, nil
 }
 
 // projectRoots finds the Maven project roots under dir: each directory that holds a pom.xml, WITHOUT
@@ -304,7 +347,7 @@ func pomFilePath(repo, g, a, v string) string {
 // `dependency:list` alone cannot resolve (it aborts → no output). So when the root POM declares
 // <modules>, prepend `install -DskipTests` to build + install every module first, after which
 // `dependency:list` emits the full union across modules. Test-scope is filtered in the parser.
-func (r *Resolver) args(dir string) []string {
+func (r *Resolver) args(dir, goal string) []string {
 	pom := filepath.Join(dir, "pom.xml")
 	args := []string{"-B", "-ntp", "-f", pom}
 	if r.localRepo != "" {
@@ -319,7 +362,7 @@ func (r *Resolver) args(dir string) []string {
 		// pom-only INCOMPLETE result, never wrong). The CLI direct path (writable project) handles it.
 		args = append(args, "-Dmaven.test.skip=true", "install")
 	}
-	return append(args, "dependency:list")
+	return append(args, goal)
 }
 
 // pomDeclaresModules reports whether a POM is a multi-module aggregator (has a <module> entry). A naive
@@ -340,8 +383,8 @@ func (r *Resolver) allowedHosts() []string {
 	return append(append([]string{}, mavenCentralHosts...), r.repoHosts...)
 }
 
-func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
-	args := r.args(dir)
+func (r *Resolver) run(ctx context.Context, dir, goal string) ([]byte, error) {
+	args := r.args(dir, goal)
 	if r.runner != nil {
 		res, err := r.runner.Run(ctx, ports.ToolSpec{
 			Name:          r.bin,

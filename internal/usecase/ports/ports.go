@@ -1603,6 +1603,15 @@ type MavenResolver interface {
 	Resolve(ctx context.Context, dir string) ([]sbom.Component, error)
 }
 
+// MavenGraphResolver is the optional graph-aware capability of a MavenResolver: it returns the resolved
+// components AND the dependency EDGES (with per-edge Maven scope), from `mvn dependency:tree`. A resolver
+// that implements it lets the SCA pipeline attach a dependency path and the introducing direct dependencies
+// to a transitive Maven CVE, and deprioritize a provided-only transitive by graph-propagated scope. It is
+// separate from MavenResolver so a static (no-tree) resolver can still satisfy the base contract.
+type MavenGraphResolver interface {
+	ResolveGraph(ctx context.Context, dir string) ([]sbom.Component, []sbom.Dependency, error)
+}
+
 // GradleResolver resolves a Gradle project's FULL dependency tree (direct + transitive, with the
 // resolved versions) from its build script – which a static parse cannot do, because Gradle versions
 // are often supplied by a platform/BOM or version catalog (absent from the declaration ⇒ UNKNOWN) and
