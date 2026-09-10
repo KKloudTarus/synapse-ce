@@ -1585,6 +1585,24 @@ func (s *Service) Scan(ctx context.Context, actor string, engagementID shared.ID
 }
 
 func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementID shared.ID, req ports.AcquireRequest, opts ScanOptions) (*ScanResult, error) {
+	started := s.clock.Now()
+	result, err := s.scanWithOptions(ctx, actor, engagementID, req, opts)
+	if err != nil || s.jobs == nil || s.ids == nil {
+		return result, err
+	}
+	finished := s.clock.Now()
+	// Synchronous callers persist the same successful terminal boundary as
+	// queued scans. PostgreSQL captures the notification inbox in this write.
+	job := ports.ScanJob{ID: s.ids.NewID().String(), EngagementID: engagementID.String(), Target: req.Value, Kind: kindOrLocal(req.Kind), Status: ports.ScanSucceeded, Stage: "done", Progress: 100, StartedAt: started, FinishedAt: &finished, DebugEvents: []ports.ScanDebugEvent{}}
+	completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err = s.jobs.Save(completionCtx, job); err != nil {
+		return result, fmt.Errorf("persist synchronous scan completion: %w", err)
+	}
+	return result, nil
+}
+
+func (s *Service) scanWithOptions(ctx context.Context, actor string, engagementID shared.ID, req ports.AcquireRequest, opts ScanOptions) (*ScanResult, error) {
 	var err error
 	opts, err = normalizeScanOptions(s.withDetectionDefault(opts))
 	if err != nil {

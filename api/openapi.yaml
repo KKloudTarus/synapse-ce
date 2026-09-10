@@ -57,6 +57,9 @@ tags:
     description: Risk-based remediation deadlines, immutable assessments, policy versions, and human-owned lifecycle governance
   - name: fleet
     description: Agent-plane fleet telemetry transport
+  - name: notifications
+    description: Tenant-managed channels, routing rules, and durable delivery history
+
 paths:
   /healthz:
     get:
@@ -1789,6 +1792,138 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '502': {description: No sink acknowledged the alert, content: {application/json: {schema: {$ref: '#/components/schemas/AlertTestResult'}}}}
+
+  /api/v1/notifications/channels:
+    get:
+      tags: [notifications]
+      operationId: listNotificationChannels
+      summary: List tenant notification channels without secrets
+      responses:
+        '200': {description: Channels, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/NotificationChannel'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [notifications]
+      operationId: createNotificationChannel
+      summary: Create a signed webhook, Slack, or email channel
+      description: URL and credentials are write-only and encrypted at rest. Email uses the operator-managed SMTP relay.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationChannelInput'}}}}
+      responses:
+        '201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationChannel'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/notifications/channels/{nid}:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [notifications]
+      operationId: getNotificationChannel
+      summary: Get channel metadata without its secret
+      responses:
+        '200': {description: Channel, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationChannel'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [notifications]
+      operationId: updateNotificationChannel
+      summary: Update a channel with optimistic revision checking
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationChannelInput'}}}}
+      responses:
+        '200': {description: Updated channel, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationChannel'}}}}
+        '409': {description: Stale revision}
+    delete:
+      tags: [notifications]
+      operationId: deleteNotificationChannel
+      summary: Soft-delete a channel and cancel pending deliveries
+      parameters: [{name: revision, in: query, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '204': {description: Deleted}
+        '409': {description: Stale revision}
+
+  /api/v1/notifications/channels/{nid}/test:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [notifications]
+      operationId: testNotificationChannel
+      summary: Queue a synthetic test through the durable delivery path
+      responses:
+        '202': {description: Queued, content: {application/json: {schema: {type: object, required: [delivery_id, state], properties: {delivery_id: {type: string}, state: {type: string, enum: [pending]}}}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/notifications/rules:
+    get:
+      tags: [notifications]
+      operationId: listNotificationRules
+      summary: List tenant routing rules
+      responses:
+        '200': {description: Rules, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/NotificationRule'}}}}}}}
+    post:
+      tags: [notifications]
+      operationId: createNotificationRule
+      summary: Create a routing rule
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationRuleInput'}}}}
+      responses:
+        '201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationRule'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+
+  /api/v1/notifications/rules/{nid}:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [notifications]
+      operationId: getNotificationRule
+      summary: Get one routing rule
+      responses:
+        '200': {description: Rule, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationRule'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [notifications]
+      operationId: updateNotificationRule
+      summary: Update a routing rule with optimistic revision checking
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationRuleInput'}}}}
+      responses:
+        '200': {description: Updated rule, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationRule'}}}}
+        '409': {description: Stale revision}
+    delete:
+      tags: [notifications]
+      operationId: deleteNotificationRule
+      summary: Delete a routing rule
+      parameters: [{name: revision, in: query, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '204': {description: Deleted}
+        '409': {description: Stale revision}
+
+  /api/v1/notifications/deliveries:
+    get:
+      tags: [notifications]
+      operationId: listNotificationDeliveries
+      summary: List durable delivery history
+      parameters:
+        - {name: channel_id, in: query, schema: {type: string}}
+        - {name: event_type, in: query, schema: {$ref: '#/components/schemas/NotificationEventType'}}
+        - {name: state, in: query, schema: {$ref: '#/components/schemas/NotificationDeliveryState'}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
+      responses:
+        '200': {description: Delivery page, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationDeliveryPage'}}}}
+
+  /api/v1/notifications/deliveries/{nid}:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [notifications]
+      operationId: getNotificationDelivery
+      summary: Get one delivery
+      responses:
+        '200': {description: Delivery, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationDelivery'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/notifications/deliveries/{nid}/attempts:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [notifications]
+      operationId: listNotificationDeliveryAttempts
+      summary: List per-attempt outcomes for a delivery
+      responses:
+        '200': {description: Attempts, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/NotificationAttempt'}}}}}}}
 
   /api/v1/connectors:
     get:
@@ -9579,3 +9714,101 @@ components:
         sealed_at: {type: string, format: date-time}
         lane_count: {type: integer}
         complete_coverage: {type: boolean}
+
+    NotificationEventType:
+      type: string
+      enum: [vulnerability_action.created, scan.completed, quality_gate.failed, sla.approaching_deadline, fleet.agent.offline, incident.created]
+
+    NotificationDeliveryState:
+      type: string
+      enum: [pending, retrying, delivered, dead_letter, cancelled]
+
+    NotificationChannelInput:
+      type: object
+      required: [name, type, enabled]
+      properties:
+        name: {type: string, maxLength: 200}
+        type: {type: string, enum: [webhook, slack, email]}
+        enabled: {type: boolean}
+        url: {type: string, format: uri, description: Write-only HTTPS endpoint for webhook and Slack channels}
+        secret: {type: string, writeOnly: true, minLength: 16}
+        recipients: {type: array, maxItems: 50, items: {type: string, format: email}}
+        revision: {type: integer, minimum: 1}
+
+    NotificationChannel:
+      type: object
+      required: [id, name, type, enabled, destination, revision, secret_version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        type: {type: string, enum: [webhook, slack, email]}
+        enabled: {type: boolean}
+        destination: {type: string, description: Redacted destination metadata}
+        recipients: {type: array, items: {type: string, format: email}}
+        revision: {type: integer}
+        secret_version: {type: integer}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    NotificationRuleInput:
+      type: object
+      required: [name, enabled, event_type, channel_ids]
+      properties:
+        name: {type: string, maxLength: 200}
+        enabled: {type: boolean}
+        event_type: {$ref: '#/components/schemas/NotificationEventType'}
+        min_severity: {type: string, enum: [critical, high, medium, low, info]}
+        action_types: {type: array, items: {type: string}}
+        engagement_ids: {type: array, items: {type: string}}
+        channel_ids: {type: array, minItems: 1, items: {type: string}}
+        lead_time_seconds: {type: integer, minimum: 0, maximum: 2592000}
+        revision: {type: integer, minimum: 1}
+
+    NotificationRule:
+      allOf:
+        - {$ref: '#/components/schemas/NotificationRuleInput'}
+        - type: object
+          required: [id, revision, created_at, updated_at]
+          properties:
+            id: {type: string}
+            revision: {type: integer}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+
+    NotificationDelivery:
+      type: object
+      required: [id, event_id, channel_id, channel_type, matched_rule_ids, state, attempts, created_at, updated_at]
+      properties:
+        id: {type: string}
+        event_id: {type: string}
+        channel_id: {type: string}
+        channel_type: {type: string, enum: [webhook, slack, email]}
+        recipient: {type: string}
+        matched_rule_ids: {type: array, items: {type: string}}
+        state: {$ref: '#/components/schemas/NotificationDeliveryState'}
+        attempts: {type: integer, minimum: 0}
+        last_error: {type: string}
+        next_attempt_at: {type: string, format: date-time}
+        delivered_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    NotificationDeliveryPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/NotificationDelivery'}}
+        next: {type: string}
+
+    NotificationAttempt:
+      type: object
+      required: [id, delivery_id, number, started_at, outcome]
+      properties:
+        id: {type: string}
+        delivery_id: {type: string}
+        number: {type: integer, minimum: 1}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        outcome: {type: string, enum: [started, delivered, retrying, failed, cancelled]}
+        response_code: {type: integer}
+        error_code: {type: string}

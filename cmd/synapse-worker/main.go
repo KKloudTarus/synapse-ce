@@ -33,6 +33,7 @@ import (
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	recontools "github.com/KKloudTarus/synapse-ce/internal/infrastructure/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
@@ -73,6 +74,7 @@ import (
 	lineageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findinglineage"
 	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
+	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
@@ -514,6 +516,41 @@ func main() {
 		integrationuc.JobKind:                  integrationJobHandler{svc: integrationService},
 		comparisonuc.JobKind:                   assessmentComparisonJobHandler{svc: assessmentComparisonService},
 		cycleuc.AssessmentClosureReportJobKind: assessmentClosureReportJobHandler{svc: assessmentClosureReportService},
+	}
+	if cfg.NotificationEnabled {
+		if cfg.VaultMasterKey == "" {
+			log.Error("SYNAPSE_NOTIFICATIONS_ENABLED requires SYNAPSE_VAULT_MASTER_KEY shared by API and worker")
+			os.Exit(1)
+		}
+		sender := notificationsender.New(notificationsender.SMTPConfig{
+			Host: cfg.NotificationSMTPHost, Port: cfg.NotificationSMTPPort, From: cfg.NotificationSMTPFrom,
+			Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS,
+		}, 10*time.Second)
+		notificationService, notificationErr := notificationuc.NewService(postgres.NewNotificationRepository(pool), vaultCipher, sender, auditLog, clock, ids)
+		if notificationErr != nil {
+			log.Error("notification service init failed", "err", notificationErr)
+			os.Exit(1)
+		}
+		handlers[notificationuc.JobKind] = notificationJobHandler{svc: notificationService}
+		notificationSource := postgres.NewNotificationSource(pool, postgres.NewNotificationRepository(pool), cfg.FleetAgentStaleAfter, cfg.AlertWebhookURL == "")
+		notificationSource.SetVulnerabilityEnabled(cfg.VulnerabilityNotificationsEnabled && !cfg.VulnerabilityDryRunEnabled)
+		maintenanceTasks = append(maintenanceTasks, func(taskCtx context.Context) {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				if n, pollErr := notificationSource.Poll(taskCtx, clock.Now().UTC(), 200); pollErr != nil && taskCtx.Err() == nil {
+					log.Warn("notification source poll failed", "err", pollErr)
+				} else if n > 0 {
+					log.Info("notification source events projected", "count", n)
+				}
+				select {
+				case <-taskCtx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		})
+		log.Info("durable notification delivery ENABLED")
 	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
 	vulnerabilityRegistry.AllowPrivateNetworkSources(cfg.VulnerabilitySourceAllowPrivateNetwork)
@@ -1047,6 +1084,16 @@ func mustVaultCipher(cfg config.Config, log *slog.Logger) *vault.Cipher {
 // terminal failed state (parity with recon + agent), so a stranded scan is operator-visible
 // rather than stuck non-terminal with no result.
 type scaJobHandler struct{ svc *scauc.Service }
+
+type notificationJobHandler struct{ svc *notificationuc.Service }
+
+func (h notificationJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	return h.svc.HandleJob(ctx, job)
+}
+
+func (h notificationJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error {
+	return h.svc.OnDeadLetter(ctx, job, cause)
+}
 
 func (h scaJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
 	return h.svc.RunScanJob(ctx, job.Payload)

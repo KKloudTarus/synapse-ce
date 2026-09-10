@@ -41,6 +41,17 @@ type DeadLetterer interface {
 	OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error
 }
 
+// RetryDirective lets a handler classify a transport failure without changing
+// retry behavior for existing job kinds. Terminal failures dead-letter now;
+// RetryAfter schedules the durable queue without sleeping a worker goroutine.
+type RetryDirective interface {
+	error
+	RetryAfter() time.Duration
+	Terminal() bool
+}
+
+type retryBudget interface{ MaxAttempts() int }
+
 // Config tunes the loop; zero values fall back to sane defaults.
 type Config struct {
 	Visibility  time.Duration // lease per claim
@@ -190,7 +201,20 @@ func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
 		w.complete(jobCtx, job.ID, job.Fence)
 		return
 	}
-	if job.Attempts >= w.cfg.MaxAttempts {
+	retryIn := w.cfg.Backoff
+	terminal := false
+	maxAttempts := w.cfg.MaxAttempts
+	var directive RetryDirective
+	if errors.As(err, &directive) {
+		terminal = directive.Terminal()
+		if directive.RetryAfter() > 0 {
+			retryIn = directive.RetryAfter()
+		}
+		if budget, ok := directive.(retryBudget); ok && budget.MaxAttempts() > 0 {
+			maxAttempts = budget.MaxAttempts()
+		}
+	}
+	if terminal || job.Attempts >= maxAttempts {
 		w.log.Error("job failed permanently – dead-lettering", "kind", job.Kind, "job", job.ID, "attempts", job.Attempts, "err", err)
 		// Claim the terminal transition through the fence FIRST. A worker whose lease expired
 		// must never drive the backing entity terminal: another worker may already own this job
@@ -217,7 +241,7 @@ func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
 		return
 	}
 	w.log.Warn("job failed – requeueing with backoff", "kind", job.Kind, "job", job.ID, "attempt", job.Attempts, "err", err)
-	if ferr := w.queue.Fail(jobCtx, job.ID, job.Fence, w.cfg.Backoff); ferr != nil {
+	if ferr := w.queue.Fail(jobCtx, job.ID, job.Fence, retryIn); ferr != nil {
 		if errors.Is(ferr, ports.ErrStaleLease) {
 			w.log.Warn("job was reclaimed by another worker – abandoning", "job", job.ID, "err", ferr)
 			return
