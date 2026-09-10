@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/compliance"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/distro"
@@ -2154,6 +2155,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		raws = append(raws, srcRaws...)
 		detectionSourceWarnings = srcWarnings
 		step = trace.start(stageVulns, "correlate", "", "Correlate and deduplicate vulnerability findings", map[string]int{"raw_findings": len(raws)})
+		raws = s.expandFindingAliases(ctx, raws) // widen cross-source aliases so one CVE under non-overlapping ids merges
 		vulns = vulnerability.Correlate(raws)
 		trace.succeed(step, "Vulnerabilities correlated", map[string]int{"raw_findings": len(raws), "vulnerabilities": len(vulns)})
 		if s.sevEnricher != nil {
@@ -2801,6 +2803,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		raws = append(raws, srcRaws...)
 		detectionSourceWarnings = srcWarnings
 		step = trace.start(stageVulns, "correlate", "", "Correlate and deduplicate vulnerability findings", map[string]int{"raw_findings": len(raws)})
+		raws = s.expandFindingAliases(ctx, raws) // widen cross-source aliases so one CVE under non-overlapping ids merges
 		vulns = vulnerability.Correlate(raws)
 		trace.succeed(step, "Vulnerabilities correlated", map[string]int{"raw_findings": len(raws), "vulnerabilities": len(vulns)})
 		// Backfill severity for vulns the sources left unknown (e.g. OSV-only distro CVEs with
@@ -3665,6 +3668,53 @@ func kindOrLocal(kind string) string {
 // classifyVulns marks each vuln first-party / unversioned from its SBOM component
 // . Unversioned (no resolvable version) means the advisory cannot be
 // confirmed against an affected range – it becomes a historical advisory.
+// expandFindingAliases widens each raw finding's alias set with the owned advisory store's transitive alias
+// closure BEFORE correlation, so two findings that are the same vulnerability under non-overlapping ids (a
+// GHSA-only finding from one source, a CVE-only finding from another) cluster into one. It collects the
+// findings' ids, asks each detection source that provides alias edges (the owned advisory source) for the
+// edges touching those ids - a bounded, index-backed query, not a corpus scan - and applies the closure.
+// Best-effort: an alias-edge lookup error never fails the scan, and with no alias provider the raws are
+// returned unchanged (correlation behaves exactly as before).
+func (s *Service) expandFindingAliases(ctx context.Context, raws []vulnerability.RawFinding) []vulnerability.RawFinding {
+	if len(raws) == 0 {
+		return raws
+	}
+	idSet := map[string]struct{}{}
+	for _, r := range raws {
+		if r.AdvisoryID != "" {
+			idSet[r.AdvisoryID] = struct{}{}
+		}
+		for _, a := range r.Aliases {
+			if a != "" {
+				idSet[a] = struct{}{}
+			}
+		}
+	}
+	if len(idSet) == 0 {
+		return raws
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	var edges []advisory.AliasEdge
+	for _, src := range s.sources {
+		provider, ok := src.(ports.AliasEdgeProvider)
+		if !ok {
+			continue
+		}
+		e, err := provider.AliasEdges(ctx, ids)
+		if err != nil {
+			continue // best-effort: alias expansion never fails the scan
+		}
+		edges = append(edges, e...)
+	}
+	if len(edges) == 0 {
+		return raws
+	}
+	return vulnerability.ExpandAliases(raws, advisory.NewAliasGraph(edges).Closure)
+}
+
 func classifyVulns(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) {
 	firstParty := make(map[string]bool, len(doc.Components))
 	scopeByCV := make(map[string]string, len(doc.Components))

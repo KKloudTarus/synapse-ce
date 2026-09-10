@@ -1723,6 +1723,23 @@ type AdvisoryCorpusFreshness interface {
 	AdvisoryFreshness(ctx context.Context) (latest time.Time, count int, err error)
 }
 
+// AdvisoryAliasStore is an OPTIONAL capability of an AdvisoryStore: it returns the alias edges (alias id ->
+// canonical id) for the advisories touching a set of ids, so correlation can resolve the transitive alias
+// closure of a scan's findings and merge two findings that are the same vulnerability under non-overlapping
+// ids. The query is bounded to the given ids (backed by the advisories alias GIN index), so it is O(matching
+// advisories), not a full-corpus scan. An empty ids slice returns no edges.
+type AdvisoryAliasStore interface {
+	AdvisoryAliasEdges(ctx context.Context, ids []string) ([]advisory.AliasEdge, error)
+}
+
+// AliasEdgeProvider is an OPTIONAL capability of a DetectionSource: it supplies the alias edges for a set of
+// advisory ids so the SCA correlation step can resolve the transitive alias closure of its findings. The
+// owned advisory source implements it over its store's AdvisoryAliasStore; a source without it contributes
+// no edges.
+type AliasEdgeProvider interface {
+	AliasEdges(ctx context.Context, ids []string) ([]advisory.AliasEdge, error)
+}
+
 // CorrelationRecorder turns a cross-check DISAGREEMENT report into Judgments for human review.
 // The SCA pipeline computes the report (vulnerability.CrossCheck over its multi-source
 // RawFindings) and hands it here; the recorder proposes one UNGATED CapCorrelation judgment per NEW

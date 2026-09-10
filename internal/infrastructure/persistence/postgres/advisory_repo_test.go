@@ -225,3 +225,60 @@ func TestAdvisoryRepositoryUpsertConcurrentInsertKeepsEnrichment(t *testing.T) {
 		}()
 	}
 }
+
+// TestAdvisoryRepositoryAliasEdges exercises the D2.5 alias-edge query against a real DB (the ?| intersection
+// is backed by the migration-0145 GIN index): a query by an alias id returns that advisory's full edge set
+// and does not leak an unrelated advisory.
+func TestAdvisoryRepositoryAliasEdges(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	repo := NewAdvisoryRepository(pool)
+
+	id1 := "CVE-" + randHex(t)
+	id2 := "CVE-" + randHex(t)
+	aliasA := "GHSA-" + randHex(t)
+	aliasB := "GHSA-" + randHex(t)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM advisories WHERE id = ANY($1)", []string{id1, id2})
+	})
+	if err := repo.Upsert(ctx, advisory.Advisory{ID: id1, Aliases: []string{aliasA, "OSV-" + randHex(t)}}); err != nil {
+		t.Fatalf("upsert id1: %v", err)
+	}
+	if err := repo.Upsert(ctx, advisory.Advisory{ID: id2, Aliases: []string{aliasB}}); err != nil {
+		t.Fatalf("upsert id2: %v", err)
+	}
+
+	edges, err := repo.AdvisoryAliasEdges(ctx, []string{aliasA})
+	if err != nil {
+		t.Fatalf("AdvisoryAliasEdges: %v", err)
+	}
+	var sawAliasA, leakedB bool
+	for _, e := range edges {
+		if e.AliasID == aliasA && e.CanonicalID == id1 {
+			sawAliasA = true
+		}
+		if e.CanonicalID == id2 {
+			leakedB = true
+		}
+	}
+	if !sawAliasA {
+		t.Errorf("query by %s must return its edge to %s; got %+v", aliasA, id1, edges)
+	}
+	if leakedB {
+		t.Errorf("unrelated advisory %s must not be returned for %s", id2, aliasA)
+	}
+	if e, _ := repo.AdvisoryAliasEdges(ctx, nil); len(e) != 0 {
+		t.Errorf("empty ids must return no edges, got %+v", e)
+	}
+}

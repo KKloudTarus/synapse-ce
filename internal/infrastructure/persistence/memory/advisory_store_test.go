@@ -119,3 +119,35 @@ func TestAdvisoryStoreReSyncPreservesRiskEnrichment(t *testing.T) {
 		t.Errorf("base summary not refreshed: got %q", a.Summary)
 	}
 }
+
+func TestAdvisoryStoreAliasEdgesBoundedByIds(t *testing.T) {
+	ctx := context.Background()
+	s := NewAdvisoryStore()
+	_ = s.Upsert(ctx, advisory.Advisory{ID: "CVE-2026-1", Aliases: []string{"GHSA-a", "OSV-9"}, Affected: []advisory.AffectedPackage{ap("npm", "left-pad")}})
+	_ = s.Upsert(ctx, advisory.Advisory{ID: "CVE-2026-2", Aliases: []string{"GHSA-b"}, Affected: []advisory.AffectedPackage{ap("npm", "other")}})
+
+	// Query by an ALIAS id: the advisory whose alias is GHSA-a is returned, and its full edge set.
+	edges, err := s.AdvisoryAliasEdges(ctx, []string{"GHSA-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, e := range edges {
+		got[e.AliasID] = e.CanonicalID
+	}
+	if got["GHSA-a"] != "CVE-2026-1" || got["OSV-9"] != "CVE-2026-1" {
+		t.Errorf("alias edges for GHSA-a wrong: %v", got)
+	}
+	if _, leaked := got["GHSA-b"]; leaked {
+		t.Errorf("unrelated advisory CVE-2026-2 must not be returned: %v", got)
+	}
+
+	// Query by a CANONICAL id also returns its edges.
+	if e2, _ := s.AdvisoryAliasEdges(ctx, []string{"CVE-2026-2"}); len(e2) != 1 || e2[0].AliasID != "GHSA-b" {
+		t.Errorf("canonical-id query = %v, want [GHSA-b->CVE-2026-2]", e2)
+	}
+	// Empty ids -> no edges.
+	if e3, _ := s.AdvisoryAliasEdges(ctx, nil); len(e3) != 0 {
+		t.Errorf("empty ids must return no edges, got %v", e3)
+	}
+}
