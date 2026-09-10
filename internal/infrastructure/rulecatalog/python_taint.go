@@ -98,6 +98,14 @@ func pythonTaintRules() []rule.Rule {
 			"tree.xpath('//user[@id=$id]', id=request.args['id'])",
 			"tree.xpath(\"//user[@id='\" + request.args['id'] + \"']\")",
 		),
+		pythonTaintRule(
+			"python-taint-log", "Interprocedural Python log injection", "CWE-117", "A03:2021", shared.SeverityMedium,
+			"Tracks untrusted values into the standard-library logging module functions.",
+			"Unneutralized input written to a log can inject newlines to forge or split log entries, misleading an investigation or poisoning a log-analysis pipeline.\n\nSource: https://cwe.mitre.org/data/definitions/117.html",
+			"Log user input as a bounded parameter (never as part of the format string), and strip or encode newline and control characters before logging.",
+			"logging.info('login for user=%s', user_id)",
+			"logging.info('login for user=' + request.args['user'])",
+		),
 	}
 }
 
