@@ -277,8 +277,17 @@ func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, 
 		if !includeTest && nonProductionSecretPath(sr.File) {
 			continue
 		}
-		// Dedup on rule+file+line so a re-scan updates in place (1:1).
+		// Dedup on rule+file+line so a re-scan updates in place (1:1). A git-history hit keys distinctly from a
+		// working-tree hit at the same path:line (a "history" marker, plus its introducing commit when
+		// resolved) so a committed-then-removed secret is its own finding rather than colliding with a
+		// working-tree one, and two history hits without attribution still separate from the worktree.
 		dedup := "secret:" + sr.RuleID + ":" + sr.File + ":" + strconv.Itoa(sr.Line)
+		if sr.FromHistory {
+			dedup += ":history"
+			if sr.Commit != "" {
+				dedup += ":" + sr.Commit
+			}
+		}
 		scope := sbom.ClassifyScope(sr.File, "")
 		out = append(out, finding.Finding{
 			ID:           findingID(engagementID, dedup),
@@ -325,8 +334,23 @@ func secretRuleConfidence(ruleID string) string {
 }
 
 func secretDescription(sr ports.SecretRawFinding) string {
-	return fmt.Sprintf("A %s secret was detected (rule %s). Rotate the credential and remove it from source; prefer a secret manager or environment injection. Match (redacted): %s",
+	base := fmt.Sprintf("A %s secret was detected (rule %s). Rotate the credential and remove it from source; prefer a secret manager or environment injection. Match (redacted): %s",
 		sr.Category, sr.RuleID, sr.Match)
+	if sr.Commit != "" {
+		commit := sr.Commit
+		if len(commit) > 12 {
+			commit = commit[:12] // short hash for readability; the full id is the dedup key
+		}
+		attribution := "Found in git history, introduced in commit " + commit
+		if sr.Author != "" {
+			attribution += " by " + sr.Author
+		}
+		if sr.FirstSeen != "" {
+			attribution += " on " + sr.FirstSeen
+		}
+		base += ". " + attribution + ". Rotate it: a committed-then-removed secret remains recoverable from the repository history."
+	}
+	return base
 }
 
 // buildMisconfigFindings turns insecure IaC/config settings into ungated Kind=misconfig findings
