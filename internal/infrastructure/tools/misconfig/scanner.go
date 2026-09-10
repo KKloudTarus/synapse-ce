@@ -1,6 +1,6 @@
 // Package misconfig is an owned, deterministic infrastructure-as-code / config scanner over a prepared
 // workspace. It flags insecure settings in Dockerfiles, Kubernetes manifests, Helm charts (rendered via
-// `helm template`), Terraform (HCL), and CloudFormation (YAML/JSON) with first-party Go checks – no
+// `helm template`), Terraform (HCL), CloudFormation (YAML/JSON), and Azure Bicep with first-party Go checks – no
 // external policy engine (no OPA/Rego). Explicit-insecure settings are flagged as high/medium; recommended-hardening that is absent
 // (KSV/CIS/tfsec baseline: runAsNonRoot, dropped capabilities, encryption, resource limits, ...) is
 // flagged as low/medium, so coverage matches comprehensive scanners while the highs stay legible.
@@ -73,6 +73,7 @@ const (
 	cfgCloudFormation
 	cfgCompose
 	cfgGithubActions
+	cfgBicep
 )
 
 // ScanConfigs walks root, classifies each regular file, and returns located misconfig findings.
@@ -192,6 +193,8 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			tfFiles = append(tfFiles, tfFile{rel: rel, data: data})
 		case cfgARM:
 			out = append(out, scanARM(rel, data)...)
+		case cfgBicep:
+			out = append(out, scanBicep(rel, data)...)
 		case cfgCloudFormation:
 			out = append(out, scanCloudFormation(rel, data)...)
 		case cfgCompose:
@@ -234,6 +237,9 @@ func classifyName(name string) configKind {
 	}
 	if strings.HasSuffix(strings.ToLower(name), ".tf") {
 		return cfgTerraform
+	}
+	if strings.HasSuffix(strings.ToLower(name), ".bicep") {
+		return cfgBicep
 	}
 	if isComposeName(name) {
 		return cfgCompose

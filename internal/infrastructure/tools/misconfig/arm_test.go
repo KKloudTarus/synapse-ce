@@ -129,6 +129,45 @@ func TestARMDynamicExpressionsFailClosed(t *testing.T) {
 	}
 }
 
+// TestARMDynamicObjectParentFailClosed pins that a nested object property set to a dynamic ARM expression is
+// unknown, so an "absent hardening" rule that descends into it (which would otherwise read the missing child
+// as insecure) does not fire. This is the shared armDynamicNode guard the Bicep scanner relies on.
+func TestARMDynamicObjectParentFailClosed(t *testing.T) {
+	tmpl := `{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-01-01",
+      "name": "acct",
+      "location": "[resourceGroup().location]",
+      "tags": {"owner":"sec"},
+      "properties": {"encryption": "[parameters('enc')]"}
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2023-01-01",
+      "name": "vm",
+      "location": "[resourceGroup().location]",
+      "tags": {"owner":"sec"},
+      "identity": "[parameters('id')]",
+      "properties": {"securityProfile": "[parameters('sp')]"}
+    }
+  ]
+}`
+	got := ruleIDs(scan(t, map[string]string{"azuredeploy.json": tmpl}))
+	for _, unwanted := range []string{
+		"arm-storage-infrastructure-encryption-disabled",
+		"arm-vm-encryption-at-host-disabled",
+		"arm-managed-identity-missing",
+	} {
+		if _, ok := got[unwanted]; ok {
+			t.Errorf("dynamic object parent must suppress %s; got %v", unwanted, keys(got))
+		}
+	}
+}
+
 func TestARMSecretValueNeverCopiedToFinding(t *testing.T) {
 	const secret = "do-not-copy-this-secret"
 	tmpl := `{
