@@ -2539,11 +2539,15 @@ python-sys-maxint
 python-sys-version-slice
 python-taint-command
 python-taint-deserialization
+python-taint-ldap
 python-taint-open-redirect
 python-taint-path
 python-taint-sqli
 python-taint-ssrf
+python-taint-ssti
+python-taint-xpath
 python-taint-xss
+python-taint-xxe
 python-tar-zip-extractall
 python-telnetlib
 python-thread-module
