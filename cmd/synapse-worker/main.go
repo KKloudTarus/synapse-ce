@@ -593,6 +593,32 @@ func main() {
 	handlers[vulnerabilitymonitor.JobKind] = vulnerabilitySyncJobHandler{svc: vulnerabilityMonitor}
 	handlers[vulnerabilityreconcile.JobKind] = vulnerabilityReconcileJobHandler{svc: vulnerabilityReconciliation}
 
+	// Cadence-driven sync scheduler (#860 D1.1): a leader-gated maintenance task that enqueues each source
+	// whose last successful sync is older than its Cadence and reclaims stranded runs. The worker runtime
+	// runs maintenance tasks only on the leader, so exactly one scheduler runs; the in-flight-run check and
+	// the hourly idempotency key are secondary guards. Off (interval 0) unless provider sync is also enabled.
+	if cfg.VulnerabilitySyncSchedulerInterval > 0 && cfg.VulnerabilityProviderSyncEnabled {
+		// The scheduler must run on exactly one worker; leader election is what guarantees that. Without it a
+		// multi-worker deployment would run a scheduler on every worker and two ticks across an hour boundary
+		// could enqueue redundant concurrent syncs for one source (the in-flight check and idempotency key
+		// are not transactional across workers). Same requirement as the integration scheduler.
+		if !cfg.LeaderElectionEnabled {
+			log.Error("vulnerability sync scheduler requires SYNAPSE_LEADER_ENABLED=true")
+			os.Exit(1)
+		}
+		syncScheduler, serr := vulnerabilitymonitor.NewScheduler(vulnerabilityMonitor, clock, vulnerabilitymonitor.AlwaysLeader{}, vulnerabilitymonitor.SchedulerConfig{
+			Interval:      cfg.VulnerabilitySyncSchedulerInterval,
+			StaleAfter:    cfg.VulnerabilitySyncStaleAfter,
+			DispatchLimit: cfg.VulnerabilitySyncSchedulerDispatch,
+		}, log)
+		if serr != nil {
+			log.Error("vulnerability sync scheduler init failed", "err", serr)
+			os.Exit(1)
+		}
+		maintenanceTasks = append(maintenanceTasks, syncScheduler.Run)
+		log.Info("vulnerability sync scheduler ENABLED", "interval", cfg.VulnerabilitySyncSchedulerInterval, "stale_after", cfg.VulnerabilitySyncStaleAfter, "dispatch_limit", cfg.VulnerabilitySyncSchedulerDispatch)
+	}
+
 	// #823 durable DAST verification. A governed, approved probe used to execute on the API request
 	// thread; it now runs here as a lease job. The stack is the SAME the API's in-process path uses
 	// (runtime verifier + sandboxed runner + safety gate + approval consume + evidence seal), so the

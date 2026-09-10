@@ -328,6 +328,9 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_VULNERABILITY_SCHEDULER_MAX_QUEUE_DEPTH` | `100` | Stop dispatching when the vulnerability-sync queue reaches this depth. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT` | `10` | Maximum stale runs recovered per scheduler tick. |
 | `SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED` | `false` | Permit provider sync execution. This global gate also blocks already queued runs after rollback. |
+| `SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_INTERVAL` | `0` (off) | Above zero, turns on the leader-gated cadence-driven sync scheduler: every interval one worker enqueues each source whose last successful sync is older than its Cadence and reclaims stranded runs. Needs `SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED` and `SYNAPSE_LEADER_ENABLED`. |
+| `SYNAPSE_VULNERABILITY_SYNC_STALE_AFTER` | `2h` | A queued/running sync run older than this is reclaimed by the scheduler's stale-recovery sweep. |
+| `SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_DISPATCH_LIMIT` | `16` | Maximum syncs enqueued (and stale runs recovered) per scheduler tick. |
 | `SYNAPSE_VULNERABILITY_SOURCE_ALLOW_PRIVATE_NETWORK` | `false` | Permit a vulnerability source to reach RFC1918 addresses. A source is a URL the control plane fetches on a schedule, so leaving this off keeps whoever can write a source from probing the operator's own network. Loopback, link-local and carrier-grade NAT ranges stay blocked either way. |
 | `SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED` | `false` | Permit tenant-scoped occurrence mutations for allowlisted tenants. |
 | `SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED` | `false` | Permit machine-owned finding projection updates for allowlisted tenants. |
