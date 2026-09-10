@@ -105,6 +105,9 @@ func TestCatalogParity(t *testing.T) {
 		"cloudinary-url":                "CWE-798",
 		"discord-webhook-url":           "CWE-798",
 	}
+	for _, id := range parityExpansionRuleIDs() {
+		expectedCWE[id] = "CWE-798"
+	}
 	builtin := defaultRules()
 	seenInBuiltin := make(map[string]bool, len(builtin))
 

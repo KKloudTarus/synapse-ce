@@ -5,7 +5,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-func secretRules() []rule.Rule {
+func baseSecretRules() []rule.Rule {
 	return []rule.Rule{
 		{
 			Key:                 "aws-access-key-id",
