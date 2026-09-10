@@ -2037,6 +2037,15 @@ type SecretRawFinding struct {
 	Title    string // human title, e.g. "AWS access key ID"
 	Severity shared.Severity
 	Match    string // REDACTED preview only (e.g. "AKIA****...**7X"), never the full secret
+	// FromHistory marks a hit found by the git-HISTORY scan (a committed-then-removed secret) rather than the
+	// working tree, so it keys distinctly even when its commit attribution could not be resolved.
+	FromHistory bool
+	// Commit, Author, and FirstSeen attribute a git-HISTORY hit to the commit that first introduced the blob
+	// carrying the secret. They are empty for a working-tree hit and empty when history attribution could not
+	// be resolved (never fabricated). FirstSeen is the introducing commit's author date in RFC 3339.
+	Commit    string
+	Author    string
+	FirstSeen string
 }
 
 // SecretScanReport is the bounded output of a deterministic secret scan. Truncated means the scan was incomplete due to a child-file failure or safety cap, so Findings is a lower bound.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -25,6 +26,7 @@ import (
 const (
 	maxHistoryObjects = 500_000 // (sha, path) pairs read from rev-list before the walk stops (a huge repo cap)
 	maxHistoryBlobs   = 200_000 // unique blobs actually fetched + scanned (bounds cat-file work)
+	maxHistoryCommits = 500_000 // commits walked by the introduction attribution log before it stops
 	maxHistoryPathLen = 1024    // clip a stored blob path (a real path fits; bounds pathByBlob memory)
 	maxGitStderr      = 4096    // cap captured git stderr so a noisy/hostile repo cannot exhaust memory
 	gitBinary         = "git"
@@ -69,8 +71,18 @@ func (s *Scanner) ScanHistory(ctx context.Context, repoDir string) (ports.Secret
 	if err != nil {
 		return report, err
 	}
-	seen := map[string]bool{} // shared with content dedup: identical secrets across blobs collapse
-	err = gitCatBlobs(ctx, repoDir, pathByBlob, func(path string, data []byte) {
+	// Attribute each blob to the commit that first introduced it (first-introducing commit + author + date).
+	// Best-effort: a plain git-log failure yields no attribution (Commit/Author/FirstSeen stay empty, never
+	// fabricated) rather than failing the scan; a context cancellation IS fatal.
+	intro, ierr := gitBlobIntroductions(ctx, repoDir, pathByBlob)
+	if ierr != nil && ctx.Err() != nil {
+		return report, ierr
+	}
+	// Scan oldest-introduced blobs first so the (rule,path,line) dedup keeps the EARLIEST occurrence of a
+	// secret, and stamp each finding with that blob's introducing commit.
+	order := orderBlobsByIntroduction(pathByBlob, intro)
+	seen := map[string]bool{} // (rule,path,line) dedup: the same secret across historical blobs collapses to one
+	err = gitCatBlobs(ctx, repoDir, order, pathByBlob, func(sha, path string, data []byte) {
 		if len(report.Findings) >= maxFindings {
 			report.Truncated = true
 			return
@@ -78,14 +90,183 @@ func (s *Scanner) ScanHistory(ctx context.Context, repoDir string) (ports.Secret
 		if isBinary(data) {
 			return
 		}
+		start := len(report.Findings)
 		if s.scanContent(path, data, seen, &report.Findings, maxFindings) {
 			report.Truncated = true
+		}
+		bi, attributed := intro[sha]
+		for i := start; i < len(report.Findings); i++ {
+			report.Findings[i].FromHistory = true // every history hit keys distinctly from a working-tree hit
+			if attributed {
+				report.Findings[i].Commit = bi.commit
+				report.Findings[i].Author = bi.author
+				report.Findings[i].FirstSeen = bi.date
+			}
 		}
 	})
 	if err != nil {
 		return report, err
 	}
 	return report, nil
+}
+
+// blobIntro is the commit that first introduced a blob into history: its hash, author name, and author date,
+// plus seq, the 1-based chronological ordinal of that commit in the --reverse walk. seq gives a total oldest-
+// first order even when several commits share an author-date second (RFC 3339 has only second precision), so
+// it, not the date string, is what orders the scan.
+type blobIntro struct {
+	commit string
+	author string
+	date   string
+	seq    int
+}
+
+// orderBlobsByIntroduction returns the blob object ids ordered oldest-introduced first (unattributed blobs
+// last), with a stable sha tie-break, so the (rule,path,line) dedup in ScanHistory attributes a secret to its
+// earliest occurrence.
+func orderBlobsByIntroduction(pathByBlob map[string]string, intro map[string]blobIntro) []string {
+	order := make([]string, 0, len(pathByBlob))
+	for sha := range pathByBlob {
+		order = append(order, sha)
+	}
+	sort.Slice(order, func(i, j int) bool {
+		si, sj := introSeq(intro, order[i]), introSeq(intro, order[j])
+		if si != sj {
+			return si < sj
+		}
+		return order[i] < order[j]
+	})
+	return order
+}
+
+// introSeq returns a blob's introduction ordinal, or a sentinel that sorts after every attributed blob so an
+// unattributed blob (introduced by a merge git log did not diff, or beyond the walk cap) scans last.
+func introSeq(intro map[string]blobIntro, sha string) int {
+	if bi, ok := intro[sha]; ok {
+		return bi.seq
+	}
+	return int(^uint(0) >> 1) // math.MaxInt without importing math
+}
+
+// gitBlobIntroductions maps each blob object id in wanted to the commit that FIRST introduced it. It runs
+// `git log --all --topo-order --reverse --raw`: --topo-order --reverse walks ancestors before descendants
+// (parent-before-child even when author dates are skewed across refs), so the first commit adding a blob id is
+// its true earliest introducer; --no-renames stops a rename from masking the add; --no-abbrev yields full ids
+// that match cat-file. Only ids present in wanted (the capped set of blobs that will actually be scanned) are
+// recorded, so the map is bounded by len(wanted) and non-blob ids (gitlinks, trees) never enter it. The custom
+// format is NUL-prefixed so a header line is unambiguous against the ':'-prefixed raw diff lines. Read-only.
+func gitBlobIntroductions(ctx context.Context, repoDir string, wanted map[string]string) (map[string]blobIntro, error) {
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, gitBinary, "-C", repoDir, "log", "--all", "--topo-order", "--reverse",
+		"--no-renames", "--no-abbrev", "--format=%x00%H%x1f%an%x1f%aI", "--raw")
+	stderr := &cappedBuffer{cap: maxGitStderr}
+	cmd.Stderr = stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("git log stdout: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start git log %q: %w", repoDir, err)
+	}
+	intro := make(map[string]blobIntro)
+	sc := bufio.NewScanner(stdout)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	var cur blobIntro
+	commits := 0
+	capped := false
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "" {
+			continue
+		}
+		if line[0] == 0x00 { // commit header: "\x00<hash>\x1f<author>\x1f<date>"
+			// Stop once every wanted blob is attributed, or the commit cap is hit.
+			if commits >= maxHistoryCommits || len(intro) >= len(wanted) {
+				capped = true
+				break
+			}
+			commits++
+			parts := strings.SplitN(line[1:], "\x1f", 3)
+			if len(parts) == 3 {
+				cur = blobIntro{commit: parts[0], author: parts[1], date: parts[2], seq: commits}
+			} else {
+				cur = blobIntro{seq: commits}
+			}
+			continue
+		}
+		if line[0] != ':' { // raw diff lines begin with ':'; ignore anything else (e.g. a stray blank)
+			continue
+		}
+		// ":<srcmode> <dstmode> <srcsha> <dstsha> <status>\t<path>".
+		left, _, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(left)
+		if len(fields) < 5 || cur.commit == "" {
+			continue
+		}
+		dstMode, srcSha, dstSha, status := fields[1], fields[2], fields[3], fields[4]
+		if !isBlobMode(dstMode) { // skip gitlinks (160000) and trees; only a regular/exec/symlink blob is scanned
+			continue
+		}
+		if status == "" || (status[0] != 'A' && status[0] != 'M' && status[0] != 'T') {
+			continue
+		}
+		if dstSha == srcSha { // a mode-only change re-uses the same blob id; it introduces no new content
+			continue
+		}
+		if !isHexSHA(dstSha) || isZeroSHA(dstSha) {
+			continue
+		}
+		if _, want := wanted[dstSha]; !want { // only blobs that will actually be scanned
+			continue
+		}
+		if _, exists := intro[dstSha]; !exists { // first (oldest, from --topo-order --reverse) commit wins
+			intro[dstSha] = cur
+		}
+	}
+	scanErr := sc.Err()
+	if capped || scanErr != nil {
+		cancel() // stop git early on a cap or a scanner failure so it cannot keep producing unbounded output
+	}
+	_, _ = io.Copy(io.Discard, stdout)
+	waitErr := cmd.Wait()
+	if scanErr != nil {
+		return intro, fmt.Errorf("read git log output: %w", scanErr)
+	}
+	if ctx.Err() != nil {
+		return intro, fmt.Errorf("secret history scan: %w", ctx.Err())
+	}
+	if !capped && waitErr != nil {
+		return intro, fmt.Errorf("git log %q: %w: %s", repoDir, waitErr, truncate(stderr.String(), 200))
+	}
+	return intro, nil
+}
+
+// isBlobMode reports whether a git raw-diff mode is a file blob (regular, executable, or symlink), excluding
+// gitlinks (160000) and trees, so only ids that can carry a secret and will be scanned are attributed.
+func isBlobMode(mode string) bool {
+	switch mode {
+	case "100644", "100755", "120000":
+		return true
+	default:
+		return false
+	}
+}
+
+// isZeroSHA reports whether s is an all-zero git object id (the "no object" side of an add/delete raw line).
+func isZeroSHA(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] != '0' {
+			return false
+		}
+	}
+	return true
 }
 
 // gitBlobObjects lists every (blob object id -> a path it was stored under) reachable from all refs, via
@@ -155,8 +336,8 @@ func gitBlobObjects(ctx context.Context, repoDir string) (map[string]string, err
 // (trees) and oversized blobs are skipped. The batch protocol is: for each id, a header line
 // "<sha> <type> <size>" followed by <size> raw bytes and a trailing newline; a missing id yields "<sha>
 // missing". Parsing is bounded and never blocks: stdin is closed after the id list is written.
-func gitCatBlobs(ctx context.Context, repoDir string, pathByBlob map[string]string, fn func(path string, data []byte)) error {
-	if len(pathByBlob) == 0 {
+func gitCatBlobs(ctx context.Context, repoDir string, order []string, pathByBlob map[string]string, fn func(sha, path string, data []byte)) error {
+	if len(order) == 0 {
 		return nil
 	}
 	cctx, cancel := context.WithCancel(ctx)
@@ -181,7 +362,7 @@ func gitCatBlobs(ctx context.Context, repoDir string, pathByBlob map[string]stri
 	go func() {
 		w := bufio.NewWriter(stdin)
 		var werr error
-		for sha := range pathByBlob {
+		for _, sha := range order {
 			if _, e := w.WriteString(sha + "\n"); e != nil {
 				werr = e
 				break
@@ -216,7 +397,7 @@ func gitCatBlobs(ctx context.Context, repoDir string, pathByBlob map[string]stri
 }
 
 // parseCatFileBatch reads the cat-file --batch stream, calling fn for each blob within the size cap.
-func parseCatFileBatch(ctx context.Context, r *bufio.Reader, pathByBlob map[string]string, fn func(path string, data []byte)) error {
+func parseCatFileBatch(ctx context.Context, r *bufio.Reader, pathByBlob map[string]string, fn func(sha, path string, data []byte)) error {
 	blobs := 0
 	for {
 		if err := ctx.Err(); err != nil {
@@ -264,7 +445,7 @@ func parseCatFileBatch(ctx context.Context, r *bufio.Reader, pathByBlob map[stri
 		if err := readTerminator(r, sha); err != nil {
 			return err
 		}
-		fn(pathByBlob[sha], data)
+		fn(sha, pathByBlob[sha], data)
 	}
 }
 
