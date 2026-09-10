@@ -237,11 +237,28 @@ func collectSymbolUses(graph modulegraph.Graph, resolution jsresolution.Result,
 			continue
 		}
 
-		// A re-export republishes whatever the package exports, under names this scanner cannot
-		// enumerate, so it reaches everything.
+		// A re-export is resolved by its bindings (D4.7): a NAMED re-export (`export {template} from
+		// 'pkg'`) republishes exactly the named exports, so it touches ONLY those symbols - a vuln in a
+		// different export this module never re-exports is provably not reached through here. A namespace
+		// re-export (`export * from 'pkg'`) or a default re-export republishes the whole module object under
+		// names this scanner cannot enumerate, so it stays opaque (any export could be reached).
 		if edge.Kind == modulegraph.ImportReExport {
-			add(jssymbols.Use{Module: edge.From, PURL: purl, Kind: jssymbols.UseOpaque,
-				Reason: "the module re-exports the package"})
+			if len(edge.Bindings) == 0 {
+				add(jssymbols.Use{Module: edge.From, PURL: purl, Kind: jssymbols.UseOpaque,
+					Reason: "the module re-exports the package with no enumerable binding"})
+				continue
+			}
+			for _, binding := range edge.Bindings {
+				if binding.TypeOnly {
+					continue
+				}
+				if binding.Imported != "" && binding.Imported != "default" && !binding.Namespace && !binding.Default {
+					add(jssymbols.Use{Module: edge.From, PURL: purl, Symbol: binding.Imported, Kind: jssymbols.UseNamed})
+				} else {
+					add(jssymbols.Use{Module: edge.From, PURL: purl, Kind: jssymbols.UseOpaque,
+						Reason: "the module re-exports the package's whole namespace (export * / default)"})
+				}
+			}
 			continue
 		}
 		// A module-loading form with no binding clause at all — a bare `require('pkg')` or a dynamic
