@@ -7,9 +7,9 @@ import (
 )
 
 func TestMigration0161NotificationFramework(t *testing.T) {
-	isolated := newIsolatedMigrationDB(t, 161, 160)
+	isolated := newIsolatedMigrationDB(t, 163, 162)
 	db := isolated.db
-	if err := goose.UpTo(db, ".", 161); err != nil {
+	if err := goose.UpTo(db, ".", 163); err != nil {
 		t.Fatalf("apply 0161: %v", err)
 	}
 	for _, table := range []string{"notification_channels", "notification_channel_versions", "notification_rules", "notification_rule_channels", "notification_events", "notification_deliveries", "notification_delivery_attempts", "notification_source_state", "notification_source_records", "notification_audit_intents"} {

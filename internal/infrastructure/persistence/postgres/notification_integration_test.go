@@ -43,7 +43,7 @@ func (s *notificationTestSender) Send(context.Context, ports.NotificationWork, p
 
 func notificationTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	isolated := newIsolatedMigrationDB(t, 161, 161)
+	isolated := newIsolatedMigrationDB(t, 163, 163)
 	var database, role string
 	if err := isolated.db.QueryRow("SELECT current_database(),current_user").Scan(&database, &role); err != nil {
 		t.Fatal(err)
