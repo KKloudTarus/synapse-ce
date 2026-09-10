@@ -125,6 +125,7 @@ function mapProjectDependencyGraph(r: any): ProjectDependencyGraph {
       reachability: node.reachability ?? '',
       direct: node.direct ?? false,
       depth: node.depth ?? -1,
+      synthetic: node.synthetic ?? false,
       licenses: (node.licenses ?? []).map((license: any) => ({
         id: license.id ?? '',
         name: license.name ?? '',
