@@ -32,12 +32,24 @@ var _ ports.VulnerabilityReconciliationTenantStore = (*EngagementRepository)(nil
 var _ ports.DetectionReconciliationTenantStore = (*EngagementRepository)(nil)
 var _ ports.VulnerabilityReconciliationEngagementStore = (*EngagementRepository)(nil)
 var _ ports.HostEngagementLister = (*EngagementRepository)(nil)
+var _ ports.AssessmentCycleBackfillSource = (*EngagementRepository)(nil)
 
-func (r *EngagementRepository) Create(_ context.Context, e *engagement.Engagement) error {
+func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagement) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e.TenantID = shared.TenantOrDefault(e.TenantID)
-	r.data[e.ID] = e
+	previous, existed := r.data[e.ID]
+	previous = cloneMemoryEngagement(previous)
+	registerTenantRollback(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if existed {
+			r.data[e.ID] = previous
+		} else {
+			delete(r.data, e.ID)
+		}
+	})
+	r.data[e.ID] = cloneMemoryEngagement(e)
 	return nil
 }
 
@@ -48,7 +60,7 @@ func (r *EngagementRepository) GetByID(_ context.Context, id shared.ID) (*engage
 	if !ok {
 		return nil, shared.ErrNotFound
 	}
-	return e, nil
+	return cloneMemoryEngagement(e), nil
 }
 
 // GetByIDInTenant loads an engagement scoped to tenantID. Empty input normalizes to the non-empty
@@ -64,7 +76,7 @@ func (r *EngagementRepository) GetByIDInTenant(_ context.Context, tenantID, id s
 	if e.Internal() || e.TenantID != tenantID {
 		return nil, shared.ErrNotFound // cross-tenant/internal access – do not reveal existence
 	}
-	return e, nil
+	return cloneMemoryEngagement(e), nil
 }
 
 func (r *EngagementRepository) GetByHostAssetID(_ context.Context, tenantID, assetID shared.ID) (*engagement.Engagement, error) {
@@ -76,7 +88,7 @@ func (r *EngagementRepository) GetByHostAssetID(_ context.Context, tenantID, ass
 	}
 	for _, e := range r.data {
 		if e.HostAssetID == assetID && e.TenantID == tenantID {
-			return e, nil
+			return cloneMemoryEngagement(e), nil
 		}
 	}
 	return nil, shared.ErrNotFound
@@ -88,7 +100,7 @@ func (r *EngagementRepository) GetByProjectID(_ context.Context, tenantID, proje
 	tenantID = shared.TenantOrDefault(tenantID)
 	for _, e := range r.data {
 		if e.ProjectID == projectID && e.TenantID == tenantID {
-			return e, nil
+			return cloneMemoryEngagement(e), nil
 		}
 	}
 	return nil, shared.ErrNotFound
@@ -105,31 +117,68 @@ func (r *EngagementRepository) ProjectContexts(_ context.Context, tenantID share
 	out := map[shared.ID]*engagement.Engagement{}
 	for _, e := range r.data {
 		if wanted[e.ProjectID] && e.TenantID == tenantID {
-			out[e.ProjectID] = e
+			out[e.ProjectID] = cloneMemoryEngagement(e)
 		}
 	}
 	return out, nil
 }
 
-func (r *EngagementRepository) Update(_ context.Context, e *engagement.Engagement) error {
+func (r *EngagementRepository) Update(ctx context.Context, e *engagement.Engagement) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.data[e.ID]; !ok {
+	previous, ok := r.data[e.ID]
+	if !ok {
 		return shared.ErrNotFound
 	}
+	previous = cloneMemoryEngagement(previous)
+	registerTenantRollback(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.data[e.ID] = previous
+	})
 	e.TenantID = shared.TenantOrDefault(e.TenantID)
-	r.data[e.ID] = e
+	r.data[e.ID] = cloneMemoryEngagement(e)
 	return nil
 }
 
 // Delete removes an engagement (idempotent). In Postgres the FK cascade removes
 // children; in memory other stores are independent, but import rollback only needs
 // the engagement gone so a re-import isn't blocked.
-func (r *EngagementRepository) Delete(_ context.Context, id shared.ID) error {
+func (r *EngagementRepository) Delete(ctx context.Context, id shared.ID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	previous, existed := r.data[id]
+	previous = cloneMemoryEngagement(previous)
+	registerTenantRollback(ctx, func() {
+		if !existed {
+			return
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.data[id] = previous
+	})
 	delete(r.data, id)
 	return nil
+}
+
+func cloneMemoryEngagement(item *engagement.Engagement) *engagement.Engagement {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.Scope.InScope = append([]engagement.Target(nil), item.Scope.InScope...)
+	cloned.Scope.OutOfScope = append([]engagement.Target(nil), item.Scope.OutOfScope...)
+	cloned.RoE.AllowedToolClasses = append([]engagement.ToolClass(nil), item.RoE.AllowedToolClasses...)
+	cloned.RoE.Blackouts = append([]engagement.Blackout(nil), item.RoE.Blackouts...)
+	if item.AuthorizedFrom != nil {
+		value := *item.AuthorizedFrom
+		cloned.AuthorizedFrom = &value
+	}
+	if item.AuthorizedTo != nil {
+		value := *item.AuthorizedTo
+		cloned.AuthorizedTo = &value
+	}
+	return &cloned
 }
 
 // ListPromotionReconciliationScopes returns every non-project engagement for
@@ -160,7 +209,7 @@ func (r *EngagementRepository) List(_ context.Context, tenantID shared.ID) ([]*e
 	out := make([]*engagement.Engagement, 0, len(r.data))
 	for _, e := range r.data {
 		if !e.Internal() && e.TenantID == tenantID {
-			out = append(out, e)
+			out = append(out, cloneMemoryEngagement(e))
 		}
 	}
 	return out, nil
@@ -191,6 +240,10 @@ func (r *EngagementRepository) ListAssessmentCycleBackfillEngagements(_ context.
 	return items, nil
 }
 
+func (r *EngagementRepository) ListAssessmentSnapshotBackfillEngagements(ctx context.Context, tenantID, after shared.ID, snapshotAt time.Time, limit int) ([]*engagement.Engagement, error) {
+	return r.ListAssessmentCycleBackfillEngagements(ctx, tenantID, after, snapshotAt, limit)
+}
+
 func (r *EngagementRepository) ListProjectEngagements(_ context.Context, tenantID shared.ID) ([]*engagement.Engagement, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -198,7 +251,7 @@ func (r *EngagementRepository) ListProjectEngagements(_ context.Context, tenantI
 	out := make([]*engagement.Engagement, 0)
 	for _, e := range r.data {
 		if !e.ProjectID.IsZero() && e.TenantID == tenantID {
-			out = append(out, e)
+			out = append(out, cloneMemoryEngagement(e))
 		}
 	}
 	return out, nil
@@ -212,7 +265,7 @@ func (r *EngagementRepository) ListHostEngagements(_ context.Context, tenantID s
 	out := make([]*engagement.Engagement, 0)
 	for _, e := range r.data {
 		if !e.HostAssetID.IsZero() && e.TenantID == tenantID {
-			out = append(out, e)
+			out = append(out, cloneMemoryEngagement(e))
 		}
 	}
 	return out, nil

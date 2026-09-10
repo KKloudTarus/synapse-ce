@@ -133,8 +133,8 @@ func contextTenantTx(ctx context.Context, tenantID shared.ID) (pgx.Tx, bool, err
 }
 
 // bindTenantTransaction exposes an already-open tenant transaction to nested
-// repositories. Fenced backfill commits use it so the projected aggregate and
-// its accounting item share one database commit.
+// repositories. It is used by fenced backfill commits so the projected business
+// artifact and its accounting item share one database commit.
 func bindTenantTransaction(ctx context.Context, tenantID shared.ID, tx pgx.Tx) context.Context {
 	return shared.WithTenant(context.WithValue(ctx, tenantTransactionKey{}, tenantTransaction{tenantID: tenantID.String(), tx: tx}), tenantID)
 }
