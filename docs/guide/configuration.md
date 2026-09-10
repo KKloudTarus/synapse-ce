@@ -428,6 +428,7 @@ All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 | `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python semantic call-graph reachability (Tier-2). Requires Python Tier-1 and `synapse-ast`. |
 | `SYNAPSE_TAINT_ENABLED` | `false` | Go call-graph taint proposals. Needs judgments and the target-compilation sandbox. |
 | `SYNAPSE_PYTAINT_ENABLED` | `true` | Python value-flow taint proposals (default-on when synapse-ast resolves). Needs judgments and `synapse-ast`; source-only, so the sandbox is optional. |
+| `SYNAPSE_TAINT_RULES_FILE` | empty | Optional YAML file of custom Python taint rules (`python.sources` / `python.sinks`) merged additively into the built-in catalog at startup. Custom rules only ADD detection (a new source or sink); there are no custom sanitizers, so they cannot suppress a built-in flow. A malformed or invalid file fails startup rather than silently dropping rules. |
 | `SYNAPSE_CROSSCHECK_ENABLED` | `true` | Detection-source disagreement judgments. |
 | `SYNAPSE_SBOM_CROSSCHECK_ENABLED` | `true` | Dual-producer SBOM cross-check. |
 | `SYNAPSE_GOMODGRAPH_ENABLED` | `true` | Transitive Go dependency edges via `go mod graph`. |

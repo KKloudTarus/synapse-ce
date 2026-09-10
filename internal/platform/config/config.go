@@ -540,6 +540,10 @@ type Config struct {
 	// sidecar extracts bounded facts, but unlike Go taint this pass never compiles or imports target code.
 	// Positive paths become gated CapSAST proposals; incomplete coverage never produces a clean verdict.
 	PythonTaintEnabled bool
+	// TaintRulesFile is an optional operator-provided YAML file of CUSTOM Python taint rules (Semgrep-style
+	// user sources and sinks) merged additively into the built-in catalog at startup. Empty (the default)
+	// uses only the built-in catalog. Custom rules can only ADD detection, never suppress a built-in flow.
+	TaintRulesFile string
 	// TriScoreReassessEnabled turns on the tri-score risk reassessment surface (#594 C3/D/X5): an operator
 	// route that re-scores an incident's RiskAssessment from its factors (Threat now; Exposure/Behavior/
 	// Coverage as their producers are wired) via the deterministic Scorer. Off by default while the
@@ -825,32 +829,33 @@ func Load() Config {
 		// absent. Set the flag to false to opt out. Capabilities that need external setup or would be
 		// unsafe unsandboxed stay OFF by default (sandbox, agent/LLM, taint, maven/gradle resolvers,
 		// jarhash egress) – see their fields below.
-		JudgmentsEnabled:                            getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
-		SASTEnabled:                                 getbool("SYNAPSE_SAST_ENABLED", true),
-		SecretScanEnabled:                           getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
-		SecretHistoryEnabled:                        getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
-		MisconfigEnabled:                            getbool("SYNAPSE_MISCONFIG_ENABLED", true),
-		SuppressionEnabled:                          getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
-		VEXEnabled:                                  getbool("SYNAPSE_VEX_ENABLED", true),
-		ComplianceEnabled:                           getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
-		DetectionPriority:                           os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
-		DBMaxAgeDays:                                getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
-		ScanCacheEnabled:                            getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
-		ScanCacheDir:                                os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
-		ImageRootFSEnabled:                          getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
-		OwnedAdvisoryEnabled:                        getbool("SYNAPSE_OWNED_ADVISORY", true),
-		SymbolOverlayDir:                            getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
-		ReachabilityEnabled:                         getbool("SYNAPSE_REACHABILITY_ENABLED", true),
-		PyReachabilityEnabled:                       getbool("SYNAPSE_PYREACH_ENABLED", true),
-		PySemanticReachabilityEnabled:               getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
-		ASTBin:                                      os.Getenv("SYNAPSE_AST_BIN"),
-		PythonTaintEnabled:                          getbool("SYNAPSE_PYTAINT_ENABLED", true),
-		TriScoreReassessEnabled:                     getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
-		FleetCorrelationEnabled:                     getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
-		FleetCorrelationWindow:                      getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
-		FleetCorrelationMaxPerIncident:              getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
-		FleetCorrelationPageSize:                    getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
-		FleetCorrelationMaxActiveSessions:           getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
+		JudgmentsEnabled:                  getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
+		SASTEnabled:                       getbool("SYNAPSE_SAST_ENABLED", true),
+		SecretScanEnabled:                 getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
+		SecretHistoryEnabled:              getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
+		MisconfigEnabled:                  getbool("SYNAPSE_MISCONFIG_ENABLED", true),
+		SuppressionEnabled:                getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
+		VEXEnabled:                        getbool("SYNAPSE_VEX_ENABLED", true),
+		ComplianceEnabled:                 getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
+		DetectionPriority:                 os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
+		DBMaxAgeDays:                      getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
+		ScanCacheEnabled:                  getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
+		ScanCacheDir:                      os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
+		ImageRootFSEnabled:                getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
+		OwnedAdvisoryEnabled:              getbool("SYNAPSE_OWNED_ADVISORY", true),
+		SymbolOverlayDir:                  getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
+		ReachabilityEnabled:               getbool("SYNAPSE_REACHABILITY_ENABLED", true),
+		PyReachabilityEnabled:             getbool("SYNAPSE_PYREACH_ENABLED", true),
+		PySemanticReachabilityEnabled:     getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
+		ASTBin:                            os.Getenv("SYNAPSE_AST_BIN"),
+		PythonTaintEnabled:                getbool("SYNAPSE_PYTAINT_ENABLED", true),
+		TaintRulesFile:                    strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
+		TriScoreReassessEnabled:           getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
+		FleetCorrelationEnabled:           getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
+		FleetCorrelationWindow:            getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
+		FleetCorrelationMaxPerIncident:    getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
+		FleetCorrelationPageSize:          getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
+		FleetCorrelationMaxActiveSessions: getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
 		FleetCorrelationMaxTimelineRefsPerDetection: getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_DETECTION", 32),
 		FleetCorrelationMaxTimelineRefsPerPage:      getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE", 500),
 		JSReachabilityEnabled:                       getbool("SYNAPSE_JSREACH_ENABLED", true),
