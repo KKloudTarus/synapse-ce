@@ -1,7 +1,14 @@
 package ownadvisory
 
 import (
+	"bytes"
+	"encoding/hex"
+	"strings"
 	"testing"
+
+	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp/armor"
+	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
 // These fixtures were produced with gpg: a 2048-bit RSA key signs csafFixtureMsg with a detached armored
@@ -79,5 +86,127 @@ func TestVerifyDetachedSignature(t *testing.T) {
 	}
 	if err := VerifyDetachedSignature([]byte(csafFixtureMsg), csafFixtureSig, "not-a-key"); err == nil {
 		t.Fatal("a malformed key must fail closed")
+	}
+}
+
+// TestExtractKeyByFingerprint covers the D1.8 trust binding: discovery trusts ONLY the entity whose primary-key
+// fingerprint matches the fingerprint the provider-metadata published, never the whole fetched blob. The
+// critical case is a keyring that carries the legitimate key PLUS an extra (attacker) key: extraction must
+// return a single-entity key bound to the requested fingerprint, so a document signed by the extra key cannot
+// verify against it.
+func TestExtractKeyByFingerprint(t *testing.T) {
+	const realFP = "b24a2a20bdcf0f1707e0d9ba55403e69a7416b57"
+	const decoyFP = "dc12cc1ce68ed8223814e5aaca769fcc4c80dbd4"
+
+	// A two-entity keyring: the real signing key and an unrelated (attacker) key in one armored blob.
+	var blob bytes.Buffer
+	writer, err := armor.Encode(&blob, openpgp.PublicKeyType, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, armored := range []string{csafFixturePub, csafFixtureOtherPub} {
+		ring, rerr := openpgp.ReadArmoredKeyRing(strings.NewReader(armored))
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		if serr := ring[0].Serialize(writer); serr != nil {
+			t.Fatal(serr)
+		}
+	}
+	if cerr := writer.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	twoEntity := blob.String()
+
+	// Extract by the real fingerprint (with case/space variants): the result is a single-entity key bound to
+	// the real fingerprint, and it verifies the real signature.
+	for _, want := range []string{realFP, "B24A2A20BDCF0F1707E0D9BA55403E69A7416B57", "B24A 2A20 BDCF 0F17 07E0  D9BA 5540 3E69 A741 6B57"} {
+		bound, berr := ExtractKeyByFingerprint(twoEntity, want)
+		if berr != nil || bound == "" {
+			t.Fatalf("real key must extract for %q: bound=%q err=%v", want, bound, berr)
+		}
+		ring, rerr := openpgp.ReadArmoredKeyRing(strings.NewReader(bound))
+		if rerr != nil || len(ring) != 1 {
+			t.Fatalf("extracted key must be single-entity: n=%d err=%v", len(ring), rerr)
+		}
+		if verr := VerifyDetachedSignature([]byte(csafFixtureMsg), csafFixtureSig, bound); verr != nil {
+			t.Fatalf("real signature must verify against the extracted real key: %v", verr)
+		}
+	}
+
+	// The bypass proof: extracting the decoy entity from the SAME blob yields a key the real signature does
+	// NOT verify against. If extraction returned the whole blob, the real signature would verify here.
+	decoyBound, err := ExtractKeyByFingerprint(twoEntity, decoyFP)
+	if err != nil || decoyBound == "" {
+		t.Fatalf("decoy key must extract: bound=%q err=%v", decoyBound, err)
+	}
+	if verr := VerifyDetachedSignature([]byte(csafFixtureMsg), csafFixtureSig, decoyBound); verr == nil {
+		t.Fatal("real signature must NOT verify against the extracted decoy key (whole-blob trust bug)")
+	}
+
+	// A fingerprint present in neither entity yields no key.
+	if bound, err := ExtractKeyByFingerprint(twoEntity, "00"+realFP[2:]); err != nil || bound != "" {
+		t.Fatalf("an absent fingerprint must yield no key: bound=%q err=%v", bound, err)
+	}
+	// An empty fingerprint and a malformed key are rejected.
+	if _, err := ExtractKeyByFingerprint(csafFixturePub, "  "); err == nil {
+		t.Fatal("an empty fingerprint must error")
+	}
+	if _, err := ExtractKeyByFingerprint("not-a-key", realFP); err == nil {
+		t.Fatal("a malformed key must error")
+	}
+}
+
+// TestExtractKeyByFingerprintRejectsForeignSubkeyBinding pins the last trust-binding guarantee: an attacker who
+// takes a provider's fingerprint-matching primary key and injects their OWN signing subkey cannot get it
+// trusted, because forging a subkey binding needs the primary's private key. go-crypto validates subkey binding
+// signatures on read, so a subkey bound by a foreign key fails the read and ExtractKeyByFingerprint fails closed
+// rather than admitting an attacker signing subkey under the matched primary.
+func TestExtractKeyByFingerprintRejectsForeignSubkeyBinding(t *testing.T) {
+	cfg := &packet.Config{Algorithm: packet.PubKeyAlgoEdDSA}
+	entA, err := openpgp.NewEntity("A", "", "a@example.com", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entB, err := openpgp.NewEntity("B", "", "b@example.com", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entA.Subkeys) == 0 || len(entB.Subkeys) == 0 {
+		t.Skip("key generation produced no subkey to graft")
+	}
+	fpA := hex.EncodeToString(entA.PrimaryKey.Fingerprint)
+
+	// A clean entA extracts.
+	var clean bytes.Buffer
+	cw, err := armor.Encode(&clean, openpgp.PublicKeyType, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := entA.Serialize(cw); err != nil {
+		t.Fatal(err)
+	}
+	if err := cw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if bound, err := ExtractKeyByFingerprint(clean.String(), fpA); err != nil || bound == "" {
+		t.Fatalf("a clean key must extract: bound=%q err=%v", bound, err)
+	}
+
+	// Graft entB's subkey binding onto entA's subkey (a binding made by a foreign primary), then serialize entA.
+	entA.Subkeys[0].Sig = entB.Subkeys[0].Sig
+	var tampered bytes.Buffer
+	tw, err := armor.Encode(&tampered, openpgp.PublicKeyType, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := entA.Serialize(tw); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExtractKeyByFingerprint(tampered.String(), fpA); err == nil {
+		t.Fatal("a subkey with a foreign binding signature must fail closed on read")
 	}
 }
