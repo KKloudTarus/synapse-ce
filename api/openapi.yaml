@@ -6423,7 +6423,7 @@ components:
         id: {type: string}
         key: {type: string}
         name: {type: string}
-        adapter_type: {type: string, enum: [osv, csaf, oval, nvd, ghsa, cisa_kev, first_epss, public_exploit]}
+        adapter_type: {type: string, enum: [osv, csaf, oval, nvd, ghsa, gitlab, cisa_kev, first_epss, public_exploit]}
         endpoint: {type: string, format: uri, pattern: '^https://'}
         enabled: {type: boolean}
         archived: {type: boolean}
