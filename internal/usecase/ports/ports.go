@@ -2084,6 +2084,14 @@ type MisconfigRawFinding struct {
 	Description string // what is wrong + how to fix
 }
 
+// ImageConfigChecker runs owned hardening checks over a scanned container image's recovered config and build
+// history (root user, credential in an ENV variable, sensitive build commands). It is PURE and READ-ONLY over
+// the domain sbom.ImageInfo the acquirer already recovered, needs no filesystem walk, and returns the same
+// ungated MisconfigRawFinding shape as the config scanner. nil info yields no findings.
+type ImageConfigChecker interface {
+	Check(info *sbom.ImageInfo) []MisconfigRawFinding
+}
+
 // SuppressionLoader reads a repo-committed suppression policy (.synapseignore) from a prepared workspace.
 // It is READ-ONLY and best-effort: a missing file yields an empty set with no error, and any read/parse
 // issue degrades to fewer rules rather than failing a scan. Applying the policy – and SURFACING every

@@ -58,6 +58,11 @@ runs owned catalogers over it, so a shipped artifact is inventoried even without
   advisory matcher keys them to the right OS ecosystem.
 - **Installed binaries.** Go build information embedded in ELF, PE, and Mach-O binaries, and
   Python dist-info and egg-info metadata, become `pkg:golang` and `pkg:pypi` components.
+- **Image config hardening.** An owned check over the image config and build history flags a
+  container that runs as root (no `USER`, or an explicit root/uid-0), a credential baked into an
+  environment variable, and a sensitive build command (a remote script piped to a shell, or an
+  `ADD` of a remote URL). It reads only the recovered config, so it needs no filesystem walk, and
+  a recognized credential in an env value is redacted before it reaches persisted scan data.
 
 Every parser treats the image as untrusted input: reads are bounded, cancellable, and hardened
 against a hostile filesystem or a crafted package database.
