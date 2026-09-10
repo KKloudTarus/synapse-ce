@@ -495,3 +495,47 @@ func (c *countingScanner) Scan(context.Context, string) (modulegraph.Graph, erro
 	c.calls++
 	return c.graph, nil
 }
+
+func namedReExportEdge(module string, symbols ...string) modulegraph.Edge {
+	var bindings []modulegraph.Binding
+	for _, sym := range symbols {
+		bindings = append(bindings, modulegraph.Binding{Imported: sym, Local: sym})
+	}
+	return modulegraph.Edge{From: module, Specifier: "lodash", Kind: modulegraph.ImportReExport, Bindings: bindings}
+}
+
+func namespaceReExportEdge(module string) modulegraph.Edge {
+	return modulegraph.Edge{From: module, Specifier: "lodash", Kind: modulegraph.ImportReExport, Bindings: []modulegraph.Binding{{Namespace: true}}}
+}
+
+// TestNamedReExportTouchesOnlyTheReExportedSymbol (D4.7): `export {template} from 'lodash'` republishes
+// exactly template, so a vuln in template is reachable but a vuln in a DIFFERENT export the module never
+// re-exports is provably not reached through here - the precision the blanket-opaque handling threw away.
+func TestNamedReExportTouchesOnlyTheReExportedSymbol(t *testing.T) {
+	t.Parallel()
+
+	graph, result := graphWith("src/a.ts", []modulegraph.Edge{namedReExportEdge("src/a.ts", "template")}, nil)
+	a := symbolAnalyzerFor(t, graph, result, lodashPURL)
+
+	if reachable, _ := analyzeOne(t, a, mustSubject(t, lodashPURL, "template")); !reachable {
+		t.Fatal("a named re-export of the affected export is reachable")
+	}
+	if reachable, _ := analyzeOne(t, a, mustSubject(t, lodashPURL, "merge")); reachable {
+		t.Fatal("an export the module never re-exports must not be reachable through a named re-export")
+	}
+}
+
+// TestNamespaceReExportStaysOpaque is the soundness guard: `export * from 'lodash'` republishes every
+// export under names this scanner cannot enumerate, so NO symbol may be answered not-reachable. An unknown
+// verdict maps to reachable=true (suppresses nothing), so an un-named export under a namespace re-export
+// must come back reachable, never a false negative.
+func TestNamespaceReExportStaysOpaque(t *testing.T) {
+	t.Parallel()
+
+	graph, result := graphWith("src/a.ts", []modulegraph.Edge{namespaceReExportEdge("src/a.ts")}, nil)
+	a := symbolAnalyzerFor(t, graph, result, lodashPURL)
+
+	if reachable, _ := analyzeOne(t, a, mustSubject(t, lodashPURL, "merge")); !reachable {
+		t.Fatal("a namespace re-export could republish any export, so no symbol may be answered not-reachable")
+	}
+}
