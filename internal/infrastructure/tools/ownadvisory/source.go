@@ -139,19 +139,50 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 			}
 		}
 		if distroPackageMatchable && eco != "" && c.Name != "" && sbom.IsResolvedVersion(c.Version) {
+			// matchName queries the store for (eco, name) and emits any advisory that hits version.
+			matchName := func(name, version string) error {
+				advs, err := s.store.ByPackage(ctx, eco, name)
+				if err != nil {
+					return err
+				}
+				for _, a := range advs {
+					if a.Withdrawn {
+						continue
+					}
+					if affected, fixed := a.Match(eco, name, version); affected {
+						emit(a, c, fixed, a.AffectedSymbolsFor(eco, name))
+					}
+				}
+				return nil
+			}
 			// Normalize to the ecosystem-canonical key on the lookup side too, so a component name that
 			// isn't already normalized (e.g. a Syft-produced PyPI name) still meets the stored advisory key.
 			name := canonicalName(eco, c.Name)
-			advs, err := s.store.ByPackage(ctx, eco, name)
-			if err != nil {
+			if err := matchName(name, matchVersion); err != nil {
 				return nil, err
 			}
-			for _, a := range advs {
-				if a.Withdrawn {
-					continue
-				}
-				if affected, fixed := a.Match(eco, name, matchVersion); affected {
-					emit(a, c, fixed, a.AffectedSymbolsFor(eco, name))
+			// A Debian/Ubuntu security advisory is keyed by the SOURCE package (one openssl advisory covers
+			// the libssl1.1, libcrypto1.1, … binaries built from it), so a binary package never matches it by
+			// its own name. Also match the binary by its source-package name, which Syft records in the deb
+			// PURL "upstream=" qualifier as "<source>" or "<source>@<version>". Match against the SOURCE
+			// version when the qualifier carries one: a binNMU gives the binary a "<src>+bN" version while the
+			// source stays "<src>", and the advisory ranges are in source-version space, so using the binary
+			// version could cross a nonzero introduced/fixed boundary the source does not (a false result).
+			// Fall back to the binary version only for a name-only upstream (Syft omits the version when they
+			// are equal). The emit map dedups a binary+source double hit. Only deb: an rpm's upstream is a
+			// source-RPM filename needing NEVRA parsing, and the owned RedHat CSAF feed is binary-keyed.
+			if purlType(c.PURL) == "deb" {
+				// Decode the qualifier BEFORE splitting: PURL encodes the name/version "@" separator as %40
+				// (and an epoch ":" as %3A), so "openssl%401.1.1k" decodes to "openssl@1.1.1k" first.
+				upstreamName, upstreamVer, _ := strings.Cut(decodePURLSegment(purlQualifier(c.PURL, "upstream")), "@")
+				if src := canonicalName(eco, strings.TrimSpace(upstreamName)); src != "" && src != name {
+					srcVersion := matchVersion
+					if v := strings.TrimSpace(upstreamVer); v != "" {
+						srcVersion = v // the source version, in the space the source-keyed advisory ranges use
+					}
+					if err := matchName(src, srcVersion); err != nil {
+						return nil, err
+					}
 				}
 			}
 		}

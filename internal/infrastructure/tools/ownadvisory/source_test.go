@@ -243,3 +243,85 @@ func TestScanCarriesRisk(t *testing.T) {
 		t.Fatalf("finding must carry KEV/EPSS from the corpus advisory, got %+v", raws)
 	}
 }
+
+func TestScanMatchesDebianBinaryViaSourcePackage(t *testing.T) {
+	// D2.8: a Debian advisory is keyed by the SOURCE package "openssl", but the installed BINARY is
+	// "libssl1.1" (built from openssl). Without source-package matching the binary is invisible; with it,
+	// the binary matches via its Syft "upstream=openssl" PURL qualifier.
+	adv := advisory.Advisory{
+		ID: "CVE-2024-SRC", Summary: "openssl", CVSSScore: 7.5,
+		Affected: []advisory.AffectedPackage{{
+			Ecosystem: "Debian:11", Package: "openssl",
+			Ranges:       []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: "1.1.1n-0+deb11u4"}}}},
+			FixedVersion: "1.1.1n-0+deb11u4",
+		}},
+	}
+	store := memStore{byKey: map[string][]advisory.Advisory{"Debian:11|openssl": {adv}}}
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		// binary built from openssl, vulnerable version, source recorded in upstream=
+		{Name: "libssl1.1", Version: "1.1.1n-0+deb11u3", PURL: "pkg:deb/debian/libssl1.1@1.1.1n-0+deb11u3?arch=amd64&distro=debian-11&upstream=openssl"},
+		// same source, patched version -> not affected
+		{Name: "libcrypto1.1", Version: "1.1.1n-0+deb11u4", PURL: "pkg:deb/debian/libcrypto1.1@1.1.1n-0+deb11u4?distro=debian-11&upstream=openssl"},
+		// a binary whose upstream is unrelated -> no match
+		{Name: "zlib1g", Version: "1.2.11", PURL: "pkg:deb/debian/zlib1g@1.2.11?distro=debian-11&upstream=zlib"},
+	}}
+	raws, err := New(store).Scan(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(raws) != 1 {
+		t.Fatalf("want 1 finding (the vulnerable libssl1.1 via source openssl), got %d: %+v", len(raws), raws)
+	}
+	if raws[0].Component != "libssl1.1" || raws[0].AdvisoryID != "CVE-2024-SRC" {
+		t.Errorf("finding must be the binary libssl1.1 matched via source openssl, got %+v", raws[0])
+	}
+}
+
+func TestScanSourceMatchDoesNotDoubleEmit(t *testing.T) {
+	// A source package whose binary name equals the source name must not double-emit (binary + source hit
+	// the same advisory); the emit dedup handles it.
+	adv := advisory.Advisory{
+		ID: "CVE-2024-DUP", Summary: "openssl", CVSSScore: 7.5,
+		Affected: []advisory.AffectedPackage{{
+			Ecosystem: "Debian:11", Package: "openssl",
+			Ranges: []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: "9"}}}},
+		}},
+	}
+	store := memStore{byKey: map[string][]advisory.Advisory{"Debian:11|openssl": {adv}}}
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "openssl", Version: "1.1.1n", PURL: "pkg:deb/debian/openssl@1.1.1n?distro=debian-11&upstream=openssl"},
+	}}
+	raws, err := New(store).Scan(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(raws) != 1 {
+		t.Fatalf("binary==source must emit exactly once, got %d: %+v", len(raws), raws)
+	}
+}
+
+func TestScanSourceMatchUsesUpstreamVersionNotBinary(t *testing.T) {
+	// D2.8 soundness (Codex): when Syft records upstream=<source>@<version>, the SOURCE version differs from
+	// the binary and the source-keyed advisory must be matched against the SOURCE version. Here the binary
+	// version (1.1.1n) is >= the fix (1.1.1m) and would be missed, but the source version (1.1.1k) is below
+	// the fix and IS affected — using the source version finds it.
+	adv := advisory.Advisory{
+		ID: "CVE-2024-UPV", Summary: "openssl", CVSSScore: 7.5,
+		Affected: []advisory.AffectedPackage{{
+			Ecosystem: "Debian:11", Package: "openssl",
+			Ranges:       []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: "1.1.1m"}}}},
+			FixedVersion: "1.1.1m",
+		}},
+	}
+	store := memStore{byKey: map[string][]advisory.Advisory{"Debian:11|openssl": {adv}}}
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "libssl1.1", Version: "1.1.1n", PURL: "pkg:deb/debian/libssl1.1@1.1.1n?distro=debian-11&upstream=openssl%401.1.1k"},
+	}}
+	raws, err := New(store).Scan(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(raws) != 1 || raws[0].AdvisoryID != "CVE-2024-UPV" {
+		t.Fatalf("want the finding via source version 1.1.1k (< fix 1.1.1m), got %+v", raws)
+	}
+}
