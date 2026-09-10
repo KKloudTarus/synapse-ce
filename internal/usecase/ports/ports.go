@@ -1524,6 +1524,21 @@ type JVMReachabilityAnalyzer interface {
 	Analyze(ctx context.Context, wsDir string, comps []sbom.Component) (int, error)
 }
 
+// JVMReachabilityVerdict is one finding's pre-computed JVM class-reachability result (the JVMReachabilityAnalyzer
+// tags components in-scan; this carries the per-finding verdict to the recorder).
+type JVMReachabilityVerdict struct {
+	FindingID shared.ID
+	Reachable bool
+}
+
+// JVMReachabilityRecorder mints an auditable Tier-1.5 JVM class-reachability judgment per finding from the
+// pre-computed verdicts, so the coarse JVM signal feeds VEX and (for a reachable verdict) the SLA scorer, not
+// just an ephemeral finding tag. A Tier-1.5 verdict is never a promotable proof, so a not-reachable verdict
+// only deprioritizes, never suppresses. Optional; nil ⇒ JVM reachability stays a finding tag only.
+type JVMReachabilityRecorder interface {
+	RecordVerdicts(ctx context.Context, engagementID shared.ID, verdicts []JVMReachabilityVerdict) (int, error)
+}
+
 // CallGraphBuilder is the deterministic call-graph PRODUCER port: an implementation
 // runs a language's builder (the Go MVP shells govulncheck-class via argv, sandboxed) over a target and
 // returns the NORMALIZED domain callgraph.Graph – no tool/analysis type crosses this boundary. The Graph

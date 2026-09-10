@@ -49,18 +49,22 @@ const (
 	LanguageRust       Language = "rust"
 	LanguagePHP        Language = "php"
 	LanguageRuby       Language = "ruby"
+	LanguageJVM        Language = "jvm"
 )
 
 // Valid reports whether l is a supported Tier-1 language.
 func (l Language) Valid() bool {
 	switch l {
-	case LanguageGo, LanguagePython, LanguageJavaScript, LanguageRust, LanguagePHP, LanguageRuby:
+	case LanguageGo, LanguagePython, LanguageJavaScript, LanguageRust, LanguagePHP, LanguageRuby, LanguageJVM:
 		return true
 	}
 	return false
 }
 
 func actorsFor(tier judgment.ReachabilityTier, language Language) (proposer, verifier, proofLabel string) {
+	if tier == judgment.Tier1_5 && language == LanguageJVM {
+		return judgment.ProofActorJVMClassScan, judgment.ProofActorJVMClassEngine, "tier-1.5 jvm class-reachability proof"
+	}
 	if tier == judgment.Tier2 {
 		// Tier-2 is a STRENGTH of claim, not an engine. Two different engines reach it — the Go call
 		// graph and the JavaScript binding-and-property-read analysis — and a sealed rationale that
@@ -121,6 +125,7 @@ type Coordinator struct {
 }
 
 var _ ports.ReachabilityRecorder = (*Coordinator)(nil)
+var _ ports.JVMReachabilityRecorder = (*Coordinator)(nil)
 
 // NewCoordinator validates and returns a Tier-2 coordinator (a call-graph analyzer that proves a reached
 // call path — the Go/govulncheck default).
@@ -154,6 +159,53 @@ func NewCoordinatorForLanguage(a analyzer, r recorder, audit ports.AuditLogger, 
 	}
 	coordinator.proposer, coordinator.verifier, coordinator.proofLabel = actorsFor(tier, language)
 	return coordinator, nil
+}
+
+// NewJVMVerdictCoordinator returns a Tier-1.5 coordinator for JVM class-reachability that mints from
+// PRE-COMPUTED per-finding verdicts (via RecordVerdicts) instead of running a symbol analyzer, since the
+// jvmreach tagger computes reachability in-scan at the COMPONENT level (the app's class-reference closure),
+// not by affected symbol. It carries no analyzer; RecordVerdicts is its entry point.
+func NewJVMVerdictCoordinator(r recorder, audit ports.AuditLogger, clock ports.Clock) (*Coordinator, error) {
+	if r == nil || audit == nil || clock == nil {
+		return nil, fmt.Errorf("%w: jvm verdict coordinator is missing a dependency", shared.ErrValidation)
+	}
+	proposer, verifier, label := actorsFor(judgment.Tier1_5, LanguageJVM)
+	return &Coordinator{recorder: r, audit: audit, clock: clock, tier: judgment.Tier1_5, proposer: proposer, verifier: verifier, proofLabel: label}, nil
+}
+
+// RecordVerdicts mints a Tier-1.5 JVM class-reachability judgment per finding from PRE-COMPUTED verdicts,
+// recording the in-scan jvmreach tags as auditable judgments that feed VEX and (for a REACHABLE verdict) the
+// SLA scorer. It runs no analyzer. A judgment is minted only when it SUPERSEDES the prior (a stronger Tier-2
+// call-graph proof stands, no churn). Tier-1.5 is never a promotable deterministic proof
+// (IsDeterministicReachabilityProof returns false), so a not-reachable verdict is auditable but NEVER becomes
+// a VEX not_affected - correct for a coarse, reflection-blind signal that must only deprioritize.
+func (c *Coordinator) RecordVerdicts(ctx context.Context, engagementID shared.ID, verdicts []ports.JVMReachabilityVerdict) (int, error) {
+	if engagementID.IsZero() {
+		return 0, fmt.Errorf("%w: engagement id is required", shared.ErrValidation)
+	}
+	prior, err := c.priorReachability(ctx, engagementID)
+	if err != nil {
+		return 0, err
+	}
+	minted := 0
+	for _, v := range verdicts {
+		if v.FindingID.IsZero() {
+			continue
+		}
+		state := judgment.NotReachable
+		if v.Reachable {
+			state = judgment.Reachable
+		}
+		claim := judgment.ReachabilityClaim{Reachable: state, Tier: c.tier, Confidence: deterministicClaimConfidence}
+		if p, ok := prior[v.FindingID]; ok && !claim.Supersedes(p.claim) {
+			continue // a same-or-stronger prior reachability judgment stands - don't churn
+		}
+		if err := c.mint(ctx, engagementID, v.FindingID, claim, prior[v.FindingID]); err != nil {
+			return minted, err
+		}
+		minted++
+	}
+	return minted, nil
 }
 
 // Record runs the analyzer over the engagement target ONCE and mints a deterministic reachability judgment
@@ -287,8 +339,11 @@ func (c *Coordinator) mint(ctx context.Context, engagementID, findingID shared.I
 // STRENGTH (tier-2 call-graph vs tier-1 import-reachability) so a weaker import proof is never sealed as a
 // call-graph proof. The reachability.Result.Path is already a normalized symbol/import chain.
 func (c *Coordinator) proofRationale(claim judgment.ReachabilityClaim) string {
-	if claim.Reachable == judgment.Reachable && len(claim.Path) > 0 {
-		return c.proofLabel + ": reachable via " + strings.Join(claim.Path, " → ")
+	if claim.Reachable == judgment.Reachable {
+		if len(claim.Path) > 0 {
+			return c.proofLabel + ": reachable via " + strings.Join(claim.Path, " → ")
+		}
+		return c.proofLabel + ": the analyzed target references the dependency"
 	}
 	return c.proofLabel + ": no entrypoint reaches the affected symbol(s)"
 }
