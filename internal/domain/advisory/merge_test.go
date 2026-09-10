@@ -120,3 +120,30 @@ func TestDiffNamesMaterialChanges(t *testing.T) {
 		t.Fatalf("Diff=%v, want %v", got, want)
 	}
 }
+
+// TestMergeUnionsCWEsAndReferences covers EPIC #860 D1.10: the materializer unions CWE ids and reference URLs
+// across feeds (deduped, sorted) so the GitHub metadata survives into the stored canonical advisory.
+func TestMergeUnionsCWEsAndReferences(t *testing.T) {
+	obs := []Observation{
+		{SourceID: "ghsa", RecordID: "GHSA-1", Advisory: Advisory{ID: "CVE-2026-1", CWEs: []string{"CWE-79", "CWE-89"}, References: []string{"https://a", "https://b"}}},
+		{SourceID: "osv", RecordID: "OSV-1", Advisory: Advisory{ID: "CVE-2026-1", CWEs: []string{"CWE-89"}, References: []string{"https://b", "https://c"}}},
+	}
+	canonical, err := Merge(obs)
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if got := canonical.Advisory.CWEs; len(got) != 2 || got[0] != "CWE-79" || got[1] != "CWE-89" {
+		t.Fatalf("CWEs = %v, want deduped sorted [CWE-79 CWE-89]", got)
+	}
+	if got := canonical.Advisory.References; len(got) != 3 || got[0] != "https://a" || got[2] != "https://c" {
+		t.Fatalf("References = %v, want deduped sorted [https://a https://b https://c]", got)
+	}
+	// An advisory with neither keeps them nil (out of the stored blob).
+	none, err := Merge([]Observation{{SourceID: "x", RecordID: "y", Advisory: Advisory{ID: "CVE-2026-2"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none.Advisory.CWEs != nil || none.Advisory.References != nil {
+		t.Fatalf("empty advisory must carry nil CWEs/References, got %v / %v", none.Advisory.CWEs, none.Advisory.References)
+	}
+}
