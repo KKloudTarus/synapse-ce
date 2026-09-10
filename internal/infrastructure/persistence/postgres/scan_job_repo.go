@@ -24,13 +24,17 @@ func NewScanJobStore(pool *pgxpool.Pool) *ScanJobStore { return &ScanJobStore{po
 var _ ports.ScanJobStore = (*ScanJobStore)(nil)
 
 func (r *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error {
+	sourcePackage, err := encodeScanJobSource(j)
+	if err != nil {
+		return err
+	}
 	debugEvents, err := json.Marshal(j.DebugEvents)
 	if err != nil {
 		return fmt.Errorf("marshal scan job debug events: %w", err)
 	}
-	_, err = r.pool.Exec(ctx, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents)
+	_, err = r.execSourceJob(ctx, j, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -43,17 +47,21 @@ func (r *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error
 
 // Save upserts a scan job (used on create and on every stage/status update).
 func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
+	sourcePackage, err := encodeScanJobSource(j)
+	if err != nil {
+		return err
+	}
 	debugEvents, err := json.Marshal(j.DebugEvents)
 	if err != nil {
 		return fmt.Errorf("marshal scan job debug events: %w", err)
 	}
-	_, err = r.pool.Exec(ctx,
-		`INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+	_, err = r.execSourceJob(ctx, j,
+		`INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		 ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage,
 		     progress=EXCLUDED.progress, error=EXCLUDED.error, finished_at=EXCLUDED.finished_at,
 		     debug_events=EXCLUDED.debug_events`,
-		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents)
+		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage)
 	if err != nil {
 		return fmt.Errorf("save scan job: %w", err)
 	}
@@ -67,7 +75,7 @@ func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time
 		limit = 100
 	}
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
+		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package
 		 FROM scan_jobs WHERE status='running' AND started_at < $1 ORDER BY started_at LIMIT $2`,
 		olderThan, limit)
 	if err != nil {
@@ -81,13 +89,16 @@ func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time
 			status   string
 			finished *time.Time
 		)
-		var debugEvents []byte
-		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents); err != nil {
+		var debugEvents, sourcePackage []byte
+		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage); err != nil {
 			return nil, fmt.Errorf("scan scan job: %w", err)
 		}
 		j.Status = ports.ScanStatus(status)
 		j.FinishedAt = finished
 		if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
+			return nil, err
+		}
+		if err := decodeScanJobSource(sourcePackage, &j); err != nil {
 			return nil, err
 		}
 		out = append(out, j)
@@ -98,15 +109,16 @@ func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time
 // GetJob returns a scan job by its own id, or ErrNotFound.
 func (r *ScanJobStore) GetJob(ctx context.Context, id string) (ports.ScanJob, error) {
 	var (
-		j           ports.ScanJob
-		status      string
-		finished    *time.Time
-		debugEvents []byte
+		j             ports.ScanJob
+		status        string
+		finished      *time.Time
+		debugEvents   []byte
+		sourcePackage []byte
 	)
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
+		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package
 		 FROM scan_jobs WHERE id=$1`, id).
-		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents)
+		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ports.ScanJob{}, fmt.Errorf("scan job %s: %w", id, shared.ErrNotFound)
 	}
@@ -116,6 +128,9 @@ func (r *ScanJobStore) GetJob(ctx context.Context, id string) (ports.ScanJob, er
 	j.Status = ports.ScanStatus(status)
 	j.FinishedAt = finished
 	if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
+		return ports.ScanJob{}, err
+	}
+	if err := decodeScanJobSource(sourcePackage, &j); err != nil {
 		return ports.ScanJob{}, err
 	}
 	return j, nil
@@ -132,10 +147,10 @@ func (r *ScanJobStore) LatestForEngagements(ctx context.Context, engagementIDs [
 	}
 	// A LATERAL top-1 per engagement walks idx_scan_jobs_engagement once per id; DISTINCT ON over every
 	// job of every engagement sorted the whole set (an on-disk merge at tens of thousands of jobs).
-	rows, err := r.pool.Query(ctx, `SELECT j.id, j.engagement_id, j.target, j.kind, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at
+	rows, err := r.pool.Query(ctx, `SELECT j.id, j.engagement_id, j.target, j.kind, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at, j.source_package
 		FROM unnest($1::text[]) AS e(engagement_id)
 		JOIN LATERAL (
-			SELECT id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at
+			SELECT id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, source_package
 			FROM scan_jobs WHERE engagement_id = e.engagement_id
 			ORDER BY started_at DESC, id DESC LIMIT 1
 		) j ON true`, ids)
@@ -148,10 +163,14 @@ func (r *ScanJobStore) LatestForEngagements(ctx context.Context, engagementIDs [
 		var j ports.ScanJob
 		var status string
 		var finished *time.Time
-		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished); err != nil {
+		var sourcePackage []byte
+		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &sourcePackage); err != nil {
 			return nil, fmt.Errorf("scan latest scan job: %w", err)
 		}
 		j.Status, j.FinishedAt, j.DebugEvents = ports.ScanStatus(status), finished, []ports.ScanDebugEvent{}
+		if err := decodeScanJobSource(sourcePackage, &j); err != nil {
+			return nil, err
+		}
 		out[shared.ID(j.EngagementID)] = j
 	}
 	return out, rows.Err()
@@ -159,15 +178,16 @@ func (r *ScanJobStore) LatestForEngagements(ctx context.Context, engagementIDs [
 
 func (r *ScanJobStore) LatestForEngagement(ctx context.Context, engagementID shared.ID) (ports.ScanJob, error) {
 	var (
-		j           ports.ScanJob
-		status      string
-		finished    *time.Time
-		debugEvents []byte
+		j             ports.ScanJob
+		status        string
+		finished      *time.Time
+		debugEvents   []byte
+		sourcePackage []byte
 	)
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
+		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package
 		 FROM scan_jobs WHERE engagement_id=$1 ORDER BY started_at DESC LIMIT 1`, engagementID.String()).
-		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents)
+		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ports.ScanJob{}, fmt.Errorf("scan job for %s: %w", engagementID, shared.ErrNotFound)
 	}
@@ -179,7 +199,51 @@ func (r *ScanJobStore) LatestForEngagement(ctx context.Context, engagementID sha
 	if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
 		return ports.ScanJob{}, err
 	}
+	if err := decodeScanJobSource(sourcePackage, &j); err != nil {
+		return ports.ScanJob{}, err
+	}
 	return j, nil
+}
+
+func encodeScanJobSource(job ports.ScanJob) ([]byte, error) {
+	if job.SourcePackage == nil {
+		return nil, nil
+	}
+	if err := job.SourcePackage.Validate(); err != nil {
+		return nil, err
+	}
+	if job.Kind != ports.TargetUpload || job.SourcePackage.EngagementID.String() != job.EngagementID || job.SourcePackage.Target() != job.Target {
+		return nil, fmt.Errorf("%w: scan source binding does not match the job", shared.ErrValidation)
+	}
+	return json.Marshal(job.SourcePackage)
+}
+
+func decodeScanJobSource(data []byte, job *ports.ScanJob) error {
+	if len(data) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(data, &job.SourcePackage); err != nil {
+		return fmt.Errorf("decode scan source metadata: %w", err)
+	}
+	_, err := encodeScanJobSource(*job)
+	return err
+}
+
+func (r *ScanJobStore) execSourceJob(ctx context.Context, job ports.ScanJob, query string, args ...any) (pgconn.CommandTag, error) {
+	if job.SourcePackage == nil {
+		return r.pool.Exec(ctx, query, args...)
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID != job.SourcePackage.TenantID {
+		return pgconn.CommandTag{}, fmt.Errorf("%w: scan source tenant context does not match", shared.ErrValidation)
+	}
+	var result pgconn.CommandTag
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		var err error
+		result, err = tx.Exec(ctx, query, args...)
+		return err
+	})
+	return result, err
 }
 
 func decodeScanDebugEvents(data []byte, j *ports.ScanJob) error {

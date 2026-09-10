@@ -3,14 +3,20 @@ package engagement
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentsnapshot"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -87,6 +93,12 @@ type fixedIDs struct{}
 
 func (fixedIDs) NewID() shared.ID { return shared.ID("eng-1") }
 
+type finalizedSnapshotReader struct{}
+
+func (finalizedSnapshotReader) GetDefault(context.Context, shared.ID, shared.ID) (*assessmentsnapshot.Snapshot, ports.AssessmentSnapshotDefault, error) {
+	return &assessmentsnapshot.Snapshot{Lifecycle: assessmentsnapshot.LifecycleFinalized}, ports.AssessmentSnapshotDefault{}, nil
+}
+
 type capAudit struct{ entries []ports.AuditEntry }
 
 func (a *capAudit) Record(_ context.Context, e ports.AuditEntry) error {
@@ -106,6 +118,71 @@ type sourceStoreFake struct {
 	item    sourcepackage.Package
 	saved   []byte
 	deleted bool
+}
+
+type failedUploadAudit struct{ err error }
+
+type failedSourcePublishStore struct {
+	sourceStoreFake
+	discarded []sourcepackage.Package
+}
+
+func (s *failedSourcePublishStore) Save(ctx context.Context, tenantID, engagementID shared.ID, filename, actor string, at time.Time, size int64, digest string, src io.Reader) (sourcepackage.Package, error) {
+	item, err := s.sourceStoreFake.Save(ctx, tenantID, engagementID, filename, actor, at, size, digest, src)
+	if err != nil {
+		return item, err
+	}
+	item.VersionID, item.AssociatedBy, item.AssociatedAt = "private-version", actor, at
+	return item, errors.New("source metadata publication failed")
+}
+
+func (s *failedSourcePublishStore) DiscardUnpublished(_ context.Context, item sourcepackage.Package) error {
+	s.discarded = append(s.discarded, item)
+	return nil
+}
+
+func (a failedUploadAudit) Record(context.Context, ports.AuditEntry) error { return a.err }
+
+func TestSourceUploadAuditFailureCompensatesEngagementAndArchive(t *testing.T) {
+	ctx := context.Background()
+	repo, sources := newMemRepo(), &sourceStoreFake{}
+	auditErr := errors.New("audit unavailable")
+	svc := NewService(repo, fixedClock{time.Now()}, fixedIDs{}, failedUploadAudit{auditErr})
+	svc.SetSourceStore(sources)
+	_, _, err := svc.CreateFromSourcePackage(ctx, CreateInput{
+		TenantID: "tenant-a", Name: "Unaudited upload", CreatedBy: "alice",
+	}, "source.zip", 7, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", bytes.NewBufferString("archive"))
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("expected original audit failure, got %v", err)
+	}
+	if !sources.deleted || len(repo.data) != 0 {
+		t.Fatalf("unaudited upload left durable state: deleted=%v engagements=%d", sources.deleted, len(repo.data))
+	}
+}
+
+func TestSourcePublicationFailureRetainsOwnedCleanupToken(t *testing.T) {
+	sources := &failedSourcePublishStore{}
+	repo := newMemRepo()
+	svc := NewService(repo, fixedClock{time.Now()}, fixedIDs{}, &capAudit{})
+	svc.SetSourceStore(sources)
+	_, item, err := svc.CreateFromSourcePackage(context.Background(), CreateInput{TenantID: "tenant-a", Name: "Upload", CreatedBy: "actor"}, "source.zip", 7, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.NewReader("archive"))
+	if err == nil || item.VersionID != "private-version" || !sources.deleted || len(repo.data) != 0 || len(sources.discarded) != 1 || sources.discarded[0].VersionID != item.VersionID {
+		t.Fatalf("metadata failure lost cleanup token or draft owner: item=%+v discarded=%+v deleted=%v engagements=%d err=%v", item, sources.discarded, sources.deleted, len(repo.data), err)
+	}
+}
+
+func TestSourceCompensationRejectsForeignCleanupTokenBeforeMutation(t *testing.T) {
+	sources, repo := &failedSourcePublishStore{}, newMemRepo()
+	svc := NewService(repo, fixedClock{time.Now()}, fixedIDs{}, &capAudit{})
+	svc.SetSourceStore(sources)
+	child, err := svc.Create(context.Background(), CreateInput{TenantID: "tenant-a", Name: "Child", CreatedBy: "actor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = svc.CompensateCreate(context.Background(), "tenant-a", child.ID, sourcepackage.Package{VersionID: "parent-version", TenantID: "tenant-a", EngagementID: "parent"})
+	if !errors.Is(err, shared.ErrValidation) || sources.deleted || len(sources.discarded) != 0 || len(repo.data) != 1 {
+		t.Fatalf("foreign cleanup token mutated state: deleted=%v discarded=%d engagements=%d err=%v", sources.deleted, len(sources.discarded), len(repo.data), err)
+	}
 }
 
 func (s *sourceStoreFake) Save(_ context.Context, tenantID, engagementID shared.ID, filename, actor string, createdAt time.Time, size int64, sha256hex string, src io.Reader) (sourcepackage.Package, error) {
@@ -199,8 +276,99 @@ func TestCreateFromSourcePackageAddsImmutableScopeAndCleansFailure(t *testing.T)
 	}, "source.zip", int64(len(data)), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", bytes.NewReader(data)); err == nil {
 		t.Fatal("CreateFromSourcePackage succeeded when engagement persistence failed")
 	}
-	if !failingSources.deleted {
-		t.Fatal("uploaded source was not cleaned up after engagement persistence failed")
+	if len(failingSources.saved) != 0 || failingSources.deleted {
+		t.Fatal("source storage was mutated even though its owning engagement could not be created")
+	}
+}
+
+func TestCreateFromReusedSourceOwnsChildAndPreservesUploadAttribution(t *testing.T) {
+	for _, auditFails := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "audit rollback"}[auditFails], func(t *testing.T) {
+			ctx := context.Background()
+			now := time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC)
+			repo := newMemRepo()
+			parent, err := domain.New("parent", "tenant-a", "Original", "", now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.Create(ctx, parent); err != nil {
+				t.Fatal(err)
+			}
+			sources := sourceupload.NewStore(blob.NewMemory(), 0)
+			payload := []byte("immutable archive fixture")
+			digest := sha256.Sum256(payload)
+			original, err := sources.Save(ctx, "tenant-a", parent.ID, "original.zip", "original-uploader", now, int64(len(payload)), hex.EncodeToString(digest[:]), bytes.NewReader(payload))
+			if err != nil {
+				t.Fatal(err)
+			}
+			audit := &capAudit{}
+			var auditLog ports.AuditLogger = audit
+			if auditFails {
+				auditLog = failedUploadAudit{errors.New("audit unavailable")}
+			}
+			svc := NewService(repo, fixedClock{now.Add(time.Hour)}, fixedIDs{}, auditLog)
+			svc.SetSourceStore(sources)
+			input := CreateInput{TenantID: "tenant-a", Name: "Re-test", CreatedBy: "retest-creator", RequiresExplicitExecutionAuthorization: true}
+			child, reused, err := svc.CreateFromReusedSource(ctx, input, parent.ID, original.VersionID)
+			if auditFails {
+				if err == nil {
+					t.Fatal("unaudited source reuse succeeded")
+				}
+				if _, err := repo.GetByID(ctx, "eng-1"); !errors.Is(err, shared.ErrNotFound) {
+					t.Fatalf("child survived rollback: %v", err)
+				}
+				if _, err := sources.Get(ctx, "tenant-a", "eng-1"); !errors.Is(err, shared.ErrNotFound) {
+					t.Fatalf("child source survived rollback: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if reused.EngagementID != child.ID || reused.VersionID.IsZero() || reused.VersionID == original.VersionID || reused.ReusedFromVersionID != original.VersionID || reused.SHA256 != original.SHA256 || reused.CreatedBy != original.CreatedBy || !reused.CreatedAt.Equal(original.CreatedAt) || reused.AssociatedBy != input.CreatedBy || !reused.AssociatedAt.Equal(now.Add(time.Hour)) {
+					t.Fatalf("reuse lost ownership or attribution: original=%+v reused=%+v", original, reused)
+				}
+				if len(child.Scope.InScope) != 1 || child.Scope.InScope[0].Value != original.Target() || child.AllowsExecution() || !child.RequiresExplicitExecutionAuthorization || !audit.has("engagement.source_reused") {
+					t.Fatalf("reuse lost scope/audit or inherited execution authorization: %+v", child)
+				}
+			}
+			retained, err := sources.Get(ctx, "tenant-a", parent.ID)
+			if err != nil || retained.VersionID != original.VersionID || retained.SHA256 != original.SHA256 {
+				t.Fatalf("reuse changed predecessor: %+v err=%v", retained, err)
+			}
+		})
+	}
+}
+
+func TestCreateFromReusedSourceRejectsForeignPredecessorAndStaleVersion(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC)
+	repo := newMemRepo()
+	parent, err := domain.New("parent", "tenant-a", "Original", "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	sources := sourceupload.NewStore(blob.NewMemory(), 0)
+	digest := sha256.Sum256([]byte("archive"))
+	if _, err := sources.Save(ctx, "tenant-a", parent.ID, "original.zip", "uploader", now, 7, hex.EncodeToString(digest[:]), bytes.NewBufferString("archive")); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(repo, fixedClock{now}, fixedIDs{}, &capAudit{})
+	svc.SetSourceStore(sources)
+	for _, test := range []struct {
+		tenant, version shared.ID
+		want            error
+	}{
+		{"other-tenant", "", shared.ErrNotFound}, {"tenant-a", "stale-version", shared.ErrConflict},
+	} {
+		if _, _, err := svc.CreateFromReusedSource(ctx, CreateInput{TenantID: test.tenant, Name: "Denied", CreatedBy: "actor"}, parent.ID, test.version); !errors.Is(err, test.want) {
+			t.Fatalf("reuse error=%v want=%v", err, test.want)
+		}
+		if _, err := repo.GetByID(ctx, "eng-1"); !errors.Is(err, shared.ErrNotFound) {
+			t.Fatalf("invalid reuse created child: %v", err)
+		}
 	}
 }
 
@@ -269,6 +437,7 @@ func TestEngagementMutationsAndGatePickup(t *testing.T) {
 	}
 
 	// Lifecycle: draft -> active -> completed; completed blocks execution.
+	svc.SetCompletionSnapshotReader(finalizedSnapshotReader{})
 	if _, err := svc.Transition(ctx, "operator", "", id, domain.StatusActive); err != nil {
 		t.Fatalf("activate: %v", err)
 	}
@@ -288,6 +457,37 @@ func TestEngagementMutationsAndGatePickup(t *testing.T) {
 	}
 	if _, err := svc.UpdateScope(ctx, "  ", "", id, nil, nil); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("empty actor should be ErrValidation, got %v", err)
+	}
+}
+
+func TestCompletionRequiresDefaultFinalizedSnapshot(t *testing.T) {
+	repo := newMemRepo()
+	svc := NewService(repo, fixedClock{time.Now().UTC()}, fixedIDs{}, &capAudit{})
+	item, err := svc.Create(context.Background(), CreateInput{Name: "Assessment", CreatedBy: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusActive); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetCompletionSnapshotPolicy(nil, func(string) bool { return true })
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusCompleted); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("completion without default snapshot=%v", err)
+	}
+}
+
+func TestCompletionSnapshotPolicyDefaultsToLegacyCompatible(t *testing.T) {
+	repo := newMemRepo()
+	svc := NewService(repo, fixedClock{time.Now().UTC()}, fixedIDs{}, &capAudit{})
+	item, err := svc.Create(context.Background(), CreateInput{Name: "Legacy Assessment", CreatedBy: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusActive); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transition(context.Background(), "operator", "", item.ID, domain.StatusCompleted); err != nil {
+		t.Fatalf("default-off completion must preserve legacy behavior: %v", err)
 	}
 }
 
