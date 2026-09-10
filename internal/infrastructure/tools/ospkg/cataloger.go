@@ -192,6 +192,7 @@ func parseOSDB(ctx context.Context, path string, fieldKeys map[string]bool, extr
 		}
 		if name, version, arch, ok := extract(cur); ok {
 			if c, ok := osComponent(typ, namespace, name, version, arch, tag); ok {
+				c.Location = path // the package DB's path, so the component attributes to the DB's image layer
 				out = append(out, c)
 			}
 		}

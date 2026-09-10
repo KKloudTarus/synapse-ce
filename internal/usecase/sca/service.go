@@ -3147,6 +3147,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	}
 	// Container-image layer attribution (Epic D): join each vuln to the layer that introduced
 	// its component, and classify base vs application layers. No-op for non-image scans.
+	stampOwnedLayerIDs(ws, doc)
 	attributeImageLayers(result.Image, doc, result.Vulnerabilities)
 	// Capture the OS distribution from the SBOM's OS-package PURLs and flag it if End-of-Life
 	// (no security updates) as of the scan time – a posture signal for container/host scans (Epic E).
@@ -4125,6 +4126,29 @@ func unresolvedRemediation(unresolvedEco []string) string {
 // introduced its component, and classifies the image's base layers (Epic D). No-op for
 // non-image scans (img == nil). It joins vulns → SBOM components → layers entirely on data
 // already gathered (Syft's per-component layerID + the OCI image config), deterministically.
+// stampOwnedLayerIDs attributes each OWNED-cataloger component to the image layer that wrote its evidence
+// file, so attributeImageLayers can then join the vulnerability to that layer. The owned catalogers (ospkg,
+// bincat, ownsbom) record each component's on-disk Location under the materialized rootfs; the extractor
+// recorded a rootfs-relative path -> layer diff_id map. A component whose Location maps to a layer gets that
+// layer's diff_id as its LayerID. A component that already carries a LayerID (syft, which attributes
+// internally), one with no Location, one whose Location is not under the rootfs, or one whose file is unmapped
+// is left unchanged, so this only fills the gap the owned path leaves and never overrides a stronger source.
+func stampOwnedLayerIDs(ws *ports.Workspace, doc *sbom.SBOM) {
+	if ws == nil || doc == nil || ws.RootFS == "" || len(ws.RootFSLayers) == 0 {
+		return
+	}
+	prefix := ws.RootFS + string(os.PathSeparator)
+	for i := range doc.Components {
+		c := &doc.Components[i]
+		if c.LayerID != "" || c.Location == "" || !strings.HasPrefix(c.Location, prefix) {
+			continue
+		}
+		if id, ok := ws.RootFSLayers[filepath.ToSlash(strings.TrimPrefix(c.Location, prefix))]; ok {
+			c.LayerID = id
+		}
+	}
+}
+
 func attributeImageLayers(img *sbom.ImageInfo, doc *sbom.SBOM, vulns []vulnerability.Vulnerability) {
 	if img == nil || doc == nil {
 		return

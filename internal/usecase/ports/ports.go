@@ -1421,6 +1421,11 @@ type Workspace struct {
 	// targets. Owned parsers read it for on-disk OS-package DBs + /etc/os-release. Dir stays the OCI layout
 	// (what syft scans); RootFS is the walkable tree. Both live under the same cleaned-up temp dir.
 	RootFS string
+	// RootFSLayers attributes each materialized file (RootFS-relative, slash-separated path) to the diff_id of
+	// the image layer that last wrote it (the squashed view), so an owned cataloger can stamp a component with
+	// the layer that introduced it. It matches ImageInfo.Layers[].DiffID. Empty/nil when the image config's
+	// diff_ids were unavailable or for a non-image target; a component whose file is unmapped stays unattributed.
+	RootFSLayers map[string]string
 	// (see OSPackageCataloger for how RootFS is consumed.)
 	// RootFSNote records why rootfs materialization was skipped for an image target (unsupported layer
 	// compression, a hostile layer the hardening refused, a malformed layout) when extraction was enabled but

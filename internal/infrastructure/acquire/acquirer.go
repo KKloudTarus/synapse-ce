@@ -768,10 +768,11 @@ func (a *Acquirer) acquireImage(ctx context.Context, ref string) (*ports.Workspa
 	// RootFS is left empty so no partial tree is ever consumed.
 	if a.materializeRootFS {
 		rootfs := filepath.Join(dir, "rootfs")
-		if err := extractOCIRootFS(ctx, layout, rootfs, a.maxWorkspaceBytes); err != nil {
+		if layers, err := extractOCIRootFS(ctx, layout, rootfs, a.maxWorkspaceBytes); err != nil {
 			ws.RootFSNote = truncate(redactCreds(err.Error()), 200)
 		} else {
 			ws.RootFS = rootfs
+			ws.RootFSLayers = layers
 		}
 	}
 	return ws, nil

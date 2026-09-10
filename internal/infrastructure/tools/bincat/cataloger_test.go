@@ -67,6 +67,10 @@ func TestCatalogPythonDistInfo(t *testing.T) {
 	if len(comps) != 1 || comps[0].PURL != "pkg:pypi/requests@2.31.0" || comps[0].Scope != "production" {
 		t.Fatalf("want one normalized pkg:pypi/requests@2.31.0 (production), got %+v", comps)
 	}
+	// Location is the evidence file, so the component can be attributed to the image layer that wrote it.
+	if comps[0].Location != meta {
+		t.Errorf("component Location = %q, want the metadata path %q", comps[0].Location, meta)
+	}
 }
 
 func TestBuildInfoComponents(t *testing.T) {

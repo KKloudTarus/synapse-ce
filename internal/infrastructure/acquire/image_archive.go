@@ -76,10 +76,11 @@ func (a *Acquirer) acquireImageArchive(_ context.Context, ref string) (*ports.Wo
 	ws := &ports.Workspace{Dir: layoutDir, Image: readImageInfo(layoutDir, ref), Cleanup: cleanup}
 	if a.materializeRootFS {
 		rootfs := filepath.Join(dir, "rootfs")
-		if err := extractOCIRootFS(context.Background(), layoutDir, rootfs, a.maxWorkspaceBytes); err != nil {
+		if layers, err := extractOCIRootFS(context.Background(), layoutDir, rootfs, a.maxWorkspaceBytes); err != nil {
 			ws.RootFSNote = truncate(err.Error(), 200)
 		} else {
 			ws.RootFS = rootfs
+			ws.RootFSLayers = layers
 		}
 	}
 	return ws, nil
