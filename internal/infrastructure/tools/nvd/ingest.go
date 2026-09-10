@@ -9,15 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 // BuildDB parses NVD JSON feed files and writes a compact CVSS database as JSONL (one
 // {"id","v","s"} object per CVE) to out. It accepts both the NVD API 2.0 shape
 // ("vulnerabilities":[{"cve":{"id","metrics":{...}}}]) and the legacy 1.1 feed shape
 // ("CVE_Items":[{"cve":{"CVE_data_meta":{"ID"}},"impact":{...}}]), gzip-compressed or plain. For
-// each CVE it records the strongest available vector, preferring CVSS v3.1 > v3.0 > v2. A CVE
+// each CVE it records the strongest available vector via BestCVSS (v3.1 > v3.0 > v4.0 > v2). A CVE
 // with no CVSS vector is skipped (nothing to store). Returns the number of entries written.
 func BuildDB(inPaths []string, out io.Writer) (int, error) {
 	w := bufio.NewWriter(out)
@@ -65,7 +63,7 @@ func ingestFile(path string, enc *json.Encoder) (int, error) {
 	}
 	// NVD API 2.0
 	for _, item := range doc.Vulnerabilities {
-		if v, s, ok := bestAPI2(item.CVE.Metrics); ok {
+		if v, s, ok := BestCVSS(item.CVE.Metrics); ok {
 			write(item.CVE.ID, v, s)
 		}
 	}
@@ -80,35 +78,13 @@ func ingestFile(path string, enc *json.Encoder) (int, error) {
 	return n, nil
 }
 
-// bestAPI2 picks the strongest CVSS metric from an API-2.0 metrics block (v3.1 > v3.0 > v4.0 > v2).
-// v3.x is preferred so the existing corpus keeps its published band; v4.0 outranks the far weaker v2
-// so a v4-only CVE (a growing NVD share) is stored with its v4 vector instead of being skipped. When
-// the feed omits the base score, it is computed from the vector so the compact record never stores a
-// vectored entry with a 0 score (which the enricher would band as Info).
-func bestAPI2(m nvdMetrics) (string, float64, bool) {
-	for _, group := range [][]nvdMetric{m.V31, m.V30, m.V40, m.V2} {
-		if len(group) == 0 || group[0].CVSSData.Vector == "" {
-			continue
-		}
-		vector := group[0].CVSSData.Vector
-		if score := group[0].CVSSData.Base; score > 0 && score <= 10 {
-			return vector, score, true
-		}
-		if computed, ok := shared.CVSSBaseScore(vector); ok {
-			return vector, computed, true
-		}
-		return vector, group[0].CVSSData.Base, true
-	}
-	return "", 0, false
-}
-
 // --- NVD JSON shapes (only the CVSS-relevant subset) ---
 
 type nvdFeed struct {
 	Vulnerabilities []struct {
 		CVE struct {
-			ID      string     `json:"id"`
-			Metrics nvdMetrics `json:"metrics"`
+			ID      string      `json:"id"`
+			Metrics CVSSMetrics `json:"metrics"`
 		} `json:"cve"`
 	} `json:"vulnerabilities"`
 	CVEItems []struct {
@@ -132,18 +108,4 @@ type nvdFeed struct {
 			} `json:"baseMetricV2"`
 		} `json:"impact"`
 	} `json:"CVE_Items"`
-}
-
-type nvdMetrics struct {
-	V40 []nvdMetric `json:"cvssMetricV40"`
-	V31 []nvdMetric `json:"cvssMetricV31"`
-	V30 []nvdMetric `json:"cvssMetricV30"`
-	V2  []nvdMetric `json:"cvssMetricV2"`
-}
-
-type nvdMetric struct {
-	CVSSData struct {
-		Vector string  `json:"vectorString"`
-		Base   float64 `json:"baseScore"`
-	} `json:"cvssData"`
 }
