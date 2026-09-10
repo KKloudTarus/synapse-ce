@@ -72,6 +72,7 @@ func (f *fakeAudit) Record(_ context.Context, e ports.AuditEntry) error {
 
 type fakeAcquirer struct {
 	dir     string
+	rootfs  string
 	cleaned int
 	called  bool
 }
@@ -98,7 +99,7 @@ func (s *cancelAfterAppendEvidenceStore) Append(ctx context.Context, items []evi
 
 func (f *fakeAcquirer) Acquire(_ context.Context, _ ports.AcquireRequest) (*ports.Workspace, error) {
 	f.called = true
-	return &ports.Workspace{Dir: f.dir, Cleanup: func() error { f.cleaned++; return nil }}, nil
+	return &ports.Workspace{Dir: f.dir, RootFS: f.rootfs, Cleanup: func() error { f.cleaned++; return nil }}, nil
 }
 
 type fakeDetector struct{ gotPath string }
@@ -1928,5 +1929,64 @@ func TestEvidenceSealedAndVerifiable(t *testing.T) {
 	rep, _ = svc.VerifyEvidence(context.Background(), "e1")
 	if rep.Intact {
 		t.Error("tampered chain must fail verification")
+	}
+}
+
+type recordingSecretScanner struct{ roots []string }
+
+func (*recordingSecretScanner) Name() string { return "rec-secret" }
+func (r *recordingSecretScanner) ScanFiles(_ context.Context, root string) (ports.SecretScanReport, error) {
+	r.roots = append(r.roots, root)
+	return ports.SecretScanReport{}, nil
+}
+
+type recordingMisconfigScanner struct{ roots []string }
+
+func (*recordingMisconfigScanner) Name() string { return "rec-misconfig" }
+func (r *recordingMisconfigScanner) ScanConfigs(_ context.Context, root string) ([]ports.MisconfigRawFinding, error) {
+	r.roots = append(r.roots, root)
+	return nil, nil
+}
+
+func rootsContain(roots []string, want string) bool {
+	for _, r := range roots {
+		if r == want {
+			return true
+		}
+	}
+	return false
+}
+
+// An image scan runs the secret and misconfig scanners over the materialized rootfs IN ADDITION to the
+// scanned layout, so a credential or misconfig baked into an image layer is caught. A source scan (no
+// RootFS) runs each scanner once.
+func TestImageRootFSSecretAndMisconfigScan(t *testing.T) {
+	newSvc := func(rootfs string, sec *recordingSecretScanner, mis *recordingMisconfigScanner) *Service {
+		svc := NewService(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, nil, nil, nil, nil, nil, nil, nil, ports.Provenance{}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAudit{}, shared.SeverityHigh, 0, &fakeAcquirer{dir: t.TempDir(), rootfs: rootfs}, &fakeDetector{}, erroringSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
+		svc.SetSecretScanner(sec)
+		svc.SetMisconfigScanner(mis)
+		return svc
+	}
+
+	// Image scan: RootFS distinct from the scanned layout -> each scanner runs over BOTH.
+	rootfs := t.TempDir()
+	sec, mis := &recordingSecretScanner{}, &recordingMisconfigScanner{}
+	if _, err := newSvc(rootfs, sec, mis).Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}); err != nil {
+		t.Fatalf("image scan: %v", err)
+	}
+	if !rootsContain(sec.roots, rootfs) {
+		t.Errorf("the secret scanner must scan the image rootfs, roots=%v", sec.roots)
+	}
+	if !rootsContain(mis.roots, rootfs) {
+		t.Errorf("the misconfig scanner must scan the image rootfs, roots=%v", mis.roots)
+	}
+
+	// Source scan: no RootFS -> each scanner runs exactly once (only the workspace).
+	sec2, mis2 := &recordingSecretScanner{}, &recordingMisconfigScanner{}
+	if _, err := newSvc("", sec2, mis2).Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}); err != nil {
+		t.Fatalf("source scan: %v", err)
+	}
+	if len(sec2.roots) != 1 || len(mis2.roots) != 1 {
+		t.Errorf("a source scan must run each scanner once, secret=%v misconfig=%v", sec2.roots, mis2.roots)
 	}
 }

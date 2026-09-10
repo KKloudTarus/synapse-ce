@@ -3134,6 +3134,21 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 				}
 			}
 		}
+		// Image filesystem: scan the materialized rootfs too, so a credential baked into an image layer (a
+		// top container-secret finding class that a source-tree scan cannot see) is caught. Best-effort: a
+		// rootfs scan error is a warning, never a scan failure; the precise prefix detectors + allowlist
+		// bound the base-image noise and every secret is redacted. Only runs for an image target (RootFS
+		// materialized and distinct from the scanned layout).
+		if ws.RootFS != "" && ws.RootFS != ws.Dir {
+			if rootfsReport, rerr := s.secretScanner.ScanFiles(ctx, ws.RootFS); rerr != nil {
+				result.SourceWarnings = append(result.SourceWarnings, "image-filesystem secret scan skipped: "+rerr.Error())
+			} else {
+				if rootfsReport.Truncated {
+					result.SourceWarnings = append(result.SourceWarnings, "image-filesystem secret scan incomplete or truncated; secret findings are a lower bound")
+				}
+				result.Findings = append(result.Findings, buildSecretFindings(engagementID, rootfsReport.Findings, now, s.minSeverity, s.includeTestSecrets)...)
+			}
+		}
 	}
 	if opts.scansVulnerabilities() && s.misconfig != nil {
 		misRaws, merr := s.misconfig.ScanConfigs(ctx, ws.Dir)
@@ -3141,6 +3156,16 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			return nil, fmt.Errorf("scan misconfig: %w", merr)
 		}
 		result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, misRaws, now, s.minSeverity)...)
+		// Image filesystem: scan the rootfs for misconfigured configs shipped inside the image (a baked-in
+		// Dockerfile, a Kubernetes manifest, a Terraform file). Best-effort; the misconfig rules are precise
+		// attribute matches, so this adds coverage with low false-positive risk. Image targets only.
+		if ws.RootFS != "" && ws.RootFS != ws.Dir {
+			if rootfsRaws, rerr := s.misconfig.ScanConfigs(ctx, ws.RootFS); rerr != nil {
+				result.SourceWarnings = append(result.SourceWarnings, "image-filesystem misconfig scan skipped: "+rerr.Error())
+			} else {
+				result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, rootfsRaws, now, s.minSeverity)...)
+			}
+		}
 	}
 	if opts.CodeQuality && s.codeQuality != nil {
 		report, qerr := s.codeQuality.BuildReport(ctx, ws.Dir)
