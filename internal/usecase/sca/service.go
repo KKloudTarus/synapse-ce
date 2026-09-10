@@ -115,6 +115,7 @@ type Service struct {
 	npmResolver                      ports.NPMResolver                     // optional npm resolver (`npm install --package-lock-only`) for a lockfile-less package.json
 	manifestResolvers                []ports.ManifestResolver              // optional lockfile-less resolvers for composer.json / Gemfile / pyproject.toml / ...
 	jvmReach                         ports.JVMReachabilityAnalyzer         // optional coarse JVM class-reachability tagger
+	jvmReachRecorder                 ports.JVMReachabilityRecorder         // optional: records the JVM tags as auditable Tier-1.5 judgments (D4.4)
 	sevEnricher                      ports.SeverityEnricher                // optional NVD CVSS backfill for unknown-severity vulns
 	ignoreUnfixed                    bool                                  // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
 	guard                            *execution.Guard                      // shared scope + window + audit gate; built in NewService
@@ -525,6 +526,11 @@ func (s *Service) SetGraphResolver(r ports.DependencyGraphResolver) { s.graphRes
 // SetJVMReachability configures the optional coarse JVM class-reachability tagger. nil ⇒ no
 // reachability tagging (components keep an empty/unknown verdict).
 func (s *Service) SetJVMReachability(a ports.JVMReachabilityAnalyzer) { s.jvmReach = a }
+
+// SetJVMReachabilityRecorder configures the optional recorder that mints the coarse JVM class-reachability
+// tags as auditable Tier-1.5 judgments (feeding VEX + the SLA scorer). nil ⇒ JVM reachability stays a
+// finding tag only.
+func (s *Service) SetJVMReachabilityRecorder(r ports.JVMReachabilityRecorder) { s.jvmReachRecorder = r }
 
 // SetMavenResolver configures the optional Maven transitive-tree resolver. When it also implements
 // ports.MavenGraphResolver the pipeline runs `mvn dependency:tree` and folds in the dependency edges; nil ⇒
@@ -3139,6 +3145,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if opts.scansVulnerabilities() && s.reachability != nil {
 		if subs := reachabilitySubjects(result.Findings, result.Vulnerabilities); len(subs) > 0 {
 			_, _ = s.reachability.Record(ctx, engagementID, ws.Dir, subs)
+		}
+	}
+
+	// D4.4: record the coarse JVM class-reachability tags (computed in-scan by the jvmreach tagger) as
+	// auditable Tier-1.5 judgments, so the JVM signal feeds VEX + the SLA scorer, not just the finding tag.
+	// Best-effort; Tier-1.5 is never a promotable proof, so a JVM not-reachable verdict only deprioritizes.
+	if opts.scansVulnerabilities() && s.jvmReachRecorder != nil {
+		if verdicts := jvmReachabilityVerdicts(result.Findings, result.Vulnerabilities); len(verdicts) > 0 {
+			_, _ = s.jvmReachRecorder.RecordVerdicts(ctx, engagementID, verdicts)
 		}
 	}
 

@@ -2576,6 +2576,20 @@ func main() {
 		log.Info("Tier-2 reachability proof ENABLED (deterministic overrides LLM Tier-1.5)", "builder", cfg.ReachabilityBuilder)
 	}
 
+	// D4.4: record the coarse JVM class-reachability tags (the tagger is wired in scacompose) as auditable
+	// Tier-1.5 judgments, so the JVM signal feeds VEX + the SLA scorer, not just an ephemeral finding tag.
+	// Needs the judgment lifecycle. Tier-1.5 is never a promotable proof, so a JVM not-reachable verdict only
+	// deprioritizes, never suppresses (correct for the coarse, reflection-blind signal).
+	if cfg.JVMReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_JVM_REACHABILITY_ENABLED", "jvm reachability recorder") {
+		jvmCoord, cerr := reachproof.NewJVMVerdictCoordinator(judgmentSvc, auditLog, clock)
+		if cerr != nil {
+			log.Error("jvm reachability recorder init failed", "err", cerr)
+			os.Exit(1)
+		}
+		scaService.SetJVMReachabilityRecorder(jvmCoord)
+		log.Info("JVM class-reachability judgments ENABLED (Tier-1.5, deprioritize-only)")
+	}
+
 	// Deterministic Tier-1 Python import-reachability, opt-in. A SOURCE-ONLY scanner (no compile/execute, so
 	// in-process like the lockfile parsers) determines which declared PyPI packages first-party code imports;
 	// a dead dependency becomes a not_reachable judgment → an OpenVEX not_affected justification. Requires the

@@ -204,3 +204,66 @@ func TestNewCoordinatorValidates(t *testing.T) {
 		t.Error("nil analyzer must fail validation")
 	}
 }
+
+// TestJVMVerdictMintsTier15 (D4.4): RecordVerdicts mints Tier-1.5 JVM class-reachability judgments from
+// pre-computed verdicts, with the reserved JVM actors, via propose(scan)->verify(engine).
+func TestJVMVerdictMintsTier15(t *testing.T) {
+	rec := &fakeRecorder{}
+	c, err := NewJVMVerdictCoordinator(rec, &fakeAudit{}, fakeClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := c.RecordVerdicts(context.Background(), "eng-1", []ports.JVMReachabilityVerdict{
+		{FindingID: "f1", Reachable: true},
+		{FindingID: "f2", Reachable: false},
+	})
+	if err != nil || n != 2 {
+		t.Fatalf("want 2 minted, got n=%d err=%v", n, err)
+	}
+	for _, p := range rec.proposes {
+		if p.proposer != judgment.ProofActorJVMClassScan || p.claim.Tier != judgment.Tier1_5 {
+			t.Fatalf("propose wrong (want jvmclass-scan + tier-1.5): %+v", p)
+		}
+	}
+	if rec.proposes[0].claim.Reachable != judgment.Reachable || rec.proposes[1].claim.Reachable != judgment.NotReachable {
+		t.Fatalf("verdicts wrong: %+v", rec.proposes)
+	}
+	for _, v := range rec.verifies {
+		if v.verifier != judgment.ProofActorJVMClassEngine {
+			t.Fatalf("verify actor wrong: %+v", v)
+		}
+	}
+	// Distinct identities: the self-confirm guard never fires.
+	if verdict.SelfConfirm(judgment.ProofActorJVMClassEngine, judgment.ProofActorJVMClassScan) {
+		t.Error("jvm proposer and verifier must be distinct")
+	}
+}
+
+// TestJVMNotReachableNeverPromotes is the D4.4 SOUNDNESS invariant: a JVM (Tier-1.5) not-reachable verdict is
+// NEVER a deterministic promotable proof, so it can never become a VEX not_affected. JVM class-reachability
+// is coarse and reflection-blind; it must only deprioritize, never suppress.
+func TestJVMNotReachableNeverPromotes(t *testing.T) {
+	if judgment.IsDeterministicReachabilityProof(judgment.Tier1_5, judgment.ProofActorJVMClassScan, judgment.ProofActorJVMClassEngine) {
+		t.Fatal("a Tier-1.5 JVM verdict must NEVER be a deterministic proof (would wrongly promote to not_affected)")
+	}
+}
+
+// TestJVMVerdictDoesNotSupersedeStrongerPrior: a prior Tier-2 call-graph proof stands; a JVM Tier-1.5 verdict
+// for the same finding mints nothing (no churn, no downgrade of a stronger proof).
+func TestJVMVerdictDoesNotSupersedeStrongerPrior(t *testing.T) {
+	rec := &fakeRecorder{prior: []judgment.Judgment{{
+		ID: "prior", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "f1",
+		Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, Confidence: 100},
+	}}}
+	c, err := NewJVMVerdictCoordinator(rec, &fakeAudit{}, fakeClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := c.RecordVerdicts(context.Background(), "eng-1", []ports.JVMReachabilityVerdict{{FindingID: "f1", Reachable: true}})
+	if err != nil || n != 0 {
+		t.Fatalf("a stronger Tier-2 prior must stand: got n=%d err=%v", n, err)
+	}
+	if len(rec.proposes) != 0 {
+		t.Errorf("must not mint over a stronger prior: %+v", rec.proposes)
+	}
+}

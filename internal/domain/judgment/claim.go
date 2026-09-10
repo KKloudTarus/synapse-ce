@@ -74,6 +74,13 @@ const (
 	ProofActorPHPImportEngine  = "system:phpimport-engine"
 	ProofActorRubyImportScan   = "system:rubyimport-scan"
 	ProofActorRubyImportEngine = "system:rubyimport-engine"
+	// JVM class-reachability is a Tier-1.5 signal: stronger than an import (the app's class-reference
+	// closure reaches the dependency's classes) but weaker than a call-graph proof, and coarse +
+	// reflection-blind, so it must only DEPRIORITIZE. Its actors are deliberately absent from
+	// IsDeterministicReachabilityProof (Tier-1.5 is never a promotable proof), so a JVM not-reachable
+	// verdict can never become a VEX not_affected.
+	ProofActorJVMClassScan   = "system:jvmclass-scan"
+	ProofActorJVMClassEngine = "system:jvmclass-engine"
 )
 
 // IsDeterministicReachabilityProof reports whether the distinct reserved identities

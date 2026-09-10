@@ -912,3 +912,29 @@ func ecosystemReachabilitySubjects(findings []finding.Finding, vulns []vulnerabi
 	}
 	return subs
 }
+
+// jvmReachabilityVerdicts builds the per-finding JVM class-reachability verdicts for D4.4: each promoted
+// finding whose vulnerability carries a JVM reachability tag (Reachable / Unreferenced, set in-scan by the
+// jvmreach tagger) becomes a verdict keyed by the real finding id, joined via the finding DedupKey exactly
+// like reachabilitySubjects. A finding with no JVM tag (non-JVM component, or a not-built target) is skipped,
+// so no judgment is minted for it.
+func jvmReachabilityVerdicts(findings []finding.Finding, vulns []vulnerability.Vulnerability) []ports.JVMReachabilityVerdict {
+	byDedup := make(map[string]vulnerability.Vulnerability, len(vulns))
+	for _, v := range vulns {
+		byDedup[vulnDedupKey(v)] = v
+	}
+	var out []ports.JVMReachabilityVerdict
+	for _, f := range findings {
+		v, ok := byDedup[f.DedupKey]
+		if !ok {
+			continue
+		}
+		switch v.ClassReachability {
+		case sbom.ReachabilityReachable:
+			out = append(out, ports.JVMReachabilityVerdict{FindingID: f.ID, Reachable: true})
+		case sbom.ReachabilityUnreferenced:
+			out = append(out, ports.JVMReachabilityVerdict{FindingID: f.ID, Reachable: false})
+		}
+	}
+	return out
+}
