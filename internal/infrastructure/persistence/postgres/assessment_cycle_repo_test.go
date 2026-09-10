@@ -4,27 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 func setupTestDB(t *testing.T) (context.Context, *pgxpool.Pool) {
 	t.Helper()
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
+	_, dsn := newAssessmentMigrationDB(t)
 	ctx := context.Background()
-	if err := Migrate(ctx, dsn); err != nil {
+	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
@@ -39,18 +35,17 @@ func ensureTestTenantAndEngagement(t *testing.T, ctx context.Context, pool *pgxp
 	t.Helper()
 	tenantID = shared.TenantOrDefault(tenantID)
 
-	// Ensure tenant exists
-	_, _ = pool.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, tenantID.String(), "Tenant "+tenantID.String())
-
-	// Ensure engagement exists
-	engRepo := NewEngagementRepository(pool)
-	eng, err := engagement.New(engID, tenantID, "Eng "+engID.String(), "Client", time.Now())
-	if err != nil {
-		t.Fatalf("new engagement: %v", err)
+	// Keep upgrade fixtures independent of columns introduced after the schema
+	// being tested; every setup error is fatal rather than silently ignored.
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id,name) VALUES ($1,$1) ON CONFLICT (id) DO NOTHING`, tenantID.String()); err != nil {
+		t.Fatal(err)
 	}
-	eng.BusinessAssetID = assetID
-	eng.ProjectID = projectID
-	_ = engRepo.Create(ctx, eng)
+	if _, err := pool.Exec(ctx, `INSERT INTO engagements (id,tenant_id,name,client,project_id,business_asset_id)
+		VALUES ($1,$2,$1,'Client',NULLIF($3,''),NULLIF($4,'')) ON CONFLICT (id) DO NOTHING`,
+		engID.String(), tenantID.String(), projectID.String(), assetID.String()); err != nil {
+		t.Fatal(err)
+	}
+
 }
 
 func TestPostgresAssessmentCycleRepository_LifecycleAndCAS(t *testing.T) {
@@ -89,6 +84,15 @@ func TestPostgresAssessmentCycleRepository_LifecycleAndCAS(t *testing.T) {
 	}
 	if err := repo.CreateMember(ctx, rootMember); err != nil {
 		t.Fatalf("create initial member: %v", err)
+	}
+	assetID := "asset-" + tenantID.String()
+	if _, err := pool.Exec(ctx, `INSERT INTO fleet_business_services(id,tenant_id,"key",name,owner) VALUES($1,$2,$1,'Frozen boundary','team')`, assetID, tenantID.String()); err != nil {
+		t.Fatalf("create boundary-change probe asset: %v", err)
+	}
+	_, err = pool.Exec(ctx, `UPDATE engagements SET business_asset_id=$1 WHERE tenant_id=$2 AND id=$3`, assetID, tenantID.String(), rootID.String())
+	var boundaryErr *pgconn.PgError
+	if !errors.As(err, &boundaryErr) || boundaryErr.Code != "23514" || boundaryErr.ConstraintName != "assessment_cycle_frozen_business_asset" {
+		t.Fatalf("database boundary invariant error=%v", err)
 	}
 
 	// 3. Duplicate Cycle Create -> ErrConflict
