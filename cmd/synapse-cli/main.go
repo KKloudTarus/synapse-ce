@@ -1179,32 +1179,34 @@ func syncAdvisories(args []string) error {
 		return fmt.Errorf("SYNAPSE_DB_DSN is required: ingesting into an ephemeral in-memory store does nothing")
 	}
 	// Select the feed: --remote fetches the OSV bulk bucket; otherwise read a local OSV dump directory. Both
-	// stream into the same Postgres-backed store via the same ingester.
+	// stream into the same Postgres-backed store via the same ingester. Each feed kind maps to a named bulk
+	// source (osv/csaf/oval) so its advisories are MERGED with every other source that covers the same CVE
+	// (union of affected ranges) instead of clobbering advisories.data (EPIC #860 D1.2).
 	var feed ports.AdvisoryFeed
-	var src string
+	var src, bulkAdapter, sourceKey, sourceName string
 	switch {
 	case args[0] == "--remote":
 		feed = ownadvisory.NewRemoteFeed(cfg.OSVBulkURL, nil, nil) // default bucket + the covered app ecosystems
-		src = "OSV bulk bucket"
+		src, bulkAdapter, sourceKey, sourceName = "OSV bulk bucket", "osv", "cli-osv-bulk", "CLI OSV bulk ingest"
 	case args[0] == "--remote-distros":
 		// OS-package advisories (Debian/Alpine) – large zips, fetched only on explicit request (Epic B).
 		feed = ownadvisory.NewRemoteFeed(cfg.OSVBulkURL, ownadvisory.DistroBulkEcosystems, nil)
-		src = "OSV bulk bucket (distros)"
+		src, bulkAdapter, sourceKey, sourceName = "OSV bulk bucket (distros)", "osv", "cli-osv-bulk", "CLI OSV bulk ingest"
 	case args[0] == "--csaf":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: synapse-cli sync-advisories --csaf <dir>")
 		}
 		feed = ownadvisory.NewCSAFDirFeed(args[1])
-		src = "CSAF dir " + args[1]
+		src, bulkAdapter, sourceKey, sourceName = "CSAF dir "+args[1], "csaf", "cli-csaf-bulk", "CLI CSAF bulk ingest"
 	case args[0] == "--oval":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: synapse-cli sync-advisories --oval <dir>")
 		}
 		feed = ownadvisory.NewOVALDirFeed(args[1])
-		src = "Ubuntu OVAL dir " + args[1]
+		src, bulkAdapter, sourceKey, sourceName = "Ubuntu OVAL dir "+args[1], "oval", "cli-oval-bulk", "CLI OVAL bulk ingest"
 	default:
 		feed = ownadvisory.NewDirFeed(args[0])
-		src = args[0]
+		src, bulkAdapter, sourceKey, sourceName = args[0], "osv", "cli-osv-bulk", "CLI OSV bulk ingest"
 	}
 	ctx := context.Background()
 	pool, err := postgres.Connect(ctx, cfg.DBDSN)
@@ -1215,7 +1217,16 @@ func syncAdvisories(args []string) error {
 	if err := postgres.CheckMigrationsReady(ctx, pool); err != nil {
 		return fmt.Errorf("database migrations are not current; run synapse-migrate: %w", err)
 	}
-	ingest, err := advisoryingest.NewService(feed, postgres.NewAdvisoryRepository(pool))
+	writerSkipped := 0
+	onSkip := func(id string, cause error) {
+		writerSkipped++
+		fmt.Fprintf(os.Stderr, "synapse-cli: skipped advisory %s: %v\n", id, cause)
+	}
+	writer, err := postgres.NewMaterializingAdvisoryWriter(ctx, pool, sourceKey, sourceName, bulkAdapter, onSkip)
+	if err != nil {
+		return fmt.Errorf("prepare bulk advisory source: %w", err)
+	}
+	ingest, err := advisoryingest.NewService(feed, writer)
 	if err != nil {
 		return err
 	}
@@ -1223,7 +1234,7 @@ func syncAdvisories(args []string) error {
 	if err != nil {
 		return fmt.Errorf("ingest from %s: %w", src, err)
 	}
-	fmt.Printf("synapse-cli: ingested %d advisories, skipped %d (unparseable/unmatchable) (from %s)\n", stats.Ingested, stats.Skipped, src)
+	fmt.Printf("synapse-cli: ingested %d advisories, skipped %d unparseable, %d conflicting (from %s)\n", stats.Ingested-writerSkipped, stats.Skipped, writerSkipped, src)
 	return nil
 }
 
