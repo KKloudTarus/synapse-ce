@@ -10,6 +10,8 @@ package secretscan
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +34,13 @@ const (
 	maxTotalScanBytes = 100 << 20 // bound aggregate source reads
 	maxFindings       = 2000      // bound aggregate redacted output
 	sniffBytes        = 8 << 10   // read this much to decide binary-or-text
+	// Decode-pass bounds: a secret hidden inside a base64/hex value is found by decoding, but the pass
+	// must not become a DoS amplifier, so tokens, decoded volume, and per-token size are all capped.
+	minBase64TokenLen      = 32        // < this decodes to < 24 bytes, below any modeled secret
+	minHexTokenLen         = 40        // even length; < this decodes to < 20 bytes
+	maxEncodedTokenLen     = 20000     // a credential is small; do not decode a giant blob
+	maxDecodeTokensPerFile = 500       // bound tokens decoded per file
+	maxDecodedBytesPerFile = 512 << 10 // bound aggregate decoded volume per file
 )
 
 // rule is one detector. keywords pre-filter the file (cheap Contains) before the regex runs; group selects
@@ -261,7 +270,117 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			})
 		}
 	}
+	// A secret hidden inside a base64/hex value (a Kubernetes Secret, a base64-wrapped credential) is
+	// invisible to the rules above; the decode pass finds it. It runs on the same comment-masked text so a
+	// secret encoded inside a comment stays masked.
+	if s.scanDecoded(rel, text, original, seen, out, limit) {
+		return true
+	}
 	return false
+}
+
+var (
+	// A base64 run of at least minBase64TokenLen characters, optionally padded. The class spans the std
+	// (+/) and url (-_) alphabets; a token that mixes them decodes as neither and is skipped.
+	base64TokenRe = regexp.MustCompile(`[A-Za-z0-9+/_-]{` + strconv.Itoa(minBase64TokenLen) + `,}={0,2}`)
+	hexTokenRe    = regexp.MustCompile(`\b[0-9a-fA-F]{` + strconv.Itoa(minHexTokenLen) + `,}\b`)
+)
+
+// scanDecoded finds base64/hex tokens in text, decodes each one level (bounded), and re-runs the detectors
+// over the decoded bytes, so a secret carried inside an encoded value is found. The finding is reported at
+// the ENCODED token's line, where a reader edits it. The pass is purely ADDITIVE: a hit requires a real
+// detector (with its distinctive keyword) to fire on the decoded bytes, so a random encoded blob (a hash,
+// an id, minified data) produces nothing. Returns true if the finding limit was reached.
+func (s *Scanner) scanDecoded(rel, text, original string, seen map[string]bool, out *[]ports.SecretRawFinding, limit int) bool {
+	tokens := 0
+	decodedBudget := maxDecodedBytesPerFile
+	consider := func(start int, token string, decode func(string) ([]byte, bool), enc string) bool {
+		if tokens >= maxDecodeTokensPerFile || decodedBudget <= 0 || len(token) > maxEncodedTokenLen {
+			return false
+		}
+		// Count every decode ATTEMPT (a rejected decode still did the work), so the cap bounds total decode
+		// cost even against a file of tokens that all decode to binary. A token is <= maxEncodedTokenLen, so
+		// each decode allocates a bounded amount, and at most maxDecodeTokensPerFile decodes run.
+		tokens++
+		decoded, ok := decode(token)
+		if !ok || len(decoded) == 0 || isBinary(decoded) {
+			return false
+		}
+		decodedBudget -= len(decoded)
+		// The inline-allow annotation lives in the trailing comment, which maskComments blanks in text;
+		// check it against the pre-mask original (offsets are preserved by masking).
+		if inlineAllow(lineOf(original, start)) {
+			return false // an inline allow on the encoded token's line suppresses it
+		}
+		decodedText := string(decoded)
+		line := 1 + strings.Count(text[:start], "\n")
+		for i := range s.rules {
+			r := &s.rules[i]
+			if !hasAnyKeyword(decodedText, r.keywords) {
+				continue
+			}
+			for _, m := range r.re.FindAllStringSubmatchIndex(decodedText, -1) {
+				if len(*out) >= limit {
+					return true
+				}
+				ds, de := m[0], m[1]
+				if r.group > 0 && len(m) > 2*r.group+1 && m[2*r.group] >= 0 {
+					ds, de = m[2*r.group], m[2*r.group+1]
+				}
+				secret := decodedText[ds:de]
+				if s.allowed(secret, r.allow) || (r.minEnt > 0 && shannon(secret) < r.minEnt) {
+					continue
+				}
+				key := r.id + ":" + enc + ":" + rel + ":" + strconv.Itoa(line)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				*out = append(*out, ports.SecretRawFinding{
+					File: rel, Line: line, RuleID: r.id, Category: r.category,
+					Title: r.title + " (" + enc + "-encoded)", Severity: r.severity,
+					Match: redactMatch(secret),
+				})
+			}
+		}
+		return false
+	}
+	// Cap the candidate enumeration at the token budget so a file packed with encoded-looking runs cannot
+	// force materializing millions of match locations before the per-token cap in consider applies.
+	for _, loc := range base64TokenRe.FindAllStringIndex(text, maxDecodeTokensPerFile) {
+		if consider(loc[0], text[loc[0]:loc[1]], decodeBase64Token, "base64") {
+			return true
+		}
+	}
+	for _, loc := range hexTokenRe.FindAllStringIndex(text, maxDecodeTokensPerFile) {
+		if consider(loc[0], text[loc[0]:loc[1]], decodeHexToken, "hex") {
+			return true
+		}
+	}
+	return false
+}
+
+// decodeBase64Token tries the standard and URL alphabets, padded and unpadded, returning the first that
+// decodes cleanly. A token that fits no alphabet is not base64 and is skipped.
+func decodeBase64Token(token string) ([]byte, bool) {
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		if b, err := enc.DecodeString(token); err == nil && len(b) > 0 {
+			return b, true
+		}
+	}
+	return nil, false
+}
+
+// decodeHexToken decodes an even-length hex run.
+func decodeHexToken(token string) ([]byte, bool) {
+	if len(token)%2 != 0 {
+		return nil, false
+	}
+	b, err := hex.DecodeString(token)
+	if err != nil || len(b) == 0 {
+		return nil, false
+	}
+	return b, true
 }
 
 // inlineAllow reports whether a line carries an inline suppression annotation ("synapse:allow", or
