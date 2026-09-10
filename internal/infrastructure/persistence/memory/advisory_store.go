@@ -12,7 +12,8 @@ import (
 // AdvisoryStore is the in-memory owned-advisory store (dev/tests, mirrors the Postgres adapter). It
 // is GLOBAL reference data – NOT tenant-scoped. Advisories are indexed by every affected (ecosystem,
 // package) so ByPackage is a map lookup, and Upsert is idempotent by advisory id (re-syncable reference
-// data, replaced in place – not append-only). The stored ecosystem+package keys are the ingester-normalized,
+// data, replaced in place – not append-only – except the exploitation-risk enrichment carried forward
+// raise-only via advisory.Advisory.PreserveEnrichment). The stored ecosystem+package keys are the ingester-normalized,
 // OSV-canonical ids per the ports.AdvisoryStore KEY CONTRACT.
 type AdvisoryStore struct {
 	mu    sync.RWMutex
@@ -35,7 +36,11 @@ var (
 func (s *AdvisoryStore) Upsert(_ context.Context, a advisory.Advisory) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, existed := s.byID[a.ID]; existed {
+	if prior, existed := s.byID[a.ID]; existed {
+		// Carry the prior row's exploitation-risk enrichment forward: the bulk feed has no KEV/EPSS, so a
+		// blind replace would LOWER the signals the risk pipeline merged in. Mirrors the Postgres adapter;
+		// the single mutex serializes writers here.
+		a = a.PreserveEnrichment(prior)
 		s.removeFromIndex(a.ID)
 	}
 	s.byID[a.ID] = a

@@ -1779,8 +1779,12 @@ type ThreatModelStore interface {
 // SEPARATE from the read-only AdvisoryStore so a read consumer (the owned DetectionSource) cannot reach the
 // mutator – only the ingester holds this narrow writer (mirrors how the score-mover is kept off the broad
 // JudgmentStore). Upsert is idempotent by advisory id: advisories are re-syncable reference data, so a
-// re-ingest REPLACES in place (not append-only). The ingester must pass ingester-NORMALIZED keys per the
-// AdvisoryStore KEY CONTRACT.
+// re-ingest REPLACES the base advisory in place (not append-only), with one exception - the exploitation-risk
+// enrichment (KEV/EPSS/EPSSPercentile/PublicExploit) is carried forward raise-only via
+// advisory.Advisory.PreserveEnrichment, because the bulk feed does not carry it and a blind replace would
+// clobber the signals the canonical materializer merged in. Writers of one identity serialize on a
+// transaction advisory lock so a concurrent insert of a new id cannot lose the merge. The ingester must pass
+// ingester-NORMALIZED keys per the AdvisoryStore KEY CONTRACT.
 type AdvisoryWriter interface {
 	Upsert(ctx context.Context, a advisory.Advisory) error
 }
