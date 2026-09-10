@@ -56,6 +56,17 @@ type npmV3Pkg struct {
 	OptionalDependencies map[string]string `json:"optionalDependencies"`
 }
 
+type npmEdgeSpec struct {
+	name     string
+	scope    string
+	optional bool
+}
+
+type npmEdgeMeta struct {
+	scope    string
+	optional bool
+}
+
 // Parse extracts the resolved npm packages (+ v2/v3 edges) from a package-lock.json.
 func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	var lock struct {
@@ -72,7 +83,7 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 		// Syft path + the PURL conformance test), while Component.Name keeps the @scope/name.
 		purlName := name
 		if strings.HasPrefix(purlName, "@") {
-			purlName = "%40" + purlName[1:]
+			purlName = "%40" + purlName[1:] // PURL spec: scoped @ → %40 (matches the npm/yarn parsers)
 		}
 		return "pkg:npm/" + purlName + "@" + version
 	}
@@ -95,8 +106,8 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 				pathPURL[path] = add(name, p.Version, p.Integrity, p.Dev)
 			}
 		}
-		// Pass 2: resolve each package's direct deps to PURLs via npm's nearest-wins hoisting. Deterministic:
-		// iterate paths + dep names sorted. Resolution-as-filter – a dep not present in the tree yields no edge.
+		// Pass 2: resolve each package's direct deps to PURLs via npm's nearest-wins hoisting. Edge scope and
+		// optionality stay attached to the relationship; records are split when one source has mixed metadata.
 		paths := make([]string, 0, len(lock.Packages))
 		for path := range lock.Packages {
 			paths = append(paths, path)
@@ -108,20 +119,49 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 			if !ok {
 				continue // root project / unnamed – not a component, so no edges from it
 			}
-			seen := map[string]bool{ref: true} // drop self-edges + duplicate targets
-			var on []string
-			for _, depName := range npmDepNames(lock.Packages[path]) {
-				tp := resolveNpmDep(path, depName, lock.Packages)
+			sourceScope := prodScope
+			if lock.Packages[path].Dev {
+				sourceScope = sbom.ScopeDevelopment
+			}
+			targetMeta := make(map[string]npmEdgeMeta)
+			for _, dep := range npmEdgeSpecs(lock.Packages[path], sourceScope) {
+				tp := resolveNpmDep(path, dep.name, lock.Packages)
 				if tp == "" {
 					continue
 				}
-				if t := pathPURL[tp]; t != "" && !seen[t] {
-					seen[t] = true
-					on = append(on, t)
+				t := pathPURL[tp]
+				if t == "" || t == ref {
+					continue
 				}
+				meta := npmEdgeMeta{scope: dep.scope, optional: dep.optional}
+				if existing, exists := targetMeta[t]; exists {
+					meta = mergeNPMEdgeMeta(existing, meta)
+				}
+				targetMeta[t] = meta
 			}
-			if len(on) > 0 {
-				edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: on})
+			type groupKey struct {
+				scope    string
+				optional bool
+			}
+			groups := make(map[groupKey][]string)
+			for target, meta := range targetMeta {
+				key := groupKey(meta)
+				groups[key] = append(groups[key], target)
+			}
+			keys := make([]groupKey, 0, len(groups))
+			for key := range groups {
+				keys = append(keys, key)
+			}
+			sort.Slice(keys, func(i, j int) bool {
+				if keys[i].scope != keys[j].scope {
+					return keys[i].scope < keys[j].scope
+				}
+				return !keys[i].optional && keys[j].optional
+			})
+			for _, key := range keys {
+				on := groups[key]
+				sort.Strings(on)
+				edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: on, Scope: key.scope, Optional: key.optional})
 			}
 		}
 		return set.components(), edges, nil
@@ -163,22 +203,50 @@ func parseSubresourceIntegrity(s string) []sbom.Checksum {
 	return out
 }
 
-// npmDepNames returns the sorted, unique direct-dependency names of a v2/v3 package: its dependencies +
-// devDependencies (chiefly on the root, but npm may write them on nested entries too) + optionalDependencies
-// – i.e. everything npm installs into the tree for it. peerDependencies are excluded (a "the host must
-// provide" expectation, not a "this depends on").
-func npmDepNames(p npmV3Pkg) []string {
-	set := map[string]bool{}
-	for _, m := range []map[string]string{p.Dependencies, p.DevDependencies, p.OptionalDependencies} {
-		for name := range m {
-			set[name] = true
+// npmEdgeSpecs returns sorted, unique direct-dependency declarations with their per-edge semantics.
+// If the same package is listed as both runtime and dev, the runtime relationship wins: one shipping path is
+// sufficient to make that edge shipping. Optionality is retained independently from scope.
+func npmEdgeSpecs(p npmV3Pkg, prodScope string) []npmEdgeSpec {
+	byName := map[string]npmEdgeSpec{}
+	for name := range p.Dependencies {
+		byName[name] = npmEdgeSpec{name: name, scope: prodScope}
+	}
+	for name := range p.DevDependencies {
+		if _, exists := byName[name]; exists {
+			continue // an existing runtime declaration is the stronger shipping relationship
 		}
+		byName[name] = npmEdgeSpec{name: name, scope: sbom.ScopeDevelopment}
 	}
-	out := make([]string, 0, len(set))
-	for name := range set {
-		out = append(out, name)
+	for name := range p.OptionalDependencies {
+		spec := byName[name]
+		spec.name = name
+		if spec.scope == "" {
+			spec.scope = prodScope
+		}
+		spec.optional = true
+		byName[name] = spec
 	}
-	sort.Strings(out)
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]npmEdgeSpec, 0, len(names))
+	for _, name := range names {
+		out = append(out, byName[name])
+	}
+	return out
+}
+
+func mergeNPMEdgeMeta(a, b npmEdgeMeta) npmEdgeMeta {
+	out := npmEdgeMeta{scope: a.scope, optional: a.optional && b.optional}
+	if a.scope == sbom.ScopeProduction || b.scope == sbom.ScopeProduction {
+		out.scope = sbom.ScopeProduction
+	} else if a.scope == sbom.ScopeDevelopment || b.scope == sbom.ScopeDevelopment {
+		out.scope = sbom.ScopeDevelopment
+	} else if out.scope == "" {
+		out.scope = b.scope
+	}
 	return out
 }
 

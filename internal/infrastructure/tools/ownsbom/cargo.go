@@ -119,7 +119,9 @@ func (Cargo) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 		return "", false // unresolvable (not in the lock, or ambiguous without a version) -> no edge
 	}
 
-	// Pass 2: emit components + resolve edges.
+	// Pass 2: emit components + resolve edges. Cargo.lock does not encode dependency kinds per edge, so the
+	// relationship inherits the lockfile's path-derived base scope; direct dev roots then carry development
+	// through ReachableScopes to their transitive descendants.
 	set := newComponentSet()
 	var deps []sbom.Dependency
 	for _, p := range pkgs {
@@ -142,7 +144,7 @@ func (Cargo) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 			}
 		}
 		if len(on) > 0 {
-			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: on})
+			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: on, Scope: scope})
 		}
 	}
 	return set.components(), deps, nil
@@ -151,8 +153,8 @@ func (Cargo) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 // cargoDevDeps reads the companion Cargo.toml beside Cargo.lock (if present) and returns the set of DIRECT
 // [dev-dependencies] names, so the lock's resolved crates can be scoped dev vs prod. Best-effort – no
 // manifest, or an unreadable one, yields no dev refinement (everything stays prod/path-scoped). Their
-// transitive dev-deps stay prod (Cargo.lock is a flat resolved set; precise dev-transitivity needs the
-// graph) – same limitation as the Syft path, which Cargo.lock's lack of a dev flag forces.
+// transitive dev-deps are later classified by graph scope propagation, which preserves development along
+// every path rooted at a direct dev dependency.
 func cargoDevDeps(dir string) map[string]bool {
 	dev := map[string]bool{}
 	if dir == "" {

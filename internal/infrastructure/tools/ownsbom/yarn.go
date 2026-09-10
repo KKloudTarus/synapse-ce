@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -32,15 +33,18 @@ func (Yarn) Ecosystem() string { return "npm" }
 func (Yarn) Markers() []string { return []string{"yarn.lock"} }
 
 // yarnEntry is one lock entry collected in pass 1: its resolved name+version, the descriptors its key line
-// claims (for edge resolution), and the direct deps from its dependencies: block.
+// claims (for edge resolution), and the direct deps from its dependencies/optionalDependencies blocks.
 type yarnEntry struct {
 	name, version string
 	integrity     string    // the `integrity` Subresource Integrity value (Yarn v1), when present
 	descriptors   []string  // full `name@range` specs from the key line(s)
-	deps          []yarnDep // direct deps from the dependencies: block
+	deps          []yarnDep // direct deps with per-edge optionality
 }
 
-type yarnDep struct{ name, rng string }
+type yarnDep struct {
+	name, rng string
+	optional  bool
+}
 
 // Parse extracts the resolved packages + dependency edges from a yarn.lock.
 func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
@@ -54,6 +58,7 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 	var entries []*yarnEntry
 	var cur *yarnEntry
 	inDeps := false
+	depsOptional := false
 	depsIndent := 0
 	sc := bufio.NewScanner(bytes.NewReader(in.Content))
 	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
@@ -67,7 +72,7 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 			// a col-0 key line starts a new entry. A `name@workspace:…` key is the project/workspace ITSELF
 			// (its version is the non-matchable 0.0.0-use.local), not a dependency – skip it; a non-spec line
 			// (Berry's __metadata) has no name and is skipped too.
-			inDeps, cur = false, nil
+			inDeps, depsOptional, cur = false, false, nil
 			if strings.HasSuffix(line, ":") && !strings.Contains(line, "@workspace:") {
 				if descs, name := yarnDescriptors(line); name != "" {
 					cur = &yarnEntry{name: name, descriptors: descs}
@@ -81,20 +86,20 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 		}
 		indent := leadingIndent(raw)
 		if inDeps {
-			if indent > depsIndent { // a member of the dependencies: block (more indented than it)
+			if indent > depsIndent { // a member of the dependencies block (more indented than it)
 				if d, ok := parseYarnDep(line); ok {
+					d.optional = depsOptional
 					cur.deps = append(cur.deps, d)
 				}
 				continue
 			}
-			inDeps = false // dedented back to an entry field – the dependencies: block ended
+			inDeps, depsOptional = false, false // dedented back to an entry field – the block ended
 		}
 		switch {
-		case strings.HasPrefix(line, "dependencies:") || strings.HasPrefix(line, "optionalDependencies:"):
-			// Both are real installed edges (optional ones are present in the tree when satisfiable; an
-			// unsatisfied one fails the descriptor lookup → no edge anyway) – parity with the npm parser,
-			// which also merges optionalDependencies. peerDependencies stays excluded (host-provides).
-			inDeps, depsIndent = true, indent
+		case strings.HasPrefix(line, "dependencies:"):
+			inDeps, depsOptional, depsIndent = true, false, indent
+		case strings.HasPrefix(line, "optionalDependencies:"):
+			inDeps, depsOptional, depsIndent = true, true, indent
 		case strings.HasPrefix(line, "version ") || strings.HasPrefix(line, "version:"):
 			cur.version = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "version")), `:" `)
 		case strings.HasPrefix(line, "integrity "):
@@ -118,7 +123,8 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 		}
 	}
 
-	// Pass 2: emit components + resolve edges via the descriptor map.
+	// Pass 2: emit components + resolve edges via the descriptor map. Edge records are split by optionality;
+	// if the same resolved target is declared both required and optional, required wins.
 	set := newComponentSet()
 	var edges []sbom.Dependency
 	for _, e := range entries {
@@ -131,20 +137,41 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 		}
 		ref := yarnPURL(e.name, e.version)
 		set.add(sbom.Component{Name: e.name, Version: e.version, PURL: ref, Location: in.Path, Scope: scope, Checksums: parseSubresourceIntegrity(e.integrity)})
-		seen := map[string]bool{ref: true} // drop self-edges + duplicate targets
-		var on []string
+		targetOptional := map[string]bool{}
+		seen := map[string]bool{ref: true}
 		for _, d := range e.deps {
 			v, ok := descVer[d.name+"@"+d.rng]
 			if !ok {
 				continue // descriptor not claimed by any lock entry – no edge
 			}
-			if t := yarnPURL(d.name, v); !seen[t] {
+			t := yarnPURL(d.name, v)
+			if t == ref {
+				continue
+			}
+			if !seen[t] {
 				seen[t] = true
-				on = append(on, t)
+				targetOptional[t] = d.optional
+				continue
+			}
+			if !d.optional { // required wins when duplicate declarations resolve to the same package
+				targetOptional[t] = false
 			}
 		}
-		if len(on) > 0 {
-			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: on})
+		var required, optional []string
+		for target, isOptional := range targetOptional {
+			if isOptional {
+				optional = append(optional, target)
+			} else {
+				required = append(required, target)
+			}
+		}
+		sort.Strings(required)
+		sort.Strings(optional)
+		if len(required) > 0 {
+			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: required, Scope: prodScope})
+		}
+		if len(optional) > 0 {
+			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: optional, Scope: prodScope, Optional: true})
 		}
 	}
 	return set.components(), edges, nil

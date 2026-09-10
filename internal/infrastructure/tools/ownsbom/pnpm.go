@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -33,11 +34,16 @@ func (Pnpm) Ecosystem() string { return "npm" }
 // Markers are the lockfile basenames Pnpm claims.
 func (Pnpm) Markers() []string { return []string{"pnpm-lock.yaml"} }
 
+type pnpmRawDep struct {
+	key      string
+	optional bool
+}
+
 // pnpmRawEdge is one package's accumulated dependency keys, resolved to PURLs after the full scan (so a
 // forward reference to a package defined later in the file still resolves).
 type pnpmRawEdge struct {
-	parent string   // the package/snapshot key spec (edge source)
-	deps   []string // "name@version" dependency keys (edge targets)
+	parent string       // the package/snapshot key spec (edge source)
+	deps   []pnpmRawDep // resolved dependency keys with per-edge optionality
 }
 
 // Parse extracts the resolved npm packages from a pnpm-lock.yaml `packages:` block as npm components, and the
@@ -55,7 +61,8 @@ func (Pnpm) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 	var cur *sbom.Component // current component (packages section only), held so its integrity (SRI) attaches
 	curKey := ""            // current package/snapshot key spec (edge source), set in packages AND snapshots
 	inDeps := false         // inside a dependencies:/optionalDependencies: sub-block
-	var curDeps []string    // "name@version" dep keys accumulated for curKey
+	depsOptional := false   // whether the current dependency sub-block is optionalDependencies
+	var curDeps []pnpmRawDep
 	var rawEdges []pnpmRawEdge
 
 	// flush completes the current package block: emit its component (packages only), index it, and record its
@@ -69,7 +76,7 @@ func (Pnpm) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 		if curKey != "" && len(curDeps) > 0 {
 			rawEdges = append(rawEdges, pnpmRawEdge{parent: curKey, deps: curDeps})
 		}
-		curKey, curDeps, inDeps = "", nil, false
+		curKey, curDeps, inDeps, depsOptional = "", nil, false, false
 	}
 
 	sc := bufio.NewScanner(bytes.NewReader(in.Content))
@@ -121,6 +128,7 @@ func (Pnpm) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 			// other sub-key (resolution:/engines:/…) closes it, and may carry the integrity (tamper evidence).
 			key := strings.TrimSuffix(line, ":")
 			inDeps = key == "dependencies" || key == "optionalDependencies"
+			depsOptional = inDeps && key == "optionalDependencies"
 			if !inDeps && cur != nil && cur.Checksums == nil {
 				if v := pnpmIntegrityFromLine(raw); v != "" {
 					cur.Checksums = parseSubresourceIntegrity(v)
@@ -129,7 +137,7 @@ func (Pnpm) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 		default: // indent >= 6: a dep entry inside a deps block, or a block-form integrity line
 			if inDeps && curKey != "" {
 				if dk, ok := pnpmDepKey(line); ok {
-					curDeps = append(curDeps, dk)
+					curDeps = append(curDeps, pnpmRawDep{key: dk, optional: depsOptional})
 				}
 			} else if cur != nil && cur.Checksums == nil {
 				if v := pnpmIntegrityFromLine(raw); v != "" {
@@ -142,7 +150,7 @@ func (Pnpm) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 	if err := sc.Err(); err != nil {
 		return nil, nil, fmt.Errorf("scan pnpm-lock.yaml: %w", err)
 	}
-	return set.components(), pnpmResolveEdges(rawEdges, purlByKey), nil
+	return set.components(), pnpmResolveEdges(rawEdges, purlByKey, baseScope), nil
 }
 
 // pnpmDepKey parses one dependency entry line from a `dependencies:`/`optionalDependencies:` sub-map into the
@@ -189,16 +197,12 @@ func pnpmDepKey(line string) (string, bool) {
 	return name + "@" + val, true
 }
 
-// pnpmResolveEdges turns the raw per-package dependency keys into sbom.Dependency edges, resolved against the
-// emitted-component index. An edge (and each target) is kept only when it names an emitted component
-// (resolution-as-filter); self-edges and duplicate targets are dropped. Because components are deduped at
-// name/version granularity, several peer-context snapshot variants of one package (e.g.
-// `plugin@1.0.0(react@17)` and `plugin@1.0.0(react@18)`) collapse to the same Ref; their targets are MERGED
-// into a single Dependency, preserving first-seen order, so the graph has one edge object per Ref.
-func pnpmResolveEdges(rawEdges []pnpmRawEdge, purlByKey map[string]string) []sbom.Dependency {
-	var order []string                   // Refs in first-seen order (deterministic output)
-	targets := map[string][]string{}     // Ref → ordered target PURLs
-	seen := map[string]map[string]bool{} // Ref → set of already-added targets (+ the Ref itself)
+// pnpmResolveEdges turns raw dependency keys into sbom.Dependency records resolved against the emitted
+// component index. Required/optional metadata is retained even when peer-context snapshot variants collapse
+// to the same component Ref; if the same target is seen as both required and optional, required wins.
+func pnpmResolveEdges(rawEdges []pnpmRawEdge, purlByKey map[string]string, scope string) []sbom.Dependency {
+	var order []string
+	targetOptional := map[string]map[string]bool{} // Ref -> target PURL -> optional
 	for _, re := range rawEdges {
 		pn, pv, ok := pnpmSpecNameVersion(re.parent)
 		if !ok {
@@ -206,25 +210,44 @@ func pnpmResolveEdges(rawEdges []pnpmRawEdge, purlByKey map[string]string) []sbo
 		}
 		ref := purlByKey[pn+"@"+pv]
 		if ref == "" {
-			continue // the source package is not an emitted component (e.g. a snapshot with no packages entry)
+			continue // source not emitted (e.g. snapshot without a packages entry)
 		}
-		if seen[ref] == nil {
-			seen[ref] = map[string]bool{ref: true} // no self-edge
+		if targetOptional[ref] == nil {
+			targetOptional[ref] = map[string]bool{}
 			order = append(order, ref)
 		}
-		for _, dk := range re.deps {
-			t := purlByKey[dk]
-			if t == "" || seen[ref][t] {
+		for _, dep := range re.deps {
+			target := purlByKey[dep.key]
+			if target == "" || target == ref {
 				continue
 			}
-			seen[ref][t] = true
-			targets[ref] = append(targets[ref], t)
+			old, exists := targetOptional[ref][target]
+			if !exists {
+				targetOptional[ref][target] = dep.optional
+				continue
+			}
+			if old && !dep.optional {
+				targetOptional[ref][target] = false
+			}
 		}
 	}
 	var edges []sbom.Dependency
 	for _, ref := range order {
-		if on := targets[ref]; len(on) > 0 {
-			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: on})
+		var required, optional []string
+		for target, isOptional := range targetOptional[ref] {
+			if isOptional {
+				optional = append(optional, target)
+			} else {
+				required = append(required, target)
+			}
+		}
+		sort.Strings(required)
+		sort.Strings(optional)
+		if len(required) > 0 {
+			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: required, Scope: scope})
+		}
+		if len(optional) > 0 {
+			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: optional, Scope: scope, Optional: true})
 		}
 	}
 	return edges
