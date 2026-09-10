@@ -80,6 +80,26 @@ const (
 func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.MisconfigRawFinding, error) {
 	var out []ports.MisconfigRawFinding
 	var kubernetes k8sScanResult
+	// Terraform is scanned in a second pass: variable defaults, locals, and *.tfvars are collected first,
+	// so a misconfiguration expressed through a variable resolves to its literal before the rules run.
+	// Resolution is scoped PER DIRECTORY because a Terraform module is a directory: a root variable default
+	// must not be substituted into a same-named variable of a child module (which receives its value from
+	// the module block, not the root default). Deferring keeps the per-directory map complete regardless of
+	// walk order.
+	tfSets := map[string]tfValueSet{}
+	tfSetFor := func(dir string) tfValueSet {
+		s, ok := tfSets[dir]
+		if !ok {
+			s = newTFValueSet()
+			tfSets[dir] = s
+		}
+		return s
+	}
+	type tfFile struct {
+		rel  string
+		data []byte
+	}
+	var tfFiles []tfFile
 	count := 0  // config files actually scanned
 	walked := 0 // total tree entries visited
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -119,7 +139,8 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			return nil
 		}
 		kind := classifyName(d.Name())
-		if kind == cfgNone && !maybeYAML(d.Name()) && !maybeCFN(d.Name()) {
+		isTFVars := isTFVarsName(d.Name())
+		if kind == cfgNone && !isTFVars && !maybeYAML(d.Name()) && !maybeCFN(d.Name()) {
 			return nil
 		}
 		if count >= maxFiles {
@@ -135,6 +156,11 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			return nil
 		}
 		rel := strings.TrimPrefix(strings.TrimPrefix(path, root), string(os.PathSeparator))
+		// A .tfvars file carries variable values only; collect them for resolution, never scan it for rules.
+		if isTFVars {
+			collectTFVarsFile(data, tfSetFor(filepath.Dir(rel)))
+			return nil
+		}
 		if kind == cfgNone {
 			// Decide by path/content: a GitHub Actions workflow lives under .github/workflows/; a Compose
 			// file declares a top-level services: map; a Kubernetes manifest declares apiVersion + kind; a
@@ -160,7 +186,10 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		case cfgKubernetes:
 			mergeK8sScanResult(&kubernetes, scanKubernetes(rel, data))
 		case cfgTerraform:
-			out = append(out, scanTerraform(rel, data)...)
+			// Defer: collect this file's variable/local literal definitions into its directory's map, then
+			// scan it after the walk with that (module-scoped) resolved map.
+			collectTFDefinitions(data, tfSetFor(filepath.Dir(rel)))
+			tfFiles = append(tfFiles, tfFile{rel: rel, data: data})
 		case cfgARM:
 			out = append(out, scanARM(rel, data)...)
 		case cfgCloudFormation:
@@ -175,9 +204,25 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 	if walkErr != nil {
 		return out, fmt.Errorf("misconfig scan: %w", walkErr) // e.g. context cancellation
 	}
+	// Second Terraform pass: resolve each directory's variable/local map (unambiguous literals only) and
+	// scan each deferred .tf file with its own directory's map.
+	resolvedByDir := make(map[string]map[string]string, len(tfSets))
+	for dir, set := range tfSets {
+		resolvedByDir[dir] = set.resolve()
+	}
+	for _, f := range tfFiles {
+		out = append(out, scanTerraformResolved(f.rel, f.data, resolvedByDir[filepath.Dir(f.rel)])...)
+	}
 	out = append(out, kubernetes.findings...)
 	out = append(out, networkPolicyFindings(kubernetes)...)
 	return out, nil
+}
+
+// isTFVarsName recognises an HCL Terraform variable-values file (terraform.tfvars, *.auto.tfvars, or any
+// *.tfvars). Its assignments feed variable resolution but are never scanned for misconfigurations. The JSON
+// variant (*.tfvars.json) is not parsed here, so it simply does not contribute resolved values.
+func isTFVarsName(name string) bool {
+	return strings.HasSuffix(strings.ToLower(name), ".tfvars")
 }
 
 // classifyName recognises a Dockerfile by conventional names; YAML is decided later by content.

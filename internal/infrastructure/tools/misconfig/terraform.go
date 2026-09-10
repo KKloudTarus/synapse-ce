@@ -61,8 +61,18 @@ var (
 	tfRegistryModule = regexp.MustCompile(`^[0-9A-Za-z._-]+/[0-9A-Za-z._-]+/[0-9A-Za-z._-]+(//.+)?$`)
 )
 
-// scanTerraform runs the owned Terraform checks over one .tf file.
+// scanTerraform runs the owned Terraform checks over one .tf file with no variable resolution.
 func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
+	return scanTerraformResolved(rel, data, nil)
+}
+
+// scanTerraformResolved runs the owned Terraform checks over one .tf file, substituting each var./local.
+// reference with its resolved literal from `resolved` before the rules run, so a misconfiguration expressed
+// through a variable (a public CIDR, encryption disabled) is caught where a literal-only match would miss
+// it. A nil/empty map makes substitution a no-op, so the single-file entry point is unchanged. Resolution
+// is conservative: `resolved` holds only UNAMBIGUOUS literals (a variable whose sources disagree is absent),
+// so substitution can only add a true positive, never manufacture one from a guessed value.
+func scanTerraformResolved(rel string, data []byte, resolved map[string]string) []ports.MisconfigRawFinding {
 	lines := strings.Split(string(data), "\n")
 	var out []ports.MisconfigRawFinding
 
@@ -83,6 +93,9 @@ func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
 	for i, raw := range lines {
 		line := stripHCLComment(raw)
 		trimmed := strings.TrimSpace(line)
+		// Substitute resolved var./local. references so the rules see the effective literal value. Applied
+		// after comment stripping and before any rule so both line- and block-level checks use it.
+		trimmed = substituteTFVars(trimmed, resolved)
 		if m := tfResourceOpen.FindStringSubmatch(trimmed); m != nil {
 			stack = append(stack, &frame{typ: m[1], name: m[2], depth: depth, start: i + 1})
 		}
@@ -590,4 +603,200 @@ func stripHCLBlockComments(body string) string {
 		out.WriteByte(c)
 	}
 	return out.String()
+}
+
+// --- Variable resolution (D6.4) ---
+
+var (
+	tfVariableRe = regexp.MustCompile(`^variable\s+"([A-Za-z_][A-Za-z0-9_-]*)"\s*\{`)
+	tfLocalsRe   = regexp.MustCompile(`^locals\s*\{`)
+	// A conservative literal RHS: a double-quoted string, a bool, or a number. Anything else (an
+	// expression, a reference, a list, a heredoc) is not a resolvable literal and is skipped.
+	tfLiteralRe = regexp.MustCompile(`^("(?:[^"\\]|\\.)*"|true|false|-?\d+(?:\.\d+)?)\s*$`)
+	tfAssignRe  = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*(.+)$`)
+)
+
+// substituteTFVars replaces each var./local. reference for which resolved holds a literal with that
+// literal, so the rules see the effective value. It substitutes ONLY in a reference context: an unquoted
+// reference (cidr = var.cidr) or one inside a ${...} interpolation ("${var.cidr}"). A reference-looking
+// token inside a plain string literal ("var.cidr") is NOT a reference and is left untouched, so it cannot
+// manufacture a finding. Unresolved references are left as-is. A nil/empty map is a no-op.
+func substituteTFVars(text string, resolved map[string]string) string {
+	if len(resolved) == 0 {
+		return text
+	}
+	var b strings.Builder
+	inStr := false // inside a double-quoted string
+	interp := 0    // ${...} nesting depth inside the current string
+	for i := 0; i < len(text); {
+		c := text[i]
+		switch {
+		case c == '"' && !tfEscaped(text, i):
+			inStr = !inStr
+			b.WriteByte(c)
+			i++
+			continue
+		case inStr && c == '$' && i+1 < len(text) && text[i+1] == '{':
+			interp++
+			b.WriteString("${")
+			i += 2
+			continue
+		case inStr && interp > 0 && c == '}':
+			interp--
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		// A reference is substitutable only when unquoted, or inside an interpolation, and only when it is a
+		// standalone var./local. reference: a preceding '.' (module.var.cidr, data.x.var.y) or a trailing '.'
+		// (a nested attribute access) means it is part of a longer traversal, not the variable itself.
+		leftOK := i == 0 || (text[i-1] != '.' && !isTFIdentByte(text[i-1]))
+		if (!inStr || interp > 0) && leftOK {
+			if ref := matchTFRef(text[i:]); ref != "" {
+				end := i + len(ref)
+				rightOK := end >= len(text) || (text[end] != '.' && !isTFIdentByte(text[end]))
+				if lit, ok := resolved[ref]; ok && rightOK {
+					b.WriteString(lit)
+					i = end
+					continue
+				}
+			}
+		}
+		b.WriteByte(c)
+		i++
+	}
+	return b.String()
+}
+
+// matchTFRef returns the leading `var.NAME` / `local.NAME` reference in s, or "" if s does not start with
+// one.
+func matchTFRef(s string) string {
+	var prefix int
+	switch {
+	case strings.HasPrefix(s, "var."):
+		prefix = len("var.")
+	case strings.HasPrefix(s, "local."):
+		prefix = len("local.")
+	default:
+		return ""
+	}
+	j := prefix
+	for j < len(s) && isTFIdentByte(s[j]) {
+		j++
+	}
+	if j == prefix { // "var." with no name
+		return ""
+	}
+	return s[:j]
+}
+
+// isTFIdentByte reports whether b can continue a Terraform name. It includes '-' because HCL variable and
+// local names allow hyphens (and the collectors store them with hyphens), so matchTFRef must consume the
+// WHOLE name: matching only the prefix of `var.cidr-block` as `var.cidr` would substitute the wrong value.
+func isTFIdentByte(b byte) bool {
+	return b == '_' || b == '-' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+// tfEscaped reports whether the character at index i is escaped, i.e. preceded by an ODD number of
+// consecutive backslashes. A quote after `\\` (an escaped backslash) is NOT escaped and does close a string.
+func tfEscaped(s string, i int) bool {
+	n := 0
+	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
+		n++
+	}
+	return n%2 == 1
+}
+
+// tfValueSet accumulates, per var./local. name, the distinct literal values seen across a workspace's .tf
+// and .tfvars files. A name with exactly one distinct literal resolves; a name whose sources disagree stays
+// ambiguous and is never substituted, so a wrong value can never produce a false positive.
+type tfValueSet map[string]map[string]bool
+
+func newTFValueSet() tfValueSet { return tfValueSet{} }
+
+func (s tfValueSet) add(key, literal string) {
+	if s[key] == nil {
+		s[key] = map[string]bool{}
+	}
+	s[key][literal] = true
+}
+
+// resolve returns the unambiguous subset: only names with a single distinct literal.
+func (s tfValueSet) resolve() map[string]string {
+	out := make(map[string]string, len(s))
+	for key, lits := range s {
+		if len(lits) == 1 {
+			for lit := range lits {
+				out[key] = lit
+			}
+		}
+	}
+	return out
+}
+
+// collectTFDefinitions parses a .tf file's `variable "x" { default = <lit> }` and `locals { y = <lit> }`
+// literal definitions into the set. It tracks brace depth to know whether an assignment sits inside a
+// variable default, a locals block, or elsewhere (which is ignored).
+func collectTFDefinitions(data []byte, set tfValueSet) {
+	depth := 0
+	inLocals := false
+	localsDepth := 0
+	curVar := ""
+	varDepth := 0
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := stripHCLComment(raw)
+		trimmed := strings.TrimSpace(line)
+		if m := tfVariableRe.FindStringSubmatch(trimmed); m != nil {
+			curVar, varDepth = m[1], depth
+		} else if tfLocalsRe.MatchString(trimmed) {
+			inLocals, localsDepth = true, depth
+		} else if curVar != "" && depth == varDepth+1 {
+			// The variable's scalar default sits directly in the variable block; a `default` key nested one
+			// level deeper (an object attribute) is not the variable's value and must not be collected.
+			if key, rhs, ok := tfAssignKV(trimmed); ok && key == "default" && tfLiteralRe.MatchString(rhs) {
+				set.add("var."+curVar, rhs)
+			}
+		} else if inLocals && depth == localsDepth+1 {
+			if key, rhs, ok := tfAssignKV(trimmed); ok && tfLiteralRe.MatchString(rhs) {
+				set.add("local."+key, rhs)
+			}
+		}
+		depth += strings.Count(line, "{") - strings.Count(line, "}")
+		if depth < 0 {
+			depth = 0
+		}
+		if curVar != "" && depth <= varDepth {
+			curVar = ""
+		}
+		if inLocals && depth <= localsDepth {
+			inLocals = false
+		}
+	}
+}
+
+// collectTFVarsFile parses a .tfvars file's top-level `name = <lit>` assignments into the set as var.name.
+func collectTFVarsFile(data []byte, set tfValueSet) {
+	depth := 0
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := stripHCLComment(raw)
+		trimmed := strings.TrimSpace(line)
+		if depth == 0 {
+			if key, rhs, ok := tfAssignKV(trimmed); ok && tfLiteralRe.MatchString(rhs) {
+				set.add("var."+key, rhs)
+			}
+		}
+		depth += strings.Count(line, "{") - strings.Count(line, "}")
+		if depth < 0 {
+			depth = 0
+		}
+	}
+}
+
+// tfAssignKV splits a `key = value` line, returning the key and the trimmed RHS.
+func tfAssignKV(line string) (key, value string, ok bool) {
+	m := tfAssignRe.FindStringSubmatch(line)
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], strings.TrimSpace(m[2]), true
 }
