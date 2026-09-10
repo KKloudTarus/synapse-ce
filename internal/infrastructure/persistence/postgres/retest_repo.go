@@ -63,3 +63,45 @@ func (r *RetestRepository) ListByEngagementFinding(ctx context.Context, engageme
 	})
 	return out, err
 }
+
+// LatestByEngagementFindings projects only the effective decision, not arbitrary notes.
+func (r *RetestRepository) LatestByEngagementFindings(ctx context.Context, engagementID shared.ID, findingIDs []shared.ID) (map[shared.ID]finding.Retest, error) {
+	if len(findingIDs) > 1000 || engagementID.IsZero() {
+		return nil, shared.ErrValidation
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		return nil, shared.ErrValidation
+	}
+	out := make(map[shared.ID]finding.Retest)
+	if len(findingIDs) == 0 {
+		return out, nil
+	}
+	ids := make([]string, len(findingIDs))
+	for index, id := range findingIDs {
+		if id.IsZero() {
+			return nil, shared.ErrValidation
+		}
+		ids[index] = id.String()
+	}
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT ON (finding_id) id, finding_id, outcome, created_at
+   FROM finding_retests WHERE tenant_id=$1 AND engagement_id=$2 AND finding_id=ANY($3::text[])
+   ORDER BY finding_id, created_at DESC, id DESC`, tenantID.String(), engagementID.String(), ids)
+		if err != nil {
+			return fmt.Errorf("latest comparison verifications: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			decision := finding.Retest{EngagementID: engagementID}
+			if err := rows.Scan(&decision.ID, &decision.FindingID, &decision.Outcome, &decision.At); err != nil {
+				return err
+			}
+			out[decision.FindingID] = decision
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+var _ ports.RetestLatestReader = (*RetestRepository)(nil)

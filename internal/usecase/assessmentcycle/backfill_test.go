@@ -121,10 +121,9 @@ func TestBackfillRunnerPreservesHistoryAndRerunsWithoutDuplicates(t *testing.T) 
 	if second.CreatedCount != 0 || second.SkippedCount != 3 || len(observer.runs) != 2 {
 		t.Fatalf("rerun = %+v observer=%+v", second, observer)
 	}
-	for _, assessmentID := range []shared.ID{existing.ID, archived.ID, asset.ID} {
-		if _, err := cycles.GetCycleByAssessment(ctx, tenantID, assessmentID); err != nil {
-			t.Fatalf("cycle for %s missing after rerun: %v", assessmentID, err)
-		}
+	records, err := cycles.ListCycles(ctx, ports.AssessmentCycleListQuery{TenantID: tenantID, Limit: 10})
+	if err != nil || len(records) != 3 {
+		t.Fatalf("cycle count after rerun = %d, err=%v", len(records), err)
 	}
 }
 

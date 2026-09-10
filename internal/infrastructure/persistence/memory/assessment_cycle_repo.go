@@ -3,8 +3,11 @@ package memory
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentclosure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -12,22 +15,35 @@ import (
 
 // AssessmentCycleRepository is an in-memory implementation of ports.AssessmentCycleRepository.
 type AssessmentCycleRepository struct {
+	readers           AssessmentCycleReaders
 	mu                sync.Mutex
 	cycles            map[shared.ID]map[shared.ID]*assessmentcycle.AssessmentCycle
 	members           map[shared.ID]map[shared.ID]map[shared.ID]*assessmentcycle.Member
 	assessmentToCycle map[shared.ID]map[shared.ID]shared.ID
+	closureManifests  map[shared.ID]map[shared.ID]map[shared.ID]*assessmentclosure.Manifest
+	closureReports    map[shared.ID]map[shared.ID]map[shared.ID]map[string]ports.AssessmentClosureReportArtifact
 }
 
 // NewAssessmentCycleRepository creates a new in-memory AssessmentCycleRepository.
-func NewAssessmentCycleRepository() *AssessmentCycleRepository {
-	return &AssessmentCycleRepository{
+func NewAssessmentCycleRepository(readers ...AssessmentCycleReaders) *AssessmentCycleRepository {
+	repository := &AssessmentCycleRepository{
 		cycles:            make(map[shared.ID]map[shared.ID]*assessmentcycle.AssessmentCycle),
 		members:           make(map[shared.ID]map[shared.ID]map[shared.ID]*assessmentcycle.Member),
 		assessmentToCycle: make(map[shared.ID]map[shared.ID]shared.ID),
+		closureManifests:  make(map[shared.ID]map[shared.ID]map[shared.ID]*assessmentclosure.Manifest),
+		closureReports:    make(map[shared.ID]map[shared.ID]map[shared.ID]map[string]ports.AssessmentClosureReportArtifact),
 	}
+	if len(readers) > 0 {
+		repository.readers = readers[0]
+	}
+	return repository
 }
 
 var _ ports.AssessmentCycleRepository = (*AssessmentCycleRepository)(nil)
+var _ ports.AssessmentCycleListRepository = (*AssessmentCycleRepository)(nil)
+var _ ports.AssessmentCycleCompensationRepository = (*AssessmentCycleRepository)(nil)
+var _ ports.AssessmentClosureRepository = (*AssessmentCycleRepository)(nil)
+var _ ports.AssessmentClosureReportStore = (*AssessmentCycleRepository)(nil)
 
 func (r *AssessmentCycleRepository) CreateCycle(ctx context.Context, cycle *assessmentcycle.AssessmentCycle) error {
 	if cycle == nil {
@@ -41,6 +57,7 @@ func (r *AssessmentCycleRepository) CreateCycle(ctx context.Context, cycle *asse
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.registerRollback(ctx)
 
 	tenantCycles := r.cycles[tenantID]
 	if tenantCycles == nil {
@@ -117,6 +134,7 @@ func (r *AssessmentCycleRepository) UpdateCycleCAS(ctx context.Context, cycle *a
 		return fmt.Errorf("%w: cycle version mismatch (expected %d, found %d)", shared.ErrConflict, expectedVersion, existing.Version)
 	}
 
+	r.registerRollback(ctx)
 	r.cycles[tenantID][cycle.ID] = cloneCycle(cycle)
 	return nil
 }
@@ -133,6 +151,7 @@ func (r *AssessmentCycleRepository) CreateMember(ctx context.Context, member *as
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.registerRollback(ctx)
 
 	// Enforce global uniqueness: one Assessment in at most one Cycle
 	tenantAssToCycle := r.assessmentToCycle[tenantID]
@@ -228,6 +247,7 @@ func (r *AssessmentCycleRepository) UpdateMemberCAS(ctx context.Context, member 
 		return fmt.Errorf("%w: member relationship version mismatch (expected %d, found %d)", shared.ErrConflict, expectedVersion, existing.RelationshipVersion)
 	}
 
+	r.registerRollback(ctx)
 	r.members[tenantID][member.CycleID][member.AssessmentID] = cloneMember(member)
 	return nil
 }
@@ -236,13 +256,11 @@ func (r *AssessmentCycleRepository) LockCycleForUpdate(ctx context.Context, tena
 	return r.GetCycle(ctx, tenantID, cycleID)
 }
 
-func (r *AssessmentCycleRepository) DeleteCycle(_ context.Context, tenantID, cycleID shared.ID) error {
+func (r *AssessmentCycleRepository) DeleteCycle(ctx context.Context, tenantID, cycleID shared.ID) error {
 	tenantID = shared.TenantOrDefault(tenantID)
-	if tenantID.IsZero() || cycleID.IsZero() {
-		return fmt.Errorf("%w: tenant and cycle ids are required", shared.ErrValidation)
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.registerRollback(ctx)
 	for assessmentID := range r.members[tenantID][cycleID] {
 		delete(r.assessmentToCycle[tenantID], assessmentID)
 	}
@@ -251,16 +269,99 @@ func (r *AssessmentCycleRepository) DeleteCycle(_ context.Context, tenantID, cyc
 	return nil
 }
 
-func (r *AssessmentCycleRepository) DeleteMember(_ context.Context, tenantID, cycleID, assessmentID shared.ID) error {
+func (r *AssessmentCycleRepository) DeleteMember(ctx context.Context, tenantID, cycleID, assessmentID shared.ID) error {
 	tenantID = shared.TenantOrDefault(tenantID)
-	if tenantID.IsZero() || cycleID.IsZero() || assessmentID.IsZero() {
-		return fmt.Errorf("%w: tenant, cycle, and assessment ids are required", shared.ErrValidation)
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.registerRollback(ctx)
 	delete(r.members[tenantID][cycleID], assessmentID)
 	delete(r.assessmentToCycle[tenantID], assessmentID)
 	return nil
+}
+
+func (r *AssessmentCycleRepository) ListCycles(ctx context.Context, query ports.AssessmentCycleListQuery) ([]ports.AssessmentCycleListRecord, error) {
+	tenantID := shared.TenantOrDefault(query.TenantID)
+	if tenantID.IsZero() || query.Limit <= 0 {
+		return nil, fmt.Errorf("%w: tenant and positive cycle list limit are required", shared.ErrValidation)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if query.MemberLimit <= 0 {
+		query.MemberLimit = 10
+	}
+	records := make([]ports.AssessmentCycleListRecord, 0, len(r.cycles[tenantID]))
+	for _, cycle := range r.cycles[tenantID] {
+		if cycle.TenantID != tenantID || query.Status != "" && cycle.Status != query.Status || query.BoundaryKind != "" && cycle.BoundaryKind != query.BoundaryKind {
+			continue
+		}
+		if !query.SelectedHeadID.IsZero() && cycle.SelectedHeadAssessmentID != query.SelectedHeadID {
+			continue
+		}
+		if query.Search != "" {
+			needle := strings.ToLower(query.Search)
+			if !strings.Contains(strings.ToLower(cycle.Name), needle) && !strings.Contains(strings.ToLower(cycle.ID.String()), needle) &&
+				!strings.Contains(strings.ToLower(cycle.RootAssessmentID.String()), needle) && !strings.Contains(strings.ToLower(cycle.SelectedHeadAssessmentID.String()), needle) {
+				continue
+			}
+		}
+		if !query.AfterUpdatedAt.IsZero() && (cycle.UpdatedAt.After(query.AfterUpdatedAt) || cycle.UpdatedAt.Equal(query.AfterUpdatedAt) && cycle.ID >= query.AfterCycleID) {
+			continue
+		}
+		members := make([]assessmentcycle.Member, 0)
+		for _, member := range r.members[tenantID][cycle.ID] {
+			members = append(members, *cloneMember(member))
+		}
+		if query.AssessmentType != "" {
+			matched := false
+			for _, member := range members {
+				if member.AssessmentType == query.AssessmentType {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		sort.Slice(members, func(left, right int) bool {
+			if members[left].RetestNumber == members[right].RetestNumber {
+				return members[left].AssessmentID < members[right].AssessmentID
+			}
+			return members[left].RetestNumber < members[right].RetestNumber
+		})
+		latestID, latestNumber := shared.ID(""), -1
+		for _, member := range members {
+			if member.IsArchived() {
+				continue
+			}
+			if member.RetestNumber > latestNumber || member.RetestNumber == latestNumber && member.AssessmentID > latestID {
+				latestID, latestNumber = member.AssessmentID, member.RetestNumber
+			}
+		}
+		record := ports.AssessmentCycleListRecord{
+			Cycle: *cloneCycle(cycle), MemberCount: len(members), ActiveBranchCount: len(assessmentcycle.DeriveBranchHeads(members)),
+			LatestAssessmentID: latestID, LatestRetestNumber: latestNumber,
+			Members:         append([]assessmentcycle.Member(nil), members[:min(len(members), query.MemberLimit)]...),
+			MembersHaveMore: len(members) > query.MemberLimit,
+		}
+		matched, err := r.projectCycleRecord(ctx, &record, query)
+		if err != nil {
+			return nil, err
+		}
+		if matched {
+			records = append(records, record)
+		}
+	}
+	sort.Slice(records, func(left, right int) bool {
+		if records[left].Cycle.UpdatedAt.Equal(records[right].Cycle.UpdatedAt) {
+			return records[left].Cycle.ID > records[right].Cycle.ID
+		}
+		return records[left].Cycle.UpdatedAt.After(records[right].Cycle.UpdatedAt)
+	})
+	if len(records) > query.Limit {
+		records = records[:query.Limit]
+	}
+	return records, nil
 }
 
 func cloneCycle(c *assessmentcycle.AssessmentCycle) *assessmentcycle.AssessmentCycle {
@@ -281,4 +382,28 @@ func cloneMember(m *assessmentcycle.Member) *assessmentcycle.Member {
 		copy.ArchivedAt = &t
 	}
 	return &copy
+}
+
+func (r *AssessmentCycleRepository) registerRollback(ctx context.Context) {
+	registerTenantCheckpoint(ctx, r, func(tenantID shared.ID) func() {
+		cycles := cloneMapValues(r.cycles[tenantID], cloneCycle)
+		members := cloneMapValues(r.members[tenantID], func(items map[shared.ID]*assessmentcycle.Member) map[shared.ID]*assessmentcycle.Member {
+			return cloneMapValues(items, cloneMember)
+		})
+		mapping := cloneMapValues(r.assessmentToCycle[tenantID], func(id shared.ID) shared.ID { return id })
+		manifests := cloneMapValues(r.closureManifests[tenantID], func(items map[shared.ID]*assessmentclosure.Manifest) map[shared.ID]*assessmentclosure.Manifest {
+			return cloneMapValues(items, cloneClosureManifest)
+		})
+		reports := cloneMapValues(r.closureReports[tenantID], func(items map[shared.ID]map[string]ports.AssessmentClosureReportArtifact) map[shared.ID]map[string]ports.AssessmentClosureReportArtifact {
+			return cloneMapValues(items, func(versions map[string]ports.AssessmentClosureReportArtifact) map[string]ports.AssessmentClosureReportArtifact {
+				return cloneMapValues(versions, cloneClosureReport)
+			})
+		})
+		return func() {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.cycles[tenantID], r.members[tenantID], r.assessmentToCycle[tenantID] = cycles, members, mapping
+			r.closureManifests[tenantID], r.closureReports[tenantID] = manifests, reports
+		}
+	})
 }

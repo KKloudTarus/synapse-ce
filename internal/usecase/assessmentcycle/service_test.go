@@ -374,7 +374,7 @@ func TestService_ArchiveMemberAndReopenCycle(t *testing.T) {
 		}
 
 		// Reopen from archived is rejected by state machine
-		err := svc.ReopenCycle(ctx, uc.ReopenCycleInput{TenantID: tenantID, CycleID: cycle.ID, Actor: "alice"})
+		err := svc.ReopenCycle(ctx, uc.ReopenCycleInput{TenantID: tenantID, CycleID: cycle.ID, Actor: "alice", Reason: "continue remediation verification"})
 		if !errors.Is(err, shared.ErrValidation) {
 			t.Fatalf("expected ErrValidation reopening archived cycle, got %v", err)
 		}
@@ -387,7 +387,7 @@ func TestService_PostgresParity(t *testing.T) {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres parity test")
 	}
 	ctx := context.Background()
-	if err := postgres.Migrate(ctx, dsn); err != nil {
+	if err := postgres.MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	pool, err := postgres.Connect(ctx, dsn)

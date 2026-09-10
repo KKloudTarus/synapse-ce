@@ -90,16 +90,13 @@ type BackfillHistoricalSingletonResult struct {
 	ReasonCode  string
 }
 
-// BackfillHistoricalSingleton creates one deterministic singleton Cycle for an
-// eligible historical Assessment. The transaction makes the aggregate, root
-// member and audit record one atomic publication.
+// BackfillHistoricalSingleton creates one history-preserving singleton Cycle for an eligible legacy Assessment.
 func (s *Service) BackfillHistoricalSingleton(ctx context.Context, in BackfillHistoricalSingletonInput) (BackfillHistoricalSingletonResult, error) {
 	tenantID := shared.TenantOrDefault(in.TenantID)
 	actor := strings.TrimSpace(in.Actor)
 	if tenantID.IsZero() || in.AssessmentID.IsZero() || in.SchemaVersion <= 0 || actor == "" || len(actor) > 256 {
-		return BackfillHistoricalSingletonResult{}, fmt.Errorf("%w: tenant, assessment, schema version, and actor are required", shared.ErrValidation)
+		return BackfillHistoricalSingletonResult{}, fmt.Errorf("%w: tenant, assessment, and schema version are required", shared.ErrValidation)
 	}
-
 	var result BackfillHistoricalSingletonResult
 	err := s.tx.Run(ctx, tenantID, func(txCtx context.Context) error {
 		assessment, err := s.engagements.GetByID(txCtx, in.AssessmentID)
@@ -139,12 +136,9 @@ func (s *Service) BackfillHistoricalSingleton(ctx context.Context, in BackfillHi
 		if updatedBy == "" {
 			updatedBy = createdBy
 		}
-
-		// Current main has no visible Assessment-to-Project association. ProjectID
-		// denotes a hidden internal analysis context, which was rejected above.
-		boundary := assessmentcycle.BoundaryFor(assessment.BusinessAssetID, "")
+		boundary := assessmentcycle.BoundaryFor(assessment.BusinessAssetID, assessment.AssessmentProjectID)
 		cycleID := historicalSingletonCycleID(tenantID, in.AssessmentID, in.SchemaVersion)
-		cycle, err := assessmentcycle.NewAssessmentCycle(cycleID, tenantID, assessment.Name, boundary, assessment.BusinessAssetID, "", assessment.ID, createdBy, createdAt)
+		cycle, err := assessmentcycle.NewAssessmentCycle(cycleID, tenantID, assessment.Name, boundary, assessment.BusinessAssetID, assessment.AssessmentProjectID, assessment.ID, createdBy, createdAt)
 		if err != nil {
 			return err
 		}
@@ -169,7 +163,7 @@ func (s *Service) BackfillHistoricalSingleton(ctx context.Context, in BackfillHi
 			return err
 		}
 		if s.audit != nil {
-			if err := s.audit.Record(txCtx, ports.AuditEntry{Actor: actor, Action: "assessment_cycle.backfill_created", Target: cycleID.String(), Metadata: map[string]string{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{Actor: strings.TrimSpace(in.Actor), Action: "assessment_cycle.backfill_created", Target: cycleID.String(), Metadata: map[string]string{
 				"tenant_id": tenantID.String(), "assessment_id": assessment.ID.String(), "schema_version": fmt.Sprintf("%d", in.SchemaVersion),
 			}, At: s.clock.Now().UTC()}); err != nil {
 				return fmt.Errorf("audit assessment cycle backfill: %w", err)
@@ -195,6 +189,12 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 
 	if err := assessmentcycle.ValidateBoundaryEnforcement(in.BoundaryKind, in.BusinessAssetID, in.ProjectID); err != nil {
 		return nil, nil, err
+	}
+	if !in.ProjectID.IsZero() && s.projects == nil {
+		return nil, nil, fmt.Errorf("%w: Project ownership validation is unavailable", shared.ErrValidation)
+	}
+	if in.BoundaryKind == assessmentcycle.BoundaryAssetProject && s.assets == nil {
+		return nil, nil, fmt.Errorf("%w: Asset/Project association validation is unavailable", shared.ErrValidation)
 	}
 
 	var createdCycle *assessmentcycle.AssessmentCycle
@@ -232,8 +232,8 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 			}
 		}
 
-		// 3. Validate Project if boundary is project
-		if in.BoundaryKind == assessmentcycle.BoundaryProject && s.projects != nil {
+		// 3. Validate Project ownership for either Project-bearing boundary.
+		if !in.ProjectID.IsZero() && s.projects != nil {
 			if _, err := s.projects.GetByID(txCtx, tenantID, in.ProjectID); err != nil {
 				return fmt.Errorf("%w: project %q validation failed: %v", shared.ErrValidation, in.ProjectID, err)
 			}
@@ -249,20 +249,13 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 		}
 
 		// Rule #10: Hidden Project analysis-context Engagements cannot become Cycle members
-		if !eng.ProjectID.IsZero() {
+		if eng.Internal() {
 			return assessmentcycle.ErrHiddenProjectContext
 		}
 
-		// Verify boundary matching against assessment
-		switch in.BoundaryKind {
-		case assessmentcycle.BoundaryStandalone:
-			if !eng.BusinessAssetID.IsZero() {
-				return fmt.Errorf("%w: standalone cycle requires assessment with no business asset, but found %q", shared.ErrValidation, eng.BusinessAssetID)
-			}
-		case assessmentcycle.BoundaryAsset, assessmentcycle.BoundaryAssetProject:
-			if eng.BusinessAssetID != in.BusinessAssetID {
-				return fmt.Errorf("%w: assessment business asset %q does not match cycle business asset %q", shared.ErrValidation, eng.BusinessAssetID, in.BusinessAssetID)
-			}
+		// All non-null associations, including absence, are part of the key.
+		if eng.BusinessAssetID != in.BusinessAssetID || eng.AssessmentProjectID != in.ProjectID {
+			return fmt.Errorf("%w: Assessment must match the exact Cycle Asset/Project boundary", shared.ErrValidation)
 		}
 
 		// 5. Ensure root assessment does not already belong to any cycle
@@ -297,12 +290,15 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 			return err
 		}
 		if err := s.cycles.CreateMember(txCtx, rootMember); err != nil {
+			if cleanup, ok := s.cycles.(ports.AssessmentCycleCompensationRepository); ok {
+				return errors.Join(err, cleanup.DeleteCycle(context.WithoutCancel(txCtx), tenantID, cycleID))
+			}
 			return err
 		}
 
 		// 8. Audit event
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.created",
 				Target: cycleID.String(),
@@ -312,7 +308,9 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 					"root_assessment_id": in.RootAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle creation: %w", err)
+			}
 		}
 
 		createdCycle = cycle
@@ -324,6 +322,7 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 }
 
 type CreateRetestInput struct {
+	PlannedDate             string
 	TenantID                shared.ID
 	CycleID                 shared.ID
 	PredecessorAssessmentID shared.ID
@@ -335,8 +334,8 @@ type CreateRetestInput struct {
 // CreateRetest atomically adds a new re-test member to an open AssessmentCycle and updates the cycle sequence.
 func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*assessmentcycle.Member, error) {
 	tenantID := shared.TenantOrDefault(in.TenantID)
-	if tenantID.IsZero() || in.CycleID.IsZero() || in.PredecessorAssessmentID.IsZero() || in.NewAssessmentID.IsZero() {
-		return nil, fmt.Errorf("%w: tenant, cycle, predecessor, and new assessment ids are required", shared.ErrValidation)
+	if tenantID.IsZero() || in.CycleID.IsZero() || in.NewAssessmentID.IsZero() {
+		return nil, fmt.Errorf("%w: tenant, cycle, and new assessment ids are required", shared.ErrValidation)
 	}
 
 	var createdMember *assessmentcycle.Member
@@ -348,16 +347,23 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 			return err
 		}
 		if cycle.Status != assessmentcycle.StatusOpen {
-			return fmt.Errorf("%w: cannot add retest to non-open cycle (status: %s)", shared.ErrValidation, cycle.Status)
+			if cycle.Status == assessmentcycle.StatusCompleted {
+				return assessmentcycle.ErrCycleReopenRequired
+			}
+			return assessmentcycle.ErrCycleArchived
+		}
+		predecessorID := in.PredecessorAssessmentID
+		if predecessorID.IsZero() {
+			predecessorID = cycle.SelectedHeadAssessmentID
 		}
 
 		// 2. Validate predecessor member
-		predMember, err := s.cycles.GetMember(txCtx, tenantID, in.CycleID, in.PredecessorAssessmentID)
+		predMember, err := s.cycles.GetMember(txCtx, tenantID, in.CycleID, predecessorID)
 		if err != nil {
-			return fmt.Errorf("%w: predecessor %q not found in cycle: %v", shared.ErrNotFound, in.PredecessorAssessmentID, err)
+			return fmt.Errorf("%w: predecessor %q not found in cycle: %v", shared.ErrNotFound, predecessorID, err)
 		}
 		if predMember.IsArchived() {
-			return fmt.Errorf("%w: predecessor %q is archived", shared.ErrValidation, in.PredecessorAssessmentID)
+			return fmt.Errorf("%w: predecessor %q is archived", shared.ErrValidation, predecessorID)
 		}
 
 		// 3. Validate new assessment
@@ -370,20 +376,12 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 		}
 
 		// Rule #10: Hidden Project analysis-context Engagements cannot become Cycle members
-		if !eng.ProjectID.IsZero() {
+		if eng.Internal() {
 			return assessmentcycle.ErrHiddenProjectContext
 		}
 
-		// Boundary check
-		switch cycle.BoundaryKind {
-		case assessmentcycle.BoundaryStandalone:
-			if !eng.BusinessAssetID.IsZero() {
-				return fmt.Errorf("%w: standalone cycle requires assessment with no business asset", shared.ErrValidation)
-			}
-		case assessmentcycle.BoundaryAsset, assessmentcycle.BoundaryAssetProject:
-			if eng.BusinessAssetID != cycle.BusinessAssetID {
-				return fmt.Errorf("%w: assessment business asset %q does not match cycle business asset %q", shared.ErrValidation, eng.BusinessAssetID, cycle.BusinessAssetID)
-			}
+		if eng.BusinessAssetID != cycle.BusinessAssetID || eng.AssessmentProjectID != cycle.ProjectID {
+			return fmt.Errorf("%w: Re-test must match the exact frozen Cycle Asset/Project boundary", shared.ErrValidation)
 		}
 
 		// Ensure new assessment does not already belong to any cycle
@@ -402,17 +400,23 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 			expectedVer = cycle.Version
 		}
 
-		retestNumber, err := cycle.AdvanceRetest(in.NewAssessmentID, in.PredecessorAssessmentID, expectedVer, in.Actor, now)
+		originalCycle := *cycle
+		retestNumber, err := cycle.AdvanceRetest(in.NewAssessmentID, predecessorID, expectedVer, in.Actor, now)
 		if err != nil {
 			return err
 		}
 
 		// 5. Build member
 		retestMember, err := assessmentcycle.NewRetestMember(
-			tenantID, in.CycleID, in.NewAssessmentID, in.PredecessorAssessmentID,
+			tenantID, in.CycleID, in.NewAssessmentID, predecessorID,
 			retestNumber, in.Actor, now,
 		)
 		if err != nil {
+			return err
+		}
+
+		retestMember.PlannedDate = in.PlannedDate
+		if err := retestMember.Validate(); err != nil {
 			return err
 		}
 
@@ -421,24 +425,26 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 			return err
 		}
 		if err := s.cycles.CreateMember(txCtx, retestMember); err != nil {
-			return err
+			return errors.Join(err, s.cycles.UpdateCycleCAS(context.WithoutCancel(txCtx), &originalCycle, cycle.Version))
 		}
 
 		// 7. Audit event
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.retest_created",
 				Target: in.CycleID.String(),
 				Metadata: map[string]string{
 					"tenant_id":        tenantID.String(),
 					"assessment_id":    in.NewAssessmentID.String(),
-					"predecessor_id":   in.PredecessorAssessmentID.String(),
+					"predecessor_id":   predecessorID.String(),
 					"retest_number":    fmt.Sprintf("%d", retestNumber),
 					"selected_head_id": cycle.SelectedHeadAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle re-test creation: %w", err)
+			}
 		}
 
 		createdMember = retestMember
@@ -540,7 +546,7 @@ func (s *Service) ReparentWithinCycle(ctx context.Context, in ReparentInput) err
 
 		// 8. Audit event
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.reparented",
 				Target: in.CycleID.String(),
@@ -550,7 +556,9 @@ func (s *Service) ReparentWithinCycle(ctx context.Context, in ReparentInput) err
 					"new_predecessor_id": in.NewPredecessorAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle reparent: %w", err)
+			}
 		}
 
 		return nil
@@ -613,7 +621,7 @@ func (s *Service) SelectHead(ctx context.Context, in SelectHeadInput) error {
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.head_selected",
 				Target: in.CycleID.String(),
@@ -622,7 +630,9 @@ func (s *Service) SelectHead(ctx context.Context, in SelectHeadInput) error {
 					"selected_head_id": in.TargetAssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle head selection: %w", err)
+			}
 		}
 
 		return nil
@@ -692,7 +702,7 @@ func (s *Service) ArchiveMember(ctx context.Context, in ArchiveMemberInput) erro
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.member_archived",
 				Target: in.CycleID.String(),
@@ -701,7 +711,9 @@ func (s *Service) ArchiveMember(ctx context.Context, in ArchiveMemberInput) erro
 					"assessment_id": in.AssessmentID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle member archive: %w", err)
+			}
 		}
 
 		return nil
@@ -713,19 +725,25 @@ type ReopenCycleInput struct {
 	CycleID              shared.ID
 	ExpectedCycleVersion int64
 	Actor                string
+	Reason               string
 }
 
-// ReopenCycle transitions a completed AssessmentCycle back to open.
+// ReopenCycle reopens a legacy completed cycle without a closure artifact.
+// Cycles with a sealed closure must use the governed preview/commit flow.
 func (s *Service) ReopenCycle(ctx context.Context, in ReopenCycleInput) error {
 	tenantID := shared.TenantOrDefault(in.TenantID)
-	if tenantID.IsZero() || in.CycleID.IsZero() {
-		return fmt.Errorf("%w: tenant and cycle ids are required", shared.ErrValidation)
+	reason := strings.TrimSpace(in.Reason)
+	if tenantID.IsZero() || in.CycleID.IsZero() || reason == "" || len(reason) > 1024 {
+		return fmt.Errorf("%w: tenant, cycle, and a bounded reopen reason are required", shared.ErrValidation)
 	}
 
 	return s.tx.Run(ctx, tenantID, func(txCtx context.Context) error {
 		cycle, err := s.cycles.LockCycleForUpdate(txCtx, tenantID, in.CycleID)
 		if err != nil {
 			return err
+		}
+		if !cycle.ActiveClosureManifestID.IsZero() {
+			return &APIError{Code: "governed_reopen_required", Cause: shared.ErrConflict}
 		}
 
 		now := s.clock.Now().UTC()
@@ -743,15 +761,18 @@ func (s *Service) ReopenCycle(ctx context.Context, in ReopenCycleInput) error {
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.reopened",
 				Target: in.CycleID.String(),
 				Metadata: map[string]string{
 					"tenant_id": tenantID.String(),
+					"reason":    reason,
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle reopen: %w", err)
+			}
 		}
 
 		return nil
@@ -793,7 +814,7 @@ func (s *Service) ArchiveCycle(ctx context.Context, in ArchiveCycleInput) error 
 		}
 
 		if s.audit != nil {
-			_ = s.audit.Record(txCtx, ports.AuditEntry{
+			if err := s.audit.Record(txCtx, ports.AuditEntry{
 				Actor:  in.Actor,
 				Action: "assessment_cycle.archived",
 				Target: in.CycleID.String(),
@@ -801,11 +822,62 @@ func (s *Service) ArchiveCycle(ctx context.Context, in ArchiveCycleInput) error 
 					"tenant_id": tenantID.String(),
 				},
 				At: now,
-			})
+			}); err != nil {
+				return fmt.Errorf("audit assessment cycle archive: %w", err)
+			}
 		}
 
 		return nil
 	})
+}
+
+func (s *Service) compensateInitialCreate(ctx context.Context, tenantID, cycleID shared.ID) error {
+	cleanup, ok := s.cycles.(ports.AssessmentCycleCompensationRepository)
+	if !ok {
+		return fmt.Errorf("%w: assessment cycle compensation is unavailable", shared.ErrConflict)
+	}
+	return cleanup.DeleteCycle(ctx, shared.TenantOrDefault(tenantID), cycleID)
+}
+
+func (s *Service) compensateCycleMutation(ctx context.Context, original *assessmentcycle.AssessmentCycle, createdAssessmentID shared.ID) error {
+	if original == nil {
+		return fmt.Errorf("%w: original assessment cycle is required", shared.ErrValidation)
+	}
+	current, err := s.cycles.GetCycle(ctx, original.TenantID, original.ID)
+	if err != nil {
+		return err
+	}
+	if err := s.cycles.UpdateCycleCAS(ctx, original, current.Version); err != nil {
+		return err
+	}
+	if createdAssessmentID.IsZero() {
+		return nil
+	}
+	cleanup, ok := s.cycles.(ports.AssessmentCycleCompensationRepository)
+	if !ok {
+		return fmt.Errorf("%w: assessment cycle member compensation is unavailable", shared.ErrConflict)
+	}
+	return cleanup.DeleteMember(ctx, original.TenantID, original.ID, createdAssessmentID)
+}
+
+func (s *Service) compensateRelationshipMutation(ctx context.Context, originalCycle *assessmentcycle.AssessmentCycle, originalMember *assessmentcycle.Member) error {
+	if originalCycle == nil {
+		return fmt.Errorf("%w: original assessment cycle is required", shared.ErrValidation)
+	}
+	if originalMember != nil {
+		currentMember, err := s.cycles.GetMember(ctx, originalMember.TenantID, originalMember.CycleID, originalMember.AssessmentID)
+		if err != nil {
+			return err
+		}
+		if err := s.cycles.UpdateMemberCAS(ctx, originalMember, currentMember.RelationshipVersion); err != nil {
+			return err
+		}
+	}
+	currentCycle, err := s.cycles.GetCycle(ctx, originalCycle.TenantID, originalCycle.ID)
+	if err != nil {
+		return err
+	}
+	return s.cycles.UpdateCycleCAS(ctx, originalCycle, currentCycle.Version)
 }
 
 // GetCycle retrieves an AssessmentCycle by ID.

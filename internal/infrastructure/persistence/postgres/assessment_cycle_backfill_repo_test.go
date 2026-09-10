@@ -18,10 +18,6 @@ type postgresBackfillClock struct{ now time.Time }
 
 func (clock *postgresBackfillClock) Now() time.Time { return clock.now }
 
-type assessmentCycleNoopAudit struct{}
-
-func (assessmentCycleNoopAudit) Record(context.Context, ports.AuditEntry) error { return nil }
-
 func TestPostgresAssessmentCycleBackfillRunner(t *testing.T) {
 	db, dsn := newAssessmentMigrationDB(t)
 	if err := goose.Up(db, "."); err != nil {
