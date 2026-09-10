@@ -325,6 +325,32 @@ type EngagementSourceStore interface {
 	Materialize(ctx context.Context, locator string) (string, sourcepackage.Package, func() error, error)
 }
 
+type EngagementSourceReuser interface {
+	Reuse(ctx context.Context, tenantID, parentEngagementID, childEngagementID, expectedVersionID shared.ID, actor string, at time.Time) (sourcepackage.Package, error)
+}
+
+type EngagementSourceVersionReader interface {
+	GetByVersion(ctx context.Context, tenantID, engagementID, versionID shared.ID) (sourcepackage.Package, error)
+}
+
+// EngagementSourceCompensator releases a newly uploaded, unpublished object after
+// the enclosing metadata transaction has rolled back. Reused objects are retained.
+type EngagementSourceCompensator interface {
+	DiscardUnpublished(ctx context.Context, item sourcepackage.Package) error
+}
+
+// EngagementSourceRepository retains one immutable, versioned package binding per
+// engagement. Delete removes only an unreferenced binding; its boolean is true
+// only when no retained package references the returned object's storage key.
+type EngagementSourceRepository interface {
+	Create(ctx context.Context, item sourcepackage.Package) (sourcepackage.Package, bool, error)
+	Get(ctx context.Context, tenantID, engagementID shared.ID) (sourcepackage.Package, error)
+	GetByVersion(ctx context.Context, tenantID, engagementID, versionID shared.ID) (sourcepackage.Package, error)
+	GetByLocator(ctx context.Context, tenantID shared.ID, locator string) (sourcepackage.Package, error)
+	Delete(ctx context.Context, tenantID, engagementID shared.ID) (sourcepackage.Package, bool, error)
+	ObjectUnreferenced(ctx context.Context, tenantID shared.ID, objectKey string) (bool, error)
+}
+
 // EngagementRepository persists engagements. Returned aggregates are read-only –
 // callers must not mutate them (implementations may return shared instances).
 type EngagementRepository interface {
@@ -620,14 +646,17 @@ type ScanSnapshot struct {
 // ScanManifest captures everything needed to explain + replay a scan result
 // (reproducibility / chain-of-custody). Stored per run.
 type ScanManifest struct {
-	ToolVersions       map[string]string `json:"tool_versions"`       // syft/grype/enry/synapse + *-db
-	VulnDBSnapshot     string            `json:"vuln_db_snapshot"`    // osv.dev@<time> (live source marker)
-	GrypeDBVersion     string            `json:"grype_db_version"`    // pinned grype DB schema@built
-	CorrelationVersion int               `json:"correlation_version"` // bumped when merge logic changes
-	SBOMSHA256         string            `json:"sbom_sha256"`         // hash of the generator's raw SBOM
-	ReproScore         int               `json:"repro_score"`         // 0..100, fraction of pinned inputs
-	PinnedInputs       []string          `json:"pinned_inputs"`       // which inputs are version-pinned
-	UnpinnedInputs     []string          `json:"unpinned_inputs"`     // which are live (e.g. osv.dev)
+	// SourcePackage is frozen at scan admission, never resolved from current
+	// engagement state when rendering historical scan results.
+	SourcePackage      *sourcepackage.Package `json:"source_package,omitempty"`
+	ToolVersions       map[string]string      `json:"tool_versions"`       // syft/grype/enry/synapse + *-db
+	VulnDBSnapshot     string                 `json:"vuln_db_snapshot"`    // osv.dev@<time> (live source marker)
+	GrypeDBVersion     string                 `json:"grype_db_version"`    // pinned grype DB schema@built
+	CorrelationVersion int                    `json:"correlation_version"` // bumped when merge logic changes
+	SBOMSHA256         string                 `json:"sbom_sha256"`         // hash of the generator's raw SBOM
+	ReproScore         int                    `json:"repro_score"`         // 0..100, fraction of pinned inputs
+	PinnedInputs       []string               `json:"pinned_inputs"`       // which inputs are version-pinned
+	UnpinnedInputs     []string               `json:"unpinned_inputs"`     // which are live (e.g. osv.dev)
 }
 
 // ScanRun is one persisted scan execution: its manifest plus the finding identity
@@ -861,17 +890,18 @@ type ScanDebugEvent struct {
 // ScanJob tracks the progress of an asynchronous scan so the UI can show a
 // progress bar and survive a page reload (the pipeline runs server-side).
 type ScanJob struct {
-	ID           string           `json:"id"`
-	EngagementID string           `json:"engagement_id"`
-	Target       string           `json:"target"`
-	Kind         string           `json:"kind"`
-	Status       ScanStatus       `json:"status"`
-	Stage        string           `json:"stage"`
-	Progress     int              `json:"progress"` // 0..100
-	Error        string           `json:"error,omitempty"`
-	StartedAt    time.Time        `json:"started_at"`
-	FinishedAt   *time.Time       `json:"finished_at,omitempty"`
-	DebugEvents  []ScanDebugEvent `json:"debug_events"`
+	SourcePackage *sourcepackage.Package `json:"source_package,omitempty"`
+	ID            string                 `json:"id"`
+	EngagementID  string                 `json:"engagement_id"`
+	Target        string                 `json:"target"`
+	Kind          string                 `json:"kind"`
+	Status        ScanStatus             `json:"status"`
+	Stage         string                 `json:"stage"`
+	Progress      int                    `json:"progress"` // 0..100
+	Error         string                 `json:"error,omitempty"`
+	StartedAt     time.Time              `json:"started_at"`
+	FinishedAt    *time.Time             `json:"finished_at,omitempty"`
+	DebugEvents   []ScanDebugEvent       `json:"debug_events"`
 }
 
 // ScanJobStore persists scan-job status (upserted as the pipeline progresses).
@@ -1357,12 +1387,15 @@ const (
 
 // AcquireRequest identifies a scan target and how to obtain it.
 type AcquireRequest struct {
-	Kind       string // local | git | archive | upload | image (default: local)
-	Value      string // path, git URL, archive path, or image ref
-	Locator    string // internal locator for a server-owned uploaded source package
-	Ref        string // optional git branch/tag to clone (git kind only)
-	BaseRef    string // optional validated Git comparison base ref
-	BaseCommit string // optional immutable base commit from a previous analysis
+	// SourcePackage is server-resolved and pinned before an upload scan is queued.
+	// HTTP adapters must never accept caller-supplied package metadata or locators.
+	SourcePackage *sourcepackage.Package
+	Kind          string // local | git | archive | upload | image (default: local)
+	Value         string // path, git URL, archive path, or image ref
+	Locator       string // internal locator for a server-owned uploaded source package
+	Ref           string // optional git branch/tag to clone (git kind only)
+	BaseRef       string // optional validated Git comparison base ref
+	BaseCommit    string // optional immutable base commit from a previous analysis
 }
 
 // Workspace is an isolated directory holding a target to analyze (never execute).

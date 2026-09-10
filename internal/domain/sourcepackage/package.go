@@ -17,16 +17,22 @@ const (
 )
 
 var sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var versionPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 type Package struct {
-	TenantID     shared.ID `json:"tenant_id"`
-	EngagementID shared.ID `json:"engagement_id"`
-	Filename     string    `json:"filename"`
-	Size         int64     `json:"size"`
-	SHA256       string    `json:"sha256"`
-	CreatedBy    string    `json:"created_by"`
-	CreatedAt    time.Time `json:"created_at"`
-	Locator      string    `json:"-"`
+	VersionID           shared.ID `json:"version_id,omitempty"`
+	ReusedFromVersionID shared.ID `json:"reused_from_version_id,omitempty"`
+	AssociatedBy        string    `json:"associated_by,omitempty"`
+	AssociatedAt        time.Time `json:"associated_at,omitempty"`
+	TenantID            shared.ID `json:"tenant_id"`
+	EngagementID        shared.ID `json:"engagement_id"`
+	Filename            string    `json:"filename"`
+	Size                int64     `json:"size"`
+	SHA256              string    `json:"sha256"`
+	CreatedBy           string    `json:"created_by"`
+	CreatedAt           time.Time `json:"created_at"`
+	Locator             string    `json:"-"`
+	ObjectKey           string    `json:"-"`
 }
 
 func (p Package) Target() string { return TargetPrefix + p.SHA256 }
@@ -46,6 +52,25 @@ func (p Package) Validate() error {
 	}
 	if strings.TrimSpace(p.CreatedBy) == "" || p.CreatedAt.IsZero() {
 		return fmt.Errorf("%w: uploaded source attribution is required", shared.ErrValidation)
+	}
+	if !p.VersionID.IsZero() && (strings.TrimSpace(p.AssociatedBy) == "" || p.AssociatedAt.IsZero()) {
+		return fmt.Errorf("%w: source package version association is required", shared.ErrValidation)
+	}
+	if p.VersionID.IsZero() && !p.ReusedFromVersionID.IsZero() || p.VersionID == p.ReusedFromVersionID && !p.VersionID.IsZero() {
+		return fmt.Errorf("%w: source package reuse version is invalid", shared.ErrValidation)
+	}
+	return nil
+}
+
+func (p Package) ValidateVersion() error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if !versionPattern.MatchString(p.VersionID.String()) || (!p.ReusedFromVersionID.IsZero() && !versionPattern.MatchString(p.ReusedFromVersionID.String())) {
+		return fmt.Errorf("%w: source package version is invalid", shared.ErrValidation)
+	}
+	if p.Filename != BaseFilename(p.Filename) || p.Locator == "" || p.ObjectKey == "" || len(p.Locator) > 1024 || len(p.ObjectKey) > 1024 || len(p.CreatedBy) > 512 || len(p.AssociatedBy) > 512 {
+		return fmt.Errorf("%w: source package storage metadata is invalid", shared.ErrValidation)
 	}
 	return nil
 }

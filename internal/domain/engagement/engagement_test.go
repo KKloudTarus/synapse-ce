@@ -54,6 +54,27 @@ func TestAllowsExecution(t *testing.T) {
 	}
 }
 
+func TestRetestRequiresExplicitExecutionAuthorization(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	engagement := &Engagement{Status: StatusDraft, RequiresExplicitExecutionAuthorization: true}
+	if engagement.AllowsExecution() {
+		t.Fatal("Re-test without explicit authorization and RoE must not execute")
+	}
+	from, to := now.Add(-time.Hour), now.Add(time.Hour)
+	engagement.AuthorizedFrom, engagement.AuthorizedTo = &from, &to
+	if engagement.AllowsExecution() {
+		t.Fatal("authorization window without explicit RoE must not execute")
+	}
+	engagement.RoE = RoE{Blackouts: []Blackout{{From: now.Add(2 * time.Hour), To: now.Add(3 * time.Hour)}}}
+	if engagement.AllowsExecution() {
+		t.Fatal("a blackout-only RoE must not authorize every tool class")
+	}
+	engagement.RoE = RoE{AllowedToolClasses: []ToolClass{"sca"}}
+	if !engagement.AllowsExecution() {
+		t.Fatal("Re-test with explicit authorization window and RoE should execute")
+	}
+}
+
 func TestTransition(t *testing.T) {
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
 	cases := []struct {

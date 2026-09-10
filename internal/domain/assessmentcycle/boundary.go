@@ -57,17 +57,17 @@ func ValidateBoundaryEnforcement(kind BoundaryKind, businessAssetID, projectID s
 	return nil
 }
 
-// BoundaryFor derives the frozen boundary kind from the visible associations
-// retained by an Assessment.
+// BoundaryFor derives the frozen key from visible Assessment associations.
+// Hidden execution contexts are rejected separately, never mapped as Projects.
 func BoundaryFor(assetID, projectID shared.ID) BoundaryKind {
-	switch {
-	case !assetID.IsZero() && !projectID.IsZero():
+	if !assetID.IsZero() && !projectID.IsZero() {
 		return BoundaryAssetProject
-	case !assetID.IsZero():
-		return BoundaryAsset
-	case !projectID.IsZero():
-		return BoundaryProject
-	default:
-		return BoundaryStandalone
 	}
+	if !assetID.IsZero() {
+		return BoundaryAsset
+	}
+	if !projectID.IsZero() {
+		return BoundaryProject
+	}
+	return BoundaryStandalone
 }
