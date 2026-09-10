@@ -554,7 +554,7 @@ func set(items ...string) map[string]bool {
 
 // defaultRules is the owned starter ruleset. Prefix-anchored rules (AWS/GitHub/GitLab/Slack/Google/private
 // key) need no entropy gate; the generic assignment rule is entropy-gated and only MEDIUM to bound FPs.
-func defaultRules() []rule {
+func baseDefaultRules() []rule {
 	return []rule{
 		{
 			id: "aws-access-key-id", category: "AWS", title: "AWS access key ID", severity: shared.SeverityHigh,
