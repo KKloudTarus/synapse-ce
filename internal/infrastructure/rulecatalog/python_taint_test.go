@@ -14,8 +14,8 @@ func TestPythonTaintCatalogRulesHaveCompleteFirstPartyMetadata(t *testing.T) {
 		}
 		metadata[string(item.Key)] = true
 	}
-	if len(metadata) != 7 {
-		t.Fatalf("metadata rules = %d, want seven taint classes", len(metadata))
+	if len(metadata) != 11 {
+		t.Fatalf("metadata rules = %d, want eleven taint classes", len(metadata))
 	}
 	used := map[string]bool{}
 	for _, sink := range taint.DefaultPythonCatalog().Sinks {

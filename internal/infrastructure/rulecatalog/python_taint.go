@@ -66,6 +66,38 @@ func pythonTaintRules() []rule.Rule {
 			"return redirect(url_for('account.dashboard'))",
 			"return redirect(request.args.get('next'))",
 		),
+		pythonTaintRule(
+			"python-taint-ssti", "Interprocedural Python server-side template injection", "CWE-1336", "A03:2021", shared.SeverityHigh,
+			"Tracks untrusted values into Jinja2, Mako, Django, and Tornado template constructors and string-render APIs.",
+			"A template engine evaluates attacker-controlled markup as code, which on engines like Jinja2 can reach remote code execution.\n\nSource: https://cwe.mitre.org/data/definitions/1336.html",
+			"Render fixed template files and pass untrusted values only as escaped data; never build a template from request input.",
+			"return render_template('greeting.html', name=request.args.get('name'))",
+			"return Template(request.args.get('tpl')).render()",
+		),
+		pythonTaintRule(
+			"python-taint-xxe", "Interprocedural Python XML external entity injection", "CWE-611", "A05:2021", shared.SeverityHigh,
+			"Tracks untrusted XML into lxml and the standard-library xml.dom / xml.sax parsers that resolve external entities.",
+			"A parser that resolves external entities on attacker-controlled XML can disclose local files or reach internal network services.\n\nSource: https://cwe.mitre.org/data/definitions/611.html",
+			"Disable DTD loading and entity resolution (defusedxml, or an lxml parser with load_dtd=False, resolve_entities=False, no_network=True) before parsing untrusted XML.",
+			"tree = lxml.etree.parse(data, lxml.etree.XMLParser(load_dtd=False, resolve_entities=False, no_network=True))",
+			"tree = lxml.etree.fromstring(request.get_data())",
+		),
+		pythonTaintRule(
+			"python-taint-ldap", "Interprocedural Python LDAP injection", "CWE-90", "A03:2021", shared.SeverityHigh,
+			"Tracks untrusted values into python-ldap and ldap3 search filters.",
+			"Unescaped input in an LDAP filter can alter the query to bypass authentication or read directory entries beyond the intended scope.\n\nSource: https://cwe.mitre.org/data/definitions/90.html",
+			"Escape filter assertion values with ldap.filter.escape_filter_chars and build the filter from a fixed template.",
+			"flt = '(uid=%s)' % ldap.filter.escape_filter_chars(request.args['uid'])",
+			"conn.search_s(base, scope, '(uid=' + request.args['uid'] + ')')",
+		),
+		pythonTaintRule(
+			"python-taint-xpath", "Interprocedural Python XPath injection", "CWE-643", "A03:2021", shared.SeverityHigh,
+			"Tracks untrusted values into lxml and standard-library ElementTree XPath expressions.",
+			"Attacker-controlled text in an XPath expression can change the selection to read nodes outside the intended scope.\n\nSource: https://cwe.mitre.org/data/definitions/643.html",
+			"Use a fixed XPath expression with variables (lxml XPath variable binding), never string-concatenated request input.",
+			"tree.xpath('//user[@id=$id]', id=request.args['id'])",
+			"tree.xpath(\"//user[@id='\" + request.args['id'] + \"']\")",
+		),
 	}
 }
 
