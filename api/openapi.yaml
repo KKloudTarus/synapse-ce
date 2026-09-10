@@ -575,9 +575,35 @@ paths:
     get:
       tags: [export]
       summary: Export findings as OpenVEX 0.2
+      description: The document @id is content-addressed (an unchanged re-export is idempotent)
+        and each statement carries its own assertion timestamp. Pass ?supersedes=<prior @id>
+        to declare which prior document this export replaces.
+      parameters:
+      - name: supersedes
+        in: query
+        required: false
+        schema: {type: string}
+        description: The @id of a prior OpenVEX document this one supersedes.
       responses:
         "200":
           description: OpenVEX document
+          content:
+            application/json:
+              schema: {type: object}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/engagements/{id}/export/csaf:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    get:
+      tags: [export]
+      summary: Export findings as a CSAF 2.0 VEX document
+      description: The OASIS CSAF 2.0 VEX profile, templated from the same publishable findings
+        as the OpenVEX export (no LLM in the report path).
+      responses:
+        "200":
+          description: CSAF 2.0 VEX document
           content:
             application/json:
               schema: {type: object}

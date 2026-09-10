@@ -730,6 +730,7 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/writeups", rt.authz(userdom.PermView, rt.listWriteups))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/export/sarif", rt.authz(userdom.PermView, rt.withEngTenant(rt.exportSARIF)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/export/openvex", rt.authz(userdom.PermView, rt.withEngTenant(rt.exportOpenVEX)))
+	mux.HandleFunc("GET /api/v1/engagements/{id}/export/csaf", rt.authz(userdom.PermView, rt.withEngTenant(rt.exportCSAF)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/export/spdx", rt.authz(userdom.PermView, rt.withEngTenant(rt.exportSPDX)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/export/cyclonedx", rt.authz(userdom.PermView, rt.withEngTenant(rt.exportCycloneDX)))
 	mux.HandleFunc("POST /api/v1/engagements/{id}/vex", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.applyVEX)))
