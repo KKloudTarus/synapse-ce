@@ -138,10 +138,13 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 	return res, nil
 }
 
-// rpmMatchableIDs are the rpm-family os-release IDs osDistroEcosystem can key to an advisory ecosystem
-// (Rocky/AlmaLinux/Oracle Linux, which OSV keys by "<Name>:<major>"). Others (rhel/centos/fedora/amzn/suse)
-// are cataloged for inventory but flagged unresolved until their ecosystem mapping + advisory feed land.
-var rpmMatchableIDs = map[string]bool{"rocky": true, "almalinux": true, "alma": true, "ol": true, "oracle": true}
+// rpmMatchableIDs are the rpm-family os-release IDs osDistroEcosystem can key to an advisory ecosystem: RHEL
+// (rhel/redhat -> "Red Hat:<major>", served by the owned Red Hat CSAF feed) and the Rocky/AlmaLinux/Oracle
+// rebuilds (keyed "<Name>:<major>" by their own errata). This set must stay in lockstep with osDistroEcosystem:
+// an id is listed only once its ecosystem mapping AND feed exist, so DistroResolved never claims a keying the
+// matcher cannot make. CentOS (Stream drifts ahead of RHEL), Fedora, Amazon Linux, and SUSE stay OFF until
+// their feeds land, so their rpm packages are cataloged for inventory but honestly flagged unresolved.
+var rpmMatchableIDs = map[string]bool{"rhel": true, "redhat": true, "rocky": true, "almalinux": true, "alma": true, "ol": true, "oracle": true}
 
 // dpkgFieldKeys / apkFieldKeys are the ONLY stanza keys each parser reads. parseOSDB stores only these, so a
 // stanza with millions of distinct junk keys cannot grow the per-stanza map (keeps memory O(1) per stanza).
