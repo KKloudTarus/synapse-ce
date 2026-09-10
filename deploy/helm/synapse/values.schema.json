@@ -57,7 +57,8 @@
         "resources",
         "nodeSelector",
         "tolerations",
-        "affinity"
+        "affinity",
+        "assessmentCycleApi"
       ],
       "properties": {
         "replicaCount": {
@@ -131,6 +132,115 @@
         },
         "resources": {
           "$ref": "#/definitions/resources"
+        },
+        "assessmentCycleApi": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "dualWriteEnabled",
+            "dualWriteTenants",
+            "snapshotEnabled",
+            "identityComparisonShadowEnabled",
+            "identityComparisonShadowTenants",
+            "lifecycleReadEnabled",
+            "lifecycleReadTenants",
+            "lifecycleUiDefaultEnabled",
+            "lifecycleUiDefaultTenants",
+            "closureReportEnabled",
+            "migrationBatchSize",
+            "processTenantJobs",
+            "comparisonBacklogWarning",
+            "comparisonBacklogHardLimit",
+            "snapshotCompletionEnabled",
+            "snapshotCompletionTenants"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "dualWriteEnabled": {
+              "type": "boolean"
+            },
+            "dualWriteTenants": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "snapshotEnabled": {
+              "type": "boolean"
+            },
+            "identityComparisonShadowEnabled": {
+              "type": "boolean"
+            },
+            "identityComparisonShadowTenants": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "lifecycleReadEnabled": {
+              "type": "boolean"
+            },
+            "lifecycleReadTenants": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "lifecycleUiDefaultEnabled": {
+              "type": "boolean"
+            },
+            "lifecycleUiDefaultTenants": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "closureReportEnabled": {
+              "type": "boolean"
+            },
+            "migrationBatchSize": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2000
+            },
+            "processTenantJobs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4
+            },
+            "comparisonBacklogWarning": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "comparisonBacklogHardLimit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "snapshotCompletionEnabled": {
+              "type": "boolean"
+            },
+            "snapshotCompletionTenants": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          }
         }
       }
     },
