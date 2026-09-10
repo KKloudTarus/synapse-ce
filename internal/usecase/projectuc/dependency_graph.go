@@ -154,6 +154,7 @@ func buildProjectDependencyGraph(analysisID string, scan scauc.ScanResult) (Depe
 		byNameVersion[component.Name+"\x00"+component.Version] = append(byNameVersion[component.Name+"\x00"+component.Version], id)
 	}
 	sort.Slice(components, func(i, j int) bool { return components[i].id < components[j].id })
+	prodReach := sbom.ProductionReachable(scan.SBOM.Dependencies)
 
 	edgeSeen := make(map[string]bool)
 	children := make(map[string][]string)
@@ -268,9 +269,14 @@ func buildProjectDependencyGraph(analysisID string, scan scauc.ScanResult) (Depe
 		vulns := vulnsByID[ref.id]
 		verdict := licenseVerdict[ref.id]
 		licenseRisk := verdict == string(ports.LicenseWarn) || verdict == string(ports.LicenseDeny) || verdict == "" && riskyCategory
+		effectiveScope := ref.component.Scope
+		if reachable, ok := prodReach[ref.id]; ok && !reachable &&
+			(effectiveScope == "" || effectiveScope == sbom.ScopeProduction || effectiveScope == sbom.ScopeUnknown) {
+			effectiveScope = sbom.ScopeDevelopment
+		}
 		node := DependencyGraphNode{
 			ID: ref.id, Name: ref.component.Name, Version: ref.component.Version, PURL: ref.component.PURL,
-			Scope: ref.component.Scope, Reachability: ref.component.Reachability,
+			Scope: effectiveScope, Reachability: ref.component.Reachability,
 			Direct: itemDepth == 0, Depth: itemDepth, Licenses: licenses,
 			LicenseRisk: licenseRisk, LicenseVerdict: verdict, Vulnerabilities: vulns,
 			VulnerabilityCount: len(vulns), WorstSeverity: worstDependencySeverity(vulns),
@@ -485,7 +491,7 @@ func dependencySubtree(doc *sbom.SBOM, root string) (*sbom.SBOM, error) {
 		if !selected[dependency.Ref] {
 			continue
 		}
-		next := sbom.Dependency{Ref: dependency.Ref}
+		next := sbom.Dependency{Ref: dependency.Ref, Scope: dependency.Scope, Optional: dependency.Optional}
 		for _, child := range dependency.DependsOn {
 			if selected[child] {
 				next.DependsOn = append(next.DependsOn, child)
@@ -499,7 +505,10 @@ func dependencySubtree(doc *sbom.SBOM, root string) (*sbom.SBOM, error) {
 func cloneDependencies(in []sbom.Dependency) []sbom.Dependency {
 	out := make([]sbom.Dependency, len(in))
 	for i, dependency := range in {
-		out[i] = sbom.Dependency{Ref: dependency.Ref, DependsOn: append([]string(nil), dependency.DependsOn...)}
+		out[i] = sbom.Dependency{
+			Ref: dependency.Ref, DependsOn: append([]string(nil), dependency.DependsOn...),
+			Scope: dependency.Scope, Optional: dependency.Optional,
+		}
 	}
 	return out
 }

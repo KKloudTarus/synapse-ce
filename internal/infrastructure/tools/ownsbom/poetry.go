@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -27,12 +28,17 @@ func (Poetry) Ecosystem() string { return "pypi" }
 // Markers are the lockfile basenames Poetry claims.
 func (Poetry) Markers() []string { return []string{"poetry.lock"} }
 
+type poetryDep struct {
+	name     string
+	optional bool
+}
+
 // poetryPkg is a [[package]] block collected in pass 1: identity + the direct dependency names from its
 // [package.dependencies] sub-table (resolved to edges in pass 2).
 type poetryPkg struct {
 	name, version, category string
-	hash                    string   // first artifact hash ("sha256:<hex>") from the package's own `files = [...]` (lock v2.0)
-	deps                    []string // raw direct-dependency names from [package.dependencies]
+	hash                    string      // first artifact hash ("sha256:<hex>") from the package's own `files = [...]` (lock v2.0)
+	deps                    []poetryDep // direct dependencies + explicit optional=true metadata
 }
 
 // Parse extracts the resolved packages + their dependency edges from a poetry.lock. The artifact-hash
@@ -112,11 +118,13 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 		case inPkg && line == "files = [": // lock v2.0 per-package artifact hashes
 			inFiles = true
 		case inDeps && strings.ContainsRune(line, '='):
-			// a dep entry `name = "constraint"` or `name = {version=…}`: the KEY (before the first =) is the
-			// dep name. A non-package-name key (e.g. a "{" array element) is filtered; an unresolvable name
-			// produces no edge in pass 2, so a stray entry is harmless.
-			if k := strings.Trim(strings.TrimSpace(line[:strings.IndexByte(line, '=')]), `"`); isPoetryDepKey(k) {
-				cur.deps = append(cur.deps, k)
+			// A dep entry is `name = "constraint"` or `name = {version=…, optional=true}`. The key names the
+			// package; optionality is captured only when the same TOML value explicitly says optional=true.
+			// Multi-line continuation elements are filtered by isPoetryDepKey and never guessed as optional.
+			i := strings.IndexByte(line, '=')
+			if k := strings.Trim(strings.TrimSpace(line[:i]), `"`); isPoetryDepKey(k) {
+				value := strings.ToLower(strings.ReplaceAll(line[i+1:], " ", ""))
+				cur.deps = append(cur.deps, poetryDep{name: k, optional: strings.Contains(value, "optional=true")})
 			}
 		case inPkg && strings.HasPrefix(line, "name = "):
 			cur.name = tomlString(line[len("name = "):])
@@ -141,7 +149,7 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 		versionsOf[n] = append(versionsOf[n], p.version)
 	}
 
-	// Pass 2: emit components + resolve edges.
+	// Pass 2: emit components + resolve edges, splitting required and optional relationships.
 	set := newComponentSet()
 	var deps []sbom.Dependency
 	for _, p := range pkgs {
@@ -156,21 +164,42 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 			hash = metaHashes[n]
 		}
 		set.add(sbom.Component{Name: n, Version: p.version, PURL: ref, Location: in.Path, Scope: scope, Checksums: pyHashChecksums([]string{hash})})
-		seen := map[string]bool{ref: true} // drop self-edges + duplicate targets
-		var on []string
+		targetOptional := map[string]bool{}
+		seen := map[string]bool{ref: true}
 		for _, d := range p.deps {
-			dn := normalizePyPI(d)
+			dn := normalizePyPI(d.name)
 			vs := versionsOf[dn]
 			if len(vs) != 1 {
 				continue // no [[package]] entry (e.g. the python constraint) OR an ambiguous duplicate name – no edge
 			}
-			if t := purlOf(dn, vs[0]); !seen[t] {
+			t := purlOf(dn, vs[0])
+			if t == ref {
+				continue
+			}
+			if !seen[t] {
 				seen[t] = true
-				on = append(on, t)
+				targetOptional[t] = d.optional
+				continue
+			}
+			if !d.optional { // required wins over an alternate optional declaration
+				targetOptional[t] = false
 			}
 		}
-		if len(on) > 0 {
-			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: on})
+		var required, optional []string
+		for target, isOptional := range targetOptional {
+			if isOptional {
+				optional = append(optional, target)
+			} else {
+				required = append(required, target)
+			}
+		}
+		sort.Strings(required)
+		sort.Strings(optional)
+		if len(required) > 0 {
+			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: required, Scope: scope})
+		}
+		if len(optional) > 0 {
+			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: optional, Scope: scope, Optional: true})
 		}
 	}
 	return set.components(), deps, nil

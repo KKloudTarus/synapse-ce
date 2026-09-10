@@ -157,9 +157,10 @@ func TestPnpmParseV9Edges(t *testing.T) {
 	}
 	byRef := map[string][]string{}
 	for _, d := range deps {
-		byRef[d.Ref] = d.DependsOn
+		byRef[d.Ref] = append(byRef[d.Ref], d.DependsOn...)
 	}
-	// express depends on body-parser (dependencies) AND bytes (optionalDependencies).
+	// express depends on body-parser (dependencies) AND bytes (optionalDependencies). D3.3 may split these
+	// into separate records because optionality is relationship metadata, so aggregate records by source.
 	exp := byRef["pkg:npm/express@4.18.2"]
 	if !contains(exp, "pkg:npm/body-parser@1.20.1") || !contains(exp, "pkg:npm/bytes@3.1.2") {
 		t.Errorf("express edges = %v, want body-parser + bytes", exp)

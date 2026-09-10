@@ -160,8 +160,10 @@ func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 		}
 	}
 
-	// Pass 2: Aggregate valid dependency edges according to PURL identity, ignoring self-edges.
-	edgesByRef := make(map[string]map[string]struct{})
+	// Pass 2: aggregate valid edges by PURL identity while preserving the relationship kind. A Conan
+	// requires edge is production/path-scoped; build_requires is development (or the enclosing background
+	// path). If the same target appears in both lists, the production relationship wins.
+	edgesByRef := make(map[string]map[string]string)
 	for _, id := range nodeIDs {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
@@ -171,40 +173,50 @@ func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 			continue
 		}
 		node := lock.GraphLock.Nodes[id]
-		targetIDs := make([]string, 0, len(node.Requires)+len(node.BuildRequires))
-		targetIDs = append(targetIDs, node.Requires...)
-		targetIDs = append(targetIDs, node.BuildRequires...)
-
-		for _, targetID := range targetIDs {
+		addEdge := func(targetID, scope string) {
 			target := nodePURL[targetID]
 			if target == "" || target == source {
-				continue
+				return
 			}
 			if edgesByRef[source] == nil {
-				edgesByRef[source] = make(map[string]struct{})
+				edgesByRef[source] = make(map[string]string)
 			}
-			edgesByRef[source][target] = struct{}{}
+			old, exists := edgesByRef[source][target]
+			if !exists || scope == prod || old == "" {
+				edgesByRef[source][target] = scope
+			}
+		}
+		for _, targetID := range node.Requires {
+			addEdge(targetID, prod)
+		}
+		for _, targetID := range node.BuildRequires {
+			addEdge(targetID, dev)
 		}
 	}
 
-	// Materialize deterministic graph edges
+	// Materialize deterministic graph edges, split by scope because Dependency metadata applies to the
+	// whole DependsOn group.
 	var deps []sbom.Dependency
 	refs := make([]string, 0, len(edgesByRef))
 	for ref := range edgesByRef {
-		refs = append(refs, ref) // every entry has at least one target by construction
+		refs = append(refs, ref)
 	}
 	sort.Strings(refs)
-
 	for _, ref := range refs {
-		dependsOn := make([]string, 0, len(edgesByRef[ref]))
-		for target := range edgesByRef[ref] {
-			dependsOn = append(dependsOn, target)
+		byScope := map[string][]string{}
+		for target, scope := range edgesByRef[ref] {
+			byScope[scope] = append(byScope[scope], target)
 		}
-		sort.Strings(dependsOn)
-		deps = append(deps, sbom.Dependency{
-			Ref:       ref,
-			DependsOn: dependsOn,
-		})
+		scopes := make([]string, 0, len(byScope))
+		for scope := range byScope {
+			scopes = append(scopes, scope)
+		}
+		sort.Strings(scopes)
+		for _, scope := range scopes {
+			dependsOn := byScope[scope]
+			sort.Strings(dependsOn)
+			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: dependsOn, Scope: scope})
+		}
 	}
 
 	comps := set.components()

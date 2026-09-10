@@ -168,22 +168,13 @@ func TestConanParseV1GraphEdges(t *testing.T) {
 		}
 	}
 
-	if len(deps) != 2 {
-		t.Fatalf("want 2 dependencies, got %d: %+v", len(deps), deps)
+	wantDeps := []sbom.Dependency{
+		{Ref: "pkg:conan/app@1.0", DependsOn: []string{"pkg:conan/cmake@3.29.0"}, Scope: sbom.ScopeDevelopment},
+		{Ref: "pkg:conan/app@1.0", DependsOn: []string{"pkg:conan/lib-a@2.0", "pkg:conan/lib-b@3.0"}, Scope: sbom.ScopeProduction},
+		{Ref: "pkg:conan/lib-a@2.0", DependsOn: []string{"pkg:conan/openssl@3.0.0"}, Scope: sbom.ScopeProduction},
 	}
-
-	if deps[0].Ref != "pkg:conan/app@1.0" {
-		t.Errorf("dep 0 ref want pkg:conan/app@1.0, got %s", deps[0].Ref)
-	}
-	if len(deps[0].DependsOn) != 3 || deps[0].DependsOn[0] != "pkg:conan/cmake@3.29.0" || deps[0].DependsOn[1] != "pkg:conan/lib-a@2.0" || deps[0].DependsOn[2] != "pkg:conan/lib-b@3.0" {
-		t.Errorf("dep 0 DependsOn wrong: %v", deps[0].DependsOn)
-	}
-
-	if deps[1].Ref != "pkg:conan/lib-a@2.0" {
-		t.Errorf("dep 1 ref want pkg:conan/lib-a@2.0, got %s", deps[1].Ref)
-	}
-	if len(deps[1].DependsOn) != 1 || deps[1].DependsOn[0] != "pkg:conan/openssl@3.0.0" {
-		t.Errorf("dep 1 DependsOn wrong: %v", deps[1].DependsOn)
+	if !reflect.DeepEqual(deps, wantDeps) {
+		t.Fatalf("dependencies = %+v, want %+v", deps, wantDeps)
 	}
 }
 
@@ -409,8 +400,8 @@ func TestConanRegistryGenerateIncludesGraphEdges(t *testing.T) {
 		t.Errorf("want 5 components, got %d", len(doc.Components))
 	}
 
-	if len(doc.Dependencies) != 2 {
-		t.Fatalf("want 2 dependencies, got %d: %+v", len(doc.Dependencies), doc.Dependencies)
+	if len(doc.Dependencies) != 3 {
+		t.Fatalf("want 3 dependencies, got %d: %+v", len(doc.Dependencies), doc.Dependencies)
 	}
 }
 
@@ -642,11 +633,12 @@ func TestConanParseV1PythonRequiresMixedEdgeKinds(t *testing.T) {
 	if len(comps) != 4 {
 		t.Fatalf("want 4 components")
 	}
-	if len(deps) != 1 || len(deps[0].DependsOn) != 2 {
-		t.Fatalf("want 1 dep with 2 edges, got %+v", deps)
+	wantDeps := []sbom.Dependency{
+		{Ref: "pkg:conan/app@1.0", DependsOn: []string{"pkg:conan/cmake@2.0"}, Scope: sbom.ScopeDevelopment},
+		{Ref: "pkg:conan/app@1.0", DependsOn: []string{"pkg:conan/runtime@1.0"}, Scope: sbom.ScopeProduction},
 	}
-	if deps[0].DependsOn[0] != "pkg:conan/cmake@2.0" || deps[0].DependsOn[1] != "pkg:conan/runtime@1.0" {
-		t.Errorf("DependsOn wrong: %v", deps[0].DependsOn)
+	if !reflect.DeepEqual(deps, wantDeps) {
+		t.Fatalf("dependencies = %+v, want %+v", deps, wantDeps)
 	}
 }
 

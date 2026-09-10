@@ -340,7 +340,7 @@ func (UV) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.De
 			}
 		}
 		if len(on) > 0 {
-			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: on})
+			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: on, Scope: scope})
 		}
 	}
 

@@ -153,7 +153,7 @@ func (NuGet) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 	var edges []sbom.Dependency
 	for _, ref := range refs {
 		if on := edgeTargets[ref]; len(on) > 0 {
-			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: on})
+			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: on, Scope: scope})
 		}
 	}
 	return comps, edges, nil
