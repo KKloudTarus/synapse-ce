@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { BellRinging01, Plus, Send01, Trash01 } from '@untitledui/icons'
 import { api, AlertNotEnabledError, ApiError } from '../../lib/api'
 import type {
@@ -55,11 +55,6 @@ export function Alerting() {
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(async () => {
     setError(null)
-    if (typeof api.listNotificationChannels !== 'function') {
-      setUnsupported(true)
-      setChannels([])
-      return
-    }
     try {
       const c = await api.listNotificationChannels()
       if (c === null) {
@@ -79,12 +74,20 @@ export function Alerting() {
     }
   }, [])
   useEffect(() => {
-    void load()
-  }, [load])
+    if (canAdmin) void load()
+  }, [load, canAdmin])
   return (
     <div className="space-y-6">
       <LegacyAlertTest canAdmin={canAdmin} />
-      {unsupported ? (
+      {!me ? (
+        <Spinner label="Loading permissions…" />
+      ) : !canAdmin ? (
+        <EmptyState
+          icon={BellRinging01}
+          title="Administrator access required"
+          hint="Only tenant administrators can manage notification settings and delivery history."
+        />
+      ) : unsupported ? (
         <EmptyState
           icon={BellRinging01}
           title="Notification framework is not enabled"
@@ -513,7 +516,9 @@ function RuleCreate({
     initial?.action_types?.join(', ') ?? '',
   )
   const [error, setError] = useState<string | null>(null)
-  const [severity, setSeverity] = useState(initial?.min_severity ?? 'high')
+  const [severity, setSeverity] = useState(
+    initial ? initial.min_severity || 'any' : 'high',
+  )
   const [leadHours, setLeadHours] = useState(
     String((initial?.lead_time_seconds ?? 86400) / 3600),
   )
@@ -542,7 +547,9 @@ function RuleCreate({
         min_severity:
           event === 'vulnerability_action.created' ||
           event === 'incident.created'
-            ? severity
+            ? severity === 'any'
+              ? undefined
+              : severity
             : undefined,
         lead_time_seconds:
           event === 'sla.approaching_deadline'
@@ -634,9 +641,13 @@ function RuleCreate({
               id="notification-severity"
               value={severity}
               onValueChange={setSeverity}
-              options={['critical', 'high', 'medium', 'low', 'info'].map(
-                (v) => ({ value: v, label: v }),
-              )}
+              options={[
+                { value: 'any', label: 'Any severity (including unknown)' },
+                ...['critical', 'high', 'medium', 'low', 'info'].map((v) => ({
+                  value: v,
+                  label: v,
+                })),
+              ]}
             />
           </Field>
         )}
@@ -772,11 +783,16 @@ function RuleList({
 }
 
 function DeliveryHistory({ channels }: { channels: NotificationChannel[] }) {
+  const historyRequest = useRef(0)
+  const attemptRequest = useRef(0)
   const [items, setItems] = useState<NotificationDelivery[]>([])
   const [next, setNext] = useState<string>()
   const [channel, setChannel] = useState('all')
   const [event, setEvent] = useState('all')
   const [state, setState] = useState('all')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [attemptsBusy, setAttemptsBusy] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<NotificationDelivery>()
@@ -785,6 +801,7 @@ function DeliveryHistory({ channels }: { channels: NotificationChannel[] }) {
   >([])
   const load = useCallback(
     async (cursor?: string) => {
+      const request = ++historyRequest.current
       setBusy(true)
       setError(null)
       try {
@@ -792,31 +809,41 @@ function DeliveryHistory({ channels }: { channels: NotificationChannel[] }) {
           channel_id: channel === 'all' ? undefined : channel,
           event_type: event === 'all' ? undefined : event,
           state: state === 'all' ? undefined : state,
+          from: from ? new Date(from).toISOString() : undefined,
+          to: to ? new Date(to).toISOString() : undefined,
           cursor,
         })
+        if (request !== historyRequest.current) return
         setItems((old) => (cursor ? [...old, ...page.items] : page.items))
         setNext(page.next)
       } catch (e) {
+        if (request !== historyRequest.current) return
         setError(
           e instanceof Error ? e.message : 'Could not load delivery history',
         )
       } finally {
-        setBusy(false)
+        if (request === historyRequest.current) setBusy(false)
       }
     },
-    [channel, event, state],
+    [channel, event, state, from, to],
   )
   useEffect(() => {
     void load()
   }, [load])
   async function inspect(d: NotificationDelivery) {
+    const request = ++attemptRequest.current
     setError(null)
     setSelected(d)
     setAttempts([])
+    setAttemptsBusy(true)
     try {
-      setAttempts(await api.listNotificationAttempts(d.id))
+      const records = await api.listNotificationAttempts(d.id)
+      if (request === attemptRequest.current) setAttempts(records)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load attempts')
+      if (request === attemptRequest.current)
+        setError(e instanceof Error ? e.message : 'Could not load attempts')
+    } finally {
+      if (request === attemptRequest.current) setAttemptsBusy(false)
     }
   }
   return (
@@ -861,6 +888,22 @@ function DeliveryHistory({ channels }: { channels: NotificationChannel[] }) {
               { value: 'all', label: 'All states' },
               ...Object.keys(stateTone).map((s) => ({ value: s, label: s })),
             ]}
+          />
+        </Field>
+        <Field label="Created from" htmlFor="history-from">
+          <Input
+            id="history-from"
+            type="datetime-local"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+        </Field>
+        <Field label="Created until" htmlFor="history-to">
+          <Input
+            id="history-to"
+            type="datetime-local"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
           />
         </Field>
       </div>
@@ -932,7 +975,9 @@ function DeliveryHistory({ channels }: { channels: NotificationChannel[] }) {
           <p className="text-sm font-semibold text-primary">
             Attempts for {selected.id}
           </p>
-          {attempts.length === 0 ? (
+          {attemptsBusy ? (
+            <Spinner label="Loading attempts…" />
+          ) : attempts.length === 0 ? (
             <p className="text-sm text-tertiary">No attempt has started.</p>
           ) : (
             attempts.map((a) => (

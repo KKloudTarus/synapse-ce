@@ -4,7 +4,7 @@ import { api, AlertNotEnabledError } from '../../lib/api'
 import { Alerting } from './Alerting'
 
 vi.mock('../../lib/api', () => ({
-  api: { testAlert: vi.fn(), me: vi.fn() },
+  api: { testAlert: vi.fn(), me: vi.fn(), listNotificationChannels: vi.fn() },
   AlertNotEnabledError: class AlertNotEnabledError extends Error {
     constructor() {
       super('Alerting is not enabled in this deployment.')
@@ -14,7 +14,10 @@ vi.mock('../../lib/api', () => ({
 }))
 
 describe('Alerting', () => {
-  beforeEach(() => vi.resetAllMocks())
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.listNotificationChannels).mockResolvedValue(null)
+  })
 
   it('an admin sends a test alert and sees the per-sink outcome', async () => {
     vi.mocked(api.me).mockResolvedValue({ role: 'admin' } as never)

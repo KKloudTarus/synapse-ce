@@ -130,7 +130,7 @@ func TestPyReachToOpenVEXEndToEnd(t *testing.T) {
 	}
 	exp := export.NewService(findingRepo, clock{}, "test")
 	exp.SetJudgments(store)
-	doc, err := exp.OpenVEX(context.Background(), eng)
+	doc, err := exp.OpenVEX(context.Background(), eng, "")
 	if err != nil {
 		t.Fatalf("openvex: %v", err)
 	}

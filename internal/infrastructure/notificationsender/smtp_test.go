@@ -124,3 +124,46 @@ func TestPublicTransportBlocksPrivateDestinations(t *testing.T) {
 		}
 	}
 }
+
+func TestSMTPTimeoutAndRequiredTLS(t *testing.T) {
+	for _, silent := range []bool{true, false} {
+		t.Run(fmt.Sprint("silent=", silent), func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			release := make(chan struct{})
+			defer close(release)
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				_ = conn.SetDeadline(time.Now().Add(time.Second))
+				if silent {
+					<-release
+					return
+				}
+				_, _ = fmt.Fprint(conn, "220 relay\r\n")
+				_, _ = bufio.NewReader(conn).ReadString('\n')
+				_, _ = fmt.Fprint(conn, "250 relay without TLS\r\n")
+				<-release
+			}()
+			host, port, _ := net.SplitHostPort(listener.Addr().String())
+			number, _ := strconv.Atoi(port)
+			sender := New(SMTPConfig{Host: host, Port: number, From: "sender@example.com", RequireTLS: true}, 100*time.Millisecond)
+			work := testWork(notification.ChannelEmail)
+			work.Delivery.Recipient = "recipient@example.com"
+			result := sender.Send(context.Background(), work, ports.NotificationChannelConfig{})
+			if silent {
+				if !result.Retryable {
+					t.Fatalf("timeout: %+v", result)
+				}
+			} else if result.Retryable || result.ErrorCode != "smtp_tls_required" {
+				t.Fatalf("TLS policy: %+v", result)
+			}
+		})
+	}
+}

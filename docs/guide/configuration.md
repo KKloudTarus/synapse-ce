@@ -301,7 +301,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_NOTIFICATION_SMTP_HOST` | (unset) | Operator-managed SMTP relay host used by every tenant Email channel. Tenants can select recipients but cannot select the relay. |
 | `SYNAPSE_NOTIFICATION_SMTP_PORT` | `587` | SMTP relay port. |
 | `SYNAPSE_NOTIFICATION_SMTP_FROM` | (unset) | Envelope and message sender for notification email. Required before an Email channel can deliver. |
-| `SYNAPSE_NOTIFICATION_SMTP_USERNAME` / `_PASSWORD` | (unset) | Optional SMTP authentication. The password is secret and must not be logged. |
+| `SYNAPSE_NOTIFICATION_SMTP_USERNAME` / `SYNAPSE_NOTIFICATION_SMTP_PASSWORD` | (unset) | Optional SMTP authentication. The password is secret and must not be logged. |
 | `SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS` | `true` | Require STARTTLS with certificate verification. Keep enabled in production. |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |
 | `SYNAPSE_FLEET_MIN_AGENT_VERSION` | empty | Reject agents below this version (empty = no floor). |

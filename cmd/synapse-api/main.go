@@ -1571,6 +1571,9 @@ func main() {
 			os.Exit(1)
 		}
 		metrics = observability.New(queueReader, postgres.NewPoolStatsSource(databasePool))
+		if cfg.NotificationEnabled {
+			metrics.EnableNotifications()
+		}
 		httpObserver = metrics
 		scaService.SetObserver(metrics)
 		integrationService.SetObserver(metrics)

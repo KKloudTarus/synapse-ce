@@ -104,3 +104,31 @@ func TestValidateChannelRejectsUnsafeEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleJobRetryBudgetAndTerminalReplay(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		state    domain.DeliveryState
+		attempt  int
+		terminal bool
+	}{{"eighth failure", domain.DeliveryPending, 8, true}, {"ninth claim", domain.DeliveryPending, 9, true}, {"persisted dead", domain.DeliveryDead, 2, true}, {"persisted success", domain.DeliverySucceeded, 2, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeRepo{relevant: true, work: ports.NotificationWork{Delivery: domain.Delivery{ID: "delivery", State: tc.state}, Channel: domain.Channel{ID: "channel", Enabled: true}}}
+			svc, _ := NewService(repo, fakeProtector{raw: []byte(`{}`)}, fakeSender{result: ports.NotificationSendResult{StatusCode: 500, Retryable: true, ErrorCode: "http_500"}}, fakeAudit{}, fakeClock{time.Now()}, &fakeIDs{})
+			err := svc.HandleJob(context.Background(), ports.QueuedJob{TenantID: "tenant", Payload: []byte(`{"delivery_id":"delivery"}`), Attempts: tc.attempt})
+			var directive *DeliveryError
+			if tc.terminal {
+				if !errors.As(err, &directive) || !directive.Terminal() {
+					t.Fatalf("%v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if tc.attempt > 8 || tc.state != domain.DeliveryPending {
+				if repo.finished != "" {
+					t.Fatal("replay performed another attempt")
+				}
+			}
+		})
+	}
+}

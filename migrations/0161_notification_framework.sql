@@ -191,7 +191,7 @@ BEGIN
         IF NEW.kind<>'created' THEN RETURN NEW; END IF;
         tenant:=NEW.tenant_id; skind:='incident'; sid:=NEW.incident_id; etype:='incident.created'; happened:=NEW.occurred_at;
         eng:=COALESCE(NEW.payload->>'EngagementID',''); sev:=COALESCE(NEW.payload->>'Severity','');
-        body:=jsonb_build_object('title',COALESCE(NEW.payload->>'Title','Security incident created'),'summary','Fleet correlation created an incident.','incident_id',NEW.incident_id,'asset_id',NEW.asset_id);
+        body:=jsonb_build_object('title',left(COALESCE(NEW.payload->>'Title','Security incident created'),500),'summary','Fleet correlation created an incident.','incident_id',NEW.incident_id,'asset_id',NEW.asset_id);
     END IF;
     IF tenant IS NULL OR NOT EXISTS(SELECT 1 FROM notification_source_state s WHERE s.tenant_id=tenant AND s.source_kind='framework' AND s.source_id='activation' AND s.observed_at<=happened) THEN RETURN NEW; END IF;
     INSERT INTO notification_source_records(tenant_id,source_kind,source_id,event_type,engagement_id,severity,occurred_at,data)

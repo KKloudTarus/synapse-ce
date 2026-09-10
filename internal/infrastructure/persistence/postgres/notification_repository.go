@@ -157,8 +157,12 @@ func (r *NotificationRepository) UpdateRule(ctx context.Context, rule notificati
 func insertRule(ctx context.Context, tx pgx.Tx, r notification.Rule, update bool) error {
 	for _, id := range r.EngagementIDs {
 		var owned bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM engagements WHERE tenant_id=$1 AND id=$2)`, r.TenantID, id).Scan(&owned); err != nil { return err }
-		if !owned { return fmt.Errorf("notification engagement %s: %w", id, shared.ErrNotFound) }
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM engagements WHERE tenant_id=$1 AND id=$2)`, r.TenantID, id).Scan(&owned); err != nil {
+			return err
+		}
+		if !owned {
+			return fmt.Errorf("notification engagement %s: %w", id, shared.ErrNotFound)
+		}
 	}
 	if !update {
 		if err := notificationAdmission(ctx, tx, r.TenantID, "rule", 200); err != nil {
@@ -300,7 +304,9 @@ func (r *NotificationRepository) PublishToChannel(ctx context.Context, e notific
 	return ids[0], nil
 }
 func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e notification.Event, only shared.ID) ([]shared.ID, error) {
-	if err := e.Validate(); err != nil { return nil, err }
+	if err := e.Validate(); err != nil {
+		return nil, err
+	}
 	data := []byte(e.Data)
 	tag, err := tx.Exec(ctx, `INSERT INTO notification_events(tenant_id,id,event_type,source_kind,source_id,engagement_id,severity,schema_version,occurred_at,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(tenant_id,source_kind,source_id) DO NOTHING`, e.TenantID, e.ID, e.Type, e.SourceKind, e.SourceID, e.EngagementID, e.Severity, e.SchemaVersion, e.OccurredAt, data)
 	if err != nil {
@@ -566,7 +572,7 @@ func (r *NotificationRepository) DeliveryStillRelevant(ctx context.Context, work
 		}
 		var relevant bool
 		err := WithTenant(ctx, r.pool, work.Event.TenantID.String(), func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sla_current_assessments ca JOIN sla_assessments a ON a.tenant_id=ca.tenant_id AND a.id=ca.assessment_id JOIN sla_lifecycles l ON l.tenant_id=ca.tenant_id AND l.engagement_id=ca.engagement_id AND l.finding_id=ca.finding_id WHERE ca.tenant_id=$1 AND ca.engagement_id=$2 AND ca.finding_id=$3 AND ca.assessment_id=$4 AND a.remediate_by=$5 AND l.status IN ('open','mitigating'))`, work.Event.TenantID, data.EngagementID, data.FindingID, data.AssessmentID, data.Deadline).Scan(&relevant)
+			return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sla_current_assessments ca JOIN sla_assessments a ON a.tenant_id=ca.tenant_id AND a.id=ca.assessment_id JOIN sla_lifecycles l ON l.tenant_id=ca.tenant_id AND l.engagement_id=ca.engagement_id AND l.finding_id=ca.finding_id WHERE ca.tenant_id=$1 AND ca.engagement_id=$2 AND ca.finding_id=$3 AND ca.assessment_id=$4 AND a.remediate_by=$5 AND a.remediate_by>now() AND a.tier<>'exception' AND l.status IN ('open','mitigating'))`, work.Event.TenantID, data.EngagementID, data.FindingID, data.AssessmentID, data.Deadline).Scan(&relevant)
 		})
 		return relevant, err
 	case notification.EventFleetAgentOffline:
@@ -598,6 +604,17 @@ func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did s
 			return err
 		}
 		var n int
+		// A shared tenant row serializes this budget across every worker and channel.
+		if _, err := tx.Exec(ctx, `INSERT INTO notification_source_state(tenant_id,source_kind,source_id,fingerprint,active,observed_at) VALUES($1,'delivery_rate','tenant','',true,$2::timestamptz-interval '1 second') ON CONFLICT DO NOTHING`, tenant, at); err != nil {
+			return err
+		}
+		var tenantLast time.Time
+		if err := tx.QueryRow(ctx, `SELECT observed_at FROM notification_source_state WHERE tenant_id=$1 AND source_kind='delivery_rate' AND source_id='tenant' FOR UPDATE`, tenant).Scan(&tenantLast); err != nil {
+			return err
+		}
+		if at.Sub(tenantLast) < 100*time.Millisecond {
+			return fmt.Errorf("%w: tenant rate limited", ports.ErrRetryable)
+		}
 		var enabled bool
 		var last *time.Time
 		if err := tx.QueryRow(ctx, `SELECT enabled AND deleted_at IS NULL,last_attempt_at FROM notification_channels WHERE tenant_id=$1 AND id=(SELECT channel_id FROM notification_deliveries WHERE tenant_id=$1 AND id=$2) FOR UPDATE`, tenant, did).Scan(&enabled, &last); err != nil {
@@ -608,6 +625,9 @@ func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did s
 		}
 		if last != nil && at.Sub(*last) < time.Second {
 			return fmt.Errorf("%w: channel rate limited", ports.ErrRetryable)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE notification_source_state SET observed_at=$2 WHERE tenant_id=$1 AND source_kind='delivery_rate' AND source_id='tenant'`, tenant, at); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE notification_channels SET last_attempt_at=$3 WHERE tenant_id=$1 AND id=(SELECT channel_id FROM notification_deliveries WHERE tenant_id=$1 AND id=$2)`, tenant, did, at); err != nil {
 			return err
@@ -680,14 +700,16 @@ func (r *NotificationRepository) CancelDelivery(ctx context.Context, tenant, did
 			}
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE notification_deliveries SET state='cancelled',last_error=$3,next_attempt_at=NULL,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','retrying')`, tenant, did, sanitizeError(reason))
+		_, err := tx.Exec(ctx, `WITH changed AS (UPDATE notification_deliveries SET state='cancelled',last_error=$3,next_attempt_at=NULL,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','retrying') RETURNING id)
+        INSERT INTO notification_audit_intents(tenant_id,id,delivery_id,action,error_code,occurred_at) SELECT $1,'cancel:'||id,id,'notification.delivery_cancelled',$3,now() FROM changed ON CONFLICT DO NOTHING`, tenant, did, sanitizeError(reason))
 		return err
 	})
 }
 
 func (r *NotificationRepository) DeadLetterDelivery(ctx context.Context, tenant, did shared.ID, reason string) error {
 	return WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE notification_deliveries SET state='dead_letter',last_error=$3,next_attempt_at=NULL,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','retrying')`, tenant, did, sanitizeError(reason))
+		_, err := tx.Exec(ctx, `WITH changed AS (UPDATE notification_deliveries d SET state='dead_letter',last_error=$3,next_attempt_at=NULL,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','retrying') AND EXISTS(SELECT 1 FROM jobs j WHERE j.tenant_id=d.tenant_id AND j.id='notification-'||d.id AND j.status='failed') RETURNING id)
+        INSERT INTO notification_audit_intents(tenant_id,id,delivery_id,action,error_code,occurred_at) SELECT $1,'dead:'||id,id,'notification.delivery_failed',$3,now() FROM changed ON CONFLICT DO NOTHING`, tenant, did, sanitizeError(reason))
 		return err
 	})
 }

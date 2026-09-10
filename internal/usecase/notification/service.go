@@ -431,8 +431,11 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	if err != nil {
 		return err
 	}
-	if work.Delivery.State == domain.DeliverySucceeded || work.Delivery.State == domain.DeliveryCancelled || work.Delivery.State == domain.DeliveryDead {
+	if work.Delivery.State == domain.DeliverySucceeded || work.Delivery.State == domain.DeliveryCancelled {
 		return nil
+	}
+	if work.Delivery.State == domain.DeliveryDead || job.Attempts > 8 {
+		return &DeliveryError{terminal: true, cause: errors.New("notification_delivery_exhausted")}
 	}
 	if !work.Channel.Enabled {
 		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, "channel_disabled")
@@ -451,12 +454,16 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	}
 	raw, err := s.protector.Open(work.Sealed, channelAAD(job.TenantID, work.Channel.ID, work.Channel.SecretVersion))
 	if err != nil {
-		_ = s.repo.FinishAttempt(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, aid, s.clock.Now().UTC(), "failed", 0, "channel_secret_unavailable", nil)
+		if finishErr := s.repo.FinishAttempt(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, aid, s.clock.Now().UTC(), "failed", 0, "channel_secret_unavailable", nil); finishErr != nil {
+			return finishErr
+		}
 		return &DeliveryError{terminal: true, cause: errors.New("channel_secret_unavailable")}
 	}
 	var cfg ports.NotificationChannelConfig
 	if json.Unmarshal(raw, &cfg) != nil {
-		_ = s.repo.FinishAttempt(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, aid, s.clock.Now().UTC(), "failed", 0, "channel_config_invalid", nil)
+		if finishErr := s.repo.FinishAttempt(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, aid, s.clock.Now().UTC(), "failed", 0, "channel_config_invalid", nil); finishErr != nil {
+			return finishErr
+		}
 		return &DeliveryError{terminal: true, cause: errors.New("channel_config_invalid")}
 	}
 	result := s.sender.Send(ctx, work, cfg)
@@ -499,6 +506,9 @@ func (s *Service) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause e
 		return nil
 	}
 	d, err := s.repo.GetDelivery(shared.WithTenant(ctx, job.TenantID), job.TenantID, p.DeliveryID)
+	if err != nil {
+		return err
+	}
 	if err == nil && (d.State == domain.DeliveryPending || d.State == domain.DeliveryRetrying) {
 		return s.repo.DeadLetterDelivery(shared.WithTenant(ctx, job.TenantID), job.TenantID, p.DeliveryID, "worker_dead_letter")
 	}

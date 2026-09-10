@@ -240,7 +240,10 @@ func TestNotificationPostgresCapturedSources(t *testing.T) {
 	if _, err := source.Poll(ctx, now, 100); err != nil {
 		t.Fatal(err)
 	}
-	exec(`INSERT INTO scan_jobs(id,engagement_id,target,kind,status,stage,started_at,finished_at) VALUES('scan','eng','ignored','git','succeeded','done',$1,$1)`, now.Add(time.Second))
+	finished := now.Add(time.Second)
+	if err := NewScanJobStore(pool).Save(ctx, ports.ScanJob{ID: "scan", EngagementID: "eng", Target: "ignored", Kind: "git", Status: ports.ScanSucceeded, Stage: "done", StartedAt: finished, FinishedAt: &finished}); err != nil {
+		t.Fatal(err)
+	}
 	exec(`INSERT INTO projects(id,tenant_id,name,key,source_binding) VALUES('project','notify-a','P','p','{}')`)
 	exec(`INSERT INTO project_analyses(id,tenant_id,project_id,created_at,payload) VALUES('analysis','notify-a','project',$1,'{"gate":{"Passed":false}}')`, now.Add(time.Second))
 	exec(`INSERT INTO incident_events(tenant_id,incident_id,seq,kind,occurred_at,actor,payload) VALUES('notify-a','incident',1,'created',$1,'correlator','{"Severity":"high","Title":"Detected"}')`, now.Add(time.Second))
@@ -273,5 +276,22 @@ func TestNotificationPostgresCapturedSources(t *testing.T) {
 				t.Fatalf("recovery not rechecked: %v %v", relevant, e)
 			}
 		}
+	}
+	// Legacy routing consumes the inbox without a second durable incident send.
+	exec(`INSERT INTO incident_events(tenant_id,incident_id,seq,kind,occurred_at,actor,payload) VALUES('notify-a','legacy-incident',1,'created',$1,'correlator','{"Severity":"high","Title":"Legacy"}')`, now.Add(4*time.Minute))
+	legacy := NewNotificationSource(pool, repo, time.Minute, false)
+	if _, err := legacy.Poll(ctx, now.Add(4*time.Minute), 100); err != nil {
+		t.Fatal(err)
+	}
+	// Keep the heartbeat fresh while switching routing back to the framework.
+	exec("UPDATE fleet_agents SET last_seen_at=$1 WHERE id='agent'", now.Add(5*time.Minute))
+	if _, err := source.Poll(ctx, now.Add(5*time.Minute), 100); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM notification_events WHERE source_kind='incident'`).Scan(&count)
+	}); err != nil || count != 1 {
+		t.Fatalf("legacy incident replayed: %d %v", count, err)
 	}
 }

@@ -134,6 +134,10 @@ func (s *Sender) sendEmail(ctx context.Context, w ports.NotificationWork, _ port
 	if err != nil || strings.ContainsAny(from.Address, "\r\n") {
 		return ports.NotificationSendResult{ErrorCode: "smtp_sender_invalid"}
 	}
+	recipient, err := mail.ParseAddress(w.Delivery.Recipient)
+	if err != nil || recipient.Address != w.Delivery.Recipient || strings.ContainsAny(w.Delivery.Recipient, "\r\n") {
+		return ports.NotificationSendResult{ErrorCode: "smtp_recipient_invalid"}
+	}
 	title, summary := eventText(w)
 	messageID := "<" + w.Delivery.ID.String() + "@synapse.local>"
 	body := "From: " + from.Address + "\r\nTo: " + w.Delivery.Recipient + "\r\nSubject: " + safeHeader(title) + "\r\nMessage-ID: " + messageID + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + limit(summary, 64<<10) + "\r\n"

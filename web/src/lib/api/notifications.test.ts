@@ -2,7 +2,9 @@ import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest'
 import { notificationsApi } from './notifications'
 
 describe('notification API', () => {
-  beforeEach(() => { vi.spyOn(globalThis, 'fetch') })
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch')
+  })
   afterEach(() => vi.restoreAllMocks())
   function respond(body: unknown, status = 200) {
     vi.mocked(fetch).mockResolvedValueOnce({

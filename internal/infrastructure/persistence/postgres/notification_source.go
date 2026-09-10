@@ -211,7 +211,7 @@ func (s *NotificationSource) pollSLA(ctx context.Context, tx pgx.Tx, tenant shar
 		if count >= limit {
 			break
 		}
-		rows, err := tx.Query(ctx, `SELECT ca.assessment_id,ca.engagement_id,ca.finding_id,a.remediate_by,a.tier FROM sla_current_assessments ca JOIN sla_assessments a ON a.tenant_id=ca.tenant_id AND a.id=ca.assessment_id JOIN sla_lifecycles l ON l.tenant_id=ca.tenant_id AND l.engagement_id=ca.engagement_id AND l.finding_id=ca.finding_id WHERE ca.tenant_id=$1 AND l.status IN ('open','mitigating') AND a.remediate_by>$2 AND a.remediate_by<=$2::timestamptz+make_interval(secs=>$3) AND NOT EXISTS (SELECT 1 FROM notification_events n WHERE n.tenant_id=$1 AND n.source_kind='sla_reminder' AND n.data->>'assessment_id'=ca.assessment_id AND (n.data->>'lead_time_seconds')::bigint=$3) ORDER BY a.remediate_by,ca.assessment_id LIMIT $4`, tenant, now, lead, limit-count)
+		rows, err := tx.Query(ctx, `SELECT ca.assessment_id,ca.engagement_id,ca.finding_id,a.remediate_by,a.tier FROM sla_current_assessments ca JOIN sla_assessments a ON a.tenant_id=ca.tenant_id AND a.id=ca.assessment_id JOIN sla_lifecycles l ON l.tenant_id=ca.tenant_id AND l.engagement_id=ca.engagement_id AND l.finding_id=ca.finding_id WHERE ca.tenant_id=$1 AND l.status IN ('open','mitigating') AND a.tier<>'exception' AND a.remediate_by>$2 AND a.remediate_by<=$2::timestamptz+make_interval(secs=>$3) AND NOT EXISTS (SELECT 1 FROM notification_events n WHERE n.tenant_id=$1 AND n.source_kind='sla_reminder' AND n.data->>'assessment_id'=ca.assessment_id AND (n.data->>'lead_time_seconds')::bigint=$3) ORDER BY a.remediate_by,ca.assessment_id LIMIT $4`, tenant, now, lead, limit-count)
 		if err != nil {
 			return count, err
 		}

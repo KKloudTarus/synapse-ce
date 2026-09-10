@@ -1898,6 +1898,8 @@ paths:
       operationId: listNotificationDeliveries
       summary: List durable delivery history
       parameters:
+        - {name: from, in: query, schema: {type: string, format: date-time}, description: Inclusive creation time in RFC3339}
+        - {name: to, in: query, schema: {type: string, format: date-time}, description: Inclusive upper creation time in RFC3339}
         - {name: channel_id, in: query, schema: {type: string}}
         - {name: event_type, in: query, schema: {$ref: '#/components/schemas/NotificationEventType'}}
         - {name: state, in: query, schema: {$ref: '#/components/schemas/NotificationDeliveryState'}}
@@ -9725,13 +9727,15 @@ components:
 
     NotificationChannelInput:
       type: object
+      additionalProperties: false
+      description: Creates a channel or replaces its metadata. PATCH requires revision. Channel type is immutable; blank URL and secret retain the encrypted configuration on PATCH. Webhook creation or rotation requires both URL and a secret of at least 16 bytes.
       required: [name, type, enabled]
       properties:
         name: {type: string, maxLength: 200}
         type: {type: string, enum: [webhook, slack, email]}
         enabled: {type: boolean}
-        url: {type: string, format: uri, description: Write-only HTTPS endpoint for webhook and Slack channels}
-        secret: {type: string, writeOnly: true, minLength: 16}
+        url: {type: string, writeOnly: true, description: HTTPS endpoint for webhook and Slack channels; blank retains the current endpoint on PATCH}
+        secret: {type: string, writeOnly: true, description: At least 16 bytes on creation or rotation; blank retains the current secret on PATCH}
         recipients: {type: array, maxItems: 50, items: {type: string, format: email}}
         revision: {type: integer, minimum: 1}
 
@@ -9759,8 +9763,8 @@ components:
         event_type: {$ref: '#/components/schemas/NotificationEventType'}
         min_severity: {type: string, enum: [critical, high, medium, low, info]}
         action_types: {type: array, items: {type: string}}
-        engagement_ids: {type: array, items: {type: string}}
-        channel_ids: {type: array, minItems: 1, items: {type: string}}
+        engagement_ids: {type: array, maxItems: 200, items: {type: string}}
+        channel_ids: {type: array, minItems: 1, maxItems: 50, items: {type: string}}
         lead_time_seconds: {type: integer, minimum: 0, maximum: 2592000}
         revision: {type: integer, minimum: 1}
 

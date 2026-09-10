@@ -12,7 +12,7 @@ func TestMigration0161NotificationFramework(t *testing.T) {
 	if err := goose.UpTo(db, ".", 161); err != nil {
 		t.Fatalf("apply 0161: %v", err)
 	}
-	for _, table := range []string{"notification_channels", "notification_channel_versions", "notification_rules", "notification_rule_channels", "notification_events", "notification_deliveries", "notification_delivery_attempts", "notification_source_state"} {
+	for _, table := range []string{"notification_channels", "notification_channel_versions", "notification_rules", "notification_rule_channels", "notification_events", "notification_deliveries", "notification_delivery_attempts", "notification_source_state", "notification_source_records", "notification_audit_intents"} {
 		requireMigrationTable(t, db, table, true)
 		requireMigrationRLS(t, db, table)
 	}
