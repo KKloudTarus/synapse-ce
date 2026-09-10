@@ -82,6 +82,7 @@ type Service struct {
 	secretHistory                    bool                                  // also scan git history for committed-then-removed secrets
 	includeTestSecrets               bool                                  // report secrets in test/fixture/docs paths (default false: suppress)
 	misconfig                        ports.MisconfigScanner                // optional deterministic IaC/config misconfig scan over the live workspace
+	imageConfig                      ports.ImageConfigChecker              // optional owned image config + build-history hardening checks (D7.10)
 	fpTriager                        ports.FPTriager                       // optional LLM false-positive critique of production-scope source findings
 	fpTriageMaxFindings              int                                   // hard per-scan candidate cap; untriaged findings remain gating
 	fpTriageMode                     aiTriageMode                          // shadow by default; enforce must be selected explicitly
@@ -361,6 +362,9 @@ func boolToInt(b bool) int {
 // SetMisconfigScanner configures the optional deterministic IaC/config misconfig scanner.
 // nil ⇒ no misconfig scanning. A setter keeps the existing NewService call sites unchanged.
 func (s *Service) SetMisconfigScanner(m ports.MisconfigScanner) { s.misconfig = m }
+
+// SetImageConfigChecker configures the optional owned image config + build-history hardening checker. nil ⇒ off.
+func (s *Service) SetImageConfigChecker(c ports.ImageConfigChecker) { s.imageConfig = c }
 
 // SetSuppressionLoader configures the optional repo-committed .synapseignore accepted-risk policy loader.
 // nil ⇒ no suppression. Suppressed findings are always retained + surfaced, never silently dropped.
@@ -3234,6 +3238,13 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 				result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, rootfsRaws, now, s.minSeverity)...)
 			}
 		}
+	}
+	// Image config + build-history hardening (D7.10): a container that runs as root, a credential baked into
+	// an ENV variable, and a sensitive build command (a remote script piped to a shell, an ADD of a remote
+	// URL). Pure over the recovered image config; runs for any image target, independent of the misconfig
+	// scanner, and needs no filesystem walk.
+	if opts.scansVulnerabilities() && s.imageConfig != nil && result.Image != nil {
+		result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, s.imageConfig.Check(result.Image), now, s.minSeverity)...)
 	}
 	if opts.CodeQuality && s.codeQuality != nil {
 		report, qerr := s.codeQuality.BuildReport(ctx, ws.Dir)

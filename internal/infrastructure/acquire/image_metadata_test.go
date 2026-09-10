@@ -92,3 +92,67 @@ func TestReadBlobJSONRejectsTraversal(t *testing.T) {
 		}
 	}
 }
+
+// TestReadImageInfoCapturesUserAndRedactsSecretEnv covers D7.10: config.User and config.Env are captured, and
+// a secret-named env value is REDACTED at read time so a baked-in credential never reaches persisted data.
+func TestReadImageInfoCapturesUserAndRedactsSecretEnv(t *testing.T) {
+	layout := t.TempDir()
+	config := map[string]any{
+		"architecture": "amd64", "os": "linux",
+		"config": map[string]any{
+			"User": "root",
+			"Env":  []string{"PATH=/usr/bin", "API_TOKEN=ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "LANG=C.UTF-8"},
+		},
+		"rootfs": map[string]any{"diff_ids": []string{"sha256:layer0"}},
+	}
+	cfgBytes, _ := json.Marshal(config)
+	cfgDigest := writeBlob(t, layout, cfgBytes)
+	manBytes, _ := json.Marshal(map[string]any{"config": map[string]any{"digest": cfgDigest}})
+	manDigest := writeBlob(t, layout, manBytes)
+	idxBytes, _ := json.Marshal(map[string]any{"manifests": []map[string]any{
+		{"digest": manDigest, "platform": map[string]any{"os": "linux", "architecture": "amd64"}},
+	}})
+	if err := os.WriteFile(filepath.Join(layout, "index.json"), idxBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info := readImageInfo(layout, "app:latest")
+	if info == nil {
+		t.Fatal("readImageInfo returned nil")
+	}
+	if info.User != "root" {
+		t.Errorf("User = %q, want root", info.User)
+	}
+	joined := ""
+	for _, e := range info.Env {
+		joined += e + "\n"
+	}
+	if want := "API_TOKEN=<redacted>"; !contains(info.Env, want) {
+		t.Errorf("secret env value must be redacted to %q, got %v", want, info.Env)
+	}
+	if containsSubstr(joined, "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
+		t.Errorf("the raw secret value must never be stored, got %v", info.Env)
+	}
+	if !contains(info.Env, "PATH=/usr/bin") { // a non-secret env keeps its value
+		t.Errorf("non-secret env must be preserved, got %v", info.Env)
+	}
+}
+
+func contains(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSubstr(hay, needle string) bool {
+	return len(needle) > 0 && len(hay) >= len(needle) && (func() bool {
+		for i := 0; i+len(needle) <= len(hay); i++ {
+			if hay[i:i+len(needle)] == needle {
+				return true
+			}
+		}
+		return false
+	})()
+}

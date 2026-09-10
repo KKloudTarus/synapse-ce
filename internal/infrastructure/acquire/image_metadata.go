@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/imageconfig"
 )
 
 // readImageInfo recovers container-image metadata from a pulled OCI image layout
@@ -34,6 +35,8 @@ func readImageInfo(layoutDir, ref string) *sbom.ImageInfo {
 		OS:           cfg.OS,
 		Architecture: cfg.Architecture,
 		Layers:       buildLayers(cfg),
+		User:         strings.TrimSpace(cfg.Config.User),
+		Env:          imageconfig.RedactEnv(cfg.Config.Env),
 	}
 	return info
 }
@@ -57,7 +60,7 @@ func buildLayers(cfg ociConfig) []sbom.ImageLayer {
 		layers = append(layers, sbom.ImageLayer{
 			Index:     di,
 			DiffID:    diffIDs[di],
-			CreatedBy: strings.TrimSpace(h.CreatedBy),
+			CreatedBy: imageconfig.RedactCommand(strings.TrimSpace(h.CreatedBy)),
 			Created:   strings.TrimSpace(h.Created),
 		})
 		di++
@@ -98,7 +101,11 @@ type ociManifest struct {
 type ociConfig struct {
 	Architecture string `json:"architecture"`
 	OS           string `json:"os"`
-	RootFS       struct {
+	Config       struct {
+		User string   `json:"User"`
+		Env  []string `json:"Env"`
+	} `json:"config"`
+	RootFS struct {
 		DiffIDs []string `json:"diff_ids"`
 	} `json:"rootfs"`
 	History []struct {

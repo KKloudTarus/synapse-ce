@@ -42,6 +42,13 @@ type ImageInfo struct {
 	// A heuristic ESTIMATE (see MarkBaseLayers): the count of layers below the first
 	// layer that introduced an application (non-OS) package. Zero until classified.
 	BaseLayerCount int `json:"base_layer_count"`
+	// User is the image config's default runtime user (`config.User`). Empty means no USER was set, so the
+	// container runs as root, a hardening finding (imageconfig.Check).
+	User string `json:"user,omitempty"`
+	// Env is the image config's default environment (`config.Env`), stored as "KEY=VALUE". The VALUE of an
+	// entry whose key indicates a credential is REDACTED at read time, so a baked-in secret never reaches
+	// persisted data; the key is preserved so a "secret in ENV" hardening finding can still name it.
+	Env []string `json:"env,omitempty"`
 }
 
 // LayerIndexByDiffID returns the stack index of the layer with the given diff_id,

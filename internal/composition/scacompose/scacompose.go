@@ -25,6 +25,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/grype"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ignorefile"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/imageconfig"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarchecksum"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarhash"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarlicense"
@@ -379,6 +380,10 @@ func Configure(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, log *s
 		svc.SetInstalledPackageCataloger(bincat.New()) // owned Go-binary, Python dist-info, Java jar, Node.js, and Ruby gem cataloging from the rootfs
 		log.Info("image-rootfs cataloging ENABLED (dpkg + apk OS packages; Go binaries, Python dist-info, Java jars, Node.js packages, Ruby gems)")
 	}
+	// Image config + build-history hardening runs for any image target (root user, credential in ENV,
+	// sensitive build command). It is pure over the recovered image config and needs no filesystem walk, so it
+	// is always wired; it is a no-op for a non-image scan.
+	svc.SetImageConfigChecker(imageconfig.New())
 	if cfg.MisconfigEnabled {
 		// Helm chart rendering shells out `helm template` over an UNTRUSTED chart; like the maven/gradle
 		// resolvers it must be sandbox-confined on the API host (a crafted chart's Sprig getHostByName is an
