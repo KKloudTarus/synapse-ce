@@ -45,6 +45,12 @@ type Observation struct {
 	EPSSPercentile     *float64
 	PublicExploit      *bool
 	ActiveExploitation *bool
+	// SignatureVerified records that this observation's source document carried a valid provider OpenPGP
+	// signature that was verified before ingest (D1.8). It is persisted in the observation's normalized
+	// payload as the authenticity audit trail. omitempty: a provider without signature verification (most
+	// feeds) simply omits it. Because verification is fail-closed, an ingested observation is never marked
+	// with a failed verification; the field is set true only on a document that verified.
+	SignatureVerified bool `json:",omitempty"`
 }
 
 // ObservationRecord is the bounded persistence envelope for one provider record.
