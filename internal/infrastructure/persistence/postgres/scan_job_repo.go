@@ -230,11 +230,11 @@ func decodeScanJobSource(data []byte, job *ports.ScanJob) error {
 }
 
 func (r *ScanJobStore) execSourceJob(ctx context.Context, job ports.ScanJob, query string, args ...any) (pgconn.CommandTag, error) {
-	if job.SourcePackage == nil {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if job.SourcePackage == nil && (!ok || tenantID.IsZero()) {
 		return r.pool.Exec(ctx, query, args...)
 	}
-	tenantID, ok := shared.TenantFrom(ctx)
-	if !ok || tenantID != job.SourcePackage.TenantID {
+	if job.SourcePackage != nil && (!ok || tenantID != job.SourcePackage.TenantID) {
 		return pgconn.CommandTag{}, fmt.Errorf("%w: scan source tenant context does not match", shared.ErrValidation)
 	}
 	var result pgconn.CommandTag

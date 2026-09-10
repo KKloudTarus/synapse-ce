@@ -52,6 +52,7 @@ import (
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
 	oidcadapter "github.com/KKloudTarus/synapse-ce/internal/infrastructure/oidc"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/file"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
@@ -166,6 +167,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/jsreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
+	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	offensivepolicyuc "github.com/KKloudTarus/synapse-ce/internal/usecase/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -1315,6 +1317,28 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	if cfg.NotificationEnabled {
+		if databasePool == nil {
+			log.Error("SYNAPSE_NOTIFICATIONS_ENABLED requires PostgreSQL")
+			os.Exit(1)
+		}
+		if cfg.VaultMasterKey == "" {
+			log.Error("SYNAPSE_NOTIFICATIONS_ENABLED requires SYNAPSE_VAULT_MASTER_KEY shared by API and worker")
+			os.Exit(1)
+		}
+		notificationSender := notificationsender.New(notificationsender.SMTPConfig{
+			Host: cfg.NotificationSMTPHost, Port: cfg.NotificationSMTPPort, From: cfg.NotificationSMTPFrom,
+			Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS,
+		}, 10*time.Second)
+		notificationService, notificationErr := notificationuc.NewService(postgres.NewNotificationRepository(databasePool), vaultCipher, notificationSender, auditLog, clock, ids)
+		if notificationErr != nil {
+			log.Error("notification service init failed", "err", notificationErr)
+			os.Exit(1)
+		}
+		notificationService.SetTransactionRunner(postgres.NewTenantTransactionRunner(databasePool))
+		router.SetNotifications(notificationService)
+		log.Info("tenant notification management ENABLED")
+	}
 	router.SetIntegrations(integrationService)
 	if summaries, ok := findingRepo.(ports.FindingSummaryReader); ok {
 		router.SetFindingSummaries(summaries)
@@ -1547,6 +1571,9 @@ func main() {
 			os.Exit(1)
 		}
 		metrics = observability.New(queueReader, postgres.NewPoolStatsSource(databasePool))
+		if cfg.NotificationEnabled {
+			metrics.EnableNotifications()
+		}
 		httpObserver = metrics
 		scaService.SetObserver(metrics)
 		integrationService.SetObserver(metrics)

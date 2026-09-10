@@ -28,6 +28,7 @@ architectural boundaries that keep execution auditable.
 | [Fleet and runtime defense](fleet-blue-team.md) | Agent identity, inventory, detections, coverage, work, rollout, and decommissioning |
 | [AI triage review](ai-triage-review.md) | Propose/verify/review flow, evidence requirements, independence, and promotion |
 | [Remediation SLA governance](sla-governance.md) | Risk scoring, immutable deadlines, lifecycle transitions, and reassessment |
+| [Notifications and webhooks](notifications.md) | Tenant routing rules, signed webhooks, Slack, email, retry, and delivery history |
 
 ## Operate and integrate
 

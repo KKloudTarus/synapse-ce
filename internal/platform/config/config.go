@@ -208,6 +208,15 @@ type Config struct {
 	// chars or base64 of 32 bytes. Empty = an ephemeral key (dev only; stored secrets do
 	// not survive restart). Required in production. Never logged.
 	VaultMasterKey string
+	// NotificationEnabled enables tenant-managed durable notification delivery.
+	// It requires PostgreSQL and a stable VaultMasterKey shared by API and worker.
+	NotificationEnabled        bool
+	NotificationSMTPHost       string
+	NotificationSMTPPort       int
+	NotificationSMTPFrom       string
+	NotificationSMTPUsername   string
+	NotificationSMTPPassword   string
+	NotificationSMTPRequireTLS bool
 	// ReconViaWorker routes recon runs through the durable queue: the API enqueues
 	// and the non-root synapse-worker claims and executes them. Scoped egress is
 	// configured by a separate root-owned broker. Requires Postgres. Default false
@@ -799,30 +808,37 @@ func Load() Config {
 
 		ReconAllowCapabilitySensitive: getbool("SYNAPSE_RECON_ALLOW_CAPABILITY_SENSITIVE", false),
 
-		EvidenceSigningSeed:       getenv("SYNAPSE_EVIDENCE_SIGNING_SEED", ""),
-		TSAURL:                    getenv("SYNAPSE_TSA_URL", ""),
-		SandboxEnabled:            getbool("SYNAPSE_SANDBOX_ENABLED", false),
-		SandboxMemMax:             int64(getint("SYNAPSE_SANDBOX_MEM_MAX", 512<<20)),
-		SandboxPidsMax:            getint("SYNAPSE_SANDBOX_PIDS_MAX", 256),
-		DASTHelperBin:             getenv("SYNAPSE_DAST_HELPER_BIN", "synapse-dast-helper"),
-		DASTMaxReauth:             maxReauth,
-		DASTRatePerSec:            ratePerSec,
-		DASTConcurrency:           concurrency,
-		DASTMaxDepth:              maxDepth,
-		DASTMaxPages:              maxPages,
-		DASTMaxRequests:           maxRequests,
-		DASTMaxWallClock:          maxWallClock,
-		VaultMasterKey:            getenv("SYNAPSE_VAULT_MASTER_KEY", ""),
-		ReconViaWorker:            getbool("SYNAPSE_RECON_VIA_WORKER", false),
-		EgressBrokerSocket:        getenv("SYNAPSE_EGRESS_BROKER_SOCKET", "/run/synapse-egress-broker/egress-broker.sock"),
-		EgressGrantAuthorityAddr:  getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR", ""),
-		EgressGrantAuthorityURL:   getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_URL", ""),
-		EgressGrantAuthorityToken: getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN", ""),
-		EgressGrantIssuerToken:    getenv("SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN", ""),
-		EgressGrantSigningSeed:    getenv("SYNAPSE_EGRESS_GRANT_SIGNING_SEED", ""),
-		ToolExecutionMode:         getenv("SYNAPSE_TOOL_EXECUTION_MODE", ""),
-		ToolHashes:                parsePins(getenv("SYNAPSE_TOOL_HASHES", "")),
-		AgentEnabled:              getbool("SYNAPSE_AGENT_ENABLED", false), // needs LLM creds → stays opt-in
+		EvidenceSigningSeed:        getenv("SYNAPSE_EVIDENCE_SIGNING_SEED", ""),
+		TSAURL:                     getenv("SYNAPSE_TSA_URL", ""),
+		SandboxEnabled:             getbool("SYNAPSE_SANDBOX_ENABLED", false),
+		SandboxMemMax:              int64(getint("SYNAPSE_SANDBOX_MEM_MAX", 512<<20)),
+		SandboxPidsMax:             getint("SYNAPSE_SANDBOX_PIDS_MAX", 256),
+		DASTHelperBin:              getenv("SYNAPSE_DAST_HELPER_BIN", "synapse-dast-helper"),
+		DASTMaxReauth:              maxReauth,
+		DASTRatePerSec:             ratePerSec,
+		DASTConcurrency:            concurrency,
+		DASTMaxDepth:               maxDepth,
+		DASTMaxPages:               maxPages,
+		DASTMaxRequests:            maxRequests,
+		DASTMaxWallClock:           maxWallClock,
+		VaultMasterKey:             getenv("SYNAPSE_VAULT_MASTER_KEY", ""),
+		NotificationEnabled:        getbool("SYNAPSE_NOTIFICATIONS_ENABLED", false),
+		NotificationSMTPHost:       getenv("SYNAPSE_NOTIFICATION_SMTP_HOST", ""),
+		NotificationSMTPPort:       getint("SYNAPSE_NOTIFICATION_SMTP_PORT", 587),
+		NotificationSMTPFrom:       getenv("SYNAPSE_NOTIFICATION_SMTP_FROM", ""),
+		NotificationSMTPUsername:   getenv("SYNAPSE_NOTIFICATION_SMTP_USERNAME", ""),
+		NotificationSMTPPassword:   getenv("SYNAPSE_NOTIFICATION_SMTP_PASSWORD", ""),
+		NotificationSMTPRequireTLS: getbool("SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS", true),
+		ReconViaWorker:             getbool("SYNAPSE_RECON_VIA_WORKER", false),
+		EgressBrokerSocket:         getenv("SYNAPSE_EGRESS_BROKER_SOCKET", "/run/synapse-egress-broker/egress-broker.sock"),
+		EgressGrantAuthorityAddr:   getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR", ""),
+		EgressGrantAuthorityURL:    getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_URL", ""),
+		EgressGrantAuthorityToken:  getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN", ""),
+		EgressGrantIssuerToken:     getenv("SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN", ""),
+		EgressGrantSigningSeed:     getenv("SYNAPSE_EGRESS_GRANT_SIGNING_SEED", ""),
+		ToolExecutionMode:          getenv("SYNAPSE_TOOL_EXECUTION_MODE", ""),
+		ToolHashes:                 parsePins(getenv("SYNAPSE_TOOL_HASHES", "")),
+		AgentEnabled:               getbool("SYNAPSE_AGENT_ENABLED", false), // needs LLM creds → stays opt-in
 		// Analysis capabilities default ON so the tool is fully effective out of the box (the UI and a
 		// bare scan get every deterministic, best-effort feature without hunting env flags). Each is
 		// safe to default on: file/compute-based, no external service, and a no-op when its input is

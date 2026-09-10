@@ -33,6 +33,7 @@ import (
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
 	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
+	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
@@ -148,6 +149,7 @@ type Router struct {
 	assessmentLifecycleUI    func(string) bool
 	incidentResponses        incidentResponseCoordinator // optional; nil ⇒ incident-scoped governed response route is not registered
 	responseObservers        responseObserverAdmin       // optional; nil ⇒ response-observer assignment route is not registered
+	notifications            *notificationuc.Service     // optional; nil ⇒ tenant notification management routes are not registered
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -322,6 +324,9 @@ func (rt *Router) requireAssessmentLifecycleWrite(next http.HandlerFunc) http.Ha
 // SetSLA wires the opt-in risk-based remediation governance API.
 func (rt *Router) SetSLA(service *slauc.Service) { rt.sla = service }
 
+// SetNotifications wires tenant-managed channels, rules, and delivery history.
+func (rt *Router) SetNotifications(service *notificationuc.Service) { rt.notifications = service }
+
 // SetIntegrations wires the CI/CD integration API.
 func (rt *Router) SetIntegrations(service *integrationuc.Service) { rt.integrations = service }
 
@@ -475,6 +480,22 @@ func (rt *Router) routes() *http.ServeMux {
 	}
 	if rt.alerts != nil {
 		mux.HandleFunc("POST /api/v1/alerts/test", rt.authz(userdom.PermAdminister, rt.testAlert))
+	}
+	if rt.notifications != nil {
+		mux.HandleFunc("GET /api/v1/notifications/channels", rt.authz(userdom.PermAdminister, rt.listNotificationChannels))
+		mux.HandleFunc("POST /api/v1/notifications/channels", rt.authz(userdom.PermAdminister, rt.createNotificationChannel))
+		mux.HandleFunc("GET /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermAdminister, rt.getNotificationChannel))
+		mux.HandleFunc("PATCH /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermAdminister, rt.updateNotificationChannel))
+		mux.HandleFunc("DELETE /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermAdminister, rt.deleteNotificationChannel))
+		mux.HandleFunc("POST /api/v1/notifications/channels/{nid}/test", rt.authz(userdom.PermAdminister, rt.testNotificationChannel))
+		mux.HandleFunc("GET /api/v1/notifications/rules", rt.authz(userdom.PermAdminister, rt.listNotificationRules))
+		mux.HandleFunc("POST /api/v1/notifications/rules", rt.authz(userdom.PermAdminister, rt.createNotificationRule))
+		mux.HandleFunc("GET /api/v1/notifications/rules/{nid}", rt.authz(userdom.PermAdminister, rt.getNotificationRule))
+		mux.HandleFunc("PATCH /api/v1/notifications/rules/{nid}", rt.authz(userdom.PermAdminister, rt.updateNotificationRule))
+		mux.HandleFunc("DELETE /api/v1/notifications/rules/{nid}", rt.authz(userdom.PermAdminister, rt.deleteNotificationRule))
+		mux.HandleFunc("GET /api/v1/notifications/deliveries", rt.authz(userdom.PermAdminister, rt.listNotificationDeliveries))
+		mux.HandleFunc("GET /api/v1/notifications/deliveries/{nid}", rt.authz(userdom.PermAdminister, rt.getNotificationDelivery))
+		mux.HandleFunc("GET /api/v1/notifications/deliveries/{nid}/attempts", rt.authz(userdom.PermAdminister, rt.listNotificationAttempts))
 	}
 	if rt.businessAssets != nil {
 		if rt.eng != nil && rt.findings != nil {

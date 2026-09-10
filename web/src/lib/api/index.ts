@@ -14,6 +14,7 @@ export { type AttackPathResult, type AttackPath, type AttackPathNode, type Attac
 export { type SLAPoliciesView, type SLAPolicy, type SLAConfig, type SLAWeights, type SLAThresholds, type SLADueRange, type SLADueRanges, type SLADueTier, type SLAActivateResult, nsToDays, daysToNs } from './sla'
 export { type OffensivePolicy, type OffensiveTechnique, type OffensiveLegalReview } from './offensivepolicy'
 export { type AlertTestResult, type AlertTestOutcome, AlertNotEnabledError } from './alerting'
+export { type NotificationChannel, type NotificationChannelInput, type NotificationChannelType, type NotificationRule, type NotificationRuleInput, type NotificationEventType, type NotificationDelivery, type NotificationDeliveryState, type NotificationAttempt } from './notifications'
 export { type EngagementCredential } from './engagements'
 export { type AutoVerifyResult } from './dashboard'
 export { type DetectionProvenanceCurrent, type DetectionProvenanceTransition } from './incidents'
@@ -46,6 +47,7 @@ import { attackPathsApi } from './attackpaths'
 import { slaApi } from './sla'
 import { offensivePolicyApi } from './offensivepolicy'
 import { alertingApi } from './alerting'
+import { notificationsApi } from './notifications'
 import { privacyApi } from './privacy'
 import { writeupApi } from './writeup'
 import { cspmApi } from './cspm'
@@ -93,6 +95,7 @@ export const api = {
   ...slaApi,
   ...offensivePolicyApi,
   ...alertingApi,
+  ...notificationsApi,
   ...privacyApi,
   ...writeupApi,
   ...cspmApi,

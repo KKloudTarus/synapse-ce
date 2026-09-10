@@ -297,6 +297,12 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_ALERT_MIN_SEVERITY` | `medium` | Inclusive severity floor for delivered alerts (`critical`, `high`, `medium`, `low`, `info`). Test alerts always deliver. |
 | `SYNAPSE_ALERT_WEBHOOK_ALLOW_PRIVATE` | `false` | Let the webhook client dial private and link-local receivers. The SSRF guard refuses them otherwise. |
 | `SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED` | `false` | Allow UNSIGNED alert delivery when no secret is set. Default false: a configured webhook requires `SYNAPSE_ALERT_WEBHOOK_SECRET` so a receiver can trust the alert is genuine. Set true only for a development receiver that does not verify the signature. |
+| `SYNAPSE_NOTIFICATIONS_ENABLED` | `false` | Enable tenant-managed Webhook, Slack, and Email channels, durable rule fan-out, delivery history, and the worker source scheduler. Requires PostgreSQL, a running `synapse-worker`, and a stable shared `SYNAPSE_VAULT_MASTER_KEY`. |
+| `SYNAPSE_NOTIFICATION_SMTP_HOST` | (unset) | Operator-managed SMTP relay host used by every tenant Email channel. Tenants can select recipients but cannot select the relay. |
+| `SYNAPSE_NOTIFICATION_SMTP_PORT` | `587` | SMTP relay port. |
+| `SYNAPSE_NOTIFICATION_SMTP_FROM` | (unset) | Envelope and message sender for notification email. Required before an Email channel can deliver. |
+| `SYNAPSE_NOTIFICATION_SMTP_USERNAME` / `SYNAPSE_NOTIFICATION_SMTP_PASSWORD` | (unset) | Optional SMTP authentication. The password is secret and must not be logged. |
+| `SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS` | `true` | Require STARTTLS with certificate verification. Keep enabled in production. |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |
 | `SYNAPSE_FLEET_MIN_AGENT_VERSION` | empty | Reject agents below this version (empty = no floor). |
 | `SYNAPSE_FLEET_ENROL_URL` | `SYNAPSE_FLEET_URL` | One-time enrollment API base URL for `synapse-agent`; after enrollment, the agent uses `SYNAPSE_FLEET_URL`. HTTPS is required except for a loopback host. |

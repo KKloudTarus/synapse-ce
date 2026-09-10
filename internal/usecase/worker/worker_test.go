@@ -47,6 +47,42 @@ type staleCompleteQueue struct {
 	deadletterCalls atomic.Int64
 }
 
+type notificationPolicyTestError struct{ terminal bool }
+
+func (e notificationPolicyTestError) Error() string             { return "transport failure" }
+func (e notificationPolicyTestError) Terminal() bool            { return e.terminal }
+func (e notificationPolicyTestError) RetryAfter() time.Duration { return 17 * time.Second }
+func (e notificationPolicyTestError) MaxAttempts() int          { return 8 }
+
+type policyQueue struct {
+	staleCompleteQueue
+	delay time.Duration
+}
+
+func (q *policyQueue) Fail(_ context.Context, _ string, _ int64, delay time.Duration) error {
+	q.delay = delay
+	q.failCalls.Add(1)
+	return nil
+}
+func TestWorkerNotificationRetryPolicyPreservesOtherJobs(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		attempt int
+		dead    bool
+		delay   time.Duration
+	}{{"notification overrides default budget", notificationPolicyTestError{}, 5, false, 17 * time.Second}, {"notification exhausted", notificationPolicyTestError{}, 8, true, 0}, {"notification permanent", notificationPolicyTestError{true}, 1, true, 0}, {"ordinary retry", errors.New("ordinary"), 1, false, 10 * time.Millisecond}, {"ordinary exhausted", errors.New("ordinary"), 3, true, 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := &policyQueue{}
+			w := New(q, map[string]Handler{"test": HandlerFunc(func(context.Context, ports.QueuedJob) error { return tc.err })}, cfg(), nil)
+			w.process(context.Background(), ports.QueuedJob{ID: "job", Kind: "test", TenantID: "tenant", Fence: 1, Attempts: tc.attempt})
+			if (q.deadletterCalls.Load() == 1) != tc.dead || q.delay != tc.delay {
+				t.Fatalf("dead=%d delay=%v", q.deadletterCalls.Load(), q.delay)
+			}
+		})
+	}
+}
+
 func (q *staleCompleteQueue) Enqueue(context.Context, string, []byte) (string, error) {
 	return "", nil
 }
