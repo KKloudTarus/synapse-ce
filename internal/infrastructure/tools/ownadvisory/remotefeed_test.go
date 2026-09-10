@@ -4,6 +4,10 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
+	"hash"
+	"hash/crc32"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -153,5 +157,126 @@ func TestRemoteFeedNoRedirectOnInjectedClient(t *testing.T) {
 	NewRemoteFeed("", nil, c)
 	if c.CheckRedirect == nil {
 		t.Fatal("an injected stock client must be given the no-redirect policy")
+	}
+}
+
+// serveZipHashed serves a zip at /<eco>/all.zip with the given x-goog-hash header values (one Add per value,
+// mirroring GCS which sends crc32c and md5 as separate headers).
+func serveZipHashed(t *testing.T, eco string, zipBytes []byte, googHashes []string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/"+eco+"/all.zip" {
+			for _, h := range googHashes {
+				w.Header().Add("X-Goog-Hash", h)
+			}
+			_, _ = w.Write(zipBytes)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+}
+
+const validOSVAdvisoryJSON = `{"id":"GHSA-hash-1","affected":[{"package":{"ecosystem":"Go","name":"example.com/pkg"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.0.0"}]}]}]}`
+
+// TestRemoteFeedVerifiesGoogHash (D1.8): a download whose bytes match the bucket's published crc32c ingests.
+// A deliberately-wrong md5 in the same header is ignored (only crc32c is checked).
+func TestRemoteFeedVerifiesGoogHash(t *testing.T) {
+	zipBytes := zipAllOf(t, map[string]string{"a.json": validOSVAdvisoryJSON})
+	hdr := []string{
+		"crc32c=" + base64.StdEncoding.EncodeToString(crc32Castagnoli(zipBytes)),
+		"md5=" + base64.StdEncoding.EncodeToString([]byte("0123456789abcdef")), // wrong on purpose, must be ignored
+	}
+	srv := serveZipHashed(t, "Go", zipBytes, hdr)
+	defer srv.Close()
+	got := 0
+	skipped, err := NewRemoteFeed(srv.URL, []string{"Go"}, srv.Client()).Each(context.Background(), func(advisory.Advisory) error { got++; return nil })
+	if err != nil || skipped != 0 || got != 1 {
+		t.Fatalf("verified feed: got=%d skipped=%d err=%v", got, skipped, err)
+	}
+}
+
+// TestRemoteFeedRejectsBadCRC32C (D1.8): a download whose bytes do NOT match the published crc32c is
+// fail-closed (rejected), never ingested.
+func TestRemoteFeedRejectsBadCRC32C(t *testing.T) {
+	zipBytes := zipAllOf(t, map[string]string{"a.json": validOSVAdvisoryJSON})
+	srv := serveZipHashed(t, "Go", zipBytes, []string{"crc32c=" + base64.StdEncoding.EncodeToString([]byte{0, 0, 0, 0})})
+	defer srv.Close()
+	_, err := NewRemoteFeed(srv.URL, []string{"Go"}, srv.Client()).Each(context.Background(), func(advisory.Advisory) error {
+		t.Fatal("a corrupted download must not be ingested")
+		return nil
+	})
+	if err == nil {
+		t.Fatal("crc32c mismatch must fail closed")
+	}
+}
+
+// TestRemoteFeedProceedsWithoutHash (D1.8): a mirror that publishes no x-goog-hash cannot be verified, so
+// the feed proceeds best-effort rather than failing.
+func TestRemoteFeedProceedsWithoutHash(t *testing.T) {
+	zipBytes := zipAllOf(t, map[string]string{"a.json": validOSVAdvisoryJSON})
+	srv := serveZipHashed(t, "Go", zipBytes, nil)
+	defer srv.Close()
+	got := 0
+	if _, err := NewRemoteFeed(srv.URL, []string{"Go"}, srv.Client()).Each(context.Background(), func(advisory.Advisory) error { got++; return nil }); err != nil || got != 1 {
+		t.Fatalf("no-hash mirror must proceed: got=%d err=%v", got, err)
+	}
+}
+
+func crc32Castagnoli(b []byte) []byte {
+	var out [4]byte
+	binary.BigEndian.PutUint32(out[:], crc32.Checksum(b, crc32.MakeTable(crc32.Castagnoli)))
+	return out[:]
+}
+
+// TestCRC32CKnownVector pins the crc32c encoding to the standard Castagnoli check value for "123456789"
+// (0xE3069283), independently of the production code, so a wrong polynomial/endianness/base64 can't pass by
+// matching a same-wrong helper.
+func TestCRC32CKnownVector(t *testing.T) {
+	if got := base64.StdEncoding.EncodeToString(crc32Castagnoli([]byte("123456789"))); got != "4waSgw==" {
+		t.Fatalf("crc32c('123456789') = %q, want 4waSgw== (0xE3069283)", got)
+	}
+}
+
+// TestGCSHostRequiresDigest: a GCS-bucket source (the default) requires a published crc32c; a custom mirror
+// does not.
+func TestGCSHostRequiresDigest(t *testing.T) {
+	if !isGCSHost(defaultOSVBulkURL) || !NewRemoteFeed("", nil, nil).requireDigest {
+		t.Fatal("the default OSV bucket is a GCS host and must require a digest")
+	}
+	if isGCSHost("http://localhost:9999") || NewRemoteFeed("http://mirror.internal/osv", nil, nil).requireDigest {
+		t.Fatal("a custom mirror must not require a digest")
+	}
+}
+
+// TestVerifyGoogHashPolicy exercises verifyGoogHash directly: match passes, mismatch and a conflicting second
+// digest fail closed, and an absent digest is fail-closed only when required.
+func TestVerifyGoogHashPolicy(t *testing.T) {
+	crc := func(b []byte) hash.Hash32 {
+		h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+		_, _ = h.Write(b)
+		return h
+	}
+	good := base64.StdEncoding.EncodeToString(crc32Castagnoli([]byte("payload")))
+	hdr := func(vals ...string) http.Header {
+		h := http.Header{}
+		for _, v := range vals {
+			h.Add("X-Goog-Hash", v)
+		}
+		return h
+	}
+	if err := verifyGoogHash(hdr("crc32c="+good), crc([]byte("payload")), true); err != nil {
+		t.Fatalf("matching digest must pass: %v", err)
+	}
+	if err := verifyGoogHash(hdr("crc32c=AAAAAA=="), crc([]byte("payload")), false); err == nil {
+		t.Fatal("mismatched digest must fail closed")
+	}
+	if err := verifyGoogHash(hdr("crc32c="+good, "crc32c=AAAAAA=="), crc([]byte("payload")), false); err == nil {
+		t.Fatal("a conflicting second digest must fail closed")
+	}
+	if err := verifyGoogHash(hdr(), crc([]byte("payload")), true); err == nil {
+		t.Fatal("an absent digest must fail closed when required (GCS source)")
+	}
+	if err := verifyGoogHash(hdr(), crc([]byte("payload")), false); err != nil {
+		t.Fatalf("an absent digest proceeds for a mirror: %v", err)
 	}
 }
