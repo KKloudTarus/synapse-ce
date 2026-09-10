@@ -3,10 +3,15 @@ package ownadvisory
 import (
 	"archive/zip"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
+	"hash"
+	"hash/crc32"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -54,6 +59,21 @@ type RemoteFeed struct {
 	baseURL    string
 	ecosystems []string
 	client     *http.Client
+	// requireDigest is set when baseURL is a Google Cloud Storage host, which publishes a crc32c x-goog-hash
+	// for every object. For such a source an absent digest is unexpected and fail-closed (a stripped header
+	// must not silently bypass the integrity check); a self-hosted mirror that publishes none proceeds.
+	requireDigest bool
+}
+
+// isGCSHost reports whether baseURL points at a Google Cloud Storage bucket (which always publishes a crc32c
+// x-goog-hash), so a missing digest from it is treated as an integrity failure rather than best-effort.
+func isGCSHost(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "storage.googleapis.com" || strings.HasSuffix(host, ".storage.googleapis.com")
 }
 
 // Test performs one bounded metadata request and never downloads or parses a
@@ -99,7 +119,8 @@ func NewRemoteFeed(baseURL string, ecosystems []string, client *http.Client) *Re
 	} else if client.CheckRedirect == nil {
 		client.CheckRedirect = noRedirect // defense-in-depth: a stock injected client must not follow redirects either
 	}
-	return &RemoteFeed{baseURL: strings.TrimRight(baseURL, "/"), ecosystems: ecosystems, client: client}
+	base := strings.TrimRight(baseURL, "/")
+	return &RemoteFeed{baseURL: base, ecosystems: ecosystems, client: client, requireDigest: isGCSHost(base)}
 }
 
 func safeTransport() http.RoundTripper {
@@ -238,12 +259,62 @@ func (f *RemoteFeed) downloadInto(ctx context.Context, url string, w io.Writer) 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return 0, fmt.Errorf("%w: unexpected status %d", shared.ErrValidation, resp.StatusCode)
 	}
-	n, err := io.Copy(w, io.LimitReader(resp.Body, maxZipDownload+1))
+	// Checksum the bytes as they stream so the download can be checked against the bucket's published
+	// integrity digest (D1.8) without a second pass. GCS reports crc32c (Castagnoli) in x-goog-hash for every
+	// object; it is the canonical, always-present integrity digest and catches a corrupted or truncated
+	// download. It is an integrity check, not authenticity (a same-origin digest cannot prove authorship);
+	// cryptographic authenticity is the CSAF/OpenPGP path's job.
+	crcw := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+	n, err := io.Copy(io.MultiWriter(w, crcw), io.LimitReader(resp.Body, maxZipDownload+1))
 	if err != nil {
 		return 0, fmt.Errorf("download: %w", err)
 	}
 	if n > maxZipDownload {
 		return 0, fmt.Errorf("%w: zip exceeds %d-byte download cap", shared.ErrValidation, maxZipDownload)
 	}
+	// Integrity check: reject a download whose bytes do not match the bucket's published digest (a corrupted
+	// zip is never ingested). f.requireDigest fails closed when a GCS source omits the digest it always sends.
+	if err := verifyGoogHash(resp.Header, crcw, f.requireDigest); err != nil {
+		return 0, fmt.Errorf("%s integrity: %w", url, err)
+	}
 	return n, nil
+}
+
+// verifyGoogHash checks the downloaded bytes against every crc32c digest in the GCS x-goog-hash header, the
+// same integrity digest gsutil verifies. A published crc32c that does NOT match the computed one is
+// FAIL-CLOSED (shared.ErrValidation); checking ALL of them means a second, conflicting digest also fails
+// closed rather than being silently overwritten. When no crc32c digest is present, the download is rejected
+// if require is set (a GCS source that always publishes one), else it proceeds best-effort (a mirror that
+// publishes none cannot be verified).
+func verifyGoogHash(header http.Header, crcw hash.Hash32, require bool) error {
+	published := parseGoogHashValues(header, "crc32c")
+	if len(published) == 0 {
+		if require {
+			return fmt.Errorf("%w: the GCS feed published no crc32c digest to verify against", shared.ErrValidation)
+		}
+		return nil
+	}
+	var b [4]byte
+	binary.BigEndian.PutUint32(b[:], crcw.Sum32())
+	got := base64.StdEncoding.EncodeToString(b[:])
+	for _, want := range published {
+		if want != got {
+			return fmt.Errorf("%w: crc32c mismatch (published %q, computed %q)", shared.ErrValidation, want, got)
+		}
+	}
+	return nil
+}
+
+// parseGoogHashValues returns every digest for algo in the x-goog-hash header(s). GCS sends the digests as
+// multiple header values ("crc32c=...", "md5=...") and/or a comma-separated list; both shapes are handled.
+func parseGoogHashValues(header http.Header, algo string) []string {
+	var out []string
+	for _, value := range header.Values("X-Goog-Hash") {
+		for _, part := range strings.Split(value, ",") {
+			if a, digest, ok := strings.Cut(strings.TrimSpace(part), "="); ok && strings.EqualFold(strings.TrimSpace(a), algo) {
+				out = append(out, strings.TrimSpace(digest))
+			}
+		}
+	}
+	return out
 }
