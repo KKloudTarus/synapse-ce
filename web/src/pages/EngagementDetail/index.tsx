@@ -9,6 +9,7 @@ import {
   ShieldTick,
   ShieldZap,
   Sliders04,
+  SwitchHorizontal01,
   Target04,
 } from '@untitledui/icons'
 import { Button, cn, EmptyState, Spinner } from '../../components/ui'
@@ -53,6 +54,9 @@ import { SettingsTab } from './SettingsTab'
 import { JudgmentReviewTab } from './ReviewsTab'
 import { ARCHIVED_REASON, isReadOnly } from './readOnly'
 
+import { AssessmentComparisonTab } from './AssessmentComparisonTab'
+import { AssessmentLifecyclePanel } from './AssessmentLifecyclePanel'
+
 // Lazy-loaded so React Flow stays out of the initial bundle (only the Graph tab needs it).
 const DependencyGraphTab = lazy(() => import('../DependencyGraph').then((m) => ({ default: m.DependencyGraphTab })))
 
@@ -60,6 +64,8 @@ export type Tab =
   | 'overview'
   | 'findings'
   | 'imported'
+
+  | 'comparison'
   | 'sla'
   | 'risk-stories'
   | 'vuln-posture'
@@ -115,6 +121,11 @@ export const TAB_GROUPS: TabGroupDefinition[] = [
       { id: 'vuln-posture', label: 'Vuln Posture' },
       { id: 'sla', label: 'Remediation SLA' },
     ],
+  },
+  {
+    id: 'comparison',
+    label: 'Comparison',
+    icon: SwitchHorizontal01,
   },
   {
     id: 'supply-chain',
@@ -266,8 +277,11 @@ export function EngagementDetail() {
     () => api.importedSBOM(id).catch(() => null),
     { deps: [id] },
   )
-  const { data: uploadedSource } = useFetch<UploadedSourcePackage | null>(
-    () => api.uploadedSource(id).catch(() => null),
+  const { data: uploadedSource, error: uploadedSourceError, refetch: refetchUploadedSource } = useFetch<UploadedSourcePackage | null>(
+    () => api.uploadedSource(id).catch((error) => {
+      if (error instanceof ApiError && error.status === 404) return null
+      throw error
+    }),
     { deps: [id] },
   )
 
@@ -395,12 +409,14 @@ export function EngagementDetail() {
         <ExportButtons engagementId={eng.id} scan={scan} onChanged={refreshAll} />
       </div>
 
-      {/* Single Unified Hero Card for Engagement Details and Scan Console */}
-      <div className="bg-hero rounded-2xl border border-secondary p-5 sm:p-6 shadow-xs space-y-4">
+      {/* Keep the Engagement identity first; lifecycle is supporting context below the scan console. */}
+      <section aria-label="Engagement summary" className="bg-hero rounded-2xl border border-secondary p-5 sm:p-6 shadow-xs space-y-4">
         <ScanPanel
           eng={eng}
           importedSBOM={importedSBOM}
           uploadedSource={uploadedSource}
+          uploadedSourceError={uploadedSourceError}
+          onRetryUploadedSource={refetchUploadedSource}
           initialError={scanStartError}
           onImportedSBOMChanged={refreshAll}
           job={job}
@@ -416,7 +432,8 @@ export function EngagementDetail() {
             }
           }}
         />
-      </div>
+        <AssessmentLifecyclePanel assessmentId={id} engagementStatus={eng.status} />
+      </section>
 
       {/* 2-Tier Navigation Section. Sticky so a tab switch does not leave the
           reader hunting for the content below a tall hero. */}
@@ -529,6 +546,8 @@ export function EngagementDetail() {
         {tab === 'sla' && <SLATab key={id} engagementId={id} findings={findings} />}
         {tab === 'risk-stories' && <RiskStoriesTab key={id} engagementId={id} />}
         {tab === 'vuln-posture' && <VulnPostureTab key={id} engagementId={id} />}
+
+        {tab === 'comparison' && <AssessmentComparisonTab assessmentId={id} />}
         {tab === 'components' && <ComponentsTab scan={scan} />}
         {tab === 'vulns' && <VulnsTab scan={scan} />}
         {tab === 'graph' && (

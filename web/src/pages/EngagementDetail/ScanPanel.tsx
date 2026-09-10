@@ -12,6 +12,7 @@ import { ARCHIVED_REASON, isReadOnly } from './readOnly'
 import { EvidenceBadge, ScopeBadge } from './components/ScanBadges'
 import { ScanConfigModal, detectKind } from './components/ScanConfigModal'
 import { ScanDebugTimeline } from './components/ScanDebugTimeline'
+import { SourcePackageSummary } from '../../components/synapse/SourcePackageSummary'
 
 // Re-export shared helpers consumed by sibling modules (ReportBuilderModal).
 export { trapTabFocus } from './components/ScanConfigModal'
@@ -26,6 +27,8 @@ export function ScanPanel({
   eng,
   importedSBOM,
   uploadedSource,
+  uploadedSourceError,
+  onRetryUploadedSource,
   initialError,
   onImportedSBOMChanged,
   job,
@@ -35,6 +38,8 @@ export function ScanPanel({
   eng: Engagement
   importedSBOM: ImportedSBOMMetadata | null
   uploadedSource: UploadedSourcePackage | null
+  uploadedSourceError?: string | null
+  onRetryUploadedSource?: () => void
   initialError?: string
   onImportedSBOMChanged: () => void
   job: ScanJob | null
@@ -64,8 +69,18 @@ export function ScanPanel({
   )
 
   const running = job?.status === 'running'
-  // Archived is terminal: no scan may start against it.
   const archived = isReadOnly(eng)
+  const completed = eng.status === 'completed'
+  const authorizationWindowConfigured = Boolean(eng.authorizedFrom && eng.authorizedTo)
+  const scaAllowed = eng.roe.allowedToolClasses.includes('sca')
+  const explicitAuthorizationIncomplete = eng.requiresExplicitExecutionAuthorization && (!authorizationWindowConfigured || !scaAllowed)
+  const lifecycleBlocked = archived || completed
+  const scanBlocked = lifecycleBlocked || explicitAuthorizationIncomplete
+  const scanBlockedReason = archived
+    ? ARCHIVED_REASON
+    : completed
+      ? 'Completed Assessments keep their finalized Snapshots. Create a Re-test to run another assessment.'
+      : 'Configure the Re-test authorization window and allow SCA tools before running a scan.'
   const debugEvents = job?.debugEvents?.length ? job.debugEvents : (summary?.debugEvents ?? [])
   const usingImportedSBOM = Boolean(importedSBOM) && !usingUploadedSource
 
@@ -126,6 +141,10 @@ export function ScanPanel({
   }, [eng.id])
 
   async function run() {
+    if (scanBlocked) {
+      setError(scanBlockedReason)
+      return
+    }
     if (!usingUploadedSource && !usingImportedSBOM && !target.trim()) {
       setError('Enter a target in Scan Settings.')
       setConfigOpen(true)
@@ -215,18 +234,20 @@ export function ScanPanel({
             type="button"
             variant="secondary"
             onClick={() => setConfigOpen(true)}
+            disabled={lifecycleBlocked}
+            aria-describedby={completed ? 'engagement-completed-note' : archived ? 'engagement-archived-note' : undefined}
             className="h-10 px-5 text-sm font-semibold rounded-xl shadow-xs transition-transform active:scale-[0.98]"
           >
             <Settings01 className="size-4 text-secondary" />
             <span>Scan settings</span>
           </Button>
 
-          <span title={archived ? ARCHIVED_REASON : undefined}>
+          <span title={scanBlocked ? scanBlockedReason : undefined}>
             <Button
               onClick={run}
               loading={running}
-              disabled={running || outsideWindow || archived}
-              aria-describedby={archived ? 'engagement-archived-note' : undefined}
+              disabled={running || outsideWindow || scanBlocked}
+              aria-describedby={completed ? 'engagement-completed-note' : archived ? 'engagement-archived-note' : undefined}
               variant="primary"
               className="h-10 px-6 text-sm font-bold rounded-xl shadow-xs transition-transform active:scale-[0.98]"
             >
@@ -236,6 +257,15 @@ export function ScanPanel({
           </span>
         </div>
       </div>
+
+      {uploadedSource ? <details className="rounded-lg border border-secondary px-3 py-2">
+        <summary className="cursor-pointer text-xs font-semibold text-secondary">Immutable source details</summary>
+        <div className="mt-3"><SourcePackageSummary source={uploadedSource} /></div>
+      </details> : null}
+      {uploadedSourceError ? <div role="alert" className="rounded-lg border border-error/30 p-3 text-sm text-error-primary">
+        <p>Could not load source metadata: {uploadedSourceError}</p>
+        {onRetryUploadedSource ? <button type="button" className="mt-2 font-semibold underline" onClick={onRetryUploadedSource}>Retry source lookup</button> : null}
+      </div> : null}
 
       {(sbomError || sbomMessage) && (
         <div
@@ -250,6 +280,12 @@ export function ScanPanel({
         </div>
       )}
 
+      {completed && (
+        <div id="engagement-completed-note" className="rounded-lg border border-secondary bg-secondary p-3 text-xs text-tertiary">
+          {scanBlockedReason}
+        </div>
+      )}
+
       {archived && (
         <div
           id="engagement-archived-note"
@@ -257,6 +293,27 @@ export function ScanPanel({
         >
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-fg-quaternary" />
           <span>{ARCHIVED_REASON} Scans, new findings and triage changes are disabled.</span>
+        </div>
+      )}
+
+      {!lifecycleBlocked && explicitAuthorizationIncomplete && (
+        <div role="status" className="flex items-start justify-between gap-3 rounded-lg border border-medium/40 bg-medium/10 p-3 text-xs text-medium">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <div>
+              <p className="font-semibold">Scan authorization required.</p>
+              <p className="mt-1 text-secondary">
+                {!authorizationWindowConfigured && !scaAllowed
+                  ? 'Set both authorization window bounds and allow SCA tools before scanning this Re-test.'
+                  : !authorizationWindowConfigured
+                    ? 'Set both authorization window bounds before scanning this Re-test.'
+                    : 'Allow SCA tools before scanning this Re-test.'}
+              </p>
+            </div>
+          </div>
+          <Link to={`/engagements/${encodeURIComponent(eng.id)}/settings`} className="shrink-0 font-semibold text-brand-secondary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
+            Configure in Settings
+          </Link>
         </div>
       )}
 

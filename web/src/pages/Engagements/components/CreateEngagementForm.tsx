@@ -1,25 +1,32 @@
 import { useEffect, useMemo, useState, type FC, type FormEvent } from 'react'
 import { Check, Link01, Plus, Trash01, Upload01 } from '@untitledui/icons'
 import { api } from '../../../lib/api'
+import { useRequestIdempotency } from '../../../hooks/useRequestIdempotency'
+import { useRetestSource } from '../../../hooks/useRetestSource'
+import { RetestSourceChoice } from '../../../components/synapse/RetestSourceChoice'
 import { kindLabel } from '../../../lib/format'
-import type { BusinessAsset, Engagement, ScopeTarget } from '../../../lib/types'
+import type { AssessmentCycleSummary, BusinessAsset, Engagement, Project, ScopeTarget } from '../../../lib/types'
 import { Select } from '../../../components/ui'
 
 const KINDS = ['repo', 'domain', 'host', 'url', 'image', 'cidr']
 const MAX_SOURCE_BYTES = 512 * 1024 * 1024
 type SourceMode = 'linked' | 'upload'
+type CreationKind = SourceMode | 'retest'
 
 export interface CreateEngagementFormProps {
   initialAssetId?: string
-  onCreated: (engagement: Engagement, sourceMode: SourceMode, scanStartError?: string) => void
+  assessmentLifecycleEnabled?: boolean
+  onCreated: (engagement: Engagement, creationKind: CreationKind, scanStartError?: string) => void
 }
 
 export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
   initialAssetId,
+  assessmentLifecycleEnabled = false,
   onCreated,
 }) => {
   const [name, setName] = useState('')
   const [client, setClient] = useState('')
+  const [purpose, setPurpose] = useState<'initial' | 'retest'>('initial')
   const [sourceMode, setSourceMode] = useState<SourceMode>('linked')
   const [sourceFile, setSourceFile] = useState<File | null>(null)
   const [scope, setScope] = useState<ScopeTarget[]>([{ kind: 'repo', value: '' }])
@@ -29,6 +36,34 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
   const [error, setError] = useState<string | null>(null)
   const [assets, setAssets] = useState<BusinessAsset[]>([])
   const [assetId, setAssetId] = useState(initialAssetId ?? '')
+  const [projects, setProjects] = useState<Project[]>([])
+  const [assessmentProjectId, setAssessmentProjectId] = useState('')
+  const [projectsLoading, setProjectsLoading] = useState(false)
+  const [projectsError, setProjectsError] = useState('')
+  const [projectRetry, setProjectRetry] = useState(0)
+  const [eligibleCycles, setEligibleCycles] = useState<AssessmentCycleSummary[]>([])
+  const [eligibleCursor, setEligibleCursor] = useState('')
+  const [eligibleRetry, setEligibleRetry] = useState(0)
+  const [eligibleLoading, setEligibleLoading] = useState(false)
+  const [eligibleError, setEligibleError] = useState('')
+  const [basedOnAssessmentId, setBasedOnAssessmentId] = useState('')
+  const [toolClasses, setToolClasses] = useState('')
+  const initialRequestKey = useRequestIdempotency()
+  const retestRequestKey = useRequestIdempotency()
+  const retestSource = useRetestSource(purpose === 'retest' ? basedOnAssessmentId : '')
+
+  useEffect(() => {
+    if (!assessmentLifecycleEnabled) return
+    let live = true
+    setProjectsLoading(true)
+    setProjectsError('')
+    api.listProjects().then((items) => {
+      if (live) setProjects(items)
+    }).catch(() => {
+      if (live) setProjectsError('Could not load Projects. Retry to choose an association.')
+    }).finally(() => { if (live) setProjectsLoading(false) })
+    return () => { live = false }
+  }, [assessmentLifecycleEnabled, projectRetry])
 
   useEffect(() => {
     let live = true
@@ -51,6 +86,37 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
     }
   }, [initialAssetId])
 
+  useEffect(() => {
+    if (purpose !== 'retest') return
+    let live = true
+    setEligibleLoading(true)
+    setEligibleError('')
+    api.listAssessmentCycles({ status: 'open', limit: 50 })
+      .then(async (result) => ({
+        ...result,
+        items: await Promise.all(result.items.map(async (cycle) => {
+          if (!cycle.membersNextCursor) return cycle
+          const members = await api.listAssessmentCycleMembers(cycle.id, '', 100)
+          return { ...cycle, members: members.items, membersNextCursor: members.nextCursor }
+        })),
+      }))
+      .then((result) => {
+        if (!live) return
+        setEligibleCycles(result.items)
+        setEligibleCursor(result.nextCursor)
+        const ids = result.items.flatMap((cycle) => cycle.members.filter((member) => !member.archivedAt && member.assessmentStatus === 'completed').map((member) => member.assessmentId))
+        setBasedOnAssessmentId((current) => (ids.includes(current) ? current : (ids.includes(result.items[0]?.selectedHeadAssessmentId) ? result.items[0].selectedHeadAssessmentId : ids[0]) ?? ''))
+      })
+      .catch((cause) => {
+        if (!live) return
+        setEligibleCycles([])
+        setBasedOnAssessmentId('')
+        setEligibleError(cause instanceof Error ? cause.message : 'Eligible Assessment lookup failed.')
+      })
+      .finally(() => { if (live) setEligibleLoading(false) })
+    return () => { live = false }
+  }, [purpose, eligibleRetry])
+
   const assetOptions = useMemo(() => [
     { value: '__unassigned__', label: 'Unassigned' },
     ...assets.map((asset) => ({
@@ -63,6 +129,34 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
     value: kind,
     label: kindLabel(kind),
   })), [])
+  const predecessorOptions = useMemo(() => {
+    const seen = new Set<string>()
+    return eligibleCycles.flatMap((cycle) => cycle.members.filter((member) => !member.archivedAt && member.assessmentStatus === 'completed' && !seen.has(member.assessmentId)).map((member) => {
+      seen.add(member.assessmentId)
+      return { value: member.assessmentId, label: `${cycle.name} · ${member.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial'} · ${member.assessmentId}` }
+    }))
+  }, [eligibleCycles])
+
+  async function loadMoreEligible() {
+    if (!eligibleCursor || eligibleLoading) return
+    setEligibleLoading(true)
+    setEligibleError('')
+    try {
+      const page = await api.listAssessmentCycles({ status: 'open', limit: 50, cursor: eligibleCursor })
+      const cycles = await Promise.all(page.items.map(async (cycle) => {
+        if (!cycle.membersNextCursor) return cycle
+        const members = await api.listAssessmentCycleMembers(cycle.id, '', 100)
+        return { ...cycle, members: members.items, membersNextCursor: members.nextCursor }
+      }))
+      setEligibleCycles((current) => [...current, ...cycles])
+      setEligibleCursor(page.nextCursor)
+      setBasedOnAssessmentId((current) => current || cycles.flatMap((cycle) => cycle.members).find((member) => !member.archivedAt && member.assessmentStatus === 'completed')?.assessmentId || '')
+    } catch (cause) {
+      setEligibleError(cause instanceof Error ? cause.message : 'Eligible Assessment lookup failed.')
+    } finally {
+      setEligibleLoading(false)
+    }
+  }
 
   function setRow(index: number, patch: Partial<ScopeTarget>) {
     setScope((rows) => rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)))
@@ -86,26 +180,46 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
+    await submit(false)
+  }
+
+  async function submit(draft: boolean) {
     const inScope = sourceMode === 'linked' ? scope.filter((row) => row.value.trim() !== '') : []
     if (!name.trim()) {
       setError('Name is required.')
       return
     }
-    if (sourceMode === 'linked' && inScope.length === 0) {
+    if (purpose === 'retest' && !basedOnAssessmentId) {
+      setError('Choose an eligible completed Assessment in an open Cycle.')
+      return
+    }
+    if (purpose === 'retest') {
+      const sourceError = retestSource.validationError('copy')
+      if (sourceError) { setError(sourceError); return }
+    }
+    if (purpose === 'initial' && sourceMode === 'linked' && inScope.length === 0) {
       setError('Add at least one in-scope target.')
       return
     }
-    if (sourceMode === 'upload' && !sourceFile) {
+    if (purpose === 'initial' && sourceMode === 'upload' && !sourceFile) {
       setError('Choose a source package to upload.')
       return
     }
-    if (assetId && !assets.some((asset) => asset.id === assetId)) {
+    if (purpose === 'initial' && assetId && !assets.some((asset) => asset.id === assetId)) {
       setError('Select a valid Asset.')
       return
     }
+    if (purpose === 'retest' && !draft && (!authFrom || !authTo || !toolClasses.split(',').some((value) => value.trim()))) {
+      setError('Enter a separate authorization window and allowed tool classes, or save a non-executable draft.')
+      return
+    }
+    if ((!draft || purpose !== 'retest') && [authFrom, authTo].some((value) => value && Number.isNaN(new Date(value).getTime()))) {
+      setError('Enter valid authorization dates.')
+      return
+    }
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-    const from = authFrom ? new Date(authFrom).toISOString() : undefined
-    const to = authTo ? new Date(authTo).toISOString() : undefined
+    const from = (purpose !== 'retest' || !draft) && authFrom ? new Date(authFrom).toISOString() : undefined
+    const to = (purpose !== 'retest' || !draft) && authTo ? new Date(authTo).toISOString() : undefined
     if (from && to && new Date(from) >= new Date(to)) {
       setError('Authorization start must be before end.')
       return
@@ -114,6 +228,17 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
     setSubmitting(true)
     setError(null)
     try {
+      if (purpose === 'retest') {
+        const input = {
+          name: name.trim(), predecessorAssessmentId: basedOnAssessmentId, scopeStrategy: 'copy' as const, profileStrategy: 'none' as const,
+          authorizedFrom: draft ? '' : from ?? '', authorizedTo: draft ? '' : to ?? '', timezone: timezone || 'UTC',
+          roe: draft ? undefined : { allowedToolClasses: toolClasses.split(',').map((value) => value.trim()).filter(Boolean), blackouts: [] },
+          ...retestSource.input,
+        }
+        const result = await api.createRetest(basedOnAssessmentId, { ...input, idempotencyKey: retestRequestKey(input, input.source) })
+        onCreated(result.engagement, 'retest')
+        return
+      }
       const input = {
         name: name.trim(),
         client: client.trim(),
@@ -123,10 +248,11 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
         authorizedTo: to,
         timezone: from || to ? timezone : undefined,
         assetId,
+        assessmentProjectId: assessmentLifecycleEnabled ? assessmentProjectId : undefined,
       }
       const engagement = sourceMode === 'upload'
-        ? await api.createEngagementFromSource(input, sourceFile!)
-        : await api.createEngagement(input)
+        ? await api.createEngagementFromSource(input, sourceFile!, initialRequestKey(input, sourceFile!))
+        : await api.createEngagement(input, initialRequestKey(input))
       if (sourceMode === 'upload') {
         try {
           await api.startScan(engagement.id, '', 'upload')
@@ -162,6 +288,16 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
             </span>
             Assessment context
           </div>
+          <div role="radiogroup" aria-label="Assessment purpose" className="mb-4 grid gap-3 sm:grid-cols-2">
+            <label className="flex cursor-pointer gap-3 rounded-xl border border-secondary bg-secondary/30 p-4">
+              <input type="radio" name="assessment-purpose" checked={purpose === 'initial'} disabled={submitting} onChange={() => { setPurpose('initial'); setError(null) }} className="mt-1 size-4 accent-brand-solid" />
+              <span><span className="block text-sm font-semibold text-primary">Initial assessment</span><span className="mt-1 block text-xs text-tertiary">Create a new standalone or Asset-bound Cycle.</span></span>
+            </label>
+            {assessmentLifecycleEnabled ? <label className="flex cursor-pointer gap-3 rounded-xl border border-secondary bg-secondary/30 p-4">
+              <input type="radio" name="assessment-purpose" checked={purpose === 'retest'} disabled={submitting} onChange={() => { setPurpose('retest'); setError(null) }} className="mt-1 size-4 accent-brand-solid" />
+              <span><span className="block text-sm font-semibold text-primary">Re-test existing assessment</span><span className="mt-1 block text-xs text-tertiary">Cycle, boundary, type, scope, and profile are server-derived.</span></span>
+            </label> : null}
+          </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <div>
               <label htmlFor="engagement-name-input" className="block text-xs font-medium text-secondary">
@@ -180,6 +316,7 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
               />
             </div>
 
+            {purpose === 'initial' ? <>
             <div>
               <label htmlFor="engagement-client-input" className="block text-xs font-medium text-secondary">
                 Client <span className="text-tertiary">(Optional)</span>
@@ -208,11 +345,32 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
                 className="mt-1.5 h-10 w-full border-primary bg-primary shadow-xs"
               />
             </div>
+            {assessmentLifecycleEnabled ? <div>
+              <label htmlFor="engagement-project-select" className="block text-xs font-medium text-secondary">
+                Project <span className="text-tertiary">(Optional)</span>
+              </label>
+              <Select id="engagement-project-select" ariaLabel="Assessment Project" disabled={submitting || projectsLoading || Boolean(projectsError)}
+                value={assessmentProjectId || '__unassigned__'} onValueChange={(value) => setAssessmentProjectId(value === '__unassigned__' ? '' : value)}
+                options={[{ value: '__unassigned__', label: 'No Project' }, ...projects.map((project) => ({ value: project.id, label: project.name }))]}
+                className="mt-1.5 h-10 w-full border-primary bg-primary shadow-xs" />
+              {projectsLoading ? <p role="status" className="mt-1.5 text-xs text-tertiary">Loading Projects…</p> : null}
+              {projectsError ? <p role="alert" className="mt-1.5 text-xs text-error-primary">{projectsError} <button type="button" disabled={submitting} onClick={() => setProjectRetry((value) => value + 1)} className="font-medium underline">Retry</button></p> : null}
+              {!projectsLoading && !projectsError && projects.length === 0 ? <p className="mt-1.5 text-xs text-tertiary">No Projects available. You can create an Assessment without one.</p> : null}
+              <p className="mt-1.5 text-xs text-tertiary">Asset and Project become fixed for this Cycle. A selected Project must belong to the selected Asset.</p>
+            </div> : null}
+            </> : <div className="sm:col-span-1 xl:col-span-2">
+              <label className="block text-xs font-medium text-secondary">Based on Assessment <span className="text-utility-red-600">*</span></label>
+              {predecessorOptions.length ? <Select ariaLabel="Based on Assessment" disabled={submitting || eligibleLoading} value={basedOnAssessmentId || predecessorOptions[0]!.value} onValueChange={(value) => { setBasedOnAssessmentId(value); setError(null) }} options={predecessorOptions} className="mt-1.5 h-10 w-full border-primary bg-primary shadow-xs" /> : null}
+              {eligibleLoading ? <p role="status" className="mt-1.5 text-xs text-tertiary">Loading eligible completed Assessments…</p> : null}
+              {!eligibleLoading && !eligibleError && predecessorOptions.length === 0 ? <p role="status" className="mt-1.5 text-xs text-warning">No eligible completed Assessment in the loaded Cycles. Reopen the Cycle first if it is completed.</p> : null}
+              {eligibleError ? <div role="alert" className="mt-1.5 text-xs text-error-primary">{eligibleError} <button type="button" disabled={eligibleLoading} className="underline" onClick={() => eligibleCursor ? loadMoreEligible() : setEligibleRetry((value) => value + 1)}>Retry</button></div> : null}
+              {eligibleCursor ? <button type="button" disabled={eligibleLoading || submitting} onClick={loadMoreEligible} className="mt-2 text-sm font-semibold text-brand-secondary underline disabled:opacity-50">Load more Cycles</button> : null}
+            </div>}
           </div>
         </div>
 
         {/* Step 2: Source */}
-        <div className="border-t border-secondary pt-6">
+        {purpose === 'initial' ? <div className="border-t border-secondary pt-6">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary">
             <span className="flex size-6 items-center justify-center rounded-full bg-brand-solid text-xs font-bold text-white">
               2
@@ -334,7 +492,7 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
               </div>
             )}
           </div>
-        </div>
+        </div> : <div className="border-t border-secondary pt-6"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary"><span className="flex size-6 items-center justify-center rounded-full bg-brand-solid text-xs font-bold text-white">2</span>Derived lifecycle context</div><div className="rounded-xl border border-secondary bg-secondary/30 p-4 text-sm text-secondary"><p><strong>Assessment type:</strong> Re-test</p><p className="mt-1"><strong>Scope/profile:</strong> copied only by the server contract; no Cycle or boundary selector is writable.</p></div><div className="mt-4"><RetestSourceChoice selection={retestSource} disabled={submitting} onChange={() => setError(null)} /></div></div>}
 
         {/* Step 3: Authorization Window */}
         <div className="border-t border-secondary pt-6">
@@ -373,19 +531,21 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
                 className="mt-1.5 w-full rounded-lg border border-primary bg-primary px-3.5 py-2 text-sm text-primary shadow-xs outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
+            {purpose === 'retest' ? <div className="sm:col-span-2"><label htmlFor="retest-tool-classes" className="block text-xs font-medium text-secondary">Allowed tool classes <span className="text-tertiary">(Required for executable authorization)</span></label><input id="retest-tool-classes" value={toolClasses} disabled={submitting} onChange={(event) => setToolClasses(event.target.value)} placeholder="sca, sast" className="mt-1.5 w-full rounded-lg border border-primary bg-primary px-3.5 py-2 text-sm text-primary shadow-xs outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:cursor-not-allowed disabled:opacity-50" /><p className="mt-1.5 text-xs text-tertiary">Planned dates never authorize execution. Missing, expired, reversed, or invalid authorization/RoE remains a non-executable draft.</p></div> : null}
           </div>
         </div>
 
         {error && (
-          <div className="rounded-lg border border-utility-red-200 bg-utility-red-50 p-3 text-xs font-medium text-utility-red-700 dark:border-utility-red-800 dark:bg-utility-red-950/40 dark:text-utility-red-300">
+          <div role="alert" className="rounded-lg border border-utility-red-200 bg-utility-red-50 p-3 text-xs font-medium text-utility-red-700 dark:border-utility-red-800 dark:bg-utility-red-950/40 dark:text-utility-red-300">
             {error}
           </div>
         )}
 
-        <div className="flex items-center justify-end gap-3 border-t border-secondary pt-6">
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-secondary pt-6">
+          {purpose === 'retest' ? <button type="button" disabled={submitting || eligibleLoading || retestSource.loading || Boolean(retestSource.error)} onClick={() => submit(true)} className="inline-flex items-center justify-center rounded-lg border border-secondary bg-primary px-4 py-2.5 text-sm font-semibold text-secondary shadow-xs transition hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-brand/30 disabled:cursor-not-allowed disabled:opacity-50">Save non-executable draft</button> : null}
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || purpose === 'retest' && (eligibleLoading || retestSource.loading || Boolean(retestSource.error))}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white shadow-xs transition hover:bg-brand-solid_hover focus:outline-none focus:ring-2 focus:ring-brand/30 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? (
@@ -393,7 +553,7 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
             ) : (
               <Check className="size-4" />
             )}
-            {sourceMode === 'upload' ? 'Create & Scan' : 'Create Engagement'}
+            {purpose === 'retest' ? 'Create Re-test' : sourceMode === 'upload' ? 'Create & Scan' : 'Create Engagement'}
           </button>
         </div>
       </form>

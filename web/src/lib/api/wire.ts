@@ -34,6 +34,8 @@ export interface ScopeWire {
 
 /** `engagementView`. `business_asset_id`, `project_id` and `timezone` are `omitempty`. */
 export interface EngagementWire {
+	assessment_project_id?: string
+  requires_explicit_execution_authorization?: boolean
   id: string
   tenant_id: string
   project_id?: string
@@ -92,6 +94,8 @@ export const ENGAGEMENT_WIRE_KEYS = [
   'id',
   'tenant_id',
   'project_id',
+  'assessment_project_id',
+  'requires_explicit_execution_authorization',
   'business_asset_id',
   'name',
   'client',

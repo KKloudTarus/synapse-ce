@@ -49,6 +49,10 @@ import { alertingApi } from './alerting'
 import { privacyApi } from './privacy'
 import { writeupApi } from './writeup'
 import { cspmApi } from './cspm'
+import { assessmentCyclesApi } from './assessment-cycles'
+import { assessmentSnapshotsApi } from './assessment-snapshots'
+import { assessmentRelationshipsApi } from './assessment-relationships'
+import { assessmentComparisonsApi } from './assessment-comparisons'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -92,6 +96,10 @@ export const api = {
   ...privacyApi,
   ...writeupApi,
   ...cspmApi,
+  ...assessmentCyclesApi,
+  ...assessmentSnapshotsApi,
+  ...assessmentRelationshipsApi,
+  ...assessmentComparisonsApi,
 }
 export {
   type CoverageWindow,

@@ -17,6 +17,7 @@ function createRequest(input: CreateEngagementInput) {
     authorized_to: input.authorizedTo ?? '',
     timezone: input.timezone ?? '',
     asset_id: input.assetId ?? '',
+    assessment_project_id: input.assessmentProjectId ?? '',
   }
 }
 
@@ -47,6 +48,8 @@ function mapEngagement(r: EngagementWire): Engagement {
     },
     createdAt: r.created_at ?? null,
     businessAssetId: r.business_asset_id ?? '',
+    assessmentProjectId: r.assessment_project_id ?? '',
+    requiresExplicitExecutionAuthorization: r.requires_explicit_execution_authorization ?? false,
     // Optional list-view enrichment; stays undefined when the API omits it.
     findingsCount: r.findings_count
       ? {
@@ -64,6 +67,21 @@ function mapEngagement(r: EngagementWire): Engagement {
 
 export { mapEngagement }
 
+export function mapUploadedSource(source: any): UploadedSourcePackage {
+  return {
+    versionId: source.version_id || undefined,
+    reusedFromVersionId: source.reused_from_version_id || undefined,
+    associatedBy: source.associated_by || undefined,
+    associatedAt: source.associated_at ?? null,
+    filename: source.filename ?? '',
+    size: source.size ?? 0,
+    sha256: source.sha256 ?? '',
+    target: source.target ?? '',
+    uploadedBy: source.uploaded_by ?? '',
+    uploadedAt: source.uploaded_at ?? null,
+  }
+}
+
 // A per-engagement tool credential. The secret value is write-only: it is sealed in the vault on set
 // and never returned, so this metadata carries only the name and timestamps.
 export interface EngagementCredential {
@@ -76,20 +94,22 @@ export const engagementsApi = {
   listEngagements: async (): Promise<Engagement[]> =>
     ((await req('/engagements')) ?? []).map(mapEngagement),
 
-  createEngagement: async (input: CreateEngagementInput): Promise<Engagement> =>
+  createEngagement: async (input: CreateEngagementInput, idempotencyKey: string): Promise<Engagement> =>
     mapEngagement(
       await req('/engagements', {
         method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify(createRequest(input)),
       }),
     ),
 
-  createEngagementFromSource: async (input: CreateEngagementInput, source: File): Promise<Engagement> => {
+  createEngagementFromSource: async (input: CreateEngagementInput, source: File, idempotencyKey: string): Promise<Engagement> => {
     const form = new FormData()
     form.append('metadata', JSON.stringify(createRequest(input)))
     form.append('source', source)
     return mapEngagement(await req('/engagements', {
       method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
       body: form,
     }))
   },
@@ -99,14 +119,7 @@ export const engagementsApi = {
 
   uploadedSource: async (id: string): Promise<UploadedSourcePackage> => {
     const source = await req(`/engagements/${encodeURIComponent(id)}/source`)
-    return {
-      filename: source.filename ?? '',
-      size: source.size ?? 0,
-      sha256: source.sha256 ?? '',
-      target: source.target ?? '',
-      uploadedBy: source.uploaded_by ?? '',
-      uploadedAt: source.uploaded_at ?? null,
-    }
+    return mapUploadedSource(source)
   },
 
   updateScope: async (id: string, inScope: ScopeTarget[], outOfScope: ScopeTarget[]): Promise<Engagement> =>
