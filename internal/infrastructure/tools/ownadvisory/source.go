@@ -474,3 +474,15 @@ func osvEcosystem(purlType string) string {
 	}
 	return ""
 }
+
+// AliasEdges exposes the owned store's alias edges for the given ids, so the SCA correlation step can build
+// the transitive alias closure and merge cross-source findings that carry non-overlapping ids. It delegates
+// to the store's optional AdvisoryAliasStore capability; a store without it returns no edges (correlation
+// then behaves exactly as before). Bounded to the given ids.
+func (s *Source) AliasEdges(ctx context.Context, ids []string) ([]advisory.AliasEdge, error) {
+	aliasStore, ok := s.store.(ports.AdvisoryAliasStore)
+	if !ok {
+		return nil, nil
+	}
+	return aliasStore.AdvisoryAliasEdges(ctx, ids)
+}

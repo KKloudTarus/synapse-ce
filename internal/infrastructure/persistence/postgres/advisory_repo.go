@@ -23,6 +23,7 @@ import (
 type AdvisoryRepository struct{ pool *pgxpool.Pool }
 
 var _ ports.AdvisoryCorpusFreshness = (*AdvisoryRepository)(nil)
+var _ ports.AdvisoryAliasStore = (*AdvisoryRepository)(nil)
 
 // AdvisoryFreshness reports the newest advisory timestamp and the corpus row count so a scan can warn when
 // the owned advisory store is stale. Advisories are global reference data (not tenant-scoped), so the query
@@ -188,4 +189,45 @@ func (r *AdvisoryRepository) ByCPE(ctx context.Context, part, vendor, product st
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+// AdvisoryAliasEdges returns the alias edges (alias id -> canonical id, the row id) for every advisory whose
+// id is in ids OR whose stored Aliases array intersects ids. The `?|` intersection is backed by the
+// advisories alias GIN index (migration 0145), so the query is bounded to the finding ids rather than a
+// full-corpus scan. Ids are matched as stored; the caller normalizes for the alias graph. An empty ids slice
+// returns no edges (no findings to expand).
+func (r *AdvisoryRepository) AdvisoryAliasEdges(ctx context.Context, ids []string) ([]advisory.AliasEdge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, data->'Aliases' FROM advisories WHERE id = ANY($1) OR data->'Aliases' ?| $1`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("query advisory alias edges: %w", err)
+	}
+	defer rows.Close()
+	var edges []advisory.AliasEdge
+	for rows.Next() {
+		var canonical string
+		var aliasesRaw []byte
+		if err := rows.Scan(&canonical, &aliasesRaw); err != nil {
+			return nil, fmt.Errorf("scan advisory alias edge: %w", err)
+		}
+		if len(aliasesRaw) == 0 {
+			continue
+		}
+		var aliases []string
+		if err := json.Unmarshal(aliasesRaw, &aliases); err != nil {
+			continue // a malformed Aliases blob is skipped, never a fatal scan error
+		}
+		for _, alias := range aliases {
+			if alias != "" && alias != canonical {
+				edges = append(edges, advisory.AliasEdge{AliasID: alias, CanonicalID: canonical})
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate advisory alias edges: %w", err)
+	}
+	return edges, nil
 }

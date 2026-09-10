@@ -27,8 +27,9 @@ func NewAdvisoryStore() *AdvisoryStore {
 }
 
 var (
-	_ ports.AdvisoryStore  = (*AdvisoryStore)(nil)
-	_ ports.AdvisoryWriter = (*AdvisoryStore)(nil) // the ingester loads via the narrow writer port
+	_ ports.AdvisoryStore      = (*AdvisoryStore)(nil)
+	_ ports.AdvisoryWriter     = (*AdvisoryStore)(nil) // the ingester loads via the narrow writer port
+	_ ports.AdvisoryAliasStore = (*AdvisoryStore)(nil)
 )
 
 // Upsert inserts or replaces an advisory by id and (re)builds its (ecosystem, package) index entries. A
@@ -91,4 +92,39 @@ func (s *AdvisoryStore) ByPackage(_ context.Context, ecosystem, name string) ([]
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID }) // byte order, parity with the pg adapter
 	return out, nil
+}
+
+// AdvisoryAliasEdges returns the alias edges for advisories whose id is in ids or whose Aliases intersect
+// ids, mirroring the Postgres adapter. Bounded to the given ids. Empty ids -> no edges.
+func (s *AdvisoryStore) AdvisoryAliasEdges(_ context.Context, ids []string) ([]advisory.AliasEdge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var edges []advisory.AliasEdge
+	for id, a := range s.byID {
+		match := want[id]
+		if !match {
+			for _, alias := range a.Aliases {
+				if want[alias] {
+					match = true
+					break
+				}
+			}
+		}
+		if !match {
+			continue
+		}
+		for _, alias := range a.Aliases {
+			if alias != "" && alias != id {
+				edges = append(edges, advisory.AliasEdge{AliasID: alias, CanonicalID: id})
+			}
+		}
+	}
+	return edges, nil
 }
