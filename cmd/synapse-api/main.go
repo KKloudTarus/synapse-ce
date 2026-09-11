@@ -229,6 +229,9 @@ func explicitTaintEnvKey() string {
 	if _, ok := os.LookupEnv("SYNAPSE_JSTAINT_ENABLED"); ok {
 		return "SYNAPSE_JSTAINT_ENABLED"
 	}
+	if _, ok := os.LookupEnv("SYNAPSE_JAVATAINT_ENABLED"); ok {
+		return "SYNAPSE_JAVATAINT_ENABLED"
+	}
 	return "SYNAPSE_PYTAINT_ENABLED"
 }
 
@@ -3017,7 +3020,7 @@ func main() {
 	// scacompose.ConfigureJudgmentScanners, which attaches each language only when its own flag is set);
 	// requireJudgmentsOrSkip preserves the loud error when either flag is set explicitly without the judgment
 	// lifecycle. Python taint is on by default, so a JS-only deployment still reaches this path.
-	if (cfg.PythonTaintEnabled || cfg.JsTaintEnabled) && requireJudgmentsOrSkip(log, judgmentSvc != nil, explicitTaintEnvKey(), "semantic taint") {
+	if (cfg.PythonTaintEnabled || cfg.JsTaintEnabled || cfg.JavaTaintEnabled) && requireJudgmentsOrSkip(log, judgmentSvc != nil, explicitTaintEnvKey(), "semantic taint") {
 		if err := scacompose.ConfigureJudgmentScanners(scaService, cfg, scaSandbox, judgmentSvc, auditLog, clock, log); err != nil {
 			log.Error("semantic taint coordinator init failed", "err", err)
 			os.Exit(1)

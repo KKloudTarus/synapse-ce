@@ -21,8 +21,8 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 3 || (os.Args[1] != "functions" && os.Args[1] != "metrics" && os.Args[1] != "bugs" && os.Args[1] != "quality" && os.Args[1] != "python-facts" && os.Args[1] != "js-facts") {
-		fmt.Fprintln(os.Stderr, "usage: synapse-ast functions|metrics|bugs|quality|python-facts|js-facts <dir>")
+	if len(os.Args) != 3 || (os.Args[1] != "functions" && os.Args[1] != "metrics" && os.Args[1] != "bugs" && os.Args[1] != "quality" && os.Args[1] != "python-facts" && os.Args[1] != "js-facts" && os.Args[1] != "java-facts") {
+		fmt.Fprintln(os.Stderr, "usage: synapse-ast functions|metrics|bugs|quality|python-facts|js-facts|java-facts <dir>")
 		os.Exit(2)
 	}
 	var (
@@ -42,6 +42,8 @@ func main() {
 		out, err = astwalk.PythonFactsFor(context.Background(), os.Args[2])
 	case "js-facts":
 		out, err = astwalk.JsFactsFor(context.Background(), os.Args[2])
+	case "java-facts":
+		out, err = astwalk.JavaFactsFor(context.Background(), os.Args[2])
 	}
 	if errors.Is(err, astwalk.ErrUnavailable) {
 		fmt.Fprintln(os.Stderr, "synapse-ast:", err)

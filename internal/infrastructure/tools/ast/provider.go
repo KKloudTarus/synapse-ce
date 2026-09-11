@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/javaprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/jsprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
@@ -104,6 +105,7 @@ var (
 	_ ports.CodeAnalyzer        = (*Provider)(nil)
 	_ ports.PythonFactsProvider = (*Provider)(nil)
 	_ ports.JsFactsProvider     = (*Provider)(nil)
+	_ ports.JavaFactsProvider   = (*Provider)(nil)
 )
 
 // PythonFacts runs `synapse-ast python-facts <root>`. The wire document is validated here because the
@@ -125,6 +127,29 @@ func (p *Provider) PythonFacts(ctx context.Context, root string) (pythonprogram.
 	}
 	if err := document.Validate(); err != nil {
 		return pythonprogram.Document{}, false, fmt.Errorf("validate synapse-ast python facts: %w", err)
+	}
+	return document, true, nil
+}
+
+// JavaFacts runs `synapse-ast java-facts <root>`. The wire document is validated here because the sidecar
+// is outside the trust boundary; exitUnavailable (a CGO-free build) degrades to unavailable, not an error.
+func (p *Provider) JavaFacts(ctx context.Context, root string) (javaprogram.Document, bool, error) {
+	if strings.TrimSpace(root) == "" {
+		return javaprogram.Document{}, false, nil
+	}
+	out, exit, err := p.run(ctx, "java-facts", root)
+	if exit == exitUnavailable {
+		return javaprogram.Document{}, false, nil
+	}
+	if err != nil {
+		return javaprogram.Document{}, false, err
+	}
+	var document javaprogram.Document
+	if err := json.Unmarshal(out, &document); err != nil {
+		return javaprogram.Document{}, false, fmt.Errorf("parse synapse-ast java facts: %w", err)
+	}
+	if err := document.Validate(); err != nil {
+		return javaprogram.Document{}, false, fmt.Errorf("validate synapse-ast java facts: %w", err)
 	}
 	return document, true, nil
 }

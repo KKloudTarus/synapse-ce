@@ -559,6 +559,11 @@ type Config struct {
 	// code. OFF by default while the catalog breadth grows; positive paths become gated CapSAST proposals and
 	// incomplete coverage never produces a clean verdict.
 	JsTaintEnabled bool
+	// JavaTaintEnabled turns on source-only Java semantic value-flow analysis (Spring/Servlet/JDBC). Like the
+	// JS/Python engines it uses the synapse-ast sidecar to extract bounded facts and never compiles or
+	// executes target code. OFF by default while the catalog breadth grows; positive paths become gated
+	// CapSAST proposals and incomplete coverage never produces a clean verdict.
+	JavaTaintEnabled bool
 	// TriScoreReassessEnabled turns on the tri-score risk reassessment surface (#594 C3/D/X5): an operator
 	// route that re-scores an incident's RiskAssessment from its factors (Threat now; Exposure/Behavior/
 	// Coverage as their producers are wired) via the deterministic Scorer. Off by default while the
@@ -874,6 +879,7 @@ func Load() Config {
 		PythonTaintEnabled:                getbool("SYNAPSE_PYTAINT_ENABLED", true),
 		TaintRulesFile:                    strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
 		JsTaintEnabled:                    getbool("SYNAPSE_JSTAINT_ENABLED", false),
+		JavaTaintEnabled:                  getbool("SYNAPSE_JAVATAINT_ENABLED", false),
 		TriScoreReassessEnabled:           getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
 		FleetCorrelationEnabled:           getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
 		FleetCorrelationWindow:            getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
