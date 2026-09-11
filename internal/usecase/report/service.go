@@ -779,6 +779,9 @@ func detailsSection(findings []finding.Finding) (ports.ReportSection, bool) {
 		if f.KEV {
 			meta = append(meta, "CISA KEV: yes")
 		}
+		if f.PublicExploit {
+			meta = append(meta, "Public exploit: known") // D1.3: a public exploit exists for this vuln
+		}
 		// Minimal-upgrade remediation (D3.8): the direct dependencies to bump to remove a transitive vuln.
 		// It names WHICH direct deps must change, not the target version, so the wording stays precise.
 		if len(f.DirectBumps) > 0 {

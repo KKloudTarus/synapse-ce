@@ -229,6 +229,10 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 		if len(f.DirectBumps) > 0 {
 			res.Properties["upgradePath"] = strings.Join(f.DirectBumps, ", ")
 		}
+		// Public-exploit exploitation-risk signal (D1.3), surfaced for a code-scanning consumer to prioritize.
+		if f.PublicExploit {
+			res.Properties["publicExploit"] = "true"
+		}
 		if opts.AIGateExemption != nil {
 			findingKey := strings.TrimSpace(f.DedupKey)
 			if exemption, ok := opts.AIGateExemption(f); ok && findingKey != "" &&

@@ -178,6 +178,10 @@ type Finding struct {
 	// Risk priority (CISA KEV -> EPSS x CVSS), copied from the source vuln so
 	// findings can be ordered by real risk. KEV findings rank above all.
 	KEV bool
+	// PublicExploit is true when a public exploit is known to exist for this finding's vulnerability
+	// (an exploitation-risk signal from the advisory corpus, D1.3). Surfaced for triage; it does not itself
+	// change ranking (KEV, actual exploitation, stays the top signal). Omitted from JSON when false.
+	PublicExploit bool `json:",omitempty"`
 	// RiskScore is the computed risk priority; omitted from JSON when unset (0) so a scan path that does
 	// not populate it — e.g. the CLI, which has no KEV/EPSS enrichment — does not emit a misleading 0.00.
 	RiskScore float64 `json:",omitempty"`

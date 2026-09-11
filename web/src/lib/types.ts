@@ -756,6 +756,7 @@ export interface Finding {
   proposedBy: string // for an agent-proposed exploitation finding, e.g. "agent:<sid>"
   complianceControls: ComplianceControl[] // curated regulatory/standard controls the CWE maps to
   directBumps?: string[] // minimal set of direct dependencies to upgrade to remove a transitive vuln (D3.8)
+  publicExploit?: boolean // a public exploit is known to exist for this vuln (D1.3, triage signal)
 }
 
 export type SLATier = 'emergency' | 'critical' | 'high' | 'medium' | 'low' | 'exception'

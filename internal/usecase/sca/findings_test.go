@@ -412,3 +412,22 @@ func TestBuildFindingsDirectBumpsEdgeCases(t *testing.T) {
 		}
 	}
 }
+
+// D1.3: the public-exploit signal is surfaced on the finding from the vulnerability.
+func TestBuildFindingsSurfacesPublicExploit(t *testing.T) {
+	res := &ScanResult{Vulnerabilities: []vulnerability.Vulnerability{
+		{ID: "CVE-E", Component: "x", Version: "1", Severity: shared.SeverityHigh, PublicExploit: true},
+		{ID: "CVE-N", Component: "y", Version: "1", Severity: shared.SeverityHigh},
+	}}
+	got := buildFindings("eng1", res, time.Unix(0, 0).UTC(), shared.SeverityHigh, false, nil)
+	byKey := map[string]finding.Finding{}
+	for _, f := range got {
+		byKey[f.DedupKey] = f
+	}
+	if !byKey["vuln:CVE-E:x:1"].PublicExploit {
+		t.Error("a vuln with a public exploit must surface PublicExploit on the finding")
+	}
+	if byKey["vuln:CVE-N:y:1"].PublicExploit {
+		t.Error("a vuln without a public exploit must not set PublicExploit")
+	}
+}

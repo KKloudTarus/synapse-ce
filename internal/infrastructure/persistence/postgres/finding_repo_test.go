@@ -383,3 +383,72 @@ func TestFindingRepositoryPersistsAndPreservesDirectBumps(t *testing.T) {
 		t.Errorf("a non-empty incoming must replace DirectBumps, got %q", got)
 	}
 }
+
+// D1.3: public_exploit round-trips through postgres and is OR-merged on upsert — a producer that upserts
+// the same dedup key with false (e.g. the continuous vulnerability projection) cannot clear a stored true;
+// a true incoming sets it.
+func TestFindingRepositoryPublicExploitOrMerge(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := shared.WithTenant(context.Background(), "default")
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	eid := shared.ID("px-" + randHex(t))
+	e, err := engagement.New(eid, "", "public-exploit-test", "", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := NewEngagementRepository(pool).Create(ctx, e); err != nil {
+		t.Fatalf("create engagement: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM findings WHERE engagement_id=$1", eid.String())
+		_, _ = pool.Exec(ctx, "DELETE FROM engagements WHERE id=$1", eid.String())
+	})
+
+	repo := NewFindingRepository(pool)
+	now := time.Now().UTC().Truncate(time.Second)
+	base := finding.Finding{
+		ID: shared.ID("fid-" + randHex(t)), EngagementID: eid, Title: "CVE-1 in x@1", Severity: shared.SeverityHigh,
+		Status: finding.StatusOpen, Kind: finding.KindSCA, DedupKey: "vuln:CVE-1:x:1",
+		PublicExploit: true, Audit: shared.Audit{CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{base}); err != nil {
+		t.Fatalf("upsert with public_exploit: %v", err)
+	}
+	pxFor := func() bool {
+		list, lerr := repo.ListByEngagement(ctx, eid)
+		if lerr != nil {
+			t.Fatalf("list: %v", lerr)
+		}
+		for _, f := range list {
+			if f.DedupKey == base.DedupKey {
+				return f.PublicExploit
+			}
+		}
+		t.Fatal("finding not found")
+		return false
+	}
+	if !pxFor() {
+		t.Fatal("public_exploit must round-trip as true")
+	}
+	// A projection-style re-upsert with false must PRESERVE the stored true (OR-merge).
+	proj := base
+	proj.ID = shared.ID("fid-" + randHex(t))
+	proj.PublicExploit = false
+	if err := repo.Upsert(ctx, []finding.Finding{proj}); err != nil {
+		t.Fatalf("projection upsert: %v", err)
+	}
+	if !pxFor() {
+		t.Errorf("a false re-upsert must not clear public_exploit (OR-merge)")
+	}
+}
