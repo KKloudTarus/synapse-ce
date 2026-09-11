@@ -264,6 +264,7 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | `SYNAPSE_PYREACH_ENABLED` | `true` | Python Tier-1 import-reachability: a declared DIRECT dependency never imported by first-party source becomes an OpenVEX `not_affected` (transitive deps are refused, not answered). Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python Tier-2 affected-symbol semantic reachability. Requires Tier-1, judgments, and a CGO-enabled `synapse-ast`. |
 | `SYNAPSE_PYTAINT_ENABLED` | `true` | Python interprocedural semantic taint proposals (default-on when the synapse-ast sidecar resolves; a clean no-op otherwise). Requires judgments and a CGO-enabled `synapse-ast`; it does not require the target-compilation sandbox. |
+| `SYNAPSE_JSTAINT_ENABLED` | `false` | JavaScript/TypeScript interprocedural semantic taint proposals. OFF by default while the catalog breadth grows. Requires judgments and a CGO-enabled `synapse-ast`; source-only, so the target-compilation sandbox is not required. |
 | `SYNAPSE_TRISCORE_REASSESS_ENABLED` | `false` | Tri-score risk reassessment surface (`POST /api/v1/fleet/incidents/{id}/risk/reassess`): re-scores an incident's RiskAssessment via the deterministic Scorer. Threat is live; Exposure/Behavior/Coverage abstain until their producers are wired. |
 | `SYNAPSE_AST_BIN` | bundled / `PATH` | Optional path to the `synapse-ast` sidecar used by Python Tier-2 reachability, Python taint, and code-quality analysis. |
 | `SYNAPSE_JSREACH_ENABLED` | `true` | JS/TS Tier-1 import-level reachability. Default ON; fails to unknown on any coverage gap. Needs judgments. |
@@ -434,6 +435,7 @@ All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 | `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python semantic call-graph reachability (Tier-2). Requires Python Tier-1 and `synapse-ast`. |
 | `SYNAPSE_TAINT_ENABLED` | `false` | Go call-graph taint proposals. Needs judgments and the target-compilation sandbox. |
 | `SYNAPSE_PYTAINT_ENABLED` | `true` | Python value-flow taint proposals (default-on when synapse-ast resolves). Needs judgments and `synapse-ast`; source-only, so the sandbox is optional. |
+| `SYNAPSE_JSTAINT_ENABLED` | `false` | JavaScript/TypeScript value-flow taint proposals (OFF by default). Needs judgments and `synapse-ast`; source-only, so the sandbox is optional. |
 | `SYNAPSE_TAINT_RULES_FILE` | empty | Optional YAML file of custom Python taint rules (`python.sources` / `python.sinks`) merged additively into the built-in catalog at startup. Custom rules only ADD detection (a new source or sink); there are no custom sanitizers, so they cannot suppress a built-in flow. A malformed or invalid file fails startup rather than silently dropping rules. |
 | `SYNAPSE_CROSSCHECK_ENABLED` | `true` | Detection-source disagreement judgments. |
 | `SYNAPSE_SBOM_CROSSCHECK_ENABLED` | `true` | Dual-producer SBOM cross-check. |

@@ -262,7 +262,9 @@ func (l SASTFlowLocation) validate() error {
 }
 
 func (d SASTDataFlow) validate() error {
-	if d.Language != "python" {
+	switch d.Language {
+	case "python", "javascript":
+	default:
 		return fmt.Errorf("%w: sast data-flow language is unknown", shared.ErrValidation)
 	}
 	if len(d.Steps) == 0 || len(d.Steps) > MaxSASTDataFlowSteps {

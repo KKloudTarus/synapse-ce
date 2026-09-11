@@ -392,6 +392,15 @@ func jsClassHeritage(node *sitter.Node) *sitter.Node {
 }
 
 func (e *jsFactExtractor) importFacts(node *sitter.Node, scope jsScope) {
+	// TS `import x = require('m')` is an import_statement carrying an import_require_clause, not a `source`
+	// field. Bind its local name so a name like `fetch`/`eval` is resolved as an import, never mistaken for
+	// the language global (which would emit a false sink). Handle it before the ES-source path.
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		if node.NamedChild(i).Type() == "import_require_clause" {
+			e.bindImportRequire(node.NamedChild(i), scope, node)
+			return
+		}
+	}
 	source := node.ChildByFieldName("source")
 	spec, ok := jsStringLiteral(source, e.source)
 	if !ok {
@@ -405,6 +414,34 @@ func (e *jsFactExtractor) importFacts(node *sitter.Node, scope jsScope) {
 		return
 	}
 	e.bindImportClause(clause, spec, scope, node)
+}
+
+// bindImportRequire binds the local name of a TS `import alias = require('spec')` clause. The clause holds
+// an identifier (the local alias) and a string (the module specifier). A non-literal specifier (dynamic
+// require) is gapped rather than bound; the concrete false-positive vector this closes is the static-literal
+// form, where the alias would otherwise resolve as a language global sink.
+func (e *jsFactExtractor) bindImportRequire(clause *sitter.Node, scope jsScope, node *sitter.Node) {
+	var alias, spec string
+	haveSpec := false
+	for i := 0; i < int(clause.NamedChildCount()); i++ {
+		child := clause.NamedChild(i)
+		switch child.Type() {
+		case "identifier":
+			if alias == "" {
+				alias = child.Content(e.source)
+			}
+		case "string":
+			spec, haveSpec = jsStringLiteral(child, e.source)
+		}
+	}
+	if alias == "" {
+		return
+	}
+	if !haveSpec {
+		e.gap(jsprogram.GapDynamicImport, scope.id, "dynamic_require", node)
+		return
+	}
+	e.addImport(scope, jsprogram.ImportRequire, spec, "", alias, node)
 }
 
 func (e *jsFactExtractor) bindImportClause(clause *sitter.Node, spec string, scope jsScope, node *sitter.Node) {

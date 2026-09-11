@@ -553,6 +553,11 @@ type Config struct {
 	// user sources and sinks) merged additively into the built-in catalog at startup. Empty (the default)
 	// uses only the built-in catalog. Custom rules can only ADD detection, never suppress a built-in flow.
 	TaintRulesFile string
+	// JsTaintEnabled turns on source-only JavaScript/TypeScript semantic value-flow analysis. Like Python
+	// taint it uses the synapse-ast sidecar to extract bounded facts and never compiles or executes target
+	// code. OFF by default while the catalog breadth grows; positive paths become gated CapSAST proposals and
+	// incomplete coverage never produces a clean verdict.
+	JsTaintEnabled bool
 	// TriScoreReassessEnabled turns on the tri-score risk reassessment surface (#594 C3/D/X5): an operator
 	// route that re-scores an incident's RiskAssessment from its factors (Threat now; Exposure/Behavior/
 	// Coverage as their producers are wired) via the deterministic Scorer. Off by default while the
@@ -866,6 +871,7 @@ func Load() Config {
 		ASTBin:                            os.Getenv("SYNAPSE_AST_BIN"),
 		PythonTaintEnabled:                getbool("SYNAPSE_PYTAINT_ENABLED", true),
 		TaintRulesFile:                    strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
+		JsTaintEnabled:                    getbool("SYNAPSE_JSTAINT_ENABLED", false),
 		TriScoreReassessEnabled:           getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
 		FleetCorrelationEnabled:           getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
 		FleetCorrelationWindow:            getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),

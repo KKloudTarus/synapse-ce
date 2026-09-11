@@ -1787,6 +1787,12 @@ js-string-html-methods
 js-structured-clone
 js-substr-deprecated
 js-symbol-no-description
+js-taint-code
+js-taint-command
+js-taint-open-redirect
+js-taint-path
+js-taint-ssrf
+js-taint-xss
 js-test-disabled
 js-test-focused
 js-throw-new-error
