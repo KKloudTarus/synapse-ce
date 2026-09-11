@@ -39,6 +39,12 @@ func DefaultPythonCatalog() PythonCatalog {
 			),
 			pySink([]string{"sqlalchemy"}, []string{"text"}, TaintSQL, "CWE-89", "python-taint-sqli", 0, "text"),
 
+			// CWE-94: dynamic code execution. eval, exec, and compile are builtins that evaluate/compile their
+			// first argument as Python source, so passing attacker-controlled text is arbitrary code execution.
+			// The safe alternative is ast.literal_eval (a distinct function that parses only literals), so no
+			// sanitizer makes eval/exec safe on untrusted input.
+			pySink([]string{"builtins"}, []string{"eval", "exec", "compile"}, TaintCode, "CWE-94", "python-taint-code", 0, "source", "expression"),
+
 			// CWE-78: command and shell execution.
 			pySink([]string{"os"}, []string{"system", "popen"}, TaintCommand, "CWE-78", "python-taint-command", 0, "command", "cmd"),
 			pySink([]string{"os"}, []string{"execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe"}, TaintCommand, "CWE-78", "python-taint-command", 0, "path"),
