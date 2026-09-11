@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/jsprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -116,4 +117,60 @@ func customSinkDocument() pythonprogram.Document {
 	}
 	document.Entrypoints = []pythonprogram.EntrypointHint{{SymbolID: route.ID, Kind: "framework_route", Pos: route.Pos}}
 	return document
+}
+
+// TestWithCustomJsIsAdditive: a custom JS source and sink are appended to the built-in catalog, and no
+// sanitizer is added (custom rules can never suppress).
+func TestWithCustomJsIsAdditive(t *testing.T) {
+	base := DefaultJsCatalog()
+	baseSinks, baseSources, baseSan := len(base.Sinks), len(base.Sources), len(base.Sanitizers)
+	merged := base.WithCustomJs(CustomJsRules{
+		Sources: []CustomSource{{Modules: []string{"myframework"}, Names: []string{"readBody"}}},
+		Sinks:   []CustomSink{{Modules: []string{"myorm"}, Names: []string{"rawQuery"}, Class: "sql", CWE: "CWE-89", Rule: "myorm-js-sqli", Argument: 0}},
+	})
+	if len(merged.Sinks) != baseSinks+1 || len(merged.Sources) != baseSources+1 {
+		t.Fatalf("merge must append exactly the custom entries: sinks %d->%d sources %d->%d", baseSinks, len(merged.Sinks), baseSources, len(merged.Sources))
+	}
+	if len(merged.Sanitizers) != baseSan {
+		t.Errorf("custom rules must not touch sanitizers (no suppression), got %d", len(merged.Sanitizers))
+	}
+}
+
+// TestCustomJsSinkFiresEndToEnd: a request value reaching a user-declared myorm.rawQuery is a finding under
+// the merged JS catalog, proving custom JS rules are not merely parsed but actually detect.
+func TestCustomJsSinkFiresEndToEnd(t *testing.T) {
+	scope := jsModuleID()
+	src := jsReqSource("v-src", "req", "body", "q")
+	catalog := DefaultJsCatalog().WithCustomJs(CustomJsRules{
+		Sinks: []CustomSink{{Modules: []string{"myorm"}, Names: []string{"rawQuery"}, Class: "sql", CWE: "CWE-89", Rule: "myorm-js-sqli", Argument: 0}},
+	})
+	doc := jsDoc(
+		[]jsprogram.Import{{ScopeID: scope, Kind: jsprogram.ImportDefault, Module: "myorm", Alias: "myorm", Pos: jsPos(1, 0)}},
+		[]jsprogram.Value{src},
+		[]jsprogram.Call{jsAttrCall("c1", []string{"myorm", "rawQuery"}, src.Ref, src.ID)},
+	)
+	graph, err := BuildJsValueGraph(doc, catalog)
+	if err != nil {
+		t.Fatalf("graph: %v", err)
+	}
+	if !jsFindingRules(graph)["myorm-js-sqli"] {
+		t.Fatalf("the custom JS sink must produce a finding, got %v", jsFindingRules(graph))
+	}
+}
+
+// TestCustomRulesValidateJsRejectsBadRule: a JS custom sink with an unknown class is rejected, with the
+// error naming the js side.
+func TestCustomRulesValidateJsRejectsBadRule(t *testing.T) {
+	bad := CustomRules{JS: CustomJsRules{
+		Sinks: []CustomSink{{Modules: []string{"m"}, Names: []string{"n"}, Class: "not-a-class", CWE: "CWE-1", Rule: "r", Argument: 0}},
+	}}
+	if err := bad.Validate(); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("an unknown JS taint class must be rejected, got %v", err)
+	}
+	valid := CustomRules{JS: CustomJsRules{
+		Sinks: []CustomSink{{Modules: []string{"m"}, Names: []string{"n"}, Class: "code", CWE: "CWE-94", Rule: "r", Argument: 0}},
+	}}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("a well-formed JS rule must validate, got %v", err)
+	}
 }

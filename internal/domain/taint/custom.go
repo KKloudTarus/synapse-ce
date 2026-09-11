@@ -26,10 +26,20 @@ const (
 // CustomRules is the whole custom-rule document.
 type CustomRules struct {
 	Python CustomPythonRules `yaml:"python" json:"python"`
+	JS     CustomJsRules     `yaml:"js" json:"js"`
 }
 
 // CustomPythonRules extends the Python value-flow catalog.
 type CustomPythonRules struct {
+	Sources []CustomSource `yaml:"sources" json:"sources"`
+	Sinks   []CustomSink   `yaml:"sinks" json:"sinks"`
+}
+
+// CustomJsRules extends the JavaScript/TypeScript value-flow catalog. A custom JS source/sink is
+// import-anchored (modules + names), the sound match the built-in catalog trusts most; the free-form global
+// and receiver-name conventions are deliberately NOT exposed to custom rules, so an operator cannot author an
+// unanchored pattern that fires broadly.
+type CustomJsRules struct {
 	Sources []CustomSource `yaml:"sources" json:"sources"`
 	Sinks   []CustomSink   `yaml:"sinks" json:"sinks"`
 }
@@ -52,33 +62,44 @@ type CustomSink struct {
 
 // Empty reports whether the document declares no custom rules.
 func (r CustomRules) Empty() bool {
-	return len(r.Python.Sources) == 0 && len(r.Python.Sinks) == 0
+	return len(r.Python.Sources) == 0 && len(r.Python.Sinks) == 0 &&
+		len(r.JS.Sources) == 0 && len(r.JS.Sinks) == 0
 }
 
 // Validate rejects a document that is malformed or that could bloat the catalog. It never fails open: an
 // invalid rule is an error, not a silently-dropped entry, so an operator sees the mistake.
 func (r CustomRules) Validate() error {
-	total := len(r.Python.Sources) + len(r.Python.Sinks)
+	total := len(r.Python.Sources) + len(r.Python.Sinks) + len(r.JS.Sources) + len(r.JS.Sinks)
 	if total > maxCustomTaintRules {
 		return fmt.Errorf("%w: %d custom taint rules exceeds the cap of %d", shared.ErrValidation, total, maxCustomTaintRules)
 	}
-	for i, s := range r.Python.Sources {
+	if err := validateRuleSet("python", r.Python.Sources, r.Python.Sinks); err != nil {
+		return err
+	}
+	return validateRuleSet("js", r.JS.Sources, r.JS.Sinks)
+}
+
+// validateRuleSet checks one language's custom sources and sinks: every pattern is a well-formed
+// module+name anchor, and every sink names a known taint class, a CWE-<number>, a non-empty rule id, and a
+// non-negative argument index. An invalid rule is an error, never a silently-dropped entry.
+func validateRuleSet(lang string, sources []CustomSource, sinks []CustomSink) error {
+	for i, s := range sources {
 		if err := validatePattern(s.Modules, s.Names); err != nil {
-			return fmt.Errorf("%w: custom source %d: %s", shared.ErrValidation, i, err)
+			return fmt.Errorf("%w: %s custom source %d: %s", shared.ErrValidation, lang, i, err)
 		}
 	}
-	for i, s := range r.Python.Sinks {
+	for i, s := range sinks {
 		if err := validatePattern(s.Modules, s.Names); err != nil {
-			return fmt.Errorf("%w: custom sink %d: %s", shared.ErrValidation, i, err)
+			return fmt.Errorf("%w: %s custom sink %d: %s", shared.ErrValidation, lang, i, err)
 		}
 		if !TaintClass(strings.TrimSpace(s.Class)).Valid() {
-			return fmt.Errorf("%w: custom sink %d: unknown taint class %q", shared.ErrValidation, i, s.Class)
+			return fmt.Errorf("%w: %s custom sink %d: unknown taint class %q", shared.ErrValidation, lang, i, s.Class)
 		}
 		if !cweID.MatchString(strings.TrimSpace(s.CWE)) || strings.TrimSpace(s.Rule) == "" {
-			return fmt.Errorf("%w: custom sink %d: cwe must be CWE-<number> and rule must be non-empty", shared.ErrValidation, i)
+			return fmt.Errorf("%w: %s custom sink %d: cwe must be CWE-<number> and rule must be non-empty", shared.ErrValidation, lang, i)
 		}
 		if s.Argument < 0 {
-			return fmt.Errorf("%w: custom sink %d: argument index must be non-negative", shared.ErrValidation, i)
+			return fmt.Errorf("%w: %s custom sink %d: argument index must be non-negative", shared.ErrValidation, lang, i)
 		}
 	}
 	return nil
@@ -113,6 +134,30 @@ func (c PythonCatalog) WithCustomPython(rules CustomPythonRules) PythonCatalog {
 	for _, s := range rules.Sinks {
 		out.Sinks = append(out.Sinks, PythonSinkModel{
 			Pattern:         PythonCallablePattern{Modules: normalizePatternList(s.Modules), Names: normalizePatternList(s.Names)},
+			Class:           TaintClass(strings.TrimSpace(s.Class)),
+			CWE:             strings.TrimSpace(s.CWE),
+			Rule:            strings.TrimSpace(s.Rule),
+			ArgumentIndexes: []int{s.Argument},
+		})
+	}
+	return out
+}
+
+// WithCustomJs returns a copy of the JS catalog extended with the validated custom rules. Like the Python
+// twin it is additive (built-ins are preserved, custom entries appended) and import-anchored (each custom
+// source/sink matches only via its modules + names, never the free-form global or receiver-name conventions),
+// so a custom rule can only ADD detection, never suppress or fire unanchored. Validate must have been called.
+func (c JsCatalog) WithCustomJs(rules CustomJsRules) JsCatalog {
+	out := c
+	for _, s := range rules.Sources {
+		out.Sources = append(out.Sources, JsSourceModel{
+			Pattern: JsCallablePattern{Modules: normalizePatternList(s.Modules), Names: normalizePatternList(s.Names)},
+			Classes: append([]TaintClass(nil), allJsTaintClasses...),
+		})
+	}
+	for _, s := range rules.Sinks {
+		out.Sinks = append(out.Sinks, JsSinkModel{
+			Pattern:         JsCallablePattern{Modules: normalizePatternList(s.Modules), Names: normalizePatternList(s.Names)},
 			Class:           TaintClass(strings.TrimSpace(s.Class)),
 			CWE:             strings.TrimSpace(s.CWE),
 			Rule:            strings.TrimSpace(s.Rule),

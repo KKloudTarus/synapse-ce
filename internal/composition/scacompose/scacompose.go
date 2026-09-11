@@ -530,7 +530,18 @@ func jsTaintScanner(cfg config.Config, sb *sandbox.Runner, proposer TaintPropose
 	} else {
 		log.Warn("js taint: synapse-ast runs unsandboxed (dev only); target source is parsed but never executed")
 	}
-	coordinator, err := taintscan.NewJsCoordinator(factsProvider, proposer, taint.DefaultJsCatalog(), audit, clock)
+	catalog := taint.DefaultJsCatalog()
+	if cfg.TaintRulesFile != "" {
+		custom, found, cerr := taintrules.Load(cfg.TaintRulesFile)
+		if cerr != nil {
+			return nil, fmt.Errorf("load custom taint rules %q: %w", cfg.TaintRulesFile, cerr)
+		}
+		if found && !custom.Empty() {
+			catalog = catalog.WithCustomJs(custom.JS)
+			log.Info("custom js taint rules loaded", "sources", len(custom.JS.Sources), "sinks", len(custom.JS.Sinks))
+		}
+	}
+	coordinator, err := taintscan.NewJsCoordinator(factsProvider, proposer, catalog, audit, clock)
 	if err != nil {
 		return nil, fmt.Errorf("js semantic taint coordinator init: %w", err)
 	}

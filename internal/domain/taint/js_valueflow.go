@@ -487,6 +487,7 @@ func (b *jsValueBuilder) modelReferenceSources() {
 	if len(b.catalog.ReferenceSourcePrefixes) == 0 {
 		return
 	}
+	classes := jsSourceClasses(b.catalog)
 	for _, value := range b.document.Values {
 		if value.Kind != jsprogram.ValueReference {
 			continue
@@ -497,10 +498,31 @@ func (b *jsValueBuilder) modelReferenceSources() {
 		if !jsSegmentsMatchAnyPrefix(value.Ref.Segments, b.catalog.ReferenceSourcePrefixes) {
 			continue
 		}
-		for _, class := range allJsTaintClasses {
+		for _, class := range classes {
 			b.addSource(value.ID, class, value.Pos)
 		}
 	}
+}
+
+// jsSourceClasses is the set of taint classes a fully untrusted request source produces: every built-in
+// class, plus any class a custom sink introduced. A source must taint for a custom sink's class or the
+// operator's custom rule (e.g. a SQL class the built-in JS catalog does not carry) could never fire.
+func jsSourceClasses(catalog JsCatalog) []TaintClass {
+	seen := map[TaintClass]bool{}
+	out := make([]TaintClass, 0, len(allJsTaintClasses))
+	for _, c := range allJsTaintClasses {
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	for _, s := range catalog.Sinks {
+		if s.Class != "" && !seen[s.Class] {
+			seen[s.Class] = true
+			out = append(out, s.Class)
+		}
+	}
+	return out
 }
 
 func (b *jsValueBuilder) addFlow(from, to string) {
