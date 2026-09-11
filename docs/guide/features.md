@@ -56,9 +56,11 @@ When container image scanning is enabled, Synapse materializes the image root fi
 runs owned catalogers over it, so a shipped artifact is inventoried even without a lockfile:
 
 - **OS packages.** dpkg (`/var/lib/dpkg/status`) and apk (`/lib/apk/db/installed`) for Debian,
-  Ubuntu, and Alpine, plus rpm from the sqlite `rpmdb.sqlite` used by modern RHEL, Fedora,
-  AlmaLinux, Rocky, and Oracle Linux. Packages are emitted with a distro qualifier so the
-  advisory matcher keys them to the right OS ecosystem.
+  Ubuntu, and Alpine, plus rpm from all three database backends: sqlite (`rpmdb.sqlite`, modern
+  RHEL/Fedora/AlmaLinux/Rocky/Oracle), BerkeleyDB (`Packages`, RHEL 8 and Amazon Linux 2), and
+  ndb (`Packages.db`, openSUSE and SLE), each parsed by owned pure-Go code so `CGO_ENABLED=0`
+  still builds. Packages are emitted with a distro qualifier so the advisory matcher keys them to
+  the right OS ecosystem.
 - **Installed binaries.** Go build information embedded in ELF, PE, and Mach-O binaries, and
   Python dist-info and egg-info metadata, become `pkg:golang` and `pkg:pypi` components.
 - **Image config hardening.** An owned check over the image config and build history flags a

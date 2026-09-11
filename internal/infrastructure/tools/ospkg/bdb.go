@@ -54,10 +54,9 @@ import (
 // page-number (a relocated/copied image is rejected); and parseRPMHeader's structural validation gates what any
 // surfaced blob can be. The failure direction is add-a-(real, previously-installed)-package, never hide one.
 //
-// The openSUSE ndb backend (/var/lib/rpm/Packages.db) is DEFERRED, not half-implemented: it is a different
-// slot-directory format and no ndb fixture was available to validate an owned parser against, and shipping an
-// unvalidated binary parser for untrusted input is exactly the misparse-is-a-wrong-CVE risk this file guards
-// against. See rpm.go's rpmComponents dispatcher.
+// The openSUSE/SLE ndb backend (/var/lib/rpm/Packages.db) is a different slot-directory format, parsed by the
+// owned pure-Go rpm_ndb.go and validated byte-for-byte against a real openSUSE Leap 15.6 fixture. See rpm.go's
+// rpmComponents dispatcher, which tries sqlite, then this BerkeleyDB backend, then ndb.
 const (
 	bdbHashMagic  = 0x00061561 // DBMETA magic for a HASH database (native byte order)
 	bdbMagicOff   = 12         // byte offset of the magic in the metadata page
