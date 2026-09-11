@@ -391,6 +391,9 @@ synapse-cli sync-advisories --oval <dir>
 
 # ingest a local yum/dnf updateinfo dump (Amazon Linux ALAS: repodata updateinfo.xml[.gz])
 synapse-cli sync-advisories --updateinfo <dir>
+
+# ingest a local RESF/Apollo OSV list dump (Rocky Linux RLSA: apollo.build.resf.org OSV JSON pages)
+synapse-cli sync-advisories --rocky <dir>
 ```
 
 Enable the store at scan time with `SYNAPSE_OWNED_ADVISORY=true`, then it runs alongside the
