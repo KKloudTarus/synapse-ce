@@ -2042,6 +2042,11 @@ type SecretRawFinding struct {
 	Title    string // human title, e.g. "AWS access key ID"
 	Severity shared.Severity
 	Match    string // REDACTED preview only (e.g. "AKIA****...**7X"), never the full secret
+	// Verified is the opt-in active-verification verdict (D6.3): SecretVerified when the issuing provider
+	// confirmed the credential is live, SecretUnverified when the provider rejected it, SecretUnknown
+	// (default) when verification was off, no provider matched, or the check was inconclusive. It NEVER
+	// carries the secret value and an unknown/unverified verdict never suppresses the finding.
+	Verified SecretVerdict
 	// FromHistory marks a hit found by the git-HISTORY scan (a committed-then-removed secret) rather than the
 	// working tree, so it keys distinctly even when its commit attribution could not be resolved.
 	FromHistory bool

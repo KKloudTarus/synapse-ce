@@ -187,7 +187,7 @@ func TestScanTruncatesAggregateBudgets(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			report, err := New().scanFiles(context.Background(), dir, tc.limits)
+			report, err := New().scanFiles(context.Background(), dir, tc.limits, nil)
 			if err != nil || !report.Truncated || len(report.Findings) > tc.limits.findings {
 				t.Fatalf("report=%+v err=%v", report, err)
 			}

@@ -91,7 +91,7 @@ func (s *Scanner) ScanHistory(ctx context.Context, repoDir string) (ports.Secret
 			return
 		}
 		start := len(report.Findings)
-		if s.scanContent(path, data, seen, &report.Findings, maxFindings) {
+		if s.scanContent(path, data, seen, &report.Findings, maxFindings, nil) {
 			report.Truncated = true
 		}
 		bi, attributed := intro[sha]

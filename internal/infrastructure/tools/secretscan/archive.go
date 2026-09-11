@@ -85,17 +85,17 @@ func openAndReadArchive(root *os.Root, rel string, walkInfo fs.FileInfo, limit i
 
 // scanArchiveData scans the members of an archive held in data (dispatched by ext). Bounded by budget and
 // depth. Returns true if a scan cap was hit (report should be marked truncated).
-func (s *Scanner) scanArchiveData(ctx context.Context, displayPath string, data []byte, ext string, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, budget *archiveBudget, depth int) bool {
+func (s *Scanner) scanArchiveData(ctx context.Context, displayPath string, data []byte, ext string, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, budget *archiveBudget, depth int, vf *verifyState) bool {
 	if ctx.Err() != nil || depth > maxArchiveDepth {
 		return true
 	}
 	switch ext {
 	case ".zip", ".jar", ".war", ".ear":
-		return s.scanZip(ctx, displayPath, data, seen, out, limit, budget, depth)
+		return s.scanZip(ctx, displayPath, data, seen, out, limit, budget, depth, vf)
 	case ".tar":
-		return s.scanTar(ctx, displayPath, bytes.NewReader(data), seen, out, limit, budget, depth)
+		return s.scanTar(ctx, displayPath, bytes.NewReader(data), seen, out, limit, budget, depth, vf)
 	case ".gz", ".tgz":
-		return s.scanGzip(ctx, displayPath, data, ext, seen, out, limit, budget, depth)
+		return s.scanGzip(ctx, displayPath, data, ext, seen, out, limit, budget, depth, vf)
 	}
 	return false
 }
@@ -105,7 +105,7 @@ func (s *Scanner) scanArchiveData(ctx context.Context, displayPath string, data 
 // reads to the budget EVEN on a read error (so a corrupt member that decompresses far then fails a checksum is
 // still charged), recurses when the member is itself an archive (within depth), and otherwise runs the
 // detectors over its text. Returns true when a cap was hit and extraction should stop.
-func (s *Scanner) scanMember(ctx context.Context, memberPath string, r io.Reader, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, budget *archiveBudget, depth int) bool {
+func (s *Scanner) scanMember(ctx context.Context, memberPath string, r io.Reader, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, budget *archiveBudget, depth int, vf *verifyState) bool {
 	if budget.exhausted() || len(*out) >= limit {
 		return true
 	}
@@ -123,15 +123,15 @@ func (s *Scanner) scanMember(ctx context.Context, memberPath string, r io.Reader
 	}
 	ext := strings.ToLower(path.Ext(memberPath))
 	if archiveExts[ext] && depth < maxArchiveDepth {
-		return s.scanArchiveData(ctx, memberPath, data, ext, seen, out, limit, budget, depth+1)
+		return s.scanArchiveData(ctx, memberPath, data, ext, seen, out, limit, budget, depth+1, vf)
 	}
 	if isBinary(data) {
 		return false
 	}
-	return s.scanContent(memberPath, data, seen, out, limit)
+	return s.scanContent(memberPath, data, seen, out, limit, vf)
 }
 
-func (s *Scanner) scanZip(ctx context.Context, displayPath string, data []byte, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, budget *archiveBudget, depth int) bool {
+func (s *Scanner) scanZip(ctx context.Context, displayPath string, data []byte, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, budget *archiveBudget, depth int, vf *verifyState) bool {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return false
@@ -151,7 +151,7 @@ func (s *Scanner) scanZip(ctx context.Context, displayPath string, data []byte, 
 		if oerr != nil {
 			continue
 		}
-		stop := s.scanMember(ctx, displayPath+"!"+f.Name, rc, seen, out, limit, budget, depth)
+		stop := s.scanMember(ctx, displayPath+"!"+f.Name, rc, seen, out, limit, budget, depth, vf)
 		_ = rc.Close()
 		if stop {
 			return true
@@ -160,7 +160,7 @@ func (s *Scanner) scanZip(ctx context.Context, displayPath string, data []byte, 
 	return false
 }
 
-func (s *Scanner) scanTar(ctx context.Context, displayPath string, r io.Reader, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, budget *archiveBudget, depth int) bool {
+func (s *Scanner) scanTar(ctx context.Context, displayPath string, r io.Reader, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, budget *archiveBudget, depth int, vf *verifyState) bool {
 	tr := tar.NewReader(r)
 	for {
 		if ctx.Err() != nil {
@@ -175,7 +175,7 @@ func (s *Scanner) scanTar(ctx context.Context, displayPath string, r io.Reader, 
 			return true
 		}
 		if hdr.Typeflag == tar.TypeReg { // tar.Reader normalizes the legacy TypeRegA to TypeReg, so this covers it too
-			if s.scanMember(ctx, displayPath+"!"+hdr.Name, tr, seen, out, limit, budget, depth) {
+			if s.scanMember(ctx, displayPath+"!"+hdr.Name, tr, seen, out, limit, budget, depth, vf) {
 				return true
 			}
 			continue
@@ -193,7 +193,7 @@ func (s *Scanner) scanTar(ctx context.Context, displayPath string, r io.Reader, 
 	}
 }
 
-func (s *Scanner) scanGzip(ctx context.Context, displayPath string, data []byte, ext string, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, budget *archiveBudget, depth int) bool {
+func (s *Scanner) scanGzip(ctx context.Context, displayPath string, data []byte, ext string, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, budget *archiveBudget, depth int, vf *verifyState) bool {
 	// Classify by PARSING the first tar header from a bounded decompression (not a magic sniff): a valid tar
 	// (including GNU format, which lacks the ustar magic) is scanned entry by entry; anything else falls back to
 	// a single gzipped file. This avoids both a plain .gz whose bytes coincidentally look like a tar header and a
@@ -206,7 +206,7 @@ func (s *Scanner) scanGzip(ctx context.Context, displayPath string, data []byte,
 			gz2, err2 := gzip.NewReader(bytes.NewReader(data))
 			if err2 == nil {
 				defer func() { _ = gz2.Close() }()
-				return s.scanTar(ctx, displayPath, gz2, seen, out, limit, budget, depth)
+				return s.scanTar(ctx, displayPath, gz2, seen, out, limit, budget, depth, vf)
 			}
 		}
 	}
@@ -220,5 +220,5 @@ func (s *Scanner) scanGzip(ctx context.Context, displayPath string, data []byte,
 		return true
 	}
 	inner := path.Base(strings.TrimSuffix(displayPath, ext)) // "foo.txt.gz" -> member "foo.txt"
-	return s.scanMember(ctx, displayPath+"!"+inner, gz, seen, out, limit, budget, depth+1)
+	return s.scanMember(ctx, displayPath+"!"+inner, gz, seen, out, limit, budget, depth+1, vf)
 }

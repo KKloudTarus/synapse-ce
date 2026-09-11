@@ -18,6 +18,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/secretverify"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourcesnippet"
 	asttool "github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
@@ -373,6 +374,13 @@ func Configure(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, log *s
 		if cfg.SecretHistoryEnabled {
 			svc.SetSecretHistoryEnabled(true) // also scan git history for committed-then-removed secrets
 			log.Info("git-history secret scanning ENABLED (blobs from all refs; best-effort on a git repo)")
+		}
+		if cfg.SecretVerifyEnabled {
+			// Opt-in active verification (D6.3): one read-only provider call per detected credential to
+			// confirm it is live. Sends the raw secret to its issuing provider; default-off, rate-limited,
+			// secret never logged. Enable only for an authorized assessment.
+			svc.SetSecretVerifier(secretverify.New(float64(cfg.SecretVerifyRPS)))
+			log.Warn("active secret verification ENABLED (D6.3): detected credentials are sent to their issuing provider over the network to confirm they are live")
 		}
 	}
 	if cfg.ImageRootFSEnabled {
