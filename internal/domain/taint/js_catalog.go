@@ -80,6 +80,13 @@ func DefaultJsCatalog() JsCatalog {
 			// (res.redirect(url); res.redirect(302, url) is DECLINED, argument one, because a status-first form
 			// is rare and modeling argument one would flag the safe status-only usage).
 			jsSink(jsRaw("res.redirect", "response.redirect"), TaintRedirect, "CWE-601", "js-taint-open-redirect", 0),
+
+			// CWE-1333: an untrusted value compiled as a regular expression (regex injection / ReDoS). RegExp is
+			// a global constructor (matched only when unshadowed), invoked as `new RegExp(pattern)` or
+			// `RegExp(pattern)`; the PATTERN is argument zero. A second-argument flags string is not injectable.
+			// This fires only when the pattern is TAINTED (a literal `/abc/` or a constant string never is), so
+			// it flags an attacker-controlled regex, not every dynamic RegExp.
+			jsSinkGlobal(TaintReDoS, "CWE-1333", "js-taint-redos", []int{0}, "RegExp"),
 		},
 		Sanitizers: []JsSanitizerModel{
 			// CWE-79: contextual HTML/URL encoders. encodeURIComponent / encodeURI are globals; the library
@@ -97,6 +104,10 @@ func DefaultJsCatalog() JsCatalog {
 			// CWE-78: shell-argument quoting neutralizes command injection only.
 			{Pattern: jsMod([]string{"shell-quote"}, "quote"), Classes: []TaintClass{TaintCommand}},
 			{Pattern: jsMod([]string{"shescape"}, "quote", "quoteAll", "escape", "escapeAll"), Classes: []TaintClass{TaintCommand}},
+
+			// CWE-1333: escape-string-regexp's default export escapes a string so it matches literally inside a
+			// regex, so the value carries no injectable metacharacters; it neutralizes the ReDoS class only.
+			{Pattern: JsCallablePattern{Modules: []string{"escape-string-regexp"}, CallModule: true}, Classes: []TaintClass{TaintReDoS}},
 
 			// Numeric coercion produces a Number with no injectable structure, so it neutralizes every class.
 			{Pattern: JsCallablePattern{Globals: []string{"Number", "parseInt", "parseFloat"}}, Classes: all},

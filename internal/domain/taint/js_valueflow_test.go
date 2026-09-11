@@ -371,3 +371,51 @@ func TestDeepDocumentWriteIsNotXSS(t *testing.T) {
 		t.Fatalf("widget.document.write must not match the DOM document.write sink, got %v", rules)
 	}
 }
+
+// TestGlobalRegExpIsReDoS: the RegExp global constructor with a tainted pattern is a ReDoS (CWE-1333) sink.
+func TestGlobalRegExpIsReDoS(t *testing.T) {
+	src := jsReqSource("v-src", "req", "query", "pattern")
+	doc := jsDoc(nil,
+		[]jsprogram.Value{src},
+		[]jsprogram.Call{jsNameCall("c1", []string{"RegExp"}, src.Ref, src.ID)},
+	)
+	if !jsFindingRules(mustJsGraph(t, doc))["js-taint-redos"] {
+		t.Fatal("global RegExp with a tainted pattern should be a ReDoS sink")
+	}
+}
+
+// TestShadowedRegExpIsNotReDoS: a local binding named RegExp is not the global constructor, so it is not a sink.
+func TestShadowedRegExpIsNotReDoS(t *testing.T) {
+	src := jsReqSource("v-src", "req", "query", "pattern")
+	doc := jsDocSym(nil,
+		[]jsprogram.Symbol{jsDecl("RegExp", jsprogram.SymbolFunction)},
+		[]jsprogram.Value{src},
+		[]jsprogram.Call{jsNameCall("c1", []string{"RegExp"}, src.Ref, src.ID)},
+	)
+	if rules := jsFindingRules(mustJsGraph(t, doc)); rules["js-taint-redos"] {
+		t.Fatalf("a locally shadowed RegExp must not be a ReDoS sink, got %v", rules)
+	}
+}
+
+// TestEscapeStringRegexpSanitizesReDoS: escape-string-regexp's default export escapes the pattern, so the
+// value reaching RegExp carries no injectable metacharacters and the ReDoS flow is neutralized.
+func TestEscapeStringRegexpSanitizesReDoS(t *testing.T) {
+	scope := jsModuleID()
+	src := jsReqSource("v-src", "req", "query", "q")
+	esc := jsprogram.Value{ID: "v-esc", ScopeID: scope, Kind: jsprogram.ValueCallResult, Ref: jsprogram.Reference{Kind: jsprogram.ReferenceExpression}, Pos: jsPos(3, 20)}
+	escCall := jsprogram.Call{
+		ID: "c-esc", CallerID: scope,
+		Callee:    jsprogram.Reference{Kind: jsprogram.ReferenceName, Segments: []string{"escapeStringRegexp"}},
+		Arguments: []jsprogram.Argument{{Value: src.Ref, ValueID: src.ID, Pos: jsPos(3, 20)}},
+		ResultID:  "v-esc", Pos: jsPos(3, 10),
+	}
+	reCall := jsNameCall("c-re", []string{"RegExp"}, jsprogram.Reference{Kind: jsprogram.ReferenceExpression}, "v-esc")
+	doc := jsDoc(
+		[]jsprogram.Import{{ScopeID: scope, Kind: jsprogram.ImportDefault, Module: "escape-string-regexp", Alias: "escapeStringRegexp", Pos: jsPos(1, 0)}},
+		[]jsprogram.Value{src, esc},
+		[]jsprogram.Call{escCall, reCall},
+	)
+	if rules := jsFindingRules(mustJsGraph(t, doc)); rules["js-taint-redos"] {
+		t.Fatalf("escape-string-regexp should neutralize the ReDoS flow, got %v", rules)
+	}
+}
