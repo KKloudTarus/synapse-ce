@@ -21,7 +21,8 @@ import (
 // /var/lib/rpm/rpmdb.sqlite, whose Packages table holds one binary RPM HEADER blob per installed package. The
 // older Berkeley-DB backend (/var/lib/rpm/Packages, RHEL<=8/CentOS/UBI8/Amazon Linux 2) is now parsed by the
 // owned pure-Go bdb.go, which extracts the SAME header blobs from the hash pages and feeds each to
-// safeParseRPMHeader. The ndb backend (openSUSE, /var/lib/rpm/Packages.db) stays DEFERRED (see bdb.go).
+// safeParseRPMHeader. The ndb backend (openSUSE/SLE, /var/lib/rpm/Packages.db) is parsed by the owned pure-Go
+// rpm_ndb.go, which reads the slot directory and feeds each slot's header blob to the same safeParseRPMHeader.
 // Everything here treats the DB + header as UNTRUSTED (a hostile image): reads are cancellable
 // (modernc interrupts the first query step, the loop re-checks ctx between steps, and a best-effort watchdog
 // closes the DB on cancel) and bounded (per-blob size filter server-side + total-byte + row-count budgets);
@@ -58,7 +59,20 @@ func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) ([]sbo
 	if err != nil || len(comps) > 0 {
 		return comps, err
 	}
-	return rpmBDBComponents(ctx, filepath.Join(rootfsDir, rpmBDBPath), namespace, tag)
+	comps, err = rpmBDBComponents(ctx, filepath.Join(rootfsDir, rpmBDBPath), namespace, tag)
+	if err != nil || len(comps) > 0 {
+		return comps, err
+	}
+	// ndb backend (openSUSE/SLE). Probe /var/lib/rpm/Packages.db first, then the relocated openSUSE location;
+	// the first that yields packages wins, so a rootfs where /var/lib/rpm symlinks to /usr/lib/sysimage/rpm is
+	// never double-counted.
+	for _, p := range []string{rpmNDBPath, rpmNDBSysimagePath} {
+		comps, err = rpmNDBComponents(ctx, filepath.Join(rootfsDir, p), namespace, tag)
+		if err != nil || len(comps) > 0 {
+			return comps, err
+		}
+	}
+	return nil, nil
 }
 
 // rpmSQLiteComponents reads /var/lib/rpm/rpmdb.sqlite and returns one component per installed package. namespace

@@ -39,14 +39,18 @@ const (
 	apkDBPath  = "lib/apk/db/installed"
 	rpmDBPath  = "var/lib/rpm/rpmdb.sqlite" // RHEL9+/Fedora/UBI9 sqlite backend
 	rpmBDBPath = "var/lib/rpm/Packages"     // RHEL<=8/CentOS/UBI8/Amazon Linux 2 BerkeleyDB backend
+	// ndb backend (openSUSE/SLE, rpm >= 4.15). openSUSE Leap relocates the rpmdb under
+	// /usr/lib/sysimage/rpm and symlinks /var/lib/rpm to it, so both locations are probed.
+	rpmNDBPath         = "var/lib/rpm/Packages.db"
+	rpmNDBSysimagePath = "usr/lib/sysimage/rpm/Packages.db"
 )
 
 // SupportedDBPaths returns the rootfs-relative OS package database paths Catalog reads, in a fresh
-// slice. It is the single source of truth for "which databases does the engine know about". The ndb
-// backend (var/lib/rpm/Packages.db, openSUSE) is deferred (see bdb.go) and deliberately absent here, so
-// the host coverage probe never claims a DB the cataloger cannot read.
+// slice. It is the single source of truth for "which databases does the engine know about", so the host
+// coverage probe never claims a DB the cataloger cannot read. All three rpm backends are covered: sqlite
+// (rpmDBPath), BerkeleyDB (rpmBDBPath), and ndb (rpmNDBPath and its relocated openSUSE location).
 func SupportedDBPaths() []string {
-	return []string{dpkgDBPath, apkDBPath, rpmDBPath, rpmBDBPath}
+	return []string{dpkgDBPath, apkDBPath, rpmDBPath, rpmBDBPath, rpmNDBPath, rpmNDBSysimagePath}
 }
 
 // debianFamilyIDs are the dpkg os-release IDs the advisory matcher can key (osDistroEcosystem handles Debian +
@@ -106,11 +110,12 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 		}
 	}
 
-	// rpm (RHEL/Fedora family, sqlite backend): the distro qualifier is set for any rpm-family id (inventory),
-	// but only the ids osDistroEcosystem keys (Rocky/AlmaLinux/Oracle) with a non-empty major version count as
-	// resolved – RHEL/CentOS/Fedora use module-qualified or uncertain OSV keys, so they are emitted but flagged
-	// unresolved (surfaced upstream, never a silent zero-match). rpmComponents tries the sqlite backend then
-	// the owned BerkeleyDB backend (RHEL<=8/UBI8), so a bdb-only rootfs is cataloged; ndb (openSUSE) is deferred.
+	// rpm (RHEL/Fedora/SUSE family): the distro qualifier is set for any rpm-family id (inventory), but only the
+	// ids osDistroEcosystem keys (Rocky/AlmaLinux/Oracle, and openSUSE Leap) with a non-empty major version
+	// count as resolved – RHEL/CentOS/Fedora use module-qualified or uncertain OSV keys, so they are emitted but
+	// flagged unresolved (surfaced upstream, never a silent zero-match). rpmComponents tries the sqlite backend,
+	// then the owned BerkeleyDB backend (RHEL<=8/UBI8), then the owned ndb backend (openSUSE/SLE), so every rpm
+	// rootfs is cataloged.
 	rpmNS, rpmTag := "rhel", ""
 	rpmResolved := false
 	if id != "" {
@@ -126,6 +131,14 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 				major = versionID[:i]
 			}
 			rpmResolved = rpmMatchableIDs[id] && major != ""
+			if id == "opensuse-leap" {
+				// openSUSE keys on major.minor (openSUSE:15.6), not the major alone, so a bare or trailing-dot
+				// VERSION_ID must NOT resolve: it would set DistroResolved=true yet derive a key
+				// (openSUSE:15 / openSUSE:15.) the feed never wrote, exactly the silent zero-match this flag
+				// prevents. A genuine openSUSE Leap os-release always carries major.minor.
+				_, minor, hasMinor := strings.Cut(versionID, ".")
+				rpmResolved = rpmResolved && hasMinor && minor != ""
+			}
 		}
 	}
 	rpmComps, err := rpmComponents(ctx, rootfsDir, rpmNS, rpmTag)
@@ -142,12 +155,14 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 }
 
 // rpmMatchableIDs are the rpm-family os-release IDs osDistroEcosystem can key to an advisory ecosystem: RHEL
-// (rhel/redhat -> "Red Hat:<major>", served by the owned Red Hat CSAF feed) and the Rocky/AlmaLinux/Oracle
-// rebuilds (keyed "<Name>:<major>" by their own errata). This set must stay in lockstep with osDistroEcosystem:
+// (rhel/redhat -> "Red Hat:<major>", served by the owned Red Hat CSAF feed), the Rocky/AlmaLinux/Oracle
+// rebuilds (keyed "<Name>:<major>" by their own errata), and openSUSE Leap (opensuse-leap -> "openSUSE:<major.
+// minor>", served by the owned openSUSE Leap OVAL feed). This set must stay in lockstep with osDistroEcosystem:
 // an id is listed only once its ecosystem mapping AND feed exist, so DistroResolved never claims a keying the
-// matcher cannot make. CentOS (Stream drifts ahead of RHEL), Fedora, Amazon Linux, and SUSE stay OFF until
-// their feeds land, so their rpm packages are cataloged for inventory but honestly flagged unresolved.
-var rpmMatchableIDs = map[string]bool{"rhel": true, "redhat": true, "rocky": true, "almalinux": true, "alma": true, "ol": true, "oracle": true}
+// matcher cannot make. CentOS (Stream drifts ahead of RHEL), Fedora, Amazon Linux, openSUSE Tumbleweed
+// (rolling, no per-release feed), and SUSE Linux Enterprise (feed not yet landed) stay OFF, so their rpm
+// packages are cataloged for inventory but honestly flagged unresolved.
+var rpmMatchableIDs = map[string]bool{"rhel": true, "redhat": true, "rocky": true, "almalinux": true, "alma": true, "ol": true, "oracle": true, "opensuse-leap": true}
 
 // dpkgFieldKeys / apkFieldKeys are the ONLY stanza keys each parser reads. parseOSDB stores only these, so a
 // stanza with millions of distinct junk keys cannot grow the per-stanza map (keeps memory O(1) per stanza).
