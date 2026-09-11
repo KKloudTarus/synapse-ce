@@ -77,6 +77,13 @@ func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding
 			key = f.ID.String()
 		}
 		if existing, ok := byKey[key]; ok {
+			// DirectBumps (the D3.8 upgrade path) is computed only by the SCA scan from the dependency
+			// graph; a producer that does not carry it (e.g. the continuous vulnerability projection) must
+			// not clear a previously-computed path. Preserve it on an empty incoming, before change
+			// detection so the preserve does not itself register as a machine change.
+			if len(f.DirectBumps) == 0 {
+				f.DirectBumps = existing.DirectBumps
+			}
 			machineChanged := findingMachineProjectionChanged(existing, f)
 			f.ID = existing.ID
 			f.Status = existing.Status // preserve triage
@@ -116,6 +123,7 @@ func findingMachineProjectionChanged(existing, incoming finding.Finding) bool {
 		existing.OccurrenceID != incoming.OccurrenceID ||
 		existing.ComponentFingerprint != incoming.ComponentFingerprint ||
 		existing.FixedVersion != incoming.FixedVersion ||
+		!sameStrings(existing.DirectBumps, incoming.DirectBumps) ||
 		existing.DetectionState != incoming.DetectionState ||
 		existing.RiskAssessmentID != incoming.RiskAssessmentID ||
 		!finding.EqualDataFlowTrace(existing.DataFlow, incoming.DataFlow) ||
@@ -125,6 +133,7 @@ func findingMachineProjectionChanged(existing, incoming finding.Finding) bool {
 func cloneFinding(in finding.Finding) finding.Finding {
 	out := in
 	out.Sources = append([]string(nil), in.Sources...)
+	out.DirectBumps = append([]string(nil), in.DirectBumps...)
 	if in.SourceLocation != nil {
 		location := cloneFindingSourceLocation(*in.SourceLocation)
 		out.SourceLocation = &location

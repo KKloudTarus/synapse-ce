@@ -193,6 +193,12 @@ type Finding struct {
 	OccurrenceID         shared.ID
 	ComponentFingerprint string
 	FixedVersion         string
+	// DirectBumps is the minimal set of DIRECT (top-level) dependencies to upgrade to remove this
+	// transitive vulnerability from the resolved graph (EPIC #860 D3.8, the "upgrade path"). It is sorted
+	// and deduplicated. A directly-declared vulnerable dependency lists itself. It is empty for a
+	// first-party/non-SCA finding, when no dependency graph was resolved, or when the component is reachable
+	// only through a dependency cycle (no clean set of direct introducers). Omitted from JSON when empty.
+	DirectBumps []string `json:",omitempty"`
 	// DetectionState is the continuous-intelligence projection's lifecycle state; empty on a one-shot
 	// scan (e.g. the CLI) that has no stored occurrence history. Omitted from JSON when empty so a
 	// consumer does not build logic on a field that is a constant blank on those paths.

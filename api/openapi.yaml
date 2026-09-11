@@ -7893,6 +7893,10 @@ components:
           Priority: {type: integer}
           ClassReachability: {type: string}
           ProposedBy: {type: string}
+          DirectBumps:
+            type: array
+            items: {type: string}
+            description: Minimal set of direct dependencies to upgrade to remove a transitive vulnerability (EPIC #860 D3.8). Empty/omitted for a first-party finding or when no dependency graph was resolved.
           Audit:
             type: object
             properties:

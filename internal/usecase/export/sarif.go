@@ -223,6 +223,12 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 				res.Message.Text = f.Title + " (fixed in " + fix + ")"
 			}
 		}
+		// Minimal-upgrade remediation (D3.8): the direct dependencies to bump to remove a transitive vuln.
+		// It rides on the finding itself, so no resolver is needed; a code-scanning consumer gets the
+		// upgrade path directly.
+		if len(f.DirectBumps) > 0 {
+			res.Properties["upgradePath"] = strings.Join(f.DirectBumps, ", ")
+		}
 		if opts.AIGateExemption != nil {
 			findingKey := strings.TrimSpace(f.DedupKey)
 			if exemption, ok := opts.AIGateExemption(f); ok && findingKey != "" &&

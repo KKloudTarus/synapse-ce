@@ -64,6 +64,7 @@ export function mapFinding(r: any): Finding {
       id: c.ID ?? '',
       title: c.Title ?? '',
     })),
+    directBumps: r.DirectBumps ?? [],
   }
 }
 

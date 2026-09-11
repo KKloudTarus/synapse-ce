@@ -38,6 +38,7 @@ import (
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/sca/remediation"
 )
 
 // Service orchestrates the SCA pipeline over swappable ports.
@@ -4030,8 +4031,14 @@ func attachDependencyPaths(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) 
 		vulns[i].Path = path
 		vulns[i].Direct = sbom.IsDirect(doc.Dependencies, componentIDs, id) // no COMPONENT depends on it: the one canonical rule
 		// The complete set of direct deps that introduce this component (Path is only one of them), so
-		// remediation lists every parent to bump for a transitive vuln reachable through several.
-		vulns[i].Introducers = sbom.IntroducedBy(doc.Dependencies, id)
+		// remediation lists every parent to bump for a transitive vuln reachable through several. Computed
+		// via the remediation solver (D3.8), the single source of truth for the minimal-upgrade set that
+		// also feeds each finding's DirectBumps; ok=false (not in graph / cycle-only) leaves it empty.
+		if plan, ok := remediation.Solve(doc.Dependencies, id, vulns[i].FixedVersion); ok {
+			vulns[i].Introducers = plan.DirectBumps
+		} else {
+			vulns[i].Introducers = nil // absent / cycle-only: no clean bump set (mirrors the prior unconditional assign; never a stale value)
+		}
 	}
 }
 
