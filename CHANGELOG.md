@@ -381,6 +381,25 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Changed
 
+- **Go taint gains value-level exec-sink precision (fewer command-injection false positives).** The Go
+  taint engine was function-granular: any function that both read untrusted input and called
+  `os/exec.Command`/`CommandContext` was reported as CWE-78 command injection, regardless of whether the
+  program name was attacker-controlled. The sandboxed `synapse-callgraph` builder now inspects, from the
+  same SSA build, the program name (argv[0]) at every exec call site in each first-party function. When it
+  proves that argument is a compile-time constant naming a known-fixed-safe program (an allowlist of tools
+  that never execute a command or code from their arguments, e.g. `echo`, `ls`, `ping`, `curl`) AND the
+  resulting `*exec.Cmd` is confined (its program is never re-pointed via a field write such as `cmd.Path =`
+  and it does not escape before execution), the finding de-escalates from CWE-78 to CWE-88 argument
+  injection (`taint-argument-injection`): the program is fixed and attacker-uncontrolled, so the residual
+  risk is a tainted argument, not a tainted command. The classification is fail-closed: it de-escalates only
+  for the vetted safe set, so any shell, interpreter (including versioned names such as `python3.11`),
+  command-runner (`env`, `xargs`, `pkexec`, `flock`, `find`, …), unknown program, variable argv[0], mutated
+  or escaping `*exec.Cmd`, mixed call set, unresolved function-value exec call, or an older builder that
+  omits the facts keeps CWE-78. It is a precision filter, never a suppressor: the finding still fires at the
+  same location with the same witness, only its class narrows. Verdicts are keyed per sink symbol and ride
+  an additive, back/forward-compatible field on the existing call-graph wire protocol (unchanged for
+  reachability), so no configuration changes. Implements EPIC #860 D5.4.
+
 - **Dashboard theme fidelity.** The Code Quality measures table now labels bug, vulnerability, code-smell
   and hotspot columns with icons instead of emoji; the project-activity trend chart, the code-viewer
   syntax highlighter, the modern badge addon, and the dependency-graph minimap now draw from semantic

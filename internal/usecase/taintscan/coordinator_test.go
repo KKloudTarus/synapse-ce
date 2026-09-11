@@ -18,11 +18,14 @@ import (
 const engID = shared.ID("eng-1")
 
 type fakeBuilder struct {
-	g   *callgraph.Graph
-	err error
+	g     *callgraph.Graph
+	facts taint.ExecFacts // value-level exec-sink verdicts (D5.4); zero value = no de-escalation (keep CWE-78)
+	err   error
 }
 
-func (f *fakeBuilder) Build(context.Context, string) (*callgraph.Graph, error) { return f.g, f.err }
+func (f *fakeBuilder) BuildWithExecFacts(context.Context, string) (*callgraph.Graph, taint.ExecFacts, error) {
+	return f.g, f.facts, f.err
+}
 
 type proposeCall struct {
 	proposer    string
@@ -118,6 +121,56 @@ func TestScanProposesSameFunctionInjection(t *testing.T) {
 	}
 	if a.entries[0].Metadata["cwe"] != "CWE-78" {
 		t.Errorf("witness must carry the injection class: %+v", a.entries[0].Metadata)
+	}
+}
+
+// D5.4: a same-function command-injection finding DE-ESCALATES from CWE-78 to CWE-88 when the SSA pass
+// proves the exec program name (argv[0]) is a compile-time-constant, non-interpreter string at every call
+// site (e.g. exec.Command("echo", userInput)). The finding is NOT removed — it still fires, at the same
+// location and with the same witness path — only its injection class narrows.
+func TestScanDeEscalatesConstantArgvToArgumentInjection(t *testing.T) {
+	b := &fakeBuilder{
+		g: &callgraph.Graph{Edges: []callgraph.Edge{
+			{Caller: "app.handler", Callees: []string{"os.Getenv", "os/exec.Command"}},
+		}},
+		facts: taint.ExecFacts{Funcs: map[string]taint.ExecFuncFacts{
+			"app.handler": {SafeSinks: map[string]bool{"os/exec.Command": true}},
+		}},
+	}
+	p := &fakeProposer{}
+	a := &fakeAudit{}
+	n, err := newCoord(t, b, p, a).Scan(context.Background(), engID, "/work/target")
+	if err != nil || n != 1 || len(p.calls) != 1 {
+		t.Fatalf("want 1 proposal, got n=%d calls=%d err=%v", n, len(p.calls), err)
+	}
+	sc := p.calls[0].claim.(judgment.SASTClaim)
+	if sc.CWE != "CWE-88" || sc.Rule != "taint-argument-injection" {
+		t.Errorf("constant argv[0] must de-escalate to CWE-88 argument injection, got %+v", sc)
+	}
+	if a.entries[0].Metadata["cwe"] != "CWE-88" {
+		t.Errorf("the witness must carry the de-escalated class, got %+v", a.entries[0].Metadata)
+	}
+}
+
+// D5.4 fail-closed: an exec fact for a DIFFERENT function must not de-escalate one it does not cover. The
+// unsafe twin (exec.Command(parts[0], parts[1:]...), a variable argv[0]) emits no constant-safe fact, so it
+// keeps CWE-78.
+func TestScanKeepsCommandInjectionWithoutConstantSafeFact(t *testing.T) {
+	b := &fakeBuilder{
+		g: &callgraph.Graph{Edges: []callgraph.Edge{
+			{Caller: "app.unsafe", Callees: []string{"os.Getenv", "os/exec.Command"}},
+		}},
+		facts: taint.ExecFacts{Funcs: map[string]taint.ExecFuncFacts{
+			"app.other": {SafeSinks: map[string]bool{"os/exec.Command": true}}, // unrelated function; app.unsafe is uncovered
+		}},
+	}
+	p := &fakeProposer{}
+	if _, err := newCoord(t, b, p, &fakeAudit{}).Scan(context.Background(), engID, "/work/target"); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	sc := p.calls[0].claim.(judgment.SASTClaim)
+	if sc.CWE != "CWE-78" || sc.Rule != "taint-command-injection" {
+		t.Errorf("a function with no constant-safe fact must keep CWE-78, got %+v", sc)
 	}
 }
 
