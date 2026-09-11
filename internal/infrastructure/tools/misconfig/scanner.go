@@ -31,10 +31,13 @@ const (
 
 // Scanner implements ports.MisconfigScanner with an owned ruleset.
 type Scanner struct {
-	skipDirs map[string]bool
-	helmBin  string           // `helm` binary for rendering Helm charts
-	helmRun  ports.ToolRunner // sandbox runner for helm (API path); nil = not sandboxed
-	helmDir  bool             // allow a direct host exec of helm (trusted-local CLI only)
+	skipDirs     map[string]bool
+	helmBin      string           // `helm` binary for rendering Helm charts
+	helmRun      ports.ToolRunner // sandbox runner for helm (API path); nil = not sandboxed
+	helmDir      bool             // allow a direct host exec of helm (trusted-local CLI only)
+	kustomizeBin string           // `kustomize` binary for rendering kustomizations
+	kustomizeRun ports.ToolRunner // sandbox runner for kustomize (API path); nil = not sandboxed
+	kustomizeDir bool             // allow a direct host exec of kustomize (trusted-local CLI only)
 }
 
 var _ ports.MisconfigScanner = (*Scanner)(nil)
@@ -46,7 +49,8 @@ func New() *Scanner {
 	return &Scanner{
 		skipDirs: set(".git", "node_modules", "vendor", "dist", "build", "target", ".idea",
 			".gradle", ".venv", "venv", "__pycache__", "bin"),
-		helmBin: "helm",
+		helmBin:      "helm",
+		kustomizeBin: "kustomize",
 	}
 }
 
@@ -57,6 +61,14 @@ func (s *Scanner) WithHelmRunner(r ports.ToolRunner) *Scanner { s.helmRun = r; r
 // WithHelmDirect enables Helm chart rendering via a direct host exec – ONLY for a trusted-local caller
 // (the CLI), mirroring how the CLI runs the maven/gradle resolvers unsandboxed on a trusted project.
 func (s *Scanner) WithHelmDirect() *Scanner { s.helmDir = true; return s }
+
+// WithKustomizeRunner enables kustomization rendering confined by the given ToolRunner (the SCA sandbox), so
+// `kustomize build` never runs unprotected on the host. Use this in the API path.
+func (s *Scanner) WithKustomizeRunner(r ports.ToolRunner) *Scanner { s.kustomizeRun = r; return s }
+
+// WithKustomizeDirect enables kustomization rendering via a direct host exec – ONLY for a trusted-local
+// caller (the CLI), mirroring the Helm and maven/gradle posture.
+func (s *Scanner) WithKustomizeDirect() *Scanner { s.kustomizeDir = true; return s }
 
 // Name identifies the source on findings.
 func (s *Scanner) Name() string { return "synapse-misconfig" }
@@ -81,6 +93,45 @@ const (
 func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.MisconfigRawFinding, error) {
 	var out []ports.MisconfigRawFinding
 	var kubernetes k8sScanResult
+	// Kustomize (opt-in, like Helm): render each ROOT kustomization and scan the output. A manifest is
+	// skipped from the raw scan ONLY when it is an explicit resource in the transitive closure of a root
+	// whose render SUCCEEDED, so a base resource is not double-counted (once unpatched) while a render
+	// failure or a non-referenced file never hides a finding. Disabled leaves manifests scanned raw.
+	kustomizeCovered := map[string]bool{}
+	if s.kustomizeRun != nil || s.kustomizeDir {
+		index, roots := collectKustomizations(ctx, root)
+		success := map[string]bool{} // files covered by a root that rendered successfully
+		failed := map[string]bool{}  // files in a root that failed to render or was not attempted
+		for i, dir := range roots {
+			closure := coveredFiles(dir, index)
+			if i >= maxKustomizeRenders { // past the render budget: not covered by a successful render
+				for f := range closure {
+					failed[f] = true
+				}
+				continue
+			}
+			relDir := strings.TrimPrefix(strings.TrimPrefix(dir, root), string(os.PathSeparator))
+			res, ok := s.renderKustomization(ctx, root, dir, relDir)
+			if !ok {
+				for f := range closure {
+					failed[f] = true
+				}
+				continue // render failed: leave this overlay's files to the raw scan (never suppress)
+			}
+			mergeK8sScanResult(&kubernetes, res)
+			for f := range closure {
+				success[f] = true
+			}
+		}
+		// Skip a file's raw scan only when EVERY root that references it rendered successfully; if any
+		// referencing root failed or was skipped, keep the raw scan (a harmless double is better than a
+		// suppressed finding).
+		for f := range success {
+			if !failed[f] {
+				kustomizeCovered[f] = true
+			}
+		}
+	}
 	// Terraform is scanned in a second pass: variable defaults, locals, and *.tfvars are collected first,
 	// so a misconfiguration expressed through a variable resolves to its literal before the rules run.
 	// Resolution is scoped PER DIRECTORY because a Terraform module is a directory: a root variable default
@@ -185,7 +236,11 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		case cfgDockerfile:
 			out = append(out, scanDockerfile(rel, data)...)
 		case cfgKubernetes:
-			mergeK8sScanResult(&kubernetes, scanKubernetes(rel, data))
+			// A manifest that a SUCCESSFUL kustomize render already covered (an explicit resource in a root's
+			// closure) is patched in the render, so scanning it raw as well would double-count the resource.
+			if !kustomizeCovered[path] {
+				mergeK8sScanResult(&kubernetes, scanKubernetes(rel, data))
+			}
 		case cfgTerraform:
 			// Defer: collect this file's variable/local literal definitions into its directory's map, then
 			// scan it after the walk with that (module-scoped) resolved map.

@@ -389,13 +389,15 @@ func Configure(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, log *s
 		// resolvers it must be sandbox-confined on the API host (a crafted chart's Sprig getHostByName is an
 		// SSRF vector). Wire it through the SCA sandbox when present; otherwise leave Helm rendering OFF.
 		mc := misconfig.New()
-		helmMode := "Helm rendering OFF (no SCA sandbox; a chart runs untrusted templates on the host)"
+		helmMode := "Helm/Kustomize rendering OFF (no SCA sandbox; a chart/overlay runs untrusted templates on the host)"
 		if sb != nil {
-			mc = mc.WithHelmRunner(sb)
-			helmMode = "Helm charts rendered sandboxed (egress-denied)"
+			// Kustomize, like Helm, shells out over UNTRUSTED input (an overlay can pull remote bases, an SSRF
+			// vector), so it is sandbox-confined the same way when a runner is present.
+			mc = mc.WithHelmRunner(sb).WithKustomizeRunner(sb)
+			helmMode = "Helm charts + Kustomize overlays rendered sandboxed (egress-denied)"
 		}
 		svc.SetMisconfigScanner(mc) // deterministic IaC/config misconfig scan in the scan pipeline
-		log.Info("misconfig scanning ENABLED (Dockerfile + Kubernetes + Terraform); " + helmMode)
+		log.Info("misconfig scanning ENABLED (Dockerfile + Kubernetes + Terraform + Bicep); " + helmMode)
 	}
 	// AI false-positive triage in the scan pipeline (opt-in, best-effort, PROPOSE-ONLY). Independent of
 	// the agent: it critiques production-scope source findings. Single-model output is advisory-only; a
