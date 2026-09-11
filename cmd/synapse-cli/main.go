@@ -1216,6 +1216,12 @@ func syncAdvisories(args []string) error {
 		}
 		feed = ownadvisory.NewRockyOSVDirFeed(args[1])
 		src, bulkAdapter, sourceKey, sourceName = "Rocky Apollo OSV dir "+args[1], "osv", "cli-rocky-bulk", "CLI Rocky OSV bulk ingest"
+	case args[0] == "--secdb":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: synapse-cli sync-advisories --secdb <dir>")
+		}
+		feed = ownadvisory.NewSecdbDirFeed(args[1])
+		src, bulkAdapter, sourceKey, sourceName = "apk secdb dir "+args[1], "osv", "cli-secdb-bulk", "CLI apk secdb bulk ingest"
 	default:
 		feed = ownadvisory.NewDirFeed(args[0])
 		src, bulkAdapter, sourceKey, sourceName = args[0], "osv", "cli-osv-bulk", "CLI OSV bulk ingest"

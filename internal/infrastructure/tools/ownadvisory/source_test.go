@@ -353,6 +353,11 @@ func TestDistroEcosystemLockstep(t *testing.T) {
 		// Case-variant distro qualifiers must still agree (both functions lowercase the qualifier).
 		"pkg:rpm/amzn/bash@5-1?distro=AMZN-2",
 		"pkg:rpm/opensuse-leap/bash@5-1?distro=OpenSUSE-Leap-15.6",
+		// apk family: Alpine keys by release, Wolfi/Chainguard are rolling (version-less), matching the secdb feed.
+		"pkg:apk/alpine/musl@1.2?distro=alpine-3.20",
+		"pkg:apk/wolfi/glibc@2.39?distro=wolfi",
+		"pkg:apk/wolfi/glibc@2.39?distro=wolfi-20230201",
+		"pkg:apk/chainguard/glibc@2.39?distro=chainguard",
 		// Degenerate qualifiers must agree on "" (empty id, empty version, no hyphen).
 		"pkg:rpm/x/bash@5-1?distro=-2",
 		"pkg:rpm/x/bash@5-1?distro=rhel-",

@@ -166,6 +166,21 @@ func DistroEcosystem(purlType, distro string) string {
 			return "openSUSE:" + v
 		}
 	}
+	// Wolfi and Chainguard are rolling apk distros with no release version, so the whole family name is the key
+	// (matching the owned secdb feed and the apk comparator). Handle both a bare "wolfi" and a "wolfi-<date>"
+	// qualifier before the id/ver Cut, which would otherwise reject the version-less form.
+	if purlType == "apk" {
+		fam := distro
+		if id, _, ok := strings.Cut(distro, "-"); ok {
+			fam = id
+		}
+		switch fam {
+		case "wolfi":
+			return "Wolfi"
+		case "chainguard":
+			return "Chainguard"
+		}
+	}
 	id, ver, ok := strings.Cut(distro, "-")
 	if !ok || id == "" || ver == "" {
 		return ""
