@@ -19,12 +19,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: synapse-callgraph build-callgraph <go-module-dir>")
 		os.Exit(2)
 	}
-	g, err := ssacallgraph.BuildGraph(context.Background(), os.Args[2])
+	g, facts, err := ssacallgraph.BuildGraphAndExecFacts(context.Background(), os.Args[2])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-callgraph:", err)
 		os.Exit(1)
 	}
-	if err := taintcallgraph.EncodeGraph(os.Stdout, g); err != nil {
+	if err := taintcallgraph.EncodeGraphWithFacts(os.Stdout, g, facts); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-callgraph: encode:", err)
 		os.Exit(1)
 	}

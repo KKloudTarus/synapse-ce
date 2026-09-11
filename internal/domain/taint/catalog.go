@@ -13,6 +13,12 @@ type Sink struct {
 	Symbol string // "importPath.Symbol", e.g. "database/sql.DB.Query"
 	CWE    string // e.g. "CWE-89"
 	Rule   string // e.g. "taint-sqli"
+	// Exec, when non-nil, marks this as an exec-style command sink and carries the value-level
+	// de-escalation policy (D5.4): the argument index of the program name (argv[0]) plus the class the
+	// finding drops to when the SSA pass proves that argument is a compile-time-constant, non-interpreter
+	// string at every call site. It is the ONLY value-level refinement the coarse call-graph model needs,
+	// and it never suppresses — see ExecPolicy + AssembleWithFacts.
+	Exec *ExecPolicy
 }
 
 // Catalog is the curated, per-language set of taint roles in the shared "importPath.Symbol" convention
@@ -56,7 +62,22 @@ type Catalog struct {
 // kept to PURPOSE-BUILT neutralizers (escapers / containment checks) and deliberately omits incidental
 // general utilities (e.g. strconv.Atoi) that, walling every flow through their caller, would suppress
 // unrelated real injections.
+//
+// Assemble carries no value-level facts (an empty ExecFacts), so it keeps the coarse over-approximation
+// verbatim. AssembleWithFacts is the value-level-aware entry point (D5.4).
 func Assemble(g callgraph.Graph, cat Catalog) (FlowGraph, map[string][]Sink) {
+	return AssembleWithFacts(g, cat, ExecFacts{})
+}
+
+// AssembleWithFacts is Assemble plus the value-level exec-sink precision filter (D5.4): when facts prove a
+// sink-using function's os/exec program names are all compile-time-constant + non-interpreter, that
+// function's command-injection sink is DE-ESCALATED from its CWE-78 class to the sink's ExecPolicy target
+// (CWE-88 argument injection). This never removes a finding and never touches path detection — the same
+// source→sink flow still reports, only its injection CLASS narrows — and it defaults to KEEPING CWE-78
+// whenever facts are absent or inconclusive (fail-closed). It thus adds precision without adding a false
+// negative: a function whose exec program name is variable, an interpreter (sh/bash/env/…), or unproven
+// retains the CWE-78 over-approximation exactly as before.
+func AssembleWithFacts(g callgraph.Graph, cat Catalog, facts ExecFacts) (FlowGraph, map[string][]Sink) {
 	srcSet := toSet(cat.Sources)
 	sanSet := toSet(cat.Sanitizers)
 	sinkSet := make(map[string]Sink, len(cat.Sinks))
@@ -95,7 +116,11 @@ func Assemble(g callgraph.Graph, cat Catalog) (FlowGraph, map[string][]Sink) {
 				if sinkClassSet[e.Caller] == nil {
 					sinkClassSet[e.Caller] = map[string]Sink{}
 				}
-				sinkClassSet[e.Caller][s.Symbol] = s
+				// Value-level de-escalation: an exec sink at a function whose program names are all
+				// provably constant + non-interpreter drops from CWE-78 to CWE-88. The map key stays the
+				// sink SYMBOL (unchanged by de-escalation), so a function reaching the same exec sink by two
+				// edges dedups to one entry, and the coordinator's (CWE,Rule) dedup then folds it correctly.
+				sinkClassSet[e.Caller][s.Symbol] = deEscalateExecSink(s, facts.Funcs[e.Caller])
 			}
 		}
 	}
@@ -166,9 +191,13 @@ func DefaultCatalog() Catalog {
 			{Symbol: "database/sql.Tx.QueryContext", CWE: "CWE-89", Rule: "taint-sqli"},
 			{Symbol: "database/sql.Tx.Exec", CWE: "CWE-89", Rule: "taint-sqli"},
 			{Symbol: "database/sql.Tx.ExecContext", CWE: "CWE-89", Rule: "taint-sqli"},
-			// CWE-78 – OS command injection.
-			{Symbol: "os/exec.Command", CWE: "CWE-78", Rule: "taint-command-injection"},
-			{Symbol: "os/exec.CommandContext", CWE: "CWE-78", Rule: "taint-command-injection"},
+			// CWE-78 – OS command injection. Go's exec.Command execs an argv array directly (no shell), so
+			// the program (argv[0]) being attacker-controlled is the command-injection risk. When the SSA
+			// pass (D5.4) proves argv[0] is a compile-time-constant, non-interpreter string at every call
+			// site, the program is fixed and the worst case is argument injection (CWE-88), so the finding
+			// de-escalates. argv[0] is arg 0 of Command; arg 1 of CommandContext (arg 0 is the context).
+			{Symbol: "os/exec.Command", CWE: "CWE-78", Rule: "taint-command-injection", Exec: &ExecPolicy{ProgramNameArg: 0, DeEscalatedCWE: "CWE-88", DeEscalatedRule: "taint-argument-injection"}},
+			{Symbol: "os/exec.CommandContext", CWE: "CWE-78", Rule: "taint-command-injection", Exec: &ExecPolicy{ProgramNameArg: 1, DeEscalatedCWE: "CWE-88", DeEscalatedRule: "taint-argument-injection"}},
 			// CWE-22 – path traversal: an attacker-controlled path opened on the host filesystem. Only
 			// symbols whose sole meaningful argument is a PATH are listed, so a class-blind function-level
 			// match cannot fire on a tainted content/mode argument (os.WriteFile's data, for example, is

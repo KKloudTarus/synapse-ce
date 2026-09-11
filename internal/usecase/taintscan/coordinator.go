@@ -44,10 +44,11 @@ const proposerActor = "system:taint-scan"
 // seal an unbounded string (generous – a real taint path is far smaller).
 const maxWitnessElems = 64
 
-// builder builds a target's call graph (ports.CallGraphBuilder satisfies it). A build error is NO COVERAGE
-// – the coordinator proposes nothing rather than a false "clean".
+// builder builds a target's call graph plus the value-level exec-sink facts (taintcallgraph.Builder
+// satisfies it). A build error is NO COVERAGE – the coordinator proposes nothing rather than a false
+// "clean". The facts carry the D5.4 de-escalation signal; an empty facts table keeps every CWE-78 finding.
 type builder interface {
-	Build(ctx context.Context, targetRef string) (*callgraph.Graph, error)
+	BuildWithExecFacts(ctx context.Context, targetRef string) (*callgraph.Graph, taint.ExecFacts, error)
 }
 
 // proposer is the NARROW propose-only slice of the judgment lifecycle the coordinator needs
@@ -89,7 +90,7 @@ func (c *Coordinator) Scan(ctx context.Context, engagementID shared.ID, targetRe
 	if engagementID.IsZero() {
 		return 0, fmt.Errorf("%w: engagement id is required", shared.ErrValidation)
 	}
-	g, err := c.builder.Build(ctx, targetRef)
+	g, execFacts, err := c.builder.BuildWithExecFacts(ctx, targetRef)
 	if err != nil {
 		// No coverage: propose nothing. The wrapped error may carry tool stderr – it is returned to the
 		// best-effort caller (which ignores it) and never reaches the audit log or an LLM transcript.
@@ -99,7 +100,10 @@ func (c *Coordinator) Scan(ctx context.Context, engagementID shared.ID, targetRe
 		return 0, fmt.Errorf("%w: taint call-graph build returned no graph", shared.ErrValidation)
 	}
 
-	fg, sinkClass := taint.Assemble(*g, c.catalog)
+	// AssembleWithFacts applies the value-level exec-sink precision filter (D5.4): a constant-argv
+	// command-injection finding de-escalates CWE-78 → CWE-88; anything unproven keeps CWE-78. It never
+	// removes a path, so recall is unchanged.
+	fg, sinkClass := taint.AssembleWithFacts(*g, c.catalog, execFacts)
 	proposed := 0
 	for _, v := range fg.Vulnerabilities() {
 		// Join the sink-class index against the REPORTED path: every injection CLASS the reached

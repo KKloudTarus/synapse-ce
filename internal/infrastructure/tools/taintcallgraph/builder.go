@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/callgraph"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -40,17 +41,26 @@ var _ ports.CallGraphBuilder = (*Builder)(nil)
 
 // Build runs `synapse-callgraph build-callgraph <targetRef>` and parses its wire output into the domain
 // call graph. A load/type error in the target fails closed (the binary exits non-zero) – never a partial
-// graph, which would drop taint paths.
+// graph, which would drop taint paths. This satisfies ports.CallGraphBuilder (the reachability contract);
+// it discards the value-level exec facts BuildWithExecFacts also returns.
 func (b *Builder) Build(ctx context.Context, targetRef string) (*callgraph.Graph, error) {
+	g, _, err := b.BuildWithExecFacts(ctx, targetRef)
+	return g, err
+}
+
+// BuildWithExecFacts is Build plus the value-level exec-sink facts (D5.4) the taint coordinator uses to
+// de-escalate constant-argv command-injection findings. Same exec + same fail-closed behavior; the facts
+// are parsed from the additive wire field (empty when the binary omits it, which keeps every CWE-78).
+func (b *Builder) BuildWithExecFacts(ctx context.Context, targetRef string) (*callgraph.Graph, taint.ExecFacts, error) {
 	out, err := b.run(ctx, targetRef)
 	if err != nil {
-		return nil, err
+		return nil, taint.ExecFacts{}, err
 	}
-	g, err := parseCallgraph(out)
+	g, facts, err := parseCallgraph(out)
 	if err != nil {
-		return nil, fmt.Errorf("parse synapse-callgraph: %w", err)
+		return nil, taint.ExecFacts{}, fmt.Errorf("parse synapse-callgraph: %w", err)
 	}
-	return g, nil
+	return g, facts, nil
 }
 
 // run executes the binary (sandboxed when a runner is set, else direct os/exec) and returns its raw wire
