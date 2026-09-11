@@ -12,22 +12,27 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// This file parses a Canonical Ubuntu OVAL feed (com.ubuntu.<codename>.cve.oval.xml[.bz2]) into the owned
-// normalized advisory shape. Ubuntu (and Debian) publish per-release OVAL that carries the distro's OWN
-// fixed package version – the backport-accurate value a generic NVD range cannot express – so ingesting it
-// natively gives Synapse offline, vendor-authoritative OS-package detection independent of any scanner DB.
+// This file parses a deb-family OVAL feed into the owned normalized advisory shape: Canonical Ubuntu
+// (com.ubuntu.<codename>.cve.oval.xml[.bz2]) and Debian (oval-definitions-<release>.xml[.bz2]). Both publish
+// per-release OVAL that carries the distro's OWN fixed package version, the backport-accurate value a generic
+// NVD range cannot express, so ingesting it natively gives Synapse offline, vendor-authoritative OS-package
+// detection independent of any scanner DB.
 //
 // It handles only the dpkginfo (deb-family) OVAL: a definition's criteria reference dpkginfo_tests, each
-// binding a dpkginfo_object (binary package name) to a dpkginfo_state (a "less than" fixed version). We map
-// each such binding to a [0, fixed) ECOSYSTEM range keyed "Ubuntu:<release>", which the owned dpkg
-// comparator already orders. A package with no "less than" fixed version (not-yet-fixed / not-affected) is
-// skipped conservatively, so a match always carries an actionable fix.
+// binding a dpkginfo_object (binary package name) to a dpkginfo_state (a "less than" fixed version, in a
+// <version> element for Ubuntu or an <evr> element for Debian). We map each such binding to a [0, fixed)
+// ECOSYSTEM range keyed "Ubuntu:<release>" or "Debian:<major>", which the owned dpkg comparator already
+// orders and the scan-side osDistroEcosystem derives identically. The release is taken from the Ubuntu
+// definition-id codename or the Debian affected <platform>. A package with no "less than" fixed version
+// (not-yet-fixed / not-affected) is skipped conservatively, so a match always carries an actionable fix.
 
 // --- OVAL XML shapes (matched by LOCAL element name, so the linux-def namespace prefix is irrelevant) ---
 
 type ovalDefinition struct {
+	ID         string       `xml:"id,attr"`
 	Class      string       `xml:"class,attr"`
 	Title      string       `xml:"metadata>title"`
+	Platforms  []string     `xml:"metadata>affected>platform"`
 	References []ovalRef    `xml:"metadata>reference"`
 	Severity   string       `xml:"metadata>advisory>severity"`
 	Criteria   ovalCriteria `xml:"criteria"`
@@ -64,18 +69,54 @@ type ovalObject struct {
 	Name string `xml:"name"`
 }
 
+// ovalState carries the fixed-version boundary. Ubuntu OVAL states it in a <version> element, Debian OVAL in
+// an <evr> element (both datatype="debian_evr_string"); we read whichever is present.
 type ovalState struct {
-	ID      string `xml:"id,attr"`
-	Version struct {
-		Operation string `xml:"operation,attr"`
-		Value     string `xml:",chardata"`
-	} `xml:"version"`
+	ID      string  `xml:"id,attr"`
+	Version ovalEVR `xml:"version"`
+	Evr     ovalEVR `xml:"evr"`
 }
 
-// ParseUbuntuOVAL parses one Ubuntu OVAL document (optionally bzip2-compressed) into advisories. It returns
-// an error only for an input it cannot soundly handle (bad XML, unknown release); the caller's hardened
-// walk turns that into a per-file skip.
-func ParseUbuntuOVAL(content []byte) ([]advisory.Advisory, error) {
+type ovalEVR struct {
+	Operation string `xml:"operation,attr"`
+	Value     string `xml:",chardata"`
+}
+
+// fixed returns the operation and value of whichever of <evr>/<version> the state carries, and ok=false when
+// no bound is present or the state AMBIGUOUSLY carries BOTH with different values (schema-valid but not a safe
+// "pick one" union). An ambiguous state is skipped rather than guessed, so a match never rests on a boundary
+// the feed did not unambiguously state.
+func (s ovalState) fixed() (operation, value string, ok bool) {
+	v := strings.TrimSpace(s.Version.Value)
+	e := strings.TrimSpace(s.Evr.Value)
+	switch {
+	case v != "" && e != "":
+		if v == e && strings.EqualFold(strings.TrimSpace(s.Version.Operation), strings.TrimSpace(s.Evr.Operation)) {
+			return s.Evr.Operation, e, true // both present and identical: unambiguous
+		}
+		return "", "", false // both present and divergent: refuse to guess the boundary
+	case e != "":
+		return s.Evr.Operation, e, true
+	case v != "":
+		return s.Version.Operation, v, true
+	default:
+		return "", "", false
+	}
+}
+
+// ovalScan holds the raw deb-family OVAL facts collected by one streaming pass, before a distro-specific
+// ecosystem key is resolved.
+type ovalScan struct {
+	defs    []ovalDefinition
+	tests   map[string]ovalTest // test id -> object/state refs
+	objects map[string]string   // object id -> binary package name
+	states  map[string]ovalState
+}
+
+// scanOVAL streams one OVAL document (optionally bzip2-compressed) into the raw facts. It returns an error
+// only for an input it cannot soundly handle (bad XML, over-cap decompressed stream). Elements are matched by
+// LOCAL name, so the Ubuntu (linux-def) and Debian (linux) namespace prefixes both resolve.
+func scanOVAL(content []byte) (*ovalScan, error) {
 	// Self-guard direct callers that bypass the feed's per-file cap (parity with ParseCSAF): the raw input
 	// is bounded here, and the bzip2 branch below additionally bounds the DECOMPRESSED stream.
 	if int64(len(content)) > maxOVALFileBytes {
@@ -90,12 +131,12 @@ func ParseUbuntuOVAL(content []byte) ([]advisory.Advisory, error) {
 		r = lr
 	}
 
-	defs := make([]ovalDefinition, 0, 1024)
-	objects := map[string]string{}   // object id -> binary package name
-	states := map[string]ovalState{} // state id -> version state
-	tests := map[string]ovalTest{}   // test id -> object/state refs
-	codename := ""
-
+	scan := &ovalScan{
+		defs:    make([]ovalDefinition, 0, 1024),
+		tests:   map[string]ovalTest{},
+		objects: map[string]string{},
+		states:  map[string]ovalState{},
+	}
 	dec := xml.NewDecoder(r)
 	for {
 		tok, err := dec.Token()
@@ -111,29 +152,25 @@ func ParseUbuntuOVAL(content []byte) ([]advisory.Advisory, error) {
 		}
 		switch se.Name.Local {
 		case "definition":
-			// Grab the release codename from the first definition id: "oval:com.ubuntu.jammy:def:NNN".
-			if codename == "" {
-				codename = ubuntuCodename(attr(se, "id"))
-			}
 			var d ovalDefinition
 			if err := dec.DecodeElement(&d, &se); err != nil {
 				return nil, fmt.Errorf("decode definition: %w", err)
 			}
-			defs = append(defs, d)
+			scan.defs = append(scan.defs, d)
 		case "dpkginfo_test":
 			var t ovalTest
 			if err := dec.DecodeElement(&t, &se); err == nil && t.ID != "" {
-				tests[t.ID] = t
+				scan.tests[t.ID] = t
 			}
 		case "dpkginfo_object":
 			var o ovalObject
 			if err := dec.DecodeElement(&o, &se); err == nil && o.ID != "" {
-				objects[o.ID] = strings.TrimSpace(o.Name)
+				scan.objects[o.ID] = strings.TrimSpace(o.Name)
 			}
 		case "dpkginfo_state":
 			var s ovalState
 			if err := dec.DecodeElement(&s, &se); err == nil && s.ID != "" {
-				states[s.ID] = s
+				scan.states[s.ID] = s
 			}
 		}
 	}
@@ -143,19 +180,105 @@ func ParseUbuntuOVAL(content []byte) ([]advisory.Advisory, error) {
 	if lr != nil && lr.N <= 0 {
 		return nil, fmt.Errorf("%w: OVAL decompressed stream exceeds %d bytes; raise the cap or split the feed", shared.ErrValidation, maxOVALDecompressed)
 	}
-	release := ubuntuRelease(codename)
-	if release == "" {
-		return nil, fmt.Errorf("parse oval: unrecognized ubuntu release (codename %q)", codename)
-	}
-	ecosystem := "Ubuntu:" + release
+	return scan, nil
+}
 
-	out := make([]advisory.Advisory, 0, len(defs))
-	for i := range defs {
-		if adv, ok := buildOVALAdvisory(&defs[i], ecosystem, tests, objects, states); ok {
+// ParseOVAL parses one deb-family OVAL document (Canonical Ubuntu or Debian, optionally bzip2-compressed)
+// into advisories keyed to the release-versioned ecosystem the owned dpkg comparator and the scan-side
+// osDistroEcosystem agree on ("Ubuntu:22.04", "Debian:12"). It returns an error only for an input it cannot
+// soundly handle (bad XML, unrecognized distro/release); the caller's hardened walk turns that into a
+// per-file skip rather than a mis-keyed advisory.
+func ParseOVAL(content []byte) ([]advisory.Advisory, error) {
+	scan, err := scanOVAL(content)
+	if err != nil {
+		return nil, err
+	}
+	ecosystem, err := scan.ecosystem()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]advisory.Advisory, 0, len(scan.defs))
+	for i := range scan.defs {
+		if adv, ok := buildOVALAdvisory(&scan.defs[i], ecosystem, scan.tests, scan.objects, scan.states); ok {
 			out = append(out, adv)
 		}
 	}
 	return out, nil
+}
+
+// ParseUbuntuOVAL is retained for callers and tests that name the Ubuntu feed explicitly; it dispatches
+// through the distro-parametric ParseOVAL, which detects the family from the document itself.
+func ParseUbuntuOVAL(content []byte) ([]advisory.Advisory, error) { return ParseOVAL(content) }
+
+// ecosystem resolves the release-versioned ecosystem key from the scanned document, detecting the distro
+// family. Ubuntu tags each definition id with the release codename (oval:com.ubuntu.<codename>:def); Debian
+// tags the id with org.debian and states the release in the affected <platform>. An unrecognized release for
+// a recognized family is an error (per-file skip), never a guessed key.
+func (s *ovalScan) ecosystem() (string, error) {
+	ubuntuCodes := map[string]bool{}
+	debian := false
+	for i := range s.defs {
+		// Detect the family from an ANCHORED definition-id prefix, not a loose substring: a real Ubuntu id is
+		// "oval:com.ubuntu.<codename>:def:N", a real Debian id "oval:org.debian:def:N". This keeps a crafted id
+		// that merely contains "com.ubuntu" as a substring (e.g. "oval:org.debian.com.ubuntu...") classified by
+		// its true "oval:org.debian" prefix instead of being miscounted as Ubuntu.
+		id := s.defs[i].ID
+		switch {
+		case strings.HasPrefix(id, "oval:com.ubuntu."):
+			if codename := ubuntuCodename(id); codename != "" {
+				ubuntuCodes[codename] = true
+			}
+		case strings.HasPrefix(id, "oval:org.debian"):
+			debian = true
+		}
+	}
+	// Fail closed on a document that is not exactly one recognized family: a mixed or crafted file could
+	// otherwise key one distro's package facts under another distro's ecosystem (a false match).
+	if len(ubuntuCodes) > 0 && debian {
+		return "", fmt.Errorf("parse oval: ambiguous OVAL document mixes ubuntu and debian definitions")
+	}
+	if len(ubuntuCodes) > 0 {
+		if len(ubuntuCodes) > 1 {
+			return "", fmt.Errorf("parse oval: ambiguous ubuntu OVAL document mixes releases")
+		}
+		var codename string
+		for c := range ubuntuCodes {
+			codename = c
+		}
+		release := ubuntuRelease(codename)
+		if release == "" {
+			return "", fmt.Errorf("parse oval: unrecognized ubuntu release (codename %q)", codename)
+		}
+		return "Ubuntu:" + release, nil
+	}
+	if debian {
+		release := debianRelease(s.defs)
+		if release == "" {
+			return "", fmt.Errorf("parse oval: unrecognized or mixed debian release")
+		}
+		return "Debian:" + release, nil
+	}
+	return "", fmt.Errorf("parse oval: unrecognized OVAL distro family")
+}
+
+// isDebianZeroBound reports whether a fixed version is the "0"/"0:0" sentinel that carries no actionable
+// boundary (all epoch/upstream/revision components are zero or empty). A real fix is never at version zero,
+// so treating these as no-boundary cannot drop a legitimate fixed version.
+func isDebianZeroBound(v string) bool {
+	v = strings.TrimSpace(v)
+	if i := strings.IndexByte(v, ':'); i >= 0 {
+		v = v[i+1:] // drop the epoch
+	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return true
+	}
+	for _, r := range v {
+		if r != '0' && r != '.' && r != '-' && r != ':' {
+			return false
+		}
+	}
+	return true // only zeros and separators
 }
 
 // buildOVALAdvisory resolves a definition's criteria into an advisory. ok=false when the definition carries
@@ -188,11 +311,21 @@ func buildOVALAdvisory(d *ovalDefinition, ecosystem string, tests map[string]ova
 		if pkg == "" || !ok {
 			continue
 		}
-		fixed := strings.TrimSpace(st.Version.Value)
+		operation, value, ok := st.fixed()
+		if !ok {
+			continue // no bound, or an ambiguous both-elements state
+		}
+		fixed := strings.TrimSpace(value)
 		// Only the exact "less than <fixed>" state is an actionable fixed-at boundary → [0, fixed). Anything
 		// else (not-fixed "pattern match", "greater than", or "less than or equal", which would be a
 		// DIFFERENT, off-by-one interval) is skipped so a match always yields a real remediation version.
-		if strings.ToLower(strings.TrimSpace(st.Version.Operation)) != "less than" || fixed == "" {
+		if strings.ToLower(strings.TrimSpace(operation)) != "less than" || fixed == "" {
+			continue
+		}
+		// Debian OVAL has historically emitted "less than 0:0" (or "0") for missing/inaccurate version data.
+		// A [0, 0) range is a degenerate non-boundary, so skip it rather than store a row that can never carry
+		// an actionable fix.
+		if isDebianZeroBound(fixed) {
 			continue
 		}
 		if seen[pkg] {
@@ -240,14 +373,48 @@ func flattenCriteriaDepth(c *ovalCriteria, depth int) []string {
 	return refs
 }
 
-// attr returns a start-element attribute by local name.
-func attr(se xml.StartElement, local string) string {
-	for _, a := range se.Attr {
-		if a.Name.Local == local {
-			return a.Value
+// debianRelease returns the Debian release major (e.g. "12") shared by the document's definitions, taken from
+// each definition's affected <platform> ("Debian GNU/Linux 12"). It requires a UNIQUE release across the file
+// (Debian publishes one OVAL file per release); a file that mixes releases, or names none, returns "" so the
+// caller skips it rather than key an advisory to the wrong release (which would be a false match).
+func debianRelease(defs []ovalDefinition) string {
+	release := ""
+	for i := range defs {
+		for _, p := range defs[i].Platforms {
+			r := debianPlatformRelease(p)
+			if r == "" {
+				continue
+			}
+			switch {
+			case release == "":
+				release = r
+			case release != r:
+				return "" // mixed releases in one file: refuse to key any of them
+			}
 		}
 	}
-	return ""
+	return release
+}
+
+// debianPlatformRelease extracts the numeric release from a Debian OVAL platform string
+// ("Debian GNU/Linux 12" -> "12"). A string that is not a Debian platform, or carries no leading numeric
+// release, returns "". This matches the "Debian:<major>" key osDistroEcosystem derives for a deb PURL.
+func debianPlatformRelease(platform string) string {
+	const marker = "debian gnu/linux "
+	trimmed := strings.TrimSpace(platform)
+	i := strings.Index(strings.ToLower(trimmed), marker) // ASCII marker: byte index valid in the original too
+	if i < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(trimmed[i+len(marker):])
+	j := 0
+	for j < len(rest) && rest[j] >= '0' && rest[j] <= '9' {
+		j++
+	}
+	if j == 0 {
+		return ""
+	}
+	return rest[:j]
 }
 
 // ubuntuCodename extracts the release codename from an Ubuntu OVAL id like

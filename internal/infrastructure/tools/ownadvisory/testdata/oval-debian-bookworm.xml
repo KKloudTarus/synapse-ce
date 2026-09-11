@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<oval_definitions xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5" xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux" xmlns:unix="http://oval.mitre.org/XMLSchema/oval-definitions-5#unix">
+  <generator><product_name>Debian</product_name></generator>
+  <definitions>
+    <definition id="oval:org.debian:def:302398480618719661759273474285073383836" version="1" class="vulnerability">
+      <metadata>
+        <title>CVE-1999-0199 glibc</title>
+        <affected family="unix">
+          <platform>Debian GNU/Linux 12</platform>
+          <product>glibc</product>
+        </affected>
+        <reference source="CVE" ref_id="CVE-1999-0199" ref_url="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-1999-0199"/>
+        <description>manual/search.texi in the GNU C Library (aka glibc) before 2.2 lacks a statement about the unspecified tdelete return value upon deletion of a tree's root, which might allow attackers to access a dangling pointer in an application whose developer was unaware of a documentation update from 1999.</description>
+        <debian>
+          <moreinfo></moreinfo>
+        </debian>
+      </metadata>
+      <criteria comment="Release section" operator="AND">
+        <criterion test_ref="oval:org.debian.oval:tst:1" comment="Debian 12 is installed"/>
+        <criteria comment="Architecture section" operator="OR">
+          <criteria comment="Architecture independent section" operator="AND">
+            <criterion test_ref="oval:org.debian.oval:tst:2" comment="all architecture"/>
+            <criterion test_ref="oval:org.debian.oval:tst:3" comment="glibc DPKG is earlier than 2.2-1"/>
+          </criteria>
+        </criteria>
+      </criteria>
+    </definition>
+    <definition id="oval:org.debian:def:235219172302950797077809285042175390515" version="1" class="vulnerability">
+      <metadata>
+        <title>CVE-1999-0710 squid</title>
+        <affected family="unix">
+          <platform>Debian GNU/Linux 12</platform>
+          <product>squid</product>
+        </affected>
+        <reference source="CVE" ref_id="CVE-1999-0710" ref_url="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-1999-0710"/>
+        <description>The Squid package in Red Hat Linux 5.2 and 6.0, and other distributions, installs cachemgr.cgi in a public web directory, which allows remote attackers to use it as an intermediary to connect to other systems.</description>
+        <debian>
+          <moreinfo></moreinfo>
+        </debian>
+      </metadata>
+      <criteria comment="Release section" operator="AND">
+        <criterion test_ref="oval:org.debian.oval:tst:1" comment="Debian 12 is installed"/>
+        <criteria comment="Architecture section" operator="OR">
+          <criteria comment="Architecture independent section" operator="AND">
+            <criterion test_ref="oval:org.debian.oval:tst:2" comment="all architecture"/>
+            <criterion test_ref="oval:org.debian.oval:tst:4" comment="squid DPKG is earlier than 2.5.7-1"/>
+          </criteria>
+        </criteria>
+      </criteria>
+    </definition>
+  </definitions>
+  <tests>
+    <dpkginfo_test id="oval:org.debian.oval:tst:3" version="1" check="all" check_existence="at_least_one_exists" comment="glibc is earlier than 2.2-1" xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+      <object object_ref="oval:org.debian.oval:obj:3"/>
+      <state state_ref="oval:org.debian.oval:ste:2"/>
+    </dpkginfo_test>
+    <dpkginfo_test id="oval:org.debian.oval:tst:4" version="1" check="all" check_existence="at_least_one_exists" comment="squid is earlier than 2.5.7-1" xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+      <object object_ref="oval:org.debian.oval:obj:4"/>
+      <state state_ref="oval:org.debian.oval:ste:3"/>
+    </dpkginfo_test>
+  </tests>
+  <objects>
+    <dpkginfo_object id="oval:org.debian.oval:obj:3" version="1" xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+      <name>glibc</name>
+    </dpkginfo_object>
+    <dpkginfo_object id="oval:org.debian.oval:obj:4" version="1" xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+      <name>squid</name>
+    </dpkginfo_object>
+  </objects>
+  <states>
+    <dpkginfo_state id="oval:org.debian.oval:ste:2" version="1" xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+      <evr datatype="debian_evr_string" operation="less than">0:2.2-1</evr>
+    </dpkginfo_state>
+    <dpkginfo_state id="oval:org.debian.oval:ste:3" version="1" xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+      <evr datatype="debian_evr_string" operation="less than">0:2.5.7-1</evr>
+    </dpkginfo_state>
+  </states>
+</oval_definitions>
