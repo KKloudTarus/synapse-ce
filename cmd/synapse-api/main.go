@@ -72,6 +72,7 @@ import (
 	asttool "github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/dotnetreach"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
@@ -168,6 +169,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
 	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/nugetreach"
 	offensivepolicyuc "github.com/KKloudTarus/synapse-ce/internal/usecase/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -2958,6 +2960,31 @@ func main() {
 		}
 		scaService.SetSourceReachability(lang.purlType, coord)
 		log.Info("Tier-1 " + lang.label + " ENABLED (source-only dead-dependency detection → OpenVEX not_affected; best-effort)")
+	}
+
+	// Build-aware .NET (NuGet) reachability. Unlike the source-only import scanners above, it does NOT guess
+	// a package's namespace from its id (AWSSDK.S3 ships the Amazon.S3 namespace): it reads each subject
+	// package's REAL exported namespaces from its restored assemblies (project.assets.json + the on-disk
+	// assembly cache) and concludes a package unreferenced only when it is a declared direct dependency, its
+	// full namespace set is known, and none of those namespaces is observed in first-party source. It reads
+	// bytes only and runs nothing. It fails closed to "unknown" (mints nothing) on any gap: a dynamic
+	// construct in source, no restore graph, an unreadable/incomplete assembly, or a transitive subject.
+	if cfg.DotNetReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACH_DOTNET", "dotnet reachability") {
+		reader := func(ctx context.Context, dir string) (map[string]bool, bool) {
+			return srcimports.DirectDependencies(ctx, dir, "nuget")
+		}
+		analyzer, aerr := nugetreach.New(srcimports.NewDotNetScanner(), dotnetreach.Loader{}, reader)
+		if aerr != nil {
+			log.Error("dotnet reachability analyzer init failed", "err", aerr)
+			os.Exit(1)
+		}
+		coord, cerr := reachproof.NewCoordinatorForLanguage(analyzer, judgmentSvc, auditLog, clock, judgment.Tier1, reachproof.LanguageDotNet)
+		if cerr != nil {
+			log.Error("dotnet reachability coordinator init failed", "err", cerr)
+			os.Exit(1)
+		}
+		scaService.SetSourceReachability("nuget", coord.WithSkipUnresolvedSubjects())
+		log.Info("Tier-1 build-aware dotnet reachability ENABLED (assembly-metadata dead-dependency detection → OpenVEX not_affected; fails closed to unknown)")
 	}
 
 	// Deterministic taint-analysis CapSAST proposals, opt-in. Builds the workspace call

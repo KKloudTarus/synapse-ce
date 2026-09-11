@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -112,10 +113,21 @@ type sourceWalker struct {
 	skipDir    map[string]bool
 	// extraFiles are extension-less files that are nonetheless source (Rakefile, config.ru).
 	extraFiles []string
+	// exemptDir names skipped directories that a language KNOWS hold only build or tooling output, so
+	// excluding them is not a coverage limitation even when they contain files with a source extension
+	// (a .NET obj/ holds generated .cs). It supplements the shared exemptFromCoverage set.
+	exemptDir map[string]bool
 }
 
 func newSourceWalker(limits scanLimits, extensions []string, skipDir map[string]bool) *sourceWalker {
 	return &sourceWalker{limits: limits, extensions: extensions, skipDir: skipDir}
+}
+
+// withExemptCoverage marks skipped directories whose contents are build or tooling output, so excluding
+// them never degrades coverage. Returns the walker for chaining.
+func (w *sourceWalker) withExemptCoverage(dirs map[string]bool) *sourceWalker {
+	w.exemptDir = dirs
+	return w
 }
 
 // walk visits every supported source file under dir, calling visit with its content.
@@ -174,7 +186,7 @@ func (w *sourceWalker) walk(ctx context.Context, dir string, visit func(path str
 				// Excluding a directory is a policy choice, but source inside it is UNOBSERVED. Only
 				// dependency and VCS directories are exempt; anything else that actually holds source
 				// degrades coverage so its references are never read as absent.
-				if !exemptFromCoverage[name] && w.directoryHasSource(rootDir, p) {
+				if !exemptFromCoverage[name] && !w.exemptDir[name] && w.directoryHasSource(rootDir, p) {
 					out.addReason("an excluded directory contains unscanned source (" + p + ")")
 				}
 				return fs.SkipDir
@@ -377,8 +389,82 @@ func DirectDependencies(ctx context.Context, dir, purlType string) (map[string]b
 		return gemfileDirectDependencies(string(content)), true
 	case "pypi":
 		return pypiDirectDependencies(ctx, dir)
+	case "nuget":
+		return nugetDirectDependencies(ctx, dir, limits)
 	}
 	return nil, false
+}
+
+// nugetPackageRefRe matches a direct NuGet dependency in an MSBuild project or props file: a
+// <PackageReference Include="Name" .../> or a <PackageVersion Include="Name" .../> (central package
+// management). The Include attribute may precede or follow other attributes, so it is matched independently.
+var nugetPackageRefRe = regexp.MustCompile(`(?is)<Package(?:Reference|Version)\b[^>]*\bInclude\s*=\s*"([^"]+)"`)
+
+// nugetDirectDependencies walks dir for MSBuild project files (*.csproj / *.vbproj / *.fsproj) and central
+// package-management props (Directory.Packages.props / Directory.Build.props) and returns the DIRECT NuGet
+// package names they declare, lowercased. found=false when no project file is present (no coverage, so the
+// analyzer refuses a negative conclusion rather than treating a subject as un-referenced).
+func nugetDirectDependencies(ctx context.Context, dir string, limits scanLimits) (map[string]bool, bool) {
+	if ctx == nil || ctx.Err() != nil {
+		return nil, false
+	}
+	rootDir, err := os.OpenRoot(strings.TrimSpace(dir))
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = rootDir.Close() }()
+	deps := map[string]bool{}
+	files := 0
+	anyProject := false
+	_ = fs.WalkDir(rootDir.FS(), ".", func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fs.SkipDir
+		}
+		if ctx.Err() != nil {
+			return fs.SkipAll
+		}
+		if d != nil && d.IsDir() {
+			if dotnetSkipDir[d.Name()] {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !isNuGetManifest(d.Name()) {
+			return nil
+		}
+		anyProject = true
+		if files >= limits.maxFiles {
+			return fs.SkipAll
+		}
+		files++
+		content, ok := readThroughRoot(rootDir, p, limits.maxFileBytes)
+		if !ok {
+			return nil
+		}
+		for _, m := range nugetPackageRefRe.FindAllStringSubmatch(string(content), -1) {
+			if name := strings.ToLower(strings.TrimSpace(m[1])); name != "" {
+				deps[name] = true
+			}
+		}
+		return nil
+	})
+	if !anyProject {
+		return nil, false // no project file: the manifest is absent, so no direct-dependency coverage
+	}
+	return deps, true
+}
+
+// isNuGetManifest reports whether a file name is an MSBuild project or a central-package-management props
+// file that declares direct NuGet references.
+func isNuGetManifest(name string) bool {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lower, ".csproj"), strings.HasSuffix(lower, ".vbproj"), strings.HasSuffix(lower, ".fsproj"):
+		return true
+	case lower == "directory.packages.props", lower == "directory.build.props", lower == "packages.props":
+		return true
+	}
+	return false
 }
 
 // cargoDirectDependencies reads the [dependencies] style tables of a Cargo manifest.

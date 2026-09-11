@@ -615,9 +615,10 @@ type Config struct {
 	// justification. All are source-only (nothing is executed, installed or resolved over the network),
 	// best-effort and opt-in, and each refuses a verdict whenever a dynamic construct could hide a
 	// reference. All require the judgment lifecycle (SYNAPSE_JUDGMENTS_ENABLED).
-	RustReachabilityEnabled bool
-	PHPReachabilityEnabled  bool
-	RubyReachabilityEnabled bool
+	RustReachabilityEnabled   bool
+	PHPReachabilityEnabled    bool
+	RubyReachabilityEnabled   bool
+	DotNetReachabilityEnabled bool
 	// TaintCallgraphBin is the pinned synapse-callgraph binary: the sandboxed go/ssa call-graph builder
 	// the taint analyzer shells out to. In-repo cmd (built by `make build` into bin/); pin its hash via
 	// SYNAPSE_TOOL_HASHES, like any other tool binary.
@@ -886,6 +887,7 @@ func Load() Config {
 		RustReachabilityEnabled:                     getbool("SYNAPSE_REACH_RUST", true),
 		PHPReachabilityEnabled:                      getbool("SYNAPSE_REACH_PHP", true),
 		RubyReachabilityEnabled:                     getbool("SYNAPSE_REACH_RUBY", true),
+		DotNetReachabilityEnabled:                   getbool("SYNAPSE_REACH_DOTNET", true),
 		CrossCheckEnabled:                           getbool("SYNAPSE_CROSSCHECK_ENABLED", true),
 		SBOMCrossCheckEnabled:                       getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
 		WriteupDraftsEnabled:                        getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in

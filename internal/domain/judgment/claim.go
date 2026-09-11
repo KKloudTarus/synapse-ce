@@ -74,6 +74,13 @@ const (
 	ProofActorPHPImportEngine  = "system:phpimport-engine"
 	ProofActorRubyImportScan   = "system:rubyimport-scan"
 	ProofActorRubyImportEngine = "system:rubyimport-engine"
+	// .NET build-aware reachability is a Tier-1 proof, but unlike the source-only import scanners it does
+	// not guess a package's namespace from its id (AWSSDK.S3 ships the Amazon.S3 namespace): it reads the
+	// package's REAL exported namespaces from its restored assemblies, so a not-reachable conclusion is a
+	// sound deterministic proof. It fails closed to unknown (mints nothing) whenever the restore graph,
+	// assembly metadata, or source observation is incomplete.
+	ProofActorDotNetReachScan   = "system:dotnetreach-scan"
+	ProofActorDotNetReachEngine = "system:dotnetreach-engine"
 	// JVM class-reachability is a Tier-1.5 signal: stronger than an import (the app's class-reference
 	// closure reaches the dependency's classes) but weaker than a call-graph proof, and coarse +
 	// reflection-blind, so it must only DEPRIORITIZE. Its actors are deliberately absent from
@@ -96,7 +103,8 @@ func IsDeterministicReachabilityProof(tier ReachabilityTier, proposer, verifier 
 			(proposer == ProofActorPyImportScan && verifier == ProofActorPyImportEngine) ||
 			(proposer == ProofActorRustImportScan && verifier == ProofActorRustImportEngine) ||
 			(proposer == ProofActorPHPImportScan && verifier == ProofActorPHPImportEngine) ||
-			(proposer == ProofActorRubyImportScan && verifier == ProofActorRubyImportEngine)
+			(proposer == ProofActorRubyImportScan && verifier == ProofActorRubyImportEngine) ||
+			(proposer == ProofActorDotNetReachScan && verifier == ProofActorDotNetReachEngine)
 	default:
 		return false
 	}

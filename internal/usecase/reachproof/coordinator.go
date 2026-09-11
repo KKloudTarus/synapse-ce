@@ -49,13 +49,14 @@ const (
 	LanguageRust       Language = "rust"
 	LanguagePHP        Language = "php"
 	LanguageRuby       Language = "ruby"
+	LanguageDotNet     Language = "dotnet"
 	LanguageJVM        Language = "jvm"
 )
 
 // Valid reports whether l is a supported Tier-1 language.
 func (l Language) Valid() bool {
 	switch l {
-	case LanguageGo, LanguagePython, LanguageJavaScript, LanguageRust, LanguagePHP, LanguageRuby, LanguageJVM:
+	case LanguageGo, LanguagePython, LanguageJavaScript, LanguageRust, LanguagePHP, LanguageRuby, LanguageDotNet, LanguageJVM:
 		return true
 	}
 	return false
@@ -87,6 +88,8 @@ func actorsFor(tier judgment.ReachabilityTier, language Language) (proposer, ver
 		return judgment.ProofActorPHPImportScan, judgment.ProofActorPHPImportEngine, "tier-1 php import-reachability proof"
 	case LanguageRuby:
 		return judgment.ProofActorRubyImportScan, judgment.ProofActorRubyImportEngine, "tier-1 ruby import-reachability proof"
+	case LanguageDotNet:
+		return judgment.ProofActorDotNetReachScan, judgment.ProofActorDotNetReachEngine, "tier-1 dotnet build-aware reachability proof"
 	default:
 		return judgment.ProofActorPyImportScan, judgment.ProofActorPyImportEngine, "tier-1 import-reachability proof"
 	}
@@ -122,6 +125,12 @@ type Coordinator struct {
 	proposer   string // reserved proposer identity (tier-specific, audit accuracy)
 	verifier   string // reserved verifier identity (distinct from proposer → never self-confirms)
 	proofLabel string // tier-appropriate prefix for the sealed proof rationale
+	// skipUnresolvedSubjects makes a subject whose symbols the analyzer returned NO result for leave the
+	// prior tier standing (mint nothing) instead of defaulting to not-reachable. A build-aware analyzer that
+	// distinguishes "proven unreachable" from "unknown" (it omits unknown subjects from its results) needs
+	// this so an UNKNOWN subject never becomes a false not_affected. The lexical analyzers return a result
+	// for every subject, so this flag does not change their behaviour.
+	skipUnresolvedSubjects bool
 }
 
 var _ ports.ReachabilityRecorder = (*Coordinator)(nil)
@@ -159,6 +168,14 @@ func NewCoordinatorForLanguage(a analyzer, r recorder, audit ports.AuditLogger, 
 	}
 	coordinator.proposer, coordinator.verifier, coordinator.proofLabel = actorsFor(tier, language)
 	return coordinator, nil
+}
+
+// WithSkipUnresolvedSubjects makes the coordinator treat a subject the analyzer returned no result for as
+// UNKNOWN (mint nothing, prior tier stands) rather than not-reachable. It is for a build-aware analyzer that
+// omits subjects it cannot prove either way; a false not_affected must never come from an unknown.
+func (c *Coordinator) WithSkipUnresolvedSubjects() *Coordinator {
+	c.skipUnresolvedSubjects = true
+	return c
 }
 
 // NewJVMVerdictCoordinator returns a Tier-1.5 coordinator for JVM class-reachability that mints from
@@ -243,7 +260,17 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, target
 		if sub.FindingID.IsZero() {
 			continue
 		}
-		claim := subjectClaim(sub, reachableBy, c.tier)
+		claim, reachable, complete := subjectClaim(sub, reachableBy, c.tier)
+		if !reachable && !complete {
+			// Not reachable, but at least one of the subject's symbols had NO result: the subject is only
+			// PARTIALLY known. A build-aware coordinator must not conclude not-reachable from a partial
+			// subject (the omitted symbol could be reached), so it leaves the prior tier standing. The
+			// lexical analyzers return a result for every symbol, so complete is always true for them and
+			// this preserves the legacy "no result -> not-reachable" behaviour.
+			if c.skipUnresolvedSubjects {
+				continue
+			}
+		}
 		if p, ok := prior[sub.FindingID]; ok && !claim.Supersedes(p.claim) {
 			continue // a same-or-stronger prior reachability judgment stands – don't churn
 		}
@@ -263,17 +290,26 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, target
 const deterministicClaimConfidence = 100
 
 // subjectClaim aggregates a subject's affected symbols into a claim at the coordinator's tier: reachable
-// (with the proof path) if ANY affected symbol is reached, else not-reachable.
-func subjectClaim(sub ports.ReachabilitySubject, reachableBy map[string]reachability.Result, tier judgment.ReachabilityTier) judgment.ReachabilityClaim {
+// (with the proof path) if ANY affected symbol is reached, else not-reachable. reachable is true when at
+// least one symbol was reached. complete is true only when EVERY symbol had a result, so the caller can tell
+// a fully-decided not-reachable subject from one where a symbol was left unknown: concluding not-reachable
+// from a partially-unknown subject would suppress a finding whose omitted symbol could be reached.
+func subjectClaim(sub ports.ReachabilitySubject, reachableBy map[string]reachability.Result, tier judgment.ReachabilityTier) (claim judgment.ReachabilityClaim, reachable bool, complete bool) {
+	complete = len(sub.Symbols) > 0 // a subject with no symbols is not a decided not-reachable
 	for _, sym := range sub.Symbols {
-		if r, ok := reachableBy[sym]; ok && r.Reachable {
+		r, ok := reachableBy[sym]
+		if !ok {
+			complete = false
+			continue
+		}
+		if r.Reachable {
 			return judgment.ReachabilityClaim{
 				Reachable: judgment.Reachable, Tier: tier, Path: r.Path,
 				Confidence: deterministicClaimConfidence,
-			}
+			}, true, complete
 		}
 	}
-	return judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: tier, Confidence: deterministicClaimConfidence}
+	return judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: tier, Confidence: deterministicClaimConfidence}, false, complete
 }
 
 // priorJudgment pairs a stored reachability judgment with its decoded claim (append-only supersession

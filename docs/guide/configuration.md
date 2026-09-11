@@ -551,6 +551,7 @@ The following variables are read by `synapse-agent` and `synapse-cluster-agent`,
 | `SYNAPSE_REACH_RUST` | `true` | Conservative Rust manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_REACH_RUBY` | `true` | Conservative Ruby manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_REACH_PHP` | `true` | Conservative PHP manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |
+| `SYNAPSE_REACH_DOTNET` | `true` | Build-aware .NET (C#/VB) dead-dependency reachability (Tier-1). Reads each direct NuGet package's REAL exported namespaces from its restored assemblies (`project.assets.json` + the on-disk assembly cache), not a guess from the package id, so `AWSSDK.S3` (namespace `Amazon.S3`) is matched correctly. Concludes `not_affected` only when a direct dependency's full namespace set is known and none of it is referenced in first-party source. Reads bytes only, runs nothing. Fails closed to unknown (mints nothing) on any gap: a reflection/`dynamic` construct, no restore graph (build the project first), an unreadable/forwarder-bearing assembly, or a transitive subject. Needs judgments. |
 
 ## MCP server (synapse-mcp)
 
