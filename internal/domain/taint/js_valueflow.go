@@ -21,7 +21,7 @@ const (
 // allJsTaintClasses is the set a fully untrusted request source taints. It is intentionally the JS subset
 // that has a modeled sink today; a source can never introduce a class the engine cannot terminate in a sink.
 var allJsTaintClasses = []TaintClass{
-	TaintCode, TaintCommand, TaintPathTraversal, TaintRedirect, TaintSSRF, TaintXSS,
+	TaintCode, TaintCommand, TaintPathTraversal, TaintRedirect, TaintReDoS, TaintSSRF, TaintXSS,
 }
 
 // JsCallablePattern matches a JS/TS callee. Because PR1's facts carry no resolver, matching is done three
@@ -155,7 +155,7 @@ func BuildJsValueGraph(document jsprogram.Document, catalog JsCatalog) (JsValueF
 		parents: map[string]string{}, definitions: map[string]map[string][]jsprogram.Value{},
 		returns: map[string][]string{}, imports: map[string]map[string]jsImportBinding{},
 		functionsByName: map[string]map[string][]string{}, declaredCallables: map[string]map[string]bool{},
-		flows:           map[string]bool{}, sources: map[string]JsTypedValueSource{}, sinks: map[string]JsTypedValueSink{},
+		flows: map[string]bool{}, sources: map[string]JsTypedValueSource{}, sinks: map[string]JsTypedValueSink{},
 		sanitizers: map[string]JsTypedSanitizer{}, positions: map[string]jsprogram.Position{},
 	}
 	b.index()
@@ -182,11 +182,11 @@ type jsValueBuilder struct {
 	// wrapper as the language global and fire a false sink (CWE-918/CWE-94).
 	declaredCallables map[string]map[string]bool // scopeID -> declared function/class name -> present
 	flows             map[string]bool
-	sources         map[string]JsTypedValueSource
-	sinks           map[string]JsTypedValueSink
-	sanitizers      map[string]JsTypedSanitizer
-	positions       map[string]jsprogram.Position
-	truncated       bool
+	sources           map[string]JsTypedValueSource
+	sinks             map[string]JsTypedValueSink
+	sanitizers        map[string]JsTypedSanitizer
+	positions         map[string]jsprogram.Position
+	truncated         bool
 }
 
 func (b *jsValueBuilder) index() {

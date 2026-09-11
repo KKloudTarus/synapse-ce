@@ -33,14 +33,15 @@ const (
 	TaintXXE             TaintClass = "xxe"
 	TaintLDAP            TaintClass = "ldap"
 	TaintXPath           TaintClass = "xpath"
-	TaintLog             TaintClass = "log"  // CWE-117 log injection: untrusted data written into a log record
-	TaintCode            TaintClass = "code" // CWE-94 code injection: untrusted data compiled/evaluated as program text
+	TaintLog             TaintClass = "log"   // CWE-117 log injection: untrusted data written into a log record
+	TaintCode            TaintClass = "code"  // CWE-94 code injection: untrusted data compiled/evaluated as program text
+	TaintReDoS           TaintClass = "redos" // CWE-1333 untrusted data compiled as a regular expression (regex injection / ReDoS)
 )
 
 func (c TaintClass) Valid() bool {
 	switch c {
 	case TaintSQL, TaintCommand, TaintPathTraversal, TaintSSRF, TaintXSS, TaintDeserialization, TaintRedirect,
-		TaintSSTI, TaintXXE, TaintLDAP, TaintXPath, TaintLog, TaintCode:
+		TaintSSTI, TaintXXE, TaintLDAP, TaintXPath, TaintLog, TaintCode, TaintReDoS:
 		return true
 	}
 	return false

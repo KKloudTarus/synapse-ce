@@ -58,6 +58,14 @@ func jsTaintRules() []rule.Rule {
 			"res.redirect(SAFE_PATHS[req.query.to] || '/');",
 			"res.redirect(req.query.to);",
 		),
+		jsTaintRule(
+			"js-taint-redos", "Interprocedural JavaScript regular-expression injection", "CWE-1333", "A03:2021", shared.SeverityHigh,
+			"Tracks untrusted request values into the RegExp constructor, where they are compiled as a pattern.",
+			"An attacker-controlled regular expression can trigger catastrophic backtracking that stalls the event loop (denial of service), or alter matching to bypass a security check.\n\nSource: https://cwe.mitre.org/data/definitions/1333.html",
+			"Match against a fixed regex, or escape the user portion with escape-string-regexp so it is treated as a literal.",
+			"const re = new RegExp('^' + escapeStringRegexp(req.query.q));",
+			"const re = new RegExp(req.query.q);",
+		),
 	}
 }
 

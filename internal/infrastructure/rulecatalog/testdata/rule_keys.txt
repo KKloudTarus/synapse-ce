@@ -1791,6 +1791,7 @@ js-taint-code
 js-taint-command
 js-taint-open-redirect
 js-taint-path
+js-taint-redos
 js-taint-ssrf
 js-taint-xss
 js-test-disabled

@@ -17,8 +17,8 @@ func TestJsTaintCatalogRulesHaveCompleteFirstPartyMetadata(t *testing.T) {
 		}
 		metadata[string(item.Key)] = true
 	}
-	if len(metadata) != 6 {
-		t.Fatalf("metadata rules = %d, want six JS taint classes", len(metadata))
+	if len(metadata) != 7 {
+		t.Fatalf("metadata rules = %d, want seven JS taint classes", len(metadata))
 	}
 	used := map[string]bool{}
 	for _, sink := range taint.DefaultJsCatalog().Sinks {
