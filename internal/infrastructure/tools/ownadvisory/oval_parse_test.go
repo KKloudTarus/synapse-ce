@@ -3,7 +3,10 @@ package ownadvisory
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 )
 
 func TestParseUbuntuOVAL(t *testing.T) {
@@ -127,5 +130,260 @@ func TestOVALEcosystemKeyRoundTrip(t *testing.T) {
 func TestParseUbuntuOVALMalformedXML(t *testing.T) {
 	if _, err := ParseUbuntuOVAL([]byte("<oval_definitions><definitions><definition")); err == nil {
 		t.Error("truncated XML must return an error so the walk skips + counts the file")
+	}
+}
+
+// TestParseDebianOVAL parses a real (trimmed) Debian bookworm OVAL fixture into Debian:12 advisories.
+func TestParseDebianOVAL(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "oval-debian-bookworm.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatalf("ParseOVAL(debian): %v", err)
+	}
+	got := map[string]string{} // "CVE|pkg" -> fixed
+	for _, a := range advs {
+		for _, ap := range a.Affected {
+			if ap.Ecosystem != "Debian:12" {
+				t.Errorf("%s: ecosystem = %q, want Debian:12", a.ID, ap.Ecosystem)
+			}
+			if ap.Ranges[0].Type != "ECOSYSTEM" {
+				t.Errorf("%s: range type = %q, want ECOSYSTEM", a.ID, ap.Ranges[0].Type)
+			}
+			got[a.ID+"|"+ap.Package] = ap.FixedVersion
+		}
+	}
+	for key, want := range map[string]string{
+		"CVE-1999-0199|glibc": "0:2.2-1",
+		"CVE-1999-0710|squid": "0:2.5.7-1",
+	} {
+		if got[key] != want {
+			t.Errorf("%s fixed = %q, want %q (all: %v)", key, got[key], want, got)
+		}
+	}
+}
+
+// TestParseDebianOVALMatchesViaDomainMatcher proves the Debian:12 key and the epoch-aware dpkg comparator
+// wire end to end: a lower version (with or without an explicit epoch) matches, the fixed version and a
+// different release do not.
+func TestParseDebianOVALMatchesViaDomainMatcher(t *testing.T) {
+	data, _ := os.ReadFile(filepath.Join("testdata", "oval-debian-bookworm.xml"))
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var glibc advisory.Advisory
+	for _, a := range advs {
+		if a.ID == "CVE-1999-0199" {
+			glibc = a
+		}
+	}
+	if glibc.ID == "" {
+		t.Fatal("glibc advisory not parsed")
+	}
+	if ok, fixed := glibc.Match("Debian:12", "glibc", "2.1-1"); !ok || fixed != "0:2.2-1" {
+		t.Errorf("older glibc (no epoch) must match with fix 0:2.2-1, got ok=%v fixed=%q", ok, fixed)
+	}
+	if ok, _ := glibc.Match("Debian:12", "glibc", "0:2.1-1"); !ok {
+		t.Error("older glibc with an explicit epoch must match")
+	}
+	if ok, _ := glibc.Match("Debian:12", "glibc", "0:2.2-1"); ok {
+		t.Error("glibc at the fixed version must not match")
+	}
+	if ok, _ := glibc.Match("Debian:11", "glibc", "2.1-1"); ok {
+		t.Error("a different Debian release must not match (ecosystem key differs)")
+	}
+}
+
+func TestDebianPlatformRelease(t *testing.T) {
+	cases := map[string]string{
+		"Debian GNU/Linux 12":   "12",
+		"debian gnu/linux 11":   "11", // case-insensitive
+		"Debian GNU/Linux 12.4": "12", // leading integer only
+		"Ubuntu 22.04":          "",   // not a Debian platform
+		"Debian GNU/Linux":      "",   // no numeric release
+		"":                      "",
+	}
+	for platform, want := range cases {
+		if got := debianPlatformRelease(platform); got != want {
+			t.Errorf("debianPlatformRelease(%q) = %q, want %q", platform, got, want)
+		}
+	}
+}
+
+// TestDebianReleaseRejectsMixed proves a file that mixes releases (never a real per-release feed) refuses to
+// key any advisory rather than mis-key some to the wrong release.
+func TestDebianReleaseRejectsMixed(t *testing.T) {
+	defs := []ovalDefinition{
+		{Platforms: []string{"Debian GNU/Linux 12"}},
+		{Platforms: []string{"Debian GNU/Linux 11"}},
+	}
+	if got := debianRelease(defs); got != "" {
+		t.Errorf("mixed-release file must return no release, got %q", got)
+	}
+	single := []ovalDefinition{{Platforms: []string{"Debian GNU/Linux 12"}}, {Platforms: []string{"Debian GNU/Linux 12"}}}
+	if got := debianRelease(single); got != "12" {
+		t.Errorf("single-release file must return 12, got %q", got)
+	}
+}
+
+// TestDebianOVALEcosystemKeyRoundTrip locks the feed key (Debian:<major>) to the matcher key a Syft debian
+// PURL derives, tolerating a point-release qualifier.
+func TestDebianOVALEcosystemKeyRoundTrip(t *testing.T) {
+	for _, ver := range []string{"12", "11", "12.4"} {
+		want := "Debian:" + strings.SplitN(ver, ".", 2)[0]
+		if got := osDistroEcosystem("pkg:deb/debian/bash@5?distro=debian-" + ver); got != want {
+			t.Errorf("debian-%s: matcher key %q != feed key %q", ver, got, want)
+		}
+	}
+}
+
+// TestParseOVALAutoDetectsFamily proves the single ParseOVAL entry point resolves the correct distro from the
+// document, so one dir feed handles a mixed Ubuntu+Debian directory.
+func TestParseOVALAutoDetectsFamily(t *testing.T) {
+	ubuntu, _ := os.ReadFile(filepath.Join("testdata", "oval-jammy.xml"))
+	advs, err := ParseOVAL(ubuntu)
+	if err != nil || len(advs) == 0 || advs[0].Affected[0].Ecosystem != "Ubuntu:22.04" {
+		t.Fatalf("ubuntu doc must key Ubuntu:22.04, got err=%v advs=%+v", err, advs)
+	}
+	debian, _ := os.ReadFile(filepath.Join("testdata", "oval-debian-bookworm.xml"))
+	advs, err = ParseOVAL(debian)
+	if err != nil || len(advs) == 0 || advs[0].Affected[0].Ecosystem != "Debian:12" {
+		t.Fatalf("debian doc must key Debian:12, got err=%v advs=%+v", err, advs)
+	}
+}
+
+// TestParseOVALUnknownFamilySkipped proves a document of neither known family is a per-file skip (error), not
+// a mis-keyed advisory.
+func TestParseOVALUnknownFamilySkipped(t *testing.T) {
+	x := `<oval_definitions><definitions>
+	  <definition class="vulnerability" id="oval:org.example:def:1">
+	    <metadata><reference source="CVE" ref_id="CVE-2023-9"/></metadata>
+	    <criteria><criterion test_ref="x"/></criteria>
+	  </definition></definitions></oval_definitions>`
+	if _, err := ParseOVAL([]byte(x)); err == nil {
+		t.Error("an unknown OVAL distro family must return an error (per-file skip)")
+	}
+}
+
+// TestParseOVALMixedFamilyRejected proves a document that mixes Ubuntu and Debian definitions is rejected
+// wholesale, so Debian package facts can never be keyed under an Ubuntu ecosystem (a false match).
+func TestParseOVALMixedFamilyRejected(t *testing.T) {
+	x := `<oval_definitions><definitions>
+	  <definition class="inventory" id="oval:com.ubuntu.jammy:def:1"><metadata></metadata><criteria></criteria></definition>
+	  <definition class="vulnerability" id="oval:org.debian:def:2">
+	    <metadata><affected><platform>Debian GNU/Linux 12</platform></affected>
+	      <reference source="CVE" ref_id="CVE-2099-0001"/></metadata>
+	    <criteria><criterion test_ref="oval:org.debian.oval:tst:3"/></criteria>
+	  </definition></definitions>
+	  <tests><linux:dpkginfo_test id="oval:org.debian.oval:tst:3" xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+	    <object object_ref="o3"/><state state_ref="s3"/></linux:dpkginfo_test></tests>
+	  <objects><linux:dpkginfo_object id="o3" xmlns:linux="x"><name>bash</name></linux:dpkginfo_object></objects>
+	  <states><linux:dpkginfo_state id="s3" xmlns:linux="x"><evr operation="less than">0:9.9-1</evr></linux:dpkginfo_state></states>
+	</oval_definitions>`
+	if _, err := ParseOVAL([]byte(x)); err == nil {
+		t.Error("a document mixing ubuntu and debian definitions must be rejected (no wrong-ecosystem keying)")
+	}
+}
+
+// TestOVALAmbiguousStateSkipped proves a dpkginfo_state carrying BOTH <version> and <evr> with divergent
+// values yields no advisory, rather than silently choosing one boundary.
+func TestOVALAmbiguousStateSkipped(t *testing.T) {
+	x := `<oval_definitions><definitions>
+	  <definition class="vulnerability" id="oval:org.debian:def:1">
+	    <metadata><affected><platform>Debian GNU/Linux 12</platform></affected>
+	      <reference source="CVE" ref_id="CVE-2099-0002"/></metadata>
+	    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
+	  <tests><linux:dpkginfo_test id="t1" xmlns:linux="x"><object object_ref="o1"/><state state_ref="s1"/></linux:dpkginfo_test></tests>
+	  <objects><linux:dpkginfo_object id="o1" xmlns:linux="x"><name>openssl</name></linux:dpkginfo_object></objects>
+	  <states><linux:dpkginfo_state id="s1" xmlns:linux="x">
+	    <version operation="less than">0:1.2-1</version>
+	    <evr operation="less than">0:9.9-1</evr></linux:dpkginfo_state></states>
+	</oval_definitions>`
+	advs, err := ParseOVAL([]byte(x))
+	if err != nil {
+		t.Fatalf("ParseOVAL: %v", err)
+	}
+	if len(advs) != 0 {
+		t.Errorf("an ambiguous version/evr state must yield no advisory, got %+v", advs)
+	}
+}
+
+// TestOVALConsistentBothElementsAccepted proves a state carrying both elements with the SAME value is not
+// ambiguous and still yields the advisory (no over-skip).
+func TestOVALConsistentBothElementsAccepted(t *testing.T) {
+	x := `<oval_definitions><definitions>
+	  <definition class="vulnerability" id="oval:org.debian:def:1">
+	    <metadata><affected><platform>Debian GNU/Linux 12</platform></affected>
+	      <reference source="CVE" ref_id="CVE-2099-0003"/></metadata>
+	    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
+	  <tests><linux:dpkginfo_test id="t1" xmlns:linux="x"><object object_ref="o1"/><state state_ref="s1"/></linux:dpkginfo_test></tests>
+	  <objects><linux:dpkginfo_object id="o1" xmlns:linux="x"><name>openssl</name></linux:dpkginfo_object></objects>
+	  <states><linux:dpkginfo_state id="s1" xmlns:linux="x">
+	    <version operation="less than">0:1.2-1</version>
+	    <evr operation="less than">0:1.2-1</evr></linux:dpkginfo_state></states>
+	</oval_definitions>`
+	advs, err := ParseOVAL([]byte(x))
+	if err != nil {
+		t.Fatalf("ParseOVAL: %v", err)
+	}
+	if len(advs) != 1 || advs[0].Affected[0].FixedVersion != "0:1.2-1" {
+		t.Errorf("consistent both-elements state must yield the advisory, got %+v", advs)
+	}
+}
+
+// TestDebianZeroBoundSkipped proves the "less than 0:0" missing-data sentinel yields no advisory.
+func TestDebianZeroBoundSkipped(t *testing.T) {
+	for _, sentinel := range []string{"0:0", "0", "0:0-0"} {
+		x := `<oval_definitions><definitions>
+		  <definition class="vulnerability" id="oval:org.debian:def:1">
+		    <metadata><affected><platform>Debian GNU/Linux 12</platform></affected>
+		      <reference source="CVE" ref_id="CVE-2099-0004"/></metadata>
+		    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
+		  <tests><linux:dpkginfo_test id="t1" xmlns:linux="x"><object object_ref="o1"/><state state_ref="s1"/></linux:dpkginfo_test></tests>
+		  <objects><linux:dpkginfo_object id="o1" xmlns:linux="x"><name>bash</name></linux:dpkginfo_object></objects>
+		  <states><linux:dpkginfo_state id="s1" xmlns:linux="x"><evr operation="less than">` + sentinel + `</evr></linux:dpkginfo_state></states>
+		</oval_definitions>`
+		advs, err := ParseOVAL([]byte(x))
+		if err != nil {
+			t.Fatalf("ParseOVAL(%s): %v", sentinel, err)
+		}
+		if len(advs) != 0 {
+			t.Errorf("zero-bound %q must yield no advisory, got %+v", sentinel, advs)
+		}
+	}
+}
+
+func TestIsDebianZeroBound(t *testing.T) {
+	for v, want := range map[string]bool{
+		"0:0": true, "0": true, "0:0-0": true, "0.0": true, "": true,
+		"0:2.2-1": false, "2.2-1": false, "0:0.1": false, "0ubuntu1": false,
+	} {
+		if got := isDebianZeroBound(v); got != want {
+			t.Errorf("isDebianZeroBound(%q) = %v, want %v", v, got, want)
+		}
+	}
+}
+
+// TestParseOVALFamilyAnchoredNotSubstring proves family detection is anchored to the id prefix: a Debian id
+// that merely contains the substring "com.ubuntu" is still keyed Debian, not misclassified as Ubuntu.
+func TestParseOVALFamilyAnchoredNotSubstring(t *testing.T) {
+	x := `<oval_definitions><definitions>
+	  <definition class="vulnerability" id="oval:org.debian.com.ubuntu.jammy:def:1">
+	    <metadata><affected><platform>Debian GNU/Linux 12</platform></affected>
+	      <reference source="CVE" ref_id="CVE-2099-0005"/></metadata>
+	    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
+	  <tests><linux:dpkginfo_test id="t1" xmlns:linux="x"><object object_ref="o1"/><state state_ref="s1"/></linux:dpkginfo_test></tests>
+	  <objects><linux:dpkginfo_object id="o1" xmlns:linux="x"><name>zlib</name></linux:dpkginfo_object></objects>
+	  <states><linux:dpkginfo_state id="s1" xmlns:linux="x"><evr operation="less than">0:1.2.13-1</evr></linux:dpkginfo_state></states>
+	</oval_definitions>`
+	advs, err := ParseOVAL([]byte(x))
+	if err != nil {
+		t.Fatalf("ParseOVAL: %v", err)
+	}
+	if len(advs) != 1 || advs[0].Affected[0].Ecosystem != "Debian:12" {
+		t.Fatalf("an org.debian id must key Debian:12 despite a com.ubuntu substring, got %+v", advs)
 	}
 }
