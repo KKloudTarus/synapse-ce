@@ -1789,6 +1789,7 @@ js-substr-deprecated
 js-symbol-no-description
 js-taint-code
 js-taint-command
+js-taint-deserialization
 js-taint-open-redirect
 js-taint-path
 js-taint-redos
