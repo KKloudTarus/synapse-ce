@@ -75,17 +75,21 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 // gigabytes bounds memory instead of OOMing the process. Write always reports a full write so the child
 // process is not killed by a short-write error; the timeout still bounds a runaway render.
 type cappedBuffer struct {
-	buf bytes.Buffer
-	max int
+	buf       bytes.Buffer
+	max       int
+	truncated bool // set when output overflowed the cap and was discarded
 }
 
 func (c *cappedBuffer) Write(p []byte) (int, error) {
 	if room := c.max - c.buf.Len(); room > 0 {
 		if len(p) > room {
 			c.buf.Write(p[:room])
+			c.truncated = true
 		} else {
 			c.buf.Write(p)
 		}
+	} else if len(p) > 0 {
+		c.truncated = true
 	}
 	return len(p), nil
 }
