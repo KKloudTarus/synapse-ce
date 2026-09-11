@@ -94,12 +94,18 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 		}
 	}
 
-	// apk (Alpine): resolvable only when os-release ID is alpine.
-	apkTag := ""
-	if id == "alpine" && versionID != "" {
-		apkTag = "alpine-" + versionID
+	// apk (Alpine / Wolfi / Chainguard): Alpine keys by its release (alpine-3.19), while Wolfi and Chainguard
+	// are rolling (keyed by family name alone). Each resolves to the ecosystem the owned apk secdb feed writes.
+	apkNS, apkTag := "alpine", ""
+	switch id {
+	case "alpine":
+		if versionID != "" {
+			apkTag = "alpine-" + versionID
+		}
+	case "wolfi", "chainguard":
+		apkNS, apkTag = id, id // rolling: the family name is the whole distro key, with no release version
 	}
-	comps, err = parseOSDB(ctx, filepath.Join(rootfsDir, apkDBPath), apkFieldKeys, apkExtract, "apk", "alpine", apkTag)
+	comps, err = parseOSDB(ctx, filepath.Join(rootfsDir, apkDBPath), apkFieldKeys, apkExtract, "apk", apkNS, apkTag)
 	if err != nil {
 		return ports.OSPackageResult{}, err
 	}

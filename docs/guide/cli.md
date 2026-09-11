@@ -394,6 +394,9 @@ synapse-cli sync-advisories --updateinfo <dir>
 
 # ingest a local RESF/Apollo OSV list dump (Rocky Linux RLSA: apollo.build.resf.org OSV JSON pages)
 synapse-cli sync-advisories --rocky <dir>
+
+# ingest a local apk secdb dump (Alpine secdb.alpinelinux.org, Wolfi packages.wolfi.dev, Chainguard)
+synapse-cli sync-advisories --secdb <dir>
 ```
 
 Enable the store at scan time with `SYNAPSE_OWNED_ADVISORY=true`, then it runs alongside the

@@ -250,3 +250,35 @@ func TestCatalogRPMDistroResolution(t *testing.T) {
 		})
 	}
 }
+
+// TestCatalogWolfi: a Wolfi image (rolling apk distro) resolves its distro to the version-less "wolfi" key the
+// owned apk secdb feed and osDistroEcosystem/DistroEcosystem agree on, and emits pkg:apk/wolfi PURLs.
+func TestCatalogWolfi(t *testing.T) {
+	for _, id := range []string{"wolfi", "chainguard"} {
+		t.Run(id, func(t *testing.T) {
+			rootfs := writeRootfs(t, map[string]string{
+				"etc/os-release":       "ID=" + id + "\nVERSION_ID=\"20230201\"\n",
+				"lib/apk/db/installed": "P:glibc\nV:2.39-r0\nA:x86_64\n",
+			})
+			res, err := New().Catalog(context.Background(), rootfs)
+			if err != nil {
+				t.Fatalf("catalog: %v", err)
+			}
+			if len(res.Components) != 1 || !res.DistroResolved {
+				t.Fatalf("want 1 apk package + resolved distro, got %d / %v", len(res.Components), res.DistroResolved)
+			}
+			want := "pkg:apk/" + id + "/glibc@2.39-r0?arch=x86_64&distro=" + id
+			if p := byName(res.Components)["glibc"].PURL; p != want {
+				t.Errorf("glibc PURL = %q; want %q", p, want)
+			}
+			// The distro qualifier keys the family ecosystem the secdb feed writes.
+			wantEco := "Wolfi"
+			if id == "chainguard" {
+				wantEco = "Chainguard"
+			}
+			if eco := sbom.IdentityFromComponent(byName(res.Components)["glibc"]).Ecosystem; eco != wantEco {
+				t.Errorf("glibc ecosystem = %q, want %q", eco, wantEco)
+			}
+		})
+	}
+}
