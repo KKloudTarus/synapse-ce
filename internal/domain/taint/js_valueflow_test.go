@@ -448,3 +448,30 @@ func TestHandlebarsCompileIsSSTI(t *testing.T) {
 		t.Fatal("handlebars.compile on a tainted template should be an SSTI sink")
 	}
 }
+
+// TestXpathSelectIsXpathInjection: xpath.select on a tainted expression is an XPath-injection sink.
+func TestXpathSelectIsXpathInjection(t *testing.T) {
+	scope := jsModuleID()
+	src := jsReqSource("v-src", "req", "query", "id")
+	doc := jsDoc(
+		[]jsprogram.Import{{ScopeID: scope, Kind: jsprogram.ImportDefault, Module: "xpath", Alias: "xpath", Pos: jsPos(1, 0)}},
+		[]jsprogram.Value{src},
+		[]jsprogram.Call{jsAttrCall("c1", []string{"xpath", "select"}, src.Ref, src.ID)},
+	)
+	if !jsFindingRules(mustJsGraph(t, doc))["js-taint-xpath"] {
+		t.Fatal("xpath.select on a tainted expression should be an XPath-injection sink")
+	}
+}
+
+// TestConsoleLogIsLogInjection: console.log with a tainted argument is a log-injection sink, and a tainted
+// argument in any position (not only zero) is caught.
+func TestConsoleLogIsLogInjection(t *testing.T) {
+	src := jsReqSource("v-src", "req", "query", "user")
+	doc := jsDoc(nil,
+		[]jsprogram.Value{src},
+		[]jsprogram.Call{jsAttrCall("c1", []string{"console", "log"}, src.Ref, src.ID)},
+	)
+	if !jsFindingRules(mustJsGraph(t, doc))["js-taint-log"] {
+		t.Fatal("console.log on tainted input should be a log-injection sink")
+	}
+}
