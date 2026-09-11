@@ -37,3 +37,24 @@ type SourceImportScanner interface {
 	// "gem"), so a coordinator can pair it with the right components.
 	Lang() string
 }
+
+// NuGetPackageNamespaces is the set of namespaces a NuGet package's restored assemblies export, and whether
+// that set is fully known. Complete is false when any of the package's assemblies could not be located or
+// fully read; a package with an incompletely known namespace set, or an empty one, must never be concluded
+// unreachable (build-aware reachability fails closed).
+type NuGetPackageNamespaces struct {
+	Namespaces []string
+	Complete   bool
+}
+
+// NuGetReachabilityData maps requested NuGet packages to the REAL namespaces their restored assemblies
+// export, so reachability is decided against a package's actual namespaces rather than a guess from its id
+// (AWSSDK.S3 ships the Amazon.S3 namespace). Implementations read bytes only (project.assets.json and the
+// on-disk assembly cache) and run nothing.
+type NuGetReachabilityData interface {
+	// LoadReachabilityData resolves the given lowercased package ids under dir. present is false when no
+	// restore graph (project.assets.json) exists, so build-aware reachability is impossible and the caller
+	// must fail closed. A package absent from the map is unknown; one present with Complete=false or an
+	// empty Namespaces set must not be concluded unreachable.
+	LoadReachabilityData(ctx context.Context, dir string, packages []string) (map[string]NuGetPackageNamespaces, bool, error)
+}

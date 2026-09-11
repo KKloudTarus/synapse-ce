@@ -267,3 +267,72 @@ func TestJVMVerdictDoesNotSupersedeStrongerPrior(t *testing.T) {
 		t.Errorf("must not mint over a stronger prior: %+v", rec.proposes)
 	}
 }
+
+// TestSkipUnresolvedSubjectsMintsNothingForUnknown: a build-aware coordinator with
+// WithSkipUnresolvedSubjects leaves the prior tier standing (mints nothing) when the analyzer returns NO
+// result for a subject, so an UNKNOWN subject can never become a false not_affected.
+func TestSkipUnresolvedSubjectsMintsNothingForUnknown(t *testing.T) {
+	rec := &fakeRecorder{}
+	c := newCoord(t, fakeAnalyzer{res: []reachability.Result{{Symbol: "decided.dep", Reachable: false}}}, rec).
+		WithSkipUnresolvedSubjects()
+	n, err := c.Record(context.Background(), "eng-1", "/work", []ports.ReachabilitySubject{
+		{FindingID: "f-decided", Symbols: []string{"decided.dep"}}, // analyzer decided: not reachable
+		{FindingID: "f-unknown", Symbols: []string{"unknown.dep"}}, // analyzer returned no result: UNKNOWN
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("only the decided subject must mint; got %d", n)
+	}
+	if len(rec.proposes) != 1 || rec.proposes[0].subjectID != "f-decided" {
+		t.Fatalf("the unknown subject must mint nothing; proposes=%+v", rec.proposes)
+	}
+	if rec.proposes[0].claim.Reachable != judgment.NotReachable {
+		t.Errorf("the decided subject is proven unreachable; got %+v", rec.proposes[0].claim)
+	}
+}
+
+// TestUnresolvedSubjectDefaultsNotReachableWithoutFlag: without the flag the legacy behaviour holds (a
+// subject with no result is treated not-reachable), so the change does not alter the other languages.
+func TestUnresolvedSubjectDefaultsNotReachableWithoutFlag(t *testing.T) {
+	rec := &fakeRecorder{}
+	c := newCoord(t, fakeAnalyzer{res: nil}, rec) // analyzer returned no results at all
+	n, err := c.Record(context.Background(), "eng-1", "/work", []ports.ReachabilitySubject{
+		{FindingID: "f1", Symbols: []string{"dep.vuln"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(rec.proposes) != 1 || rec.proposes[0].claim.Reachable != judgment.NotReachable {
+		t.Fatalf("without the flag an unresolved subject must default not-reachable; n=%d proposes=%+v", n, rec.proposes)
+	}
+}
+
+func TestDotNetTier1UsesDistinctProofActors(t *testing.T) {
+	proposer, verifier, label := actorsFor(judgment.Tier1, LanguageDotNet)
+	if proposer != judgment.ProofActorDotNetReachScan || verifier != judgment.ProofActorDotNetReachEngine {
+		t.Fatalf("dotnet tier-1 actors = (%q,%q), must not fall through to python", proposer, verifier)
+	}
+	if !judgment.IsDeterministicReachabilityProof(judgment.Tier1, proposer, verifier) {
+		t.Error("the build-aware dotnet proof must be a deterministic (suppressing) proof")
+	}
+	_ = label
+}
+
+// TestSkipModePartialSubjectMintsNothing: in skip mode a subject with one symbol proven not-reachable and
+// another symbol UNKNOWN (no result) must mint nothing, because the unknown symbol could be reached.
+func TestSkipModePartialSubjectMintsNothing(t *testing.T) {
+	rec := &fakeRecorder{}
+	c := newCoord(t, fakeAnalyzer{res: []reachability.Result{{Symbol: "a", Reachable: false}}}, rec).
+		WithSkipUnresolvedSubjects()
+	n, err := c.Record(context.Background(), "eng-1", "/work", []ports.ReachabilitySubject{
+		{FindingID: "f1", Symbols: []string{"a", "b"}}, // b has no result -> partially unknown
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(rec.proposes) != 0 {
+		t.Errorf("a partially-unknown subject must mint nothing in skip mode; n=%d proposes=%+v", n, rec.proposes)
+	}
+}

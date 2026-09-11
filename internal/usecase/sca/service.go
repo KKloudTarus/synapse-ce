@@ -479,6 +479,7 @@ var sourceReachabilityEcosystems = []struct {
 	{purlType: "cargo", prefix: "pkg:cargo/"},
 	{purlType: "composer", prefix: "pkg:composer/"},
 	{purlType: "gem", prefix: "pkg:gem/"},
+	{purlType: "nuget", prefix: "pkg:nuget/"},
 }
 
 // SetSourceReachability registers a deterministic Tier-1 import-reachability prover for one package-URL
