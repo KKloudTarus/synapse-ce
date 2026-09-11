@@ -2583,6 +2583,7 @@ python-subprocess-universal-newlines
 python-super-with-arguments
 python-sys-maxint
 python-sys-version-slice
+python-taint-code
 python-taint-command
 python-taint-deserialization
 python-taint-ldap

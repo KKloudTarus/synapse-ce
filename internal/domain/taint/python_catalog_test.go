@@ -148,6 +148,9 @@ func TestPythonCatalogModelsInjectionClasses(t *testing.T) {
 		{"python:re:compile", TaintReDoS},
 		{"python:re:match", TaintReDoS},
 		{"python:re:sub", TaintReDoS},
+		{"python:builtins:eval", TaintCode},
+		{"python:builtins:exec", TaintCode},
+		{"python:builtins:compile", TaintCode},
 	}
 	for _, p := range positives {
 		if !isSink(p.callee, p.class) {

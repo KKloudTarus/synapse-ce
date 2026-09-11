@@ -19,6 +19,14 @@ func pythonTaintRules() []rule.Rule {
 			"cursor.execute('SELECT * FROM users WHERE id = ' + request.args['id'])",
 		),
 		pythonTaintRule(
+			"python-taint-code", "Interprocedural Python code injection", "CWE-94", "A03:2021", shared.SeverityCritical,
+			"Tracks untrusted request values into the eval, exec, and compile builtins, which evaluate their argument as Python source.",
+			"Evaluating attacker-controlled text as Python code runs arbitrary logic in the server process.\n\nSource: https://cwe.mitre.org/data/definitions/94.html",
+			"Never eval request input; parse it as data (json.loads) or use ast.literal_eval, which evaluates only literals, and dispatch through a fixed allowlist of operations.",
+			"op = OPERATIONS.get(request.args['op']); op and op()",
+			"eval(request.args['expr'])",
+		),
+		pythonTaintRule(
 			"python-taint-command", "Interprocedural Python command injection", "CWE-78", "A03:2021", shared.SeverityCritical,
 			"Tracks untrusted Python values into os and subprocess command execution APIs through local helpers and return values.",
 			"When an attacker controls a command or executable path, the server can run unintended operating-system actions.\n\nSource: https://cwe.mitre.org/data/definitions/78.html",
