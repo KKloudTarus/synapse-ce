@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/jsprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -102,6 +103,7 @@ var (
 	_ ports.BugDetector         = (*Provider)(nil)
 	_ ports.CodeAnalyzer        = (*Provider)(nil)
 	_ ports.PythonFactsProvider = (*Provider)(nil)
+	_ ports.JsFactsProvider     = (*Provider)(nil)
 )
 
 // PythonFacts runs `synapse-ast python-facts <root>`. The wire document is validated here because the
@@ -123,6 +125,29 @@ func (p *Provider) PythonFacts(ctx context.Context, root string) (pythonprogram.
 	}
 	if err := document.Validate(); err != nil {
 		return pythonprogram.Document{}, false, fmt.Errorf("validate synapse-ast python facts: %w", err)
+	}
+	return document, true, nil
+}
+
+// JsFacts runs `synapse-ast js-facts <root>`. The wire document is validated here because the sidecar is
+// outside the application trust boundary and parses attacker-controlled repositories.
+func (p *Provider) JsFacts(ctx context.Context, root string) (jsprogram.Document, bool, error) {
+	if strings.TrimSpace(root) == "" {
+		return jsprogram.Document{}, false, nil
+	}
+	out, exit, err := p.run(ctx, "js-facts", root)
+	if exit == exitUnavailable {
+		return jsprogram.Document{}, false, nil
+	}
+	if err != nil {
+		return jsprogram.Document{}, false, err
+	}
+	var document jsprogram.Document
+	if err := json.Unmarshal(out, &document); err != nil {
+		return jsprogram.Document{}, false, fmt.Errorf("parse synapse-ast js facts: %w", err)
+	}
+	if err := document.Validate(); err != nil {
+		return jsprogram.Document{}, false, fmt.Errorf("validate synapse-ast js facts: %w", err)
 	}
 	return document, true, nil
 }
