@@ -270,3 +270,36 @@ func TestFindingRepositorySummarizesOpenFindingsByEngagement(t *testing.T) {
 		t.Fatalf("open finding summary = %+v, want SCA + SAST + secret", a)
 	}
 }
+
+// D3.8: DirectBumps (the upgrade path, computed only by the SCA scan) must be PRESERVED when a producer
+// that does not carry it (e.g. the continuous vulnerability projection) re-upserts the same finding with an
+// empty DirectBumps — it must not be clobbered. A non-empty incoming still replaces it.
+func TestFindingRepositoryPreservesDirectBumpsOnEmptyUpsert(t *testing.T) {
+	r := NewFindingRepository()
+	ctx := context.Background()
+
+	scan := finding.Finding{ID: "f1", EngagementID: "e1", Title: "v", Severity: shared.SeverityHigh, Status: finding.StatusOpen, DedupKey: "vuln:CVE-1", DirectBumps: []string{"web@2.0"}}
+	if err := r.Upsert(ctx, []finding.Finding{scan}); err != nil {
+		t.Fatal(err)
+	}
+	// A projection re-upsert with NO DirectBumps must not wipe the stored path.
+	proj := scan
+	proj.DirectBumps = nil
+	if err := r.Upsert(ctx, []finding.Finding{proj}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := r.ListByEngagement(ctx, "e1")
+	if len(list) != 1 || strings.Join(list[0].DirectBumps, ",") != "web@2.0" {
+		t.Fatalf("DirectBumps must be preserved on an empty re-upsert, got %+v", list)
+	}
+	// A new non-empty value DOES replace it.
+	next := scan
+	next.DirectBumps = []string{"api@3.0"}
+	if err := r.Upsert(ctx, []finding.Finding{next}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ = r.ListByEngagement(ctx, "e1")
+	if strings.Join(list[0].DirectBumps, ",") != "api@3.0" {
+		t.Errorf("a non-empty incoming must replace DirectBumps, got %+v", list[0].DirectBumps)
+	}
+}

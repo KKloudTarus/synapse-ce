@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -299,5 +300,86 @@ func TestFindingRepositorySummarizesOpenFindingsByEngagement(t *testing.T) {
 	}
 	if a := all[eid]; a.Total != 3 || a.Critical != 1 || a.High != 1 || a.Medium != 1 {
 		t.Fatalf("open finding summary = %+v, want SCA + SAST + secret", a)
+	}
+}
+
+// D3.8: DirectBumps (the upgrade path) round-trips through postgres, and a re-upsert of the same dedup key
+// with an EMPTY DirectBumps (e.g. the continuous vulnerability projection, which does not compute it)
+// PRESERVES the previously-stored path rather than clobbering it. A non-empty incoming still replaces it.
+func TestFindingRepositoryPersistsAndPreservesDirectBumps(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := shared.WithTenant(context.Background(), "default")
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	eid := shared.ID("db-" + randHex(t))
+	e, err := engagement.New(eid, "", "direct-bumps-test", "", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := NewEngagementRepository(pool).Create(ctx, e); err != nil {
+		t.Fatalf("create engagement: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM findings WHERE engagement_id=$1", eid.String())
+		_, _ = pool.Exec(ctx, "DELETE FROM engagements WHERE id=$1", eid.String())
+	})
+
+	repo := NewFindingRepository(pool)
+	now := time.Now().UTC().Truncate(time.Second)
+	base := finding.Finding{
+		ID: shared.ID("fid-" + randHex(t)), EngagementID: eid, Title: "CVE-1 in vulnlib@1.0", Severity: shared.SeverityHigh,
+		Status: finding.StatusOpen, Kind: finding.KindSCA, DedupKey: "vuln:CVE-1:vulnlib:1.0",
+		DirectBumps: []string{"web@2.0", "api@3.0"}, Audit: shared.Audit{CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{base}); err != nil {
+		t.Fatalf("upsert with bumps: %v", err)
+	}
+	bumpsFor := func(dedup string) []string {
+		list, lerr := repo.ListByEngagement(ctx, eid)
+		if lerr != nil {
+			t.Fatalf("list: %v", lerr)
+		}
+		for _, f := range list {
+			if f.DedupKey == dedup {
+				return f.DirectBumps
+			}
+		}
+		t.Fatalf("finding %q not found", dedup)
+		return nil
+	}
+	if got := strings.Join(bumpsFor(base.DedupKey), ","); got != "web@2.0,api@3.0" {
+		t.Fatalf("DirectBumps must round-trip, got %q", got)
+	}
+
+	// A projection-style re-upsert with empty DirectBumps must PRESERVE the stored path.
+	proj := base
+	proj.ID = shared.ID("fid-" + randHex(t))
+	proj.DirectBumps = nil
+	if err := repo.Upsert(ctx, []finding.Finding{proj}); err != nil {
+		t.Fatalf("projection upsert: %v", err)
+	}
+	if got := strings.Join(bumpsFor(base.DedupKey), ","); got != "web@2.0,api@3.0" {
+		t.Fatalf("an empty re-upsert must preserve DirectBumps, got %q", got)
+	}
+
+	// A new non-empty value replaces it.
+	next := base
+	next.ID = shared.ID("fid-" + randHex(t))
+	next.DirectBumps = []string{"only@1.0"}
+	if err := repo.Upsert(ctx, []finding.Finding{next}); err != nil {
+		t.Fatalf("replace upsert: %v", err)
+	}
+	if got := strings.Join(bumpsFor(base.DedupKey), ","); got != "only@1.0" {
+		t.Errorf("a non-empty incoming must replace DirectBumps, got %q", got)
 	}
 }

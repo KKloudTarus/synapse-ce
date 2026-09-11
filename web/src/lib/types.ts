@@ -755,6 +755,7 @@ export interface Finding {
   evidenceScore: number // 0-100; exploitation findings need >= 75 to be reportable
   proposedBy: string // for an agent-proposed exploitation finding, e.g. "agent:<sid>"
   complianceControls: ComplianceControl[] // curated regulatory/standard controls the CWE maps to
+  directBumps?: string[] // minimal set of direct dependencies to upgrade to remove a transitive vuln (D3.8)
 }
 
 export type SLATier = 'emergency' | 'critical' | 'high' | 'medium' | 'low' | 'exception'

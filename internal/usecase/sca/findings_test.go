@@ -356,3 +356,59 @@ func TestClassifyVulns_GraphScopeDowngradesProvidedOnlyTransitive(t *testing.T) 
 		t.Errorf("provided-only tomcat-embed-el must be downgraded below production, got %q", vulns[1].Scope)
 	}
 }
+
+// D3.8: attachDependencyPaths routes the minimal-upgrade set through the remediation solver, and
+// buildFindings surfaces it on the finding as DirectBumps. web@2.0 (direct) -> vulnlib@1.0 (transitive,
+// vulnerable): the one bump to remove the vuln is web@2.0.
+func TestBuildFindingsSurfacesDirectBumps(t *testing.T) {
+	doc := &sbom.SBOM{
+		Components: []sbom.Component{{Name: "web", Version: "2.0"}, {Name: "vulnlib", Version: "1.0"}},
+		Dependencies: []sbom.Dependency{
+			{Ref: "web@2.0", DependsOn: []string{"vulnlib@1.0"}},
+			{Ref: "vulnlib@1.0"},
+		},
+	}
+	vulns := []vulnerability.Vulnerability{
+		{ID: "CVE-X", Component: "vulnlib", Version: "1.0", Severity: shared.SeverityHigh, FixedVersion: "1.1"},
+	}
+	attachDependencyPaths(doc, vulns) // populates Introducers via remediation.Solve (D3.8)
+	if got := strings.Join(vulns[0].Introducers, ","); got != "web@2.0" {
+		t.Fatalf("attachDependencyPaths must route through the solver and set Introducers=[web@2.0], got %q", got)
+	}
+
+	res := &ScanResult{SBOM: doc, Vulnerabilities: vulns}
+	got := buildFindings("eng1", res, time.Unix(0, 0).UTC(), shared.SeverityHigh, false, nil)
+	var found bool
+	for _, f := range got {
+		if f.DedupKey == "vuln:CVE-X:vulnlib:1.0" {
+			found = true
+			if b := strings.Join(f.DirectBumps, ","); b != "web@2.0" {
+				t.Errorf("finding must surface DirectBumps=[web@2.0], got %q", b)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the vulnlib finding must be produced")
+	}
+}
+
+// A directly-declared vulnerable dependency bumps itself; a first-party/no-graph finding has no bumps.
+func TestBuildFindingsDirectBumpsEdgeCases(t *testing.T) {
+	// vulnlib is itself a direct (top-level) dependency: the bump is itself.
+	doc := &sbom.SBOM{
+		Components:   []sbom.Component{{Name: "vulnlib", Version: "1.0"}},
+		Dependencies: []sbom.Dependency{{Ref: "vulnlib@1.0"}},
+	}
+	vulns := []vulnerability.Vulnerability{{ID: "CVE-Y", Component: "vulnlib", Version: "1.0", Severity: shared.SeverityHigh}}
+	attachDependencyPaths(doc, vulns)
+	if got := strings.Join(vulns[0].Introducers, ","); got != "vulnlib@1.0" {
+		t.Errorf("a direct vuln must bump itself, got %q", got)
+	}
+	// No SBOM/graph: DirectBumps stays empty (no crash).
+	resNoGraph := &ScanResult{Vulnerabilities: []vulnerability.Vulnerability{{ID: "CVE-Z", Component: "x", Version: "1", Severity: shared.SeverityHigh}}}
+	for _, f := range buildFindings("eng1", resNoGraph, time.Unix(0, 0).UTC(), shared.SeverityHigh, false, nil) {
+		if len(f.DirectBumps) != 0 {
+			t.Errorf("a finding with no resolved graph must have no DirectBumps, got %v", f.DirectBumps)
+		}
+	}
+}
