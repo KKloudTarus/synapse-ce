@@ -2419,6 +2419,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	result.UnfixedSuppressed = countUnfixedSuppressed(result.Vulnerabilities, s.minSeverity, s.ignoreUnfixed)
 	result.FindingQuality = computeFindingQuality(result)
 	applyDetectionPriority(result, opts.DetectionPriority)
+	quarantineUnkeyedEntropySecrets(result)
 	s.attachCompliance(result)
 	result.ReproDigest = ReproDigest(result)
 	evidenceRef, err := s.sealEvidenceFailClosedWithID(ctx, actor, engagementID, now, result, evidenceID)
@@ -3484,6 +3485,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	result.UnfixedSuppressed = countUnfixedSuppressed(result.Vulnerabilities, s.minSeverity, s.ignoreUnfixed)
 	result.FindingQuality = computeFindingQuality(result)
 	applyDetectionPriority(result, opts.DetectionPriority)
+	quarantineUnkeyedEntropySecrets(result)
 	s.attachCompliance(result)
 	// Reproducibility fingerprint: a stable content digest of the final SBOM + findings, so the same
 	// inputs (target + pinned producer + pinned advisory/DB snapshot) verifiably yield the same scan.

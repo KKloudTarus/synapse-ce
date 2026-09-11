@@ -903,6 +903,7 @@ gcp-oauth-client-secret
 gcp-oauth-refresh-token
 gcp-service-account-key
 generic-command-injection-sink
+generic-high-entropy
 generic-secret
 generic-sql-dynamic-execute
 generic-ssrf-request-url

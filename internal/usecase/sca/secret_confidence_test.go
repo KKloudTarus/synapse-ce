@@ -81,3 +81,30 @@ func TestBuildSecretFindingsSurfacesVerdict(t *testing.T) {
 		t.Error("an unverified finding must note it is not currently live (and still be reported)")
 	}
 }
+
+// D6.7: keyword-free high-entropy secret hits (generic-high-entropy) are QUARANTINED into the needs-verify
+// queue (reported but gate-exempt), while a keyword-anchored token stays promoted/gating. Neither is removed.
+func TestKeywordFreeEntropySecretsQuarantined(t *testing.T) {
+	raws := []ports.SecretRawFinding{
+		{File: "a.go", Line: 1, RuleID: "generic-high-entropy", Category: "Generic", Title: "High-entropy string", Severity: shared.SeverityMedium, Match: "abc***xy"},
+		{File: "b.go", Line: 2, RuleID: "github-token", Category: "GitHub", Title: "GitHub token", Severity: shared.SeverityHigh, Match: "ghp***12"},
+	}
+	res := &ScanResult{Findings: buildSecretFindings(shared.ID("eng"), raws, time.Unix(0, 0).UTC(), shared.SeverityInfo, true)}
+	quarantineUnkeyedEntropySecrets(res)
+
+	nv := res.NeedsVerifyKeys()
+	if !nv["secret:generic-high-entropy:a.go:1"] {
+		t.Errorf("a keyword-free high-entropy hit must be quarantined to needs-verify, got %v", nv)
+	}
+	if nv["secret:github-token:b.go:2"] {
+		t.Errorf("a keyword-anchored token must NOT be quarantined (it stays gating)")
+	}
+	if len(res.Findings) != 2 {
+		t.Errorf("quarantine must never remove a finding, got %d", len(res.Findings))
+	}
+	// Idempotent: a second pass adds no duplicate.
+	quarantineUnkeyedEntropySecrets(res)
+	if got := len(res.NeedsVerification); got != 1 {
+		t.Errorf("quarantine must be idempotent (one entry), got %d", got)
+	}
+}

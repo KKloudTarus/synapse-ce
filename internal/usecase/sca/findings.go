@@ -319,9 +319,42 @@ func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, 
 // Everything not listed here is a distinctive fixed-format token, so a match is high-confidence.
 var lowSignalSecretRules = map[string]bool{
 	"generic-secret":        true, // catch-all high-entropy assignment
+	"generic-high-entropy":  true, // keyword-free high-entropy blob (D6.7); always quarantined to needs-verify
 	"aws-secret-access-key": true, // entropy-only 40-char base64, no distinctive prefix
 	"db-connection-string":  true, // credential embedded in an otherwise ordinary URL
 	"jwt":                   true, // JWTs are common and frequently non-secret
+}
+
+// keywordFreeEntropyRule is the D6.7 detector whose keyword-free hits are always routed to needs-verify.
+const keywordFreeEntropyRule = "generic-high-entropy"
+
+// quarantineUnkeyedEntropySecrets routes keyword-free high-entropy secret hits (the generic-high-entropy
+// rule, D6.7) into the needs-verify queue: they stay reported and evidence-sealed, but are exempt from the
+// --fail-on gate, because a bare high-entropy blob with no adjacent keyword is lower-confidence and must not
+// fail a build on its own. It runs unconditionally (independent of detection priority), never removes a
+// finding, and skips a hit already accepted (suppressed) or already queued.
+func quarantineUnkeyedEntropySecrets(res *ScanResult) {
+	if res == nil {
+		return
+	}
+	queued := res.NeedsVerifyKeys()
+	if queued == nil {
+		queued = map[string]bool{}
+	}
+	accepted := res.SuppressedKeys()
+	for _, f := range res.Findings {
+		if f.RuleKey != keywordFreeEntropyRule {
+			continue
+		}
+		if queued[f.DedupKey] || accepted[f.DedupKey] {
+			continue
+		}
+		res.NeedsVerification = append(res.NeedsVerification, NeedsVerifyFinding{
+			DedupKey: f.DedupKey, Title: f.Title,
+			Reason: "keyword-free high-entropy string (unverified) – verify before acting",
+		})
+		queued[f.DedupKey] = true // dedup within this pass
+	}
 }
 
 // secretRuleConfidence tags a secret finding's confidence: high for the fixed-prefix vendor-token rules

@@ -33,6 +33,7 @@ func TestCatalogParity(t *testing.T) {
 		"private-key":             "CWE-321",
 		"jwt":                     "CWE-798",
 		"generic-secret":          "CWE-798",
+		"generic-high-entropy":    "CWE-798",
 		"aws-secret-access-key":   "CWE-798",
 		"gcp-service-account-key": "CWE-798",
 		"azure-storage-key":       "CWE-798",
