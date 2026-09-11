@@ -74,6 +74,14 @@ func jsTaintRules() []rule.Rule {
 			"const data = JSON.parse(req.body.payload);",
 			"const data = nodeSerialize.unserialize(req.body.payload);",
 		),
+		jsTaintRule(
+			"js-taint-ssti", "Interprocedural JavaScript server-side template injection", "CWE-1336", "A03:2021", shared.SeverityHigh,
+			"Tracks untrusted values into the template source of handlebars, pug, ejs, and lodash template engines.",
+			"When an attacker controls the template source, the engine evaluates their expressions on the server, which can read data or run code.\n\nSource: https://cwe.mitre.org/data/definitions/1336.html",
+			"Compile a fixed template and pass user input only as data, never as the template source.",
+			"const html = template({ name: req.query.name });",
+			"const html = handlebars.compile(req.query.tpl)();",
+		),
 	}
 }
 

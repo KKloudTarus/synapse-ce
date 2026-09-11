@@ -21,7 +21,7 @@ const (
 // allJsTaintClasses is the set a fully untrusted request source taints. It is intentionally the JS subset
 // that has a modeled sink today; a source can never introduce a class the engine cannot terminate in a sink.
 var allJsTaintClasses = []TaintClass{
-	TaintCode, TaintCommand, TaintDeserialization, TaintPathTraversal, TaintRedirect, TaintReDoS, TaintSSRF, TaintXSS,
+	TaintCode, TaintCommand, TaintDeserialization, TaintPathTraversal, TaintRedirect, TaintReDoS, TaintSSRF, TaintSSTI, TaintXSS,
 }
 
 // JsCallablePattern matches a JS/TS callee. Because PR1's facts carry no resolver, matching is done three

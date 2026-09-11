@@ -1794,6 +1794,7 @@ js-taint-open-redirect
 js-taint-path
 js-taint-redos
 js-taint-ssrf
+js-taint-ssti
 js-taint-xss
 js-test-disabled
 js-test-focused
