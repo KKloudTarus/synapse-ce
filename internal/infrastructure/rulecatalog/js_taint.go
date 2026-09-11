@@ -66,6 +66,14 @@ func jsTaintRules() []rule.Rule {
 			"const re = new RegExp('^' + escapeStringRegexp(req.query.q));",
 			"const re = new RegExp(req.query.q);",
 		),
+		jsTaintRule(
+			"js-taint-deserialization", "Interprocedural JavaScript unsafe deserialization", "CWE-502", "A08:2021", shared.SeverityCritical,
+			"Tracks untrusted values into node-serialize unserialize and funcster deepDeserialize, which reconstruct functions.",
+			"These deserializers rebuild functions from the payload and invoke them, so deserializing attacker-controlled data runs arbitrary code in the server process.\n\nSource: https://cwe.mitre.org/data/definitions/502.html",
+			"Never deserialize request data with a function-reviving library; parse it as data with JSON.parse and validate the shape.",
+			"const data = JSON.parse(req.body.payload);",
+			"const data = nodeSerialize.unserialize(req.body.payload);",
+		),
 	}
 }
 

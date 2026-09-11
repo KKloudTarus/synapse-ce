@@ -87,6 +87,14 @@ func DefaultJsCatalog() JsCatalog {
 			// This fires only when the pattern is TAINTED (a literal `/abc/` or a constant string never is), so
 			// it flags an attacker-controlled regex, not every dynamic RegExp.
 			jsSinkGlobal(TaintReDoS, "CWE-1333", "js-taint-redos", []int{0}, "RegExp"),
+
+			// CWE-502: unsafe deserialization. node-serialize's unserialize and funcster's deepDeserialize
+			// reconstruct FUNCTIONS from the serialized payload (an immediately-invoked function expression), so
+			// deserializing attacker-controlled data is remote code execution (CVE-2017-5941). Both resolve
+			// through their import; the payload is argument zero. The safe alternative is JSON.parse, a distinct
+			// function, so no sanitizer makes these calls safe on untrusted input.
+			jsSink(jsMod([]string{"node-serialize"}, "unserialize"), TaintDeserialization, "CWE-502", "js-taint-deserialization", 0),
+			jsSink(jsMod([]string{"funcster"}, "deepDeserialize"), TaintDeserialization, "CWE-502", "js-taint-deserialization", 0),
 		},
 		Sanitizers: []JsSanitizerModel{
 			// CWE-79: contextual HTML/URL encoders. encodeURIComponent / encodeURI are globals; the library

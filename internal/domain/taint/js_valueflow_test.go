@@ -419,3 +419,18 @@ func TestEscapeStringRegexpSanitizesReDoS(t *testing.T) {
 		t.Fatalf("escape-string-regexp should neutralize the ReDoS flow, got %v", rules)
 	}
 }
+
+// TestNodeSerializeUnserializeIsDeserialization: node-serialize.unserialize on a tainted payload is an unsafe
+// deserialization (RCE) sink.
+func TestNodeSerializeUnserializeIsDeserialization(t *testing.T) {
+	scope := jsModuleID()
+	src := jsReqSource("v-src", "req", "body", "payload")
+	doc := jsDoc(
+		[]jsprogram.Import{{ScopeID: scope, Kind: jsprogram.ImportDefault, Module: "node-serialize", Alias: "nodeSerialize", Pos: jsPos(1, 0)}},
+		[]jsprogram.Value{src},
+		[]jsprogram.Call{jsAttrCall("c1", []string{"nodeSerialize", "unserialize"}, src.Ref, src.ID)},
+	)
+	if !jsFindingRules(mustJsGraph(t, doc))["js-taint-deserialization"] {
+		t.Fatal("node-serialize.unserialize on tainted input should be a deserialization sink")
+	}
+}
