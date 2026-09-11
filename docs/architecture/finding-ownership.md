@@ -1,14 +1,16 @@
-# Finding ownership foundations
+# Finding ownership and team routing
 
 The ownership domain routes a canonical finding to one accountable team and
 records the source evidence behind that decision. Team membership is a grouping
 of existing users; it grants no role or engagement access. An individual still
 claims or receives a finding through the existing human triage workflow.
 
-This document describes the domain, PostgreSQL foundations and notification
-integration. Producer capture, routing jobs, ownership HTTP routes and ownership
-UI are separate integration milestones. No existing finding is reassigned by
-migrations 0164/0165 or by enabling the notification source.
+This document describes the domain, PostgreSQL persistence, notification
+integration and ownership HTTP API. Producer capture, production routing jobs
+and the ownership UI still require integration. No existing finding is reassigned
+by migrations 0164–0166 or by enabling the notification source. The
+[ownership API guide](../ownership-api.md) documents the available operations and
+the explicit unavailable response for work that requires the routing worker.
 
 ## Identity and resolution contracts
 
@@ -210,10 +212,10 @@ routes should be added to `api/openapi.yaml`, together with the HTTP coverage te
 | Teams | `id`, `slug`, `name`, `archived`, `revision`, timestamps; mutations require expected revision. Members reference `user_id` only. |
 | Mappings | Exact repository/owner token, `team_id`, optional `suggested_user_id`, revision. Asset mappings use `asset_id`. Policy versions freeze copies. |
 | Snapshots | Metadata, content hash, source revision, diagnostics/trust status; raw capture/import is admin-only and bounded. No tenant authority from JSON. |
-| Policies | Ordered `rules`, immutable `version`, frozen `mappings`/`assets`, `snapshot_id`; activation requires `expected_revision`, candidate `version` and `expected_hash`. Version zero deactivates. |
+| Policies | Ordered `rules`, immutable `version`, frozen `mappings`/`assets`, `snapshot_id`; activation requires `revision`, candidate `version` and `content_hash`. Version zero deactivates. |
 | Preview/reroute runs | `id`, `mode`, `state`, revision, policy hash/revision, cutoff, counters and paginated item results. Reroute is a separate explicit operation. |
 | Finding ownership | Current team/user/legacy value/mode/revisions, resolution/reason, candidate evidence and paginated decision history. |
-| Claim/assign/transfer/clear/release | Explicit action; `expected_finding_version`, `expected_revision`, `expected_manual_generation`, idempotency key and target IDs where applicable. Actor comes from the authenticated principal. |
+| Claim/assign/transfer/clear/release | Explicit action; `finding_version`, `ownership_revision`, `manual_generation`, `Idempotency-Key` header and target IDs where applicable. Actor comes from the authenticated principal. Transfer preserves an eligible assignee, otherwise requires `assignee_id` or `clear_assignee: true`. |
 | Bulk mutations | At most 200 individually authorized items; each item is atomic and returns success/conflict/forbidden separately. |
 
 Use `404` for tenant-inaccessible resources, `409` for stale revision/changed preview,
@@ -225,11 +227,15 @@ API keys/member settings remain intact; a team membership is never an access gra
 ## Deployment and validation
 
 Apply additive migrations before new binaries; activate routing only after every
-API/worker process supports the feature. The eventual capability defaults off,
-offers observation/preview without mutation, and enables enforcement per scope.
-Memory mode must report unavailable rather than claim durable routing. Historical
-reroute remains explicit. Existing assignee writes are unchanged until the common
-boundary is wired; do not enable workers before that integration is complete.
+API/worker process supports the feature. `SYNAPSE_OWNERSHIP_MODE` defaults to `off`;
+`observe` and `enforce` register the ownership API only with PostgreSQL. Both allow
+authorized manual triage. Memory mode reports `postgres_required` and registers
+no ownership data routes. The API now sends legacy assignee writes through the
+same atomic boundary when enabled, including same-value clears, manual protection,
+optimistic finding versions and audit rollback. When off, the legacy path is
+unchanged. Production routing is not yet wired: preview, reroute and release
+return `503` and `routing_available` is false. A policy activation stores its
+configuration but cannot start routing until production workers are integrated.
 
 Migration tests call the real `Migrate` entry point for both an empty database and
 an upgrade from 0163 containing legacy identities/findings. Repository tests use a

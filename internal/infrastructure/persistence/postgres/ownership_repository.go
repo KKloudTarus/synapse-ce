@@ -159,7 +159,10 @@ func ownershipEligibleUser(ctx context.Context, tx pgx.Tx, tenant, id, team shar
 	if !team.IsZero() {
 		var member string
 		if err := tx.QueryRow(ctx, `SELECT user_id FROM ownership_memberships WHERE tenant_id=$1 AND team_id=$2 AND user_id=$3 FOR SHARE`, tenant, team, id).Scan(&member); err != nil {
-			return fmt.Errorf("%w: user is not a team member", shared.ErrValidation)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("%w: user is not a team member", shared.ErrValidation)
+			}
+			return err
 		}
 	}
 	return nil

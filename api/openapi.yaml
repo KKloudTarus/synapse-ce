@@ -59,8 +59,884 @@ tags:
     description: Agent-plane fleet telemetry transport
   - name: notifications
     description: Tenant-managed channels, routing rules, and durable delivery history
+  - name: ownership
+    description: Finding teams, immutable routing policies, assignment and ownership history
 
 paths:
+  /api/v1/ownership/capabilities:
+    get:
+      tags: ["ownership"]
+      operationId: "getOwnershipCapabilities"
+      summary: "Get ownership capabilities"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipCapability"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/teams:
+    get:
+      tags: ["ownership"]
+      operationId: "listOwnershipTeams"
+      summary: "List ownership teams"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":200,"default":100}},{"name":"cursor","in":"query","schema":{"type":"string"}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipTeamPage"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+    post:
+      tags: ["ownership"]
+      operationId: "createOwnershipTeam"
+      summary: "Create ownership team"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipTeamInput"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipTeam"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/teams/{tid}:
+    get:
+      tags: ["ownership"]
+      operationId: "getOwnershipTeam"
+      summary: "Get ownership team"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"tid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipTeam"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+    patch:
+      tags: ["ownership"]
+      operationId: "updateOwnershipTeam"
+      summary: "Update ownership team"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"tid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipTeamInput"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipTeam"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/teams/{tid}/members:
+    get:
+      tags: ["ownership"]
+      operationId: "listOwnershipMembers"
+      summary: "List ownership members"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"tid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":200,"default":100}},{"name":"cursor","in":"query","schema":{"type":"string"}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipMemberPage"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/teams/{tid}/members/{uid}:
+    put:
+      tags: ["ownership"]
+      operationId: "addOwnershipMember"
+      summary: "Add ownership member"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"tid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"uid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipRevision"
+      responses:
+        "204":
+          description: "Completed"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+    delete:
+      tags: ["ownership"]
+      operationId: "removeOwnershipMember"
+      summary: "Remove ownership member"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"tid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"uid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipRevision"
+      responses:
+        "204":
+          description: "Completed"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/mappings:
+    get:
+      tags: ["ownership"]
+      operationId: "listOwnershipMappings"
+      summary: "List ownership mappings"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":200,"default":100}},{"name":"cursor","in":"query","schema":{"type":"string"}},{"name":"engagement_id","in":"query","required":true,"schema":{"type":"string"}},{"name":"repository","in":"query","required":true,"schema":{"type":"string"}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipMappingPage"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+    put:
+      tags: ["ownership"]
+      operationId: "saveOwnershipMapping"
+      summary: "Save ownership mapping"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipMappingInput"
+      responses:
+        "204":
+          description: "Completed"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+    delete:
+      tags: ["ownership"]
+      operationId: "deleteOwnershipMapping"
+      summary: "Delete ownership mapping"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipMappingInput"
+      responses:
+        "204":
+          description: "Completed"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/asset-mappings:
+    get:
+      tags: ["ownership"]
+      operationId: "listOwnershipAssetMappings"
+      summary: "List ownership asset mappings"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":200,"default":100}},{"name":"cursor","in":"query","schema":{"type":"string"}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipAssetMappingPage"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+    put:
+      tags: ["ownership"]
+      operationId: "saveOwnershipAssetMapping"
+      summary: "Save ownership asset mapping"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipAssetMapping"
+      responses:
+        "204":
+          description: "Completed"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+    delete:
+      tags: ["ownership"]
+      operationId: "deleteOwnershipAssetMapping"
+      summary: "Delete ownership asset mapping"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipAssetMapping"
+      responses:
+        "204":
+          description: "Completed"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/snapshots:
+    get:
+      tags: ["ownership"]
+      operationId: "listOwnershipSnapshots"
+      summary: "List ownership snapshots"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":200,"default":100}},{"name":"cursor","in":"query","schema":{"type":"string"}},{"name":"engagement_id","in":"query","required":true,"schema":{"type":"string"}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipSnapshotPage"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+    post:
+      tags: ["ownership"]
+      operationId: "importOwnershipSnapshot"
+      summary: "Import ownership snapshot"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipSnapshotInput"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipSnapshot"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/snapshots/{sid}:
+    get:
+      tags: ["ownership"]
+      operationId: "getOwnershipSnapshot"
+      summary: "Get ownership snapshot"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"sid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipSnapshot"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/snapshots/{sid}/approve:
+    post:
+      tags: ["ownership"]
+      operationId: "approveOwnershipSnapshot"
+      summary: "Approve ownership snapshot"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"sid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipApproval"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipSnapshot"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/policies:
+    get:
+      tags: ["ownership"]
+      operationId: "listOwnershipPolicies"
+      summary: "List ownership policies"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":200,"default":100}},{"name":"cursor","in":"query","schema":{"type":"string"}},{"name":"engagement_id","in":"query","required":true,"schema":{"type":"string"}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipPolicyPage"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+    post:
+      tags: ["ownership"]
+      operationId: "createOwnershipPolicy"
+      summary: "Create ownership policy"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipPolicyInput"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipPolicyResponse"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/policies/{pid}:
+    get:
+      tags: ["ownership"]
+      operationId: "getOwnershipPolicy"
+      summary: "Get ownership policy"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"pid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipPolicyHeader"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/policies/{pid}/versions:
+    post:
+      tags: ["ownership"]
+      operationId: "createOwnershipPolicyVersion"
+      summary: "Create ownership policy version"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"pid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipPolicyInput"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipPolicyResponse"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/policies/{pid}/versions/{version}:
+    get:
+      tags: ["ownership"]
+      operationId: "getOwnershipPolicyVersion"
+      summary: "Get ownership policy version"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"pid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"version","in":"path","required":true,"schema":{"type":"integer","minimum":1}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipPolicyResponse"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/policies/{pid}/activate:
+    post:
+      tags: ["ownership"]
+      operationId: "activateOwnershipPolicy"
+      summary: "Activate ownership policy"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"pid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipActivation"
+      responses:
+        "204":
+          description: "Completed"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/policies/{pid}/preview:
+    post:
+      tags: ["ownership"]
+      operationId: "previewOwnershipPolicy"
+      summary: "Preview ownership policy"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"pid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"Idempotency-Key","in":"header","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipRunInput"
+      responses:
+        "202":
+          description: "Accepted"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipRun"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/policies/{pid}/reroute:
+    post:
+      tags: ["ownership"]
+      operationId: "rerouteOwnershipPolicy"
+      summary: "Reroute ownership policy"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"pid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"Idempotency-Key","in":"header","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipRunInput"
+      responses:
+        "202":
+          description: "Accepted"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipRun"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/runs/{rid}:
+    get:
+      tags: ["ownership"]
+      operationId: "getOwnershipRun"
+      summary: "Get ownership run"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"rid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipRun"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/runs/{rid}/items:
+    get:
+      tags: ["ownership"]
+      operationId: "listOwnershipRunItems"
+      summary: "List ownership run items"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"rid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":200,"default":100}},{"name":"cursor","in":"query","schema":{"type":"string"}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipRunItemsPage"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/runs/{rid}/cancel:
+    post:
+      tags: ["ownership"]
+      operationId: "cancelOwnershipRun"
+      summary: "Cancel ownership run"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"rid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipRevision"
+      responses:
+        "204":
+          description: "Completed"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/findings:
+    get:
+      tags: ["ownership"]
+      operationId: "listOwnershipInbox"
+      summary: "List ownership inbox"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":200,"default":100}},{"name":"cursor","in":"query","schema":{"type":"string"}},{"name":"engagement_id","in":"query","required":false,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"team_id","in":"query","required":false,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"assignee_id","in":"query","required":false,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"my_teams","in":"query","required":false,"schema":{"type":"boolean"}},{"name":"unresolved","in":"query","required":false,"schema":{"type":"boolean"}},{"name":"severity","in":"query","required":false,"schema":{"type":"string","enum":["critical","high","medium","low","info"]}},{"name":"status","in":"query","required":false,"schema":{"type":"string"}},{"name":"kind","in":"query","required":false,"schema":{"type":"string"}},{"name":"sla_status","in":"query","required":false,"schema":{"type":"string","enum":["open","mitigating","remediated","accepted_risk"]}},{"name":"due_before","in":"query","required":false,"schema":{"type":"string","format":"date-time"}},{"name":"mine","in":"query","required":false,"schema":{"type":"boolean"}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipInboxPage"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/engagements/{id}/findings/{fid}/ownership:
+    get:
+      tags: ["ownership"]
+      operationId: "getFindingOwnership"
+      summary: "Get finding ownership"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"id","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"fid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipCurrent"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+    post:
+      tags: ["ownership"]
+      operationId: "changeFindingOwnership"
+      summary: "Change finding ownership"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"id","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"fid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"Idempotency-Key","in":"header","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipAssignmentInput"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipDecision"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/engagements/{id}/findings/{fid}/ownership/history:
+    get:
+      tags: ["ownership"]
+      operationId: "listFindingOwnershipHistory"
+      summary: "List finding ownership history"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"id","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"fid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":200,"default":100}},{"name":"cursor","in":"query","schema":{"type":"string"}}]
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipHistoryPage"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/bulk:
+    post:
+      tags: ["ownership"]
+      operationId: "bulkChangeFindingOwnership"
+      summary: "Bulk change finding ownership"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"Idempotency-Key","in":"header","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipBulkInput"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OwnershipBulkResult"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
   /healthz:
     get:
       tags: [health]
@@ -5086,6 +5962,896 @@ components:
         cases: {type: integer}
         overall: {$ref: '#/components/schemas/AccuracyMetrics'}
         groups: {type: array, items: {$ref: '#/components/schemas/AccuracyGroup'}}
+
+    OwnershipCapability:
+      type: "object"
+      additionalProperties: false
+      required: ["enabled","mode","routing_available"]
+      properties:
+        enabled:
+          type: "boolean"
+        mode:
+          type: "string"
+          enum: ["off","observe","enforce"]
+        routing_available:
+          type: "boolean"
+        reason:
+          type: "string"
+    OwnershipTeamInput:
+      type: "object"
+      additionalProperties: false
+      required: ["name","slug"]
+      properties:
+        name:
+          type: "string"
+          maxLength: 200
+        slug:
+          type: "string"
+          pattern: "^[a-z0-9]+(?:[a-z0-9-]*[a-z0-9])?$"
+        archived:
+          type: "boolean"
+        revision:
+          type: "integer"
+          minimum: 0
+    OwnershipTeam:
+      type: "object"
+      additionalProperties: false
+      required: ["id","name","slug","archived","revision","created_at","updated_at"]
+      properties:
+        id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        name:
+          type: "string"
+        slug:
+          type: "string"
+        archived:
+          type: "boolean"
+        revision:
+          type: "integer"
+          minimum: 1
+        created_at:
+          type: "string"
+          format: "date-time"
+        updated_at:
+          type: "string"
+          format: "date-time"
+    OwnershipRevision:
+      type: "object"
+      additionalProperties: false
+      required: ["revision"]
+      properties:
+        revision:
+          type: "integer"
+          minimum: 1
+    OwnershipMember:
+      type: "object"
+      additionalProperties: false
+      required: ["team_id","user_id","created_at"]
+      properties:
+        team_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        user_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        created_at:
+          type: "string"
+          format: "date-time"
+    OwnershipMappingValue:
+      type: "object"
+      additionalProperties: false
+      required: ["repository","owner","team_id"]
+      properties:
+        repository:
+          type: "string"
+          maxLength: 2048
+        owner:
+          type: "string"
+        team_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        suggested_user_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+    OwnershipMapping:
+      type: "object"
+      additionalProperties: false
+      required: ["mapping","revision"]
+      properties:
+        mapping:
+          "$ref": "#/components/schemas/OwnershipMappingValue"
+        revision:
+          type: "integer"
+          minimum: 1
+    OwnershipMappingInput:
+      type: "object"
+      additionalProperties: false
+      required: ["engagement_id","mapping","revision"]
+      properties:
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        mapping:
+          "$ref": "#/components/schemas/OwnershipMappingValue"
+        revision:
+          type: "integer"
+          minimum: 1
+    OwnershipAssetMappingValue:
+      type: "object"
+      additionalProperties: false
+      required: ["asset_id","team_id"]
+      properties:
+        asset_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        team_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+    OwnershipAssetMapping:
+      type: "object"
+      additionalProperties: false
+      required: ["mapping","revision"]
+      properties:
+        mapping:
+          "$ref": "#/components/schemas/OwnershipAssetMappingValue"
+        revision:
+          type: "integer"
+          minimum: 1
+    OwnershipSnapshotInput:
+      type: "object"
+      additionalProperties: false
+      required: ["engagement_id","repository","source_revision","file_path","content"]
+      properties:
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        repository:
+          type: "string"
+        source_revision:
+          type: "string"
+          pattern: "^(git:[0-9a-f]{40}([0-9a-f]{24})?|sha256:[0-9a-f]{64})$"
+        file_path:
+          type: "string"
+          enum: [".github/CODEOWNERS","CODEOWNERS","docs/CODEOWNERS"]
+        content:
+          type: "string"
+          maxLength: 3000000
+        approve:
+          type: "boolean"
+          default: false
+        accept_diagnostics:
+          type: "boolean"
+          default: false
+    OwnershipSnapshot:
+      type: "object"
+      additionalProperties: false
+      required: ["id","engagement_id","repository","source_revision","file_path","content_hash","parser_version","trust","created_at"]
+      properties:
+        id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        repository:
+          type: "string"
+        source_revision:
+          type: "string"
+        file_path:
+          type: "string"
+        content_hash:
+          type: "string"
+        parser_version:
+          type: "string"
+        trust:
+          type: "string"
+          enum: ["untrusted","base_ref","admin_import"]
+        approved_by:
+          type: "string"
+        accept_diagnostics:
+          type: "boolean"
+        created_at:
+          type: "string"
+          format: "date-time"
+        diagnostics:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required: ["line","code"]
+            properties:
+              line:
+                type: "integer"
+                minimum: 1
+              code:
+                type: "string"
+    OwnershipApproval:
+      type: "object"
+      additionalProperties: false
+      required: ["content_hash"]
+      properties:
+        content_hash:
+          type: "string"
+          minLength: 64
+          maxLength: 64
+        accept_diagnostics:
+          type: "boolean"
+    OwnershipConditions:
+      type: "object"
+      additionalProperties: false
+      properties:
+        engagement_ids:
+          type: "array"
+          items:
+            type: "string"
+            minLength: 1
+            maxLength: 200
+          maxItems: 200
+        repositories:
+          type: "array"
+          items:
+            type: "string"
+          maxItems: 200
+        project_ids:
+          type: "array"
+          items:
+            type: "string"
+            minLength: 1
+            maxLength: 200
+          maxItems: 200
+        paths:
+          type: "array"
+          items:
+            type: "string"
+          maxItems: 200
+        kinds:
+          type: "array"
+          items:
+            type: "string"
+          maxItems: 200
+        severities:
+          type: "array"
+          items:
+            type: "string"
+            enum: ["critical","high","medium","low","info"]
+          maxItems: 200
+        asset_ids:
+          type: "array"
+          items:
+            type: "string"
+            minLength: 1
+            maxLength: 200
+          maxItems: 200
+    OwnershipRule:
+      type: "object"
+      additionalProperties: false
+      required: ["id","priority","when"]
+      properties:
+        id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        priority:
+          type: "integer"
+          minimum: 0
+        when:
+          "$ref": "#/components/schemas/OwnershipConditions"
+        team_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        exclude:
+          type: "boolean"
+    OwnershipPolicyInput:
+      type: "object"
+      additionalProperties: false
+      required: ["engagement_id","version"]
+      properties:
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        repository:
+          type: "string"
+        version:
+          type: "integer"
+          minimum: 1
+        snapshot_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        rules:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipRule"
+          maxItems: 200
+        mappings:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipMappingValue"
+          maxItems: 20000
+        assets:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipAssetMappingValue"
+          maxItems: 2000
+    OwnershipPolicyHeader:
+      type: "object"
+      additionalProperties: false
+      required: ["id","engagement_id","repository","revision","active_version","latest_version"]
+      properties:
+        id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        repository:
+          type: "string"
+        revision:
+          type: "integer"
+          minimum: 1
+        active_version:
+          type: "integer"
+          minimum: 0
+        latest_version:
+          type: "integer"
+          minimum: 1
+    OwnershipActivation:
+      type: "object"
+      additionalProperties: false
+      required: ["version","revision"]
+      properties:
+        version:
+          type: "integer"
+          minimum: 0
+          description: "Zero deactivates. Positive values select an immutable version; content_hash must match."
+        revision:
+          type: "integer"
+          minimum: 1
+        content_hash:
+          type: "string"
+    OwnershipAssignment:
+      type: "object"
+      additionalProperties: false
+      required: ["mode","revision","manual_generation"]
+      properties:
+        team_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        assignee_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        legacy_assignee:
+          type: "string"
+        mode:
+          type: "string"
+          enum: ["auto","manual"]
+        revision:
+          type: "integer"
+          minimum: 0
+        manual_generation:
+          type: "integer"
+          minimum: 0
+    OwnershipResolution:
+      type: "string"
+      enum: ["resolved","unresolved","ambiguous","excluded","unsupported"]
+    OwnershipEvidence:
+      type: "object"
+      additionalProperties: false
+      required: ["path","reason"]
+      properties:
+        path:
+          type: "string"
+        line:
+          type: "integer"
+          minimum: 0
+        pattern:
+          type: "string"
+        owners:
+          type: "array"
+          items:
+            type: "string"
+        reason:
+          type: "string"
+    OwnershipResult:
+      type: "object"
+      additionalProperties: false
+      required: ["resolution","reason","candidates","evidence","policy_hash","input_hash"]
+      properties:
+        resolution:
+          "$ref": "#/components/schemas/OwnershipResolution"
+        reason:
+          type: "string"
+        team_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        candidates:
+          type: "array"
+          items:
+            type: "string"
+            minLength: 1
+            maxLength: 200
+          maxItems: 200
+        evidence:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipEvidence"
+        rule_id:
+          type: "string"
+        policy_hash:
+          type: "string"
+        snapshot_hash:
+          type: "string"
+        input_hash:
+          type: "string"
+    OwnershipCurrent:
+      type: "object"
+      additionalProperties: false
+      required: ["assignment","finding_version","finding_assignee","resolution","reason","updated_at"]
+      properties:
+        assignment:
+          "$ref": "#/components/schemas/OwnershipAssignment"
+        finding_version:
+          type: "integer"
+          minimum: 1
+        finding_assignee:
+          type: "string"
+        resolution:
+          "$ref": "#/components/schemas/OwnershipResolution"
+        reason:
+          type: "string"
+        updated_at:
+          type: "string"
+          format: "date-time"
+    OwnershipAssignmentInput:
+      type: "object"
+      additionalProperties: false
+      description: "Transfer preserves the current assignee when eligible in the destination team. Otherwise choose an eligible assignee_id or clear_assignee=true; ambiguous implicit removal returns 409. Clear retains manual protection. Release requires the routing worker."
+      required: ["action","finding_version","ownership_revision","manual_generation"]
+      properties:
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        finding_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        action:
+          type: "string"
+          enum: ["assign","transfer","claim","clear","release"]
+        clear_assignee:
+          type: "boolean"
+          description: "Only for transfer; mutually exclusive with assignee_id."
+        team_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        assignee_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        finding_version:
+          type: "integer"
+          minimum: 1
+        ownership_revision:
+          type: "integer"
+          minimum: 0
+        manual_generation:
+          type: "integer"
+          minimum: 0
+    OwnershipDecision:
+      type: "object"
+      additionalProperties: false
+      required: ["id","engagement_id","finding_id","transition_key","actor","before","after","result","created_at"]
+      properties:
+        id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        finding_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        transition_key:
+          type: "string"
+        actor:
+          type: "string"
+        before:
+          "$ref": "#/components/schemas/OwnershipAssignment"
+        after:
+          "$ref": "#/components/schemas/OwnershipAssignment"
+        result:
+          "$ref": "#/components/schemas/OwnershipResult"
+        created_at:
+          type: "string"
+          format: "date-time"
+    OwnershipFilter:
+      type: "object"
+      additionalProperties: false
+      properties:
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        team_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        assignee_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        my_teams:
+          type: "boolean"
+        unresolved:
+          type: "boolean"
+        severity:
+          type: "string"
+          enum: ["critical","high","medium","low","info"]
+        status:
+          type: "string"
+        kind:
+          type: "string"
+        sla_status:
+          type: "string"
+          enum: ["open","mitigating","remediated","accepted_risk"]
+        due_before:
+          type: "string"
+          format: "date-time"
+    OwnershipInboxItem:
+      type: "object"
+      additionalProperties: false
+      required: ["id","engagement_id","title","severity","status","kind","version","assignment","resolution","reason"]
+      properties:
+        id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        title:
+          type: "string"
+        severity:
+          type: "string"
+        status:
+          type: "string"
+        kind:
+          type: "string"
+        version:
+          type: "integer"
+          minimum: 1
+        assignment:
+          "$ref": "#/components/schemas/OwnershipAssignment"
+        resolution:
+          "$ref": "#/components/schemas/OwnershipResolution"
+        reason:
+          type: "string"
+        sla_status:
+          type: "string"
+        remediate_by:
+          type: "string"
+          format: "date-time"
+    OwnershipRunInput:
+      type: "object"
+      additionalProperties: false
+      required: ["version","policy_revision","policy_hash"]
+      properties:
+        version:
+          type: "integer"
+          minimum: 1
+        policy_revision:
+          type: "integer"
+          minimum: 1
+        policy_hash:
+          type: "string"
+          minLength: 64
+          maxLength: 64
+        filter:
+          "$ref": "#/components/schemas/OwnershipFilter"
+    OwnershipRun:
+      type: "object"
+      additionalProperties: false
+      required: ["id","engagement_id","policy_id","policy_version","policy_revision","policy_hash","mode","state","revision","cutoff","total","processed","filter","created_at"]
+      properties:
+        id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        policy_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        policy_version:
+          type: "integer"
+          minimum: 1
+        policy_revision:
+          type: "integer"
+          minimum: 1
+        policy_hash:
+          type: "string"
+        mode:
+          type: "string"
+          enum: ["preview","reroute"]
+        state:
+          type: "string"
+          enum: ["queued","running","completed","cancelled","failed"]
+        revision:
+          type: "integer"
+          minimum: 1
+        cutoff:
+          type: "string"
+          format: "date-time"
+        total:
+          type: "integer"
+          minimum: 0
+        processed:
+          type: "integer"
+          minimum: 0
+        filter:
+          "$ref": "#/components/schemas/OwnershipFilter"
+        created_at:
+          type: "string"
+          format: "date-time"
+    OwnershipRunItem:
+      type: "object"
+      additionalProperties: false
+      required: ["run_id","engagement_id","finding_id","finding_version","ownership_revision","manual_generation","result"]
+      properties:
+        run_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        finding_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        finding_version:
+          type: "integer"
+          minimum: 1
+        ownership_revision:
+          type: "integer"
+          minimum: 0
+        manual_generation:
+          type: "integer"
+          minimum: 0
+        result:
+          "$ref": "#/components/schemas/OwnershipResult"
+    OwnershipBulkInput:
+      type: "object"
+      additionalProperties: false
+      required: ["items"]
+      properties:
+        items:
+          type: "array"
+          items:
+            allOf:
+              - "$ref": "#/components/schemas/OwnershipAssignmentInput"
+              - required: ["engagement_id","finding_id"]
+          maxItems: 200
+          minItems: 1
+    OwnershipBulkResult:
+      type: "object"
+      additionalProperties: false
+      required: ["items"]
+      properties:
+        items:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required: ["engagement_id","finding_id","status"]
+            properties:
+              engagement_id:
+                type: "string"
+                minLength: 1
+                maxLength: 200
+              finding_id:
+                type: "string"
+                minLength: 1
+                maxLength: 200
+              decision:
+                "$ref": "#/components/schemas/OwnershipDecision"
+              status:
+                type: "integer"
+                enum: [200,400,403,404,409,503]
+              error:
+                type: "string"
+          maxItems: 200
+    OwnershipPolicyVersion:
+      type: "object"
+      additionalProperties: false
+      required: ["policy_id","engagement_id","version","created_by","created_at"]
+      properties:
+        engagement_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        repository:
+          type: "string"
+        version:
+          type: "integer"
+          minimum: 1
+        snapshot_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        rules:
+          type: ["array", "null"]
+          items:
+            "$ref": "#/components/schemas/OwnershipRule"
+          maxItems: 200
+        mappings:
+          type: ["array", "null"]
+          items:
+            "$ref": "#/components/schemas/OwnershipMappingValue"
+          maxItems: 20000
+        assets:
+          type: ["array", "null"]
+          items:
+            "$ref": "#/components/schemas/OwnershipAssetMappingValue"
+          maxItems: 2000
+        policy_id:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        created_by:
+          type: "string"
+        created_at:
+          type: "string"
+          format: "date-time"
+    OwnershipPolicyResponse:
+      type: "object"
+      additionalProperties: false
+      required: ["policy","content_hash"]
+      properties:
+        policy:
+          "$ref": "#/components/schemas/OwnershipPolicyVersion"
+        content_hash:
+          type: "string"
+    OwnershipTeamPage:
+      type: "object"
+      additionalProperties: false
+      required: ["items"]
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipTeam"
+        next:
+          type: "string"
+          description: "Opaque cursor bound to this endpoint, caller and filters. A full page can have a trailing empty page."
+    OwnershipMemberPage:
+      type: "object"
+      additionalProperties: false
+      required: ["items"]
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipMember"
+        next:
+          type: "string"
+          description: "Opaque cursor bound to this endpoint, caller and filters. A full page can have a trailing empty page."
+    OwnershipMappingPage:
+      type: "object"
+      additionalProperties: false
+      required: ["items"]
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipMapping"
+        next:
+          type: "string"
+          description: "Opaque cursor bound to this endpoint, caller and filters. A full page can have a trailing empty page."
+    OwnershipAssetMappingPage:
+      type: "object"
+      additionalProperties: false
+      required: ["items"]
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipAssetMapping"
+        next:
+          type: "string"
+          description: "Opaque cursor bound to this endpoint, caller and filters. A full page can have a trailing empty page."
+    OwnershipSnapshotPage:
+      type: "object"
+      additionalProperties: false
+      required: ["items"]
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipSnapshot"
+        next:
+          type: "string"
+          description: "Opaque cursor bound to this endpoint, caller and filters. A full page can have a trailing empty page."
+    OwnershipPolicyPage:
+      type: "object"
+      additionalProperties: false
+      required: ["items"]
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipPolicyHeader"
+        next:
+          type: "string"
+          description: "Opaque cursor bound to this endpoint, caller and filters. A full page can have a trailing empty page."
+    OwnershipHistoryPage:
+      type: "object"
+      additionalProperties: false
+      required: ["items"]
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipDecision"
+        next:
+          type: "string"
+          description: "Opaque cursor bound to this endpoint, caller and filters. A full page can have a trailing empty page."
+    OwnershipRunItemsPage:
+      type: "object"
+      additionalProperties: false
+      required: ["items"]
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipRunItem"
+        next:
+          type: "string"
+          description: "Opaque cursor bound to this endpoint, caller and filters. A full page can have a trailing empty page."
+    OwnershipInboxPage:
+      type: "object"
+      additionalProperties: false
+      required: ["items","total"]
+      properties:
+        items:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OwnershipInboxItem"
+        next:
+          type: "string"
+          description: "Opaque cursor bound to this endpoint, caller and filters. A full page can have a trailing empty page."
+        total:
+          type: "integer"
+          minimum: 0
     IntegrationFieldDescriptor:
       type: object
       additionalProperties: false

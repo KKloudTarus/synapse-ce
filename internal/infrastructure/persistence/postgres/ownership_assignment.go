@@ -33,10 +33,19 @@ func (r *OwnershipRepository) GetAssignment(ctx context.Context, eng, finding sh
 }
 
 func validateOwnershipMutation(m ports.OwnershipMutation) error {
+	if m.ClearAssignee && (m.Kind != "transfer" || !m.AssigneeID.IsZero() || m.LegacyAssignee != "") {
+		return shared.ErrValidation
+	}
+	if m.Kind == "transfer" && m.TeamID.IsZero() {
+		return shared.ErrValidation
+	}
+	if m.LegacyEndpoint && m.Kind != "assign" {
+		return shared.ErrValidation
+	}
 	if m.EngagementID.IsZero() || m.FindingID.IsZero() || m.DecisionID.IsZero() || strings.TrimSpace(m.Actor) == "" || len(m.Actor) > 200 || m.Key == "" || len(m.Key) > 256 || m.ExpectedFindingVersion < 1 || m.ExpectedRevision < 0 || m.ExpectedManualGeneration < 0 || m.At.IsZero() {
 		return shared.ErrValidation
 	}
-	if m.Kind != "assign" && m.Kind != "claim" && m.Kind != "clear" && m.Kind != "release" && m.Kind != "route" {
+	if m.Kind != "assign" && m.Kind != "transfer" && m.Kind != "claim" && m.Kind != "clear" && m.Kind != "release" && m.Kind != "route" {
 		return shared.ErrValidation
 	}
 	if m.Kind == "route" {
@@ -121,6 +130,13 @@ func (r *OwnershipRepository) ApplyAssignment(ctx context.Context, m ports.Owner
 		}
 		before := current.Assignment
 		after := ownership.Assignment{TeamID: m.TeamID, AssigneeID: m.AssigneeID, LegacyAssignee: m.LegacyAssignee, Mode: "manual", Revision: before.Revision, ManualGeneration: before.ManualGeneration + 1}
+		preserveAssignee := m.Kind == "transfer" && !m.ClearAssignee && m.AssigneeID.IsZero()
+		if preserveAssignee {
+			if before.AssigneeID.IsZero() && current.FindingAssignee != "" {
+				return fmt.Errorf("%w: choose an eligible assignee or clear_assignee for a legacy owner", shared.ErrConflict)
+			}
+			after.AssigneeID, after.LegacyAssignee = before.AssigneeID, before.LegacyAssignee
+		}
 		if m.Kind == "route" {
 			if before.Mode == "manual" || current.FindingAssignee != "" || before.LegacyAssignee != current.FindingAssignee {
 				return fmt.Errorf("%w: manual ownership is protected", shared.ErrConflict)
@@ -155,6 +171,9 @@ func (r *OwnershipRepository) ApplyAssignment(ctx context.Context, m ports.Owner
 		}
 		if !after.AssigneeID.IsZero() {
 			if err := ownershipEligibleUser(ctx, tx, tenant, after.AssigneeID, after.TeamID, true); err != nil {
+				if preserveAssignee && (errors.Is(err, shared.ErrForbidden) || errors.Is(err, pgx.ErrNoRows) || errors.Is(err, shared.ErrValidation)) {
+					return fmt.Errorf("%w: choose an eligible assignee or clear_assignee for the destination team", shared.ErrConflict)
+				}
 				return err
 			}
 		}
@@ -163,7 +182,7 @@ func (r *OwnershipRepository) ApplyAssignment(ctx context.Context, m ports.Owner
 		if stateChanged {
 			after.Revision++
 		}
-		if effectiveChanged {
+		if effectiveChanged || m.LegacyEndpoint {
 			if err := ownershipCAS(tx.Exec(ctx, `UPDATE findings SET assignee=$4,version=version+1,updated_at=$5 WHERE tenant_id=$1 AND engagement_id=$2 AND id=$3 AND version=$6`, tenant, m.EngagementID, m.FindingID, after.LegacyAssignee, m.At, m.ExpectedFindingVersion)); err != nil {
 				return err
 			}

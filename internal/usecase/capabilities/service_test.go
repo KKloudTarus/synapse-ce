@@ -48,6 +48,7 @@ func TestCatalogReportsSwitchPerSubsystem(t *testing.T) {
 		{"js_reachability", "SYNAPSE_JSREACH_ENABLED"},
 		{"single_tenant", "SYNAPSE_SINGLE_TENANT"},
 		{"oidc", "SYNAPSE_OIDC_ENABLED"},
+		{"ownership", "SYNAPSE_OWNERSHIP_MODE"},
 	}
 	if len(list) != len(cases) {
 		t.Fatalf("catalog has %d entries, want %d", len(list), len(cases))
@@ -72,6 +73,7 @@ func TestEnabledFlagsResolve(t *testing.T) {
 		FleetTelemetryIngest: true, FleetDetectionIngest: true, CSPM: true, Agent: true,
 		FPTriage: true, SLA: true, Judgments: true, Sandbox: true, WriteupDrafts: true,
 		Taint: true, JSReachability: true, SingleTenant: true, OIDC: true,
+		Ownership: true,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)

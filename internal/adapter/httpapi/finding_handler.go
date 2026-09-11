@@ -176,6 +176,9 @@ type assigneeRequest struct {
 
 // setFindingAssignee assigns/unassigns a finding, same optimistic guard.
 func (rt *Router) setFindingAssignee(w http.ResponseWriter, r *http.Request) {
+	if rt.ownership != nil {
+		r = r.WithContext(shared.WithTenant(r.Context(), shared.TenantOrDefault(shared.ID(TenantFrom(r.Context())))))
+	}
 	var body assigneeRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid request body"})

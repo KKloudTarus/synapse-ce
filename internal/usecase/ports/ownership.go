@@ -10,12 +10,12 @@ import (
 )
 
 type OwnershipMapping struct {
-	Mapping  ownership.Mapping
-	Revision int
+	Mapping  ownership.Mapping `json:"mapping"`
+	Revision int               `json:"revision"`
 }
 type OwnershipAssetMapping struct {
-	Mapping  ownership.AssetMapping
-	Revision int
+	Mapping  ownership.AssetMapping `json:"mapping"`
+	Revision int                    `json:"revision"`
 }
 type OwnershipPolicy struct {
 	Version  ownership.PolicyVersion
@@ -38,7 +38,7 @@ type OwnershipMutation struct {
 	DecisionID               shared.ID
 	Key                      string
 	Actor                    string
-	Kind                     string // assign, claim, clear, release, route
+	Kind                     string // assign, transfer, claim, clear, release, route
 	TeamID                   shared.ID
 	AssigneeID               shared.ID
 	LegacyAssignee           string
@@ -52,16 +52,18 @@ type OwnershipMutation struct {
 	Fence                    int64
 	Result                   ownership.Result
 	Notify                   bool
+	LegacyEndpoint           bool // legacy assignment always advances the finding version
+	ClearAssignee            bool // transfer requires explicit consent to drop an assignee
 	At                       time.Time
 }
 
 type OwnershipCurrent struct {
-	Assignment      ownership.Assignment
-	FindingVersion  int
-	FindingAssignee string // authoritative legacy value; detects out-of-boundary writes
-	Resolution      ownership.Resolution
-	Reason          string
-	UpdatedAt       time.Time
+	Assignment      ownership.Assignment `json:"assignment"`
+	FindingVersion  int                  `json:"finding_version"`
+	FindingAssignee string               `json:"finding_assignee"` // authoritative legacy value; detects out-of-boundary writes
+	Resolution      ownership.Resolution `json:"resolution"`
+	Reason          string               `json:"reason"`
+	UpdatedAt       time.Time            `json:"updated_at"`
 }
 
 type OwnershipIntent struct {
@@ -77,29 +79,29 @@ type OwnershipIntent struct {
 }
 
 type OwnershipRun struct {
-	ID             shared.ID
-	EngagementID   shared.ID
-	PolicyID       shared.ID
-	PolicyVersion  int
-	PolicyRevision int
-	PolicyHash     string
-	Mode           string
-	State          string
-	Revision       int
-	Cutoff         time.Time
-	Total          int
-	Processed      int
-	Filter         json.RawMessage
-	CreatedAt      time.Time
+	ID             shared.ID       `json:"id"`
+	EngagementID   shared.ID       `json:"engagement_id"`
+	PolicyID       shared.ID       `json:"policy_id"`
+	PolicyVersion  int             `json:"policy_version"`
+	PolicyRevision int             `json:"policy_revision"`
+	PolicyHash     string          `json:"policy_hash"`
+	Mode           string          `json:"mode"`
+	State          string          `json:"state"`
+	Revision       int             `json:"revision"`
+	Cutoff         time.Time       `json:"cutoff"`
+	Total          int             `json:"total"`
+	Processed      int             `json:"processed"`
+	Filter         json.RawMessage `json:"filter"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 type OwnershipRunItem struct {
-	RunID             shared.ID
-	EngagementID      shared.ID
-	FindingID         shared.ID
-	FindingVersion    int
-	OwnershipRevision int
-	ManualGeneration  int64
-	Result            ownership.Result
+	RunID             shared.ID        `json:"run_id"`
+	EngagementID      shared.ID        `json:"engagement_id"`
+	FindingID         shared.ID        `json:"finding_id"`
+	FindingVersion    int              `json:"finding_version"`
+	OwnershipRevision int              `json:"ownership_revision"`
+	ManualGeneration  int64            `json:"manual_generation"`
+	Result            ownership.Result `json:"result"`
 }
 type OwnershipHistoryCursor struct {
 	Before   time.Time

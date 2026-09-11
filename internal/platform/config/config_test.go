@@ -7,6 +7,19 @@ import (
 	"time"
 )
 
+func TestLoadOwnershipIsExplicitOptIn(t *testing.T) {
+	t.Setenv("SYNAPSE_OWNERSHIP_MODE", "")
+	if got := Load().OwnershipMode; got != "off" {
+		t.Fatalf("ownership default = %q", got)
+	}
+	for _, mode := range []string{"observe", "enforce"} {
+		t.Setenv("SYNAPSE_OWNERSHIP_MODE", mode)
+		if got := Load().OwnershipMode; got != mode {
+			t.Fatalf("ownership mode = %q, want %q", got, mode)
+		}
+	}
+}
+
 // TestIsProductionFailsClosed pins the env-gate hardening: IsProduction normalizes
 // (trim + lowercase) and treats anything that is NOT an explicitly recognized
 // non-production environment as production, so a misconfigured/misspelled env lands in

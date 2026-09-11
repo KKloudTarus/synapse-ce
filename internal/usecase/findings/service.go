@@ -27,18 +27,19 @@ var _ ports.AITriageFindingDecision = (*Service)(nil)
 
 // Service lists findings and applies authoring/triage/assignment/comment/retest changes.
 type Service struct {
-	repo        ports.FindingRepository
-	claimer     ports.FindingProjectionClaimer
-	engagements ports.EngagementTenantResolver
-	comments    ports.CommentRepository
-	retests     ports.RetestRepository
-	audit       ports.AuditLogger
-	clock       ports.Clock
-	ids         ports.IDGenerator
-	attributor  ports.FindingAttributor
-	shadowTx    ports.TenantTransactionRunner
-	shadow      CreatedFindingProjector
-	shadowOn    func(string) bool
+	repo           ports.FindingRepository
+	claimer        ports.FindingProjectionClaimer
+	engagements    ports.EngagementTenantResolver
+	comments       ports.CommentRepository
+	retests        ports.RetestRepository
+	audit          ports.AuditLogger
+	clock          ports.Clock
+	ids            ports.IDGenerator
+	attributor     ports.FindingAttributor
+	assigneeWriter ports.FindingAssigneeWriter
+	shadowTx       ports.TenantTransactionRunner
+	shadow         CreatedFindingProjector
+	shadowOn       func(string) bool
 }
 
 type CreatedFindingProjector interface {
@@ -56,6 +57,8 @@ func (s *Service) SetEngagementTenantResolver(r ports.EngagementTenantResolver) 
 
 // SetAttributor wires authoritative asset-to-finding bindings; nil preserves legacy internal callers.
 func (s *Service) SetAttributor(a ports.FindingAttributor) { s.attributor = a }
+
+func (s *Service) SetAssigneeWriter(writer ports.FindingAssigneeWriter) { s.assigneeWriter = writer }
 
 // SetLifecycleShadow makes a newly-authored Finding, its audit/attribution, and
 // its shadow lineage Observation one tenant-local transaction.
@@ -536,6 +539,9 @@ func (s *Service) ApplyAITriageReview(ctx context.Context, actor string, engagem
 // SetAssignee assigns/unassigns a finding with the same optimistic-concurrency
 // guard, then audits it.
 func (s *Service) SetAssignee(ctx context.Context, engagementID, findingID shared.ID, assignee, actor string, expectedVersion int) (finding.Finding, error) {
+	if s.assigneeWriter != nil {
+		return s.assigneeWriter.SetLegacyAssignee(ctx, engagementID, findingID, assignee, actor, expectedVersion)
+	}
 	if strings.TrimSpace(actor) == "" {
 		return finding.Finding{}, fmt.Errorf("%w: actor is required", shared.ErrValidation)
 	}
