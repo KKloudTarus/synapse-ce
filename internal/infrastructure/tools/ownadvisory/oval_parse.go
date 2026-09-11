@@ -6,25 +6,31 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// This file parses a deb-family OVAL feed into the owned normalized advisory shape: Canonical Ubuntu
-// (com.ubuntu.<codename>.cve.oval.xml[.bz2]) and Debian (oval-definitions-<release>.xml[.bz2]). Both publish
-// per-release OVAL that carries the distro's OWN fixed package version, the backport-accurate value a generic
-// NVD range cannot express, so ingesting it natively gives Synapse offline, vendor-authoritative OS-package
-// detection independent of any scanner DB.
+// This file parses vendor OVAL feeds into the owned normalized advisory shape. Each distro publishes
+// per-release (or, for Oracle, per-year multi-release) OVAL carrying the distro's OWN fixed package version,
+// the backport-accurate value a generic NVD range cannot express, so ingesting it natively gives Synapse
+// offline, vendor-authoritative OS-package detection independent of any scanner DB. ParseOVAL detects the
+// distro from the document and dispatches:
 //
-// It handles only the dpkginfo (deb-family) OVAL: a definition's criteria reference dpkginfo_tests, each
-// binding a dpkginfo_object (binary package name) to a dpkginfo_state (a "less than" fixed version, in a
-// <version> element for Ubuntu or an <evr> element for Debian). We map each such binding to a [0, fixed)
-// ECOSYSTEM range keyed "Ubuntu:<release>" or "Debian:<major>", which the owned dpkg comparator already
-// orders and the scan-side osDistroEcosystem derives identically. The release is taken from the Ubuntu
-// definition-id codename or the Debian affected <platform>. A package with no "less than" fixed version
-// (not-yet-fixed / not-affected) is skipped conservatively, so a match always carries an actionable fix.
+//   - deb-family (Canonical Ubuntu com.ubuntu.<codename>, Debian org.debian): dpkginfo tests bind a package
+//     name to a "less than" fixed version (a <version> element for Ubuntu, <evr> for Debian). Keyed
+//     "Ubuntu:<release>" (from the id codename) or "Debian:<major>" (from the affected <platform>), one file
+//     is one release.
+//   - rpm-family (Oracle Linux com.oracle.elsa): rpminfo tests bind a package name to a "less than" <evr>.
+//     One file mixes releases, so the "Oracle Linux:<major>" key is taken per definition from its platform;
+//     one patch fixes several CVEs, so each becomes its own advisory. Modular definitions are skipped (they
+//     need the enabled module stream the scan side does not carry).
+//
+// Each binding maps to a [0, fixed) ECOSYSTEM range that the owned dpkg/rpm comparator orders and the
+// scan-side osDistroEcosystem keys identically. A package with no "less than" fixed version (not-yet-fixed /
+// not-affected) is skipped conservatively, so a match always carries an actionable fix.
 
 // --- OVAL XML shapes (matched by LOCAL element name, so the linux-def namespace prefix is irrelevant) ---
 
@@ -46,12 +52,14 @@ type ovalRef struct {
 // ovalCriteria is a (possibly nested) AND/OR tree; we flatten it, since any referenced fixed-package test
 // is an affected+fixed fact regardless of the boolean shape.
 type ovalCriteria struct {
+	Comment   string          `xml:"comment,attr"`
 	Criteria  []ovalCriteria  `xml:"criteria"`
 	Criterion []ovalCriterion `xml:"criterion"`
 }
 
 type ovalCriterion struct {
 	TestRef string `xml:"test_ref,attr"`
+	Comment string `xml:"comment,attr"`
 }
 
 type ovalTest struct {
@@ -157,17 +165,20 @@ func scanOVAL(content []byte) (*ovalScan, error) {
 				return nil, fmt.Errorf("decode definition: %w", err)
 			}
 			scan.defs = append(scan.defs, d)
-		case "dpkginfo_test":
+		// dpkginfo (deb-family: Ubuntu, Debian) and rpminfo (rpm-family: Oracle Linux) share the same internal
+		// shape (id, object ref, state ref, package name, evr), so both feed the same maps; the distinct id
+		// namespaces prevent any collision.
+		case "dpkginfo_test", "rpminfo_test":
 			var t ovalTest
 			if err := dec.DecodeElement(&t, &se); err == nil && t.ID != "" {
 				scan.tests[t.ID] = t
 			}
-		case "dpkginfo_object":
+		case "dpkginfo_object", "rpminfo_object":
 			var o ovalObject
 			if err := dec.DecodeElement(&o, &se); err == nil && o.ID != "" {
 				scan.objects[o.ID] = strings.TrimSpace(o.Name)
 			}
-		case "dpkginfo_state":
+		case "dpkginfo_state", "rpminfo_state":
 			var s ovalState
 			if err := dec.DecodeElement(&s, &se); err == nil && s.ID != "" {
 				scan.states[s.ID] = s
@@ -193,6 +204,11 @@ func ParseOVAL(content []byte) ([]advisory.Advisory, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Oracle Linux ELSA OVAL is rpm-family, mixes releases in one file, and fixes several CVEs per definition,
+	// so it takes a separate per-definition build path. The deb-family (Ubuntu/Debian) flow below is unchanged.
+	if scan.isOracle() {
+		return scan.oracleAdvisories(), nil
+	}
 	ecosystem, err := scan.ecosystem()
 	if err != nil {
 		return nil, err
@@ -204,6 +220,203 @@ func ParseOVAL(content []byte) ([]advisory.Advisory, error) {
 		}
 	}
 	return out, nil
+}
+
+// isOracle reports whether the document is an Oracle Linux ELSA OVAL feed, detected by the anchored
+// definition-id prefix.
+func (s *ovalScan) isOracle() bool {
+	for i := range s.defs {
+		if strings.HasPrefix(s.defs[i].ID, "oval:com.oracle.elsa") {
+			return true
+		}
+	}
+	return false
+}
+
+// oracleAdvisories builds advisories from an Oracle Linux ELSA OVAL document. One file mixes releases
+// (OL7/8/9), so the release is resolved PER DEFINITION from its "Oracle Linux N" platform; one patch
+// definition fixes several CVEs, so each CVE becomes its own advisory sharing the fixed packages. Modular rpm
+// bindings are skipped (see affectedFromCriteria). A definition with an unrecognized release or no non-modular
+// fixed package contributes nothing.
+type oracleAcc struct {
+	summary  string
+	score    float64
+	affected []advisory.AffectedPackage
+	seen     map[string]bool // "ecosystem\x00package" dedup
+}
+
+func (s *ovalScan) oracleAdvisories() []advisory.Advisory {
+	// Accumulate affected packages PER CVE across ALL definitions. A CVE fixed on several releases (OL7/8/9)
+	// appears in several definitions, and the advisory store upserts by id (overwriting the affected set), so
+	// emitting one advisory per (CVE, definition) would keep only the last release ingested. Unioning by CVE
+	// here yields ONE advisory carrying every release's fixed package, so no release is silently dropped.
+	byCVE := map[string]*oracleAcc{}
+	order := make([]string, 0)
+	for i := range s.defs {
+		d := &s.defs[i]
+		if d.Class != "" && d.Class != "vulnerability" && d.Class != "patch" {
+			continue
+		}
+		// A definition gated on an enabled module stream fixes a MODULAR package; matching it soundly needs the
+		// stream the scan side does not carry, so skip the whole definition. oracleAffected also skips any
+		// per-package binding whose fixed version carries a ".module" build tag (the second signal).
+		if criteriaHasModule(&d.Criteria) {
+			continue
+		}
+		majors := oraclePlatformMajors(d)
+		if len(majors) == 0 {
+			continue // unrecognized release
+		}
+		cves := oracleCVEs(d)
+		if len(cves) == 0 {
+			continue
+		}
+		affected := oracleAffected(d, majors, s.tests, s.objects, s.states)
+		if len(affected) == 0 {
+			continue
+		}
+		score := ovalSeverityScore(d.Severity)
+		summary := strings.TrimSpace(d.Title)
+		for _, cve := range cves {
+			a := byCVE[cve]
+			if a == nil {
+				a = &oracleAcc{summary: summary, score: score, seen: map[string]bool{}}
+				byCVE[cve] = a
+				order = append(order, cve)
+			}
+			if score > a.score {
+				a.score = score
+			}
+			for _, ap := range affected {
+				key := ap.Ecosystem + "\x00" + ap.Package
+				if a.seen[key] {
+					continue
+				}
+				a.seen[key] = true
+				a.affected = append(a.affected, ap)
+			}
+		}
+	}
+	out := make([]advisory.Advisory, 0, len(order))
+	for _, cve := range order {
+		a := byCVE[cve]
+		out = append(out, advisory.Advisory{ID: cve, Summary: a.summary, CVSSScore: a.score, Affected: a.affected})
+	}
+	return out
+}
+
+// oracleAffected resolves a definition's non-modular fixed bindings, keying EACH package by the release its
+// OWN version's rpm dist tag names (.elN / .olN), constrained to the definition's platforms. Because one
+// Oracle definition can cover several releases (a shared UEK build, or per-release package tests), keying by
+// the version's own dist tag is what stops a package being emitted under a release it does not belong to (a
+// false match). A version with no recognizable dist tag is keyed only when the definition is single-release.
+func oracleAffected(d *ovalDefinition, majors map[string]bool, tests map[string]ovalTest, objects map[string]string, states map[string]ovalState) []advisory.AffectedPackage {
+	singleMajor := ""
+	if len(majors) == 1 {
+		for m := range majors {
+			singleMajor = m
+		}
+	}
+	seen := map[string]bool{}
+	var out []advisory.AffectedPackage
+	for _, ref := range flattenCriteria(&d.Criteria) {
+		t, ok := tests[ref]
+		if !ok {
+			continue
+		}
+		pkg := objects[t.Object.Ref]
+		st, ok := states[t.State.Ref]
+		if pkg == "" || !ok {
+			continue
+		}
+		operation, value, ok := st.fixed()
+		if !ok {
+			continue
+		}
+		fixed := strings.TrimSpace(value)
+		if strings.ToLower(strings.TrimSpace(operation)) != "less than" || fixed == "" {
+			continue
+		}
+		if isDebianZeroBound(fixed) || strings.Contains(fixed, ".module") {
+			continue
+		}
+		major := oracleReleaseFromEVR(fixed)
+		if major == "" {
+			major = singleMajor // no dist tag: only safe to key when the definition covers one release
+		}
+		if major == "" || !majors[major] {
+			continue // the version's release is unknown or not one this definition covers: skip
+		}
+		ecosystem := "Oracle Linux:" + major
+		key := ecosystem + "\x00" + pkg
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, advisory.AffectedPackage{
+			Ecosystem:    ecosystem,
+			Package:      pkg,
+			Ranges:       []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}}}},
+			FixedVersion: fixed,
+		})
+	}
+	return out
+}
+
+// oraclePlatformMajors is the set of release majors a definition's platforms name ("Oracle Linux 8" -> "8").
+func oraclePlatformMajors(d *ovalDefinition) map[string]bool {
+	majors := map[string]bool{}
+	for _, p := range d.Platforms {
+		if m := oraclePlatformRelease(p); m != "" {
+			majors[m] = true
+		}
+	}
+	return majors
+}
+
+// oracleCVEs returns the definition's distinct CVE references in order.
+func oracleCVEs(d *ovalDefinition) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range d.References {
+		if r.Source == "CVE" && strings.HasPrefix(r.RefID, "CVE-") && !seen[r.RefID] {
+			seen[r.RefID] = true
+			out = append(out, r.RefID)
+		}
+	}
+	return out
+}
+
+// oracleReleaseFromEVR extracts the OS major from an rpm release dist tag: ".el8_10" / ".el8uek" / ".ol9_..."
+// all yield the leading major ("8"/"8"/"9"). Returns "" when the version carries no el/ol dist tag.
+func oracleReleaseFromEVR(evr string) string {
+	m := oracleDistTag.FindStringSubmatch(evr)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+var oracleDistTag = regexp.MustCompile(`\.(?:el|ol)(\d+)`)
+
+// oraclePlatformRelease extracts the numeric release from "Oracle Linux 8" -> "8"; a non-Oracle platform or
+// one with no leading numeric release returns "".
+func oraclePlatformRelease(platform string) string {
+	const marker = "oracle linux "
+	trimmed := strings.TrimSpace(platform)
+	i := strings.Index(strings.ToLower(trimmed), marker)
+	if i < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(trimmed[i+len(marker):])
+	j := 0
+	for j < len(rest) && rest[j] >= '0' && rest[j] <= '9' {
+		j++
+	}
+	if j == 0 {
+		return ""
+	}
+	return rest[:j]
 }
 
 // ParseUbuntuOVAL is retained for callers and tests that name the Ubuntu feed explicitly; it dispatches
@@ -298,7 +511,24 @@ func buildOVALAdvisory(d *ovalDefinition, ecosystem string, tests map[string]ova
 		return advisory.Advisory{}, false
 	}
 
-	score := ubuntuSeverityScore(d.Severity)
+	affected := affectedFromCriteria(d, ecosystem, tests, objects, states, false)
+	if len(affected) == 0 {
+		return advisory.Advisory{}, false
+	}
+	return advisory.Advisory{
+		ID:        cve,
+		Summary:   strings.TrimSpace(d.Title),
+		CVSSScore: ovalSeverityScore(d.Severity), // vendor qualitative severity is authoritative for an OS package
+		Affected:  affected,
+	}, true
+}
+
+// affectedFromCriteria resolves a definition's criteria into its fixed (ecosystem, package, [0, fixed))
+// bindings. Only an exact "less than <fixed>" dpkginfo/rpminfo state is an actionable boundary; a not-fixed,
+// zero-sentinel, or ambiguous state is skipped. When skipModular is set (the rpm families), a fixed version
+// carrying a ".module" build tag is skipped: matching a modular package soundly needs the enabled module
+// STREAM, which the scan side does not carry, so a cross-stream comparison could false-match.
+func affectedFromCriteria(d *ovalDefinition, ecosystem string, tests map[string]ovalTest, objects map[string]string, states map[string]ovalState, skipModular bool) []advisory.AffectedPackage {
 	seen := map[string]bool{} // dedup package within this definition
 	var affected []advisory.AffectedPackage
 	for _, ref := range flattenCriteria(&d.Criteria) {
@@ -316,17 +546,14 @@ func buildOVALAdvisory(d *ovalDefinition, ecosystem string, tests map[string]ova
 			continue // no bound, or an ambiguous both-elements state
 		}
 		fixed := strings.TrimSpace(value)
-		// Only the exact "less than <fixed>" state is an actionable fixed-at boundary → [0, fixed). Anything
-		// else (not-fixed "pattern match", "greater than", or "less than or equal", which would be a
-		// DIFFERENT, off-by-one interval) is skipped so a match always yields a real remediation version.
 		if strings.ToLower(strings.TrimSpace(operation)) != "less than" || fixed == "" {
 			continue
 		}
-		// Debian OVAL has historically emitted "less than 0:0" (or "0") for missing/inaccurate version data.
-		// A [0, 0) range is a degenerate non-boundary, so skip it rather than store a row that can never carry
-		// an actionable fix.
 		if isDebianZeroBound(fixed) {
-			continue
+			continue // "0"/"0:0" missing-data sentinel: a [0, 0) range is a degenerate non-boundary
+		}
+		if skipModular && strings.Contains(fixed, ".module") {
+			continue // modular rpm without stream context: skip rather than risk a cross-stream false match
 		}
 		if seen[pkg] {
 			continue
@@ -339,20 +566,42 @@ func buildOVALAdvisory(d *ovalDefinition, ecosystem string, tests map[string]ova
 			FixedVersion: fixed,
 		})
 	}
-	if len(affected) == 0 {
-		return advisory.Advisory{}, false
-	}
-	return advisory.Advisory{
-		ID:        cve,
-		Summary:   strings.TrimSpace(d.Title),
-		CVSSScore: score, // Ubuntu ships a qualitative severity, not CVSS; vendor severity is authoritative
-		Affected:  affected,
-	}, true
+	return affected
 }
 
 // maxCriteriaDepth bounds the criteria-tree recursion (real Ubuntu OVAL nests 2-3 deep; this is defense-
 // in-depth against a corrupt/crafted feed, mirroring the misconfig locator cap).
 const maxCriteriaDepth = 1000
+
+// criteriaHasModule reports whether the (possibly nested) criteria tree gates on an enabled module stream,
+// detected by a "Module <name>:<stream> is enabled" comment on any criterion or sub-criteria. Such a
+// definition fixes a modular package.
+func criteriaHasModule(c *ovalCriteria) bool { return criteriaHasModuleDepth(c, 0) }
+
+func criteriaHasModuleDepth(c *ovalCriteria, depth int) bool {
+	if depth > maxCriteriaDepth {
+		return false
+	}
+	if isModuleComment(c.Comment) {
+		return true
+	}
+	for _, cr := range c.Criterion {
+		if isModuleComment(cr.Comment) {
+			return true
+		}
+	}
+	for i := range c.Criteria {
+		if criteriaHasModuleDepth(&c.Criteria[i], depth+1) {
+			return true
+		}
+	}
+	return false
+}
+
+func isModuleComment(comment string) bool {
+	c := strings.ToLower(comment)
+	return strings.Contains(c, "module ") && strings.Contains(c, "is enabled")
+}
 
 // flattenCriteria collects every criterion test_ref in the (possibly nested) criteria tree.
 func flattenCriteria(c *ovalCriteria) []string { return flattenCriteriaDepth(c, 0) }
@@ -463,18 +712,18 @@ func ubuntuRelease(codename string) string {
 	return ""
 }
 
-// ubuntuSeverityScore maps Ubuntu's qualitative CVE priority to a representative CVSS base score so the
+// ovalSeverityScore maps a distro qualitative CVE priority to a representative CVSS base score so the
 // finding carries the vendor's rating. For an OS package the distro's severity is the authoritative one
 // (it reflects the backport/exposure context), which is why we set it here rather than leaving it for an
 // NVD backfill. The CVSS vector is intentionally left empty to signal this is a mapped band, not a scored
 // vector. Unknown/untriaged → 0 (kept as unknown; an NVD enricher may still fill it).
-func ubuntuSeverityScore(sev string) float64 {
+func ovalSeverityScore(sev string) float64 {
 	switch strings.ToLower(strings.TrimSpace(sev)) {
 	case "critical":
 		return 9.5
-	case "high":
+	case "high", "important": // Ubuntu uses "high", the rpm families use "important"
 		return 8.0
-	case "medium":
+	case "medium", "moderate": // Ubuntu "medium", rpm "moderate"
 		return 5.5
 	case "low":
 		return 3.0
