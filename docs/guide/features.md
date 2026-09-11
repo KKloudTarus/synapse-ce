@@ -13,7 +13,7 @@ SBOM as the scan inventory.
 **Multi-source detection.** Components are matched against a live advisory API and an offline
 database. Results are cross-correlated and de-duplicated, and each finding records the scanner
 and database version as evidence. An owned advisory store can ingest OSV, GHSA, CSAF, and
-Ubuntu, Debian, and Oracle Linux OVAL feeds so that detection does not depend on one provider. A freshness check warns
+Ubuntu, Debian, Oracle Linux, and AlmaLinux OVAL feeds so that detection does not depend on one provider. A freshness check warns
 when a dated database is stale, and a `precise` detection mode routes single-source,
 uncorroborated findings into a needs-verify queue instead of failing the build on them.
 

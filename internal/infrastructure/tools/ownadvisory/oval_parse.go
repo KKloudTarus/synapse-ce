@@ -23,10 +23,12 @@ import (
 //     name to a "less than" fixed version (a <version> element for Ubuntu, <evr> for Debian). Keyed
 //     "Ubuntu:<release>" (from the id codename) or "Debian:<major>" (from the affected <platform>), one file
 //     is one release.
-//   - rpm-family (Oracle Linux com.oracle.elsa): rpminfo tests bind a package name to a "less than" <evr>.
-//     One file mixes releases, so the "Oracle Linux:<major>" key is taken per definition from its platform;
-//     one patch fixes several CVEs, so each becomes its own advisory. Modular definitions are skipped (they
-//     need the enabled module stream the scan side does not carry).
+//   - rpm-family (Oracle Linux com.oracle.elsa, AlmaLinux org.almalinux.al): rpminfo tests bind a package
+//     name to a "less than" <evr>. A file can mix releases, so each package is keyed to the release its own
+//     rpm dist tag names (.elN / .olN) constrained to the definition's covered majors (from the platform for
+//     Oracle, the affected CPE for AlmaLinux); one patch fixes several CVEs and a CVE spans releases, so
+//     packages are unioned per CVE into one advisory. Modular definitions are skipped (they need the enabled
+//     module stream the scan side does not carry). See rpmOvalDistros for the per-feed configuration.
 //
 // Each binding maps to a [0, fixed) ECOSYSTEM range that the owned dpkg/rpm comparator orders and the
 // scan-side osDistroEcosystem keys identically. A package with no "less than" fixed version (not-yet-fixed /
@@ -39,6 +41,7 @@ type ovalDefinition struct {
 	Class      string       `xml:"class,attr"`
 	Title      string       `xml:"metadata>title"`
 	Platforms  []string     `xml:"metadata>affected>platform"`
+	CPEs       []string     `xml:"metadata>advisory>affected_cpe_list>cpe"` // AlmaLinux names the release only here
 	References []ovalRef    `xml:"metadata>reference"`
 	Severity   string       `xml:"metadata>advisory>severity"`
 	Criteria   ovalCriteria `xml:"criteria"`
@@ -204,10 +207,11 @@ func ParseOVAL(content []byte) ([]advisory.Advisory, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Oracle Linux ELSA OVAL is rpm-family, mixes releases in one file, and fixes several CVEs per definition,
-	// so it takes a separate per-definition build path. The deb-family (Ubuntu/Debian) flow below is unchanged.
-	if scan.isOracle() {
-		return scan.oracleAdvisories(), nil
+	// The rpm-family feeds (Oracle Linux, AlmaLinux) are rpm OVAL: one file can mix releases, a definition
+	// fixes several CVEs, and packages are modular; they take a separate per-definition build path. The
+	// deb-family (Ubuntu/Debian) flow below is unchanged.
+	if distro := scan.rpmDistro(); distro != nil {
+		return scan.rpmOvalAdvisories(*distro), nil
 	}
 	ecosystem, err := scan.ecosystem()
 	if err != nil {
@@ -222,56 +226,72 @@ func ParseOVAL(content []byte) ([]advisory.Advisory, error) {
 	return out, nil
 }
 
-// isOracle reports whether the document is an Oracle Linux ELSA OVAL feed, detected by the anchored
-// definition-id prefix.
-func (s *ovalScan) isOracle() bool {
-	for i := range s.defs {
-		if strings.HasPrefix(s.defs[i].ID, "oval:com.oracle.elsa") {
-			return true
-		}
-	}
-	return false
+// rpmOvalDistro configures an rpm-family OVAL feed: how its definitions are recognized, the ecosystem-key
+// prefix its packages are stamped with, and how the release majors a definition covers are found.
+type rpmOvalDistro struct {
+	idPrefix  string                                // anchored definition-id prefix, e.g. "oval:com.oracle.elsa"
+	ecosystem string                                // ecosystem-key prefix, e.g. "Oracle Linux:"
+	majorsOf  func(*ovalDefinition) map[string]bool // the release majors a definition covers
 }
 
-// oracleAdvisories builds advisories from an Oracle Linux ELSA OVAL document. One file mixes releases
-// (OL7/8/9), so the release is resolved PER DEFINITION from its "Oracle Linux N" platform; one patch
-// definition fixes several CVEs, so each CVE becomes its own advisory sharing the fixed packages. Modular rpm
-// bindings are skipped (see affectedFromCriteria). A definition with an unrecognized release or no non-modular
-// fixed package contributes nothing.
-type oracleAcc struct {
+// rpmOvalDistros is the registry of supported rpm-family OVAL feeds. Oracle names the release in the affected
+// <platform>; AlmaLinux names it only in the advisory's affected_cpe_list.
+var rpmOvalDistros = []rpmOvalDistro{
+	{idPrefix: "oval:com.oracle.elsa", ecosystem: "Oracle Linux:", majorsOf: oraclePlatformMajors},
+	{idPrefix: "oval:org.almalinux.al", ecosystem: "AlmaLinux:", majorsOf: almaCPEMajors},
+}
+
+// rpmDistro reports which rpm-family OVAL feed this document is, detected by the anchored definition-id
+// prefix, or nil for a deb-family (or unrecognized) document.
+func (s *ovalScan) rpmDistro() *rpmOvalDistro {
+	for di := range rpmOvalDistros {
+		for i := range s.defs {
+			if strings.HasPrefix(s.defs[i].ID, rpmOvalDistros[di].idPrefix) {
+				return &rpmOvalDistros[di]
+			}
+		}
+	}
+	return nil
+}
+
+type rpmOvalAcc struct {
 	summary  string
 	score    float64
 	affected []advisory.AffectedPackage
 	seen     map[string]bool // "ecosystem\x00package" dedup
 }
 
-func (s *ovalScan) oracleAdvisories() []advisory.Advisory {
-	// Accumulate affected packages PER CVE across ALL definitions. A CVE fixed on several releases (OL7/8/9)
-	// appears in several definitions, and the advisory store upserts by id (overwriting the affected set), so
-	// emitting one advisory per (CVE, definition) would keep only the last release ingested. Unioning by CVE
-	// here yields ONE advisory carrying every release's fixed package, so no release is silently dropped.
-	byCVE := map[string]*oracleAcc{}
+// rpmOvalAdvisories builds advisories from an rpm-family OVAL document. One file can mix releases, so the
+// release majors a definition covers come from distro.majorsOf; one patch definition fixes several CVEs and
+// the same CVE is fixed across several releases, so affected packages are UNIONED per CVE across definitions
+// into one advisory (the store upserts by id, overwriting affected, so per-(CVE, definition) advisories would
+// keep only the last release). Modular definitions are skipped.
+func (s *ovalScan) rpmOvalAdvisories(distro rpmOvalDistro) []advisory.Advisory {
+	byCVE := map[string]*rpmOvalAcc{}
 	order := make([]string, 0)
 	for i := range s.defs {
 		d := &s.defs[i]
+		if !strings.HasPrefix(d.ID, distro.idPrefix) {
+			continue // only this distro's own definitions (a mixed document keys each under its own config)
+		}
 		if d.Class != "" && d.Class != "vulnerability" && d.Class != "patch" {
 			continue
 		}
 		// A definition gated on an enabled module stream fixes a MODULAR package; matching it soundly needs the
-		// stream the scan side does not carry, so skip the whole definition. oracleAffected also skips any
+		// stream the scan side does not carry, so skip the whole definition. rpmOvalAffected also skips any
 		// per-package binding whose fixed version carries a ".module" build tag (the second signal).
 		if criteriaHasModule(&d.Criteria) {
 			continue
 		}
-		majors := oraclePlatformMajors(d)
+		majors := distro.majorsOf(d)
 		if len(majors) == 0 {
 			continue // unrecognized release
 		}
-		cves := oracleCVEs(d)
+		cves := rpmOvalCVEs(d)
 		if len(cves) == 0 {
 			continue
 		}
-		affected := oracleAffected(d, majors, s.tests, s.objects, s.states)
+		affected := rpmOvalAffected(d, distro.ecosystem, majors, s.tests, s.objects, s.states)
 		if len(affected) == 0 {
 			continue
 		}
@@ -280,7 +300,7 @@ func (s *ovalScan) oracleAdvisories() []advisory.Advisory {
 		for _, cve := range cves {
 			a := byCVE[cve]
 			if a == nil {
-				a = &oracleAcc{summary: summary, score: score, seen: map[string]bool{}}
+				a = &rpmOvalAcc{summary: summary, score: score, seen: map[string]bool{}}
 				byCVE[cve] = a
 				order = append(order, cve)
 			}
@@ -305,12 +325,12 @@ func (s *ovalScan) oracleAdvisories() []advisory.Advisory {
 	return out
 }
 
-// oracleAffected resolves a definition's non-modular fixed bindings, keying EACH package by the release its
-// OWN version's rpm dist tag names (.elN / .olN), constrained to the definition's platforms. Because one
-// Oracle definition can cover several releases (a shared UEK build, or per-release package tests), keying by
-// the version's own dist tag is what stops a package being emitted under a release it does not belong to (a
-// false match). A version with no recognizable dist tag is keyed only when the definition is single-release.
-func oracleAffected(d *ovalDefinition, majors map[string]bool, tests map[string]ovalTest, objects map[string]string, states map[string]ovalState) []advisory.AffectedPackage {
+// rpmOvalAffected resolves a definition's non-modular fixed bindings, keying EACH package by the release its
+// OWN version's rpm dist tag names (.elN / .olN), constrained to the definition's covered majors. Because one
+// definition can cover several releases (a shared UEK build, or per-release package tests), keying by the
+// version's own dist tag is what stops a package being emitted under a release it does not belong to (a false
+// match). A version with no recognizable dist tag is keyed only when the definition covers one release.
+func rpmOvalAffected(d *ovalDefinition, ecosystemPrefix string, majors map[string]bool, tests map[string]ovalTest, objects map[string]string, states map[string]ovalState) []advisory.AffectedPackage {
 	singleMajor := ""
 	if len(majors) == 1 {
 		for m := range majors {
@@ -347,7 +367,7 @@ func oracleAffected(d *ovalDefinition, majors map[string]bool, tests map[string]
 		if major == "" || !majors[major] {
 			continue // the version's release is unknown or not one this definition covers: skip
 		}
-		ecosystem := "Oracle Linux:" + major
+		ecosystem := ecosystemPrefix + major
 		key := ecosystem + "\x00" + pkg
 		if seen[key] {
 			continue
@@ -374,8 +394,39 @@ func oraclePlatformMajors(d *ovalDefinition) map[string]bool {
 	return majors
 }
 
-// oracleCVEs returns the definition's distinct CVE references in order.
-func oracleCVEs(d *ovalDefinition) []string {
+// almaCPEMajors is the set of release majors an AlmaLinux definition names in its affected CPEs
+// ("cpe:/a:almalinux:almalinux:9" -> "9"). AlmaLinux leaves the affected <platform> empty.
+func almaCPEMajors(d *ovalDefinition) map[string]bool {
+	majors := map[string]bool{}
+	for _, cpe := range d.CPEs {
+		if m := almaCPERelease(cpe); m != "" {
+			majors[m] = true
+		}
+	}
+	return majors
+}
+
+// almaCPERelease extracts the release major from an AlmaLinux CPE ("cpe:/a:almalinux:almalinux:9::appstream"
+// -> "9"); a non-AlmaLinux CPE or one with no numeric release returns "".
+func almaCPERelease(cpe string) string {
+	const marker = "almalinux:almalinux:"
+	i := strings.Index(strings.ToLower(cpe), marker)
+	if i < 0 {
+		return ""
+	}
+	rest := cpe[i+len(marker):]
+	j := 0
+	for j < len(rest) && rest[j] >= '0' && rest[j] <= '9' {
+		j++
+	}
+	if j == 0 {
+		return ""
+	}
+	return rest[:j]
+}
+
+// rpmOvalCVEs returns the definition's distinct CVE references in order.
+func rpmOvalCVEs(d *ovalDefinition) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, r := range d.References {

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<oval_definitions xmlns:red-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+  <definitions>
+    <definition id="oval:org.almalinux.alsa:def:20225716" version="635" class="patch">
+      <metadata>
+        <title>ALSA-2022:5716: grafana security update (Important)</title>
+        <reference ref_id="ALSA-2022:5716" source="ALSA" ref_url="https://errata.almalinux.org/9/ALSA-2022-5716.html"/>
+        <reference ref_id="RHSA-2022:5716" source="RHSA" ref_url="https://access.redhat.com/errata/RHSA-2022:5716"/>
+        <reference ref_id="CVE-2022-31107" source="CVE" ref_url="https://access.redhat.com/security/cve/CVE-2022-31107"/>
+        <description>Grafana is an open source, feature rich metrics dashboard and graph editor for
+Graphite, InfluxDB &amp; OpenTSDB.
+Security Fix(es):
+* grafana: OAuth account takeover (CVE-2022-31107)
+For more details about the security issue(s), including the impact, a CVSS
+score, acknowledgments, and other related information, refer to the CVE page(s)
+listed in the References section.</description>
+        <advisory from="packager@almalinux.org">
+          <severity>Important</severity>
+          <rights>Copyright 2022 AlmaLinux OS</rights>
+          <issued date="2022-07-26"/>
+          <updated date="2022-07-26"/>
+          <affected_cpe_list>
+            <cpe>cpe:/a:almalinux:almalinux:9</cpe>
+            <cpe>cpe:/a:almalinux:almalinux:9::appstream</cpe>
+          </affected_cpe_list>
+          <bugzilla href="https://bugzilla.redhat.com/2104367" id="2104367"></bugzilla>
+          <cve public="20220714" href="https://access.redhat.com/security/cve/CVE-2022-31107" impact="Important" cwe="CWE-287" cvss3="CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:L">CVE-2022-31107</cve>
+        </advisory>
+      </metadata>
+      <criteria operator="OR">
+        <criterion test_ref="oval:org.almalinux.alba:tst:20225749024" comment="AlmaLinux must be installed"/>
+        <criteria operator="AND">
+          <criterion test_ref="oval:org.almalinux.alba:tst:20225749023" comment="AlmaLinux 9 is installed"/>
+          <criterion test_ref="oval:org.almalinux.alsa:tst:20225716001" comment="grafana is earlier than 0:7.5.11-5.el9_0"/>
+          <criterion test_ref="oval:org.almalinux.alsa:tst:20225716002" comment="grafana is signed with AlmaLinux OS 9 key"/>
+        </criteria>
+      </criteria>
+    </definition>
+  </definitions>
+  <tests>
+    <red-def:rpminfo_test check="at least one" comment="grafana is earlier than 0:7.5.11-5.el9_0" id="oval:org.almalinux.alsa:tst:20225716001" version="635">
+      <red-def:object object_ref="oval:org.almalinux.alsa:obj:20225716001"/>
+      <red-def:state state_ref="oval:org.almalinux.alsa:ste:20225716001"/>
+    </red-def:rpminfo_test>
+    <red-def:rpminfo_test check="at least one" comment="grafana is signed with AlmaLinux OS 9 key" id="oval:org.almalinux.alsa:tst:20225716002" version="635">
+      <red-def:object object_ref="oval:org.almalinux.alsa:obj:20225716001"/>
+      <red-def:state state_ref="oval:org.almalinux.alba:ste:20225749002"/>
+    </red-def:rpminfo_test>
+  </tests>
+  <objects>
+    <red-def:rpminfo_object id="oval:org.almalinux.alsa:obj:20225716001" version="635">
+      <red-def:name>grafana</red-def:name>
+    </red-def:rpminfo_object>
+  </objects>
+  <states>
+    <red-def:rpminfo_state id="oval:org.almalinux.alsa:ste:20225716001" version="635">
+      <red-def:arch operation="pattern match" datatype="string">aarch64|ppc64le|s390x|x86_64</red-def:arch>
+      <red-def:evr datatype="evr_string" operation="less than">0:7.5.11-5.el9_0</red-def:evr>
+    </red-def:rpminfo_state>
+    <red-def:rpminfo_state id="oval:org.almalinux.alba:ste:20225749002" version="635">
+      <red-def:signature_keyid operation="equals">d36cb86cb86b3716</red-def:signature_keyid>
+    </red-def:rpminfo_state>
+  </states>
+</oval_definitions>
