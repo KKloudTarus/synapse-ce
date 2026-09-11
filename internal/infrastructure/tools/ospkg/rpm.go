@@ -10,7 +10,7 @@ import (
 	"strconv"
 
 	// pure-Go sqlite driver (matches CGO_ENABLED=0), for the RHEL9+/Fedora rpmdb.sqlite. NOTE: the crafted-view
-	// non-hang property (see rpmComponents + TestCatalogRPMHostileViewTerminates) is driver-behavior-specific –
+	// non-hang property (see rpmSQLiteComponents + TestCatalogRPMHostileViewTerminates) is driver-behavior-specific –
 	// re-validate that test on any version bump of this dependency.
 	_ "modernc.org/sqlite"
 
@@ -19,9 +19,10 @@ import (
 
 // RPM package cataloging. Modern distros (RHEL 9+/Fedora/AL2023/UBI9) store the package DB as sqlite at
 // /var/lib/rpm/rpmdb.sqlite, whose Packages table holds one binary RPM HEADER blob per installed package. The
-// older Berkeley-DB (/var/lib/rpm/Packages, RHEL<=8/CentOS/AL2) and ndb (openSUSE) backends are DEFERRED –
-// their binary page formats are a larger, riskier parse and the generator already catalogs them from the
-// layout. Everything here treats the DB + header as UNTRUSTED (a hostile image): reads are cancellable
+// older Berkeley-DB backend (/var/lib/rpm/Packages, RHEL<=8/CentOS/UBI8/Amazon Linux 2) is now parsed by the
+// owned pure-Go bdb.go, which extracts the SAME header blobs from the hash pages and feeds each to
+// safeParseRPMHeader. The ndb backend (openSUSE, /var/lib/rpm/Packages.db) stays DEFERRED (see bdb.go).
+// Everything here treats the DB + header as UNTRUSTED (a hostile image): reads are cancellable
 // (modernc interrupts the first query step, the loop re-checks ctx between steps, and a best-effort watchdog
 // closes the DB on cancel) and bounded (per-blob size filter server-side + total-byte + row-count budgets);
 // together with the pinned driver returning promptly on a crafted view rather than spinning, those bound a
@@ -47,14 +48,27 @@ const (
 	rpmTypeString = 6
 )
 
-// rpmComponents reads /var/lib/rpm/rpmdb.sqlite and returns one component per installed package. namespace is
-// the PURL namespace (distro id) and tag the distro qualifier (or ""). Best-effort + hardened for an untrusted
-// DB: streamed (one blob at a time), bounded (per-blob size filter + total-byte + row-count budgets), and
-// recover-wrapped so a malformed sqlite yields nil rather than crashing the scan. It is cancellable: an error
-// is returned ONLY on context cancellation (so the pipeline surfaces a timed-out read as a failure, never a
-// silently-truncated success); a hostile-DB read error or panic degrades to (nil, nil). An absent/non-sqlite
-// DB (a Berkeley-DB/ndb rootfs) → (nil, nil); the generator still catalogs those from the layout.
-func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) (out []sbom.Component, err error) {
+// rpmComponents returns one component per installed RPM package, trying each on-disk backend in turn: the
+// sqlite rpmdb (RHEL9+/Fedora/UBI9) first, then the BerkeleyDB rpmdb (RHEL<=8/CentOS/UBI8/Amazon Linux 2). The
+// first backend that yields packages wins, so a single-backend rootfs is cataloged from whichever DB it has.
+// An error (context cancellation) from any backend is surfaced; otherwise an absent/malformed DB contributes
+// nothing. The ndb backend (openSUSE) is deferred (see bdb.go).
+func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) ([]sbom.Component, error) {
+	comps, err := rpmSQLiteComponents(ctx, rootfsDir, namespace, tag)
+	if err != nil || len(comps) > 0 {
+		return comps, err
+	}
+	return rpmBDBComponents(ctx, filepath.Join(rootfsDir, rpmBDBPath), namespace, tag)
+}
+
+// rpmSQLiteComponents reads /var/lib/rpm/rpmdb.sqlite and returns one component per installed package. namespace
+// is the PURL namespace (distro id) and tag the distro qualifier (or ""). Best-effort + hardened for an
+// untrusted DB: streamed (one blob at a time), bounded (per-blob size filter + total-byte + row-count budgets),
+// and recover-wrapped so a malformed sqlite yields nil rather than crashing the scan. It is cancellable: an
+// error is returned ONLY on context cancellation (so the pipeline surfaces a timed-out read as a failure, never
+// a silently-truncated success); a hostile-DB read error or panic degrades to (nil, nil). An absent/non-sqlite
+// DB (a Berkeley-DB/ndb rootfs) → (nil, nil), and rpmComponents then tries the BerkeleyDB backend.
+func rpmSQLiteComponents(ctx context.Context, rootfsDir, namespace, tag string) (out []sbom.Component, err error) {
 	defer func() {
 		if recover() != nil { // the sqlite file is untrusted; a driver panic must degrade to no components
 			out, err = nil, nil

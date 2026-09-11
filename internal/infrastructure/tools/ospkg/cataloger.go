@@ -37,13 +37,16 @@ const (
 const (
 	dpkgDBPath = "var/lib/dpkg/status"
 	apkDBPath  = "lib/apk/db/installed"
-	rpmDBPath  = "var/lib/rpm/rpmdb.sqlite"
+	rpmDBPath  = "var/lib/rpm/rpmdb.sqlite" // RHEL9+/Fedora/UBI9 sqlite backend
+	rpmBDBPath = "var/lib/rpm/Packages"     // RHEL<=8/CentOS/UBI8/Amazon Linux 2 BerkeleyDB backend
 )
 
 // SupportedDBPaths returns the rootfs-relative OS package database paths Catalog reads, in a fresh
-// slice. It is the single source of truth for "which databases does the engine know about".
+// slice. It is the single source of truth for "which databases does the engine know about". The ndb
+// backend (var/lib/rpm/Packages.db, openSUSE) is deferred (see bdb.go) and deliberately absent here, so
+// the host coverage probe never claims a DB the cataloger cannot read.
 func SupportedDBPaths() []string {
-	return []string{dpkgDBPath, apkDBPath, rpmDBPath}
+	return []string{dpkgDBPath, apkDBPath, rpmDBPath, rpmBDBPath}
 }
 
 // debianFamilyIDs are the dpkg os-release IDs the advisory matcher can key (osDistroEcosystem handles Debian +
@@ -106,8 +109,8 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 	// rpm (RHEL/Fedora family, sqlite backend): the distro qualifier is set for any rpm-family id (inventory),
 	// but only the ids osDistroEcosystem keys (Rocky/AlmaLinux/Oracle) with a non-empty major version count as
 	// resolved – RHEL/CentOS/Fedora use module-qualified or uncertain OSV keys, so they are emitted but flagged
-	// unresolved (surfaced upstream, never a silent zero-match). Berkeley-DB/ndb backends are deferred (the
-	// generator covers them).
+	// unresolved (surfaced upstream, never a silent zero-match). rpmComponents tries the sqlite backend then
+	// the owned BerkeleyDB backend (RHEL<=8/UBI8), so a bdb-only rootfs is cataloged; ndb (openSUSE) is deferred.
 	rpmNS, rpmTag := "rhel", ""
 	rpmResolved := false
 	if id != "" {
