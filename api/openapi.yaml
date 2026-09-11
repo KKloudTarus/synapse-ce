@@ -9788,7 +9788,7 @@ components:
 
     NotificationEventType:
       type: string
-      enum: [vulnerability_action.created, scan.completed, quality_gate.failed, sla.approaching_deadline, fleet.agent.offline, incident.created]
+      enum: [vulnerability_action.created, scan.completed, quality_gate.failed, sla.approaching_deadline, fleet.agent.offline, incident.created, finding.ownership_changed]
 
     NotificationDeliveryState:
       type: string
@@ -9833,6 +9833,15 @@ components:
         min_severity: {type: string, enum: [critical, high, medium, low, info]}
         action_types: {type: array, items: {type: string}}
         engagement_ids: {type: array, maxItems: 200, items: {type: string}}
+        team_ids:
+          type: array
+          maxItems: 200
+          items: {type: string, minLength: 1, maxLength: 200}
+          description: Only for finding.ownership_changed. Matches the old or new team; IDs must belong to this tenant. Requires at least one ID unless all_teams is true.
+        all_teams:
+          type: boolean
+          default: false
+          description: Explicit administrator subscription to ownership changes across this tenant, including findings without a team. Only for finding.ownership_changed; mutually exclusive with team_ids.
         channel_ids: {type: array, minItems: 1, maxItems: 50, items: {type: string}}
         lead_time_seconds: {type: integer, minimum: 0, maximum: 2592000}
         revision: {type: integer, minimum: 1}

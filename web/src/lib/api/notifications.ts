@@ -8,6 +8,7 @@ export type NotificationEventType =
   | 'sla.approaching_deadline'
   | 'fleet.agent.offline'
   | 'incident.created'
+  | 'finding.ownership_changed'
 export type NotificationDeliveryState =
   | 'pending'
   | 'retrying'
@@ -44,6 +45,8 @@ export interface NotificationRule {
   min_severity?: string
   action_types?: string[]
   engagement_ids?: string[]
+  team_ids?: string[]
+  all_teams?: boolean
   channel_ids: string[]
   lead_time_seconds?: number
   revision: number

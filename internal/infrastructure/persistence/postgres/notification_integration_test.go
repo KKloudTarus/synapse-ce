@@ -54,6 +54,9 @@ func notificationTestPool(t *testing.T) *pgxpool.Pool {
 	}
 	u.Path = "/" + database
 	u.User = url.UserPassword(role, "migration-test-password")
+	if err := Migrate(context.Background(), u.String()); err != nil {
+		t.Fatal(err)
+	}
 	pool, err := pgxpool.New(context.Background(), u.String())
 	if err != nil {
 		t.Fatal(err)

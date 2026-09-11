@@ -29,6 +29,7 @@ const EVENTS: { value: NotificationEventType; label: string }[] = [
   { value: 'fleet.agent.offline', label: 'Fleet agent offline' },
   { value: 'scan.completed', label: 'Scan completed' },
   { value: 'incident.created', label: 'Incident created' },
+  { value: 'finding.ownership_changed', label: 'Finding ownership changed' },
 ]
 const stateTone: Record<string, string> = {
   delivered: 'text-success-primary',
@@ -512,6 +513,8 @@ function RuleCreate({
   const [engagements, setEngagements] = useState(
     initial?.engagement_ids?.join(', ') ?? '',
   )
+  const [teams, setTeams] = useState(initial?.team_ids?.join(', ') ?? '')
+  const [allTeams, setAllTeams] = useState(initial?.all_teams ?? false)
   const [actions, setActions] = useState(
     initial?.action_types?.join(', ') ?? '',
   )
@@ -528,6 +531,10 @@ function RuleCreate({
     setBusy(true)
     setError(null)
     try {
+      const teamIDs = teams.split(',').map((id) => id.trim()).filter(Boolean)
+      if (event === 'finding.ownership_changed' && !allTeams && !teamIDs.length) {
+        throw new Error('Enter at least one team ID or select all teams.')
+      }
       const input = {
         name: name.trim(),
         enabled: initial?.enabled ?? true,
@@ -537,6 +544,8 @@ function RuleCreate({
           .split(',')
           .map((x) => x.trim())
           .filter(Boolean),
+        team_ids: event === 'finding.ownership_changed' && !allTeams ? teamIDs : undefined,
+        all_teams: event === 'finding.ownership_changed' ? allTeams : undefined,
         action_types:
           event === 'vulnerability_action.created'
             ? actions
@@ -633,6 +642,31 @@ function RuleCreate({
               onChange={(e) => setActions(e.target.value)}
             />
           </Field>
+        )}
+        {event === 'finding.ownership_changed' && (
+          <fieldset className="space-y-3 md:col-span-2">
+            <legend className="text-sm font-medium text-secondary">Affected teams</legend>
+            <label className="flex gap-2 text-sm text-secondary">
+              <input
+                type="checkbox"
+                checked={allTeams}
+                onChange={(e) => setAllTeams(e.target.checked)}
+              />
+              All teams in this tenant
+            </label>
+            <Field
+              label="Team IDs"
+              htmlFor="notification-teams"
+              hint="Comma-separated. Notify when any listed team gains or loses ownership, or its finding's assignee changes."
+            >
+              <Input
+                id="notification-teams"
+                value={teams}
+                disabled={allTeams}
+                onChange={(e) => setTeams(e.target.value)}
+              />
+            </Field>
+          </fieldset>
         )}
         {(event === 'vulnerability_action.created' ||
           event === 'incident.created') && (
@@ -739,6 +773,11 @@ function RuleList({
                 {EVENTS.find((e) => e.value === r.event_type)?.label} →{' '}
                 {r.channel_ids.map(channelName).join(', ')}
               </p>
+              {r.event_type === 'finding.ownership_changed' && (
+                <p className="text-sm text-tertiary">
+                  {r.all_teams ? 'All teams in this tenant' : `Teams: ${r.team_ids?.join(', ') ?? ''}`}
+                </p>
+              )}
             </div>
             <Button
               variant="secondary"

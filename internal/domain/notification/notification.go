@@ -33,13 +33,14 @@ const (
 	EventSLAApproaching      EventType = "sla.approaching_deadline"
 	EventFleetAgentOffline   EventType = "fleet.agent.offline"
 	EventIncidentCreated     EventType = "incident.created"
+	EventOwnershipChanged    EventType = "finding.ownership_changed"
 	EventTest                EventType = "notification.test"
 )
 
 func (v EventType) Valid() bool {
 	switch v {
 	case EventVulnerabilityAction, EventScanCompleted, EventQualityGateFailed,
-		EventSLAApproaching, EventFleetAgentOffline, EventIncidentCreated, EventTest:
+		EventSLAApproaching, EventFleetAgentOffline, EventIncidentCreated, EventOwnershipChanged, EventTest:
 		return true
 	}
 	return false
@@ -95,6 +96,8 @@ type Rule struct {
 	MinSeverity   shared.Severity `json:"min_severity,omitempty"`
 	ActionTypes   []string        `json:"action_types,omitempty"`
 	EngagementIDs []shared.ID     `json:"engagement_ids,omitempty"`
+	TeamIDs       []shared.ID     `json:"team_ids,omitempty"`
+	AllTeams      bool            `json:"all_teams,omitempty"`
 	ChannelIDs    []shared.ID     `json:"channel_ids"`
 	LeadTime      time.Duration   `json:"-"`
 	LeadTimeSecs  int64           `json:"lead_time_seconds,omitempty"`
@@ -141,6 +144,9 @@ func (r *Rule) Normalize() error {
 	r.ActionTypes = uniqueStrings(r.ActionTypes)
 	r.ChannelIDs = uniqueIDs(r.ChannelIDs)
 	r.EngagementIDs = uniqueIDs(r.EngagementIDs)
+	if err := r.normalizeTeamScope(); err != nil {
+		return err
+	}
 	if len(r.ChannelIDs) == 0 || len(r.ChannelIDs) > 50 || len(r.EngagementIDs) > 200 || len(r.Name) > 200 {
 		return fmt.Errorf("%w: invalid rule bounds", shared.ErrValidation)
 	}
@@ -179,6 +185,9 @@ func (r Rule) Matches(e Event) bool {
 		return false
 	}
 	if len(r.EngagementIDs) > 0 && !containsID(r.EngagementIDs, e.EngagementID) {
+		return false
+	}
+	if e.Type == EventOwnershipChanged && !r.matchesOwnership(e) {
 		return false
 	}
 	if len(r.ActionTypes) > 0 {

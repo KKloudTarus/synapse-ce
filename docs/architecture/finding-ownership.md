@@ -5,10 +5,10 @@ records the source evidence behind that decision. Team membership is a grouping
 of existing users; it grants no role or engagement access. An individual still
 claims or receives a finding through the existing human triage workflow.
 
-This document describes the domain and PostgreSQL foundations. Producer capture,
-worker dispatch, HTTP routes and UI are separate integration milestones and are
-not enabled by the foundation migration. No existing finding is reassigned when
-an application applies migration 0164.
+This document describes the domain, PostgreSQL foundations and notification
+integration. Producer capture, routing jobs, ownership HTTP routes and ownership
+UI are separate integration milestones. No existing finding is reassigned by
+migrations 0164/0165 or by enabling the notification source.
 
 ## Identity and resolution contracts
 
@@ -119,6 +119,49 @@ at most 100 items; duplicate identical items do not inflate counters, conflictin
 items roll back the batch, and a run cannot complete before all selected items are
 accounted for. Persisting preview items never writes assignments or notifications.
 Run execution and authorization belong to the subsequent worker/use-case milestone.
+
+## Ownership change notifications
+
+`finding.ownership_changed` uses the existing notification service, transports,
+delivery history and `notification.deliver` worker. It emits one event for each
+effective team/assignee transition, including a combined transfer and assignment.
+The source key is `(tenant, ownership_decision, decision_id)`. The source reads
+only metadata from immutable decisions; it does not load their source evidence
+into the transport payload. Schema version 1 includes `decision_id`, `finding_id`,
+`engagement_id`, `actor`, `reason`, `old_team_id`, `new_team_id`,
+`old_assignee_id`, `new_assignee_id`, a static title and a static summary. Empty
+IDs mean unassigned. Source snippets, owner tokens and legacy free-text assignees
+are excluded. Consumers construct links from their trusted application base URL.
+
+Administrators configure this event in Settings → Notifications. A rule must
+specify `team_ids` (at most 200 tenant-owned IDs) or explicitly set `all_teams: true`.
+Both together, a blank ID and an unspecified scope are rejected. These fields
+are invalid for other event types. `team_ids` matches either the old or the new
+team, so both teams can be informed about a transfer. `all_teams` also covers
+individual assignment changes on findings without a team. Engagement filtering
+continues to apply. Normalized rule/team bindings have composite tenant FKs and
+forced RLS. Archiving a team preserves historical subscriptions and evidence.
+
+The notification source projects pending ownership intents inside its existing
+tenant transaction. It publishes through the complete rule fan-out used by
+`NotificationRepository.Publish`, then acknowledges the intent. A channel that
+matches multiple rules receives one delivery, with all matching rule IDs retained.
+Event, deliveries, queue jobs and acknowledgement either all commit or all roll
+back. Source locks precede audit reconciliation to preserve audit-last ordering.
+Polling is bounded to 200 intents per tenant; restart and concurrent polling are
+safe. Network delivery retains the framework's retry, fencing and at-least-once
+semantics, including a possible resend after a remote success with a local crash.
+
+Assignment callers persist notification eligibility at commit time using the
+notification feature flag. Disabled transitions create `suppressed` intents;
+they are never converted to pending by later activation. Previously eligible
+pending intents recover even on a worker's first poll, independently of the
+framework's fleet activation cutoff. No notification configuration or running
+sender is required to commit ownership and its audit record.
+
+Migration 0165 extends the shipped rule constraint without editing 0163. Its down
+migration requires deleting ownership subscriptions explicitly; it refuses to
+silently discard them. Existing event/delivery history is retained on downgrade.
 
 ## Producer and assignment inventory
 

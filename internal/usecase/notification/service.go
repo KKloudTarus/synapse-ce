@@ -176,6 +176,8 @@ type RuleInput struct {
 	MinSeverity     shared.Severity  `json:"min_severity,omitempty"`
 	ActionTypes     []string         `json:"action_types,omitempty"`
 	EngagementIDs   []shared.ID      `json:"engagement_ids,omitempty"`
+	TeamIDs         []shared.ID      `json:"team_ids,omitempty"`
+	AllTeams        bool             `json:"all_teams,omitempty"`
 	ChannelIDs      []shared.ID      `json:"channel_ids"`
 	LeadTimeSeconds int64            `json:"lead_time_seconds,omitempty"`
 	Revision        int              `json:"revision,omitempty"`
@@ -194,7 +196,7 @@ func (s *Service) createRule(ctx context.Context, actor string, in RuleInput) (d
 		return domain.Rule{}, fmt.Errorf("notification rule limit reached: %w", shared.ErrSaturated)
 	}
 	now := s.clock.Now().UTC()
-	r := domain.Rule{TenantID: tenant, ID: s.ids.NewID(), Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, ChannelIDs: in.ChannelIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	r := domain.Rule{TenantID: tenant, ID: s.ids.NewID(), Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, ChannelIDs: in.ChannelIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err = r.Normalize(); err != nil {
 		return domain.Rule{}, err
 	}
@@ -219,7 +221,7 @@ func (s *Service) updateRule(ctx context.Context, actor string, id shared.ID, in
 	if current.Revision != in.Revision {
 		return domain.Rule{}, fmt.Errorf("notification rule revision is stale: %w", shared.ErrConflict)
 	}
-	r := domain.Rule{TenantID: tenant, ID: id, Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, ChannelIDs: in.ChannelIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: current.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: s.clock.Now().UTC()}
+	r := domain.Rule{TenantID: tenant, ID: id, Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, ChannelIDs: in.ChannelIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: current.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: s.clock.Now().UTC()}
 	if err = r.Normalize(); err != nil {
 		return domain.Rule{}, err
 	}
