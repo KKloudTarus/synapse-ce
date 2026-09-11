@@ -34,6 +34,8 @@ import (
 	"github.com/smacker/go-tree-sitter/rust"
 	"github.com/smacker/go-tree-sitter/scala"
 	"github.com/smacker/go-tree-sitter/swift"
+	tsx "github.com/smacker/go-tree-sitter/typescript/tsx"
+	typescript "github.com/smacker/go-tree-sitter/typescript/typescript"
 )
 
 func set(types ...string) map[string]bool {
@@ -70,6 +72,24 @@ var specs = map[string]spec{
 	},
 	"JavaScript": {
 		lang:         javascript.GetLanguage(),
+		funcType:     set("function_declaration", "function_expression", "arrow_function", "method_definition", "generator_function_declaration", "generator_function"),
+		cycDecision:  set("if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_case", "catch_clause", "ternary_expression"),
+		cogIncrement: set("if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_statement", "catch_clause", "ternary_expression"),
+		cogElse:      set("else_clause"),
+		boolOpBinry:  set("binary_expression"),
+	},
+	// TypeScript and TSX share the JavaScript node vocabulary (a superset), so the metric node sets mirror
+	// "JavaScript". Registering them wires the vendored grammars for the JS/TS semantic-facts extractor.
+	"TypeScript": {
+		lang:         typescript.GetLanguage(),
+		funcType:     set("function_declaration", "function_expression", "arrow_function", "method_definition", "generator_function_declaration", "generator_function"),
+		cycDecision:  set("if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_case", "catch_clause", "ternary_expression"),
+		cogIncrement: set("if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_statement", "catch_clause", "ternary_expression"),
+		cogElse:      set("else_clause"),
+		boolOpBinry:  set("binary_expression"),
+	},
+	"TSX": {
+		lang:         tsx.GetLanguage(),
 		funcType:     set("function_declaration", "function_expression", "arrow_function", "method_definition", "generator_function_declaration", "generator_function"),
 		cycDecision:  set("if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_case", "catch_clause", "ternary_expression"),
 		cogIncrement: set("if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_statement", "catch_clause", "ternary_expression"),

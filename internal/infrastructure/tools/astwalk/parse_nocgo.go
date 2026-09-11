@@ -5,6 +5,7 @@ package astwalk
 import (
 	"context"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/jsprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
 )
 
@@ -29,4 +30,8 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 
 func PythonFactsFor(ctx context.Context, root string) (pythonprogram.Document, error) {
 	return pythonprogram.Document{}, ErrUnavailable
+}
+
+func JsFactsFor(ctx context.Context, root string) (jsprogram.Document, error) {
+	return jsprogram.Document{}, ErrUnavailable
 }
