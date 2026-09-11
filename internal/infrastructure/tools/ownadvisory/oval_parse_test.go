@@ -1,6 +1,8 @@
 package ownadvisory
 
 import (
+	"bytes"
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -672,5 +674,145 @@ func TestAlmaEcosystemKeyRoundTrip(t *testing.T) {
 		if got := osDistroEcosystem(tc.purl); got != tc.want {
 			t.Errorf("osDistroEcosystem(%s) = %q, want %q", tc.purl, got, tc.want)
 		}
+	}
+}
+
+// TestParseOpenSUSEOVAL parses a real (trimmed) openSUSE Leap OVAL fixture into openSUSE:15.6 advisories,
+// exercising the SUSE specifics: the CVE is taken from the <title>, and the release from the affected
+// "openSUSE Leap 15.6" platform (SUSE rpm versions carry no distro dist tag).
+func TestParseOpenSUSEOVAL(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "oval-opensuse.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatalf("ParseOVAL(opensuse): %v", err)
+	}
+	var rc advisory.Advisory
+	for _, a := range advs {
+		for _, ap := range a.Affected {
+			if ap.Ecosystem != "openSUSE:15.6" {
+				t.Errorf("%s: ecosystem = %q, want openSUSE:15.6", a.ID, ap.Ecosystem)
+			}
+			if ap.Ranges[0].Type != "ECOSYSTEM" {
+				t.Errorf("%s: range type = %q, want ECOSYSTEM", a.ID, ap.Ranges[0].Type)
+			}
+			if ap.Package == "roundcubemail" {
+				rc = a
+			}
+		}
+	}
+	if rc.ID != "CVE-2026-25916" || rc.Affected[0].FixedVersion != "0:1.6.13-bp156.2.12.1" {
+		t.Fatalf("roundcubemail advisory (CVE from title) not parsed as expected: %+v", rc)
+	}
+	// end-to-end match through the rpm comparator on SUSE's version format
+	if ok, _ := rc.Match("openSUSE:15.6", "roundcubemail", "0:1.6.13-bp156.2.11.1"); !ok {
+		t.Error("an older roundcubemail must match")
+	}
+	if ok, _ := rc.Match("openSUSE:15.6", "roundcubemail", "0:1.6.13-bp156.2.12.1"); ok {
+		t.Error("roundcubemail at the fixed version must not match")
+	}
+	if ok, _ := rc.Match("openSUSE:15.5", "roundcubemail", "0:1.6.13-bp156.2.11.1"); ok {
+		t.Error("a different openSUSE release must not match")
+	}
+}
+
+// TestParseOVALGzip proves the gzip-compressed feed path (SUSE ships .gz) parses identically to plain XML.
+func TestParseOVALGzip(t *testing.T) {
+	plain, err := os.ReadFile(filepath.Join("testdata", "oval-opensuse.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(plain); err != nil {
+		t.Fatal(err)
+	}
+	gz.Close()
+	advs, err := ParseOVAL(buf.Bytes())
+	if err != nil {
+		t.Fatalf("ParseOVAL(gzip): %v", err)
+	}
+	if len(advs) == 0 || advs[0].Affected[0].Ecosystem != "openSUSE:15.6" {
+		t.Errorf("gzip parse mismatch: %+v", advs)
+	}
+}
+
+func TestSusePlatformRelease(t *testing.T) {
+	cases := map[string]string{
+		"openSUSE Leap 15.6":                  "15.6",
+		"opensuse leap 15.5":                  "15.5",
+		"SUSE Linux Enterprise Server 15 SP5": "",
+		"openSUSE Leap":                       "",
+		"":                                    "",
+	}
+	for platform, want := range cases {
+		if got := susePlatformRelease(platform); got != want {
+			t.Errorf("susePlatformRelease(%q) = %q, want %q", platform, got, want)
+		}
+	}
+}
+
+func TestOpenSUSEEcosystemKeyRoundTrip(t *testing.T) {
+	for _, tc := range []struct{ purl, want string }{
+		{"pkg:rpm/opensuse/bash@5?arch=x86_64&distro=opensuse-leap-15.6", "openSUSE:15.6"},
+		{"pkg:rpm/opensuse/bash@5?distro=opensuse-leap-15.5", "openSUSE:15.5"},
+	} {
+		if got := osDistroEcosystem(tc.purl); got != tc.want {
+			t.Errorf("osDistroEcosystem(%s) = %q, want %q", tc.purl, got, tc.want)
+		}
+	}
+}
+
+// TestRpmOvalCVEsFromTitle proves a CVE named only in the <title> (SUSE) is extracted, while an ELSA-style
+// title (Oracle/Alma) contributes no bogus CVE.
+func TestRpmOvalCVEsFromTitle(t *testing.T) {
+	suse := &ovalDefinition{Title: "CVE-2001-0405"}
+	if got := rpmOvalCVEs(suse); len(got) != 1 || got[0] != "CVE-2001-0405" {
+		t.Errorf("SUSE title CVE not extracted: %v", got)
+	}
+	elsa := &ovalDefinition{Title: "ELSA-2024-5962: python39:3.9 security update (MODERATE)"}
+	if got := rpmOvalCVEs(elsa); len(got) != 0 {
+		t.Errorf("ELSA title must yield no CVE, got %v", got)
+	}
+}
+
+// TestRpmOvalBoundedRangeSkipped proves a package constrained by BOTH a "greater than or equal" and a "less
+// than" state in one definition (a [X, Y) range) is skipped rather than emitted as an overshooting [0, Y).
+func TestRpmOvalBoundedRangeSkipped(t *testing.T) {
+	doc := oracleDoc(`<definitions>
+	  <definition class="patch" id="oval:com.oracle.elsa:def:1"><metadata><title>ELSA-B</title>
+	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9000"/></metadata>
+	    <criteria>
+	      <criterion test_ref="tge"/>
+	      <criterion test_ref="tlt"/>
+	      <criterion test_ref="tok"/></criteria></definition></definitions>
+	  <tests>
+	    <linux:rpminfo_test id="tge"><object object_ref="o1"/><state state_ref="sge"/></linux:rpminfo_test>
+	    <linux:rpminfo_test id="tlt"><object object_ref="o1"/><state state_ref="slt"/></linux:rpminfo_test>
+	    <linux:rpminfo_test id="tok"><object object_ref="o2"/><state state_ref="sok"/></linux:rpminfo_test></tests>
+	  <objects>
+	    <linux:rpminfo_object id="o1"><name>bounded-pkg</name></linux:rpminfo_object>
+	    <linux:rpminfo_object id="o2"><name>plain-pkg</name></linux:rpminfo_object></objects>
+	  <states>
+	    <linux:rpminfo_state id="sge"><evr operation="greater than or equal">0:1.0-1.el9</evr></linux:rpminfo_state>
+	    <linux:rpminfo_state id="slt"><evr operation="less than">0:2.0-1.el9</evr></linux:rpminfo_state>
+	    <linux:rpminfo_state id="sok"><evr operation="less than">0:3.0-1.el9</evr></linux:rpminfo_state></states>`)
+	advs, err := ParseOVAL(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkgs := map[string]bool{}
+	for _, a := range advs {
+		for _, ap := range a.Affected {
+			pkgs[ap.Package] = true
+		}
+	}
+	if pkgs["bounded-pkg"] {
+		t.Error("a package with a ge+lt bounded range must be skipped, not emitted as [0, Y)")
+	}
+	if !pkgs["plain-pkg"] {
+		t.Error("a plain less-than package in the same definition must still be emitted")
 	}
 }

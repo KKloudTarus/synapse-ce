@@ -392,6 +392,18 @@ func osDistroEcosystem(purl string) string {
 	if distro == "" {
 		return ""
 	}
+	// openSUSE Leap carries a two-segment id (Syft distro=opensuse-leap-15.6), which the id/ver Cut below
+	// mis-splits, so key it explicitly. The owned openSUSE OVAL feed writes "openSUSE:<release>" (the family
+	// "openSUSE" that advisory.osFamilyScheme orders as rpm), so the two agree.
+	if purlType(purl) == "rpm" {
+		if v := strings.TrimPrefix(distro, "opensuse-leap-"); v != distro && v != "" {
+			parts := strings.SplitN(v, ".", 3)
+			if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
+				return "openSUSE:" + parts[0] + "." + parts[1]
+			}
+			return "openSUSE:" + v
+		}
+	}
 	id, ver, ok := strings.Cut(distro, "-")
 	if !ok || ver == "" {
 		return ""
