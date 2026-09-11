@@ -549,9 +549,10 @@ type Config struct {
 	// sidecar extracts bounded facts, but unlike Go taint this pass never compiles or imports target code.
 	// Positive paths become gated CapSAST proposals; incomplete coverage never produces a clean verdict.
 	PythonTaintEnabled bool
-	// TaintRulesFile is an optional operator-provided YAML file of CUSTOM Python taint rules (Semgrep-style
-	// user sources and sinks) merged additively into the built-in catalog at startup. Empty (the default)
-	// uses only the built-in catalog. Custom rules can only ADD detection, never suppress a built-in flow.
+	// TaintRulesFile is an optional operator-provided YAML file of CUSTOM Python and JavaScript taint rules
+	// (Semgrep-style user sources and sinks, under `python.*` and `js.*`) merged additively into the built-in
+	// catalogs at startup. Empty (the default) uses only the built-in catalogs. Custom rules can only ADD
+	// detection, never suppress a built-in flow.
 	TaintRulesFile string
 	// JsTaintEnabled turns on source-only JavaScript/TypeScript semantic value-flow analysis. Like Python
 	// taint it uses the synapse-ast sidecar to extract bounded facts and never compiles or executes target
