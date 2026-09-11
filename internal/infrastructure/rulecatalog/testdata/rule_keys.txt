@@ -1790,11 +1790,13 @@ js-symbol-no-description
 js-taint-code
 js-taint-command
 js-taint-deserialization
+js-taint-log
 js-taint-open-redirect
 js-taint-path
 js-taint-redos
 js-taint-ssrf
 js-taint-ssti
+js-taint-xpath
 js-taint-xss
 js-test-disabled
 js-test-focused

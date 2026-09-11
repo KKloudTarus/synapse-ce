@@ -82,6 +82,22 @@ func jsTaintRules() []rule.Rule {
 			"const html = template({ name: req.query.name });",
 			"const html = handlebars.compile(req.query.tpl)();",
 		),
+		jsTaintRule(
+			"js-taint-xpath", "Interprocedural JavaScript XPath injection", "CWE-643", "A03:2021", shared.SeverityHigh,
+			"Tracks untrusted values into the xpath package's expression compiler.",
+			"Attacker-controlled text in an XPath expression can change the selection to read nodes outside the intended scope.\n\nSource: https://cwe.mitre.org/data/definitions/643.html",
+			"Use a fixed XPath expression and pass user input only through variable binding or a parameterized evaluator, never string-concatenated into the expression.",
+			"xpath.select('//user[@id=$id]', doc, false, { id: req.query.id });",
+			"xpath.select(\"//user[@id='\" + req.query.id + \"']\", doc);",
+		),
+		jsTaintRule(
+			"js-taint-log", "Interprocedural JavaScript log injection", "CWE-117", "A03:2021", shared.SeverityMedium,
+			"Tracks untrusted request values into the console logging methods.",
+			"Unneutralized input written to a log can inject newlines to forge or split log entries, misleading an investigation or poisoning a log-analysis pipeline.\n\nSource: https://cwe.mitre.org/data/definitions/117.html",
+			"Log user input as a bounded field (never concatenated into the message), and strip or encode newline and control characters before logging.",
+			"console.log('login for user=%s', encodeURIComponent(req.query.user));",
+			"console.log('login for user=' + req.query.user);",
+		),
 	}
 }
 

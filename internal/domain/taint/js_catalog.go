@@ -96,6 +96,19 @@ func DefaultJsCatalog() JsCatalog {
 			jsSink(jsMod([]string{"node-serialize"}, "unserialize"), TaintDeserialization, "CWE-502", "js-taint-deserialization", 0),
 			jsSink(jsMod([]string{"funcster"}, "deepDeserialize"), TaintDeserialization, "CWE-502", "js-taint-deserialization", 0),
 
+			// CWE-643: XPath injection. The `xpath` package compiles its first argument as an XPath expression,
+			// so a tainted expression can change the selection to read nodes outside the intended scope. Only
+			// the expression argument (zero) is modeled; the document/node argument is not injectable.
+			jsSink(jsMod([]string{"xpath"}, "select", "select1", "parse", "evaluate"), TaintXPath, "CWE-643", "js-taint-xpath", 0),
+
+			// CWE-117: log injection. Untrusted data written to a console log record can inject a newline to
+			// forge or split log lines. Only the stdlib console logger is modeled (console.log/info/warn/... , a
+			// global receiver), the JS analog of the Python logging module; a bare `logger.info` on an arbitrary
+			// object is NOT modeled (too broad). Every argument is a message part, so any tainted argument is an
+			// injection.
+			{Pattern: jsRaw("console.log", "console.info", "console.warn", "console.error", "console.debug", "console.trace"),
+				Class: TaintLog, CWE: "CWE-117", Rule: "js-taint-log", AllArguments: true},
+
 			// CWE-1336: server-side template injection. The template-engine compile/render APIs take the
 			// TEMPLATE SOURCE at argument zero, so a tainted template can execute engine expressions on the
 			// server. Only the source-string APIs are modeled; Express's res.render is DECLINED (its argument
