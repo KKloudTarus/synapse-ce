@@ -434,3 +434,17 @@ func TestNodeSerializeUnserializeIsDeserialization(t *testing.T) {
 		t.Fatal("node-serialize.unserialize on tainted input should be a deserialization sink")
 	}
 }
+
+// TestHandlebarsCompileIsSSTI: handlebars.compile on a tainted template source is an SSTI sink.
+func TestHandlebarsCompileIsSSTI(t *testing.T) {
+	scope := jsModuleID()
+	src := jsReqSource("v-src", "req", "query", "tpl")
+	doc := jsDoc(
+		[]jsprogram.Import{{ScopeID: scope, Kind: jsprogram.ImportDefault, Module: "handlebars", Alias: "handlebars", Pos: jsPos(1, 0)}},
+		[]jsprogram.Value{src},
+		[]jsprogram.Call{jsAttrCall("c1", []string{"handlebars", "compile"}, src.Ref, src.ID)},
+	)
+	if !jsFindingRules(mustJsGraph(t, doc))["js-taint-ssti"] {
+		t.Fatal("handlebars.compile on a tainted template should be an SSTI sink")
+	}
+}

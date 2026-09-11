@@ -95,6 +95,16 @@ func DefaultJsCatalog() JsCatalog {
 			// function, so no sanitizer makes these calls safe on untrusted input.
 			jsSink(jsMod([]string{"node-serialize"}, "unserialize"), TaintDeserialization, "CWE-502", "js-taint-deserialization", 0),
 			jsSink(jsMod([]string{"funcster"}, "deepDeserialize"), TaintDeserialization, "CWE-502", "js-taint-deserialization", 0),
+
+			// CWE-1336: server-side template injection. The template-engine compile/render APIs take the
+			// TEMPLATE SOURCE at argument zero, so a tainted template can execute engine expressions on the
+			// server. Only the source-string APIs are modeled; Express's res.render is DECLINED (its argument
+			// zero is a view NAME, a file lookup, not a template source, so modeling it would be a false SSTI on
+			// the safe `res.render('view', userData)` form).
+			jsSink(jsMod([]string{"handlebars"}, "compile"), TaintSSTI, "CWE-1336", "js-taint-ssti", 0),
+			jsSink(jsMod([]string{"pug", "jade"}, "compile", "render"), TaintSSTI, "CWE-1336", "js-taint-ssti", 0),
+			jsSink(jsMod([]string{"ejs"}, "compile", "render"), TaintSSTI, "CWE-1336", "js-taint-ssti", 0),
+			jsSink(jsMod([]string{"lodash", "underscore"}, "template"), TaintSSTI, "CWE-1336", "js-taint-ssti", 0),
 		},
 		Sanitizers: []JsSanitizerModel{
 			// CWE-79: contextual HTML/URL encoders. encodeURIComponent / encodeURI are globals; the library
