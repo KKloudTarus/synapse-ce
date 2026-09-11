@@ -1070,3 +1070,16 @@ func TestAssessmentLifecycleTenantGates(t *testing.T) {
 		t.Fatal("Snapshot completion tenant gate mismatch")
 	}
 }
+
+// TestJavaTaintDefaultsOff pins that Java value-flow taint is OFF by default (opt-in while catalog breadth
+// grows) and that the env flag turns it on.
+func TestJavaTaintDefaultsOff(t *testing.T) {
+	t.Setenv("SYNAPSE_JAVATAINT_ENABLED", "")
+	if Load().JavaTaintEnabled {
+		t.Error("Java taint must be OFF by default")
+	}
+	t.Setenv("SYNAPSE_JAVATAINT_ENABLED", "true")
+	if !Load().JavaTaintEnabled {
+		t.Error("SYNAPSE_JAVATAINT_ENABLED=true must enable Java taint")
+	}
+}

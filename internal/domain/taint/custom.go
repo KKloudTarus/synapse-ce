@@ -27,6 +27,16 @@ const (
 type CustomRules struct {
 	Python CustomPythonRules `yaml:"python" json:"python"`
 	JS     CustomJsRules     `yaml:"js" json:"js"`
+	Java   CustomJavaRules   `yaml:"java" json:"java"`
+}
+
+// CustomJavaRules extends the Java value-flow catalog. A custom Java source/sink is import-anchored (modules
+// + names), the sound match the built-in catalog trusts most; the receiver-name floor the built-ins use for
+// auto-imported/runtime-receiver sinks is deliberately NOT exposed to custom rules, so an operator cannot
+// author an unanchored pattern that fires broadly.
+type CustomJavaRules struct {
+	Sources []CustomSource `yaml:"sources" json:"sources"`
+	Sinks   []CustomSink   `yaml:"sinks" json:"sinks"`
 }
 
 // CustomPythonRules extends the Python value-flow catalog.
@@ -63,20 +73,25 @@ type CustomSink struct {
 // Empty reports whether the document declares no custom rules.
 func (r CustomRules) Empty() bool {
 	return len(r.Python.Sources) == 0 && len(r.Python.Sinks) == 0 &&
-		len(r.JS.Sources) == 0 && len(r.JS.Sinks) == 0
+		len(r.JS.Sources) == 0 && len(r.JS.Sinks) == 0 &&
+		len(r.Java.Sources) == 0 && len(r.Java.Sinks) == 0
 }
 
 // Validate rejects a document that is malformed or that could bloat the catalog. It never fails open: an
 // invalid rule is an error, not a silently-dropped entry, so an operator sees the mistake.
 func (r CustomRules) Validate() error {
-	total := len(r.Python.Sources) + len(r.Python.Sinks) + len(r.JS.Sources) + len(r.JS.Sinks)
+	total := len(r.Python.Sources) + len(r.Python.Sinks) + len(r.JS.Sources) + len(r.JS.Sinks) +
+		len(r.Java.Sources) + len(r.Java.Sinks)
 	if total > maxCustomTaintRules {
 		return fmt.Errorf("%w: %d custom taint rules exceeds the cap of %d", shared.ErrValidation, total, maxCustomTaintRules)
 	}
 	if err := validateRuleSet("python", r.Python.Sources, r.Python.Sinks); err != nil {
 		return err
 	}
-	return validateRuleSet("js", r.JS.Sources, r.JS.Sinks)
+	if err := validateRuleSet("js", r.JS.Sources, r.JS.Sinks); err != nil {
+		return err
+	}
+	return validateRuleSet("java", r.Java.Sources, r.Java.Sinks)
 }
 
 // validateRuleSet checks one language's custom sources and sinks: every pattern is a well-formed
@@ -158,6 +173,30 @@ func (c JsCatalog) WithCustomJs(rules CustomJsRules) JsCatalog {
 	for _, s := range rules.Sinks {
 		out.Sinks = append(out.Sinks, JsSinkModel{
 			Pattern:         JsCallablePattern{Modules: normalizePatternList(s.Modules), Names: normalizePatternList(s.Names)},
+			Class:           TaintClass(strings.TrimSpace(s.Class)),
+			CWE:             strings.TrimSpace(s.CWE),
+			Rule:            strings.TrimSpace(s.Rule),
+			ArgumentIndexes: []int{s.Argument},
+		})
+	}
+	return out
+}
+
+// WithCustomJava returns a copy of the Java catalog extended with the validated custom rules. Like the JS
+// twin it is additive (built-ins preserved, custom entries appended) and import-anchored (each custom
+// source/sink matches only via its modules + names, never the receiver-name floor), so a custom rule can only
+// ADD detection, never suppress or fire unanchored. Validate must have been called.
+func (c JavaCatalog) WithCustomJava(rules CustomJavaRules) JavaCatalog {
+	out := c
+	for _, s := range rules.Sources {
+		out.Sources = append(out.Sources, JavaSourceModel{
+			Pattern: JavaCallablePattern{Modules: normalizePatternList(s.Modules), Names: normalizePatternList(s.Names)},
+			Classes: append([]TaintClass(nil), allJavaTaintClasses...),
+		})
+	}
+	for _, s := range rules.Sinks {
+		out.Sinks = append(out.Sinks, JavaSinkModel{
+			Pattern:         JavaCallablePattern{Modules: normalizePatternList(s.Modules), Names: normalizePatternList(s.Names)},
 			Class:           TaintClass(strings.TrimSpace(s.Class)),
 			CWE:             strings.TrimSpace(s.CWE),
 			Rule:            strings.TrimSpace(s.Rule),

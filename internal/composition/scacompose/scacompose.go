@@ -513,7 +513,47 @@ func ConfigureJudgmentScanners(svc *scauc.Service, cfg config.Config, sb *sandbo
 		svc.SetJsTaint(jsTaint)
 		log.Info("JavaScript/TypeScript semantic taint ENABLED (source-only interprocedural value flow; propose-only, a distinct verifier gates)")
 	}
+	javaTaint, err := javaTaintScanner(cfg, sb, proposer, audit, clock, log)
+	if err != nil {
+		return err
+	}
+	if javaTaint != nil {
+		svc.SetJavaTaint(javaTaint)
+		log.Info("Java semantic taint ENABLED (source-only interprocedural value flow; propose-only, a distinct verifier gates)")
+	}
 	return nil
+}
+
+// javaTaintScanner builds the Java value-flow taint coordinator when Java taint is enabled and a judgment
+// proposer is present; it returns (nil, nil) when either is absent. It mirrors jsTaintScanner: the
+// synapse-ast sidecar extracts bounded facts (never compiles or executes the target), and a custom-rule file
+// additively extends the built-in catalog.
+func javaTaintScanner(cfg config.Config, sb *sandbox.Runner, proposer TaintProposer, audit ports.AuditLogger, clock ports.Clock, log *slog.Logger) (ports.TaintScanner, error) {
+	if proposer == nil || !cfg.JavaTaintEnabled {
+		return nil, nil
+	}
+	factsProvider := asttool.New(cfg.ASTBin)
+	if sb != nil {
+		factsProvider = factsProvider.WithRunner(sb)
+	} else {
+		log.Warn("java taint: synapse-ast runs unsandboxed (dev only); target source is parsed but never executed")
+	}
+	catalog := taint.DefaultJavaCatalog()
+	if cfg.TaintRulesFile != "" {
+		custom, found, cerr := taintrules.Load(cfg.TaintRulesFile)
+		if cerr != nil {
+			return nil, fmt.Errorf("load custom taint rules %q: %w", cfg.TaintRulesFile, cerr)
+		}
+		if found && !custom.Empty() {
+			catalog = catalog.WithCustomJava(custom.Java)
+			log.Info("custom java taint rules loaded", "sources", len(custom.Java.Sources), "sinks", len(custom.Java.Sinks))
+		}
+	}
+	coordinator, err := taintscan.NewJavaCoordinator(factsProvider, proposer, catalog, audit, clock)
+	if err != nil {
+		return nil, fmt.Errorf("java semantic taint coordinator init: %w", err)
+	}
+	return coordinator, nil
 }
 
 // jsTaintScanner builds the JS/TS value-flow taint coordinator when JS taint is enabled and a judgment

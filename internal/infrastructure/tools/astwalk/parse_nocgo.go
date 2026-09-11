@@ -5,6 +5,7 @@ package astwalk
 import (
 	"context"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/javaprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/jsprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
 )
@@ -34,4 +35,8 @@ func PythonFactsFor(ctx context.Context, root string) (pythonprogram.Document, e
 
 func JsFactsFor(ctx context.Context, root string) (jsprogram.Document, error) {
 	return jsprogram.Document{}, ErrUnavailable
+}
+
+func JavaFactsFor(ctx context.Context, root string) (javaprogram.Document, error) {
+	return javaprogram.Document{}, ErrUnavailable
 }

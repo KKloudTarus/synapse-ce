@@ -271,7 +271,7 @@ func (l SASTFlowLocation) validate() error {
 
 func (d SASTDataFlow) validate() error {
 	switch d.Language {
-	case "python", "javascript":
+	case "python", "javascript", "java":
 	default:
 		return fmt.Errorf("%w: sast data-flow language is unknown", shared.ErrValidation)
 	}

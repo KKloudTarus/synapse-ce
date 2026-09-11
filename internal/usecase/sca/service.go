@@ -111,6 +111,7 @@ type Service struct {
 	taint                            ports.TaintScanner                    // optional deterministic taint-analysis → gated CapSAST proposals
 	pythonTaint                      ports.TaintScanner                    // optional Python semantic value-flow → gated CapSAST proposals
 	jsTaint                          ports.TaintScanner                    // optional JavaScript/TypeScript semantic value-flow → gated CapSAST proposals
+	javaTaint                        ports.TaintScanner                    // optional Java semantic value-flow → gated CapSAST proposals
 	graphResolver                    ports.DependencyGraphResolver         // optional transitive-edge resolver (Go via `go mod graph`)
 	mavenResolver                    ports.MavenResolver                   // optional Maven transitive-tree resolver (`mvn dependency:tree` when it also implements ports.MavenGraphResolver, else `dependency:list`)
 	gradleResolver                   ports.GradleResolver                  // optional Gradle transitive-tree resolver (`gradle dependencies`)
@@ -528,6 +529,11 @@ func (s *Service) SetPythonTaint(t ports.TaintScanner) { s.pythonTaint = t }
 // follows the same propose-only lifecycle: positive witnesses become gated CapSAST proposals while missing or
 // partial coverage never becomes a clean conclusion.
 func (s *Service) SetJsTaint(t ports.TaintScanner) { s.jsTaint = t }
+
+// SetJavaTaint configures the Java source-only, interprocedural value-flow proposer. Like the JS/Python
+// engines it is propose-only: positive witnesses become gated CapSAST proposals and partial coverage never
+// becomes a clean conclusion. A setter keeps NewService call sites unchanged.
+func (s *Service) SetJavaTaint(t ports.TaintScanner) { s.javaTaint = t }
 
 // SetGraphResolver configures the optional transitive-edge resolver (Go via `go mod graph`). nil ⇒
 // no resolved Go edges. Best-effort + opt-in: a non-Go target / no module cache / tool error adds no edges
@@ -3396,6 +3402,19 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			}
 		} else {
 			_, _ = s.jsTaint.Scan(ctx, engagementID, ws.Dir)
+		}
+	}
+
+	// Java semantic value-flow taint, same propose-only lifecycle as the JS/Python/Go scanners.
+	if opts.scansVulnerabilities() && s.javaTaint != nil {
+		if scanner, ok := s.javaTaint.(ports.TaintCoverageScanner); ok {
+			outcome, _ := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
+			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
+			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
+				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+			}
+		} else {
+			_, _ = s.javaTaint.Scan(ctx, engagementID, ws.Dir)
 		}
 	}
 
