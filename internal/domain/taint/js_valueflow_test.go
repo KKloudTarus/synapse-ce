@@ -475,3 +475,36 @@ func TestConsoleLogIsLogInjection(t *testing.T) {
 		t.Fatal("console.log on tainted input should be a log-injection sink")
 	}
 }
+
+// TestExtendedNodeLibrarySinks proves the broadened coverage fires: undici (SSRF), execa (command), and
+// fs-extra (path) are common Node libraries that were previously unmodeled.
+func TestExtendedNodeLibrarySinks(t *testing.T) {
+	cases := []struct {
+		name   string
+		module string
+		member string
+		src    []string
+		rule   string
+	}{
+		{"undici request", "undici", "request", []string{"req", "query", "url"}, "js-taint-ssrf"},
+		{"undici stream", "undici", "stream", []string{"req", "query", "url"}, "js-taint-ssrf"},
+		{"execa command", "execa", "command", []string{"req", "query", "cmd"}, "js-taint-command"},
+		{"fs-extra outputFile", "fs-extra", "outputFile", []string{"req", "query", "path"}, "js-taint-path"},
+		{"fs-extra copy", "fs-extra", "copy", []string{"req", "query", "path"}, "js-taint-path"},
+		{"fs-extra readFile (fs surface)", "fs-extra", "readFile", []string{"req", "query", "path"}, "js-taint-path"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			scope := jsModuleID()
+			src := jsReqSource("v-src", tc.src...)
+			doc := jsDoc(
+				[]jsprogram.Import{{ScopeID: scope, Kind: jsprogram.ImportDefault, Module: tc.module, Alias: "lib", Pos: jsPos(1, 0)}},
+				[]jsprogram.Value{src},
+				[]jsprogram.Call{jsAttrCall("c1", []string{"lib", tc.member}, src.Ref, src.ID)},
+			)
+			if !jsFindingRules(mustJsGraph(t, doc))[tc.rule] {
+				t.Fatalf("%s: expected %s, got %v", tc.name, tc.rule, jsFindingRules(mustJsGraph(t, doc)))
+			}
+		})
+	}
+}
