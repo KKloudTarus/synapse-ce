@@ -109,9 +109,9 @@ func TestOsDistroEcosystem(t *testing.T) {
 		"pkg:rpm/rocky/bash@4.4-1?distro=rocky-9.3":              "Rocky Linux:9", // mapped: OSV keys "<Name>:<major>"
 		"pkg:rpm/almalinux/openssl@3?distro=almalinux-8.9":       "AlmaLinux:8",
 		"pkg:rpm/ol/glibc@2?distro=ol-9":                         "Oracle Linux:9",
-		"pkg:rpm/redhat/bash@4.4?distro=rhel-9":                  "Red Hat:9",   // mapped: owned RedHat CSAF feed keys "Red Hat:<major>"
-		"pkg:rpm/redhat/bash@4.4?distro=redhat-8.9":              "Red Hat:8",   // the "redhat" distro id maps the same
-		"pkg:rpm/centos/bash@4.4?distro=centos-9":                "",            // CentOS Stream drifts ahead of RHEL → deliberately unmapped
+		"pkg:rpm/redhat/bash@4.4?distro=rhel-9":                  "Red Hat:9", // mapped: owned RedHat CSAF feed keys "Red Hat:<major>"
+		"pkg:rpm/redhat/bash@4.4?distro=redhat-8.9":              "Red Hat:8", // the "redhat" distro id maps the same
+		"pkg:rpm/centos/bash@4.4?distro=centos-9":                "",          // CentOS Stream drifts ahead of RHEL → deliberately unmapped
 		"pkg:rpm/fedora/bash@5?distro=fedora-39":                 "",
 		"pkg:deb/debian/openssl@1.1":                             "", // no distro qualifier
 		"pkg:npm/lodash@4.0.0":                                   "", // not an OS package
@@ -323,5 +323,46 @@ func TestScanSourceMatchUsesUpstreamVersionNotBinary(t *testing.T) {
 	}
 	if len(raws) != 1 || raws[0].AdvisoryID != "CVE-2024-UPV" {
 		t.Fatalf("want the finding via source version 1.1.1k (< fix 1.1.1m), got %+v", raws)
+	}
+}
+
+// TestDistroEcosystemLockstep pins the scan-side matcher key (osDistroEcosystem, this package) to the
+// inventory/correlation identity key (sbom.IdentityFromComponent). Both derive the advisory ecosystem for an
+// OS-package PURL and MUST agree, or a component keyed one way at scan time and another in the correlation path
+// would silently miss its advisories (a false negative) or hit a foreign ecosystem's (a false match). Both now
+// delegate to the shared sbom.DistroEcosystem, so they cannot drift; this table is the regression guard that
+// keeps it that way (and documents the exact keys, case-variants, and unmapped families).
+func TestDistroEcosystemLockstep(t *testing.T) {
+	purls := []string{
+		"pkg:deb/debian/openssl@1.0?distro=debian-12",
+		"pkg:deb/ubuntu/bash@5?arch=amd64&distro=ubuntu-22.04",
+		"pkg:deb/ubuntu/bash@5?distro=ubuntu-22.04.1", // point release keys to major.minor
+		"pkg:apk/alpine/musl@1.2?distro=alpine-3.19",
+		"pkg:rpm/rhel/openssl@3.0-1?arch=x86_64&distro=rhel-9.2&epoch=1",
+		"pkg:rpm/redhat/kernel@5.14-1?distro=redhat-9",
+		"pkg:rpm/rocky/bash@5-1?distro=rocky-9.3",
+		"pkg:rpm/almalinux/bash@5-1?distro=almalinux-9",
+		"pkg:rpm/ol/openssl@3.0-1?distro=ol-8",
+		"pkg:rpm/amzn/openssl@1.0.2k-24?distro=amzn-2",
+		"pkg:rpm/amzn/curl@8.5.0-1?distro=amzn-2023",
+		"pkg:rpm/opensuse-leap/bash@5.1-1?arch=x86_64&distro=opensuse-leap-15.6",
+		// Unmapped families must agree on "" (cataloged for inventory, never keyed to an advisory ecosystem).
+		"pkg:rpm/fedora/bash@5-1?distro=fedora-40",
+		"pkg:rpm/centos/bash@5-1?distro=centos-9",
+		"pkg:rpm/sles/bash@5-1?distro=sles-15.6",
+		// Case-variant distro qualifiers must still agree (both functions lowercase the qualifier).
+		"pkg:rpm/amzn/bash@5-1?distro=AMZN-2",
+		"pkg:rpm/opensuse-leap/bash@5-1?distro=OpenSUSE-Leap-15.6",
+		// Degenerate qualifiers must agree on "" (empty id, empty version, no hyphen).
+		"pkg:rpm/x/bash@5-1?distro=-2",
+		"pkg:rpm/x/bash@5-1?distro=rhel-",
+		"pkg:rpm/x/bash@5-1?distro=rhel",
+	}
+	for _, purl := range purls {
+		scanKey := osDistroEcosystem(purl)
+		identity := sbom.IdentityFromComponent(sbom.Component{PURL: purl})
+		if scanKey != identity.Ecosystem {
+			t.Errorf("lockstep drift for %s: osDistroEcosystem=%q but IdentityFromComponent.Ecosystem=%q", purl, scanKey, identity.Ecosystem)
+		}
 	}
 }

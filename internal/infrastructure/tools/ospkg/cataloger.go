@@ -156,13 +156,14 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 
 // rpmMatchableIDs are the rpm-family os-release IDs osDistroEcosystem can key to an advisory ecosystem: RHEL
 // (rhel/redhat -> "Red Hat:<major>", served by the owned Red Hat CSAF feed), the Rocky/AlmaLinux/Oracle
-// rebuilds (keyed "<Name>:<major>" by their own errata), and openSUSE Leap (opensuse-leap -> "openSUSE:<major.
-// minor>", served by the owned openSUSE Leap OVAL feed). This set must stay in lockstep with osDistroEcosystem:
-// an id is listed only once its ecosystem mapping AND feed exist, so DistroResolved never claims a keying the
-// matcher cannot make. CentOS (Stream drifts ahead of RHEL), Fedora, Amazon Linux, openSUSE Tumbleweed
-// (rolling, no per-release feed), and SUSE Linux Enterprise (feed not yet landed) stay OFF, so their rpm
-// packages are cataloged for inventory but honestly flagged unresolved.
-var rpmMatchableIDs = map[string]bool{"rhel": true, "redhat": true, "rocky": true, "almalinux": true, "alma": true, "ol": true, "oracle": true, "opensuse-leap": true}
+// rebuilds (keyed "<Name>:<major>" by their own errata), Amazon Linux (amzn/amazon -> "Amazon Linux:<release>",
+// served by the owned Amazon updateinfo feed), and openSUSE Leap (opensuse-leap -> "openSUSE:<major.minor>",
+// served by the owned openSUSE Leap OVAL feed). This set must stay in lockstep with osDistroEcosystem: an id is
+// listed only once its ecosystem mapping AND feed exist, so DistroResolved never claims a keying the matcher
+// cannot make. CentOS (Stream drifts ahead of RHEL), Fedora, openSUSE Tumbleweed (rolling, no per-release
+// feed), and SUSE Linux Enterprise (feed not yet landed) stay OFF, so their rpm packages are cataloged for
+// inventory but honestly flagged unresolved.
+var rpmMatchableIDs = map[string]bool{"rhel": true, "redhat": true, "rocky": true, "almalinux": true, "alma": true, "ol": true, "oracle": true, "amzn": true, "amazon": true, "opensuse-leap": true}
 
 // dpkgFieldKeys / apkFieldKeys are the ONLY stanza keys each parser reads. parseOSDB stores only these, so a
 // stanza with millions of distinct junk keys cannot grow the per-stanza map (keeps memory O(1) per stanza).

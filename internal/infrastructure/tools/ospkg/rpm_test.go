@@ -247,18 +247,18 @@ func TestCatalogRPMRHELResolved(t *testing.T) {
 	}
 }
 
-// TestCatalogRPMAmazonUnresolved: Amazon Linux (amzn) has no owned advisory feed yet, so its rpm packages are
-// cataloged for inventory but honestly flagged unresolved (fail-closed: no false DistroResolved without a feed).
-func TestCatalogRPMAmazonUnresolved(t *testing.T) {
+// TestCatalogRPMAmazonResolved: Amazon Linux (amzn) resolves now that its owned updateinfo feed exists;
+// osDistroEcosystem keys amzn-2023 to "Amazon Linux:2023", the exact key the feed writes.
+func TestCatalogRPMAmazonResolved(t *testing.T) {
 	rootfs := writeRPMRootfs(t, "ID=amzn\nVERSION_ID=\"2023\"\n")
 	res, err := New().Catalog(context.Background(), rootfs)
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
 	if len(res.Components) != 1 {
-		t.Fatalf("want the rpm component emitted for inventory, got %d", len(res.Components))
+		t.Fatalf("want the rpm component emitted, got %d", len(res.Components))
 	}
-	if res.DistroResolved {
-		t.Error("Amazon Linux must NOT be flagged resolved until its feed lands")
+	if !res.DistroResolved {
+		t.Error("Amazon Linux must resolve its distro now that the updateinfo feed exists")
 	}
 }

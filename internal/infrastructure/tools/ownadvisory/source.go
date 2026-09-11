@@ -381,91 +381,13 @@ func rpmCanonicalEVR(version, epoch string) string {
 	return epoch + ":" + version
 }
 
-// osDistroEcosystem derives the release-versioned ecosystem key for an OS-package PURL from its "distro"
-// qualifier (Syft emits e.g. distro=debian-9 / ubuntu-22.04 / alpine-3.18.12). Debian keys by major
-// ("Debian:<major>", from OSV); Alpine by "Alpine:v<major>.<minor>" (OSV); Ubuntu by its full VERSION_ID
-// ("Ubuntu:<version>") – the canonical key the OWNED Ubuntu OVAL feed writes, which sidesteps OSV's
-// awkward :LTS/:Pro variants because we own both the feed and this mapping. The RPM distros stay deferred
-// (return "" → skip → never a false match), though their comparators exist for any future bridge.
+// osDistroEcosystem derives the release-versioned ecosystem key for an OS-package PURL from its purl type and
+// "distro" qualifier (Syft emits e.g. distro=debian-9 / ubuntu-22.04 / amzn-2). It delegates to the shared
+// sbom.DistroEcosystem so the scan-side matcher key and the inventory identity key (sbom.IdentityFromComponent)
+// can never drift; TestDistroEcosystemLockstep pins the two. An unmapped/malformed distro yields "" (skip,
+// never a false match).
 func osDistroEcosystem(purl string) string {
-	distro := purlQualifier(purl, "distro")
-	if distro == "" {
-		return ""
-	}
-	// openSUSE Leap carries a two-segment id (Syft distro=opensuse-leap-15.6), which the id/ver Cut below
-	// mis-splits, so key it explicitly. The owned openSUSE OVAL feed writes "openSUSE:<release>" (the family
-	// "openSUSE" that advisory.osFamilyScheme orders as rpm), so the two agree.
-	if purlType(purl) == "rpm" {
-		if v := strings.TrimPrefix(distro, "opensuse-leap-"); v != distro && v != "" {
-			parts := strings.SplitN(v, ".", 3)
-			if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
-				return "openSUSE:" + parts[0] + "." + parts[1]
-			}
-			return "openSUSE:" + v
-		}
-	}
-	id, ver, ok := strings.Cut(distro, "-")
-	if !ok || ver == "" {
-		return ""
-	}
-	switch purlType(purl) {
-	case "deb":
-		if id == "debian" {
-			major := ver
-			if i := strings.IndexByte(ver, '.'); i >= 0 {
-				major = ver[:i]
-			}
-			if major != "" {
-				return "Debian:" + major
-			}
-		}
-		if id == "ubuntu" {
-			// Ubuntu OVAL keys by the release major.minor (e.g. "Ubuntu:22.04"), matching ParseUbuntuOVAL.
-			// Tolerate a point-release qualifier (ubuntu-22.04.1) by keying on major.minor so it can't
-			// desync from the feed's key.
-			parts := strings.SplitN(ver, ".", 3)
-			if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
-				return "Ubuntu:" + parts[0] + "." + parts[1]
-			}
-			return "Ubuntu:" + ver
-		}
-	case "apk":
-		if id == "alpine" {
-			parts := strings.SplitN(ver, ".", 3)
-			if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
-				return "Alpine:v" + parts[0] + "." + parts[1]
-			}
-		}
-	case "rpm":
-		// The rpm distros key by "<Name>:<major>", the major taken from the distro qualifier's VERSION_ID.
-		// The owned RedHat CSAF feed writes "Red Hat:<major>" (the RHEL major from the platform CPE), so a
-		// RHEL component (Syft distro id "rhel"/"redhat") keys the same way. CentOS is deliberately NOT mapped
-		// to Red Hat: CentOS Stream runs ahead of RHEL, so a RHEL fixed NEVR would false-match a Stream
-		// package at a different version. Rocky/AlmaLinux/Oracle key to their OWN rebuild ecosystems (their
-		// errata feeds), never Red Hat, for the same version-drift reason. Fedora stays unmapped (no feed).
-		major := ver
-		if i := strings.IndexByte(ver, '.'); i >= 0 {
-			major = ver[:i]
-		}
-		if major == "" {
-			return ""
-		}
-		switch id {
-		case "rhel", "redhat":
-			return "Red Hat:" + major
-		case "rocky":
-			return "Rocky Linux:" + major
-		case "almalinux", "alma":
-			return "AlmaLinux:" + major
-		case "ol", "oracle":
-			return "Oracle Linux:" + major
-		case "amzn", "amazon":
-			// Syft emits distro=amzn-2 / amzn-2023; the owned Amazon updateinfo feed writes "Amazon Linux:2" /
-			// "Amazon Linux:2023" from the collection short (amazon-linux-2 / amazon-linux-2023).
-			return "Amazon Linux:" + major
-		}
-	}
-	return ""
+	return sbom.DistroEcosystem(purlType(purl), purlQualifier(purl, "distro"))
 }
 
 // osvEcosystem maps a PURL type to the OSV ecosystem the store is keyed by. Unmapped → "" (skip – never a

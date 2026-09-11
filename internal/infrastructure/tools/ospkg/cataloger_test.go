@@ -213,3 +213,40 @@ func TestCatalogDistroTagRoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// TestCatalogRPMDistroResolution locks which rpm-family os-release IDs mark DistroResolved, in lockstep with
+// rpmMatchableIDs and osDistroEcosystem: Amazon Linux resolves now that its updateinfo feed exists, while
+// Fedora (no feed) and CentOS (Stream drifts ahead of RHEL) stay cataloged-but-unresolved. It reuses the real
+// BerkeleyDB rpm fixture (the packages are inventory; only the os-release drives the resolved flag).
+func TestCatalogRPMDistroResolution(t *testing.T) {
+	cases := []struct {
+		id, ver  string
+		resolved bool
+	}{
+		{"amzn", "2", true},
+		{"amzn", "2023", true},
+		{"fedora", "40", false},
+		{"centos", "9", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id+"-"+tc.ver, func(t *testing.T) {
+			rootfs := decompressFixture(t, "ubi8-micro.rpmdb.bdb.gz", rpmBDBPath)
+			if err := os.MkdirAll(filepath.Join(rootfs, "etc"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(rootfs, "etc/os-release"), []byte("ID="+tc.id+"\nVERSION_ID=\""+tc.ver+"\"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			res, err := New().Catalog(context.Background(), rootfs)
+			if err != nil {
+				t.Fatalf("catalog: %v", err)
+			}
+			if len(res.Components) == 0 {
+				t.Fatal("packages must still be cataloged for inventory")
+			}
+			if res.DistroResolved != tc.resolved {
+				t.Errorf("%s-%s: DistroResolved=%v, want %v", tc.id, tc.ver, res.DistroResolved, tc.resolved)
+			}
+		})
+	}
+}

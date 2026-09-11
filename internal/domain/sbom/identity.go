@@ -129,6 +129,8 @@ func ComponentFingerprint(identity ComponentIdentity, purl string) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// distroEcosystem reads the distro qualifier from an OS-package PURL and maps it to the advisory ecosystem via
+// the shared DistroEcosystem, so this inventory identity and the scan-side matcher key a component identically.
 func distroEcosystem(typ, purl string) string {
 	qualifiers := ""
 	if i := strings.IndexByte(purl, '?'); i >= 0 {
@@ -138,34 +140,72 @@ func distroEcosystem(typ, purl string) string {
 	if err != nil {
 		return ""
 	}
-	distro := values.Get("distro")
-	id, version, ok := strings.Cut(strings.ToLower(distro), "-")
-	if !ok || id == "" || version == "" {
+	return DistroEcosystem(typ, values.Get("distro"))
+}
+
+// DistroEcosystem maps an OS package's PURL type and its Syft "distro" qualifier (e.g. "rpm", "amzn-2") to the
+// advisory ecosystem key ("Amazon Linux:2"), the exact key the owned distro feed writes and the matcher keys
+// on. It is the SINGLE source of truth for OS-package ecosystem keying: both the inventory identity here and
+// the scan-side matcher (osDistroEcosystem in the ownadvisory feed) call it, so the two can never drift. The
+// qualifier is lowercased first (Syft emits lowercase; a case-variant keys the same). An unmapped distro
+// (CentOS, Fedora, openSUSE Tumbleweed, SUSE Linux Enterprise) or a malformed qualifier returns "" (cataloged
+// for inventory, never keyed to an advisory ecosystem, so never a false match).
+func DistroEcosystem(purlType, distro string) string {
+	distro = strings.ToLower(distro)
+	if distro == "" {
 		return ""
 	}
-	parts := strings.Split(version, ".")
-	switch typ {
+	// openSUSE Leap carries a two-segment id (Syft distro=opensuse-leap-15.6), which the id/ver Cut below
+	// mis-splits, so key it explicitly: "openSUSE:<major.minor>", the key the owned openSUSE Leap OVAL feed writes.
+	if purlType == "rpm" {
+		if v := strings.TrimPrefix(distro, "opensuse-leap-"); v != distro && v != "" {
+			p := strings.SplitN(v, ".", 3)
+			if len(p) >= 2 && p[0] != "" && p[1] != "" {
+				return "openSUSE:" + p[0] + "." + p[1]
+			}
+			return "openSUSE:" + v
+		}
+	}
+	id, ver, ok := strings.Cut(distro, "-")
+	if !ok || id == "" || ver == "" {
+		return ""
+	}
+	major := ver
+	if i := strings.IndexByte(ver, '.'); i >= 0 {
+		major = ver[:i]
+	}
+	switch purlType {
 	case "deb":
 		switch id {
 		case "debian":
-			return "Debian:" + parts[0]
-		case "ubuntu":
-			if len(parts) >= 2 {
-				return "Ubuntu:" + parts[0] + "." + parts[1]
+			if major != "" {
+				return "Debian:" + major
 			}
+		case "ubuntu":
+			// Ubuntu OVAL keys by release major.minor; tolerate a point release (ubuntu-22.04.1) by keying on
+			// major.minor, and fall back to the raw version for an unexpected shape.
+			p := strings.SplitN(ver, ".", 3)
+			if len(p) >= 2 && p[0] != "" && p[1] != "" {
+				return "Ubuntu:" + p[0] + "." + p[1]
+			}
+			return "Ubuntu:" + ver
 		}
 	case "apk":
-		if id == "alpine" && len(parts) >= 2 {
-			return "Alpine:v" + parts[0] + "." + parts[1]
+		if id == "alpine" {
+			p := strings.SplitN(ver, ".", 3)
+			if len(p) >= 2 && p[0] != "" && p[1] != "" {
+				return "Alpine:v" + p[0] + "." + p[1]
+			}
 		}
 	case "rpm":
-		major := parts[0]
+		if major == "" {
+			return ""
+		}
+		// The rpm distros key "<Name>:<major>". CentOS is deliberately excluded (Stream runs ahead of RHEL, so
+		// a RHEL fixed NEVR would false-match a Stream package); Fedora and SUSE Linux Enterprise stay unmapped
+		// (no owned feed). Each mapped id keys the ecosystem its own feed writes.
 		switch id {
 		case "rhel", "redhat":
-			// RHEL keys to "Red Hat:<major>", matching the owned RedHat CSAF feed (which derives the major
-			// from the platform CPE). CentOS is deliberately excluded: CentOS Stream runs ahead of RHEL, so a
-			// RHEL fixed NEVR would false-match a Stream package. Rocky/Alma/Oracle key to their own rebuild
-			// ecosystems. This mapping MUST stay in lockstep with osDistroEcosystem in the ownadvisory feed.
 			return "Red Hat:" + major
 		case "rocky":
 			return "Rocky Linux:" + major
@@ -173,6 +213,8 @@ func distroEcosystem(typ, purl string) string {
 			return "AlmaLinux:" + major
 		case "ol", "oracle":
 			return "Oracle Linux:" + major
+		case "amzn", "amazon":
+			return "Amazon Linux:" + major
 		}
 	}
 	return ""
