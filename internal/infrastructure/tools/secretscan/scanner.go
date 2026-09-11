@@ -661,6 +661,16 @@ func set(items ...string) map[string]bool {
 	return m
 }
 
+// highEntropyDeferKeywords are lowercase substrings that, when present on a line, make the keyword-FREE
+// generic-high-entropy rule stand down (matched case-insensitively by hasAnyKeyword). The first group are
+// credential keywords the PROMOTED/gating generic-secret rule owns, so a keyword-context secret is gated
+// there rather than quarantined here; the second group are benign high-entropy contexts (SRI/integrity,
+// digests, checksums, ETags) that are public hashes, not credentials.
+var highEntropyDeferKeywords = []string{
+	"secret", "token", "passwd", "password", "api_key", "apikey", "access_key",
+	"integrity", "digest", "checksum", "sha256", "sha384", "sha512", "sha1", "md5", "fingerprint", "etag",
+}
+
 // defaultRules is the owned starter ruleset. Prefix-anchored rules (AWS/GitHub/GitLab/Slack/Google/private
 // key) need no entropy gate; the generic assignment rule is entropy-gated and only MEDIUM to bound FPs.
 func baseDefaultRules() []rule {
@@ -890,6 +900,25 @@ func baseDefaultRules() []rule {
 			id: "jfrog-token", category: "JFrog", title: "JFrog Artifactory token", severity: shared.SeverityHigh,
 			keywords: []string{"AKCp8"},
 			re:       regexp.MustCompile(`\bAKCp8[A-Za-z0-9]{50,}\b`),
+		},
+		{
+			// Keyword-INDEPENDENT high-entropy detector (D6.7): fires on a standalone base64-alphabet token
+			// of 32-64 chars with Shannon entropy >= 4.5 bits/char, with NO adjacent keyword. The 4.5 floor
+			// sits ABOVE the 4.0 maximum of any hex string, so git SHAs, md5/sha hashes, and hex UUIDs are
+			// excluded by construction; only a base64-alphabet blob (a real token/key shape) can clear it.
+			// The delimiter anchors capture a COMPLETE token, so a fragment of a long minified/base64 blob
+			// (which is neither 32-64 chars nor delimited) does not match. Its hits are QUARANTINED into the
+			// needs-verify queue (quarantineUnkeyedEntropySecrets), never promoted to a gating finding, so
+			// the residual noise of a keyword-free rule cannot fail a build.
+			id: "generic-high-entropy", category: "Generic", title: "High-entropy string", severity: shared.SeverityMedium,
+			keywords: nil,
+			re:       regexp.MustCompile(`(?:^|[^A-Za-z0-9+/=_-])([A-Za-z0-9+/_-]{32,64}={0,2})(?:[^A-Za-z0-9+/=_-]|$)`),
+			group:    1, minEnt: 4.5,
+			// This is the KEYWORD-FREE detector. If a secret keyword is on the same line, defer to the
+			// keyword-anchored generic-secret rule (which is PROMOTED/gating) rather than quarantining here,
+			// so a keyword-context secret is never demoted to gate-exempt. Also skip benign high-entropy
+			// contexts (SRI/integrity, digests, checksums) that are public hashes, not credentials.
+			lineSkip: func(line string) bool { return hasAnyKeyword(line, highEntropyDeferKeywords) },
 		},
 		{
 			id: "generic-secret", category: "Generic", title: "Hardcoded secret", severity: shared.SeverityMedium,

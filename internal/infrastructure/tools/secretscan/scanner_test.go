@@ -562,3 +562,63 @@ func TestDetectsDiscordWebhook(t *testing.T) {
 		t.Errorf("near-miss discord URL must not match, got %+v", rs2)
 	}
 }
+
+// TestGenericHighEntropyTuning is the D6.7 tuning test: it fixes the entropy threshold on
+// real-looking-vs-random fixtures. High-entropy base64-alphabet blobs (the shape of real keys/tokens) MUST
+// fire the keyword-free detector; hex hashes/SHAs, UUIDs, English prose, low-entropy runs, and short tokens
+// MUST NOT (the 4.5 bits/char floor sits above the 4.0 hex maximum, so every hex string is excluded by
+// construction). Values that must fire are hashed rather than written as literals so no real-looking secret
+// appears in this source.
+func TestGenericHighEntropyTuning(t *testing.T) {
+	sum := func(s string) []byte { d := sha256.Sum256([]byte(s)); return d[:] }
+	fires := []string{
+		base64.StdEncoding.EncodeToString(sum("alpha")),    // 44 chars, ~6 bits/char
+		base64.StdEncoding.EncodeToString(sum("bravo")),    // padded base64
+		base64.RawURLEncoding.EncodeToString(sum("delta")), // url alphabet, no padding
+	}
+	for i, v := range fires {
+		rs := scanDir(t, map[string]string{"f.txt": "value = \"" + v + "\"\n"})
+		if hasRule(rs, "generic-high-entropy") == nil {
+			t.Errorf("fires[%d] (a high-entropy base64 blob) must trigger generic-high-entropy: %q", i, v)
+		}
+	}
+
+	benign := map[string]string{
+		"sha256hex": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03", // 64 hex ⇒ entropy 4.0
+		"sha1hex":   "e83c5163316f89bfbde7d9ab23ca2e25604af290",                         // 40 hex (git SHA)
+		"uuid":      "550e8400-e29b-41d4-a716-446655440000",                             // hex + dashes ⇒ < 4.0
+		"english":   "the quick brown fox jumps over the lazy dog again and again now",  // prose ⇒ low entropy + spaces
+		"repeated":  strings.Repeat("ab", 30),                                           // 60 chars, 2 symbols ⇒ entropy 1.0
+		"shortish":  "abc123XYZ_short",                                                  // < 32 chars
+	}
+	for name, v := range benign {
+		rs := scanDir(t, map[string]string{name + ".txt": "value = \"" + v + "\"\n"})
+		if r := hasRule(rs, "generic-high-entropy"); r != nil {
+			t.Errorf("benign %s (%q) must NOT trigger generic-high-entropy, got match %q", name, v, r.match)
+		}
+	}
+}
+
+// D6.7 (keyword-defer): a high-entropy value on a line WITH a secret keyword must NOT fire the keyword-free
+// generic-high-entropy rule — it defers to the PROMOTED/gating generic-secret rule, so a keyword-context
+// secret is never demoted to gate-exempt. A benign integrity/digest context is skipped entirely.
+func TestGenericHighEntropyDefersToKeywordRules(t *testing.T) {
+	sum := func(s string) []byte { d := sha256.Sum256([]byte(s)); return d[:] }
+	blob := base64.StdEncoding.EncodeToString(sum("zeta"))
+
+	rs := scanDir(t, map[string]string{"a.go": "password = \"" + blob + "\"\n"})
+	if r := hasRule(rs, "generic-high-entropy"); r != nil {
+		t.Errorf("a keyword-adjacent high-entropy value must defer to keyword rules, not fire generic-high-entropy: %+v", r)
+	}
+	if hasRule(rs, "generic-secret") == nil {
+		t.Errorf("the keyword-anchored generic-secret rule must still catch (and gate) the keyword-context secret")
+	}
+
+	// A benign integrity/SRI or digest context is a public hash, not a credential: skipped.
+	for _, ctx := range []string{"integrity=\"" + blob + "\"", "digest: \"" + blob + "\"", "checksum = \"" + blob + "\""} {
+		rsB := scanDir(t, map[string]string{"b.txt": ctx + "\n"})
+		if r := hasRule(rsB, "generic-high-entropy"); r != nil {
+			t.Errorf("a benign hash context (%q) must not fire generic-high-entropy: %+v", ctx, r)
+		}
+	}
+}
