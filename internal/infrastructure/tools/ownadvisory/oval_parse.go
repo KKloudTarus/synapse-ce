@@ -3,6 +3,7 @@ package ownadvisory
 import (
 	"bytes"
 	"compress/bzip2"
+	"compress/gzip"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -23,12 +24,13 @@ import (
 //     name to a "less than" fixed version (a <version> element for Ubuntu, <evr> for Debian). Keyed
 //     "Ubuntu:<release>" (from the id codename) or "Debian:<major>" (from the affected <platform>), one file
 //     is one release.
-//   - rpm-family (Oracle Linux com.oracle.elsa, AlmaLinux org.almalinux.al): rpminfo tests bind a package
-//     name to a "less than" <evr>. A file can mix releases, so each package is keyed to the release its own
-//     rpm dist tag names (.elN / .olN) constrained to the definition's covered majors (from the platform for
-//     Oracle, the affected CPE for AlmaLinux); one patch fixes several CVEs and a CVE spans releases, so
-//     packages are unioned per CVE into one advisory. Modular definitions are skipped (they need the enabled
-//     module stream the scan side does not carry). See rpmOvalDistros for the per-feed configuration.
+//   - rpm-family (Oracle Linux com.oracle.elsa, AlmaLinux org.almalinux.al, openSUSE org.opensuse.security):
+//     rpminfo tests bind a package name to a "less than" <evr>. A file can mix releases, so each package is
+//     keyed to the release its own rpm dist tag names (.elN / .olN), or, for a version with no dist tag (SUSE),
+//     the definition's single covered release; the covered majors come from the platform (Oracle, SUSE) or the
+//     affected CPE (AlmaLinux). One patch fixes several CVEs and a CVE spans releases, so packages are unioned
+//     per CVE into one advisory. Modular definitions are skipped (they need the enabled module stream the scan
+//     side does not carry). See rpmOvalDistros for the per-feed configuration. SUSE ships gzip, the rest bzip2.
 //
 // Each binding maps to a [0, fixed) ECOSYSTEM range that the owned dpkg/rpm comparator orders and the
 // scan-side osDistroEcosystem keys identically. A package with no "less than" fixed version (not-yet-fixed /
@@ -135,10 +137,19 @@ func scanOVAL(content []byte) (*ovalScan, error) {
 	}
 	var r io.Reader = bytes.NewReader(content)
 	var lr *io.LimitedReader
-	if bytes.HasPrefix(content, []byte("BZh")) { // bzip2 magic
-		// Read one PAST the cap so an over-cap feed is detected and fails CLOSED after the loop, rather than
-		// truncating silently mid-stream into a partial (whole-release-dropped) advisory set.
+	// Read one PAST the cap so an over-cap feed is detected and fails CLOSED after the loop, rather than
+	// truncating silently mid-stream into a partial (whole-release-dropped) advisory set. Ubuntu/Debian/Oracle
+	// ship bzip2; SUSE ships gzip.
+	switch {
+	case bytes.HasPrefix(content, []byte("BZh")): // bzip2 magic
 		lr = &io.LimitedReader{R: bzip2.NewReader(r), N: maxOVALDecompressed + 1}
+		r = lr
+	case bytes.HasPrefix(content, []byte{0x1f, 0x8b}): // gzip magic
+		gz, err := gzip.NewReader(r)
+		if err != nil {
+			return nil, fmt.Errorf("parse oval: gzip: %w", err)
+		}
+		lr = &io.LimitedReader{R: gz, N: maxOVALDecompressed + 1}
 		r = lr
 	}
 
@@ -239,6 +250,7 @@ type rpmOvalDistro struct {
 var rpmOvalDistros = []rpmOvalDistro{
 	{idPrefix: "oval:com.oracle.elsa", ecosystem: "Oracle Linux:", majorsOf: oraclePlatformMajors},
 	{idPrefix: "oval:org.almalinux.al", ecosystem: "AlmaLinux:", majorsOf: almaCPEMajors},
+	{idPrefix: "oval:org.opensuse.security", ecosystem: "openSUSE:", majorsOf: susePlatformMajors},
 }
 
 // rpmDistro reports which rpm-family OVAL feed this document is, detected by the anchored definition-id
@@ -337,6 +349,11 @@ func rpmOvalAffected(d *ovalDefinition, ecosystemPrefix string, majors map[strin
 			singleMajor = m
 		}
 	}
+	// A package that also carries an upper-exclusion ("greater than [or equal]") state in this definition is a
+	// BOUNDED [X, Y) affected range, not a fixed-at boundary; emitting its "less than Y" as [0, Y) would widen
+	// past X and match versions below X that are not affected. Current feeds never pair the two for one package
+	// (verified against the SUSE feed), so this is a fail-closed guard against a future feed that does.
+	bounded := boundedPackages(d, tests, objects, states)
 	seen := map[string]bool{}
 	var out []advisory.AffectedPackage
 	for _, ref := range flattenCriteria(&d.Criteria) {
@@ -348,6 +365,9 @@ func rpmOvalAffected(d *ovalDefinition, ecosystemPrefix string, majors map[strin
 		st, ok := states[t.State.Ref]
 		if pkg == "" || !ok {
 			continue
+		}
+		if bounded[pkg] {
+			continue // a [X, Y) range: skip rather than emit an overshooting [0, Y)
 		}
 		operation, value, ok := st.fixed()
 		if !ok {
@@ -381,6 +401,33 @@ func rpmOvalAffected(d *ovalDefinition, ecosystemPrefix string, majors map[strin
 		})
 	}
 	return out
+}
+
+// boundedPackages returns the set of packages a definition constrains with an upper-exclusion state
+// ("greater than" / "greater than or equal"), i.e. the lower bound of a [X, Y) affected range. Such a package
+// must not be emitted from its "less than Y" state alone (that would be [0, Y), overshooting past X).
+func boundedPackages(d *ovalDefinition, tests map[string]ovalTest, objects map[string]string, states map[string]ovalState) map[string]bool {
+	bounded := map[string]bool{}
+	for _, ref := range flattenCriteria(&d.Criteria) {
+		t, ok := tests[ref]
+		if !ok {
+			continue
+		}
+		pkg := objects[t.Object.Ref]
+		st, ok := states[t.State.Ref]
+		if pkg == "" || !ok {
+			continue
+		}
+		op, _, ok := st.fixed()
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(op)) {
+		case "greater than", "greater than or equal":
+			bounded[pkg] = true
+		}
+	}
+	return bounded
 }
 
 // oraclePlatformMajors is the set of release majors a definition's platforms name ("Oracle Linux 8" -> "8").
@@ -425,17 +472,62 @@ func almaCPERelease(cpe string) string {
 	return rest[:j]
 }
 
-// rpmOvalCVEs returns the definition's distinct CVE references in order.
+// rpmOvalCVEs returns the definition's distinct CVE references in order, from the CVE <reference> entries
+// (Oracle, AlmaLinux) and from the <title> (SUSE names the CVE only in the title, e.g. "CVE-2001-0405").
 func rpmOvalCVEs(d *ovalDefinition) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, r := range d.References {
-		if r.Source == "CVE" && strings.HasPrefix(r.RefID, "CVE-") && !seen[r.RefID] {
-			seen[r.RefID] = true
-			out = append(out, r.RefID)
+	add := func(id string) {
+		if strings.HasPrefix(id, "CVE-") && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
 		}
 	}
+	for _, r := range d.References {
+		if r.Source == "CVE" {
+			add(r.RefID)
+		}
+	}
+	for _, id := range cvePattern.FindAllString(d.Title, -1) {
+		add(id)
+	}
 	return out
+}
+
+var cvePattern = regexp.MustCompile(`CVE-\d{4}-\d{4,}`)
+
+// susePlatformMajors is the set of release versions a SUSE definition's platforms name ("openSUSE Leap 15.6"
+// -> "15.6"). openSUSE OVAL is per-release, so this is normally a single entry.
+func susePlatformMajors(d *ovalDefinition) map[string]bool {
+	majors := map[string]bool{}
+	for _, p := range d.Platforms {
+		if rel := susePlatformRelease(p); rel != "" {
+			majors[rel] = true
+		}
+	}
+	return majors
+}
+
+// susePlatformRelease extracts the release from a SUSE OVAL platform ("openSUSE Leap 15.6" -> "15.6"); a
+// non-openSUSE-Leap platform returns "". SUSE rpm versions carry no distro dist tag, so the release comes
+// from the platform and every package in a (single-release) file keys to it.
+func susePlatformRelease(platform string) string {
+	const marker = "opensuse leap "
+	trimmed := strings.TrimSpace(platform)
+	i := strings.Index(strings.ToLower(trimmed), marker)
+	if i < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(trimmed[i+len(marker):])
+	j := 0
+	for j < len(rest) && (rest[j] >= '0' && rest[j] <= '9' || rest[j] == '.') {
+		j++
+	}
+	rel := strings.TrimRight(rest[:j], ".")
+	if rel == "" || !strings.ContainsAny(rel, "0123456789") {
+		return ""
+	}
+	return rel
 }
 
 // oracleReleaseFromEVR extracts the OS major from an rpm release dist tag: ".el8_10" / ".el8uek" / ".ol9_..."
