@@ -601,3 +601,76 @@ func TestOracleReleaseFromEVR(t *testing.T) {
 		}
 	}
 }
+
+// TestParseAlmaLinuxOVAL parses a real (trimmed) AlmaLinux ALSA OVAL fixture into AlmaLinux:9 advisories,
+// exercising the rpm-family path with the release taken from the affected CPE (AlmaLinux leaves <platform>
+// empty).
+func TestParseAlmaLinuxOVAL(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "oval-almalinux.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatalf("ParseOVAL(alma): %v", err)
+	}
+	if len(advs) == 0 {
+		t.Fatal("no AlmaLinux advisories parsed")
+	}
+	var grafana advisory.Advisory
+	for _, a := range advs {
+		for _, ap := range a.Affected {
+			if ap.Ecosystem != "AlmaLinux:9" {
+				t.Errorf("%s: ecosystem = %q, want AlmaLinux:9", a.ID, ap.Ecosystem)
+			}
+			if strings.Contains(ap.FixedVersion, ".module") {
+				t.Errorf("%s: modular version leaked: %s", a.ID, ap.FixedVersion)
+			}
+			if ap.Package == "grafana" {
+				grafana = a
+			}
+		}
+	}
+	if grafana.ID == "" || grafana.Affected[0].FixedVersion != "0:7.5.11-5.el9_0" {
+		t.Fatalf("grafana advisory not parsed as expected: %+v", grafana)
+	}
+	// end-to-end match through the rpm comparator and the AlmaLinux:9 key
+	if ok, _ := grafana.Match("AlmaLinux:9", "grafana", "0:7.5.11-4.el9_0"); !ok {
+		t.Error("an older grafana must match")
+	}
+	if ok, _ := grafana.Match("AlmaLinux:9", "grafana", "0:7.5.11-5.el9_0"); ok {
+		t.Error("grafana at the fixed version must not match")
+	}
+	if ok, _ := grafana.Match("AlmaLinux:8", "grafana", "0:7.5.11-4.el9_0"); ok {
+		t.Error("a different AlmaLinux release must not match")
+	}
+}
+
+func TestAlmaCPERelease(t *testing.T) {
+	cases := map[string]string{
+		"cpe:/a:almalinux:almalinux:9":            "9",
+		"cpe:/a:almalinux:almalinux:9::appstream": "9",
+		"cpe:/a:almalinux:almalinux:8::crb":       "8",
+		"cpe:/o:redhat:enterprise_linux:9":        "",
+		"cpe:/a:almalinux:almalinux:":             "",
+		"":                                        "",
+	}
+	for cpe, want := range cases {
+		if got := almaCPERelease(cpe); got != want {
+			t.Errorf("almaCPERelease(%q) = %q, want %q", cpe, got, want)
+		}
+	}
+}
+
+// TestAlmaEcosystemKeyRoundTrip locks the AlmaLinux feed key to the matcher key a Syft almalinux rpm PURL
+// derives.
+func TestAlmaEcosystemKeyRoundTrip(t *testing.T) {
+	for _, tc := range []struct{ purl, want string }{
+		{"pkg:rpm/almalinux/bash@5?arch=x86_64&distro=almalinux-9.4", "AlmaLinux:9"},
+		{"pkg:rpm/alma/bash@5?distro=almalinux-8", "AlmaLinux:8"},
+	} {
+		if got := osDistroEcosystem(tc.purl); got != tc.want {
+			t.Errorf("osDistroEcosystem(%s) = %q, want %q", tc.purl, got, tc.want)
+		}
+	}
+}
