@@ -256,6 +256,7 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string, symbols []s
 		// orders findings by KEV/EPSS without the live network enricher (which still runs online and raises).
 		KEV:             a.KEV,
 		EPSS:            a.EPSS,
+		PublicExploit:   a.PublicExploit, // D1.3: a public exploit exists (offline, from the synced corpus)
 		AffectedSymbols: symbols,
 	}
 	if len(fixedVersions) > 0 {

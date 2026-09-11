@@ -84,6 +84,9 @@ func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding
 			if len(f.DirectBumps) == 0 {
 				f.DirectBumps = existing.DirectBumps
 			}
+			// PublicExploit (D1.3) is OR-merged (monotonic any-true, mirroring the domain's any-source-KEV
+			// merge and the postgres OR): a producer that does not compute it must not clear a stored true.
+			f.PublicExploit = f.PublicExploit || existing.PublicExploit
 			machineChanged := findingMachineProjectionChanged(existing, f)
 			f.ID = existing.ID
 			f.Status = existing.Status // preserve triage
@@ -123,6 +126,7 @@ func findingMachineProjectionChanged(existing, incoming finding.Finding) bool {
 		existing.OccurrenceID != incoming.OccurrenceID ||
 		existing.ComponentFingerprint != incoming.ComponentFingerprint ||
 		existing.FixedVersion != incoming.FixedVersion ||
+		existing.PublicExploit != incoming.PublicExploit ||
 		!sameStrings(existing.DirectBumps, incoming.DirectBumps) ||
 		existing.DetectionState != incoming.DetectionState ||
 		existing.RiskAssessmentID != incoming.RiskAssessmentID ||

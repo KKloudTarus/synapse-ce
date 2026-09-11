@@ -7897,6 +7897,9 @@ components:
             type: array
             items: {type: string}
             description: Minimal set of direct dependencies to upgrade to remove a transitive vulnerability (EPIC #860 D3.8). Empty/omitted for a first-party finding or when no dependency graph was resolved.
+          PublicExploit:
+            type: boolean
+            description: True when a public exploit is known to exist for this finding's vulnerability (EPIC #860 D1.3, an exploitation-risk triage signal). Omitted when false.
           Audit:
             type: object
             properties:

@@ -303,3 +303,23 @@ func TestFindingRepositoryPreservesDirectBumpsOnEmptyUpsert(t *testing.T) {
 		t.Errorf("a non-empty incoming must replace DirectBumps, got %+v", list[0].DirectBumps)
 	}
 }
+
+// D1.3: PublicExploit is OR-merged (monotonic any-true) so a producer that does not compute it (the
+// continuous vulnerability projection) cannot clear a stored true; a true incoming still sets it.
+func TestFindingRepositoryOrMergesPublicExploit(t *testing.T) {
+	r := NewFindingRepository()
+	ctx := context.Background()
+	scan := finding.Finding{ID: "f1", EngagementID: "e1", Title: "v", Severity: shared.SeverityHigh, Status: finding.StatusOpen, DedupKey: "vuln:CVE-1", PublicExploit: true}
+	if err := r.Upsert(ctx, []finding.Finding{scan}); err != nil {
+		t.Fatal(err)
+	}
+	proj := scan
+	proj.PublicExploit = false // a producer without the signal must not clear it
+	if err := r.Upsert(ctx, []finding.Finding{proj}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := r.ListByEngagement(ctx, "e1")
+	if len(list) != 1 || !list[0].PublicExploit {
+		t.Fatalf("PublicExploit must be preserved (OR-merged) on a false re-upsert, got %+v", list)
+	}
+}

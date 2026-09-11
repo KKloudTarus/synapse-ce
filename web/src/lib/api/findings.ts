@@ -65,6 +65,7 @@ export function mapFinding(r: any): Finding {
       title: c.Title ?? '',
     })),
     directBumps: r.DirectBumps ?? [],
+    publicExploit: r.PublicExploit ?? false,
   }
 }
 
