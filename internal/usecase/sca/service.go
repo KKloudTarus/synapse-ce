@@ -81,6 +81,7 @@ type Service struct {
 	secretScanner                    ports.SecretScanner                   // optional deterministic secret scan over the live workspace
 	secretHistory                    bool                                  // also scan git history for committed-then-removed secrets
 	includeTestSecrets               bool                                  // report secrets in test/fixture/docs paths (default false: suppress)
+	secretVerifier                   ports.SecretVerifier                  // optional opt-in active secret verification (D6.3); nil = off
 	misconfig                        ports.MisconfigScanner                // optional deterministic IaC/config misconfig scan over the live workspace
 	imageConfig                      ports.ImageConfigChecker              // optional owned image config + build-history hardening checks (D7.10)
 	fpTriager                        ports.FPTriager                       // optional LLM false-positive critique of production-scope source findings
@@ -276,6 +277,27 @@ func (s *Service) SetSecretHistoryEnabled(enabled bool) { s.secretHistory = enab
 // reported. Default false: they are suppressed (they are overwhelmingly fake credentials, not leaked
 // production secrets), so a customer report is not flooded with test-double noise.
 func (s *Service) SetIncludeTestSecrets(v bool) { s.includeTestSecrets = v }
+
+// SetSecretVerifier injects the OPT-IN active secret verifier (D6.3). When set AND the secret scanner
+// implements ports.VerifyingSecretScanner, the working-tree secret scan additionally makes one minimal
+// read-only provider call per detected credential to confirm it is live, stamping the finding's verdict.
+// nil (the default) leaves the scan fully deterministic and offline. Verification runs inside the scan the
+// engagement's authorization window already gated (execution.Guard), so it inherits that authorization.
+func (s *Service) SetSecretVerifier(v ports.SecretVerifier) { s.secretVerifier = v }
+
+// scanSecrets runs the working-tree secret scan. When a verifier is wired and the scanner implements the
+// verifying extension, it uses the opt-in active-verification path (one read-only provider call per
+// detected credential, verdict stamped on each finding); otherwise it uses the deterministic offline
+// ScanFiles. Active verification never changes WHICH secrets are found, only stamps a verdict, so a scanner
+// without the extension degrades cleanly to a deterministic scan.
+func (s *Service) scanSecrets(ctx context.Context, dir string) (ports.SecretScanReport, error) {
+	if s.secretVerifier != nil {
+		if vs, ok := s.secretScanner.(ports.VerifyingSecretScanner); ok {
+			return vs.ScanFilesVerified(ctx, dir, s.secretVerifier)
+		}
+	}
+	return s.secretScanner.ScanFiles(ctx, dir)
+}
 
 // SetFPTriage injects the optional LLM false-positive triager. When set, the pipeline critiques the
 // production-scope first-party source findings after they are built and records the advisory verdicts on
@@ -3196,7 +3218,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Deterministic secret scan over the LIVE workspace: hardcoded credentials, redacted before they
 	// leave the scanner. Ungated Kind=secret findings, publishable like SCA. Best-effort.
 	if opts.scansVulnerabilities() && s.secretScanner != nil {
-		secretReport, serr := s.secretScanner.ScanFiles(ctx, ws.Dir)
+		// Active verification (D6.3) is opt-in: only when a verifier is wired AND the scanner supports the
+		// verifying extension. Otherwise the scan stays deterministic and offline. The raw secret is
+		// confined to the scanner; only the verdict rides back on each finding.
+		secretReport, serr := s.scanSecrets(ctx, ws.Dir)
 		if serr != nil {
 			return nil, fmt.Errorf("scan secrets: %w", serr)
 		}

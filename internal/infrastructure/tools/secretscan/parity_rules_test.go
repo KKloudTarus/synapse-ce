@@ -106,7 +106,7 @@ func TestParityExpansionRules(t *testing.T) {
 
 func scanHasRule(s *Scanner, text, want string) bool {
 	var findings []ports.SecretRawFinding
-	s.scanContent("fixture.env", []byte(text), map[string]bool{}, &findings, 1000)
+	s.scanContent("fixture.env", []byte(text), map[string]bool{}, &findings, 1000, nil)
 	for _, finding := range findings {
 		if finding.RuleID == want {
 			return true

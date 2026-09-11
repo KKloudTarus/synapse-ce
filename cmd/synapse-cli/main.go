@@ -38,6 +38,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/secretverify"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourcesnippet"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
@@ -1012,13 +1013,14 @@ func gradeNum(g rating.Grade) float64 {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  synapse-cli doctor [path] [--json]       # offline pre-scan readiness: toolchain, markers, and dimension coverage")
-	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--min-confidence low|medium|high|very_high] [--base REF] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise] [--server URL --project KEY [--branch REF] [--run-url URL] [--ci-provider NAME] [--insecure-http]]")
+	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--min-confidence low|medium|high|very_high] [--base REF] [--include-test] [--verify-secrets] [--ignore-unfixed] [--detection-priority comprehensive|precise] [--server URL --project KEY [--branch REF] [--run-url URL] [--ci-provider NAME] [--insecure-http]]")
 	fmt.Fprintln(os.Stderr, "      --server   record the result on a Synapse server as the project's next analysis (token from SYNAPSE_API_TOKEN); the history, trend and managed gate in the console pick it up")
 	fmt.Fprintln(os.Stderr, "      --insecure-http   allow a plain-http --server that is not loopback (the token then travels in the clear)")
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  no network egress: skip live OSV, every registry resolver (npm/composer/poetry/bundler/maven/gradle), KEV/EPSS, online NVD, license metadata and AI triage; detect with Grype's offline DB only (air-gapped / fast)")
 	fmt.Fprintln(os.Stderr, "      --include-test  also fail the gate on findings in test/fixture/example paths (default: reported but exempt)")
+	fmt.Fprintln(os.Stderr, "      --verify-secrets  actively confirm each detected credential is live via one read-only provider call (opt-in; sends the secret to its issuing provider; default off)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli publish-source [path] --server URL --project KEY --analysis ID  # stream server-inventoried source; token from SYNAPSE_API_TOKEN")
 	fmt.Fprintln(os.Stderr, "  synapse-cli inventory <path>             # per-language code-size inventory (files, code/comment/blank lines, functions) – no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli metrics <path> [--fail-on-complexity N] [--top N]  # per-function cyclomatic+cognitive complexity (needs the synapse-ast sidecar)")
@@ -1052,6 +1054,7 @@ func runScan() {
 	sarifOut := false
 	sbomOut := false
 	includeTest := false
+	verifySecrets := false
 	minConfidence := ""
 	baseRef := ""
 	push := pushTarget{token: strings.TrimSpace(os.Getenv("SYNAPSE_API_TOKEN"))}
@@ -1085,6 +1088,8 @@ func runScan() {
 			i++
 		case os.Args[i] == "--include-test":
 			includeTest = true
+		case os.Args[i] == "--verify-secrets":
+			verifySecrets = true
 		case os.Args[i] == "--mode" && i+1 < len(os.Args):
 			mode = os.Args[i+1]
 			i++
@@ -1160,7 +1165,7 @@ func runScan() {
 		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json, --sarif or --sbom")
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, priority, minConfidence, baseRef, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest, push); err != nil {
+	if err := run(os.Args[2], failOn, mode, priority, minConfidence, baseRef, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest, verifySecrets, push); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -1393,7 +1398,7 @@ func selectSBOMGenerator(cfg config.Config) (ports.SBOMGenerator, error) {
 	}
 }
 
-func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest bool, push pushTarget) error {
+func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest, verifySecrets bool, push pushTarget) error {
 	// An image target is an OCI reference (acquired via crane → OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -1408,6 +1413,17 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	// single-tenant dogfood path, so bind the default tenant, same as the other CLI commands.
 	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	cfg := config.Load()
+	if verifySecrets { // --verify-secrets opts this run into active secret verification (default-off)
+		cfg.SecretVerifyEnabled = true
+	}
+	if offline && cfg.SecretVerifyEnabled {
+		// --offline is a no-network-egress contract; active verification makes outbound provider calls with
+		// the raw secret. Offline wins: disable verification (and say so if it was explicitly requested).
+		if verifySecrets {
+			fmt.Fprintln(os.Stderr, "synapse-cli: --offline disables active secret verification (no network egress); ignoring --verify-secrets")
+		}
+		cfg.SecretVerifyEnabled = false
+	}
 	if priority == "" { // the --detection-priority flag falls back to the configured default
 		priority = cfg.DetectionPriority
 	}
@@ -1580,6 +1596,13 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		sca.SetSecretScanner(secretscan.New())                // deterministic, redacted secret scan (CI-friendly)
 		sca.SetIncludeTestSecrets(includeTest)                // by default suppress test/fixture/docs/detector-pattern secrets (fake creds)
 		sca.SetSecretHistoryEnabled(cfg.SecretHistoryEnabled) // opt-in: also scan git history for committed-then-removed secrets
+		if cfg.SecretVerifyEnabled {
+			// --verify-secrets (D6.3): confirm each detected credential is live via one read-only provider
+			// call. Sends the raw secret to its issuing provider over the network; opt-in, rate-limited, and
+			// the secret is never logged. Only run this against credentials you are authorized to test.
+			sca.SetSecretVerifier(secretverify.New(float64(cfg.SecretVerifyRPS)))
+			fmt.Fprintln(os.Stderr, "synapse-cli: active secret verification ENABLED (--verify-secrets); detected credentials are sent to their issuing provider to confirm they are live")
+		}
 	}
 	if cfg.MisconfigEnabled {
 		// Trusted-local model (like the CLI's maven/gradle resolvers): render Helm charts via a direct

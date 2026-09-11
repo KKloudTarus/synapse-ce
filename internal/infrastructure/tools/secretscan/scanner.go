@@ -10,6 +10,7 @@ package secretscan
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -94,9 +95,67 @@ func New() *Scanner {
 func (s *Scanner) Name() string { return "synapse-secret-scan" }
 
 // ScanFiles walks root and returns redacted secret hits. It confines every open to root and stops
-// when an aggregate byte, file, or finding limit is reached. Child-file failures mark the report truncated and are otherwise skipped.
+// when an aggregate byte, file, or finding limit is reached. Child-file failures mark the report truncated
+// and are otherwise skipped. It is deterministic and READ-ONLY: it makes NO network calls (a nil verify
+// state), so the SecretScanner contract holds.
 func (s *Scanner) ScanFiles(ctx context.Context, root string) (ports.SecretScanReport, error) {
-	return s.scanFiles(ctx, root, scanLimits{files: maxFiles, bytes: maxTotalScanBytes, findings: maxFindings})
+	return s.scanFiles(ctx, root, scanLimits{files: maxFiles, bytes: maxTotalScanBytes, findings: maxFindings}, nil)
+}
+
+// ScanFilesVerified is the opt-in active-verification path (D6.3, ports.VerifyingSecretScanner): it scans
+// like ScanFiles but additionally asks verifier whether each detected credential is live and stamps the
+// finding's Verified verdict. The raw secret is confined to this scan (used only for the single provider
+// call, keyed by hash for per-scan dedup, then discarded) and never returned, logged, or sealed. A nil
+// verifier falls back to the deterministic path. Verification never removes a finding: an unknown or
+// unverified verdict leaves the hit exactly as ScanFiles would report it.
+func (s *Scanner) ScanFilesVerified(ctx context.Context, root string, verifier ports.SecretVerifier) (ports.SecretScanReport, error) {
+	if verifier == nil {
+		return s.ScanFiles(ctx, root)
+	}
+	vf := &verifyState{ctx: ctx, verifier: verifier, cache: map[string]ports.SecretVerdict{}}
+	return s.scanFiles(ctx, root, scanLimits{files: maxFiles, bytes: maxTotalScanBytes, findings: maxFindings}, vf)
+}
+
+var _ ports.VerifyingSecretScanner = (*Scanner)(nil)
+
+// maxSecretVerifications caps the number of DISTINCT provider calls one verified scan may make. A repo with
+// more than this many distinct credential-shaped strings is adversarial or misconfigured; the rest are left
+// SecretUnknown rather than amplified into outbound requests (a hostile-repo egress/rate-limit guard). It
+// bounds calls, not findings: every hit is still reported.
+const maxSecretVerifications = 100
+
+// verifyState carries the per-scan active-verification context. It is nil on the deterministic ScanFiles
+// path. cache dedups provider calls within a scan by rule + secret hash, so a credential repeated across
+// files is verified once and the plaintext is never held in a map (only its sha256). calls counts the
+// DISTINCT provider calls made this scan, capped at maxSecretVerifications.
+type verifyState struct {
+	ctx      context.Context
+	verifier ports.SecretVerifier
+	cache    map[string]ports.SecretVerdict
+	calls    int
+}
+
+// verdict returns the verification verdict for one detected secret, calling the provider at most once per
+// distinct (rule, secret) per scan and at most maxSecretVerifications times per scan. It returns
+// SecretUnknown when verification is off, the per-scan cap is reached, or the verifier fails; the verifier
+// is responsible for keeping the secret out of any returned error. The plaintext is used only for the call
+// and the sha256 cache key, never stored or logged here.
+func verdict(vf *verifyState, ruleID, secret string) ports.SecretVerdict {
+	if vf == nil || vf.verifier == nil {
+		return ports.SecretUnknown
+	}
+	sum := sha256.Sum256([]byte(secret))
+	key := ruleID + ":" + hex.EncodeToString(sum[:])
+	if v, ok := vf.cache[key]; ok {
+		return v
+	}
+	if vf.calls >= maxSecretVerifications {
+		return ports.SecretUnknown // over the per-scan cap: do not call (and do not cache, to keep the cap on calls)
+	}
+	vf.calls++
+	v, _ := vf.verifier.Verify(vf.ctx, ruleID, []byte(secret)) // error is pre-redacted; unknown on failure
+	vf.cache[key] = v
+	return v
 }
 
 type scanLimits struct {
@@ -105,7 +164,7 @@ type scanLimits struct {
 	findings int
 }
 
-func (s *Scanner) scanFiles(ctx context.Context, root string, limits scanLimits) (report ports.SecretScanReport, err error) {
+func (s *Scanner) scanFiles(ctx context.Context, root string, limits scanLimits, vf *verifyState) (report ports.SecretScanReport, err error) {
 	if err := ctx.Err(); err != nil {
 		return report, fmt.Errorf("secret scan: %w", err)
 	}
@@ -181,7 +240,7 @@ func (s *Scanner) scanFiles(ctx context.Context, root string, limits scanLimits)
 			if budget.maxBytes < 0 {
 				budget.maxBytes = 0
 			}
-			if s.scanArchiveData(ctx, filepath.ToSlash(path), archData, ext, seen, &report.Findings, limits.findings, budget, 0) {
+			if s.scanArchiveData(ctx, filepath.ToSlash(path), archData, ext, seen, &report.Findings, limits.findings, budget, 0, vf) {
 				report.Truncated = true
 			}
 			bytesRead += budget.bytes // charge decompressed bytes against the scan-wide budget
@@ -222,7 +281,7 @@ func (s *Scanner) scanFiles(ctx context.Context, root string, limits scanLimits)
 		if isBinary(data) {
 			return nil
 		}
-		if s.scanContent(filepath.ToSlash(path), data, seen, &report.Findings, limits.findings) {
+		if s.scanContent(filepath.ToSlash(path), data, seen, &report.Findings, limits.findings, vf) {
 			report.Truncated = true
 			return fs.SkipAll
 		}
@@ -264,7 +323,7 @@ func stableFileSnapshot(before, after fs.FileInfo, bytesRead int64) bool {
 		before.Size() == after.Size() && before.ModTime().Equal(after.ModTime()) && after.Size() == bytesRead
 }
 
-func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out *[]ports.SecretRawFinding, limit int) bool {
+func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, vf *verifyState) bool {
 	// Blank comment regions (VB, #-family, //-and-/* */-family) before the rules run, so a secret that
 	// lives only in a comment is not reported as a live finding. Offsets/newlines are preserved.
 	// Keep the pre-mask text: an inline "synapse:allow" annotation lives in the trailing comment that
@@ -304,6 +363,9 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 				continue
 			}
 			seen[key] = true
+			// Active verification (opt-in) runs here, where the plaintext is still in scope, and only the
+			// verdict is kept; the value is redacted into Match immediately after. verdict is a no-op
+			// (SecretUnknown) on the deterministic path.
 			*out = append(*out, ports.SecretRawFinding{
 				File:     rel,
 				Line:     line,
@@ -312,13 +374,14 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 				Title:    r.title,
 				Severity: r.severity,
 				Match:    redactMatch(secret),
+				Verified: verdict(vf, r.id, secret),
 			})
 		}
 	}
 	// A secret hidden inside a base64/hex value (a Kubernetes Secret, a base64-wrapped credential) is
 	// invisible to the rules above; the decode pass finds it. It runs on the same comment-masked text so a
 	// secret encoded inside a comment stays masked.
-	if s.scanDecoded(rel, text, original, seen, out, limit) {
+	if s.scanDecoded(rel, text, original, seen, out, limit, vf) {
 		return true
 	}
 	return false
@@ -336,7 +399,7 @@ var (
 // the ENCODED token's line, where a reader edits it. The pass is purely ADDITIVE: a hit requires a real
 // detector (with its distinctive keyword) to fire on the decoded bytes, so a random encoded blob (a hash,
 // an id, minified data) produces nothing. Returns true if the finding limit was reached.
-func (s *Scanner) scanDecoded(rel, text, original string, seen map[string]bool, out *[]ports.SecretRawFinding, limit int) bool {
+func (s *Scanner) scanDecoded(rel, text, original string, seen map[string]bool, out *[]ports.SecretRawFinding, limit int, vf *verifyState) bool {
 	tokens := 0
 	decodedBudget := maxDecodedBytesPerFile
 	consider := func(start int, token string, decode func(string) ([]byte, bool), enc string) bool {
@@ -384,7 +447,8 @@ func (s *Scanner) scanDecoded(rel, text, original string, seen map[string]bool, 
 				*out = append(*out, ports.SecretRawFinding{
 					File: rel, Line: line, RuleID: r.id, Category: r.category,
 					Title: r.title + " (" + enc + "-encoded)", Severity: r.severity,
-					Match: redactMatch(secret),
+					Match:    redactMatch(secret),
+					Verified: verdict(vf, r.id, secret),
 				})
 			}
 		}

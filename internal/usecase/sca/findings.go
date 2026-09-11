@@ -296,7 +296,7 @@ func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, 
 			Description:  secretDescription(sr),
 			Severity:     sr.Severity,
 			Sources:      []string{"synapse-secret-scan"},
-			Confidence:   secretRuleConfidence(sr.RuleID),
+			Confidence:   secretFindingConfidence(sr),
 			Class:        finding.ClassFirstParty,
 			Scope:        scope,
 			// Reachability/Impact are left empty on purpose: a hardcoded secret is a PRESENCE fact, not a
@@ -350,7 +350,27 @@ func secretDescription(sr ports.SecretRawFinding) string {
 		}
 		base += ". " + attribution + ". Rotate it: a committed-then-removed secret remains recoverable from the repository history."
 	}
+	// Active-verification verdict (D6.3), when the opt-in check ran. Verified is the strongest signal (a
+	// live credential); unverified never removes the finding (a rotated/revoked secret is still a leak).
+	switch sr.Verified {
+	case ports.SecretVerified:
+		base += " Active verification confirmed this credential is LIVE against its provider; rotate it immediately."
+	case ports.SecretUnverified:
+		base += " Active verification found this credential is not currently live (it may have been rotated or revoked); still remove it from source."
+	}
 	return base
+}
+
+// secretFindingConfidence tags a secret finding's confidence, raising an actively-verified live credential
+// to very_high — strictly ABOVE the high base the fixed-prefix vendor-token rules already carry, so a
+// confirmed-live leak is observably distinguished from an unchecked one and sorts to the top (the D6.3
+// "raises above needs-verify" signal). An unverified or unknown verdict keeps the rule's base confidence, so
+// a check that could not confirm the credential never lowers or suppresses the finding.
+func secretFindingConfidence(sr ports.SecretRawFinding) string {
+	if sr.Verified == ports.SecretVerified {
+		return vulnerability.ConfidenceVeryHigh
+	}
+	return secretRuleConfidence(sr.RuleID)
 }
 
 // buildMisconfigFindings turns insecure IaC/config settings into ungated Kind=misconfig findings

@@ -479,6 +479,17 @@ type Config struct {
 	// heavier and reports credentials no longer in the tree. Requires the workspace to be a git repository;
 	// otherwise it is a best-effort no-op with a warning. Redacts every match like the working-tree scan.
 	SecretHistoryEnabled bool
+	// SecretVerifyEnabled turns on OPT-IN active secret verification (D6.3): for a detected credential whose
+	// provider is supported (GitHub, GitLab, OpenAI in this build), the scanner makes ONE minimal read-only
+	// API call to that provider to confirm the credential is live, and stamps the finding verified/unverified.
+	// OFF by default and SECURITY-SENSITIVE: it sends the raw leaked secret to its issuing provider over the
+	// network (SSRF-hardened client, rate-limited, secret never logged). Enable only for an authorized
+	// assessment. A verified credential is raised above needs-verify; an unverified/unknown verdict never
+	// suppresses a finding.
+	SecretVerifyEnabled bool
+	// SecretVerifyRPS caps the verifier's outbound provider requests per second (default 5). Only meaningful
+	// when SecretVerifyEnabled is true.
+	SecretVerifyRPS int
 	// MisconfigEnabled turns on the deterministic IaC/config misconfig scanner (Dockerfile, Kubernetes
 	// manifests) in the scan pipeline; off by default. Read-only, first-party checks, no policy engine.
 	MisconfigEnabled bool
@@ -861,6 +872,8 @@ func Load() Config {
 		SASTEnabled:                       getbool("SYNAPSE_SAST_ENABLED", true),
 		SecretScanEnabled:                 getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
 		SecretHistoryEnabled:              getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
+		SecretVerifyEnabled:               getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
+		SecretVerifyRPS:                   getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
 		MisconfigEnabled:                  getbool("SYNAPSE_MISCONFIG_ENABLED", true),
 		SuppressionEnabled:                getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
 		VEXEnabled:                        getbool("SYNAPSE_VEX_ENABLED", true),

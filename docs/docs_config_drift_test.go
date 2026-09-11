@@ -177,6 +177,11 @@ func TestSecuritySensitiveEnvDocumentsItsRisk(t *testing.T) {
 			want: []string{"least-privileged"},
 			why:  "its purpose is separating migration authority from runtime authority",
 		},
+		{
+			env:  "SYNAPSE_SECRET_VERIFY_ENABLED",
+			want: []string{"network", "authorized"},
+			why:  "it sends the raw leaked secret to its issuing provider over the network",
+		},
 	}
 
 	for _, tc := range cases {
