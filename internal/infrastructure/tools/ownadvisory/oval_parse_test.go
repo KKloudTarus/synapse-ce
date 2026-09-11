@@ -100,8 +100,8 @@ func TestUbuntuReleaseTable(t *testing.T) {
 func TestUbuntuSeverityScore(t *testing.T) {
 	cases := map[string]float64{"Critical": 9.5, "High": 8.0, "Medium": 5.5, "Low": 3.0, "Negligible": 1.0, "untriaged": 0}
 	for sev, want := range cases {
-		if got := ubuntuSeverityScore(sev); got != want {
-			t.Errorf("ubuntuSeverityScore(%q) = %v, want %v", sev, got, want)
+		if got := ovalSeverityScore(sev); got != want {
+			t.Errorf("ovalSeverityScore(%q) = %v, want %v", sev, got, want)
 		}
 	}
 }
@@ -385,5 +385,219 @@ func TestParseOVALFamilyAnchoredNotSubstring(t *testing.T) {
 	}
 	if len(advs) != 1 || advs[0].Affected[0].Ecosystem != "Debian:12" {
 		t.Fatalf("an org.debian id must key Debian:12 despite a com.ubuntu substring, got %+v", advs)
+	}
+}
+
+// TestParseOracleOVAL parses a real (trimmed) Oracle Linux ELSA OVAL fixture: a non-modular patch fixing
+// several CVEs expands to one advisory per CVE keyed Oracle Linux:9, and a modular definition is skipped.
+func TestParseOracleOVAL(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "oval-oracle-linux.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatalf("ParseOVAL(oracle): %v", err)
+	}
+	cves := map[string]bool{}
+	pkgs := map[string]bool{}
+	for _, a := range advs {
+		cves[a.ID] = true
+		if len(a.Affected) == 0 {
+			t.Errorf("%s has no affected packages", a.ID)
+		}
+		for _, ap := range a.Affected {
+			pkgs[ap.Package] = true
+			if ap.Ecosystem != "Oracle Linux:9" {
+				t.Errorf("%s: ecosystem = %q, want Oracle Linux:9", a.ID, ap.Ecosystem)
+			}
+			if ap.Ranges[0].Type != "ECOSYSTEM" {
+				t.Errorf("%s: range type = %q, want ECOSYSTEM", a.ID, ap.Ranges[0].Type)
+			}
+			if strings.Contains(ap.FixedVersion, ".module") {
+				t.Errorf("%s: modular fixed version leaked: %s", a.ID, ap.FixedVersion)
+			}
+		}
+	}
+	// One ELSA fixing 7 CVEs in microcode_ctl becomes 7 advisories sharing that package.
+	if len(cves) != 7 {
+		t.Errorf("want 7 CVE advisories from the non-modular ELSA, got %d: %v", len(cves), cves)
+	}
+	if !pkgs["microcode_ctl"] {
+		t.Error("the non-modular microcode_ctl package must be present")
+	}
+	// The modular ELSA (a "Module ... is enabled" gate and a .module fixed version) is skipped wholesale.
+	if pkgs["cjose"] || pkgs["mod_auth_openidc"] {
+		t.Errorf("a modular definition must be skipped, got packages %v", pkgs)
+	}
+}
+
+// TestParseOracleMatchesViaDomainMatcher proves the Oracle Linux:9 key and the rpm comparator wire end to
+// end, including the .elN dist tag and epoch.
+func TestParseOracleMatchesViaDomainMatcher(t *testing.T) {
+	data, _ := os.ReadFile(filepath.Join("testdata", "oval-oracle-linux.xml"))
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mc advisory.Advisory
+	for _, a := range advs {
+		for _, ap := range a.Affected {
+			if ap.Package == "microcode_ctl" {
+				mc = a
+			}
+		}
+	}
+	if mc.ID == "" {
+		t.Fatal("microcode_ctl advisory not parsed")
+	}
+	fixed := mc.Affected[0].FixedVersion // 4:20240910-1.0.1.el9_5
+	if ok, got := mc.Match("Oracle Linux:9", "microcode_ctl", "4:20240815-1.0.1.el9_5"); !ok || got != fixed {
+		t.Errorf("older microcode_ctl must match with fix %s, got ok=%v fixed=%q", fixed, ok, got)
+	}
+	if ok, _ := mc.Match("Oracle Linux:9", "microcode_ctl", fixed); ok {
+		t.Error("microcode_ctl at the fixed version must not match")
+	}
+	if ok, _ := mc.Match("Oracle Linux:8", "microcode_ctl", "4:20240815-1.0.1.el9_5"); ok {
+		t.Error("a different Oracle release must not match")
+	}
+}
+
+func TestOraclePlatformRelease(t *testing.T) {
+	cases := map[string]string{
+		"Oracle Linux 8":             "8",
+		"oracle linux 9":             "9",
+		"Oracle Linux 7.9":           "7",
+		"Red Hat Enterprise Linux 9": "",
+		"Oracle Linux":               "",
+		"":                           "",
+	}
+	for platform, want := range cases {
+		if got := oraclePlatformRelease(platform); got != want {
+			t.Errorf("oraclePlatformRelease(%q) = %q, want %q", platform, got, want)
+		}
+	}
+}
+
+// TestOracleEcosystemKeyRoundTrip locks the feed key (Oracle Linux:<major>) to the matcher key a Syft ol rpm
+// PURL derives.
+func TestOracleEcosystemKeyRoundTrip(t *testing.T) {
+	for _, tc := range []struct{ purl, want string }{
+		{"pkg:rpm/ol/bash@5?arch=x86_64&distro=ol-9", "Oracle Linux:9"},
+		{"pkg:rpm/oracle/bash@5?distro=oracle-8.10", "Oracle Linux:8"},
+	} {
+		if got := osDistroEcosystem(tc.purl); got != tc.want {
+			t.Errorf("osDistroEcosystem(%s) = %q, want %q", tc.purl, got, tc.want)
+		}
+	}
+}
+
+// TestIsModuleComment covers the modular-gate detector.
+func TestIsModuleComment(t *testing.T) {
+	for c, want := range map[string]bool{
+		"Module python39:3.9 is enabled":         true,
+		"Module mod_auth_openidc:2.3 is enabled": true,
+		"Oracle Linux 8 is installed":            false,
+		"bash is earlier than 0:1.2-3.el8":       false,
+		"":                                       false,
+	} {
+		if got := isModuleComment(c); got != want {
+			t.Errorf("isModuleComment(%q) = %v, want %v", c, got, want)
+		}
+	}
+}
+
+// oracleDoc builds a minimal Oracle ELSA OVAL document from inline definitions/tests/objects/states.
+func oracleDoc(body string) []byte {
+	return []byte(`<oval_definitions xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">` + body + `</oval_definitions>`)
+}
+
+// TestParseOracleUnionsByCVE proves a CVE fixed on two releases (two definitions) yields ONE advisory
+// carrying both ecosystems, so the store's upsert-by-id cannot drop a release.
+func TestParseOracleUnionsByCVE(t *testing.T) {
+	doc := oracleDoc(`<definitions>
+	  <definition class="patch" id="oval:com.oracle.elsa:def:1"><metadata><title>ELSA-1</title>
+	    <affected><platform>Oracle Linux 8</platform></affected><reference source="CVE" ref_id="CVE-2099-1000"/></metadata>
+	    <criteria><criterion test_ref="t8"/></criteria></definition>
+	  <definition class="patch" id="oval:com.oracle.elsa:def:2"><metadata><title>ELSA-2</title>
+	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-1000"/></metadata>
+	    <criteria><criterion test_ref="t9"/></criteria></definition></definitions>
+	  <tests>
+	    <linux:rpminfo_test id="t8"><object object_ref="o1"/><state state_ref="s8"/></linux:rpminfo_test>
+	    <linux:rpminfo_test id="t9"><object object_ref="o1"/><state state_ref="s9"/></linux:rpminfo_test></tests>
+	  <objects><linux:rpminfo_object id="o1"><name>glibc</name></linux:rpminfo_object></objects>
+	  <states>
+	    <linux:rpminfo_state id="s8"><evr operation="less than">0:2.28-1.el8_10</evr></linux:rpminfo_state>
+	    <linux:rpminfo_state id="s9"><evr operation="less than">0:2.34-1.el9_4</evr></linux:rpminfo_state></states>`)
+	advs, err := ParseOVAL(doc)
+	if err != nil {
+		t.Fatalf("ParseOVAL: %v", err)
+	}
+	if len(advs) != 1 || advs[0].ID != "CVE-2099-1000" {
+		t.Fatalf("want one unioned advisory for CVE-2099-1000, got %+v", advs)
+	}
+	got := map[string]string{}
+	for _, ap := range advs[0].Affected {
+		got[ap.Ecosystem] = ap.FixedVersion
+	}
+	if got["Oracle Linux:8"] != "0:2.28-1.el8_10" || got["Oracle Linux:9"] != "0:2.34-1.el9_4" {
+		t.Errorf("union must carry both releases, got %v", got)
+	}
+}
+
+// TestParseOracleKeysByDistTag proves a package is keyed by its OWN version's dist tag, not the definition's
+// first platform: a multi-platform definition with an .el8uek build lands only on Oracle Linux:8, and a
+// version whose dist tag is not among the definition's platforms is skipped (no false match).
+func TestParseOracleKeysByDistTag(t *testing.T) {
+	// A UEK build tagged el8uek in an OL8+OL9 definition: keyed to OL8 by its dist tag, not both.
+	doc := oracleDoc(`<definitions>
+	  <definition class="patch" id="oval:com.oracle.elsa:def:1"><metadata><title>ELSA-UEK</title>
+	    <affected><platform>Oracle Linux 8</platform><platform>Oracle Linux 9</platform></affected>
+	    <reference source="CVE" ref_id="CVE-2099-2000"/></metadata>
+	    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
+	  <tests><linux:rpminfo_test id="t1"><object object_ref="o1"/><state state_ref="s1"/></linux:rpminfo_test></tests>
+	  <objects><linux:rpminfo_object id="o1"><name>kernel-uek</name></linux:rpminfo_object></objects>
+	  <states><linux:rpminfo_state id="s1"><evr operation="less than">0:5.15.0-1.el8uek</evr></linux:rpminfo_state></states>`)
+	advs, err := ParseOVAL(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 1 || advs[0].Affected[0].Ecosystem != "Oracle Linux:8" {
+		t.Fatalf("el8uek build must key Oracle Linux:8 only, got %+v", advs)
+	}
+
+	// A version whose dist tag (.el9) is NOT one of the definition's platforms (OL8) must be skipped, never
+	// keyed under OL8 (which would be a false match).
+	doc2 := oracleDoc(`<definitions>
+	  <definition class="patch" id="oval:com.oracle.elsa:def:1"><metadata><title>ELSA-X</title>
+	    <affected><platform>Oracle Linux 8</platform></affected><reference source="CVE" ref_id="CVE-2099-3000"/></metadata>
+	    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
+	  <tests><linux:rpminfo_test id="t1"><object object_ref="o1"/><state state_ref="s1"/></linux:rpminfo_test></tests>
+	  <objects><linux:rpminfo_object id="o1"><name>glibc</name></linux:rpminfo_object></objects>
+	  <states><linux:rpminfo_state id="s1"><evr operation="less than">0:2.34-1.el9_4</evr></linux:rpminfo_state></states>`)
+	advs2, err := ParseOVAL(doc2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(advs2) != 0 {
+		t.Errorf("an el9 version in an OL8-only definition must be skipped, got %+v", advs2)
+	}
+}
+
+func TestOracleReleaseFromEVR(t *testing.T) {
+	cases := map[string]string{
+		"0:5.15.0-303.171.5.2.el8uek":     "8",
+		"0:1.2-3.el8_10":                  "8",
+		"4:20240910-1.0.1.el9_5":          "9",
+		"0:1.12.1-11.11.ol9_202312212316": "9",
+		// A module build ("+el8", no leading dot) yields no dist tag here; modular versions are skipped
+		// upstream of this function anyway, so it never gates a real emitted package.
+		"0:3.9.19-7.module+el8.10.0+90395": "",
+		"1.2.3-4":                          "",
+	}
+	for evr, want := range cases {
+		if got := oracleReleaseFromEVR(evr); got != want {
+			t.Errorf("oracleReleaseFromEVR(%q) = %q, want %q", evr, got, want)
+		}
 	}
 }
