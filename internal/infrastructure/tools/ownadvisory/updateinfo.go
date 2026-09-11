@@ -74,7 +74,7 @@ func ParseUpdateInfo(content []byte) ([]advisory.Advisory, error) {
 		r = lr
 	}
 
-	byCVE := map[string]*amazonAcc{}
+	byCVE := map[string]*rpmCVEMerge{}
 	order := make([]string, 0)
 	dec := xml.NewDecoder(r)
 	for {
@@ -114,7 +114,7 @@ func ParseUpdateInfo(content []byte) ([]advisory.Advisory, error) {
 		for _, cve := range cves {
 			a := byCVE[cve]
 			if a == nil {
-				a = &amazonAcc{summary: summary, score: score, evrs: map[string]map[string]struct{}{}}
+				a = &rpmCVEMerge{summary: summary, score: score, evrs: map[string]map[string]struct{}{}}
 				byCVE[cve] = a
 				order = append(order, cve)
 			}
@@ -142,7 +142,7 @@ func ParseUpdateInfo(content []byte) ([]advisory.Advisory, error) {
 		var affected []advisory.AffectedPackage
 		for _, key := range a.order {
 			ecosystem, pkg, _ := strings.Cut(key, "\x00")
-			fixed := resolveAmazonFixed(ecosystem, a.evrs[key])
+			fixed := resolveRpmFixedInLineage(ecosystem, a.evrs[key])
 			if fixed == "" {
 				continue // no version, or fixed across multiple lineages: skip (a safe coverage gap)
 			}
@@ -161,7 +161,7 @@ func ParseUpdateInfo(content []byte) ([]advisory.Advisory, error) {
 	return out, nil
 }
 
-type amazonAcc struct {
+type rpmCVEMerge struct {
 	summary string
 	score   float64
 	evrs    map[string]map[string]struct{} // "ecosystem\x00package" -> set of distinct fixed EVRs
@@ -173,7 +173,7 @@ type amazonAcc struct {
 // span multiple lineages (e.g. a CVE fixed in both the 4.9 and 4.14 kernels). A lineage-blind [0, fixed) range
 // over a multi-lineage set would false-match a package that is actually fixed in a different lineage, so it is
 // dropped (a safe coverage gap) rather than emitted.
-func resolveAmazonFixed(ecosystem string, evrs map[string]struct{}) string {
+func resolveRpmFixedInLineage(ecosystem string, evrs map[string]struct{}) string {
 	lineages := map[string]bool{}
 	max := ""
 	for e := range evrs {
@@ -182,7 +182,11 @@ func resolveAmazonFixed(ecosystem string, evrs map[string]struct{}) string {
 			max = e
 			continue
 		}
-		if cmp, ok := advisory.CompareVersions(ecosystem, e, max); ok && cmp > 0 {
+		cmp, ok := advisory.CompareVersions(ecosystem, e, max)
+		if !ok {
+			return "" // an EVR the rpm comparator cannot order is not a trustworthy boundary; fail closed
+		}
+		if cmp > 0 {
 			max = e
 		}
 	}

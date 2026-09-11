@@ -1210,6 +1210,12 @@ func syncAdvisories(args []string) error {
 		}
 		feed = ownadvisory.NewUpdateInfoDirFeed(args[1])
 		src, bulkAdapter, sourceKey, sourceName = "updateinfo dir "+args[1], "oval", "cli-updateinfo-bulk", "CLI updateinfo bulk ingest"
+	case args[0] == "--rocky":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: synapse-cli sync-advisories --rocky <dir>")
+		}
+		feed = ownadvisory.NewRockyOSVDirFeed(args[1])
+		src, bulkAdapter, sourceKey, sourceName = "Rocky Apollo OSV dir "+args[1], "osv", "cli-rocky-bulk", "CLI Rocky OSV bulk ingest"
 	default:
 		feed = ownadvisory.NewDirFeed(args[0])
 		src, bulkAdapter, sourceKey, sourceName = args[0], "osv", "cli-osv-bulk", "CLI OSV bulk ingest"

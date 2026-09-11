@@ -68,11 +68,19 @@ func ParseOSV(data []byte) (advisory.Advisory, error) {
 			adv.CVSSScore = score
 		}
 	}
+	adv.Affected = osvAffectedPackages(doc)
+	return adv, nil
+}
+
+// osvAffectedPackages maps an OSV document's affected entries into the domain AffectedPackage shape. An entry
+// with no identifiable package is skipped. Shared by ParseOSV and the RESF/Apollo OSV list parser.
+func osvAffectedPackages(doc osvDoc) []advisory.AffectedPackage {
+	out := make([]advisory.AffectedPackage, 0, len(doc.Affected))
 	for _, aff := range doc.Affected {
 		if aff.Package.Ecosystem == "" || aff.Package.Name == "" {
 			continue // an advisory entry with no identifiable package can't be matched
 		}
-		adv.Affected = append(adv.Affected, advisory.AffectedPackage{
+		out = append(out, advisory.AffectedPackage{
 			Ecosystem: aff.Package.Ecosystem, // OSV ecosystem is the canonical form the matcher keys on
 			// Normalize the package name to the ecosystem-canonical key (PEP 503 for PyPI) so the stored key
 			// matches the SBOM-side lookup – OSV PyPI advisories carry non-normalized names ("Django").
@@ -83,7 +91,7 @@ func ParseOSV(data []byte) (advisory.Advisory, error) {
 			AffectedSymbols: osvImportSymbols(aff),
 		})
 	}
-	return adv, nil
+	return out
 }
 
 // mapRanges converts OSV ranges (events are untyped {key:value} maps) into the domain Range/Event model.
@@ -135,6 +143,7 @@ func firstNonEmpty(a, b string) string {
 type osvDoc struct {
 	ID               string         `json:"id"`
 	Aliases          []string       `json:"aliases"`
+	Upstream         []string       `json:"upstream"` // Rocky/RESF Apollo OSV names CVEs here, not in aliases
 	Summary          string         `json:"summary"`
 	Details          string         `json:"details"`
 	Withdrawn        string         `json:"withdrawn"` // RFC3339 timestamp when the advisory was retracted; empty when active
