@@ -302,6 +302,28 @@ func TestScanSurfacesPythonTaintCoverageEvenWhenBestEffortScannerFails(t *testin
 	}
 }
 
+func TestScanSurfacesJSTaintCoverageEvenWhenBestEffortScannerFails(t *testing.T) {
+	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{})
+	scanner := &staticTaintCoverage{
+		outcome: ports.TaintScanOutcome{Coverage: ports.AnalysisCoverage{
+			Analyzer: "js-semantic-taint-v1", Language: "javascript", Status: ports.AnalysisCoveragePartial,
+			Available: true, FilesSeen: 2, FilesParsed: 1, Gaps: []ports.AnalysisCoverageGap{{Kind: "parse_recovery", Count: 1}},
+		}},
+		err: errors.New("untrusted parser detail"),
+	}
+	svc.SetJsTaint(scanner)
+	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatalf("best-effort JavaScript semantic scanner failed the SCA scan: %v", err)
+	}
+	if scanner.calls != 1 || len(result.AnalysisCoverage) != 1 || result.AnalysisCoverage[0].Language != "javascript" {
+		t.Fatalf("coverage result = %+v calls=%d", result.AnalysisCoverage, scanner.calls)
+	}
+	if len(result.SourceWarnings) != 1 || strings.Contains(result.SourceWarnings[0], "untrusted parser detail") {
+		t.Fatalf("safe source warning = %v", result.SourceWarnings)
+	}
+}
+
 func TestCodeQualityRequiresExplicitScanOption(t *testing.T) {
 	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
 	quality := &countingCodeQuality{}

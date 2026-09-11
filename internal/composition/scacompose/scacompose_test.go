@@ -47,6 +47,23 @@ func TestPythonTaintScannerAttach(t *testing.T) {
 	}
 }
 
+func TestJSTaintScannerAttach(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	audit := noopAudit{}
+	clock := idgen.SystemClock{}
+
+	if s, err := jsTaintScanner(config.Config{JsTaintEnabled: false}, nil, fakeTaintProposer{}, audit, clock, log); err != nil || s != nil {
+		t.Fatalf("disabled must not attach: scanner=%v err=%v", s, err)
+	}
+	if s, err := jsTaintScanner(config.Config{JsTaintEnabled: true}, nil, nil, audit, clock, log); err != nil || s != nil {
+		t.Fatalf("no judgment proposer must not attach: scanner=%v err=%v", s, err)
+	}
+	s, err := jsTaintScanner(config.Config{JsTaintEnabled: true}, nil, fakeTaintProposer{}, audit, clock, log)
+	if err != nil || s == nil {
+		t.Fatalf("enabled + proposer must attach the JavaScript taint coordinator: scanner=%v err=%v", s, err)
+	}
+}
+
 func TestValidateProductionNetworkedTools(t *testing.T) {
 	tests := []struct {
 		name    string
