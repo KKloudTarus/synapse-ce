@@ -159,6 +159,16 @@ func TestSASTClaimValidatesBoundedPythonDataFlow(t *testing.T) {
 		t.Fatalf("valid Python data flow: %v", err)
 	}
 
+	jsSource := SASTFlowLocation{File: "app/routes.js", Line: 3, Column: 4}
+	jsSink := SASTFlowLocation{File: "app/routes.js", Line: 7, Column: 8}
+	jsValid := SASTClaim{
+		CWE: "CWE-78", Location: "app/routes.js:7", Rule: "js-taint-command",
+		DataFlow: &SASTDataFlow{Language: "javascript", Source: jsSource, Sink: jsSink, Steps: []SASTFlowLocation{jsSource, jsSink}},
+	}
+	if err := jsValid.Validate(); err != nil {
+		t.Fatalf("valid JavaScript data flow: %v", err)
+	}
+
 	tooMany := valid
 	tooMany.DataFlow = &SASTDataFlow{Language: "python", Source: source, Sink: sink, Steps: make([]SASTFlowLocation, MaxSASTDataFlowSteps+1)}
 	for i := range tooMany.DataFlow.Steps {

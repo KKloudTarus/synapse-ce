@@ -217,6 +217,19 @@ import (
 // cross-check, SBOM cross-check) may wire. With the judgment service present it wires. With judgments off it
 // AUTO-SKIPS (warn) – a default-on analyzer must not crash a judgments-off deployment – UNLESS the operator
 // EXPLICITLY set the analyzer's flag =true, which is a real contradiction worth failing closed on.
+// explicitTaintEnvKey names, for the combined semantic-taint gate, whichever taint flag the operator set in
+// the environment (so requireJudgmentsOrSkip fails loud when either was requested without judgments). It
+// falls back to the Python key, which is default-on and therefore quietly skipped when nothing is set.
+func explicitTaintEnvKey() string {
+	if _, ok := os.LookupEnv("SYNAPSE_PYTAINT_ENABLED"); ok {
+		return "SYNAPSE_PYTAINT_ENABLED"
+	}
+	if _, ok := os.LookupEnv("SYNAPSE_JSTAINT_ENABLED"); ok {
+		return "SYNAPSE_JSTAINT_ENABLED"
+	}
+	return "SYNAPSE_PYTAINT_ENABLED"
+}
+
 func requireJudgmentsOrSkip(log *slog.Logger, hasJudgment bool, envKey, name string) bool {
 	if hasJudgment {
 		return true
@@ -2972,13 +2985,14 @@ func main() {
 		log.Info("taint-analysis CapSAST proposals ENABLED (sandboxed call-graph; propose-only, a distinct verifier gates)")
 	}
 
-	// Python Tier-2 taint is source-only: synapse-ast parses bounded semantic/value facts and never imports,
-	// executes, or compiles target Python. It runs in the default scan (shared with synapse-worker via
-	// scacompose.ConfigureJudgmentScanners); requireJudgmentsOrSkip preserves the loud error when the flag is
-	// set explicitly without the judgment lifecycle.
-	if cfg.PythonTaintEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_PYTAINT_ENABLED", "python semantic taint") {
+	// Source-only semantic taint (Python and JS/TS): synapse-ast parses bounded semantic/value facts and never
+	// imports, executes, or compiles target code. Both run in the default scan (shared with synapse-worker via
+	// scacompose.ConfigureJudgmentScanners, which attaches each language only when its own flag is set);
+	// requireJudgmentsOrSkip preserves the loud error when either flag is set explicitly without the judgment
+	// lifecycle. Python taint is on by default, so a JS-only deployment still reaches this path.
+	if (cfg.PythonTaintEnabled || cfg.JsTaintEnabled) && requireJudgmentsOrSkip(log, judgmentSvc != nil, explicitTaintEnvKey(), "semantic taint") {
 		if err := scacompose.ConfigureJudgmentScanners(scaService, cfg, scaSandbox, judgmentSvc, auditLog, clock, log); err != nil {
-			log.Error("python semantic taint coordinator init failed", "err", err)
+			log.Error("semantic taint coordinator init failed", "err", err)
 			os.Exit(1)
 		}
 	}
