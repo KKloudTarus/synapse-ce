@@ -459,6 +459,10 @@ func osDistroEcosystem(purl string) string {
 			return "AlmaLinux:" + major
 		case "ol", "oracle":
 			return "Oracle Linux:" + major
+		case "amzn", "amazon":
+			// Syft emits distro=amzn-2 / amzn-2023; the owned Amazon updateinfo feed writes "Amazon Linux:2" /
+			// "Amazon Linux:2023" from the collection short (amazon-linux-2 / amazon-linux-2023).
+			return "Amazon Linux:" + major
 		}
 	}
 	return ""

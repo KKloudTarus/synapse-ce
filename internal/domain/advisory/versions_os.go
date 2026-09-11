@@ -25,7 +25,7 @@ func osFamilyScheme(ecosystem string) (scheme, bool) {
 		return dpkgScheme, true
 	case "Alpine", "Wolfi", "Chainguard":
 		return apkScheme, true
-	case "Red Hat", "Rocky Linux", "AlmaLinux", "openSUSE", "SUSE", "Fedora", "Mageia", "Oracle Linux":
+	case "Red Hat", "Rocky Linux", "AlmaLinux", "openSUSE", "SUSE", "Fedora", "Mageia", "Oracle Linux", "Amazon Linux":
 		return rpmScheme, true
 	}
 	return scheme{}, false
