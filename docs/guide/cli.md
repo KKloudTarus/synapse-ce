@@ -386,8 +386,11 @@ synapse-cli sync-advisories --remote-distros
 # ingest a local CSAF 2.0 advisory dump
 synapse-cli sync-advisories --csaf <dir>
 
-# ingest a local Ubuntu OVAL dump (com.ubuntu.*.cve.oval.xml[.bz2])
+# ingest a local OVAL dump (Ubuntu/Debian dpkginfo, or Oracle/AlmaLinux/openSUSE rpminfo, .xml[.bz2/.gz])
 synapse-cli sync-advisories --oval <dir>
+
+# ingest a local yum/dnf updateinfo dump (Amazon Linux ALAS: repodata updateinfo.xml[.gz])
+synapse-cli sync-advisories --updateinfo <dir>
 ```
 
 Enable the store at scan time with `SYNAPSE_OWNED_ADVISORY=true`, then it runs alongside the

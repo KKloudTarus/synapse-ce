@@ -1204,6 +1204,12 @@ func syncAdvisories(args []string) error {
 		}
 		feed = ownadvisory.NewOVALDirFeed(args[1])
 		src, bulkAdapter, sourceKey, sourceName = "Ubuntu OVAL dir "+args[1], "oval", "cli-oval-bulk", "CLI OVAL bulk ingest"
+	case args[0] == "--updateinfo":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: synapse-cli sync-advisories --updateinfo <dir>")
+		}
+		feed = ownadvisory.NewUpdateInfoDirFeed(args[1])
+		src, bulkAdapter, sourceKey, sourceName = "updateinfo dir "+args[1], "oval", "cli-updateinfo-bulk", "CLI updateinfo bulk ingest"
 	default:
 		feed = ownadvisory.NewDirFeed(args[0])
 		src, bulkAdapter, sourceKey, sourceName = args[0], "osv", "cli-osv-bulk", "CLI OSV bulk ingest"
