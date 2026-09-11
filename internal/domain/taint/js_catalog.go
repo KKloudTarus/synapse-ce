@@ -35,6 +35,11 @@ func DefaultJsCatalog() JsCatalog {
 			// program, so only the program/command argument is modeled).
 			jsSink(jsMod([]string{"child_process"}, "exec", "execSync", "spawn", "spawnSync", "execFile", "execFileSync", "fork"),
 				TaintCommand, "CWE-78", "js-taint-command", 0),
+			// execa is a widely used exec wrapper: execa.command / execaCommand shell-parse a whole command
+			// string (argument zero), and the default export execa(file, args) runs the file at argument zero.
+			jsSink(jsMod([]string{"execa"}, "command", "commandSync", "sync", "execaCommand", "execaCommandSync", "execaSync", "node"),
+				TaintCommand, "CWE-78", "js-taint-command", 0),
+			{Pattern: JsCallablePattern{Modules: []string{"execa"}, CallModule: true}, Class: TaintCommand, CWE: "CWE-78", Rule: "js-taint-command", ArgumentIndexes: []int{0}},
 
 			// CWE-94: dynamic code execution. eval / Function are globals (matched only when unshadowed); vm
 			// resolves through its import. Function is modeled over ALL arguments because `new Function(a, b,
@@ -48,11 +53,18 @@ func DefaultJsCatalog() JsCatalog {
 			// CWE-22: filesystem path traversal. fs (and fs/promises) resolve through the import; only the PATH
 			// argument (argument zero) is modeled. writeFile/appendFile carry their DATA in argument one, which
 			// is deliberately NOT a path sink.
-			jsSink(jsMod([]string{"fs", "fs/promises"},
+			jsSink(jsMod([]string{"fs", "fs/promises", "fs-extra"},
 				"readFile", "readFileSync", "writeFile", "writeFileSync", "appendFile", "appendFileSync",
 				"createReadStream", "createWriteStream", "open", "openSync", "unlink", "unlinkSync", "readdir",
 				"readdirSync", "mkdir", "mkdirSync", "rmdir", "rm", "stat", "statSync", "lstat", "lstatSync",
 				"access", "accessSync", "copyFile", "copyFileSync", "realpath", "truncate", "truncateSync"),
+				TaintPathTraversal, "CWE-22", "js-taint-path", 0),
+			// fs-extra adds path-taking helpers on top of the fs surface above; only the PATH (argument zero) is
+			// modeled (the write helpers carry their DATA in a later argument, which is not a path sink).
+			jsSink(jsMod([]string{"fs-extra"},
+				"ensureDir", "ensureDirSync", "ensureFile", "ensureFileSync", "outputFile", "outputFileSync",
+				"outputJson", "outputJSON", "readJson", "readJSON", "remove", "removeSync", "emptyDir",
+				"emptyDirSync", "mkdirp", "mkdirpSync", "copy", "copySync", "move", "moveSync", "pathExists", "pathExistsSync"),
 				TaintPathTraversal, "CWE-22", "js-taint-path", 0),
 
 			// CWE-918: server-side request forgery. axios/http/https resolve through the import and take the URL
@@ -62,6 +74,11 @@ func DefaultJsCatalog() JsCatalog {
 				TaintSSRF, "CWE-918", "js-taint-ssrf", 0),
 			jsSink(jsMod([]string{"http", "https"}, "get", "request"), TaintSSRF, "CWE-918", "js-taint-ssrf", 0),
 			jsSink(jsMod([]string{"got"}, "get", "post", "put", "patch", "delete", "head"), TaintSSRF, "CWE-918", "js-taint-ssrf", 0),
+			// undici is Node's built-in HTTP client; its request/fetch/stream/pipeline/connect take the URL as a
+			// positional string (argument zero). The object-config form ({ origin, path }) is not modeled, like
+			// the axios object form, because the URL sits in a field the facts cannot resolve.
+			jsSink(jsMod([]string{"undici"}, "request", "fetch", "stream", "pipeline", "connect", "upgrade"),
+				TaintSSRF, "CWE-918", "js-taint-ssrf", 0),
 			// got(url) and node-fetch's default export are called directly, so the URL is the first positional
 			// argument of a module/default call.
 			{Pattern: JsCallablePattern{Modules: []string{"got", "node-fetch"}, CallModule: true}, Class: TaintSSRF, CWE: "CWE-918", Rule: "js-taint-ssrf", ArgumentIndexes: []int{0}},
