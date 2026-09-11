@@ -2587,6 +2587,7 @@ python-taint-ldap
 python-taint-log
 python-taint-open-redirect
 python-taint-path
+python-taint-redos
 python-taint-sqli
 python-taint-ssrf
 python-taint-ssti

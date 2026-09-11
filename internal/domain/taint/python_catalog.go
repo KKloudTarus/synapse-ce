@@ -124,6 +124,12 @@ func DefaultPythonCatalog() PythonCatalog {
 			// in argument ONE; the level-named functions carry it in argument ZERO.
 			pySink([]string{"logging"}, []string{"debug", "info", "warning", "warn", "error", "critical", "exception"}, TaintLog, "CWE-117", "python-taint-log", 0, "msg"),
 			pySinkIndexes([]string{"logging"}, []string{"log"}, TaintLog, "CWE-117", "python-taint-log", []int{1}, "msg"),
+
+			// CWE-1333: an untrusted value compiled as a regular expression (regex injection / ReDoS). The re
+			// module compiles argument zero (the PATTERN) in compile and every module-level operation; a tainted
+			// SUBJECT (re.match(CONSTANT, tainted)) does not fire because only the pattern position is modeled.
+			pySink([]string{"re"}, []string{"compile", "match", "fullmatch", "search", "sub", "subn", "split", "findall", "finditer"},
+				TaintReDoS, "CWE-1333", "python-taint-redos", 0, "pattern"),
 			// Archive-extraction path traversal is deliberately NOT modeled here: tarfile.open / zipfile.ZipFile
 			// accept EITHER a path string OR a file-like object at argument zero, and request.files (an uploaded
 			// file object) is a taint source, so ZipFile(request.files.get("f")) would produce a FALSE CWE-22
@@ -139,6 +145,9 @@ func DefaultPythonCatalog() PythonCatalog {
 			// escaping (escape_dn_chars) is deliberately excluded: it escapes distinguished-name components,
 			// not filter metacharacters, so it must not neutralize a search-filter injection finding.
 			{Pattern: pyCall([]string{"ldap.filter", "ldap3.utils.conv"}, []string{"escape_filter_chars"}), Classes: []TaintClass{TaintLDAP}},
+			// CWE-1333: re.escape turns the value into a literal pattern with no regex metacharacters, so it
+			// neutralizes the ReDoS class only.
+			{Pattern: pyCall([]string{"re"}, []string{"escape"}), Classes: []TaintClass{TaintReDoS}},
 			{Pattern: pyCall([]string{"builtins"}, []string{"int", "float", "bool", "len"}), Classes: all},
 		},
 	}

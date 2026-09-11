@@ -48,8 +48,8 @@ func (c TaintClass) Valid() bool {
 }
 
 var allPythonTaintClasses = []TaintClass{
-	TaintCommand, TaintDeserialization, TaintLDAP, TaintLog, TaintPathTraversal, TaintRedirect, TaintSQL,
-	TaintSSRF, TaintSSTI, TaintXPath, TaintXSS, TaintXXE,
+	TaintCommand, TaintDeserialization, TaintLDAP, TaintLog, TaintPathTraversal, TaintReDoS, TaintRedirect,
+	TaintSQL, TaintSSRF, TaintSSTI, TaintXPath, TaintXSS, TaintXXE,
 }
 
 // PythonCallablePattern matches a resolved Python callable and, when resolution is unavailable, a

@@ -145,6 +145,9 @@ func TestPythonCatalogModelsInjectionClasses(t *testing.T) {
 		{"python:logging:info", TaintLog},
 		{"python:logging:error", TaintLog},
 		{"python:logging:log", TaintLog},
+		{"python:re:compile", TaintReDoS},
+		{"python:re:match", TaintReDoS},
+		{"python:re:sub", TaintReDoS},
 	}
 	for _, p := range positives {
 		if !isSink(p.callee, p.class) {
@@ -171,6 +174,13 @@ func TestPythonCatalogModelsInjectionClasses(t *testing.T) {
 	}
 	if !neutralizes("python:ldap.filter:escape_filter_chars", TaintLDAP) {
 		t.Error("twin: escape_filter_chars must neutralize the LDAP class")
+	}
+	// re.escape turns the value into a literal pattern, so it neutralizes ReDoS, and only ReDoS.
+	if !neutralizes("python:re:escape", TaintReDoS) {
+		t.Error("twin: re.escape must neutralize the ReDoS class")
+	}
+	if neutralizes("python:re:escape", TaintCommand) {
+		t.Error("twin: re.escape must not neutralize command injection")
 	}
 	// The LDAP escaper is class-specific: it must NOT be treated as a SQL or command sanitizer.
 	if neutralizes("python:ldap.filter:escape_filter_chars", TaintSQL) {

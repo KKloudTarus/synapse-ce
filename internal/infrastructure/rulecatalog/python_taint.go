@@ -106,6 +106,14 @@ func pythonTaintRules() []rule.Rule {
 			"logging.info('login for user=%s', user_id)",
 			"logging.info('login for user=' + request.args['user'])",
 		),
+		pythonTaintRule(
+			"python-taint-redos", "Interprocedural Python regular-expression injection", "CWE-1333", "A03:2021", shared.SeverityHigh,
+			"Tracks untrusted request values into the re module, where they are compiled as a regular-expression pattern.",
+			"An attacker-controlled regular expression can trigger catastrophic backtracking that stalls the worker (denial of service), or alter matching to bypass a security check.\n\nSource: https://cwe.mitre.org/data/definitions/1333.html",
+			"Match against a fixed pattern, or escape the user portion with re.escape so it is treated as a literal.",
+			"re.match('^' + re.escape(request.args['q']), text)",
+			"re.match(request.args['q'], text)",
+		),
 	}
 }
 
