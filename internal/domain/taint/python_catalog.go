@@ -51,9 +51,16 @@ func DefaultPythonCatalog() PythonCatalog {
 			pySink([]string{"os"}, []string{"spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe"}, TaintCommand, "CWE-78", "python-taint-command", 1, "path"),
 			pySink([]string{"subprocess"}, []string{"Popen", "run", "call", "check_call", "check_output", "getoutput", "getstatusoutput"}, TaintCommand, "CWE-78", "python-taint-command", 0, "args", "command", "cmd"),
 			pySink([]string{"asyncio"}, []string{"create_subprocess_shell", "create_subprocess_exec"}, TaintCommand, "CWE-78", "python-taint-command", 0, "cmd", "program"),
+			// pexpect and the stdlib pty execute a program (pexpect.run splits a command string) named at
+			// argument zero, so a tainted value there controls what program or command line runs.
+			pySink([]string{"pexpect"}, []string{"spawn", "run", "runu"}, TaintCommand, "CWE-78", "python-taint-command", 0, "command"),
+			pySink([]string{"pty"}, []string{"spawn"}, TaintCommand, "CWE-78", "python-taint-command", 0, "argv"),
 
 			// CWE-22: host filesystem paths.
 			pySink([]string{"builtins"}, []string{"open"}, TaintPathTraversal, "CWE-22", "python-taint-path", 0, "file"),
+			// aiofiles.open is the async file opener common in FastAPI/asyncio code; its first argument is the
+			// path (it opens files, not arbitrary file objects, so there is no path-vs-fileobj ambiguity).
+			pySink([]string{"aiofiles"}, []string{"open"}, TaintPathTraversal, "CWE-22", "python-taint-path", 0, "file"),
 			pySink([]string{"os"}, []string{"open", "remove", "unlink", "mkdir", "makedirs", "listdir", "scandir"}, TaintPathTraversal, "CWE-22", "python-taint-path", 0, "path", "file"),
 			pySinkIndexes([]string{"os"}, []string{"rename", "replace"}, TaintPathTraversal, "CWE-22", "python-taint-path", []int{0, 1}, "src", "dst"),
 			pyReceiverSink([]string{"pathlib"}, []string{"open", "read_text", "read_bytes", "write_text", "write_bytes", "unlink", "mkdir", "rmdir", "touch", "chmod", "stat", "iterdir", "glob", "rglob"}, TaintPathTraversal, "CWE-22", "python-taint-path", nil),
