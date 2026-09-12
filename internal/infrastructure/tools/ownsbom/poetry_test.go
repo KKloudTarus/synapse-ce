@@ -52,6 +52,10 @@ func TestPoetryParse(t *testing.T) {
 	if len(deps[0].DependsOn) != 1 || deps[0].DependsOn[0] != "pkg:pypi/charset-normalizer@3.3.2" {
 		t.Errorf("requests must depend on charset-normalizer@3.3.2 only (idna unresolved → no edge), got %v", deps[0].DependsOn)
 	}
+	// D3.8: the edge records the declared range for the resolved target (requests declared ">=2,<4").
+	if r := deps[0].RequestedRanges["pkg:pypi/charset-normalizer@3.3.2"]; r != ">=2,<4" {
+		t.Errorf("requests edge must record charset-normalizer declared range >=2,<4, got %q", r)
+	}
 	if len(comps) != 3 {
 		t.Fatalf("want 3 components, got %d: %+v", len(comps), comps)
 	}
@@ -204,5 +208,151 @@ category = "main"
 	// dup-pkg and dup_pkg both PEP 503-normalize to "dup-pkg" → 2 versions → ambiguous → app gets no edge.
 	if len(deps) != 0 {
 		t.Errorf("an ambiguous duplicate-name dep must yield no edge, got %+v", deps)
+	}
+}
+
+// D3.8 regression: an inline-table key that merely CONTAINS the substring "version" (a marker/python-versions
+// field) and a git/path/url table (no version field at all) must NOT supply a declared range – only a real
+// `version` key does. A losing substring match would invent a bogus RequestedRanges entry.
+func TestPoetryDepConstraintVersionKeyExact(t *testing.T) {
+	lock := `[[package]]
+name = "app"
+version = "1.0.0"
+category = "main"
+
+[package.dependencies]
+foo = {python-versions = ">=3.8", markers = "sys_platform == 'linux'"}
+bar = {git = "https://example.com/bar.git"}
+baz = {version = ">=1,<2", optional = false}
+
+[[package]]
+name = "foo"
+version = "2.0.0"
+category = "main"
+
+[[package]]
+name = "bar"
+version = "3.0.0"
+category = "main"
+
+[[package]]
+name = "baz"
+version = "4.0.0"
+category = "main"
+`
+	_, deps, err := Poetry{}.Parse(context.Background(), ParseInput{Path: "poetry.lock", Content: []byte(lock)})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(deps) != 1 {
+		t.Fatalf("want one edge-set rooted at app, got %+v", deps)
+	}
+	rr := deps[0].RequestedRanges
+	// foo (python-versions marker) and bar (git table) resolve to edges but carry NO declared range; only the
+	// real version key on baz is recorded.
+	if _, ok := rr["pkg:pypi/foo@2.0.0"]; ok {
+		t.Errorf("a python-versions/marker key must not supply a range, got %q", rr["pkg:pypi/foo@2.0.0"])
+	}
+	if _, ok := rr["pkg:pypi/bar@3.0.0"]; ok {
+		t.Errorf("a git dependency table must not supply a range, got %q", rr["pkg:pypi/bar@3.0.0"])
+	}
+	if rr["pkg:pypi/baz@4.0.0"] != ">=1,<2" {
+		t.Errorf("the real version key must be recorded, got %q", rr["pkg:pypi/baz@4.0.0"])
+	}
+}
+
+// D3.8 regression: two required declarations normalizing to the SAME resolved target (a crafted lock with
+// `foo_bar` and `foo-bar`) must keep the FIRST declaration's range, not the later tie's.
+func TestPoetryRequiredTieKeepsFirstRange(t *testing.T) {
+	lock := `[[package]]
+name = "app"
+version = "1.0.0"
+category = "main"
+
+[package.dependencies]
+foo_bar = ">=1"
+foo-bar = "<2"
+
+[[package]]
+name = "foo-bar"
+version = "5.0.0"
+category = "main"
+`
+	_, deps, err := Poetry{}.Parse(context.Background(), ParseInput{Path: "poetry.lock", Content: []byte(lock)})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(deps) != 1 {
+		t.Fatalf("want one edge-set rooted at app, got %+v", deps)
+	}
+	if r := deps[0].RequestedRanges["pkg:pypi/foo-bar@5.0.0"]; r != ">=1" {
+		t.Errorf("a required tie must keep the first declared range >=1, got %q", r)
+	}
+}
+
+// D3.8 regression: an optional declaration's range must NOT leak onto the edge when a later REQUIRED
+// declaration (with no version constraint, e.g. a git table) wins the target. The required winner has no
+// constraint, so the recorded range must be absent, not the optional loser's "^1".
+func TestPoetryOptionalRangeDoesNotLeakOntoRequired(t *testing.T) {
+	lock := `[[package]]
+name = "app"
+version = "1.0.0"
+category = "main"
+
+[package.dependencies]
+foo = {version = "^1", optional = true}
+foo = {git = "https://example.com/foo.git"}
+
+[[package]]
+name = "foo"
+version = "6.0.0"
+category = "main"
+`
+	_, deps, err := Poetry{}.Parse(context.Background(), ParseInput{Path: "poetry.lock", Content: []byte(lock)})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(deps) != 1 {
+		t.Fatalf("want one edge-set rooted at app, got %+v", deps)
+	}
+	// The required declaration wins the target, so the edge is required (not optional)...
+	if deps[0].Optional {
+		t.Errorf("a required declaration must win optionality over an optional one, got optional edge %+v", deps[0])
+	}
+	if deps[0].DependsOn[0] != "pkg:pypi/foo@6.0.0" {
+		t.Fatalf("want edge to foo@6.0.0, got %v", deps[0].DependsOn)
+	}
+	// ...and since that required winner declared no version, the optional loser's "^1" must NOT be recorded.
+	if r, ok := deps[0].RequestedRanges["pkg:pypi/foo@6.0.0"]; ok {
+		t.Errorf("an optional declaration's range must not leak onto a required winner with no constraint, got %q", r)
+	}
+}
+
+// D3.8 regression: a `version = "…"` inside a trailing TOML comment after the inline table's closing brace
+// must NOT be read as the dependency's version key. Only the actual inline-table body supplies a range, so a
+// git/path/url dependency with such a comment carries no range (never a fabricated one).
+func TestPoetryDepConstraintIgnoresTrailingComment(t *testing.T) {
+	lock := `[[package]]
+name = "app"
+version = "1.0.0"
+category = "main"
+
+[package.dependencies]
+foo = {git = "https://example.com/foo.git"} # version = ">=99"
+
+[[package]]
+name = "foo"
+version = "2.0.0"
+category = "main"
+`
+	_, deps, err := Poetry{}.Parse(context.Background(), ParseInput{Path: "poetry.lock", Content: []byte(lock)})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(deps) != 1 || deps[0].DependsOn[0] != "pkg:pypi/foo@2.0.0" {
+		t.Fatalf("want one edge app->foo@2.0.0, got %+v", deps)
+	}
+	if r, ok := deps[0].RequestedRanges["pkg:pypi/foo@2.0.0"]; ok {
+		t.Errorf("a version key in a trailing comment must not supply a range, got %q", r)
 	}
 }
