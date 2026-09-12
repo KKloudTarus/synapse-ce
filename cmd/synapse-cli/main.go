@@ -1017,7 +1017,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "      --server   record the result on a Synapse server as the project's next analysis (token from SYNAPSE_API_TOKEN); the history, trend and managed gate in the console pick it up")
 	fmt.Fprintln(os.Stderr, "      --insecure-http   allow a plain-http --server that is not loopback (the token then travels in the clear)")
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
-	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
+	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled daemonlessly, in-process) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  no network egress: skip live OSV, every registry resolver (npm/composer/poetry/bundler/maven/gradle), KEV/EPSS, online NVD, license metadata and AI triage; detect with Grype's offline DB only (air-gapped / fast)")
 	fmt.Fprintln(os.Stderr, "      --include-test  also fail the gate on findings in test/fixture/example paths (default: reported but exempt)")
 	fmt.Fprintln(os.Stderr, "      --verify-secrets  actively confirm each detected credential is live via one read-only provider call (opt-in; sends the secret to its issuing provider; default off)")
@@ -1399,7 +1399,7 @@ func selectSBOMGenerator(cfg config.Config) (ports.SBOMGenerator, error) {
 }
 
 func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest, verifySecrets bool, push pushTarget) error {
-	// An image target is an OCI reference (acquired via crane → OCI layout); a local
+	// An image target is an OCI reference (acquired in-process into an OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
 	if !image {
