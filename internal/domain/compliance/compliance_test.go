@@ -1,6 +1,7 @@
 package compliance
 
 import (
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"testing"
 )
 
@@ -85,4 +86,56 @@ func hasControl(cs []Control, framework, id string) bool {
 		}
 	}
 	return false
+}
+
+// EPIC #860 D6.6: a misconfiguration rule maps to its published CIS Benchmark control (verbatim id+title),
+// an unmapped rule yields none, and ControlsForFinding unions the CWE-mapped and rule-mapped controls.
+func TestControlsForRuleAndFinding(t *testing.T) {
+	// a mapped AWS rule -> the exact CIS AWS control
+	aws := ControlsForRule("cloudformation-rds-unencrypted")
+	if len(aws) != 1 || aws[0].Framework != "CIS-AWS-3.0" || aws[0].ID != "2.3.1" {
+		t.Fatalf("rds rule must map to CIS-AWS-3.0 2.3.1, got %+v", aws)
+	}
+	// a mapped K8s rule
+	k8s := ControlsForRule("kubernetes-privileged")
+	if len(k8s) != 1 || k8s[0].Framework != "CIS-Kubernetes-1.10" || k8s[0].ID != "5.2.2" {
+		t.Fatalf("privileged rule must map to CIS-Kubernetes-1.10 5.2.2, got %+v", k8s)
+	}
+	// an unmapped rule (broader than any single CIS control) yields nothing, never a guess
+	if got := ControlsForRule("cloudformation-open-security-group"); got != nil {
+		t.Errorf("a rule with no exact CIS match must map to nothing, got %+v", got)
+	}
+	if got := ControlsForRule(""); got != nil {
+		t.Errorf("empty rule key must map to nothing, got %+v", got)
+	}
+	// ControlsForFinding unions the CWE controls (OWASP/PCI/ISO) with the rule's CIS control
+	both := ControlsForFinding("CWE-311", "cloudformation-rds-unencrypted")
+	if !hasControl(both, "CIS-AWS-3.0", "2.3.1") {
+		t.Errorf("ControlsForFinding must include the rule's CIS control, got %+v", both)
+	}
+}
+
+// Rollup aggregates a finding set into a per-framework rollup, counting each finding once per framework.
+func TestComplianceRollup(t *testing.T) {
+	findings := []finding.Finding{
+		{RuleKey: "kubernetes-privileged"},          // CIS-Kubernetes-1.10 5.2.2
+		{RuleKey: "kubernetes-host-network"},        // CIS-Kubernetes-1.10 5.2.5
+		{RuleKey: "cloudformation-rds-unencrypted"}, // CIS-AWS-3.0 2.3.1
+		{CWE: "CWE-89"},           // OWASP/PCI/ISO
+		{RuleKey: "no-such-rule"}, // maps to nothing
+	}
+	roll := Rollup(findings)
+	got := map[string]FrameworkCoverage{}
+	for _, fc := range roll {
+		got[fc.Framework] = fc
+	}
+	if k := got["CIS-Kubernetes-1.10"]; k.Findings != 2 || len(k.Controls) != 2 {
+		t.Errorf("K8s rollup: want 2 findings / 2 controls, got %+v", k)
+	}
+	if a := got["CIS-AWS-3.0"]; a.Findings != 1 || len(a.Controls) != 1 {
+		t.Errorf("AWS rollup: want 1 finding / 1 control, got %+v", a)
+	}
+	if _, ok := got["OWASP-2021"]; !ok {
+		t.Errorf("CWE-mapped OWASP framework must appear in the rollup, got %v", roll)
+	}
 }

@@ -75,13 +75,95 @@ func ControlsFor(cwe string) []Control {
 	}
 	out := make([]Control, len(src))
 	copy(out, src)
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Framework != out[j].Framework {
-			return out[i].Framework < out[j].Framework
-		}
-		return out[i].ID < out[j].ID
-	})
+	sortControls(out)
 	return out
+}
+
+func cisAWS(id, title string) Control { return Control{"CIS-AWS-3.0", id, title} }
+func cisK8s(id, title string) Control { return Control{"CIS-Kubernetes-1.10", id, title} }
+
+// ruleControls is the curated misconfiguration-RULE → controls table. A CIS Benchmark control is per-resource
+// (e.g. "EBS Volume Encryption"), too specific to key by CWE, so it is keyed by the rule's stable catalog key
+// instead. Like cweControls it is reference data, NEVER inferred: every entry is a verbatim lookup of a
+// PUBLISHED CIS Benchmark control (ids + titles verbatim from CIS AWS Foundations Benchmark v3.0.0 and CIS
+// Kubernetes Benchmark v1.10.0, as transcribed in Prowler's Apache-2.0 compliance specs), and ONLY rules
+// whose detection matches EXACTLY what the control requires are mapped –
+// an approximate match (e.g. an "any 0.0.0.0/0 ingress" rule against CIS 5.2, which is admin-ports-only) is
+// deliberately left unmapped rather than claimed, because a wrong control id is false compliance assurance.
+// Interpretive frameworks (NIST-800-53 / SOC2 / HIPAA) are intentionally excluded: claiming a specific
+// sub-control there for a bespoke rule cannot be done without an authoritative mapping we do not have.
+var ruleControls = map[string][]Control{
+	// CIS AWS Foundations Benchmark v3.0.0. Each mapped rule detects a per-RESOURCE property that is exactly
+	// the control's condition. Deliberately NOT mapped (approximate, would be false assurance): a per-volume
+	// EBS-encrypted check vs the account-level default-encryption control 2.2.1; a per-trail "not multi-region"
+	// flag vs the account-level "at least one multi-region trail" control 3.1 (a supplementary single-region
+	// trail is not itself noncompliant); a "KMS key without rotation" flag vs 3.6, which is symmetric CMKs only
+	// (asymmetric/HMAC keys cannot rotate).
+	"cloudformation-rds-unencrypted":              {cisAWS("2.3.1", "Ensure that encryption is enabled for RDS Instances")},
+	"cloudformation-rds-public":                   {cisAWS("2.3.3", "Ensure that public access is not given to RDS Instance")},
+	"cloudformation-efs-unencrypted":              {cisAWS("2.4.1", "Ensure that encryption is enabled for EFS file systems")},
+	"cloudformation-cloudtrail-no-log-validation": {cisAWS("3.2", "Ensure CloudTrail log file validation is enabled")},
+	"cloudformation-ec2-imdsv2":                   {cisAWS("5.6", "Ensure that EC2 Metadata Service only allows IMDSv2")},
+	// CIS Kubernetes Benchmark v1.10.0 (pod-security controls; each is an explicit per-manifest predicate).
+	// Deliberately NOT mapped: "may run as root" (no manifest runAsNonRoot) is broader than 5.2.7's root
+	// containers (a non-root image USER with no manifest setting is not a root container); a repo-scoped
+	// "namespace has no NetworkPolicy" is approximate against 5.3.2's per-cluster-namespace requirement.
+	"kubernetes-privileged":            {cisK8s("5.2.2", "Minimize the admission of privileged containers")},
+	"kubernetes-host-pid":              {cisK8s("5.2.3", "Minimize the admission of containers wishing to share the host process ID namespace")},
+	"kubernetes-host-ipc":              {cisK8s("5.2.4", "Minimize the admission of containers wishing to share the host IPC namespace")},
+	"kubernetes-host-network":          {cisK8s("5.2.5", "Minimize the admission of containers wishing to share the host network namespace")},
+	"kubernetes-allow-priv-escalation": {cisK8s("5.2.6", "Minimize the admission of containers with allowPrivilegeEscalation")},
+	"kubernetes-run-as-root":           {cisK8s("5.2.7", "Minimize the admission of root containers")},
+	"kubernetes-host-path":             {cisK8s("5.2.12", "Minimize the admission of HostPath volumes")},
+	"kubernetes-host-port":             {cisK8s("5.2.13", "Minimize the admission of containers which use HostPorts")},
+	"kubernetes-default-namespace":     {cisK8s("5.7.4", "The default namespace should not be used")},
+}
+
+// ControlsForRule returns the curated CIS Benchmark controls a misconfiguration rule KEY maps to, in
+// deterministic order. An unmapped or empty key returns nil – the rule simply carries no CIS tag rather than
+// a guessed one (fail-open-to-nothing, same contract as ControlsFor).
+func ControlsForRule(ruleKey string) []Control {
+	src := ruleControls[strings.TrimSpace(ruleKey)]
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]Control, len(src))
+	copy(out, src)
+	sortControls(out)
+	return out
+}
+
+// ControlsForFinding returns the union of a finding's CWE-mapped controls (OWASP/PCI/ISO) and its
+// rule-key-mapped controls (CIS), de-duplicated by (framework, id) and deterministically ordered. This is the
+// single call a client-facing reader uses so a misconfiguration finding carries both its weakness-class and
+// its benchmark controls.
+func ControlsForFinding(cwe, ruleKey string) []Control {
+	seen := map[string]bool{}
+	var out []Control
+	for _, c := range ControlsFor(cwe) {
+		if k := c.Framework + "\x00" + c.ID; !seen[k] {
+			seen[k] = true
+			out = append(out, c)
+		}
+	}
+	for _, c := range ControlsForRule(ruleKey) {
+		if k := c.Framework + "\x00" + c.ID; !seen[k] {
+			seen[k] = true
+			out = append(out, c)
+		}
+	}
+	sortControls(out)
+	return out
+}
+
+// sortControls orders controls by framework then id, in place.
+func sortControls(cs []Control) {
+	sort.Slice(cs, func(i, j int) bool {
+		if cs[i].Framework != cs[j].Framework {
+			return cs[i].Framework < cs[j].Framework
+		}
+		return cs[i].ID < cs[j].ID
+	})
 }
 
 // normalizeCWE canonicalizes a CWE id to "CWE-<n>" (upper-case, "CWE-" prefix added if the caller passed a
@@ -98,4 +180,16 @@ func normalizeCWE(cwe string) string {
 		return ""
 	}
 	return "CWE-" + strconv.FormatUint(n, 10)
+}
+
+// MappedRuleKeys returns the misconfiguration rule keys that carry a curated CIS control mapping. A guard
+// test in the rule catalog uses it to assert every mapped key is a real, current rule (so a rule rename can
+// never silently drop its compliance mapping).
+func MappedRuleKeys() []string {
+	keys := make([]string, 0, len(ruleControls))
+	for k := range ruleControls {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
