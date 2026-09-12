@@ -156,10 +156,22 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 		res.Components = append(res.Components, rpmComps...)
 		if !rpmResolved {
 			res.DistroResolved = false
+			// A recognized-but-deliberately-unsupported distro (CentOS) is reported as a structured
+			// coverage gap, distinct from an unparseable release, so the pipeline never presents it as a
+			// generic "release could not be resolved" (nor aliases it to RHEL, nor reads it as clean).
+			if knownUnsupportedRPMIDs[id] {
+				res.UnsupportedDistro = id
+			}
 		}
 	}
 	return res, nil
 }
+
+// knownUnsupportedRPMIDs are rpm-family os-release IDs Synapse RECOGNIZES but deliberately does not match
+// advisories for. CentOS (both classic and Stream carry ID=centos) is excluded because CentOS Stream runs
+// ahead of RHEL, so applying a RHEL fixed version would be a false match; its packages are cataloged for
+// inventory and reported coverage=unsupported, never aliased to RHEL.
+var knownUnsupportedRPMIDs = map[string]bool{"centos": true}
 
 // rpmMatchableIDs are the rpm-family os-release IDs osDistroEcosystem can key to an advisory ecosystem: RHEL
 // (rhel/redhat -> "Red Hat:<major>", served by the owned Red Hat CSAF feed), the Rocky/AlmaLinux/Oracle

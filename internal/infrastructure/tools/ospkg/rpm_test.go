@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -300,5 +301,29 @@ func TestCatalogRPMSLESResolution(t *testing.T) {
 	}
 	if res.DistroResolved {
 		t.Error("SLES with a major-only VERSION_ID must NOT resolve (bare SUSE:15 would conflate service packs)")
+	}
+}
+
+// TestCatalogRPMCentOSUnsupported: CentOS is recognized but deliberately unsupported (CentOS Stream runs
+// ahead of RHEL). Its packages are cataloged for inventory, but the result flags UnsupportedDistro and does
+// NOT resolve (so the pipeline reports coverage=unsupported, never a clean posture and never a RHEL alias).
+func TestCatalogRPMCentOSUnsupported(t *testing.T) {
+	rootfs := writeRPMRootfs(t, "ID=centos\nVERSION_ID=\"9\"\n")
+	res, err := New().Catalog(context.Background(), rootfs)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if len(res.Components) != 1 {
+		t.Fatalf("CentOS packages must still be cataloged for inventory, got %d", len(res.Components))
+	}
+	if res.DistroResolved {
+		t.Error("CentOS must NOT resolve (deliberately unsupported)")
+	}
+	if res.UnsupportedDistro != "centos" {
+		t.Errorf("CentOS must be flagged UnsupportedDistro=centos, got %q", res.UnsupportedDistro)
+	}
+	// It must not be aliased to RHEL: the component keeps a centos namespace, not rhel.
+	if p := res.Components[0].PURL; !strings.Contains(p, "/centos/") {
+		t.Errorf("CentOS package must keep a centos PURL namespace (never aliased to rhel), got %q", p)
 	}
 }

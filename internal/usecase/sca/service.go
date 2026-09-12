@@ -2808,6 +2808,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// cataloged from the image layout. A non-image target / disabled or failed extraction leaves RootFS empty,
 	// so this is a no-op there.
 	osPkgsAdded, osDistroUnresolved := 0, false
+	osUnsupportedDistro := ""
 	if s.osPkgCataloger != nil && ws.RootFS != "" {
 		before := countComponents(doc)
 		step = trace.start(stageSBOM, "os-package-catalog", "ospkg-cataloger", "Catalog OS packages from image rootfs", map[string]int{"components": before})
@@ -2816,7 +2817,12 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		} else {
 			osPkgsAdded = mergeComponents(doc, osRes.Components)
 			// no-silent-gap: packages cataloged but the release could not be keyed to an ecosystem → warn below.
-			osDistroUnresolved = osPkgsAdded > 0 && !osRes.DistroResolved
+			// A recognized-but-unsupported distro (CentOS) gets a distinct structured warning instead.
+			if osPkgsAdded > 0 && osRes.UnsupportedDistro != "" {
+				osUnsupportedDistro = osRes.UnsupportedDistro
+			} else {
+				osDistroUnresolved = osPkgsAdded > 0 && !osRes.DistroResolved
+			}
 			trace.succeed(step, "OS-package cataloging completed", map[string]int{"os_packages_added": osPkgsAdded})
 		}
 	}
@@ -3177,6 +3183,13 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// OS packages were cataloged but their distro release could not be resolved (os-release absent/garbled, or
 	// inconsistent with the package DB), so they matched NO OS advisories – surface it so this never reads as
 	// a clean OS posture (a hostile image cannot suppress its own OS vulns by lying in /etc/os-release).
+	if osUnsupportedDistro != "" {
+		// A recognized-but-deliberately-unsupported distro (CentOS): a by-design coverage gap, not a parse
+		// failure. Report it as structured coverage=unsupported so it never reads as clean and is never aliased
+		// to another distro's advisories.
+		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
+			"%d OS package(s) cataloged from %s but coverage=unsupported: %s is deliberately not matched (CentOS Stream runs ahead of RHEL, so applying a RHEL fixed version would be a false match) – OS advisories were NOT matched and were NOT aliased to another distro", osPkgsAdded, osUnsupportedDistro, osUnsupportedDistro))
+	}
 	if osDistroUnresolved {
 		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
 			"%d OS package(s) cataloged but the distro release could not be resolved (/etc/os-release absent, garbled, or inconsistent with the package database) – OS advisories were NOT matched", osPkgsAdded))
