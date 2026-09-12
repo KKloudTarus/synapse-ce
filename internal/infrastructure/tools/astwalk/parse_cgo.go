@@ -390,3 +390,26 @@ func complexity(fn *sitter.Node, sp spec) (cyc, cog int) {
 	}
 	return cyc, cog
 }
+
+// astChildByType returns the first named child of n with the given type, or nil. Shared by the
+// per-language quality analyzers.
+func astChildByType(n *sitter.Node, t string) *sitter.Node {
+	for i := 0; i < int(n.NamedChildCount()); i++ {
+		if c := n.NamedChild(i); c.Type() == t {
+			return c
+		}
+	}
+	return nil
+}
+
+// astBlockEmpty reports whether a block / compound-statement body contains no real statements; a
+// body holding only comments or bare empty statements (`;`) counts as empty, since neither handles
+// the caught error. Shared by the per-language quality analyzers' empty-catch checks.
+func astBlockEmpty(body *sitter.Node) bool {
+	for i := 0; i < int(body.NamedChildCount()); i++ {
+		if t := body.NamedChild(i).Type(); t != "comment" && t != "empty_statement" {
+			return false
+		}
+	}
+	return true
+}

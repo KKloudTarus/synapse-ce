@@ -43,8 +43,8 @@ func TestPHPRuleFamilyInventory(t *testing.T) {
 			}
 		}
 	}
-	if php != 180 {
-		t.Fatalf("PHP catalog has %d rules, want 180", php)
+	if php != 182 {
+		t.Fatalf("PHP catalog has %d rules, want 182", php)
 	}
 	for family, count := range want {
 		if got[family] != count {
@@ -57,7 +57,7 @@ func TestPHPRuleFamilyInventory(t *testing.T) {
 		}
 	}
 	profile, ok := qualityprofile.BuiltIn("PHP", rules)
-	if !ok || len(profile.ActivatedRules) != 180 {
+	if !ok || len(profile.ActivatedRules) != 182 {
 		t.Fatalf("PHP built-in profile activates %d rules, ok=%v", len(profile.ActivatedRules), ok)
 	}
 }
