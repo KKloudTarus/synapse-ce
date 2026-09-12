@@ -682,12 +682,19 @@ func canonicalPythonSymbolID(module, qualified string) string {
 	return "python:" + module + ":" + qualified
 }
 
+// builtinCallables are the builtins a bare call (no local/import binding) resolves to "builtins.<name>". A
+// local or imported name of the same spelling is resolved BEFORE this fallback (lookupLexical/lookupImports
+// run first), so a user function that shadows a builtin is never mis-resolved to the builtin. This set MUST
+// include every builtin the taint catalog models as a source or sink, or that model is dead (unreachable via
+// a bare call): input (source) and eval/exec (CWE-94 code-execution sinks). open is already present (CWE-22
+// path sink). compile is intentionally NOT a taint sink (compiling untrusted text does not by itself execute
+// it; the execution risk is caught at the eval/exec it is passed to), so it is not listed here.
 var builtinCallables = map[string]bool{
 	"abs": true, "all": true, "any": true, "bool": true, "bytes": true, "callable": true,
-	"dict": true, "enumerate": true, "filter": true, "float": true, "frozenset": true,
-	"getattr": true, "hasattr": true, "hash": true, "int": true, "isinstance": true,
-	"issubclass": true, "iter": true, "len": true, "list": true, "map": true, "max": true,
-	"min": true, "next": true, "object": true, "open": true, "print": true, "range": true,
-	"repr": true, "reversed": true, "round": true, "set": true, "slice": true, "sorted": true,
-	"str": true, "sum": true, "super": true, "tuple": true, "type": true, "zip": true,
+	"dict": true, "enumerate": true, "eval": true, "exec": true, "filter": true,
+	"float": true, "frozenset": true, "getattr": true, "hasattr": true, "hash": true, "input": true,
+	"int": true, "isinstance": true, "issubclass": true, "iter": true, "len": true, "list": true,
+	"map": true, "max": true, "min": true, "next": true, "object": true, "open": true, "print": true,
+	"range": true, "repr": true, "reversed": true, "round": true, "set": true, "slice": true,
+	"sorted": true, "str": true, "sum": true, "super": true, "tuple": true, "type": true, "zip": true,
 }

@@ -153,7 +153,6 @@ func TestPythonCatalogModelsInjectionClasses(t *testing.T) {
 		{"python:pty:spawn", TaintCommand},
 		{"python:builtins:eval", TaintCode},
 		{"python:builtins:exec", TaintCode},
-		{"python:builtins:compile", TaintCode},
 	}
 	for _, p := range positives {
 		if !isSink(p.callee, p.class) {
@@ -162,6 +161,11 @@ func TestPythonCatalogModelsInjectionClasses(t *testing.T) {
 	}
 
 	// Sanitized twins: the safe shape is not a sink, or is neutralized for that class only.
+	// compile() is deliberately NOT a code-execution sink: compiling untrusted text does not by itself
+	// execute it (that would flag a benign syntax check); the risk surfaces at the eval/exec it is passed to.
+	if isSink("python:builtins:compile", TaintCode) {
+		t.Error("compile() must NOT be a code-execution sink (compiling text is not executing it)")
+	}
 	if isSink("python:defusedxml.ElementTree:parse", TaintXXE) {
 		t.Error("twin: the hardened defusedxml parser must NOT be an XXE sink")
 	}
