@@ -3210,6 +3210,33 @@ paths:
         '429': {description: Backpressure; the agent preserves WAL state and retries according to Retry-After, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '500': {$ref: '#/components/responses/InternalServerError'}
 
+  /api/v1/engine/accuracy:
+    get:
+      tags: [engine]
+      operationId: listEngineAccuracyRuns
+      summary: List recent detection-accuracy regression runs over the golden corpus (engine trend)
+      description: >-
+        Deployment-global engine accuracy: the owned scanner's precision, recall, and
+        false-discovery/false-negative rates over the fixed golden corpus, one entry per nightly run,
+        newest first. Returns an empty list when the nightly accuracy job is not enabled.
+      parameters:
+      - name: limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 1000, default: 100}
+      responses:
+        '200':
+          description: Recent accuracy runs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runs:
+                    type: array
+                    items: {$ref: '#/components/schemas/AccuracyRun'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
   /api/v1/integration-providers:
     get:
       tags: [integrations]
@@ -5024,6 +5051,41 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
+    AccuracyMetrics:
+      type: object
+      additionalProperties: false
+      description: Confusion-matrix summary. FalseDiscoveryRate = 1-Precision; FalseNegativeRate = 1-Recall.
+      required: [true_positives, false_positives, false_negatives, precision, recall, f1, false_discovery_rate, false_negative_rate]
+      properties:
+        true_positives: {type: integer, format: int64}
+        false_positives: {type: integer, format: int64}
+        false_negatives: {type: integer, format: int64}
+        precision: {type: number, format: double}
+        recall: {type: number, format: double}
+        f1: {type: number, format: double}
+        false_discovery_rate: {type: number, format: double}
+        false_negative_rate: {type: number, format: double}
+    AccuracyGroup:
+      type: object
+      additionalProperties: false
+      required: [group, cases, metrics]
+      properties:
+        group: {type: string, description: Ecosystem group label}
+        cases: {type: integer, format: int64}
+        metrics: {$ref: '#/components/schemas/AccuracyMetrics'}
+    AccuracyRun:
+      type: object
+      additionalProperties: false
+      description: One detection-accuracy regression run over the golden corpus.
+      required: [id, ran_at, corpus_version, schema_version, cases, overall, groups]
+      properties:
+        id: {type: string}
+        ran_at: {type: string, format: date-time}
+        corpus_version: {type: string}
+        schema_version: {type: string}
+        cases: {type: integer}
+        overall: {$ref: '#/components/schemas/AccuracyMetrics'}
+        groups: {type: array, items: {$ref: '#/components/schemas/AccuracyGroup'}}
     IntegrationFieldDescriptor:
       type: object
       additionalProperties: false

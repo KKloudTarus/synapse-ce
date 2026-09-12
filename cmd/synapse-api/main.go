@@ -424,6 +424,7 @@ func main() {
 	} // #423 detection ledger projection
 	var purpleCoverageStore ports.PurpleCoverageStore // #426 emulated technique vs observed detection
 	var emulationRunStore emulationuc.RunStore        // #426 adversary-emulation run producer
+	var accuracyRunStore ports.AccuracyRunStore       // #860 D8.6 detection-accuracy regression trend
 	var exploitChainStore exploitationuc.ChainStore   // governed exploitation chain rehearsal store
 	// Registry of the LLM agent runs executing in this process, so the offensive kill switch can cancel
 	// one mid-decision. Declared here because the kill switch is built before the orchestrator is.
@@ -598,6 +599,7 @@ func main() {
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
 		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
 		purpleCoverageStore = postgres.NewPurpleRepository(pool)
+		accuracyRunStore = postgres.NewAccuracyRunRepository(pool)
 		emulationRunStore = postgres.NewEmulationRunRepository(pool)
 		exploitChainStore = postgres.NewExploitationChainRepository(pool)
 		detectionProvenanceStore, err = postgres.NewDetectionProvenanceRepository(pool)
@@ -775,6 +777,7 @@ func main() {
 		memoryDetectionRecords := memory.NewDetectionRecordStore()
 		detectionRecordStore = memoryDetectionRecords
 		purpleCoverageStore = memory.NewPurpleStore()
+		accuracyRunStore = memory.NewAccuracyRunStore()
 		emulationRunStore = memory.NewEmulationRunStore()
 		exploitChainStore = memory.NewExploitationChainStore()
 		detectionProvenanceStore = memory.NewDetectionProvenanceStore()
@@ -2303,6 +2306,11 @@ func main() {
 		// judgments, and the detection ledger) into one deterministic, tenant-scoped story per asset. It
 		// creates no data and persists no table; staleness uses the same freshness target as fleet
 		// coverage (#413). No LLM is in this path (asserted by an arch test).
+		// #860 D8.6: the engine detection-accuracy trend. The API only READS recent runs; the worker
+		// (leader-gated nightly job) WRITES them. Read-only here, so the store is the reader directly.
+		if accuracyRunStore != nil {
+			router.SetAccuracyReader(accuracyRunStore)
+		}
 		if riskStorySvc, rserr := riskstoryuc.NewService(assetStore, findingRepo, attackPathStore, judgmentStore, detectionRecordStore, cfg.FleetCoverageFreshnessTarget, clock.Now); rserr != nil {
 			log.Error("risk story assembler init failed", "err", rserr)
 			os.Exit(1)
