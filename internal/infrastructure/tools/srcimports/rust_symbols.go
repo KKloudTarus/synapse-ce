@@ -26,7 +26,7 @@ func (s *RustSymbolScanner) ScanSymbols(ctx context.Context, dir string) (ports.
 	qualified := map[string]bool{}
 	walker := newSourceWalker(s.limits, []string{".rs"}, rustSkipDir)
 	_, err := walker.walk(ctx, dir, func(_ string, content []byte, _ *scanAccumulator) {
-		body := stripLineComments(string(content), "//")
+		body := stripRustBlockComments(stripLineComments(string(content), "//"))
 		for _, st := range splitRustStatements(body) {
 			trimmed := strings.TrimPrefix(strings.TrimSpace(st), "pub ")
 			if strings.HasPrefix(trimmed, "use ") {
@@ -122,10 +122,45 @@ func rustQualifiedPaths(body string) []string {
 			break
 		}
 		if segs >= 2 {
-			out = append(out, normalizeRustPath(body[start:i]))
+			// Only a path in CALL position counts as a reference: the next non-space byte must be '('. This
+			// excludes a `use crate::a::func;` declaration (followed by ';' or ',') and most path mentions
+			// inside strings/attributes, so an imported-but-never-called function does not raise on the
+			// qualified-path pass (an actual call to it is caught via the use-binding pass instead).
+			j := i
+			for j < n && (body[j] == ' ' || body[j] == '\t' || body[j] == '\n' || body[j] == '\r') {
+				j++
+			}
+			if j < n && body[j] == '(' {
+				out = append(out, normalizeRustPath(body[start:i]))
+			}
 		}
 	}
 	return out
+}
+
+// stripRustBlockComments removes /* ... */ block comments (honoring Rust's nesting) so a path or call
+// mentioned only in a comment does not raise a finding. Content is replaced with spaces to preserve offsets.
+func stripRustBlockComments(body string) string {
+	b := []byte(body)
+	depth := 0
+	for i := 0; i < len(b)-1; i++ {
+		if b[i] == '/' && b[i+1] == '*' {
+			depth++
+			b[i], b[i+1] = ' ', ' '
+			i++
+			continue
+		}
+		if depth > 0 && b[i] == '*' && b[i+1] == '/' {
+			depth--
+			b[i], b[i+1] = ' ', ' '
+			i++
+			continue
+		}
+		if depth > 0 && b[i] != '\n' {
+			b[i] = ' '
+		}
+	}
+	return string(b)
 }
 
 // rustCallNames returns the set of bare identifiers immediately followed by '(' (a call), e.g. "from_str"
@@ -147,11 +182,39 @@ func rustCallNames(body string) map[string]bool {
 			j++
 		}
 		if j < n && body[j] == '(' {
-			out[body[start:i]] = true
+			// Exclude a method call (`x.foo()`) and a function/macro DECLARATION (`fn foo(`, `macro_rules! foo`):
+			// a use-binding maps a leaf to a FREE function, so a same-named method or a local declaration must
+			// not be counted as a call of that imported free function.
+			k := start - 1
+			for k >= 0 && (body[k] == ' ' || body[k] == '\t') {
+				k--
+			}
+			isMethod := k >= 0 && body[k] == '.'
+			if !isMethod && !precededByRustWord(body, start, "fn") {
+				out[body[start:i]] = true
+			}
 		}
 		i--
 	}
 	return out
+}
+
+// precededByRustWord reports whether the identifier starting at idx is immediately preceded (across spaces)
+// by the keyword word as a whole token, e.g. "fn " before a function name declaration.
+func precededByRustWord(body string, idx int, word string) bool {
+	k := idx - 1
+	for k >= 0 && (body[k] == ' ' || body[k] == '\t') {
+		k--
+	}
+	end := k + 1
+	if end < len(word) {
+		return false
+	}
+	if body[end-len(word):end] != word {
+		return false
+	}
+	before := end - len(word) - 1
+	return before < 0 || !isRustIdentByte(body[before])
 }
 
 func isRustIdentStart(b byte) bool {

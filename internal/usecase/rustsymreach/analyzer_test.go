@@ -100,3 +100,41 @@ func TestHyphenatedCrateNormalizes(t *testing.T) {
 		t.Errorf("a hyphenated advisory crate must match the underscore source form, got %v", got)
 	}
 }
+
+func TestImportOnlyWithoutCallIsNotReachable(t *testing.T) {
+	// `use time::at;` with no call must NOT raise: importing a function is not calling it. (Addresses the
+	// Codex review's import-only over-raise.)
+	src := "use time::at;\nfn main() { println!(\"noop\"); }\n"
+	got := reach(t, src, []string{"time::at"})
+	if got["time::at"] {
+		t.Error("an imported-but-never-called function must NOT be reachable")
+	}
+}
+
+func TestMethodCallOfSameNamedImportedFreeFnIsNotReachable(t *testing.T) {
+	// `use vulncrate::ops::insert_many;` + a METHOD call `x.insert_many()` must NOT be attributed to the
+	// imported free function (a method call cannot be tied to the crate without type resolution).
+	src := "use vulncrate::ops::insert_many;\nfn main() { let mut v = X{}; v.insert_many(0, 1); }\n"
+	got := reach(t, src, []string{"vulncrate::ops::insert_many"})
+	if got["vulncrate::ops::insert_many"] {
+		t.Error("a method call must not match an imported free function of the same name")
+	}
+}
+
+func TestReferenceInBlockCommentIsNotReachable(t *testing.T) {
+	src := "fn main() {\n    /* old code: time::at(0); */\n    println!(\"noop\");\n}\n"
+	got := reach(t, src, []string{"time::at"})
+	if got["time::at"] {
+		t.Error("a call mentioned only inside a block comment must NOT be reachable")
+	}
+}
+
+func TestFunctionDeclarationIsNotACall(t *testing.T) {
+	// Declaring `fn insert_many(...)` locally, with `use vulncrate::ops::insert_many`, must not count the
+	// declaration as a call of the imported free function.
+	src := "use vulncrate::ops::insert_many;\nfn insert_many(x: i32) -> i32 { x }\n"
+	got := reach(t, src, []string{"vulncrate::ops::insert_many"})
+	if got["vulncrate::ops::insert_many"] {
+		t.Error("a function declaration must not count as a call")
+	}
+}

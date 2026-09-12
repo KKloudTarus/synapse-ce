@@ -77,18 +77,19 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 			continue
 		}
 		seen[subject] = true
+		// Only a PROVEN reference is appended, and always Reachable=true. The analyzer is physically
+		// incapable of emitting a not-reachable result, so it cannot suppress a finding even if a caller
+		// forgot the raise-only wrapper: a symbol it cannot prove reached is simply absent from the output
+		// (which the coordinator treats as no verdict, leaving the finding's prior tier standing).
 		want := splitNorm(subject)
-		res := reachability.Result{Symbol: subject}
-		if len(want) >= 2 {
-			if p, ok := matchTail(want, qualified); ok {
-				res.Reachable = true
-				res.Path = []string{"rust qualified reference " + strings.Join(p, "::")}
-			} else if p, ok := matchTail(want, usedPaths); ok {
-				res.Reachable = true
-				res.Path = []string{"rust use + call of " + strings.Join(p, "::")}
-			}
+		if len(want) < 2 {
+			continue
 		}
-		results = append(results, res)
+		if p, ok := matchTail(want, qualified); ok {
+			results = append(results, reachability.Result{Symbol: subject, Reachable: true, Path: []string{"rust qualified reference " + strings.Join(p, "::")}})
+		} else if p, ok := matchTail(want, usedPaths); ok {
+			results = append(results, reachability.Result{Symbol: subject, Reachable: true, Path: []string{"rust use + call of " + strings.Join(p, "::")}})
+		}
 	}
 	return &reachability.Analysis{Results: results}, nil
 }
