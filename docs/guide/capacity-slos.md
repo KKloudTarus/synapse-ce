@@ -43,6 +43,25 @@ for that run). Measured on a real SUSE Linux Enterprise Server 15 SP6 image (144
 owned SLE OVAL feed against Grype's pinned DB, the owned engine reported every pair Grype did (no recall
 gap) plus twelve additional real SUSE CVEs Grype missed.
 
+## SAST scorecard against OWASP BenchmarkJava
+
+The owned Java taint engine is scored against the OWASP BenchmarkJava suite, scoped to the CWE classes it
+models (command injection, SQL injection, path traversal); the other categories are reported as not-covered
+rather than blended into one number. Precision is propose-stage (the taint engine models no sanitizers by
+design, so it flags the benchmark's sanitized-safe variants, which the verify/triage stage filters), so the
+regression ratchet gates on per-category recall (floors only rise). The corpus is GPL v2 and is NOT vendored;
+the gated test runs only when both env vars are set, so CI provisions them and a normal run skips it:
+
+```bash
+# clone the corpus out-of-band (not vendored) and build a java-facts-capable synapse-ast (CGO)
+SYNAPSE_OWASP_BENCHMARK_DIR=/path/to/BenchmarkJava \
+SYNAPSE_AST_BIN="$PWD/bin/synapse-ast" \
+  go test ./internal/infrastructure/tools/ast -run TestOWASPBenchmarkScorecard -v
+```
+
+The pure scorer and the ratchet floors live in `internal/usecase/sastbench`; a recall drop below a committed
+floor fails the test.
+
 ## Generating observations
 
 Generate benchmark observations through the public HTTP contracts rather than by calling internal

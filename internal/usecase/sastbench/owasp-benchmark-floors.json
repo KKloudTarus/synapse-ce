@@ -1,0 +1,8 @@
+{
+  "recall": {
+    "cmdi": 0.40,
+    "sqli": 0.28,
+    "pathtraver": 0.40
+  },
+  "precision_tripwire": 0.30
+}
