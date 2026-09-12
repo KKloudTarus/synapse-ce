@@ -471,18 +471,16 @@ func versionScopedAffected(identity sbom.ComponentIdentity, affected []osvAffect
 	}
 	out := make([]osvAffected, 0, len(affected))
 	for _, a := range affected {
-		// A block with no ranges and no explicit versions constrains nothing: per OSV it applies to all
-		// versions, so its symbols apply here too. Only a block that actually declares a version constraint
-		// is filtered by it, which is where the cross-version symbol leak lives.
-		if len(a.Ranges) == 0 && len(a.Versions) == 0 {
-			out = append(out, a)
-			continue
-		}
+		// Strict: a block contributes its symbols ONLY when its ranges or explicit versions PROVABLY include
+		// the component version. A block with neither constrains nothing we can evaluate, so per OSV it does
+		// not establish that this version is in scope (OSV represents "all versions" with an introduced-0
+		// range, not by omitting both); attaching its symbols would reopen the cross-version leak, so it is
+		// dropped. A dropped symbol only under-drives raise-only reachability, never a false suppression.
 		ranges := make([]advisory.Range, 0, len(a.Ranges))
 		for _, r := range a.Ranges {
 			conv := advisory.Range{Type: strings.ToUpper(strings.TrimSpace(r.Type))}
 			for _, e := range r.Events {
-				conv.Events = append(conv.Events, advisory.Event{Introduced: e["introduced"], Fixed: e["fixed"], LastAffected: e["last_affected"]})
+				conv.Events = append(conv.Events, advisory.Event{Introduced: e["introduced"], Fixed: e["fixed"], LastAffected: e["last_affected"], Limit: e["limit"]})
 			}
 			ranges = append(ranges, conv)
 		}
@@ -628,13 +626,36 @@ func dedupRaws(raws []vulnerability.RawFinding) []vulnerability.RawFinding {
 	for _, v := range raws {
 		k := key{v.AdvisoryID, v.Component, v.Version}
 		if i, ok := idx[k]; ok {
+			// Union symbols across duplicates BEFORE picking the richer record, so a RustSec advisory's
+			// affected functions are not lost when a GHSA alias (which carries none) wins on severity/fix.
+			merged := unionSymbols(out[i].AffectedSymbols, v.AffectedSymbols)
 			if richerRaw(v, out[i]) {
 				out[i] = v
 			}
+			out[i].AffectedSymbols = merged
 			continue
 		}
 		idx[k] = len(out)
 		out = append(out, v)
+	}
+	return out
+}
+
+// unionSymbols merges two affected-symbol lists, de-duplicated and order-preserving (a is kept ahead of b).
+func unionSymbols(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	for _, s := range b {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
 	}
 	return out
 }

@@ -85,3 +85,18 @@ func TestMatchDetailsSymbolsAreVersionScoped(t *testing.T) {
 		t.Errorf("AffectedSymbolsFor should return both version-agnostic symbols, got %v", all)
 	}
 }
+
+// TestAffectedRespectsLimit: an OSV "limit" event caps a range (exclusive upper bound), so a version at or
+// beyond the limit is NOT affected even when no "fixed" closes the range.
+func TestAffectedRespectsLimit(t *testing.T) {
+	ranges := []Range{{Type: "SEMVER", Events: []Event{{Introduced: "0"}, {Limit: "2.0.0"}}}}
+	if !Affected("Go", "1.5.0", ranges, nil) {
+		t.Error("1.5.0 is below the limit 2.0.0, must be affected")
+	}
+	if Affected("Go", "2.0.0", ranges, nil) {
+		t.Error("2.0.0 (== limit) must NOT be affected (limit is exclusive)")
+	}
+	if Affected("Go", "2.1.0", ranges, nil) {
+		t.Error("2.1.0 (beyond the limit) must NOT be affected")
+	}
+}
