@@ -53,12 +53,26 @@ func newGraph() *graph {
 // it, so a not-built project can never be mislabeled as having dead dependencies. Non-nil error only on
 // a walk that could not start; a per-file parse error is skipped.
 func (a *Analyzer) Analyze(ctx context.Context, wsDir string, comps []sbom.Component) (int, error) {
-	if strings.TrimSpace(wsDir) == "" {
-		return 0, nil
-	}
+	return a.AnalyzeDirs(ctx, []string{wsDir}, comps)
+}
+
+// AnalyzeDirs is Analyze over more than one workspace root: it scans every dir into a SINGLE
+// class-reference graph before computing the reachable closure, so an image/binary target can pass both
+// the build tree (ws.Dir) and the extracted image rootfs (ws.RootFS) — where a containerized app's
+// shipped fat jars live, since ws.Dir for an image is the packed OCI layout and is not walkable — and a
+// component whose classes span the two roots is still resolved. Same conservative contract as Analyze: if
+// no application root classes are found across any dir, it tags NOTHING and returns 0.
+func (a *Analyzer) AnalyzeDirs(ctx context.Context, dirs []string, comps []sbom.Component) (int, error) {
 	g := newGraph()
-	scanWorkspace(ctx, wsDir, g)
-	if len(g.roots) == 0 || g.classes == 0 {
+	scanned := false
+	for _, dir := range dirs {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+		scanWorkspace(ctx, dir, g)
+		scanned = true
+	}
+	if !scanned || len(g.roots) == 0 || g.classes == 0 {
 		return 0, nil // not built / no JVM classes → cannot compute; never guess "unreferenced"
 	}
 	reachable := reachClosure(g.refs, g.roots)
