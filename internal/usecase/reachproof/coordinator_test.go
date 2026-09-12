@@ -336,3 +336,51 @@ func TestSkipModePartialSubjectMintsNothing(t *testing.T) {
 		t.Errorf("a partially-unknown subject must mint nothing in skip mode; n=%d proposes=%+v", n, rec.proposes)
 	}
 }
+
+// WithRaiseOnly mints a reachable claim exactly like the default: raise-only only affects the negative.
+func TestRaiseOnlyMintsReachable(t *testing.T) {
+	rec := &fakeRecorder{}
+	c := newCoord(t, fakeAnalyzer{res: []reachability.Result{
+		{Symbol: "dep.vuln", Reachable: true, Path: []string{"app.main", "dep.vuln"}},
+	}}, rec).WithRaiseOnly()
+	n, err := c.Record(context.Background(), "eng-1", "/work", []ports.ReachabilitySubject{{FindingID: "f1", Symbols: []string{"dep.vuln"}}})
+	if err != nil || n != 1 {
+		t.Fatalf("want 1 minted, got n=%d err=%v", n, err)
+	}
+	if rec.proposes[0].claim.Reachable != judgment.Reachable {
+		t.Errorf("want a reachable claim, got %+v", rec.proposes[0].claim)
+	}
+}
+
+// WithRaiseOnly must NEVER mint a not-reachable (suppressing) claim, even for a definitively un-reached
+// subject (contrast TestRecordNotReachable, which mints one without the flag). The prior tier stands.
+func TestRaiseOnlyNeverMintsNotReachable(t *testing.T) {
+	rec := &fakeRecorder{}
+	c := newCoord(t, fakeAnalyzer{res: []reachability.Result{{Symbol: "dep.vuln", Reachable: false}}}, rec).WithRaiseOnly()
+	n, err := c.Record(context.Background(), "eng-1", "/work", []ports.ReachabilitySubject{{FindingID: "f1", Symbols: []string{"dep.vuln"}}})
+	if err != nil || n != 0 {
+		t.Fatalf("raise-only must mint nothing for an un-reached subject, got n=%d err=%v", n, err)
+	}
+	if len(rec.proposes) != 0 {
+		t.Fatalf("raise-only must not propose a not-reachable claim, got %+v", rec.proposes)
+	}
+}
+
+// With a mix, raise-only mints only the reached subject and leaves the un-reached one to the prior tier.
+func TestRaiseOnlyMintsOnlyTheReached(t *testing.T) {
+	rec := &fakeRecorder{}
+	c := newCoord(t, fakeAnalyzer{res: []reachability.Result{
+		{Symbol: "hit", Reachable: true, Path: []string{"app.main", "hit"}},
+		{Symbol: "miss", Reachable: false},
+	}}, rec).WithRaiseOnly()
+	n, err := c.Record(context.Background(), "eng-1", "/work", []ports.ReachabilitySubject{
+		{FindingID: "f1", Symbols: []string{"hit"}},
+		{FindingID: "f2", Symbols: []string{"miss"}},
+	})
+	if err != nil || n != 1 {
+		t.Fatalf("want only the reached subject minted, got n=%d err=%v", n, err)
+	}
+	if len(rec.proposes) != 1 || rec.proposes[0].claim.Reachable != judgment.Reachable {
+		t.Fatalf("only the reached subject should mint (reachable), got %+v", rec.proposes)
+	}
+}

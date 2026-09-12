@@ -131,6 +131,12 @@ type Coordinator struct {
 	// this so an UNKNOWN subject never becomes a false not_affected. The lexical analyzers return a result
 	// for every subject, so this flag does not change their behaviour.
 	skipUnresolvedSubjects bool
+	// raiseOnly makes the coordinator mint ONLY reachable (urgency-raising) claims and never a not-reachable
+	// (suppressing) one: any non-reachable subject leaves the prior tier standing. It is for an analyzer whose
+	// positive direction is sound but whose negative is not (a coarse lexical scanner can miss a reference and
+	// so must never conclude not-reachable), letting that analyzer prioritise reached findings by default
+	// without any false-suppression risk. A reachable verdict never lowers a score, so this is always safe.
+	raiseOnly bool
 }
 
 var _ ports.ReachabilityRecorder = (*Coordinator)(nil)
@@ -175,6 +181,14 @@ func NewCoordinatorForLanguage(a analyzer, r recorder, audit ports.AuditLogger, 
 // omits subjects it cannot prove either way; a false not_affected must never come from an unknown.
 func (c *Coordinator) WithSkipUnresolvedSubjects() *Coordinator {
 	c.skipUnresolvedSubjects = true
+	return c
+}
+
+// WithRaiseOnly makes the coordinator mint only reachable (urgency-raising) claims and never a not-reachable
+// (suppressing) one. Use it for an analyzer whose positive direction is sound but whose negative is not, so a
+// reached finding is prioritised while an un-reached one leaves the prior tier standing (no false suppression).
+func (c *Coordinator) WithRaiseOnly() *Coordinator {
+	c.raiseOnly = true
 	return c
 }
 
@@ -261,13 +275,16 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, target
 			continue
 		}
 		claim, reachable, complete := subjectClaim(sub, reachableBy, c.tier)
-		if !reachable && !complete {
-			// Not reachable, but at least one of the subject's symbols had NO result: the subject is only
-			// PARTIALLY known. A build-aware coordinator must not conclude not-reachable from a partial
-			// subject (the omitted symbol could be reached), so it leaves the prior tier standing. The
-			// lexical analyzers return a result for every symbol, so complete is always true for them and
-			// this preserves the legacy "no result -> not-reachable" behaviour.
-			if c.skipUnresolvedSubjects {
+		if !reachable {
+			if c.raiseOnly {
+				continue // raise-only: never mint a not-reachable (suppressing) claim; prior tier stands
+			}
+			if !complete && c.skipUnresolvedSubjects {
+				// Not reachable, but at least one of the subject's symbols had NO result: the subject is only
+				// PARTIALLY known. A build-aware coordinator must not conclude not-reachable from a partial
+				// subject (the omitted symbol could be reached), so it leaves the prior tier standing. The
+				// lexical analyzers return a result for every symbol, so complete is always true for them and
+				// this preserves the legacy "no result -> not-reachable" behaviour.
 				continue
 			}
 		}

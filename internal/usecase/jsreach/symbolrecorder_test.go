@@ -119,3 +119,46 @@ func TestSymbolRecorderValidatesDependencies(t *testing.T) {
 		t.Fatalf("recording without the sbom the subjects were minted from must be refused, got %v", err)
 	}
 }
+
+// Raise-only: an un-reached affected export mints NOTHING, where the default recorder mints a suppressing
+// not-reachable. The lexical scanner can miss a reference, so a not-reachable is only safe behind the flag.
+func TestSymbolRecorderRaiseOnlyDropsNotReachable(t *testing.T) {
+	t.Parallel()
+	subj := []ports.ReachabilitySubject{{FindingID: "f1", Symbols: []string{mustSubject(t, lodashPURL, "chunk")}}}
+
+	// default recorder mints a not-reachable for an export the code never names (it names "template")
+	g1, r1 := graphWith("src/a.ts", []modulegraph.Edge{namedEdge("src/a.ts", "template")}, nil)
+	def, judgments, doc := symbolRecorderFor(t, g1, r1)
+	if n, err := def.RecordWithSBOM(context.Background(), "eng1", "/ws", doc, subj); err != nil || n != 1 {
+		t.Fatalf("default recorder should mint a not-reachable for an un-named export, got n=%d err=%v", n, err)
+	}
+	if judgments.minted[0].claim.Reachable != judgment.NotReachable {
+		t.Fatalf("default: want not-reachable, got %+v", judgments.minted[0].claim)
+	}
+
+	// raise-only recorder mints nothing for the same un-reached export
+	g2, r2 := graphWith("src/a.ts", []modulegraph.Edge{namedEdge("src/a.ts", "template")}, nil)
+	ro, judgments2, doc2 := symbolRecorderFor(t, g2, r2)
+	if n, err := ro.WithRaiseOnly().RecordWithSBOM(context.Background(), "eng1", "/ws", doc2, subj); err != nil || n != 0 {
+		t.Fatalf("raise-only must mint nothing for an un-reached export, got n=%d err=%v", n, err)
+	}
+	if len(judgments2.minted) != 0 {
+		t.Fatalf("raise-only must not mint a not-reachable, got %+v", judgments2.minted)
+	}
+}
+
+// Raise-only still mints a REACHABLE judgment for a reached export (only the negative is suppressed).
+func TestSymbolRecorderRaiseOnlyMintsReachable(t *testing.T) {
+	t.Parallel()
+	g, res := graphWith("src/a.ts", []modulegraph.Edge{namedEdge("src/a.ts", "template")}, nil)
+	r, judgments, doc := symbolRecorderFor(t, g, res)
+	n, err := r.WithRaiseOnly().RecordWithSBOM(context.Background(), "eng1", "/ws", doc, []ports.ReachabilitySubject{
+		{FindingID: "f1", Symbols: []string{mustSubject(t, lodashPURL, "template")}},
+	})
+	if err != nil || n != 1 {
+		t.Fatalf("raise-only must still mint a reachable judgment, got n=%d err=%v", n, err)
+	}
+	if judgments.minted[0].claim.Reachable != judgment.Reachable {
+		t.Fatalf("want reachable, got %+v", judgments.minted[0].claim)
+	}
+}
