@@ -40,12 +40,13 @@ func (rt *Router) listFindings(w http.ResponseWriter, r *http.Request) {
 }
 
 // findingViews annotates each finding with its UI read-path augmentations: the suspected-FP flag
-// (from fp) and the curated compliance controls its CWE maps to. Both are deterministic
-// and additive; an unmapped/empty CWE simply yields no controls (compliance.ControlsFor fail-open).
+// (from fp) and the curated compliance controls it maps to (its CWE's OWASP/PCI/ISO controls plus, for a
+// misconfiguration finding, its rule's CIS Benchmark controls). All deterministic and additive; an
+// unmapped CWE/rule simply yields no controls (compliance.ControlsForFinding fail-open).
 func findingViews(list []finding.Finding, fp map[shared.ID]bool) []findingView {
 	views := make([]findingView, len(list))
 	for i, f := range list {
-		views[i] = findingView{Finding: f, SuspectedFP: fp[f.ID], Compliance: compliance.ControlsFor(f.CWE)}
+		views[i] = findingView{Finding: f, SuspectedFP: fp[f.ID], Compliance: compliance.ControlsForFinding(f.CWE, f.RuleKey)}
 	}
 	return views
 }

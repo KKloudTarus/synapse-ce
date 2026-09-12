@@ -769,7 +769,7 @@ func detailsSection(findings []finding.Finding) (ports.ReportSection, bool) {
 		if f.CWE != "" {
 			meta = append(meta, "CWE: "+f.CWE)
 		}
-		if cl := complianceLabel(f.CWE); cl != "" {
+		if cl := complianceLabel(f.CWE, f.RuleKey); cl != "" {
 			meta = append(meta, "Compliance: "+cl)
 		}
 		if f.CVSSVector != "" {
@@ -805,12 +805,12 @@ func detailsSection(findings []finding.Finding) (ports.ReportSection, bool) {
 	return sec, true
 }
 
-// complianceLabel maps a finding's CWE to its compliance controls as a compact "Framework ID" list
-// (e.g. "ISO-27001-2022 A.8.28, OWASP-2021 A03:2021, PCI-DSS-4.0 6.2.4"), or "" if the CWE is empty or
-// maps to none. It is a pure curated-table lookup (no LLM, deterministic order), so the report path stays
-// templated and auditable – a compliance tag is a stored-data lookup, not a model output.
-func complianceLabel(cwe string) string {
-	controls := compliance.ControlsFor(cwe)
+// complianceLabel maps a finding's CWE and rule key to its compliance controls as a compact "Framework ID"
+// list (e.g. "CIS-Kubernetes-1.10 5.2.2, OWASP-2021 A01:2021"), or "" if it maps to none. It is a pure
+// curated-table lookup (no LLM, deterministic order), so the report path stays templated and auditable – a
+// compliance tag is a stored-data lookup, not a model output.
+func complianceLabel(cwe, ruleKey string) string {
+	controls := compliance.ControlsForFinding(cwe, ruleKey)
 	if len(controls) == 0 {
 		return ""
 	}

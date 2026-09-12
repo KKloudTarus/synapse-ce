@@ -97,3 +97,53 @@ func controlMatchesFinding(c SpecControl, f finding.Finding) bool {
 	}
 	return false
 }
+
+// FrameworkCoverage is a per-framework compliance rollup over a finding set: the distinct controls the
+// findings touched in that framework, and how many findings mapped to it. Deterministic order.
+type FrameworkCoverage struct {
+	Framework string    `json:"framework"`
+	Controls  []Control `json:"controls"`
+	Findings  int       `json:"findings"`
+}
+
+// Rollup aggregates findings into a per-framework compliance rollup using the same curated
+// finding->controls mapping (CWE + rule key) as ControlsForFinding, so it is a deterministic lookup, never
+// an inference. A finding maps to a framework at most once (so Findings counts findings, not control hits);
+// a finding with no mapped control contributes to nothing.
+func Rollup(findings []finding.Finding) []FrameworkCoverage {
+	type fw struct {
+		controls map[string]Control
+		findings int
+	}
+	byFramework := map[string]*fw{}
+	for _, f := range findings {
+		controls := ControlsForFinding(f.CWE, f.RuleKey)
+		if len(controls) == 0 {
+			continue
+		}
+		counted := map[string]bool{}
+		for _, c := range controls {
+			g := byFramework[c.Framework]
+			if g == nil {
+				g = &fw{controls: map[string]Control{}}
+				byFramework[c.Framework] = g
+			}
+			g.controls[c.ID] = c
+			if !counted[c.Framework] {
+				counted[c.Framework] = true
+				g.findings++
+			}
+		}
+	}
+	out := make([]FrameworkCoverage, 0, len(byFramework))
+	for name, g := range byFramework {
+		cs := make([]Control, 0, len(g.controls))
+		for _, c := range g.controls {
+			cs = append(cs, c)
+		}
+		sortControls(cs)
+		out = append(out, FrameworkCoverage{Framework: name, Controls: cs, Findings: g.findings})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Framework < out[j].Framework })
+	return out
+}
