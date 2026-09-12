@@ -25,6 +25,9 @@ type Input struct {
 	Paths          []string        `json:"paths"`
 	SourceRevision string          `json:"source_revision"`
 	SourceBound    bool            `json:"source_bound"`
+	InvalidSource  bool            `json:"invalid_source,omitempty"`
+	BaseRevision   string          `json:"base_revision,omitempty"`
+	BaseRequired   bool            `json:"base_required,omitempty"`
 	Supported      bool            `json:"supported"`
 	Current        Assignment      `json:"current"`
 	// Only policy-referenced teams are needed; eligibility is checked again at commit.
@@ -104,7 +107,7 @@ func (r *Resolver) Resolve(input Input) (Result, error) {
 		return out, err
 	}
 	paths := make([]string, 0, len(input.Paths))
-	invalidPath := false
+	invalidPath := input.InvalidSource
 	for _, raw := range input.Paths {
 		if len(raw) > MaxPathBytes {
 			return out, invalid("input path size")
@@ -176,6 +179,10 @@ func (r *Resolver) Resolve(input Input) (Result, error) {
 			return out, nil
 		}
 		if r.snapshot != nil {
+			if input.BaseRequired && (input.BaseRevision == "" || r.snapshot.Revision != input.BaseRevision) {
+				out.Reason = "missing_trusted_base_snapshot"
+				return out, nil
+			}
 			if r.snapshot.Repository != input.Repository {
 				out.Reason = "snapshot_repository_mismatch"
 				return out, nil

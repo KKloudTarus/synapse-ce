@@ -128,6 +128,15 @@ func (r *OwnershipRepository) ApplyAssignment(ctx context.Context, m ports.Owner
 		if current.FindingVersion != m.ExpectedFindingVersion || current.Assignment.Revision != m.ExpectedRevision || current.Assignment.ManualGeneration != m.ExpectedManualGeneration {
 			return shared.ErrConflict
 		}
+		if m.ExpectedBindingHash != "" {
+			var binding string
+			if e := tx.QueryRow(ctx, `SELECT `+ownershipBindingFingerprint+` FROM findings f JOIN engagements e ON e.tenant_id=f.tenant_id AND e.id=f.engagement_id`+ownershipSourceJoins+` WHERE f.tenant_id=$1 AND f.engagement_id=$2 AND f.id=$3 FOR SHARE OF e`, tenant, m.EngagementID, m.FindingID).Scan(&binding); e != nil {
+				return e
+			}
+			if binding != m.ExpectedBindingHash {
+				return shared.ErrConflict
+			}
+		}
 		before := current.Assignment
 		after := ownership.Assignment{TeamID: m.TeamID, AssigneeID: m.AssigneeID, LegacyAssignee: m.LegacyAssignee, Mode: "manual", Revision: before.Revision, ManualGeneration: before.ManualGeneration + 1}
 		preserveAssignee := m.Kind == "transfer" && !m.ClearAssignee && m.AssigneeID.IsZero()
@@ -166,6 +175,9 @@ func (r *OwnershipRepository) ApplyAssignment(ctx context.Context, m ports.Owner
 		}
 		if !after.TeamID.IsZero() {
 			if err := ownershipActiveTeam(ctx, tx, tenant, after.TeamID); err != nil {
+				if m.Kind == "route" && (errors.Is(err, shared.ErrValidation) || errors.Is(err, shared.ErrNotFound) || errors.Is(err, pgx.ErrNoRows)) {
+					return shared.ErrConflict
+				}
 				return err
 			}
 		}
@@ -222,6 +234,9 @@ func (r *OwnershipRepository) ApplyAssignment(ctx context.Context, m ports.Owner
 		if m.Kind == "release" {
 			data, _ := json.Marshal(map[string]any{"decision_id": out.ID, "manual_generation": after.ManualGeneration})
 			if err := ownershipInsertIntent(ctx, tx, tenant, ports.OwnershipIntent{ID: shared.ID("route:" + out.ID.String()), EngagementID: m.EngagementID, FindingID: m.FindingID, Kind: "route", SourceKey: m.Key, DecisionID: out.ID, Payload: data, State: "pending", CreatedAt: m.At}); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO ownership_dirty_findings(tenant_id,engagement_id,finding_id) VALUES($1,$2,$3) ON CONFLICT(tenant_id,engagement_id,finding_id) DO UPDATE SET generation=ownership_dirty_findings.generation+1`, tenant, m.EngagementID, m.FindingID); err != nil {
 				return err
 			}
 		}

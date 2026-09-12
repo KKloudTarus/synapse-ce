@@ -73,12 +73,13 @@ type OwnershipReader interface {
 // atomically persist the run and its queue obligation, never acknowledge a job
 // that cannot be executed. API authorization/validation precedes this port.
 type OwnershipRunRequest struct {
-	Policy  OwnershipPolicyHeader
-	Version ownership.PolicyVersion
-	Actor   shared.ID
-	Key     string
-	Mode    string
-	Filter  json.RawMessage
+	Policy    OwnershipPolicyHeader
+	Version   ownership.PolicyVersion
+	Actor     shared.ID
+	Key       string
+	Mode      string
+	Filter    json.RawMessage
+	PreviewID shared.ID
 }
 type OwnershipRunStarter interface {
 	StartOwnershipRun(context.Context, OwnershipRunRequest) (OwnershipRun, error)

@@ -167,7 +167,7 @@ func (r *OwnershipRepository) SaveRunItems(ctx context.Context, id shared.ID, re
 func (r *OwnershipRepository) ListRunItems(ctx context.Context, id, after shared.ID, limit int) (out []ports.OwnershipRunItem, err error) {
 	out = []ports.OwnershipRunItem{}
 	err = r.within(ctx, func(tx pgx.Tx, tenant shared.ID) error {
-		rows, e := tx.Query(ctx, `SELECT run_id,engagement_id,finding_id,finding_version,ownership_revision,manual_generation,result FROM ownership_run_items WHERE tenant_id=$1 AND run_id=$2 AND finding_id>$3 ORDER BY finding_id LIMIT $4`, tenant, id, after, ownershipLimit(limit))
+		rows, e := tx.Query(ctx, `SELECT i.run_id,i.engagement_id,i.finding_id,i.finding_version,i.ownership_revision,i.manual_generation,i.result,COALESCE(w.outcome,'evaluated') FROM ownership_run_items i LEFT JOIN ownership_work_items w ON w.tenant_id=i.tenant_id AND w.run_id=i.run_id AND w.finding_id=i.finding_id WHERE i.tenant_id=$1 AND i.run_id=$2 AND i.finding_id COLLATE "C">$3 ORDER BY i.finding_id COLLATE "C" LIMIT $4`, tenant, id, after, ownershipLimit(limit))
 		if e != nil {
 			return e
 		}
@@ -175,7 +175,7 @@ func (r *OwnershipRepository) ListRunItems(ctx context.Context, id, after shared
 		for rows.Next() {
 			var item ports.OwnershipRunItem
 			var data []byte
-			if e := rows.Scan(&item.RunID, &item.EngagementID, &item.FindingID, &item.FindingVersion, &item.OwnershipRevision, &item.ManualGeneration, &data); e != nil {
+			if e := rows.Scan(&item.RunID, &item.EngagementID, &item.FindingID, &item.FindingVersion, &item.OwnershipRevision, &item.ManualGeneration, &data, &item.Outcome); e != nil {
 				return e
 			}
 			if e := json.Unmarshal(data, &item.Result); e != nil {

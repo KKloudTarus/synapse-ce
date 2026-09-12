@@ -117,45 +117,54 @@ const ownershipInboxFrom = ` FROM findings f JOIN engagements e ON e.tenant_id=f
  LEFT JOIN sla_assessments sa ON sa.tenant_id=sc.tenant_id AND sa.id=sc.assessment_id
  LEFT JOIN sla_lifecycles sl ON sl.tenant_id=sc.tenant_id AND sl.engagement_id=sc.engagement_id AND sl.finding_id=sc.finding_id AND sl.assessment_id=sc.assessment_id`
 
+func ownershipInboxPredicate(tenant shared.ID, f ports.OwnershipInboxFilter) (string, []any, error) {
+	args := []any{tenant}
+	where := ` WHERE f.tenant_id=$1 AND e.project_id IS NULL AND e.host_asset_id IS NULL`
+	add := func(clause string, value any) { args = append(args, value); where += fmt.Sprintf(clause, len(args)) }
+	if !f.EngagementID.IsZero() {
+		add(` AND f.engagement_id=$%d`, f.EngagementID)
+	}
+	if !f.TeamID.IsZero() {
+		add(` AND a.team_id=$%d`, f.TeamID)
+	}
+	if !f.AssigneeID.IsZero() {
+		add(` AND a.assignee_id=$%d`, f.AssigneeID)
+	}
+	if f.MyTeams {
+		if f.MemberID.IsZero() {
+			return "", nil, shared.ErrValidation
+		}
+		add(` AND EXISTS(SELECT 1 FROM ownership_memberships m WHERE m.tenant_id=f.tenant_id AND m.team_id=a.team_id AND m.user_id=$%d)`, f.MemberID)
+	}
+	if f.Unresolved {
+		where += ` AND COALESCE(a.resolution,'unresolved')='unresolved'`
+	}
+	if f.Severity != "" {
+		add(` AND f.severity=$%d`, f.Severity)
+	}
+	if f.Status != "" {
+		add(` AND f.status=$%d`, f.Status)
+	}
+	if f.Kind != "" {
+		add(` AND f.kind=$%d`, f.Kind)
+	}
+	if f.SLAStatus != "" {
+		add(` AND sl.status=$%d`, f.SLAStatus)
+	}
+	if f.DueBefore != nil {
+		add(` AND sa.remediate_by <= $%d`, *f.DueBefore)
+	}
+	return where, args, nil
+}
+
 func (r *OwnershipRepository) OwnershipInbox(ctx context.Context, f ports.OwnershipInboxFilter) (out ports.OwnershipInboxPage, err error) {
 	out.Items = []ports.OwnershipInboxItem{}
 	err = r.within(ctx, func(tx pgx.Tx, tenant shared.ID) error {
-		args := []any{tenant}
-		where := ` WHERE f.tenant_id=$1 AND e.project_id IS NULL AND e.host_asset_id IS NULL`
+		where, args, err := ownershipInboxPredicate(tenant, f)
+		if err != nil {
+			return err
+		}
 		add := func(clause string, value any) { args = append(args, value); where += fmt.Sprintf(clause, len(args)) }
-		if !f.EngagementID.IsZero() {
-			add(` AND f.engagement_id=$%d`, f.EngagementID)
-		}
-		if !f.TeamID.IsZero() {
-			add(` AND a.team_id=$%d`, f.TeamID)
-		}
-		if !f.AssigneeID.IsZero() {
-			add(` AND a.assignee_id=$%d`, f.AssigneeID)
-		}
-		if f.MyTeams {
-			if f.MemberID.IsZero() {
-				return shared.ErrValidation
-			}
-			add(` AND EXISTS(SELECT 1 FROM ownership_memberships m WHERE m.tenant_id=f.tenant_id AND m.team_id=a.team_id AND m.user_id=$%d)`, f.MemberID)
-		}
-		if f.Unresolved {
-			where += ` AND COALESCE(a.resolution,'unresolved')='unresolved'`
-		}
-		if f.Severity != "" {
-			add(` AND f.severity=$%d`, f.Severity)
-		}
-		if f.Status != "" {
-			add(` AND f.status=$%d`, f.Status)
-		}
-		if f.Kind != "" {
-			add(` AND f.kind=$%d`, f.Kind)
-		}
-		if f.SLAStatus != "" {
-			add(` AND sl.status=$%d`, f.SLAStatus)
-		}
-		if f.DueBefore != nil {
-			add(` AND sa.remediate_by <= $%d`, *f.DueBefore)
-		}
 		if err := tx.QueryRow(ctx, `SELECT count(*)`+ownershipInboxFrom+where, args...).Scan(&out.Total); err != nil {
 			return err
 		}

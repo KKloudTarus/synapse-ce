@@ -45,6 +45,7 @@ type OwnershipMutation struct {
 	ExpectedFindingVersion   int
 	ExpectedRevision         int
 	ExpectedManualGeneration int64
+	ExpectedBindingHash      string // empty only for compatibility/manual mutations
 	PolicyID                 shared.ID
 	PolicyVersion            int
 	ExpectedPolicyRevision   int
@@ -95,6 +96,7 @@ type OwnershipRun struct {
 	CreatedAt      time.Time       `json:"created_at"`
 }
 type OwnershipRunItem struct {
+	Outcome           string           `json:"outcome,omitempty"`
 	RunID             shared.ID        `json:"run_id"`
 	EngagementID      shared.ID        `json:"engagement_id"`
 	FindingID         shared.ID        `json:"finding_id"`

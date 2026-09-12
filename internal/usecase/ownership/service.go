@@ -231,6 +231,7 @@ type SnapshotInput struct {
 }
 type SnapshotView struct {
 	domain.Snapshot
+	Content     string              `json:"content"`
 	Diagnostics []domain.Diagnostic `json:"diagnostics"`
 }
 
@@ -239,7 +240,7 @@ func snapshotView(snap domain.Snapshot) (SnapshotView, error) {
 	if p.Diagnostics == nil {
 		p.Diagnostics = []domain.Diagnostic{}
 	}
-	return SnapshotView{Snapshot: snap, Diagnostics: p.Diagnostics}, err
+	return SnapshotView{Snapshot: snap, Content: snap.Content, Diagnostics: p.Diagnostics}, err
 }
 func (s *Service) ImportSnapshot(ctx context.Context, actor string, in SnapshotInput) (out SnapshotView, err error) {
 	if !validID(in.EngagementID) {
@@ -596,6 +597,7 @@ func (s *Service) Bulk(ctx context.Context, actor, key string, items []Assignmen
 }
 
 type RunInput struct {
+	PreviewID      shared.ID                  `json:"preview_id,omitempty"`
 	Version        int                        `json:"version"`
 	PolicyRevision int                        `json:"policy_revision"`
 	PolicyHash     string                     `json:"policy_hash"`
@@ -629,7 +631,7 @@ func (s *Service) StartRun(ctx context.Context, actor, key string, id shared.ID,
 		return ports.OwnershipRun{}, ErrWorkerUnavailable
 	}
 	data, _ := json.Marshal(in.Filter)
-	return s.runtime.StartOwnershipRun(ctx, ports.OwnershipRunRequest{Policy: p, Version: v, Actor: shared.ID(actor), Key: key, Mode: mode, Filter: data})
+	return s.runtime.StartOwnershipRun(ctx, ports.OwnershipRunRequest{Policy: p, Version: v, Actor: shared.ID(actor), Key: key, Mode: mode, Filter: data, PreviewID: in.PreviewID})
 }
 func (s *Service) Run(ctx context.Context, actor string, id shared.ID) (ports.OwnershipRun, error) {
 	if err := s.check(ctx, actor, user.PermAdminister, ""); err != nil {
@@ -664,4 +666,18 @@ func (s *Service) CancelRun(ctx context.Context, actor string, id shared.ID, rev
 		}
 		return s.repo.SetRunState(ctx, id, revision, "cancelled")
 	})
+}
+
+func (s *Service) RetryRun(ctx context.Context, actor string, id shared.ID, revision int) error {
+	if revision < 1 {
+		return shared.ErrValidation
+	}
+	if _, err := s.Run(ctx, actor, id); err != nil {
+		return err
+	}
+	replayer, ok := s.runtime.(ports.OwnershipRunReplayer)
+	if !ok {
+		return ErrWorkerUnavailable
+	}
+	return replayer.ReplayOwnershipRun(ctx, shared.ID(actor), id, revision)
 }

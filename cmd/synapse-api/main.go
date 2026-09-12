@@ -54,6 +54,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
 	oidcadapter "github.com/KKloudTarus/synapse-ce/internal/infrastructure/oidc"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ownershipcapture"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/file"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
@@ -1352,6 +1353,27 @@ func main() {
 		ownershipService, ownershipErr := ownershipuc.NewService(ownershipRepo, ownershipRepo, findingRepo, postgres.NewTenantTransactionRunner(databasePool), auditLog, clock, ids, cfg.OwnershipMode, cfg.NotificationEnabled)
 		if ownershipErr != nil {
 			log.Error("ownership service init failed", "err", ownershipErr)
+			os.Exit(1)
+		}
+		ownershipExecution, ownershipErr := postgres.NewOwnershipExecution(ownershipRepo, ids, clock)
+		if ownershipErr != nil {
+			log.Error("ownership execution init failed", "err", ownershipErr)
+			os.Exit(1)
+		}
+		ownershipWorker, ownershipErr := ownershipuc.NewWorker(ownershipExecution, ownershipRepo, cfg.OwnershipMode, cfg.NotificationEnabled, log)
+		if ownershipErr != nil {
+			log.Error("ownership worker init failed", "err", ownershipErr)
+			os.Exit(1)
+		}
+		ownershipService.SetRunStarter(ownershipWorker)
+		var ownershipReader ports.ToolRunner
+		if scaSandbox != nil {
+			ownershipReader = scaSandbox
+		} else if toolExecution != config.ToolExecutionDispatchOnly {
+			ownershipReader = toolrunner.NewExecRunner(15*time.Second, 3_000_001)
+		}
+		if ownershipErr := scaService.SetOwnershipSource(ownershipcapture.New(ownershipReader), ownershipRepo); ownershipErr != nil {
+			log.Error("ownership capture init failed", "err", ownershipErr)
 			os.Exit(1)
 		}
 		router.SetOwnership(ownershipService, cfg.OwnershipMode, "")

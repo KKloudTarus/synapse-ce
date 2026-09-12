@@ -137,6 +137,11 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 				nullableFindingID(f.RiskAssessmentID), f.EvaluatedAt, dataFlow, strings.Join(f.DirectBumps, "\n"), f.PublicExploit, f.EPSSPercentile); err != nil {
 				return fmt.Errorf("upsert finding: %w", err)
 			}
+			if batch, ok := ports.OwnershipSourceFrom(ctx); ok {
+				if err := ownershipBindFinding(ctx, tx, tenantID, f, batch); err != nil {
+					return fmt.Errorf("bind finding ownership source: %w", err)
+				}
+			}
 		}
 		return nil
 	})

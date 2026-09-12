@@ -806,6 +806,32 @@ paths:
           description: "Stale revision, hash mismatch or idempotency key reused with different content"
         "503":
           description: "Routing worker unavailable or capacity exhausted"
+  /api/v1/ownership/runs/{rid}/retry:
+    post:
+      tags: ["ownership"]
+      operationId: "retryOwnershipRun"
+      summary: "Retry a dead-lettered ownership run without changing its frozen selection"
+      description: "Tenant comes from authentication. Persisted user permissions and normal engagement visibility are enforced. Hidden project/host scan contexts are excluded."
+      parameters: [{"name":"rid","in":"path","required":true,"schema":{"type":"string","minLength":1,"maxLength":200}}]
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/OwnershipRevision"
+      responses:
+        "204":
+          description: "Completed"
+        "400":
+          description: "Invalid or conflicting request fields"
+        "403":
+          description: "Role disallowed or persisted user disabled"
+        "404":
+          description: "Absent, hidden or other tenant resource"
+        "409":
+          description: "Stale revision, hash mismatch or idempotency key reused with different content"
+        "503":
+          description: "Routing worker unavailable or capacity exhausted"
   /api/v1/ownership/findings:
     get:
       tags: ["ownership"]
@@ -6165,6 +6191,10 @@ components:
         created_at:
           type: "string"
           format: "date-time"
+        content:
+          type: "string"
+          maxLength: 3000000
+          description: "CODEOWNERS content for authenticated admin review; omitted from list responses."
         diagnostics:
           type: "array"
           items:
@@ -6561,6 +6591,11 @@ components:
       additionalProperties: false
       required: ["version","policy_revision","policy_hash"]
       properties:
+        preview_id:
+          type: "string"
+          description: "Required for reroute: a completed preview with the same policy revision, version, hash and filter. Omit for preview."
+          minLength: 1
+          maxLength: 200
         version:
           type: "integer"
           minimum: 1
@@ -6626,6 +6661,9 @@ components:
       additionalProperties: false
       required: ["run_id","engagement_id","finding_id","finding_version","ownership_revision","manual_generation","result"]
       properties:
+        outcome:
+          type: "string"
+          enum: ["evaluated", "manual_protected", "conflict"]
         run_id:
           type: "string"
           minLength: 1

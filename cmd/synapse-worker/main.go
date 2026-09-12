@@ -35,6 +35,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ownershipcapture"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	recontools "github.com/KKloudTarus/synapse-ce/internal/infrastructure/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
@@ -42,6 +43,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/license"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensemeta"
@@ -78,6 +80,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
+	ownershipuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ownership"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
@@ -96,6 +99,10 @@ import (
 func main() {
 	cfg := config.Load()
 	log := logging.New(cfg.LogLevel)
+	if cfg.OwnershipMode != "off" && cfg.OwnershipMode != "observe" && cfg.OwnershipMode != "enforce" {
+		log.Error("SYNAPSE_OWNERSHIP_MODE must be off, observe or enforce")
+		os.Exit(1)
+	}
 	if err := cfg.ValidateWorkerProfile(); err != nil {
 		log.Error("worker profile invalid", "err", err)
 		os.Exit(1)
@@ -187,6 +194,25 @@ func main() {
 	evidenceStore := postgres.NewEvidenceStore(pool)
 	auditLog := postgres.NewAuditLog(pool)
 	queue := postgres.NewJobQueue(pool, ids)
+	var ownershipRepo *postgres.OwnershipRepository
+	var ownershipWorker *ownershipuc.Worker
+	if cfg.OwnershipMode != "off" {
+		ownershipRepo, err = postgres.NewOwnershipRepository(pool)
+		if err != nil {
+			log.Error("ownership repository init failed", "err", err)
+			os.Exit(1)
+		}
+		ownershipExecution, ownershipErr := postgres.NewOwnershipExecution(ownershipRepo, ids, clock)
+		if ownershipErr != nil {
+			log.Error("ownership execution init failed", "err", ownershipErr)
+			os.Exit(1)
+		}
+		ownershipWorker, ownershipErr = ownershipuc.NewWorker(ownershipExecution, ownershipRepo, cfg.OwnershipMode, cfg.NotificationEnabled, log)
+		if ownershipErr != nil {
+			log.Error("ownership worker init failed", "err", ownershipErr)
+			os.Exit(1)
+		}
+	}
 	assessmentCycleStore := postgres.NewAssessmentCycleRepository(pool)
 	assessmentSnapshotStore := postgres.NewAssessmentSnapshotRepository(pool)
 	assessmentComparisonStore := postgres.NewAssessmentComparisonRepository(pool)
@@ -223,10 +249,17 @@ func main() {
 		os.Exit(1)
 	}
 	if cfg.WorkerProfile == config.WorkerProfileLifecycle {
-		runWorkerRuntime(ctx, cfg, queue, map[string]worker.Handler{
+		handlers := map[string]worker.Handler{
 			comparisonuc.JobKind:                   assessmentComparisonJobHandler{svc: assessmentComparisonService},
 			cycleuc.AssessmentClosureReportJobKind: assessmentClosureReportJobHandler{svc: assessmentClosureReportService},
-		}, nil, postgres.NewLeaderStore(pool), auditLog, clock, ids, 6*time.Minute, log)
+		}
+		var maintenance []func(context.Context)
+		if ownershipWorker != nil {
+			handlers[ownershipuc.RouteJobKind] = ownershipWorker
+			maintenance = append(maintenance, ownershipWorker.Run)
+			log.Info("durable finding ownership routing enabled", "mode", cfg.OwnershipMode, "profile", cfg.WorkerProfile)
+		}
+		runWorkerRuntime(ctx, cfg, queue, handlers, maintenance, postgres.NewLeaderStore(pool), auditLog, clock, ids, 6*time.Minute, log)
 		return
 	}
 	vulnerabilitySources := postgres.NewVulnerabilitySourceStore(pool)
@@ -568,6 +601,19 @@ func main() {
 		integrationuc.JobKind:                  integrationJobHandler{svc: integrationService},
 		comparisonuc.JobKind:                   assessmentComparisonJobHandler{svc: assessmentComparisonService},
 		cycleuc.AssessmentClosureReportJobKind: assessmentClosureReportJobHandler{svc: assessmentClosureReportService},
+	}
+	if ownershipWorker != nil {
+		var ownershipReader ports.ToolRunner = scaExecution.Sandbox
+		if scaExecution.Sandbox == nil {
+			ownershipReader = toolrunner.NewExecRunner(15*time.Second, 3_000_001)
+		}
+		if ownershipErr := scaService.SetOwnershipSource(ownershipcapture.New(ownershipReader), ownershipRepo); ownershipErr != nil {
+			log.Error("ownership capture init failed", "err", ownershipErr)
+			os.Exit(1)
+		}
+		handlers[ownershipuc.RouteJobKind] = ownershipWorker
+		maintenanceTasks = append(maintenanceTasks, ownershipWorker.Run)
+		log.Info("durable finding ownership routing enabled", "mode", cfg.OwnershipMode, "profile", cfg.WorkerProfile)
 	}
 	if cfg.NotificationEnabled {
 		if cfg.VaultMasterKey == "" {

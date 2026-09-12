@@ -59,6 +59,7 @@ func (rt *Router) registerOwnership(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/ownership/runs/{rid}", rt.ownershipAuthorized(user.PermAdminister, rt.ownershipRun))
 	mux.HandleFunc("GET /api/v1/ownership/runs/{rid}/items", rt.ownershipAuthorized(user.PermAdminister, rt.ownershipRun))
 	mux.HandleFunc("POST /api/v1/ownership/runs/{rid}/cancel", rt.ownershipAuthorized(user.PermAdminister, rt.ownershipRun))
+	mux.HandleFunc("POST /api/v1/ownership/runs/{rid}/retry", rt.ownershipAuthorized(user.PermAdminister, rt.ownershipRun))
 	mux.HandleFunc("GET /api/v1/ownership/findings", rt.ownershipAuthorized(user.PermView, rt.ownershipInbox))
 	mux.HandleFunc("POST /api/v1/ownership/bulk", rt.ownershipAuthorized(user.PermTriage, rt.ownershipBulk))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/findings/{fid}/ownership", rt.ownershipAuthorized(user.PermView, rt.ownershipFinding))
@@ -429,7 +430,12 @@ func (rt *Router) ownershipRun(w http.ResponseWriter, r *http.Request) {
 			rt.ownershipReply(w, 0, nil, e)
 			return
 		}
-		e := rt.ownership.CancelRun(r.Context(), PrincipalFrom(r.Context()), id, in.Revision)
+		var e error
+		if strings.HasSuffix(r.URL.Path, "/retry") {
+			e = rt.ownership.RetryRun(r.Context(), PrincipalFrom(r.Context()), id, in.Revision)
+		} else {
+			e = rt.ownership.CancelRun(r.Context(), PrincipalFrom(r.Context()), id, in.Revision)
+		}
 		rt.ownershipReply(w, 204, nil, e)
 		return
 	}

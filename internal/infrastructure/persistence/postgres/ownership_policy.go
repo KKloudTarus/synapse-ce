@@ -238,7 +238,7 @@ func (r *OwnershipRepository) ActivatePolicy(ctx context.Context, a ports.Owners
 			}
 			active = a.Version
 		}
-		return ownershipCAS(tx.Exec(ctx, `UPDATE ownership_policies SET active_version=$3,revision=revision+1 WHERE tenant_id=$1 AND id=$2 AND revision=$4`, tenant, a.PolicyID, active, revision))
+		return ownershipCAS(tx.Exec(ctx, `UPDATE ownership_policies SET active_version=$3,revision=revision+1,activated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 AND revision=$4`, tenant, a.PolicyID, active, revision))
 	})
 }
 
