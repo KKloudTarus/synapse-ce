@@ -29,8 +29,9 @@ func (Poetry) Ecosystem() string { return "pypi" }
 func (Poetry) Markers() []string { return []string{"poetry.lock"} }
 
 type poetryDep struct {
-	name     string
-	optional bool
+	name       string
+	optional   bool
+	constraint string // the declared version constraint (D3.8): `"^1.2"` or a table's version=…
 }
 
 // poetryPkg is a [[package]] block collected in pass 1: identity + the direct dependency names from its
@@ -123,8 +124,9 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 			// Multi-line continuation elements are filtered by isPoetryDepKey and never guessed as optional.
 			i := strings.IndexByte(line, '=')
 			if k := strings.Trim(strings.TrimSpace(line[:i]), `"`); isPoetryDepKey(k) {
-				value := strings.ToLower(strings.ReplaceAll(line[i+1:], " ", ""))
-				cur.deps = append(cur.deps, poetryDep{name: k, optional: strings.Contains(value, "optional=true")})
+				raw := strings.TrimSpace(line[i+1:])
+				value := strings.ToLower(strings.ReplaceAll(raw, " ", ""))
+				cur.deps = append(cur.deps, poetryDep{name: k, optional: strings.Contains(value, "optional=true"), constraint: poetryDepConstraint(raw)})
 			}
 		case inPkg && strings.HasPrefix(line, "name = "):
 			cur.name = tomlString(line[len("name = "):])
@@ -165,6 +167,7 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 		}
 		set.add(sbom.Component{Name: n, Version: p.version, PURL: ref, Location: in.Path, Scope: scope, Checksums: pyHashChecksums([]string{hash})})
 		targetOptional := map[string]bool{}
+		targetRange := map[string]string{}
 		seen := map[string]bool{ref: true}
 		for _, d := range p.deps {
 			dn := normalizePyPI(d.name)
@@ -175,6 +178,11 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 			t := purlOf(dn, vs[0])
 			if t == ref {
 				continue
+			}
+			// The declared range follows the edge winner: a required declaration wins over an optional one
+			// for the same resolved target (matching the required-wins optionality below), never the reverse.
+			if d.constraint != "" && (!d.optional || targetRange[t] == "") {
+				targetRange[t] = d.constraint
 			}
 			if !seen[t] {
 				seen[t] = true
@@ -196,10 +204,10 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 		sort.Strings(required)
 		sort.Strings(optional)
 		if len(required) > 0 {
-			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: required, Scope: scope})
+			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: required, Scope: scope, RequestedRanges: rangesFor(required, targetRange)})
 		}
 		if len(optional) > 0 {
-			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: optional, Scope: scope, Optional: true})
+			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: optional, Scope: scope, Optional: true, RequestedRanges: rangesFor(optional, targetRange)})
 		}
 	}
 	return set.components(), deps, nil
@@ -223,4 +231,25 @@ func isPoetryDepKey(k string) bool {
 	}
 	c := k[0]
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+// poetryDepConstraint extracts the declared version constraint from a poetry.lock dependency value:
+// a bare TOML string ("^1.2") or an inline table's version field ({version = "^1.2", optional = true}).
+// A table with no version (a git/path/url dependency) yields "" (D3.8).
+func poetryDepConstraint(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if raw[0] == '"' {
+		return tomlString(raw)
+	}
+	if raw[0] == '{' {
+		if j := strings.Index(raw, "version"); j >= 0 {
+			if eq := strings.IndexByte(raw[j:], '='); eq >= 0 {
+				return tomlString(raw[j+eq+1:])
+			}
+		}
+	}
+	return ""
 }

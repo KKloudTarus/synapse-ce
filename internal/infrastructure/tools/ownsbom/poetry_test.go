@@ -52,6 +52,10 @@ func TestPoetryParse(t *testing.T) {
 	if len(deps[0].DependsOn) != 1 || deps[0].DependsOn[0] != "pkg:pypi/charset-normalizer@3.3.2" {
 		t.Errorf("requests must depend on charset-normalizer@3.3.2 only (idna unresolved → no edge), got %v", deps[0].DependsOn)
 	}
+	// D3.8: the edge records the declared range for the resolved target (requests declared ">=2,<4").
+	if r := deps[0].RequestedRanges["pkg:pypi/charset-normalizer@3.3.2"]; r != ">=2,<4" {
+		t.Errorf("requests edge must record charset-normalizer declared range >=2,<4, got %q", r)
+	}
 	if len(comps) != 3 {
 		t.Fatalf("want 3 components, got %d: %+v", len(comps), comps)
 	}
