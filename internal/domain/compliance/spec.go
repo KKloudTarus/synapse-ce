@@ -145,7 +145,12 @@ func controlsByFramework() map[string][]Control {
 			if byFW[c.Framework] == nil {
 				byFW[c.Framework] = map[string]Control{}
 			}
-			byFW[c.Framework][c.ID] = c
+			// Deterministic dedup: a control ID should carry one canonical title across the CWE and rule
+			// tables, but if two entries ever disagree, pick the lexicographically smaller title so the
+			// emitted metadata does not depend on Go's map iteration order.
+			if existing, ok := byFW[c.Framework][c.ID]; !ok || c.Title < existing.Title {
+				byFW[c.Framework][c.ID] = c
+			}
 		}
 	}
 	for _, cs := range cweControls {
@@ -182,11 +187,15 @@ func Rollup(findings []finding.Finding) []FrameworkCoverage {
 			continue
 		}
 		countedFW := map[string]bool{}
+		countedControl := map[string]bool{} // guard: count each (framework,control) at most once PER finding
 		for _, c := range controls {
 			if failed[c.Framework] == nil {
 				failed[c.Framework] = map[string]int{}
 			}
-			failed[c.Framework][c.ID]++
+			if key := c.Framework + "\x00" + c.ID; !countedControl[key] {
+				countedControl[key] = true
+				failed[c.Framework][c.ID]++
+			}
 			if !countedFW[c.Framework] {
 				countedFW[c.Framework] = true
 				frameworkFindings[c.Framework]++
