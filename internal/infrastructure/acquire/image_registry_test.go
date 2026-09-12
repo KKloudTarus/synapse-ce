@@ -239,7 +239,9 @@ func TestRegistryHostsCloudCDNs(t *testing.T) {
 // CGNAT cloud-metadata endpoints are refused; RFC1918 (self-hosted registry) and public IPs pass.
 func TestIsInternalAcquisitionIP(t *testing.T) {
 	reject := []string{"127.0.0.1", "::1", "169.254.169.254", "100.100.100.200", "0.0.0.0", "fe80::1", "fd00:ec2::254"}
-	allow := []string{"10.0.0.5", "192.168.1.10", "172.16.0.1", "8.8.8.8", "1.1.1.1", "fd12:3456::1"}
+	// 100.80.1.2 is a Tailscale tailnet address (CGNAT 100.64/10); a registry served over a tailnet
+	// is a legitimate target, so only the exact Alibaba metadata IP in that range is blocked.
+	allow := []string{"10.0.0.5", "192.168.1.10", "172.16.0.1", "8.8.8.8", "1.1.1.1", "fd12:3456::1", "100.80.1.2"}
 	for _, s := range reject {
 		if !isInternalAcquisitionIP(net.ParseIP(s)) {
 			t.Errorf("isInternalAcquisitionIP(%s) = false, want true (must be refused)", s)

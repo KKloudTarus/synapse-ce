@@ -692,24 +692,28 @@ func rejectInternalAcquisitionHost(host string) error {
 	return nil
 }
 
-// carrierGradeNAT is the shared CGNAT range (RFC 6598). It is ISP-internal, never a legitimate
-// code/image host, and is the range the Alibaba/OpenStack metadata service (100.100.100.200) sits
-// in, so it is refused alongside loopback/link-local.
-var carrierGradeNAT = func() *net.IPNet { _, n, _ := net.ParseCIDR("100.64.0.0/10"); return n }()
-
-// awsMetadataIPv6 is the AWS EC2 IPv6 instance-metadata endpoint. It sits in the IPv6 ULA range
-// (fd00::/8) which is otherwise allowed for a self-hosted registry, so the IPv4 link-local metadata
-// guard would not cover it; it is refused explicitly to keep the "never reach cloud metadata"
-// invariant symmetric across IPv4 and IPv6.
-var awsMetadataIPv6 = net.ParseIP("fd00:ec2::254")
+// metadataIPs are the cloud instance-metadata endpoints that do NOT fall in the IPv4 link-local
+// range already blocked below: the Alibaba/OpenStack IPv4 endpoint (100.100.100.200, in the CGNAT
+// range) and the AWS EC2 IPv6 endpoint (fd00:ec2::254, in the otherwise-allowed IPv6 ULA range).
+// Only these exact addresses are refused, so a legitimate registry reached over a shared-CGNAT
+// network (a Tailscale tailnet assigns 100.64.0.0/10) or over IPv6 ULA stays reachable.
+var metadataIPs = []net.IP{net.ParseIP("100.100.100.200"), net.ParseIP("fd00:ec2::254")}
 
 // isInternalAcquisitionIP reports whether an IP is a loopback, link-local (169.254/16, fe80::/10,
-// incl. the standard cloud metadata endpoint), unspecified, carrier-grade-NAT, or the AWS IPv6
-// metadata address – never a legitimate code/image source. RFC1918 and other IPv6 ULA are
-// intentionally NOT rejected: an internal git/registry server is a valid target.
+// incl. the standard IPv4 cloud metadata endpoint), unspecified, or one of the non-link-local cloud
+// metadata endpoints – never a legitimate code/image source. RFC1918, CGNAT, and IPv6 ULA are
+// intentionally NOT blocked wholesale: an internal git/registry server (including one on a Tailscale
+// tailnet) is a valid target.
 func isInternalAcquisitionIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
-		carrierGradeNAT.Contains(ip) || ip.Equal(awsMetadataIPv6)
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	for _, m := range metadataIPs {
+		if ip.Equal(m) {
+			return true
+		}
+	}
+	return false
 }
 
 // gitHost extracts the host to allow through egress from a validated http(s) clone URL.
@@ -875,9 +879,9 @@ func checkImageManifestSize(img v1.Image, maxBytes int64) error {
 // registryTransport is the in-process egress pin for a registry pull. Its DialContext admits
 // only a host in allowHosts (the registryHosts allow-list), resolves it, and dials a vetted IP
 // directly so a DNS rebind between check and connect cannot redirect the connection. Loopback,
-// link-local, cloud-metadata (169.254/16, its IPv6 form), and carrier-grade-NAT (100.64/10, the
-// Alibaba/OpenStack 100.100.100.200 metadata range) addresses are refused (SSRF/metadata guard);
-// RFC1918 stays reachable so a self-hosted internal registry is a valid target, matching
+// link-local, and cloud-metadata addresses (IPv4 169.254/16, the Alibaba/OpenStack 100.100.100.200,
+// and the AWS IPv6 fd00:ec2::254) are refused (SSRF/metadata guard); RFC1918, CGNAT, and IPv6 ULA
+// stay reachable so a self-hosted internal registry (incl. one on a Tailscale tailnet) is valid, matching
 // rejectInternalAcquisitionHost. allowInternal is a test-only escape for a loopback httptest
 // registry; it is never set in production. Every connection, including a blob-CDN redirect and a
 // cross-host token exchange, flows through this DialContext, so a redirect to a non-allow-listed
