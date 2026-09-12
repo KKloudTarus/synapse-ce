@@ -126,6 +126,7 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 			}
 			targetMeta := make(map[string]npmEdgeMeta)
 			targetRange := make(map[string]string)
+			targetRangePrio := make(map[string]int)
 			for _, dep := range npmEdgeSpecs(lock.Packages[path], sourceScope) {
 				tp := resolveNpmDep(path, dep.name, lock.Packages)
 				if tp == "" {
@@ -140,8 +141,15 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 					meta = mergeNPMEdgeMeta(existing, meta)
 				}
 				targetMeta[t] = meta
+				// When two declared names at this parent resolve to the SAME target, the recorded range must
+				// come from the declaration that wins the edge (runtime over dev, required over optional),
+				// matching mergeNPMEdgeMeta, so the emitted edge never reports a lower-priority declaration's
+				// range. Ties keep the first (deterministic: npmEdgeSpecs is name-sorted).
 				if dep.rangeStr != "" {
-					targetRange[t] = dep.rangeStr
+					if p, ok := targetRangePrio[t]; !ok || npmEdgeRangePrio(dep) > p {
+						targetRange[t] = dep.rangeStr
+						targetRangePrio[t] = npmEdgeRangePrio(dep)
+					}
 				}
 			}
 			type groupKey struct {
@@ -211,6 +219,19 @@ func parseSubresourceIntegrity(s string) []sbom.Checksum {
 // npmEdgeSpecs returns sorted, unique direct-dependency declarations with their per-edge semantics.
 // If the same package is listed as both runtime and dev, the runtime relationship wins: one shipping path is
 // sufficient to make that edge shipping. Optionality is retained independently from scope.
+// npmEdgeRangePrio scores a declaration so the recorded range follows the edge winner: runtime beats
+// dev, required beats optional (same ordering mergeNPMEdgeMeta uses for the edge's scope/optionality).
+func npmEdgeRangePrio(dep npmEdgeSpec) int {
+	prio := 0
+	if dep.scope != sbom.ScopeDevelopment {
+		prio += 2
+	}
+	if !dep.optional {
+		prio++
+	}
+	return prio
+}
+
 func npmEdgeSpecs(p npmV3Pkg, prodScope string) []npmEdgeSpec {
 	byName := map[string]npmEdgeSpec{}
 	for name, rng := range p.Dependencies {

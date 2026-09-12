@@ -149,8 +149,11 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 			if t == ref {
 				continue
 			}
-			if d.rng != "" {
-				targetRange[t] = d.rng // the declared range for this target (D3.8)
+			// The recorded range must follow the edge winner: a required declaration wins over an optional
+			// one (matching the required-wins optionality below), so an optional declaration never overwrites
+			// a required declaration's range for the same resolved target. Ties keep the first seen.
+			if d.rng != "" && (!d.optional || targetRange[t] == "") {
+				targetRange[t] = d.rng
 			}
 			if !seen[t] {
 				seen[t] = true

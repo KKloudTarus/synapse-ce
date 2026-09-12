@@ -156,3 +156,18 @@ func TestRegistryMultiEcosystem(t *testing.T) {
 		t.Fatalf("want 3 go + 6 npm components, got %d go / %d npm: %+v", nGo, nNPM, doc.Components)
 	}
 }
+
+// D3.8: npmEdgeRangePrio orders declarations so the recorded range follows the edge winner
+// (runtime > dev, required > optional) when two declared names resolve to the same target.
+func TestNPMEdgeRangePrio(t *testing.T) {
+	runtimeReq := npmEdgeSpec{scope: sbom.ScopeProduction}
+	runtimeOpt := npmEdgeSpec{scope: sbom.ScopeProduction, optional: true}
+	devReq := npmEdgeSpec{scope: sbom.ScopeDevelopment}
+	devOpt := npmEdgeSpec{scope: sbom.ScopeDevelopment, optional: true}
+	if !(npmEdgeRangePrio(runtimeReq) > npmEdgeRangePrio(runtimeOpt) &&
+		npmEdgeRangePrio(runtimeOpt) > npmEdgeRangePrio(devReq) &&
+		npmEdgeRangePrio(devReq) > npmEdgeRangePrio(devOpt)) {
+		t.Errorf("priority must be runtime-required > runtime-optional > dev-required > dev-optional, got %d %d %d %d",
+			npmEdgeRangePrio(runtimeReq), npmEdgeRangePrio(runtimeOpt), npmEdgeRangePrio(devReq), npmEdgeRangePrio(devOpt))
+	}
+}
