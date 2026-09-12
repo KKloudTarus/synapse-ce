@@ -91,6 +91,20 @@ func Score(detected map[string]map[string]bool, cases []Case) []CategoryScore {
 	return out
 }
 
+// NotCovered returns the answer-key categories the engine does NOT model, each with the count of cases in it.
+// The scorecard reports these explicitly (rather than silently omitting them) so the result never overstates
+// coverage: a category absent from ScoredCategories was not assessed, not assessed-and-clean. Deterministic
+// via the returned map's caller-side sort.
+func NotCovered(cases []Case) map[string]int {
+	out := map[string]int{}
+	for _, c := range cases {
+		if _, scored := ScoredCategories[c.Category]; !scored && c.Category != "" {
+			out[c.Category]++
+		}
+	}
+	return out
+}
+
 // Floors is the checked-in regression ratchet: the minimum recall each scored category must hold. Floors only
 // rise (they are raised by hand as the engine improves), so a drop below a floor fails the gate. Recall is the
 // primary gate; precision is understated by the no-sanitizer propose-stage design so it is NOT gated at the
