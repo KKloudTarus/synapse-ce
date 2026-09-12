@@ -167,3 +167,60 @@ func TestParseOSVGoSymbolsCarry(t *testing.T) {
 		t.Errorf("finding must carry the affected symbols offline, got %v", raws[0].AffectedSymbols)
 	}
 }
+
+// RustSec (crates.io) publishes affected functions as ecosystem_specific.affects.functions (already
+// fully-qualified crate::Type::method paths); the owned parser must carry them as AffectedSymbols exactly
+// like the Go imports form, and they must reach the finding offline. (D4.6 data half)
+func TestParseOSVRustAffectedFunctions(t *testing.T) {
+	const j = `{
+	  "id": "RUSTSEC-2019-0033", "aliases": ["CVE-2019-25009"],
+	  "affected": [{
+	    "package": {"ecosystem": "crates.io", "name": "http"},
+	    "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "0.1.20"}]}],
+	    "ecosystem_specific": {"affects": {"functions": ["http::header::HeaderMap::reserve", "http::header::HeaderMap::try_reserve"]}}
+	  }]
+	}`
+	adv, err := ParseOSV([]byte(j))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"http::header::HeaderMap::reserve", "http::header::HeaderMap::try_reserve"}
+	if !symbolsPresent(adv.Affected[0].AffectedSymbols, want) {
+		t.Fatalf("Rust affected functions not carried: got %v, want %v", adv.Affected[0].AffectedSymbols, want)
+	}
+	store := memStore{byKey: map[string][]advisory.Advisory{"crates.io|http": {adv}}}
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "http", Version: "0.1.19", PURL: "pkg:cargo/http@0.1.19"},
+	}}
+	raws, err := New(store).Scan(context.Background(), doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raws) != 1 || !symbolsPresent(raws[0].AffectedSymbols, want) {
+		t.Fatalf("finding must carry Rust affected symbols offline, got %+v", raws)
+	}
+}
+
+// Both the Go imports form and the Rust affects.functions form are read into one symbol set, and duplicate
+// entries within a form are de-duplicated.
+func TestOSVImportSymbolsDedupAndBothForms(t *testing.T) {
+	const j = `{
+	  "id": "X-1",
+	  "affected": [{
+	    "package": {"ecosystem": "crates.io", "name": "c"},
+	    "ecosystem_specific": {
+	      "imports": [{"path": "example.com/p", "symbols": ["Vuln", "Vuln"]}],
+	      "affects": {"functions": ["c::A::f", "c::A::f", "c::B::g"]}
+	    }
+	  }]
+	}`
+	adv, err := ParseOSV([]byte(j))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := adv.Affected[0].AffectedSymbols
+	// the Go import (deduped to one "example.com/p.Vuln") plus the two distinct Rust functions
+	if len(got) != 3 || !symbolsPresent(got, []string{"example.com/p.Vuln", "c::A::f", "c::B::g"}) {
+		t.Fatalf("expected both forms de-duplicated to [example.com/p.Vuln c::A::f c::B::g], got %v", got)
+	}
+}
