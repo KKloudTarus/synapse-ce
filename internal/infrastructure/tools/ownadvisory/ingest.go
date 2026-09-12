@@ -107,6 +107,8 @@ func mapRanges(ranges []osvRange) []advisory.Range {
 				dr.Events = append(dr.Events, advisory.Event{Fixed: ev["fixed"]})
 			case ev["last_affected"] != "":
 				dr.Events = append(dr.Events, advisory.Event{LastAffected: ev["last_affected"]})
+			case ev["limit"] != "":
+				dr.Events = append(dr.Events, advisory.Event{Limit: ev["limit"]})
 			}
 		}
 		out = append(out, dr)

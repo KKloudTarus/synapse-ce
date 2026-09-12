@@ -71,9 +71,12 @@ type AffectedPackage struct {
 }
 
 // AffectedSymbolsFor returns the deduplicated affected symbols this advisory marks for (ecosystem, name),
-// aggregated across every matching affected block. Empty when the advisory carries no symbol data for that
-// package (the common case outside the Go vuln DB). The caller keys with the same ecosystem-canonical name it
-// used to match the package, so the symbol lookup meets the same stored key.
+// aggregated across every name-matching affected block REGARDLESS of version. It answers "what symbols does
+// this advisory list for this package anywhere", so it is version-agnostic. Do NOT use it to attach symbols
+// to a version-specific finding: use MatchDetails, which restricts symbols to the blocks that actually match
+// the component's version (unioning across versions here would attach another version's symbols and seed a
+// false reachable-symbol claim). Empty when the advisory carries no symbol data for that package (the common
+// case outside the Go vuln DB and RustSec).
 func (a Advisory) AffectedSymbolsFor(ecosystem, name string) []string {
 	var out []string
 	for _, aff := range a.Affected {
@@ -100,13 +103,32 @@ func FixedVersions(affected AffectedPackage) []string {
 // fixed version. It runs the owned matcher (Affected = explicit-versions OR semver-range) against every
 // affected block for that exact ecosystem+package – so it is a deterministic, third-party-free verdict.
 func (a Advisory) Match(ecosystem, name, version string) (bool, string) {
+	matched, fixed, _ := a.MatchDetails(ecosystem, name, version)
+	return matched, fixed
+}
+
+// MatchDetails is the version-correct match: it reports whether the advisory affects (ecosystem, name) at
+// version and returns the first matching block's fixed version TOGETHER with the affected symbols drawn ONLY
+// from the affected blocks whose range actually includes version. This is the atomic replacement for calling
+// Match and AffectedSymbolsFor separately. OSV permits the same package in several affected[] blocks (distinct
+// version ranges, each carrying its own ecosystem_specific symbols), so unioning symbols across every
+// name-matching block — as AffectedSymbolsFor does — can attach a symbol that belongs to a DIFFERENT version
+// to this finding, which would seed a false "reachable vulnerable symbol" for a version the symbol does not
+// apply to. Restricting symbols to the version-matching blocks removes that false-evidence path (a #1-bar
+// no-false-positive requirement before symbol-level reachability runs on any ecosystem). Symbols are
+// deduplicated and sorted; fixed matches Match (the first version-matching block's FixedVersion).
+func (a Advisory) MatchDetails(ecosystem, name, version string) (matched bool, fixed string, symbols []string) {
+	var syms []string
 	for _, aff := range a.Affected {
 		if aff.Ecosystem != ecosystem || aff.Package != name {
 			continue
 		}
 		if Affected(aff.Ecosystem, version, aff.Ranges, aff.Versions) {
-			return true, aff.FixedVersion
+			if !matched {
+				matched, fixed = true, aff.FixedVersion
+			}
+			syms = append(syms, aff.AffectedSymbols...)
 		}
 	}
-	return false, ""
+	return matched, fixed, uniqueSorted(syms)
 }

@@ -67,7 +67,7 @@ func TestOsvToRaw(t *testing.T) {
 func TestOsvToRawAffectedSymbols(t *testing.T) {
 	// the Go vuln DB carries affected functions in affected[].ecosystem_specific.imports[].symbols
 	const raw = `{"id":"GO-2024-1","aliases":["CVE-2024-1"],
-		"affected":[{"package":{"ecosystem":"Go","name":"github.com/foo/bar","purl":"pkg:golang/github.com/foo/bar"},"ecosystem_specific":{"imports":[{"path":"github.com/foo/bar","symbols":["Vuln","Other"]}]}}]}`
+		"affected":[{"package":{"ecosystem":"Go","name":"github.com/foo/bar","purl":"pkg:golang/github.com/foo/bar"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"2.0.0"}]}],"ecosystem_specific":{"imports":[{"path":"github.com/foo/bar","symbols":["Vuln","Other"]}]}}]}`
 	var v osvVuln
 	if err := json.Unmarshal([]byte(raw), &v); err != nil {
 		t.Fatal(err)
@@ -261,5 +261,89 @@ func TestIsOSDistroPURL(t *testing.T) {
 		if got := isOSDistroPURL(purl); got != want {
 			t.Errorf("isOSDistroPURL(%q) = %v, want %v", purl, got, want)
 		}
+	}
+}
+
+// TestOsvToRawSymbolsAreVersionScoped guards the live-path half of the symbol version-scoping fix: an advisory
+// listing the same package in two blocks with different ranges and different symbols must attach a 1.x
+// component ONLY the 1.x block's symbol, never the 2.x block's (which would seed a false reachable-symbol).
+func TestOsvToRawSymbolsAreVersionScoped(t *testing.T) {
+	const raw = `{"id":"GO-multi","affected":[
+		{"package":{"ecosystem":"Go","name":"example.com/mod","purl":"pkg:golang/example.com/mod"},
+		 "ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.2.0"}]}],
+		 "ecosystem_specific":{"imports":[{"path":"example.com/mod","symbols":["OldVuln"]}]}},
+		{"package":{"ecosystem":"Go","name":"example.com/mod","purl":"pkg:golang/example.com/mod"},
+		 "ranges":[{"type":"SEMVER","events":[{"introduced":"2.0.0"},{"fixed":"2.3.0"}]}],
+		 "ecosystem_specific":{"imports":[{"path":"example.com/mod","symbols":["NewVuln"]}]}}]}`
+	var v osvVuln
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		t.Fatal(err)
+	}
+	got := osvToRaw(sbom.Component{Name: "example.com/mod", Version: "1.1.0", PURL: "pkg:golang/example.com/mod@1.1.0"}, v)
+	if len(got.AffectedSymbols) != 1 || got.AffectedSymbols[0] != "example.com/mod.OldVuln" {
+		t.Fatalf("AffectedSymbols = %v, want only [example.com/mod.OldVuln] (NOT the 2.x block's NewVuln)", got.AffectedSymbols)
+	}
+}
+
+// TestOsvToRawReadsRustSecFunctions: RustSec publishes affected symbols under ecosystem_specific.affects
+// .functions (already-qualified), parallel to the Go vuln DB's imports[].symbols. The live scanner must read
+// both, matching the owned offline ingester, so a crates.io finding surfaces its affected functions.
+func TestOsvToRawReadsRustSecFunctions(t *testing.T) {
+	const raw = `{"id":"RUSTSEC-1","affected":[
+		{"package":{"ecosystem":"crates.io","name":"mycrate","purl":"pkg:cargo/mycrate"},
+		 "ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.5.0"}]}],
+		 "ecosystem_specific":{"affects":{"functions":["mycrate::Foo::bar","mycrate::baz"]}}}]}`
+	var v osvVuln
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		t.Fatal(err)
+	}
+	got := osvToRaw(sbom.Component{Name: "mycrate", Version: "1.2.0", PURL: "pkg:cargo/mycrate@1.2.0"}, v)
+	want := map[string]bool{"mycrate::Foo::bar": true, "mycrate::baz": true}
+	if len(got.AffectedSymbols) != 2 {
+		t.Fatalf("AffectedSymbols = %v, want the 2 RustSec functions", got.AffectedSymbols)
+	}
+	for _, s := range got.AffectedSymbols {
+		if !want[s] {
+			t.Errorf("unexpected symbol %q", s)
+		}
+	}
+}
+
+// TestOsvToRawSymbolsRespectLimit: a "limit" event caps the range, so a version beyond the limit must not
+// inherit that block's symbols (the block does not apply to it). Guards the OSV limit-event handling in the
+// symbol version-scoping path.
+func TestOsvToRawSymbolsRespectLimit(t *testing.T) {
+	const raw = `{"id":"GO-limit","affected":[
+		{"package":{"ecosystem":"Go","name":"example.com/mod","purl":"pkg:golang/example.com/mod"},
+		 "ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"limit":"2.0.0"}]}],
+		 "ecosystem_specific":{"imports":[{"path":"example.com/mod","symbols":["OldOnly"]}]}},
+		{"package":{"ecosystem":"Go","name":"example.com/mod","purl":"pkg:golang/example.com/mod"},
+		 "ranges":[{"type":"SEMVER","events":[{"introduced":"2.0.0"}]}],
+		 "ecosystem_specific":{"imports":[{"path":"example.com/mod","symbols":["New"]}]}}]}`
+	var v osvVuln
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		t.Fatal(err)
+	}
+	got := osvToRaw(sbom.Component{Name: "example.com/mod", Version: "2.1.0", PURL: "pkg:golang/example.com/mod@2.1.0"}, v)
+	if len(got.AffectedSymbols) != 1 || got.AffectedSymbols[0] != "example.com/mod.New" {
+		t.Fatalf("AffectedSymbols = %v, want only [example.com/mod.New] (the limit-capped block must not apply at 2.1.0)", got.AffectedSymbols)
+	}
+}
+
+// TestDedupUnionsSymbols: when two advisories alias the same CVE (a GHSA carrying no symbols and a RustSec
+// entry carrying affected functions), dedup by the shared id must preserve the functions rather than drop them
+// when the symbol-less record wins on severity.
+func TestDedupUnionsSymbols(t *testing.T) {
+	rustsec := vulnerability.RawFinding{Source: "osv", AdvisoryID: "CVE-2020-26235", Component: "time", Version: "0.1.44", Severity: shared.SeverityLow, AffectedSymbols: []string{"time::at", "time::now"}}
+	ghsa := vulnerability.RawFinding{Source: "osv", AdvisoryID: "CVE-2020-26235", Component: "time", Version: "0.1.44", Severity: shared.SeverityHigh}
+	out := dedupRaws([]vulnerability.RawFinding{rustsec, ghsa})
+	if len(out) != 1 {
+		t.Fatalf("want 1 deduped finding, got %d", len(out))
+	}
+	if out[0].Severity != shared.SeverityHigh {
+		t.Errorf("richer severity must win: got %v", out[0].Severity)
+	}
+	if len(out[0].AffectedSymbols) != 2 {
+		t.Errorf("RustSec functions must survive dedup, got %v", out[0].AffectedSymbols)
 	}
 }

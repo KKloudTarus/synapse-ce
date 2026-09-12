@@ -149,8 +149,12 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 					if a.Withdrawn {
 						continue
 					}
-					if affected, fixed := a.Match(eco, name, version); affected {
-						emit(a, c, fixed, a.AffectedSymbolsFor(eco, name))
+					// MatchDetails (not Match + AffectedSymbolsFor) so the finding carries ONLY the symbols of the
+					// affected blocks that actually match this version. OSV can list the same package in several
+					// blocks with different ranges and different symbols; unioning across all of them would attach
+					// another version's symbol to this finding and seed a false reachable-symbol claim.
+					if affected, fixed, symbols := a.MatchDetails(eco, name, version); affected {
+						emit(a, c, fixed, symbols)
 					}
 				}
 				return nil

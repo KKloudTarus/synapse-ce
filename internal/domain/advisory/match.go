@@ -18,6 +18,10 @@ type Event struct {
 	Introduced   string
 	Fixed        string
 	LastAffected string
+	// Limit is the OSV "limit" event: an EXCLUSIVE upper bound that caps the range (a version at or beyond it
+	// is outside this range), used mainly by GIT ranges but valid in SEMVER/ECOSYSTEM ranges too. It bounds
+	// affectedness like Fixed, but it is a range cap, not a remediation, so it never feeds a fixed-version.
+	Limit string
 }
 
 // Affected is the matcher entry point: a version is affected by an advisory if it is in the advisory's
@@ -179,6 +183,12 @@ func affectedInRange(version string, events []Event, sc scheme) bool {
 		case e.LastAffected != "":
 			if sc.valid(e.LastAffected) {
 				bounds = append(bounds, bound{v: e.LastAffected, kind: 2})
+			}
+		case e.Limit != "":
+			// A "limit" caps the range: a version at or beyond it is outside this range, exactly like an
+			// exclusive "fixed" bound for the purpose of deciding affectedness.
+			if sc.valid(e.Limit) {
+				bounds = append(bounds, bound{v: e.Limit, kind: 1})
 			}
 		}
 	}
