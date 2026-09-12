@@ -1548,6 +1548,10 @@ type SBOMCache interface {
 type ReachabilitySubject struct {
 	FindingID shared.ID
 	Symbols   []string
+	// PackagePURL optionally identifies the package the finding belongs to. Symbol analyzers that need
+	// package-exact attribution (notably JVM/Maven) use it to prevent a same-named symbol in another
+	// dependency from raising the wrong finding; analyzers that do not need it may ignore it.
+	PackagePURL string
 }
 
 // ReachabilityRecorder runs deterministic reachability over a target and records the resulting Tier-2

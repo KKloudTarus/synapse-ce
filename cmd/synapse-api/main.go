@@ -238,6 +238,18 @@ func explicitTaintEnvKey() string {
 	return "SYNAPSE_PYTAINT_ENABLED"
 }
 
+// explicitJudgmentScannerEnvKey extends the legacy semantic-taint gate with JVM Tier-2.
+// Only an explicitly ENABLED JVM flag wins; an explicit false value must not turn another
+// default-on scanner into a startup contradiction when judgments are disabled.
+func explicitJudgmentScannerEnvKey(cfg config.Config) string {
+	if cfg.JVMReachabilityEnabled {
+		if _, ok := os.LookupEnv("SYNAPSE_JVM_REACHABILITY_ENABLED"); ok {
+			return "SYNAPSE_JVM_REACHABILITY_ENABLED"
+		}
+	}
+	return explicitTaintEnvKey()
+}
+
 func requireJudgmentsOrSkip(log *slog.Logger, hasJudgment bool, envKey, name string) bool {
 	if hasJudgment {
 		return true
@@ -3105,7 +3117,7 @@ func main() {
 	// scacompose.ConfigureJudgmentScanners, which attaches each language only when its own flag is set);
 	// requireJudgmentsOrSkip preserves the loud error when either flag is set explicitly without the judgment
 	// lifecycle. Python taint is on by default, so a JS-only deployment still reaches this path.
-	if (cfg.PythonTaintEnabled || cfg.JsTaintEnabled || cfg.JavaTaintEnabled) && requireJudgmentsOrSkip(log, judgmentSvc != nil, explicitTaintEnvKey(), "semantic taint") {
+	if (cfg.PythonTaintEnabled || cfg.JsTaintEnabled || cfg.JavaTaintEnabled || cfg.JVMReachabilityEnabled) && requireJudgmentsOrSkip(log, judgmentSvc != nil, explicitJudgmentScannerEnvKey(cfg), "judgment scanner") {
 		if err := scacompose.ConfigureJudgmentScanners(scaService, cfg, scaSandbox, judgmentSvc, auditLog, clock, log); err != nil {
 			log.Error("semantic taint coordinator init failed", "err", err)
 			os.Exit(1)

@@ -264,6 +264,7 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | `SYNAPSE_REACHABILITY_ENABLED` | `true` | Go Tier-2 call-graph reachability proof (best-effort). |
 | `SYNAPSE_REACHABILITY_BUILDER` | `owned` | Go Tier-2 call-graph producer: `owned` (Synapse's own go/ssa builder, no third-party engine) or `govulncheck`. |
 | `SYNAPSE_JVM_REACHABILITY_ENABLED` | `true` | JVM (Java/Kotlin) reachability. |
+| `SYNAPSE_JVM_REACH_TIER2_POINTS_TO_ENABLED` | `false` | Optional JVM Tier-2 receiver points-to refinement. When enabled, applies bounded intraprocedural Andersen-style narrowing and falls back to CHA whenever receiver facts are incomplete. Raise-only: it can increase urgency but never emits `not_affected`. Requires JVM reachability and judgments. |
 | `SYNAPSE_PYREACH_ENABLED` | `true` | Python Tier-1 import-reachability: a declared DIRECT dependency never imported by first-party source becomes an OpenVEX `not_affected` (transitive deps are refused, not answered). Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python Tier-2 affected-symbol semantic reachability. Requires Tier-1, judgments, and a CGO-enabled `synapse-ast`. |
 | `SYNAPSE_PYTAINT_ENABLED` | `true` | Python interprocedural semantic taint proposals (default-on when the synapse-ast sidecar resolves; a clean no-op otherwise). Requires judgments and a CGO-enabled `synapse-ast`; it does not require the target-compilation sandbox. |
