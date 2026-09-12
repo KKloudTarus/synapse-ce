@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<updates>
+  <update from="updates@fedoraproject.org" status="stable" type="security" version="2.0">
+    <id>FEDORA-2026-abc123</id>
+    <title>curl-8.11.0-1.fc43</title>
+    <release>Fedora 43</release>
+    <severity>Important</severity>
+    <references>
+      <reference href="https://bugzilla.redhat.com/show_bug.cgi?id=2400001" id="2400001" type="bugzilla" title="CVE-2026-40001 CVE-2026-40002 curl: two flaws in curl [fedora-all]"/>
+    </references>
+    <pkglist>
+      <collection short="F43">
+        <name>Fedora 43</name>
+        <package name="curl" version="8.11.0" release="1.fc43" epoch="0" arch="x86_64" src="curl.src.rpm"><filename>curl-8.11.0-1.fc43.x86_64.rpm</filename></package>
+        <package name="libcurl" version="8.11.0" release="1.fc43" epoch="0" arch="x86_64" src="curl.src.rpm"><filename>libcurl-8.11.0-1.fc43.x86_64.rpm</filename></package>
+      </collection>
+    </pkglist>
+  </update>
+  <update from="updates@fedoraproject.org" status="stable" type="security" version="2.0">
+    <id>FEDORA-2026-def456</id>
+    <title>foo-1.0-1.fc43</title>
+    <release>Fedora 43</release>
+    <references>
+      <reference href="https://bugzilla.redhat.com/show_bug.cgi?id=2400099" id="2400099" type="bugzilla" title="foo-1.0 is available [fedora-43]"/>
+    </references>
+    <pkglist>
+      <collection short="F43">
+        <name>Fedora 43</name>
+        <package name="foo" version="1.0" release="1.fc43" epoch="0" arch="x86_64" src="foo.src.rpm"><filename>foo-1.0-1.fc43.x86_64.rpm</filename></package>
+      </collection>
+    </pkglist>
+  </update>
+</updates>

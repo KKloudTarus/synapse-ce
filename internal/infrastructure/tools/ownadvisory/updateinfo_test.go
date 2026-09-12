@@ -3,9 +3,12 @@ package ownadvisory
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 )
@@ -252,5 +255,157 @@ func TestRpmLineage(t *testing.T) {
 		if got := rpmLineage(evr); got != want {
 			t.Errorf("rpmLineage(%q) = %q, want %q", evr, got, want)
 		}
+	}
+}
+
+// EPIC #860 D2.4: Fedora publishes no type="cve" reference; its CVEs are a leading run of CVE tokens in the
+// bugzilla reference title, and its release comes from the F43 collection. A non-CVE tracking bug (a rebuild
+// "is available" title) must contribute no advisory.
+func TestParseFedoraUpdateInfo(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "updateinfo-fedora43.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	advs, err := ParseUpdateInfo(data)
+	if err != nil {
+		t.Fatalf("ParseUpdateInfo(fedora): %v", err)
+	}
+	byID := map[string]advisory.Advisory{}
+	for _, a := range advs {
+		byID[a.ID] = a
+		for _, ap := range a.Affected {
+			if ap.Ecosystem != "Fedora:43" {
+				t.Errorf("%s: ecosystem = %q, want Fedora:43", a.ID, ap.Ecosystem)
+			}
+		}
+	}
+	// both CVEs in the leading run of the bugzilla title are extracted
+	for _, cve := range []string{"CVE-2026-40001", "CVE-2026-40002"} {
+		a, ok := byID[cve]
+		if !ok {
+			t.Fatalf("%s not parsed from the bugzilla-title leading CVE run", cve)
+		}
+		// affects both curl and libcurl (all packages in the update's collection)
+		names := map[string]bool{}
+		for _, ap := range a.Affected {
+			names[ap.Package] = true
+		}
+		if !names["curl"] || !names["libcurl"] {
+			t.Errorf("%s must affect curl + libcurl, got %v", cve, names)
+		}
+		// end-to-end match through the rpm comparator on the Fedora .fc43 version format
+		if hit, _ := a.Match("Fedora:43", "curl", "8.10.0-1.fc43"); !hit {
+			t.Errorf("%s: an older curl must match", cve)
+		}
+		if hit, _ := a.Match("Fedora:43", "curl", "8.11.0-1.fc43"); hit {
+			t.Errorf("%s: curl at the fixed version must not match", cve)
+		}
+		if hit, _ := a.Match("Fedora:42", "curl", "8.10.0-1.fc43"); hit {
+			t.Errorf("%s: a different Fedora release must not match", cve)
+		}
+	}
+	// the non-CVE "foo is available" tracking bug contributes no advisory (foo is affected by nothing)
+	for _, a := range advs {
+		for _, ap := range a.Affected {
+			if ap.Package == "foo" {
+				t.Errorf("a non-CVE rebuild bug must not produce an advisory, got %s -> foo", a.ID)
+			}
+		}
+	}
+}
+
+// leadingCVEs takes only the leading CVE run of a bugzilla title, never a CVE that appears later in free text.
+func TestLeadingCVEs(t *testing.T) {
+	cases := map[string]int{
+		"CVE-2026-40001 CVE-2026-40002 curl: flaws [fedora-all]":       2,
+		"CVE-2026-0001 pkg: fixes and mentions CVE-2026-0002 in prose": 1, // only the leading run
+		"foo-1.0 is available [fedora-43]":                             0,
+		"F45FailsToInstall: trafficserver":                             0,
+		"CVE-2026-12345 single [fedora-42]":                            1,
+		"CVE-2026-1 too-short-sequence pkg: x":                         0, // malformed CVE id is not a leading CVE
+	}
+	for title, want := range cases {
+		if got := len(leadingCVEs(title)); got != want {
+			t.Errorf("leadingCVEs(%q) = %d, want %d", title, got, want)
+		}
+	}
+}
+
+// isCVEToken accepts only a well-formed CVE id (exactly 4 year digits, at least 4 sequence digits), so a
+// malformed leading token in a bugzilla title never mints a bogus advisory.
+func TestIsCVEToken(t *testing.T) {
+	valid := []string{"CVE-2026-0001", "CVE-2026-40001", "CVE-1999-1234567"}
+	for _, s := range valid {
+		if !isCVEToken(s) {
+			t.Errorf("isCVEToken(%q) = false, want true", s)
+		}
+	}
+	invalid := []string{"CVE-2026-1", "CVE-2026-123", "CVE-20261-1234", "CVE-abc-1234", "CVE-", "CVE-2026-", "GHSA-x", "", "cve-2026-0001"}
+	for _, s := range invalid {
+		if isCVEToken(s) {
+			t.Errorf("isCVEToken(%q) = true, want false", s)
+		}
+	}
+}
+
+// fedoraRelease keys F43/"Fedora 43" -> "43" but rejects EPEL and non-Fedora collections.
+func TestFedoraRelease(t *testing.T) {
+	cases := []struct{ short, name, want string }{
+		{"F43", "Fedora 43", "43"},
+		{"F42", "Fedora 42", "42"},
+		{"", "Fedora 41", "41"},
+		{"epel9", "Fedora EPEL 9", ""}, // EPEL is not Fedora
+		{"amazon-linux-2", "Amazon Linux 2", ""},
+		{"Fnn", "not a release", ""},
+	}
+	for _, c := range cases {
+		if got := fedoraRelease(c.short, c.name); got != c.want {
+			t.Errorf("fedoraRelease(%q,%q) = %q, want %q", c.short, c.name, got, c.want)
+		}
+	}
+}
+
+// Fedora ships updateinfo only as zstd (.xml.zst): the offline dir feed must accept and decompress it. (D2.4)
+func TestUpdateInfoDirFeedZstd(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("testdata", "updateinfo-fedora43.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	f, err := os.Create(filepath.Join(dir, "abc-updateinfo.xml.zst"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw, err := zstd.NewWriter(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := zw.Write(src); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var got []advisory.Advisory
+	if _, err := NewUpdateInfoDirFeed(dir).Each(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	}); err != nil {
+		t.Fatalf("Each(zst): %v", err)
+	}
+	seen := map[string]bool{}
+	for _, a := range got {
+		seen[a.ID] = true
+		for _, ap := range a.Affected {
+			if ap.Ecosystem != "Fedora:43" {
+				t.Errorf("%s: ecosystem = %q, want Fedora:43", a.ID, ap.Ecosystem)
+			}
+		}
+	}
+	if !seen["CVE-2026-40001"] || !seen["CVE-2026-40002"] {
+		t.Fatalf("zstd Fedora updateinfo must ingest both CVEs, got %v", seen)
 	}
 }
