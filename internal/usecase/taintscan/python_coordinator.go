@@ -13,6 +13,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/symbolcanon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -42,6 +43,7 @@ type PythonCoordinator struct {
 
 var _ ports.TaintScanner = (*PythonCoordinator)(nil)
 var _ ports.TaintCoverageScanner = (*PythonCoordinator)(nil)
+var _ ports.CorrelatedTaintScanner = (*PythonCoordinator)(nil)
 
 func NewPythonCoordinator(provider ports.PythonFactsProvider, p proposer, catalog taint.PythonCatalog, audit ports.AuditLogger, clock ports.Clock) (*PythonCoordinator, error) {
 	if provider == nil || p == nil || audit == nil || clock == nil {
@@ -64,6 +66,16 @@ func (c *PythonCoordinator) Scan(ctx context.Context, engagementID shared.ID, ta
 // ScanWithCoverage is the coverage-aware form of Scan. Failures retain a closed, non-sensitive reason
 // so callers can distinguish zero findings from zero analysis without exposing parser or target data.
 func (c *PythonCoordinator) ScanWithCoverage(ctx context.Context, engagementID shared.ID, targetRef string) (ports.TaintScanOutcome, error) {
+	return c.scanWithCoverage(ctx, engagementID, targetRef, nil)
+}
+
+// ScanCorrelated is the finding-aware form of ScanWithCoverage. Correlation is additive evidence only:
+// unmatched flows remain ordinary gated CapSAST proposals and never imply a clean SCA finding.
+func (c *PythonCoordinator) ScanCorrelated(ctx context.Context, engagementID shared.ID, targetRef string, subjects []ports.ReachabilitySubject) (ports.TaintScanOutcome, error) {
+	return c.scanWithCoverage(ctx, engagementID, targetRef, subjects)
+}
+
+func (c *PythonCoordinator) scanWithCoverage(ctx context.Context, engagementID shared.ID, targetRef string, subjects []ports.ReachabilitySubject) (ports.TaintScanOutcome, error) {
 	outcome := ports.TaintScanOutcome{Coverage: ports.AnalysisCoverage{
 		Analyzer: "python-semantic-taint-v1", Language: "python", Status: ports.AnalysisCoverageUnavailable,
 	}}
@@ -149,7 +161,8 @@ func (c *PythonCoordinator) ScanWithCoverage(ctx context.Context, engagementID s
 		location := boundedPythonLocation(positionLineString(finding.SinkPos), finding.Callee)
 		claim := judgment.SASTClaim{
 			CWE: finding.CWE, Location: location, Rule: finding.Rule,
-			DataFlow: pythonClaimDataFlow(finding, graph, analysisComplete),
+			DataFlow: pythonClaimDataFlow(finding, graph, analysisComplete), SinkSymbols: []string{finding.Callee},
+			Correlations: correlateSASTFindings(symbolcanon.Generic, []string{finding.Callee}, subjects),
 		}
 		judged, err := c.proposer.Propose(
 			ctx, pythonProposerActor, engagementID, judgment.CapSAST, judgment.SubjectDataFlow,

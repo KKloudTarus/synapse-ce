@@ -278,6 +278,42 @@ func TestScanSameClassSinkDedup(t *testing.T) {
 	}
 }
 
+func TestScanCorrelatedLinksReachedVulnerableSymbolToSCAFinding(t *testing.T) {
+	b := &fakeBuilder{g: &callgraph.Graph{Edges: []callgraph.Edge{
+		{Caller: "app.handler", Callees: []string{"os.Getenv", "os/exec.Command"}},
+	}}}
+	p := &fakeProposer{}
+	outcome, err := newCoord(t, b, p, &fakeAudit{}).ScanCorrelated(context.Background(), engID, "/work/target", []ports.ReachabilitySubject{
+		{FindingID: "finding-command", Symbols: []string{"os/exec.Command"}},
+		{FindingID: "finding-other", Symbols: []string{"database/sql.DB.Query"}},
+	})
+	if err != nil || outcome.Proposed != 1 || len(p.calls) != 1 {
+		t.Fatalf("want one correlated proposal, got outcome=%+v calls=%d err=%v", outcome, len(p.calls), err)
+	}
+	claim := p.calls[0].claim.(judgment.SASTClaim)
+	if len(claim.SinkSymbols) != 1 || claim.SinkSymbols[0] != "os/exec.Command" {
+		t.Fatalf("claim must retain the reached library sink, got %+v", claim.SinkSymbols)
+	}
+	if len(claim.Correlations) != 1 || claim.Correlations[0].FindingID != "finding-command" {
+		t.Fatalf("taint flow must link only the matching SCA finding, got %+v", claim.Correlations)
+	}
+}
+
+func TestScanCorrelatedLeavesUnmatchedFlowUnlinked(t *testing.T) {
+	b := &fakeBuilder{g: &callgraph.Graph{Edges: []callgraph.Edge{
+		{Caller: "app.handler", Callees: []string{"os.Getenv", "os/exec.Command"}},
+	}}}
+	p := &fakeProposer{}
+	if _, err := newCoord(t, b, p, &fakeAudit{}).ScanCorrelated(context.Background(), engID, "/work/target", []ports.ReachabilitySubject{
+		{FindingID: "finding-local", Symbols: []string{"app.Command"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.calls[0].claim.(judgment.SASTClaim).Correlations; len(got) != 0 {
+		t.Fatalf("non-advisory sink must not fabricate a finding link: %+v", got)
+	}
+}
+
 // A no-coverage build error proposes NOTHING and never a false "clean" (fail-closed).
 func TestScanNoCoverageProposesNothing(t *testing.T) {
 	b := &fakeBuilder{err: errors.New("module cache offline")}

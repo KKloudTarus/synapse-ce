@@ -12,6 +12,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/jsprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/symbolcanon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -38,6 +39,7 @@ type JsCoordinator struct {
 
 var _ ports.TaintScanner = (*JsCoordinator)(nil)
 var _ ports.TaintCoverageScanner = (*JsCoordinator)(nil)
+var _ ports.CorrelatedTaintScanner = (*JsCoordinator)(nil)
 
 func NewJsCoordinator(provider ports.JsFactsProvider, p proposer, catalog taint.JsCatalog, audit ports.AuditLogger, clock ports.Clock) (*JsCoordinator, error) {
 	if provider == nil || p == nil || audit == nil || clock == nil {
@@ -59,6 +61,16 @@ func (c *JsCoordinator) Scan(ctx context.Context, engagementID shared.ID, target
 // ScanWithCoverage is the coverage-aware form of Scan. Failures retain a closed, non-sensitive reason so a
 // caller can tell zero findings from zero analysis without exposing parser or target data.
 func (c *JsCoordinator) ScanWithCoverage(ctx context.Context, engagementID shared.ID, targetRef string) (ports.TaintScanOutcome, error) {
+	return c.scanWithCoverage(ctx, engagementID, targetRef, nil)
+}
+
+// ScanCorrelated is the finding-aware form of ScanWithCoverage. It only records exact symbol links;
+// absence of a link never changes the positive/raise-only taint result.
+func (c *JsCoordinator) ScanCorrelated(ctx context.Context, engagementID shared.ID, targetRef string, subjects []ports.ReachabilitySubject) (ports.TaintScanOutcome, error) {
+	return c.scanWithCoverage(ctx, engagementID, targetRef, subjects)
+}
+
+func (c *JsCoordinator) scanWithCoverage(ctx context.Context, engagementID shared.ID, targetRef string, subjects []ports.ReachabilitySubject) (ports.TaintScanOutcome, error) {
 	outcome := ports.TaintScanOutcome{Coverage: ports.AnalysisCoverage{
 		Analyzer: "js-semantic-taint-v1", Language: "javascript", Status: ports.AnalysisCoverageUnavailable,
 	}}
@@ -139,7 +151,8 @@ func (c *JsCoordinator) ScanWithCoverage(ctx context.Context, engagementID share
 		location := boundedJsLocation(jsPositionLineString(finding.SinkPos), finding.Callee)
 		claim := judgment.SASTClaim{
 			CWE: finding.CWE, Location: location, Rule: finding.Rule,
-			DataFlow: jsClaimDataFlow(finding, graph, analysisComplete),
+			DataFlow: jsClaimDataFlow(finding, graph, analysisComplete), SinkSymbols: []string{finding.Callee},
+			Correlations: correlateSASTFindings(symbolcanon.Generic, []string{finding.Callee}, subjects),
 		}
 		judged, err := c.proposer.Propose(
 			ctx, jsProposerActor, engagementID, judgment.CapSAST, judgment.SubjectDataFlow,

@@ -3524,20 +3524,34 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 	}
 
+	// Taint correlation consumes the same version-correct finding subjects as symbol reachability. It is
+	// computed once from this scan's findings so a flow can only link to an SCA finding that actually exists.
+	taintSubjects := reachabilitySubjects(result.Findings, result.Vulnerabilities)
+
 	// Deterministic taint-analysis CapSAST proposals, best-effort + opt-in: build the workspace call
 	// graph (sandboxed), assemble the taint FlowGraph over the injection catalog, and PROPOSE gated CapSAST
 	// judgments (one per injection path × class) for a distinct verifier to gate. Same best-effort contract
 	// as reachability – a no-coverage/un-buildable target returns an error here that is IGNORED (taint is an
 	// enhancement; the scan is never failed). Runs while ws.Dir still exists.
 	if opts.scansVulnerabilities() && s.taint != nil {
-		_, _ = s.taint.Scan(ctx, engagementID, ws.Dir)
+		if scanner, ok := s.taint.(ports.CorrelatedTaintScanner); ok {
+			_, _ = scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
+		} else {
+			_, _ = s.taint.Scan(ctx, engagementID, ws.Dir)
+		}
 	}
 
 	// Python semantic taint is source-only and value-granular. It runs independently of the legacy Go
 	// function-level scanner, but follows the same propose-only lifecycle: positive witnesses become gated
 	// CapSAST proposals, while missing/partial coverage never becomes a clean conclusion.
 	if opts.scansVulnerabilities() && s.pythonTaint != nil {
-		if scanner, ok := s.pythonTaint.(ports.TaintCoverageScanner); ok {
+		if scanner, ok := s.pythonTaint.(ports.CorrelatedTaintScanner); ok {
+			outcome, _ := scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
+			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
+			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
+				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+			}
+		} else if scanner, ok := s.pythonTaint.(ports.TaintCoverageScanner); ok {
 			outcome, _ := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
 			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
 			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
@@ -3552,7 +3566,13 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Python and Go scanners on the same propose-only lifecycle: positive witnesses become gated CapSAST
 	// proposals, while missing/partial coverage never becomes a clean conclusion.
 	if opts.scansVulnerabilities() && s.jsTaint != nil {
-		if scanner, ok := s.jsTaint.(ports.TaintCoverageScanner); ok {
+		if scanner, ok := s.jsTaint.(ports.CorrelatedTaintScanner); ok {
+			outcome, _ := scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
+			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
+			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
+				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+			}
+		} else if scanner, ok := s.jsTaint.(ports.TaintCoverageScanner); ok {
 			outcome, _ := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
 			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
 			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
@@ -3565,7 +3585,13 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 
 	// Java semantic value-flow taint, same propose-only lifecycle as the JS/Python/Go scanners.
 	if opts.scansVulnerabilities() && s.javaTaint != nil {
-		if scanner, ok := s.javaTaint.(ports.TaintCoverageScanner); ok {
+		if scanner, ok := s.javaTaint.(ports.CorrelatedTaintScanner); ok {
+			outcome, _ := scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
+			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
+			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
+				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+			}
+		} else if scanner, ok := s.javaTaint.(ports.TaintCoverageScanner); ok {
 			outcome, _ := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
 			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
 			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {

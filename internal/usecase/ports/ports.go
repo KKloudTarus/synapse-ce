@@ -1643,6 +1643,15 @@ type TaintScanner interface {
 	Scan(ctx context.Context, engagementID shared.ID, targetRef string) (int, error)
 }
 
+// CorrelatedTaintScanner is the optional finding-aware extension of TaintScanner. The SCA pipeline passes
+// its version-correct advisory symbols for each existing finding; implementations attach an exact
+// dataflow-to-finding correlation to the proposed SAST claim. A scanner that does not implement this
+// extension keeps the legacy proposal-only behavior.
+type CorrelatedTaintScanner interface {
+	TaintScanner
+	ScanCorrelated(ctx context.Context, engagementID shared.ID, targetRef string, subjects []ReachabilitySubject) (TaintScanOutcome, error)
+}
+
 // DependencyGraphResolver augments a generated SBOM with transitive dependency EDGES that a static
 // lockfile/manifest parse cannot provide on its own – e.g. Go modules, whose edge graph is not in go.mod
 // but in the module cache, read via `go mod graph`. Unlike SBOMEnricher (pure file reads), an

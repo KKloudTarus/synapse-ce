@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -125,6 +126,9 @@ const (
 	maxClaimPathElemLen = 256
 	maxSASTLocationLen  = 512
 	maxSASTRuleLen      = 128
+	maxSASTSymbolLen    = 512
+	maxSASTSinkSymbols  = 64
+	maxSASTCorrelations = 128
 	// MaxSASTDataFlowSteps caps the structured witness admitted to the judgment ledger.
 	MaxSASTDataFlowSteps = 64
 	maxRiskDrivers       = 32
@@ -237,11 +241,23 @@ func (c ReachabilityClaim) Validate() error {
 // SASTClaim is the typed result of a SAST judgment: the weakness (CWE), where, and the
 // rule that fired. No free-text – a "hardcoded secret at L42" finding renders from these fields.
 type SASTClaim struct {
-	CWE      string        `json:"cwe"`
-	Location string        `json:"location"` // path[:line]
-	Rule     string        `json:"rule"`
-	AssetID  shared.ID     `json:"asset_id"`
-	DataFlow *SASTDataFlow `json:"data_flow,omitempty"`
+	CWE          string                   `json:"cwe"`
+	Location     string                   `json:"location"` // path[:line]
+	Rule         string                   `json:"rule"`
+	AssetID      shared.ID                `json:"asset_id"`
+	DataFlow     *SASTDataFlow            `json:"data_flow,omitempty"`
+	SinkSymbols  []string                 `json:"sink_symbols,omitempty"`
+	Correlations []SASTFindingCorrelation `json:"correlations,omitempty"`
+}
+
+// SASTFindingCorrelation is an evidence-bearing relation from a taint-flow judgment to an existing SCA
+// finding. A data-flow judgment deliberately remains about SubjectDataFlow: this relation records which
+// SubjectFinding it can raise, never changes the judgment subject or turns an unmatched flow into a finding.
+// SinkSymbol and AffectedSymbol preserve the exact symmetric symbol match used to make the link auditable.
+type SASTFindingCorrelation struct {
+	FindingID      shared.ID `json:"finding_id"`
+	SinkSymbol     string    `json:"sink_symbol"`
+	AffectedSymbol string    `json:"affected_symbol"`
 }
 
 // SASTFlowLocation is a source-only point in a repository-relative file. Columns are zero-based UTF-8
@@ -352,12 +368,83 @@ func (c SASTClaim) Validate() error {
 	if len(c.Rule) > maxSASTRuleLen || !sastRuleRE.MatchString(c.Rule) {
 		return fmt.Errorf("%w: sast claim rule must be a structured token of at most %d bytes", shared.ErrValidation, maxSASTRuleLen)
 	}
+	if len(c.SinkSymbols) > maxSASTSinkSymbols {
+		return fmt.Errorf("%w: sast claim has too many sink symbols (%d > %d)", shared.ErrValidation, len(c.SinkSymbols), maxSASTSinkSymbols)
+	}
+	sinks := make(map[string]struct{}, len(c.SinkSymbols))
+	for _, symbol := range c.SinkSymbols {
+		if err := validateSASTSymbol(symbol); err != nil {
+			return err
+		}
+		if _, duplicate := sinks[symbol]; duplicate {
+			return fmt.Errorf("%w: sast claim repeats sink symbol %q", shared.ErrValidation, symbol)
+		}
+		sinks[symbol] = struct{}{}
+	}
+	if len(c.Correlations) > maxSASTCorrelations {
+		return fmt.Errorf("%w: sast claim has too many finding correlations (%d > %d)", shared.ErrValidation, len(c.Correlations), maxSASTCorrelations)
+	}
+	correlations := make(map[string]struct{}, len(c.Correlations))
+	for _, link := range c.Correlations {
+		if link.FindingID.IsZero() {
+			return fmt.Errorf("%w: sast finding correlation requires a finding id", shared.ErrValidation)
+		}
+		if err := validateSASTSymbol(link.SinkSymbol); err != nil {
+			return err
+		}
+		if err := validateSASTSymbol(link.AffectedSymbol); err != nil {
+			return err
+		}
+		if _, present := sinks[link.SinkSymbol]; !present {
+			return fmt.Errorf("%w: sast finding correlation sink %q is not declared by the claim", shared.ErrValidation, link.SinkSymbol)
+		}
+		key := link.FindingID.String() + "\x00" + link.SinkSymbol + "\x00" + link.AffectedSymbol
+		if _, duplicate := correlations[key]; duplicate {
+			return fmt.Errorf("%w: sast claim repeats a finding correlation", shared.ErrValidation)
+		}
+		correlations[key] = struct{}{}
+	}
 	if c.DataFlow != nil {
 		if err := c.DataFlow.validate(); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func validateSASTSymbol(symbol string) error {
+	if symbol == "" || strings.TrimSpace(symbol) != symbol || len(symbol) > maxSASTSymbolLen {
+		return fmt.Errorf("%w: sast symbol must be a non-empty bounded token", shared.ErrValidation)
+	}
+	for _, r := range symbol {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%w: sast symbol contains control characters", shared.ErrValidation)
+		}
+	}
+	return nil
+}
+
+// CorrelatedFindingIDs returns the distinct SCA findings linked by this SAST claim in stable order.
+// A correlation is evidence for a later raise-only promotion decision; it does not change the SAST
+// judgment's subject or decide a severity by itself.
+func (c SASTClaim) CorrelatedFindingIDs() []shared.ID {
+	if len(c.Correlations) == 0 {
+		return nil
+	}
+	seen := make(map[shared.ID]struct{}, len(c.Correlations))
+	out := make([]shared.ID, 0, len(c.Correlations))
+	for _, link := range c.Correlations {
+		if link.FindingID.IsZero() {
+			continue
+		}
+		if _, exists := seen[link.FindingID]; exists {
+			continue
+		}
+		seen[link.FindingID] = struct{}{}
+		out = append(out, link.FindingID)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 // RiskNarrativeClaim explains the Go-computed priority via STRUCTURED drivers (never prose):

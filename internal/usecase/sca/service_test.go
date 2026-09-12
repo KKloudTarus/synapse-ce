@@ -114,6 +114,19 @@ type staticTaintCoverage struct {
 	calls   int
 }
 
+type staticCorrelatedTaint struct {
+	calls    int
+	subjects []ports.ReachabilitySubject
+}
+
+func (*staticCorrelatedTaint) Scan(context.Context, shared.ID, string) (int, error) { return 0, nil }
+
+func (s *staticCorrelatedTaint) ScanCorrelated(_ context.Context, _ shared.ID, _ string, subjects []ports.ReachabilitySubject) (ports.TaintScanOutcome, error) {
+	s.calls++
+	s.subjects = append([]ports.ReachabilitySubject(nil), subjects...)
+	return ports.TaintScanOutcome{Proposed: 1}, nil
+}
+
 func (s *staticTaintCoverage) Scan(context.Context, shared.ID, string) (int, error) {
 	return s.outcome.Proposed, s.err
 }
@@ -321,6 +334,28 @@ func TestScanSurfacesJSTaintCoverageEvenWhenBestEffortScannerFails(t *testing.T)
 	}
 	if len(result.SourceWarnings) != 1 || strings.Contains(result.SourceWarnings[0], "untrusted parser detail") {
 		t.Fatalf("safe source warning = %v", result.SourceWarnings)
+	}
+}
+
+func TestScanPassesVersionCorrectFindingSymbolsToCorrelatedTaint(t *testing.T) {
+	svc := newSvcWithSources(
+		&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()},
+		&fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{},
+		[]ports.DetectionSource{staticVuln{{
+			Source: "static", AdvisoryID: "CVE-2026-1050", Component: "example.com/lib", Version: "1.0.0",
+			Severity: shared.SeverityHigh, AffectedSymbols: []string{"example.com/lib.Parser.Parse"},
+		}}},
+	)
+	scanner := &staticCorrelatedTaint{}
+	svc.SetTaint(scanner)
+	if _, err := svc.ScanWithOptions(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeVulnerabilities}); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if scanner.calls != 1 || len(scanner.subjects) != 1 {
+		t.Fatalf("correlated scanner calls=%d subjects=%+v", scanner.calls, scanner.subjects)
+	}
+	if scanner.subjects[0].FindingID.IsZero() || len(scanner.subjects[0].Symbols) != 1 || scanner.subjects[0].Symbols[0] != "example.com/lib.Parser.Parse" {
+		t.Fatalf("scanner must receive the real finding id and version-correct advisory symbol: %+v", scanner.subjects[0])
 	}
 }
 
