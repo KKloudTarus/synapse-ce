@@ -1,6 +1,7 @@
 package ownadvisory
 
 import (
+	"compress/gzip"
 	"context"
 	"os"
 	"path/filepath"
@@ -71,5 +72,39 @@ func TestOVALDirFeedContextCancelled(t *testing.T) {
 	cancel()
 	if _, err := NewOVALDirFeed(dir).Each(ctx, func(advisory.Advisory) error { return nil }); err == nil {
 		t.Error("a cancelled context must surface an error")
+	}
+}
+
+// SUSE publishes OVAL only as gzip (SLE ships no .bz2), and its decompressed .xml exceeds the per-file read
+// cap, so the offline dir feed must accept and decompress .xml.gz. (D1.4)
+func TestOVALDirFeedGz(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	f, err := os.Create(filepath.Join(dir, "suse.linux.enterprise.15-sp6.xml.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	if _, err := gz.Write(src); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var got []advisory.Advisory
+	if _, err := NewOVALDirFeed(dir).Each(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	}); err != nil {
+		t.Fatalf("Each(gz): %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "CVE-2026-12345" || got[0].Affected[0].Ecosystem != "SUSE:15.6" {
+		t.Fatalf("gzipped SLE OVAL must ingest and key SUSE:15.6, got %+v", got)
 	}
 }

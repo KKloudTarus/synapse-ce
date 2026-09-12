@@ -32,7 +32,14 @@ func hasJSONSuffix(name string) bool { return strings.HasSuffix(strings.ToLower(
 
 func hasOVALSuffix(name string) bool {
 	n := strings.ToLower(name)
-	return strings.HasSuffix(n, ".xml") || strings.HasSuffix(n, ".xml.bz2") || strings.HasSuffix(n, ".oval.bz2")
+	// SUSE (openSUSE Leap + SUSE Linux Enterprise) publishes OVAL only as gzip, not bzip2, so accept .xml.gz /
+	// .oval.gz too; ParseOVAL already decompresses gzip by magic byte, bounded by the same decompressed cap as
+	// bzip2. A gzipped feed's on-disk file is small (SUSE SLE 15 SP6 is ~14 MB gz for a 213 MB document), well
+	// under the per-file read cap, while its decompressed .xml would exceed it, so the compressed form is the
+	// only ingestable one for large SUSE feeds.
+	return strings.HasSuffix(n, ".xml") ||
+		strings.HasSuffix(n, ".xml.bz2") || strings.HasSuffix(n, ".oval.bz2") ||
+		strings.HasSuffix(n, ".xml.gz") || strings.HasSuffix(n, ".oval.gz")
 }
 
 // walkAdvisoryFiles is the generic hardened core shared by every directory-backed advisory feed. accept

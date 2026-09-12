@@ -816,3 +816,62 @@ func TestRpmOvalBoundedRangeSkipped(t *testing.T) {
 		t.Error("a plain less-than package in the same definition must still be emitted")
 	}
 }
+
+// EPIC #860 D1.4: SUSE Linux Enterprise OVAL shares openSUSE's definition-id prefix but uses "SUSE Linux
+// Enterprise ... 15 SP6" platform strings, so it must key "SUSE:15.6" (per service pack), not "openSUSE:".
+func TestParseSLEOVAL(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatalf("ParseOVAL(sle): %v", err)
+	}
+	var oss advisory.Advisory
+	for _, a := range advs {
+		for _, ap := range a.Affected {
+			if ap.Ecosystem != "SUSE:15.6" {
+				t.Errorf("%s: ecosystem = %q, want SUSE:15.6 (SLE must not key as openSUSE)", a.ID, ap.Ecosystem)
+			}
+			if ap.Package == "libopenssl1_1" {
+				oss = a
+			}
+		}
+	}
+	if oss.ID != "CVE-2026-12345" || len(oss.Affected) == 0 || oss.Affected[0].FixedVersion != "0:1.1.1w-150600.3.10" {
+		t.Fatalf("libopenssl1_1 advisory (CVE from title, SUSE:15.6) not parsed as expected: %+v", oss)
+	}
+	// end-to-end match through the rpm comparator on SUSE's version format
+	if ok, _ := oss.Match("SUSE:15.6", "libopenssl1_1", "0:1.1.1w-150600.3.9"); !ok {
+		t.Error("an older libopenssl1_1 must match")
+	}
+	if ok, _ := oss.Match("SUSE:15.6", "libopenssl1_1", "0:1.1.1w-150600.3.10"); ok {
+		t.Error("libopenssl1_1 at the fixed version must not match")
+	}
+	// A different service pack must NOT match: a SP6 fixed NEVR keyed SUSE:15.6 cannot apply to a SUSE:15.5
+	// (SP5) package, mirroring why bare-major keying would be unsound.
+	if ok, _ := oss.Match("SUSE:15.5", "libopenssl1_1", "0:1.1.1w-150600.3.9"); ok {
+		t.Error("a different SLE service pack must not match")
+	}
+}
+
+// slePlatformRelease extracts the per-service-pack release from a SUSE Linux Enterprise platform string and
+// returns "" for any non-SLE platform (so an openSUSE Leap document is never mis-detected as SLE).
+func TestSLEPlatformRelease(t *testing.T) {
+	cases := map[string]string{
+		"SUSE Linux Enterprise Server 15 SP6":                "15.6",
+		"SUSE Linux Enterprise Module for Basesystem 15 SP6": "15.6",
+		"SUSE Linux Enterprise Server 12 SP5":                "12.5",
+		"SUSE Linux Enterprise Server 15":                    "15",
+		"SUSE Linux Enterprise Server 16.0":                  "16.0",
+		"openSUSE Leap 15.6":                                 "", // not SLE
+		"Ubuntu 22.04":                                       "",
+		"SUSE Linux Enterprise Server":                       "", // no version token
+	}
+	for in, want := range cases {
+		if got := slePlatformRelease(in); got != want {
+			t.Errorf("slePlatformRelease(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
