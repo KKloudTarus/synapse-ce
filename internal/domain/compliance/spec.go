@@ -49,6 +49,10 @@ type Report struct {
 	Results       []ControlResult
 	Passed        int
 	Failed        int
+	// Frameworks is the per-framework CIS/OWASP/PCI/ISO coverage rollup over the same findings (D6.6): for each
+	// framework a finding maps to, the controls Synapse assesses and whether each FAILED or is NOT_ASSESSED.
+	// It never asserts PASS (see ComplianceStatus). Empty when no finding maps to any mapped control.
+	Frameworks []FrameworkCoverage `json:"frameworks,omitempty"`
 }
 
 // Evaluate joins the findings against the spec and returns the per-control report. Deterministic and
@@ -98,51 +102,120 @@ func controlMatchesFinding(c SpecControl, f finding.Finding) bool {
 	return false
 }
 
-// FrameworkCoverage is a per-framework compliance rollup over a finding set: the distinct controls the
-// findings touched in that framework, and how many findings mapped to it. Deterministic order.
-type FrameworkCoverage struct {
-	Framework string    `json:"framework"`
-	Controls  []Control `json:"controls"`
-	Findings  int       `json:"findings"`
+// ComplianceStatus is a control's assessed state in a rollup. Synapse asserts FAILED (a finding mapped to the
+// control) or NOT_ASSESSED (the control is mapped but no finding matched it). It deliberately does NOT assert
+// PASS: a clean finding set is not proof a control's requirement is met, only that Synapse's checks for it did
+// not fire. Asserting PASS would need per-control coverage proof (that the relevant check actually ran over
+// the relevant resource), which the scan does not carry. NOT_APPLICABLE is reserved for a future scan-scope
+// signal (e.g. a Kubernetes framework against a scan with no Kubernetes manifests).
+type ComplianceStatus string
+
+const (
+	ControlFailed      ComplianceStatus = "failed"
+	ControlNotAssessed ComplianceStatus = "not_assessed"
+)
+
+// ControlStatus is one control's assessed state within a framework rollup.
+type ControlStatus struct {
+	Control  Control          `json:"control"`
+	Status   ComplianceStatus `json:"status"`
+	Findings int              `json:"findings"` // findings mapped to this control (>0 iff failed)
 }
 
-// Rollup aggregates findings into a per-framework compliance rollup using the same curated
-// finding->controls mapping (CWE + rule key) as ControlsForFinding, so it is a deterministic lookup, never
-// an inference. A finding maps to a framework at most once (so Findings counts findings, not control hits);
-// a finding with no mapped control contributes to nothing.
-func Rollup(findings []finding.Finding) []FrameworkCoverage {
-	type fw struct {
-		controls map[string]Control
-		findings int
+// FrameworkCoverage is a per-framework compliance rollup over a finding set. For every control Synapse can
+// assess in the framework (its curated mapping), it reports FAILED or NOT_ASSESSED. Assessable is the
+// denominator — the number of controls Synapse maps in this framework, NOT the framework's full control
+// catalogue — so "Failed of Assessable" is never misread as full-framework compliance. Findings counts the
+// findings that mapped to the framework (each finding once). A NOT_ASSESSED control is explicitly NOT a pass.
+type FrameworkCoverage struct {
+	Framework  string          `json:"framework"`
+	Assessable int             `json:"assessable_controls"`
+	Failed     int             `json:"failed_controls"`
+	Findings   int             `json:"findings"`
+	Controls   []ControlStatus `json:"controls"`
+}
+
+// controlsByFramework returns every control Synapse maps (from the CWE and rule tables), grouped by framework
+// and de-duplicated by control ID. It is the denominator source for the rollup: the controls Synapse is able
+// to assess, never the framework's complete catalogue.
+func controlsByFramework() map[string][]Control {
+	byFW := map[string]map[string]Control{}
+	add := func(cs []Control) {
+		for _, c := range cs {
+			if byFW[c.Framework] == nil {
+				byFW[c.Framework] = map[string]Control{}
+			}
+			// Deterministic dedup: a control ID should carry one canonical title across the CWE and rule
+			// tables, but if two entries ever disagree, pick the lexicographically smaller title so the
+			// emitted metadata does not depend on Go's map iteration order.
+			if existing, ok := byFW[c.Framework][c.ID]; !ok || c.Title < existing.Title {
+				byFW[c.Framework][c.ID] = c
+			}
+		}
 	}
-	byFramework := map[string]*fw{}
+	for _, cs := range cweControls {
+		add(cs)
+	}
+	for _, cs := range ruleControls {
+		add(cs)
+	}
+	out := make(map[string][]Control, len(byFW))
+	for fw, m := range byFW {
+		cs := make([]Control, 0, len(m))
+		for _, c := range m {
+			cs = append(cs, c)
+		}
+		sortControls(cs)
+		out[fw] = cs
+	}
+	return out
+}
+
+// Rollup aggregates findings into a per-framework compliance rollup using the same curated finding->controls
+// mapping (CWE + rule key) as ControlsForFinding, so every FAILED is a deterministic lookup, never an
+// inference. A framework is reported only when at least one finding maps to it; within that framework EVERY
+// control Synapse maps is listed with its status — FAILED (a finding mapped) or NOT_ASSESSED (no finding, and
+// NOT a pass assertion) — alongside the assessable-controls denominator, so a partial result reads honestly
+// and a NOT_ASSESSED control is never mistaken for a clean pass. Deterministic order.
+func Rollup(findings []finding.Finding) []FrameworkCoverage {
+	assessable := controlsByFramework()
+	failed := map[string]map[string]int{} // framework -> control ID -> findings mapped
+	frameworkFindings := map[string]int{}
 	for _, f := range findings {
 		controls := ControlsForFinding(f.CWE, f.RuleKey)
 		if len(controls) == 0 {
 			continue
 		}
-		counted := map[string]bool{}
+		countedFW := map[string]bool{}
+		countedControl := map[string]bool{} // guard: count each (framework,control) at most once PER finding
 		for _, c := range controls {
-			g := byFramework[c.Framework]
-			if g == nil {
-				g = &fw{controls: map[string]Control{}}
-				byFramework[c.Framework] = g
+			if failed[c.Framework] == nil {
+				failed[c.Framework] = map[string]int{}
 			}
-			g.controls[c.ID] = c
-			if !counted[c.Framework] {
-				counted[c.Framework] = true
-				g.findings++
+			if key := c.Framework + "\x00" + c.ID; !countedControl[key] {
+				countedControl[key] = true
+				failed[c.Framework][c.ID]++
+			}
+			if !countedFW[c.Framework] {
+				countedFW[c.Framework] = true
+				frameworkFindings[c.Framework]++
 			}
 		}
 	}
-	out := make([]FrameworkCoverage, 0, len(byFramework))
-	for name, g := range byFramework {
-		cs := make([]Control, 0, len(g.controls))
-		for _, c := range g.controls {
-			cs = append(cs, c)
+	out := make([]FrameworkCoverage, 0, len(failed))
+	for fw := range failed {
+		controls := assessable[fw]
+		fc := FrameworkCoverage{Framework: fw, Assessable: len(controls), Findings: frameworkFindings[fw]}
+		for _, c := range controls {
+			n := failed[fw][c.ID]
+			st := ControlNotAssessed
+			if n > 0 {
+				st = ControlFailed
+				fc.Failed++
+			}
+			fc.Controls = append(fc.Controls, ControlStatus{Control: c, Status: st, Findings: n})
 		}
-		sortControls(cs)
-		out = append(out, FrameworkCoverage{Framework: name, Controls: cs, Findings: g.findings})
+		out = append(out, fc)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Framework < out[j].Framework })
 	return out
