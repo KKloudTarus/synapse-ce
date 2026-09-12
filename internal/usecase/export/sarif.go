@@ -233,6 +233,10 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 		if f.PublicExploit {
 			res.Properties["publicExploit"] = "true"
 		}
+		// EPSS percentile (D1.3): the exploit-prediction rank among all CVEs, a triage-ordering aid.
+		if f.EPSSPercentile > 0 {
+			res.Properties["epssPercentile"] = strconv.FormatFloat(f.EPSSPercentile, 'f', 4, 64)
+		}
 		if opts.AIGateExemption != nil {
 			findingKey := strings.TrimSpace(f.DedupKey)
 			if exemption, ok := opts.AIGateExemption(f); ok && findingKey != "" &&

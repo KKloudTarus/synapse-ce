@@ -416,7 +416,7 @@ func TestBuildFindingsDirectBumpsEdgeCases(t *testing.T) {
 // D1.3: the public-exploit signal is surfaced on the finding from the vulnerability.
 func TestBuildFindingsSurfacesPublicExploit(t *testing.T) {
 	res := &ScanResult{Vulnerabilities: []vulnerability.Vulnerability{
-		{ID: "CVE-E", Component: "x", Version: "1", Severity: shared.SeverityHigh, PublicExploit: true},
+		{ID: "CVE-E", Component: "x", Version: "1", Severity: shared.SeverityHigh, PublicExploit: true, EPSSPercentile: 0.98},
 		{ID: "CVE-N", Component: "y", Version: "1", Severity: shared.SeverityHigh},
 	}}
 	got := buildFindings("eng1", res, time.Unix(0, 0).UTC(), shared.SeverityHigh, false, nil)
@@ -429,5 +429,12 @@ func TestBuildFindingsSurfacesPublicExploit(t *testing.T) {
 	}
 	if byKey["vuln:CVE-N:y:1"].PublicExploit {
 		t.Error("a vuln without a public exploit must not set PublicExploit")
+	}
+	// D1.3: the EPSS percentile is surfaced on the finding as a triage rank.
+	if byKey["vuln:CVE-E:x:1"].EPSSPercentile != 0.98 {
+		t.Errorf("the EPSS percentile must surface on the finding, got %v", byKey["vuln:CVE-E:x:1"].EPSSPercentile)
+	}
+	if byKey["vuln:CVE-N:y:1"].EPSSPercentile != 0 {
+		t.Error("a vuln without an EPSS percentile must leave it 0")
 	}
 }

@@ -87,6 +87,11 @@ func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding
 			// PublicExploit (D1.3) is OR-merged (monotonic any-true, mirroring the domain's any-source-KEV
 			// merge and the postgres OR): a producer that does not compute it must not clear a stored true.
 			f.PublicExploit = f.PublicExploit || existing.PublicExploit
+			// EPSSPercentile (D1.3) is raise-only (max), mirroring the domain's highest-EPSS merge and the
+			// postgres GREATEST: a producer with no EPSS enrichment must not lower a stored rank.
+			if existing.EPSSPercentile > f.EPSSPercentile {
+				f.EPSSPercentile = existing.EPSSPercentile
+			}
 			machineChanged := findingMachineProjectionChanged(existing, f)
 			f.ID = existing.ID
 			f.Status = existing.Status // preserve triage
@@ -127,6 +132,7 @@ func findingMachineProjectionChanged(existing, incoming finding.Finding) bool {
 		existing.ComponentFingerprint != incoming.ComponentFingerprint ||
 		existing.FixedVersion != incoming.FixedVersion ||
 		existing.PublicExploit != incoming.PublicExploit ||
+		existing.EPSSPercentile != incoming.EPSSPercentile ||
 		!sameStrings(existing.DirectBumps, incoming.DirectBumps) ||
 		existing.DetectionState != incoming.DetectionState ||
 		existing.RiskAssessmentID != incoming.RiskAssessmentID ||

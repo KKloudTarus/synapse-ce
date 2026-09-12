@@ -66,6 +66,7 @@ export function mapFinding(r: any): Finding {
     })),
     directBumps: r.DirectBumps ?? [],
     publicExploit: r.PublicExploit ?? false,
+    epssPercentile: r.EPSSPercentile ?? 0,
   }
 }
 
