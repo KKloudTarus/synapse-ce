@@ -1,0 +1,66 @@
+# OWASP BenchmarkJava SAST scorecard (EPIC #860 D5.8). Provisions the corpus at a PINNED commit and a
+# java-facts-capable synapse-ast, runs the gated per-category recall ratchet, and uploads the scorecard.
+# The corpus is GPL v2, so it is not vendored; it is checked out here at a fixed commit and content-verified.
+name: OWASP SAST Benchmark
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owasp-scorecard:
+    name: OWASP BenchmarkJava scorecard
+    runs-on: ubuntu-latest
+    env:
+      # Pinned OWASP-Benchmark/BenchmarkJava commit the ratchet floors are calibrated against (v1.2 answer
+      # key). Bumping this REQUIRES re-verifying the checksum below and re-calibrating the floors.
+      OWASP_BENCHMARK_REF: 20cbf3d11123347e47ed89541e6942836def53f7
+      OWASP_BENCHMARK_CSV_SHA256: 1809f6a690c6cf7dd6685df6ebe2eef8fe3ca93d19a7ca0ce45987ca4f5d78e1
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Checkout OWASP BenchmarkJava (pinned)
+        uses: actions/checkout@v7
+        with:
+          repository: OWASP-Benchmark/BenchmarkJava
+          ref: ${{ env.OWASP_BENCHMARK_REF }}
+          path: owasp-benchmark
+          persist-credentials: false
+
+      - name: Verify answer-key checksum (content pin)
+        working-directory: owasp-benchmark
+        run: |
+          echo "${OWASP_BENCHMARK_CSV_SHA256}  expectedresults-1.2.csv" | sha256sum -c -
+
+      - name: Build java-facts-capable synapse-ast (CGO)
+        run: CGO_ENABLED=1 go build -o "${RUNNER_TEMP}/synapse-ast" ./cmd/synapse-ast
+
+      - name: Run OWASP scorecard + recall ratchet
+        env:
+          SYNAPSE_OWASP_BENCHMARK_DIR: ${{ github.workspace }}/owasp-benchmark
+          SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
+          SYNAPSE_OWASP_BENCHMARK_SHA256: ${{ env.OWASP_BENCHMARK_CSV_SHA256 }}
+        run: |
+          set -o pipefail
+          CGO_ENABLED=1 go test -count=1 -v -run TestOWASPBenchmarkScorecard \
+            ./internal/infrastructure/tools/ast/ | tee "${RUNNER_TEMP}/owasp-scorecard.log"
+
+      - name: Upload scorecard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-benchmark-scorecard
+          path: ${{ runner.temp }}/owasp-scorecard.log
+          if-no-files-found: warn
