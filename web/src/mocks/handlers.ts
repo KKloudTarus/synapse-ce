@@ -555,6 +555,36 @@ export const handlers = [
   // deployment runs everything the browser mock can serve, so every entry is enabled here.
   http.get('/api/v1/capabilities', () => HttpResponse.json({ capabilities: CAPABILITIES })),
 
+  // Engine detection-accuracy trend (#860 D8.6). Newest first; a small precision improvement across runs.
+  http.get('/api/v1/engine/accuracy', () => {
+    const metrics = (tp: number, fp: number, fn: number) => {
+      const precision = tp + fp === 0 ? 1 : tp / (tp + fp)
+      const recall = tp + fn === 0 ? 1 : tp / (tp + fn)
+      const f1 = precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall)
+      return { true_positives: tp, false_positives: fp, false_negatives: fn, precision, recall, f1, false_discovery_rate: 1 - precision, false_negative_rate: 1 - recall }
+    }
+    const run = (id: string, ranAt: string, tp: number, fp: number, fn: number) => ({
+      id,
+      ran_at: ranAt,
+      corpus_version: 'detection-golden-v1',
+      schema_version: 'synapse-accuracy-report-v1',
+      cases: 9,
+      overall: metrics(tp, fp, fn),
+      groups: [
+        { group: 'npm', cases: 3, metrics: metrics(4, fp > 0 ? 1 : 0, 0) },
+        { group: 'PyPI', cases: 3, metrics: metrics(3, 0, fn) },
+        { group: 'Go', cases: 3, metrics: metrics(3, 0, 0) },
+      ],
+    })
+    return HttpResponse.json({
+      runs: [
+        run('acc-3', '2026-01-03T02:00:00Z', 10, 0, 0),
+        run('acc-2', '2026-01-02T02:00:00Z', 10, 1, 0),
+        run('acc-1', '2026-01-01T02:00:00Z', 9, 1, 1),
+      ],
+    })
+  }),
+
   // Source-control connectors (Settings → Connectors). Token is never returned.
   http.get('/api/v1/connectors', () => HttpResponse.json({ connectors: [
     { id: 'conn-1', name: 'Production GitHub', provider: 'github', host: 'github.com', username: 'x-access-token', auth_kind: 'pat', created_at: WEEK_AGO, updated_at: WEEK_AGO },
