@@ -1445,6 +1445,13 @@ type Workspace struct {
 type OSPackageResult struct {
 	Components     []sbom.Component
 	DistroResolved bool
+	// UnsupportedDistro names a distro the cataloger RECOGNIZED but deliberately does not match advisories for
+	// (empty otherwise). It distinguishes a by-design coverage gap from a parse failure: CentOS is the case
+	// today (CentOS Stream runs ahead of RHEL, so applying a RHEL fixed version would be a false match). The
+	// packages are still cataloged for inventory; the pipeline surfaces this as a structured
+	// coverage=unsupported warning rather than a generic "release could not be resolved", and never aliases
+	// the packages to RHEL or reads them as clean.
+	UnsupportedDistro string
 }
 
 // OSPackageCataloger reads a materialized image root filesystem (Workspace.RootFS) and returns the installed

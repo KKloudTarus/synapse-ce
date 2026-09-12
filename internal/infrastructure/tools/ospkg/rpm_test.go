@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -300,5 +301,46 @@ func TestCatalogRPMSLESResolution(t *testing.T) {
 	}
 	if res.DistroResolved {
 		t.Error("SLES with a major-only VERSION_ID must NOT resolve (bare SUSE:15 would conflate service packs)")
+	}
+}
+
+// TestCatalogRPMCentOSUnsupported: CentOS is recognized but deliberately unsupported (CentOS Stream runs
+// ahead of RHEL). Its packages are cataloged for inventory, but the result flags UnsupportedDistro and does
+// NOT resolve (so the pipeline reports coverage=unsupported, never a clean posture and never a RHEL alias).
+func TestCatalogRPMCentOSUnsupported(t *testing.T) {
+	rootfs := writeRPMRootfs(t, "ID=centos\nVERSION_ID=\"9\"\n")
+	res, err := New().Catalog(context.Background(), rootfs)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if len(res.Components) != 1 {
+		t.Fatalf("CentOS packages must still be cataloged for inventory, got %d", len(res.Components))
+	}
+	if res.DistroResolved {
+		t.Error("CentOS must NOT resolve (deliberately unsupported)")
+	}
+	if res.UnsupportedDistro != "centos" {
+		t.Errorf("CentOS must be flagged UnsupportedDistro=centos, got %q", res.UnsupportedDistro)
+	}
+	// It must not be aliased to RHEL: the component keeps a centos namespace, not rhel.
+	if p := res.Components[0].PURL; !strings.Contains(p, "/centos/") {
+		t.Errorf("CentOS package must keep a centos PURL namespace (never aliased to rhel), got %q", p)
+	}
+}
+
+// TestUnsupportedAndMatchableAreDisjoint guards a dangerous future edit: a distro must never be BOTH
+// advisory-matchable and flagged unsupported. If a supported id (rhel/rocky/almalinux/...) were ever added to
+// knownUnsupportedRPMIDs, its real OS findings would be relabeled a coverage gap. Keep the two sets disjoint.
+func TestUnsupportedAndMatchableAreDisjoint(t *testing.T) {
+	for id := range knownUnsupportedRPMIDs {
+		if rpmMatchableIDs[id] {
+			t.Errorf("distro %q is BOTH matchable and unsupported: a supported distro must never be flagged coverage=unsupported", id)
+		}
+	}
+	// Sanity: the supported rpm distros are not accidentally in the unsupported set.
+	for _, id := range []string{"rhel", "redhat", "rocky", "almalinux", "ol", "amzn", "fedora", "sles"} {
+		if knownUnsupportedRPMIDs[id] {
+			t.Errorf("supported distro %q must not be in knownUnsupportedRPMIDs", id)
+		}
 	}
 }
