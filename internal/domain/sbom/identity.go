@@ -148,8 +148,8 @@ func distroEcosystem(typ, purl string) string {
 // on. It is the SINGLE source of truth for OS-package ecosystem keying: both the inventory identity here and
 // the scan-side matcher (osDistroEcosystem in the ownadvisory feed) call it, so the two can never drift. The
 // qualifier is lowercased first (Syft emits lowercase; a case-variant keys the same). An unmapped distro
-// (CentOS, Fedora, openSUSE Tumbleweed, SUSE Linux Enterprise) or a malformed qualifier returns "" (cataloged
-// for inventory, never keyed to an advisory ecosystem, so never a false match).
+// (CentOS, Fedora, openSUSE Tumbleweed) or a malformed qualifier returns "" (cataloged for inventory, never
+// keyed to an advisory ecosystem, so never a false match).
 func DistroEcosystem(purlType, distro string) string {
 	distro = strings.ToLower(distro)
 	if distro == "" {
@@ -164,6 +164,16 @@ func DistroEcosystem(purlType, distro string) string {
 				return "openSUSE:" + p[0] + "." + p[1]
 			}
 			return "openSUSE:" + v
+		}
+		// SUSE Linux Enterprise (Syft distro=sles-15.6): key "SUSE:<major>.<sp>" per service pack, the key the
+		// owned SLE OVAL feed writes. Keying by bare major would conflate service packs — a SP6 fixed NEVR must
+		// not match a SP5 package — so the minor is preserved, exactly like openSUSE Leap above.
+		if v := strings.TrimPrefix(distro, "sles-"); v != distro && v != "" {
+			p := strings.SplitN(v, ".", 3)
+			if len(p) >= 2 && p[0] != "" && p[1] != "" {
+				return "SUSE:" + p[0] + "." + p[1]
+			}
+			return "SUSE:" + v
 		}
 	}
 	// Wolfi and Chainguard are rolling apk distros with no release version, so the whole family name is the key
@@ -217,8 +227,8 @@ func DistroEcosystem(purlType, distro string) string {
 			return ""
 		}
 		// The rpm distros key "<Name>:<major>". CentOS is deliberately excluded (Stream runs ahead of RHEL, so
-		// a RHEL fixed NEVR would false-match a Stream package); Fedora and SUSE Linux Enterprise stay unmapped
-		// (no owned feed). Each mapped id keys the ecosystem its own feed writes.
+		// a RHEL fixed NEVR would false-match a Stream package); Fedora stays unmapped (no owned feed). SUSE
+		// Linux Enterprise (sles-*) is keyed by the major.minor branch above. Each mapped id keys its own feed.
 		switch id {
 		case "rhel", "redhat":
 			return "Red Hat:" + major

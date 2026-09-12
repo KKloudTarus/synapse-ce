@@ -387,7 +387,7 @@ synapse-cli sync-advisories --remote-distros
 # ingest a local CSAF 2.0 advisory dump
 synapse-cli sync-advisories --csaf <dir>
 
-# ingest a local OVAL dump (Ubuntu/Debian dpkginfo, or Oracle/AlmaLinux/openSUSE rpminfo, .xml[.bz2/.gz])
+# ingest a local OVAL dump (Ubuntu/Debian dpkginfo, or Oracle/AlmaLinux/openSUSE/SUSE Linux Enterprise rpminfo, .xml[.bz2/.gz])
 synapse-cli sync-advisories --oval <dir>
 
 # ingest a local yum/dnf updateinfo dump (Amazon Linux ALAS: repodata updateinfo.xml[.gz])

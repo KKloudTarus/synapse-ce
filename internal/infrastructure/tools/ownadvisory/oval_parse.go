@@ -251,19 +251,36 @@ var rpmOvalDistros = []rpmOvalDistro{
 	{idPrefix: "oval:com.oracle.elsa", ecosystem: "Oracle Linux:", majorsOf: oraclePlatformMajors},
 	{idPrefix: "oval:org.almalinux.al", ecosystem: "AlmaLinux:", majorsOf: almaCPEMajors},
 	{idPrefix: "oval:org.opensuse.security", ecosystem: "openSUSE:", majorsOf: susePlatformMajors},
+	// SUSE Linux Enterprise shares openSUSE's definition-id prefix but uses "SUSE Linux Enterprise ... 15 SP6"
+	// platform strings (vs openSUSE's "openSUSE Leap 15.6"). rpmDistro disambiguates the shared prefix by which
+	// entry's majorsOf actually recognizes the document's platforms, so a Leap file keys openSUSE: and an SLE
+	// file keys SUSE:. Keyed per service pack (SUSE:15.6), matching the sles-<major.minor> inventory key.
+	{idPrefix: "oval:org.opensuse.security", ecosystem: "SUSE:", majorsOf: sleServerPlatformMajors},
 }
 
-// rpmDistro reports which rpm-family OVAL feed this document is, detected by the anchored definition-id
-// prefix, or nil for a deb-family (or unrecognized) document.
+// rpmDistro reports which rpm-family OVAL feed this document is. Detection is by the anchored definition-id
+// prefix, but two feeds (openSUSE Leap and SUSE Linux Enterprise) share the prefix "oval:org.opensuse.security"
+// and differ only in their platform strings, so a shared-prefix tie is broken by which entry's majorsOf
+// actually recognizes a definition in this document. The first entry whose majorsOf matches wins; if the
+// prefix matches but no entry recognizes any platform (an unrecognized release), the first prefix match is
+// returned so the caller still keys nothing (majorsOf stays empty downstream). nil for a deb-family document.
 func (s *ovalScan) rpmDistro() *rpmOvalDistro {
+	var prefixMatch *rpmOvalDistro
 	for di := range rpmOvalDistros {
+		dist := &rpmOvalDistros[di]
 		for i := range s.defs {
-			if strings.HasPrefix(s.defs[i].ID, rpmOvalDistros[di].idPrefix) {
-				return &rpmOvalDistros[di]
+			if !strings.HasPrefix(s.defs[i].ID, dist.idPrefix) {
+				continue
+			}
+			if prefixMatch == nil {
+				prefixMatch = dist
+			}
+			if len(dist.majorsOf(&s.defs[i])) > 0 {
+				return dist // this entry recognizes the document's platforms → it is the right feed
 			}
 		}
 	}
-	return nil
+	return prefixMatch
 }
 
 type rpmOvalAcc struct {
@@ -528,6 +545,78 @@ func susePlatformRelease(platform string) string {
 		return ""
 	}
 	return rel
+}
+
+// sleServerPlatformMajors returns the SUSE Linux Enterprise release(s) a definition covers, read from its
+// affected <platform> strings (e.g. "SUSE Linux Enterprise Server 15 SP6", "SUSE Linux Enterprise Module for
+// Basesystem 15 SP6"). Any openSUSE Leap platform is not SLE and contributes nothing, so an openSUSE Leap
+// document yields no SLE majors and rpmDistro keeps it on the openSUSE entry.
+func sleServerPlatformMajors(d *ovalDefinition) map[string]bool {
+	majors := map[string]bool{}
+	for _, p := range d.Platforms {
+		if rel := slePlatformRelease(p); rel != "" {
+			majors[rel] = true
+		}
+	}
+	return majors
+}
+
+// slePlatformRelease extracts the release key from a "SUSE Linux Enterprise ..." platform string: a trailing
+// "<major> SP<sp>" yields "<major>.<sp>" (SP6 → 15.6), a bare trailing "<major>" yields "<major>", and an
+// already-dotted "<major>.<minor>" (SLE 16.0) is returned as-is. This matches the sles-<major.minor> inventory
+// key (per service pack), so a fixed NEVR is never applied across service packs. A non-SLE platform returns "".
+func slePlatformRelease(platform string) string {
+	s := strings.ToLower(strings.TrimSpace(platform))
+	if !strings.HasPrefix(s, "suse linux enterprise") {
+		return ""
+	}
+	fields := strings.Fields(s)
+	if len(fields) < 2 {
+		return ""
+	}
+	last := fields[len(fields)-1]
+	if sp, ok := strings.CutPrefix(last, "sp"); ok && sleAllDigits(sp) {
+		if major := fields[len(fields)-2]; sleAllDigits(major) {
+			return major + "." + sp
+		}
+		return ""
+	}
+	if sleNumericVersion(last) { // bare major "15" or already major.minor "16.0"
+		return last
+	}
+	return ""
+}
+
+// sleAllDigits reports whether s is non-empty and all ASCII digits.
+func sleAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// sleNumericVersion reports whether s is a version of digits with at most one interior dot ("15" or "16.0").
+func sleNumericVersion(s string) bool {
+	if s == "" || s[0] == '.' || s[len(s)-1] == '.' {
+		return false
+	}
+	dot := false
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c == '.' {
+			if dot {
+				return false
+			}
+			dot = true
+		} else if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // oracleReleaseFromEVR extracts the OS major from an rpm release dist tag: ".el8_10" / ".el8uek" / ".ol9_..."
