@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -166,9 +167,14 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 			hash = metaHashes[n]
 		}
 		set.add(sbom.Component{Name: n, Version: p.version, PURL: ref, Location: in.Path, Scope: scope, Checksums: pyHashChecksums([]string{hash})})
+		// Per resolved target, the WINNING declaration decides both the edge's optionality and its recorded
+		// range. Priority: a required declaration (2) beats an optional one (1), and a strict > keeps the FIRST
+		// declaration at a given priority (a later required tie does not overwrite an earlier one). The range is
+		// then the winner's OWN constraint – empty when that winner declared none (a git/path/url dependency),
+		// so a losing declaration's range can never leak onto the edge.
 		targetOptional := map[string]bool{}
 		targetRange := map[string]string{}
-		seen := map[string]bool{ref: true}
+		winnerPrio := map[string]int{}
 		for _, d := range p.deps {
 			dn := normalizePyPI(d.name)
 			vs := versionsOf[dn]
@@ -179,18 +185,14 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 			if t == ref {
 				continue
 			}
-			// The declared range follows the edge winner: a required declaration wins over an optional one
-			// for the same resolved target (matching the required-wins optionality below), never the reverse.
-			if d.constraint != "" && (!d.optional || targetRange[t] == "") {
-				targetRange[t] = d.constraint
+			prio := 1 // optional
+			if !d.optional {
+				prio = 2 // required wins over an alternate optional declaration
 			}
-			if !seen[t] {
-				seen[t] = true
+			if prio > winnerPrio[t] { // strict > keeps the first declaration at a given priority
+				winnerPrio[t] = prio
 				targetOptional[t] = d.optional
-				continue
-			}
-			if !d.optional { // required wins over an alternate optional declaration
-				targetOptional[t] = false
+				targetRange[t] = d.constraint // the winner's own constraint (may be empty -> range absent)
 			}
 		}
 		var required, optional []string
@@ -233,9 +235,41 @@ func isPoetryDepKey(k string) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
+// poetryTableVersionRE matches the `version` KEY inside an inline dependency table body and captures its
+// double-quoted value whole. The key must be at the body start or preceded by a comma or whitespace, so a
+// `python-versions` (or any other marker) key that merely CONTAINS the substring "version" never matches.
+// Capturing the quoted value as one group keeps a comma inside the constraint (`">=1,<2"`) intact, which a
+// naive comma-split would sever. It is applied only to the table body (see poetryInlineTableBody), never the
+// raw RHS, so a `version = "…"` in a trailing `# comment` after the closing brace can never be read as a key.
+var poetryTableVersionRE = regexp.MustCompile(`(?:^|[{,\s])version\s*=\s*"([^"]*)"`)
+
+// poetryInlineTableBody returns the body of a `{…}` inline table – the text between the opening brace and its
+// MATCHING closing brace – skipping any `}` that appears inside a double-quoted string value (honoring `\"`
+// escapes). Anything after the closing brace (a trailing `# comment`, another table) is excluded. It returns
+// "" for a non-table or an unterminated table, so a malformed line yields no range rather than a guessed one.
+func poetryInlineTableBody(raw string) string {
+	if len(raw) == 0 || raw[0] != '{' {
+		return ""
+	}
+	inStr, esc := false, false
+	for i := 1; i < len(raw); i++ {
+		switch c := raw[i]; {
+		case esc:
+			esc = false
+		case c == '\\' && inStr:
+			esc = true
+		case c == '"':
+			inStr = !inStr
+		case c == '}' && !inStr:
+			return raw[1:i]
+		}
+	}
+	return "" // unterminated inline table – no reliable body, so no range
+}
+
 // poetryDepConstraint extracts the declared version constraint from a poetry.lock dependency value:
 // a bare TOML string ("^1.2") or an inline table's version field ({version = "^1.2", optional = true}).
-// A table with no version (a git/path/url dependency) yields "" (D3.8).
+// A table with no version key (a git/path/url dependency) yields "" (D3.8).
 func poetryDepConstraint(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -245,10 +279,8 @@ func poetryDepConstraint(raw string) string {
 		return tomlString(raw)
 	}
 	if raw[0] == '{' {
-		if j := strings.Index(raw, "version"); j >= 0 {
-			if eq := strings.IndexByte(raw[j:], '='); eq >= 0 {
-				return tomlString(raw[j+eq+1:])
-			}
+		if m := poetryTableVersionRE.FindStringSubmatch(poetryInlineTableBody(raw)); m != nil {
+			return m[1]
 		}
 	}
 	return ""
