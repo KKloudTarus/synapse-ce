@@ -271,7 +271,7 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | `SYNAPSE_TRISCORE_REASSESS_ENABLED` | `false` | Tri-score risk reassessment surface (`POST /api/v1/fleet/incidents/{id}/risk/reassess`): re-scores an incident's RiskAssessment via the deterministic Scorer. Threat is live; Exposure/Behavior/Coverage abstain until their producers are wired. |
 | `SYNAPSE_AST_BIN` | bundled / `PATH` | Optional path to the `synapse-ast` sidecar used by Python Tier-2 reachability, Python taint, and code-quality analysis. |
 | `SYNAPSE_JSREACH_ENABLED` | `true` | JS/TS Tier-1 import-level reachability. Default ON; fails to unknown on any coverage gap. Needs judgments. |
-| `SYNAPSE_JSREACH_TIER2_ENABLED` | `false` | JS/TS Tier-2 symbol-level reachability. |
+| `SYNAPSE_JSREACH_TIER2_ENABLED` | `false` | JS/TS Tier-2 affected-export reachability. When Tier-1 is on, Tier-2 runs by default in raise-only mode (mints only reachable/urgency-raising judgments, never suppresses). Setting this to `true` additionally mints not-reachable (suppressing → OpenVEX not_affected) judgments, which the lexical scanner can only assert conservatively. |
 
 ## Fleet, leader election, and DAST
 

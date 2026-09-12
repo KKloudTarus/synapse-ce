@@ -25,6 +25,7 @@ type SymbolRecorder struct {
 	judgments recorderPort
 	audit     ports.AuditLogger
 	clock     ports.Clock
+	raiseOnly bool
 }
 
 // NewSymbolRecorder validates and returns the Tier-2 recorder.
@@ -33,6 +34,16 @@ func NewSymbolRecorder(scanner importScanner, resolver importResolver, judgments
 		return nil, fmt.Errorf("%w: jsreach symbol recorder is missing a dependency", shared.ErrValidation)
 	}
 	return &SymbolRecorder{scanner: scanner, resolver: resolver, judgments: judgments, audit: audit, clock: clock}, nil
+}
+
+// WithRaiseOnly makes the recorder mint only REACHABLE Tier-2 judgments and never a not-reachable one. The
+// JS lexical scanner's positive direction is sound (a named/member read of the affected export is a real
+// reference), but its negative is not (a coarse token lex can miss a reference and so must never conclude
+// not-reachable), so raise-only prioritises reached findings by default without any false-suppression risk.
+// The suppressing (not-reachable) Tier-2 stays behind its explicit opt-in flag.
+func (r *SymbolRecorder) WithRaiseOnly() *SymbolRecorder {
+	r.raiseOnly = true
+	return r
 }
 
 // RecordWithSBOM analyses the target against doc and mints Tier-2 JavaScript reachability judgments.
@@ -66,6 +77,9 @@ func (r *SymbolRecorder) RecordWithSBOM(ctx context.Context, engagementID shared
 	coordinator, err := reachproof.NewCoordinatorForLanguage(analyzer, r.judgments, r.audit, r.clock, judgment.Tier2, reachproof.LanguageJavaScript)
 	if err != nil {
 		return 0, err
+	}
+	if r.raiseOnly {
+		coordinator = coordinator.WithRaiseOnly()
 	}
 	return coordinator.Record(ctx, engagementID, targetRef, answerable)
 }

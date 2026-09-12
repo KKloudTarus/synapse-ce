@@ -2918,17 +2918,23 @@ func main() {
 		scaService.SetJSReachability(jsRecorder)
 		log.Info("Tier-1 JavaScript import-reachability ENABLED (source-only, direct dependencies only → OpenVEX not_affected; best-effort)")
 
-		// Tier-2 rides on Tier-1. Every safety statement it makes ends "…leaves the Tier-1 judgment
-		// standing", so enabling it alone would leave nothing standing; the dependency is enforced here
-		// rather than documented.
+		// Tier-2 rides on Tier-1. It runs by default in RAISE-ONLY mode: it mints only reachable
+		// (urgency-raising) affected-export judgments and never a not-reachable one, which is sound because
+		// the lexical scanner's positive direction (an observed named/member read of the affected export) is
+		// a real reference, while its negative is not (a coarse lex can miss a reference). Setting
+		// SYNAPSE_JSREACH_TIER2_ENABLED upgrades it to also mint not-reachable (suppressing → OpenVEX
+		// not_affected), which needs the Tier-1 judgment to stand behind an unanswerable subject.
+		jsSymbolRecorder, serr := jsreach.NewSymbolRecorder(jsScanner, jsResolver, judgmentSvc, auditLog, clock)
+		if serr != nil {
+			log.Error("javascript tier-2 reachability init failed", "err", serr)
+			os.Exit(1)
+		}
 		if cfg.JSSymbolReachabilityEnabled {
-			jsSymbolRecorder, serr := jsreach.NewSymbolRecorder(jsScanner, jsResolver, judgmentSvc, auditLog, clock)
-			if serr != nil {
-				log.Error("javascript tier-2 reachability init failed", "err", serr)
-				os.Exit(1)
-			}
 			scaService.SetJSSymbolReachability(jsSymbolRecorder)
-			log.Info("javascript TIER-2 affected-export reachability ENABLED (a binding that escapes observation yields no conclusion, never not-reachable)")
+			log.Info("javascript TIER-2 affected-export reachability ENABLED (suppressing: a binding that escapes observation yields no conclusion, never not-reachable)")
+		} else {
+			scaService.SetJSSymbolReachability(jsSymbolRecorder.WithRaiseOnly())
+			log.Info("javascript TIER-2 affected-export reachability ENABLED (raise-only: prioritises a reached export, never suppresses; set SYNAPSE_JSREACH_TIER2_ENABLED for not-reachable proofs)")
 		}
 	} else if cfg.JSSymbolReachabilityEnabled {
 		log.Warn("SYNAPSE_JSREACH_TIER2_ENABLED is set but tier-1 javascript reachability is off - tier-2 is SKIPPED, because a tier-2 refusal is only safe when a tier-1 judgment can stand in its place")
