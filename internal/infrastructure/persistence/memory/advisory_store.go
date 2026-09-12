@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -16,9 +17,10 @@ import (
 // raise-only via advisory.Advisory.PreserveEnrichment). The stored ecosystem+package keys are the ingester-normalized,
 // OSV-canonical ids per the ports.AdvisoryStore KEY CONTRACT.
 type AdvisoryStore struct {
-	mu    sync.RWMutex
-	byID  map[string]advisory.Advisory
-	byKey map[string][]string // "ecosystem\x00package" -> advisory ids (resolved via byID); NUL separator is collision-proof (excluded from canonical names), matching the pg adapter
+	mu        sync.RWMutex
+	byID      map[string]advisory.Advisory
+	byKey     map[string][]string // "ecosystem\x00package" -> advisory ids (resolved via byID); NUL separator is collision-proof (excluded from canonical names), matching the pg adapter
+	updatedAt time.Time           // time of the last Upsert, reported as corpus freshness (the in-memory corpus carries no per-advisory publish date)
 }
 
 // NewAdvisoryStore returns an empty in-memory advisory store.
@@ -27,16 +29,33 @@ func NewAdvisoryStore() *AdvisoryStore {
 }
 
 var (
-	_ ports.AdvisoryStore      = (*AdvisoryStore)(nil)
-	_ ports.AdvisoryWriter     = (*AdvisoryStore)(nil) // the ingester loads via the narrow writer port
-	_ ports.AdvisoryAliasStore = (*AdvisoryStore)(nil)
+	_ ports.AdvisoryStore           = (*AdvisoryStore)(nil)
+	_ ports.AdvisoryWriter          = (*AdvisoryStore)(nil) // the ingester loads via the narrow writer port
+	_ ports.AdvisoryAliasStore      = (*AdvisoryStore)(nil)
+	_ ports.AdvisoryCorpusFreshness = (*AdvisoryStore)(nil) // so the owned source's readiness/provenance marker is non-empty when populated
 )
+
+// AdvisoryFreshness reports the corpus size and a freshness timestamp, so the owned detection source's
+// provenance marker (and thus the pipeline's detection-readiness guard) is non-empty when this in-memory
+// store is populated. The in-memory store carries no per-advisory publish date (it is dev/test-only and
+// re-loaded each process), so a populated store reports the time of its last write: the corpus is exactly as fresh as
+// its last load, and an empty store reports a zero time + zero count so the readiness guard correctly
+// treats it as no coverage. Production uses the Postgres adapter, which reports real advisory dates.
+func (s *AdvisoryStore) AdvisoryFreshness(_ context.Context) (time.Time, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.byID) == 0 {
+		return time.Time{}, 0, nil
+	}
+	return s.updatedAt, len(s.byID), nil
+}
 
 // Upsert inserts or replaces an advisory by id and (re)builds its (ecosystem, package) index entries. A
 // re-sync may change the affected set, so the prior index entries for the id are dropped first. Idempotent.
 func (s *AdvisoryStore) Upsert(_ context.Context, a advisory.Advisory) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.updatedAt = time.Now().UTC() // corpus freshness = time of the last write (see AdvisoryFreshness)
 	if prior, existed := s.byID[a.ID]; existed {
 		// Carry the prior row's exploitation-risk enrichment forward: the bulk feed has no KEV/EPSS, so a
 		// blind replace would LOWER the signals the risk pipeline merged in. Mirrors the Postgres adapter;
