@@ -17,6 +17,8 @@ func Default() (*Catalog, error) {
 	all = append(all, rubyASTRules()...)
 	all = append(all, javaASTRules()...)
 	all = append(all, jsASTRules()...)
+	all = append(all, csharpASTRules()...)
+	all = append(all, phpASTRules()...)
 	all = append(all, secretRules()...)
 	all = append(all, misconfigRules()...)
 	all = append(all, qualityRules()...)

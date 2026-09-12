@@ -26,7 +26,7 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 	}
 	notebooks := map[string][]notebookChunk{}
 	truncated, err := walkSource(ctx, root, func(rel, lang string, content []byte) {
-		if lang != "Python" && lang != "Java" && lang != "JavaScript" && lang != "Kotlin" && lang != "Scala" && lang != "Ruby" && lang != "CSS" && lang != "HTML" && lang != "Swift" && lang != "Rust" && lang != "C" && lang != "C++" {
+		if lang != "Python" && lang != "Java" && lang != "JavaScript" && lang != "Kotlin" && lang != "Scala" && lang != "Ruby" && lang != "CSS" && lang != "HTML" && lang != "Swift" && lang != "Rust" && lang != "C" && lang != "C++" && lang != "C#" && lang != "PHP" {
 			return
 		}
 		if lang == "Python" {
@@ -80,6 +80,10 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 			out.Findings = append(out.Findings, cFindings(tree, content, rel)...)
 		case "C++":
 			out.Findings = append(out.Findings, cppFindings(tree, content, rel)...)
+		case "C#":
+			out.Findings = append(out.Findings, csharpFindings(tree, content, rel)...)
+		case "PHP":
+			out.Findings = append(out.Findings, phpFindings(tree, content, rel)...)
 		}
 	})
 	if err != nil {
