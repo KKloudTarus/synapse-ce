@@ -169,25 +169,43 @@ type osvAffected struct {
 			Path    string   `json:"path"`
 			Symbols []string `json:"symbols"`
 		} `json:"imports"`
+		// RustSec (crates.io) publishes affected functions as fully-qualified paths (crate::Type::method)
+		// under ecosystem_specific.affects.functions; osv.dev re-exports them here.
+		Affects struct {
+			Functions []string `json:"functions"`
+		} `json:"affects"`
 	} `json:"ecosystem_specific"`
 }
 
-// osvImportSymbols collects the affected symbols an OSV entry carries (the Go vuln DB publishes them via
-// affected[].ecosystem_specific.imports[].symbols), qualified as "importPath.Symbol" when a path is set —
-// the exact form the live OSV adapter and the reachability engine use, so the offline owned path agrees.
+// osvImportSymbols collects the affected symbols an OSV entry carries. The Go vuln DB publishes them via
+// affected[].ecosystem_specific.imports[].symbols (qualified as "importPath.Symbol" when a path is set);
+// RustSec publishes them via affected[].ecosystem_specific.affects.functions as already-qualified
+// "crate::Type::method" paths. Both feeds are read so the offline owned path carries the same affected
+// symbols the reachability engine keys on, for every ecosystem that supplies them.
 func osvImportSymbols(aff osvAffected) []string {
+	seen := map[string]bool{}
 	var out []string
+	add := func(s string) {
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
 	for _, imp := range aff.EcosystemSpecific.Imports {
 		for _, s := range imp.Symbols {
 			if s == "" {
 				continue
 			}
 			if imp.Path != "" {
-				out = append(out, imp.Path+"."+s)
+				add(imp.Path + "." + s)
 			} else {
-				out = append(out, s)
+				add(s)
 			}
 		}
+	}
+	for _, fn := range aff.EcosystemSpecific.Affects.Functions {
+		add(fn) // already a fully-qualified crate::Type::method path
 	}
 	return out
 }
