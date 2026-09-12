@@ -28,6 +28,22 @@ func (f *fakeVerifier) Verify(_ context.Context, ruleID string, secret []byte) (
 	return f.verdict, nil
 }
 
+type fakeGroupedVerifier struct {
+	fakeVerifier
+	groupVerdict   ports.SecretVerdict
+	groupCalls     int
+	groupMaterials []ports.SecretMaterial
+}
+
+func (f *fakeGroupedVerifier) VerifyGroup(_ context.Context, materials []ports.SecretMaterial) (ports.SecretVerdict, error) {
+	f.groupCalls++
+	f.groupMaterials = make([]ports.SecretMaterial, len(materials))
+	for i, material := range materials {
+		f.groupMaterials[i] = ports.SecretMaterial{RuleID: material.RuleID, Secret: append([]byte(nil), material.Secret...)}
+	}
+	return f.groupVerdict, nil
+}
+
 func writeSecretFixture(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -150,5 +166,46 @@ func TestVerifyStatePerScanCap(t *testing.T) {
 	vf2 := &verifyState{ctx: context.Background(), verifier: fv, cache: map[string]ports.SecretVerdict{}}
 	if got := verdict(vf2, "github-token", "ghp_underthecap0000000000000000000000000"); got != ports.SecretVerified || fv.calls != 1 {
 		t.Errorf("under the cap the verifier must be called, got %q calls=%d", got, fv.calls)
+	}
+}
+
+func TestScanFilesVerifiedPairsAWSMaterials(t *testing.T) {
+	secretKey := strings.Repeat("0123456789abcdef", 2) + "wJalrXbP"
+	dir := writeSecretFixture(t, "aws_access_key_id = \""+awsID+"\"\naws_secret_access_key = \""+secretKey+"\"\n")
+	fv := &fakeGroupedVerifier{groupVerdict: ports.SecretVerified}
+	report, err := New().ScanFilesVerified(context.Background(), dir, fv)
+	if err != nil {
+		t.Fatalf("verified scan: %v", err)
+	}
+	if fv.groupCalls != 1 || len(fv.groupMaterials) != 2 {
+		t.Fatalf("AWS pair calls=%d materials=%d, want 1/2", fv.groupCalls, len(fv.groupMaterials))
+	}
+	for _, ruleID := range []string{"aws-access-key-id", "aws-secret-access-key"} {
+		finding, ok := findByRule(report, ruleID)
+		if !ok || finding.Verified != ports.SecretVerified {
+			t.Errorf("%s finding = %+v, found=%v; want verified", ruleID, finding, ok)
+		}
+		if strings.Contains(finding.Match, awsID) || strings.Contains(finding.Match, secretKey) {
+			t.Errorf("%s finding leaked raw material: %q", ruleID, finding.Match)
+		}
+	}
+}
+
+func TestScanFilesVerifiedDoesNotGuessAmbiguousAWSPair(t *testing.T) {
+	secondID := "AKIA" + "Q2K7QMN4TJ5VWXY8"
+	secretKey := strings.Repeat("0123456789abcdef", 2) + "wJalrXbP"
+	dir := writeSecretFixture(t, "first = \""+awsID+"\"\nsecond = \""+secondID+"\"\naws_secret_access_key = \""+secretKey+"\"\n")
+	fv := &fakeGroupedVerifier{groupVerdict: ports.SecretUnverified}
+	report, err := New().ScanFilesVerified(context.Background(), dir, fv)
+	if err != nil {
+		t.Fatalf("verified scan: %v", err)
+	}
+	if fv.groupCalls != 0 {
+		t.Fatalf("ambiguous AWS material must make no provider call, got %d", fv.groupCalls)
+	}
+	for _, finding := range report.Findings {
+		if isAWSGroupedRule(finding.RuleID) && finding.Verified != ports.SecretUnknown {
+			t.Errorf("ambiguous %s must remain unknown, got %q", finding.RuleID, finding.Verified)
+		}
 	}
 }

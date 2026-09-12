@@ -2,10 +2,12 @@ package secretverify
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -210,5 +212,86 @@ func TestOpenAIEligibilityGatesForeignKeys(t *testing.T) {
 	called = false
 	if got, err := v.Verify(context.Background(), "openai-api-key", []byte("sk-proj-abcdefghijklmnopqrstuvwxyz0123456789")); err != nil || got != ports.SecretVerified || !called {
 		t.Errorf("a plausible OpenAI key must be sent and verified (got %q err=%v called=%v)", got, err, called)
+	}
+}
+
+func TestVerifyAWSUsesOneSignedGetCallerIdentityRequest(t *testing.T) {
+	accessKey := "AKIA" + "Z2K7QMN4TJ5VWXY9"
+	secretKey := strings.Repeat("0123456789abcdef", 2) + "wJalrXbP"
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		body, _ := io.ReadAll(r.Body)
+		if r.Method != http.MethodPost || string(body) != "Action=GetCallerIdentity&Version=2011-06-15" {
+			t.Errorf("unexpected STS request: %s %q", r.Method, body)
+		}
+		auth := r.Header.Get("Authorization")
+		if !strings.Contains(auth, "Credential="+accessKey+"/") || !strings.Contains(auth, "SignedHeaders=content-type;host;x-amz-date") {
+			t.Errorf("invalid SigV4 Authorization header: %q", auth)
+		}
+		if strings.Contains(auth, secretKey) || strings.Contains(string(body), secretKey) {
+			t.Fatal("AWS secret access key was transmitted instead of used only for signing")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	v := newWithClient(srv.Client(), 1000)
+	v.stsURL = srv.URL
+	v.now = func() time.Time { return time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC) }
+	got, err := v.VerifyGroup(context.Background(), []ports.SecretMaterial{
+		{RuleID: "aws-access-key-id", Secret: []byte(accessKey)},
+		{RuleID: "aws-secret-access-key", Secret: []byte(secretKey)},
+	})
+	if err != nil || got != ports.SecretVerified || calls != 1 {
+		t.Fatalf("VerifyGroup() = %q, %v; calls=%d, want verified/1", got, err, calls)
+	}
+}
+
+func TestVerifyAWSIncompleteGroupIsUnknownWithoutCall(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer srv.Close()
+	v := newWithClient(srv.Client(), 1000)
+	v.stsURL = srv.URL
+	got, err := v.VerifyGroup(context.Background(), []ports.SecretMaterial{{RuleID: "aws-access-key-id", Secret: []byte("ASIA" + "Z2K7QMN4TJ5VWXY9")}})
+	if err != nil || got != ports.SecretUnknown || called {
+		t.Fatalf("incomplete AWS group = %q, %v; called=%v", got, err, called)
+	}
+}
+
+func TestVerifierVaultLookupSelf(t *testing.T) {
+	const token = "hvs.not-a-real-token-material"
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/token/lookup-self" || r.Header.Get("X-Vault-Token") != token {
+			t.Errorf("unexpected Vault request: path=%q token=%q", r.URL.Path, r.Header.Get("X-Vault-Token"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	v, err := NewWithVault(1000, "https://vault.internal:8200")
+	if err != nil {
+		t.Fatalf("NewWithVault: %v", err)
+	}
+	v.byRule["vault-token"].baseURL = srv.URL + "/v1/auth/token/lookup-self"
+	v.byRule["vault-token"].client = srv.Client()
+	got, err := v.Verify(context.Background(), "vault-token", []byte(token))
+	if err != nil || got != ports.SecretVerified {
+		t.Fatalf("Vault Verify() = %q, %v; want verified", got, err)
+	}
+}
+
+func TestVaultAddressValidation(t *testing.T) {
+	for _, invalid := range []string{"http://vault.internal", "https://user@vault.internal", "://bad"} {
+		if _, err := NewWithVault(1, invalid); err == nil {
+			t.Errorf("NewWithVault(%q) succeeded, want error", invalid)
+		}
+	}
+	v, err := NewWithVault(1, " https://vault.internal:8200/base/?ignored=yes#fragment ")
+	if err != nil {
+		t.Fatalf("valid Vault address rejected: %v", err)
+	}
+	if got := v.byRule["vault-token"].baseURL; got != "https://vault.internal:8200/base/v1/auth/token/lookup-self" {
+		t.Fatalf("Vault lookup URL = %q", got)
 	}
 }

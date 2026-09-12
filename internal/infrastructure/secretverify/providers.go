@@ -60,3 +60,27 @@ func checkOpenAI(ctx context.Context, client *http.Client, baseURL, secret strin
 		"Authorization": "Bearer " + secret,
 	}, rejectOn401)
 }
+
+// checkVault confirms a Vault service token via the configured read-only lookup-self endpoint. Vault uses
+// 403 for an invalid/expired token; rate limiting and all other statuses remain inconclusive.
+func checkVault(ctx context.Context, client *http.Client, endpoint, secret string, _ bool) (ports.SecretVerdict, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return ports.SecretUnknown, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("X-Vault-Token", secret)
+	resp, err := client.Do(req)
+	if err != nil {
+		return ports.SecretUnknown, fmt.Errorf("request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainBytes))
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		return ports.SecretVerified, nil
+	case resp.StatusCode == http.StatusForbidden:
+		return ports.SecretUnverified, nil
+	default:
+		return ports.SecretUnknown, nil
+	}
+}

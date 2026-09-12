@@ -144,6 +144,12 @@ func verdict(vf *verifyState, ruleID, secret string) ports.SecretVerdict {
 	if vf == nil || vf.verifier == nil {
 		return ports.SecretUnknown
 	}
+	// AWS credentials are never verified component-by-component: STS authentication requires a matched
+	// access-key/secret-key pair (and a session token for ASIA credentials). scanContent collects and pairs
+	// direct findings before using the optional grouped-verifier extension below.
+	if isAWSGroupedRule(ruleID) {
+		return ports.SecretUnknown
+	}
 	sum := sha256.Sum256([]byte(secret))
 	key := ruleID + ":" + hex.EncodeToString(sum[:])
 	if v, ok := vf.cache[key]; ok {
@@ -156,6 +162,121 @@ func verdict(vf *verifyState, ruleID, secret string) ports.SecretVerdict {
 	v, _ := vf.verifier.Verify(vf.ctx, ruleID, []byte(secret)) // error is pre-redacted; unknown on failure
 	vf.cache[key] = v
 	return v
+}
+
+const awsPairLineWindow = 24
+
+type awsCandidate struct {
+	ruleID string
+	secret string
+	line   int
+	index  int
+}
+
+func isAWSGroupedRule(ruleID string) bool {
+	switch ruleID {
+	case "aws-access-key-id", "aws-secret-access-key", "aws-session-token":
+		return true
+	default:
+		return false
+	}
+}
+
+// verifyAWSPairs correlates only unambiguous nearby components from the same scanned content. It never
+// guesses: a component that has zero or multiple plausible partners stays SecretUnknown. One matched set
+// consumes one call from the existing per-scan budget and receives one shared STS verdict.
+func verifyAWSPairs(vf *verifyState, findings *[]ports.SecretRawFinding, candidates []awsCandidate) {
+	if vf == nil || vf.verifier == nil || len(candidates) == 0 {
+		return
+	}
+	grouped, ok := vf.verifier.(ports.GroupedSecretVerifier)
+	if !ok {
+		return
+	}
+	for _, access := range candidates {
+		if access.ruleID != "aws-access-key-id" {
+			continue
+		}
+		secret, ok := uniqueAWSCandidate(candidates, access.line, "aws-secret-access-key")
+		if !ok || !mutuallyUniqueAWSPartner(candidates, access, secret) {
+			continue
+		}
+
+		matched := []awsCandidate{access, secret}
+		session, hasSession := uniqueAWSCandidate(candidates, access.line, "aws-session-token")
+		hasSession = hasSession && mutuallyUniqueAWSPartner(candidates, access, session)
+		if hasSession {
+			matched = append(matched, session)
+		} else if strings.HasPrefix(access.secret, "ASIA") {
+			continue // temporary credentials cannot be checked without an unambiguous session token
+		}
+		materials := []ports.SecretMaterial{
+			{RuleID: access.ruleID, Secret: []byte(access.secret)},
+			{RuleID: secret.ruleID, Secret: []byte(secret.secret)},
+		}
+		if hasSession {
+			materials = append(materials, ports.SecretMaterial{RuleID: session.ruleID, Secret: []byte(session.secret)})
+		}
+
+		cacheKey := groupedVerificationKey(materials)
+		v, cached := vf.cache[cacheKey]
+		if !cached {
+			if vf.calls >= maxSecretVerifications {
+				for i := range materials {
+					clear(materials[i].Secret)
+				}
+				continue
+			}
+			vf.calls++
+			v, _ = grouped.VerifyGroup(vf.ctx, materials) // errors are pre-redacted; unknown on failure
+			vf.cache[cacheKey] = v
+		}
+		for _, candidate := range matched {
+			if candidate.index >= 0 && candidate.index < len(*findings) {
+				(*findings)[candidate.index].Verified = v
+			}
+		}
+		for i := range materials {
+			clear(materials[i].Secret)
+		}
+	}
+}
+
+func uniqueAWSCandidate(candidates []awsCandidate, line int, ruleID string) (awsCandidate, bool) {
+	var match awsCandidate
+	count := 0
+	for _, candidate := range candidates {
+		if candidate.ruleID != ruleID || lineDistance(candidate.line, line) > awsPairLineWindow {
+			continue
+		}
+		match = candidate
+		count++
+	}
+	return match, count == 1
+}
+
+func mutuallyUniqueAWSPartner(candidates []awsCandidate, access, partner awsCandidate) bool {
+	other, ok := uniqueAWSCandidate(candidates, partner.line, "aws-access-key-id")
+	return ok && other.index == access.index
+}
+
+func lineDistance(a, b int) int {
+	if a < b {
+		return b - a
+	}
+	return a - b
+}
+
+func groupedVerificationKey(materials []ports.SecretMaterial) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte("group:"))
+	for _, material := range materials {
+		_, _ = h.Write([]byte(material.RuleID))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write(material.Secret)
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 type scanLimits struct {
@@ -331,6 +452,7 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 	original := string(data)
 	data = maskComments(rel, data)
 	text := string(data)
+	awsCandidates := make([]awsCandidate, 0, 3)
 	for i := range s.rules {
 		r := &s.rules[i]
 		if !hasAnyKeyword(text, r.keywords) {
@@ -366,6 +488,13 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			// Active verification (opt-in) runs here, where the plaintext is still in scope, and only the
 			// verdict is kept; the value is redacted into Match immediately after. verdict is a no-op
 			// (SecretUnknown) on the deterministic path.
+			verified := ports.SecretUnknown
+			findingIndex := len(*out)
+			if isAWSGroupedRule(r.id) {
+				awsCandidates = append(awsCandidates, awsCandidate{ruleID: r.id, secret: secret, line: line, index: findingIndex})
+			} else {
+				verified = verdict(vf, r.id, secret)
+			}
 			*out = append(*out, ports.SecretRawFinding{
 				File:     rel,
 				Line:     line,
@@ -374,10 +503,11 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 				Title:    r.title,
 				Severity: r.severity,
 				Match:    redactMatch(secret),
-				Verified: verdict(vf, r.id, secret),
+				Verified: verified,
 			})
 		}
 	}
+	verifyAWSPairs(vf, out, awsCandidates)
 	// A secret hidden inside a base64/hex value (a Kubernetes Secret, a base64-wrapped credential) is
 	// invisible to the rules above; the decode pass finds it. It runs on the same comment-masked text so a
 	// secret encoded inside a comment stays masked.

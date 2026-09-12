@@ -1424,6 +1424,9 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		}
 		cfg.SecretVerifyEnabled = false
 	}
+	if err := cfg.ValidateSecretVerification(); err != nil {
+		return fmt.Errorf("active secret verification configuration: %w", err)
+	}
 	if priority == "" { // the --detection-priority flag falls back to the configured default
 		priority = cfg.DetectionPriority
 	}
@@ -1600,7 +1603,11 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 			// --verify-secrets (D6.3): confirm each detected credential is live via one read-only provider
 			// call. Sends the raw secret to its issuing provider over the network; opt-in, rate-limited, and
 			// the secret is never logged. Only run this against credentials you are authorized to test.
-			sca.SetSecretVerifier(secretverify.New(float64(cfg.SecretVerifyRPS)))
+			verifier, err := secretverify.NewWithVault(float64(cfg.SecretVerifyRPS), cfg.SecretVerifyVaultAddr)
+			if err != nil {
+				return fmt.Errorf("configure active secret verification: %w", err)
+			}
+			sca.SetSecretVerifier(verifier)
 			fmt.Fprintln(os.Stderr, "synapse-cli: active secret verification ENABLED (--verify-secrets); detected credentials are sent to their issuing provider to confirm they are live")
 		}
 	}

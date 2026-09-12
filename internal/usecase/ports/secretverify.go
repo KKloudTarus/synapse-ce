@@ -40,6 +40,24 @@ type SecretVerifier interface {
 	Verify(ctx context.Context, ruleID string, secret []byte) (SecretVerdict, error)
 }
 
+// SecretMaterial is one raw credential component passed only across the optional grouped-verification
+// boundary. It exists for providers such as AWS whose read-only authentication check requires a credential
+// set (access key id + secret access key, and a session token for temporary credentials). Callers MUST keep
+// values ephemeral: never log, persist, seal, or include them in a returned error.
+type SecretMaterial struct {
+	RuleID string
+	Secret []byte
+}
+
+// GroupedSecretVerifier is an optional extension implemented by verifiers that can authenticate a bounded
+// group of related credential components with one provider request. The scanner, which still owns the raw
+// detection context, is responsible for pairing only unambiguous nearby components. Implementations MUST
+// make at most one outbound call and follow the same redaction, rate-limit, and failure semantics as
+// SecretVerifier.Verify.
+type GroupedSecretVerifier interface {
+	VerifyGroup(ctx context.Context, materials []SecretMaterial) (SecretVerdict, error)
+}
+
 // VerifyingSecretScanner is the OPTIONAL active-verification extension of a SecretScanner. ScanFiles (the
 // SecretScanner contract) stays deterministic and read-only; ScanFilesVerified additionally makes the
 // opt-in outbound provider calls through the verifier and stamps each finding's Verified verdict, with the
