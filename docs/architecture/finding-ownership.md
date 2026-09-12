@@ -5,12 +5,11 @@ records the source evidence behind that decision. Team membership is a grouping
 of existing users; it grants no role or engagement access. An individual still
 claims or receives a finding through the existing human triage workflow.
 
-This document describes the domain, PostgreSQL persistence, notification
-integration and ownership HTTP API. Producer capture, production routing jobs
-and the ownership UI still require integration. No existing finding is reassigned
-by migrations 0164–0166 or by enabling the notification source. The
-[ownership API guide](../ownership-api.md) documents the available operations and
-the explicit unavailable response for work that requires the routing worker.
+This document describes the domain, PostgreSQL persistence, source capture,
+durable routing, notification integration and ownership HTTP/UI surfaces. No
+existing finding is reassigned by migrations 0164–0168 or by enabling the
+notification source. The [ownership API guide](../ownership-api.md) documents the
+available operations and concurrency contracts.
 
 ## Identity and resolution contracts
 
@@ -64,7 +63,9 @@ Bounds are 3,000,000 source bytes, 20,000 non-comment entries, 100 owners per li
 per path, 128 relevant paths per finding, 200 routing rules and 200 conditions per
 rule. Resolution additionally bounds path bytes multiplied by compiled pattern
 count to 20,000,000, returning a saturation error instead of partially evaluating
-an excessive document. Capture adapters must reject unsafe filesystem paths and
+an excessive document. The production capture adapter reads Git objects by exact
+object ID and reads archives through a bounded rooted filesystem view before scan
+cleanup. Capture adapters must reject unsafe filesystem paths and
 symlinks; the domain normalizes relative separators and rejects traversal, drive
 paths, UNC paths and NULs without filesystem access.
 
@@ -109,18 +110,20 @@ audit entry or intent. A reevaluation with unchanged assignment does not increas
 the assignment/finding version or enqueue another notification. Suppressed intents
 cannot be acknowledged as pending delivery and are not resurrected by replay.
 
-The new intent table stores source obligations, not a second execution queue.
-Execution will use the existing `JobQueue` and `ownership.route` kind. The source
-publisher must publish/enqueue and acknowledge an intent in one bound transaction,
-with audit last. Network delivery remains the existing notification framework's
-at-least-once contract.
+The intent table stores source obligations rather than a second execution queue.
+The dispatcher expands them into the existing `JobQueue` with the
+`ownership.route` kind. It elects one tenant dispatcher with an advisory transaction
+lock, freezes at most 100 inputs per job and removes dirty generations in one batch.
+The queue supplies lease fencing, exponential retry and dead-letter state.
 
 Preview/reroute run records pin a candidate version/hash, policy revision, cutoff,
 filter and total count. Preview items are immutable and paginated. Batches contain
 at most 100 items; duplicate identical items do not inflate counters, conflicting
 items roll back the batch, and a run cannot complete before all selected items are
 accounted for. Persisting preview items never writes assignments or notifications.
-Run execution and authorization belong to the subsequent worker/use-case milestone.
+Run admission, execution, cancellation and replay recheck tenant, engagement and
+policy authorization. Reroute requires an exact completed preview and copies that
+preview's immutable work set.
 
 ## Ownership change notifications
 
@@ -167,45 +170,47 @@ silently discard them. Existing event/delivery history is retained on downgrade.
 
 ## Producer and assignment inventory
 
-The following inventory was verified against `94abbfec` on 2026-09-11. Integration
-must cover every row; a foundation repository alone does not provide this coverage.
+The following inventory was verified against `94abbfec` and implemented through
+the central finding-dirty trigger plus scan-specific source binding. This keeps
+every canonical producer durable without after-commit callbacks.
 
-| Producer / write path | Existing boundary | Integration obligation |
+| Producer / write path | Existing boundary | Implemented coverage |
 | --- | --- | --- |
-| Manual and attributed creation | `internal/usecase/findings/service.go`, `Create` / `CreateAttributed` / `withCreationBoundary` | Append a durable intent with the canonical ID inside the creation transaction. |
-| Confirmed threat, SAST and DAST judgments | Same service, `RecordConfirmedThreat`, `RecordConfirmedSAST`, `RecordConfirmedDAST` | Capture projection mode and source/asset provenance; retain projection-claim idempotency. |
-| Normal source/image/SBOM scan | `internal/usecase/sca/service.go`, `runPipeline` | Resolve dedup-preserved finding IDs after upsert; capture source ownership before workspace cleanup and publish only after its immutable binding exists. |
-| Imported SBOM scan | Same service, `runImportedSBOMPipeline` | Bind the imported scan/manifest provenance; mark unavailable source paths explicitly. |
-| Vulnerability projection | `internal/usecase/vulnerabilityprojection/service.go`, `Project` | Reuse canonical IDs; capture routing-relevant provenance changes without treating every scan version as an owner change. |
-| CSPM findings | `internal/usecase/cspm/service.go`, standard findings upsert | Use explicit engagement/asset mapping when no source path is available. |
-| Exploitation findings | `internal/usecase/exploitation/service.go`, findings upsert | Preserve evidence/status semantics and capture asset associations. |
-| Engagement transfer | `internal/usecase/transfer/service.go`, findings upsert | Treat destination IDs/scope as new inputs; do not copy a source tenant/team relationship blindly. |
-| Writeup updates | `findings.Service.ApplyWriteupDraft` | Description-only updates must not trigger ownership changes. |
-| Manual assignee endpoint | `finding_handler.go` → `findings.Service.SetAssignee` → `FindingRepository.SetAssignee` | Replace the separate assignment/audit writes with the common transactional ownership boundary when enabled, including explicit clear protection. Preserve the existing API contract. |
-| Finding promotion | `postgres/promotion_store.go`, `Apply` | Promotion changes an existing canonical finding's state/evidence; reroute only if authoritative routing inputs change. |
+| Manual and attributed creation | `internal/usecase/findings/service.go`, `Create` / `CreateAttributed` / `withCreationBoundary` | Appends a durable intent with the canonical ID inside the creation transaction. |
+| Confirmed threat, SAST and DAST judgments | Same service, `RecordConfirmedThreat`, `RecordConfirmedSAST`, `RecordConfirmedDAST` | Captures projection mode and source/asset provenance while retaining projection-claim idempotency. |
+| Normal source/image/SBOM scan | `internal/usecase/sca/service.go`, `runPipeline` | Resolves dedup-preserved finding IDs after upsert, captures source ownership before workspace cleanup and publishes only after its immutable binding exists. |
+| Imported SBOM scan | Same service, `runImportedSBOMPipeline` | Binds the imported scan/manifest provenance and marks unavailable source paths explicitly. |
+| Vulnerability projection | `internal/usecase/vulnerabilityprojection/service.go`, `Project` | Reuses canonical IDs and captures routing-relevant provenance changes without treating every scan version as an owner change. |
+| CSPM findings | `internal/usecase/cspm/service.go`, standard findings upsert | Uses explicit engagement/asset mapping when no source path is available. |
+| Exploitation findings | `internal/usecase/exploitation/service.go`, findings upsert | Preserves evidence/status semantics and captures asset associations. |
+| Engagement transfer | `internal/usecase/transfer/service.go`, findings upsert | Treats destination IDs/scope as new inputs and does not copy a source tenant/team relationship blindly. |
+| Writeup updates | `findings.Service.ApplyWriteupDraft` | Description-only updates do not trigger ownership changes. |
+| Manual assignee endpoint | `finding_handler.go` -> `findings.Service.SetAssignee` -> `FindingRepository.SetAssignee` | Routes assignment/audit writes through the common transactional ownership boundary when enabled, including explicit clear protection, while preserving the existing API contract. |
+| Finding promotion | `postgres/promotion_store.go`, `Apply` | Promotion changes an existing canonical finding's state/evidence; routing occurs only if authoritative routing inputs change. |
 | Imported findings and project issues | `importedfinding_repo.go`, project issue stores | These are separate entities. No ownership relationship until a verified canonical finding binding exists. |
 
 `FindingRepository.Upsert` is the sole production SQL insert into `findings` in the
-audited baseline and preserves existing human assignees on conflict. Its existing
-`SetAssignee` is the SQL assignee update path. Producer integration should centralize
-capture at these boundaries where possible and use explicit source readiness,
-bounded durable reconciliation and stable fingerprints for delayed provenance.
-Do not add a callback after commit that can lose work on a process crash.
+audited baseline and preserves existing human assignees on conflict. Its source
+batch binds canonical IDs in the same transaction. Migration 0167's trigger records
+only routing-relevant finding changes for every other producer. `SetAssignee` uses
+the common ownership transaction when enabled. Source readiness, bounded durable
+reconciliation and stable fingerprints cover delayed provenance without an
+after-commit callback that could lose work on a crash.
 
 `sca.Service.captureProjectSource` currently runs before deferred source cleanup,
 after the scan readers; comparison capture separately reads base files. Project
-source publishing also applies `sourcepolicy.RetainPath`. Therefore ownership must
-capture a dedicated bounded CODEOWNERS snapshot at acquisition/capture time and
-must not assume a code-viewer manifest retained every ownership file. Durable
+source publishing also applies `sourcepolicy.RetainPath`. Ownership captures a
+dedicated bounded CODEOWNERS snapshot at acquisition time and does not assume a
+code-viewer manifest retained every ownership file. Durable
 `scan_source_bindings` and `engagement_source_packages` remain authoritative for
 source associations and archive digests. Deleting retained source must not delete
 snapshots referenced by policies/decisions.
 
-## HTTP contract for the integration milestone
+## HTTP contract
 
-The planned `/api/v1/ownership` routes use existing authentication and error
-envelopes. They are not registered in this foundation change. Only implemented
-routes should be added to `api/openapi.yaml`, together with the HTTP coverage tests.
+The `/api/v1/ownership` routes use existing authentication and error envelopes.
+All routes below are registered and described in `api/openapi.yaml`; feature-off
+deployments expose only the capability response.
 
 | Resource | Request/response shape and concurrency |
 | --- | --- |
@@ -233,9 +238,11 @@ authorized manual triage. Memory mode reports `postgres_required` and registers
 no ownership data routes. The API now sends legacy assignee writes through the
 same atomic boundary when enabled, including same-value clears, manual protection,
 optimistic finding versions and audit rollback. When off, the legacy path is
-unchanged. Production routing is not yet wired: preview, reroute and release
-return `503` and `routing_available` is false. A policy activation stores its
-configuration but cannot start routing until production workers are integrated.
+unchanged. The API creates durable preview and reroute jobs, while
+`synapse-worker` dispatches source-ready dirty findings and consumes the jobs.
+`observe` records automatic evaluation without applying it; `enforce` permits
+automatic assignment and release-to-auto. A stopped worker leaves jobs retryable
+and makes progress visible through run state rather than acknowledging work as complete.
 
 Migration tests call the real `Migrate` entry point for both an empty database and
 an upgrade from 0163 containing legacy identities/findings. Repository tests use a

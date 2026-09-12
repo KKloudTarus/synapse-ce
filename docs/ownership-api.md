@@ -2,18 +2,17 @@
 
 Set `SYNAPSE_OWNERSHIP_MODE=observe` or `enforce` on a PostgreSQL-backed API to
 enable team administration, manual ownership and the inbox. The default is
-`off`; any other value prevents startup. Apply migrations through 0166 first.
+`off`; any other value prevents startup. Apply migrations through 0168 first.
 Authentication and Acceptable Use Policy acceptance follow the normal API rules.
 The complete request and response contracts are in [OpenAPI](../api/openapi.yaml).
 
-The production source capture and routing worker are still pending. At this
-checkpoint, both modes allow manual triage; preview, historical reroute and
-release to automatic routing return `503`. Activation records policy configuration
-without scheduling work. Check `GET /api/v1/ownership/capabilities` before showing
-worker-dependent controls:
+The API admits durable preview and reroute runs; `synapse-worker` captures source
+ownership during scans, dispatches dirty findings and consumes `ownership.route`
+jobs. Check `GET /api/v1/ownership/capabilities` before showing worker-dependent
+controls:
 
 ```json
-{"enabled":true,"mode":"observe","routing_available":false,"reason":"worker_not_configured"}
+{"enabled":true,"mode":"observe","routing_available":true}
 ```
 
 With ownership off, the reason is `disabled`. Memory storage reports
@@ -52,13 +51,13 @@ All paths in this table are relative to `/api/v1/ownership`.
 | `/teams/{id}/members`, `/teams/{id}/members/{user_id}` | GET and PUT/DELETE. Send the current team `revision` in the mutation body. Membership and revision changes commit together. |
 | `/mappings` | GET with required `engagement_id` and `repository`; PUT/DELETE with `engagement_id`, `mapping` and `revision`. The mapping contains the exact repository, owner token, team and optional suggested user. |
 | `/asset-mappings` | GET/PUT/DELETE. Bodies contain `mapping:{asset_id,team_id}` and `revision`. |
-| `/snapshots`, `/snapshots/{id}` | GET/POST and GET. Lists require `engagement_id`; POST imports bounded CODEOWNERS content. Responses contain metadata; individual responses also include diagnostics, never raw source. |
+| `/snapshots`, `/snapshots/{id}` | GET/POST and GET. Lists require `engagement_id`; POST imports bounded CODEOWNERS content. Lists contain metadata; the admin-only individual response includes exact CODEOWNERS content and diagnostics for approval review. It never contains application source. |
 | `/snapshots/{id}/approve` | POST with `content_hash` and `accept_diagnostics`. Creates a new immutable admin-approved snapshot and returns its new ID. |
 | `/policies`, `/policies/{id}` | GET/POST and GET. Lists require `engagement_id`; create includes immutable version 1. |
 | `/policies/{id}/versions`, `/policies/{id}/versions/{version}` | POST and GET. Version creation freezes rules, mappings, assets and the snapshot reference. |
 | `/policies/{id}/activate` | POST with `version`, current header `revision` and version `content_hash`. A stale header or hash returns `409`; version zero deactivates without deleting history. |
-| `/policies/{id}/preview`, `/policies/{id}/reroute` | POST with `version`, `policy_revision`, `policy_hash`, `filter` and an `Idempotency-Key` header. Admission requires the production worker; currently returns `503`. |
-| `/runs/{id}`, `/runs/{id}/items`, `/runs/{id}/cancel` | GET progress, GET paginated results, POST cancellation with current run `revision`. Scope authorization includes the parent engagement. |
+| `/policies/{id}/preview`, `/policies/{id}/reroute` | POST with `version`, `policy_revision`, `policy_hash`, `filter` and an `Idempotency-Key` header. Reroute also requires the ID of a completed preview with the same frozen selection and policy identity. |
+| `/runs/{id}`, `/runs/{id}/items`, `/runs/{id}/cancel`, `/runs/{id}/retry` | GET progress, GET paginated results, POST cancellation or dead-letter replay with current run `revision`. Scope authorization includes the parent engagement. |
 
 New mapping records start at revision 1. An update supplies the next revision;
 deletion supplies the current revision. Team update and activation instead supply
@@ -101,7 +100,7 @@ destination team and preserves the current assignee when eligible there. If they
 are ineligible, or only a legacy free-text owner exists, select an eligible
 `assignee_id` or send `clear_assignee:true`; otherwise transfer returns `409`.
 Clear removes team and assignee while retaining manual protection. Only release
-explicitly removes that protection and requires a configured routing worker.
+explicitly removes that protection and requires enforce mode with a configured routing worker.
 Disabled users and archived teams cannot receive new assignments.
 
 Each successful transition atomically persists the finding projection, decision,
@@ -132,3 +131,29 @@ items recover their original decisions; unfinished items are checked again, so
 their result can change as permissions or revisions change. Reserve a new key
 for a revised request. Audit and reservation records currently have no automatic
 retention cleanup; a migration rollback dropping 0166 also drops its reservations.
+
+## Source capture and run guarantees
+
+Git scans read CODEOWNERS from pinned head and base object IDs with `git show`; the
+worker never rereads a mutable checkout. Archive and image sources use their
+immutable digest. Capture occurs before temporary source cleanup and stores only
+the bounded CODEOWNERS files plus normalized relevant paths. A source is marked
+ready only after its canonical finding and vulnerability projections finish, so
+the dispatcher cannot route a half-published scan. Imported SBOMs explicitly record
+that no trusted application source exists. SCA paths come from the exact scan's
+application manifests and introducing direct dependency provenance; package cache
+paths and ambiguous repository roots are rejected.
+
+Automatic routing freezes source, asset, project, assignment, policy revision and
+manual generation into work items of at most 100 findings. The durable queue uses
+leases and fences. A stale worker can neither change an assignment nor append audit
+or notification data. Preview stores only immutable results. Reroute copies the
+completed preview selection and records conflicts instead of widening or silently
+refreshing it. New policy activation applies only to later or newly dirty findings;
+historical backfill always requires preview followed by reroute.
+
+When a job exhausts normal queue retries, its run becomes `failed`. After correcting
+the cause, an administrator posts the current run revision to `/runs/{id}/retry`.
+This reuses the same frozen job and rejects a missing dead letter, changed policy or
+unauthorized engagement. Cancellation and API/worker restarts do not depend on an
+in-memory run handle.
