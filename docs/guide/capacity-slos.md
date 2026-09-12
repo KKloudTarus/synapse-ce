@@ -22,6 +22,27 @@ actually measures them. Leave an unmeasured observation set empty or zero rather
 configured limit as a measurement. A run is invalid if correctness reports a lost or duplicate job,
 cross-tenant result, result-digest drift, broken evidence chain, or missing object.
 
+## Owned-vs-competitor detection comparison
+
+`synapse-bench -mode compare` reduces two engines' finding sets over the SAME target into an honest
+differential: which `(component, CVE)` pairs the owned Synapse engine found that a competitor baseline
+(e.g. Grype) missed, and vice versa. It computes no verdict and invents no ground truth; it reports the
+set difference of two real runs, so a "Synapse matched or beat Grype here" claim is always backed by an
+actual comparison. The input pairs each source's raw findings:
+
+```bash
+# baseline/candidate are arrays of {component, id, aliases}; a CI job produces them by scanning one
+# target with the competitor and with the owned engine. An unknown field is rejected, so a mistyped
+# key can never silently drop a finding and understate a recall gap.
+synapse-bench -mode compare -input owned-vs-grype.json -output diff.json
+```
+
+The report gives `both`, `candidate_only` (owned coverage the baseline lacked), `baseline_only` (a
+recall gap to investigate), and `candidate_matches_baseline_recall` (true when `baseline_only` is empty
+for that run). Measured on a real SUSE Linux Enterprise Server 15 SP6 image (144 rpm components) with the
+owned SLE OVAL feed against Grype's pinned DB, the owned engine reported every pair Grype did (no recall
+gap) plus twelve additional real SUSE CVEs Grype missed.
+
 ## Generating observations
 
 Generate benchmark observations through the public HTTP contracts rather than by calling internal
