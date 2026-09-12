@@ -35,6 +35,7 @@ import { incidentsApi } from './incidents'
 import { governanceApi } from './governance'
 import { assetsApi } from './assets'
 import { vulnerabilityApi } from './vulnerability'
+import { engineAccuracyApi } from './engine-accuracy'
 import { aiTriageApi } from './ai-triage'
 import { dashboardApi } from './dashboard'
 import { dastApi } from './dast'
@@ -83,6 +84,7 @@ export const api = {
   ...governanceApi,
   ...assetsApi,
   ...vulnerabilityApi,
+  ...engineAccuracyApi,
   ...aiTriageApi,
   ...dashboardApi,
   ...dastApi,
