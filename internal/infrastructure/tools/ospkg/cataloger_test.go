@@ -309,6 +309,15 @@ func TestDpkgSourceQualifier(t *testing.T) {
 		{"distinct source with version (binNMU)", "util-linux (2.38.1-5)", "libblkid1", "util-linux@2.38.1-5"},
 		{"same name but explicit version is dropped (primary lookup owns it)", "bash (5.2.15-2)", "bash", ""},
 		{"whitespace tolerated", "  glibc  ", "libc6", "glibc"},
+		// Hostile / malformed forms must be rejected (no qualifier), never smuggle the matcher's '@' delimiter
+		// or a fabricated source version. A real Debian Source name never contains '@'.
+		{"at-sign in name (matcher delimiter injection)", "openssl@1.0", "harmless", ""},
+		{"at-sign version override attempt", "openssl@9:9.9", "harmless", ""},
+		{"qualifier separators in name", "evil&distro=lies", "harmless", ""},
+		{"unclosed paren", "openssl (", "harmless", ""},
+		{"trailing junk after paren", "openssl (1.0) evil", "harmless", ""},
+		{"at-sign inside version", "openssl (1.0@2)", "harmless", ""},
+		{"uppercase is not a debian source name", "OpenSSL", "harmless", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := dpkgSourceQualifier(tc.source, tc.bin); got != tc.wantUpstream {
@@ -365,15 +374,16 @@ func TestCatalogDebianSourceQualifierInjectionSafe(t *testing.T) {
 		t.Fatalf("catalog: %v", err)
 	}
 	c := byName(res.Components)["evilbin"]
-	// The only distro qualifier is the legit release, never an injected distro=lies.
+	// A Source name carrying qualifier separators is not a valid Debian source name, so it is rejected
+	// entirely: no upstream qualifier is emitted (safer than emitting an encoded bogus one), and the only
+	// distro qualifier is the legit release.
+	if up := upstreamQualifier(c.PURL); up != "" {
+		t.Errorf("a hostile Source must emit NO upstream qualifier, got %q (%s)", up, c.PURL)
+	}
 	if got := distroQualifier(c.PURL); got != "debian-12" {
 		t.Errorf("distro qualifier = %q, want debian-12 (a hostile Source must not inject distro=): %s", got, c.PURL)
 	}
 	if strings.Count(c.PURL, "distro=") != 1 {
 		t.Errorf("PURL carries an injected qualifier: %s", c.PURL)
-	}
-	// The hostile separators are percent-encoded inside the upstream value (& -> %26, = -> %3D, @ -> %40).
-	if up := upstreamQualifier(c.PURL); up != "evil%26distro%3Dlies%401.0" {
-		t.Errorf("upstream = %q, want evil%%26distro%%3Dlies%%401.0 (separators percent-encoded)", up)
 	}
 }

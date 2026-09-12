@@ -207,17 +207,75 @@ func dpkgSourceQualifier(source, binName string) string {
 	name, version := source, ""
 	if i := strings.IndexByte(source, '('); i >= 0 {
 		name = strings.TrimSpace(source[:i])
-		if j := strings.IndexByte(source[i+1:], ')'); j >= 0 {
-			version = strings.TrimSpace(source[i+1 : i+1+j])
+		rest := source[i+1:]
+		j := strings.IndexByte(rest, ')')
+		if j < 0 {
+			return "" // malformed: '(' with no closing ')'
+		}
+		version = strings.TrimSpace(rest[:j])
+		if strings.TrimSpace(rest[j+1:]) != "" {
+			return "" // trailing junk after ')'
 		}
 	}
-	if name == "" || name == binName {
-		return "" // no distinct source package; the binary name already IS the match key
+	// Validate against the Debian Source grammar before emitting. The advisory matcher decodes the upstream=
+	// value and splits it on the first '@' into (source-name, source-version), so a Source containing '@' (or
+	// a PURL qualifier separator) could otherwise smuggle a fabricated source-version or name past the
+	// percent-encoding. A real Debian Source name never contains '@'; an invalid field yields no qualifier (the
+	// binary name stays the only match key) rather than a bogus source match on an untrusted image.
+	if name == binName || !validDebianSourceName(name) {
+		return ""
 	}
 	if version != "" {
+		if !validDebianVersion(version) {
+			return ""
+		}
 		return name + "@" + version
 	}
 	return name
+}
+
+// validDebianSourceName reports whether s is a Debian source package name (Debian Policy 5.6.1): a non-empty
+// run of lowercase letters, digits, '+', '-', '.' beginning with an alphanumeric. It deliberately excludes
+// '@', whitespace, and PURL qualifier separators, so an untrusted Source cannot inject the matcher's '@'
+// delimiter or a second qualifier.
+func validDebianSourceName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		alnum := (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+		if i == 0 {
+			if !alnum {
+				return false
+			}
+			continue
+		}
+		if !alnum && c != '+' && c != '-' && c != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+// validDebianVersion reports whether s uses only Debian version characters (letters, digits, and '.+~:-').
+// It excludes '@' and separators so a source version cannot smuggle the matcher's delimiter into upstream=.
+func validDebianVersion(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			continue
+		}
+		switch c {
+		case '.', '+', '~', ':', '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // apkExtract pulls (name, version, arch) from an apk stanza (single-letter keys). No upstream: the apk
