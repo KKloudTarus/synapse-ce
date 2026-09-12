@@ -68,6 +68,23 @@ func TestNPMParseV3(t *testing.T) {
 	if ms := on["pkg:npm/mocha@10.2.0"]; !contains(ms, "pkg:npm/ms@2.1.3") {
 		t.Errorf("mocha (no nested ms) must resolve ms to the hoisted 2.1.3, got %v", ms)
 	}
+
+	// D3.8: each edge carries the DECLARED range for its targets, keyed by the resolved target ref, beside
+	// the resolved version the target component carries. @angular/core declared ms "^1" and tslib "^2".
+	ranges := map[string]string{}
+	for _, d := range deps {
+		if d.Ref == "pkg:npm/%40angular/core@17.0.1" {
+			for target, r := range d.RequestedRanges {
+				ranges[target] = r
+			}
+		}
+	}
+	if ranges["pkg:npm/ms@1.0.0"] != "^1" {
+		t.Errorf("@angular/core edge must record ms declared range ^1, got %q", ranges["pkg:npm/ms@1.0.0"])
+	}
+	if ranges["pkg:npm/tslib@2.6.2"] != "^2" {
+		t.Errorf("@angular/core edge must record tslib declared range ^2, got %q", ranges["pkg:npm/tslib@2.6.2"])
+	}
 }
 
 func contains(xs []string, v string) bool {

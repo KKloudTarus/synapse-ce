@@ -27,3 +27,20 @@ func (s *componentSet) add(c sbom.Component) {
 
 // components returns the accumulated, de-duplicated components.
 func (s *componentSet) components() []sbom.Component { return s.comps }
+
+// rangesFor builds the per-target requested-range map for one dependency edge from the edge's targets
+// and the parent's target->declared-range index (D3.8), so an edge carries only the ranges for its own
+// targets. It returns nil when no target has a recorded range, keeping the field omitempty-absent for a
+// format that does not expose declared ranges.
+func rangesFor(targets []string, byTarget map[string]string) map[string]string {
+	var out map[string]string
+	for _, t := range targets {
+		if r, ok := byTarget[t]; ok && r != "" {
+			if out == nil {
+				out = make(map[string]string, len(targets))
+			}
+			out[t] = r
+		}
+	}
+	return out
+}

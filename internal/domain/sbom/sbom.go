@@ -353,6 +353,14 @@ type Dependency struct {
 	DependsOn []string
 	Scope     string `json:",omitempty"`
 	Optional  bool   `json:",omitempty"`
+	// RequestedRanges records, per DependsOn target (keyed by the same identity string used in DependsOn),
+	// the version constraint the parent DECLARED for it (e.g. "^1.2.0", ">=1.4,<2", "~> 5.0"), alongside the
+	// resolved version the target's component carries (D3.8). It contextualizes remediation: a direct-bump
+	// suggestion can show the range currently allowing the vulnerable resolution. A target is present only
+	// when the parsed manifest/lockfile format exposes the declared range; a format that records only
+	// resolved versions (e.g. a CycloneDX SBOM) leaves it absent rather than inventing one. omitempty keeps
+	// it out of existing stored graphs.
+	RequestedRanges map[string]string `json:",omitempty"`
 }
 
 // PathToRoot returns the dependency path from a top-level dependency (a node that

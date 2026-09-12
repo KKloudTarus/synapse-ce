@@ -138,6 +138,7 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 		ref := yarnPURL(e.name, e.version)
 		set.add(sbom.Component{Name: e.name, Version: e.version, PURL: ref, Location: in.Path, Scope: scope, Checksums: parseSubresourceIntegrity(e.integrity)})
 		targetOptional := map[string]bool{}
+		targetRange := map[string]string{}
 		seen := map[string]bool{ref: true}
 		for _, d := range e.deps {
 			v, ok := descVer[d.name+"@"+d.rng]
@@ -147,6 +148,9 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 			t := yarnPURL(d.name, v)
 			if t == ref {
 				continue
+			}
+			if d.rng != "" {
+				targetRange[t] = d.rng // the declared range for this target (D3.8)
 			}
 			if !seen[t] {
 				seen[t] = true
@@ -168,10 +172,10 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 		sort.Strings(required)
 		sort.Strings(optional)
 		if len(required) > 0 {
-			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: required, Scope: prodScope})
+			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: required, Scope: prodScope, RequestedRanges: rangesFor(required, targetRange)})
 		}
 		if len(optional) > 0 {
-			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: optional, Scope: prodScope, Optional: true})
+			edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: optional, Scope: prodScope, Optional: true, RequestedRanges: rangesFor(optional, targetRange)})
 		}
 	}
 	return set.components(), edges, nil

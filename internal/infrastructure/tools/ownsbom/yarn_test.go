@@ -59,6 +59,21 @@ func TestYarnV1(t *testing.T) {
 	if !contains(ng, "pkg:npm/%40babel/code-frame@7.22.13") || !contains(ng, "pkg:npm/lodash@4.17.21") {
 		t.Errorf("@babel/core must depend on the resolved code-frame@7.22.13 + lodash@4.17.21, got %v", ng)
 	}
+	// D3.8: the edge records the DECLARED range for each target beside the resolved version.
+	rngs := map[string]string{}
+	for _, d := range deps {
+		if d.Ref == "pkg:npm/%40babel/core@7.23.0" {
+			for target, r := range d.RequestedRanges {
+				rngs[target] = r
+			}
+		}
+	}
+	if rngs["pkg:npm/%40babel/code-frame@7.22.13"] != "^7.22.0" {
+		t.Errorf("@babel/core edge must record code-frame declared range ^7.22.0, got %q", rngs["pkg:npm/%40babel/code-frame@7.22.13"])
+	}
+	if rngs["pkg:npm/lodash@4.17.21"] != "^4.17.21" {
+		t.Errorf("@babel/core edge must record lodash declared range ^4.17.21, got %q", rngs["pkg:npm/lodash@4.17.21"])
+	}
 	// multi-spec key + scoped %40 PURL + resolved version (NOT the transitive "@babel/code-frame" spec line)
 	if c := byName["@babel/core"]; c.Version != "7.23.0" || c.PURL != "pkg:npm/%40babel/core@7.23.0" {
 		t.Errorf("@babel/core = %+v, want 7.23.0 / pkg:npm/%%40babel/core@7.23.0", c)

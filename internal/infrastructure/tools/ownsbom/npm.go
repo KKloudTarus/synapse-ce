@@ -60,6 +60,7 @@ type npmEdgeSpec struct {
 	name     string
 	scope    string
 	optional bool
+	rangeStr string // the declared version range for this dep (the map value, e.g. "^1.2.0")
 }
 
 type npmEdgeMeta struct {
@@ -124,6 +125,7 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 				sourceScope = sbom.ScopeDevelopment
 			}
 			targetMeta := make(map[string]npmEdgeMeta)
+			targetRange := make(map[string]string)
 			for _, dep := range npmEdgeSpecs(lock.Packages[path], sourceScope) {
 				tp := resolveNpmDep(path, dep.name, lock.Packages)
 				if tp == "" {
@@ -138,6 +140,9 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 					meta = mergeNPMEdgeMeta(existing, meta)
 				}
 				targetMeta[t] = meta
+				if dep.rangeStr != "" {
+					targetRange[t] = dep.rangeStr
+				}
 			}
 			type groupKey struct {
 				scope    string
@@ -161,7 +166,7 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 			for _, key := range keys {
 				on := groups[key]
 				sort.Strings(on)
-				edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: on, Scope: key.scope, Optional: key.optional})
+				edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: on, Scope: key.scope, Optional: key.optional, RequestedRanges: rangesFor(on, targetRange)})
 			}
 		}
 		return set.components(), edges, nil
@@ -208,22 +213,25 @@ func parseSubresourceIntegrity(s string) []sbom.Checksum {
 // sufficient to make that edge shipping. Optionality is retained independently from scope.
 func npmEdgeSpecs(p npmV3Pkg, prodScope string) []npmEdgeSpec {
 	byName := map[string]npmEdgeSpec{}
-	for name := range p.Dependencies {
-		byName[name] = npmEdgeSpec{name: name, scope: prodScope}
+	for name, rng := range p.Dependencies {
+		byName[name] = npmEdgeSpec{name: name, scope: prodScope, rangeStr: rng}
 	}
-	for name := range p.DevDependencies {
+	for name, rng := range p.DevDependencies {
 		if _, exists := byName[name]; exists {
 			continue // an existing runtime declaration is the stronger shipping relationship
 		}
-		byName[name] = npmEdgeSpec{name: name, scope: sbom.ScopeDevelopment}
+		byName[name] = npmEdgeSpec{name: name, scope: sbom.ScopeDevelopment, rangeStr: rng}
 	}
-	for name := range p.OptionalDependencies {
+	for name, rng := range p.OptionalDependencies {
 		spec := byName[name]
 		spec.name = name
 		if spec.scope == "" {
 			spec.scope = prodScope
 		}
 		spec.optional = true
+		if spec.rangeStr == "" {
+			spec.rangeStr = rng
+		}
 		byName[name] = spec
 	}
 	names := make([]string, 0, len(byName))
