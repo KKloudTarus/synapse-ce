@@ -100,7 +100,7 @@ func TestOwnershipMigrationVersionsUnique(t *testing.T) {
 	}
 }
 
-func TestMigration0164OwnershipFresh(t *testing.T) {
+func TestMigration0168OwnershipFresh(t *testing.T) {
 	_, db := ownershipTestDatabase(t, 0, nil)
 	for _, table := range []string{"ownership_teams", "ownership_memberships", "ownership_mappings", "ownership_asset_mappings", "ownership_snapshots", "ownership_policies", "ownership_policy_versions", "ownership_policy_team_refs", "ownership_policy_project_refs", "ownership_policy_asset_refs", "ownership_assignments", "ownership_decisions", "ownership_intents", "ownership_runs", "ownership_run_items"} {
 		requireMigrationTable(t, db, table, true)
@@ -109,7 +109,7 @@ func TestMigration0164OwnershipFresh(t *testing.T) {
 	requireMigrationIndexes(t, db, "ownership_assignments_inbox", "ownership_assignments_assignee", "ownership_assignments_resolution", "ownership_decisions_history", "ownership_intents_pending")
 }
 
-func TestMigration0164OwnershipUpgradePreservesLegacy(t *testing.T) {
+func TestMigration0168OwnershipUpgradePreservesLegacy(t *testing.T) {
 	_, db := ownershipTestDatabase(t, 163, func(db *sql.DB) {
 		if _, err := db.Exec(`INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('legacy-bootstrap','Admin','admin','ownership-upgrade-key','')`); err != nil {
 			t.Fatal(err)

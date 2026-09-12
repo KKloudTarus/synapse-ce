@@ -13,7 +13,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func TestMigration0166OwnershipBulkUpgrade(t *testing.T) {
+func TestMigration0170OwnershipBulkUpgrade(t *testing.T) {
 	pool, db := ownershipTestDatabase(t, 165, func(db *sql.DB) {
 		if _, err := db.Exec(`INSERT INTO tenants(id,name) VALUES('bulk-other','Other'); INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('bulk-admin','Admin','admin','bulk-default',''),('bulk-foreign','Foreign','admin','bulk-foreign','bulk-other')`); err != nil {
 			t.Fatal(err)

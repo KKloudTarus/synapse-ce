@@ -7,7 +7,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func TestMigration0165OwnershipNotificationUpgrade(t *testing.T) {
+func TestMigration0169OwnershipNotificationUpgrade(t *testing.T) {
 	_, db := ownershipTestDatabase(t, 164, func(db *sql.DB) {
 		withMigrationTenant(t, db, "default", func(tx *sql.Tx) {
 			if _, err := tx.Exec(`INSERT INTO notification_rules(tenant_id,id,name,event_type,created_at,updated_at)
