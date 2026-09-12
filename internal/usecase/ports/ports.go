@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/accuracy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aitriagereview"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/alerting"
@@ -1761,6 +1762,14 @@ type DetectionSource interface {
 // store + the SBOM producer MUST agree per ecosystem.
 type AdvisoryStore interface {
 	ByPackage(ctx context.Context, ecosystem, name string) ([]advisory.Advisory, error)
+}
+
+// AccuracyRunStore persists and reads detection-accuracy regression runs over the golden corpus.
+// Like AdvisoryStore it is deployment-global engine data, not tenant-scoped, so it takes no tenant.
+// The worker writes a run per nightly evaluation; the API reads Recent for the console trend.
+type AccuracyRunStore interface {
+	Save(ctx context.Context, run accuracy.Run) error
+	Recent(ctx context.Context, limit int) ([]accuracy.Run, error)
 }
 
 type CPEAdvisoryStore interface {

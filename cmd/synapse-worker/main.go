@@ -26,6 +26,7 @@ import (
 	integrationdom "github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/accuracyprobe"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cloudsandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
@@ -53,6 +54,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/jobs"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/logging"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/accuracyeval"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
@@ -510,6 +512,56 @@ func main() {
 	reconService.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
 
 	maintenanceTasks := append([]func(context.Context){}, integrationMaintenanceTasks...)
+	if cfg.AccuracyEvalInterval > 0 && !cfg.LeaderElectionEnabled {
+		// maintenanceTasks run on EVERY replica when leader election is off, so a multi-worker deployment
+		// would each persist a duplicate accuracy_runs row per interval and inflate the very trend the
+		// feature exists to show. Require leader election (as the other global sweepers do); warn-and-skip
+		// rather than crash, since the job is optional and off by default.
+		log.Warn("accuracy regression job requires SYNAPSE_LEADER_ENABLED=true (else replicas write duplicate trend rows); skipping", "interval", cfg.AccuracyEvalInterval)
+	}
+	if cfg.AccuracyEvalInterval > 0 && cfg.LeaderElectionEnabled {
+		// Detection-accuracy regression (EPIC #860 D8.6): run the owned engine over the golden corpus on
+		// an interval and persist a run for the console trend. Registered only with leader election on, so
+		// runWorkerRuntime's leader lease makes exactly one replica run it; fully offline (embedded corpus).
+		accuracyStore := postgres.NewAccuracyRunRepository(pool)
+		probe := accuracyprobe.New()
+		interval := cfg.AccuracyEvalInterval
+		maintenanceTasks = append(maintenanceTasks, func(taskCtx context.Context) {
+			runOnce := func() {
+				report, err := accuracyeval.Evaluate(taskCtx, probe)
+				if err != nil {
+					if taskCtx.Err() == nil {
+						log.Warn("accuracy eval failed", "err", err)
+					}
+					return
+				}
+				run, err := accuracyeval.ToRun(ids.NewID().String(), clock.Now().UTC(), report)
+				if err != nil {
+					log.Warn("accuracy run map failed", "err", err)
+					return
+				}
+				if err := accuracyStore.Save(taskCtx, run); err != nil {
+					if taskCtx.Err() == nil {
+						log.Warn("accuracy run save failed", "err", err)
+					}
+					return
+				}
+				log.Info("accuracy run persisted", "cases", run.Cases, "precision", run.Overall.Precision, "recall", run.Overall.Recall, "fp", run.Overall.FalsePositives)
+			}
+			runOnce() // seed a fresh point at startup rather than waiting a full interval
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-taskCtx.Done():
+					return
+				case <-ticker.C:
+					runOnce()
+				}
+			}
+		})
+		log.Info("accuracy regression job ENABLED", "interval", interval)
+	}
 	handlers := map[string]worker.Handler{
 		reconuc.JobKind:                        reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
 		scauc.ScanJobKind:                      scaJobHandler{svc: scaService},

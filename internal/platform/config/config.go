@@ -421,6 +421,9 @@ type Config struct {
 	IntegrationSchedulerInterval   time.Duration
 	IntegrationSchedulerDispatch   int
 	IntegrationSchedulerQueueDepth int
+	// AccuracyEvalInterval is how often the leader worker runs the detection-accuracy regression over
+	// the golden corpus and persists a run for the console trend (EPIC #860 D8.6). Zero disables it.
+	AccuracyEvalInterval time.Duration
 	// IntegrationAllowPrivateNetwork is an operator-controlled exception that permits
 	// tenant administrators to configure integrations targeting private address space.
 	// It is intentionally off by default because the API flag alone must not weaken SSRF controls.
@@ -948,6 +951,7 @@ func Load() Config {
 		VulnerabilitySchedulerRecovery:              getint("SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT", 10),
 		IntegrationSchedulerEnabled:                 getbool("SYNAPSE_INTEGRATION_SCHEDULER_ENABLED", false),
 		IntegrationSchedulerInterval:                getduration("SYNAPSE_INTEGRATION_SCHEDULER_POLL", time.Minute),
+		AccuracyEvalInterval:                        getduration("SYNAPSE_ACCURACY_EVAL_INTERVAL", 0),
 		IntegrationSchedulerDispatch:                getint("SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT", 10),
 		IntegrationSchedulerQueueDepth:              getint("SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH", 100),
 		IntegrationAllowPrivateNetwork:              getbool("SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK", false),

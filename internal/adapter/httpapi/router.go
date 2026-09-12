@@ -122,6 +122,7 @@ type Router struct {
 	riskStories              riskStoryReader            // optional read side for the unified per-asset risk story (#427)
 	purpleCoverage           purpleCoverageReader       // optional read side for purple-team coverage (#426)
 	purpleTeam               purpleTeamRunner           // optional producer: runs governed emulation → coverage (#426)
+	accuracyRuns             accuracyRunReader          // optional read side for the engine detection-accuracy trend (#860 D8.6)
 	chainRehearsal           chainRehearser             // optional: governed exploitation chain rehearsal (simulation)
 	fleet                    *fleetRouter               // optional; nil ⇒ agent transport plane is not served
 	fleetAdmin               fleetAdminService          // optional; nil ⇒ operator agent-admin routes not registered
@@ -862,6 +863,10 @@ func (rt *Router) routes() *http.ServeMux {
 	// floor. Legacy v1 rows predate tenant chaining and are visible to no tenant by design.
 	mux.HandleFunc("GET /api/v1/audit", rt.authz(userdom.PermReview, rt.listAudit))
 	mux.HandleFunc("GET /api/v1/audit/verify", rt.authz(userdom.PermReview, rt.verifyAudit))
+	// Engine detection-accuracy trend (#860 D8.6). Registered unconditionally: the handler is nil-safe
+	// (returns an empty list when the nightly job is not wired), so the console can always distinguish a
+	// disabled job from a broken endpoint, matching the capabilities route's rationale.
+	mux.HandleFunc("GET /api/v1/engine/accuracy", rt.authz(userdom.PermView, rt.listAccuracyRuns))
 	if rt.capabilities != nil {
 		// Optional-subsystem catalog: configuration booleans only, so the view floor is the right
 		// gate. It must stay registered whatever else is off — a client uses it to tell a disabled
