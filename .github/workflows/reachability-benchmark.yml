@@ -1,0 +1,80 @@
+# Reachability scorecard (EPIC #1042 / #1049). The corpus and external runners are pinned so a PR cannot
+# improve a score by changing the tool, omitting an analysis record, or comparing a different denominator.
+name: Reachability Benchmark
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go-oss-baselines:
+    name: Go corpus vs OSV-Scanner and Semgrep CE
+    runs-on: ubuntu-latest
+    env:
+      # Reviewed external-tool pins. Updating either pin requires reviewing the resulting artifact diff.
+      OSV_SCANNER_VERSION: v2.4.0
+      SEMGREP_VERSION: 1.176.0
+      REACHBENCH_DIR: internal/infrastructure/tools/ssacallgraph/testdata/reachbench
+      REACHBENCH_REPORT_DIR: ${{ runner.temp }}/reachbench
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned OSS baselines
+        run: |
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@${OSV_SCANNER_VERSION}
+          python -m pip install --disable-pip-version-check semgrep==${SEMGREP_VERSION}
+
+      - name: Run OSV-Scanner Go call analysis
+        run: |
+          mkdir -p "${REACHBENCH_REPORT_DIR}"
+          set +e
+          "$(go env GOPATH)/bin/osv-scanner" scan source --recursive --format json --call-analysis=go "${REACHBENCH_DIR}" > "${REACHBENCH_REPORT_DIR}/osv.raw.json"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            echo "OSV-Scanner failed with unexpected status $status"
+            exit "$status"
+          fi
+          go run ./cmd/synapse-bench -mode reachability-osv -input "${REACHBENCH_REPORT_DIR}/osv.raw.json" -output "${REACHBENCH_REPORT_DIR}/osv-scanner.json"
+
+      - name: Run Semgrep CE direct-call baseline
+        run: |
+          set +e
+          semgrep scan --config internal/usecase/reachbench/corpus/semgrep-ce.yml --json --no-git-ignore "${REACHBENCH_DIR}" > "${REACHBENCH_REPORT_DIR}/semgrep.raw.json"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            echo "Semgrep CE failed with unexpected status $status"
+            exit "$status"
+          fi
+          go run ./cmd/synapse-bench -mode reachability-semgrep-ce -input "${REACHBENCH_REPORT_DIR}/semgrep.raw.json" -output "${REACHBENCH_REPORT_DIR}/semgrep-ce.json"
+
+      - name: Gate owned engine recall and parity
+        env:
+          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ runner.temp }}/reachbench/synapse-owned.json
+          SYNAPSE_REACHBENCH_BASELINE_REPORTS: ${{ runner.temp }}/reachbench/osv-scanner.json,${{ runner.temp }}/reachbench/semgrep-ce.json
+        run: go test -count=1 -v -run TestGoReachabilityCorpus ./internal/infrastructure/tools/ssacallgraph
+
+      - name: Upload raw evidence and scorecards
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reachability-benchmark-go-scorecards
+          path: ${{ runner.temp }}/reachbench
+          if-no-files-found: warn
