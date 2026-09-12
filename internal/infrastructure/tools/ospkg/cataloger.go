@@ -137,11 +137,12 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 				major = versionID[:i]
 			}
 			rpmResolved = rpmMatchableIDs[id] && major != ""
-			if id == "opensuse-leap" {
-				// openSUSE keys on major.minor (openSUSE:15.6), not the major alone, so a bare or trailing-dot
-				// VERSION_ID must NOT resolve: it would set DistroResolved=true yet derive a key
-				// (openSUSE:15 / openSUSE:15.) the feed never wrote, exactly the silent zero-match this flag
-				// prevents. A genuine openSUSE Leap os-release always carries major.minor.
+			if id == "opensuse-leap" || id == "sles" {
+				// openSUSE Leap (openSUSE:15.6) and SUSE Linux Enterprise (SUSE:15.6, keyed per service pack) key
+				// on major.minor, not the major alone, so a bare or trailing-dot VERSION_ID must NOT resolve: it
+				// would set DistroResolved=true yet derive a key the feed never wrote (openSUSE:15 / SUSE:15),
+				// exactly the silent zero-match this flag prevents. A genuine Leap/SLE os-release always carries
+				// major.minor (e.g. SLES VERSION_ID="15.6").
 				_, minor, hasMinor := strings.Cut(versionID, ".")
 				rpmResolved = rpmResolved && hasMinor && minor != ""
 			}
@@ -163,38 +164,130 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 // rpmMatchableIDs are the rpm-family os-release IDs osDistroEcosystem can key to an advisory ecosystem: RHEL
 // (rhel/redhat -> "Red Hat:<major>", served by the owned Red Hat CSAF feed), the Rocky/AlmaLinux/Oracle
 // rebuilds (keyed "<Name>:<major>" by their own errata), Amazon Linux (amzn/amazon -> "Amazon Linux:<release>",
-// served by the owned Amazon updateinfo feed), and openSUSE Leap (opensuse-leap -> "openSUSE:<major.minor>",
-// served by the owned openSUSE Leap OVAL feed). This set must stay in lockstep with osDistroEcosystem: an id is
-// listed only once its ecosystem mapping AND feed exist, so DistroResolved never claims a keying the matcher
-// cannot make. CentOS (Stream drifts ahead of RHEL), Fedora, openSUSE Tumbleweed (rolling, no per-release
-// feed), and SUSE Linux Enterprise (feed not yet landed) stay OFF, so their rpm packages are cataloged for
-// inventory but honestly flagged unresolved.
-var rpmMatchableIDs = map[string]bool{"rhel": true, "redhat": true, "rocky": true, "almalinux": true, "alma": true, "ol": true, "oracle": true, "amzn": true, "amazon": true, "opensuse-leap": true}
+// served by the owned Amazon updateinfo feed), Fedora (fedora -> "Fedora:<major>", served by the owned Fedora
+// updateinfo feed), openSUSE Leap (opensuse-leap -> "openSUSE:<major.minor>", owned openSUSE OVAL feed), and
+// SUSE Linux Enterprise (sles -> "SUSE:<major.minor>" per service pack, owned SLE OVAL feed). This set must
+// stay in lockstep with osDistroEcosystem: an id is listed only once its ecosystem mapping AND feed exist, so
+// DistroResolved never claims a keying the matcher cannot make. CentOS (Stream drifts ahead of RHEL, so a RHEL
+// fixed NEVR would false-match a Stream package) and openSUSE Tumbleweed (rolling, no per-release feed) stay
+// OFF, so their rpm packages are cataloged for inventory but honestly flagged unresolved.
+var rpmMatchableIDs = map[string]bool{"rhel": true, "redhat": true, "rocky": true, "almalinux": true, "alma": true, "ol": true, "oracle": true, "amzn": true, "amazon": true, "fedora": true, "opensuse-leap": true, "sles": true}
 
 // dpkgFieldKeys / apkFieldKeys are the ONLY stanza keys each parser reads. parseOSDB stores only these, so a
 // stanza with millions of distinct junk keys cannot grow the per-stanza map (keeps memory O(1) per stanza).
 var (
-	dpkgFieldKeys = map[string]bool{"Package": true, "Status": true, "Version": true, "Architecture": true}
+	dpkgFieldKeys = map[string]bool{"Package": true, "Status": true, "Version": true, "Architecture": true, "Source": true}
 	apkFieldKeys  = map[string]bool{"P": true, "V": true, "A": true}
 )
 
-// dpkgExtract pulls (name, version, arch) from a dpkg stanza; only "install ok installed" is present.
-func dpkgExtract(f map[string]string) (name, version, arch string, ok bool) {
+// dpkgExtract pulls (name, version, arch, upstream) from a dpkg stanza; only "install ok installed" is
+// present. upstream is the deb PURL "upstream=" value derived from the "Source:" field (see
+// dpkgSourceQualifier) so a binary whose SOURCE package name differs still matches its source-keyed advisory.
+func dpkgExtract(f map[string]string) (name, version, arch, upstream string, ok bool) {
 	if !strings.Contains(f["Status"], "install ok installed") {
-		return "", "", "", false
+		return "", "", "", "", false
 	}
-	return f["Package"], f["Version"], f["Architecture"], true
+	name, version, arch = f["Package"], f["Version"], f["Architecture"]
+	return name, version, arch, dpkgSourceQualifier(f["Source"], name), true
 }
 
-// apkExtract pulls (name, version, arch) from an apk stanza (single-letter keys).
-func apkExtract(f map[string]string) (name, version, arch string, ok bool) {
-	return f["P"], f["V"], f["A"], true
+// dpkgSourceQualifier turns a dpkg "Source:" field into the deb PURL "upstream=" value the advisory matcher
+// reads. A Debian/Ubuntu security advisory is keyed by the SOURCE package (one openssl advisory covers the
+// libssl3, libcrypto3, … binaries built from it), so a binary whose source name differs never matches the
+// advisory by its own name. The field is "<source>" or "<source> (<source-version>)"; dpkg OMITS it when the
+// source name and version equal the binary's. Returns the source name, plus "@<source-version>" when the
+// field carries a distinct source version (a binNMU makes the binary version "<src>+bN" while the advisory
+// ranges live in source-version space). Returns "" when there is no DISTINCT source name (the binary name is
+// already the match key, matched with the binary version by the primary lookup).
+func dpkgSourceQualifier(source, binName string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return ""
+	}
+	name, version := source, ""
+	if i := strings.IndexByte(source, '('); i >= 0 {
+		name = strings.TrimSpace(source[:i])
+		rest := source[i+1:]
+		j := strings.IndexByte(rest, ')')
+		if j < 0 {
+			return "" // malformed: '(' with no closing ')'
+		}
+		version = strings.TrimSpace(rest[:j])
+		if strings.TrimSpace(rest[j+1:]) != "" {
+			return "" // trailing junk after ')'
+		}
+	}
+	// Validate against the Debian Source grammar before emitting. The advisory matcher decodes the upstream=
+	// value and splits it on the first '@' into (source-name, source-version), so a Source containing '@' (or
+	// a PURL qualifier separator) could otherwise smuggle a fabricated source-version or name past the
+	// percent-encoding. A real Debian Source name never contains '@'; an invalid field yields no qualifier (the
+	// binary name stays the only match key) rather than a bogus source match on an untrusted image.
+	if name == binName || !validDebianSourceName(name) {
+		return ""
+	}
+	if version != "" {
+		if !validDebianVersion(version) {
+			return ""
+		}
+		return name + "@" + version
+	}
+	return name
+}
+
+// validDebianSourceName reports whether s is a Debian source package name (Debian Policy 5.6.1): a non-empty
+// run of lowercase letters, digits, '+', '-', '.' beginning with an alphanumeric. It deliberately excludes
+// '@', whitespace, and PURL qualifier separators, so an untrusted Source cannot inject the matcher's '@'
+// delimiter or a second qualifier.
+func validDebianSourceName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		alnum := (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+		if i == 0 {
+			if !alnum {
+				return false
+			}
+			continue
+		}
+		if !alnum && c != '+' && c != '-' && c != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+// validDebianVersion reports whether s uses only Debian version characters (letters, digits, and '.+~:-').
+// It excludes '@' and separators so a source version cannot smuggle the matcher's delimiter into upstream=.
+func validDebianVersion(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			continue
+		}
+		switch c {
+		case '.', '+', '~', ':', '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// apkExtract pulls (name, version, arch) from an apk stanza (single-letter keys). No upstream: the apk
+// secdb matcher is keyed on the package name the apk DB carries.
+func apkExtract(f map[string]string) (name, version, arch, upstream string, ok bool) {
+	return f["P"], f["V"], f["A"], "", true
 }
 
 // parseOSDB streams a Debian/apk control DB (stanzas separated by a blank line, "Key: Value" lines) into
 // components. Streaming keeps memory O(1) per stanza; the size/line/package caps + periodic ctx check bound a
 // hostile DB. A missing/irregular/symlinked path or an over-long line yields no components (best-effort).
-func parseOSDB(ctx context.Context, path string, fieldKeys map[string]bool, extract func(map[string]string) (string, string, string, bool), typ, namespace, tag string) ([]sbom.Component, error) {
+func parseOSDB(ctx context.Context, path string, fieldKeys map[string]bool, extract func(map[string]string) (string, string, string, string, bool), typ, namespace, tag string) ([]sbom.Component, error) {
 	fi, err := os.Lstat(path) // regular-file guard: never follow a symlinked DB out of the rootfs
 	if err != nil || !fi.Mode().IsRegular() {
 		return nil, nil
@@ -215,8 +308,8 @@ func parseOSDB(ctx context.Context, path string, fieldKeys map[string]bool, extr
 		if len(cur) == 0 || len(out) >= maxPackages { // keep maxPackages an exact upper bound
 			return
 		}
-		if name, version, arch, ok := extract(cur); ok {
-			if c, ok := osComponent(typ, namespace, name, version, arch, tag); ok {
+		if name, version, arch, upstream, ok := extract(cur); ok {
+			if c, ok := osComponent(typ, namespace, name, version, arch, tag, upstream); ok {
 				c.Location = path // the package DB's path, so the component attributes to the DB's image layer
 				out = append(out, c)
 			}
@@ -262,7 +355,7 @@ func parseOSDB(ctx context.Context, path string, fieldKeys map[string]bool, extr
 // qualifier) but kept RAW in Name/Version, which is what the advisory matcher compares. Returns ok=false when
 // the name/version is empty or carries a control character. The distro qualifier is set only for a resolvable
 // release, so a match is attempted only against a real OS ecosystem.
-func osComponent(typ, namespace, name, version, arch, tag string) (sbom.Component, bool) {
+func osComponent(typ, namespace, name, version, arch, tag, upstream string) (sbom.Component, bool) {
 	name, version = cleanField(name), cleanField(version)
 	if name == "" || version == "" {
 		return sbom.Component{}, false
@@ -274,6 +367,12 @@ func osComponent(typ, namespace, name, version, arch, tag string) (sbom.Componen
 	}
 	if tag != "" {
 		q = append(q, "distro="+purlEncode(tag))
+	}
+	// upstream=<source>[@<source-version>]: the SOURCE package a Debian/Ubuntu advisory is keyed by, so a
+	// binary whose source name differs matches its source-keyed advisory (the matcher reads this qualifier).
+	// The whole value is percent-encoded, so a hostile Source field cannot inject a qualifier (@ -> %40).
+	if up := cleanField(upstream); up != "" {
+		q = append(q, "upstream="+purlEncode(up))
 	}
 	if len(q) > 0 {
 		purl += "?" + strings.Join(q, "&")

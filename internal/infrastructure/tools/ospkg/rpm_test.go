@@ -262,3 +262,43 @@ func TestCatalogRPMAmazonResolved(t *testing.T) {
 		t.Error("Amazon Linux must resolve its distro now that the updateinfo feed exists")
 	}
 }
+
+// TestCatalogRPMFedoraResolved: Fedora resolves now that its owned updateinfo feed exists; osDistroEcosystem
+// keys fedora-43 to "Fedora:43", the exact key the feed writes. Guards the D2.4 drift the resolved-flag gate
+// (rpmMatchableIDs) previously carried after the feed landed, which produced a false "distro unresolved" warning.
+func TestCatalogRPMFedoraResolved(t *testing.T) {
+	rootfs := writeRPMRootfs(t, "ID=fedora\nVERSION_ID=\"43\"\n")
+	res, err := New().Catalog(context.Background(), rootfs)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if len(res.Components) != 1 || !res.DistroResolved {
+		t.Fatalf("Fedora must resolve now that the updateinfo feed exists, got resolved=%v comps=%d", res.DistroResolved, len(res.Components))
+	}
+}
+
+// TestCatalogRPMSLESResolution: SUSE Linux Enterprise (sles) resolves only with a major.minor VERSION_ID, since
+// its advisories are keyed per service pack ("SUSE:15.6"). A major-only VERSION_ID must NOT resolve (keying
+// bare "SUSE:15" would conflate service packs, a silent zero-match).
+func TestCatalogRPMSLESResolution(t *testing.T) {
+	resolved := writeRPMRootfs(t, "ID=sles\nVERSION_ID=\"15.6\"\n")
+	res, err := New().Catalog(context.Background(), resolved)
+	if err != nil {
+		t.Fatalf("catalog sles 15.6: %v", err)
+	}
+	if len(res.Components) != 1 || !res.DistroResolved {
+		t.Fatalf("SLES 15.6 must resolve (SUSE:15.6, per service pack), got resolved=%v comps=%d", res.DistroResolved, len(res.Components))
+	}
+
+	majorOnly := writeRPMRootfs(t, "ID=sles\nVERSION_ID=\"15\"\n")
+	res, err = New().Catalog(context.Background(), majorOnly)
+	if err != nil {
+		t.Fatalf("catalog sles 15: %v", err)
+	}
+	if len(res.Components) != 1 {
+		t.Fatalf("want the rpm component still emitted for inventory, got %d", len(res.Components))
+	}
+	if res.DistroResolved {
+		t.Error("SLES with a major-only VERSION_ID must NOT resolve (bare SUSE:15 would conflate service packs)")
+	}
+}
