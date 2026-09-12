@@ -68,6 +68,23 @@ func TestNPMParseV3(t *testing.T) {
 	if ms := on["pkg:npm/mocha@10.2.0"]; !contains(ms, "pkg:npm/ms@2.1.3") {
 		t.Errorf("mocha (no nested ms) must resolve ms to the hoisted 2.1.3, got %v", ms)
 	}
+
+	// D3.8: each edge carries the DECLARED range for its targets, keyed by the resolved target ref, beside
+	// the resolved version the target component carries. @angular/core declared ms "^1" and tslib "^2".
+	ranges := map[string]string{}
+	for _, d := range deps {
+		if d.Ref == "pkg:npm/%40angular/core@17.0.1" {
+			for target, r := range d.RequestedRanges {
+				ranges[target] = r
+			}
+		}
+	}
+	if ranges["pkg:npm/ms@1.0.0"] != "^1" {
+		t.Errorf("@angular/core edge must record ms declared range ^1, got %q", ranges["pkg:npm/ms@1.0.0"])
+	}
+	if ranges["pkg:npm/tslib@2.6.2"] != "^2" {
+		t.Errorf("@angular/core edge must record tslib declared range ^2, got %q", ranges["pkg:npm/tslib@2.6.2"])
+	}
 }
 
 func contains(xs []string, v string) bool {
@@ -137,5 +154,20 @@ func TestRegistryMultiEcosystem(t *testing.T) {
 	}
 	if nGo != 3 || nNPM != 6 { // npm fixture (npmLockV3) carries 6 components across two ms versions
 		t.Fatalf("want 3 go + 6 npm components, got %d go / %d npm: %+v", nGo, nNPM, doc.Components)
+	}
+}
+
+// D3.8: npmEdgeRangePrio orders declarations so the recorded range follows the edge winner
+// (runtime > dev, required > optional) when two declared names resolve to the same target.
+func TestNPMEdgeRangePrio(t *testing.T) {
+	runtimeReq := npmEdgeSpec{scope: sbom.ScopeProduction}
+	runtimeOpt := npmEdgeSpec{scope: sbom.ScopeProduction, optional: true}
+	devReq := npmEdgeSpec{scope: sbom.ScopeDevelopment}
+	devOpt := npmEdgeSpec{scope: sbom.ScopeDevelopment, optional: true}
+	if !(npmEdgeRangePrio(runtimeReq) > npmEdgeRangePrio(runtimeOpt) &&
+		npmEdgeRangePrio(runtimeOpt) > npmEdgeRangePrio(devReq) &&
+		npmEdgeRangePrio(devReq) > npmEdgeRangePrio(devOpt)) {
+		t.Errorf("priority must be runtime-required > runtime-optional > dev-required > dev-optional, got %d %d %d %d",
+			npmEdgeRangePrio(runtimeReq), npmEdgeRangePrio(runtimeOpt), npmEdgeRangePrio(devReq), npmEdgeRangePrio(devOpt))
 	}
 }

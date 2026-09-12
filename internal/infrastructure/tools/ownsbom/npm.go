@@ -60,6 +60,7 @@ type npmEdgeSpec struct {
 	name     string
 	scope    string
 	optional bool
+	rangeStr string // the declared version range for this dep (the map value, e.g. "^1.2.0")
 }
 
 type npmEdgeMeta struct {
@@ -124,6 +125,8 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 				sourceScope = sbom.ScopeDevelopment
 			}
 			targetMeta := make(map[string]npmEdgeMeta)
+			targetRange := make(map[string]string)
+			targetRangePrio := make(map[string]int)
 			for _, dep := range npmEdgeSpecs(lock.Packages[path], sourceScope) {
 				tp := resolveNpmDep(path, dep.name, lock.Packages)
 				if tp == "" {
@@ -138,6 +141,16 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 					meta = mergeNPMEdgeMeta(existing, meta)
 				}
 				targetMeta[t] = meta
+				// When two declared names at this parent resolve to the SAME target, the recorded range must
+				// come from the declaration that wins the edge (runtime over dev, required over optional),
+				// matching mergeNPMEdgeMeta, so the emitted edge never reports a lower-priority declaration's
+				// range. Ties keep the first (deterministic: npmEdgeSpecs is name-sorted).
+				if dep.rangeStr != "" {
+					if p, ok := targetRangePrio[t]; !ok || npmEdgeRangePrio(dep) > p {
+						targetRange[t] = dep.rangeStr
+						targetRangePrio[t] = npmEdgeRangePrio(dep)
+					}
+				}
 			}
 			type groupKey struct {
 				scope    string
@@ -161,7 +174,7 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 			for _, key := range keys {
 				on := groups[key]
 				sort.Strings(on)
-				edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: on, Scope: key.scope, Optional: key.optional})
+				edges = append(edges, sbom.Dependency{Ref: ref, DependsOn: on, Scope: key.scope, Optional: key.optional, RequestedRanges: rangesFor(on, targetRange)})
 			}
 		}
 		return set.components(), edges, nil
@@ -206,24 +219,40 @@ func parseSubresourceIntegrity(s string) []sbom.Checksum {
 // npmEdgeSpecs returns sorted, unique direct-dependency declarations with their per-edge semantics.
 // If the same package is listed as both runtime and dev, the runtime relationship wins: one shipping path is
 // sufficient to make that edge shipping. Optionality is retained independently from scope.
+// npmEdgeRangePrio scores a declaration so the recorded range follows the edge winner: runtime beats
+// dev, required beats optional (same ordering mergeNPMEdgeMeta uses for the edge's scope/optionality).
+func npmEdgeRangePrio(dep npmEdgeSpec) int {
+	prio := 0
+	if dep.scope != sbom.ScopeDevelopment {
+		prio += 2
+	}
+	if !dep.optional {
+		prio++
+	}
+	return prio
+}
+
 func npmEdgeSpecs(p npmV3Pkg, prodScope string) []npmEdgeSpec {
 	byName := map[string]npmEdgeSpec{}
-	for name := range p.Dependencies {
-		byName[name] = npmEdgeSpec{name: name, scope: prodScope}
+	for name, rng := range p.Dependencies {
+		byName[name] = npmEdgeSpec{name: name, scope: prodScope, rangeStr: rng}
 	}
-	for name := range p.DevDependencies {
+	for name, rng := range p.DevDependencies {
 		if _, exists := byName[name]; exists {
 			continue // an existing runtime declaration is the stronger shipping relationship
 		}
-		byName[name] = npmEdgeSpec{name: name, scope: sbom.ScopeDevelopment}
+		byName[name] = npmEdgeSpec{name: name, scope: sbom.ScopeDevelopment, rangeStr: rng}
 	}
-	for name := range p.OptionalDependencies {
+	for name, rng := range p.OptionalDependencies {
 		spec := byName[name]
 		spec.name = name
 		if spec.scope == "" {
 			spec.scope = prodScope
 		}
 		spec.optional = true
+		if spec.rangeStr == "" {
+			spec.rangeStr = rng
+		}
 		byName[name] = spec
 	}
 	names := make([]string, 0, len(byName))
