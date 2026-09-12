@@ -309,7 +309,18 @@ func (e *pythonFactExtractor) callFact(node *sitter.Node, scope pythonScope) {
 	case "getattr", "setattr", "delattr", "globals", "locals":
 		e.gap(pythonprogram.GapDynamicAttribute, scope.id, "dynamic_attribute", node)
 	}
-	if args := node.ChildByFieldName("arguments"); args != nil {
+	if args := node.ChildByFieldName("arguments"); args != nil && args.Type() == "generator_expression" {
+		// f(x for x in r): the sole-argument generator form places the generator_expression directly as the
+		// `arguments` node (no argument_list wrapper). It is ONE lazy argument, so model it via valueFor on the
+		// genexp node (which bumps loopDepth so its body subscripts widen). Iterating its children here would
+		// mistake the genexp body and for-clause for separate arguments and bypass that widening (a false
+		// negative when the generator is consumed after a same-key reassignment).
+		arg := pythonprogram.Argument{Value: e.reference(args), ValueID: e.valueFor(args, scope), Pos: e.position(args)}
+		if arg.Value.Kind == pythonprogram.ReferenceUnknown && arg.ValueID == "" {
+			e.gap(pythonprogram.GapUnresolvedValue, scope.id, "call_argument", args)
+		}
+		call.Arguments = append(call.Arguments, arg)
+	} else if args := node.ChildByFieldName("arguments"); args != nil {
 		for i := 0; i < int(args.NamedChildCount()); i++ {
 			argNode := args.NamedChild(i)
 			arg := pythonprogram.Argument{}
@@ -454,6 +465,18 @@ func (e *pythonFactExtractor) valueFor(node *sitter.Node, scope pythonScope) str
 		return id
 	case "identifier":
 		return id
+	case "subscript":
+		// A subscript read propagates from its container (sound: any key of a tainted container is tainted)
+		// and from the key expression (sound: a tainted key expression taints the result). The container
+		// value carries the literal key when it is a simple local name, so the taint engine can refine
+		// per-key for a container it proves cannot alias or escape; every other shape leaves it whole.
+		container := node.ChildByFieldName("value")
+		keyNode := subscriptIndexNode(node)
+		e.addValueFlow(e.subscriptContainerValue(container, keyNode, scope), id, pythonprogram.FlowExpression, node)
+		if keyNode != nil {
+			e.addValueFlow(e.valueFor(keyNode, scope), id, pythonprogram.FlowExpression, node)
+		}
+		return id
 	}
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
@@ -467,7 +490,27 @@ func (e *pythonFactExtractor) bindingValues(node *sitter.Node, scope pythonScope
 		return nil
 	}
 	if node.Type() == "subscript" {
-		return e.bindingValues(node.ChildByFieldName("value"), scope)
+		container := node.ChildByFieldName("value")
+		if container != nil && container.Type() == "identifier" && !subscriptInReorderingContext(container) {
+			// Write to container[key]. Tag the container binding with the literal key so the taint engine
+			// can keep the write scoped to that key for a non-escaping local; a dynamic key marks the whole
+			// container (the sound widen). Keying the binding on the subscript node makes each write site a
+			// distinct definition.
+			id := pythonValueID(e.file, node, "binding")
+			name := container.Content(e.source)
+			v := pythonprogram.Value{
+				ID: id, ScopeID: scope.id, Kind: pythonprogram.ValueBinding, Name: name,
+				Ref: pythonprogram.Reference{Kind: pythonprogram.ReferenceName, Segments: []string{name}}, Pos: e.position(node),
+			}
+			if key, dyn := literalSubscriptKey(subscriptIndexNode(node), e.source); dyn {
+				v.SubDyn = true
+			} else {
+				v.SubKey = key
+			}
+			e.addValue(v)
+			return []string{id}
+		}
+		return e.bindingValues(container, scope)
 	}
 	ref := e.reference(node)
 	if ref.Kind == pythonprogram.ReferenceName || ref.Kind == pythonprogram.ReferenceAttribute {
@@ -837,4 +880,171 @@ func pythonDottedName(value string) bool {
 		}
 	}
 	return true
+}
+
+// subscriptIndexNode returns the key/index child of a subscript node: the first named child that is not
+// the container ("value" field). Returns nil for a malformed subscript.
+func subscriptIndexNode(node *sitter.Node) *sitter.Node {
+	if node == nil {
+		return nil
+	}
+	container := node.ChildByFieldName("value")
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		ch := node.NamedChild(i)
+		if container != nil && ch.StartByte() == container.StartByte() && ch.EndByte() == container.EndByte() {
+			continue
+		}
+		return ch
+	}
+	return nil
+}
+
+// subscriptInReorderingContext reports whether a subscript container node sits inside a construct whose
+// execution order differs from its textual order within the same scope: a for/while loop (a body repeats,
+// so a textually-later write can execute before a read in the next iteration) or a generator expression (a
+// lazy body read executes when the generator is consumed, possibly after a same-key reassignment). The
+// position-gated per-literal-key def-use is unsound in both, so a subscript here must widen to
+// whole-container taint. This is decided from the AST ancestors, so it holds no matter which traversal path
+// reached the subscript. Eager comprehensions read at their textual position and are deliberately excluded
+// (the position gate is correct for them). The walk stops at the nearest scope boundary so an enclosing
+// loop never taints a nested function/lambda/class local.
+func subscriptInReorderingContext(node *sitter.Node) bool {
+	for n := node.Parent(); n != nil; n = n.Parent() {
+		switch n.Type() {
+		case "for_statement", "while_statement", "generator_expression":
+			return true
+		case "function_definition", "lambda", "class_definition":
+			return false
+		}
+	}
+	return false
+}
+
+// subscriptContainerValue returns the value id for a subscript's container and, when the container is a
+// simple local name, tags that reference value with the literal key (or marks it dynamic). A non-name
+// container (an attribute, call result, or nested expression) is handled generically and never refined.
+func (e *pythonFactExtractor) subscriptContainerValue(container, keyNode *sitter.Node, scope pythonScope) string {
+	if container == nil || container.Type() != "identifier" || subscriptInReorderingContext(container) {
+		return e.valueFor(container, scope) // inside a loop/generator: emit a bare use so the container widens (sound)
+	}
+	id := pythonValueID(e.file, container, "value")
+	if e.values[id] {
+		return id
+	}
+	name := container.Content(e.source)
+	v := pythonprogram.Value{
+		ID: id, ScopeID: scope.id, Kind: pythonprogram.ValueReference, Name: name,
+		Ref: pythonprogram.Reference{Kind: pythonprogram.ReferenceName, Segments: []string{name}}, Pos: e.position(container),
+	}
+	if key, dyn := literalSubscriptKey(keyNode, e.source); dyn {
+		v.SubDyn = true
+	} else {
+		v.SubKey = key
+	}
+	e.addValue(v)
+	return id
+}
+
+// literalSubscriptKey decodes a subscript index that is a simple literal (a plain string or an integer),
+// returning dynamic=true for everything else. It is deliberately strict: any key it cannot decode with
+// certainty (a variable, slice, f-string, escaped or prefixed string, triple-quote, or empty string) is
+// reported dynamic so the taint engine widens to whole-container taint, the sound default.
+func literalSubscriptKey(node *sitter.Node, src []byte) (string, bool) {
+	if node == nil {
+		return "", true
+	}
+	var cand string
+	switch node.Type() {
+	case "integer":
+		// Only plain decimal digits: 0x/0o/0b/underscore forms name the SAME runtime key as a decimal but
+		// with different text (d[0] vs d[0x0]), which would break the per-key match and HIDE taint. Python 3
+		// forbids leading-zero decimals, so a plain-decimal literal is canonical (same value <=> same text).
+		txt := node.Content(src)
+		if !isPlainDecimal(txt) {
+			return "", true
+		}
+		// The type tag keeps an int key distinct from a string key of the same text: d[0] and d['0'] are
+		// different runtime keys, so they must not share a refined slot.
+		cand = "i:" + txt
+	case "string":
+		inner, dyn := decodeSimplePyString(node, src)
+		if dyn {
+			return "", true
+		}
+		cand = "s:" + inner
+	default:
+		return "", true
+	}
+	// Never emit a key the trust-boundary validator would reject (overlong or control-char): that would fail
+	// the WHOLE facts document and silently drop all Python taint for the scan. Widen instead (sound).
+	if !pythonprogram.ValidSubscriptKey(cand) {
+		return "", true
+	}
+	return cand, false
+}
+
+// isPlainDecimal reports whether s is a non-empty run of ASCII decimal digits (no base prefix, sign, or
+// digit separator), the only integer literal form whose text is a canonical stand-in for its value.
+func isPlainDecimal(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// decodeSimplePyString extracts the text of a plain single/double-quoted string literal with no prefix,
+// escapes, interpolation, or implicit concatenation. It handles both the decomposed grammar
+// (string_start/string_content/string_end) and, as a fallback, a raw string node. Anything else -> dynamic.
+func decodeSimplePyString(node *sitter.Node, src []byte) (string, bool) {
+	var pieces []string
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		switch ch := node.NamedChild(i); ch.Type() {
+		case "string_content":
+			// tree-sitter nests escape_sequence UNDER string_content, so a direct-child check misses it. A
+			// piece with any nested child or a backslash carries an escape we do not decode; treat the whole
+			// key as dynamic so d['\x61'] does not get a different slot from d['a'] (same runtime key).
+			if ch.NamedChildCount() > 0 || strings.ContainsRune(ch.Content(src), '\\') {
+				return "", true
+			}
+			pieces = append(pieces, ch.Content(src))
+		case "interpolation", "escape_sequence", "format_specifier":
+			return "", true
+		}
+	}
+	raw := node.Content(src)
+	if len(raw) < 2 || (raw[0] != '\'' && raw[0] != '"') {
+		return "", true // a letter prefix (f/r/b/u...) or a degenerate node
+	}
+	if len(pieces) == 1 {
+		if pieces[0] == "" {
+			return "", true
+		}
+		return pieces[0], false
+	}
+	if len(pieces) > 1 {
+		return "", true // implicit concatenation inside one node
+	}
+	return decodeRawSimpleString(raw)
+}
+
+// decodeRawSimpleString strips a matching single- or double-quote pair from a raw string literal, rejecting
+// triple-quotes, escapes, empty keys, and mismatched quotes (all -> dynamic).
+func decodeRawSimpleString(raw string) (string, bool) {
+	q := raw[0]
+	if len(raw) >= 6 && raw[1] == q && raw[2] == q {
+		return "", true // triple-quoted
+	}
+	if raw[len(raw)-1] != q {
+		return "", true
+	}
+	inner := raw[1 : len(raw)-1]
+	if inner == "" || strings.ContainsRune(inner, '\\') {
+		return "", true
+	}
+	return inner, false
 }
