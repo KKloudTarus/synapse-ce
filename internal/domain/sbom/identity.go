@@ -148,8 +148,8 @@ func distroEcosystem(typ, purl string) string {
 // on. It is the SINGLE source of truth for OS-package ecosystem keying: both the inventory identity here and
 // the scan-side matcher (osDistroEcosystem in the ownadvisory feed) call it, so the two can never drift. The
 // qualifier is lowercased first (Syft emits lowercase; a case-variant keys the same). An unmapped distro
-// (CentOS, Fedora, openSUSE Tumbleweed) or a malformed qualifier returns "" (cataloged for inventory, never
-// keyed to an advisory ecosystem, so never a false match).
+// (CentOS, openSUSE Tumbleweed) or a malformed qualifier returns "" (cataloged for inventory, never keyed to
+// an advisory ecosystem, so never a false match).
 func DistroEcosystem(purlType, distro string) string {
 	distro = strings.ToLower(distro)
 	if distro == "" {
@@ -227,8 +227,8 @@ func DistroEcosystem(purlType, distro string) string {
 			return ""
 		}
 		// The rpm distros key "<Name>:<major>". CentOS is deliberately excluded (Stream runs ahead of RHEL, so
-		// a RHEL fixed NEVR would false-match a Stream package); Fedora stays unmapped (no owned feed). SUSE
-		// Linux Enterprise (sles-*) is keyed by the major.minor branch above. Each mapped id keys its own feed.
+		// a RHEL fixed NEVR would false-match a Stream package). SUSE Linux Enterprise (sles-*) is keyed by the
+		// major.minor branch above. Each mapped id keys the ecosystem its own feed writes.
 		switch id {
 		case "rhel", "redhat":
 			return "Red Hat:" + major
@@ -240,6 +240,8 @@ func DistroEcosystem(purlType, distro string) string {
 			return "Oracle Linux:" + major
 		case "amzn", "amazon":
 			return "Amazon Linux:" + major
+		case "fedora":
+			return "Fedora:" + major
 		}
 	}
 	return ""

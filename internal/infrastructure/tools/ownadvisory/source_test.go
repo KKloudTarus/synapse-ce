@@ -112,7 +112,7 @@ func TestOsDistroEcosystem(t *testing.T) {
 		"pkg:rpm/redhat/bash@4.4?distro=rhel-9":                  "Red Hat:9", // mapped: owned RedHat CSAF feed keys "Red Hat:<major>"
 		"pkg:rpm/redhat/bash@4.4?distro=redhat-8.9":              "Red Hat:8", // the "redhat" distro id maps the same
 		"pkg:rpm/centos/bash@4.4?distro=centos-9":                "",          // CentOS Stream drifts ahead of RHEL → deliberately unmapped
-		"pkg:rpm/fedora/bash@5?distro=fedora-39":                 "",
+		"pkg:rpm/fedora/bash@5?distro=fedora-39":                 "Fedora:39", // mapped: owned Fedora updateinfo feed keys "Fedora:<major>"
 		"pkg:rpm/sles/libopenssl1_1@1.1.1w-1?distro=sles-15.6":   "SUSE:15.6", // mapped: owned SLE OVAL feed keys "SUSE:<major.minor>" per service pack
 		"pkg:rpm/sles/bash@4.4-1?distro=sles-15":                 "SUSE:15",   // SLE GA (no service pack) keys the bare major
 		"pkg:deb/debian/openssl@1.1":                             "",          // no distro qualifier
@@ -348,9 +348,9 @@ func TestDistroEcosystemLockstep(t *testing.T) {
 		"pkg:rpm/amzn/openssl@1.0.2k-24?distro=amzn-2",
 		"pkg:rpm/amzn/curl@8.5.0-1?distro=amzn-2023",
 		"pkg:rpm/opensuse-leap/bash@5.1-1?arch=x86_64&distro=opensuse-leap-15.6",
-		"pkg:rpm/sles/bash@5-1?distro=sles-15.6", // SUSE Linux Enterprise: owned SLE OVAL feed keys "SUSE:15.6"
+		"pkg:rpm/sles/bash@5-1?distro=sles-15.6",   // SUSE Linux Enterprise: owned SLE OVAL feed keys "SUSE:15.6"
+		"pkg:rpm/fedora/bash@5-1?distro=fedora-40", // Fedora: owned updateinfo feed keys "Fedora:40"
 		// Unmapped families must agree on "" (cataloged for inventory, never keyed to an advisory ecosystem).
-		"pkg:rpm/fedora/bash@5-1?distro=fedora-40",
 		"pkg:rpm/centos/bash@5-1?distro=centos-9",
 		// Case-variant distro qualifiers must still agree (both functions lowercase the qualifier).
 		"pkg:rpm/amzn/bash@5-1?distro=AMZN-2",

@@ -390,7 +390,7 @@ synapse-cli sync-advisories --csaf <dir>
 # ingest a local OVAL dump (Ubuntu/Debian dpkginfo, or Oracle/AlmaLinux/openSUSE/SUSE Linux Enterprise rpminfo, .xml[.bz2/.gz])
 synapse-cli sync-advisories --oval <dir>
 
-# ingest a local yum/dnf updateinfo dump (Amazon Linux ALAS: repodata updateinfo.xml[.gz])
+# ingest a local yum/dnf updateinfo dump (Amazon Linux ALAS and Fedora: repodata updateinfo.xml[.gz/.bz2/.zst])
 synapse-cli sync-advisories --updateinfo <dir>
 
 # ingest a local RESF/Apollo OSV list dump (Rocky Linux RLSA: apollo.build.resf.org OSV JSON pages)

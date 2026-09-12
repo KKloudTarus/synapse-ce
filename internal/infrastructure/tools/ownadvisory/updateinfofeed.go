@@ -26,7 +26,11 @@ var _ ports.AdvisoryFeed = (*UpdateInfoDirFeed)(nil)
 // hasUpdateInfoSuffix accepts the plain and compressed updateinfo XML file names.
 func hasUpdateInfoSuffix(name string) bool {
 	n := strings.ToLower(name)
-	return strings.HasSuffix(n, ".xml") || strings.HasSuffix(n, ".xml.gz") || strings.HasSuffix(n, ".xml.bz2")
+	// Fedora ships updateinfo only as zstd (.xml.zst); ParseUpdateInfo decompresses it by magic byte, bounded
+	// by the same decompressed cap as gzip/bzip2.
+	return strings.HasSuffix(n, ".xml") ||
+		strings.HasSuffix(n, ".xml.gz") || strings.HasSuffix(n, ".xml.bz2") ||
+		strings.HasSuffix(n, ".xml.zst")
 }
 
 // Each walks the directory, parses every updateinfo file via ParseUpdateInfo, and invokes fn for each

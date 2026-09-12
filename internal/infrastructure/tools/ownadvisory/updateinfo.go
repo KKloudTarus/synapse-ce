@@ -9,6 +9,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
@@ -35,8 +37,9 @@ type updateInfoUpdate struct {
 }
 
 type updateInfoRef struct {
-	Type string `xml:"type,attr"`
-	ID   string `xml:"id,attr"`
+	Type  string `xml:"type,attr"`
+	ID    string `xml:"id,attr"`
+	Title string `xml:"title,attr"` // Fedora carries its CVEs as a leading run of CVE tokens in the bugzilla ref title
 }
 
 type updateInfoCollection struct {
@@ -71,6 +74,16 @@ func ParseUpdateInfo(content []byte) ([]advisory.Advisory, error) {
 			return nil, fmt.Errorf("parse updateinfo: gzip: %w", err)
 		}
 		lr = &io.LimitedReader{R: gz, N: maxOVALDecompressed + 1}
+		r = lr
+	case bytes.HasPrefix(content, []byte{0x28, 0xb5, 0x2f, 0xfd}): // zstd magic (Fedora ships updateinfo.xml.zst)
+		// Bound the decoder's own memory to the same cap as the decompressed-stream LimitedReader below, so a
+		// hostile feed cannot force a large allocation before the reader cuts the output off.
+		zr, err := zstd.NewReader(r, zstd.WithDecoderMaxMemory(maxOVALDecompressed))
+		if err != nil {
+			return nil, fmt.Errorf("parse updateinfo: zstd: %w", err)
+		}
+		defer zr.Close()
+		lr = &io.LimitedReader{R: zr, N: maxOVALDecompressed + 1}
 		r = lr
 	}
 
@@ -217,13 +230,57 @@ func rpmLineage(evr string) string {
 func updateInfoCVEs(u updateInfoUpdate) []string {
 	seen := map[string]bool{}
 	var out []string
+	add := func(id string) {
+		if isCVEToken(id) && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
 	for _, ref := range u.References {
-		if strings.EqualFold(strings.TrimSpace(ref.Type), "cve") && strings.HasPrefix(ref.ID, "CVE-") && !seen[ref.ID] {
-			seen[ref.ID] = true
-			out = append(out, ref.ID)
+		switch strings.ToLower(strings.TrimSpace(ref.Type)) {
+		case "cve":
+			// Structured CVE reference (Amazon Linux / RHEL style): authoritative.
+			add(strings.TrimSpace(ref.ID))
+		case "bugzilla":
+			// Fedora publishes no type="cve" reference; its CVEs are a LEADING run of CVE tokens in the
+			// bugzilla reference title ("CVE-A CVE-B <pkg>: <desc> [scope]"). Take only that leading run so a
+			// CVE mentioned later in free text is never harvested, and a non-CVE tracking bug (a rebuild /
+			// FTBFS title) contributes nothing.
+			for _, tok := range leadingCVEs(ref.Title) {
+				add(tok)
+			}
 		}
 	}
 	return out
+}
+
+// leadingCVEs returns the run of CVE ids at the START of a bugzilla title, stopping at the first token that is
+// not a CVE id (the package name in Fedora's "CVE... CVE... pkg: desc" convention).
+func leadingCVEs(title string) []string {
+	var out []string
+	for _, tok := range strings.Fields(strings.TrimSpace(title)) {
+		if !isCVEToken(tok) {
+			break
+		}
+		out = append(out, tok)
+	}
+	return out
+}
+
+// isCVEToken reports whether s is a well-formed CVE id: CVE-<year>-<sequence> with EXACTLY 4 year digits and
+// AT LEAST 4 sequence digits (the CVE syntax). The strict shape stops a malformed leading token like
+// "CVE-2026-1" or "CVE-20261-1234" in a bugzilla title from minting a bogus advisory (a false positive).
+func isCVEToken(s string) bool {
+	rest, ok := strings.CutPrefix(s, "CVE-")
+	if !ok {
+		return false
+	}
+	dash := strings.IndexByte(rest, '-')
+	if dash != 4 { // the year is exactly 4 digits
+		return false
+	}
+	year, num := rest[:dash], rest[dash+1:]
+	return isAllDigits(year) && len(num) >= 4 && isAllDigits(num)
 }
 
 type amazonBinding struct {
@@ -239,11 +296,10 @@ type amazonBinding struct {
 func updateInfoBindings(u updateInfoUpdate) []amazonBinding {
 	var out []amazonBinding
 	for _, c := range u.Collections {
-		release := amazonRelease(c.Short, c.Name)
-		if release == "" {
+		ecosystem := updateInfoEcosystem(c.Short, c.Name)
+		if ecosystem == "" {
 			continue // unrecognized collection: skip rather than key a package to an unknown release
 		}
-		ecosystem := "Amazon Linux:" + release
 		for _, p := range c.Packages {
 			name := strings.TrimSpace(p.Name)
 			evr := rpmEVR(p.Epoch, p.Version, p.Release)
@@ -261,6 +317,38 @@ func updateInfoBindings(u updateInfoUpdate) []amazonBinding {
 // with "Amazon Linux " ("Amazon Linux 2" -> "2"). Both matches are ANCHORED so a non-Amazon collection (for
 // example an "EPEL for Amazon Linux 2" name, or an "rhel-9" short) returns "" and is skipped, never keyed to
 // an Amazon release.
+// updateInfoEcosystem maps an updateinfo collection (short id + name) to the advisory ecosystem key its
+// packages belong to, trying each supported updateinfo distro. It returns "" for an unrecognized collection
+// so a package is never keyed to an unknown release. The collection is authoritative for the release: a
+// Fedora update's bugzilla title may carry a cross-release scope tag ([fedora-42]/[epel-9]), but the shipped
+// package belongs to the collection's own release (F43 -> Fedora:43).
+func updateInfoEcosystem(short, name string) string {
+	if rel := amazonRelease(short, name); rel != "" {
+		return "Amazon Linux:" + rel
+	}
+	if rel := fedoraRelease(short, name); rel != "" {
+		return "Fedora:" + rel
+	}
+	return ""
+}
+
+// fedoraRelease extracts the Fedora release from an updateinfo collection: short "F43" or name "Fedora 43" ->
+// "43". The whole remainder must be digits so an EPEL collection ("Fedora EPEL 9") or a look-alike is not
+// keyed to Fedora.
+func fedoraRelease(short, name string) string {
+	if v := strings.TrimPrefix(short, "F"); v != short && isAllDigits(v) {
+		return v
+	}
+	const prefix = "fedora "
+	trimmed := strings.TrimSpace(name)
+	if strings.HasPrefix(strings.ToLower(trimmed), prefix) {
+		if rest := strings.TrimSpace(trimmed[len(prefix):]); isAllDigits(rest) {
+			return rest
+		}
+	}
+	return ""
+}
+
 func amazonRelease(short, name string) string {
 	// The release token must be the COMPLETE remainder (all digits): a real Amazon collection is exactly
 	// "amazon-linux-2" / "amazon-linux-2023" / "Amazon Linux 2". Requiring the whole remainder rejects a
