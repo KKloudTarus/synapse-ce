@@ -176,7 +176,7 @@ func rpmNDBComponents(ctx context.Context, dbPath, namespace, tag string) (out [
 	}
 	for _, pkgIdx := range order {
 		c := best[pkgIdx]
-		if comp, ok := osComponent("rpm", namespace, c.name, c.evr, c.arch, tag); ok {
+		if comp, ok := osComponent("rpm", namespace, c.name, c.evr, c.arch, tag, ""); ok {
 			comp.Location = dbPath // attribute the component to the DB's image layer
 			out = append(out, comp)
 		}

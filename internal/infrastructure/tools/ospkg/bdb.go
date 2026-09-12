@@ -134,7 +134,7 @@ func rpmBDBComponents(ctx context.Context, dbPath, namespace, tag string) (out [
 	// contributes nothing. Shared by the inline and overflow value paths so both behave identically.
 	emit := func(blob []byte) {
 		if name, evr, arch, ok := safeParseRPMHeader(blob); ok {
-			if c, compOK := osComponent("rpm", namespace, name, evr, arch, tag); compOK {
+			if c, compOK := osComponent("rpm", namespace, name, evr, arch, tag, ""); compOK {
 				c.Location = dbPath // the rpm DB's path, so the component attributes to the DB's image layer
 				out = append(out, c)
 			}

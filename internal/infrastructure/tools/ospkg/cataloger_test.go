@@ -225,8 +225,8 @@ func TestCatalogRPMDistroResolution(t *testing.T) {
 	}{
 		{"amzn", "2", true},
 		{"amzn", "2023", true},
-		{"fedora", "40", false},
-		{"centos", "9", false},
+		{"fedora", "40", true}, // resolves now that the owned Fedora updateinfo feed exists (Fedora:40)
+		{"centos", "9", false}, // deliberately unmapped: CentOS Stream runs ahead of RHEL
 	}
 	for _, tc := range cases {
 		t.Run(tc.id+"-"+tc.ver, func(t *testing.T) {
@@ -280,5 +280,100 @@ func TestCatalogWolfi(t *testing.T) {
 				t.Errorf("glibc ecosystem = %q, want %q", eco, wantEco)
 			}
 		})
+	}
+}
+
+// upstreamQualifier extracts the raw (still percent-encoded) value of the deb PURL "upstream=" qualifier.
+func upstreamQualifier(purl string) string {
+	i := strings.IndexByte(purl, '?')
+	if i < 0 {
+		return ""
+	}
+	for _, kv := range strings.Split(purl[i+1:], "&") {
+		if v, ok := strings.CutPrefix(kv, "upstream="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+func TestDpkgSourceQualifier(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		source, bin  string
+		wantUpstream string
+	}{
+		{"absent source (binary is the source)", "", "coreutils", ""},
+		{"same name, no version", "coreutils", "coreutils", ""},
+		{"distinct source name only", "gnupg2", "gpgv", "gnupg2"},
+		{"distinct source with version (binNMU)", "util-linux (2.38.1-5)", "libblkid1", "util-linux@2.38.1-5"},
+		{"same name but explicit version is dropped (primary lookup owns it)", "bash (5.2.15-2)", "bash", ""},
+		{"whitespace tolerated", "  glibc  ", "libc6", "glibc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := dpkgSourceQualifier(tc.source, tc.bin); got != tc.wantUpstream {
+				t.Errorf("dpkgSourceQualifier(%q,%q) = %q, want %q", tc.source, tc.bin, got, tc.wantUpstream)
+			}
+		})
+	}
+}
+
+// TestCatalogDebianSourceUpstream is the regression guard for EPIC #860 Debian OS-CVE recall: a binary
+// package whose SOURCE name differs (gpgv from gnupg2, libgnutls30 from gnutls28) must carry an "upstream="
+// qualifier so the advisory matcher, which keys Debian advisories by the SOURCE package, still matches it.
+// Measured impact on python:3.9.18-slim: Debian CVE recall vs Trivy rose from 29% to 98% once this landed.
+func TestCatalogDebianSourceUpstream(t *testing.T) {
+	rootfs := writeRootfs(t, map[string]string{
+		"etc/os-release": "ID=debian\nVERSION_ID=\"12\"\n",
+		"var/lib/dpkg/status": "" +
+			// distinct source name, no source version
+			"Package: gpgv\nStatus: install ok installed\nVersion: 2.2.40-1.1\nArchitecture: amd64\nSource: gnupg2\n\n" +
+			// distinct source name WITH a binNMU source version (binary version has +b1)
+			"Package: libblkid1\nStatus: install ok installed\nVersion: 2.38.1-5+b1\nArchitecture: amd64\nSource: util-linux (2.38.1-5)\n\n" +
+			// no Source field: the binary name IS the source, so no upstream qualifier
+			"Package: coreutils\nStatus: install ok installed\nVersion: 9.1-1\nArchitecture: amd64\n",
+	})
+	res, err := New().Catalog(context.Background(), rootfs)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	by := byName(res.Components)
+	if got := upstreamQualifier(by["gpgv"].PURL); got != "gnupg2" {
+		t.Errorf("gpgv upstream = %q, want gnupg2 (%s)", got, by["gpgv"].PURL)
+	}
+	// util-linux@2.38.1-5, percent-encoded: '@' -> %40 (so a hostile Source cannot inject a qualifier).
+	if got := upstreamQualifier(by["libblkid1"].PURL); got != "util-linux%402.38.1-5" {
+		t.Errorf("libblkid1 upstream = %q, want util-linux%%402.38.1-5 (%s)", got, by["libblkid1"].PURL)
+	}
+	if got := upstreamQualifier(by["coreutils"].PURL); got != "" {
+		t.Errorf("coreutils upstream = %q, want empty (no distinct source) (%s)", got, by["coreutils"].PURL)
+	}
+}
+
+// TestCatalogDebianSourceQualifierInjectionSafe pins the qualifier-injection safety of the untrusted dpkg
+// Source: field (the image controls /var/lib/dpkg/status). A Source value carrying PURL qualifier separators
+// (&, =, ?) must be percent-encoded into the upstream= value and can never inject a SECOND qualifier such as
+// distro=, which would cross-key the component to a foreign release and forge a CVE. This is a defense-in-depth
+// regression guard on the #1 no-false-positive path: if purlEncode's allowlist were ever weakened, this fails.
+func TestCatalogDebianSourceQualifierInjectionSafe(t *testing.T) {
+	rootfs := writeRootfs(t, map[string]string{
+		"etc/os-release":      "ID=debian\nVERSION_ID=\"12\"\n",
+		"var/lib/dpkg/status": "Package: evilbin\nStatus: install ok installed\nVersion: 1.0\nArchitecture: amd64\nSource: evil&distro=lies (1.0)\n",
+	})
+	res, err := New().Catalog(context.Background(), rootfs)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	c := byName(res.Components)["evilbin"]
+	// The only distro qualifier is the legit release, never an injected distro=lies.
+	if got := distroQualifier(c.PURL); got != "debian-12" {
+		t.Errorf("distro qualifier = %q, want debian-12 (a hostile Source must not inject distro=): %s", got, c.PURL)
+	}
+	if strings.Count(c.PURL, "distro=") != 1 {
+		t.Errorf("PURL carries an injected qualifier: %s", c.PURL)
+	}
+	// The hostile separators are percent-encoded inside the upstream value (& -> %26, = -> %3D, @ -> %40).
+	if up := upstreamQualifier(c.PURL); up != "evil%26distro%3Dlies%401.0" {
+		t.Errorf("upstream = %q, want evil%%26distro%%3Dlies%%401.0 (separators percent-encoded)", up)
 	}
 }

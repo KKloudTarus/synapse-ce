@@ -141,7 +141,7 @@ func rpmSQLiteComponents(ctx context.Context, rootfsDir, namespace, tag string) 
 		}
 		total += int64(len(b))
 		if name, evr, arch, ok := safeParseRPMHeader(b); ok {
-			if c, ok := osComponent("rpm", namespace, name, evr, arch, tag); ok {
+			if c, ok := osComponent("rpm", namespace, name, evr, arch, tag, ""); ok {
 				c.Location = path // the rpm DB's path, so the component attributes to the DB's image layer
 				out = append(out, c)
 			}
