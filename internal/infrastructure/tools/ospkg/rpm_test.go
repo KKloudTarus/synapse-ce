@@ -327,3 +327,20 @@ func TestCatalogRPMCentOSUnsupported(t *testing.T) {
 		t.Errorf("CentOS package must keep a centos PURL namespace (never aliased to rhel), got %q", p)
 	}
 }
+
+// TestUnsupportedAndMatchableAreDisjoint guards a dangerous future edit: a distro must never be BOTH
+// advisory-matchable and flagged unsupported. If a supported id (rhel/rocky/almalinux/...) were ever added to
+// knownUnsupportedRPMIDs, its real OS findings would be relabeled a coverage gap. Keep the two sets disjoint.
+func TestUnsupportedAndMatchableAreDisjoint(t *testing.T) {
+	for id := range knownUnsupportedRPMIDs {
+		if rpmMatchableIDs[id] {
+			t.Errorf("distro %q is BOTH matchable and unsupported: a supported distro must never be flagged coverage=unsupported", id)
+		}
+	}
+	// Sanity: the supported rpm distros are not accidentally in the unsupported set.
+	for _, id := range []string{"rhel", "redhat", "rocky", "almalinux", "ol", "amzn", "fedora", "sles"} {
+		if knownUnsupportedRPMIDs[id] {
+			t.Errorf("supported distro %q must not be in knownUnsupportedRPMIDs", id)
+		}
+	}
+}
