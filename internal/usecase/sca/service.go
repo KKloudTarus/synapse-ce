@@ -439,6 +439,62 @@ func (s *Service) scanWithSources(ctx context.Context, doc *sbom.SBOM, trace *sc
 	return raws, warnings, nil
 }
 
+// detectionReadiness is the owned-engine readiness guard. Called ONCE right after the vulnerability scan, it
+// inspects each configured detection source's provenance: a source has "coverage" if it reports a non-empty
+// DB marker, or if it does not report provenance at all (an opaque source is assumed to carry its own DB, as
+// it cannot be judged). If NO source has coverage while the SBOM has components, then no detection actually
+// ran and a zero-vulnerability result is a FALSE clean, not a clean bill: it returns a warning and
+// incomplete=true so the scan is marked not-confident, and — under strict sources — a non-nil error so an
+// owned-only deployment fails closed rather than shipping a misleading clean scan. This covers both an empty
+// owned advisory corpus / missing Grype DB AND a misconfiguration that leaves the source list empty. The
+// guarantee is scoped: for an owned-only or otherwise all-provenance deployment it fails closed on an empty
+// corpus; a mixed deployment that includes an opaque source trusts that source to have attempted coverage
+// (the guard does not prove a mixed deployment found vulnerabilities). The result is snapshotted by the caller
+// and carried to the completeness site, so a concurrent advisory sync cannot flip the verdict between reads.
+func (s *Service) detectionReadiness(hasComponents bool) (warning string, incomplete bool, err error) {
+	if !hasComponents {
+		return "", false, nil
+	}
+	withCoverage := 0
+	for _, src := range s.sources {
+		p, ok := src.(ports.SourceProvenance)
+		if !ok {
+			withCoverage++ // opaque source: assume its own DB, cannot judge readiness
+			continue
+		}
+		if ver, db := p.Provenance(); ver != "" || db != "" {
+			withCoverage++
+		}
+	}
+	if withCoverage > 0 {
+		return "", false, nil
+	}
+	const w = "no detection source had a usable vulnerability database: every configured source reported an empty DB (an unsynced owned advisory corpus, or a missing Grype binary/DB), or no detection source is configured. A zero-vulnerability result is NOT a clean bill; sync advisories (synapse-cli sync-advisories) or provision the DB, then re-scan"
+	if s.strictSources {
+		return w, true, fmt.Errorf("detection readiness: %s", w)
+	}
+	return w, true, nil
+}
+
+// applyDetectionReadiness folds the SNAPSHOTTED non-strict readiness verdict into a built result: when the
+// scan that just ran had no detection source with a usable DB, it forces Completeness not-confident and
+// records the warning, so a zero-vulnerability result can never read as a clean bill. The verdict is passed in
+// (captured once right after the scan) rather than recomputed, so a concurrent advisory sync cannot change it
+// between the scan and result build. No-op when the scan was ready (incomplete=false); the strict path has
+// already aborted before result build.
+func applyDetectionReadiness(result *ScanResult, warning string, incomplete bool) {
+	if result == nil || !incomplete || warning == "" {
+		return
+	}
+	result.Completeness.Confident = false
+	if result.Completeness.Warning == "" {
+		result.Completeness.Warning = warning
+	} else {
+		result.Completeness.Warning = warning + "; " + result.Completeness.Warning
+	}
+	result.SourceWarnings = append(result.SourceWarnings, warning)
+}
+
 // SetDetectionPriority sets the server-level default detection priority (comprehensive|precise) applied
 // when a scan request does not specify one – so a server-configured SYNAPSE_DETECTION_PRIORITY reaches
 // the API scan path, which has no per-request priority field. Empty leaves the comprehensive default.
@@ -2273,12 +2329,23 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	var riskVersions map[string]string
 	var riskMatches map[string]int
 	var detectionSourceWarnings []string
+	var detectionReadinessWarn string     // snapshotted readiness verdict (captured once, applied at result build)
+	var detectionReadinessIncomplete bool // true ⇒ no detection source had a usable DB for this scan
 	if opts.scansVulnerabilities() {
 		stage, pct = stageVulns, 55
 		report(stage, pct, trace.snapshot())
 		srcRaws, srcWarnings, srcErr := s.scanWithSources(ctx, doc, trace)
 		if srcErr != nil {
 			return nil, srcErr
+		}
+		// Readiness, captured ONCE from the just-finished scan's provenance: under strict sources an empty
+		// detection corpus (no source had a usable DB) aborts rather than return a misleading zero-vulnerability
+		// result; non-strict carries the snapshot to the completeness site (applyDetectionReadiness) so a
+		// concurrent advisory sync cannot flip the verdict between the scan and result build.
+		var readyErr error
+		detectionReadinessWarn, detectionReadinessIncomplete, readyErr = s.detectionReadiness(len(doc.Components) > 0)
+		if readyErr != nil {
+			return nil, readyErr
 		}
 		raws = append(raws, srcRaws...)
 		detectionSourceWarnings = srcWarnings
@@ -2389,6 +2456,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		LineCoverage:             opts.LineCoverage,
 		Gate:                     opts.Gate,
 	}
+	applyDetectionReadiness(result, detectionReadinessWarn, detectionReadinessIncomplete) // empty detection corpus ⇒ not-confident + warning (non-strict)
 	result.Findings = buildFindings(engagementID, result, now, s.minSeverity, s.ignoreUnfixed, nil)
 	result.MinSeverity = s.minSeverity
 	result.VulnsBelowThreshold = countBelowThreshold(vulns, s.minSeverity)
@@ -2946,6 +3014,8 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	var riskVersions map[string]string
 	var riskMatches map[string]int
 	var detectionSourceWarnings []string
+	var detectionReadinessWarn string     // snapshotted readiness verdict (captured once, applied at result build)
+	var detectionReadinessIncomplete bool // true ⇒ no detection source had a usable DB for this scan
 	if opts.scansVulnerabilities() {
 		stage, pct = stageVulns, 55
 		report(stage, pct, trace.snapshot())
@@ -2955,6 +3025,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		srcRaws, srcWarnings, srcErr := s.scanWithSources(ctx, doc, trace)
 		if srcErr != nil {
 			return nil, srcErr
+		}
+		// Readiness, captured ONCE from the just-finished scan's provenance: under strict sources an empty
+		// detection corpus (no source had a usable DB) aborts rather than return a misleading zero-vulnerability
+		// result; non-strict carries the snapshot to the completeness site (applyDetectionReadiness) so a
+		// concurrent advisory sync cannot flip the verdict between the scan and result build.
+		var readyErr error
+		detectionReadinessWarn, detectionReadinessIncomplete, readyErr = s.detectionReadiness(len(doc.Components) > 0)
+		if readyErr != nil {
+			return nil, readyErr
 		}
 		raws = append(raws, srcRaws...)
 		detectionSourceWarnings = srcWarnings
@@ -3173,6 +3252,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		Gate:                     opts.Gate,
 		Comparison:               comparisonFromWorkspace(req, ws),
 	}
+	applyDetectionReadiness(result, detectionReadinessWarn, detectionReadinessIncomplete) // empty detection corpus ⇒ not-confident + warning (non-strict)
 	// SBOM production failed: force the scan INCOMPLETE and surface it, so the empty dependency/vuln/
 	// license coverage reads as a known gap rather than a clean result. The source-only analyzers below
 	// still run and contribute findings.
