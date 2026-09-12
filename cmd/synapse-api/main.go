@@ -322,6 +322,10 @@ func main() {
 		log.Error("OIDC posture invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateSecretVerification(); err != nil {
+		log.Error("active secret verification configuration invalid", "err", err)
+		os.Exit(1)
+	}
 	if err := cfg.ValidateEgressGrantPosture(config.ProcessRoleAPI); err != nil {
 		log.Error("egress grant posture invalid", "err", err)
 		os.Exit(1)

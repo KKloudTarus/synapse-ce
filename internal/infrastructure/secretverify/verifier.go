@@ -10,20 +10,19 @@
 //   - A transport/DNS/timeout failure maps to SecretUnknown, NEVER to SecretUnverified: "could not reach the
 //     provider" must not be confused with "the provider rejected the credential", or a network outage would
 //     understate a live leak. Only an explicit provider rejection (401/403) is SecretUnverified.
-//   - Outbound requests use the SSRF-hardened safehttp client (no proxy, no redirects, public hosts only)
-//     and are rate-limited. The whole feature is default-off; a nil verifier means no verification.
+//   - Outbound requests use SSRF-hardened safehttp clients (no proxy or redirects) and are rate-limited.
+//     Public providers reject private destinations; an explicitly configured HTTPS Vault address may resolve
+//     to RFC1918 space but still rejects loopback, link-local, multicast, and other special ranges.
 //
-// Providers requiring more than a single bearer token are deliberately NOT verified here and return
-// SecretUnknown: AWS needs the access-key-id + secret-access-key PAIR (SigV4), which a single-rule match
-// does not carry, and HashiCorp Vault needs an operator-supplied address. Adding pair-aware AWS and
-// configured-address Vault verification is a documented follow-up; returning SecretUnknown keeps the
-// verifier honest rather than emitting a fabricated verdict.
+// AWS is exposed through the optional ports.GroupedSecretVerifier extension because STS needs a correlated
+// access-key/secret-key pair. Vault is registered only when an operator supplies a validated HTTPS address.
 package secretverify
 
 import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -50,7 +49,8 @@ const (
 // always inconclusive (rate limit / abuse / SSO / permissions) and never a rejection.
 type provider struct {
 	name        string
-	baseURL     string // overridable in tests; defaults to the real provider host
+	baseURL     string       // overridable in tests; defaults to the real provider host
+	client      *http.Client // nil uses the verifier's public-only client
 	rejectOn401 bool
 	// eligible, when non-nil, gates whether a matched secret is actually sent to this provider. It narrows a
 	// broad detector rule to only high-confidence shapes for THIS provider, so a foreign secret that merely
@@ -62,9 +62,12 @@ type provider struct {
 // Verifier is the concrete ports.SecretVerifier: a per-rule registry of providers over one shared,
 // SSRF-hardened, rate-limited HTTP client.
 type Verifier struct {
-	client  *http.Client
-	limiter *rate.Limiter
-	byRule  map[string]*provider
+	client      *http.Client
+	vaultClient *http.Client
+	limiter     *rate.Limiter
+	byRule      map[string]*provider
+	stsURL      string
+	now         func() time.Time
 }
 
 var _ ports.SecretVerifier = (*Verifier)(nil)
@@ -74,22 +77,62 @@ var _ ports.SecretVerifier = (*Verifier)(nil)
 // caller cannot substitute an unhardened client that would follow a cross-host redirect and forward the
 // secret header. Tests use newWithClient.
 func New(rps float64) *Verifier {
-	return newWithClient(safehttp.New(defaultTimeout, false), rps)
+	v, _ := NewWithVault(rps, "")
+	return v
+}
+
+// NewWithVault extends the built-in public providers with an operator-supplied Vault base address. The
+// address must be absolute HTTPS without userinfo; query and fragment are discarded, and the read-only
+// token self-lookup path is appended. An empty address leaves Vault verification disabled.
+func NewWithVault(rps float64, vaultAddr string) (*Verifier, error) {
+	vaultURL, err := vaultLookupURL(vaultAddr)
+	if err != nil {
+		return nil, err
+	}
+	v := newWithClients(safehttp.New(defaultTimeout, false), safehttp.New(defaultTimeout, true), rps)
+	if vaultURL != "" {
+		v.byRule["vault-token"] = &provider{
+			name: "vault", baseURL: vaultURL, client: v.vaultClient, rejectOn401: true, check: checkVault,
+		}
+	}
+	return v, nil
 }
 
 // newWithClient is the internal constructor that accepts an explicit client (tests inject an httptest
 // client, since safehttp blocks loopback). Not exported so production egress cannot be un-hardened.
 func newWithClient(client *http.Client, rps float64) *Verifier {
+	return newWithClients(client, client, rps)
+}
+
+func newWithClients(client, vaultClient *http.Client, rps float64) *Verifier {
 	if rps <= 0 {
 		rps = defaultRPS
 	}
 	v := &Verifier{
-		client:  client,
-		limiter: rate.NewLimiter(rate.Limit(rps), 1),
-		byRule:  map[string]*provider{},
+		client:      client,
+		vaultClient: vaultClient,
+		limiter:     rate.NewLimiter(rate.Limit(rps), 1),
+		byRule:      map[string]*provider{},
+		stsURL:      awsSTSEndpoint,
+		now:         time.Now,
 	}
 	v.register()
 	return v
+}
+
+func vaultLookupURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+		return "", fmt.Errorf("secret verifier: Vault address must be an absolute HTTPS URL without userinfo")
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.Path = strings.TrimRight(u.Path, "/") + "/v1/auth/token/lookup-self"
+	return u.String(), nil
 }
 
 // register wires the built-in providers to the detector rule ids they can verify. GitHub and GitLab are
@@ -132,7 +175,11 @@ func (v *Verifier) Verify(ctx context.Context, ruleID string, secret []byte) (po
 		return ports.SecretUnknown, fmt.Errorf("secret verify rate-limit wait: %w", err) // ctx error; carries no secret
 	}
 	s := string(secret)
-	verdict, err := p.check(ctx, v.client, p.baseURL, s, p.rejectOn401)
+	client := p.client
+	if client == nil {
+		client = v.client
+	}
+	verdict, err := p.check(ctx, client, p.baseURL, s, p.rejectOn401)
 	if err != nil {
 		// Scrub the secret out of the error unconditionally, then map any failure to unknown (never to
 		// unverified): a failed call is "did not confirm", not "confirmed dead".

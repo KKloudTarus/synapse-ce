@@ -484,8 +484,9 @@ type Config struct {
 	// otherwise it is a best-effort no-op with a warning. Redacts every match like the working-tree scan.
 	SecretHistoryEnabled bool
 	// SecretVerifyEnabled turns on OPT-IN active secret verification (D6.3): for a detected credential whose
-	// provider is supported (GitHub, GitLab, OpenAI in this build), the scanner makes ONE minimal read-only
-	// API call to that provider to confirm the credential is live, and stamps the finding verified/unverified.
+	// provider is supported (GitHub, GitLab, OpenAI, configured Vault, or an unambiguously paired AWS
+	// credential set), the scanner makes ONE minimal read-only API call to confirm it is live and stamps the
+	// finding verified/unverified.
 	// OFF by default and SECURITY-SENSITIVE: it sends the raw leaked secret to its issuing provider over the
 	// network (SSRF-hardened client, rate-limited, secret never logged). Enable only for an authorized
 	// assessment. A verified credential is raised above needs-verify; an unverified/unknown verdict never
@@ -494,6 +495,10 @@ type Config struct {
 	// SecretVerifyRPS caps the verifier's outbound provider requests per second (default 5). Only meaningful
 	// when SecretVerifyEnabled is true.
 	SecretVerifyRPS int
+	// SecretVerifyVaultAddr is the optional absolute HTTPS base address used to verify Vault tokens. It may
+	// resolve to private network space, but loopback/link-local/special ranges remain blocked. Empty disables
+	// Vault verification while leaving the public providers available.
+	SecretVerifyVaultAddr string
 	// MisconfigEnabled turns on the deterministic IaC/config misconfig scanner (Dockerfile, Kubernetes
 	// manifests) in the scan pipeline; off by default. Read-only, first-party checks, no policy engine.
 	MisconfigEnabled bool
@@ -879,6 +884,7 @@ func Load() Config {
 		SecretHistoryEnabled:              getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
 		SecretVerifyEnabled:               getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
 		SecretVerifyRPS:                   getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
+		SecretVerifyVaultAddr:             strings.TrimSpace(getenv("SYNAPSE_SECRET_VERIFY_VAULT_ADDR", "")),
 		MisconfigEnabled:                  getbool("SYNAPSE_MISCONFIG_ENABLED", true),
 		SuppressionEnabled:                getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
 		VEXEnabled:                        getbool("SYNAPSE_VEX_ENABLED", true),
