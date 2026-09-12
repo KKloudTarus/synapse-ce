@@ -1033,3 +1033,38 @@ func jvmReachabilityVerdicts(findings []finding.Finding, vulns []vulnerability.V
 	}
 	return out
 }
+
+// rustSymbolReachabilitySubjects builds Tier-2 Rust subjects: each promoted finding on a cargo (crates.io)
+// component whose advisory names affected functions becomes a subject carrying those functions verbatim (the
+// RustSec "crate::path::func" form), which the raise-only Rust symbol analyzer matches against first-party
+// source. A finding with no cargo component or no affected symbols is skipped (it gets no Tier-2 verdict).
+func rustSymbolReachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vulnerability, doc *sbom.SBOM) []ports.ReachabilitySubject {
+	if doc == nil {
+		return nil
+	}
+	cargo := map[string]bool{}
+	for _, c := range doc.Components {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.PURL)), "pkg:cargo/") {
+			cargo[strings.ToLower(c.Name)+"\x00"+c.Version] = true
+		}
+	}
+	if len(cargo) == 0 {
+		return nil
+	}
+	byDedup := make(map[string]vulnerability.Vulnerability, len(vulns))
+	for _, v := range vulns {
+		byDedup[vulnDedupKey(v)] = v
+	}
+	var subs []ports.ReachabilitySubject
+	for _, f := range findings {
+		v, ok := byDedup[f.DedupKey]
+		if !ok || len(v.AffectedSymbols) == 0 {
+			continue
+		}
+		if !cargo[strings.ToLower(v.Component)+"\x00"+v.Version] {
+			continue
+		}
+		subs = append(subs, ports.ReachabilitySubject{FindingID: f.ID, Symbols: v.AffectedSymbols})
+	}
+	return subs
+}

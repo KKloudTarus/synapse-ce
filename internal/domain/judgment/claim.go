@@ -70,6 +70,12 @@ const (
 	ProofActorPyImportEngine   = "system:pyimport-engine"
 	ProofActorRustImportScan   = "system:rustimport-scan"
 	ProofActorRustImportEngine = "system:rustimport-engine"
+	// Rust affected-symbol reachability is a Tier-2 RAISE-ONLY signal: a source scan can prove a
+	// qualified reference to a vulnerable function (raising urgency) but cannot prove ABSENCE (a method
+	// call or macro cannot be tied to a crate without type resolution). Its actors are deliberately absent
+	// from IsDeterministicReachabilityProof, so a Rust symbol verdict can never become a VEX not_affected.
+	ProofActorRustSymbolScan   = "system:rustsymbol-scan"
+	ProofActorRustSymbolEngine = "system:rustsymbol-engine"
 	ProofActorPHPImportScan    = "system:phpimport-scan"
 	ProofActorPHPImportEngine  = "system:phpimport-engine"
 	ProofActorRubyImportScan   = "system:rubyimport-scan"
