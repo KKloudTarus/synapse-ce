@@ -753,7 +753,11 @@ func reachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vuln
 	var subs []ports.ReachabilitySubject
 	for _, f := range findings {
 		if v, ok := byDedup[f.DedupKey]; ok && len(v.AffectedSymbols) > 0 {
-			subs = append(subs, ports.ReachabilitySubject{FindingID: f.ID, Symbols: v.AffectedSymbols})
+			subs = append(subs, ports.ReachabilitySubject{
+				FindingID:   f.ID,
+				Symbols:     v.AffectedSymbols,
+				PackagePURL: v.PackagePURL,
+			})
 		}
 	}
 	return subs

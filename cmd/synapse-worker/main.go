@@ -438,7 +438,7 @@ func main() {
 	// Source-only judgment-minting scanners in the default scan path (Python value-flow taint today), shared
 	// with synapse-api via scacompose. The worker runs queued SCA scans, so without this a worker-run scan
 	// would be regex-only. Gated on the judgment lifecycle (it mints CapSAST proposals).
-	if (cfg.PythonTaintEnabled || cfg.JsTaintEnabled || cfg.JavaTaintEnabled) && cfg.JudgmentsEnabled {
+	if (cfg.PythonTaintEnabled || cfg.JsTaintEnabled || cfg.JavaTaintEnabled || cfg.JVMReachabilityEnabled) && cfg.JudgmentsEnabled {
 		scaJudgmentSvc, jerr := analysisuc.NewService(postgres.NewJudgmentRepository(pool), evidenceService, auditLog, clock, ids)
 		if jerr != nil {
 			log.Error("worker SCA judgment service init failed", "err", jerr)
