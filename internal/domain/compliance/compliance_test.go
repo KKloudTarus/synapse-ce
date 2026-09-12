@@ -115,7 +115,9 @@ func TestControlsForRuleAndFinding(t *testing.T) {
 	}
 }
 
-// Rollup aggregates a finding set into a per-framework rollup, counting each finding once per framework.
+// Rollup aggregates a finding set into a per-framework rollup: each framework reports FAILED controls (a
+// finding mapped) alongside its full assessable-control list (the rest NOT_ASSESSED), and counts each finding
+// once per framework. A NOT_ASSESSED control is never a pass.
 func TestComplianceRollup(t *testing.T) {
 	findings := []finding.Finding{
 		{RuleKey: "kubernetes-privileged"},          // CIS-Kubernetes-1.10 5.2.2
@@ -129,11 +131,34 @@ func TestComplianceRollup(t *testing.T) {
 	for _, fc := range roll {
 		got[fc.Framework] = fc
 	}
-	if k := got["CIS-Kubernetes-1.10"]; k.Findings != 2 || len(k.Controls) != 2 {
-		t.Errorf("K8s rollup: want 2 findings / 2 controls, got %+v", k)
+
+	statusOf := func(fc FrameworkCoverage, id string) (ComplianceStatus, bool) {
+		for _, cs := range fc.Controls {
+			if cs.Control.ID == id {
+				return cs.Status, true
+			}
+		}
+		return "", false
 	}
-	if a := got["CIS-AWS-3.0"]; a.Findings != 1 || len(a.Controls) != 1 {
-		t.Errorf("AWS rollup: want 1 finding / 1 control, got %+v", a)
+
+	k := got["CIS-Kubernetes-1.10"]
+	if k.Findings != 2 || k.Failed != 2 {
+		t.Errorf("K8s rollup: want 2 findings / 2 failed controls, got %+v", k)
+	}
+	// The full assessable set is listed (denominator), not just the two failed controls.
+	if k.Assessable <= 2 || len(k.Controls) != k.Assessable {
+		t.Errorf("K8s rollup must list ALL assessable controls (denominator), got assessable=%d controls=%d", k.Assessable, len(k.Controls))
+	}
+	if st, ok := statusOf(k, "5.2.2"); !ok || st != ControlFailed {
+		t.Errorf("K8s 5.2.2 must be FAILED, got %q ok=%v", st, ok)
+	}
+	// A mapped-but-untouched K8s control is NOT_ASSESSED, never a pass.
+	if st, ok := statusOf(k, "5.2.6"); !ok || st != ControlNotAssessed {
+		t.Errorf("K8s 5.2.6 (mapped, no finding) must be NOT_ASSESSED, got %q ok=%v", st, ok)
+	}
+
+	if a := got["CIS-AWS-3.0"]; a.Findings != 1 || a.Failed != 1 {
+		t.Errorf("AWS rollup: want 1 finding / 1 failed control, got %+v", a)
 	}
 	if _, ok := got["OWASP-2021"]; !ok {
 		t.Errorf("CWE-mapped OWASP framework must appear in the rollup, got %v", roll)

@@ -523,6 +523,9 @@ func (s *Service) attachCompliance(result *ScanResult) {
 	// findings BEFORE compliance, and this qualifies the result accordingly.
 	rep.MinSeverity = string(result.MinSeverity)
 	rep.IgnoreUnfixed = s.ignoreUnfixed
+	// Per-framework CIS/OWASP/PCI/ISO coverage rollup (D6.6): FAILED vs NOT_ASSESSED per assessable control,
+	// never a PASS assertion. Surfaced in the scan result JSON and the report.
+	rep.Frameworks = compliance.Rollup(result.Findings)
 	result.Compliance = &rep
 }
 
