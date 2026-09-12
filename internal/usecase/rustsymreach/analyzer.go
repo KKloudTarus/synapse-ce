@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/symbolcanon"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
 )
@@ -57,16 +58,17 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 		return nil, err
 	}
 
-	// Pre-split the observed qualified references once.
-	qualified := make([][]string, 0, len(idx.Qualified))
+	// Pre-canonicalize the observed qualified references once (shared symbolcanon: the SAME
+	// canonicalizer runs on the advisory subject below, so the two sides compare symmetrically).
+	qualified := make([]symbolcanon.Symbol, 0, len(idx.Qualified))
 	for _, r := range idx.Qualified {
-		qualified = append(qualified, splitNorm(r))
+		qualified = append(qualified, symbolcanon.Canonicalize(symbolcanon.Rust, r))
 	}
 	// use-resolved calls: a leaf bound by `use crate::…::leaf` and actually called as leaf(...).
-	usedPaths := make([][]string, 0, len(idx.Uses))
+	usedPaths := make([]symbolcanon.Symbol, 0, len(idx.Uses))
 	for leaf, path := range idx.Uses {
 		if idx.Called[leaf] {
-			usedPaths = append(usedPaths, splitNorm(path))
+			usedPaths = append(usedPaths, symbolcanon.Canonicalize(symbolcanon.Rust, path))
 		}
 	}
 
@@ -81,45 +83,28 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 		// incapable of emitting a not-reachable result, so it cannot suppress a finding even if a caller
 		// forgot the raise-only wrapper: a symbol it cannot prove reached is simply absent from the output
 		// (which the coordinator treats as no verdict, leaving the finding's prior tier standing).
-		want := splitNorm(subject)
-		if len(want) < 2 {
+		want := symbolcanon.Canonicalize(symbolcanon.Rust, subject)
+		if len(want.Segments) < 2 {
 			continue
 		}
-		if p, ok := matchTail(want, qualified); ok {
-			results = append(results, reachability.Result{Symbol: subject, Reachable: true, Path: []string{"rust qualified reference " + strings.Join(p, "::")}})
-		} else if p, ok := matchTail(want, usedPaths); ok {
-			results = append(results, reachability.Result{Symbol: subject, Reachable: true, Path: []string{"rust use + call of " + strings.Join(p, "::")}})
+		if p, ok := tailMatchAny(want, qualified); ok {
+			results = append(results, reachability.Result{Symbol: subject, Reachable: true, Path: []string{"rust qualified reference " + p.String()}})
+		} else if p, ok := tailMatchAny(want, usedPaths); ok {
+			results = append(results, reachability.Result{Symbol: subject, Reachable: true, Path: []string{"rust use + call of " + p.String()}})
 		}
 	}
 	return &reachability.Analysis{Results: results}, nil
 }
 
-// matchTail reports whether any observed path shares the last TWO segments with the wanted symbol (a
-// function name qualified by its immediate owner: a module or a type). Requiring two trailing segments,
-// not one, keeps a bare function name (e.g. a same-named local `parse()`) from matching, so a reachable
-// verdict always ties the function to its qualifier. Segments are hyphen-normalized (a RustSec crate name
-// may be hyphenated where Rust source uses underscores).
-func matchTail(want []string, observed [][]string) ([]string, bool) {
-	w := want[len(want)-2:]
+// tailMatchAny reports whether any observed symbol shares the last TWO segments with want (a function
+// qualified by its immediate owner). Requiring two trailing segments, not one, keeps a bare function
+// name (a same-named local `parse()`) from matching, so a reachable verdict always ties the function
+// to its qualifier. Canonicalization (hyphen-normalization, generic-stripping) is symbolcanon's job.
+func tailMatchAny(want symbolcanon.Symbol, observed []symbolcanon.Symbol) (symbolcanon.Symbol, bool) {
 	for _, o := range observed {
-		if len(o) < 2 {
-			continue
-		}
-		if o[len(o)-1] == w[1] && o[len(o)-2] == w[0] {
+		if symbolcanon.TailMatch(want, o, 2) {
 			return o, true
 		}
 	}
-	return nil, false
-}
-
-// splitNorm splits a Rust path into hyphen-normalized, case-preserved segments.
-func splitNorm(p string) []string {
-	var out []string
-	for _, s := range strings.Split(strings.TrimPrefix(strings.TrimSpace(p), "::"), "::") {
-		s = strings.ReplaceAll(strings.TrimSpace(s), "-", "_")
-		if s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
+	return symbolcanon.Symbol{}, false
 }
