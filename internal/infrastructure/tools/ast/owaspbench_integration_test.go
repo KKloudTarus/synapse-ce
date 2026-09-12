@@ -136,17 +136,29 @@ func loadOWASPCases(t *testing.T, csvPath string) []sastbench.Case {
 		t.Fatal(err)
 	}
 	var cases []sastbench.Case
-	for _, r := range rows {
+	headerSkipped := false
+	for i, r := range rows {
 		if len(r) < 3 {
-			continue
+			continue // blank/short line
 		}
-		// Load EVERY category (Score ignores the ones the engine does not model; NotCovered reports them), but
-		// skip the header and any malformed row: the real-vulnerability column must be a literal true/false.
+		// Load EVERY category (Score ignores the ones the engine does not model; NotCovered reports them). The
+		// real-vulnerability column must be a literal true/false. The answer key has exactly ONE header row
+		// (its real column is text); tolerate that once, then FAIL LOUD on any further non-bool row rather than
+		// silently dropping it, since a dropped or mis-categorized row would move the ratchet denominator.
+		name := strings.TrimSpace(r[0])
+		cat := strings.TrimSpace(r[1])
 		real := strings.TrimSpace(r[2])
 		if real != "true" && real != "false" {
-			continue
+			if !headerSkipped {
+				headerSkipped = true
+				continue
+			}
+			t.Fatalf("malformed answer-key row %d: real-vulnerability column %q is not true/false (%v)", i+1, real, firstN(r, 4))
 		}
-		cases = append(cases, sastbench.Case{Name: strings.TrimSpace(r[0]), Category: strings.TrimSpace(r[1]), Real: real == "true"})
+		if name == "" || cat == "" {
+			t.Fatalf("malformed answer-key row %d: empty test name or category (%v)", i+1, firstN(r, 4))
+		}
+		cases = append(cases, sastbench.Case{Name: name, Category: cat, Real: real == "true"})
 	}
 	return cases
 }

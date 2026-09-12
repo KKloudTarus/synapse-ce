@@ -48,10 +48,13 @@ jobs:
         run: CGO_ENABLED=1 go build -o "${RUNNER_TEMP}/synapse-ast" ./cmd/synapse-ast
 
       - name: Run OWASP scorecard + recall ratchet
+        # No SYNAPSE_OWASP_BENCHMARK_SHA256 override: the test verifies the answer key against its CHECKED-IN
+        # compiled constant, independent of this workflow's OWASP_BENCHMARK_CSV_SHA256. Re-pinning the corpus
+        # therefore requires editing BOTH the workflow ref/checksum AND the constant in source (reviewed with
+        # the recalibrated floors), which is the belt-and-suspenders the workflow-only checksum alone is not.
         env:
           SYNAPSE_OWASP_BENCHMARK_DIR: ${{ github.workspace }}/owasp-benchmark
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
-          SYNAPSE_OWASP_BENCHMARK_SHA256: ${{ env.OWASP_BENCHMARK_CSV_SHA256 }}
         run: |
           set -o pipefail
           CGO_ENABLED=1 go test -count=1 -v -run TestOWASPBenchmarkScorecard \
