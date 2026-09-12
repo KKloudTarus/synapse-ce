@@ -103,6 +103,7 @@ type Service struct {
 	reachability                     ports.ReachabilityRecorder            // optional deterministic Tier-2 reachability proof (Go call-graph)
 	pyReachability                   ports.ReachabilityRecorder            // optional deterministic Tier-1 Python import-reachability proof
 	pySymbolReachability             ports.ReachabilityRecorder            // optional deterministic Tier-2 Python semantic call-graph proof
+	rustSymbolReachability           ports.ReachabilityRecorder            // optional deterministic Tier-2 Rust affected-symbol reachability (raise-only)
 	jsReachability                   jsSBOMReachabilityRecorder            // optional deterministic Tier-1 JavaScript import-reachability proof
 	jsSymbolReachability             jsSBOMReachabilityRecorder            // optional deterministic Tier-2 JavaScript affected-export proof
 	srcReachability                  map[string]ports.ReachabilityRecorder // optional Tier-1 provers keyed by package-URL type
@@ -544,6 +545,13 @@ func (s *Service) SetPyReachability(r ports.ReachabilityRecorder) { s.pyReachabi
 // SetPySymbolReachability configures the optional Python Tier-2 affected-symbol call-graph proof. It is
 // run after Tier-1 so an incomplete semantic analysis leaves the package-level judgment standing.
 func (s *Service) SetPySymbolReachability(r ports.ReachabilityRecorder) { s.pySymbolReachability = r }
+
+// SetRustSymbolReachability configures the optional Rust Tier-2 affected-symbol reachability prover
+// (raise-only: it mints a reachable judgment for a proven qualified reference to a vulnerable crate function,
+// never a not-reachable one). nil disables it. Fed the RustSec affected-function symbols per finding.
+func (s *Service) SetRustSymbolReachability(r ports.ReachabilityRecorder) {
+	s.rustSymbolReachability = r
+}
 
 // jsSBOMReachabilityRecorder is the narrow slice of a JavaScript reachability recorder this service
 // needs. BOTH tiers satisfy it — the name is deliberately tier-neutral, because Go interfaces are
@@ -3459,6 +3467,13 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if opts.scansVulnerabilities() && s.pySymbolReachability != nil {
 		if subs := pySymbolReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
 			_, _ = s.pySymbolReachability.Record(ctx, engagementID, ws.Dir, subs)
+		}
+	}
+	// Tier-2 Rust affected-symbol reachability (raise-only): raise a finding whose vulnerable crate function
+	// first-party source actually references. Best-effort; a no-coverage result is ignored.
+	if opts.scansVulnerabilities() && s.rustSymbolReachability != nil {
+		if subs := rustSymbolReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
+			_, _ = s.rustSymbolReachability.Record(ctx, engagementID, ws.Dir, subs)
 		}
 	}
 

@@ -187,6 +187,7 @@ import (
 	responseuc "github.com/KKloudTarus/synapse-ce/internal/usecase/response"
 	riskstoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/riskstoryuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/rustsymreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sbomcrosscheckjudge"
@@ -2977,6 +2978,26 @@ func main() {
 		}
 		scaService.SetSourceReachability(lang.purlType, coord)
 		log.Info("Tier-1 " + lang.label + " ENABLED (source-only dead-dependency detection → OpenVEX not_affected; best-effort)")
+	}
+
+	// Tier-2 Rust affected-symbol reachability (D4.6), raise-only: does first-party Rust source reference the
+	// specific vulnerable crate function a RustSec advisory names (not merely import the crate)? It RAISES a
+	// finding's urgency on a proven qualified reference and NEVER suppresses (a source scan cannot prove
+	// absence without type resolution), so a false result only over-prioritizes, never hides a vuln. It needs
+	// the RustSec affected functions, which the owned + live advisory sources now carry. Composition-root only.
+	if cfg.RustReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACH_RUST", "rust symbol reachability") {
+		rustSymAnalyzer, aerr := rustsymreach.New(srcimports.NewRustSymbolScanner())
+		if aerr != nil {
+			log.Error("rust symbol reachability analyzer init failed", "err", aerr)
+			os.Exit(1)
+		}
+		coord, cerr := reachproof.NewCoordinatorForLanguage(rustSymAnalyzer, judgmentSvc, auditLog, clock, judgment.Tier2, reachproof.LanguageRust)
+		if cerr != nil {
+			log.Error("rust symbol reachability coordinator init failed", "err", cerr)
+			os.Exit(1)
+		}
+		scaService.SetRustSymbolReachability(coord.WithRaiseOnly())
+		log.Info("Tier-2 rust affected-symbol reachability ENABLED (raise-only: a qualified reference to a vulnerable crate function raises urgency; never suppresses)")
 	}
 
 	// Build-aware .NET (NuGet) reachability. Unlike the source-only import scanners above, it does NOT guess

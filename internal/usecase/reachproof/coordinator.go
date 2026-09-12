@@ -77,6 +77,9 @@ func actorsFor(tier judgment.ReachabilityTier, language Language) (proposer, ver
 		if language == LanguagePython {
 			return judgment.ProofActorPySemanticScan, judgment.ProofActorPySemanticEngine, "tier-2 python semantic call-graph proof"
 		}
+		if language == LanguageRust {
+			return judgment.ProofActorRustSymbolScan, judgment.ProofActorRustSymbolEngine, "tier-2 rust affected-symbol reference proof"
+		}
 		return judgment.ProofActorCallgraphScan, judgment.ProofActorCallgraphEngine, "tier-2 call-graph proof"
 	}
 	switch language {

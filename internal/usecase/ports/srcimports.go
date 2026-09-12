@@ -38,6 +38,24 @@ type SourceImportScanner interface {
 	Lang() string
 }
 
+// RustSymbolIndex is what a source scan observed about SYMBOL-level references in a Rust project: the
+// fully-qualified path references it saw, the `use` bindings (imported leaf/alias -> full path), and the bare
+// call names. It is the raw evidence a Tier-2 symbol-reachability analyzer matches an advisory's affected
+// functions against. It never resolves types, so a method call (`x.foo()`) is deliberately NOT captured:
+// tying it to a crate needs type resolution a source scan cannot do, and the raise-only analyzer leaves such
+// a symbol unknown rather than guessing.
+type RustSymbolIndex struct {
+	Qualified []string          // normalized fully-qualified path references, e.g. "serde_json::from_str"
+	Uses      map[string]string // imported leaf or alias -> full path, e.g. "at" -> "time::at"
+	Called    map[string]bool   // bare call names observed, e.g. "at", "from_str"
+}
+
+// RustSymbolScanner observes symbol-level references in first-party Rust source for Tier-2 raise-only
+// reachability. Source-only (never runs cargo), case-preserving (Rust symbols are case-sensitive).
+type RustSymbolScanner interface {
+	ScanSymbols(ctx context.Context, dir string) (RustSymbolIndex, error)
+}
+
 // NuGetPackageNamespaces is the set of namespaces a NuGet package's restored assemblies export, and whether
 // that set is fully known. Complete is false when any of the package's assemblies could not be located or
 // fully read; a package with an incompletely known namespace set, or an empty one, must never be concluded
