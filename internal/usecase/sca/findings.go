@@ -147,7 +147,8 @@ func buildFindings(engagementID shared.ID, res *ScanResult, now time.Time, minSe
 			Severity:          v.Severity,
 			CVSSVector:        v.CVSSVector,
 			KEV:               v.KEV,
-			PublicExploit:     v.PublicExploit, // D1.3: surface the "public exploit exists" signal on the finding
+			PublicExploit:     v.PublicExploit,  // D1.3: surface the "public exploit exists" signal on the finding
+			EPSSPercentile:    v.EPSSPercentile, // D1.3: the EPSS rank, a triage aid beside RiskScore
 			RiskScore:         v.RiskScore(),
 			FixedVersion:      v.FixedVersion,
 			DirectBumps:       v.Introducers, // the minimal-upgrade set (D3.8), computed via remediation.Solve in attachDependencyPaths

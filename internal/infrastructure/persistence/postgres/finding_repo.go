@@ -23,7 +23,7 @@ const findingCols = `id, engagement_id, title, description, severity, cvss_vecto
 	`reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key, ` +
 	`COALESCE(advisory_id, ''), COALESCE(occurrence_id, ''), COALESCE(component_fingerprint, ''), ` +
 	`COALESCE(fixed_version, ''), COALESCE(detection_state, ''), COALESCE(risk_assessment_id, ''), evaluated_at, data_flow, ` +
-	`COALESCE(direct_bumps, ''), COALESCE(public_exploit, false)`
+	`COALESCE(direct_bumps, ''), COALESCE(public_exploit, false), COALESCE(epss_percentile, 0)`
 
 // FindingRepository persists findings to PostgreSQL, deduped per engagement.
 type FindingRepository struct{ pool *pgxpool.Pool }
@@ -86,8 +86,8 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 				return fmt.Errorf("encode finding data flow: %w", err)
 			}
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key, advisory_id, occurrence_id, component_fingerprint, fixed_version, detection_state, risk_assessment_id, evaluated_at, data_flow, direct_bumps, public_exploit)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38)
+				`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key, advisory_id, occurrence_id, component_fingerprint, fixed_version, detection_state, risk_assessment_id, evaluated_at, data_flow, direct_bumps, public_exploit, epss_percentile)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)
 			 ON CONFLICT (engagement_id, dedup_key) WHERE dedup_key IS NOT NULL
 			 DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
 				               severity = EXCLUDED.severity, cvss_vector = EXCLUDED.cvss_vector, kev = EXCLUDED.kev, risk_score = EXCLUDED.risk_score,
@@ -100,6 +100,7 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 			               evaluated_at = EXCLUDED.evaluated_at, data_flow = EXCLUDED.data_flow,
 			               direct_bumps = CASE WHEN EXCLUDED.direct_bumps <> '' THEN EXCLUDED.direct_bumps ELSE findings.direct_bumps END,
 			               public_exploit = findings.public_exploit OR EXCLUDED.public_exploit,
+			               epss_percentile = GREATEST(findings.epss_percentile, EXCLUDED.epss_percentile),
 			               version = findings.version + 1, updated_at = EXCLUDED.updated_at
 			 WHERE findings.title IS DISTINCT FROM EXCLUDED.title
 			    OR findings.description IS DISTINCT FROM EXCLUDED.description
@@ -125,14 +126,15 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 				    OR findings.evaluated_at IS DISTINCT FROM EXCLUDED.evaluated_at
 				    OR findings.data_flow IS DISTINCT FROM EXCLUDED.data_flow
 				    OR (EXCLUDED.direct_bumps <> '' AND findings.direct_bumps IS DISTINCT FROM EXCLUDED.direct_bumps)
-				    OR (EXCLUDED.public_exploit AND NOT findings.public_exploit)`,
+				    OR (EXCLUDED.public_exploit AND NOT findings.public_exploit)
+				    OR EXCLUDED.epss_percentile > findings.epss_percentile`,
 				f.ID.String(), tenantID.String(), f.EngagementID.String(), f.Title, f.Description, string(f.Severity),
 				f.CVSSVector, f.CWE, string(f.Status), f.EvidenceScore, f.DedupKey,
 				f.KEV, f.RiskScore, f.Audit.CreatedAt, f.Audit.UpdatedAt, strings.Join(f.Sources, ","), f.Confidence, classOrDefault(f.Class),
 				scopeOrDefault(f.Scope), reachOrDefault(f.Reachability), f.Impact, priorityOrDefault(f.Priority), kindOrDefault(string(f.Kind)),
 				f.Assignee, versionOrDefault(f.Version), f.ProposedBy, f.ClassReachability, f.RuleKey,
 				f.AdvisoryID, nullableFindingID(f.OccurrenceID), f.ComponentFingerprint, f.FixedVersion, f.DetectionState,
-				nullableFindingID(f.RiskAssessmentID), f.EvaluatedAt, dataFlow, strings.Join(f.DirectBumps, "\n"), f.PublicExploit); err != nil {
+				nullableFindingID(f.RiskAssessmentID), f.EvaluatedAt, dataFlow, strings.Join(f.DirectBumps, "\n"), f.PublicExploit, f.EPSSPercentile); err != nil {
 				return fmt.Errorf("upsert finding: %w", err)
 			}
 		}
@@ -350,7 +352,7 @@ func scanFinding(row rowScanner) (finding.Finding, error) {
 		&status, &f.EvidenceScore, &dedup, &f.KEV, &f.RiskScore, &f.Audit.CreatedAt, &f.Audit.UpdatedAt,
 		&sources, &f.Confidence, &f.Class, &f.Scope, &f.Reachability, &f.Impact, &f.Priority, &kind,
 		&f.Assignee, &f.Version, &f.ProposedBy, &f.ClassReachability, &f.RuleKey,
-		&advisoryID, &occurrenceID, &componentFingerprint, &fixedVersion, &detectionState, &riskAssessmentID, &f.EvaluatedAt, &dataFlowJSON, &directBumps, &f.PublicExploit); err != nil {
+		&advisoryID, &occurrenceID, &componentFingerprint, &fixedVersion, &detectionState, &riskAssessmentID, &f.EvaluatedAt, &dataFlowJSON, &directBumps, &f.PublicExploit, &f.EPSSPercentile); err != nil {
 		return finding.Finding{}, err
 	}
 	f.DirectBumps = splitLines(directBumps)
