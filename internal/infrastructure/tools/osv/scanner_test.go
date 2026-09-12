@@ -263,3 +263,48 @@ func TestIsOSDistroPURL(t *testing.T) {
 		}
 	}
 }
+
+// TestOsvToRawSymbolsAreVersionScoped guards the live-path half of the symbol version-scoping fix: an advisory
+// listing the same package in two blocks with different ranges and different symbols must attach a 1.x
+// component ONLY the 1.x block's symbol, never the 2.x block's (which would seed a false reachable-symbol).
+func TestOsvToRawSymbolsAreVersionScoped(t *testing.T) {
+	const raw = `{"id":"GO-multi","affected":[
+		{"package":{"ecosystem":"Go","name":"example.com/mod","purl":"pkg:golang/example.com/mod"},
+		 "ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.2.0"}]}],
+		 "ecosystem_specific":{"imports":[{"path":"example.com/mod","symbols":["OldVuln"]}]}},
+		{"package":{"ecosystem":"Go","name":"example.com/mod","purl":"pkg:golang/example.com/mod"},
+		 "ranges":[{"type":"SEMVER","events":[{"introduced":"2.0.0"},{"fixed":"2.3.0"}]}],
+		 "ecosystem_specific":{"imports":[{"path":"example.com/mod","symbols":["NewVuln"]}]}}]}`
+	var v osvVuln
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		t.Fatal(err)
+	}
+	got := osvToRaw(sbom.Component{Name: "example.com/mod", Version: "1.1.0", PURL: "pkg:golang/example.com/mod@1.1.0"}, v)
+	if len(got.AffectedSymbols) != 1 || got.AffectedSymbols[0] != "example.com/mod.OldVuln" {
+		t.Fatalf("AffectedSymbols = %v, want only [example.com/mod.OldVuln] (NOT the 2.x block's NewVuln)", got.AffectedSymbols)
+	}
+}
+
+// TestOsvToRawReadsRustSecFunctions: RustSec publishes affected symbols under ecosystem_specific.affects
+// .functions (already-qualified), parallel to the Go vuln DB's imports[].symbols. The live scanner must read
+// both, matching the owned offline ingester, so a crates.io finding surfaces its affected functions.
+func TestOsvToRawReadsRustSecFunctions(t *testing.T) {
+	const raw = `{"id":"RUSTSEC-1","affected":[
+		{"package":{"ecosystem":"crates.io","name":"mycrate","purl":"pkg:cargo/mycrate"},
+		 "ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.5.0"}]}],
+		 "ecosystem_specific":{"affects":{"functions":["mycrate::Foo::bar","mycrate::baz"]}}}]}`
+	var v osvVuln
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		t.Fatal(err)
+	}
+	got := osvToRaw(sbom.Component{Name: "mycrate", Version: "1.2.0", PURL: "pkg:cargo/mycrate@1.2.0"}, v)
+	want := map[string]bool{"mycrate::Foo::bar": true, "mycrate::baz": true}
+	if len(got.AffectedSymbols) != 2 {
+		t.Fatalf("AffectedSymbols = %v, want the 2 RustSec functions", got.AffectedSymbols)
+	}
+	for _, s := range got.AffectedSymbols {
+		if !want[s] {
+			t.Errorf("unexpected symbol %q", s)
+		}
+	}
+}

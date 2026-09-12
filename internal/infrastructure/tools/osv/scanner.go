@@ -378,11 +378,18 @@ type osvSeverity struct {
 type osvAffected struct {
 	Package           osvPackage `json:"package"`
 	Ranges            []osvRange `json:"ranges"`
+	Versions          []string   `json:"versions"` // explicit affected versions (for version-scoping symbols)
 	EcosystemSpecific struct {
 		Imports []struct {
 			Path    string   `json:"path"`
 			Symbols []string `json:"symbols"`
 		} `json:"imports"`
+		// Affects.Functions is RustSec's affected-symbol form (already-qualified "crate::Type::method"),
+		// parallel to the Go vuln DB's imports[].symbols. Read both so a crates.io finding surfaces its
+		// affected functions, matching the owned offline ingester (ownadvisory.osvImportSymbols).
+		Affects struct {
+			Functions []string `json:"functions"`
+		} `json:"affects"`
 	} `json:"ecosystem_specific"`
 }
 type osvPackage struct {
@@ -444,7 +451,45 @@ func osvToRaw(comp sbom.Component, v osvVuln) vulnerability.RawFinding {
 			out.Severity = s
 		}
 	}
-	out.AffectedSymbols = affectedSymbols(matchedAffected)
+	// Symbols come ONLY from the affected blocks whose range/versions actually include this component's
+	// version. matchingAffected filters by package name/PURL, not version; an advisory may list the same
+	// package in several blocks with different ranges and different symbols, so unioning across all of them
+	// would attach another version's symbol to this finding and seed a false reachable-symbol claim. Strict
+	// filtering (no fallback) keeps this on the safe side of the #1 no-false-positive bar: a missed symbol only
+	// under-drives raise-only reachability, never a false suppression.
+	out.AffectedSymbols = affectedSymbols(versionScopedAffected(identity, matchedAffected))
+	return out
+}
+
+// versionScopedAffected narrows name/PURL-matched blocks to those whose ranges or explicit versions include the
+// component version, so only version-applicable symbols reach the finding. An unresolved identity keeps the
+// name-matched set (no version to scope by); this only governs which symbols attach, not whether the finding
+// is emitted (that gate is upstream).
+func versionScopedAffected(identity sbom.ComponentIdentity, affected []osvAffected) []osvAffected {
+	if identity.Status != sbom.IdentityResolved {
+		return affected
+	}
+	out := make([]osvAffected, 0, len(affected))
+	for _, a := range affected {
+		// A block with no ranges and no explicit versions constrains nothing: per OSV it applies to all
+		// versions, so its symbols apply here too. Only a block that actually declares a version constraint
+		// is filtered by it, which is where the cross-version symbol leak lives.
+		if len(a.Ranges) == 0 && len(a.Versions) == 0 {
+			out = append(out, a)
+			continue
+		}
+		ranges := make([]advisory.Range, 0, len(a.Ranges))
+		for _, r := range a.Ranges {
+			conv := advisory.Range{Type: strings.ToUpper(strings.TrimSpace(r.Type))}
+			for _, e := range r.Events {
+				conv.Events = append(conv.Events, advisory.Event{Introduced: e["introduced"], Fixed: e["fixed"], LastAffected: e["last_affected"]})
+			}
+			ranges = append(ranges, conv)
+		}
+		if advisory.Affected(identity.Ecosystem, identity.Version, ranges, a.Versions) {
+			out = append(out, a)
+		}
+	}
 	return out
 }
 
@@ -536,6 +581,12 @@ func affectedSymbols(affected []osvAffected) []string {
 				} else {
 					out = append(out, s)
 				}
+			}
+		}
+		// RustSec's already-qualified "crate::Type::method" functions (parallel to imports[].symbols).
+		for _, fn := range a.EcosystemSpecific.Affects.Functions {
+			if fn != "" {
+				out = append(out, fn)
 			}
 		}
 	}
