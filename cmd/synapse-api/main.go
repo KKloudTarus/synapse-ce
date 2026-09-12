@@ -54,6 +54,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
 	oidcadapter "github.com/KKloudTarus/synapse-ce/internal/infrastructure/oidc"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ownershipcapture"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/file"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
@@ -172,6 +173,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/nugetreach"
 	offensivepolicyuc "github.com/KKloudTarus/synapse-ce/internal/usecase/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
+	ownershipuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ownership"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	promotionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/promotion"
@@ -1339,6 +1341,49 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	if cfg.OwnershipMode != "off" && cfg.OwnershipMode != "observe" && cfg.OwnershipMode != "enforce" {
+		log.Error("SYNAPSE_OWNERSHIP_MODE must be off, observe or enforce")
+		os.Exit(1)
+	}
+	if cfg.OwnershipMode != "off" && databasePool != nil {
+		ownershipRepo, ownershipErr := postgres.NewOwnershipRepository(databasePool)
+		if ownershipErr != nil {
+			log.Error("ownership repository init failed", "err", ownershipErr)
+			os.Exit(1)
+		}
+		ownershipService, ownershipErr := ownershipuc.NewService(ownershipRepo, ownershipRepo, findingRepo, postgres.NewTenantTransactionRunner(databasePool), auditLog, clock, ids, cfg.OwnershipMode, cfg.NotificationEnabled)
+		if ownershipErr != nil {
+			log.Error("ownership service init failed", "err", ownershipErr)
+			os.Exit(1)
+		}
+		ownershipExecution, ownershipErr := postgres.NewOwnershipExecution(ownershipRepo, ids, clock)
+		if ownershipErr != nil {
+			log.Error("ownership execution init failed", "err", ownershipErr)
+			os.Exit(1)
+		}
+		ownershipWorker, ownershipErr := ownershipuc.NewWorker(ownershipExecution, ownershipRepo, cfg.OwnershipMode, cfg.NotificationEnabled, log)
+		if ownershipErr != nil {
+			log.Error("ownership worker init failed", "err", ownershipErr)
+			os.Exit(1)
+		}
+		ownershipService.SetRunStarter(ownershipWorker)
+		var ownershipReader ports.ToolRunner
+		if scaSandbox != nil {
+			ownershipReader = scaSandbox
+		} else if toolExecution != config.ToolExecutionDispatchOnly {
+			ownershipReader = toolrunner.NewExecRunner(15*time.Second, 3_000_001)
+		}
+		if ownershipErr := scaService.SetOwnershipSource(ownershipcapture.New(ownershipReader), ownershipRepo); ownershipErr != nil {
+			log.Error("ownership capture init failed", "err", ownershipErr)
+			os.Exit(1)
+		}
+		router.SetOwnership(ownershipService, cfg.OwnershipMode, "")
+		findingsService.SetAssigneeWriter(ownershipService)
+	} else if cfg.OwnershipMode != "off" {
+		router.SetOwnership(nil, cfg.OwnershipMode, "postgres_required")
+	} else {
+		router.SetOwnership(nil, "off", "disabled")
+	}
 	if cfg.NotificationEnabled {
 		if databasePool == nil {
 			log.Error("SYNAPSE_NOTIFICATIONS_ENABLED requires PostgreSQL")
@@ -1524,6 +1569,7 @@ func main() {
 		JSReachability:       cfg.JSReachabilityEnabled,
 		SingleTenant:         cfg.SingleTenant,
 		OIDC:                 cfg.OIDCEnabled,
+		Ownership:            cfg.OwnershipMode != "off" && databasePool != nil,
 	})
 	if err != nil {
 		log.Error("capability catalog init failed", "err", err)

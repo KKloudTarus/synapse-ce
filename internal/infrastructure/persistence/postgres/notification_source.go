@@ -43,6 +43,9 @@ func (s *NotificationSource) Poll(ctx context.Context, now time.Time, limit int)
 	if limit <= 0 {
 		limit = 100
 	}
+	if limit > 200 {
+		limit = 200
+	}
 	rows, err := s.pool.Query(ctx, `SELECT id FROM tenants WHERE id<>'' ORDER BY id`)
 	if err != nil {
 		return 0, fmt.Errorf("list notification tenants: %w", err)
@@ -88,9 +91,14 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 		if !acquired {
 			return nil
 		}
-		if err := s.repo.reconcileTx(ctx, tx, tenant); err != nil {
+		// Eligibility was persisted atomically with the assignment. Recover eligible
+		// intents even on the first poll; suppressed decisions never become pending
+		// merely because notification delivery is enabled later.
+		n, err := s.pollOwnership(ctx, tx, tenant, limit)
+		if err != nil {
 			return err
 		}
+		count += n
 		tag, err := tx.Exec(ctx, `INSERT INTO notification_source_state(tenant_id,source_kind,source_id,fingerprint,active,observed_at) VALUES($1,'framework','activation','v1',true,$2) ON CONFLICT DO NOTHING`, tenant, now)
 		if err != nil {
 			return err
@@ -101,7 +109,7 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 			if _, err := tx.Exec(ctx, `INSERT INTO notification_source_state(tenant_id,source_kind,source_id,fingerprint,active,observed_at) SELECT tenant_id,'fleet_agent',id,((extract(epoch FROM last_seen_at)*1000000)::bigint*1000)::text,(last_seen_at <= $2::timestamptz-make_interval(secs=>$3)),$2 FROM fleet_agents WHERE tenant_id=$1 AND state IN ('active','stale') AND last_seen_at>created_at ON CONFLICT DO NOTHING`, tenant, now, s.fleetStaleAfter.Seconds()); err != nil {
 				return err
 			}
-			return nil
+			return s.repo.reconcileTx(ctx, tx, tenant)
 		}
 		var activated time.Time
 		if err := tx.QueryRow(ctx, `SELECT observed_at FROM notification_source_state WHERE tenant_id=$1 AND source_kind='framework' AND source_id='activation'`, tenant).Scan(&activated); err != nil {
@@ -127,9 +135,14 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 			}
 			count += n
 		}
-		return nil
+		// Reconciliation may take the audit chain lock. All source/intent/delivery
+		// locks must be acquired first, matching assignment's audit-last order.
+		return s.repo.reconcileTx(ctx, tx, tenant)
 	})
-	return count, err
+	if err != nil {
+		return 0, err // the entire tenant projection rolled back
+	}
+	return count, nil
 }
 
 func (s *NotificationSource) pollVulnerability(ctx context.Context, tx pgx.Tx, tenant shared.ID, activated, now time.Time, limit int) (int, error) {

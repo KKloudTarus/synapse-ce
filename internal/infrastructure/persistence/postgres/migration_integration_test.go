@@ -81,8 +81,10 @@ func newIsolatedMigrationDB(t *testing.T, migration int, baseVersion int64) isol
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.UpTo(db, ".", baseVersion); err != nil {
-		t.Fatalf("migrate isolated database to %04d: %v", baseVersion, err)
+	if baseVersion > 0 {
+		if err := goose.UpTo(db, ".", baseVersion); err != nil {
+			t.Fatalf("migrate isolated database to %04d: %v", baseVersion, err)
+		}
 	}
 	return isolatedMigrationDB{db: db}
 }

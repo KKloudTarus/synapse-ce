@@ -65,6 +65,7 @@ nav:
   - Operate:
       - Configuration: configuration.md
       - Notifications and webhooks: notifications.md
+      - Finding ownership and routing: finding-ownership.md
       - Assessment lifecycle rollout: assessment-lifecycle-operations.md
       - Deployment: deployment.md
       - Capacity and service objectives: capacity-slos.md

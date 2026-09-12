@@ -7,6 +7,7 @@ import type { Finding, Vulnerability } from '../../../lib/types'
 import { ConfidenceBadge, DetectedBy, shortPkg } from '../VulnsTab'
 import { AssigneeControl, CommentsPanel, RetestPanel } from './FindingCollab'
 import { EVIDENCE_BAR, ExplainJudgments } from './FindingJudgments'
+import { FindingOwnership } from '../../Ownership/OwnershipPanel'
 
 export function frameworkShort(framework: string): string {
   switch (framework) {
@@ -298,6 +299,7 @@ export function FindingDetail({
 
       {/* Right Column (5 cols): Collaboration, Assignment & Retests */}
       <div className="space-y-3.5 lg:col-span-5">
+		<FindingOwnership engagement={engagementId} finding={finding.id} version={finding.version} onChanged={onReload} />
         {/* Assignment & Status Box */}
         <div className="rounded-lg border border-secondary bg-primary p-3.5 shadow-2xs space-y-3">
           <div className="text-xs font-bold uppercase tracking-wider text-secondary">

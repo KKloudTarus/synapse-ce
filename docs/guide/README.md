@@ -38,6 +38,7 @@ architectural boundaries that keep execution auditable.
 | [Assessment Cycle and Snapshot rollout](assessment-lifecycle-operations.md) | Tenant canary, resumable backfills, integrity verification, read cutover, and rollback |
 | [Deployment](deployment.md) | Containers, services, agents, Linux-only capabilities, and production checks |
 | [Backup, restore, and upgrade recovery](backup-restore-upgrade.md) | Quiesced paired backups, restore verification, active-write characterization, and safe upgrades |
+| [Finding ownership and team routing](finding-ownership.md) | Trusted CODEOWNERS mapping, policy rollout, triage, recovery, and scale limits |
 | [CLI](cli.md) | Scanning, code-quality gates, advisory maintenance, imports, and exit contracts |
 | [MCP integration](mcp-integration.md) | Read/propose-only tool access scoped to one engagement |
 | [External CI/CD integrations](integrations.md) | Jenkins onboarding, provider-neutral architecture, polling operations, correlation, and security boundaries |

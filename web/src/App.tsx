@@ -56,6 +56,8 @@ const Team = lazy(() => import('./pages/Settings/Team').then(m => ({ default: m.
 const SLAPolicy = lazy(() => import('./pages/Settings/SLAPolicy').then(m => ({ default: m.SLAPolicy })))
 const OffensivePolicy = lazy(() => import('./pages/Settings/OffensivePolicy').then(m => ({ default: m.OffensivePolicy })))
 const Alerting = lazy(() => import('./pages/Settings/Alerting').then(m => ({ default: m.Alerting })))
+const OwnershipInbox = lazy(() => import('./pages/Ownership/OwnershipInbox').then(m => ({ default: m.OwnershipInbox })))
+const OwnershipSettings = lazy(() => import('./pages/Ownership/OwnershipSettings').then(m => ({ default: m.OwnershipSettings })))
 const ProjectOverviewPage = lazy(() => import('./pages/CodeQuality/ProjectOverviewPage').then(m => ({ default: m.ProjectOverviewPage })))
 const ProjectAnalysisPage = lazy(() => import('./pages/CodeQuality/ProjectAnalysisPage').then(m => ({ default: m.ProjectAnalysisPage })))
 const ProjectActivityPage = lazy(() => import('./pages/CodeQuality/ProjectActivityPage').then(m => ({ default: m.ProjectActivityPage })))
@@ -123,6 +125,7 @@ function Gate() {
         <Route path="fleet/incidents/:id" element={<IncidentDetail />} />
         <Route path="rules" element={<Rules />} />
         <Route path="rules/:key" element={<RuleDetail />} />
+        <Route path="ownership" element={<OwnershipInbox />} />
         <Route path="settings" element={<Settings />}>
           <Route index element={<Audit />} />
           <Route path="team" element={<Team />} />
@@ -135,6 +138,7 @@ function Gate() {
           <Route path="sla" element={<SLAPolicy />} />
           <Route path="offensive-policy" element={<OffensivePolicy />} />
           <Route path="alerting" element={<Alerting />} />
+          <Route path="ownership" element={<OwnershipSettings />} />
         </Route>
         <Route path="audit" element={<Navigate to="/settings" replace />} />
         <Route path="team" element={<Navigate to="/settings/team" replace />} />

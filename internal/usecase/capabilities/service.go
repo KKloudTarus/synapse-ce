@@ -34,6 +34,7 @@ type Flags struct {
 	JSReachability       bool // SYNAPSE_JSREACH_ENABLED
 	SingleTenant         bool // SYNAPSE_SINGLE_TENANT
 	OIDC                 bool // SYNAPSE_OIDC_ENABLED
+	Ownership            bool // effective SYNAPSE_OWNERSHIP_MODE != off with PostgreSQL
 }
 
 // Capability describes one optional subsystem to a client. Key is stable API: a dashboard keys its
@@ -148,5 +149,6 @@ func build(f Flags) []Capability {
 		{Key: "js_reachability", Name: "JavaScript reachability", Enabled: f.JSReachability, Switch: "SYNAPSE_JSREACH_ENABLED"},
 		{Key: "single_tenant", Name: "Single-tenant mode", Enabled: f.SingleTenant, Switch: "SYNAPSE_SINGLE_TENANT"},
 		{Key: "oidc", Name: "OIDC browser login", Enabled: f.OIDC, Switch: "SYNAPSE_OIDC_ENABLED"},
+		{Key: "ownership", Name: "Finding ownership", Enabled: f.Ownership, Switch: "SYNAPSE_OWNERSHIP_MODE"},
 	}
 }

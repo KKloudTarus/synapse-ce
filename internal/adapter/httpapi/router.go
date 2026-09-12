@@ -34,6 +34,7 @@ import (
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
 	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
 	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
+	ownershipuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ownership"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
@@ -51,6 +52,9 @@ import (
 
 // Router wires HTTP routes to use case services.
 type Router struct {
+	ownership                *ownershipuc.Service
+	ownershipMode            string
+	ownershipUnavailable     string
 	log                      *slog.Logger
 	accessLogEnabled         bool
 	httpObserver             HTTPObserver
@@ -387,6 +391,7 @@ func (rt *Router) withEngTenant(h http.HandlerFunc) http.HandlerFunc {
 // without the auth/AUP middleware (which are validated separately).
 func (rt *Router) routes() *http.ServeMux {
 	mux := http.NewServeMux()
+	rt.registerOwnership(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "synapse-api"})
 	})

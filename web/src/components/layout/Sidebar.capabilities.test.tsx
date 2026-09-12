@@ -25,6 +25,7 @@ function renderSidebar() {
 const CATALOG = [
   { key: 'fleet', name: 'Agent fleet transport', enabled: false, switch: 'SYNAPSE_FLEET_ENABLED', requires: [] },
   { key: 'ai_triage', name: 'AI false-positive triage', enabled: false, switch: 'SYNAPSE_FP_TRIAGE_ENABLED', requires: [] },
+  { key: 'ownership', name: 'Finding ownership', enabled: false, switch: 'SYNAPSE_OWNERSHIP_MODE', requires: [] },
 ]
 
 describe('Sidebar capability gating', () => {
@@ -47,6 +48,8 @@ describe('Sidebar capability gating', () => {
     const reviews = screen.getByRole('button', { name: /^Review Queue\./ })
     expect(reviews.getAttribute('aria-label')).toContain('SYNAPSE_FP_TRIAGE_ENABLED')
     expect(screen.queryByRole('link', { name: 'Review Queue' })).toBeNull()
+    const ownership = screen.getByRole('button', { name: /^Ownership Inbox\./ })
+    expect(ownership.getAttribute('aria-label')).toContain('SYNAPSE_OWNERSHIP_MODE')
   })
 
   it('keeps ungated destinations as live links', async () => {

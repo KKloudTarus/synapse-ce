@@ -67,6 +67,8 @@ type Service struct {
 	timeout                          time.Duration
 	projectAnalysisCompletionTimeout time.Duration
 	acquirer                         ports.Acquirer
+	ownershipReader                  ports.OwnershipSourceReader
+	ownershipSources                 ports.OwnershipSourceStore
 	detector                         ports.LanguageDetector
 	sbomGen                          ports.SBOMGenerator
 	sources                          []ports.DetectionSource
@@ -2332,6 +2334,10 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 // runPipeline is the read-only tool chain (acquire -> detect -> SBOM -> vulns ->
 // risk -> licenses -> findings -> persist). report() advances the progress bar.
 func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, record importedsbom.Record, doc *sbom.SBOM, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (*ScanResult, error) {
+	ownershipSource, err := s.captureImportedOwnershipSource(ctx, actor, engagementID, record.TargetRef)
+	if err != nil {
+		return nil, err
+	}
 	stage, pct := stageSBOM, 35
 	trace := newScanDebugTrace(func(events []ports.ScanDebugEvent) { report(stage, pct, events) })
 	report(stage, pct, trace.snapshot())
@@ -2512,6 +2518,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	if err != nil {
 		return nil, err
 	}
+	ctx = s.ownershipFindingContext(ctx, ownershipSource, "", result)
 	if s.scans != nil {
 		skipped, err := s.scans.SaveScan(ctx, engagementID, doc, vulns, snap)
 		if err != nil {
@@ -2546,6 +2553,9 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		if data, mErr := json.Marshal(result); mErr == nil {
 			_ = s.results.SaveResult(ctx, engagementID, data)
 		}
+	}
+	if err := s.ownershipSourceReady(ctx, ownershipSource); err != nil {
+		return nil, err
 	}
 	if err := s.notifyAssessmentScanRun(ctx, engagementID, assessmentRunID); err != nil {
 		return nil, err
@@ -2715,6 +2725,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	}
 	trace.succeed(step, "Target workspace acquired", nil)
 	defer func() { _ = ws.Close() }()
+	ownershipSource, err := s.captureOwnershipSource(ctx, actor, engagementID, req, ws)
+	if err != nil {
+		return nil, err
+	}
 
 	stage, pct = stageDetect, 20
 	report(stage, pct, trace.snapshot())
@@ -3619,6 +3633,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		return nil, err
 	}
 
+	ctx = s.ownershipFindingContext(ctx, ownershipSource, ws.Dir, result)
 	// The scan snapshot and the findings are written in SEPARATE transactions. A
 	// SaveScan that commits without its findings is tolerated: findings are
 	// deterministically re-derivable on the next scan. (P-later: outbox / one txn.)
@@ -3678,6 +3693,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Record the image's manifest digest so the fleet cluster agent can correlate a running digest
 	// with this scan (#446). This is the pipeline that populates result.Image (image scans).
 	s.recordScannedImage(ctx, engagementID, result)
+	if err := s.ownershipSourceReady(ctx, ownershipSource); err != nil {
+		return nil, err
+	}
 	if err := s.notifyAssessmentScanRun(ctx, engagementID, assessmentRunID); err != nil {
 		return nil, err
 	}

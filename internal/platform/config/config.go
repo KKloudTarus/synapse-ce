@@ -211,6 +211,7 @@ type Config struct {
 	// NotificationEnabled enables tenant-managed durable notification delivery.
 	// It requires PostgreSQL and a stable VaultMasterKey shared by API and worker.
 	NotificationEnabled        bool
+	OwnershipMode              string // off (default), observe, enforce; PostgreSQL only
 	NotificationSMTPHost       string
 	NotificationSMTPPort       int
 	NotificationSMTPFrom       string
@@ -849,6 +850,7 @@ func Load() Config {
 		DASTMaxWallClock:           maxWallClock,
 		VaultMasterKey:             getenv("SYNAPSE_VAULT_MASTER_KEY", ""),
 		NotificationEnabled:        getbool("SYNAPSE_NOTIFICATIONS_ENABLED", false),
+		OwnershipMode:              getenv("SYNAPSE_OWNERSHIP_MODE", "off"),
 		NotificationSMTPHost:       getenv("SYNAPSE_NOTIFICATION_SMTP_HOST", ""),
 		NotificationSMTPPort:       getint("SYNAPSE_NOTIFICATION_SMTP_PORT", 587),
 		NotificationSMTPFrom:       getenv("SYNAPSE_NOTIFICATION_SMTP_FROM", ""),

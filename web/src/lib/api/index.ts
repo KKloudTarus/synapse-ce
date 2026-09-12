@@ -19,6 +19,7 @@ export { type EngagementCredential } from './engagements'
 export { type AutoVerifyResult } from './dashboard'
 export { type DetectionProvenanceCurrent, type DetectionProvenanceTransition } from './incidents'
 export { type DastProposal, type DastScanResult, type DastScanInput, type DastRun, type DastDecision, type DastProof, type RuntimeVerifyInput, type RuntimeVerifyOutcome } from './dast'
+export type * from './ownership'
 
 import { authApi, teamApi } from './auth'
 import { auditApi } from './audit'
@@ -49,6 +50,7 @@ import { slaApi } from './sla'
 import { offensivePolicyApi } from './offensivepolicy'
 import { alertingApi } from './alerting'
 import { notificationsApi } from './notifications'
+import { ownershipApi } from './ownership'
 import { privacyApi } from './privacy'
 import { writeupApi } from './writeup'
 import { cspmApi } from './cspm'
@@ -68,6 +70,7 @@ export const downloadReportDoc = evidenceApi.downloadReportDoc
 
 // Unified api object — same shape as before
 export const api = {
+  ...ownershipApi,
   ...authApi,
   ...teamApi,
   ...auditApi,

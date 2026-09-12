@@ -62,6 +62,7 @@ const NAV_GROUPS: Array<{
         { icon: Target04, label: 'Engagements', to: '/engagements' },
         { icon: GitBranch01, label: 'Assessment Cycles', to: '/assessment-cycles' },
         { icon: ShieldTick, label: 'Review Queue', to: '/ai-triage/reviews', capability: 'ai_triage' },
+        { icon: CheckDone01, label: 'Ownership Inbox', to: '/ownership', capability: 'ownership' },
       ],
     },
     {

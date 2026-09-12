@@ -36,6 +36,7 @@ var pathParam = regexp.MustCompile(`\{[a-zA-Z]+\}`)
 var routeRegistrationFiles = []string{
 	"../internal/adapter/httpapi/router.go",
 	"../internal/adapter/httpapi/fleet_handler.go",
+	"../internal/adapter/httpapi/ownership_handler.go",
 }
 
 // nonAPIRouteRegistrationFiles register routes on their own mux outside /api/v1, so this

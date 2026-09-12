@@ -14,6 +14,8 @@ vi.mock('../../lib/api', async (original) => ({
     listNotificationAttempts: vi.fn(),
     createNotificationChannel: vi.fn(),
     updateNotificationChannel: vi.fn(),
+    createNotificationRule: vi.fn(),
+    updateNotificationRule: vi.fn(),
     testNotificationChannel: vi.fn(),
   },
 }))
@@ -32,6 +34,10 @@ const channel = {
 describe('notification settings', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    })
     vi.mocked(api.me).mockResolvedValue({ role: 'admin' } as never)
     vi.mocked(api.listNotificationChannels).mockResolvedValue([channel])
     vi.mocked(api.listNotificationRules).mockResolvedValue([])
@@ -129,5 +135,56 @@ describe('notification settings', () => {
     ).toBeInTheDocument()
     expect(api.listNotificationChannels).not.toHaveBeenCalled()
     expect(api.notificationDeliveryPage).not.toHaveBeenCalled()
+  })
+  it('requires explicit scope before subscribing to ownership changes', async () => {
+    render(<Alerting />)
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Event' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Finding ownership changed' }))
+    fireEvent.change(screen.getAllByLabelText('Name')[1], {
+      target: { value: 'Ownership alerts' },
+    })
+    expect(screen.getByLabelText('All teams in this tenant')).not.toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Add rule' }))
+    expect(await screen.findByText('Enter at least one team ID or select all teams.')).toBeInTheDocument()
+    expect(api.createNotificationRule).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText(/^Team IDs/), {
+      target: { value: 'pay, ops' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add rule' }))
+    await waitFor(() => expect(api.createNotificationRule).toHaveBeenCalledWith(
+      expect.objectContaining({ event_type: 'finding.ownership_changed', team_ids: ['pay', 'ops'], all_teams: false }),
+    ))
+  })
+  it('clears the team filter when an administrator explicitly chooses all teams', async () => {
+    render(<Alerting />)
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Event' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Finding ownership changed' }))
+    fireEvent.change(screen.getAllByLabelText('Name')[1], {
+      target: { value: 'Tenant ownership alerts' },
+    })
+    fireEvent.change(screen.getByLabelText(/^Team IDs/), { target: { value: 'pay' } })
+    fireEvent.click(screen.getByLabelText('All teams in this tenant'))
+    expect(screen.getByLabelText(/^Team IDs/)).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Add rule' }))
+    await waitFor(() => expect(api.createNotificationRule).toHaveBeenCalledWith(
+      expect.objectContaining({ event_type: 'finding.ownership_changed', all_teams: true, team_ids: undefined }),
+    ))
+  })
+  it('preserves team scope and revision when editing an ownership rule', async () => {
+    vi.mocked(api.listNotificationRules).mockResolvedValue([{
+      id: 'rule', name: 'Scoped ownership', enabled: true,
+      event_type: 'finding.ownership_changed', channel_ids: ['c'],
+      team_ids: ['pay', 'ops'], all_teams: false, revision: 4,
+      created_at: '', updated_at: '',
+    }])
+    render(<Alerting />)
+    expect(await screen.findByText('Teams: pay, ops')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit rule' }))
+    expect(screen.getByLabelText(/^Team IDs/)).toHaveValue('pay, ops')
+    expect(screen.getByLabelText('All teams in this tenant')).not.toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }))
+    await waitFor(() => expect(api.updateNotificationRule).toHaveBeenCalledWith('rule',
+      expect.objectContaining({ revision: 4, team_ids: ['pay', 'ops'], all_teams: false }),
+    ))
   })
 })

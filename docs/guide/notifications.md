@@ -45,6 +45,7 @@ of these events:
 - `sla.approaching_deadline`
 - `fleet.agent.offline`
 - `incident.created`
+- `finding.ownership_changed` (requires explicit `team_ids` or `all_teams` scope)
 
 Vulnerability and incident rules can set an inclusive severity floor. SLA rules
 set a lead time (24 hours by default). Events created before the framework first
