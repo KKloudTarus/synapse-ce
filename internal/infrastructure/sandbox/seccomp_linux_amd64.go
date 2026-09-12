@@ -3,7 +3,7 @@
 // seccomp_linux_amd64.go builds the seccomp-BPF syscall filter handed to bubblewrap via
 // `--seccomp <fd>` (F1). The filter is DEFAULT-DENY: it returns EPERM for any syscall not
 // on the explicit allowlist, and KILLs the process on a foreign architecture. The
-// allowlist is the set a Go/C tool (syft, grype, naabu, subfinder, httpx, crane, git)
+// allowlist is the set a Go/C tool (syft, grype, naabu, subfinder, httpx, git)
 // needs to run – it deliberately OMITS the dangerous syscalls a malicious tool/input would
 // reach for: ptrace, process_vm_*, bpf, keyctl, add_key, request_key, userfaultfd, unshare,
 // setns, mount, umount2, pivot_root, kexec_*, *_module, perf_event_open, io_uring_*,

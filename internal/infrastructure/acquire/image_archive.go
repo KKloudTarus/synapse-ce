@@ -62,7 +62,7 @@ func (a *Acquirer) acquireImageArchive(_ context.Context, ref string) (*ports.Wo
 		return nil, fmt.Errorf("read image archive %q: %w", filepath.Base(ref), err)
 	}
 
-	layoutDir := filepath.Join(dir, "image") // syft scans this as an oci-dir, same as a crane pull
+	layoutDir := filepath.Join(dir, "image") // syft scans this as an oci-dir, same as a registry pull
 	lp, err := layout.Write(layoutDir, empty.Index)
 	if err != nil {
 		_ = cleanup()

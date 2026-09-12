@@ -14,6 +14,7 @@ import (
 	"io"
 	"io/fs"
 	"net"
+	"net/http"
 	neturl "net/url"
 	"os"
 	"os/exec"
@@ -23,6 +24,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
+
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/empty"
+	"github.com/google/go-containerregistry/pkg/v1/layout"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/scmconnector"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -38,9 +47,8 @@ var credsRE = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@`)
 
 // Acquirer prepares isolated workspaces for SCA targets.
 type Acquirer struct {
-	sandbox            ports.ToolRunner            // when set, git clone + image pull always use the hardened runner
+	sandbox            ports.ToolRunner            // when set, git clone uses the hardened runner; image pull is fail-closed unless egressScoped
 	egressScoped       bool                        // when true, request scoped egress; false requests legacy host-net and is rejected by the hardened runner
-	imageTool          string                      // crane (go-containerregistry CLI) binary for daemonless image pulls
 	maxWorkspaceBytes  int64                       // prepared-workspace size cap; <=0 ⇒ the MaxWorkspaceBytes default
 	materializeRootFS  bool                        // when true, an image pull also assembles the layers into a walkable rootfs
 	comparisonDepth    int                         // bounded history depth for Code comparison resolution
@@ -60,7 +68,7 @@ func (a *Acquirer) rejectInternalHost(host string) error {
 
 // New returns a new Acquirer.
 func New() *Acquirer {
-	return &Acquirer{imageTool: "crane", maxWorkspaceBytes: MaxWorkspaceBytes, comparisonDepth: 256}
+	return &Acquirer{maxWorkspaceBytes: MaxWorkspaceBytes, comparisonDepth: 256}
 }
 
 // WithComparisonDepth bounds Git history fetched for immutable Code comparisons.
@@ -68,14 +76,6 @@ func New() *Acquirer {
 func (a *Acquirer) WithComparisonDepth(depth int) *Acquirer {
 	if depth > 0 {
 		a.comparisonDepth = depth
-	}
-	return a
-}
-
-// WithImageTool overrides the crane binary used for container-image acquisition.
-func (a *Acquirer) WithImageTool(bin string) *Acquirer {
-	if strings.TrimSpace(bin) != "" {
-		a.imageTool = bin
 	}
 	return a
 }
@@ -100,13 +100,20 @@ func (a *Acquirer) WithImageRootFS(enabled bool) *Acquirer {
 	return a
 }
 
-// WithSandbox makes git clone + image pull ALWAYS run inside the sandbox (F4) – caps
-// dropped, seccomp-filtered, curated read-only FS, cgroup-limited, workspace the only
-// writable path – so a hostile repo/server/hook/image cannot touch the host or read its
-// secrets. egressScoped selects the network posture: true confines the fetch to a netns
-// whose egress is DNS-pinned to the repo/registry host (needs CAP_NET_ADMIN); false
-// shares the host network un-scoped (still fully sandboxed otherwise) for an unprivileged
-// deployment that cannot build a netns. A nil runner is the only path that execs directly.
+// WithSandbox makes git clone ALWAYS run inside the sandbox (F4) – caps dropped,
+// seccomp-filtered, curated read-only FS, cgroup-limited, workspace the only writable
+// path – so a hostile repo/server/hook cannot touch the host or read its secrets.
+// egressScoped selects the network posture: true confines the fetch to a netns whose
+// egress is DNS-pinned to the repo/registry host (needs CAP_NET_ADMIN); false shares the
+// host network un-scoped (still fully sandboxed otherwise) for an unprivileged deployment
+// that cannot build a netns. A nil runner is the only path that execs git directly.
+//
+// Image pull no longer execs an external binary: it runs in-process (go-containerregistry)
+// with an egress-pinned HTTP transport, so egress confinement moved from the sandbox netns
+// into the transport (host allow-list + loopback/link-local/metadata rejection). The
+// sandbox posture for a pull is UNCHANGED: a sandboxed acquirer without egress scoping
+// still fail-closes a remote pull (the production wiring), and the sandbox runner is not
+// consulted for the pull itself.
 func (a *Acquirer) WithSandbox(r ports.ToolRunner, egressScoped bool) *Acquirer {
 	a.sandbox, a.egressScoped = r, egressScoped
 	return a
@@ -678,11 +685,31 @@ func rejectInternalAcquisitionHost(host string) error {
 		return nil // unresolvable: the egress pin / fetch fails closed downstream anyway
 	}
 	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		if isInternalAcquisitionIP(ip) {
 			return fmt.Errorf("%w: acquisition host %q resolves to a loopback/link-local address (%s) – refused (SSRF/metadata guard)", shared.ErrValidation, host, ip)
 		}
 	}
 	return nil
+}
+
+// carrierGradeNAT is the shared CGNAT range (RFC 6598). It is ISP-internal, never a legitimate
+// code/image host, and is the range the Alibaba/OpenStack metadata service (100.100.100.200) sits
+// in, so it is refused alongside loopback/link-local.
+var carrierGradeNAT = func() *net.IPNet { _, n, _ := net.ParseCIDR("100.64.0.0/10"); return n }()
+
+// awsMetadataIPv6 is the AWS EC2 IPv6 instance-metadata endpoint. It sits in the IPv6 ULA range
+// (fd00::/8) which is otherwise allowed for a self-hosted registry, so the IPv4 link-local metadata
+// guard would not cover it; it is refused explicitly to keep the "never reach cloud metadata"
+// invariant symmetric across IPv4 and IPv6.
+var awsMetadataIPv6 = net.ParseIP("fd00:ec2::254")
+
+// isInternalAcquisitionIP reports whether an IP is a loopback, link-local (169.254/16, fe80::/10,
+// incl. the standard cloud metadata endpoint), unspecified, carrier-grade-NAT, or the AWS IPv6
+// metadata address – never a legitimate code/image source. RFC1918 and other IPv6 ULA are
+// intentionally NOT rejected: an internal git/registry server is a valid target.
+func isInternalAcquisitionIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
+		carrierGradeNAT.Contains(ip) || ip.Equal(awsMetadataIPv6)
 }
 
 // gitHost extracts the host to allow through egress from a validated http(s) clone URL.
@@ -695,72 +722,99 @@ func gitHost(rawURL string) (string, error) {
 }
 
 // imageRefRE bounds a container image reference to safe characters (no shell metacharacters
-// or whitespace); crane gets argv (no shell), and validateImageRef also blocks a leading
-// dash so the ref cannot be parsed as a flag.
+// or whitespace); validateImageRef also blocks a leading dash so name.ParseReference cannot
+// treat the ref as a flag-like token.
 var imageRefRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]*$`)
 
-// acquireImage pulls a container image's rootfs into an OCI layout for SCA: a
-// DAEMONLESS pull (crane / go-containerregistry – never `docker run`), pinned to one
-// platform, written into the workspace. When a sandbox is set, the pull runs confined
-// with egress restricted to the registry. syft auto-detects the layout (oci-dir scan).
+// registryPlatform pins the pulled image to one architecture; a multi-arch index resolves to
+// this manifest and single-arch images ignore it.
+var registryPlatform = v1.Platform{OS: "linux", Architecture: "amd64"}
+
+// acquireImage pulls a container image into an OCI layout for SCA: a DAEMONLESS,
+// IN-PROCESS pull (go-containerregistry as a library – never `docker run`, never an external
+// crane binary), pinned to one platform, written into the workspace. Egress is confined by an
+// allow-list transport (registryHosts + loopback/link-local/metadata rejection) rather than a
+// sandbox netns, and the on-disk layout is bounded by the workspace cap. syft auto-detects the
+// layout (oci-dir scan).
 func (a *Acquirer) acquireImage(ctx context.Context, ref string) (*ports.Workspace, error) {
 	ref = strings.TrimSpace(ref)
 	// Airgapped path: a local `docker save` tarball (offline delivery, e.g. an SFTP bundle)
-	// is loaded in-process into an OCI layout — no registry, no crane. A bare registry
-	// reference has no archive suffix / is not a file on disk, so this never intercepts one.
+	// is loaded in-process into an OCI layout — no registry. A bare registry reference has no
+	// archive suffix / is not a file on disk, so this never intercepts one.
 	if isLocalImageArchive(ref) {
 		return a.acquireImageArchive(ctx, ref)
 	}
 	if err := validateImageRef(ref); err != nil {
 		return nil, err
 	}
+	// Sandbox posture UNCHANGED: a sandboxed acquirer without egress scoping still fail-closes
+	// a remote pull (production wires WithSandbox(sb,false)). Only an unsandboxed or explicitly
+	// egress-scoped acquirer proceeds; the pull then runs in-process with the egress-pinned
+	// transport below.
 	if a.sandbox != nil && !a.egressScoped {
 		return nil, fmt.Errorf("%w: remote image acquisition requires authoritative signed execution grants", shared.ErrValidation)
 	}
+	parsed, err := name.ParseReference(ref)
+	if err != nil {
+		// Do NOT echo ref or the parse error: a ref such as user:pass@host passes imageRefRE, and
+		// redactCreds only catches the scheme://user@ form, so echoing it could leak a credential.
+		return nil, fmt.Errorf("%w: invalid image reference", shared.ErrValidation)
+	}
+	regHosts := registryHosts(ref)
+	for _, h := range regHosts {
+		if herr := a.rejectInternalHost(h); herr != nil {
+			return nil, herr
+		}
+	}
+	maxBytes := a.maxWorkspaceBytes
+	if maxBytes <= 0 {
+		maxBytes = MaxWorkspaceBytes
+	}
+
 	dir, err := os.MkdirTemp("", "synapse-ws-*")
 	if err != nil {
 		return nil, fmt.Errorf("create workspace: %w", err)
 	}
 	cleanup := func() error { return os.RemoveAll(dir) }
-	layout := filepath.Join(dir, "image") // crane writes the OCI layout here; syft scans it
-	args := []string{"pull", "--format=oci", "--platform=linux/amd64", ref, layout}
+	layoutDir := filepath.Join(dir, "image") // the OCI layout syft scans as oci-dir
 
-	regHosts := registryHosts(ref)
-	for _, h := range regHosts {
-		if herr := rejectInternalAcquisitionHost(h); herr != nil {
-			_ = cleanup()
-			return nil, herr
-		}
+	// remote.Image fetches the manifest through the egress-pinned transport; the blobs are
+	// downloaded lazily and written by layout.AppendImage below. The transport is per-pull, so its
+	// idle keep-alive connections (and their goroutines/FDs) are closed when the pull returns
+	// rather than lingering IdleConnTimeout past every pull.
+	transport := registryTransport(regHosts, a.allowInternalHosts, maxBytes)
+	defer transport.closeIdleConnections()
+	img, err := remote.Image(parsed,
+		remote.WithContext(ctx),
+		remote.WithPlatform(registryPlatform),
+		remote.WithTransport(transport),
+	)
+	if err != nil {
+		_ = cleanup()
+		return nil, fmt.Errorf("image pull failed: %s", truncate(redactCreds(err.Error()), 400))
 	}
-	if a.sandbox != nil {
-		egress, hostNet := a.sandboxNet(regHosts)
-		res, rerr := a.sandbox.Run(ctx, ports.ToolSpec{
-			Name:         a.imageTool,
-			Args:         args,
-			Workdir:      dir, // the only writable path; crane writes the layout here
-			EgressPolicy: egress,
-			HostNetwork:  hostNet,
-		})
-		if rerr != nil {
-			_ = cleanup()
-			return nil, fmt.Errorf("image pull (sandboxed) failed: %w", rerr)
-		}
-		if res.ExitCode != 0 {
-			_ = cleanup()
-			return nil, fmt.Errorf("image pull failed: exit %d: %s", res.ExitCode, truncate(redactCreds(string(res.Stderr)), 400))
-		}
-	} else {
-		cmd := exec.CommandContext(ctx, a.imageTool, args...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			_ = cleanup()
-			return nil, fmt.Errorf("image pull failed: %w: %s", err, truncate(redactCreds(string(out)), 400))
-		}
+	// Bomb front door: reject before writing any blob when the manifest HONESTLY declares more
+	// compressed bytes than the workspace cap. A manifest that LIES (under-declares layer sizes)
+	// is caught by the transport's shared pull-wide byte budget, and extractOCIRootFS bounds the
+	// DECOMPRESSED tree separately below.
+	if err := checkImageManifestSize(img, maxBytes); err != nil {
+		_ = cleanup()
+		return nil, err
+	}
+	lp, err := layout.Write(layoutDir, empty.Index)
+	if err != nil {
+		_ = cleanup()
+		return nil, fmt.Errorf("init oci layout: %w", err)
+	}
+	if err := lp.AppendImage(img); err != nil {
+		_ = cleanup()
+		return nil, fmt.Errorf("write oci layout: %s", truncate(redactCreds(err.Error()), 400))
 	}
 	// The packages live in the image layers (syft oci-dir scans the layout); there are no
 	// host-side lockfiles to inspect, so the workspace carries just the layout dir. Recover
 	// image metadata (layer stack + build history) from the OCI config for layer attribution
 	// (Epic D) – best-effort: nil if the config is unreadable, never fails the acquisition.
-	ws := &ports.Workspace{Dir: layout, Image: readImageInfo(layout, ref), Cleanup: cleanup}
+	ws := &ports.Workspace{Dir: layoutDir, Image: readImageInfo(layoutDir, ref), Cleanup: cleanup}
 	// Optionally assemble the layers into a walkable root filesystem (owned OS-package cataloging reads it).
 	// BEST-EFFORT: the rootfs is supplementary – syft still scans the OCI layout in Dir regardless – and the
 	// extractor is fail-closed, so a failure (a hostile layer the hardening refused, an unsupported
@@ -768,7 +822,7 @@ func (a *Acquirer) acquireImage(ctx context.Context, ref string) (*ports.Workspa
 	// RootFS is left empty so no partial tree is ever consumed.
 	if a.materializeRootFS {
 		rootfs := filepath.Join(dir, "rootfs")
-		if layers, err := extractOCIRootFS(ctx, layout, rootfs, a.maxWorkspaceBytes); err != nil {
+		if layers, err := extractOCIRootFS(ctx, layoutDir, rootfs, a.maxWorkspaceBytes); err != nil {
 			ws.RootFSNote = truncate(redactCreds(err.Error()), 200)
 		} else {
 			ws.RootFS = rootfs
@@ -778,9 +832,171 @@ func (a *Acquirer) acquireImage(ctx context.Context, ref string) (*ports.Workspa
 	return ws, nil
 }
 
+// maxImageLayers caps the number of layers a pulled image may declare. layout.AppendImage writes
+// each layer in its own goroutine with a concurrent blob GET (ggcr's WriteImage errgroup has no
+// concurrency limit), so an attacker-controlled manifest declaring tens of thousands of 1-byte
+// layers would pass the byte cap yet fan out into that many goroutines and requests per pull. Real
+// images stay well under this (Docker's own soft ceiling is 127); it is a fail-closed DoS bound.
+const maxImageLayers = 256
+
+// checkImageManifestSize rejects an image whose manifest declares more compressed bytes
+// (config + layers) than the workspace cap allows, or more layers than maxImageLayers, before any
+// blob is written to disk.
+func checkImageManifestSize(img v1.Image, maxBytes int64) error {
+	m, err := img.Manifest()
+	if err != nil {
+		return fmt.Errorf("read image manifest: %s", truncate(redactCreds(err.Error()), 400))
+	}
+	if len(m.Layers) > maxImageLayers {
+		return fmt.Errorf("%w: image declares %d layers, exceeds the %d-layer cap", shared.ErrValidation, len(m.Layers), maxImageLayers)
+	}
+	// Overflow-safe accumulation: a hostile manifest can declare negative or MaxInt64 sizes to
+	// wrap the sum negative and slip past a naive `total > maxBytes`. Reject any negative size and
+	// any overflow; the transport's shared byte budget is the authoritative guard on real bytes.
+	if m.Config.Size < 0 {
+		return fmt.Errorf("%w: image manifest declares a negative config size", shared.ErrValidation)
+	}
+	total := m.Config.Size
+	for _, l := range m.Layers {
+		if l.Size < 0 {
+			return fmt.Errorf("%w: image manifest declares a negative layer size", shared.ErrValidation)
+		}
+		total += l.Size
+		if total < 0 {
+			return fmt.Errorf("%w: image manifest declared sizes overflow", shared.ErrValidation)
+		}
+	}
+	if maxBytes > 0 && total > maxBytes {
+		return fmt.Errorf("%w: image declares %d compressed bytes, exceeds the %d-byte workspace cap", shared.ErrValidation, total, maxBytes)
+	}
+	return nil
+}
+
+// registryTransport is the in-process egress pin for a registry pull. Its DialContext admits
+// only a host in allowHosts (the registryHosts allow-list), resolves it, and dials a vetted IP
+// directly so a DNS rebind between check and connect cannot redirect the connection. Loopback,
+// link-local, cloud-metadata (169.254/16, its IPv6 form), and carrier-grade-NAT (100.64/10, the
+// Alibaba/OpenStack 100.100.100.200 metadata range) addresses are refused (SSRF/metadata guard);
+// RFC1918 stays reachable so a self-hosted internal registry is a valid target, matching
+// rejectInternalAcquisitionHost. allowInternal is a test-only escape for a loopback httptest
+// registry; it is never set in production. Every connection, including a blob-CDN redirect and a
+// cross-host token exchange, flows through this DialContext, so a redirect to a non-allow-listed
+// host fails closed. The returned transport carries the pull's shared byte budget (maxBytes).
+func registryTransport(allowHosts []string, allowInternal bool, maxBytes int64) *boundedRoundTripper {
+	allow := make(map[string]struct{}, len(allowHosts))
+	for _, h := range allowHosts {
+		allow[strings.ToLower(strings.TrimSpace(h))] = struct{}{}
+	}
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	base := &http.Transport{
+		Proxy:                 nil, // never route an egress-pinned pull through a proxy env var
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          16,
+		MaxIdleConnsPerHost:   8, // = MaxConnsPerHost, so an 8-wide blob wave does not discard and re-dial mid-pull
+		MaxConnsPerHost:       8,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := allow[strings.ToLower(host)]; !ok {
+				return nil, fmt.Errorf("registry egress: host %q is not in the pull allow-list", host)
+			}
+			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+			if err != nil {
+				return nil, err
+			}
+			var lastErr error
+			for _, ip := range ips {
+				if !allowInternal && isInternalAcquisitionIP(ip) {
+					lastErr = fmt.Errorf("registry egress: host %q resolves to a loopback/link-local address (%s) – refused (SSRF/metadata guard)", host, ip)
+					continue
+				}
+				conn, derr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+				if derr == nil {
+					return conn, nil
+				}
+				lastErr = derr
+			}
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, fmt.Errorf("registry egress: host %q has no usable address", host)
+		},
+	}
+	rt := &boundedRoundTripper{base: base, limit: maxBytes}
+	rt.remaining.Store(maxBytes + 1) // +1 so a pull whose bytes exactly equal the cap reads fully.
+	return rt
+}
+
+// boundedRoundTripper caps the TOTAL bytes read across every response body of one pull (manifest,
+// token, and all blobs share one budget). A per-response cap would not help: an OCI manifest
+// descriptor's Size field is separate from its digest, so a malicious registry can under-declare
+// each layer's size (defeating checkImageManifestSize) and serve many digest-honest blobs, writing
+// N×cap to disk. One shared budget bounds the whole pull to the workspace cap regardless of layer
+// count. layout.AppendImage writes layers concurrently, so several budgetReadCloser instances draw
+// on this atomic at once; each Read reads at most the currently-remaining budget, so the only
+// overshoot is the in-flight reads at the moment the budget crosses zero, bounded by
+// maxImageLayers × one read buffer (a few MiB) against a multi-GiB cap. The budget is per-transport,
+// and registryTransport is built once per pull.
+type boundedRoundTripper struct {
+	base      *http.Transport
+	remaining atomic.Int64
+	limit     int64
+}
+
+func (t *boundedRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(r)
+	if err != nil {
+		return nil, err
+	}
+	if t.limit > 0 && resp.Body != nil {
+		resp.Body = &budgetReadCloser{under: resp.Body, budget: &t.remaining, limit: t.limit}
+	}
+	return resp, nil
+}
+
+// closeIdleConnections releases the per-pull transport's idle keep-alive connections (and their
+// reader goroutines) instead of letting them linger IdleConnTimeout after the pull returns.
+func (t *boundedRoundTripper) closeIdleConnections() { t.base.CloseIdleConnections() }
+
+// budgetReadCloser draws from a shared pull-wide byte budget and fails closed once it is exhausted.
+type budgetReadCloser struct {
+	under  io.ReadCloser
+	budget *atomic.Int64
+	limit  int64
+}
+
+func (b *budgetReadCloser) Read(p []byte) (int, error) {
+	rem := b.budget.Load()
+	if rem <= 0 {
+		return 0, fmt.Errorf("registry egress: pull exceeds the %d-byte workspace cap", b.limit)
+	}
+	// io.LimitReader semantics on the SHARED budget: never let one Read draw past what remains, so
+	// the cumulative bytes read across all bodies never exceed the initial budget even when a stream
+	// returns its bytes together with io.EOF in one call. The budget starts at cap+1 so a pull of
+	// exactly cap bytes still reads its trailing EOF probe cleanly; a larger pull runs the budget to
+	// zero and the next Read fails closed.
+	if int64(len(p)) > rem {
+		p = p[:rem]
+	}
+	n, err := b.under.Read(p)
+	if n > 0 {
+		b.budget.Add(-int64(n))
+	}
+	return n, err
+}
+
+func (b *budgetReadCloser) Close() error { return b.under.Close() }
+
 // registryHosts is the egress allow-list for pulling ref: the registry host, plus the
 // auth/CDN hosts the well-known public registries serve tokens/blobs from. A private or
-// self-hosted registry is typically single-host.
+// self-hosted registry is typically single-host. Every entry is a bare hostname (no port):
+// the transport's DialContext and rejectInternalAcquisitionHost both compare hostnames, so an
+// explicit :port on the ref's registry (e.g. registry.internal:5000) is stripped here.
 func registryHosts(ref string) []string {
 	reg := "docker.io"
 	if i := strings.IndexByte(ref, '/'); i > 0 {
@@ -788,6 +1004,7 @@ func registryHosts(ref string) []string {
 			reg = first
 		}
 	}
+	reg = hostWithoutPort(reg)
 	switch reg {
 	case "docker.io", "index.docker.io", "registry-1.docker.io":
 		// registry + token + the AWS CloudFront blob CDN Docker Hub serves layers from.
@@ -796,13 +1013,31 @@ func registryHosts(ref string) []string {
 		return []string{"ghcr.io", "pkg-containers.githubusercontent.com"}
 	case "quay.io":
 		return []string{"quay.io", "cdn.quay.io", "cdn01.quay.io", "cdn02.quay.io", "cdn03.quay.io"}
+	case "gcr.io", "us.gcr.io", "eu.gcr.io", "asia.gcr.io", "marketplace.gcr.io":
+		// GCR/Artifact Registry redirect blob GETs to Google Cloud Storage; without it an
+		// anonymous public pull (e.g. gcr.io/distroless/*) fails on the first blob redirect.
+		return []string{reg, "storage.googleapis.com"}
 	default:
+		// Google Artifact Registry (regional *.pkg.dev, e.g. us-docker.pkg.dev) also serves blobs
+		// from Google Cloud Storage.
+		if strings.HasSuffix(reg, ".pkg.dev") {
+			return []string{reg, "storage.googleapis.com"}
+		}
 		return []string{reg} // private / self-hosted registry (single host)
 	}
 }
 
+// hostWithoutPort strips an explicit :port from a registry host string, leaving the bare
+// hostname (or IP). A value with no port is returned unchanged.
+func hostWithoutPort(reg string) string {
+	if h, _, err := net.SplitHostPort(reg); err == nil {
+		return h
+	}
+	return reg
+}
+
 // validateImageRef rejects refs with whitespace or shell metacharacters and any leading
-// dash (option injection); crane still gets argv (no shell).
+// dash (option injection) before name.ParseReference sees them.
 func validateImageRef(ref string) error {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {

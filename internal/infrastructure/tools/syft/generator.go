@@ -18,7 +18,7 @@ import (
 )
 
 // sourceScheme picks Syft's source scheme for a workspace path: an OCI image layout
-// (container acquisition produces one via crane) is scanned with `oci-dir:` so Syft reads
+// (container acquisition produces one via an in-process registry pull) is scanned with `oci-dir:` so Syft reads
 // it as an image; a plain source tree is scanned with `dir:`. Both pin the source type and
 // stop the path being parsed as a flag.
 func sourceScheme(targetRef string) string {

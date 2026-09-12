@@ -114,7 +114,7 @@ func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.Adv
 		if serr != nil {
 			// Fail CLOSED (re-audit fix): the operator explicitly asked for the sandbox
 			// (SYNAPSE_SANDBOX_ENABLED=true); if it cannot be built we must NOT silently
-			// degrade to a direct host exec of syft/grype/git/crane. Refuse to start –
+			// degrade to a direct host exec of syft/grype/git. Refuse to start –
 			// mirrors the worker (which os.Exit's) and the prod-vault-key hardening.
 			return Execution{}, fmt.Errorf("SYNAPSE_SANDBOX_ENABLED is set but the sandbox is unavailable – refusing to run SCA/acquisition UNSANDBOXED; install bubblewrap or unset the flag: %w", serr)
 		}
@@ -130,7 +130,7 @@ func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.Adv
 		acquirer = localAcquirer
 		log.Info("SCA tools (syft/grype) run sandboxed-isolated; network acquisition is fail-closed pending signed scan grants")
 	} else {
-		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) – syft/grype/git/crane run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
+		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) – syft/grype/git run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
 	}
 	// SBOM producer select: default Syft (pinned binary, full coverage + CycloneDX
 	// dep-graph edges) or the detection-independent owned parsers. ownsbom is pure-Go (no exec) so it

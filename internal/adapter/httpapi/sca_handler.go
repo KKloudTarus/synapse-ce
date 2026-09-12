@@ -19,7 +19,7 @@ import (
 
 // scanImageRefRE bounds a container image reference to safe characters at the HTTP edge, mirroring
 // the acquirer's authoritative check (no shell metacharacters, no leading '-'). The acquirer still
-// validates and pulls the reference daemonlessly (crane); this is a fast-fail 400 for garbage.
+// validates and pulls the reference daemonlessly (in-process); this is a fast-fail 400 for garbage.
 var scanImageRefRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]*$`)
 
 type scaScanRequest struct {
@@ -158,7 +158,7 @@ func validateScanTarget(kind, target string) string {
 			return "uploaded source target is managed by the server"
 		}
 	case ports.TargetImage:
-		// Container-image scanning: the acquirer pulls the reference daemonlessly (crane) into an
+		// Container-image scanning: the acquirer pulls the reference daemonlessly (in-process) into an
 		// OCI layout and catalogs its OS + language packages, so the server accepts an image ref here.
 		if !scanImageRefRE.MatchString(target) {
 			return "image target must be a valid container image reference"

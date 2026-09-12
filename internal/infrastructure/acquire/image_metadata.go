@@ -11,7 +11,7 @@ import (
 )
 
 // readImageInfo recovers container-image metadata from a pulled OCI image layout
-// (crane writes one to layoutDir). It reads the manifest + image config to build
+// (the in-process pull writes one to layoutDir). It reads the manifest + image config to build
 // the ordered layer stack (diff_id + build command per non-empty layer) so the
 // scan can attribute packages to layers and estimate the base image (Epic D).
 //
@@ -122,7 +122,7 @@ func readManifest(layoutDir string) (ociManifest, bool) {
 	if !ok || len(idx.Manifests) == 0 {
 		return ociManifest{}, false
 	}
-	// Prefer a linux/amd64 image manifest (crane pulled that platform); else the first.
+	// Prefer a linux/amd64 image manifest (the pull pinned that platform); else the first.
 	pick := idx.Manifests[0]
 	for _, m := range idx.Manifests {
 		if m.Platform.OS == "linux" && m.Platform.Architecture == "amd64" {
