@@ -16,7 +16,7 @@ import (
 
 const (
 	// SchemaVersion is the only semantic-facts wire version this build understands.
-	SchemaVersion = 1
+	SchemaVersion = 2
 
 	maxFiles       = 200_000
 	maxSymbols     = 2_000_000
@@ -24,6 +24,7 @@ const (
 	maxParameters  = 1_024
 	maxArguments   = 4_096
 	maxSegments    = 256
+	maxSubKey      = 256 // bound on a captured literal subscript key (structural selector text, never a scalar value)
 	maxStringBytes = 4_096
 )
 
@@ -235,6 +236,14 @@ type Value struct {
 	Name    string    `json:"name,omitempty"`
 	Ref     Reference `json:"reference"`
 	Pos     Position  `json:"position"`
+	// SubKey and SubDyn describe a subscript-container appearance of a simple local name so the taint
+	// engine can refine per-literal-key when a container provably cannot alias or escape. SubKey holds the
+	// literal key text of container[literal] (a structural selector, not a scalar value); SubDyn marks
+	// container[<non-literal>], which forces the engine to widen back to whole-container taint. Both are set
+	// only on a Reference/Binding whose Ref is a single bare name; a bare use of the name leaves both zero,
+	// which the engine reads as an escape. They never appear together.
+	SubKey string `json:"subscript_key,omitempty"`
+	SubDyn bool   `json:"subscript_dynamic,omitempty"`
 }
 
 // ValueFlowKind is a closed intra-procedural propagation operation emitted by the sidecar.
@@ -398,6 +407,9 @@ func (d Document) Validate() error {
 		if err := validateReference(value.Ref); err != nil {
 			return err
 		}
+		if err := validateSubscript(value); err != nil {
+			return err
+		}
 		if _, duplicate := valueSet[value.ID]; duplicate {
 			return fmt.Errorf("%w: duplicate python value fact", shared.ErrValidation)
 		}
@@ -536,6 +548,59 @@ func validateReference(ref Reference) error {
 		}
 	}
 	return nil
+}
+
+// validateSubscript rejects malformed subscript-key annotations at the trust boundary. A captured key text
+// is a structural selector, so it is length-bounded and printable; it is meaningful only on a single-name
+// Reference or Binding; and SubKey with SubDyn together is contradictory (a key is either a known literal or
+// dynamic, never both). Every other value carries neither field.
+func validateSubscript(v Value) error {
+	if v.SubKey == "" && !v.SubDyn {
+		return nil
+	}
+	if v.SubKey != "" && v.SubDyn {
+		return fmt.Errorf("%w: python subscript annotation is both literal and dynamic", shared.ErrValidation)
+	}
+	if v.Kind != ValueReference && v.Kind != ValueBinding {
+		return fmt.Errorf("%w: python subscript annotation on a non-name value", shared.ErrValidation)
+	}
+	if v.Ref.Kind != ReferenceName || len(v.Ref.Segments) != 1 {
+		return fmt.Errorf("%w: python subscript annotation needs a single-name container", shared.ErrValidation)
+	}
+	if v.SubKey != "" {
+		// The container name and the reference's single segment must agree: the taint engine aggregates a
+		// container's refinability on Ref.Segments[0] but files its per-key bindings under Name, so a producer
+		// that disagreed would silently misfile a def-use edge (a false negative). Reject at the boundary.
+		if v.Name != v.Ref.Segments[0] {
+			return fmt.Errorf("%w: python subscript annotation name/segment mismatch", shared.ErrValidation)
+		}
+		// A literal key is type-tagged ("s:" string, "i:" integer) so an integer key never shares a refined
+		// slot with a string key of the same text. Reject an untagged key: it cannot have come from the
+		// extractor and would break the key-identity assumption the refinement rests on.
+		if !strings.HasPrefix(v.SubKey, "s:") && !strings.HasPrefix(v.SubKey, "i:") {
+			return fmt.Errorf("%w: python subscript key missing type tag", shared.ErrValidation)
+		}
+		if !ValidSubscriptKey(v.SubKey) {
+			return fmt.Errorf("%w: python subscript key exceeds bound or has control characters", shared.ErrValidation)
+		}
+	}
+	return nil
+}
+
+// ValidSubscriptKey reports whether a captured subscript key is within the facts bound and printable. It is
+// the single source of truth shared by the trust-boundary validator (validateSubscript) and the extractor,
+// which consults it to WIDEN (emit a dynamic key) rather than emit a key that would fail validation and
+// reject the whole document. A structural selector is length-bounded and carries no control characters.
+func ValidSubscriptKey(key string) bool {
+	if len(key) > maxSubKey {
+		return false
+	}
+	for _, r := range key {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 func validatePosition(pos Position, requireFile bool) error {

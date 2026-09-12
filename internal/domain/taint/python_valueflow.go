@@ -180,6 +180,7 @@ type pythonValueBuilder struct {
 	sinks       map[string]TypedValueSink
 	sanitizers  map[string]TypedSanitizer
 	positions   map[string]pythonprogram.Position
+	refinable   map[string]bool
 	truncated   bool
 }
 
@@ -188,14 +189,16 @@ func (b *pythonValueBuilder) index() {
 		b.symbols[symbol.ID] = symbol
 		b.parents[symbol.ID] = symbol.ParentID
 	}
+	b.refinable = b.refinableContainers()
 	for _, value := range b.document.Values {
 		b.values[value.ID] = value
 		b.positions[value.ID] = value.Pos
 		if value.Kind == pythonprogram.ValueParameter || value.Kind == pythonprogram.ValueBinding {
+			name := b.effectiveName(value.ScopeID, value.Name, value.SubKey)
 			if b.definitions[value.ScopeID] == nil {
 				b.definitions[value.ScopeID] = map[string][]pythonprogram.Value{}
 			}
-			b.definitions[value.ScopeID][value.Name] = append(b.definitions[value.ScopeID][value.Name], value)
+			b.definitions[value.ScopeID][name] = append(b.definitions[value.ScopeID][name], value)
 		}
 	}
 	for scope := range b.definitions {
@@ -226,7 +229,7 @@ func (b *pythonValueBuilder) bindReferences() {
 		if value.Kind != pythonprogram.ValueReference || value.Ref.Kind != pythonprogram.ReferenceName || len(value.Ref.Segments) != 1 {
 			continue
 		}
-		name := value.Ref.Segments[0]
+		name := b.effectiveName(value.ScopeID, value.Ref.Segments[0], value.SubKey)
 		for _, scope := range b.scopeChain(value.ScopeID) {
 			definitions := b.definitions[scope][name]
 			var prior []pythonprogram.Value
@@ -243,6 +246,134 @@ func (b *pythonValueBuilder) bindReferences() {
 			}
 		}
 	}
+}
+
+// effectiveName maps a subscript-container appearance to a per-key pseudo-name when its container is
+// field-refinable, so a write to container[literal] and a read of the same literal share a def-use edge
+// while a read of a different literal does not. Any non-refinable container keeps its plain name and the
+// whole-container taint semantics. The NUL separator cannot occur in a Python identifier or a validated
+// subscript key, so the synthetic name cannot collide with a real one.
+func (b *pythonValueBuilder) effectiveName(scopeID, name, subKey string) string {
+	if subKey != "" && b.refinable[scopeID+"\x00"+name] {
+		return name + "\x00[" + subKey + "]"
+	}
+	return name
+}
+
+// refinableContainers returns the set of (scope, name) local containers whose per-literal-key taint the
+// engine may track without risking a false negative. This is the field-sensitivity refinement: it removes
+// the false positive where a tainted value stored under one literal key makes a read of a DIFFERENT literal
+// key of the same dict/list look tainted. It is sound by construction because it refines ONLY containers it
+// proves cannot alias, escape, or hold keys it did not observe, and every disqualified container falls back
+// to the whole-container over-approximation (the prior, already-sound behavior). A container qualifies only
+// when ALL hold, and any single failure widens it:
+//   - it has at least one literal-keyed subscript (there is something to refine);
+//   - no non-literal-key subscript appears on it (a dynamic key could be any key -> unknown taint);
+//   - it never appears as a bare name (assigned to another var, passed to a call, returned, iterated,
+//     unpacked, or used in an expression) -> it cannot be aliased or escape;
+//   - it is not a parameter (a parameter's keys are caller-controlled and unknown);
+//   - it is initialized in-scope by at least one whole binding, and EVERY whole binding is a fresh empty
+//     container literal ({} or []), so the container provably starts empty and local;
+//   - its scope has no nested callable/class scope, so no closure can capture and mutate it out of view;
+//   - its scope has no coverage gap, so no unmodeled construct (exec, getattr, a recovered parse) can
+//     touch it invisibly.
+func (b *pythonValueBuilder) refinableContainers() map[string]bool {
+	type agg struct {
+		keyed     int
+		dynamic   bool
+		bareRef   bool
+		wholeBind int
+		freshInit int
+		isParam   bool
+	}
+	rhsKind := map[string]pythonprogram.ValueKind{}
+	valueKind := map[string]pythonprogram.ValueKind{}
+	for _, v := range b.document.Values {
+		valueKind[v.ID] = v.Kind
+	}
+	for _, a := range b.document.Assignments {
+		k, ok := valueKind[a.ValueID]
+		for _, t := range a.TargetIDs {
+			if ok {
+				rhsKind[t] = k
+			} else {
+				rhsKind[t] = ""
+			}
+		}
+	}
+	hasChild := map[string]bool{}
+	for _, sym := range b.document.Symbols {
+		if sym.ParentID != "" {
+			hasChild[sym.ParentID] = true
+		}
+	}
+	gapped := map[string]bool{}
+	for _, g := range b.document.CoverageGaps {
+		if g.SymbolID != "" {
+			gapped[g.SymbolID] = true
+		}
+	}
+	aggs := map[string]*agg{}
+	get := func(scope, name string) *agg {
+		k := scope + "\x00" + name
+		a := aggs[k]
+		if a == nil {
+			a = &agg{}
+			aggs[k] = a
+		}
+		return a
+	}
+	for _, v := range b.document.Values {
+		if v.Ref.Kind != pythonprogram.ReferenceName || len(v.Ref.Segments) != 1 {
+			continue
+		}
+		name := v.Ref.Segments[0]
+		switch v.Kind {
+		case pythonprogram.ValueParameter:
+			get(v.ScopeID, name).isParam = true
+		case pythonprogram.ValueReference:
+			a := get(v.ScopeID, name)
+			switch {
+			case v.SubDyn:
+				a.dynamic = true
+			case v.SubKey != "":
+				a.keyed++
+			default:
+				a.bareRef = true
+			}
+		case pythonprogram.ValueBinding:
+			a := get(v.ScopeID, name)
+			switch {
+			case v.SubDyn:
+				a.dynamic = true
+			case v.SubKey != "":
+				a.keyed++
+			default:
+				a.wholeBind++
+				if rhsKind[v.ID] == pythonprogram.ValueLiteral {
+					a.freshInit++
+				}
+			}
+		}
+	}
+	out := map[string]bool{}
+	for k, a := range aggs {
+		scope := k
+		if i := strings.Index(k, "\x00"); i >= 0 {
+			scope = k[:i]
+		}
+		if a.keyed == 0 || a.dynamic || a.bareRef || a.isParam {
+			continue
+		}
+		if a.wholeBind == 0 || a.wholeBind != a.freshInit {
+			continue
+		}
+		if hasChild[scope] || gapped[scope] {
+			continue
+		}
+		out[k] = true
+	}
+	return out
 }
 
 func (b *pythonValueBuilder) modelCalls() {
