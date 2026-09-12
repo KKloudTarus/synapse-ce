@@ -88,3 +88,56 @@ func TestReachClosure(t *testing.T) {
 		t.Error("c should NOT be reachable")
 	}
 }
+
+// D4.8: an image target ships its classes under the extracted rootfs (ws.RootFS), while ws.Dir is the
+// packed OCI layout with no walkable classes. AnalyzeDirs must scan the second root, so passing an empty
+// build dir followed by the rootfs tags exactly as scanning the rootfs directly.
+func TestAnalyzeDirsScansRootfsAsSecondDir(t *testing.T) {
+	comps := []sbom.Component{
+		{Name: "com.deplib:deplib", Version: "1.0", PURL: "pkg:maven/com.deplib/deplib@1.0"},
+		{Name: "com.unused:unusedlib", Version: "1.0", PURL: "pkg:maven/com.unused/unusedlib@1.0"},
+	}
+	// first dir empty (mirrors an image's OCI-layout ws.Dir), classes only under the second ("rootfs").
+	n, err := New().AnalyzeDirs(context.Background(), []string{"", "testdata"}, comps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("tagged = %d, want 2 (rootfs scanned as second dir)", n)
+	}
+	byName := map[string]string{}
+	for _, c := range comps {
+		byName[c.Name] = c.Reachability
+	}
+	if byName["com.deplib:deplib"] != sbom.ReachabilityReachable {
+		t.Errorf("deplib = %q, want reachable", byName["com.deplib:deplib"])
+	}
+	if byName["com.unused:unusedlib"] != sbom.ReachabilityUnreferenced {
+		t.Errorf("unusedlib = %q, want unreferenced", byName["com.unused:unusedlib"])
+	}
+}
+
+// D4.8: the app roots and a dependency jar can live in SEPARATE roots (e.g. build tree vs image layer).
+// AnalyzeDirs builds one shared reachability graph across every dir, so the edge still resolves.
+func TestAnalyzeDirsSingleGraphAcrossRoots(t *testing.T) {
+	appDir := t.TempDir()
+	if err := os.CopyFS(filepath.Join(appDir, "classes"), os.DirFS(filepath.Join("testdata", "target", "classes"))); err != nil {
+		t.Fatal(err)
+	}
+	depDir := t.TempDir()
+	data, err := os.ReadFile(filepath.Join("testdata", "target", "dependency", "deplib-1.0.jar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "deplib-1.0.jar"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	comps := []sbom.Component{{Name: "com.deplib:deplib", Version: "1.0", PURL: "pkg:maven/com.deplib/deplib@1.0"}}
+	n, err := New().AnalyzeDirs(context.Background(), []string{appDir, depDir}, comps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || comps[0].Reachability != sbom.ReachabilityReachable {
+		t.Fatalf("app-root-in-one-dir + dep-jar-in-another must resolve reachable via the shared graph, got n=%d reachability=%q", n, comps[0].Reachability)
+	}
+}

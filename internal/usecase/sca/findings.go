@@ -993,6 +993,21 @@ func ecosystemReachabilitySubjects(findings []finding.Finding, vulns []vulnerabi
 	return subs
 }
 
+// jvmReachRoots returns the workspace directories the JVM reachability tagger should scan: the build tree
+// (dir) plus the extracted image rootfs (rootfs) when present and distinct. An image target's dir is the
+// packed OCI layout — not walkable for classes/jars — so a containerized Java app's shipped fat jars are
+// only reachable under rootfs (D4.8). Empty entries are dropped and the two are de-duplicated.
+func jvmReachRoots(dir, rootfs string) []string {
+	var dirs []string
+	if strings.TrimSpace(dir) != "" {
+		dirs = append(dirs, dir)
+	}
+	if r := strings.TrimSpace(rootfs); r != "" && r != strings.TrimSpace(dir) {
+		dirs = append(dirs, r)
+	}
+	return dirs
+}
+
 // jvmReachabilityVerdicts builds the per-finding JVM class-reachability verdicts for D4.4: each promoted
 // finding whose vulnerability carries a JVM reachability tag (Reachable / Unreferenced, set in-scan by the
 // jvmreach tagger) becomes a verdict keyed by the real finding id, joined via the finding DedupKey exactly

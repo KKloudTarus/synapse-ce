@@ -2901,7 +2901,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// classes in the workspace; a non-JVM / not-built target tags nothing (never a false "unreferenced").
 	if s.jvmReach != nil {
 		step = trace.start(stageSBOM, "jvm-reachability", "jvm-reachability", "Tag JVM class-reachability", map[string]int{"components": countComponents(doc)})
-		if n, rerr := s.jvmReach.Analyze(ctx, ws.Dir, doc.Components); rerr != nil {
+		// Scan the build tree AND, for an image/binary target, the extracted rootfs where a containerized
+		// app's shipped fat jars live: ws.Dir for an image is the packed OCI layout (not walkable for
+		// classes/jars), so without ws.RootFS a scanned Java image would tag nothing (D4.8).
+		if n, rerr := s.jvmReach.AnalyzeDirs(ctx, jvmReachRoots(ws.Dir, ws.RootFS), doc.Components); rerr != nil {
 			trace.fail(step, rerr)
 		} else {
 			trace.succeed(step, "JVM reachability tagged", map[string]int{"components": countComponents(doc), "tagged": n})

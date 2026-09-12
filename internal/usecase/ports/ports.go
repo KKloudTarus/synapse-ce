@@ -1561,6 +1561,11 @@ type ReachabilityRecorder interface {
 // only; never executes it. The SCA pipeline calls it best-effort post-resolve; an error is ignored.
 type JVMReachabilityAnalyzer interface {
 	Analyze(ctx context.Context, wsDir string, comps []sbom.Component) (int, error)
+	// AnalyzeDirs is Analyze over more than one workspace root, scanned into a single reachability graph.
+	// The SCA pipeline passes the build tree plus, for an image target, the extracted rootfs (ws.RootFS)
+	// where a containerized app's shipped fat jars live, so a scanned image with a Java layer produces
+	// reachability too. Same conservative contract: no application roots across any dir ⇒ tags nothing.
+	AnalyzeDirs(ctx context.Context, dirs []string, comps []sbom.Component) (int, error)
 }
 
 // JVMReachabilityVerdict is one finding's pre-computed JVM class-reachability result (the JVMReachabilityAnalyzer

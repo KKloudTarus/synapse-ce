@@ -438,3 +438,32 @@ func TestBuildFindingsSurfacesPublicExploit(t *testing.T) {
 		t.Error("a vuln without an EPSS percentile must leave it 0")
 	}
 }
+
+// jvmReachRoots (D4.8): the JVM tagger scans the build tree plus, for an image target, the extracted
+// rootfs — de-duplicated and empty-filtered. A source target (no rootfs) yields just the build dir.
+func TestJVMReachRoots(t *testing.T) {
+	cases := []struct {
+		name, dir, rootfs string
+		want              []string
+	}{
+		{"source only", "/ws", "", []string{"/ws"}},
+		{"image dir + rootfs", "/oci", "/rootfs", []string{"/oci", "/rootfs"}},
+		{"identical deduped", "/ws", "/ws", []string{"/ws"}},
+		{"blank dir keeps rootfs", "", "/rootfs", []string{"/rootfs"}},
+		{"both blank", "  ", "", nil},
+		{"rootfs whitespace-trims to dir", "/ws", " /ws ", []string{"/ws"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := jvmReachRoots(tc.dir, tc.rootfs)
+			if len(got) != len(tc.want) {
+				t.Fatalf("jvmReachRoots(%q,%q) = %v, want %v", tc.dir, tc.rootfs, got, tc.want)
+			}
+			for i := range got {
+				if strings.TrimSpace(got[i]) != strings.TrimSpace(tc.want[i]) {
+					t.Errorf("jvmReachRoots(%q,%q)[%d] = %q, want %q", tc.dir, tc.rootfs, i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
