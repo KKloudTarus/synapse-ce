@@ -36,6 +36,15 @@ func TestDetectionReadiness(t *testing.T) {
 			t.Fatalf("strict must fail closed on an empty corpus, got incomplete=%v err=%v", incomplete, err)
 		}
 	})
+	t.Run("version-only source (tool present, empty DB): unready", func(t *testing.T) {
+		// Grype binary present (version reported) but its vulnerability DB missing (empty db marker): no
+		// detection data, so this is NOT coverage.
+		versionOnly := provenancedSource{fakeSource: fakeSource{name: "grype"}, ver: "grype 0.74.0"}
+		s := &Service{sources: []ports.DetectionSource{versionOnly}}
+		if w, incomplete, err := s.detectionReadiness(true); !incomplete || w == "" || err != nil {
+			t.Fatalf("a version-only source (empty DB) must be unready, got w=%q incomplete=%v err=%v", w, incomplete, err)
+		}
+	})
 	t.Run("one populated source: ready", func(t *testing.T) {
 		s := &Service{sources: []ports.DetectionSource{empty, populated}}
 		if w, incomplete, err := s.detectionReadiness(true); incomplete || err != nil || w != "" {

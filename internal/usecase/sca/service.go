@@ -462,7 +462,10 @@ func (s *Service) detectionReadiness(hasComponents bool) (warning string, incomp
 			withCoverage++ // opaque source: assume its own DB, cannot judge readiness
 			continue
 		}
-		if ver, db := p.Provenance(); ver != "" || db != "" {
+		// Coverage requires a non-empty DB marker specifically, not merely a tool version. A source can report
+		// its binary/tool version while its vulnerability DB or advisory corpus is empty/missing (Grype binary
+		// present, DB unbuilt); that source has no detection data, so a version-only marker is NOT coverage.
+		if _, db := p.Provenance(); db != "" {
 			withCoverage++
 		}
 	}
