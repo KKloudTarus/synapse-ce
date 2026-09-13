@@ -67,6 +67,7 @@ type semanticResolver struct {
 	imports   map[string]map[string][]importBinding // scope id -> local name -> bindings
 	receivers map[string]map[string][]jsType        // owner scope id -> local/attr name -> constructed types
 	bases     map[string][]string                   // class id -> base class ids (extends)
+	subclass  map[string][]string                   // class id -> direct subclass ids (reverse of bases)
 	gaps      []CoverageGap
 }
 
@@ -171,6 +172,7 @@ func newSemanticResolver(document Document) *semanticResolver {
 		imports:   map[string]map[string][]importBinding{},
 		receivers: map[string]map[string][]jsType{},
 		bases:     map[string][]string{},
+		subclass:  map[string][]string{},
 	}
 	for _, symbol := range document.Symbols {
 		r.symbols[symbol.ID] = symbol
@@ -258,6 +260,46 @@ func (r *semanticResolver) indexBases() {
 		}
 		r.bases[symbol.ID] = sortedUnique(r.bases[symbol.ID])
 	}
+	// Reverse index: base class -> direct subclasses, for downward-closure virtual dispatch.
+	for classID, bases := range r.bases {
+		for _, base := range bases {
+			r.subclass[base] = append(r.subclass[base], classID)
+		}
+	}
+	for base := range r.subclass {
+		r.subclass[base] = sortedUnique(r.subclass[base])
+	}
+}
+
+// dispatchMethods resolves a virtual method call on a statically-typed class to a SOUND over-approximation:
+// the class's own or inherited implementation of the path, plus a directly-declared override on any subclass
+// (transitively). Without the downward closure, `this.m()` on a base type would resolve only to the base's
+// method and miss a subclass override, wrongly reporting the override unreached with a "complete" proof.
+func (r *semanticResolver) dispatchMethods(classID string, path []string) []string {
+	out := r.lookupMethods(classID, path, map[string]bool{})
+	for _, sub := range r.allSubclasses(classID) {
+		out = append(out, r.lookupQualifiedChildren(sub, path)...)
+	}
+	return sortedUnique(out)
+}
+
+// allSubclasses returns every transitive subclass of classID (excluding itself), following the reverse of
+// the extends graph. It carries a visited set so a (malformed) class cycle terminates.
+func (r *semanticResolver) allSubclasses(classID string) []string {
+	seen := map[string]bool{classID: true}
+	var out []string
+	queue := append([]string(nil), r.subclass[classID]...)
+	for len(queue) > 0 {
+		next := queue[0]
+		queue = queue[1:]
+		if seen[next] {
+			continue
+		}
+		seen[next] = true
+		out = append(out, next)
+		queue = append(queue, r.subclass[next]...)
+	}
+	return sortedUnique(out)
 }
 
 // derivedEntrypoints treats every module top-level scope as an entrypoint (its top-level statements run on
@@ -339,17 +381,31 @@ func (r *semanticResolver) resolveReference(scopeID string, ref Reference, isNew
 		}
 		return sortedUnique(candidates), false
 	}
-	// this.method() / super.method(): dispatch on the enclosing class (and its bases).
-	if (segments[0] == "this" || segments[0] == "super") && len(segments) > 1 {
+	// this.method(): virtual dispatch on the enclosing class, resolved by downward closure (the class's
+	// own/inherited method PLUS every subclass override), so a template-method call `this.step()` on a base
+	// type reaches an override in a subclass instead of being wrongly pinned to the base implementation.
+	if segments[0] == "this" && len(segments) > 1 {
 		if classID := r.enclosingClass(scopeID); classID != "" {
-			return r.lookupMethods(classID, segments[1:], map[string]bool{}), false
+			return r.dispatchMethods(classID, segments[1:]), false
 		}
 	}
-	// receiver.method(): the receiver's constructed type decides the class.
+	// super.method(): resolves to the BASE implementation, skipping the enclosing class's own override. It
+	// dispatches up the extends chain only (never to the current class or a sibling subclass).
+	if segments[0] == "super" && len(segments) > 1 {
+		if classID := r.enclosingClass(scopeID); classID != "" {
+			var candidates []string
+			for _, base := range r.bases[classID] {
+				candidates = append(candidates, r.lookupMethods(base, segments[1:], map[string]bool{})...)
+			}
+			return sortedUnique(candidates), false
+		}
+	}
+	// receiver.method(): the receiver's constructed type decides the class, again closed downward over
+	// subclass overrides.
 	if len(segments) > 1 {
 		var candidates []string
 		for _, typ := range r.receiverTypes(scopeID, segments[0]) {
-			candidates = append(candidates, r.lookupMethods(typ.classID, segments[1:], map[string]bool{})...)
+			candidates = append(candidates, r.dispatchMethods(typ.classID, segments[1:])...)
 		}
 		if len(candidates) > 0 {
 			return sortedUnique(candidates), false
@@ -598,6 +654,31 @@ func (r *semanticResolver) argumentEscapesFirstParty(call Call) bool {
 			for _, binding := range r.lookupImports(call.CallerID, ref.Segments[0]) {
 				if binding.firstParty {
 					if ids := r.localSymbolsFromImport(binding, ref.Segments); len(ids) > 0 {
+						return true
+					}
+				}
+			}
+			continue
+		}
+		// A member-reference callback (`this.handler`, `super.handler`, `receiver.handler`) is just as much a
+		// first-party callable handed out of view; resolve it the same way a member CALL would and flag it.
+		if segments := ref.Segments; len(segments) > 1 {
+			switch segments[0] {
+			case "this":
+				if classID := r.enclosingClass(call.CallerID); classID != "" && len(r.dispatchMethods(classID, segments[1:])) > 0 {
+					return true
+				}
+			case "super":
+				if classID := r.enclosingClass(call.CallerID); classID != "" {
+					for _, base := range r.bases[classID] {
+						if len(r.lookupMethods(base, segments[1:], map[string]bool{})) > 0 {
+							return true
+						}
+					}
+				}
+			default:
+				for _, typ := range r.receiverTypes(call.CallerID, segments[0]) {
+					if len(r.dispatchMethods(typ.classID, segments[1:])) > 0 {
 						return true
 					}
 				}

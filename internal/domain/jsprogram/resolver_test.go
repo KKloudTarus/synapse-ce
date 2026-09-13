@@ -248,6 +248,67 @@ func TestResolveCallbackEscapeDefeatsComplete(t *testing.T) {
 	_ = cb
 }
 
+func TestResolveVirtualDispatchDownwardClosure(t *testing.T) {
+	// class Base { run(){ this.step() } step(){} }  class Derived extends Base { step(){} }
+	// new Derived().run() must reach Derived.step (the override), not only Base.step.
+	b := newDoc()
+	mod := b.module("app")
+	base := b.class("app", "Base", mod)
+	baseRun := b.fn("app", "Base.run", "run", base, SymbolMethod)
+	b.fn("app", "Base.step", "step", base, SymbolMethod)
+	derived := b.class("app", "Derived", mod, name("Base"))
+	derivedStep := b.fn("app", "Derived.step", "step", derived, SymbolMethod)
+	b.call("app", baseRun, attr("this", "step"), false)
+	b.assign("app", mod, name("d"), callref("Derived"))
+	b.call("app", mod, name("Derived"), true)
+	b.call("app", mod, attr("d", "run"), false)
+
+	res := resolveOrFatal(t, b)
+	if !res.Graph.Reaches(derivedStep) {
+		t.Errorf("Derived.step override must be reachable via this.step() downward closure")
+	}
+}
+
+func TestResolveSuperResolvesToBase(t *testing.T) {
+	// class Base { step(){} }  class Derived extends Base { step(){ super.step() } }  new Derived().step()
+	// Base.step is reachable ONLY through super and must be reached.
+	b := newDoc()
+	mod := b.module("app")
+	base := b.class("app", "Base", mod)
+	baseStep := b.fn("app", "Base.step", "step", base, SymbolMethod)
+	derived := b.class("app", "Derived", mod, name("Base"))
+	derivedStep := b.fn("app", "Derived.step", "step", derived, SymbolMethod)
+	b.call("app", derivedStep, attr("super", "step"), false)
+	b.assign("app", mod, name("d"), callref("Derived"))
+	b.call("app", mod, name("Derived"), true)
+	b.call("app", mod, attr("d", "step"), false)
+
+	res := resolveOrFatal(t, b)
+	if !res.Graph.Reaches(baseStep) {
+		t.Errorf("Base.step must be reachable via super.step()")
+	}
+}
+
+func TestResolveMemberCallbackEscapeDefeatsComplete(t *testing.T) {
+	// class Svc { run(){ dispatch(this.onEvent) } onEvent(){} }  a first-party method handed to a dispatcher
+	// escapes, so a negative is unsafe: the document must be incomplete.
+	b := newDoc()
+	mod := b.module("app")
+	b.fn("app", "dispatch", "dispatch", mod, SymbolFunction)
+	svc := b.class("app", "Svc", mod)
+	run := b.fn("app", "Svc.run", "run", svc, SymbolMethod)
+	b.fn("app", "Svc.onEvent", "onEvent", svc, SymbolMethod)
+	b.callSeq++
+	b.doc.Calls = append(b.doc.Calls, Call{
+		ID: "c1", CallerID: run, Callee: name("dispatch"),
+		Arguments: []Argument{{Value: attr("this", "onEvent")}}, Pos: Position{File: "app.js", Line: 3},
+	})
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("a first-party method passed as a callback must force incomplete (member-ref escape)")
+	}
+}
+
 func TestResolveTruncatedDocumentIsIncomplete(t *testing.T) {
 	b := newDoc()
 	b.module("app")

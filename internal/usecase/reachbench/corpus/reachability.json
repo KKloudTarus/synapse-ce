@@ -266,6 +266,34 @@
       "fixture": "js_eval_dynamic",
       "symbol": "js:app:secret",
       "expected": "no_analysis"
+    },
+    {
+      "name": "js_method_override_reached",
+      "language": "javascript",
+      "fixture": "js_method_override",
+      "symbol": "js:app:Derived.step",
+      "expected": "reachable"
+    },
+    {
+      "name": "js_super_call_reached",
+      "language": "javascript",
+      "fixture": "js_super_call",
+      "symbol": "js:app:Base.step",
+      "expected": "reachable"
+    },
+    {
+      "name": "js_method_callback_escape",
+      "language": "javascript",
+      "fixture": "js_method_callback_escape",
+      "symbol": "js:app:Svc.onEvent",
+      "expected": "no_analysis"
+    },
+    {
+      "name": "js_accessor_reached",
+      "language": "javascript",
+      "fixture": "js_accessor_reached",
+      "symbol": "js:app:A.danger",
+      "expected": "reachable"
     }
   ]
 }
