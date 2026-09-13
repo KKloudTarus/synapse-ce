@@ -499,11 +499,18 @@ func (r *semanticResolver) constructorOrClass(classID string) []string {
 	return []string{classID}
 }
 
-// targetsFromImport resolves a call whose base name is an imported binding. Only a first-party relative
-// import to an in-document module yields a resolved in-document target; a third-party (bare/scoped) package
-// yields no in-document symbol and is reported external so the call is a leaf, not an unresolved gap.
+// targetsFromImport resolves a call whose base name is an imported binding. A first-party relative import to
+// an in-document module yields a resolved in-document target. A third-party (bare/scoped) package yields a
+// canonical EXTERNAL node (the twin of pythonprogram's canonicalPythonSymbolID): first-party code calling
+// into the package is precisely what makes the package's export reachable, so the call graph carries an edge
+// caller -> package-export. The external node is a leaf (no outgoing edge) and lives only in edges, never in
+// Positions, so it grows the reachable set without changing any first-party reachability; the call keeps
+// status CallExternal (a resolved leaf, not a gap), so Complete is unchanged.
 func (r *semanticResolver) targetsFromImport(binding importBinding, segments []string) ([]string, bool) {
 	if !binding.firstParty {
+		if id := externalImportID(binding, segments); id != "" {
+			return []string{id}, true
+		}
 		return nil, true
 	}
 	moduleID := r.resolveModuleID(binding.module)
@@ -543,6 +550,57 @@ func (r *semanticResolver) targetsFromImport(binding importBinding, segments []s
 		return sortedUnique(out), false
 	}
 	return nil, false
+}
+
+// externalSymbolPrefix namespaces third-party (npm) call-target node ids. It is deliberately distinct from
+// the first-party "js:" prefix (facts.go canonicalSymbolID) so an external leaf can never collide with an
+// in-document symbol id.
+const externalSymbolPrefix = "jsnpm:"
+
+// ExternalSymbolID is the canonical call-graph node id for a third-party export a first-party call targets:
+// "jsnpm:" + import specifier + ":" + export path. A consumer (a reachability analyzer) reconstructs it, or
+// matches ExternalSymbolPrefix, to ask whether first-party code reaches a call into that package.
+func ExternalSymbolID(specifier, export string) string {
+	return externalSymbolPrefix + specifier + ":" + export
+}
+
+// ExternalSymbolPrefix is the id prefix shared by every external node for one import specifier, so a consumer
+// can match all calls into a package without reconstructing each export path.
+func ExternalSymbolPrefix(specifier string) string {
+	return externalSymbolPrefix + specifier + ":"
+}
+
+// externalImportID builds the external node id for a call into a third-party import binding, encoding the
+// package specifier and the export the call names. It mirrors the first-party export resolution: a
+// named/default import binds one export (its name); a namespace/require binding names the export by the
+// member read. It returns "" for a shape that names no export (a bare call of a whole-namespace binding),
+// leaving that call an external leaf with no node rather than inventing an export.
+func externalImportID(binding importBinding, segments []string) string {
+	var export string
+	switch {
+	case binding.kind == ImportNamed || binding.kind == ImportDefault ||
+		(binding.kind == ImportRequire && binding.name != ""):
+		// A named/default import, OR a destructured require (`const {template} = require('lodash')`, which the
+		// extractor emits as an ImportRequire carrying the binding name): the local binds one export, named by
+		// binding.name. A bare call names that export; a member call adds the member path.
+		export = binding.name
+		if binding.kind == ImportDefault || export == "" {
+			export = "default"
+		}
+		if len(segments) > 1 {
+			export += "." + strings.Join(segments[1:], ".")
+		}
+	case binding.kind == ImportNamespace || binding.kind == ImportRequire:
+		// A whole-namespace binding (`import * as ns` / `const ns = require(...)`): the export is named by the
+		// member read. A bare call of the namespace binding names no single export.
+		if len(segments) < 2 {
+			return ""
+		}
+		export = strings.Join(segments[1:], ".")
+	default:
+		return ""
+	}
+	return ExternalSymbolID(binding.module, export)
 }
 
 // resolveModuleID maps a first-party relative module name to its in-document module symbol, trying the
