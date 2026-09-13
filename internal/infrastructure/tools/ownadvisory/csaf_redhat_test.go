@@ -229,9 +229,9 @@ func TestRHELMajorFromCPE(t *testing.T) {
 		{"cpe:/o:redhat:enterprise_linux:9::baseos", "9", true},
 		{"cpe:/o:redhat:enterprise_linux:8::appstream", "8", true},
 		{"cpe:2.3:o:redhat:enterprise_linux:9:*:baseos:*:*:*:*:*", "9", true},
-		{"cpe:/a:redhat:openshift:4.13::el9", "", false},          // not enterprise_linux
-		{"cpe:/o:redhat:enterprise_linux:*::baseos", "", false},   // non-numeric major
-		{"cpe:/o:centos:centos:9", "", false},                     // not redhat vendor
+		{"cpe:/a:redhat:openshift:4.13::el9", "", false},        // not enterprise_linux
+		{"cpe:/o:redhat:enterprise_linux:*::baseos", "", false}, // non-numeric major
+		{"cpe:/o:centos:centos:9", "", false},                   // not redhat vendor
 		{"cpe:2.3:a:djangoproject:django:3.2:*:*:*:*:*:*:*", "", false},
 		{"not-a-cpe", "", false},
 	}
@@ -257,7 +257,7 @@ func TestRPMPurlNameEVR(t *testing.T) {
 		// Modular stream: RedHat percent-encodes the '+' in "module+el8" as %2B. It MUST decode to '+' so the
 		// EVR matches the decoded version the scan side carries (else a patched module build is a false positive).
 		{"pkg:rpm/redhat/nodejs@20.11.1-1.module%2Bel8.9.0%2B21380%2B12032667?arch=x86_64&epoch=1", "nodejs", "1:20.11.1-1.module+el8.9.0+21380+12032667", true},
-		{"pkg:npm/leftpad@1.0.0", "", "", false}, // not rpm
+		{"pkg:npm/leftpad@1.0.0", "", "", false},  // not rpm
 		{"pkg:rpm/redhat/openssl", "", "", false}, // no version
 	}
 	for _, c := range cases {

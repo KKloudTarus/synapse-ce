@@ -373,3 +373,19 @@ func TestDistroEcosystemLockstep(t *testing.T) {
 		}
 	}
 }
+
+// TestOsvEcosystemHexPackagistPub locks the #1037 feed wiring: composer/pub now map to their OSV buckets so
+// the owned matcher (which has Packagist/Pub/Hex comparators) can order their ranges.
+func TestOsvEcosystemHexPackagistPub(t *testing.T) {
+	cases := map[string]string{
+		"hex":      "Hex",
+		"composer": "Packagist",
+		"pub":      "Pub",
+		"unknown":  "", // still fail-closed
+	}
+	for purl, want := range cases {
+		if got := osvEcosystem(purl); got != want {
+			t.Errorf("osvEcosystem(%q)=%q want %q", purl, got, want)
+		}
+	}
+}

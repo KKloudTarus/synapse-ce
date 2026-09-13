@@ -51,12 +51,12 @@ func TestAffectedGitRangeSkipped(t *testing.T) {
 	}
 }
 
-// TestAffectedUnsupportedEcosystemFailsClosed: an ecosystem with NO owned comparator yet (Hex, Pub,
-// Packagist, Swift, …) still skips ECOSYSTEM ranges – versions list only, never a guessed-order false
-// match. (Maven/RubyGems/NuGet are now SUPPORTED via versions_eco.go – see versions_eco_test.go.)
+// TestAffectedUnsupportedEcosystemFailsClosed: an ecosystem with NO owned comparator still skips ECOSYSTEM
+// ranges – versions list only, never a guessed-order false match. (Maven/RubyGems/NuGet via versions_eco.go,
+// and Hex/Pub/Packagist via #1037, are now SUPPORTED – see versions_eco_test.go and version_range_corpus_test.go.)
 func TestAffectedUnsupportedEcosystemFailsClosed(t *testing.T) {
 	r := []Range{{Type: "ECOSYSTEM", Events: []Event{{Introduced: "0"}, {Fixed: "2.0"}}}}
-	for _, eco := range []string{"Hex", "Pub", "Packagist", "SwiftURL"} {
+	for _, eco := range []string{"SwiftURL", "Bitnami"} {
 		if Affected(eco, "1.0", r, nil) {
 			t.Errorf("%s ECOSYSTEM range must fail closed (no comparator)", eco)
 		}

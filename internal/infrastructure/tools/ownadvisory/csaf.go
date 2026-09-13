@@ -270,8 +270,8 @@ func (v csafVulnDoc) cvss() (vector string, score float64) {
 // affectedAccum accumulates a product's affected versions while resolving product bindings, before being
 // flattened into a deterministic advisory.AffectedPackage.
 type affectedAccum struct {
-	ecosystem   string
-	pkg         string
+	ecosystem    string
+	pkg          string
 	versions     map[string]bool // explicit concrete affected versions (from each known_affected CPE)
 	allVersions  bool            // a known_affected CPE with version "*" ⇒ every version is affected
 	fixed        string          // fixed version: language ecosystem = the CPE fixed version; distro = MIN fixed EVR

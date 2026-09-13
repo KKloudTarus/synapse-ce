@@ -37,7 +37,7 @@ var ecosystemRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.+_-]*$`)
 
 // defaultBulkEcosystems are the OSV bucket ecosystem directories the owned store covers (match osvEcosystem
 // + the owned SBOM producer's ecosystems). Each is fetched as "<base>/<ecosystem>/all.zip".
-var defaultBulkEcosystems = []string{"Go", "npm", "PyPI", "crates.io", "Maven", "RubyGems", "NuGet"}
+var defaultBulkEcosystems = []string{"Go", "npm", "PyPI", "crates.io", "Maven", "RubyGems", "NuGet", "Hex", "Packagist", "Pub"}
 
 // DistroBulkEcosystems are the OS-package ecosystems whose advisories the owned store can match (Epic B):
 // the PURL→ecosystem bridge faithfully derives "Debian:<release>" and "Alpine:v<maj>.<min>", and the dpkg/

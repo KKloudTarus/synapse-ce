@@ -415,8 +415,11 @@ func osvEcosystem(purlType string) string {
 	case "nuget":
 		return "NuGet"
 	case "hex":
-		return "Hex" // Elixir/Erlang; OSV has a Hex ecosystem. Explicit-version matches today –
-		// Hex range ordering (a comparator in advisory.schemeFor) is a follow-up, so ranges are skipped (safe).
+		return "Hex" // Elixir/Erlang; SemVer-ordered ranges (advisory.schemeFor), #1037.
+	case "composer":
+		return "Packagist" // PHP; Composer-stability-ordered ranges (advisory.packagistScheme), #1037.
+	case "pub":
+		return "Pub" // Dart; SemVer-ordered ranges (advisory.schemeFor), #1037.
 	}
 	return ""
 }
