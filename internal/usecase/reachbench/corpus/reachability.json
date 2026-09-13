@@ -294,6 +294,27 @@
       "fixture": "js_accessor_reached",
       "symbol": "js:app:A.danger",
       "expected": "reachable"
+    },
+    {
+      "name": "js_returned_call_dynamic",
+      "language": "javascript",
+      "fixture": "js_returned_call_dynamic",
+      "symbol": "js:app:vuln",
+      "expected": "no_analysis"
+    },
+    {
+      "name": "js_property_escape_dynamic",
+      "language": "javascript",
+      "fixture": "js_property_escape_dynamic",
+      "symbol": "js:app:vuln",
+      "expected": "no_analysis"
+    },
+    {
+      "name": "js_index_import_reached",
+      "language": "javascript",
+      "fixture": "js_index_import_reached",
+      "symbol": "js:helper/index:work",
+      "expected": "reachable"
     }
   ]
 }

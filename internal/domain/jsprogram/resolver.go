@@ -135,6 +135,14 @@ func Resolve(document Document) (Resolution, error) {
 		}
 	}
 
+	// A first-party callable stored into a property (`obj.handler = vuln`) can be invoked through that holder
+	// out of view of the graph, so it makes a not-reached conclusion for that callable unsafe.
+	for _, assignment := range document.Assignments {
+		if r.assignmentEscapesFirstParty(assignment) {
+			r.addGap(GapUnresolvedValue, assignment.ScopeID, "property_escape", assignment.Pos)
+		}
+	}
+
 	graph := callgraph.Graph{Positions: make(map[string]string, len(document.Symbols))}
 	for _, symbol := range document.Symbols {
 		graph.Positions[symbol.ID] = symbol.Pos.File + ":" + strconv.Itoa(symbol.Pos.Line)
@@ -368,7 +376,11 @@ func (r *semanticResolver) constructedTypes(scopeID string, ref Reference) []jsT
 }
 
 func (r *semanticResolver) resolveReference(scopeID string, ref Reference, isNew bool) ([]string, bool) {
-	if len(ref.Segments) == 0 || ref.Kind == ReferenceUnknown || ref.Kind == ReferenceLiteral || ref.Kind == ReferenceExpression {
+	// A ReferenceCall callee is invoking the RESULT of another call (`f()()`, `factory().handler()`). Its
+	// target is the callee's return value, which this graph does not track, so it must not be mis-resolved to
+	// the inner function; return no candidate so it becomes an unresolved-call gap (incomplete). A `new X()`
+	// is unaffected: its callee is the class name (ReferenceName) with Call.New set, not a ReferenceCall.
+	if len(ref.Segments) == 0 || ref.Kind == ReferenceUnknown || ref.Kind == ReferenceLiteral || ref.Kind == ReferenceExpression || (ref.Kind == ReferenceCall && !isNew) {
 		return nil, false
 	}
 	segments := ref.Segments
@@ -494,9 +506,13 @@ func (r *semanticResolver) targetsFromImport(binding importBinding, segments []s
 	if !binding.firstParty {
 		return nil, true
 	}
-	moduleID := r.modules[binding.module]
+	moduleID := r.resolveModuleID(binding.module)
 	if moduleID == "" {
-		return nil, true // resolves to a file not in the analyzed set; treat as an external leaf
+		// A first-party relative import that resolves to no in-document module is a HOLE, not an external
+		// leaf: the file may exist (a directory/index form, an unscanned first-party file) and carry edges we
+		// cannot see. Returning external=false makes it an unresolved-call gap so Complete drops to false,
+		// rather than silently letting the target read as present_unreached.
+		return nil, false
 	}
 	switch binding.kind {
 	case ImportNamed, ImportDefault:
@@ -529,11 +545,24 @@ func (r *semanticResolver) targetsFromImport(binding importBinding, segments []s
 	return nil, false
 }
 
+// resolveModuleID maps a first-party relative module name to its in-document module symbol, trying the
+// exact name then the Node directory-import form (`./helper` -> `helper/index` when `helper.js` is absent).
+// An empty result means the module is not in the analyzed set.
+func (r *semanticResolver) resolveModuleID(module string) string {
+	if id := r.modules[module]; id != "" {
+		return id
+	}
+	if id := r.modules[module+"/index"]; id != "" {
+		return id
+	}
+	return ""
+}
+
 func (r *semanticResolver) localSymbolsFromImport(binding importBinding, segments []string) []string {
 	if !binding.firstParty {
 		return nil
 	}
-	moduleID := r.modules[binding.module]
+	moduleID := r.resolveModuleID(binding.module)
 	if moduleID == "" {
 		return nil
 	}
@@ -633,55 +662,95 @@ func (r *semanticResolver) enclosingClass(scopeID string) string {
 	return ""
 }
 
-// argumentEscapesFirstParty reports whether any argument of the call is a bare or member reference that
-// resolves to a first-party function, arrow, method, or class. Such a value can be invoked by the callee
-// out of view of the static graph, so its presence makes a not-reached conclusion unsafe.
+// argumentEscapesFirstParty reports whether any argument of the call is a reference that resolves to a
+// first-party callable. Such a value can be invoked by the callee out of view of the static graph, so its
+// presence makes a not-reached conclusion unsafe.
 func (r *semanticResolver) argumentEscapesFirstParty(call Call) bool {
 	for _, arg := range call.Arguments {
-		ref := arg.Value
-		if ref.Kind != ReferenceName && ref.Kind != ReferenceAttribute {
+		if r.referenceIsFirstPartyCallable(call.CallerID, arg.Value) {
+			return true
+		}
+	}
+	return false
+}
+
+// assignmentEscapesFirstParty reports whether the assignment stores a first-party callable into a MEMBER
+// (property) target, e.g. `bus.handler = vuln`. The holder may be an external object that later invokes the
+// callable, out of view of the static graph, so a not-reached conclusion for that callable is unsafe. A
+// plain local binding (`const f = vuln`) is not flagged here: a later `f()` fails to resolve the alias and
+// already forces incompleteness.
+func (r *semanticResolver) assignmentEscapesFirstParty(a Assignment) bool {
+	if !r.referenceIsFirstPartyCallable(a.ScopeID, a.Value) {
+		return false
+	}
+	for _, target := range a.Targets {
+		if len(target.Segments) == 0 {
 			continue
 		}
-		// A bare name argument that is a first-party callable (function/arrow/method/class) escapes.
-		if len(ref.Segments) == 1 {
-			for _, id := range r.lookupLexical(call.CallerID, ref.Segments[0]) {
-				switch r.symbols[id].Kind {
-				case SymbolFunction, SymbolArrow, SymbolMethod, SymbolClass:
+		// A property write (attribute) onto any holder escapes. The extractor collapses a member-write target
+		// `bus.handler = fn` to its base name, so also treat a write whose base name is an imported (external)
+		// object, or a module-export / global sink, as an escape: external code can invoke the callable
+		// through that holder. A plain new local binding (`const f = fn`) is not flagged; an unresolvable
+		// later use of it already forces incompleteness.
+		if target.Kind == ReferenceAttribute {
+			return true
+		}
+		base := target.Segments[0]
+		if len(r.lookupImports(a.ScopeID, base)) > 0 {
+			return true
+		}
+		switch base {
+		case "exports", "module", "window", "globalThis", "global", "self":
+			return true
+		}
+	}
+	return false
+}
+
+// referenceIsFirstPartyCallable reports whether a bare or member reference resolves, in scope, to a
+// first-party function, arrow, method, or class.
+func (r *semanticResolver) referenceIsFirstPartyCallable(scopeID string, ref Reference) bool {
+	if ref.Kind != ReferenceName && ref.Kind != ReferenceAttribute {
+		return false
+	}
+	// A bare name that is a first-party callable (function/arrow/method/class), locally or via a first-party
+	// import.
+	if len(ref.Segments) == 1 {
+		for _, id := range r.lookupLexical(scopeID, ref.Segments[0]) {
+			switch r.symbols[id].Kind {
+			case SymbolFunction, SymbolArrow, SymbolMethod, SymbolClass:
+				return true
+			}
+		}
+		for _, binding := range r.lookupImports(scopeID, ref.Segments[0]) {
+			if binding.firstParty {
+				if ids := r.localSymbolsFromImport(binding, ref.Segments); len(ids) > 0 {
 					return true
 				}
 			}
-			// A first-party function imported and re-passed as a callback also escapes.
-			for _, binding := range r.lookupImports(call.CallerID, ref.Segments[0]) {
-				if binding.firstParty {
-					if ids := r.localSymbolsFromImport(binding, ref.Segments); len(ids) > 0 {
-						return true
-					}
-				}
-			}
-			continue
 		}
-		// A member-reference callback (`this.handler`, `super.handler`, `receiver.handler`) is just as much a
-		// first-party callable handed out of view; resolve it the same way a member CALL would and flag it.
-		if segments := ref.Segments; len(segments) > 1 {
-			switch segments[0] {
-			case "this":
-				if classID := r.enclosingClass(call.CallerID); classID != "" && len(r.dispatchMethods(classID, segments[1:])) > 0 {
+		return false
+	}
+	// A member reference (`this.handler`, `super.handler`, `receiver.handler`) resolved the same way a member
+	// call would.
+	segments := ref.Segments
+	switch segments[0] {
+	case "this":
+		if classID := r.enclosingClass(scopeID); classID != "" && len(r.dispatchMethods(classID, segments[1:])) > 0 {
+			return true
+		}
+	case "super":
+		if classID := r.enclosingClass(scopeID); classID != "" {
+			for _, base := range r.bases[classID] {
+				if len(r.lookupMethods(base, segments[1:], map[string]bool{})) > 0 {
 					return true
 				}
-			case "super":
-				if classID := r.enclosingClass(call.CallerID); classID != "" {
-					for _, base := range r.bases[classID] {
-						if len(r.lookupMethods(base, segments[1:], map[string]bool{})) > 0 {
-							return true
-						}
-					}
-				}
-			default:
-				for _, typ := range r.receiverTypes(call.CallerID, segments[0]) {
-					if len(r.dispatchMethods(typ.classID, segments[1:])) > 0 {
-						return true
-					}
-				}
+			}
+		}
+	default:
+		for _, typ := range r.receiverTypes(scopeID, segments[0]) {
+			if len(r.dispatchMethods(typ.classID, segments[1:])) > 0 {
+				return true
 			}
 		}
 	}

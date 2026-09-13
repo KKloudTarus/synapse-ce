@@ -83,7 +83,7 @@ func TestJSReachabilityCorpus(t *testing.T) {
 		t.Fatal("reachability corpus must retain at least one JavaScript fixture")
 	}
 	// Pin the JS denominator so a removed or relabelled case cannot shrink the corpus into an easier subset.
-	const expectedJSCases = 14
+	const expectedJSCases = 17
 	if len(jsCases) != expectedJSCases {
 		t.Fatalf("JS corpus has %d cases, expected %d; update the ratchet only with reviewed corpus changes", len(jsCases), expectedJSCases)
 	}

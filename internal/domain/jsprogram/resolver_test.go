@@ -20,7 +20,11 @@ func (b *docBuilder) module(name string) string {
 	pos := Position{File: file, Line: 1}
 	b.doc.Modules = append(b.doc.Modules, Module{Name: name, File: file, Pos: pos})
 	id := CanonicalSymbolID(name, "<module>")
-	b.doc.Symbols = append(b.doc.Symbols, Symbol{ID: id, Module: name, QualifiedName: "<module>", Name: name, Kind: SymbolModule, Pos: pos})
+	leaf := name
+	if i := lastSlash(name); i >= 0 {
+		leaf = name[i+1:]
+	}
+	b.doc.Symbols = append(b.doc.Symbols, Symbol{ID: id, Module: name, QualifiedName: "<module>", Name: leaf, Kind: SymbolModule, Pos: pos})
 	b.moduleID[name] = id
 	b.doc.FilesSeen++
 	b.doc.FilesParsed++
@@ -58,6 +62,15 @@ func (b *docBuilder) imp(module, scopeID string, kind ImportKind, specifier, nam
 func name(segs ...string) Reference    { return Reference{Kind: ReferenceName, Segments: segs} }
 func attr(segs ...string) Reference    { return Reference{Kind: ReferenceAttribute, Segments: segs} }
 func callref(segs ...string) Reference { return Reference{Kind: ReferenceCall, Segments: segs} }
+
+func lastSlash(s string) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == '/' {
+			return i
+		}
+	}
+	return -1
+}
 
 func itoa(n int) string {
 	if n == 0 {
@@ -306,6 +319,68 @@ func TestResolveMemberCallbackEscapeDefeatsComplete(t *testing.T) {
 	res := resolveOrFatal(t, b)
 	if res.Complete {
 		t.Fatal("a first-party method passed as a callback must force incomplete (member-ref escape)")
+	}
+}
+
+func TestResolveReturnedFunctionCallDefeatsComplete(t *testing.T) {
+	// function vuln(){}  function f(){ return vuln }  f()()  — the outer call invokes f's RETURN value, not
+	// f. The resolver must not pin it to f (which would leave vuln unreached with a "complete" proof); it
+	// records an unresolved-call gap.
+	b := newDoc()
+	mod := b.module("app")
+	b.fn("app", "vuln", "vuln", mod, SymbolFunction)
+	b.fn("app", "f", "f", mod, SymbolFunction)
+	// f()() : the outer call's callee is a ReferenceCall over "f".
+	b.callSeq++
+	b.doc.Calls = append(b.doc.Calls, Call{ID: "c1", CallerID: mod, Callee: callref("f"), Pos: Position{File: "app.js", Line: 3}})
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("invoking a returned function f()() must force incomplete, not resolve to the factory")
+	}
+	if res.Graph.Reaches(CanonicalSymbolID("app", "vuln")) {
+		t.Error("vuln is not statically reached; it must not be a false-positive edge")
+	}
+}
+
+func TestResolvePropertyEscapeDefeatsComplete(t *testing.T) {
+	// import bus from 'bus'; function vuln(){}; bus.handler = vuln; bus.start(); — vuln is stored on an
+	// external object that may invoke it, so a negative is unsafe.
+	b := newDoc()
+	mod := b.module("app")
+	b.fn("app", "vuln", "vuln", mod, SymbolFunction)
+	b.imp("app", mod, ImportDefault, "bus", "default", "bus")
+	b.assign("app", mod, attr("bus", "handler"), name("vuln"))
+	b.call("app", mod, attr("bus", "start"), false)
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("a first-party function assigned to an external property must force incomplete")
+	}
+}
+
+func TestResolveUnresolvedFirstPartyImportIsGapNotExternal(t *testing.T) {
+	// import {work} from './missing'; work() — a first-party relative import to a module not in the analyzed
+	// set is a hole (the file may exist), so it must be an unresolved-call gap, not a silent external leaf.
+	b := newDoc()
+	mod := b.module("app")
+	b.imp("app", mod, ImportNamed, "./missing", "work", "")
+	b.call("app", mod, name("work"), false)
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("an unresolved first-party relative import must force incomplete, not be treated as external")
+	}
+}
+
+func TestResolveDirectoryIndexImportResolves(t *testing.T) {
+	// import {work} from './helper'; work() where the module is helper/index (Node directory import).
+	b := newDoc()
+	appMod := b.module("app")
+	helperIndex := b.module("helper/index")
+	work := b.fn("helper/index", "work", "work", helperIndex, SymbolFunction)
+	b.imp("app", appMod, ImportNamed, "./helper", "work", "")
+	b.call("app", appMod, name("work"), false)
+	res := resolveOrFatal(t, b)
+	if !res.Graph.Reaches(work) {
+		t.Errorf("./helper must resolve to helper/index via the directory-import fallback")
 	}
 }
 
