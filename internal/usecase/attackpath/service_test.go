@@ -143,6 +143,54 @@ func TestReachabilityInputPrefersPublishableProof(t *testing.T) {
 	}
 }
 
+// TestReachabilityInputStateAwareWithinTier: a same-tier stale not_reachable must never shadow a proven
+// reachable (EPIC #1042, 0.4). Before the state-aware fix, selection broke ties on judgment id, so a
+// not_reachable with a lower id could win and traverse.go would then drop the finding from every path.
+func TestReachabilityInputStateAwareWithinTier(t *testing.T) {
+	f := finding.Finding{ID: "finding", EngagementID: "eng"}
+	// "a-not-reach" sorts before "b-reach": the old id tie-break would have picked the not_reachable.
+	got := reachabilityInput(f, []judgment.Judgment{
+		{ID: "a-not-reach", EngagementID: "eng", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "finding", Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, EntrypointsPresent: true}, State: judgment.StateConfirmed, EvidenceScore: 90},
+		{ID: "b-reach", EngagementID: "eng", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "finding", Claim: judgment.ReachabilityClaim{Reachable: judgment.Reachable, Tier: judgment.Tier2}, State: judgment.StateConfirmed, EvidenceScore: 90},
+	})
+	if got.Reachability != judgment.Reachable || got.Provenance != "b-reach" {
+		t.Fatalf("same-tier reachable must win over not_reachable, got %#v", got)
+	}
+}
+
+// TestReachabilityInputProofGatesNegative: an unproven not_reachable (a Tier-2 call-graph negative with no
+// entry points) is not a sound basis to drop a finding from attack paths; it downgrades to unknown so
+// traverse.go keeps the finding. A proven negative (entry points recorded) stays not_reachable.
+func TestReachabilityInputProofGatesNegative(t *testing.T) {
+	f := finding.Finding{ID: "finding", EngagementID: "eng"}
+	unproven := reachabilityInput(f, []judgment.Judgment{
+		{ID: "zero-entry", EngagementID: "eng", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "finding", Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2}, State: judgment.StateConfirmed, EvidenceScore: 90},
+	})
+	if unproven.Reachability != judgment.ReachUnknown {
+		t.Fatalf("zero-entrypoint Tier-2 not_reachable must downgrade to unknown, got %#v", unproven)
+	}
+	proven := reachabilityInput(f, []judgment.Judgment{
+		{ID: "with-entry", EngagementID: "eng", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "finding", Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, EntrypointsPresent: true}, State: judgment.StateConfirmed, EvidenceScore: 90},
+	})
+	if proven.Reachability != judgment.NotReachable {
+		t.Fatalf("proven Tier-2 not_reachable must stay not_reachable, got %#v", proven)
+	}
+}
+
+// TestReachabilityInputUnprovenNegativeNeverShadowsReachable: a higher-tier UNPROVEN negative
+// (zero-entrypoint Tier-2) must not shadow a lower-tier reachable, or the finding would lose its reachable
+// score boost in the attack-path graph (EPIC #1042, 0.6). The reachable must win selection.
+func TestReachabilityInputUnprovenNegativeNeverShadowsReachable(t *testing.T) {
+	f := finding.Finding{ID: "finding", EngagementID: "eng"}
+	got := reachabilityInput(f, []judgment.Judgment{
+		{ID: "hi-tier-neg", EngagementID: "eng", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "finding", Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2}, State: judgment.StateConfirmed, EvidenceScore: 90},
+		{ID: "lo-tier-reach", EngagementID: "eng", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "finding", Claim: judgment.ReachabilityClaim{Reachable: judgment.Reachable, Tier: judgment.Tier1}, State: judgment.StateConfirmed, EvidenceScore: 90},
+	})
+	if got.Reachability != judgment.Reachable || got.Provenance != "lo-tier-reach" {
+		t.Fatalf("a lower-tier reachable must win over a higher-tier unproven negative, got %#v", got)
+	}
+}
+
 func TestServiceIncludesBoundImportedFinding(t *testing.T) {
 	ctx := context.Background()
 	assets := memory.NewAssetStore()

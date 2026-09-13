@@ -156,17 +156,29 @@ func (s *Service) notReachableTiers(ctx context.Context, engagementID shared.ID)
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]judgment.ReachabilityTier{}
+	// Resolve the WINNING reachability claim per finding first (tier then state, EPIC #1042, 0.4), so a
+	// superseding reachable judgment hides a stale not_reachable and we never emit a not_affected
+	// justification for a finding whose strongest claim is actually reachable.
+	winner := map[string]judgment.ReachabilityClaim{}
 	for _, j := range js {
-		if !j.Publishable() || j.Capability != judgment.CapReachability {
+		if !j.Publishable() || j.Capability != judgment.CapReachability || j.SubjectKind != judgment.SubjectFinding {
 			continue
 		}
 		rc, ok := j.Claim.(judgment.ReachabilityClaim)
-		if !ok || rc.Reachable != judgment.NotReachable {
+		if !ok {
 			continue
 		}
 		id := j.SubjectID.String()
-		if cur, exists := out[id]; !exists || rc.Tier.Rank() > cur.Rank() {
+		if cur, exists := winner[id]; !exists || rc.Supersedes(cur) {
+			winner[id] = rc
+		}
+	}
+	out := map[string]judgment.ReachabilityTier{}
+	for id, rc := range winner {
+		// Only a claim that soundly suppresses (ProvedNotReachable, plus entry points on the call-graph
+		// tier) may stamp a not_affected justification; a partial, blind, or zero-entrypoint negative is
+		// not proof of absence (EPIC #1042, 0.6). The finding then falls back to its status-derived VEX.
+		if rc.SuppressesFinding() {
 			out[id] = rc.Tier
 		}
 	}

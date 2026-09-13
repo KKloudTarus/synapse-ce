@@ -518,8 +518,9 @@ func TestEvaluatorDeterministicUnreachabilityDeescalation(t *testing.T) {
 		SubjectKind:  judgment.SubjectFinding,
 		SubjectID:    fid,
 		Claim: judgment.ReachabilityClaim{
-			Reachable: judgment.NotReachable,
-			Tier:      judgment.Tier2,
+			Reachable:          judgment.NotReachable,
+			Tier:               judgment.Tier2,
+			EntrypointsPresent: true, // a proven call-graph negative: recorded entry points, full coverage
 		},
 		State:         judgment.StateConfirmed,
 		EvidenceScore: 90,
@@ -559,6 +560,60 @@ func TestEvaluatorDeterministicUnreachabilityDeescalation(t *testing.T) {
 	if pc.BeforePriority != 2 || pc.AfterPriority != 3 {
 		t.Fatalf("expected priority 2->3, got %d->%d", pc.BeforePriority, pc.AfterPriority)
 	}
+}
+
+// TestEvaluatorZeroEntrypointUnreachabilityNoDeescalation: a Tier-2 (call-graph) not_reachable that did
+// NOT record entry points is soft no-coverage, not proof of absence, so it must NOT de-escalate priority
+// even from a deterministic proposer/verifier pair (EPIC #1042, 0.6). Contrast the test above, which
+// de-escalates because the claim recorded entry points.
+func TestEvaluatorZeroEntrypointUnreachabilityNoDeescalation(t *testing.T) {
+	tid := testTenantID()
+	eid := testEngagementID()
+	fid := testFindingID()
+
+	f := baseFinding()
+	f.Priority = 2
+
+	reachJudgment := judgment.Judgment{
+		ID:           shared.ID("reach-j-2"),
+		EngagementID: eid,
+		Capability:   judgment.CapReachability,
+		SubjectKind:  judgment.SubjectFinding,
+		SubjectID:    fid,
+		Claim: judgment.ReachabilityClaim{
+			Reachable: judgment.NotReachable,
+			Tier:      judgment.Tier2, // no EntrypointsPresent: zero-entrypoint call-graph negative
+		},
+		State:         judgment.StateConfirmed,
+		EvidenceScore: 90,
+		ProposedBy:    "system:callgraph-scan", VerifiedBy: "system:callgraph-engine", VerdictRationale: "confirmed",
+	}
+
+	p := &fakeProposer{}
+	ev := &Evaluator{
+		proposer:   p,
+		findings:   &fakeFindingRepo{findings: []finding.Finding{f}},
+		judgments:  &fakeJudgmentStore{judgments: []judgment.Judgment{reachJudgment}},
+		bindings:   &fakeAttackPathStore{},
+		assets:     &fakeAssetRepo{},
+		detections: &fakeDetectionStore{},
+		engagement: &fakeEngagementOwnershipReader{eng: baseEngagement()},
+		promotions: &fakePromotionStore{},
+		clock:      &fakeClock{t: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
+		audit:      &fakeAudit{},
+	}
+
+	ctx := shared.WithTenant(context.Background(), tid)
+	n, err := ev.Evaluate(ctx, eid)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, pr := range p.proposed {
+		if pc, ok := pr.Claim.(*judgment.PromotionClaim); ok && pc.Rule == judgment.RuleDeterministicUnreachable {
+			t.Fatalf("zero-entrypoint Tier-2 not_reachable must not de-escalate, got %s %s", pc.Rule, pc.Proposed)
+		}
+	}
+	_ = n
 }
 
 func TestEvaluatorInferredPathFlagForReview(t *testing.T) {

@@ -16,8 +16,9 @@ import (
 // --- fakes ---
 
 type fakeAnalyzer struct {
-	res []reachability.Result
-	err error
+	res           []reachability.Result
+	err           error
+	noEntrypoints bool
 }
 
 func TestPythonTier2UsesDistinctSemanticProofActors(t *testing.T) {
@@ -38,7 +39,11 @@ func (f fakeAnalyzer) Analyze(context.Context, string, []string) (*reachability.
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &reachability.Analysis{Results: f.res, Entrypoints: []string{"app.main"}}, nil
+	entry := []string{"app.main"}
+	if f.noEntrypoints {
+		entry = nil
+	}
+	return &reachability.Analysis{Results: f.res, Entrypoints: entry}, nil
 }
 
 type proposeCall struct {
@@ -253,7 +258,9 @@ func TestJVMNotReachableNeverPromotes(t *testing.T) {
 func TestJVMVerdictDoesNotSupersedeStrongerPrior(t *testing.T) {
 	rec := &fakeRecorder{prior: []judgment.Judgment{{
 		ID: "prior", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "f1",
-		Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, Confidence: 100},
+		// A genuine Tier-2 call-graph proof (recorded entry points); a JVM Tier-1.5 verdict must not
+		// supersede it. An UNPROVEN Tier-2 negative would carry no authority, so mark this one proven.
+		Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, Confidence: 100, EntrypointsPresent: true},
 	}}}
 	c, err := NewJVMVerdictCoordinator(rec, &fakeAudit{}, fakeClock{})
 	if err != nil {
@@ -382,5 +389,21 @@ func TestRaiseOnlyMintsOnlyTheReached(t *testing.T) {
 	}
 	if len(rec.proposes) != 1 || rec.proposes[0].claim.Reachable != judgment.Reachable {
 		t.Fatalf("only the reached subject should mint (reachable), got %+v", rec.proposes)
+	}
+}
+
+// TestTier2NotReachableRequiresEntrypoints (EPIC #1042, 0.5): a Tier-2 call-graph "not reachable" with
+// NO entry points is soft no-coverage, not proof of absence, so the coordinator must mint nothing and let
+// the prior tier stand. Closes the zero-entrypoint suppression hole. Contrast TestRecordNotReachable, which
+// mints because the analysis DID report entry points.
+func TestTier2NotReachableRequiresEntrypoints(t *testing.T) {
+	rec := &fakeRecorder{}
+	c := newCoord(t, fakeAnalyzer{res: []reachability.Result{{Symbol: "dep.vuln", Reachable: false}}, noEntrypoints: true}, rec)
+	n, err := c.Record(context.Background(), shared.ID("eng"), "/work", []ports.ReachabilitySubject{{FindingID: shared.ID("f1"), Symbols: []string{"dep.vuln"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(rec.proposes) != 0 {
+		t.Fatalf("zero-entrypoint Tier-2 not-reachable must mint nothing, got n=%d proposes=%d", n, len(rec.proposes))
 	}
 }

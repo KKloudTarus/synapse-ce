@@ -934,6 +934,7 @@ type reachInfo struct {
 	tier          judgment.ReachabilityTier
 	publishable   bool
 	deterministic bool
+	suppresses    bool // claim.SuppressesFinding(): a not_reachable that is a sound proof of absence
 	evidenceScore int
 	version       int
 	updatedAt     time.Time
@@ -971,12 +972,21 @@ func indexReachability(judgments []judgment.Judgment) map[shared.ID]reachInfo {
 		if exists && !reachabilitySupersedes(j, rc, existing) {
 			continue
 		}
+		deterministic := j.EvidenceScore >= verdict.DeterministicProofScore && judgment.IsDeterministicReachabilityProof(rc.Tier, j.ProposedBy, j.VerifiedBy)
+		// A not_reachable may only de-escalate when its coverage proves absence: every affected symbol
+		// answered, no blind construct, and (on the call-graph tier) a recorded entry-point set. A partial,
+		// blind, or zero-entrypoint negative is soft no-coverage, not proof (EPIC #1042, 0.6), so it must
+		// not lower priority. A reachable claim keeps its deterministic flag (it only ever raises).
+		if rc.Reachable == judgment.NotReachable && !rc.SuppressesFinding() {
+			deterministic = false
+		}
 		out[j.SubjectID] = reachInfo{
 			judgmentID:    j.ID,
 			state:         rc.Reachable,
 			tier:          rc.Tier,
 			publishable:   true,
-			deterministic: j.EvidenceScore >= verdict.DeterministicProofScore && judgment.IsDeterministicReachabilityProof(rc.Tier, j.ProposedBy, j.VerifiedBy),
+			deterministic: deterministic,
+			suppresses:    rc.SuppressesFinding(),
 			evidenceScore: j.EvidenceScore,
 			version:       j.Version,
 			updatedAt:     j.Audit.UpdatedAt,
@@ -986,8 +996,16 @@ func indexReachability(judgments []judgment.Judgment) map[shared.ID]reachInfo {
 }
 
 func reachabilitySupersedes(j judgment.Judgment, rc judgment.ReachabilityClaim, existing reachInfo) bool {
-	if rc.Tier.Rank() != existing.tier.Rank() {
-		return rc.Tier.Rank() > existing.tier.Rank()
+	// Order by the shared authoritative-selection ranking (tier then state, with an unproven negative
+	// demoted below every valid-tier signal), so a proven reachable is never shadowed by a same-tier
+	// not_reachable and a higher-tier UNPROVEN negative never shadows a lower-tier reachable (EPIC #1042).
+	nt, ns := judgment.ReachabilitySignalRank(rc.Tier, rc.Reachable, rc.SuppressesFinding())
+	et, es := judgment.ReachabilitySignalRank(existing.tier, existing.state, existing.suppresses)
+	if nt != et {
+		return nt > et
+	}
+	if ns != es {
+		return ns > es
 	}
 	if j.Audit.UpdatedAt != existing.updatedAt {
 		return j.Audit.UpdatedAt.After(existing.updatedAt)

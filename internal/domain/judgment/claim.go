@@ -201,19 +201,103 @@ type ReachabilityClaim struct {
 	Tier       ReachabilityTier  `json:"tier"`
 	Path       []string          `json:"path,omitempty"`
 	Confidence int               `json:"confidence"`
+	// Coverage carries the sound-suppression evidence (EPIC #1042, 0.6): whether the analysis had a
+	// non-empty entry-point set, which of the finding's affected symbols it could NOT answer, and which
+	// reachable-surface constructs it is blind to (reflection, dynamic dispatch, ...). A not_reachable that
+	// does not satisfy ProvedNotReachable must never drive an OpenVEX not_affected. Empty on a reachable
+	// claim and on the pre-coverage analyzers that do not yet populate it (they stay raise-only or rely on
+	// the coordinator's tier-scoped guard).
+	EntrypointsPresent bool     `json:"entrypoints_present,omitempty"`
+	UnknownSymbols     []string `json:"unknown_symbols,omitempty"`
+	BlindConstructs    []string `json:"blind_constructs,omitempty"`
+}
+
+// rank orders reachability STATES within a single tier so a weaker state can never shadow a stronger one
+// (EPIC #1042, 0.4): reachable is strongest, then the future conditionally_reachable (reserved rank 2),
+// then not_reachable, then unknown/invalid. A proven reachable must supersede a same-tier not_reachable, or
+// a later weak verdict would hide a real vulnerability.
+func (s ReachabilityState) Rank() int {
+	switch s {
+	case Reachable:
+		return 3
+	case NotReachable:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// ProvedNotReachable reports whether a not_reachable claim is a SOUND suppression: it answered every affected
+// symbol (no UnknownSymbols) and hit no blind construct on the reachable surface. It intentionally does not
+// itself require entry points, because Tier-1 import reachability has no call-graph entry-point notion; the
+// call-graph tiers add the entry-point requirement in the coordinator. Only a ProvedNotReachable claim may
+// drive an OpenVEX not_affected.
+func (c ReachabilityClaim) ProvedNotReachable() bool {
+	return c.Reachable == NotReachable && len(c.UnknownSymbols) == 0 && len(c.BlindConstructs) == 0
+}
+
+// SuppressesFinding reports whether this claim is a SOUND basis for hiding or downgrading a finding: an
+// OpenVEX not_affected justification, an attack-path exclusion, a promotion de-escalation, or an SLA
+// urgency subtraction. Every reader that would drop or lower a finding on a not_reachable MUST gate on
+// this, not on Reachable == NotReachable alone, because a legacy or agent-proposed claim can reach a
+// reader without passing the coordinator's mint-time coverage guard (EPIC #1042, 0.6). It requires
+// ProvedNotReachable AND a tier whose negative is a sound proof of absence:
+//   - Tier-1 (import): the vulnerable package is not imported; there is no entry-point notion.
+//   - Tier-2 (call-graph): valid only relative to a recorded entry-point set, so EntrypointsPresent
+//     is required; a missing/empty value decodes as false, failing the gate closed.
+//
+// Tier-0 (dependency-graph presence) and Tier-1.5 (bounded source call-path, e.g. the JVM class-reference
+// closure) are NOT sound proofs of absence: a Tier-1.5 negative is blind to reflection and dynamic
+// dispatch beyond its bound, so it must only ever RAISE (mint reachable) and never hide a finding. This
+// matches IsDeterministicReachabilityProof, which recognises a deterministic proof only at Tier-1 and
+// Tier-2. Raising urgency on a reachable claim needs no such gate and is unaffected.
+func (c ReachabilityClaim) SuppressesFinding() bool {
+	if !c.ProvedNotReachable() {
+		return false
+	}
+	switch c.Tier {
+	case Tier1:
+		return true
+	case Tier2:
+		return c.EntrypointsPresent
+	default:
+		return false
+	}
 }
 
 // Capability identifies this claim's brain.
 func (ReachabilityClaim) Capability() Capability { return CapReachability }
 
-// Supersedes reports whether this claim should override prior – true only when this claim was produced by
-// a STRICTLY STRONGER tier of proof (a deterministic Tier-2 call-graph result overrides an
-// LLM Tier-1.5 claim, whether they agree or contradict). Same-or-lower tier does NOT supersede: a re-run
-// at equal strength leaves the stored verdict standing (no churn), and a weaker re-analysis never
-// downgrades a stronger proof. An unknown/invalid tier (Rank 0) can neither supersede nor be preserved
-// against any valid tier.
+// ReachabilitySignalRank returns the authoritative-selection ranking (tierRank, stateRank) of a
+// reachability verdict, given whether a not_reachable is a proven suppression (SuppressesFinding). It is
+// the single source of truth for supersession ordering, shared by the domain Supersedes and the
+// promotion/vulnerabilityevaluation projections that cannot hold the full claim.
+//
+// A reachable verdict and a PROVEN not_reachable rank by proof tier then state, so a stronger tier
+// legitimately refines a weaker one (a proven Tier-2 not_reachable overrides a Tier-1 reachable). An
+// UNPROVEN not_reachable carries no more information than "unknown": it is demoted to (0,0), below every
+// valid-tier signal, so it can neither suppress a finding nor shadow a reachable claim (which would wrongly
+// blunt urgency). (0,0) is "no authority".
+func ReachabilitySignalRank(tier ReachabilityTier, state ReachabilityState, suppresses bool) (int, int) {
+	if state == NotReachable && !suppresses {
+		return 0, 0
+	}
+	return tier.Rank(), state.Rank()
+}
+
+// Supersedes reports whether this claim should override prior. A stronger PROOF (a reachable or a proven
+// not_reachable at a higher tier) supersedes a weaker one, whether they agree or contradict; at equal tier
+// the stronger state wins (a proven reachable supersedes a same-tier not_reachable). An UNPROVEN
+// not_reachable is demoted below every valid-tier signal, so a higher-tier unproven negative can no longer
+// shadow a lower-tier reachable. Same-or-lower authority does NOT supersede (no churn), and an
+// unknown/invalid tier can neither supersede nor be preserved against a valid tier.
 func (c ReachabilityClaim) Supersedes(prior ReachabilityClaim) bool {
-	return c.Tier.Rank() > prior.Tier.Rank()
+	ct, cs := ReachabilitySignalRank(c.Tier, c.Reachable, c.SuppressesFinding())
+	pt, ps := ReachabilitySignalRank(prior.Tier, prior.Reachable, prior.SuppressesFinding())
+	if ct != pt {
+		return ct > pt
+	}
+	return cs > ps
 }
 
 // Validate enforces the closed verdict + tier vocabularies and a 0..100 confidence.

@@ -181,7 +181,9 @@ func tenantIDForEngagement(tenantID shared.ID) shared.ID {
 
 func reachabilityInput(f finding.Finding, judgments []judgment.Judgment) ap.FindingInput {
 	best := ap.FindingInput{Target: ap.FindingTarget{ID: f.ID, Kind: ap.TargetCanonical}, Finding: f}
-	bestPublishable := false
+	var bestClaim judgment.ReachabilityClaim
+	var bestID shared.ID
+	bestPublishable, haveBest := false, false
 	for _, j := range judgments {
 		if j.Capability != judgment.CapReachability || j.SubjectKind != judgment.SubjectFinding || j.SubjectID != f.ID {
 			continue
@@ -191,16 +193,43 @@ func reachabilityInput(f finding.Finding, judgments []judgment.Judgment) ap.Find
 			continue
 		}
 		publishable := j.Publishable()
-		if best.Provenance != "" && (publishable != bestPublishable && !publishable || publishable == bestPublishable && (claim.Tier.Rank() < best.Tier.Rank() || claim.Tier == best.Tier && j.ID > best.Provenance)) {
+		if haveBest && !reachabilityClaimWins(publishable, claim, j.ID, bestPublishable, bestClaim, bestID) {
 			continue
 		}
 		best.Reachability, best.Tier, best.Provenance, best.Confirmed = claim.Reachable, claim.Tier, j.ID, publishable
-		bestPublishable = publishable
+		bestClaim, bestID, bestPublishable, haveBest = claim, j.ID, publishable, true
 	}
-	if best.Provenance != "" && !bestPublishable {
+	if !haveBest {
+		return best
+	}
+	switch {
+	case !bestPublishable:
+		best.Reachability = judgment.ReachUnknown
+	case best.Reachability == judgment.NotReachable && !bestClaim.SuppressesFinding():
+		// An unproven not_reachable (partial coverage, a blind construct, or a call-graph tier with no
+		// entry points) is not a sound basis to drop the finding from attack paths; traverse.go excludes
+		// only a confirmed not_reachable, so downgrade it to unknown and keep the finding in the graph.
 		best.Reachability = judgment.ReachUnknown
 	}
 	return best
+}
+
+// reachabilityClaimWins reports whether a candidate (publishable, claim, id) should replace the current
+// best. A publishable (confirmed) claim always beats an unconfirmed one; within the same publishability the
+// state-aware winner wins (tier then state, via ReachabilityClaim.Supersedes), so a same-tier stale
+// not_reachable can never shadow a proven reachable; equal tier and state break on the lower judgment id
+// for determinism.
+func reachabilityClaimWins(pub bool, claim judgment.ReachabilityClaim, id shared.ID, bestPub bool, best judgment.ReachabilityClaim, bestID shared.ID) bool {
+	if pub != bestPub {
+		return pub
+	}
+	if claim.Supersedes(best) {
+		return true
+	}
+	if best.Supersedes(claim) {
+		return false
+	}
+	return id < bestID
 }
 
 func dedupFindingInputs(in []ap.FindingInput) []ap.FindingInput {
