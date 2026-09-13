@@ -3077,6 +3077,7 @@ func main() {
 		{cfg.PHPReachabilityEnabled, "SYNAPSE_REACH_PHP", "composer", srcimports.NewPHPSymbolScanner(), symbolcanon.PHP, reachproof.LanguagePHP},
 		{cfg.RubyReachabilityEnabled, "SYNAPSE_REACH_RUBY", "gem", srcimports.NewRubySymbolScanner(), symbolcanon.Ruby, reachproof.LanguageRuby},
 		{cfg.DotNetReachabilityEnabled, "SYNAPSE_REACH_DOTNET", "nuget", srcimports.NewDotNetSymbolScanner(), symbolcanon.DotNet, reachproof.LanguageDotNet},
+		{cfg.CppReachabilityEnabled, "SYNAPSE_REACH_CPP", "conan", srcimports.NewCppSymbolScanner(), symbolcanon.Cpp, reachproof.LanguageCPP},
 	} {
 		if !lang.enabled || !requireJudgmentsOrSkip(log, judgmentSvc != nil, lang.env, lang.purlType+" symbol reachability") {
 			continue

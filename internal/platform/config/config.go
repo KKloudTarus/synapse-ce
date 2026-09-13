@@ -644,6 +644,11 @@ type Config struct {
 	PHPReachabilityEnabled    bool
 	RubyReachabilityEnabled   bool
 	DotNetReachabilityEnabled bool
+	// CppReachabilityEnabled turns on the source-only, RAISE-ONLY C/C++ (conan) affected-symbol reachability:
+	// first-party source that references a curated vulnerable function raises the finding's urgency. It never
+	// mints not_reachable (macros, function pointers, dlopen, LTO/inlining and mangling hide calls), so it can
+	// only ever raise, never suppress.
+	CppReachabilityEnabled bool
 	// TaintCallgraphBin is the pinned synapse-callgraph binary: the sandboxed go/ssa call-graph builder
 	// the taint analyzer shells out to. In-repo cmd (built by `make build` into bin/); pin its hash via
 	// SYNAPSE_TOOL_HASHES, like any other tool binary.
@@ -918,6 +923,7 @@ func Load() Config {
 		PHPReachabilityEnabled:                      getbool("SYNAPSE_REACH_PHP", true),
 		RubyReachabilityEnabled:                     getbool("SYNAPSE_REACH_RUBY", true),
 		DotNetReachabilityEnabled:                   getbool("SYNAPSE_REACH_DOTNET", true),
+		CppReachabilityEnabled:                      getbool("SYNAPSE_REACH_CPP", true),
 		CrossCheckEnabled:                           getbool("SYNAPSE_CROSSCHECK_ENABLED", true),
 		SBOMCrossCheckEnabled:                       getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
 		WriteupDraftsEnabled:                        getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in

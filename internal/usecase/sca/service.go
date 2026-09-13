@@ -577,6 +577,7 @@ var sourceReachabilityEcosystems = []struct {
 	{purlType: "composer", prefix: "pkg:composer/"},
 	{purlType: "gem", prefix: "pkg:gem/"},
 	{purlType: "nuget", prefix: "pkg:nuget/"},
+	{purlType: "conan", prefix: "pkg:conan/"},
 }
 
 // reachabilityEngineEcosystems is the authoritative set of PURL types for which Synapse HAS a reachability
@@ -594,6 +595,7 @@ var reachabilityEngineEcosystems = map[string]bool{
 	"gem":      true,
 	"nuget":    true,
 	"maven":    true,
+	"conan":    true,
 }
 
 // reachabilityEngineExists reports whether Synapse has any reachability engine for a PURL type. An unknown

@@ -17,6 +17,10 @@ func TestCanonicalizePerLanguageForms(t *testing.T) {
 		{"php namespaced method", PHP, `Monolog\Logger::addRecord`, []string{"Monolog", "Logger", "addRecord"}},
 		{"ruby module class method", Ruby, "Nokogiri::XML::Document#parse", []string{"Nokogiri", "XML", "Document", "parse"}},
 		{"dotnet type member + arity", DotNet, "System.Text.Json.JsonSerializer`1.Deserialize", []string{"System", "Text", "Json", "JsonSerializer", "Deserialize"}},
+		{"cpp namespaced method", Cpp, "curl::easy::perform", []string{"curl", "easy", "perform"}},
+		{"cpp template dropped", Cpp, "std::vector<int>::push_back", []string{"std", "vector", "push_back"}},
+		{"cpp nested template + pointer", Cpp, "boost::asio::io_context<std::mutex>::run", []string{"boost", "asio", "io_context", "run"}},
+		{"cpp no hyphen normalization", Cpp, "my-lib::Foo::bar", []string{"my-lib", "Foo", "bar"}},
 		{"generic superset", Generic, "a::b.c/d", []string{"a", "b", "c", "d"}},
 		{"empty", Rust, "   ::  ", nil},
 	}

@@ -67,3 +67,44 @@ func TestSymreachTailMatchAcrossVendorPrefix(t *testing.T) {
 		t.Fatalf("tail-match on owner+member must raise, got %+v", res.Results)
 	}
 }
+
+// TestSymreachCppRaiseOnly: a C/C++ (conan) qualified reference tail-matches the curated vulnerable symbol
+// and raises it; a bare/one-segment subject never matches; the analyzer is incapable of not-reachable.
+func TestSymreachCppRaiseOnly(t *testing.T) {
+	a, err := New("conan", symbolcanon.Cpp, fakeScanner{refs: []string{"curl::easy::perform", "app::mod::use"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Analyzeable() != "conan" {
+		t.Fatalf("Analyzeable = %q", a.Analyzeable())
+	}
+	res, err := a.Analyze(context.Background(), "/work", []string{
+		"curl::easy::perform", // referenced -> reachable
+		"other::pkg::unused",  // not referenced -> absent (raise-only omits it)
+		"perform",             // bare leaf -> never matches
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Results) != 1 || res.Results[0].Symbol != "curl::easy::perform" || !res.Results[0].Reachable {
+		t.Fatalf("only the referenced curated symbol may raise, got %+v", res.Results)
+	}
+	for _, r := range res.Results {
+		if !r.Reachable {
+			t.Fatalf("symreach must never emit a not-reachable result, got %+v", r)
+		}
+	}
+}
+
+// A C++ template instantiation in the observed reference tail-matches a template-free advisory subject
+// (symbolcanon strips the <...> on both sides).
+func TestSymreachCppTemplateTailMatch(t *testing.T) {
+	a, _ := New("conan", symbolcanon.Cpp, fakeScanner{refs: []string{"boost::regex::match<char>"}})
+	res, err := a.Analyze(context.Background(), "/work", []string{"boost::regex::match"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Results) != 1 || !res.Results[0].Reachable {
+		t.Fatalf("a templated reference must match the template-free subject, got %+v", res.Results)
+	}
+}

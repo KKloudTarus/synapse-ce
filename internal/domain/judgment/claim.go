@@ -91,12 +91,19 @@ const (
 	// cannot prove ABSENCE (dynamic dispatch / reflection cannot be tied to a symbol without resolution).
 	// These actors are deliberately absent from IsDeterministicReachabilityProof, so a symbol verdict can
 	// never become a VEX not_affected.
-	ProofActorPHPSymbolScan     = "system:phpsymbol-scan"
-	ProofActorPHPSymbolEngine   = "system:phpsymbol-engine"
-	ProofActorRubySymbolScan    = "system:rubysymbol-scan"
-	ProofActorRubySymbolEngine  = "system:rubysymbol-engine"
-	ProofActorDotNetSymbolScan  = "system:dotnetsymbol-scan"
+	ProofActorPHPSymbolScan      = "system:phpsymbol-scan"
+	ProofActorPHPSymbolEngine    = "system:phpsymbol-engine"
+	ProofActorRubySymbolScan     = "system:rubysymbol-scan"
+	ProofActorRubySymbolEngine   = "system:rubysymbol-engine"
+	ProofActorDotNetSymbolScan   = "system:dotnetsymbol-scan"
 	ProofActorDotNetSymbolEngine = "system:dotnetsymbol-engine"
+	// C/C++ affected-symbol reachability is a Tier-2 RAISE-ONLY source signal (EPIC #1042 4.1): a source scan
+	// can prove a qualified reference to a curated vulnerable function (raising urgency) but cannot prove
+	// ABSENCE (macros, function pointers, dlopen/dlsym, textual #include, LTO/inlining, and mangling all hide
+	// calls). These actors are deliberately absent from IsDeterministicReachabilityProof, so a C/C++ symbol
+	// verdict can never become a VEX not_affected.
+	ProofActorCppSymbolScan   = "system:cppsymbol-scan"
+	ProofActorCppSymbolEngine = "system:cppsymbol-engine"
 	// .NET build-aware reachability is a Tier-1 proof, but unlike the source-only import scanners it does
 	// not guess a package's namespace from its id (AWSSDK.S3 ships the Amazon.S3 namespace): it reads the
 	// package's REAL exported namespaces from its restored assemblies, so a not-reachable conclusion is a

@@ -408,3 +408,22 @@ func TestTier2NotReachableRequiresEntrypoints(t *testing.T) {
 		t.Fatalf("zero-entrypoint Tier-2 not-reachable must mint nothing, got n=%d proposes=%d", n, len(rec.proposes))
 	}
 }
+
+// TestCppTier2ActorsAndRaiseOnly: the C/C++ Tier-2 symbol actors are distinct + labeled, and are EXCLUDED
+// from the deterministic-reachability proof set, so a C/C++ verdict can never become an OpenVEX not_affected.
+func TestCppTier2ActorsAndRaiseOnly(t *testing.T) {
+	proposer, verifier, label := actorsFor(judgment.Tier2, LanguageCPP)
+	if proposer != judgment.ProofActorCppSymbolScan || verifier != judgment.ProofActorCppSymbolEngine {
+		t.Fatalf("cpp tier-2 actors = (%q,%q)", proposer, verifier)
+	}
+	if label != "tier-2 c/c++ affected-symbol reference proof" {
+		t.Fatalf("cpp tier-2 label = %q", label)
+	}
+	if !LanguageCPP.Valid() {
+		t.Fatal("LanguageCPP must be Valid")
+	}
+	// The exclusion is the soundness bar: a raise-only C/C++ symbol proof must never be a deterministic proof.
+	if judgment.IsDeterministicReachabilityProof(judgment.Tier2, proposer, verifier) {
+		t.Fatal("C/C++ symbol actors must NOT be a deterministic reachability proof (raise-only)")
+	}
+}

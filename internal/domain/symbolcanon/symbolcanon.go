@@ -28,6 +28,7 @@ const (
 	PHP     Language = "php"
 	Ruby    Language = "ruby"
 	DotNet  Language = "dotnet"
+	Cpp     Language = "cpp"
 	Generic Language = ""
 )
 
@@ -97,7 +98,8 @@ func LooksMangled(raw string) bool {
 // separatorFunc returns the segment separator predicate for a language.
 func separatorFunc(lang Language) func(rune) bool {
 	switch lang {
-	case Rust:
+	case Rust, Cpp:
+		// C++ namespaces + members use the :: separator, like Rust; unlike Rust it has no crate hyphen rule.
 		return func(r rune) bool { return r == ':' }
 	case PHP:
 		return func(r rune) bool { return r == ':' || r == '\\' }
@@ -120,9 +122,9 @@ func normalizeSegment(lang Language, seg string) string {
 	// Pointer/reference decoration (a Go/Rust/.NET receiver like (*Server) or &T) is stripped only for the
 	// languages that use it. Ruby uses *, **, & as method NAMES (Numeric#*, Set#&), and Generic is lossless,
 	// so neither strips, or a valid operator method would lose its segment.
-	if lang == Go || lang == Rust || lang == DotNet {
+	if lang == Go || lang == Rust || lang == DotNet || lang == Cpp {
 		seg = strings.Trim(seg, "()")
-		seg = strings.TrimLeft(seg, "*&")
+		seg = strings.TrimLeft(seg, "*&") // a C/C++ pointer/reference return or receiver decoration
 	}
 	seg = strings.TrimSpace(seg)
 	if lang == Rust {
@@ -135,7 +137,7 @@ func normalizeSegment(lang Language, seg string) string {
 // generics (and uses [] / <=> / << as method NAMES, which must survive), and Generic is a lossless
 // superset, so neither strips.
 func hasGenerics(lang Language) bool {
-	return lang == Go || lang == Rust || lang == DotNet
+	return lang == Go || lang == Rust || lang == DotNet || lang == Cpp // C++ templates: Vec<T>, std::map<K,V>
 }
 
 // stripGenerics removes generic argument lists so a generic instantiation matches its definition:
