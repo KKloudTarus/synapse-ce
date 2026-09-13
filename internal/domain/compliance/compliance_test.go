@@ -1,8 +1,10 @@
 package compliance
 
 import (
-	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"reflect"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 )
 
 // TestControlsForSASTCWEs: the CWEs the pattern-SAST analyzer emits today all map (so a SAST finding always
@@ -162,5 +164,48 @@ func TestComplianceRollup(t *testing.T) {
 	}
 	if _, ok := got["OWASP-2021"]; !ok {
 		t.Errorf("CWE-mapped OWASP framework must appear in the rollup, got %v", roll)
+	}
+}
+
+// TestInterpretiveFrameworksExcluded enforces the #1041 DEFER decision (docs/adr/0009): the curated mapping
+// tables use ONLY supported frameworks, and NEVER an interpretive framework (NIST 800-53 / HIPAA / SOC 2 /
+// full PCI DSS). This pins the exclusion so an interpretive framework cannot be added without meeting the
+// reopening bar (direct per-entry human review + authoritative versioned catalog + provenance).
+func TestInterpretiveFrameworksExcluded(t *testing.T) {
+	used := map[string]bool{}
+	for _, cs := range cweControls {
+		for _, c := range cs {
+			used[c.Framework] = true
+		}
+	}
+	for _, cs := range ruleControls {
+		for _, c := range cs {
+			used[c.Framework] = true
+		}
+	}
+	// Every mapped framework must be in the closed supported set.
+	for f := range used {
+		if !FrameworkSupported(f) {
+			t.Errorf("framework %q is mapped but not in the supported set (an interpretive/uncurated mapping): update SupportedFrameworks and the ADR, or remove it", f)
+		}
+	}
+	// No interpretive framework may appear, in any spelling.
+	for _, bad := range []string{"NIST-800-53", "NIST-800-53r5", "NIST", "HIPAA", "SOC2", "SOC-2", "PCI-DSS-Full"} {
+		if used[bad] || FrameworkSupported(bad) {
+			t.Errorf("interpretive framework %q must stay excluded (DEFER decision, ADR 0009); adding it needs the reopening bar", bad)
+		}
+	}
+	// The supported set must be exactly the mapped set (no orphan listed-but-unmapped framework claiming coverage).
+	for _, f := range SupportedFrameworks() {
+		if !used[f] {
+			t.Errorf("framework %q is listed as supported but maps no control; it must not be advertised as assessed", f)
+		}
+	}
+	// Pin the CLOSED set to the exact five curated frameworks. This is what forces the reopening bar: adding
+	// ANY new framework (an interpretive one, or a new spelling like NIST-800-53-Rev5) to both a mapping table
+	// AND supportedFrameworks still fails here until this literal list and the ADR are updated deliberately.
+	wantFrameworks := []string{"CIS-AWS-3.0", "CIS-Kubernetes-1.10", "ISO-27001-2022", "OWASP-2021", "PCI-DSS-4.0"}
+	if got := SupportedFrameworks(); !reflect.DeepEqual(got, wantFrameworks) {
+		t.Fatalf("supported framework set drifted: got %v, want exactly %v (update ADR 0009 and this list to change the closed set)", got, wantFrameworks)
 	}
 }
