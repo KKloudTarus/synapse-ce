@@ -51,6 +51,33 @@ func TestProvedNotReachable(t *testing.T) {
 	}
 }
 
+// TestConditionallyReachableState: conditionally_reachable ranks between reachable and not_reachable, is a
+// valid non-suppressing verdict, and orders correctly in Supersedes (EPIC #1042 2.3).
+func TestConditionallyReachableState(t *testing.T) {
+	if !ConditionallyReachable.Valid() {
+		t.Error("conditionally_reachable must be a valid state")
+	}
+	if !(Reachable.Rank() > ConditionallyReachable.Rank() && ConditionallyReachable.Rank() > NotReachable.Rank()) {
+		t.Fatalf("rank order must be reachable > conditionally_reachable > not_reachable, got %d,%d,%d",
+			Reachable.Rank(), ConditionallyReachable.Rank(), NotReachable.Rank())
+	}
+	// It is NEVER a suppression (an unproven precondition must not mint not_affected).
+	if (ReachabilityClaim{Reachable: ConditionallyReachable, Tier: Tier2, EntrypointsPresent: true}).SuppressesFinding() {
+		t.Error("conditionally_reachable must never suppress a finding")
+	}
+	// Supersedes: reachable > conditionally_reachable > not_reachable at equal tier.
+	cond := ReachabilityClaim{Reachable: ConditionallyReachable, Tier: Tier2}
+	if !(ReachabilityClaim{Reachable: Reachable, Tier: Tier2}).Supersedes(cond) {
+		t.Error("reachable must supersede a same-tier conditionally_reachable")
+	}
+	if !cond.Supersedes(ReachabilityClaim{Reachable: NotReachable, Tier: Tier2, EntrypointsPresent: true}) {
+		t.Error("conditionally_reachable must supersede a same-tier not_reachable")
+	}
+	if cond.Supersedes(ReachabilityClaim{Reachable: Reachable, Tier: Tier2}) {
+		t.Error("conditionally_reachable must NOT supersede a same-tier reachable")
+	}
+}
+
 func TestSuppressesFinding(t *testing.T) {
 	// A complete Tier-1 (import) not_reachable suppresses: import reachability has no entry-point notion.
 	if !(ReachabilityClaim{Reachable: NotReachable, Tier: Tier1}).SuppressesFinding() {

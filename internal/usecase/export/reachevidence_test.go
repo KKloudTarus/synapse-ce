@@ -56,4 +56,12 @@ func TestDeriveReachabilityEvidence(t *testing.T) {
 	if ev := DeriveReachabilityEvidence(reach, "other"); ev.Label != LabelNoAnalysis {
 		t.Fatalf("another finding's judgment must not leak, got %+v", ev)
 	}
+
+	// A conditionally_reachable claim derives the conditionally_reachable label (never no_analysis, never
+	// present_unreached), carrying the call path.
+	cond := []judgment.Judgment{reachJ("f1", judgment.StateConfirmed, judgment.ReachabilityClaim{
+		Reachable: judgment.ConditionallyReachable, Tier: judgment.Tier2, Confidence: 90, Path: []string{"a.b"}})}
+	if ev := DeriveReachabilityEvidence(cond, "f1"); ev.Label != LabelConditionallyReachable || len(ev.Path) != 1 {
+		t.Fatalf("conditionally_reachable claim must derive the conditionally_reachable label + path, got %+v", ev)
+	}
 }

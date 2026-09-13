@@ -26,6 +26,11 @@ type FlowGraph struct {
 	Sinks      []string
 	Sanitizers []string
 	Flows      []Flow
+	// SourceLabels optionally tags a source node with a taint label (Semgrep taint-labels). A source with
+	// no entry carries the default (empty) label. It drives conditional reachability: a sink that Requires a
+	// set of labels is a full match only when a source carrying each reaches it. Empty map = no labeling
+	// (classic behavior).
+	SourceLabels map[string]string
 }
 
 // TaintPath is a proven injection: untrusted data flows from Source to Sink with no sanitizer between –

@@ -13,6 +13,12 @@ type Sink struct {
 	Symbol string // "importPath.Symbol", e.g. "database/sql.DB.Query"
 	CWE    string // e.g. "CWE-89"
 	Rule   string // e.g. "taint-sqli"
+	// Requires is an optional taint-label precondition (Semgrep taint-labels, AND semantics): the sink is a
+	// FULL match only when a source carrying EACH listed label reaches it. Empty means no precondition (the
+	// classic single-label behavior). It is FAIL-OPEN: when not every required label is proven to reach, the
+	// flow is CONDITIONALLY reachable, never suppressed, because the coarse model cannot prove a label's
+	// absence (EPIC #1042 2.3).
+	Requires []string
 	// Exec, when non-nil, marks this as an exec-style command sink and carries the value-level
 	// de-escalation policy (D5.4): the argument index of the program name (argv[0]) plus the class the
 	// finding drops to when the SSA pass proves that argument is a compile-time-constant, non-interpreter

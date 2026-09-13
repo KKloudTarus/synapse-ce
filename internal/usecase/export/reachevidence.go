@@ -75,6 +75,9 @@ func DeriveReachabilityEvidence(judgments []judgment.Judgment, findingID string)
 	switch {
 	case winner.Reachable == judgment.Reachable:
 		return &ReachabilityEvidence{Source: "reachability", Label: LabelReachable, Tier: winner.Tier, Path: winner.Path}
+	case winner.Reachable == judgment.ConditionallyReachable:
+		// Reached under an unproven precondition: exploitable-under-condition, never a suppression.
+		return &ReachabilityEvidence{Source: "reachability", Label: LabelConditionallyReachable, Tier: winner.Tier, Path: winner.Path}
 	case winner.SuppressesFinding():
 		return &ReachabilityEvidence{Source: "reachability", Label: LabelPresentUnreached, Tier: winner.Tier}
 	default:

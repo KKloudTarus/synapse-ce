@@ -149,15 +149,21 @@ type Claim interface {
 type ReachabilityState string
 
 const (
-	Reachable    ReachabilityState = "reachable"
-	NotReachable ReachabilityState = "not_reachable"
-	ReachUnknown ReachabilityState = "unknown"
+	Reachable ReachabilityState = "reachable"
+	// ConditionallyReachable: the vulnerable code is reached, but only under a precondition that is not
+	// (yet) proven, e.g. a taint flow that reaches the sink but whose required label combination is not
+	// fully satisfied. It is MORE exploitable than not_reachable and less than a proven reachable, and it is
+	// NEVER a suppressing verdict: an unproven precondition must never mint an OpenVEX not_affected (EPIC
+	// #1042 2.3). SuppressesFinding is false for it (it is not NotReachable), so no reader can suppress on it.
+	ConditionallyReachable ReachabilityState = "conditionally_reachable"
+	NotReachable           ReachabilityState = "not_reachable"
+	ReachUnknown           ReachabilityState = "unknown"
 )
 
 // Valid reports whether s is a known reachability verdict (fail-closed: anything else is rejected).
 func (s ReachabilityState) Valid() bool {
 	switch s {
-	case Reachable, NotReachable, ReachUnknown:
+	case Reachable, ConditionallyReachable, NotReachable, ReachUnknown:
 		return true
 	}
 	return false
@@ -220,6 +226,8 @@ func (s ReachabilityState) Rank() int {
 	switch s {
 	case Reachable:
 		return 3
+	case ConditionallyReachable:
+		return 2
 	case NotReachable:
 		return 1
 	default:
