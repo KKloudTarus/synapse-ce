@@ -187,20 +187,20 @@ func TestOwnedBeatsSemgrepPrecisionOnPythonCorpus(t *testing.T) {
 
 func TestCheckBaselineExpectationFailsClosed(t *testing.T) {
 	exp, ok := ExpectedBaseline("semgrep-ce", "python")
-	if !ok || exp.Cases != 9 || exp.PositiveProduced != 9 || exp.FalsePositiveRise != 4 {
+	if !ok || exp.Cases != 10 || exp.PositiveProduced != 10 || exp.FalsePositiveRise != 4 {
 		t.Fatalf("pinned semgrep python expectation = %+v ok=%v", exp, ok)
 	}
-	good := Report{Languages: []LanguageScore{{Language: "python", Cases: 9, PositiveExpected: 5, PositiveFound: 5, PositiveProduced: 9, FalsePositiveRise: 4}}}
+	good := Report{Languages: []LanguageScore{{Language: "python", Cases: 10, PositiveExpected: 6, PositiveFound: 6, PositiveProduced: 10, FalsePositiveRise: 4}}}
 	if breaches := CheckBaselineExpectation(good, "semgrep-ce", "python"); len(breaches) != 0 {
 		t.Fatalf("exact match must have no breaches, got %v", breaches)
 	}
 	// A weakened baseline (fewer matches) breaches the pinned scorecard.
-	weak := Report{Languages: []LanguageScore{{Language: "python", Cases: 9, PositiveExpected: 5, PositiveFound: 5, PositiveProduced: 5, FalsePositiveRise: 0}}}
+	weak := Report{Languages: []LanguageScore{{Language: "python", Cases: 10, PositiveExpected: 6, PositiveFound: 6, PositiveProduced: 5, FalsePositiveRise: 0}}}
 	if breaches := CheckBaselineExpectation(weak, "semgrep-ce", "python"); len(breaches) == 0 {
 		t.Fatal("a weakened baseline must breach the pinned scorecard")
 	}
 	// A shrunk denominator breaches.
-	shrunk := Report{Languages: []LanguageScore{{Language: "python", Cases: 6, PositiveExpected: 5, PositiveFound: 5, PositiveProduced: 9, FalsePositiveRise: 4}}}
+	shrunk := Report{Languages: []LanguageScore{{Language: "python", Cases: 6, PositiveExpected: 6, PositiveFound: 6, PositiveProduced: 10, FalsePositiveRise: 4}}}
 	if breaches := CheckBaselineExpectation(shrunk, "semgrep-ce", "python"); len(breaches) == 0 {
 		t.Fatal("a shrunk denominator must breach the pinned scorecard")
 	}

@@ -86,7 +86,7 @@ func TestPythonReachabilityCorpus(t *testing.T) {
 	// Pin the Python denominator. A PR that removes a Python case, or relabels a hard one away from
 	// "python", would shrink this subset; the owned and baseline reports would then share the reduced digest
 	// and parity would pass on an easier corpus. Changing this count is a reviewed ratchet update.
-	const expectedPythonCases = 9
+	const expectedPythonCases = 10
 	if len(pyCases) != expectedPythonCases {
 		t.Fatalf("Python corpus has %d cases, expected %d; update the ratchet only with reviewed corpus changes", len(pyCases), expectedPythonCases)
 	}

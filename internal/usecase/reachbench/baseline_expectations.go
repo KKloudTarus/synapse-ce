@@ -35,8 +35,12 @@ var baselineExpectations = map[string]map[string]BaselineExpectation{
 		"go": {Cases: 7, PositiveExpected: 4, PositiveFound: 1, PositiveProduced: 1, FalsePositiveRise: 0},
 	},
 	"semgrep-ce": {
-		"go":     {Cases: 7, PositiveExpected: 4, PositiveFound: 1, PositiveProduced: 1, FalsePositiveRise: 0},
-		"python": {Cases: 9, PositiveExpected: 5, PositiveFound: 5, PositiveProduced: 9, FalsePositiveRise: 4},
+		"go": {Cases: 7, PositiveExpected: 4, PositiveFound: 1, PositiveProduced: 1, FalsePositiveRise: 0},
+		// 10 python fixtures each call the os.system sink, so Semgrep labels all 10 reachable: 6 are truly
+		// reachable (recall 6/6) and 4 are unreached fixtures it cannot prove (4 false-positive reachable,
+		// precision 6/10). The added py_method_override case is the subclass-override the owned engine now
+		// reaches via downward-closure dispatch.
+		"python": {Cases: 10, PositiveExpected: 6, PositiveFound: 6, PositiveProduced: 10, FalsePositiveRise: 4},
 	},
 }
 
