@@ -37,7 +37,7 @@ if [[ -n "${multiarch}" && -d "/usr/include/${multiarch}" ]]; then
 fi
 
 common_flags=(-target bpfel -O2 -g -Wall -Werror "-fdebug-prefix-map=${repo_root}=." "${include_flags[@]}")
-sources=(connlog exec file priv netconn)
+sources=(connlog exec file priv netconn library)
 
 build_arch() {
   local goarch="$1"

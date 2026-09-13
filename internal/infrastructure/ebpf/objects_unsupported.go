@@ -12,4 +12,5 @@ var (
 	fileObj    []byte
 	privObj    []byte
 	netObj     []byte
+	libraryObj []byte
 )
