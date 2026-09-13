@@ -29,7 +29,11 @@ type mkdocsConfig struct {
 // navExclusions lists Markdown files under the guide directory that are intentionally absent from the
 // navigation. It is empty on purpose: every current guide is reachable. An entry added here must carry a
 // reason, so "not in nav" stays a decision rather than an oversight.
-var navExclusions = map[string]string{}
+var navExclusions = map[string]string{
+	// An internal implementation/tracking plan for the vulnerability-intelligence work, not end-user guide
+	// content; it lives under docs/guide for co-location but is intentionally kept out of the published nav.
+	"vulnerability-intelligence-implementation-plan.md": "internal implementation plan, not a user guide",
+}
 
 // TestEveryGuidePageIsPublished fails when a Markdown file under the MkDocs docs_dir is missing from the
 // navigation. Such a page builds but is unreachable except by direct URL.
