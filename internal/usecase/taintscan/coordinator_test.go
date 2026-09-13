@@ -11,6 +11,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/callgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/symbolcanon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -121,6 +122,58 @@ func TestScanProposesSameFunctionInjection(t *testing.T) {
 	}
 	if a.entries[0].Metadata["cwe"] != "CWE-78" {
 		t.Errorf("witness must carry the injection class: %+v", a.entries[0].Metadata)
+	}
+}
+
+// #1050: a taint flow whose dangerous callee is an advisory's vulnerable symbol correlates to that SCA
+// finding (the vuln is taint-reachable). The link is recorded in the witness metadata; a sink that is not
+// an advisory symbol, or a coordinator without the index, records NO link (no fabricated correlation).
+func TestScanCorrelatesSinkToSCAFinding(t *testing.T) {
+	// app.handler reads a request value (source) and passes it to database/sql.DB.Query (sink, CWE-89).
+	graph := func() *callgraph.Graph {
+		return &callgraph.Graph{Edges: []callgraph.Edge{
+			{Caller: "app.handler", Callees: []string{"net/http.Request.FormValue", "database/sql.DB.Query"}},
+		}}
+	}
+
+	// With the advisory index naming database/sql.DB.Query as finding-sql's vulnerable symbol: correlated.
+	p := &fakeProposer{}
+	a := &fakeAudit{}
+	c := newCoord(t, &fakeBuilder{g: graph()}, p, a).WithVulnerableSymbols(symbolcanon.Go, map[shared.ID][]string{
+		"finding-sql":   {"database/sql.DB.Query"},
+		"finding-other": {"github.com/unrelated/pkg.Safe"},
+	})
+	if _, err := c.Scan(context.Background(), engID, "/work/target"); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(a.entries) != 1 {
+		t.Fatalf("want 1 witness entry, got %d", len(a.entries))
+	}
+	if got := a.entries[0].Metadata["correlated_findings"]; got != "finding-sql" {
+		t.Errorf("sink into a vulnerable symbol must correlate to its finding, got %q", got)
+	}
+
+	// Without the index: no correlation recorded (default behavior unchanged).
+	p2 := &fakeProposer{}
+	a2 := &fakeAudit{}
+	if _, err := newCoord(t, &fakeBuilder{g: graph()}, p2, a2).Scan(context.Background(), engID, "/work/target"); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if _, ok := a2.entries[0].Metadata["correlated_findings"]; ok {
+		t.Errorf("no index must record no correlation, got %+v", a2.entries[0].Metadata)
+	}
+
+	// With an index whose symbols do not match the sink: no fabricated link.
+	p3 := &fakeProposer{}
+	a3 := &fakeAudit{}
+	c3 := newCoord(t, &fakeBuilder{g: graph()}, p3, a3).WithVulnerableSymbols(symbolcanon.Go, map[shared.ID][]string{
+		"finding-x": {"github.com/unrelated/pkg.Vuln"},
+	})
+	if _, err := c3.Scan(context.Background(), engID, "/work/target"); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if _, ok := a3.entries[0].Metadata["correlated_findings"]; ok {
+		t.Errorf("a non-matching index must record no correlation, got %+v", a3.entries[0].Metadata)
 	}
 }
 
