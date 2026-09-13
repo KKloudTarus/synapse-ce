@@ -80,6 +80,13 @@
       "fixture": "py_method_unreached",
       "symbol": "python:app:Service._unused",
       "expected": "present_unreached"
+    },
+    {
+      "name": "py_cross_module_reached",
+      "language": "python",
+      "fixture": "py_crossmodule_reached",
+      "symbol": "python:helper:_work",
+      "expected": "reachable"
     }
   ]
 }
