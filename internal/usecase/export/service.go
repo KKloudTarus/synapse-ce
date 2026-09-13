@@ -81,40 +81,50 @@ func (s *Service) SARIF(ctx context.Context, engagementID shared.ID) (*SARIFLog,
 // replaces (the caller who re-exports knows it); the document's own @id is content-addressed, so an
 // unchanged re-export is idempotent.
 func (s *Service) OpenVEX(ctx context.Context, engagementID shared.ID, supersedes string) (*VEXDoc, error) {
-	fs, notReachable, vexJust, err := s.vexInputs(ctx, engagementID)
+	in, err := s.vexInputs(ctx, engagementID)
 	if err != nil {
 		return nil, err
 	}
-	return buildOpenVEX(engagementID, fs, notReachable, vexJust, s.clock.Now().UTC(), s.version, supersedes), nil
+	return buildOpenVEX(engagementID, in, s.clock.Now().UTC(), s.version, supersedes), nil
 }
 
 // CSAFVEX returns the same publishable findings as a CSAF 2.0 VEX document, the enterprise-standard
 // companion to OpenVEX. It asserts exactly what OpenVEX asserts, reshaped into CSAF's product-tree +
 // per-vulnerability product-status model.
 func (s *Service) CSAFVEX(ctx context.Context, engagementID shared.ID) (*CSAFDoc, error) {
-	fs, notReachable, vexJust, err := s.vexInputs(ctx, engagementID)
+	in, err := s.vexInputs(ctx, engagementID)
 	if err != nil {
 		return nil, err
 	}
-	return buildCSAFVEX(engagementID, fs, notReachable, vexJust, s.clock.Now().UTC(), s.version), nil
+	return buildCSAFVEX(engagementID, in, s.clock.Now().UTC(), s.version), nil
+}
+
+// vexInputData is the shared input set both VEX emitters read.
+type vexInputData struct {
+	findings     []finding.Finding
+	notReachable map[string]judgment.ReachabilityTier // findings soundly PROVED not_reachable (justification source)
+	reachable    map[string]bool                      // findings Synapse independently PROVED reachable (#1064 reconciliation)
+	vexJust      map[string]string                    // human-confirmed OpenVEX justifications
 }
 
 // vexInputs gathers the shared inputs both VEX emitters read: the publishable findings, the not-reachable
-// tier map, and the human VEX justifications.
-func (s *Service) vexInputs(ctx context.Context, engagementID shared.ID) ([]finding.Finding, map[string]judgment.ReachabilityTier, map[string]string, error) {
+// tier map, the reachable-verdict set (for the #1064 reconciliation), and the human VEX justifications.
+func (s *Service) vexInputs(ctx context.Context, engagementID shared.ID) (vexInputData, error) {
 	fs, err := s.findings.ListPublishableByEngagement(ctx, engagementID)
 	if err != nil {
-		return nil, nil, nil, err
+		return vexInputData{}, err
 	}
-	notReachable, err := s.notReachableTiers(ctx, engagementID)
+	// One winner snapshot feeds BOTH the not_reachable justification map and the reachable reconciliation set,
+	// so the two verdicts can never disagree from separate reads of a store that changes mid-export.
+	winner, err := s.reachabilityWinners(ctx, engagementID)
 	if err != nil {
-		return nil, nil, nil, err
+		return vexInputData{}, err
 	}
 	vexJust, err := s.vexJustifications(ctx, engagementID)
 	if err != nil {
-		return nil, nil, nil, err
+		return vexInputData{}, err
 	}
-	return fs, notReachable, vexJust, nil
+	return vexInputData{findings: fs, notReachable: notReachableTiersFrom(winner), reachable: reachableFrom(winner), vexJust: vexJust}, nil
 }
 
 // vexJustifications maps a finding id → the OpenVEX justification of a PUBLISHABLE (confirmed + verified
@@ -146,9 +156,10 @@ func (s *Service) vexJustifications(ctx context.Context, engagementID shared.ID)
 	return out, nil
 }
 
-// notReachableTiers maps a finding id → the strongest tier of a PUBLISHABLE (confirmed + evidence-
-// gated) not_reachable reachability judgment about it. Empty when judgments are disabled.
-func (s *Service) notReachableTiers(ctx context.Context, engagementID shared.ID) (map[string]judgment.ReachabilityTier, error) {
+// reachabilityWinners resolves the WINNING reachability claim per finding id (tier then state, EPIC #1042,
+// 0.4): a superseding claim hides a stale one, so both the not_reachable justification and the reachable
+// reconciliation read a single, consistent verdict. Empty when judgments are disabled.
+func (s *Service) reachabilityWinners(ctx context.Context, engagementID shared.ID) (map[string]judgment.ReachabilityClaim, error) {
 	if s.judgments == nil {
 		return nil, nil
 	}
@@ -156,9 +167,6 @@ func (s *Service) notReachableTiers(ctx context.Context, engagementID shared.ID)
 	if err != nil {
 		return nil, err
 	}
-	// Resolve the WINNING reachability claim per finding first (tier then state, EPIC #1042, 0.4), so a
-	// superseding reachable judgment hides a stale not_reachable and we never emit a not_affected
-	// justification for a finding whose strongest claim is actually reachable.
 	winner := map[string]judgment.ReachabilityClaim{}
 	for _, j := range js {
 		if !j.Publishable() || j.Capability != judgment.CapReachability || j.SubjectKind != judgment.SubjectFinding {
@@ -173,16 +181,36 @@ func (s *Service) notReachableTiers(ctx context.Context, engagementID shared.ID)
 			winner[id] = rc
 		}
 	}
+	return winner, nil
+}
+
+// notReachableTiersFrom maps a finding id → the strongest tier of a PUBLISHABLE (confirmed + evidence-gated)
+// not_reachable reachability judgment about it, derived from a winner snapshot. Only a claim that soundly
+// suppresses (ProvedNotReachable, plus entry points on the call-graph tier) may stamp a not_affected
+// justification; a partial, blind, or zero-entrypoint negative is not proof of absence (EPIC #1042, 0.6), and
+// the finding then falls back to its status-derived VEX.
+func notReachableTiersFrom(winner map[string]judgment.ReachabilityClaim) map[string]judgment.ReachabilityTier {
 	out := map[string]judgment.ReachabilityTier{}
 	for id, rc := range winner {
-		// Only a claim that soundly suppresses (ProvedNotReachable, plus entry points on the call-graph
-		// tier) may stamp a not_affected justification; a partial, blind, or zero-entrypoint negative is
-		// not proof of absence (EPIC #1042, 0.6). The finding then falls back to its status-derived VEX.
 		if rc.SuppressesFinding() {
 			out[id] = rc.Tier
 		}
 	}
-	return out, nil
+	return out
+}
+
+// reachableFrom is the id set of findings whose WINNING reachability claim is `reachable`: Synapse
+// independently proved the vulnerable code is reached. A vendor `not_affected` (a mere assertion) must never
+// suppress such a finding on export, so collectVEXRecords refuses to emit not_affected for these ids and
+// asserts the more-exploitable `affected` instead (EPIC #1042, #1064; the #1-bar reachability reconciliation).
+func reachableFrom(winner map[string]judgment.ReachabilityClaim) map[string]bool {
+	out := map[string]bool{}
+	for id, rc := range winner {
+		if rc.Reachable == judgment.Reachable {
+			out[id] = true
+		}
+	}
+	return out
 }
 
 // parsedKey is the structured form of a finding dedup key

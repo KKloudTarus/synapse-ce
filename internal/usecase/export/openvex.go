@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
@@ -67,9 +66,9 @@ type vexRecord struct {
 // > not_affected), so the export can never assert not_affected while an affected finding for the same
 // product exists — a false suppression is impossible. Sorting makes the statement order and the
 // content-addressed id reproducible regardless of finding read order.
-func collectVEXRecords(findings []finding.Finding, notReachable map[string]judgment.ReachabilityTier, vexJust map[string]string, now time.Time) []vexRecord {
+func collectVEXRecords(in vexInputData, now time.Time) []vexRecord {
 	byKey := map[string]vexRecord{}
-	for _, f := range findings {
+	for _, f := range in.findings {
 		p := parseDedup(f.DedupKey)
 		// VEX asserts exploitability against a PRODUCT, not licenses; skip non-vuln findings and any vuln
 		// without a resolvable component (no valid product id).
@@ -77,13 +76,21 @@ func collectVEXRecords(findings []finding.Finding, notReachable map[string]judgm
 			continue
 		}
 		status, justification := vexStatus(f.Status)
-		// Justification precedence for a not_affected finding: (1) a PUBLISHABLE not_reachable reachability
-		// judgment gives a tier-grounded justification (a deterministic proof); else (2) a human-confirmed
-		// OpenVEX justification; else (3) the vexStatus default. Reachability wins because it is a proof.
+		// Reachability reconciliation (EPIC #1042, #1064, the #1-bar): a vendor/human `not_affected` is only an
+		// ASSERTION. When Synapse independently PROVED the finding reachable (a winning `reachable` judgment, or
+		// a finding-level reachable verdict such as a runtime hit), the more-exploitable verdict wins: the
+		// export must NOT emit not_affected, so it is upgraded to `affected`. This closes the export suppression
+		// surface that mirrors the apply-path guard already in usecase/vex/service.go.
+		if status == "not_affected" && (in.reachable[f.ID.String()] || f.Reachability == string(judgment.Reachable)) {
+			status, justification = "affected", ""
+		}
+		// Justification precedence for a not_affected finding that stands: (1) a PUBLISHABLE not_reachable
+		// reachability judgment gives a tier-grounded justification (a deterministic proof); else (2) a
+		// human-confirmed OpenVEX justification; else (3) the vexStatus default. Reachability wins as a proof.
 		if status == "not_affected" {
-			if tier, ok := notReachable[f.ID.String()]; ok {
+			if tier, ok := in.notReachable[f.ID.String()]; ok {
 				justification = reachabilityJustification(tier)
-			} else if j, ok := vexJust[f.ID.String()]; ok {
+			} else if j, ok := in.vexJust[f.ID.String()]; ok {
 				justification = j
 			}
 		}
@@ -174,8 +181,8 @@ func vexContentID(engagementID shared.ID, records []vexRecord) string {
 
 // buildOpenVEX renders the publishable findings as an OpenVEX 0.2 document. supersedes, when non-empty, is
 // the @id of a prior document this one replaces.
-func buildOpenVEX(engagementID shared.ID, findings []finding.Finding, notReachable map[string]judgment.ReachabilityTier, vexJust map[string]string, now time.Time, version, supersedes string) *VEXDoc {
-	records := collectVEXRecords(findings, notReachable, vexJust, now)
+func buildOpenVEX(engagementID shared.ID, in vexInputData, now time.Time, version, supersedes string) *VEXDoc {
+	records := collectVEXRecords(in, now)
 	stmts := make([]VEXStatement, 0, len(records))
 	for _, r := range records {
 		stmts = append(stmts, VEXStatement{
