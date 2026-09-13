@@ -69,6 +69,43 @@ func TestPythonBuiltinSourceSinkResolution(t *testing.T) {
 	}
 }
 
+// TestPythonCrossFileInterprocedural proves the Python resolver already carries taint across a FILE boundary:
+// app.py imports forward from helper.py and calls forward(input()); the os.system sink lives in helper.py.
+// This pins the cross-file two-hop path (#1054) so a later refactor of the resolver cannot silently regress it.
+func TestPythonCrossFileInterprocedural(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"helper.py": "import os\ndef forward(cmd):\n    os.system(cmd)\n",
+		"app.py":    "from helper import forward\ndef handle():\n    forward(input())\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	doc, err := PythonFactsFor(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("facts: %v", err)
+	}
+	res, err := pythonprogram.Resolve(doc)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	g, err := taint.BuildPythonValueGraph(doc, res, taint.DefaultPythonCatalog())
+	if err != nil {
+		t.Fatalf("graph: %v", err)
+	}
+	found := false
+	for _, p := range g.Vulnerabilities() {
+		if p.CWE == "CWE-78" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("cross-file command injection (input -> forward -> os.system) missed across app.py/helper.py")
+	}
+}
+
 // TestPythonFrameworkEscapersSanitizeXSS proves the #1039 Django/Flask HTML escapers neutralize the XSS class
 // (and only that class) end to end through the real extractor + engine.
 func TestPythonFrameworkEscapersSanitizeXSS(t *testing.T) {
