@@ -59,6 +59,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/file"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/reachcache"
 	recontools "github.com/KKloudTarus/synapse-ce/internal/infrastructure/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/report"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/responsefleet"
@@ -2895,6 +2896,13 @@ func main() {
 			log.Error("reachability coordinator init failed", "err", cerr)
 			os.Exit(1)
 		}
+		// Read-through whole-graph cache (EPIC #1042, 0.7): a re-scan of an unchanged tree reuses the call
+		// graph instead of rebuilding it. The key binds the source-tree Merkle hash + build env (via the
+		// fingerprinter) and the builder identity + coverage-model version, so a changed source, a switched
+		// builder, or a changed toolchain misses. It is verdict-preserving (the coordinator always re-derives
+		// per-subject verdicts from the cached graph), so it is always safe to enable.
+		coord = coord.WithCache(reachproof.NewInMemoryCache(), reachcache.NewTreeFingerprinter(),
+			"callgraph/"+cfg.ReachabilityBuilder+"/v1", "reach-coverage/v1")
 		scaService.SetReachability(coord)
 		log.Info("Tier-2 reachability proof ENABLED (deterministic overrides LLM Tier-1.5)", "builder", cfg.ReachabilityBuilder)
 	}

@@ -149,6 +149,18 @@ type Coordinator struct {
 	// so must never conclude not-reachable), letting that analyzer prioritise reached findings by default
 	// without any false-suppression risk. A reachable verdict never lowers a score, so this is always safe.
 	raiseOnly bool
+	// cache memoizes the whole-graph Analysis across Record calls whose verdict-affecting inputs are identical
+	// (EPIC #1042, 0.7). It is read-through only: the coordinator always re-derives per-subject verdicts from
+	// the Analysis, so a cache hit changes wall-clock, never a verdict. The per-target inputs (source-tree hash
+	// and per-target environment fingerprint) come from fingerprinter, called ONCE per Record on targetRef,
+	// because one long-lived coordinator serves every target; a static context would collide two different
+	// repos with the same symbol set. analyzerVersion + coverageModel are the coordinator's static inputs. The
+	// cache is used only when cache and fingerprinter are set, the fingerprint succeeds, AND the resulting
+	// CacheKey is Complete(): any failure or missing field recomputes, so a stale-key negative is never served.
+	cache           ReachabilityCache
+	fingerprinter   ports.ReachabilitySourceFingerprinter
+	analyzerVersion string
+	coverageModel   string
 }
 
 var _ ports.ReachabilityRecorder = (*Coordinator)(nil)
@@ -201,6 +213,20 @@ func (c *Coordinator) WithSkipUnresolvedSubjects() *Coordinator {
 // reached finding is prioritised while an un-reached one leaves the prior tier standing (no false suppression).
 func (c *Coordinator) WithRaiseOnly() *Coordinator {
 	c.raiseOnly = true
+	return c
+}
+
+// WithCache attaches a read-through whole-graph Analysis cache. fingerprinter supplies the per-target source
+// hash + environment fingerprint (called once per Record on targetRef); analyzerVersion and coverageModel are
+// the coordinator's static key inputs. The cache is consulted only when the fingerprint succeeds AND the
+// resulting CacheKey is Complete(), so a fingerprint error or an unbound field disables caching for that run
+// (recompute) rather than risk a stale verdict. A nil cache or nil fingerprinter leaves the coordinator
+// uncached (every Record recomputes), which is the default and always sound.
+func (c *Coordinator) WithCache(cache ReachabilityCache, fingerprinter ports.ReachabilitySourceFingerprinter, analyzerVersion, coverageModel string) *Coordinator {
+	c.cache = cache
+	c.fingerprinter = fingerprinter
+	c.analyzerVersion = analyzerVersion
+	c.coverageModel = coverageModel
 	return c
 }
 
@@ -266,12 +292,29 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, target
 	for _, s := range subjects {
 		allSymbols = append(allSymbols, s.Symbols...)
 	}
-	analysis, err := c.analyzer.Analyze(ctx, targetRef, allSymbols)
-	if err != nil {
-		return 0, fmt.Errorf("reachability analysis (no coverage – prior tier stands): %w", err)
+	// Read-through cache. The fingerprint (set only when the key is Complete()) is the sole gate on both Get
+	// and Put, so a fingerprint error, a nil cache, or an unbound field always recomputes and never serves or
+	// stores under a partial key. A cache MISS or an analyzer error still runs / propagates exactly as before:
+	// caching only skips a redundant analyzer run, never changes a verdict.
+	fingerprint := c.cacheFingerprint(ctx, targetRef, allSymbols)
+	var analysis *reachability.Analysis
+	if fingerprint != "" {
+		if cached, hit, cerr := c.cache.Get(ctx, fingerprint); cerr == nil && hit && cached != nil {
+			analysis = cached
+		}
 	}
-	if analysis == nil { // defensive: a contract-violating analyzer returning (nil,nil) is no-coverage, not a deref
-		return 0, fmt.Errorf("%w: reachability analysis returned no result", shared.ErrValidation)
+	if analysis == nil {
+		a, err := c.analyzer.Analyze(ctx, targetRef, allSymbols)
+		if err != nil {
+			return 0, fmt.Errorf("reachability analysis (no coverage – prior tier stands): %w", err)
+		}
+		if a == nil { // defensive: a contract-violating analyzer returning (nil,nil) is no-coverage, not a deref
+			return 0, fmt.Errorf("%w: reachability analysis returned no result", shared.ErrValidation)
+		}
+		analysis = a
+		if fingerprint != "" { // cache only a real result under a Complete() key
+			_ = c.cache.Put(ctx, fingerprint, analysis)
+		}
 	}
 	reachableBy := map[string]reachability.Result{}
 	for _, r := range analysis.Results {
@@ -321,6 +364,33 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, target
 		minted++
 	}
 	return minted, nil
+}
+
+// cacheFingerprint returns the content-addressed cache key for this run, or "" when caching must be skipped
+// (no cache/fingerprinter wired, the fingerprinter failed, or a verdict-affecting input is unbound). "" is
+// the single signal the read-through uses to disable BOTH Get and Put, so an incomplete key can never read
+// or write a cached verdict. The fingerprinter runs once per Record on targetRef, binding the per-target
+// source hash and environment; the analyzer + coverage-model versions are the coordinator's static inputs.
+func (c *Coordinator) cacheFingerprint(ctx context.Context, targetRef string, allSymbols []string) string {
+	if c.cache == nil || c.fingerprinter == nil {
+		return ""
+	}
+	sourceHash, envFingerprint, err := c.fingerprinter.FingerprintSource(ctx, targetRef)
+	if err != nil {
+		return "" // could not trust the inputs -> recompute rather than risk a stale key
+	}
+	key := CacheKey{
+		SourceHash:      sourceHash,
+		Symbols:         allSymbols,
+		Tier:            c.tier,
+		AnalyzerVersion: c.analyzerVersion,
+		CoverageModel:   c.coverageModel,
+		EnvFingerprint:  envFingerprint,
+	}
+	if !key.Complete() {
+		return ""
+	}
+	return key.Fingerprint()
 }
 
 // deterministicClaimConfidence is the claim's OWN self-reported confidence for a deterministic result:
