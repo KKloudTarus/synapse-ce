@@ -44,3 +44,23 @@ func rangesFor(targets []string, byTarget map[string]string) map[string]string {
 	}
 	return out
 }
+
+// stripInlineComment truncates a line at the first '#' that is not inside a double-quoted string, removing a
+// trailing TOML/YAML/Elixir line comment. Without this, a comment's tokens (a dependency-shaped tuple, a
+// quoted name in a `deps` array, a version range) would be parsed as data and fabricate an edge — a
+// violation of the no-fabricated-data bar. It understands only double-quoted strings (the quoting these
+// hand-scanned formats use for the values in question); a '#' inside such a string is preserved.
+func stripInlineComment(line string) string {
+	inStr := false
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '"':
+			inStr = !inStr
+		case '#':
+			if !inStr {
+				return line[:i]
+			}
+		}
+	}
+	return line
+}

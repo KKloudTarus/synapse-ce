@@ -23,7 +23,8 @@ import (
 
 const (
 	// ownsbomVersion identifies this producer in SBOM provenance. Bump when parser behavior changes.
-	ownsbomVersion = "ownsbom/0.7.0"
+	// 0.8.0: Composer/Mix/Julia/renv/Dart now emit dependency edges (EPIC #1034, #1036).
+	ownsbomVersion = "ownsbom/0.8.0"
 	// maxManifestBytes caps a single manifest read so a hostile/corrupt repo cannot OOM the scan with an
 	// absurd file. Real manifests are KB–low-MB; exceeding this is malicious or wrong, so it fails loud.
 	maxManifestBytes = 64 << 20
