@@ -92,6 +92,38 @@ func TestTier2AnswerabilityRequiresEverySymbolForANegative(t *testing.T) {
 	}
 }
 
+// TestTier2EveryDynamicDispatchConstructForcesRaiseOnly is the #1058 hard-bar guard for Python: a symbol
+// that the graph does not statically reach must NOT be answerable-as-negative when ANY dynamic-dispatch
+// construct left a coverage gap, because that construct could reach it out of view. Each gap kind the
+// extractor emits for getattr/setattr, importlib, a decorator, import *, eval/exec, or a parse recovery
+// must independently drop the negative to raise-only.
+func TestTier2EveryDynamicDispatchConstructForcesRaiseOnly(t *testing.T) {
+	for _, gap := range []pythonprogram.GapKind{
+		pythonprogram.GapDynamicAttribute,
+		pythonprogram.GapDynamicImport,
+		pythonprogram.GapDynamicExecution,
+		pythonprogram.GapUnsupportedDecorator,
+		pythonprogram.GapWildcardImport,
+		pythonprogram.GapParseRecovery,
+	} {
+		t.Run(string(gap), func(t *testing.T) {
+			document := pythonTier2Fixture(false)
+			document.CoverageGaps = []pythonprogram.CoverageGap{{Kind: gap, SymbolID: "python:app.api:<module>", Detail: "x", Pos: pythonprogram.Position{File: "app/api.py", Line: 9}}}
+			analyzer, _ := NewTier2Analyzer(&fakePythonFactsProvider{document: document, available: true})
+			negative := mustPythonSubject(t, "requests.sessions.safe") // placeable, but never statically reached
+			answerable, err := analyzer.answerableSubjects(context.Background(), "/workspace", []ports.ReachabilitySubject{
+				{FindingID: "finding", Symbols: []string{negative}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(answerable) != 0 {
+				t.Fatalf("gap %q must force raise-only (drop the negative), got answerable=%+v", gap, answerable)
+			}
+		})
+	}
+}
+
 func TestTier2AnalyzerUnavailableIsNoCoverage(t *testing.T) {
 	analyzer, _ := NewTier2Analyzer(&fakePythonFactsProvider{})
 	if _, err := analyzer.Analyze(context.Background(), "/workspace", []string{mustPythonSubject(t, "requests.get")}); err == nil {
