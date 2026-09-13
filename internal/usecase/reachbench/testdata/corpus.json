@@ -1,0 +1,8 @@
+[
+  {"id": "go-reach-sql", "language": "go", "symbol": "github.com/vuln/lib.Query", "want": "reachable"},
+  {"id": "go-unreach-dead", "language": "go", "symbol": "github.com/vuln/lib.Unused", "want": "not_reachable"},
+  {"id": "py-reach-deserialize", "language": "python", "symbol": "vulnpkg.mod.loads", "want": "reachable"},
+  {"id": "py-unreach-dead", "language": "python", "symbol": "vulnpkg.mod.dead", "want": "not_reachable"},
+  {"id": "js-reach-proto", "language": "javascript", "symbol": "vulnpkg/index.merge", "want": "reachable"},
+  {"id": "js-unreach-dead", "language": "javascript", "symbol": "vulnpkg/index.unused", "want": "not_reachable"}
+]
