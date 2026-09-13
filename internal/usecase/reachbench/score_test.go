@@ -184,3 +184,32 @@ func TestOwnedBeatsSemgrepPrecisionOnPythonCorpus(t *testing.T) {
 		t.Fatal("Semgrep must over-report at least one unreached Python case (its recorded limitation)")
 	}
 }
+
+func TestCheckBaselineExpectationFailsClosed(t *testing.T) {
+	exp, ok := ExpectedBaseline("semgrep-ce", "python")
+	if !ok || exp.Cases != 9 || exp.PositiveProduced != 9 || exp.FalsePositiveRise != 4 {
+		t.Fatalf("pinned semgrep python expectation = %+v ok=%v", exp, ok)
+	}
+	good := Report{Languages: []LanguageScore{{Language: "python", Cases: 9, PositiveExpected: 5, PositiveFound: 5, PositiveProduced: 9, FalsePositiveRise: 4}}}
+	if breaches := CheckBaselineExpectation(good, "semgrep-ce", "python"); len(breaches) != 0 {
+		t.Fatalf("exact match must have no breaches, got %v", breaches)
+	}
+	// A weakened baseline (fewer matches) breaches the pinned scorecard.
+	weak := Report{Languages: []LanguageScore{{Language: "python", Cases: 9, PositiveExpected: 5, PositiveFound: 5, PositiveProduced: 5, FalsePositiveRise: 0}}}
+	if breaches := CheckBaselineExpectation(weak, "semgrep-ce", "python"); len(breaches) == 0 {
+		t.Fatal("a weakened baseline must breach the pinned scorecard")
+	}
+	// A shrunk denominator breaches.
+	shrunk := Report{Languages: []LanguageScore{{Language: "python", Cases: 6, PositiveExpected: 5, PositiveFound: 5, PositiveProduced: 9, FalsePositiveRise: 4}}}
+	if breaches := CheckBaselineExpectation(shrunk, "semgrep-ce", "python"); len(breaches) == 0 {
+		t.Fatal("a shrunk denominator must breach the pinned scorecard")
+	}
+	// Unpinned tool fails closed.
+	if breaches := CheckBaselineExpectation(good, "mystery", "python"); len(breaches) != 1 || !strings.Contains(breaches[0], "no pinned") {
+		t.Fatalf("unpinned tool must fail closed, got %v", breaches)
+	}
+	// A report missing the language fails closed.
+	if breaches := CheckBaselineExpectation(Report{Languages: []LanguageScore{{Language: "go"}}}, "semgrep-ce", "python"); len(breaches) != 1 || !strings.Contains(breaches[0], "no python language score") {
+		t.Fatalf("missing language must fail closed, got %v", breaches)
+	}
+}

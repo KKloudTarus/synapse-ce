@@ -83,6 +83,13 @@ func TestPythonReachabilityCorpus(t *testing.T) {
 	if len(pyCases) == 0 {
 		t.Fatal("reachability corpus must retain at least one Python fixture")
 	}
+	// Pin the Python denominator. A PR that removes a Python case, or relabels a hard one away from
+	// "python", would shrink this subset; the owned and baseline reports would then share the reduced digest
+	// and parity would pass on an easier corpus. Changing this count is a reviewed ratchet update.
+	const expectedPythonCases = 9
+	if len(pyCases) != expectedPythonCases {
+		t.Fatalf("Python corpus has %d cases, expected %d; update the ratchet only with reviewed corpus changes", len(pyCases), expectedPythonCases)
+	}
 	corpus.Cases = pyCases
 
 	svc, err := reachability.NewService(pythonReachBuilder{})
@@ -143,11 +150,18 @@ func TestPythonReachabilityCorpus(t *testing.T) {
 	// analysis). The owned engine must match or beat every baseline's positive-reachability recall AND
 	// precision on the SAME language subset, so a CE tool that flags a vulnerable call site it cannot prove
 	// reachable never quietly outscores the owned engine.
-	for _, path := range strings.Split(os.Getenv("SYNAPSE_REACHBENCH_BASELINE_REPORTS"), ",") {
-		path = strings.TrimSpace(path)
-		if path == "" {
+	for _, entry := range strings.Split(os.Getenv("SYNAPSE_REACHBENCH_BASELINE_REPORTS"), ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
 			continue
 		}
+		// Each entry is "tool=path" (e.g. semgrep-ce=/tmp/.../semgrep-ce.py.json), so the freshly reduced
+		// report can be held to that tool's pinned expectation before parity.
+		tool, path, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(tool) == "" || strings.TrimSpace(path) == "" {
+			t.Fatalf("baseline report entry %q must be tool=path", entry)
+		}
+		tool, path = strings.TrimSpace(tool), strings.TrimSpace(path)
 		file, err := os.Open(path)
 		if err != nil {
 			t.Fatalf("open reachability baseline report %q: %v", path, err)
@@ -157,14 +171,11 @@ func TestPythonReachabilityCorpus(t *testing.T) {
 		if loadErr != nil {
 			t.Fatalf("load reachability baseline report %q: %v", path, loadErr)
 		}
-		// Non-triviality floor: a baseline that detected NOTHING on the corpus (the OSS tool did not run, its
-		// rule failed to load, or a fixture edit removed the sink) reduces to recall 0 that the owned engine
-		// beats vacuously. Require every gated baseline to have produced at least one positive on this
-		// language, so a silently-degraded head-to-head fails loudly instead of recording a hollow win.
-		for _, bs := range baseline.Languages {
-			if bs.Language == "python" && bs.PositiveProduced == 0 {
-				t.Fatalf("baseline %q recorded zero positive detections on the Python corpus; the OSS tool did not run or matched nothing, so the head-to-head would be vacuous", path)
-			}
+		// Hold the baseline to its EXACT pinned scorecard, so a silently-degraded OSS run (empty or weakened
+		// results while still exiting 0/1) or a corpus edit changes the integers and fails here instead of
+		// recording a hollow win. Fails closed on an unpinned tool.
+		if breaches := reachbench.CheckBaselineExpectation(baseline, tool, "python"); len(breaches) > 0 {
+			t.Fatalf("%s baseline did not reproduce its pinned Python scorecard: %v", tool, breaches)
 		}
 		if breaches := reachbench.CheckBaselineParity(report, baseline); len(breaches) > 0 {
 			t.Fatalf("owned Python reachability is below baseline %q: %v", path, breaches)

@@ -68,7 +68,7 @@ jobs:
       - name: Gate owned engine recall and parity
         env:
           SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ runner.temp }}/reachbench/synapse-owned.json
-          SYNAPSE_REACHBENCH_BASELINE_REPORTS: ${{ runner.temp }}/reachbench/osv-scanner.json,${{ runner.temp }}/reachbench/semgrep-ce.json
+          SYNAPSE_REACHBENCH_BASELINE_REPORTS: osv-scanner=${{ runner.temp }}/reachbench/osv-scanner.json,semgrep-ce=${{ runner.temp }}/reachbench/semgrep-ce.json
         run: go test -count=1 -v -run TestGoReachabilityCorpus ./internal/infrastructure/tools/ssacallgraph
 
       - name: Upload raw evidence and scorecards
@@ -83,7 +83,7 @@ jobs:
     name: Python corpus vs Semgrep CE
     runs-on: ubuntu-latest
     env:
-      # OSV-Scanner call analysis is Go-only (it drives govulncheck), so there is no OSV Python baseline; the
+      # OSV-Scanner has no Python call-analysis baseline (its call analysis covers Go and Rust), so the
       # Python head-to-head is against Semgrep CE, whose pattern rule proves a dangerous-sink call site but
       # not its entrypoint reachability. The owned engine must match or beat its recall AND precision.
       SEMGREP_VERSION: 1.176.0
@@ -124,7 +124,7 @@ jobs:
           # The owned Python reachability engine uses cgo tree-sitter, so the corpus gate runs with CGO enabled.
           CGO_ENABLED: '1'
           SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ runner.temp }}/reachbench/synapse-owned.py.json
-          SYNAPSE_REACHBENCH_BASELINE_REPORTS: ${{ runner.temp }}/reachbench/semgrep-ce.py.json
+          SYNAPSE_REACHBENCH_BASELINE_REPORTS: semgrep-ce=${{ runner.temp }}/reachbench/semgrep-ce.py.json
         run: go test -count=1 -v -run TestPythonReachabilityCorpus ./internal/infrastructure/tools/astwalk
 
       - name: Upload raw evidence and scorecards
