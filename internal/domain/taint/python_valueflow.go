@@ -156,7 +156,6 @@ func BuildPythonValueGraph(document pythonprogram.Document, resolution pythonpro
 		returns: map[string][]string{}, calls: map[string]pythonprogram.ResolvedCall{},
 		flows: map[string]bool{}, sources: map[string]TypedValueSource{}, sinks: map[string]TypedValueSink{},
 		sanitizers: map[string]TypedSanitizer{}, positions: map[string]pythonprogram.Position{},
-		paramShadows: map[string]map[string]bool{},
 	}
 	b.index()
 	b.addSyntaxFlows()
@@ -182,28 +181,13 @@ type pythonValueBuilder struct {
 	sanitizers  map[string]TypedSanitizer
 	positions   map[string]pythonprogram.Position
 	refinable   map[string]bool
-	// paramShadows[scopeID][name] marks a name bound as a PARAMETER of that scope. A parameter is
-	// unambiguously local and bound at function entry, so a bare call to that name invokes the parameter, not
-	// an import of the same name the resolver may have matched. It is used to suppress a SANITIZER wall on
-	// such a call (raise-only: an uncertain wall would hide a real vulnerability), while sinks/sources keep
-	// firing (over-reporting on a shadowed name is the safe direction).
-	paramShadows map[string]map[string]bool
-	truncated    bool
+	truncated   bool
 }
 
 func (b *pythonValueBuilder) index() {
 	for _, symbol := range b.document.Symbols {
 		b.symbols[symbol.ID] = symbol
 		b.parents[symbol.ID] = symbol.ParentID
-		for _, param := range symbol.Parameters {
-			if param.Name == "" {
-				continue
-			}
-			if b.paramShadows[symbol.ID] == nil {
-				b.paramShadows[symbol.ID] = map[string]bool{}
-			}
-			b.paramShadows[symbol.ID][param.Name] = true
-		}
 	}
 	b.refinable = b.refinableContainers()
 	for _, value := range b.document.Values {
@@ -444,17 +428,17 @@ func (b *pythonValueBuilder) modelCalls() {
 				b.addFlow(call.ReceiverValueID, sinkID)
 			}
 		}
-		calleeShadowed := b.calleeShadowedByParam(call)
+		calleeShadowed := b.calleeShadowedByLocal(call)
 		for _, model := range b.catalog.Sanitizers {
 			if !callMatches(model.Pattern, candidates, raw) || call.ResultID == "" {
 				continue
 			}
 			if calleeShadowed {
-				// A parameter of the same name shadows the sanitizer the resolver matched: the call invokes the
-				// parameter (an arbitrary caller-supplied callable), not the modeled escaper. Walling here would
-				// neutralize a flow that is not actually sanitized, hiding a real vulnerability (#1089, #1-bar).
-				// Skip the wall; the call then widens via the fallback below (taint survives). Sinks/sources are
-				// left to fire above, because over-reporting on a shadowed name is the safe direction.
+				// A local binding of the same name (a parameter or an assignment) shadows the sanitizer the
+				// resolver matched: the call invokes that local, not necessarily the modeled escaper. Walling
+				// here could neutralize a flow that is not actually sanitized, hiding a real vulnerability
+				// (#1089, #1-bar). Skip the wall; the call then widens via the fallback below (taint survives).
+				// Sinks/sources are left to fire above, because over-reporting on a shadowed name is safe.
 				continue
 			}
 			matchedRole = true
@@ -609,17 +593,32 @@ func (b *pythonValueBuilder) addSource(valueID string, class TaintClass, pos pyt
 	b.sources[key] = TypedValueSource{ValueID: valueID, Class: class, Pos: pos}
 }
 
-// calleeShadowedByParam reports whether a bare-name call resolves to a PARAMETER of an enclosing scope. Python
-// binds a parameter at function entry, so at the call site the name is the parameter, never an import of the
-// same name the resolver may have matched. Only a single-segment name reference can be a parameter shadow; a
-// dotted attribute (html.escape) never is.
-func (b *pythonValueBuilder) calleeShadowedByParam(call pythonprogram.Call) bool {
+// calleeShadowedByLocal reports whether a bare-name call resolves to a LOCAL binding (a parameter or an
+// assignment) of an enclosing scope, rather than to the import of the same name the resolver matched. Only a
+// single-segment name reference can be a local shadow; a dotted attribute (html.escape) never is.
+//
+// It is used ONLY to suppress a SANITIZER wall on such a call (#1089). That suppression is always the safe
+// direction: if the local really is the imported escaper (e.g. `escape = html.escape`), skipping the wall
+// merely over-reports; if it is an arbitrary local, skipping the wall correctly reports the un-neutralized
+// flow. Because it never touches sink/source resolution, extending the check from parameters to local
+// assignments needs no `global`/`nonlocal` tracking: at worst it over-reports, it can never hide a flow.
+func (b *pythonValueBuilder) calleeShadowedByLocal(call pythonprogram.Call) bool {
 	if call.Callee.Kind != pythonprogram.ReferenceName || len(call.Callee.Segments) != 1 {
 		return false
 	}
 	name := call.Callee.Segments[0]
 	for _, scope := range b.scopeChain(call.CallerID) {
-		if b.paramShadows[scope][name] {
+		if len(b.definitions[scope][name]) == 0 {
+			continue
+		}
+		// Only a FUNCTION-like scope's binding shadows: a parameter or an assignment inside a function/method/
+		// lambda is a local the bare call resolves to instead of a module import. A binding at MODULE scope is
+		// not a shadow (a module-level `escape = ...` after `from x import escape` is a position-dependent
+		// rebind, and the call may invoke the import; keeping the wall avoids a false positive). A CLASS-scope
+		// binding is not a shadow either: a bare name in a method body does not resolve through the class
+		// namespace in Python (that needs `self.`), so a class attribute named `escape` never shadows it.
+		switch b.symbols[scope].Kind {
+		case pythonprogram.SymbolFunction, pythonprogram.SymbolMethod, pythonprogram.SymbolLambda:
 			return true
 		}
 	}

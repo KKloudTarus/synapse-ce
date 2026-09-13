@@ -106,12 +106,12 @@ func TestPythonCrossFileInterprocedural(t *testing.T) {
 	}
 }
 
-// TestPythonShadowedSanitizerImportNotWalled is the #1-bar guard for #1089: when a PARAMETER shadows an
-// imported sanitizer name, the taint engine must NOT apply the sanitizer wall to that call. Otherwise a
-// parameter named `escape` is walled as if it were the real HTML escaper, hiding a real XSS. A parameter is
-// unambiguously local (never `global`/`nonlocal`) and bound at function entry, so at the call site the name is
-// the parameter, not the import. The suppression is scoped to sanitizers only: sinks/sources keep firing on a
-// shadowed name (over-reporting is the safe direction), and a same-scope import (no parameter) still walls.
+// TestPythonShadowedSanitizerImportNotWalled is the #1-bar guard for #1089: when a FUNCTION-LOCAL binding (a
+// parameter or an assignment) shadows an imported sanitizer name, the taint engine must NOT apply the
+// sanitizer wall to that call. Otherwise a local named `escape` is walled as if it were the real HTML escaper,
+// hiding a real XSS. The suppression is scoped to sanitizers only, so it can only over-report, never touch
+// sink/source resolution (which is why local-assignment shadowing needs no `global`/`nonlocal` tracking). A
+// MODULE-level rebind is left alone (position-dependent, keeping the wall avoids a false positive).
 func TestPythonShadowedSanitizerImportNotWalled(t *testing.T) {
 	detect := func(t *testing.T, src string) []string {
 		t.Helper()
@@ -154,13 +154,20 @@ func TestPythonShadowedSanitizerImportNotWalled(t *testing.T) {
 		t.Errorf("a parameter shadowing the imported escaper must not wall XSS (CWE-79), got %v", cwes)
 	}
 
-	// A module-level reassignment of the imported name is NOT a parameter shadow, so the wall still applies
-	// (the skip is scoped to parameters only; a same-scope rebind is position-dependent and left alone). The
-	// escaper neutralizes the flow.
+	// A FUNCTION-LOCAL assignment named `escape` also shadows the import: inside f, `escape` is the local, so
+	// the wall must not fire (it is not provably the real escaper).
+	localAssign := "from flask import render_template_string\n" +
+		"def f(user_fn):\n    escape = user_fn\n    x = input()\n    render_template_string(escape(x))\n"
+	if cwes := detect(t, localAssign); !has(cwes, "CWE-79") {
+		t.Errorf("a function-local assignment shadowing the escaper must not wall XSS (CWE-79), got %v", cwes)
+	}
+
+	// A MODULE-level reassignment of the imported name is NOT a shadow: a same-scope `escape = ...` after the
+	// import is a position-dependent rebind, so keeping the wall avoids a false positive. The escaper stands.
 	moduleRebind := "from flask import escape, render_template_string\n" +
 		"x = input()\nrender_template_string(escape(x))\nescape = None\n"
 	if cwes := detect(t, moduleRebind); has(cwes, "CWE-79") {
-		t.Errorf("a module-level rebind (not a parameter) must not disable the escaper wall, got %v", cwes)
+		t.Errorf("a module-level rebind (not a function-local shadow) must not disable the escaper wall, got %v", cwes)
 	}
 
 	// Control: with no shadow, the real imported escaper still neutralizes the XSS (the fix must not break the
