@@ -68,3 +68,64 @@ func TestPythonBuiltinSourceSinkResolution(t *testing.T) {
 		t.Errorf("a locally-defined eval() must not be treated as the builtin sink, got %v", cwes)
 	}
 }
+
+// TestPythonFrameworkEscapersSanitizeXSS proves the #1039 Django/Flask HTML escapers neutralize the XSS class
+// (and only that class) end to end through the real extractor + engine.
+func TestPythonFrameworkEscapersSanitizeXSS(t *testing.T) {
+	detect := func(t *testing.T, src string) []string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "m.py"), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		doc, err := PythonFactsFor(context.Background(), dir)
+		if err != nil {
+			t.Fatalf("facts: %v", err)
+		}
+		res, err := pythonprogram.Resolve(doc)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		g, err := taint.BuildPythonValueGraph(doc, res, taint.DefaultPythonCatalog())
+		if err != nil {
+			t.Fatalf("graph: %v", err)
+		}
+		var cwes []string
+		for _, p := range g.Vulnerabilities() {
+			cwes = append(cwes, p.CWE)
+		}
+		return cwes
+	}
+	has := func(cwes []string, want string) bool {
+		for _, c := range cwes {
+			if c == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Baseline: an unsanitized tainted value into render_template_string is XSS (CWE-79).
+	baseline := "from flask import render_template_string\ndef f():\n    x = input()\n    render_template_string(x)\n"
+	if cwes := detect(t, baseline); !has(cwes, "CWE-79") {
+		t.Fatalf("baseline unsanitized flow must report XSS (CWE-79), got %v", cwes)
+	}
+
+	// Django escape neutralizes the XSS flow.
+	django := "from django.utils.html import escape\nfrom flask import render_template_string\ndef f():\n    x = input()\n    render_template_string(escape(x))\n"
+	if cwes := detect(t, django); has(cwes, "CWE-79") {
+		t.Errorf("django.utils.html.escape must neutralize XSS, got %v", cwes)
+	}
+
+	// Flask escape neutralizes the XSS flow.
+	flaskEsc := "from flask import escape, render_template_string\ndef f():\n    x = input()\n    render_template_string(escape(x))\n"
+	if cwes := detect(t, flaskEsc); has(cwes, "CWE-79") {
+		t.Errorf("flask.escape must neutralize XSS, got %v", cwes)
+	}
+
+	// Cross-class: an HTML escaper must NOT neutralize command injection (CWE-78).
+	cross := "import os\nfrom django.utils.html import escape\ndef f():\n    x = input()\n    os.system(escape(x))\n"
+	if cwes := detect(t, cross); !has(cwes, "CWE-78") {
+		t.Errorf("an HTML escaper must not suppress command injection (CWE-78), got %v", cwes)
+	}
+}

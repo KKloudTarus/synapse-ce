@@ -126,8 +126,8 @@ func TestJsTaintSanitizedTwin(t *testing.T) {
 			clean: "js-taint-xss",
 		},
 		{
-			name: "xss_encodeuricomponent_global",
-			body: "app.get('/x', (req, res) => { res.send(encodeURIComponent(req.query.m)); });\n",
+			name:  "xss_encodeuricomponent_global",
+			body:  "app.get('/x', (req, res) => { res.send(encodeURIComponent(req.query.m)); });\n",
 			clean: "js-taint-xss",
 		},
 		{
@@ -154,6 +154,26 @@ func TestJsTaintSanitizedTwin(t *testing.T) {
 			rules := jsTaintRules(t, map[string]string{"app.js": tc.body})
 			if rules[tc.clean] {
 				t.Fatalf("sanitized flow still reported %q: %v", tc.clean, jsRuleList(rules))
+			}
+		})
+	}
+}
+
+// TestJsTaintConfigurableSanitizersNotWalled pins the #1039 reviewed decision: a CONFIGURABLE HTML sanitizer
+// (DOMPurify.sanitize, sanitize-html, js-xss) is NOT modeled as an unconditional XSS wall, because its safety
+// depends on version/config (bypass history, permissive allow-lists, non-HTML output contexts). Walling it
+// would risk a false negative, so the flow through it must STILL report XSS.
+func TestJsTaintConfigurableSanitizersNotWalled(t *testing.T) {
+	cases := map[string]string{
+		"dompurify":     "const DOMPurify = require('dompurify');\napp.get('/x', (req, res) => { res.send(DOMPurify.sanitize(req.query.m)); });\n",
+		"sanitize_html": "const sanitizeHtml = require('sanitize-html');\napp.get('/x', (req, res) => { res.send(sanitizeHtml(req.query.m)); });\n",
+		"js_xss":        "const xss = require('xss');\napp.get('/x', (req, res) => { res.send(xss.filterXSS(req.query.m)); });\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			rules := jsTaintRules(t, map[string]string{"app.js": body})
+			if !rules["js-taint-xss"] {
+				t.Fatalf("a configurable HTML sanitizer must NOT be walled (would risk a false negative): %v", jsRuleList(rules))
 			}
 		})
 	}
