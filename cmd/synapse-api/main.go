@@ -3045,6 +3045,27 @@ func main() {
 			scaService.SetJSSymbolReachability(jsSymbolRecorder.WithRaiseOnly())
 			log.Info("javascript TIER-2 affected-export reachability ENABLED (raise-only: prioritises a reached export, never suppresses; set SYNAPSE_JSREACH_TIER2_ENABLED for not-reachable proofs)")
 		}
+
+		// Interprocedural Tier-2 (#1058): the jsprogram call graph proves an affected npm export REACHED
+		// through first-party CALL chains (a call-path proof), recovering a reachable verdict the lexical
+		// Tier-2 leaves opaque (a whole-module binding that escapes into a reached function). It is RAISE-ONLY
+		// (JS default per #1058): it only ADDS a reached-export judgment and never a not-reachable one, so a
+		// proven call path is sound without the resolver's Complete flag, and it can never suppress a finding.
+		// It reads the same synapse-ast facts the JS taint engine uses (sandboxed when configured) and
+		// composes alongside the lexical recorders through the multi-recorder pass.
+		jsFactsProvider := asttool.New(cfg.ASTBin)
+		if scaSandbox != nil {
+			jsFactsProvider = jsFactsProvider.WithRunner(scaSandbox)
+		} else {
+			log.Warn("javascript interprocedural tier-2: synapse-ast runs unsandboxed (dev only); target code is parsed but never executed")
+		}
+		jsInterproc, ierr := jsreach.NewInterprocRecorder(jsFactsProvider, judgmentSvc, auditLog, clock)
+		if ierr != nil {
+			log.Error("javascript interprocedural reachability init failed", "err", ierr)
+			os.Exit(1)
+		}
+		scaService.AddReachabilityRecorder(jsInterproc)
+		log.Info("javascript INTERPROCEDURAL tier-2 reachability ENABLED (call-graph proof of a reached affected export via first-party wrappers; raise-only, complements the lexical tier-2)")
 	} else if cfg.JSSymbolReachabilityEnabled {
 		log.Warn("SYNAPSE_JSREACH_TIER2_ENABLED is set but tier-1 javascript reachability is off - tier-2 is SKIPPED, because a tier-2 refusal is only safe when a tier-1 judgment can stand in its place")
 	}

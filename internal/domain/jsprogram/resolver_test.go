@@ -211,6 +211,68 @@ func TestResolveThirdPartyCallIsExternalLeafNotGap(t *testing.T) {
 	if !res.Complete {
 		t.Fatalf("a resolved third-party external call must not defeat Complete, gaps=%v", res.Gaps)
 	}
+	// The external call now carries a canonical leaf node so a consumer can ask whether first-party code
+	// reaches a call into the package. The call is at module top level (an entrypoint), so it is reached.
+	if !res.Graph.Reaches(ExternalSymbolID("axios", "default.get")) {
+		t.Errorf("a first-party call into a third-party package must reach its external node")
+	}
+	// The external node is a leaf in edges, never a first-party Positions entry.
+	if _, ok := res.Graph.Positions[ExternalSymbolID("axios", "default.get")]; ok {
+		t.Errorf("an external node must not appear in Positions (first-party namespace only)")
+	}
+}
+
+func TestResolveExternalImportReachabilityByKind(t *testing.T) {
+	// A named and a namespace/require third-party import each resolve their call into a distinct external
+	// node under the package specifier, reachable when the calling first-party code is reached.
+	t.Run("named", func(t *testing.T) {
+		b := newDoc()
+		appMod := b.module("app")
+		b.imp("app", appMod, ImportNamed, "lodash", "template", "")
+		b.call("app", appMod, name("template"), false)
+		res := resolveOrFatal(t, b)
+		if !res.Complete {
+			t.Fatalf("named third-party import call must stay complete, gaps=%v", res.Gaps)
+		}
+		if !res.Graph.Reaches(ExternalSymbolID("lodash", "template")) {
+			t.Errorf("a reached call to a named third-party export must reach jsnpm:lodash:template")
+		}
+	})
+	t.Run("namespace member", func(t *testing.T) {
+		b := newDoc()
+		appMod := b.module("app")
+		b.imp("app", appMod, ImportNamespace, "lodash", "", "_")
+		b.call("app", appMod, attr("_", "merge"), false)
+		res := resolveOrFatal(t, b)
+		if !res.Complete {
+			t.Fatalf("namespace third-party member call must stay complete, gaps=%v", res.Gaps)
+		}
+		if !res.Graph.Reaches(ExternalSymbolID("lodash", "merge")) {
+			t.Errorf("a reached namespace member call must reach jsnpm:lodash:merge")
+		}
+	})
+	t.Run("destructured require", func(t *testing.T) {
+		// const { template } = require('lodash'); template() — the extractor emits ImportRequire carrying the
+		// binding name, so a bare call must still resolve to a named external export, not be dropped.
+		b := newDoc()
+		appMod := b.module("app")
+		b.imp("app", appMod, ImportRequire, "lodash", "template", "template")
+		b.call("app", appMod, name("template"), false)
+		res := resolveOrFatal(t, b)
+		if !res.Graph.Reaches(ExternalSymbolID("lodash", "template")) {
+			t.Errorf("a destructured require call must reach jsnpm:lodash:template")
+		}
+	})
+	t.Run("uncalled import is not reached", func(t *testing.T) {
+		b := newDoc()
+		appMod := b.module("app")
+		b.imp("app", appMod, ImportNamed, "lodash", "template", "")
+		// imported but never called: no external node reached (import != reach).
+		res := resolveOrFatal(t, b)
+		if res.Graph.Reaches(ExternalSymbolID("lodash", "template")) {
+			t.Errorf("an imported-but-uncalled third-party export must not be reachable")
+		}
+	})
 }
 
 func TestResolveUnresolvedCallDefeatsComplete(t *testing.T) {
