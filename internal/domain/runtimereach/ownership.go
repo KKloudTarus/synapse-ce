@@ -21,8 +21,8 @@ import (
 // Two versions of the same library are two distinct PackageRefs, which is what lets a load of one version
 // raise only that version's finding.
 type PackageRef struct {
-	Name    string
-	Version string
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // IsZero reports whether the reference names no package.
@@ -34,8 +34,8 @@ func (p PackageRef) IsZero() bool {
 // on a running host, so it disambiguates a path that several packages claim and it survives a symlink (the
 // resolved target carries the real device+inode). A zero FileID means the identity was not observed.
 type FileID struct {
-	Device uint64
-	Inode  uint64
+	Device uint64 `json:"device,omitempty"`
+	Inode  uint64 `json:"inode,omitempty"`
 }
 
 // Known reports whether both halves of the identity were observed.
@@ -44,14 +44,14 @@ func (f FileID) Known() bool { return f.Device != 0 && f.Inode != 0 }
 // OwnedFile is one file the package database attributes to a package, carrying its canonical install path
 // and, when the agent could stat it, its filesystem identity.
 type OwnedFile struct {
-	Path string
-	ID   FileID
+	Path string `json:"path"`
+	ID   FileID `json:"id,omitempty"`
 }
 
 // PackageFiles is the file set the package database attributes to one package.
 type PackageFiles struct {
-	Package PackageRef
-	Files   []OwnedFile
+	Package PackageRef  `json:"package"`
+	Files   []OwnedFile `json:"files"`
 }
 
 // MatchKind records HOW a load was attributed, for the sealed audit trail. A file-identity match is the
@@ -129,10 +129,10 @@ func NewOwnership(packages []PackageFiles) *Ownership {
 // symlink-resolved real path when the agent could read it, the loaded file's filesystem identity, and
 // whether the mapped file had been unlinked (the "(deleted)" case, where the path can no longer be trusted).
 type LoadEvent struct {
-	Path     string
-	RealPath string
-	ID       FileID
-	Deleted  bool
+	Path     string `json:"path"`
+	RealPath string `json:"real_path,omitempty"`
+	ID       FileID `json:"id,omitempty"`
+	Deleted  bool   `json:"deleted,omitempty"`
 }
 
 // Resolve attributes one load to the package that owns the loaded file, returning the package and how it

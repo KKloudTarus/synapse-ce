@@ -148,6 +148,13 @@ func (c *Coordinator) priorReachability(ctx context.Context, engagementID shared
 		if j.Capability != judgment.CapReachability || j.SubjectKind != judgment.SubjectFinding {
 			continue
 		}
+		if j.State != judgment.StateConfirmed {
+			// Only a CONFIRMED judgment stands. A proposed judgment is inert (a mint whose Verify never
+			// cleared, e.g. after a transient store error), and a refuted one did not clear the bar; treating
+			// either as a standing prior would let a failed mint permanently block the real raise, since a
+			// same-tier claim does not supersede it. Skipping it lets the next report re-mint and recover.
+			continue
+		}
 		rc, ok := j.Claim.(judgment.ReachabilityClaim)
 		if !ok {
 			continue

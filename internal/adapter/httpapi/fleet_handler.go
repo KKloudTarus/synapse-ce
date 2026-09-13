@@ -22,11 +22,13 @@ import (
 	dhi "github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/runtimereach"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/processreport"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/runtimeevidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 )
 
@@ -84,6 +86,14 @@ type fleetProcessReport interface {
 	Report(ctx context.Context, tenantID, agentID shared.ID, procs []processreport.Process, complete bool) (processreport.Result, error)
 }
 
+// fleetRuntimeEvidence ingests an enrolled agent's runtime-reachability evidence (observed shared-library
+// loads + the OS packages that own them) and joins it to the host's findings (EPIC #1042 #1060/#1061).
+// *runtimeevidence.Service satisfies it. The host asset is resolved server-side from the authenticated
+// agent, never the request body. nil means the runtime-evidence route is not served.
+type fleetRuntimeEvidence interface {
+	Ingest(ctx context.Context, tenantID, agentID shared.ID, report runtimereach.Report) (runtimeevidence.Result, error)
+}
+
 // fleetRolloutDecider answers what ONE agent is offered. It is the narrow slice of the rollout service
 // this transport needs; fleetrolloutuc.Service satisfies it.
 type fleetRolloutDecider interface {
@@ -103,6 +113,7 @@ type fleetRouter struct {
 	work              fleetWorkService
 	clusterInv        fleetClusterInventory              // optional; nil ⇒ cluster inventory ingest is not served
 	hostInv           fleetHostInventory                 // optional; nil ⇒ host inventory ingest is not served
+	runtimeEvidence   fleetRuntimeEvidence               // optional; nil ⇒ runtime-reachability evidence ingest is not served (#1060/#1061)
 	procReport        fleetProcessReport                 // optional; nil ⇒ agent process reporting is not served (#594 D input)
 	telemetry         fleetTelemetryIngest               // optional; nil ⇒ telemetry ingest is not served (A3 #624)
 	responseVerify    fleetResponseVerificationIngest    // optional; nil ⇒ response-verification ingest is not served
@@ -237,6 +248,14 @@ func (rt *Router) SetFleetClusterInventory(s fleetClusterInventory) {
 func (rt *Router) SetFleetHostInventory(s fleetHostInventory) {
 	if rt.fleet != nil {
 		rt.fleet.hostInv = s
+	}
+}
+
+// SetFleetRuntimeEvidence wires the agent-plane runtime-reachability evidence ingest (#1060/#1061). When
+// nil (or unset), POST /api/v1/fleet/inventory/runtime returns 404. It must be called after SetFleet.
+func (rt *Router) SetFleetRuntimeEvidence(s fleetRuntimeEvidence) {
+	if rt.fleet != nil {
+		rt.fleet.runtimeEvidence = s
 	}
 }
 
@@ -418,6 +437,8 @@ func fleetAgentPlaneRoutes() []fleetAgentPlaneRoute {
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.clusterInventory)) }},
 		{"POST /api/v1/fleet/inventory/host", "/api/v1/fleet/inventory/",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.hostInventory)) }},
+		{"POST /api/v1/fleet/inventory/runtime", "/api/v1/fleet/inventory/",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestRuntimeEvidence)) }},
 		{"POST /api/v1/fleet/processes", "/api/v1/fleet/processes",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.reportProcesses)) }},
 		{"POST /api/v1/fleet/telemetry", "/api/v1/fleet/telemetry",
@@ -906,6 +927,48 @@ func (f *fleetRouter) hostInventory(w http.ResponseWriter, r *http.Request) {
 		body["vulnerability_scan"] = res.VulnerabilityScan
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// runtimeEvidence ingests one agent's runtime-reachability evidence: the shared libraries it observed
+// loaded plus the OS packages that own them. The host asset is resolved server-side from the authenticated
+// agent, never the body, so an agent cannot report for a host it does not own. It is best-effort and
+// raise-only: it can only raise a finding whose vulnerable library actually loaded, never suppress one, and
+// a host whose first scan has not produced findings yet returns pending (nothing minted) rather than an
+// error.
+func (f *fleetRouter) ingestRuntimeEvidence(w http.ResponseWriter, r *http.Request) {
+	if f.runtimeEvidence == nil {
+		writeJSON(w, http.StatusNotFound, errorBody{Error: "runtime evidence ingest not enabled"})
+		return
+	}
+	agent, ok := agentFrom(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorBody{Error: "unauthenticated"})
+		return
+	}
+	var report runtimereach.Report
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetInventoryCap)).Decode(&report); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid runtime evidence body"})
+		return
+	}
+	res, err := f.runtimeEvidence.Ingest(r.Context(), agent.TenantID, agent.ID, report)
+	if err != nil {
+		writeError(w, f.log, err)
+		return
+	}
+	coverage := make([]string, 0, len(res.Coverage))
+	for _, c := range res.Coverage {
+		coverage = append(coverage, string(c))
+	}
+	if len(coverage) > 0 && f.log != nil {
+		// Record the host's runtime-evidence gap so an operator can see a host that reports no (or partial)
+		// runtime reachability. Coverage never suppresses a finding; this is honest observability.
+		f.log.Info("fleet runtime-reachability coverage gap",
+			"agent_id", agent.ID.String(), "asset_id", res.AssetID.String(), "coverage", coverage)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"asset_id": res.AssetID.String(), "engagement_id": res.EngagementID.String(),
+		"minted": res.Minted, "pending": res.Pending, "coverage": coverage,
+	})
 }
 
 // reportProcesses ingests one agent's running-process snapshot for the behavior baseline (#594 D). The
