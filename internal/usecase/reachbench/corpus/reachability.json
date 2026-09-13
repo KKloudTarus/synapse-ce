@@ -52,6 +52,20 @@
       "fixture": "py_unreached",
       "symbol": "python:app:_unused_admin_action",
       "expected": "present_unreached"
+    },
+    {
+      "name": "py_transitive_private_chain_reached",
+      "language": "python",
+      "fixture": "py_transitive_reached",
+      "symbol": "python:app:_step_two",
+      "expected": "reachable"
+    },
+    {
+      "name": "py_decorator_registered_unreached",
+      "language": "python",
+      "fixture": "py_dynamic_unreached",
+      "symbol": "python:app:_admin_wipe",
+      "expected": "present_unreached"
     }
   ]
 }
