@@ -65,63 +65,90 @@
       "language": "python",
       "fixture": "py_reached",
       "symbol": "python:app:_run_query",
-      "expected": "reachable"
+      "expected": "reachable",
+      "baseline": {
+        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_reached/app.py"}
+      }
     },
     {
       "name": "py_unreached_private_function",
       "language": "python",
       "fixture": "py_unreached",
       "symbol": "python:app:_unused_admin_action",
-      "expected": "present_unreached"
+      "expected": "present_unreached",
+      "baseline": {
+        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_unreached/app.py"}
+      }
     },
     {
       "name": "py_transitive_private_chain_reached",
       "language": "python",
       "fixture": "py_transitive_reached",
       "symbol": "python:app:_step_two",
-      "expected": "reachable"
+      "expected": "reachable",
+      "baseline": {
+        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_transitive_reached/app.py"}
+      }
     },
     {
       "name": "py_decorator_registered_unreached",
       "language": "python",
       "fixture": "py_dynamic_unreached",
       "symbol": "python:app:_admin_wipe",
-      "expected": "present_unreached"
+      "expected": "present_unreached",
+      "baseline": {
+        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_dynamic_unreached/app.py"}
+      }
     },
     {
       "name": "py_instance_method_reached",
       "language": "python",
       "fixture": "py_method_reached",
       "symbol": "python:app:Runner._do",
-      "expected": "reachable"
+      "expected": "reachable",
+      "baseline": {
+        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_method_reached/app.py"}
+      }
     },
     {
       "name": "py_instance_method_unreached",
       "language": "python",
       "fixture": "py_method_unreached",
       "symbol": "python:app:Service._unused",
-      "expected": "present_unreached"
+      "expected": "present_unreached",
+      "baseline": {
+        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_method_unreached/app.py"}
+      }
     },
     {
       "name": "py_cross_module_reached",
       "language": "python",
       "fixture": "py_crossmodule_reached",
       "symbol": "python:helper:_work",
-      "expected": "reachable"
+      "expected": "reachable",
+      "baseline": {
+        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_crossmodule_reached/helper.py"}
+      }
     },
     {
       "name": "py_cross_module_transitive_reached",
       "language": "python",
       "fixture": "py_crossmodule_transitive_reached",
       "symbol": "python:helper:_deep",
-      "expected": "reachable"
+      "expected": "reachable",
+      "baseline": {
+        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_crossmodule_transitive_reached/helper.py"}
+      }
     },
     {
       "name": "py_cross_module_imported_uncalled",
       "language": "python",
       "fixture": "py_crossmodule_imported_uncalled",
       "symbol": "python:helper:_work",
-      "expected": "present_unreached"
+      "expected": "present_unreached",
+      "baseline": {
+        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_crossmodule_imported_uncalled/helper.py"}
+      }
     }
   ]
 }

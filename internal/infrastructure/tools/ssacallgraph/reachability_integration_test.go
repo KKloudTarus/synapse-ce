@@ -71,6 +71,12 @@ func TestGoReachabilityCorpus(t *testing.T) {
 	if len(goCases) == 0 {
 		t.Fatal("reachability corpus must retain at least one Go fixture")
 	}
+	// Pin the Go denominator so a removed or relabelled case cannot shrink the corpus into an easier subset
+	// that the owned and baseline reports would both share. Changing this is a reviewed ratchet update.
+	const expectedGoCases = 7
+	if len(goCases) != expectedGoCases {
+		t.Fatalf("Go corpus has %d cases, expected %d; update the ratchet only with reviewed corpus changes", len(goCases), expectedGoCases)
+	}
 	corpus.Cases = goCases
 
 	svc, err := reachability.NewService(ownedReachBuilder{})
@@ -114,11 +120,18 @@ func TestGoReachabilityCorpus(t *testing.T) {
 			t.Fatalf("close owned reachability report: %v", err)
 		}
 	}
-	for _, path := range strings.Split(os.Getenv("SYNAPSE_REACHBENCH_BASELINE_REPORTS"), ",") {
-		path = strings.TrimSpace(path)
-		if path == "" {
+	for _, entry := range strings.Split(os.Getenv("SYNAPSE_REACHBENCH_BASELINE_REPORTS"), ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
 			continue
 		}
+		// Each entry is "tool=path" (osv-scanner=..., semgrep-ce=...), so the freshly reduced report can be
+		// held to that tool's pinned expectation before parity.
+		tool, path, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(tool) == "" || strings.TrimSpace(path) == "" {
+			t.Fatalf("baseline report entry %q must be tool=path", entry)
+		}
+		tool, path = strings.TrimSpace(tool), strings.TrimSpace(path)
 		file, err := os.Open(path)
 		if err != nil {
 			t.Fatalf("open reachability baseline report %q: %v", path, err)
@@ -127,6 +140,12 @@ func TestGoReachabilityCorpus(t *testing.T) {
 		_ = file.Close()
 		if loadErr != nil {
 			t.Fatalf("load reachability baseline report %q: %v", path, loadErr)
+		}
+		// Hold the baseline to its EXACT pinned scorecard, so a silently-degraded OSS run (empty or weakened
+		// results while still exiting 0/1) or a corpus edit changes the integers and fails here instead of
+		// recording a hollow win. Fails closed on an unpinned tool.
+		if breaches := reachbench.CheckBaselineExpectation(baseline, tool, "go"); len(breaches) > 0 {
+			t.Fatalf("%s baseline did not reproduce its pinned Go scorecard: %v", tool, breaches)
 		}
 		if breaches := reachbench.CheckBaselineParity(report, baseline); len(breaches) > 0 {
 			t.Fatalf("owned reachability is below baseline %q: %v", path, breaches)

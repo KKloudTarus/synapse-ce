@@ -51,7 +51,7 @@ jobs:
             echo "OSV-Scanner failed with unexpected status $status"
             exit "$status"
           fi
-          go run ./cmd/synapse-bench -mode reachability-osv -input "${REACHBENCH_REPORT_DIR}/osv.raw.json" -output "${REACHBENCH_REPORT_DIR}/osv-scanner.json"
+          go run ./cmd/synapse-bench -mode reachability-osv -language go -input "${REACHBENCH_REPORT_DIR}/osv.raw.json" -output "${REACHBENCH_REPORT_DIR}/osv-scanner.json"
 
       - name: Run Semgrep CE direct-call baseline
         run: |
@@ -63,12 +63,12 @@ jobs:
             echo "Semgrep CE failed with unexpected status $status"
             exit "$status"
           fi
-          go run ./cmd/synapse-bench -mode reachability-semgrep-ce -input "${REACHBENCH_REPORT_DIR}/semgrep.raw.json" -output "${REACHBENCH_REPORT_DIR}/semgrep-ce.json"
+          go run ./cmd/synapse-bench -mode reachability-semgrep-ce -language go -input "${REACHBENCH_REPORT_DIR}/semgrep.raw.json" -output "${REACHBENCH_REPORT_DIR}/semgrep-ce.json"
 
       - name: Gate owned engine recall and parity
         env:
           SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ runner.temp }}/reachbench/synapse-owned.json
-          SYNAPSE_REACHBENCH_BASELINE_REPORTS: ${{ runner.temp }}/reachbench/osv-scanner.json,${{ runner.temp }}/reachbench/semgrep-ce.json
+          SYNAPSE_REACHBENCH_BASELINE_REPORTS: osv-scanner=${{ runner.temp }}/reachbench/osv-scanner.json,semgrep-ce=${{ runner.temp }}/reachbench/semgrep-ce.json
         run: go test -count=1 -v -run TestGoReachabilityCorpus ./internal/infrastructure/tools/ssacallgraph
 
       - name: Upload raw evidence and scorecards
@@ -76,5 +76,61 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reachability-benchmark-go-scorecards
+          path: ${{ runner.temp }}/reachbench
+          if-no-files-found: warn
+
+  python-oss-baselines:
+    name: Python corpus vs Semgrep CE
+    runs-on: ubuntu-latest
+    env:
+      # OSV-Scanner has no Python call-analysis baseline (its call analysis covers Go and Rust), so the
+      # Python head-to-head is against Semgrep CE, whose pattern rule proves a dangerous-sink call site but
+      # not its entrypoint reachability. The owned engine must match or beat its recall AND precision.
+      SEMGREP_VERSION: 1.176.0
+      REACHBENCH_DIR: internal/infrastructure/tools/astwalk/testdata/reachbench
+      REACHBENCH_REPORT_DIR: ${{ runner.temp }}/reachbench
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned Semgrep CE
+        run: python -m pip install --disable-pip-version-check semgrep==${SEMGREP_VERSION}
+
+      - name: Run Semgrep CE Python direct-sink baseline
+        run: |
+          mkdir -p "${REACHBENCH_REPORT_DIR}"
+          set +e
+          semgrep scan --config internal/usecase/reachbench/corpus/semgrep-ce.yml --json --no-git-ignore "${REACHBENCH_DIR}" > "${REACHBENCH_REPORT_DIR}/semgrep.py.raw.json"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            echo "Semgrep CE failed with unexpected status $status"
+            exit "$status"
+          fi
+          go run ./cmd/synapse-bench -mode reachability-semgrep-ce -language python -input "${REACHBENCH_REPORT_DIR}/semgrep.py.raw.json" -output "${REACHBENCH_REPORT_DIR}/semgrep-ce.py.json"
+
+      - name: Gate owned Python engine recall and parity
+        env:
+          # The owned Python reachability engine uses cgo tree-sitter, so the corpus gate runs with CGO enabled.
+          CGO_ENABLED: '1'
+          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ runner.temp }}/reachbench/synapse-owned.py.json
+          SYNAPSE_REACHBENCH_BASELINE_REPORTS: semgrep-ce=${{ runner.temp }}/reachbench/semgrep-ce.py.json
+        run: go test -count=1 -v -run TestPythonReachabilityCorpus ./internal/infrastructure/tools/astwalk
+
+      - name: Upload raw evidence and scorecards
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reachability-benchmark-python-scorecards
           path: ${{ runner.temp }}/reachbench
           if-no-files-found: warn

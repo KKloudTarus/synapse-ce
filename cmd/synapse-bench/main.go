@@ -20,18 +20,41 @@ func main() {
 	inputPath := flag.String("input", "", "versioned benchmark input JSON")
 	outputPath := flag.String("output", "", "output benchmark report JSON (default: stdout)")
 	mode := flag.String("mode", "throughput", "reduction mode: throughput, accuracy, reachability, reachability-osv, reachability-semgrep-ce, reachability-snyk-sample, or compare")
+	language := flag.String("language", "", "restrict a reachability baseline to one corpus language (e.g. go, python), so its report matches the owned report's language subset and corpus digest")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "synapse-bench: positional arguments are not supported")
 		os.Exit(1)
 	}
-	if err := run(*mode, *inputPath, *outputPath, os.Stdin, os.Stdout); err != nil {
+	if err := run(*mode, *inputPath, *outputPath, *language, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-bench:", err)
 		os.Exit(1)
 	}
 }
 
-func run(mode, inputPath, outputPath string, stdin io.Reader, stdout io.Writer) error {
+// baselineCorpus returns the reachability corpus a baseline is scored against: the full checked-in corpus,
+// or, when -language is set, only that language's cases. Filtering here (not just in the owned test) keeps a
+// baseline report on the SAME language subset and corpus digest as the owned report, which
+// CheckBaselineParity requires; comparing a language-scoped owned report against a full-corpus baseline
+// would otherwise be rejected as different corpora.
+func baselineCorpus(language string) (reachbench.Corpus, error) {
+	if language == "" {
+		return reachbench.DefaultCorpus(), nil
+	}
+	return reachbench.FilterByLanguage(reachbench.DefaultCorpus(), language)
+}
+
+func run(mode, inputPath, outputPath, language string, stdin io.Reader, stdout io.Writer) error {
+	// -language scopes an OSS-baseline report to one corpus language; it is meaningless for the other modes,
+	// which carry their own corpus or no corpus at all. Reject it there rather than accept-and-ignore, so a
+	// caller never believes a plain reachability/throughput run was language-filtered.
+	if language != "" {
+		switch mode {
+		case "reachability-osv", "reachability-semgrep-ce", "reachability-snyk-sample":
+		default:
+			return fmt.Errorf("-language is only valid for the reachability baseline modes, not %q", mode)
+		}
+	}
 	inputReader := stdin
 	var inputFile *os.File
 	if inputPath != "" {
@@ -81,31 +104,43 @@ func run(mode, inputPath, outputPath string, stdin io.Reader, stdout io.Writer) 
 		}
 		encode = func(w io.Writer) error { return reachbench.EncodeReport(w, report) }
 	case "reachability-osv":
-		observations, err := reachbench.OSVObservations(reachbench.DefaultCorpus(), inputReader)
+		corpus, err := baselineCorpus(language)
 		if err != nil {
 			return err
 		}
-		report, err := reachbench.Evaluate(reachbench.DefaultCorpus(), observations)
+		observations, err := reachbench.OSVObservations(corpus, inputReader)
+		if err != nil {
+			return err
+		}
+		report, err := reachbench.Evaluate(corpus, observations)
 		if err != nil {
 			return fmt.Errorf("evaluate OSV-Scanner reachability baseline: %w", err)
 		}
 		encode = func(w io.Writer) error { return reachbench.EncodeReport(w, report) }
 	case "reachability-semgrep-ce":
-		observations, err := reachbench.SemgrepCEObservations(reachbench.DefaultCorpus(), inputReader)
+		corpus, err := baselineCorpus(language)
 		if err != nil {
 			return err
 		}
-		report, err := reachbench.Evaluate(reachbench.DefaultCorpus(), observations)
+		observations, err := reachbench.SemgrepCEObservations(corpus, inputReader)
+		if err != nil {
+			return err
+		}
+		report, err := reachbench.Evaluate(corpus, observations)
 		if err != nil {
 			return fmt.Errorf("evaluate Semgrep CE reachability baseline: %w", err)
 		}
 		encode = func(w io.Writer) error { return reachbench.EncodeReport(w, report) }
 	case "reachability-snyk-sample":
-		observations, err := reachbench.SnykSampleObservations(reachbench.DefaultCorpus(), inputReader)
+		corpus, err := baselineCorpus(language)
 		if err != nil {
 			return err
 		}
-		report, err := reachbench.Evaluate(reachbench.DefaultCorpus(), observations)
+		observations, err := reachbench.SnykSampleObservations(corpus, inputReader)
+		if err != nil {
+			return err
+		}
+		report, err := reachbench.Evaluate(corpus, observations)
 		if err != nil {
 			return fmt.Errorf("evaluate Snyk sample reachability baseline: %w", err)
 		}
