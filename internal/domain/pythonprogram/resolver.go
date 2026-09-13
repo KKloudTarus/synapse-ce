@@ -66,6 +66,7 @@ type semanticResolver struct {
 	imports   map[string]map[string][]importBinding
 	receivers map[string]map[string][]pythonType
 	bases     map[string][]string
+	subclass  map[string][]string // class id -> direct subclass ids (reverse of bases), for downward dispatch
 	gaps      []CoverageGap
 }
 
@@ -156,6 +157,7 @@ func newSemanticResolver(document Document) *semanticResolver {
 		imports:   map[string]map[string][]importBinding{},
 		receivers: map[string]map[string][]pythonType{},
 		bases:     map[string][]string{},
+		subclass:  map[string][]string{},
 	}
 	for _, symbol := range document.Symbols {
 		r.symbols[symbol.ID] = symbol
@@ -227,6 +229,47 @@ func (r *semanticResolver) indexBases() {
 		}
 		r.bases[symbol.ID] = sortedUnique(r.bases[symbol.ID])
 	}
+	// Reverse index: base class -> direct subclasses, for downward-closure virtual dispatch.
+	for classID, bases := range r.bases {
+		for _, base := range bases {
+			r.subclass[base] = append(r.subclass[base], classID)
+		}
+	}
+	for base := range r.subclass {
+		r.subclass[base] = sortedUnique(r.subclass[base])
+	}
+}
+
+// dispatchMethods resolves a virtual method call on a statically-typed class to a SOUND over-approximation:
+// the class's own or inherited implementation of the path, PLUS a directly-declared override on any subclass
+// (transitively). Without the downward closure, a base-typed self.step()/receiver.step() would resolve only
+// to the base implementation and miss a subclass override, wrongly reporting the override unreached with a
+// "complete" proof, which for the SUPPRESSING Python Tier-2 would hide a real vulnerability (EPIC #1042 #1-bar).
+func (r *semanticResolver) dispatchMethods(classID string, path []string) []string {
+	out := r.lookupMethods(classID, path, map[string]bool{})
+	for _, sub := range r.allSubclasses(classID) {
+		out = append(out, r.lookupQualifiedChildren(sub, path)...)
+	}
+	return sortedUnique(out)
+}
+
+// allSubclasses returns every transitive subclass of classID (excluding itself), following the reverse of
+// the base-class graph, with a visited set so a malformed class cycle terminates.
+func (r *semanticResolver) allSubclasses(classID string) []string {
+	seen := map[string]bool{classID: true}
+	var out []string
+	queue := append([]string(nil), r.subclass[classID]...)
+	for len(queue) > 0 {
+		next := queue[0]
+		queue = queue[1:]
+		if seen[next] {
+			continue
+		}
+		seen[next] = true
+		out = append(out, next)
+		queue = append(queue, r.subclass[next]...)
+	}
+	return sortedUnique(out)
 }
 
 func (r *semanticResolver) derivedEntrypoints() map[string]bool {
@@ -503,7 +546,9 @@ func (r *semanticResolver) methodsForType(typ pythonType, rest []string) []strin
 		return nil
 	}
 	if typ.classID != "" {
-		return r.lookupMethods(typ.classID, rest, map[string]bool{})
+		// Virtual dispatch: the class's own/inherited method AND any subclass override (downward closure),
+		// so a base-typed self.method()/receiver.method() reaches an override in a subclass.
+		return r.dispatchMethods(typ.classID, rest)
 	}
 	if typ.module == "" || typ.qualified == "" {
 		return nil

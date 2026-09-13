@@ -315,6 +315,19 @@
       "fixture": "js_index_import_reached",
       "symbol": "js:helper/index:work",
       "expected": "reachable"
+    },
+    {
+      "name": "py_method_override_reached",
+      "language": "python",
+      "fixture": "py_method_override",
+      "symbol": "python:app:Derived._step",
+      "expected": "reachable",
+      "baseline": {
+        "semgrep_ce": {
+          "rule_id": "reachbench.py.os-system-call",
+          "path_suffix": "py_method_override/app.py"
+        }
+      }
     }
   ]
 }
