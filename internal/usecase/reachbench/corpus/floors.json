@@ -1,5 +1,6 @@
 {
   "positive_recall": {
-    "go": 1
+    "go": 1,
+    "python": 1
   }
 }

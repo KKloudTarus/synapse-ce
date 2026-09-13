@@ -38,6 +38,20 @@
         "semgrep_ce": {"rule_id": "reachbench.go.jsonparser-delete-called", "path_suffix": "go_osv_jsonparser_uncalled/main.go"},
         "snyk_sample": {"evidence_id": "GO-2026-4514-uncalled"}
       }
+    },
+    {
+      "name": "py_reached_via_handler",
+      "language": "python",
+      "fixture": "py_reached",
+      "symbol": "python:app:_run_query",
+      "expected": "reachable"
+    },
+    {
+      "name": "py_unreached_private_function",
+      "language": "python",
+      "fixture": "py_unreached",
+      "symbol": "python:app:_unused_admin_action",
+      "expected": "present_unreached"
     }
   ]
 }
