@@ -994,29 +994,52 @@ func ecosystemReachabilitySubjects(findings []finding.Finding, vulns []vulnerabi
 	return subs
 }
 
-// unanalyzedReachabilityEcosystems returns the sorted, distinct PURL types of ecosystems that HAVE a
-// finding in this scan but for which Synapse has NO reachability engine (swift, pub, hex, conda, cran,
-// julia, ...). A finding is mapped to its component's PURL type through its vulnerability. The result drives
-// an explicit no_analysis coverage statement so an engine-less ecosystem never reads as reachability-clean
-// (EPIC #1042 E.1). It never returns an ecosystem Synapse can analyze, so a supported ecosystem is never
-// falsely marked un-analyzable.
+// unanalyzedReachabilityEcosystems returns the sorted, distinct ecosystems that HAVE a finding in this scan
+// but for which Synapse has NO reachability engine: engine-less LANGUAGE ecosystems (swift, pub, hex, conda,
+// cran, julia, ...) AND every OS-package ecosystem (Debian/Ubuntu deb, Alpine apk, RHEL/Fedora rpm, Arch
+// alpm), which are reachability-blind by construction (#820, #1062). A finding is mapped to its component
+// through its vulnerability. The result drives an explicit no_analysis coverage statement so such an
+// ecosystem never reads as reachability-clean (EPIC #1042 E.1). It never returns an ecosystem Synapse can
+// analyze, so a supported ecosystem is never falsely marked un-analyzable.
+//
+// An OS-package component is reported under its DISTRO ecosystem key (Debian:12, Alpine:v3.18), matching how
+// its findings and advisories are keyed, instead of the uninformative bare PURL type. OS packages are handled
+// EXPLICITLY (not merely as an engine-less type) so a future change to the engine set can never silently drop
+// them into implied-clean; an unmapped distro falls back to the bare PURL type, still emitted, never dropped.
 func unanalyzedReachabilityEcosystems(findings []finding.Finding, vulns []vulnerability.Vulnerability, doc *sbom.SBOM) []string {
 	if doc == nil {
 		return nil
 	}
+	type ecoEntry struct{ typ, label string } // typ gates the engine check; label is what is reported
 	// Key components by name AND version (the identity a vulnerability carries), not name alone: two
 	// ecosystems can publish the same package name, and a name-only key would let one overwrite the other
 	// and mislabel a finding's ecosystem. A name+version can still (rarely) exist in more than one
-	// ecosystem, so collect ALL its PURL types and report every engine-less one, never implying clean.
-	purlsByNameVer := make(map[string][]string, len(doc.Components))
+	// ecosystem, so collect ALL its entries and report every engine-less one, never implying clean.
+	entriesByNameVer := make(map[string][]ecoEntry, len(doc.Components))
 	for _, c := range doc.Components {
 		t := strings.ToLower(purlType(c.PURL))
 		if t == "" {
 			continue
 		}
+		label := t
+		if isOSPackage(c.PURL) {
+			// Distro-key the label (Debian:12, Alpine:v3.18) so the coverage reads as the real ecosystem. An
+			// unmapped or version-less distro (an unsupported release, or rolling-release Arch alpm, which has
+			// no distro-release key) keeps the bare PURL type: still emitted, never dropped into implied-clean.
+			if eco := sbom.IdentityFromComponent(c).Ecosystem; eco != "" {
+				label = eco
+			}
+		}
 		k := componentNameVerKey(c.Name, c.Version)
-		if !containsString(purlsByNameVer[k], t) {
-			purlsByNameVer[k] = append(purlsByNameVer[k], t)
+		dup := false
+		for _, e := range entriesByNameVer[k] {
+			if e.typ == t && e.label == label {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			entriesByNameVer[k] = append(entriesByNameVer[k], ecoEntry{typ: t, label: label})
 		}
 	}
 	byDedup := make(map[string]vulnerability.Vulnerability, len(vulns))
@@ -1030,16 +1053,30 @@ func unanalyzedReachabilityEcosystems(findings []finding.Finding, vulns []vulner
 		if !ok {
 			continue
 		}
-		for _, t := range purlsByNameVer[componentNameVerKey(v.Component, v.Version)] {
-			if reachabilityEngineExists(t) || seen[t] {
+		for _, e := range entriesByNameVer[componentNameVerKey(v.Component, v.Version)] {
+			// OS packages are ALWAYS unanalyzed (reachability-blind), independent of the engine set; a language
+			// ecosystem is unanalyzed only when it has no engine.
+			if !isOSPackageType(e.typ) && reachabilityEngineExists(e.typ) {
 				continue
 			}
-			seen[t] = true
-			out = append(out, t)
+			if seen[e.label] {
+				continue
+			}
+			seen[e.label] = true
+			out = append(out, e.label)
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+// isOSPackageType reports whether an ecosystem PURL type is an OS package manager (deb/apk/rpm/alpm).
+func isOSPackageType(t string) bool {
+	switch t {
+	case "deb", "apk", "rpm", "alpm":
+		return true
+	}
+	return false
 }
 
 // componentNameVerKey is the case-insensitive name@version identity used to join a vulnerability to its SBOM

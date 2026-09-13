@@ -53,6 +53,43 @@ func TestUnanalyzedReachabilityEcosystems(t *testing.T) {
 	}
 }
 
+// TestUnanalyzedReachabilityEcosystemsOSPackages pins #1062: an OS-package (deb/rpm/apk) finding is ALWAYS
+// reported as unanalyzed under its DISTRO ecosystem key (Debian:12, ...), so an OS-package finding can never
+// read as reachability-clean. This is independent of the engine set (OS packages are reachability-blind), and
+// a distro-keyed label is more honest than the bare PURL type. An unmapped distro falls back to the bare type
+// (still emitted, never dropped).
+func TestUnanalyzedReachabilityEcosystemsOSPackages(t *testing.T) {
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "bash", Version: "5.1-2", PURL: "pkg:deb/debian/bash@5.1-2?arch=amd64&distro=debian-12"},
+		{Name: "openssl", Version: "3.0.9", PURL: "pkg:rpm/rocky/openssl@3.0.9?arch=x86_64&distro=rocky-9.3"},
+		{Name: "busybox", Version: "1.36.1", PURL: "pkg:apk/alpine/busybox@1.36.1?arch=x86_64&distro=alpine-3.18.12"},
+		{Name: "centospkg", Version: "1", PURL: "pkg:rpm/centos/centospkg@1?arch=x86_64&distro=centos-8"}, // unmapped distro
+		{Name: "gopkg", Version: "1", PURL: "pkg:golang/example.com/gopkg@1"},                             // engine-backed -> not reported
+	}}
+	vulns := []vulnerability.Vulnerability{
+		{ID: "V1", Component: "bash", Version: "5.1-2"},
+		{ID: "V2", Component: "openssl", Version: "3.0.9"},
+		{ID: "V3", Component: "busybox", Version: "1.36.1"},
+		{ID: "V4", Component: "centospkg", Version: "1"},
+		{ID: "V5", Component: "gopkg", Version: "1"},
+	}
+	findings := make([]finding.Finding, len(vulns))
+	for i, v := range vulns {
+		findings[i] = finding.Finding{DedupKey: vulnDedupKey(v)}
+	}
+	got := unanalyzedReachabilityEcosystems(findings, vulns, doc)
+	// Debian:12, Rocky Linux:9, Alpine:v3.18 (distro-keyed); centos-8 is unmapped -> bare "rpm" fallback.
+	want := []string{"Alpine:v3.18", "Debian:12", "Rocky Linux:9", "rpm"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("OS-package unanalyzed ecosystems = %v, want %v", got, want)
+	}
+	for _, os := range []string{"Debian:12", "Rocky Linux:9", "Alpine:v3.18"} {
+		if !containsString(got, os) {
+			t.Fatalf("OS finding %q must be reported unanalyzed (never reachability-clean): %v", os, got)
+		}
+	}
+}
+
 // TestUnanalyzedReachabilityEcosystemsNameCollision: a package name shared across an engine-backed and an
 // engine-less ecosystem is disambiguated by version, so a finding is mapped to the RIGHT ecosystem (the join
 // is name+version, not name alone).
