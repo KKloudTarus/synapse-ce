@@ -12,6 +12,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/javaprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/symbolcanon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -38,6 +39,7 @@ type JavaCoordinator struct {
 
 var _ ports.TaintScanner = (*JavaCoordinator)(nil)
 var _ ports.TaintCoverageScanner = (*JavaCoordinator)(nil)
+var _ ports.CorrelatedTaintScanner = (*JavaCoordinator)(nil)
 
 func NewJavaCoordinator(provider ports.JavaFactsProvider, p proposer, catalog taint.JavaCatalog, audit ports.AuditLogger, clock ports.Clock) (*JavaCoordinator, error) {
 	if provider == nil || p == nil || audit == nil || clock == nil {
@@ -59,6 +61,16 @@ func (c *JavaCoordinator) Scan(ctx context.Context, engagementID shared.ID, targ
 // ScanWithCoverage is the coverage-aware form of Scan. Failures retain a closed, non-sensitive reason so a
 // caller can tell zero findings from zero analysis without exposing parser or target data.
 func (c *JavaCoordinator) ScanWithCoverage(ctx context.Context, engagementID shared.ID, targetRef string) (ports.TaintScanOutcome, error) {
+	return c.scanWithCoverage(ctx, engagementID, targetRef, nil)
+}
+
+// ScanCorrelated is the finding-aware form of ScanWithCoverage. It records only whole-symbol matches to
+// existing SCA findings, leaving unmatched taint paths as their original gated SAST proposals.
+func (c *JavaCoordinator) ScanCorrelated(ctx context.Context, engagementID shared.ID, targetRef string, subjects []ports.ReachabilitySubject) (ports.TaintScanOutcome, error) {
+	return c.scanWithCoverage(ctx, engagementID, targetRef, subjects)
+}
+
+func (c *JavaCoordinator) scanWithCoverage(ctx context.Context, engagementID shared.ID, targetRef string, subjects []ports.ReachabilitySubject) (ports.TaintScanOutcome, error) {
 	outcome := ports.TaintScanOutcome{Coverage: ports.AnalysisCoverage{
 		Analyzer: "java-semantic-taint-v1", Language: "java", Status: ports.AnalysisCoverageUnavailable,
 	}}
@@ -139,7 +151,8 @@ func (c *JavaCoordinator) ScanWithCoverage(ctx context.Context, engagementID sha
 		location := boundedJavaLocation(javaPositionLineString(finding.SinkPos), finding.Callee)
 		claim := judgment.SASTClaim{
 			CWE: finding.CWE, Location: location, Rule: finding.Rule,
-			DataFlow: javaClaimDataFlow(finding, graph, analysisComplete),
+			DataFlow: javaClaimDataFlow(finding, graph, analysisComplete), SinkSymbols: []string{finding.Callee},
+			Correlations: correlateSASTFindings(symbolcanon.Generic, []string{finding.Callee}, subjects),
 		}
 		judged, err := c.proposer.Propose(
 			ctx, javaProposerActor, engagementID, judgment.CapSAST, judgment.SubjectDataFlow,

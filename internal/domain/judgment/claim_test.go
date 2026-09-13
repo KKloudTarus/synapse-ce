@@ -14,6 +14,9 @@ func TestClaimRoundTrip(t *testing.T) {
 	claims := []Claim{
 		ReachabilityClaim{Reachable: Reachable, Tier: Tier2, Path: []string{"main", "vuln"}, Confidence: 95},
 		SASTClaim{CWE: "CWE-327", Location: "auth.go:42", Rule: "weak-hash-md5"},
+		SASTClaim{CWE: "CWE-89", Location: "app/db.go:42", Rule: "taint-sqli", SinkSymbols: []string{"database/sql.DB.Query"}, Correlations: []SASTFindingCorrelation{
+			{FindingID: "finding-1", SinkSymbol: "database/sql.DB.Query", AffectedSymbol: "database/sql.DB.Query"},
+		}},
 		SASTClaim{CWE: "CWE-78", Location: "app.py:4", Rule: "python-taint-command", DataFlow: &SASTDataFlow{
 			Language: "python", Source: SASTFlowLocation{File: "app.py", Line: 3, Column: 4}, Sink: SASTFlowLocation{File: "app.py", Line: 4, Column: 4},
 			Steps: []SASTFlowLocation{{File: "app.py", Line: 3, Column: 4}, {File: "app.py", Line: 4, Column: 4}},
@@ -142,6 +145,41 @@ func TestSASTClaimValidateRejectsModelProseAndOversizedFields(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.claim.Validate(); !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("want ErrValidation, got %v", err)
+			}
+		})
+	}
+}
+
+func TestSASTClaimValidatesFindingCorrelations(t *testing.T) {
+	valid := SASTClaim{
+		CWE: "CWE-89", Location: "internal/db/query.go:42", Rule: "taint-sqli",
+		SinkSymbols: []string{"database/sql.DB.Query"},
+		Correlations: []SASTFindingCorrelation{{
+			FindingID: "finding-1", SinkSymbol: "database/sql.DB.Query", AffectedSymbol: "database/sql.DB.Query",
+		}},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid SAST finding correlation rejected: %v", err)
+	}
+
+	wrongSink := valid
+	wrongSink.Correlations = []SASTFindingCorrelation{{
+		FindingID: "finding-1", SinkSymbol: "database/sql.DB.Exec", AffectedSymbol: "database/sql.DB.Exec",
+	}}
+	emptyFinding := valid
+	emptyFinding.Correlations = []SASTFindingCorrelation{{
+		SinkSymbol: "database/sql.DB.Query", AffectedSymbol: "database/sql.DB.Query",
+	}}
+	duplicateSink := valid
+	duplicateSink.SinkSymbols = []string{"database/sql.DB.Query", "database/sql.DB.Query"}
+	for name, claim := range map[string]SASTClaim{
+		"correlation sink not declared": wrongSink,
+		"correlation finding missing":   emptyFinding,
+		"duplicate sink symbol":         duplicateSink,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := claim.Validate(); !errors.Is(err, shared.ErrValidation) {
 				t.Fatalf("want ErrValidation, got %v", err)
 			}
 		})

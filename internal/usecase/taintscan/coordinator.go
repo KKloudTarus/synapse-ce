@@ -25,11 +25,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/callgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/symbolcanon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -69,6 +71,7 @@ type Coordinator struct {
 }
 
 var _ ports.TaintScanner = (*Coordinator)(nil)
+var _ ports.CorrelatedTaintScanner = (*Coordinator)(nil)
 
 // NewCoordinator validates and returns the coordinator. The catalog must be non-empty (an empty catalog
 // would silently propose nothing – a misconfiguration, not a clean result).
@@ -87,6 +90,18 @@ func NewCoordinator(b builder, p proposer, catalog taint.Catalog, audit ports.Au
 // no-coverage build error proposes NOTHING (never a false "clean"). Every judgment is born
 // StateProposed/score-0 and awaits a distinct verifier.
 func (c *Coordinator) Scan(ctx context.Context, engagementID shared.ID, targetRef string) (int, error) {
+	return c.scan(ctx, engagementID, targetRef, nil)
+}
+
+// ScanCorrelated is the finding-aware form of Scan. Subjects are the SCA pipeline's version-correct
+// advisory-symbol inputs, keyed by their real SubjectFinding id. A missing or non-matching subject never
+// suppresses the ordinary SAST judgment; it merely leaves Correlations empty.
+func (c *Coordinator) ScanCorrelated(ctx context.Context, engagementID shared.ID, targetRef string, subjects []ports.ReachabilitySubject) (ports.TaintScanOutcome, error) {
+	n, err := c.scan(ctx, engagementID, targetRef, subjects)
+	return ports.TaintScanOutcome{Proposed: n}, err
+}
+
+func (c *Coordinator) scan(ctx context.Context, engagementID shared.ID, targetRef string, subjects []ports.ReachabilitySubject) (int, error) {
 	if engagementID.IsZero() {
 		return 0, fmt.Errorf("%w: engagement id is required", shared.ErrValidation)
 	}
@@ -111,13 +126,24 @@ func (c *Coordinator) Scan(ctx context.Context, engagementID shared.ID, targetRe
 		// same class at one function (e.g. DB.Query + DB.Exec, both CWE-89) produce a byte-identical claim
 		// (Location is the function, not the specific sink call), so they are the SAME finding and must be
 		// proposed once. This also matches flowSubjectID's per-class key (no duplicate subjects/seals).
-		seen := map[string]bool{}
+		byClass := map[string][]taint.Sink{}
 		for _, sink := range sinkClass[v.Sink] {
 			classKey := sink.CWE + "|" + sink.Rule
-			if seen[classKey] {
-				continue
+			byClass[classKey] = append(byClass[classKey], sink)
+		}
+		classKeys := make([]string, 0, len(byClass))
+		for classKey := range byClass {
+			classKeys = append(classKeys, classKey)
+		}
+		sort.Strings(classKeys)
+		for _, classKey := range classKeys {
+			classSinks := byClass[classKey]
+			sort.Slice(classSinks, func(i, j int) bool { return classSinks[i].Symbol < classSinks[j].Symbol })
+			sinkSymbols := make([]string, 0, len(classSinks))
+			for _, sink := range classSinks {
+				sinkSymbols = append(sinkSymbols, sink.Symbol)
 			}
-			seen[classKey] = true
+			sink := classSinks[0]
 			// Location prefers the sink-using function's "relpath:line" (def-use precision, from the SSA
 			// build's Positions side table) so the finding cites a file:line like the pattern engine, not
 			// only a symbol. It is a coarse, function-granular over-approximation — the function's
@@ -128,8 +154,11 @@ func (c *Coordinator) Scan(ctx context.Context, engagementID shared.ID, targetRe
 			if sinkPos != "" {
 				loc = sinkPos
 			}
-			claim := judgment.SASTClaim{CWE: sink.CWE, Location: loc, Rule: sink.Rule}
-			j, err := c.proposer.Propose(ctx, proposerActor, engagementID, judgment.CapSAST, judgment.SubjectDataFlow, flowSubjectID(engagementID, v, sink), claim)
+			claim := judgment.SASTClaim{
+				CWE: sink.CWE, Location: loc, Rule: sink.Rule, SinkSymbols: sinkSymbols,
+				Correlations: correlateSASTFindings(symbolcanon.Go, sinkSymbols, subjects),
+			}
+			j, err := c.proposer.Propose(ctx, proposerActor, engagementID, judgment.CapSAST, judgment.SubjectDataFlow, flowSubjectID(engagementID, v, sinkSymbols, sink), claim)
 			if err != nil {
 				return proposed, fmt.Errorf("propose taint judgment: %w", err)
 			}
@@ -147,8 +176,8 @@ func (c *Coordinator) Scan(ctx context.Context, engagementID shared.ID, targetRe
 // engagement. Keyed on source/sink importPath.Symbol + CWE + Rule (the fields that distinguish a claim) –
 // never file contents (mirrors sca.findingID's derivation). Cross-scan idempotency additionally depends on
 // the judgment store, as with reachproof.
-func flowSubjectID(engagementID shared.ID, v taint.TaintPath, sink taint.Sink) shared.ID {
-	sum := sha256.Sum256([]byte(engagementID.String() + "|taint|" + v.Source + "|" + v.Sink + "|" + sink.CWE + "|" + sink.Rule))
+func flowSubjectID(engagementID shared.ID, v taint.TaintPath, sinkSymbols []string, sink taint.Sink) shared.ID {
+	sum := sha256.Sum256([]byte(engagementID.String() + "|taint|" + v.Source + "|" + v.Sink + "|" + strings.Join(sinkSymbols, ",") + "|" + sink.CWE + "|" + sink.Rule))
 	return shared.ID(hex.EncodeToString(sum[:16]))
 }
 
