@@ -162,6 +162,7 @@ import (
 	retrohunt "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/retrohunt"
 	riskscorebridge "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscorebridge"
 	riskscoreuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscoreuc"
+	runtimeevidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/runtimeevidence"
 	telemetryingest "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/telemetryingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
@@ -192,6 +193,7 @@ import (
 	responseuc "github.com/KKloudTarus/synapse-ce/internal/usecase/response"
 	riskstoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/riskstoryuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
+	runtimereachuc "github.com/KKloudTarus/synapse-ce/internal/usecase/runtimereach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rustsymreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
@@ -2758,6 +2760,31 @@ func main() {
 			router.SetHostVulnerabilities(hvSvc)
 			router.SetFleetHostInventory(hiSvc)
 			log.Info("fleet host inventory ingest ENABLED (VM agents persist host inventories into the asset model; packages are correlated with advisories per host)")
+
+			// #1060/#1061: runtime-reachability evidence. A host agent reports the shared libraries it
+			// observed loaded plus the OS packages that own them; the server joins them to the host's SCA
+			// findings by PACKAGE OWNERSHIP and raises (never suppresses) the finding for a vulnerable library
+			// that actually loaded. Judgment-gated like every reachability coordinator, and idempotent, so a
+			// re-report re-attributes against the now-populated findings without churn.
+			if requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_FLEET_HOST_INGEST_ENABLED", "runtime reachability") {
+				rrCoord, rrErr := runtimereachuc.NewCoordinator(judgmentSvc, auditLog, clock)
+				if rrErr != nil {
+					log.Error("runtime reachability coordinator init failed", "err", rrErr)
+					os.Exit(1)
+				}
+				rrSvc, rrErr := runtimereachuc.NewService(findingRepo, rrCoord)
+				if rrErr != nil {
+					log.Error("runtime reachability join service init failed", "err", rrErr)
+					os.Exit(1)
+				}
+				reSvc, reErr := runtimeevidenceuc.NewService(telemetryTransportStore, repo, rrSvc)
+				if reErr != nil {
+					log.Error("runtime evidence ingest init failed", "err", reErr)
+					os.Exit(1)
+				}
+				router.SetFleetRuntimeEvidence(reSvc)
+				log.Info("fleet runtime-reachability evidence ingest ENABLED (agents report observed shared-library loads; a loaded vulnerable library raises its finding, raise-only)")
+			}
 		}
 
 		// Agent→control-plane telemetry batch ingest (A3, #624): an enrolled agent ships a signed
