@@ -25,6 +25,28 @@ type Sink struct {
 	// string at every call site. It is the ONLY value-level refinement the coarse call-graph model needs,
 	// and it never suppresses — see ExecPolicy + AssembleWithFacts.
 	Exec *ExecPolicy
+	// Provenance is set for a CURATED per-advisory sink (EPIC #1042 2.2): a curated CVE's vulnerable API
+	// modeled as a taint sink, so the dataflow engine proves attacker-input reaches THAT function. It records
+	// which advisory the sink came from and who curated it, so every curated finding is auditable. nil for a
+	// built-in injection-class sink.
+	Provenance *SinkProvenance
+}
+
+// SinkProvenance records where a curated per-advisory sink came from, so a curated taint finding is
+// traceable to the advisory and the curation act (mirrors advisory.CuratedProvenance).
+type SinkProvenance struct {
+	Advisory  string // the advisory id the vulnerable API belongs to (e.g. "GHSA-…" / "CVE-…")
+	Source    string // curation source ("sme", "ghsa-fix-commit", …)
+	Reference string // URL / commit / advisory reference
+	Curator   string // the SME who confirmed the vulnerable API
+}
+
+// CuratedSink builds a per-advisory taint sink for a curated vulnerable API. Symbol is the canonical
+// vulnerable function ("importPath.Symbol"), cwe the advisory's weakness, ruleID a stable per-advisory rule
+// name, and prov the curation provenance. It carries no ExecPolicy (a curated sink is a plain dangerous-call
+// model) and no Requires unless a caller adds a label precondition.
+func CuratedSink(symbol, cwe, ruleID string, prov SinkProvenance) Sink {
+	return Sink{Symbol: symbol, CWE: cwe, Rule: ruleID, Provenance: &prov}
 }
 
 // Catalog is the curated, per-language set of taint roles in the shared "importPath.Symbol" convention

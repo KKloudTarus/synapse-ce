@@ -205,6 +205,12 @@ func (c CuratedSymbol) seedSymbols() []string {
 	return c.seedCandidates()
 }
 
+// SeedSymbols is the exported view of the canonical symbols a CONFIRMED, valid curated entry contributes
+// (primary + overloads + aliases, trimmed and bounded); nil for a candidate or a malformed entry. It lets a
+// consumer (e.g. the curated taint-sink builder) derive sinks from the same gated, canonical set the matcher
+// seeds, so a candidate or invalid record can never become a taint sink.
+func (c CuratedSymbol) SeedSymbols() []string { return c.seedSymbols() }
+
 // AffectedSymbolsFor returns the deduplicated affected symbols this advisory marks for (ecosystem, name),
 // aggregated across every name-matching affected block REGARDLESS of version. It answers "what symbols does
 // this advisory list for this package anywhere", so it is version-agnostic. Do NOT use it to attach symbols
