@@ -68,6 +68,11 @@ type Coordinator struct {
 	catalog  taint.Catalog
 	audit    ports.AuditLogger
 	clock    ports.Clock
+	// vulnIndex is the OPTIONAL prebuilt advisory vulnerable-symbol index. When set (non-empty), a taint flow
+	// whose dangerous callee is one of those symbols is correlated to its SCA finding: the vulnerable code is
+	// not merely present, it is taint-reachable (the strongest exploitability signal). The zero value means
+	// no correlation is attempted and no link is recorded.
+	vulnIndex judgment.VulnerableSymbolIndex
 }
 
 var _ ports.TaintScanner = (*Coordinator)(nil)
@@ -83,6 +88,18 @@ func NewCoordinator(b builder, p proposer, catalog taint.Catalog, audit ports.Au
 		return nil, fmt.Errorf("%w: taintscan coordinator needs a non-empty catalog (sources+sinks)", shared.ErrValidation)
 	}
 	return &Coordinator{builder: b, proposer: p, catalog: catalog, audit: audit, clock: clock}, nil
+}
+
+// WithVulnerableSymbols supplies the advisory vulnerable-symbol index so the coordinator correlates a taint
+// flow's dangerous callee to the SCA finding it exploits (a taint flow INTO a vulnerable function). lang is
+// the scan's source dialect, applied to BOTH the advisory symbols and the taint sink frames so a spelling
+// difference does not drop the link and a cross-dialect token collision cannot fabricate one; vulnByFinding
+// maps a finding id to its advisory's vulnerable symbols (importPath.Symbol form). It is OPTIONAL: without
+// it the coordinator behaves exactly as before (no correlation). The index is built ONCE here so per-flow
+// correlation is an O(1) lookup, and a sink that is not any finding's vulnerable symbol records no link.
+func (c *Coordinator) WithVulnerableSymbols(lang symbolcanon.Language, vulnByFinding map[shared.ID][]string) *Coordinator {
+	c.vulnIndex = judgment.NewVulnerableSymbolIndex(lang, vulnByFinding)
+	return c
 }
 
 // Scan builds the target's call graph, assembles the taint FlowGraph over the catalog, and PROPOSES a
@@ -162,7 +179,13 @@ func (c *Coordinator) scan(ctx context.Context, engagementID shared.ID, targetRe
 			if err != nil {
 				return proposed, fmt.Errorf("propose taint judgment: %w", err)
 			}
-			if err := c.recordWitness(ctx, engagementID, j.ID, v, sink, sourcePos, sinkPos); err != nil {
+			// Correlate the dangerous CALLEE (sink.Symbol, the "importPath.Symbol" the tainted data flows
+			// into, e.g. database/sql.DB.Query) to the SCA finding(s) it exploits, when an advisory index is
+			// wired. A canonical match of that symbol to a finding's vulnerable symbol links this taint flow
+			// to the finding (the vuln is taint-reachable); no match records no link (Generic canonicalization
+			// splits any dialect losslessly).
+			correlated := c.vulnIndex.Correlate(sink.Symbol)
+			if err := c.recordWitness(ctx, engagementID, j.ID, v, sink, sourcePos, sinkPos, correlated); err != nil {
 				return proposed, err
 			}
 			proposed++
@@ -184,7 +207,7 @@ func flowSubjectID(engagementID shared.ID, v taint.TaintPath, sinkSymbols []stri
 // recordWitness records the taint proof path as append-only, attributable evidence for the proposed
 // judgment (GR6). The metadata carries ONLY normalized importPath.Symbol frames + the injection class –
 // never file contents, env, build stderr, or secrets (GR3), mirroring reachproof's proof rationale.
-func (c *Coordinator) recordWitness(ctx context.Context, engagementID, judgmentID shared.ID, v taint.TaintPath, sink taint.Sink, sourcePos, sinkPos string) error {
+func (c *Coordinator) recordWitness(ctx context.Context, engagementID, judgmentID shared.ID, v taint.TaintPath, sink taint.Sink, sourcePos, sinkPos string, correlated []shared.ID) error {
 	md := map[string]string{
 		"engagement": engagementID.String(),
 		"cwe":        sink.CWE,
@@ -198,6 +221,15 @@ func (c *Coordinator) recordWitness(ctx context.Context, engagementID, judgmentI
 	}
 	if sinkPos != "" {
 		md["sink_pos"] = sinkPos
+	}
+	// The SCA finding(s) this taint flow's sink exploits (a taint flow into a vulnerable function). Recorded
+	// only when the correlation resolved, so the metadata carries a link exactly when one is real.
+	if len(correlated) > 0 {
+		ids := make([]string, len(correlated))
+		for i, id := range correlated {
+			ids[i] = id.String()
+		}
+		md["correlated_findings"] = strings.Join(ids, ",")
 	}
 	if err := c.audit.Record(ctx, ports.AuditEntry{
 		Actor:    proposerActor,
