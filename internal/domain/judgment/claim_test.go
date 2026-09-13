@@ -55,6 +55,39 @@ func TestPythonSemanticActorsAreRecognizedOnlyAtTier2(t *testing.T) {
 	}
 }
 
+// TestRuntimeActorsNeverDeterministicProof is the #1061 #1-bar guard: observed runtime execution is
+// raise-only, so no runtime proof-actor pair may ever be a deterministic (suppressing) reachability proof
+// at any tier. If it were, a runtime signal could mint an OpenVEX not_affected, which runtime evidence must
+// never do (a host not exercising a path is not proof the path is unreachable).
+func TestRuntimeActorsNeverDeterministicProof(t *testing.T) {
+	pairs := [][2]string{
+		{ProofActorRuntimeExecScan, ProofActorRuntimeExecEngine},
+		{ProofActorRuntimeLibLoadedScan, ProofActorRuntimeLibLoadedEngine},
+		{ProofActorRuntimeSymbolHitScan, ProofActorRuntimeSymbolHitEngine},
+	}
+	for _, tier := range []ReachabilityTier{Tier0, Tier1, Tier1_5, Tier2, TierRuntime} {
+		for _, p := range pairs {
+			if IsDeterministicReachabilityProof(tier, p[0], p[1]) {
+				t.Errorf("runtime actor pair %v must never be a deterministic proof (tier %s)", p, tier)
+			}
+		}
+	}
+	// TierRuntime outranks every static tier (observed execution is the strongest reachability evidence).
+	if TierRuntime.Rank() <= Tier2.Rank() {
+		t.Errorf("TierRuntime rank %d must exceed Tier2 rank %d", TierRuntime.Rank(), Tier2.Rank())
+	}
+	// A runtime claim can NEVER suppress a finding, even if a not_reachable somehow reached this method:
+	// SuppressesFinding must fall through to false for TierRuntime (raise-only invariant).
+	full := ReachabilityClaim{Reachable: NotReachable, Tier: TierRuntime, Confidence: 100}
+	if full.SuppressesFinding() {
+		t.Error("a TierRuntime claim must never suppress a finding (raise-only)")
+	}
+	// The escalation rule must be an escalate-only effect (never de-escalate/suppress).
+	if eff, ok := ExpectedEffect(RuleRuntimeLibraryLoaded); !ok || eff != PromotionEscalate {
+		t.Errorf("RuleRuntimeLibraryLoaded must be escalate-only, got %v ok=%v", eff, ok)
+	}
+}
+
 func TestDASTClaimStrictDecode(t *testing.T) {
 	valid := []byte(`{"capability":"dast","claim":{"cwe":"CWE-79","location":"/search","rule":"reflected-xss","source":"first_party","fingerprint":"search_reflection","proof_evidence_id":"proof-1"}}`)
 	claim, err := UnmarshalClaim(valid)

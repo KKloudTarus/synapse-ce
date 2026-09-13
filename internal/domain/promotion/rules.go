@@ -89,6 +89,14 @@ type Snapshot struct {
 	TaintExploitPath    bool
 	TaintExploitApplied bool
 	TaintSignal         Signal
+	// RuntimeLibraryLoaded is true when a monitored host was OBSERVED loading the shared library this
+	// finding's OS package owns (EPIC #1042 #1061), matched by package ownership. Like TaintExploitPath it is
+	// a RAISE-ONLY trigger, independent of the attack-path/detection combo. RuntimeLibraryLoadedApplied is
+	// true once a prior runtime-library escalation has been recorded, so the raise happens at most once; the
+	// absence of a runtime load never reverses it. RuntimeLibrarySignal is its input provenance.
+	RuntimeLibraryLoaded        bool
+	RuntimeLibraryLoadedApplied bool
+	RuntimeLibrarySignal        Signal
 }
 
 // Evaluate returns at most one deterministic promotion claim. Signal-loss reversal restores the
@@ -114,6 +122,13 @@ func Evaluate(s Snapshot) (*judgment.PromotionClaim, error) {
 	// path never reverses it (this branch never de-escalates), so it can only ever raise urgency.
 	if s.TaintExploitPath && !s.TaintExploitApplied && s.Priority > 1 {
 		return claim(s, judgment.RuleTaintExploitPath, judgment.PromotionEscalate, s.Priority-1, []Signal{s.TaintSignal}, nil)
+	}
+	// Raise-only runtime-library escalation (EPIC #1042 #1061): a host observed loading the shared library
+	// this finding's package owns is standalone escalation evidence, independent of the attack-path/detection
+	// combo below. It escalates at most once (RuntimeLibraryLoadedApplied guards re-escalation) and is sticky:
+	// the absence of a runtime load never reverses it (this branch never de-escalates), so it can only raise.
+	if s.RuntimeLibraryLoaded && !s.RuntimeLibraryLoadedApplied && s.Priority > 1 {
+		return claim(s, judgment.RuleRuntimeLibraryLoaded, judgment.PromotionEscalate, s.Priority-1, []Signal{s.RuntimeLibrarySignal}, nil)
 	}
 	if len(s.DetectionSignals) == 0 || !s.PathPresent {
 		return nil, nil

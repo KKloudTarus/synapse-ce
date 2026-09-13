@@ -175,6 +175,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, engagementID shared.ID) (int, 
 	}
 	reachabilityByFinding := indexReachability(judgments)
 	taintByFinding := indexTaintExploitPaths(judgments)
+	runtimeByFinding := indexRuntimeLibraryLoads(judgments)
 	existingProposals := indexPromotionProposals(judgments)
 	allBindings, err := e.bindings.ListBindings(ctx, tenantID)
 	if err != nil {
@@ -213,14 +214,14 @@ func (e *Evaluator) Evaluate(ctx context.Context, engagementID shared.ID) (int, 
 		return 0, fmt.Errorf("list detections: %w", err)
 	}
 	activeDetections := filterActive(detRecords, e.clock.Now())
-	latestEvents, taintApplied, err := e.loadLatestEvents(ctx, engagementID, findings, graph, activeDetections, reachabilityByFinding)
+	latestEvents, taintApplied, runtimeApplied, err := e.loadLatestEvents(ctx, engagementID, findings, graph, activeDetections, reachabilityByFinding)
 	if err != nil {
 		return 0, fmt.Errorf("load latest promotion events: %w", err)
 	}
 
 	proposed := 0
 	for _, f := range findings {
-		snap, err := e.buildSnapshot(ctx, f, graph, activeDetections, reachabilityByFinding, latestEvents, taintByFinding, taintApplied)
+		snap, err := e.buildSnapshot(ctx, f, graph, activeDetections, reachabilityByFinding, latestEvents, taintByFinding, taintApplied, runtimeByFinding, runtimeApplied)
 		if err != nil {
 			return proposed, fmt.Errorf("build promotion snapshot for finding %s: %w", f.ID, err)
 		}
@@ -282,6 +283,8 @@ func (e *Evaluator) buildSnapshot(
 	latestEvents map[shared.ID]promotion.PriorEscalation,
 	taintByFinding map[shared.ID]promotion.Signal,
 	taintApplied map[shared.ID]bool,
+	runtimeByFinding map[shared.ID]promotion.Signal,
+	runtimeApplied map[shared.ID]bool,
 ) (promotion.Snapshot, error) {
 	snap := promotion.Snapshot{
 		FindingID:      f.ID,
@@ -307,6 +310,14 @@ func (e *Evaluator) buildSnapshot(
 		snap.TaintSignal = sig
 	}
 	snap.TaintExploitApplied = taintApplied[f.ID]
+
+	// Runtime-library signal (raise-only, EPIC #1042 #1061): a host observed loading the shared library
+	// this finding's OS package owns, matched by package ownership. RuntimeLibraryLoadedApplied gates re-escalation.
+	if sig, ok := runtimeByFinding[f.ID]; ok {
+		snap.RuntimeLibraryLoaded = true
+		snap.RuntimeLibrarySignal = sig
+	}
+	snap.RuntimeLibraryLoadedApplied = runtimeApplied[f.ID]
 
 	// Attack-path signal: evaluate each path independently so that
 	// confidence, attack-path provenance, and detection match come from
@@ -399,16 +410,19 @@ func (e *Evaluator) loadLatestEvents(
 	graph *attackpath.Graph,
 	activeDetections []detection.Record,
 	reachability map[shared.ID]reachInfo,
-) (map[shared.ID]promotion.PriorEscalation, map[shared.ID]bool, error) {
+) (map[shared.ID]promotion.PriorEscalation, map[shared.ID]bool, map[shared.ID]bool, error) {
 	out := make(map[shared.ID]promotion.PriorEscalation, len(findings))
 	// taintApplied records findings that already have a taint-exploit-path escalation event, so the
 	// raise-only rule fires at most once. These events are deliberately kept OUT of the reversal stack
 	// below (a taint escalation is sticky: the absence of the taint path never reverses it).
 	taintApplied := make(map[shared.ID]bool)
+	// runtimeApplied mirrors taintApplied for the runtime-library-load raise-only rule (EPIC #1042 #1061):
+	// a finding is applied iff such an escalation remains on the final reversal stack, so it fires at most once.
+	runtimeApplied := make(map[shared.ID]bool)
 	for _, f := range findings {
 		events, err := e.promotions.ListByFinding(ctx, engagementID, f.ID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("list promotions for finding %s: %w", f.ID, err)
+			return nil, nil, nil, fmt.Errorf("list promotions for finding %s: %w", f.ID, err)
 		}
 		// Events are oldest-first. Reconstruct unresolved escalations as a stack:
 		// an exact corroborating-signal-loss reversal pops only its referenced event.
@@ -447,34 +461,36 @@ func (e *Evaluator) loadLatestEvents(
 				}
 			}
 		}
-		// A finding is "taint-applied" (raise fires at most once) iff a taint escalation event REMAINS on the
-		// final stack after reversal pops, so a popped taint event correctly frees a re-raise.
+		// A finding is "applied" for a sticky raise-only rule (taint / runtime-library) iff such an escalation
+		// event REMAINS on the final stack after reversal pops, so a popped event correctly frees a re-raise.
 		for _, evt := range stack {
-			if evt.Rule == judgment.RuleTaintExploitPath {
+			switch evt.Rule {
+			case judgment.RuleTaintExploitPath:
 				taintApplied[f.ID] = true
-				break
+			case judgment.RuleRuntimeLibraryLoaded:
+				runtimeApplied[f.ID] = true
 			}
 		}
 		if len(stack) > 0 {
 			evt := stack[len(stack)-1]
-			// A taint exploit-path escalation is STICKY: its inputs are permanently active, so signal-loss
-			// never reverses it (EPIC #1042 2.1, "absence of a taint path changes nothing"). While it sits
-			// on top it also shields the escalations below it from reversal, which is the raise-only-safe
-			// direction (never de-escalates below the escalated level).
+			// A sticky raise-only escalation (taint / runtime-library) has permanently-active inputs, so
+			// signal-loss never reverses it (EPIC #1042 2.1/#1061, "the absence of the signal changes
+			// nothing"). While it sits on top it also shields the escalations below it from reversal, the
+			// raise-only-safe direction (never de-escalates below the escalated level).
 			inputsActive := true
-			if evt.Rule != judgment.RuleTaintExploitPath {
+			if !isStickyRaiseOnlyRule(evt.Rule) {
 				var err error
 				inputsActive, err = inputsStillActive(ctx, evt, f.ID, graph, activeDetections, reachability)
 				if err != nil {
-					return nil, nil, fmt.Errorf("check active escalation inputs for finding %s: %w", f.ID, err)
+					return nil, nil, nil, fmt.Errorf("check active escalation inputs for finding %s: %w", f.ID, err)
 				}
 			}
-			inputsMatch := false                           // a taint top is never an attack-path escalation, so its attack-path-shaped
-			if evt.Rule != judgment.RuleTaintExploitPath { // inputs-match is not computed (stays false).
+			inputsMatch := false                     // a sticky raise-only top is never an attack-path escalation, so its
+			if !isStickyRaiseOnlyRule(evt.Rule) {    // attack-path-shaped inputs-match is not computed (stays false).
 				var err error
 				inputsMatch, err = escalationInputsMatch(ctx, evt, f.ID, graph, activeDetections, reachability)
 				if err != nil {
-					return nil, nil, fmt.Errorf("check matching escalation inputs for finding %s: %w", f.ID, err)
+					return nil, nil, nil, fmt.Errorf("check matching escalation inputs for finding %s: %w", f.ID, err)
 				}
 			}
 			out[f.ID] = promotion.PriorEscalation{EventID: evt.ID, BeforePriority: evt.BeforePriority, InputsActive: inputsActive, InputsMatch: inputsMatch}
@@ -482,7 +498,14 @@ func (e *Evaluator) loadLatestEvents(
 			out[f.ID] = promotion.PriorEscalation{DeescalationInputsMatch: deescalationInputsMatch(*latestDeescalation, f.ID, reachability)}
 		}
 	}
-	return out, taintApplied, nil
+	return out, taintApplied, runtimeApplied, nil
+}
+
+// isStickyRaiseOnlyRule reports whether a promotion rule is a standalone raise-only escalation that is sticky
+// (never reversed by signal loss) and fires at most once: the taint exploit-path (#1051) and the runtime
+// library-load (#1061). They are kept OUT of the reversal stack's signal-loss de-escalation.
+func isStickyRaiseOnlyRule(rule string) bool {
+	return rule == judgment.RuleTaintExploitPath || rule == judgment.RuleRuntimeLibraryLoaded
 }
 
 // inputsStillActive reports whether the detection inputs that drove a prior
@@ -1021,6 +1044,35 @@ func indexTaintExploitPaths(judgments []judgment.Judgment) map[shared.ID]promoti
 			}
 			out[link.FindingID] = promotion.Signal{Kind: judgment.PromotionInputReachability, ID: j.ID}
 		}
+	}
+	return out
+}
+
+// indexRuntimeLibraryLoads indexes, per finding, a PUBLISHABLE finding-scoped CapReachability judgment
+// minted by the runtime library-load actor (EPIC #1042 #1061): a monitored host was observed loading the
+// shared library this finding's OS package owns, matched by PACKAGE OWNERSHIP (never a bare path). It is
+// the raise-only escalation signal for that finding. Only a runtime-libloaded actor's judgment qualifies,
+// and only when its ReachabilityClaim is Reachable, so an observed load raises urgency but the coordinator's
+// absence-of-load (which mints nothing) never de-escalates. The lowest judgment id wins per finding
+// (deterministic, churn-free). The signal rides the reachability input kind (an observed load is runtime
+// reachability evidence); it never de-escalates and never asserts not_affected.
+func indexRuntimeLibraryLoads(judgments []judgment.Judgment) map[shared.ID]promotion.Signal {
+	out := make(map[shared.ID]promotion.Signal)
+	for _, j := range judgments {
+		if j.Capability != judgment.CapReachability || j.SubjectKind != judgment.SubjectFinding || !j.Publishable() {
+			continue
+		}
+		if j.ProposedBy != judgment.ProofActorRuntimeLibLoadedScan && j.ProposedBy != judgment.ProofActorRuntimeLibLoadedEngine {
+			continue
+		}
+		rc, ok := j.Claim.(judgment.ReachabilityClaim)
+		if !ok || rc.Reachable != judgment.Reachable {
+			continue
+		}
+		if cur, exists := out[j.SubjectID]; exists && cur.ID <= j.ID {
+			continue // keep the lowest judgment id for a deterministic, churn-free signal
+		}
+		out[j.SubjectID] = promotion.Signal{Kind: judgment.PromotionInputRuntimeLibrary, ID: j.ID}
 	}
 	return out
 }
