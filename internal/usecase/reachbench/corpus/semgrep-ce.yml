@@ -1,0 +1,9 @@
+# Semgrep CE baseline for the reachability corpus. These are deliberately narrow, inspectable rules: CE can
+# prove the direct call site but cannot reproduce OSV's advisory-aware interprocedural analysis. The report
+# records that exact capability rather than calling a clean scan a proof of absence.
+rules:
+  - id: reachbench.go.jsonparser-delete-called
+    languages: [go]
+    severity: INFO
+    message: direct call to the GO-2026-4514 affected API
+    pattern: jsonparser.Delete(...)

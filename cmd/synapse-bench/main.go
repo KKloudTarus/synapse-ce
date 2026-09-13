@@ -13,12 +13,13 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/enginecompare"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachbench"
 )
 
 func main() {
 	inputPath := flag.String("input", "", "versioned benchmark input JSON")
 	outputPath := flag.String("output", "", "output benchmark report JSON (default: stdout)")
-	mode := flag.String("mode", "throughput", "reduction mode: throughput (latency/throughput), accuracy (detection precision/recall), or compare (owned-vs-competitor finding differential)")
+	mode := flag.String("mode", "throughput", "reduction mode: throughput, accuracy, reachability, reachability-osv, reachability-semgrep-ce, reachability-snyk-sample, or compare")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "synapse-bench: positional arguments are not supported")
@@ -66,6 +67,49 @@ func run(mode, inputPath, outputPath string, stdin io.Reader, stdout io.Writer) 
 			return fmt.Errorf("evaluate accuracy input: %w", err)
 		}
 		encode = func(w io.Writer) error { return benchmark.EncodeAccuracyReport(w, report) }
+	case "reachability":
+		// A fixture runner (owned engine or an OSS baseline adapter) supplies complete labelled observations
+		// against a versioned corpus. This command reduces only that evidence; it never executes a scanner
+		// or contacts a service, which keeps scorecards reproducible and safe to compare in CI.
+		input, err := reachbench.DecodeInput(inputReader)
+		if err != nil {
+			return err
+		}
+		report, err := reachbench.EvaluateInput(input)
+		if err != nil {
+			return fmt.Errorf("evaluate reachability input: %w", err)
+		}
+		encode = func(w io.Writer) error { return reachbench.EncodeReport(w, report) }
+	case "reachability-osv":
+		observations, err := reachbench.OSVObservations(reachbench.DefaultCorpus(), inputReader)
+		if err != nil {
+			return err
+		}
+		report, err := reachbench.Evaluate(reachbench.DefaultCorpus(), observations)
+		if err != nil {
+			return fmt.Errorf("evaluate OSV-Scanner reachability baseline: %w", err)
+		}
+		encode = func(w io.Writer) error { return reachbench.EncodeReport(w, report) }
+	case "reachability-semgrep-ce":
+		observations, err := reachbench.SemgrepCEObservations(reachbench.DefaultCorpus(), inputReader)
+		if err != nil {
+			return err
+		}
+		report, err := reachbench.Evaluate(reachbench.DefaultCorpus(), observations)
+		if err != nil {
+			return fmt.Errorf("evaluate Semgrep CE reachability baseline: %w", err)
+		}
+		encode = func(w io.Writer) error { return reachbench.EncodeReport(w, report) }
+	case "reachability-snyk-sample":
+		observations, err := reachbench.SnykSampleObservations(reachbench.DefaultCorpus(), inputReader)
+		if err != nil {
+			return err
+		}
+		report, err := reachbench.Evaluate(reachbench.DefaultCorpus(), observations)
+		if err != nil {
+			return fmt.Errorf("evaluate Snyk sample reachability baseline: %w", err)
+		}
+		encode = func(w io.Writer) error { return reachbench.EncodeReport(w, report) }
 	case "compare":
 		// Reduce two engines' finding sets (owned candidate vs a competitor baseline, e.g. Grype) over the
 		// same target into an honest differential: what the owned engine found that the baseline missed, and
@@ -116,7 +160,7 @@ func run(mode, inputPath, outputPath string, stdin io.Reader, stdout io.Writer) 
 			return enc.Encode(report)
 		}
 	default:
-		return fmt.Errorf("unknown mode %q (want throughput, accuracy or compare)", mode)
+		return fmt.Errorf("unknown mode %q (want throughput, accuracy, reachability, reachability-osv, reachability-semgrep-ce, reachability-snyk-sample or compare)", mode)
 	}
 
 	outputWriter := stdout

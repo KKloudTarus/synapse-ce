@@ -1,0 +1,43 @@
+{
+  "schema_version": "synapse-reachability-corpus-v1",
+  "cases": [
+    {
+      "name": "go_direct_call_reachable",
+      "language": "go",
+      "fixture": "go_direct_call",
+      "symbol": "reachfixture.reached",
+      "expected": "reachable"
+    },
+    {
+      "name": "go_unreached_function",
+      "language": "go",
+      "fixture": "go_direct_call",
+      "symbol": "reachfixture.unreached",
+      "expected": "present_unreached"
+    },
+    {
+      "name": "go_osv_jsonparser_delete_called",
+      "language": "go",
+      "fixture": "go_osv_jsonparser_called",
+      "symbol": "github.com/buger/jsonparser.Delete",
+      "expected": "reachable",
+      "baseline": {
+        "osv": {"advisory_ids": ["GO-2026-4514"], "source_suffix": "go_osv_jsonparser_called/go.mod"},
+        "semgrep_ce": {"rule_id": "reachbench.go.jsonparser-delete-called", "path_suffix": "go_osv_jsonparser_called/main.go"},
+        "snyk_sample": {"evidence_id": "GO-2026-4514-called"}
+      }
+    },
+    {
+      "name": "go_osv_jsonparser_delete_uncalled",
+      "language": "go",
+      "fixture": "go_osv_jsonparser_uncalled",
+      "symbol": "github.com/buger/jsonparser.Delete",
+      "expected": "present_unreached",
+      "baseline": {
+        "osv": {"advisory_ids": ["GO-2026-4514"], "source_suffix": "go_osv_jsonparser_uncalled/go.mod"},
+        "semgrep_ce": {"rule_id": "reachbench.go.jsonparser-delete-called", "path_suffix": "go_osv_jsonparser_uncalled/main.go"},
+        "snyk_sample": {"evidence_id": "GO-2026-4514-uncalled"}
+      }
+    }
+  ]
+}

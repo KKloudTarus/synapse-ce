@@ -74,6 +74,7 @@ nav:
       - eBPF portability: ebpf-portability.md
       - Release provenance: release-provenance.md
       - AI triage evaluation: ai-triage-evaluation.md
+      - Reachability benchmark: reachability-benchmark-runbook.md
       - Operations drill evidence: operations-drill-evidence.md
       - Detection RulePack lifecycle: rulepack.md
   - Integrate:

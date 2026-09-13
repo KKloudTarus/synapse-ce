@@ -9,6 +9,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/enginecompare"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachbench"
 )
 
 func TestRunWritesDeterministicJSON(t *testing.T) {
@@ -54,6 +55,64 @@ func TestRunAccuracyMode(t *testing.T) {
 	// TP=2 (both CVE-1, CVE-2), FP=1 (CVE-9), FN=0: recall 1.0, precision 2/3.
 	if report.Overall.TruePositives != 2 || report.Overall.FalsePositives != 1 || report.Overall.Recall != 1 {
 		t.Fatalf("overall = %+v", report.Overall)
+	}
+}
+
+// TestRunReachabilityMode gives owned-engine and OSS-adapter runners the same deterministic reduction
+// contract: a scorecard is accepted only when every checked-in corpus case has an explicit label.
+func TestRunReachabilityMode(t *testing.T) {
+	input := `{"schema_version":"synapse-reachability-input-v1","corpus":{"schema_version":"synapse-reachability-corpus-v1","cases":[` +
+		`{"name":"go-hit","language":"go","fixture":"fixture","symbol":"fixture.hit","expected":"reachable"},` +
+		`{"name":"go-miss","language":"go","fixture":"fixture","symbol":"fixture.miss","expected":"present_unreached"}]},` +
+		`"observations":[{"case":"go-hit","label":"reachable"},{"case":"go-miss","label":"present_unreached"}]}`
+	var stdout bytes.Buffer
+	if err := run("reachability", "", "", strings.NewReader(input), &stdout); err != nil {
+		t.Fatal(err)
+	}
+	report, err := reachbench.LoadReport(&stdout)
+	if err != nil {
+		t.Fatalf("LoadReport: %v", err)
+	}
+	if report.SchemaVersion != reachbench.ReportSchemaVersion || report.Cases != 2 || report.Languages[0].PositiveRecall != 1 {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestRunExternalReachabilityBaselineModes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		mode  string
+		input string
+	}{
+		{
+			name:  "osv",
+			mode:  "reachability-osv",
+			input: `{"results":[{"source":{"path":"go_osv_jsonparser_called/go.mod"},"packages":[{"groups":[{"experimentalAnalysis":{"GO-2026-4514":{"called":true}}}]}]},{"source":{"path":"go_osv_jsonparser_uncalled/go.mod"},"packages":[{"groups":[{"experimentalAnalysis":{"GO-2026-4514":{"called":false}}}]}]}]}`,
+		},
+		{
+			name:  "semgrep",
+			mode:  "reachability-semgrep-ce",
+			input: `{"results":[{"check_id":"reachbench.go.jsonparser-delete-called","path":"go_osv_jsonparser_called/main.go"}]}`,
+		},
+		{
+			name:  "snyk sample",
+			mode:  "reachability-snyk-sample",
+			input: `{"observations":[{"evidence_id":"GO-2026-4514-called","label":"reachable"},{"evidence_id":"GO-2026-4514-uncalled","label":"present_unreached"}]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			if err := run(tc.mode, "", "", strings.NewReader(tc.input), &stdout); err != nil {
+				t.Fatal(err)
+			}
+			report, err := reachbench.LoadReport(&stdout)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.Cases != len(reachbench.DefaultCorpus().Cases) || report.SchemaVersion != reachbench.ReportSchemaVersion {
+				t.Fatalf("report = %+v", report)
+			}
+		})
 	}
 }
 
