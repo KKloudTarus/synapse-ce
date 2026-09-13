@@ -109,6 +109,30 @@ func TestSemgrepCEObservationsPythonSinkPresenceIsNotReachability(t *testing.T) 
 	}
 }
 
+// TestSemgrepConfigPrefixedRuleMatches pins that a Semgrep result whose check_id is prefixed by the config
+// file path (Semgrep's behavior for `--config <file>`: `reachbench.py.os-system-call` is emitted as
+// `internal.usecase.reachbench.corpus.reachbench.py.os-system-call`) still maps to its corpus selector. A
+// regression here silently scores every Semgrep baseline as zero, making the head-to-head vacuous.
+func TestSemgrepConfigPrefixedRuleMatches(t *testing.T) {
+	base := "internal/infrastructure/tools/astwalk/testdata/reachbench"
+	observations, err := SemgrepCEObservations(DefaultCorpus(), strings.NewReader(`{"results":[
+		{"check_id":"internal.usecase.reachbench.corpus.reachbench.py.os-system-call","path":"`+base+`/py_reached/app.py"}
+	]}`))
+	if err != nil {
+		t.Fatalf("SemgrepCEObservations: %v", err)
+	}
+	if got := observationLabels(observations); got["py_reached_via_handler"] != Reachable {
+		t.Fatalf("a config-path-prefixed Semgrep check_id must map to its selector, got %v", got["py_reached_via_handler"])
+	}
+	// A partial-segment suffix must NOT alias (dot-boundary match): "x.os-system-call" != "os-system-call".
+	if semgrepRuleMatches("reachbench.py.evil-os-system-call", "os-system-call") {
+		t.Fatal("rule match must be at a dot boundary, not a bare string suffix")
+	}
+	if !semgrepRuleMatches("reachbench.go.jsonparser-delete-called", "reachbench.go.jsonparser-delete-called") {
+		t.Fatal("an exact bare rule id must match")
+	}
+}
+
 func observationLabels(observations []Observation) map[string]Label {
 	got := make(map[string]Label, len(observations))
 	for _, item := range observations {
