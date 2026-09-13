@@ -157,6 +157,15 @@ func TestPythonReachabilityCorpus(t *testing.T) {
 		if loadErr != nil {
 			t.Fatalf("load reachability baseline report %q: %v", path, loadErr)
 		}
+		// Non-triviality floor: a baseline that detected NOTHING on the corpus (the OSS tool did not run, its
+		// rule failed to load, or a fixture edit removed the sink) reduces to recall 0 that the owned engine
+		// beats vacuously. Require every gated baseline to have produced at least one positive on this
+		// language, so a silently-degraded head-to-head fails loudly instead of recording a hollow win.
+		for _, bs := range baseline.Languages {
+			if bs.Language == "python" && bs.PositiveProduced == 0 {
+				t.Fatalf("baseline %q recorded zero positive detections on the Python corpus; the OSS tool did not run or matched nothing, so the head-to-head would be vacuous", path)
+			}
+		}
 		if breaches := reachbench.CheckBaselineParity(report, baseline); len(breaches) > 0 {
 			t.Fatalf("owned Python reachability is below baseline %q: %v", path, breaches)
 		}

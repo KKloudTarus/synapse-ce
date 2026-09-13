@@ -258,3 +258,13 @@ func TestRunReachabilityBaselineLanguageFilter(t *testing.T) {
 		t.Fatal("a language with no corpus cases must error")
 	}
 }
+
+// TestRunRejectsLanguageForNonBaselineModes: -language only scopes an OSS-baseline report, so it is an error
+// on modes that carry their own corpus (or none), never silently ignored.
+func TestRunRejectsLanguageForNonBaselineModes(t *testing.T) {
+	for _, mode := range []string{"reachability", "throughput", "accuracy", "compare"} {
+		if err := run(mode, "", "", "python", strings.NewReader(`{}`), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "-language is only valid") {
+			t.Fatalf("mode %q with -language must be rejected, got %v", mode, err)
+		}
+	}
+}

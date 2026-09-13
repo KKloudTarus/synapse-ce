@@ -116,3 +116,32 @@ func observationLabels(observations []Observation) map[string]Label {
 	}
 	return got
 }
+
+// TestSemgrepSelectorsDoNotSuffixAlias locks a benchmark-integrity property of the Semgrep path matching
+// (strings.HasSuffix in SemgrepCEObservations): no case's path_suffix may be a suffix of another's, or one
+// Semgrep result could be attributed to two cases and mislabel one. It also requires each selector's rule id
+// to be non-empty. This is a corpus-authoring guard, not a runtime path.
+func TestSemgrepSelectorsDoNotSuffixAlias(t *testing.T) {
+	var suffixes []string
+	for _, c := range DefaultCorpus().Cases {
+		if s := c.Baseline.SemgrepCE; s != nil {
+			if s.RuleID == "" || s.PathSuffix == "" {
+				t.Fatalf("case %q has an incomplete Semgrep selector", c.Name)
+			}
+			suffixes = append(suffixes, s.PathSuffix)
+		}
+	}
+	if len(suffixes) < 2 {
+		t.Skip("need at least two Semgrep selectors to check aliasing")
+	}
+	for i := range suffixes {
+		for j := range suffixes {
+			if i == j {
+				continue
+			}
+			if strings.HasSuffix(suffixes[i], suffixes[j]) {
+				t.Errorf("Semgrep path_suffix %q is a suffix of %q; a single result could mislabel both cases", suffixes[j], suffixes[i])
+			}
+		}
+	}
+}

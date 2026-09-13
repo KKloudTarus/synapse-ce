@@ -45,6 +45,16 @@ func baselineCorpus(language string) (reachbench.Corpus, error) {
 }
 
 func run(mode, inputPath, outputPath, language string, stdin io.Reader, stdout io.Writer) error {
+	// -language scopes an OSS-baseline report to one corpus language; it is meaningless for the other modes,
+	// which carry their own corpus or no corpus at all. Reject it there rather than accept-and-ignore, so a
+	// caller never believes a plain reachability/throughput run was language-filtered.
+	if language != "" {
+		switch mode {
+		case "reachability-osv", "reachability-semgrep-ce", "reachability-snyk-sample":
+		default:
+			return fmt.Errorf("-language is only valid for the reachability baseline modes, not %q", mode)
+		}
+	}
 	inputReader := stdin
 	var inputFile *os.File
 	if inputPath != "" {
