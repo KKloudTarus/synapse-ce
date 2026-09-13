@@ -212,6 +212,40 @@ broker DaemonSet enabled and an execution node selector.
   value: {{ .Values.api.assessmentCycleApi.comparisonBacklogWarning | quote }}
 - name: SYNAPSE_ASSESSMENT_COMPARISON_BACKLOG_HARD_LIMIT
   value: {{ .Values.api.assessmentCycleApi.comparisonBacklogHardLimit | quote }}
+- name: SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED
+  value: {{ .Values.vulnerabilityIntelligence.providerSyncEnabled | quote }}
+- name: SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_INTERVAL
+  value: {{ .Values.vulnerabilityIntelligence.syncSchedulerInterval | quote }}
+- name: SYNAPSE_VULNERABILITY_SYNC_STALE_AFTER
+  value: {{ .Values.vulnerabilityIntelligence.syncStaleAfter | quote }}
+- name: SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_DISPATCH_LIMIT
+  value: {{ .Values.vulnerabilityIntelligence.syncDispatchLimit | quote }}
+- name: SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED
+  value: {{ .Values.vulnerabilityIntelligence.occurrenceWritesEnabled | quote }}
+- name: SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED
+  value: {{ .Values.vulnerabilityIntelligence.findingProjectionEnabled | quote }}
+- name: SYNAPSE_VULNERABILITY_ACTIONS_ENABLED
+  value: {{ .Values.vulnerabilityIntelligence.actionsEnabled | quote }}
+- name: SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED
+  value: {{ .Values.vulnerabilityIntelligence.notificationsEnabled | quote }}
+- name: SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED
+  value: {{ .Values.vulnerabilityIntelligence.dryRunEnabled | quote }}
+- name: SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST
+  value: {{ join "," .Values.vulnerabilityIntelligence.tenantAllowlist | quote }}
+- name: SYNAPSE_VULNERABILITY_MAINTENANCE_INTERVAL
+  value: {{ .Values.vulnerabilityIntelligence.maintenance.interval | quote }}
+- name: SYNAPSE_VULNERABILITY_MAINTENANCE_DELETE_ENABLED
+  value: {{ .Values.vulnerabilityIntelligence.maintenance.deleteEnabled | quote }}
+- name: SYNAPSE_VULNERABILITY_RAW_PAYLOAD_RETENTION
+  value: {{ .Values.vulnerabilityIntelligence.maintenance.rawPayloadRetention | quote }}
+- name: SYNAPSE_VULNERABILITY_SYNC_RUN_RETENTION
+  value: {{ .Values.vulnerabilityIntelligence.maintenance.syncRunRetention | quote }}
+- name: SYNAPSE_VULNERABILITY_RESOLVED_OCCURRENCE_RETENTION
+  value: {{ .Values.vulnerabilityIntelligence.maintenance.resolvedOccurrenceRetention | quote }}
+- name: SYNAPSE_VULNERABILITY_UNREFERENCED_ADVISORY_RETENTION
+  value: {{ .Values.vulnerabilityIntelligence.maintenance.unreferencedAdvisoryRetention | quote }}
+- name: SYNAPSE_VULNERABILITY_MAINTENANCE_BATCH_SIZE
+  value: {{ .Values.vulnerabilityIntelligence.maintenance.batchSize | quote }}
 {{- if .Values.oidc.enabled }}
 - name: SYNAPSE_OIDC_ENABLED
   value: "true"

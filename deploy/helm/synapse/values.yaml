@@ -103,6 +103,28 @@ responseExecution:
   commandTTL: 2m
   pollInterval: 100ms
 
+# Vulnerability Intelligence rollout is fail-closed. Maintenance remains off;
+# when scheduled, it is audit-only until deleteEnabled is explicitly set.
+vulnerabilityIntelligence:
+  providerSyncEnabled: false
+  syncSchedulerInterval: "0"
+  syncStaleAfter: 2h
+  syncDispatchLimit: 16
+  occurrenceWritesEnabled: false
+  findingProjectionEnabled: false
+  actionsEnabled: false
+  notificationsEnabled: false
+  dryRunEnabled: true
+  tenantAllowlist: []
+  maintenance:
+    interval: "0"
+    deleteEnabled: false
+    rawPayloadRetention: 720h
+    syncRunRetention: 4320h
+    resolvedOccurrenceRetention: 2160h
+    unreferencedAdvisoryRetention: 720h
+    batchSize: 1000
+
 worker:
   # Disable this Deployment when execution workers run on the hardened external EC2 tier.
   enabled: true

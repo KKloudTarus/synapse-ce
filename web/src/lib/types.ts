@@ -2482,7 +2482,8 @@ export interface DashboardSecurityOperations {
 
 export type VulnerabilityAdvisoryStatus = 'active' | 'rejected' | 'withdrawn'
 export type VulnerabilityRiskTrend = 'none' | 'new' | 'increased' | 'decreased' | 'unchanged'
-export type VulnerabilitySourceAdapter = 'osv' | 'csaf' | 'oval' | 'nvd' | 'cisa_kev' | 'first_epss' | 'public_exploit'
+export type VulnerabilityCoverageState = 'affected' | 'evaluated_not_affected' | 'not_evaluated' | 'unsupported_identity' | 'incomplete_inventory'
+export type VulnerabilitySourceAdapter = 'osv' | 'csaf' | 'oval' | 'nvd' | 'ghsa' | 'gitlab' | 'cisa_kev' | 'first_epss' | 'public_exploit' | 'vulncheck_kev'
 export type VulnerabilitySyncMode = 'incremental' | 'full'
 export type VulnerabilitySyncState = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'superseded'
 
@@ -2498,6 +2499,9 @@ export interface VulnerabilityIntelligenceOverview {
   staleOrFailedSources: number
   lastSuccessfulSync: string | null
   changedAdvisories24Hours: number
+  newlyDisclosed24Hours: number
+  newlyIngested24Hours: number
+  newlyAffectedAssets24Hours: number
   oldestUnevaluatedRevision: VulnerabilityEvaluationLag | null
   openHighCriticalExposure: number
   pendingRiskActions: number
@@ -2532,6 +2536,8 @@ export interface VulnerabilityAdvisory {
   detectionStates: string[]
   actionStates: string[]
   lastEvaluation: string | null
+  coverageState: VulnerabilityCoverageState
+  coverageReason: string
 }
 
 export interface VulnerabilityAdvisoryPage {

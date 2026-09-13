@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,10 +19,11 @@ type ComponentInventoryStore struct {
 	generations map[string]int64
 	current     map[string]sbom.InventoryPublication
 	published   map[string]sbom.InventoryPublication
+	work        map[string]sbom.InventoryWork
 }
 
 func NewComponentInventoryStore(records ...sbom.ComponentRecord) *ComponentInventoryStore {
-	store := &ComponentInventoryStore{generations: map[string]int64{}, current: map[string]sbom.InventoryPublication{}, published: map[string]sbom.InventoryPublication{}}
+	store := &ComponentInventoryStore{generations: map[string]int64{}, current: map[string]sbom.InventoryPublication{}, published: map[string]sbom.InventoryPublication{}, work: map[string]sbom.InventoryWork{}}
 	store.items = append(store.items, records...)
 	return store
 }
@@ -43,6 +45,7 @@ func (s *ComponentInventoryStore) admit(admission sbom.InventoryAdmission) (sbom
 }
 
 var _ ports.ComponentInventoryStore = (*ComponentInventoryStore)(nil)
+var _ ports.InventoryWorkStore = (*ComponentInventoryStore)(nil)
 
 func (s *ComponentInventoryStore) Save(record sbom.ComponentRecord) error {
 	if err := record.Validate(); err != nil {
@@ -93,6 +96,7 @@ func (s *ComponentInventoryStore) publishSnapshot(records []sbom.ComponentRecord
 		if s.generations[key] == publication.Generation && publication.Generation > current.Generation {
 			publication.Current = true
 			s.current[key] = publication
+			s.work[publicationKey] = sbom.InventoryWork{Publication: publication, State: sbom.InventoryWorkPending, NextAttemptAt: publication.PublishedAt, CreatedAt: publication.PublishedAt, UpdatedAt: publication.PublishedAt}
 		} else {
 			publication.Superseded = true
 		}
@@ -246,6 +250,162 @@ func (s *ComponentInventoryStore) ListSnapshotComponents(ctx context.Context, qu
 	}
 	page.Items = append([]sbom.ComponentRecord(nil), items...)
 	return page, nil
+}
+
+func (s *ComponentInventoryStore) ListCurrentInventoryPublications(ctx context.Context, tenantID shared.ID, cursor sbom.InventoryCursor, limit int) (sbom.InventoryPublicationPage, error) {
+	contextTenant, ok := shared.TenantFrom(ctx)
+	tenantID = shared.TenantOrDefault(tenantID)
+	if !ok || shared.TenantOrDefault(contextTenant) != tenantID {
+		return sbom.InventoryPublicationPage{}, fmt.Errorf("%w: inventory publication tenant does not match context", shared.ErrValidation)
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	s.mu.RLock()
+	items := make([]sbom.InventoryPublication, 0)
+	for _, item := range s.current {
+		if item.TenantID != tenantID || item.EngagementID < cursor.AfterEngagementID ||
+			(item.EngagementID == cursor.AfterEngagementID && item.Scope <= cursor.AfterScope) {
+			continue
+		}
+		items = append(items, item)
+	}
+	s.mu.RUnlock()
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].EngagementID != items[j].EngagementID {
+			return items[i].EngagementID < items[j].EngagementID
+		}
+		return items[i].Scope < items[j].Scope
+	})
+	page := sbom.InventoryPublicationPage{}
+	if len(items) > limit {
+		page.Items = append([]sbom.InventoryPublication(nil), items[:limit]...)
+		last := page.Items[len(page.Items)-1]
+		page.Next = &sbom.InventoryCursor{AfterEngagementID: last.EngagementID, AfterScope: last.Scope}
+		return page, nil
+	}
+	page.Items = append([]sbom.InventoryPublication(nil), items...)
+	return page, nil
+}
+
+func (s *ComponentInventoryStore) GetCurrentInventoryPublication(ctx context.Context, tenantID, engagementID shared.ID, scope string) (sbom.InventoryPublication, error) {
+	contextTenant, ok := shared.TenantFrom(ctx)
+	tenantID = shared.TenantOrDefault(tenantID)
+	if !ok || shared.TenantOrDefault(contextTenant) != tenantID || engagementID.IsZero() || scope == "" {
+		return sbom.InventoryPublication{}, fmt.Errorf("%w: inventory publication identity is invalid", shared.ErrValidation)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	item, ok := s.current[inventoryScopeKey(tenantID, engagementID, scope)]
+	if !ok {
+		return sbom.InventoryPublication{}, shared.ErrNotFound
+	}
+	return item, nil
+}
+
+func (s *ComponentInventoryStore) ClaimInventoryWork(ctx context.Context, tenantID shared.ID, owner string, at time.Time, lease time.Duration, limit int) ([]sbom.InventoryWork, error) {
+	contextTenant, ok := shared.TenantFrom(ctx)
+	tenantID = shared.TenantOrDefault(tenantID)
+	owner = strings.TrimSpace(owner)
+	if !ok || shared.TenantOrDefault(contextTenant) != tenantID || owner == "" || at.IsZero() || lease <= 0 {
+		return nil, fmt.Errorf("%w: inventory work lease identity is invalid", shared.ErrValidation)
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := make([]string, 0)
+	for key, work := range s.work {
+		if work.Publication.TenantID != tenantID || work.State.Terminal() {
+			continue
+		}
+		current := s.current[inventoryScopeKey(tenantID, work.Publication.EngagementID, work.Publication.Scope)]
+		if current.Generation != work.Publication.Generation || current.SBOMID != work.Publication.SBOMID {
+			work.State, work.Reason, work.UpdatedAt = sbom.InventoryWorkSkipped, "superseded_inventory_generation", at.UTC()
+			work.LeaseOwner, work.LeaseUntil = "", nil
+			s.work[key] = work
+			continue
+		}
+		eligible := (work.State == sbom.InventoryWorkPending || work.State == sbom.InventoryWorkRetry) && !work.NextAttemptAt.After(at)
+		eligible = eligible || work.State == sbom.InventoryWorkRunning && work.LeaseUntil != nil && !work.LeaseUntil.After(at)
+		if eligible {
+			keys = append(keys, key)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		left, right := s.work[keys[i]], s.work[keys[j]]
+		if !left.NextAttemptAt.Equal(right.NextAttemptAt) {
+			return left.NextAttemptAt.Before(right.NextAttemptAt)
+		}
+		return keys[i] < keys[j]
+	})
+	if len(keys) > limit {
+		keys = keys[:limit]
+	}
+	result := make([]sbom.InventoryWork, 0, len(keys))
+	for _, key := range keys {
+		work := s.work[key]
+		until := at.UTC().Add(lease)
+		work.State, work.Attempt, work.LeaseOwner, work.LeaseUntil, work.UpdatedAt = sbom.InventoryWorkRunning, work.Attempt+1, owner, &until, at.UTC()
+		s.work[key] = work
+		result = append(result, work)
+	}
+	return result, nil
+}
+
+func (s *ComponentInventoryStore) FinishInventoryWork(ctx context.Context, work sbom.InventoryWork, owner string, state sbom.InventoryWorkState, reason string, nextAttemptAt, at time.Time) error {
+	tenantID, ok := shared.TenantFrom(ctx)
+	owner = strings.TrimSpace(owner)
+	if !ok || shared.TenantOrDefault(tenantID) != shared.TenantOrDefault(work.Publication.TenantID) || owner == "" || !state.Terminal() && state != sbom.InventoryWorkRetry || at.IsZero() {
+		return fmt.Errorf("%w: invalid inventory work completion", shared.ErrValidation)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := fmt.Sprintf("%s\x00%d", inventoryScopeKey(work.Publication.TenantID, work.Publication.EngagementID, work.Publication.Scope), work.Publication.Generation)
+	current, exists := s.work[key]
+	if !exists {
+		return shared.ErrNotFound
+	}
+	if current.State != sbom.InventoryWorkRunning || current.LeaseOwner != owner || current.LeaseUntil == nil || !current.LeaseUntil.After(at) {
+		return shared.ErrConflict
+	}
+	current.State, current.Reason, current.LeaseOwner, current.LeaseUntil, current.UpdatedAt = state, strings.TrimSpace(reason), "", nil, at.UTC()
+	if state == sbom.InventoryWorkRetry {
+		if nextAttemptAt.IsZero() || nextAttemptAt.Before(at) {
+			return fmt.Errorf("%w: inventory retry time is invalid", shared.ErrValidation)
+		}
+		current.NextAttemptAt = nextAttemptAt.UTC()
+	}
+	s.work[key] = current
+	return nil
+}
+
+func (s *ComponentInventoryStore) CompleteInventoryPublication(ctx context.Context, publication sbom.InventoryPublication, at time.Time) error {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || shared.TenantOrDefault(tenantID) != shared.TenantOrDefault(publication.TenantID) || at.IsZero() {
+		return fmt.Errorf("%w: invalid inventory publication completion", shared.ErrValidation)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := fmt.Sprintf("%s\x00%d", inventoryScopeKey(publication.TenantID, publication.EngagementID, publication.Scope), publication.Generation)
+	work, exists := s.work[key]
+	if !exists {
+		return shared.ErrNotFound
+	}
+	current := s.current[inventoryScopeKey(publication.TenantID, publication.EngagementID, publication.Scope)]
+	if current.Generation != publication.Generation || current.SBOMID != publication.SBOMID {
+		return shared.ErrConflict
+	}
+	work.State, work.Reason, work.LeaseOwner, work.LeaseUntil, work.UpdatedAt = sbom.InventoryWorkCompleted, "", "", nil, at.UTC()
+	s.work[key] = work
+	return nil
 }
 
 func latestSBOM(items []sbom.ComponentRecord, tenantID, engagementID shared.ID) (sbom.ComponentRecord, bool) {

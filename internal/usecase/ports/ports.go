@@ -40,6 +40,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityaction"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityintel"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilitymaintenance"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityoccurrence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityrisk"
@@ -513,6 +514,25 @@ type FindingRepository interface {
 	SetAssignee(ctx context.Context, engagementID, findingID shared.ID, assignee string, expectedVersion int) (finding.Finding, error)
 }
 
+type VulnerabilityFindingOccurrenceLinker interface {
+	LinkVulnerabilityFindingOccurrence(ctx context.Context, tenantID, engagementID, findingID, occurrenceID shared.ID, at time.Time) error
+}
+
+// FindingDedupReader resolves the stable finding identity after an upsert. It is
+// deliberately separate from FindingRepository so older adapters remain source
+// compatible while vulnerability projection can preserve historical finding IDs.
+type FindingDedupReader interface {
+	GetByEngagementAndDedupKey(ctx context.Context, engagementID shared.ID, dedupKey string) (finding.Finding, error)
+}
+
+// VulnerabilityPrimaryFindingMapper owns the VI-specific uniqueness boundary:
+// one primary remediation workflow per tenant, technical target and canonical
+// advisory. Conflicted historical groups are fenced until explicitly resolved.
+type VulnerabilityPrimaryFindingMapper interface {
+	CheckVulnerabilityPrimaryFinding(ctx context.Context, tenantID, engagementID shared.ID, inventoryScope, advisoryID string) error
+	MapVulnerabilityPrimaryFinding(ctx context.Context, tenantID, engagementID shared.ID, inventoryScope, advisoryID string, findingID shared.ID, at time.Time) error
+}
+
 // CommentRepository persists the per-finding comment thread – the human
 // collaboration record, distinct from the append-only audit log. Reads are scoped
 // to the engagement (no cross-engagement comment access).
@@ -723,6 +743,14 @@ type ScanRepository interface {
 type ComponentInventoryStore interface {
 	ListCurrentComponents(ctx context.Context, query sbom.ComponentQuery) (sbom.ComponentPage, error)
 	ListSnapshotComponents(ctx context.Context, query sbom.SnapshotQuery) (sbom.ComponentPage, error)
+	ListCurrentInventoryPublications(ctx context.Context, tenantID shared.ID, cursor sbom.InventoryCursor, limit int) (sbom.InventoryPublicationPage, error)
+	GetCurrentInventoryPublication(ctx context.Context, tenantID, engagementID shared.ID, scope string) (sbom.InventoryPublication, error)
+}
+
+type InventoryWorkStore interface {
+	ClaimInventoryWork(ctx context.Context, tenantID shared.ID, owner string, at time.Time, lease time.Duration, limit int) ([]sbom.InventoryWork, error)
+	FinishInventoryWork(ctx context.Context, work sbom.InventoryWork, owner string, state sbom.InventoryWorkState, reason string, nextAttemptAt, at time.Time) error
+	CompleteInventoryPublication(ctx context.Context, publication sbom.InventoryPublication, at time.Time) error
 }
 
 type SBOMVulnerabilityReconciler interface {
@@ -815,6 +843,25 @@ type VulnerabilityAdvisoryReadStore interface {
 	ListVulnerabilityAdvisoryRevisions(ctx context.Context, query vulnerabilityintel.AdvisoryRevisionQuery) (vulnerabilityintel.AdvisoryRevisionPage, error)
 	ListVulnerabilitySyncRunRevisions(ctx context.Context, runIDs []shared.ID, limitPerRun int) (map[shared.ID]vulnerabilityintel.AdvisoryRevisionLinkPage, error)
 	CountVulnerabilityAdvisoriesChangedSince(ctx context.Context, since time.Time) (int64, error)
+}
+
+// VulnerabilityCoverageReadStore is an optional durable read capability. It
+// combines advisory checkpoints with authoritative inventory-work state so a
+// missing occurrence is never presented as proof of no exposure.
+type VulnerabilityCoverageReadStore interface {
+	SummarizeVulnerabilityCoverage(ctx context.Context, tenantID shared.ID, requests []vulnerabilityintel.AdvisoryCoverageRequest) (map[string]vulnerabilityintel.AdvisoryCoverageSummary, error)
+}
+
+type VulnerabilityAdvisoryImpactReadStore interface {
+	CountVulnerabilityAdvisoryDailyImpact(ctx context.Context, since time.Time) (vulnerabilityintel.AdvisoryDailyImpact, error)
+}
+
+type VulnerabilityOccurrenceImpactReadStore interface {
+	CountNewlyAffectedAssets(ctx context.Context, tenantID shared.ID, since time.Time) (int64, error)
+}
+
+type VulnerabilityRetentionStore interface {
+	RunVulnerabilityRetention(ctx context.Context, runID shared.ID, policy vulnerabilitymaintenance.Policy, dryRun bool, at time.Time) (vulnerabilitymaintenance.Run, error)
 }
 
 type VulnerabilityOccurrenceReadStore interface {

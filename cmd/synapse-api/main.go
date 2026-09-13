@@ -321,6 +321,14 @@ func main() {
 		log.Error("database migration posture invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateVulnerabilitySchedulerOwnership(); err != nil {
+		log.Error("vulnerability scheduler ownership invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateVulnerabilityMaintenance(); err != nil {
+		log.Error("vulnerability maintenance configuration invalid", "err", err)
+		os.Exit(1)
+	}
 	if err := cfg.ValidateOIDCPosture(); err != nil {
 		log.Error("OIDC posture invalid", "err", err)
 		os.Exit(1)
@@ -1779,6 +1787,7 @@ func main() {
 		log.Error("vulnerability finding projection init failed", "err", err)
 		os.Exit(1)
 	}
+	vulnerabilityProjection.SetWorkflowSources(vulnerabilityOccurrences, vulnerabilityAssessments)
 	vulnerabilityEvaluator, err := vulnerabilityevaluation.NewService(vulnerabilityMaterializer, vulnerabilityAssessments, vulnerabilityProjection, clock)
 	if err != nil {
 		log.Error("vulnerability evaluation init failed", "err", err)
@@ -1863,6 +1872,7 @@ func main() {
 		os.Exit(1)
 	}
 	vulnerabilityReconciliation.SetRollout(vulnerabilityRollout)
+	vulnerabilityReconciliation.SetInventoryStore(vulnerabilityInventory)
 	vulnerabilitySBOMCorrelation, err := vulnerabilitycorrelation.NewSBOMReconciler(vulnerabilityInventory, vulnerabilityAdvisoryStore, vulnerabilityMaterializer, vulnerabilityOccurrences)
 	if err != nil {
 		log.Error("vulnerability SBOM correlation init failed", "err", err)
@@ -1876,6 +1886,13 @@ func main() {
 		log.Error("vulnerability runtime init failed", "err", err)
 		os.Exit(1)
 	}
+	vulnerabilityRuntime.SetAdvisoryRunStarter(vulnerabilityReconciliation)
+	vulnerabilityInventoryWork, ok := vulnerabilityInventory.(ports.InventoryWorkStore)
+	if !ok {
+		log.Error("vulnerability inventory store does not support durable work")
+		os.Exit(1)
+	}
+	vulnerabilityRuntime.SetInventoryWorkStore(vulnerabilityInventoryWork)
 	vulnerabilityMonitor.SetReconciler(vulnerabilityRuntime)
 	scaService.SetVulnerabilityReconciler(vulnerabilityRuntime)
 	router.SetVulnerabilityIntelligence(vulnerabilitySourceService, vulnerabilityMonitor)
@@ -3409,6 +3426,7 @@ func main() {
 			os.Exit(1)
 		}
 		scheduler.SetLogger(log)
+		scheduler.SetRuntimeRecovery(vulnerabilityRuntime)
 		go scheduler.Run(ctx)
 		log.Info("vulnerability scheduler ENABLED",
 			"poll", cfg.VulnerabilitySchedulerPollInterval,

@@ -528,6 +528,27 @@ func (m *AdvisoryMaterializer) CountVulnerabilityAdvisoriesChangedSince(ctx cont
 	return count, nil
 }
 
+func (m *AdvisoryMaterializer) CountVulnerabilityAdvisoryDailyImpact(ctx context.Context, since time.Time) (vulnerabilityintel.AdvisoryDailyImpact, error) {
+	if _, ok := shared.TenantFrom(ctx); !ok || since.IsZero() {
+		return vulnerabilityintel.AdvisoryDailyImpact{}, fmt.Errorf("%w: tenant context and since are required", shared.ErrValidation)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var impact vulnerabilityintel.AdvisoryDailyImpact
+	for _, revisions := range m.revisions {
+		if len(revisions) == 0 {
+			continue
+		}
+		if !revisions[0].createdAt.Before(since) {
+			impact.NewlyIngested++
+		}
+		if !revisions[len(revisions)-1].canonical.PublishedAt.IsZero() && !revisions[len(revisions)-1].canonical.PublishedAt.Before(since) {
+			impact.NewlyDisclosed++
+		}
+	}
+	return impact, nil
+}
+
 func (m *AdvisoryMaterializer) ListVulnerabilityAdvisoryRevisions(ctx context.Context, query vulnerabilityintel.AdvisoryRevisionQuery) (vulnerabilityintel.AdvisoryRevisionPage, error) {
 	tenantID, ok := shared.TenantFrom(ctx)
 	if !ok {

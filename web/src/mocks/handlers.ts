@@ -92,7 +92,7 @@ const RECONCILE_RUN = {
   advisory_id: '',
   dry_run: false,
   durable_job_id: 'job-rec-001',
-  counts: { processed: 1284, added: 12, updated: 37, unchanged: 1201, unmatchable: 28, retired: 6 },
+  counts: { processed: 1284, added: 12, updated: 37, unchanged: 1201, superseded: 0, unmatchable: 28, retired: 6 },
   error_samples: [],
   state: 'succeeded',
   snapshot_at: HOUR_AGO,
@@ -1124,6 +1124,7 @@ export const handlers = [
     { type: 'first_epss', implemented: true, supports_test: false, supports_credentials: false },
     { type: 'csaf', implemented: true, supports_test: true, supports_credentials: true },
     { type: 'public_exploit', implemented: true, supports_test: false, supports_credentials: false },
+    { type: 'vulncheck_kev', implemented: true, supports_test: true, supports_credentials: true },
   ])),
   http.get('/api/v1/vulnerability/sync-runs', () => HttpResponse.json({ items: [
     {

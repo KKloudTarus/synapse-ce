@@ -899,8 +899,8 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/archive", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.archiveVulnerabilitySource)))
 		mux.HandleFunc("POST /api/v1/vulnerability/sources/test", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.testVulnerabilitySourceDraft)))
 		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/test", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.testVulnerabilitySource)))
-		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/sync", rt.authz(userdom.PermOperate, rt.startVulnerabilitySync))
-		mux.HandleFunc("POST /api/v1/vulnerability/sync-all", rt.authz(userdom.PermOperate, rt.startAllVulnerabilitySync))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/sync", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.startVulnerabilitySync)))
+		mux.HandleFunc("POST /api/v1/vulnerability/sync-all", rt.authz(userdom.PermAdminister, rt.requirePlatformAdmin(rt.startAllVulnerabilitySync)))
 		if rt.vulnerabilityRead != nil {
 			mux.HandleFunc("GET /api/v1/vulnerability/sync-runs/{id}", rt.authz(userdom.PermView, rt.getVulnerabilitySyncRun))
 		}

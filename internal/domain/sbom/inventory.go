@@ -67,6 +67,16 @@ type InventoryPublication struct {
 	Superseded      bool
 }
 
+type InventoryCursor struct {
+	AfterEngagementID shared.ID
+	AfterScope        string
+}
+
+type InventoryPublicationPage struct {
+	Items []InventoryPublication
+	Next  *InventoryCursor
+}
+
 func (p InventoryPublication) Validate() error {
 	if err := p.InventoryAdmission.Validate(); err != nil {
 		return err
@@ -122,6 +132,10 @@ func (c ComponentRecord) Validate() error {
 		return fmt.Errorf("%w: component inventory timestamp is required", shared.ErrValidation)
 	case c.IdentityStatus == "":
 		return fmt.Errorf("%w: component identity status is required", shared.ErrValidation)
+	case (strings.TrimSpace(c.InventoryScope) == "") != (c.InventoryGeneration == 0):
+		return fmt.Errorf("%w: component inventory scope and generation must be provided together", shared.ErrValidation)
+	case c.InventoryGeneration < 0:
+		return fmt.Errorf("%w: component inventory generation cannot be negative", shared.ErrValidation)
 	}
 	return nil
 }

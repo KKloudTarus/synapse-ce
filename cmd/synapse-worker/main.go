@@ -85,13 +85,16 @@ import (
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitycorrelation"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityevaluation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitymaintenance"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitymonitor"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityprojection"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityreconciliation"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityrollout"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityruntime"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityscheduler"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/worker"
 	writeupdraftuc "github.com/KKloudTarus/synapse-ce/internal/usecase/writeupdraftuc"
 )
@@ -119,6 +122,14 @@ func main() {
 	}
 	if err := cfg.ValidateMigrationPosture(); err != nil {
 		log.Error("database migration posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateVulnerabilitySchedulerOwnership(); err != nil {
+		log.Error("vulnerability scheduler ownership invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateVulnerabilityMaintenance(); err != nil {
+		log.Error("vulnerability maintenance configuration invalid", "err", err)
 		os.Exit(1)
 	}
 	if err := cfg.ValidateWorkerConcurrency(); err != nil {
@@ -683,11 +694,13 @@ func main() {
 	}
 	vulnerabilityMonitor.SetRollout(vulnerabilityRollout)
 	vulnerabilityMonitor.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
-	vulnerabilityProjection, err := vulnerabilityprojection.NewService(postgres.NewFindingRepository(pool))
+	vulnerabilityFindingRepo := postgres.NewFindingRepository(pool)
+	vulnerabilityProjection, err := vulnerabilityprojection.NewService(vulnerabilityFindingRepo)
 	if err != nil {
 		log.Error("vulnerability finding projection init failed", "err", err)
 		os.Exit(1)
 	}
+	vulnerabilityProjection.SetWorkflowSources(vulnerabilityOccurrences, vulnerabilityAssessments)
 	vulnerabilityEvaluator, err := vulnerabilityevaluation.NewService(vulnerabilityMaterializer, vulnerabilityAssessments, vulnerabilityProjection, clock)
 	if err != nil {
 		log.Error("vulnerability evaluation init failed", "err", err)
@@ -695,6 +708,14 @@ func main() {
 	}
 	vulnerabilityEvaluator.SetActionStore(vulnerabilityActions)
 	vulnerabilityEvaluator.SetRollout(vulnerabilityRollout)
+	if cfg.SLAEnabled {
+		vulnerabilitySLA, slaErr := slauc.NewService(postgres.NewSLAStore(pool), clock, ids)
+		if slaErr != nil {
+			log.Error("vulnerability SLA service init failed", "err", slaErr)
+			os.Exit(1)
+		}
+		vulnerabilityEvaluator.SetSLAAssessor(vulnerabilitySLA)
+	}
 	vulnerabilityAdvisoryCorrelation, err := vulnerabilitycorrelation.NewService(vulnerabilityInventory, vulnerabilityMaterializer, vulnerabilityOccurrences)
 	if err != nil {
 		log.Error("vulnerability advisory correlation init failed", "err", err)
@@ -714,6 +735,7 @@ func main() {
 		os.Exit(1)
 	}
 	vulnerabilityReconciliation.SetRollout(vulnerabilityRollout)
+	vulnerabilityReconciliation.SetInventoryStore(vulnerabilityInventory)
 	vulnerabilityReconciliation.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
 	vulnerabilitySBOMCorrelation, err := vulnerabilitycorrelation.NewSBOMReconciler(vulnerabilityInventory, vulnerabilityMaterializer, vulnerabilityMaterializer, vulnerabilityOccurrences)
 	if err != nil {
@@ -728,6 +750,8 @@ func main() {
 		log.Error("vulnerability runtime init failed", "err", err)
 		os.Exit(1)
 	}
+	vulnerabilityRuntime.SetAdvisoryRunStarter(vulnerabilityReconciliation)
+	vulnerabilityRuntime.SetInventoryWorkStore(vulnerabilityInventory)
 	vulnerabilityMonitor.SetReconciler(vulnerabilityRuntime)
 	handlers[vulnerabilitymonitor.JobKind] = vulnerabilitySyncJobHandler{svc: vulnerabilityMonitor}
 	handlers[vulnerabilityreconcile.JobKind] = vulnerabilityReconcileJobHandler{svc: vulnerabilityReconciliation}
@@ -745,17 +769,53 @@ func main() {
 			log.Error("vulnerability sync scheduler requires SYNAPSE_LEADER_ENABLED=true")
 			os.Exit(1)
 		}
-		syncScheduler, serr := vulnerabilitymonitor.NewScheduler(vulnerabilityMonitor, clock, vulnerabilitymonitor.AlwaysLeader{}, vulnerabilitymonitor.SchedulerConfig{
-			Interval:      cfg.VulnerabilitySyncSchedulerInterval,
-			StaleAfter:    cfg.VulnerabilitySyncStaleAfter,
-			DispatchLimit: cfg.VulnerabilitySyncSchedulerDispatch,
-		}, log)
+		syncScheduler, serr := vulnerabilityscheduler.New(vulnerabilitySources, vulnerabilityRuns, repo, queue, vulnerabilityMonitor, clock, vulnerabilityscheduler.AlwaysLeader{}, vulnerabilityscheduler.Config{
+			PollInterval: cfg.VulnerabilitySyncSchedulerInterval, StaleAfter: cfg.VulnerabilitySyncStaleAfter,
+			JitterPercent: cfg.VulnerabilitySchedulerJitter, DispatchLimit: cfg.VulnerabilitySyncSchedulerDispatch,
+			MaxQueueDepth: cfg.VulnerabilitySchedulerQueueDepth, RecoveryLimit: cfg.VulnerabilitySyncSchedulerDispatch,
+		})
 		if serr != nil {
 			log.Error("vulnerability sync scheduler init failed", "err", serr)
 			os.Exit(1)
 		}
+		syncScheduler.SetLogger(log)
+		syncScheduler.SetRuntimeRecovery(vulnerabilityRuntime)
 		maintenanceTasks = append(maintenanceTasks, syncScheduler.Run)
 		log.Info("vulnerability sync scheduler ENABLED", "interval", cfg.VulnerabilitySyncSchedulerInterval, "stale_after", cfg.VulnerabilitySyncStaleAfter, "dispatch_limit", cfg.VulnerabilitySyncSchedulerDispatch)
+	}
+
+	if cfg.VulnerabilityMaintenanceInterval > 0 {
+		maintenanceService, maintenanceErr := vulnerabilitymaintenance.New(
+			postgres.NewVulnerabilityRetentionStore(pool), clock, ids,
+			vulnerabilitymaintenance.Config{
+				RawPayloadRetention: cfg.VulnerabilityRawPayloadRetention, SyncRunRetention: cfg.VulnerabilitySyncRunRetention,
+				ResolvedOccurrenceRetention:   cfg.VulnerabilityResolvedOccurrenceRetention,
+				UnreferencedAdvisoryRetention: cfg.VulnerabilityUnreferencedAdvisoryRetention,
+				BatchSize:                     cfg.VulnerabilityMaintenanceBatchSize,
+			},
+		)
+		if maintenanceErr != nil {
+			log.Error("vulnerability maintenance init failed", "err", maintenanceErr)
+			os.Exit(1)
+		}
+		maintenanceTasks = append(maintenanceTasks, func(ctx context.Context) {
+			ticker := time.NewTicker(cfg.VulnerabilityMaintenanceInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					run, err := maintenanceService.Run(ctx, cfg.VulnerabilityMaintenanceDeleteEnabled)
+					if err != nil && ctx.Err() == nil {
+						log.Warn("vulnerability maintenance failed", "err", err)
+					} else if err == nil {
+						log.Info("vulnerability maintenance completed", "run_id", run.ID, "dry_run", run.DryRun, "eligible", run.Eligible, "removed", run.Removed, "protected", run.Protected)
+					}
+				}
+			}
+		})
+		log.Info("vulnerability maintenance ENABLED", "interval", cfg.VulnerabilityMaintenanceInterval, "delete_enabled", cfg.VulnerabilityMaintenanceDeleteEnabled, "batch_size", cfg.VulnerabilityMaintenanceBatchSize)
 	}
 
 	// #823 durable DAST verification. A governed, approved probe used to execute on the API request

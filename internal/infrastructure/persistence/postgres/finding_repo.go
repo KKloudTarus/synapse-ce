@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -64,6 +65,68 @@ func (r *FindingRepository) ClaimFindingProjection(ctx context.Context, tenantID
 }
 
 var _ ports.FindingRepository = (*FindingRepository)(nil)
+var _ ports.VulnerabilityFindingOccurrenceLinker = (*FindingRepository)(nil)
+var _ ports.FindingDedupReader = (*FindingRepository)(nil)
+var _ ports.VulnerabilityPrimaryFindingMapper = (*FindingRepository)(nil)
+
+func (r *FindingRepository) CheckVulnerabilityPrimaryFinding(ctx context.Context, tenantID, engagementID shared.ID, inventoryScope, advisoryID string) error {
+	contextTenant, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() || shared.TenantOrDefault(contextTenant) != shared.TenantOrDefault(tenantID) || engagementID.IsZero() || strings.TrimSpace(inventoryScope) == "" || strings.TrimSpace(advisoryID) == "" {
+		return fmt.Errorf("%w: vulnerability primary finding identity is invalid", shared.ErrValidation)
+	}
+	var conflict bool
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM vulnerability_finding_backfill_conflicts
+			WHERE tenant_id=current_setting('app.current_tenant') AND engagement_id=$1 AND inventory_scope=$2 AND advisory_id=$3)`,
+			engagementID.String(), inventoryScope, advisoryID).Scan(&conflict)
+	})
+	if err != nil {
+		return fmt.Errorf("check vulnerability primary finding: %w", err)
+	}
+	if conflict {
+		return fmt.Errorf("%w: historical vulnerability workflows require explicit conflict resolution", shared.ErrConflict)
+	}
+	return nil
+}
+
+func (r *FindingRepository) MapVulnerabilityPrimaryFinding(ctx context.Context, tenantID, engagementID shared.ID, inventoryScope, advisoryID string, findingID shared.ID, at time.Time) error {
+	if err := r.CheckVulnerabilityPrimaryFinding(ctx, tenantID, engagementID, inventoryScope, advisoryID); err != nil {
+		return err
+	}
+	if findingID.IsZero() || at.IsZero() {
+		return fmt.Errorf("%w: vulnerability primary finding mapping is invalid", shared.ErrValidation)
+	}
+	return WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		var mappedID string
+		err := tx.QueryRow(ctx, `INSERT INTO vulnerability_primary_findings(tenant_id,engagement_id,inventory_scope,advisory_id,finding_id,created_at,updated_at)
+			VALUES(current_setting('app.current_tenant'),$1,$2,$3,$4,$5,$5)
+			ON CONFLICT (tenant_id,engagement_id,inventory_scope,advisory_id)
+			DO UPDATE SET updated_at=vulnerability_primary_findings.updated_at
+			RETURNING finding_id`, engagementID.String(), inventoryScope, advisoryID, findingID.String(), at.UTC()).Scan(&mappedID)
+		if err != nil {
+			return fmt.Errorf("map vulnerability primary finding: %w", err)
+		}
+		if shared.ID(mappedID) != findingID {
+			return fmt.Errorf("%w: vulnerability primary finding is already mapped", shared.ErrConflict)
+		}
+		return nil
+	})
+}
+
+func (r *FindingRepository) LinkVulnerabilityFindingOccurrence(ctx context.Context, tenantID, engagementID, findingID, occurrenceID shared.ID, at time.Time) error {
+	contextTenant, ok := shared.TenantFrom(ctx)
+	if !ok || shared.TenantOrDefault(contextTenant) != shared.TenantOrDefault(tenantID) || engagementID.IsZero() || findingID.IsZero() || occurrenceID.IsZero() || at.IsZero() {
+		return fmt.Errorf("%w: vulnerability finding occurrence link is invalid", shared.ErrValidation)
+	}
+	return WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO vulnerability_finding_occurrences(tenant_id,engagement_id,finding_id,occurrence_id,created_at)
+			VALUES(current_setting('app.current_tenant'),$1,$2,$3,$4) ON CONFLICT DO NOTHING`, engagementID.String(), findingID.String(), occurrenceID.String(), at.UTC())
+		if err != nil {
+			return fmt.Errorf("link vulnerability occurrence to finding: %w", err)
+		}
+		return nil
+	})
+}
 
 // Upsert inserts or updates findings, deduped on (engagement_id, dedup_key). On
 // conflict it updates machine-owned data, preserves id, status (triage), assignee,
@@ -340,6 +403,32 @@ func (r *FindingRepository) GetByEngagementAndID(ctx context.Context, engagement
 	}
 	if err != nil {
 		return finding.Finding{}, fmt.Errorf("get finding: %w", err)
+	}
+	return f, nil
+}
+
+// GetByEngagementAndDedupKey resolves the row selected by the repository's
+// unique engagement/dedup constraint. Unlike a computed finding ID, this is
+// stable across the historical component-to-target workflow migration.
+func (r *FindingRepository) GetByEngagementAndDedupKey(ctx context.Context, engagementID shared.ID, dedupKey string) (finding.Finding, error) {
+	if engagementID.IsZero() || strings.TrimSpace(dedupKey) == "" {
+		return finding.Finding{}, fmt.Errorf("%w: finding dedup lookup is invalid", shared.ErrValidation)
+	}
+	var f finding.Finding
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx,
+			`SELECT `+findingCols+` FROM findings WHERE engagement_id=$1 AND dedup_key=$2`,
+			engagementID.String(), dedupKey,
+		)
+		var scanErr error
+		f, scanErr = scanFinding(row)
+		return scanErr
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return finding.Finding{}, fmt.Errorf("finding dedup key in engagement %s: %w", engagementID, shared.ErrNotFound)
+	}
+	if err != nil {
+		return finding.Finding{}, fmt.Errorf("get finding by dedup key: %w", err)
 	}
 	return f, nil
 }

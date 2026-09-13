@@ -2638,7 +2638,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 			s.logger().Warn("assess SCA finding SLAs failed (best-effort)", "err", err)
 		}
 		if err := s.reconcileVulnerabilities(ctx, inventoryPublication); err != nil {
-			return nil, err
+			s.logger().Warn("reconcile persisted SBOM vulnerabilities failed; durable inventory work will retry", "err", err)
 		}
 		if err := s.attributeFindings(ctx, engagementID, strings.TrimSpace(doc.TargetRef), result); err != nil {
 			s.logger().Warn("attribute SCA findings failed (best-effort)", "err", err)
@@ -3841,7 +3841,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			s.logger().Warn("assess SCA finding SLAs failed (best-effort)", "err", err)
 		}
 		if err := s.reconcileVulnerabilities(ctx, inventoryPublication); err != nil {
-			return nil, err
+			s.logger().Warn("reconcile persisted SBOM vulnerabilities failed; durable inventory work will retry", "err", err)
 		}
 		if err := s.attributeFindings(ctx, engagementID, normalizedSourceTarget(req), result); err != nil {
 			s.logger().Warn("attribute SCA findings failed (best-effort)", "err", err)

@@ -16,21 +16,62 @@ import (
 // FindingRepository is an in-memory finding store (dev/tests), deduped per
 // engagement by dedup key. Replaced by Postgres when a DB is configured.
 type FindingRepository struct {
-	mu                sync.RWMutex
-	data              map[shared.ID]map[string]finding.Finding // engagementID -> dedupKey -> finding
-	projections       map[shared.ID]map[shared.ID]ports.FindingProjectionMode
-	cloudObservations *CloudObservationStore
+	mu                   sync.RWMutex
+	data                 map[shared.ID]map[string]finding.Finding // engagementID -> dedupKey -> finding
+	projections          map[shared.ID]map[shared.ID]ports.FindingProjectionMode
+	vulnerabilityLinks   map[string]time.Time
+	vulnerabilityPrimary map[string]shared.ID
+	cloudObservations    *CloudObservationStore
 }
 
 // NewFindingRepository returns an empty in-memory finding repository.
 func NewFindingRepository() *FindingRepository {
 	return &FindingRepository{
-		data:        map[shared.ID]map[string]finding.Finding{},
-		projections: map[shared.ID]map[shared.ID]ports.FindingProjectionMode{},
+		data:                 map[shared.ID]map[string]finding.Finding{},
+		projections:          map[shared.ID]map[shared.ID]ports.FindingProjectionMode{},
+		vulnerabilityLinks:   map[string]time.Time{},
+		vulnerabilityPrimary: map[string]shared.ID{},
 	}
 }
 
 var _ ports.FindingRepository = (*FindingRepository)(nil)
+var _ ports.VulnerabilityFindingOccurrenceLinker = (*FindingRepository)(nil)
+var _ ports.FindingDedupReader = (*FindingRepository)(nil)
+var _ ports.VulnerabilityPrimaryFindingMapper = (*FindingRepository)(nil)
+
+func (r *FindingRepository) CheckVulnerabilityPrimaryFinding(_ context.Context, tenantID, engagementID shared.ID, inventoryScope, advisoryID string) error {
+	if tenantID.IsZero() || engagementID.IsZero() || strings.TrimSpace(inventoryScope) == "" || strings.TrimSpace(advisoryID) == "" {
+		return fmt.Errorf("%w: vulnerability primary finding identity is invalid", shared.ErrValidation)
+	}
+	return nil
+}
+
+func (r *FindingRepository) MapVulnerabilityPrimaryFinding(ctx context.Context, tenantID, engagementID shared.ID, inventoryScope, advisoryID string, findingID shared.ID, at time.Time) error {
+	if err := r.CheckVulnerabilityPrimaryFinding(ctx, tenantID, engagementID, inventoryScope, advisoryID); err != nil {
+		return err
+	}
+	if findingID.IsZero() || at.IsZero() {
+		return fmt.Errorf("%w: vulnerability primary finding mapping is invalid", shared.ErrValidation)
+	}
+	key := strings.Join([]string{tenantID.String(), engagementID.String(), inventoryScope, advisoryID}, "\x00")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing := r.vulnerabilityPrimary[key]; !existing.IsZero() && existing != findingID {
+		return fmt.Errorf("%w: vulnerability primary finding is already mapped", shared.ErrConflict)
+	}
+	r.vulnerabilityPrimary[key] = findingID
+	return nil
+}
+
+func (r *FindingRepository) LinkVulnerabilityFindingOccurrence(_ context.Context, tenantID, engagementID, findingID, occurrenceID shared.ID, at time.Time) error {
+	if tenantID.IsZero() || engagementID.IsZero() || findingID.IsZero() || occurrenceID.IsZero() || at.IsZero() {
+		return fmt.Errorf("%w: vulnerability finding occurrence link is invalid", shared.ErrValidation)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.vulnerabilityLinks[strings.Join([]string{tenantID.String(), engagementID.String(), findingID.String(), occurrenceID.String()}, "\x00")] = at.UTC()
+	return nil
+}
 
 // ClaimFindingProjection atomically selects the CapSAST projection mode for a judgment.
 func (r *FindingRepository) SetCloudObservationStore(store *CloudObservationStore) {
@@ -236,6 +277,17 @@ func (r *FindingRepository) GetByEngagementAndID(_ context.Context, engagementID
 		}
 	}
 	return finding.Finding{}, fmt.Errorf("finding %s in engagement %s: %w", findingID, engagementID, shared.ErrNotFound)
+}
+
+// GetByEngagementAndDedupKey resolves the canonical repository key directly.
+func (r *FindingRepository) GetByEngagementAndDedupKey(_ context.Context, engagementID shared.ID, dedupKey string) (finding.Finding, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	f, ok := r.data[engagementID][dedupKey]
+	if !ok {
+		return finding.Finding{}, fmt.Errorf("finding dedup key in engagement %s: %w", engagementID, shared.ErrNotFound)
+	}
+	return cloneFinding(f), nil
 }
 
 // SetEvidenceScore sets a finding's evidence score with the same optimistic-concurrency
