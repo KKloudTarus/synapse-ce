@@ -53,12 +53,13 @@ const (
 	LanguageDotNet     Language = "dotnet"
 	LanguageJVM        Language = "jvm"
 	LanguageCPP        Language = "cpp"
+	LanguageGoBinary   Language = "go-binary"
 )
 
 // Valid reports whether l is a supported Tier-1 language.
 func (l Language) Valid() bool {
 	switch l {
-	case LanguageGo, LanguagePython, LanguageJavaScript, LanguageRust, LanguagePHP, LanguageRuby, LanguageDotNet, LanguageJVM, LanguageCPP:
+	case LanguageGo, LanguagePython, LanguageJavaScript, LanguageRust, LanguagePHP, LanguageRuby, LanguageDotNet, LanguageJVM, LanguageCPP, LanguageGoBinary:
 		return true
 	}
 	return false
@@ -93,6 +94,9 @@ func actorsFor(tier judgment.ReachabilityTier, language Language) (proposer, ver
 		}
 		if language == LanguageCPP {
 			return judgment.ProofActorCppSymbolScan, judgment.ProofActorCppSymbolEngine, "tier-2 c/c++ affected-symbol reference proof"
+		}
+		if language == LanguageGoBinary {
+			return judgment.ProofActorGoBinarySymbolScan, judgment.ProofActorGoBinarySymbolEngine, "tier-2 go-binary affected-symbol pclntab proof"
 		}
 		return judgment.ProofActorCallgraphScan, judgment.ProofActorCallgraphEngine, "tier-2 call-graph proof"
 	}

@@ -103,6 +103,7 @@ type Service struct {
 	strictSources                    bool                                  // when true, any detection-source error aborts the scan; default degrades (skip + warn)
 	detectionPriority                string                                // server default detection priority (comprehensive|precise); empty = comprehensive
 	reachability                     ports.ReachabilityRecorder            // optional deterministic Tier-2 reachability proof (Go call-graph)
+	goBinaryReachability             ports.ReachabilityRecorder            // optional raise-only Go-binary .gopclntab symbol reachability (#1038)
 	pyReachability                   ports.ReachabilityRecorder            // optional deterministic Tier-1 Python import-reachability proof
 	pySymbolReachability             ports.ReachabilityRecorder            // optional deterministic Tier-2 Python semantic call-graph proof
 	rustSymbolReachability           ports.ReachabilityRecorder            // optional deterministic Tier-2 Rust affected-symbol reachability (raise-only)
@@ -537,6 +538,9 @@ func (s *Service) attachCompliance(result *ScanResult) {
 // reachability judgments. Best-effort + opt-in: a no-coverage/un-buildable target leaves the prior
 // reachability tier standing (never a false "not reachable"). A setter keeps NewService call sites unchanged.
 func (s *Service) SetReachability(r ports.ReachabilityRecorder) { s.reachability = r }
+
+// SetGoBinaryReachability wires the raise-only Go-binary .gopclntab symbol reachability recorder (#1038).
+func (s *Service) SetGoBinaryReachability(r ports.ReachabilityRecorder) { s.goBinaryReachability = r }
 
 // SetPyReachability configures the optional deterministic Tier-1 Python import-reachability prover: it
 // mints a not_reachable judgment for a declared PyPI package that first-party code never imports (a dead
@@ -3490,6 +3494,16 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if opts.scansVulnerabilities() && s.reachability != nil {
 		if subs := reachabilitySubjects(result.Findings, result.Vulnerabilities); len(subs) > 0 {
 			_, _ = s.reachability.Record(ctx, engagementID, ws.Dir, subs)
+		}
+	}
+
+	// Go-binary affected-symbol reachability (raise-only, #1038): scan any compiled Go binaries under ws.Dir
+	// and RAISE a finding whose affected symbol appears in a binary's .gopclntab. Runs AFTER the call-graph
+	// pass so a stronger source call-graph judgment is preserved (this only ever adds a reachable/raise, never
+	// a not_reachable). Absence of a matching binary or symbol mints nothing (no coverage). Best-effort.
+	if opts.scansVulnerabilities() && s.goBinaryReachability != nil {
+		if subs := reachabilitySubjects(result.Findings, result.Vulnerabilities); len(subs) > 0 {
+			_, _ = s.goBinaryReachability.Record(ctx, engagementID, ws.Dir, subs)
 		}
 	}
 

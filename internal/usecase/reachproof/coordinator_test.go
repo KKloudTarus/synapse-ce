@@ -427,3 +427,22 @@ func TestCppTier2ActorsAndRaiseOnly(t *testing.T) {
 		t.Fatal("C/C++ symbol actors must NOT be a deterministic reachability proof (raise-only)")
 	}
 }
+
+// TestGoBinaryTier2ActorsAndRaiseOnly: the Go-binary Tier-2 symbol actors are distinct + labeled, and are
+// EXCLUDED from the deterministic-reachability proof set, so a Go-binary pclntab verdict can never become an
+// OpenVEX not_affected (#1038).
+func TestGoBinaryTier2ActorsAndRaiseOnly(t *testing.T) {
+	proposer, verifier, label := actorsFor(judgment.Tier2, LanguageGoBinary)
+	if proposer != judgment.ProofActorGoBinarySymbolScan || verifier != judgment.ProofActorGoBinarySymbolEngine {
+		t.Fatalf("go-binary tier-2 actors = (%q,%q)", proposer, verifier)
+	}
+	if label != "tier-2 go-binary affected-symbol pclntab proof" {
+		t.Fatalf("go-binary tier-2 label = %q", label)
+	}
+	if !LanguageGoBinary.Valid() {
+		t.Fatal("LanguageGoBinary must be Valid")
+	}
+	if judgment.IsDeterministicReachabilityProof(judgment.Tier2, proposer, verifier) {
+		t.Fatal("Go-binary symbol actors must NOT be a deterministic reachability proof (raise-only)")
+	}
+}

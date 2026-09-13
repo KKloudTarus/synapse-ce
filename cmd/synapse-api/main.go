@@ -79,6 +79,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gobinreach"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/govulncheck"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsimports"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsresolve"
@@ -3094,6 +3095,26 @@ func main() {
 		}
 		scaService.SetSourceSymbolReachability(lang.purlType, coord.WithRaiseOnly())
 		log.Info("Tier-2 affected-symbol reachability ENABLED (raise-only)", "ecosystem", lang.purlType)
+	}
+
+	// Raise-only Go-binary reachability (#1038): a compiled Go binary in the workspace whose .gopclntab
+	// contains a matched vulnerable function raises the finding. It never mints not_reachable (absence is no
+	// coverage: stripped-of-pclntab, inlined, or non-Go binaries hide symbols), so its proof actors stay out
+	// of the deterministic set and it can only raise, never suppress. Reuses the parameterized symreach
+	// analyzer over the Go canonicalizer and the pclntab scanner.
+	if cfg.GoBinaryReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACH_GOBIN", "go-binary reachability") {
+		goBinAnalyzer, aerr := symreach.New("golang", symbolcanon.Go, gobinreach.New())
+		if aerr != nil {
+			log.Error("go-binary reachability analyzer init failed", "err", aerr)
+			os.Exit(1)
+		}
+		coord, cerr := reachproof.NewCoordinatorForLanguage(goBinAnalyzer, judgmentSvc, auditLog, clock, judgment.Tier2, reachproof.LanguageGoBinary)
+		if cerr != nil {
+			log.Error("go-binary reachability coordinator init failed", "err", cerr)
+			os.Exit(1)
+		}
+		scaService.SetGoBinaryReachability(coord.WithRaiseOnly())
+		log.Info("Go-binary affected-symbol reachability ENABLED (raise-only, .gopclntab)")
 	}
 
 	// Build-aware .NET (NuGet) reachability. Unlike the source-only import scanners above, it does NOT guess

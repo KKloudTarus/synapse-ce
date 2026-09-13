@@ -104,6 +104,13 @@ const (
 	// verdict can never become a VEX not_affected.
 	ProofActorCppSymbolScan   = "system:cppsymbol-scan"
 	ProofActorCppSymbolEngine = "system:cppsymbol-engine"
+	// Go-binary affected-symbol reachability is a Tier-2 RAISE-ONLY signal (EPIC #1034 D4.8): the PRESENCE of
+	// a matched vulnerable function in a compiled Go binary's .gopclntab raises urgency, but ABSENCE is no
+	// coverage (a stripped-of-pclntab, inlined, dead-code-eliminated, or non-Go binary hides symbols), never
+	// not_reachable. These actors are deliberately absent from IsDeterministicReachabilityProof, so a Go-binary
+	// symbol verdict can never become a VEX not_affected.
+	ProofActorGoBinarySymbolScan   = "system:gobinsymbol-scan"
+	ProofActorGoBinarySymbolEngine = "system:gobinsymbol-engine"
 	// .NET build-aware reachability is a Tier-1 proof, but unlike the source-only import scanners it does
 	// not guess a package's namespace from its id (AWSSDK.S3 ships the Amazon.S3 namespace): it reads the
 	// package's REAL exported namespaces from its restored assemblies, so a not-reachable conclusion is a
