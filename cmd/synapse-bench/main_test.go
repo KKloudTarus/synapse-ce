@@ -15,7 +15,7 @@ import (
 func TestRunWritesDeterministicJSON(t *testing.T) {
 	input := `{"schema_version":"synapse-benchmark-input-v1","metadata":{"environment":"fixture","environment_digest":"env","release":"release","release_digest":"rel","data_digest":"data"},"window":{"duration_milliseconds":1000},"requests":[{"duration_milliseconds":10,"succeeded":true}],"queue":{"delay_milliseconds":[2],"recovery_milliseconds":[3]},"pool":{"acquisition_milliseconds":[4],"saturation_events":0},"evidence":{"database_before_bytes":1,"database_after_bytes":2,"object_before_bytes":3,"object_after_bytes":5},"migration":{"duration_milliseconds":6},"api_failovers":[],"correctness":[]}`
 	var stdout bytes.Buffer
-	if err := run("throughput", "", "", strings.NewReader(input), &stdout); err != nil {
+	if err := run("throughput", "", "", "", strings.NewReader(input), &stdout); err != nil {
 		t.Fatal(err)
 	}
 	var report benchmark.Report
@@ -29,7 +29,7 @@ func TestRunWritesDeterministicJSON(t *testing.T) {
 
 func TestRunReturnsErrorForInvalidInput(t *testing.T) {
 	var stdout bytes.Buffer
-	err := run("throughput", "", "", strings.NewReader(`{"schema_version":"wrong"}`), &stdout)
+	err := run("throughput", "", "", "", strings.NewReader(`{"schema_version":"wrong"}`), &stdout)
 	if err == nil || !strings.Contains(err.Error(), "evaluate benchmark input") {
 		t.Fatalf("error = %v", err)
 	}
@@ -42,7 +42,7 @@ func TestRunAccuracyMode(t *testing.T) {
 		`{"case":"c1","group":"npm","expected":["pkg|CVE-1"],"produced":["pkg|CVE-1"]},` +
 		`{"case":"c2","group":"npm","expected":["pkg|CVE-2"],"produced":["pkg|CVE-2","pkg|CVE-9"]}]}`
 	var stdout bytes.Buffer
-	if err := run("accuracy", "", "", strings.NewReader(input), &stdout); err != nil {
+	if err := run("accuracy", "", "", "", strings.NewReader(input), &stdout); err != nil {
 		t.Fatal(err)
 	}
 	var report benchmark.AccuracyReport
@@ -66,7 +66,7 @@ func TestRunReachabilityMode(t *testing.T) {
 		`{"name":"go-miss","language":"go","fixture":"fixture","symbol":"fixture.miss","expected":"present_unreached"}]},` +
 		`"observations":[{"case":"go-hit","label":"reachable"},{"case":"go-miss","label":"present_unreached"}]}`
 	var stdout bytes.Buffer
-	if err := run("reachability", "", "", strings.NewReader(input), &stdout); err != nil {
+	if err := run("reachability", "", "", "", strings.NewReader(input), &stdout); err != nil {
 		t.Fatal(err)
 	}
 	report, err := reachbench.LoadReport(&stdout)
@@ -102,7 +102,7 @@ func TestRunExternalReachabilityBaselineModes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout bytes.Buffer
-			if err := run(tc.mode, "", "", strings.NewReader(tc.input), &stdout); err != nil {
+			if err := run(tc.mode, "", "", "", strings.NewReader(tc.input), &stdout); err != nil {
 				t.Fatal(err)
 			}
 			report, err := reachbench.LoadReport(&stdout)
@@ -118,7 +118,7 @@ func TestRunExternalReachabilityBaselineModes(t *testing.T) {
 
 func TestRunRejectsUnknownMode(t *testing.T) {
 	var stdout bytes.Buffer
-	err := run("bogus", "", "", strings.NewReader(`{}`), &stdout)
+	err := run("bogus", "", "", "", strings.NewReader(`{}`), &stdout)
 	if err == nil || !strings.Contains(err.Error(), "unknown mode") {
 		t.Fatalf("error = %v", err)
 	}
@@ -149,7 +149,7 @@ func TestRunCompareMode(t *testing.T) {
 		`"baseline":[{"component":"curl","id":"CVE-1"}],` +
 		`"candidate":[{"component":"curl","id":"CVE-1"},{"component":"curl","id":"CVE-2"}]}`
 	var stdout bytes.Buffer
-	if err := run("compare", "", "", strings.NewReader(input), &stdout); err != nil {
+	if err := run("compare", "", "", "", strings.NewReader(input), &stdout); err != nil {
 		t.Fatal(err)
 	}
 	var report enginecompare.Report
@@ -166,7 +166,7 @@ func TestRunCompareMode(t *testing.T) {
 
 // An unknown mode is rejected (the message now lists compare).
 func TestRunCompareUnknownMode(t *testing.T) {
-	if err := run("bogus", "", "", strings.NewReader("{}"), &bytes.Buffer{}); err == nil {
+	if err := run("bogus", "", "", "", strings.NewReader("{}"), &bytes.Buffer{}); err == nil {
 		t.Fatal("unknown mode must error")
 	}
 }
@@ -175,7 +175,7 @@ func TestRunCompareUnknownMode(t *testing.T) {
 // understate a recall gap and overstate the owned engine).
 func TestRunCompareRejectsUnknownField(t *testing.T) {
 	input := `{"baseline_name":"grype","candidate_name":"owned","baseline":[{"component":"curl","advisory_id":"CVE-1"}],"candidate":[]}`
-	if err := run("compare", "", "", strings.NewReader(input), &bytes.Buffer{}); err == nil {
+	if err := run("compare", "", "", "", strings.NewReader(input), &bytes.Buffer{}); err == nil {
 		t.Fatal("a mistyped field (advisory_id) must be rejected, not silently dropped")
 	}
 }
@@ -186,7 +186,7 @@ func TestRunCompareRejectsUnknownField(t *testing.T) {
 func TestRunCompareRejectsCaseVariantKey(t *testing.T) {
 	input := `{"baseline_name":"grype","candidate_name":"owned",` +
 		`"baseline":[{"component":"curl","id":"CVE-2024-1","ID":"CVE-2024-2"}],"candidate":[]}`
-	if err := run("compare", "", "", strings.NewReader(input), &bytes.Buffer{}); err == nil {
+	if err := run("compare", "", "", "", strings.NewReader(input), &bytes.Buffer{}); err == nil {
 		t.Fatal("a case-variant duplicate key must be rejected")
 	}
 }
@@ -196,7 +196,7 @@ func TestRunCompareRejectsCaseVariantKey(t *testing.T) {
 func TestRunCompareRejectsDuplicateKey(t *testing.T) {
 	input := `{"baseline_name":"grype","candidate_name":"owned",` +
 		`"baseline":[{"component":"curl","id":"CVE-2024-1","id":"CVE-2024-2"}],"candidate":[]}`
-	if err := run("compare", "", "", strings.NewReader(input), &bytes.Buffer{}); err == nil {
+	if err := run("compare", "", "", "", strings.NewReader(input), &bytes.Buffer{}); err == nil {
 		t.Fatal("a same-case duplicate key must be rejected")
 	}
 }
@@ -224,5 +224,37 @@ func TestRejectDuplicateJSONKeys(t *testing.T) {
 		if err := rejectDuplicateJSONKeys([]byte(s)); err != nil {
 			t.Errorf("well-formed %s must not be rejected: %v", s, err)
 		}
+	}
+}
+
+// TestRunReachabilityBaselineLanguageFilter scopes a baseline report to one corpus language so its digest
+// matches a language-scoped owned report (the parity gate rejects a full-corpus baseline against a
+// language-scoped owned report). A python-scoped Semgrep baseline must contain only python cases.
+func TestRunReachabilityBaselineLanguageFilter(t *testing.T) {
+	base := "internal/infrastructure/tools/astwalk/testdata/reachbench"
+	input := `{"results":[{"check_id":"reachbench.py.os-system-call","path":"` + base + `/py_reached/app.py"}]}`
+	var stdout bytes.Buffer
+	if err := run("reachability-semgrep-ce", "", "", "python", strings.NewReader(input), &stdout); err != nil {
+		t.Fatal(err)
+	}
+	report, err := reachbench.LoadReport(&stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Languages) != 1 || report.Languages[0].Language != "python" {
+		t.Fatalf("language-scoped report must contain only python, got %+v", report.Languages)
+	}
+	pyCases := 0
+	for _, c := range reachbench.DefaultCorpus().Cases {
+		if c.Language == "python" {
+			pyCases++
+		}
+	}
+	if report.Cases != pyCases {
+		t.Fatalf("python-scoped report has %d cases, want %d", report.Cases, pyCases)
+	}
+	// An unknown language fails closed rather than emitting an empty, vacuously-passing baseline.
+	if err := run("reachability-semgrep-ce", "", "", "cobol", strings.NewReader(input), &bytes.Buffer{}); err == nil {
+		t.Fatal("a language with no corpus cases must error")
 	}
 }

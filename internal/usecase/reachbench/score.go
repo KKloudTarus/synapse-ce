@@ -155,6 +155,31 @@ func DefaultFloors() Floors {
 	return f
 }
 
+// FilterByLanguage returns the corpus restricted to one language, preserving the schema version. It is the
+// single filtering primitive shared by the owned-engine adapters and the OSS-baseline reducer, so an owned
+// report and its baseline report measure the SAME language subset and therefore carry the SAME corpus
+// digest, which CheckBaselineParity requires. It errors when no case matches, so a typo'd language can never
+// silently produce an empty, vacuously-passing comparison.
+func FilterByLanguage(c Corpus, language string) (Corpus, error) {
+	if err := validateCorpus(c); err != nil {
+		return Corpus{}, err
+	}
+	language = strings.TrimSpace(language)
+	if language == "" {
+		return Corpus{}, fmt.Errorf("reachability corpus language filter is empty")
+	}
+	cases := make([]Case, 0, len(c.Cases))
+	for _, item := range c.Cases {
+		if item.Language == language {
+			cases = append(cases, item)
+		}
+	}
+	if len(cases) == 0 {
+		return Corpus{}, fmt.Errorf("reachability corpus has no %q cases", language)
+	}
+	return Corpus{SchemaVersion: c.SchemaVersion, Cases: cases}, nil
+}
+
 // LoadCorpus decodes exactly one strict corpus document and validates its closed vocabulary.
 func LoadCorpus(r io.Reader) (Corpus, error) {
 	var c Corpus

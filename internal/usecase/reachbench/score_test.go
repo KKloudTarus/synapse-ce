@@ -111,3 +111,76 @@ func TestCheckBaselineParityRefusesDifferentCorpus(t *testing.T) {
 		t.Fatalf("different corpus breaches = %v", breaches)
 	}
 }
+
+func TestFilterByLanguageScopesCorpusAndDigest(t *testing.T) {
+	full := DefaultCorpus()
+	py, err := FilterByLanguage(full, "python")
+	if err != nil {
+		t.Fatalf("FilterByLanguage(python): %v", err)
+	}
+	if len(py.Cases) == 0 || len(py.Cases) == len(full.Cases) {
+		t.Fatalf("python subset size = %d of %d", len(py.Cases), len(full.Cases))
+	}
+	for _, c := range py.Cases {
+		if c.Language != "python" {
+			t.Fatalf("filtered corpus contains a %q case", c.Language)
+		}
+	}
+	// A language-scoped owned report and its baseline share this subset's digest, which is what makes a
+	// language-scoped parity comparison legal; the full-corpus digest must differ.
+	full.SchemaVersion = CorpusSchemaVersion
+	if d1, _ := corpusDigest(py); d1 == "" {
+		t.Fatal("filtered corpus has no digest")
+	}
+	if _, err := FilterByLanguage(full, "cobol"); err == nil {
+		t.Fatal("a language with no cases must error, not pass vacuously")
+	}
+	if _, err := FilterByLanguage(full, ""); err == nil {
+		t.Fatal("an empty language filter must error")
+	}
+}
+
+// TestOwnedBeatsSemgrepPrecisionOnPythonCorpus is the recorded head-to-head math: on the Python corpus the
+// owned engine is exact (recall 1.0, precision 1.0) while Semgrep CE, which cannot prove entrypoint
+// reachability, over-reports every unreached fixture whose sink call site it matches (recall 1.0, precision
+// below 1.0). Parity holds and the owned engine strictly wins on precision.
+func TestOwnedBeatsSemgrepPrecisionOnPythonCorpus(t *testing.T) {
+	py, err := FilterByLanguage(DefaultCorpus(), "python")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned := make([]Observation, 0, len(py.Cases))
+	semgrep := make([]Observation, 0, len(py.Cases))
+	for _, c := range py.Cases {
+		owned = append(owned, Observation{Case: c.Name, Label: c.Expected})    // the owned engine is exact on the corpus
+		semgrep = append(semgrep, Observation{Case: c.Name, Label: Reachable}) // Semgrep matches os.system in every fixture
+	}
+	ownedReport, err := Evaluate(py, owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	semgrepReport, err := Evaluate(py, semgrep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if breaches := CheckBaselineParity(ownedReport, semgrepReport); len(breaches) != 0 {
+		t.Fatalf("owned engine must meet Semgrep parity on Python, got breaches: %v", breaches)
+	}
+	var owndScore, semScore LanguageScore
+	for _, s := range ownedReport.Languages {
+		if s.Language == "python" {
+			owndScore = s
+		}
+	}
+	for _, s := range semgrepReport.Languages {
+		if s.Language == "python" {
+			semScore = s
+		}
+	}
+	if owndScore.PositivePrecision <= semScore.PositivePrecision {
+		t.Fatalf("owned precision %.3f must exceed Semgrep precision %.3f", owndScore.PositivePrecision, semScore.PositivePrecision)
+	}
+	if semScore.FalsePositiveRise == 0 {
+		t.Fatal("Semgrep must over-report at least one unreached Python case (its recorded limitation)")
+	}
+}

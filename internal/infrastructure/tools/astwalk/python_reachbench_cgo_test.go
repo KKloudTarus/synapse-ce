@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	domaincg "github.com/KKloudTarus/synapse-ce/internal/domain/callgraph"
@@ -122,6 +123,43 @@ func TestPythonReachabilityCorpus(t *testing.T) {
 	for _, score := range report.Languages {
 		t.Logf("reachbench %-10s: cases=%d exact=%d exact_accuracy=%.3f positive_precision=%.3f positive_recall=%.3f false_positive_reachable=%d",
 			score.Language, score.Cases, score.Exact, score.ExactAccuracy, score.PositivePrecision, score.PositiveRecall, score.FalsePositiveRise)
+	}
+	// Persist the owned scorecard when CI asks for it, so the head-to-head artifact is uploaded alongside
+	// the OSS baselines.
+	if output := strings.TrimSpace(os.Getenv("SYNAPSE_REACHBENCH_OWNED_REPORT")); output != "" {
+		file, err := os.Create(output)
+		if err != nil {
+			t.Fatalf("create owned reachability report: %v", err)
+		}
+		if err := reachbench.EncodeReport(file, report); err != nil {
+			_ = file.Close()
+			t.Fatalf("encode owned reachability report: %v", err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatalf("close owned reachability report: %v", err)
+		}
+	}
+	// Gate parity against each recorded OSS baseline (Semgrep CE for Python; OSV-Scanner has no Python call
+	// analysis). The owned engine must match or beat every baseline's positive-reachability recall AND
+	// precision on the SAME language subset, so a CE tool that flags a vulnerable call site it cannot prove
+	// reachable never quietly outscores the owned engine.
+	for _, path := range strings.Split(os.Getenv("SYNAPSE_REACHBENCH_BASELINE_REPORTS"), ",") {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatalf("open reachability baseline report %q: %v", path, err)
+		}
+		baseline, loadErr := reachbench.LoadReport(file)
+		_ = file.Close()
+		if loadErr != nil {
+			t.Fatalf("load reachability baseline report %q: %v", path, loadErr)
+		}
+		if breaches := reachbench.CheckBaselineParity(report, baseline); len(breaches) > 0 {
+			t.Fatalf("owned Python reachability is below baseline %q: %v", path, breaches)
+		}
 	}
 	if breaches := reachbench.CheckRatchet(report, reachbench.DefaultFloors()); len(breaches) > 0 {
 		t.Fatalf("Python reachability recall ratchet regressed: %v", breaches)

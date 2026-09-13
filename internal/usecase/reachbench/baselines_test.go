@@ -78,6 +78,37 @@ func TestSnykSampleObservationsAreExplicitAndComplete(t *testing.T) {
 	}
 }
 
+// TestSemgrepCEObservationsPythonSinkPresenceIsNotReachability pins the Python head-to-head: Semgrep CE's
+// os.system pattern proves a call SITE exists, not that it is reachable from an entrypoint, so a fixture
+// whose sink is matched becomes reachable while one with no match stays present_unreached. The unreached
+// fixtures whose sink Semgrep still matches are the owned engine's precision advantage, recorded honestly.
+func TestSemgrepCEObservationsPythonSinkPresenceIsNotReachability(t *testing.T) {
+	base := "internal/infrastructure/tools/astwalk/testdata/reachbench"
+	observations, err := SemgrepCEObservations(DefaultCorpus(), strings.NewReader(`{"results":[
+		{"check_id":"reachbench.py.os-system-call","path":"`+base+`/py_reached/app.py"},
+		{"check_id":"reachbench.py.os-system-call","path":"`+base+`/py_unreached/app.py"},
+		{"check_id":"reachbench.py.os-system-call","path":"`+base+`/py_crossmodule_imported_uncalled/helper.py"}
+	]}`))
+	if err != nil {
+		t.Fatalf("SemgrepCEObservations: %v", err)
+	}
+	got := observationLabels(observations)
+	// A matched reachable case and a matched unreached case both read reachable to Semgrep (sink present).
+	if got["py_reached_via_handler"] != Reachable {
+		t.Errorf("py_reached_via_handler = %v, want reachable", got["py_reached_via_handler"])
+	}
+	if got["py_unreached_private_function"] != Reachable {
+		t.Errorf("py_unreached_private_function = %v, want reachable (Semgrep over-reports the sink presence)", got["py_unreached_private_function"])
+	}
+	if got["py_cross_module_imported_uncalled"] != Reachable {
+		t.Errorf("py_cross_module_imported_uncalled = %v, want reachable (sink present in helper.py)", got["py_cross_module_imported_uncalled"])
+	}
+	// A python case with a selector but no matching result stays present_unreached, never no_analysis.
+	if got["py_instance_method_reached"] != PresentUnreached {
+		t.Errorf("py_instance_method_reached (no Semgrep match) = %v, want present_unreached", got["py_instance_method_reached"])
+	}
+}
+
 func observationLabels(observations []Observation) map[string]Label {
 	got := make(map[string]Label, len(observations))
 	for _, item := range observations {
