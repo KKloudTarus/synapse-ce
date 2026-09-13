@@ -87,6 +87,20 @@
       "fixture": "py_crossmodule_reached",
       "symbol": "python:helper:_work",
       "expected": "reachable"
+    },
+    {
+      "name": "py_cross_module_transitive_reached",
+      "language": "python",
+      "fixture": "py_crossmodule_transitive_reached",
+      "symbol": "python:helper:_deep",
+      "expected": "reachable"
+    },
+    {
+      "name": "py_cross_module_imported_uncalled",
+      "language": "python",
+      "fixture": "py_crossmodule_imported_uncalled",
+      "symbol": "python:helper:_work",
+      "expected": "present_unreached"
     }
   ]
 }
