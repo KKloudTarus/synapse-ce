@@ -109,6 +109,7 @@ type Service struct {
 	jsReachability                   jsSBOMReachabilityRecorder            // optional deterministic Tier-1 JavaScript import-reachability proof
 	jsSymbolReachability             jsSBOMReachabilityRecorder            // optional deterministic Tier-2 JavaScript affected-export proof
 	srcReachability                  map[string]ports.ReachabilityRecorder // optional Tier-1 provers keyed by package-URL type
+	srcSymbolReachability            map[string]ports.ReachabilityRecorder // optional Tier-2 raise-only symbol provers keyed by package-URL type (php/ruby/dotnet)
 	correlation                      ports.CorrelationRecorder             // optional cross-check disagreement → judgment minter
 	sbomGen2                         ports.SBOMGenerator                   // optional 2nd SBOM producer for the cross-check
 	sbomCache                        ports.SBOMCache                       // optional content+version-addressed cache of the generated SBOM
@@ -609,6 +610,17 @@ func (s *Service) SetSourceReachability(purlType string, r ports.ReachabilityRec
 		s.srcReachability = map[string]ports.ReachabilityRecorder{}
 	}
 	s.srcReachability[purlType] = r
+}
+
+// SetSourceSymbolReachability registers a deterministic Tier-2 RAISE-ONLY affected-symbol prover for one
+// package-URL ecosystem (composer/gem/nuget): it asks whether first-party source REFERENCES the specific
+// curated vulnerable function, not merely imports the package. Best-effort and opt-in; because it only
+// mints reachable (never not-reachable), a no-coverage result leaves the prior tier standing.
+func (s *Service) SetSourceSymbolReachability(purlType string, r ports.ReachabilityRecorder) {
+	if s.srcSymbolReachability == nil {
+		s.srcSymbolReachability = map[string]ports.ReachabilityRecorder{}
+	}
+	s.srcSymbolReachability[purlType] = r
 }
 
 // SetJSReachability configures the optional deterministic Tier-1 JavaScript import-reachability prover.
@@ -3523,6 +3535,22 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 				continue
 			}
 			if subs := ecosystemReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM, eco.prefix); len(subs) > 0 {
+				_, _ = recorder.Record(ctx, engagementID, ws.Dir, subs)
+			}
+		}
+	}
+
+	// Deterministic TIER-2 RAISE-ONLY affected-symbol reachability for the source ecosystems whose vulnerable
+	// symbols come from the curated DB (PHP/Ruby/.NET): does first-party source REFERENCE the specific
+	// vulnerable function, not merely import the package? Best-effort and opt-in; it only ever raises, so a
+	// no-coverage result leaves the prior tier standing.
+	if opts.scansVulnerabilities() && len(s.srcSymbolReachability) > 0 {
+		for _, eco := range sourceReachabilityEcosystems {
+			recorder, ok := s.srcSymbolReachability[eco.purlType]
+			if !ok || recorder == nil {
+				continue
+			}
+			if subs := sourceSymbolReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM, eco.prefix); len(subs) > 0 {
 				_, _ = recorder.Record(ctx, engagementID, ws.Dir, subs)
 			}
 		}

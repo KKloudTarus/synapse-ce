@@ -80,6 +80,15 @@ func actorsFor(tier judgment.ReachabilityTier, language Language) (proposer, ver
 		if language == LanguageRust {
 			return judgment.ProofActorRustSymbolScan, judgment.ProofActorRustSymbolEngine, "tier-2 rust affected-symbol reference proof"
 		}
+		if language == LanguagePHP {
+			return judgment.ProofActorPHPSymbolScan, judgment.ProofActorPHPSymbolEngine, "tier-2 php affected-symbol reference proof"
+		}
+		if language == LanguageRuby {
+			return judgment.ProofActorRubySymbolScan, judgment.ProofActorRubySymbolEngine, "tier-2 ruby affected-symbol reference proof"
+		}
+		if language == LanguageDotNet {
+			return judgment.ProofActorDotNetSymbolScan, judgment.ProofActorDotNetSymbolEngine, "tier-2 dotnet affected-symbol reference proof"
+		}
 		return judgment.ProofActorCallgraphScan, judgment.ProofActorCallgraphEngine, "tier-2 call-graph proof"
 	}
 	switch language {

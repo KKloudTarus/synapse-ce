@@ -1132,3 +1132,39 @@ func rustSymbolReachabilitySubjects(findings []finding.Finding, vulns []vulnerab
 	}
 	return subs
 }
+
+// sourceSymbolReachabilitySubjects builds Tier-2 affected-symbol subjects for a source ecosystem addressed
+// by a PURL prefix (composer/gem/nuget), mirroring rustSymbolReachabilitySubjects: a finding contributes a
+// subject only when its vulnerability carries affected symbols AND its component matches the prefix at the
+// exact (name, version). The symbols are the curated/advisory affected symbols the raise-only symreach
+// analyzer tail-matches against observed source references.
+func sourceSymbolReachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vulnerability, doc *sbom.SBOM, purlPrefix string) []ports.ReachabilitySubject {
+	if doc == nil {
+		return nil
+	}
+	match := map[string]bool{}
+	for _, c := range doc.Components {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.PURL)), purlPrefix) {
+			match[strings.ToLower(c.Name)+"\x00"+c.Version] = true
+		}
+	}
+	if len(match) == 0 {
+		return nil
+	}
+	byDedup := make(map[string]vulnerability.Vulnerability, len(vulns))
+	for _, v := range vulns {
+		byDedup[vulnDedupKey(v)] = v
+	}
+	var subs []ports.ReachabilitySubject
+	for _, f := range findings {
+		v, ok := byDedup[f.DedupKey]
+		if !ok || len(v.AffectedSymbols) == 0 {
+			continue
+		}
+		if !match[strings.ToLower(v.Component)+"\x00"+v.Version] {
+			continue
+		}
+		subs = append(subs, ports.ReachabilitySubject{FindingID: f.ID, Symbols: v.AffectedSymbols})
+	}
+	return subs
+}

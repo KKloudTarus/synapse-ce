@@ -39,6 +39,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/riskassessment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/symbolcanon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
 	alertwebhook "github.com/KKloudTarus/synapse-ce/internal/infrastructure/alertsink/webhook"
@@ -198,6 +199,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/scmconnectoruc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/srcreach"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/symreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/taintscan"
 	threatmodeluc "github.com/KKloudTarus/synapse-ce/internal/usecase/threatmodeluc"
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
@@ -3048,6 +3050,41 @@ func main() {
 		}
 		scaService.SetRustSymbolReachability(coord.WithRaiseOnly())
 		log.Info("Tier-2 rust affected-symbol reachability ENABLED (raise-only: a qualified reference to a vulnerable crate function raises urgency; never suppresses)")
+	}
+
+	// Tier-2 RAISE-ONLY affected-symbol reachability for the curated-DB source ecosystems (PHP/Ruby/.NET):
+	// does first-party source REFERENCE the specific curated vulnerable function an advisory names, not
+	// merely import the package? It runs alongside each language's Tier-1 prover under the same per-language
+	// gate, is source-only (lexes text, runs no package manager), and is raise-only (a qualified reference
+	// raises urgency; it never mints not-reachable, so it can never suppress a finding). Its proof actors are
+	// excluded from the deterministic set, so a verdict here can never become a VEX not_affected.
+	for _, lang := range []struct {
+		enabled  bool
+		env      string
+		purlType string
+		scanner  symreach.SymbolReferenceScanner
+		canon    symbolcanon.Language
+		language reachproof.Language
+	}{
+		{cfg.PHPReachabilityEnabled, "SYNAPSE_REACH_PHP", "composer", srcimports.NewPHPSymbolScanner(), symbolcanon.PHP, reachproof.LanguagePHP},
+		{cfg.RubyReachabilityEnabled, "SYNAPSE_REACH_RUBY", "gem", srcimports.NewRubySymbolScanner(), symbolcanon.Ruby, reachproof.LanguageRuby},
+		{cfg.DotNetReachabilityEnabled, "SYNAPSE_REACH_DOTNET", "nuget", srcimports.NewDotNetSymbolScanner(), symbolcanon.DotNet, reachproof.LanguageDotNet},
+	} {
+		if !lang.enabled || !requireJudgmentsOrSkip(log, judgmentSvc != nil, lang.env, lang.purlType+" symbol reachability") {
+			continue
+		}
+		symAnalyzer, aerr := symreach.New(lang.purlType, lang.canon, lang.scanner)
+		if aerr != nil {
+			log.Error("symbol reachability analyzer init failed", "purl", lang.purlType, "err", aerr)
+			os.Exit(1)
+		}
+		coord, cerr := reachproof.NewCoordinatorForLanguage(symAnalyzer, judgmentSvc, auditLog, clock, judgment.Tier2, lang.language)
+		if cerr != nil {
+			log.Error("symbol reachability coordinator init failed", "purl", lang.purlType, "err", cerr)
+			os.Exit(1)
+		}
+		scaService.SetSourceSymbolReachability(lang.purlType, coord.WithRaiseOnly())
+		log.Info("Tier-2 affected-symbol reachability ENABLED (raise-only)", "ecosystem", lang.purlType)
 	}
 
 	// Build-aware .NET (NuGet) reachability. Unlike the source-only import scanners above, it does NOT guess
