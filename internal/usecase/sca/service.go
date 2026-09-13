@@ -578,6 +578,29 @@ var sourceReachabilityEcosystems = []struct {
 	{purlType: "nuget", prefix: "pkg:nuget/"},
 }
 
+// reachabilityEngineEcosystems is the authoritative set of PURL types for which Synapse HAS a reachability
+// engine (Go/Python/JS Tier-1/Tier-2, the Rust/PHP/Ruby/.NET source provers, and the JVM Tier-1.5 tagger).
+// It is the single source of truth for reachability coverage honesty (EPIC #1042 E.1): a finding whose
+// ecosystem is NOT in this set has no engine and must surface an explicit no_analysis, never an implied
+// reachability-clean. Membership is about whether an engine EXISTS, not whether it is registered at runtime
+// (an opt-in engine that is simply unconfigured leaves the prior tier standing, a different concern).
+var reachabilityEngineEcosystems = map[string]bool{
+	"golang":   true,
+	"pypi":     true,
+	"npm":      true,
+	"cargo":    true,
+	"composer": true,
+	"gem":      true,
+	"nuget":    true,
+	"maven":    true,
+}
+
+// reachabilityEngineExists reports whether Synapse has any reachability engine for a PURL type. An unknown
+// or engine-less ecosystem (swift, pub, hex, conda, cran, julia, ...) returns false.
+func reachabilityEngineExists(purlType string) bool {
+	return reachabilityEngineEcosystems[strings.ToLower(strings.TrimSpace(purlType))]
+}
+
 // SetSourceReachability registers a deterministic Tier-1 import-reachability prover for one package-URL
 // ecosystem ("cargo", "composer", "gem"). Best-effort and opt-in; a prover that reports no coverage
 // leaves the prior tier standing.
@@ -3538,6 +3561,22 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			_, _ = scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
 		} else {
 			_, _ = s.taint.Scan(ctx, engagementID, ws.Dir)
+		}
+	}
+
+	// Reachability honesty (EPIC #1042 E.1): an ecosystem with a finding but NO reachability engine (swift,
+	// pub, hex, conda, cran, julia, ...) gets an explicit no_reachability_engine coverage entry, so a reader
+	// sees "no analysis" rather than an implied reachability-clean. Deterministic (sorted) and additive.
+	if opts.scansVulnerabilities() {
+		for _, eco := range unanalyzedReachabilityEcosystems(result.Findings, result.Vulnerabilities, result.SBOM) {
+			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, ports.AnalysisCoverage{
+				Analyzer:  "reachability",
+				Language:  eco,
+				Status:    ports.AnalysisCoverageNotApplicable,
+				Reason:    ports.AnalysisReasonNoEngine,
+				Available: false,
+				Complete:  false,
+			})
 		}
 	}
 

@@ -29,6 +29,10 @@ const (
 	AnalysisReasonResolutionFailed       AnalysisCoverageReason = "resolution_failed"
 	AnalysisReasonAnalysisFailed         AnalysisCoverageReason = "analysis_failed"
 	AnalysisReasonProposalBudgetExceeded AnalysisCoverageReason = "proposal_budget_exceeded"
+	// AnalysisReasonNoEngine marks an ecosystem for which Synapse has NO reachability engine at all (e.g.
+	// swift, pub, hex, conda, cran, julia). It is emitted so a finding in such an ecosystem reads as an
+	// explicit no_analysis, never an implied reachability-clean (EPIC #1042 E.1).
+	AnalysisReasonNoEngine AnalysisCoverageReason = "no_reachability_engine"
 )
 
 // AnalysisCoverageGap aggregates one trusted semantic coverage-gap kind. Kind is emitted by a closed

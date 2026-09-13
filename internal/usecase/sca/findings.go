@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -991,6 +992,69 @@ func ecosystemReachabilitySubjects(findings []finding.Finding, vulns []vulnerabi
 		subs = append(subs, ports.ReachabilitySubject{FindingID: f.ID, Symbols: []string{v.Component}})
 	}
 	return subs
+}
+
+// unanalyzedReachabilityEcosystems returns the sorted, distinct PURL types of ecosystems that HAVE a
+// finding in this scan but for which Synapse has NO reachability engine (swift, pub, hex, conda, cran,
+// julia, ...). A finding is mapped to its component's PURL type through its vulnerability. The result drives
+// an explicit no_analysis coverage statement so an engine-less ecosystem never reads as reachability-clean
+// (EPIC #1042 E.1). It never returns an ecosystem Synapse can analyze, so a supported ecosystem is never
+// falsely marked un-analyzable.
+func unanalyzedReachabilityEcosystems(findings []finding.Finding, vulns []vulnerability.Vulnerability, doc *sbom.SBOM) []string {
+	if doc == nil {
+		return nil
+	}
+	// Key components by name AND version (the identity a vulnerability carries), not name alone: two
+	// ecosystems can publish the same package name, and a name-only key would let one overwrite the other
+	// and mislabel a finding's ecosystem. A name+version can still (rarely) exist in more than one
+	// ecosystem, so collect ALL its PURL types and report every engine-less one, never implying clean.
+	purlsByNameVer := make(map[string][]string, len(doc.Components))
+	for _, c := range doc.Components {
+		t := strings.ToLower(purlType(c.PURL))
+		if t == "" {
+			continue
+		}
+		k := componentNameVerKey(c.Name, c.Version)
+		if !containsString(purlsByNameVer[k], t) {
+			purlsByNameVer[k] = append(purlsByNameVer[k], t)
+		}
+	}
+	byDedup := make(map[string]vulnerability.Vulnerability, len(vulns))
+	for _, v := range vulns {
+		byDedup[vulnDedupKey(v)] = v
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range findings {
+		v, ok := byDedup[f.DedupKey]
+		if !ok {
+			continue
+		}
+		for _, t := range purlsByNameVer[componentNameVerKey(v.Component, v.Version)] {
+			if reachabilityEngineExists(t) || seen[t] {
+				continue
+			}
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// componentNameVerKey is the case-insensitive name@version identity used to join a vulnerability to its SBOM
+// component (the same identity an SCA match is keyed on).
+func componentNameVerKey(name, version string) string {
+	return strings.ToLower(strings.TrimSpace(name)) + "@" + strings.TrimSpace(version)
+}
+
+func containsString(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 // jvmReachRoots returns the workspace directories the JVM reachability tagger should scan: the build tree
