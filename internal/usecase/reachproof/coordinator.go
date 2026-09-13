@@ -19,6 +19,7 @@ package reachproof
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
@@ -333,7 +334,7 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, target
 		if sub.FindingID.IsZero() {
 			continue
 		}
-		claim, reachable, complete := subjectClaim(sub, reachableBy, c.tier)
+		claim, reachable, complete := subjectClaim(sub, reachableBy, c.tier, analysis.BlindConstructs)
 		claim.EntrypointsPresent = entrypointsPresent
 		if !reachable {
 			if c.raiseOnly {
@@ -405,9 +406,10 @@ const deterministicClaimConfidence = 100
 // least one symbol was reached. complete is true only when EVERY symbol had a result, so the caller can tell
 // a fully-decided not-reachable subject from one where a symbol was left unknown: concluding not-reachable
 // from a partially-unknown subject would suppress a finding whose omitted symbol could be reached.
-func subjectClaim(sub ports.ReachabilitySubject, reachableBy map[string]reachability.Result, tier judgment.ReachabilityTier) (claim judgment.ReachabilityClaim, reachable bool, complete bool) {
+func subjectClaim(sub ports.ReachabilitySubject, reachableBy map[string]reachability.Result, tier judgment.ReachabilityTier, analysisBlind []string) (claim judgment.ReachabilityClaim, reachable bool, complete bool) {
 	complete = len(sub.Symbols) > 0 // a subject with no symbols is not a decided not-reachable
 	var unknown []string
+	blind := newStringSet(analysisBlind) // analysis-wide blind spots taint every not_reachable verdict
 	for _, sym := range sub.Symbols {
 		r, ok := reachableBy[sym]
 		if !ok {
@@ -421,10 +423,43 @@ func subjectClaim(sub ports.ReachabilitySubject, reachableBy map[string]reachabi
 				Confidence: deterministicClaimConfidence,
 			}, true, complete
 		}
+		blind.add(r.BlindConstructs...) // a per-symbol blind spot on this not-reachable symbol
 	}
-	// A not_reachable claim records the symbols it could not answer so ProvedNotReachable / a reader can
-	// refuse to suppress on a partial subject.
-	return judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: tier, Confidence: deterministicClaimConfidence, UnknownSymbols: unknown}, false, complete
+	// A not_reachable claim records the symbols it could not answer AND the constructs it was blind to, so
+	// ProvedNotReachable / a reader refuses to suppress on a partial or blind subject (EPIC #1042, 0.6).
+	return judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: tier, Confidence: deterministicClaimConfidence, UnknownSymbols: unknown, BlindConstructs: blind.sorted()}, false, complete
+}
+
+// stringSet is a small de-duplicating, order-stable string set used to merge blind-construct labels from the
+// analysis-wide set and each not_reachable symbol without importing a helper package into this leaf usecase.
+type stringSet struct {
+	seen  map[string]bool
+	items []string
+}
+
+func newStringSet(initial []string) stringSet {
+	s := stringSet{seen: map[string]bool{}}
+	s.add(initial...)
+	return s
+}
+
+func (s *stringSet) add(vals ...string) {
+	for _, v := range vals {
+		if v == "" || s.seen[v] {
+			continue
+		}
+		s.seen[v] = true
+		s.items = append(s.items, v)
+	}
+}
+
+func (s *stringSet) sorted() []string {
+	if len(s.items) == 0 {
+		return nil
+	}
+	out := append([]string(nil), s.items...)
+	sort.Strings(out)
+	return out
 }
 
 // priorJudgment pairs a stored reachability judgment with its decoded claim (append-only supersession

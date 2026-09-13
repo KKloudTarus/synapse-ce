@@ -127,3 +127,23 @@ func TestParseRejectsBadJSON(t *testing.T) {
 		t.Error("malformed JSON must fail closed")
 	}
 }
+
+func TestEncodeParseCarriesBlindConstructs(t *testing.T) {
+	// The analysis-wide blind-construct list (#1065) must survive the exec-boundary round-trip so a
+	// not_reachable derived from a reflection-blind graph never suppresses a finding.
+	g := &callgraph.Graph{
+		Entrypoints:     []string{"m.main"},
+		BlindConstructs: []string{"reflection"},
+	}
+	var buf bytes.Buffer
+	if err := EncodeGraph(&buf, g); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	got, _, err := parseCallgraph(buf.Bytes())
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !reflect.DeepEqual(got.BlindConstructs, g.BlindConstructs) {
+		t.Errorf("blind constructs must round-trip:\n got %+v\nwant %+v", got.BlindConstructs, g.BlindConstructs)
+	}
+}

@@ -20,20 +20,27 @@ import (
 )
 
 // Result is one symbol's reachability verdict. Path is the proof – a shortest entrypoint→symbol call
-// chain ("main → … → vulnFunc") – present only when Reachable.
+// chain ("main → … → vulnFunc") – present only when Reachable. BlindConstructs names any reachable-surface
+// construct the analysis could NOT follow while deciding THIS symbol (reflection, dynamic dispatch beyond
+// its bound, cgo, generated code). A not_reachable Result carrying a blind construct is not a sound proof of
+// absence: the coordinator folds it into the claim so it can never drive an OpenVEX not_affected.
 type Result struct {
-	Symbol    string
-	Reachable bool
-	Path      []string
+	Symbol          string
+	Reachable       bool
+	Path            []string
+	BlindConstructs []string
 }
 
 // Analysis is the outcome of a successful reachability run: the per-symbol verdicts plus the Entrypoints
 // the graph was measured from. Entrypoints is the provenance sealed with the Tier-2 judgment ("proven
 // reachable from these roots") – and a zero-entrypoint analysis is a soft no-coverage signal a consumer
-// may choose to treat as inconclusive rather than definitive.
+// may choose to treat as inconclusive rather than definitive. BlindConstructs names analysis-WIDE blind
+// spots (e.g. the target uses reflection anywhere on the reachable surface): they taint EVERY not_reachable
+// verdict from this run, because any of them could be wrong for the same reason, so none may suppress.
 type Analysis struct {
-	Results     []Result
-	Entrypoints []string
+	Results         []Result
+	Entrypoints     []string
+	BlindConstructs []string
 }
 
 // Service answers reachability queries for a target by building its call graph once and querying it.
@@ -82,5 +89,5 @@ func (s *Service) Analyze(ctx context.Context, targetRef string, symbols []strin
 		}
 		out = append(out, r)
 	}
-	return &Analysis{Results: out, Entrypoints: g.Entrypoints}, nil
+	return &Analysis{Results: out, Entrypoints: g.Entrypoints, BlindConstructs: g.BlindConstructs}, nil
 }

@@ -30,7 +30,7 @@ func contains(s []string, v string) bool {
 }
 
 func TestBuildSandboxedSpecAndParse(t *testing.T) {
-	wire := `{"protocol_version":"v1.0.0","entrypoints":["m.main"],"edges":[{"caller":"m.main","callees":["m.run"]}]}`
+	wire := `{"protocol_version":"v1.1.0","entrypoints":["m.main"],"edges":[{"caller":"m.main","callees":["m.run"]}]}`
 	fr := &fakeRunner{result: ports.ToolResult{Stdout: []byte(wire)}}
 	g, err := New("synapse-callgraph").WithRunner(fr).Build(context.Background(), "/work/target")
 	if err != nil {
@@ -69,7 +69,7 @@ func TestBuildRunnerErrorFailsClosed(t *testing.T) {
 
 func TestNewDefaultsBinaryName(t *testing.T) {
 	// New("") must default the binary to "synapse-callgraph" (the in-repo cmd), reflected in the ToolSpec.
-	fr := &fakeRunner{result: ports.ToolResult{Stdout: []byte(`{"protocol_version":"v1.0.0"}`)}}
+	fr := &fakeRunner{result: ports.ToolResult{Stdout: []byte(`{"protocol_version":"v1.1.0"}`)}}
 	if _, err := New("").WithRunner(fr).Build(context.Background(), "/t"); err != nil {
 		t.Fatalf("build: %v", err)
 	}

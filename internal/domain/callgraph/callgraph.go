@@ -38,6 +38,12 @@ type Graph struct {
 	// Positions carries no json tag to match Entrypoints/Edges: the domain Graph is never marshaled
 	// directly — the synapse-callgraph wire type (taintcallgraph.wireGraph) owns serialization.
 	Positions map[string]string
+	// BlindConstructs names reachable-surface constructs the builder could NOT follow (reflection, cgo,
+	// go:linkname, unsafe function calls). It is analysis-WIDE: any not_reachable verdict derived from this
+	// graph is unsound while a blind construct is present, so a reachability consumer must refuse to suppress
+	// on it (EPIC #1042 #1065). Empty means the builder saw no such construct. Descriptive only: the
+	// adjacency/Reachable/PathTo queries never read it.
+	BlindConstructs []string
 }
 
 // adjacency builds the caller -> callees map once, for the multi-target queries to share. Empty node

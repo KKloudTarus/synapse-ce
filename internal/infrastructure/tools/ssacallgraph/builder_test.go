@@ -386,3 +386,188 @@ func TestArgIsFixedSafeProgramFailClosedBranches(t *testing.T) {
 		t.Error("an allowlisted const must be safe")
 	}
 }
+
+// TestBuildGraphFlagsReflectionBlindConstruct: first-party code that performs a reflect.Value.Call makes the
+// CHA graph blind to the reflective target, so the builder must flag "reflection" analysis-wide (EPIC #1042
+// #1065) so no not_reachable derived from it can suppress a finding.
+func TestBuildGraphFlagsReflectionBlindConstruct(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module cgfixture\n\ngo 1.21\n",
+		"main.go": `package main
+
+import "reflect"
+
+func main() { invoke(target) }
+
+func target() {}
+
+func invoke(fn interface{}) { reflect.ValueOf(fn).Call(nil) }
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !contains(g.BlindConstructs, "reflection") {
+		t.Fatalf("first-party reflect.Value.Call must flag the reflection blind construct; got %v", g.BlindConstructs)
+	}
+}
+
+// TestBuildGraphNoReflectionNoBlindConstruct: an ordinary program (no first-party reflective invocation) must
+// NOT flag a blind construct, so a sound not_reachable can still suppress.
+func TestBuildGraphNoReflectionNoBlindConstruct(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module cgfixture\n\ngo 1.21\n",
+		"main.go": `package main
+
+import "fmt"
+
+func main() { fmt.Println("hi") }
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(g.BlindConstructs) != 0 {
+		t.Fatalf("a program with no first-party reflective invocation must have no blind constructs; got %v", g.BlindConstructs)
+	}
+}
+
+// TestBuildGraphRouteHandlerIsEntrypoint: an UNEXPORTED handler registered on net/http must become a
+// reachability entry point (framework-route discovery, EPIC #1042 #1065), so a vuln reached only through it
+// is not misreported not_reachable. A plain unexported function that is never registered stays a non-root.
+func TestBuildGraphRouteHandlerIsEntrypoint(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module cgfixture\n\ngo 1.21\n",
+		"main.go": `package main
+
+import "net/http"
+
+func main() {
+	http.HandleFunc("/vuln", handleVuln)
+	unregistered()
+}
+
+func handleVuln(w http.ResponseWriter, r *http.Request) {}
+
+func unregistered() {}
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !contains(g.Entrypoints, "cgfixture.handleVuln") {
+		t.Fatalf("an unexported handler registered via http.HandleFunc must be an entrypoint; got %v", g.Entrypoints)
+	}
+	if contains(g.Entrypoints, "cgfixture.unregistered") {
+		t.Fatalf("an unexported, unregistered function must NOT be an entrypoint; got %v", g.Entrypoints)
+	}
+}
+
+// TestBuildGraphUnreachableReflectionNotFlagged: reflection in an UNREACHABLE function must NOT flag the
+// analysis-wide blind construct, so a sound not_reachable on the reachable surface can still suppress. This
+// exercises the reachable-surface scoping (EPIC #1042 #1065).
+func TestBuildGraphUnreachableReflectionNotFlagged(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module cgfixture\n\ngo 1.21\n",
+		"main.go": `package main
+
+import "reflect"
+
+func main() { println("hi") }
+
+// unexported + never called -> not an entrypoint, not reachable.
+func deadReflect(fn interface{}) { reflect.ValueOf(fn).Call(nil) }
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if contains(g.BlindConstructs, "reflection") {
+		t.Fatalf("reflection in an unreachable function must not flag the analysis; got %v", g.BlindConstructs)
+	}
+}
+
+// TestBuildGraphWrappedHandlerResolved: a handler wrapped in http.HandlerFunc(...) and passed to http.Handle
+// (an interface arg) must still be resolved to an entrypoint via the SSA unwrap (EPIC #1042 #1065 fix).
+func TestBuildGraphWrappedHandlerResolved(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module cgfixture\n\ngo 1.21\n",
+		"main.go": `package main
+
+import "net/http"
+
+func main() { http.Handle("/vuln", http.HandlerFunc(handleVuln)) }
+
+func handleVuln(w http.ResponseWriter, r *http.Request) {}
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !contains(g.Entrypoints, "cgfixture.handleVuln") {
+		t.Fatalf("a handler wrapped in http.HandlerFunc and registered via http.Handle must be an entrypoint; got %v", g.Entrypoints)
+	}
+}
+
+// TestBuildGraphDynamicHandlerFlagsBlind: a route registered with a handler value the graph cannot resolve to
+// a static function (read from a variable/slice) must flag a framework_route blind construct, so symbols it
+// might reach are not suppressed.
+func TestBuildGraphDynamicHandlerFlagsBlind(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module cgfixture\n\ngo 1.21\n",
+		"main.go": `package main
+
+import "net/http"
+
+func pick() http.HandlerFunc { return nil }
+
+func main() {
+	h := pick() // a dynamic handler value the CHA graph cannot resolve to a static function
+	http.Handle("/dyn", h)
+}
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !contains(g.BlindConstructs, "framework_route") {
+		t.Fatalf("an unresolved dynamic route handler must flag framework_route; got %v", g.BlindConstructs)
+	}
+}
+
+// TestIsRegistrationName covers the route-registration verb gate (EPIC #1042 #1065): an interface-router verb
+// (chi.Router.Get) IS a registration even though it arrives as an invoke, while a non-registration router
+// call (gin c.JSON) is NOT, so it never falsely disables suppression. net/http is limited to Handle/HandleFunc.
+func TestIsRegistrationName(t *testing.T) {
+	cases := []struct {
+		name, pkg string
+		want      bool
+	}{
+		{"Handle", "net/http", true},
+		{"HandleFunc", "net/http", true},
+		{"Get", "net/http", false},        // net/http registration is only Handle/HandleFunc
+		{"NewRequest", "net/http", false}, // a client call, not registration
+		{"Get", "github.com/go-chi/chi/v5", true},
+		{"Mount", "github.com/go-chi/chi/v5", true},
+		{"JSON", "github.com/gin-gonic/gin", false}, // finding 3: a handler body call, not a registration
+		{"GET", "github.com/gin-gonic/gin", true},
+		{"HandleFunc", "github.com/gorilla/mux", true},
+		{"Add", "github.com/labstack/echo/v4", true},
+		{"Use", "github.com/gin-gonic/gin", true}, // middleware runs on every request -> request-surface entry
+		{"Pre", "github.com/labstack/echo/v4", true},
+		{"Use", "github.com/gorilla/mux", true},
+		{"Foo", "example.com/other", false}, // not a router package
+		{"Get", "", false},
+	}
+	for _, c := range cases {
+		if got := isRegistrationName(c.name, c.pkg); got != c.want {
+			t.Errorf("isRegistrationName(%q,%q)=%v want %v", c.name, c.pkg, got, c.want)
+		}
+	}
+}

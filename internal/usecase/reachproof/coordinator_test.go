@@ -19,6 +19,7 @@ type fakeAnalyzer struct {
 	res           []reachability.Result
 	err           error
 	noEntrypoints bool
+	blind         []string // analysis-wide blind constructs (EPIC #1042 #1065)
 }
 
 func TestPythonTier2UsesDistinctSemanticProofActors(t *testing.T) {
@@ -43,7 +44,7 @@ func (f fakeAnalyzer) Analyze(context.Context, string, []string) (*reachability.
 	if f.noEntrypoints {
 		entry = nil
 	}
-	return &reachability.Analysis{Results: f.res, Entrypoints: entry}, nil
+	return &reachability.Analysis{Results: f.res, Entrypoints: entry, BlindConstructs: f.blind}, nil
 }
 
 type proposeCall struct {

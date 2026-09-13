@@ -95,7 +95,9 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 
 	adj := map[string]map[string]bool{}
 	entry := map[string]bool{}
-	positions := map[string]string{} // first-party symbol → "relpath:line" (def-use precision for taint findings)
+	positions := map[string]string{}   // first-party symbol → "relpath:line" (def-use precision for taint findings)
+	reflectiveFns := map[string]bool{} // node id → performs a reflective invocation the CHA graph cannot target
+	routeBlind := false                // a route registration passed a handler value that could not be resolved
 	for fn, node := range cg.Nodes {
 		caller := nodeID(fn)
 		if caller == "" {
@@ -103,6 +105,21 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 		}
 		if isEntrypoint(fn, firstParty) {
 			entry[caller] = true
+		}
+		// Reflection blindness is scoped to the REACHABLE surface below, so it is collected for EVERY function
+		// (a dependency helper that reflectively invokes a first-party-supplied function can hide a symbol too;
+		// EPIC #1042 #1065), not only first-party code.
+		if fnReflectivelyInvokes(fn) {
+			reflectiveFns[caller] = true
+		}
+		if isFirstPartyFunc(fn, firstParty) {
+			handlers, blind := routeHandlers(fn, firstParty)
+			for _, h := range handlers {
+				entry[h] = true // EPIC #1042 #1065: a handler registered on an HTTP router is a reachability root
+			}
+			if blind {
+				routeBlind = true // a handler value we could not resolve: don't let its reached symbols suppress
+			}
 		}
 		if p := firstPartyPos(prog.Fset, fn, dir, firstParty); p != "" {
 			positions[caller] = p
@@ -153,7 +170,189 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 		}
 	}
 	g := &domaincg.Graph{Entrypoints: sortedKeys(entry), Edges: edgesOf(adj), Positions: positions}
+	// Blind constructs are analysis-wide: any not_reachable derived from this graph is unsound while one is
+	// present, so the reachproof coordinator refuses to suppress on it (EPIC #1042 #1065). Reflection is
+	// flagged only when a REACHABLE function performs it (a reflect.Value.Call/Method the CHA graph cannot
+	// target), so an unreachable dependency's reflection does not needlessly disable every suppression.
+	var blind []string
+	reachable := g.Reachable()
+	for id := range reflectiveFns {
+		if reachable[id] {
+			blind = append(blind, "reflection")
+			break
+		}
+	}
+	if routeBlind {
+		blind = append(blind, "framework_route")
+	}
+	sort.Strings(blind)
+	g.BlindConstructs = blind
 	return g, taint.ExecFacts{Funcs: execFuncs}, nil
+}
+
+// routeHandlers returns the node ids of first-party functions fn passes as handler values to a web-framework
+// route registration (net/http Handle/HandleFunc, or a call into gin/chi/gorilla/echo). Such a handler is a
+// reachability ENTRY POINT even when it is unexported, because the framework invokes it on an inbound
+// request; the CHA graph would otherwise treat an unexported handler reached only via registration as a root
+// only incidentally. This is sound in the raise direction: an extra entry point can only make more symbols
+// reachable, never fabricate a not_reachable (EPIC #1042 #1065).
+//
+// blind is true when a handler-SHAPED argument (a func or an interface that can box one, e.g. http.Handler)
+// could not be resolved to a static function. That is a dynamic handler the graph is blind to, so its reached
+// symbols must not be suppressed; the caller records a framework_route blind construct.
+func routeHandlers(fn *ssa.Function, firstParty map[string]bool) (out []string, blind bool) {
+	if fn == nil {
+		return nil, false
+	}
+	for _, b := range fn.Blocks {
+		for _, instr := range b.Instrs {
+			cc, ok := instr.(ssa.CallInstruction)
+			if !ok || !isRouteRegistration(cc.Common()) {
+				continue
+			}
+			for _, arg := range cc.Common().Args {
+				if !isHandlerShaped(arg) {
+					continue // the path string, an int, etc. — not a handler value
+				}
+				h := handlerFuncOf(arg)
+				if h == nil {
+					blind = true // a dynamic handler value we cannot resolve to a static function
+					continue
+				}
+				if isFirstPartyFunc(h, firstParty) {
+					if id := nodeID(h); id != "" {
+						out = append(out, id)
+					}
+				}
+			}
+		}
+	}
+	return out, blind
+}
+
+// isHandlerShaped reports whether v's type can carry an HTTP handler: a func value, or an interface value
+// (http.Handler, echo.HandlerFunc via an interface, ...) that can box one. String/int route arguments are
+// not handler-shaped and are ignored, so an unresolved path argument never flags a blind construct.
+func isHandlerShaped(v ssa.Value) bool {
+	if v == nil {
+		return false
+	}
+	switch v.Type().Underlying().(type) {
+	case *types.Signature, *types.Interface:
+		return true
+	}
+	return false
+}
+
+// routeRegistrationVerbs is the set of method/function names that register an HTTP handler across the
+// supported routers (net/http, gin, chi, gorilla/mux, echo). Gating on the verb (not on any call into the
+// package) stops a non-registration router call like gin's c.JSON(200, payload) from being misread as a
+// registration and needlessly flagging a framework_route blind construct.
+var routeRegistrationVerbs = map[string]bool{
+	"Handle": true, "HandleFunc": true, "Any": true, "All": true, "Match": true, "Method": true, "MethodFunc": true, "Mount": true, "Add": true,
+	"GET": true, "POST": true, "PUT": true, "DELETE": true, "PATCH": true, "HEAD": true, "OPTIONS": true, "CONNECT": true, "TRACE": true,
+	"Get": true, "Post": true, "Put": true, "Delete": true, "Patch": true, "Head": true, "Options": true, "Connect": true, "Trace": true,
+	// Middleware registration: a handler passed to Use/Pre runs on every request, so it is a request-surface
+	// entry point too (gin/echo/chi/gorilla Use, echo Pre). Missing it could suppress a symbol reached only
+	// through middleware (EPIC #1042 #1065).
+	"Use": true, "Pre": true,
+}
+
+// isRouteRegistration reports whether a call registers an HTTP handler. It resolves the callee's name+package
+// for both a static call (StaticCallee) and an interface invoke (Common.Method, e.g. chi.Router.Get where the
+// receiver is the router interface), then defers to isRegistrationName. Handling the invoke case closes the
+// gap where an interface-typed router (r.Get("/x", h)) was skipped and its handler never became an entry
+// point (EPIC #1042 #1065).
+func isRouteRegistration(cc *ssa.CallCommon) bool {
+	if cc == nil {
+		return false
+	}
+	if callee := cc.StaticCallee(); callee != nil && callee.Pkg != nil && callee.Pkg.Pkg != nil {
+		return isRegistrationName(callee.Name(), callee.Pkg.Pkg.Path())
+	}
+	if cc.IsInvoke() && cc.Method != nil && cc.Method.Pkg() != nil {
+		return isRegistrationName(cc.Method.Name(), cc.Method.Pkg().Path())
+	}
+	return false
+}
+
+// isRegistrationName is the pure name+package gate: net/http's Handle/HandleFunc, or a registration verb in a
+// recognized router package. Over-matching a verb WITHIN a router package is harmless (extra entry points
+// only raise reachability, and an unresolved handler only flags a blind construct that prevents suppression),
+// but matching a NON-verb call must not fire, or every router-package call would falsely disable suppression.
+func isRegistrationName(name, pkg string) bool {
+	if pkg == "" {
+		return false
+	}
+	if pkg == "net/http" {
+		return name == "Handle" || name == "HandleFunc"
+	}
+	for _, router := range []string{"github.com/gin-gonic/gin", "github.com/go-chi/chi", "github.com/gorilla/mux", "github.com/labstack/echo"} {
+		if pkg == router || strings.HasPrefix(pkg, router+"/") {
+			return routeRegistrationVerbs[name]
+		}
+	}
+	return false
+}
+
+// handlerFuncOf extracts the *ssa.Function a route-registration argument refers to, unwrapping the SSA value
+// wrappers a handler is commonly built through: a named-type conversion (http.HandlerFunc(h)), an interface
+// box (http.Handle takes http.Handler), a ChangeType, and a closure (MakeClosure). It returns nil for a
+// handler the graph cannot resolve to a static function (a value read from a slice/map/field, a method value
+// through an interface), which the caller treats as a blind construct. The unwrap is depth-bounded so a
+// pathological chain cannot loop.
+func handlerFuncOf(v ssa.Value) *ssa.Function {
+	for i := 0; i < 16 && v != nil; i++ {
+		switch t := v.(type) {
+		case *ssa.Function:
+			return t
+		case *ssa.MakeClosure:
+			if f, ok := t.Fn.(*ssa.Function); ok {
+				return f
+			}
+			return nil
+		case *ssa.MakeInterface:
+			v = t.X
+		case *ssa.ChangeType:
+			v = t.X
+		case *ssa.Convert:
+			v = t.X
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// fnReflectivelyInvokes reports whether fn contains a static call to a reflect dynamic-invocation method
+// (reflect.Value.Call / CallSlice / Method / MethodByName). The CHA call graph cannot know the callee such a
+// call dispatches to, so first-party code using it makes the graph blind to those targets: a vulnerable
+// symbol reached only reflectively would be misreported not_reachable. Detecting the reflective invocation
+// (not merely importing reflect, which fmt/json pull in transitively) keeps the signal targeted.
+func fnReflectivelyInvokes(fn *ssa.Function) bool {
+	if fn == nil {
+		return false
+	}
+	for _, b := range fn.Blocks {
+		for _, instr := range b.Instrs {
+			cc, ok := instr.(ssa.CallInstruction)
+			if !ok {
+				continue
+			}
+			callee := cc.Common().StaticCallee()
+			if callee == nil || callee.Pkg == nil || callee.Pkg.Pkg == nil {
+				continue
+			}
+			if callee.Pkg.Pkg.Path() != "reflect" {
+				continue
+			}
+			switch callee.Name() {
+			case "Call", "CallSlice", "Method", "MethodByName":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isFirstPartyFunc reports whether fn is defined in a loaded-module (first-party) package, resolving a

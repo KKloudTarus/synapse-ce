@@ -109,3 +109,20 @@ func TestNewServiceValidates(t *testing.T) {
 		t.Errorf("nil builder must fail validation, got %v", err)
 	}
 }
+
+func TestAnalyzePropagatesBlindConstructs(t *testing.T) {
+	// A graph the builder flagged reflection-blind must carry that into the Analysis so the reachproof
+	// coordinator refuses to suppress on any not_reachable it derives (EPIC #1042 #1065).
+	g := &callgraph.Graph{Entrypoints: []string{"app.main"}, BlindConstructs: []string{"reflection"}}
+	svc, err := NewService(fakeBuilder{g: g})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := svc.Analyze(context.Background(), "/work", []string{"dep.vuln"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.BlindConstructs) != 1 || a.BlindConstructs[0] != "reflection" {
+		t.Fatalf("Analysis must carry the graph's blind constructs, got %v", a.BlindConstructs)
+	}
+}
