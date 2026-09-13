@@ -21,7 +21,13 @@ type Rule struct {
 	Reversal   string
 }
 
-// Rules returns immutable, local catalogue values in key order.
+// Rules returns immutable, local catalogue values in key order. It documents the reversible cross-pillar
+// promotion policies (escalate/de-escalate/flag that respond to signal changes). The raise-only, sticky
+// escalations that fire at most once and are never reversed by signal loss, RuleTaintExploitPath (#1051)
+// and RuleRuntimeLibraryLoaded (#1061), are DELIBERATELY excluded: they are standalone urgency raises with
+// no reversal semantics to document here, and their effect and one-shot behavior are pinned by
+// judgment.ExpectedEffect and the promotion evaluator's own tests. Adding them here would also require a
+// matching doc entry (docs/architecture/promotion-rules.md), which is scoped to the reversible rules.
 func Rules() []Rule {
 	catalogue := []struct {
 		key        string

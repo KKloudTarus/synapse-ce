@@ -68,3 +68,59 @@ func TestLoadLatestEventsRuntimeShieldsLowerEscalation(t *testing.T) {
 		t.Fatalf("runtime top must shield the lower escalation (sticky, InputsActive=true), got %+v", pe)
 	}
 }
+
+// TestLoadLatestEventsSignalLossNeverWipesRuntimeAbove is the Codex-flagged regression: a persisted
+// signal-loss event that references an OLDER attack-path escalation must not wipe a NEWER runtime-library
+// escalation sitting above it on the reversal stack. Replaying attack-path escalate -> runtime escalate ->
+// signal-loss(ref attack-path) must leave the runtime escalation on the stack (runtimeApplied stays true,
+// the top stays the runtime event), so its raise-only / at-most-once property survives.
+func TestLoadLatestEventsSignalLossNeverWipesRuntimeAbove(t *testing.T) {
+	f := finding.Finding{ID: "f1", Version: 1, Priority: 1}
+	store := &fakePromotionStore{events: map[shared.ID][]promotion.PromotionEvent{
+		"f1": {
+			{ID: "ap-evt", FindingID: "f1", Rule: judgment.RuleRuntimeReachableExposed, Effect: judgment.PromotionEscalate, BeforePriority: 3, AfterPriority: 2},
+			{ID: "rt-evt", FindingID: "f1", Rule: judgment.RuleRuntimeLibraryLoaded, Effect: judgment.PromotionEscalate, BeforePriority: 2, AfterPriority: 1},
+			// A stale/external signal-loss referencing the OLDER attack-path event. It must remove only that
+			// event, never the runtime event above it.
+			{ID: "sl-evt", FindingID: "f1", Rule: judgment.RuleCorroboratingSignalLoss, Effect: judgment.PromotionDeescalate, Inputs: []judgment.PromotionInput{{Kind: judgment.PromotionInputPrior, ID: "ap-evt"}}},
+		},
+	}}
+	ev := &Evaluator{promotions: store}
+
+	out, _, runtimeApplied, err := ev.loadLatestEvents(context.Background(), "eng", []finding.Finding{f}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runtimeApplied["f1"] {
+		t.Fatal("signal loss on the older attack-path event must NOT wipe the runtime escalation (still applied)")
+	}
+	if pe := out["f1"]; pe.EventID != "rt-evt" || !pe.InputsActive {
+		t.Fatalf("runtime escalation must survive the signal-loss pop, got %+v", pe)
+	}
+}
+
+// TestLoadLatestEventsSignalLossCannotPopStickyDirectly guards the other pop path: a signal-loss event that
+// references the sticky runtime escalation ITSELF must not remove it (a sticky raise-only escalation is
+// never reversed by signal loss). The normal evaluator never emits such an event, but a stale/external one
+// must not de-escalate a raise-only signal.
+func TestLoadLatestEventsSignalLossCannotPopStickyDirectly(t *testing.T) {
+	f := finding.Finding{ID: "f1", Version: 1, Priority: 1}
+	store := &fakePromotionStore{events: map[shared.ID][]promotion.PromotionEvent{
+		"f1": {
+			{ID: "rt-evt", FindingID: "f1", Rule: judgment.RuleRuntimeLibraryLoaded, Effect: judgment.PromotionEscalate, BeforePriority: 2, AfterPriority: 1},
+			{ID: "sl-evt", FindingID: "f1", Rule: judgment.RuleCorroboratingSignalLoss, Effect: judgment.PromotionDeescalate, Inputs: []judgment.PromotionInput{{Kind: judgment.PromotionInputPrior, ID: "rt-evt"}}},
+		},
+	}}
+	ev := &Evaluator{promotions: store}
+
+	out, _, runtimeApplied, err := ev.loadLatestEvents(context.Background(), "eng", []finding.Finding{f}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runtimeApplied["f1"] {
+		t.Fatal("a signal-loss referencing the sticky runtime escalation must not pop it (still applied)")
+	}
+	if pe := out["f1"]; pe.EventID != "rt-evt" || !pe.InputsActive {
+		t.Fatalf("sticky runtime escalation must survive a direct signal-loss reference, got %+v", pe)
+	}
+}

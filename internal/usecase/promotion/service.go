@@ -450,7 +450,16 @@ func (e *Evaluator) loadLatestEvents(
 						}
 						for i := len(stack) - 1; i >= 0; i-- {
 							if stack[i].ID == input.ID {
-								stack = stack[:i]
+								// A sticky raise-only escalation (taint / runtime-library) is NEVER reversed by
+								// signal loss: the absence of its signal must never de-escalate (EPIC #1042
+								// 2.1/#1061). Leave it and the rest of the stack intact.
+								if isStickyRaiseOnlyRule(stack[i].Rule) {
+									break
+								}
+								// Remove ONLY the referenced event, preserving newer escalations above it. A
+								// newer escalation may be a sticky raise-only one that must survive a reversal
+								// aimed at an older non-sticky escalation below it; truncating at i would wipe it.
+								stack = append(stack[:i], stack[i+1:]...)
 								break
 							}
 						}
@@ -485,8 +494,8 @@ func (e *Evaluator) loadLatestEvents(
 					return nil, nil, nil, fmt.Errorf("check active escalation inputs for finding %s: %w", f.ID, err)
 				}
 			}
-			inputsMatch := false                     // a sticky raise-only top is never an attack-path escalation, so its
-			if !isStickyRaiseOnlyRule(evt.Rule) {    // attack-path-shaped inputs-match is not computed (stays false).
+			inputsMatch := false                  // a sticky raise-only top is never an attack-path escalation, so its
+			if !isStickyRaiseOnlyRule(evt.Rule) { // attack-path-shaped inputs-match is not computed (stays false).
 				var err error
 				inputsMatch, err = escalationInputsMatch(ctx, evt, f.ID, graph, activeDetections, reachability)
 				if err != nil {
@@ -1062,11 +1071,15 @@ func indexRuntimeLibraryLoads(judgments []judgment.Judgment) map[shared.ID]promo
 		if j.Capability != judgment.CapReachability || j.SubjectKind != judgment.SubjectFinding || !j.Publishable() {
 			continue
 		}
-		if j.ProposedBy != judgment.ProofActorRuntimeLibLoadedScan && j.ProposedBy != judgment.ProofActorRuntimeLibLoadedEngine {
+		// Require the EXACT reserved runtime-libloaded pair (scan proposer, engine verifier), so a
+		// reachability judgment merely proposed or verified by one of these actors in some other role, or a
+		// judgment at a different tier, can never be read as a runtime-library-load signal. The coordinator
+		// always mints with exactly this pair at TierRuntime; anything else is not a runtime observation.
+		if j.ProposedBy != judgment.ProofActorRuntimeLibLoadedScan || j.VerifiedBy != judgment.ProofActorRuntimeLibLoadedEngine {
 			continue
 		}
 		rc, ok := j.Claim.(judgment.ReachabilityClaim)
-		if !ok || rc.Reachable != judgment.Reachable {
+		if !ok || rc.Reachable != judgment.Reachable || rc.Tier != judgment.TierRuntime {
 			continue
 		}
 		if cur, exists := out[j.SubjectID]; exists && cur.ID <= j.ID {
