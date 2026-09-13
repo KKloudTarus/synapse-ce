@@ -24,7 +24,7 @@ func TestLoadLatestEventsTaintEscalationIsSticky(t *testing.T) {
 	}}
 	ev := &Evaluator{promotions: store}
 
-	out, taintApplied, err := ev.loadLatestEvents(context.Background(), "eng", []finding.Finding{f}, nil, nil, nil)
+	out, taintApplied, _, err := ev.loadLatestEvents(context.Background(), "eng", []finding.Finding{f}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
