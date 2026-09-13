@@ -8,7 +8,7 @@ import (
 )
 
 func TestMigration0169OwnershipNotificationUpgrade(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 164, func(db *sql.DB) {
+	_, db := ownershipTestDatabase(t, 168, func(db *sql.DB) {
 		withMigrationTenant(t, db, "default", func(tx *sql.Tx) {
 			if _, err := tx.Exec(`INSERT INTO notification_rules(tenant_id,id,name,event_type,created_at,updated_at)
 				VALUES('default','legacy-scan','Existing scan rule','scan.completed',now(),now())`); err != nil {
@@ -29,7 +29,7 @@ func TestMigration0169OwnershipNotificationUpgrade(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if err := goose.DownTo(db, ".", 164); err == nil {
+	if err := goose.DownTo(db, ".", 168); err == nil {
 		t.Fatal("downgrade silently discarded an ownership subscription")
 	}
 	withMigrationTenant(t, db, "default", func(tx *sql.Tx) {
@@ -37,11 +37,11 @@ func TestMigration0169OwnershipNotificationUpgrade(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if err := goose.DownTo(db, ".", 164); err != nil {
+	if err := goose.DownTo(db, ".", 168); err != nil {
 		t.Fatal(err)
 	}
 	requireMigrationTable(t, db, "notification_rule_teams", false)
-	if err := goose.UpTo(db, ".", 165); err != nil {
+	if err := goose.UpTo(db, ".", 169); err != nil {
 		t.Fatal(err)
 	}
 	withMigrationTenant(t, db, "default", func(tx *sql.Tx) {
