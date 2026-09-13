@@ -111,6 +111,7 @@ func TestRecordSupersedesWeakerStaticPrior(t *testing.T) {
 	// blocked by it. This is the "refutes a stale static negative" case.
 	prior := judgment.Judgment{
 		ID: "old", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "f1",
+		State: judgment.StateConfirmed,
 		Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, Confidence: 90, EntrypointsPresent: true},
 	}
 	c, rec, aud := newCoordinator(t, prior)
@@ -137,6 +138,7 @@ func TestRecordNoChurnOnExistingRuntimeReachable(t *testing.T) {
 	// A finding already reachable at TierRuntime must not re-mint on the next observation (no churn).
 	prior := judgment.Judgment{
 		ID: "old", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "f1",
+		State: judgment.StateConfirmed,
 		Claim: judgment.ReachabilityClaim{Reachable: judgment.Reachable, Tier: judgment.TierRuntime, Confidence: 100},
 	}
 	c, rec, _ := newCoordinator(t, prior)
@@ -146,6 +148,44 @@ func TestRecordNoChurnOnExistingRuntimeReachable(t *testing.T) {
 	}
 	if n != 0 || len(rec.proposes) != 0 {
 		t.Fatalf("minted %d (proposes %d), want 0 (no churn)", n, len(rec.proposes))
+	}
+}
+
+// TestRecordReMintsWhenPriorIsUnconfirmed proves a dangling PROPOSED judgment (a mint whose Verify never
+// cleared, e.g. after a transient store error) does not permanently block the real raise: since a same-tier
+// claim does not supersede an equal one, treating the inert proposed judgment as a standing prior would skip
+// the mint forever. The next report must re-mint and recover.
+func TestRecordReMintsWhenPriorIsUnconfirmed(t *testing.T) {
+	prior := judgment.Judgment{
+		ID: "dangling", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "f1",
+		State: judgment.StateProposed, // inert: Propose landed, Verify did not
+		Claim: judgment.ReachabilityClaim{Reachable: judgment.Reachable, Tier: judgment.TierRuntime, Confidence: 100},
+	}
+	c, rec, _ := newCoordinator(t, prior)
+	n, err := c.Record(context.Background(), "eng", []dr.Hit{{FindingID: "f1", Package: dr.PackageRef{Name: "a", Version: "1"}, Match: dr.MatchFileIdentity}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(rec.proposes) != 1 {
+		t.Fatalf("minted %d (proposes %d), want 1 (an inert proposed prior must not block the raise)", n, len(rec.proposes))
+	}
+}
+
+// TestRecordReMintsWhenPriorIsRefuted proves a refuted prior likewise does not stand: a runtime observation
+// must be able to raise even after an earlier attempt was refuted.
+func TestRecordReMintsWhenPriorIsRefuted(t *testing.T) {
+	prior := judgment.Judgment{
+		ID: "refuted", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "f1",
+		State: judgment.StateRefuted,
+		Claim: judgment.ReachabilityClaim{Reachable: judgment.Reachable, Tier: judgment.TierRuntime, Confidence: 100},
+	}
+	c, rec, _ := newCoordinator(t, prior)
+	n, err := c.Record(context.Background(), "eng", []dr.Hit{{FindingID: "f1", Package: dr.PackageRef{Name: "a", Version: "1"}, Match: dr.MatchFileIdentity}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(rec.proposes) != 1 {
+		t.Fatalf("minted %d (proposes %d), want 1 (a refuted prior must not block the raise)", n, len(rec.proposes))
 	}
 }
 
