@@ -146,6 +146,101 @@ func main() { (&Svc{}).Handle() }
 	}
 }
 
+// TestBuildGraphVTAPrunesUninstantiatedImpl proves the CHA→VTA→VTA upgrade (#1055) tightens precision
+// soundly: an interface call resolves only to the implementation whose concrete type actually flows to the
+// call site. CHA would add an edge to EVERY Greeter implementation; VTA proves no Danger value reaches g and
+// prunes it, so Danger.Greet and the danger() it alone reaches are NOT reachable. This is sound — no Danger
+// value can reach this call site — so it removes a spurious flow without hiding a real one.
+func TestBuildGraphVTAPrunesUninstantiatedImpl(t *testing.T) {
+	// The interface and its method are UNEXPORTED, so the implementations are not exported-method entrypoints;
+	// their only reachability is through the interface call, which is exactly what VTA resolves.
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module vtafix\n\ngo 1.21\n",
+		"main.go": `package main
+
+type greeter interface{ greet() }
+
+type safeImpl struct{}
+
+func (safeImpl) greet() {}
+
+type dangerImpl struct{}
+
+func (dangerImpl) greet() { danger() }
+
+func danger() {}
+
+func main() {
+	var g greeter = safeImpl{}
+	g.greet()
+}
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	reach := g.Reachable()
+	if !reach["vtafix.safeImpl.greet"] {
+		t.Errorf("safeImpl.greet (the instantiated impl called via the interface) must be reachable; entrypoints=%v", g.Entrypoints)
+	}
+	if reach["vtafix.dangerImpl.greet"] {
+		t.Errorf("VTA must prune the uninstantiated dangerImpl.greet from g.greet() (CHA over-approximation)")
+	}
+	if reach["vtafix.danger"] {
+		t.Errorf("danger(), reached only via the pruned dangerImpl.greet, must not be reachable")
+	}
+}
+
+// TestBuildGraphInitIsEntrypoint proves the entry-policy fix (#1055): a first-party func init() is a
+// reachability root, so a symbol reached only from init is reachable. Before, init was missed and such a
+// symbol was under-approximated as unreachable.
+func TestBuildGraphInitIsEntrypoint(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module initfix\n\ngo 1.21\n",
+		"main.go": `package main
+
+func init() { fromInit() }
+
+func fromInit() {}
+
+func main() {}
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !g.Reachable()["initfix.fromInit"] {
+		t.Errorf("a symbol reached only from func init() must be reachable; entrypoints=%v", g.Entrypoints)
+	}
+}
+
+// TestBuildGraphPluginLoadIsBlindConstruct proves the blind-construct guard (#1055) flags a reachable
+// plugin.Open: a loaded Go plugin's code is in no analyzed package, so the graph is blind to what it invokes
+// and the reachproof coordinator must refuse to mint not_reachable. Without this, a symbol reached only
+// through a plugin would be wrongly suppressed.
+func TestBuildGraphPluginLoadIsBlindConstruct(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module plugfix\n\ngo 1.21\n",
+		"main.go": `package main
+
+import "plugin"
+
+func main() {
+	_, _ = plugin.Open("mod.so")
+}
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !contains(g.BlindConstructs, "plugin") {
+		t.Errorf("a reachable plugin.Open must record a \"plugin\" blind construct; got %v", g.BlindConstructs)
+	}
+}
+
 func TestBuildGraphGenericInstanceEdgesSurvive(t *testing.T) {
 	// A call chain THROUGH a generic function must NOT be severed. A monomorphized instance (Map[int]) has a
 	// nil ssa Pkg + a parameterized name, so without Origin() resolution its in/out edges would silently drop
