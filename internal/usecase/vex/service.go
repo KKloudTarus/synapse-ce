@@ -26,6 +26,7 @@ type Service struct {
 	audit        ports.AuditLogger
 	clock        ports.Clock
 	transactions ports.TenantTransactionRunner
+	statements   ports.VEXStatementRepository
 }
 
 // SetTransactionRunner makes one Apply atomic. Without it each status change commits on its own
@@ -34,6 +35,12 @@ type Service struct {
 // file stores have no transactions; the Postgres composition roots set it.
 func (s *Service) SetTransactionRunner(transactions ports.TenantTransactionRunner) {
 	s.transactions = transactions
+}
+
+// SetStatementStore enables persistence of ingested statements so they can be re-applied after a rescan
+// (Reapply). Optional: without it Apply still adjusts finding statuses, it just does not survive a rescan.
+func (s *Service) SetStatementStore(statements ports.VEXStatementRepository) {
+	s.statements = statements
 }
 
 // NewService validates dependencies and returns the VEX service.
@@ -71,7 +78,15 @@ func (s *Service) Apply(ctx context.Context, actor string, tenantID, engagementI
 		if err := s.transactions.Run(ctx, tenantID, func(txCtx context.Context) error {
 			var applyErr error
 			res, applyErr = s.apply(txCtx, actor, engagementID, doc)
-			return applyErr
+			if applyErr != nil {
+				return applyErr
+			}
+			// Persist after a successful apply. The repository opens its own tenant transaction, so this is
+			// not one atomic unit with the status changes; that is safe because the failure modes are benign:
+			// if persist fails, its error rolls back the apply above (nothing lands); if apply's transaction
+			// later fails to commit, the persisted statements simply re-apply the same decision on the next
+			// scan (self-healing), never a decision that was never asked for.
+			return s.persist(txCtx, actor, tenantID, engagementID, doc)
 		}); err != nil {
 			// The transaction rolled back, so nothing was applied. Reporting a partial count
 			// would describe changes that no longer exist.
@@ -79,7 +94,75 @@ func (s *Service) Apply(ctx context.Context, actor string, tenantID, engagementI
 		}
 		return res, nil
 	}
-	return s.apply(ctx, actor, engagementID, doc)
+	res, err := s.apply(ctx, actor, engagementID, doc)
+	if err != nil {
+		return res, err
+	}
+	if err := s.persist(ctx, actor, tenantID, engagementID, doc); err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
+// persist retains the document's actionable statements so a later rescan can re-evaluate them
+// (usecase/vex is otherwise apply-and-forget). It is a no-op when no statement store is configured, and it
+// stores every statement whose status maps to a finding status, INCLUDING ones that matched nothing this
+// time, because a rescan may surface a finding the assertion then covers.
+func (s *Service) persist(ctx context.Context, actor string, tenantID, engagementID shared.ID, doc vex.Document) error {
+	if s.statements == nil {
+		return nil
+	}
+	stored := make([]vex.StoredStatement, 0, len(doc.Statements))
+	for _, st := range doc.Statements {
+		if st.Vulnerability == "" {
+			continue
+		}
+		if _, ok := vexTargetStatus(st.Status); !ok {
+			continue // an unmapped status changes no finding, so retaining it would re-apply nothing
+		}
+		stored = append(stored, vex.NewStoredStatement(st, actor, s.clock.Now()))
+	}
+	if err := s.statements.Save(ctx, tenantID, engagementID, stored); err != nil {
+		return fmt.Errorf("persist vex statements: %w", err)
+	}
+	return nil
+}
+
+// Reapply re-evaluates the engagement's PERSISTED VEX statements against its current findings. A rescan's
+// Upsert resets findings to open, so without this a previously-ingested not_affected/fixed decision would be
+// silently lost; the scan pipeline calls this after materializing findings. It is a no-op when no statement
+// store is configured or nothing has been ingested. The same reachability reconciliation as Apply holds: a
+// persisted not_affected never suppresses a Synapse-reachable finding.
+func (s *Service) Reapply(ctx context.Context, tenantID, engagementID shared.ID) error {
+	if s.statements == nil {
+		return nil
+	}
+	stored, err := s.statements.ListByEngagement(ctx, tenantID, engagementID)
+	if err != nil {
+		return fmt.Errorf("load persisted vex statements: %w", err)
+	}
+	if len(stored) == 0 {
+		return nil
+	}
+	doc := vex.Document{Statements: make([]vex.Statement, 0, len(stored))}
+	for _, st := range stored {
+		doc.Statements = append(doc.Statements, st.Statement)
+	}
+	const actor = "system:vex-reapply"
+	if s.transactions != nil {
+		// Atomic: a mid-apply failure rolls the whole re-apply back, so the rescan-materialized findings stay
+		// as they are (open) rather than half-suppressed by only the statements that ran before the failure.
+		// The Postgres composition root always sets a transaction runner, so this is the production path.
+		return s.transactions.Run(ctx, tenantID, func(txCtx context.Context) error {
+			_, applyErr := s.apply(txCtx, actor, engagementID, doc)
+			return applyErr
+		})
+	}
+	// No transaction runner (in-memory backend, dev/test): best-effort. The per-finding reachability guard in
+	// apply still holds, so a reachable finding is never suppressed; a mid-apply failure could leave the
+	// un-applied tail as materialized (open), which is the safe over-reporting direction.
+	_, err = s.apply(ctx, actor, engagementID, doc)
+	return err
 }
 
 // apply walks the document against the engagement's findings. When the caller wrapped it in a

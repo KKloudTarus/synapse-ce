@@ -98,6 +98,7 @@ type Service struct {
 	artifactCataloger                ports.ArtifactCataloger               // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
 	suppression                      ports.SuppressionLoader               // optional repo-committed .synapseignore accepted-risk policy
 	vexLoader                        ports.VEXLoader                       // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
+	vexReapplier                     ports.VEXReapplier                    // optional re-apply of persisted imported VEX statements after a rescan (#1064)
 	complianceOn                     bool                                  // when set, attach the AppSec-baseline compliance report to a scan
 	dbMaxAgeDays                     int                                   // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
 	strictSources                    bool                                  // when true, any detection-source error aborts the scan; default degrades (skip + warn)
@@ -237,6 +238,28 @@ func (s *Service) SetGateDecoder(decoder ports.GateDecoder) { s.gateDecoder = de
 // SetSLAAssessor enables durable remediation SLA assessment at the finding persistence boundary.
 // When unset, scan behavior and output remain unchanged.
 func (s *Service) SetSLAAssessor(assessor ports.FindingSLAAssessor) { s.slaAssessor = assessor }
+
+// SetVEXReapplier wires the re-apply of persisted imported VEX statements after a rescan (#1064). Optional:
+// without it a rescan leaves findings as materialized, so a previously-imported not_affected/fixed decision
+// is not re-applied.
+func (s *Service) SetVEXReapplier(r ports.VEXReapplier) { s.vexReapplier = r }
+
+// reapplyPersistedVEX re-evaluates the engagement's persisted imported VEX statements against the findings a
+// scan just materialized (a rescan's Upsert resets them to open). It is best-effort: a failure leaves findings
+// UN-suppressed, which is the safe direction (a VEX suppression that fails to re-apply can only over-report,
+// never hide a vulnerability), so it never fails the scan. The tenant is ambient in ctx.
+func (s *Service) reapplyPersistedVEX(ctx context.Context, engagementID shared.ID) {
+	if s.vexReapplier == nil {
+		return
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return
+	}
+	if err := s.vexReapplier.Reapply(ctx, tenantID, engagementID); err != nil {
+		s.logger().Warn("re-apply persisted VEX after scan failed (best-effort)", "engagement", engagementID.String(), "err", err)
+	}
+}
 
 // SetIgnoreUnfixed controls whether vulnerabilities with no available fix are promoted to
 // findings. true = suppress them (Trivy's --ignore-unfixed); they stay in the vuln inventory.
@@ -2584,6 +2607,8 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		if err := s.attributeFindings(ctx, engagementID, strings.TrimSpace(doc.TargetRef), result); err != nil {
 			s.logger().Warn("attribute SCA findings failed (best-effort)", "err", err)
 		}
+		// See runPipeline: re-apply persisted imported VEX after the rescan reset findings to open (#1064).
+		s.reapplyPersistedVEX(ctx, engagementID)
 	}
 	if s.aiReviews != nil {
 		if err := s.aiReviews.RecordScan(ctx, engagementID, evidenceRef, result.Findings, result.AITriage); err != nil {
@@ -3778,6 +3803,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		if err := s.attributeFindings(ctx, engagementID, normalizedSourceTarget(req), result); err != nil {
 			s.logger().Warn("attribute SCA findings failed (best-effort)", "err", err)
 		}
+		// A rescan's Upsert reset these findings to open; re-apply the engagement's persisted imported VEX
+		// so a prior not_affected/fixed decision survives the rescan (#1064). Best-effort and safe: a failure
+		// leaves findings un-suppressed.
+		s.reapplyPersistedVEX(ctx, engagementID)
 	}
 	if s.aiReviews != nil {
 		if err := s.aiReviews.RecordScan(ctx, engagementID, evidenceRef, result.Findings, result.AITriage); err != nil {

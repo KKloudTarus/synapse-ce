@@ -429,6 +429,7 @@ func main() {
 	var aiTriageReviewStore ports.AITriageReviewStore
 	var importedSBOMStore ports.ImportedSBOMStore
 	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
+	var vexStatementStore ports.VEXStatementRepository  // persisted imported VEX statements, re-applied after a rescan (#1064)
 	var detectionRecordStore interface {
 		ports.DetectionRecordStore
 		ports.CorrelationDetectionSource
@@ -608,6 +609,7 @@ func main() {
 		aiTriageReviewStore = postgres.NewAITriageReviewRepository(pool)
 		importedSBOMStore = postgres.NewImportedSBOMStore(pool)
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
+		vexStatementStore = postgres.NewVEXStatementRepository(pool)
 		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
 		purpleCoverageStore = postgres.NewPurpleRepository(pool)
 		accuracyRunStore = postgres.NewAccuracyRunRepository(pool)
@@ -785,6 +787,7 @@ func main() {
 		aiTriageReviewStore = memory.NewAITriageReviewStore()
 		importedSBOMStore = memory.NewImportedSBOMStore()
 		importedFindingStore = memory.NewImportedFindingStore()
+		vexStatementStore = memory.NewVEXStatementStore()
 		memoryDetectionRecords := memory.NewDetectionRecordStore()
 		detectionRecordStore = memoryDetectionRecords
 		purpleCoverageStore = memory.NewPurpleStore()
@@ -1159,6 +1162,11 @@ func main() {
 		// One VEX document retires many findings. Without a transaction each retirement commits
 		// on its own, so a failure part way through leaves some findings retired and the rest not.
 		vexService.SetTransactionRunner(vulnerabilityTransactions)
+	}
+	// Persist imported VEX statements and re-apply them after a rescan resets findings to open (#1064).
+	if vexStatementStore != nil {
+		vexService.SetStatementStore(vexStatementStore)
+		scaService.SetVEXReapplier(vexService)
 	}
 
 	// Recon orchestration: one shared execution guard, an argv-only

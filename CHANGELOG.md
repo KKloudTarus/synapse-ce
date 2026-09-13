@@ -7,6 +7,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Added
+
+- **Ingested VEX statements persist and re-apply after a rescan (EPIC #1042, #1064 part 2b).** VEX import was apply-and-forget: a vendor/human OpenVEX/CSAF document adjusted finding statuses and was then discarded, so the next scan's `Upsert` reset those findings to open and silently dropped the decision. Imported statements are now persisted per engagement (a new `ports.VEXStatementRepository` with Postgres + in-memory adapters, migration `0173_vex_statements` with tenant RLS, idempotent by a content digest of the assertion), and the SCA pipeline re-applies them after it materializes findings on every scan (a new `ports.VEXReapplier`, wired best-effort so a re-apply failure leaves findings un-suppressed rather than failing the scan). The re-apply runs the same reachability reconciliation as import, so a persisted `not_affected` still never suppresses a finding Synapse now judges reachable. This completes #1064 (the suppression clause landed in part 1 and part 2a).
+
 ### Fixed
 
 - **Export never emits OpenVEX/CSAF `not_affected` for a Synapse-reachable finding (EPIC #1042, #1064 part 2a).** The VEX export derived its status purely from finding status, so a vendor/human `not_affected` (`finding.StatusFalsePos`) was exported as `not_affected` even when Synapse had independently proved the vulnerable code reachable, a suppression surface that mirrored (and could bypass) the apply-path guard already in `usecase/vex/service.go`. Export now reconciles: when a finding's winning reachability judgment is `reachable`, or the finding carries a finding-level reachable verdict (a runtime hit sets `finding.Reachability`), a would-be `not_affected` record is upgraded to the more-exploitable `affected` in both the OpenVEX and CSAF emitters (they share `collectVEXRecords`). A vendor assertion can no longer suppress Synapse's own reachable verdict on export. A not-contradicted `not_affected` still stands. Persisting ingested VEX statements for re-evaluation on rescan (#1064 part 2b) is the remaining follow-on.
