@@ -88,6 +88,28 @@ func TestApplyNotAffectedSuppresses(t *testing.T) {
 	}
 }
 
+// TestApplyNotAffectedDoesNotSuppressReachable is the EPIC #1042 E.2 reconciliation: a vendor not_affected
+// must NEVER suppress a finding Synapse independently judged reachable (a real reachable vulnerability would
+// otherwise be hidden by a vendor assertion). The finding keeps its status; the conflict is recorded.
+func TestApplyNotAffectedDoesNotSuppressReachable(t *testing.T) {
+	svc, repo := newSvc(t, []finding.Finding{
+		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2020-1:foo:1.2.3", Status: finding.StatusOpen, Version: 1, Reachability: "reachable"},
+	})
+	doc := []byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+		{"vulnerability":{"name":"CVE-2020-1"},"products":[{"@id":"foo@1.2.3"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`)
+
+	res, err := svc.Apply(context.Background(), "alice", "", "e1", doc)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if res.Matched != 1 || res.Applied != 0 {
+		t.Fatalf("res = %+v, want matched=1 applied=0 (reconciliation blocked the suppression)", res)
+	}
+	if repo.list[0].Status != finding.StatusOpen {
+		t.Errorf("a Synapse-reachable finding must NOT be suppressed by a vendor not_affected, got status %s", repo.list[0].Status)
+	}
+}
+
 func TestApplyFixedMarksRemediatedAndPurlProductMatches(t *testing.T) {
 	svc, repo := newSvc(t, []finding.Finding{
 		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2021-2:lodash:4.17.20", Status: finding.StatusConfirmed, Version: 3},

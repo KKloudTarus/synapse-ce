@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
@@ -103,6 +104,25 @@ func (s *Service) apply(ctx context.Context, actor string, engagementID shared.I
 				continue
 			}
 			res.Matched++
+			// Reconciliation (EPIC #1042 E.2): a vendor not_affected is an ASSERTION, not a fact. It must
+			// never suppress a finding Synapse independently judged REACHABLE (the more-exploitable verdict
+			// wins), or a real, reachable vulnerability would be hidden by a vendor claim. Record the
+			// conflict on the audit log and leave the finding's status untouched.
+			if target == finding.StatusFalsePos && f.Reachability == string(judgment.Reachable) {
+				if err := s.audit.Record(ctx, ports.AuditEntry{
+					Actor: actor, Action: "finding.vex_not_applied", Target: f.ID.String(),
+					Metadata: map[string]string{
+						"engagement": engagementID.String(),
+						"advisory":   st.Vulnerability,
+						"vex_status": st.Status,
+						"reason":     "synapse_reachable",
+					},
+					At: s.clock.Now(),
+				}); err != nil {
+					return res, fmt.Errorf("record vex reconciliation conflict for finding %s: %w", f.ID, err)
+				}
+				continue
+			}
 			if f.Status == target {
 				continue // already in the asserted state
 			}
