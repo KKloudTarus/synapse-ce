@@ -40,6 +40,27 @@
       }
     },
     {
+      "name": "go_vta_instantiated_impl_reached",
+      "language": "go",
+      "fixture": "go_vta_pruned",
+      "symbol": "reachvta.safeImpl.greet",
+      "expected": "reachable"
+    },
+    {
+      "name": "go_vta_uninstantiated_impl_pruned",
+      "language": "go",
+      "fixture": "go_vta_pruned",
+      "symbol": "reachvta.dangerImpl.greet",
+      "expected": "present_unreached"
+    },
+    {
+      "name": "go_init_reached",
+      "language": "go",
+      "fixture": "go_init_reached",
+      "symbol": "reachinit.fromInit",
+      "expected": "reachable"
+    },
+    {
       "name": "py_reached_via_handler",
       "language": "python",
       "fixture": "py_reached",
