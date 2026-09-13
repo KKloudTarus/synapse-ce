@@ -1809,6 +1809,14 @@ func (s *Service) scanWithOptions(ctx context.Context, actor string, engagementI
 			s.observeGateOutcome(err)
 			return nil, err
 		}
+		inventoryTarget := imported.TargetRef
+		if strings.TrimSpace(inventoryTarget) == "" {
+			inventoryTarget = imported.Filename
+		}
+		ctx, err = s.withInventoryAdmission(ctx, engagementID, inventoryTarget, now)
+		if err != nil {
+			return nil, err
+		}
 		result, err := s.runImportedSBOMPipeline(ctx, actor, engagementID, now, imported, doc, opts, func(string, int, []ports.ScanDebugEvent) {}, "")
 		s.observeSyncTerminal(started, err)
 		return result, err
@@ -1816,6 +1824,10 @@ func (s *Service) scanWithOptions(ctx context.Context, actor string, engagementI
 	now, err := s.gateAndAudit(ctx, actor, engagementID, req, opts)
 	if err != nil {
 		s.observeGateOutcome(err)
+		return nil, err
+	}
+	ctx, err = s.withInventoryAdmission(ctx, engagementID, req.Value, now)
+	if err != nil {
 		return nil, err
 	}
 	result, err := s.runPipeline(ctx, actor, engagementID, now, req, opts, func(string, int, []ports.ScanDebugEvent) {}, "")
@@ -1864,9 +1876,18 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 	kind := kindOrLocal(req.Kind)
 	if useImported {
 		target = imported.TargetRef
+		if strings.TrimSpace(target) == "" {
+			target = imported.Filename
+		}
 		kind = "imported-sbom"
 		_ = importedDoc // loaded now to fail fast; worker reloads the active artifact when executing.
 	}
+	admissionTarget := target
+	admissionCtx, err := s.withInventoryAdmission(ctx, engagementID, admissionTarget, now)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
+	admission, _ := inventoryAdmissionFrom(admissionCtx)
 	job := ports.ScanJob{
 		SourcePackage: publicSourcePackage(req.SourcePackage),
 		ID:            s.ids.NewID().String(),
@@ -1892,7 +1913,7 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 			return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for scan job", shared.ErrValidation)
 		}
 		tenant := tenantID.String()
-		payload, mErr := json.Marshal(scaJobPayload{Actor: actor, TenantID: &tenant, EngagementID: engagementID.String(), Now: now, Req: req, Options: opts, Job: job})
+		payload, mErr := json.Marshal(scaJobPayload{Actor: actor, TenantID: &tenant, EngagementID: engagementID.String(), Now: now, Req: req, Options: opts, Job: job, InventoryAdmission: admission})
 		if mErr != nil {
 			return ports.ScanJob{}, fmt.Errorf("marshal scan job: %w", mErr)
 		}
@@ -1912,7 +1933,11 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for scan job", shared.ErrValidation)
 	}
 	go func() {
-		_ = s.runScanJob(shared.WithTenant(context.Background(), tenantID), actor, engagementID, now, req, opts, job)
+		background := shared.WithTenant(context.Background(), tenantID)
+		if admission.Generation > 0 {
+			background = context.WithValue(background, inventoryAdmissionContextKey{}, admission)
+		}
+		_ = s.runScanJob(background, actor, engagementID, now, req, opts, job)
 	}()
 	return job, nil
 }
@@ -1922,13 +1947,14 @@ const ScanJobKind = "sca"
 
 // scaJobPayload is the durable-queue payload for one SCA scan run.
 type scaJobPayload struct {
-	Actor        string               `json:"actor"`
-	TenantID     *string              `json:"tenant_id"`
-	EngagementID string               `json:"engagement_id"`
-	Now          time.Time            `json:"now"`
-	Req          ports.AcquireRequest `json:"req"`
-	Options      ScanOptions          `json:"options"`
-	Job          ports.ScanJob        `json:"job"`
+	Actor              string                  `json:"actor"`
+	TenantID           *string                 `json:"tenant_id"`
+	EngagementID       string                  `json:"engagement_id"`
+	Now                time.Time               `json:"now"`
+	Req                ports.AcquireRequest    `json:"req"`
+	Options            ScanOptions             `json:"options"`
+	Job                ports.ScanJob           `json:"job"`
+	InventoryAdmission sbom.InventoryAdmission `json:"inventory_admission,omitempty"`
 }
 
 // SetQueue routes SCA scans through the durable job queue: StartScan enqueues and
@@ -2005,6 +2031,15 @@ func (s *Service) RunScanJob(ctx context.Context, payload []byte) error {
 	opts, err := normalizeScanOptions(p.Options)
 	if err != nil {
 		return err
+	}
+	if p.InventoryAdmission.Generation > 0 {
+		if err := p.InventoryAdmission.Validate(); err != nil {
+			return err
+		}
+		if shared.TenantOrDefault(p.InventoryAdmission.TenantID) != tenantID || p.InventoryAdmission.EngagementID != shared.ID(p.EngagementID) {
+			return fmt.Errorf("%w: scan job inventory admission is mismatched", shared.ErrValidation)
+		}
+		ctx = context.WithValue(ctx, inventoryAdmissionContextKey{}, p.InventoryAdmission)
 	}
 	return s.runScanJob(ctx, p.Actor, shared.ID(p.EngagementID), p.Now, p.Req, opts, p.Job)
 }
@@ -2269,6 +2304,28 @@ func looksLikePath(v string) bool {
 	return filepath.IsAbs(v) || strings.HasPrefix(v, ".") || strings.ContainsAny(v, `/\`)
 }
 
+type inventoryAdmissionContextKey struct{}
+
+func inventoryAdmissionFrom(ctx context.Context) (sbom.InventoryAdmission, bool) {
+	admission, ok := ctx.Value(inventoryAdmissionContextKey{}).(sbom.InventoryAdmission)
+	return admission, ok && admission.Generation > 0
+}
+
+func (s *Service) withInventoryAdmission(ctx context.Context, engagementID shared.ID, target string, admittedAt time.Time) (context.Context, error) {
+	if s.scans == nil {
+		return ctx, nil
+	}
+	scope := sbom.InventoryScope(target)
+	if scope == "" {
+		return nil, fmt.Errorf("%w: inventory target is required", shared.ErrValidation)
+	}
+	admission, err := s.scans.AdmitInventory(ctx, engagementID, scope, admittedAt)
+	if err != nil {
+		return nil, fmt.Errorf("admit inventory generation: %w", err)
+	}
+	return context.WithValue(ctx, inventoryAdmissionContextKey{}, admission), nil
+}
+
 // runScanJob runs the pipeline on a detached background context (the request that
 // started the scan has returned), advancing + finishing the job.
 func retryableScanInterruption(ctx context.Context, err error) error {
@@ -2489,7 +2546,11 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 			sourceWarnings = append(sourceWarnings, fmt.Sprintf("detection source %q did not run (tool/DB missing or errored) – its vulnerabilities are NOT included", src.Name()))
 		}
 	}
-	snap := ports.ScanSnapshot{ToolVersions: toolVersions, VulnDBSnapshot: vulnDBSnapshot(s.prov.VulnDBSource, now), GrypeDBVersion: grypeDB}
+	inventoryCompleteness := importedCompleteness(doc)
+	admission, _ := inventoryAdmissionFrom(ctx)
+	snap := ports.ScanSnapshot{ToolVersions: toolVersions, VulnDBSnapshot: vulnDBSnapshot(s.prov.VulnDBSource, now), GrypeDBVersion: grypeDB,
+		InventoryAdmission: admission, InventoryCompleteness: inventoryCompletenessState(inventoryCompleteness.Confident),
+		InventoryAuthoritative: inventoryCompleteness.Confident, InventoryAuthorityReason: "server_validated_import_artifact"}
 	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
 	sourceWarnings = append(sourceWarnings, detectionSourceWarnings...)                                // sources skipped by the non-strict degrade policy
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
@@ -2503,7 +2564,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		ComponentLicenses:        componentLicenses,
 		ToolVersions:             toolVersions,
 		VulnDBSnapshot:           snap.VulnDBSnapshot,
-		Completeness:             importedCompleteness(doc),
+		Completeness:             inventoryCompleteness,
 		LicenseCoverage:          licenseCoverage,
 		LicenseCoverageBreakdown: licenseCoverageBreakdown,
 		Manifest:                 manifest,
@@ -2556,13 +2617,15 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		return nil, err
 	}
 	ctx = s.ownershipFindingContext(ctx, ownershipSource, "", result)
+	var inventoryPublication sbom.InventoryPublication
 	if s.scans != nil {
-		skipped, err := s.scans.SaveScan(ctx, engagementID, doc, vulns, snap)
+		saved, err := s.scans.SaveScan(ctx, engagementID, doc, vulns, snap)
 		if err != nil {
 			return nil, fmt.Errorf("persist scan: %w", err)
 		}
-		if skipped > 0 {
-			if err := s.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: "sca.scan.vulns_unlinked", Target: doc.TargetRef, Metadata: map[string]string{"engagement": engagementID.String(), "count": strconv.Itoa(skipped)}, At: s.clock.Now()}); err != nil {
+		inventoryPublication = saved.Publication
+		if saved.SkippedVulnerabilities > 0 {
+			if err := s.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: "sca.scan.vulns_unlinked", Target: doc.TargetRef, Metadata: map[string]string{"engagement": engagementID.String(), "count": strconv.Itoa(saved.SkippedVulnerabilities)}, At: s.clock.Now()}); err != nil {
 				return nil, fmt.Errorf("audit unlinked vulns: %w", err)
 			}
 		}
@@ -2574,7 +2637,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		if err := s.assessFindingSLAs(ctx, result); err != nil {
 			s.logger().Warn("assess SCA finding SLAs failed (best-effort)", "err", err)
 		}
-		if err := s.reconcileVulnerabilities(ctx, engagementID, doc); err != nil {
+		if err := s.reconcileVulnerabilities(ctx, inventoryPublication); err != nil {
 			return nil, err
 		}
 		if err := s.attributeFindings(ctx, engagementID, strings.TrimSpace(doc.TargetRef), result); err != nil {
@@ -2725,7 +2788,14 @@ func importedCompleteness(doc *sbom.SBOM) ports.Completeness {
 			resolved++
 		}
 	}
-	return ports.Completeness{ComponentsTotal: len(doc.Components), ComponentsResolved: resolved, Confident: true, Warning: "imported client SBOM used as scan inventory; source-only analyzers skipped"}
+	return ports.Completeness{ComponentsTotal: len(doc.Components), ComponentsResolved: resolved, Confident: resolved == len(doc.Components), Warning: "imported client SBOM used as scan inventory; source-only analyzers skipped"}
+}
+
+func inventoryCompletenessState(complete bool) sbom.InventoryCompleteness {
+	if complete {
+		return sbom.InventoryComplete
+	}
+	return sbom.InventoryIncomplete
 }
 
 func (s *Service) runPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (*ScanResult, error) {
@@ -3330,6 +3400,16 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		Gate:                     opts.Gate,
 		Comparison:               comparisonFromWorkspace(req, ws),
 	}
+	inventoryAuthoritative := result.Completeness.Confident || (sbomGenErr == nil && len(doc.Components) == 0 && len(unresolvedEco) == 0)
+	admission, _ := inventoryAdmissionFrom(ctx)
+	snap.InventoryAdmission = admission
+	snap.InventoryCompleteness = inventoryCompletenessState(inventoryAuthoritative)
+	snap.InventoryAuthoritative = inventoryAuthoritative
+	if inventoryAuthoritative {
+		snap.InventoryAuthorityReason = "server_native_inventory_acquisition_complete"
+	} else {
+		snap.InventoryAuthorityReason = "native_inventory_acquisition_incomplete"
+	}
 	applyDetectionReadiness(result, detectionReadinessWarn, detectionReadinessIncomplete) // empty detection corpus ⇒ not-confident + warning (non-strict)
 	// SBOM production failed: force the scan INCOMPLETE and surface it, so the empty dependency/vuln/
 	// license coverage reads as a known gap rather than a clean result. The source-only analyzers below
@@ -3732,19 +3812,21 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// The scan snapshot and the findings are written in SEPARATE transactions. A
 	// SaveScan that commits without its findings is tolerated: findings are
 	// deterministically re-derivable on the next scan. (P-later: outbox / one txn.)
+	var inventoryPublication sbom.InventoryPublication
 	if s.scans != nil {
-		skipped, err := s.scans.SaveScan(ctx, engagementID, doc, vulns, snap)
+		saved, err := s.scans.SaveScan(ctx, engagementID, doc, vulns, snap)
 		if err != nil {
 			return nil, fmt.Errorf("persist scan: %w", err)
 		}
-		if skipped > 0 {
+		inventoryPublication = saved.Publication
+		if saved.SkippedVulnerabilities > 0 {
 			// A vuln could not be linked to an SBOM component and was dropped – record it
 			// on the append-only audit log (counts only; never advisory/component text).
 			if err := s.audit.Record(ctx, ports.AuditEntry{
 				Actor:    actor,
 				Action:   "sca.scan.vulns_unlinked",
 				Target:   req.Value,
-				Metadata: map[string]string{"engagement": engagementID.String(), "count": strconv.Itoa(skipped)},
+				Metadata: map[string]string{"engagement": engagementID.String(), "count": strconv.Itoa(saved.SkippedVulnerabilities)},
 				At:       s.clock.Now(),
 			}); err != nil {
 				return nil, fmt.Errorf("audit unlinked vulns: %w", err)
@@ -3758,7 +3840,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		if err := s.assessFindingSLAs(ctx, result); err != nil {
 			s.logger().Warn("assess SCA finding SLAs failed (best-effort)", "err", err)
 		}
-		if err := s.reconcileVulnerabilities(ctx, engagementID, doc); err != nil {
+		if err := s.reconcileVulnerabilities(ctx, inventoryPublication); err != nil {
 			return nil, err
 		}
 		if err := s.attributeFindings(ctx, engagementID, normalizedSourceTarget(req), result); err != nil {
@@ -3797,11 +3879,11 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	return result, nil
 }
 
-func (s *Service) reconcileVulnerabilities(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM) error {
-	if s.vulnerabilityReconciler == nil || doc == nil {
+func (s *Service) reconcileVulnerabilities(ctx context.Context, publication sbom.InventoryPublication) error {
+	if s.vulnerabilityReconciler == nil || publication.Generation <= 0 {
 		return nil
 	}
-	if err := s.vulnerabilityReconciler.ReconcileSBOM(ctx, engagementID, doc); err != nil {
+	if err := s.vulnerabilityReconciler.ReconcileSBOM(ctx, publication); err != nil {
 		return fmt.Errorf("reconcile persisted SBOM vulnerabilities: %w", err)
 	}
 	return nil

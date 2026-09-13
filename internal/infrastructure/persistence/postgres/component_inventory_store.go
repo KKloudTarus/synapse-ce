@@ -81,9 +81,10 @@ func (s *ComponentInventoryStore) ListCurrentComponents(ctx context.Context, que
 	err = WithTenant(ctx, s.pool, tenantID.String(), func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			WITH latest_sbom AS (
-				SELECT id, engagement_id, created_at
+				SELECT id, engagement_id, created_at, inventory_scope, inventory_generation
 				FROM sboms
 				WHERE tenant_id=$1 AND engagement_id=$2
+				  AND ($8='' OR (id=$8 AND inventory_scope=$9 AND inventory_generation=$10))
 				ORDER BY created_at DESC, id DESC
 				LIMIT 1
 			)
@@ -91,15 +92,17 @@ func (s *ComponentInventoryStore) ListCurrentComponents(ctx context.Context, que
 			       c.cpe, c.cpe_part, c.cpe_vendor, c.cpe_product, c.cpe_status, c.cpe_reason, c.cpe_hash,
 			       c.ecosystem, c.package_name, c.identity_hash, c.identity_status, c.identity_reason,
 			       c.component_scope, c.reachability, c.class_unreferenced,
-			       s.created_at
+			       s.created_at, s.inventory_scope, s.inventory_generation
 			FROM components c
 			JOIN latest_sbom s ON s.id=c.sbom_id
 			WHERE c.tenant_id=$1
 			  AND ((c.identity_status='resolved' AND c.ecosystem=$3 AND c.package_name=$4)
 			       OR (c.cpe_status='resolved' AND c.cpe_part=$5 AND c.cpe_vendor=$6 AND c.cpe_product=$7))
-			  AND ($8::timestamptz IS NULL OR (s.created_at, s.id, c.id) < ($8, $9, $10))
+			  AND ($11::timestamptz IS NULL OR (s.created_at, s.id, c.id) < ($11, $12, $13))
 			ORDER BY s.created_at DESC, s.id DESC, c.id DESC
-			LIMIT $11`, tenantID.String(), query.EngagementID.String(), query.Ecosystem, query.Package, query.CPEPart, query.CPEVendor, query.CPEProduct, nullableInventoryTime(query.Cursor.BeforeSBOMCreatedAt), nullableID(query.Cursor.BeforeSBOMID), nullableID(query.Cursor.BeforeComponentID), query.Limit+1)
+			LIMIT $14`, tenantID.String(), query.EngagementID.String(), query.Ecosystem, query.Package, query.CPEPart, query.CPEVendor, query.CPEProduct,
+			query.SBOMID.String(), query.InventoryScope, query.InventoryGeneration,
+			nullableInventoryTime(query.Cursor.BeforeSBOMCreatedAt), nullableID(query.Cursor.BeforeSBOMID), nullableID(query.Cursor.BeforeComponentID), query.Limit+1)
 		if err != nil {
 			return fmt.Errorf("list current components: %w", err)
 		}
@@ -108,7 +111,8 @@ func (s *ComponentInventoryStore) ListCurrentComponents(ctx context.Context, que
 			var item sbom.ComponentRecord
 			if err := rows.Scan(&item.TenantID, &item.EngagementID, &item.SBOMID, &item.ComponentID, &item.Name, &item.Version, &item.PURL,
 				&item.CPE, &item.CPEPart, &item.CPEVendor, &item.CPEProduct, &item.CPEStatus, &item.CPEReason, &item.CPEHash,
-				&item.Ecosystem, &item.Package, &item.IdentityHash, &item.IdentityStatus, &item.IdentityReason, &item.Scope, &item.Reachability, &item.Unreferenced, &item.SBOMCreatedAt); err != nil {
+				&item.Ecosystem, &item.Package, &item.IdentityHash, &item.IdentityStatus, &item.IdentityReason, &item.Scope, &item.Reachability, &item.Unreferenced,
+				&item.SBOMCreatedAt, &item.InventoryScope, &item.InventoryGeneration); err != nil {
 				return fmt.Errorf("scan current component: %w", err)
 			}
 			page.Items = append(page.Items, item)
@@ -127,6 +131,58 @@ func (s *ComponentInventoryStore) ListCurrentComponents(ctx context.Context, que
 		return sbom.ComponentPage{}, err
 	}
 	return page, nil
+}
+
+func (s *ComponentInventoryStore) ListSnapshotComponents(ctx context.Context, query sbom.SnapshotQuery) (sbom.ComponentPage, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return sbom.ComponentPage{}, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	if !query.TenantID.IsZero() && shared.TenantOrDefault(query.TenantID) != tenantID {
+		return sbom.ComponentPage{}, fmt.Errorf("%w: snapshot query tenant does not match context", shared.ErrValidation)
+	}
+	query.TenantID = tenantID
+	query, err := query.Normalize()
+	if err != nil {
+		return sbom.ComponentPage{}, err
+	}
+	page := sbom.ComponentPage{}
+	err = WithTenant(ctx, s.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT c.tenant_id, s.engagement_id, c.sbom_id, c.id, c.name, c.version, c.purl,
+			c.cpe, c.cpe_part, c.cpe_vendor, c.cpe_product, c.cpe_status, c.cpe_reason, c.cpe_hash,
+			c.ecosystem, c.package_name, c.identity_hash, c.identity_status, c.identity_reason,
+			c.component_scope, c.reachability, c.class_unreferenced, s.created_at, s.inventory_scope, s.inventory_generation
+			FROM sboms s JOIN components c ON c.tenant_id=s.tenant_id AND c.sbom_id=s.id
+			WHERE s.tenant_id=$1 AND s.engagement_id=$2 AND s.id=$3 AND s.inventory_scope=$4 AND s.inventory_generation=$5
+			  AND c.id>$6
+			ORDER BY c.id COLLATE "C" LIMIT $7`, tenantID.String(), query.EngagementID.String(), query.SBOMID.String(),
+			query.InventoryScope, query.InventoryGeneration, query.AfterComponentID.String(), query.Limit+1)
+		if err != nil {
+			return fmt.Errorf("list immutable snapshot components: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var item sbom.ComponentRecord
+			if err := rows.Scan(&item.TenantID, &item.EngagementID, &item.SBOMID, &item.ComponentID, &item.Name, &item.Version, &item.PURL,
+				&item.CPE, &item.CPEPart, &item.CPEVendor, &item.CPEProduct, &item.CPEStatus, &item.CPEReason, &item.CPEHash,
+				&item.Ecosystem, &item.Package, &item.IdentityHash, &item.IdentityStatus, &item.IdentityReason, &item.Scope, &item.Reachability, &item.Unreferenced,
+				&item.SBOMCreatedAt, &item.InventoryScope, &item.InventoryGeneration); err != nil {
+				return fmt.Errorf("scan immutable snapshot component: %w", err)
+			}
+			page.Items = append(page.Items, item)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate immutable snapshot components: %w", err)
+		}
+		if len(page.Items) > query.Limit {
+			page.Items = page.Items[:query.Limit]
+			last := page.Items[len(page.Items)-1]
+			page.Next = &sbom.ComponentCursor{BeforeSBOMID: query.SBOMID, BeforeComponentID: last.ComponentID}
+		}
+		return nil
+	})
+	return page, err
 }
 
 func nullableInventoryTime(value interface{ IsZero() bool }) any {

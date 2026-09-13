@@ -639,9 +639,18 @@ type Provenance struct {
 // ScanSnapshot is the reproducibility record persisted with a scan: the tool
 // versions used and the vulnerability-DB snapshot marker (source + query time).
 type ScanSnapshot struct {
-	ToolVersions   map[string]string
-	VulnDBSnapshot string
-	GrypeDBVersion string // Grype vulnerability-DB build/schema (reproducibility); empty if unused
+	ToolVersions             map[string]string
+	VulnDBSnapshot           string
+	GrypeDBVersion           string // Grype vulnerability-DB build/schema (reproducibility); empty if unused
+	InventoryAdmission       sbom.InventoryAdmission
+	InventoryCompleteness    sbom.InventoryCompleteness
+	InventoryAuthoritative   bool
+	InventoryAuthorityReason string
+}
+
+type ScanSaveResult struct {
+	SkippedVulnerabilities int
+	Publication            sbom.InventoryPublication
 }
 
 // ScanManifest captures everything needed to explain + replay a scan result
@@ -699,9 +708,12 @@ type ScanRunProvenanceStore interface {
 // ScanRepository persists an SCA scan's SBOM (with its components) and the
 // vulnerabilities found against them, as an immutable snapshot.
 type ScanRepository interface {
+	// AdmitInventory assigns the scope generation before scan execution starts.
+	// A generation may be abandoned, but is never reused.
+	AdmitInventory(ctx context.Context, engagementID shared.ID, scope string, admittedAt time.Time) (sbom.InventoryAdmission, error)
 	// SaveScan persists the snapshot and returns the count of vulns that could not
 	// be linked to an SBOM component (skipped, never orphaned).
-	SaveScan(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM, vulns []vulnerability.Vulnerability, snap ScanSnapshot) (int, error)
+	SaveScan(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM, vulns []vulnerability.Vulnerability, snap ScanSnapshot) (ScanSaveResult, error)
 }
 
 // ComponentInventoryStore returns only components from the latest persisted SBOM
@@ -710,10 +722,11 @@ type ScanRepository interface {
 // query contract rather than guessed into a match.
 type ComponentInventoryStore interface {
 	ListCurrentComponents(ctx context.Context, query sbom.ComponentQuery) (sbom.ComponentPage, error)
+	ListSnapshotComponents(ctx context.Context, query sbom.SnapshotQuery) (sbom.ComponentPage, error)
 }
 
 type SBOMVulnerabilityReconciler interface {
-	ReconcileSBOM(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM) error
+	ReconcileSBOM(ctx context.Context, publication sbom.InventoryPublication) error
 }
 
 type AdvisoryRevisionReconciler interface {

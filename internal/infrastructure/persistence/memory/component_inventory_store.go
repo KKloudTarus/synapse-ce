@@ -13,14 +13,33 @@ import (
 )
 
 type ComponentInventoryStore struct {
-	mu    sync.RWMutex
-	items []sbom.ComponentRecord
+	mu          sync.RWMutex
+	items       []sbom.ComponentRecord
+	generations map[string]int64
+	current     map[string]sbom.InventoryPublication
+	published   map[string]sbom.InventoryPublication
 }
 
 func NewComponentInventoryStore(records ...sbom.ComponentRecord) *ComponentInventoryStore {
-	store := &ComponentInventoryStore{}
+	store := &ComponentInventoryStore{generations: map[string]int64{}, current: map[string]sbom.InventoryPublication{}, published: map[string]sbom.InventoryPublication{}}
 	store.items = append(store.items, records...)
 	return store
+}
+
+func inventoryScopeKey(tenantID, engagementID shared.ID, scope string) string {
+	return tenantID.String() + "\x00" + engagementID.String() + "\x00" + scope
+}
+
+func (s *ComponentInventoryStore) admit(admission sbom.InventoryAdmission) (sbom.InventoryAdmission, error) {
+	if admission.TenantID.IsZero() || admission.EngagementID.IsZero() || admission.Scope == "" || admission.AdmittedAt.IsZero() {
+		return sbom.InventoryAdmission{}, fmt.Errorf("%w: inventory admission identity is required", shared.ErrValidation)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := inventoryScopeKey(admission.TenantID, admission.EngagementID, admission.Scope)
+	s.generations[key]++
+	admission.Generation = s.generations[key]
+	return admission, nil
 }
 
 var _ ports.ComponentInventoryStore = (*ComponentInventoryStore)(nil)
@@ -51,6 +70,36 @@ func (s *ComponentInventoryStore) saveSnapshot(records []sbom.ComponentRecord) e
 	defer s.mu.Unlock()
 	s.items = append(s.items, records...)
 	return nil
+}
+
+func (s *ComponentInventoryStore) publishSnapshot(records []sbom.ComponentRecord, publication sbom.InventoryPublication) (sbom.InventoryPublication, error) {
+	for _, record := range records {
+		if err := record.Validate(); err != nil {
+			return sbom.InventoryPublication{}, err
+		}
+	}
+	if err := publication.Validate(); err != nil {
+		return sbom.InventoryPublication{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := inventoryScopeKey(publication.TenantID, publication.EngagementID, publication.Scope)
+	publicationKey := fmt.Sprintf("%s\x00%d", key, publication.Generation)
+	if existing, ok := s.published[publicationKey]; ok {
+		return existing, nil
+	}
+	if publication.Authoritative && publication.Completeness == sbom.InventoryComplete {
+		current := s.current[key]
+		if s.generations[key] == publication.Generation && publication.Generation > current.Generation {
+			publication.Current = true
+			s.current[key] = publication
+		} else {
+			publication.Superseded = true
+		}
+	}
+	s.items = append(s.items, records...)
+	s.published[publicationKey] = publication
+	return publication, nil
 }
 
 // ListCurrentComponentsByEngagement returns the components of the engagement's LATEST SBOM (by
@@ -125,12 +174,19 @@ func (s *ComponentInventoryStore) ListCurrentComponents(ctx context.Context, que
 	defer s.mu.RUnlock()
 
 	latest, found := latestSBOM(s.items, tenantID, query.EngagementID)
+	if !query.SBOMID.IsZero() {
+		latest = sbom.ComponentRecord{SBOMID: query.SBOMID, InventoryScope: query.InventoryScope, InventoryGeneration: query.InventoryGeneration}
+		found = true
+	}
 	if !found {
 		return sbom.ComponentPage{}, nil
 	}
 	items := make([]sbom.ComponentRecord, 0)
 	for _, item := range s.items {
 		if item.TenantID != tenantID || item.EngagementID != query.EngagementID || item.SBOMID != latest.SBOMID {
+			continue
+		}
+		if !query.SBOMID.IsZero() && (item.InventoryScope != query.InventoryScope || item.InventoryGeneration != query.InventoryGeneration) {
 			continue
 		}
 		packageMatch := query.Ecosystem != "" && item.IdentityStatus == sbom.IdentityResolved && item.Ecosystem == query.Ecosystem && item.Package == query.Package
@@ -148,6 +204,44 @@ func (s *ComponentInventoryStore) ListCurrentComponents(ctx context.Context, que
 		page.Items = append([]sbom.ComponentRecord(nil), items[:query.Limit]...)
 		last := page.Items[len(page.Items)-1]
 		page.Next = &sbom.ComponentCursor{BeforeSBOMCreatedAt: last.SBOMCreatedAt, BeforeSBOMID: last.SBOMID, BeforeComponentID: last.ComponentID}
+		return page, nil
+	}
+	page.Items = append([]sbom.ComponentRecord(nil), items...)
+	return page, nil
+}
+
+func (s *ComponentInventoryStore) ListSnapshotComponents(ctx context.Context, query sbom.SnapshotQuery) (sbom.ComponentPage, error) {
+	if err := ctx.Err(); err != nil {
+		return sbom.ComponentPage{}, err
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return sbom.ComponentPage{}, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	if !query.TenantID.IsZero() && shared.TenantOrDefault(query.TenantID) != tenantID {
+		return sbom.ComponentPage{}, fmt.Errorf("%w: snapshot query tenant does not match context", shared.ErrValidation)
+	}
+	query.TenantID = tenantID
+	query, err := query.Normalize()
+	if err != nil {
+		return sbom.ComponentPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]sbom.ComponentRecord, 0)
+	for _, item := range s.items {
+		if item.TenantID == tenantID && item.EngagementID == query.EngagementID && item.SBOMID == query.SBOMID &&
+			item.InventoryScope == query.InventoryScope && item.InventoryGeneration == query.InventoryGeneration && item.ComponentID > query.AfterComponentID {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ComponentID < items[j].ComponentID })
+	page := sbom.ComponentPage{}
+	if len(items) > query.Limit {
+		page.Items = append([]sbom.ComponentRecord(nil), items[:query.Limit]...)
+		last := page.Items[len(page.Items)-1]
+		page.Next = &sbom.ComponentCursor{BeforeSBOMID: query.SBOMID, BeforeComponentID: last.ComponentID}
 		return page, nil
 	}
 	page.Items = append([]sbom.ComponentRecord(nil), items...)
