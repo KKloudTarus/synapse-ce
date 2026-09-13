@@ -236,7 +236,9 @@ func TestFindingsPreserveImportedProvenanceAndReachabilityTiers(t *testing.T) {
 	}
 	for index, claim := range []judgment.ReachabilityClaim{
 		{Reachable: judgment.Reachable, Tier: judgment.Tier1, Confidence: 70},
-		{Reachable: judgment.NotReachable, Tier: judgment.Tier2, Confidence: 95},
+		// A genuine Tier-2 call-graph proof: recorded entry points, full coverage, so it soundly supersedes
+		// the weaker Tier-1 reachable (an UNPROVEN Tier-2 negative would not).
+		{Reachable: judgment.NotReachable, Tier: judgment.Tier2, Confidence: 95, EntrypointsPresent: true},
 	} {
 		row, err := judgment.New(shared.ID(fmt.Sprintf("j%d", index+1)), e.ID, judgment.CapReachability, judgment.SubjectFinding, firstParty.ID, claim, "agent", clock.now.Add(time.Duration(index)*time.Minute))
 		if err != nil {

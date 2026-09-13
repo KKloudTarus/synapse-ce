@@ -42,9 +42,11 @@ func (f fakeAIGateExemptions) AIGateExemptions(context.Context, shared.ID, []fin
 }
 
 func mkJudg(subj string, st judgment.State, score int, r judgment.ReachabilityState, tier judgment.ReachabilityTier) judgment.Judgment {
+	// A proven claim: complete coverage (no unknown symbols, no blind construct) and, on the call-graph
+	// tier, a recorded entry-point set, so it soundly suppresses per ReachabilityClaim.SuppressesFinding.
 	return judgment.Judgment{
 		Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: shared.ID(subj),
-		State: st, EvidenceScore: score, Claim: judgment.ReachabilityClaim{Reachable: r, Tier: tier, Confidence: 90},
+		State: st, EvidenceScore: score, Claim: judgment.ReachabilityClaim{Reachable: r, Tier: tier, Confidence: 90, EntrypointsPresent: true},
 	}
 }
 
@@ -81,6 +83,48 @@ func TestOpenVEXJustificationByTier(t *testing.T) {
 	}
 	if s := by["CVE-2020-7471"]; s.Status != "affected" || s.Justification != "" {
 		t.Errorf("f1 affected must not get a not_affected justification: %+v", s)
+	}
+}
+
+// TestOpenVEXUnprovenNotReachableNoExecutePathJustification: a Tier-2 (call-graph) not_reachable that did
+// NOT record entry points, or left an affected symbol unanswered, is soft no-coverage, not proof of
+// absence. It must NOT stamp the "not in execute path" justification; the false-positive finding falls back
+// to its status-derived justification (vulnerable_code_not_present). This is the EPIC #1042, 0.6 gate: an
+// unproven negative never suppresses.
+func TestOpenVEXUnprovenNotReachableNoExecutePathJustification(t *testing.T) {
+	repo := memory.NewFindingRepository()
+	ctx := context.Background()
+	if err := repo.Upsert(ctx, []finding.Finding{
+		{ID: "fe", EngagementID: "e1", Kind: finding.KindSCA, Severity: shared.SeverityMedium, Status: finding.StatusFalsePos, DedupKey: "vuln:CVE-4444:libD:1.0"},
+		{ID: "fp", EngagementID: "e1", Kind: finding.KindSCA, Severity: shared.SeverityMedium, Status: finding.StatusFalsePos, DedupKey: "vuln:CVE-5555:libE:1.0"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(repo, fixedClock{}, "v1")
+	svc.SetJudgments(&fakeJudgments{js: []judgment.Judgment{
+		// Tier-2 not_reachable with NO entry points recorded: no coverage, must not justify not-in-path.
+		{Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "fe",
+			State: judgment.StateConfirmed, EvidenceScore: 90,
+			Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, Confidence: 90}},
+		// Tier-2 not_reachable that left an affected symbol unanswered: partial, must not justify.
+		{Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "fp",
+			State: judgment.StateConfirmed, EvidenceScore: 90,
+			Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, Confidence: 90, EntrypointsPresent: true, UnknownSymbols: []string{"dep.vuln"}}},
+	}})
+
+	doc, err := svc.OpenVEX(ctx, "e1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]VEXStatement{}
+	for _, s := range doc.Statements {
+		by[s.Vulnerability.Name] = s
+	}
+	if s := by["CVE-4444"]; s.Status != "not_affected" || s.Justification != "vulnerable_code_not_present" {
+		t.Errorf("zero-entrypoint Tier-2 not_reachable must not justify execute-path, got %+v", s)
+	}
+	if s := by["CVE-5555"]; s.Status != "not_affected" || s.Justification != "vulnerable_code_not_present" {
+		t.Errorf("partial Tier-2 not_reachable (unknown symbol) must not justify execute-path, got %+v", s)
 	}
 }
 

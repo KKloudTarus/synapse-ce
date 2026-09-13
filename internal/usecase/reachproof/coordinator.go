@@ -268,6 +268,10 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, target
 	for _, r := range analysis.Results {
 		reachableBy[r.Symbol] = r
 	}
+	// A call-graph tier concludes "not reachable" only relative to a set of entry points; an empty entry-point
+	// set is no coverage, not proof of absence (EPIC #1042, 0.5). Record it on every claim so the guard below
+	// and downstream readers can see it.
+	entrypointsPresent := len(analysis.Entrypoints) > 0
 	prior, err := c.priorReachability(ctx, engagementID)
 	if err != nil {
 		return 0, err
@@ -278,9 +282,17 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, target
 			continue
 		}
 		claim, reachable, complete := subjectClaim(sub, reachableBy, c.tier)
+		claim.EntrypointsPresent = entrypointsPresent
 		if !reachable {
 			if c.raiseOnly {
 				continue // raise-only: never mint a not-reachable (suppressing) claim; prior tier stands
+			}
+			if c.tier == judgment.Tier2 && !entrypointsPresent {
+				// A Tier-2 call-graph "not reachable" with NO entry points is soft no-coverage, not a proof
+				// of absence: fail open and leave the prior tier standing (EPIC #1042, 0.5, closes the
+				// zero-entrypoint suppression hole). Tier-1 import reachability has no entry-point notion and
+				// is unaffected.
+				continue
 			}
 			if !complete && c.skipUnresolvedSubjects {
 				// Not reachable, but at least one of the subject's symbols had NO result: the subject is only
@@ -316,10 +328,12 @@ const deterministicClaimConfidence = 100
 // from a partially-unknown subject would suppress a finding whose omitted symbol could be reached.
 func subjectClaim(sub ports.ReachabilitySubject, reachableBy map[string]reachability.Result, tier judgment.ReachabilityTier) (claim judgment.ReachabilityClaim, reachable bool, complete bool) {
 	complete = len(sub.Symbols) > 0 // a subject with no symbols is not a decided not-reachable
+	var unknown []string
 	for _, sym := range sub.Symbols {
 		r, ok := reachableBy[sym]
 		if !ok {
 			complete = false
+			unknown = append(unknown, sym) // an affected symbol the analysis could not answer (EPIC #1042, 0.6)
 			continue
 		}
 		if r.Reachable {
@@ -329,7 +343,9 @@ func subjectClaim(sub ports.ReachabilitySubject, reachableBy map[string]reachabi
 			}, true, complete
 		}
 	}
-	return judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: tier, Confidence: deterministicClaimConfidence}, false, complete
+	// A not_reachable claim records the symbols it could not answer so ProvedNotReachable / a reader can
+	// refuse to suppress on a partial subject.
+	return judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: tier, Confidence: deterministicClaimConfidence, UnknownSymbols: unknown}, false, complete
 }
 
 // priorJudgment pairs a stored reachability judgment with its decoded claim (append-only supersession
