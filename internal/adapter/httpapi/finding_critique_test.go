@@ -8,6 +8,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 )
 
 type critiqueJudgments struct{ js []judgment.Judgment }
@@ -63,10 +64,18 @@ func TestFindingViewsAttachCompliance(t *testing.T) {
 		{ID: "f2", CWE: ""},          // no CWE → no controls
 		{ID: "f3", CWE: "CWE-99999"}, // unmapped → no controls
 	}
-	views := findingViews(list, map[shared.ID]bool{"f1": true})
+	views := findingViews(list, map[shared.ID]bool{"f1": true}, nil, true)
 
 	if len(views) != 3 {
 		t.Fatalf("want 3 views, got %d", len(views))
+	}
+	// Judgments loaded (available) but none for these findings: each derives an explicit no_analysis item.
+	if views[0].Reachability == nil || views[0].Reachability.Label != export.LabelNoAnalysis {
+		t.Errorf("f1 must derive no_analysis reachability evidence with no judgments, got %+v", views[0].Reachability)
+	}
+	// When the judgment load is UNAVAILABLE, reachability evidence is omitted (not synthesized as no_analysis).
+	if unavailable := findingViews(list, nil, nil, false); unavailable[0].Reachability != nil {
+		t.Errorf("unavailable judgments must omit reachability evidence, got %+v", unavailable[0].Reachability)
 	}
 	if len(views[0].Compliance) == 0 {
 		t.Error("f1 (CWE-89) must carry compliance controls")

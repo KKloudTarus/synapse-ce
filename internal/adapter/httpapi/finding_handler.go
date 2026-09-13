@@ -9,17 +9,20 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 )
 
-// findingView is a finding annotated for the UI read path with two purely-additive, DETERMINISTIC
+// findingView is a finding annotated for the UI read path with purely-additive, DETERMINISTIC
 // augmentations (no LLM): the suspected-FP flag (a CONFIRMED, publishable "refuted" critique –
-// advisory only, never suppresses the finding) and the curated compliance controls the finding's CWE
-// maps to (the same table the report uses – a lookup, not a model output). The embedded
-// finding's JSON shape is unchanged; both new fields are omitempty (non-breaking).
+// advisory only, never suppresses the finding), the curated compliance controls the finding's CWE
+// maps to (the same table the report uses – a lookup, not a model output), and the reachability evidence
+// (a tagged, surface-derived label + call/exploit path, EPIC #1042 0.2). The embedded finding's JSON shape
+// is unchanged; the added fields are omitempty (non-breaking).
 type findingView struct {
 	finding.Finding
-	SuspectedFP bool                 `json:"suspected_fp,omitempty"`
-	Compliance  []compliance.Control `json:"compliance_controls,omitempty"`
+	SuspectedFP  bool                         `json:"suspected_fp,omitempty"`
+	Compliance   []compliance.Control         `json:"compliance_controls,omitempty"`
+	Reachability *export.ReachabilityEvidence `json:"reachability_evidence,omitempty"`
 }
 
 // listFindings returns the findings for an engagement (highest risk first), each annotated with the
@@ -36,19 +39,49 @@ func (rt *Router) listFindings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fp := rt.suspectedFP(r.Context(), shared.ID(id))
-	writeJSON(w, http.StatusOK, findingViews(list, fp))
+	js, reachAvailable := rt.reachabilityJudgments(r.Context(), shared.ID(id))
+	writeJSON(w, http.StatusOK, findingViews(list, fp, js, reachAvailable))
 }
 
 // findingViews annotates each finding with its UI read-path augmentations: the suspected-FP flag
-// (from fp) and the curated compliance controls it maps to (its CWE's OWASP/PCI/ISO controls plus, for a
-// misconfiguration finding, its rule's CIS Benchmark controls). All deterministic and additive; an
-// unmapped CWE/rule simply yields no controls (compliance.ControlsForFinding fail-open).
-func findingViews(list []finding.Finding, fp map[shared.ID]bool) []findingView {
+// (from fp), the curated compliance controls it maps to (its CWE's OWASP/PCI/ISO controls plus, for a
+// misconfiguration finding, its rule's CIS Benchmark controls), and its reachability evidence derived from
+// judgments. All deterministic and additive; an unmapped CWE/rule simply yields no controls
+// (compliance.ControlsForFinding fail-open). When the reachability judgment load succeeded, every finding
+// gets a reachability evidence item (at least no_analysis) so absence of analysis is explicit; when the
+// subsystem is unavailable the item is omitted rather than synthesized (see below).
+func findingViews(list []finding.Finding, fp map[shared.ID]bool, judgments []judgment.Judgment, reachAvailable bool) []findingView {
 	views := make([]findingView, len(list))
 	for i, f := range list {
-		views[i] = findingView{Finding: f, SuspectedFP: fp[f.ID], Compliance: compliance.ControlsForFinding(f.CWE, f.RuleKey)}
+		views[i] = findingView{
+			Finding:     f,
+			SuspectedFP: fp[f.ID],
+			Compliance:  compliance.ControlsForFinding(f.CWE, f.RuleKey),
+		}
+		// Derive reachability evidence ONLY when the judgment load succeeded. On a read failure (or the
+		// judgment subsystem being disabled) the field is omitted rather than synthesized as no_analysis, so
+		// a transient unavailability never mislabels a genuinely reachable finding as un-analyzed. When the
+		// load succeeded, a finding with no reachability judgment correctly derives no_analysis.
+		if reachAvailable {
+			views[i].Reachability = export.DeriveReachabilityEvidence(judgments, f.ID.String())
+		}
 	}
 	return views
+}
+
+// reachabilityJudgments loads the engagement's judgments for reachability-evidence derivation. It returns
+// (judgments, true) only when the load SUCCEEDED; a disabled subsystem or a read error returns
+// (nil, false) so the caller omits reachability evidence rather than asserting no_analysis, keeping
+// "unavailable" distinct from "no conclusive analysis".
+func (rt *Router) reachabilityJudgments(ctx context.Context, engagementID shared.ID) ([]judgment.Judgment, bool) {
+	if rt.judgments == nil {
+		return nil, false
+	}
+	js, err := rt.judgments.List(ctx, engagementID)
+	if err != nil {
+		return nil, false
+	}
+	return js, true
 }
 
 // suspectedFP returns the set of finding ids that have a CONFIRMED (publishable) "refuted" critique

@@ -9726,6 +9726,33 @@ components:
         KEV: {type: boolean}
         RiskScore: {type: number}
 
+    ReachabilityEvidence:
+      type: object
+      description: >
+        A tagged reachability evidence item (EPIC #1042), adopting the Snyk evidence[] contract:
+        source-tagged evidence beside the dependency path. The label is DERIVED at the export/API
+        surface from a finding's reachability judgments; it is not a domain verdict and does not change the
+        reachability state enum. Every finding carries one (at least no_analysis) so absence of analysis is
+        explicit. `present_unreached` (a sound proof the vulnerable code is present but not reached) and
+        `no_analysis` (no conclusive reachability ran) are DISTINCT.
+      required: [source, label]
+      properties:
+        source: {type: string, enum: [reachability]}
+        label:
+          type: string
+          enum: [reachable, conditionally_reachable, present_unreached, no_analysis]
+          description: >
+            reachable = the vulnerable code is reached (call path in `path`); conditionally_reachable =
+            reachable only under a precondition (reserved for the conditional engine); present_unreached =
+            proven present but not reached; no_analysis = no conclusive reachability analysis.
+        tier:
+          type: string
+          enum: [tier-0, tier-1, tier-1.5, tier-2]
+          description: The proving tier when a judgment decided the label; omitted for no_analysis.
+        path:
+          type: array
+          items: {type: string}
+          description: The call/exploit path (importPath.Symbol frames) for a reachable label.
     Finding:
       allOf:
       - $ref: "#/components/schemas/AttackPathScoreComponents"
@@ -9755,6 +9782,11 @@ components:
           Class: {type: string}
           Scope: {type: string}
           Reachability: {type: string}
+          reachability_evidence:
+            description: >
+              The derived reachability evidence for this finding (EPIC #1042 0.2), present on the findings
+              read path. Omitted when the reachability judgment subsystem is unavailable.
+            $ref: "#/components/schemas/ReachabilityEvidence"
           Impact: {type: string}
           Priority: {type: integer}
           ClassReachability: {type: string}
