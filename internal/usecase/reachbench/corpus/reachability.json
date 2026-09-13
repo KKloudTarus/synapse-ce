@@ -22,9 +22,19 @@
       "symbol": "github.com/buger/jsonparser.Delete",
       "expected": "reachable",
       "baseline": {
-        "osv": {"advisory_ids": ["GO-2026-4514"], "source_suffix": "go_osv_jsonparser_called/go.mod"},
-        "semgrep_ce": {"rule_id": "reachbench.go.jsonparser-delete-called", "path_suffix": "go_osv_jsonparser_called/main.go"},
-        "snyk_sample": {"evidence_id": "GO-2026-4514-called"}
+        "osv": {
+          "advisory_ids": [
+            "GO-2026-4514"
+          ],
+          "source_suffix": "go_osv_jsonparser_called/go.mod"
+        },
+        "semgrep_ce": {
+          "rule_id": "reachbench.go.jsonparser-delete-called",
+          "path_suffix": "go_osv_jsonparser_called/main.go"
+        },
+        "snyk_sample": {
+          "evidence_id": "GO-2026-4514-called"
+        }
       }
     },
     {
@@ -34,9 +44,19 @@
       "symbol": "github.com/buger/jsonparser.Delete",
       "expected": "present_unreached",
       "baseline": {
-        "osv": {"advisory_ids": ["GO-2026-4514"], "source_suffix": "go_osv_jsonparser_uncalled/go.mod"},
-        "semgrep_ce": {"rule_id": "reachbench.go.jsonparser-delete-called", "path_suffix": "go_osv_jsonparser_uncalled/main.go"},
-        "snyk_sample": {"evidence_id": "GO-2026-4514-uncalled"}
+        "osv": {
+          "advisory_ids": [
+            "GO-2026-4514"
+          ],
+          "source_suffix": "go_osv_jsonparser_uncalled/go.mod"
+        },
+        "semgrep_ce": {
+          "rule_id": "reachbench.go.jsonparser-delete-called",
+          "path_suffix": "go_osv_jsonparser_uncalled/main.go"
+        },
+        "snyk_sample": {
+          "evidence_id": "GO-2026-4514-uncalled"
+        }
       }
     },
     {
@@ -67,7 +87,10 @@
       "symbol": "python:app:_run_query",
       "expected": "reachable",
       "baseline": {
-        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_reached/app.py"}
+        "semgrep_ce": {
+          "rule_id": "reachbench.py.os-system-call",
+          "path_suffix": "py_reached/app.py"
+        }
       }
     },
     {
@@ -77,7 +100,10 @@
       "symbol": "python:app:_unused_admin_action",
       "expected": "present_unreached",
       "baseline": {
-        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_unreached/app.py"}
+        "semgrep_ce": {
+          "rule_id": "reachbench.py.os-system-call",
+          "path_suffix": "py_unreached/app.py"
+        }
       }
     },
     {
@@ -87,7 +113,10 @@
       "symbol": "python:app:_step_two",
       "expected": "reachable",
       "baseline": {
-        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_transitive_reached/app.py"}
+        "semgrep_ce": {
+          "rule_id": "reachbench.py.os-system-call",
+          "path_suffix": "py_transitive_reached/app.py"
+        }
       }
     },
     {
@@ -97,7 +126,10 @@
       "symbol": "python:app:_admin_wipe",
       "expected": "present_unreached",
       "baseline": {
-        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_dynamic_unreached/app.py"}
+        "semgrep_ce": {
+          "rule_id": "reachbench.py.os-system-call",
+          "path_suffix": "py_dynamic_unreached/app.py"
+        }
       }
     },
     {
@@ -107,7 +139,10 @@
       "symbol": "python:app:Runner._do",
       "expected": "reachable",
       "baseline": {
-        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_method_reached/app.py"}
+        "semgrep_ce": {
+          "rule_id": "reachbench.py.os-system-call",
+          "path_suffix": "py_method_reached/app.py"
+        }
       }
     },
     {
@@ -117,7 +152,10 @@
       "symbol": "python:app:Service._unused",
       "expected": "present_unreached",
       "baseline": {
-        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_method_unreached/app.py"}
+        "semgrep_ce": {
+          "rule_id": "reachbench.py.os-system-call",
+          "path_suffix": "py_method_unreached/app.py"
+        }
       }
     },
     {
@@ -127,7 +165,10 @@
       "symbol": "python:helper:_work",
       "expected": "reachable",
       "baseline": {
-        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_crossmodule_reached/helper.py"}
+        "semgrep_ce": {
+          "rule_id": "reachbench.py.os-system-call",
+          "path_suffix": "py_crossmodule_reached/helper.py"
+        }
       }
     },
     {
@@ -137,7 +178,10 @@
       "symbol": "python:helper:_deep",
       "expected": "reachable",
       "baseline": {
-        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_crossmodule_transitive_reached/helper.py"}
+        "semgrep_ce": {
+          "rule_id": "reachbench.py.os-system-call",
+          "path_suffix": "py_crossmodule_transitive_reached/helper.py"
+        }
       }
     },
     {
@@ -147,8 +191,130 @@
       "symbol": "python:helper:_work",
       "expected": "present_unreached",
       "baseline": {
-        "semgrep_ce": {"rule_id": "reachbench.py.os-system-call", "path_suffix": "py_crossmodule_imported_uncalled/helper.py"}
+        "semgrep_ce": {
+          "rule_id": "reachbench.py.os-system-call",
+          "path_suffix": "py_crossmodule_imported_uncalled/helper.py"
+        }
       }
+    },
+    {
+      "name": "js_direct_reached",
+      "language": "javascript",
+      "fixture": "js_reached",
+      "symbol": "js:app:runQuery",
+      "expected": "reachable"
+    },
+    {
+      "name": "js_unreached_function",
+      "language": "javascript",
+      "fixture": "js_unreached",
+      "symbol": "js:app:adminAction",
+      "expected": "present_unreached"
+    },
+    {
+      "name": "js_transitive_reached",
+      "language": "javascript",
+      "fixture": "js_transitive_reached",
+      "symbol": "js:app:stepTwo",
+      "expected": "reachable"
+    },
+    {
+      "name": "js_method_reached",
+      "language": "javascript",
+      "fixture": "js_method_reached",
+      "symbol": "js:app:Runner.doWork",
+      "expected": "reachable"
+    },
+    {
+      "name": "js_method_unreached",
+      "language": "javascript",
+      "fixture": "js_method_unreached",
+      "symbol": "js:app:Service.unused",
+      "expected": "present_unreached"
+    },
+    {
+      "name": "js_cross_module_reached",
+      "language": "javascript",
+      "fixture": "js_crossmodule_reached",
+      "symbol": "js:helper:work",
+      "expected": "reachable"
+    },
+    {
+      "name": "js_cross_module_transitive_reached",
+      "language": "javascript",
+      "fixture": "js_crossmodule_transitive_reached",
+      "symbol": "js:helper:deep",
+      "expected": "reachable"
+    },
+    {
+      "name": "js_cross_module_imported_uncalled",
+      "language": "javascript",
+      "fixture": "js_crossmodule_imported_uncalled",
+      "symbol": "js:helper:work",
+      "expected": "present_unreached"
+    },
+    {
+      "name": "js_computed_member_dynamic",
+      "language": "javascript",
+      "fixture": "js_computed_member_dynamic",
+      "symbol": "js:app:doWork",
+      "expected": "no_analysis"
+    },
+    {
+      "name": "js_eval_dynamic",
+      "language": "javascript",
+      "fixture": "js_eval_dynamic",
+      "symbol": "js:app:secret",
+      "expected": "no_analysis"
+    },
+    {
+      "name": "js_method_override_reached",
+      "language": "javascript",
+      "fixture": "js_method_override",
+      "symbol": "js:app:Derived.step",
+      "expected": "reachable"
+    },
+    {
+      "name": "js_super_call_reached",
+      "language": "javascript",
+      "fixture": "js_super_call",
+      "symbol": "js:app:Base.step",
+      "expected": "reachable"
+    },
+    {
+      "name": "js_method_callback_escape",
+      "language": "javascript",
+      "fixture": "js_method_callback_escape",
+      "symbol": "js:app:Svc.onEvent",
+      "expected": "no_analysis"
+    },
+    {
+      "name": "js_accessor_reached",
+      "language": "javascript",
+      "fixture": "js_accessor_reached",
+      "symbol": "js:app:A.danger",
+      "expected": "reachable"
+    },
+    {
+      "name": "js_returned_call_dynamic",
+      "language": "javascript",
+      "fixture": "js_returned_call_dynamic",
+      "symbol": "js:app:vuln",
+      "expected": "no_analysis"
+    },
+    {
+      "name": "js_property_escape_dynamic",
+      "language": "javascript",
+      "fixture": "js_property_escape_dynamic",
+      "symbol": "js:app:vuln",
+      "expected": "no_analysis"
+    },
+    {
+      "name": "js_index_import_reached",
+      "language": "javascript",
+      "fixture": "js_index_import_reached",
+      "symbol": "js:helper/index:work",
+      "expected": "reachable"
     }
   ]
 }
