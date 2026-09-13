@@ -174,6 +174,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, engagementID shared.ID) (int, 
 		return 0, fmt.Errorf("list judgments: %w", err)
 	}
 	reachabilityByFinding := indexReachability(judgments)
+	taintByFinding := indexTaintExploitPaths(judgments)
 	existingProposals := indexPromotionProposals(judgments)
 	allBindings, err := e.bindings.ListBindings(ctx, tenantID)
 	if err != nil {
@@ -212,14 +213,14 @@ func (e *Evaluator) Evaluate(ctx context.Context, engagementID shared.ID) (int, 
 		return 0, fmt.Errorf("list detections: %w", err)
 	}
 	activeDetections := filterActive(detRecords, e.clock.Now())
-	latestEvents, err := e.loadLatestEvents(ctx, engagementID, findings, graph, activeDetections, reachabilityByFinding)
+	latestEvents, taintApplied, err := e.loadLatestEvents(ctx, engagementID, findings, graph, activeDetections, reachabilityByFinding)
 	if err != nil {
 		return 0, fmt.Errorf("load latest promotion events: %w", err)
 	}
 
 	proposed := 0
 	for _, f := range findings {
-		snap, err := e.buildSnapshot(ctx, f, graph, activeDetections, reachabilityByFinding, latestEvents)
+		snap, err := e.buildSnapshot(ctx, f, graph, activeDetections, reachabilityByFinding, latestEvents, taintByFinding, taintApplied)
 		if err != nil {
 			return proposed, fmt.Errorf("build promotion snapshot for finding %s: %w", f.ID, err)
 		}
@@ -279,6 +280,8 @@ func (e *Evaluator) buildSnapshot(
 	activeDetections []detection.Record,
 	reachability map[shared.ID]reachInfo,
 	latestEvents map[shared.ID]promotion.PriorEscalation,
+	taintByFinding map[shared.ID]promotion.Signal,
+	taintApplied map[shared.ID]bool,
 ) (promotion.Snapshot, error) {
 	snap := promotion.Snapshot{
 		FindingID:      f.ID,
@@ -296,6 +299,14 @@ func (e *Evaluator) buildSnapshot(
 			ID:   ri.judgmentID,
 		}
 	}
+
+	// Taint exploit-path signal (raise-only, EPIC #1042 2.1): a publishable taint-flow judgment proving
+	// attacker input reaches this finding's vulnerable API. TaintExploitApplied gates re-escalation.
+	if sig, ok := taintByFinding[f.ID]; ok {
+		snap.TaintExploitPath = true
+		snap.TaintSignal = sig
+	}
+	snap.TaintExploitApplied = taintApplied[f.ID]
 
 	// Attack-path signal: evaluate each path independently so that
 	// confidence, attack-path provenance, and detection match come from
@@ -388,12 +399,16 @@ func (e *Evaluator) loadLatestEvents(
 	graph *attackpath.Graph,
 	activeDetections []detection.Record,
 	reachability map[shared.ID]reachInfo,
-) (map[shared.ID]promotion.PriorEscalation, error) {
+) (map[shared.ID]promotion.PriorEscalation, map[shared.ID]bool, error) {
 	out := make(map[shared.ID]promotion.PriorEscalation, len(findings))
+	// taintApplied records findings that already have a taint-exploit-path escalation event, so the
+	// raise-only rule fires at most once. These events are deliberately kept OUT of the reversal stack
+	// below (a taint escalation is sticky: the absence of the taint path never reverses it).
+	taintApplied := make(map[shared.ID]bool)
 	for _, f := range findings {
 		events, err := e.promotions.ListByFinding(ctx, engagementID, f.ID)
 		if err != nil {
-			return nil, fmt.Errorf("list promotions for finding %s: %w", f.ID, err)
+			return nil, nil, fmt.Errorf("list promotions for finding %s: %w", f.ID, err)
 		}
 		// Events are oldest-first. Reconstruct unresolved escalations as a stack:
 		// an exact corroborating-signal-loss reversal pops only its referenced event.
@@ -405,6 +420,12 @@ func (e *Evaluator) loadLatestEvents(
 			}
 			switch evt.Effect {
 			case judgment.PromotionEscalate:
+				// A raise-only taint escalation is pushed onto the stack like any escalation but is STICKY:
+				// the reversal step below marks a taint top's inputs permanently active so signal-loss never
+				// reverses it (the absence of a taint path must not de-escalate). Whether it counts as
+				// "applied" (blocking re-raise) is derived from the FINAL stack after pops below, so the
+				// stack stays the single source of truth: a taint event popped by an (external) reversal
+				// correctly frees the finding to re-raise.
 				stack = append(stack, evt)
 				latestDeescalation = nil
 			case judgment.PromotionDeescalate:
@@ -426,22 +447,42 @@ func (e *Evaluator) loadLatestEvents(
 				}
 			}
 		}
+		// A finding is "taint-applied" (raise fires at most once) iff a taint escalation event REMAINS on the
+		// final stack after reversal pops, so a popped taint event correctly frees a re-raise.
+		for _, evt := range stack {
+			if evt.Rule == judgment.RuleTaintExploitPath {
+				taintApplied[f.ID] = true
+				break
+			}
+		}
 		if len(stack) > 0 {
 			evt := stack[len(stack)-1]
-			inputsActive, err := inputsStillActive(ctx, evt, f.ID, graph, activeDetections, reachability)
-			if err != nil {
-				return nil, fmt.Errorf("check active escalation inputs for finding %s: %w", f.ID, err)
+			// A taint exploit-path escalation is STICKY: its inputs are permanently active, so signal-loss
+			// never reverses it (EPIC #1042 2.1, "absence of a taint path changes nothing"). While it sits
+			// on top it also shields the escalations below it from reversal, which is the raise-only-safe
+			// direction (never de-escalates below the escalated level).
+			inputsActive := true
+			if evt.Rule != judgment.RuleTaintExploitPath {
+				var err error
+				inputsActive, err = inputsStillActive(ctx, evt, f.ID, graph, activeDetections, reachability)
+				if err != nil {
+					return nil, nil, fmt.Errorf("check active escalation inputs for finding %s: %w", f.ID, err)
+				}
 			}
-			inputsMatch, err := escalationInputsMatch(ctx, evt, f.ID, graph, activeDetections, reachability)
-			if err != nil {
-				return nil, fmt.Errorf("check matching escalation inputs for finding %s: %w", f.ID, err)
+			inputsMatch := false                           // a taint top is never an attack-path escalation, so its attack-path-shaped
+			if evt.Rule != judgment.RuleTaintExploitPath { // inputs-match is not computed (stays false).
+				var err error
+				inputsMatch, err = escalationInputsMatch(ctx, evt, f.ID, graph, activeDetections, reachability)
+				if err != nil {
+					return nil, nil, fmt.Errorf("check matching escalation inputs for finding %s: %w", f.ID, err)
+				}
 			}
 			out[f.ID] = promotion.PriorEscalation{EventID: evt.ID, BeforePriority: evt.BeforePriority, InputsActive: inputsActive, InputsMatch: inputsMatch}
 		} else if latestDeescalation != nil {
 			out[f.ID] = promotion.PriorEscalation{DeescalationInputsMatch: deescalationInputsMatch(*latestDeescalation, f.ID, reachability)}
 		}
 	}
-	return out, nil
+	return out, taintApplied, nil
 }
 
 // inputsStillActive reports whether the detection inputs that drove a prior
@@ -953,6 +994,35 @@ func deriveStableEventID(engagementID, judgmentID shared.ID) shared.ID {
 func deriveStableEvidenceID(tenantID, judgmentID shared.ID, fingerprint string) shared.ID {
 	h := sha256.Sum256([]byte("promotion:evidence:" + string(tenantID) + ":" + string(judgmentID) + ":" + fingerprint))
 	return shared.ID(hex.EncodeToString(h[:16]))
+}
+
+// indexTaintExploitPaths indexes, per SCA finding, a PUBLISHABLE (confirmed + evidence-gated) CapSAST
+// taint-flow judgment that CORRELATES to it: a proven attacker-input-to-vulnerable-API dataflow (EPIC
+// #1042 2.1). It is the raise-only escalation signal for that finding. A CapSAST judgment is gated
+// (propose-only; a distinct verifier confirms), so only a confirmed flow reaches here. The lowest judgment
+// id wins per finding (deterministic; no churn across rescans). The signal rides the reachability input
+// kind (a dataflow proof is reachability evidence); it never de-escalates and never asserts not_affected.
+func indexTaintExploitPaths(judgments []judgment.Judgment) map[shared.ID]promotion.Signal {
+	out := make(map[shared.ID]promotion.Signal)
+	for _, j := range judgments {
+		if j.Capability != judgment.CapSAST || j.SubjectKind != judgment.SubjectDataFlow || !j.Publishable() {
+			continue
+		}
+		sc, ok := j.Claim.(judgment.SASTClaim)
+		if !ok {
+			continue
+		}
+		for _, link := range sc.Correlations {
+			if link.FindingID.IsZero() {
+				continue
+			}
+			if cur, exists := out[link.FindingID]; exists && cur.ID <= j.ID {
+				continue // keep the lowest judgment id for a deterministic, churn-free signal
+			}
+			out[link.FindingID] = promotion.Signal{Kind: judgment.PromotionInputReachability, ID: j.ID}
+		}
+	}
+	return out
 }
 
 // indexReachability indexes the current publishable finding-scoped reachability

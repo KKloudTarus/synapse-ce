@@ -1565,7 +1565,7 @@ func TestPromotionTraversalCancellationPropagates(t *testing.T) {
 	graph, event, reachability := promotionTraversalFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := (&Evaluator{}).buildSnapshot(ctx, baseFinding(), graph, nil, reachability, nil); !errors.Is(err, context.Canceled) {
+	if _, err := (&Evaluator{}).buildSnapshot(ctx, baseFinding(), graph, nil, reachability, nil, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("buildSnapshot error = %v, want context.Canceled", err)
 	}
 	if _, err := inputsStillActive(ctx, event, testFindingID(), graph, nil, reachability); !errors.Is(err, context.Canceled) {

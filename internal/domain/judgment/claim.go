@@ -39,13 +39,18 @@ const (
 	RuleDeterministicUnreachable = "promotion.deescalate.deterministic_unreachable"
 	RuleUncertainCorroboration   = "promotion.review.uncertain_corroboration"
 	RuleCorroboratingSignalLoss  = "promotion.deescalate.corroborating_signal_loss"
+	// RuleTaintExploitPath escalates a finding when a proven taint exploit-path reaches its vulnerable API
+	// (EPIC #1042 2.1). It is RAISE-ONLY and sticky: it only ever escalates, is applied at most once, and the
+	// ABSENCE of a taint path never reverses it or de-escalates (a dataflow proof is sufficient, never
+	// necessary). It never enters IsDeterministicReachabilityProof and never drives a not_affected.
+	RuleTaintExploitPath = "promotion.escalate.taint_exploit_path"
 )
 
 // ExpectedEffect returns the PromotionChange that the given rule is allowed to produce.
 // Unknown rules are rejected so claims cannot introduce new promotion behavior.
 func ExpectedEffect(rule string) (PromotionChange, bool) {
 	switch rule {
-	case RuleRuntimeReachableExposed:
+	case RuleRuntimeReachableExposed, RuleTaintExploitPath:
 		return PromotionEscalate, true
 	case RuleDeterministicUnreachable, RuleCorroboratingSignalLoss:
 		return PromotionDeescalate, true

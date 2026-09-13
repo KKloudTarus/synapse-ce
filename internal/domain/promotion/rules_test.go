@@ -22,6 +22,61 @@ func baseSnapshot() Snapshot {
 	}
 }
 
+// TestEvaluateTaintExploitPathEscalation is the #1051 acceptance: a proven taint exploit-path escalates a
+// finding by one level (raise-only), fires at most once, and its absence changes nothing; it never
+// de-escalates and never reaches not_affected.
+func TestEvaluateTaintExploitPathEscalation(t *testing.T) {
+	base := func() Snapshot {
+		s := baseSnapshot()
+		s.TaintExploitPath = true
+		s.TaintSignal = Signal{Kind: judgment.PromotionInputReachability, ID: "taint-j1"}
+		return s
+	}
+
+	// A proven taint path escalates P3 -> P2 under the taint rule.
+	c, err := Evaluate(base())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil || c.Rule != judgment.RuleTaintExploitPath || c.Proposed != judgment.PromotionEscalate || c.AfterPriority != 2 {
+		t.Fatalf("a taint exploit-path must escalate P3->P2, got %+v", c)
+	}
+
+	// Already applied: no re-escalation (idempotent, no churn).
+	applied := base()
+	applied.TaintExploitApplied = true
+	if c, err := Evaluate(applied); err != nil || c != nil {
+		t.Fatalf("an already-applied taint escalation must not re-fire, got %+v err=%v", c, err)
+	}
+
+	// Absence of a taint path changes nothing.
+	none := base()
+	none.TaintExploitPath = false
+	if c, err := Evaluate(none); err != nil || c != nil {
+		t.Fatalf("no taint path must change nothing, got %+v err=%v", c, err)
+	}
+
+	// At P1 (highest) it does not escalate further.
+	top := base()
+	top.Priority = 1
+	if c, err := Evaluate(top); err != nil || c != nil {
+		t.Fatalf("a P1 finding must not escalate further, got %+v err=%v", c, err)
+	}
+}
+
+// TestEvaluateStickyEscalationNotReversed: a taint escalation is kept sticky by the usecase setting
+// PriorEscalation.InputsActive=true, so the signal-loss reversal never fires and the raise-only taint
+// escalation is never wiped, whatever the recorded before-priority.
+func TestEvaluateStickyEscalationNotReversed(t *testing.T) {
+	s := baseSnapshot()
+	s.Priority = 1
+	s.TaintExploitApplied = true
+	s.PriorEscalation = &PriorEscalation{EventID: "taint-evt", BeforePriority: 3, InputsActive: true} // sticky
+	if c, err := Evaluate(s); err != nil || c != nil {
+		t.Fatalf("a sticky (InputsActive) escalation must never be reversed, got %+v err=%v", c, err)
+	}
+}
+
 func TestEvaluateDeterministicEscalation(t *testing.T) {
 	cases := []struct {
 		name     string

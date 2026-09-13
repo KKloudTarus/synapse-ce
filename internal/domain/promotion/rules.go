@@ -81,6 +81,14 @@ type Snapshot struct {
 	PathConfident             bool
 	DetectionSignals          []Signal
 	PriorEscalation           *PriorEscalation
+	// TaintExploitPath is true when a PUBLISHABLE taint-flow judgment proves an attacker-controlled path
+	// into this finding's vulnerable API (EPIC #1042 2.1). It is a RAISE-ONLY escalation trigger,
+	// independent of the attack-path/detection combo. TaintExploitApplied is true once a prior
+	// taint-exploit-path escalation has already been recorded, so the raise happens at most once; the
+	// absence of a taint path never reverses it. TaintSignal is its input provenance.
+	TaintExploitPath    bool
+	TaintExploitApplied bool
+	TaintSignal         Signal
 }
 
 // Evaluate returns at most one deterministic promotion claim. Signal-loss reversal restores the
@@ -99,6 +107,13 @@ func Evaluate(s Snapshot) (*judgment.PromotionClaim, error) {
 			inputs = append(inputs, Signal{Kind: judgment.PromotionInputPrior, ID: s.PriorEscalation.EventID})
 			return claim(s, judgment.RuleCorroboratingSignalLoss, judgment.PromotionDeescalate, prior, inputs, nil)
 		}
+	}
+	// Raise-only taint-exploit-path escalation (EPIC #1042 2.1): a proven attacker-input-to-vulnerable-API
+	// dataflow is standalone escalation evidence, independent of the attack-path/detection combo below. It
+	// escalates at most once (TaintExploitApplied guards re-escalation) and is sticky: the absence of a taint
+	// path never reverses it (this branch never de-escalates), so it can only ever raise urgency.
+	if s.TaintExploitPath && !s.TaintExploitApplied && s.Priority > 1 {
+		return claim(s, judgment.RuleTaintExploitPath, judgment.PromotionEscalate, s.Priority-1, []Signal{s.TaintSignal}, nil)
 	}
 	if len(s.DetectionSignals) == 0 || !s.PathPresent {
 		return nil, nil
