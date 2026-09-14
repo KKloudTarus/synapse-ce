@@ -269,17 +269,20 @@ func classifyLegacyCredentialEvidence(ctx context.Context, tx pgx.Tx, tenantID, 
 	}
 
 	var issued, oidcLinked bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM audit_log WHERE tenant_id=$1 AND target=$2 AND action IN ('user.created','user.api_key_rotated'))`, tenantID.String(), userID.String()).Scan(&issued); err != nil {
-		return "", "", fmt.Errorf("read legacy credential issuance evidence: %w", err)
-	}
-	if issued {
-		return ports.LegacyCredentialIssued, "durable_issuance_audit", nil
-	}
+	// An OIDC link is an explicit non-bearer provisioning signal. Check it before historical
+	// user.created evidence so an OIDC-provisioned user cannot be misclassified as issued merely
+	// because the provisioning flow also emitted a generic creation audit.
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM oidc_external_identities WHERE tenant_id=$1 AND user_id=$2)`, tenantID.String(), userID.String()).Scan(&oidcLinked); err != nil {
 		return "", "", fmt.Errorf("read legacy OIDC placeholder evidence: %w", err)
 	}
 	if oidcLinked {
 		return ports.LegacyCredentialPlaceholder, "oidc_without_issuance_evidence", nil
+	}
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM audit_log WHERE tenant_id=$1 AND target=$2 AND action IN ('user.created','user.api_key_rotated'))`, tenantID.String(), userID.String()).Scan(&issued); err != nil {
+		return "", "", fmt.Errorf("read legacy credential issuance evidence: %w", err)
+	}
+	if issued {
+		return ports.LegacyCredentialIssued, "durable_issuance_audit", nil
 	}
 	return ports.LegacyCredentialAmbiguous, "missing_durable_issuance_evidence", nil
 }
