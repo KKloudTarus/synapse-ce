@@ -306,6 +306,11 @@ func (c *Catalog) Tools() []agent.ToolSchema {
 			Description: "Propose an OpenVEX JUSTIFICATION for why a finding is NOT AFFECTED – pick ONE of the closed OpenVEX justifications. This is a PROPOSAL recorded at score 0: you CANNOT confirm it; a distinct human ratifies it before any export trusts it (a false 'not affected' suppresses a real vuln). Pick the most specific justification you can support.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"finding_id":{"type":"string","description":"the finding this justification is about (from list_findings)"},"justification":{"type":"string","description":"one of: component_not_present | vulnerable_code_not_present | vulnerable_code_not_in_execute_path | vulnerable_code_cannot_be_controlled_by_adversary | inline_mitigations_already_exist"}},"required":["finding_id","justification"],"additionalProperties":false}`),
 		})
+	}
+	// propose_investigation needs the reader as well as the proposer: a hypothesis is bound to an incident
+	// only after the catalog has read that incident and found it inside the session's engagement, so a
+	// catalog that cannot read incidents must not offer to bind hypotheses to them.
+	if c.jproposer != nil && c.incidents != nil {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeInvestigation,
 			Description: "Propose an INVESTIGATION HYPOTHESIS about an incident: pick ONE closed ATT&CK-style tactic that best explains what is happening, a confidence 0..100, and the STRUCTURED signal tokens that support it (never prose). This is a PROPOSAL recorded at score 0 that a human analyst ACCEPTS or REJECTS – it proves nothing and NEVER drives a response on its own; you cannot accept your own hypothesis. Use 'benign' when the evidence points to NOT malicious.",
@@ -407,7 +412,7 @@ func (c *Catalog) Dispatch(ctx context.Context, sess agent.Session, call agent.T
 		}
 		return c.getIncidentDetail(ctx, sess, call.Arguments)
 	case ToolProposeInvestigation:
-		if c.jproposer == nil {
+		if c.jproposer == nil || c.incidents == nil {
 			return Result{}, fmt.Errorf("%w: investigation proposals are not enabled", shared.ErrValidation)
 		}
 		return c.proposeInvestigation(ctx, sess, call.Arguments)
@@ -1326,11 +1331,11 @@ func (c *Catalog) getIncidentDetail(ctx context.Context, sess agent.Session, raw
 	if id == "" {
 		return Result{}, fmt.Errorf("%w: incident_id is required", shared.ErrValidation)
 	}
-	inc, err := c.incidents.Get(ctx, shared.ID(id))
-	if err != nil && !errors.Is(err, shared.ErrNotFound) {
-		return Result{}, fmt.Errorf("get incident: %w", err) // a real failure is never reported as a miss
+	inc, ok, err := c.incidentInScope(ctx, sess, shared.ID(id))
+	if err != nil {
+		return Result{}, err
 	}
-	if err != nil || inc.EngagementID.IsZero() || inc.EngagementID != sess.EngagementID {
+	if !ok {
 		return c.incidentMiss(ctx, sess, id)
 	}
 	timeline := make([]incidentTimelineView, 0, min(len(inc.Timeline), maxRows))
@@ -1361,6 +1366,21 @@ func (c *Catalog) getIncidentDetail(ctx context.Context, sess agent.Session, raw
 		return Result{}, err
 	}
 	return Result{Data: payload}, nil
+}
+
+// incidentInScope fetches an incident and reports whether the session may see it: it must exist and
+// carry the session's EngagementID. Absent, out-of-scope, and no-engagement-id all report ok=false with a
+// nil error, so a caller cannot tell them apart; a genuine store failure is returned as err so it is
+// never mistaken for a miss.
+func (c *Catalog) incidentInScope(ctx context.Context, sess agent.Session, id shared.ID) (incident.Incident, bool, error) {
+	inc, err := c.incidents.Get(ctx, id)
+	if err != nil && !errors.Is(err, shared.ErrNotFound) {
+		return incident.Incident{}, false, fmt.Errorf("get incident: %w", err)
+	}
+	if err != nil || inc.EngagementID.IsZero() || inc.EngagementID != sess.EngagementID {
+		return incident.Incident{}, false, nil
+	}
+	return inc, true, nil
 }
 
 func (c *Catalog) incidentMiss(ctx context.Context, sess agent.Session, id string) (Result, error) {
@@ -1398,6 +1418,16 @@ func (c *Catalog) proposeInvestigation(ctx context.Context, sess agent.Session, 
 	incidentID := shared.ID(strings.TrimSpace(a.IncidentID))
 	if incidentID.IsZero() {
 		return Result{}, fmt.Errorf("%w: incident_id is required", shared.ErrValidation)
+	}
+	// The subject must be an incident this session can read. The judgment is stored under the session's
+	// engagement either way, but a SubjectIncident pointing into another engagement would sit in the record
+	// until some consumer dereferenced it, so it is refused at the boundary — the same way
+	// propose_sast_validation refuses a finding outside the engagement. Absent and out-of-scope are
+	// reported identically, as in get_incident_detail.
+	if _, ok, err := c.incidentInScope(ctx, sess, incidentID); err != nil {
+		return Result{}, err
+	} else if !ok {
+		return Result{}, fmt.Errorf("%w: incident_id must reference an existing incident in this engagement", shared.ErrValidation)
 	}
 	claim := judgment.InvestigationClaim{
 		IncidentID: incidentID,

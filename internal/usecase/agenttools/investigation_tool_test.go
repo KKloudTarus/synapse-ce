@@ -3,17 +3,28 @@ package agenttools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
+
+// inc7 is the incident the happy paths bind a hypothesis to; it lives in the session's engagement.
+func inc7() *fakeIncidents {
+	inc := sessionIncident()
+	inc.ID = "inc-7"
+	return &fakeIncidents{byID: map[shared.ID]incident.Incident{"inc-7": inc}}
+}
 
 func TestProposeInvestigation(t *testing.T) {
 	c, _ := newCatalog(t, nil, nil, subfinder())
 	fp := &fakeJudgmentProposer{}
 	c.EnableJudgments(fp)
+	c.EnableIncidentReads(inc7())
 
 	advertised := false
 	for _, ts := range c.Tools() {
@@ -58,6 +69,7 @@ func TestProposeInvestigationRequiresSupportingDrivers(t *testing.T) {
 	c, _ := newCatalog(t, nil, nil, subfinder())
 	fp := &fakeJudgmentProposer{}
 	c.EnableJudgments(fp)
+	c.EnableIncidentReads(inc7())
 
 	var schema struct {
 		Required   []string `json:"required"`
@@ -100,14 +112,91 @@ func TestProposeInvestigationRequiresSupportingDrivers(t *testing.T) {
 	}
 }
 
-func TestProposeInvestigationDisabledFailsClosed(t *testing.T) {
-	c, _ := newCatalog(t, nil, nil, subfinder()) // no EnableJudgments
-	for _, ts := range c.Tools() {
-		if ts.Name == ToolProposeInvestigation {
-			t.Fatal("propose_investigation must not be advertised without a judgment proposer")
+// TestProposeInvestigationRefusesOutOfScopeIncidents is the propose-side twin of the get_incident_detail
+// scope test: a hypothesis may only bind to an incident the session can read. The judgment would be stored
+// under the session's engagement either way, but a SubjectIncident pointing into another engagement would
+// sit in the record until a consumer dereferenced it, so it is refused at the boundary — and absent,
+// other-engagement, and no-engagement-id are refused identically so the tool cannot probe for ids.
+func TestProposeInvestigationRefusesOutOfScopeIncidents(t *testing.T) {
+	other := sessionIncident()
+	other.ID, other.EngagementID = "inc-other", "eng-2"
+	legacy := sessionIncident()
+	legacy.ID, legacy.EngagementID = "inc-legacy", ""
+
+	c, _ := newCatalog(t, nil, nil, subfinder())
+	fp := &fakeJudgmentProposer{}
+	c.EnableJudgments(fp)
+	c.EnableIncidentReads(&fakeIncidents{byID: map[shared.ID]incident.Incident{"inc-other": other, "inc-legacy": legacy}})
+
+	var msgs []string
+	for _, id := range []string{"inc-other", "inc-legacy", "inc-does-not-exist"} {
+		t.Run(id, func(t *testing.T) {
+			fp.got = judgment.Judgment{}
+			_, err := c.Dispatch(context.Background(), session(), agent.ToolCall{
+				Name:      ToolProposeInvestigation,
+				Arguments: json.RawMessage(`{"incident_id":"` + id + `","tactic":"lateral_movement","confidence":70,"drivers":["new_exec_paths"]}`),
+			})
+			if !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("%s: want ErrValidation, got %v", id, err)
+			}
+			if fp.got.Capability != "" {
+				t.Fatalf("%s: a hypothesis was bound to an incident outside the session engagement: %+v", id, fp.got)
+			}
+			msgs = append(msgs, err.Error())
+		})
+	}
+	for _, m := range msgs[1:] {
+		if m != msgs[0] {
+			t.Fatalf("refusals must be indistinguishable, got %q vs %q", msgs[0], m)
 		}
 	}
-	if _, err := c.Dispatch(context.Background(), session(), agent.ToolCall{Name: ToolProposeInvestigation, Arguments: json.RawMessage(`{}`)}); err == nil {
-		t.Fatal("dispatch must fail closed when judgments are disabled")
+
+	// An engagement-less session must not bind to a legacy incident that carries no engagement either:
+	// "" == "" is exactly the match the IsZero guard refuses.
+	fp.got = judgment.Judgment{}
+	if _, err := c.Dispatch(context.Background(), agent.Session{ID: "s0", InitiatedBy: "alice"}, agent.ToolCall{
+		Name:      ToolProposeInvestigation,
+		Arguments: json.RawMessage(`{"incident_id":"inc-legacy","tactic":"lateral_movement","confidence":70,"drivers":["new_exec_paths"]}`),
+	}); !errors.Is(err, shared.ErrValidation) || fp.got.Capability != "" {
+		t.Fatalf("an engagement-less session bound a hypothesis to a legacy incident: err=%v got=%+v", err, fp.got)
+	}
+
+	// A real store failure is a failure, not a scope miss.
+	boom := errors.New("incident store unavailable")
+	c2, _ := newCatalog(t, nil, nil, subfinder())
+	c2.EnableJudgments(&fakeJudgmentProposer{})
+	c2.EnableIncidentReads(&fakeIncidents{err: boom})
+	if _, err := c2.Dispatch(context.Background(), session(), agent.ToolCall{
+		Name:      ToolProposeInvestigation,
+		Arguments: json.RawMessage(`{"incident_id":"inc-7","tactic":"lateral_movement","confidence":70,"drivers":["new_exec_paths"]}`),
+	}); !errors.Is(err, boom) {
+		t.Fatalf("store failure must propagate, got %v", err)
+	}
+}
+
+// TestProposeInvestigationDisabledFailsClosed: the tool needs BOTH a judgment proposer and an incident
+// reader. A catalog that can propose but not read must not offer to bind a hypothesis to an incident it
+// could never have looked at.
+func TestProposeInvestigationDisabledFailsClosed(t *testing.T) {
+	for name, wire := range map[string]func(*Catalog){
+		"neither":        func(*Catalog) {},
+		"judgments only": func(c *Catalog) { c.EnableJudgments(&fakeJudgmentProposer{}) },
+		"incidents only": func(c *Catalog) { c.EnableIncidentReads(inc7()) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, _ := newCatalog(t, nil, nil, subfinder())
+			wire(c)
+			for _, ts := range c.Tools() {
+				if ts.Name == ToolProposeInvestigation {
+					t.Fatal("propose_investigation must not be advertised without both a judgment proposer and an incident reader")
+				}
+			}
+			if _, err := c.Dispatch(context.Background(), session(), agent.ToolCall{
+				Name:      ToolProposeInvestigation,
+				Arguments: json.RawMessage(`{"incident_id":"inc-7","tactic":"lateral_movement","confidence":70,"drivers":["new_exec_paths"]}`),
+			}); err == nil {
+				t.Fatal("dispatch must fail closed")
+			}
+		})
 	}
 }

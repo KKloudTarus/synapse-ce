@@ -156,6 +156,24 @@ func TestGetIncidentDetailRefusesOutOfScopeIncidents(t *testing.T) {
 			}
 		})
 	}
+
+	// The pairing the IsZero guard exists for: a session that itself carries no engagement must not match
+	// a legacy incident that carries none either. Equality alone would let "" == "" through.
+	t.Run("engagement-less session cannot read a legacy incident", func(t *testing.T) {
+		res, err := c.Dispatch(context.Background(), agent.Session{ID: "s0", InitiatedBy: "alice"}, agent.ToolCall{
+			Name: ToolGetIncidentDetail, Arguments: json.RawMessage(`{"incident_id":"inc-legacy"}`),
+		})
+		if err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(res.Data, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out["found"] != false {
+			t.Fatalf("an engagement-less session read a legacy incident: %+v", out)
+		}
+	})
 }
 
 // TestGetIncidentDetailCapsTheTimeline covers the bound itself, including the exact boundary: a regression

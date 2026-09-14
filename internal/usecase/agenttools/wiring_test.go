@@ -108,6 +108,31 @@ func TestEnableAgentToolsetOptionalOff(t *testing.T) {
 	}
 }
 
+// TestEnableAgentToolsetInvestigationNeedsBothDeps: propose_investigation is the one controlled tool
+// gated on TWO optional dependencies. Judgments alone must not switch it on — a catalog that cannot read an
+// incident must not offer to bind a hypothesis to one — while every other judgment tool stays on.
+func TestEnableAgentToolsetInvestigationNeedsBothDeps(t *testing.T) {
+	c, _ := newCatalog(t, nil, nil)
+	if err := c.EnableAgentToolset(AgentToolset{
+		Findings: &fakeProposer{}, Hypotheses: &fakeHypProposer{}, Reachability: &fakeScanResults{},
+		Judgments: &fakeJudgmentProposer{}, // Incidents deliberately nil
+	}); err != nil {
+		t.Fatalf("EnableAgentToolset: %v", err)
+	}
+	names := toolNames(c)
+	if names[ToolProposeInvestigation] {
+		t.Error("propose_investigation must be OFF when no incident reader is wired, even with judgments on")
+	}
+	if names[ToolGetIncidentDetail] {
+		t.Error("get_incident_detail must be OFF when no incident reader is wired")
+	}
+	for _, n := range []string{ToolProposeReachability, ToolProposeCritique, ToolProposeRiskNarrative, ToolProposeThreat, ToolProposeVexJustification} {
+		if !names[n] {
+			t.Errorf("judgment tool %q must stay ON; only investigation depends on the incident reader", n)
+		}
+	}
+}
+
 // TestEnableAgentToolsetFailsClosed proves a missing REQUIRED dependency returns ErrValidation and enables
 // NOTHING — the durable worker fails closed rather than advertising a partial toolset (the #161 defect).
 func TestEnableAgentToolsetFailsClosed(t *testing.T) {

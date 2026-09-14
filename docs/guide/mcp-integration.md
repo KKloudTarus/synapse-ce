@@ -68,7 +68,6 @@ can confirm itself.
 | `propose_risk_narrative` | A risk narrative for human acceptance |
 | `propose_threat` | A STRIDE threat over the architecture model |
 | `propose_vex_justification` | An OpenVEX `not_affected` justification |
-| `propose_investigation` | An investigation hypothesis about an incident: one tactic, a confidence, and the signals supporting it |
 | `propose_writeup_draft` | Finding write-up prose awaiting human sign-off |
 
 A `tools/call` response for a proposal carries `"proposal_requires_human_approval": true`. Treat it as a
@@ -78,11 +77,11 @@ Judgment proposal tools require `SYNAPSE_JUDGMENTS_ENABLED`, and `propose_writeu
 `SYNAPSE_WRITEUP_DRAFTS_ENABLED`. A tool whose dependency is not wired is simply absent from
 `tools/list` rather than present and failing.
 
-`propose_investigation` requires at least one supporting driver, so a hypothesis always carries the
-signals behind it. The in-process agent reads those signals with `get_incident_detail`; that tool is NOT
-exposed here, because the incident store is tenant-scoped and this server binds an engagement but no
-tenant. An MCP client must therefore supply the incident id and the supporting signal tokens from its own
-context.
+The in-process agent also has `get_incident_detail` (read one incident of its engagement) and
+`propose_investigation` (bind a hypothesis to an incident it has read, with at least one supporting
+driver). Neither is exposed here: a hypothesis may only bind to an incident the catalog can read and prove
+is inside the engagement, the incident store is tenant-scoped, and this server binds an engagement but no
+tenant. They will appear on this surface once it carries a tenant.
 
 ## Why proposals cannot become executions
 
