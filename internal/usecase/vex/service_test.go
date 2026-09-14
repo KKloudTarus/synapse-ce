@@ -208,6 +208,34 @@ func TestApplyNotAffectedSuppressesWhenWinnerIsNotReachable(t *testing.T) {
 	}
 }
 
+// TestApplyNotAffectedDoesNotSuppressConditionallyReachable pins the conditionally_reachable follow-on: a
+// finding Synapse judged conditionally reachable (reachable under a precondition) is potentially a real vuln,
+// so a vendor not_affected must not suppress it either (the #1-bar-safe over-report direction).
+func TestApplyNotAffectedDoesNotSuppressConditionallyReachable(t *testing.T) {
+	repo := &fakeRepo{list: []finding.Finding{
+		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2020-1:foo:1.2.3", Status: finding.StatusOpen, Version: 1, Reachability: "high"},
+	}}
+	svc, err := NewService(fakeEngRepo{}, repo, nopAudit{}, fixedClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cond := judgment.Judgment{
+		Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "f1",
+		State: judgment.StateConfirmed, EvidenceScore: 90,
+		Claim: judgment.ReachabilityClaim{Reachable: judgment.ConditionallyReachable, Tier: judgment.Tier2, Confidence: 90, EntrypointsPresent: true},
+	}
+	svc.SetJudgments(fakeJudgments{js: []judgment.Judgment{cond}})
+	doc := []byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+		{"vulnerability":{"name":"CVE-2020-1"},"products":[{"@id":"foo@1.2.3"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`)
+
+	if _, err := svc.Apply(context.Background(), "alice", "", "e1", doc); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if repo.list[0].Status != finding.StatusOpen {
+		t.Errorf("a conditionally_reachable finding must NOT be suppressed by a vendor not_affected, got %s", repo.list[0].Status)
+	}
+}
+
 func TestApplyFixedMarksRemediatedAndPurlProductMatches(t *testing.T) {
 	svc, repo := newSvc(t, []finding.Finding{
 		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2021-2:lodash:4.17.20", Status: finding.StatusConfirmed, Version: 3},
