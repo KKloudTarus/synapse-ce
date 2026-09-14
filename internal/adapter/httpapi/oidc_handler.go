@@ -90,8 +90,13 @@ func (rt *Router) oidcSession(w http.ResponseWriter, r *http.Request) {
 	}
 	session, err := rt.oidc.Discover(r.Context(), cookie.Value)
 	if err != nil {
-		clearSessionCookie(w)
-		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+		code := identityCodeFor(err)
+		if code == IdentityErrorAuthenticationInvalid {
+			// Invalid/revoked/expired credentials are terminal. Dependency and capacity failures are
+			// explicitly NOT cleared so a transient outage cannot log the user out.
+			clearSessionCookie(w)
+		}
+		writeIdentityError(w, r.Context(), code, err)
 		return
 	}
 	setSessionCookie(w, session.Token)
@@ -111,7 +116,14 @@ func (rt *Router) oidcLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil && cookie.Value != "" {
 		if err := rt.oidc.Logout(r.Context(), cookie.Value); err != nil && !errors.Is(err, context.Canceled) {
-			writeError(w, rt.log, err)
+			code := identityCodeFor(err)
+			if code == IdentityErrorAuthenticationInvalid {
+				// The local credential is already unusable; clearing it completes the user's intent.
+				clearSessionCookie(w)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			writeIdentityError(w, r.Context(), code, err)
 			return
 		}
 	}
