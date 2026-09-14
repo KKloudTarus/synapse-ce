@@ -317,6 +317,7 @@ func (s *Service) Publish(ctx context.Context, e domain.Event) ([]shared.ID, err
 }
 
 func (s *Service) seal(tenant, id shared.ID, version int, cfg ports.NotificationChannelConfig) (string, error) {
+	// #nosec G117 -- channel configuration is sealed before persistence and never logged.
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return "", err
@@ -486,7 +487,7 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 		after = time.Hour
 	}
 	next := finished.Add(after)
-	var nextPtr *time.Time = &next
+	nextPtr := &next
 	if terminal {
 		outcome = "failed"
 		nextPtr = nil
