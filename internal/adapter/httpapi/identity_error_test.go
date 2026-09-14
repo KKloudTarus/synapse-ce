@@ -46,7 +46,7 @@ func TestIdentityErrorContract(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			ctx := identityContext("req-123")
-			writeIdentityFailure(rec, ctx, tc.err)
+			writeIdentityFailure(ctx, rec, tc.err)
 			if rec.Code != tc.wantHTTP {
 				t.Fatalf("status = %d, want %d", rec.Code, tc.wantHTTP)
 			}
