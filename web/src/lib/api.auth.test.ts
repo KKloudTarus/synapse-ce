@@ -43,7 +43,7 @@ describe('BFF session API helpers', () => {
     } as Response)
 
     const promise = discoverSession()
-    await expect(promise).rejects.toMatchObject<ApiError>({
+    await expect(promise).rejects.toMatchObject({
       status: 503,
       code: 'dependency_unavailable',
       requestId: 'req-42',
@@ -58,7 +58,7 @@ describe('BFF session API helpers', () => {
       json: async () => ({ error: 'future identity state', code: 'future_identity_state', request_id: 'r2', retryable: false }),
     } as Response)
 
-    await expect(discoverSession()).rejects.toMatchObject<ApiError>({ status: 401, code: 'future_identity_state' })
+    await expect(discoverSession()).rejects.toMatchObject({ status: 401, code: 'future_identity_state' })
   })
 
   it('sends the in-memory CSRF token for unsafe session requests and logout', async () => {
@@ -92,7 +92,7 @@ describe('BFF session API helpers', () => {
       status: 503,
       json: async () => ({ error: 'identity service temporarily unavailable', code: 'dependency_unavailable', retryable: true }),
     } as Response)
-    await expect(api.aup()).rejects.toMatchObject<ApiError>({ code: 'dependency_unavailable', retryable: true })
+    await expect(api.aup()).rejects.toMatchObject({ code: 'dependency_unavailable', retryable: true })
     expect(unauthorized).not.toHaveBeenCalled()
 
     // Prove the credential was preserved through externally observable request behavior rather than
@@ -106,7 +106,7 @@ describe('BFF session API helpers', () => {
       status: 401,
       json: async () => ({ error: 'authentication failed', code: 'authentication_invalid', retryable: false }),
     } as Response)
-    await expect(api.aup()).rejects.toMatchObject<ApiError>({ code: 'authentication_invalid' })
+    await expect(api.aup()).rejects.toMatchObject({ code: 'authentication_invalid' })
     expect(unauthorized).toHaveBeenCalledTimes(1)
   })
 
