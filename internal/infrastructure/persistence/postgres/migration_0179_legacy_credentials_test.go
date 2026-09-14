@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -48,10 +49,12 @@ func TestMigration0179LegacyCredentialRLSAndClassification(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed issuance audit: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO oidc_external_identities(id,tenant_id,user_id,issuer,subject,created_at,updated_at)
-		VALUES('d5-placeholder-link',$1,'placeholder','https://issuer.example','subject-placeholder',$2,$2)`, tenantID.String(), now); err != nil {
-		t.Fatalf("seed placeholder OIDC link: %v", err)
-	}
+	withMigrationTenant(t, db, tenantID.String(), func(tx *sql.Tx) {
+		if _, err := tx.Exec(`INSERT INTO oidc_external_identities(id,tenant_id,user_id,issuer,subject,created_at,updated_at)
+			VALUES('d5-placeholder-link',$1,'placeholder','https://issuer.example','subject-placeholder',$2,$2)`, tenantID.String(), now); err != nil {
+			t.Fatalf("seed placeholder OIDC link: %v", err)
+		}
+	})
 
 	repository, err := NewLegacyCredentialRepository(pool)
 	if err != nil {
@@ -113,9 +116,9 @@ func TestMigration0179LegacyCredentialRLSAndClassification(t *testing.T) {
 	if resolved.Classification != ports.LegacyCredentialIssued || resolved.Digest != strings.Repeat("c", 64) || resolved.Status != ports.LegacyCredentialDisabled {
 		t.Fatalf("resolved projection=%+v", resolved)
 	}
-	if _, err := db.Exec(`UPDATE legacy_credential_resolutions SET actor='rewrite' WHERE tenant_id=$1 AND id='resolution-1'`, tenantID.String()); err == nil {
-		t.Fatal("append-only credential resolution unexpectedly accepted UPDATE")
-	}
+	withMigrationTenant(t, db, tenantID.String(), func(tx *sql.Tx) {
+		requireMigrationWriteRejected(t, tx, `UPDATE legacy_credential_resolutions SET actor='rewrite' WHERE tenant_id=$1 AND id='resolution-1'`, tenantID.String())
+	})
 }
 
 func TestD5RotationAuditFailureRollsBackSourceProjectionAndLocator(t *testing.T) {
@@ -301,10 +304,12 @@ func TestD5CredentialRunnerPersistsReconciliationEvidenceInImmutableLedger(t *te
 	}); err != nil {
 		t.Fatalf("seed issuance evidence: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO oidc_external_identities(id,tenant_id,user_id,issuer,subject,created_at,updated_at)
-		VALUES('d5-runner-placeholder-link',$1,'placeholder','https://issuer.example','subject-placeholder',$2,$2)`, tenantID.String(), now); err != nil {
-		t.Fatalf("seed placeholder OIDC link: %v", err)
-	}
+	withMigrationTenant(t, db, tenantID.String(), func(tx *sql.Tx) {
+		if _, err := tx.Exec(`INSERT INTO oidc_external_identities(id,tenant_id,user_id,issuer,subject,created_at,updated_at)
+			VALUES('d5-runner-placeholder-link',$1,'placeholder','https://issuer.example','subject-placeholder',$2,$2)`, tenantID.String(), now); err != nil {
+			t.Fatalf("seed placeholder OIDC link: %v", err)
+		}
+	})
 
 	identityRepository, err := NewIdentityRolloutRepository(pool)
 	if err != nil {
@@ -339,18 +344,20 @@ func TestD5CredentialRunnerPersistsReconciliationEvidenceInImmutableLedger(t *te
 	}
 	var complete bool
 	var projected, issued, placeholder, ambiguous, missing, drift, indexDrift int
-	if err := db.QueryRow(`SELECT credential_projection_complete,credential_projected_count,issued_credential_count,placeholder_credential_count,
-		ambiguous_credential_count,missing_credential_count,credential_drift_count,credential_index_drift_count
-		FROM identity_rollout_phase_records WHERE tenant_id=$1 AND id='d5-evidence'`, tenantID.String()).
-		Scan(&complete, &projected, &issued, &placeholder, &ambiguous, &missing, &drift, &indexDrift); err != nil {
-		t.Fatalf("read D5 reconciliation evidence: %v", err)
-	}
+	withMigrationTenant(t, db, tenantID.String(), func(tx *sql.Tx) {
+		if err := tx.QueryRow(`SELECT credential_projection_complete,credential_projected_count,issued_credential_count,placeholder_credential_count,
+			ambiguous_credential_count,missing_credential_count,credential_drift_count,credential_index_drift_count
+			FROM identity_rollout_phase_records WHERE tenant_id=$1 AND id='d5-evidence'`, tenantID.String()).
+			Scan(&complete, &projected, &issued, &placeholder, &ambiguous, &missing, &drift, &indexDrift); err != nil {
+			t.Fatalf("read D5 reconciliation evidence: %v", err)
+		}
+	})
 	if !complete || projected != 3 || issued != 1 || placeholder != 1 || ambiguous != 1 || missing != 0 || drift != 0 || indexDrift != 0 {
 		t.Fatalf("persisted D5 evidence complete=%v counts=%d/%d/%d/%d/%d/%d/%d", complete, projected, issued, placeholder, ambiguous, missing, drift, indexDrift)
 	}
-	if _, err := db.Exec(`UPDATE identity_rollout_phase_records SET credential_projection_complete=false WHERE tenant_id=$1 AND id='d5-evidence'`, tenantID.String()); err == nil {
-		t.Fatal("immutable D5 reconciliation evidence unexpectedly accepted UPDATE")
-	}
+	withMigrationTenant(t, db, tenantID.String(), func(tx *sql.Tx) {
+		requireMigrationWriteRejected(t, tx, `UPDATE identity_rollout_phase_records SET credential_projection_complete=false WHERE tenant_id=$1 AND id='d5-evidence'`, tenantID.String())
+	})
 }
 
 func TestD5BootstrapNeverProjectsAsOrdinaryCredential(t *testing.T) {
@@ -367,9 +374,11 @@ func TestD5BootstrapNeverProjectsAsOrdinaryCredential(t *testing.T) {
 		t.Fatalf("bootstrap projection err=%v, want validation refusal", err)
 	}
 	var projected, indexed int
-	if err := db.QueryRow(`SELECT count(*) FROM legacy_human_credentials WHERE tenant_id=$1 AND user_id='operator'`, tenantID.String()).Scan(&projected); err != nil {
-		t.Fatal(err)
-	}
+	withMigrationTenant(t, db, tenantID.String(), func(tx *sql.Tx) {
+		if err := tx.QueryRow(`SELECT count(*) FROM legacy_human_credentials WHERE tenant_id=$1 AND user_id='operator'`, tenantID.String()).Scan(&projected); err != nil {
+			t.Fatal(err)
+		}
+	})
 	if err := db.QueryRow(`SELECT count(*) FROM credential_index WHERE organization_id=$1 AND credential_kind='legacy_api_key' AND credential_id='operator'`, tenantID.String()).Scan(&indexed); err != nil {
 		t.Fatal(err)
 	}
