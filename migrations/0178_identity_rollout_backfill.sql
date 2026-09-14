@@ -20,6 +20,7 @@ CREATE TABLE identity_backfill_runs (
     projected_count       INTEGER NOT NULL DEFAULT 0 CHECK (projected_count >= 0),
     unchanged_count       INTEGER NOT NULL DEFAULT 0 CHECK (unchanged_count >= 0),
     drift_count           INTEGER NOT NULL DEFAULT 0 CHECK (drift_count >= 0),
+    reconciled_drift_count INTEGER NOT NULL DEFAULT 0 CHECK (reconciled_drift_count >= 0),
     source_count          INTEGER NOT NULL DEFAULT 0 CHECK (source_count >= 0),
     person_count          INTEGER NOT NULL DEFAULT 0 CHECK (person_count >= 0),
     membership_count      INTEGER NOT NULL DEFAULT 0 CHECK (membership_count >= 0),
@@ -74,7 +75,8 @@ CREATE TABLE identity_rollout_phase_records (
     )),
     owner                 TEXT NOT NULL CHECK (owner=btrim(owner) AND length(owner) BETWEEN 1 AND 256),
     source_of_truth       TEXT NOT NULL CHECK (source_of_truth IN ('legacy_users','shadow_compare','enterprise_identity')),
-    allowed_writers       TEXT[] NOT NULL DEFAULT '{}',
+    allowed_writers       TEXT[] NOT NULL DEFAULT '{}'
+        CHECK (cardinality(allowed_writers) >= 1 AND allowed_writers <@ ARRAY['legacy_users','legacy_dual_write','enterprise_identity']::TEXT[]),
     source_count          INTEGER NOT NULL DEFAULT 0 CHECK (source_count >= 0),
     projected_count       INTEGER NOT NULL DEFAULT 0 CHECK (projected_count >= 0),
     drift_count           INTEGER NOT NULL DEFAULT 0 CHECK (drift_count >= 0),
