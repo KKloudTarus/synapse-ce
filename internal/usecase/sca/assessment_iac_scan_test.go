@@ -1,6 +1,7 @@
 package sca
 
 import (
+	"runtime"
 	"context"
 	"encoding/json"
 	"os"
@@ -76,6 +77,9 @@ func (acquirer *assessmentIaCAcquirer) Acquire(ctx context.Context, request port
 }
 
 func TestAssessmentIaCMixedScanPersistsAllFamiliesAndNeverInfersFixed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("IaC fixture currently requires POSIX relative-path normalization")
+	}
 	for _, mode := range []string{"synchronous", "durable-job"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := shared.WithTenant(context.Background(), "iac-scan-tenant")
