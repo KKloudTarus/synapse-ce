@@ -273,7 +273,7 @@ func (s *Service) reachableFindings(ctx context.Context, engagementID shared.ID)
 	if err != nil {
 		return nil, err
 	}
-	return judgment.ReachableFindingIDs(judgment.WinningReachabilityClaims(js)), nil
+	return judgment.SuppressionResistantFindingIDs(judgment.WinningReachabilityClaims(js)), nil
 }
 
 // vexTargetStatus maps an OpenVEX status to the finding status it implies.

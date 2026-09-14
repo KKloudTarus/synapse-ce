@@ -124,7 +124,7 @@ func (s *Service) vexInputs(ctx context.Context, engagementID shared.ID) (vexInp
 	if err != nil {
 		return vexInputData{}, err
 	}
-	return vexInputData{findings: fs, notReachable: notReachableTiersFrom(winner), reachable: reachableFrom(winner), vexJust: vexJust}, nil
+	return vexInputData{findings: fs, notReachable: notReachableTiersFrom(winner), reachable: suppressionResistantFrom(winner), vexJust: vexJust}, nil
 }
 
 // vexJustifications maps a finding id → the OpenVEX justification of a PUBLISHABLE (confirmed + verified
@@ -190,8 +190,12 @@ func notReachableTiersFrom(winner map[string]judgment.ReachabilityClaim) map[str
 // independently proved the vulnerable code is reached. A vendor `not_affected` (a mere assertion) must never
 // suppress such a finding on export, so collectVEXRecords refuses to emit not_affected for these ids and
 // asserts the more-exploitable `affected` instead (EPIC #1042, #1064; the #1-bar reachability reconciliation).
-func reachableFrom(winner map[string]judgment.ReachabilityClaim) map[string]bool {
-	return judgment.ReachableFindingIDs(winner)
+// suppressionResistantFrom is the id set whose winning reachability verdict (reachable OR conditionally
+// reachable) forbids a vendor not_affected from suppressing it; export upgrades such a would-be not_affected
+// to the more-exploitable affected. Shared with the VEX apply/reapply path so both surfaces protect the same
+// findings.
+func suppressionResistantFrom(winner map[string]judgment.ReachabilityClaim) map[string]bool {
+	return judgment.SuppressionResistantFindingIDs(winner)
 }
 
 // parsedKey is the structured form of a finding dedup key

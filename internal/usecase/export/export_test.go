@@ -86,6 +86,38 @@ func TestOpenVEXJustificationByTier(t *testing.T) {
 	}
 }
 
+// TestOpenVEXConditionallyReachableUpgradesNotAffected pins the conditionally_reachable follow-on on export:
+// a false-positive finding Synapse judged conditionally reachable must NOT export as not_affected (a vendor
+// assertion cannot hide a potentially-real vuln); it is upgraded to the more-exploitable affected, the same
+// way a proven-reachable finding is. Reachable and conditionally_reachable share the suppression-resistant set.
+func TestOpenVEXConditionallyReachableUpgradesNotAffected(t *testing.T) {
+	repo := memory.NewFindingRepository()
+	ctx := context.Background()
+	if err := repo.Upsert(ctx, []finding.Finding{
+		{ID: "fc", EngagementID: "e1", Kind: finding.KindSCA, Severity: shared.SeverityHigh, Status: finding.StatusFalsePos, DedupKey: "vuln:CVE-2021-9:libF:1.0"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(repo, fixedClock{}, "v1")
+	svc.SetJudgments(&fakeJudgments{js: []judgment.Judgment{
+		mkJudg("fc", judgment.StateConfirmed, 90, judgment.ConditionallyReachable, judgment.Tier2),
+	}})
+
+	doc, err := svc.OpenVEX(ctx, "e1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range doc.Statements {
+		if s.Vulnerability.Name == "CVE-2021-9" {
+			if s.Status != "affected" {
+				t.Errorf("a conditionally_reachable finding must export as affected, not %q", s.Status)
+			}
+			return
+		}
+	}
+	t.Fatal("expected a VEX statement for CVE-2021-9")
+}
+
 // TestOpenVEXUnprovenNotReachableNoExecutePathJustification: a Tier-2 (call-graph) not_reachable that did
 // NOT record entry points, or left an affected symbol unanswered, is soft no-coverage, not proof of
 // absence. It must NOT stamp the "not in execute path" justification; the false-positive finding falls back

@@ -35,3 +35,26 @@ func TestWinningReachabilityClaimsAndReachableIDs(t *testing.T) {
 		t.Errorf("f2/f3 must not be reachable, got %v", reach)
 	}
 }
+
+// TestSuppressionResistantIncludesConditional pins that a conditionally_reachable finding is
+// suppression-resistant (a vendor not_affected must not suppress it) even though it is not strictly
+// Reachable, while a not_reachable finding is not resistant. Reachable is a subset of resistant.
+func TestSuppressionResistantIncludesConditional(t *testing.T) {
+	js := []Judgment{
+		{Capability: CapReachability, SubjectKind: SubjectFinding, SubjectID: "reach", State: StateConfirmed, EvidenceScore: 90, Claim: ReachabilityClaim{Reachable: Reachable, Tier: Tier2, Confidence: 90, EntrypointsPresent: true}},
+		{Capability: CapReachability, SubjectKind: SubjectFinding, SubjectID: "cond", State: StateConfirmed, EvidenceScore: 90, Claim: ReachabilityClaim{Reachable: ConditionallyReachable, Tier: Tier2, Confidence: 90, EntrypointsPresent: true}},
+		{Capability: CapReachability, SubjectKind: SubjectFinding, SubjectID: "not", State: StateConfirmed, EvidenceScore: 90, Claim: ReachabilityClaim{Reachable: NotReachable, Tier: Tier2, Confidence: 90, EntrypointsPresent: true}},
+	}
+	winner := WinningReachabilityClaims(js)
+	resistant := SuppressionResistantFindingIDs(winner)
+	if !resistant["reach"] || !resistant["cond"] {
+		t.Errorf("both reachable and conditionally_reachable must be suppression-resistant, got %v", resistant)
+	}
+	if resistant["not"] {
+		t.Errorf("a not_reachable finding must not be suppression-resistant, got %v", resistant)
+	}
+	// Reachable is strictly a subset: the reachable-only set excludes the conditional one.
+	if reach := ReachableFindingIDs(winner); reach["cond"] {
+		t.Errorf("ReachableFindingIDs must be strictly reachable (exclude conditional), got %v", reach)
+	}
+}

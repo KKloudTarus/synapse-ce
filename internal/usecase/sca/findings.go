@@ -13,6 +13,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ignore"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/jssymbols"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
@@ -666,12 +667,26 @@ func applyVEX(res *ScanResult, doc vex.Document) {
 		if !st.Suppresses() { // only not_affected / fixed exempt the gate; affected/under_investigation don't
 			continue
 		}
+		// A `not_affected` asserts "not exploitable" (a reachability claim); `fixed` asserts remediation
+		// (orthogonal to reachability). Only the former is reconciled against Synapse's own reachability.
+		notAffected := strings.EqualFold(strings.TrimSpace(st.Status), "not_affected")
 		for _, f := range res.Findings {
 			if accepted[f.DedupKey] {
 				continue
 			}
 			a, comp, ver, ok := vulnerability.ParseDedupKey(f.DedupKey)
 			if !ok || !st.MatchesFinding(a, comp, ver) {
+				continue
+			}
+			// Reachability reconciliation (EPIC #1042, #1-bar): a not_affected must not exempt the CI gate for a
+			// finding Synapse independently PROVED reachable (a finding-level reachable verdict, e.g. a runtime
+			// or DAST hit). The finding stays actionable and the conflict is surfaced, mirroring the
+			// control-plane VEX guard. (Call-graph reachability is judgment-scoped and lives on the control
+			// plane, not in this in-scan path; the finding field is the reachability signal available here.)
+			if notAffected && f.Reachability == string(judgment.Reachable) {
+				res.SourceWarnings = append(res.SourceWarnings, fmt.Sprintf(
+					"in-repo VEX not_affected for %q was NOT applied to a Synapse-reachable finding (%s); it stays on the gate",
+					st.Vulnerability, f.DedupKey))
 				continue
 			}
 			accepted[f.DedupKey] = true

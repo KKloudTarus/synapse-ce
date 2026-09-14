@@ -389,12 +389,29 @@ func WinningReachabilityClaims(js []Judgment) map[string]ReachabilityClaim {
 }
 
 // ReachableFindingIDs is the id set of findings whose WINNING reachability claim is Reachable: Synapse
-// independently proved the vulnerable code is reached. A vendor `not_affected` (a mere assertion) must never
-// suppress such a finding, on export or on apply.
+// independently proved the vulnerable code is reached.
 func ReachableFindingIDs(winner map[string]ReachabilityClaim) map[string]bool {
 	out := map[string]bool{}
 	for id, rc := range winner {
 		if rc.Reachable == Reachable {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+// SuppressionResistantFindingIDs is the id set a vendor/human `not_affected` must never suppress: a finding
+// Synapse proved Reachable, OR one it proved ConditionallyReachable (reachable under a precondition). A
+// conditional reach is still a potentially-real vulnerability, so treating it as suppression-resistant is the
+// #1-bar-safe direction: it over-reports (export upgrades to `affected`, apply refuses the suppression)
+// rather than let an assertion hide a finding that may be exploitable. Both the VEX export and the VEX
+// apply/reapply paths reconcile against THIS set, so the two surfaces protect exactly the same findings.
+// (ConditionallyReachable is a reserved state no tier emits yet; including it here fixes the semantics ahead
+// of the first tier that does, with no behavior change until then.)
+func SuppressionResistantFindingIDs(winner map[string]ReachabilityClaim) map[string]bool {
+	out := ReachableFindingIDs(winner)
+	for id, rc := range winner {
+		if rc.Reachable == ConditionallyReachable {
 			out[id] = true
 		}
 	}
