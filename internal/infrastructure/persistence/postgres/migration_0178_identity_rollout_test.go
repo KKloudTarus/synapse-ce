@@ -282,7 +282,7 @@ func seedIdentityLegacyUser(t *testing.T, db *sql.DB, tenantID, userID, digest s
 func identityAcquire(tenantID, runID, leaseToken, leaseOwner string, now time.Time) ports.IdentityBackfillAcquireRequest {
 	return ports.IdentityBackfillAcquireRequest{
 		Run: ports.IdentityBackfillRun{
-			TenantID: tenantID, ID: shared.ID(runID), SchemaVersion: identityrollout.IdentityBackfillSchemaVersion,
+			TenantID: shared.ID(tenantID), ID: shared.ID(runID), SchemaVersion: identityrollout.IdentityBackfillSchemaVersion,
 			BatchSize: 10, SnapshotAt: now, State: ports.IdentityBackfillRunning, LeaseOwner: leaseOwner,
 			LeaseToken: shared.ID(leaseToken), LeaseExpiresAt: now.Add(time.Minute), CreatedBy: "operator-a", CreatedAt: now, UpdatedAt: now,
 		},
