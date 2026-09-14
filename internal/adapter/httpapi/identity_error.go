@@ -68,7 +68,7 @@ func identityCodeFor(err error) IdentityErrorCode {
 	}
 }
 
-func writeIdentityError(w http.ResponseWriter, ctx context.Context, code IdentityErrorCode, cause error) {
+func writeIdentityError(ctx context.Context, w http.ResponseWriter, code IdentityErrorCode, cause error) {
 	spec := identityErrorDetails(code)
 	if code == IdentityErrorAuthenticationInvalid {
 		w.Header().Set("WWW-Authenticate", "Bearer")
@@ -87,6 +87,6 @@ func writeIdentityError(w http.ResponseWriter, ctx context.Context, code Identit
 	})
 }
 
-func writeIdentityFailure(w http.ResponseWriter, ctx context.Context, err error) {
-	writeIdentityError(w, ctx, identityCodeFor(err), err)
+func writeIdentityFailure(ctx context.Context, w http.ResponseWriter, err error) {
+	writeIdentityError(ctx, w, identityCodeFor(err), err)
 }
