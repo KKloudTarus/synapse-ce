@@ -59,12 +59,10 @@ func TestMigration0178IdentityRolloutRLSAndAppendOnlyEvidence(t *testing.T) {
 	if err := repository.AppendIdentityRolloutPhaseRecord(context.Background(), record); err != nil {
 		t.Fatalf("append phase record: %v", err)
 	}
-	if _, err := db.Exec(`UPDATE identity_rollout_phase_records SET owner='rewrite' WHERE tenant_id='identity-rls' AND id='phase-1'`); err == nil {
-		t.Fatal("append-only rollout evidence unexpectedly accepted UPDATE")
-	}
-	if _, err := db.Exec(`DELETE FROM identity_rollout_phase_records WHERE tenant_id='identity-rls' AND id='phase-1'`); err == nil {
-		t.Fatal("append-only rollout evidence unexpectedly accepted DELETE")
-	}
+	withMigrationTenant(t, db, "identity-rls", func(tx *sql.Tx) {
+		requireMigrationWriteRejected(t, tx, `UPDATE identity_rollout_phase_records SET owner='rewrite' WHERE tenant_id='identity-rls' AND id='phase-1'`)
+		requireMigrationWriteRejected(t, tx, `DELETE FROM identity_rollout_phase_records WHERE tenant_id='identity-rls' AND id='phase-1'`)
+	})
 }
 
 func TestIdentityBackfillLeaseFenceAndReconciledDrift(t *testing.T) {
@@ -85,9 +83,11 @@ func TestIdentityBackfillLeaseFenceAndReconciledDrift(t *testing.T) {
 		t.Fatalf("live lease takeover err=%v, want conflict", err)
 	}
 
-	if _, err := db.Exec(`UPDATE identity_backfill_runs SET lease_expires_at=now()-interval '1 second' WHERE tenant_id='identity-fence' AND id='run-a'`); err != nil {
-		t.Fatalf("expire lease: %v", err)
-	}
+	withMigrationTenant(t, db, "identity-fence", func(tx *sql.Tx) {
+		if _, err := tx.Exec(`UPDATE identity_backfill_runs SET lease_expires_at=now()-interval '1 second' WHERE tenant_id='identity-fence' AND id='run-a'`); err != nil {
+			t.Fatalf("expire lease: %v", err)
+		}
+	})
 	secondRequest := identityAcquire("identity-fence", "ignored-new-id", "lease-b", "worker-b", now.Add(time.Second))
 	second, resumed, err := repository.AcquireIdentityBackfillRun(context.Background(), secondRequest)
 	if err != nil || !resumed || second.ID != first.ID || second.LeaseToken != "lease-b" {
@@ -109,9 +109,11 @@ func TestIdentityBackfillLeaseFenceAndReconciledDrift(t *testing.T) {
 
 	// Corrupt only the derived side after the item committed. Final reconciliation must record
 	// this separately; it must not make processed_count cease matching item outcome counts.
-	if _, err := db.Exec(`UPDATE memberships SET role='reviewer' WHERE tenant_id='identity-fence' AND id='alice'`); err != nil {
-		t.Fatalf("inject derived drift: %v", err)
-	}
+	withMigrationTenant(t, db, "identity-fence", func(tx *sql.Tx) {
+		if _, err := tx.Exec(`UPDATE memberships SET role='reviewer' WHERE tenant_id='identity-fence' AND id='alice'`); err != nil {
+			t.Fatalf("inject derived drift: %v", err)
+		}
+	})
 	reconciliation, err := repository.ReconcileIdentityBackfill(context.Background(), "identity-fence", second.SnapshotAt)
 	if err != nil || reconciliation.DriftCount != 1 {
 		t.Fatalf("reconciliation=%+v err=%v", reconciliation, err)
@@ -155,17 +157,21 @@ func TestIdentityBackfillRunnerProjectsLegacyUsersButNeverBootstrap(t *testing.T
 		{id: "bob", status: "suspended"},
 	} {
 		var personID, status string
-		if err := db.QueryRow(`SELECT person_id,status FROM memberships WHERE tenant_id='identity-clean' AND id=$1`, test.id).Scan(&personID, &status); err != nil {
-			t.Fatalf("membership %s: %v", test.id, err)
-		}
+		withMigrationTenant(t, db, "identity-clean", func(tx *sql.Tx) {
+			if err := tx.QueryRow(`SELECT person_id,status FROM memberships WHERE tenant_id='identity-clean' AND id=$1`, test.id).Scan(&personID, &status); err != nil {
+				t.Fatalf("membership %s: %v", test.id, err)
+			}
+		})
 		if personID != test.id || status != test.status {
 			t.Fatalf("membership %s person=%q status=%q", test.id, personID, status)
 		}
 	}
 	var bootstrapMemberships int
-	if err := db.QueryRow(`SELECT count(*) FROM memberships WHERE tenant_id='identity-clean' AND (id='operator' OR person_id='operator')`).Scan(&bootstrapMemberships); err != nil || bootstrapMemberships != 0 {
-		t.Fatalf("bootstrap memberships=%d err=%v", bootstrapMemberships, err)
-	}
+	withMigrationTenant(t, db, "identity-clean", func(tx *sql.Tx) {
+		if err := tx.QueryRow(`SELECT count(*) FROM memberships WHERE tenant_id='identity-clean' AND (id='operator' OR person_id='operator')`).Scan(&bootstrapMemberships); err != nil || bootstrapMemberships != 0 {
+			t.Fatalf("bootstrap memberships=%d err=%v", bootstrapMemberships, err)
+		}
+	})
 	var legacyUsers int
 	if err := db.QueryRow(`SELECT count(*) FROM users WHERE ownership_tenant_id='identity-clean'`).Scan(&legacyUsers); err != nil || legacyUsers != 3 {
 		t.Fatalf("legacy users changed count=%d err=%v", legacyUsers, err)
@@ -230,10 +236,12 @@ func TestIdentityOIDCShadowImportNeverEnablesServingAuthority(t *testing.T) {
 		t.Fatalf("backfill: %v", err)
 	}
 
-	if _, err := db.Exec(`INSERT INTO oidc_external_identities(id,tenant_id,user_id,issuer,subject,created_at,updated_at)
-		VALUES('legacy-link-a','identity-shadow','alice','https://issuer.example','subject-a',$1,$1)`, now); err != nil {
-		t.Fatalf("seed legacy OIDC link: %v", err)
-	}
+	withMigrationTenant(t, db, "identity-shadow", func(tx *sql.Tx) {
+		if _, err := tx.Exec(`INSERT INTO oidc_external_identities(id,tenant_id,user_id,issuer,subject,created_at,updated_at)
+			VALUES('legacy-link-a','identity-shadow','alice','https://issuer.example','subject-a',$1,$1)`, now); err != nil {
+			t.Fatalf("seed legacy OIDC link: %v", err)
+		}
+	})
 	result, err := repository.ImportLegacyOIDCShadow(context.Background(), ports.LegacyOIDCShadowConfig{
 		TenantID: "identity-shadow", Issuer: "https://issuer.example", ClientID: "client-a", RedirectURL: "https://synapse.example/api/auth/oidc/callback", Actor: "operator-a",
 	})
@@ -244,11 +252,13 @@ func TestIdentityOIDCShadowImportNeverEnablesServingAuthority(t *testing.T) {
 	var enabled bool
 	var active sql.NullInt64
 	var secretRef, configJSON string
-	if err := db.QueryRow(`SELECT c.enabled,c.active_revision,r.encrypted_secret_ref,r.configuration::text
-		FROM sso_connections c JOIN sso_connection_revisions r ON r.tenant_id=c.tenant_id AND r.connection_id=c.id AND r.revision=1
-		WHERE c.tenant_id='identity-shadow' AND c.id=$1`, result.ConnectionID.String()).Scan(&enabled, &active, &secretRef, &configJSON); err != nil {
-		t.Fatalf("read shadow connection: %v", err)
-	}
+	withMigrationTenant(t, db, "identity-shadow", func(tx *sql.Tx) {
+		if err := tx.QueryRow(`SELECT c.enabled,c.active_revision,r.encrypted_secret_ref,r.configuration::text
+			FROM sso_connections c JOIN sso_connection_revisions r ON r.tenant_id=c.tenant_id AND r.connection_id=c.id AND r.revision=1
+			WHERE c.tenant_id='identity-shadow' AND c.id=$1`, result.ConnectionID.String()).Scan(&enabled, &active, &secretRef, &configJSON); err != nil {
+			t.Fatalf("read shadow connection: %v", err)
+		}
+	})
 	if enabled || active.Valid {
 		t.Fatalf("shadow import enabled serving authority: enabled=%v active=%v", enabled, active)
 	}
