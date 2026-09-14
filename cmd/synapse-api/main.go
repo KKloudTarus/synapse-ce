@@ -1663,7 +1663,7 @@ func main() {
 			},
 			func(ctx context.Context, token, csrf string, unsafe bool) (httpapi.OIDCPrincipal, error) {
 				result, err := oidcService.Authenticate(ctx, token, csrf, unsafe)
-				return httpapi.OIDCPrincipal{ID: result.ID, Name: result.Name, Role: result.Role, TenantID: result.TenantID}, err
+				return httpapi.OIDCPrincipal(result), err
 			},
 			oidcService.Logout,
 		)
