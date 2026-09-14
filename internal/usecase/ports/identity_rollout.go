@@ -134,28 +134,36 @@ type IdentityShadowImporter interface {
 }
 
 type IdentityRolloutPhaseRecord struct {
-	TenantID                 shared.ID
-	ID                       shared.ID
-	Phase                    string
-	Owner                    string
-	SourceOfTruth            string
-	AllowedWriters           []string
-	SourceCount              int
-	ProjectedCount           int
-	DriftCount               int
-	CorruptCredentialCount   int
-	DuplicateCredentialCount int
-	DenialCount              int
-	ErrorCount               int
-	SessionCount             int
-	ObservationMinutes       int
-	AbortThresholdBPS        int
-	LastKnownGoodPhase       string
-	RollbackAction           string
-	MetricsRecorded          bool
-	ApprovalRecorded         bool
-	CreatedBy                string
-	CreatedAt                time.Time
+	TenantID                     shared.ID
+	ID                           shared.ID
+	Phase                        string
+	Owner                        string
+	SourceOfTruth                string
+	AllowedWriters               []string
+	SourceCount                  int
+	ProjectedCount               int
+	DriftCount                   int
+	CorruptCredentialCount       int
+	DuplicateCredentialCount     int
+	CredentialProjectionComplete bool
+	CredentialProjectedCount     int
+	IssuedCredentialCount        int
+	PlaceholderCredentialCount   int
+	AmbiguousCredentialCount     int
+	MissingCredentialCount       int
+	CredentialDriftCount         int
+	CredentialIndexDriftCount    int
+	DenialCount                  int
+	ErrorCount                   int
+	SessionCount                 int
+	ObservationMinutes           int
+	AbortThresholdBPS            int
+	LastKnownGoodPhase           string
+	RollbackAction               string
+	MetricsRecorded              bool
+	ApprovalRecorded             bool
+	CreatedBy                    string
+	CreatedAt                    time.Time
 }
 
 type IdentityRolloutLedger interface {
