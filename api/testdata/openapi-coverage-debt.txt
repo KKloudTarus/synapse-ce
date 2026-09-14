@@ -125,6 +125,7 @@ POST /api/v1/fleet/incidents/{p}/owner
 POST /api/v1/fleet/incidents/{p}/status
 POST /api/v1/fleet/inventory/cluster
 POST /api/v1/fleet/inventory/host
+POST /api/v1/fleet/inventory/runtime
 POST /api/v1/fleet/work/{p}/progress
 POST /api/v1/fleet/work/{p}/result
 POST /api/v1/fleet/work/claim

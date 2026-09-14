@@ -184,7 +184,8 @@ services:
       SYNAPSE_SCAN_CACHE_ENABLED: "true"    # content+version-addressed SBOM cache
       SYNAPSE_IMAGE_ROOTFS_ENABLED: "true"  # OS-package + installed-binary cataloging from an image rootfs
       SYNAPSE_GOMODGRAPH_ENABLED: "true"    # runs unsandboxed (warns) when the sandbox is off
-      SYNAPSE_JVM_REACHABILITY_ENABLED: "true"   # read-only bytecode parse, no sandbox needed
+      # Tier-2 parses JVM bytecode; opt in after assessing the target artifacts.
+      SYNAPSE_JVM_REACHABILITY_ENABLED: "false"
       # Maven/Gradle transitive resolvers: the API server fail-closes these without the sandbox (they run
       # untrusted build logic). They are DEFAULT-ON in the CLI (trusted-local) – use `synapse-cli scan`
       # (see header) for full JVM-from-source SCA from this image. Tool bins are baked into the image.

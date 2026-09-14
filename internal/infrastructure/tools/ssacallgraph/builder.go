@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/callgraph/cha"
+	"golang.org/x/tools/go/callgraph/vta"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
@@ -79,7 +80,20 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 
 	prog, _ := ssautil.AllPackages(pkgs, ssa.InstantiateGenerics)
 	prog.Build()
+	// CHA-seeded VTA, two rounds, then collapse synthetic nodes: the govulncheck reachability algorithm.
+	// CHA is a sound over-approximation that resolves an interface/dynamic call to EVERY type-compatible
+	// method; VTA (variable-type analysis) then propagates the concrete types that actually flow to each
+	// call site and removes the CHA edges it can PROVE impossible, and a second VTA round tightens further.
+	// VTA only removes edges it proves cannot occur, so it never drops a call that can really happen: it
+	// tightens precision RELATIVE TO the CHA-only graph without reducing soundness (better taint precision and
+	// reachability accuracy). It does not raise soundness to an absolute guarantee: the graph is still bounded
+	// by the CHA seed and the blind-construct guard. VTA is blind to the same dynamic constructs as CHA
+	// (reflection, plugins, linkname, unsafe); those are handled by the analysis-wide blind-construct guard
+	// below, not by the graph edges (EPIC #1042 #1055).
+	allFuncs := ssautil.AllFunctions(prog)
 	cg := cha.CallGraph(prog)
+	cg = vta.CallGraph(allFuncs, cg)
+	cg = vta.CallGraph(allFuncs, cg)
 	cg.DeleteSyntheticNodes() // collapse wrapper/thunk nodes so edges connect real functions
 
 	// execArgs is the catalog's single source of truth for which callee is an exec sink and which of its
@@ -96,7 +110,8 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 	adj := map[string]map[string]bool{}
 	entry := map[string]bool{}
 	positions := map[string]string{}   // first-party symbol → "relpath:line" (def-use precision for taint findings)
-	reflectiveFns := map[string]bool{} // node id → performs a reflective invocation the CHA graph cannot target
+	reflectiveFns := map[string]bool{} // node id → performs a reflective invocation the graph cannot target
+	pluginFns := map[string]bool{}     // node id → loads a Go plugin (plugin.Open / Lookup): arbitrary code
 	routeBlind := false                // a route registration passed a handler value that could not be resolved
 	for fn, node := range cg.Nodes {
 		caller := nodeID(fn)
@@ -111,6 +126,13 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 		// EPIC #1042 #1065), not only first-party code.
 		if fnReflectivelyInvokes(fn) {
 			reflectiveFns[caller] = true
+		}
+		// A plugin load (plugin.Open / Plugin.Lookup) brings in code that exists in no analyzed package, so
+		// the call graph is fully blind to what it can invoke: a symbol reached only through a loaded plugin
+		// would be misreported not_reachable (EPIC #1042 #1055). Flagged like reflection, and scoped to the
+		// reachable surface below.
+		if fnLoadsPlugin(fn) {
+			pluginFns[caller] = true
 		}
 		if isFirstPartyFunc(fn, firstParty) {
 			handlers, blind := routeHandlers(fn, firstParty)
@@ -179,6 +201,12 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 	for id := range reflectiveFns {
 		if reachable[id] {
 			blind = append(blind, "reflection")
+			break
+		}
+	}
+	for id := range pluginFns {
+		if reachable[id] {
+			blind = append(blind, "plugin")
 			break
 		}
 	}
@@ -348,6 +376,36 @@ func fnReflectivelyInvokes(fn *ssa.Function) bool {
 			}
 			switch callee.Name() {
 			case "Call", "CallSlice", "Method", "MethodByName":
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// fnLoadsPlugin reports whether fn contains a static call to plugin.Open or (*plugin.Plugin).Lookup. A Go
+// plugin is compiled code that exists in no analyzed package, so neither CHA nor VTA can know what a loaded
+// plugin invokes: a vulnerable symbol reached only through a plugin would be misreported not_reachable.
+// Detecting the load site (not merely importing "plugin") keeps the blind signal targeted.
+func fnLoadsPlugin(fn *ssa.Function) bool {
+	if fn == nil {
+		return false
+	}
+	for _, b := range fn.Blocks {
+		for _, instr := range b.Instrs {
+			cc, ok := instr.(ssa.CallInstruction)
+			if !ok {
+				continue
+			}
+			callee := cc.Common().StaticCallee()
+			if callee == nil || callee.Pkg == nil || callee.Pkg.Pkg == nil {
+				continue
+			}
+			if callee.Pkg.Pkg.Path() != "plugin" {
+				continue
+			}
+			switch callee.Name() {
+			case "Open", "Lookup":
 				return true
 			}
 		}
@@ -605,6 +663,14 @@ func isEntrypoint(fn *ssa.Function, firstParty map[string]bool) bool {
 		return false
 	}
 	if fn.Name() == "main" && fn.Pkg.Pkg.Name() == "main" {
+		return true
+	}
+	// A first-party package initializer is a reachability root: the runtime runs it at program start, so a
+	// vulnerable symbol reached only from a `func init()` (or the synthesized package `init`) is genuinely
+	// reachable. go/ssa names the synthesized initializer "init" and each source `func init()` "init#1",
+	// "init#2", ... Missing these under-approximated reachability (EPIC #1042 #1055, the noted init gap);
+	// adding them is sound in the raise direction, since an extra root can only make more symbols reachable.
+	if fn.Name() == "init" || strings.HasPrefix(fn.Name(), "init#") {
 		return true
 	}
 	return token.IsExported(fn.Name())

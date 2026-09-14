@@ -155,6 +155,7 @@ func BuildJavaValueGraph(document javaprogram.Document, catalog JavaCatalog) (Ja
 		parents: map[string]string{}, definitions: map[string]map[string][]javaprogram.Value{},
 		returns: map[string][]string{}, imports: map[string]map[string]javaImportBinding{},
 		methodsByName: map[string][]string{}, declaredCallables: map[string]map[string]bool{},
+		classByFQN: map[string][]string{}, methodsByParent: map[string][]string{},
 		flows: map[string]bool{}, sources: map[string]JavaTypedValueSource{}, sinks: map[string]JavaTypedValueSink{},
 		sanitizers: map[string]JavaTypedSanitizer{}, positions: map[string]javaprogram.Position{},
 	}
@@ -177,6 +178,13 @@ type javaValueBuilder struct {
 	imports           map[string]map[string]javaImportBinding // scopeID -> localName -> binding
 	methodsByName     map[string][]string                     // "module\x00name" -> symbol IDs
 	declaredCallables map[string]map[string]bool              // scopeID -> declared method/type name -> present
+	// classByFQN maps a fully-qualified type name (package + "." + dotted qualified name) to the symbol ids
+	// declaring it, and methodsByParent maps "classID\x00methodName" to the method symbol ids under it.
+	// Together they resolve a static import (`import static com.example.Helper.sanitize`) to the in-document
+	// method, so a cross-file source->sink flow through a first-party static-imported helper connects (#1054).
+	// classByFQN keeps ALL declarers so a duplicate FQN resolves to nothing (ambiguous), never a guess.
+	classByFQN      map[string][]string
+	methodsByParent map[string][]string
 	flows             map[string]bool
 	sources           map[string]JavaTypedValueSource
 	sinks             map[string]JavaTypedValueSink
@@ -186,12 +194,28 @@ type javaValueBuilder struct {
 }
 
 func (b *javaValueBuilder) index() {
+	packageByModule := make(map[string]string, len(b.document.Modules))
+	for _, m := range b.document.Modules {
+		packageByModule[m.Name] = m.Package
+	}
 	for _, symbol := range b.document.Symbols {
 		b.symbols[symbol.ID] = symbol
 		b.parents[symbol.ID] = symbol.ParentID
 		if symbol.Kind == javaprogram.SymbolMethod || symbol.Kind == javaprogram.SymbolConstructor || symbol.Kind == javaprogram.SymbolLambda {
 			key := symbol.Module + "\x00" + symbol.Name
 			b.methodsByName[key] = append(b.methodsByName[key], symbol.ID)
+		}
+		if symbol.Kind == javaprogram.SymbolMethod {
+			b.methodsByParent[symbol.ParentID+"\x00"+symbol.Name] = append(b.methodsByParent[symbol.ParentID+"\x00"+symbol.Name], symbol.ID)
+		}
+		if symbol.Kind == javaprogram.SymbolClass || symbol.Kind == javaprogram.SymbolInterface {
+			// Only a class in a NAMED package can be the target of a static import (an unnamed-package type
+			// cannot be imported in Java), so a default-package class is never indexed. All declarers of an FQN
+			// are recorded so a duplicate FQN resolves to nothing (ambiguous), never a first-wins guess.
+			if pkg := packageByModule[symbol.Module]; pkg != "" {
+				fqn := pkg + "." + symbol.QualifiedName
+				b.classByFQN[fqn] = append(b.classByFQN[fqn], symbol.ID)
+			}
 		}
 		if (symbol.Kind == javaprogram.SymbolMethod || symbol.Kind == javaprogram.SymbolClass || symbol.Kind == javaprogram.SymbolInterface) && symbol.Name != "" {
 			if b.declaredCallables[symbol.ParentID] == nil {
@@ -285,6 +309,14 @@ func (b *javaValueBuilder) modelCalls() {
 			local = true
 			b.bindCall(call, b.symbols[symbolID])
 		}
+		// Cross-file binding through a first-party STATIC import is ADDITIVE, not a replacement: it binds
+		// arg->param / return->result so a sink inside a static-imported helper is reached, but it does NOT set
+		// local, so the widen fallback below still runs. Resolving an FQN to a same-named method is a heuristic
+		// (unique-method-guarded), not a proof, so keeping widen means a possibly-wrong bind can only ADD
+		// reachability, never suppress a downstream-result flow (the #1 raise-only invariant). See #1054.
+		for _, symbolID := range b.crossFileCallees(call) {
+			b.bindCall(call, b.symbols[symbolID])
+		}
 		module, member, resolved := b.resolveCatalogCallee(call)
 		raw := strings.Join(call.Callee.Segments, ".")
 		matchedRole := false
@@ -366,6 +398,50 @@ func (b *javaValueBuilder) localCallees(call javaprogram.Call) []string {
 	candidates := b.methodsByName[symbol.Module+"\x00"+name]
 	if len(candidates) != 1 {
 		return nil // absent or ambiguous (overloads): skip rather than bind the wrong method
+	}
+	callee := b.symbols[candidates[0]]
+	if callee.Kind != javaprogram.SymbolMethod {
+		return nil
+	}
+	return []string{callee.ID}
+}
+
+// crossFileCallees returns the in-document method a bare call resolves to THROUGH a first-party STATIC import
+// (`import static com.example.Helper.sanitize; ... sanitize(x)`), so a cross-file source->sink flow connects
+// (#1054). The caller binds it ADDITIVELY (keeps widening), so a heuristic match can never suppress. A local
+// binding, a local method/type declaration of the same name, a non-static import, an FQN not resolvable to an
+// in-document class, or an ambiguous method (overloads) all bind nothing, the safe direction against a wrong
+// edge. Java resolves a static-imported name only via the import (never through the receiver of a member
+// call), so this deliberately handles only the bare single-name form.
+func (b *javaValueBuilder) crossFileCallees(call javaprogram.Call) []string {
+	if call.New || call.Callee.Kind != javaprogram.ReferenceName || len(call.Callee.Segments) != 1 {
+		return nil
+	}
+	name := call.Callee.Segments[0]
+	var binding javaImportBinding
+	found := false
+	for _, scope := range b.scopeChain(call.CallerID) {
+		if len(b.definitions[scope][name]) > 0 {
+			return nil // shadowed by a local variable/parameter
+		}
+		if b.declaredCallables[scope][name] {
+			return nil // shadowed by a local method/type declaration of the same name
+		}
+		if bnd, ok := b.imports[scope][name]; ok {
+			binding, found = bnd, true
+			break
+		}
+	}
+	if !found || binding.kind != javaprogram.ImportStatic || binding.name != name {
+		return nil // only a static import of THIS method name resolves cross-file here
+	}
+	classIDs := b.classByFQN[binding.module] // binding.module is the class FQN for a static import
+	if len(classIDs) != 1 {
+		return nil // not first-party (absent), or an ambiguous duplicate FQN: never guess
+	}
+	candidates := b.methodsByParent[classIDs[0]+"\x00"+binding.name]
+	if len(candidates) != 1 {
+		return nil // absent, or ambiguous overloads: never bind a wrong overload
 	}
 	callee := b.symbols[candidates[0]]
 	if callee.Kind != javaprogram.SymbolMethod {

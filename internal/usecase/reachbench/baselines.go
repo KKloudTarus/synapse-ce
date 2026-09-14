@@ -109,6 +109,15 @@ func OSVObservations(c Corpus, r io.Reader) ([]Observation, error) {
 
 func outputPath(path string) string { return strings.ReplaceAll(path, `\`, "/") }
 
+// semgrepRuleMatches reports whether a Semgrep result's check_id corresponds to the corpus selector's rule
+// id. Semgrep run with `--config <file>` prefixes the rule id with the config file's dotted path (a rule
+// `reachbench.py.os-system-call` is emitted as `internal.usecase.reachbench.corpus.reachbench.py.os-system-call`),
+// while native JSON from an inline rule emits the bare id and SARIF emits the bare id too. Accept the exact
+// id or the config-prefixed form (matched at a dot boundary so a partial-segment suffix cannot alias).
+func semgrepRuleMatches(checkID, ruleID string) bool {
+	return checkID == ruleID || strings.HasSuffix(checkID, "."+ruleID)
+}
+
 // SemgrepCEObservations converts Semgrep CE's native JSON or SARIF result shape. Semgrep CE's baseline is
 // an explicit, checked-in rule per corpus case; a matching rule result is reachable and a clean result for
 // that exact rule/path pair is present_unreached. Cases without a Semgrep selector remain no_analysis.
@@ -178,7 +187,7 @@ func SemgrepCEObservations(c Corpus, r io.Reader) ([]Observation, error) {
 		if selector := item.Baseline.SemgrepCE; selector != nil {
 			label = PresentUnreached
 			for _, result := range results {
-				if result.RuleID == selector.RuleID && strings.HasSuffix(strings.TrimPrefix(result.Path, "./"), selector.PathSuffix) {
+				if semgrepRuleMatches(result.RuleID, selector.RuleID) && strings.HasSuffix(strings.TrimPrefix(result.Path, "./"), selector.PathSuffix) {
 					label = Reachable
 					break
 				}

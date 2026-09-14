@@ -79,6 +79,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gobinreach"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/govulncheck"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsimports"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsresolve"
@@ -161,6 +162,7 @@ import (
 	retrohunt "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/retrohunt"
 	riskscorebridge "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscorebridge"
 	riskscoreuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscoreuc"
+	runtimeevidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/runtimeevidence"
 	telemetryingest "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/telemetryingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
@@ -191,6 +193,7 @@ import (
 	responseuc "github.com/KKloudTarus/synapse-ce/internal/usecase/response"
 	riskstoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/riskstoryuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
+	runtimereachuc "github.com/KKloudTarus/synapse-ce/internal/usecase/runtimereach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rustsymreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
@@ -239,6 +242,18 @@ func explicitTaintEnvKey() string {
 		return "SYNAPSE_JAVATAINT_ENABLED"
 	}
 	return "SYNAPSE_PYTAINT_ENABLED"
+}
+
+// explicitJudgmentScannerEnvKey extends the legacy semantic-taint gate with JVM Tier-2.
+// Only an explicitly ENABLED JVM flag wins; an explicit false value must not turn another
+// default-on scanner into a startup contradiction when judgments are disabled.
+func explicitJudgmentScannerEnvKey(cfg config.Config) string {
+	if cfg.JVMReachabilityEnabled {
+		if _, ok := os.LookupEnv("SYNAPSE_JVM_REACHABILITY_ENABLED"); ok {
+			return "SYNAPSE_JVM_REACHABILITY_ENABLED"
+		}
+	}
+	return explicitTaintEnvKey()
 }
 
 func requireJudgmentsOrSkip(log *slog.Logger, hasJudgment bool, envKey, name string) bool {
@@ -436,6 +451,7 @@ func main() {
 	var aiTriageReviewStore ports.AITriageReviewStore
 	var importedSBOMStore ports.ImportedSBOMStore
 	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
+	var vexStatementStore ports.VEXStatementRepository  // persisted imported VEX statements, re-applied after a rescan (#1064)
 	var detectionRecordStore interface {
 		ports.DetectionRecordStore
 		ports.CorrelationDetectionSource
@@ -615,6 +631,7 @@ func main() {
 		aiTriageReviewStore = postgres.NewAITriageReviewRepository(pool)
 		importedSBOMStore = postgres.NewImportedSBOMStore(pool)
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
+		vexStatementStore = postgres.NewVEXStatementRepository(pool)
 		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
 		purpleCoverageStore = postgres.NewPurpleRepository(pool)
 		accuracyRunStore = postgres.NewAccuracyRunRepository(pool)
@@ -792,6 +809,7 @@ func main() {
 		aiTriageReviewStore = memory.NewAITriageReviewStore()
 		importedSBOMStore = memory.NewImportedSBOMStore()
 		importedFindingStore = memory.NewImportedFindingStore()
+		vexStatementStore = memory.NewVEXStatementStore()
 		memoryDetectionRecords := memory.NewDetectionRecordStore()
 		detectionRecordStore = memoryDetectionRecords
 		purpleCoverageStore = memory.NewPurpleStore()
@@ -1166,6 +1184,11 @@ func main() {
 		// One VEX document retires many findings. Without a transaction each retirement commits
 		// on its own, so a failure part way through leaves some findings retired and the rest not.
 		vexService.SetTransactionRunner(vulnerabilityTransactions)
+	}
+	// Persist imported VEX statements and re-apply them after a rescan resets findings to open (#1064).
+	if vexStatementStore != nil {
+		vexService.SetStatementStore(vexStatementStore)
+		scaService.SetVEXReapplier(vexService)
 	}
 
 	// Recon orchestration: one shared execution guard, an argv-only
@@ -2754,6 +2777,31 @@ func main() {
 			router.SetHostVulnerabilities(hvSvc)
 			router.SetFleetHostInventory(hiSvc)
 			log.Info("fleet host inventory ingest ENABLED (VM agents persist host inventories into the asset model; packages are correlated with advisories per host)")
+
+			// #1060/#1061: runtime-reachability evidence. A host agent reports the shared libraries it
+			// observed loaded plus the OS packages that own them; the server joins them to the host's SCA
+			// findings by PACKAGE OWNERSHIP and raises (never suppresses) the finding for a vulnerable library
+			// that actually loaded. Judgment-gated like every reachability coordinator, and idempotent, so a
+			// re-report re-attributes against the now-populated findings without churn.
+			if requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_FLEET_HOST_INGEST_ENABLED", "runtime reachability") {
+				rrCoord, rrErr := runtimereachuc.NewCoordinator(judgmentSvc, auditLog, clock)
+				if rrErr != nil {
+					log.Error("runtime reachability coordinator init failed", "err", rrErr)
+					os.Exit(1)
+				}
+				rrSvc, rrErr := runtimereachuc.NewService(findingRepo, rrCoord)
+				if rrErr != nil {
+					log.Error("runtime reachability join service init failed", "err", rrErr)
+					os.Exit(1)
+				}
+				reSvc, reErr := runtimeevidenceuc.NewService(telemetryTransportStore, repo, rrSvc)
+				if reErr != nil {
+					log.Error("runtime evidence ingest init failed", "err", reErr)
+					os.Exit(1)
+				}
+				router.SetFleetRuntimeEvidence(reSvc)
+				log.Info("fleet runtime-reachability evidence ingest ENABLED (agents report observed shared-library loads; a loaded vulnerable library raises its finding, raise-only)")
+			}
 		}
 
 		// Agent→control-plane telemetry batch ingest (A3, #624): an enrolled agent ships a signed
@@ -3014,6 +3062,27 @@ func main() {
 			scaService.SetJSSymbolReachability(jsSymbolRecorder.WithRaiseOnly())
 			log.Info("javascript TIER-2 affected-export reachability ENABLED (raise-only: prioritises a reached export, never suppresses; set SYNAPSE_JSREACH_TIER2_ENABLED for not-reachable proofs)")
 		}
+
+		// Interprocedural Tier-2 (#1058): the jsprogram call graph proves an affected npm export REACHED
+		// through first-party CALL chains (a call-path proof), recovering a reachable verdict the lexical
+		// Tier-2 leaves opaque (a whole-module binding that escapes into a reached function). It is RAISE-ONLY
+		// (JS default per #1058): it only ADDS a reached-export judgment and never a not-reachable one, so a
+		// proven call path is sound without the resolver's Complete flag, and it can never suppress a finding.
+		// It reads the same synapse-ast facts the JS taint engine uses (sandboxed when configured) and
+		// composes alongside the lexical recorders through the multi-recorder pass.
+		jsFactsProvider := asttool.New(cfg.ASTBin)
+		if scaSandbox != nil {
+			jsFactsProvider = jsFactsProvider.WithRunner(scaSandbox)
+		} else {
+			log.Warn("javascript interprocedural tier-2: synapse-ast runs unsandboxed (dev only); target code is parsed but never executed")
+		}
+		jsInterproc, ierr := jsreach.NewInterprocRecorder(jsFactsProvider, judgmentSvc, auditLog, clock)
+		if ierr != nil {
+			log.Error("javascript interprocedural reachability init failed", "err", ierr)
+			os.Exit(1)
+		}
+		scaService.AddReachabilityRecorder(jsInterproc)
+		log.Info("javascript INTERPROCEDURAL tier-2 reachability ENABLED (call-graph proof of a reached affected export via first-party wrappers; raise-only, complements the lexical tier-2)")
 	} else if cfg.JSSymbolReachabilityEnabled {
 		log.Warn("SYNAPSE_JSREACH_TIER2_ENABLED is set but tier-1 javascript reachability is off - tier-2 is SKIPPED, because a tier-2 refusal is only safe when a tier-1 judgment can stand in its place")
 	}
@@ -3113,6 +3182,26 @@ func main() {
 		log.Info("Tier-2 affected-symbol reachability ENABLED (raise-only)", "ecosystem", lang.purlType)
 	}
 
+	// Raise-only Go-binary reachability (#1038): a compiled Go binary in the workspace whose .gopclntab
+	// contains a matched vulnerable function raises the finding. It never mints not_reachable (absence is no
+	// coverage: stripped-of-pclntab, inlined, or non-Go binaries hide symbols), so its proof actors stay out
+	// of the deterministic set and it can only raise, never suppress. Reuses the parameterized symreach
+	// analyzer over the Go canonicalizer and the pclntab scanner.
+	if cfg.GoBinaryReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACH_GOBIN", "go-binary reachability") {
+		goBinAnalyzer, aerr := symreach.New("golang", symbolcanon.Go, gobinreach.New())
+		if aerr != nil {
+			log.Error("go-binary reachability analyzer init failed", "err", aerr)
+			os.Exit(1)
+		}
+		coord, cerr := reachproof.NewCoordinatorForLanguage(goBinAnalyzer, judgmentSvc, auditLog, clock, judgment.Tier2, reachproof.LanguageGoBinary)
+		if cerr != nil {
+			log.Error("go-binary reachability coordinator init failed", "err", cerr)
+			os.Exit(1)
+		}
+		scaService.SetGoBinaryReachability(coord.WithRaiseOnly())
+		log.Info("Go-binary affected-symbol reachability ENABLED (raise-only, .gopclntab)")
+	}
+
 	// Build-aware .NET (NuGet) reachability. Unlike the source-only import scanners above, it does NOT guess
 	// a package's namespace from its id (AWSSDK.S3 ships the Amazon.S3 namespace): it reads each subject
 	// package's REAL exported namespaces from its restored assemblies (project.assets.json + the on-disk
@@ -3168,7 +3257,7 @@ func main() {
 	// scacompose.ConfigureJudgmentScanners, which attaches each language only when its own flag is set);
 	// requireJudgmentsOrSkip preserves the loud error when either flag is set explicitly without the judgment
 	// lifecycle. Python taint is on by default, so a JS-only deployment still reaches this path.
-	if (cfg.PythonTaintEnabled || cfg.JsTaintEnabled || cfg.JavaTaintEnabled) && requireJudgmentsOrSkip(log, judgmentSvc != nil, explicitTaintEnvKey(), "semantic taint") {
+	if (cfg.PythonTaintEnabled || cfg.JsTaintEnabled || cfg.JavaTaintEnabled || cfg.JVMReachabilityEnabled) && requireJudgmentsOrSkip(log, judgmentSvc != nil, explicitJudgmentScannerEnvKey(cfg), "judgment scanner") {
 		if err := scacompose.ConfigureJudgmentScanners(scaService, cfg, scaSandbox, judgmentSvc, auditLog, clock, log); err != nil {
 			log.Error("semantic taint coordinator init failed", "err", err)
 			os.Exit(1)

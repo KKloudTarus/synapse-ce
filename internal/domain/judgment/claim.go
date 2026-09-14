@@ -44,13 +44,20 @@ const (
 	// ABSENCE of a taint path never reverses it or de-escalates (a dataflow proof is sufficient, never
 	// necessary). It never enters IsDeterministicReachabilityProof and never drives a not_affected.
 	RuleTaintExploitPath = "promotion.escalate.taint_exploit_path"
+	// RuleRuntimeLibraryLoaded escalates a finding when a monitored host is OBSERVED loading the shared
+	// library the finding's OS package owns (EPIC #1042 #1061), matched by package ownership (dpkg/rpm/apk
+	// file database), not a bare path string. Like RuleTaintExploitPath it is RAISE-ONLY and sticky: it only
+	// ever escalates, is applied at most once, and the ABSENCE of a runtime load never reverses or
+	// de-escalates it (observed execution is sufficient evidence, never necessary). Its runtime proof actors
+	// never enter IsDeterministicReachabilityProof, so a runtime signal can never drive a not_affected.
+	RuleRuntimeLibraryLoaded = "promotion.escalate.runtime_library_loaded"
 )
 
 // ExpectedEffect returns the PromotionChange that the given rule is allowed to produce.
 // Unknown rules are rejected so claims cannot introduce new promotion behavior.
 func ExpectedEffect(rule string) (PromotionChange, bool) {
 	switch rule {
-	case RuleRuntimeReachableExposed, RuleTaintExploitPath:
+	case RuleRuntimeReachableExposed, RuleTaintExploitPath, RuleRuntimeLibraryLoaded:
 		return PromotionEscalate, true
 	case RuleDeterministicUnreachable, RuleCorroboratingSignalLoss:
 		return PromotionDeescalate, true
@@ -104,6 +111,24 @@ const (
 	// verdict can never become a VEX not_affected.
 	ProofActorCppSymbolScan   = "system:cppsymbol-scan"
 	ProofActorCppSymbolEngine = "system:cppsymbol-engine"
+	// Go-binary affected-symbol reachability is a Tier-2 RAISE-ONLY signal (EPIC #1034 D4.8): the PRESENCE of
+	// a matched vulnerable function in a compiled Go binary's .gopclntab raises urgency, but ABSENCE is no
+	// coverage (a stripped-of-pclntab, inlined, dead-code-eliminated, or non-Go binary hides symbols), never
+	// not_reachable. These actors are deliberately absent from IsDeterministicReachabilityProof, so a Go-binary
+	// symbol verdict can never become a VEX not_affected.
+	ProofActorGoBinarySymbolScan   = "system:gobinsymbol-scan"
+	ProofActorGoBinarySymbolEngine = "system:gobinsymbol-engine"
+	// Runtime reachability is OBSERVED execution on a monitored host (EPIC #1042 #1060/#1061): a process ran
+	// (exec), loaded a shared library (lib-loaded), or hit a symbol (symbol-hit). It is RAISE-ONLY: presence
+	// raises urgency, absence is never proof of unreachability (a host may not have exercised the path yet).
+	// These actors are deliberately absent from IsDeterministicReachabilityProof, so a runtime verdict can
+	// never become a VEX not_affected.
+	ProofActorRuntimeExecScan        = "system:runtime-exec-scan"
+	ProofActorRuntimeExecEngine      = "system:runtime-exec-engine"
+	ProofActorRuntimeLibLoadedScan   = "system:runtime-libloaded-scan"
+	ProofActorRuntimeLibLoadedEngine = "system:runtime-libloaded-engine"
+	ProofActorRuntimeSymbolHitScan   = "system:runtime-symbolhit-scan"
+	ProofActorRuntimeSymbolHitEngine = "system:runtime-symbolhit-engine"
 	// .NET build-aware reachability is a Tier-1 proof, but unlike the source-only import scanners it does
 	// not guess a package's namespace from its id (AWSSDK.S3 ships the Amazon.S3 namespace): it reads the
 	// package's REAL exported namespaces from its restored assemblies, so a not-reachable conclusion is a
@@ -194,7 +219,8 @@ func (s ReachabilityState) Valid() bool {
 
 // ReachabilityTier is the analysis tier that produced a verdict, ordered by strength of proof
 // tier-0 = dependency-graph presence · tier-1 = direct import · tier-1.5 = bounded
-// source call-path · tier-2 = call-graph proof. A higher-ranked tier OVERRIDES a lower one.
+// source call-path · tier-2 = call-graph proof · tier-runtime = OBSERVED execution on a
+// monitored host. A higher-ranked tier OVERRIDES a lower one.
 type ReachabilityTier string
 
 const (
@@ -202,6 +228,12 @@ const (
 	Tier1   ReachabilityTier = "tier-1"
 	Tier1_5 ReachabilityTier = "tier-1.5"
 	Tier2   ReachabilityTier = "tier-2"
+	// TierRuntime is a live host OBSERVATION (EPIC #1042 #1060/#1061): a process ran, loaded a shared
+	// library, or hit a symbol. It is the strongest evidence that a path is reachable (it actually
+	// executed), so it outranks every static tier. It is RAISE-ONLY: it only ever mints reachable, and its
+	// actors are absent from IsDeterministicReachabilityProof, so SuppressesFinding falls through to false
+	// for it. Absence of an observation is never proof of unreachability, so it never mints not_reachable.
+	TierRuntime ReachabilityTier = "tier-runtime"
 )
 
 // Rank orders tiers by strength of proof (higher = stronger); 0 ⇒ unknown/invalid. Compare ranks to
@@ -216,6 +248,8 @@ func (t ReachabilityTier) Rank() int {
 		return 3
 	case Tier2:
 		return 4
+	case TierRuntime:
+		return 5
 	}
 	return 0
 }
@@ -794,14 +828,15 @@ func (c PromotionChange) Valid() bool {
 type PromotionInputKind string
 
 const (
-	PromotionInputReachability PromotionInputKind = "reachability_judgment"
-	PromotionInputAttackPath   PromotionInputKind = "attack_path"
-	PromotionInputDetection    PromotionInputKind = "detection"
-	PromotionInputPrior        PromotionInputKind = "prior_promotion"
+	PromotionInputReachability   PromotionInputKind = "reachability_judgment"
+	PromotionInputAttackPath     PromotionInputKind = "attack_path"
+	PromotionInputDetection      PromotionInputKind = "detection"
+	PromotionInputPrior          PromotionInputKind = "prior_promotion"
+	PromotionInputRuntimeLibrary PromotionInputKind = "runtime_library_load"
 )
 
 func (k PromotionInputKind) Valid() bool {
-	return k == PromotionInputReachability || k == PromotionInputAttackPath || k == PromotionInputDetection || k == PromotionInputPrior
+	return k == PromotionInputReachability || k == PromotionInputAttackPath || k == PromotionInputDetection || k == PromotionInputPrior || k == PromotionInputRuntimeLibrary
 }
 
 // PromotionInput links a promotion to the exact record and, where available, its sealed evidence.

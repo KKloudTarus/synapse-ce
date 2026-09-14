@@ -7,3 +7,12 @@ rules:
     severity: INFO
     message: direct call to the GO-2026-4514 affected API
     pattern: jsonparser.Delete(...)
+  # Python baseline. CE proves the dangerous-sink call site exists but cannot prove it is reachable from an
+  # entrypoint, so it labels every fixture that contains an os.system call as reachable, including the ones
+  # where that call lives in a function no entrypoint reaches. The report records that exact
+  # over-approximation, which is the owned engine's precision advantage on the Python corpus.
+  - id: reachbench.py.os-system-call
+    languages: [python]
+    severity: INFO
+    message: direct call to the os.system affected sink
+    pattern: os.system(...)

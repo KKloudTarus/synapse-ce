@@ -26,6 +26,36 @@ type Control struct {
 	Title     string
 }
 
+// supportedFrameworks is the CLOSED set of compliance frameworks Synapse maps: five frameworks that publish a
+// direct, per-CWE or per-control condition Synapse detection matches exactly. Interpretive frameworks
+// (NIST 800-53, HIPAA, full PCI DSS, SOC 2) are DEFERRED and deliberately absent: mapping a bespoke rule to a
+// prose control needs qualified human semantic review + an authoritative versioned catalog + per-entry
+// provenance that does not exist yet, and a wrong control id is false compliance assurance. See
+// docs/adr/0009-interpretive-compliance-mappings.md (issue #1041). This set is enforced by
+// TestInterpretiveFrameworksExcluded, so an interpretive framework cannot be added without meeting that bar.
+var supportedFrameworks = map[string]bool{
+	"OWASP-2021":          true,
+	"PCI-DSS-4.0":         true,
+	"ISO-27001-2022":      true,
+	"CIS-AWS-3.0":         true,
+	"CIS-Kubernetes-1.10": true,
+}
+
+// SupportedFrameworks returns the sorted, closed set of compliance frameworks Synapse maps. It is what the
+// API/UI/report should enumerate as assessed frameworks, so a partial per-control mapping is never presented
+// as certification or full-framework coverage of an unlisted (e.g. NIST/HIPAA/SOC 2) framework.
+func SupportedFrameworks() []string {
+	out := make([]string, 0, len(supportedFrameworks))
+	for f := range supportedFrameworks {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// FrameworkSupported reports whether a framework is in the curated, mapped set.
+func FrameworkSupported(framework string) bool { return supportedFrameworks[framework] }
+
 // OWASP Top 10 2021 categories (each CWE below is listed under exactly one, per the OWASP 2021 CWE lists).
 var (
 	owaspA01 = Control{"OWASP-2021", "A01:2021", "Broken Access Control"}

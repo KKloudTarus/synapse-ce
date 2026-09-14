@@ -208,6 +208,68 @@ public class PathController {
 	}
 }
 
+// TestJavaTaintCrossFileStaticImport proves taint crosses a FILE boundary through a first-party STATIC import
+// (#1054): a request value passed into a helper imported by `import static <fqn>.run` reaches a command-exec
+// sink inside that helper's own file. The router file holds the source and the call; the helper file (a
+// different package) holds the sink, resolved by matching the import FQN to the in-document class + method.
+func TestJavaTaintCrossFileStaticImport(t *testing.T) {
+	files := map[string]string{
+		"Router.java": `package com.example.web;
+
+import javax.servlet.http.HttpServletRequest;
+import static com.example.cmd.Helper.run;
+
+public class Router {
+  public void handle(HttpServletRequest request) throws Exception {
+    run(request.getParameter("cmd"));
+  }
+}
+`,
+		"Helper.java": `package com.example.cmd;
+
+public class Helper {
+  public static void run(String cmd) throws Exception {
+    Runtime.getRuntime().exec(cmd);
+  }
+}
+`,
+	}
+	if rules := javaTaintRules(t, files); !rules["java-taint-command-exec"] {
+		t.Fatalf("cross-file static-import command injection missed: %v", javaRuleList(rules))
+	}
+}
+
+// TestJavaTaintCrossFileNonFirstPartyStaticImportNotBound is the soundness guard for the cross-file resolver:
+// a static import of a type NOT in the scanned document (a third-party library) must not be bound to some
+// same-named in-tree method. Here the only `run` in the document is the safe local one; the third-party
+// import must not fabricate a command finding from the wrong method.
+func TestJavaTaintCrossFileNonFirstPartyStaticImportNotBound(t *testing.T) {
+	files := map[string]string{
+		"Router.java": `package com.example.web;
+
+import javax.servlet.http.HttpServletRequest;
+import static com.thirdparty.Vendor.run;
+
+public class Router {
+  public void handle(HttpServletRequest request) throws Exception {
+    run(request.getParameter("cmd"));
+  }
+}
+`,
+		"Local.java": `package com.example.local;
+
+public class Local {
+  public static void run(String cmd) throws Exception {
+    Runtime.getRuntime().exec(cmd);
+  }
+}
+`,
+	}
+	if rules := javaTaintRules(t, files); rules["java-taint-command-exec"] {
+		t.Fatalf("a third-party static import must not bind to a same-named in-tree method: %v", javaRuleList(rules))
+	}
+}
+
 // TestJavaTaintNoFalsePositive is the soundness guard: a constant query and a benign program must find
 // nothing. A regression that widens a sink into a false positive fails here.
 func TestJavaTaintNoFalsePositive(t *testing.T) {

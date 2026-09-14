@@ -126,8 +126,8 @@ func TestJsTaintSanitizedTwin(t *testing.T) {
 			clean: "js-taint-xss",
 		},
 		{
-			name: "xss_encodeuricomponent_global",
-			body: "app.get('/x', (req, res) => { res.send(encodeURIComponent(req.query.m)); });\n",
+			name:  "xss_encodeuricomponent_global",
+			body:  "app.get('/x', (req, res) => { res.send(encodeURIComponent(req.query.m)); });\n",
 			clean: "js-taint-xss",
 		},
 		{
@@ -159,6 +159,26 @@ func TestJsTaintSanitizedTwin(t *testing.T) {
 	}
 }
 
+// TestJsTaintConfigurableSanitizersNotWalled pins the #1039 reviewed decision: a CONFIGURABLE HTML sanitizer
+// (DOMPurify.sanitize, sanitize-html, js-xss) is NOT modeled as an unconditional XSS wall, because its safety
+// depends on version/config (bypass history, permissive allow-lists, non-HTML output contexts). Walling it
+// would risk a false negative, so the flow through it must STILL report XSS.
+func TestJsTaintConfigurableSanitizersNotWalled(t *testing.T) {
+	cases := map[string]string{
+		"dompurify":     "const DOMPurify = require('dompurify');\napp.get('/x', (req, res) => { res.send(DOMPurify.sanitize(req.query.m)); });\n",
+		"sanitize_html": "const sanitizeHtml = require('sanitize-html');\napp.get('/x', (req, res) => { res.send(sanitizeHtml(req.query.m)); });\n",
+		"js_xss":        "const xss = require('xss');\napp.get('/x', (req, res) => { res.send(xss.filterXSS(req.query.m)); });\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			rules := jsTaintRules(t, map[string]string{"app.js": body})
+			if !rules["js-taint-xss"] {
+				t.Fatalf("a configurable HTML sanitizer must NOT be walled (would risk a false negative): %v", jsRuleList(rules))
+			}
+		})
+	}
+}
+
 // TestJsTaintCrossClassSanitizerDoesNotClean proves a class-specific sanitizer does not neutralize a
 // different class: an HTML escaper on a command argument must leave the command-injection finding standing.
 func TestJsTaintCrossClassSanitizerDoesNotClean(t *testing.T) {
@@ -180,6 +200,88 @@ func TestJsTaintInterprocedural(t *testing.T) {
 		"app.get('/x', (req, res) => { runIt(req.query.cmd); });\n"})
 	if !rules["js-taint-command"] {
 		t.Fatalf("interprocedural command injection missed: %v", jsRuleList(rules))
+	}
+}
+
+// TestJsTaintCrossFileInterprocedural proves taint crosses a FILE boundary: a request value passed into a
+// helper imported by a first-party relative specifier reaches a sink inside that helper's own file. The router
+// file holds the source and the call; the helper file holds the sink. This is the two-hop cross-file flow
+// (#1054): the call `forward(req.query.cmd)` in routes.js must resolve to `forward` in helper.js so the arg
+// binds the param and the param reaches `cp.exec`.
+func TestJsTaintCrossFileInterprocedural(t *testing.T) {
+	files := map[string]string{
+		"routes.js": "" +
+			"const { forward } = require('./helper');\n" +
+			"app.get('/x', (req, res) => { forward(req.query.cmd); });\n",
+		"helper.js": "" +
+			"const cp = require('child_process');\n" +
+			"function forward(cmd) { cp.exec(cmd); }\n" +
+			"module.exports = { forward };\n",
+	}
+	if rules := jsTaintRules(t, files); !rules["js-taint-command"] {
+		t.Fatalf("cross-file command injection missed: %v", jsRuleList(rules))
+	}
+}
+
+// TestJsTaintCrossFileSubdirInterprocedural proves the relative specifier is resolved against the importer's
+// directory (`../lib/helper` from `src/routes.js` resolves to `lib/helper.js`), not treated as a package.
+func TestJsTaintCrossFileSubdirInterprocedural(t *testing.T) {
+	files := map[string]string{
+		"src/routes.js": "" +
+			"const { forward } = require('../lib/helper');\n" +
+			"app.get('/x', (req, res) => { forward(req.query.cmd); });\n",
+		"lib/helper.js": "" +
+			"const cp = require('child_process');\n" +
+			"function forward(cmd) { cp.exec(cmd); }\n" +
+			"module.exports = { forward };\n",
+	}
+	if rules := jsTaintRules(t, files); !rules["js-taint-command"] {
+		t.Fatalf("cross-file (subdir) command injection missed: %v", jsRuleList(rules))
+	}
+}
+
+// TestJsTaintCrossFileBarePackageStaysUnbound is the soundness guard for the cross-file resolver: a bare
+// PACKAGE import is not a first-party file, so `sanitize(req.query.cmd)` must NOT be bound to some in-tree
+// function that happens to share the name. The local `sanitize` here would clean the value; binding across the
+// package boundary would be a WRONG edge. The pipeline must not fabricate a finding from the package import,
+// and must not silently suppress via the wrong-file function either: with no real sink, it finds nothing.
+func TestJsTaintCrossFileBarePackageStaysUnbound(t *testing.T) {
+	files := map[string]string{
+		"routes.js": "" +
+			"const { sanitize } = require('some-pkg');\n" +
+			"app.get('/x', (req, res) => { res.send(sanitize(req.query.cmd)); });\n",
+		"helper.js": "" +
+			"const cp = require('child_process');\n" +
+			"function sanitize(cmd) { cp.exec(cmd); return cmd; }\n" +
+			"module.exports = { sanitize };\n",
+	}
+	// The bare-package `sanitize` call widens (its result taints res.send -> XSS is expected and correct), but
+	// it must NOT bind to helper.js's `sanitize` and fire a command-injection from the wrong file's body.
+	rules := jsTaintRules(t, files)
+	if rules["js-taint-command"] {
+		t.Fatalf("bare-package import wrongly bound to a same-named first-party function: %v", jsRuleList(rules))
+	}
+}
+
+// TestJsTaintCrossFileInnerFunctionShadowsImport is the soundness guard for the cross-file resolver's
+// shadowing rule: a local function declaration of the same name shadows the import, so the bare call resolves
+// to the safe inner function, NOT the imported helper. Binding the cross-file helper here would fabricate a
+// command injection the code cannot actually perform.
+func TestJsTaintCrossFileInnerFunctionShadowsImport(t *testing.T) {
+	files := map[string]string{
+		"routes.js": "" +
+			"const { run } = require('./helper');\n" +
+			"app.get('/x', (req, res) => {\n" +
+			"  function run(x) { return x; }\n" + // inner declaration shadows the import
+			"  run(req.query.cmd);\n" +
+			"});\n",
+		"helper.js": "" +
+			"const cp = require('child_process');\n" +
+			"function run(cmd) { cp.exec(cmd); }\n" +
+			"module.exports = { run };\n",
+	}
+	if rules := jsTaintRules(t, files); rules["js-taint-command"] {
+		t.Fatalf("inner function shadowing the import was wrongly bound to the cross-file helper: %v", jsRuleList(rules))
 	}
 }
 

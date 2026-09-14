@@ -507,6 +507,9 @@ type TaintProposer interface {
 // proposer (judgments disabled) attaches nothing. A coordinator init error is returned so a misconfigured
 // analyzer is a loud startup failure at the composition root, never a silently degraded scan.
 func ConfigureJudgmentScanners(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, proposer TaintProposer, audit ports.AuditLogger, clock ports.Clock, log *slog.Logger) error {
+	if err := configureJVMTier2(svc, cfg, proposer, audit, clock, log); err != nil {
+		return err
+	}
 	pythonTaint, err := pythonTaintScanner(cfg, sb, proposer, audit, clock, log)
 	if err != nil {
 		return err

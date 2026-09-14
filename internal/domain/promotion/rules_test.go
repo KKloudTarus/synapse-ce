@@ -64,6 +64,44 @@ func TestEvaluateTaintExploitPathEscalation(t *testing.T) {
 	}
 }
 
+// TestEvaluateRuntimeLibraryLoadedEscalation is the #1061 acceptance: an observed runtime load of the
+// finding's library escalates one level (raise-only), fires at most once, and its absence changes nothing;
+// it never de-escalates and never reaches not_affected.
+func TestEvaluateRuntimeLibraryLoadedEscalation(t *testing.T) {
+	base := func() Snapshot {
+		s := baseSnapshot()
+		s.RuntimeLibraryLoaded = true
+		s.RuntimeLibrarySignal = Signal{Kind: judgment.PromotionInputRuntimeLibrary, ID: "runtime-j1"}
+		return s
+	}
+
+	c, err := Evaluate(base())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil || c.Rule != judgment.RuleRuntimeLibraryLoaded || c.Proposed != judgment.PromotionEscalate || c.AfterPriority != 2 {
+		t.Fatalf("a runtime library load must escalate P3->P2, got %+v", c)
+	}
+
+	applied := base()
+	applied.RuntimeLibraryLoadedApplied = true
+	if c, err := Evaluate(applied); err != nil || c != nil {
+		t.Fatalf("an already-applied runtime escalation must not re-fire, got %+v err=%v", c, err)
+	}
+
+	none := base()
+	none.RuntimeLibraryLoaded = false
+	if c, err := Evaluate(none); err != nil || c != nil {
+		t.Fatalf("no runtime load must change nothing, got %+v err=%v", c, err)
+	}
+
+	top := base()
+	top.Priority = 1
+	if c, err := Evaluate(top); err != nil || c != nil {
+		t.Fatalf("a P1 finding must not escalate further, got %+v err=%v", c, err)
+	}
+}
+
 // TestEvaluateStickyEscalationNotReversed: a taint escalation is kept sticky by the usecase setting
 // PriorEscalation.InputsActive=true, so the signal-loss reversal never fires and the raise-only taint
 // escalation is never wiped, whatever the recorded before-priority.

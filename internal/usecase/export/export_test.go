@@ -212,7 +212,7 @@ func TestBuildSARIF(t *testing.T) {
 
 func TestBuildOpenVEX(t *testing.T) {
 	now := time.Unix(0, 0).UTC()
-	doc := buildOpenVEX("e1", sampleFindings(), nil, nil, now, "v1.2.3", "")
+	doc := buildOpenVEX("e1", vexInputData{findings: sampleFindings()}, now, "v1.2.3", "")
 	if doc.Context != vexContext || doc.Version != 1 || doc.Author != "Synapse" {
 		t.Fatalf("bad header: %+v", doc)
 	}

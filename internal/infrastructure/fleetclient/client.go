@@ -276,6 +276,14 @@ func (c *Client) SendHostInventory(ctx context.Context, token string, inv any) e
 	return c.do(ctx, http.MethodPost, "/api/v1/fleet/inventory/host", token, inv, nil)
 }
 
+// SendRuntimeEvidence posts the host's runtime-reachability evidence (observed shared-library loads plus
+// the OS packages that own them) to the agent plane (#1060/#1061). The control plane resolves the host
+// asset from the authenticated agent, so no asset id crosses the wire. Best-effort like the other agent
+// reports: a transport failure is retried on the next sweep.
+func (c *Client) SendRuntimeEvidence(ctx context.Context, token string, report any) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/fleet/inventory/runtime", token, report, nil)
+}
+
 // ReportedProcess is one running process the agent observed, in the wire shape the process-report
 // endpoint accepts. The agent maps its OS enumeration to this; the client keeps no OS dependency.
 type ReportedProcess struct {

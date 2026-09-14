@@ -658,6 +658,10 @@ type Config struct {
 	// mints not_reachable (macros, function pointers, dlopen, LTO/inlining and mangling hide calls), so it can
 	// only ever raise, never suppress.
 	CppReachabilityEnabled bool
+	// GoBinaryReachabilityEnabled turns on the RAISE-ONLY Go-binary reachability: a compiled Go binary in the
+	// workspace whose .gopclntab contains a matched vulnerable function raises the finding's urgency. Absence
+	// is no coverage (stripped-of-pclntab, inlined, or non-Go binaries hide symbols), never not_reachable.
+	GoBinaryReachabilityEnabled bool
 	// TaintCallgraphBin is the pinned synapse-callgraph binary: the sandboxed go/ssa call-graph builder
 	// the taint analyzer shells out to. In-repo cmd (built by `make build` into bin/); pin its hash via
 	// SYNAPSE_TOOL_HASHES, like any other tool binary.
@@ -933,6 +937,7 @@ func Load() Config {
 		RubyReachabilityEnabled:                     getbool("SYNAPSE_REACH_RUBY", true),
 		DotNetReachabilityEnabled:                   getbool("SYNAPSE_REACH_DOTNET", true),
 		CppReachabilityEnabled:                      getbool("SYNAPSE_REACH_CPP", true),
+		GoBinaryReachabilityEnabled:                 getbool("SYNAPSE_REACH_GOBIN", true),
 		CrossCheckEnabled:                           getbool("SYNAPSE_CROSSCHECK_ENABLED", true),
 		SBOMCrossCheckEnabled:                       getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
 		WriteupDraftsEnabled:                        getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in
@@ -1016,7 +1021,7 @@ func Load() Config {
 		PoetryBin:                                   getenv("SYNAPSE_POETRY_BIN", "poetry"),
 		ManifestRegistryHosts:                       splitList(getenv("SYNAPSE_MANIFEST_REGISTRY_HOSTS", "")),
 		BundlerResolveEnabled:                       getbool("SYNAPSE_BUNDLER_RESOLVE_ENABLED", false),
-		JVMReachabilityEnabled:                      getbool("SYNAPSE_JVM_REACHABILITY_ENABLED", true),
+		JVMReachabilityEnabled:                      getbool("SYNAPSE_JVM_REACHABILITY_ENABLED", false),
 		JarHashOnlineEnabled:                        getbool("SYNAPSE_JARHASH_ONLINE_ENABLED", false),
 		JarHashBaseURL:                              getenv("SYNAPSE_JARHASH_BASE_URL", ""),
 		JarHashDBPath:                               getenv("SYNAPSE_JARHASH_DB_PATH", ""),

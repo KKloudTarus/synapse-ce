@@ -20,3 +20,6 @@ var privObj []byte
 
 //go:embed c/netconn.arm64.bpf.o
 var netObj []byte
+
+//go:embed c/library.arm64.bpf.o
+var libraryObj []byte

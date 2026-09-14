@@ -1578,14 +1578,8 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		sca.AddManifestResolver(manifestresolve.New("gem", cfg.BundleBin).WithRegistryHosts(cfg.ManifestRegistryHosts))
 		fmt.Fprintln(os.Stderr, "synapse-cli: Bundler resolver ON – `bundle lock` EVALUATES a lockfile-less Gemfile as Ruby (runs project code UNSANDBOXED); opt-in via SYNAPSE_BUNDLER_RESOLVE_ENABLED")
 	}
-	// Coarse JVM class-reachability – default-on for the CLI (read-only bytecode parsing, no exec);
-	// tags each JVM component reachable/unreferenced from the app's compiled closure. Opt out with
-	// SYNAPSE_JVM_REACHABILITY_ENABLED=false. Best-effort; a not-built project tags nothing.
-	jvmReachOn := cfg.JVMReachabilityEnabled
-	if _, set := os.LookupEnv("SYNAPSE_JVM_REACHABILITY_ENABLED"); !set {
-		jvmReachOn = true
-	}
-	if jvmReachOn {
+	// JVM reachability parses target bytecode in-process, so both CLI and server require explicit opt-in.
+	if cfg.JVMReachabilityEnabled {
 		sca.SetJVMReachability(jvmreach.New())
 	}
 	if cfg.SASTEnabled && !image {

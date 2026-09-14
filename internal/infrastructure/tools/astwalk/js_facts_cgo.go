@@ -292,7 +292,14 @@ func (e *jsFactExtractor) walkMethod(node *sitter.Node, parent jsScope) {
 		name = nameNode.Content(e.source)
 		kind = jsprogram.SymbolMethod
 	}
-	e.emitCallable(node, parent, name, kind)
+	symbol := e.emitCallable(node, parent, name, kind)
+	// A `get`/`set` accessor is invoked by a plain property READ/WRITE (`o.danger`), which is not a call
+	// expression, so the call graph cannot connect it and a reachability negative for its body would be
+	// unsound. Record it as an entrypoint so it is conservatively treated as reachable (raise-only): an
+	// accessor with a vulnerable body is never wrongly reported unreached.
+	if jsNodeHasToken(node, "get") || jsNodeHasToken(node, "set") {
+		e.doc.Entrypoints = append(e.doc.Entrypoints, jsprogram.EntrypointHint{SymbolID: symbol.ID, Kind: "accessor", Pos: symbol.Pos})
+	}
 }
 
 // walkAnonymousFunction handles arrow functions and unnamed function expressions: a synthetic name keyed to
@@ -302,7 +309,7 @@ func (e *jsFactExtractor) walkAnonymousFunction(node *sitter.Node, parent jsScop
 	e.emitCallable(node, parent, name, jsprogram.SymbolArrow)
 }
 
-func (e *jsFactExtractor) emitCallable(node *sitter.Node, parent jsScope, name string, kind jsprogram.SymbolKind) {
+func (e *jsFactExtractor) emitCallable(node *sitter.Node, parent jsScope, name string, kind jsprogram.SymbolKind) jsprogram.Symbol {
 	name = e.safeName(name, node) // sanitize an escaped/over-long identifier so the symbol fact stays valid
 	qualified := e.boundedQualified(parent.qualified, name, node)
 	id := jsprogram.CanonicalSymbolID(e.module, qualified)
@@ -330,6 +337,7 @@ func (e *jsFactExtractor) emitCallable(node *sitter.Node, parent jsScope, name s
 	if body != nil {
 		e.walk(body, jsScope{id: id, qualified: qualified, kind: kind})
 	}
+	return symbol
 }
 
 func (e *jsFactExtractor) walkClass(node *sitter.Node, parent jsScope) {
@@ -815,7 +823,7 @@ func (e *jsFactExtractor) reference(node *sitter.Node) jsprogram.Reference {
 		return jsprogram.Reference{Kind: jsprogram.ReferenceUnknown}
 	}
 	switch node.Type() {
-	case "identifier", "shorthand_property_identifier", "shorthand_property_identifier_pattern", "property_identifier", "this":
+	case "identifier", "shorthand_property_identifier", "shorthand_property_identifier_pattern", "property_identifier", "this", "super":
 		content := jsSanitizeSegment(node.Content(e.source))
 		if content == "" {
 			return jsprogram.Reference{Kind: jsprogram.ReferenceUnknown}

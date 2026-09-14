@@ -78,10 +78,94 @@ func TestSnykSampleObservationsAreExplicitAndComplete(t *testing.T) {
 	}
 }
 
+// TestSemgrepCEObservationsPythonSinkPresenceIsNotReachability pins the Python head-to-head: Semgrep CE's
+// os.system pattern proves a call SITE exists, not that it is reachable from an entrypoint, so a fixture
+// whose sink is matched becomes reachable while one with no match stays present_unreached. The unreached
+// fixtures whose sink Semgrep still matches are the owned engine's precision advantage, recorded honestly.
+func TestSemgrepCEObservationsPythonSinkPresenceIsNotReachability(t *testing.T) {
+	base := "internal/infrastructure/tools/astwalk/testdata/reachbench"
+	observations, err := SemgrepCEObservations(DefaultCorpus(), strings.NewReader(`{"results":[
+		{"check_id":"reachbench.py.os-system-call","path":"`+base+`/py_reached/app.py"},
+		{"check_id":"reachbench.py.os-system-call","path":"`+base+`/py_unreached/app.py"},
+		{"check_id":"reachbench.py.os-system-call","path":"`+base+`/py_crossmodule_imported_uncalled/helper.py"}
+	]}`))
+	if err != nil {
+		t.Fatalf("SemgrepCEObservations: %v", err)
+	}
+	got := observationLabels(observations)
+	// A matched reachable case and a matched unreached case both read reachable to Semgrep (sink present).
+	if got["py_reached_via_handler"] != Reachable {
+		t.Errorf("py_reached_via_handler = %v, want reachable", got["py_reached_via_handler"])
+	}
+	if got["py_unreached_private_function"] != Reachable {
+		t.Errorf("py_unreached_private_function = %v, want reachable (Semgrep over-reports the sink presence)", got["py_unreached_private_function"])
+	}
+	if got["py_cross_module_imported_uncalled"] != Reachable {
+		t.Errorf("py_cross_module_imported_uncalled = %v, want reachable (sink present in helper.py)", got["py_cross_module_imported_uncalled"])
+	}
+	// A python case with a selector but no matching result stays present_unreached, never no_analysis.
+	if got["py_instance_method_reached"] != PresentUnreached {
+		t.Errorf("py_instance_method_reached (no Semgrep match) = %v, want present_unreached", got["py_instance_method_reached"])
+	}
+}
+
+// TestSemgrepConfigPrefixedRuleMatches pins that a Semgrep result whose check_id is prefixed by the config
+// file path (Semgrep's behavior for `--config <file>`: `reachbench.py.os-system-call` is emitted as
+// `internal.usecase.reachbench.corpus.reachbench.py.os-system-call`) still maps to its corpus selector. A
+// regression here silently scores every Semgrep baseline as zero, making the head-to-head vacuous.
+func TestSemgrepConfigPrefixedRuleMatches(t *testing.T) {
+	base := "internal/infrastructure/tools/astwalk/testdata/reachbench"
+	observations, err := SemgrepCEObservations(DefaultCorpus(), strings.NewReader(`{"results":[
+		{"check_id":"internal.usecase.reachbench.corpus.reachbench.py.os-system-call","path":"`+base+`/py_reached/app.py"}
+	]}`))
+	if err != nil {
+		t.Fatalf("SemgrepCEObservations: %v", err)
+	}
+	if got := observationLabels(observations); got["py_reached_via_handler"] != Reachable {
+		t.Fatalf("a config-path-prefixed Semgrep check_id must map to its selector, got %v", got["py_reached_via_handler"])
+	}
+	// A partial-segment suffix must NOT alias (dot-boundary match): "x.os-system-call" != "os-system-call".
+	if semgrepRuleMatches("reachbench.py.evil-os-system-call", "os-system-call") {
+		t.Fatal("rule match must be at a dot boundary, not a bare string suffix")
+	}
+	if !semgrepRuleMatches("reachbench.go.jsonparser-delete-called", "reachbench.go.jsonparser-delete-called") {
+		t.Fatal("an exact bare rule id must match")
+	}
+}
+
 func observationLabels(observations []Observation) map[string]Label {
 	got := make(map[string]Label, len(observations))
 	for _, item := range observations {
 		got[item.Case] = item.Label
 	}
 	return got
+}
+
+// TestSemgrepSelectorsDoNotSuffixAlias locks a benchmark-integrity property of the Semgrep path matching
+// (strings.HasSuffix in SemgrepCEObservations): no case's path_suffix may be a suffix of another's, or one
+// Semgrep result could be attributed to two cases and mislabel one. It also requires each selector's rule id
+// to be non-empty. This is a corpus-authoring guard, not a runtime path.
+func TestSemgrepSelectorsDoNotSuffixAlias(t *testing.T) {
+	var suffixes []string
+	for _, c := range DefaultCorpus().Cases {
+		if s := c.Baseline.SemgrepCE; s != nil {
+			if s.RuleID == "" || s.PathSuffix == "" {
+				t.Fatalf("case %q has an incomplete Semgrep selector", c.Name)
+			}
+			suffixes = append(suffixes, s.PathSuffix)
+		}
+	}
+	if len(suffixes) < 2 {
+		t.Skip("need at least two Semgrep selectors to check aliasing")
+	}
+	for i := range suffixes {
+		for j := range suffixes {
+			if i == j {
+				continue
+			}
+			if strings.HasSuffix(suffixes[i], suffixes[j]) {
+				t.Errorf("Semgrep path_suffix %q is a suffix of %q; a single result could mislabel both cases", suffixes[j], suffixes[i])
+			}
+		}
+	}
 }

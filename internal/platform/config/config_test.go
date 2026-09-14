@@ -580,7 +580,7 @@ var analysisDefaultOnEnv = []string{
 	"SYNAPSE_MISCONFIG_ENABLED", "SYNAPSE_SUPPRESSION_ENABLED", "SYNAPSE_VEX_ENABLED",
 	"SYNAPSE_COMPLIANCE_ENABLED", "SYNAPSE_SCAN_CACHE_ENABLED", "SYNAPSE_IMAGE_ROOTFS_ENABLED",
 	"SYNAPSE_OWNED_ADVISORY", "SYNAPSE_REACHABILITY_ENABLED", "SYNAPSE_CROSSCHECK_ENABLED",
-	"SYNAPSE_SBOM_CROSSCHECK_ENABLED", "SYNAPSE_GOMODGRAPH_ENABLED", "SYNAPSE_JVM_REACHABILITY_ENABLED",
+	"SYNAPSE_SBOM_CROSSCHECK_ENABLED", "SYNAPSE_GOMODGRAPH_ENABLED",
 	"SYNAPSE_PYREACH_ENABLED", "SYNAPSE_JSREACH_ENABLED", "SYNAPSE_REACH_RUST",
 	"SYNAPSE_REACH_PHP", "SYNAPSE_REACH_RUBY",
 }
@@ -599,7 +599,7 @@ func TestAnalysisDefaultsOn(t *testing.T) {
 		"Compliance": c.ComplianceEnabled, "ScanCache": c.ScanCacheEnabled, "ImageRootFS": c.ImageRootFSEnabled,
 		"OwnedAdvisory": c.OwnedAdvisoryEnabled, "Reachability": c.ReachabilityEnabled,
 		"CrossCheck": c.CrossCheckEnabled, "SBOMCrossCheck": c.SBOMCrossCheckEnabled,
-		"GoModGraph": c.GoModGraphEnabled, "JVMReachability": c.JVMReachabilityEnabled,
+		"GoModGraph": c.GoModGraphEnabled,
 		// Source-only Tier-1 import reachability (D4.2): default ON. Each fails to "unknown" on any coverage
 		// gap and only ever produces a bounded, independently-confirmed priority de-escalation, never a
 		// suppression, so default-on cannot hide a real vulnerability.
@@ -629,7 +629,7 @@ func TestAnalysisDefaultsOn(t *testing.T) {
 func TestExternalSetupDefaultsOff(t *testing.T) {
 	for _, k := range []string{
 		"SYNAPSE_SANDBOX_ENABLED", "SYNAPSE_AGENT_ENABLED", "SYNAPSE_TAINT_ENABLED",
-		"SYNAPSE_PYREACH_TIER2_ENABLED", "SYNAPSE_SECRET_HISTORY_ENABLED",
+		"SYNAPSE_PYREACH_TIER2_ENABLED", "SYNAPSE_SECRET_HISTORY_ENABLED", "SYNAPSE_JVM_REACHABILITY_ENABLED",
 		"SYNAPSE_MAVEN_RESOLVE_ENABLED", "SYNAPSE_GRADLE_RESOLVE_ENABLED", "SYNAPSE_JARHASH_ONLINE_ENABLED",
 		"SYNAPSE_WRITEUP_DRAFTS_ENABLED", "SYNAPSE_OFFLINE", "SYNAPSE_IGNORE_UNFIXED",
 	} {
@@ -644,7 +644,7 @@ func TestExternalSetupDefaultsOff(t *testing.T) {
 		"PythonTier2": c.PySemanticReachabilityEnabled, "SecretHistory": c.SecretHistoryEnabled,
 		"MavenResolve": c.MavenResolveEnabled, "GradleResolve": c.GradleResolveEnabled,
 		"JarHashOnline": c.JarHashOnlineEnabled, "WriteupDrafts": c.WriteupDraftsEnabled,
-		"Offline": c.Offline, "IgnoreUnfixed": c.IgnoreUnfixed,
+		"Offline": c.Offline, "IgnoreUnfixed": c.IgnoreUnfixed, "JVMReachability": c.JVMReachabilityEnabled,
 	}
 	for name, v := range off {
 		if v {

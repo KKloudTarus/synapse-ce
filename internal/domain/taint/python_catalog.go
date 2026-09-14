@@ -153,6 +153,12 @@ func DefaultPythonCatalog() PythonCatalog {
 		},
 		Sanitizers: []PythonSanitizerModel{
 			{Pattern: pyCall([]string{"html", "markupsafe", "bleach"}, []string{"escape", "clean"}), Classes: []TaintClass{TaintXSS}},
+			// Framework HTML escapers: Django's html.escape and Flask's escape (a markupsafe.escape re-export).
+			// Each converts the value into HTML-context-safe text with no injectable markup, neutralizing ONLY
+			// the XSS class (never SQL or a command). Django's escapejs is deliberately EXCLUDED: it is safe only
+			// inside a whole single/double-quoted JavaScript string literal, so it is not a general HTML-context
+			// XSS neutralizer and modeling it as one could suppress a real flow into an HTML sink.
+			{Pattern: pyCall([]string{"django.utils.html", "flask"}, []string{"escape"}), Classes: []TaintClass{TaintXSS}},
 			{Pattern: pyCall([]string{"shlex"}, []string{"quote"}), Classes: []TaintClass{TaintCommand}},
 			{Pattern: pyCall([]string{"werkzeug.utils"}, []string{"secure_filename"}), Classes: []TaintClass{TaintPathTraversal}},
 			{Pattern: pyCall([]string{"yaml"}, []string{"safe_load"}), Classes: []TaintClass{TaintDeserialization}},

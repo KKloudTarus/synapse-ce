@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -100,8 +98,8 @@ type CSAFProductStatus struct {
 // buildCSAFVEX renders the publishable findings as a CSAF 2.0 VEX document. It reuses collectVEXRecords so
 // the CSAF assertions are identical to the OpenVEX ones, then reshapes them into CSAF's product-tree +
 // per-vulnerability product-status model.
-func buildCSAFVEX(engagementID shared.ID, findings []finding.Finding, notReachable map[string]judgment.ReachabilityTier, vexJust map[string]string, now time.Time, version string) *CSAFDoc {
-	records := collectVEXRecords(findings, notReachable, vexJust, now)
+func buildCSAFVEX(engagementID shared.ID, in vexInputData, now time.Time, version string) *CSAFDoc {
+	records := collectVEXRecords(in, now)
 
 	// Assign a stable CSAF product id per unique product, ordered for determinism.
 	products := map[string]bool{}

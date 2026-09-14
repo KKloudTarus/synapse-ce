@@ -151,10 +151,14 @@ type Parameter struct {
 }
 
 // Module associates a canonical module candidate (its source path without extension) with its source file.
+// Package is the file's `package` declaration (dotted, e.g. "com.example.util"), empty for the default
+// package. It lets the value-flow engine map a static import (`import static com.example.util.X.m`) to the
+// in-document type by its fully-qualified name, which the file-path Name cannot express.
 type Module struct {
-	Name string   `json:"name"`
-	File string   `json:"file"`
-	Pos  Position `json:"position"`
+	Name    string   `json:"name"`
+	File    string   `json:"file"`
+	Package string   `json:"package,omitempty"`
+	Pos     Position `json:"position"`
 }
 
 // Symbol is a module, class, interface, method, constructor, or lambda declaration.
@@ -336,6 +340,9 @@ func (d Document) Validate() error {
 	for _, m := range d.Modules {
 		if !validModulePath(m.Name) || validatePosition(m.Pos, true) != nil || m.File != m.Pos.File {
 			return fmt.Errorf("%w: invalid java module fact", shared.ErrValidation)
+		}
+		if m.Package != "" && !validQualified(m.Package) {
+			return fmt.Errorf("%w: invalid java module package %q", shared.ErrValidation, m.Package)
 		}
 		if moduleSet[m.Name] || fileSet[m.File] {
 			return fmt.Errorf("%w: duplicate java module or file", shared.ErrValidation)

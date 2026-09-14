@@ -7,12 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/runtimereach"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
@@ -37,6 +39,16 @@ type fakeAPI struct {
 	policyErr         error
 	responseResults   []fleetclient.ResponseResultRequest
 	responseResultErr error
+	runtimeMu         sync.Mutex
+	runtimeReports    []runtimereach.Report
+}
+
+// runtimeReportsSnapshot returns a copy of the shipped runtime reports under a lock, so a test polling from
+// the main goroutine does not race the runtime-reachability loop goroutine writing them.
+func (f *fakeAPI) runtimeReportsSnapshot() []runtimereach.Report {
+	f.runtimeMu.Lock()
+	defer f.runtimeMu.Unlock()
+	return append([]runtimereach.Report(nil), f.runtimeReports...)
 }
 
 type result struct{ orderID, status, reason string }
@@ -132,6 +144,14 @@ func (f *fakeAPI) SubmitResponseResult(_ context.Context, _ string, orderID stri
 }
 func (f *fakeAPI) SendHostInventory(_ context.Context, _ string, _ any) error {
 	f.sent++
+	return f.sendErr
+}
+func (f *fakeAPI) SendRuntimeEvidence(_ context.Context, _ string, report any) error {
+	if rep, ok := report.(runtimereach.Report); ok {
+		f.runtimeMu.Lock()
+		f.runtimeReports = append(f.runtimeReports, rep)
+		f.runtimeMu.Unlock()
+	}
 	return f.sendErr
 }
 func (f *fakeAPI) RegisterDetectionKey(context.Context, string, fleetagent.AgentSigningKey, string) error {

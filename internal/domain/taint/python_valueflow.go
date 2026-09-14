@@ -428,8 +428,17 @@ func (b *pythonValueBuilder) modelCalls() {
 				b.addFlow(call.ReceiverValueID, sinkID)
 			}
 		}
+		calleeShadowed := b.calleeShadowedByLocal(call)
 		for _, model := range b.catalog.Sanitizers {
 			if !callMatches(model.Pattern, candidates, raw) || call.ResultID == "" {
+				continue
+			}
+			if calleeShadowed {
+				// A local binding of the same name (a parameter or an assignment) shadows the sanitizer the
+				// resolver matched: the call invokes that local, not necessarily the modeled escaper. Walling
+				// here could neutralize a flow that is not actually sanitized, hiding a real vulnerability
+				// (#1089, #1-bar). Skip the wall; the call then widens via the fallback below (taint survives).
+				// Sinks/sources are left to fire above, because over-reporting on a shadowed name is safe.
 				continue
 			}
 			matchedRole = true
@@ -582,6 +591,38 @@ func (b *pythonValueBuilder) addSource(valueID string, class TaintClass, pos pyt
 	}
 	key := valueID + "\x00" + string(class)
 	b.sources[key] = TypedValueSource{ValueID: valueID, Class: class, Pos: pos}
+}
+
+// calleeShadowedByLocal reports whether a bare-name call resolves to a LOCAL binding (a parameter or an
+// assignment) of an enclosing scope, rather than to the import of the same name the resolver matched. Only a
+// single-segment name reference can be a local shadow; a dotted attribute (html.escape) never is.
+//
+// It is used ONLY to suppress a SANITIZER wall on such a call (#1089). That suppression is always the safe
+// direction: if the local really is the imported escaper (e.g. `escape = html.escape`), skipping the wall
+// merely over-reports; if it is an arbitrary local, skipping the wall correctly reports the un-neutralized
+// flow. Because it never touches sink/source resolution, extending the check from parameters to local
+// assignments needs no `global`/`nonlocal` tracking: at worst it over-reports, it can never hide a flow.
+func (b *pythonValueBuilder) calleeShadowedByLocal(call pythonprogram.Call) bool {
+	if call.Callee.Kind != pythonprogram.ReferenceName || len(call.Callee.Segments) != 1 {
+		return false
+	}
+	name := call.Callee.Segments[0]
+	for _, scope := range b.scopeChain(call.CallerID) {
+		if len(b.definitions[scope][name]) == 0 {
+			continue
+		}
+		// Only a FUNCTION-like scope's binding shadows: a parameter or an assignment inside a function/method/
+		// lambda is a local the bare call resolves to instead of a module import. A binding at MODULE scope is
+		// not a shadow (a module-level `escape = ...` after `from x import escape` is a position-dependent
+		// rebind, and the call may invoke the import; keeping the wall avoids a false positive). A CLASS-scope
+		// binding is not a shadow either: a bare name in a method body does not resolve through the class
+		// namespace in Python (that needs `self.`), so a class attribute named `escape` never shadows it.
+		switch b.symbols[scope].Kind {
+		case pythonprogram.SymbolFunction, pythonprogram.SymbolMethod, pythonprogram.SymbolLambda:
+			return true
+		}
+	}
+	return false
 }
 
 func (b *pythonValueBuilder) scopeChain(scope string) []string {

@@ -2,6 +2,7 @@ package taint
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -285,6 +286,15 @@ func (b *jsValueBuilder) modelCalls() {
 			local = true
 			b.bindCall(call, symbol)
 		}
+		// Cross-file binding is ADDITIVE, not a replacement: it binds arg->param / return->result so a sink
+		// inside an imported helper is reached, but it deliberately does NOT set local, so the widen fallback
+		// below still runs. JS facts do not carry the export table, so an imported name matched to a same-named
+		// function in the target file is a heuristic, not a proof (an aliased re-export `{forward: other}` can
+		// point elsewhere). Keeping widen means a possibly-wrong cross-file bind can only ADD reachability,
+		// never suppress a downstream-result flow the widen would have carried (the #1 raise-only invariant).
+		for _, symbolID := range b.crossFileCallees(call) {
+			b.bindCall(call, b.symbols[symbolID])
+		}
 		module, member, resolved := b.resolveCatalogCallee(call)
 		global, isGlobal := b.globalCallee(call)
 		raw := strings.Join(call.Callee.Segments, ".")
@@ -359,7 +369,7 @@ func (b *jsValueBuilder) localCallees(call jsprogram.Call) []string {
 			return nil // shadowed by a local parameter/binding
 		}
 		if _, ok := b.imports[scope][name]; ok {
-			return nil // the name is an import, not a local function
+			return nil // the name is an import, resolved cross-file by crossFileCallees, not a same-file function
 		}
 	}
 	symbol, ok := b.symbols[call.CallerID]
@@ -378,6 +388,81 @@ func (b *jsValueBuilder) localCallees(call jsprogram.Call) []string {
 		return nil // only a module-level function (qualified name == bare name) is reachable by a bare call
 	}
 	return []string{callee.ID}
+}
+
+// crossFileCallees returns the in-document function a bare call resolves to THROUGH a first-party relative
+// import, so a two-hop cross-file source->sink flow (routes.js calls helper.js's forward(), which hits a sink)
+// connects through the same bindCall parameter/return edges a same-file call uses (#1054). The caller binds it
+// additively (it keeps widening), so a heuristic match can never suppress. A local parameter, binding, or a
+// same-name function/class DECLARATION shadows the import, in which case this binds nothing.
+func (b *jsValueBuilder) crossFileCallees(call jsprogram.Call) []string {
+	if call.Callee.Kind != jsprogram.ReferenceName || len(call.Callee.Segments) != 1 {
+		return nil
+	}
+	name := call.Callee.Segments[0]
+	var binding jsImportBinding
+	found := false
+	for _, scope := range b.scopeChain(call.CallerID) {
+		if len(b.definitions[scope][name]) > 0 {
+			return nil // shadowed by a local parameter/binding
+		}
+		if b.declaredCallables[scope][name] {
+			return nil // shadowed by a local function/class declaration (inner or same-file), not the import
+		}
+		if bnd, ok := b.imports[scope][name]; ok {
+			binding, found = bnd, true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	symbol, ok := b.symbols[call.CallerID]
+	if !ok {
+		return nil
+	}
+	return b.crossFileCallee(symbol.Module, binding)
+}
+
+// crossFileCallee resolves a NAMED, first-party RELATIVE import to a same-named module-level function/arrow in
+// the imported file. It resolves only what it can point at: a bare-package import (no `./` or `../` prefix), a
+// default/namespace import (binding.name empty or "default"), an absent/ambiguous target, or a target whose
+// qualified name is not the module-level name all return nil. It does NOT try a directory `/index` fallback,
+// because Node resolves `./helper` to `helper.js` when that file exists and never falls through to
+// `helper/index.js`; guessing the directory form could bind the wrong file's function.
+func (b *jsValueBuilder) crossFileCallee(importerModule string, binding jsImportBinding) []string {
+	if binding.name == "" || binding.name == "default" {
+		return nil // a default/namespace import binds the module object, not a single named export
+	}
+	if !strings.HasPrefix(binding.module, "./") && !strings.HasPrefix(binding.module, "../") {
+		return nil // only a first-party relative specifier is resolvable to an in-document file
+	}
+	// Resolve the specifier against the importer's directory, mirroring the module names jsModuleName emits
+	// (extension stripped, forward slashes). path.Join+Clean folds `./` and `../` segments.
+	resolved := path.Join(path.Dir(importerModule), stripJsModuleExt(binding.module))
+	candidates := b.functionsByName[resolved][binding.name]
+	if len(candidates) != 1 {
+		return nil // absent in the resolved file, or ambiguous (never bind a wrong overload)
+	}
+	callee := b.symbols[candidates[0]]
+	if callee.Kind != jsprogram.SymbolFunction && callee.Kind != jsprogram.SymbolArrow {
+		return nil // an imported name that resolves to a method/class is not bound by this bare call
+	}
+	if callee.QualifiedName != binding.name {
+		return nil // only a module-level function (qualified name == the name) is reachable this way
+	}
+	return []string{callee.ID}
+}
+
+// stripJsModuleExt removes a JS/TS module extension from an import specifier so it matches the extension-less
+// module names jsModuleName emits ("./helper.js" -> "./helper").
+func stripJsModuleExt(spec string) string {
+	for _, ext := range []string{".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"} {
+		if strings.HasSuffix(spec, ext) {
+			return spec[:len(spec)-len(ext)]
+		}
+	}
+	return spec
 }
 
 func (b *jsValueBuilder) bindCall(call jsprogram.Call, callee jsprogram.Symbol) {

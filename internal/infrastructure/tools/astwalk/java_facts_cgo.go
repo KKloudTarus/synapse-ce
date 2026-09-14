@@ -63,15 +63,15 @@ func JavaFactsFor(ctx context.Context, root string) (javaprogram.Document, error
 		doc.FilesParsed++
 		modulePos := javaprogram.Position{File: rel, Line: 1}
 		moduleID := javaprogram.CanonicalSymbolID(module, "<module>")
-		doc.Modules = append(doc.Modules, javaprogram.Module{Name: module, File: rel, Pos: modulePos})
-		doc.Symbols = append(doc.Symbols, javaprogram.Symbol{
-			ID: moduleID, Module: module, QualifiedName: "<module>", Name: javaModuleLeaf(module), Kind: javaprogram.SymbolModule, Pos: modulePos,
-		})
-		doc.Entrypoints = append(doc.Entrypoints, javaprogram.EntrypointHint{SymbolID: moduleID, Kind: "module_import", Pos: modulePos})
 		extractor := javaFactExtractor{
 			doc: &doc, module: module, file: rel, source: content,
 			values: map[string]bool{}, flows: map[string]bool{}, gapKeys: map[string]bool{}, symbolQual: map[string]bool{},
 		}
+		doc.Modules = append(doc.Modules, javaprogram.Module{Name: module, File: rel, Package: extractor.packageName(rootNode), Pos: modulePos})
+		doc.Symbols = append(doc.Symbols, javaprogram.Symbol{
+			ID: moduleID, Module: module, QualifiedName: "<module>", Name: javaModuleLeaf(module), Kind: javaprogram.SymbolModule, Pos: modulePos,
+		})
+		doc.Entrypoints = append(doc.Entrypoints, javaprogram.EntrypointHint{SymbolID: moduleID, Kind: "module_import", Pos: modulePos})
 		if rootNode.HasError() {
 			extractor.gap(javaprogram.GapParseRecovery, moduleID, "parser_recovery", rootNode)
 		}
@@ -237,6 +237,28 @@ func (e *javaFactExtractor) walkLambda(node *sitter.Node, parent javaScope) {
 // scoped_identifier (the dotted path), an optional `static` keyword, and an optional trailing `*`
 // (on-demand). Module/Name/Kind follow the domain contract so the taint engine can anchor a sink to a
 // package without a classpath.
+// packageName returns the file's dotted `package` declaration (empty for the default package). It lets the
+// value-flow engine map a static import to the in-document type by fully-qualified name; the file-path module
+// id cannot express the Java package. Only the first package_declaration under the compilation unit is read.
+func (e *javaFactExtractor) packageName(root *sitter.Node) string {
+	if root == nil {
+		return ""
+	}
+	for i := 0; i < int(root.NamedChildCount()); i++ {
+		child := root.NamedChild(i)
+		if child.Type() != "package_declaration" {
+			continue
+		}
+		for j := 0; j < int(child.NamedChildCount()); j++ {
+			seg := child.NamedChild(j)
+			if seg.Type() == "scoped_identifier" || seg.Type() == "identifier" {
+				return strings.Join(e.dottedSegments(seg), ".")
+			}
+		}
+	}
+	return ""
+}
+
 func (e *javaFactExtractor) importFact(node *sitter.Node, scope javaScope) {
 	static := false
 	onDemand := false

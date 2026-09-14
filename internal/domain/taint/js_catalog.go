@@ -162,7 +162,15 @@ func DefaultJsCatalog() JsCatalog {
 		},
 
 		// DECLINED, each because sound detection would need resolution the PR1 facts do not carry and the
-		// syntactic shape alone would produce a false positive:
+		// syntactic shape alone would produce a false positive (or, for the HTML sanitizers, a false NEGATIVE):
+		//
+		//   - HTML SANITIZER libraries (DOMPurify.sanitize, sanitize-html, js-xss filterXSS): NOT modeled as
+		//     unconditional XSS walls. Unlike a pure escaper (he/lodash/escape-html, which always render text
+		//     inert), a sanitizer's output is HTML whose safety depends on its VERSION and CONFIG: sanitize-html
+		//     has had default-config bypasses (GHSA-rpr9-rxv7-x643) and can be configured to allow all tags,
+		//     DOMPurify is unsafe when the allow-list is widened or its output is used in a non-HTML context,
+		//     and js-xss exposes custom handlers. The catalog is not version/config-aware, so walling these
+		//     would risk suppressing a real XSS (a false negative), which the no-false-suppression bar forbids.
 		//
 		//   - SQL injection (knex.raw / sequelize.query / pg|mysql|mysql2 .query): the receiver is a runtime
 		//     CONNECTION INSTANCE (mysql.createPool(), new Client()), not a direct import, so a bare .query /

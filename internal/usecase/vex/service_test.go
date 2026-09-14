@@ -9,6 +9,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -249,5 +250,96 @@ func TestApplyWithoutATransactionRunnerStillWorks(t *testing.T) {
 	}
 	if repo.list[0].Status != finding.StatusFalsePos {
 		t.Errorf("finding status = %s, want false_positive", repo.list[0].Status)
+	}
+}
+
+// fakeStatementStore is an in-test ports.VEXStatementRepository: a per-engagement slice with digest-based
+// idempotency, returned oldest-first, so the usecase test needs no infrastructure dependency.
+type fakeStatementStore struct {
+	byEng map[string][]vex.StoredStatement
+}
+
+func newFakeStatementStore() *fakeStatementStore {
+	return &fakeStatementStore{byEng: map[string][]vex.StoredStatement{}}
+}
+
+func (s *fakeStatementStore) Save(_ context.Context, _ , engagementID shared.ID, statements []vex.StoredStatement) error {
+	key := engagementID.String()
+	seen := map[string]bool{}
+	for _, st := range s.byEng[key] {
+		seen[st.Digest] = true
+	}
+	for _, st := range statements {
+		if seen[st.Digest] {
+			continue
+		}
+		seen[st.Digest] = true
+		s.byEng[key] = append(s.byEng[key], st)
+	}
+	return nil
+}
+
+func (s *fakeStatementStore) ListByEngagement(_ context.Context, _, engagementID shared.ID) ([]vex.StoredStatement, error) {
+	return append([]vex.StoredStatement(nil), s.byEng[engagementID.String()]...), nil
+}
+
+// TestApplyPersistsAndReapplyRestores proves #1064 part 2b: Apply persists the ingested statement, and after a
+// rescan resets the finding to open, Reapply re-applies the persisted not_affected so the decision survives.
+func TestApplyPersistsAndReapplyRestores(t *testing.T) {
+	svc, repo := newSvc(t, []finding.Finding{
+		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2020-1:foo:1.2.3", Status: finding.StatusOpen, Version: 1},
+	})
+	store := newFakeStatementStore()
+	svc.SetStatementStore(store)
+	svc.SetTransactionRunner(rollbackRunner{repo}) // exercise the atomic re-apply path (production always has a runner)
+
+	doc := []byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+		{"vulnerability":{"name":"CVE-2020-1"},"products":[{"@id":"foo@1.2.3"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`)
+	if _, err := svc.Apply(context.Background(), "alice", "", "e1", doc); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if repo.list[0].Status != finding.StatusFalsePos {
+		t.Fatalf("apply must suppress, got %s", repo.list[0].Status)
+	}
+	if got, _ := store.ListByEngagement(context.Background(), "", "e1"); len(got) != 1 {
+		t.Fatalf("apply must persist the statement, got %d", len(got))
+	}
+
+	// Simulate a rescan: the Upsert resets the finding to open.
+	repo.list[0].Status = finding.StatusOpen
+
+	if err := svc.Reapply(context.Background(), "", "e1"); err != nil {
+		t.Fatalf("reapply: %v", err)
+	}
+	if repo.list[0].Status != finding.StatusFalsePos {
+		t.Errorf("reapply must restore the persisted not_affected after a rescan, got %s", repo.list[0].Status)
+	}
+}
+
+// TestReapplyDoesNotSuppressReachable is the #1-bar guard on the rescan path: a persisted not_affected must
+// NOT suppress a finding Synapse now judges reachable, even though it suppressed before.
+func TestReapplyDoesNotSuppressReachable(t *testing.T) {
+	svc, repo := newSvc(t, []finding.Finding{
+		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2020-1:foo:1.2.3", Status: finding.StatusOpen, Version: 1},
+	})
+	store := newFakeStatementStore()
+	svc.SetStatementStore(store)
+	svc.SetTransactionRunner(rollbackRunner{repo}) // exercise the atomic re-apply path (production always has a runner)
+
+	doc := []byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+		{"vulnerability":{"name":"CVE-2020-1"},"products":[{"@id":"foo@1.2.3"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`)
+	if _, err := svc.Apply(context.Background(), "alice", "", "e1", doc); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	// The rescan resets the finding to open AND now proves it reachable.
+	repo.list[0].Status = finding.StatusOpen
+	repo.list[0].Reachability = "reachable"
+
+	if err := svc.Reapply(context.Background(), "", "e1"); err != nil {
+		t.Fatalf("reapply: %v", err)
+	}
+	if repo.list[0].Status != finding.StatusOpen {
+		t.Errorf("a persisted not_affected must NOT suppress a now-reachable finding on reapply, got %s", repo.list[0].Status)
 	}
 }

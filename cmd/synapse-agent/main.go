@@ -71,6 +71,7 @@ type fleetAPI interface {
 	SubmitResult(ctx context.Context, token, orderID, leaseID, status, reason string) error
 	SubmitResponseResult(ctx context.Context, token, orderID string, request fleetclient.ResponseResultRequest) error
 	SendHostInventory(ctx context.Context, token string, inv any) error
+	SendRuntimeEvidence(ctx context.Context, token string, report any) error
 }
 
 // hostInventoryResolvedAPI is optional so the long-standing run-loop test doubles
@@ -209,6 +210,11 @@ type config struct {
 	// periodic stream (A8, #629). It is default-on and cadence-clamped to avoid busy loops.
 	inventorySweepEnabled  bool
 	inventorySweepInterval time.Duration
+	// runtimeReach ships runtime-reachability evidence (observed shared-library loads + the OS packages
+	// that own them, #1060/#1061) on its own cadence. Linux + eBPF privilege only; degrades cleanly (a
+	// declared coverage gap) when the sensor cannot run. Default-on, operator-disableable.
+	runtimeReachEnabled  bool
+	runtimeReachInterval time.Duration
 	// processReportEnabled ships the host's running-process snapshot to the behavior baseline (#594 D)
 	// on the inventory-sweep cadence. Read-only /proc metadata; on by default, operator-disableable.
 	processReportEnabled    bool
@@ -305,6 +311,8 @@ func parseConfig() config {
 	flag.StringVar(&cfg.metricsAddr, "agent-metrics-addr", os.Getenv("SYNAPSE_AGENT_METRICS_ADDR"), "optional address for private agent Prometheus metrics (for example 127.0.0.1:9465)")
 	flag.BoolVar(&cfg.inventorySweepEnabled, "inventory-sweep", envEnabledDefaultTrue(os.Getenv("SYNAPSE_INVENTORY_SWEEP_ENABLED")), "ship host inventory continuously on a cadence (A8, #629); on by default")
 	flag.DurationVar(&cfg.inventorySweepInterval, "inventory-sweep-interval", parsePositiveDuration(os.Getenv("SYNAPSE_INVENTORY_SWEEP_INTERVAL"), time.Hour), "cadence of the continuous host-inventory sweep (clamped to a floor)")
+	flag.BoolVar(&cfg.runtimeReachEnabled, "runtime-reachability", envEnabledDefaultTrue(os.Getenv("SYNAPSE_RUNTIME_REACHABILITY_ENABLED")), "ship runtime-reachability evidence (observed shared-library loads joined to owning OS packages, #1060/#1061); Linux+eBPF only, on by default")
+	flag.DurationVar(&cfg.runtimeReachInterval, "runtime-reachability-interval", parsePositiveDuration(os.Getenv("SYNAPSE_RUNTIME_REACHABILITY_INTERVAL"), 5*time.Minute), "cadence of the runtime-reachability evidence ship (clamped to a floor)")
 	flag.BoolVar(&cfg.processReportEnabled, "process-report", envEnabledDefaultTrue(os.Getenv("SYNAPSE_PROCESS_REPORT_ENABLED")), "report the host's running processes to the behavior baseline on the sweep cadence (read-only /proc; #594 D); on by default")
 	flag.StringVar(&cfg.procRoot, "proc-root", envOr("SYNAPSE_AGENT_PROC_ROOT", "/proc"), "procfs root to enumerate running processes from")
 	flag.BoolVar(&cfg.responseEnabled, "response-execution", envEnabled(os.Getenv("SYNAPSE_RESPONSE_EXECUTION_ENABLED")), "enable governed Linux process response (requires root, process detection, and a pinned command trust bundle)")
@@ -365,6 +373,7 @@ func (r *runner) run(ctx context.Context) error {
 	// Every observer retains an independently enrolled primary host identity. Its secondary target is
 	// applied only to a bounded response-observation telemetry session.
 	r.startInventorySweep(ctx, cred)
+	r.startRuntimeReachabilitySweep(ctx, cred)
 
 	var transport *detectionTransport
 	producer := &producerController{}
