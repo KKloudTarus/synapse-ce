@@ -1,14 +1,42 @@
+export type IdentityErrorCode =
+  | 'authentication_invalid'
+  | 'identity_access_denied'
+  | 'identity_conflict'
+  | 'dependency_unavailable'
+  | 'capacity_limited'
+
+export type ApiErrorBody = {
+  error?: string
+  code?: string
+  request_id?: string
+  retryable?: boolean
+  [key: string]: unknown
+}
+
+function errorBody(value: unknown): ApiErrorBody | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  return value as ApiErrorBody
+}
+
 export class ApiError extends Error {
+  public readonly code?: string
+  public readonly requestId?: string
+  public readonly retryable: boolean
+
   constructor(
     public status: number,
     message: string,
     // The parsed JSON error body, when the server sent one. Some endpoints attach structured detail
-    // alongside the message (e.g. /alerts/test returns { error, outcome } on 502); callers that need it
-    // read err.body, while the common `err.status === 404` checks are unaffected.
+    // alongside the message. Existing callers that inspect err.body keep working while D2 identity
+    // callers can use the stable code/requestId/retryable fields directly.
     public body?: unknown,
   ) {
     super(message)
     this.name = 'ApiError'
+    const structured = errorBody(body)
+    this.code = typeof structured?.code === 'string' ? structured.code : undefined
+    this.requestId = typeof structured?.request_id === 'string' ? structured.request_id : undefined
+    this.retryable = structured?.retryable === true
   }
 }
 
@@ -56,8 +84,29 @@ function apiRequestInit(init: RequestInit = {}, json = true): RequestInit {
   return { ...init, credentials: token ? 'omit' : 'same-origin', headers: { ...headers, ...(init.headers as Record<string, string> ?? {}) } }
 }
 
-async function errorMessage(res: Response): Promise<string> {
-  try { const b = await res.json(); return b?.error ?? `HTTP ${res.status}` } catch { return `HTTP ${res.status}` }
+async function responseError(res: Response): Promise<ApiError> {
+  let body: unknown
+  let message = `HTTP ${res.status}`
+  try {
+    body = await res.json()
+    const parsed = errorBody(body)
+    if (typeof parsed?.error === 'string' && parsed.error !== '') message = parsed.error
+  } catch {
+    /* non-JSON error body */
+  }
+  return new ApiError(res.status, message, body)
+}
+
+// Only the explicit D2 invalid-credential code is authoritative. The status-only fallback keeps
+// compatibility with older Synapse servers during rolling upgrades. Unknown future codes fail
+// closed toward PRESERVING credentials rather than unexpectedly signing a user out.
+export function isAuthenticationInvalid(error: ApiError): boolean {
+  if (error.code === 'authentication_invalid') return true
+  return error.code === undefined && error.status === 401
+}
+
+function notifyAuthenticationInvalid(error: ApiError): void {
+  if (isAuthenticationInvalid(error) && onUnauthorized) onUnauthorized()
 }
 
 export async function discoverSession(): Promise<BFFSession> {
@@ -67,11 +116,13 @@ export async function discoverSession(): Promise<BFFSession> {
   } catch {
     throw new ApiError(0, 'Cannot reach the API. Is the server running on :8080?')
   }
-  // 401/403 = not signed in; 404 = a token-only server that doesn't mount the OIDC BFF
-  // (the /api/auth/* routes are registered only when OIDC is enabled). Both mean "no
-  // session" — surface the login screen rather than an error.
-  if (res.status === 401 || res.status === 403 || res.status === 404) return { authenticated: false, csrfToken: '' }
-  if (!res.ok) throw new ApiError(res.status, await errorMessage(res))
+  // 404 = token-only server that does not mount the OIDC BFF.
+  if (res.status === 404) return { authenticated: false, csrfToken: '' }
+  if (!res.ok) {
+    const err = await responseError(res)
+    if (isAuthenticationInvalid(err)) return { authenticated: false, csrfToken: '' }
+    throw err
+  }
   const body = await res.json()
   if (body?.authenticated !== true) return { authenticated: false, csrfToken: '' }
   const csrf = body?.csrf_token ?? body?.csrfToken ?? body?.csrf
@@ -88,7 +139,7 @@ export async function logoutSession(): Promise<void> {
   } catch {
     throw new ApiError(0, 'Cannot reach the API. Is the server running on :8080?')
   }
-  if (!res.ok) throw new ApiError(res.status, await errorMessage(res))
+  if (!res.ok) throw await responseError(res)
 }
 
 export async function req(path: string, init?: RequestInit): Promise<any> {
@@ -101,17 +152,10 @@ export async function req(path: string, init?: RequestInit): Promise<any> {
     }
     throw new ApiError(0, 'Cannot reach the API. Is the server running on :8080?')
   }
-  if (res.status === 401 && onUnauthorized) onUnauthorized()
   if (!res.ok) {
-    let msg = `HTTP ${res.status}`
-    let body: unknown
-    try {
-      body = await res.json()
-      if ((body as { error?: string })?.error) msg = (body as { error: string }).error
-    } catch {
-      /* non-JSON error body */
-    }
-    throw new ApiError(res.status, msg, body)
+    const err = await responseError(res)
+    notifyAuthenticationInvalid(err)
+    throw err
   }
   if (res.status === 204) return null
   return res.json()
@@ -120,16 +164,10 @@ export async function req(path: string, init?: RequestInit): Promise<any> {
 /** Fetch a SARIF/OpenVEX export with the bearer token and trigger a browser download. */
 export async function blobDownload(path: string, fallbackName: string): Promise<void> {
   const res = await fetch(path, apiRequestInit({}, false))
-  if (res.status === 401 && onUnauthorized) onUnauthorized()
   if (!res.ok) {
-    let msg = `HTTP ${res.status}`
-    try {
-      const b = await res.json()
-      if (b?.error) msg = b.error
-    } catch {
-      /* non-JSON */
-    }
-    throw new ApiError(res.status, msg)
+    const err = await responseError(res)
+    notifyAuthenticationInvalid(err)
+    throw err
   }
   const blob = await res.blob()
   const cd = res.headers.get('content-disposition') ?? ''
