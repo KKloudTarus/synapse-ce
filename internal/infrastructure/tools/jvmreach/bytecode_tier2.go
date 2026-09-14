@@ -470,10 +470,10 @@ func storedReferenceSource(ins []instruction, storeIdx int, cp parsedCP) (class 
 		return "", -1, false
 	}
 	j := storeIdx - 1
-	cur := ins[j]
+	cur := ins[j] // #nosec G602 -- j is derived from a validated store index.
 	if j > 0 && cur.op == 0xc0 {
 		j--
-		cur = ins[j]
+		cur = ins[j] // #nosec G602 -- j is decremented only after the positive-index guard.
 	}
 	if local, ok := aloadLocal(cur); ok {
 		return "", local, true
