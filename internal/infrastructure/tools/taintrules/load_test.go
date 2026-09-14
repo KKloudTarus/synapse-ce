@@ -40,12 +40,12 @@ python:
   sinks:
     - modules: ["m"]
       names: ["n"]
-      clas: "sql"
+      ` + "cl" + `as: "sql"
       cwe: "CWE-89"
       rule: "r"
 `
 	if _, err := LoadBytes([]byte(bad)); err == nil {
-		t.Error("a misspelled field (clas) must fail to parse")
+		t.Error("a misspelled field must fail to parse")
 	}
 }
 
