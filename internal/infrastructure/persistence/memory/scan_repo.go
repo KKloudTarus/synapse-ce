@@ -26,18 +26,39 @@ func NewScanRepository(inventory ...*ComponentInventoryStore) *ScanRepository {
 
 var _ ports.ScanRepository = (*ScanRepository)(nil)
 
-func (r *ScanRepository) SaveScan(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM, vulns []vulnerability.Vulnerability, _ ports.ScanSnapshot) (int, error) {
+func (r *ScanRepository) AdmitInventory(ctx context.Context, engagementID shared.ID, scope string, admittedAt time.Time) (sbom.InventoryAdmission, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return sbom.InventoryAdmission{}, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	return r.inventory.admit(sbom.InventoryAdmission{TenantID: tenantID, EngagementID: engagementID, Scope: scope, AdmittedAt: admittedAt.UTC()})
+}
+
+func (r *ScanRepository) SaveScan(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM, vulns []vulnerability.Vulnerability, snap ports.ScanSnapshot) (ports.ScanSaveResult, error) {
 	if doc == nil {
-		return 0, nil
+		return ports.ScanSaveResult{}, nil
 	}
 	if engagementID.IsZero() {
-		return 0, fmt.Errorf("%w: engagement id is required", shared.ErrValidation)
+		return ports.ScanSaveResult{}, fmt.Errorf("%w: engagement id is required", shared.ErrValidation)
 	}
 	tenantID, ok := shared.TenantFrom(ctx)
 	if !ok {
-		return 0, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+		return ports.ScanSaveResult{}, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
 	}
 	tenantID = shared.TenantOrDefault(tenantID)
+	admission := snap.InventoryAdmission
+	legacyAdmission := admission.Generation <= 0
+	if legacyAdmission {
+		var err error
+		admission, err = r.AdmitInventory(ctx, engagementID, sbom.InventoryScope(doc.TargetRef), time.Now().UTC())
+		if err != nil {
+			return ports.ScanSaveResult{}, err
+		}
+	}
+	if err := admission.Validate(); err != nil || admission.TenantID != tenantID || admission.EngagementID != engagementID {
+		return ports.ScanSaveResult{}, fmt.Errorf("%w: inventory admission does not match scan", shared.ErrValidation)
+	}
 	sbomID := doc.ID
 	if sbomID.IsZero() {
 		sbomID = shared.ID(rand.Text())
@@ -48,6 +69,7 @@ func (r *ScanRepository) SaveScan(ctx context.Context, engagementID shared.ID, d
 	}
 	records := make([]sbom.ComponentRecord, 0, len(doc.Components))
 	components := make(map[string]struct{}, len(doc.Components))
+	coverage := sbom.IdentityCoverage{Total: len(doc.Components)}
 	for _, component := range doc.Components {
 		identity := sbom.IdentityFromComponent(component)
 		cpeIdentity := sbom.IdentityFromCPE(component.CPE, component.Version)
@@ -60,11 +82,14 @@ func (r *ScanRepository) SaveScan(ctx context.Context, engagementID shared.ID, d
 			Ecosystem: identity.Ecosystem, Package: identity.Package, IdentityHash: identity.Fingerprint,
 			IdentityStatus: identity.Status, IdentityReason: identity.Reason, Scope: scope,
 			Reachability: reachability, Unreferenced: unreferenced, SBOMCreatedAt: createdAt,
+			InventoryScope: admission.Scope, InventoryGeneration: admission.Generation,
 		})
+		if identity.Status == sbom.IdentityResolved || cpeIdentity.Status == sbom.IdentityResolved {
+			coverage.Resolved++
+		} else {
+			coverage.Unsupported++
+		}
 		components[component.Name+"\x00"+component.Version] = struct{}{}
-	}
-	if err := r.inventory.saveSnapshot(records); err != nil {
-		return 0, err
 	}
 	skipped := 0
 	for _, item := range vulns {
@@ -72,7 +97,22 @@ func (r *ScanRepository) SaveScan(ctx context.Context, engagementID shared.ID, d
 			skipped++
 		}
 	}
-	return skipped, nil
+	completeness := snap.InventoryCompleteness
+	if !completeness.Valid() {
+		completeness = sbom.InventoryUnknown
+	}
+	authoritative := snap.InventoryAuthoritative && !legacyAdmission
+	reason := snap.InventoryAuthorityReason
+	if legacyAdmission {
+		reason = "legacy_writer_without_admission"
+	}
+	publication := sbom.InventoryPublication{InventoryAdmission: admission, SBOMID: sbomID, Completeness: completeness,
+		Authoritative: authoritative, AuthorityReason: reason, Coverage: coverage, PublishedAt: createdAt}
+	publication, err := r.inventory.publishSnapshot(records, publication)
+	if err != nil {
+		return ports.ScanSaveResult{}, err
+	}
+	return ports.ScanSaveResult{SkippedVulnerabilities: skipped, Publication: publication}, nil
 }
 
 func inventoryRiskContext(component sbom.Component) (string, string, bool) {

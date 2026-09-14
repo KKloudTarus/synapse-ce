@@ -439,6 +439,16 @@ func TestLoadVulnerabilitySchedulerDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestVulnerabilitySchedulerOwnershipRejectsDualDispatch(t *testing.T) {
+	cfg := Config{VulnerabilitySchedulerEnabled: true, VulnerabilitySyncSchedulerInterval: time.Minute}
+	if err := cfg.ValidateVulnerabilitySchedulerOwnership(); err == nil {
+		t.Fatal("dual vulnerability scheduler ownership was accepted")
+	}
+	if err := (Config{VulnerabilitySchedulerEnabled: true}).ValidateVulnerabilitySchedulerOwnership(); err != nil {
+		t.Fatalf("single scheduler owner rejected: %v", err)
+	}
+}
+
 func TestLoadIntegrationSchedulerDefaultsAndOverrides(t *testing.T) {
 	keys := []string{
 		"SYNAPSE_INTEGRATION_SCHEDULER_ENABLED",
@@ -479,17 +489,18 @@ func TestLoadVulnerabilityRolloutDefaultsFailClosed(t *testing.T) {
 		"SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", "SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED",
 		"SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED", "SYNAPSE_VULNERABILITY_ACTIONS_ENABLED",
 		"SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED", "SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED",
-		"SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST",
+		"SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "SYNAPSE_VULNERABILITY_INLINE_WORKER_ENABLED",
 	}
 	for _, key := range keys {
 		t.Setenv(key, "")
 	}
 	cfg := Load()
-	if cfg.VulnerabilityProviderSyncEnabled || cfg.VulnerabilityOccurrenceWritesEnabled || cfg.VulnerabilityFindingProjectionEnabled || cfg.VulnerabilityActionsEnabled || cfg.VulnerabilityNotificationsEnabled || !cfg.VulnerabilityDryRunEnabled || len(cfg.VulnerabilityTenantAllowlist) != 0 {
+	if cfg.VulnerabilityProviderSyncEnabled || cfg.VulnerabilityInlineWorkerEnabled || cfg.VulnerabilityOccurrenceWritesEnabled || cfg.VulnerabilityFindingProjectionEnabled || cfg.VulnerabilityActionsEnabled || cfg.VulnerabilityNotificationsEnabled || !cfg.VulnerabilityDryRunEnabled || len(cfg.VulnerabilityTenantAllowlist) != 0 {
 		t.Fatalf("unsafe vulnerability rollout defaults: %+v", cfg)
 	}
 
 	t.Setenv("SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", "true")
+	t.Setenv("SYNAPSE_VULNERABILITY_INLINE_WORKER_ENABLED", "true")
 	t.Setenv("SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED", "true")
 	t.Setenv("SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED", "true")
 	t.Setenv("SYNAPSE_VULNERABILITY_ACTIONS_ENABLED", "true")
@@ -497,7 +508,7 @@ func TestLoadVulnerabilityRolloutDefaultsFailClosed(t *testing.T) {
 	t.Setenv("SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED", "false")
 	t.Setenv("SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "tenant-a, tenant-b")
 	cfg = Load()
-	if !cfg.VulnerabilityProviderSyncEnabled || !cfg.VulnerabilityOccurrenceWritesEnabled || !cfg.VulnerabilityFindingProjectionEnabled || !cfg.VulnerabilityActionsEnabled || !cfg.VulnerabilityNotificationsEnabled || cfg.VulnerabilityDryRunEnabled || len(cfg.VulnerabilityTenantAllowlist) != 2 {
+	if !cfg.VulnerabilityProviderSyncEnabled || !cfg.VulnerabilityInlineWorkerEnabled || !cfg.VulnerabilityOccurrenceWritesEnabled || !cfg.VulnerabilityFindingProjectionEnabled || !cfg.VulnerabilityActionsEnabled || !cfg.VulnerabilityNotificationsEnabled || cfg.VulnerabilityDryRunEnabled || len(cfg.VulnerabilityTenantAllowlist) != 2 {
 		t.Fatalf("vulnerability rollout overrides: %+v", cfg)
 	}
 }
@@ -1094,5 +1105,31 @@ func TestJavaTaintDefaultsOff(t *testing.T) {
 	t.Setenv("SYNAPSE_JAVATAINT_ENABLED", "true")
 	if !Load().JavaTaintEnabled {
 		t.Error("SYNAPSE_JAVATAINT_ENABLED=true must enable Java taint")
+	}
+}
+
+func TestVulnerabilityMaintenanceDefaultsDryRunAndBounded(t *testing.T) {
+	for _, key := range []string{"SYNAPSE_VULNERABILITY_MAINTENANCE_INTERVAL", "SYNAPSE_VULNERABILITY_MAINTENANCE_DELETE_ENABLED", "SYNAPSE_VULNERABILITY_MAINTENANCE_BATCH_SIZE"} {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.VulnerabilityMaintenanceInterval != 0 || cfg.VulnerabilityMaintenanceDeleteEnabled || cfg.VulnerabilityMaintenanceBatchSize != 1000 {
+		t.Fatalf("unsafe vulnerability maintenance defaults: interval=%s delete=%v batch=%d", cfg.VulnerabilityMaintenanceInterval, cfg.VulnerabilityMaintenanceDeleteEnabled, cfg.VulnerabilityMaintenanceBatchSize)
+	}
+	if err := cfg.ValidateVulnerabilityMaintenance(); err != nil {
+		t.Fatalf("default maintenance configuration: %v", err)
+	}
+	cfg.VulnerabilityMaintenanceDeleteEnabled = true
+	if err := cfg.ValidateVulnerabilityMaintenance(); err == nil {
+		t.Fatal("deletion without a maintenance interval must fail")
+	}
+	cfg.VulnerabilityMaintenanceInterval = time.Hour
+	if err := cfg.ValidateVulnerabilityMaintenance(); err == nil {
+		t.Fatal("scheduled maintenance without leader election must fail")
+	}
+	cfg.LeaderElectionEnabled = true
+	cfg.VulnerabilityMaintenanceBatchSize = 1001
+	if err := cfg.ValidateVulnerabilityMaintenance(); err == nil {
+		t.Fatal("unbounded maintenance batch must fail")
 	}
 }

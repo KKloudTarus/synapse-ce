@@ -72,7 +72,15 @@ func TestAdvisoryMaterializerPostgresReplayAndConcurrency(t *testing.T) {
 
 	materializer := NewAdvisoryMaterializer(pool)
 	record := postgresObservationRecord(sourceID.String(), "record-1", advisoryID, "initial")
+	publishedAt := time.Now().UTC().Add(-time.Second)
+	record.Observation.PublishedAt = publishedAt
 	record.SyncRunID = runID
+	tenantCtx := shared.WithTenant(ctx, tenantID)
+	dailySince := publishedAt.Add(-time.Minute)
+	impactBefore, err := materializer.CountVulnerabilityAdvisoryDailyImpact(tenantCtx, dailySince)
+	if err != nil {
+		t.Fatalf("count daily impact before materialization: %v", err)
+	}
 	if _, err := materializer.Materialize(ctx, []advisory.ObservationRecord{record}); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("missing tenant error=%v", err)
 	}
@@ -83,7 +91,6 @@ func TestAdvisoryMaterializerPostgresReplayAndConcurrency(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM advisory_revisions WHERE advisory_id=$1`, advisoryID).Scan(&rejectedRevisions); err != nil || rejectedRevisions != 0 {
 		t.Fatalf("rejected materialization revisions=%d err=%v", rejectedRevisions, err)
 	}
-	tenantCtx := shared.WithTenant(ctx, tenantID)
 	results := make([]advisory.MaterializationResult, 2)
 	errors := make([]error, 2)
 	var wait sync.WaitGroup
@@ -119,11 +126,16 @@ func TestAdvisoryMaterializerPostgresReplayAndConcurrency(t *testing.T) {
 		t.Fatalf("replay=%+v err=%v", replay, err)
 	}
 	changed := postgresObservationRecord(sourceID.String(), "record-1", advisoryID, "changed")
+	changed.Observation.PublishedAt = publishedAt
 	changed.SyncRunID = runID
 	changed.Observation.Advisory.Affected[0].Versions = []string{"2.0.0"}
 	changedResult, err := materializer.Materialize(tenantCtx, []advisory.ObservationRecord{changed})
 	if err != nil || !changedResult.CreatedRevision || changedResult.Revision != 2 {
 		t.Fatalf("changed=%+v err=%v", changedResult, err)
+	}
+	impactAfter, err := materializer.CountVulnerabilityAdvisoryDailyImpact(tenantCtx, dailySince)
+	if err != nil || impactAfter.NewlyDisclosed != impactBefore.NewlyDisclosed+1 || impactAfter.NewlyIngested != impactBefore.NewlyIngested+1 {
+		t.Fatalf("daily impact before=%+v after=%+v err=%v", impactBefore, impactAfter, err)
 	}
 	revisionPage, err := materializer.ListVulnerabilityAdvisoryRevisions(tenantCtx, vulnerabilityintel.AdvisoryRevisionQuery{AdvisoryID: advisoryID, Limit: 10})
 	if err != nil || len(revisionPage.Items) != 2 || len(revisionPage.Items[0].SyncRunIDs) != 1 || revisionPage.Items[0].SyncRunIDs[0] != shared.ID(runID) {
@@ -146,6 +158,20 @@ func TestAdvisoryMaterializerPostgresReplayAndConcurrency(t *testing.T) {
 	canonical, err := materializer.GetCanonical(ctx, advisoryID)
 	if err != nil || canonical.Advisory.Summary != "changed" {
 		t.Fatalf("canonical=%+v err=%v", canonical, err)
+	}
+	page, err := materializer.ListVulnerabilityAdvisories(tenantCtx, tenantID, vulnerabilityintel.AdvisoryQuery{Search: advisoryID, Limit: 1})
+	if err != nil || len(page.Items) != 1 || page.Items[0].Canonical.Advisory.ID != advisoryID {
+		t.Fatalf("server-search advisory page=%+v err=%v", page, err)
+	}
+	page, err = materializer.ListVulnerabilityAdvisories(tenantCtx, tenantID, vulnerabilityintel.AdvisoryQuery{
+		Search: advisoryID, RiskTrends: []vulnerabilityintel.RiskTrend{vulnerabilityintel.RiskTrendNone}, NoActions: true, Limit: 1,
+	})
+	if err != nil || len(page.Items) != 1 || page.Items[0].Canonical.Advisory.ID != advisoryID {
+		t.Fatalf("server-filtered advisory page=%+v err=%v", page, err)
+	}
+	coverage, err := materializer.SummarizeVulnerabilityCoverage(tenantCtx, tenantID, []vulnerabilityintel.AdvisoryCoverageRequest{{AdvisoryID: advisoryID, Revision: 2}})
+	if err != nil || coverage[advisoryID].State != vulnerabilityintel.CoverageIncompleteInventory || coverage[advisoryID].Reason != "no_authoritative_inventory" {
+		t.Fatalf("coverage without inventory=%+v err=%v", coverage, err)
 	}
 }
 

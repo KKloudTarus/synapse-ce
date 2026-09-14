@@ -37,6 +37,10 @@ export function mapImportedFinding(r: any): ImportedFinding {
 }
 
 export function mapFinding(r: any): Finding {
+  const sources = Array.isArray(r.Sources)
+    ? r.Sources.filter((source: unknown): source is string => typeof source === 'string')
+    : []
+
   return {
     id: r.ID,
     engagementId: r.EngagementID ?? '',
@@ -67,6 +71,13 @@ export function mapFinding(r: any): Finding {
     directBumps: r.DirectBumps ?? [],
     publicExploit: r.PublicExploit ?? false,
     epssPercentile: r.EPSSPercentile ?? 0,
+    sources,
+    confidence: r.Confidence ?? '',
+    advisoryId: r.AdvisoryID ?? '',
+    occurrenceId: r.OccurrenceID ?? '',
+    fixedVersion: r.FixedVersion ?? '',
+    detectionState: r.DetectionState ?? '',
+    evaluatedAt: r.EvaluatedAt ?? null,
   }
 }
 

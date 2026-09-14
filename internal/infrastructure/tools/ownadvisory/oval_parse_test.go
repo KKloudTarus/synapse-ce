@@ -43,6 +43,40 @@ func TestParseUbuntuOVAL(t *testing.T) {
 	}
 }
 
+func TestParseUbuntuOVALResolvesCurrentConstantVariablePackageList(t *testing.T) {
+	doc := `<oval_definitions xmlns:linux-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+	  <definitions><definition class="vulnerability" id="oval:com.ubuntu.jammy:def:2026100000000000">
+	    <metadata><title>CVE-2026-10000 on Ubuntu 22.04 LTS</title><affected><platform>Ubuntu 22.04 LTS</platform></affected>
+	      <reference source="CVE" ref_id="CVE-2026-10000"/><advisory><severity>High</severity></advisory></metadata>
+	    <criteria><criterion test_ref="oval:com.ubuntu.jammy:tst:2026100000000000"/></criteria>
+	  </definition></definitions>
+	  <tests><linux-def:dpkginfo_test id="oval:com.ubuntu.jammy:tst:2026100000000000">
+	    <linux-def:object object_ref="oval:com.ubuntu.jammy:obj:2026100000000000"/>
+	    <linux-def:state state_ref="oval:com.ubuntu.jammy:ste:2026100000000000"/>
+	  </linux-def:dpkginfo_test></tests>
+	  <objects><linux-def:dpkginfo_object id="oval:com.ubuntu.jammy:obj:2026100000000000">
+	    <linux-def:name var_ref="oval:com.ubuntu.jammy:var:2026100000000000"/>
+	  </linux-def:dpkginfo_object></objects>
+	  <states><linux-def:dpkginfo_state id="oval:com.ubuntu.jammy:ste:2026100000000000">
+	    <linux-def:evr operation="less than">2.4.52-1ubuntu4.3</linux-def:evr>
+	  </linux-def:dpkginfo_state></states>
+	  <variables><constant_variable id="oval:com.ubuntu.jammy:var:2026100000000000">
+	    <value>apache2</value><value>apache2-bin</value><value>apache2</value>
+	  </constant_variable></variables>
+	</oval_definitions>`
+
+	advs, err := ParseUbuntuOVAL([]byte(doc))
+	if err != nil {
+		t.Fatalf("ParseUbuntuOVAL: %v", err)
+	}
+	if len(advs) != 1 {
+		t.Fatalf("want 1 advisory, got %d: %+v", len(advs), advs)
+	}
+	if got := advs[0].Affected; len(got) != 2 || got[0].Package != "apache2" || got[1].Package != "apache2-bin" {
+		t.Fatalf("constant-variable packages = %+v, want apache2 and apache2-bin once each", got)
+	}
+}
+
 func TestParseUbuntuOVALMatchesViaDomainMatcher(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join("testdata", "oval-jammy.xml"))
 	advs, err := ParseUbuntuOVAL(data)

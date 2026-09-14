@@ -433,6 +433,11 @@ type Config struct {
 	// an explicit tenant allowlist entry; "*" enables all tenants. Dry-run records correlation
 	// differences without mutating occurrences, findings, actions, or notification outbox rows.
 	VulnerabilityProviderSyncEnabled bool
+	// VulnerabilityInlineWorkerEnabled lets synapse-api consume only vulnerability sync and reconciliation
+	// jobs when PostgreSQL is configured. It is an explicit local/single-process topology option; the default
+	// remains a separately deployed worker. Unlike scan workers, these handlers execute no target code and do
+	// not require the external-tool sandbox.
+	VulnerabilityInlineWorkerEnabled bool
 	// VulnerabilitySyncSchedulerInterval turns on the leader-gated cadence-driven sync scheduler when set
 	// above zero: every interval a single worker enqueues each enabled source whose last successful sync is
 	// older than its Cadence, and reclaims runs stranded past VulnerabilitySyncStaleAfter. Zero (the default)
@@ -452,6 +457,15 @@ type Config struct {
 	VulnerabilityNotificationsEnabled      bool
 	VulnerabilityDryRunEnabled             bool
 	VulnerabilityTenantAllowlist           []string
+	// Vulnerability maintenance is disabled until an interval is configured.
+	// Even then it remains audit-only unless DeleteEnabled is explicitly set.
+	VulnerabilityMaintenanceInterval           time.Duration
+	VulnerabilityMaintenanceDeleteEnabled      bool
+	VulnerabilityRawPayloadRetention           time.Duration
+	VulnerabilitySyncRunRetention              time.Duration
+	VulnerabilityResolvedOccurrenceRetention   time.Duration
+	VulnerabilityUnreferencedAdvisoryRetention time.Duration
+	VulnerabilityMaintenanceBatchSize          int
 	// SLAEnabled turns on durable risk-based remediation deadlines, versioned tenant policy, and
 	// human lifecycle APIs. Default false until an operator explicitly opts into the new schema/path.
 	SLAEnabled bool
@@ -887,38 +901,38 @@ func Load() Config {
 		// absent. Set the flag to false to opt out. Capabilities that need external setup or would be
 		// unsafe unsandboxed stay OFF by default (sandbox, agent/LLM, taint, maven/gradle resolvers,
 		// jarhash egress) – see their fields below.
-		JudgmentsEnabled:                  getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
-		SASTEnabled:                       getbool("SYNAPSE_SAST_ENABLED", true),
-		SecretScanEnabled:                 getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
-		SecretHistoryEnabled:              getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
-		SecretVerifyEnabled:               getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
-		SecretVerifyRPS:                   getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
-		SecretVerifyVaultAddr:             strings.TrimSpace(getenv("SYNAPSE_SECRET_VERIFY_VAULT_ADDR", "")),
-		MisconfigEnabled:                  getbool("SYNAPSE_MISCONFIG_ENABLED", true),
-		SuppressionEnabled:                getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
-		VEXEnabled:                        getbool("SYNAPSE_VEX_ENABLED", true),
-		ComplianceEnabled:                 getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
-		DetectionPriority:                 os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
-		DBMaxAgeDays:                      getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
-		ScanCacheEnabled:                  getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
-		ScanCacheDir:                      os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
-		ImageRootFSEnabled:                getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
-		OwnedAdvisoryEnabled:              getbool("SYNAPSE_OWNED_ADVISORY", true),
-		SymbolOverlayDir:                  getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
-		ReachabilityEnabled:               getbool("SYNAPSE_REACHABILITY_ENABLED", true),
-		PyReachabilityEnabled:             getbool("SYNAPSE_PYREACH_ENABLED", true),
-		PySemanticReachabilityEnabled:     getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
-		ASTBin:                            os.Getenv("SYNAPSE_AST_BIN"),
-		PythonTaintEnabled:                getbool("SYNAPSE_PYTAINT_ENABLED", true),
-		TaintRulesFile:                    strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
-		JsTaintEnabled:                    getbool("SYNAPSE_JSTAINT_ENABLED", false),
-		JavaTaintEnabled:                  getbool("SYNAPSE_JAVATAINT_ENABLED", false),
-		TriScoreReassessEnabled:           getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
-		FleetCorrelationEnabled:           getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
-		FleetCorrelationWindow:            getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
-		FleetCorrelationMaxPerIncident:    getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
-		FleetCorrelationPageSize:          getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
-		FleetCorrelationMaxActiveSessions: getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
+		JudgmentsEnabled:                            getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
+		SASTEnabled:                                 getbool("SYNAPSE_SAST_ENABLED", true),
+		SecretScanEnabled:                           getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
+		SecretHistoryEnabled:                        getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
+		SecretVerifyEnabled:                         getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
+		SecretVerifyRPS:                             getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
+		SecretVerifyVaultAddr:                       strings.TrimSpace(getenv("SYNAPSE_SECRET_VERIFY_VAULT_ADDR", "")),
+		MisconfigEnabled:                            getbool("SYNAPSE_MISCONFIG_ENABLED", true),
+		SuppressionEnabled:                          getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
+		VEXEnabled:                                  getbool("SYNAPSE_VEX_ENABLED", true),
+		ComplianceEnabled:                           getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
+		DetectionPriority:                           os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
+		DBMaxAgeDays:                                getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
+		ScanCacheEnabled:                            getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
+		ScanCacheDir:                                os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
+		ImageRootFSEnabled:                          getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
+		OwnedAdvisoryEnabled:                        getbool("SYNAPSE_OWNED_ADVISORY", true),
+		SymbolOverlayDir:                            getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
+		ReachabilityEnabled:                         getbool("SYNAPSE_REACHABILITY_ENABLED", true),
+		PyReachabilityEnabled:                       getbool("SYNAPSE_PYREACH_ENABLED", true),
+		PySemanticReachabilityEnabled:               getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
+		ASTBin:                                      os.Getenv("SYNAPSE_AST_BIN"),
+		PythonTaintEnabled:                          getbool("SYNAPSE_PYTAINT_ENABLED", true),
+		TaintRulesFile:                              strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
+		JsTaintEnabled:                              getbool("SYNAPSE_JSTAINT_ENABLED", false),
+		JavaTaintEnabled:                            getbool("SYNAPSE_JAVATAINT_ENABLED", false),
+		TriScoreReassessEnabled:                     getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
+		FleetCorrelationEnabled:                     getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
+		FleetCorrelationWindow:                      getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
+		FleetCorrelationMaxPerIncident:              getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
+		FleetCorrelationPageSize:                    getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
+		FleetCorrelationMaxActiveSessions:           getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
 		FleetCorrelationMaxTimelineRefsPerDetection: getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_DETECTION", 32),
 		FleetCorrelationMaxTimelineRefsPerPage:      getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE", 500),
 		JSReachabilityEnabled:                       getbool("SYNAPSE_JSREACH_ENABLED", true),
@@ -975,6 +989,7 @@ func Load() Config {
 		IntegrationSchedulerQueueDepth:              getint("SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH", 100),
 		IntegrationAllowPrivateNetwork:              getbool("SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK", false),
 		VulnerabilityProviderSyncEnabled:            getbool("SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", false),
+		VulnerabilityInlineWorkerEnabled:            getbool("SYNAPSE_VULNERABILITY_INLINE_WORKER_ENABLED", false),
 		VulnerabilitySyncSchedulerInterval:          getduration("SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_INTERVAL", 0),
 		VulnerabilitySyncStaleAfter:                 getduration("SYNAPSE_VULNERABILITY_SYNC_STALE_AFTER", 2*time.Hour),
 		VulnerabilitySyncSchedulerDispatch:          getint("SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_DISPATCH_LIMIT", 16),
@@ -984,6 +999,13 @@ func Load() Config {
 		VulnerabilityNotificationsEnabled:           getbool("SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED", false),
 		VulnerabilityDryRunEnabled:                  getbool("SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED", true),
 		VulnerabilityTenantAllowlist:                splitList(getenv("SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "")),
+		VulnerabilityMaintenanceInterval:            getduration("SYNAPSE_VULNERABILITY_MAINTENANCE_INTERVAL", 0),
+		VulnerabilityMaintenanceDeleteEnabled:       getbool("SYNAPSE_VULNERABILITY_MAINTENANCE_DELETE_ENABLED", false),
+		VulnerabilityRawPayloadRetention:            getduration("SYNAPSE_VULNERABILITY_RAW_PAYLOAD_RETENTION", 30*24*time.Hour),
+		VulnerabilitySyncRunRetention:               getduration("SYNAPSE_VULNERABILITY_SYNC_RUN_RETENTION", 180*24*time.Hour),
+		VulnerabilityResolvedOccurrenceRetention:    getduration("SYNAPSE_VULNERABILITY_RESOLVED_OCCURRENCE_RETENTION", 90*24*time.Hour),
+		VulnerabilityUnreferencedAdvisoryRetention:  getduration("SYNAPSE_VULNERABILITY_UNREFERENCED_ADVISORY_RETENTION", 30*24*time.Hour),
+		VulnerabilityMaintenanceBatchSize:           getint("SYNAPSE_VULNERABILITY_MAINTENANCE_BATCH_SIZE", 1000),
 		SLAEnabled:                                  getbool("SYNAPSE_SLA_ENABLED", false),
 		GovulncheckBin:                              getenv("SYNAPSE_GOVULNCHECK_BIN", "govulncheck"),
 		ReachabilityBuilder:                         normalizeEnv(getenv("SYNAPSE_REACHABILITY_BUILDER", "owned")),
@@ -1248,6 +1270,35 @@ func (c Config) ValidateCorrelationPosture() error {
 		return errors.New("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE must be between 1 and 10000")
 	case c.FleetCorrelationMaxTimelineRefsPerDetection > c.FleetCorrelationMaxTimelineRefsPerPage:
 		return errors.New("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_DETECTION must not exceed per-page limit")
+	}
+	return nil
+}
+
+// ValidateVulnerabilitySchedulerOwnership rejects the two historical scheduler
+// switches being enabled together. Both composition roots use the same scheduler
+// implementation, but exactly one process may own source due-time dispatch.
+func (c Config) ValidateVulnerabilitySchedulerOwnership() error {
+	if c.VulnerabilitySchedulerEnabled && c.VulnerabilitySyncSchedulerInterval > 0 {
+		return errors.New("configure only one vulnerability scheduler owner: SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED or SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_INTERVAL")
+	}
+	return nil
+}
+
+func (c Config) ValidateVulnerabilityMaintenance() error {
+	if c.VulnerabilityMaintenanceInterval < 0 {
+		return errors.New("SYNAPSE_VULNERABILITY_MAINTENANCE_INTERVAL must not be negative")
+	}
+	if c.VulnerabilityMaintenanceInterval > 0 && !c.LeaderElectionEnabled {
+		return errors.New("SYNAPSE_VULNERABILITY_MAINTENANCE_INTERVAL requires SYNAPSE_LEADER_ENABLED=true")
+	}
+	if c.VulnerabilityMaintenanceDeleteEnabled && c.VulnerabilityMaintenanceInterval <= 0 {
+		return errors.New("SYNAPSE_VULNERABILITY_MAINTENANCE_DELETE_ENABLED requires a positive maintenance interval")
+	}
+	if c.VulnerabilityRawPayloadRetention <= 0 || c.VulnerabilitySyncRunRetention <= 0 || c.VulnerabilityResolvedOccurrenceRetention <= 0 || c.VulnerabilityUnreferencedAdvisoryRetention <= 0 {
+		return errors.New("vulnerability retention durations must be positive")
+	}
+	if c.VulnerabilityMaintenanceBatchSize <= 0 || c.VulnerabilityMaintenanceBatchSize > 1000 {
+		return errors.New("SYNAPSE_VULNERABILITY_MAINTENANCE_BATCH_SIZE must be between 1 and 1000")
 	}
 	return nil
 }

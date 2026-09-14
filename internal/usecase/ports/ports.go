@@ -40,6 +40,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityaction"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityintel"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilitymaintenance"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityoccurrence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityrisk"
@@ -513,6 +514,25 @@ type FindingRepository interface {
 	SetAssignee(ctx context.Context, engagementID, findingID shared.ID, assignee string, expectedVersion int) (finding.Finding, error)
 }
 
+type VulnerabilityFindingOccurrenceLinker interface {
+	LinkVulnerabilityFindingOccurrence(ctx context.Context, tenantID, engagementID, findingID, occurrenceID shared.ID, at time.Time) error
+}
+
+// FindingDedupReader resolves the stable finding identity after an upsert. It is
+// deliberately separate from FindingRepository so older adapters remain source
+// compatible while vulnerability projection can preserve historical finding IDs.
+type FindingDedupReader interface {
+	GetByEngagementAndDedupKey(ctx context.Context, engagementID shared.ID, dedupKey string) (finding.Finding, error)
+}
+
+// VulnerabilityPrimaryFindingMapper owns the VI-specific uniqueness boundary:
+// one primary remediation workflow per tenant, technical target and canonical
+// advisory. Conflicted historical groups are fenced until explicitly resolved.
+type VulnerabilityPrimaryFindingMapper interface {
+	CheckVulnerabilityPrimaryFinding(ctx context.Context, tenantID, engagementID shared.ID, inventoryScope, advisoryID string) error
+	MapVulnerabilityPrimaryFinding(ctx context.Context, tenantID, engagementID shared.ID, inventoryScope, advisoryID string, findingID shared.ID, at time.Time) error
+}
+
 // CommentRepository persists the per-finding comment thread – the human
 // collaboration record, distinct from the append-only audit log. Reads are scoped
 // to the engagement (no cross-engagement comment access).
@@ -639,9 +659,18 @@ type Provenance struct {
 // ScanSnapshot is the reproducibility record persisted with a scan: the tool
 // versions used and the vulnerability-DB snapshot marker (source + query time).
 type ScanSnapshot struct {
-	ToolVersions   map[string]string
-	VulnDBSnapshot string
-	GrypeDBVersion string // Grype vulnerability-DB build/schema (reproducibility); empty if unused
+	ToolVersions             map[string]string
+	VulnDBSnapshot           string
+	GrypeDBVersion           string // Grype vulnerability-DB build/schema (reproducibility); empty if unused
+	InventoryAdmission       sbom.InventoryAdmission
+	InventoryCompleteness    sbom.InventoryCompleteness
+	InventoryAuthoritative   bool
+	InventoryAuthorityReason string
+}
+
+type ScanSaveResult struct {
+	SkippedVulnerabilities int
+	Publication            sbom.InventoryPublication
 }
 
 // ScanManifest captures everything needed to explain + replay a scan result
@@ -699,9 +728,12 @@ type ScanRunProvenanceStore interface {
 // ScanRepository persists an SCA scan's SBOM (with its components) and the
 // vulnerabilities found against them, as an immutable snapshot.
 type ScanRepository interface {
+	// AdmitInventory assigns the scope generation before scan execution starts.
+	// A generation may be abandoned, but is never reused.
+	AdmitInventory(ctx context.Context, engagementID shared.ID, scope string, admittedAt time.Time) (sbom.InventoryAdmission, error)
 	// SaveScan persists the snapshot and returns the count of vulns that could not
 	// be linked to an SBOM component (skipped, never orphaned).
-	SaveScan(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM, vulns []vulnerability.Vulnerability, snap ScanSnapshot) (int, error)
+	SaveScan(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM, vulns []vulnerability.Vulnerability, snap ScanSnapshot) (ScanSaveResult, error)
 }
 
 // ComponentInventoryStore returns only components from the latest persisted SBOM
@@ -710,10 +742,19 @@ type ScanRepository interface {
 // query contract rather than guessed into a match.
 type ComponentInventoryStore interface {
 	ListCurrentComponents(ctx context.Context, query sbom.ComponentQuery) (sbom.ComponentPage, error)
+	ListSnapshotComponents(ctx context.Context, query sbom.SnapshotQuery) (sbom.ComponentPage, error)
+	ListCurrentInventoryPublications(ctx context.Context, tenantID shared.ID, cursor sbom.InventoryCursor, limit int) (sbom.InventoryPublicationPage, error)
+	GetCurrentInventoryPublication(ctx context.Context, tenantID, engagementID shared.ID, scope string) (sbom.InventoryPublication, error)
+}
+
+type InventoryWorkStore interface {
+	ClaimInventoryWork(ctx context.Context, tenantID shared.ID, owner string, at time.Time, lease time.Duration, limit int) ([]sbom.InventoryWork, error)
+	FinishInventoryWork(ctx context.Context, work sbom.InventoryWork, owner string, state sbom.InventoryWorkState, reason string, nextAttemptAt, at time.Time) error
+	CompleteInventoryPublication(ctx context.Context, publication sbom.InventoryPublication, at time.Time) error
 }
 
 type SBOMVulnerabilityReconciler interface {
-	ReconcileSBOM(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM) error
+	ReconcileSBOM(ctx context.Context, publication sbom.InventoryPublication) error
 }
 
 type AdvisoryRevisionReconciler interface {
@@ -802,6 +843,25 @@ type VulnerabilityAdvisoryReadStore interface {
 	ListVulnerabilityAdvisoryRevisions(ctx context.Context, query vulnerabilityintel.AdvisoryRevisionQuery) (vulnerabilityintel.AdvisoryRevisionPage, error)
 	ListVulnerabilitySyncRunRevisions(ctx context.Context, runIDs []shared.ID, limitPerRun int) (map[shared.ID]vulnerabilityintel.AdvisoryRevisionLinkPage, error)
 	CountVulnerabilityAdvisoriesChangedSince(ctx context.Context, since time.Time) (int64, error)
+}
+
+// VulnerabilityCoverageReadStore is an optional durable read capability. It
+// combines advisory checkpoints with authoritative inventory-work state so a
+// missing occurrence is never presented as proof of no exposure.
+type VulnerabilityCoverageReadStore interface {
+	SummarizeVulnerabilityCoverage(ctx context.Context, tenantID shared.ID, requests []vulnerabilityintel.AdvisoryCoverageRequest) (map[string]vulnerabilityintel.AdvisoryCoverageSummary, error)
+}
+
+type VulnerabilityAdvisoryImpactReadStore interface {
+	CountVulnerabilityAdvisoryDailyImpact(ctx context.Context, since time.Time) (vulnerabilityintel.AdvisoryDailyImpact, error)
+}
+
+type VulnerabilityOccurrenceImpactReadStore interface {
+	CountNewlyAffectedAssets(ctx context.Context, tenantID shared.ID, since time.Time) (int64, error)
+}
+
+type VulnerabilityRetentionStore interface {
+	RunVulnerabilityRetention(ctx context.Context, runID shared.ID, policy vulnerabilitymaintenance.Policy, dryRun bool, at time.Time) (vulnerabilitymaintenance.Run, error)
 }
 
 type VulnerabilityOccurrenceReadStore interface {

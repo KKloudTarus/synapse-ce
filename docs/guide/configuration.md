@@ -342,6 +342,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_VULNERABILITY_SCHEDULER_MAX_QUEUE_DEPTH` | `100` | Stop dispatching when the vulnerability-sync queue reaches this depth. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT` | `10` | Maximum stale runs recovered per scheduler tick. |
 | `SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED` | `false` | Permit provider sync execution. This global gate also blocks already queued runs after rollback. |
+| `SYNAPSE_VULNERABILITY_INLINE_WORKER_ENABLED` | `false` | Let `synapse-api` consume only vulnerability sync and reconciliation jobs in a PostgreSQL deployment. Intended for an explicit local/single-process topology; leave off when a separate worker consumes those jobs. These data-only handlers execute no target code and do not replace the sandboxed scan worker. |
 | `SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_INTERVAL` | `0` (off) | Above zero, turns on the leader-gated cadence-driven sync scheduler: every interval one worker enqueues each source whose last successful sync is older than its Cadence and reclaims stranded runs. Needs `SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED` and `SYNAPSE_LEADER_ENABLED`. |
 | `SYNAPSE_VULNERABILITY_SYNC_STALE_AFTER` | `2h` | A queued/running sync run older than this is reclaimed by the scheduler's stale-recovery sweep. |
 | `SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_DISPATCH_LIMIT` | `16` | Maximum syncs enqueued (and stale runs recovered) per scheduler tick. |
@@ -352,6 +353,13 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED` | `false` | Permit notification-outbox writes for allowlisted tenants. |
 | `SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED` | `true` | Persist reconciliation diffs and counts without occurrence, finding, action, or notification mutations. |
 | `SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST` | empty | Comma-separated tenant IDs allowed to use tenant-scoped gates and dry-run; `*` enables every tenant. Empty fails closed. |
+| `SYNAPSE_VULNERABILITY_MAINTENANCE_INTERVAL` | `0` (off) | Leader-gated interval for audited vulnerability retention passes. A positive interval still performs dry-runs unless deletion is separately enabled. |
+| `SYNAPSE_VULNERABILITY_MAINTENANCE_DELETE_ENABLED` | `false` | Opt in to bounded deletion/clearing of eligible data. Requires a positive maintenance interval and a database role with global RLS visibility. |
+| `SYNAPSE_VULNERABILITY_RAW_PAYLOAD_RETENTION` | `720h` | Age for non-current provider raw payload clearing; normalized current evidence is preserved. |
+| `SYNAPSE_VULNERABILITY_SYNC_RUN_RETENTION` | `4320h` | Age for terminal sync runs that have no observation or revision references. |
+| `SYNAPSE_VULNERABILITY_RESOLVED_OCCURRENCE_RETENTION` | `2160h` | Age for resolved/withdrawn occurrences with no finding, risk, legal hold, current-inventory, or pending-work reference. |
+| `SYNAPSE_VULNERABILITY_UNREFERENCED_ADVISORY_RETENTION` | `720h` | Age for rejected/withdrawn advisories that have no aliases, observations, revisions needed by runs, tenant checkpoints, workflows, or pending reconciliation. |
+| `SYNAPSE_VULNERABILITY_MAINTENANCE_BATCH_SIZE` | `1000` | Per-category upper bound for one maintenance pass; values above 1000 are rejected. |
 | `SYNAPSE_SLA_ENABLED` | `false` | Enable versioned risk-based remediation deadlines, immutable assessment history, human-only lifecycle transitions, and continuous-intelligence reassessment. See [Remediation SLA governance](sla-governance.md). |
 | `SYNAPSE_ASSESSMENT_CYCLE_API_ENABLED` | `false` | Atomically create initial Assessment Cycles and enable tenant-scoped lifecycle, Re-test, list, and archive APIs. Create/archive requests require `Idempotency-Key`; archive also requires `If-Match`. |
 | `SYNAPSE_ASSESSMENT_CYCLE_DUAL_WRITE_ENABLED` | `false` | Enable the independently gated new-Assessment Cycle/root dual-write path after schema readiness and tenant rollout checks. |

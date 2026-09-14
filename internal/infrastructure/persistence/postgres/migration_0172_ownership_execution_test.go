@@ -8,7 +8,7 @@ import (
 )
 
 func TestMigration0171And0172OwnershipExecutionUpgrade(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 166, func(db *sql.DB) {
+	_, db := ownershipTestDatabase(t, 170, func(db *sql.DB) {
 		if _, err := db.Exec(`BEGIN; SELECT set_config('app.current_tenant','default',true); INSERT INTO engagements(tenant_id,id,name) VALUES('default','before-capture','Before capture'); INSERT INTO findings(tenant_id,engagement_id,id,title,assignee) VALUES('default','before-capture','historical','Existing finding','Existing owner'); COMMIT`); err != nil {
 			t.Fatal(err)
 		}
@@ -36,13 +36,13 @@ func TestMigration0171And0172OwnershipExecutionUpgrade(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.DownTo(db, ".", 166); err != nil {
+	if err := goose.DownTo(db, ".", 170); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range tables {
 		requireMigrationTable(t, db, table, false)
 	}
-	if err := goose.UpTo(db, ".", 168); err != nil {
+	if err := goose.UpTo(db, ".", 172); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range tables {

@@ -291,6 +291,10 @@ func metricsAddrIsLoopback(addr string) bool {
 	return ip.IsLoopback()
 }
 
+func shouldStartVulnerabilityWorker(cfg config.Config) bool {
+	return cfg.DBDSN == "" || cfg.VulnerabilityInlineWorkerEnabled
+}
+
 // telemetryBindingReader adapts the telemetry transport store's agent→asset binding list to the
 // desired-vs-observed BindingReader (#633), mapping ports.TelemetryAssetBinding to desired.CurrentBinding.
 type telemetryBindingReader struct {
@@ -334,6 +338,14 @@ func main() {
 	}
 	if err := cfg.ValidateMigrationPosture(); err != nil {
 		log.Error("database migration posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateVulnerabilitySchedulerOwnership(); err != nil {
+		log.Error("vulnerability scheduler ownership invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateVulnerabilityMaintenance(); err != nil {
+		log.Error("vulnerability maintenance configuration invalid", "err", err)
 		os.Exit(1)
 	}
 	if err := cfg.ValidateOIDCPosture(); err != nil {
@@ -1809,6 +1821,7 @@ func main() {
 		log.Error("vulnerability finding projection init failed", "err", err)
 		os.Exit(1)
 	}
+	vulnerabilityProjection.SetWorkflowSources(vulnerabilityOccurrences, vulnerabilityAssessments)
 	vulnerabilityEvaluator, err := vulnerabilityevaluation.NewService(vulnerabilityMaterializer, vulnerabilityAssessments, vulnerabilityProjection, clock)
 	if err != nil {
 		log.Error("vulnerability evaluation init failed", "err", err)
@@ -1893,6 +1906,13 @@ func main() {
 		os.Exit(1)
 	}
 	vulnerabilityReconciliation.SetRollout(vulnerabilityRollout)
+	vulnerabilityReconciliation.SetInventoryStore(vulnerabilityInventory)
+	if cfg.VulnerabilityInlineWorkerEnabled && databasePool != nil {
+		// PostgreSQL execution is lease-protected in the standalone worker. Inline mode must preserve the
+		// same single-run guarantee; otherwise the monitor correctly fails closed when it consumes a job.
+		vulnerabilityMonitor.SetRunLock(postgres.NewLeaseRunLock(databasePool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
+		vulnerabilityReconciliation.SetRunLock(postgres.NewLeaseRunLock(databasePool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
+	}
 	vulnerabilitySBOMCorrelation, err := vulnerabilitycorrelation.NewSBOMReconciler(vulnerabilityInventory, vulnerabilityAdvisoryStore, vulnerabilityMaterializer, vulnerabilityOccurrences)
 	if err != nil {
 		log.Error("vulnerability SBOM correlation init failed", "err", err)
@@ -1906,6 +1926,13 @@ func main() {
 		log.Error("vulnerability runtime init failed", "err", err)
 		os.Exit(1)
 	}
+	vulnerabilityRuntime.SetAdvisoryRunStarter(vulnerabilityReconciliation)
+	vulnerabilityInventoryWork, ok := vulnerabilityInventory.(ports.InventoryWorkStore)
+	if !ok {
+		log.Error("vulnerability inventory store does not support durable work")
+		os.Exit(1)
+	}
+	vulnerabilityRuntime.SetInventoryWorkStore(vulnerabilityInventoryWork)
 	vulnerabilityMonitor.SetReconciler(vulnerabilityRuntime)
 	scaService.SetVulnerabilityReconciler(vulnerabilityRuntime)
 	router.SetVulnerabilityIntelligence(vulnerabilitySourceService, vulnerabilityMonitor)
@@ -1913,17 +1940,24 @@ func main() {
 	router.SetVulnerabilityAudit(auditLog)
 	router.SetVulnerabilityReadModel(vulnerabilityRead)
 	router.SetVulnerabilityActions(vulnerabilityActionService)
-	if cfg.DBDSN == "" {
+	if shouldStartVulnerabilityWorker(cfg) {
 		handlers := map[string]worker.Handler{
 			vulnerabilitymonitor.JobKind:   vulnerabilitySyncJobHandler{svc: vulnerabilityMonitor},
 			vulnerabilityreconcile.JobKind: vulnerabilityReconcileJobHandler{svc: vulnerabilityReconciliation},
-			integrationuc.JobKind:          integrationJobHandler{svc: integrationService},
 		}
-		if assessmentComparisonService != nil {
-			handlers[comparisonuc.JobKind] = assessmentComparisonJobHandler{svc: assessmentComparisonService}
-		}
-		if assessmentClosureReportService != nil {
-			handlers[cycleuc.AssessmentClosureReportJobKind] = assessmentClosureReportJobHandler{svc: assessmentClosureReportService}
+		// Preserve the historical in-memory single-process worker. PostgreSQL inline mode is intentionally
+		// narrower: it consumes only data-only vulnerability jobs and cannot claim scan/integration work that
+		// belongs to the separately sandboxed worker topology.
+		if cfg.DBDSN == "" {
+			handlers[integrationuc.JobKind] = integrationJobHandler{svc: integrationService}
+			if assessmentComparisonService != nil {
+				handlers[comparisonuc.JobKind] = assessmentComparisonJobHandler{svc: assessmentComparisonService}
+			}
+			if assessmentClosureReportService != nil {
+				handlers[cycleuc.AssessmentClosureReportJobKind] = assessmentClosureReportJobHandler{svc: assessmentClosureReportService}
+			}
+		} else {
+			log.Info("vulnerability inline worker ENABLED", "handlers", "vulnerability-sync,vulnerability-reconcile")
 		}
 		vulnerabilityWorker = worker.New(vulnerabilityQueue, handlers, worker.Config{Visibility: 2 * time.Minute, Poll: 100 * time.Millisecond, MaxAttempts: 3}, log)
 	}
@@ -3505,6 +3539,7 @@ func main() {
 			os.Exit(1)
 		}
 		scheduler.SetLogger(log)
+		scheduler.SetRuntimeRecovery(vulnerabilityRuntime)
 		go scheduler.Run(ctx)
 		log.Info("vulnerability scheduler ENABLED",
 			"poll", cfg.VulnerabilitySchedulerPollInterval,

@@ -33,6 +33,7 @@ var navExclusions = map[string]string{
 	// An internal implementation/tracking plan for the vulnerability-intelligence work, not end-user guide
 	// content; it lives under docs/guide for co-location but is intentionally kept out of the published nav.
 	"vulnerability-intelligence-implementation-plan.md": "internal implementation plan, not a user guide",
+	"vulnerability-intelligence-execution-readiness.md": "internal implementation readiness handoff, not a user guide",
 }
 
 // TestEveryGuidePageIsPublished fails when a Markdown file under the MkDocs docs_dir is missing from the

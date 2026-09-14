@@ -1,18 +1,24 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, CheckCircle, InfoCircle, XClose } from '@untitledui/icons'
-import { cn } from '../ui'
+import { Button, cn } from '../ui'
 
 export type ToastTone = 'success' | 'error' | 'info'
+
+export interface ToastAction {
+  label: string
+  onClick: () => void
+}
 
 export interface ToastMessage {
   id: number
   message: string
   tone: ToastTone
+  action?: ToastAction
 }
 
 export interface ToastApi {
   /** Announce a short outcome. Errors stay until dismissed; the rest auto-expire. */
-  notify: (message: string, tone?: ToastTone) => void
+  notify: (message: string, tone?: ToastTone, action?: ToastAction) => void
   dismiss: (id: number) => void
   toasts: ToastMessage[]
 }
@@ -49,11 +55,11 @@ export function ToastProvider({ children, ttlMs = TOAST_TTL_MS }: { children: Re
   }, [])
 
   const notify = useCallback(
-    (message: string, tone: ToastTone = 'info') => {
+    (message: string, tone: ToastTone = 'info', action?: ToastAction) => {
       const text = message.trim()
       if (!text) return
       const id = nextId.current++
-      setToasts((current) => [...current, { id, message: text, tone }])
+      setToasts((current) => [...current, { id, message: text, tone, action }])
       // An error is the one outcome a user may need to read twice, so it waits
       // for an explicit dismissal instead of disappearing on a timer.
       if (tone === 'error') return
@@ -106,7 +112,22 @@ export function ToastRegion({ toasts, onDismiss }: { toasts: ToastMessage[]; onD
             )}
           >
             <Icon className={cn('mt-0.5 size-4 shrink-0', tone.iconClass)} aria-hidden="true" />
-            <span className="min-w-0 flex-1 break-words">{toast.message}</span>
+            <div className="min-w-0 flex-1">
+              <p className="break-words">{toast.message}</p>
+              {toast.action ? (
+                <Button
+                  type="button"
+                  variant="secondary-color"
+                  className="mt-2 px-2.5 py-1 text-xs"
+                  onClick={() => {
+                    toast.action?.onClick()
+                    onDismiss(toast.id)
+                  }}
+                >
+                  {toast.action.label}
+                </Button>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={() => onDismiss(toast.id)}

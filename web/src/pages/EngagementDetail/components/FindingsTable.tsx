@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, SwitchVertical01 } from '@untitledui/icons'
 import { Fragment } from 'react'
 import { AITriageBadges } from '../../../components/synapse/AITriageBadges'
+import { VulnerabilityIntelligenceBadge } from '../../../components/synapse/VulnerabilityIntelligenceBadge'
 import { KevBadge, Select, SevBadge, cn } from '../../../components/ui'
 import { sevRank } from '../../../lib/severity'
 import { statusLabel } from '../../../lib/format'
@@ -255,6 +256,7 @@ export function FindingsTable({
                   <td className="px-4 py-3 align-top">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-primary">{f.title}</span>
+                      {f.advisoryId && <VulnerabilityIntelligenceBadge compact />}
                       {f.kev && <KevBadge />}
                       {f.kind && f.kind !== 'sca' && <KindBadge kind={f.kind} />}
                       {f.cwe && (

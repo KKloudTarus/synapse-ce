@@ -31,6 +31,8 @@ var _ ports.AdvisoryMaterializer = (*AdvisoryMaterializer)(nil)
 var _ ports.AdvisoryStore = (*AdvisoryMaterializer)(nil)
 var _ ports.AdvisoryEvaluationCheckpointStore = (*AdvisoryMaterializer)(nil)
 var _ ports.VulnerabilityAdvisoryReadStore = (*AdvisoryMaterializer)(nil)
+var _ ports.VulnerabilityAdvisoryImpactReadStore = (*AdvisoryMaterializer)(nil)
+var _ ports.VulnerabilityCoverageReadStore = (*AdvisoryMaterializer)(nil)
 
 func (r *AdvisoryMaterializer) CurrentSourceRecordIDs(ctx context.Context, sourceID string, yield func(string) error) error {
 	sourceID = strings.TrimSpace(sourceID)
@@ -665,43 +667,103 @@ func (r *AdvisoryMaterializer) ListVulnerabilityAdvisories(ctx context.Context, 
 	if query.MaxCVSS != nil {
 		maxCVSS = *query.MaxCVSS
 	}
-	rows, err := r.pool.Query(ctx, `WITH latest AS (
-			SELECT DISTINCT ON (advisory_id) advisory_id,revision,data,changed_fields,created_at
-			FROM advisory_revisions ORDER BY advisory_id,revision DESC
-		)
-		SELECT advisory_id,revision,data,changed_fields,created_at FROM latest
-		WHERE advisory_id>$1
-		AND (cardinality($2::text[])=0 OR data#>>'{canonical,Status}'=ANY($2::text[]))
-		AND ($3='' OR lower(advisory_id) LIKE '%'||lower($3)||'%' OR lower(COALESCE(data#>>'{canonical,Advisory,Summary}','')) LIKE '%'||lower($3)||'%'
-			OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(data#>'{canonical,Advisory,Aliases}','[]'::jsonb)) alias WHERE lower(alias) LIKE '%'||lower($3)||'%'))
-		AND (NOT $4 OR COALESCE((data#>>'{canonical,KEV}')::boolean,false)=$5)
-		AND (NOT $6 OR COALESCE((data#>>'{canonical,Advisory,CVSSScore}')::double precision,0)>=$7)
-		AND (NOT $8 OR COALESCE((data#>>'{canonical,Advisory,CVSSScore}')::double precision,0)<=$9)
-		AND ($10='' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(data#>'{canonical,Sources}','[]'::jsonb)) source WHERE lower(source) LIKE '%'||lower($10)||'%'))
-		ORDER BY advisory_id COLLATE "C" LIMIT $11`, query.AfterID, statuses, query.Search, query.KEV != nil, kev, query.MinCVSS != nil, minCVSS, query.MaxCVSS != nil, maxCVSS, query.Source, query.Limit+1)
-	if err != nil {
-		return vulnerabilityintel.AdvisoryPage{}, fmt.Errorf("list vulnerability advisories: %w", err)
+	riskPriorities := append([]int{}, query.RiskPriorities...)
+	for _, priority := range riskPriorities {
+		if priority < 1 || priority > 5 {
+			return vulnerabilityintel.AdvisoryPage{}, fmt.Errorf("%w: invalid advisory risk priority", shared.ErrValidation)
+		}
 	}
-	defer rows.Close()
+	riskTrends := make([]string, len(query.RiskTrends))
+	for index, trend := range query.RiskTrends {
+		if !trend.Valid() {
+			return vulnerabilityintel.AdvisoryPage{}, fmt.Errorf("%w: invalid advisory risk trend", shared.ErrValidation)
+		}
+		riskTrends[index] = string(trend)
+	}
+	detectionStates := make([]string, len(query.DetectionStates))
+	for index, state := range query.DetectionStates {
+		if !state.Valid() {
+			return vulnerabilityintel.AdvisoryPage{}, fmt.Errorf("%w: invalid advisory detection state", shared.ErrValidation)
+		}
+		detectionStates[index] = string(state)
+	}
+	actionStates := make([]string, len(query.ActionStates))
+	for index, state := range query.ActionStates {
+		if !state.Valid() {
+			return vulnerabilityintel.AdvisoryPage{}, fmt.Errorf("%w: invalid advisory action state", shared.ErrValidation)
+		}
+		actionStates[index] = string(state)
+	}
 	page := vulnerabilityintel.AdvisoryPage{}
-	for rows.Next() {
-		var advisoryID string
-		var item vulnerabilityintel.AdvisoryItem
-		var payload, fields []byte
-		if err := rows.Scan(&advisoryID, &item.Revision, &payload, &fields, &item.ChangedAt); err != nil {
-			return vulnerabilityintel.AdvisoryPage{}, fmt.Errorf("scan vulnerability advisory: %w", err)
-		}
-		canonical, err := decodeCanonical(payload)
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `WITH latest AS (
+			SELECT DISTINCT ON (revisions.advisory_id) revisions.advisory_id,revisions.revision,revisions.data,revisions.changed_fields,revisions.created_at
+			FROM advisory_revisions revisions ORDER BY revisions.advisory_id,revisions.revision DESC
+		), ranked_risk AS (
+			SELECT assessment.advisory_id,assessment.priority,assessment.risk_score,assessment.previous_assessment_id,
+				row_number() OVER (PARTITION BY assessment.advisory_id ORDER BY assessment.priority,assessment.risk_score DESC,assessment.assessed_at DESC,assessment.id DESC) rank
+			FROM vulnerability_current_risk_assessments current
+			JOIN vulnerability_risk_assessments assessment ON assessment.tenant_id=current.tenant_id AND assessment.id=current.assessment_id
+			WHERE current.tenant_id=$11
+		), risk AS (
+			SELECT current.advisory_id,current.priority,CASE
+				WHEN current.previous_assessment_id IS NULL THEN 'new'
+				WHEN current.priority<previous.priority OR (current.priority=previous.priority AND current.risk_score>previous.risk_score) THEN 'increased'
+				WHEN current.priority>previous.priority OR (current.priority=previous.priority AND current.risk_score<previous.risk_score) THEN 'decreased'
+				ELSE 'unchanged' END AS trend
+			FROM ranked_risk current LEFT JOIN vulnerability_risk_assessments previous
+				ON previous.tenant_id=$11 AND previous.id=current.previous_assessment_id WHERE current.rank=1
+		)
+		SELECT latest.advisory_id,latest.revision,latest.data,latest.changed_fields,latest.created_at FROM latest
+		LEFT JOIN risk ON risk.advisory_id=latest.advisory_id
+		WHERE latest.advisory_id>$1
+		AND (COALESCE(cardinality($2::text[]),0)=0 OR latest.data#>>'{canonical,Status}'=ANY($2::text[]))
+		AND ($3='' OR lower(latest.advisory_id) LIKE '%'||lower($3)||'%' OR lower(COALESCE(latest.data#>>'{canonical,Advisory,Summary}','')) LIKE '%'||lower($3)||'%'
+			OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(latest.data#>'{canonical,Advisory,Aliases}','[]'::jsonb)) alias WHERE lower(alias) LIKE '%'||lower($3)||'%'))
+		AND (NOT $4 OR COALESCE((latest.data#>>'{canonical,KEV}')::boolean,false)=$5)
+		AND (NOT $6 OR COALESCE((latest.data#>>'{canonical,Advisory,CVSSScore}')::double precision,0)>=$7)
+		AND (NOT $8 OR COALESCE((latest.data#>>'{canonical,Advisory,CVSSScore}')::double precision,0)<=$9)
+		AND ($10='' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(latest.data#>'{canonical,Sources}','[]'::jsonb)) source WHERE lower(source) LIKE '%'||lower($10)||'%'))
+		AND (COALESCE(cardinality($12::int[]),0)=0 OR COALESCE(risk.priority,0)=ANY($12::int[]))
+		AND (COALESCE(cardinality($13::text[]),0)=0 OR COALESCE(risk.trend,'none')=ANY($13::text[]))
+		AND ($14='' OR EXISTS (SELECT 1 FROM vulnerability_occurrences occurrence
+			LEFT JOIN engagements engagement ON engagement.tenant_id=occurrence.tenant_id AND engagement.id=occurrence.engagement_id
+			WHERE occurrence.tenant_id=$11 AND occurrence.advisory_id=latest.advisory_id
+			AND lower(concat_ws(' ',occurrence.engagement_id,COALESCE(engagement.business_asset_id,''),COALESCE(engagement.name,''),occurrence.component_id,occurrence.component_fingerprint,occurrence.package_name,occurrence.component_cpe)) LIKE '%'||lower($14)||'%'))
+		AND (COALESCE(cardinality($15::text[]),0)=0 OR EXISTS (SELECT 1 FROM vulnerability_occurrences occurrence
+			WHERE occurrence.tenant_id=$11 AND occurrence.advisory_id=latest.advisory_id AND occurrence.state=ANY($15::text[])))
+		AND ((COALESCE(cardinality($16::text[]),0)=0 AND NOT $17) OR ($17 AND NOT EXISTS (SELECT 1 FROM vulnerability_actions action
+			JOIN vulnerability_risk_transitions transition ON transition.tenant_id=action.tenant_id AND transition.id=action.transition_id
+			WHERE action.tenant_id=$11 AND transition.advisory_id=latest.advisory_id)) OR EXISTS (
+			SELECT 1 FROM vulnerability_actions action JOIN vulnerability_risk_transitions transition
+			ON transition.tenant_id=action.tenant_id AND transition.id=action.transition_id
+			WHERE action.tenant_id=$11 AND transition.advisory_id=latest.advisory_id AND action.status=ANY($16::text[])))
+		ORDER BY latest.advisory_id COLLATE "C" LIMIT $18`, query.AfterID, statuses, query.Search, query.KEV != nil, kev, query.MinCVSS != nil, minCVSS, query.MaxCVSS != nil, maxCVSS, query.Source,
+			tenantID.String(), riskPriorities, riskTrends, query.AffectedAsset, detectionStates, actionStates, query.NoActions, query.Limit+1)
 		if err != nil {
-			return vulnerabilityintel.AdvisoryPage{}, err
+			return fmt.Errorf("list vulnerability advisories: %w", err)
 		}
-		if err := json.Unmarshal(fields, &item.ChangedFields); err != nil {
-			return vulnerabilityintel.AdvisoryPage{}, fmt.Errorf("decode vulnerability advisory changes: %w", err)
+		defer rows.Close()
+		for rows.Next() {
+			var advisoryID string
+			var item vulnerabilityintel.AdvisoryItem
+			var payload, fields []byte
+			if err := rows.Scan(&advisoryID, &item.Revision, &payload, &fields, &item.ChangedAt); err != nil {
+				return fmt.Errorf("scan vulnerability advisory: %w", err)
+			}
+			canonical, err := decodeCanonical(payload)
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal(fields, &item.ChangedFields); err != nil {
+				return fmt.Errorf("decode vulnerability advisory changes: %w", err)
+			}
+			item.Canonical = canonical
+			page.Items = append(page.Items, item)
 		}
-		item.Canonical = canonical
-		page.Items = append(page.Items, item)
-	}
-	if err := rows.Err(); err != nil {
+		return rows.Err()
+	})
+	if err != nil {
 		return vulnerabilityintel.AdvisoryPage{}, err
 	}
 	if len(page.Items) > query.Limit {
@@ -709,6 +771,84 @@ func (r *AdvisoryMaterializer) ListVulnerabilityAdvisories(ctx context.Context, 
 		page.Next = page.Items[len(page.Items)-1].Canonical.Advisory.ID
 	}
 	return page, nil
+}
+
+func (*AdvisoryMaterializer) SupportsServerAdvisoryFilters() bool { return true }
+
+func (r *AdvisoryMaterializer) SummarizeVulnerabilityCoverage(ctx context.Context, tenantID shared.ID, requests []vulnerabilityintel.AdvisoryCoverageRequest) (map[string]vulnerabilityintel.AdvisoryCoverageSummary, error) {
+	contextTenant, ok := shared.TenantFrom(ctx)
+	tenantID = shared.TenantOrDefault(tenantID)
+	if !ok || shared.TenantOrDefault(contextTenant) != tenantID {
+		return nil, fmt.Errorf("%w: coverage summary tenant does not match context", shared.ErrValidation)
+	}
+	ids := make([]string, 0, len(requests))
+	revisions := make([]int64, 0, len(requests))
+	for _, request := range requests {
+		id := strings.ToUpper(strings.TrimSpace(request.AdvisoryID))
+		if id == "" || request.Revision <= 0 {
+			return nil, fmt.Errorf("%w: invalid advisory coverage request", shared.ErrValidation)
+		}
+		ids, revisions = append(ids, id), append(revisions, request.Revision)
+	}
+	out := make(map[string]vulnerabilityintel.AdvisoryCoverageSummary, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `WITH requested AS (
+			SELECT advisory_id,revision FROM unnest($2::text[],$3::bigint[]) requested(advisory_id,revision)
+		), inventory AS (
+			SELECT count(*) FILTER (WHERE inventory.current_generation IS NOT NULL) AS current_count,
+				COALESCE(bool_or(inventory.latest_admitted_generation>COALESCE(inventory.current_generation,0)),false) AS newer_unpublished,
+				COALESCE(sum(sbom.identity_resolved),0) AS resolved_count,
+				COALESCE(sum(sbom.identity_unsupported),0) AS unsupported_count
+			FROM vulnerability_inventory_scopes inventory
+			LEFT JOIN sboms sbom ON sbom.tenant_id=inventory.tenant_id AND sbom.id=inventory.current_sbom_id
+			WHERE inventory.tenant_id=$1
+		), work AS (
+			SELECT COALESCE(bool_or(work.state<>'completed'),false) AS pending
+			FROM vulnerability_inventory_scopes inventory
+			JOIN vulnerability_inventory_work work ON work.tenant_id=inventory.tenant_id
+				AND work.engagement_id=inventory.engagement_id AND work.inventory_scope=inventory.inventory_scope
+				AND work.inventory_generation=inventory.current_generation AND work.sbom_id=inventory.current_sbom_id
+			WHERE inventory.tenant_id=$1
+		)
+		SELECT requested.advisory_id,CASE
+			WHEN EXISTS (SELECT 1 FROM vulnerability_occurrences occurrence WHERE occurrence.tenant_id=$1 AND occurrence.advisory_id=requested.advisory_id AND occurrence.state='detected') THEN 'affected'
+			WHEN inventory.current_count=0 THEN 'incomplete_inventory'
+			WHEN inventory.newer_unpublished THEN 'incomplete_inventory'
+			WHEN COALESCE(checkpoint.evaluated_revision,0)<requested.revision THEN 'not_evaluated'
+			WHEN work.pending THEN 'not_evaluated'
+			WHEN inventory.unsupported_count>0 THEN 'unsupported_identity'
+			ELSE 'evaluated_not_affected' END AS state,
+			CASE
+			WHEN EXISTS (SELECT 1 FROM vulnerability_occurrences occurrence WHERE occurrence.tenant_id=$1 AND occurrence.advisory_id=requested.advisory_id AND occurrence.state='detected') THEN 'active_occurrence'
+			WHEN inventory.current_count=0 THEN 'no_authoritative_inventory'
+			WHEN inventory.newer_unpublished THEN 'newer_inventory_not_authoritative'
+			WHEN COALESCE(checkpoint.evaluated_revision,0)<requested.revision THEN 'advisory_revision_pending'
+			WHEN work.pending THEN 'inventory_generation_pending'
+			WHEN inventory.unsupported_count>0 THEN 'unsupported_component_identity'
+			ELSE 'complete_evaluation' END AS reason
+		FROM requested CROSS JOIN inventory CROSS JOIN work
+		LEFT JOIN advisory_evaluation_checkpoints checkpoint ON checkpoint.tenant_id=$1 AND checkpoint.advisory_id=requested.advisory_id`, tenantID.String(), ids, revisions)
+		if err != nil {
+			return fmt.Errorf("summarize vulnerability coverage: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var advisoryID, state, reason string
+			if err := rows.Scan(&advisoryID, &state, &reason); err != nil {
+				return fmt.Errorf("scan vulnerability coverage: %w", err)
+			}
+			summary := vulnerabilityintel.AdvisoryCoverageSummary{State: vulnerabilityintel.CoverageState(state), Reason: reason}
+			if !summary.State.Valid() {
+				return fmt.Errorf("%w: invalid stored vulnerability coverage state", shared.ErrValidation)
+			}
+			out[advisoryID] = summary
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 func (r *AdvisoryMaterializer) CountVulnerabilityAdvisoriesChangedSince(ctx context.Context, since time.Time) (int64, error) {
@@ -722,6 +862,27 @@ func (r *AdvisoryMaterializer) CountVulnerabilityAdvisoriesChangedSince(ctx cont
 		return 0, fmt.Errorf("count changed vulnerability advisories: %w", err)
 	}
 	return count, nil
+}
+
+func (r *AdvisoryMaterializer) CountVulnerabilityAdvisoryDailyImpact(ctx context.Context, since time.Time) (vulnerabilityintel.AdvisoryDailyImpact, error) {
+	if _, ok := shared.TenantFrom(ctx); !ok || since.IsZero() {
+		return vulnerabilityintel.AdvisoryDailyImpact{}, fmt.Errorf("%w: tenant context and since are required", shared.ErrValidation)
+	}
+	var impact vulnerabilityintel.AdvisoryDailyImpact
+	err := r.pool.QueryRow(ctx, `WITH history AS (
+		SELECT advisory_id,min(created_at) AS first_ingested_at
+		FROM advisory_revisions GROUP BY advisory_id
+	), latest AS (
+		SELECT DISTINCT ON (advisory_id) advisory_id,data
+		FROM advisory_revisions ORDER BY advisory_id,revision DESC
+	)
+	SELECT count(*) FILTER (WHERE NULLIF(latest.data#>>'{canonical,PublishedAt}','')::timestamptz >= $1),
+	       count(*) FILTER (WHERE history.first_ingested_at >= $1)
+	FROM history JOIN latest USING(advisory_id)`, since.UTC()).Scan(&impact.NewlyDisclosed, &impact.NewlyIngested)
+	if err != nil {
+		return vulnerabilityintel.AdvisoryDailyImpact{}, fmt.Errorf("count vulnerability advisory daily impact: %w", err)
+	}
+	return impact, nil
 }
 
 func (r *AdvisoryMaterializer) ListVulnerabilityAdvisoryRevisions(ctx context.Context, query vulnerabilityintel.AdvisoryRevisionQuery) (vulnerabilityintel.AdvisoryRevisionPage, error) {

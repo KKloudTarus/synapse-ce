@@ -2,7 +2,27 @@ package main
 
 import (
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
 )
+
+func TestShouldStartVulnerabilityWorker(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		cfg  config.Config
+		want bool
+	}{
+		{name: "in-memory topology", cfg: config.Config{}, want: true},
+		{name: "postgres defaults to external worker", cfg: config.Config{DBDSN: "postgres://db/synapse"}, want: false},
+		{name: "postgres explicit inline worker", cfg: config.Config{DBDSN: "postgres://db/synapse", VulnerabilityInlineWorkerEnabled: true}, want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldStartVulnerabilityWorker(tt.cfg); got != tt.want {
+				t.Fatalf("shouldStartVulnerabilityWorker() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestMetricsAddrIsLoopback(t *testing.T) {
 	tests := []struct {

@@ -14,7 +14,7 @@ import (
 )
 
 func TestMigration0170OwnershipBulkUpgrade(t *testing.T) {
-	pool, db := ownershipTestDatabase(t, 165, func(db *sql.DB) {
+	pool, db := ownershipTestDatabase(t, 169, func(db *sql.DB) {
 		if _, err := db.Exec(`INSERT INTO tenants(id,name) VALUES('bulk-other','Other'); INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('bulk-admin','Admin','admin','bulk-default',''),('bulk-foreign','Foreign','admin','bulk-foreign','bulk-other')`); err != nil {
 			t.Fatal(err)
 		}
@@ -57,11 +57,11 @@ func TestMigration0170OwnershipBulkUpgrade(t *testing.T) {
 			t.Fatalf("immutable reservation accepted %s", statement)
 		}
 	}
-	if err := goose.DownTo(db, ".", 165); err != nil {
+	if err := goose.DownTo(db, ".", 169); err != nil {
 		t.Fatal(err)
 	}
 	requireMigrationTable(t, db, "ownership_bulk_requests", false)
-	if err := goose.UpTo(db, ".", 166); err != nil {
+	if err := goose.UpTo(db, ".", 170); err != nil {
 		t.Fatal(err)
 	}
 	requireMigrationRLS(t, db, "ownership_bulk_requests")

@@ -6,6 +6,7 @@ import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoadingFallback } from './components/layout/LoadingFallback'
 import { MobileSidebar, Sidebar } from './components/layout/Sidebar'
 import { ToastProvider } from './components/synapse/Toast'
+import { VulnerabilityExposureNotifier } from './components/synapse/VulnerabilityExposureNotifier'
 import { Connect } from './pages/Connect'
 import { NotFound } from './pages/NotFound'
 
@@ -163,6 +164,7 @@ function Shell() {
   const location = useLocation()
   return (
     <div className="h-screen overflow-hidden bg-primary md:grid md:grid-cols-[auto_1fr]">
+      <VulnerabilityExposureNotifier />
       <a
         href="#main-content"
         onClick={(e) => {

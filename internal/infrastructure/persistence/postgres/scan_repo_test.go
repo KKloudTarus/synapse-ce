@@ -40,6 +40,7 @@ func TestScanRepository(t *testing.T) {
 	t.Cleanup(func() {
 		// components + vulns cascade from sboms; delete sboms by engagement first
 		// (sboms.engagement_id is ON DELETE SET NULL, so it won't cascade from engagement).
+		_, _ = pool.Exec(ctx, "DELETE FROM vulnerability_inventory_scopes WHERE engagement_id=$1", eid.String())
 		_, _ = pool.Exec(ctx, "DELETE FROM sboms WHERE engagement_id=$1", eid.String())
 		_, _ = pool.Exec(ctx, "DELETE FROM engagements WHERE id=$1", eid.String())
 	})
@@ -60,12 +61,28 @@ func TestScanRepository(t *testing.T) {
 		ToolVersions:   map[string]string{"syft": "1.45.1", "go-enry": "v2.9.0"},
 		VulnDBSnapshot: "osv.dev@2026-06-20T00:00:00Z",
 	}
-	skipped, err := NewScanRepository(pool).SaveScan(ctx, eid, doc, vulns, snap)
+	repository := NewScanRepository(pool)
+	admission, err := repository.AdmitInventory(ctx, eid, sbom.InventoryScope(doc.TargetRef), time.Now().UTC())
+	if err != nil {
+		t.Fatalf("AdmitInventory: %v", err)
+	}
+	snap.InventoryAdmission = admission
+	snap.InventoryCompleteness = sbom.InventoryComplete
+	snap.InventoryAuthoritative = true
+	snap.InventoryAuthorityReason = "postgres_test_complete"
+	skipped, err := repository.SaveScan(ctx, eid, doc, vulns, snap)
 	if err != nil {
 		t.Fatalf("SaveScan: %v", err)
 	}
-	if skipped != 1 {
-		t.Errorf("expected 1 skipped (orphan) vuln, got %d", skipped)
+	if skipped.SkippedVulnerabilities != 1 {
+		t.Errorf("expected 1 skipped (orphan) vuln, got %d", skipped.SkippedVulnerabilities)
+	}
+	if !skipped.Publication.Current || skipped.Publication.Superseded {
+		t.Fatalf("publication=%+v", skipped.Publication)
+	}
+	var workCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM vulnerability_inventory_work WHERE tenant_id='default' AND engagement_id=$1 AND inventory_generation=$2`, eid.String(), admission.Generation).Scan(&workCount); err != nil || workCount != 1 {
+		t.Fatalf("durable inventory work count=%d err=%v", workCount, err)
 	}
 	if _, err := NewScanRepository(pool).SaveScan(context.Background(), eid, doc, nil, snap); err == nil {
 		t.Fatal("SaveScan without tenant context succeeded")

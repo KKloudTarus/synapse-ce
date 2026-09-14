@@ -8304,12 +8304,15 @@ components:
 
     VulnerabilityOverview:
       type: object
-      required: [enabled_sources, stale_or_failed_sources, changed_advisories_24_hours, open_high_critical_exposure, pending_risk_actions, queue_depth, dead_letters]
+      required: [enabled_sources, stale_or_failed_sources, changed_advisories_24_hours, newly_disclosed_24_hours, newly_ingested_24_hours, newly_affected_assets_24_hours, open_high_critical_exposure, pending_risk_actions, queue_depth, dead_letters]
       properties:
         enabled_sources: {type: integer, minimum: 0}
         stale_or_failed_sources: {type: integer, minimum: 0}
         last_successful_sync: {type: string, format: date-time}
         changed_advisories_24_hours: {type: integer, minimum: 0}
+        newly_disclosed_24_hours: {type: integer, minimum: 0, description: Advisories whose upstream publication timestamp is within the current daily window}
+        newly_ingested_24_hours: {type: integer, minimum: 0, description: Advisories first persisted by Synapse within the current daily window}
+        newly_affected_assets_24_hours: {type: integer, minimum: 0, description: Distinct tenant assets with a first-detected occurrence in the current daily window}
         oldest_unevaluated_revision: {$ref: '#/components/schemas/VulnerabilityEvaluationLag'}
         open_high_critical_exposure: {type: integer, minimum: 0, description: Current detected occurrences whose latest risk severity is high or critical}
         pending_risk_actions: {type: integer, minimum: 0}
@@ -8343,7 +8346,7 @@ components:
 
     VulnerabilityAdvisoryItem:
       type: object
-      required: [canonical, revision, active_affected_count, affected_asset_count, affected_component_count, risk_priority, previous_risk_priority, risk_trend, risk_score, risk_score_change]
+      required: [canonical, revision, active_affected_count, affected_asset_count, affected_component_count, risk_priority, previous_risk_priority, risk_trend, risk_score, risk_score_change, coverage_state, coverage_reason]
       properties:
         canonical: {$ref: '#/components/schemas/VulnerabilityCanonicalAdvisory'}
         revision: {type: integer, minimum: 1}
@@ -8360,6 +8363,8 @@ components:
         detection_states: {type: array, items: {type: string, enum: [detected, no_longer_detected, withdrawn]}}
         action_states: {type: array, items: {type: string, enum: [open, acknowledged, resolved]}}
         last_evaluation: {type: string, format: date-time}
+        coverage_state: {type: string, enum: [affected, evaluated_not_affected, not_evaluated, unsupported_identity, incomplete_inventory], description: Evidence-backed tenant coverage; a zero occurrence count alone never means evaluated-not-affected}
+        coverage_reason: {type: string, enum: [active_occurrence, complete_evaluation, advisory_revision_pending, inventory_generation_pending, unsupported_component_identity, no_authoritative_inventory, newer_inventory_not_authoritative]}
 
     VulnerabilityAdvisoryPage:
       type: object
@@ -8426,7 +8431,7 @@ components:
         id: {type: string}
         key: {type: string}
         name: {type: string}
-        adapter_type: {type: string, enum: [osv, csaf, oval, nvd, ghsa, gitlab, cisa_kev, first_epss, public_exploit]}
+        adapter_type: {type: string, enum: [osv, csaf, oval, nvd, ghsa, gitlab, cisa_kev, first_epss, public_exploit, vulncheck_kev]}
         endpoint: {type: string, format: uri, pattern: '^https://'}
         enabled: {type: boolean}
         archived: {type: boolean}

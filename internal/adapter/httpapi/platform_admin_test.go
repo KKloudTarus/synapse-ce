@@ -109,13 +109,11 @@ func TestGlobalResourceMutationsRequirePlatformAdmin(t *testing.T) {
 	}
 	for _, m := range matches {
 		method, path, registration := m[1], m[2], m[3]
-		// The sync route starts a fetch for an existing source and is deliberately a tenant
-		// operator action, not a change to the shared registry.
-		if strings.HasSuffix(path, "/sync") {
-			continue
-		}
 		if !strings.Contains(registration, "requirePlatformAdmin") {
 			t.Errorf("%s %s mutates the global source registry without requirePlatformAdmin", method, path)
 		}
+	}
+	if !regexp.MustCompile(`mux\.HandleFunc\("POST /api/v1/vulnerability/sync-all",\s*([^\n]*requirePlatformAdmin[^\n]*)`).MatchString(source) {
+		t.Error("POST /api/v1/vulnerability/sync-all must require platform admin")
 	}
 }
