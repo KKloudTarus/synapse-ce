@@ -229,8 +229,10 @@ func identityWriteError(op string, err error) error {
 		switch pgErr.Code {
 		case "23505":
 			return fmt.Errorf("%s: %w", op, shared.ErrConflict)
-		case "23503", "23514":
+		case "23503":
 			return fmt.Errorf("%s: %w", op, shared.ErrForbidden)
+		case "23514":
+			return fmt.Errorf("%s: %w", op, shared.ErrValidation)
 		}
 	}
 	return fmt.Errorf("%s: %w", op, err)
