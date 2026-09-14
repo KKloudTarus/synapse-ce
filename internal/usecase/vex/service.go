@@ -19,6 +19,14 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
+// judgmentReader is the narrow read slice the apply-path reachability reconciliation needs: list the
+// engagement's judgments so the winning reachability verdict per finding can be computed. Optional; nil ⇒ the
+// apply path falls back to the finding's own reachability field. ports.JudgmentStore satisfies it. It is the
+// SAME reader the export service uses, so a vendor not_affected is reconciled identically on both surfaces.
+type judgmentReader interface {
+	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]judgment.Judgment, error)
+}
+
 // Service applies OpenVEX statements to an engagement's findings.
 type Service struct {
 	engagements  ports.EngagementRepository
@@ -27,6 +35,7 @@ type Service struct {
 	clock        ports.Clock
 	transactions ports.TenantTransactionRunner
 	statements   ports.VEXStatementRepository
+	judgments    judgmentReader
 }
 
 // SetTransactionRunner makes one Apply atomic. Without it each status change commits on its own
@@ -42,6 +51,13 @@ func (s *Service) SetTransactionRunner(transactions ports.TenantTransactionRunne
 func (s *Service) SetStatementStore(statements ports.VEXStatementRepository) {
 	s.statements = statements
 }
+
+// SetJudgments wires the reachability-judgment reader used by the apply/reapply reconciliation. With it, a
+// vendor not_affected never suppresses a finding Synapse independently PROVED reachable (a Tier-2 call-graph
+// or TierRuntime judgment), matching the export path's guard. nil ⇒ the apply path can only fall back to the
+// finding's own reachability field, which is set from an SCA scope heuristic and is never "reachable", so the
+// reader is required for the reconciliation to cover SCA findings.
+func (s *Service) SetJudgments(j judgmentReader) { s.judgments = j }
 
 // NewService validates dependencies and returns the VEX service.
 func NewService(engagements ports.EngagementRepository, findings ports.FindingRepository, audit ports.AuditLogger, clock ports.Clock) (*Service, error) {
@@ -173,6 +189,14 @@ func (s *Service) apply(ctx context.Context, actor string, engagementID shared.I
 	if err != nil {
 		return ApplyResult{}, fmt.Errorf("load findings: %w", err)
 	}
+	// The id set of findings Synapse independently proved reachable, from the WINNING reachability judgment
+	// (the same snapshot the export path reconciles against). finding.Reachability alone is insufficient: for
+	// an SCA finding it is a scope heuristic ("high"/"medium"/...), never "reachable", so without this a
+	// vendor not_affected would suppress a call-graph- or runtime-proven-reachable SCA finding.
+	reachable, err := s.reachableFindings(ctx, engagementID)
+	if err != nil {
+		return ApplyResult{}, fmt.Errorf("resolve reachability winners: %w", err)
+	}
 
 	res := ApplyResult{Statements: len(doc.Statements)}
 	for _, st := range doc.Statements {
@@ -191,7 +215,7 @@ func (s *Service) apply(ctx context.Context, actor string, engagementID shared.I
 			// never suppress a finding Synapse independently judged REACHABLE (the more-exploitable verdict
 			// wins), or a real, reachable vulnerability would be hidden by a vendor claim. Record the
 			// conflict on the audit log and leave the finding's status untouched.
-			if target == finding.StatusFalsePos && f.Reachability == string(judgment.Reachable) {
+			if target == finding.StatusFalsePos && (reachable[f.ID.String()] || f.Reachability == string(judgment.Reachable)) {
 				if err := s.audit.Record(ctx, ports.AuditEntry{
 					Actor: actor, Action: "finding.vex_not_applied", Target: f.ID.String(),
 					Metadata: map[string]string{
@@ -236,6 +260,20 @@ func (s *Service) apply(ctx context.Context, actor string, engagementID shared.I
 		}
 	}
 	return res, nil
+}
+
+// reachableFindings returns the id set of findings whose winning reachability judgment is `reachable`. It
+// reads the SAME shared winner logic the export path uses, so a vendor not_affected is reconciled identically
+// on both surfaces. Empty (never nil-panics) when no judgment reader is wired.
+func (s *Service) reachableFindings(ctx context.Context, engagementID shared.ID) (map[string]bool, error) {
+	if s.judgments == nil {
+		return map[string]bool{}, nil
+	}
+	js, err := s.judgments.ListByEngagement(ctx, engagementID)
+	if err != nil {
+		return nil, err
+	}
+	return judgment.ReachableFindingIDs(judgment.WinningReachabilityClaims(js)), nil
 }
 
 // vexTargetStatus maps an OpenVEX status to the finding status it implies.

@@ -1177,6 +1177,13 @@ func main() {
 		// on its own, so a failure part way through leaves some findings retired and the rest not.
 		vexService.SetTransactionRunner(vulnerabilityTransactions)
 	}
+	if judgmentStore != nil {
+		// Reconcile an imported/persisted not_affected against Synapse's own reachability judgment, so a
+		// vendor assertion never suppresses a finding proved reachable (the apply-path twin of the export
+		// guard). #1064 completes here: import AND reapply read the judgment winner, not just the finding
+		// field (which for an SCA finding is a scope heuristic, never "reachable"). Independent of persistence.
+		vexService.SetJudgments(judgmentStore)
+	}
 	// Persist imported VEX statements and re-apply them after a rescan resets findings to open (#1064).
 	if vexStatementStore != nil {
 		vexService.SetStatementStore(vexStatementStore)
