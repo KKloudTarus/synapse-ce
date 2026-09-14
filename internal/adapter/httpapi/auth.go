@@ -106,28 +106,28 @@ func (a *Authenticator) Middleware(publicPaths map[string]bool, next http.Handle
 				var err error
 				principal, err = a.resolveError(r.Context(), token)
 				if err != nil {
-					writeIdentityFailure(w, r.Context(), err)
+					writeIdentityFailure(r.Context(), w, err)
 					return
 				}
 			} else if a.resolve == nil {
-				writeIdentityError(w, r.Context(), IdentityErrorDependencyUnavailable, nil)
+				writeIdentityError(r.Context(), w, IdentityErrorDependencyUnavailable, nil)
 				return
 			} else {
 				var authenticated bool
 				principal, authenticated = a.resolve(r.Context(), token)
 				if !authenticated {
-					writeIdentityError(w, r.Context(), IdentityErrorAuthenticationInvalid, nil)
+					writeIdentityError(r.Context(), w, IdentityErrorAuthenticationInvalid, nil)
 					return
 				}
 			}
 			if principal.ID == "" {
-				writeIdentityError(w, r.Context(), IdentityErrorAuthenticationInvalid, nil)
+				writeIdentityError(r.Context(), w, IdentityErrorAuthenticationInvalid, nil)
 				return
 			}
 		} else {
 			cookie, err := r.Cookie(sessionCookieName)
 			if err != nil || cookie.Value == "" || a.session == nil {
-				writeIdentityError(w, r.Context(), IdentityErrorAuthenticationInvalid, nil)
+				writeIdentityError(r.Context(), w, IdentityErrorAuthenticationInvalid, nil)
 				return
 			}
 			unsafe := r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions
@@ -137,12 +137,12 @@ func (a *Authenticator) Middleware(publicPaths map[string]bool, next http.Handle
 				if code == IdentityErrorAuthenticationInvalid {
 					clearSessionCookie(w)
 				}
-				writeIdentityError(w, r.Context(), code, err)
+				writeIdentityError(r.Context(), w, code, err)
 				return
 			}
 			if principal.ID == "" {
 				clearSessionCookie(w)
-				writeIdentityError(w, r.Context(), IdentityErrorAuthenticationInvalid, nil)
+				writeIdentityError(r.Context(), w, IdentityErrorAuthenticationInvalid, nil)
 				return
 			}
 		}
