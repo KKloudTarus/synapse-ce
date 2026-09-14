@@ -55,7 +55,7 @@ func identityErrorDetails(code IdentityErrorCode) identityErrorSpec {
 // never cause a browser or bearer client to discard a credential that may still be valid.
 func identityCodeFor(err error) IdentityErrorCode {
 	switch {
-	case errors.Is(err, identitydom.ErrAuthenticationInvalid):
+	case errors.Is(err, identitydom.ErrAuthenticationInvalid), errors.Is(err, shared.ErrNotFound):
 		return IdentityErrorAuthenticationInvalid
 	case errors.Is(err, identitydom.ErrAccessDenied), errors.Is(err, shared.ErrForbidden):
 		return IdentityErrorAccessDenied
