@@ -34,6 +34,9 @@ type Service struct {
 	// transactions makes the last-admin guard and its write one unit. Optional: the in-memory and
 	// file stores have no transactions, and the Postgres composition roots set it.
 	transactions ports.TenantTransactionRunner
+	// legacyCredentials is enabled only during the PostgreSQL enterprise-identity rollout. It is a
+	// derived representation: users.api_key_hash remains authoritative until read cutover.
+	legacyCredentials ports.LegacyCredentialProjectionStore
 	// roster serializes the guarded mutations within this process. The guard is a read-modify-write
 	// over the tenant's roster, so two concurrent demotions each see the other admin still enabled,
 	// both pass, and the tenant is left with nobody who can administer it. A single mutex is enough
@@ -46,6 +49,17 @@ type Service struct {
 // Without it the count and the write commit separately, and the roster can change in between.
 func (s *Service) SetTransactionRunner(transactions ports.TenantTransactionRunner) {
 	s.transactions = transactions
+}
+
+// SetLegacyCredentialProjectionStore enables D5 dual-write. It is deliberately refused without a
+// transaction runner: source, derived credential, exact-hash index and mandatory audit must share
+// one commit, never four best-effort writes.
+func (s *Service) SetLegacyCredentialProjectionStore(store ports.LegacyCredentialProjectionStore) error {
+	if store == nil || s.transactions == nil {
+		return fmt.Errorf("%w: legacy credential projection requires store and tenant transaction runner", shared.ErrValidation)
+	}
+	s.legacyCredentials = store
+	return nil
 }
 
 // NewService validates dependencies and returns the users service.
@@ -167,23 +181,44 @@ func (s *Service) CreateUser(ctx context.Context, actor Actor, tenantID string, 
 	if err != nil {
 		return nil, "", err
 	}
+	if s.legacyCredentials == nil {
+		return s.createUser(ctx, actor, target, name, role)
+	}
+	var (
+		created   *user.User
+		plaintext string
+	)
+	if err := s.transactions.Run(ctx, target, func(txCtx context.Context) error {
+		var createErr error
+		created, plaintext, createErr = s.createUser(txCtx, actor, target, name, role)
+		return createErr
+	}); err != nil {
+		return nil, "", err
+	}
+	return created, plaintext, nil
+}
+
+func (s *Service) createUser(ctx context.Context, actor Actor, target shared.ID, name string, role user.Role) (*user.User, string, error) {
 	plaintext, hash, err := generateKey()
 	if err != nil {
 		return nil, "", err
 	}
 	// The provisioning admin assigns the tenant – the aggregate owns it from birth.
-	u, err := user.New(s.ids.NewID(), target.String(), name, role, hash, s.clock.Now())
+	now := s.clock.Now()
+	u, err := user.New(s.ids.NewID(), target.String(), name, role, hash, now)
 	if err != nil {
 		return nil, "", err
 	}
 	if err := s.repo.Create(ctx, u); err != nil {
 		return nil, "", fmt.Errorf("create user: %w", err)
 	}
-	_ = s.audit.Record(ctx, ports.AuditEntry{
+	if err := s.recordUserAudit(ctx, ports.AuditEntry{
 		Actor: actor.ID, Action: "user.created", Target: u.ID.String(),
 		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": target.String()},
-		At:       s.clock.Now(),
-	})
+		At:       now,
+	}); err != nil {
+		return nil, "", err
+	}
 	return u, plaintext, nil
 }
 
@@ -230,6 +265,8 @@ func (s *Service) update(ctx context.Context, actor Actor, id shared.ID, name st
 	if err := s.repo.Update(ctx, actor.tenant(), u); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
+	// D5 does not change role/name projection. Keep the legacy best-effort behavior here; D6 owns
+	// the broader command-store audit conversion for all identity mutations.
 	_ = s.audit.Record(ctx, ports.AuditEntry{
 		Actor: actor.ID, Action: "user.updated", Target: u.ID.String(),
 		Metadata: map[string]string{
@@ -269,15 +306,25 @@ func (s *Service) setDisabled(ctx context.Context, actor Actor, id shared.ID, di
 	if err := s.repo.Update(ctx, actor.tenant(), u); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
+	if s.legacyCredentials != nil {
+		if _, _, err := s.legacyCredentials.SyncLegacyCredentialDisabled(ctx, ports.LegacyCredentialSyncRequest{
+			TenantID: actor.tenant(), UserID: u.ID, Digest: u.APIKeyHash, Disabled: u.Disabled,
+			SourceUpdatedAt: u.Audit.UpdatedAt, At: now,
+		}); err != nil {
+			return nil, fmt.Errorf("project user credential disable: %w", err)
+		}
+	}
 	action := "user.enabled"
 	if disabled {
 		action = "user.disabled"
 	}
-	_ = s.audit.Record(ctx, ports.AuditEntry{
+	if err := s.recordUserAudit(ctx, ports.AuditEntry{
 		Actor: actor.ID, Action: action, Target: u.ID.String(),
 		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String()},
 		At:       now,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return u, nil
 }
 
@@ -328,12 +375,35 @@ func (s *Service) rotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (
 	if err := s.repo.Update(ctx, actor.tenant(), u); err != nil {
 		return nil, "", fmt.Errorf("update user: %w", err)
 	}
-	_ = s.audit.Record(ctx, ports.AuditEntry{
+	if s.legacyCredentials != nil {
+		if _, _, err := s.legacyCredentials.SyncIssuedLegacyCredential(ctx, ports.LegacyCredentialSyncRequest{
+			TenantID: actor.tenant(), UserID: u.ID, Digest: u.APIKeyHash, Disabled: u.Disabled,
+			SourceUpdatedAt: u.Audit.UpdatedAt, At: now,
+		}); err != nil {
+			return nil, "", fmt.Errorf("project rotated user credential: %w", err)
+		}
+	}
+	if err := s.recordUserAudit(ctx, ports.AuditEntry{
 		Actor: actor.ID, Action: "user.api_key_rotated", Target: u.ID.String(),
 		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String()},
 		At:       now,
-	})
+	}); err != nil {
+		return nil, "", err
+	}
 	return u, plaintext, nil
+}
+
+// recordUserAudit preserves the historical best-effort audit contract until D5 is enabled. Once
+// the derived credential writer is active, issuance/rotation/disable audits are classification or
+// revocation evidence and therefore mandatory; because callers are inside TenantTransactionRunner,
+// a failure rolls back users + projection + credential_index together.
+func (s *Service) recordUserAudit(ctx context.Context, entry ports.AuditEntry) error {
+	if err := s.audit.Record(ctx, entry); err != nil {
+		if s.legacyCredentials != nil {
+			return fmt.Errorf("record user audit: %w", err)
+		}
+	}
+	return nil
 }
 
 // assertNotLastEnabledAdmin refuses an action that would leave the tenant with no enabled admin.
