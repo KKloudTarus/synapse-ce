@@ -1,6 +1,7 @@
 package blob
 
 import (
+	"runtime"
 	"bytes"
 	"context"
 	"errors"
@@ -13,6 +14,9 @@ import (
 )
 
 func TestFilesystemDurableImmutableObjects(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("filesystem durability fixture relies on POSIX rename semantics")
+	}
 	directory := t.TempDir()
 	store, err := NewFilesystem(directory)
 	if err != nil {
