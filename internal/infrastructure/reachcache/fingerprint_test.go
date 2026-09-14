@@ -433,9 +433,7 @@ func TestTreeFingerprintExternalGoWorkErrors(t *testing.T) {
 func TestTreeFingerprintFIFONotOpened(t *testing.T) {
 	dir := writeTree(t, map[string]string{"main.go": "package main"})
 	fifo := filepath.Join(dir, "pipe")
-	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
-		t.Skipf("mkfifo unsupported: %v", err)
-	}
+	makeFIFO(t, fifo)
 	done := make(chan struct{})
 	var src string
 	go func() {
