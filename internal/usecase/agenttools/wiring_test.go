@@ -23,6 +23,7 @@ func fullToolset() AgentToolset {
 		Reachability:  &fakeScanResults{},
 		Judgments:     &fakeJudgmentProposer{},
 		WriteupDrafts: &fakeWriteupdraftProposer{},
+		Incidents:     &fakeIncidents{},
 	}
 }
 
@@ -43,6 +44,7 @@ var toolsetControlled = []string{
 	ToolProposeVexJustification,
 	ToolProposeInvestigation,
 	ToolProposeWriteupDraft,
+	ToolGetIncidentDetail,
 }
 
 // TestEnableAgentToolsetEnablesFullSet locks the durable/inline parity guarantee: a FULL dependency set
@@ -98,9 +100,35 @@ func TestEnableAgentToolsetOptionalOff(t *testing.T) {
 	for _, n := range []string{
 		ToolProposeReachability, ToolProposeSASTValidation, ToolProposeCritique,
 		ToolProposeRiskNarrative, ToolProposeThreat, ToolProposeVexJustification, ToolProposeWriteupDraft,
+		ToolGetIncidentDetail,
 	} {
 		if names[n] {
 			t.Errorf("optional tool %q must be OFF when its dependency is nil", n)
+		}
+	}
+}
+
+// TestEnableAgentToolsetInvestigationNeedsBothDeps: propose_investigation is the one controlled tool
+// gated on TWO optional dependencies. Judgments alone must not switch it on — a catalog that cannot read an
+// incident must not offer to bind a hypothesis to one — while every other judgment tool stays on.
+func TestEnableAgentToolsetInvestigationNeedsBothDeps(t *testing.T) {
+	c, _ := newCatalog(t, nil, nil)
+	if err := c.EnableAgentToolset(AgentToolset{
+		Findings: &fakeProposer{}, Hypotheses: &fakeHypProposer{}, Reachability: &fakeScanResults{},
+		Judgments: &fakeJudgmentProposer{}, // Incidents deliberately nil
+	}); err != nil {
+		t.Fatalf("EnableAgentToolset: %v", err)
+	}
+	names := toolNames(c)
+	if names[ToolProposeInvestigation] {
+		t.Error("propose_investigation must be OFF when no incident reader is wired, even with judgments on")
+	}
+	if names[ToolGetIncidentDetail] {
+		t.Error("get_incident_detail must be OFF when no incident reader is wired")
+	}
+	for _, n := range []string{ToolProposeReachability, ToolProposeCritique, ToolProposeRiskNarrative, ToolProposeThreat, ToolProposeVexJustification} {
+		if !names[n] {
+			t.Errorf("judgment tool %q must stay ON; only investigation depends on the incident reader", n)
 		}
 	}
 }

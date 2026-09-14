@@ -76,6 +76,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
 	lineageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findinglineage"
+	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
@@ -1032,6 +1033,15 @@ func main() {
 			}
 			toolset.WriteupDrafts = writeupSvc
 		}
+		// The incident read tool is not behind a feature flag on either side: the API wires it from the
+		// same always-present event-sourced store. Building it here keeps the durable catalog identical
+		// to the inline one, which is the whole point of this block.
+		incidentSvc, inerr := incidentuc.NewService(postgres.NewIncidentEventRepository(pool))
+		if inerr != nil {
+			log.Error("incident read service init failed", "err", inerr)
+			os.Exit(1)
+		}
+		toolset.Incidents = incidentSvc
 		if terr := agentCatalog.EnableAgentToolset(toolset); terr != nil {
 			log.Error("agent toolset wiring failed (durable/inline parity)", "err", terr)
 			os.Exit(1)

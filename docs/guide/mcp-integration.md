@@ -77,6 +77,12 @@ Judgment proposal tools require `SYNAPSE_JUDGMENTS_ENABLED`, and `propose_writeu
 `SYNAPSE_WRITEUP_DRAFTS_ENABLED`. A tool whose dependency is not wired is simply absent from
 `tools/list` rather than present and failing.
 
+The in-process agent also has `get_incident_detail` (read one incident of its engagement) and
+`propose_investigation` (bind a hypothesis to an incident it has read, with at least one supporting
+driver). Neither is exposed here: a hypothesis may only bind to an incident the catalog can read and prove
+is inside the engagement, the incident store is tenant-scoped, and this server binds an engagement but no
+tenant. They will appear on this surface once it carries a tenant.
+
 ## Why proposals cannot become executions
 
 Three independent controls hold, and none of them depends on the MCP client behaving correctly:

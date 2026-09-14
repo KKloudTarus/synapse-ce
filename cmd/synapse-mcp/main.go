@@ -115,10 +115,14 @@ func main() {
 		log.Error("agent catalog init failed", "err", err)
 		os.Exit(1)
 	}
-	// #640 E — MCP investigation: enable propose-only judgment tools (investigation hypotheses +
-	// reachability / sast / critique / threat / …) for external MCP clients. The MCP path stays
-	// propose-only — analysis.Service exposes ONLY Propose (never Verify/Accept), so a client can PROPOSE
-	// an investigation hypothesis about an incident but a HUMAN must accept it; nothing is executed.
+	// #640 E — enable the propose-only judgment tools (reachability / sast / critique / threat / …) for
+	// external MCP clients. The MCP path stays propose-only — analysis.Service exposes ONLY Propose (never
+	// Verify/Accept), so a client can PROPOSE but a HUMAN must accept; nothing is executed.
+	//
+	// propose_investigation is NOT on this surface (#1117): it also requires an incident reader, so a
+	// hypothesis can only bind to an incident the catalog has read and found inside the engagement, and the
+	// incident store is tenant-scoped while this server binds an engagement and no tenant. Wiring a reader
+	// here would advertise a tool that fails on every call; giving MCP a tenant is a separate decision.
 	if idempotentAudit, ok := auditLog.(ports.IdempotentAuditLogger); ok {
 		evidenceSvc, everr := evidenceuc.NewService(evidenceStore, nil, auditLog, clock, ids)
 		if everr != nil {
@@ -131,7 +135,7 @@ func main() {
 			os.Exit(1)
 		}
 		catalog.EnableJudgments(analysisSvc)
-		log.Info("MCP judgment proposals ENABLED (propose-only: investigation hypotheses + reachability/critique/threat; a human accepts)")
+		log.Info("MCP judgment proposals ENABLED (propose-only: reachability/critique/threat; a human accepts). investigation is not on this surface: it needs a tenant-bound incident reader")
 	} else {
 		log.Warn("MCP judgment proposals disabled: audit log is not idempotent")
 	}
