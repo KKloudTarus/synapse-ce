@@ -365,6 +365,42 @@ func (c ReachabilityClaim) Supersedes(prior ReachabilityClaim) bool {
 	return cs > ps
 }
 
+// WinningReachabilityClaims resolves the WINNING reachability claim per finding-subject id from a judgment
+// list: only PUBLISHABLE (confirmed + evidence-gated), finding-scoped reachability claims are considered, and
+// a superseding claim (stronger tier, then stronger state) hides a stale one. Every consumer that reconciles
+// a vendor assertion against Synapse's own verdict (VEX export AND VEX apply/reapply) must read this ONE
+// snapshot, so the two surfaces can never disagree about whether a finding is reachable (EPIC #1042, 0.4).
+func WinningReachabilityClaims(js []Judgment) map[string]ReachabilityClaim {
+	winner := map[string]ReachabilityClaim{}
+	for _, j := range js {
+		if !j.Publishable() || j.Capability != CapReachability || j.SubjectKind != SubjectFinding {
+			continue
+		}
+		rc, ok := j.Claim.(ReachabilityClaim)
+		if !ok {
+			continue
+		}
+		id := j.SubjectID.String()
+		if cur, exists := winner[id]; !exists || rc.Supersedes(cur) {
+			winner[id] = rc
+		}
+	}
+	return winner
+}
+
+// ReachableFindingIDs is the id set of findings whose WINNING reachability claim is Reachable: Synapse
+// independently proved the vulnerable code is reached. A vendor `not_affected` (a mere assertion) must never
+// suppress such a finding, on export or on apply.
+func ReachableFindingIDs(winner map[string]ReachabilityClaim) map[string]bool {
+	out := map[string]bool{}
+	for id, rc := range winner {
+		if rc.Reachable == Reachable {
+			out[id] = true
+		}
+	}
+	return out
+}
+
 // Validate enforces the closed verdict + tier vocabularies and a 0..100 confidence.
 func (c ReachabilityClaim) Validate() error {
 	if !c.Reachable.Valid() {

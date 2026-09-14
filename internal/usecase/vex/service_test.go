@@ -8,6 +8,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -108,6 +109,102 @@ func TestApplyNotAffectedDoesNotSuppressReachable(t *testing.T) {
 	}
 	if repo.list[0].Status != finding.StatusOpen {
 		t.Errorf("a Synapse-reachable finding must NOT be suppressed by a vendor not_affected, got status %s", repo.list[0].Status)
+	}
+}
+
+// fakeJudgments returns a fixed judgment list, standing in for the reachability-judgment store.
+type fakeJudgments struct{ js []judgment.Judgment }
+
+func (f fakeJudgments) ListByEngagement(context.Context, shared.ID) ([]judgment.Judgment, error) {
+	return f.js, nil
+}
+
+// reachableJudgment builds a PUBLISHABLE confirmed Tier-2 reachable judgment about a finding.
+func reachableJudgment(findingID string) judgment.Judgment {
+	return judgment.Judgment{
+		Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: shared.ID(findingID),
+		State: judgment.StateConfirmed, EvidenceScore: 90,
+		Claim: judgment.ReachabilityClaim{Reachable: judgment.Reachable, Tier: judgment.Tier2, Confidence: 90, EntrypointsPresent: true},
+	}
+}
+
+// TestApplyNotAffectedDoesNotSuppressJudgmentReachable is the real-world case Finding-1 exposed: an SCA
+// finding carries a scope-heuristic Reachability ("high", never "reachable"), so the field-only guard would
+// let a vendor not_affected suppress it. With the judgment reader wired, the apply path reconciles against the
+// reachability JUDGMENT (a Tier-2 call-graph reachable), so the finding is NOT suppressed.
+func TestApplyNotAffectedDoesNotSuppressJudgmentReachable(t *testing.T) {
+	repo := &fakeRepo{list: []finding.Finding{
+		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2020-1:foo:1.2.3", Status: finding.StatusOpen, Version: 1, Reachability: "high"},
+	}}
+	svc, err := NewService(fakeEngRepo{}, repo, nopAudit{}, fixedClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetJudgments(fakeJudgments{js: []judgment.Judgment{reachableJudgment("f1")}})
+	doc := []byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+		{"vulnerability":{"name":"CVE-2020-1"},"products":[{"@id":"foo@1.2.3"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`)
+
+	res, err := svc.Apply(context.Background(), "alice", "", "e1", doc)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if res.Applied != 0 {
+		t.Fatalf("res = %+v, want applied=0 (judgment reachability blocked the suppression)", res)
+	}
+	if repo.list[0].Status != finding.StatusOpen {
+		t.Errorf("a JUDGMENT-reachable finding must NOT be suppressed by a vendor not_affected, got status %s", repo.list[0].Status)
+	}
+}
+
+// TestApplyNotAffectedSuppressesWhenNotJudgmentReachable confirms the fix does not over-block: a finding with
+// NO reachable judgment (and a non-"reachable" field) is still suppressed by a legitimate not_affected.
+func TestApplyNotAffectedSuppressesWhenNotJudgmentReachable(t *testing.T) {
+	repo := &fakeRepo{list: []finding.Finding{
+		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2020-1:foo:1.2.3", Status: finding.StatusOpen, Version: 1, Reachability: "unknown"},
+	}}
+	svc, err := NewService(fakeEngRepo{}, repo, nopAudit{}, fixedClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetJudgments(fakeJudgments{js: nil}) // no reachability judgment about f1
+	doc := []byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+		{"vulnerability":{"name":"CVE-2020-1"},"products":[{"@id":"foo@1.2.3"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`)
+
+	if _, err := svc.Apply(context.Background(), "alice", "", "e1", doc); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if repo.list[0].Status != finding.StatusFalsePos {
+		t.Errorf("a not-proven-reachable finding must still be suppressible by not_affected, got status %s", repo.list[0].Status)
+	}
+}
+
+// TestApplyNotAffectedSuppressesWhenWinnerIsNotReachable proves no over-block: a finding whose WINNING
+// reachability verdict is a proven Tier-2 not_reachable is not in the reachable set, so a vendor not_affected
+// still suppresses it. This locks that the guard keys on the reachable winner, not on the mere absence of a
+// judgment. (A reachable claim, by contrast, is sticky: it outranks a same-tier not_reachable, so once
+// Synapse proves reachable a vendor assertion can never flip it back — verified by the reachable tests.)
+func TestApplyNotAffectedSuppressesWhenWinnerIsNotReachable(t *testing.T) {
+	repo := &fakeRepo{list: []finding.Finding{
+		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2020-1:foo:1.2.3", Status: finding.StatusOpen, Version: 1, Reachability: "high"},
+	}}
+	svc, err := NewService(fakeEngRepo{}, repo, nopAudit{}, fixedClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notReachableWinner := judgment.Judgment{
+		Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "f1",
+		State: judgment.StateConfirmed, EvidenceScore: 90,
+		Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, Confidence: 90, EntrypointsPresent: true},
+	}
+	svc.SetJudgments(fakeJudgments{js: []judgment.Judgment{notReachableWinner}})
+	doc := []byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+		{"vulnerability":{"name":"CVE-2020-1"},"products":[{"@id":"foo@1.2.3"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`)
+
+	if _, err := svc.Apply(context.Background(), "alice", "", "e1", doc); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if repo.list[0].Status != finding.StatusFalsePos {
+		t.Errorf("when the WINNING reachability verdict is not_reachable, not_affected must suppress; got %s", repo.list[0].Status)
 	}
 }
 
@@ -263,7 +360,7 @@ func newFakeStatementStore() *fakeStatementStore {
 	return &fakeStatementStore{byEng: map[string][]vex.StoredStatement{}}
 }
 
-func (s *fakeStatementStore) Save(_ context.Context, _ , engagementID shared.ID, statements []vex.StoredStatement) error {
+func (s *fakeStatementStore) Save(_ context.Context, _, engagementID shared.ID, statements []vex.StoredStatement) error {
 	key := engagementID.String()
 	seen := map[string]bool{}
 	for _, st := range s.byEng[key] {
@@ -341,5 +438,36 @@ func TestReapplyDoesNotSuppressReachable(t *testing.T) {
 	}
 	if repo.list[0].Status != finding.StatusOpen {
 		t.Errorf("a persisted not_affected must NOT suppress a now-reachable finding on reapply, got %s", repo.list[0].Status)
+	}
+}
+
+// TestReapplyDoesNotSuppressJudgmentReachable is the realistic rescan case: after a rescan the SCA finding
+// keeps its scope-heuristic Reachability field ("high", never "reachable"), and Synapse's call graph proves
+// it reachable via a JUDGMENT. A persisted not_affected must not re-suppress it on reapply.
+func TestReapplyDoesNotSuppressJudgmentReachable(t *testing.T) {
+	repo := &fakeRepo{list: []finding.Finding{
+		{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2020-1:foo:1.2.3", Status: finding.StatusOpen, Version: 1, Reachability: "high"},
+	}}
+	svc, err := NewService(fakeEngRepo{}, repo, nopAudit{}, fixedClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newFakeStatementStore()
+	svc.SetStatementStore(store)
+	svc.SetTransactionRunner(rollbackRunner{repo})
+	svc.SetJudgments(fakeJudgments{js: []judgment.Judgment{reachableJudgment("f1")}})
+
+	doc := []byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+		{"vulnerability":{"name":"CVE-2020-1"},"products":[{"@id":"foo@1.2.3"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`)
+	if _, err := svc.Apply(context.Background(), "alice", "", "e1", doc); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	repo.list[0].Status = finding.StatusOpen // rescan resets to open; field stays "high", judgment proves reachable
+
+	if err := svc.Reapply(context.Background(), "", "e1"); err != nil {
+		t.Fatalf("reapply: %v", err)
+	}
+	if repo.list[0].Status != finding.StatusOpen {
+		t.Errorf("a persisted not_affected must NOT re-suppress a JUDGMENT-reachable SCA finding on reapply, got %s", repo.list[0].Status)
 	}
 }

@@ -167,21 +167,8 @@ func (s *Service) reachabilityWinners(ctx context.Context, engagementID shared.I
 	if err != nil {
 		return nil, err
 	}
-	winner := map[string]judgment.ReachabilityClaim{}
-	for _, j := range js {
-		if !j.Publishable() || j.Capability != judgment.CapReachability || j.SubjectKind != judgment.SubjectFinding {
-			continue
-		}
-		rc, ok := j.Claim.(judgment.ReachabilityClaim)
-		if !ok {
-			continue
-		}
-		id := j.SubjectID.String()
-		if cur, exists := winner[id]; !exists || rc.Supersedes(cur) {
-			winner[id] = rc
-		}
-	}
-	return winner, nil
+	// Shared with the VEX apply/reapply reconciliation, so export and apply read one identical verdict.
+	return judgment.WinningReachabilityClaims(js), nil
 }
 
 // notReachableTiersFrom maps a finding id → the strongest tier of a PUBLISHABLE (confirmed + evidence-gated)
@@ -204,13 +191,7 @@ func notReachableTiersFrom(winner map[string]judgment.ReachabilityClaim) map[str
 // suppress such a finding on export, so collectVEXRecords refuses to emit not_affected for these ids and
 // asserts the more-exploitable `affected` instead (EPIC #1042, #1064; the #1-bar reachability reconciliation).
 func reachableFrom(winner map[string]judgment.ReachabilityClaim) map[string]bool {
-	out := map[string]bool{}
-	for id, rc := range winner {
-		if rc.Reachable == judgment.Reachable {
-			out[id] = true
-		}
-	}
-	return out
+	return judgment.ReachableFindingIDs(winner)
 }
 
 // parsedKey is the structured form of a finding dedup key
