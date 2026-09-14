@@ -174,7 +174,7 @@ type Input struct {
 	GateExempt        map[string]bool
 	LinesOfCode       int
 	Coverage          *measure.CoverageReport
-	Duplication       measure.DuplicationReport
+	Duplication       *measure.DuplicationReport // nil when no duplication walk ran, like Coverage
 	AnalysisTruncated bool
 	Previous          *Analysis
 	Hotspots          hotspot.Summary
@@ -261,7 +261,7 @@ func Build(in Input) (Analysis, error) {
 		GateInfo: GateInfo{Key: gateDef.Key, Name: gateName, Source: gateSource}, Issues: counts,
 		InternalIssues: issues, NewCode: NewCode{PreviousID: previousID, Counts: newCounts, Rating: NewCodeRating{Security: newRating.Security, Reliability: newRating.Reliability}},
 		Delta: buildDelta(counts, measures, overallRating, in.Previous), Coverage: in.Coverage,
-		Duplication: in.Duplication, Rating: overallRating,
+		Duplication: derefDuplication(in.Duplication), Rating: overallRating,
 		Hotspots: in.Hotspots, NewHotspots: in.NewHotspots,
 		Snapshot: in.Snapshot,
 	}, nil
@@ -348,29 +348,50 @@ func countIssues(issues []Issue) Counts {
 	return counts
 }
 
+// maxChangedLines bounds how many changed lines the new-code measurements expand into a set. The file
+// changes reach this code from the CI import as JSON, so the ranges are caller-supplied; a diff larger
+// than this is not measured (the set is nil, so both new-code metrics report no data) rather than
+// allowed to size a map without limit.
+const maxChangedLines = 1 << 20
+
 // ChangedLineSet is the new-side changed lines of an analysis as file -> set of line numbers, the shape
 // the new-code measurements consume. Only Added ranges count (Modified mirrors them; Removed lines no
 // longer exist), a deleted or binary change contributes nothing, and paths are canonicalised so the set
 // shares a key space with coverage and duplication data, which are canonicalised the same way.
+//
+// The ranges are untrusted input. An invalid range, or a diff over maxChangedLines, yields nil: the
+// new-code metrics then fail closed as unmeasured, which is the right answer for a diff that cannot be
+// trusted to describe itself.
 func ChangedLineSet(changes []FileChange) map[string]map[int]bool {
 	out := map[string]map[int]bool{}
+	total := 0
 	for _, c := range changes {
 		if c.Binary || c.Status == FileStatusDeleted || len(c.Added) == 0 {
 			continue
 		}
 		path, err := measure.CanonicalPath(c.NewPath)
-		if err != nil {
+		if err != nil || path == "" {
 			continue
 		}
-		lines := out[path]
-		if lines == nil {
-			lines = map[int]bool{}
-			out[path] = lines
-		}
 		for _, r := range c.Added {
-			for ln := r.Start; ln <= r.End; ln++ {
-				if ln >= 1 {
-					lines[ln] = true
+			if !r.Valid() {
+				return nil
+			}
+			// Valid guarantees Start > 0 and End >= Start, so this cannot overflow.
+			if total += r.End - r.Start + 1; total > maxChangedLines {
+				return nil
+			}
+			lines := out[path]
+			if lines == nil {
+				lines = map[int]bool{}
+				out[path] = lines
+			}
+			// Stop on End before incrementing: a loop of the form `ln <= End` never terminates when End
+			// is the maximum int, and End is caller-supplied.
+			for ln := r.Start; ; ln++ {
+				lines[ln] = true
+				if ln == r.End {
+					break
 				}
 			}
 		}
@@ -379,14 +400,22 @@ func ChangedLineSet(changes []FileChange) map[string]map[int]bool {
 }
 
 // newCodeDuplicationPercent is the duplicated-line density over only the changed lines: the share of
-// changed lines that sit inside any duplicated block occurrence. ok=false when there is no changed line
-// to measure, so the caller reports "no data" instead of 0.
+// changed lines that sit inside any duplicated block occurrence. ok=false when there is no duplication
+// report or no changed line to measure, so the caller reports "no data" instead of 0. A report that ran
+// and found nothing is a measured 0.
 //
 // The denominator is every changed line, including blank and comment lines, because the duplication
 // walk reports occurrences as line ranges and does not expose its per-line code classification. That
 // under-reports density slightly relative to a code-lines-only denominator — the lenient direction for a
 // `<=` condition — and is stated here rather than hidden.
-func newCodeDuplicationPercent(duplication measure.DuplicationReport, changed map[string]map[int]bool) (pct float64, ok bool) {
+//
+// Occurrence ranges are walked by testing each changed line against them, never by expanding the
+// occurrence: the report can arrive from the CI import, and an occurrence range is not something this
+// code should size a loop by.
+func newCodeDuplicationPercent(duplication *measure.DuplicationReport, changed map[string]map[int]bool) (pct float64, ok bool) {
+	if duplication == nil {
+		return 0, false
+	}
 	total := 0
 	for _, lines := range changed {
 		total += len(lines)
@@ -397,16 +426,15 @@ func newCodeDuplicationPercent(duplication measure.DuplicationReport, changed ma
 	duplicated := map[string]map[int]bool{}
 	for _, block := range duplication.Blocks {
 		for _, occ := range block.Occurrences {
+			if occ.StartLine < 1 || occ.EndLine < occ.StartLine {
+				continue
+			}
 			path, err := measure.CanonicalPath(occ.File)
 			if err != nil {
 				continue
 			}
-			lines := changed[path]
-			if lines == nil {
-				continue
-			}
-			for ln := occ.StartLine; ln <= occ.EndLine; ln++ {
-				if !lines[ln] {
+			for ln := range changed[path] {
+				if ln < occ.StartLine || ln > occ.EndLine {
 					continue
 				}
 				if duplicated[path] == nil {
@@ -423,18 +451,27 @@ func newCodeDuplicationPercent(duplication measure.DuplicationReport, changed ma
 	return 100 * float64(count) / float64(total), true
 }
 
+// derefDuplication keeps the persisted Analysis shape: a missing walk is stored as the zero report, as it
+// always was; only the measurement path distinguishes the two.
+func derefDuplication(d *measure.DuplicationReport) measure.DuplicationReport {
+	if d == nil {
+		return measure.DuplicationReport{}
+	}
+	return *d
+}
+
 // buildMeasures is the gate snapshot. A metric present in the snapshot was measured; one that could not
 // be measured is left absent, never written as 0 — coverage has always followed that rule, and the two
 // new-code measurements follow it too, so a gate condition on them fails closed with "no data" rather
 // than passing on a value nobody computed.
-func buildMeasures(all, new Counts, overallRating rating.Report, duplication measure.DuplicationReport, coverage *measure.CoverageReport, hotspots, newHotspots hotspot.Summary, changed map[string]map[int]bool) qualitygate.Snapshot {
+func buildMeasures(all, new Counts, overallRating rating.Report, duplication *measure.DuplicationReport, coverage *measure.CoverageReport, hotspots, newHotspots hotspot.Summary, changed map[string]map[int]bool) qualitygate.Snapshot {
 	metrics := qualitygate.Snapshot{
 		qualitygate.MetricNewIssues:       float64(new.Total),
 		qualitygate.MetricNewCritical:     float64(new.BySeverity[string(shared.SeverityCritical)]),
 		qualitygate.MetricNewHigh:         float64(new.BySeverity[string(shared.SeverityHigh)]),
 		qualitygate.MetricNewMedium:       float64(new.BySeverity[string(shared.SeverityMedium)]),
 		qualitygate.MetricTotalCritical:   float64(all.BySeverity[string(shared.SeverityCritical)]),
-		qualitygate.MetricDuplicationPct:  duplication.Density(),
+		qualitygate.MetricDuplicationPct:  derefDuplication(duplication).Density(),
 		qualitygate.MetricSecurityRating:  float64(gradeNumber(overallRating.Security)),
 		qualitygate.MetricReliability:     float64(gradeNumber(overallRating.Reliability)),
 		qualitygate.MetricMaintainability: float64(gradeNumber(overallRating.Maintainability)),

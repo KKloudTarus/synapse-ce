@@ -10472,7 +10472,9 @@ components:
         - complexity_not_available
         - coverage_not_supplied
         - no_executable_lines
-        - changed_line_coverage_not_available
+        - no_coverage_report
+        - no_changed_lines
+        - changed_lines_not_in_report
         - duplication_not_available
         - issue_type_incomplete
         - issue_attribution_incomplete

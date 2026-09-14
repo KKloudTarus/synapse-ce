@@ -431,3 +431,26 @@ func TestSnapshotNewCodeCoverage(t *testing.T) {
 		})
 	}
 }
+
+// TestNormalizeLinesCanonicalisesReportKeys: the inventory is keyed canonically and a report key is
+// whatever the tool wrote, so `./src/a.go` must be recognised as `src/a.go`, two raw spellings of one
+// file must merge under the parsers' union rule, and an absolute path is dropped rather than kept raw.
+func TestNormalizeLinesCanonicalisesReportKeys(t *testing.T) {
+	r := &CoverageReport{Lines: LineCoverage{
+		"./src/a.go":    {1: true, 2: false},
+		"src\\a.go":     {2: true, 3: false},
+		"/abs/src/a.go": {9: true},
+		"src/zzz.go":    {1: true},
+	}}
+	r.NormalizeLines(map[string]struct{}{"src/a.go": {}})
+	a := r.Lines["src/a.go"]
+	if len(r.Lines) != 1 || a == nil {
+		t.Fatalf("lines = %v, want only the canonical src/a.go", r.Lines)
+	}
+	if !a[1] || !a[2] || a[3] {
+		t.Fatalf("merged lines wrong: %v (line 2 is covered in one spelling, so covered)", a)
+	}
+	if _, kept := a[9]; kept {
+		t.Fatal("an absolute-path key must be dropped, not merged")
+	}
+}
