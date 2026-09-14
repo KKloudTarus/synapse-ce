@@ -10,9 +10,9 @@ package main
 
 import (
 	"context"
-	"errors"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
