@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, api, discoverSession, getToken, logoutSession, setCSRFToken, setToken, setUnauthorizedHandler } from './api'
+import { ApiError, api, discoverSession, logoutSession, setCSRFToken, setToken, setUnauthorizedHandler } from './api'
 
 describe('BFF session API helpers', () => {
   const fetchSpy = vi.fn()
@@ -82,7 +82,7 @@ describe('BFF session API helpers', () => {
     expect((fetchSpy.mock.calls[0][1] as RequestInit).headers).not.toHaveProperty('X-CSRF-Token')
   })
 
-  it('notifies bearer restoration only for authentication_invalid', async () => {
+  it('preserves bearer state on dependency failure and notifies only for authentication_invalid', async () => {
     const unauthorized = vi.fn()
     setUnauthorizedHandler(unauthorized)
     setToken('saved-token')
@@ -94,7 +94,12 @@ describe('BFF session API helpers', () => {
     } as Response)
     await expect(api.aup()).rejects.toMatchObject<ApiError>({ code: 'dependency_unavailable', retryable: true })
     expect(unauthorized).not.toHaveBeenCalled()
-    expect(getToken()).toBe('saved-token')
+
+    // Prove the credential was preserved through externally observable request behavior rather than
+    // exposing the client's private token getter through the public API barrel solely for a test.
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ accepted: true }) } as Response)
+    await api.aup()
+    expect(fetchSpy.mock.calls[1][1]).toMatchObject({ credentials: 'omit', headers: { authorization: 'Bearer saved-token' } })
 
     fetchSpy.mockResolvedValueOnce({
       ok: false,
