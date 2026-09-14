@@ -96,7 +96,7 @@ func (rt *Router) oidcSession(w http.ResponseWriter, r *http.Request) {
 			// explicitly NOT cleared so a transient outage cannot log the user out.
 			clearSessionCookie(w)
 		}
-		writeIdentityError(w, r.Context(), code, err)
+		writeIdentityError(r.Context(), w, code, err)
 		return
 	}
 	setSessionCookie(w, session.Token)
@@ -123,7 +123,7 @@ func (rt *Router) oidcLogout(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
-			writeIdentityError(w, r.Context(), code, err)
+			writeIdentityError(r.Context(), w, code, err)
 			return
 		}
 	}
