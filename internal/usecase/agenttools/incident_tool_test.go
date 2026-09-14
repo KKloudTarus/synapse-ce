@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/riskassessment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -41,7 +43,27 @@ func sessionIncident() incident.Incident {
 			{EventID: "ev-1", OccurredAt: at, Kind: "detection", Summary: "egress to 203.0.113.9"},
 		},
 		Comments: []incident.Comment{{At: at, Actor: "alice", Text: "looks like exfiltration to me"}},
+		// Populated on purpose: with a nil Risk the "the risk assessment is withheld" assertion below
+		// would hold even if the view serialized one.
+		Risk: &riskassessment.RiskAssessment{
+			AssessmentID: "ra-1", IncidentRevision: 1, ScorerVersion: "scorer-v1", PolicyVersion: "policy-v1",
+			ReasonCodes: []string{"exfil_pattern"}, CreatedAt: at,
+		},
 	}
+}
+
+// incidentWithTimeline returns the session incident carrying n timeline entries.
+func incidentWithTimeline(n int) incident.Incident {
+	inc := sessionIncident()
+	at := time.Unix(1_700_000_000, 0).UTC()
+	inc.Timeline = make([]incident.TimelineRef, 0, n)
+	for i := range n {
+		inc.Timeline = append(inc.Timeline, incident.TimelineRef{
+			EventID: shared.ID(fmt.Sprintf("ev-%d", i)), OccurredAt: at.Add(time.Duration(i) * time.Second),
+			Kind: "detection", Summary: fmt.Sprintf("signal %d", i),
+		})
+	}
+	return inc
 }
 
 func readIncident(t *testing.T, c *Catalog, id string) map[string]any {
@@ -97,6 +119,9 @@ func TestGetIncidentDetailReturnsTheSessionIncident(t *testing.T) {
 	if _, present := out["risk"]; present {
 		t.Error("the risk assessment must not be returned")
 	}
+	if strings.Contains(string(mustJSON(t, out)), "exfil_pattern") {
+		t.Error("risk-assessment content leaked into the agent payload")
+	}
 	if len(audit.recs) == 0 || audit.recs[len(audit.recs)-1].Action != "agent.read.incident_detail" {
 		t.Errorf("read was not audited: %+v", audit.recs)
 	}
@@ -128,6 +153,38 @@ func TestGetIncidentDetailRefusesOutOfScopeIncidents(t *testing.T) {
 			}
 			if _, leaked := out["title"]; leaked {
 				t.Fatalf("%s leaked incident content: %+v", id, out)
+			}
+		})
+	}
+}
+
+// TestGetIncidentDetailCapsTheTimeline covers the bound itself, including the exact boundary: a regression
+// that returned every entry, or that reported the wrong total or flag, would otherwise pass unnoticed
+// because the other fixtures carry a single entry.
+func TestGetIncidentDetailCapsTheTimeline(t *testing.T) {
+	for _, tc := range []struct {
+		entries   int
+		want      int
+		truncated bool
+	}{
+		{entries: maxRows - 1, want: maxRows - 1, truncated: false},
+		{entries: maxRows, want: maxRows, truncated: false}, // exact boundary: full, not truncated
+		{entries: maxRows + 1, want: maxRows, truncated: true},
+	} {
+		t.Run(fmt.Sprintf("%d entries", tc.entries), func(t *testing.T) {
+			c, _ := newCatalog(t, nil, nil, subfinder())
+			c.EnableIncidentReads(&fakeIncidents{byID: map[shared.ID]incident.Incident{
+				"inc-1": incidentWithTimeline(tc.entries),
+			}})
+			out := readIncident(t, c, "inc-1")
+			if got := len(out["timeline"].([]any)); got != tc.want {
+				t.Errorf("returned %d timeline entries, want %d", got, tc.want)
+			}
+			if out["timeline_total"] != float64(tc.entries) {
+				t.Errorf("timeline_total = %v, want %d (the TRUE total, not the returned count)", out["timeline_total"], tc.entries)
+			}
+			if out["timeline_truncated"] != tc.truncated {
+				t.Errorf("timeline_truncated = %v, want %v", out["timeline_truncated"], tc.truncated)
 			}
 		})
 	}

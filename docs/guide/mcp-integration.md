@@ -47,7 +47,6 @@ engagement cannot silently return a partial picture as if it were complete.
 | `reachability_context` | Dependency-graph reachability facts |
 | `evidence_sufficiency` | Advisory assessment of what a finding still needs to become publishable |
 | `plan_runtime_verification` | A safe, read-only verification plan for a SAST finding. Executes nothing |
-| `get_incident_detail` | Bounded detail for one incident of the engagement: title, severity, state, disposition, attached detections, timeline. Never analyst comments or the risk assessment |
 
 `evidence_sufficiency` is explicitly advisory. It sets no score; only a distinct verifier's sealed verdict
 moves a finding's evidence score.
@@ -80,8 +79,10 @@ Judgment proposal tools require `SYNAPSE_JUDGMENTS_ENABLED`, and `propose_writeu
 `tools/list` rather than present and failing.
 
 `propose_investigation` requires at least one supporting driver, so a hypothesis always carries the
-signals behind it. `get_incident_detail` is where those signals come from; it returns only incidents of
-the caller's own engagement, and an incident outside it is reported exactly like one that does not exist.
+signals behind it. The in-process agent reads those signals with `get_incident_detail`; that tool is NOT
+exposed here, because the incident store is tenant-scoped and this server binds an engagement but no
+tenant. An MCP client must therefore supply the incident id and the supporting signal tokens from its own
+context.
 
 ## Why proposals cannot become executions
 
