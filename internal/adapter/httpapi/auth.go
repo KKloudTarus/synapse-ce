@@ -58,10 +58,13 @@ func principalObj(ctx context.Context) (HumanPrincipal, bool) {
 }
 
 // Resolver maps a presented bearer token to a HumanPrincipal. ok=false means the token
-// is unknown/disabled (→ 401). D2 retains this compatibility form until the credential-index
-// resolver replaces legacy user lookup; browser-session resolution already preserves dependency
-// failures through SessionResolver's error result.
+// is unknown/disabled (→ 401). It is retained for test and adapter compatibility; production
+// authentication must use ErrorResolver so dependency failures cannot be mistaken for a bad token.
 type Resolver func(ctx context.Context, token string) (HumanPrincipal, bool)
+
+// ErrorResolver maps a bearer token while retaining the failure distinction needed by the public
+// identity error contract. A returned error is never interpreted as an invalid credential.
+type ErrorResolver func(ctx context.Context, token string) (HumanPrincipal, error)
 
 // SessionResolver validates an opaque browser session. CSRF is passed only for cookie authentication.
 type SessionResolver interface {
@@ -69,8 +72,9 @@ type SessionResolver interface {
 }
 
 type Authenticator struct {
-	resolve Resolver
-	session SessionResolver
+	resolve      Resolver
+	resolveError ErrorResolver
+	session      SessionResolver
 }
 
 // SetSessionResolver enables the OIDC BFF cookie session fallback while retaining bearer authentication.
@@ -79,6 +83,12 @@ func (a *Authenticator) SetSessionResolver(resolve SessionResolver) { a.session 
 // NewAuthenticator builds an authenticator from a token resolver.
 func NewAuthenticator(resolve Resolver) *Authenticator {
 	return &Authenticator{resolve: resolve}
+}
+
+// NewAuthenticatorWithErrorResolver builds the production bearer authenticator. It preserves
+// dependency failures as retryable identity errors instead of collapsing them into a 401.
+func NewAuthenticatorWithErrorResolver(resolve ErrorResolver) *Authenticator {
+	return &Authenticator{resolveError: resolve}
 }
 
 // Middleware enforces a valid bearer token on every route except publicPaths (no
@@ -92,9 +102,25 @@ func (a *Authenticator) Middleware(publicPaths map[string]bool, next http.Handle
 		var principal HumanPrincipal
 		if token, ok := bearerToken(r); ok {
 			// Bearer credentials retain their existing API semantics, including no CSRF requirement.
-			var authenticated bool
-			principal, authenticated = a.resolve(r.Context(), token)
-			if !authenticated || principal.ID == "" {
+			if a.resolveError != nil {
+				var err error
+				principal, err = a.resolveError(r.Context(), token)
+				if err != nil {
+					writeIdentityFailure(w, r.Context(), err)
+					return
+				}
+			} else if a.resolve == nil {
+				writeIdentityError(w, r.Context(), IdentityErrorDependencyUnavailable, nil)
+				return
+			} else {
+				var authenticated bool
+				principal, authenticated = a.resolve(r.Context(), token)
+				if !authenticated {
+					writeIdentityError(w, r.Context(), IdentityErrorAuthenticationInvalid, nil)
+					return
+				}
+			}
+			if principal.ID == "" {
 				writeIdentityError(w, r.Context(), IdentityErrorAuthenticationInvalid, nil)
 				return
 			}
