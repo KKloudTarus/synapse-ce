@@ -1351,12 +1351,12 @@ func main() {
 		log.Error("bootstrap admin seed failed", "err", err)
 		os.Exit(1)
 	}
-	auth := httpapi.NewAuthenticator(func(ctx context.Context, token string) (httpapi.Principal, bool) {
+	auth := httpapi.NewAuthenticatorWithErrorResolver(func(ctx context.Context, token string) (httpapi.Principal, error) {
 		u, err := usersService.Authenticate(ctx, token)
 		if err != nil {
-			return httpapi.Principal{}, false
+			return httpapi.Principal{}, err
 		}
-		return httpapi.Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: u.TenantID}, true
+		return httpapi.Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: u.TenantID}, nil
 	})
 	// Audit read/verify use case: same signer as evidence, so the audit head is
 	// origin-attested at parity with the evidence chain.
