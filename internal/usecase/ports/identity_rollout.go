@@ -32,27 +32,28 @@ type LegacyHumanSnapshot struct {
 }
 
 type IdentityBackfillRun struct {
-	TenantID        shared.ID
-	ID              shared.ID
-	SchemaVersion   int
-	BatchSize       int
-	SnapshotAt      time.Time
-	CheckpointUser  shared.ID
-	State           IdentityBackfillState
-	LeaseOwner      string
-	LeaseToken      shared.ID
-	LeaseExpiresAt  time.Time
-	ProcessedCount  int
-	ProjectedCount  int
-	UnchangedCount  int
-	DriftCount      int
-	SourceCount     int
-	PersonCount     int
-	MembershipCount int
-	CreatedBy       string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	CompletedAt     *time.Time
+	TenantID             shared.ID
+	ID                   shared.ID
+	SchemaVersion        int
+	BatchSize            int
+	SnapshotAt           time.Time
+	CheckpointUser       shared.ID
+	State                IdentityBackfillState
+	LeaseOwner           string
+	LeaseToken           shared.ID
+	LeaseExpiresAt       time.Time
+	ProcessedCount       int
+	ProjectedCount       int
+	UnchangedCount       int
+	DriftCount           int
+	ReconciledDriftCount int
+	SourceCount          int
+	PersonCount          int
+	MembershipCount      int
+	CreatedBy            string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	CompletedAt          *time.Time
 }
 
 type IdentityBackfillAcquireRequest struct {
@@ -118,11 +119,11 @@ type LegacyOIDCShadowConfig struct {
 }
 
 type IdentityShadowImportResult struct {
-	ConnectionID     shared.ID
-	Revision         int64
-	ProjectedLinks   int
-	UnchangedLinks   int
-	DriftedLinks     int
+	ConnectionID   shared.ID
+	Revision       int64
+	ProjectedLinks int
+	UnchangedLinks int
+	DriftedLinks   int
 }
 
 // IdentityShadowImporter imports the fixed-cell OIDC configuration and existing approved links as
