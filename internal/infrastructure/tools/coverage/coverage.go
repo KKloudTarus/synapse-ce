@@ -21,9 +21,22 @@ const maxReportBytes = 256 << 20 // coverage reports can be large; cap defensive
 // absent lines are not counted.
 type LineCoverage map[string]map[int]bool
 
+// Options tunes parsing for formats whose file paths are not repo-relative on their own.
+type Options struct {
+	// GoModulePath is the `module` directive of the scanned tree. A Go -coverprofile names files by
+	// import path (module/pkg/file.go); with the module path known, that prefix is stripped so the
+	// result keys on repo-relative paths like every other format. Empty leaves Go paths untouched.
+	GoModulePath string
+}
+
 // Parse reads a coverage report file, auto-detects its format, and returns the aggregated report plus the
 // per-line map.
 func Parse(path string) (measure.CoverageReport, LineCoverage, error) {
+	return ParseWithOptions(path, Options{})
+}
+
+// ParseWithOptions is Parse with format options.
+func ParseWithOptions(path string, opts Options) (measure.CoverageReport, LineCoverage, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return measure.CoverageReport{}, nil, fmt.Errorf("stat coverage report: %w", err)
@@ -35,12 +48,18 @@ func Parse(path string) (measure.CoverageReport, LineCoverage, error) {
 	if err != nil {
 		return measure.CoverageReport{}, nil, fmt.Errorf("read coverage report: %w", err)
 	}
-	return ParseBytes(data)
+	return ParseBytesWithOptions(data, opts)
 }
 
 // ParseBytes parses coverage data whose format is auto-detected: XML with a <coverage> root is Cobertura,
-// XML with a <report> root is JaCoCo, otherwise the data is treated as lcov.
+// XML with a <report> root is JaCoCo, a `mode:` header is a Go -coverprofile, otherwise the data is
+// treated as lcov.
 func ParseBytes(data []byte) (measure.CoverageReport, LineCoverage, error) {
+	return ParseBytesWithOptions(data, Options{})
+}
+
+// ParseBytesWithOptions is ParseBytes with format options.
+func ParseBytesWithOptions(data []byte, opts Options) (measure.CoverageReport, LineCoverage, error) {
 	trimmed := bytes.TrimSpace(data)
 	var (
 		lc  LineCoverage
@@ -51,6 +70,8 @@ func ParseBytes(data []byte) (measure.CoverageReport, LineCoverage, error) {
 		lc, err = parseJaCoCo(data)
 	case bytes.HasPrefix(trimmed, []byte("<")) && bytes.Contains(peek(trimmed), []byte("<coverage")):
 		lc, err = parseCobertura(data)
+	case bytes.HasPrefix(trimmed, []byte(goCoverModePrefix)):
+		lc, err = parseGoCoverProfile(data, opts.GoModulePath)
 	default:
 		lc, err = parseLCOV(data)
 	}
@@ -85,6 +106,99 @@ func mark(lc LineCoverage, file string, line int, covered bool) {
 	} else if _, ok := m[line]; !ok {
 		m[line] = false
 	}
+}
+
+// goCoverModePrefix opens every Go -coverprofile: "mode: set", "mode: count" or "mode: atomic".
+const goCoverModePrefix = "mode: "
+
+// parseGoCoverProfile parses the profile `go test -coverprofile` writes. After the mode header, each line
+// is one block: `file:startLine.startCol,endLine.endCol numStmts count`, where file is an import path.
+// Every line the block spans is marked covered when count > 0; a line spanned by several blocks is
+// covered if any of them is, which mark already provides (the union rule the merged-report path relies
+// on). Column offsets are not needed for line coverage and are validated only for shape.
+//
+// Unlike the lcov parser, which skips a line it cannot read, this one fails on it. An lcov file is often
+// hand-assembled from several tools and a stray line is noise; a coverprofile is written by one tool in
+// one pass, so a line that does not parse means the file is not what it claims to be, and reporting
+// coverage from the lines that did parse would present a partial profile as a whole one.
+func parseGoCoverProfile(data []byte, modulePath string) (LineCoverage, error) {
+	lc := LineCoverage{}
+	prefix := ""
+	if modulePath = strings.TrimSpace(modulePath); modulePath != "" {
+		prefix = strings.TrimSuffix(modulePath, "/") + "/"
+	}
+	for i, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if i == 0 {
+			mode := strings.TrimSpace(strings.TrimPrefix(line, goCoverModePrefix))
+			if mode != "set" && mode != "count" && mode != "atomic" {
+				return nil, fmt.Errorf("go coverprofile: unknown mode %q (want set, count or atomic)", mode)
+			}
+			continue
+		}
+		// file:startLine.startCol,endLine.endCol numStmts count — split from the right so a file path
+		// containing ':' (a Windows drive, say) still parses.
+		fields := strings.Fields(line)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("go coverprofile line %d: want 3 fields, got %d", i+1, len(fields))
+		}
+		colon := strings.LastIndexByte(fields[0], ':')
+		if colon <= 0 {
+			return nil, fmt.Errorf("go coverprofile line %d: missing file:position", i+1)
+		}
+		file, span := fields[0][:colon], fields[0][colon+1:]
+		start, end, err := goCoverSpan(span)
+		if err != nil {
+			return nil, fmt.Errorf("go coverprofile line %d: %w", i+1, err)
+		}
+		if _, err := strconv.Atoi(fields[1]); err != nil {
+			return nil, fmt.Errorf("go coverprofile line %d: statement count %q is not a number", i+1, fields[1])
+		}
+		count, err := strconv.Atoi(fields[2])
+		if err != nil || count < 0 {
+			return nil, fmt.Errorf("go coverprofile line %d: hit count %q is not a non-negative number", i+1, fields[2])
+		}
+		if prefix != "" {
+			file = strings.TrimPrefix(file, prefix)
+		}
+		for ln := start; ln <= end; ln++ {
+			mark(lc, file, ln, count > 0)
+		}
+	}
+	return lc, nil
+}
+
+// goCoverSpan reads `startLine.startCol,endLine.endCol` and returns the line range.
+func goCoverSpan(span string) (start, end int, err error) {
+	from, to, ok := strings.Cut(span, ",")
+	if !ok {
+		return 0, 0, fmt.Errorf("span %q is not start,end", span)
+	}
+	parse := func(pos string) (int, error) {
+		lineStr, colStr, ok := strings.Cut(pos, ".")
+		if !ok {
+			return 0, fmt.Errorf("position %q is not line.col", pos)
+		}
+		ln, err1 := strconv.Atoi(lineStr)
+		_, err2 := strconv.Atoi(colStr)
+		if err1 != nil || err2 != nil || ln < 1 {
+			return 0, fmt.Errorf("position %q is not line.col", pos)
+		}
+		return ln, nil
+	}
+	if start, err = parse(from); err != nil {
+		return 0, 0, err
+	}
+	if end, err = parse(to); err != nil {
+		return 0, 0, err
+	}
+	if end < start {
+		return 0, 0, fmt.Errorf("span %q ends before it starts", span)
+	}
+	return start, end, nil
 }
 
 // parseLCOV parses an lcov .info file: SF:<file> sets the current file, DA:<line>,<hits> records a line.

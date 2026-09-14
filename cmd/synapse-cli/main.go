@@ -22,6 +22,8 @@ import (
 	"time"
 	"unicode"
 
+	"golang.org/x/mod/modfile"
+
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
@@ -797,7 +799,7 @@ func runGate(args []string) error {
 	coverageMeasured := false
 	var snapCoverage float64
 	if covPath != "" {
-		covRep, lc, cerr := coverage.Parse(covPath)
+		covRep, lc, cerr := coverage.ParseWithOptions(covPath, coverage.Options{GoModulePath: goModulePath(dir)})
 		if cerr != nil {
 			return fmt.Errorf("coverage: %w", cerr)
 		}
@@ -961,6 +963,18 @@ func sastLocation(file string, line int) *finding.SourceLocation {
 		return nil
 	}
 	return &finding.SourceLocation{File: file, StartLine: line, EndLine: line}
+}
+
+// goModulePath returns the `module` directive of dir/go.mod, or "" when there is none. A Go -coverprofile
+// names files by import path, and the module path is what turns those back into the repo-relative paths
+// the rest of the gate keys on. Any read or parse failure is "" — the profile then keeps its import
+// paths, which is the same as not knowing the module, never an error on a non-Go tree.
+func goModulePath(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod")) // #nosec G304 -- the operator-supplied scan root
+	if err != nil {
+		return ""
+	}
+	return modfile.ModulePath(data)
 }
 
 // buildSnapshot turns the scoped findings + ratings + duplication into gate metrics.

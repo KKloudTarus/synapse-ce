@@ -82,3 +82,114 @@ func TestLeastCovered(t *testing.T) {
 		t.Errorf("least-covered should be lo.go, got %+v", lc)
 	}
 }
+
+// A profile as `go test -coverprofile` writes it: import-path file names, one block per line, blocks
+// that span several lines, and two blocks on one line (the `if` and its `else` body).
+const goProfile = `mode: set
+github.com/acme/app/internal/x/y.go:10.2,12.16 2 1
+github.com/acme/app/internal/x/y.go:12.16,14.3 1 0
+github.com/acme/app/internal/x/y.go:20.1,20.40 1 1
+github.com/acme/app/cmd/main.go:5.13,7.2 1 1
+`
+
+func TestParseGoCoverProfileStripsModulePathAndUnionsBlocks(t *testing.T) {
+	rep, lc, err := ParseBytesWithOptions([]byte(goProfile), Options{GoModulePath: "github.com/acme/app"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	y := lc["internal/x/y.go"]
+	if y == nil {
+		t.Fatalf("module path was not stripped; files = %v", keysOf(lc))
+	}
+	// 10-11 covered by the first block; 12 by both (count 1 and count 0) and therefore covered; 13-14
+	// only by the uncovered block; 20 covered; nothing recorded for lines no block spans.
+	for ln, want := range map[int]bool{10: true, 11: true, 12: true, 13: false, 14: false, 20: true} {
+		if got, ok := y[ln]; !ok || got != want {
+			t.Errorf("y.go line %d: got %v (recorded=%v), want %v", ln, got, ok, want)
+		}
+	}
+	if _, recorded := y[15]; recorded {
+		t.Error("line 15 is spanned by no block and must not be recorded")
+	}
+	if !lc["cmd/main.go"][6] {
+		t.Error("cmd/main.go line 6 must be covered")
+	}
+	// Recorded: y.go 10-14 and 20, main.go 5-7 = 9 lines; covered: y.go 10,11,12,20 + main.go 5,6,7 = 7.
+	if rep.TotalLines != 9 || rep.CoveredLines != 7 {
+		t.Errorf("totals: got %d/%d, want 7/9", rep.CoveredLines, rep.TotalLines)
+	}
+}
+
+func TestParseGoCoverProfileModes(t *testing.T) {
+	for _, mode := range []string{"set", "count", "atomic"} {
+		data := "mode: " + mode + "\nm/a.go:1.1,2.2 1 3\nm/a.go:3.1,3.9 1 0\n"
+		_, lc, err := ParseBytesWithOptions([]byte(data), Options{GoModulePath: "m"})
+		if err != nil {
+			t.Fatalf("mode %s: %v", mode, err)
+		}
+		if !lc["a.go"][1] || !lc["a.go"][2] || lc["a.go"][3] {
+			t.Errorf("mode %s: line map wrong: %+v", mode, lc["a.go"])
+		}
+	}
+}
+
+func TestParseGoCoverProfileKeepsImportPathsWithoutAModule(t *testing.T) {
+	_, lc, err := ParseBytes([]byte(goProfile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lc["github.com/acme/app/internal/x/y.go"] == nil || lc["internal/x/y.go"] != nil {
+		t.Errorf("without a module path the import path must be kept verbatim; files = %v", keysOf(lc))
+	}
+	// A module path that is not a prefix of the file changes nothing either.
+	_, lc, err = ParseBytesWithOptions([]byte(goProfile), Options{GoModulePath: "github.com/other/mod"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lc["github.com/acme/app/internal/x/y.go"] == nil {
+		t.Errorf("a non-matching module path must not rewrite the file; files = %v", keysOf(lc))
+	}
+}
+
+// TestParseGoCoverProfileFailsClosed: a coverprofile is written by one tool in one pass, so a line that
+// does not parse means the file is not what it claims to be. It must not fall through to the lcov parser
+// either, which would accept anything and report an empty, "successful" coverage.
+func TestParseGoCoverProfileFailsClosed(t *testing.T) {
+	for name, data := range map[string]string{
+		"unknown mode":          "mode: bogus\nm/a.go:1.1,2.2 1 1\n",
+		"too few fields":        "mode: set\nm/a.go:1.1,2.2 1\n",
+		"no position":           "mode: set\nm/a.go 1 1\n",
+		"span not start,end":    "mode: set\nm/a.go:1.1 1 1\n",
+		"position not line.col": "mode: set\nm/a.go:1,2 1 1\n",
+		"end before start":      "mode: set\nm/a.go:5.1,2.2 1 1\n",
+		"line zero":             "mode: set\nm/a.go:0.1,2.2 1 1\n",
+		"hit count not number":  "mode: set\nm/a.go:1.1,2.2 1 x\n",
+		"negative hit count":    "mode: set\nm/a.go:1.1,2.2 1 -1\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, lc, err := ParseBytes([]byte(data))
+			if err == nil {
+				t.Fatalf("malformed profile was accepted; lines = %v", lc)
+			}
+		})
+	}
+}
+
+func TestParseGoCoverProfileIsDetectedBeforeLCOV(t *testing.T) {
+	// The same bytes through the lcov parser would yield nothing at all: no SF:/DA: records.
+	if lc, err := parseLCOV([]byte(goProfile)); err != nil || len(lc) != 0 {
+		t.Fatalf("precondition: lcov must see nothing in a coverprofile, got %v err=%v", lc, err)
+	}
+	_, lc, err := ParseBytes([]byte(goProfile))
+	if err != nil || len(lc) == 0 {
+		t.Fatalf("a coverprofile must be detected and parsed, got %v err=%v", lc, err)
+	}
+}
+
+func keysOf(lc LineCoverage) []string {
+	out := make([]string, 0, len(lc))
+	for k := range lc {
+		out = append(out, k)
+	}
+	return out
+}
