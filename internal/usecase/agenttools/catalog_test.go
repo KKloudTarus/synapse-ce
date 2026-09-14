@@ -610,6 +610,11 @@ func (f *fakeJudgmentProposer) Propose(_ context.Context, proposer string, eng s
 	if f.err != nil {
 		return judgment.Judgment{}, f.err
 	}
+	// analysis.Propose validates the claim (via judgment.MarshalClaim) before it persists anything, so the
+	// fake validates too — otherwise a catalog test would accept a claim the real service refuses.
+	if verr := claim.Validate(); verr != nil {
+		return judgment.Judgment{}, verr
+	}
 	// echo a PROPOSED judgment at score 0, mirroring analysis.Propose (which validates + seals + audits)
 	f.got = judgment.Judgment{
 		ID: "j-1", EngagementID: eng, Capability: capb, SubjectKind: sk, SubjectID: sid,

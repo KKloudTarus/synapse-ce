@@ -47,6 +47,7 @@ engagement cannot silently return a partial picture as if it were complete.
 | `reachability_context` | Dependency-graph reachability facts |
 | `evidence_sufficiency` | Advisory assessment of what a finding still needs to become publishable |
 | `plan_runtime_verification` | A safe, read-only verification plan for a SAST finding. Executes nothing |
+| `get_incident_detail` | Bounded detail for one incident of the engagement: title, severity, state, disposition, attached detections, timeline. Never analyst comments or the risk assessment |
 
 `evidence_sufficiency` is explicitly advisory. It sets no score; only a distinct verifier's sealed verdict
 moves a finding's evidence score.
@@ -68,6 +69,7 @@ can confirm itself.
 | `propose_risk_narrative` | A risk narrative for human acceptance |
 | `propose_threat` | A STRIDE threat over the architecture model |
 | `propose_vex_justification` | An OpenVEX `not_affected` justification |
+| `propose_investigation` | An investigation hypothesis about an incident: one tactic, a confidence, and the signals supporting it |
 | `propose_writeup_draft` | Finding write-up prose awaiting human sign-off |
 
 A `tools/call` response for a proposal carries `"proposal_requires_human_approval": true`. Treat it as a
@@ -76,6 +78,10 @@ queued request for review, not as work that happened.
 Judgment proposal tools require `SYNAPSE_JUDGMENTS_ENABLED`, and `propose_writeup_draft` requires
 `SYNAPSE_WRITEUP_DRAFTS_ENABLED`. A tool whose dependency is not wired is simply absent from
 `tools/list` rather than present and failing.
+
+`propose_investigation` requires at least one supporting driver, so a hypothesis always carries the
+signals behind it. `get_incident_detail` is where those signals come from; it returns only incidents of
+the caller's own engagement, and an incident outside it is reported exactly like one that does not exist.
 
 ## Why proposals cannot become executions
 

@@ -25,6 +25,7 @@ type AgentToolset struct {
 	Reachability  scanResultReader     // required: reachability_context (read-only)
 	Judgments     judgmentProposer     // optional (nil ⇒ off): propose_reachability/sast_validation/critique/risk_narrative/threat/vex_justification
 	WriteupDrafts writeupdraftProposer // optional (nil ⇒ off): propose_writeup_draft
+	Incidents     incidentReader       // optional (nil ⇒ off): get_incident_detail (read-only)
 }
 
 // EnableAgentToolset turns on planning + the proposal/read tools from a single dependency set, so the
@@ -49,6 +50,9 @@ func (c *Catalog) EnableAgentToolset(t AgentToolset) error {
 	}
 	if t.WriteupDrafts != nil {
 		c.EnableWriteupDrafts(t.WriteupDrafts)
+	}
+	if t.Incidents != nil {
+		c.EnableIncidentReads(t.Incidents)
 	}
 	return nil
 }

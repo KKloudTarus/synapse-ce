@@ -22,6 +22,7 @@ package agenttools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -33,6 +34,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -67,6 +69,7 @@ const (
 	ToolProposeAttackChain      = "propose_attack_chain"      // propose an attack-chain HYPOTHESIS finding (score 0; gated until a human verifies)
 	ToolProposeVexJustification = "propose_vex_justification" // propose an OpenVEX not_affected justification Judgment (score 0; a human ratifies)
 	ToolProposeInvestigation    = "propose_investigation"     // propose an AI investigation HYPOTHESIS about an incident (E; ungated, a human accepts)
+	ToolGetIncidentDetail       = "get_incident_detail"       // read ONE incident of the session engagement, so a hypothesis can cite what it saw
 )
 
 // MaxPlanNodes bounds how many nodes a single propose_plan may carry (mirrors the domain cap);
@@ -86,6 +89,13 @@ type findingReader interface {
 
 type evidenceReader interface {
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]evidence.Evidence, error)
+}
+
+// incidentReader is the narrow read slice of the incident use-case the investigation tools need: one
+// canonical projection by id. Like the other readers the catalog depends on no write method, so the
+// agent can observe an incident and never edit, own, triage, or close one. *incidentuc.Service satisfies it.
+type incidentReader interface {
+	Get(ctx context.Context, id shared.ID) (incident.Incident, error)
 }
 
 // findingProposer is the narrow slice of the exploitation use-case the catalog needs to record
@@ -144,6 +154,7 @@ type Catalog struct {
 	reach       scanResultReader     // advertise + dispatch reachability_context (nil ⇒ tool absent)
 	jproposer   judgmentProposer     // advertise + dispatch propose_reachability/critique/risk_narrative/threat (nil ⇒ absent)
 	drafter     writeupdraftProposer // advertise + dispatch propose_writeup_draft (nil ⇒ absent)
+	incidents   incidentReader       // advertise + dispatch get_incident_detail (nil ⇒ tool absent)
 }
 
 // EnableFindingProposals turns on the propose_finding tool. The agent can then
@@ -173,6 +184,12 @@ func (c *Catalog) EnableJudgments(p judgmentProposer) { c.jproposer = p }
 // reject a draft – those are human actions behind PermReview + SoD (the proposer cannot sign off its own
 // draft). The composition root supplies the writeupdraft service (which satisfies the narrow proposer).
 func (c *Catalog) EnableWriteupDrafts(p writeupdraftProposer) { c.drafter = p }
+
+// EnableIncidentReads turns on the get_incident_detail read tool: the agent can read one incident of its
+// own engagement so an investigation hypothesis can cite the signals it actually saw. Read-only — the
+// narrow reader exposes no write method, so the agent can never own, triage, comment on, or close an
+// incident. The composition root supplies the incident service.
+func (c *Catalog) EnableIncidentReads(r incidentReader) { c.incidents = r }
 
 // EnablePlanning turns on the propose_plan tool. The composition root calls this for the
 // orchestrator's catalog when (and only when) it also wires a PlanStore + SetPlanStore, so the
@@ -292,7 +309,14 @@ func (c *Catalog) Tools() []agent.ToolSchema {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeInvestigation,
 			Description: "Propose an INVESTIGATION HYPOTHESIS about an incident: pick ONE closed ATT&CK-style tactic that best explains what is happening, a confidence 0..100, and the STRUCTURED signal tokens that support it (never prose). This is a PROPOSAL recorded at score 0 that a human analyst ACCEPTS or REJECTS – it proves nothing and NEVER drives a response on its own; you cannot accept your own hypothesis. Use 'benign' when the evidence points to NOT malicious.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"incident_id":{"type":"string","description":"the incident this hypothesis is about (from the incident list)"},"tactic":{"type":"string","description":"one of: lateral_movement | data_exfiltration | privilege_escalation | credential_access | persistence | command_and_control | defense_evasion | execution | benign"},"confidence":{"type":"integer","description":"0..100 confidence in the hypothesis"},"drivers":{"type":"array","items":{"type":"string"},"description":"the signal TOKENS that support it, e.g. new_exec_paths, network_fanout_spike, privilege_events (lowercase tokens, no spaces, no prose)"}},"required":["incident_id","tactic","confidence"],"additionalProperties":false}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"incident_id":{"type":"string","description":"the incident this hypothesis is about (from the incident list)"},"tactic":{"type":"string","description":"one of: lateral_movement | data_exfiltration | privilege_escalation | credential_access | persistence | command_and_control | defense_evasion | execution | benign"},"confidence":{"type":"integer","description":"0..100 confidence in the hypothesis"},"drivers":{"type":"array","minItems":1,"items":{"type":"string"},"description":"the signal TOKENS that support it, e.g. new_exec_paths, network_fanout_spike, privilege_events (lowercase tokens, no spaces, no prose). At least one is required: read the incident with get_incident_detail and cite what you saw."}},"required":["incident_id","tactic","confidence","drivers"],"additionalProperties":false}`),
+		})
+	}
+	if c.incidents != nil {
+		schemas = append(schemas, agent.ToolSchema{
+			Name:        ToolGetIncidentDetail,
+			Description: "Read ONE incident of the current engagement: title, severity, state, disposition, the detections attached to it, and its timeline entries. Read-only — you cannot own, triage, comment on, or close an incident. Use this before propose_investigation so your hypothesis cites signals you actually observed. Analyst comments are deliberately NOT returned.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"incident_id":{"type":"string","description":"the incident id to read; it must belong to the current engagement"}},"required":["incident_id"],"additionalProperties":false}`),
 		})
 	}
 	if c.drafter != nil {
@@ -377,6 +401,11 @@ func (c *Catalog) Dispatch(ctx context.Context, sess agent.Session, call agent.T
 			return Result{}, fmt.Errorf("%w: VEX justification proposals are not enabled", shared.ErrValidation)
 		}
 		return c.proposeVexJustification(ctx, sess, call.Arguments)
+	case ToolGetIncidentDetail:
+		if c.incidents == nil {
+			return Result{}, fmt.Errorf("%w: incident reads are not enabled", shared.ErrValidation)
+		}
+		return c.getIncidentDetail(ctx, sess, call.Arguments)
 	case ToolProposeInvestigation:
 		if c.jproposer == nil {
 			return Result{}, fmt.Errorf("%w: investigation proposals are not enabled", shared.ErrValidation)
@@ -1239,6 +1268,112 @@ func (c *Catalog) proposeThreat(ctx context.Context, sess agent.Session, raw jso
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal judgment: %w", err)
+	}
+	return Result{Data: payload}, nil
+}
+
+// incidentTimelineView is one entry of an incident's timeline: what happened, when, and a redacted
+// one-line summary. The summary is the only prose this tool returns, redacted exactly like a finding
+// description in get_finding_detail.
+type incidentTimelineView struct {
+	EventID    string `json:"event_id"`
+	OccurredAt string `json:"occurred_at"`
+	Kind       string `json:"kind"`
+	Summary    string `json:"summary"`
+}
+
+// incidentDetailView is the bounded read model behind get_incident_detail: enough for the agent to cite
+// what it observed, and nothing that would let it restate a conclusion somebody else already reached.
+//
+// Analyst comments are counted, never returned, and the risk assessment is omitted entirely. Both are
+// human or Go-computed judgements about the incident; feeding them back to the model would let it
+// launder an existing conclusion into an "independent" hypothesis, which is the same self-confirmation
+// the propose-only interface exists to prevent.
+type incidentDetailView struct {
+	ID                string                 `json:"id"`
+	Title             string                 `json:"title"`
+	Severity          string                 `json:"severity"`
+	State             string                 `json:"state"`
+	Disposition       string                 `json:"disposition"`
+	DetectionIDs      []string               `json:"detection_ids"`
+	Timeline          []incidentTimelineView `json:"timeline"`
+	TimelineTotal     int                    `json:"timeline_total"`
+	TimelineTruncated bool                   `json:"timeline_truncated"`
+	CommentCount      int                    `json:"comment_count"`
+	Note              string                 `json:"note"`
+}
+
+// getIncidentDetail returns ONE incident of the session's engagement, so propose_investigation can cite
+// signals the agent actually read instead of asserting a tactic with nothing behind it.
+//
+// get_finding_detail scopes by listing the engagement's findings and matching the id inside that set, so
+// a foreign id is simply absent. The incident store has no engagement listing (its by-asset index exists
+// for a different question), so this fetches by id and then refuses anything whose EngagementID is not
+// the session's — including an incident that carries no engagement id at all, which incident.IncidentEvent
+// documents as possible for legacy rows. Refusing is the fail-closed reading: an incident the agent cannot
+// prove is in scope is one it must not read.
+//
+// A miss and an out-of-scope incident return the SAME found:false payload, so the tool cannot be used to
+// test whether an id exists in another engagement.
+func (c *Catalog) getIncidentDetail(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
+	var args struct {
+		IncidentID string `json:"incident_id"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return Result{}, fmt.Errorf("%w: invalid get_incident_detail arguments", shared.ErrValidation)
+	}
+	id := strings.TrimSpace(args.IncidentID)
+	if id == "" {
+		return Result{}, fmt.Errorf("%w: incident_id is required", shared.ErrValidation)
+	}
+	inc, err := c.incidents.Get(ctx, shared.ID(id))
+	if err != nil && !errors.Is(err, shared.ErrNotFound) {
+		return Result{}, fmt.Errorf("get incident: %w", err) // a real failure is never reported as a miss
+	}
+	if err != nil || inc.EngagementID.IsZero() || inc.EngagementID != sess.EngagementID {
+		return c.incidentMiss(ctx, sess, id)
+	}
+	timeline := make([]incidentTimelineView, 0, min(len(inc.Timeline), maxRows))
+	for i, t := range inc.Timeline {
+		if i >= maxRows {
+			break
+		}
+		timeline = append(timeline, incidentTimelineView{
+			EventID: t.EventID.String(), OccurredAt: t.OccurredAt.UTC().Format(time.RFC3339),
+			Kind: t.Kind, Summary: redact.String(strings.TrimSpace(t.Summary), nil),
+		})
+	}
+	detections := make([]string, 0, len(inc.DetectionIDs))
+	for _, d := range inc.DetectionIDs {
+		detections = append(detections, d.String())
+	}
+	payload, err := json.Marshal(incidentDetailView{
+		ID: inc.ID.String(), Title: inc.Title, Severity: string(inc.Severity),
+		State: string(inc.State), Disposition: string(inc.Disposition),
+		DetectionIDs: detections, Timeline: timeline, TimelineTotal: len(inc.Timeline),
+		TimelineTruncated: len(inc.Timeline) > maxRows, CommentCount: len(inc.Comments),
+		Note: "read-only bounded incident detail; analyst comments and the risk assessment are not returned",
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("marshal incident detail: %w", err)
+	}
+	if err := c.auditRead(ctx, sess, "agent.read.incident_detail", id, 1); err != nil {
+		return Result{}, err
+	}
+	return Result{Data: payload}, nil
+}
+
+func (c *Catalog) incidentMiss(ctx context.Context, sess agent.Session, id string) (Result, error) {
+	payload, err := json.Marshal(map[string]any{
+		"incident_id": id,
+		"found":       false,
+		"note":        "incident not found in this agent session engagement",
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("marshal incident detail miss: %w", err)
+	}
+	if err := c.auditRead(ctx, sess, "agent.read.incident_detail", id, 0); err != nil {
+		return Result{}, err
 	}
 	return Result{Data: payload}, nil
 }

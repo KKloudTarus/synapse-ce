@@ -3,6 +3,7 @@ package agenttools
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
@@ -47,6 +48,55 @@ func TestProposeInvestigation(t *testing.T) {
 	ic, ok := fp.got.Claim.(judgment.InvestigationClaim)
 	if !ok || ic.Tactic != judgment.TacticLateralMovement || ic.Confidence != 72 || len(ic.Drivers) != 2 {
 		t.Fatalf("claim built wrong: %#v", fp.got.Claim)
+	}
+}
+
+// TestProposeInvestigationRequiresSupportingDrivers pins the two halves together: the advertised schema
+// must ask for drivers, and the domain must refuse a hypothesis without them. A schema that leaves the
+// supporting signals optional invites the model to send exactly what Validate rejects.
+func TestProposeInvestigationRequiresSupportingDrivers(t *testing.T) {
+	c, _ := newCatalog(t, nil, nil, subfinder())
+	fp := &fakeJudgmentProposer{}
+	c.EnableJudgments(fp)
+
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties struct {
+			Drivers struct {
+				MinItems int `json:"minItems"`
+			} `json:"drivers"`
+		} `json:"properties"`
+	}
+	for _, ts := range c.Tools() {
+		if ts.Name != ToolProposeInvestigation {
+			continue
+		}
+		if err := json.Unmarshal(ts.Parameters, &schema); err != nil {
+			t.Fatalf("decode advertised schema: %v", err)
+		}
+	}
+	if !slices.Contains(schema.Required, "drivers") {
+		t.Errorf("advertised schema must require drivers, got required=%v", schema.Required)
+	}
+	if schema.Properties.Drivers.MinItems != 1 {
+		t.Errorf("advertised drivers minItems = %d, want 1", schema.Properties.Drivers.MinItems)
+	}
+
+	for name, args := range map[string]string{
+		"omitted": `{"incident_id":"inc-7","tactic":"data_exfiltration","confidence":95}`,
+		"empty":   `{"incident_id":"inc-7","tactic":"data_exfiltration","confidence":95,"drivers":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			fp.got = judgment.Judgment{}
+			if _, err := c.Dispatch(context.Background(), session(), agent.ToolCall{
+				Name: ToolProposeInvestigation, Arguments: json.RawMessage(args),
+			}); err == nil {
+				t.Fatal("a hypothesis with no supporting driver was accepted")
+			}
+			if fp.got.Capability != "" {
+				t.Fatalf("a rejected hypothesis still reached the proposer: %+v", fp.got)
+			}
+		})
 	}
 }
 

@@ -23,6 +23,7 @@ func fullToolset() AgentToolset {
 		Reachability:  &fakeScanResults{},
 		Judgments:     &fakeJudgmentProposer{},
 		WriteupDrafts: &fakeWriteupdraftProposer{},
+		Incidents:     &fakeIncidents{},
 	}
 }
 
@@ -43,6 +44,7 @@ var toolsetControlled = []string{
 	ToolProposeVexJustification,
 	ToolProposeInvestigation,
 	ToolProposeWriteupDraft,
+	ToolGetIncidentDetail,
 }
 
 // TestEnableAgentToolsetEnablesFullSet locks the durable/inline parity guarantee: a FULL dependency set
@@ -98,6 +100,7 @@ func TestEnableAgentToolsetOptionalOff(t *testing.T) {
 	for _, n := range []string{
 		ToolProposeReachability, ToolProposeSASTValidation, ToolProposeCritique,
 		ToolProposeRiskNarrative, ToolProposeThreat, ToolProposeVexJustification, ToolProposeWriteupDraft,
+		ToolGetIncidentDetail,
 	} {
 		if names[n] {
 			t.Errorf("optional tool %q must be OFF when its dependency is nil", n)

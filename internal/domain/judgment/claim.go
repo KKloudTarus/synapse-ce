@@ -813,7 +813,12 @@ type InvestigationClaim struct {
 func (InvestigationClaim) Capability() Capability { return CapInvestigation }
 
 // Validate enforces the closed tactic vocabulary, a bounded confidence, an incident reference, and
-// token-only drivers (no free prose ever reaches the record).
+// at least one token-only driver (no free prose ever reaches the record).
+//
+// The driver list is required for the same reason it is on the two claims this one is modelled on: a
+// hypothesis whose supporting signals are empty asserts a tactic the record cannot show any basis for,
+// and an analyst reading it back has nothing to weigh but the confidence number. RiskNarrativeClaim
+// requires a driver, and CorrelationClaim requires a non-empty disagreement, on the same reasoning.
 func (c InvestigationClaim) Validate() error {
 	if c.IncidentID.IsZero() {
 		return fmt.Errorf("%w: investigation hypothesis requires an incident id", shared.ErrValidation)
@@ -823,6 +828,9 @@ func (c InvestigationClaim) Validate() error {
 	}
 	if c.Confidence < 0 || c.Confidence > 100 {
 		return fmt.Errorf("%w: investigation confidence must be 0..100, got %d", shared.ErrValidation, c.Confidence)
+	}
+	if len(c.Drivers) == 0 {
+		return fmt.Errorf("%w: investigation hypothesis requires at least one supporting driver", shared.ErrValidation)
 	}
 	if len(c.Drivers) > maxRiskDrivers {
 		return fmt.Errorf("%w: investigation hypothesis has too many drivers (%d > %d)", shared.ErrValidation, len(c.Drivers), maxRiskDrivers)

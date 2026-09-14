@@ -1567,6 +1567,9 @@ func main() {
 	}
 	responseService.SetApprovalDecider(approvalSvc)
 	var incidentResponseCoordinator *responseuc.IncidentCoordinator
+	// Hoisted so the agent catalog can read incidents too; the read service itself stays the same instance
+	// the operator surface uses, so the agent sees exactly what a human analyst sees.
+	var agentIncidentSvc *incidentuc.Service
 	var responseRunner *responseuc.ReconciliationRunner
 	// In Postgres mode all three repositories embed one *FleetAuditRepository over the
 	// single fleet_audit_intents table, so registering all three would sweep the same
@@ -2447,6 +2450,7 @@ func main() {
 			os.Exit(1)
 		}
 		router.SetIncidents(incidentSvc)
+		agentIncidentSvc = incidentSvc
 		incidentResponseCoordinator, ierr = responseuc.NewIncidentCoordinator(responseService, incidentSvc, clock)
 		if ierr != nil {
 			log.Error("incident response coordinator init failed", "err", ierr)
@@ -3387,6 +3391,9 @@ func main() {
 		}
 		if writeupDraftSvc != nil { // PROPOSE finding write-up drafts (prose); edit/accept stays human-only
 			toolset.WriteupDrafts = writeupDraftSvc
+		}
+		if agentIncidentSvc != nil { // READ one incident of the engagement, so a hypothesis can cite what it saw
+			toolset.Incidents = agentIncidentSvc
 		}
 		if terr := agentCatalog.EnableAgentToolset(toolset); terr != nil {
 			log.Error("agent toolset wiring failed", "err", terr)
