@@ -24,22 +24,49 @@ func NewUserRepository() *UserRepository {
 
 var _ ports.UserRepository = (*UserRepository)(nil)
 
-func (r *UserRepository) Create(_ context.Context, u *user.User) error {
+func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.byID[u.ID]; ok {
 		return fmt.Errorf("%w: user %s already exists", shared.ErrValidation, u.ID)
 	}
-	cp := *u
-	r.byID[u.ID] = &cp
-	return nil
+\tcp := *u
+\tstored := &cp
+\tr.byID[u.ID] = stored
+\tregisterTenantRollback(ctx, func() {
+\t\tr.mu.Lock()
+\t\tdefer r.mu.Unlock()
+\t\tif current, ok := r.byID[u.ID]; ok && current == stored {
+\t\t\tdelete(r.byID, u.ID)
+\t\t}
+\t})
+\treturn nil
 }
 
-func (r *UserRepository) Upsert(_ context.Context, u *user.User) error {
+func (r *UserRepository) Upsert(ctx context.Context, u *user.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	cp := *u
-	r.byID[u.ID] = &cp
+	previous, hadPrevious := r.byID[u.ID]
+	var previousCopy user.User
+	if hadPrevious {
+		previousCopy = *previous
+	}
+	updated := *u
+	stored := &updated
+	r.byID[u.ID] = stored
+	registerTenantRollback(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if current, ok := r.byID[u.ID]; !ok || current != stored {
+			return
+		}
+		if hadPrevious {
+			cp := previousCopy
+			r.byID[u.ID] = &cp
+			return
+		}
+		delete(r.byID, u.ID)
+	})
 	return nil
 }
 
@@ -68,16 +95,27 @@ func (r *UserRepository) GetByID(_ context.Context, tenantID, id shared.ID) (*us
 
 // Update writes the mutable fields of an existing user inside tenantID. The tenant of the stored
 // row is preserved, so an update can never move a user between tenants.
-func (r *UserRepository) Update(_ context.Context, tenantID shared.ID, u *user.User) error {
+func (r *UserRepository) Update(ctx context.Context, tenantID shared.ID, u *user.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	existing, ok := r.byID[u.ID]
 	if !ok || !sameTenant(existing.TenantID, tenantID) {
 		return shared.ErrNotFound
 	}
+	previous := *existing
 	updated := *u
 	updated.TenantID = existing.TenantID
-	r.byID[u.ID] = &updated
+	stored := &updated
+	r.byID[u.ID] = stored
+	registerTenantRollback(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if current, ok := r.byID[u.ID]; !ok || current != stored {
+			return
+		}
+		cp := previous
+		r.byID[u.ID] = &cp
+	})
 	return nil
 }
 
