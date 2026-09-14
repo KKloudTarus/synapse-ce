@@ -94,6 +94,24 @@ func TestSessionMiddlewarePreservesCookieOnDependencyFailure(t *testing.T) {
 	}
 }
 
+func TestBearerMiddlewarePreservesDependencyFailure(t *testing.T) {
+	auth := NewAuthenticatorWithErrorResolver(func(context.Context, string) (HumanPrincipal, error) {
+		return HumanPrincipal{}, errors.New("database unavailable")
+	})
+	h := auth.Middleware(map[string]bool{}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("handler must not run when bearer resolution fails")
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil).WithContext(identityContext("req-bearer-dep"))
+	req.Header.Set("Authorization", "Bearer still-valid")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	body := decodeIdentityError(t, rec)
+	if rec.Code != http.StatusServiceUnavailable || body.Code != IdentityErrorDependencyUnavailable || !body.Retryable {
+		t.Fatalf("dependency response = status %d body %+v", rec.Code, body)
+	}
+}
+
 func TestSessionMiddlewareClearsOnlyInvalidCredential(t *testing.T) {
 	auth := NewAuthenticator(func(context.Context, string) (HumanPrincipal, bool) { return HumanPrincipal{}, false })
 	auth.SetSessionResolver(sessionResolverFunc(func(context.Context, string, string, bool) (HumanPrincipal, error) {
