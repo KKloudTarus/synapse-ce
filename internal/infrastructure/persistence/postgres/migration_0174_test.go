@@ -9,19 +9,19 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func TestMigration0173FindingBackfillPreservesSingletonAndQuarantinesConflict(t *testing.T) {
+func TestMigration0174FindingBackfillPreservesSingletonAndQuarantinesConflict(t *testing.T) {
 	db, _ := newAssessmentMigrationDB(t)
-	if err := goose.UpTo(db, ".", 172); err != nil {
-		t.Fatalf("migrate to 0172: %v", err)
+	if err := goose.UpTo(db, ".", 173); err != nil {
+		t.Fatalf("migrate to 0173: %v", err)
 	}
-	prefix := "m173-" + randHex(t)
+	prefix := "m174-" + randHex(t)
 	tenant, engagement := prefix+"-tenant", prefix+"-engagement"
 	advisory := "CVE-2026-" + prefix
 	conflictTarget, singletonTarget := "registry.example/app:1", "registry.example/worker:1"
 	if _, err := db.Exec(`INSERT INTO tenants(id,name) VALUES($1,$1)`, tenant); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'Migration 0173')`, engagement, tenant); err != nil {
+	if _, err := db.Exec(`INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'Migration 0174')`, engagement, tenant); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO advisories(id,data) VALUES($1,'{}')`, advisory); err != nil {
@@ -51,8 +51,8 @@ func TestMigration0173FindingBackfillPreservesSingletonAndQuarantinesConflict(t 
 		}
 	}
 
-	if err := goose.UpTo(db, ".", 173); err != nil {
-		t.Fatalf("migrate to 0173: %v", err)
+	if err := goose.UpTo(db, ".", 174); err != nil {
+		t.Fatalf("migrate to 0174: %v", err)
 	}
 	requireMigrationRLS(t, db, "vulnerability_finding_occurrences")
 	requireMigrationRLS(t, db, "vulnerability_finding_backfill_conflicts")
@@ -93,10 +93,10 @@ func TestMigration0173FindingBackfillPreservesSingletonAndQuarantinesConflict(t 
 	}
 }
 
-func TestMigration0173NewTablesEnforceTenantRLSForNonSuperuser(t *testing.T) {
-	isolated := newIsolatedMigrationDB(t, 173, 172)
+func TestMigration0174NewTablesEnforceTenantRLSForNonSuperuser(t *testing.T) {
+	isolated := newIsolatedMigrationDB(t, 174, 173)
 	db := isolated.db
-	for _, tenant := range []string{"m173-rls-a", "m173-rls-b"} {
+	for _, tenant := range []string{"m174-rls-a", "m174-rls-b"} {
 		if _, err := db.Exec(`INSERT INTO tenants(id,name) VALUES($1,$1)`, tenant); err != nil {
 			t.Fatal(err)
 		}
@@ -109,8 +109,8 @@ func TestMigration0173NewTablesEnforceTenantRLSForNonSuperuser(t *testing.T) {
 			}
 		})
 	}
-	if err := goose.UpTo(db, ".", 173); err != nil {
-		t.Fatalf("migrate to 0173: %v", err)
+	if err := goose.UpTo(db, ".", 174); err != nil {
+		t.Fatalf("migrate to 0174: %v", err)
 	}
 	for _, table := range []string{"vulnerability_inventory_scopes", "vulnerability_inventory_work", "vulnerability_finding_occurrences", "vulnerability_finding_backfill_conflicts", "vulnerability_primary_findings"} {
 		requireMigrationRLS(t, db, table)
@@ -119,7 +119,7 @@ func TestMigration0173NewTablesEnforceTenantRLSForNonSuperuser(t *testing.T) {
 	if err := db.QueryRow(`SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user`).Scan(&superuser, &bypass); err != nil || superuser || bypass {
 		t.Fatalf("migration role super=%v bypass=%v err=%v", superuser, bypass, err)
 	}
-	for _, tenant := range []string{"m173-rls-a", "m173-rls-b"} {
+	for _, tenant := range []string{"m174-rls-a", "m174-rls-b"} {
 		withMigrationTenant(t, db, tenant, func(tx *sql.Tx) {
 			scope := "scope-" + tenant
 			if _, err := tx.Exec(`UPDATE sboms SET inventory_scope=$2,inventory_generation=1,inventory_completeness='complete',inventory_authoritative=true,
@@ -140,14 +140,14 @@ func TestMigration0173NewTablesEnforceTenantRLSForNonSuperuser(t *testing.T) {
 			}
 		})
 	}
-	withMigrationTenant(t, db, "m173-rls-a", func(tx *sql.Tx) {
+	withMigrationTenant(t, db, "m174-rls-a", func(tx *sql.Tx) {
 		for _, table := range []string{"vulnerability_inventory_scopes", "vulnerability_inventory_work", "vulnerability_finding_backfill_conflicts"} {
 			var count int
 			if err := tx.QueryRow(`SELECT count(*) FROM ` + table).Scan(&count); err != nil || count != 1 {
 				t.Fatalf("tenant-a unscoped %s count=%d err=%v", table, count, err)
 			}
 		}
-		requireMigrationWriteRejected(t, tx, `INSERT INTO vulnerability_inventory_scopes(tenant_id,engagement_id,inventory_scope,latest_admitted_generation) VALUES('m173-rls-b','m173-rls-b-eng','forged',0)`)
+		requireMigrationWriteRejected(t, tx, `INSERT INTO vulnerability_inventory_scopes(tenant_id,engagement_id,inventory_scope,latest_admitted_generation) VALUES('m174-rls-b','m174-rls-b-eng','forged',0)`)
 	})
 }
 
