@@ -1,23 +1,25 @@
 package identityrollout
 
-import (
-	"testing"
-)
+import "testing"
 
 func cleanLegacySnapshot() GateSnapshot {
 	return GateSnapshot{
-		TenantID:           "tenant-a",
-		Owner:              "identity-operator",
-		SourceOfTruth:      "legacy_users",
-		AllowedWriters:     []string{"legacy_users"},
-		SourceCount:        2,
-		ProjectedCount:     2,
-		BackfillCompleted:  true,
-		LegacyWritesEnabled: true,
-		MetricsRecorded:    true,
-		ApprovalRecorded:   true,
-		LastKnownGoodPhase: string(PhaseExpand),
-		RollbackAction:     "disable enterprise reads and restore legacy-authoritative behavior",
+		TenantID:                     "tenant-a",
+		Owner:                        "identity-operator",
+		SourceOfTruth:                "legacy_users",
+		AllowedWriters:               []string{"legacy_users"},
+		SourceCount:                  2,
+		ProjectedCount:               2,
+		CredentialProjectionComplete: true,
+		CredentialProjectedCount:     2,
+		IssuedCredentialCount:        1,
+		PlaceholderCredentialCount:   1,
+		BackfillCompleted:            true,
+		LegacyWritesEnabled:          true,
+		MetricsRecorded:              true,
+		ApprovalRecorded:             true,
+		LastKnownGoodPhase:           string(PhaseExpand),
+		RollbackAction:               "disable enterprise reads and restore legacy-authoritative behavior",
 	}
 }
 
@@ -78,6 +80,60 @@ func TestEvaluateCanaryUsesOperatorSuppliedAbortThreshold(t *testing.T) {
 	}
 	if decision.Allowed || !hasGateBlocker(decision, "abort_threshold_exceeded") {
 		t.Fatalf("decision=%+v, want abort threshold blocker", decision)
+	}
+}
+
+func TestEvaluateCanaryBlocksUnresolvedLegacyCredentialState(t *testing.T) {
+	base := cleanLegacySnapshot()
+	base.SourceOfTruth = "shadow_compare"
+	base.AllowedWriters = []string{"legacy_users"}
+	base.ShadowComparisonComplete = true
+	base.AuthoritativeReads = true
+	base.ObservationMinutes = 30
+	base.AbortThresholdBPS = 100
+	base.SessionCount = 1000
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*GateSnapshot)
+		code   string
+	}{
+		{name: "projection not run", mutate: func(s *GateSnapshot) { s.CredentialProjectionComplete = false }, code: "credential_projection_incomplete"},
+		{name: "missing row", mutate: func(s *GateSnapshot) { s.CredentialProjectedCount--; s.MissingCredentialCount = 1; s.IssuedCredentialCount-- }, code: "credential_projection_missing"},
+		{name: "ambiguous row", mutate: func(s *GateSnapshot) { s.IssuedCredentialCount--; s.AmbiguousCredentialCount = 1 }, code: "credential_classification_ambiguous"},
+		{name: "projection drift", mutate: func(s *GateSnapshot) { s.CredentialDriftCount = 1 }, code: "credential_projection_drift"},
+		{name: "index drift", mutate: func(s *GateSnapshot) { s.CredentialIndexDriftCount = 1 }, code: "credential_index_drift"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot := base
+			snapshot.AllowedWriters = append([]string(nil), base.AllowedWriters...)
+			test.mutate(&snapshot)
+			decision, err := Evaluate(PhaseCanaryAuthoritativeRead, snapshot)
+			if err != nil {
+				t.Fatalf("Evaluate: %v", err)
+			}
+			if decision.Allowed || !hasGateBlocker(decision, test.code) {
+				t.Fatalf("decision=%+v, want blocker %q", decision, test.code)
+			}
+		})
+	}
+}
+
+func TestEvaluateCanaryAllowsClassifiedPlaceholder(t *testing.T) {
+	snapshot := cleanLegacySnapshot()
+	snapshot.SourceOfTruth = "shadow_compare"
+	snapshot.AllowedWriters = []string{"legacy_users"}
+	snapshot.ShadowComparisonComplete = true
+	snapshot.AuthoritativeReads = true
+	snapshot.ObservationMinutes = 30
+	snapshot.AbortThresholdBPS = 100
+	snapshot.SessionCount = 1000
+	snapshot.IssuedCredentialCount = 0
+	snapshot.PlaceholderCredentialCount = snapshot.SourceCount
+
+	decision, err := Evaluate(PhaseCanaryAuthoritativeRead, snapshot)
+	if err != nil || !decision.Allowed {
+		t.Fatalf("fully classified placeholders are non-bearer but cutover-safe: decision=%+v err=%v", decision, err)
 	}
 }
 
