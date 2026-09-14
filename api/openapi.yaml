@@ -8,7 +8,11 @@ info:
     scope and authorization window, enforced server-side.
 
     Auth: human/control-plane endpoints except `/healthz` and `/readyz` require
-    the operator bearer token (`Authorization: Bearer <SYNAPSE_API_TOKEN>`).
+    an authenticated human bearer credential (`Authorization: Bearer <token>`).
+    Authentication and identity-state failures use the stable `IdentityError` response:
+    `authentication_invalid` (401), `identity_access_denied` (403), `identity_conflict` (409),
+    or retryable `dependency_unavailable` / `capacity_limited` (503). The response includes a
+    request id but never exposes credential or database details.
     Agent-plane `/api/v1/fleet/*` endpoints use the enrolled agent bearer credential
     (or the configured trusted mTLS-proxy certificate path) and pin protocol version 1.
     After operator authentication, every endpoint except the AUP endpoints also
@@ -5927,10 +5931,30 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     Unauthorized:
-      description: Missing or invalid bearer token
+      description: Missing or invalid bearer token on legacy or agent-plane endpoints
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
+    IdentityUnauthorized:
+      description: Invalid human authentication credential
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/IdentityError"}
+    IdentityForbidden:
+      description: Authenticated human is not permitted to perform this identity operation
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/IdentityError"}
+    IdentityConflict:
+      description: Identity state changed and the operation must be retried or reconciled
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/IdentityError"}
+    IdentityUnavailable:
+      description: Identity dependency or capacity is temporarily unavailable; retry is safe when retryable is true
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/IdentityError"}
     Forbidden:
       description: AUP not accepted, or target outside scope / authorization window
       content:
@@ -8678,6 +8702,18 @@ components:
       type: object
       properties:
         error: {type: string}
+
+    IdentityError:
+      type: object
+      additionalProperties: false
+      required: [error, code, request_id, retryable]
+      properties:
+        error: {type: string, description: Stable client-safe message with no dependency detail}
+        code:
+          type: string
+          enum: [authentication_invalid, identity_access_denied, identity_conflict, dependency_unavailable, capacity_limited]
+        request_id: {type: string, description: Correlates the response with server-side diagnostics}
+        retryable: {type: boolean}
 
     AITriageReview:
       type: object
