@@ -233,10 +233,12 @@ func (s *Service) update(ctx context.Context, actor Actor, id shared.ID, name st
 	if err := s.repo.Update(ctx, actor.tenant(), u); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
-	_ = s.audit.Record(ctx, ports.AuditEntry{
+	if err := s.recordUserAudit(ctx, ports.AuditEntry{
 		Actor: actor.ID, Action: "user.updated", Target: u.ID.String(),
 		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String(), "previous_name": before.Name, "previous_role": string(before.Role)}, At: now,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return u, nil
 }
 
