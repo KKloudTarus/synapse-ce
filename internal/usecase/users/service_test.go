@@ -19,6 +19,38 @@ type nopAudit struct{}
 
 func (nopAudit) Record(context.Context, ports.AuditEntry) error { return nil }
 
+// failingAudit lets the D5 transaction test prove that an audit failure is returned to the
+// transaction runner instead of being silently discarded.
+type failingAudit struct{ err error }
+
+func (a failingAudit) Record(context.Context, ports.AuditEntry) error { return a.err }
+
+// noopLegacyCredentialProjection enables the D5 atomic path without reaching a database. Update does
+// not need to call the projection for a role/name mutation; the interface is still required to make
+// recordUserAudit mandatory and to exercise the same transaction boundary used by PostgreSQL.
+type noopLegacyCredentialProjection struct{}
+
+func (noopLegacyCredentialProjection) ClassifyAndProjectLegacyCredential(context.Context, shared.ID, shared.ID, time.Time) (ports.LegacyCredentialProjection, error) {
+	return ports.LegacyCredentialProjection{}, nil
+}
+func (noopLegacyCredentialProjection) SyncIssuedLegacyCredential(context.Context, ports.LegacyCredentialSyncRequest) (ports.LegacyCredentialProjection, bool, error) {
+	return ports.LegacyCredentialProjection{}, false, nil
+}
+func (noopLegacyCredentialProjection) SyncLegacyCredentialDisabled(context.Context, ports.LegacyCredentialSyncRequest) (ports.LegacyCredentialProjection, bool, error) {
+	return ports.LegacyCredentialProjection{}, false, nil
+}
+func (noopLegacyCredentialProjection) ResolveLegacyCredentialClassification(context.Context, ports.LegacyCredentialResolutionRequest) (ports.LegacyCredentialProjection, error) {
+	return ports.LegacyCredentialProjection{}, nil
+}
+func (noopLegacyCredentialProjection) GetLegacyCredentialProjection(context.Context, shared.ID, shared.ID) (ports.LegacyCredentialProjection, error) {
+	return ports.LegacyCredentialProjection{}, nil
+}
+func (noopLegacyCredentialProjection) ReconcileLegacyCredentials(context.Context, shared.ID) (ports.LegacyCredentialReconciliation, error) {
+	return ports.LegacyCredentialReconciliation{}, nil
+}
+
+var _ ports.LegacyCredentialProjectionStore = noopLegacyCredentialProjection{}
+
 type fixedClock struct{}
 
 func (fixedClock) Now() time.Time { return time.Date(2026, 6, 21, 0, 0, 0, 0, time.UTC) }
