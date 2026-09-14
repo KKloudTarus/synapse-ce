@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -342,9 +341,7 @@ func TestTreeFingerprintAncestorGoWorkErrors(t *testing.T) {
 // block); it is not collected as a manifest, so fingerprinting completes.
 func TestTreeFingerprintGoModFIFONotOpened(t *testing.T) {
 	dir := writeTree(t, map[string]string{"main.go": "package main"})
-	if err := syscall.Mkfifo(filepath.Join(dir, "go.mod"), 0o644); err != nil {
-		t.Skipf("mkfifo unsupported: %v", err)
-	}
+	makeFIFO(t, filepath.Join(dir, "go.mod"))
 	done := make(chan struct{})
 	go func() { _, _, _ = NewTreeFingerprinter().FingerprintSource(context.Background(), dir); close(done) }()
 	select {
