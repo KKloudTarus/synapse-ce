@@ -52,25 +52,25 @@ type LegacyCredentialSyncRequest struct {
 }
 
 type LegacyCredentialResolutionRequest struct {
-	TenantID       shared.ID
-	ResolutionID   shared.ID
-	UserID         shared.ID
-	Resolution     LegacyCredentialClassification
+	TenantID        shared.ID
+	ResolutionID    shared.ID
+	UserID          shared.ID
+	Resolution      LegacyCredentialClassification
 	ExpectedVersion int64
-	Reason         string
-	Actor          string
-	At             time.Time
+	Reason          string
+	Actor           string
+	At              time.Time
 }
 
 type LegacyCredentialReconciliation struct {
-	SourceCount       int
-	ProjectedCount    int
-	IssuedCount       int
-	PlaceholderCount  int
-	AmbiguousCount    int
-	MissingCount      int
-	DriftCount        int
-	IndexDriftCount   int
+	SourceCount      int
+	ProjectedCount   int
+	IssuedCount      int
+	PlaceholderCount int
+	AmbiguousCount   int
+	MissingCount     int
+	DriftCount       int
+	IndexDriftCount  int
 }
 
 // LegacyCredentialProjectionStore is the only D5 mutation surface for the derived legacy bearer.
@@ -86,4 +86,12 @@ type LegacyCredentialProjectionStore interface {
 	ResolveLegacyCredentialClassification(ctx context.Context, request LegacyCredentialResolutionRequest) (LegacyCredentialProjection, error)
 	GetLegacyCredentialProjection(ctx context.Context, tenantID, userID shared.ID) (LegacyCredentialProjection, error)
 	ReconcileLegacyCredentials(ctx context.Context, tenantID shared.ID) (LegacyCredentialReconciliation, error)
+}
+
+// IdentityCredentialRolloutLedger appends a phase record including D5 reconciliation evidence to
+// the same append-only rollout table used by D4. It is separate from IdentityRolloutLedger so an
+// older D4-only adapter cannot accidentally claim it persisted credential evidence that its INSERT
+// statement does not know about.
+type IdentityCredentialRolloutLedger interface {
+	AppendIdentityCredentialRolloutPhaseRecord(ctx context.Context, record IdentityRolloutPhaseRecord) error
 }
