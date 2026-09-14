@@ -433,6 +433,11 @@ type Config struct {
 	// an explicit tenant allowlist entry; "*" enables all tenants. Dry-run records correlation
 	// differences without mutating occurrences, findings, actions, or notification outbox rows.
 	VulnerabilityProviderSyncEnabled bool
+	// VulnerabilityInlineWorkerEnabled lets synapse-api consume only vulnerability sync and reconciliation
+	// jobs when PostgreSQL is configured. It is an explicit local/single-process topology option; the default
+	// remains a separately deployed worker. Unlike scan workers, these handlers execute no target code and do
+	// not require the external-tool sandbox.
+	VulnerabilityInlineWorkerEnabled bool
 	// VulnerabilitySyncSchedulerInterval turns on the leader-gated cadence-driven sync scheduler when set
 	// above zero: every interval a single worker enqueues each enabled source whose last successful sync is
 	// older than its Cadence, and reclaims runs stranded past VulnerabilitySyncStaleAfter. Zero (the default)
@@ -984,6 +989,7 @@ func Load() Config {
 		IntegrationSchedulerQueueDepth:              getint("SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH", 100),
 		IntegrationAllowPrivateNetwork:              getbool("SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK", false),
 		VulnerabilityProviderSyncEnabled:            getbool("SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", false),
+		VulnerabilityInlineWorkerEnabled:            getbool("SYNAPSE_VULNERABILITY_INLINE_WORKER_ENABLED", false),
 		VulnerabilitySyncSchedulerInterval:          getduration("SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_INTERVAL", 0),
 		VulnerabilitySyncStaleAfter:                 getduration("SYNAPSE_VULNERABILITY_SYNC_STALE_AFTER", 2*time.Hour),
 		VulnerabilitySyncSchedulerDispatch:          getint("SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_DISPATCH_LIMIT", 16),

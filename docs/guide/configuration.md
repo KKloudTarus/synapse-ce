@@ -342,6 +342,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_VULNERABILITY_SCHEDULER_MAX_QUEUE_DEPTH` | `100` | Stop dispatching when the vulnerability-sync queue reaches this depth. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT` | `10` | Maximum stale runs recovered per scheduler tick. |
 | `SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED` | `false` | Permit provider sync execution. This global gate also blocks already queued runs after rollback. |
+| `SYNAPSE_VULNERABILITY_INLINE_WORKER_ENABLED` | `false` | Let `synapse-api` consume only vulnerability sync and reconciliation jobs in a PostgreSQL deployment. Intended for an explicit local/single-process topology; leave off when a separate worker consumes those jobs. These data-only handlers execute no target code and do not replace the sandboxed scan worker. |
 | `SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_INTERVAL` | `0` (off) | Above zero, turns on the leader-gated cadence-driven sync scheduler: every interval one worker enqueues each source whose last successful sync is older than its Cadence and reclaims stranded runs. Needs `SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED` and `SYNAPSE_LEADER_ENABLED`. |
 | `SYNAPSE_VULNERABILITY_SYNC_STALE_AFTER` | `2h` | A queued/running sync run older than this is reclaimed by the scheduler's stale-recovery sweep. |
 | `SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_DISPATCH_LIMIT` | `16` | Maximum syncs enqueued (and stale runs recovered) per scheduler tick. |

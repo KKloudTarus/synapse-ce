@@ -291,6 +291,10 @@ func metricsAddrIsLoopback(addr string) bool {
 	return ip.IsLoopback()
 }
 
+func shouldStartVulnerabilityWorker(cfg config.Config) bool {
+	return cfg.DBDSN == "" || cfg.VulnerabilityInlineWorkerEnabled
+}
+
 // telemetryBindingReader adapts the telemetry transport store's agent→asset binding list to the
 // desired-vs-observed BindingReader (#633), mapping ports.TelemetryAssetBinding to desired.CurrentBinding.
 type telemetryBindingReader struct {
@@ -1923,17 +1927,24 @@ func main() {
 	router.SetVulnerabilityAudit(auditLog)
 	router.SetVulnerabilityReadModel(vulnerabilityRead)
 	router.SetVulnerabilityActions(vulnerabilityActionService)
-	if cfg.DBDSN == "" {
+	if shouldStartVulnerabilityWorker(cfg) {
 		handlers := map[string]worker.Handler{
 			vulnerabilitymonitor.JobKind:   vulnerabilitySyncJobHandler{svc: vulnerabilityMonitor},
 			vulnerabilityreconcile.JobKind: vulnerabilityReconcileJobHandler{svc: vulnerabilityReconciliation},
-			integrationuc.JobKind:          integrationJobHandler{svc: integrationService},
 		}
-		if assessmentComparisonService != nil {
-			handlers[comparisonuc.JobKind] = assessmentComparisonJobHandler{svc: assessmentComparisonService}
-		}
-		if assessmentClosureReportService != nil {
-			handlers[cycleuc.AssessmentClosureReportJobKind] = assessmentClosureReportJobHandler{svc: assessmentClosureReportService}
+		// Preserve the historical in-memory single-process worker. PostgreSQL inline mode is intentionally
+		// narrower: it consumes only data-only vulnerability jobs and cannot claim scan/integration work that
+		// belongs to the separately sandboxed worker topology.
+		if cfg.DBDSN == "" {
+			handlers[integrationuc.JobKind] = integrationJobHandler{svc: integrationService}
+			if assessmentComparisonService != nil {
+				handlers[comparisonuc.JobKind] = assessmentComparisonJobHandler{svc: assessmentComparisonService}
+			}
+			if assessmentClosureReportService != nil {
+				handlers[cycleuc.AssessmentClosureReportJobKind] = assessmentClosureReportJobHandler{svc: assessmentClosureReportService}
+			}
+		} else {
+			log.Info("vulnerability inline worker ENABLED", "handlers", "vulnerability-sync,vulnerability-reconcile")
 		}
 		vulnerabilityWorker = worker.New(vulnerabilityQueue, handlers, worker.Config{Visibility: 2 * time.Minute, Poll: 100 * time.Millisecond, MaxAttempts: 3}, log)
 	}

@@ -489,17 +489,18 @@ func TestLoadVulnerabilityRolloutDefaultsFailClosed(t *testing.T) {
 		"SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", "SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED",
 		"SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED", "SYNAPSE_VULNERABILITY_ACTIONS_ENABLED",
 		"SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED", "SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED",
-		"SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST",
+		"SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "SYNAPSE_VULNERABILITY_INLINE_WORKER_ENABLED",
 	}
 	for _, key := range keys {
 		t.Setenv(key, "")
 	}
 	cfg := Load()
-	if cfg.VulnerabilityProviderSyncEnabled || cfg.VulnerabilityOccurrenceWritesEnabled || cfg.VulnerabilityFindingProjectionEnabled || cfg.VulnerabilityActionsEnabled || cfg.VulnerabilityNotificationsEnabled || !cfg.VulnerabilityDryRunEnabled || len(cfg.VulnerabilityTenantAllowlist) != 0 {
+	if cfg.VulnerabilityProviderSyncEnabled || cfg.VulnerabilityInlineWorkerEnabled || cfg.VulnerabilityOccurrenceWritesEnabled || cfg.VulnerabilityFindingProjectionEnabled || cfg.VulnerabilityActionsEnabled || cfg.VulnerabilityNotificationsEnabled || !cfg.VulnerabilityDryRunEnabled || len(cfg.VulnerabilityTenantAllowlist) != 0 {
 		t.Fatalf("unsafe vulnerability rollout defaults: %+v", cfg)
 	}
 
 	t.Setenv("SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", "true")
+	t.Setenv("SYNAPSE_VULNERABILITY_INLINE_WORKER_ENABLED", "true")
 	t.Setenv("SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED", "true")
 	t.Setenv("SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED", "true")
 	t.Setenv("SYNAPSE_VULNERABILITY_ACTIONS_ENABLED", "true")
@@ -507,7 +508,7 @@ func TestLoadVulnerabilityRolloutDefaultsFailClosed(t *testing.T) {
 	t.Setenv("SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED", "false")
 	t.Setenv("SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "tenant-a, tenant-b")
 	cfg = Load()
-	if !cfg.VulnerabilityProviderSyncEnabled || !cfg.VulnerabilityOccurrenceWritesEnabled || !cfg.VulnerabilityFindingProjectionEnabled || !cfg.VulnerabilityActionsEnabled || !cfg.VulnerabilityNotificationsEnabled || cfg.VulnerabilityDryRunEnabled || len(cfg.VulnerabilityTenantAllowlist) != 2 {
+	if !cfg.VulnerabilityProviderSyncEnabled || !cfg.VulnerabilityInlineWorkerEnabled || !cfg.VulnerabilityOccurrenceWritesEnabled || !cfg.VulnerabilityFindingProjectionEnabled || !cfg.VulnerabilityActionsEnabled || !cfg.VulnerabilityNotificationsEnabled || cfg.VulnerabilityDryRunEnabled || len(cfg.VulnerabilityTenantAllowlist) != 2 {
 		t.Fatalf("vulnerability rollout overrides: %+v", cfg)
 	}
 }
