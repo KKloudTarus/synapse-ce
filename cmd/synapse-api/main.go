@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
@@ -34,6 +35,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/correlation"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
+	identitydom "github.com/KKloudTarus/synapse-ce/internal/domain/identity"
 	integrationdom "github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
@@ -1354,6 +1356,12 @@ func main() {
 	auth := httpapi.NewAuthenticatorWithErrorResolver(func(ctx context.Context, token string) (httpapi.Principal, error) {
 		u, err := usersService.Authenticate(ctx, token)
 		if err != nil {
+			// The user service uses shared not-found/forbidden errors for unknown and disabled
+			// bearer credentials. At the HTTP boundary both are terminal authentication failures;
+			// only unexpected dependency errors remain retryable 503s.
+			if errors.Is(err, shared.ErrNotFound) || errors.Is(err, shared.ErrForbidden) {
+				return httpapi.Principal{}, identitydom.ErrAuthenticationInvalid
+			}
 			return httpapi.Principal{}, err
 		}
 		return httpapi.Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: u.TenantID}, nil
