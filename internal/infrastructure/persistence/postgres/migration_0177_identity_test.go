@@ -159,9 +159,7 @@ func TestIdentityConnectionRevisionAndFanoutEvidenceImmutable(t *testing.T) {
 			VALUES('immut-a','conn','oidc','https://issuer.example',true,1,1,now(),now())`); err != nil { t.Fatal(err) }
 		if _, err := tx.Exec(`INSERT INTO sso_connection_revisions(tenant_id,connection_id,revision,protocol,configuration,encrypted_secret_ref,test_status,test_result,created_by,created_at,tested_at)
 			VALUES('immut-a','conn',1,'oidc','{}','','passed','{}','actor',now(),now())`); err != nil { t.Fatal(err) }
-		if _, err := tx.Exec(`UPDATE sso_connection_revisions SET created_by='rewritten' WHERE tenant_id='immut-a' AND connection_id='conn' AND revision=1`); err == nil {
-			t.Fatal("immutable connection revision accepted UPDATE")
-		}
+		requireMigrationWriteRejected(t, tx, `UPDATE sso_connection_revisions SET created_by='rewritten' WHERE tenant_id='immut-a' AND connection_id='conn' AND revision=1`)
 	})
 
 	if _, err := db.Exec(`INSERT INTO platform_identity_audit(id,actor,action,target_person_id,previous_hash,hash,metadata,created_at)
@@ -171,9 +169,7 @@ func TestIdentityConnectionRevisionAndFanoutEvidenceImmutable(t *testing.T) {
 	withMigrationTenant(t, db, "immut-a", func(tx *sql.Tx) {
 		if _, err := tx.Exec(`INSERT INTO identity_fanout_obligations(tenant_id,id,person_id,audit_id,idempotency_key,payload,state,created_at)
 			VALUES('immut-a','fanout-1','immut-person','audit-1','person.suspend:immut-person:1','{}','pending',now())`); err != nil { t.Fatal(err) }
-		if _, err := tx.Exec(`UPDATE identity_fanout_obligations SET payload='{"tampered":true}' WHERE tenant_id='immut-a' AND id='fanout-1'`); err == nil {
-			t.Fatal("fan-out immutable payload accepted rewrite")
-		}
+		requireMigrationWriteRejected(t, tx, `UPDATE identity_fanout_obligations SET payload='{"tampered":true}' WHERE tenant_id='immut-a' AND id='fanout-1'`)
 		completed := time.Now().UTC()
 		if _, err := tx.Exec(`UPDATE identity_fanout_obligations SET state='completed',completed_at=$1 WHERE tenant_id='immut-a' AND id='fanout-1'`, completed); err != nil {
 			t.Fatalf("legal pending->completed transition failed: %v", err)
