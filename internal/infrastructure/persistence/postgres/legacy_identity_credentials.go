@@ -16,6 +16,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
+// #nosec G101 -- this is a SQL identifier list; it never contains a credential value.
 const legacyCredentialCols = `tenant_id,id,user_id,membership_id,person_id,classification,digest,status,classification_reason,version,source_updated_at,classified_at,updated_at`
 
 // LegacyCredentialRepository owns the D5 derived bearer projection. The legacy users row remains
