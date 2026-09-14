@@ -49,6 +49,13 @@ func TestMigration0179LegacyCredentialRLSAndClassification(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed issuance audit: %v", err)
 	}
+	// OIDC provisioning may also emit a generic user.created audit; the OIDC link must still
+	// classify this user as a non-bearer placeholder.
+	if err := audit.Record(shared.WithTenant(context.Background(), tenantID), ports.AuditEntry{
+		Actor: "admin", Action: "user.created", Target: "placeholder", At: now,
+	}); err != nil {
+		t.Fatalf("seed OIDC user creation audit: %v", err)
+	}
 	withMigrationTenant(t, db, tenantID.String(), func(tx *sql.Tx) {
 		if _, err := tx.Exec(`INSERT INTO oidc_external_identities(id,tenant_id,user_id,issuer,subject,created_at,updated_at)
 			VALUES('d5-placeholder-link',$1,'placeholder','https://issuer.example','subject-placeholder',$2,$2)`, tenantID.String(), now); err != nil {
