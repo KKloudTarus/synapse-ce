@@ -34,8 +34,8 @@ type Service struct {
 	// transactions makes the last-admin guard and its write one unit. Optional: the in-memory and
 	// file stores have no transactions, and the Postgres composition roots set it.
 	transactions ports.TenantTransactionRunner
-	// legacyCredentials is enabled only during the PostgreSQL enterprise-identity rollout. It is a
-	// derived representation: users.api_key_hash remains authoritative until read cutover.
+	// legacyCredentials is enabled only when the configured repository exposes the PostgreSQL D5
+	// projection capability. It is derived state: users.api_key_hash remains authoritative.
 	legacyCredentials ports.LegacyCredentialProjectionStore
 	// roster serializes the guarded mutations within this process. The guard is a read-modify-write
 	// over the tenant's roster, so two concurrent demotions each see the other admin still enabled,
@@ -46,14 +46,21 @@ type Service struct {
 }
 
 // SetTransactionRunner makes the last-admin guard atomic against a concurrent second mutation.
-// Without it the count and the write commit separately, and the roster can change in between.
+// The PostgreSQL user repository also implements the D5 projection port; capability detection here
+// enables dual-write only after a transaction runner exists, so no-DSN/memory behavior is unchanged.
 func (s *Service) SetTransactionRunner(transactions ports.TenantTransactionRunner) {
 	s.transactions = transactions
+	if transactions == nil {
+		return
+	}
+	if store, ok := s.repo.(ports.LegacyCredentialProjectionStore); ok {
+		s.legacyCredentials = store
+	}
 }
 
-// SetLegacyCredentialProjectionStore enables D5 dual-write. It is deliberately refused without a
-// transaction runner: source, derived credential, exact-hash index and mandatory audit must share
-// one commit, never four best-effort writes.
+// SetLegacyCredentialProjectionStore enables D5 dual-write explicitly (primarily for composition
+// tests or alternate PostgreSQL adapters). It is deliberately refused without a transaction runner:
+// source, derived credential, exact-hash index and mandatory audit must share one commit.
 func (s *Service) SetLegacyCredentialProjectionStore(store ports.LegacyCredentialProjectionStore) error {
 	if store == nil || s.transactions == nil {
 		return fmt.Errorf("%w: legacy credential projection requires store and tenant transaction runner", shared.ErrValidation)
