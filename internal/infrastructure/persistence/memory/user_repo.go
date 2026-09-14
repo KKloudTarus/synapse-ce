@@ -30,17 +30,17 @@ func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 	if _, ok := r.byID[u.ID]; ok {
 		return fmt.Errorf("%w: user %s already exists", shared.ErrValidation, u.ID)
 	}
-\tcp := *u
-\tstored := &cp
-\tr.byID[u.ID] = stored
-\tregisterTenantRollback(ctx, func() {
-\t\tr.mu.Lock()
-\t\tdefer r.mu.Unlock()
-\t\tif current, ok := r.byID[u.ID]; ok && current == stored {
-\t\t\tdelete(r.byID, u.ID)
-\t\t}
-\t})
-\treturn nil
+	cp := *u
+	stored := &cp
+	r.byID[u.ID] = stored
+	registerTenantRollback(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if current, ok := r.byID[u.ID]; ok && current == stored {
+			delete(r.byID, u.ID)
+		}
+	})
+	return nil
 }
 
 func (r *UserRepository) Upsert(ctx context.Context, u *user.User) error {
