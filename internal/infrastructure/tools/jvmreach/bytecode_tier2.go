@@ -483,9 +483,20 @@ func storedReferenceSource(ins []instruction, storeIdx int, cp parsedCP) (class 
 		if len(window) != 3 {
 			return "", -1, false
 		}
-		if window[0].op == 0xbb && window[1].op == 0x59 && window[2].op == 0xb7 { // #nosec G602 -- window length is checked immediately above.
-			allocated := cp.className(window[0].cpIndex) // #nosec G602 -- window has exactly three instructions.
-			owner, name, _, ok := cp.member(window[2].cpIndex) // #nosec G602 -- window has exactly three instructions.
+		var first, second, third instruction
+		for index, item := range window {
+			switch index {
+			case 0:
+				first = item
+			case 1:
+				second = item
+			case 2:
+				third = item
+			}
+		}
+		if first.op == 0xbb && second.op == 0x59 && third.op == 0xb7 {
+			allocated := cp.className(first.cpIndex)
+			owner, name, _, ok := cp.member(third.cpIndex)
 			if ok && name == "<init>" && allocated != "" && owner == allocated {
 				return allocated, -1, true
 			}
