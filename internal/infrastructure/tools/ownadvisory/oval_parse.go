@@ -78,8 +78,21 @@ type ovalTest struct {
 }
 
 type ovalObject struct {
-	ID   string `xml:"id,attr"`
-	Name string `xml:"name"`
+	ID   string   `xml:"id,attr"`
+	Name ovalName `xml:"name"`
+}
+
+// Ubuntu's current OVAL feed puts the binary package names in a constant_variable and points at it from
+// dpkginfo_object/name@var_ref. Older Ubuntu feeds and the other supported distros put the package name
+// directly in the name element, so retain both shapes.
+type ovalName struct {
+	VarRef string `xml:"var_ref,attr"`
+	Value  string `xml:",chardata"`
+}
+
+type ovalConstantVariable struct {
+	ID     string   `xml:"id,attr"`
+	Values []string `xml:"value"`
 }
 
 // ovalState carries the fixed-version boundary. Ubuntu OVAL states it in a <version> element, Debian OVAL in
@@ -122,7 +135,7 @@ func (s ovalState) fixed() (operation, value string, ok bool) {
 type ovalScan struct {
 	defs    []ovalDefinition
 	tests   map[string]ovalTest // test id -> object/state refs
-	objects map[string]string   // object id -> binary package name
+	objects map[string][]string // object id -> one or more binary package names
 	states  map[string]ovalState
 }
 
@@ -156,9 +169,11 @@ func scanOVAL(content []byte) (*ovalScan, error) {
 	scan := &ovalScan{
 		defs:    make([]ovalDefinition, 0, 1024),
 		tests:   map[string]ovalTest{},
-		objects: map[string]string{},
+		objects: map[string][]string{},
 		states:  map[string]ovalState{},
 	}
+	objects := map[string]ovalObject{}
+	variables := map[string][]string{}
 	dec := xml.NewDecoder(r)
 	for {
 		tok, err := dec.Token()
@@ -190,12 +205,17 @@ func scanOVAL(content []byte) (*ovalScan, error) {
 		case "dpkginfo_object", "rpminfo_object":
 			var o ovalObject
 			if err := dec.DecodeElement(&o, &se); err == nil && o.ID != "" {
-				scan.objects[o.ID] = strings.TrimSpace(o.Name)
+				objects[o.ID] = o
 			}
 		case "dpkginfo_state", "rpminfo_state":
 			var s ovalState
 			if err := dec.DecodeElement(&s, &se); err == nil && s.ID != "" {
 				scan.states[s.ID] = s
+			}
+		case "constant_variable":
+			var v ovalConstantVariable
+			if err := dec.DecodeElement(&v, &se); err == nil && v.ID != "" {
+				variables[v.ID] = cleanPackageNames(v.Values)
 			}
 		}
 	}
@@ -205,7 +225,29 @@ func scanOVAL(content []byte) (*ovalScan, error) {
 	if lr != nil && lr.N <= 0 {
 		return nil, fmt.Errorf("%w: OVAL decompressed stream exceeds %d bytes; raise the cap or split the feed", shared.ErrValidation, maxOVALDecompressed)
 	}
+	for id, object := range objects {
+		names := cleanPackageNames([]string{object.Name.Value})
+		if ref := strings.TrimSpace(object.Name.VarRef); ref != "" {
+			names = append(names, variables[ref]...)
+			names = cleanPackageNames(names)
+		}
+		scan.objects[id] = names
+	}
 	return scan, nil
+}
+
+func cleanPackageNames(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		name := strings.TrimSpace(value)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 // ParseOVAL parses one deb-family OVAL document (Canonical Ubuntu or Debian, optionally bzip2-compressed)
@@ -359,7 +401,7 @@ func (s *ovalScan) rpmOvalAdvisories(distro rpmOvalDistro) []advisory.Advisory {
 // definition can cover several releases (a shared UEK build, or per-release package tests), keying by the
 // version's own dist tag is what stops a package being emitted under a release it does not belong to (a false
 // match). A version with no recognizable dist tag is keyed only when the definition covers one release.
-func rpmOvalAffected(d *ovalDefinition, ecosystemPrefix string, majors map[string]bool, tests map[string]ovalTest, objects map[string]string, states map[string]ovalState) []advisory.AffectedPackage {
+func rpmOvalAffected(d *ovalDefinition, ecosystemPrefix string, majors map[string]bool, tests map[string]ovalTest, objects map[string][]string, states map[string]ovalState) []advisory.AffectedPackage {
 	singleMajor := ""
 	if len(majors) == 1 {
 		for m := range majors {
@@ -378,13 +420,10 @@ func rpmOvalAffected(d *ovalDefinition, ecosystemPrefix string, majors map[strin
 		if !ok {
 			continue
 		}
-		pkg := objects[t.Object.Ref]
+		packages := objects[t.Object.Ref]
 		st, ok := states[t.State.Ref]
-		if pkg == "" || !ok {
+		if len(packages) == 0 || !ok {
 			continue
-		}
-		if bounded[pkg] {
-			continue // a [X, Y) range: skip rather than emit an overshooting [0, Y)
 		}
 		operation, value, ok := st.fixed()
 		if !ok {
@@ -405,17 +444,22 @@ func rpmOvalAffected(d *ovalDefinition, ecosystemPrefix string, majors map[strin
 			continue // the version's release is unknown or not one this definition covers: skip
 		}
 		ecosystem := ecosystemPrefix + major
-		key := ecosystem + "\x00" + pkg
-		if seen[key] {
-			continue
+		for _, pkg := range packages {
+			if bounded[pkg] {
+				continue // a [X, Y) range: skip rather than emit an overshooting [0, Y)
+			}
+			key := ecosystem + "\x00" + pkg
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, advisory.AffectedPackage{
+				Ecosystem:    ecosystem,
+				Package:      pkg,
+				Ranges:       []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}}}},
+				FixedVersion: fixed,
+			})
 		}
-		seen[key] = true
-		out = append(out, advisory.AffectedPackage{
-			Ecosystem:    ecosystem,
-			Package:      pkg,
-			Ranges:       []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}}}},
-			FixedVersion: fixed,
-		})
 	}
 	return out
 }
@@ -423,16 +467,16 @@ func rpmOvalAffected(d *ovalDefinition, ecosystemPrefix string, majors map[strin
 // boundedPackages returns the set of packages a definition constrains with an upper-exclusion state
 // ("greater than" / "greater than or equal"), i.e. the lower bound of a [X, Y) affected range. Such a package
 // must not be emitted from its "less than Y" state alone (that would be [0, Y), overshooting past X).
-func boundedPackages(d *ovalDefinition, tests map[string]ovalTest, objects map[string]string, states map[string]ovalState) map[string]bool {
+func boundedPackages(d *ovalDefinition, tests map[string]ovalTest, objects map[string][]string, states map[string]ovalState) map[string]bool {
 	bounded := map[string]bool{}
 	for _, ref := range flattenCriteria(&d.Criteria) {
 		t, ok := tests[ref]
 		if !ok {
 			continue
 		}
-		pkg := objects[t.Object.Ref]
+		packages := objects[t.Object.Ref]
 		st, ok := states[t.State.Ref]
-		if pkg == "" || !ok {
+		if len(packages) == 0 || !ok {
 			continue
 		}
 		op, _, ok := st.fixed()
@@ -441,7 +485,9 @@ func boundedPackages(d *ovalDefinition, tests map[string]ovalTest, objects map[s
 		}
 		switch strings.ToLower(strings.TrimSpace(op)) {
 		case "greater than", "greater than or equal":
-			bounded[pkg] = true
+			for _, pkg := range packages {
+				bounded[pkg] = true
+			}
 		}
 	}
 	return bounded
@@ -728,7 +774,7 @@ func isDebianZeroBound(v string) bool {
 
 // buildOVALAdvisory resolves a definition's criteria into an advisory. ok=false when the definition carries
 // no CVE id or no fixed package (nothing matchable).
-func buildOVALAdvisory(d *ovalDefinition, ecosystem string, tests map[string]ovalTest, objects map[string]string, states map[string]ovalState) (advisory.Advisory, bool) {
+func buildOVALAdvisory(d *ovalDefinition, ecosystem string, tests map[string]ovalTest, objects map[string][]string, states map[string]ovalState) (advisory.Advisory, bool) {
 	if d.Class != "" && d.Class != "vulnerability" {
 		return advisory.Advisory{}, false
 	}
@@ -760,7 +806,7 @@ func buildOVALAdvisory(d *ovalDefinition, ecosystem string, tests map[string]ova
 // zero-sentinel, or ambiguous state is skipped. When skipModular is set (the rpm families), a fixed version
 // carrying a ".module" build tag is skipped: matching a modular package soundly needs the enabled module
 // STREAM, which the scan side does not carry, so a cross-stream comparison could false-match.
-func affectedFromCriteria(d *ovalDefinition, ecosystem string, tests map[string]ovalTest, objects map[string]string, states map[string]ovalState, skipModular bool) []advisory.AffectedPackage {
+func affectedFromCriteria(d *ovalDefinition, ecosystem string, tests map[string]ovalTest, objects map[string][]string, states map[string]ovalState, skipModular bool) []advisory.AffectedPackage {
 	seen := map[string]bool{} // dedup package within this definition
 	var affected []advisory.AffectedPackage
 	for _, ref := range flattenCriteria(&d.Criteria) {
@@ -768,9 +814,9 @@ func affectedFromCriteria(d *ovalDefinition, ecosystem string, tests map[string]
 		if !ok {
 			continue
 		}
-		pkg := objects[t.Object.Ref]
+		packages := objects[t.Object.Ref]
 		st, ok := states[t.State.Ref]
-		if pkg == "" || !ok {
+		if len(packages) == 0 || !ok {
 			continue
 		}
 		operation, value, ok := st.fixed()
@@ -787,16 +833,18 @@ func affectedFromCriteria(d *ovalDefinition, ecosystem string, tests map[string]
 		if skipModular && strings.Contains(fixed, ".module") {
 			continue // modular rpm without stream context: skip rather than risk a cross-stream false match
 		}
-		if seen[pkg] {
-			continue
+		for _, pkg := range packages {
+			if seen[pkg] {
+				continue
+			}
+			seen[pkg] = true
+			affected = append(affected, advisory.AffectedPackage{
+				Ecosystem:    ecosystem,
+				Package:      pkg,
+				Ranges:       []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}}}},
+				FixedVersion: fixed,
+			})
 		}
-		seen[pkg] = true
-		affected = append(affected, advisory.AffectedPackage{
-			Ecosystem:    ecosystem,
-			Package:      pkg,
-			Ranges:       []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}}}},
-			FixedVersion: fixed,
-		})
 	}
 	return affected
 }
