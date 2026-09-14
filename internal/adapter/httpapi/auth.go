@@ -58,11 +58,11 @@ func principalObj(ctx context.Context) (HumanPrincipal, bool) {
 }
 
 // Resolver maps a presented bearer token to a HumanPrincipal. ok=false means the token
-// is unknown/disabled (→ 401). Implemented over the users service in the wiring.
+// is unknown/disabled (→ 401). D2 retains this compatibility form until the credential-index
+// resolver replaces legacy user lookup; browser-session resolution already preserves dependency
+// failures through SessionResolver's error result.
 type Resolver func(ctx context.Context, token string) (HumanPrincipal, bool)
 
-// Authenticator validates the bearer token on each request via the Resolver and
-// stamps the resolved principal into the request context for attribution.
 // SessionResolver validates an opaque browser session. CSRF is passed only for cookie authentication.
 type SessionResolver interface {
 	Authenticate(ctx context.Context, token, csrfToken string, unsafe bool) (HumanPrincipal, error)
@@ -95,20 +95,28 @@ func (a *Authenticator) Middleware(publicPaths map[string]bool, next http.Handle
 			var authenticated bool
 			principal, authenticated = a.resolve(r.Context(), token)
 			if !authenticated || principal.ID == "" {
-				unauthorized(w)
+				writeIdentityError(w, r.Context(), IdentityErrorAuthenticationInvalid, nil)
 				return
 			}
 		} else {
 			cookie, err := r.Cookie(sessionCookieName)
 			if err != nil || cookie.Value == "" || a.session == nil {
-				unauthorized(w)
+				writeIdentityError(w, r.Context(), IdentityErrorAuthenticationInvalid, nil)
 				return
 			}
 			unsafe := r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions
-			var sessionErr error
-			principal, sessionErr = a.session.Authenticate(r.Context(), cookie.Value, r.Header.Get("X-CSRF-Token"), unsafe)
-			if sessionErr != nil || principal.ID == "" {
-				unauthorized(w)
+			principal, err = a.session.Authenticate(r.Context(), cookie.Value, r.Header.Get("X-CSRF-Token"), unsafe)
+			if err != nil {
+				code := identityCodeFor(err)
+				if code == IdentityErrorAuthenticationInvalid {
+					clearSessionCookie(w)
+				}
+				writeIdentityError(w, r.Context(), code, err)
+				return
+			}
+			if principal.ID == "" {
+				clearSessionCookie(w)
+				writeIdentityError(w, r.Context(), IdentityErrorAuthenticationInvalid, nil)
 				return
 			}
 		}
@@ -122,6 +130,8 @@ func (a *Authenticator) Middleware(publicPaths map[string]bool, next http.Handle
 	})
 }
 
+// unauthorized is retained for non-human auxiliary endpoints (for example the isolated egress
+// grant listener). Human-plane authentication uses the stable identity error contract above.
 func unauthorized(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", "Bearer")
 	writeJSON(w, http.StatusUnauthorized, errorBody{Error: "missing or invalid API token"})
