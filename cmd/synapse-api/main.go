@@ -1900,6 +1900,12 @@ func main() {
 	}
 	vulnerabilityReconciliation.SetRollout(vulnerabilityRollout)
 	vulnerabilityReconciliation.SetInventoryStore(vulnerabilityInventory)
+	if cfg.VulnerabilityInlineWorkerEnabled && databasePool != nil {
+		// PostgreSQL execution is lease-protected in the standalone worker. Inline mode must preserve the
+		// same single-run guarantee; otherwise the monitor correctly fails closed when it consumes a job.
+		vulnerabilityMonitor.SetRunLock(postgres.NewLeaseRunLock(databasePool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
+		vulnerabilityReconciliation.SetRunLock(postgres.NewLeaseRunLock(databasePool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
+	}
 	vulnerabilitySBOMCorrelation, err := vulnerabilitycorrelation.NewSBOMReconciler(vulnerabilityInventory, vulnerabilityAdvisoryStore, vulnerabilityMaterializer, vulnerabilityOccurrences)
 	if err != nil {
 		log.Error("vulnerability SBOM correlation init failed", "err", err)
