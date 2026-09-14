@@ -5,61 +5,67 @@ import (
 	"net/http"
 	"strings"
 
+	identitydom "github.com/KKloudTarus/synapse-ce/internal/domain/identity"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// PrincipalOperator is the fallback principal id (the bootstrap admin also uses it,
-// so historical "operator" attribution stays coherent). Once auth is wired, the real
-// authenticated user is stamped into the context per request.
+// PrincipalOperator is the explicit bootstrap principal id. It is only present when
+// authentication resolves the deployment operator; missing principal context never implies it.
 const PrincipalOperator = "operator"
 
-// Principal is the authenticated subject for a request.
-type Principal struct {
-	ID   string
-	Name string
-	Role string
-	// TenantID is the tenant the principal belongs to – it scopes the request's data and stamps
-	// new records. Empty = the single default tenant (single-tenant mode).
-	TenantID string
-}
+// HumanPrincipal is the protocol-neutral authenticated-human identity shared with the domain.
+// Principal remains as a source-compatible alias while callers migrate to the explicit name.
+type HumanPrincipal = identitydom.HumanPrincipal
+type Principal = HumanPrincipal
 
 type ctxKey int
 
 const principalKey ctxKey = iota
 
-// PrincipalFrom returns the authenticated principal's id from ctx (the value used as
-// the actor on every attributable action), defaulting to operator if unset.
-func PrincipalFrom(ctx context.Context) string {
-	if p, ok := ctx.Value(principalKey).(Principal); ok && p.ID != "" {
-		return p.ID
-	}
-	return PrincipalOperator
-}
-
-// TenantFrom returns the authenticated principal's tenant from ctx – the tenant that scopes the
-// request's data and stamps new records. Empty = the single default tenant (single-tenant mode).
-func TenantFrom(ctx context.Context) string {
-	if p, ok := ctx.Value(principalKey).(Principal); ok {
-		return p.TenantID
-	}
-	return ""
-}
-
-// principalObj returns the full authenticated principal from ctx.
-func principalObj(ctx context.Context) (Principal, bool) {
-	p, ok := ctx.Value(principalKey).(Principal)
+// HumanPrincipalFrom returns the authenticated human principal from ctx. Missing or empty
+// principal context is never interpreted as the deployment operator.
+func HumanPrincipalFrom(ctx context.Context) (HumanPrincipal, bool) {
+	p, ok := ctx.Value(principalKey).(HumanPrincipal)
 	return p, ok && p.ID != ""
 }
 
-// Resolver maps a presented bearer token to a Principal. ok=false means the token
+// PrincipalFrom returns the authenticated principal id used as the actor on attributable actions.
+// It returns an empty string when no authenticated human principal is bound; callers must never
+// infer bootstrap/operator authority from absence.
+func PrincipalFrom(ctx context.Context) string {
+	p, ok := HumanPrincipalFrom(ctx)
+	if !ok {
+		return ""
+	}
+	return p.ID
+}
+
+// TenantFrom returns the authenticated principal's tenant from ctx – the tenant that scopes the
+// request's data and stamps new records. Missing principal context returns empty rather than
+// fabricating a tenant or identity.
+func TenantFrom(ctx context.Context) string {
+	p, ok := HumanPrincipalFrom(ctx)
+	if !ok {
+		return ""
+	}
+	return p.TenantID
+}
+
+// principalObj is the package-local compatibility accessor for existing authorization and privacy
+// guards. New code should use HumanPrincipalFrom so the human-plane requirement is explicit.
+func principalObj(ctx context.Context) (HumanPrincipal, bool) {
+	return HumanPrincipalFrom(ctx)
+}
+
+// Resolver maps a presented bearer token to a HumanPrincipal. ok=false means the token
 // is unknown/disabled (→ 401). Implemented over the users service in the wiring.
-type Resolver func(ctx context.Context, token string) (Principal, bool)
+type Resolver func(ctx context.Context, token string) (HumanPrincipal, bool)
 
 // Authenticator validates the bearer token on each request via the Resolver and
 // stamps the resolved principal into the request context for attribution.
 // SessionResolver validates an opaque browser session. CSRF is passed only for cookie authentication.
 type SessionResolver interface {
-	Authenticate(ctx context.Context, token, csrfToken string, unsafe bool) (Principal, error)
+	Authenticate(ctx context.Context, token, csrfToken string, unsafe bool) (HumanPrincipal, error)
 }
 
 type Authenticator struct {
@@ -83,12 +89,12 @@ func (a *Authenticator) Middleware(publicPaths map[string]bool, next http.Handle
 			next.ServeHTTP(w, r)
 			return
 		}
-		var principal Principal
+		var principal HumanPrincipal
 		if token, ok := bearerToken(r); ok {
 			// Bearer credentials retain their existing API semantics, including no CSRF requirement.
 			var authenticated bool
 			principal, authenticated = a.resolve(r.Context(), token)
-			if !authenticated {
+			if !authenticated || principal.ID == "" {
 				unauthorized(w)
 				return
 			}
@@ -101,7 +107,7 @@ func (a *Authenticator) Middleware(publicPaths map[string]bool, next http.Handle
 			unsafe := r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions
 			var sessionErr error
 			principal, sessionErr = a.session.Authenticate(r.Context(), cookie.Value, r.Header.Get("X-CSRF-Token"), unsafe)
-			if sessionErr != nil {
+			if sessionErr != nil || principal.ID == "" {
 				unauthorized(w)
 				return
 			}

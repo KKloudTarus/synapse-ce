@@ -36,8 +36,12 @@ func actorFrom(r *http.Request) usersuc.Actor {
 // currentUser returns the authenticated principal (who am I), so the UI can show
 // the logged-in consultant and gate admin-only surfaces.
 func (rt *Router) currentUser(w http.ResponseWriter, r *http.Request) {
-	p, _ := principalObj(r.Context())
-	tenantID := TenantFrom(r.Context())
+	p, ok := HumanPrincipalFrom(r.Context())
+	if !ok {
+		unauthorized(w)
+		return
+	}
+	tenantID := p.TenantID
 	readEnabled := rt.assessmentLifecycleRead != nil && rt.assessmentLifecycleRead(tenantID)
 	uiEnabled := rt.assessmentLifecycleUI != nil && rt.assessmentLifecycleUI(tenantID)
 	writeJSON(w, http.StatusOK, map[string]any{

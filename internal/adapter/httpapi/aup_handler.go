@@ -35,13 +35,17 @@ type acceptAUPRequest struct {
 }
 
 func (rt *Router) acceptAUP(w http.ResponseWriter, r *http.Request) {
+	principal, ok := HumanPrincipalFrom(r.Context())
+	if !ok {
+		unauthorized(w)
+		return
+	}
 	var req acceptAUPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
 		return
 	}
-	// Attribute to the authenticated principal (single-user → operator today).
-	if err := rt.aup.Accept(r.Context(), PrincipalFrom(r.Context()), req.Version); err != nil {
+	if err := rt.aup.Accept(r.Context(), principal.ID, req.Version); err != nil {
 		writeError(w, rt.log, err)
 		return
 	}

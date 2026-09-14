@@ -18,7 +18,11 @@ type OIDCSession struct {
 	Token, CSRFToken string
 	Principal        OIDCPrincipal
 }
-type OIDCPrincipal struct{ ID, Name, Role, TenantID string }
+
+// OIDCPrincipal uses the same protocol-neutral human-principal contract as bearer authentication;
+// provider-specific claims remain inside the OIDC adapter/use case and never create a second
+// request-principal shape.
+type OIDCPrincipal = HumanPrincipal
 
 type OIDCService interface {
 	Begin(context.Context) (OIDCAuthorization, error)
@@ -30,12 +34,12 @@ type OIDCService interface {
 
 type oidcSessionResolver struct{ service OIDCService }
 
-func (r oidcSessionResolver) Authenticate(ctx context.Context, token, csrf string, unsafe bool) (Principal, error) {
+func (r oidcSessionResolver) Authenticate(ctx context.Context, token, csrf string, unsafe bool) (HumanPrincipal, error) {
 	p, err := r.service.Authenticate(ctx, token, csrf, unsafe)
 	if err != nil {
-		return Principal{}, err
+		return HumanPrincipal{}, err
 	}
-	return Principal(p), nil
+	return p, nil
 }
 
 // SetOIDC installs the browser OIDC BFF and its fixed, validated frontend destination.
