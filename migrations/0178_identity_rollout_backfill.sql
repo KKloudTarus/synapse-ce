@@ -55,8 +55,8 @@ CREATE TABLE identity_backfill_items (
     PRIMARY KEY (tenant_id,run_id,user_id),
     FOREIGN KEY (tenant_id,run_id) REFERENCES identity_backfill_runs(tenant_id,id) ON DELETE RESTRICT,
     FOREIGN KEY (tenant_id,user_id) REFERENCES users(ownership_tenant_id,id) ON DELETE RESTRICT,
-    FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE RESTRICT,
-    FOREIGN KEY (tenant_id,membership_id,person_id) REFERENCES memberships(tenant_id,id,person_id) ON DELETE RESTRICT,
+    -- Do not FK evidence to persons/memberships: a drift item must be able to prove that a
+    -- projection is missing or ownership-corrupt without first repairing the derived side.
     UNIQUE (tenant_id,run_id,source_hash,user_id)
 );
 CREATE INDEX identity_backfill_items_outcome
