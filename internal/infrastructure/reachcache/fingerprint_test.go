@@ -1,6 +1,7 @@
 package reachcache
 
 import (
+	"runtime"
 	"context"
 	"os"
 	"path/filepath"
@@ -127,6 +128,9 @@ func TestTreeFingerprintContextCancel(t *testing.T) {
 
 // Changing a file's mode changes the source hash (mode is bound).
 func TestTreeFingerprintModeChange(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file mode bits are not portable on Windows")
+	}
 	dir := writeTree(t, map[string]string{"run.sh": "echo hi"})
 	before := hashOf(t, dir)
 	if err := os.Chmod(filepath.Join(dir, "run.sh"), 0o755); err != nil {
