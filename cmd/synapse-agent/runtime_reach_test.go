@@ -1,6 +1,7 @@
 package main
 
 import (
+	"runtime"
 	"context"
 	"errors"
 	"os"
@@ -53,6 +54,9 @@ func dpkgTestRoot(t *testing.T) string {
 }
 
 func TestRuntimeReachSweepShipsResolvedEvidence(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("runtime reach evidence fixture requires Linux procfs/dpkg")
+	}
 	sensor := &fakeSensor{events: make(chan ebpf.LibraryLoadEvent, 4)}
 	withFakeSensor(t, sensor)
 	api := &fakeAPI{}
