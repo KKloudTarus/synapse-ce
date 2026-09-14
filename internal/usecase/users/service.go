@@ -126,36 +126,9 @@ type Actor struct {
 	TenantID string
 }
 
-// tenant returns the actor's normalized tenant (” and "default" name the same tenant).
 func (a Actor) tenant() shared.ID { return shared.TenantOrDefault(shared.ID(a.TenantID)) }
-
-// platformAdmin reports whether the actor may act outside its own tenant.
-//
-// There is deliberately no platform-admin ROLE: a role would be assignable by any tenant admin
-// through the same user-management API this guards, which is the escalation being closed. The one
-// cross-tenant identity is the bootstrap principal seeded from SYNAPSE_API_TOKEN (id "operator"),
-// which only somebody with the deployment's environment can present, and which already owns the
-// default-tenant superadmin position. Its single cross-tenant power is provisioning a user in
-// another tenant, so a new tenant can be given its first admin; reads and every other mutation stay
-// confined to the actor's own tenant for the bootstrap principal too.
 func (a Actor) platformAdmin() bool { return a.ID == BootstrapID }
 
-// mayMutate refuses every user-management mutation aimed at the bootstrap principal, including one
-// the bootstrap principal makes on itself.
-//
-// The bootstrap admin is stored with an empty tenant_id, which normalizes to the default tenant, so
-// it is a member of that tenant's roster and reachable by its admins through the ordinary
-// tenant-scoped lookup. Without this guard a default-tenant admin could rotate the bootstrap key,
-// read the new plaintext from the response, and present it to become the platform principal that
-// every global-resource guard in the product tests for. Disabling or demoting it would equally lock
-// the deployment operator out of its own deployment.
-//
-// Self-mutation is refused for a different reason. EnsureBootstrapAdmin refreshes this row from
-// SYNAPSE_API_TOKEN on every startup, overwriting the key hash, the role and the disabled flag. A
-// key rotated through this API therefore authenticates only until the next restart, while the
-// environment token stops working in the meantime: two credentials, each valid at a different time,
-// and no way to tell which from the outside. The credential is owned by SYNAPSE_API_TOKEN, and
-// changing that variable and restarting is the one path that actually moves it.
 func (a Actor) mayMutate(id shared.ID) error {
 	if id.String() == BootstrapID {
 		return fmt.Errorf("%w: the bootstrap operator is managed through SYNAPSE_API_TOKEN, not through user management", shared.ErrForbidden)
@@ -163,9 +136,6 @@ func (a Actor) mayMutate(id shared.ID) error {
 	return nil
 }
 
-// targetTenant resolves the tenant an action applies to. An empty request means "my own tenant".
-// A different tenant is refused unless the actor is the platform admin, so a tenant-A admin can
-// neither provision into tenant B nor receive that user's API key.
 func (a Actor) targetTenant(requested string) (shared.ID, error) {
 	if strings.TrimSpace(requested) == "" {
 		return a.tenant(), nil
@@ -177,12 +147,7 @@ func (a Actor) targetTenant(requested string) (shared.ID, error) {
 	return target, nil
 }
 
-// CreateUser provisions a new operator and returns the raw API key ONCE (it is never recoverable
-// afterwards). tenantID is assigned server-side by the admin provisioning the user (never from the
-// new user's own token) and must be the actor's own tenant unless the actor is the platform admin;
-// empty means the actor's tenant, so a single-tenant admin keeps creating users with no ceremony.
-// The tenant the user lands in is what scopes every read/write they later make, so it is captured
-// in the audit record. Audited.
+// CreateUser provisions a new operator and returns the raw API key once.
 func (s *Service) CreateUser(ctx context.Context, actor Actor, tenantID string, name string, role user.Role) (*user.User, string, error) {
 	target, err := actor.targetTenant(tenantID)
 	if err != nil {
@@ -210,7 +175,6 @@ func (s *Service) createUser(ctx context.Context, actor Actor, target shared.ID,
 	if err != nil {
 		return nil, "", err
 	}
-	// The provisioning admin assigns the tenant – the aggregate owns it from birth.
 	now := s.clock.Now()
 	u, err := user.New(s.ids.NewID(), target.String(), name, role, hash, now)
 	if err != nil {
@@ -221,23 +185,17 @@ func (s *Service) createUser(ctx context.Context, actor Actor, target shared.ID,
 	}
 	if err := s.recordUserAudit(ctx, ports.AuditEntry{
 		Actor: actor.ID, Action: "user.created", Target: u.ID.String(),
-		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": target.String()},
-		At:       now,
+		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": target.String()}, At: now,
 	}); err != nil {
 		return nil, "", err
 	}
 	return u, plaintext, nil
 }
 
-// List returns the users of the actor's own tenant (the hash is on the struct; the adapter must not
-// serialize it). No caller, the platform admin included, lists another tenant's roster.
 func (s *Service) List(ctx context.Context, actor Actor) ([]*user.User, error) {
 	return s.repo.List(ctx, actor.tenant())
 }
 
-// Update changes a user's display name and role inside the actor's tenant. An empty name or role
-// leaves that field unchanged, so a caller can rename without knowing the current role. Demoting
-// the tenant's last enabled admin is refused, else the tenant would be left unmanageable. Audited.
 func (s *Service) Update(ctx context.Context, actor Actor, id shared.ID, name string, role user.Role) (*user.User, error) {
 	if err := actor.mayMutate(id); err != nil {
 		return nil, err
@@ -248,7 +206,10 @@ func (s *Service) Update(ctx context.Context, actor Actor, id shared.ID, name st
 }
 
 func (s *Service) update(ctx context.Context, actor Actor, id shared.ID, name string, role user.Role) (*user.User, error) {
-	u, err := s.repo.GetByID(ctx, actor.tenant(), id)
+	// Read the aggregate under the same roster lock used by rotation/disable. UserRepository.Update
+	// writes the whole mutable aggregate, so an unlocked stale read could otherwise restore an old
+	// api_key_hash after a concurrent rotation committed on another replica.
+	u, err := s.lockedUser(ctx, actor.tenant(), id)
 	if err != nil {
 		return nil, fmt.Errorf("load user: %w", err)
 	}
@@ -272,23 +233,13 @@ func (s *Service) update(ctx context.Context, actor Actor, id shared.ID, name st
 	if err := s.repo.Update(ctx, actor.tenant(), u); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
-	// D5 does not change role/name projection. Keep the legacy best-effort behavior here; D6 owns
-	// the broader command-store audit conversion for all identity mutations.
 	_ = s.audit.Record(ctx, ports.AuditEntry{
 		Actor: actor.ID, Action: "user.updated", Target: u.ID.String(),
-		Metadata: map[string]string{
-			"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String(),
-			"previous_name": before.Name, "previous_role": string(before.Role),
-		},
-		At: now,
+		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String(), "previous_name": before.Name, "previous_role": string(before.Role)}, At: now,
 	})
 	return u, nil
 }
 
-// SetDisabled turns a user's credentials off or back on inside the actor's tenant. Disabling is the
-// revocation the product offers instead of deletion: the identity, and therefore every past
-// attribution, is preserved while authentication stops. Disabling the tenant's last enabled admin
-// is refused, else nobody could administer the tenant afterwards. Audited.
 func (s *Service) SetDisabled(ctx context.Context, actor Actor, id shared.ID, disabled bool) (*user.User, error) {
 	if err := actor.mayMutate(id); err != nil {
 		return nil, err
@@ -299,7 +250,9 @@ func (s *Service) SetDisabled(ctx context.Context, actor Actor, id shared.ID, di
 }
 
 func (s *Service) setDisabled(ctx context.Context, actor Actor, id shared.ID, disabled bool) (*user.User, error) {
-	u, err := s.repo.GetByID(ctx, actor.tenant(), id)
+	// Disable/enable and rotation are one-writer operations over the same legacy row. Lock the row
+	// before reading it so disabling can never write an old hash over a newly rotated credential.
+	u, err := s.lockedUser(ctx, actor.tenant(), id)
 	if err != nil {
 		return nil, fmt.Errorf("load user: %w", err)
 	}
@@ -327,18 +280,13 @@ func (s *Service) setDisabled(ctx context.Context, actor Actor, id shared.ID, di
 	}
 	if err := s.recordUserAudit(ctx, ports.AuditEntry{
 		Actor: actor.ID, Action: action, Target: u.ID.String(),
-		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String()},
-		At:       now,
+		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String()}, At: now,
 	}); err != nil {
 		return nil, err
 	}
 	return u, nil
 }
 
-// RotateAPIKey issues a new API key for a user in the actor's tenant and returns it ONCE. The
-// previous key stops authenticating immediately, which is how a leaked key is revoked from the
-// product. Audited; the key itself never reaches the audit log. A disabled user may be rotated —
-// rotation invalidates the old credential whether or not the account is currently usable.
 func (s *Service) RotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (*user.User, string, error) {
 	if err := actor.mayMutate(id); err != nil {
 		return nil, "", err
@@ -352,24 +300,10 @@ func (s *Service) RotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (
 	return u, plaintext, nil
 }
 
-// rotateAPIKey issues the new key. It reads the user from the LOCKED roster rather than through a
-// plain lookup: Update writes the whole aggregate, so a read outside the lock lets a rotation on
-// one replica silently revert a disable or a demotion committed on another between the two
-// statements. Reading under the same row lock the guard takes makes the read-modify-write atomic.
 func (s *Service) rotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (*user.User, string, error) {
-	roster, err := s.lockedRoster(ctx, actor.tenant())
+	u, err := s.lockedUser(ctx, actor.tenant(), id)
 	if err != nil {
 		return nil, "", fmt.Errorf("load user: %w", err)
-	}
-	var u *user.User
-	for _, candidate := range roster {
-		if candidate.ID == id {
-			u = candidate
-			break
-		}
-	}
-	if u == nil {
-		return nil, "", fmt.Errorf("load user: %w", shared.ErrNotFound)
 	}
 	plaintext, hash, err := generateKey()
 	if err != nil {
@@ -392,18 +326,13 @@ func (s *Service) rotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (
 	}
 	if err := s.recordUserAudit(ctx, ports.AuditEntry{
 		Actor: actor.ID, Action: "user.api_key_rotated", Target: u.ID.String(),
-		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String()},
-		At:       now,
+		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String()}, At: now,
 	}); err != nil {
 		return nil, "", err
 	}
 	return u, plaintext, nil
 }
 
-// recordUserAudit preserves the historical best-effort audit contract until D5 is enabled. Once
-// the derived credential writer is active, issuance/rotation/disable audits are classification or
-// revocation evidence and therefore mandatory; because callers are inside TenantTransactionRunner,
-// a failure rolls back users + projection + credential_index together.
 func (s *Service) recordUserAudit(ctx context.Context, entry ports.AuditEntry) error {
 	if err := s.audit.Record(ctx, entry); err != nil {
 		if s.legacyCredentials != nil {
@@ -413,9 +342,6 @@ func (s *Service) recordUserAudit(ctx context.Context, entry ports.AuditEntry) e
 	return nil
 }
 
-// assertNotLastEnabledAdmin refuses an action that would leave the tenant with no enabled admin.
-// It counts the tenant's OTHER enabled admins, so an admin cannot lock the tenant out by disabling
-// or demoting itself.
 func (s *Service) assertNotLastEnabledAdmin(ctx context.Context, actor Actor, id shared.ID, action string) error {
 	roster, err := s.lockedRoster(ctx, actor.tenant())
 	if err != nil {
@@ -432,9 +358,6 @@ func (s *Service) assertNotLastEnabledAdmin(ctx context.Context, actor Actor, id
 	return fmt.Errorf("%w: cannot %s the last enabled admin of tenant %q", shared.ErrConflict, action, actor.tenant())
 }
 
-// guarded runs one roster mutation with the last-admin guard held: serialized in this process by
-// the service mutex, and against other replicas by the row lock the guard's read takes inside the
-// transaction. Both are needed, and neither alone is sufficient.
 func guarded(ctx context.Context, s *Service, actor Actor, fn func(context.Context) (*user.User, error)) (*user.User, error) {
 	s.roster.Lock()
 	defer s.roster.Unlock()
@@ -452,8 +375,6 @@ func guarded(ctx context.Context, s *Service, actor Actor, fn func(context.Conte
 	return out, nil
 }
 
-// guardedKey is guarded for the mutation that also returns a secret. The two differ only in the
-// shape of the value they carry out of the transaction.
 func guardedKey(ctx context.Context, s *Service, actor Actor, fn func(context.Context) (*user.User, string, error)) (*user.User, string, error) {
 	s.roster.Lock()
 	defer s.roster.Unlock()
@@ -474,9 +395,22 @@ func guardedKey(ctx context.Context, s *Service, actor Actor, fn func(context.Co
 	return out, plaintext, nil
 }
 
-// lockedRoster reads the tenant's roster, locking the rows for the rest of the caller's transaction
-// where the repository supports it. A repository that cannot lock falls back to a plain read, which
-// leaves the in-process mutex as the only serialization.
+// lockedUser resolves one user from the locked tenant roster. PostgreSQL ListForUpdate holds every
+// roster row through the caller's bound transaction; memory/file adapters fall back to process-local
+// serialization, preserving their historical development behavior.
+func (s *Service) lockedUser(ctx context.Context, tenant, id shared.ID) (*user.User, error) {
+	roster, err := s.lockedRoster(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range roster {
+		if candidate.ID == id {
+			return candidate, nil
+		}
+	}
+	return nil, shared.ErrNotFound
+}
+
 func (s *Service) lockedRoster(ctx context.Context, tenant shared.ID) ([]*user.User, error) {
 	if locker, ok := s.repo.(ports.UserRosterLocker); ok {
 		return locker.ListForUpdate(ctx, tenant)
