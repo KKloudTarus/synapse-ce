@@ -39,7 +39,9 @@ func hashOf(t *testing.T, dir string) string {
 // The same tree content yields the same source hash across two independent walks (order-independent).
 func TestTreeFingerprintStable(t *testing.T) {
 	files := map[string]string{"main.go": "package main", "pkg/a.go": "package pkg", "go.mod": "module x"}
-	if hashOf(t, writeTree(t, files)) != hashOf(t, writeTree(t, files)) {
+	left := hashOf(t, writeTree(t, files))
+	right := hashOf(t, writeTree(t, files))
+	if left != right {
 		t.Fatal("identical trees must hash equal")
 	}
 }
