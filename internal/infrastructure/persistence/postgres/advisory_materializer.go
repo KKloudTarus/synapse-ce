@@ -31,6 +31,7 @@ var _ ports.AdvisoryMaterializer = (*AdvisoryMaterializer)(nil)
 var _ ports.AdvisoryStore = (*AdvisoryMaterializer)(nil)
 var _ ports.AdvisoryEvaluationCheckpointStore = (*AdvisoryMaterializer)(nil)
 var _ ports.VulnerabilityAdvisoryReadStore = (*AdvisoryMaterializer)(nil)
+var _ ports.VulnerabilityAdvisoryImpactReadStore = (*AdvisoryMaterializer)(nil)
 var _ ports.VulnerabilityCoverageReadStore = (*AdvisoryMaterializer)(nil)
 
 func (r *AdvisoryMaterializer) CurrentSourceRecordIDs(ctx context.Context, sourceID string, yield func(string) error) error {

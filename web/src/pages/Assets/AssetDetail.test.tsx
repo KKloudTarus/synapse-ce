@@ -65,6 +65,30 @@ describe('Asset detail projections', () => {
     expect(screen.getByText(/never assessed/)).toBeInTheDocument()
   })
 
+  it('paginates asset coverage after 50 rows', () => {
+    const rows = Array.from({ length: 55 }, (_, index) => ({
+      kind: 'technical_asset',
+      componentId: `workload-${index + 1}`,
+      name: `Workload ${index + 1}`,
+      verdict: 'covered',
+      engagementId: 'e1',
+      lastAssessed: null,
+      freshnessTargetDays: 90,
+    }))
+    renderWithContext(<AssetCoverageView />, {
+      coverage: { freshnessTargetDays: 90, counts: { covered: 55 }, rows },
+    })
+
+    expect(screen.getByText('Workload 1')).toBeInTheDocument()
+    expect(screen.getByText('Workload 50')).toBeInTheDocument()
+    expect(screen.queryByText('Workload 51')).not.toBeInTheDocument()
+    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByText('Workload 51')).toBeInTheDocument()
+    expect(screen.getByText('Page 2 of 2')).toBeInTheDocument()
+  })
+
   it('renders AssetOverview stat strip, read-only profile, recent engagements, and collapsible editor', () => {
     const mockContext = {
       asset: {

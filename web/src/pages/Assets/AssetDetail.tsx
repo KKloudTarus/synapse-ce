@@ -700,7 +700,12 @@ function CoverageBadge({ verdict }: { verdict: AssetCoverageVerdict }) {
 
 export function AssetCoverageView() {
   const context = useAssetContext()
+  const pageSize = 50
+  const [page, setPage] = useState(0)
   if (!context.coverage.rows.length) return <EmptyState icon={CheckDone01} title="No expected components" hint="Link Projects or technical assets to establish the coverage denominator." />
+  const pageCount = Math.max(1, Math.ceil(context.coverage.rows.length / pageSize))
+  const activePage = Math.min(page, pageCount - 1)
+  const rows = context.coverage.rows.slice(activePage * pageSize, (activePage + 1) * pageSize)
   return (
     <Card
       title={`Coverage · ${context.coverage.freshnessTargetDays}-day freshness`}
@@ -714,19 +719,30 @@ export function AssetCoverageView() {
           ))}
         </div>
       }
-      bodyClass="divide-y divide-secondary p-0"
+      bodyClass="p-0"
     >
-      {context.coverage.rows.map((row) => (
-        <div key={`${row.kind}-${row.componentId}`} className="flex items-center justify-between gap-3 px-5 py-2.5">
-          <div className="min-w-0">
-            <span className="text-sm font-medium text-primary">{row.name || row.componentId}</span>
-            <span className="ml-2 text-xs text-tertiary">
-              {row.kind} · {row.lastAssessed ? new Date(row.lastAssessed).toLocaleDateString() : 'never assessed'}
-            </span>
+      <div className="divide-y divide-secondary">
+        {rows.map((row) => (
+          <div key={`${row.kind}-${row.componentId}`} className="flex items-center justify-between gap-3 px-5 py-2.5">
+            <div className="min-w-0">
+              <span className="text-sm font-medium text-primary">{row.name || row.componentId}</span>
+              <span className="ml-2 text-xs text-tertiary">
+                {row.kind} · {row.lastAssessed ? new Date(row.lastAssessed).toLocaleDateString() : 'never assessed'}
+              </span>
+            </div>
+            <CoverageBadge verdict={row.verdict} />
           </div>
-          <CoverageBadge verdict={row.verdict} />
+        ))}
+      </div>
+      {pageCount > 1 ? (
+        <div className="flex items-center justify-between border-t border-secondary px-5 py-3 text-sm text-tertiary">
+          <span className="font-mono tabular-nums">Page {activePage + 1} of {pageCount}</span>
+          <div className="flex gap-2">
+            <Button variant="secondary" disabled={activePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Previous</Button>
+            <Button variant="secondary" disabled={activePage + 1 >= pageCount} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>Next</Button>
+          </div>
         </div>
-      ))}
+      ) : null}
     </Card>
   )
 }
