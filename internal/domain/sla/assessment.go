@@ -126,7 +126,10 @@ func Evaluate(input AssessmentInput, cfg Config, now time.Time) (Assessment, err
 	if err != nil {
 		return Assessment{}, err
 	}
-	now = now.UTC()
+	// PostgreSQL TIMESTAMPTZ preserves microseconds. Canonicalize before placing the
+	// same instant in a relational column and the JSON result payload so a round-trip
+	// cannot make a freshly stored assessment fail its own provenance validation.
+	now = now.UTC().Truncate(time.Microsecond)
 	return Assessment{
 		TenantID: input.TenantID, ID: AssessmentID(input.TenantID, input.FindingID, cfg.Version, inputHash),
 		EngagementID: input.EngagementID, FindingID: input.FindingID,
