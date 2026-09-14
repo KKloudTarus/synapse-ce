@@ -15,14 +15,22 @@ function Harness() {
       <button type="button" onClick={() => notify('   ')}>
         blank
       </button>
+      <button type="button" onClick={() => notify('New exposure', 'error', { label: 'View finding', onClick: actionSpy })}>
+        actionable
+      </button>
     </div>
   )
 }
 
+const actionSpy = vi.fn()
+
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
 
 describe('ToastProvider', () => {
-  afterEach(() => vi.useRealTimers())
+  afterEach(() => {
+    vi.useRealTimers()
+    actionSpy.mockReset()
+  })
 
   it('announces an outcome in a polite live region', () => {
     render(
@@ -68,6 +76,19 @@ describe('ToastProvider', () => {
     )
     click('blank')
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('runs an optional action and dismisses its toast', () => {
+    render(
+      <ToastProvider>
+        <Harness />
+      </ToastProvider>,
+    )
+    click('actionable')
+    click('View finding')
+
+    expect(actionSpy).toHaveBeenCalledOnce()
+    expect(screen.queryByText('New exposure')).not.toBeInTheDocument()
   })
 
   it('degrades to a no-op outside a provider', () => {
