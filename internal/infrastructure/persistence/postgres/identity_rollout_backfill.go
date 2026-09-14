@@ -16,7 +16,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-const identityBackfillRunCols = `tenant_id,id,schema_version,batch_size,snapshot_at,checkpoint_user_id,state,lease_owner,lease_token,lease_expires_at,processed_count,projected_count,unchanged_count,drift_count,source_count,person_count,membership_count,created_by,created_at,updated_at,completed_at`
+const identityBackfillRunCols = `tenant_id,id,schema_version,batch_size,snapshot_at,checkpoint_user_id,state,lease_owner,lease_token,lease_expires_at,processed_count,projected_count,unchanged_count,drift_count,reconciled_drift_count,source_count,person_count,membership_count,created_by,created_at,updated_at,completed_at`
 
 type IdentityRolloutRepository struct{ pool *pgxpool.Pool }
 
@@ -89,8 +89,8 @@ func (repository *IdentityRolloutRepository) AcquireIdentityBackfillRun(ctx cont
 		}
 		created, createErr := scanIdentityBackfillRun(tx.QueryRow(ctx, `INSERT INTO identity_backfill_runs
 			(tenant_id,id,schema_version,batch_size,snapshot_at,checkpoint_user_id,state,lease_owner,lease_token,lease_expires_at,
-			 processed_count,projected_count,unchanged_count,drift_count,source_count,person_count,membership_count,created_by,created_at,updated_at,completed_at)
-			VALUES($1,$2,$3,$4,$5,$6,'running',$7,$8,now()+($9 * interval '1 microsecond'),0,0,0,0,0,0,0,$10,$11,$11,NULL)
+			 processed_count,projected_count,unchanged_count,drift_count,reconciled_drift_count,source_count,person_count,membership_count,created_by,created_at,updated_at,completed_at)
+			VALUES($1,$2,$3,$4,$5,$6,'running',$7,$8,now()+($9 * interval '1 microsecond'),0,0,0,0,0,0,0,0,$10,$11,$11,NULL)
 			RETURNING `+identityBackfillRunCols,
 			request.Run.TenantID.String(), request.Run.ID.String(), request.Run.SchemaVersion, request.Run.BatchSize, request.Run.SnapshotAt.UTC(), request.ResumeAfter.String(),
 			request.Run.LeaseOwner, request.Run.LeaseToken.String(), request.LeaseDuration.Microseconds(), request.Run.CreatedBy, request.Run.CreatedAt.UTC()))
@@ -302,8 +302,8 @@ func (repository *IdentityRolloutRepository) FinishIdentityBackfillRun(ctx conte
 			processed_count=(SELECT count(*) FROM identity_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id),
 			projected_count=(SELECT count(*) FROM identity_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id AND item.outcome='projected'),
 			unchanged_count=(SELECT count(*) FROM identity_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id AND item.outcome='unchanged'),
-			drift_count=GREATEST($7,(SELECT count(*) FROM identity_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id AND item.outcome='drift')),
-			source_count=$8,person_count=$9,membership_count=$10
+			drift_count=(SELECT count(*) FROM identity_backfill_items item WHERE item.tenant_id=run.tenant_id AND item.run_id=run.id AND item.outcome='drift'),
+			reconciled_drift_count=$7,source_count=$8,person_count=$9,membership_count=$10
 			WHERE run.tenant_id=$1 AND run.id=$2 AND run.state='running' AND run.lease_owner=$3 AND run.lease_token=$4 AND run.lease_expires_at>now()
 			RETURNING `+identityBackfillRunCols,
 			tenantID.String(), runID.String(), leaseOwner, leaseToken.String(), string(state), now,
@@ -397,7 +397,7 @@ func scanIdentityBackfillRun(row rowScanner) (ports.IdentityBackfillRun, error) 
 	var state string
 	var leaseExpires, completedAt pgtype.Timestamptz
 	if err := row.Scan(&run.TenantID, &run.ID, &run.SchemaVersion, &run.BatchSize, &run.SnapshotAt, &run.CheckpointUser, &state, &run.LeaseOwner, &run.LeaseToken, &leaseExpires,
-		&run.ProcessedCount, &run.ProjectedCount, &run.UnchangedCount, &run.DriftCount, &run.SourceCount, &run.PersonCount, &run.MembershipCount,
+		&run.ProcessedCount, &run.ProjectedCount, &run.UnchangedCount, &run.DriftCount, &run.ReconciledDriftCount, &run.SourceCount, &run.PersonCount, &run.MembershipCount,
 		&run.CreatedBy, &run.CreatedAt, &run.UpdatedAt, &completedAt); err != nil {
 		return run, err
 	}
