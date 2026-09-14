@@ -758,6 +758,13 @@ export interface Finding {
   directBumps?: string[] // minimal set of direct dependencies to upgrade to remove a transitive vuln (D3.8)
   publicExploit?: boolean // a public exploit is known to exist for this vuln (D1.3, triage signal)
   epssPercentile?: number // EPSS score's rank among all scored CVEs, 0..1 (D1.3, triage aid)
+  sources?: string[] // intelligence providers that contributed to this projected finding
+  confidence?: string
+  advisoryId?: string // non-empty only when projected from Vulnerability Intelligence
+  occurrenceId?: string
+  fixedVersion?: string
+  detectionState?: string
+  evaluatedAt?: string | null
 }
 
 export type SLATier = 'emergency' | 'critical' | 'high' | 'medium' | 'low' | 'exception'

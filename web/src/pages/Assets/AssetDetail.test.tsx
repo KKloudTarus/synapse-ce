@@ -36,6 +36,23 @@ describe('Asset detail projections', () => {
     expect(screen.getByText(/semgrep 1.2.3 · rule.a · sha256:abc/)).toBeInTheDocument()
   })
 
+  it('tags asset findings projected from Vulnerability Intelligence', () => {
+    renderWithContext(<AssetFindings />, {
+      findings: [{
+        finding: { id: 'vi-1', title: 'Banking advisory exposure', severity: 'critical', advisoryId: 'CVE-2026-12346', sources: ['nvd'] },
+        external: false,
+        canSelfPromote: false,
+        suppressedByTool: false,
+        reachability: { state: 'reachable', tier: 'tier-2', status: '', history: [] },
+        engagementId: 'e1',
+        engagementName: 'Banking assessment',
+      }],
+    })
+
+    expect(screen.getByLabelText('Vulnerability Intelligence')).toBeInTheDocument()
+    expect(screen.getByText('VI')).toBeInTheDocument()
+  })
+
   it('renders partial coverage as a distinct non-passing state', () => {
     renderWithContext(<AssetCoverageView />, {
       coverage: {
@@ -157,4 +174,3 @@ describe('Asset detail projections', () => {
     expect(screen.getByText('No findings match this severity filter.')).toBeInTheDocument()
   })
 })
-

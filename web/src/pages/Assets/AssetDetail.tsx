@@ -35,6 +35,7 @@ import type {
 } from '../../lib/types'
 import { PostureBadge } from './Assets'
 import { StatusPill } from '../Engagements'
+import { VulnerabilityIntelligenceBadge } from '../../components/synapse/VulnerabilityIntelligenceBadge'
 
 type Context = {
   asset: BusinessAsset
@@ -106,6 +107,7 @@ export function AssetDetail() {
   const coveragePercent = data.coverage.rows.length
     ? Math.round(((data.coverage.counts.covered ?? 0) / data.coverage.rows.length) * 100)
     : 0
+  const viFindingCount = data.findings.filter((row) => Boolean(row.finding.advisoryId)).length
 
   return (
     <div className="mx-auto max-w-[1480px] animate-fade-in">
@@ -131,6 +133,7 @@ export function AssetDetail() {
                   </>
                 )}
               </div>
+              {viFindingCount > 0 && <VulnerabilityIntelligenceBadge count={viFindingCount} className="mt-3 inline-flex" />}
             </div>
           </div>
 
@@ -644,6 +647,7 @@ export function AssetFindings() {
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-primary">{row.finding.title}</span>
+                  {row.finding.advisoryId && <VulnerabilityIntelligenceBadge compact />}
                   {row.external && <Pill>External · {row.provenance?.toolName || 'unknown tool'}</Pill>}
                   {row.suppressedByTool && <Pill>Suppressed by tool</Pill>}
                 </div>

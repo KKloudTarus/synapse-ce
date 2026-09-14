@@ -121,6 +121,33 @@ describe('EngagementDetail Page Shell', () => {
     expect(screen.getAllByTitle('github.com/acme/core-service').length).toBeGreaterThan(0)
   })
 
+  it('tags an engagement when it has Vulnerability Intelligence findings', async () => {
+    vi.mocked(api.findings).mockResolvedValue([{
+      id: 'finding-vi-1', engagementId: 'eng-123456', title: 'Projected advisory', description: '', severity: 'critical',
+      cvssVector: '', cwe: '', status: 'open', dedupKey: 'vi-1', kev: true, riskScore: 9.8, class: 'third_party',
+      scope: 'in_scope', reachability: 'unknown', impact: '', priority: 1, assignee: '', version: 1, kind: 'sca',
+      evidenceScore: 0, proposedBy: '', complianceControls: [], advisoryId: 'CVE-2026-12346', sources: ['nvd'],
+    }])
+    vi.mocked(api.latestScan).mockResolvedValue({
+      target: 'sbom.json', scanMode: 'licenses', languages: [], components: [], dependencies: [], vulnerabilities: [],
+      licenses: [], findings: [], toolVersions: {}, vulnDBSnapshot: '', debugEvents: [],
+      completeness: { lockfiles: [], componentsTotal: 0, componentsResolved: 0, confident: true, warning: '' },
+      licenseCoverage: { total: 0, detected: 0, unknown: 0, pct: 100 },
+      manifest: { toolVersions: {}, vulnDBSnapshot: '', grypeDBVersion: '', correlationVersion: 1, sbomSha256: '', reproScore: 100, pinnedInputs: [], unpinnedInputs: [] },
+      findingQuality: { rawFindings: 0, actionable: 0, background: 0, production: 0, development: 0, exampleTest: 0, thirdParty: 0, firstPartyHistorical: 0, versionCoveragePct: 100, pathCoveragePct: 100, confidence: 'high', byPriority: {} },
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456']}>
+        <Routes><Route path="/engagements/:id" element={<EngagementDetail />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByLabelText('Vulnerability Intelligence · 1 finding')).toBeInTheDocument()
+    await waitFor(() => expect(api.latestScan).toHaveBeenCalled())
+    expect(screen.getByLabelText('Vulnerability Intelligence · 1 finding')).toBeInTheDocument()
+  })
+
   it('groups lifecycle below scan controls in the Engagement summary, before the content tabs', async () => {
     vi.mocked(api.me).mockResolvedValue({ id: 'operator', name: 'Operator', role: 'member', features: { assessmentLifecycleRead: true, assessmentLifecycleUIDefault: true } })
     render(

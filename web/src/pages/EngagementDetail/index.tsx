@@ -56,6 +56,7 @@ import { ARCHIVED_REASON, isReadOnly } from './readOnly'
 
 import { AssessmentComparisonTab } from './AssessmentComparisonTab'
 import { AssessmentLifecyclePanel } from './AssessmentLifecyclePanel'
+import { VulnerabilityIntelligenceBadge } from '../../components/synapse/VulnerabilityIntelligenceBadge'
 
 // Lazy-loaded so React Flow stays out of the initial bundle (only the Graph tab needs it).
 const DependencyGraphTab = lazy(() => import('../DependencyGraph').then((m) => ({ default: m.DependencyGraphTab })))
@@ -269,7 +270,6 @@ export function EngagementDetail() {
   useEffect(() => {
     if (fetchedScan) {
       setScan(fetchedScan)
-      if (fetchedScan.scanMode === 'licenses') setFindings(fetchedScan.findings)
     }
   }, [fetchedScan])
 
@@ -387,6 +387,7 @@ export function EngagementDetail() {
     vulns: scan ? countVulnerabilityFindings(scan.vulnerabilities, packageLocationMap(scan.components)) : 0,
     licenses: scan?.licenses.length ?? 0,
   }
+  const viFindingCount = findings?.filter((finding) => Boolean(finding.advisoryId)).length ?? 0
 
   return (
     <div className="mx-auto max-w-[1600px] animate-fade-in space-y-5">
@@ -406,7 +407,10 @@ export function EngagementDetail() {
         </nav>
 
         {/* 3 action buttons moved up to be on the same horizontal row with breadcrumbs */}
-        <ExportButtons engagementId={eng.id} scan={scan} onChanged={refreshAll} />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {viFindingCount > 0 && <VulnerabilityIntelligenceBadge count={viFindingCount} />}
+          <ExportButtons engagementId={eng.id} scan={scan} onChanged={refreshAll} />
+        </div>
       </div>
 
       {/* Keep the Engagement identity first; lifecycle is supporting context below the scan console. */}
