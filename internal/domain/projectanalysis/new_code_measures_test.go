@@ -188,7 +188,7 @@ func TestChangedLineSetRefusesUntrustedRanges(t *testing.T) {
 			t.Fatalf("changed line 10 lies inside 1..MaxInt, want 100, got %g", v)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("newCodeDuplicationPercent expanded an occurrence range")
+		t.Fatal("NewCodeDuplicationPercent expanded an occurrence range")
 	}
 }
 

@@ -550,6 +550,13 @@ synapse-cli gate . --new-code-only --base origin/main
 synapse-cli gate . --new-code-only --base origin/main --coverage coverage.info
 ```
 
+With `--new-code-only` the gate also measures `new_coverage` (line coverage over the added lines the
+report knows about) and `new_duplication` (the share of added lines inside a duplicated block). Each is
+written only when it could be measured: a condition on `coverage`, `new_coverage`, or `new_duplication`
+with no measurement fails as `no data` rather than being judged against a 0 nobody computed — so a
+`new_duplication` condition without `--new-code-only`, or with a diff no report line matches, fails
+rather than silently passing.
+
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--new-code-only` | off | Score only lines changed against `--base` instead of the whole tree. |

@@ -796,8 +796,11 @@ func runGate(args []string) error {
 	// 5. Coverage (optional): overall line coverage, or coverage on new code when scoping to a diff.
 	coverageMeasured := false
 	var snapCoverage float64
+	var lc coverage.LineCoverage
 	if covPath != "" {
-		covRep, lc, cerr := coverage.Parse(covPath)
+		var covRep measure.CoverageReport
+		var cerr error
+		covRep, lc, cerr = coverage.Parse(covPath)
 		if cerr != nil {
 			return fmt.Errorf("coverage: %w", cerr)
 		}
@@ -820,6 +823,9 @@ func runGate(args []string) error {
 	snap := buildSnapshot(scoped, rep, dupRep.Density())
 	if coverageMeasured {
 		snap[qualitygate.MetricCoveragePct] = snapCoverage
+	}
+	if newCodeOnly && changed != nil {
+		applyNewCodeMetrics(snap, lc, &dupRep, changed)
 	}
 	gate, found, err := qualityprofile.LoadGate(gatePath)
 	if err != nil {
@@ -970,6 +976,23 @@ func sastLocation(file string, line int) *finding.SourceLocation {
 		return nil
 	}
 	return &finding.SourceLocation{File: file, StartLine: line, EndLine: line}
+}
+
+// applyNewCodeMetrics writes new_coverage and new_duplication when the run is scoped to a diff, each only
+// when it could be measured. The gate fails a condition on either as "no data" when the key is absent,
+// so writing a 0 here would be the silent pass that rule exists to prevent: no coverage report, or a diff
+// no report line matches, leaves new_coverage unset; new_duplication needs at least one changed line.
+// (In new-code mode `coverage` also carries the new-code percentage, as it always has; the new key is the
+// one a Clean-as-You-Code gate names.)
+func applyNewCodeMetrics(snap qualitygate.Snapshot, lc coverage.LineCoverage, dup *measure.DuplicationReport, changed gitdiff.ChangedLines) {
+	if lc != nil {
+		if pct, ok := lc.NewCodePercent(changed); ok {
+			snap[qualitygate.MetricNewCoverage] = pct
+		}
+	}
+	if pct, ok := measure.NewCodeDuplicationPercent(dup, changed); ok {
+		snap[qualitygate.MetricNewDuplication] = pct
+	}
 }
 
 // buildSnapshot turns the scoped findings + ratings + duplication into gate metrics.

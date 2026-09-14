@@ -399,58 +399,6 @@ func ChangedLineSet(changes []FileChange) map[string]map[int]bool {
 	return out
 }
 
-// newCodeDuplicationPercent is the duplicated-line density over only the changed lines: the share of
-// changed lines that sit inside any duplicated block occurrence. ok=false when there is no duplication
-// report or no changed line to measure, so the caller reports "no data" instead of 0. A report that ran
-// and found nothing is a measured 0.
-//
-// The denominator is every changed line, including blank and comment lines, because the duplication
-// walk reports occurrences as line ranges and does not expose its per-line code classification. That
-// under-reports density slightly relative to a code-lines-only denominator — the lenient direction for a
-// `<=` condition — and is stated here rather than hidden.
-//
-// Occurrence ranges are walked by testing each changed line against them, never by expanding the
-// occurrence: the report can arrive from the CI import, and an occurrence range is not something this
-// code should size a loop by.
-func newCodeDuplicationPercent(duplication *measure.DuplicationReport, changed map[string]map[int]bool) (pct float64, ok bool) {
-	if duplication == nil {
-		return 0, false
-	}
-	total := 0
-	for _, lines := range changed {
-		total += len(lines)
-	}
-	if total == 0 {
-		return 0, false
-	}
-	duplicated := map[string]map[int]bool{}
-	for _, block := range duplication.Blocks {
-		for _, occ := range block.Occurrences {
-			if occ.StartLine < 1 || occ.EndLine < occ.StartLine {
-				continue
-			}
-			path, err := measure.CanonicalPath(occ.File)
-			if err != nil {
-				continue
-			}
-			for ln := range changed[path] {
-				if ln < occ.StartLine || ln > occ.EndLine {
-					continue
-				}
-				if duplicated[path] == nil {
-					duplicated[path] = map[int]bool{}
-				}
-				duplicated[path][ln] = true
-			}
-		}
-	}
-	count := 0
-	for _, lines := range duplicated {
-		count += len(lines)
-	}
-	return 100 * float64(count) / float64(total), true
-}
-
 // derefDuplication keeps the persisted Analysis shape: a missing walk is stored as the zero report, as it
 // always was; only the measurement path distinguishes the two.
 func derefDuplication(d *measure.DuplicationReport) measure.DuplicationReport {
@@ -482,7 +430,7 @@ func buildMeasures(all, new Counts, overallRating rating.Report, duplication *me
 			metrics[qualitygate.MetricNewCoverage] = pct
 		}
 	}
-	if pct, ok := newCodeDuplicationPercent(duplication, changed); ok {
+	if pct, ok := measure.NewCodeDuplicationPercent(duplication, changed); ok {
 		metrics[qualitygate.MetricNewDuplication] = pct
 	}
 	metrics[qualitygate.MetricSecurityHotspotsReviewed] = hotspots.ReviewedPct
