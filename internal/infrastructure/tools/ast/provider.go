@@ -326,6 +326,7 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 	}
 	stdout := boundedOutput{limit: maxASTOutputBytes}
 	stderr := boundedOutput{limit: maxASTOutputBytes}
+	// #nosec G702 -- p.bin is process-local configuration; args are constructed from validated paths.
 	ec := exec.CommandContext(ctx, p.bin, args...)
 	ec.Stdout = &stdout
 	ec.Stderr = &stderr
