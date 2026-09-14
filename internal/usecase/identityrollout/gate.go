@@ -40,6 +40,19 @@ type GateSnapshot struct {
 	CorruptCredentialCount   int
 	DuplicateCredentialCount int
 	BootstrapMembershipCount int
+
+	// D5 credential-projection evidence is distinct from D4 person/membership cardinality. A
+	// placeholder is a valid classified legacy row, while ambiguous/missing/drifted rows are not
+	// safe for authoritative-read cutover.
+	CredentialProjectionComplete bool
+	CredentialProjectedCount     int
+	IssuedCredentialCount        int
+	PlaceholderCredentialCount   int
+	AmbiguousCredentialCount     int
+	MissingCredentialCount       int
+	CredentialDriftCount         int
+	CredentialIndexDriftCount    int
+
 	DenialCount              int
 	ErrorCount               int
 	SessionCount             int
@@ -106,6 +119,12 @@ func Evaluate(phase Phase, snapshot GateSnapshot) (GateDecision, error) {
 	if snapshot.ProjectedCount > snapshot.SourceCount {
 		block("projection_count_invalid", "projected identity count cannot exceed legacy source count")
 	}
+	if snapshot.CredentialProjectedCount > snapshot.SourceCount {
+		block("credential_projection_count_invalid", "credential projection count cannot exceed legacy source count")
+	}
+	if snapshot.IssuedCredentialCount+snapshot.PlaceholderCredentialCount+snapshot.AmbiguousCredentialCount != snapshot.CredentialProjectedCount {
+		block("credential_classification_count_invalid", "issued, placeholder, and ambiguous credential counts must exactly partition projected credentials")
+	}
 	if snapshot.ErrorCount > snapshot.SessionCount && snapshot.SessionCount > 0 {
 		block("error_count_invalid", "observed identity errors cannot exceed the measured request/session sample")
 	}
@@ -153,6 +172,7 @@ func Evaluate(phase Phase, snapshot GateSnapshot) (GateDecision, error) {
 		if !snapshot.LegacyWritesEnabled {
 			block("legacy_writer_disabled_early", "legacy writes remain enabled before mutation cutover")
 		}
+		requireCredentialCutoverReady(snapshot, block)
 		requireCanaryEvidence(snapshot, block)
 	case PhaseCanaryIdentityMutations:
 		if !snapshot.AuthoritativeReads || !snapshot.IdentityMutations {
@@ -161,6 +181,7 @@ func Evaluate(phase Phase, snapshot GateSnapshot) (GateDecision, error) {
 		if snapshot.SourceOfTruth != "enterprise_identity" {
 			block("mutation_source_invalid", "identity mutation canary must explicitly declare enterprise identity authority")
 		}
+		requireCredentialCutoverReady(snapshot, block)
 		requireCanaryEvidence(snapshot, block)
 	case PhasePointOfNoReturn:
 		if snapshot.SourceOfTruth != "enterprise_identity" || !snapshot.AuthoritativeReads || !snapshot.IdentityMutations || snapshot.LegacyWritesEnabled {
@@ -169,6 +190,7 @@ func Evaluate(phase Phase, snapshot GateSnapshot) (GateDecision, error) {
 		if !snapshot.RollbackDrillPassed || !snapshot.PairedBackupApproved {
 			block("recovery_evidence_missing", "point of no return requires rollback rehearsal and approved paired backup")
 		}
+		requireCredentialCutoverReady(snapshot, block)
 		requireCanaryEvidence(snapshot, block)
 	case PhaseContract:
 		if snapshot.SourceOfTruth != "enterprise_identity" || !snapshot.AuthoritativeReads || !snapshot.IdentityMutations || snapshot.LegacyWritesEnabled {
@@ -177,6 +199,7 @@ func Evaluate(phase Phase, snapshot GateSnapshot) (GateDecision, error) {
 		if !snapshot.RollbackDrillPassed || !snapshot.PairedBackupApproved {
 			block("contract_recovery_evidence_missing", "contract requires retained recovery evidence")
 		}
+		requireCredentialCutoverReady(snapshot, block)
 		requireCanaryEvidence(snapshot, block)
 	}
 
@@ -198,6 +221,24 @@ func requireLegacyAuthority(snapshot GateSnapshot, block func(string, string)) {
 	}
 }
 
+func requireCredentialCutoverReady(snapshot GateSnapshot, block func(string, string)) {
+	if !snapshot.CredentialProjectionComplete {
+		block("credential_projection_incomplete", "authoritative reads require a completed legacy credential classification/projection pass")
+	}
+	if snapshot.CredentialProjectedCount != snapshot.SourceCount || snapshot.MissingCredentialCount != 0 {
+		block("credential_projection_missing", "every non-bootstrap legacy human must have exactly one classified credential projection")
+	}
+	if snapshot.AmbiguousCredentialCount != 0 {
+		block("credential_classification_ambiguous", "ambiguous legacy credentials must be rotated or explicitly resolved before authoritative reads")
+	}
+	if snapshot.CredentialDriftCount != 0 {
+		block("credential_projection_drift", "legacy credential projection must match the authoritative users source before cutover")
+	}
+	if snapshot.CredentialIndexDriftCount != 0 {
+		block("credential_index_drift", "legacy credential exact-hash locators must reconcile before cutover")
+	}
+}
+
 func requireCanaryEvidence(snapshot GateSnapshot, block func(string, string)) {
 	if !snapshot.BackfillCompleted || !snapshot.ShadowComparisonComplete || snapshot.DriftCount != 0 || snapshot.SourceCount != snapshot.ProjectedCount {
 		block("canary_projection_not_clean", "canary requires completed backfill and shadow comparison with zero drift")
@@ -208,7 +249,12 @@ func requireCanaryEvidence(snapshot GateSnapshot, block func(string, string)) {
 }
 
 func invalidGateCounts(snapshot GateSnapshot) bool {
-	values := []int{snapshot.SourceCount, snapshot.ProjectedCount, snapshot.DriftCount, snapshot.CorruptCredentialCount, snapshot.DuplicateCredentialCount, snapshot.BootstrapMembershipCount, snapshot.DenialCount, snapshot.ErrorCount, snapshot.SessionCount, snapshot.ObservationMinutes, snapshot.AbortThresholdBPS}
+	values := []int{
+		snapshot.SourceCount, snapshot.ProjectedCount, snapshot.DriftCount, snapshot.CorruptCredentialCount, snapshot.DuplicateCredentialCount, snapshot.BootstrapMembershipCount,
+		snapshot.CredentialProjectedCount, snapshot.IssuedCredentialCount, snapshot.PlaceholderCredentialCount, snapshot.AmbiguousCredentialCount,
+		snapshot.MissingCredentialCount, snapshot.CredentialDriftCount, snapshot.CredentialIndexDriftCount,
+		snapshot.DenialCount, snapshot.ErrorCount, snapshot.SessionCount, snapshot.ObservationMinutes, snapshot.AbortThresholdBPS,
+	}
 	for _, value := range values {
 		if value < 0 {
 			return true
