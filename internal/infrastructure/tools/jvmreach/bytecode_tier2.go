@@ -478,7 +478,7 @@ func storedReferenceSource(ins []instruction, storeIdx int, cp parsedCP) (class 
 	if local, ok := aloadLocal(cur); ok {
 		return "", local, true
 	}
-	if storeIdx >= 3 {
+	if storeIdx >= 3 && storeIdx <= len(ins) {
 		window := ins[storeIdx-3 : storeIdx]
 		if window[0].op == 0xbb && window[1].op == 0x59 && window[2].op == 0xb7 {
 			allocated := cp.className(window[0].cpIndex)
