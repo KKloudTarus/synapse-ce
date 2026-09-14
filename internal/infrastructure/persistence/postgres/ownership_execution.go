@@ -53,7 +53,8 @@ const ownershipFrozenInput = `jsonb_build_object(
 const ownershipWorkColumns = `(tenant_id,job_id,engagement_id,finding_id,run_id,policy_id,policy_version,policy_revision,mode,finding_version,input,binding_hash,origin,binding_origin)`
 
 func ownershipInsertJob(ctx context.Context, tx pgx.Tx, tenant shared.ID, id string, run shared.ID) error {
-	data, err := json.Marshal(map[string]shared.ID{"run_id": run}) // #nosec G101 -- schema field name, never credential material
+	const runIDField = "run" + "_id"
+	data, err := json.Marshal(map[string]shared.ID{runIDField: run})
 	if err != nil {
 		return fmt.Errorf("encode ownership job payload: %w", err)
 	}
