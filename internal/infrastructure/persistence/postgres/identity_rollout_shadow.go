@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -47,10 +48,14 @@ func (repository *IdentityRolloutRepository) ImportLegacyOIDCShadow(ctx context.
 	}
 
 	err = WithTenant(ctx, repository.pool, config.TenantID.String(), func(tx pgx.Tx) error {
-		now := time.Now().UTC()
+		var now time.Time
+		if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
+			return fmt.Errorf("read identity shadow database time: %w", err)
+		}
+		now = now.UTC()
 		var existingProtocol, existingTrust string
 		var enabled bool
-		var activeRevision *int64
+		var activeRevision pgtype.Int8
 		lookupErr := tx.QueryRow(ctx, `SELECT protocol,trust_identifier,enabled,active_revision FROM sso_connections WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, config.TenantID.String(), connectionID.String()).Scan(&existingProtocol, &existingTrust, &enabled, &activeRevision)
 		switch {
 		case errors.Is(lookupErr, pgx.ErrNoRows):
@@ -61,12 +66,12 @@ func (repository *IdentityRolloutRepository) ImportLegacyOIDCShadow(ctx context.
 		case lookupErr != nil:
 			return fmt.Errorf("read legacy OIDC shadow connection: %w", lookupErr)
 		default:
-			if existingProtocol != "oidc" || existingTrust != trustIdentifier || enabled || activeRevision != nil {
+			if existingProtocol != "oidc" || existingTrust != trustIdentifier || enabled || activeRevision.Valid {
 				return fmt.Errorf("%w: existing OIDC shadow connection differs from fixed legacy trust tuple", shared.ErrConflict)
 			}
 		}
 
-		var revisionConfig []byte
+		var revisionConfig string
 		revisionErr := tx.QueryRow(ctx, `SELECT configuration::text FROM sso_connection_revisions WHERE tenant_id=$1 AND connection_id=$2 AND revision=1`, config.TenantID.String(), connectionID.String()).Scan(&revisionConfig)
 		switch {
 		case errors.Is(revisionErr, pgx.ErrNoRows):
@@ -80,7 +85,7 @@ func (repository *IdentityRolloutRepository) ImportLegacyOIDCShadow(ctx context.
 			return fmt.Errorf("read legacy OIDC shadow revision: %w", revisionErr)
 		default:
 			var existing map[string]string
-			if err := json.Unmarshal(revisionConfig, &existing); err != nil {
+			if err := json.Unmarshal([]byte(revisionConfig), &existing); err != nil {
 				return fmt.Errorf("decode existing OIDC shadow revision: %w", err)
 			}
 			if existing["issuer"] != config.Issuer || existing["client_id"] != config.ClientID || existing["redirect_url"] != config.RedirectURL || existing["source"] != "legacy_fixed_oidc_shadow" {
