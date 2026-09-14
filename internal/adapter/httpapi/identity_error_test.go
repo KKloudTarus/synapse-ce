@@ -35,6 +35,7 @@ func TestIdentityErrorContract(t *testing.T) {
 		retryable bool
 	}{
 		{name: "invalid credential", err: identitydom.ErrAuthenticationInvalid, wantCode: IdentityErrorAuthenticationInvalid, wantHTTP: http.StatusUnauthorized},
+		{name: "unknown bearer credential", err: shared.ErrNotFound, wantCode: IdentityErrorAuthenticationInvalid, wantHTTP: http.StatusUnauthorized},
 		{name: "access denied", err: identitydom.ErrAccessDenied, wantCode: IdentityErrorAccessDenied, wantHTTP: http.StatusForbidden},
 		{name: "legacy forbidden", err: shared.ErrForbidden, wantCode: IdentityErrorAccessDenied, wantHTTP: http.StatusForbidden},
 		{name: "conflict", err: shared.ErrConflict, wantCode: IdentityErrorConflict, wantHTTP: http.StatusConflict},
