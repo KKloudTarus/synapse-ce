@@ -21,6 +21,34 @@ func (f FileCoverage) Percent() float64 {
 // never inferred as uncovered.
 type LineCoverage map[string]map[int]bool
 
+// NewCodePercent is the line-coverage percentage over only the changed lines (file -> set of line
+// numbers), i.e. coverage on new code. A changed line the report does not know about is not counted:
+// coverage tools only report executable lines, so a changed comment or blank line is neither covered
+// nor uncovered. ok=false when no changed line is measurable, so a caller reports "no data" rather than
+// a misleading 0 or 100.
+func (lc LineCoverage) NewCodePercent(changed map[string]map[int]bool) (pct float64, ok bool) {
+	total, covered := 0, 0
+	for file, lines := range lc {
+		ch := changed[file]
+		if ch == nil {
+			continue
+		}
+		for ln, cov := range lines {
+			if !ch[ln] {
+				continue
+			}
+			total++
+			if cov {
+				covered++
+			}
+		}
+	}
+	if total == 0 {
+		return 0, false
+	}
+	return 100 * float64(covered) / float64(total), true
+}
+
 // CoverageReport is the whole-tree line coverage parsed from a report file (lcov / cobertura / jacoco).
 type CoverageReport struct {
 	Files        []FileCoverage `json:"files"`

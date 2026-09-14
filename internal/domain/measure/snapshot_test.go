@@ -193,9 +193,9 @@ func TestBuildSnapshot(t *testing.T) {
 		t.Fatalf("src blocks = %d", src.Counters.DuplicationBlocks)
 	}
 
-	// 17. new-code coverage unavailable
-	if snap.NewCodeCoverage.Availability != AvailabilityUnavailable {
-		t.Fatalf("new code coverage should be unavailable")
+	// 17. new-code coverage: this input carries no changed lines, so it is unavailable — and says why.
+	if snap.NewCodeCoverage.Availability != AvailabilityUnavailable || snap.NewCodeCoverage.Reason != NewCodeCoverageNoChangedLines {
+		t.Fatalf("new code coverage without a diff must be unavailable with reason %q, got %+v", NewCodeCoverageNoChangedLines, snap.NewCodeCoverage)
 	}
 
 	// 6. percentage derivation
@@ -388,5 +388,46 @@ func TestSnapshotAttributionUnavailable(t *testing.T) {
 	}
 	if root.Counters.RemediationEffortMinutes != 15 {
 		t.Fatalf("expected 15 minutes of remediation effort, got %d", root.Counters.RemediationEffortMinutes)
+	}
+}
+
+// TestSnapshotNewCodeCoverage pins the measured value and each of the three distinct unavailability
+// reasons, so an operator can tell a missing report from a missing diff from a diff the report never
+// mentions — three different things to fix.
+func TestSnapshotNewCodeCoverage(t *testing.T) {
+	catalog := &mockResolver{m: map[rule.Key]rule.Rule{}}
+	inventory := NewInventory(nil, FileInventory{Path: "src/a.go", Language: "Go", CodeLines: 30, FunctionsKnown: true})
+	report := &CoverageReport{
+		Files: []FileCoverage{{File: "src/a.go", CoveredLines: 2, TotalLines: 3}}, CoveredLines: 2, TotalLines: 3,
+		Lines: LineCoverage{"src/a.go": {10: true, 11: true, 12: false}},
+	}
+	changed := map[string]map[int]bool{"src/a.go": {11: true, 12: true}}
+
+	snap, err := BuildSnapshot(BuildSnapshotInput{RuleCatalog: catalog, Inventory: inventory, Coverage: report, ChangedLines: changed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.NewCodeCoverage.Availability != AvailabilityAvailable || snap.NewCodeCoverage.Value == nil || *snap.NewCodeCoverage.Value != 50 {
+		t.Fatalf("new code coverage = %+v, want available 50%% (1 of the 2 changed lines covered)", snap.NewCodeCoverage)
+	}
+
+	for name, tc := range map[string]struct {
+		coverage *CoverageReport
+		changed  map[string]map[int]bool
+		reason   string
+	}{
+		"no report":             {nil, changed, NewCodeCoverageNoReport},
+		"no changed lines":      {report, nil, NewCodeCoverageNoChangedLines},
+		"changed lines unknown": {report, map[string]map[int]bool{"src/a.go": {99: true}}, NewCodeCoverageNotInReport},
+	} {
+		t.Run(name, func(t *testing.T) {
+			snap, err := BuildSnapshot(BuildSnapshotInput{RuleCatalog: catalog, Inventory: inventory, Coverage: tc.coverage, ChangedLines: tc.changed})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snap.NewCodeCoverage.Availability != AvailabilityUnavailable || snap.NewCodeCoverage.Value != nil || snap.NewCodeCoverage.Reason != tc.reason {
+				t.Fatalf("got %+v, want unavailable with reason %q", snap.NewCodeCoverage, tc.reason)
+			}
+		})
 	}
 }

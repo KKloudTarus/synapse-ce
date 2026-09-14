@@ -848,7 +848,7 @@ func runGate(args []string) error {
 			if !cr.Passed {
 				mark = "FAIL"
 			}
-			fmt.Printf("  [%s] %s (actual %g)\n", mark, cr.Condition, cr.Actual)
+			fmt.Printf("  [%s] %s (%s)\n", mark, cr.Condition, conditionActual(cr))
 		}
 	}
 	if !result.Passed {
@@ -924,8 +924,17 @@ func printGateMarkdown(dir, scope string, rep rating.Report, dupDensity float64,
 		if !cr.Passed {
 			mark = "❌"
 		}
-		fmt.Printf("| `%s` | %g | %s |\n", cr.Condition, cr.Actual, mark)
+		fmt.Printf("| `%s` | %s | %s |\n", cr.Condition, conditionActual(cr), mark)
 	}
+}
+
+// conditionActual renders what a condition was compared against. An unmeasured condition has no value:
+// printing "actual 0" there would read as a measurement of zero, which is the misreading the gate refuses.
+func conditionActual(cr qualitygate.ConditionResult) string {
+	if cr.Unmeasured {
+		return "no data"
+	}
+	return fmt.Sprintf("actual %g", cr.Actual)
 }
 
 // filterNewCode keeps only line-anchored findings that sit on a changed line.

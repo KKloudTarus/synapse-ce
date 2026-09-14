@@ -128,6 +128,16 @@ Available metrics include `new_critical`, `new_high`, `new_medium`, `new_issues`
 Conditions on `new_*` metrics implement Clean as You Code: a legacy codebase can adopt a strict gate for
 changed lines without first repaying all existing debt.
 
+`coverage`, `new_coverage`, and `new_duplication` are measurements rather than counters, and an analysis
+may have nothing to measure: no coverage report was supplied, the analysis had no diff, or the diff touched
+no line the report knows about. A condition on one of these then fails closed and is reported as
+**unmeasured** (`"unmeasured": true` in the API, `no data` in the CLI) rather than being judged against a
+0 nobody computed — a `new_duplication <= 3` condition does not pass on the strength of a missing
+measurement. `new_coverage` is line coverage over the lines the diff added; `new_duplication` is the share
+of those lines that sit inside a duplicated block. The measures snapshot's `new_code_coverage` carries the
+specific reason when it is unavailable: `no_coverage_report`, `no_changed_lines`, or
+`changed_lines_not_in_report`.
+
 ## Quality profiles
 
 A profile decides which rules are active for a language and at what severity:

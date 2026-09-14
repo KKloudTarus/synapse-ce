@@ -750,12 +750,13 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 	}
 
 	snapshot, err := measure.BuildSnapshot(measure.BuildSnapshotInput{
-		Inventory:   inventory,
-		Complexity:  compPtr,
-		Coverage:    result.LineCoverage,
-		Duplication: dupPtr,
-		Issues:      issueInputs,
-		RuleCatalog: resolver,
+		Inventory:    inventory,
+		Complexity:   compPtr,
+		Coverage:     result.LineCoverage,
+		Duplication:  dupPtr,
+		Issues:       issueInputs,
+		RuleCatalog:  resolver,
+		ChangedLines: projectanalysis.ChangedLineSet(result.FileChanges),
 	})
 	if err != nil {
 		return fmt.Errorf("build measure snapshot: %w", err)

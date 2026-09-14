@@ -229,7 +229,7 @@ func Build(in Input) (Analysis, error) {
 	overallRating := rating.Compute(normalized, in.LinesOfCode)
 	newRating := rating.Compute(newFindings, 0)
 	gateOverallRating := rating.Compute(gateFindings, in.LinesOfCode)
-	measures := buildMeasures(countIssues(gateIssues), countIssues(gateNewIssues), gateOverallRating, in.Duplication, in.Coverage, in.Hotspots, in.NewHotspots)
+	measures := buildMeasures(countIssues(gateIssues), countIssues(gateNewIssues), gateOverallRating, in.Duplication, in.Coverage, in.Hotspots, in.NewHotspots, ChangedLineSet(in.FileChanges))
 	gateDef := in.Gate
 	gateSource := in.GateSource
 	if len(gateDef.Conditions) == 0 {
@@ -348,7 +348,86 @@ func countIssues(issues []Issue) Counts {
 	return counts
 }
 
-func buildMeasures(all, new Counts, overallRating rating.Report, duplication measure.DuplicationReport, coverage *measure.CoverageReport, hotspots, newHotspots hotspot.Summary) qualitygate.Snapshot {
+// ChangedLineSet is the new-side changed lines of an analysis as file -> set of line numbers, the shape
+// the new-code measurements consume. Only Added ranges count (Modified mirrors them; Removed lines no
+// longer exist), a deleted or binary change contributes nothing, and paths are canonicalised so the set
+// shares a key space with coverage and duplication data, which are canonicalised the same way.
+func ChangedLineSet(changes []FileChange) map[string]map[int]bool {
+	out := map[string]map[int]bool{}
+	for _, c := range changes {
+		if c.Binary || c.Status == FileStatusDeleted || len(c.Added) == 0 {
+			continue
+		}
+		path, err := measure.CanonicalPath(c.NewPath)
+		if err != nil {
+			continue
+		}
+		lines := out[path]
+		if lines == nil {
+			lines = map[int]bool{}
+			out[path] = lines
+		}
+		for _, r := range c.Added {
+			for ln := r.Start; ln <= r.End; ln++ {
+				if ln >= 1 {
+					lines[ln] = true
+				}
+			}
+		}
+	}
+	return out
+}
+
+// newCodeDuplicationPercent is the duplicated-line density over only the changed lines: the share of
+// changed lines that sit inside any duplicated block occurrence. ok=false when there is no changed line
+// to measure, so the caller reports "no data" instead of 0.
+//
+// The denominator is every changed line, including blank and comment lines, because the duplication
+// walk reports occurrences as line ranges and does not expose its per-line code classification. That
+// under-reports density slightly relative to a code-lines-only denominator — the lenient direction for a
+// `<=` condition — and is stated here rather than hidden.
+func newCodeDuplicationPercent(duplication measure.DuplicationReport, changed map[string]map[int]bool) (pct float64, ok bool) {
+	total := 0
+	for _, lines := range changed {
+		total += len(lines)
+	}
+	if total == 0 {
+		return 0, false
+	}
+	duplicated := map[string]map[int]bool{}
+	for _, block := range duplication.Blocks {
+		for _, occ := range block.Occurrences {
+			path, err := measure.CanonicalPath(occ.File)
+			if err != nil {
+				continue
+			}
+			lines := changed[path]
+			if lines == nil {
+				continue
+			}
+			for ln := occ.StartLine; ln <= occ.EndLine; ln++ {
+				if !lines[ln] {
+					continue
+				}
+				if duplicated[path] == nil {
+					duplicated[path] = map[int]bool{}
+				}
+				duplicated[path][ln] = true
+			}
+		}
+	}
+	count := 0
+	for _, lines := range duplicated {
+		count += len(lines)
+	}
+	return 100 * float64(count) / float64(total), true
+}
+
+// buildMeasures is the gate snapshot. A metric present in the snapshot was measured; one that could not
+// be measured is left absent, never written as 0 — coverage has always followed that rule, and the two
+// new-code measurements follow it too, so a gate condition on them fails closed with "no data" rather
+// than passing on a value nobody computed.
+func buildMeasures(all, new Counts, overallRating rating.Report, duplication measure.DuplicationReport, coverage *measure.CoverageReport, hotspots, newHotspots hotspot.Summary, changed map[string]map[int]bool) qualitygate.Snapshot {
 	metrics := qualitygate.Snapshot{
 		qualitygate.MetricNewIssues:       float64(new.Total),
 		qualitygate.MetricNewCritical:     float64(new.BySeverity[string(shared.SeverityCritical)]),
@@ -362,6 +441,12 @@ func buildMeasures(all, new Counts, overallRating rating.Report, duplication mea
 	}
 	if coverage != nil {
 		metrics[qualitygate.MetricCoveragePct] = coverage.Percent()
+		if pct, ok := coverage.Lines.NewCodePercent(changed); ok {
+			metrics[qualitygate.MetricNewCoverage] = pct
+		}
+	}
+	if pct, ok := newCodeDuplicationPercent(duplication, changed); ok {
+		metrics[qualitygate.MetricNewDuplication] = pct
 	}
 	metrics[qualitygate.MetricSecurityHotspotsReviewed] = hotspots.ReviewedPct
 	metrics[qualitygate.MetricNewSecurityHotspotsReviewed] = newHotspots.ReviewedPct

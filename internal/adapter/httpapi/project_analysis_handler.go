@@ -20,6 +20,9 @@ type projectGateConditionResponse struct {
 	Threshold float64 `json:"threshold"`
 	Actual    float64 `json:"actual"`
 	Passed    bool    `json:"passed"`
+	// Unmeasured is true when the metric had no measurement for this analysis; Actual is then 0 only
+	// because there is nothing to report, and the condition failed for lack of data, not on a value.
+	Unmeasured bool `json:"unmeasured,omitempty"`
 }
 
 type projectGateResponse struct {
@@ -50,7 +53,7 @@ type projectAnalysisResponse struct {
 func projectAnalysisDTO(analysis projectanalysis.Analysis) projectAnalysisResponse {
 	gate := projectGateResponse{Passed: analysis.Gate.Passed, Results: make([]projectGateConditionResponse, len(analysis.Gate.Results))}
 	for i, result := range analysis.Gate.Results {
-		gate.Results[i] = projectGateConditionResponse{Metric: result.Condition.Metric, Op: string(result.Condition.Op), Threshold: result.Condition.Threshold, Actual: result.Actual, Passed: result.Passed}
+		gate.Results[i] = projectGateConditionResponse{Metric: result.Condition.Metric, Op: string(result.Condition.Op), Threshold: result.Condition.Threshold, Actual: result.Actual, Passed: result.Passed, Unmeasured: result.Unmeasured}
 	}
 	origin := analysis.Origin
 	if !origin.Valid() {
