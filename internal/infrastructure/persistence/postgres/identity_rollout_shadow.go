@@ -97,13 +97,25 @@ func (repository *IdentityRolloutRepository) ImportLegacyOIDCShadow(ctx context.
 		if err != nil {
 			return fmt.Errorf("list legacy OIDC approved links: %w", err)
 		}
-		defer rows.Close()
+		type legacyOIDCLink struct {
+			userID  shared.ID
+			subject string
+		}
+		links := make([]legacyOIDCLink, 0)
 		for rows.Next() {
 			var userID shared.ID
 			var subject string
 			if err := rows.Scan(&userID, &subject); err != nil {
 				return fmt.Errorf("scan legacy OIDC approved link: %w", err)
 			}
+			links = append(links, legacyOIDCLink{userID: userID, subject: subject})
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate legacy OIDC approved links: %w", err)
+		}
+		rows.Close()
+		for _, link := range links {
+			userID, subject := link.userID, link.subject
 			if userID.String() == "operator" {
 				result.DriftedLinks++
 				continue
@@ -139,9 +151,6 @@ func (repository *IdentityRolloutRepository) ImportLegacyOIDCShadow(ctx context.
 				// surface drift for the offline gate/operator instead of stealing the subject.
 				result.DriftedLinks++
 			}
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate legacy OIDC approved links: %w", err)
 		}
 		result.ConnectionID = connectionID
 		result.Revision = 1
