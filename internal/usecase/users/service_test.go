@@ -295,6 +295,41 @@ func TestDisableRejectsTheUsersKeyAndEnableRestoresIt(t *testing.T) {
 	}
 }
 
+// TestUpdateAuditFailureRollsBackD5Mutation ensures a role change cannot commit without its
+// mandatory audit record once the D5 projection path is enabled. The in-memory transaction runner
+// mirrors the PostgreSQL atomic boundary and the user repository restores its prior aggregate on
+// rollback.
+func TestUpdateAuditFailureRollsBackD5Mutation(t *testing.T) {
+	audit := &recordingAudit{}
+	repo := memory.NewUserRepository()
+	svc, err := NewService(repo, audit, fixedClock{}, &seqIDs{})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	ctx := context.Background()
+	_, _, admin := seedAdmin(t, svc, "acme", "Admin")
+	target, _, err := svc.CreateUser(ctx, admin, "", "Alice", user.RoleMember)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	svc.transactions = memory.NewTenantTransactionRunner()
+	svc.legacyCredentials = noopLegacyCredentialProjection{}
+	auditErr := errors.New("audit backend unavailable")
+	svc.audit = failingAudit{err: auditErr}
+
+	if updated, err := svc.Update(ctx, admin, target.ID, "Alice Admin", user.RoleReviewer); updated != nil || !errors.Is(err, auditErr) {
+		t.Fatalf("update = %+v, err=%v; want audit failure and no result", updated, err)
+	}
+	stored, err := repo.GetByID(ctx, shared.ID("acme"), target.ID)
+	if err != nil {
+		t.Fatalf("reload after rollback: %v", err)
+	}
+	if stored.Name != "Alice" || stored.Role != user.RoleMember {
+		t.Fatalf("failed D5 update committed: %+v", stored)
+	}
+}
+
 func TestUpdateChangesNameAndRole(t *testing.T) {
 	svc, audit := newAuditedSvc(t)
 	ctx := context.Background()
