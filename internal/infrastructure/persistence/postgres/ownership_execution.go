@@ -53,8 +53,11 @@ const ownershipFrozenInput = `jsonb_build_object(
 const ownershipWorkColumns = `(tenant_id,job_id,engagement_id,finding_id,run_id,policy_id,policy_version,policy_revision,mode,finding_version,input,binding_hash,origin,binding_origin)`
 
 func ownershipInsertJob(ctx context.Context, tx pgx.Tx, tenant shared.ID, id string, run shared.ID) error {
-	data, _ := json.Marshal(map[string]shared.ID{"run_id": run})
-	_, err := tx.Exec(ctx, `INSERT INTO jobs(id,tenant_id,kind,payload,status,available_at) VALUES($1,$2,'ownership.route',$3,'queued',now())`, id, tenant, data)
+	data, err := json.Marshal(map[string]shared.ID{"run_id": run})
+	if err != nil {
+		return fmt.Errorf("encode ownership job payload: %w", err)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO jobs(id,tenant_id,kind,payload,status,available_at) VALUES($1,$2,'ownership.route',$3,'queued',now())`, id, tenant, data)
 	return err
 }
 
