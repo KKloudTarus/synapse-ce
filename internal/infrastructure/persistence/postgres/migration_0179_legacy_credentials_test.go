@@ -3,13 +3,13 @@ package postgres
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/identityrollout"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
@@ -254,23 +254,7 @@ func TestD5BootstrapNeverProjectsAsOrdinaryCredential(t *testing.T) {
 	}
 }
 
-func projectD4Tenant(t *testing.T, pool interface {
-	Close()
-}, tenantID shared.ID, now time.Time) {
-	t.Helper()
-	// ownershipTestDatabase returns *pgxpool.Pool. Keep the helper's public shape simple at callers,
-	// then assert the concrete capability here so accidental fixture drift fails loudly.
-	pgPool, ok := pool.(interface {
-		QueryRow(context.Context, string, ...any) interface{ Scan(...any) error }
-	})
-	_ = pgPool
-	_ = ok
-	// The concrete repository constructor gives compile-time validation of the actual pool type at
-	// every call site below; this helper is replaced by projectD4TenantPool in the typed wrapper.
-	panic("projectD4Tenant must be called through typed wrapper")
-}
-
-func projectD4TenantPool(t *testing.T, pool *pgxpool.Pool, tenantID shared.ID, now time.Time) {
+func projectD4Tenant(t *testing.T, pool *pgxpool.Pool, tenantID shared.ID, now time.Time) {
 	t.Helper()
 	repository, err := NewIdentityRolloutRepository(pool)
 	if err != nil {
@@ -286,6 +270,3 @@ func projectD4TenantPool(t *testing.T, pool *pgxpool.Pool, tenantID shared.ID, n
 		t.Fatalf("D4 prerequisite backfill: %v", err)
 	}
 }
-
-var _ = fmt.Sprintf
-var _ = user.RoleMember
