@@ -111,6 +111,16 @@ func mark(lc LineCoverage, file string, line int, covered bool) {
 // goCoverModePrefix opens every Go -coverprofile: "mode: set", "mode: count" or "mode: atomic".
 const goCoverModePrefix = "mode: "
 
+// maxGoCoverBlockLines bounds how many lines one coverprofile block may span, and maxGoCoverLines how
+// many a whole profile may expand to. A block is a basic block of one function; a span in the hundreds
+// of thousands of lines is not a real block, it is a line asking the parser to size a loop by a number
+// the file chose. The report is operator-supplied on the CLI and uploaded on the server, so both are
+// refused rather than honoured.
+const (
+	maxGoCoverBlockLines = 1 << 16
+	maxGoCoverLines      = 1 << 22
+)
+
 // parseGoCoverProfile parses the profile `go test -coverprofile` writes. After the mode header, each line
 // is one block: `file:startLine.startCol,endLine.endCol numStmts count`, where file is an import path.
 // Every line the block spans is marked covered when count > 0; a line spanned by several blocks is
@@ -123,6 +133,7 @@ const goCoverModePrefix = "mode: "
 // coverage from the lines that did parse would present a partial profile as a whole one.
 func parseGoCoverProfile(data []byte, modulePath string) (LineCoverage, error) {
 	lc := LineCoverage{}
+	expanded := 0
 	prefix := ""
 	if modulePath = strings.TrimSpace(modulePath); modulePath != "" {
 		prefix = strings.TrimSuffix(modulePath, "/") + "/"
@@ -154,8 +165,8 @@ func parseGoCoverProfile(data []byte, modulePath string) (LineCoverage, error) {
 		if err != nil {
 			return nil, fmt.Errorf("go coverprofile line %d: %w", i+1, err)
 		}
-		if _, err := strconv.Atoi(fields[1]); err != nil {
-			return nil, fmt.Errorf("go coverprofile line %d: statement count %q is not a number", i+1, fields[1])
+		if stmts, err := strconv.Atoi(fields[1]); err != nil || stmts < 0 {
+			return nil, fmt.Errorf("go coverprofile line %d: statement count %q is not a non-negative number", i+1, fields[1])
 		}
 		count, err := strconv.Atoi(fields[2])
 		if err != nil || count < 0 {
@@ -164,8 +175,20 @@ func parseGoCoverProfile(data []byte, modulePath string) (LineCoverage, error) {
 		if prefix != "" {
 			file = strings.TrimPrefix(file, prefix)
 		}
-		for ln := start; ln <= end; ln++ {
+		// goCoverSpan guarantees 1 <= start <= end, so the arithmetic cannot overflow.
+		blockLines := end - start + 1
+		if blockLines > maxGoCoverBlockLines {
+			return nil, fmt.Errorf("go coverprofile line %d: block spans %d lines, more than the %d one block may", i+1, blockLines, maxGoCoverBlockLines)
+		}
+		if expanded += blockLines; expanded > maxGoCoverLines {
+			return nil, fmt.Errorf("go coverprofile: profile expands to more than %d lines", maxGoCoverLines)
+		}
+		// Stop on end before incrementing: `ln <= end` never terminates when end is the maximum int.
+		for ln := start; ; ln++ {
 			mark(lc, file, ln, count > 0)
+			if ln == end {
+				break
+			}
 		}
 	}
 	return lc, nil

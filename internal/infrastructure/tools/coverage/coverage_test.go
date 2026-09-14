@@ -1,7 +1,9 @@
 package coverage
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -165,6 +167,13 @@ func TestParseGoCoverProfileFailsClosed(t *testing.T) {
 		"line zero":             "mode: set\nm/a.go:0.1,2.2 1 1\n",
 		"hit count not number":  "mode: set\nm/a.go:1.1,2.2 1 x\n",
 		"negative hit count":    "mode: set\nm/a.go:1.1,2.2 1 -1\n",
+		"negative statements":   "mode: set\nm/a.go:1.1,2.2 -1 1\n",
+		// A block spanning more lines than any real basic block is a line asking the parser to size a
+		// loop by a number the file chose; refused, not honoured. The last one would loop forever with a
+		// `ln <= end` expansion even if it were within the bound.
+		"block over the bound":    fmt.Sprintf("mode: set\nm/a.go:1.1,%d.1 1 1\n", maxGoCoverBlockLines+1),
+		"profile over the bound":  overBoundProfile(),
+		"block ending at max int": fmt.Sprintf("mode: set\nm/a.go:1.1,%d.1 1 1\n", math.MaxInt),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, lc, err := ParseBytes([]byte(data))
@@ -192,4 +201,33 @@ func keysOf(lc LineCoverage) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// overBoundProfile is a profile whose blocks are each within the per-block bound but together exceed
+// the whole-profile bound.
+func overBoundProfile() string {
+	var b strings.Builder
+	b.WriteString("mode: set\n")
+	blocks := maxGoCoverLines/maxGoCoverBlockLines + 1
+	for i := 0; i < blocks; i++ {
+		start := i*maxGoCoverBlockLines + 1
+		fmt.Fprintf(&b, "m/f%d.go:%d.1,%d.1 1 1\n", i, start, start+maxGoCoverBlockLines-1)
+	}
+	return b.String()
+}
+
+// TestParseGoCoverProfileExpandsExactlyToTheBound: a block exactly at the per-block bound, and a block
+// ending on a large line, both parse in full — the bound refuses only what exceeds it.
+func TestParseGoCoverProfileExpandsExactlyToTheBound(t *testing.T) {
+	data := fmt.Sprintf("mode: set\nm/a.go:1.1,%d.1 1 1\nm/b.go:%d.1,%d.1 1 0\n", maxGoCoverBlockLines, maxGoCoverLines-3, maxGoCoverLines)
+	_, lc, err := ParseBytesWithOptions([]byte(data), Options{GoModulePath: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lc["a.go"]) != maxGoCoverBlockLines || !lc["a.go"][maxGoCoverBlockLines] {
+		t.Fatalf("a block at the bound must expand in full, got %d lines", len(lc["a.go"]))
+	}
+	if len(lc["b.go"]) != 4 || lc["b.go"][maxGoCoverLines] {
+		t.Fatalf("b.go: got %d lines, want 4 uncovered lines ending on %d", len(lc["b.go"]), maxGoCoverLines)
+	}
 }

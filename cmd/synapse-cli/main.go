@@ -970,7 +970,13 @@ func sastLocation(file string, line int) *finding.SourceLocation {
 // the rest of the gate keys on. Any read or parse failure is "" — the profile then keeps its import
 // paths, which is the same as not knowing the module, never an error on a non-Go tree.
 func goModulePath(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, "go.mod")) // #nosec G304 -- the operator-supplied scan root
+	path := filepath.Join(dir, "go.mod")
+	// A FIFO or device named go.mod would block ReadFile with no writer; the same guard the reachability
+	// cache applies to manifests it reads.
+	if fi, err := os.Stat(path); err != nil || !fi.Mode().IsRegular() {
+		return ""
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- the operator-supplied scan root, regular file checked above
 	if err != nil {
 		return ""
 	}
