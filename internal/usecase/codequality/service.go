@@ -35,6 +35,7 @@ type Service struct {
 	inventory         ports.CodeInventoryScanner
 	bugs              ports.BugDetector
 	structural        ports.CodeAnalyzer
+	coupling          ports.CouplingAnalyzer
 	complexityMin     int
 	includeTestSmells bool
 }
@@ -58,6 +59,12 @@ func WithBugs(b ports.BugDetector) Option { return func(s *Service) { s.bugs = b
 // no findings through its adapter.
 func WithStructuralAnalyzer(a ports.CodeAnalyzer) Option {
 	return func(s *Service) { s.structural = a }
+}
+
+// WithCoupling adds deterministic first-party module dependency measures to
+// full reports. It does not create findings or change the default quality gate.
+func WithCoupling(analyzer ports.CouplingAnalyzer) Option {
+	return func(s *Service) { s.coupling = analyzer }
 }
 
 // bugCWE maps a deeper-bug rule id to its CWE for the finding.
@@ -309,6 +316,7 @@ type Report struct {
 	Findings    []finding.Finding          `json:"findings"`
 	Duplication *measure.DuplicationReport `json:"duplication,omitempty"`
 	Complexity  *measure.ComplexityReport  `json:"complexity,omitempty"`
+	Coupling    *measure.CouplingReport    `json:"coupling,omitempty"`
 	Truncated   bool                       `json:"truncated,omitempty"`
 	Rating      rating.Report              `json:"rating"`
 }
@@ -328,6 +336,13 @@ func (s *Service) BuildReport(ctx context.Context, root string) (Report, error) 
 			return Report{}, fmt.Errorf("inventory: %w", ierr)
 		}
 		rep.Inventory = inv
+	}
+	if s.coupling != nil {
+		coupling, couplingErr := s.coupling.AnalyzeCoupling(ctx, root)
+		if couplingErr != nil {
+			return Report{}, fmt.Errorf("coupling: %w", couplingErr)
+		}
+		rep.Coupling = &coupling
 	}
 	rep.Rating = rating.Compute(findings, rep.Inventory.Totals().CodeLines)
 	return rep, nil

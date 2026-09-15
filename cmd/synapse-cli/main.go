@@ -46,6 +46,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/coupling"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/coverage"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/doctor"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
@@ -58,6 +59,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarchecksum"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarhash"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarlicense"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsimports"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jvmreach"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/license"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensefile"
@@ -546,11 +548,13 @@ func runQualityTo(w io.Writer, args []string) error {
 		codequality.WithBugs(astProvider),
 		codequality.WithStructuralAnalyzer(astProvider),
 		codequality.WithTestScopedSmells(includeTestSmells),
+		codequality.WithCoupling(coupling.New(jsimports.New())),
 	)
-	findings, err := svc.Analyze(context.Background(), dir)
+	qualityReport, err := svc.BuildReport(context.Background(), dir)
 	if err != nil {
 		return fmt.Errorf("quality: %w", err)
 	}
+	findings := qualityReport.Findings
 
 	if sarifOut {
 		out, merr := exportuc.MarshalSARIF(findings, buildinfo.App(), exportuc.SARIFOptions{})
@@ -568,6 +572,18 @@ func runQualityTo(w io.Writer, args []string) error {
 		var rep bytes.Buffer
 		fmt.Fprintf(&rep, "\nSynapse code quality – %s\n", dir)
 		fmt.Fprintf(&rep, "  findings: %d (quality: %d, reliability: %d, sast: %d)\n", len(findings), byKind[finding.KindQuality], byKind[finding.KindReliability], byKind[finding.KindSAST])
+		if qualityReport.Coupling != nil {
+			if ce, ok := qualityReport.Coupling.MaxEfferent(); ok {
+				instability, instabilityOK := qualityReport.Coupling.MaxInstability()
+				if instabilityOK {
+					fmt.Fprintf(&rep, "  coupling: %d modules, max Ce %d, max instability %.2f\n", len(qualityReport.Coupling.Modules), ce, instability)
+				} else {
+					fmt.Fprintf(&rep, "  coupling: %d isolated modules, max Ce %d\n", len(qualityReport.Coupling.Modules), ce)
+				}
+			} else {
+				fmt.Fprintf(&rep, "  coupling: unavailable (%d collection gap(s))\n", len(qualityReport.Coupling.Gaps))
+			}
+		}
 		if !includeTestSmells {
 			fmt.Fprintln(&rep, "  note: info-severity smells in test code are hidden (--include-test-smells to show)")
 		}
@@ -737,11 +753,13 @@ func runGate(args []string) error {
 		codequality.WithComplexity(astProvider, codequality.DefaultComplexityThreshold),
 		codequality.WithBugs(astProvider),
 		codequality.WithStructuralAnalyzer(astProvider),
+		codequality.WithCoupling(coupling.New(jsimports.New())),
 	)
-	findings, err := svc.Analyze(ctx, dir)
+	qualityReport, err := svc.BuildReport(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("code quality: %w", err)
 	}
+	findings := qualityReport.Findings
 	sastRaws, err := sast.New().AnalyzeSource(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("sast: %w", err)
@@ -823,6 +841,14 @@ func runGate(args []string) error {
 
 	// 6. Build the snapshot + evaluate the gate.
 	snap := buildSnapshot(scoped, rep, dupRep.Density())
+	if qualityReport.Coupling != nil {
+		if value, ok := qualityReport.Coupling.MaxEfferent(); ok {
+			snap[qualitygate.MetricMaxEfferentCoupling] = float64(value)
+		}
+		if value, ok := qualityReport.Coupling.MaxInstability(); ok {
+			snap[qualitygate.MetricMaxInstability] = value
+		}
+	}
 	if coverageMeasured {
 		snap[qualitygate.MetricCoveragePct] = snapCoverage
 	}

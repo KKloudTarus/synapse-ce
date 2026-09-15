@@ -72,6 +72,11 @@ func TestGetMeasures(t *testing.T) {
 			Maintainability: "C",
 		},
 		Coverage: nil, // coverage not supplied
+		Coupling: &measure.CouplingReport{
+			Version: measure.CouplingSchemaVersion, Complete: true,
+			Modules: []measure.CouplingModule{{ID: "go:a", Path: "src", Language: "go"}, {ID: "go:b", Path: "src/z-dir", Language: "go"}},
+			Edges:   []measure.CouplingEdge{{From: "go:a", To: "go:b"}},
+		},
 		Snapshot: measure.Snapshot{
 			Nodes: []measure.Node{
 				{Path: "", Kind: measure.NodeProject, Parent: "", IssueTypeAvailable: true, TechDebtAvailable: true, ComplexityAvailable: false, DuplicationAvailable: false},
@@ -97,8 +102,25 @@ func TestGetMeasures(t *testing.T) {
 		if res.Node.Ratings == nil || *res.Node.Ratings.Security.Grade != "A" {
 			t.Fatalf("expected ratings on root")
 		}
-		if len(res.IncludedDomains) != 7 {
-			t.Fatalf("expected all 7 domains, got %d", len(res.IncludedDomains))
+		if len(res.IncludedDomains) != 8 {
+			t.Fatalf("expected all 8 domains, got %d", len(res.IncludedDomains))
+		}
+	})
+
+	t.Run("coupling domain exposes project maxima and module boundary", func(t *testing.T) {
+		root, err := svc.GetMeasures(ctx, "tenant", "project", "", []string{"coupling"}, 50, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if root.Node.Coupling == nil || root.Node.Coupling.Efferent.Value == nil || *root.Node.Coupling.Efferent.Value != 1 {
+			t.Fatalf("root coupling=%+v", root.Node.Coupling)
+		}
+		src, err := svc.GetMeasures(ctx, "tenant", "project", "src", []string{"coupling"}, 50, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if src.Node.Coupling == nil || src.Node.Coupling.Efferent.Value == nil || *src.Node.Coupling.Efferent.Value != 1 {
+			t.Fatalf("src boundary coupling=%+v", src.Node.Coupling)
 		}
 	})
 
@@ -124,7 +146,7 @@ func TestGetMeasures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(res.IncludedDomains) != 7 {
+		if len(res.IncludedDomains) != 8 {
 			t.Fatalf("domains=%v", res.IncludedDomains)
 		}
 	})

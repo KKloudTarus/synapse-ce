@@ -36,6 +36,12 @@ type fakeMetrics struct {
 	available bool
 }
 
+type fakeCoupling struct{ report measure.CouplingReport }
+
+func (f fakeCoupling) AnalyzeCoupling(context.Context, string) (measure.CouplingReport, error) {
+	return f.report, nil
+}
+
 func (f fakeMetrics) Complexity(context.Context, string) (measure.ComplexityReport, bool, error) {
 	return f.rep, f.available, nil
 }
@@ -106,6 +112,23 @@ func TestServiceMapsAndBridges(t *testing.T) {
 		if strings.Contains(f.Title, "small") {
 			t.Errorf("low-complexity function must not be flagged: %+v", f)
 		}
+	}
+}
+
+func TestBuildReportIncludesCouplingEvidence(t *testing.T) {
+	couplingReport, err := measure.NewCouplingReport(
+		[]measure.CouplingModule{{ID: "go:a", Path: "a", Language: "go"}, {ID: "go:b", Path: "b", Language: "go"}},
+		[]measure.CouplingEdge{{From: "go:a", To: "go:b"}}, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := New(fakeAnalyzer{}, WithCoupling(fakeCoupling{report: couplingReport})).BuildReport(context.Background(), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Coupling == nil || len(report.Coupling.Edges) != 1 {
+		t.Fatalf("coupling not retained: %+v", report.Coupling)
 	}
 }
 

@@ -20,6 +20,8 @@ const (
 	MetricNewSecurityHotspotsReviewed = "new_security_hotspots_reviewed"
 	MetricNewCoverage                 = "new_coverage"    // line coverage on new/changed code
 	MetricNewDuplication              = "new_duplication" // duplication density on new/changed code
+	MetricMaxEfferentCoupling         = "max_efferent_coupling"
+	MetricMaxInstability              = "max_instability"
 )
 
 // knownMetrics is the set a gate condition may reference, so a typo'd metric name is rejected at load
@@ -32,6 +34,7 @@ var knownMetrics = map[string]bool{
 	MetricSecurityRating: true, MetricReliability: true, MetricMaintainability: true,
 	MetricSecurityHotspotsReviewed: true, MetricNewSecurityHotspotsReviewed: true,
 	MetricNewCoverage: true, MetricNewDuplication: true,
+	MetricMaxEfferentCoupling: true, MetricMaxInstability: true,
 }
 
 // ValidMetric reports whether name is a recognized gate metric.
@@ -39,15 +42,16 @@ func ValidMetric(name string) bool { return knownMetrics[name] }
 
 // measuredMetrics are the metrics that come from a measurement which may simply not exist for an
 // analysis: coverage needs a report, and the two new-code variants additionally need changed lines the
-// report knows about. When one of these is absent from the snapshot there is no data, not a zero, and
-// Evaluate fails the condition closed and marks it Unmeasured. A counter such as new_critical is
-// deliberately not in this set: a builder that never saw a critical finding leaves the key unset, and
-// reading that as 0 is the truth.
+// report knows about. Coupling limits need a complete first-party dependency graph. When one of these
+// is absent from the snapshot there is no data, not a zero, and Evaluate fails the condition closed
+// and marks it Unmeasured. A counter such as new_critical is deliberately not in this set: a builder
+// that never saw a critical finding leaves the key unset, and reading that as 0 is the truth.
 //
 // This replaces the earlier arrangement in which all three read 0 when unmeasured, so a `>=` coverage
 // condition failed for the right reason while a `<=` new_duplication condition passed for no reason at all.
 var measuredMetrics = map[string]bool{
 	MetricCoveragePct: true, MetricNewCoverage: true, MetricNewDuplication: true,
+	MetricMaxEfferentCoupling: true, MetricMaxInstability: true,
 }
 
 // RequiresMeasurement reports whether an absent snapshot value for name means "no data" rather than 0.

@@ -46,6 +46,13 @@ func newImportServiceWithAudit(t *testing.T, audit *captureAudit) (*Service, *me
 }
 
 func pipelineResult() *scauc.ScanResult {
+	coupling, err := measure.NewCouplingReport(
+		[]measure.CouplingModule{{ID: "go:main", Path: "src", Language: "go"}, {ID: "go:lib", Path: "lib", Language: "go"}},
+		[]measure.CouplingEdge{{From: "go:main", To: "go:lib"}}, nil,
+	)
+	if err != nil {
+		panic(err)
+	}
 	return &scauc.ScanResult{
 		Target:       "/home/runner/work/app",
 		SourceCommit: "0123456789abcdef0123456789abcdef01234567",
@@ -57,6 +64,7 @@ func pipelineResult() *scauc.ScanResult {
 			Findings: []finding.Finding{
 				{ID: "q1", DedupKey: "quality:code-smell:src/main.go:10", RuleKey: "code-smell", Kind: finding.KindQuality, Severity: shared.SeverityMedium, Status: finding.StatusOpen},
 			},
+			Coupling: &coupling,
 		},
 	}
 }
@@ -93,6 +101,9 @@ func TestImportAnalysisRecordsAPipelineResult(t *testing.T) {
 	}
 	if analysis.Issues.Total == 0 {
 		t.Error("the imported findings did not become issues; the analysis is empty")
+	}
+	if analysis.Coupling == nil || analysis.Measures[qualitygate.MetricMaxEfferentCoupling] != 1 {
+		t.Fatalf("coupling report/gate measure was not retained: %+v", analysis.Coupling)
 	}
 
 	// It is in the history, newest first, exactly like a server analysis.

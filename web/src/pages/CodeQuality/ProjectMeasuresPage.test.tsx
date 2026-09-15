@@ -45,7 +45,7 @@ function buildResponse(overrides: Partial<ProjectMeasureResponse> = {}): Project
     includedDomains: ['size'],
     node: {
       path: '', name: 'Synapse', kind: 'project', language: '',
-      size: null, complexity: null, coverage: null, duplication: null, issues: null, debt: null, ratings: null,
+      size: null, complexity: null, coupling: null, coverage: null, duplication: null, issues: null, debt: null, ratings: null,
     },
     children: { items: [], nextCursor: null },
     ...overrides,
@@ -232,6 +232,29 @@ describe('Project Measures route and logic', () => {
 
     expect(screen.getByText('High Issues')).toBeInTheDocument()
     expect(screen.getByText('4')).toBeInTheDocument()
+  })
+
+  it('renders coupling values and unavailable instability honestly', async () => {
+    vi.mocked(api.projectMeasures).mockResolvedValue(buildResponse({
+      includedDomains: ['coupling'],
+      node: {
+        path: 'internal/app', name: 'app', kind: 'directory', language: 'go',
+        size: null, complexity: null, coverage: null, duplication: null, issues: null, debt: null, ratings: null,
+        coupling: {
+          afferent: { availability: 'available', value: 0, reason: null },
+          efferent: { availability: 'available', value: 0, reason: null },
+          instability: { availability: 'unavailable', value: null, reason: 'isolated_module' },
+        },
+      },
+    }))
+
+    renderRoute('/code-quality/projects/synapse/measures?path=internal%2Fapp&domain=coupling')
+
+    expect(await screen.findByText('Incoming dependencies (Ca)')).toBeInTheDocument()
+    expect(screen.getByText('Outgoing dependencies (Ce)')).toBeInTheDocument()
+    expect(screen.getAllByText('0')).toHaveLength(2)
+    expect(screen.getByText('Instability Ce / (Ca + Ce)')).toBeInTheDocument()
+    expect(screen.getByTitle('isolated_module')).toBeInTheDocument()
   })
 
   it('normal load more appends children and deduplicates', async () => {

@@ -743,10 +743,17 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 	var inventory measure.Inventory
 	var compPtr *measure.ComplexityReport
 	var dupPtr *measure.DuplicationReport
+	var couplingPtr *measure.CouplingReport
 	if result.CodeQuality != nil {
 		inventory = result.CodeQuality.Inventory
 		compPtr = result.CodeQuality.Complexity
 		dupPtr = result.CodeQuality.Duplication
+		couplingPtr = result.CodeQuality.Coupling
+		if couplingPtr != nil {
+			if err := couplingPtr.Validate(); err != nil {
+				return fmt.Errorf("validate coupling report: %w", err)
+			}
+		}
 	}
 
 	snapshot, err := measure.BuildSnapshot(measure.BuildSnapshotInput{
@@ -806,7 +813,7 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 		SourceRevision: projectanalysis.SourceRevision{Kind: projectScanKind(p.SourceBinding.Kind), Head: result.SourceCommit, Base: comparison.BaseCommit, MergeBase: comparison.MergeBase, AnalysisID: jobID},
 		Capabilities:   capabilities, SourceManifest: manifest, Comparison: comparison, FileChanges: result.FileChanges, Annotations: annotations,
 		Findings: issues, Gate: gate, GateSource: gateSource, GateExempt: exempt, LinesOfCode: loc,
-		Coverage: analysisCoverage, Duplication: dupPtr, AnalysisTruncated: analysisTruncated, Previous: baseline,
+		Coverage: analysisCoverage, Duplication: dupPtr, Coupling: couplingPtr, AnalysisTruncated: analysisTruncated, Previous: baseline,
 		Hotspots: overallHsSummary, NewHotspots: newHsSummary, Snapshot: snapshot,
 	})
 	if err != nil {

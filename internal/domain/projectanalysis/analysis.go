@@ -90,6 +90,7 @@ type Analysis struct {
 	Delta          *Delta                    `json:"delta"`
 	Coverage       *measure.CoverageReport   `json:"coverage"`
 	Duplication    measure.DuplicationReport `json:"duplication"`
+	Coupling       *measure.CouplingReport   `json:"coupling,omitempty"`
 	Rating         rating.Report             `json:"rating"`
 	Hotspots       hotspot.Summary           `json:"hotspots"`
 	NewHotspots    hotspot.Summary           `json:"new_hotspots"`
@@ -175,6 +176,7 @@ type Input struct {
 	LinesOfCode       int
 	Coverage          *measure.CoverageReport
 	Duplication       *measure.DuplicationReport // nil when no duplication walk ran, like Coverage
+	Coupling          *measure.CouplingReport
 	AnalysisTruncated bool
 	Previous          *Analysis
 	Hotspots          hotspot.Summary
@@ -184,6 +186,11 @@ type Input struct {
 
 // Build returns one immutable snapshot and evaluates the built-in gate at creation.
 func Build(in Input) (Analysis, error) {
+	if in.Coupling != nil {
+		if err := in.Coupling.Validate(); err != nil {
+			return Analysis{}, fmt.Errorf("invalid coupling report: %w", err)
+		}
+	}
 	pairs, err := compactIssues(finding.Publishable(in.Findings))
 	if err != nil {
 		return Analysis{}, err
@@ -229,7 +236,7 @@ func Build(in Input) (Analysis, error) {
 	overallRating := rating.Compute(normalized, in.LinesOfCode)
 	newRating := rating.Compute(newFindings, 0)
 	gateOverallRating := rating.Compute(gateFindings, in.LinesOfCode)
-	measures := buildMeasures(countIssues(gateIssues), countIssues(gateNewIssues), gateOverallRating, in.Duplication, in.Coverage, in.Hotspots, in.NewHotspots, ChangedLineSet(in.FileChanges))
+	measures := buildMeasures(countIssues(gateIssues), countIssues(gateNewIssues), gateOverallRating, in.Duplication, in.Coverage, in.Coupling, in.Hotspots, in.NewHotspots, ChangedLineSet(in.FileChanges))
 	gateDef := in.Gate
 	gateSource := in.GateSource
 	if len(gateDef.Conditions) == 0 {
@@ -261,7 +268,7 @@ func Build(in Input) (Analysis, error) {
 		GateInfo: GateInfo{Key: gateDef.Key, Name: gateName, Source: gateSource}, Issues: counts,
 		InternalIssues: issues, NewCode: NewCode{PreviousID: previousID, Counts: newCounts, Rating: NewCodeRating{Security: newRating.Security, Reliability: newRating.Reliability}},
 		Delta: buildDelta(counts, measures, overallRating, in.Previous), Coverage: in.Coverage,
-		Duplication: derefDuplication(in.Duplication), Rating: overallRating,
+		Duplication: derefDuplication(in.Duplication), Coupling: in.Coupling, Rating: overallRating,
 		Hotspots: in.Hotspots, NewHotspots: in.NewHotspots,
 		Snapshot: in.Snapshot,
 	}, nil
@@ -412,7 +419,7 @@ func derefDuplication(d *measure.DuplicationReport) measure.DuplicationReport {
 // be measured is left absent, never written as 0 — coverage has always followed that rule, and the two
 // new-code measurements follow it too, so a gate condition on them fails closed with "no data" rather
 // than passing on a value nobody computed.
-func buildMeasures(all, new Counts, overallRating rating.Report, duplication *measure.DuplicationReport, coverage *measure.CoverageReport, hotspots, newHotspots hotspot.Summary, changed map[string]map[int]bool) qualitygate.Snapshot {
+func buildMeasures(all, new Counts, overallRating rating.Report, duplication *measure.DuplicationReport, coverage *measure.CoverageReport, coupling *measure.CouplingReport, hotspots, newHotspots hotspot.Summary, changed map[string]map[int]bool) qualitygate.Snapshot {
 	metrics := qualitygate.Snapshot{
 		qualitygate.MetricNewIssues:       float64(new.Total),
 		qualitygate.MetricNewCritical:     float64(new.BySeverity[string(shared.SeverityCritical)]),
@@ -432,6 +439,14 @@ func buildMeasures(all, new Counts, overallRating rating.Report, duplication *me
 	}
 	if pct, ok := measure.NewCodeDuplicationPercent(duplication, changed); ok {
 		metrics[qualitygate.MetricNewDuplication] = pct
+	}
+	if coupling != nil {
+		if value, ok := coupling.MaxEfferent(); ok {
+			metrics[qualitygate.MetricMaxEfferentCoupling] = float64(value)
+		}
+		if value, ok := coupling.MaxInstability(); ok {
+			metrics[qualitygate.MetricMaxInstability] = value
+		}
 	}
 	metrics[qualitygate.MetricSecurityHotspotsReviewed] = hotspots.ReviewedPct
 	metrics[qualitygate.MetricNewSecurityHotspotsReviewed] = newHotspots.ReviewedPct

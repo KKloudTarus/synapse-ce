@@ -182,7 +182,7 @@ function QualityGateCard({ gate, analysis }: { gate: ProjectOverviewGate; analys
               <li key={`${condition.metric}-${index}`} className="rounded-lg border border-critical/25 bg-primary px-4 py-2.5 shadow-xs">
                 <div className="text-sm font-medium text-primary">{gateMetricLabel(condition.metric)}</div>
                 <div className="mt-0.5 font-mono text-xs tabular-nums text-tertiary">
-                  {formatGateEvidenceValue(condition.metric, condition.actual)} — expected {condition.operator} {formatGateEvidenceValue(condition.metric, condition.threshold)}
+                  {condition.unmeasured ? 'no data' : formatGateEvidenceValue(condition.metric, condition.actual)} — expected {condition.operator} {formatGateEvidenceValue(condition.metric, condition.threshold)}
                 </div>
               </li>
             ))}

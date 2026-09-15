@@ -26,6 +26,7 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 		Delta:          &projectanalysis.Delta{Measures: map[string]float64{"coverage": 1}, Ratings: map[string]int{"security": 1}, Issues: projectanalysis.Counts{ByKind: map[string]int{}, BySeverity: map[string]int{}, ByStatus: map[string]int{}}},
 		Coverage:       &measure.CoverageReport{Files: []measure.FileCoverage{{File: "a.go", CoveredLines: 5, TotalLines: 10}}},
 		Duplication:    measure.DuplicationReport{Blocks: []measure.DuplicationBlock{{Occurrences: []measure.CodeRange{{File: "a.go", StartLine: 1, EndLine: 2}}}}},
+		Coupling:       &measure.CouplingReport{Version: measure.CouplingSchemaVersion, Complete: true, Modules: []measure.CouplingModule{{ID: "go:a", Path: "a", Language: "go"}}},
 		Rating:         rating.Report{Security: rating.GradeA},
 		Snapshot: measure.Snapshot{
 			Nodes: []measure.Node{
@@ -47,6 +48,7 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	analysis.Measures["coverage"] = 0
 	analysis.Coverage.Files[0].File = "mutated.go"
 	analysis.Duplication.Blocks[0].Occurrences[0].File = "mutated.go"
+	analysis.Coupling.Modules[0].Path = "mutated"
 	analysis.Snapshot.Nodes[0].Counters.IssuesByType["bug"] = 0
 	*analysis.Snapshot.NewCodeCoverage.Value = 0.0
 
@@ -59,6 +61,7 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	got.Gate.Results[0].Actual = 0
 	got.Coverage.Files[0].File = "returned.go"
 	got.Duplication.Blocks[0].Occurrences[0].File = "returned.go"
+	got.Coupling.Modules[0].Path = "returned"
 	got.Delta.Measures["coverage"] = 0
 	got.Snapshot.Nodes[0].Counters.IssuesByType["bug"] = 0
 	*got.Snapshot.NewCodeCoverage.Value = 0.0
@@ -67,7 +70,7 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if list[0].Measures["coverage"] != 50 || list[0].Issues.ByKind["sca"] != 1 || list[0].Gate.Results[0].Actual != 50 || list[0].Coverage.Files[0].File != "a.go" || list[0].Duplication.Blocks[0].Occurrences[0].File != "a.go" || list[0].Delta.Measures["coverage"] != 1 {
+	if list[0].Measures["coverage"] != 50 || list[0].Issues.ByKind["sca"] != 1 || list[0].Gate.Results[0].Actual != 50 || list[0].Coverage.Files[0].File != "a.go" || list[0].Duplication.Blocks[0].Occurrences[0].File != "a.go" || list[0].Coupling.Modules[0].Path != "a" || list[0].Delta.Measures["coverage"] != 1 {
 		t.Fatalf("stored snapshot mutated: %+v", list[0])
 	}
 	if list[0].Snapshot.Nodes[0].Counters.IssuesByType["bug"] != 1 {

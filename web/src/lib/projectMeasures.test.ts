@@ -68,7 +68,21 @@ describe('projectMeasures mapper', () => {
     const res = mapProjectMeasureResponse(raw)
     expect(res.node?.size).toBeNull()
     expect(res.node?.complexity).toBeNull()
+    expect(res.node?.coupling).toBeNull()
     expect(res.node?.coverage).toBeNull()
+  })
+
+  it('maps coupling zero separately from unavailable instability', () => {
+    const res = mapProjectMeasureResponse({
+      node: { coupling: {
+        afferent: { availability: 'available', value: 0 },
+        efferent: { availability: 'available', value: 0 },
+        instability: { availability: 'unavailable', unavailable_reason: 'isolated_module' },
+      } },
+    })
+    expect(res.node?.coupling?.afferent.value).toBe(0)
+    expect(res.node?.coupling?.instability.value).toBeNull()
+    expect(res.node?.coupling?.instability.reason).toBe('isolated_module')
   })
 
   it('defaults omitted child items to an empty array', () => {

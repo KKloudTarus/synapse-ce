@@ -12,6 +12,8 @@ export const metricLabels: Record<string, string> = {
   total_critical: 'Total critical issues',
   coverage: 'Line coverage',
   duplication_density: 'Duplication density',
+  max_efferent_coupling: 'Maximum outgoing coupling',
+  max_instability: 'Maximum instability',
   security_rating: 'Security rating',
   reliability_rating: 'Reliability rating',
   maintainability_rating: 'Maintainability rating',
@@ -133,7 +135,7 @@ export function GateEvidence({
       <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
         {results.map((result, index) => {
           const isPassed = result.passed
-          const actualFormatted = metricValue(result.condition.metric, result.actual)
+          const actualFormatted = result.unmeasured ? 'no data' : metricValue(result.condition.metric, result.actual)
           const thresholdFormatted = metricValue(result.condition.metric, result.condition.threshold)
 
           return (

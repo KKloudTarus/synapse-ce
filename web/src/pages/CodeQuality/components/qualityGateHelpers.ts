@@ -13,6 +13,8 @@ export const metrics = [
   'new_coverage',
   'duplication_density',
   'new_duplication',
+  'max_efferent_coupling',
+  'max_instability',
   'security_rating',
   'reliability_rating',
   'maintainability_rating',
@@ -24,7 +26,7 @@ export const operators: QualityGateCondition['op'][] = ['<=', '>=', '==', '<', '
 
 export const blankCondition = (metric = 'new_high'): QualityGateCondition => ({ metric, op: '<=', threshold: 0 })
 
-export type MetricCategory = 'security' | 'rating' | 'coverage' | 'duplication'
+export type MetricCategory = 'security' | 'rating' | 'coverage' | 'duplication' | 'coupling'
 export type TypeFilter = 'all' | 'builtin' | 'custom'
 export type SortOption = 'name-asc' | 'name-desc' | 'conditions-desc' | 'conditions-asc'
 
@@ -46,6 +48,7 @@ export function getMetricCategory(metric: string): MetricCategory {
   if (['coverage', 'new_coverage'].includes(metric)) {
     return 'coverage'
   }
+  if (['max_efferent_coupling', 'max_instability'].includes(metric)) return 'coupling'
   return 'duplication'
 }
 
@@ -70,6 +73,7 @@ export function getMetricCategoryStyle(category: MetricCategory) {
         iconBg: 'bg-utility-green-100 text-utility-green-700 dark:bg-utility-green-900 dark:text-utility-green-300',
       }
     case 'duplication':
+    case 'coupling':
     default:
       return {
         cardBg: 'border-utility-blue-200 bg-utility-blue-50 dark:border-utility-blue-900/70 dark:bg-utility-blue-950/40',

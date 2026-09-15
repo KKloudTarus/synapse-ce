@@ -1373,13 +1373,14 @@ export const handlers = [
       path, name, kind, language: 'go',
       size: { files: av(files), ncloc: av(ncloc), comment_lines: av(Math.round(ncloc * 0.12)), blank_lines: av(Math.round(ncloc * 0.15)), functions: av(fns), comment_density: av(12.4) },
       complexity: { cyclomatic: av(cyclo), cognitive: av(cog) },
+      coupling: { afferent: av(Math.max(0, Math.floor(cyclo / 20))), efferent: av(Math.max(0, Math.floor(cog / 20))), instability: av(cyclo + cog > 0 ? cog / (cyclo + cog) : 0) },
       coverage: { covered_lines: av(Math.round(ncloc * cov / 100)), coverable_lines: av(ncloc), coverage: av(cov), new_code_coverage: av(Math.max(0, cov - 5)) },
       duplication: { duplicated_lines: av(dupLines), duplication_blocks: av(Math.max(1, Math.round(dupLines / 80))), duplication_density: av(+(dupLines / Math.max(1, ncloc) * 100).toFixed(1)) },
       issues: { by_type: { vulnerability: av(3), bug: av(2), code_smell: av(8) }, by_severity: { critical: av(1), high: av(3), medium: av(5), low: av(4) } },
       debt: { remediation_effort_minutes: av(cyclo * 2) },
       ratings: { security: ag('B'), reliability: ag('A'), maintainability: ag('C') },
     })
-    const base = { state: 'analyzed' as const, project: { key: p.key, name: p.name }, analysis: { id: p.latest_analysis.id, created_at: p.latest_analysis.created_at, source_ref: 'refs/heads/main', source_commit: p.latest_analysis.source_commit }, included_domains: ['size', 'complexity', 'coverage', 'duplication', 'issues', 'debt', 'ratings'] }
+    const base = { state: 'analyzed' as const, project: { key: p.key, name: p.name }, analysis: { id: p.latest_analysis.id, created_at: p.latest_analysis.created_at, source_ref: 'refs/heads/main', source_commit: p.latest_analysis.source_commit }, included_domains: ['size', 'complexity', 'coupling', 'coverage', 'duplication', 'issues', 'debt', 'ratings'] }
     if (path) {
       // Drill-down: return files inside the directory
       const dirName = path.split('/').pop() ?? path
