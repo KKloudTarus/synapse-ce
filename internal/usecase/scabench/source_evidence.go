@@ -223,8 +223,8 @@ func (set SourceCaseEvidenceSet) Validate() error {
 		if _, err := componentIdentityKey(item.Component); err != nil || strings.TrimSpace(item.AdvisoryID) == "" || strings.TrimSpace(item.Rationale) == "" {
 			return fmt.Errorf("source case evidence %q is incomplete", item.ID)
 		}
-		if item.DerivedTruth != TruthAffected && item.DerivedTruth != TruthFixed {
-			return fmt.Errorf("source case evidence %q must derive affected or fixed truth", item.ID)
+		if item.DerivedTruth != TruthAffected && item.DerivedTruth != TruthFixed && item.DerivedTruth != TruthNotAffected {
+			return fmt.Errorf("source case evidence %q must derive affected, fixed, or not-affected truth", item.ID)
 		}
 		if len(item.NativeComparisonIDs) == 0 {
 			return fmt.Errorf("source case evidence %q requires native comparisons", item.ID)
@@ -364,28 +364,34 @@ func nativeComparisonTruth(comparisons []NativeComparisonRecord) (Truth, error) 
 	if len(comparisons) == 0 {
 		return "", fmt.Errorf("native comparisons are required")
 	}
-	affected := false
-	fixed := false
+	truths := make(map[Truth]struct{}, 2)
 	for _, comparison := range comparisons {
 		if err := comparison.Validate(); err != nil {
 			return "", err
 		}
-		switch comparison.Relation {
-		case "before":
-			affected = true
-		case "equal", "after":
-			fixed = true
+		switch comparison.PredicateKind {
+		case "", NativePredicateEVRLessThan:
+			if comparison.Relation == "before" {
+				truths[TruthAffected] = struct{}{}
+			} else {
+				truths[TruthFixed] = struct{}{}
+			}
+		case NativePredicateVersionEqualsZero:
+			if comparison.Relation != "equal" {
+				return "", fmt.Errorf("native zero-version comparison %q does not prove not-affected truth", comparison.ID)
+			}
+			truths[TruthNotAffected] = struct{}{}
 		default:
-			return "", fmt.Errorf("native comparison %q has an invalid relation", comparison.ID)
+			return "", fmt.Errorf("native comparison %q has an invalid predicate kind", comparison.ID)
 		}
 	}
-	if affected && fixed {
+	if len(truths) != 1 {
 		return "", fmt.Errorf("target-native comparisons provide a split witness")
 	}
-	if affected {
-		return TruthAffected, nil
+	for truth := range truths {
+		return truth, nil
 	}
-	return TruthFixed, nil
+	return "", fmt.Errorf("native comparisons do not establish truth")
 }
 
 func DigestSourceEvidencePlan(plan SourceEvidencePlan) (string, error) {

@@ -449,6 +449,12 @@ func bzip2OVALBytes(t *testing.T) []byte {
 
 func buildSourceEvidenceFixture(t *testing.T, oval string, pkg bench.SourceEvidencePackage, comparator *sourceNativeComparator) (bench.SourceCaseEvidenceSet, bench.NativeEvidenceSet, error) {
 	t.Helper()
+	selection := bench.SourceEvidenceTarget{TargetID: "target-a", SourceAssetLocator: "sources/vendor.xml", PackageFamily: "deb", Release: "12", Product: "debian", Architecture: "amd64", Packages: []bench.SourceEvidencePackage{pkg}}
+	return buildSourceEvidenceForTarget(t, oval, selection, []bench.Component{pkg.Component}, comparator)
+}
+
+func buildSourceEvidenceForTarget(t *testing.T, oval string, selection bench.SourceEvidenceTarget, components []bench.Component, comparator *sourceNativeComparator) (bench.SourceCaseEvidenceSet, bench.NativeEvidenceSet, error) {
+	t.Helper()
 	root := t.TempDir()
 	freeze := sourceFixtureFreeze(t, oval)
 	if err := os.MkdirAll(filepath.Join(root, "sources"), 0o755); err != nil {
@@ -458,12 +464,12 @@ func buildSourceEvidenceFixture(t *testing.T, oval string, pkg bench.SourceEvide
 		t.Fatal(err)
 	}
 	targetDigest := sourceTestDigest('a')
-	catalog := bench.Catalog{SchemaVersion: bench.CatalogSchemaVersion, Revision: "source-evidence", Targets: []bench.Target{{ID: "target-a", OCIRef: "registry.example.test/target@" + targetDigest, Digest: targetDigest, SBOMDigest: sourceTestDigest('b'), Components: []bench.Component{pkg.Component}}}}
+	catalog := bench.Catalog{SchemaVersion: bench.CatalogSchemaVersion, Revision: "source-evidence", Targets: []bench.Target{{ID: selection.TargetID, OCIRef: "registry.example.test/target@" + targetDigest, Digest: targetDigest, SBOMDigest: sourceTestDigest('b'), Components: components}}}
 	freezeDigest, err := bench.DigestSourceFreeze(freeze)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := bench.SourceEvidencePlan{SchemaVersion: bench.SourceEvidencePlanSchemaVersion, CycleID: freeze.CycleID, SourceFreezeDigest: freezeDigest, Targets: []bench.SourceEvidenceTarget{{TargetID: "target-a", SourceAssetLocator: "sources/vendor.xml", PackageFamily: "deb", Release: "12", Product: "debian", Architecture: "amd64", Packages: []bench.SourceEvidencePackage{pkg}}}}
+	plan := bench.SourceEvidencePlan{SchemaVersion: bench.SourceEvidencePlanSchemaVersion, CycleID: freeze.CycleID, SourceFreezeDigest: freezeDigest, Targets: []bench.SourceEvidenceTarget{selection}}
 	return BuildSourceNativeEvidence(context.Background(), root, freeze, catalog, plan, func(bench.Target) (ports.NativeVersionComparator, error) { return comparator, nil })
 }
 
@@ -500,4 +506,241 @@ func sourceObject(id, name string) string {
 
 func sourceState(id, operator, operation, evr string) string {
 	return `<dpkginfo_state id="` + id + `" operator="` + operator + `"><evr operation="` + operation + `">` + evr + `</evr></dpkginfo_state>`
+}
+
+func sourceEvidenceRPMPackage(name, evr string) bench.SourceEvidencePackage {
+	return bench.SourceEvidencePackage{
+		Name: name, Component: bench.Component{PURL: "pkg:rpm/suse/" + name + "@" + url.PathEscape(evr) + "?arch=x86_64&distro=sles-15.6&upstream=" + url.QueryEscape(name+"-"+evr+".src.rpm"), Version: evr},
+		Architecture: "x86_64", Distro: "sles-15.6", Release: "15.6", SourcePackage: name, SourceEVR: evr,
+	}
+}
+
+func sourceSLESSelection(pkg bench.SourceEvidencePackage) bench.SourceEvidenceTarget {
+	return bench.SourceEvidenceTarget{TargetID: "target-a", SourceAssetLocator: "sources/vendor.xml", PackageFamily: "rpm", Product: "sles", Release: "15.6", Architecture: "x86_64", Packages: []bench.SourceEvidencePackage{pkg}}
+}
+
+func sourceSLESReleaseComponent(version string) bench.Component {
+	return bench.Component{PURL: "pkg:rpm/suse/sles-release@" + url.PathEscape(version) + "?arch=x86_64&distro=sles-15.6&upstream=sles-release-" + url.QueryEscape(version) + ".src.rpm", Version: version}
+}
+
+func evaluateSourceOVAL(t *testing.T, oval string, target bench.Target, selection bench.SourceEvidenceTarget, pkg bench.SourceEvidencePackage, comparator *sourceNativeComparator) ovalResult {
+	t.Helper()
+	document, err := parseVendorOVAL([]byte(oval))
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, exists := document.definitions["definition-a"]
+	if !exists {
+		t.Fatal("fixture definition is missing")
+	}
+	result, err := (ovalEvaluator{ctx: context.Background(), document: document, target: target, selection: selection, pkg: pkg, comparator: comparator, definitionStack: map[string]struct{}{"definition-a": {}}}).evaluate(definition.criteria)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestBuildSourceNativeEvidenceRecognizesDebianCurrentGuards(t *testing.T) {
+	pkg := sourceEvidencePackage("pkg", "1", "pkg", "1")
+	selection := bench.SourceEvidenceTarget{TargetID: "target-a", SourceAssetLocator: "sources/vendor.xml", PackageFamily: "deb", Product: "debian", Release: "12", Architecture: "amd64", Packages: []bench.SourceEvidencePackage{pkg}}
+	target := bench.Target{ID: "target-a", Digest: sourceTestDigest('a'), Components: []bench.Component{pkg.Component}}
+	cases := []struct {
+		name            string
+		release         string
+		releaseObject   string
+		unameObject     string
+		wantApplicable  bool
+		wantUnsupported bool
+	}{
+		{name: "release guard matches", release: "12", releaseObject: sourceDebianReleaseObject("release-object"), unameObject: `<uname_object id="uname-object"/>`, wantApplicable: true},
+		{name: "release mismatch is non-applicable", release: "11", releaseObject: sourceDebianReleaseObject("release-object"), unameObject: `<uname_object id="uname-object"/>`},
+		{name: "malformed release guard is unsupported", release: "12", releaseObject: `<textfilecontent54_object id="release-object"><path>/etc</path><filename>debian_version</filename><pattern operation="equals">(\d+)\.\d</pattern><instance datatype="int">1</instance></textfilecontent54_object>`, unameObject: `<uname_object id="uname-object"/>`, wantApplicable: true, wantUnsupported: true},
+		{name: "uname variant is unsupported", release: "12", releaseObject: sourceDebianReleaseObject("release-object"), unameObject: `<uname_object id="uname-object"><machine>x86_64</machine></uname_object>`, wantApplicable: true, wantUnsupported: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			oval := sourceDebianGuardOVAL(tc.release, tc.releaseObject, tc.unameObject)
+			result := evaluateSourceOVAL(t, oval, target, selection, pkg, &sourceNativeComparator{relations: map[string]int{"2": -1}})
+			if result.applicable != tc.wantApplicable || (len(result.unsupported) != 0) != tc.wantUnsupported {
+				t.Fatalf("guard result = %+v", result)
+			}
+			if tc.wantUnsupported || !tc.wantApplicable {
+				return
+			}
+			source, native, err := buildSourceEvidenceForTarget(t, oval, selection, []bench.Component{pkg.Component}, &sourceNativeComparator{relations: map[string]int{"2": -1}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(source.Cases) != 1 || source.Cases[0].DerivedTruth != bench.TruthAffected || len(native.Targets[0].Comparisons) != 1 {
+				t.Fatalf("source/native evidence = %+v/%+v", source, native)
+			}
+		})
+	}
+}
+
+func TestBuildSourceNativeEvidenceEvaluatesSLESReleaseGuards(t *testing.T) {
+	pkg := sourceEvidenceRPMPackage("pkg", "1:1-1")
+	selection := sourceSLESSelection(pkg)
+	cases := []struct {
+		name            string
+		components      []bench.Component
+		wantApplicable  bool
+		wantUnsupported bool
+	}{
+		{name: "exact release component matches", components: []bench.Component{pkg.Component, sourceSLESReleaseComponent("0:15.6-1")}, wantApplicable: true},
+		{name: "release mismatch is non-applicable", components: []bench.Component{pkg.Component, sourceSLESReleaseComponent("0:15.5-1")}},
+		{name: "release component is missing", components: []bench.Component{pkg.Component}, wantApplicable: true, wantUnsupported: true},
+		{name: "duplicate release components fail closed", components: []bench.Component{pkg.Component, sourceSLESReleaseComponent("0:15.6-1"), sourceSLESReleaseComponent("0:15.6-2")}, wantApplicable: true, wantUnsupported: true},
+		{name: "non-rpm release component fails closed", components: []bench.Component{pkg.Component, {PURL: "pkg:deb/suse/sles-release@15.6-1", Version: "15.6-1"}}, wantApplicable: true, wantUnsupported: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := bench.Target{ID: "target-a", Digest: sourceTestDigest('a'), Components: tc.components}
+			result := evaluateSourceOVAL(t, sourceSLESGuardOVAL(`<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test"/></criteria>`, `<rpminfo_test id="pkg-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, `<rpminfo_state id="pkg-state"><evr operation="less than">2</evr></rpminfo_state>`), target, selection, pkg, &sourceNativeComparator{relations: map[string]int{"2": -1}})
+			if result.applicable != tc.wantApplicable || (len(result.unsupported) != 0) != tc.wantUnsupported {
+				t.Fatalf("release guard result = %+v", result)
+			}
+		})
+	}
+}
+
+func TestBuildSourceNativeEvidenceSLESCurrentPredicates(t *testing.T) {
+	cases := []struct {
+		name            string
+		pkgEVR          string
+		criteria        string
+		tests           string
+		states          string
+		relations       map[string]int
+		wantTruth       bench.Truth
+		wantUnsupported bool
+		wantRecords     int
+	}{
+		{
+			name: "single check at least one supports affected EVR", pkgEVR: "1:1-1", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test"/></criteria>`,
+			tests: `<rpminfo_test id="pkg-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><evr operation="less than">2</evr></rpminfo_state>`, relations: map[string]int{"2": -1}, wantTruth: bench.TruthAffected, wantRecords: 1,
+		},
+		{
+			name: "multiple refs with check at least one remains unsupported", pkgEVR: "1:1-1", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test"/></criteria>`,
+			tests: `<rpminfo_test id="pkg-test" check="at least one"><object object_ref="pkg-object"/><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><evr operation="less than">2</evr></rpminfo_state>`, relations: map[string]int{}, wantUnsupported: true,
+		},
+		{
+			name: "fixed EVR remains fixed", pkgEVR: "1:2-1", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test"/></criteria>`,
+			tests: `<rpminfo_test id="pkg-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><evr operation="less than">2</evr></rpminfo_state>`, relations: map[string]int{"2": 0}, wantTruth: bench.TruthFixed, wantRecords: 1,
+		},
+		{
+			name: "exact zero sentinel derives not affected", pkgEVR: "0", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test" comment="pkg is not affected"/></criteria>`,
+			tests: `<rpminfo_test id="pkg-test" check="at least one" comment="pkg is ==0"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><version operation="equals">0</version></rpminfo_state>`, relations: map[string]int{"0": 0}, wantTruth: bench.TruthNotAffected, wantRecords: 1,
+		},
+		{
+			name: "nonzero equality is unsupported", pkgEVR: "1:1-1", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test" comment="pkg is not affected"/></criteria>`,
+			tests: `<rpminfo_test id="pkg-test" check="at least one" comment="pkg is ==0"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><version operation="equals">1</version></rpminfo_state>`, relations: map[string]int{}, wantUnsupported: true,
+		},
+		{
+			name: "sentinel collision is unsupported", pkgEVR: "0", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test" comment="pkg is not affected"/></criteria>`,
+			tests: `<rpminfo_test id="pkg-test" check="at least one" comment="pkg is ==0"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><version operation="equals">0</version><evr operation="less than">2</evr></rpminfo_state>`, relations: map[string]int{}, wantUnsupported: true,
+		},
+		{
+			name: "mixed fixed and not affected OR is unsupported", pkgEVR: "0", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criteria operator="OR"><criterion test_ref="fixed-test"/><criterion test_ref="zero-test" comment="pkg is not affected"/></criteria></criteria>`,
+			tests: `<rpminfo_test id="fixed-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="fixed-state"/></rpminfo_test><rpminfo_test id="zero-test" check="at least one" comment="pkg is ==0"><object object_ref="pkg-object"/><state state_ref="zero-state"/></rpminfo_test>`, states: `<rpminfo_state id="fixed-state"><evr operation="less than">1</evr></rpminfo_state><rpminfo_state id="zero-state"><version operation="equals">0</version></rpminfo_state>`, relations: map[string]int{"1": 0, "0": 0}, wantUnsupported: true, wantRecords: 2,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg := sourceEvidenceRPMPackage("pkg", tc.pkgEVR)
+			selection := sourceSLESSelection(pkg)
+			oval := sourceSLESGuardOVAL(tc.criteria, tc.tests, tc.states)
+			components := []bench.Component{pkg.Component, sourceSLESReleaseComponent("0:15.6-1")}
+			source, native, err := buildSourceEvidenceForTarget(t, oval, selection, components, &sourceNativeComparator{relations: tc.relations})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(native.Targets) != 1 || len(native.Targets[0].Comparisons) != tc.wantRecords {
+				t.Fatalf("native evidence = %+v", native)
+			}
+			if tc.wantUnsupported {
+				if len(source.Cases) != 0 || len(source.Unsupported) == 0 {
+					t.Fatalf("source evidence did not retain failure: %+v", source)
+				}
+				return
+			}
+			if len(source.Unsupported) != 0 || len(source.Cases) != 1 || source.Cases[0].DerivedTruth != tc.wantTruth {
+				t.Fatalf("source evidence = %+v", source)
+			}
+			if tc.wantTruth == bench.TruthNotAffected && native.Targets[0].Comparisons[0].PredicateKind != bench.NativePredicateVersionEqualsZero {
+				t.Fatalf("not-affected record is not explicit: %+v", native.Targets[0].Comparisons[0])
+			}
+		})
+	}
+}
+
+func TestOVALCVECanonicalizationRejectsAmbiguity(t *testing.T) {
+	cases := []struct {
+		name  string
+		refID string
+		want  string
+		valid bool
+	}{
+		{name: "direct case insensitive", refID: "cve-2003-1605", want: "CVE-2003-1605", valid: true},
+		{name: "Mitre prefix case insensitive", refID: "mItRe cVe-2003-1605", want: "CVE-2003-1605", valid: true},
+		{name: "multiple identities", refID: "CVE-2003-1605 CVE-2003-1606"},
+		{name: "malformed identity", refID: "Mitre CVE-2003-16"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, valid := canonicalOVALCVE(tc.refID)
+			if got != tc.want || valid != tc.valid {
+				t.Fatalf("canonicalOVALCVE(%q) = %q, %t", tc.refID, got, valid)
+			}
+		})
+	}
+}
+
+func TestBuildSourceNativeEvidenceDeterministicGuardedOutput(t *testing.T) {
+	pkg := sourceEvidenceRPMPackage("pkg", "1:1-1")
+	selection := sourceSLESSelection(pkg)
+	oval := sourceSLESGuardOVAL(`<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test"/></criteria>`, `<rpminfo_test id="pkg-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, `<rpminfo_state id="pkg-state"><evr operation="less than">2</evr></rpminfo_state>`)
+	components := []bench.Component{pkg.Component, sourceSLESReleaseComponent("0:15.6-1")}
+	firstSource, firstNative, err := buildSourceEvidenceForTarget(t, oval, selection, components, &sourceNativeComparator{relations: map[string]int{"2": -1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondSource, secondNative, err := buildSourceEvidenceForTarget(t, oval, selection, components, &sourceNativeComparator{relations: map[string]int{"2": -1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstSourceDigest, err := bench.DigestSourceCaseEvidence(firstSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondSourceDigest, err := bench.DigestSourceCaseEvidence(secondSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstNativeDigest, err := bench.DigestNativeEvidenceSet(firstNative)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondNativeDigest, err := bench.DigestNativeEvidenceSet(secondNative)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstSourceDigest != secondSourceDigest || firstNativeDigest != secondNativeDigest {
+		t.Fatalf("guarded output digests differ: %s/%s != %s/%s", firstSourceDigest, firstNativeDigest, secondSourceDigest, secondNativeDigest)
+	}
+}
+
+func sourceDebianReleaseObject(id string) string {
+	return `<textfilecontent54_object id="` + id + `"><path>/etc</path><filename>debian_version</filename><pattern operation="pattern match">(\d+)\.\d</pattern><instance datatype="int">1</instance></textfilecontent54_object>`
+}
+
+func sourceDebianGuardOVAL(release, releaseObject, unameObject string) string {
+	return sourceOVAL(`<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="uname-test"/><criterion test_ref="pkg-test"/></criteria>`, `<textfilecontent54_test id="release-test" check="all"><object object_ref="release-object"/><state state_ref="release-state"/></textfilecontent54_test><uname_test id="uname-test" check="all"><object object_ref="uname-object"/></uname_test>`+sourceTest("pkg-test", "pkg-object", "pkg-state"), releaseObject+unameObject+sourceObject("pkg-object", "pkg"), `<textfilecontent54_state id="release-state"><subexpression operation="equals">`+release+`</subexpression></textfilecontent54_state>`+sourceState("pkg-state", "AND", "less than", "2"))
+}
+
+func sourceSLESGuardOVAL(criteria, packageTests, packageStates string) string {
+	releaseTest := `<rpminfo_test id="release-test" check="at least one"><object object_ref="release-object"/><state state_ref="release-state"/></rpminfo_test>`
+	releaseObject := `<rpminfo_object id="release-object"><name>sles-release</name></rpminfo_object>`
+	releaseState := `<rpminfo_state id="release-state"><version operation="equals">15.6</version></rpminfo_state>`
+	return sourceOVAL(criteria, releaseTest+packageTests, releaseObject+`<rpminfo_object id="pkg-object"><name>pkg</name></rpminfo_object>`, releaseState+packageStates)
 }

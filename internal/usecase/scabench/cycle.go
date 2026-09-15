@@ -846,6 +846,13 @@ func latestCycleAttempt(attempts []CycleAttempt) CycleAttempt {
 	return latest
 }
 
+const (
+	// NativePredicateEVRLessThan identifies a vendor EVR vulnerability range.
+	NativePredicateEVRLessThan = "evr_less_than"
+	// NativePredicateVersionEqualsZero identifies the SLES explicit not-affected sentinel.
+	NativePredicateVersionEqualsZero = "version_equals_zero"
+)
+
 // NativeComparisonRecord binds a normalized package relationship to execution
 // by a target-native comparator. It has no host or semantic fallback field.
 // NativeComparisonRecord binds one generated source predicate to its
@@ -860,6 +867,7 @@ type NativeComparisonRecord struct {
 	PackageIdentity string `json:"package_identity"`
 	CandidateEVR    string `json:"candidate_evr"`
 	FixedEVR        string `json:"fixed_evr"`
+	PredicateKind   string `json:"predicate_kind,omitempty"`
 	Relation        string `json:"relation"`
 	Method          string `json:"method"`
 	ExecutionDigest string `json:"execution_digest"`
@@ -877,6 +885,16 @@ func (record NativeComparisonRecord) Validate() error {
 	}
 	if strings.TrimSpace(record.PackageIdentity) == "" || containsControlCharacter(record.PackageIdentity) || strings.TrimSpace(record.CandidateEVR) == "" || strings.TrimSpace(record.FixedEVR) == "" || containsControlCharacter(record.CandidateEVR) || containsControlCharacter(record.FixedEVR) {
 		return fmt.Errorf("native comparison requires an explicit package identity and exact EVRs")
+	}
+	switch record.PredicateKind {
+	case "", NativePredicateEVRLessThan:
+		// Empty is the immutable v2 encoding for the legacy EVR-less-than predicate.
+	case NativePredicateVersionEqualsZero:
+		if record.PackageFamily != "rpm" || record.FixedEVR != "0" {
+			return fmt.Errorf("native zero-version predicate requires an RPM package and zero comparator value")
+		}
+	default:
+		return fmt.Errorf("native comparison predicate kind is invalid")
 	}
 	if record.Relation != "before" && record.Relation != "equal" && record.Relation != "after" {
 		return fmt.Errorf("native comparison relation is invalid")
