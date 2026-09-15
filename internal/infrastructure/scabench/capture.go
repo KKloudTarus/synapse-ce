@@ -1422,7 +1422,7 @@ func buildProfile(engine bench.Engine, databaseFormat DatabaseFormat, limits Run
 		// osv-scanner expects TOML; empty bytes are a valid empty TOML document.
 		config = []byte{}
 		profile.ExecutionMode = "external"
-		profile.ArgvTemplate = []string{"scan", "source", "--offline", "--format", "json", "--config={config}", "--lockfile={sbom}"}
+		profile.ArgvTemplate = []string{"scan", "source", "--offline", "--offline-vulnerabilities", "--experimental-no-default-plugins", "--experimental-plugins=lockfile", "--experimental-plugins=sbom", "--format", "json", "--config={config}", "--lockfile={sbom}"}
 		profile.VersionProbeArgvTemplate = []string{"--version"}
 		profile.EnvironmentTemplate = []string{"OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY={db}"}
 		profile.OutputFormat = "osv-scanner-v2-json"
