@@ -283,7 +283,7 @@ type sourceFile struct {
 
 // New returns an analyzer with the built-in tier-1 rule set.
 func New() *Analyzer {
-	rules := builtinRules()
+	rules := canonicalBuiltinRules(builtinRules())
 	a := &Analyzer{rules: rules, byID: make(map[string]*rule, len(rules))}
 	for i := range a.rules {
 		a.byID[a.rules[i].id] = &a.rules[i]

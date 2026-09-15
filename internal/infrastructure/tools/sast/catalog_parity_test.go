@@ -7,6 +7,7 @@ import (
 
 	domainrule "github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/rulecatalog"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/rulemeta"
 )
 
 func TestCatalogParity(t *testing.T) {
@@ -40,8 +41,9 @@ func TestCatalogParity(t *testing.T) {
 			continue
 		}
 
-		if catRule.Name != tc.title {
-			t.Errorf("Rule %s Title mismatch: catalog=%q engine=%q", tc.id, catRule.Name, tc.title)
+		expectedTitle := rulemeta.DisplayName(tc.id, tc.title)
+		if catRule.Name != expectedTitle {
+			t.Errorf("Rule %s Title mismatch: catalog=%q engine=%q", tc.id, catRule.Name, expectedTitle)
 		}
 		if catRule.DefaultSeverity != tc.severity {
 			t.Errorf("Rule %s Severity mismatch: catalog=%v engine=%v", tc.id, catRule.DefaultSeverity, tc.severity)

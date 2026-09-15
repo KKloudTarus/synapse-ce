@@ -36,5 +36,9 @@ func Default() (*Catalog, error) {
 	all = append(all, cExtendedRules()...)
 	all = append(all, cppExtendedRules()...)
 
-	return New(all)
+	audited, err := auditRuleMetadata(all)
+	if err != nil {
+		return nil, err
+	}
+	return New(audited)
 }
