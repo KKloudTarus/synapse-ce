@@ -1,0 +1,15 @@
+{
+  "schema_version": "synapse-sca-benchmark-cycle-matrix-spec-v1",
+  "execution_status": "requires_fresh_source_and_oracle_freeze",
+  "repetitions": 2,
+  "cells": [
+    {"target_id": "debian-12-13-slim-amd64", "engine": "owned", "expected_state": "complete", "scanner_dispatches": 1},
+    {"target_id": "debian-12-13-slim-amd64", "engine": "grype", "expected_state": "complete", "scanner_dispatches": 1},
+    {"target_id": "debian-12-13-slim-amd64", "engine": "trivy", "expected_state": "complete", "scanner_dispatches": 1},
+    {"target_id": "debian-12-13-slim-amd64", "engine": "osv-scanner", "expected_state": "complete", "scanner_dispatches": 1},
+    {"target_id": "sles-15-6-bci-base-amd64", "engine": "owned", "expected_state": "complete", "scanner_dispatches": 1},
+    {"target_id": "sles-15-6-bci-base-amd64", "engine": "grype", "expected_state": "complete", "scanner_dispatches": 1},
+    {"target_id": "sles-15-6-bci-base-amd64", "engine": "trivy", "expected_state": "complete", "scanner_dispatches": 1},
+    {"target_id": "sles-15-6-bci-base-amd64", "engine": "osv-scanner", "expected_state": "unsupported", "scanner_dispatches": 0}
+  ]
+}

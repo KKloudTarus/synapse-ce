@@ -78,7 +78,7 @@ func Run(mode string, strict bool, readyWait time.Duration) (Report, error) {
 	// so wait a bounded time without weakening the fail-closed outcome.
 	var runner *sandbox.Runner
 	var err error
-	if strict && readyWait > 0 {
+	if needsRunnerReadinessWait(strict, readyWait) {
 		ctx, cancel := context.WithTimeout(context.Background(), readyWait)
 		defer cancel()
 		runner, err = sandbox.NewRunnerReady(ctx, cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.SandboxMemMax, cfg.SandboxPidsMax, 250*time.Millisecond)
@@ -113,6 +113,13 @@ func Run(mode string, strict bool, readyWait time.Duration) (Report, error) {
 	return r, nil
 }
 
+func needsRunnerReadinessWait(strict bool, readyWait time.Duration) bool {
+	return strict && readyWait > 0
+}
+
+// constructProductionRunner routes every strict conformance invocation through
+// NewRunnerReady. A non-positive wait supplies an already-expired context; the ready
+// constructor still makes its immediate direct-cgroup attempt before returning unavailable.
 func BaseSpec(name string) ports.ToolSpec {
 	return ports.ToolSpec{Name: name, CapAdd: nil, EgressPolicy: nil, HostNetwork: false}
 }

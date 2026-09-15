@@ -1,0 +1,8 @@
+{
+  "schema_version": "synapse-sca-benchmark-publication-layout-v1",
+  "execution_status": "requires_authorized_trusted_linux_evidence_cycle",
+  "publication_manifest": "publication-manifest.json",
+  "candidate_evidence_summary": "candidate-evidence-summary.json",
+  "result": "result.json",
+  "report": "report.md"
+}

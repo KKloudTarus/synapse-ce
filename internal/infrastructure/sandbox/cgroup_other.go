@@ -12,6 +12,10 @@ func prepareDelegatedCgroup() (string, error) {
 	return "", errors.New("cgroup v2 unavailable off Linux")
 }
 
+func prepareDelegatedCgroupRoot(string, int) (string, error) {
+	return "", errors.New("cgroup v2 unavailable off Linux")
+}
+
 func newRunCgroup(string, int64, int64, int) (*runCgroup, error) {
 	return nil, errors.New("cgroup v2 unavailable off Linux")
 }
