@@ -152,6 +152,7 @@ func newEngRouter(t *testing.T) (*Router, *engRepoFake, *fakeAudit) {
 func engCall(h http.HandlerFunc, method, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, "/api/v1/engagements/eng-1", strings.NewReader(body))
 	req.SetPathValue("id", "eng-1")
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice"}))
 	rec := httptest.NewRecorder()
 	h(rec, req)
 	return rec

@@ -85,28 +85,45 @@ func TestRequireAUPGate(t *testing.T) {
 	}
 }
 
+func aupRequestWithPrincipal(body string, p HumanPrincipal) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/aup/accept", strings.NewReader(body))
+	return req.WithContext(context.WithValue(req.Context(), principalKey, p))
+}
+
 func TestAcceptAUPHandler(t *testing.T) {
 	store := newFakeAUPStore()
 	audit := &fakeAudit{}
 	rt := &Router{log: discardLog(), aup: newTestAUP(store, audit)}
 
-	// wrong version → 400 validation
+	// Missing principal must not be silently attributed to the bootstrap operator.
 	rec := httptest.NewRecorder()
-	rt.acceptAUP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/aup/accept", strings.NewReader(`{"version":"9.9"}`)))
+	rt.acceptAUP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/aup/accept", strings.NewReader(`{"version":"1.0"}`)))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("missing principal: want 401, got %d", rec.Code)
+	}
+	if len(audit.entries) != 0 || len(store.accepted) != 0 {
+		t.Fatalf("missing principal mutated AUP state: audit=%+v accepted=%+v", audit.entries, store.accepted)
+	}
+
+	operator := HumanPrincipal{ID: PrincipalOperator, Name: "Operator", Role: "admin"}
+
+	// wrong version → 400 validation, with an explicitly authenticated actor
+	rec = httptest.NewRecorder()
+	rt.acceptAUP(rec, aupRequestWithPrincipal(`{"version":"9.9"}`, operator))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("wrong version: want 400, got %d", rec.Code)
 	}
 
 	// correct version → 200 + recorded + audited
 	rec = httptest.NewRecorder()
-	rt.acceptAUP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/aup/accept", strings.NewReader(`{"version":"1.0"}`)))
+	rt.acceptAUP(rec, aupRequestWithPrincipal(`{"version":"1.0"}`, operator))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("correct version: want 200, got %d", rec.Code)
 	}
 	if _, ok := store.accepted["1.0"]; !ok {
 		t.Fatal("acceptance was not recorded in the store")
 	}
-	if len(audit.entries) != 1 || audit.entries[0].Action != "aup.accept" || audit.entries[0].Actor != "operator" {
-		t.Fatalf("want one attributed aup.accept audit entry, got %+v", audit.entries)
+	if len(audit.entries) != 1 || audit.entries[0].Action != "aup.accept" || audit.entries[0].Actor != PrincipalOperator {
+		t.Fatalf("want one explicitly attributed aup.accept audit entry, got %+v", audit.entries)
 	}
 }

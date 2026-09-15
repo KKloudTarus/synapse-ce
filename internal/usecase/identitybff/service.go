@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	identitydom "github.com/KKloudTarus/synapse-ce/internal/domain/identity"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	identityuc "github.com/KKloudTarus/synapse-ce/internal/usecase/identityuc"
@@ -30,7 +31,7 @@ type Session struct {
 	Token, CSRFToken string
 	Principal        Principal
 }
-type Principal struct{ ID, Name, Role, TenantID string }
+type Principal = identitydom.HumanPrincipal
 
 type Service struct {
 	provider   ports.OIDCProvider
@@ -104,7 +105,13 @@ func (s *Service) resolveUser(ctx context.Context, verified ports.OIDCIdentity) 
 			return nil, fmt.Errorf("OIDC linked identity tenant mismatch: %w", shared.ErrForbidden)
 		}
 		u, getErr := s.users.GetByID(ctx, external.TenantID, external.UserID)
-		if getErr != nil || u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID {
+		if getErr != nil {
+			if errors.Is(getErr, shared.ErrNotFound) {
+				return nil, fmt.Errorf("OIDC linked user is unavailable: %w", shared.ErrForbidden)
+			}
+			return nil, fmt.Errorf("load OIDC linked user: %w", getErr)
+		}
+		if u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID {
 			return nil, fmt.Errorf("OIDC user is unavailable: %w", shared.ErrForbidden)
 		}
 		if u.ID.String() == usersuc.BootstrapID {
@@ -180,17 +187,30 @@ func randomHex() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
+func invalidSessionError(err error) error {
+	return fmt.Errorf("%w: %v", identitydom.ErrAuthenticationInvalid, err)
+}
+
 func (s *Service) Authenticate(ctx context.Context, token, csrfToken string, unsafe bool) (Principal, error) {
 	session, err := s.identities.AuthenticateSession(ctx, s.cfg.TenantID, token)
 	if err != nil {
-		return Principal{}, err
+		if errors.Is(err, shared.ErrNotFound) || errors.Is(err, shared.ErrForbidden) || errors.Is(err, shared.ErrValidation) || errors.Is(err, shared.ErrConflict) {
+			return Principal{}, invalidSessionError(err)
+		}
+		return Principal{}, fmt.Errorf("authenticate browser session: %w", err)
 	}
 	if unsafe && (csrfToken == "" || subtle.ConstantTimeCompare([]byte(hash(csrfToken)), []byte(session.CSRFTokenHash)) != 1) {
-		return Principal{}, fmt.Errorf("CSRF token mismatch: %w", shared.ErrForbidden)
+		return Principal{}, fmt.Errorf("%w: CSRF token mismatch", identitydom.ErrAccessDenied)
 	}
 	u, err := s.users.GetByID(ctx, session.TenantID, session.UserID)
-	if err != nil || u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID {
-		return Principal{}, shared.ErrForbidden
+	if err != nil {
+		if errors.Is(err, shared.ErrNotFound) {
+			return Principal{}, invalidSessionError(err)
+		}
+		return Principal{}, fmt.Errorf("load browser-session user: %w", err)
+	}
+	if u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID {
+		return Principal{}, invalidSessionError(shared.ErrForbidden)
 	}
 	return Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: s.cfg.TenantID.String()}, nil
 }
@@ -200,14 +220,26 @@ func (s *Service) Authenticate(ctx context.Context, token, csrfToken string, uns
 func (s *Service) Discover(ctx context.Context, token string) (Session, error) {
 	session, err := s.identities.AuthenticateSession(ctx, s.cfg.TenantID, token)
 	if err != nil {
-		return Session{}, err
+		if errors.Is(err, shared.ErrNotFound) || errors.Is(err, shared.ErrForbidden) || errors.Is(err, shared.ErrValidation) || errors.Is(err, shared.ErrConflict) {
+			return Session{}, invalidSessionError(err)
+		}
+		return Session{}, fmt.Errorf("discover browser session: %w", err)
 	}
 	u, err := s.users.GetByID(ctx, session.TenantID, session.UserID)
-	if err != nil || u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID || !u.Role.Valid() {
-		return Session{}, shared.ErrForbidden
+	if err != nil {
+		if errors.Is(err, shared.ErrNotFound) {
+			return Session{}, invalidSessionError(err)
+		}
+		return Session{}, fmt.Errorf("load discovered-session user: %w", err)
+	}
+	if u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID || !u.Role.Valid() {
+		return Session{}, invalidSessionError(shared.ErrForbidden)
 	}
 	created, err := s.identities.RotateSession(ctx, session, nil, s.cfg.SessionTTL)
 	if err != nil {
+		if errors.Is(err, shared.ErrNotFound) || errors.Is(err, shared.ErrForbidden) || errors.Is(err, shared.ErrConflict) {
+			return Session{}, invalidSessionError(err)
+		}
 		return Session{}, fmt.Errorf("rotate discovered OIDC session: %w", err)
 	}
 	return Session{Token: created.Token, CSRFToken: created.CSRFToken, Principal: Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: s.cfg.TenantID.String()}}, nil
@@ -216,7 +248,10 @@ func (s *Service) Discover(ctx context.Context, token string) (Session, error) {
 func (s *Service) Logout(ctx context.Context, token string) error {
 	session, err := s.identities.AuthenticateSession(ctx, s.cfg.TenantID, token)
 	if err != nil {
-		return err
+		if errors.Is(err, shared.ErrNotFound) || errors.Is(err, shared.ErrForbidden) || errors.Is(err, shared.ErrValidation) || errors.Is(err, shared.ErrConflict) {
+			return invalidSessionError(err)
+		}
+		return fmt.Errorf("authenticate logout session: %w", err)
 	}
 	if err := s.store.RevokeSession(ctx, s.cfg.TenantID, session.ID, s.clock.Now().UTC()); err != nil {
 		return fmt.Errorf("revoke OIDC session: %w", err)

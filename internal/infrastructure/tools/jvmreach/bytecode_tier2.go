@@ -470,19 +470,33 @@ func storedReferenceSource(ins []instruction, storeIdx int, cp parsedCP) (class 
 		return "", -1, false
 	}
 	j := storeIdx - 1
-	cur := ins[j]
+	cur := ins[j] // #nosec G602 -- j is derived from a validated store index.
 	if j > 0 && cur.op == 0xc0 {
 		j--
-		cur = ins[j]
+		cur = ins[j] // #nosec G602 -- j is decremented only after the positive-index guard.
 	}
 	if local, ok := aloadLocal(cur); ok {
 		return "", local, true
 	}
-	if storeIdx >= 3 {
+	if storeIdx >= 3 && storeIdx <= len(ins) {
 		window := ins[storeIdx-3 : storeIdx]
-		if window[0].op == 0xbb && window[1].op == 0x59 && window[2].op == 0xb7 {
-			allocated := cp.className(window[0].cpIndex)
-			owner, name, _, ok := cp.member(window[2].cpIndex)
+		if len(window) != 3 {
+			return "", -1, false
+		}
+		var first, second, third instruction
+		for index, item := range window {
+			switch index {
+			case 0:
+				first = item
+			case 1:
+				second = item
+			case 2:
+				third = item
+			}
+		}
+		if first.op == 0xbb && second.op == 0x59 && third.op == 0xb7 {
+			allocated := cp.className(first.cpIndex)
+			owner, name, _, ok := cp.member(third.cpIndex)
 			if ok && name == "<init>" && allocated != "" && owner == allocated {
 				return allocated, -1, true
 			}

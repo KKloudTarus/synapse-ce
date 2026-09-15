@@ -1,6 +1,7 @@
 package sourceupload
 
 import (
+	"runtime"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -21,6 +22,9 @@ import (
 )
 
 func TestVersionedSourceDurableReuseAndImmutableBindings(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("object-store durability fixture relies on POSIX filesystem semantics")
+	}
 	ctx := shared.WithTenant(context.Background(), "tenant-a")
 	directory := t.TempDir()
 	objects, err := blob.NewFilesystem(directory)
@@ -225,6 +229,9 @@ func TestVersionedSourceAmbiguousCleanupRetainsBytes(t *testing.T) {
 }
 
 func TestVersionedSourceConcurrentUploadPublishesOneImmutableObject(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("object-store durability fixture relies on POSIX filesystem semantics")
+	}
 	ctx := shared.WithTenant(context.Background(), "tenant-a")
 	directory := t.TempDir()
 	objects, err := blob.NewFilesystem(directory)

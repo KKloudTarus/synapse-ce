@@ -107,7 +107,7 @@ func (s *Sender) do(req *http.Request) ports.NotificationSendResult {
 	if err != nil {
 		return ports.NotificationSendResult{ErrorCode: "network_error", Retryable: true}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 	result := ports.NotificationSendResult{StatusCode: resp.StatusCode}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -147,7 +147,7 @@ func (s *Sender) sendEmail(ctx context.Context, w ports.NotificationWork, _ port
 	if err != nil {
 		return ports.NotificationSendResult{ErrorCode: "smtp_connect", Retryable: true}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stopCancel()
 	_ = conn.SetDeadline(time.Now().Add(s.timeout))
@@ -155,7 +155,7 @@ func (s *Sender) sendEmail(ctx context.Context, w ports.NotificationWork, _ port
 	if err != nil {
 		return smtpResult(err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	if ok, _ := client.Extension("STARTTLS"); ok {
 		if err = client.StartTLS(&tls.Config{ServerName: s.smtp.Host, MinVersion: tls.VersionTLS12}); err != nil {
 			return smtpResult(err)

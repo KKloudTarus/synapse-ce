@@ -241,6 +241,24 @@ func TestAssessmentValidateDetectsTampering(t *testing.T) {
 	}
 }
 
+
+func TestEvaluateCanonicalizesPostgresTimestampPrecision(t *testing.T) {
+	now := time.Date(2026, 8, 15, 9, 30, 0, 123456789, time.FixedZone("offset", 9*60*60))
+	item, err := Evaluate(validAssessmentInput(), DefaultConfig(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.AssessedAt.Location() != time.UTC || item.AssessedAt.Nanosecond()%1_000 != 0 {
+		t.Fatalf("assessment timestamp must be UTC microsecond precision, got %s", item.AssessedAt)
+	}
+	if !item.Result.ComputedAt.Equal(item.AssessedAt) {
+		t.Fatalf("JSON result and persisted assessment timestamps must match: result=%s assessment=%s", item.Result.ComputedAt, item.AssessedAt)
+	}
+	if err := item.Validate(); err != nil {
+		t.Fatalf("canonical assessment must validate: %v", err)
+	}
+}
+
 func TestPolicyDigestAndValidation(t *testing.T) {
 	policy, err := NewPolicy("tenant-a", DefaultConfig(), "alice", assessmentEpoch)
 	if err != nil {

@@ -7,13 +7,15 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	identitydom "github.com/KKloudTarus/synapse-ce/internal/domain/identity"
 )
 
 type cookieSessionResolver struct{ principal Principal }
 
 func (s cookieSessionResolver) Authenticate(_ context.Context, token, csrf string, unsafe bool) (Principal, error) {
 	if token != "opaque" || unsafe && csrf != "csrf" {
-		return Principal{}, errors.New("denied")
+		return Principal{}, identitydom.ErrAuthenticationInvalid
 	}
 	return s.principal, nil
 }

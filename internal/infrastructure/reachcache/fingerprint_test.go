@@ -1,10 +1,10 @@
 package reachcache
 
 import (
+	"runtime"
 	"context"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -39,7 +39,9 @@ func hashOf(t *testing.T, dir string) string {
 // The same tree content yields the same source hash across two independent walks (order-independent).
 func TestTreeFingerprintStable(t *testing.T) {
 	files := map[string]string{"main.go": "package main", "pkg/a.go": "package pkg", "go.mod": "module x"}
-	if hashOf(t, writeTree(t, files)) != hashOf(t, writeTree(t, files)) {
+	left := hashOf(t, writeTree(t, files))
+	right := hashOf(t, writeTree(t, files))
+	if left != right {
 		t.Fatal("identical trees must hash equal")
 	}
 }
@@ -126,6 +128,9 @@ func TestTreeFingerprintContextCancel(t *testing.T) {
 
 // Changing a file's mode changes the source hash (mode is bound).
 func TestTreeFingerprintModeChange(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file mode bits are not portable on Windows")
+	}
 	dir := writeTree(t, map[string]string{"run.sh": "echo hi"})
 	before := hashOf(t, dir)
 	if err := os.Chmod(filepath.Join(dir, "run.sh"), 0o755); err != nil {
@@ -340,9 +345,7 @@ func TestTreeFingerprintAncestorGoWorkErrors(t *testing.T) {
 // block); it is not collected as a manifest, so fingerprinting completes.
 func TestTreeFingerprintGoModFIFONotOpened(t *testing.T) {
 	dir := writeTree(t, map[string]string{"main.go": "package main"})
-	if err := syscall.Mkfifo(filepath.Join(dir, "go.mod"), 0o644); err != nil {
-		t.Skipf("mkfifo unsupported: %v", err)
-	}
+	makeFIFO(t, filepath.Join(dir, "go.mod"))
 	done := make(chan struct{})
 	go func() { _, _, _ = NewTreeFingerprinter().FingerprintSource(context.Background(), dir); close(done) }()
 	select {
@@ -434,9 +437,7 @@ func TestTreeFingerprintExternalGoWorkErrors(t *testing.T) {
 func TestTreeFingerprintFIFONotOpened(t *testing.T) {
 	dir := writeTree(t, map[string]string{"main.go": "package main"})
 	fifo := filepath.Join(dir, "pipe")
-	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
-		t.Skipf("mkfifo unsupported: %v", err)
-	}
+	makeFIFO(t, fifo)
 	done := make(chan struct{})
 	var src string
 	go func() {

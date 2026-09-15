@@ -31,10 +31,9 @@ func harnessSource(t *testing.T) string {
 	return string(b)
 }
 
-// TestIsPlatformAdminFailsClosed pins the one property that makes this check usable as
-// authorization: with no authenticated principal bound it must answer no. PrincipalFrom
-// deliberately falls back to the operator id for attribution, so a check built on it would
-// grant platform authority to any request that reached a handler without the authenticator.
+// TestIsPlatformAdminFailsClosed pins the property that makes this check usable as
+// authorization: bootstrap authority exists only for an explicitly authenticated operator.
+// Missing or empty human-principal context must always answer no.
 func TestIsPlatformAdminFailsClosed(t *testing.T) {
 	cases := []struct {
 		name string
@@ -42,10 +41,10 @@ func TestIsPlatformAdminFailsClosed(t *testing.T) {
 		want bool
 	}{
 		{"no principal bound", context.Background(), false},
-		{"empty principal", context.WithValue(context.Background(), principalKey, Principal{}), false},
-		{"tenant admin", context.WithValue(context.Background(), principalKey, Principal{ID: "u1", Role: "admin", TenantID: "tenant-a"}), false},
-		{"tenant member", context.WithValue(context.Background(), principalKey, Principal{ID: "u2", Role: "member", TenantID: "tenant-a"}), false},
-		{"platform operator", context.WithValue(context.Background(), principalKey, Principal{ID: PrincipalOperator, Role: "admin"}), true},
+		{"empty principal", context.WithValue(context.Background(), principalKey, HumanPrincipal{}), false},
+		{"tenant admin", context.WithValue(context.Background(), principalKey, HumanPrincipal{ID: "u1", Role: "admin", TenantID: "tenant-a"}), false},
+		{"tenant member", context.WithValue(context.Background(), principalKey, HumanPrincipal{ID: "u2", Role: "member", TenantID: "tenant-a"}), false},
+		{"platform operator", context.WithValue(context.Background(), principalKey, HumanPrincipal{ID: PrincipalOperator, Role: "admin"}), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,7 +69,7 @@ func TestRequirePlatformAdminRejectsTenantAdmin(t *testing.T) {
 		reached = false
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/vulnerability/sources", nil)
-		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "u1", Role: "admin", TenantID: "tenant-a"}))
+		req = req.WithContext(context.WithValue(req.Context(), principalKey, HumanPrincipal{ID: "u1", Role: "admin", TenantID: "tenant-a"}))
 		h(rec, req)
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
@@ -84,7 +83,7 @@ func TestRequirePlatformAdminRejectsTenantAdmin(t *testing.T) {
 		reached = false
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/vulnerability/sources", nil)
-		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: PrincipalOperator, Role: "admin"}))
+		req = req.WithContext(context.WithValue(req.Context(), principalKey, HumanPrincipal{ID: PrincipalOperator, Role: "admin"}))
 		h(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)

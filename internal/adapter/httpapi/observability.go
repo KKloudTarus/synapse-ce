@@ -159,8 +159,8 @@ func Instrument(next http.Handler, log *slog.Logger, accessLogEnabled bool, obse
 					"status", status,
 					"duration_ms", duration.Milliseconds(),
 				}
-				if principalID := state.principal(); principalID != "" {
-					attrs = append(attrs, "principal_id", principalID)
+				if state.principal() != "" {
+					attrs = append(attrs, "authenticated_principal", true)
 				}
 				requestLog.Info("http access", attrs...)
 			}

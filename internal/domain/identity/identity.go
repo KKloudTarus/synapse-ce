@@ -1,4 +1,5 @@
-// Package identity defines persisted OIDC identities, authorization transactions, and sessions.
+// Package identity defines protocol-neutral human identity primitives together with the legacy
+// persisted OIDC identity, authorization-transaction, and browser-session model.
 package identity
 
 import (

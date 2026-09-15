@@ -28,7 +28,7 @@ const (
 // evidence. Roles that already hold an investigative/mutating/review capability may see the source-side
 // redacted evidence. Unknown/machine roles fail closed even if this helper is ever called outside authz.
 func detectionFieldScopeFor(ctx context.Context) (detectionFieldScope, error) {
-	p, ok := principalObj(ctx)
+	p, ok := HumanPrincipalFrom(ctx)
 	if !ok {
 		return "", fmt.Errorf("%w: detection field authorization requires an authenticated principal", shared.ErrForbidden)
 	}
@@ -102,7 +102,7 @@ func projectDetectionEvent(event detection.Event, scope detectionFieldScope) det
 // unaudited read. Router.vulnerabilityAudit is the existing writable append-only audit port wired by the
 // composition root; despite the historical field name it points at the shared audit log used system-wide.
 func (rt *Router) auditDetectionQuery(ctx context.Context, engagementID shared.ID, view string, scope detectionFieldScope) error {
-	p, ok := principalObj(ctx)
+	p, ok := HumanPrincipalFrom(ctx)
 	if !ok {
 		return fmt.Errorf("%w: detection query audit requires an authenticated principal", shared.ErrForbidden)
 	}

@@ -140,16 +140,16 @@ func SemgrepCEObservations(c Corpus, r io.Reader) ([]Observation, error) {
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(body, &native); err != nil {
-		return nil, fmt.Errorf("decode Semgrep CE reachability output: %w", err)
+		return nil, fmt.Errorf("decode semgrep CE reachability output: %w", err)
 	}
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, fmt.Errorf("decode Semgrep CE reachability output: %w", err)
+		return nil, fmt.Errorf("decode semgrep CE reachability output: %w", err)
 	}
 	_, hasNative := envelope["results"]
 	_, hasSARIF := envelope["runs"]
 	if !hasNative && !hasSARIF {
-		return nil, fmt.Errorf("Semgrep CE reachability output is neither native JSON nor SARIF")
+		return nil, fmt.Errorf("semgrep CE reachability output is neither native JSON nor SARIF")
 	}
 	results := make([]result, 0, len(native.Results))
 	for _, item := range native.Results {
@@ -198,7 +198,7 @@ func SemgrepCEObservations(c Corpus, r io.Reader) ([]Observation, error) {
 	return observations, nil
 }
 
-// SnykSampleObservations reduces a human-reviewed Snyk sample without embedding credentials, organization
+// SnykSampleObservations reduces a human-reviewed snyk sample without embedding credentials, organization
 // identifiers, or a vendor-specific API contract in the repository. Each observation cites the stable
 // evidence_id declared by the corpus; missing evidence is no_analysis and duplicate evidence is rejected.
 func SnykSampleObservations(c Corpus, r io.Reader) ([]Observation, error) {
@@ -211,17 +211,17 @@ func SnykSampleObservations(c Corpus, r io.Reader) ([]Observation, error) {
 			Label      Label  `json:"label"`
 		} `json:"observations"`
 	}
-	if err := decodeStrict(r, &input, "Snyk sample reachability input"); err != nil {
+	if err := decodeStrict(r, &input, "snyk sample reachability input"); err != nil {
 		return nil, err
 	}
 	byEvidence := make(map[string]Label, len(input.Observations))
 	for _, item := range input.Observations {
 		id := strings.TrimSpace(item.EvidenceID)
 		if id == "" || !item.Label.valid() {
-			return nil, fmt.Errorf("Snyk sample has invalid evidence observation")
+			return nil, fmt.Errorf("snyk sample has invalid evidence observation")
 		}
 		if _, duplicate := byEvidence[id]; duplicate {
-			return nil, fmt.Errorf("Snyk sample duplicates evidence id %q", id)
+			return nil, fmt.Errorf("snyk sample duplicates evidence id %q", id)
 		}
 		byEvidence[id] = item.Label
 	}

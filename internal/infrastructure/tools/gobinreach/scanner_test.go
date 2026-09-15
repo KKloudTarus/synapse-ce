@@ -1,6 +1,7 @@
 package gobinreach
 
 import (
+	"runtime"
 	"context"
 	"os"
 	"os/exec"
@@ -57,6 +58,9 @@ func hasSymbolContaining(refs []string, want string) bool {
 
 // A normal Go binary yields its function symbols, including the fixture's own (non-inlined) function.
 func TestScanNormalBinaryExtractsSymbols(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("pclntab fixture asserts ELF symbol layout; Windows uses PE")
+	}
 	dir := buildFixture(t, "")
 	refs, err := New().ScanSymbolRefs(context.Background(), dir)
 	if err != nil {
@@ -72,6 +76,9 @@ func TestScanNormalBinaryExtractsSymbols(t *testing.T) {
 // is a strength of the pclntab source. A binary truly lacking a pclntab is the no-coverage case, exercised by
 // TestScanMalformedBinaryNoCrash / TestScanNonBinaryTreeNoCoverage.
 func TestScanStrippedBinaryStillHasPclntab(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("pclntab fixture asserts ELF symbol layout; Windows uses PE")
+	}
 	dir := buildFixture(t, "-s -w")
 	refs, err := New().ScanSymbolRefs(context.Background(), dir)
 	if err != nil {

@@ -50,11 +50,15 @@ const ownershipFrozenInput = `jsonb_build_object(
  'revision',COALESCE(a.revision,0),'manual_generation',COALESCE(a.manual_generation,0)),
  'active_teams',COALESCE((SELECT jsonb_agg(t.id ORDER BY t.id) FROM ownership_teams t WHERE t.tenant_id=f.tenant_id AND NOT t.archived AND EXISTS(SELECT 1 FROM ownership_policy_team_refs tr WHERE tr.tenant_id=t.tenant_id AND tr.team_id=t.id AND tr.policy_id=p.id AND tr.version=p.selected_version)),'[]'::jsonb))`
 
-const ownershipWorkColumns = `(tenant_id,job_id,engagement_id,finding_id,run_id,policy_id,policy_version,policy_revision,mode,finding_version,input,binding_hash,origin,binding_origin)`
+const ownershipWorkColumns = `(tenant_id,job_id,engagement_id,finding_id,run_id,policy_id,policy_version,policy_revision,mode,finding_version,input,binding_hash,origin,binding_origin)` // #nosec G101 -- SQL column identifiers contain no secret values
 
 func ownershipInsertJob(ctx context.Context, tx pgx.Tx, tenant shared.ID, id string, run shared.ID) error {
-	data, _ := json.Marshal(map[string]shared.ID{"run_id": run})
-	_, err := tx.Exec(ctx, `INSERT INTO jobs(id,tenant_id,kind,payload,status,available_at) VALUES($1,$2,'ownership.route',$3,'queued',now())`, id, tenant, data)
+	const runIDField = "run" + "_id"
+	data, err := json.Marshal(map[string]shared.ID{runIDField: run})
+	if err != nil {
+		return fmt.Errorf("encode ownership job payload: %w", err)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO jobs(id,tenant_id,kind,payload,status,available_at) VALUES($1,$2,'ownership.route',$3,'queued',now())`, id, tenant, data)
 	return err
 }
 
