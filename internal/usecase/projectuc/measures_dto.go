@@ -62,6 +62,14 @@ type ComplexityMeasures struct {
 	Cognitive  MeasureCountMetric `json:"cognitive"`
 }
 
+// CouplingMeasures describes incoming and outgoing first-party module
+// dependencies. Instability is Ce/(Ca+Ce) and is unavailable for an isolated module.
+type CouplingMeasures struct {
+	Afferent    MeasureCountMetric   `json:"afferent"`
+	Efferent    MeasureCountMetric   `json:"efferent"`
+	Instability MeasureDecimalMetric `json:"instability"`
+}
+
 // CoverageMeasures encapsulates code coverage metrics.
 type CoverageMeasures struct {
 	CoveredLines    MeasureCountMetric   `json:"covered_lines"`
@@ -117,6 +125,7 @@ type MeasureNode struct {
 	Language    string               `json:"language,omitempty"`
 	Size        *SizeMeasures        `json:"size,omitempty"`
 	Complexity  *ComplexityMeasures  `json:"complexity,omitempty"`
+	Coupling    *CouplingMeasures    `json:"coupling,omitempty"`
 	Coverage    *CoverageMeasures    `json:"coverage,omitempty"`
 	Duplication *DuplicationMeasures `json:"duplication,omitempty"`
 	Issues      *IssueMeasures       `json:"issues,omitempty"`

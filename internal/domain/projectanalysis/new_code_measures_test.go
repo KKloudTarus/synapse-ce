@@ -20,7 +20,7 @@ func changes() []FileChange {
 }
 
 func measuresFor(coverage *measure.CoverageReport, dup *measure.DuplicationReport, fc []FileChange) qualitygate.Snapshot {
-	return buildMeasures(Counts{}, Counts{}, rating.Report{}, dup, coverage, hotspot.Summary{}, hotspot.Summary{}, ChangedLineSet(fc))
+	return buildMeasures(Counts{}, Counts{}, rating.Report{}, dup, coverage, nil, hotspot.Summary{}, hotspot.Summary{}, ChangedLineSet(fc))
 }
 
 func TestChangedLineSetExpandsAddedRangesOnly(t *testing.T) {

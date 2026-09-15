@@ -81,6 +81,8 @@ describe('projectOverviewPresentation', () => {
     expect(gateMetricLabel('security_rating')).toBe('Security rating')
     expect(gateMetricLabel('coverage')).toBe('Coverage')
     expect(gateMetricLabel('duplication_density')).toBe('Duplications')
+    expect(gateMetricLabel('max_efferent_coupling')).toBe('Maximum outgoing coupling')
+    expect(gateMetricLabel('max_instability')).toBe('Maximum instability')
     expect(formatGateEvidenceValue('new_high', 2)).toBe('2')
     expect(formatGateEvidenceValue('coverage', 72.34)).toBe('72.3%')
     expect(formatGateEvidenceValue('coverage', 99.96)).toBe('99.9%')

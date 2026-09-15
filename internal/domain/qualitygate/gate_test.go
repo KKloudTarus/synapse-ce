@@ -32,6 +32,30 @@ func TestUnknownOpFailsClosed(t *testing.T) {
 	}
 }
 
+func TestMissingCouplingMeasurementFailsClosed(t *testing.T) {
+	for _, metric := range []string{MetricMaxEfferentCoupling, MetricMaxInstability} {
+		g := Gate{Conditions: []Condition{{Metric: metric, Op: OpLE, Threshold: 1}}}
+		result := Evaluate(g, Snapshot{})
+		if result.Passed || len(result.Failures()) != 1 || !result.Failures()[0].Unmeasured {
+			t.Fatalf("%s missing result = %+v", metric, result)
+		}
+		if result := Evaluate(g, Snapshot{metric: 0}); !result.Passed || result.Results[0].Unmeasured {
+			t.Fatalf("%s measured zero should pass: %+v", metric, result)
+		}
+	}
+}
+
+func TestCouplingThresholdValidation(t *testing.T) {
+	for _, condition := range []Condition{
+		{Metric: MetricMaxEfferentCoupling, Op: OpLE, Threshold: 1.5},
+		{Metric: MetricMaxInstability, Op: OpLE, Threshold: 1.1},
+	} {
+		if _, err := (Gate{Key: "coupling", Name: "Coupling", Conditions: []Condition{condition}}).Normalize(); err == nil {
+			t.Fatalf("invalid condition accepted: %+v", condition)
+		}
+	}
+}
+
 func TestDefaultGate(t *testing.T) {
 	g := Default()
 	if len(g.Conditions) == 0 {

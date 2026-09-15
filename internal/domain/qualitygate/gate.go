@@ -6,6 +6,7 @@ package qualitygate
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 )
@@ -104,6 +105,15 @@ func (g Gate) Validate() error {
 		}
 		if !validOps[c.Op] {
 			return fmt.Errorf("unknown gate operator %q for metric %q", c.Op, c.Metric)
+		}
+		if math.IsNaN(c.Threshold) || math.IsInf(c.Threshold, 0) {
+			return fmt.Errorf("threshold for metric %q must be finite", c.Metric)
+		}
+		if c.Metric == MetricMaxEfferentCoupling && (c.Threshold < 0 || c.Threshold != math.Trunc(c.Threshold)) {
+			return fmt.Errorf("threshold for metric %q must be a non-negative integer", c.Metric)
+		}
+		if c.Metric == MetricMaxInstability && (c.Threshold < 0 || c.Threshold > 1) {
+			return fmt.Errorf("threshold for metric %q must be between 0 and 1", c.Metric)
 		}
 	}
 	return nil

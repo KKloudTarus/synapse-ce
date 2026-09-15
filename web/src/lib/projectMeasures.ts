@@ -32,6 +32,12 @@ export interface ComplexityMeasures {
   cognitive: MeasureCountMetric
 }
 
+export interface CouplingMeasures {
+  afferent: MeasureCountMetric
+  efferent: MeasureCountMetric
+  instability: MeasureDecimalMetric
+}
+
 export interface CoverageMeasures {
   coveredLines: MeasureCountMetric
   coverableLines: MeasureCountMetric
@@ -79,6 +85,7 @@ export interface MeasureNode {
   language: string
   size: SizeMeasures | null
   complexity: ComplexityMeasures | null
+  coupling?: CouplingMeasures | null
   coverage: CoverageMeasures | null
   duplication: DuplicationMeasures | null
   issues: IssueMeasures | null
@@ -155,6 +162,15 @@ function mapComplexityMeasures(raw: any): ComplexityMeasures | null {
   }
 }
 
+function mapCouplingMeasures(raw: any): CouplingMeasures | null {
+  if (!raw) return null
+  return {
+    afferent: mapCountMetric(raw.afferent),
+    efferent: mapCountMetric(raw.efferent),
+    instability: mapDecimalMetric(raw.instability),
+  }
+}
+
 function mapCoverageMeasures(raw: any): CoverageMeasures | null {
   if (!raw) return null
   return {
@@ -219,6 +235,7 @@ export function mapMeasureNode(raw: any): MeasureNode | null {
     language: raw.language ?? '',
     size: mapSizeMeasures(raw.size),
     complexity: mapComplexityMeasures(raw.complexity),
+    coupling: mapCouplingMeasures(raw.coupling),
     coverage: mapCoverageMeasures(raw.coverage),
     duplication: mapDuplicationMeasures(raw.duplication),
     issues: mapIssueMeasures(raw.issues),

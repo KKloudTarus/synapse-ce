@@ -105,7 +105,10 @@ deterministically from stored findings.
 
 A metric is reported as unavailable rather than guessed when its analyzer could not run. Complexity and
 structural metrics need the `synapse-ast` sidecar; without it they degrade to Go-only counts instead of
-reporting a false zero.
+reporting a false zero. The Coupling tab derives direct first-party dependencies for Go packages and
+JavaScript/TypeScript modules from source imports. It reports afferent coupling (Ca), efferent coupling
+(Ce), and instability (`Ce / (Ca + Ce)`) for each module or directory boundary. An isolated module has
+no defined instability, and an incomplete dependency graph is shown as unavailable instead of zero.
 
 ## Quality gates
 
@@ -123,7 +126,9 @@ PUT    /api/v1/projects/{key}/gate          bind a gate to a project
 
 Available metrics include `new_critical`, `new_high`, `new_medium`, `new_issues`, `new_vulnerability`,
 `new_secret`, `new_misconfig`, `new_coverage`, `coverage`, `new_duplication`, `duplication_density`,
-`maintainability_rating`, and `new_security_hotspots_reviewed`.
+`maintainability_rating`, `max_efferent_coupling`, `max_instability`, and
+`new_security_hotspots_reviewed`. Coupling gate metrics use the maximum complete per-module value;
+collection gaps fail closed as unmeasured conditions rather than passing a threshold.
 
 Conditions on `new_*` metrics implement Clean as You Code: a legacy codebase can adopt a strict gate for
 changed lines without first repaying all existing debt.

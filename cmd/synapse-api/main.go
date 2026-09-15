@@ -75,6 +75,7 @@ import (
 	asttool "github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/coupling"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/dotnetreach"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
@@ -2077,6 +2078,7 @@ func main() {
 		codeanalysis.New(),
 		codequality.WithDuplication(duplication.New(0)),
 		codequality.WithInventory(codeinventory.New()),
+		codequality.WithCoupling(coupling.New(jsimports.New())),
 	)
 	scaService.SetCodeQuality(codeQualityService)
 	if rulesSvc, rerr := rules.NewService(ruleCatalog); rerr != nil {

@@ -26,6 +26,7 @@ import { getDomainColumns, CurrentNodeMeasures } from './measureColumns'
 const DOMAINS = [
   { key: 'size', label: 'Size', icon: FileCode01 },
   { key: 'complexity', label: 'Complexity', icon: CpuChip01 },
+  { key: 'coupling', label: 'Coupling', icon: CpuChip01 },
   { key: 'coverage', label: 'Coverage', icon: ShieldTick },
   { key: 'duplication', label: 'Duplications', icon: Copy01 },
   { key: 'issues', label: 'Issues', icon: Virus },

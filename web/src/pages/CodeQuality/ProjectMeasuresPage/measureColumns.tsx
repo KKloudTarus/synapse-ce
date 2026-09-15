@@ -213,6 +213,13 @@ export function getDomainColumns(
             cell: (i) => <MetricValue m={i.complexity?.cognitive} />,
           },
         ]
+      case 'coupling':
+        return [
+          ...base,
+          { header: 'Incoming (Ca)', cell: (i) => <MetricValue m={i.coupling?.afferent} /> },
+          { header: 'Outgoing (Ce)', cell: (i) => <MetricValue m={i.coupling?.efferent} /> },
+          { header: 'Instability', cell: (i) => <MetricValue m={i.coupling?.instability} /> },
+        ]
       case 'coverage':
         return [
           ...base,
@@ -389,6 +396,12 @@ export function CurrentNodeMeasures({
     items.push(
       { label: 'Cyclomatic Complexity', icon: CpuChip01, m: node.complexity?.cyclomatic },
       { label: 'Cognitive Complexity', icon: CpuChip01, m: node.complexity?.cognitive },
+    )
+  } else if (domain === 'coupling') {
+    items.push(
+      { label: 'Incoming dependencies (Ca)', icon: CpuChip01, m: node.coupling?.afferent },
+      { label: 'Outgoing dependencies (Ce)', icon: CpuChip01, m: node.coupling?.efferent },
+      { label: 'Instability Ce / (Ca + Ce)', icon: Percent01, m: node.coupling?.instability },
     )
   } else if (domain === 'coverage') {
     items.push(

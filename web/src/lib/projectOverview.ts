@@ -38,6 +38,8 @@ export type ProjectOverviewGateMetric =
   | 'security_rating'
   | 'reliability_rating'
   | 'maintainability_rating'
+  | 'max_efferent_coupling'
+  | 'max_instability'
 
 export interface RatingMetric {
   availability: MetricAvailability
@@ -82,6 +84,7 @@ export interface ProjectOverviewGateCondition {
   operator: ProjectOverviewGateOperator
   threshold: number
   actual: number
+  unmeasured?: boolean
 }
 
 export interface ProjectOverviewIssueSummary {
@@ -142,6 +145,8 @@ const GATE_METRICS = new Set<ProjectOverviewGateMetric>([
   'security_rating',
   'reliability_rating',
   'maintainability_rating',
+  'max_efferent_coupling',
+  'max_instability',
 ])
 const RFC3339_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
 
@@ -280,6 +285,7 @@ function projectGate(value: unknown): ProjectOverviewGate {
         operator: stringEnum(condition.operator, GATE_OPERATORS),
         threshold: finiteNumber(condition.threshold),
         actual: finiteNumber(condition.actual),
+        unmeasured: condition.unmeasured === true,
       }
     }),
   }

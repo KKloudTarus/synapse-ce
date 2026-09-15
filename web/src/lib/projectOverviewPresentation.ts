@@ -133,6 +133,10 @@ export function gateMetricLabel(metric: ProjectOverviewGateMetric): string {
       return 'Reliability rating'
     case 'maintainability_rating':
       return 'Maintainability rating'
+    case 'max_efferent_coupling':
+      return 'Maximum outgoing coupling'
+    case 'max_instability':
+      return 'Maximum instability'
   }
 }
 

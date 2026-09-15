@@ -2234,7 +2234,7 @@ paths:
           type: array
           items:
             type: string
-            enum: [size, complexity, coverage, duplication, issues, debt, ratings]
+            enum: [size, complexity, coupling, coverage, duplication, issues, debt, ratings]
       responses:
         "200":
           description: Project measure node and children
@@ -10007,6 +10007,8 @@ components:
       - security_rating
       - reliability_rating
       - maintainability_rating
+      - max_efferent_coupling
+      - max_instability
 
       - security_hotspots_reviewed
       - new_security_hotspots_reviewed
@@ -10127,7 +10129,7 @@ components:
         unmeasured:
           type: boolean
           description: True when the condition failed because its metric had no measurement for this
-            analysis (coverage, new_coverage, new_duplication without data). actual is then 0 only
+            analysis (coverage, new-code metrics, or coupling limits without data). actual is then 0 only
             because there is nothing to report. Omitted when false.
 
     ProjectOverviewIssueSummary:
@@ -10487,6 +10489,13 @@ components:
         - issue_attribution_incomplete
         - technical_debt_incomplete
         - rating_not_available
+        - coupling_not_collected
+        - coupling_incomplete
+        - no_supported_modules
+        - no_connected_modules
+        - not_a_supported_module
+        - isolated_module
+        - project_uses_module_maxima
 
     MeasureCountMetric:
       type: object
@@ -10537,6 +10546,15 @@ components:
       properties:
         cyclomatic: {$ref: '#/components/schemas/MeasureCountMetric'}
         cognitive: {$ref: '#/components/schemas/MeasureCountMetric'}
+
+    MeasureCoupling:
+      type: object
+      description: Distinct first-party source module dependencies. Instability is Ce/(Ca+Ce).
+      required: [afferent, efferent, instability]
+      properties:
+        afferent: {$ref: '#/components/schemas/MeasureCountMetric'}
+        efferent: {$ref: '#/components/schemas/MeasureCountMetric'}
+        instability: {$ref: '#/components/schemas/MeasureDecimalMetric'}
 
     MeasureCoverage:
       type: object
@@ -10609,6 +10627,7 @@ components:
         language: {type: string}
         size: {$ref: '#/components/schemas/MeasureSize'}
         complexity: {$ref: '#/components/schemas/MeasureComplexity'}
+        coupling: {$ref: '#/components/schemas/MeasureCoupling'}
         coverage: {$ref: '#/components/schemas/MeasureCoverage'}
         duplication: {$ref: '#/components/schemas/MeasureDuplication'}
         issues: {$ref: '#/components/schemas/MeasureIssues'}
@@ -10649,7 +10668,7 @@ components:
         path: {type: string}
         included_domains:
           type: array
-          items: {type: string, enum: [size, complexity, coverage, duplication, issues, debt, ratings]}
+          items: {type: string, enum: [size, complexity, coupling, coverage, duplication, issues, debt, ratings]}
         node: {$ref: '#/components/schemas/MeasureNode'}
         children: {$ref: '#/components/schemas/ChildCollection'}
       required:
@@ -10670,7 +10689,7 @@ components:
         path: {type: string}
         included_domains:
           type: array
-          items: {type: string, enum: [size, complexity, coverage, duplication, issues, debt, ratings]}
+          items: {type: string, enum: [size, complexity, coupling, coverage, duplication, issues, debt, ratings]}
         node: {type: 'null'}
         children: {$ref: '#/components/schemas/ChildCollection'}
       required:

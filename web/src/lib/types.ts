@@ -1701,6 +1701,7 @@ export interface ProjectGateCondition {
   condition: { metric: string; op: string; threshold: number }
   actual: number
   passed: boolean
+  unmeasured?: boolean
 }
 
 export interface ProjectGateResult {

@@ -557,6 +557,11 @@ with no measurement fails as `no data` rather than being judged against a 0 nobo
 `new_duplication` condition without `--new-code-only`, or with a diff no report line matches, fails
 rather than silently passing.
 
+The gate also builds a first-party dependency graph for Go and JavaScript/TypeScript source. Managed or
+local gates can cap `max_efferent_coupling` and `max_instability`; if graph collection is incomplete,
+those conditions are reported as `no data` and fail closed. `synapse-cli quality` prints the same maxima
+for architectural feedback without executing project code or package managers.
+
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--new-code-only` | off | Score only lines changed against `--base` instead of the whole tree. |
@@ -578,6 +583,12 @@ conditions:
   - metric: coverage
     op: ">="
     threshold: 80
+  - metric: max_efferent_coupling
+    op: "<="
+    threshold: 12
+  - metric: max_instability
+    op: "<="
+    threshold: 0.8
 ```
 
 Inspect coverage on its own:
@@ -605,7 +616,7 @@ synapse-cli rating <path> [--json] [--fail-below GRADE]
 | `inventory` | Languages, files, and lines of code | none |
 | `metrics` | Per-function cyclomatic and cognitive complexity | `--fail-on-complexity N` exits `1` when any function exceeds `N` |
 | `duplication` | Duplicated blocks, lines, and density | `--fail-on-duplication PCT` exits `1` when density exceeds `PCT` |
-| `quality` | Maintainability and reliability findings, plus duplication and complexity bridges | `--fail-on SEV` accepts `critical\|high\|medium\|low\|info` |
+| `quality` | Maintainability and reliability findings, duplication and complexity bridges, and module coupling maxima | `--fail-on SEV` accepts `critical\|high\|medium\|low\|info` |
 | `rating` | A–E security, reliability, and maintainability grades with technical debt | `--fail-below GRADE` exits `1` when any grade falls below it |
 
 `--top N` limits how many entries are printed. `quality --sarif` writes a SARIF report, and
