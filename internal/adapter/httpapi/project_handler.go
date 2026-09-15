@@ -39,6 +39,7 @@ type projectService interface {
 	ExportProjectDependencySubtree(context.Context, shared.ID, string, string) ([]byte, string, error)
 	Overview(context.Context, shared.ID, string, string) (projectuc.Overview, error)
 	GetMeasures(context.Context, string, string, string, []string, int, string) (projectuc.ProjectMeasureResponse, error)
+	GetBehavioralHotspots(context.Context, shared.ID, string, string, string, int) (projectuc.BehavioralHotspotsResponse, error)
 	ListAnalyses(context.Context, shared.ID, string, string, int, time.Time, shared.ID) ([]projectanalysis.Analysis, bool, error)
 	Branches(context.Context, shared.ID, string) ([]string, error)
 	GetAnalysis(context.Context, shared.ID, string, string) (projectanalysis.Analysis, error)

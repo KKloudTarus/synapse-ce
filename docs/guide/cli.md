@@ -575,6 +575,12 @@ local gates can cap `max_efferent_coupling` and `max_instability`; if graph coll
 those conditions are reported as `no data` and fail closed. `synapse-cli quality` prints the same maxima
 for architectural feedback without executing project code or package managers.
 
+`synapse-cli scan --server` also records a commit-pinned Behavioral Hotspots snapshot when the source is
+a clean Git worktree and enough first-parent history is already present. It scores each file as
+cyclomatic complexity multiplied by the number of commits that touched its current path. Collection is
+read-only and performs no network fetch; unavailable or shallow evidence stays explicit and does not
+create findings or affect the gate.
+
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--new-code-only` | off | Score only lines changed against `--base` instead of the whole tree. |

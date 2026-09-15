@@ -18,8 +18,53 @@ type mockMeasureService struct {
 	cursorStr string
 }
 
+type mockBehavioralHotspotsService struct {
+	projectService
+	err error
+	res projectuc.BehavioralHotspotsResponse
+}
+
+func (m mockBehavioralHotspotsService) GetBehavioralHotspots(context.Context, shared.ID, string, string, string, int) (projectuc.BehavioralHotspotsResponse, error) {
+	return m.res, m.err
+}
+
 func (m mockMeasureService) GetMeasures(_ context.Context, _, _, _ string, _ []string, _ int, cursorStr string) (projectuc.ProjectMeasureResponse, error) {
 	return m.res, m.err
+}
+
+func TestGetProjectBehavioralHotspots(t *testing.T) {
+	tests := []struct {
+		name       string
+		query      string
+		serviceErr error
+		want       int
+	}{
+		{name: "success", query: "path=src&limit=10", want: http.StatusOK},
+		{name: "unknown query", query: "cursor=x", want: http.StatusBadRequest},
+		{name: "duplicate path", query: "path=a&path=b", want: http.StatusBadRequest},
+		{name: "invalid path", query: "path=src%2F..%2Fsrc", want: http.StatusBadRequest},
+		{name: "invalid limit", query: "limit=101", want: http.StatusBadRequest},
+		{name: "not found", serviceErr: shared.ErrNotFound, want: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &mockBehavioralHotspotsService{err: tt.serviceErr}
+			rt := &Router{log: discardLog(), projects: svc}
+			url := "/api/v1/projects/demo/analyses/a1/behavioral-hotspots"
+			if tt.query != "" {
+				url += "?" + tt.query
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			req.SetPathValue("key", "demo")
+			req.SetPathValue("analysisID", "a1")
+			req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", TenantID: "tenant-a"}))
+			rr := httptest.NewRecorder()
+			rt.getProjectBehavioralHotspots(rr, req)
+			if rr.Code != tt.want {
+				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+			}
+		})
+	}
 }
 
 func TestGetProjectMeasures(t *testing.T) {

@@ -2837,6 +2837,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	trace := newScanDebugTrace(func(events []ports.ScanDebugEvent) { report(stage, pct, events) })
 	report(stage, pct, trace.snapshot())
 	step := trace.start(stageAcquire, "acquire", "", "Acquire and prepare target workspace", nil)
+	if opts.CodeQuality && req.Kind == ports.TargetGit {
+		req.RequireCodeQualityHistory = true
+	}
 	ws, err := s.acquirer.Acquire(ctx, req)
 	if err != nil {
 		trace.fail(step, err)
@@ -3559,7 +3562,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, s.imageConfig.Check(result.Image), now, s.minSeverity)...)
 	}
 	if opts.CodeQuality && s.codeQuality != nil {
-		report, qerr := s.codeQuality.BuildReport(ctx, ws.Dir)
+		var report codequality.Report
+		var qerr error
+		if pinned, ok := s.codeQuality.(interface {
+			BuildReportForCommit(context.Context, string, string) (codequality.Report, error)
+		}); ok {
+			report, qerr = pinned.BuildReportForCommit(ctx, ws.Dir, ws.Commit)
+		} else {
+			report, qerr = s.codeQuality.BuildReport(ctx, ws.Dir)
+		}
 		if qerr != nil {
 			return nil, fmt.Errorf("analyze code quality: %w", qerr)
 		}

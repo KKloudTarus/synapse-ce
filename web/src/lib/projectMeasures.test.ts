@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mapProjectMeasureResponse } from './projectMeasures'
+import { mapBehavioralHotspotsResponse, mapProjectMeasureResponse } from './projectMeasures'
 
 describe('projectMeasures mapper', () => {
   it('maps available zero values to zero', () => {
@@ -83,6 +83,37 @@ describe('projectMeasures mapper', () => {
     expect(res.node?.coupling?.afferent.value).toBe(0)
     expect(res.node?.coupling?.instability.value).toBeNull()
     expect(res.node?.coupling?.instability.reason).toBe('isolated_module')
+  })
+
+  it('maps behavioral measure zero and pinned ranking metadata', () => {
+    const measures = mapProjectMeasureResponse({
+      node: { behavioral_hotspots: {
+        cyclomatic_sum: { availability: 'available', value: 0 },
+        change_count: { availability: 'available', value: 2 },
+        score: { availability: 'available', value: 30 },
+      } },
+    })
+    expect(measures.node?.behavioralHotspots?.cyclomaticSum.value).toBe(0)
+    expect(measures.node?.behavioralHotspots?.score.value).toBe(30)
+
+    const ranking = mapBehavioralHotspotsResponse({
+      project: { key: 'p', name: 'Project' },
+      analysis: { id: 'a1', source_ref: 'main', source_commit: 'abc' },
+      availability: 'partial',
+      unavailable_reason: '1_of_2_files_unmeasured',
+      formula_version: 1,
+      requested_commits: 255,
+      evaluated_commits: 2,
+      total_eligible: 2,
+      total_measured: 1,
+      total_excluded: 1,
+      shown: 1,
+      omitted: 0,
+      items: [{ path: 'a.go', language: 'Go', cyclomatic: 10, change_count: 3, score: 30 }],
+    })
+    expect(ranking.availability).toBe('partial')
+    expect(ranking.analysis.id).toBe('a1')
+    expect(ranking.items[0]).toMatchObject({ path: 'a.go', changeCount: 3, score: 30 })
   })
 
   it('defaults omitted child items to an empty array', () => {

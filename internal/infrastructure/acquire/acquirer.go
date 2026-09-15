@@ -147,7 +147,7 @@ func (a *Acquirer) Acquire(ctx context.Context, req ports.AcquireRequest) (*port
 	case "", ports.TargetLocal:
 		return acquireLocal(req.Value, a.maxWorkspaceBytes)
 	case ports.TargetGit:
-		return a.acquireGit(ctx, req.Value, req.Ref, req.BaseRef, req.BaseCommit)
+		return a.acquireGit(ctx, req.Value, req.Ref, req.BaseRef, req.BaseCommit, req.RequireCodeQualityHistory)
 	case ports.TargetArchive:
 		return acquireArchive(req.Value, a.maxWorkspaceBytes)
 	case ports.TargetImage:
@@ -419,7 +419,7 @@ func (a *Acquirer) gitAuth(ctx context.Context, rawURL string) (cloneURL string,
 	return u.String(), authEnv, []string{credDir}, cleanup, nil
 }
 
-func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit string) (*ports.Workspace, error) {
+func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit string, cqHistory bool) (*ports.Workspace, error) {
 	if err := validateGitURL(url); err != nil {
 		return nil, err
 	}
@@ -456,6 +456,15 @@ func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit
 	}
 	cleanup := func() error { return os.RemoveAll(dir) }
 
+	cloneDepth := "1"
+	if cqHistory && a.comparisonDepth > 1 {
+		depth := a.comparisonDepth
+		if depth > 2049 { // 2048 scored commits plus the oldest commit's first parent
+			depth = 2049
+		}
+		cloneDepth = strconv.Itoa(depth)
+	}
+
 	// argv (no shell), shallow, no tags, restricted transports, no prompts. credential.helper is
 	// blanked so ONLY a connector-provided askpass can authenticate: no ambient credential helper
 	// (cache/store/manager) may supply or persist credentials for a scanned host.
@@ -466,7 +475,7 @@ func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit
 		// Do not follow a cross-host redirect: git re-invokes the askpass on a redirect target, which would
 		// hand the connector token to a host the operator never configured. Fail rather than leak.
 		"-c", "http.followRedirects=false",
-		"clone", "--depth", "1", "--no-tags", "--single-branch",
+		"clone", "--depth", cloneDepth, "--no-tags", "--single-branch",
 	}
 	if ref != "" {
 		args = append(args, "--branch", ref) // validated: no option injection

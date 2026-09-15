@@ -97,6 +97,8 @@ Hotspots are never auto-resolved. `to_review` is the honest default, and the
 ```
 GET /api/v1/projects/{key}/overview     current ratings and headline measures
 GET /api/v1/projects/{key}/measures     paginated metric history
+GET /api/v1/projects/{key}/analyses/{analysisID}/behavioral-hotspots
+                                        ranked files from one immutable analysis
 ```
 
 Measure pagination cursors are signed with `SYNAPSE_MEASURE_CURSOR_SECRET`, which is required in
@@ -109,6 +111,21 @@ reporting a false zero. The Coupling tab derives direct first-party dependencies
 JavaScript/TypeScript modules from source imports. It reports afferent coupling (Ca), efferent coupling
 (Ce), and instability (`Ce / (Ca + Ce)`) for each module or directory boundary. An isolated module has
 no defined instability, and an incomplete dependency graph is shown as unavailable instead of zero.
+
+The **Behavioral Hotspots** tab combines static complexity with recent change frequency. For each
+measured source file, `score = cyclomatic complexity × number of first-parent commits that touched the
+path`; files are ranked by score, changes, complexity, and then path. The default comparison depth of
+256 evaluates at most 255 commits (one revision is reserved for the boundary). History is collected
+without fetching, follows the first-parent chain, treats renames as delete/add paths, and is pinned to
+the analysis commit. Results may be `complete`, `partial` (some inventory files lack complexity), or
+`unavailable` with a reason; missing history or AST coverage is never represented as a zero score.
+Behavioral hotspots are code-maintenance signals, not the separately reviewed **Security Hotspots**, and
+they do not add findings or change a quality gate.
+
+Managed server scans require both the confined tool runner and the `synapse-ast` sidecar. Local
+`synapse-cli scan --server` uploads the snapshot computed from its checked-out repository. Shallow CI
+checkouts must fetch at least `SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH` revisions to obtain the configured
+window; Synapse never deepens or otherwise mutates the checkout itself.
 
 ## Quality gates
 

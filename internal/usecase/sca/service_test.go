@@ -73,6 +73,7 @@ func (f *fakeAudit) Record(_ context.Context, e ports.AuditEntry) error {
 type fakeAcquirer struct {
 	dir     string
 	rootfs  string
+	commit  string
 	cleaned int
 	called  bool
 }
@@ -99,7 +100,7 @@ func (s *cancelAfterAppendEvidenceStore) Append(ctx context.Context, items []evi
 
 func (f *fakeAcquirer) Acquire(_ context.Context, _ ports.AcquireRequest) (*ports.Workspace, error) {
 	f.called = true
-	return &ports.Workspace{Dir: f.dir, RootFS: f.rootfs, Cleanup: func() error { f.cleaned++; return nil }}, nil
+	return &ports.Workspace{Dir: f.dir, RootFS: f.rootfs, Commit: f.commit, Cleanup: func() error { f.cleaned++; return nil }}, nil
 }
 
 type fakeDetector struct{ gotPath string }
@@ -241,6 +242,17 @@ func (c *countingCodeQuality) BuildReport(context.Context, string) (codequality.
 	return c.report, c.err
 }
 
+type pinnedCodeQuality struct {
+	countingCodeQuality
+	head string
+}
+
+func (c *pinnedCodeQuality) BuildReportForCommit(_ context.Context, _ string, head string) (codequality.Report, error) {
+	c.calls++
+	c.head = head
+	return c.report, c.err
+}
+
 func engagementWithScope(t *testing.T, inScope ...string) *engdom.Engagement {
 	t.Helper()
 	e, err := engdom.New("e1", "", "test", "", time.Unix(0, 0).UTC())
@@ -379,6 +391,21 @@ func TestCodeQualityRequiresExplicitScanOption(t *testing.T) {
 	}
 	if quality.calls != 1 || project.CodeQuality == nil {
 		t.Fatalf("opted-in scan code quality: calls=%d report=%v", quality.calls, project.CodeQuality != nil)
+	}
+}
+
+func TestCodeQualityUsesAcquiredWorkspaceCommit(t *testing.T) {
+	const commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
+	quality := &pinnedCodeQuality{}
+	svc := newSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws", commit: commit}, &fakeAudit{}, &fakeDetector{})
+	svc.SetCodeQuality(quality)
+
+	if _, err := svc.ScanWithOptions(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, CodeQuality: true}); err != nil {
+		t.Fatalf("project scan: %v", err)
+	}
+	if quality.calls != 1 || quality.head != commit {
+		t.Fatalf("code quality calls=%d head=%q, want acquired commit %q", quality.calls, quality.head, commit)
 	}
 }
 

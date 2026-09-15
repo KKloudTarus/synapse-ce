@@ -17,6 +17,7 @@ package astwalk
 
 import (
 	"context"
+	"sort"
 
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/c"
@@ -233,19 +234,47 @@ func MetricsFor(ctx context.Context, root string) (Metrics, error) {
 		err             error
 	)
 	m.Functions = []FunctionMetric{}
+	m.Files = []FileMetricCoverage{}
 	walkTruncated, err := walkSource(ctx, root, func(rel, lang string, content []byte) {
 		sp, ok := specs[lang]
 		if !ok {
+			m.Files = append(m.Files, FileMetricCoverage{
+				File:      rel,
+				Language:  lang,
+				Supported: false,
+				Parsed:    false,
+			})
 			return
 		}
-		root := parseRoot(ctx, sp, content)
-		if root == nil {
+		rootNode := parseRoot(ctx, sp, content)
+		if rootNode == nil {
+			m.Files = append(m.Files, FileMetricCoverage{
+				File:       rel,
+				Language:   lang,
+				Supported:  true,
+				Parsed:     false,
+				ParseError: true,
+			})
 			return
 		}
-		if root.HasError() {
+		if rootNode.HasError() {
 			parserTruncated = true
+			m.Files = append(m.Files, FileMetricCoverage{
+				File:       rel,
+				Language:   lang,
+				Supported:  true,
+				Parsed:     false,
+				ParseError: true,
+			})
+		} else {
+			m.Files = append(m.Files, FileMetricCoverage{
+				File:      rel,
+				Language:  lang,
+				Supported: true,
+				Parsed:    true,
+			})
 		}
-		for _, fn := range collectFunctions(root, sp) {
+		for _, fn := range collectFunctions(rootNode, sp) {
 			if fn.HasError() {
 				parserTruncated = true
 				continue
@@ -264,6 +293,9 @@ func MetricsFor(ctx context.Context, root string) (Metrics, error) {
 	if err != nil {
 		return Metrics{}, err
 	}
+	sort.Slice(m.Files, func(i, j int) bool {
+		return m.Files[i].File < m.Files[j].File
+	})
 	m.Truncated = walkTruncated || parserTruncated
 	return m, nil
 }

@@ -72,29 +72,30 @@ type Analysis struct {
 	// before the import route was a server analysis.
 	Origin Origin `json:"origin,omitempty"`
 	// CI is the pipeline's own account of the run, present only for OriginCI.
-	CI             *CIContext                `json:"ci,omitempty"`
-	SourceRef      string                    `json:"source_ref,omitempty"`
-	SourceCommit   string                    `json:"source_commit,omitempty"`
-	SourceRevision SourceRevision            `json:"source_revision,omitempty"`
-	Capabilities   SourceCapabilities        `json:"capabilities,omitempty"`
-	SourceManifest SourceManifest            `json:"source_manifest,omitempty"`
-	Comparison     Comparison                `json:"comparison,omitempty"`
-	FileChanges    []FileChange              `json:"file_changes,omitempty"`
-	Annotations    []Annotation              `json:"annotations,omitempty"`
-	Measures       qualitygate.Snapshot      `json:"measures"`
-	Gate           qualitygate.Result        `json:"gate"`
-	GateInfo       GateInfo                  `json:"gate_info"`
-	Issues         Counts                    `json:"issues"`
-	InternalIssues []Issue                   `json:"internal_issues"`
-	NewCode        NewCode                   `json:"new_code"`
-	Delta          *Delta                    `json:"delta"`
-	Coverage       *measure.CoverageReport   `json:"coverage"`
-	Duplication    measure.DuplicationReport `json:"duplication"`
-	Coupling       *measure.CouplingReport   `json:"coupling,omitempty"`
-	Rating         rating.Report             `json:"rating"`
-	Hotspots       hotspot.Summary           `json:"hotspots"`
-	NewHotspots    hotspot.Summary           `json:"new_hotspots"`
-	Snapshot       measure.Snapshot          `json:"snapshot"`
+	CI                 *CIContext                        `json:"ci,omitempty"`
+	SourceRef          string                            `json:"source_ref,omitempty"`
+	SourceCommit       string                            `json:"source_commit,omitempty"`
+	SourceRevision     SourceRevision                    `json:"source_revision,omitempty"`
+	Capabilities       SourceCapabilities                `json:"capabilities,omitempty"`
+	SourceManifest     SourceManifest                    `json:"source_manifest,omitempty"`
+	Comparison         Comparison                        `json:"comparison,omitempty"`
+	FileChanges        []FileChange                      `json:"file_changes,omitempty"`
+	Annotations        []Annotation                      `json:"annotations,omitempty"`
+	Measures           qualitygate.Snapshot              `json:"measures"`
+	Gate               qualitygate.Result                `json:"gate"`
+	GateInfo           GateInfo                          `json:"gate_info"`
+	Issues             Counts                            `json:"issues"`
+	InternalIssues     []Issue                           `json:"internal_issues"`
+	NewCode            NewCode                           `json:"new_code"`
+	Delta              *Delta                            `json:"delta"`
+	Coverage           *measure.CoverageReport           `json:"coverage"`
+	Duplication        measure.DuplicationReport         `json:"duplication"`
+	Coupling           *measure.CouplingReport           `json:"coupling,omitempty"`
+	BehavioralHotspots *measure.BehavioralHotspotsReport `json:"behavioral_hotspots,omitempty"`
+	Rating             rating.Report                     `json:"rating"`
+	Hotspots           hotspot.Summary                   `json:"hotspots"`
+	NewHotspots        hotspot.Summary                   `json:"new_hotspots"`
+	Snapshot           measure.Snapshot                  `json:"snapshot"`
 }
 
 // UnmarshalJSON handles legacy decoding where Snapshot might be empty or missing.
@@ -154,34 +155,35 @@ func (a Analysis) Branch() string {
 // Input supplies one completed scan's project-facing facts. Findings must be the
 // merged root and code-quality findings, not two independently counted lists.
 type Input struct {
-	ID                string
-	TenantID          shared.ID
-	ProjectID         shared.ID
-	ProjectKey        string
-	CreatedAt         time.Time
-	Origin            Origin
-	CI                *CIContext
-	SourceRef         string
-	SourceCommit      string
-	SourceRevision    SourceRevision
-	Capabilities      SourceCapabilities
-	SourceManifest    SourceManifest
-	Comparison        Comparison
-	FileChanges       []FileChange
-	Annotations       []Annotation
-	Findings          []finding.Finding
-	Gate              qualitygate.Gate
-	GateSource        string
-	GateExempt        map[string]bool
-	LinesOfCode       int
-	Coverage          *measure.CoverageReport
-	Duplication       *measure.DuplicationReport // nil when no duplication walk ran, like Coverage
-	Coupling          *measure.CouplingReport
-	AnalysisTruncated bool
-	Previous          *Analysis
-	Hotspots          hotspot.Summary
-	NewHotspots       hotspot.Summary
-	Snapshot          measure.Snapshot
+	ID                 string
+	TenantID           shared.ID
+	ProjectID          shared.ID
+	ProjectKey         string
+	CreatedAt          time.Time
+	Origin             Origin
+	CI                 *CIContext
+	SourceRef          string
+	SourceCommit       string
+	SourceRevision     SourceRevision
+	Capabilities       SourceCapabilities
+	SourceManifest     SourceManifest
+	Comparison         Comparison
+	FileChanges        []FileChange
+	Annotations        []Annotation
+	Findings           []finding.Finding
+	Gate               qualitygate.Gate
+	GateSource         string
+	GateExempt         map[string]bool
+	LinesOfCode        int
+	Coverage           *measure.CoverageReport
+	Duplication        *measure.DuplicationReport // nil when no duplication walk ran, like Coverage
+	Coupling           *measure.CouplingReport
+	BehavioralHotspots *measure.BehavioralHotspotsReport
+	AnalysisTruncated  bool
+	Previous           *Analysis
+	Hotspots           hotspot.Summary
+	NewHotspots        hotspot.Summary
+	Snapshot           measure.Snapshot
 }
 
 // Build returns one immutable snapshot and evaluates the built-in gate at creation.
@@ -189,6 +191,11 @@ func Build(in Input) (Analysis, error) {
 	if in.Coupling != nil {
 		if err := in.Coupling.Validate(); err != nil {
 			return Analysis{}, fmt.Errorf("invalid coupling report: %w", err)
+		}
+	}
+	if in.BehavioralHotspots != nil {
+		if err := in.BehavioralHotspots.Validate(); err != nil {
+			return Analysis{}, fmt.Errorf("invalid behavioral hotspots report: %w", err)
 		}
 	}
 	pairs, err := compactIssues(finding.Publishable(in.Findings))
@@ -268,7 +275,7 @@ func Build(in Input) (Analysis, error) {
 		GateInfo: GateInfo{Key: gateDef.Key, Name: gateName, Source: gateSource}, Issues: counts,
 		InternalIssues: issues, NewCode: NewCode{PreviousID: previousID, Counts: newCounts, Rating: NewCodeRating{Security: newRating.Security, Reliability: newRating.Reliability}},
 		Delta: buildDelta(counts, measures, overallRating, in.Previous), Coverage: in.Coverage,
-		Duplication: derefDuplication(in.Duplication), Coupling: in.Coupling, Rating: overallRating,
+		Duplication: derefDuplication(in.Duplication), Coupling: in.Coupling, BehavioralHotspots: in.BehavioralHotspots, Rating: overallRating,
 		Hotspots: in.Hotspots, NewHotspots: in.NewHotspots,
 		Snapshot: in.Snapshot,
 	}, nil

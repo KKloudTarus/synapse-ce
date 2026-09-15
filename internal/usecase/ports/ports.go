@@ -1455,8 +1455,9 @@ type AcquireRequest struct {
 	Value         string // path, git URL, archive path, or image ref
 	Locator       string // internal locator for a server-owned uploaded source package
 	Ref           string // optional git branch/tag to clone (git kind only)
-	BaseRef       string // optional validated Git comparison base ref
-	BaseCommit    string // optional immutable base commit from a previous analysis
+	BaseRef                   string // optional validated Git comparison base ref
+	BaseCommit                string // optional immutable base commit from a previous analysis
+	RequireCodeQualityHistory bool   // optional hint to clone bounded history for code-quality behavioral hotspots
 }
 
 // Workspace is an isolated directory holding a target to analyze (never execute).

@@ -41,10 +41,20 @@ type FunctionMetric struct {
 	Cognitive  int    `json:"cognitive"`
 }
 
-// Metrics is the `metrics` wire output: one record per function.
+// FileMetricCoverage records parse status and coverage for a source file in the metrics pass.
+type FileMetricCoverage struct {
+	File       string `json:"file"`
+	Language   string `json:"language"`
+	Supported  bool   `json:"supported"`
+	Parsed     bool   `json:"parsed"`
+	ParseError bool   `json:"parse_error,omitempty"`
+}
+
+// Metrics is the `metrics` wire output: one record per function, plus per-file coverage.
 type Metrics struct {
-	Functions []FunctionMetric `json:"functions"`
-	Truncated bool             `json:"truncated,omitempty"`
+	Functions []FunctionMetric     `json:"functions"`
+	Files     []FileMetricCoverage `json:"files,omitempty"`
+	Truncated bool                 `json:"truncated,omitempty"`
 }
 
 // Bug is one deterministic reliability defect found by the AST dataflow checks (deeper than the
