@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	domaincg "github.com/KKloudTarus/synapse-ce/internal/domain/callgraph"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachbench"
 )
@@ -53,6 +54,37 @@ func unreached() {}
 	}
 	if got := byName["cgfixture.unreached"]; got.Reachable {
 		t.Errorf("cgfixture.unreached is never called and must not be reachable, got %+v", got)
+	}
+}
+
+// TestGoBlindConstructCorpusCannotSuppress is the #1138 acceptance fixture. The target symbol is genuinely
+// absent from the static path, but a reachable unsafe conversion makes that negative incomplete: the same
+// BlindConstructs evidence the production coordinator folds into a Tier-2 claim must make
+// ProvedNotReachable false, so this result can never become a suppressing not_reachable.
+func TestGoBlindConstructCorpusCannotSuppress(t *testing.T) {
+	dir := filepath.Join("testdata", "reachbench", "go_blind_unsafe")
+	svc, err := reachability.NewService(ownedReachBuilder{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	analysis, err := svc.Analyze(context.Background(), dir, []string{"blindfixture.vulnerable"})
+	if err != nil {
+		t.Fatalf("analyze blind corpus: %v", err)
+	}
+	if len(analysis.Results) != 1 || analysis.Results[0].Reachable {
+		t.Fatalf("fixture target must be statically unreached, got %+v", analysis.Results)
+	}
+	if !contains(analysis.BlindConstructs, "unsafe") {
+		t.Fatalf("reachable unsafe surface must taint the negative, got %v", analysis.BlindConstructs)
+	}
+	claim := judgment.ReachabilityClaim{
+		Reachable:          judgment.NotReachable,
+		Tier:               judgment.Tier2,
+		EntrypointsPresent: len(analysis.Entrypoints) > 0,
+		BlindConstructs:    analysis.BlindConstructs,
+	}
+	if claim.ProvedNotReachable() {
+		t.Fatalf("blind Tier-2 negative must not be a suppressing proof: %+v", claim)
 	}
 }
 

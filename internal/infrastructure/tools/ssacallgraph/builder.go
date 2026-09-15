@@ -69,6 +69,14 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 		return &domaincg.Graph{}, taint.ExecFacts{}, nil
 	}
 
+	// //go:linkname, unsafe, cgo, and assembly are source/runtime escape hatches SSA can rewrite or omit.
+	// Capture their exact first-party function symbols from source now, then intersect with the final reachable
+	// set below so a dead opaque helper does not needlessly disable unrelated suppressions (#1138).
+	sourceBlind, err := sourceBlindFunctions(pkgs)
+	if err != nil {
+		return nil, taint.ExecFacts{}, err
+	}
+
 	// First-party package paths (the loaded module's own packages) – entrypoints are drawn from these, so a
 	// stdlib/dependency exported function isn't treated as a reachability root.
 	firstParty := map[string]bool{}
@@ -208,6 +216,14 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 		if reachable[id] {
 			blind = append(blind, "plugin")
 			break
+		}
+	}
+	for _, construct := range goOpaqueConstructs {
+		for id := range sourceBlind[construct] {
+			if reachable[id] {
+				blind = append(blind, construct)
+				break
+			}
 		}
 	}
 	if routeBlind {
