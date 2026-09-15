@@ -47,24 +47,40 @@ type CIContext struct {
 	Branch string `json:"branch,omitempty"`
 	// Actor is who or what triggered the run, in the provider's own terms.
 	Actor string `json:"actor,omitempty"`
+	// PullRequest is the forge change identifier: GitHub/Bitbucket PR number or GitLab MR IID.
+	PullRequest string `json:"pull_request,omitempty"`
+	// TargetBranch is the base/destination branch of the pull/merge request.
+	TargetBranch string `json:"target_branch,omitempty"`
+	// RepoSlug is the forge repository identity, normally owner/name or namespace/project.
+	RepoSlug string `json:"repo_slug,omitempty"`
+	// HeadSHA is the forge-reported pull/merge-request head commit, not a synthetic merge commit.
+	HeadSHA string `json:"head_sha,omitempty"`
 }
 
 const maxCIFieldRunes = 512
 
 // Normalize trims every field and rejects a context that could not have come from a pipeline: an
 // over-long field, a run URL that is not an absolute http(s) URL, or control characters. It is
-// deliberately lenient about what a valid branch or provider name is, because those conventions
-// belong to the provider, and strict about the shape a link must have before the dashboard renders
-// it as one.
+// deliberately lenient about what a valid branch, provider, or forge change id is, because those
+// conventions belong to the provider, and strict about the shape a link must have before the
+// dashboard renders it as one.
 func (c CIContext) Normalize() (CIContext, error) {
 	out := CIContext{
-		Provider: strings.TrimSpace(c.Provider),
-		RunURL:   strings.TrimSpace(c.RunURL),
-		RunID:    strings.TrimSpace(c.RunID),
-		Branch:   strings.TrimSpace(c.Branch),
-		Actor:    strings.TrimSpace(c.Actor),
+		Provider:     strings.TrimSpace(c.Provider),
+		RunURL:       strings.TrimSpace(c.RunURL),
+		RunID:        strings.TrimSpace(c.RunID),
+		Branch:       strings.TrimSpace(c.Branch),
+		Actor:        strings.TrimSpace(c.Actor),
+		PullRequest:  strings.TrimSpace(c.PullRequest),
+		TargetBranch: strings.TrimSpace(c.TargetBranch),
+		RepoSlug:     strings.TrimSpace(c.RepoSlug),
+		HeadSHA:      strings.TrimSpace(c.HeadSHA),
 	}
-	for name, value := range map[string]string{"provider": out.Provider, "run_url": out.RunURL, "run_id": out.RunID, "branch": out.Branch, "actor": out.Actor} {
+	fields := map[string]string{
+		"provider": out.Provider, "run_url": out.RunURL, "run_id": out.RunID, "branch": out.Branch, "actor": out.Actor,
+		"pull_request": out.PullRequest, "target_branch": out.TargetBranch, "repo_slug": out.RepoSlug, "head_sha": out.HeadSHA,
+	}
+	for name, value := range fields {
 		if utf8.RuneCountInString(value) > maxCIFieldRunes {
 			return CIContext{}, fmt.Errorf("ci %s exceeds %d characters", name, maxCIFieldRunes)
 		}
@@ -85,5 +101,6 @@ func (c CIContext) Normalize() (CIContext, error) {
 
 // Empty reports whether the pipeline said nothing about itself.
 func (c CIContext) Empty() bool {
-	return c.Provider == "" && c.RunURL == "" && c.RunID == "" && c.Branch == "" && c.Actor == ""
+	return c.Provider == "" && c.RunURL == "" && c.RunID == "" && c.Branch == "" && c.Actor == "" &&
+		c.PullRequest == "" && c.TargetBranch == "" && c.RepoSlug == "" && c.HeadSHA == ""
 }

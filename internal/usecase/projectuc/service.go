@@ -49,6 +49,7 @@ type Service struct {
 	gates                            *qualitygatesuc.Service
 	gateMutator                      ports.QualityGateMutator
 	profiles                         *qualityprofilesuc.Service
+	decorator                        ports.PRDecorator
 	allowLocalSource                 bool
 	projectAnalysisCompletionTimeout time.Duration
 	cursorSecret                     []byte
@@ -80,6 +81,7 @@ func (s *Service) SetQualityProfiles(profiles *qualityprofilesuc.Service) { s.pr
 func (s *Service) SetFindingRepository(repo ports.FindingRepository)      { s.findings = repo }
 func (s *Service) SetQualityGates(gates *qualitygatesuc.Service)          { s.gates = gates }
 func (s *Service) SetQualityGateMutator(mutator ports.QualityGateMutator) { s.gateMutator = mutator }
+func (s *Service) SetPRDecorator(decorator ports.PRDecorator)             { s.decorator = decorator }
 
 func (s *Service) completionTimeout() time.Duration {
 	if s.projectAnalysisCompletionTimeout > 0 {
@@ -841,6 +843,7 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 	} else if err := s.analyses.SaveWithResult(ctx, analysis, data); err != nil {
 		return fmt.Errorf("save project analysis: %w", err)
 	}
+	s.decorateProjectAnalysis(ctx, analysis)
 	return nil
 }
 

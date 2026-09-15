@@ -210,6 +210,19 @@ other than `full`. The project must exist on the server first; create it in the 
 Recording a result needs the operate permission. Give the pipeline its own user with that role
 rather than the bootstrap operator token.
 
+### CI pull / merge-request identity
+
+When a scan is pushed with `--server`, Synapse also captures provider-neutral pull/merge-request identity for later PR decoration. Explicit CLI CI fields still win; the variables below fill only missing values. The forge head SHA is the source commit for the change, not GitHub's synthetic merge commit.
+
+| Provider | Variables used |
+| --- | --- |
+| GitHub Actions | `GITHUB_HEAD_REF`, `GITHUB_BASE_REF`, `GITHUB_REPOSITORY`, `GITHUB_REF`, and the `pull_request` payload in `GITHUB_EVENT_PATH` (including `head.sha`). |
+| GitLab CI | `CI_MERGE_REQUEST_IID`, `CI_MERGE_REQUEST_TARGET_BRANCH_NAME`, `CI_PROJECT_PATH`, `CI_MERGE_REQUEST_SOURCE_BRANCH_SHA` (falling back to `CI_COMMIT_SHA`). |
+| Bitbucket Pipelines | `BITBUCKET_PR_ID`, `BITBUCKET_PR_DESTINATION_BRANCH`, `BITBUCKET_REPO_FULL_NAME`, `BITBUCKET_COMMIT`. |
+| Jenkins multibranch | `CHANGE_ID`, `CHANGE_TARGET`, `GIT_COMMIT`; set `SYNAPSE_REPO_SLUG` when Jenkins cannot infer the repository slug. |
+
+Provider-independent overrides are `SYNAPSE_PR_NUMBER`, `SYNAPSE_PR_TARGET_BRANCH`, `SYNAPSE_REPO_SLUG`, and `SYNAPSE_PR_HEAD_SHA`. Decoration is skipped unless all four identity fields are present.
+
 ## False-positive gate
 
 A scan of a real repository surfaces findings in test files and deliberately-insecure fixtures. Synapse

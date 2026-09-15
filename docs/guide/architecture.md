@@ -27,6 +27,13 @@ tool types in it. `cmd/*` remains the composition root: it wires concrete implem
 interfaces in `main`, and holds no business logic. Shared wiring that is reused by multiple binaries
 lives in `internal/composition/*`, above the platform and infrastructure packages it composes.
 
+PR/MR decoration follows the same boundary. `ports.PRDecorator` carries only a normalized forge
+target plus the quality-gate result, deterministic Markdown summary, and stored line annotations;
+credentials stay outside the render payload. Project-analysis completion and the CLI gate finalize
+path call the port fail-soft, and incomplete PR identity is skipped rather than guessed.
+Provider-specific network adapters and opt-in wiring are separate follow-up work, so this foundation
+does not contact a forge by itself.
+
 ## Projects and engagements
 
 A **Project** is a long-lived code-quality identity: it binds source and configuration and will
