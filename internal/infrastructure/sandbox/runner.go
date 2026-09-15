@@ -88,23 +88,30 @@ func readBwrapChildPID(r *os.File) (int, error) {
 }
 
 type Runner struct {
-	inner            *toolrunner.ExecRunner
-	bwrap            string                // resolved bwrap path
-	systemdRun       string                // resolved systemd-run path, or "" when its fallback is unavailable
-	directCgroupRoot string                // systemd-delegated cgroup v2 subtree, or "" when unavailable
-	memMax           int64                 // default cgroup memory.max
-	pidsMax          int                   // default cgroup pids.max
-	vault            ports.CredentialVault // optional; resolves {{secret:NAME}} env placeholders
-	egress           ports.EgressEnforcer  // optional; enforces a per-run scope egress netns
-	connMon          *ebpf.Monitor         // optional; eBPF connect-logger for egress runs
-	binreg           *binregistry.Registry // optional; verifies tool-binary integrity before exec (F5)
-	lookupNetIP      egressLookup          // host-side exact-domain resolver; defaults to net.DefaultResolver
-	netnsSlots       chan int              // free-list of netns/subnet slots [0,63] (ops: no wrap-collision)
-	runSeq           atomic.Int64          // disambiguates per-run cgroups (F3)
+	inner                *toolrunner.ExecRunner
+	bwrap                string                // resolved bwrap path
+	systemdRun           string                // resolved systemd-run path, or "" when its fallback is unavailable
+	directCgroupRoot     string                // systemd-delegated cgroup v2 subtree, or "" when unavailable
+	directCgroupRequired bool                  // immutable direct-cgroup policy; never fall back after direct allocation fails
+	memMax               int64                 // default cgroup memory.max
+	pidsMax              int                   // default cgroup pids.max
+	vault                ports.CredentialVault // optional; resolves {{secret:NAME}} env placeholders
+	egress               ports.EgressEnforcer  // optional; enforces a per-run scope egress netns
+	connMon              *ebpf.Monitor         // optional; eBPF connect-logger for egress runs
+	binreg               *binregistry.Registry // optional; verifies tool-binary integrity before exec (F5)
+	lookupNetIP          egressLookup          // host-side exact-domain resolver; defaults to net.DefaultResolver
+	netnsSlots           chan int              // free-list of netns/subnet slots [0,63] (ops: no wrap-collision)
+	runSeq               atomic.Int64          // disambiguates per-run cgroups (F3)
 }
 
 // netnsSlotCount bounds concurrent egress runs (the /30 subnet space the applier carves).
-const netnsSlotCount = 64
+const (
+	netnsSlotCount = 64
+
+	// ControlSetIdentityBubblewrapSeccompCgroupV2 names the verified control set
+	// provided only by the delegated cgroup-v2 runner path.
+	ControlSetIdentityBubblewrapSeccompCgroupV2 = "bubblewrap+seccomp+cgroup-v2"
+)
 
 // curatedEtc is the allowlist of PUBLIC /etc paths bound read-only into the sandbox (F2
 // re-audit fix). It deliberately omits /etc/shadow, /etc/gshadow, /etc/ssl/private,
@@ -249,6 +256,17 @@ var _ ports.ToolRunner = (*Runner)(nil)
 // NewRunner resolves bubblewrap (required) and systemd-run (optional, for cgroup
 // limits, probed for actual usability). Returns ErrUnavailable when a required control is absent.
 func NewRunner(timeout time.Duration, maxOut int, memMax int64, pidsMax int) (*Runner, error) {
+	return newRunner(timeout, maxOut, memMax, pidsMax, "")
+}
+
+// NewRunnerWithDelegatedCgroupRoot uses the externally captured systemd service
+// cgroup root rather than re-reading a process membership that may already have
+// moved into the runner manager child.
+func NewRunnerWithDelegatedCgroupRoot(timeout time.Duration, maxOut int, memMax int64, pidsMax int, delegatedRoot string) (*Runner, error) {
+	return newRunner(timeout, maxOut, memMax, pidsMax, delegatedRoot)
+}
+
+func newRunner(timeout time.Duration, maxOut int, memMax int64, pidsMax int, delegatedRoot string) (*Runner, error) {
 	bwrap, err := exec.LookPath("bwrap")
 	if err != nil {
 		return nil, fmt.Errorf("%w: bubblewrap (bwrap) not found", ErrUnavailable)
@@ -282,7 +300,14 @@ func NewRunner(timeout time.Duration, maxOut int, memMax int64, pidsMax int) (*R
 		lookupNetIP: net.DefaultResolver.LookupNetIP,
 		netnsSlots:  slots,
 	}
-	if root, cgErr := prepareDelegatedCgroup(); cgErr == nil {
+	var cgroupRoot string
+	var cgErr error
+	if delegatedRoot == "" {
+		cgroupRoot, cgErr = prepareDelegatedCgroup()
+	} else {
+		cgroupRoot, cgErr = prepareDelegatedCgroupRoot(delegatedRoot, os.Getpid())
+	}
+	if cgErr == nil {
 		probeMem := memMax
 		if probeMem <= 0 {
 			probeMem = 1 << 30
@@ -291,8 +316,8 @@ func NewRunner(timeout time.Duration, maxOut int, memMax int64, pidsMax int) (*R
 		if probePids <= 0 {
 			probePids = 512
 		}
-		if cg, probeErr := newRunCgroup(root, r.runSeq.Add(1), probeMem, probePids); probeErr == nil {
-			r.directCgroupRoot = root
+		if cg, probeErr := newRunCgroup(cgroupRoot, r.runSeq.Add(1), probeMem, probePids); probeErr == nil {
+			r.directCgroupRoot = cgroupRoot
 			cg.Close()
 		}
 	}
@@ -302,32 +327,66 @@ func NewRunner(timeout time.Duration, maxOut int, memMax int64, pidsMax int) (*R
 	return r, nil
 }
 
-// NewRunnerReady constructs the production runner, retrying until cgroup v2 resource limits are
-// actually available or ctx expires. NewRunner resolves the limiter exactly once, and at first
-// boot systemd may not yet have delegated the memory/pids controllers to this unit's slice, so a
-// single attempt can report an unenforced limiter on a host that is merely still starting. It
-// remains fail-closed: when the deadline passes without a limiter the last error is returned and
-// the caller refuses to accept work.
+// NewRunnerReady constructs the production runner, retrying until a direct delegated cgroup
+// or verified systemd-run fallback can enforce resource limits, or until ctx expires.
 func NewRunnerReady(ctx context.Context, timeout time.Duration, maxOut int, memMax int64, pidsMax int, interval time.Duration) (*Runner, error) {
+	return newRunnerReady(ctx, timeout, maxOut, memMax, pidsMax, interval, false, NewRunner)
+}
+
+// NewDirectCgroupRunnerReady constructs a runner that requires a direct delegated cgroup v2
+// subtree. It never falls back to systemd-run and attests the direct control-set identity.
+func NewDirectCgroupRunnerReady(ctx context.Context, timeout time.Duration, maxOut int, memMax int64, pidsMax int, interval time.Duration) (*Runner, error) {
+	return newDirectCgroupRunnerReady(ctx, timeout, maxOut, memMax, pidsMax, interval, NewRunner)
+}
+
+// NewDirectCgroupRunnerReadyAt requires the explicit, delegated service cgroup
+// root captured by the runner wrapper before this process moves into its child.
+func NewDirectCgroupRunnerReadyAt(ctx context.Context, timeout time.Duration, maxOut int, memMax int64, pidsMax int, interval time.Duration, delegatedRoot string) (*Runner, error) {
+	if strings.TrimSpace(delegatedRoot) == "" {
+		return nil, fmt.Errorf("%w: delegated cgroup root is required", ErrUnavailable)
+	}
+	return newDirectCgroupRunnerReady(ctx, timeout, maxOut, memMax, pidsMax, interval, func(runTimeout time.Duration, runMaxOut int, runMemMax int64, runPIDsMax int) (*Runner, error) {
+		return NewRunnerWithDelegatedCgroupRoot(runTimeout, runMaxOut, runMemMax, runPIDsMax, delegatedRoot)
+	})
+}
+
+func newDirectCgroupRunnerReady(ctx context.Context, timeout time.Duration, maxOut int, memMax int64, pidsMax int, interval time.Duration, construct func(time.Duration, int, int64, int) (*Runner, error)) (*Runner, error) {
+	return newRunnerReady(ctx, timeout, maxOut, memMax, pidsMax, interval, true, construct)
+}
+
+// newRunnerReady retries construction until its required cgroup limiter is available. The
+// injected constructor keeps readiness policy deterministic in tests without mutable
+// process-wide construction hooks.
+func newRunnerReady(ctx context.Context, timeout time.Duration, maxOut int, memMax int64, pidsMax int, interval time.Duration, requireDirect bool, construct func(time.Duration, int, int64, int) (*Runner, error)) (*Runner, error) {
 	if interval <= 0 {
 		interval = 250 * time.Millisecond
 	}
 	var lastErr error
 	for {
-		runner, err := NewRunner(timeout, maxOut, memMax, pidsMax)
+		runner, err := construct(timeout, maxOut, memMax, pidsMax)
 		switch {
 		case err != nil:
 			lastErr = err
-		case runner.CgroupLimitsEnforced():
+		case runner != nil && requireDirect && runner.directCgroupRoot != "":
+			// Set this before publishing the runner. There is intentionally no setter:
+			// a direct-only runner must never silently become fallback-capable.
+			runner.directCgroupRequired = true
 			return runner, nil
+		case runner != nil && !requireDirect && runner.CgroupLimitsEnforced():
+			return runner, nil
+		case requireDirect:
+			lastErr = errors.New("direct delegated cgroup unavailable")
 		default:
-			lastErr = fmt.Errorf("%w: cgroup limits are required: no delegated cgroup or systemd-run fallback", ErrUnavailable)
+			lastErr = errors.New("cgroup limits unavailable")
 		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return nil, lastErr
+			if requireDirect {
+				return nil, fmt.Errorf("%w: direct delegated cgroup is required but unavailable: %v", ErrUnavailable, lastErr)
+			}
+			return nil, fmt.Errorf("%w: cgroup limits are required but unavailable: %v", ErrUnavailable, lastErr)
 		case <-timer.C:
 		}
 	}
@@ -371,7 +430,42 @@ func (r *Runner) CgroupLimitsEnforced() bool {
 	return r.directCgroupRoot != "" || r.systemdRun != ""
 }
 
+// ControlSetIdentity reports the exact sandbox controls guaranteed by this runner.
+// Only NewDirectCgroupRunnerReady's immutable direct-cgroup policy can attest this
+// identity; ordinary runners retain their systemd-run fallback without making that claim.
+func (r *Runner) ControlSetIdentity() string {
+	if r != nil && r.directCgroupRoot != "" && r.directCgroupRequired {
+		return ControlSetIdentityBubblewrapSeccompCgroupV2
+	}
+	return ""
+}
+
+// cgroupExecution selects the resource-limit path for one run. A direct-only runner
+// rejects an unavailable direct allocation instead of selecting its optional
+// systemd-run fallback. Ordinary runners preserve the fallback behavior.
+func (r *Runner) cgroupExecution(mem int64, pids int) (*runCgroup, bool, error) {
+	if r.directCgroupRoot == "" {
+		if r.directCgroupRequired {
+			return nil, false, fmt.Errorf("%w: direct delegated cgroup is required but unavailable", ErrUnavailable)
+		}
+		return nil, r.systemdRun != "", nil
+	}
+
+	runCG, err := newRunCgroup(r.directCgroupRoot, r.runSeq.Add(1), mem, pids)
+	if err == nil {
+		return runCG, false, nil
+	}
+	if r.directCgroupRequired {
+		return nil, false, fmt.Errorf("%w: allocate direct delegated cgroup: %v", ErrUnavailable, err)
+	}
+	if r.systemdRun != "" {
+		return nil, true, nil
+	}
+	return nil, false, err
+}
+
 // Run confines spec in bubblewrap and executes it via the inner ExecRunner.
+
 func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
 	if spec.Name == "" {
 		return ports.ToolResult{}, fmt.Errorf("%w: sandbox empty command name", shared.ErrValidation)
@@ -430,15 +524,14 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 	if pids <= 0 {
 		pids = r.pidsMax
 	}
-	var runCG *runCgroup
-	var cgroupErr error
-	if r.directCgroupRoot != "" {
-		runCG, cgroupErr = newRunCgroup(r.directCgroupRoot, r.runSeq.Add(1), mem, pids)
-		if cgroupErr == nil {
-			defer runCG.Close()
-		}
+	runCG, useSystemd, cgroupErr := r.cgroupExecution(mem, pids)
+	if cgroupErr != nil && r.directCgroupRequired {
+		return ports.ToolResult{}, cgroupErr
 	}
-	if runCG == nil && r.systemdRun == "" && (mem > 0 || pids > 0) {
+	if runCG != nil {
+		defer runCG.Close()
+	}
+	if runCG == nil && !useSystemd && (mem > 0 || pids > 0) {
 		if cgroupErr == nil {
 			cgroupErr = errors.New("no delegated cgroup or systemd-run fallback")
 		}
@@ -511,7 +604,7 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 			defer func() { _ = os.Remove(hostsFile) }()
 		}
 	}
-	argv := r.command(spec, egressNS, hostsFile, seccompChildFD, blockChildFD, statusChildFD, runCG != nil)
+	argv := r.command(spec, egressNS, hostsFile, seccompChildFD, blockChildFD, statusChildFD, useSystemd)
 	extraFiles := make([]*os.File, 0, 3+len(spec.ExtraFiles))
 	extraFiles = append(extraFiles, seccompF)
 	extraFiles = append(extraFiles, spec.ExtraFiles...)
@@ -654,7 +747,7 @@ func (r *Runner) substituteSecrets(ctx context.Context, engagementID shared.ID, 
 // – entering the prepared netns; systemd-run is skipped there (it conflicts with the
 // netns-enter privilege). cgroup memory/pids limits ARE applied on egress runs via the
 // per-run cgroup the tool is cloned into (F3, directCgroup), not via systemd-run.
-func (r *Runner) command(spec ports.ToolSpec, egressNS, hostsFile string, seccompFD, blockFD, statusFD int, directCgroup bool) []string {
+func (r *Runner) command(spec ports.ToolSpec, egressNS, hostsFile string, seccompFD, blockFD, statusFD int, useSystemd bool) []string {
 	// Egress runs create their own fresh network namespace and pause on --block-fd
 	// until the fixed root broker attaches and configures that exact namespace. Run rejects
 	// HostNetwork before command construction, so ordinary execution always unshares net.
@@ -662,10 +755,7 @@ func (r *Runner) command(spec ports.ToolSpec, egressNS, hostsFile string, seccom
 	full := append([]string{r.bwrap}, r.bwrapArgs(spec, sharedNet, hostsFile, seccompFD, blockFD, statusFD)...)
 	full = append(full, "--", spec.Name)
 	full = append(full, spec.Args...)
-	// directCgroup (F3): the run is already cloned into a limit cgroup, so skip systemd-run
-	// (it would create a second, redundant scope). systemd-run stays the fallback limiter
-	// only when no direct cgroup could be created (unprivileged in-process runs).
-	if !directCgroup && r.systemdRun != "" {
+	if useSystemd {
 		return append(r.systemdArgs(spec), full...)
 	}
 	return full

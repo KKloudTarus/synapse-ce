@@ -7,6 +7,7 @@ package enginecompare
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -42,6 +43,32 @@ type Report struct {
 	// claim, and it is false the moment the baseline surfaces one pair the candidate missed.
 	CandidateMatchesBaselineRecall bool `json:"candidate_matches_baseline_recall"`
 }
+
+// InputIdentity binds a comparison to one immutable catalog target and SBOM input.
+type InputIdentity struct {
+	CatalogRevision string `json:"catalog_revision"`
+	CatalogDigest   string `json:"catalog_digest"`
+	TargetDigest    string `json:"target_digest"`
+	SBOMDigest      string `json:"sbom_digest"`
+}
+
+// EngineFindingSet is one precomputed engine's findings for a shared immutable input. It carries no oracle truth.
+type EngineFindingSet struct {
+	Name          string
+	InputIdentity InputIdentity
+	Findings      []vulnerability.RawFinding
+}
+
+// MultiReport independently compares a candidate with every supplied baseline. It is diagnostic only and
+// deliberately contains no oracle or gate verdict.
+type MultiReport struct {
+	DiagnosticOnly bool          `json:"diagnostic_only"`
+	CandidateName  string        `json:"candidate_name"`
+	InputIdentity  InputIdentity `json:"input_identity"`
+	Comparisons    []Report      `json:"comparisons"`
+}
+
+const maxCompareManyBaselines = 3
 
 // canonicalCVE upper-cases a CVE-shaped id ("cve-2024-1" -> "CVE-2024-1") so two engines that spell the same
 // CVE differently compare equal; it returns "" for a non-CVE id.
@@ -108,7 +135,10 @@ func pairSet(findings []vulnerability.RawFinding) map[Divergence]bool {
 // Compare computes the differential of two already-produced finding sets. It is pure (no I/O), so a CI job
 // that has both engines' outputs can reduce them deterministically.
 func Compare(baselineName, candidateName string, baseline, candidate []vulnerability.RawFinding) Report {
-	base, cand := pairSet(baseline), pairSet(candidate)
+	return comparePairSets(baselineName, candidateName, pairSet(baseline), pairSet(candidate))
+}
+
+func comparePairSets(baselineName, candidateName string, base, cand map[Divergence]bool) Report {
 	rep := Report{
 		BaselineName:   baselineName,
 		CandidateName:  candidateName,
@@ -134,6 +164,83 @@ func Compare(baselineName, candidateName string, baseline, candidate []vulnerabi
 	sortDivergences(rep.BaselineOnly)
 	rep.CandidateMatchesBaselineRecall = len(rep.BaselineOnly) == 0
 	return rep
+}
+
+// Validate verifies that a comparison input is fully content-addressed.
+func (identity InputIdentity) Validate() error {
+	if strings.TrimSpace(identity.CatalogRevision) == "" {
+		return fmt.Errorf("catalog revision is required")
+	}
+	for _, digest := range []struct {
+		name  string
+		value string
+	}{
+		{name: "catalog", value: identity.CatalogDigest},
+		{name: "target", value: identity.TargetDigest},
+		{name: "SBOM", value: identity.SBOMDigest},
+	} {
+		if !validSHA256Digest(digest.value) {
+			return fmt.Errorf("%s digest must be an immutable sha256 digest", digest.name)
+		}
+	}
+	return nil
+}
+
+func validSHA256Digest(value string) bool {
+	if len(value) != len("sha256:")+64 || !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	for _, character := range value[len("sha256:"):] {
+		if !(character >= '0' && character <= '9' || character >= 'a' && character <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// CompareMany compares the candidate independently with every named baseline using the same canonical-ID
+// semantics as Compare. Names are required and unique, and every finding set must bind the same immutable input.
+func CompareMany(candidate EngineFindingSet, baselines []EngineFindingSet) (MultiReport, error) {
+	if err := candidate.InputIdentity.Validate(); err != nil {
+		return MultiReport{}, fmt.Errorf("candidate input identity: %w", err)
+	}
+	candidateName := strings.TrimSpace(candidate.Name)
+	if candidateName == "" {
+		return MultiReport{}, fmt.Errorf("candidate name is required")
+	}
+	if len(baselines) == 0 {
+		return MultiReport{}, fmt.Errorf("at least one baseline is required")
+	}
+	if len(baselines) > maxCompareManyBaselines {
+		return MultiReport{}, fmt.Errorf("at most %d baselines are supported", maxCompareManyBaselines)
+	}
+	candidatePairs := pairSet(candidate.Findings)
+	seen := map[string]struct{}{candidateName: {}}
+	report := MultiReport{
+		DiagnosticOnly: true,
+		CandidateName:  candidateName,
+		InputIdentity:  candidate.InputIdentity,
+		Comparisons:    make([]Report, 0, len(baselines)),
+	}
+	for i, baseline := range baselines {
+		if err := baseline.InputIdentity.Validate(); err != nil {
+			return MultiReport{}, fmt.Errorf("baseline %d input identity: %w", i, err)
+		}
+		if baseline.InputIdentity != candidate.InputIdentity {
+			return MultiReport{}, fmt.Errorf("baseline %d input identity does not match candidate", i)
+		}
+		baselineName := strings.TrimSpace(baseline.Name)
+		if baselineName == "" {
+			return MultiReport{}, fmt.Errorf("baseline %d name is required", i)
+		}
+		if _, exists := seen[baselineName]; exists {
+			return MultiReport{}, fmt.Errorf("engine name %q is duplicated or collides with candidate", baselineName)
+		}
+		seen[baselineName] = struct{}{}
+		report.Comparisons = append(report.Comparisons, comparePairSets(baselineName, candidateName, pairSet(baseline.Findings), candidatePairs))
+	}
+	sort.Slice(report.Comparisons, func(i, j int) bool { return report.Comparisons[i].BaselineName < report.Comparisons[j].BaselineName })
+	return report, nil
 }
 
 // Run scans doc with both engines and compares them. Errors from either engine abort (a partial scan would

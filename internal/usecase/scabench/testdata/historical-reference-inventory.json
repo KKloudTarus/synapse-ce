@@ -1,0 +1,32 @@
+{
+  "schema_version": "synapse-sca-benchmark-historical-reference-inventory-v1",
+  "classification": "historical_reducer_regression_evidence_only",
+  "case_count": 628,
+  "inaccessible_historical_citation_count": 698,
+  "native_replay_required": true,
+  "reconstructable_evidence": {
+    "capture": false,
+    "review": false,
+    "bundle": false,
+    "environment": false
+  },
+  "control_digest": "sha256:e533da17165bc57bbada24a6c605a060c17e1301b0a7272b7900876b86639ca1",
+  "files": [
+    {"locator": "catalog.json", "digest": "sha256:af72418b62bc0da9e0d17b9431ff55fe92af3ddad484a4411b3fdafad6d96513", "size": 49314},
+    {"locator": "comparison.json", "digest": "sha256:3183de973f6a00c04896216262da44b6435e66584128b49253ce775513648948", "size": 17740},
+    {"locator": "observations/debian-12-13-slim-amd64--grype.json", "digest": "sha256:7265d39ed49a2c06b5f73f54d7ca468f3d84317b74f9cc2eba387ed280d7b444", "size": 47099},
+    {"locator": "observations/debian-12-13-slim-amd64--osv-scanner.json", "digest": "sha256:174b91f196776abbf43c2be13e386af1ce9392f5574e69491a5138e9cfae65a8", "size": 6220},
+    {"locator": "observations/debian-12-13-slim-amd64--owned.json", "digest": "sha256:1fb40eb6b1eef969801f3af546349f06b57dcc0eaaba98ab09bbac6c492d7b7f", "size": 9331},
+    {"locator": "observations/debian-12-13-slim-amd64--trivy.json", "digest": "sha256:e3043c1205cbf661ad7b830a6fbbf5899c04312f55496779fc47a8109885b046", "size": 6559},
+    {"locator": "observations/sles-15-6-bci-base-amd64--grype.json", "digest": "sha256:2c9395aa8ee15f620702f57a29d12bcd0e949ccdef259a20a28524897ee321fa", "size": 53463},
+    {"locator": "observations/sles-15-6-bci-base-amd64--osv-scanner-unsupported.json", "digest": "sha256:f2fad9e99256d013822f010828058a3f0f6b11183f587ef8ffc8d446296f2d1b", "size": 1456},
+    {"locator": "observations/sles-15-6-bci-base-amd64--owned.json", "digest": "sha256:8b1888a4b48bab51c9e07780702aacb361a285c8b58c273d16d84ba1952816ce", "size": 53478},
+    {"locator": "observations/sles-15-6-bci-base-amd64--trivy.json", "digest": "sha256:213dd97830fcdefc65081adb62b631e96b6d64c0e13c991bc8cd38d820bd1973", "size": 1280},
+    {"locator": "oracle.json", "digest": "sha256:c6e7ad9e96f7fd2bb45433804e584654736d8aadecb3013c6864cd3a490e0d90", "size": 1275497},
+    {"locator": "provenance.json", "digest": "sha256:4515b54326b5687fcdaddf8d2a046272c668588d7c9ef4268c363617ad97da0b", "size": 8422},
+    {"locator": "ratchet.json", "digest": "sha256:9474093eda3f179d1a99dae108119ee2353d96a75acc4693db3080940c29f4eb", "size": 8817},
+    {"locator": "result.json", "digest": "sha256:eac69db59c23b0a5efe6fe694375c180e7d82b123b8e1a105eb9d643b0eecd2c", "size": 127331},
+    {"locator": "sboms/debian-12-13-slim-amd64.json", "digest": "sha256:7ce61382f20b13bc49a843112f3fd83a8bcb215c2c01bd77263735f0093b6d39", "size": 1015852},
+    {"locator": "sboms/sles-15-6-bci-base-amd64.json", "digest": "sha256:c858309e5c5df2ce920343bc104c8011e99fc26ea5337aa7c1fb35c8d2dfc870", "size": 899649}
+  ]
+}
