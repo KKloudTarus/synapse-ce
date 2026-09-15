@@ -104,6 +104,14 @@ func TestMetricsForCGO(t *testing.T) {
 			t.Errorf("%s: got cyc=%d cog=%d lang=%s, want cyc=%d cog=%d lang=%s", tc.name, f.Cyclomatic, f.Cognitive, f.Language, tc.cyc, tc.cog, tc.lang)
 		}
 	}
+	if len(m.Files) != 4 {
+		t.Errorf("expected 4 covered files, got %d (%+v)", len(m.Files), m.Files)
+	}
+	for _, cov := range m.Files {
+		if !cov.Supported || !cov.Parsed || cov.ParseError {
+			t.Errorf("file %s coverage not successful: %+v", cov.File, cov)
+		}
+	}
 }
 
 func TestSwiftMetricsForMalformedSiblingIsTruncated(t *testing.T) {

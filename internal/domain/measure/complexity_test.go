@@ -56,3 +56,49 @@ func TestTopByCyclomatic(t *testing.T) {
 		t.Errorf("TopByCyclomatic(100) = %d, want all 4", n)
 	}
 }
+
+func TestFileCyclomatic(t *testing.T) {
+	// Legacy report without Files returns false
+	legacy := sampleReport()
+	if _, ok := legacy.FileCyclomatic("a.go"); ok {
+		t.Errorf("legacy report without coverage evidence must return ok=false")
+	}
+
+	rep := ComplexityReport{
+		Functions: []FunctionComplexity{
+			{File: "a.go", Cyclomatic: 3},
+			{File: "a.go", Cyclomatic: 5},
+		},
+		Files: []ComplexityFileCoverage{
+			{File: "a.go", Language: "Go", Supported: true, Parsed: true},
+			{File: "zero.go", Language: "Go", Supported: true, Parsed: true}, // 0 functions in file
+			{File: "err.go", Language: "Go", Supported: true, Parsed: false, ParseError: true},
+			{File: "unsupported.txt", Language: "Text", Supported: false, Parsed: false},
+		},
+	}
+
+	// a.go sum = 3 + 5 = 8
+	if sum, ok := rep.FileCyclomatic("a.go"); !ok || sum != 8 {
+		t.Errorf("a.go want sum=8 ok=true, got sum=%d ok=%v", sum, ok)
+	}
+
+	// zero.go sum = 0, ok = true (file parsed successfully with 0 functions)
+	if sum, ok := rep.FileCyclomatic("zero.go"); !ok || sum != 0 {
+		t.Errorf("zero.go want sum=0 ok=true, got sum=%d ok=%v", sum, ok)
+	}
+
+	// err.go ok = false
+	if _, ok := rep.FileCyclomatic("err.go"); ok {
+		t.Errorf("err.go want ok=false")
+	}
+
+	// unsupported.txt ok = false
+	if _, ok := rep.FileCyclomatic("unsupported.txt"); ok {
+		t.Errorf("unsupported.txt want ok=false")
+	}
+
+	// unknown.go ok = false
+	if _, ok := rep.FileCyclomatic("unknown.go"); ok {
+		t.Errorf("unknown.go want ok=false")
+	}
+}

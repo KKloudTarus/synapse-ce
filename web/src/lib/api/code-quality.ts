@@ -35,7 +35,13 @@ import type {
   Severity,
 } from '../types'
 import { mapProjectOverviewResponse, type ProjectOverview } from '../projectOverview'
-import { mapProjectMeasureResponse, type MeasuresQuery, type ProjectMeasureResponse } from '../projectMeasures'
+import {
+  mapBehavioralHotspotsResponse,
+  mapProjectMeasureResponse,
+  type BehavioralHotspotsResponse,
+  type MeasuresQuery,
+  type ProjectMeasureResponse,
+} from '../projectMeasures'
 import { ApiError, blobDownload, getToken, getOnUnauthorized, req } from './client'
 import type { ProjectWire } from './wire'
 import { mapScanJob, mapCodeQualityReport } from './scan'
@@ -370,6 +376,23 @@ export const codeQualityApi = {
     const qs = q.toString()
     const raw = await req(`/projects/${encodeURIComponent(projectKey)}/measures${qs ? `?${qs}` : ''}`, { signal })
     return mapProjectMeasureResponse(raw)
+  },
+
+  projectBehavioralHotspots: async (
+    projectKey: string,
+    analysisID: string,
+    query: { path?: string; limit?: number },
+    signal?: AbortSignal,
+  ): Promise<BehavioralHotspotsResponse> => {
+    const q = new URLSearchParams()
+    if (query.path) q.set('path', query.path)
+    if (query.limit) q.set('limit', query.limit.toString())
+    const qs = q.toString()
+    const raw = await req(
+      `/projects/${encodeURIComponent(projectKey)}/analyses/${encodeURIComponent(analysisID)}/behavioral-hotspots${qs ? `?${qs}` : ''}`,
+      { signal },
+    )
+    return mapBehavioralHotspotsResponse(raw)
   },
 
   listQualityGates: async (): Promise<QualityGate[]> =>

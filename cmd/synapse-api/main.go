@@ -80,6 +80,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/githistory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gobinreach"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/govulncheck"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsimports"
@@ -2071,14 +2072,28 @@ func main() {
 	}
 	router.SetAssessmentRelationships(assessmentRelationshipService)
 	router.SetExploitation(exploitationService) // evidence-gated finding verify endpoint
-	// Read-only code-quality dashboard. Server-side analysis is PURE-GO and memory-safe only (pattern
-	// rules + duplication + Go-parser inventory); tree-sitter complexity is intentionally NOT wired here
-	// so the server never runs C parsers over untrusted source (that stays a local-CLI capability).
-	codeQualityService := codequality.New(
-		codeanalysis.New(),
+	// Read-only code-quality dashboard. The API remains a pure-Go binary: complexity is delegated to the
+	// synapse-ast sidecar and Git history to git, and both are enabled only through the confined runner.
+	// Their absence leaves behavioral hotspots explicitly unavailable without changing findings or gates.
+	codeQualityOptions := []codequality.Option{
 		codequality.WithDuplication(duplication.New(0)),
 		codequality.WithInventory(codeinventory.New()),
 		codequality.WithCoupling(coupling.New(jsimports.New())),
+	}
+	if scaSandbox != nil {
+		codeQualityOptions = append(codeQualityOptions,
+			codequality.WithComplexityMetricsOnly(asttool.New(cfg.ASTBin).WithRunner(scaSandbox)),
+			codequality.WithGitHistory(githistory.New().WithRunner(scaSandbox), cfg.ProjectGitComparisonDepth),
+		)
+	} else {
+		codeQualityOptions = append(codeQualityOptions,
+			codequality.WithBehavioralHotspotsUnavailable("confined_tool_runner_unavailable"),
+		)
+		log.Warn("behavioral hotspots disabled: confined AST and Git runners are not configured")
+	}
+	codeQualityService := codequality.New(
+		codeanalysis.New(),
+		codeQualityOptions...,
 	)
 	scaService.SetCodeQuality(codeQualityService)
 	if rulesSvc, rerr := rules.NewService(ruleCatalog); rerr != nil {

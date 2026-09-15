@@ -61,3 +61,46 @@ func (rt *Router) getProjectMeasures(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, res)
 }
+
+func (rt *Router) getProjectBehavioralHotspots(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	analysisID := r.PathValue("analysisID")
+	if key == "" || analysisID == "" {
+		writeError(w, rt.log, shared.ErrValidation)
+		return
+	}
+
+	q := r.URL.Query()
+	for k, values := range q {
+		if k != "path" && k != "limit" {
+			writeError(w, rt.log, fmt.Errorf("%w: unknown query parameter %q", shared.ErrValidation, k))
+			return
+		}
+		if len(values) > 1 {
+			writeError(w, rt.log, fmt.Errorf("%w: duplicate query parameter %q", shared.ErrValidation, k))
+			return
+		}
+	}
+
+	pathParam := q.Get("path")
+	if canonical, err := measure.CanonicalPath(pathParam); err != nil || canonical != pathParam {
+		writeError(w, rt.log, fmt.Errorf("%w: invalid path parameter", shared.ErrValidation))
+		return
+	}
+	limit := 50
+	if raw := q.Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			writeError(w, rt.log, fmt.Errorf("%w: limit must be an integer between 1 and 100", shared.ErrValidation))
+			return
+		}
+		limit = parsed
+	}
+
+	res, err := rt.projects.GetBehavioralHotspots(r.Context(), shared.ID(TenantFrom(r.Context())), key, analysisID, pathParam, limit)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}

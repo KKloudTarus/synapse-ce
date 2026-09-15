@@ -102,8 +102,8 @@ func TestGetMeasures(t *testing.T) {
 		if res.Node.Ratings == nil || *res.Node.Ratings.Security.Grade != "A" {
 			t.Fatalf("expected ratings on root")
 		}
-		if len(res.IncludedDomains) != 8 {
-			t.Fatalf("expected all 8 domains, got %d", len(res.IncludedDomains))
+		if len(res.IncludedDomains) != 9 {
+			t.Fatalf("expected all 9 domains, got %d", len(res.IncludedDomains))
 		}
 	})
 
@@ -146,7 +146,7 @@ func TestGetMeasures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(res.IncludedDomains) != 8 {
+		if len(res.IncludedDomains) != 9 {
 			t.Fatalf("domains=%v", res.IncludedDomains)
 		}
 	})

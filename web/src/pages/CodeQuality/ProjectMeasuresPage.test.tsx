@@ -12,6 +12,7 @@ vi.mock('../../lib/api', () => ({
     getProject: vi.fn(),
     projectAnalysisStatus: vi.fn(),
     projectMeasures: vi.fn(),
+    projectBehavioralHotspots: vi.fn(),
     listQualityGates: vi.fn(),
   },
 }))
@@ -59,6 +60,14 @@ describe('Project Measures route and logic', () => {
     vi.mocked(api.projectAnalysisStatus).mockResolvedValue(null)
     vi.mocked(api.listQualityGates).mockResolvedValue([])
     vi.mocked(api.projectMeasures).mockResolvedValue(buildResponse())
+    vi.mocked(api.projectBehavioralHotspots).mockResolvedValue({
+      project: { key: 'synapse', name: 'Synapse' },
+      analysis: { id: 'a1', createdAt: '', sourceRef: 'main', sourceCommit: 'abcdef1234567890' },
+      path: '', availability: 'complete', reason: null, formulaVersion: 1,
+      requestedCommits: 255, evaluatedCommits: 2, reachedRoot: true,
+      totalEligible: 1, totalMeasured: 1, totalExcluded: 0, shown: 1, omitted: 0,
+      items: [{ path: 'src/hot.go', language: 'Go', cyclomatic: 10, changeCount: 8, score: 80 }],
+    })
   })
 
   function renderRoute(initialPath: string) {
@@ -255,6 +264,32 @@ describe('Project Measures route and logic', () => {
     expect(screen.getAllByText('0')).toHaveLength(2)
     expect(screen.getByText('Instability Ce / (Ca + Ce)')).toBeInTheDocument()
     expect(screen.getByTitle('isolated_module')).toBeInTheDocument()
+  })
+
+  it('renders a pinned behavioral hotspots ranking instead of sorting tree children', async () => {
+    vi.mocked(api.projectMeasures).mockResolvedValue(buildResponse({
+      includedDomains: ['behavioral_hotspots'],
+      analysis: { id: 'a1', createdAt: '', sourceRef: 'main', sourceCommit: 'abcdef1234567890' },
+      node: {
+        path: '', name: 'Synapse', kind: 'project', language: '',
+        size: null, complexity: null, coupling: null, coverage: null, duplication: null, issues: null, debt: null, ratings: null,
+        behavioralHotspots: {
+          cyclomaticSum: { availability: 'unavailable', value: null, reason: 'directory_summary_uses_max_score' },
+          changeCount: { availability: 'available', value: 1, reason: null },
+          score: { availability: 'available', value: 80, reason: null },
+        },
+      },
+      children: { items: [], nextCursor: null },
+    }))
+
+    renderRoute('/code-quality/projects/synapse/measures?domain=behavioral_hotspots')
+
+    expect(await screen.findByRole('heading', { name: 'Behavioral hotspots' })).toBeInTheDocument()
+    expect(screen.getByText('src/hot.go')).toBeInTheDocument()
+    expect(screen.getByText('main')).toBeInTheDocument()
+    expect(screen.getAllByText('80').length).toBeGreaterThan(0)
+    expect(api.projectBehavioralHotspots).toHaveBeenCalledWith('synapse', 'a1', { path: '', limit: 50 }, expect.any(AbortSignal))
+    expect(screen.queryByText('Empty directory')).not.toBeInTheDocument()
   })
 
   it('normal load more appends children and deduplicates', async () => {

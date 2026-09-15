@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   ChevronRight,
+  Activity,
   Clock,
   Copy01,
   CpuChip01,
@@ -22,11 +23,13 @@ import { VirtualTable } from '../../../components/synapse/VirtualTable'
 import { useProjectRouteContext, ProjectRouteEmpty } from '../CodeQualityProject'
 import type { ProjectMeasureResponse } from '../../../lib/projectMeasures'
 import { getDomainColumns, CurrentNodeMeasures } from './measureColumns'
+import { BehavioralHotspotsPanel } from './BehavioralHotspotsPanel'
 
 const DOMAINS = [
   { key: 'size', label: 'Size', icon: FileCode01 },
   { key: 'complexity', label: 'Complexity', icon: CpuChip01 },
   { key: 'coupling', label: 'Coupling', icon: CpuChip01 },
+  { key: 'behavioral_hotspots', label: 'Behavioral Hotspots', icon: Activity },
   { key: 'coverage', label: 'Coverage', icon: ShieldTick },
   { key: 'duplication', label: 'Duplications', icon: Copy01 },
   { key: 'issues', label: 'Issues', icon: Virus },
@@ -244,8 +247,12 @@ export function ProjectMeasuresPage() {
       {/* Current Node KPI Cards */}
       {data.node && <CurrentNodeMeasures node={data.node} domain={domain} />}
 
+      {domain === 'behavioral_hotspots' && data.analysis ? (
+        <BehavioralHotspotsPanel projectKey={projectKey} analysisID={data.analysis.id} path={path} />
+      ) : null}
+
       {/* Directory Content Table & Instant Filters */}
-      {data.node?.kind !== 'file' && (
+      {domain !== 'behavioral_hotspots' && data.node?.kind !== 'file' && (
         <div className="rounded-xl border border-secondary bg-primary overflow-hidden shadow-xs">
           {/* Table Header Filter Toolbar */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-secondary bg-secondary/20 p-3">
@@ -358,7 +365,7 @@ export function ProjectMeasuresPage() {
       )}
 
       {/* Load More Button */}
-      {data.node?.kind !== 'file' && data.children.nextCursor && (
+      {domain !== 'behavioral_hotspots' && data.node?.kind !== 'file' && data.children.nextCursor && (
         <div className="flex justify-center pt-2">
           <Button variant="secondary" onClick={loadMore} loading={loadingMore}>
             Load more

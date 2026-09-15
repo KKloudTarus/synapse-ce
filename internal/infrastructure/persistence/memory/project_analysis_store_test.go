@@ -27,7 +27,16 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 		Coverage:       &measure.CoverageReport{Files: []measure.FileCoverage{{File: "a.go", CoveredLines: 5, TotalLines: 10}}},
 		Duplication:    measure.DuplicationReport{Blocks: []measure.DuplicationBlock{{Occurrences: []measure.CodeRange{{File: "a.go", StartLine: 1, EndLine: 2}}}}},
 		Coupling:       &measure.CouplingReport{Version: measure.CouplingSchemaVersion, Complete: true, Modules: []measure.CouplingModule{{ID: "go:a", Path: "a", Language: "go"}}},
-		Rating:         rating.Report{Security: rating.GradeA},
+		BehavioralHotspots: &measure.BehavioralHotspotsReport{
+			Version: measure.BehavioralHotspotsSchemaVersion, Availability: measure.BehavioralPartial,
+			Reason: "1_of_2_files_unmeasured", HeadCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			RequestedCommits: 1, EvaluatedCommits: 1, ReachedRoot: true,
+			Commits:       []measure.BehavioralCommitEvidence{{CommitID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TouchedPaths: []string{"a.go"}}},
+			Files:         []measure.BehavioralFile{{Path: "a.go", Cyclomatic: 5, ChangeCount: 1, Score: 5}},
+			TotalEligible: 2, TotalMeasured: 1,
+			Gaps: []measure.BehavioralGap{{Path: "b.go", Reason: "complexity_not_measured"}},
+		},
+		Rating: rating.Report{Security: rating.GradeA},
 		Snapshot: measure.Snapshot{
 			Nodes: []measure.Node{
 				{
@@ -49,6 +58,9 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	analysis.Coverage.Files[0].File = "mutated.go"
 	analysis.Duplication.Blocks[0].Occurrences[0].File = "mutated.go"
 	analysis.Coupling.Modules[0].Path = "mutated"
+	analysis.BehavioralHotspots.Commits[0].TouchedPaths[0] = "mutated.go"
+	analysis.BehavioralHotspots.Files[0].Path = "mutated.go"
+	analysis.BehavioralHotspots.Gaps[0].Path = "mutated.go"
 	analysis.Snapshot.Nodes[0].Counters.IssuesByType["bug"] = 0
 	*analysis.Snapshot.NewCodeCoverage.Value = 0.0
 
@@ -62,6 +74,9 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	got.Coverage.Files[0].File = "returned.go"
 	got.Duplication.Blocks[0].Occurrences[0].File = "returned.go"
 	got.Coupling.Modules[0].Path = "returned"
+	got.BehavioralHotspots.Commits[0].TouchedPaths[0] = "returned.go"
+	got.BehavioralHotspots.Files[0].Path = "returned.go"
+	got.BehavioralHotspots.Gaps[0].Path = "returned.go"
 	got.Delta.Measures["coverage"] = 0
 	got.Snapshot.Nodes[0].Counters.IssuesByType["bug"] = 0
 	*got.Snapshot.NewCodeCoverage.Value = 0.0
@@ -78,6 +93,9 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	}
 	if list[0].Snapshot.NewCodeCoverage.Value == nil || *list[0].Snapshot.NewCodeCoverage.Value != 10.0 {
 		t.Fatalf("snapshot new code coverage mutated")
+	}
+	if hotspots := list[0].BehavioralHotspots; hotspots == nil || hotspots.Commits[0].TouchedPaths[0] != "a.go" || hotspots.Files[0].Path != "a.go" || hotspots.Gaps[0].Path != "b.go" {
+		t.Fatalf("behavioral hotspots snapshot mutated: %+v", hotspots)
 	}
 }
 

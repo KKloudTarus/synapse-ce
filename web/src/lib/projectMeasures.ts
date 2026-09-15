@@ -38,6 +38,12 @@ export interface CouplingMeasures {
   instability: MeasureDecimalMetric
 }
 
+export interface BehavioralMeasures {
+  cyclomaticSum: MeasureCountMetric
+  changeCount: MeasureCountMetric
+  score: MeasureCountMetric
+}
+
 export interface CoverageMeasures {
   coveredLines: MeasureCountMetric
   coverableLines: MeasureCountMetric
@@ -86,11 +92,40 @@ export interface MeasureNode {
   size: SizeMeasures | null
   complexity: ComplexityMeasures | null
   coupling?: CouplingMeasures | null
+  behavioralHotspots?: BehavioralMeasures | null
   coverage: CoverageMeasures | null
   duplication: DuplicationMeasures | null
   issues: IssueMeasures | null
   debt: DebtMeasures | null
   ratings: RatingsMeasures | null
+}
+
+export type BehavioralAvailability = 'complete' | 'partial' | 'unavailable'
+
+export interface BehavioralHotspotItem {
+  path: string
+  language: string
+  cyclomatic: number
+  changeCount: number
+  score: number
+}
+
+export interface BehavioralHotspotsResponse {
+  project: ProjectNodeInfo
+  analysis: AnalysisMetadata
+  path: string
+  availability: BehavioralAvailability
+  reason: string | null
+  formulaVersion: number
+  requestedCommits: number
+  evaluatedCommits: number
+  reachedRoot: boolean
+  totalEligible: number
+  totalMeasured: number
+  totalExcluded: number
+  shown: number
+  omitted: number
+  items: BehavioralHotspotItem[]
 }
 
 export interface ChildCollection {
@@ -171,6 +206,15 @@ function mapCouplingMeasures(raw: any): CouplingMeasures | null {
   }
 }
 
+function mapBehavioralMeasures(raw: any): BehavioralMeasures | null {
+  if (!raw) return null
+  return {
+    cyclomaticSum: mapCountMetric(raw.cyclomatic_sum),
+    changeCount: mapCountMetric(raw.change_count),
+    score: mapCountMetric(raw.score),
+  }
+}
+
 function mapCoverageMeasures(raw: any): CoverageMeasures | null {
   if (!raw) return null
   return {
@@ -236,11 +280,51 @@ export function mapMeasureNode(raw: any): MeasureNode | null {
     size: mapSizeMeasures(raw.size),
     complexity: mapComplexityMeasures(raw.complexity),
     coupling: mapCouplingMeasures(raw.coupling),
+    behavioralHotspots: mapBehavioralMeasures(raw.behavioral_hotspots),
     coverage: mapCoverageMeasures(raw.coverage),
     duplication: mapDuplicationMeasures(raw.duplication),
     issues: mapIssueMeasures(raw.issues),
     debt: mapDebtMeasures(raw.debt),
     ratings: mapRatingsMeasures(raw.ratings),
+  }
+}
+
+function finiteNonNegative(raw: unknown): number {
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : 0
+}
+
+export function mapBehavioralHotspotsResponse(raw: any): BehavioralHotspotsResponse {
+  const availability: BehavioralAvailability =
+    raw?.availability === 'complete' || raw?.availability === 'partial' ? raw.availability : 'unavailable'
+  return {
+    project: { key: raw?.project?.key ?? '', name: raw?.project?.name ?? '' },
+    analysis: {
+      id: raw?.analysis?.id ?? '',
+      createdAt: raw?.analysis?.created_at ?? '',
+      sourceRef: raw?.analysis?.source_ref ?? '',
+      sourceCommit: raw?.analysis?.source_commit ?? '',
+    },
+    path: raw?.path ?? '',
+    availability,
+    reason: typeof raw?.unavailable_reason === 'string' ? raw.unavailable_reason : null,
+    formulaVersion: finiteNonNegative(raw?.formula_version),
+    requestedCommits: finiteNonNegative(raw?.requested_commits),
+    evaluatedCommits: finiteNonNegative(raw?.evaluated_commits),
+    reachedRoot: raw?.reached_root === true,
+    totalEligible: finiteNonNegative(raw?.total_eligible),
+    totalMeasured: finiteNonNegative(raw?.total_measured),
+    totalExcluded: finiteNonNegative(raw?.total_excluded),
+    shown: finiteNonNegative(raw?.shown),
+    omitted: finiteNonNegative(raw?.omitted),
+    items: Array.isArray(raw?.items)
+      ? raw.items.map((item: any) => ({
+          path: item?.path ?? '',
+          language: item?.language ?? '',
+          cyclomatic: finiteNonNegative(item?.cyclomatic),
+          changeCount: finiteNonNegative(item?.change_count),
+          score: finiteNonNegative(item?.score),
+        }))
+      : [],
   }
 }
 

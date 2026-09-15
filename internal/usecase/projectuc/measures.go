@@ -15,14 +15,15 @@ import (
 )
 
 var validDomains = map[string]bool{
-	"size":        true,
-	"complexity":  true,
-	"coupling":    true,
-	"coverage":    true,
-	"duplication": true,
-	"issues":      true,
-	"debt":        true,
-	"ratings":     true,
+	"size":                true,
+	"complexity":          true,
+	"coupling":            true,
+	"behavioral_hotspots": true,
+	"coverage":            true,
+	"duplication":         true,
+	"issues":              true,
+	"debt":                true,
+	"ratings":             true,
 }
 
 // GetMeasures retrieves the measure node and its direct children for a specific path.
@@ -48,7 +49,7 @@ func (s *Service) GetMeasures(ctx context.Context, tenantID, projectKey, path st
 			domainMap[d] = true
 		}
 		// Canonical order
-		normalizedDomains = []string{"size", "complexity", "coupling", "coverage", "duplication", "issues", "debt", "ratings"}
+		normalizedDomains = []string{"size", "complexity", "coupling", "behavioral_hotspots", "coverage", "duplication", "issues", "debt", "ratings"}
 	} else {
 		for _, d := range domains {
 			if !validDomains[d] {
@@ -57,7 +58,7 @@ func (s *Service) GetMeasures(ctx context.Context, tenantID, projectKey, path st
 			domainMap[d] = true
 		}
 		// Deterministic canonical order
-		for _, d := range []string{"size", "complexity", "coupling", "coverage", "duplication", "issues", "debt", "ratings"} {
+		for _, d := range []string{"size", "complexity", "coupling", "behavioral_hotspots", "coverage", "duplication", "issues", "debt", "ratings"} {
 			if domainMap[d] {
 				normalizedDomains = append(normalizedDomains, d)
 			}
@@ -319,6 +320,18 @@ func toCouplingCount(metric measure.CountMetric) MeasureCountMetric {
 	return MeasureCountMetric{Availability: AvailabilityUnavailable, Reason: &reason}
 }
 
+func toBehavioralCount(metric measure.CountMetric) MeasureCountMetric {
+	if metric.Availability == measure.AvailabilityAvailable && metric.Value != nil {
+		value := *metric.Value
+		return MeasureCountMetric{Availability: AvailabilityAvailable, Value: &value}
+	}
+	reason := metric.Reason
+	if reason == "" {
+		reason = "behavioral_hotspots_not_collected"
+	}
+	return MeasureCountMetric{Availability: AvailabilityUnavailable, Reason: &reason}
+}
+
 func mapDomainMeasures(n *measure.Node, domains map[string]bool, analysis *projectanalysis.Analysis) *MeasureNode {
 	snap := analysis.Snapshot
 	mn := &MeasureNode{
@@ -365,6 +378,21 @@ func mapDomainMeasures(n *measure.Node, domains map[string]bool, analysis *proje
 			Afferent:    toCouplingCount(metrics.Afferent),
 			Efferent:    toCouplingCount(metrics.Efferent),
 			Instability: toDecimal(metrics.Instability),
+		}
+	}
+	if domains["behavioral_hotspots"] {
+		metrics := measure.BehavioralMetrics{
+			CyclomaticSum: measure.CountMetric{Availability: measure.AvailabilityUnavailable, Reason: "behavioral_hotspots_not_collected"},
+			ChangeCount:   measure.CountMetric{Availability: measure.AvailabilityUnavailable, Reason: "behavioral_hotspots_not_collected"},
+			Score:         measure.CountMetric{Availability: measure.AvailabilityUnavailable, Reason: "behavioral_hotspots_not_collected"},
+		}
+		if analysis.BehavioralHotspots != nil {
+			metrics = analysis.BehavioralHotspots.MetricsForPath(n.Path, n.Kind)
+		}
+		mn.BehavioralHotspots = &BehavioralMeasures{
+			CyclomaticSum: toBehavioralCount(metrics.CyclomaticSum),
+			ChangeCount:   toBehavioralCount(metrics.ChangeCount),
+			Score:         toBehavioralCount(metrics.Score),
 		}
 	}
 	if domains["coverage"] {

@@ -746,14 +746,36 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 	var compPtr *measure.ComplexityReport
 	var dupPtr *measure.DuplicationReport
 	var couplingPtr *measure.CouplingReport
+	var behavioralPtr *measure.BehavioralHotspotsReport
 	if result.CodeQuality != nil {
 		inventory = result.CodeQuality.Inventory
 		compPtr = result.CodeQuality.Complexity
 		dupPtr = result.CodeQuality.Duplication
 		couplingPtr = result.CodeQuality.Coupling
+		behavioralPtr = result.CodeQuality.BehavioralHotspots
 		if couplingPtr != nil {
 			if err := couplingPtr.Validate(); err != nil {
 				return fmt.Errorf("validate coupling report: %w", err)
+			}
+		}
+		if behavioralPtr != nil {
+			if err := behavioralPtr.Validate(); err != nil {
+				return fmt.Errorf("validate behavioral hotspots report: %w", err)
+			}
+			if result.SourceCommit != "" && behavioralPtr.HeadCommit != "" && result.SourceCommit != behavioralPtr.HeadCommit {
+				return fmt.Errorf("validate behavioral hotspots report: source commit does not match history head")
+			}
+			if behavioralPtr.Availability != measure.BehavioralUnavailable {
+				rebuilt, err := measure.BuildBehavioralHotspots(measure.BuildBehavioralHotspotsInput{
+					Inventory: inventory, Complexity: compPtr, Commits: behavioralPtr.Commits,
+					HeadCommit: behavioralPtr.HeadCommit, RequestedCommits: behavioralPtr.RequestedCommits,
+					EvaluatedCommits: behavioralPtr.EvaluatedCommits, ReachedRoot: behavioralPtr.ReachedRoot,
+					HistoryAvailable: true,
+				})
+				if err != nil {
+					return fmt.Errorf("rebuild behavioral hotspots report: %w", err)
+				}
+				behavioralPtr = &rebuilt
 			}
 		}
 	}
@@ -815,7 +837,7 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 		SourceRevision: projectanalysis.SourceRevision{Kind: projectScanKind(p.SourceBinding.Kind), Head: result.SourceCommit, Base: comparison.BaseCommit, MergeBase: comparison.MergeBase, AnalysisID: jobID},
 		Capabilities:   capabilities, SourceManifest: manifest, Comparison: comparison, FileChanges: result.FileChanges, Annotations: annotations,
 		Findings: issues, Gate: gate, GateSource: gateSource, GateExempt: exempt, LinesOfCode: loc,
-		Coverage: analysisCoverage, Duplication: dupPtr, Coupling: couplingPtr, AnalysisTruncated: analysisTruncated, Previous: baseline,
+		Coverage: analysisCoverage, Duplication: dupPtr, Coupling: couplingPtr, BehavioralHotspots: behavioralPtr, AnalysisTruncated: analysisTruncated, Previous: baseline,
 		Hotspots: overallHsSummary, NewHotspots: newHsSummary, Snapshot: snapshot,
 	})
 	if err != nil {

@@ -239,7 +239,7 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | `SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES` | `2097152` | Maximum captured source file size. Bigger files are retained as unavailable metadata. |
 | `SYNAPSE_PROJECT_SOURCE_MAX_FILES` | `10000` | Maximum source files captured for one analysis. |
 | `SYNAPSE_PROJECT_SOURCE_MAX_BYTES` | `524288000` | Total source-artifact capture budget per analysis. |
-| `SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH` | `256` | Maximum Git history depth fetched to resolve a persisted comparison base. A missing/too-old base leaves source readable but comparison/unified/split capabilities unavailable. |
+| `SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH` | `256` | Maximum Git history depth acquired for persisted comparisons and behavioral-hotspot evidence. Behavioral hotspots evaluate at most `depth - 1` first-parent commits (capped at 2048), never fetch during analysis, and report shallow/incomplete history explicitly; a missing/too-old comparison base leaves source readable but comparison/unified/split capabilities unavailable. |
 
 Historical Code reads are analysis-scoped and private-cacheable. Source and diff APIs never fetch the current repository or read mutable local paths. Git comparison requires configured, validated head/base/default-branch refs; local and archive scans intentionally expose source-only capability. Generated files are hidden by default from the Code inventory but remain retained and explicitly addressable. Binary/non-UTF-8/limited artifacts expose an unavailable reason instead of content.
 

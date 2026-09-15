@@ -29,15 +29,20 @@ const DefaultComplexityThreshold = 15
 // Service produces code-quality findings. analyzer is required; dup, metrics and inventory are optional
 // enrichers.
 type Service struct {
-	analyzer          ports.CodeAnalyzer
-	dup               ports.DuplicationScanner
-	metrics           ports.CodeMetricsProvider
-	inventory         ports.CodeInventoryScanner
-	bugs              ports.BugDetector
-	structural        ports.CodeAnalyzer
-	coupling          ports.CouplingAnalyzer
-	complexityMin     int
-	includeTestSmells bool
+	analyzer               ports.CodeAnalyzer
+	dup                    ports.DuplicationScanner
+	metrics                ports.CodeMetricsProvider
+	inventory              ports.CodeInventoryScanner
+	bugs                   ports.BugDetector
+	structural             ports.CodeAnalyzer
+	coupling               ports.CouplingAnalyzer
+	history                ports.GitHistoryCollector
+	historyDepth           int
+	defaultHeadCommit      string
+	behavioralUnavailable  string
+	complexityMin          int
+	emitComplexityFindings bool
+	includeTestSmells      bool
 }
 
 // Option configures a Service.
@@ -67,6 +72,33 @@ func WithCoupling(analyzer ports.CouplingAnalyzer) Option {
 	return func(s *Service) { s.coupling = analyzer }
 }
 
+// WithGitHistory adds bounded git history evidence to compute behavioral hotspots on full reports.
+func WithGitHistory(collector ports.GitHistoryCollector, depth int, head ...string) Option {
+	return func(s *Service) {
+		s.history = collector
+		s.historyDepth = depth
+		if len(head) > 0 {
+			s.defaultHeadCommit = head[0]
+		}
+	}
+}
+
+// WithBehavioralHotspotsUnavailable records why behavioral hotspots cannot be collected in this
+// deployment. It is intended for deliberately disabled infrastructure, so new analyses remain
+// distinguishable from legacy analyses that predate behavioral hotspot snapshots.
+func WithBehavioralHotspotsUnavailable(reason string) Option {
+	return func(s *Service) { s.behavioralUnavailable = strings.TrimSpace(reason) }
+}
+
+// WithComplexityMetricsOnly adds complexity measurement to reports without emitting maintainability findings
+// or changing quality gates.
+func WithComplexityMetricsOnly(m ports.CodeMetricsProvider) Option {
+	return func(s *Service) {
+		s.metrics = m
+		s.emitComplexityFindings = false
+	}
+}
+
 // bugCWE maps a deeper-bug rule id to its CWE for the finding.
 var bugCWE = map[string]string{
 	"reliability-unreachable-code":   "CWE-561", // dead code
@@ -91,6 +123,7 @@ func WithTestScopedSmells(include bool) Option {
 func WithComplexity(m ports.CodeMetricsProvider, threshold int) Option {
 	return func(s *Service) {
 		s.metrics = m
+		s.emitComplexityFindings = true
 		if threshold > 0 {
 			s.complexityMin = threshold
 		}
@@ -166,32 +199,34 @@ func (s *Service) analyze(ctx context.Context, root string) ([]finding.Finding, 
 		}
 		if available {
 			compReport = &rep
-			for _, f := range rep.Functions {
-				if f.Language == "Kotlin" || f.Language == "PHP" {
-					if f.Cognitive > s.complexityMin {
-						ruleID := "kotlin-cognitive-complexity"
-						if f.Language == "PHP" {
-							ruleID = "php:cognitive-complexity"
+			if s.emitComplexityFindings {
+				for _, f := range rep.Functions {
+					if f.Language == "Kotlin" || f.Language == "PHP" {
+						if f.Cognitive > s.complexityMin {
+							ruleID := "kotlin-cognitive-complexity"
+							if f.Language == "PHP" {
+								ruleID = "php:cognitive-complexity"
+							}
+							title := fmt.Sprintf("High cognitive complexity: %d (%s)", f.Cognitive, f.Name)
+							desc := fmt.Sprintf("%s function %q has cognitive complexity %d, above %d. Use guard clauses or extract focused functions.", f.Language, f.Name, f.Cognitive, s.complexityMin)
+							out = append(out, newFinding("quality", ruleID, "CWE-1120", shared.SeverityMedium, title, desc, f.File, f.Line))
 						}
-						title := fmt.Sprintf("High cognitive complexity: %d (%s)", f.Cognitive, f.Name)
-						desc := fmt.Sprintf("%s function %q has cognitive complexity %d, above %d. Use guard clauses or extract focused functions.", f.Language, f.Name, f.Cognitive, s.complexityMin)
-						out = append(out, newFinding("quality", ruleID, "CWE-1120", shared.SeverityMedium, title, desc, f.File, f.Line))
+						continue
 					}
-					continue
+					if f.Cyclomatic > s.complexityMin {
+						title := fmt.Sprintf("High cyclomatic complexity: %d (%s)", f.Cyclomatic, f.Name)
+						desc := fmt.Sprintf("Function %q has cyclomatic complexity %d (cognitive %d), above %d. Break it into smaller units to improve testability and readability.", f.Name, f.Cyclomatic, f.Cognitive, s.complexityMin)
+						out = append(out, newFinding("quality", "quality-high-complexity", "CWE-1120", shared.SeverityMedium, title, desc, f.File, f.Line))
+					}
 				}
-				if f.Cyclomatic > s.complexityMin {
-					title := fmt.Sprintf("High cyclomatic complexity: %d (%s)", f.Cyclomatic, f.Name)
-					desc := fmt.Sprintf("Function %q has cyclomatic complexity %d (cognitive %d), above %d. Break it into smaller units to improve testability and readability.", f.Name, f.Cyclomatic, f.Cognitive, s.complexityMin)
-					out = append(out, newFinding("quality", "quality-high-complexity", "CWE-1120", shared.SeverityMedium, title, desc, f.File, f.Line))
+				for _, f := range rep.OverCognitive(s.complexityMin) {
+					if f.Language != "Swift" {
+						continue
+					}
+					title := fmt.Sprintf("High cognitive complexity: %d (%s)", f.Cognitive, f.Name)
+					desc := fmt.Sprintf("Swift function %q has cognitive complexity %d, above %d. Break nested decisions into smaller units or use guard clauses.", f.Name, f.Cognitive, s.complexityMin)
+					out = append(out, newFinding("quality", "swift:cognitive-complexity", "", shared.SeverityMedium, title, desc, f.File, f.Line))
 				}
-			}
-			for _, f := range rep.OverCognitive(s.complexityMin) {
-				if f.Language != "Swift" {
-					continue
-				}
-				title := fmt.Sprintf("High cognitive complexity: %d (%s)", f.Cognitive, f.Name)
-				desc := fmt.Sprintf("Swift function %q has cognitive complexity %d, above %d. Break nested decisions into smaller units or use guard clauses.", f.Name, f.Cognitive, s.complexityMin)
-				out = append(out, newFinding("quality", "swift:cognitive-complexity", "", shared.SeverityMedium, title, desc, f.File, f.Line))
 			}
 		}
 	}
@@ -312,19 +347,31 @@ func isTestPath(p string) bool {
 // Report is the full code-quality dashboard payload for a source tree: the per-language inventory, the
 // findings, the duplication summary, and the rolled-up A-E health ratings + technical debt.
 type Report struct {
-	Inventory   measure.Inventory          `json:"inventory"`
-	Findings    []finding.Finding          `json:"findings"`
-	Duplication *measure.DuplicationReport `json:"duplication,omitempty"`
-	Complexity  *measure.ComplexityReport  `json:"complexity,omitempty"`
-	Coupling    *measure.CouplingReport    `json:"coupling,omitempty"`
-	Truncated   bool                       `json:"truncated,omitempty"`
-	Rating      rating.Report              `json:"rating"`
+	Inventory          measure.Inventory                 `json:"inventory"`
+	Findings           []finding.Finding                 `json:"findings"`
+	Duplication        *measure.DuplicationReport        `json:"duplication,omitempty"`
+	Complexity         *measure.ComplexityReport         `json:"complexity,omitempty"`
+	Coupling           *measure.CouplingReport           `json:"coupling,omitempty"`
+	BehavioralHotspots *measure.BehavioralHotspotsReport `json:"behavioral_hotspots,omitempty"`
+	Truncated          bool                              `json:"truncated,omitempty"`
+	Rating             rating.Report                     `json:"rating"`
 }
 
 // BuildReport computes the full dashboard report for root. Findings come from Analyze (which already
 // bridges duplication + complexity); the inventory + duplication summary + ratings are added for display.
 // Missing optional dependencies degrade to empty sections rather than erroring.
 func (s *Service) BuildReport(ctx context.Context, root string) (Report, error) {
+	return s.buildReport(ctx, root, s.defaultHeadCommit)
+}
+
+// BuildReportForCommit builds a report pinned to the immutable commit captured by the acquired
+// workspace. Keeping the commit on the call rather than the shared Service prevents concurrent scans
+// from ever collecting history for one workspace while labelling it as another.
+func (s *Service) BuildReportForCommit(ctx context.Context, root, headCommit string) (Report, error) {
+	return s.buildReport(ctx, root, headCommit)
+}
+
+func (s *Service) buildReport(ctx context.Context, root, headCommit string) (Report, error) {
 	findings, dup, comp, truncated, err := s.analyze(ctx, root) // reuse the duplication report Analyze already computed
 	if err != nil {
 		return Report{}, err
@@ -343,6 +390,44 @@ func (s *Service) BuildReport(ctx context.Context, root string) (Report, error) 
 			return Report{}, fmt.Errorf("coupling: %w", couplingErr)
 		}
 		rep.Coupling = &coupling
+	}
+	if s.history != nil {
+		hist, herr := s.history.CollectHistory(ctx, root, headCommit, s.historyDepth)
+		if herr != nil {
+			if ctx.Err() != nil {
+				return Report{}, ctx.Err()
+			}
+			hist = ports.GitHistoryResult{
+				Requested: max(s.historyDepth-1, 0),
+				Available: false,
+				Reason:    "history_collection_failed",
+			}
+		}
+		hotspots, berr := measure.BuildBehavioralHotspots(measure.BuildBehavioralHotspotsInput{
+			Inventory:        rep.Inventory,
+			Complexity:       comp,
+			Commits:          hist.Commits,
+			HeadCommit:       hist.HeadCommit,
+			RequestedCommits: hist.Requested,
+			EvaluatedCommits: hist.Evaluated,
+			ReachedRoot:      hist.ReachedRoot,
+			HistoryAvailable: hist.Available,
+			HistoryReason:    hist.Reason,
+		})
+		if berr != nil {
+			return Report{}, fmt.Errorf("behavioral hotspots: %w", berr)
+		}
+		rep.BehavioralHotspots = &hotspots
+	} else if s.behavioralUnavailable != "" {
+		hotspots := measure.BehavioralHotspotsReport{
+			Version:      measure.BehavioralHotspotsSchemaVersion,
+			Availability: measure.BehavioralUnavailable,
+			Reason:       s.behavioralUnavailable,
+		}
+		if validateErr := hotspots.Validate(); validateErr != nil {
+			return Report{}, fmt.Errorf("behavioral hotspots unavailable snapshot: %w", validateErr)
+		}
+		rep.BehavioralHotspots = &hotspots
 	}
 	rep.Rating = rating.Compute(findings, rep.Inventory.Totals().CodeLines)
 	return rep, nil

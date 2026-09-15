@@ -2242,7 +2242,7 @@ paths:
           type: array
           items:
             type: string
-            enum: [size, complexity, coupling, coverage, duplication, issues, debt, ratings]
+            enum: [size, complexity, coupling, behavioral_hotspots, coverage, duplication, issues, debt, ratings]
       responses:
         "200":
           description: Project measure node and children
@@ -2354,6 +2354,46 @@ paths:
                     children:
                       items: []
                       next_cursor: null
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+
+  /api/v1/projects/{key}/analyses/{analysisID}/behavioral-hotspots:
+    parameters:
+    - name: key
+      in: path
+      required: true
+      schema: {type: string}
+    - name: analysisID
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags: [projects]
+      summary: Rank behavioral hotspots in one immutable analysis
+      operationId: getProjectBehavioralHotspots
+      description: >
+        Returns a bounded top-list of descendant files ranked by cyclomatic
+        complexity multiplied by the number of first-parent commits that changed
+        the file. The response is pinned to analysisID and performs no source or
+        Git scan at read time.
+      parameters:
+      - name: path
+        in: query
+        description: Canonical file or directory path. Empty selects the project root.
+        schema: {type: string, default: ""}
+      - name: limit
+        in: query
+        description: Maximum ranked rows. This bounded top-list has no cursor.
+        schema: {type: integer, default: 50, minimum: 1, maximum: 100}
+      responses:
+        "200":
+          description: Behavioral hotspot ranking and measurement coverage
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BehavioralHotspotsResponse'}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -10504,6 +10544,20 @@ components:
         - not_a_supported_module
         - isolated_module
         - project_uses_module_maxima
+        - behavioral_hotspots_not_collected
+        - behavioral_hotspots_unavailable
+        - directory_summary_uses_max_score
+        - no_measured_descendant_files
+        - file_not_in_scope
+        - complexity_not_measured
+        - complexity_not_available
+        - no_supported_files_measured
+        - history_unavailable
+        - dirty_worktree
+        - shallow_clone
+        - head_commit_mismatch
+        - depth_too_small_configure_min_2
+        - file_budget_exceeded
 
     MeasureCountMetric:
       type: object
@@ -10563,6 +10617,18 @@ components:
         afferent: {$ref: '#/components/schemas/MeasureCountMetric'}
         efferent: {$ref: '#/components/schemas/MeasureCountMetric'}
         instability: {$ref: '#/components/schemas/MeasureDecimalMetric'}
+
+    MeasureBehavioralHotspots:
+      type: object
+      description: >
+        File values use cyclomatic sum, commit change count, and their product.
+        Directory/project score is the maximum measured descendant score;
+        change_count is the measured descendant count and cyclomatic_sum is unavailable.
+      required: [cyclomatic_sum, change_count, score]
+      properties:
+        cyclomatic_sum: {$ref: '#/components/schemas/MeasureCountMetric'}
+        change_count: {$ref: '#/components/schemas/MeasureCountMetric'}
+        score: {$ref: '#/components/schemas/MeasureCountMetric'}
 
     MeasureCoverage:
       type: object
@@ -10636,6 +10702,7 @@ components:
         size: {$ref: '#/components/schemas/MeasureSize'}
         complexity: {$ref: '#/components/schemas/MeasureComplexity'}
         coupling: {$ref: '#/components/schemas/MeasureCoupling'}
+        behavioral_hotspots: {$ref: '#/components/schemas/MeasureBehavioralHotspots'}
         coverage: {$ref: '#/components/schemas/MeasureCoverage'}
         duplication: {$ref: '#/components/schemas/MeasureDuplication'}
         issues: {$ref: '#/components/schemas/MeasureIssues'}
@@ -10676,7 +10743,7 @@ components:
         path: {type: string}
         included_domains:
           type: array
-          items: {type: string, enum: [size, complexity, coupling, coverage, duplication, issues, debt, ratings]}
+          items: {type: string, enum: [size, complexity, coupling, behavioral_hotspots, coverage, duplication, issues, debt, ratings]}
         node: {$ref: '#/components/schemas/MeasureNode'}
         children: {$ref: '#/components/schemas/ChildCollection'}
       required:
@@ -10697,7 +10764,7 @@ components:
         path: {type: string}
         included_domains:
           type: array
-          items: {type: string, enum: [size, complexity, coupling, coverage, duplication, issues, debt, ratings]}
+          items: {type: string, enum: [size, complexity, coupling, behavioral_hotspots, coverage, duplication, issues, debt, ratings]}
         node: {type: 'null'}
         children: {$ref: '#/components/schemas/ChildCollection'}
       required:
@@ -10708,6 +10775,54 @@ components:
         - included_domains
         - node
         - children
+    BehavioralHotspotItem:
+      type: object
+      required: [path, cyclomatic, change_count, score]
+      properties:
+        path: {type: string}
+        language: {type: string}
+        cyclomatic: {type: integer, minimum: 0}
+        change_count: {type: integer, minimum: 0}
+        score: {type: integer, minimum: 0, maximum: 2147483647}
+
+    BehavioralHotspotsResponse:
+      type: object
+      required:
+      - project
+      - analysis
+      - path
+      - availability
+      - unavailable_reason
+      - formula_version
+      - requested_commits
+      - evaluated_commits
+      - reached_root
+      - total_eligible
+      - total_measured
+      - total_excluded
+      - shown
+      - omitted
+      - items
+      properties:
+        project: {$ref: '#/components/schemas/ProjectMetadata'}
+        analysis: {$ref: '#/components/schemas/AnalysisMetadata'}
+        path: {type: string}
+        availability: {type: string, enum: [complete, partial, unavailable]}
+        unavailable_reason: {type: [string, "null"]}
+        formula_version: {type: integer, minimum: 1}
+        requested_commits: {type: integer, minimum: 0, maximum: 2048}
+        evaluated_commits: {type: integer, minimum: 0, maximum: 2048}
+        reached_root: {type: boolean}
+        total_eligible: {type: integer, minimum: 0}
+        total_measured: {type: integer, minimum: 0}
+        total_excluded: {type: integer, minimum: 0}
+        shown: {type: integer, minimum: 0, maximum: 100}
+        omitted: {type: integer, minimum: 0}
+        items:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/BehavioralHotspotItem'}
+
     AssessmentCycleMember:
       type: object
       required: [assessment_id, assessment_type, retest_number, relationship_version, created_at, created_by]

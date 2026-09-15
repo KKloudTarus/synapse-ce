@@ -58,6 +58,33 @@ func TestLegacyAnalysisDecode(t *testing.T) {
 	}
 }
 
+func TestBuildPersistsOnlyValidBehavioralHotspots(t *testing.T) {
+	report := &measure.BehavioralHotspotsReport{
+		Version:      measure.BehavioralHotspotsSchemaVersion,
+		Availability: measure.BehavioralUnavailable,
+		Reason:       "history_unavailable",
+	}
+	analysis, err := Build(Input{
+		ID: "a1", TenantID: "tenant", ProjectID: "project", ProjectKey: "demo", CreatedAt: time.Now(),
+		BehavioralHotspots: report,
+	})
+	if err != nil {
+		t.Fatalf("build valid analysis: %v", err)
+	}
+	if analysis.BehavioralHotspots == nil || analysis.BehavioralHotspots.Reason != "history_unavailable" {
+		t.Fatalf("behavioral snapshot not persisted: %+v", analysis.BehavioralHotspots)
+	}
+
+	invalid := *report
+	invalid.Reason = ""
+	if _, err := Build(Input{
+		ID: "a2", TenantID: "tenant", ProjectID: "project", ProjectKey: "demo", CreatedAt: time.Now(),
+		BehavioralHotspots: &invalid,
+	}); err == nil {
+		t.Fatal("expected invalid behavioral snapshot to be rejected")
+	}
+}
+
 type mockCatalog struct{}
 
 func (m mockCatalog) Get(k rule.Key) (rule.Rule, error) {

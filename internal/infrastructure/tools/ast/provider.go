@@ -215,13 +215,14 @@ func (p *Provider) Complexity(ctx context.Context, root string) (measure.Complex
 		return measure.ComplexityReport{}, false, err
 	}
 	var wire struct {
-		Functions []measure.FunctionComplexity `json:"functions"`
-		Truncated bool                         `json:"truncated"`
+		Functions []measure.FunctionComplexity     `json:"functions"`
+		Files     []measure.ComplexityFileCoverage `json:"files"`
+		Truncated bool                             `json:"truncated"`
 	}
 	if err := json.Unmarshal(out, &wire); err != nil {
 		return measure.ComplexityReport{}, false, fmt.Errorf("parse synapse-ast metrics: %w", err)
 	}
-	return measure.ComplexityReport{Functions: wire.Functions, Truncated: wire.Truncated}, true, nil
+	return measure.ComplexityReport{Functions: wire.Functions, Files: wire.Files, Truncated: wire.Truncated}, true, nil
 }
 
 // Bugs runs `synapse-ast bugs <root>` and returns the deterministic reliability defects. A sidecar built

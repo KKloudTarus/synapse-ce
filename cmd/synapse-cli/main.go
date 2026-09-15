@@ -52,6 +52,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/githistory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gomodgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/grype"
@@ -1559,7 +1560,7 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	}
 	sca := scauc.NewService(
 		engRepo, memory.NewFindingRepository(), memory.NewScanRepository(), nil, nil, nil, nil, nil, prov, clock, stderrAudit{},
-		shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled),
+		shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled).WithComparisonDepth(cfg.ProjectGitComparisonDepth),
 		enry.New(), sbomGen,
 		detectionSources,
 		riskEnricher, license.New(), licensemeta.NewChain(licenseEnrichers...),
@@ -1573,6 +1574,14 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	}
 	sca.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)
 	sca.SetProjectComparisonSource(&gitdiff.ComparisonSource{})
+	sca.SetCodeQuality(codequality.New(
+		codeanalysis.New(),
+		codequality.WithDuplication(duplication.New(0)),
+		codequality.WithInventory(codeinventory.New()),
+		codequality.WithCoupling(coupling.New(jsimports.New())),
+		codequality.WithComplexityMetricsOnly(ast.New(cfg.ASTBin)),
+		codequality.WithGitHistory(githistory.New(), cfg.ProjectGitComparisonDepth),
+	))
 	sca.SetGateDecoder(qualityprofile.LoadGateBytes)
 	sca.SetSBOMEnricher(manifest.New())
 	sca.SetArtifactCataloger(msi.New())           // recover Windows Installer (.msi) product identity into the SBOM

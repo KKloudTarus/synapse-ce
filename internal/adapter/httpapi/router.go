@@ -642,6 +642,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/projects/{key}/dependency-graph", rt.authz(userdom.PermView, rt.projectDependencyGraph))
 		mux.HandleFunc("GET /api/v1/projects/{key}/dependency-graph/export", rt.authz(userdom.PermView, rt.exportProjectDependencySubtree))
 		mux.HandleFunc("GET /api/v1/projects/{key}/measures", rt.authz(userdom.PermView, rt.getProjectMeasures))
+		mux.HandleFunc("GET /api/v1/projects/{key}/analyses/{analysisID}/behavioral-hotspots", rt.authz(userdom.PermView, rt.getProjectBehavioralHotspots))
 		mux.HandleFunc("GET /api/v1/projects/{key}/hotspots", rt.authz(userdom.PermView, rt.listProjectHotspots))
 		mux.HandleFunc("GET /api/v1/projects/{key}/hotspots/{id}", rt.authz(userdom.PermView, rt.getProjectHotspot))
 		mux.HandleFunc("POST /api/v1/projects/{key}/hotspots/{id}/transitions", rt.authz(userdom.PermReview, rt.transitionProjectHotspot))

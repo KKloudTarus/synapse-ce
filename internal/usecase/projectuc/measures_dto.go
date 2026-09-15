@@ -70,6 +70,14 @@ type CouplingMeasures struct {
 	Instability MeasureDecimalMetric `json:"instability"`
 }
 
+// BehavioralMeasures exposes per-file complexity/churn scores. For directory and project nodes,
+// ChangeCount is the number of measured descendant files and Score is the maximum descendant score.
+type BehavioralMeasures struct {
+	CyclomaticSum MeasureCountMetric `json:"cyclomatic_sum"`
+	ChangeCount   MeasureCountMetric `json:"change_count"`
+	Score         MeasureCountMetric `json:"score"`
+}
+
 // CoverageMeasures encapsulates code coverage metrics.
 type CoverageMeasures struct {
 	CoveredLines    MeasureCountMetric   `json:"covered_lines"`
@@ -119,18 +127,47 @@ type AnalysisMetadata struct {
 
 // MeasureNode represents a single directory, file, or project root with its computed measures.
 type MeasureNode struct {
-	Path        string               `json:"path"`
-	Name        string               `json:"name"`
-	Kind        measure.NodeKind     `json:"kind"`
-	Language    string               `json:"language,omitempty"`
-	Size        *SizeMeasures        `json:"size,omitempty"`
-	Complexity  *ComplexityMeasures  `json:"complexity,omitempty"`
-	Coupling    *CouplingMeasures    `json:"coupling,omitempty"`
-	Coverage    *CoverageMeasures    `json:"coverage,omitempty"`
-	Duplication *DuplicationMeasures `json:"duplication,omitempty"`
-	Issues      *IssueMeasures       `json:"issues,omitempty"`
-	Debt        *DebtMeasures        `json:"debt,omitempty"`
-	Ratings     *RatingsMeasures     `json:"ratings,omitempty"`
+	Path               string               `json:"path"`
+	Name               string               `json:"name"`
+	Kind               measure.NodeKind     `json:"kind"`
+	Language           string               `json:"language,omitempty"`
+	Size               *SizeMeasures        `json:"size,omitempty"`
+	Complexity         *ComplexityMeasures  `json:"complexity,omitempty"`
+	Coupling           *CouplingMeasures    `json:"coupling,omitempty"`
+	BehavioralHotspots *BehavioralMeasures  `json:"behavioral_hotspots,omitempty"`
+	Coverage           *CoverageMeasures    `json:"coverage,omitempty"`
+	Duplication        *DuplicationMeasures `json:"duplication,omitempty"`
+	Issues             *IssueMeasures       `json:"issues,omitempty"`
+	Debt               *DebtMeasures        `json:"debt,omitempty"`
+	Ratings            *RatingsMeasures     `json:"ratings,omitempty"`
+}
+
+// BehavioralHotspotItem is one immutable, globally ranked file row.
+type BehavioralHotspotItem struct {
+	Path        string `json:"path"`
+	Language    string `json:"language,omitempty"`
+	Cyclomatic  int    `json:"cyclomatic"`
+	ChangeCount int    `json:"change_count"`
+	Score       int    `json:"score"`
+}
+
+// BehavioralHotspotsResponse is a bounded top-list pinned to one analysis.
+type BehavioralHotspotsResponse struct {
+	Project          ProjectNodeInfo                `json:"project"`
+	Analysis         AnalysisMetadata               `json:"analysis"`
+	Path             string                         `json:"path"`
+	Availability     measure.BehavioralAvailability `json:"availability"`
+	Reason           *string                        `json:"unavailable_reason"`
+	FormulaVersion   int                            `json:"formula_version"`
+	RequestedCommits int                            `json:"requested_commits"`
+	EvaluatedCommits int                            `json:"evaluated_commits"`
+	ReachedRoot      bool                           `json:"reached_root"`
+	TotalEligible    int                            `json:"total_eligible"`
+	TotalMeasured    int                            `json:"total_measured"`
+	TotalExcluded    int                            `json:"total_excluded"`
+	Shown            int                            `json:"shown"`
+	Omitted          int                            `json:"omitted"`
+	Items            []BehavioralHotspotItem        `json:"items"`
 }
 
 // ChildCollection wraps a paginated list of immediate child nodes.

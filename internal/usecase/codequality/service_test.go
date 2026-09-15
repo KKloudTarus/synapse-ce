@@ -601,3 +601,158 @@ func analyzerKindVocabulary() ([]string, error) {
 	sort.Strings(out)
 	return out, nil
 }
+
+type fakeHistoryCollector struct {
+	res ports.GitHistoryResult
+	err error
+}
+
+func (f fakeHistoryCollector) CollectHistory(context.Context, string, string, int) (ports.GitHistoryResult, error) {
+	return f.res, f.err
+}
+
+type capturingHistoryCollector struct {
+	head string
+}
+
+func (f *capturingHistoryCollector) CollectHistory(_ context.Context, _ string, head string, depth int) (ports.GitHistoryResult, error) {
+	f.head = head
+	return ports.GitHistoryResult{Requested: max(depth-1, 0), Available: false, Reason: "history_unavailable"}, nil
+}
+
+type fakeInventory struct {
+	inv measure.Inventory
+}
+
+func (f fakeInventory) Inventory(context.Context, string) (measure.Inventory, error) {
+	return f.inv, nil
+}
+
+func TestWithComplexityMetricsOnly(t *testing.T) {
+	analyzer := fakeAnalyzer{raws: []ports.CodeAnalysisRawFinding{
+		{Kind: "quality", RuleID: "quality-todo-comment", CWE: "CWE-546", Severity: shared.SeverityInfo, Title: "TODO", File: "a.go", Line: 3},
+	}}
+	metrics := fakeMetrics{available: true, rep: measure.ComplexityReport{
+		Files: []measure.ComplexityFileCoverage{
+			{File: "a.go", Language: "Go", Supported: true, Parsed: true},
+		},
+		Functions: []measure.FunctionComplexity{
+			{File: "a.go", Line: 5, Name: "monster", Language: "Go", Cyclomatic: 50, Cognitive: 60},
+		},
+	}}
+
+	// WithComplexity emits findings
+	svcWithFindings := New(analyzer, WithComplexity(metrics, 15))
+	repWithFindings, err := svcWithFindings.BuildReport(context.Background(), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byRule(repWithFindings.Findings, "quality-high-complexity") == nil {
+		t.Fatalf("expected quality-high-complexity finding with WithComplexity")
+	}
+
+	// WithComplexityMetricsOnly retains ComplexityReport but does NOT emit findings
+	svcMetricsOnly := New(analyzer, WithComplexityMetricsOnly(metrics))
+	repMetricsOnly, err := svcMetricsOnly.BuildReport(context.Background(), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repMetricsOnly.Complexity == nil || len(repMetricsOnly.Complexity.Functions) != 1 {
+		t.Fatalf("expected complexity report to be retained, got %+v", repMetricsOnly.Complexity)
+	}
+	if byRule(repMetricsOnly.Findings, "quality-high-complexity") != nil {
+		t.Fatalf("expected NO quality-high-complexity finding with WithComplexityMetricsOnly")
+	}
+}
+
+func TestBuildReportBehavioralHotspots(t *testing.T) {
+	analyzer := fakeAnalyzer{}
+	metrics := fakeMetrics{available: true, rep: measure.ComplexityReport{
+		Files: []measure.ComplexityFileCoverage{
+			{File: "pkg/core.go", Language: "Go", Supported: true, Parsed: true},
+			{File: "pkg/util.go", Language: "Go", Supported: true, Parsed: true},
+		},
+		Functions: []measure.FunctionComplexity{
+			{File: "pkg/core.go", Line: 10, Name: "CoreFunc", Language: "Go", Cyclomatic: 10},
+			{File: "pkg/util.go", Line: 5, Name: "UtilFunc", Language: "Go", Cyclomatic: 2},
+		},
+	}}
+	inv := fakeInventory{inv: measure.Inventory{
+		Files: []measure.FileInventory{
+			{Path: "pkg/core.go", Language: "Go", CodeLines: 100},
+			{Path: "pkg/util.go", Language: "Go", CodeLines: 50},
+		},
+	}}
+	hist := fakeHistoryCollector{res: ports.GitHistoryResult{
+		HeadCommit:  "1111111111111111111111111111111111111111",
+		Requested:   10,
+		Evaluated:   3,
+		ReachedRoot: true,
+		Available:   true,
+		Commits: []measure.BehavioralCommitEvidence{
+			{CommitID: "1111111111111111111111111111111111111111", FirstParentID: "2222222222222222222222222222222222222222", TouchedPaths: []string{"pkg/core.go"}},
+			{CommitID: "2222222222222222222222222222222222222222", FirstParentID: "3333333333333333333333333333333333333333", TouchedPaths: []string{"pkg/core.go", "pkg/util.go"}},
+			{CommitID: "3333333333333333333333333333333333333333", TouchedPaths: []string{"pkg/core.go"}},
+		},
+	}}
+
+	svc := New(analyzer,
+		WithInventory(inv),
+		WithComplexityMetricsOnly(metrics),
+		WithGitHistory(hist, 10, "head-ref"),
+	)
+
+	rep, err := svc.BuildReport(context.Background(), ".")
+	if err != nil {
+		t.Fatalf("build report: %v", err)
+	}
+	if rep.BehavioralHotspots == nil {
+		t.Fatalf("expected behavioral hotspots to be populated")
+	}
+	if rep.BehavioralHotspots.Availability != measure.BehavioralComplete {
+		t.Errorf("expected complete availability, got %q", rep.BehavioralHotspots.Availability)
+	}
+	if len(rep.BehavioralHotspots.Files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(rep.BehavioralHotspots.Files))
+	}
+	// pkg/core.go: cyclomatic 10 * 3 commits = 30
+	// pkg/util.go: cyclomatic 2 * 1 commit = 2
+	f0 := rep.BehavioralHotspots.Files[0]
+	if f0.Path != "pkg/core.go" || f0.Score != 30 || f0.ChangeCount != 3 {
+		t.Errorf("f0 wrong: %+v", f0)
+	}
+	f1 := rep.BehavioralHotspots.Files[1]
+	if f1.Path != "pkg/util.go" || f1.Score != 2 || f1.ChangeCount != 1 {
+		t.Errorf("f1 wrong: %+v", f1)
+	}
+}
+
+func TestBuildReportRecordsConfiguredBehavioralUnavailability(t *testing.T) {
+	svc := New(fakeAnalyzer{}, WithBehavioralHotspotsUnavailable("confined_tool_runner_unavailable"))
+
+	rep, err := svc.BuildReport(context.Background(), ".")
+	if err != nil {
+		t.Fatalf("build report: %v", err)
+	}
+	if rep.BehavioralHotspots == nil {
+		t.Fatal("expected unavailable behavioral-hotspots snapshot")
+	}
+	if got := rep.BehavioralHotspots.Availability; got != measure.BehavioralUnavailable {
+		t.Fatalf("availability = %q, want unavailable", got)
+	}
+	if got := rep.BehavioralHotspots.Reason; got != "confined_tool_runner_unavailable" {
+		t.Fatalf("reason = %q", got)
+	}
+}
+
+func TestBuildReportForCommitPinsHistoryPerCall(t *testing.T) {
+	history := &capturingHistoryCollector{}
+	svc := New(fakeAnalyzer{}, WithGitHistory(history, 10, "default-head"))
+
+	if _, err := svc.BuildReportForCommit(context.Background(), ".", "scan-head"); err != nil {
+		t.Fatalf("build report for commit: %v", err)
+	}
+	if history.head != "scan-head" {
+		t.Fatalf("collector head = %q, want scan-head", history.head)
+	}
+}
