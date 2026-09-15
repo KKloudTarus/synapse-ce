@@ -376,6 +376,12 @@ func nativeComparisonTruth(comparisons []NativeComparisonRecord) (Truth, error) 
 			} else {
 				truths[TruthFixed] = struct{}{}
 			}
+		case NativePredicateEVRGreaterThan:
+			if comparison.Relation == "after" {
+				truths[TruthAffected] = struct{}{}
+			} else {
+				truths[TruthFixed] = struct{}{}
+			}
 		case NativePredicateVersionEqualsZero:
 			if comparison.Relation == "equal" {
 				return "", fmt.Errorf("native zero-version comparison %q collides with the sentinel", comparison.ID)

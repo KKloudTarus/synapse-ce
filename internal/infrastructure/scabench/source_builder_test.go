@@ -571,7 +571,7 @@ func sourceObject(id, name string) string {
 }
 
 func sourceState(id, operator, operation, evr string) string {
-	return `<dpkginfo_state id="` + id + `" operator="` + operator + `"><evr operation="` + operation + `">` + evr + `</evr></dpkginfo_state>`
+	return `<dpkginfo_state id="` + id + `" operator="` + operator + `"><evr datatype="debian_evr_string" operation="` + operation + `">` + evr + `</evr></dpkginfo_state>`
 }
 
 func sourceEvidenceRPMPackage(name, evr string) bench.SourceEvidencePackage {
@@ -744,6 +744,203 @@ func TestBuildSourceNativeEvidenceSLESCurrentPredicates(t *testing.T) {
 	}
 }
 
+func TestParseVendorOVALFiltersOnlyNamespaceDeclarations(t *testing.T) {
+	validDebianGuards := sourceDebianGuardOVAL("12", sourceDebianReleaseObject("release-object"), `<uname_object id="uname-object"/>`)
+	cases := []struct {
+		name    string
+		oval    string
+		wantErr bool
+	}{
+		{name: "current Debian guard namespace declarations", oval: validDebianGuards},
+		{
+			name:    "qualified semantic attribute is rejected",
+			oval:    sourceOVAL(`<criteria><criterion test_ref="test-a"/></criteria>`, sourceTest("test-a", "object-a", "state-a"), sourceObject("object-a", "pkg"), `<dpkginfo_state id="state-a"><evr xmlns:external="urn:external" external:datatype="debian_evr_string" operation="less than">2</evr></dpkginfo_state>`),
+			wantErr: true,
+		},
+		{
+			name:    "duplicate local semantic attribute is rejected",
+			oval:    sourceOVAL(`<criteria><criterion test_ref="test-a"/></criteria>`, sourceTest("test-a", "object-a", "state-a"), sourceObject("object-a", "pkg"), `<dpkginfo_state id="state-a" xmlns:external="urn:external" external:id="state-b"><evr datatype="debian_evr_string" operation="less than">2</evr></dpkginfo_state>`),
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseVendorOVAL([]byte(tc.oval))
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("parseVendorOVAL() error = %v, want error %t", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestBuildSourceNativeEvidenceAcceptsOnlyFamilyEVRDatatypes(t *testing.T) {
+	debianPkg := sourceEvidencePackage("pkg", "1", "pkg", "1")
+	debianSelection := bench.SourceEvidenceTarget{TargetID: "target-a", SourceAssetLocator: "sources/vendor.xml", PackageFamily: "deb", Product: "debian", Release: "12", Architecture: "amd64", Packages: []bench.SourceEvidencePackage{debianPkg}}
+	slesPkg := sourceEvidenceRPMPackage("pkg", "0:2.9.11-150600.1.90")
+	slesSelection := sourceSLESSelection(slesPkg)
+	cases := []struct {
+		name            string
+		pkg             bench.SourceEvidencePackage
+		selection       bench.SourceEvidenceTarget
+		components      []bench.Component
+		tests           string
+		objects         string
+		states          string
+		wantUnsupported bool
+	}{
+		{
+			name: "Debian current datatype", pkg: debianPkg, selection: debianSelection, components: []bench.Component{debianPkg.Component},
+			tests: sourceTest("test-a", "object-a", "state-a"), objects: sourceObject("object-a", "pkg"), states: `<dpkginfo_state id="state-a"><evr datatype="debian_evr_string" operation="less than">2</evr></dpkginfo_state>`,
+		},
+		{
+			name: "Debian arbitrary datatype is unsupported", pkg: debianPkg, selection: debianSelection, components: []bench.Component{debianPkg.Component},
+			tests: sourceTest("test-a", "object-a", "state-a"), objects: sourceObject("object-a", "pkg"), states: `<dpkginfo_state id="state-a"><evr datatype="evr_string" operation="less than">2</evr></dpkginfo_state>`, wantUnsupported: true,
+		},
+		{
+			name: "SLES current datatype", pkg: slesPkg, selection: slesSelection, components: []bench.Component{slesPkg.Component},
+			tests: `<rpminfo_test id="test-a" check="at least one"><object object_ref="object-a"/><state state_ref="state-a"/></rpminfo_test>`, objects: `<rpminfo_object id="object-a"><name>pkg</name></rpminfo_object>`, states: `<rpminfo_state id="state-a"><evr datatype="evr_string" operation="less than">2</evr></rpminfo_state>`,
+		},
+		{
+			name: "SLES arbitrary datatype is unsupported", pkg: slesPkg, selection: slesSelection, components: []bench.Component{slesPkg.Component},
+			tests: `<rpminfo_test id="test-a" check="at least one"><object object_ref="object-a"/><state state_ref="state-a"/></rpminfo_test>`, objects: `<rpminfo_object id="object-a"><name>pkg</name></rpminfo_object>`, states: `<rpminfo_state id="state-a"><evr datatype="debian_evr_string" operation="less than">2</evr></rpminfo_state>`, wantUnsupported: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			oval := sourceOVAL(`<criteria><criterion test_ref="test-a"/></criteria>`, tc.tests, tc.objects, tc.states)
+			source, native, err := buildSourceEvidenceForTarget(t, oval, tc.selection, tc.components, &sourceNativeComparator{relations: map[string]int{"2": -1}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantUnsupported {
+				if len(source.Cases) != 0 || len(source.Unsupported) == 0 || len(native.Targets[0].Comparisons) != 0 {
+					t.Fatalf("unsupported datatype evidence = %+v/%+v", source, native)
+				}
+				return
+			}
+			if len(source.Cases) != 1 || source.Cases[0].DerivedTruth != bench.TruthAffected || len(source.Unsupported) != 0 || len(native.Targets[0].Comparisons) != 1 {
+				t.Fatalf("datatype evidence = %+v/%+v", source, native)
+			}
+		})
+	}
+}
+
+func TestBuildSourceNativeEvidenceEvaluatesSLESArchitectureAlternation(t *testing.T) {
+	pkg := sourceEvidenceRPMPackage("pkg", "0:2.9.11-150600.1.90")
+	cases := []struct {
+		name            string
+		architecture    string
+		pattern         string
+		wantApplicable  bool
+		wantUnsupported bool
+		wantRecords     int
+	}{
+		{name: "exact architecture matches", architecture: "x86_64", pattern: `(aarch64|ppc64le|s390x|x86_64)`, wantApplicable: true, wantRecords: 1},
+		{name: "current five architecture guard matches", architecture: "x86_64", pattern: `(aarch64|i586|ppc64le|s390x|x86_64)`, wantApplicable: true, wantRecords: 1},
+		{name: "architecture mismatch is non-applicable", architecture: "armv7l", pattern: `(aarch64|ppc64le|s390x|x86_64)`},
+		{name: "unknown architecture is unsupported", architecture: "x86_64", pattern: `(aarch64|mips|ppc64le|s390x|x86_64)`, wantApplicable: true, wantUnsupported: true},
+		{name: "malformed pattern is unsupported", architecture: "x86_64", pattern: `aarch64|x86_64`, wantApplicable: true, wantUnsupported: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			selection := sourceSLESSelection(pkg)
+			selection.Architecture = tc.architecture
+			oval := sourceOVAL(`<criteria><criterion test_ref="pkg-test"/></criteria>`, `<rpminfo_test id="pkg-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, `<rpminfo_object id="pkg-object"><name>pkg</name></rpminfo_object>`, `<rpminfo_state id="pkg-state"><arch datatype="string" operation="pattern match">`+tc.pattern+`</arch><evr datatype="evr_string" operation="less than">2</evr></rpminfo_state>`)
+			target := bench.Target{ID: "target-a", Digest: sourceTestDigest('a'), Components: []bench.Component{pkg.Component}}
+			result := evaluateSourceOVAL(t, oval, target, selection, pkg, &sourceNativeComparator{relations: map[string]int{"2": -1}})
+			if result.applicable != tc.wantApplicable || (len(result.unsupported) != 0) != tc.wantUnsupported || len(result.records) != tc.wantRecords {
+				t.Fatalf("architecture result = %+v", result)
+			}
+		})
+	}
+}
+
+func TestBuildSourceNativeEvidenceEvaluatesSLESEVRGreaterThan(t *testing.T) {
+	cases := []struct {
+		name      string
+		relation  int
+		wantTruth bench.Truth
+	}{
+		{name: "after establishes affected", relation: 1, wantTruth: bench.TruthAffected},
+		{name: "before establishes fixed", relation: -1, wantTruth: bench.TruthFixed},
+		{name: "equal establishes fixed", relation: 0, wantTruth: bench.TruthFixed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg := sourceEvidenceRPMPackage("pkg", "0:2.9.11-150600.1.90")
+			selection := sourceSLESSelection(pkg)
+			oval := sourceOVAL(`<criteria><criterion test_ref="pkg-test"/></criteria>`, `<rpminfo_test id="pkg-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, `<rpminfo_object id="pkg-object"><name>pkg</name></rpminfo_object>`, `<rpminfo_state id="pkg-state"><arch datatype="string" operation="pattern match">(aarch64|ppc64le|s390x|x86_64)</arch><evr datatype="evr_string" operation="greater than">0:0-0</evr></rpminfo_state>`)
+			source, native, err := buildSourceEvidenceForTarget(t, oval, selection, []bench.Component{pkg.Component}, &sourceNativeComparator{relations: map[string]int{"0:0-0": tc.relation}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(source.Unsupported) != 0 || len(source.Cases) != 1 || source.Cases[0].DerivedTruth != tc.wantTruth || len(native.Targets[0].Comparisons) != 1 || native.Targets[0].Comparisons[0].PredicateKind != bench.NativePredicateEVRGreaterThan {
+				t.Fatalf("greater-than evidence = %+v/%+v", source, native)
+			}
+		})
+	}
+}
+
+func TestBuildSourceNativeEvidenceUsesNestedSLESGuardOnlyOR(t *testing.T) {
+	pkg := sourceEvidenceRPMPackage("pkg", "0:2.9.11-150600.1.90")
+	selection := sourceSLESSelection(pkg)
+	oval := sourceOVAL(
+		`<criteria operator="AND"><criteria operator="OR"><criterion test_ref="primary-release-test"/><criterion test_ref="alternate-release-test"/><criterion test_ref="unsupported-release-test"/></criteria><criteria operator="OR"><criterion test_ref="pkg-test"/></criteria></criteria>`,
+		`<rpminfo_test id="primary-release-test" check="at least one"><object object_ref="primary-release-object"/><state state_ref="release-state"/></rpminfo_test><rpminfo_test id="alternate-release-test" check="at least one"><object object_ref="alternate-release-object"/><state state_ref="release-state"/></rpminfo_test><rpminfo_test id="unsupported-release-test" check="at least one"><object object_ref="primary-release-object"/><state state_ref="missing-state"/></rpminfo_test><rpminfo_test id="pkg-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`,
+		`<rpminfo_object id="primary-release-object"><name>sles-release</name></rpminfo_object><rpminfo_object id="alternate-release-object"><name>SLES_SAP-release</name></rpminfo_object><rpminfo_object id="pkg-object"><name>pkg</name></rpminfo_object>`,
+		`<rpminfo_state id="release-state"><version operation="equals">15.6</version></rpminfo_state><rpminfo_state id="pkg-state"><arch datatype="string" operation="pattern match">(aarch64|ppc64le|s390x|x86_64)</arch><evr datatype="evr_string" operation="greater than">0:0-0</evr></rpminfo_state>`,
+	)
+	source, native, err := buildSourceEvidenceForTarget(t, oval, selection, []bench.Component{pkg.Component, sourceSLESReleaseComponent("0:15.6-1")}, &sourceNativeComparator{relations: map[string]int{"0:0-0": 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(source.Unsupported) != 0 || len(source.Cases) != 1 || source.Cases[0].DerivedTruth != bench.TruthAffected || len(native.Targets[0].Comparisons) != 1 || native.Targets[0].Comparisons[0].PredicateKind != bench.NativePredicateEVRGreaterThan {
+		t.Fatalf("nested guard-only OR evidence = %+v/%+v", source, native)
+	}
+}
+
+func TestBuildSourceNativeEvidenceRejectsTopLevelSLESGuardOnlyOR(t *testing.T) {
+	pkg := sourceEvidenceRPMPackage("pkg", "0:2.9.11-150600.1.90")
+	selection := sourceSLESSelection(pkg)
+	oval := sourceOVAL(
+		`<criteria operator="OR"><criterion test_ref="primary-release-test"/><criterion test_ref="non-applicable-pkg-test"/></criteria>`,
+		`<rpminfo_test id="primary-release-test" check="at least one"><object object_ref="primary-release-object"/><state state_ref="release-state"/></rpminfo_test><rpminfo_test id="non-applicable-pkg-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`,
+		`<rpminfo_object id="primary-release-object"><name>sles-release</name></rpminfo_object><rpminfo_object id="pkg-object"><name>pkg</name><arch>armv7l</arch></rpminfo_object>`,
+		`<rpminfo_state id="release-state"><version operation="equals">15.6</version></rpminfo_state><rpminfo_state id="pkg-state"><evr datatype="evr_string" operation="greater than">0:0-0</evr></rpminfo_state>`,
+	)
+	source, native, err := buildSourceEvidenceForTarget(t, oval, selection, []bench.Component{pkg.Component, sourceSLESReleaseComponent("0:15.6-1")}, &sourceNativeComparator{relations: map[string]int{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(source.Cases) != 0 || len(source.Unsupported) == 0 || len(native.Targets[0].Comparisons) != 0 {
+		t.Fatalf("top-level guard-only OR evidence = %+v/%+v", source, native)
+	}
+}
+
+func TestBuildSourceNativeEvidenceDistinguishesSLESReleaseAbsence(t *testing.T) {
+	pkg := sourceEvidenceRPMPackage("pkg", "0:2.9.11-150600.1.90")
+	selection := sourceSLESSelection(pkg)
+	cases := []struct {
+		name            string
+		releasePackage  string
+		wantApplicable  bool
+		wantUnsupported bool
+	}{
+		{name: "alternate release absence is non-applicable", releasePackage: "SLES_SAP-release"},
+		{name: "missing primary release fails closed", releasePackage: "sles-release", wantApplicable: true, wantUnsupported: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			oval := sourceOVAL(`<criteria><criterion test_ref="release-test"/></criteria>`, `<rpminfo_test id="release-test" check="at least one"><object object_ref="release-object"/><state state_ref="release-state"/></rpminfo_test>`, `<rpminfo_object id="release-object"><name>`+tc.releasePackage+`</name></rpminfo_object>`, `<rpminfo_state id="release-state"><version operation="equals">15.6</version></rpminfo_state>`)
+			target := bench.Target{ID: "target-a", Digest: sourceTestDigest('a'), Components: []bench.Component{pkg.Component}}
+			result := evaluateSourceOVAL(t, oval, target, selection, pkg, &sourceNativeComparator{relations: map[string]int{}})
+			if result.applicable != tc.wantApplicable || (len(result.unsupported) != 0) != tc.wantUnsupported {
+				t.Fatalf("release absence result = %+v", result)
+			}
+		})
+	}
+}
+
 func TestOVALCVECanonicalizationRejectsAmbiguity(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -805,7 +1002,7 @@ func sourceDebianReleaseObject(id string) string {
 }
 
 func sourceDebianGuardOVAL(release, releaseObject, unameObject string) string {
-	return sourceOVAL(`<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="uname-test"/><criterion test_ref="pkg-test"/></criteria>`, `<textfilecontent54_test id="release-test" check="all"><object object_ref="release-object"/><state state_ref="release-state"/></textfilecontent54_test><uname_test id="uname-test" check="all"><object object_ref="uname-object"/></uname_test>`+sourceTest("pkg-test", "pkg-object", "pkg-state"), releaseObject+unameObject+sourceObject("pkg-object", "pkg"), `<textfilecontent54_state id="release-state"><subexpression operation="equals">`+release+`</subexpression></textfilecontent54_state>`+sourceState("pkg-state", "AND", "less than", "2"))
+	return sourceOVAL(`<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="uname-test"/><criterion test_ref="pkg-test"/></criteria>`, `<textfilecontent54_test xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5#independent" id="release-test" version="1" check="all" check_existence="at_least_one_exists" comment="Debian GNU/Linux 12 is installed"><object object_ref="release-object"/><state state_ref="release-state"/></textfilecontent54_test><uname_test xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5#unix" id="uname-test" version="1" check="all" check_existence="at_least_one_exists" comment="Installed architecture is all"><object object_ref="uname-object"/></uname_test>`+sourceTest("pkg-test", "pkg-object", "pkg-state"), releaseObject+unameObject+sourceObject("pkg-object", "pkg"), `<textfilecontent54_state id="release-state"><subexpression operation="equals">`+release+`</subexpression></textfilecontent54_state>`+sourceState("pkg-state", "AND", "less than", "2"))
 }
 
 func sourceSLESGuardOVAL(criteria, packageTests, packageStates string) string {

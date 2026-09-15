@@ -849,6 +849,8 @@ func latestCycleAttempt(attempts []CycleAttempt) CycleAttempt {
 const (
 	// NativePredicateEVRLessThan identifies a vendor EVR vulnerability range.
 	NativePredicateEVRLessThan = "evr_less_than"
+	// NativePredicateEVRGreaterThan identifies an RPM EVR vulnerability range.
+	NativePredicateEVRGreaterThan = "evr_greater_than"
 	// NativePredicateVersionEqualsZero identifies the SLES explicit not-affected sentinel.
 	NativePredicateVersionEqualsZero = "version_equals_zero"
 )
@@ -889,6 +891,10 @@ func (record NativeComparisonRecord) Validate() error {
 	switch record.PredicateKind {
 	case "", NativePredicateEVRLessThan:
 		// Empty is the immutable v2 encoding for the legacy EVR-less-than predicate.
+	case NativePredicateEVRGreaterThan:
+		if record.PackageFamily != "rpm" {
+			return fmt.Errorf("native EVR-greater-than predicate requires an RPM package")
+		}
 	case NativePredicateVersionEqualsZero:
 		if record.PackageFamily != "rpm" || record.FixedEVR != "0" {
 			return fmt.Errorf("native zero-version predicate requires an RPM package and zero comparator value")

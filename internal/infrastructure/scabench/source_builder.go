@@ -317,6 +317,7 @@ type ovalState struct {
 	predicateValue     string
 	debianReleaseGuard bool
 	guards             map[string]string
+	architectures      map[string]struct{}
 	unknown            []string
 	unsupported        string
 }
@@ -478,12 +479,25 @@ func boundedOVALBytesWithLimits(body []byte, compressedLimit, decompressedLimit 
 	return decoded, nil
 }
 
+func isOVALNamespaceDeclaration(attr xml.Attr) bool {
+	return attr.Name.Space == "xmlns" || (attr.Name.Space == "" && attr.Name.Local == "xmlns")
+}
+
 func decodeOVALNode(decoder *xml.Decoder, start xml.StartElement, depth int) (*ovalNode, error) {
 	if depth > 128 {
 		return nil, fmt.Errorf("vendor OVAL nesting exceeds limit")
 	}
 	node := &ovalNode{name: start.Name.Local, attrs: make(map[string]string, len(start.Attr))}
 	for _, attr := range start.Attr {
+		if isOVALNamespaceDeclaration(attr) {
+			continue
+		}
+		if _, exists := node.attrs[attr.Name.Local]; exists {
+			return nil, fmt.Errorf("vendor OVAL element %q has duplicate attribute %q", start.Name.Local, attr.Name.Local)
+		}
+		if attr.Name.Space != "" {
+			return nil, fmt.Errorf("vendor OVAL element %q has qualified attribute %q", start.Name.Local, attr.Name.Local)
+		}
 		node.attrs[attr.Name.Local] = strings.TrimSpace(attr.Value)
 	}
 	for {
@@ -689,10 +703,32 @@ func parseOVALState(node *ovalNode) (ovalState, error) {
 		}
 		switch child.name {
 		case "evr":
-			if state.predicateKind != "" || value == "" || child.attrs["operation"] != "less than" || len(child.attrs) != 1 {
+			if state.predicateKind != "" || value == "" || !onlyOVALAttributes(child.attrs, "operation", "datatype") {
 				return ovalState{}, fmt.Errorf("vendor OVAL state %q has an unsupported version range", state.id)
 			}
+			operation := child.attrs["operation"]
+			if operation != "less than" && operation != "greater than" {
+				return ovalState{}, fmt.Errorf("vendor OVAL state %q has an unsupported version range", state.id)
+			}
+			expectedDatatype := ""
+			switch node.name {
+			case "dpkginfo_state":
+				expectedDatatype = "debian_evr_string"
+			case "rpminfo_state":
+				expectedDatatype = "evr_string"
+			default:
+				return ovalState{}, fmt.Errorf("vendor OVAL state %q has an unsupported EVR family", state.id)
+			}
+			if datatype, present := child.attrs["datatype"]; present && datatype != expectedDatatype {
+				return ovalState{}, fmt.Errorf("vendor OVAL state %q has an unsupported EVR datatype", state.id)
+			}
 			state.predicateKind = bench.NativePredicateEVRLessThan
+			if operation == "greater than" {
+				if node.name != "rpminfo_state" {
+					return ovalState{}, fmt.Errorf("vendor OVAL state %q has an unsupported version range", state.id)
+				}
+				state.predicateKind = bench.NativePredicateEVRGreaterThan
+			}
 			state.predicateValue = value
 		case "version":
 			if state.predicateKind != "" || value == "" || child.attrs["operation"] != "equals" || len(child.attrs) != 1 {
@@ -700,7 +736,20 @@ func parseOVALState(node *ovalNode) (ovalState, error) {
 			}
 			state.predicateKind = "version_equals"
 			state.predicateValue = value
-		case "arch", "product", "release":
+		case "arch":
+			if child.attrs["operation"] == "pattern match" {
+				if node.name != "rpminfo_state" || !onlyOVALAttributes(child.attrs, "operation", "datatype") || child.attrs["datatype"] != "string" || value == "" || state.guards["arch"] != "" || len(state.architectures) != 0 {
+					return ovalState{}, fmt.Errorf("vendor OVAL state %q has an unsupported architecture guard", state.id)
+				}
+				architectures, valid := parseSLESArchitectureAlternation(value)
+				if !valid {
+					return ovalState{}, fmt.Errorf("vendor OVAL state %q has an unsupported architecture guard", state.id)
+				}
+				state.architectures = architectures
+				continue
+			}
+			fallthrough
+		case "product", "release":
 			operation := child.attrs["operation"]
 			if len(child.attrs) > 1 || (operation != "" && operation != "equals") || value == "" || state.guards[child.name] != "" {
 				return ovalState{}, fmt.Errorf("vendor OVAL state %q has an unsupported %s guard", state.id, child.name)
@@ -714,6 +763,29 @@ func parseOVALState(node *ovalNode) (ovalState, error) {
 		return ovalState{}, fmt.Errorf("vendor OVAL state %q has no supported predicate", state.id)
 	}
 	return state, nil
+}
+
+func parseSLESArchitectureAlternation(value string) (map[string]struct{}, bool) {
+	if len(value) < 5 || !strings.HasPrefix(value, "(") || !strings.HasSuffix(value, ")") {
+		return nil, false
+	}
+	values := strings.Split(value[1:len(value)-1], "|")
+	if len(values) < 2 || len(values) > 5 {
+		return nil, false
+	}
+	architectures := make(map[string]struct{}, len(values))
+	for _, architecture := range values {
+		switch architecture {
+		case "aarch64", "i586", "ppc64le", "s390x", "x86_64":
+		default:
+			return nil, false
+		}
+		if _, exists := architectures[architecture]; exists {
+			return nil, false
+		}
+		architectures[architecture] = struct{}{}
+	}
+	return architectures, true
 }
 
 func parseDebianReleaseState(node *ovalNode) (ovalState, error) {
@@ -991,10 +1063,13 @@ func (evaluator ovalEvaluator) evaluate(node *ovalNode) (ovalResult, error) {
 			return result, nil
 		}
 
-		// A complete affected witness wins an OR in source order. Every alternative
-		// is retained for a negative disposition, where all applicable branches must
-		// be supported and agree on fixed versus explicitly not-affected.
+		// A complete affected witness wins an OR in source order. If a supported
+		// applicability guard is true, the OR is already true; it remains available
+		// for an enclosing AND while evaluation continues for an affected package
+		// predicate. Without either witness, every applicable branch must remain
+		// supported and agree on fixed versus explicitly not-affected.
 		result := ovalResult{}
+		var guardWitness *ovalResult
 		for _, child := range node.children {
 			childResult, err := evaluator.evaluate(child)
 			if err != nil {
@@ -1006,6 +1081,16 @@ func (evaluator ovalEvaluator) evaluate(node *ovalNode) (ovalResult, error) {
 			if truth, complete := completeOVALTruth(childResult); complete && truth == bench.TruthAffected && len(childResult.unsupported) == 0 {
 				return childResult, nil
 			}
+			if len(childResult.records) == 0 && len(childResult.truths) == 0 && len(childResult.unsupported) == 0 {
+				if guardWitness == nil {
+					witness := childResult
+					guardWitness = &witness
+				}
+				continue
+			}
+			if guardWitness != nil {
+				continue
+			}
 			result.applicable = true
 			result.unsupported = append(result.unsupported, childResult.unsupported...)
 			result.truths = appendOVALTruths(result.truths, childResult.truths...)
@@ -1013,6 +1098,9 @@ func (evaluator ovalEvaluator) evaluate(node *ovalNode) (ovalResult, error) {
 			if len(childResult.records) == 0 && len(childResult.unsupported) == 0 {
 				result.unsupported = append(result.unsupported, &ovalUnsupportedError{kind: "criteria", id: node.name, reason: "OR branch has no package version predicate"})
 			}
+		}
+		if guardWitness != nil {
+			return *guardWitness, nil
 		}
 		if len(result.unsupported) == 0 && len(result.truths) > 1 {
 			result.unsupported = append(result.unsupported, &ovalUnsupportedError{kind: "criteria", id: node.name, reason: "OR branches disagree on negative disposition"})
@@ -1117,6 +1205,11 @@ func (evaluator ovalEvaluator) evaluateTest(testID, criterionComment string) (ov
 			return ovalResult{}, nil
 		}
 	}
+	if len(state.architectures) != 0 {
+		if _, matches := state.architectures[evaluator.selection.Architecture]; !matches {
+			return ovalResult{}, nil
+		}
+	}
 
 	candidateEVR := ""
 	packageIdentity := ""
@@ -1147,7 +1240,7 @@ func (evaluator ovalEvaluator) evaluateTest(testID, criterionComment string) (ov
 		predicateKind = bench.NativePredicateVersionEqualsZero
 		rightEVR = "0"
 	}
-	if predicateKind != bench.NativePredicateEVRLessThan && predicateKind != bench.NativePredicateVersionEqualsZero {
+	if predicateKind != bench.NativePredicateEVRLessThan && predicateKind != bench.NativePredicateEVRGreaterThan && predicateKind != bench.NativePredicateVersionEqualsZero {
 		return unsupportedOVALResult("state", state.id, "state predicate is unsupported"), nil
 	}
 
@@ -1176,7 +1269,7 @@ func (evaluator ovalEvaluator) evaluateTest(testID, criterionComment string) (ov
 		return ovalResult{applicable: true, truths: []bench.Truth{bench.TruthNotAffected}, records: []bench.NativeComparisonRecord{record}}, nil
 	}
 	truth := bench.TruthFixed
-	if relation == "before" {
+	if (predicateKind == bench.NativePredicateEVRLessThan && relation == "before") || (predicateKind == bench.NativePredicateEVRGreaterThan && relation == "after") {
 		truth = bench.TruthAffected
 	}
 	return ovalResult{applicable: true, truths: []bench.Truth{truth}, records: []bench.NativeComparisonRecord{record}}, nil
@@ -1228,15 +1321,21 @@ func (evaluator ovalEvaluator) evaluateSLESReleaseGuard(test ovalTest, object ov
 	if !exists {
 		return unsupportedOVALResult("state", test.stateID, "state is missing"), nil
 	}
-	if state.unsupported != "" || len(state.unknown) != 0 || len(state.guards) != 0 || state.predicateKind != "version_equals" {
+	if state.unsupported != "" || len(state.unknown) != 0 || len(state.guards) != 0 || len(state.architectures) != 0 || state.predicateKind != "version_equals" {
 		return unsupportedOVALResult("state", test.stateID, "state is not the supported SLES release-package guard"), nil
 	}
 	if evaluator.selection.PackageFamily != "rpm" || evaluator.selection.Product != "sles" || state.predicateValue != evaluator.selection.Release {
 		return ovalResult{}, nil
 	}
-	version, err := slesCatalogReleaseVersion(evaluator.target, object.name)
+	version, present, err := slesCatalogReleaseVersion(evaluator.target, object.name)
 	if err != nil {
 		return unsupportedOVALResult("object", object.id, err.Error()), nil
+	}
+	if !present {
+		if object.name == "sles-release" {
+			return unsupportedOVALResult("object", object.id, "SLES primary release package is missing from the exact catalog target"), nil
+		}
+		return ovalResult{}, nil
 	}
 	if version != evaluator.selection.Release || version != state.predicateValue {
 		return ovalResult{}, nil
@@ -1261,7 +1360,7 @@ func nativeRelation(relation int) (string, error) {
 	}
 }
 
-func slesCatalogReleaseVersion(target bench.Target, releasePackage string) (string, error) {
+func slesCatalogReleaseVersion(target bench.Target, releasePackage string) (string, bool, error) {
 	matches := make([]bench.Component, 0, 1)
 	for _, component := range target.Components {
 		family, name, err := catalogPackageIdentity(component.PURL)
@@ -1269,21 +1368,21 @@ func slesCatalogReleaseVersion(target bench.Target, releasePackage string) (stri
 			continue
 		}
 		if family != "rpm" {
-			return "", fmt.Errorf("SLES release package %q has a non-RPM catalog identity", releasePackage)
+			return "", false, fmt.Errorf("SLES release package %q has a non-RPM catalog identity", releasePackage)
 		}
 		matches = append(matches, component)
 	}
 	if len(matches) == 0 {
-		return "", fmt.Errorf("SLES release package %q is missing from the exact catalog target", releasePackage)
+		return "", false, nil
 	}
 	if len(matches) != 1 {
-		return "", fmt.Errorf("SLES release package %q is duplicate or conflicting in the exact catalog target", releasePackage)
+		return "", true, fmt.Errorf("SLES release package %q is duplicate or conflicting in the exact catalog target", releasePackage)
 	}
 	version, err := rpmVersionFromEVR(matches[0].Version)
 	if err != nil {
-		return "", fmt.Errorf("SLES release package %q has an invalid catalog EVR: %w", releasePackage, err)
+		return "", true, fmt.Errorf("SLES release package %q has an invalid catalog EVR: %w", releasePackage, err)
 	}
-	return version, nil
+	return version, true, nil
 }
 
 func catalogPackageIdentity(purl string) (string, string, error) {
@@ -1361,11 +1460,11 @@ func ovalResultTruth(result ovalResult) (bench.Truth, error) {
 		}
 		switch truth {
 		case bench.TruthAffected:
-			if (record.PredicateKind != "" && record.PredicateKind != bench.NativePredicateEVRLessThan) || record.Relation != "before" {
+			if (record.PredicateKind != "" && record.PredicateKind != bench.NativePredicateEVRLessThan && record.PredicateKind != bench.NativePredicateEVRGreaterThan) || (record.PredicateKind != bench.NativePredicateEVRGreaterThan && record.Relation != "before") || (record.PredicateKind == bench.NativePredicateEVRGreaterThan && record.Relation != "after") {
 				return "", fmt.Errorf("vendor OVAL affected branch has non-affected native evidence")
 			}
 		case bench.TruthFixed:
-			if (record.PredicateKind != "" && record.PredicateKind != bench.NativePredicateEVRLessThan) || record.Relation == "before" {
+			if (record.PredicateKind != "" && record.PredicateKind != bench.NativePredicateEVRLessThan && record.PredicateKind != bench.NativePredicateEVRGreaterThan) || (record.PredicateKind != bench.NativePredicateEVRGreaterThan && record.Relation == "before") || (record.PredicateKind == bench.NativePredicateEVRGreaterThan && record.Relation == "after") {
 				return "", fmt.Errorf("vendor OVAL fixed branch has incompatible native evidence")
 			}
 		case bench.TruthNotAffected:
