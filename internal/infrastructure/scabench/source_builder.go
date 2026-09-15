@@ -483,13 +483,19 @@ func isOVALNamespaceDeclaration(attr xml.Attr) bool {
 	return attr.Name.Space == "xmlns" || (attr.Name.Space == "" && attr.Name.Local == "xmlns")
 }
 
+func isOVALSchemaLocation(element string, attr xml.Attr) bool {
+	return element == "oval_definitions" &&
+		attr.Name.Space == "http://www.w3.org/2001/XMLSchema-instance" &&
+		attr.Name.Local == "schemaLocation"
+}
+
 func decodeOVALNode(decoder *xml.Decoder, start xml.StartElement, depth int) (*ovalNode, error) {
 	if depth > 128 {
 		return nil, fmt.Errorf("vendor OVAL nesting exceeds limit")
 	}
 	node := &ovalNode{name: start.Name.Local, attrs: make(map[string]string, len(start.Attr))}
 	for _, attr := range start.Attr {
-		if isOVALNamespaceDeclaration(attr) {
+		if isOVALNamespaceDeclaration(attr) || isOVALSchemaLocation(start.Name.Local, attr) {
 			continue
 		}
 		if _, exists := node.attrs[attr.Name.Local]; exists {
