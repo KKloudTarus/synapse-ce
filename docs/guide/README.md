@@ -44,6 +44,7 @@ architectural boundaries that keep execution auditable.
 | [External CI/CD integrations](integrations.md) | Jenkins onboarding, provider-neutral architecture, polling operations, correlation, and security boundaries |
 | [Fleet agent packaging](fleet-agent-packaging.md) | Package, identity, rollout, upgrade, and uninstall contracts |
 | [AI triage evaluation](ai-triage-evaluation.md) | Offline datasets, comparison gates, promotion, rollback, and drift detection |
+| [SCA accuracy benchmark](sca-accuracy-benchmark.md) | Offline published benchmark replay, provenance contracts, and trusted-Linux capture boundaries |
 | [Operations drill evidence](operations-drill-evidence.md) | Versioned, redacted evidence for backup, restore, and rollback-on-copy drills |
 | [Code quality rule authoring](code-quality-rules.md) | Clean-room rule packs, schemas, references, and golden coverage |
 
