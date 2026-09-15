@@ -68,7 +68,7 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 	if len(rendered) > maxRenderedBytes {
 		rendered = rendered[:maxRenderedBytes]
 	}
-	return scanKubernetes(filepath.Join(relDir, "Chart.yaml"), rendered)
+	return scanKubernetes(filepath.ToSlash(filepath.Join(relDir, "Chart.yaml")), rendered)
 }
 
 // cappedBuffer accumulates at most max bytes and silently discards the rest, so a chart that renders

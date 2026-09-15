@@ -1,5 +1,5 @@
 .PHONY: help install tools dev build run test harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify sca-bench-verify \
-        sca-accuracy-test sca-accuracy-smoke sca-accuracy-frozen-sbom-verify sca-accuracy-source-native-evidence sca-accuracy-prepare sca-accuracy-cell sca-accuracy-finalize sca-accuracy-publication sca-accuracy-verify \
+        sca-accuracy-test sca-accuracy-smoke sca-accuracy-binary-pin sca-accuracy-frozen-sbom-verify sca-accuracy-source-native-evidence sca-accuracy-prepare sca-accuracy-cell sca-accuracy-finalize sca-accuracy-publication sca-accuracy-verify \
         rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down kind-smoke helm-render-test clean web-dev web-build smoke release-smoke
 
 GO ?= go
@@ -34,6 +34,11 @@ SCA_ACCURACY_SOURCE_EVIDENCE_OUTPUT ?=
 SCA_ACCURACY_NATIVE_EVIDENCE ?=
 SCA_ACCURACY_NATIVE_EVIDENCE_OUTPUT ?=
 SCA_ACCURACY_CATALOG ?=
+SCA_ACCURACY_CATALOG_OUTPUT ?=
+SCA_ACCURACY_BINARY_REFERENCE ?=
+SCA_ACCURACY_BINARY_PATH ?=
+SCA_ACCURACY_ENGINE ?=
+SCA_ACCURACY_RATCHET_OUTPUT ?=
 SCA_ACCURACY_FROZEN_SBOM ?=
 SCA_ACCURACY_FROZEN_SBOM_DIGEST ?=
 SCA_ACCURACY_CAPTURE_MANIFEST ?=
@@ -135,6 +140,9 @@ sca-accuracy-smoke: ## Offline SCA accuracy smoke gate (no scanners)
 	$(MAKE) sca-bench-verify
 	$(GO) test -count=1 ./internal/usecase/scabench -run 'HistoricalReferenceInventory|SemanticComparisonFalsifierSpec|Cycle'
 	$(GO) test -count=1 ./internal/infrastructure/scabench -run 'CompareBundles|Falsifier|Cycle|RepositoryAsset|Native'
+
+sca-accuracy-binary-pin: ## Derive a benchmark binary pin and dependent ratchet bindings
+	$(GO) run ./cmd/synapse-sca-inputs -mode binary-pin -catalog "$(SCA_ACCURACY_CATALOG)" -ratchet "$(SCA_ACCURACY_RATCHET)" -binary-reference "$(SCA_ACCURACY_BINARY_REFERENCE)" -binary-path "$(SCA_ACCURACY_BINARY_PATH)" -engine "$(SCA_ACCURACY_ENGINE)" -catalog-output "$(SCA_ACCURACY_CATALOG_OUTPUT)" -ratchet-output "$(SCA_ACCURACY_RATCHET_OUTPUT)"
 
 sca-accuracy-frozen-sbom-verify: ## Verify one frozen canonical CycloneDX SBOM without generating it
 	@test -n "$(SCA_ACCURACY_FROZEN_SBOM)" && test -n "$(SCA_ACCURACY_FROZEN_SBOM_DIGEST)"

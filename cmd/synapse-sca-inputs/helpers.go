@@ -36,10 +36,13 @@ func decodeJSONFile(path string, output any) error {
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
-	defer file.Close()
-	raw, err := io.ReadAll(io.LimitReader(file, bench.MaxJSONBytes+1))
-	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
+	raw, readErr := io.ReadAll(io.LimitReader(file, bench.MaxJSONBytes+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return fmt.Errorf("read %s: %w", path, readErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close %s: %w", path, closeErr)
 	}
 	if int64(len(raw)) > bench.MaxJSONBytes {
 		return fmt.Errorf("decode %s: JSON input exceeds %d byte limit", path, bench.MaxJSONBytes)
@@ -214,130 +217,73 @@ func inputJSONFields(expected reflect.Type) map[string]reflect.Type {
 	return fields
 }
 
-func decodeCatalog(path string) (bench.Catalog, error) {
+func decodeInputFile[T any](path string, decoder func(io.Reader) (T, error)) (value T, err error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return bench.Catalog{}, err
+		return value, err
 	}
-	defer file.Close()
-	return bench.DecodeCatalog(file)
+	defer func() {
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close %s: %w", path, closeErr)
+		}
+	}()
+	return decoder(file)
+}
+
+func decodeCatalog(path string) (bench.Catalog, error) {
+	return decodeInputFile(path, bench.DecodeCatalog)
 }
 
 func decodeOracle(path string) (bench.Oracle, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.Oracle{}, err
-	}
-	defer file.Close()
-	return bench.DecodeOracle(file)
+	return decodeInputFile(path, bench.DecodeOracle)
 }
 
 func decodeRatchet(path string) (bench.Ratchet, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.Ratchet{}, err
-	}
-	defer file.Close()
-	return bench.DecodeRatchet(file)
+	return decodeInputFile(path, bench.DecodeRatchet)
 }
 
 func decodeResult(path string) (bench.Result, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.Result{}, err
-	}
-	defer file.Close()
-	return bench.DecodeResult(file)
+	return decodeInputFile(path, bench.DecodeResult)
 }
 
 func decodeSourceFreeze(path string) (bench.SourceFreeze, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.SourceFreeze{}, err
-	}
-	defer file.Close()
-	return bench.DecodeSourceFreeze(file)
+	return decodeInputFile(path, bench.DecodeSourceFreeze)
 }
 
 func decodeCandidate(path string) (bench.OracleCandidate, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.OracleCandidate{}, err
-	}
-	defer file.Close()
-	return bench.DecodeOracleCandidate(file)
+	return decodeInputFile(path, bench.DecodeOracleCandidate)
 }
 
 func decodeCrossCheck(path string) (bench.AutomatedCrossCheck, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.AutomatedCrossCheck{}, err
-	}
-	defer file.Close()
-	return bench.DecodeAutomatedCrossCheck(file)
+	return decodeInputFile(path, bench.DecodeAutomatedCrossCheck)
 }
 
 func decodeAdjudication(path string) (bench.AdjudicationRecord, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.AdjudicationRecord{}, err
-	}
-	defer file.Close()
-	return bench.DecodeAdjudicationRecord(file)
+	return decodeInputFile(path, bench.DecodeAdjudicationRecord)
 }
 
 func decodeReview(path string) (bench.AccountableReview, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.AccountableReview{}, err
-	}
-	defer file.Close()
-	return bench.DecodeAccountableReview(file)
+	return decodeInputFile(path, bench.DecodeAccountableReview)
 }
 
 func decodeFinalOracleFreeze(path string) (bench.FinalOracleFreeze, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.FinalOracleFreeze{}, err
-	}
-	defer file.Close()
-	return bench.DecodeFinalOracleFreeze(file)
+	return decodeInputFile(path, bench.DecodeFinalOracleFreeze)
 }
 
 func decodePlan(path string) (bench.CyclePlan, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.CyclePlan{}, err
-	}
-	defer file.Close()
-	return bench.DecodeCyclePlan(file)
+	return decodeInputFile(path, bench.DecodeCyclePlan)
 }
 
 func decodeLedger(path string) (bench.CycleLedger, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.CycleLedger{}, err
-	}
-	defer file.Close()
-	return bench.DecodeCycleLedger(file)
+	return decodeInputFile(path, bench.DecodeCycleLedger)
 }
 
 func decodePublicationManifest(path string) (bench.PublicationManifest, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return bench.PublicationManifest{}, err
-	}
-	defer file.Close()
-	return bench.DecodePublicationManifest(file)
+	return decodeInputFile(path, bench.DecodePublicationManifest)
 }
 
 func decodeCaptureManifest(path string) (capture.CaptureManifest, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return capture.CaptureManifest{}, err
-	}
-	defer file.Close()
-	return capture.DecodeCaptureManifest(file)
+	return decodeInputFile(path, capture.DecodeCaptureManifest)
 }
 
 func writeJSONSet(values map[string]any) error {
@@ -453,12 +399,16 @@ func resolveRepositoryAsset(root, locator string) (string, error) {
 	return resolved, nil
 }
 
-func contentReference(path, locator string) (bench.ContentReference, error) {
+func contentReference(path, locator string) (reference bench.ContentReference, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return bench.ContentReference{}, err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close %s: %w", path, closeErr)
+		}
+	}()
 	info, err := file.Stat()
 	if err != nil {
 		return bench.ContentReference{}, err
@@ -467,11 +417,11 @@ func contentReference(path, locator string) (bench.ContentReference, error) {
 		return bench.ContentReference{}, fmt.Errorf("content reference %q is not a regular file", locator)
 	}
 	hash := sha256.New()
-	if _, err := io.Copy(hash, bufio.NewReader(file)); err != nil {
+	if _, err = io.Copy(hash, bufio.NewReader(file)); err != nil {
 		return bench.ContentReference{}, err
 	}
-	reference := bench.ContentReference{Locator: filepath.ToSlash(locator), Digest: "sha256:" + hex.EncodeToString(hash.Sum(nil)), Size: info.Size()}
-	if err := reference.Validate(); err != nil {
+	reference = bench.ContentReference{Locator: filepath.ToSlash(locator), Digest: "sha256:" + hex.EncodeToString(hash.Sum(nil)), Size: info.Size()}
+	if err = reference.Validate(); err != nil {
 		return bench.ContentReference{}, err
 	}
 	return reference, nil

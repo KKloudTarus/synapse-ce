@@ -247,6 +247,126 @@ func TestSourceFreezeMaterializationRehashesAssetsAndRebindsPlan(t *testing.T) {
 	assertSameFile(t, filepath.Join(output, "source-plan.json"), option.sourcePlanOutput)
 }
 
+func TestBinaryPinMaterializationRebindsCatalogAndRatchet(t *testing.T) {
+	corpus := corpusPath(t)
+	output := t.TempDir()
+	binaryPath := filepath.Join(output, "synapse-sca-bench")
+	binaryBody := []byte("reproducible benchmark binary")
+	if err := os.WriteFile(binaryPath, binaryBody, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	catalogOutput := filepath.Join(output, "catalog.json")
+	ratchetOutput := filepath.Join(output, "ratchet.json")
+	sourceRatchet, err := decodeRatchet(optionPath(corpus, "ratchet.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBinaryDigests := make(map[string]string, len(sourceRatchet.Floors))
+	for _, floor := range sourceRatchet.Floors {
+		originalBinaryDigests[cellKey(floor.Expected.TargetID, floor.Expected.Engine)] = floor.Expected.EngineBinaryDigest
+	}
+	if err := run([]string{
+		"-mode", "binary-pin",
+		"-catalog", optionPath(corpus, "catalog.json"),
+		"-ratchet", optionPath(corpus, "ratchet.json"),
+		"-binary-reference", "binary:synapse-sca-bench:reproducible-v1",
+		"-binary-path", binaryPath,
+		"-engine", string(bench.EngineOwned),
+		"-catalog-output", catalogOutput,
+		"-ratchet-output", ratchetOutput,
+	}); err != nil {
+		t.Fatalf("materialize binary pin: %v", err)
+	}
+
+	catalog, err := decodeCatalog(catalogOutput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ratchet, err := decodeRatchet(ratchetOutput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(binaryBody)
+	wantDigest := "sha256:" + hex.EncodeToString(sum[:])
+	found := false
+	for _, pin := range catalog.Pins {
+		if pin.Reference == "binary:synapse-sca-bench:reproducible-v1" {
+			found = true
+			if pin.Digest != wantDigest {
+				t.Fatalf("binary pin = %s, want %s", pin.Digest, wantDigest)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("materialized catalog omitted the benchmark binary pin")
+	}
+	catalogDigest, err := bench.DigestCatalog(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ratchet.CatalogDigest != catalogDigest {
+		t.Fatalf("ratchet catalog digest = %s, want %s", ratchet.CatalogDigest, catalogDigest)
+	}
+	updatedFloors := 0
+	for _, floor := range ratchet.Floors {
+		if floor.Expected.Engine != bench.EngineOwned {
+			key := cellKey(floor.Expected.TargetID, floor.Expected.Engine)
+			if floor.Expected.EngineBinaryDigest != originalBinaryDigests[key] {
+				t.Fatalf("unrelated floor %s binary digest changed", key)
+			}
+			continue
+		}
+		updatedFloors++
+		if floor.Expected.EngineBinaryDigest != wantDigest {
+			t.Fatalf("owned floor binary digest = %s, want %s", floor.Expected.EngineBinaryDigest, wantDigest)
+		}
+	}
+	if updatedFloors != 2 {
+		t.Fatalf("updated %d owned floors, want 2", updatedFloors)
+	}
+}
+
+func TestBinaryPinMaterializationRejectsMixedRatchetBinding(t *testing.T) {
+	corpus := corpusPath(t)
+	output := t.TempDir()
+	ratchet, err := decodeRatchet(optionPath(corpus, "ratchet.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range ratchet.Floors {
+		if ratchet.Floors[index].Expected.Engine == bench.EngineOwned {
+			ratchet.Floors[index].Expected.EngineBinaryDigest = testDigest('f')
+			break
+		}
+	}
+	ratchetPath := filepath.Join(output, "mixed-ratchet.json")
+	writeTestJSON(t, ratchetPath, ratchet)
+	binaryPath := filepath.Join(output, "synapse-sca-bench")
+	if err := os.WriteFile(binaryPath, []byte("reproducible benchmark binary"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	catalogOutput := filepath.Join(output, "catalog-output.json")
+	ratchetOutput := filepath.Join(output, "ratchet-output.json")
+	err = run([]string{
+		"-mode", "binary-pin",
+		"-catalog", optionPath(corpus, "catalog.json"),
+		"-ratchet", ratchetPath,
+		"-binary-reference", "binary:synapse-sca-bench:reproducible-v1",
+		"-binary-path", binaryPath,
+		"-engine", string(bench.EngineOwned),
+		"-catalog-output", catalogOutput,
+		"-ratchet-output", ratchetOutput,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not bind catalog binary") {
+		t.Fatalf("mixed ratchet binding error = %v", err)
+	}
+	for _, path := range []string{catalogOutput, ratchetOutput} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("failed materialization left output %s", path)
+		}
+	}
+}
+
 func TestNonRegressionFloorPreservesUndefinedPrecisionAndUnsupportedCapability(t *testing.T) {
 	zero := 0
 	maximum := 99
