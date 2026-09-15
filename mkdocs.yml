@@ -76,6 +76,7 @@ nav:
       - AI triage evaluation: ai-triage-evaluation.md
       - Reachability benchmark: reachability-benchmark-runbook.md
       - Reachability soundness: reachability-soundness.md
+      - SCA accuracy benchmark: sca-accuracy-benchmark.md
       - Operations drill evidence: operations-drill-evidence.md
       - Detection RulePack lifecycle: rulepack.md
   - Integrate:
