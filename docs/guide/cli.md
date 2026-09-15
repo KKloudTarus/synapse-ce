@@ -545,7 +545,7 @@ the gate without fixing all pre-existing debt first.
 # fail the build if new code introduces a critical/high issue, a new secret, or drops below A ratings
 synapse-cli gate . --new-code-only --base origin/main
 
-# feed a coverage report (lcov / Cobertura / JaCoCo, auto-detected); a .synapse-gate.yaml can then
+# feed a coverage report (lcov / Cobertura / JaCoCo / Go -coverprofile, auto-detected); a .synapse-gate.yaml can then
 # require e.g. `coverage >= 80` on new code
 synapse-cli gate . --new-code-only --base origin/main --coverage coverage.info
 ```
@@ -563,7 +563,7 @@ rather than silently passing.
 | `--base <ref>` | `origin/main` | Git reference the new-code diff is computed against. |
 | `--gate <file>` | `<path>/.synapse-gate.yaml` | Gate definition to apply. |
 | `--rules <file>` | `<path>/.synapse-rules.yaml` | Rule enable/disable and severity overrides. |
-| `--coverage <file>` | none | Coverage report (lcov, Cobertura, or JaCoCo, auto-detected) so gate conditions can require a coverage floor. |
+| `--coverage <file>` | none | Coverage report (lcov, Cobertura, JaCoCo, or a Go `-coverprofile`, auto-detected) so gate conditions can require a coverage floor. A Go profile names files by import path; the CLI reads the `module` directive from `<dir>/go.mod` and strips it so lines key on repo-relative paths. Without a `go.mod` at the scan root the import paths are kept as-is and will not match the tree. |
 | `--format text\|markdown` | `text` | Output format. `markdown` prints a ready-to-post PR summary. |
 
 A `.synapse-gate.yaml` overrides the built-in gate, and a `.synapse-rules.yaml` enables/disables rules
