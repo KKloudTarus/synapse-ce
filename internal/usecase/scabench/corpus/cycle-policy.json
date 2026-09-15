@@ -1,0 +1,1 @@
+{"accepted_artifact_retention_days":90,"failed_attempt_artifact_retention_days":3,"max_attempts":3,"raw_retention":"delete_after_verification","repetitions":2,"schema_version":"synapse-sca-benchmark-cycle-policy-v1"}

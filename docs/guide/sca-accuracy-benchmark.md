@@ -33,27 +33,37 @@ Freeze those inputs before capture with separate strict records:
 - **Oracle candidate**: scanner-free proposed truth and citations derived only from generated evidence.
 - **Automated scanner-blinded cross-check**: an automated check, explicitly not a human review, which re-derives each case from the generated native predicate set.
 - **Adjudication**: resolution of candidate and cross-check records.
-- **Accountable review**: a sanitized, immutable repository-backed GitHub review capture with only a schema version, review ID/URL, login, state, submission timestamp, commit ID, and canonical `decision: <value>` body. The repository verifier checks every captured value against the submitted `github:` reviewer identity, timestamp, reviewed commit, review URL/ID, and decision; it rejects tokens, account details, headers, email fields, and all other capture data. Its decision digest must equal the capture digest and bind the exact final-oracle digest. Publication requires this distinct record to be resolved and approved; automation cannot stand in for it. Every final-oracle case names that submitted reviewer.
+- **Accountable review**: a sanitized, immutable repository-backed GitHub review capture with only a schema version, review ID/URL, login, state, submission timestamp, commit ID, and canonical `decision: <value>` body. The repository verifier checks every captured value against the submitted `github:` reviewer identity, timestamp, reviewed commit, review URL/ID, and decision; it rejects tokens, account details, headers, email fields, and all other capture data. Its decision digest must equal the capture digest and bind the exact final-oracle digest. Materialization copies those exact reviewed bytes into the sanitized candidate and the publication index re-hashes them. Publication requires this distinct record to be resolved and approved; automation cannot stand in for it. Every final-oracle case names that submitted reviewer.
 
 The candidate, cross-check, adjudication, and accountable-review schemas and command paths intentionally do not accept scanner observations, raw bundles, or scores.
 
-Prepare fresh inputs before any capture:
+The reviewed roots live in `internal/usecase/scabench/corpus/`: the catalog, Oracle, strict ratchet, source-selection templates, capture-manifest templates, cycle/retry/retention policy, and falsifier policy. Generated evidence and delivery artifacts do not live there and must not enter Git.
+
+`cmd/synapse-sca-inputs` closes the dependency graph before capture instead of asking an operator to copy hashes, counts, or paths between JSON files. Its stages:
+
+1. hash the repository-backed source assets and bind the generated source-evidence plan;
+2. derive one capture manifest per target/engine cell, including the zero-dispatch capability statement and its physical digest;
+3. bind the unique sanitized GitHub review capture to the adjudication, final Oracle, reviewer, and exact reviewed commit;
+4. derive the cycle plan, repetitions, cells, dispatch count, unsupported count, and retention controls from the reviewed roots; and
+5. later derive publication indexes, cleanup receipt, candidate inventory, delivery receipt, and PR-summary Markdown from files that actually exist.
+
+After materialization, the low-level freeze gate remains available:
 
 ```sh
 make sca-accuracy-prepare \
   SCA_ACCURACY_REPOSITORY_ROOT=/absolute/repository \
-  SCA_ACCURACY_PLAN=/protected/cycle-plan.json \
-  SCA_ACCURACY_SOURCE_FREEZE=/protected/source-freeze.json \
-  SCA_ACCURACY_ORACLE_CANDIDATE=/protected/oracle-candidate.json \
-  SCA_ACCURACY_CROSS_CHECK=/protected/cross-check.json \
-  SCA_ACCURACY_ADJUDICATION=/protected/adjudication.json \
-  SCA_ACCURACY_ACCOUNTABLE_REVIEW=/protected/accountable-review.json \
-  SCA_ACCURACY_FINAL_ORACLE_FREEZE=/protected/final-oracle-freeze.json
+  SCA_ACCURACY_PLAN=/generated/control/plan.json \
+  SCA_ACCURACY_SOURCE_FREEZE=/generated/control/source-freeze.json \
+  SCA_ACCURACY_ORACLE_CANDIDATE=/generated/control/oracle-candidate.json \
+  SCA_ACCURACY_CROSS_CHECK=/generated/control/cross-check.json \
+  SCA_ACCURACY_ADJUDICATION=/generated/control/adjudication.json \
+  SCA_ACCURACY_ACCOUNTABLE_REVIEW=/generated/control/accountable-review.json \
+  SCA_ACCURACY_FINAL_ORACLE_FREEZE=/generated/control/final-oracle-freeze.json
 ```
 
-`synapse-sca-cycle` first runs `source-native-evidence`, which reads strict frozen assets, evaluates a bounded benchmark-only OVAL subset, and writes both generated source cases and complete per-target native evidence once. Any matching OVAL definition, test, object, or state whose semantics cannot safely be evaluated is retained as a diagnostic that blocks candidate construction; guards for another product, release, architecture, or package are non-applicable rather than failures for relevant branches. `oracle-candidate`, `oracle-cross-check`, `oracle-adjudicate`, and `oracle-freeze` then form the review chain; `oracle-freeze` consumes a separately supplied accountable decision, verifies every truth-bearing candidate field against the final oracle, and never invents an approval. Each `cell` invocation requires the complete generated `-native-evidence` set and `-capture-record-output`; invoke `ledger` with every retained generated `-capture-record` after all sixteen slots complete.
+`synapse-sca-cycle` first runs `source-native-evidence`, which reads strict frozen assets, evaluates a bounded benchmark-only OVAL subset, and writes both generated source cases and complete per-target native evidence once. Any matching OVAL definition, test, object, or state whose semantics cannot safely be evaluated is retained as a diagnostic that blocks candidate construction; guards for another product, release, architecture, or package are non-applicable rather than failures for relevant branches. `oracle-candidate`, `oracle-cross-check`, `oracle-adjudicate`, and `oracle-freeze` then form the review chain; `oracle-freeze` consumes the materialized accountable decision, verifies every truth-bearing candidate field against the final Oracle, and never invents an approval. Each `cell` invocation requires the complete generated `-native-evidence` set and `-capture-record-output`; `ledger` consumes every retained generated capture record only after every policy-derived slot has an accepted attempt.
 
-The checked-in matrix specification is `internal/usecase/scabench/testdata/cycle-matrix-spec.json`. It is intentionally marked as requiring a fresh source and oracle freeze rather than pretending unavailable live evidence exists. It declares two repetitions of eight cells: 14 complete scanner dispatches and two SLES plus OSV-Scanner unsupported records with zero scanner dispatch. The strict plan and ledger are data-configurable; they reject missing, extra, duplicate, unknown, incomplete final, or unplanned unsupported cells. Failed and retry attempts remain retained instead of being discarded to select convenient repetitions.
+The matrix is derived from catalog targets, all four benchmark engines, and the Oracle's expected coverage rather than duplicated in a checked-in row list. The cycle contract requires exactly two accepted repetitions; the current reviewed roots therefore produce two repetitions of eight cells, 14 complete scanner dispatches, and two SLES plus OSV-Scanner unsupported records with zero scanner dispatch. The strict plan and ledger reject missing, extra, duplicate, unknown, incomplete final, or unplanned unsupported cells. Failed and retry attempts remain auditable instead of being discarded to select convenient repetitions.
 
 ## Trusted-Linux capture and native comparison
 
@@ -63,14 +73,14 @@ Capture one planned cell only after the freeze succeeds. Retention input identif
 
 ```sh
 make sca-accuracy-cell \
-  SCA_ACCURACY_PLAN=/protected/cycle-plan.json \
-  SCA_ACCURACY_CATALOG=/protected/catalog.json \
-  SCA_ACCURACY_NATIVE_EVIDENCE=/protected/generated-native-evidence.json \
-  SCA_ACCURACY_CAPTURE_MANIFEST=/protected/cell-manifest.json \
-  SCA_ACCURACY_OUTPUT=/protected/bundles/repetition-1-cell \
+  SCA_ACCURACY_PLAN=/generated/control/plan.json \
+  SCA_ACCURACY_CATALOG=/generated/control/catalog.json \
+  SCA_ACCURACY_NATIVE_EVIDENCE=/generated/control/native-evidence.json \
+  SCA_ACCURACY_CAPTURE_MANIFEST=/generated/control/capture-manifests/target--engine.json \
+  SCA_ACCURACY_OUTPUT=/protected/run/repetition-1-cell \
   SCA_ACCURACY_REPETITION=1 \
-  SCA_ACCURACY_RETENTION_LOCATOR=protected://retention/location \
-  SCA_ACCURACY_RETENTION_POLICY=governed-retention
+  SCA_ACCURACY_RETENTION_LOCATOR=protected://engine-accuracy/run/attempt/repetition-1-cell \
+  SCA_ACCURACY_RETENTION_POLICY=delete_after_verification
 ```
 
 Before an authorized capture, validate each supplied frozen SBOM without regenerating it:
@@ -93,9 +103,9 @@ Fresh package truth must use target-native comparison:
 
 ## Bundle comparison and falsifiers
 
-Successful and failed full capture bundles, scanner databases, tool caches, generated corrupt trees, and OCI layers stay in protected retention. They are referenced by digest, locator, and retention policy but are not committed.
+Successful and failed full capture bundles remain in protected raw retention only until verification finishes. Scanner databases, tool caches, generated corrupt trees, OCI layers, and raw bundles are never committed or uploaded in the accepted artifact. Audit-safe failed-attempt records may be uploaded under the shorter retention policy; the dedicated runner cleanup removes the run's protected raw subtree and all Docker containers, images, volumes, and build cache before delivery receipt generation.
 
-The full-bundle comparator validates both existing bundles first. It calculates a derived manifest and root identity without adding a second capture format, retains both raw roots, and fails on every unclassified difference. The per-engine policies are intentionally narrow:
+The full-bundle comparator validates both existing bundles first. It calculates a derived manifest and root identity without adding a second capture format, keeps both raw roots available for the comparison phase, and fails on every unclassified difference. The per-engine policies are intentionally narrow:
 
 - Owned: exact raw output.
 - Grype: only the descriptor timestamp.
@@ -106,7 +116,7 @@ The full-bundle comparator validates both existing bundles first. It calculates 
 
 ## Finalization and publication identity
 
-Finalization reduces and ratchets **every** planned repetition independently, then rejects a result or rendering mismatch. It runs the bundle comparator and falsifier runner before output. Numeric scores remain normalized, while the publication manifest binds both repetitions' full identities:
+Finalization reduces and ratchets **every** planned repetition independently, then rejects a result or rendering mismatch. It runs the bundle comparator and falsifier runner before output. Numeric scores remain normalized, while the publication manifest binds every planned repetition's full identity (two repetitions under the current reviewed policy):
 
 - derived bundle manifest and raw root;
 - raw stdout, stderr, or raw-output digest;
@@ -114,18 +124,20 @@ Finalization reduces and ratchets **every** planned repetition independently, th
 - target-native comparison;
 - process evidence and environment identity.
 
-The single publication manifest also binds the generated source evidence and complete native evidence. The accepted sanitized publication artifact is limited to resolvable public source snapshots, pins, canonical SBOMs, scanner-free review records, normalized observations, native comparison records, compact process/control identities, comparison and falsifier results, result, ratchet, report, and ledger. It rejects raw bundle and scanner-cache artifact categories. Freeze and publication records use write-once paths.
+The single publication manifest also binds the generated source evidence and complete native evidence. The accepted sanitized publication artifact is limited to resolvable public source snapshots, the exact sanitized review-capture bytes, pins, canonical SBOMs, scanner-free review records, normalized observations, native comparison records, compact process/control identities, comparison and falsifier results, result, ratchet, report, and ledger. It rejects unexpected candidate files in addition to raw bundle and scanner-cache artifact categories. Freeze and publication records use write-once paths.
 
 Finalization writes the measured comparison, falsifier, result, and report before publication assembly. `sca-accuracy-publication` then hashes those actual regular files, builds the manifest, and writes the candidate evidence summary that binds the manifest identity. The summary is deliberately not an artifact within that same manifest: including its own digest would create an unverifiable self-reference.
 
-Use the two explicit output stages only with all retained trusted inputs:
+The trusted workflow invokes the low-level finalization and publication targets only after the materializer has derived accepted bundle selection, observation paths, comparison pairs, publication indexes, and policy counts:
 
 ```sh
 make sca-accuracy-finalize
 make sca-accuracy-publication
+go run ./cmd/synapse-sca-inputs -mode cleanup ...
+go run ./cmd/synapse-sca-inputs -mode receipt ...
 ```
 
-They fail closed until every required path, comparison pair, falsifier specification, immutable publication control, and review decision has been supplied. Pull requests can verify the checked-in benchmark contract and historical regression inputs without scanners:
+These stages fail closed until every required generated path, comparison pair, falsifier specification, accountable review, cleanup result, and exact implementation commit forms one bound cycle. The publication control contains one content-addressed index per required artifact kind; each index deterministically covers all actual files of that kind without relying on a hand-maintained inventory. The final receipt revalidates every indexed file before hashing the complete sanitized candidate. Pull requests can verify the checked-in benchmark contract and historical regression inputs without scanners:
 
 ```sh
 make sca-accuracy-verify
@@ -140,9 +152,9 @@ This command does not consume or attest a current generated publication. The tru
 - Pull requests run offline smoke and benchmark-contract verification only; they never receive trusted capture execution or claim that checked-in files are current run evidence.
 - A branch push with code, specification, or workflow changes is only a trusted full-control request when repository variable `ENGINE_ACCURACY_TRUSTED_ENABLED` equals `true` **and** its ref is exactly `refs/heads/main` or exactly equals repository variable `ENGINE_ACCURACY_TRUSTED_REF`. The reusable branch trigger avoids maintained feature-branch names without granting privileged execution to every branch while the gate is enabled. Disabled or non-authorized refs are explicit non-evaluation modes in the aggregate.
 - The trusted runner proves a real direct-cgroup plus Bubblewrap no-op child before capture. Its wrapper captures the delegated **service** cgroup root before the benchmark process enters `synapse-manager` and supplies it as `SCA_ACCURACY_DELEGATED_CGROUP_ROOT`; the runner rejects missing, non-writable, non-service-root, memory/pids-disabled, or non-allocatable roots. It receives this root, pinned Bubblewrap, Docker images, review capture, pre-frozen SBOM provenance, and retained-input bootstrap as an explicit external ephemeral-runner contract; it does not use a host `/proc/self/status` seccomp assertion.
-- It consumes only one pre-frozen, canonical, filtered CycloneDX JSON SBOM for each exact target, verifies its byte digest against the catalog, and rewrites every target's capture manifest to use those same bytes. `syft-probe.json` and `syft-config.json` attest the version, offline/update policy, and configuration digest used by the separate authorized preparation phase; evaluation does not invoke Syft or regenerate an SBOM. No engine gets an independently generated SBOM invocation.
-- Generated source/native evidence, observations, bundles, results, reports, and publication manifests never enter Git. Before the ephemeral runner exits, an accepted run uploads only the sanitized candidate controls and results to GitHub Actions artifact storage with an explicit 90-day retention period. Protected raw scanner material stays outside that artifact and is removed after verification.
-- The trusted job first requires Linux, Bubblewrap, active seccomp, cgroup-v2 memory and pids controllers, immutable review/source/pin inputs, frozen canonical SBOMs, and protected raw retention. It initializes an audit-safe status and accepted-attempt mapping before runner preflight, then updates that bounded control state through source preparation and capture. It attempts every planned slot up to three times, preserving each exit-2 failed-attempt record and protected bundle; finalization resolves observations and comparison pairs only through the bounded accepted-attempt mapping. It uploads only auditable controls and records before issuing a failure verdict when no accepted retry exists. Only sixteen accepted planned slots (14 dispatches and two designated zero-dispatch SLES/OSV records) permit ledger construction, finalization, publication assembly, and bounded control/result uploads. Raw bundles are never uploaded.
+- It consumes only one pre-frozen, canonical, filtered CycloneDX JSON SBOM for each exact target, verifies its byte digest against the catalog, and materializes one target/engine capture manifest that points to those same bytes. `syft-probe.json` and `syft-config.json` attest the version, offline/update policy, and configuration digest used by the separate authorized preparation phase; evaluation does not invoke Syft or regenerate an SBOM. No engine gets an independently generated SBOM invocation.
+- Generated source/native evidence, observations, bundles, results, reports, publication manifests, inventories, and receipts never enter Git. Before the ephemeral runner exits, an accepted run uploads only the sanitized candidate controls and results to GitHub Actions artifact storage. The accepted retention is read from the reviewed cycle policy (currently 90 days), not duplicated in workflow logic. Protected raw scanner material stays outside that artifact and is removed after verification.
+- The trusted job first requires Linux, Bubblewrap, active seccomp, cgroup-v2 memory and pids controllers, immutable review/source/pin inputs, frozen canonical SBOMs, and protected raw retention. It initializes an audit-safe status and accepted-attempt mapping before runner preflight, then updates that bounded control state through source preparation and capture. Repetition count, retry bound, retention, logical slots, scanner dispatches, and unsupported slots all come from the generated plan and reviewed cycle policy. Each exit-2 failed-attempt record remains audit-safe while its protected bundle is available for the run; finalization resolves observations and comparison pairs only through the bounded accepted-attempt mapping. The current roots derive sixteen accepted planned slots, 14 dispatches, and two designated zero-dispatch SLES/OSV records, but the workflow contains no duplicated cell list or fixed count assertion. Raw bundles are never uploaded and are deleted before the delivery receipt can pass.
 - The scheduled and manual modes use the same full-control route once the workflow is present on the default branch.
 
-The candidate full run is pre-merge evidence bound to the exact reviewed source commit **S**. After upload succeeds, the PR discussion records the run and artifact references, manifest and result digests, verified outcome, and cleanup disposition without copying protected raw material. Removing the ephemeral runner and AWS host does not remove the accepted 90-day GitHub Actions artifact. Candidate-branch evidence is not relabeled as exact-final-main evidence.
+The candidate full run is pre-merge evidence bound to the exact reviewed source commit **S**. The generated candidate-file inventory, delivery receipt, and Markdown summary bind the derived matrix counts, manifest/result identities, passing gate, cleanup receipt, artifact name, and policy retention. After upload succeeds, the PR discussion adds the immutable Actions run, artifact ID/URL/digest, and verified outcome without copying protected raw material. Removing the ephemeral runner and AWS host does not remove the accepted 90-day GitHub Actions artifact. Candidate-branch evidence is not relabeled as exact-final-main evidence.

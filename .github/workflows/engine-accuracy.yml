@@ -37,7 +37,7 @@ jobs:
             source_sha="${{ github.sha }}"
           fi
           case "$source_sha" in
-            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
             *) echo "source revision is not a full SHA"; exit 1 ;;
           esac
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
@@ -118,13 +118,17 @@ jobs:
     name: Trusted full evidence cycle
     needs: changes
     if: ${{ needs.changes.outputs.trusted_requested == 'true' }}
-    # The runner is provisioned only for this job. Its immutable local contract
-    # supplies digest-checked source, pin, review, retention, and capture inputs;
-    # no credentials or raw bundles are exposed to GitHub artifacts.
+    # The runner is provisioned only for this job. Immutable local inputs supply
+    # canonical SBOMs, source assets, scanner databases, tools, and one submitted
+    # review capture. Derived controls are materialized inside the job.
     runs-on: [self-hosted, linux, sca-accuracy-trusted]
     timeout-minutes: 45
     outputs:
       artifacts: ${{ steps.complete.outputs.artifacts }}
+      artifact_id: ${{ steps.candidate-upload.outputs.artifact-id }}
+      artifact_url: ${{ steps.candidate-upload.outputs.artifact-url }}
+      artifact_digest: ${{ steps.candidate-upload.outputs.artifact-digest }}
+      artifact_name: ${{ steps.complete.outputs.artifact_name }}
     steps:
       - name: Check out exact source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -135,13 +139,20 @@ jobs:
         shell: bash
         run: test "$(git rev-parse HEAD)" = "${{ needs.changes.outputs.source_sha }}"
       - name: Initialize audit-safe capture controls
+        id: policy
         shell: bash
         run: |
           set -euo pipefail
+          policy="internal/usecase/scabench/corpus/cycle-policy.json"
           output="$RUNNER_TEMP/sca-accuracy-candidate"
-          mkdir -p "$output/control" "$output/records"
+          test -s "$policy"
+          mkdir -p "$output/control" "$output/records" "$output/publication"
           printf '%s\n' '{"schema_version":"synapse-sca-benchmark-capture-status-v1","status":"pending","phase":"preflight_pending","planned_slots":0,"accepted_slots":0,"retained_failed_attempts":0}' > "$output/capture-status.json"
           printf '%s\n' '{"schema_version":"synapse-sca-benchmark-accepted-bundles-v1","bundles":[]}' > "$output/control/accepted-bundles.json"
+          echo "repetitions=$(jq -er '.repetitions' "$policy")" >> "$GITHUB_OUTPUT"
+          echo "max_attempts=$(jq -er '.max_attempts' "$policy")" >> "$GITHUB_OUTPUT"
+          echo "accepted_retention_days=$(jq -er '.accepted_artifact_retention_days' "$policy")" >> "$GITHUB_OUTPUT"
+          echo "failed_retention_days=$(jq -er '.failed_attempt_artifact_retention_days' "$policy")" >> "$GITHUB_OUTPUT"
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
@@ -151,6 +162,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          corpus="internal/usecase/scabench/corpus"
+          input="$SCA_ACCURACY_TRUSTED_INPUT_ROOT"
           test "$(uname -s)" = Linux
           command -v bwrap >/dev/null
           test -n "${SCA_ACCURACY_BWRAP_VERSION:-}"
@@ -162,33 +175,32 @@ jobs:
           case "$SCA_ACCURACY_DELEGATED_CGROUP_ROOT" in /sys/fs/cgroup/*) ;; *) echo "delegated cgroup root must be under cgroup v2"; exit 1;; esac
           test -d "$SCA_ACCURACY_DELEGATED_CGROUP_ROOT"
           test -w "$SCA_ACCURACY_DELEGATED_CGROUP_ROOT"
-          # The real child-process probe verifies the explicit delegated service
-          # root, direct cgroup, Bubblewrap, and per-child seccomp path; host
-          # Seccomp is irrelevant.
           go run ./cmd/synapse-sca-cycle -mode sandbox-probe
           command -v docker >/dev/null
-          # Evaluation consumes only pre-frozen canonical CycloneDX SBOMs. The
-          # Syft probe and configuration are evidence from the authorized SBOM
-          # preparation phase; no Syft process is invoked by this workflow.
+          command -v jq >/dev/null
           test -n "${SCA_ACCURACY_SYFT_VERSION:-}"
           test -n "${SCA_ACCURACY_SYFT_CONFIG_DIGEST:-}"
           test -n "${SCA_ACCURACY_TRUSTED_INPUT_ROOT:-}"
-          test -d "$SCA_ACCURACY_TRUSTED_INPUT_ROOT"
-          test -d "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/repository"
-          command -v jq >/dev/null
-          jq -e --arg version "$SCA_ACCURACY_SYFT_VERSION" --arg config_digest "$SCA_ACCURACY_SYFT_CONFIG_DIGEST" '.version == $version and .config_digest == $config_digest and .network_disabled == true and .check_for_app_update == false' "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/syft-probe.json" >/dev/null
-          test "sha256:$(sha256sum "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/syft-config.json" | cut -d' ' -f1)" = "$SCA_ACCURACY_SYFT_CONFIG_DIGEST"
+          test -d "$input"
+          test -d "$input/repository"
+          jq -e --arg version "$SCA_ACCURACY_SYFT_VERSION" --arg config_digest "$SCA_ACCURACY_SYFT_CONFIG_DIGEST" '.version == $version and .config_digest == $config_digest and .network_disabled == true and .check_for_app_update == false' "$input/syft-probe.json" >/dev/null
+          test "sha256:$(sha256sum "$input/syft-config.json" | cut -d' ' -f1)" = "$SCA_ACCURACY_SYFT_CONFIG_DIGEST"
           test -n "${SCA_ACCURACY_RAW_RETENTION_ROOT:-}"
           test -d "$SCA_ACCURACY_RAW_RETENTION_ROOT"
           test -w "$SCA_ACCURACY_RAW_RETENTION_ROOT"
           case "$SCA_ACCURACY_RAW_RETENTION_ROOT/" in "$RUNNER_TEMP"/*) echo "raw retention must not be under runner artifacts"; exit 1;; esac
-          for required in source-freeze.json source-evidence-plan.json accountable-review.json oracle.json plan.json catalog.json ratchet.json falsifier-spec.json publication-control.json syft-probe.json syft-config.json; do
-            test -s "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/$required"
+          for required in catalog.json oracle.json ratchet.json cycle-policy.json source-freeze.template.json source-evidence-plan.template.json falsifier-spec.json; do
+            test -s "$corpus/$required"
           done
+          test "$(find "$corpus/capture-manifests" -maxdepth 1 -type f -name '*.json' | wc -l)" -gt 0
+          shopt -s nullglob
+          review_files=("$input/repository/reviews/github/"*.json)
+          test "${#review_files[@]}" = 1
+          jq -e --arg commit "${{ needs.changes.outputs.source_sha }}" '.commit_id == $commit and (.body == "decision: approved" or .body == "decision: rejected" or .body == "decision: unresolved")' "${review_files[0]}" >/dev/null
           while IFS= read -r target_json; do
             target_id="$(jq -r '.id' <<<"$target_json")"
             expected_sbom_digest="$(jq -r '.sbom_digest' <<<"$target_json")"
-            sbom="$SCA_ACCURACY_TRUSTED_INPUT_ROOT/sboms/$target_id.cdx.json"
+            sbom="$input/sboms/$target_id.cdx.json"
             canonical="$RUNNER_TEMP/$target_id.cdx.canonical.json"
             test -s "$sbom"
             jq -e '.bomFormat == "CycloneDX" and (.specVersion | type == "string") and (.components | type == "array")' "$sbom" >/dev/null
@@ -203,7 +215,7 @@ jobs:
               [.targets[] | select(.id == $target) | .components[] |
                 {purl: (.purl | required_string("purl")), version: (.version | required_string("version"))}
               ] | sort_by(.purl, .version)
-            ' "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/catalog.json")"
+            ' "$corpus/catalog.json")"
             benchmark_scopes="$(jq -ce --argjson components "$expected_components" '
               def trim_space: gsub("^[[:space:]]+|[[:space:]]+$"; "");
               def purl_scope:
@@ -249,42 +261,45 @@ jobs:
                     empty
                   end
                 else
-                            empty
+                  empty
                 end
               ] | sort_by(.purl, .version)
             ' "$sbom")"
             test "$actual_components" = "$expected_components"
             test "sha256:$(sha256sum "$sbom" | cut -d' ' -f1)" = "$expected_sbom_digest"
-          done < <(jq -rc '.targets[]' "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/catalog.json")
-          test "$(jq -r '.repetitions' "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/plan.json")" = 2
-          test "$(jq '.cells | length' "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/plan.json")" = 8
-          test "$(jq -r '.implementation_commit' "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/publication-control.json")" = "${{ needs.changes.outputs.source_sha }}"
-          for repetition in 1 2; do
-            while IFS= read -r encoded; do
-              cell="$(printf '%s' "$encoded" | base64 --decode)"
-              target="$(jq -r '.target_id' <<<"$cell")"
-              engine="$(jq -r '.engine' <<<"$cell")"
-              for input in "capture-manifests/$repetition/$target--$engine.json" "retention/$repetition/$target--$engine.json"; do
-                test -s "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/$input"
-              done
-              jq -e 'type == "object" and (keys | sort == ["locator", "retention"]) and (.locator | strings | length > 0) and (.retention | strings | length > 0)' "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/retention/$repetition/$target--$engine.json" >/dev/null
-            done < <(jq -rc '.cells[] | @base64' "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/plan.json")
-          done
+          done < <(jq -rc '.targets[]' "$corpus/catalog.json")
           status="$RUNNER_TEMP/sca-accuracy-candidate/capture-status.json"
           jq '.phase = "preflight_complete"' "$status" > "$status.next"
           mv "$status.next" "$status"
-      - name: Generate scanner-free source and native evidence, then freeze the oracle chain
+      - name: Materialize inputs and freeze the scanner-free oracle chain
         shell: bash
         run: |
           set -euo pipefail
+          corpus="internal/usecase/scabench/corpus"
           input="$SCA_ACCURACY_TRUSTED_INPUT_ROOT"
           output="$RUNNER_TEMP/sca-accuracy-candidate"
-          mkdir -p "$output/control/sboms" "$output/control/capture-manifests" "$output/records"
+          mkdir -p "$output/control/sboms" "$output/control/capture-manifests" "$output/control/capability-statements" "$output/records" "$output/publication"
           jq '.phase = "source_evidence_preparing"' "$output/capture-status.json" > "$output/capture-status.next.json"
           mv "$output/capture-status.next.json" "$output/capture-status.json"
-          # The trusted bootstrap delivers filtered canonical CycloneDX bytes.
-          # Copying them preserves their pre-approved identity; evaluation never
-          # regenerates an SBOM or substitutes a scanner-specific variant.
+          cp "$corpus/catalog.json" "$output/control/catalog.json"
+          cp "$corpus/oracle.json" "$output/control/oracle.json"
+          cp "$corpus/ratchet.json" "$output/control/ratchet.json"
+          cp "$corpus/cycle-policy.json" "$output/control/cycle-policy.json"
+          cp "$corpus/falsifier-spec.json" "$output/control/falsifier-spec.json"
+          go run ./cmd/synapse-sca-inputs -mode source-freeze -repository-root "$input/repository" -source-freeze-template "$corpus/source-freeze.template.json" -source-plan-template "$corpus/source-evidence-plan.template.json" -source-freeze-output "$output/control/source-freeze.json" -source-plan-output "$output/control/source-evidence-plan.json"
+          while IFS= read -r asset_json; do
+            locator="$(jq -er '.locator' <<<"$asset_json")"
+            expected_digest="$(jq -er '.digest' <<<"$asset_json")"
+            expected_size="$(jq -er '.size' <<<"$asset_json")"
+            source_asset="$input/repository/$locator"
+            retained_asset="$output/control/source-assets/$locator"
+            test -f "$source_asset"
+            mkdir -p "$(dirname "$retained_asset")"
+            cp "$source_asset" "$retained_asset"
+            cmp -s "$source_asset" "$retained_asset"
+            test "sha256:$(sha256sum "$retained_asset" | cut -d' ' -f1)" = "$expected_digest"
+            test "$(wc -c < "$retained_asset")" = "$expected_size"
+          done < <(jq -rc '.assets[]' "$output/control/source-freeze.json")
           while IFS= read -r target_json; do
             target_id="$(jq -r '.id' <<<"$target_json")"
             expected_sbom_digest="$(jq -r '.sbom_digest' <<<"$target_json")"
@@ -293,24 +308,20 @@ jobs:
             cp "$frozen_sbom" "$sbom"
             cmp -s "$frozen_sbom" "$sbom"
             test "sha256:$(sha256sum "$sbom" | cut -d' ' -f1)" = "$expected_sbom_digest"
-          done < <(jq -rc '.targets[]' "$input/catalog.json")
-          for repetition in 1 2; do
-            while IFS= read -r cell; do
-              target="$(jq -r '.target_id' <<<"$cell")"
-              engine="$(jq -r '.engine' <<<"$cell")"
-              sbom="$output/control/sboms/$target.cdx.json"
-              test -s "$sbom"
-              jq --arg sbom "$sbom" '.sbom_path = $sbom' "$input/capture-manifests/$repetition/$target--$engine.json" > "$output/control/capture-manifests/$repetition-$target--$engine.json"
-            done < <(jq -rc '.cells[]' "$input/plan.json")
-          done
-          # Source selection is external, frozen metadata only. This command reads
-          # its exact assets and generates every native predicate once per target.
-          make sca-accuracy-source-native-evidence SCA_ACCURACY_REPOSITORY_ROOT="$input/repository" SCA_ACCURACY_SOURCE_FREEZE="$input/source-freeze.json" SCA_ACCURACY_CATALOG="$input/catalog.json" SCA_ACCURACY_SOURCE_EVIDENCE_PLAN="$input/source-evidence-plan.json" SCA_ACCURACY_SOURCE_EVIDENCE_OUTPUT="$output/control/source-case-evidence.json" SCA_ACCURACY_NATIVE_EVIDENCE_OUTPUT="$output/control/native-evidence.json"
-          go run ./cmd/synapse-sca-cycle -mode oracle-candidate -repository-root "$input/repository" -source-freeze "$input/source-freeze.json" -source-case-evidence "$output/control/source-case-evidence.json" -oracle-output "$output/control/oracle-candidate.json"
+          done < <(jq -rc '.targets[]' "$output/control/catalog.json")
+          go run ./cmd/synapse-sca-inputs -mode manifest-set -repository-root "$input/repository" -source-freeze-output "$output/control/source-freeze.json" -catalog "$output/control/catalog.json" -oracle "$output/control/oracle.json" -ratchet "$output/control/ratchet.json" -manifest-template-dir "$corpus/capture-manifests" -manifest-output-dir "$output/control/capture-manifests" -capability-output-dir "$output/control/capability-statements" -sbom-root "$output/control/sboms"
+          make sca-accuracy-source-native-evidence SCA_ACCURACY_REPOSITORY_ROOT="$input/repository" SCA_ACCURACY_SOURCE_FREEZE="$output/control/source-freeze.json" SCA_ACCURACY_CATALOG="$output/control/catalog.json" SCA_ACCURACY_SOURCE_EVIDENCE_PLAN="$output/control/source-evidence-plan.json" SCA_ACCURACY_SOURCE_EVIDENCE_OUTPUT="$output/control/source-case-evidence.json" SCA_ACCURACY_NATIVE_EVIDENCE_OUTPUT="$output/control/native-evidence.json"
+          go run ./cmd/synapse-sca-cycle -mode oracle-candidate -repository-root "$input/repository" -source-freeze "$output/control/source-freeze.json" -source-case-evidence "$output/control/source-case-evidence.json" -oracle-output "$output/control/oracle-candidate.json"
           go run ./cmd/synapse-sca-cycle -mode oracle-cross-check -source-case-evidence "$output/control/source-case-evidence.json" -native-evidence "$output/control/native-evidence.json" -oracle-candidate "$output/control/oracle-candidate.json" -oracle-output "$output/control/cross-check.json"
           go run ./cmd/synapse-sca-cycle -mode oracle-adjudicate -oracle-candidate "$output/control/oracle-candidate.json" -cross-check "$output/control/cross-check.json" -oracle-output "$output/control/adjudication.json"
-          go run ./cmd/synapse-sca-cycle -mode oracle-freeze -repository-root "$input/repository" -source-freeze "$input/source-freeze.json" -oracle-candidate "$output/control/oracle-candidate.json" -cross-check "$output/control/cross-check.json" -adjudication "$output/control/adjudication.json" -accountable-review "$input/accountable-review.json" -oracle "$input/oracle.json" -oracle-output "$output/control/final-oracle-freeze.json"
-          make sca-accuracy-prepare SCA_ACCURACY_REPOSITORY_ROOT="$input/repository" SCA_ACCURACY_PLAN="$input/plan.json" SCA_ACCURACY_SOURCE_FREEZE="$input/source-freeze.json" SCA_ACCURACY_ORACLE_CANDIDATE="$output/control/oracle-candidate.json" SCA_ACCURACY_CROSS_CHECK="$output/control/cross-check.json" SCA_ACCURACY_ADJUDICATION="$output/control/adjudication.json" SCA_ACCURACY_ACCOUNTABLE_REVIEW="$input/accountable-review.json" SCA_ACCURACY_FINAL_ORACLE_FREEZE="$output/control/final-oracle-freeze.json"
+          shopt -s nullglob
+          review_files=("$input/repository/reviews/github/"*.json)
+          test "${#review_files[@]}" = 1
+          review_locator="${review_files[0]#"$input/repository/"}"
+          go run ./cmd/synapse-sca-inputs -mode accountable-review -repository-root "$input/repository" -review-capture-locator "$review_locator" -review-capture-output "$output/control/review-capture.json" -adjudication "$output/control/adjudication.json" -oracle "$output/control/oracle.json" -review-output "$output/control/accountable-review.json"
+          go run ./cmd/synapse-sca-cycle -mode oracle-freeze -repository-root "$input/repository" -source-freeze "$output/control/source-freeze.json" -oracle-candidate "$output/control/oracle-candidate.json" -cross-check "$output/control/cross-check.json" -adjudication "$output/control/adjudication.json" -accountable-review "$output/control/accountable-review.json" -oracle "$output/control/oracle.json" -oracle-output "$output/control/final-oracle-freeze.json"
+          go run ./cmd/synapse-sca-inputs -mode plan -source-freeze-output "$output/control/source-freeze.json" -oracle-candidate "$output/control/oracle-candidate.json" -cross-check "$output/control/cross-check.json" -adjudication "$output/control/adjudication.json" -accountable-review "$output/control/accountable-review.json" -final-oracle-freeze "$output/control/final-oracle-freeze.json" -catalog "$output/control/catalog.json" -oracle "$output/control/oracle.json" -ratchet "$output/control/ratchet.json" -cycle-policy "$output/control/cycle-policy.json" -plan-output "$output/control/plan.json"
+          make sca-accuracy-prepare SCA_ACCURACY_REPOSITORY_ROOT="$input/repository" SCA_ACCURACY_PLAN="$output/control/plan.json" SCA_ACCURACY_SOURCE_FREEZE="$output/control/source-freeze.json" SCA_ACCURACY_ORACLE_CANDIDATE="$output/control/oracle-candidate.json" SCA_ACCURACY_CROSS_CHECK="$output/control/cross-check.json" SCA_ACCURACY_ADJUDICATION="$output/control/adjudication.json" SCA_ACCURACY_ACCOUNTABLE_REVIEW="$output/control/accountable-review.json" SCA_ACCURACY_FINAL_ORACLE_FREEZE="$output/control/final-oracle-freeze.json"
           jq '.phase = "capture_pending"' "$output/capture-status.json" > "$output/capture-status.next.json"
           mv "$output/capture-status.next.json" "$output/capture-status.json"
       - name: Capture planned slots with retained retries
@@ -320,37 +331,38 @@ jobs:
           set -euo pipefail
           input="$SCA_ACCURACY_TRUSTED_INPUT_ROOT"
           output="$RUNNER_TEMP/sca-accuracy-candidate"
+          control="$output/control"
           status="$output/capture-status.json"
-          accepted_bundles="$output/control/accepted-bundles.json"
+          accepted_bundles="$control/accepted-bundles.json"
           test -s "$status"
           test -s "$accepted_bundles"
           jq '.phase = "capturing"' "$status" > "$status.next"
           mv "$status.next" "$status"
-          test "$(jq -r '.repetitions' "$input/plan.json")" = 2
-          test "$(jq '.cells | length' "$input/plan.json")" = 8
+          repetitions="$(jq -er '.repetitions' "$control/plan.json")"
+          max_attempts="$(jq -er '.max_attempts' "$control/cycle-policy.json")"
+          retention_policy="$(jq -er '.raw_retention' "$control/cycle-policy.json")"
           planned_slots=0
           accepted_slots=0
           retained_failed_attempts=0
           all_slots_accepted=true
           records=()
-          for repetition in 1 2; do
+          repetition=1
+          while [ "$repetition" -le "$repetitions" ]; do
             while IFS= read -r encoded; do
               cell="$(printf '%s' "$encoded" | base64 --decode)"
               target="$(jq -r '.target_id' <<<"$cell")"
               engine="$(jq -r '.engine' <<<"$cell")"
-              manifest="$output/control/capture-manifests/$repetition-$target--$engine.json"
-              retention="$input/retention/$repetition/$target--$engine.json"
+              manifest="$control/capture-manifests/$target--$engine.json"
               test -s "$manifest"
-              test -s "$retention"
-              locator="$(jq -r '.locator' "$retention")"
-              policy="$(jq -r '.retention' "$retention")"
               cell_accepted=false
-              for attempt in 1 2 3; do
+              attempt=1
+              while [ "$attempt" -le "$max_attempts" ]; do
                 bundle="$SCA_ACCURACY_RAW_RETENTION_ROOT/${GITHUB_RUN_ID:-local}/${GITHUB_RUN_ATTEMPT:-1}/$repetition/$target--$engine/attempt-$attempt"
                 record="$output/records/$repetition-$target--$engine-attempt-$attempt.json"
+                locator="protected://engine-accuracy/${GITHUB_RUN_ID:-local}/${GITHUB_RUN_ATTEMPT:-1}/$repetition/$target--$engine/attempt-$attempt"
                 mkdir -p "$(dirname "$bundle")"
                 set +e
-                make sca-accuracy-cell SCA_ACCURACY_REPOSITORY_ROOT="$input/repository" SCA_ACCURACY_PLAN="$input/plan.json" SCA_ACCURACY_SOURCE_FREEZE="$input/source-freeze.json" SCA_ACCURACY_ORACLE_CANDIDATE="$output/control/oracle-candidate.json" SCA_ACCURACY_CROSS_CHECK="$output/control/cross-check.json" SCA_ACCURACY_ADJUDICATION="$output/control/adjudication.json" SCA_ACCURACY_ACCOUNTABLE_REVIEW="$input/accountable-review.json" SCA_ACCURACY_FINAL_ORACLE_FREEZE="$output/control/final-oracle-freeze.json" SCA_ACCURACY_CATALOG="$input/catalog.json" SCA_ACCURACY_CAPTURE_MANIFEST="$manifest" SCA_ACCURACY_NATIVE_EVIDENCE="$output/control/native-evidence.json" SCA_ACCURACY_CAPTURE_RECORD_OUTPUT="$record" SCA_ACCURACY_OUTPUT="$bundle" SCA_ACCURACY_REPETITION="$repetition" SCA_ACCURACY_RETENTION_LOCATOR="$locator" SCA_ACCURACY_RETENTION_POLICY="$policy"
+                make sca-accuracy-cell SCA_ACCURACY_REPOSITORY_ROOT="$input/repository" SCA_ACCURACY_PLAN="$control/plan.json" SCA_ACCURACY_SOURCE_FREEZE="$control/source-freeze.json" SCA_ACCURACY_ORACLE_CANDIDATE="$control/oracle-candidate.json" SCA_ACCURACY_CROSS_CHECK="$control/cross-check.json" SCA_ACCURACY_ADJUDICATION="$control/adjudication.json" SCA_ACCURACY_ACCOUNTABLE_REVIEW="$control/accountable-review.json" SCA_ACCURACY_FINAL_ORACLE_FREEZE="$control/final-oracle-freeze.json" SCA_ACCURACY_CATALOG="$control/catalog.json" SCA_ACCURACY_CAPTURE_MANIFEST="$manifest" SCA_ACCURACY_NATIVE_EVIDENCE="$control/native-evidence.json" SCA_ACCURACY_CAPTURE_RECORD_OUTPUT="$record" SCA_ACCURACY_OUTPUT="$bundle" SCA_ACCURACY_REPETITION="$repetition" SCA_ACCURACY_RETENTION_LOCATOR="$locator" SCA_ACCURACY_RETENTION_POLICY="$retention_policy"
                 exit_code=$?
                 set -e
                 case "$exit_code" in
@@ -364,9 +376,6 @@ jobs:
                     break
                     ;;
                   2)
-                    # Exit 2 means a validated post-dispatch failed attempt was
-                    # retained. Keep both its protected bundle and auditable record
-                    # before retrying; it must never become an observation result.
                     test -s "$record"
                     test -d "$bundle"
                     records+=("-capture-record" "$record")
@@ -379,37 +388,34 @@ jobs:
                     exit 1
                     ;;
                 esac
+                attempt=$((attempt + 1))
               done
               if [ "$cell_accepted" != true ]; then
                 all_slots_accepted=false
               fi
               planned_slots=$((planned_slots + 1))
-            done < <(jq -rc '.cells[] | @base64' "$input/plan.json")
+            done < <(jq -rc '.cells[] | @base64' "$control/plan.json")
+            repetition=$((repetition + 1))
           done
-          repetitions="$(jq -r '.repetitions' "$input/plan.json")"
-          cells_per_repetition="$(jq '.cells | length' "$input/plan.json")"
+          cells_per_repetition="$(jq '.cells | length' "$control/plan.json")"
           expected_slots=$((repetitions * cells_per_repetition))
-          per_repetition_dispatches="$(jq '[.cells[] | .scanner_dispatches] | add' "$input/plan.json")"
-          per_repetition_unsupported="$(jq '[.cells[] | select(.expected_state == "unsupported" and .scanner_dispatches == 0)] | length' "$input/plan.json")"
+          per_repetition_dispatches="$(jq '[.cells[] | .scanner_dispatches] | add' "$control/plan.json")"
+          per_repetition_unsupported="$(jq '[.cells[] | select(.expected_state == "unsupported" and .scanner_dispatches == 0)] | length' "$control/plan.json")"
           expected_dispatches=$((repetitions * per_repetition_dispatches))
           expected_unsupported=$((repetitions * per_repetition_unsupported))
           test "$planned_slots" = "$expected_slots"
-          test "$expected_slots" = 16
-          jq --arg status "retained_failure" --argjson planned_slots "$planned_slots" --argjson accepted_slots "$accepted_slots" --argjson retained_failed_attempts "$retained_failed_attempts" '.status = $status | .phase = "capture_complete" | .planned_slots = $planned_slots | .accepted_slots = $accepted_slots | .retained_failed_attempts = $retained_failed_attempts' "$status" > "$status.next"
+          jq --arg status "retained_failure" --argjson planned_slots "$planned_slots" --argjson accepted_slots "$accepted_slots" --argjson retained_failed_attempts "$retained_failed_attempts" --argjson scanner_dispatches "$expected_dispatches" --argjson unsupported_records "$expected_unsupported" '.status = $status | .phase = "capture_complete" | .planned_slots = $planned_slots | .accepted_slots = $accepted_slots | .retained_failed_attempts = $retained_failed_attempts | .scanner_dispatches = $scanner_dispatches | .unsupported_records = $unsupported_records' "$status" > "$status.next"
           mv "$status.next" "$status"
           if [ "$all_slots_accepted" = true ]; then
             test "$accepted_slots" = "$expected_slots"
-            test "$accepted_slots" = 16
             actual_dispatches="$(jq -s '[.[] | select(.outcome == "accepted" and .observation_state == "complete") | .scanner_dispatches] | add' "$output"/records/*.json)"
             actual_unsupported="$(jq -s '[.[] | select(.outcome == "accepted" and .observation_state == "unsupported" and .scanner_dispatches == 0)] | length' "$output"/records/*.json)"
             test "$actual_dispatches" = "$expected_dispatches"
             test "$actual_unsupported" = "$expected_unsupported"
-            test "$expected_dispatches" = 14
-            test "$expected_unsupported" = 2
-            test "$(jq '.bundles | length' "$accepted_bundles")" = 16
+            test "$(jq '.bundles | length' "$accepted_bundles")" = "$expected_slots"
             jq '.status = "accepted"' "$status" > "$status.next"
             mv "$status.next" "$status"
-            go run ./cmd/synapse-sca-cycle -mode ledger -plan "$input/plan.json" -ledger-output "$output/control/cycle-ledger.json" "${records[@]}"
+            go run ./cmd/synapse-sca-cycle -mode ledger -plan "$control/plan.json" -ledger-output "$control/cycle-ledger.json" "${records[@]}"
             echo "accepted=true" >> "$GITHUB_OUTPUT"
           else
             echo "accepted=false" >> "$GITHUB_OUTPUT"
@@ -424,90 +430,126 @@ jobs:
             ${{ runner.temp }}/sca-accuracy-candidate/records
             ${{ runner.temp }}/sca-accuracy-candidate/capture-status.json
           if-no-files-found: error
-          retention-days: 3
+          retention-days: ${{ steps.policy.outputs.failed_retention_days }}
       - name: Finalize comparisons, falsifiers, reduction, ratchet, and report
         if: ${{ steps.capture.outputs.accepted == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
-          input="$SCA_ACCURACY_TRUSTED_INPUT_ROOT"
           output="$RUNNER_TEMP/sca-accuracy-candidate"
-          accepted_bundles="$output/control/accepted-bundles.json"
-          test "$(jq '.bundles | length' "$accepted_bundles")" = 16
+          control="$output/control"
+          publication="$output/publication"
+          accepted_bundles="$control/accepted-bundles.json"
+          repetitions="$(jq -er '.repetitions' "$control/plan.json")"
+          cells="$(jq '.cells | length' "$control/plan.json")"
+          expected_slots=$((repetitions * cells))
+          test "$(jq '.bundles | length' "$accepted_bundles")" = "$expected_slots"
+          mkdir -p "$control/observations" "$publication"
           comparison_pairs=()
           observations=()
-          for repetition in 1 2; do
+          repetition=1
+          while [ "$repetition" -le "$repetitions" ]; do
+            mkdir -p "$control/observations/$repetition"
             while IFS= read -r encoded; do
               cell="$(printf '%s' "$encoded" | base64 --decode)"
               target="$(jq -r '.target_id' <<<"$cell")"
               engine="$(jq -r '.engine' <<<"$cell")"
               attempt="$(jq -er --argjson repetition "$repetition" --arg target "$target" --arg engine "$engine" '[.bundles[] | select(.repetition == $repetition and .target_id == $target and .engine == $engine)] | if length == 1 then .[0].attempt else error("missing or ambiguous accepted bundle") end' "$accepted_bundles")"
-              case "$attempt" in 1|2|3) ;; *) echo "accepted bundle attempt is out of bounds" >&2; exit 1 ;; esac
+              max_attempts="$(jq -er '.max_attempts' "$control/cycle-policy.json")"
+              test "$attempt" -ge 1
+              test "$attempt" -le "$max_attempts"
               bundle="$SCA_ACCURACY_RAW_RETENTION_ROOT/${GITHUB_RUN_ID:-local}/${GITHUB_RUN_ATTEMPT:-1}/$repetition/$target--$engine/attempt-$attempt"
               test -s "$bundle/observation.json"
-              observations+=("$bundle/observation.json")
+              observation="$control/observations/$repetition/$target--$engine.json"
+              cp "$bundle/observation.json" "$observation"
+              cmp -s "$bundle/observation.json" "$observation"
+              observations+=("$observation")
               if [ "$repetition" = 1 ]; then
-                second_attempt="$(jq -er --arg target "$target" --arg engine "$engine" '[.bundles[] | select(.repetition == 2 and .target_id == $target and .engine == $engine)] | if length == 1 then .[0].attempt else error("missing or ambiguous accepted bundle") end' "$accepted_bundles")"
-                case "$second_attempt" in 1|2|3) ;; *) echo "accepted comparison bundle attempt is out of bounds" >&2; exit 1 ;; esac
-                second_bundle="$SCA_ACCURACY_RAW_RETENTION_ROOT/${GITHUB_RUN_ID:-local}/${GITHUB_RUN_ATTEMPT:-1}/2/$target--$engine/attempt-$second_attempt"
+                comparison_repetition="$repetitions"
+                second_attempt="$(jq -er --argjson repetition "$comparison_repetition" --arg target "$target" --arg engine "$engine" '[.bundles[] | select(.repetition == $repetition and .target_id == $target and .engine == $engine)] | if length == 1 then .[0].attempt else error("missing or ambiguous accepted bundle") end' "$accepted_bundles")"
+                test "$second_attempt" -ge 1
+                test "$second_attempt" -le "$max_attempts"
+                second_bundle="$SCA_ACCURACY_RAW_RETENTION_ROOT/${GITHUB_RUN_ID:-local}/${GITHUB_RUN_ATTEMPT:-1}/$comparison_repetition/$target--$engine/attempt-$second_attempt"
                 test -s "$second_bundle/observation.json"
                 comparison_pairs+=("$engine,$bundle,$second_bundle")
               fi
-            done < <(jq -rc '.cells[] | @base64' "$input/plan.json")
+            done < <(jq -rc '.cells[] | @base64' "$control/plan.json")
+            repetition=$((repetition + 1))
           done
-          test "${#observations[@]}" = 16
-          test "${#comparison_pairs[@]}" = 8
-          make sca-accuracy-finalize SCA_ACCURACY_PLAN="$input/plan.json" SCA_ACCURACY_LEDGER="$output/control/cycle-ledger.json" SCA_ACCURACY_CATALOG="$input/catalog.json" SCA_ACCURACY_ORACLE="$input/oracle.json" SCA_ACCURACY_RATCHET="$input/ratchet.json" SCA_ACCURACY_RESULT_OUTPUT="$output/result.json" SCA_ACCURACY_REPORT_OUTPUT="$output/report.md" SCA_ACCURACY_COMPARISON_OUTPUT="$output/comparisons.json" SCA_ACCURACY_FALSIFIER_OUTPUT="$output/falsifiers.json" SCA_ACCURACY_FALSIFIER_SPEC="$input/falsifier-spec.json" SCA_ACCURACY_OBSERVATIONS="${observations[*]}" SCA_ACCURACY_COMPARISON_PAIRS="${comparison_pairs[*]}"
-          test -s "$output/result.json"
-          test -s "$output/report.md"
-          test -s "$output/comparisons.json"
-          test -s "$output/falsifiers.json"
-      - name: Bind actual final artifacts into publication evidence
-        if: ${{ steps.capture.outputs.accepted == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          input="$SCA_ACCURACY_TRUSTED_INPUT_ROOT"
-          output="$RUNNER_TEMP/sca-accuracy-candidate"
-          make sca-accuracy-publication SCA_ACCURACY_PLAN="$input/plan.json" SCA_ACCURACY_LEDGER="$output/control/cycle-ledger.json" SCA_ACCURACY_PUBLICATION_CONTROL="$input/publication-control.json" SCA_ACCURACY_PUBLICATION_OUTPUT="$output/control/publication-manifest.json" SCA_ACCURACY_ACCOUNTABLE_REVIEW="$input/accountable-review.json" SCA_ACCURACY_SOURCE_CASE_EVIDENCE="$output/control/source-case-evidence.json" SCA_ACCURACY_NATIVE_EVIDENCE="$output/control/native-evidence.json" SCA_ACCURACY_ORACLE_CANDIDATE="$output/control/oracle-candidate.json" SCA_ACCURACY_CROSS_CHECK="$output/control/cross-check.json" SCA_ACCURACY_ADJUDICATION="$output/control/adjudication.json" SCA_ACCURACY_FINAL_ORACLE_FREEZE="$output/control/final-oracle-freeze.json" SCA_ACCURACY_RATCHET="$input/ratchet.json" SCA_ACCURACY_COMPARISON_OUTPUT="$output/comparisons.json" SCA_ACCURACY_FALSIFIER_OUTPUT="$output/falsifiers.json" SCA_ACCURACY_RESULT_OUTPUT="$output/result.json" SCA_ACCURACY_REPORT_OUTPUT="$output/report.md" SCA_ACCURACY_EVIDENCE_SUMMARY_OUTPUT="$output/candidate-evidence-summary.json"
-          test -s "$output/control/publication-manifest.json"
+          test "${#observations[@]}" = "$expected_slots"
+          test "${#comparison_pairs[@]}" = "$cells"
+          make sca-accuracy-finalize SCA_ACCURACY_PLAN="$control/plan.json" SCA_ACCURACY_LEDGER="$control/cycle-ledger.json" SCA_ACCURACY_CATALOG="$control/catalog.json" SCA_ACCURACY_ORACLE="$control/oracle.json" SCA_ACCURACY_RATCHET="$control/ratchet.json" SCA_ACCURACY_RESULT_OUTPUT="$publication/result.json" SCA_ACCURACY_REPORT_OUTPUT="$publication/report.md" SCA_ACCURACY_COMPARISON_OUTPUT="$publication/comparisons.json" SCA_ACCURACY_FALSIFIER_OUTPUT="$publication/falsifiers.json" SCA_ACCURACY_FALSIFIER_SPEC="$control/falsifier-spec.json" SCA_ACCURACY_OBSERVATIONS="${observations[*]}" SCA_ACCURACY_COMPARISON_PAIRS="${comparison_pairs[*]}"
+          cp "$control/source-case-evidence.json" "$publication/source-case-evidence.json"
+          cp "$control/native-evidence.json" "$publication/native-evidence.json"
+          cp "$control/oracle-candidate.json" "$publication/oracle-candidate.json"
+          cp "$control/cross-check.json" "$publication/cross-check.json"
+          cp "$control/adjudication.json" "$publication/adjudication.json"
+          cp "$control/accountable-review.json" "$publication/accountable-review.json"
+          cp "$control/final-oracle-freeze.json" "$publication/final-oracle-freeze.json"
+          cp "$control/cycle-ledger.json" "$publication/cycle-ledger.json"
+          go run ./cmd/synapse-sca-inputs -mode publication-control -candidate-root "$output" -implementation-commit "${{ needs.changes.outputs.source_sha }}" -plan-output "$control/plan.json" -publication-control-output "$control/publication-control.json"
+          make sca-accuracy-publication SCA_ACCURACY_PLAN="$control/plan.json" SCA_ACCURACY_LEDGER="$control/cycle-ledger.json" SCA_ACCURACY_PUBLICATION_CONTROL="$control/publication-control.json" SCA_ACCURACY_PUBLICATION_OUTPUT="$publication/publication-manifest.json" SCA_ACCURACY_ACCOUNTABLE_REVIEW="$publication/accountable-review.json" SCA_ACCURACY_SOURCE_CASE_EVIDENCE="$publication/source-case-evidence.json" SCA_ACCURACY_NATIVE_EVIDENCE="$publication/native-evidence.json" SCA_ACCURACY_ORACLE_CANDIDATE="$publication/oracle-candidate.json" SCA_ACCURACY_CROSS_CHECK="$publication/cross-check.json" SCA_ACCURACY_ADJUDICATION="$publication/adjudication.json" SCA_ACCURACY_FINAL_ORACLE_FREEZE="$publication/final-oracle-freeze.json" SCA_ACCURACY_RATCHET="$control/ratchet.json" SCA_ACCURACY_COMPARISON_OUTPUT="$publication/comparisons.json" SCA_ACCURACY_FALSIFIER_OUTPUT="$publication/falsifiers.json" SCA_ACCURACY_RESULT_OUTPUT="$publication/result.json" SCA_ACCURACY_REPORT_OUTPUT="$publication/report.md" SCA_ACCURACY_EVIDENCE_SUMMARY_OUTPUT="$output/candidate-evidence-summary.json"
+          test -s "$publication/publication-manifest.json"
           test -s "$output/candidate-evidence-summary.json"
-      - name: Write capability and status evidence
-        if: ${{ steps.capture.outputs.accepted == 'true' }}
+          rm -f \
+            "$output/capture-status.json" \
+            "$control/accepted-bundles.json" \
+            "$control/source-case-evidence.json" \
+            "$control/native-evidence.json" \
+            "$control/oracle-candidate.json" \
+            "$control/cross-check.json" \
+            "$control/adjudication.json" \
+            "$control/accountable-review.json" \
+            "$control/final-oracle-freeze.json" \
+            "$control/cycle-ledger.json" \
+            "$control/publication-control.json"
+          for transient in \
+            "$output/capture-status.json" \
+            "$control/accepted-bundles.json" \
+            "$control/source-case-evidence.json" \
+            "$control/native-evidence.json" \
+            "$control/oracle-candidate.json" \
+            "$control/cross-check.json" \
+            "$control/adjudication.json" \
+            "$control/accountable-review.json" \
+            "$control/final-oracle-freeze.json" \
+            "$control/cycle-ledger.json" \
+            "$control/publication-control.json"; do
+            test ! -e "$transient"
+          done
+      - name: Clean protected raw and Docker runner state
+        if: ${{ always() }}
         shell: bash
         run: |
           set -euo pipefail
           output="$RUNNER_TEMP/sca-accuracy-candidate"
-          jq -n --arg implementation_commit "${{ needs.changes.outputs.source_sha }}" --arg plan "$(sha256sum "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/plan.json" | cut -d' ' -f1)" '{schema_version:"synapse-sca-benchmark-cycle-status-v1", implementation_commit:$implementation_commit, planned_slots:16, scanner_dispatches:14, unsupported_records:2, plan_sha256:$plan, sandbox:{linux:true,bubblewrap:true,seccomp:true,cgroup_v2:true}, status:"complete"}' > "$output/capability-status.json"
-          cp "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/source-freeze.json" "$output/control/source-freeze.json"
-          cp "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/source-evidence-plan.json" "$output/control/source-evidence-plan.json"
-          cp "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/accountable-review.json" "$output/control/accountable-review.json"
-          cp "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/oracle.json" "$output/control/oracle.json"
-          cp "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/catalog.json" "$output/control/catalog.json"
-          cp "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/ratchet.json" "$output/control/ratchet.json"
-          cp "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/falsifier-spec.json" "$output/control/falsifier-spec.json"
-          cp "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/publication-control.json" "$output/control/publication-control.json"
-          cp "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/plan.json" "$output/control/plan.json"
-          printf '## Trusted SCA accuracy cycle\n\n- 16 retained slots: 14 dispatched scans and 2 designated SLES/OSV unsupported records.\n- Scanner-free source/native evidence, candidate, cross-check, adjudication, accountable review, final oracle freeze, ledger, comparison, falsifier, result, report, and summary were produced.\n- Raw bundles remain only in the protected retention root and are not uploaded.\n' >> "$GITHUB_STEP_SUMMARY"
-      - name: Assert complete candidate artifact set
+          go run ./cmd/synapse-sca-inputs -mode cleanup -raw-retention-root "$SCA_ACCURACY_RAW_RETENTION_ROOT" -run-id "${GITHUB_RUN_ID:-local}" -run-attempt "${GITHUB_RUN_ATTEMPT:-1}" -cleanup-output "$output/cleanup-receipt.json"
+      - name: Generate candidate inventory and delivery receipt
         if: ${{ steps.capture.outputs.accepted == 'true' }}
         id: complete
         shell: bash
         run: |
           set -euo pipefail
           output="$RUNNER_TEMP/sca-accuracy-candidate"
-          for required in capability-status.json capture-status.json candidate-evidence-summary.json comparisons.json falsifiers.json result.json report.md control/source-freeze.json control/source-evidence-plan.json control/source-case-evidence.json control/native-evidence.json control/accountable-review.json control/oracle.json control/catalog.json control/ratchet.json control/falsifier-spec.json control/publication-control.json control/plan.json control/oracle-candidate.json control/cross-check.json control/adjudication.json control/final-oracle-freeze.json control/cycle-ledger.json control/publication-manifest.json; do
-            test -s "$output/$required"
-          done
+          control="$output/control"
+          publication="$output/publication"
+          artifact_name="engine-accuracy-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ needs.changes.outputs.source_sha }}"
+          go run ./cmd/synapse-sca-inputs -mode receipt -candidate-root "$output" -implementation-commit "${{ needs.changes.outputs.source_sha }}" -plan-output "$control/plan.json" -cycle-policy "$control/cycle-policy.json" -catalog "$control/catalog.json" -oracle "$control/oracle.json" -ratchet "$control/ratchet.json" -ledger "$publication/cycle-ledger.json" -result "$publication/result.json" -publication-manifest "$publication/publication-manifest.json" -cleanup-receipt "$output/cleanup-receipt.json" -receipt-output "$output/delivery-receipt.json" -inventory-output "$output/candidate-file-inventory.json" -markdown-output "$output/pr-comment.md" -artifact-name "$artifact_name"
+          test -s "$output/delivery-receipt.json"
+          test -s "$output/candidate-file-inventory.json"
+          test -s "$output/pr-comment.md"
+          cat "$output/pr-comment.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
           echo "artifacts=produced" >> "$GITHUB_OUTPUT"
       - name: Upload bounded candidate controls and results
+        id: candidate-upload
         if: ${{ steps.capture.outputs.accepted == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: engine-accuracy-candidate-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.changes.outputs.source_sha }}
+          name: ${{ steps.complete.outputs.artifact_name }}
           path: ${{ runner.temp }}/sca-accuracy-candidate
           if-no-files-found: error
-          retention-days: 90
+          retention-days: ${{ steps.policy.outputs.accepted_retention_days }}
       - name: Fail after audited retained-attempt upload
         if: ${{ always() && steps.capture.outputs.accepted != 'true' }}
         shell: bash
@@ -531,15 +573,13 @@ jobs:
           TRUSTED_REQUESTED: ${{ needs.changes.outputs.trusted_requested }}
         run: |
           set -euo pipefail
-          echo "changes=${{ needs.changes.result }} smoke=${{ needs.smoke.result }} offline=${{ needs.offline-verify.result }} full=${{ needs.trusted-full.result }} artifacts=${{ needs.trusted-full.outputs.artifacts }}"
+          echo "changes=${{ needs.changes.result }} smoke=${{ needs.smoke.result }} offline=${{ needs.offline-verify.result }} full=${{ needs.trusted-full.result }} artifacts=${{ needs.trusted-full.outputs.artifacts }} artifact_id=${{ needs.trusted-full.outputs.artifact_id }} artifact_digest=${{ needs.trusted-full.outputs.artifact_digest }}"
           test "${{ needs.changes.result }}" = success
           if [ "$EVENT_NAME" = pull_request ]; then
             test "${{ needs.smoke.result }}" = success
             test "${{ needs.offline-verify.result }}" = success
             test "${{ needs.trusted-full.result }}" = skipped
           elif [ "$TRUSTED_REQUESTED" != true ]; then
-            # A disabled runner or a non-authorized branch is an explicit
-            # non-evaluation mode, never a substitute for fresh evidence.
             test "${{ needs.trusted-full.result }}" = skipped
             if [ "$TRUSTED_ENABLED" = true ]; then
               echo "trusted evidence cycle not requested for non-authorized ref $WORKFLOW_REF"
@@ -549,5 +589,7 @@ jobs:
           else
             test "${{ needs.trusted-full.result }}" = success
             test "${{ needs.trusted-full.outputs.artifacts }}" = produced
+            test -n "${{ needs.trusted-full.outputs.artifact_id }}"
+            test -n "${{ needs.trusted-full.outputs.artifact_digest }}"
             test "${{ needs.offline-verify.result }}" = skipped
           fi
