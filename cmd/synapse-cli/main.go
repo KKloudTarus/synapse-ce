@@ -798,8 +798,11 @@ func runGate(args []string) error {
 	// 5. Coverage (optional): overall line coverage, or coverage on new code when scoping to a diff.
 	coverageMeasured := false
 	var snapCoverage float64
+	var lc coverage.LineCoverage
 	if covPath != "" {
-		covRep, lc, cerr := coverage.ParseWithOptions(covPath, coverage.Options{GoModulePath: goModulePath(dir)})
+		var covRep measure.CoverageReport
+		var cerr error
+		covRep, lc, cerr = coverage.ParseWithOptions(covPath, coverage.Options{GoModulePath: goModulePath(dir)})
 		if cerr != nil {
 			return fmt.Errorf("coverage: %w", cerr)
 		}
@@ -822,6 +825,9 @@ func runGate(args []string) error {
 	snap := buildSnapshot(scoped, rep, dupRep.Density())
 	if coverageMeasured {
 		snap[qualitygate.MetricCoveragePct] = snapCoverage
+	}
+	if newCodeOnly && changed != nil {
+		applyNewCodeMetrics(snap, lc, &dupRep, changed)
 	}
 	gate, found, err := qualityprofile.LoadGate(gatePath)
 	if err != nil {
@@ -850,7 +856,7 @@ func runGate(args []string) error {
 			if !cr.Passed {
 				mark = "FAIL"
 			}
-			fmt.Printf("  [%s] %s (actual %g)\n", mark, cr.Condition, cr.Actual)
+			fmt.Printf("  [%s] %s (%s)\n", mark, cr.Condition, conditionActual(cr))
 		}
 	}
 	if !result.Passed {
@@ -926,8 +932,17 @@ func printGateMarkdown(dir, scope string, rep rating.Report, dupDensity float64,
 		if !cr.Passed {
 			mark = "❌"
 		}
-		fmt.Printf("| `%s` | %g | %s |\n", cr.Condition, cr.Actual, mark)
+		fmt.Printf("| `%s` | %s | %s |\n", cr.Condition, conditionActual(cr), mark)
 	}
+}
+
+// conditionActual renders what a condition was compared against. An unmeasured condition has no value:
+// printing "actual 0" there would read as a measurement of zero, which is the misreading the gate refuses.
+func conditionActual(cr qualitygate.ConditionResult) string {
+	if cr.Unmeasured {
+		return "no data"
+	}
+	return fmt.Sprintf("actual %g", cr.Actual)
 }
 
 // filterNewCode keeps only line-anchored findings that sit on a changed line.
@@ -963,6 +978,23 @@ func sastLocation(file string, line int) *finding.SourceLocation {
 		return nil
 	}
 	return &finding.SourceLocation{File: file, StartLine: line, EndLine: line}
+}
+
+// applyNewCodeMetrics writes new_coverage and new_duplication when the run is scoped to a diff, each only
+// when it could be measured. The gate fails a condition on either as "no data" when the key is absent,
+// so writing a 0 here would be the silent pass that rule exists to prevent: no coverage report, or a diff
+// no report line matches, leaves new_coverage unset; new_duplication needs at least one changed line.
+// (In new-code mode `coverage` also carries the new-code percentage, as it always has; the new key is the
+// one a Clean-as-You-Code gate names.)
+func applyNewCodeMetrics(snap qualitygate.Snapshot, lc coverage.LineCoverage, dup *measure.DuplicationReport, changed gitdiff.ChangedLines) {
+	if lc != nil {
+		if pct, ok := lc.NewCodePercent(changed); ok {
+			snap[qualitygate.MetricNewCoverage] = pct
+		}
+	}
+	if pct, ok := measure.NewCodeDuplicationPercent(dup, changed); ok {
+		snap[qualitygate.MetricNewDuplication] = pct
+	}
 }
 
 // goModulePath returns the `module` directive of dir/go.mod, or "" when there is none. A Go -coverprofile

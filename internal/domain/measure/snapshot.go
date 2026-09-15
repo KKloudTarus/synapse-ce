@@ -145,6 +145,9 @@ type BuildSnapshotInput struct {
 	Duplication *DuplicationReport
 	Issues      []IssueInput
 	RuleCatalog RuleResolver
+	// ChangedLines is the new-side changed lines (file -> set of line numbers) the new-code coverage is
+	// measured over. Nil or empty means the analysis has no diff to measure against.
+	ChangedLines map[string]map[int]bool
 }
 
 // CanonicalPath normalizes a file path and strictly rejects traversal and absolute paths.
@@ -518,10 +521,31 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 	}
 
 	return Snapshot{
-		Nodes: nodes,
-		NewCodeCoverage: DecimalMetric{
-			Availability: AvailabilityUnavailable,
-			Reason:       "changed_line_coverage_not_available",
-		},
+		Nodes:           nodes,
+		NewCodeCoverage: newCodeCoverage(in.Coverage, in.ChangedLines),
 	}, nil
+}
+
+// New-code coverage is unavailable for one of three distinct reasons, each named so an operator can tell
+// a missing report from a missing diff from a diff the report never mentions.
+const (
+	NewCodeCoverageNoReport       = "no_coverage_report"
+	NewCodeCoverageNoChangedLines = "no_changed_lines"
+	NewCodeCoverageNotInReport    = "changed_lines_not_in_report"
+)
+
+// newCodeCoverage measures coverage over the changed lines, or says exactly why it cannot. It never
+// returns a value it did not measure.
+func newCodeCoverage(coverage *CoverageReport, changed map[string]map[int]bool) DecimalMetric {
+	if coverage == nil {
+		return DecimalMetric{Availability: AvailabilityUnavailable, Reason: NewCodeCoverageNoReport}
+	}
+	if len(changed) == 0 {
+		return DecimalMetric{Availability: AvailabilityUnavailable, Reason: NewCodeCoverageNoChangedLines}
+	}
+	pct, ok := coverage.Lines.NewCodePercent(changed)
+	if !ok {
+		return DecimalMetric{Availability: AvailabilityUnavailable, Reason: NewCodeCoverageNotInReport}
+	}
+	return DecimalMetric{Availability: AvailabilityAvailable, Value: &pct}
 }

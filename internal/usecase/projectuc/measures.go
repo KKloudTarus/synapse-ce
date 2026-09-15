@@ -345,7 +345,12 @@ func mapDomainMeasures(n *measure.Node, domains map[string]bool, analysis *proje
 			if snap.NewCodeCoverage.Availability == measure.AvailabilityAvailable {
 				newCodeCov = MeasureDecimalMetric{Availability: AvailabilityAvailable, Value: snap.NewCodeCoverage.Value, Reason: nil}
 			} else {
-				reason := "changed_line_coverage_not_available"
+				// The snapshot names why: no report, no diff, or a diff the report does not mention are
+				// three different things to fix, and a single catch-all reason would erase that.
+				reason := snap.NewCodeCoverage.Reason
+				if reason == "" {
+					reason = measure.NewCodeCoverageNoChangedLines
+				}
 				newCodeCov = MeasureDecimalMetric{Availability: AvailabilityUnavailable, Value: nil, Reason: &reason}
 			}
 		}

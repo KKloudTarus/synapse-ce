@@ -46,10 +46,11 @@ type projectOverviewGateDTO struct {
 }
 
 type projectOverviewGateConditionDTO struct {
-	Metric    string  `json:"metric"`
-	Operator  string  `json:"operator"`
-	Threshold float64 `json:"threshold"`
-	Actual    float64 `json:"actual"`
+	Metric     string  `json:"metric"`
+	Operator   string  `json:"operator"`
+	Threshold  float64 `json:"threshold"`
+	Actual     float64 `json:"actual"`
+	Unmeasured bool    `json:"unmeasured,omitempty"`
 }
 
 type projectOverviewIssuesDTO struct {
@@ -127,7 +128,7 @@ func projectOverviewDTO(overview projectuc.Overview) projectOverviewResponse {
 		for i, condition := range overview.Gate.FailedConditions {
 			gate.FailedConditions[i] = projectOverviewGateConditionDTO{
 				Metric: condition.Metric, Operator: string(condition.Operator),
-				Threshold: condition.Threshold, Actual: condition.Actual,
+				Threshold: condition.Threshold, Actual: condition.Actual, Unmeasured: condition.Unmeasured,
 			}
 		}
 	}

@@ -259,6 +259,53 @@ func TestGetMeasures(t *testing.T) {
 		}
 	})
 
+	// The snapshot names why new-code coverage is unavailable; the read model must hand that reason to
+	// the API rather than replace it with a catch-all, or the distinction is computed and then thrown away.
+	t.Run("new code coverage reason reaches the API", func(t *testing.T) {
+		for i, tc := range []struct {
+			metric measure.DecimalMetric
+			want   string
+		}{
+			{measure.DecimalMetric{Availability: measure.AvailabilityUnavailable, Reason: measure.NewCodeCoverageNoReport}, measure.NewCodeCoverageNoReport},
+			{measure.DecimalMetric{Availability: measure.AvailabilityUnavailable, Reason: measure.NewCodeCoverageNotInReport}, measure.NewCodeCoverageNotInReport},
+			{measure.DecimalMetric{Availability: measure.AvailabilityUnavailable, Reason: "legacy_analysis"}, "legacy_analysis"},
+			{measure.DecimalMetric{Availability: measure.AvailabilityUnavailable}, measure.NewCodeCoverageNoChangedLines}, // no reason recorded: the diff-less default
+		} {
+			key := "p-ncc-" + string(rune('a'+i))
+			pn, _ := svc.Create(ctx, CreateInput{TenantID: "tenant", CreatedBy: "alice", Name: key, Key: key, SourceBinding: project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}})
+			analyses.Save(ctx, projectanalysis.Analysis{
+				ID: "a-" + key, TenantID: "tenant", ProjectID: string(pn.ID), CreatedAt: time.Now(),
+				Snapshot: measure.Snapshot{
+					Nodes:           []measure.Node{{Path: "", Kind: measure.NodeProject}},
+					NewCodeCoverage: tc.metric,
+				},
+			})
+			res, err := svc.GetMeasures(ctx, "tenant", key, "", []string{"coverage"}, 50, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := res.Node.Coverage.NewCodeCoverage
+			if got.Availability != AvailabilityUnavailable || got.Reason == nil || *got.Reason != tc.want {
+				t.Fatalf("case %d: new_code_coverage = %+v, want unavailable with reason %q", i, got, tc.want)
+			}
+		}
+		// And a measured value passes through as a value with no reason.
+		v := 42.5
+		key := "p-ncc-measured"
+		pn, _ := svc.Create(ctx, CreateInput{TenantID: "tenant", CreatedBy: "alice", Name: key, Key: key, SourceBinding: project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}})
+		analyses.Save(ctx, projectanalysis.Analysis{
+			ID: "a-measured", TenantID: "tenant", ProjectID: string(pn.ID), CreatedAt: time.Now(),
+			Snapshot: measure.Snapshot{Nodes: []measure.Node{{Path: "", Kind: measure.NodeProject}}, NewCodeCoverage: measure.DecimalMetric{Availability: measure.AvailabilityAvailable, Value: &v}},
+		})
+		res, err := svc.GetMeasures(ctx, "tenant", key, "", []string{"coverage"}, 50, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := res.Node.Coverage.NewCodeCoverage; got.Availability != AvailabilityAvailable || got.Value == nil || *got.Value != 42.5 || got.Reason != nil {
+			t.Fatalf("measured new_code_coverage = %+v, want available 42.5 with no reason", got)
+		}
+	})
+
 	t.Run("no commentable lines", func(t *testing.T) {
 		p5, _ := svc.Create(ctx, CreateInput{TenantID: "tenant", CreatedBy: "alice", Name: "P5", Key: "p5", SourceBinding: project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}})
 		a5 := projectanalysis.Analysis{

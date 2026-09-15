@@ -482,3 +482,25 @@ func assertCountUnavailable(t *testing.T, got CountMetric, reason UnavailableRea
 		t.Fatalf("count=%+v, want unavailable %s", got, reason)
 	}
 }
+
+// TestOverviewGateCarriesUnmeasured: a condition that failed for lack of data must reach the overview as
+// such. Showing it as `actual: 0` alone would present "nobody measured this" as "this measured zero".
+func TestOverviewGateCarriesUnmeasured(t *testing.T) {
+	gate, err := overviewGate(qualitygate.Evaluate(qualitygate.Gate{Conditions: []qualitygate.Condition{
+		{Metric: qualitygate.MetricNewDuplication, Op: qualitygate.OpLE, Threshold: 3},
+		{Metric: qualitygate.MetricNewHigh, Op: qualitygate.OpLE, Threshold: 0},
+	}}, qualitygate.Snapshot{qualitygate.MetricNewHigh: 2}), projectanalysis.GateInfo{Source: "repository"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gate.FailedConditions) != 2 {
+		t.Fatalf("failed conditions=%+v, want the unmeasured one and the real one", gate.FailedConditions)
+	}
+	dup, high := gate.FailedConditions[0], gate.FailedConditions[1]
+	if dup.Metric != qualitygate.MetricNewDuplication || !dup.Unmeasured || dup.Actual != 0 {
+		t.Fatalf("new_duplication must surface as unmeasured: %+v", dup)
+	}
+	if high.Metric != qualitygate.MetricNewHigh || high.Unmeasured || high.Actual != 2 {
+		t.Fatalf("a condition that failed on a value must not read as unmeasured: %+v", high)
+	}
+}

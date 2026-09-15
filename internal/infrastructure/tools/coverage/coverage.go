@@ -326,28 +326,8 @@ func parseJaCoCo(data []byte) (LineCoverage, error) {
 	return lc, nil
 }
 
-// NewCodePercent returns the line-coverage percentage over only the changed lines (file -> set), i.e.
-// coverage on new code. changed[file][line] must be true for a changed line. ok=false when no changed
-// line is measurable (so a caller can skip the metric rather than report a misleading 0 or 100).
+// NewCodePercent is coverage on new code. The measurement lives on the domain type so the server-side
+// measures can compute it without importing this package; this is the same function.
 func (lc LineCoverage) NewCodePercent(changed map[string]map[int]bool) (pct float64, ok bool) {
-	total, covered := 0, 0
-	for file, lines := range lc {
-		ch := changed[file]
-		if ch == nil {
-			continue
-		}
-		for ln, cov := range lines {
-			if !ch[ln] {
-				continue
-			}
-			total++
-			if cov {
-				covered++
-			}
-		}
-	}
-	if total == 0 {
-		return 0, false
-	}
-	return 100 * float64(covered) / float64(total), true
+	return measure.LineCoverage(lc).NewCodePercent(changed)
 }

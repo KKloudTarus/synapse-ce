@@ -750,19 +750,16 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 	}
 
 	snapshot, err := measure.BuildSnapshot(measure.BuildSnapshotInput{
-		Inventory:   inventory,
-		Complexity:  compPtr,
-		Coverage:    result.LineCoverage,
-		Duplication: dupPtr,
-		Issues:      issueInputs,
-		RuleCatalog: resolver,
+		Inventory:    inventory,
+		Complexity:   compPtr,
+		Coverage:     result.LineCoverage,
+		Duplication:  dupPtr,
+		Issues:       issueInputs,
+		RuleCatalog:  resolver,
+		ChangedLines: projectanalysis.ChangedLineSet(result.FileChanges),
 	})
 	if err != nil {
 		return fmt.Errorf("build measure snapshot: %w", err)
-	}
-	var analysisDuplication measure.DuplicationReport
-	if dupPtr != nil {
-		analysisDuplication = *dupPtr
 	}
 	analysisTruncated := result.CodeQuality != nil && result.CodeQuality.Truncated ||
 		compPtr != nil && compPtr.Truncated || dupPtr != nil && dupPtr.Truncated
@@ -809,7 +806,7 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 		SourceRevision: projectanalysis.SourceRevision{Kind: projectScanKind(p.SourceBinding.Kind), Head: result.SourceCommit, Base: comparison.BaseCommit, MergeBase: comparison.MergeBase, AnalysisID: jobID},
 		Capabilities:   capabilities, SourceManifest: manifest, Comparison: comparison, FileChanges: result.FileChanges, Annotations: annotations,
 		Findings: issues, Gate: gate, GateSource: gateSource, GateExempt: exempt, LinesOfCode: loc,
-		Coverage: analysisCoverage, Duplication: analysisDuplication, AnalysisTruncated: analysisTruncated, Previous: baseline,
+		Coverage: analysisCoverage, Duplication: dupPtr, AnalysisTruncated: analysisTruncated, Previous: baseline,
 		Hotspots: overallHsSummary, NewHotspots: newHsSummary, Snapshot: snapshot,
 	})
 	if err != nil {

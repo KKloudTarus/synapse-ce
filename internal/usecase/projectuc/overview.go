@@ -125,6 +125,9 @@ type OverviewGateCondition struct {
 	Operator  OverviewGateOperator
 	Threshold float64
 	Actual    float64
+	// Unmeasured: the condition failed because its metric had no measurement, not on a value; Actual
+	// is 0 only because there is nothing to report.
+	Unmeasured bool
 }
 
 type OverviewGate struct {
@@ -560,7 +563,7 @@ func overviewGate(gate qualitygate.Result, info projectanalysis.GateInfo) (Overv
 			allPassed = false
 			out.FailedConditions = append(out.FailedConditions, OverviewGateCondition{
 				Metric: metric, Operator: operator,
-				Threshold: result.Condition.Threshold, Actual: result.Actual,
+				Threshold: result.Condition.Threshold, Actual: result.Actual, Unmeasured: result.Unmeasured,
 			})
 		}
 	}

@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/coverage"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
 )
@@ -226,6 +229,48 @@ func TestRunQualitySARIFIsValidJSON(t *testing.T) {
 	}
 	if len(doc.Runs) == 0 || len(doc.Runs[0].Results) == 0 {
 		t.Fatalf("sarif carries no results: %s", buf.String())
+	}
+}
+
+// TestApplyNewCodeMetrics: in new-code mode the CLI writes new_coverage and new_duplication only when it
+// could measure them. The gate treats an absent key as "no data" and fails the condition; a 0 written
+// for a missing report would let `new_duplication <= 3` pass on nothing, which is exactly the outcome
+// the absent key exists to prevent.
+func TestApplyNewCodeMetrics(t *testing.T) {
+	changed := gitdiff.ChangedLines{"src/a.go": {10: true, 11: true, 12: true, 13: true}}
+	lc := coverage.LineCoverage{"./src/a.go": {10: true, 11: true, 12: false, 99: false}}
+	dup := &measure.DuplicationReport{Blocks: []measure.DuplicationBlock{{Occurrences: []measure.CodeRange{{File: "src/a.go", StartLine: 12, EndLine: 13}}}}}
+
+	snap := qualitygate.Snapshot{}
+	applyNewCodeMetrics(snap, lc, dup, changed)
+	if got, ok := snap[qualitygate.MetricNewCoverage]; !ok || got != 100.0*2/3 {
+		t.Fatalf("new_coverage = %g ok=%v, want %g (2 of the 3 changed lines the report knows about; line 99 is unchanged)", got, ok, 100.0*2/3)
+	}
+	if got, ok := snap[qualitygate.MetricNewDuplication]; !ok || got != 50 {
+		t.Fatalf("new_duplication = %g ok=%v, want 50 (lines 12-13 of 4 changed lines are duplicated)", got, ok)
+	}
+
+	// No coverage report: new_coverage stays absent; new_duplication is still measured.
+	snap = qualitygate.Snapshot{}
+	applyNewCodeMetrics(snap, nil, dup, changed)
+	if _, present := snap[qualitygate.MetricNewCoverage]; present {
+		t.Fatal("new_coverage must be absent without a report")
+	}
+	if _, present := snap[qualitygate.MetricNewDuplication]; !present {
+		t.Fatal("new_duplication must still be measured without a coverage report")
+	}
+
+	// A report that matches no changed line, and a diff with no lines: nothing is written.
+	snap = qualitygate.Snapshot{}
+	applyNewCodeMetrics(snap, coverage.LineCoverage{"other.go": {1: true}}, dup, gitdiff.ChangedLines{})
+	if len(snap) != 0 {
+		t.Fatalf("nothing measurable must write nothing, got %v", snap)
+	}
+
+	// The absent keys are what make the gate fail closed rather than pass on 0.
+	res := qualitygate.Evaluate(qualitygate.Gate{Conditions: []qualitygate.Condition{{Metric: qualitygate.MetricNewDuplication, Op: qualitygate.OpLE, Threshold: 3}}}, snap)
+	if res.Passed || !res.Results[0].Unmeasured {
+		t.Fatalf("an unmeasured new_duplication must fail closed: %+v", res.Results)
 	}
 }
 

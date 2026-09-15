@@ -1,6 +1,9 @@
 package measure
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // FileCoverage is one file's line-coverage summary (executable lines only).
 type FileCoverage struct {
@@ -20,6 +23,55 @@ func (f FileCoverage) Percent() float64 {
 // LineCoverage is immutable executable-line state. A missing line is unknown,
 // never inferred as uncovered.
 type LineCoverage map[string]map[int]bool
+
+// canonicalReportPath turns a file name as a coverage tool wrote it into the inventory's canonical form.
+// Tools commonly prefix a relative path with "./"; the inventory never does, and CanonicalPath rejects a
+// dot segment outright, so that prefix is removed first. Everything else — backslashes, traversal,
+// absolute paths — is CanonicalPath's decision.
+func canonicalReportPath(raw string) (string, error) {
+	raw = strings.ReplaceAll(raw, "\\", "/")
+	for strings.HasPrefix(raw, "./") {
+		raw = raw[2:]
+	}
+	return CanonicalPath(raw)
+}
+
+// NewCodePercent is the line-coverage percentage over only the changed lines (file -> set of line
+// numbers), i.e. coverage on new code. A changed line the report does not know about is not counted:
+// coverage tools only report executable lines, so a changed comment or blank line is neither covered
+// nor uncovered. ok=false when no changed line is measurable, so a caller reports "no data" rather than
+// a misleading 0 or 100.
+//
+// Report keys are canonicalised before the lookup. Parsers keep file names as the tool wrote them
+// (`./src/a.go`, `src\a.go`), while the changed set is keyed canonically; comparing the raw key would
+// make valid coverage on new code silently unavailable. A key that cannot be canonicalised (an absolute
+// path, a traversal) is skipped, never matched.
+func (lc LineCoverage) NewCodePercent(changed map[string]map[int]bool) (pct float64, ok bool) {
+	total, covered := 0, 0
+	for file, lines := range lc {
+		key, err := canonicalReportPath(file)
+		if err != nil || key == "" {
+			continue
+		}
+		ch := changed[key]
+		if ch == nil {
+			continue
+		}
+		for ln, cov := range lines {
+			if !ch[ln] {
+				continue
+			}
+			total++
+			if cov {
+				covered++
+			}
+		}
+	}
+	if total == 0 {
+		return 0, false
+	}
+	return 100 * float64(covered) / float64(total), true
+}
 
 // CoverageReport is the whole-tree line coverage parsed from a report file (lcov / cobertura / jacoco).
 type CoverageReport struct {
@@ -52,7 +104,13 @@ func (r *CoverageReport) NormalizeLines(allowed map[string]struct{}) {
 		return
 	}
 	out := make(LineCoverage)
-	for path, lines := range r.Lines {
+	for raw, lines := range r.Lines {
+		// The inventory is keyed canonically; a report key is whatever the tool wrote. Canonicalise
+		// before deciding whether the file is known, so `./src/a.go` and `src/a.go` are one file.
+		path, err := canonicalReportPath(raw)
+		if err != nil || path == "" {
+			continue
+		}
 		if _, ok := allowed[path]; !ok {
 			continue
 		}
@@ -63,7 +121,12 @@ func (r *CoverageReport) NormalizeLines(allowed map[string]struct{}) {
 			if out[path] == nil {
 				out[path] = map[int]bool{}
 			}
-			out[path][line] = covered
+			// Two raw spellings of one file merge with the union rule the parsers use.
+			if covered {
+				out[path][line] = true
+			} else if _, seen := out[path][line]; !seen {
+				out[path][line] = false
+			}
 		}
 	}
 	r.Lines = out

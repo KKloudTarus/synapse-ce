@@ -57,3 +57,55 @@ func (r DuplicationReport) TopBlocks(n int) []DuplicationBlock {
 	}
 	return sorted
 }
+
+// NewCodeDuplicationPercent is the duplicated-line density over only the changed lines: the share of
+// changed lines that sit inside any duplicated block occurrence. ok=false when there is no duplication
+// report or no changed line to measure, so the caller reports "no data" instead of 0. A report that ran
+// and found nothing is a measured 0.
+//
+// The denominator is every changed line, including blank and comment lines, because the duplication
+// walk reports occurrences as line ranges and does not expose its per-line code classification. That
+// under-reports density slightly relative to a code-lines-only denominator — the lenient direction for a
+// `<=` condition — and is stated here rather than hidden.
+//
+// Occurrence ranges are walked by testing each changed line against them, never by expanding the
+// occurrence: the report can arrive from the CI import, and an occurrence range is not something this
+// code should size a loop by.
+func NewCodeDuplicationPercent(duplication *DuplicationReport, changed map[string]map[int]bool) (pct float64, ok bool) {
+	if duplication == nil {
+		return 0, false
+	}
+	total := 0
+	for _, lines := range changed {
+		total += len(lines)
+	}
+	if total == 0 {
+		return 0, false
+	}
+	duplicated := map[string]map[int]bool{}
+	for _, block := range duplication.Blocks {
+		for _, occ := range block.Occurrences {
+			if occ.StartLine < 1 || occ.EndLine < occ.StartLine {
+				continue
+			}
+			path, err := CanonicalPath(occ.File)
+			if err != nil {
+				continue
+			}
+			for ln := range changed[path] {
+				if ln < occ.StartLine || ln > occ.EndLine {
+					continue
+				}
+				if duplicated[path] == nil {
+					duplicated[path] = map[int]bool{}
+				}
+				duplicated[path][ln] = true
+			}
+		}
+	}
+	count := 0
+	for _, lines := range duplicated {
+		count += len(lines)
+	}
+	return 100 * float64(count) / float64(total), true
+}

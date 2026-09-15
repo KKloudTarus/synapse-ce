@@ -36,7 +36,8 @@ type Gate struct {
 	BuiltIn    bool        `yaml:"-" json:"built_in,omitempty"`
 }
 
-// Snapshot is the measured metric values. A metric absent from the snapshot reads as 0.
+// Snapshot is the measured metric values. A counter or rating absent from the snapshot reads as 0; a
+// metric in measuredMetrics that is absent was not measured, and Evaluate fails its condition closed.
 type Snapshot map[string]float64
 
 // validOps is the set of operators a condition may use.
@@ -113,6 +114,10 @@ type ConditionResult struct {
 	Condition Condition
 	Actual    float64
 	Passed    bool
+	// Unmeasured is set when the condition's metric requires a measurement the snapshot does not carry.
+	// The condition fails, and Actual is 0 only because there is nothing to report — a renderer should
+	// show "no data", not the number.
+	Unmeasured bool `json:",omitempty"`
 }
 
 // Result is the gate outcome. Incomplete reports that analysis reached a limit, so
@@ -135,11 +140,18 @@ func (r Result) Failures() []ConditionResult {
 }
 
 // Evaluate checks every condition against the snapshot. An unknown operator fails its condition closed
-// (a malformed gate never silently passes).
+// (a malformed gate never silently passes), and so does a measured metric the snapshot does not carry:
+// a `new_duplication <= 3` condition with no duplication measurement is not satisfied, it is unanswered,
+// and an unanswered gate condition is a failed one.
 func Evaluate(g Gate, s Snapshot) Result {
 	res := Result{Passed: true}
 	for _, c := range g.Conditions {
-		actual := s[c.Metric]
+		actual, present := s[c.Metric]
+		if !present && RequiresMeasurement(c.Metric) {
+			res.Passed = false
+			res.Results = append(res.Results, ConditionResult{Condition: c, Passed: false, Unmeasured: true})
+			continue
+		}
 		ok := compare(actual, c.Op, c.Threshold)
 		if !ok {
 			res.Passed = false

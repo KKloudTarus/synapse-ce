@@ -10010,6 +10010,8 @@ components:
 
       - security_hotspots_reviewed
       - new_security_hotspots_reviewed
+      - new_coverage
+      - new_duplication
     ProjectBranches:
       type: object
       required: [branches]
@@ -10122,6 +10124,11 @@ components:
         operator: {$ref: "#/components/schemas/ProjectOverviewGateOperator"}
         threshold: {type: number}
         actual: {type: number}
+        unmeasured:
+          type: boolean
+          description: True when the condition failed because its metric had no measurement for this
+            analysis (coverage, new_coverage, new_duplication without data). actual is then 0 only
+            because there is nothing to report. Omitted when false.
 
     ProjectOverviewIssueSummary:
       type: object
@@ -10472,7 +10479,9 @@ components:
         - complexity_not_available
         - coverage_not_supplied
         - no_executable_lines
-        - changed_line_coverage_not_available
+        - no_coverage_report
+        - no_changed_lines
+        - changed_lines_not_in_report
         - duplication_not_available
         - issue_type_incomplete
         - issue_attribution_incomplete

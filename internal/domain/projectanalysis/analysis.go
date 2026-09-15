@@ -174,7 +174,7 @@ type Input struct {
 	GateExempt        map[string]bool
 	LinesOfCode       int
 	Coverage          *measure.CoverageReport
-	Duplication       measure.DuplicationReport
+	Duplication       *measure.DuplicationReport // nil when no duplication walk ran, like Coverage
 	AnalysisTruncated bool
 	Previous          *Analysis
 	Hotspots          hotspot.Summary
@@ -229,7 +229,7 @@ func Build(in Input) (Analysis, error) {
 	overallRating := rating.Compute(normalized, in.LinesOfCode)
 	newRating := rating.Compute(newFindings, 0)
 	gateOverallRating := rating.Compute(gateFindings, in.LinesOfCode)
-	measures := buildMeasures(countIssues(gateIssues), countIssues(gateNewIssues), gateOverallRating, in.Duplication, in.Coverage, in.Hotspots, in.NewHotspots)
+	measures := buildMeasures(countIssues(gateIssues), countIssues(gateNewIssues), gateOverallRating, in.Duplication, in.Coverage, in.Hotspots, in.NewHotspots, ChangedLineSet(in.FileChanges))
 	gateDef := in.Gate
 	gateSource := in.GateSource
 	if len(gateDef.Conditions) == 0 {
@@ -261,7 +261,7 @@ func Build(in Input) (Analysis, error) {
 		GateInfo: GateInfo{Key: gateDef.Key, Name: gateName, Source: gateSource}, Issues: counts,
 		InternalIssues: issues, NewCode: NewCode{PreviousID: previousID, Counts: newCounts, Rating: NewCodeRating{Security: newRating.Security, Reliability: newRating.Reliability}},
 		Delta: buildDelta(counts, measures, overallRating, in.Previous), Coverage: in.Coverage,
-		Duplication: in.Duplication, Rating: overallRating,
+		Duplication: derefDuplication(in.Duplication), Rating: overallRating,
 		Hotspots: in.Hotspots, NewHotspots: in.NewHotspots,
 		Snapshot: in.Snapshot,
 	}, nil
@@ -348,20 +348,90 @@ func countIssues(issues []Issue) Counts {
 	return counts
 }
 
-func buildMeasures(all, new Counts, overallRating rating.Report, duplication measure.DuplicationReport, coverage *measure.CoverageReport, hotspots, newHotspots hotspot.Summary) qualitygate.Snapshot {
+// maxChangedLines bounds how many changed lines the new-code measurements expand into a set. The file
+// changes reach this code from the CI import as JSON, so the ranges are caller-supplied; a diff larger
+// than this is not measured (the set is nil, so both new-code metrics report no data) rather than
+// allowed to size a map without limit.
+const maxChangedLines = 1 << 20
+
+// ChangedLineSet is the new-side changed lines of an analysis as file -> set of line numbers, the shape
+// the new-code measurements consume. Only Added ranges count (Modified mirrors them; Removed lines no
+// longer exist), a deleted or binary change contributes nothing, and paths are canonicalised so the set
+// shares a key space with coverage and duplication data, which are canonicalised the same way.
+//
+// The ranges are untrusted input. An invalid range, or a diff over maxChangedLines, yields nil: the
+// new-code metrics then fail closed as unmeasured, which is the right answer for a diff that cannot be
+// trusted to describe itself.
+func ChangedLineSet(changes []FileChange) map[string]map[int]bool {
+	out := map[string]map[int]bool{}
+	total := 0
+	for _, c := range changes {
+		if c.Binary || c.Status == FileStatusDeleted || len(c.Added) == 0 {
+			continue
+		}
+		path, err := measure.CanonicalPath(c.NewPath)
+		if err != nil || path == "" {
+			continue
+		}
+		for _, r := range c.Added {
+			if !r.Valid() {
+				return nil
+			}
+			// Valid guarantees Start > 0 and End >= Start, so this cannot overflow.
+			if total += r.End - r.Start + 1; total > maxChangedLines {
+				return nil
+			}
+			lines := out[path]
+			if lines == nil {
+				lines = map[int]bool{}
+				out[path] = lines
+			}
+			// Stop on End before incrementing: a loop of the form `ln <= End` never terminates when End
+			// is the maximum int, and End is caller-supplied.
+			for ln := r.Start; ; ln++ {
+				lines[ln] = true
+				if ln == r.End {
+					break
+				}
+			}
+		}
+	}
+	return out
+}
+
+// derefDuplication keeps the persisted Analysis shape: a missing walk is stored as the zero report, as it
+// always was; only the measurement path distinguishes the two.
+func derefDuplication(d *measure.DuplicationReport) measure.DuplicationReport {
+	if d == nil {
+		return measure.DuplicationReport{}
+	}
+	return *d
+}
+
+// buildMeasures is the gate snapshot. A metric present in the snapshot was measured; one that could not
+// be measured is left absent, never written as 0 — coverage has always followed that rule, and the two
+// new-code measurements follow it too, so a gate condition on them fails closed with "no data" rather
+// than passing on a value nobody computed.
+func buildMeasures(all, new Counts, overallRating rating.Report, duplication *measure.DuplicationReport, coverage *measure.CoverageReport, hotspots, newHotspots hotspot.Summary, changed map[string]map[int]bool) qualitygate.Snapshot {
 	metrics := qualitygate.Snapshot{
 		qualitygate.MetricNewIssues:       float64(new.Total),
 		qualitygate.MetricNewCritical:     float64(new.BySeverity[string(shared.SeverityCritical)]),
 		qualitygate.MetricNewHigh:         float64(new.BySeverity[string(shared.SeverityHigh)]),
 		qualitygate.MetricNewMedium:       float64(new.BySeverity[string(shared.SeverityMedium)]),
 		qualitygate.MetricTotalCritical:   float64(all.BySeverity[string(shared.SeverityCritical)]),
-		qualitygate.MetricDuplicationPct:  duplication.Density(),
+		qualitygate.MetricDuplicationPct:  derefDuplication(duplication).Density(),
 		qualitygate.MetricSecurityRating:  float64(gradeNumber(overallRating.Security)),
 		qualitygate.MetricReliability:     float64(gradeNumber(overallRating.Reliability)),
 		qualitygate.MetricMaintainability: float64(gradeNumber(overallRating.Maintainability)),
 	}
 	if coverage != nil {
 		metrics[qualitygate.MetricCoveragePct] = coverage.Percent()
+		if pct, ok := coverage.Lines.NewCodePercent(changed); ok {
+			metrics[qualitygate.MetricNewCoverage] = pct
+		}
+	}
+	if pct, ok := measure.NewCodeDuplicationPercent(duplication, changed); ok {
+		metrics[qualitygate.MetricNewDuplication] = pct
 	}
 	metrics[qualitygate.MetricSecurityHotspotsReviewed] = hotspots.ReviewedPct
 	metrics[qualitygate.MetricNewSecurityHotspotsReviewed] = newHotspots.ReviewedPct
