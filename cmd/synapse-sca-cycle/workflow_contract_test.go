@@ -200,6 +200,94 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	assertNoWorkflowKey(t, root, "continue-on-error")
 }
 
+func TestEngineAccuracyWorkflowCatalogIdentityPreflightScopeContract(t *testing.T) {
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve workflow path")
+	}
+	workflowPath := filepath.Join(filepath.Dir(source), "..", "..", ".github", "workflows", "engine-accuracy.yml")
+	body, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(body, &document); err != nil {
+		t.Fatalf("parse workflow YAML: %v", err)
+	}
+	root := yamlDocumentMapping(t, &document)
+	trusted := yamlMappingValue(t, yamlMappingValue(t, root, "jobs"), "trusted-full")
+	preflight := workflowStep(t, workflowSteps(t, trusted), "Preflight exact trusted runner contract")
+	preflightRun := yamlScalar(t, yamlMappingValue(t, preflight, "run"))
+
+	for _, contract := range []struct {
+		name     string
+		required []string
+	}{
+		{
+			name: "non-PURL components retain canonical bytes outside catalog comparison",
+			required: []string{
+				"jq -S -c . \"$sbom\" > \"$canonical\"",
+				"cmp -s \"$sbom\" \"$canonical\"",
+				"elif ((.purl? | type) == \"string\" and (.purl | trim_space | length > 0)) then",
+				"else\n                  empty",
+			},
+		},
+		{
+			name: "non-target PURL scopes are excluded from catalog identity comparison",
+			required: []string{
+				"benchmark_scopes=\"$(jq -ce --argjson components \"$expected_components\"",
+				"[$components[] | .purl | purl_scope] | unique",
+				"--argjson benchmark_scopes \"$benchmark_scopes\"",
+				"($benchmark_scopes | index($scope) != null)",
+			},
+		},
+		{
+			name: "extra benchmarkable PURL version components remain visible to equality",
+			required: []string{
+				"{purl, version}",
+				"] | sort_by(.purl, .version)",
+				"test \"$actual_components\" = \"$expected_components\"",
+			},
+		},
+		{
+			name: "missing benchmarkable PURL version components fail equality",
+			required: []string{
+				"expected_components=\"$(jq -ce --arg target \"$target_id\"",
+				"[.targets[] | select(.id == $target) | .components[] |",
+				"test \"$actual_components\" = \"$expected_components\"",
+			},
+		},
+		{
+			name: "malformed PURL version field types fail before comparison",
+			required: []string{
+				"SBOM component purl and version must be strings when present",
+				"catalog component \\($field) must be a nonempty string",
+			},
+		},
+	} {
+		t.Run(contract.name, func(t *testing.T) {
+			for _, required := range contract.required {
+				if !strings.Contains(preflightRun, required) {
+					t.Errorf("catalog identity preflight is missing %q", required)
+				}
+			}
+		})
+	}
+	for _, targetID := range []string{"debian-12-13-slim-amd64", "sles-15-6-bci-base-amd64"} {
+		if strings.Contains(preflightRun, targetID) {
+			t.Errorf("catalog identity preflight hardcodes target %q", targetID)
+		}
+	}
+	actualStart := strings.Index(preflightRun, "actual_components=\"$(jq")
+	actualEnd := strings.Index(preflightRun, "test \"$actual_components\" = \"$expected_components\"")
+	if actualStart < 0 || actualEnd <= actualStart {
+		t.Fatal("locate actual catalog identity comparison")
+	}
+	if strings.Contains(preflightRun[actualStart:actualEnd], "unique") {
+		t.Error("catalog identity comparison must preserve duplicate benchmarkable components")
+	}
+}
+
 func TestSCAAccuracyPublicationMakefileInputsAreDeclared(t *testing.T) {
 	_, source, _, ok := runtime.Caller(0)
 	if !ok {

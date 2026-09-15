@@ -221,8 +221,65 @@ jobs:
             jq -e '.bomFormat == "CycloneDX" and (.specVersion | type == "string") and (.components | type == "array")' "$sbom" >/dev/null
             jq -S -c . "$sbom" > "$canonical"
             cmp -s "$sbom" "$canonical"
-            expected_components="$(jq -c --arg target "$target_id" '[.targets[] | select(.id == $target) | .components[] | {purl, version}] | sort_by(.purl, .version)' "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/catalog.json")"
-            actual_components="$(jq -c '[.components[] | {purl, version}] | sort_by(.purl, .version)' "$sbom")"
+            expected_components="$(jq -ce --arg target "$target_id" '
+              def trim_space: gsub("^[[:space:]]+|[[:space:]]+$"; "");
+              def required_string($field):
+                if type == "string" and (trim_space | length > 0) then .
+                else error("catalog component \($field) must be a nonempty string")
+                end;
+              [.targets[] | select(.id == $target) | .components[] |
+                {purl: (.purl | required_string("purl")), version: (.version | required_string("version"))}
+              ] | sort_by(.purl, .version)
+            ' "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/catalog.json")"
+            benchmark_scopes="$(jq -ce --argjson components "$expected_components" '
+              def trim_space: gsub("^[[:space:]]+|[[:space:]]+$"; "");
+              def purl_scope:
+                trim_space as $purl |
+                if ($purl | startswith("pkg:")) then . else error("component purl must begin with pkg") end |
+                ($purl[4:] | sub("[?#].*$"; "")) as $path |
+                ($path | capture("^(?<ecosystem>[a-z0-9.-]+)/(?<package>.+)$")) as $parts |
+                ($parts.package | rindex("@")) as $version_delimiter |
+                ($parts.package | if $version_delimiter == null then . else .[0:$version_delimiter] end) as $package |
+                if ($package | length == 0) or ($package | split("/") | any(. | trim_space | length == 0)) then
+                  error("component purl package is invalid")
+                else
+                  [$parts.ecosystem, $package]
+                end;
+              [$components[] | .purl | purl_scope] | unique
+            ')"
+            actual_components="$(jq -ce --argjson benchmark_scopes "$benchmark_scopes" '
+              def trim_space: gsub("^[[:space:]]+|[[:space:]]+$"; "");
+              def purl_scope:
+                trim_space as $purl |
+                if ($purl | startswith("pkg:")) then . else error("component purl must begin with pkg") end |
+                ($purl[4:] | sub("[?#].*$"; "")) as $path |
+                ($path | capture("^(?<ecosystem>[a-z0-9.-]+)/(?<package>.+)$")) as $parts |
+                ($parts.package | rindex("@")) as $version_delimiter |
+                ($parts.package | if $version_delimiter == null then . else .[0:$version_delimiter] end) as $package |
+                if ($package | length == 0) or ($package | split("/") | any(. | trim_space | length == 0)) then
+                  error("component purl package is invalid")
+                else
+                  [$parts.ecosystem, $package]
+                end;
+              [.components[] |
+                if type != "object" then
+                  error("SBOM component must be an object")
+                elif ((has("purl") and (.purl != null) and (.purl | type != "string")) or
+                  (has("version") and (.version != null) and (.version | type != "string"))) then
+                  error("SBOM component purl and version must be strings when present")
+                elif ((.purl? | type) == "string" and (.purl | trim_space | length > 0)) then
+                  (.purl | purl_scope) as $scope |
+                  if ((.version? | type) == "string" and (.version | trim_space | length > 0) and
+                    ($benchmark_scopes | index($scope) != null)) then
+                    {purl, version}
+                  else
+                    empty
+                  end
+                else
+                            empty
+                end
+              ] | sort_by(.purl, .version)
+            ' "$sbom")"
             test "$actual_components" = "$expected_components"
             test "sha256:$(sha256sum "$sbom" | cut -d' ' -f1)" = "$expected_sbom_digest"
           done < <(jq -rc '.targets[]' "$SCA_ACCURACY_TRUSTED_INPUT_ROOT/catalog.json")
