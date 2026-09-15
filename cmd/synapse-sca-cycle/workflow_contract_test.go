@@ -20,6 +20,13 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	workflowText := string(body)
+	for _, forbidden := range []string{"base_sha", "evidence_only", "full_required", "internal/usecase/scabench/testdata/publication/publication-manifest.json"} {
+		if strings.Contains(workflowText, forbidden) {
+			t.Errorf("workflow retains checked-in evidence routing marker %q", forbidden)
+		}
+	}
+
 	var document yaml.Node
 	if err := yaml.Unmarshal(body, &document); err != nil {
 		t.Fatalf("parse workflow YAML: %v", err)
@@ -57,7 +64,7 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	if got := yamlScalar(t, yamlMappingValue(t, yamlMappingValue(t, changes, "outputs"), "trusted_requested")); got != "${{ steps.classify.outputs.trusted_requested }}" {
 		t.Errorf("trusted-request output = %q", got)
 	}
-	classify := workflowStep(t, workflowSteps(t, changes), "Classify changed surface")
+	classify := workflowStep(t, workflowSteps(t, changes), "Classify trusted execution request")
 	classifyEnvironment := yamlMappingValue(t, classify, "env")
 	for key, want := range map[string]string{
 		"EVENT_NAME":      "${{ github.event_name }}",
@@ -75,6 +82,14 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 			t.Errorf("trusted-request classifier is missing %q", required)
 		}
 	}
+	offline := yamlMappingValue(t, jobs, "offline-verify")
+	if condition := yamlScalar(t, yamlMappingValue(t, offline, "if")); condition != "${{ github.event_name == 'pull_request' }}" {
+		t.Errorf("offline verification condition = %q, want pull-request only", condition)
+	}
+	if run := yamlScalar(t, yamlMappingValue(t, workflowStep(t, workflowSteps(t, offline), "Verify benchmark contract without scanners"), "run")); run != "make sca-accuracy-verify" {
+		t.Errorf("offline verification command = %q", run)
+	}
+
 	trusted := yamlMappingValue(t, jobs, "trusted-full")
 	if condition := yamlScalar(t, yamlMappingValue(t, trusted, "if")); condition != "${{ needs.changes.outputs.trusted_requested == 'true' }}" {
 		t.Errorf("trusted cycle condition = %q, want exact classified request gate", condition)
@@ -117,9 +132,14 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 
 	freeze := workflowStep(t, steps, "Generate scanner-free source and native evidence, then freeze the oracle chain")
 	freezeRun := yamlScalar(t, yamlMappingValue(t, freeze, "run"))
-	for _, required := range []string{"$input/sboms/$target_id.cdx.json", "cp \"$frozen_sbom\" \"$sbom\"", "cmp -s \"$frozen_sbom\" \"$sbom\"", "oracle-candidate", "oracle-cross-check", "oracle-adjudicate", "oracle-freeze", "sca-accuracy-prepare", "source_evidence_preparing", "capture_pending"} {
+	for _, required := range []string{"$input/sboms/$target_id.cdx.json", "cp \"$frozen_sbom\" \"$sbom\"", "cmp -s \"$frozen_sbom\" \"$sbom\"", "sca-accuracy-source-native-evidence", "oracle-candidate", "oracle-cross-check", "oracle-adjudicate", "oracle-freeze", "sca-accuracy-prepare", "source_evidence_preparing", "capture_pending"} {
 		if !strings.Contains(freezeRun, required) {
 			t.Errorf("frozen-source step is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"target_ref=", "target_digest=", "RepoDigests", "docker image inspect"} {
+		if strings.Contains(freezeRun, forbidden) {
+			t.Errorf("frozen-source step retains tag-sensitive OCI preflight %q", forbidden)
 		}
 	}
 	if strings.Contains(freezeRun, "syft ") {
@@ -162,6 +182,9 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	if got := yamlScalar(t, yamlMappingValue(t, auditWith, "if-no-files-found")); got != "error" {
 		t.Errorf("audit artifact file policy = %q, want error", got)
 	}
+	if got := yamlScalar(t, yamlMappingValue(t, auditWith, "retention-days")); got != "3" {
+		t.Errorf("audit artifact retention = %q, want 3 days", got)
+	}
 	if strings.Contains(yamlScalar(t, yamlMappingValue(t, auditWith, "path")), "SCA_ACCURACY_RAW_RETENTION_ROOT") {
 		t.Error("audit artifact upload must not expose protected raw retention")
 	}
@@ -184,6 +207,15 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	if got := yamlScalar(t, yamlMappingValue(t, candidateWith, "name")); !strings.Contains(got, "${{ github.run_id }}-${{ github.run_attempt }}") {
 		t.Errorf("candidate artifact name lacks run identity: %q", got)
 	}
+	if got := yamlScalar(t, yamlMappingValue(t, candidateWith, "if-no-files-found")); got != "error" {
+		t.Errorf("candidate artifact file policy = %q, want error", got)
+	}
+	if got := yamlScalar(t, yamlMappingValue(t, candidateWith, "retention-days")); got != "90" {
+		t.Errorf("candidate artifact retention = %q, want 90 days", got)
+	}
+	if strings.Contains(yamlScalar(t, yamlMappingValue(t, candidateWith, "path")), "SCA_ACCURACY_RAW_RETENTION_ROOT") {
+		t.Error("candidate artifact upload must not expose protected raw retention")
+	}
 
 	aggregate := yamlMappingValue(t, jobs, "aggregate")
 	aggregateStep := workflowStep(t, workflowSteps(t, aggregate), "Require every applicable outcome and full artifact production")
@@ -196,6 +228,9 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 		if !strings.Contains(aggregateRun, required) {
 			t.Errorf("aggregate does not record explicit unrequested trusted evidence for %q", required)
 		}
+	}
+	if strings.Contains(aggregateRun, "evidence_only") {
+		t.Error("aggregate retains evidence-only routing")
 	}
 	assertNoWorkflowKey(t, root, "continue-on-error")
 }
