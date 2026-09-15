@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -128,6 +129,7 @@ func (s *SLAStore) UpsertAssessment(ctx context.Context, assessment sla.Assessme
 	if err := assessment.Validate(); err != nil {
 		return sla.AssessmentUpsertResult{}, err
 	}
+	assessment = normalizeSLAAssessmentTimestamps(assessment)
 	result := sla.AssessmentUpsertResult{Assessment: assessment}
 	err = WithTenant(ctx, s.pool, tenantID.String(), func(tx pgx.Tx) error {
 		// Serialize every candidate for one finding, including its first assessment. A row lock
@@ -448,6 +450,22 @@ func scanSLACurrent(row interface{ Scan(...any) error }, item *sla.Current) erro
 		return fmt.Errorf("validate stored sla current: %w", err)
 	}
 	return nil
+}
+
+// normalizeSLAAssessmentTimestamps matches PostgreSQL's microsecond timestamp
+// precision before JSON and timestamp columns are persisted. This keeps the
+// redundant Result.ComputedAt and AssessedAt bindings byte-for-byte coherent.
+func normalizeSLAAssessmentTimestamps(item sla.Assessment) sla.Assessment {
+	normalize := func(value time.Time) time.Time {
+		return value.UTC().Truncate(time.Microsecond)
+	}
+	item.DeadlineAnchorAt = normalize(item.DeadlineAnchorAt)
+	item.AssessedAt = normalize(item.AssessedAt)
+	item.CreatedAt = normalize(item.CreatedAt)
+	item.Result.ComputedAt = normalize(item.Result.ComputedAt)
+	item.Result.MitigateBy = normalize(item.Result.MitigateBy)
+	item.Result.RemediateBy = normalize(item.Result.RemediateBy)
+	return item
 }
 
 func insertSLAAssessment(ctx context.Context, tx pgx.Tx, item sla.Assessment) error {

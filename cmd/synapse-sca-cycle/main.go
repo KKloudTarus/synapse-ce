@@ -873,9 +873,6 @@ func decodeFinalOracleFreeze(path string) (bench.FinalOracleFreeze, error) {
 	return decode(path, bench.DecodeFinalOracleFreeze)
 }
 
-func decodeNativeComparison(path string) (bench.NativeComparisonRecord, error) {
-	return decode(path, bench.DecodeNativeComparisonRecord)
-}
 func decodeSourceCaseEvidence(path string) (bench.SourceCaseEvidenceSet, error) {
 	return decode(path, bench.DecodeSourceCaseEvidence)
 }
@@ -887,10 +884,6 @@ func decodeSourceEvidencePlan(path string) (bench.SourceEvidencePlan, error) {
 func decodeNativeEvidence(path string) (bench.NativeEvidenceSet, error) {
 	return decode(path, bench.DecodeNativeEvidenceSet)
 }
-func decodePublication(path string) (bench.PublicationManifest, error) {
-	return decode(path, bench.DecodePublicationManifest)
-}
-
 func decodePublicationControl(path string) (bench.PublicationControl, error) {
 	return decode(path, bench.DecodePublicationControl)
 }

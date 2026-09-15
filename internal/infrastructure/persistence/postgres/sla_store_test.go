@@ -36,6 +36,39 @@ func (audit *slaDeleteAudit) Record(_ context.Context, entry ports.AuditEntry) e
 // TestPostgresSLAStore exercises the real migration, JSON codecs, nullable provenance, RLS-scoped
 // adapter calls, immutable history, and the no-human-clobber refresh invariant. It deliberately uses
 // an assessment without source/previous IDs first so nullable column scanning is covered.
+func TestNormalizeSLAAssessmentTimestamps(t *testing.T) {
+	now := time.Date(2026, 9, 15, 14, 45, 30, 123456789, time.UTC)
+	assessment, err := sla.Evaluate(sla.AssessmentInput{
+		TenantID: "tenant", EngagementID: "engagement", FindingID: "finding",
+		Risk: sla.Inputs{
+			Severity: shared.SeverityHigh, CVSSScore: 8.1, EPSS: 0.2,
+			Feasibility: sla.FeasibilityPatchAvailable,
+		},
+	}, sla.DefaultConfig(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized := normalizeSLAAssessmentTimestamps(assessment)
+	for name, value := range map[string]time.Time{
+		"deadline anchor": normalized.DeadlineAnchorAt,
+		"assessed":        normalized.AssessedAt,
+		"created":         normalized.CreatedAt,
+		"computed":        normalized.Result.ComputedAt,
+		"mitigate by":     normalized.Result.MitigateBy,
+		"remediate by":    normalized.Result.RemediateBy,
+	} {
+		if value.Nanosecond()%1_000 != 0 {
+			t.Fatalf("%s timestamp retained sub-microsecond precision: %s", name, value)
+		}
+	}
+	if !normalized.AssessedAt.Equal(normalized.Result.ComputedAt) {
+		t.Fatalf("assessed and computed timestamps diverged: %s != %s", normalized.AssessedAt, normalized.Result.ComputedAt)
+	}
+	if err := normalized.Validate(); err != nil {
+		t.Fatalf("normalized assessment is invalid: %v", err)
+	}
+}
+
 func TestPostgresSLAStore(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {

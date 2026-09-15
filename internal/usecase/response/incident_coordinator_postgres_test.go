@@ -61,7 +61,7 @@ func TestIncidentCoordinatorPreparesPostgresActionBeforeRequestProjection(t *tes
 		At:           clock.Now(),
 		Actor:        "correlator",
 		AssetID:      "host-1",
-		EngagementID: "eng-1",
+		EngagementID: engagementID,
 		Severity:     shared.SeverityHigh,
 	}}); err != nil {
 		t.Fatalf("seed incident: %v", err)

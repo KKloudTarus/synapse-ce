@@ -41,11 +41,25 @@ The reviewed roots live in `internal/usecase/scabench/corpus/`: the catalog, Ora
 
 `cmd/synapse-sca-inputs` closes the dependency graph before capture instead of asking an operator to copy hashes, counts, or paths between JSON files. Its stages:
 
-1. hash the repository-backed source assets and bind the generated source-evidence plan;
-2. derive one capture manifest per target/engine cell, including the zero-dispatch capability statement and its physical digest;
-3. bind the unique sanitized GitHub review capture to the adjudication, final Oracle, reviewer, and exact reviewed commit;
-4. derive the cycle plan, repetitions, cells, dispatch count, unsupported count, and retention controls from the reviewed roots; and
-5. later derive publication indexes, cleanup receipt, candidate inventory, delivery receipt, and PR-summary Markdown from files that actually exist.
+1. hash the built benchmark binary and atomically rebind its exact catalog pin, the catalog digest, and only the matching engine identities in the strict ratchet;
+2. hash the repository-backed source assets and bind the generated source-evidence plan;
+3. derive one capture manifest per target/engine cell, including the zero-dispatch capability statement and its physical digest;
+4. bind the unique sanitized GitHub review capture to the adjudication, final Oracle, reviewer, and exact reviewed commit;
+5. derive the cycle plan, repetitions, cells, dispatch count, unsupported count, and retention controls from the reviewed roots; and
+6. later derive publication indexes, cleanup receipt, candidate inventory, delivery receipt, and PR-summary Markdown from files that actually exist.
+
+A final implementation build refreshes binary-bound reviewed roots without hand-editing a digest or chasing its dependent catalog binding. The command writes a new catalog and ratchet as one fail-fast output set; it never overwrites the reviewed inputs:
+
+```sh
+make sca-accuracy-binary-pin \
+  SCA_ACCURACY_CATALOG=internal/usecase/scabench/corpus/catalog.json \
+  SCA_ACCURACY_RATCHET=internal/usecase/scabench/corpus/ratchet.json \
+  SCA_ACCURACY_BINARY_REFERENCE=binary:synapse-sca-bench:reproducible-v1 \
+  SCA_ACCURACY_BINARY_PATH=/trusted/bin/synapse-sca-bench \
+  SCA_ACCURACY_ENGINE=owned \
+  SCA_ACCURACY_CATALOG_OUTPUT=/generated/reviewed-roots/catalog.json \
+  SCA_ACCURACY_RATCHET_OUTPUT=/generated/reviewed-roots/ratchet.json
+```
 
 After materialization, the low-level freeze gate remains available:
 

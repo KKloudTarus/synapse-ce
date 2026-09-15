@@ -350,7 +350,7 @@ func falsifierRawMutation(entry bench.FalsifierEntry) ([]byte, []byte, []byte, [
 	switch entry.Engine {
 	case bench.EngineGrype:
 		base := `{"descriptor":{"name":"grype","version":"1.2.3","timestamp":"one"},"matches":[]}`
-		mutated := base
+		var mutated string
 		switch entry.Mutation {
 		case "descriptor-timestamp-change":
 			mutated = `{"descriptor":{"name":"grype","version":"1.2.3","timestamp":"two"},"matches":[]}`
@@ -372,7 +372,7 @@ func falsifierRawMutation(entry bench.FalsifierEntry) ([]byte, []byte, []byte, [
 		return []byte(base), nil, []byte(mutated), nil, nil
 	case bench.EngineTrivy:
 		base := trivyRaw("one", "one", "one", "2.0.0", 1, 1)
-		mutated := base
+		var mutated string
 		switch entry.Mutation {
 		case "added-field":
 			mutated = strings.Replace(base, `"ReportID":"one"`, `"ReportID":"one","unexpected":true`, 1)
@@ -410,7 +410,7 @@ func falsifierRawMutation(entry bench.FalsifierEntry) ([]byte, []byte, []byte, [
 		return []byte(base), nil, []byte(mutated), nil, nil
 	case bench.EngineOSVScanner:
 		baseStderr := osvRaw("Hashes", `["one"]`, "End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 1ms elapsed, 2ms wall time")
-		mutated := baseStderr
+		var mutated string
 		switch entry.Mutation {
 		case "allowed-pointer-change":
 			mutated = osvRaw("Hashes", `["two"]`, "End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 1ms elapsed, 2ms wall time")

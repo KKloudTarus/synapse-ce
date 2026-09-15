@@ -469,11 +469,11 @@ func storedReferenceSource(ins []instruction, storeIdx int, cp parsedCP) (class 
 	if storeIdx <= 0 || storeIdx >= len(ins) {
 		return "", -1, false
 	}
-	j := storeIdx - 1
-	cur := ins[j]
-	if j > 0 && cur.op == 0xc0 {
-		j--
-		cur = ins[j]
+	//nolint:gosec // storeIdx was checked against both slice bounds above.
+	cur := ins[storeIdx-1]
+	if storeIdx > 1 && cur.op == 0xc0 {
+		//nolint:gosec // storeIdx > 1 guarantees the preceding instruction exists.
+		cur = ins[storeIdx-2]
 	}
 	if local, ok := aloadLocal(cur); ok {
 		return "", local, true
@@ -495,11 +495,11 @@ func precedingReceiverLocal(ins []instruction, callIdx int) (int, bool) {
 	if callIdx <= 0 || callIdx >= len(ins) {
 		return 0, false
 	}
-	j := callIdx - 1
-	cur := ins[j]
-	if j > 0 && cur.op == 0xc0 {
-		j--
-		cur = ins[j]
+	//nolint:gosec // callIdx was checked against both slice bounds above.
+	cur := ins[callIdx-1]
+	if callIdx > 1 && cur.op == 0xc0 {
+		//nolint:gosec // callIdx > 1 guarantees the preceding instruction exists.
+		cur = ins[callIdx-2]
 	}
 	return aloadLocal(cur)
 }

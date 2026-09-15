@@ -961,20 +961,6 @@ func (document ovalDocument) nodeMatchesPackage(node *ovalNode, pkg bench.Source
 	}
 }
 
-func criterionTestRefs(node *ovalNode) []string {
-	if node == nil {
-		return nil
-	}
-	refs := make([]string, 0)
-	if node.name == "criterion" && node.attrs["test_ref"] != "" {
-		refs = append(refs, node.attrs["test_ref"])
-	}
-	for _, child := range node.children {
-		refs = append(refs, criterionTestRefs(child)...)
-	}
-	return refs
-}
-
 type ovalEvaluator struct {
 	ctx             context.Context
 	document        ovalDocument

@@ -40,10 +40,12 @@ func prepareDelegatedCgroupAt(root string, membership []byte, pid int) (string, 
 		return "", err
 	}
 	unitRoot := membershipRoot
+	moveService := true
 	if filepath.Base(membershipRoot) == cgroupManagerName {
 		unitRoot = filepath.Dir(membershipRoot)
+		moveService = false
 	}
-	return prepareDelegatedCgroupUnitRoot(unitRoot, pid)
+	return prepareDelegatedCgroupUnitRoot(unitRoot, pid, moveService)
 }
 
 // prepareDelegatedCgroupRoot uses a systemd service root captured before this
@@ -55,10 +57,10 @@ func prepareDelegatedCgroupRoot(root string, pid int) (string, error) {
 	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) || !filepath.IsAbs(unitRoot) || filepath.Base(unitRoot) == cgroupManagerName {
 		return "", fmt.Errorf("configured delegated cgroup root is outside the service subtree")
 	}
-	return prepareDelegatedCgroupUnitRoot(unitRoot, pid)
+	return prepareDelegatedCgroupUnitRoot(unitRoot, pid, true)
 }
 
-func prepareDelegatedCgroupUnitRoot(unitRoot string, pid int) (string, error) {
+func prepareDelegatedCgroupUnitRoot(unitRoot string, pid int, moveService bool) (string, error) {
 	controllers, err := os.ReadFile(filepath.Join(unitRoot, "cgroup.controllers"))
 	if err != nil {
 		return "", fmt.Errorf("read delegated controllers: %w", err)
@@ -76,8 +78,10 @@ func prepareDelegatedCgroupUnitRoot(unitRoot string, pid int) (string, error) {
 	if err := os.Mkdir(manager, 0o755); err != nil && !os.IsExist(err) {
 		return "", fmt.Errorf("create cgroup manager child: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(manager, "cgroup.procs"), []byte(strconv.Itoa(pid)), 0o644); err != nil {
-		return "", fmt.Errorf("move service into cgroup manager child: %w", err)
+	if moveService {
+		if err := os.WriteFile(filepath.Join(manager, "cgroup.procs"), []byte(strconv.Itoa(pid)), 0o644); err != nil {
+			return "", fmt.Errorf("move service into cgroup manager child: %w", err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(unitRoot, "cgroup.subtree_control"), []byte("+memory +pids"), 0o644); err != nil {
 		return "", fmt.Errorf("enable delegated cgroup controllers: %w", err)

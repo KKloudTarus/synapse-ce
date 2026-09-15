@@ -547,7 +547,7 @@ func dockerItems(binary string, arguments ...string) ([]string, error) {
 	lines := strings.Fields(string(output))
 	for _, line := range lines {
 		if !portableDockerIdentifier(line) {
-			return nil, fmt.Errorf("Docker returned an unsafe resource identifier")
+			return nil, fmt.Errorf("docker returned an unsafe resource identifier")
 		}
 	}
 	return lines, nil
@@ -563,9 +563,9 @@ func runDocker(binary string, arguments ...string) ([]byte, error) {
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("Docker %q timed out: %w", strings.Join(arguments, " "), ctx.Err())
+			return nil, fmt.Errorf("docker %q timed out: %w", strings.Join(arguments, " "), ctx.Err())
 		}
-		return nil, fmt.Errorf("Docker %q failed: %w: %s", strings.Join(arguments, " "), err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("docker %q failed: %w: %s", strings.Join(arguments, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
 }

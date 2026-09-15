@@ -15,8 +15,12 @@ type options struct {
 	sourceFreezeOutput       string
 	sourcePlanOutput         string
 	catalog                  string
+	catalogOutput            string
 	oracle                   string
 	ratchet                  string
+	binaryReference          string
+	binaryPath               string
+	engine                   string
 	manifestTemplateDir      string
 	manifestOutputDir        string
 	capabilityOutputDir      string
@@ -70,8 +74,12 @@ func run(arguments []string) error {
 	flags.StringVar(&option.sourceFreezeOutput, "source-freeze-output", "", "generated source freeze")
 	flags.StringVar(&option.sourcePlanOutput, "source-plan-output", "", "generated source evidence plan")
 	flags.StringVar(&option.catalog, "catalog", "", "benchmark catalog")
+	flags.StringVar(&option.catalogOutput, "catalog-output", "", "generated benchmark catalog")
 	flags.StringVar(&option.oracle, "oracle", "", "benchmark oracle")
 	flags.StringVar(&option.ratchet, "ratchet", "", "strict ratchet")
+	flags.StringVar(&option.binaryReference, "binary-reference", "", "catalog reference for the benchmark binary")
+	flags.StringVar(&option.binaryPath, "binary-path", "", "built benchmark binary")
+	flags.StringVar(&option.engine, "engine", "", "engine whose ratchet identities use the binary")
 	flags.StringVar(&option.manifestTemplateDir, "manifest-template-dir", "", "capture manifest template directory")
 	flags.StringVar(&option.manifestOutputDir, "manifest-output-dir", "", "generated manifest directory")
 	flags.StringVar(&option.capabilityOutputDir, "capability-output-dir", "", "generated capability statement directory")
@@ -115,6 +123,8 @@ func run(arguments []string) error {
 	switch option.mode {
 	case "source-freeze":
 		return materializeSourceFreeze(option)
+	case "binary-pin":
+		return materializeBinaryPin(option)
 	case "manifest-set":
 		return materializeManifestSet(option)
 	case "ratchet":

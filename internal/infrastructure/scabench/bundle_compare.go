@@ -433,7 +433,7 @@ func replaceOnlyTrivyVolatileValues(value any) ([]rawJSONChange, error) {
 	}
 	results, ok := root["Results"].([]any)
 	if !ok {
-		return nil, fmt.Errorf("Results is missing")
+		return nil, fmt.Errorf("top-level Results is missing")
 	}
 	for resultIndex, resultValue := range results {
 		result, ok := resultValue.(map[string]any)
@@ -442,7 +442,7 @@ func replaceOnlyTrivyVolatileValues(value any) ([]rawJSONChange, error) {
 		}
 		vulnerabilities, ok := result["Vulnerabilities"].([]any)
 		if !ok {
-			return nil, fmt.Errorf("Vulnerabilities is missing")
+			return nil, fmt.Errorf("result Vulnerabilities is missing")
 		}
 		for vulnerabilityIndex, vulnerabilityValue := range vulnerabilities {
 			vulnerability, ok := vulnerabilityValue.(map[string]any)

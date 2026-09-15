@@ -81,6 +81,108 @@ func materializeSourceFreeze(option options) error {
 	return nil
 }
 
+func materializeBinaryPin(option options) error {
+	if err := requirePaths(
+		struct{ name, value string }{"catalog", option.catalog},
+		struct{ name, value string }{"ratchet", option.ratchet},
+		struct{ name, value string }{"binary reference", option.binaryReference},
+		struct{ name, value string }{"binary path", option.binaryPath},
+		struct{ name, value string }{"engine", option.engine},
+		struct{ name, value string }{"catalog output", option.catalogOutput},
+		struct{ name, value string }{"ratchet output", option.ratchetOutput},
+	); err != nil {
+		return err
+	}
+	if filepath.Clean(option.catalogOutput) == filepath.Clean(option.ratchetOutput) {
+		return fmt.Errorf("catalog and ratchet outputs must be distinct")
+	}
+
+	engine := bench.Engine(strings.TrimSpace(option.engine))
+	validEngine := false
+	for _, candidate := range bench.Engines() {
+		if candidate == engine {
+			validEngine = true
+			break
+		}
+	}
+	if !validEngine {
+		return fmt.Errorf("unsupported engine %q", option.engine)
+	}
+
+	catalog, err := decodeCatalog(option.catalog)
+	if err != nil {
+		return err
+	}
+	ratchet, err := decodeRatchet(option.ratchet)
+	if err != nil {
+		return err
+	}
+	oldCatalogDigest, err := bench.DigestCatalog(catalog)
+	if err != nil {
+		return err
+	}
+	if ratchet.CatalogRevision != catalog.Revision || ratchet.CatalogDigest != oldCatalogDigest {
+		return fmt.Errorf("ratchet does not bind the supplied catalog")
+	}
+
+	reference := strings.TrimSpace(option.binaryReference)
+	pinIndex := -1
+	for index := range catalog.Pins {
+		if catalog.Pins[index].Reference != reference {
+			continue
+		}
+		if pinIndex >= 0 {
+			return fmt.Errorf("catalog contains duplicate binary reference %q", reference)
+		}
+		pinIndex = index
+	}
+	if pinIndex < 0 {
+		return fmt.Errorf("catalog omits binary reference %q", reference)
+	}
+	oldBinaryDigest := catalog.Pins[pinIndex].Digest
+	binary, err := contentReference(option.binaryPath, "benchmark-binary")
+	if err != nil {
+		return fmt.Errorf("hash benchmark binary: %w", err)
+	}
+	catalog.Pins[pinIndex].Digest = binary.Digest
+	if err := catalog.Validate(); err != nil {
+		return err
+	}
+	catalogDigest, err := bench.DigestCatalog(catalog)
+	if err != nil {
+		return err
+	}
+
+	updatedFloors := 0
+	for index := range ratchet.Floors {
+		floor := &ratchet.Floors[index]
+		if floor.Expected.Engine != engine {
+			continue
+		}
+		if floor.Expected.EngineBinaryDigest != oldBinaryDigest {
+			return fmt.Errorf("ratchet floor for %s and %s does not bind catalog binary %q", floor.Expected.TargetID, engine, reference)
+		}
+		floor.Expected.EngineBinaryDigest = binary.Digest
+		updatedFloors++
+	}
+	if updatedFloors == 0 {
+		return fmt.Errorf("ratchet has no floors for engine %q", engine)
+	}
+	ratchet.CatalogDigest = catalogDigest
+	if err := ratchet.Validate(); err != nil {
+		return err
+	}
+	ratchetDigest, err := bench.DigestRatchet(ratchet)
+	if err != nil {
+		return err
+	}
+	if err := writeJSONSet(map[string]any{option.catalogOutput: catalog, option.ratchetOutput: ratchet}); err != nil {
+		return err
+	}
+	fmt.Printf("binary=%s catalog=%s ratchet=%s floors=%d reference=%s engine=%s\n", binary.Digest, catalogDigest, ratchetDigest, updatedFloors, reference, engine)
+	return nil
+}
+
 func materializeManifestSet(option options) error {
 	if err := requirePaths(
 		struct{ name, value string }{"repository root", option.repositoryRoot},

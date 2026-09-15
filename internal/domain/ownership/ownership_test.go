@@ -199,7 +199,7 @@ func TestPolicyValidationAndPrecedence(t *testing.T) {
 	if err := p.Validate(); err == nil {
 		t.Fatal("duplicate owner mapping accepted")
 	}
-	p, s, i = fixture()
+	p, s, _ = fixture()
 	s.Hash = "tampered"
 	if _, err := NewResolver(p, &s); err == nil {
 		t.Fatal("tampered snapshot accepted")
