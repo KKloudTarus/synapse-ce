@@ -200,6 +200,33 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	assertNoWorkflowKey(t, root, "continue-on-error")
 }
 
+func TestSCAAccuracyPublicationMakefileInputsAreDeclared(t *testing.T) {
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve Makefile path")
+	}
+	makefilePath := filepath.Join(filepath.Dir(source), "..", "..", "Makefile")
+	body, err := os.ReadFile(makefilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range []string{
+		"SCA_ACCURACY_PUBLICATION_CONTROL ?=",
+		"SCA_ACCURACY_PUBLICATION_OUTPUT ?=",
+	} {
+		found := false
+		for _, line := range strings.Split(string(body), "\n") {
+			if strings.TrimSpace(line) == declaration {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Makefile declaration %q is missing", declaration)
+		}
+	}
+}
+
 func yamlDocumentMapping(t *testing.T, document *yaml.Node) *yaml.Node {
 	t.Helper()
 	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
