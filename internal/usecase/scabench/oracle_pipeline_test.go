@@ -112,6 +112,32 @@ func TestNativeComparisonTruthRejectsZeroSentinelCollision(t *testing.T) {
 	}
 }
 
+func TestNativeComparisonTruthEvaluatesEVRGreaterThan(t *testing.T) {
+	cases := []struct {
+		name      string
+		relation  string
+		wantTruth Truth
+	}{
+		{name: "after establishes affected", relation: "after", wantTruth: TruthAffected},
+		{name: "before establishes fixed", relation: "before", wantTruth: TruthFixed},
+		{name: "equal establishes fixed", relation: "equal", wantTruth: TruthFixed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			comparison := NativeComparisonRecord{
+				SchemaVersion: NativeComparisonSchemaVersion, ID: "greater-compare", TargetID: "rpm-target", TargetDigest: cycleTestDigest('a'), PackageFamily: "rpm", PackageIdentity: "binary:pkg", CandidateEVR: "0:2.9.11-150600.1.90", FixedEVR: "0:0-0", PredicateKind: NativePredicateEVRGreaterThan, Relation: tc.relation, Method: "target-native-rpm", ExecutionDigest: cycleTestDigest('b'),
+			}
+			truth, err := nativeComparisonTruth([]NativeComparisonRecord{comparison})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if truth != tc.wantTruth {
+				t.Fatalf("native greater-than truth = %q, want %q", truth, tc.wantTruth)
+			}
+		})
+	}
+}
+
 func TestNativeComparisonRecordDecodesLegacyEVRPredicate(t *testing.T) {
 	legacy := NativeComparisonRecord{
 		SchemaVersion: NativeComparisonSchemaVersion, ID: "legacy-compare", TargetID: "target-a", TargetDigest: cycleTestDigest('a'), PackageFamily: "deb", PackageIdentity: "binary:pkg", CandidateEVR: "1", FixedEVR: "2", Relation: "before", Method: "target-native-dpkg", ExecutionDigest: cycleTestDigest('b'),
