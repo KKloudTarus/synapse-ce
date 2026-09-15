@@ -63,18 +63,6 @@ func (s *ComponentInventoryStore) Save(record sbom.ComponentRecord) error {
 	return nil
 }
 
-func (s *ComponentInventoryStore) saveSnapshot(records []sbom.ComponentRecord) error {
-	for _, record := range records {
-		if err := record.Validate(); err != nil {
-			return err
-		}
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.items = append(s.items, records...)
-	return nil
-}
-
 func (s *ComponentInventoryStore) publishSnapshot(records []sbom.ComponentRecord, publication sbom.InventoryPublication) (sbom.InventoryPublication, error) {
 	for _, record := range records {
 		if err := record.Validate(); err != nil {
