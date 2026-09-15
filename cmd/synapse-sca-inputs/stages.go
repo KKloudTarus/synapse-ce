@@ -125,6 +125,35 @@ func materializeBinaryPin(option options) error {
 		return fmt.Errorf("ratchet does not bind the supplied catalog")
 	}
 
+	capabilityFloors := 0
+	for _, floor := range ratchet.Floors {
+		if floor.Expected.CapabilityDigest != "" {
+			capabilityFloors++
+		}
+	}
+	var freeze bench.SourceFreeze
+	var oldCapabilityDigests map[string]string
+	if capabilityFloors > 0 {
+		if err := requirePaths(
+			struct{ name, value string }{"repository root", option.repositoryRoot},
+			struct{ name, value string }{"source freeze", option.sourceFreezeOutput},
+			struct{ name, value string }{"manifest template directory", option.manifestTemplateDir},
+		); err != nil {
+			return err
+		}
+		freeze, err = decodeSourceFreeze(option.sourceFreezeOutput)
+		if err != nil {
+			return err
+		}
+		oldCapabilityDigests, err = capabilityDigestsForCatalog(option.repositoryRoot, option.manifestTemplateDir, freeze, catalog, oldCatalogDigest)
+		if err != nil {
+			return err
+		}
+		if len(oldCapabilityDigests) != capabilityFloors {
+			return fmt.Errorf("capability template count %d does not match ratchet floor count %d", len(oldCapabilityDigests), capabilityFloors)
+		}
+	}
+
 	reference := strings.TrimSpace(option.binaryReference)
 	pinIndex := -1
 	for index := range catalog.Pins {
@@ -153,6 +182,17 @@ func materializeBinaryPin(option options) error {
 		return err
 	}
 
+	var newCapabilityDigests map[string]string
+	if capabilityFloors > 0 {
+		newCapabilityDigests, err = capabilityDigestsForCatalog(option.repositoryRoot, option.manifestTemplateDir, freeze, catalog, catalogDigest)
+		if err != nil {
+			return err
+		}
+		if len(newCapabilityDigests) != capabilityFloors {
+			return fmt.Errorf("generated capability count %d does not match ratchet floor count %d", len(newCapabilityDigests), capabilityFloors)
+		}
+	}
+
 	updatedFloors := 0
 	for index := range ratchet.Floors {
 		floor := &ratchet.Floors[index]
@@ -168,6 +208,29 @@ func materializeBinaryPin(option options) error {
 	if updatedFloors == 0 {
 		return fmt.Errorf("ratchet has no floors for engine %q", engine)
 	}
+
+	updatedCapabilities := 0
+	for index := range ratchet.Floors {
+		floor := &ratchet.Floors[index]
+		if floor.Expected.CapabilityDigest == "" {
+			continue
+		}
+		key := cellKey(floor.Expected.TargetID, floor.Expected.Engine)
+		oldDigest, oldExists := oldCapabilityDigests[key]
+		newDigest, newExists := newCapabilityDigests[key]
+		if !oldExists || !newExists {
+			return fmt.Errorf("ratchet capability floor %s has no matching capability template", key)
+		}
+		if floor.Expected.CapabilityKind != bench.CapabilityKindOSVScannerSUSERPM || floor.Expected.CapabilityDigest != oldDigest {
+			return fmt.Errorf("ratchet floor %s does not bind the generated capability statement", key)
+		}
+		floor.Expected.CapabilityDigest = newDigest
+		updatedCapabilities++
+	}
+	if updatedCapabilities != capabilityFloors {
+		return fmt.Errorf("updated %d capability floors, want %d", updatedCapabilities, capabilityFloors)
+	}
+
 	ratchet.CatalogDigest = catalogDigest
 	if err := ratchet.Validate(); err != nil {
 		return err
@@ -179,8 +242,50 @@ func materializeBinaryPin(option options) error {
 	if err := writeJSONSet(map[string]any{option.catalogOutput: catalog, option.ratchetOutput: ratchet}); err != nil {
 		return err
 	}
-	fmt.Printf("binary=%s catalog=%s ratchet=%s floors=%d reference=%s engine=%s\n", binary.Digest, catalogDigest, ratchetDigest, updatedFloors, reference, engine)
+	fmt.Printf("binary=%s catalog=%s ratchet=%s floors=%d capabilities=%d reference=%s engine=%s\n", binary.Digest, catalogDigest, ratchetDigest, updatedFloors, updatedCapabilities, reference, engine)
 	return nil
+}
+
+func capabilityDigestsForCatalog(repositoryRoot, manifestTemplateDir string, freeze bench.SourceFreeze, catalog bench.Catalog, catalogDigest string) (map[string]string, error) {
+	entries, err := os.ReadDir(manifestTemplateDir)
+	if err != nil {
+		return nil, err
+	}
+	digests := make(map[string]string)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		var template captureManifestTemplate
+		path := filepath.Join(manifestTemplateDir, entry.Name())
+		if err := decodeJSONFile(path, &template); err != nil {
+			return nil, err
+		}
+		if err := template.validate(); err != nil {
+			return nil, fmt.Errorf("validate %s: %w", entry.Name(), err)
+		}
+		if template.Capability == nil {
+			continue
+		}
+		target, exists := targetByID(catalog, template.TargetID)
+		if !exists {
+			return nil, fmt.Errorf("capability template references unknown target %q", template.TargetID)
+		}
+		sources, err := capabilityArtifactsFromFreeze(repositoryRoot, freeze, template.Capability.Sources)
+		if err != nil {
+			return nil, err
+		}
+		_, digest, err := buildCapabilityStatement(catalog, catalogDigest, target, template, sources)
+		if err != nil {
+			return nil, err
+		}
+		key := cellKey(template.TargetID, template.Engine)
+		if _, exists := digests[key]; exists {
+			return nil, fmt.Errorf("duplicate capability template for %s", key)
+		}
+		digests[key] = digest
+	}
+	return digests, nil
 }
 
 func materializeManifestSet(option options) error {

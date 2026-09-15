@@ -38,6 +38,7 @@ SCA_ACCURACY_CATALOG_OUTPUT ?=
 SCA_ACCURACY_BINARY_REFERENCE ?=
 SCA_ACCURACY_BINARY_PATH ?=
 SCA_ACCURACY_ENGINE ?=
+SCA_ACCURACY_MANIFEST_TEMPLATE_DIR ?=
 SCA_ACCURACY_RATCHET_OUTPUT ?=
 SCA_ACCURACY_FROZEN_SBOM ?=
 SCA_ACCURACY_FROZEN_SBOM_DIGEST ?=
@@ -142,7 +143,7 @@ sca-accuracy-smoke: ## Offline SCA accuracy smoke gate (no scanners)
 	$(GO) test -count=1 ./internal/infrastructure/scabench -run 'CompareBundles|Falsifier|Cycle|RepositoryAsset|Native'
 
 sca-accuracy-binary-pin: ## Derive a benchmark binary pin and dependent ratchet bindings
-	$(GO) run ./cmd/synapse-sca-inputs -mode binary-pin -catalog "$(SCA_ACCURACY_CATALOG)" -ratchet "$(SCA_ACCURACY_RATCHET)" -binary-reference "$(SCA_ACCURACY_BINARY_REFERENCE)" -binary-path "$(SCA_ACCURACY_BINARY_PATH)" -engine "$(SCA_ACCURACY_ENGINE)" -catalog-output "$(SCA_ACCURACY_CATALOG_OUTPUT)" -ratchet-output "$(SCA_ACCURACY_RATCHET_OUTPUT)"
+	$(GO) run ./cmd/synapse-sca-inputs -mode binary-pin -repository-root "$(SCA_ACCURACY_REPOSITORY_ROOT)" -source-freeze-output "$(SCA_ACCURACY_SOURCE_FREEZE)" -manifest-template-dir "$(SCA_ACCURACY_MANIFEST_TEMPLATE_DIR)" -catalog "$(SCA_ACCURACY_CATALOG)" -ratchet "$(SCA_ACCURACY_RATCHET)" -binary-reference "$(SCA_ACCURACY_BINARY_REFERENCE)" -binary-path "$(SCA_ACCURACY_BINARY_PATH)" -engine "$(SCA_ACCURACY_ENGINE)" -catalog-output "$(SCA_ACCURACY_CATALOG_OUTPUT)" -ratchet-output "$(SCA_ACCURACY_RATCHET_OUTPUT)"
 
 sca-accuracy-frozen-sbom-verify: ## Verify one frozen canonical CycloneDX SBOM without generating it
 	@test -n "$(SCA_ACCURACY_FROZEN_SBOM)" && test -n "$(SCA_ACCURACY_FROZEN_SBOM_DIGEST)"
