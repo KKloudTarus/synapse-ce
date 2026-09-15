@@ -266,6 +266,37 @@ describe('Project Measures route and logic', () => {
     expect(screen.getByTitle('isolated_module')).toBeInTheDocument()
   })
 
+  it('renders signed complexity deltas and AST coverage provenance', async () => {
+    vi.mocked(api.projectMeasures).mockResolvedValue(buildResponse({
+      includedDomains: ['complexity'],
+      node: {
+        path: '', name: 'Synapse', kind: 'project', language: '',
+        size: null, coupling: null, coverage: null, duplication: null, issues: null, debt: null, ratings: null,
+        complexity: {
+          cyclomatic: { availability: 'available', value: 12, reason: null },
+          cognitive: { availability: 'available', value: 8, reason: null },
+          cyclomaticDelta: { availability: 'available', value: -3, reason: null },
+          cognitiveDelta: { availability: 'available', value: 2, reason: null },
+          coverage: {
+            version: 1,
+            eligibleFiles: { availability: 'available', value: 4, reason: null },
+            measuredFiles: { availability: 'available', value: 4, reason: null },
+            availability: 'available', reason: null,
+          },
+          baseline: { analysisId: 'a0', createdAt: '2026-01-01T00:00:00Z', sourceRef: 'main' },
+        },
+      },
+      children: { items: [], nextCursor: null },
+    }))
+
+    renderRoute('/code-quality/projects/synapse/measures?domain=complexity')
+    expect(await screen.findByText('Cyclomatic Δ')).toBeInTheDocument()
+    expect(screen.getByText('-3')).toBeInTheDocument()
+    expect(screen.getByText('+2')).toBeInTheDocument()
+    expect(screen.getByText(/AST:/)).toBeInTheDocument()
+    expect(screen.getByText('vs main')).toBeInTheDocument()
+  })
+
   it('renders a pinned behavioral hotspots ranking instead of sorting tree children', async () => {
     vi.mocked(api.projectMeasures).mockResolvedValue(buildResponse({
       includedDomains: ['behavioral_hotspots'],

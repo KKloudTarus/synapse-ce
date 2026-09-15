@@ -460,6 +460,42 @@ func TestGetMeasures(t *testing.T) {
 	})
 }
 
+func TestMapDomainMeasuresPreservesSignedComplexityTrend(t *testing.T) {
+	reason := "1_of_2_files_unmeasured"
+	node := &measure.Node{
+		Path:                "src/a.go",
+		Kind:                measure.NodeFile,
+		ComplexityAvailable: true,
+		ComplexityCoverage: measure.ComplexityCoverageSummary{
+			Version: 1, EligibleFiles: 2, MeasuredFiles: 1,
+			Availability: measure.AvailabilityUnavailable, Reason: reason,
+		},
+		Counters: measure.Counters{Cyclomatic: 9, Cognitive: 4},
+	}
+	analysis := &projectanalysis.Analysis{
+		Snapshot: measure.Snapshot{Nodes: []measure.Node{*node}},
+		Delta: &projectanalysis.Delta{Complexity: &projectanalysis.ComplexityDelta{
+			Version: 1, BaselineAnalysisID: "a0", BaselineCreatedAt: time.Unix(10, 0), BaselineSourceRef: "main",
+			Nodes: map[string]projectanalysis.ComplexityNodeDelta{
+				"src/a.go": {Kind: measure.NodeFile, Cyclomatic: -3, Cognitive: 2, Availability: measure.AvailabilityAvailable},
+			},
+		}},
+	}
+	got := mapDomainMeasures(node, map[string]bool{"complexity": true}, analysis)
+	if got.Complexity == nil || got.Complexity.CyclomaticDelta.Value == nil || *got.Complexity.CyclomaticDelta.Value != -3 {
+		t.Fatalf("cyclomatic delta=%+v", got.Complexity)
+	}
+	if got.Complexity.CognitiveDelta.Value == nil || *got.Complexity.CognitiveDelta.Value != 2 {
+		t.Fatalf("cognitive delta=%+v", got.Complexity.CognitiveDelta)
+	}
+	if got.Complexity.Coverage.MeasuredFiles.Value == nil || *got.Complexity.Coverage.MeasuredFiles.Value != 1 || got.Complexity.Coverage.Reason == nil || *got.Complexity.Coverage.Reason != reason {
+		t.Fatalf("coverage=%+v", got.Complexity.Coverage)
+	}
+	if got.Complexity.Baseline == nil || got.Complexity.Baseline.AnalysisID != "a0" {
+		t.Fatalf("baseline=%+v", got.Complexity.Baseline)
+	}
+}
+
 func TestGetMeasures_Postgres(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {

@@ -23,10 +23,12 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 		Issues:         projectanalysis.Counts{ByKind: map[string]int{"sca": 1}, BySeverity: map[string]int{"high": 1}, ByStatus: map[string]int{"open": 1}},
 		InternalIssues: []projectanalysis.Issue{{Key: "key", Kind: finding.KindSCA}},
 		NewCode:        projectanalysis.NewCode{Counts: projectanalysis.Counts{ByKind: map[string]int{"sca": 1}, BySeverity: map[string]int{}, ByStatus: map[string]int{}}},
-		Delta:          &projectanalysis.Delta{Measures: map[string]float64{"coverage": 1}, Ratings: map[string]int{"security": 1}, Issues: projectanalysis.Counts{ByKind: map[string]int{}, BySeverity: map[string]int{}, ByStatus: map[string]int{}}},
-		Coverage:       &measure.CoverageReport{Files: []measure.FileCoverage{{File: "a.go", CoveredLines: 5, TotalLines: 10}}},
-		Duplication:    measure.DuplicationReport{Blocks: []measure.DuplicationBlock{{Occurrences: []measure.CodeRange{{File: "a.go", StartLine: 1, EndLine: 2}}}}},
-		Coupling:       &measure.CouplingReport{Version: measure.CouplingSchemaVersion, Complete: true, Modules: []measure.CouplingModule{{ID: "go:a", Path: "a", Language: "go"}}},
+		Delta: &projectanalysis.Delta{Measures: map[string]float64{"coverage": 1}, Ratings: map[string]int{"security": 1}, Issues: projectanalysis.Counts{ByKind: map[string]int{}, BySeverity: map[string]int{}, ByStatus: map[string]int{}}, Complexity: &projectanalysis.ComplexityDelta{
+			Version: projectanalysis.ComplexityDeltaSchemaVersion, BaselineAnalysisID: "baseline", Nodes: map[string]projectanalysis.ComplexityNodeDelta{"a.go": {Kind: measure.NodeFile, Cyclomatic: -2, Cognitive: 1, Availability: measure.AvailabilityAvailable}},
+		}},
+		Coverage:    &measure.CoverageReport{Files: []measure.FileCoverage{{File: "a.go", CoveredLines: 5, TotalLines: 10}}},
+		Duplication: measure.DuplicationReport{Blocks: []measure.DuplicationBlock{{Occurrences: []measure.CodeRange{{File: "a.go", StartLine: 1, EndLine: 2}}}}},
+		Coupling:    &measure.CouplingReport{Version: measure.CouplingSchemaVersion, Complete: true, Modules: []measure.CouplingModule{{ID: "go:a", Path: "a", Language: "go"}}},
 		BehavioralHotspots: &measure.BehavioralHotspotsReport{
 			Version: measure.BehavioralHotspotsSchemaVersion, Availability: measure.BehavioralPartial,
 			Reason: "1_of_2_files_unmeasured", HeadCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -78,6 +80,7 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	got.BehavioralHotspots.Files[0].Path = "returned.go"
 	got.BehavioralHotspots.Gaps[0].Path = "returned.go"
 	got.Delta.Measures["coverage"] = 0
+	got.Delta.Complexity.Nodes["a.go"] = projectanalysis.ComplexityNodeDelta{Kind: measure.NodeFile, Cyclomatic: 99, Availability: measure.AvailabilityAvailable}
 	got.Snapshot.Nodes[0].Counters.IssuesByType["bug"] = 0
 	*got.Snapshot.NewCodeCoverage.Value = 0.0
 
@@ -90,6 +93,9 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	}
 	if list[0].Snapshot.Nodes[0].Counters.IssuesByType["bug"] != 1 {
 		t.Fatalf("snapshot node counters mutated")
+	}
+	if list[0].Delta == nil || list[0].Delta.Complexity == nil || list[0].Delta.Complexity.Nodes["a.go"].Cyclomatic != -2 {
+		t.Fatalf("complexity delta mutated")
 	}
 	if list[0].Snapshot.NewCodeCoverage.Value == nil || *list[0].Snapshot.NewCodeCoverage.Value != 10.0 {
 		t.Fatalf("snapshot new code coverage mutated")

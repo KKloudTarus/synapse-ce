@@ -33,9 +33,32 @@ type Counts struct {
 
 // Delta is a signed comparison with the immediately previous successful analysis.
 type Delta struct {
-	Issues   Counts             `json:"issues"`
-	Measures map[string]float64 `json:"measures"`
-	Ratings  map[string]int     `json:"ratings"`
+	Issues     Counts             `json:"issues"`
+	Measures   map[string]float64 `json:"measures"`
+	Ratings    map[string]int     `json:"ratings"`
+	Complexity *ComplexityDelta   `json:"complexity,omitempty"`
+}
+
+const ComplexityDeltaSchemaVersion = 1
+
+// ComplexityNodeDelta is a signed, path-scoped complexity change. A nil value is represented by
+// AvailabilityUnavailable and a reason; zero is a measured delta and must remain distinguishable.
+type ComplexityNodeDelta struct {
+	Kind         measure.NodeKind     `json:"kind"`
+	Cyclomatic   int                  `json:"cyclomatic"`
+	Cognitive    int                  `json:"cognitive"`
+	Availability measure.Availability `json:"availability"`
+	Reason       string               `json:"reason,omitempty"`
+}
+
+// ComplexityDelta is immutable trend evidence tied to the exact baseline analysis used at record time.
+type ComplexityDelta struct {
+	Version            int                            `json:"version"`
+	BaselineAnalysisID string                         `json:"baseline_analysis_id,omitempty"`
+	BaselineCreatedAt  time.Time                      `json:"baseline_created_at,omitempty"`
+	BaselineSourceRef  string                         `json:"baseline_source_ref,omitempty"`
+	Reason             string                         `json:"reason,omitempty"`
+	Nodes              map[string]ComplexityNodeDelta `json:"nodes,omitempty"`
 }
 
 // NewCode retains the derived period state used by the default gate.
@@ -155,35 +178,37 @@ func (a Analysis) Branch() string {
 // Input supplies one completed scan's project-facing facts. Findings must be the
 // merged root and code-quality findings, not two independently counted lists.
 type Input struct {
-	ID                 string
-	TenantID           shared.ID
-	ProjectID          shared.ID
-	ProjectKey         string
-	CreatedAt          time.Time
-	Origin             Origin
-	CI                 *CIContext
-	SourceRef          string
-	SourceCommit       string
-	SourceRevision     SourceRevision
-	Capabilities       SourceCapabilities
-	SourceManifest     SourceManifest
-	Comparison         Comparison
-	FileChanges        []FileChange
-	Annotations        []Annotation
-	Findings           []finding.Finding
-	Gate               qualitygate.Gate
-	GateSource         string
-	GateExempt         map[string]bool
-	LinesOfCode        int
-	Coverage           *measure.CoverageReport
-	Duplication        *measure.DuplicationReport // nil when no duplication walk ran, like Coverage
-	Coupling           *measure.CouplingReport
-	BehavioralHotspots *measure.BehavioralHotspotsReport
-	AnalysisTruncated  bool
-	Previous           *Analysis
-	Hotspots           hotspot.Summary
-	NewHotspots        hotspot.Summary
-	Snapshot           measure.Snapshot
+	ID                       string
+	TenantID                 shared.ID
+	ProjectID                shared.ID
+	ProjectKey               string
+	CreatedAt                time.Time
+	Origin                   Origin
+	CI                       *CIContext
+	SourceRef                string
+	SourceCommit             string
+	SourceRevision           SourceRevision
+	Capabilities             SourceCapabilities
+	SourceManifest           SourceManifest
+	Comparison               Comparison
+	FileChanges              []FileChange
+	Annotations              []Annotation
+	Findings                 []finding.Finding
+	Gate                     qualitygate.Gate
+	GateSource               string
+	GateExempt               map[string]bool
+	LinesOfCode              int
+	Coverage                 *measure.CoverageReport
+	Duplication              *measure.DuplicationReport // nil when no duplication walk ran, like Coverage
+	Coupling                 *measure.CouplingReport
+	BehavioralHotspots       *measure.BehavioralHotspotsReport
+	AnalysisTruncated        bool
+	Previous                 *Analysis
+	ComplexityBaseline       *Analysis
+	ComplexityBaselineReason string
+	Hotspots                 hotspot.Summary
+	NewHotspots              hotspot.Summary
+	Snapshot                 measure.Snapshot
 }
 
 // Build returns one immutable snapshot and evaluates the built-in gate at creation.
@@ -274,7 +299,7 @@ func Build(in Input) (Analysis, error) {
 		Measures: measures, Gate: gate,
 		GateInfo: GateInfo{Key: gateDef.Key, Name: gateName, Source: gateSource}, Issues: counts,
 		InternalIssues: issues, NewCode: NewCode{PreviousID: previousID, Counts: newCounts, Rating: NewCodeRating{Security: newRating.Security, Reliability: newRating.Reliability}},
-		Delta: buildDelta(counts, measures, overallRating, in.Previous), Coverage: in.Coverage,
+		Delta: buildDelta(counts, measures, overallRating, in.Previous, in.Snapshot, in.ComplexityBaseline, in.ComplexityBaselineReason), Coverage: in.Coverage,
 		Duplication: derefDuplication(in.Duplication), Coupling: in.Coupling, BehavioralHotspots: in.BehavioralHotspots, Rating: overallRating,
 		Hotspots: in.Hotspots, NewHotspots: in.NewHotspots,
 		Snapshot: in.Snapshot,
@@ -481,7 +506,7 @@ func gradeNumber(grade rating.Grade) int {
 	}
 }
 
-func buildDelta(current Counts, measures qualitygate.Snapshot, currentRating rating.Report, previous *Analysis) *Delta {
+func buildDelta(current Counts, measures qualitygate.Snapshot, currentRating rating.Report, previous *Analysis, snapshot measure.Snapshot, complexityBaseline *Analysis, complexityReason string) *Delta {
 	if previous == nil {
 		return nil
 	}
@@ -495,6 +520,56 @@ func buildDelta(current Counts, measures qualitygate.Snapshot, currentRating rat
 	delta.Ratings["security"] -= gradeNumber(previous.Rating.Security)
 	delta.Ratings["reliability"] -= gradeNumber(previous.Rating.Reliability)
 	delta.Ratings["maintainability"] -= gradeNumber(previous.Rating.Maintainability)
+	if complexityBaseline != nil || complexityReason != "" {
+		delta.Complexity = buildComplexityDelta(snapshot, complexityBaseline, complexityReason)
+	}
+	return delta
+}
+
+func buildComplexityDelta(current measure.Snapshot, baseline *Analysis, reason string) *ComplexityDelta {
+	delta := &ComplexityDelta{Version: ComplexityDeltaSchemaVersion, Reason: reason, Nodes: map[string]ComplexityNodeDelta{}}
+	if baseline != nil {
+		delta.BaselineAnalysisID = baseline.ID
+		delta.BaselineCreatedAt = baseline.CreatedAt
+		delta.BaselineSourceRef = baseline.SourceRef
+	}
+	baseNodes := make(map[string]measure.Node)
+	if baseline != nil {
+		for _, node := range baseline.Snapshot.Nodes {
+			baseNodes[node.Path] = node
+		}
+	}
+	for _, node := range current.Nodes {
+		metric := ComplexityNodeDelta{Kind: node.Kind, Availability: measure.AvailabilityUnavailable}
+		if reason != "" {
+			metric.Reason = reason
+			delta.Nodes[node.Path] = metric
+			continue
+		}
+		previous, ok := baseNodes[node.Path]
+		if !ok {
+			metric.Reason = "path_not_in_baseline"
+		} else if previous.Kind != node.Kind {
+			metric.Reason = "path_kind_changed"
+		} else if node.ComplexityCoverage.Version != previous.ComplexityCoverage.Version {
+			metric.Reason = "incompatible_complexity_version"
+		} else if !node.ComplexityAvailable {
+			metric.Reason = "current_complexity_unavailable"
+			if node.ComplexityCoverage.Reason != "" {
+				metric.Reason = node.ComplexityCoverage.Reason
+			}
+		} else if !previous.ComplexityAvailable {
+			metric.Reason = "baseline_complexity_unavailable"
+			if previous.ComplexityCoverage.Reason != "" {
+				metric.Reason = previous.ComplexityCoverage.Reason
+			}
+		} else {
+			metric.Availability = measure.AvailabilityAvailable
+			metric.Cyclomatic = node.Counters.Cyclomatic - previous.Counters.Cyclomatic
+			metric.Cognitive = node.Counters.Cognitive - previous.Counters.Cognitive
+		}
+		delta.Nodes[node.Path] = metric
+	}
 	return delta
 }
 

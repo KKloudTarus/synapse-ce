@@ -299,6 +299,45 @@ func TestSnapshotNormalization(t *testing.T) {
 	}
 }
 
+func TestSnapshotComplexityCoverageRollsUpWithoutFalseZeroes(t *testing.T) {
+	input := BuildSnapshotInput{
+		RuleCatalog: &mockResolver{},
+		Inventory: NewInventory(nil,
+			FileInventory{Path: "src/a.go", Language: "Go", CodeLines: 10},
+			FileInventory{Path: "src/b.go", Language: "Go", CodeLines: 10},
+		),
+		Complexity: &ComplexityReport{
+			Version: ComplexitySchemaVersion,
+			Files: []ComplexityFileCoverage{
+				{File: "src/a.go", Language: "Go", Supported: true, Parsed: true},
+				{File: "src/b.go", Language: "Go", Supported: true, Parsed: false, ParseError: true},
+			},
+			Functions: []FunctionComplexity{
+				{File: "src/a.go", Cyclomatic: 3, Cognitive: 2},
+				{File: "src/b.go", Cyclomatic: 99, Cognitive: 99},
+			},
+		},
+	}
+	snapshot, err := BuildSnapshot(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]Node{}
+	for _, node := range snapshot.Nodes {
+		byPath[node.Path] = node
+	}
+	if byPath["src/a.go"].Counters.Cyclomatic != 3 || !byPath["src/a.go"].ComplexityAvailable {
+		t.Fatalf("measured file = %+v", byPath["src/a.go"])
+	}
+	if byPath["src/b.go"].Counters.Cyclomatic != 0 || byPath["src/b.go"].ComplexityAvailable || byPath["src/b.go"].ComplexityCoverage.Reason != "parse_error" {
+		t.Fatalf("parse-error file became a zero measurement = %+v", byPath["src/b.go"])
+	}
+	root := byPath[""]
+	if root.ComplexityAvailable || root.ComplexityCoverage.EligibleFiles != 2 || root.ComplexityCoverage.MeasuredFiles != 1 {
+		t.Fatalf("partial root coverage = %+v", root)
+	}
+}
+
 func TestSnapshotCatalogFailure(t *testing.T) {
 	input := BuildSnapshotInput{
 		RuleCatalog: &mockResolver{err: errors.New("infra failure")},

@@ -581,6 +581,13 @@ cyclomatic complexity multiplied by the number of commits that touched its curre
 read-only and performs no network fetch; unavailable or shallow evidence stays explicit and does not
 create findings or affect the gate.
 
+When the server records successive analyses, its Project Measures response also includes complexity
+rollups and signed per-path deltas. These are server-side history facts, not a CLI quality-gate input:
+the current cyclomatic/cognitive totals are summed from parsed functions, while `Δ` preserves both
+increases and reductions against a compatible baseline. The response includes measured/eligible file
+coverage and the baseline analysis provenance; unsupported languages, parser failures, legacy snapshots,
+and unknown branches are reported as unavailable rather than as zeroes.
+
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--new-code-only` | off | Score only lines changed against `--base` instead of the whole tree. |

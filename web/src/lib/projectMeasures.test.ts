@@ -156,4 +156,31 @@ describe('projectMeasures mapper', () => {
     expect(res.node?.ratings?.security.availability).toBe('available')
     expect(res.node?.ratings?.security.grade).toBeNull()
   })
+
+  it('preserves signed complexity deltas, coverage, and baseline provenance', () => {
+    const res = mapProjectMeasureResponse({
+      node: {
+        complexity: {
+          cyclomatic: { availability: 'available', value: 12 },
+          cognitive: { availability: 'available', value: 8 },
+          cyclomatic_delta: { availability: 'available', value: -3 },
+          cognitive_delta: { availability: 'available', value: 0 },
+          coverage: {
+            version: 1,
+            eligible_files: { availability: 'available', value: 4 },
+            measured_files: { availability: 'available', value: 3 },
+            availability: 'unavailable',
+            unavailable_reason: '1_of_4_files_unmeasured',
+          },
+          baseline: { analysis_id: 'a0', created_at: '2026-01-01T00:00:00Z', source_ref: 'main' },
+        },
+      },
+    })
+    expect(res.node?.complexity?.cyclomaticDelta.value).toBe(-3)
+    expect(res.node?.complexity?.cognitiveDelta.value).toBe(0)
+    expect(res.node?.complexity?.coverage.eligibleFiles.value).toBe(4)
+    expect(res.node?.complexity?.coverage.measuredFiles.value).toBe(3)
+    expect(res.node?.complexity?.coverage.reason).toBe('1_of_4_files_unmeasured')
+    expect(res.node?.complexity?.baseline).toEqual({ analysisId: 'a0', createdAt: '2026-01-01T00:00:00Z', sourceRef: 'main' })
+  })
 })
