@@ -14,6 +14,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 )
 
@@ -46,6 +47,17 @@ func newImportRouter(t *testing.T) *Router {
 	return rt
 }
 
+type importPRDecorator struct {
+	calls int
+	got   ports.PRDecoration
+}
+
+func (f *importPRDecorator) Decorate(_ context.Context, d ports.PRDecoration) error {
+	f.calls++
+	f.got = d
+	return nil
+}
+
 // importRuleCatalog is the two-method catalogue the recorder needs to classify a quality finding. A
 // fake sidesteps the real catalogue's field validation, which is not what this test is about.
 type importRuleCatalog struct{}
@@ -58,7 +70,7 @@ func (importRuleCatalog) Get(_ context.Context, key rule.Key) (rule.Rule, error)
 	return rule.Rule{}, shared.ErrNotFound
 }
 
-const importBody = `{"ci":{"provider":"github-actions","run_url":"https://github.com/acme/app/actions/runs/7","run_id":"7","branch":"main","actor":"octocat"},
+const importBody = `{"ci":{"provider":"github-actions","run_url":"https://github.com/acme/app/actions/runs/7","run_id":"7","branch":"feature/pr-decoration","actor":"octocat","pull_request":"42","target_branch":"main","repo_slug":"acme/app","head_sha":"abcdef0123456789abcdef0123456789abcdef01"},
 "result":{"target":"/work/app","source_commit":"abcdef0123456789abcdef0123456789abcdef01","scan_mode":"full","languages":[],"sbom":null,"vulnerabilities":[],"licenses":[],"component_licenses":[],
 "findings":[{"ID":"v1","DedupKey":"vuln:CVE-2024-1:lodash:4.17.15","Kind":"sca","Severity":"high","Status":"open","Title":"lodash"}],
 "min_severity":"info","vulns_below_threshold":0,"unfixed_suppressed":0,"tool_versions":{"synapse":"test"}}}`
@@ -68,6 +80,8 @@ const importBody = `{"ci":{"provider":"github-actions","run_url":"https://github
 // marked with its origin, and the project's status and history reflect it.
 func TestImportProjectAnalysisRoute(t *testing.T) {
 	rt := newImportRouter(t)
+	decorator := &importPRDecorator{}
+	rt.projects.(*projectuc.Service).SetPRDecorator(decorator)
 	handler := rt.Handler()
 
 	post := func(body string) *httptest.ResponseRecorder {
@@ -93,6 +107,12 @@ func TestImportProjectAnalysisRoute(t *testing.T) {
 	ci, _ := analysis["ci"].(map[string]any)
 	if ci["provider"] != "github-actions" || ci["run_url"] != "https://github.com/acme/app/actions/runs/7" {
 		t.Errorf("ci context not returned: %v", analysis["ci"])
+	}
+	if ci["pull_request"] != "42" || ci["target_branch"] != "main" || ci["repo_slug"] != "acme/app" || ci["head_sha"] != "abcdef0123456789abcdef0123456789abcdef01" {
+		t.Errorf("PR identity not returned: %v", analysis["ci"])
+	}
+	if decorator.calls != 1 || decorator.got.Target.Repository != "acme/app" || decorator.got.Target.PullRequest != "42" || decorator.got.Target.TargetBranch != "main" || decorator.got.Target.CommitSHA != "abcdef0123456789abcdef0123456789abcdef01" {
+		t.Fatalf("completion decoration = calls %d target %+v", decorator.calls, decorator.got.Target)
 	}
 	if analysis["source_commit"] != "abcdef0123456789abcdef0123456789abcdef01" {
 		t.Errorf("source_commit = %v", analysis["source_commit"])

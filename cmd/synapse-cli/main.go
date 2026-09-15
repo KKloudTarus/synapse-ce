@@ -872,8 +872,9 @@ func runGate(args []string) error {
 	if coverageMeasured {
 		covLabel = fmt.Sprintf("%.1f%%", snapCoverage)
 	}
+	summary := qualitygate.RenderMarkdown(scopeLabel, rep, dupRep.Density(), covLabel, result)
 	if markdown {
-		printGateMarkdown(dir, scopeLabel, rep, dupRep.Density(), covLabel, result)
+		fmt.Print(summary)
 	} else {
 		fmt.Printf("\nSynapse quality gate – %s (%s)\n", dir, scopeLabel)
 		fmt.Printf("  ratings: security %s · reliability %s · maintainability %s · duplication %.1f%% · coverage %s\n", rep.Security, rep.Reliability, rep.Maintainability, dupRep.Density(), covLabel)
@@ -885,6 +886,7 @@ func runGate(args []string) error {
 			fmt.Printf("  [%s] %s (%s)\n", mark, cr.Condition, conditionActual(cr))
 		}
 	}
+	triggerGateDecorationFromEnv(ctx, cliPRDecorator, result, summary, scoped)
 	if !result.Passed {
 		return fmt.Errorf("quality gate FAILED: %d condition(s) not met", len(result.Failures()))
 	}
@@ -940,26 +942,6 @@ func runCoverage(args []string) error {
 		return fmt.Errorf("line coverage %.1f%% is below %.1f%%", rep.Percent(), failBelow)
 	}
 	return nil
-}
-
-// printGateMarkdown renders the gate result as a Markdown summary suitable for a PR comment (gh pr comment
-// --body-file). Failed conditions are listed first so a reviewer sees the blockers immediately.
-func printGateMarkdown(dir, scope string, rep rating.Report, dupDensity float64, coverage string, result qualitygate.Result) {
-	status := "✅ **Quality gate passed**"
-	if !result.Passed {
-		status = "❌ **Quality gate failed**"
-	}
-	fmt.Printf("## Synapse quality gate\n\n%s _(%s)_\n\n", status, scope)
-	fmt.Printf("| Rating | Grade |\n|---|---|\n| Security | %s |\n| Reliability | %s |\n| Maintainability | %s |\n", rep.Security, rep.Reliability, rep.Maintainability)
-	fmt.Printf("\nDuplication %.1f%% · Coverage %s\n\n", dupDensity, coverage)
-	fmt.Printf("| Condition | Actual | |\n|---|---|---|\n")
-	for _, cr := range result.Results {
-		mark := "✅"
-		if !cr.Passed {
-			mark = "❌"
-		}
-		fmt.Printf("| `%s` | %s | %s |\n", cr.Condition, conditionActual(cr), mark)
-	}
 }
 
 // conditionActual renders what a condition was compared against. An unmeasured condition has no value:

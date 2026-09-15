@@ -169,6 +169,13 @@ func pushAnalysis(ctx context.Context, client *http.Client, target pushTarget, r
 // ciContextFromEnv fills what the pipeline did not say on the command line from the well-known
 // variables of the providers the action and the CI guides cover. An explicit flag always wins.
 func ciContextFromEnv(explicit projectanalysis.CIContext, lookup func(string) string) projectanalysis.CIContext {
+	return ciContextFromEnvWithReader(explicit, lookup, os.ReadFile)
+}
+
+// ciContextFromEnvWithReader keeps GitHub event parsing testable without touching the network. GitHub's
+// GITHUB_SHA is a synthetic merge commit for pull_request events, so the event payload is the canonical
+// place to obtain pull_request.head.sha; silently substituting GITHUB_SHA could decorate the wrong commit.
+func ciContextFromEnvWithReader(explicit projectanalysis.CIContext, lookup func(string) string, readFile func(string) ([]byte, error)) projectanalysis.CIContext {
 	out := explicit
 	pick := func(dst *string, keys ...string) {
 		if strings.TrimSpace(*dst) != "" {
@@ -190,6 +197,56 @@ func ciContextFromEnv(explicit projectanalysis.CIContext, lookup func(string) st
 		pick(&out.Branch, "GITHUB_HEAD_REF", "GITHUB_REF_NAME")
 		pick(&out.RunID, "GITHUB_RUN_ID")
 		pick(&out.Actor, "GITHUB_ACTOR")
+		pick(&out.TargetBranch, "GITHUB_BASE_REF")
+		pick(&out.RepoSlug, "GITHUB_REPOSITORY")
+		pick(&out.HeadSHA, "SYNAPSE_PR_HEAD_SHA", "GITHUB_HEAD_SHA")
+		pick(&out.PullRequest, "SYNAPSE_PR_NUMBER")
+		if out.PullRequest == "" {
+			out.PullRequest = githubPullRequestNumber(lookup("GITHUB_REF"))
+		}
+		if eventPath := strings.TrimSpace(lookup("GITHUB_EVENT_PATH")); eventPath != "" && readFile != nil {
+			if data, err := readFile(eventPath); err == nil {
+				var event struct {
+					Number      int `json:"number"`
+					PullRequest struct {
+						Number int `json:"number"`
+						Base   struct {
+							Ref string `json:"ref"`
+						} `json:"base"`
+						Head struct {
+							Ref string `json:"ref"`
+							SHA string `json:"sha"`
+						} `json:"head"`
+					} `json:"pull_request"`
+					Repository struct {
+						FullName string `json:"full_name"`
+					} `json:"repository"`
+				}
+				if json.Unmarshal(data, &event) == nil {
+					if out.PullRequest == "" {
+						n := event.PullRequest.Number
+						if n == 0 {
+							n = event.Number
+						}
+						if n > 0 {
+							out.PullRequest = fmt.Sprintf("%d", n)
+						}
+					}
+					if out.TargetBranch == "" {
+						out.TargetBranch = strings.TrimSpace(event.PullRequest.Base.Ref)
+					}
+					if out.Branch == "" {
+						out.Branch = strings.TrimSpace(event.PullRequest.Head.Ref)
+					}
+					if out.HeadSHA == "" {
+						out.HeadSHA = strings.TrimSpace(event.PullRequest.Head.SHA)
+					}
+					if out.RepoSlug == "" {
+						out.RepoSlug = strings.TrimSpace(event.Repository.FullName)
+					}
+				}
+			}
+		}
 		if out.RunURL == "" {
 			server, repo, run := lookup("GITHUB_SERVER_URL"), lookup("GITHUB_REPOSITORY"), lookup("GITHUB_RUN_ID")
 			if server != "" && repo != "" && run != "" {
@@ -204,6 +261,21 @@ func ciContextFromEnv(explicit projectanalysis.CIContext, lookup func(string) st
 		pick(&out.RunID, "CI_PIPELINE_ID")
 		pick(&out.RunURL, "CI_PIPELINE_URL")
 		pick(&out.Actor, "GITLAB_USER_LOGIN")
+		pick(&out.PullRequest, "CI_MERGE_REQUEST_IID")
+		pick(&out.TargetBranch, "CI_MERGE_REQUEST_TARGET_BRANCH_NAME")
+		pick(&out.RepoSlug, "CI_PROJECT_PATH")
+		pick(&out.HeadSHA, "CI_MERGE_REQUEST_SOURCE_BRANCH_SHA", "CI_COMMIT_SHA")
+	case lookup("BITBUCKET_BUILD_NUMBER") != "":
+		if out.Provider == "" {
+			out.Provider = "bitbucket-pipelines"
+		}
+		pick(&out.Branch, "BITBUCKET_BRANCH")
+		pick(&out.RunID, "BITBUCKET_BUILD_NUMBER")
+		pick(&out.Actor, "BITBUCKET_STEP_TRIGGERER_UUID")
+		pick(&out.PullRequest, "BITBUCKET_PR_ID")
+		pick(&out.TargetBranch, "BITBUCKET_PR_DESTINATION_BRANCH")
+		pick(&out.RepoSlug, "BITBUCKET_REPO_FULL_NAME")
+		pick(&out.HeadSHA, "BITBUCKET_COMMIT")
 	case lookup("JENKINS_URL") != "":
 		if out.Provider == "" {
 			out.Provider = "jenkins"
@@ -211,9 +283,25 @@ func ciContextFromEnv(explicit projectanalysis.CIContext, lookup func(string) st
 		pick(&out.Branch, "BRANCH_NAME", "GIT_BRANCH")
 		pick(&out.RunID, "BUILD_NUMBER")
 		pick(&out.RunURL, "BUILD_URL")
+		pick(&out.PullRequest, "CHANGE_ID")
+		pick(&out.TargetBranch, "CHANGE_TARGET")
+		pick(&out.RepoSlug, "SYNAPSE_REPO_SLUG")
+		pick(&out.HeadSHA, "GIT_COMMIT")
 	}
 	pick(&out.Provider, "SYNAPSE_CI_PROVIDER")
+	pick(&out.PullRequest, "SYNAPSE_PR_NUMBER")
+	pick(&out.TargetBranch, "SYNAPSE_PR_TARGET_BRANCH")
+	pick(&out.RepoSlug, "SYNAPSE_REPO_SLUG")
+	pick(&out.HeadSHA, "SYNAPSE_PR_HEAD_SHA")
 	return out
+}
+
+func githubPullRequestNumber(ref string) string {
+	parts := strings.Split(strings.TrimSpace(ref), "/")
+	if len(parts) >= 4 && parts[0] == "refs" && parts[1] == "pull" && strings.TrimSpace(parts[2]) != "" {
+		return strings.TrimSpace(parts[2])
+	}
+	return ""
 }
 
 // reportPush prints the server's verdict for the pipeline log. It is written to stderr so the

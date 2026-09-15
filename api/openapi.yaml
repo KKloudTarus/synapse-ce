@@ -1681,6 +1681,10 @@ paths:
                     run_id: {type: string, maxLength: 512}
                     branch: {type: string, maxLength: 512}
                     actor: {type: string, maxLength: 512}
+                    pull_request: {type: string, maxLength: 512, description: 'provider-neutral pull/merge-request number or IID'}
+                    target_branch: {type: string, maxLength: 512}
+                    repo_slug: {type: string, maxLength: 512}
+                    head_sha: {type: string, maxLength: 512, description: 'forge-reported pull/merge-request head commit, not a synthetic merge commit'}
                 result:
                   type: object
                   description: A synapse-cli scan result, exactly as `synapse-cli scan --json` prints it.
@@ -1705,6 +1709,10 @@ paths:
                       run_id: {type: string}
                       branch: {type: string}
                       actor: {type: string}
+                      pull_request: {type: string}
+                      target_branch: {type: string}
+                      repo_slug: {type: string}
+                      head_sha: {type: string}
                   source_ref: {type: string}
                   source_commit: {type: string}
                   gate:
