@@ -24,6 +24,9 @@ type sourceNativeComparator struct {
 func (comparator *sourceNativeComparator) CompareNativeVersion(_ context.Context, request ports.NativeVersionComparisonRequest) (ports.NativeVersionComparisonResult, error) {
 	comparator.requests = append(comparator.requests, request)
 	relation, exists := comparator.relations[request.RightEVR]
+	if !exists && request.Family == ports.NativePackageRPM {
+		relation, exists = comparator.relations[strings.TrimPrefix(request.RightEVR, "0:")]
+	}
 	if !exists {
 		return ports.NativeVersionComparisonResult{}, fmt.Errorf("unexpected fixed EVR %q", request.RightEVR)
 	}
@@ -45,6 +48,26 @@ func TestBuildSourceNativeEvidenceUsesSupportedTrueORBranchWithoutPoisoning(t *t
 	}
 	if _, err := bench.BuildOracleCandidate(sourceFixtureFreeze(t, oval), source); err != nil {
 		t.Fatalf("scanner-free candidate rejected a complete supported affected branch: %v", err)
+	}
+}
+
+func TestBuildSourceNativeEvidenceRejectsDebianZeroBoundaryAsRemediation(t *testing.T) {
+	oval := sourceOVAL(
+		`<criteria><criterion test_ref="test-zero"/></criteria>`,
+		`<dpkginfo_test id="test-zero" check="all" check_existence="at_least_one_exists" comment="pkg is earlier than 0"><object object_ref="object-zero"/><state state_ref="state-zero"/></dpkginfo_test>`,
+		sourceObject("object-zero", "pkg"),
+		`<dpkginfo_state id="state-zero"><evr datatype="debian_evr_string" operation="less than">0:0</evr></dpkginfo_state>`,
+	)
+	comparator := &sourceNativeComparator{relations: map[string]int{}}
+	source, native, err := buildSourceEvidenceFixture(t, oval, sourceEvidencePackage("pkg", "1", "pkg", "1"), comparator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(source.Cases) != 0 || len(source.Unsupported) != 1 || !strings.Contains(source.Unsupported[0].Reason, "zero boundary") {
+		t.Fatalf("Debian zero-boundary source evidence = %+v", source)
+	}
+	if len(comparator.requests) != 0 || len(native.Targets) != 1 || len(native.Targets[0].Comparisons) != 0 {
+		t.Fatalf("Debian zero boundary dispatched a native comparison: %+v/%+v", comparator.requests, native)
 	}
 }
 
@@ -859,6 +882,31 @@ func TestBuildSourceNativeEvidenceEvaluatesSLESArchitectureAlternation(t *testin
 				t.Fatalf("architecture result = %+v", result)
 			}
 		})
+	}
+}
+
+func TestBuildSourceNativeEvidenceCanonicalizesRPMComparisonOperands(t *testing.T) {
+	pkg := sourceEvidenceRPMPackage("pkg", "1.66.0-12.3.1")
+	selection := sourceSLESSelection(pkg)
+	oval := sourceOVAL(
+		`<criteria><criterion test_ref="pkg-test"/></criteria>`,
+		`<rpminfo_test id="pkg-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`,
+		`<rpminfo_object id="pkg-object"><name>pkg</name></rpminfo_object>`,
+		`<rpminfo_state id="pkg-state"><evr datatype="evr_string" operation="less than">0:1.66.0-150200.12.7.1</evr></rpminfo_state>`,
+	)
+	comparator := &sourceNativeComparator{relations: map[string]int{"0:1.66.0-150200.12.7.1": -1}}
+	source, native, err := buildSourceEvidenceForTarget(t, oval, selection, []bench.Component{pkg.Component}, comparator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(source.Unsupported) != 0 || len(source.Cases) != 1 || source.Cases[0].DerivedTruth != bench.TruthAffected {
+		t.Fatalf("canonical RPM source evidence = %+v", source)
+	}
+	if len(comparator.requests) != 1 || comparator.requests[0].LeftEVR != "0:1.66.0-12.3.1" || comparator.requests[0].RightEVR != "0:1.66.0-150200.12.7.1" {
+		t.Fatalf("canonical RPM request = %+v", comparator.requests)
+	}
+	if len(native.Targets) != 1 || len(native.Targets[0].Comparisons) != 1 || native.Targets[0].Comparisons[0].CandidateEVR != "0:1.66.0-12.3.1" || native.Targets[0].Comparisons[0].FixedEVR != "0:1.66.0-150200.12.7.1" {
+		t.Fatalf("canonical RPM native evidence = %+v", native)
 	}
 }
 

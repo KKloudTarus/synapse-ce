@@ -55,7 +55,7 @@ func TestTargetNativeVersionComparatorUsesConstantRPMLuaProgramAndEnvData(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := comparator.CompareNativeVersion(context.Background(), ports.NativeVersionComparisonRequest{TargetDigest: digestByte('b'), Family: ports.NativePackageRPM, LeftEVR: "0:1.0-1", RightEVR: "0:2.0-1"})
+	result, err := comparator.CompareNativeVersion(context.Background(), ports.NativeVersionComparisonRequest{TargetDigest: digestByte('b'), Family: ports.NativePackageRPM, LeftEVR: "1.0-1", RightEVR: "0:2.0-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestTargetNativeVersionComparatorUsesConstantRPMLuaProgramAndEnvData(t *tes
 	if spec.Name != "/usr/bin/rpm" || fmt.Sprint(spec.Args) != fmt.Sprint([]string{"--eval", rpmVerCmpProgram}) || spec.HostNetwork {
 		t.Fatalf("rpm Lua spec = %+v", spec)
 	}
-	if fmt.Sprint(spec.Env) != fmt.Sprint([]string{"SYNAPSE_SCA_RPM_LEFT_EVR=0:1.0-1", "SYNAPSE_SCA_RPM_RIGHT_EVR=0:2.0-1"}) || strings.Contains(spec.Args[1], "0:1.0-1") || strings.Contains(spec.Args[1], "0:2.0-1") {
+	if fmt.Sprint(spec.Env) != fmt.Sprint([]string{"SYNAPSE_SCA_RPM_LEFT_EVR=0:1.0-1", "SYNAPSE_SCA_RPM_RIGHT_EVR=0:2.0-1"}) || strings.Contains(spec.Args[1], "1.0-1") || strings.Contains(spec.Args[1], "0:2.0-1") {
 		t.Fatalf("rpm argv/env dataflow = %+v", spec)
 	}
 }
