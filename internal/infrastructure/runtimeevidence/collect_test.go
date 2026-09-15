@@ -72,6 +72,9 @@ func TestCollectDpkgResolvesLoadedPackageWithFileID(t *testing.T) {
 }
 
 func TestCollectDpkgUsrmergeSymlinkResolvesByRealPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("dpkg usrmerge evidence requires Linux symlink semantics")
+	}
 	root := dpkgRoot(t)
 	// usrmerge: /lib is a symlink to /usr/lib, and the load is observed under /lib while dpkg records /usr/lib.
 	if err := os.Symlink(filepath.Join(root, "usr", "lib"), filepath.Join(root, "lib")); err != nil {
