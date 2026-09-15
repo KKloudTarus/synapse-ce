@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -48,6 +49,13 @@ func (w *mutationWriter) Write(data []byte) (int, error) {
 		}
 		if closeErr != nil {
 			return 0, closeErr
+		}
+		info, err := os.Stat(w.path)
+		if err != nil {
+			return 0, err
+		}
+		if err := os.Chtimes(w.path, info.ModTime(), info.ModTime().Add(2*time.Second)); err != nil {
+			return 0, err
 		}
 		w.mutated = true
 	}

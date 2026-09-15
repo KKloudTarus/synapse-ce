@@ -1249,12 +1249,27 @@ func (evaluator ovalEvaluator) evaluateTest(testID, criterionComment string) (ov
 	if predicateKind != bench.NativePredicateEVRLessThan && predicateKind != bench.NativePredicateEVRGreaterThan && predicateKind != bench.NativePredicateVersionEqualsZero {
 		return unsupportedOVALResult("state", state.id, "state predicate is unsupported"), nil
 	}
+	if evaluator.selection.PackageFamily == "deb" && predicateKind == bench.NativePredicateEVRLessThan && rightEVR == "0:0" {
+		return unsupportedOVALResult("state", state.id, "Debian zero boundary does not establish an affected or remediated version range"), nil
+	}
 
 	family := ports.NativePackageDeb
 	method := "target-native-dpkg"
 	if evaluator.selection.PackageFamily == "rpm" {
 		family = ports.NativePackageRPM
 		method = "target-native-rpm"
+		if predicateKind != bench.NativePredicateVersionEqualsZero {
+			canonicalCandidate, err := canonicalRPMEVR(candidateEVR)
+			if err != nil {
+				return unsupportedOVALResult("state", state.id, "candidate RPM EVR cannot be canonicalized"), nil
+			}
+			canonicalBoundary, err := canonicalRPMEVR(rightEVR)
+			if err != nil {
+				return unsupportedOVALResult("state", state.id, "boundary RPM EVR cannot be canonicalized"), nil
+			}
+			candidateEVR = canonicalCandidate
+			rightEVR = canonicalBoundary
+		}
 	}
 	comparison, err := evaluator.comparator.CompareNativeVersion(evaluator.ctx, ports.NativeVersionComparisonRequest{TargetDigest: evaluator.target.Digest, Family: family, LeftEVR: candidateEVR, RightEVR: rightEVR})
 	if err != nil {

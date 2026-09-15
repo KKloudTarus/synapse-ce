@@ -74,9 +74,19 @@ func (comparator *TargetNativeVersionComparator) CompareNativeVersion(ctx contex
 		}
 		return ports.NativeVersionComparisonResult{Relation: relation, ExecutionDigest: nativeExecutionDigest(request, specs, results)}, nil
 	case ports.NativePackageRPM:
+		leftEVR, err := canonicalRPMEVR(request.LeftEVR)
+		if err != nil {
+			return ports.NativeVersionComparisonResult{}, fmt.Errorf("%w: left RPM EVR: %v", ErrTargetNativeComparisonUnavailable, err)
+		}
+		rightEVR, err := canonicalRPMEVR(request.RightEVR)
+		if err != nil {
+			return ports.NativeVersionComparisonResult{}, fmt.Errorf("%w: right RPM EVR: %v", ErrTargetNativeComparisonUnavailable, err)
+		}
+		request.LeftEVR = leftEVR
+		request.RightEVR = rightEVR
 		spec := ports.ToolSpec{
 			Name: comparator.rpmPath, Args: []string{"--eval", rpmVerCmpProgram},
-			Env:            []string{"SYNAPSE_SCA_RPM_LEFT_EVR=" + request.LeftEVR, "SYNAPSE_SCA_RPM_RIGHT_EVR=" + request.RightEVR},
+			Env:            []string{"SYNAPSE_SCA_RPM_LEFT_EVR=" + leftEVR, "SYNAPSE_SCA_RPM_RIGHT_EVR=" + rightEVR},
 			MaxOutputBytes: 16 << 10, HostNetwork: false,
 		}
 		result, err := comparator.runner.Run(ctx, spec)

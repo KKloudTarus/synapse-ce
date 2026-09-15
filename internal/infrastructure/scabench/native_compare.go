@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -31,6 +32,43 @@ func (evr RPMEVR) Canonical() (string, error) {
 		return "", fmt.Errorf("RPM epoch cannot be negative")
 	}
 	return strconv.Itoa(epoch) + ":" + evr.Version + "-" + evr.Release, nil
+}
+
+func canonicalRPMEVR(value string) (string, error) {
+	if value == "" || strings.TrimSpace(value) != value || containsNativeControl(value) || strings.IndexFunc(value, unicode.IsSpace) >= 0 {
+		return "", fmt.Errorf("RPM EVR must be an exact non-whitespace value")
+	}
+	if strings.Count(value, ":") > 1 || strings.Count(value, "-") > 1 {
+		return "", fmt.Errorf("RPM EVR has an invalid epoch, version, or release")
+	}
+
+	epoch := uint64(0)
+	versionRelease := value
+	if rawEpoch, remainder, present := strings.Cut(value, ":"); present {
+		if rawEpoch == "" || remainder == "" {
+			return "", fmt.Errorf("RPM EVR has an invalid epoch")
+		}
+		parsed, err := strconv.ParseUint(rawEpoch, 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("RPM EVR has an invalid epoch")
+		}
+		epoch = parsed
+		versionRelease = remainder
+	}
+
+	version := versionRelease
+	release := ""
+	if parsedVersion, parsedRelease, present := strings.Cut(versionRelease, "-"); present {
+		if parsedVersion == "" || parsedRelease == "" {
+			return "", fmt.Errorf("RPM EVR has an invalid version or release")
+		}
+		version = parsedVersion
+		release = "-" + parsedRelease
+	}
+	if version == "" || strings.ContainsAny(version, ":-") {
+		return "", fmt.Errorf("RPM EVR has an invalid version")
+	}
+	return strconv.FormatUint(epoch, 10) + ":" + version + release, nil
 }
 
 func validateNativeVersionRequest(request ports.NativeVersionComparisonRequest) error {
