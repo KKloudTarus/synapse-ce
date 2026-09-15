@@ -2,6 +2,7 @@ package scabench
 
 import (
 	"bytes"
+	"compress/bzip2"
 	"compress/gzip"
 	"context"
 	"encoding/xml"
@@ -15,8 +16,8 @@ import (
 )
 
 const (
-	maxOVALCompressedBytes   = 8 << 20
-	maxOVALDecompressedBytes = 32 << 20
+	maxOVALCompressedBytes   = 96 << 20
+	maxOVALDecompressedBytes = 1536 << 20
 )
 
 // NativeComparatorFactory creates a comparator bound to the exact selected
@@ -366,24 +367,31 @@ func parseVendorOVAL(body []byte) (ovalDocument, error) {
 }
 
 func boundedOVALBytes(body []byte) ([]byte, error) {
-	if len(body) == 0 || len(body) > maxOVALCompressedBytes {
+	return boundedOVALBytesWithLimits(body, maxOVALCompressedBytes, maxOVALDecompressedBytes)
+}
+
+func boundedOVALBytesWithLimits(body []byte, compressedLimit, decompressedLimit int) ([]byte, error) {
+	if len(body) == 0 || len(body) > compressedLimit {
 		return nil, fmt.Errorf("vendor OVAL input size is invalid")
 	}
 	reader := io.Reader(bytes.NewReader(body))
-	if len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b {
+	switch {
+	case len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b:
 		gzipReader, err := gzip.NewReader(reader)
 		if err != nil {
 			return nil, fmt.Errorf("open vendor OVAL gzip: %w", err)
 		}
 		defer func() { _ = gzipReader.Close() }()
 		reader = gzipReader
+	case len(body) >= 3 && body[0] == 'B' && body[1] == 'Z' && body[2] == 'h':
+		reader = bzip2.NewReader(reader)
 	}
-	limited := io.LimitReader(reader, maxOVALDecompressedBytes+1)
+	limited := io.LimitReader(reader, int64(decompressedLimit)+1)
 	decoded, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, fmt.Errorf("read vendor OVAL: %w", err)
 	}
-	if len(decoded) == 0 || len(decoded) > maxOVALDecompressedBytes {
+	if len(decoded) == 0 || len(decoded) > decompressedLimit {
 		return nil, fmt.Errorf("vendor OVAL expands beyond its limit")
 	}
 	return decoded, nil
