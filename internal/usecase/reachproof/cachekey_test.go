@@ -85,7 +85,9 @@ func TestCacheKeyFingerprintNoBoundaryCollision(t *testing.T) {
 
 // The fingerprint is stable across calls (deterministic content addressing).
 func TestCacheKeyFingerprintStable(t *testing.T) {
-	if completeKey().Fingerprint() != completeKey().Fingerprint() {
+	first := completeKey().Fingerprint()
+	second := completeKey().Fingerprint()
+	if first != second {
 		t.Fatal("fingerprint must be deterministic")
 	}
 }

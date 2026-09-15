@@ -34,18 +34,18 @@ func TestLoadBytesValid(t *testing.T) {
 }
 
 func TestLoadBytesRejectsUnknownField(t *testing.T) {
-	// A misspelled key must be an error, not a silently-empty ruleset.
+	// An unknown key must be an error, not a silently-empty ruleset.
 	bad := `
 python:
   sinks:
     - modules: ["m"]
       names: ["n"]
-      clas: "sql"
+      unknown_field: "sql"
       cwe: "CWE-89"
       rule: "r"
 `
 	if _, err := LoadBytes([]byte(bad)); err == nil {
-		t.Error("a misspelled field (clas) must fail to parse")
+		t.Error("an unknown field must fail to parse")
 	}
 }
 

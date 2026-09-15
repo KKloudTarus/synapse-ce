@@ -78,7 +78,7 @@ func TestKustomizeRendersRootOnlyNoDoubleCount(t *testing.T) {
 	if len(priv) != 1 {
 		t.Fatalf("want exactly 1 privileged finding (render only, no double-count), got %d: %+v", len(priv), priv)
 	}
-	if !strings.Contains(priv[0].File, filepath.Join("overlays", "prod")) {
+	if !strings.Contains(priv[0].File, "overlays/prod") {
 		t.Errorf("finding must be attributed to the rendered root overlay, got %q", priv[0].File)
 	}
 }
@@ -99,7 +99,7 @@ func TestKustomizeDisabledScansRaw(t *testing.T) {
 	if len(priv) != 1 {
 		t.Fatalf("with kustomize disabled the raw manifest must be scanned once, got %d: %+v", len(priv), priv)
 	}
-	if !strings.Contains(priv[0].File, filepath.Join("base", "deployment.yaml")) {
+	if !strings.Contains(priv[0].File, "base/deployment.yaml") {
 		t.Errorf("disabled scan should attribute to the raw file, got %q", priv[0].File)
 	}
 }
@@ -155,7 +155,7 @@ func TestKustomizeRenderFailureNoSuppression(t *testing.T) {
 	if len(priv) != 1 {
 		t.Fatalf("a failed render must NOT suppress the raw scan; want 1 privileged finding, got %d: %+v", len(priv), priv)
 	}
-	if !strings.Contains(priv[0].File, filepath.Join("base", "deployment.yaml")) {
+	if !strings.Contains(priv[0].File, "base/deployment.yaml") {
 		t.Errorf("finding must come from the raw scan of the source file, got %q", priv[0].File)
 	}
 }
@@ -276,7 +276,7 @@ func TestKustomizeTruncatedRenderNoSuppression(t *testing.T) {
 		t.Fatalf("ScanConfigs: %v", err)
 	}
 	priv := countRule(got, "kubernetes-privileged")
-	if len(priv) != 1 || !strings.Contains(priv[0].File, filepath.Join("base", "deployment.yaml")) {
+	if len(priv) != 1 || !strings.Contains(priv[0].File, "base/deployment.yaml") {
 		t.Fatalf("a truncated render must fall back to the raw scan (no suppression); got %d: %+v", len(priv), priv)
 	}
 }
@@ -315,7 +315,7 @@ func TestKustomizeSharedBaseFailedOverlayNoSuppression(t *testing.T) {
 	}
 	rawScanned := false
 	for _, f := range countRule(got, "kubernetes-privileged") {
-		if strings.Contains(f.File, filepath.Join("base", "deployment.yaml")) {
+		if strings.Contains(f.File, "base/deployment.yaml") {
 			rawScanned = true
 		}
 	}

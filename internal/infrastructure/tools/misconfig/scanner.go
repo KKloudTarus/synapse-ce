@@ -110,7 +110,7 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 				}
 				continue
 			}
-			relDir := strings.TrimPrefix(strings.TrimPrefix(dir, root), string(os.PathSeparator))
+			relDir := filepath.ToSlash(strings.TrimPrefix(strings.TrimPrefix(dir, root), string(os.PathSeparator)))
 			res, ok := s.renderKustomization(ctx, root, dir, relDir)
 			if !ok {
 				for f := range closure {
@@ -182,7 +182,7 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		if d.Name() == "Chart.yaml" {
 			if !strings.Contains(path, string(os.PathSeparator)+"charts"+string(os.PathSeparator)) && count < maxFiles {
 				count++
-				relDir := strings.TrimPrefix(strings.TrimPrefix(filepath.Dir(path), root), string(os.PathSeparator))
+				relDir := filepath.ToSlash(strings.TrimPrefix(strings.TrimPrefix(filepath.Dir(path), root), string(os.PathSeparator)))
 				result := scanHelmChart(ctx, s.helmRun, s.helmDir, s.helmBin, filepath.Dir(path), relDir)
 				out = append(out, result.findings...)
 				result.findings = nil
@@ -207,7 +207,7 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		if e != nil || isBinary(data) {
 			return nil
 		}
-		rel := strings.TrimPrefix(strings.TrimPrefix(path, root), string(os.PathSeparator))
+		rel := filepath.ToSlash(strings.TrimPrefix(strings.TrimPrefix(path, root), string(os.PathSeparator)))
 		// A .tfvars file carries variable values only; collect them for resolution, never scan it for rules.
 		if isTFVars {
 			collectTFVarsFile(data, tfSetFor(filepath.Dir(rel)))

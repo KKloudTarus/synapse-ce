@@ -3,6 +3,7 @@ package runtimeevidence
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/runtimereach"
@@ -35,6 +36,9 @@ func dpkgRoot(t *testing.T) string {
 }
 
 func TestCollectDpkgResolvesLoadedPackageWithFileID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("dpkg runtime evidence requires Linux filesystem semantics")
+	}
 	root := dpkgRoot(t)
 	rep := NewCollector(root).Collect([]string{"/usr/lib/x86_64-linux-gnu/libssl.so.3"})
 	if len(rep.Coverage) != 0 {
@@ -68,6 +72,9 @@ func TestCollectDpkgResolvesLoadedPackageWithFileID(t *testing.T) {
 }
 
 func TestCollectDpkgUsrmergeSymlinkResolvesByRealPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("dpkg usrmerge evidence requires Linux symlink semantics")
+	}
 	root := dpkgRoot(t)
 	// usrmerge: /lib is a symlink to /usr/lib, and the load is observed under /lib while dpkg records /usr/lib.
 	if err := os.Symlink(filepath.Join(root, "usr", "lib"), filepath.Join(root, "lib")); err != nil {
@@ -91,6 +98,9 @@ func TestCollectDpkgUsrmergeSymlinkResolvesByRealPath(t *testing.T) {
 // package installed at DIFFERENT versions must each resolve to their own version, not collapse to the
 // last status stanza. The loaded amd64 object must carry the amd64 version.
 func TestCollectDpkgMultiarchResolvesPerArchVersion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("dpkg multiarch metadata uses colon-qualified filenames")
+	}
 	root := t.TempDir()
 	writeFile(t, root, "/var/lib/dpkg/status",
 		"Package: libc6\nVersion: 2.39-amd64\nArchitecture: amd64\n\nPackage: libc6\nVersion: 2.39-i386\nArchitecture: i386\n\n")

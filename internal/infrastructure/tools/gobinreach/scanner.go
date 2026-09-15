@@ -106,7 +106,7 @@ func symbolsFromGoBinary(path string) (names []string) {
 		return nil
 	}
 	n, _ := f.Read(magic)
-	f.Close()
+	_ = f.Close()
 	if n < 4 || !looksLikeObject(magic) { // cheap pre-filter so we don't open every source file as a binary
 		return nil
 	}
@@ -149,7 +149,7 @@ func looksLikeObject(magic []byte) bool {
 // stripped binary).
 func goPclntab(path string) (pclntab []byte, textStart uint64, ok bool) {
 	if ef, err := elf.Open(path); err == nil {
-		defer ef.Close()
+		defer func() { _ = ef.Close() }()
 		sec := ef.Section(".gopclntab")
 		if sec == nil {
 			return nil, 0, false
@@ -165,7 +165,7 @@ func goPclntab(path string) (pclntab []byte, textStart uint64, ok bool) {
 		return data, text, true
 	}
 	if mf, err := macho.Open(path); err == nil {
-		defer mf.Close()
+		defer func() { _ = mf.Close() }()
 		sec := mf.Section("__gopclntab")
 		if sec == nil {
 			return nil, 0, false
@@ -181,7 +181,7 @@ func goPclntab(path string) (pclntab []byte, textStart uint64, ok bool) {
 		return data, text, true
 	}
 	if pf, err := pe.Open(path); err == nil {
-		defer pf.Close()
+		defer func() { _ = pf.Close() }()
 		sec := pf.Section(".gopclntab")
 		if sec == nil {
 			// A PE Go binary may keep the table under the runtime.pclntab symbol rather than a named section;

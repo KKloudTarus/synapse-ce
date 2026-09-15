@@ -105,7 +105,7 @@ func readWorkspace(ctx context.Context, directory string) (out ports.OwnershipFi
 	if err != nil {
 		return out, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	for _, path := range selectionPaths {
 		if err := ctx.Err(); err != nil {
 			return out, err
@@ -203,7 +203,7 @@ func (r *Reader) OwnershipPath(directory, raw string, manifest bool) (string, er
 	if err != nil {
 		return "", err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	file, err := openRegular(root, path)
 	if err != nil {
 		return "", err

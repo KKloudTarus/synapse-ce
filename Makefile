@@ -1,4 +1,5 @@
-.PHONY: help install tools dev build run test harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify \
+.PHONY: help install tools dev build run test harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify sca-bench-verify \
+        sca-accuracy-test sca-accuracy-smoke sca-accuracy-binary-pin sca-accuracy-frozen-sbom-verify sca-accuracy-source-native-evidence sca-accuracy-prepare sca-accuracy-cell sca-accuracy-finalize sca-accuracy-publication sca-accuracy-verify \
         rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down kind-smoke helm-render-test clean web-dev web-build smoke release-smoke
 
 GO ?= go
@@ -19,6 +20,48 @@ RULEPACK_PUBLIC_KEY ?= rulepack-release.pub
 RULEPACK_EVIDENCE ?= rulepack-gate-evidence.json
 RULEPACK_EVIDENCE_PUBLIC_KEY ?= rulepack-evidence.pub
 RULEPACK_PHASE ?= promotion
+SCA_ACCURACY_REPOSITORY_ROOT ?= $(CURDIR)
+SCA_ACCURACY_PLAN ?=
+SCA_ACCURACY_SOURCE_FREEZE ?=
+SCA_ACCURACY_ORACLE_CANDIDATE ?=
+SCA_ACCURACY_CROSS_CHECK ?=
+SCA_ACCURACY_ADJUDICATION ?=
+SCA_ACCURACY_ACCOUNTABLE_REVIEW ?=
+SCA_ACCURACY_FINAL_ORACLE_FREEZE ?=
+SCA_ACCURACY_SOURCE_CASE_EVIDENCE ?=
+SCA_ACCURACY_SOURCE_EVIDENCE_PLAN ?=
+SCA_ACCURACY_SOURCE_EVIDENCE_OUTPUT ?=
+SCA_ACCURACY_NATIVE_EVIDENCE ?=
+SCA_ACCURACY_NATIVE_EVIDENCE_OUTPUT ?=
+SCA_ACCURACY_CATALOG ?=
+SCA_ACCURACY_CATALOG_OUTPUT ?=
+SCA_ACCURACY_BINARY_REFERENCE ?=
+SCA_ACCURACY_BINARY_PATH ?=
+SCA_ACCURACY_ENGINE ?=
+SCA_ACCURACY_MANIFEST_TEMPLATE_DIR ?=
+SCA_ACCURACY_RATCHET_OUTPUT ?=
+SCA_ACCURACY_FROZEN_SBOM ?=
+SCA_ACCURACY_FROZEN_SBOM_DIGEST ?=
+SCA_ACCURACY_CAPTURE_MANIFEST ?=
+SCA_ACCURACY_CAPTURE_RECORD_OUTPUT ?=
+SCA_ACCURACY_OUTPUT ?=
+SCA_ACCURACY_REPETITION ?=
+SCA_ACCURACY_RETENTION_LOCATOR ?=
+SCA_ACCURACY_RETENTION_POLICY ?=
+SCA_ACCURACY_LEDGER ?=
+SCA_ACCURACY_ORACLE ?=
+SCA_ACCURACY_RATCHET ?=
+SCA_ACCURACY_PUBLICATION ?=
+SCA_ACCURACY_PUBLICATION_CONTROL ?=
+SCA_ACCURACY_PUBLICATION_OUTPUT ?=
+SCA_ACCURACY_RESULT_OUTPUT ?=
+SCA_ACCURACY_REPORT_OUTPUT ?=
+SCA_ACCURACY_COMPARISON_OUTPUT ?=
+SCA_ACCURACY_FALSIFIER_OUTPUT ?=
+SCA_ACCURACY_EVIDENCE_SUMMARY_OUTPUT ?=
+SCA_ACCURACY_FALSIFIER_SPEC ?= internal/usecase/scabench/testdata/semantic-comparison-falsifiers.json
+SCA_ACCURACY_OBSERVATIONS ?=
+SCA_ACCURACY_COMPARISON_PAIRS ?=
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -86,6 +129,45 @@ ai-triage-verify: ## Reproducibly verify AI-triage eval + shadow gate offline (n
 	$(GO) build ./cmd/synapse-fptriage-eval ./cmd/synapse-fptriage-compare ./cmd/synapse-fptriage-drift ./cmd/synapse-fptriage-release ./cmd/synapse-fptriage-curate
 	$(GO) test -count=1 ./internal/usecase/sca/ -run 'AIEvaluation|FPTriage|AITriage|GoldenDataset|GatePolicy'
 	$(GO) test -count=1 ./internal/usecase/fptriage/...
+
+sca-bench-verify: ## Replay the published SCA benchmark fixture offline (no scanners)
+	$(GO) test -count=1 ./cmd/synapse-bench -run '^TestPublishedBenchmarkReplay$$'
+	$(GO) test -count=1 ./internal/usecase/scabench -run '^TestPublishedBenchmarkFixture'
+
+sca-accuracy-test: ## Run focused SCA accuracy unit and command tests
+	$(GO) test -count=1 ./internal/usecase/scabench ./internal/infrastructure/scabench ./cmd/synapse-sca-inputs ./cmd/synapse-sca-cycle ./cmd/synapse-sca-bench ./cmd/synapse-bench
+
+sca-accuracy-smoke: ## Offline SCA accuracy smoke gate (no scanners)
+	$(MAKE) sca-bench-verify
+	$(GO) test -count=1 ./internal/usecase/scabench -run 'HistoricalReferenceInventory|SemanticComparisonFalsifierSpec|Cycle'
+	$(GO) test -count=1 ./internal/infrastructure/scabench -run 'CompareBundles|Falsifier|Cycle|RepositoryAsset|Native'
+
+sca-accuracy-binary-pin: ## Derive a benchmark binary pin and dependent ratchet bindings
+	$(GO) run ./cmd/synapse-sca-inputs -mode binary-pin -repository-root "$(SCA_ACCURACY_REPOSITORY_ROOT)" -source-freeze-output "$(SCA_ACCURACY_SOURCE_FREEZE)" -manifest-template-dir "$(SCA_ACCURACY_MANIFEST_TEMPLATE_DIR)" -catalog "$(SCA_ACCURACY_CATALOG)" -ratchet "$(SCA_ACCURACY_RATCHET)" -binary-reference "$(SCA_ACCURACY_BINARY_REFERENCE)" -binary-path "$(SCA_ACCURACY_BINARY_PATH)" -engine "$(SCA_ACCURACY_ENGINE)" -catalog-output "$(SCA_ACCURACY_CATALOG_OUTPUT)" -ratchet-output "$(SCA_ACCURACY_RATCHET_OUTPUT)"
+
+sca-accuracy-frozen-sbom-verify: ## Verify one frozen canonical CycloneDX SBOM without generating it
+	@test -n "$(SCA_ACCURACY_FROZEN_SBOM)" && test -n "$(SCA_ACCURACY_FROZEN_SBOM_DIGEST)"
+	@jq -e '.bomFormat == "CycloneDX" and (.specVersion | type == "string") and (.components | type == "array")' "$(SCA_ACCURACY_FROZEN_SBOM)" >/dev/null
+	@tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; jq -S -c . "$(SCA_ACCURACY_FROZEN_SBOM)" > "$$tmp"; cmp -s "$(SCA_ACCURACY_FROZEN_SBOM)" "$$tmp"; test "sha256:$$(sha256sum "$(SCA_ACCURACY_FROZEN_SBOM)" | cut -d' ' -f1)" = "$(SCA_ACCURACY_FROZEN_SBOM_DIGEST)"
+
+sca-accuracy-source-native-evidence: ## Generate write-once scanner-free source and target-native evidence
+	$(GO) run ./cmd/synapse-sca-cycle -mode source-native-evidence -repository-root "$(SCA_ACCURACY_REPOSITORY_ROOT)" -source-freeze "$(SCA_ACCURACY_SOURCE_FREEZE)" -catalog "$(SCA_ACCURACY_CATALOG)" -source-evidence-plan "$(SCA_ACCURACY_SOURCE_EVIDENCE_PLAN)" -source-evidence-output "$(SCA_ACCURACY_SOURCE_EVIDENCE_OUTPUT)" -native-evidence-output "$(SCA_ACCURACY_NATIVE_EVIDENCE_OUTPUT)"
+
+sca-accuracy-prepare: ## Verify the fully review-gated frozen source and final oracle inputs
+	$(GO) run ./cmd/synapse-sca-cycle -mode prepare -repository-root "$(SCA_ACCURACY_REPOSITORY_ROOT)" -plan "$(SCA_ACCURACY_PLAN)" -source-freeze "$(SCA_ACCURACY_SOURCE_FREEZE)" -oracle-candidate "$(SCA_ACCURACY_ORACLE_CANDIDATE)" -cross-check "$(SCA_ACCURACY_CROSS_CHECK)" -adjudication "$(SCA_ACCURACY_ADJUDICATION)" -accountable-review "$(SCA_ACCURACY_ACCOUNTABLE_REVIEW)" -final-oracle-freeze "$(SCA_ACCURACY_FINAL_ORACLE_FREEZE)"
+
+sca-accuracy-cell: ## Capture one planned cell (0 accepted, 2 retained failed attempt, 1 pre-dispatch failure)
+	$(GO) run ./cmd/synapse-sca-cycle -mode cell -repository-root "$(SCA_ACCURACY_REPOSITORY_ROOT)" -source-freeze "$(SCA_ACCURACY_SOURCE_FREEZE)" -oracle-candidate "$(SCA_ACCURACY_ORACLE_CANDIDATE)" -cross-check "$(SCA_ACCURACY_CROSS_CHECK)" -adjudication "$(SCA_ACCURACY_ADJUDICATION)" -accountable-review "$(SCA_ACCURACY_ACCOUNTABLE_REVIEW)" -final-oracle-freeze "$(SCA_ACCURACY_FINAL_ORACLE_FREEZE)" -plan "$(SCA_ACCURACY_PLAN)" -catalog "$(SCA_ACCURACY_CATALOG)" -capture-manifest "$(SCA_ACCURACY_CAPTURE_MANIFEST)" -native-evidence "$(SCA_ACCURACY_NATIVE_EVIDENCE)" -capture-record-output "$(SCA_ACCURACY_CAPTURE_RECORD_OUTPUT)" -output "$(SCA_ACCURACY_OUTPUT)" -repetition "$(SCA_ACCURACY_REPETITION)" -retention-locator "$(SCA_ACCURACY_RETENTION_LOCATOR)" -retention-policy "$(SCA_ACCURACY_RETENTION_POLICY)"
+
+sca-accuracy-finalize: ## Compare, execute falsifiers, reduce, ratchet, and render measured cycle records
+	$(GO) run ./cmd/synapse-sca-cycle -mode finalize -plan "$(SCA_ACCURACY_PLAN)" -ledger "$(SCA_ACCURACY_LEDGER)" -catalog "$(SCA_ACCURACY_CATALOG)" -oracle "$(SCA_ACCURACY_ORACLE)" -ratchet "$(SCA_ACCURACY_RATCHET)" -result-output "$(SCA_ACCURACY_RESULT_OUTPUT)" -report-output "$(SCA_ACCURACY_REPORT_OUTPUT)" -comparison-output "$(SCA_ACCURACY_COMPARISON_OUTPUT)" -falsifier-output "$(SCA_ACCURACY_FALSIFIER_OUTPUT)" -falsifier-spec "$(SCA_ACCURACY_FALSIFIER_SPEC)" $(foreach item,$(SCA_ACCURACY_OBSERVATIONS),-observation "$(item)") $(foreach item,$(SCA_ACCURACY_COMPARISON_PAIRS),-comparison-pair "$(item)")
+
+sca-accuracy-publication: ## Bind actual final artifacts into a manifest and candidate evidence summary
+	$(GO) run ./cmd/synapse-sca-cycle -mode publication -plan "$(SCA_ACCURACY_PLAN)" -ledger "$(SCA_ACCURACY_LEDGER)" -publication-control "$(SCA_ACCURACY_PUBLICATION_CONTROL)" -publication-output "$(SCA_ACCURACY_PUBLICATION_OUTPUT)" -accountable-review "$(SCA_ACCURACY_ACCOUNTABLE_REVIEW)" -source-case-evidence "$(SCA_ACCURACY_SOURCE_CASE_EVIDENCE)" -native-evidence "$(SCA_ACCURACY_NATIVE_EVIDENCE)" -oracle-candidate "$(SCA_ACCURACY_ORACLE_CANDIDATE)" -cross-check "$(SCA_ACCURACY_CROSS_CHECK)" -adjudication "$(SCA_ACCURACY_ADJUDICATION)" -final-oracle-freeze "$(SCA_ACCURACY_FINAL_ORACLE_FREEZE)" -ratchet "$(SCA_ACCURACY_RATCHET)" -comparison-output "$(SCA_ACCURACY_COMPARISON_OUTPUT)" -falsifier-output "$(SCA_ACCURACY_FALSIFIER_OUTPUT)" -result-output "$(SCA_ACCURACY_RESULT_OUTPUT)" -report-output "$(SCA_ACCURACY_REPORT_OUTPUT)" -evidence-summary-output "$(SCA_ACCURACY_EVIDENCE_SUMMARY_OUTPUT)"
+
+sca-accuracy-verify: ## Run offline SCA accuracy verification without scanners
+	$(MAKE) sca-accuracy-smoke
+	$(GO) test -count=1 ./cmd/synapse-sca-inputs ./cmd/synapse-sca-cycle ./internal/usecase/scabench ./internal/infrastructure/scabench
 
 rulepack-verify: ## Verify a signed RulePack against the externally pinned release key
 	$(GO) run ./cmd/synapse-cli rulepack verify --artifact $(RULEPACK_ARTIFACT) --public-key $(RULEPACK_PUBLIC_KEY)
