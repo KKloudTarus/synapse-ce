@@ -57,6 +57,61 @@ func TestSourceOnlyOraclePipelineBuildsAndAdjudicatesDebianAndRPMCases(t *testin
 	}
 }
 
+func TestAutomatedCrossCheckCarriesNativeNotAffectedTruth(t *testing.T) {
+	freeze := testSourceFreeze(t)
+	freezeDigest, err := DigestSourceFreeze(freeze)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := NativeEvidenceSet{SchemaVersion: NativeEvidenceSetSchemaVersion, CycleID: freeze.CycleID, SourceFreezeDigest: freezeDigest, Targets: []NativeTargetEvidence{{
+		TargetID: "rpm-target", TargetDigest: cycleTestDigest('a'), PackageFamily: "rpm", Comparisons: []NativeComparisonRecord{{
+			SchemaVersion: NativeComparisonSchemaVersion, ID: "zero-compare", TargetID: "rpm-target", TargetDigest: cycleTestDigest('a'), PackageFamily: "rpm", PackageIdentity: "binary:pkg", CandidateEVR: "0", FixedEVR: "0", PredicateKind: NativePredicateVersionEqualsZero, Relation: "equal", Method: "target-native-rpm", ExecutionDigest: cycleTestDigest('b'),
+		}},
+	}}}
+	nativeDigest, err := DigestNativeEvidenceSet(native)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := SourceCaseEvidenceSet{SchemaVersion: SourceCaseEvidenceSchemaVersion, CycleID: freeze.CycleID, SourceFreezeDigest: freezeDigest, NativeEvidenceDigest: nativeDigest, Cases: []SourceCaseEvidence{{
+		ID: "not-affected-case", TargetID: "rpm-target", Component: Component{PURL: "pkg:rpm/suse/pkg@0", Version: "0"}, AdvisoryID: "CVE-2026-0001", DerivedTruth: TruthNotAffected, NativeComparisonIDs: []string{"zero-compare"}, Rationale: "explicit vendor not-affected sentinel", Citations: []ContentReference{{Locator: "benchmark/citation.json", Digest: cycleTestDigest('c'), Size: 1}},
+	}}}
+	candidate, err := BuildOracleCandidate(freeze, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check, err := BuildAutomatedCrossCheck(source, native, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if check.Status != "passed" || len(check.Cases) != 1 || check.Cases[0].Truth != TruthNotAffected {
+		t.Fatalf("not-affected cross-check = %+v", check)
+	}
+}
+
+func TestNativeComparisonRecordDecodesLegacyEVRPredicate(t *testing.T) {
+	legacy := NativeComparisonRecord{
+		SchemaVersion: NativeComparisonSchemaVersion, ID: "legacy-compare", TargetID: "target-a", TargetDigest: cycleTestDigest('a'), PackageFamily: "deb", PackageIdentity: "binary:pkg", CandidateEVR: "1", FixedEVR: "2", Relation: "before", Method: "target-native-dpkg", ExecutionDigest: cycleTestDigest('b'),
+	}
+	body, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeNativeComparisonRecord(bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.PredicateKind != "" {
+		t.Fatalf("legacy predicate kind was rewritten to %q", decoded.PredicateKind)
+	}
+	truth, err := nativeComparisonTruth([]NativeComparisonRecord{decoded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truth != TruthAffected {
+		t.Fatalf("legacy native truth = %q, want affected", truth)
+	}
+}
+
 func TestSourceOnlyOraclePipelineFailsClosedForDisagreementAndScannerMaterial(t *testing.T) {
 	freeze := testSourceFreeze(t)
 	freezeDigest, err := DigestSourceFreeze(freeze)
