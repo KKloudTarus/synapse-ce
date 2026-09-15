@@ -147,6 +147,72 @@ func TestBuildSourceNativeEvidenceFailsClosedForUnsupportedAndAmbiguousOVALSeman
 	}
 }
 
+func TestBuildSourceNativeEvidenceNormalizesRepeatedUnsupportedBranches(t *testing.T) {
+	pkg := sourceEvidencePackage("pkg", "1", "pkg", "1")
+	oval := sourceOVAL(
+		`<criteria operator="AND"><criterion test_ref="test-bad"/><criterion test_ref="test-bad"/></criteria>`,
+		sourceTest("test-bad", "object-a", "state-bad"),
+		sourceObject("object-a", "pkg"),
+		sourceState("state-bad", "OR", "less than", "2"),
+	)
+	source, _, err := buildSourceEvidenceFixture(t, oval, pkg, &sourceNativeComparator{relations: map[string]int{}})
+	if err != nil {
+		t.Fatalf("build source evidence: %v", err)
+	}
+	if len(source.Cases) != 0 || len(source.Unsupported) != 1 {
+		t.Fatalf("source evidence = %+v", source)
+	}
+	if _, err := bench.BuildOracleCandidate(sourceFixtureFreeze(t, oval), source); err == nil {
+		t.Fatal("scanner-free candidate accepted unsupported vendor OVAL semantics")
+	}
+}
+
+func TestNormalizeSourceEvidenceDiagnosticsRejectsConflictingPayloads(t *testing.T) {
+	base := bench.SourceEvidenceDiagnostic{
+		TargetID:     "target-a",
+		Component:    bench.Component{PURL: "pkg:deb/debian/pkg@1", Version: "1"},
+		DefinitionID: "definition-a",
+		ElementKind:  "state",
+		ElementID:    "state-a",
+		Reason:       "unsupported state",
+	}
+	changedReason := base
+	changedReason.Reason = "different unsupported state"
+	changedVersion := base
+	changedVersion.Component.Version = "2"
+
+	tests := []struct {
+		name           string
+		diagnostics    []bench.SourceEvidenceDiagnostic
+		wantConflict   bool
+		wantNormalized int
+	}{
+		{name: "exact duplicates collapse", diagnostics: []bench.SourceEvidenceDiagnostic{base, base}, wantNormalized: 1},
+		{name: "different reason conflicts", diagnostics: []bench.SourceEvidenceDiagnostic{base, changedReason}, wantConflict: true},
+		{name: "different component version conflicts", diagnostics: []bench.SourceEvidenceDiagnostic{base, changedVersion}, wantConflict: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			normalized, err := normalizeSourceEvidenceDiagnostics(tc.diagnostics)
+			if tc.wantConflict {
+				if err == nil {
+					t.Fatal("conflicting diagnostics were normalized")
+				}
+				if !strings.Contains(err.Error(), "conflicting source evidence diagnostics") {
+					t.Fatalf("conflicting diagnostics error = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(normalized) != tc.wantNormalized {
+				t.Fatalf("normalized diagnostics = %+v", normalized)
+			}
+		})
+	}
+}
+
 func TestBuildSourceNativeEvidenceAcceptsCaseInsensitiveFalseNegation(t *testing.T) {
 	oval := sourceOVAL(`<criteria negate="FALSE"><criterion test_ref="test-a"/></criteria>`, sourceTest("test-a", "object-a", "state-a"), sourceObject("object-a", "pkg"), sourceState("state-a", "AND", "less than", "2"))
 	source, _, err := buildSourceEvidenceFixture(t, oval, sourceEvidencePackage("pkg", "1", "pkg", "1"), &sourceNativeComparator{relations: map[string]int{"2": -1}})
@@ -629,20 +695,24 @@ func TestBuildSourceNativeEvidenceSLESCurrentPredicates(t *testing.T) {
 			tests: `<rpminfo_test id="pkg-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><evr operation="less than">2</evr></rpminfo_state>`, relations: map[string]int{"2": 0}, wantTruth: bench.TruthFixed, wantRecords: 1,
 		},
 		{
-			name: "exact zero sentinel derives not affected", pkgEVR: "0", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test" comment="pkg is not affected"/></criteria>`,
-			tests: `<rpminfo_test id="pkg-test" check="at least one" comment="pkg is ==0"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><version operation="equals">0</version></rpminfo_state>`, relations: map[string]int{"0": 0}, wantTruth: bench.TruthNotAffected, wantRecords: 1,
+			name: "nonzero package sentinel derives not affected", pkgEVR: "1:1-1", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test" comment="pkg is not affected"/></criteria>`,
+			tests: `<rpminfo_test id="pkg-test" check="at least one" comment="pkg is ==0"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><version operation="equals">0</version></rpminfo_state>`, relations: map[string]int{"0": 1}, wantTruth: bench.TruthNotAffected, wantRecords: 1,
+		},
+		{
+			name: "zero package collides with sentinel", pkgEVR: "0", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test" comment="pkg is not affected"/></criteria>`,
+			tests: `<rpminfo_test id="pkg-test" check="at least one" comment="pkg is ==0"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><version operation="equals">0</version></rpminfo_state>`, relations: map[string]int{"0": 0}, wantUnsupported: true,
 		},
 		{
 			name: "nonzero equality is unsupported", pkgEVR: "1:1-1", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test" comment="pkg is not affected"/></criteria>`,
 			tests: `<rpminfo_test id="pkg-test" check="at least one" comment="pkg is ==0"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><version operation="equals">1</version></rpminfo_state>`, relations: map[string]int{}, wantUnsupported: true,
 		},
 		{
-			name: "sentinel collision is unsupported", pkgEVR: "0", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test" comment="pkg is not affected"/></criteria>`,
+			name: "mixed sentinel predicates are unsupported", pkgEVR: "0", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criterion test_ref="pkg-test" comment="pkg is not affected"/></criteria>`,
 			tests: `<rpminfo_test id="pkg-test" check="at least one" comment="pkg is ==0"><object object_ref="pkg-object"/><state state_ref="pkg-state"/></rpminfo_test>`, states: `<rpminfo_state id="pkg-state"><version operation="equals">0</version><evr operation="less than">2</evr></rpminfo_state>`, relations: map[string]int{}, wantUnsupported: true,
 		},
 		{
-			name: "mixed fixed and not affected OR is unsupported", pkgEVR: "0", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criteria operator="OR"><criterion test_ref="fixed-test"/><criterion test_ref="zero-test" comment="pkg is not affected"/></criteria></criteria>`,
-			tests: `<rpminfo_test id="fixed-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="fixed-state"/></rpminfo_test><rpminfo_test id="zero-test" check="at least one" comment="pkg is ==0"><object object_ref="pkg-object"/><state state_ref="zero-state"/></rpminfo_test>`, states: `<rpminfo_state id="fixed-state"><evr operation="less than">1</evr></rpminfo_state><rpminfo_state id="zero-state"><version operation="equals">0</version></rpminfo_state>`, relations: map[string]int{"1": 0, "0": 0}, wantUnsupported: true, wantRecords: 2,
+			name: "mixed fixed and not affected OR is unsupported", pkgEVR: "1:1-1", criteria: `<criteria operator="AND"><criterion test_ref="release-test"/><criteria operator="OR"><criterion test_ref="fixed-test"/><criterion test_ref="zero-test" comment="pkg is not affected"/></criteria></criteria>`,
+			tests: `<rpminfo_test id="fixed-test" check="at least one"><object object_ref="pkg-object"/><state state_ref="fixed-state"/></rpminfo_test><rpminfo_test id="zero-test" check="at least one" comment="pkg is ==0"><object object_ref="pkg-object"/><state state_ref="zero-state"/></rpminfo_test>`, states: `<rpminfo_state id="fixed-state"><evr operation="less than">1</evr></rpminfo_state><rpminfo_state id="zero-state"><version operation="equals">0</version></rpminfo_state>`, relations: map[string]int{"1": 0, "0": 1}, wantUnsupported: true, wantRecords: 2,
 		},
 	}
 	for _, tc := range cases {
