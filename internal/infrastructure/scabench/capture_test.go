@@ -470,7 +470,7 @@ func TestExternalProfilesUsePinnedNoNetworkSpecs(t *testing.T) {
 		wantEnv []string
 	}{
 		{engine: bench.EngineTrivy, stdout: `{"SchemaVersion":2,"Trivy":{"Version":"1.2.3"},"Results":[]}`, want: []string{"sbom", "--format", "json", "--scanners", "vuln", "--cache-dir", "{db}", "--config", "{config}", "--ignorefile", "{ignore}", "--skip-db-update", "--skip-java-db-update", "--skip-version-check", "--skip-vex-repo-update", "--offline-scan", "--disable-telemetry", "--quiet", "--exit-code", "0", "{sbom}"}},
-		{engine: bench.EngineOSVScanner, stdout: `{"results":[]}`, want: []string{"scan", "source", "--offline", "--format", "json", "--config={config}", "--lockfile={sbom}"}, wantEnv: []string{"OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY={db}"}},
+		{engine: bench.EngineOSVScanner, stdout: `{"results":[]}`, want: []string{"scan", "source", "--offline", "--offline-vulnerabilities", "--experimental-no-default-plugins", "--experimental-plugins=lockfile", "--experimental-plugins=sbom", "--format", "json", "--config={config}", "--lockfile={sbom}"}, wantEnv: []string{"OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY={db}"}},
 	}
 	for _, test := range cases {
 		t.Run(string(test.engine), func(t *testing.T) {
@@ -513,7 +513,7 @@ func TestOSVProfileUsesEmptyTOMLConfigAndPinnedVersionProbe(t *testing.T) {
 	if len(config) != 0 || profile.ConfigContentDigest != bench.SHA256Digest([]byte{}) {
 		t.Fatalf("OSV config must be empty TOML bytes: %q, profile=%+v", config, profile)
 	}
-	if got, want := strings.Join(profile.ArgvTemplate, "\x00"), strings.Join([]string{"scan", "source", "--offline", "--format", "json", "--config={config}", "--lockfile={sbom}"}, "\x00"); got != want {
+	if got, want := strings.Join(profile.ArgvTemplate, "\x00"), strings.Join([]string{"scan", "source", "--offline", "--offline-vulnerabilities", "--experimental-no-default-plugins", "--experimental-plugins=lockfile", "--experimental-plugins=sbom", "--format", "json", "--config={config}", "--lockfile={sbom}"}, "\x00"); got != want {
 		t.Fatalf("OSV argv profile = %#v, want %q", profile.ArgvTemplate, want)
 	}
 	for _, arg := range profile.ArgvTemplate {
@@ -532,6 +532,38 @@ func TestOSVProfileUsesEmptyTOMLConfigAndPinnedVersionProbe(t *testing.T) {
 	}
 }
 
+func TestOSVProfileExcludesFilesystemAndOnlineVulnerabilityScanning(t *testing.T) {
+	limits := RuntimeLimits{TimeoutSeconds: 1, MaxOutputBytes: 1, MemoryBytes: 1, PIDsMax: 1}
+	profile, _, _, err := buildProfile(bench.EngineOSVScanner, DatabaseFormatOSVScannerOffline, limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	joinedArgs := "\x00" + strings.Join(profile.ArgvTemplate, "\x00") + "\x00"
+	for _, required := range []string{
+		"--offline",
+		"--offline-vulnerabilities",
+		"--experimental-no-default-plugins",
+		"--experimental-plugins=lockfile",
+		"--experimental-plugins=sbom",
+		"--lockfile={sbom}",
+	} {
+		if !strings.Contains(joinedArgs, "\x00"+required+"\x00") {
+			t.Fatalf("OSV profile is missing required isolated-SBOM argument %q: %#v", required, profile.ArgvTemplate)
+		}
+	}
+	for _, forbidden := range []string{"--experimental-plugins=directory", "--recursive", "{sbom}"} {
+		if strings.Contains(joinedArgs, "\x00"+forbidden+"\x00") {
+			t.Fatalf("OSV profile must not scan a filesystem path through %q: %#v", forbidden, profile.ArgvTemplate)
+		}
+	}
+	for _, arg := range profile.ArgvTemplate {
+		if strings.HasPrefix(arg, "--experimental-plugins=") && arg != "--experimental-plugins=lockfile" && arg != "--experimental-plugins=sbom" {
+			t.Fatalf("OSV profile enables a plugin other than lockfile or sbom: %#v", profile.ArgvTemplate)
+		}
+	}
+}
+
 func TestOSVProfileResolvesPrivateDatabaseEnvironmentAndFinalSBOM(t *testing.T) {
 	limits := RuntimeLimits{TimeoutSeconds: 1, MaxOutputBytes: 1, MemoryBytes: 1, PIDsMax: 1}
 	profile, _, _, err := buildProfile(bench.EngineOSVScanner, DatabaseFormatOSVScannerOffline, limits)
@@ -546,7 +578,7 @@ func TestOSVProfileResolvesPrivateDatabaseEnvironmentAndFinalSBOM(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.Join(args, "\x00"), strings.Join([]string{"scan", "source", "--offline", "--format", "json", "--config=" + configPath, "--lockfile=" + sbomPath}, "\x00"); got != want {
+	if got, want := strings.Join(args, "\x00"), strings.Join([]string{"scan", "source", "--offline", "--offline-vulnerabilities", "--experimental-no-default-plugins", "--experimental-plugins=lockfile", "--experimental-plugins=sbom", "--format", "json", "--config=" + configPath, "--lockfile=" + sbomPath}, "\x00"); got != want {
 		t.Fatalf("OSV resolved argv = %#v, want %q", args, want)
 	}
 	if got, want := strings.Join(env, "\x00"), "OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY="+databasePath; got != want {
