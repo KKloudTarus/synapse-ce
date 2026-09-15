@@ -170,11 +170,10 @@ func BuildSourceNativeEvidence(ctx context.Context, repositoryRoot string, freez
 		})
 	}
 	sort.Slice(cases, func(left, right int) bool { return cases[left].ID < cases[right].ID })
-	sort.Slice(diagnostics, func(left, right int) bool {
-		leftKey := diagnostics[left].TargetID + "\x00" + diagnostics[left].Component.PURL + "\x00" + diagnostics[left].DefinitionID + "\x00" + diagnostics[left].ElementKind + "\x00" + diagnostics[left].ElementID
-		rightKey := diagnostics[right].TargetID + "\x00" + diagnostics[right].Component.PURL + "\x00" + diagnostics[right].DefinitionID + "\x00" + diagnostics[right].ElementKind + "\x00" + diagnostics[right].ElementID
-		return leftKey < rightKey
-	})
+	diagnostics, err = normalizeSourceEvidenceDiagnostics(diagnostics)
+	if err != nil {
+		return bench.SourceCaseEvidenceSet{}, bench.NativeEvidenceSet{}, fmt.Errorf("normalize source evidence diagnostics: %w", err)
+	}
 	if len(cases) == 0 && len(diagnostics) == 0 {
 		return bench.SourceCaseEvidenceSet{}, bench.NativeEvidenceSet{}, fmt.Errorf("source evidence plan did not produce cases or diagnostics")
 	}
@@ -219,6 +218,49 @@ func appendUnique(values []string, value string) []string {
 
 func sourceOVALDiagnostic(targetID string, component bench.Component, definitionID, elementKind, elementID, reason string) bench.SourceEvidenceDiagnostic {
 	return bench.SourceEvidenceDiagnostic{TargetID: targetID, Component: component, DefinitionID: definitionID, ElementKind: elementKind, ElementID: elementID, Reason: reason}
+}
+
+func normalizeSourceEvidenceDiagnostics(diagnostics []bench.SourceEvidenceDiagnostic) ([]bench.SourceEvidenceDiagnostic, error) {
+	sorted := append([]bench.SourceEvidenceDiagnostic(nil), diagnostics...)
+	sort.Slice(sorted, func(left, right int) bool {
+		leftIdentity := sourceEvidenceDiagnosticIdentity(sorted[left])
+		rightIdentity := sourceEvidenceDiagnosticIdentity(sorted[right])
+		if leftIdentity != rightIdentity {
+			return leftIdentity < rightIdentity
+		}
+		return sourceEvidenceDiagnosticPayload(sorted[left]) < sourceEvidenceDiagnosticPayload(sorted[right])
+	})
+
+	normalized := make([]bench.SourceEvidenceDiagnostic, 0, len(sorted))
+	for _, diagnostic := range sorted {
+		if len(normalized) == 0 {
+			normalized = append(normalized, diagnostic)
+			continue
+		}
+		previous := normalized[len(normalized)-1]
+		if sourceEvidenceDiagnosticIdentity(previous) != sourceEvidenceDiagnosticIdentity(diagnostic) {
+			normalized = append(normalized, diagnostic)
+			continue
+		}
+		if previous != diagnostic {
+			return nil, fmt.Errorf("conflicting source evidence diagnostics for identity %q", sourceEvidenceDiagnosticIdentity(diagnostic))
+		}
+	}
+	return normalized, nil
+}
+
+func sourceEvidenceDiagnosticIdentity(diagnostic bench.SourceEvidenceDiagnostic) string {
+	return diagnostic.TargetID + "\x00" +
+		diagnostic.Component.PURL + "\x00" +
+		diagnostic.DefinitionID + "\x00" +
+		diagnostic.ElementKind + "\x00" +
+		diagnostic.ElementID
+}
+
+func sourceEvidenceDiagnosticPayload(diagnostic bench.SourceEvidenceDiagnostic) string {
+	return sourceEvidenceDiagnosticIdentity(diagnostic) + "\x00" +
+		diagnostic.Component.Version + "\x00" +
+		diagnostic.Reason
 }
 
 type ovalNode struct {
@@ -1128,8 +1170,8 @@ func (evaluator ovalEvaluator) evaluateTest(testID, criterionComment string) (ov
 		return ovalResult{}, err
 	}
 	if predicateKind == bench.NativePredicateVersionEqualsZero {
-		if relation != "equal" {
-			return unsupportedOVALResult("state", state.id, "not-affected sentinel does not match the exact target package version"), nil
+		if relation == "equal" {
+			return unsupportedOVALResult("state", state.id, "not-affected sentinel collides with the exact target package version"), nil
 		}
 		return ovalResult{applicable: true, truths: []bench.Truth{bench.TruthNotAffected}, records: []bench.NativeComparisonRecord{record}}, nil
 	}
@@ -1327,8 +1369,8 @@ func ovalResultTruth(result ovalResult) (bench.Truth, error) {
 				return "", fmt.Errorf("vendor OVAL fixed branch has incompatible native evidence")
 			}
 		case bench.TruthNotAffected:
-			if record.PredicateKind != bench.NativePredicateVersionEqualsZero || record.Relation != "equal" {
-				return "", fmt.Errorf("vendor OVAL not-affected branch lacks exact-zero native evidence")
+			if record.PredicateKind != bench.NativePredicateVersionEqualsZero || record.Relation == "equal" {
+				return "", fmt.Errorf("vendor OVAL not-affected branch has a zero-sentinel collision")
 			}
 		default:
 			return "", fmt.Errorf("vendor OVAL branch has an invalid disposition")

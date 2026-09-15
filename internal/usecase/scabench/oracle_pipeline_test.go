@@ -65,7 +65,7 @@ func TestAutomatedCrossCheckCarriesNativeNotAffectedTruth(t *testing.T) {
 	}
 	native := NativeEvidenceSet{SchemaVersion: NativeEvidenceSetSchemaVersion, CycleID: freeze.CycleID, SourceFreezeDigest: freezeDigest, Targets: []NativeTargetEvidence{{
 		TargetID: "rpm-target", TargetDigest: cycleTestDigest('a'), PackageFamily: "rpm", Comparisons: []NativeComparisonRecord{{
-			SchemaVersion: NativeComparisonSchemaVersion, ID: "zero-compare", TargetID: "rpm-target", TargetDigest: cycleTestDigest('a'), PackageFamily: "rpm", PackageIdentity: "binary:pkg", CandidateEVR: "0", FixedEVR: "0", PredicateKind: NativePredicateVersionEqualsZero, Relation: "equal", Method: "target-native-rpm", ExecutionDigest: cycleTestDigest('b'),
+			SchemaVersion: NativeComparisonSchemaVersion, ID: "zero-compare", TargetID: "rpm-target", TargetDigest: cycleTestDigest('a'), PackageFamily: "rpm", PackageIdentity: "binary:pkg", CandidateEVR: "1", FixedEVR: "0", PredicateKind: NativePredicateVersionEqualsZero, Relation: "after", Method: "target-native-rpm", ExecutionDigest: cycleTestDigest('b'),
 		}},
 	}}}
 	nativeDigest, err := DigestNativeEvidenceSet(native)
@@ -73,7 +73,7 @@ func TestAutomatedCrossCheckCarriesNativeNotAffectedTruth(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := SourceCaseEvidenceSet{SchemaVersion: SourceCaseEvidenceSchemaVersion, CycleID: freeze.CycleID, SourceFreezeDigest: freezeDigest, NativeEvidenceDigest: nativeDigest, Cases: []SourceCaseEvidence{{
-		ID: "not-affected-case", TargetID: "rpm-target", Component: Component{PURL: "pkg:rpm/suse/pkg@0", Version: "0"}, AdvisoryID: "CVE-2026-0001", DerivedTruth: TruthNotAffected, NativeComparisonIDs: []string{"zero-compare"}, Rationale: "explicit vendor not-affected sentinel", Citations: []ContentReference{{Locator: "benchmark/citation.json", Digest: cycleTestDigest('c'), Size: 1}},
+		ID: "not-affected-case", TargetID: "rpm-target", Component: Component{PURL: "pkg:rpm/suse/pkg@1", Version: "1"}, AdvisoryID: "CVE-2026-0001", DerivedTruth: TruthNotAffected, NativeComparisonIDs: []string{"zero-compare"}, Rationale: "explicit vendor not-affected sentinel", Citations: []ContentReference{{Locator: "benchmark/citation.json", Digest: cycleTestDigest('c'), Size: 1}},
 	}}}
 	candidate, err := BuildOracleCandidate(freeze, source)
 	if err != nil {
@@ -85,6 +85,30 @@ func TestAutomatedCrossCheckCarriesNativeNotAffectedTruth(t *testing.T) {
 	}
 	if check.Status != "passed" || len(check.Cases) != 1 || check.Cases[0].Truth != TruthNotAffected {
 		t.Fatalf("not-affected cross-check = %+v", check)
+	}
+}
+
+func TestNativeComparisonTruthRejectsZeroSentinelCollision(t *testing.T) {
+	comparison := NativeComparisonRecord{
+		SchemaVersion:   NativeComparisonSchemaVersion,
+		ID:              "zero-compare",
+		TargetID:        "rpm-target",
+		TargetDigest:    cycleTestDigest('a'),
+		PackageFamily:   "rpm",
+		PackageIdentity: "binary:pkg",
+		CandidateEVR:    "0",
+		FixedEVR:        "0",
+		PredicateKind:   NativePredicateVersionEqualsZero,
+		Relation:        "equal",
+		Method:          "target-native-rpm",
+		ExecutionDigest: cycleTestDigest('b'),
+	}
+	truth, err := nativeComparisonTruth([]NativeComparisonRecord{comparison})
+	if err == nil {
+		t.Fatal("native zero-version collision established truth")
+	}
+	if truth == TruthNotAffected {
+		t.Fatalf("native zero-version collision derived not-affected truth: %q", truth)
 	}
 }
 
