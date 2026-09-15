@@ -1,7 +1,10 @@
 package scabench
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
@@ -338,6 +341,110 @@ func TestSourceEvidencePlanValidatesRealPURLQualifierBindings(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBoundedOVALBytesWithLimitsSupportsVendorEncodingsDeterministically(t *testing.T) {
+	payload := []byte("vendor OVAL payload\n")
+	cases := []struct {
+		name string
+		body []byte
+	}{
+		{name: "plain", body: payload},
+		{name: "gzip", body: gzipOVALBytes(t, payload)},
+		{name: "bzip2", body: bzip2OVALBytes(t)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			first, err := boundedOVALBytesWithLimits(tc.body, 128, len(payload))
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := boundedOVALBytesWithLimits(tc.body, 128, len(payload))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(first, payload) || !bytes.Equal(second, payload) || !bytes.Equal(first, second) {
+				t.Fatalf("decoded payloads = %q and %q, want %q", first, second, payload)
+			}
+		})
+	}
+}
+
+func TestBoundedOVALBytesWithLimitsRejectsEmptyAndOversizedInput(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		body            []byte
+		compressedLimit int
+	}{
+		{name: "empty", body: nil, compressedLimit: 1},
+		{name: "over-compressed", body: []byte("12345"), compressedLimit: 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := boundedOVALBytesWithLimits(tc.body, tc.compressedLimit, 16); err == nil {
+				t.Fatal("expected input to be rejected")
+			}
+		})
+	}
+}
+
+func TestBoundedOVALBytesWithLimitsRejectsOverDecompressedInput(t *testing.T) {
+	payload := []byte("vendor OVAL payload\n")
+	body := gzipOVALBytes(t, payload)
+	if _, err := boundedOVALBytesWithLimits(body, len(body), len(payload)-1); err == nil {
+		t.Fatal("expected expanded input to be rejected")
+	}
+}
+
+func TestBoundedOVALBytesWithLimitsRejectsMalformedAndTruncatedStreams(t *testing.T) {
+	payload := []byte("vendor OVAL payload\n")
+	gzipBody := gzipOVALBytes(t, payload)
+	bzip2Body := bzip2OVALBytes(t)
+	for _, tc := range []struct {
+		name string
+		body []byte
+	}{
+		{name: "malformed gzip", body: []byte{0x1f, 0x8b, 0x08}},
+		{name: "malformed bzip2", body: []byte("BZh9not-a-bzip2-stream")},
+		{name: "truncated gzip", body: gzipBody[:len(gzipBody)-4]},
+		{name: "truncated bzip2", body: bzip2Body[:len(bzip2Body)-4]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := boundedOVALBytesWithLimits(tc.body, 128, len(payload)); err == nil {
+				t.Fatal("expected compressed stream to be rejected")
+			}
+		})
+	}
+}
+
+func TestOVALInputLimitsPreserveVendorFeedHeadroom(t *testing.T) {
+	if maxOVALCompressedBytes != 96<<20 {
+		t.Fatalf("compressed limit = %d, want %d", maxOVALCompressedBytes, 96<<20)
+	}
+	if maxOVALDecompressedBytes != 1536<<20 {
+		t.Fatalf("decompressed limit = %d, want %d", maxOVALDecompressedBytes, 1536<<20)
+	}
+}
+
+func gzipOVALBytes(t *testing.T, body []byte) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := gzip.NewWriter(&buffer)
+	if _, err := writer.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+func bzip2OVALBytes(t *testing.T) []byte {
+	t.Helper()
+	body, err := base64.StdEncoding.DecodeString("QlpoOTFBWSZTWaj4MuAAAAlXgAAQQAAgBIEAJgXRICAAIoDamTMoUwAE0FcDMJqKKKMOn+LuSKcKEhUfBlwA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
 }
 
 func buildSourceEvidenceFixture(t *testing.T, oval string, pkg bench.SourceEvidencePackage, comparator *sourceNativeComparator) (bench.SourceCaseEvidenceSet, bench.NativeEvidenceSet, error) {
