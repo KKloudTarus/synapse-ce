@@ -48,10 +48,13 @@ The reviewed roots live in `internal/usecase/scabench/corpus/`: the catalog, Ora
 5. derive the cycle plan, repetitions, cells, dispatch count, unsupported count, and retention controls from the reviewed roots; and
 6. later derive publication indexes, cleanup receipt, candidate inventory, delivery receipt, and PR-summary Markdown from files that actually exist.
 
-A final implementation build refreshes binary-bound reviewed roots without hand-editing a digest or chasing its dependent catalog binding. The command writes a new catalog and ratchet as one fail-fast output set; it never overwrites the reviewed inputs:
+A final implementation build refreshes binary-bound reviewed roots without hand-editing a digest or chasing dependent catalog bindings. The command uses the generated source freeze and capture templates to re-derive every catalog-bound capability statement as well as the selected engine identities. It refuses a stale binary or capability floor and writes a new catalog and ratchet as one fail-fast output set; it never overwrites the reviewed inputs:
 
 ```sh
 make sca-accuracy-binary-pin \
+  SCA_ACCURACY_REPOSITORY_ROOT=/trusted/input/repository \
+  SCA_ACCURACY_SOURCE_FREEZE=/generated/control/source-freeze.json \
+  SCA_ACCURACY_MANIFEST_TEMPLATE_DIR=internal/usecase/scabench/corpus/capture-manifests \
   SCA_ACCURACY_CATALOG=internal/usecase/scabench/corpus/catalog.json \
   SCA_ACCURACY_RATCHET=internal/usecase/scabench/corpus/ratchet.json \
   SCA_ACCURACY_BINARY_REFERENCE=binary:synapse-sca-bench:reproducible-v1 \

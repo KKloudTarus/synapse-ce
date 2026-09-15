@@ -37,20 +37,35 @@ func TestManifestSetDerivesCapabilityAndRatchetBindings(t *testing.T) {
 	if len(manifests) != 8 {
 		t.Fatalf("manifest count = %d, want 8", len(manifests))
 	}
+
+	ratchet, err := decodeRatchet(option.ratchet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCapabilityDigest := ""
+	for _, floor := range ratchet.Floors {
+		if floor.Expected.TargetID == "sles-15-6-bci-base-45-31-amd64" && floor.Expected.Engine == bench.EngineOSVScanner {
+			wantCapabilityDigest = floor.Expected.CapabilityDigest
+			break
+		}
+	}
+	if wantCapabilityDigest == "" {
+		t.Fatal("ratchet omitted the SLES OSV-Scanner capability identity")
+	}
 	statementPath := filepath.Join(option.capabilityOutputDir, "sles-15-6-bci-base-45-31-amd64--osv-scanner.json")
 	body, err := os.ReadFile(statementPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(body)
-	if got := "sha256:" + hex.EncodeToString(sum[:]); got != "sha256:bb707e0268663844c464d6d658f0213a46d2619879b13e53b25e3da0566eb4c6" {
-		t.Fatalf("capability digest = %s", got)
+	if got := "sha256:" + hex.EncodeToString(sum[:]); got != wantCapabilityDigest {
+		t.Fatalf("capability digest = %s, want %s", got, wantCapabilityDigest)
 	}
 	manifest, err := decodeCaptureManifest(filepath.Join(option.manifestOutputDir, "sles-15-6-bci-base-45-31-amd64--osv-scanner.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Capability == nil || manifest.Capability.Statement.Digest != "sha256:bb707e0268663844c464d6d658f0213a46d2619879b13e53b25e3da0566eb4c6" {
+	if manifest.Capability == nil || manifest.Capability.Statement.Digest != wantCapabilityDigest {
 		t.Fatalf("manifest capability = %+v", manifest.Capability)
 	}
 	freeze, err := decodeSourceFreeze(freezePath)
@@ -250,6 +265,8 @@ func TestSourceFreezeMaterializationRehashesAssetsAndRebindsPlan(t *testing.T) {
 func TestBinaryPinMaterializationRebindsCatalogAndRatchet(t *testing.T) {
 	corpus := corpusPath(t)
 	output := t.TempDir()
+	freezePath := filepath.Join(output, "source-freeze.json")
+	writeManifestSourceFreeze(t, corpus, freezePath)
 	binaryPath := filepath.Join(output, "synapse-sca-bench")
 	binaryBody := []byte("reproducible benchmark binary")
 	if err := os.WriteFile(binaryPath, binaryBody, 0o700); err != nil {
@@ -262,11 +279,19 @@ func TestBinaryPinMaterializationRebindsCatalogAndRatchet(t *testing.T) {
 		t.Fatal(err)
 	}
 	originalBinaryDigests := make(map[string]string, len(sourceRatchet.Floors))
+	originalCapabilityDigests := make(map[string]string)
 	for _, floor := range sourceRatchet.Floors {
-		originalBinaryDigests[cellKey(floor.Expected.TargetID, floor.Expected.Engine)] = floor.Expected.EngineBinaryDigest
+		key := cellKey(floor.Expected.TargetID, floor.Expected.Engine)
+		originalBinaryDigests[key] = floor.Expected.EngineBinaryDigest
+		if floor.Expected.CapabilityDigest != "" {
+			originalCapabilityDigests[key] = floor.Expected.CapabilityDigest
+		}
 	}
 	if err := run([]string{
 		"-mode", "binary-pin",
+		"-repository-root", "/trusted/repository",
+		"-source-freeze-output", freezePath,
+		"-manifest-template-dir", optionPath(corpus, "capture-manifests"),
 		"-catalog", optionPath(corpus, "catalog.json"),
 		"-ratchet", optionPath(corpus, "ratchet.json"),
 		"-binary-reference", "binary:synapse-sca-bench:reproducible-v1",
@@ -308,27 +333,49 @@ func TestBinaryPinMaterializationRebindsCatalogAndRatchet(t *testing.T) {
 		t.Fatalf("ratchet catalog digest = %s, want %s", ratchet.CatalogDigest, catalogDigest)
 	}
 	updatedFloors := 0
+	updatedCapabilities := 0
 	for _, floor := range ratchet.Floors {
+		key := cellKey(floor.Expected.TargetID, floor.Expected.Engine)
 		if floor.Expected.Engine != bench.EngineOwned {
-			key := cellKey(floor.Expected.TargetID, floor.Expected.Engine)
 			if floor.Expected.EngineBinaryDigest != originalBinaryDigests[key] {
 				t.Fatalf("unrelated floor %s binary digest changed", key)
 			}
-			continue
+		} else {
+			updatedFloors++
+			if floor.Expected.EngineBinaryDigest != wantDigest {
+				t.Fatalf("owned floor binary digest = %s, want %s", floor.Expected.EngineBinaryDigest, wantDigest)
+			}
 		}
-		updatedFloors++
-		if floor.Expected.EngineBinaryDigest != wantDigest {
-			t.Fatalf("owned floor binary digest = %s, want %s", floor.Expected.EngineBinaryDigest, wantDigest)
+		if originalDigest, exists := originalCapabilityDigests[key]; exists {
+			updatedCapabilities++
+			if floor.Expected.CapabilityDigest == originalDigest {
+				t.Fatalf("capability floor %s retained the old catalog-bound digest", key)
+			}
 		}
 	}
 	if updatedFloors != 2 {
 		t.Fatalf("updated %d owned floors, want 2", updatedFloors)
+	}
+	if updatedCapabilities != 1 {
+		t.Fatalf("updated %d capability floors, want 1", updatedCapabilities)
+	}
+
+	manifestOption := options{
+		repositoryRoot: "/trusted/repository", sourceFreezeOutput: freezePath,
+		catalog: catalogOutput, oracle: optionPath(corpus, "oracle.json"), ratchet: ratchetOutput,
+		manifestTemplateDir: optionPath(corpus, "capture-manifests"), manifestOutputDir: filepath.Join(output, "manifests"),
+		capabilityOutputDir: filepath.Join(output, "capabilities"), sbomRoot: "/trusted/sboms",
+	}
+	if err := materializeManifestSet(manifestOption); err != nil {
+		t.Fatalf("materialized roots do not bind generated manifests: %v", err)
 	}
 }
 
 func TestBinaryPinMaterializationRejectsMixedRatchetBinding(t *testing.T) {
 	corpus := corpusPath(t)
 	output := t.TempDir()
+	freezePath := filepath.Join(output, "source-freeze.json")
+	writeManifestSourceFreeze(t, corpus, freezePath)
 	ratchet, err := decodeRatchet(optionPath(corpus, "ratchet.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -349,6 +396,9 @@ func TestBinaryPinMaterializationRejectsMixedRatchetBinding(t *testing.T) {
 	ratchetOutput := filepath.Join(output, "ratchet-output.json")
 	err = run([]string{
 		"-mode", "binary-pin",
+		"-repository-root", "/trusted/repository",
+		"-source-freeze-output", freezePath,
+		"-manifest-template-dir", optionPath(corpus, "capture-manifests"),
 		"-catalog", optionPath(corpus, "catalog.json"),
 		"-ratchet", ratchetPath,
 		"-binary-reference", "binary:synapse-sca-bench:reproducible-v1",
@@ -359,6 +409,57 @@ func TestBinaryPinMaterializationRejectsMixedRatchetBinding(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not bind catalog binary") {
 		t.Fatalf("mixed ratchet binding error = %v", err)
+	}
+	for _, path := range []string{catalogOutput, ratchetOutput} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("failed materialization left output %s", path)
+		}
+	}
+}
+
+func TestBinaryPinMaterializationRejectsStaleCapabilityBinding(t *testing.T) {
+	corpus := corpusPath(t)
+	output := t.TempDir()
+	freezePath := filepath.Join(output, "source-freeze.json")
+	writeManifestSourceFreeze(t, corpus, freezePath)
+	ratchet, err := decodeRatchet(optionPath(corpus, "ratchet.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := false
+	for index := range ratchet.Floors {
+		if ratchet.Floors[index].Expected.CapabilityDigest != "" {
+			ratchet.Floors[index].Expected.CapabilityDigest = testDigest('f')
+			mutated = true
+			break
+		}
+	}
+	if !mutated {
+		t.Fatal("ratchet omitted a capability-bound floor")
+	}
+	ratchetPath := filepath.Join(output, "stale-capability-ratchet.json")
+	writeTestJSON(t, ratchetPath, ratchet)
+	binaryPath := filepath.Join(output, "synapse-sca-bench")
+	if err := os.WriteFile(binaryPath, []byte("reproducible benchmark binary"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	catalogOutput := filepath.Join(output, "catalog-output.json")
+	ratchetOutput := filepath.Join(output, "ratchet-output.json")
+	err = run([]string{
+		"-mode", "binary-pin",
+		"-repository-root", "/trusted/repository",
+		"-source-freeze-output", freezePath,
+		"-manifest-template-dir", optionPath(corpus, "capture-manifests"),
+		"-catalog", optionPath(corpus, "catalog.json"),
+		"-ratchet", ratchetPath,
+		"-binary-reference", "binary:synapse-sca-bench:reproducible-v1",
+		"-binary-path", binaryPath,
+		"-engine", string(bench.EngineOwned),
+		"-catalog-output", catalogOutput,
+		"-ratchet-output", ratchetOutput,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not bind the generated capability statement") {
+		t.Fatalf("stale capability binding error = %v", err)
 	}
 	for _, path := range []string{catalogOutput, ratchetOutput} {
 		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
