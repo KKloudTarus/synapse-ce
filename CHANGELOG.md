@@ -9,6 +9,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Coverage-aware complexity rollups and pinned analysis deltas (#1133, EPIC #1120).** Project Code Quality
+  now aggregates AST cyclomatic and cognitive complexity from functions to files, directories, and the
+  project root with per-file parse coverage. Unsupported or unparsed files remain unavailable instead of
+  becoming false zeroes. Compatible consecutive analyses persist signed per-path deltas (including
+  reductions), baseline analysis provenance, schema versions, and measured/eligible coverage; unknown
+  branches, incompatible sources, legacy evidence, and missing paths fail closed with explicit reasons.
+  The Measures API/OpenAPI contract and dashboard expose current totals, `Δ` values, and coverage badges.
+
 - **Commit-pinned behavioral hotspots for Project Code Quality (#1132, EPIC #1120).** Analyses now persist a bounded, first-parent Git evidence window and per-file AST coverage, then rank maintained source files by `cyclomatic complexity × commits touching the current path`. History collection is read-only, argv-only, NUL-delimited, rename-neutral (`--no-renames`), bounded by commit/touch/output/time budgets, rejects dirty or mismatched worktrees, and never fetches; shallow boundaries, missing Git, unsupported languages, parser gaps, and missing confined runners remain explicit `partial`/`unavailable` states rather than false zeroes. Measures expose behavioral metrics at project/directory/file scope, and a pinned-analysis endpoint plus Behavioral Hotspots tab displays ranked files, provenance, coverage, and inline availability reasons. The feature is metrics-only: it creates no findings and does not change quality gates.
 
 - **Provider-agnostic PR/MR decoration foundation (#1121).** Project analyses now carry pull/merge-request identity (change number, target branch, repository slug and forge head SHA), expose a forge-neutral `PRDecorator` completion seam with gate summary and line annotations, and reuse one deterministic Markdown renderer from both server and CLI completion paths. Decoration is fail-soft and remains network-free until a provider adapter is explicitly wired.

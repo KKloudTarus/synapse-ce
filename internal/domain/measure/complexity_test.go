@@ -102,3 +102,41 @@ func TestFileCyclomatic(t *testing.T) {
 		t.Errorf("unknown.go want ok=false")
 	}
 }
+
+func TestComplexityIndexIsBoundedAndCoverageAware(t *testing.T) {
+	report := ComplexityReport{
+		Version: ComplexitySchemaVersion,
+		Files: []ComplexityFileCoverage{
+			{File: "ok.go", Language: "Go", Supported: true, Parsed: true},
+			{File: "broken.go", Language: "Go", Supported: true, Parsed: false, ParseError: true},
+		},
+		Functions: []FunctionComplexity{
+			{File: "ok.go", Cyclomatic: 3, Cognitive: 4},
+			{File: "ok.go", Cyclomatic: 5, Cognitive: 6},
+			{File: "broken.go", Cyclomatic: 99, Cognitive: 99},
+		},
+	}
+	index, err := report.ComplexityIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index["ok.go"].Cyclomatic != 8 || index["ok.go"].Cognitive != 10 || !index["ok.go"].Available {
+		t.Fatalf("ok index = %+v", index["ok.go"])
+	}
+	if index["broken.go"].Available || index["broken.go"].Cyclomatic != 0 {
+		t.Fatalf("broken file must stay unavailable: %+v", index["broken.go"])
+	}
+
+	duplicate := report
+	duplicate.Files = append(append([]ComplexityFileCoverage(nil), report.Files...), ComplexityFileCoverage{File: "ok.go", Supported: true, Parsed: true})
+	if _, err := duplicate.ComplexityIndex(); err == nil {
+		t.Fatal("expected duplicate coverage path error")
+	}
+
+	bad := report
+	bad.Functions = append([]FunctionComplexity(nil), report.Functions...)
+	bad.Functions[0].File = "../outside.go"
+	if _, err := bad.ComplexityIndex(); err == nil {
+		t.Fatal("expected non-canonical function path error")
+	}
+}

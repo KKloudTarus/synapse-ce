@@ -184,6 +184,63 @@ func TestBuildUsesIdentityDifferenceNotAggregateDifference(t *testing.T) {
 	}
 }
 
+func TestBuildPersistsSignedComplexityDeltaWithBaseline(t *testing.T) {
+	coverage := measure.ComplexityCoverageSummary{Version: measure.ComplexitySchemaVersion, EligibleFiles: 1, MeasuredFiles: 1, Availability: measure.AvailabilityAvailable}
+	previous := Analysis{
+		ID: "a1", SourceRef: "main", CreatedAt: time.Unix(1, 0).UTC(),
+		Snapshot: measure.Snapshot{Nodes: []measure.Node{
+			{Path: "", Kind: measure.NodeProject, ComplexityAvailable: true, ComplexityCoverage: coverage, Counters: measure.Counters{Cyclomatic: 10, Cognitive: 8}},
+			{Path: "src/a.go", Kind: measure.NodeFile, ComplexityAvailable: true, ComplexityCoverage: coverage, Counters: measure.Counters{Cyclomatic: 10, Cognitive: 8}},
+		}},
+	}
+	current, err := Build(Input{
+		ID: "a2", TenantID: "tenant", ProjectID: "project", ProjectKey: "demo", CreatedAt: time.Unix(2, 0).UTC(),
+		SourceRef: "main", Previous: &previous, ComplexityBaseline: &previous,
+		Snapshot: measure.Snapshot{Nodes: []measure.Node{
+			{Path: "", Kind: measure.NodeProject, ComplexityAvailable: true, ComplexityCoverage: coverage, Counters: measure.Counters{Cyclomatic: 7, Cognitive: 11}},
+			{Path: "src/a.go", Kind: measure.NodeFile, ComplexityAvailable: true, ComplexityCoverage: coverage, Counters: measure.Counters{Cyclomatic: 7, Cognitive: 11}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Delta == nil || current.Delta.Complexity == nil {
+		t.Fatalf("complexity delta missing: %+v", current.Delta)
+	}
+	delta := current.Delta.Complexity.Nodes["src/a.go"]
+	if delta.Availability != measure.AvailabilityAvailable || delta.Cyclomatic != -3 || delta.Cognitive != 3 {
+		t.Fatalf("signed file delta = %+v", delta)
+	}
+	if current.Delta.Complexity.BaselineAnalysisID != "a1" || current.Delta.Complexity.BaselineSourceRef != "main" {
+		t.Fatalf("baseline metadata = %+v", current.Delta.Complexity)
+	}
+	encoded, err := json.Marshal(current.Delta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundTrip Delta
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatal(err)
+	}
+	if got := roundTrip.Complexity.Nodes["src/a.go"].Cyclomatic; got != -3 {
+		t.Fatalf("JSON round-trip clamped signed delta to %d", got)
+	}
+}
+
+func TestBuildMarksComplexityTrendUnavailableForUnknownBranch(t *testing.T) {
+	previous := Analysis{ID: "a1", SourceRef: "main"}
+	current, err := Build(Input{
+		ID: "a2", TenantID: "tenant", ProjectID: "project", ProjectKey: "demo", CreatedAt: time.Now(),
+		Previous: &previous, ComplexityBaselineReason: "unknown_branch",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Delta == nil || current.Delta.Complexity == nil || current.Delta.Complexity.Reason != "unknown_branch" {
+		t.Fatalf("unknown-branch complexity delta = %+v", current.Delta)
+	}
+}
+
 func TestBuildDetectsMaterialNewCodeAndUsesEligibleOverallGate(t *testing.T) {
 	base := func(issue finding.Finding) Analysis {
 		analysis, err := Build(Input{ID: "a1", TenantID: "tenant", ProjectID: "project", ProjectKey: "demo", CreatedAt: time.Now(), LinesOfCode: 100, Findings: []finding.Finding{issue}})

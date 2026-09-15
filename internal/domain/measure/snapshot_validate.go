@@ -99,6 +99,24 @@ func (s Snapshot) Validate() error {
 			return fmt.Errorf("measure snapshot: duplicated lines > ncloc in node %q", n.Path)
 		}
 
+		complexityCoverage := n.ComplexityCoverage
+		if complexityCoverage.Version < 0 || complexityCoverage.Version > ComplexitySchemaVersion {
+			return fmt.Errorf("measure snapshot: unsupported complexity coverage version %d in node %q", complexityCoverage.Version, n.Path)
+		}
+		if complexityCoverage.EligibleFiles < 0 || complexityCoverage.MeasuredFiles < 0 || complexityCoverage.MeasuredFiles > complexityCoverage.EligibleFiles {
+			return fmt.Errorf("measure snapshot: invalid complexity coverage counts in node %q", n.Path)
+		}
+		if complexityCoverage.Availability != "" && complexityCoverage.Availability != AvailabilityAvailable && complexityCoverage.Availability != AvailabilityUnavailable {
+			return fmt.Errorf("measure snapshot: invalid complexity coverage availability %q in node %q", complexityCoverage.Availability, n.Path)
+		}
+		if complexityCoverage.Availability == AvailabilityAvailable &&
+			(complexityCoverage.EligibleFiles == 0 || complexityCoverage.MeasuredFiles != complexityCoverage.EligibleFiles) {
+			return fmt.Errorf("measure snapshot: available complexity coverage is incomplete in node %q", n.Path)
+		}
+		if complexityCoverage.Availability == AvailabilityAvailable && complexityCoverage.Reason != "" {
+			return fmt.Errorf("measure snapshot: available complexity coverage has a reason in node %q", n.Path)
+		}
+
 		for k, v := range n.Counters.IssuesByType {
 			if k != "code_smell" && k != "bug" && k != "vulnerability" && k != "security_hotspot" {
 				return fmt.Errorf("measure snapshot: unsupported issue key %q in node %q", k, n.Path)

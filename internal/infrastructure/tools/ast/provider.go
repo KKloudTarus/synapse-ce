@@ -222,7 +222,7 @@ func (p *Provider) Complexity(ctx context.Context, root string) (measure.Complex
 	if err := json.Unmarshal(out, &wire); err != nil {
 		return measure.ComplexityReport{}, false, fmt.Errorf("parse synapse-ast metrics: %w", err)
 	}
-	return measure.ComplexityReport{Functions: wire.Functions, Files: wire.Files, Truncated: wire.Truncated}, true, nil
+	return measure.ComplexityReport{Version: measure.ComplexitySchemaVersion, Functions: wire.Functions, Files: wire.Files, Truncated: wire.Truncated}, true, nil
 }
 
 // Bugs runs `synapse-ast bugs <root>` and returns the deterministic reliability defects. A sidecar built

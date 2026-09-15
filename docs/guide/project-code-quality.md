@@ -112,6 +112,16 @@ JavaScript/TypeScript modules from source imports. It reports afferent coupling 
 (Ce), and instability (`Ce / (Ca + Ce)`) for each module or directory boundary. An isolated module has
 no defined instability, and an incomplete dependency graph is shown as unavailable instead of zero.
 
+Complexity is rolled up from functions to files, directories, and the project root only when the AST
+report proves that each eligible file was parsed successfully. The Measures complexity view exposes the
+current cyclomatic and cognitive totals, signed deltas (`Δ`) against the most recent compatible analysis,
+and a measured/eligible coverage count. A negative delta is a real reduction; it is never clamped to zero.
+When the previous analysis is on an unknown or incompatible source, or a file was unsupported or failed
+to parse, the API returns an unavailable reason and the UI shows `—` instead of inventing a value. Each
+delta carries the baseline analysis ID, timestamp, and source ref used to compute it, so a historical
+analysis remains reproducible even after later scans are recorded. Legacy analyses without per-file AST
+coverage remain readable, but their complexity trend is explicitly unavailable.
+
 The **Behavioral Hotspots** tab combines static complexity with recent change frequency. For each
 measured source file, `score = cyclomatic complexity × number of first-parent commits that touched the
 path`; files are ranked by score, changes, complexity, and then path. The default comparison depth of

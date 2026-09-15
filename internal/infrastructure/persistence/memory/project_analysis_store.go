@@ -277,6 +277,11 @@ func cloneProjectAnalysis(in projectanalysis.Analysis) projectanalysis.Analysis 
 		delta.Issues = cloneCounts(in.Delta.Issues)
 		delta.Measures = maps.Clone(in.Delta.Measures)
 		delta.Ratings = maps.Clone(in.Delta.Ratings)
+		if in.Delta.Complexity != nil {
+			complexity := *in.Delta.Complexity
+			complexity.Nodes = maps.Clone(in.Delta.Complexity.Nodes)
+			delta.Complexity = &complexity
+		}
 		out.Delta = &delta
 	}
 	if in.Coverage != nil {

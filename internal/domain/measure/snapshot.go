@@ -3,6 +3,7 @@ package measure
 import (
 	"errors"
 	"fmt"
+	"math"
 	"path"
 	"sort"
 	"strings"
@@ -74,13 +75,14 @@ type Node struct {
 
 	Counters Counters `json:"counters"`
 
-	FunctionsKnown       bool `json:"functions_known"`
-	ComplexityAvailable  bool `json:"complexity_available"`
-	CoverageAvailable    bool `json:"coverage_available"`
-	DuplicationAvailable bool `json:"duplication_available"`
-	TechDebtAvailable    bool `json:"tech_debt_available"`
-	IssueTypeAvailable   bool `json:"issue_type_available"`
-	AttributionAvailable bool `json:"attribution_available"`
+	FunctionsKnown       bool                      `json:"functions_known"`
+	ComplexityAvailable  bool                      `json:"complexity_available"`
+	ComplexityCoverage   ComplexityCoverageSummary `json:"complexity_coverage"`
+	CoverageAvailable    bool                      `json:"coverage_available"`
+	DuplicationAvailable bool                      `json:"duplication_available"`
+	TechDebtAvailable    bool                      `json:"tech_debt_available"`
+	IssueTypeAvailable   bool                      `json:"issue_type_available"`
+	AttributionAvailable bool                      `json:"attribution_available"`
 }
 
 // CommentDensity derives a percentage from counters and never averages children.
@@ -225,7 +227,7 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 				IssuesBySeverity: make(map[string]int),
 			},
 			FunctionsKnown:       true,
-			ComplexityAvailable:  true,
+			ComplexityAvailable:  false,
 			CoverageAvailable:    in.Coverage != nil,
 			DuplicationAvailable: in.Duplication != nil,
 			TechDebtAvailable:    true,
@@ -293,22 +295,69 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 		ensureParents(p)
 	}
 
-	// 2. Complexity
+	// 2. Complexity. Keep legacy counters for old snapshots, but mark their availability unavailable
+	// because a per-file parse/coverage proof is required for a truthful rollup and trend.
+	var complexityIndex map[string]ComplexityFileMetrics
 	if in.Complexity != nil {
+		if err := in.Complexity.ValidateComplexityEvidence(); err != nil {
+			return Snapshot{}, fmt.Errorf("measure snapshot: complexity evidence: %w", err)
+		}
+		var err error
+		complexityIndex, err = in.Complexity.ComplexityIndex()
+		if err != nil {
+			return Snapshot{}, fmt.Errorf("measure snapshot: complexity evidence: %w", err)
+		}
+		version := in.Complexity.Version
+		if version == 0 && len(in.Complexity.Files) > 0 {
+			version = ComplexitySchemaVersion
+		}
+		for _, n := range nodesByPath {
+			if n.Kind != NodeFile {
+				continue
+			}
+			n.ComplexityCoverage = ComplexityCoverageSummary{Version: version, EligibleFiles: 1, Availability: AvailabilityUnavailable}
+			if len(in.Complexity.Files) == 0 {
+				n.ComplexityCoverage.Reason = "legacy_complexity_evidence"
+				continue
+			}
+			entry, ok := complexityIndex[n.Path]
+			if !ok {
+				n.ComplexityCoverage.Reason = "complexity_coverage_missing"
+				continue
+			}
+			if entry.Available {
+				n.ComplexityCoverage.MeasuredFiles = 1
+				n.ComplexityCoverage.Availability = AvailabilityAvailable
+				n.ComplexityAvailable = true
+			} else {
+				n.ComplexityCoverage.Reason = entry.Reason
+			}
+		}
 		for _, cx := range in.Complexity.Functions {
 			p, err := CanonicalPath(cx.File)
 			if err != nil {
 				return Snapshot{}, fmt.Errorf("measure snapshot: complexity path %q: %w", cx.File, err)
 			}
 			n := nodesByPath[p]
-			if n != nil && n.Kind == NodeFile {
-				n.Counters.Cyclomatic += cx.Cyclomatic
-				n.Counters.Cognitive += cx.Cognitive
+			if n == nil || n.Kind != NodeFile {
+				continue
 			}
+			// Legacy reports retain their historical additive counters. Versioned coverage reports only
+			// contribute functions from files whose parse was proven successful.
+			if len(in.Complexity.Files) > 0 && !complexityIndex[p].Available {
+				continue
+			}
+			if cx.Cyclomatic < 0 || cx.Cognitive < 0 || n.Counters.Cyclomatic > math.MaxInt32-cx.Cyclomatic || n.Counters.Cognitive > math.MaxInt32-cx.Cognitive {
+				return Snapshot{}, fmt.Errorf("measure snapshot: invalid complexity metric for %q", p)
+			}
+			n.Counters.Cyclomatic += cx.Cyclomatic
+			n.Counters.Cognitive += cx.Cognitive
 		}
 	} else {
 		for _, n := range nodesByPath {
-			n.ComplexityAvailable = false
+			if n.Kind == NodeFile {
+				n.ComplexityCoverage = ComplexityCoverageSummary{Availability: AvailabilityUnavailable, EligibleFiles: 1, Reason: "complexity_not_available"}
+			}
 		}
 	}
 
@@ -463,6 +512,10 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 		parent.Counters.BlankLines += n.Counters.BlankLines
 		parent.Counters.Functions += n.Counters.Functions
 
+		if parent.Counters.Cyclomatic < 0 || n.Counters.Cyclomatic < 0 || parent.Counters.Cyclomatic > math.MaxInt32-n.Counters.Cyclomatic ||
+			parent.Counters.Cognitive < 0 || n.Counters.Cognitive < 0 || parent.Counters.Cognitive > math.MaxInt32-n.Counters.Cognitive {
+			return Snapshot{}, fmt.Errorf("measure snapshot: complexity rollup overflow at %q", n.Parent)
+		}
 		parent.Counters.Cyclomatic += n.Counters.Cyclomatic
 		parent.Counters.Cognitive += n.Counters.Cognitive
 
@@ -487,6 +540,43 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 		parent.TechDebtAvailable = parent.TechDebtAvailable && n.TechDebtAvailable
 		parent.IssueTypeAvailable = parent.IssueTypeAvailable && n.IssueTypeAvailable
 		parent.AttributionAvailable = parent.AttributionAvailable && n.AttributionAvailable
+	}
+
+	// Complexity coverage is rolled up independently from additive counters. A parent is available
+	// only when every eligible descendant file has measured evidence.
+	children := make(map[string][]*Node, len(nodesByPath))
+	for p, n := range nodesByPath {
+		if p != "" {
+			children[n.Parent] = append(children[n.Parent], n)
+		}
+	}
+	sort.Slice(paths, func(i, j int) bool { return len(paths[i]) > len(paths[j]) })
+	for _, p := range paths {
+		n := nodesByPath[p]
+		if n.Kind == NodeFile {
+			continue
+		}
+		summary := ComplexityCoverageSummary{Availability: AvailabilityUnavailable}
+		for _, child := range children[p] {
+			if child.ComplexityCoverage.Version > summary.Version {
+				summary.Version = child.ComplexityCoverage.Version
+			}
+			summary.EligibleFiles += child.ComplexityCoverage.EligibleFiles
+			summary.MeasuredFiles += child.ComplexityCoverage.MeasuredFiles
+			if summary.Reason == "" && child.ComplexityCoverage.Reason != "" {
+				summary.Reason = child.ComplexityCoverage.Reason
+			}
+		}
+		if summary.EligibleFiles == 0 {
+			summary.Reason = "no_complexity_files"
+		} else if summary.MeasuredFiles == summary.EligibleFiles {
+			summary.Availability = AvailabilityAvailable
+			summary.Reason = ""
+		} else if summary.Reason == "" {
+			summary.Reason = fmt.Sprintf("%d_of_%d_files_unmeasured", summary.EligibleFiles-summary.MeasuredFiles, summary.EligibleFiles)
+		}
+		n.ComplexityCoverage = summary
+		n.ComplexityAvailable = summary.Availability == AvailabilityAvailable
 	}
 
 	// Deduplicate blocks for directories
