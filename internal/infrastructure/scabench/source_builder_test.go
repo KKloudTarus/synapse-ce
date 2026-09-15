@@ -744,14 +744,21 @@ func TestBuildSourceNativeEvidenceSLESCurrentPredicates(t *testing.T) {
 	}
 }
 
-func TestParseVendorOVALFiltersOnlyNamespaceDeclarations(t *testing.T) {
+func TestParseVendorOVALFiltersOnlyNonSemanticXMLAttributes(t *testing.T) {
 	validDebianGuards := sourceDebianGuardOVAL("12", sourceDebianReleaseObject("release-object"), `<uname_object id="uname-object"/>`)
+	validSchemaLocation := strings.Replace(validDebianGuards, `<oval_definitions>`, `<oval_definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://oval.mitre.org/XMLSchema/oval-definitions-5 oval-definitions-schema.xsd">`, 1)
 	cases := []struct {
 		name    string
 		oval    string
 		wantErr bool
 	}{
 		{name: "current Debian guard namespace declarations", oval: validDebianGuards},
+		{name: "root schema location metadata", oval: validSchemaLocation},
+		{
+			name:    "nested schema location metadata is rejected",
+			oval:    strings.Replace(validDebianGuards, `<criteria operator="AND">`, `<criteria xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:unexpected local.xsd" operator="AND">`, 1),
+			wantErr: true,
+		},
 		{
 			name:    "qualified semantic attribute is rejected",
 			oval:    sourceOVAL(`<criteria><criterion test_ref="test-a"/></criteria>`, sourceTest("test-a", "object-a", "state-a"), sourceObject("object-a", "pkg"), `<dpkginfo_state id="state-a"><evr xmlns:external="urn:external" external:datatype="debian_evr_string" operation="less than">2</evr></dpkginfo_state>`),
