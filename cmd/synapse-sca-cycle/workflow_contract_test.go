@@ -21,9 +21,15 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflowText := string(body)
-	for _, forbidden := range []string{"base_sha", "evidence_only", "full_required", "internal/usecase/scabench/testdata/publication/publication-manifest.json"} {
+	for _, forbidden := range []string{
+		"base_sha", "evidence_only", "full_required",
+		"internal/usecase/scabench/testdata/publication/publication-manifest.json",
+		"$input/source-freeze.json", "$input/source-evidence-plan.json", "$input/accountable-review.json", "$input/plan.json", "$input/publication-control.json",
+		"for repetition in 1 2", "for attempt in 1 2 3", ".repetition == 2",
+		"test \"$expected_slots\" = 16", "test \"$expected_dispatches\" = 14", "test \"$expected_unsupported\" = 2",
+	} {
 		if strings.Contains(workflowText, forbidden) {
-			t.Errorf("workflow retains checked-in evidence routing marker %q", forbidden)
+			t.Errorf("workflow retains manual or checked-in evidence control %q", forbidden)
 		}
 	}
 
@@ -100,6 +106,18 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	if got := yamlScalar(t, yamlMappingValue(t, trusted, "timeout-minutes")); got != "45" {
 		t.Errorf("trusted cycle timeout = %q, want 45", got)
 	}
+	trustedOutputs := yamlMappingValue(t, trusted, "outputs")
+	for key, want := range map[string]string{
+		"artifacts":       "${{ steps.complete.outputs.artifacts }}",
+		"artifact_id":     "${{ steps.candidate-upload.outputs.artifact-id }}",
+		"artifact_url":    "${{ steps.candidate-upload.outputs.artifact-url }}",
+		"artifact_digest": "${{ steps.candidate-upload.outputs.artifact-digest }}",
+		"artifact_name":   "${{ steps.complete.outputs.artifact_name }}",
+	} {
+		if got := yamlScalar(t, yamlMappingValue(t, trustedOutputs, key)); got != want {
+			t.Errorf("trusted output %s = %q, want %q", key, got, want)
+		}
+	}
 
 	steps := workflowSteps(t, trusted)
 	setupGo := workflowStep(t, steps, "Set up Go")
@@ -111,7 +129,7 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	}
 	initializeAuditControls := workflowStep(t, steps, "Initialize audit-safe capture controls")
 	initializeAuditRun := yamlScalar(t, yamlMappingValue(t, initializeAuditControls, "run"))
-	for _, required := range []string{"mkdir -p \"$output/control\" \"$output/records\"", "capture-status.json", "preflight_pending", "accepted-bundles.json"} {
+	for _, required := range []string{"cycle-policy.json", "capture-status.json", "preflight_pending", "accepted-bundles.json", "repetitions=", "max_attempts=", "accepted_retention_days=", "failed_retention_days="} {
 		if !strings.Contains(initializeAuditRun, required) {
 			t.Errorf("audit control initialization is missing %q", required)
 		}
@@ -121,7 +139,7 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	}
 	preflight := workflowStep(t, steps, "Preflight exact trusted runner contract")
 	preflightRun := yamlScalar(t, yamlMappingValue(t, preflight, "run"))
-	for _, required := range []string{"bwrap", "SCA_ACCURACY_DELEGATED_CGROUP_ROOT", "SCA_ACCURACY_RAW_RETENTION_ROOT", "syft-probe.json", "syft-config.json", "SCA_ACCURACY_SYFT_CONFIG_DIGEST", "sboms/$target_id.cdx.json", "jq -S -c", "cmp -s", "expected_components", "actual_components", "preflight_complete"} {
+	for _, required := range []string{"bwrap", "SCA_ACCURACY_DELEGATED_CGROUP_ROOT", "SCA_ACCURACY_RAW_RETENTION_ROOT", "syft-probe.json", "syft-config.json", "SCA_ACCURACY_SYFT_CONFIG_DIGEST", "sboms/$target_id.cdx.json", "jq -S -c", "cmp -s", "expected_components", "actual_components", "review_files", "preflight_complete"} {
 		if !strings.Contains(preflightRun, required) {
 			t.Errorf("trusted preflight is missing %q", required)
 		}
@@ -130,20 +148,22 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 		t.Error("trusted evaluation must verify frozen Syft provenance without invoking Syft")
 	}
 
-	freeze := workflowStep(t, steps, "Generate scanner-free source and native evidence, then freeze the oracle chain")
+	freeze := workflowStep(t, steps, "Materialize inputs and freeze the scanner-free oracle chain")
 	freezeRun := yamlScalar(t, yamlMappingValue(t, freeze, "run"))
-	for _, required := range []string{"$input/sboms/$target_id.cdx.json", "cp \"$frozen_sbom\" \"$sbom\"", "cmp -s \"$frozen_sbom\" \"$sbom\"", "sca-accuracy-source-native-evidence", "oracle-candidate", "oracle-cross-check", "oracle-adjudicate", "oracle-freeze", "sca-accuracy-prepare", "source_evidence_preparing", "capture_pending"} {
+	for _, required := range []string{
+		"-mode source-freeze", "-mode manifest-set", "-mode accountable-review", "-review-capture-output", "-mode plan",
+		"control/source-assets", "-repository-root \"$input/repository\" -source-freeze-output", "$input/sboms/$target_id.cdx.json", "cp \"$frozen_sbom\" \"$sbom\"", "cmp -s \"$frozen_sbom\" \"$sbom\"",
+		"sca-accuracy-source-native-evidence", "oracle-candidate", "oracle-cross-check", "oracle-adjudicate", "oracle-freeze", "sca-accuracy-prepare",
+		"source_evidence_preparing", "capture_pending",
+	} {
 		if !strings.Contains(freezeRun, required) {
-			t.Errorf("frozen-source step is missing %q", required)
+			t.Errorf("materialization step is missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{"target_ref=", "target_digest=", "RepoDigests", "docker image inspect"} {
+	for _, forbidden := range []string{"target_ref=", "target_digest=", "RepoDigests", "docker image inspect", "syft "} {
 		if strings.Contains(freezeRun, forbidden) {
-			t.Errorf("frozen-source step retains tag-sensitive OCI preflight %q", forbidden)
+			t.Errorf("materialization step retains live or tag-sensitive input generation %q", forbidden)
 		}
-	}
-	if strings.Contains(freezeRun, "syft ") {
-		t.Error("frozen-source step regenerated an SBOM")
 	}
 
 	capture := workflowStep(t, steps, "Capture planned slots with retained retries")
@@ -151,7 +171,12 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 		t.Errorf("capture step id = %q, want capture", got)
 	}
 	captureRun := yamlScalar(t, yamlMappingValue(t, capture, "run"))
-	for _, required := range []string{"for repetition in 1 2", "for attempt in 1 2 3", "case \"$exit_code\" in", "2)", "test -s \"$record\"", "test -d \"$bundle\"", "retained_failed_attempts", "accepted_slots", "pre_dispatch_failure", "capture_failed", "accepted-bundles.json", "attempt:$attempt", "per_repetition_dispatches", "per_repetition_unsupported", "expected_dispatches", "expected_unsupported", "test \"$expected_slots\" = 16", "test \"$expected_dispatches\" = 14", "test \"$expected_unsupported\" = 2", "-mode ledger"} {
+	for _, required := range []string{
+		"repetitions=\"$(jq -er '.repetitions'", "max_attempts=\"$(jq -er '.max_attempts'", "retention_policy=\"$(jq -er '.raw_retention'",
+		"while [ \"$repetition\" -le \"$repetitions\" ]", "while [ \"$attempt\" -le \"$max_attempts\" ]", "case \"$exit_code\" in", "2)",
+		"test -s \"$record\"", "test -d \"$bundle\"", "retained_failed_attempts", "accepted_slots", "pre_dispatch_failure", "capture_failed",
+		"accepted-bundles.json", "attempt:$attempt", "per_repetition_dispatches", "per_repetition_unsupported", "expected_dispatches", "expected_unsupported", "-mode ledger",
+	} {
 		if !strings.Contains(captureRun, required) {
 			t.Errorf("capture step is missing %q", required)
 		}
@@ -176,45 +201,65 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 			t.Errorf("audit upload misses %q", required)
 		}
 	}
-	if got := yamlScalar(t, yamlMappingValue(t, auditWith, "name")); !strings.Contains(got, "${{ github.run_id }}-${{ github.run_attempt }}") {
-		t.Errorf("audit artifact name lacks run identity: %q", got)
-	}
-	if got := yamlScalar(t, yamlMappingValue(t, auditWith, "if-no-files-found")); got != "error" {
-		t.Errorf("audit artifact file policy = %q, want error", got)
-	}
-	if got := yamlScalar(t, yamlMappingValue(t, auditWith, "retention-days")); got != "3" {
-		t.Errorf("audit artifact retention = %q, want 3 days", got)
+	if got := yamlScalar(t, yamlMappingValue(t, auditWith, "retention-days")); got != "${{ steps.policy.outputs.failed_retention_days }}" {
+		t.Errorf("audit artifact retention = %q, want policy-derived value", got)
 	}
 	if strings.Contains(yamlScalar(t, yamlMappingValue(t, auditWith, "path")), "SCA_ACCURACY_RAW_RETENTION_ROOT") {
 		t.Error("audit artifact upload must not expose protected raw retention")
 	}
+
 	finalize := workflowStep(t, steps, "Finalize comparisons, falsifiers, reduction, ratchet, and report")
 	if got := yamlScalar(t, yamlMappingValue(t, finalize, "if")); got != "${{ steps.capture.outputs.accepted == 'true' }}" {
 		t.Errorf("finalize condition = %q", got)
 	}
-	failure := workflowStep(t, steps, "Fail after audited retained-attempt upload")
-	if !strings.Contains(yamlScalar(t, yamlMappingValue(t, failure, "if")), "steps.capture.outputs.accepted != 'true'") {
-		t.Error("failure verdict does not follow the audit upload and retained-attempt result")
-	}
 	finalizeRun := yamlScalar(t, yamlMappingValue(t, finalize, "run"))
-	for _, required := range []string{"accepted-bundles.json", "attempt-$attempt", "attempt-$second_attempt", "missing or ambiguous accepted bundle"} {
+	for _, required := range []string{
+		"accepted-bundles.json", "control/observations", "comparison_repetition=\"$repetitions\"", "attempt-$attempt", "attempt-$second_attempt", "missing or ambiguous accepted bundle",
+		"publication/source-case-evidence.json", "publication/native-evidence.json", "-mode publication-control", "sca-accuracy-publication",
+		"rm -f \\", "for transient in \\", "control/publication-control.json",
+	} {
 		if !strings.Contains(finalizeRun, required) {
-			t.Errorf("finalization does not resolve accepted retry bundles through %q", required)
+			t.Errorf("finalization is missing %q", required)
+		}
+	}
+
+	cleanup := workflowStep(t, steps, "Clean protected raw and Docker runner state")
+	if got := yamlScalar(t, yamlMappingValue(t, cleanup, "if")); got != "${{ always() }}" {
+		t.Errorf("cleanup condition = %q, want always", got)
+	}
+	cleanupRun := yamlScalar(t, yamlMappingValue(t, cleanup, "run"))
+	for _, required := range []string{"-mode cleanup", "SCA_ACCURACY_RAW_RETENTION_ROOT", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "cleanup-receipt.json"} {
+		if !strings.Contains(cleanupRun, required) {
+			t.Errorf("cleanup step is missing %q", required)
+		}
+	}
+	receipt := workflowStep(t, steps, "Generate candidate inventory and delivery receipt")
+	receiptRun := yamlScalar(t, yamlMappingValue(t, receipt, "run"))
+	for _, required := range []string{"-mode receipt", "-implementation-commit", "-ledger \"$publication/cycle-ledger.json\"", "delivery-receipt.json", "candidate-file-inventory.json", "pr-comment.md", "artifact_name="} {
+		if !strings.Contains(receiptRun, required) {
+			t.Errorf("candidate receipt step is missing %q", required)
 		}
 	}
 	candidateUpload := workflowStep(t, steps, "Upload bounded candidate controls and results")
+	if got := yamlScalar(t, yamlMappingValue(t, candidateUpload, "id")); got != "candidate-upload" {
+		t.Errorf("candidate upload id = %q, want candidate-upload", got)
+	}
 	candidateWith := yamlMappingValue(t, candidateUpload, "with")
-	if got := yamlScalar(t, yamlMappingValue(t, candidateWith, "name")); !strings.Contains(got, "${{ github.run_id }}-${{ github.run_attempt }}") {
-		t.Errorf("candidate artifact name lacks run identity: %q", got)
+	if got := yamlScalar(t, yamlMappingValue(t, candidateWith, "name")); got != "${{ steps.complete.outputs.artifact_name }}" {
+		t.Errorf("candidate artifact name = %q, want receipt-bound output", got)
 	}
 	if got := yamlScalar(t, yamlMappingValue(t, candidateWith, "if-no-files-found")); got != "error" {
 		t.Errorf("candidate artifact file policy = %q, want error", got)
 	}
-	if got := yamlScalar(t, yamlMappingValue(t, candidateWith, "retention-days")); got != "90" {
-		t.Errorf("candidate artifact retention = %q, want 90 days", got)
+	if got := yamlScalar(t, yamlMappingValue(t, candidateWith, "retention-days")); got != "${{ steps.policy.outputs.accepted_retention_days }}" {
+		t.Errorf("candidate artifact retention = %q, want policy-derived value", got)
 	}
 	if strings.Contains(yamlScalar(t, yamlMappingValue(t, candidateWith, "path")), "SCA_ACCURACY_RAW_RETENTION_ROOT") {
 		t.Error("candidate artifact upload must not expose protected raw retention")
+	}
+	failure := workflowStep(t, steps, "Fail after audited retained-attempt upload")
+	if !strings.Contains(yamlScalar(t, yamlMappingValue(t, failure, "if")), "steps.capture.outputs.accepted != 'true'") {
+		t.Error("failure verdict does not follow the audit upload and retained-attempt result")
 	}
 
 	aggregate := yamlMappingValue(t, jobs, "aggregate")
@@ -224,9 +269,9 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 		t.Errorf("aggregate trusted-request environment = %q", got)
 	}
 	aggregateRun := yamlScalar(t, yamlMappingValue(t, aggregateStep, "run"))
-	for _, required := range []string{"$TRUSTED_REQUESTED", "$TRUSTED_ENABLED", "non-authorized ref", "$WORKFLOW_REF"} {
+	for _, required := range []string{"$TRUSTED_REQUESTED", "$TRUSTED_ENABLED", "non-authorized ref", "$WORKFLOW_REF", "artifact_id", "artifact_digest"} {
 		if !strings.Contains(aggregateRun, required) {
-			t.Errorf("aggregate does not record explicit unrequested trusted evidence for %q", required)
+			t.Errorf("aggregate is missing %q", required)
 		}
 	}
 	if strings.Contains(aggregateRun, "evidence_only") {
@@ -264,7 +309,8 @@ func TestEngineAccuracyWorkflowCatalogIdentityPreflightScopeContract(t *testing.
 				"jq -S -c . \"$sbom\" > \"$canonical\"",
 				"cmp -s \"$sbom\" \"$canonical\"",
 				"elif ((.purl? | type) == \"string\" and (.purl | trim_space | length > 0)) then",
-				"else\n                  empty",
+				"else",
+				"empty",
 			},
 		},
 		{

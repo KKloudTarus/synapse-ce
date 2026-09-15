@@ -337,7 +337,7 @@ func commandCapabilityFixture(t *testing.T) (bench.Catalog, capture.CaptureManif
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile := capture.ExecutionProfile{SchemaVersion: capture.ProfileSchemaVersion, Engine: bench.EngineOSVScanner, DatabaseFormat: capture.DatabaseFormatOSVScannerOffline, ExecutionMode: "external", ArgvTemplate: []string{"scan", "source", "--offline", "--format", "json", "--config={config}", "--lockfile={sbom}"}, VersionProbeArgvTemplate: []string{"--version"}, EnvironmentTemplate: []string{"OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY={db}"}, OutputFormat: "osv-scanner-v2-json", NoNetwork: true, AutoUpdateDisabled: true, Limits: limits, ConfigContentDigest: bench.SHA256Digest(nil), IgnoreContentDigest: bench.SHA256Digest(nil)}
+	profile := capture.ExecutionProfile{SchemaVersion: capture.ProfileSchemaVersion, Engine: bench.EngineOSVScanner, DatabaseFormat: capture.DatabaseFormatOSVScannerOffline, ExecutionMode: "external", ArgvTemplate: []string{"scan", "source", "--offline", "--offline-vulnerabilities", "--experimental-no-default-plugins", "--experimental-plugins=lockfile", "--experimental-plugins=sbom", "--format", "json", "--config={config}", "--lockfile={sbom}"}, VersionProbeArgvTemplate: []string{"--version"}, EnvironmentTemplate: []string{"OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY={db}"}, OutputFormat: "osv-scanner-v2-json", NoNetwork: true, AutoUpdateDisabled: true, Limits: limits, ConfigContentDigest: bench.SHA256Digest(nil), IgnoreContentDigest: bench.SHA256Digest(nil)}
 	profileBytes, err := json.Marshal(profile)
 	if err != nil {
 		t.Fatal(err)

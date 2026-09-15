@@ -129,7 +129,7 @@ sca-bench-verify: ## Replay the published SCA benchmark fixture offline (no scan
 	$(GO) test -count=1 ./internal/usecase/scabench -run '^TestPublishedBenchmarkFixture'
 
 sca-accuracy-test: ## Run focused SCA accuracy unit and command tests
-	$(GO) test -count=1 ./internal/usecase/scabench ./internal/infrastructure/scabench ./cmd/synapse-sca-cycle ./cmd/synapse-sca-bench ./cmd/synapse-bench
+	$(GO) test -count=1 ./internal/usecase/scabench ./internal/infrastructure/scabench ./cmd/synapse-sca-inputs ./cmd/synapse-sca-cycle ./cmd/synapse-sca-bench ./cmd/synapse-bench
 
 sca-accuracy-smoke: ## Offline SCA accuracy smoke gate (no scanners)
 	$(MAKE) sca-bench-verify
@@ -158,7 +158,7 @@ sca-accuracy-publication: ## Bind actual final artifacts into a manifest and can
 
 sca-accuracy-verify: ## Run offline SCA accuracy verification without scanners
 	$(MAKE) sca-accuracy-smoke
-	$(GO) test -count=1 ./cmd/synapse-sca-cycle ./internal/usecase/scabench ./internal/infrastructure/scabench
+	$(GO) test -count=1 ./cmd/synapse-sca-inputs ./cmd/synapse-sca-cycle ./internal/usecase/scabench ./internal/infrastructure/scabench
 
 rulepack-verify: ## Verify a signed RulePack against the externally pinned release key
 	$(GO) run ./cmd/synapse-cli rulepack verify --artifact $(RULEPACK_ARTIFACT) --public-key $(RULEPACK_PUBLIC_KEY)
