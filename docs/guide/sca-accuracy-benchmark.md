@@ -88,7 +88,7 @@ Fresh package truth must use target-native comparison:
 - Debian comparisons execute `dpkg --compare-versions` in a digest-pinned target OCI boundary.
 - RPM comparisons execute a fixed target-native RPM Lua program. An absent epoch is normalized to `0`; exact epoch, version, and release values are environment data, never Lua source.
 - The OCI boundary inspects and attests the exact local RepoDigest plus `linux/amd64` OS/architecture before use, invokes only validated `/usr/bin/dpkg` or `/usr/bin/rpm` through Docker `--entrypoint`, and uses no pull, no network, a read-only filesystem, dropped capabilities, no-new-privileges, and bounded memory/PIDs.
-- Complete generated target evidence is reused by every engine for that target and is committed into every accepted bundle identity. Source-package objects use an explicit mapped source EVR, never a binary component version by assumption.
+- Complete generated target evidence is reused by every engine for that target and is bound into every accepted bundle identity. Source-package objects use an explicit mapped source EVR, never a binary component version by assumption.
 - Non-Linux operation and unavailable target-native mechanisms fail closed. There is no host-side or Go semantic fallback.
 
 ## Bundle comparison and falsifiers
@@ -114,9 +114,9 @@ Finalization reduces and ratchets **every** planned repetition independently, th
 - target-native comparison;
 - process evidence and environment identity.
 
-The single publication manifest also binds the generated source evidence and complete native evidence, and limits committed material to resolvable public source snapshots, pins, canonical SBOMs, scanner-free review records, normalized observations, native comparison records, compact process/control identities, comparison and falsifier results, result, ratchet, report, and ledger. It rejects raw bundle and scanner-cache artifact categories. Freeze and publication records use write-once paths.
+The single publication manifest also binds the generated source evidence and complete native evidence. The accepted sanitized publication artifact is limited to resolvable public source snapshots, pins, canonical SBOMs, scanner-free review records, normalized observations, native comparison records, compact process/control identities, comparison and falsifier results, result, ratchet, report, and ledger. It rejects raw bundle and scanner-cache artifact categories. Freeze and publication records use write-once paths.
 
-Finalization writes the measured comparison, falsifier, result, and report before publication assembly. `sca-accuracy-publication` then hashes those actual regular files, builds the manifest, and writes the candidate evidence summary that commits the manifest identity. The summary is deliberately not an artifact within that same manifest: including its own digest would create an unverifiable self-reference.
+Finalization writes the measured comparison, falsifier, result, and report before publication assembly. `sca-accuracy-publication` then hashes those actual regular files, builds the manifest, and writes the candidate evidence summary that binds the manifest identity. The summary is deliberately not an artifact within that same manifest: including its own digest would create an unverifiable self-reference.
 
 Use the two explicit output stages only with all retained trusted inputs:
 
@@ -125,22 +125,24 @@ make sca-accuracy-finalize
 make sca-accuracy-publication
 ```
 
-They fail closed until every required path, comparison pair, falsifier specification, immutable publication control, and review decision has been supplied. Offline verification remains available without scanners:
+They fail closed until every required path, comparison pair, falsifier specification, immutable publication control, and review decision has been supplied. Pull requests can verify the checked-in benchmark contract and historical regression inputs without scanners:
 
 ```sh
 make sca-accuracy-verify
 ```
 
+This command does not consume or attest a current generated publication. The trusted run verifies and publishes its own exact-source candidate artifact.
+
 ## Workflow modes and commit binding
 
-`.github/workflows/engine-accuracy.yml` has no top-level path filters. Its always-running change detector checks out and asserts the exact source SHA, then routes work as follows:
+`.github/workflows/engine-accuracy.yml` has no top-level path filters. Its always-running route job checks out and asserts the exact source SHA, then routes work as follows:
 
-- Pull requests run offline smoke and offline current-publication verification only; they never receive trusted capture execution.
+- Pull requests run offline smoke and benchmark-contract verification only; they never receive trusted capture execution or claim that checked-in files are current run evidence.
 - A branch push with code, specification, or workflow changes is only a trusted full-control request when repository variable `ENGINE_ACCURACY_TRUSTED_ENABLED` equals `true` **and** its ref is exactly `refs/heads/main` or exactly equals repository variable `ENGINE_ACCURACY_TRUSTED_REF`. The reusable branch trigger avoids maintained feature-branch names without granting privileged execution to every branch while the gate is enabled. Disabled or non-authorized refs are explicit non-evaluation modes in the aggregate.
 - The trusted runner proves a real direct-cgroup plus Bubblewrap no-op child before capture. Its wrapper captures the delegated **service** cgroup root before the benchmark process enters `synapse-manager` and supplies it as `SCA_ACCURACY_DELEGATED_CGROUP_ROOT`; the runner rejects missing, non-writable, non-service-root, memory/pids-disabled, or non-allocatable roots. It receives this root, pinned Bubblewrap, Docker images, review capture, pre-frozen SBOM provenance, and retained-input bootstrap as an explicit external ephemeral-runner contract; it does not use a host `/proc/self/status` seccomp assertion.
 - It consumes only one pre-frozen, canonical, filtered CycloneDX JSON SBOM for each exact target, verifies its byte digest against the catalog, and rewrites every target's capture manifest to use those same bytes. `syft-probe.json` and `syft-config.json` attest the version, offline/update policy, and configuration digest used by the separate authorized preparation phase; evaluation does not invoke Syft or regenerate an SBOM. No engine gets an independently generated SBOM invocation.
-- Evidence-only changes beneath `internal/usecase/scabench/testdata/publication/` run offline verification instead of a fresh full run only when the checked-in publication manifest binds `implementation_commit` to the preceding implementation SHA **S**. The evidence commit **E** attests S rather than claiming E is a fresh capture implementation.
+- Generated source/native evidence, observations, bundles, results, reports, and publication manifests never enter Git. Before the ephemeral runner exits, an accepted run uploads only the sanitized candidate controls and results to GitHub Actions artifact storage with an explicit 90-day retention period. Protected raw scanner material stays outside that artifact and is removed after verification.
 - The trusted job first requires Linux, Bubblewrap, active seccomp, cgroup-v2 memory and pids controllers, immutable review/source/pin inputs, frozen canonical SBOMs, and protected raw retention. It initializes an audit-safe status and accepted-attempt mapping before runner preflight, then updates that bounded control state through source preparation and capture. It attempts every planned slot up to three times, preserving each exit-2 failed-attempt record and protected bundle; finalization resolves observations and comparison pairs only through the bounded accepted-attempt mapping. It uploads only auditable controls and records before issuing a failure verdict when no accepted retry exists. Only sixteen accepted planned slots (14 dispatches and two designated zero-dispatch SLES/OSV records) permit ledger construction, finalization, publication assembly, and bounded control/result uploads. Raw bundles are never uploaded.
 - The scheduled and manual modes use the same full-control route once the workflow is present on the default branch.
 
-The candidate full run is pre-merge evidence bound to S. A later evidence-only E can attest S, but it is not final-main evidence. Exact-main confirmation is explicitly post-merge and remains outside this delivery phase.
+The candidate full run is pre-merge evidence bound to the exact reviewed source commit **S**. After upload succeeds, the PR discussion records the run and artifact references, manifest and result digests, verified outcome, and cleanup disposition without copying protected raw material. Removing the ephemeral runner and AWS host does not remove the accepted 90-day GitHub Actions artifact. Candidate-branch evidence is not relabeled as exact-final-main evidence.

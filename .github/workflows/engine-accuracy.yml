@@ -19,37 +19,28 @@ concurrency:
 
 jobs:
   changes:
-    name: Determine evidence-cycle work
+    name: Determine evidence-cycle route
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       source_sha: ${{ steps.resolve.outputs.source_sha }}
-      base_sha: ${{ steps.resolve.outputs.base_sha }}
-      evidence_only: ${{ steps.classify.outputs.evidence_only }}
-      full_required: ${{ steps.classify.outputs.full_required }}
       trusted_requested: ${{ steps.classify.outputs.trusted_requested }}
     steps:
-      - name: Resolve exact source and base revisions
+      - name: Resolve exact source revision
         id: resolve
         shell: bash
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             source_sha="${{ github.event.pull_request.head.sha }}"
-            base_sha="${{ github.event.pull_request.base.sha }}"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            source_sha="${{ github.sha }}"
-            base_sha="${{ github.event.before }}"
           else
             source_sha="${{ github.sha }}"
-            base_sha=""
           fi
           case "$source_sha" in
-            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
             *) echo "source revision is not a full SHA"; exit 1 ;;
           esac
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
-          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
       - name: Check out exact source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -59,7 +50,7 @@ jobs:
       - name: Assert exact checkout revision
         shell: bash
         run: test "$(git rev-parse HEAD)" = "${{ steps.resolve.outputs.source_sha }}"
-      - name: Classify changed surface
+      - name: Classify trusted execution request
         id: classify
         shell: bash
         env:
@@ -69,30 +60,12 @@ jobs:
           TRUSTED_REF: ${{ vars.ENGINE_ACCURACY_TRUSTED_REF }}
         run: |
           set -euo pipefail
-          source_sha="${{ steps.resolve.outputs.source_sha }}"
-          base_sha="${{ steps.resolve.outputs.base_sha }}"
-          evidence_only=false
-          full_required=true
-          publication_dir="internal/usecase/scabench/testdata/publication/"
-          publication_manifest="${publication_dir}publication-manifest.json"
-          if [ -n "$base_sha" ] && git cat-file -e "$base_sha^{commit}" 2>/dev/null; then
-            changed="$(git diff --name-only "$base_sha" "$source_sha")"
-            if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -Ev "^${publication_dir}" >/dev/null; then
-              test -f "$publication_manifest"
-              implementation_sha="$(jq -r '.implementation_commit // empty' "$publication_manifest")"
-              test "$implementation_sha" = "$base_sha"
-              evidence_only=true
-              full_required=false
-            fi
-          fi
           trusted_requested=false
-          if [ "$full_required" = "true" ] && [ "$EVENT_NAME" != "pull_request" ] && [ "$TRUSTED_ENABLED" = "true" ]; then
+          if [ "$EVENT_NAME" != "pull_request" ] && [ "$TRUSTED_ENABLED" = "true" ]; then
             if [ "$WORKFLOW_REF" = "refs/heads/main" ] || { [ -n "$TRUSTED_REF" ] && [ "$WORKFLOW_REF" = "$TRUSTED_REF" ]; }; then
               trusted_requested=true
             fi
           fi
-          echo "evidence_only=$evidence_only" >> "$GITHUB_OUTPUT"
-          echo "full_required=$full_required" >> "$GITHUB_OUTPUT"
           echo "trusted_requested=$trusted_requested" >> "$GITHUB_OUTPUT"
 
   smoke:
@@ -119,9 +92,9 @@ jobs:
         run: make sca-accuracy-smoke
 
   offline-verify:
-    name: Offline evidence verification
+    name: Offline benchmark contract verification
     needs: changes
-    if: ${{ github.event_name == 'pull_request' || needs.changes.outputs.evidence_only == 'true' }}
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -138,7 +111,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Verify checked-in evidence without scanners
+      - name: Verify benchmark contract without scanners
         run: make sca-accuracy-verify
 
   trusted-full:
@@ -314,12 +287,9 @@ jobs:
           # regenerates an SBOM or substitutes a scanner-specific variant.
           while IFS= read -r target_json; do
             target_id="$(jq -r '.id' <<<"$target_json")"
-            target_ref="$(jq -r '.oci_ref' <<<"$target_json")"
-            target_digest="$(jq -r '.digest' <<<"$target_json")"
             expected_sbom_digest="$(jq -r '.sbom_digest' <<<"$target_json")"
             frozen_sbom="$input/sboms/$target_id.cdx.json"
             sbom="$output/control/sboms/$target_id.cdx.json"
-            docker image inspect --format '{{json .RepoDigests}}' "$target_ref" | jq -e --arg ref "$target_ref" 'index($ref) != null' >/dev/null
             cp "$frozen_sbom" "$sbom"
             cmp -s "$frozen_sbom" "$sbom"
             test "sha256:$(sha256sum "$sbom" | cut -d' ' -f1)" = "$expected_sbom_digest"
@@ -537,7 +507,7 @@ jobs:
           name: engine-accuracy-candidate-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.changes.outputs.source_sha }}
           path: ${{ runner.temp }}/sca-accuracy-candidate
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 90
       - name: Fail after audited retained-attempt upload
         if: ${{ always() && steps.capture.outputs.accepted != 'true' }}
         shell: bash
@@ -565,9 +535,6 @@ jobs:
           test "${{ needs.changes.result }}" = success
           if [ "$EVENT_NAME" = pull_request ]; then
             test "${{ needs.smoke.result }}" = success
-            test "${{ needs.offline-verify.result }}" = success
-            test "${{ needs.trusted-full.result }}" = skipped
-          elif [ "${{ needs.changes.outputs.evidence_only }}" = true ]; then
             test "${{ needs.offline-verify.result }}" = success
             test "${{ needs.trusted-full.result }}" = skipped
           elif [ "$TRUSTED_REQUESTED" != true ]; then
