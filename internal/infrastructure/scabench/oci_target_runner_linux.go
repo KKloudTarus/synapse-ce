@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	"github.com/google/go-containerregistry/pkg/name"
 )
 
 const (
@@ -24,6 +25,7 @@ const (
 type DigestPinnedOCITargetRunner struct {
 	docker       ports.ToolRunner
 	imageRef     string
+	repository   string
 	targetDigest string
 }
 
@@ -39,10 +41,11 @@ func NewDigestPinnedOCITargetRunner(docker ports.ToolRunner, imageRef, targetDig
 	if docker == nil {
 		return nil, fmt.Errorf("target OCI runner requires a Docker runner")
 	}
-	if !validNativeDigest(targetDigest) || strings.TrimSpace(imageRef) == "" || !strings.HasSuffix(imageRef, "@"+targetDigest) {
+	repository, digest, ok := normalizedPinnedOCIRepository(imageRef)
+	if !validNativeDigest(targetDigest) || !ok || digest != targetDigest {
 		return nil, fmt.Errorf("target OCI runner requires an exact digest-pinned image reference")
 	}
-	return &DigestPinnedOCITargetRunner{docker: docker, imageRef: imageRef, targetDigest: targetDigest}, nil
+	return &DigestPinnedOCITargetRunner{docker: docker, imageRef: imageRef, repository: repository, targetDigest: targetDigest}, nil
 }
 
 func (runner *DigestPinnedOCITargetRunner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
@@ -89,12 +92,32 @@ func (runner *DigestPinnedOCITargetRunner) verifyLocalImage(ctx context.Context)
 	if image.OS != "linux" || image.Architecture != "amd64" {
 		return fmt.Errorf("local target OCI image platform is %q/%q, want linux/amd64", image.OS, image.Architecture)
 	}
-	for _, digest := range image.RepoDigests {
-		if digest == runner.imageRef {
+	for _, reference := range image.RepoDigests {
+		repository, digest, ok := normalizedPinnedOCIRepository(reference)
+		if ok && repository == runner.repository && digest == runner.targetDigest {
 			return nil
 		}
 	}
 	return fmt.Errorf("local target OCI image does not attest the requested exact repo digest")
+}
+
+func normalizedPinnedOCIRepository(reference string) (string, string, bool) {
+	if reference == "" || strings.TrimSpace(reference) != reference {
+		return "", "", false
+	}
+	at := strings.LastIndexByte(reference, '@')
+	if at <= 0 || at == len(reference)-1 || strings.Contains(reference[:at], "@") {
+		return "", "", false
+	}
+	parsed, err := name.ParseReference(reference)
+	if err != nil {
+		return "", "", false
+	}
+	digest, ok := parsed.(name.Digest)
+	if !ok || !validNativeDigest(digest.DigestStr()) {
+		return "", "", false
+	}
+	return digest.Context().Name(), digest.DigestStr(), true
 }
 
 func validateTargetNativeSpec(spec ports.ToolSpec) error {
