@@ -489,14 +489,14 @@ func compareOSVRaw(left, right []byte) ([]AllowedBundleDifference, []string) {
 
 func normalizeOSVStderr(raw []byte) ([]string, []rawJSONChange, error) {
 	lines := strings.Split(string(raw), "\n")
-	trailingNewline := len(lines) > 1 && lines[len(lines)-1] == ""
-	last := len(lines) - 1
-	if trailingNewline {
-		last--
-	}
 	changes := make([]rawJSONChange, 0)
+	timingSeen := false
 	for index, line := range lines {
-		if index == last && osvTimingLine.MatchString(line) {
+		if osvTimingLine.MatchString(line) {
+			if timingSeen {
+				return nil, nil, fmt.Errorf("OSV stderr repeats terminal timing")
+			}
+			timingSeen = true
 			changes = append(changes, rawJSONChange{path: fmt.Sprintf("lines[%d].timing", index), value: []byte(line)})
 			lines[index] = "<terminal-timing>"
 			continue

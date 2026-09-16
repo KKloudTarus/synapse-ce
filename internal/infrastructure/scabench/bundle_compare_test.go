@@ -79,12 +79,14 @@ func TestCompareOSVRawNormalizesLivePointerDiagnostics(t *testing.T) {
 	left := []byte(
 		osvPointerDiagnosticPrefix + "{Type:library Name:a Hashes:0xc000010100 ExternalReferences:0xc000010200 Properties:0xc000010300 SWID:0xc000010400}\n" +
 			osvPointerDiagnosticPrefix + "{Type:library Name:b Hashes:0xc000010500 ExternalReferences:<nil> Properties:<nil> SWID:<nil>}\n" +
-			"End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 1ms elapsed, 2ms wall time\n",
+			"End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 1ms elapsed, 2ms wall time\n" +
+			"stable post-scan status\n",
 	)
 	right := []byte(
 		osvPointerDiagnosticPrefix + "{Type:library Name:a Hashes:0xc000020100 ExternalReferences:0xc000020200 Properties:0xc000020300 SWID:0xc000020400}\n" +
 			osvPointerDiagnosticPrefix + "{Type:library Name:b Hashes:0xc000020500 ExternalReferences:<nil> Properties:<nil> SWID:<nil>}\n" +
-			"End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 3ms elapsed, 4ms wall time\n",
+			"End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 3ms elapsed, 4ms wall time\n" +
+			"stable post-scan status\n",
 	)
 	allowed, differences := compareOSVRaw(left, right)
 	if len(differences) != 0 || len(allowed) != 6 {
@@ -134,6 +136,19 @@ func TestCompareOSVRawRejectsUnclassifiedLiveDiagnosticChanges(t *testing.T) {
 		"invalid selected field": {
 			osvPointerDiagnosticPrefix + "{Type:library Name:a Hashes:garbage}\n",
 			valid,
+		},
+		"duplicate terminal timing": {
+			valid +
+				"End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 1ms elapsed, 2ms wall time\n" +
+				"End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 3ms elapsed, 4ms wall time\n",
+			valid +
+				"End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 5ms elapsed, 6ms wall time\n",
+		},
+		"timing counters": {
+			valid +
+				"End status: 1 dirs visited, 1 inodes visited, 1 Extract calls, 1ms elapsed, 2ms wall time\n",
+			valid +
+				"End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 3ms elapsed, 4ms wall time\n",
 		},
 		"pointer to nil": {
 			valid,
