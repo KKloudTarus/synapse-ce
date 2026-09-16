@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -290,9 +289,6 @@ func TestGoModulePath(t *testing.T) {
 	}
 	// Anything that is not a regular file is not read. The case that matters is a FIFO with no
 	// writer: without the type check, ReadFile blocks the gate forever, so the assertion is a deadline.
-	if runtime.GOOS == "windows" {
-		return
-	}
 	odd := t.TempDir()
 	if err := syscall.Mkfifo(filepath.Join(odd, "go.mod"), 0o600); err != nil {
 		t.Skipf("mkfifo unavailable: %v", err)
