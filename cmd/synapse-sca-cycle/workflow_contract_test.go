@@ -149,6 +149,7 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 		"SCA_ACCURACY_ACTIONS_RUNNER_ROOT", "$runner_root/.runner", "command -v jq", ".ephemeral == true", "runner_config_digest",
 		"syft-probe.json", "syft-config.json", "SCA_ACCURACY_SYFT_CONFIG_DIGEST", "ratchet-baseline.json",
 		"sboms/$target_id.cdx.json", "jq -S -c", "cmp -s", "expected_components", "actual_components",
+		"jq -nce --argjson components", "any(. == $scope)",
 		"reviews/github", "reviews/dispositions/github", "review_files", "decision_files",
 		`.state == "COMMENTED" or .state == "APPROVED"`,
 		`implementation_commit="${{ needs.changes.outputs.source_sha }}"`,
@@ -161,6 +162,9 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	}
 	if strings.Contains(preflightRun, "CHANGES_REQUESTED") {
 		t.Error("trusted preflight must whitelist accepted review states rather than override changes requested")
+	}
+	if strings.Contains(preflightRun, "index($scope)") {
+		t.Error("trusted preflight must compare nested component scopes by equality")
 	}
 	if strings.Index(preflightRun, "command -v jq") > strings.Index(preflightRun, ".ephemeral == true") {
 		t.Error("trusted preflight must assert jq availability before runner attestation")
@@ -338,10 +342,10 @@ func TestEngineAccuracyWorkflowCatalogIdentityPreflightScopeContract(t *testing.
 		{
 			name: "non-target PURL scopes are excluded from catalog identity comparison",
 			required: []string{
-				"benchmark_scopes=\"$(jq -ce --argjson components \"$expected_components\"",
+				"benchmark_scopes=\"$(jq -nce --argjson components \"$expected_components\"",
 				"[$components[] | .purl | purl_scope] | unique",
 				"--argjson benchmark_scopes \"$benchmark_scopes\"",
-				"($benchmark_scopes | index($scope) != null)",
+				"($benchmark_scopes | any(. == $scope))",
 			},
 		},
 		{

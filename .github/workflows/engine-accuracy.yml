@@ -244,7 +244,7 @@ jobs:
                 {purl: (.purl | required_string("purl")), version: (.version | required_string("version"))}
               ] | sort_by(.purl, .version)
             ' "$corpus/catalog.json")"
-            benchmark_scopes="$(jq -ce --argjson components "$expected_components" '
+            benchmark_scopes="$(jq -nce --argjson components "$expected_components" '
               def trim_space: gsub("^[[:space:]]+|[[:space:]]+$"; "");
               def purl_scope:
                 trim_space as $purl |
@@ -283,7 +283,7 @@ jobs:
                 elif ((.purl? | type) == "string" and (.purl | trim_space | length > 0)) then
                   (.purl | purl_scope) as $scope |
                   if ((.version? | type) == "string" and (.version | trim_space | length > 0) and
-                    ($benchmark_scopes | index($scope) != null)) then
+                    ($benchmark_scopes | any(. == $scope))) then
                     {purl, version}
                   else
                     empty
