@@ -75,6 +75,7 @@ nav:
       - Release provenance: release-provenance.md
       - AI triage evaluation: ai-triage-evaluation.md
       - Reachability benchmark: reachability-benchmark-runbook.md
+      - Reachability soundness: reachability-soundness.md
       - Operations drill evidence: operations-drill-evidence.md
       - Detection RulePack lifecycle: rulepack.md
   - Integrate:
