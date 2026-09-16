@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -53,6 +54,9 @@ func dpkgTestRoot(t *testing.T) string {
 }
 
 func TestRuntimeReachSweepShipsResolvedEvidence(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("dpkg runtime evidence requires Linux filesystem semantics")
+	}
 	sensor := &fakeSensor{events: make(chan ebpf.LibraryLoadEvent, 4)}
 	withFakeSensor(t, sensor)
 	api := &fakeAPI{}

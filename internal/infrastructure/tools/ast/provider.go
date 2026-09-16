@@ -327,6 +327,7 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 	}
 	stdout := boundedOutput{limit: maxASTOutputBytes}
 	stderr := boundedOutput{limit: maxASTOutputBytes}
+	//nolint:gosec // The configured binary is executed directly with a fixed argv shape; no shell is involved.
 	ec := exec.CommandContext(ctx, p.bin, args...)
 	ec.Stdout = &stdout
 	ec.Stderr = &stderr

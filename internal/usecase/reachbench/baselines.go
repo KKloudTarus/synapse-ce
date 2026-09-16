@@ -149,7 +149,7 @@ func SemgrepCEObservations(c Corpus, r io.Reader) ([]Observation, error) {
 	_, hasNative := envelope["results"]
 	_, hasSARIF := envelope["runs"]
 	if !hasNative && !hasSARIF {
-		return nil, fmt.Errorf("Semgrep CE reachability output is neither native JSON nor SARIF")
+		return nil, fmt.Errorf("semgrep CE reachability output is neither native JSON nor SARIF")
 	}
 	results := make([]result, 0, len(native.Results))
 	for _, item := range native.Results {
@@ -218,10 +218,10 @@ func SnykSampleObservations(c Corpus, r io.Reader) ([]Observation, error) {
 	for _, item := range input.Observations {
 		id := strings.TrimSpace(item.EvidenceID)
 		if id == "" || !item.Label.valid() {
-			return nil, fmt.Errorf("Snyk sample has invalid evidence observation")
+			return nil, fmt.Errorf("snyk sample has invalid evidence observation")
 		}
 		if _, duplicate := byEvidence[id]; duplicate {
-			return nil, fmt.Errorf("Snyk sample duplicates evidence id %q", id)
+			return nil, fmt.Errorf("snyk sample duplicates evidence id %q", id)
 		}
 		byEvidence[id] = item.Label
 	}

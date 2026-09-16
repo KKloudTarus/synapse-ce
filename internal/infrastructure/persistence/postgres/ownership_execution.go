@@ -50,6 +50,7 @@ const ownershipFrozenInput = `jsonb_build_object(
  'revision',COALESCE(a.revision,0),'manual_generation',COALESCE(a.manual_generation,0)),
  'active_teams',COALESCE((SELECT jsonb_agg(t.id ORDER BY t.id) FROM ownership_teams t WHERE t.tenant_id=f.tenant_id AND NOT t.archived AND EXISTS(SELECT 1 FROM ownership_policy_team_refs tr WHERE tr.tenant_id=t.tenant_id AND tr.team_id=t.id AND tr.policy_id=p.id AND tr.version=p.selected_version)),'[]'::jsonb))`
 
+//nolint:gosec // This constant is a SQL column list, not credential material.
 const ownershipWorkColumns = `(tenant_id,job_id,engagement_id,finding_id,run_id,policy_id,policy_version,policy_revision,mode,finding_version,input,binding_hash,origin,binding_origin)`
 
 func ownershipInsertJob(ctx context.Context, tx pgx.Tx, tenant shared.ID, id string, run shared.ID) error {

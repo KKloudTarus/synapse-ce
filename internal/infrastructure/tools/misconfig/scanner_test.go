@@ -32,6 +32,18 @@ func scan(t *testing.T, files map[string]string) []ports.MisconfigRawFinding {
 	return got
 }
 
+func TestScanCanonicalizesFindingPaths(t *testing.T) {
+	findings := scan(t, map[string]string{"nested/Dockerfile": "FROM alpine:latest\nUSER root\n"})
+	if len(findings) == 0 {
+		t.Fatal("expected an insecure Dockerfile finding")
+	}
+	for _, finding := range findings {
+		if strings.Contains(finding.File, "\\") || !strings.HasPrefix(finding.File, "nested/") {
+			t.Fatalf("finding path = %q, want a repository-relative slash path", finding.File)
+		}
+	}
+}
+
 func ruleIDs(fs []ports.MisconfigRawFinding) map[string]ports.MisconfigRawFinding {
 	m := make(map[string]ports.MisconfigRawFinding, len(fs))
 	for _, f := range fs {

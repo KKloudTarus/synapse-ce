@@ -53,16 +53,7 @@ func newEndpointResponseRuntime(cfg config) (*endpointResponseRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
-	registry, err := responseactuator.NewRegistry()
-	if err != nil {
-		return nil, err
-	}
-	actuator, err := responseactuator.New(registry)
-	if err != nil {
-		_ = registry.Close()
-		return nil, err
-	}
-	return &endpointResponseRuntime{keys: keys, journal: journal, registry: registry, actuator: actuator}, nil
+	return assembleEndpointResponseRuntime(keys, journal)
 }
 
 func (r *endpointResponseRuntime) executorFor(agentID, assetID shared.ID) (responseCommandExecutor, error) {

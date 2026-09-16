@@ -219,5 +219,5 @@ func (s *Scanner) renderKustomization(ctx context.Context, root, dir, relDir str
 	default:
 		return k8sScanResult{}, false // kustomize rendering not enabled
 	}
-	return scanKubernetes(filepath.Join(relDir, "kustomization.yaml"), rendered), true
+	return scanKubernetes(filepath.ToSlash(filepath.Join(relDir, "kustomization.yaml")), rendered), true
 }

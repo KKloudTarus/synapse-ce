@@ -2,6 +2,7 @@ package enginecompare
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -155,5 +156,68 @@ func TestCompareGHSAFallbackCaseFolds(t *testing.T) {
 	rep := Compare("vendor", "owned", base, cand)
 	if rep.Both != 1 || len(rep.BaselineOnly) != 0 {
 		t.Fatalf("GHSA ids must case-fold to one pair, got %+v", rep)
+	}
+}
+
+func TestCompareManyRejectsInvalidNamesAndIsPermutationDeterministic(t *testing.T) {
+	input := comparisonInputIdentity()
+	candidate := EngineFindingSet{Name: "owned", InputIdentity: input, Findings: []vulnerability.RawFinding{raw("curl", "CVE-1"), raw("curl", "CVE-2")}}
+	grype := EngineFindingSet{Name: "grype", InputIdentity: input, Findings: []vulnerability.RawFinding{raw("curl", "CVE-1")}}
+	trivy := EngineFindingSet{Name: "trivy", InputIdentity: input, Findings: []vulnerability.RawFinding{raw("curl", "CVE-3")}}
+	first, err := CompareMany(candidate, []EngineFindingSet{trivy, grype})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := CompareMany(candidate, []EngineFindingSet{grype, trivy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.DiagnosticOnly || first.InputIdentity != input || !reflect.DeepEqual(first, second) || len(first.Comparisons) != 2 || first.Comparisons[0].BaselineName != "grype" {
+		t.Fatalf("CompareMany must be deterministic diagnostic output: %+v / %+v", first, second)
+	}
+	mismatched := trivy
+	mismatched.InputIdentity.TargetDigest = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	if _, err := CompareMany(candidate, []EngineFindingSet{mismatched}); err == nil {
+		t.Fatal("comparison across different target inputs was accepted")
+	}
+	for _, invalid := range []struct {
+		name      string
+		candidate EngineFindingSet
+		baselines []EngineFindingSet
+	}{
+		{name: "empty baseline set", candidate: candidate},
+		{name: "blank candidate", candidate: EngineFindingSet{Name: " ", InputIdentity: input}, baselines: []EngineFindingSet{grype}},
+		{name: "missing input identity", candidate: EngineFindingSet{Name: "owned"}, baselines: []EngineFindingSet{grype}},
+		{name: "duplicate baseline", candidate: candidate, baselines: []EngineFindingSet{grype, grype}},
+		{name: "candidate collision", candidate: candidate, baselines: []EngineFindingSet{{Name: "owned", InputIdentity: input}}},
+	} {
+		t.Run(invalid.name, func(t *testing.T) {
+			if _, err := CompareMany(invalid.candidate, invalid.baselines); err == nil {
+				t.Fatal("invalid comparison names or inputs were accepted")
+			}
+		})
+	}
+}
+
+func TestCompareManyRejectsMoreThanThreeBaselines(t *testing.T) {
+	identity := comparisonInputIdentity()
+	candidate := EngineFindingSet{Name: "owned", InputIdentity: identity}
+	baselines := []EngineFindingSet{
+		{Name: "grype", InputIdentity: identity},
+		{Name: "trivy", InputIdentity: identity},
+		{Name: "osv-scanner", InputIdentity: identity},
+		{Name: "other", InputIdentity: identity},
+	}
+	if _, err := CompareMany(candidate, baselines); err == nil {
+		t.Fatal("compare-many accepted more than three baselines")
+	}
+}
+
+func comparisonInputIdentity() InputIdentity {
+	return InputIdentity{
+		CatalogRevision: "catalog-r1",
+		CatalogDigest:   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		TargetDigest:    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		SBOMDigest:      "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 	}
 }

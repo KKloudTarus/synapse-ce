@@ -111,7 +111,7 @@ func (s *Filesystem) PutObject(ctx context.Context, key string, src io.Reader, s
 	if err != nil {
 		return err
 	}
-	return errors.Join(directory.Sync(), directory.Close())
+	return errors.Join(syncDirectory(directory), directory.Close())
 }
 
 func (s *Filesystem) OpenObject(ctx context.Context, key string) (io.ReadCloser, error) {

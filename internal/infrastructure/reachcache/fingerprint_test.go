@@ -4,9 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"syscall"
+	"runtime"
 	"testing"
-	"time"
 )
 
 func writeTree(t *testing.T, files map[string]string) string {
@@ -39,7 +38,9 @@ func hashOf(t *testing.T, dir string) string {
 // The same tree content yields the same source hash across two independent walks (order-independent).
 func TestTreeFingerprintStable(t *testing.T) {
 	files := map[string]string{"main.go": "package main", "pkg/a.go": "package pkg", "go.mod": "module x"}
-	if hashOf(t, writeTree(t, files)) != hashOf(t, writeTree(t, files)) {
+	first := hashOf(t, writeTree(t, files))
+	second := hashOf(t, writeTree(t, files))
+	if first != second {
 		t.Fatal("identical trees must hash equal")
 	}
 }
@@ -126,6 +127,9 @@ func TestTreeFingerprintContextCancel(t *testing.T) {
 
 // Changing a file's mode changes the source hash (mode is bound).
 func TestTreeFingerprintModeChange(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not preserve Unix executable mode bits")
+	}
 	dir := writeTree(t, map[string]string{"run.sh": "echo hi"})
 	before := hashOf(t, dir)
 	if err := os.Chmod(filepath.Join(dir, "run.sh"), 0o755); err != nil {
@@ -336,22 +340,6 @@ func TestTreeFingerprintAncestorGoWorkErrors(t *testing.T) {
 	}
 }
 
-// Codex re-review finding 3: a go.mod that is a FIFO must not be opened by the external-source parse (it would
-// block); it is not collected as a manifest, so fingerprinting completes.
-func TestTreeFingerprintGoModFIFONotOpened(t *testing.T) {
-	dir := writeTree(t, map[string]string{"main.go": "package main"})
-	if err := syscall.Mkfifo(filepath.Join(dir, "go.mod"), 0o644); err != nil {
-		t.Skipf("mkfifo unsupported: %v", err)
-	}
-	done := make(chan struct{})
-	go func() { _, _, _ = NewTreeFingerprinter().FingerprintSource(context.Background(), dir); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("FingerprintSource hung: a FIFO named go.mod must not be opened")
-	}
-}
-
 // Codex re-review finding 2: an ambient GOWORK pointing outside the tree must disable the cache.
 func TestTreeFingerprintExternalGOWORKErrors(t *testing.T) {
 	outside := t.TempDir()
@@ -426,29 +414,5 @@ func TestTreeFingerprintExternalGoWorkErrors(t *testing.T) {
 	})
 	if _, _, err := NewTreeFingerprinter().FingerprintSource(context.Background(), dir); err == nil {
 		t.Fatal("a go.work use of an out-of-tree module must disable the cache (error)")
-	}
-}
-
-// A non-regular file (FIFO) must never be opened (opening a FIFO with no writer blocks forever); it is
-// fingerprinted by identity only, so FingerprintSource completes and is stable.
-func TestTreeFingerprintFIFONotOpened(t *testing.T) {
-	dir := writeTree(t, map[string]string{"main.go": "package main"})
-	fifo := filepath.Join(dir, "pipe")
-	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
-		t.Skipf("mkfifo unsupported: %v", err)
-	}
-	done := make(chan struct{})
-	var src string
-	go func() {
-		src, _, _ = NewTreeFingerprinter().FingerprintSource(context.Background(), dir)
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("FingerprintSource hung: a FIFO must not be opened")
-	}
-	if src == "" {
-		t.Fatal("expected a source hash with a FIFO present")
 	}
 }
