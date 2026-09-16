@@ -28,11 +28,18 @@ func (t PRDecorationTarget) Complete() bool {
 
 // PRDecoration is provider-agnostic render data. Credentials are intentionally absent: adapters
 // receive authentication through their own server-side configuration and must never render it.
+// NewIssues/NewCoverage are pointers because a producer that cannot measure them must say unavailable,
+// never turn absence into a misleading zero. FileChanges carries the persisted diff hunks needed by
+// providers that can anchor annotations only to lines present in the pull-request diff.
 type PRDecoration struct {
-	Target      PRDecorationTarget
-	Gate        qualitygate.Result
-	Summary     string
-	Annotations []projectanalysis.Annotation
+	Target            PRDecorationTarget
+	Gate              qualitygate.Result
+	Summary           string
+	Annotations       []projectanalysis.Annotation
+	FileChanges       []projectanalysis.FileChange
+	NewIssues         *int
+	NewCoverage       *float64
+	NewCoverageReason string
 }
 
 // PRDecorator publishes one quality-gate result to a forge. Implementations are expected to update
