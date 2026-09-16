@@ -1,6 +1,7 @@
 package scabench
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -72,6 +73,50 @@ func TestOwnedBuildInjectsStableBenchmarkVersion(t *testing.T) {
 	}
 	if wire.EngineVersion != ownedBenchmarkVersion {
 		t.Fatalf("owned engine version = %q, want %q", wire.EngineVersion, ownedBenchmarkVersion)
+	}
+}
+
+func TestReduceRepetitionsReturnsCanonicalResult(t *testing.T) {
+	corpusRoot := filepath.Join("..", "..", "usecase", "scabench", "corpus")
+	catalog, err := decodeCatalogFile(filepath.Join(corpusRoot, "catalog.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oracle, err := decodeOracleFile(filepath.Join(corpusRoot, "oracle.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ratchet, err := decodeRatchetFile(filepath.Join(corpusRoot, "ratchet.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	observations := make([]bench.Observation, 0, len(ratchet.Floors))
+	for _, floor := range ratchet.Floors {
+		expected := floor.Expected
+		state := bench.ObservationComplete
+		if floor.Mode == bench.FloorGateModeUnsupportedOnly {
+			state = bench.ObservationUnsupported
+		}
+		observations = append(observations, bench.Observation{
+			SchemaVersion: bench.ObservationSchemaVersion, CatalogRevision: catalog.Revision, CatalogDigest: ratchet.CatalogDigest,
+			Engine: expected.Engine, EngineVersion: expected.EngineVersion, EngineBinaryDigest: expected.EngineBinaryDigest,
+			DatabaseBuild: expected.DatabaseBuild, DatabaseDigest: expected.DatabaseDigest,
+			EnvironmentID: expected.EnvironmentID, EnvironmentDigest: expected.EnvironmentDigest,
+			TargetID: expected.TargetID, TargetDigest: expected.TargetDigest, SBOMDigest: expected.SBOMDigest,
+			State: state, RawOutputDigest: sha256Digest([]byte(expected.TargetID + "\x00" + string(expected.Engine))), ConfigDigest: expected.ConfigDigest,
+			CapabilityKind: expected.CapabilityKind, CapabilityDigest: expected.CapabilityDigest,
+		})
+	}
+	result, encoded, _, err := reduceRepetitions(catalog, oracle, ratchet, [][]bench.Observation{observations, append([]bench.Observation(nil), observations...)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reencoded bytes.Buffer
+	if err := bench.EncodeResult(&reencoded, result); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(encoded, reencoded.Bytes()) {
+		t.Fatal("returned result differs from the canonical encoded result")
 	}
 }
 

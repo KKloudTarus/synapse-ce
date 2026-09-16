@@ -730,7 +730,6 @@ func (state *runState) captureCell(ctx context.Context, repetition int, manifest
 func reduceRepetitions(catalog bench.Catalog, oracle bench.Oracle, ratchet bench.Ratchet, observations [][]bench.Observation) (bench.Result, []byte, []byte, error) {
 	var expectedResult []byte
 	var expectedReport []byte
-	var final bench.Result
 	for index, repetition := range observations {
 		result, err := bench.Reduce(catalog, oracle, repetition)
 		if err != nil {
@@ -749,12 +748,16 @@ func reduceRepetitions(catalog bench.Catalog, oracle bench.Oracle, ratchet bench
 			return bench.Result{}, nil, nil, err
 		}
 		if index == 0 {
-			final, expectedResult, expectedReport = result, resultBuffer.Bytes(), reportBuffer.Bytes()
+			expectedResult, expectedReport = resultBuffer.Bytes(), reportBuffer.Bytes()
 			continue
 		}
 		if !bytes.Equal(expectedResult, resultBuffer.Bytes()) || !bytes.Equal(expectedReport, reportBuffer.Bytes()) {
 			return bench.Result{}, nil, nil, fmt.Errorf("repetition %d reduction differs", index+1)
 		}
+	}
+	final, err := bench.DecodeResult(bytes.NewReader(expectedResult))
+	if err != nil {
+		return bench.Result{}, nil, nil, fmt.Errorf("decode canonical result: %w", err)
 	}
 	return final, expectedResult, expectedReport, nil
 }
