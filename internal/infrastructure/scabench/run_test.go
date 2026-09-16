@@ -22,6 +22,20 @@ func TestValidateFixedTargetMatrix(t *testing.T) {
 	}
 }
 
+func TestCanonicalCapabilityComponentsUsesBenchmarkIdentityOrder(t *testing.T) {
+	version := "4.4-150400.25.22"
+	components, err := canonicalCapabilityComponents([]bench.Component{
+		{PURL: "pkg:rpm/sles/bash-sh@" + version, Version: version},
+		{PURL: "pkg:rpm/sles/bash@" + version, Version: version},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 2 || components[0].PURL != "pkg:rpm/sles/bash@"+version || components[1].PURL != "pkg:rpm/sles/bash-sh@"+version {
+		t.Fatalf("capability component order = %+v", components)
+	}
+}
+
 func TestMaterializeManifestPreservesPinnedCompetitorPathsAndRebindsOwnedBinary(t *testing.T) {
 	for _, engine := range []bench.Engine{bench.EngineGrype, bench.EngineOwned} {
 		t.Run(string(engine), func(t *testing.T) {

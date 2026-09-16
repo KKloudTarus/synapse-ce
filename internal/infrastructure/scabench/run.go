@@ -497,6 +497,30 @@ func (state *runState) materializeManifest(catalogDigest string, target bench.Ta
 	return manifest, nil
 }
 
+func canonicalCapabilityComponents(input []bench.Component) ([]bench.Component, error) {
+	type keyedComponent struct {
+		component bench.Component
+		key       string
+	}
+	keyed := make([]keyedComponent, len(input))
+	for i, component := range input {
+		key, err := capabilityComponentKey(component)
+		if err != nil {
+			return nil, fmt.Errorf("capability component %d: %w", i, err)
+		}
+		keyed[i] = keyedComponent{
+			component: component,
+			key:       key.Ecosystem + "\x00" + key.Package + "\x00" + key.Version,
+		}
+	}
+	sort.Slice(keyed, func(i, j int) bool { return keyed[i].key < keyed[j].key })
+	components := make([]bench.Component, len(keyed))
+	for i := range keyed {
+		components[i] = keyed[i].component
+	}
+	return components, nil
+}
+
 func (state *runState) materializeCapability(catalogDigest string, target bench.Target, template captureManifestTemplate) (CapabilityStatement, string, error) {
 	if template.Capability == nil {
 		return CapabilityStatement{}, "", errors.New("capability template is required")
@@ -521,10 +545,10 @@ func (state *runState) materializeCapability(catalogDigest string, target bench.
 	if err != nil {
 		return CapabilityStatement{}, "", err
 	}
-	components := append([]bench.Component(nil), target.Components...)
-	sort.Slice(components, func(i, j int) bool {
-		return components[i].PURL+"\x00"+components[i].Version < components[j].PURL+"\x00"+components[j].Version
-	})
+	components, err := canonicalCapabilityComponents(target.Components)
+	if err != nil {
+		return CapabilityStatement{}, "", err
+	}
 	statementSources := make([]CapabilityStatementSource, 0, len(sources))
 	for _, source := range sources {
 		statementSources = append(statementSources, CapabilityStatementSource{Reference: source.Reference, Digest: source.Digest})
