@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/redact"
@@ -3610,35 +3611,12 @@ func sameFindings(left, right []bench.Finding) bool {
 }
 
 func writeBundleFile(path string, data []byte) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return fmt.Errorf("create bundle artifact: %w", err)
-	}
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
+	if err := benchcycle.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write bundle artifact: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("sync bundle artifact: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close bundle artifact: %w", err)
 	}
 	return nil
 }
 
 func syncDirectory(path string) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	directory, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open bundle directory for sync: %w", err)
-	}
-	defer func() { _ = directory.Close() }()
-	if err := directory.Sync(); err != nil {
-		return fmt.Errorf("sync bundle directory: %w", err)
-	}
-	return nil
+	return benchcycle.SyncDirectory(path)
 }

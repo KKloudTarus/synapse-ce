@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	bench "github.com/KKloudTarus/synapse-ce/internal/usecase/scabench"
 )
@@ -84,6 +85,7 @@ type runState struct {
 	expectedStates  map[string]bench.ObservationState
 	review          []byte
 	disposition     []byte
+	workspace       benchcycle.Workspace
 	workRoot        string
 	rawRunRoot      string
 	cleanup         CleanupResult
@@ -148,14 +150,27 @@ type dispositionCapture struct {
 	Body                 string `json:"body"`
 }
 
+type cycleCell struct {
+	key      string
+	manifest CaptureManifest
+	expected bench.ObservationState
+}
+
+type cycleCapture struct {
+	observation bench.Observation
+	identity    BundleIdentity
+	path        string
+}
+
 func Run(ctx context.Context, input RunInput, runnerFactory RunnerFactory) (result RunResult, runErr error) {
 	state, err := prepareRun(input)
 	if err != nil {
 		return RunResult{}, err
 	}
-	defer func() { _ = os.RemoveAll(state.workRoot) }()
+	workspace := state.workspace
 	defer func() {
 		if !state.cleanupRequired {
+			_ = workspace.RemoveWork()
 			return
 		}
 		cleanupErr := state.clean(ctx)
@@ -179,41 +194,50 @@ func Run(ctx context.Context, input RunInput, runnerFactory RunnerFactory) (resu
 		return RunResult{}, err
 	}
 
-	observations := make([][]bench.Observation, fixedRepetitions)
-	rawBundles := make([][]BundleIdentity, fixedRepetitions)
-	bundlePaths := make(map[string][2]string, len(state.manifests))
-	for repetition := 1; repetition <= fixedRepetitions; repetition++ {
-		for _, target := range state.catalog.Targets {
-			for _, engine := range bench.Engines() {
-				key := runCellKey(target.ID, engine)
-				manifest := state.manifests[key]
-				state.cleanupRequired = true
-				observation, identity, path, captureErr := state.captureCell(ctx, repetition, manifest, runnerFactory)
-				if captureErr != nil {
-					return RunResult{}, fmt.Errorf("capture repetition %d %s: %w", repetition, key, captureErr)
-				}
-				if observation.State != state.expectedStates[key] {
-					return RunResult{}, fmt.Errorf("capture repetition %d %s returned %q, want %q", repetition, key, observation.State, state.expectedStates[key])
-				}
-				observations[repetition-1] = append(observations[repetition-1], observation)
-				rawBundles[repetition-1] = append(rawBundles[repetition-1], identity)
-				paths := bundlePaths[key]
-				paths[repetition-1] = path
-				bundlePaths[key] = paths
-			}
-		}
-	}
-
-	comparisons := make([]SemanticBundleComparison, 0, len(state.manifests))
+	cells := make([]cycleCell, 0, len(state.manifests))
 	for _, target := range state.catalog.Targets {
 		for _, engine := range bench.Engines() {
 			key := runCellKey(target.ID, engine)
-			paths := bundlePaths[key]
-			comparison, compareErr := CompareBundlesForCell(paths[0], paths[1], target.ID, engine, state.expectedStates[key])
+			cells = append(cells, cycleCell{
+				key:      key,
+				manifest: state.manifests[key],
+				expected: state.expectedStates[key],
+			})
+		}
+	}
+	comparisons := make([]SemanticBundleComparison, 0, len(cells))
+	captures, err := benchcycle.ExecuteRepeated(ctx, fixedRepetitions, cells,
+		func(ctx context.Context, repetition int, cell cycleCell) (cycleCapture, error) {
+			state.cleanupRequired = true
+			observation, identity, path, captureErr := state.captureCell(ctx, repetition, cell.manifest, runnerFactory)
+			if captureErr != nil {
+				return cycleCapture{}, fmt.Errorf("capture repetition %d %s: %w", repetition, cell.key, captureErr)
+			}
+			if observation.State != cell.expected {
+				return cycleCapture{}, fmt.Errorf("capture repetition %d %s returned %q, want %q", repetition, cell.key, observation.State, cell.expected)
+			}
+			return cycleCapture{observation: observation, identity: identity, path: path}, nil
+		},
+		func(_ context.Context, cell cycleCell, repetitions []cycleCapture) error {
+			comparison, compareErr := CompareBundlesForCell(repetitions[0].path, repetitions[1].path, cell.manifest.TargetID, cell.manifest.Engine, cell.expected)
 			if compareErr != nil {
-				return RunResult{}, fmt.Errorf("compare repetitions for %s: %w", key, compareErr)
+				return fmt.Errorf("compare repetitions for %s: %w", cell.key, compareErr)
 			}
 			comparisons = append(comparisons, comparison)
+			return nil
+		},
+	)
+	if err != nil {
+		return RunResult{}, err
+	}
+	observations := make([][]bench.Observation, fixedRepetitions)
+	rawBundles := make([][]BundleIdentity, fixedRepetitions)
+	for repetition, repetitionCaptures := range captures {
+		observations[repetition] = make([]bench.Observation, 0, len(repetitionCaptures))
+		rawBundles[repetition] = make([]BundleIdentity, 0, len(repetitionCaptures))
+		for _, captured := range repetitionCaptures {
+			observations[repetition] = append(observations[repetition], captured.observation)
+			rawBundles[repetition] = append(rawBundles[repetition], captured.identity)
 		}
 	}
 
@@ -241,19 +265,13 @@ func prepareRun(input RunInput) (*runState, error) {
 	if err := validateRunInput(input); err != nil {
 		return nil, err
 	}
-	workRoot, err := os.MkdirTemp("", "synapse-sca-cycle-")
+	workspace, err := benchcycle.PrepareWorkspace(input.RawRetentionRoot, input.RunKey)
 	if err != nil {
-		return nil, fmt.Errorf("create run workspace: %w", err)
+		return nil, err
 	}
-	rawRoot, err := realDirectory(input.RawRetentionRoot)
-	if err != nil {
-		_ = os.RemoveAll(workRoot)
-		return nil, fmt.Errorf("validate raw retention root: %w", err)
-	}
-	parts := strings.Split(input.RunKey, "/")
 	return &runState{
-		input: input, workRoot: workRoot,
-		rawRunRoot: filepath.Join(rawRoot, parts[0], parts[1]),
+		input: input, workspace: workspace,
+		workRoot: workspace.WorkRoot(), rawRunRoot: workspace.RawRunRoot(),
 	}, nil
 }
 
@@ -262,26 +280,20 @@ func validateRunInput(input RunInput) error {
 		{"corpus root", input.CorpusRoot}, {"trusted input root", input.TrustedInputRoot},
 		{"output root", input.OutputRoot}, {"raw retention root", input.RawRetentionRoot},
 	} {
-		if strings.TrimSpace(item.value) == "" || !filepath.IsAbs(item.value) {
-			return fmt.Errorf("%s must be an absolute path", item.name)
+		if err := benchcycle.ValidateAbsolutePath(item.name, item.value); err != nil {
+			return err
 		}
 	}
-	if !fullSHA(input.ImplementationCommit) {
-		return errors.New("implementation commit must be a 40-character lowercase SHA")
+	if err := benchcycle.ValidateIdentity(input.ImplementationCommit, input.RunKey); err != nil {
+		return err
 	}
-	parts := strings.Split(input.RunKey, "/")
-	if len(parts) != 2 || !portableRunSegment(parts[0]) || !portableRunSegment(parts[1]) {
-		return errors.New("run key must contain exactly two portable path segments")
+	if err := benchcycle.EnsureAbsent(input.OutputRoot, "output root"); err != nil {
+		return err
 	}
-	if _, err := os.Lstat(input.OutputRoot); err == nil {
-		return errors.New("output root already exists")
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect output root: %w", err)
-	}
-	if _, err := realDirectory(input.CorpusRoot); err != nil {
+	if _, err := benchcycle.RealDirectory(input.CorpusRoot); err != nil {
 		return fmt.Errorf("validate corpus root: %w", err)
 	}
-	if _, err := realDirectory(input.TrustedInputRoot); err != nil {
+	if _, err := benchcycle.RealDirectory(input.TrustedInputRoot); err != nil {
 		return fmt.Errorf("validate trusted input root: %w", err)
 	}
 	return nil
@@ -766,19 +778,12 @@ func (state *runState) clean(ctx context.Context) error {
 	if state.cleanup.RawRunRemoved && state.cleanup.DockerCleaned {
 		return nil
 	}
-	if err := os.RemoveAll(state.rawRunRoot); err != nil {
-		return fmt.Errorf("remove protected raw output: %w", err)
-	}
-	if _, err := os.Lstat(state.rawRunRoot); !os.IsNotExist(err) {
-		if err == nil {
-			return errors.New("protected raw output remains")
-		}
+	if err := state.workspace.Cleanup(ctx, func(ctx context.Context) error {
+		return cleanDocker(ctx, "docker")
+	}); err != nil {
 		return err
 	}
 	state.cleanup.RawRunRemoved = true
-	if err := cleanDocker(ctx, "docker"); err != nil {
-		return err
-	}
 	state.cleanup.DockerCleaned = true
 	return nil
 }
@@ -1051,33 +1056,7 @@ func capabilityPinReference(locator string) string {
 }
 
 func belowRoot(root, locator string) (string, error) {
-	if filepath.IsAbs(locator) {
-		return "", errors.New("asset locator must be relative")
-	}
-	path := filepath.Join(root, filepath.FromSlash(locator))
-	relative, err := filepath.Rel(root, path)
-	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", errors.New("asset locator escapes trusted input root")
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return "", errors.New("asset must be a regular non-symlink file")
-	}
-	return path, nil
-}
-
-func realDirectory(path string) (string, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return "", errors.New("path must be a real directory")
-	}
-	return filepath.Abs(path)
+	return benchcycle.BelowRoot(root, locator)
 }
 
 func readRegularFile(path string) ([]byte, error) {
@@ -1092,18 +1071,7 @@ func readRegularFile(path string) ([]byte, error) {
 }
 
 func writeNewFile(path string, body []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
-	if err != nil {
-		return err
-	}
-	if _, err := file.Write(body); err != nil {
-		_ = file.Close()
-		return err
-	}
-	return file.Close()
+	return benchcycle.WriteNewFile(path, body, mode)
 }
 
 func digestFile(path string) (string, error) {
@@ -1116,26 +1084,4 @@ func digestFile(path string) (string, error) {
 func sha256Digest(body []byte) string {
 	hash := sha256.Sum256(body)
 	return "sha256:" + hex.EncodeToString(hash[:])
-}
-func fullSHA(value string) bool {
-	if len(value) != 40 {
-		return false
-	}
-	for _, character := range value {
-		if !(character >= '0' && character <= '9' || character >= 'a' && character <= 'f') {
-			return false
-		}
-	}
-	return true
-}
-func portableRunSegment(value string) bool {
-	if value == "" || len(value) > 128 {
-		return false
-	}
-	for _, character := range value {
-		if !(character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '.' || character == '_' || character == '-') {
-			return false
-		}
-	}
-	return true
 }
