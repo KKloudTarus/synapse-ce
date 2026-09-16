@@ -97,16 +97,27 @@ func ReadVerifiedRepositoryAsset(repositoryRoot string, asset bench.ContentRefer
 // VerifyAccountableReviewCapture verifies both immutable capture bytes and their
 // semantic provenance binding before any scanner-capable runner is constructed.
 func VerifyAccountableReviewCapture(repositoryRoot string, review bench.AccountableReview) error {
-	body, err := ReadVerifiedRepositoryAsset(repositoryRoot, review.ReviewCapture)
+	reviewBody, err := ReadVerifiedRepositoryAsset(repositoryRoot, review.ReviewCapture)
 	if err != nil {
 		return fmt.Errorf("read immutable accountable review capture: %w", err)
 	}
-	capture, err := bench.DecodeGitHubReviewCapture(bytes.NewReader(body))
+	reviewCapture, err := bench.DecodeGitHubReviewCapture(bytes.NewReader(reviewBody))
 	if err != nil {
 		return fmt.Errorf("decode sanitized github review capture: %w", err)
 	}
-	if err := capture.ValidateAgainstAccountableReview(review); err != nil {
+	if err := reviewCapture.ValidateAgainstAccountableReview(review); err != nil {
 		return fmt.Errorf("bind sanitized github review capture: %w", err)
+	}
+	decisionBody, err := ReadVerifiedRepositoryAsset(repositoryRoot, review.DecisionCapture)
+	if err != nil {
+		return fmt.Errorf("read immutable accountable review disposition: %w", err)
+	}
+	decisionCapture, err := bench.DecodeGitHubReviewDispositionCapture(bytes.NewReader(decisionBody))
+	if err != nil {
+		return fmt.Errorf("decode sanitized github review disposition: %w", err)
+	}
+	if err := decisionCapture.ValidateAgainstAccountableReview(review); err != nil {
+		return fmt.Errorf("bind sanitized github review disposition: %w", err)
 	}
 	return nil
 }

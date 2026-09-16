@@ -8,6 +8,8 @@ enforcement is exercised, not bypassed. Nothing is persisted.
 
 Build it with `make build`. The binary lands at `./bin/synapse-cli`.
 
+The benchmark-only operator binaries `synapse-sca-bench`, `synapse-sca-cycle`, and `synapse-sca-inputs` are intentionally outside product composition. Their same-SBOM accuracy workflow, trusted-Linux requirements, review gate, artifact policy, and cleanup contract are documented in [SCA accuracy benchmark](sca-accuracy-benchmark.md).
+
 ## Assessment lifecycle administration
 
 These are separate operator binaries, not `synapse-cli` subcommands. `make build`

@@ -56,13 +56,16 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ steps.resolve.outputs.source_sha }}
           TRUSTED_ENABLED: ${{ vars.ENGINE_ACCURACY_TRUSTED_ENABLED }}
           TRUSTED_REF: ${{ vars.ENGINE_ACCURACY_TRUSTED_REF }}
+          TRUSTED_SHA: ${{ vars.ENGINE_ACCURACY_TRUSTED_SHA }}
         run: |
           set -euo pipefail
           trusted_requested=false
-          if [ "$EVENT_NAME" != "pull_request" ] && [ "$TRUSTED_ENABLED" = "true" ]; then
-            if [ "$WORKFLOW_REF" = "refs/heads/main" ] || { [ -n "$TRUSTED_REF" ] && [ "$WORKFLOW_REF" = "$TRUSTED_REF" ]; }; then
+          trusted_ref="${TRUSTED_REF:-refs/heads/main}"
+          if [ "$EVENT_NAME" != "pull_request" ] && [ "$TRUSTED_ENABLED" = "true" ] && [ -n "$TRUSTED_SHA" ]; then
+            if [ "$WORKFLOW_REF" = "$trusted_ref" ] && [ "$WORKFLOW_SHA" = "$TRUSTED_SHA" ]; then
               trusted_requested=true
             fi
           fi
@@ -118,9 +121,10 @@ jobs:
     name: Trusted full evidence cycle
     needs: changes
     if: ${{ needs.changes.outputs.trusted_requested == 'true' }}
-    # The runner is provisioned only for this job. Immutable local inputs supply
-    # canonical SBOMs, source assets, scanner databases, tools, and one submitted
-    # review capture. Derived controls are materialized inside the job.
+    # The runner is registered in ephemeral mode for this one job. Immutable
+    # local inputs supply canonical SBOMs, source assets, scanner databases,
+    # tools, the independent review, and a distinct maintainer disposition.
+    # Derived controls are materialized inside the job.
     runs-on: [self-hosted, linux, sca-accuracy-trusted]
     timeout-minutes: 45
     outputs:
@@ -143,6 +147,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          command -v jq >/dev/null
           policy="internal/usecase/scabench/corpus/cycle-policy.json"
           output="$RUNNER_TEMP/sca-accuracy-candidate"
           test -s "$policy"
@@ -164,7 +169,19 @@ jobs:
           set -euo pipefail
           corpus="internal/usecase/scabench/corpus"
           input="$SCA_ACCURACY_TRUSTED_INPUT_ROOT"
+          output="$RUNNER_TEMP/sca-accuracy-candidate"
+          runner_root="${SCA_ACCURACY_ACTIONS_RUNNER_ROOT:-}"
           test "$(uname -s)" = Linux
+          case "$runner_root" in /*) ;; *) echo "actions runner root must be an absolute path"; exit 1;; esac
+          test -d "$runner_root"
+          test -f "$runner_root/.runner"
+          test ! -L "$runner_root/.runner"
+          test -r "$runner_root/.runner"
+          command -v jq >/dev/null
+          jq -e '.ephemeral == true' "$runner_root/.runner" >/dev/null
+          runner_config_digest="sha256:$(sha256sum "$runner_root/.runner" | cut -d' ' -f1)"
+          jq --arg digest "$runner_config_digest" '.runner_ephemeral = true | .runner_config_digest = $digest' "$output/capture-status.json" > "$output/capture-status.next.json"
+          mv "$output/capture-status.next.json" "$output/capture-status.json"
           command -v bwrap >/dev/null
           test -n "${SCA_ACCURACY_BWRAP_VERSION:-}"
           test "$(bwrap --version)" = "$SCA_ACCURACY_BWRAP_VERSION"
@@ -177,7 +194,6 @@ jobs:
           test -w "$SCA_ACCURACY_DELEGATED_CGROUP_ROOT"
           go run ./cmd/synapse-sca-cycle -mode sandbox-probe
           command -v docker >/dev/null
-          command -v jq >/dev/null
           test -n "${SCA_ACCURACY_SYFT_VERSION:-}"
           test -n "${SCA_ACCURACY_SYFT_CONFIG_DIGEST:-}"
           test -n "${SCA_ACCURACY_TRUSTED_INPUT_ROOT:-}"
@@ -189,14 +205,26 @@ jobs:
           test -d "$SCA_ACCURACY_RAW_RETENTION_ROOT"
           test -w "$SCA_ACCURACY_RAW_RETENTION_ROOT"
           case "$SCA_ACCURACY_RAW_RETENTION_ROOT/" in "$RUNNER_TEMP"/*) echo "raw retention must not be under runner artifacts"; exit 1;; esac
-          for required in catalog.json oracle.json ratchet.json cycle-policy.json source-freeze.template.json source-evidence-plan.template.json falsifier-spec.json; do
+          for required in catalog.json oracle.json ratchet.json ratchet-baseline.json cycle-policy.json source-freeze.template.json source-evidence-plan.template.json falsifier-spec.json; do
             test -s "$corpus/$required"
           done
           test "$(find "$corpus/capture-manifests" -maxdepth 1 -type f -name '*.json' | wc -l)" -gt 0
           shopt -s nullglob
           review_files=("$input/repository/reviews/github/"*.json)
+          decision_files=("$input/repository/reviews/dispositions/github/"*.json)
           test "${#review_files[@]}" = 1
-          jq -e --arg commit "${{ needs.changes.outputs.source_sha }}" '.commit_id == $commit and (.body == "decision: approved" or .body == "decision: rejected" or .body == "decision: unresolved")' "${review_files[0]}" >/dev/null
+          test "${#decision_files[@]}" = 1
+          review_file="${review_files[0]}"
+          decision_file="${decision_files[0]}"
+          jq -e '.schema_version == "synapse-sca-benchmark-github-review-capture-v1" and (.state == "COMMENTED" or .state == "APPROVED") and (.body | type) == "string" and (.body | length) > 0' "$review_file" >/dev/null
+          review_id="$(jq -er '.id' "$review_file")"
+          reviewed_commit="$(jq -er '.commit_id' "$review_file")"
+          review_login="$(jq -er '.login' "$review_file")"
+          implementation_commit="${{ needs.changes.outputs.source_sha }}"
+          expected_decision_body="$(printf 'decision: approved\nreview_id: %s\nreviewed_commit: %s\nimplementation_commit: %s' "$review_id" "$reviewed_commit" "$implementation_commit")"
+          jq -e --arg review_id "$review_id" --arg reviewed_commit "$reviewed_commit" --arg implementation_commit "$implementation_commit" --arg body "$expected_decision_body" '.schema_version == "synapse-sca-benchmark-github-review-disposition-capture-v1" and .decision == "approved" and .review_id == $review_id and .reviewed_commit == $reviewed_commit and .implementation_commit == $implementation_commit and .created_at == .updated_at and .body == $body' "$decision_file" >/dev/null
+          decision_login="$(jq -er '.login' "$decision_file")"
+          test "$decision_login" != "$review_login"
           while IFS= read -r target_json; do
             target_id="$(jq -r '.id' <<<"$target_json")"
             expected_sbom_digest="$(jq -r '.sbom_digest' <<<"$target_json")"
@@ -284,6 +312,7 @@ jobs:
           cp "$corpus/catalog.json" "$output/control/catalog.json"
           cp "$corpus/oracle.json" "$output/control/oracle.json"
           cp "$corpus/ratchet.json" "$output/control/ratchet.json"
+          cp "$corpus/ratchet-baseline.json" "$output/control/ratchet-baseline.json"
           cp "$corpus/cycle-policy.json" "$output/control/cycle-policy.json"
           cp "$corpus/falsifier-spec.json" "$output/control/falsifier-spec.json"
           go run ./cmd/synapse-sca-inputs -mode source-freeze -repository-root "$input/repository" -source-freeze-template "$corpus/source-freeze.template.json" -source-plan-template "$corpus/source-evidence-plan.template.json" -source-freeze-output "$output/control/source-freeze.json" -source-plan-output "$output/control/source-evidence-plan.json"
@@ -316,11 +345,14 @@ jobs:
           go run ./cmd/synapse-sca-cycle -mode oracle-adjudicate -oracle-candidate "$output/control/oracle-candidate.json" -cross-check "$output/control/cross-check.json" -oracle-output "$output/control/adjudication.json"
           shopt -s nullglob
           review_files=("$input/repository/reviews/github/"*.json)
+          decision_files=("$input/repository/reviews/dispositions/github/"*.json)
           test "${#review_files[@]}" = 1
+          test "${#decision_files[@]}" = 1
           review_locator="${review_files[0]#"$input/repository/"}"
-          go run ./cmd/synapse-sca-inputs -mode accountable-review -repository-root "$input/repository" -review-capture-locator "$review_locator" -review-capture-output "$output/control/review-capture.json" -adjudication "$output/control/adjudication.json" -oracle "$output/control/oracle.json" -review-output "$output/control/accountable-review.json"
+          decision_locator="${decision_files[0]#"$input/repository/"}"
+          go run ./cmd/synapse-sca-inputs -mode accountable-review -repository-root "$input/repository" -review-capture-locator "$review_locator" -review-capture-output "$output/control/review-capture.json" -decision-capture-locator "$decision_locator" -decision-capture-output "$output/control/review-disposition-capture.json" -implementation-commit "${{ needs.changes.outputs.source_sha }}" -adjudication "$output/control/adjudication.json" -oracle "$output/control/oracle.json" -review-output "$output/control/accountable-review.json"
           go run ./cmd/synapse-sca-cycle -mode oracle-freeze -repository-root "$input/repository" -source-freeze "$output/control/source-freeze.json" -oracle-candidate "$output/control/oracle-candidate.json" -cross-check "$output/control/cross-check.json" -adjudication "$output/control/adjudication.json" -accountable-review "$output/control/accountable-review.json" -oracle "$output/control/oracle.json" -oracle-output "$output/control/final-oracle-freeze.json"
-          go run ./cmd/synapse-sca-inputs -mode plan -source-freeze-output "$output/control/source-freeze.json" -oracle-candidate "$output/control/oracle-candidate.json" -cross-check "$output/control/cross-check.json" -adjudication "$output/control/adjudication.json" -accountable-review "$output/control/accountable-review.json" -final-oracle-freeze "$output/control/final-oracle-freeze.json" -catalog "$output/control/catalog.json" -oracle "$output/control/oracle.json" -ratchet "$output/control/ratchet.json" -cycle-policy "$output/control/cycle-policy.json" -plan-output "$output/control/plan.json"
+          go run ./cmd/synapse-sca-inputs -mode plan -source-freeze-output "$output/control/source-freeze.json" -oracle-candidate "$output/control/oracle-candidate.json" -cross-check "$output/control/cross-check.json" -adjudication "$output/control/adjudication.json" -accountable-review "$output/control/accountable-review.json" -final-oracle-freeze "$output/control/final-oracle-freeze.json" -catalog "$output/control/catalog.json" -oracle "$output/control/oracle.json" -ratchet "$output/control/ratchet.json" -baseline-ratchet "$output/control/ratchet-baseline.json" -cycle-policy "$output/control/cycle-policy.json" -plan-output "$output/control/plan.json"
           make sca-accuracy-prepare SCA_ACCURACY_REPOSITORY_ROOT="$input/repository" SCA_ACCURACY_PLAN="$output/control/plan.json" SCA_ACCURACY_SOURCE_FREEZE="$output/control/source-freeze.json" SCA_ACCURACY_ORACLE_CANDIDATE="$output/control/oracle-candidate.json" SCA_ACCURACY_CROSS_CHECK="$output/control/cross-check.json" SCA_ACCURACY_ADJUDICATION="$output/control/adjudication.json" SCA_ACCURACY_ACCOUNTABLE_REVIEW="$output/control/accountable-review.json" SCA_ACCURACY_FINAL_ORACLE_FREEZE="$output/control/final-oracle-freeze.json"
           jq '.phase = "capture_pending"' "$output/capture-status.json" > "$output/capture-status.next.json"
           mv "$output/capture-status.next.json" "$output/capture-status.json"

@@ -763,6 +763,98 @@ func (ratchet Ratchet) Validate() error {
 	return nil
 }
 
+// ValidateRatchetTightening rejects a current ratchet that weakens a reviewed
+// threshold policy. Pin identities may refresh, so floors are matched by target
+// and engine while every metric and coverage threshold remains monotonic.
+func ValidateRatchetTightening(baseline, current Ratchet) error {
+	if err := baseline.Validate(); err != nil {
+		return fmt.Errorf("validate baseline ratchet: %w", err)
+	}
+	if err := current.Validate(); err != nil {
+		return fmt.Errorf("validate current ratchet: %w", err)
+	}
+	if current.CatalogRevision != baseline.CatalogRevision {
+		return fmt.Errorf("ratchet catalog revision %q does not match baseline revision %q", current.CatalogRevision, baseline.CatalogRevision)
+	}
+	if current.OracleDigest != baseline.OracleDigest {
+		return fmt.Errorf("ratchet changes baseline oracle digest")
+	}
+	currentFloors := make(map[observationKey]RatchetFloor, len(current.Floors))
+	for _, floor := range current.Floors {
+		currentFloors[observationKey{Engine: floor.Expected.Engine, TargetID: floor.Expected.TargetID}] = floor
+	}
+	for _, baselineFloor := range baseline.Floors {
+		key := observationKey{Engine: baselineFloor.Expected.Engine, TargetID: baselineFloor.Expected.TargetID}
+		currentFloor, exists := currentFloors[key]
+		if !exists {
+			return fmt.Errorf("ratchet removes baseline floor for engine %q target %q", key.Engine, key.TargetID)
+		}
+		if currentFloor.Mode.effective() != baselineFloor.Mode.effective() {
+			return fmt.Errorf("ratchet changes baseline mode for engine %q target %q", key.Engine, key.TargetID)
+		}
+		stableIdentity := []struct {
+			name              string
+			baseline, current string
+		}{
+			{"target digest", baselineFloor.Expected.TargetDigest, currentFloor.Expected.TargetDigest},
+			{"SBOM digest", baselineFloor.Expected.SBOMDigest, currentFloor.Expected.SBOMDigest},
+			{"environment id", baselineFloor.Expected.EnvironmentID, currentFloor.Expected.EnvironmentID},
+			{"environment digest", baselineFloor.Expected.EnvironmentDigest, currentFloor.Expected.EnvironmentDigest},
+			{"config digest", baselineFloor.Expected.ConfigDigest, currentFloor.Expected.ConfigDigest},
+			{"capability kind", string(baselineFloor.Expected.CapabilityKind), string(currentFloor.Expected.CapabilityKind)},
+		}
+		for _, identity := range stableIdentity {
+			if identity.current != identity.baseline {
+				return fmt.Errorf("ratchet changes baseline %s for engine %q target %q", identity.name, key.Engine, key.TargetID)
+			}
+		}
+		if currentFloor.AllowUndefinedPrecision && !baselineFloor.AllowUndefinedPrecision {
+			return fmt.Errorf("ratchet enables undefined precision for engine %q target %q", key.Engine, key.TargetID)
+		}
+		minimums := []struct {
+			name              string
+			baseline, current int
+		}{
+			{"covered", *baselineFloor.MinimumCovered, *currentFloor.MinimumCovered},
+			{"affected relations", *baselineFloor.MinimumAffectedRelations, *currentFloor.MinimumAffectedRelations},
+			{"negative relations", *baselineFloor.MinimumNegativeRelations, *currentFloor.MinimumNegativeRelations},
+		}
+		for _, threshold := range minimums {
+			if threshold.current < threshold.baseline {
+				return fmt.Errorf("ratchet lowers minimum %s for engine %q target %q", threshold.name, key.Engine, key.TargetID)
+			}
+		}
+		minimumMetrics := []struct {
+			name              string
+			baseline, current float64
+		}{
+			{"precision", *baselineFloor.MinimumPrecision, *currentFloor.MinimumPrecision},
+			{"recall", *baselineFloor.MinimumRecall, *currentFloor.MinimumRecall},
+		}
+		for _, threshold := range minimumMetrics {
+			if threshold.current < threshold.baseline {
+				return fmt.Errorf("ratchet lowers minimum %s for engine %q target %q", threshold.name, key.Engine, key.TargetID)
+			}
+		}
+		maximums := []struct {
+			name              string
+			baseline, current int
+		}{
+			{"false positives", *baselineFloor.MaximumFalsePositives, *currentFloor.MaximumFalsePositives},
+			{"false negatives", *baselineFloor.MaximumFalseNegatives, *currentFloor.MaximumFalseNegatives},
+			{"unknown", *baselineFloor.MaximumUnknown, *currentFloor.MaximumUnknown},
+			{"incomplete", *baselineFloor.MaximumIncomplete, *currentFloor.MaximumIncomplete},
+			{"unsupported", *baselineFloor.MaximumUnsupported, *currentFloor.MaximumUnsupported},
+		}
+		for _, threshold := range maximums {
+			if threshold.current > threshold.baseline {
+				return fmt.Errorf("ratchet raises maximum %s for engine %q target %q", threshold.name, key.Engine, key.TargetID)
+			}
+		}
+	}
+	return nil
+}
+
 func validateUnsupportedOnlyFloor(floor RatchetFloor) error {
 	if *floor.MinimumCovered != 0 ||
 		*floor.MinimumAffectedRelations != 0 ||

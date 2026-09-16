@@ -1309,7 +1309,17 @@ func TestRenderResultGoldenPrelude(t *testing.T) {
 		t.Fatal(err)
 	}
 	const goldenPrelude = "SCA Benchmark Result\nschema_version: \"synapse-sca-benchmark-result-v1\"\n"
-	if !strings.HasPrefix(rendered.String(), goldenPrelude) || !strings.Contains(rendered.String(), "scoring_observation_digest:") || strings.Contains(rendered.String(), "\nobservation_digest:") || !strings.Contains(rendered.String(), "run_metrics:\n") || !strings.Contains(rendered.String(), "diagnostics:\n") {
+	if !strings.HasPrefix(rendered.String(), goldenPrelude) ||
+		!strings.Contains(rendered.String(), "scoring_observation_digest:") ||
+		strings.Contains(rendered.String(), "\nobservation_digest:") ||
+		!strings.Contains(rendered.String(), "interpretation:\n") ||
+		!strings.Contains(rendered.String(), "owned_database_coupling:") ||
+		!strings.Contains(rendered.String(), "owned consumes the corresponding pinned vendor OVAL") ||
+		!strings.Contains(rendered.String(), "engine_database_scope:") ||
+		!strings.Contains(rendered.String(), "database_build and database_digest") ||
+		!strings.Contains(rendered.String(), "comparative_limit:") ||
+		!strings.Contains(rendered.String(), "run_metrics:\n") ||
+		!strings.Contains(rendered.String(), "diagnostics:\n") {
 		t.Fatalf("render no longer matches its stable golden structure:\n%s", rendered.String())
 	}
 }

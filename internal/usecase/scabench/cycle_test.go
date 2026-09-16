@@ -199,7 +199,14 @@ func TestAccountableReviewRequiresImmutableSanitizedGitHubCapture(t *testing.T) 
 			review.GitHubReviewURL = "https://github.com/example/repository/pull/1?token=forbidden#pullrequestreview-1"
 		}},
 		{name: "non-review capture path", edit: func(review *AccountableReview) { review.ReviewCapture.Locator = "sources/review.json" }},
-		{name: "decision not capture bound", edit: func(review *AccountableReview) { review.DecisionDigest = cycleTestDigest('c') }},
+		{name: "non-github decision authority", edit: func(review *AccountableReview) { review.DecisionAuthorityIdentity = "maintainer@example.test" }},
+		{name: "same review and decision authority", edit: func(review *AccountableReview) { review.DecisionAuthorityIdentity = review.ReviewerIdentity }},
+		{name: "decision predates review", edit: func(review *AccountableReview) { review.DecisionSubmittedAt = "2026-09-15T11:00:00Z" }},
+		{name: "different pull request", edit: func(review *AccountableReview) {
+			review.GitHubDispositionURL = "https://github.com/example/repository/pull/2#issuecomment-2"
+		}},
+		{name: "non-disposition capture path", edit: func(review *AccountableReview) { review.DecisionCapture.Locator = "reviews/github/decision.json" }},
+		{name: "decision not capture bound", edit: func(review *AccountableReview) { review.DecisionDigest = cycleTestDigest('d') }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -451,20 +458,27 @@ func testOracleCandidate(freeze SourceFreeze) OracleCandidate {
 }
 
 func testAccountableReview(cycleID, adjudicationDigest, finalOracleDigest string) AccountableReview {
-	capture := ContentReference{Locator: "reviews/github/review-1.json", Digest: cycleTestDigest('b'), Size: 1}
+	reviewCapture := ContentReference{Locator: "reviews/github/review-1.json", Digest: cycleTestDigest('b'), Size: 1}
+	decisionCapture := ContentReference{Locator: "reviews/dispositions/github/decision-1.json", Digest: cycleTestDigest('c'), Size: 1}
 	return AccountableReview{
-		SchemaVersion:      AccountableReviewSchemaVersion,
-		CycleID:            cycleID,
-		AdjudicationDigest: adjudicationDigest,
-		FinalOracleDigest:  finalOracleDigest,
-		ReviewerIdentity:   "github:reviewer",
-		SubmittedAt:        "2026-09-15T12:00:00Z",
-		ReviewedCommit:     strings.Repeat("a", 40),
-		GitHubReviewID:     "1",
-		GitHubReviewURL:    "https://github.com/example/repository/pull/1#pullrequestreview-1",
-		ReviewCapture:      capture,
-		Decision:           "approved",
-		DecisionDigest:     capture.Digest,
+		SchemaVersion:             AccountableReviewSchemaVersion,
+		CycleID:                   cycleID,
+		AdjudicationDigest:        adjudicationDigest,
+		FinalOracleDigest:         finalOracleDigest,
+		ReviewerIdentity:          "github:reviewer",
+		SubmittedAt:               "2026-09-15T12:00:00Z",
+		ReviewedCommit:            strings.Repeat("a", 40),
+		GitHubReviewID:            "1",
+		GitHubReviewURL:           "https://github.com/example/repository/pull/1#pullrequestreview-1",
+		ReviewCapture:             reviewCapture,
+		DecisionAuthorityIdentity: "github:maintainer",
+		DecisionSubmittedAt:       "2026-09-15T13:00:00Z",
+		ImplementationCommit:      strings.Repeat("b", 40),
+		GitHubDispositionID:       "2",
+		GitHubDispositionURL:      "https://github.com/example/repository/pull/1#issuecomment-2",
+		DecisionCapture:           decisionCapture,
+		Decision:                  "approved",
+		DecisionDigest:            decisionCapture.Digest,
 	}
 }
 

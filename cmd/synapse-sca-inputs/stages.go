@@ -694,11 +694,17 @@ func materializeAccountableReview(option options) error {
 		struct{ name, value string }{"repository root", option.repositoryRoot},
 		struct{ name, value string }{"review capture locator", option.reviewCaptureLocator},
 		struct{ name, value string }{"review capture output", option.reviewCaptureOutput},
+		struct{ name, value string }{"decision capture locator", option.decisionCaptureLocator},
+		struct{ name, value string }{"decision capture output", option.decisionCaptureOutput},
+		struct{ name, value string }{"implementation commit", option.implementationCommit},
 		struct{ name, value string }{"adjudication", option.adjudication},
 		struct{ name, value string }{"oracle", option.oracle},
 		struct{ name, value string }{"review output", option.reviewOutput},
 	); err != nil {
 		return err
+	}
+	if !validCommitSHA(option.implementationCommit) {
+		return fmt.Errorf("implementation commit must be a full commit SHA")
 	}
 	adjudication, err := decodeAdjudication(option.adjudication)
 	if err != nil {
@@ -708,37 +714,55 @@ func materializeAccountableReview(option options) error {
 	if err != nil {
 		return err
 	}
-	capturePath, err := resolveRepositoryAsset(option.repositoryRoot, option.reviewCaptureLocator)
+	reviewCapturePath, err := resolveRepositoryAsset(option.repositoryRoot, option.reviewCaptureLocator)
 	if err != nil {
 		return err
 	}
-	file, err := os.Open(capturePath)
+	reviewFile, err := os.Open(reviewCapturePath)
 	if err != nil {
 		return err
 	}
-	reviewCapture, err := bench.DecodeGitHubReviewCapture(file)
-	_ = file.Close()
+	reviewCapture, err := bench.DecodeGitHubReviewCapture(reviewFile)
+	_ = reviewFile.Close()
 	if err != nil {
 		return err
 	}
-	decision, err := capturedDecision(reviewCapture.Body)
+	decisionCapturePath, err := resolveRepositoryAsset(option.repositoryRoot, option.decisionCaptureLocator)
 	if err != nil {
 		return err
 	}
-	if reviewCapture.State != expectedReviewState(decision) {
-		return fmt.Errorf("github review state does not match the canonical decision")
-	}
-	captureReference, err := contentReference(capturePath, option.reviewCaptureLocator)
+	decisionFile, err := os.Open(decisionCapturePath)
 	if err != nil {
 		return err
 	}
-	captureBody, err := os.ReadFile(capturePath)
+	decisionCapture, err := bench.DecodeGitHubReviewDispositionCapture(decisionFile)
+	_ = decisionFile.Close()
 	if err != nil {
 		return err
 	}
-	copiedReference := contentReferenceForBytes(captureBody, option.reviewCaptureLocator)
-	if copiedReference.Digest != captureReference.Digest || copiedReference.Size != captureReference.Size {
+	reviewCaptureReference, err := contentReference(reviewCapturePath, option.reviewCaptureLocator)
+	if err != nil {
+		return err
+	}
+	reviewCaptureBody, err := os.ReadFile(reviewCapturePath)
+	if err != nil {
+		return err
+	}
+	copiedReviewReference := contentReferenceForBytes(reviewCaptureBody, option.reviewCaptureLocator)
+	if copiedReviewReference.Digest != reviewCaptureReference.Digest || copiedReviewReference.Size != reviewCaptureReference.Size {
 		return fmt.Errorf("github review capture changed during materialization")
+	}
+	decisionCaptureReference, err := contentReference(decisionCapturePath, option.decisionCaptureLocator)
+	if err != nil {
+		return err
+	}
+	decisionCaptureBody, err := os.ReadFile(decisionCapturePath)
+	if err != nil {
+		return err
+	}
+	copiedDecisionReference := contentReferenceForBytes(decisionCaptureBody, option.decisionCaptureLocator)
+	if copiedDecisionReference.Digest != decisionCaptureReference.Digest || copiedDecisionReference.Size != decisionCaptureReference.Size {
+		return fmt.Errorf("github review disposition capture changed during materialization")
 	}
 	adjudicationDigest, err := bench.DigestAdjudicationRecord(adjudication)
 	if err != nil {
@@ -749,18 +773,24 @@ func materializeAccountableReview(option options) error {
 		return err
 	}
 	review := bench.AccountableReview{
-		SchemaVersion:      bench.AccountableReviewSchemaVersion,
-		CycleID:            adjudication.CycleID,
-		AdjudicationDigest: adjudicationDigest,
-		FinalOracleDigest:  oracleDigest,
-		ReviewerIdentity:   "github:" + reviewCapture.Login,
-		SubmittedAt:        reviewCapture.SubmittedAt,
-		ReviewedCommit:     reviewCapture.CommitID,
-		GitHubReviewID:     reviewCapture.ID,
-		GitHubReviewURL:    reviewCapture.URL,
-		ReviewCapture:      captureReference,
-		Decision:           decision,
-		DecisionDigest:     captureReference.Digest,
+		SchemaVersion:             bench.AccountableReviewSchemaVersion,
+		CycleID:                   adjudication.CycleID,
+		AdjudicationDigest:        adjudicationDigest,
+		FinalOracleDigest:         oracleDigest,
+		ReviewerIdentity:          "github:" + reviewCapture.Login,
+		SubmittedAt:               reviewCapture.SubmittedAt,
+		ReviewedCommit:            reviewCapture.CommitID,
+		GitHubReviewID:            reviewCapture.ID,
+		GitHubReviewURL:           reviewCapture.URL,
+		ReviewCapture:             reviewCaptureReference,
+		DecisionAuthorityIdentity: "github:" + decisionCapture.Login,
+		DecisionSubmittedAt:       decisionCapture.CreatedAt,
+		ImplementationCommit:      option.implementationCommit,
+		GitHubDispositionID:       decisionCapture.ID,
+		GitHubDispositionURL:      decisionCapture.URL,
+		DecisionCapture:           decisionCaptureReference,
+		Decision:                  decisionCapture.Decision,
+		DecisionDigest:            decisionCaptureReference.Digest,
 	}
 	if err := review.Validate(); err != nil {
 		return err
@@ -768,13 +798,17 @@ func materializeAccountableReview(option options) error {
 	if err := reviewCapture.ValidateAgainstAccountableReview(review); err != nil {
 		return err
 	}
+	if err := decisionCapture.ValidateAgainstAccountableReview(review); err != nil {
+		return err
+	}
 	reviewBody, err := bench.CanonicalJSON(review)
 	if err != nil {
 		return err
 	}
 	if err := writeMixedOutputs(map[string][]byte{
-		option.reviewOutput:        append(reviewBody, '\n'),
-		option.reviewCaptureOutput: captureBody,
+		option.reviewOutput:          append(reviewBody, '\n'),
+		option.reviewCaptureOutput:   reviewCaptureBody,
+		option.decisionCaptureOutput: decisionCaptureBody,
 	}); err != nil {
 		return err
 	}
@@ -782,30 +816,8 @@ func materializeAccountableReview(option options) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("accountable_review=%s reviewer=%s commit=%s decision=%s\n", digest, review.ReviewerIdentity, review.ReviewedCommit, review.Decision)
+	fmt.Printf("accountable_review=%s reviewer=%s reviewed_commit=%s decision_authority=%s implementation_commit=%s decision=%s\n", digest, review.ReviewerIdentity, review.ReviewedCommit, review.DecisionAuthorityIdentity, review.ImplementationCommit, review.Decision)
 	return nil
-}
-
-func capturedDecision(body string) (string, error) {
-	if !strings.HasPrefix(body, "decision: ") {
-		return "", fmt.Errorf("github review capture body must contain only a canonical decision")
-	}
-	decision := strings.TrimPrefix(body, "decision: ")
-	if decision != "approved" && decision != "rejected" && decision != "unresolved" {
-		return "", fmt.Errorf("github review capture body decision is invalid")
-	}
-	return decision, nil
-}
-
-func expectedReviewState(decision string) string {
-	switch decision {
-	case "approved":
-		return "APPROVED"
-	case "rejected":
-		return "CHANGES_REQUESTED"
-	default:
-		return "COMMENTED"
-	}
 }
 
 func materializePlan(option options) error {
@@ -819,6 +831,7 @@ func materializePlan(option options) error {
 		struct{ name, value string }{"catalog", option.catalog},
 		struct{ name, value string }{"oracle", option.oracle},
 		struct{ name, value string }{"ratchet", option.ratchet},
+		struct{ name, value string }{"baseline ratchet", option.baselineRatchet},
 		struct{ name, value string }{"cycle policy", option.cyclePolicy},
 		struct{ name, value string }{"plan output", option.planOutput},
 	); err != nil {
@@ -859,6 +872,13 @@ func materializePlan(option options) error {
 	ratchet, err := decodeRatchet(option.ratchet)
 	if err != nil {
 		return err
+	}
+	baselineRatchet, err := decodeRatchet(option.baselineRatchet)
+	if err != nil {
+		return err
+	}
+	if err := bench.ValidateRatchetTightening(baselineRatchet, ratchet); err != nil {
+		return fmt.Errorf("validate ratchet monotonicity: %w", err)
 	}
 	var policy cyclePolicy
 	if err := decodeJSONFile(option.cyclePolicy, &policy); err != nil {

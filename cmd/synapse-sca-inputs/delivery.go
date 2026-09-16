@@ -99,16 +99,27 @@ func materializePublicationControl(option options) error {
 		delete(expectedSources, reference.Locator)
 		groups["source_snapshot"] = append(groups["source_snapshot"], reference)
 	}
-	if err := appendExact("pin", "control/catalog.json", "control/oracle.json", "control/cycle-policy.json", "control/falsifier-spec.json", "control/plan.json", "control/review-capture.json"); err != nil {
+	if err := appendExact("pin", "control/catalog.json", "control/oracle.json", "control/ratchet-baseline.json", "control/cycle-policy.json", "control/falsifier-spec.json", "control/plan.json", "control/review-capture.json", "control/review-disposition-capture.json"); err != nil {
 		return err
 	}
 	review, err := decodeReview(filepath.Join(option.candidateRoot, "control", "accountable-review.json"))
 	if err != nil {
 		return err
 	}
-	retainedReviewCapture := groups["pin"][len(groups["pin"])-1]
+	if review.ImplementationCommit != option.implementationCommit {
+		return fmt.Errorf("accountable review disposition does not bind the publication implementation commit")
+	}
+	retainedPins := make(map[string]bench.ContentReference, len(groups["pin"]))
+	for _, reference := range groups["pin"] {
+		retainedPins[reference.Locator] = reference
+	}
+	retainedReviewCapture := retainedPins["control/review-capture.json"]
 	if retainedReviewCapture.Digest != review.ReviewCapture.Digest || retainedReviewCapture.Size != review.ReviewCapture.Size {
 		return fmt.Errorf("retained review capture does not match the accountable review")
+	}
+	retainedDecisionCapture := retainedPins["control/review-disposition-capture.json"]
+	if retainedDecisionCapture.Digest != review.DecisionCapture.Digest || retainedDecisionCapture.Size != review.DecisionCapture.Size {
+		return fmt.Errorf("retained review disposition capture does not match the accountable review")
 	}
 	manifestReferences, err := fileList(option.candidateRoot, "control/capture-manifests", func(locator string) bool { return strings.HasSuffix(locator, ".json") })
 	if err != nil {
@@ -925,6 +936,7 @@ func renderReceiptMarkdown(receipt candidateReceipt) string {
 	fmt.Fprintf(&builder, "- Accepted artifact: `%s` (%d-day retention)\n", receipt.ArtifactName, receipt.ArtifactRetention)
 	fmt.Fprintf(&builder, "- Matrix: %d repetitions, %d cells each, %d accepted slots, %d scanner dispatches, %d explicit unsupported records.\n", receipt.Counts.Repetitions, receipt.Counts.Cells, receipt.Counts.PlannedSlots, receipt.Counts.ScannerDispatches, receipt.Counts.Unsupported)
 	builder.WriteString("- Ratchet gate: passed. Unknown, unsupported, and incomplete states remain separate from scored covered relations.\n")
+	builder.WriteString("- Interpretation: scores measure agreement with scanner-independent truth derived from frozen vendor evidence. The owned runtime database consumes the corresponding pinned vendor OVAL, while comparator engines consume their own pinned database snapshots. Database provenance or snapshot timing can affect differences; this is not an abstract market-wide accuracy ranking. Exact database builds and digests are retained in the report.\n")
 	builder.WriteString("- Cleanup: protected raw run data removed; Docker containers, images, volumes, and build cache cleared on the ephemeral runner.\n")
 	fmt.Fprintf(&builder, "- Catalog: `%s`\n", receipt.Digests.Catalog)
 	fmt.Fprintf(&builder, "- Oracle: `%s`\n", receipt.Digests.Oracle)

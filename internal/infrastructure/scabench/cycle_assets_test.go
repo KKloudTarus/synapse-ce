@@ -60,6 +60,7 @@ func freshCycleAssets(t *testing.T, root string) (bench.SourceFreeze, bench.Orac
 	source := []byte("source")
 	citation := []byte("citation")
 	writeCycleAsset(t, root, "reviews/github/review-1.json", testGitHubReviewCapture("approved"))
+	writeCycleAsset(t, root, "reviews/dispositions/github/decision-1.json", testGitHubDispositionCapture("approved"))
 	assets := []bench.ContentReference{{Locator: "sources/oracle.json", Digest: bench.SHA256Digest(source), Size: int64(len(source))}}
 	contentDigest, err := bench.DigestContentReferences(assets)
 	if err != nil {
@@ -91,6 +92,14 @@ func testGitHubReviewCapture(decision string) []byte {
 	}
 	return []byte(fmt.Sprintf(`{"schema_version":%q,"id":"1","url":"https://github.com/example/repository/pull/1#pullrequestreview-1","login":"reviewer","state":%q,"submitted_at":"2026-09-15T12:00:00Z","commit_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","body":%q}`,
 		bench.GitHubReviewCaptureSchemaVersion, state, "decision: "+decision))
+}
+
+func testGitHubDispositionCapture(decision string) []byte {
+	reviewedCommit := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	implementationCommit := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	body := bench.CanonicalReviewDispositionBody(decision, "1", reviewedCommit, implementationCommit)
+	return []byte(fmt.Sprintf(`{"schema_version":%q,"id":"2","url":"https://github.com/example/repository/pull/1#issuecomment-2","login":"maintainer","created_at":"2026-09-15T13:00:00Z","updated_at":"2026-09-15T13:00:00Z","review_id":"1","reviewed_commit":%q,"implementation_commit":%q,"decision":%q,"body":%q}`,
+		bench.GitHubReviewDispositionCaptureSchemaVersion, reviewedCommit, implementationCommit, decision, body))
 }
 
 func writeCycleAsset(t *testing.T, root, relative string, content []byte) {

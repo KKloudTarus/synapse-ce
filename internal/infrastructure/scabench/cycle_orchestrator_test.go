@@ -100,6 +100,7 @@ func TestCaptureCycleCellRejectsMissingImmutableReviewCaptureBeforeDispatch(t *t
 func TestVerifyAccountableReviewCaptureRejectsProvenanceMismatches(t *testing.T) {
 	root := t.TempDir()
 	review := testAccountableReview("fresh-cycle", digestByte('a'), digestByte('b'))
+	writeCycleAsset(t, root, review.DecisionCapture.Locator, testGitHubDispositionCapture("approved"))
 	tests := []struct {
 		name string
 		edit func(string) string
@@ -127,7 +128,6 @@ func TestVerifyAccountableReviewCaptureRejectsProvenanceMismatches(t *testing.T)
 			writeCycleAsset(t, root, "reviews/github/review-1.json", body)
 			mismatched := review
 			mismatched.ReviewCapture = bench.ContentReference{Locator: review.ReviewCapture.Locator, Digest: bench.SHA256Digest(body), Size: int64(len(body))}
-			mismatched.DecisionDigest = mismatched.ReviewCapture.Digest
 			if err := VerifyAccountableReviewCapture(root, mismatched); err == nil {
 				t.Fatal("immutable review capture accepted provenance fields that differ from the accountable review")
 			}
@@ -309,20 +309,28 @@ func approvedCycleGate(t *testing.T, freeze bench.SourceFreeze, candidate bench.
 }
 
 func testAccountableReview(cycleID, adjudicationDigest, finalOracleDigest string) bench.AccountableReview {
-	captureBody := testGitHubReviewCapture("approved")
-	capture := bench.ContentReference{Locator: "reviews/github/review-1.json", Digest: bench.SHA256Digest(captureBody), Size: int64(len(captureBody))}
+	reviewCaptureBody := testGitHubReviewCapture("approved")
+	reviewCapture := bench.ContentReference{Locator: "reviews/github/review-1.json", Digest: bench.SHA256Digest(reviewCaptureBody), Size: int64(len(reviewCaptureBody))}
+	decisionCaptureBody := testGitHubDispositionCapture("approved")
+	decisionCapture := bench.ContentReference{Locator: "reviews/dispositions/github/decision-1.json", Digest: bench.SHA256Digest(decisionCaptureBody), Size: int64(len(decisionCaptureBody))}
 	return bench.AccountableReview{
-		SchemaVersion:      bench.AccountableReviewSchemaVersion,
-		CycleID:            cycleID,
-		AdjudicationDigest: adjudicationDigest,
-		FinalOracleDigest:  finalOracleDigest,
-		ReviewerIdentity:   "github:reviewer",
-		SubmittedAt:        "2026-09-15T12:00:00Z",
-		ReviewedCommit:     strings.Repeat("a", 40),
-		GitHubReviewID:     "1",
-		GitHubReviewURL:    "https://github.com/example/repository/pull/1#pullrequestreview-1",
-		ReviewCapture:      capture,
-		Decision:           "approved",
-		DecisionDigest:     capture.Digest,
+		SchemaVersion:             bench.AccountableReviewSchemaVersion,
+		CycleID:                   cycleID,
+		AdjudicationDigest:        adjudicationDigest,
+		FinalOracleDigest:         finalOracleDigest,
+		ReviewerIdentity:          "github:reviewer",
+		SubmittedAt:               "2026-09-15T12:00:00Z",
+		ReviewedCommit:            strings.Repeat("a", 40),
+		GitHubReviewID:            "1",
+		GitHubReviewURL:           "https://github.com/example/repository/pull/1#pullrequestreview-1",
+		ReviewCapture:             reviewCapture,
+		DecisionAuthorityIdentity: "github:maintainer",
+		DecisionSubmittedAt:       "2026-09-15T13:00:00Z",
+		ImplementationCommit:      strings.Repeat("b", 40),
+		GitHubDispositionID:       "2",
+		GitHubDispositionURL:      "https://github.com/example/repository/pull/1#issuecomment-2",
+		DecisionCapture:           decisionCapture,
+		Decision:                  "approved",
+		DecisionDigest:            decisionCapture.Digest,
 	}
 }

@@ -86,6 +86,11 @@ func RenderResult(writer io.Writer, result Result) error {
 	line("catalog_digest: %s", quote(result.CatalogDigest))
 	line("oracle_digest: %s", quote(result.OracleDigest))
 	line("scoring_observation_digest: %s", quote(result.ScoringObservationDigest))
+	line("interpretation:")
+	line("  oracle_provenance: %s", quote("scanner-independent truth derived from frozen Debian and SUSE vendor evidence"))
+	line("  owned_database_coupling: %s", quote("owned consumes the corresponding pinned vendor OVAL; comparator engines consume their own pinned database snapshots"))
+	line("  engine_database_scope: %s", quote("see each run_metrics database_build and database_digest"))
+	line("  comparative_limit: %s", quote("scores measure agreement with the frozen vendor oracle; differences can reflect database provenance or snapshot timing and do not establish abstract market-wide accuracy"))
 	line("targets:")
 	for _, target := range result.Targets {
 		line("  - id: %s", quote(target.ID))

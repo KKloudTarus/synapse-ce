@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -159,7 +158,7 @@ func TestCorpusDerivesCompleteMatrixWithoutManualCellList(t *testing.T) {
 func TestCorpusContainsOnlyReviewedRootInputs(t *testing.T) {
 	corpus := corpusPath(t)
 	expected := map[string]struct{}{
-		"catalog.json": {}, "oracle.json": {}, "ratchet.json": {}, "source-freeze.template.json": {},
+		"catalog.json": {}, "oracle.json": {}, "ratchet.json": {}, "ratchet-baseline.json": {}, "source-freeze.template.json": {},
 		"source-evidence-plan.template.json": {}, "cycle-policy.json": {}, "falsifier-spec.json": {},
 	}
 	for _, target := range []string{"debian-12-13-slim-amd64", "sles-15-6-bci-base-45-31-amd64"} {
@@ -504,35 +503,45 @@ func TestNonRegressionFloorPreservesUndefinedPrecisionAndUnsupportedCapability(t
 func TestAccountableReviewMaterializationBindsCaptureOracleAndCommit(t *testing.T) {
 	corpus := corpusPath(t)
 	repository := t.TempDir()
-	capturePath := filepath.Join(repository, "reviews", "github", "123.json")
-	if err := os.MkdirAll(filepath.Dir(capturePath), 0o700); err != nil {
-		t.Fatal(err)
+	reviewCapturePath := filepath.Join(repository, "reviews", "github", "123.json")
+	decisionCapturePath := filepath.Join(repository, "reviews", "dispositions", "github", "456.json")
+	for _, path := range []string{reviewCapturePath, decisionCapturePath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	capture := bench.GitHubReviewCapture{
+	reviewCapture := bench.GitHubReviewCapture{
 		SchemaVersion: bench.GitHubReviewCaptureSchemaVersion, ID: "123", URL: "https://github.com/example/project/pull/7#pullrequestreview-123",
-		Login: "reviewer", State: "APPROVED", SubmittedAt: "2026-09-15T12:00:00Z", CommitID: "0123456789abcdef0123456789abcdef01234567", Body: "decision: approved",
+		Login: "reviewer", State: "COMMENTED", SubmittedAt: "2026-09-15T12:00:00Z", CommitID: "0123456789abcdef0123456789abcdef01234567", Body: "Independent review found no blockers and requested explicit remediation.",
 	}
-	writeTestJSON(t, capturePath, capture)
+	implementationCommit := "abcdef0123456789abcdef0123456789abcdef01"
+	decisionCapture := bench.GitHubReviewDispositionCapture{
+		SchemaVersion: bench.GitHubReviewDispositionCaptureSchemaVersion,
+		ID:            "456", URL: "https://github.com/example/project/pull/7#issuecomment-456", Login: "maintainer",
+		CreatedAt: "2026-09-15T13:00:00Z", UpdatedAt: "2026-09-15T13:00:00Z",
+		ReviewID: reviewCapture.ID, ReviewedCommit: reviewCapture.CommitID, ImplementationCommit: implementationCommit, Decision: "approved",
+	}
+	decisionCapture.Body = bench.CanonicalReviewDispositionBody(decisionCapture.Decision, decisionCapture.ReviewID, decisionCapture.ReviewedCommit, decisionCapture.ImplementationCommit)
+	writeTestJSON(t, reviewCapturePath, reviewCapture)
+	writeTestJSON(t, decisionCapturePath, decisionCapture)
 	adjudicationPath := filepath.Join(t.TempDir(), "adjudication.json")
 	adjudication := bench.AdjudicationRecord{SchemaVersion: bench.AdjudicationSchemaVersion, CycleID: "same-sbom-linux-20260915", OracleCandidateDigest: testDigest('1'), CrossCheckDigest: testDigest('2'), ResolutionDigest: testDigest('3'), Status: "resolved"}
 	writeTestJSON(t, adjudicationPath, adjudication)
 	outputRoot := t.TempDir()
 	output := filepath.Join(outputRoot, "accountable-review.json")
-	captureOutput := filepath.Join(outputRoot, "review-capture.json")
-	if err := materializeAccountableReview(options{repositoryRoot: repository, reviewCaptureLocator: "reviews/github/123.json", reviewCaptureOutput: captureOutput, adjudication: adjudicationPath, oracle: optionPath(corpus, "oracle.json"), reviewOutput: output}); err != nil {
+	reviewCaptureOutput := filepath.Join(outputRoot, "review-capture.json")
+	decisionCaptureOutput := filepath.Join(outputRoot, "review-disposition-capture.json")
+	if err := materializeAccountableReview(options{
+		repositoryRoot:       repository,
+		reviewCaptureLocator: "reviews/github/123.json", reviewCaptureOutput: reviewCaptureOutput,
+		decisionCaptureLocator: "reviews/dispositions/github/456.json", decisionCaptureOutput: decisionCaptureOutput,
+		implementationCommit: implementationCommit, adjudication: adjudicationPath,
+		oracle: optionPath(corpus, "oracle.json"), reviewOutput: output,
+	}); err != nil {
 		t.Fatal(err)
 	}
-	originalCapture, err := os.ReadFile(capturePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	retainedCapture, err := os.ReadFile(captureOutput)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(originalCapture, retainedCapture) {
-		t.Fatal("retained review capture differs from the reviewed bytes")
-	}
+	assertSameFile(t, reviewCapturePath, reviewCaptureOutput)
+	assertSameFile(t, decisionCapturePath, decisionCaptureOutput)
 	review, err := decodeReview(output)
 	if err != nil {
 		t.Fatal(err)
@@ -545,7 +554,12 @@ func TestAccountableReviewMaterializationBindsCaptureOracleAndCommit(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if review.FinalOracleDigest != oracleDigest || review.ReviewedCommit != capture.CommitID || review.ReviewerIdentity != "github:reviewer" || review.DecisionDigest != review.ReviewCapture.Digest {
+	if review.FinalOracleDigest != oracleDigest ||
+		review.ReviewedCommit != reviewCapture.CommitID ||
+		review.ImplementationCommit != implementationCommit ||
+		review.ReviewerIdentity != "github:reviewer" ||
+		review.DecisionAuthorityIdentity != "github:maintainer" ||
+		review.DecisionDigest != review.DecisionCapture.Digest {
 		t.Fatalf("review = %+v", review)
 	}
 }
@@ -641,7 +655,7 @@ func TestPublicationControlDerivesInventoryFromCandidateFiles(t *testing.T) {
 	writeTestJSON(t, filepath.Join(controlRoot, "catalog.json"), catalog)
 	for _, path := range []string{
 		filepath.Join(controlRoot, "oracle.json"), filepath.Join(controlRoot, "falsifier-spec.json"),
-		filepath.Join(controlRoot, "ratchet.json"), filepath.Join(publicationRoot, "native-evidence.json"),
+		filepath.Join(controlRoot, "ratchet.json"), filepath.Join(controlRoot, "ratchet-baseline.json"), filepath.Join(publicationRoot, "native-evidence.json"),
 	} {
 		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -655,20 +669,37 @@ func TestPublicationControlDerivesInventoryFromCandidateFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	reviewCapturePath := filepath.Join(controlRoot, "review-capture.json")
-	writeTestJSON(t, reviewCapturePath, bench.GitHubReviewCapture{
+	reviewCapture := bench.GitHubReviewCapture{
 		SchemaVersion: bench.GitHubReviewCaptureSchemaVersion, ID: "123", URL: "https://github.com/example/project/pull/7#pullrequestreview-123",
-		Login: "reviewer", State: "APPROVED", SubmittedAt: "2026-09-15T12:00:00Z", CommitID: "0123456789abcdef0123456789abcdef01234567", Body: "decision: approved",
-	})
+		Login: "reviewer", State: "COMMENTED", SubmittedAt: "2026-09-15T12:00:00Z", CommitID: "0123456789abcdef0123456789abcdef01234567", Body: "Independent review found no blockers.",
+	}
+	writeTestJSON(t, reviewCapturePath, reviewCapture)
 	reviewCaptureReference, err := contentReference(reviewCapturePath, "reviews/github/123.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	implementationCommit := "0123456789abcdef0123456789abcdef01234567"
+	decisionCapturePath := filepath.Join(controlRoot, "review-disposition-capture.json")
+	decisionCapture := bench.GitHubReviewDispositionCapture{
+		SchemaVersion: bench.GitHubReviewDispositionCaptureSchemaVersion,
+		ID:            "456", URL: "https://github.com/example/project/pull/7#issuecomment-456", Login: "maintainer",
+		CreatedAt: "2026-09-15T13:00:00Z", UpdatedAt: "2026-09-15T13:00:00Z",
+		ReviewID: reviewCapture.ID, ReviewedCommit: reviewCapture.CommitID, ImplementationCommit: implementationCommit, Decision: "approved",
+	}
+	decisionCapture.Body = bench.CanonicalReviewDispositionBody(decisionCapture.Decision, decisionCapture.ReviewID, decisionCapture.ReviewedCommit, decisionCapture.ImplementationCommit)
+	writeTestJSON(t, decisionCapturePath, decisionCapture)
+	decisionCaptureReference, err := contentReference(decisionCapturePath, "reviews/dispositions/github/456.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeTestJSON(t, filepath.Join(controlRoot, "accountable-review.json"), bench.AccountableReview{
 		SchemaVersion: bench.AccountableReviewSchemaVersion, CycleID: plan.CycleID,
 		AdjudicationDigest: testDigest('4'), FinalOracleDigest: plan.FinalOracleDigest,
-		ReviewerIdentity: "github:reviewer", SubmittedAt: "2026-09-15T12:00:00Z", ReviewedCommit: "0123456789abcdef0123456789abcdef01234567",
-		GitHubReviewID: "123", GitHubReviewURL: "https://github.com/example/project/pull/7#pullrequestreview-123",
-		ReviewCapture: reviewCaptureReference, Decision: "approved", DecisionDigest: reviewCaptureReference.Digest,
+		ReviewerIdentity: "github:reviewer", SubmittedAt: reviewCapture.SubmittedAt, ReviewedCommit: reviewCapture.CommitID,
+		GitHubReviewID: reviewCapture.ID, GitHubReviewURL: reviewCapture.URL, ReviewCapture: reviewCaptureReference,
+		DecisionAuthorityIdentity: "github:maintainer", DecisionSubmittedAt: decisionCapture.CreatedAt, ImplementationCommit: implementationCommit,
+		GitHubDispositionID: decisionCapture.ID, GitHubDispositionURL: decisionCapture.URL, DecisionCapture: decisionCaptureReference,
+		Decision: "approved", DecisionDigest: decisionCaptureReference.Digest,
 	})
 	for _, target := range catalog.Targets {
 		if err := os.WriteFile(filepath.Join(sbomRoot, target.ID+".cdx.json"), sbomBody, 0o600); err != nil {
@@ -798,8 +829,8 @@ func TestPublicationControlDerivesInventoryFromCandidateFiles(t *testing.T) {
 		}
 		indexedFiles += len(index.Files)
 	}
-	if indexedFiles != 57 {
-		t.Fatalf("indexed files = %d, want 57", indexedFiles)
+	if indexedFiles != 59 {
+		t.Fatalf("indexed files = %d, want 59", indexedFiles)
 	}
 	firstObservation := filepath.Join(observationRoot, "1", plan.Cells[0].TargetID+"--"+string(plan.Cells[0].Engine)+".json")
 	secondObservation := filepath.Join(observationRoot, "1", plan.Cells[1].TargetID+"--"+string(plan.Cells[1].Engine)+".json")

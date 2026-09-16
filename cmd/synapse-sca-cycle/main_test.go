@@ -18,6 +18,7 @@ func TestPrepareModeFreezesResolvableScannerFreeInputs(t *testing.T) {
 	writeCycleFile(t, root, "sources/source.json", []byte("source"))
 	writeCycleFile(t, root, "citations/case-a.json", []byte("citation"))
 	writeCycleFile(t, root, "reviews/github/review-1.json", testGitHubReviewCapture("approved"))
+	writeCycleFile(t, root, "reviews/dispositions/github/decision-1.json", testGitHubDispositionCapture("approved"))
 	source := []byte("source")
 	citation := []byte("citation")
 	assets := []bench.ContentReference{{Locator: "sources/source.json", Digest: bench.SHA256Digest(source), Size: int64(len(source))}}
@@ -235,21 +236,29 @@ func writeCycleJSON(t *testing.T, root, relative string, value any) string {
 }
 
 func testAccountableReview(cycleID, adjudicationDigest, finalOracleDigest, decision string) bench.AccountableReview {
-	captureBody := testGitHubReviewCapture(decision)
-	capture := bench.ContentReference{Locator: "reviews/github/review-1.json", Digest: bench.SHA256Digest(captureBody), Size: int64(len(captureBody))}
+	reviewCaptureBody := testGitHubReviewCapture(decision)
+	reviewCapture := bench.ContentReference{Locator: "reviews/github/review-1.json", Digest: bench.SHA256Digest(reviewCaptureBody), Size: int64(len(reviewCaptureBody))}
+	decisionCaptureBody := testGitHubDispositionCapture(decision)
+	decisionCapture := bench.ContentReference{Locator: "reviews/dispositions/github/decision-1.json", Digest: bench.SHA256Digest(decisionCaptureBody), Size: int64(len(decisionCaptureBody))}
 	return bench.AccountableReview{
-		SchemaVersion:      bench.AccountableReviewSchemaVersion,
-		CycleID:            cycleID,
-		AdjudicationDigest: adjudicationDigest,
-		FinalOracleDigest:  finalOracleDigest,
-		ReviewerIdentity:   "github:reviewer",
-		SubmittedAt:        "2026-09-15T12:00:00Z",
-		ReviewedCommit:     strings.Repeat("a", 40),
-		GitHubReviewID:     "1",
-		GitHubReviewURL:    "https://github.com/example/repository/pull/1#pullrequestreview-1",
-		ReviewCapture:      capture,
-		Decision:           decision,
-		DecisionDigest:     capture.Digest,
+		SchemaVersion:             bench.AccountableReviewSchemaVersion,
+		CycleID:                   cycleID,
+		AdjudicationDigest:        adjudicationDigest,
+		FinalOracleDigest:         finalOracleDigest,
+		ReviewerIdentity:          "github:reviewer",
+		SubmittedAt:               "2026-09-15T12:00:00Z",
+		ReviewedCommit:            strings.Repeat("a", 40),
+		GitHubReviewID:            "1",
+		GitHubReviewURL:           "https://github.com/example/repository/pull/1#pullrequestreview-1",
+		ReviewCapture:             reviewCapture,
+		DecisionAuthorityIdentity: "github:maintainer",
+		DecisionSubmittedAt:       "2026-09-15T13:00:00Z",
+		ImplementationCommit:      strings.Repeat("b", 40),
+		GitHubDispositionID:       "2",
+		GitHubDispositionURL:      "https://github.com/example/repository/pull/1#issuecomment-2",
+		DecisionCapture:           decisionCapture,
+		Decision:                  decision,
+		DecisionDigest:            decisionCapture.Digest,
 	}
 }
 
@@ -270,6 +279,28 @@ func testGitHubReviewCapture(decision string) []byte {
 		SubmittedAt:   "2026-09-15T12:00:00Z",
 		CommitID:      strings.Repeat("a", 40),
 		Body:          "decision: " + decision,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return body
+}
+
+func testGitHubDispositionCapture(decision string) []byte {
+	reviewedCommit := strings.Repeat("a", 40)
+	implementationCommit := strings.Repeat("b", 40)
+	body, err := json.Marshal(bench.GitHubReviewDispositionCapture{
+		SchemaVersion:        bench.GitHubReviewDispositionCaptureSchemaVersion,
+		ID:                   "2",
+		URL:                  "https://github.com/example/repository/pull/1#issuecomment-2",
+		Login:                "maintainer",
+		CreatedAt:            "2026-09-15T13:00:00Z",
+		UpdatedAt:            "2026-09-15T13:00:00Z",
+		ReviewID:             "1",
+		ReviewedCommit:       reviewedCommit,
+		ImplementationCommit: implementationCommit,
+		Decision:             decision,
+		Body:                 bench.CanonicalReviewDispositionBody(decision, "1", reviewedCommit, implementationCommit),
 	})
 	if err != nil {
 		panic(err)

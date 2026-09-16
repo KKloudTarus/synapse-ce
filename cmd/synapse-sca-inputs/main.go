@@ -30,6 +30,8 @@ type options struct {
 	ratchetOutput            string
 	reviewCaptureLocator     string
 	reviewCaptureOutput      string
+	decisionCaptureLocator   string
+	decisionCaptureOutput    string
 	adjudication             string
 	reviewOutput             string
 	oracleCandidate          string
@@ -89,6 +91,8 @@ func run(arguments []string) error {
 	flags.StringVar(&option.ratchetOutput, "ratchet-output", "", "generated strict ratchet")
 	flags.StringVar(&option.reviewCaptureLocator, "review-capture-locator", "", "repository-relative sanitized review capture")
 	flags.StringVar(&option.reviewCaptureOutput, "review-capture-output", "", "retained sanitized review capture")
+	flags.StringVar(&option.decisionCaptureLocator, "decision-capture-locator", "", "repository-relative sanitized review disposition capture")
+	flags.StringVar(&option.decisionCaptureOutput, "decision-capture-output", "", "retained sanitized review disposition capture")
 	flags.StringVar(&option.adjudication, "adjudication", "", "adjudication record")
 	flags.StringVar(&option.reviewOutput, "review-output", "", "generated accountable review")
 	flags.StringVar(&option.oracleCandidate, "oracle-candidate", "", "oracle candidate")

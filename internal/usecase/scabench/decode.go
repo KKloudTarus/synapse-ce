@@ -148,6 +148,19 @@ func DecodeGitHubReviewCapture(reader io.Reader) (GitHubReviewCapture, error) {
 	return capture, nil
 }
 
+// DecodeGitHubReviewDispositionCapture strictly decodes the sanitized,
+// immutable maintainer disposition comment.
+func DecodeGitHubReviewDispositionCapture(reader io.Reader) (GitHubReviewDispositionCapture, error) {
+	var capture GitHubReviewDispositionCapture
+	if err := strictDecode(reader, &capture); err != nil {
+		return GitHubReviewDispositionCapture{}, fmt.Errorf("decode github review disposition capture: %w", err)
+	}
+	if err := capture.Validate(); err != nil {
+		return GitHubReviewDispositionCapture{}, err
+	}
+	return capture, nil
+}
+
 func DecodeFinalOracleFreeze(reader io.Reader) (FinalOracleFreeze, error) {
 	var freeze FinalOracleFreeze
 	if err := strictDecode(reader, &freeze); err != nil {

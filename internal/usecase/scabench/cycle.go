@@ -13,20 +13,21 @@ import (
 // contracts. They describe a fresh, auditable evidence cycle and do not change
 // the historical catalog, oracle, observation, result, or ratchet schemas.
 const (
-	SourceFreezeSchemaVersion             = "synapse-sca-benchmark-source-freeze-v1"
-	OracleCandidateSchemaVersion          = "synapse-sca-benchmark-oracle-candidate-v1"
-	CrossCheckSchemaVersion               = "synapse-sca-benchmark-cross-check-v1"
-	AdjudicationSchemaVersion             = "synapse-sca-benchmark-adjudication-v1"
-	AccountableReviewSchemaVersion        = "synapse-sca-benchmark-accountable-review-v3"
-	GitHubReviewCaptureSchemaVersion      = "synapse-sca-benchmark-github-review-capture-v1"
-	FinalOracleFreezeSchemaVersion        = "synapse-sca-benchmark-final-oracle-freeze-v1"
-	CyclePlanSchemaVersion                = "synapse-sca-benchmark-cycle-plan-v1"
-	CycleLedgerSchemaVersion              = "synapse-sca-benchmark-cycle-ledger-v1"
-	NativeComparisonSchemaVersion         = "synapse-sca-benchmark-native-comparison-v2"
-	PublicationManifestSchemaVersion      = "synapse-sca-benchmark-publication-manifest-v1"
-	PublicationControlSchemaVersion       = "synapse-sca-benchmark-publication-control-v1"
-	CandidateEvidenceSummarySchemaVersion = "synapse-sca-benchmark-candidate-evidence-summary-v1"
-	FalsifierSpecSchemaVersion            = "synapse-sca-benchmark-falsifier-spec-v1"
+	SourceFreezeSchemaVersion                   = "synapse-sca-benchmark-source-freeze-v1"
+	OracleCandidateSchemaVersion                = "synapse-sca-benchmark-oracle-candidate-v1"
+	CrossCheckSchemaVersion                     = "synapse-sca-benchmark-cross-check-v1"
+	AdjudicationSchemaVersion                   = "synapse-sca-benchmark-adjudication-v1"
+	AccountableReviewSchemaVersion              = "synapse-sca-benchmark-accountable-review-v4"
+	GitHubReviewCaptureSchemaVersion            = "synapse-sca-benchmark-github-review-capture-v1"
+	GitHubReviewDispositionCaptureSchemaVersion = "synapse-sca-benchmark-github-review-disposition-capture-v1"
+	FinalOracleFreezeSchemaVersion              = "synapse-sca-benchmark-final-oracle-freeze-v1"
+	CyclePlanSchemaVersion                      = "synapse-sca-benchmark-cycle-plan-v1"
+	CycleLedgerSchemaVersion                    = "synapse-sca-benchmark-cycle-ledger-v1"
+	NativeComparisonSchemaVersion               = "synapse-sca-benchmark-native-comparison-v2"
+	PublicationManifestSchemaVersion            = "synapse-sca-benchmark-publication-manifest-v1"
+	PublicationControlSchemaVersion             = "synapse-sca-benchmark-publication-control-v1"
+	CandidateEvidenceSummarySchemaVersion       = "synapse-sca-benchmark-candidate-evidence-summary-v1"
+	FalsifierSpecSchemaVersion                  = "synapse-sca-benchmark-falsifier-spec-v1"
 )
 
 // ContentReference identifies a committed, repository-relative asset. Its
@@ -271,18 +272,24 @@ func (record AdjudicationRecord) Validate() error {
 // digest-pinned repository asset. It binds the exact reviewed commit and final
 // oracle before any capture can proceed.
 type AccountableReview struct {
-	SchemaVersion      string           `json:"schema_version"`
-	CycleID            string           `json:"cycle_id"`
-	AdjudicationDigest string           `json:"adjudication_digest"`
-	FinalOracleDigest  string           `json:"final_oracle_digest"`
-	ReviewerIdentity   string           `json:"reviewer_identity"`
-	SubmittedAt        string           `json:"submitted_at"`
-	ReviewedCommit     string           `json:"reviewed_commit"`
-	GitHubReviewID     string           `json:"github_review_id"`
-	GitHubReviewURL    string           `json:"github_review_url"`
-	ReviewCapture      ContentReference `json:"review_capture"`
-	Decision           string           `json:"decision"`
-	DecisionDigest     string           `json:"decision_digest"`
+	SchemaVersion             string           `json:"schema_version"`
+	CycleID                   string           `json:"cycle_id"`
+	AdjudicationDigest        string           `json:"adjudication_digest"`
+	FinalOracleDigest         string           `json:"final_oracle_digest"`
+	ReviewerIdentity          string           `json:"reviewer_identity"`
+	SubmittedAt               string           `json:"submitted_at"`
+	ReviewedCommit            string           `json:"reviewed_commit"`
+	GitHubReviewID            string           `json:"github_review_id"`
+	GitHubReviewURL           string           `json:"github_review_url"`
+	ReviewCapture             ContentReference `json:"review_capture"`
+	DecisionAuthorityIdentity string           `json:"decision_authority_identity"`
+	DecisionSubmittedAt       string           `json:"decision_submitted_at"`
+	ImplementationCommit      string           `json:"implementation_commit"`
+	GitHubDispositionID       string           `json:"github_disposition_id"`
+	GitHubDispositionURL      string           `json:"github_disposition_url"`
+	DecisionCapture           ContentReference `json:"decision_capture"`
+	Decision                  string           `json:"decision"`
+	DecisionDigest            string           `json:"decision_digest"`
 }
 
 // GitHubReviewCapture is the only allowed on-disk form of a submitted GitHub
@@ -297,6 +304,24 @@ type GitHubReviewCapture struct {
 	SubmittedAt   string `json:"submitted_at"`
 	CommitID      string `json:"commit_id"`
 	Body          string `json:"body"`
+}
+
+// GitHubReviewDispositionCapture is the sanitized form of a distinct
+// repository maintainer's immutable PR comment disposition. It binds the
+// independent review to the exact implementation commit without rewriting the
+// GitHub review's actual state.
+type GitHubReviewDispositionCapture struct {
+	SchemaVersion        string `json:"schema_version"`
+	ID                   string `json:"id"`
+	URL                  string `json:"url"`
+	Login                string `json:"login"`
+	CreatedAt            string `json:"created_at"`
+	UpdatedAt            string `json:"updated_at"`
+	ReviewID             string `json:"review_id"`
+	ReviewedCommit       string `json:"reviewed_commit"`
+	ImplementationCommit string `json:"implementation_commit"`
+	Decision             string `json:"decision"`
+	Body                 string `json:"body"`
 }
 
 func (capture GitHubReviewCapture) Validate() error {
@@ -318,8 +343,8 @@ func (capture GitHubReviewCapture) Validate() error {
 	if capture.State != "APPROVED" && capture.State != "CHANGES_REQUESTED" && capture.State != "COMMENTED" {
 		return fmt.Errorf("github review capture state is invalid")
 	}
-	if _, err := githubReviewBodyDecision(capture.Body); err != nil {
-		return err
+	if strings.TrimSpace(capture.Body) == "" {
+		return fmt.Errorf("github review capture body is required")
 	}
 	return nil
 }
@@ -333,29 +358,66 @@ func (capture GitHubReviewCapture) ValidateAgainstAccountableReview(review Accou
 	if capture.ID != review.GitHubReviewID || capture.URL != review.GitHubReviewURL || "github:"+capture.Login != review.ReviewerIdentity || capture.SubmittedAt != review.SubmittedAt || capture.CommitID != review.ReviewedCommit {
 		return fmt.Errorf("github review capture does not match accountable review provenance")
 	}
-	decision, err := githubReviewBodyDecision(capture.Body)
-	if err != nil {
-		return err
-	}
-	if decision != review.Decision {
-		return fmt.Errorf("github review capture body decision does not match accountable review")
-	}
-	if (decision == "approved" && capture.State != "APPROVED") || (decision == "rejected" && capture.State != "CHANGES_REQUESTED") || (decision == "unresolved" && capture.State != "COMMENTED") {
-		return fmt.Errorf("github review capture state does not match its decision")
+	if review.Decision == "approved" && capture.State == "CHANGES_REQUESTED" {
+		return fmt.Errorf("approved disposition cannot override a changes-requested github review")
 	}
 	return nil
 }
 
-func githubReviewBodyDecision(body string) (string, error) {
-	const prefix = "decision: "
-	if !strings.HasPrefix(body, prefix) {
-		return "", fmt.Errorf("github review capture body must contain only a canonical decision")
+// Validate checks the sanitized maintainer-disposition capture without relying
+// on mutable repository permissions or unsanitized GitHub API payloads.
+func (capture GitHubReviewDispositionCapture) Validate() error {
+	if capture.SchemaVersion != GitHubReviewDispositionCaptureSchemaVersion {
+		return fmt.Errorf("unsupported github review disposition capture schema %q", capture.SchemaVersion)
 	}
-	decision := strings.TrimPrefix(body, prefix)
-	if decision != "approved" && decision != "rejected" && decision != "unresolved" {
-		return "", fmt.Errorf("github review capture body decision is invalid")
+	if err := validateGitHubIssueComment(capture.ID, capture.URL); err != nil {
+		return err
 	}
-	return decision, nil
+	if !validGitHubLogin(capture.Login) {
+		return fmt.Errorf("github review disposition capture login is invalid")
+	}
+	createdAt, err := time.Parse(time.RFC3339, capture.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("github review disposition capture created time: %w", err)
+	}
+	updatedAt, err := time.Parse(time.RFC3339, capture.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("github review disposition capture updated time: %w", err)
+	}
+	if !createdAt.Equal(updatedAt) {
+		return fmt.Errorf("github review disposition comment must be captured before any edit")
+	}
+	if !validGitHubNumericID(capture.ReviewID) {
+		return fmt.Errorf("github review disposition review id is invalid")
+	}
+	if !validCommitSHA(capture.ReviewedCommit) || !validCommitSHA(capture.ImplementationCommit) {
+		return fmt.Errorf("github review disposition commits are invalid")
+	}
+	if !validReviewDecision(capture.Decision) {
+		return fmt.Errorf("github review disposition decision is invalid")
+	}
+	if capture.Body != CanonicalReviewDispositionBody(capture.Decision, capture.ReviewID, capture.ReviewedCommit, capture.ImplementationCommit) {
+		return fmt.Errorf("github review disposition body is not canonical")
+	}
+	return nil
+}
+
+// ValidateAgainstAccountableReview binds the immutable maintainer disposition
+// to the independent review and exact implementation commit.
+func (capture GitHubReviewDispositionCapture) ValidateAgainstAccountableReview(review AccountableReview) error {
+	if err := capture.Validate(); err != nil {
+		return err
+	}
+	if capture.ID != review.GitHubDispositionID || capture.URL != review.GitHubDispositionURL || "github:"+capture.Login != review.DecisionAuthorityIdentity || capture.CreatedAt != review.DecisionSubmittedAt || capture.ReviewID != review.GitHubReviewID || capture.ReviewedCommit != review.ReviewedCommit || capture.ImplementationCommit != review.ImplementationCommit || capture.Decision != review.Decision {
+		return fmt.Errorf("github review disposition capture does not match accountable review provenance")
+	}
+	return nil
+}
+
+// CanonicalReviewDispositionBody returns the only accepted PR-comment body for
+// a maintainer decision over an independent review and implementation commit.
+func CanonicalReviewDispositionBody(decision, reviewID, reviewedCommit, implementationCommit string) string {
+	return fmt.Sprintf("decision: %s\nreview_id: %s\nreviewed_commit: %s\nimplementation_commit: %s", decision, reviewID, reviewedCommit, implementationCommit)
 }
 
 func validGitHubLogin(login string) bool {
@@ -377,17 +439,37 @@ func (review AccountableReview) Validate() error {
 	if err := validateCycleID(review.CycleID); err != nil {
 		return err
 	}
-	if !strings.HasPrefix(review.ReviewerIdentity, "github:") || len(review.ReviewerIdentity) == len("github:") || containsControlCharacter(review.ReviewerIdentity) {
+	if !validGitHubIdentity(review.ReviewerIdentity) {
 		return fmt.Errorf("accountable review requires a submitted github reviewer identity")
 	}
-	if _, err := time.Parse(time.RFC3339, review.SubmittedAt); err != nil {
+	if !validGitHubIdentity(review.DecisionAuthorityIdentity) {
+		return fmt.Errorf("accountable review requires a github decision authority identity")
+	}
+	if review.DecisionAuthorityIdentity == review.ReviewerIdentity {
+		return fmt.Errorf("accountable review decision authority must be distinct from the reviewer")
+	}
+	submittedAt, err := time.Parse(time.RFC3339, review.SubmittedAt)
+	if err != nil {
 		return fmt.Errorf("accountable review submitted time: %w", err)
 	}
-	if !validCommitSHA(review.ReviewedCommit) {
-		return fmt.Errorf("accountable review reviewed commit is invalid")
+	decisionSubmittedAt, err := time.Parse(time.RFC3339, review.DecisionSubmittedAt)
+	if err != nil {
+		return fmt.Errorf("accountable review decision submitted time: %w", err)
+	}
+	if decisionSubmittedAt.Before(submittedAt) {
+		return fmt.Errorf("accountable review decision cannot predate the independent review")
+	}
+	if !validCommitSHA(review.ReviewedCommit) || !validCommitSHA(review.ImplementationCommit) {
+		return fmt.Errorf("accountable review commits are invalid")
 	}
 	if err := validateGitHubReview(review.GitHubReviewID, review.GitHubReviewURL); err != nil {
 		return err
+	}
+	if err := validateGitHubIssueComment(review.GitHubDispositionID, review.GitHubDispositionURL); err != nil {
+		return err
+	}
+	if !sameGitHubPullRequest(review.GitHubReviewURL, review.GitHubDispositionURL) {
+		return fmt.Errorf("accountable review and disposition must belong to the same pull request")
 	}
 	if err := review.ReviewCapture.Validate(); err != nil {
 		return fmt.Errorf("accountable review capture: %w", err)
@@ -395,14 +477,65 @@ func (review AccountableReview) Validate() error {
 	if !strings.HasPrefix(review.ReviewCapture.Locator, "reviews/github/") {
 		return fmt.Errorf("accountable review capture must be a sanitized repository-backed github review asset")
 	}
-	if review.Decision != "approved" && review.Decision != "rejected" && review.Decision != "unresolved" {
+	if err := review.DecisionCapture.Validate(); err != nil {
+		return fmt.Errorf("accountable review decision capture: %w", err)
+	}
+	if !strings.HasPrefix(review.DecisionCapture.Locator, "reviews/dispositions/github/") {
+		return fmt.Errorf("accountable review decision capture must be a sanitized repository-backed github disposition asset")
+	}
+	if review.DecisionCapture.Locator == review.ReviewCapture.Locator {
+		return fmt.Errorf("accountable review and decision captures must be distinct assets")
+	}
+	if !validReviewDecision(review.Decision) {
 		return fmt.Errorf("accountable review decision is invalid")
 	}
 	if !validSHA256Digest(review.AdjudicationDigest) || !validSHA256Digest(review.FinalOracleDigest) || !validSHA256Digest(review.DecisionDigest) {
 		return fmt.Errorf("accountable review digests are invalid")
 	}
-	if review.DecisionDigest != review.ReviewCapture.Digest {
-		return fmt.Errorf("accountable review decision digest must bind its immutable review capture")
+	if review.DecisionDigest != review.DecisionCapture.Digest {
+		return fmt.Errorf("accountable review decision digest must bind its immutable disposition capture")
+	}
+	return nil
+}
+
+func validGitHubIdentity(identity string) bool {
+	const prefix = "github:"
+	return strings.HasPrefix(identity, prefix) && validGitHubLogin(strings.TrimPrefix(identity, prefix))
+}
+
+func sameGitHubPullRequest(reviewURL, dispositionURL string) bool {
+	review, reviewErr := url.Parse(reviewURL)
+	disposition, dispositionErr := url.Parse(dispositionURL)
+	return reviewErr == nil && dispositionErr == nil && review.Scheme == disposition.Scheme && review.Host == disposition.Host && review.EscapedPath() == disposition.EscapedPath()
+}
+
+func validReviewDecision(decision string) bool {
+	return decision == "approved" || decision == "rejected" || decision == "unresolved"
+}
+
+func validGitHubNumericID(value string) bool {
+	if value == "" || containsControlCharacter(value) {
+		return false
+	}
+	parsed, err := strconv.ParseUint(value, 10, 64)
+	return err == nil && parsed > 0
+}
+
+func validateGitHubIssueComment(commentID, commentURL string) error {
+	if !validGitHubNumericID(commentID) {
+		return fmt.Errorf("accountable review github disposition id is invalid")
+	}
+	parsedURL, err := url.Parse(commentURL)
+	if err != nil || parsedURL.Scheme != "https" || parsedURL.Host != "github.com" || parsedURL.User != nil || parsedURL.RawQuery != "" || parsedURL.Fragment != "issuecomment-"+commentID {
+		return fmt.Errorf("accountable review github disposition url is invalid")
+	}
+	path := strings.Split(parsedURL.EscapedPath(), "/")
+	if len(path) != 5 || path[0] != "" || path[1] == "" || path[2] == "" || path[3] != "pull" {
+		return fmt.Errorf("accountable review github disposition url is not a pull-request comment")
+	}
+	pullNumber, err := strconv.ParseUint(path[4], 10, 64)
+	if err != nil || pullNumber == 0 {
+		return fmt.Errorf("accountable review github disposition pull request number is invalid")
 	}
 	return nil
 }

@@ -75,15 +75,17 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	for key, want := range map[string]string{
 		"EVENT_NAME":      "${{ github.event_name }}",
 		"WORKFLOW_REF":    "${{ github.ref }}",
+		"WORKFLOW_SHA":    "${{ steps.resolve.outputs.source_sha }}",
 		"TRUSTED_ENABLED": "${{ vars.ENGINE_ACCURACY_TRUSTED_ENABLED }}",
 		"TRUSTED_REF":     "${{ vars.ENGINE_ACCURACY_TRUSTED_REF }}",
+		"TRUSTED_SHA":     "${{ vars.ENGINE_ACCURACY_TRUSTED_SHA }}",
 	} {
 		if got := yamlScalar(t, yamlMappingValue(t, classifyEnvironment, key)); got != want {
 			t.Errorf("classify environment %s = %q, want %q", key, got, want)
 		}
 	}
 	classifyRun := yamlScalar(t, yamlMappingValue(t, classify, "run"))
-	for _, required := range []string{"trusted_requested=false", "refs/heads/main", "$TRUSTED_REF", "$WORKFLOW_REF", "trusted_requested=$trusted_requested"} {
+	for _, required := range []string{"trusted_requested=false", "refs/heads/main", "${TRUSTED_REF:-refs/heads/main}", "$WORKFLOW_REF", "$WORKFLOW_SHA", "$TRUSTED_SHA", "[ -n \"$TRUSTED_SHA\" ]", "[ \"$WORKFLOW_REF\" = \"$trusted_ref\" ]", "[ \"$WORKFLOW_SHA\" = \"$TRUSTED_SHA\" ]", "trusted_requested=$trusted_requested"} {
 		if !strings.Contains(classifyRun, required) {
 			t.Errorf("trusted-request classifier is missing %q", required)
 		}
@@ -129,20 +131,39 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	}
 	initializeAuditControls := workflowStep(t, steps, "Initialize audit-safe capture controls")
 	initializeAuditRun := yamlScalar(t, yamlMappingValue(t, initializeAuditControls, "run"))
-	for _, required := range []string{"cycle-policy.json", "capture-status.json", "preflight_pending", "accepted-bundles.json", "repetitions=", "max_attempts=", "accepted_retention_days=", "failed_retention_days="} {
+	for _, required := range []string{"command -v jq", "cycle-policy.json", "capture-status.json", "preflight_pending", "accepted-bundles.json", "repetitions=", "max_attempts=", "accepted_retention_days=", "failed_retention_days="} {
 		if !strings.Contains(initializeAuditRun, required) {
 			t.Errorf("audit control initialization is missing %q", required)
 		}
+	}
+	if strings.Index(initializeAuditRun, "command -v jq") > strings.Index(initializeAuditRun, "jq -er") {
+		t.Error("audit control initialization must assert jq availability before reading policy")
 	}
 	if workflowStepIndex(t, steps, "Initialize audit-safe capture controls") >= workflowStepIndex(t, steps, "Set up Go") {
 		t.Error("audit control initialization must precede setup-go")
 	}
 	preflight := workflowStep(t, steps, "Preflight exact trusted runner contract")
 	preflightRun := yamlScalar(t, yamlMappingValue(t, preflight, "run"))
-	for _, required := range []string{"bwrap", "SCA_ACCURACY_DELEGATED_CGROUP_ROOT", "SCA_ACCURACY_RAW_RETENTION_ROOT", "syft-probe.json", "syft-config.json", "SCA_ACCURACY_SYFT_CONFIG_DIGEST", "sboms/$target_id.cdx.json", "jq -S -c", "cmp -s", "expected_components", "actual_components", "review_files", "preflight_complete"} {
+	for _, required := range []string{
+		"bwrap", "SCA_ACCURACY_DELEGATED_CGROUP_ROOT", "SCA_ACCURACY_RAW_RETENTION_ROOT",
+		"SCA_ACCURACY_ACTIONS_RUNNER_ROOT", "$runner_root/.runner", "command -v jq", ".ephemeral == true", "runner_config_digest",
+		"syft-probe.json", "syft-config.json", "SCA_ACCURACY_SYFT_CONFIG_DIGEST", "ratchet-baseline.json",
+		"sboms/$target_id.cdx.json", "jq -S -c", "cmp -s", "expected_components", "actual_components",
+		"reviews/github", "reviews/dispositions/github", "review_files", "decision_files",
+		`.state == "COMMENTED" or .state == "APPROVED"`,
+		`implementation_commit="${{ needs.changes.outputs.source_sha }}"`,
+		".implementation_commit == $implementation_commit", ".created_at == .updated_at",
+		`test "$decision_login" != "$review_login"`, "preflight_complete",
+	} {
 		if !strings.Contains(preflightRun, required) {
 			t.Errorf("trusted preflight is missing %q", required)
 		}
+	}
+	if strings.Contains(preflightRun, "CHANGES_REQUESTED") {
+		t.Error("trusted preflight must whitelist accepted review states rather than override changes requested")
+	}
+	if strings.Index(preflightRun, "command -v jq") > strings.Index(preflightRun, ".ephemeral == true") {
+		t.Error("trusted preflight must assert jq availability before runner attestation")
 	}
 	if strings.Contains(preflightRun, "syft version") || strings.Contains(preflightRun, "syft ") {
 		t.Error("trusted evaluation must verify frozen Syft provenance without invoking Syft")
@@ -151,7 +172,8 @@ func TestEngineAccuracyWorkflowSafetyContract(t *testing.T) {
 	freeze := workflowStep(t, steps, "Materialize inputs and freeze the scanner-free oracle chain")
 	freezeRun := yamlScalar(t, yamlMappingValue(t, freeze, "run"))
 	for _, required := range []string{
-		"-mode source-freeze", "-mode manifest-set", "-mode accountable-review", "-review-capture-output", "-mode plan",
+		"-mode source-freeze", "-mode manifest-set", "-mode accountable-review", "-review-capture-output", "-decision-capture-output", "-implementation-commit", "-mode plan", "-baseline-ratchet",
+		"control/ratchet-baseline.json", "control/review-disposition-capture.json",
 		"control/source-assets", "-repository-root \"$input/repository\" -source-freeze-output", "$input/sboms/$target_id.cdx.json", "cp \"$frozen_sbom\" \"$sbom\"", "cmp -s \"$frozen_sbom\" \"$sbom\"",
 		"sca-accuracy-source-native-evidence", "oracle-candidate", "oracle-cross-check", "oracle-adjudicate", "oracle-freeze", "sca-accuracy-prepare",
 		"source_evidence_preparing", "capture_pending",
