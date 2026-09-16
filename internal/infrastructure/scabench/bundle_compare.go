@@ -461,7 +461,13 @@ func replaceOnlyTrivyVolatileValues(value any) ([]rawJSONChange, error) {
 	return changes, nil
 }
 
-var osvTimingLine = regexp.MustCompile(`^End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, ([1-9][0-9]*(?:\.[0-9]+)?)ms elapsed, ([1-9][0-9]*(?:\.[0-9]+)?)ms wall time$`)
+const osvPointerDiagnosticPrefix = "Neither CPE nor PURL found for package: "
+
+var (
+	osvTimingLine = regexp.MustCompile(`^End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, ([1-9][0-9]*(?:\.[0-9]+)?)ms elapsed, ([1-9][0-9]*(?:\.[0-9]+)?)ms wall time$`)
+	osvGoField    = regexp.MustCompile(`[A-Z][A-Za-z0-9_]*:[^ }]*`)
+	osvPointer    = regexp.MustCompile(`^0x[0-9a-fA-F]+$`)
+)
 
 func compareOSVRaw(left, right []byte) ([]AllowedBundleDifference, []string) {
 	if bytes.Equal(left, right) {
@@ -495,36 +501,123 @@ func normalizeOSVStderr(raw []byte) ([]string, []rawJSONChange, error) {
 			lines[index] = "<terminal-timing>"
 			continue
 		}
-		if strings.HasPrefix(line, "Neither CPE nor PURL found for package: {") {
-			value, err := strictJSONValue([]byte(strings.TrimPrefix(line, "Neither CPE nor PURL found for package: ")))
+		if strings.HasPrefix(line, osvPointerDiagnosticPrefix) {
+			normalized, pointerChanges, err := normalizeOSVPointerDiagnostic(strings.TrimPrefix(line, osvPointerDiagnosticPrefix), index)
 			if err != nil {
 				return nil, nil, err
 			}
-			object, ok := value.(map[string]any)
-			if !ok {
-				return nil, nil, fmt.Errorf("OSV pointer diagnostic is not an object")
-			}
-			for _, key := range []string{"ExternalReferences", "Hashes", "Properties", "SWID"} {
-				if value, exists := object[key]; exists {
-					if value == nil {
-						return nil, nil, fmt.Errorf("OSV pointer diagnostic %s is nil", key)
-					}
-					encoded, err := json.Marshal(value)
-					if err != nil {
-						return nil, nil, err
-					}
-					changes = append(changes, rawJSONChange{path: fmt.Sprintf("lines[%d].%s", index, key), value: encoded})
-					object[key] = "<volatile-pointer-field>"
-				}
-			}
-			encoded, err := json.Marshal(object)
-			if err != nil {
-				return nil, nil, err
-			}
-			lines[index] = "Neither CPE nor PURL found for package: " + string(encoded)
+			changes = append(changes, pointerChanges...)
+			lines[index] = osvPointerDiagnosticPrefix + normalized
 		}
 	}
 	return lines, changes, nil
+}
+
+func normalizeOSVPointerDiagnostic(payload string, lineIndex int) (string, []rawJSONChange, error) {
+	if len(payload) < 2 || payload[0] != '{' || payload[len(payload)-1] != '}' {
+		return "", nil, fmt.Errorf("OSV pointer diagnostic is malformed")
+	}
+	afterOpen := strings.TrimLeft(payload[1:], " \t")
+	if strings.HasPrefix(afterOpen, `"`) || afterOpen == "}" {
+		return normalizeOSVJSONPointerDiagnostic(payload, lineIndex)
+	}
+	return normalizeOSVGoPointerDiagnostic(payload, lineIndex)
+}
+
+func normalizeOSVJSONPointerDiagnostic(payload string, lineIndex int) (string, []rawJSONChange, error) {
+	value, err := strictJSONValue([]byte(payload))
+	if err != nil {
+		return "", nil, err
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return "", nil, fmt.Errorf("OSV pointer diagnostic is not an object")
+	}
+	changes := make([]rawJSONChange, 0, 4)
+	for _, key := range []string{"ExternalReferences", "Hashes", "Properties", "SWID"} {
+		fieldValue, exists := object[key]
+		if !exists {
+			continue
+		}
+		if fieldValue == nil {
+			return "", nil, fmt.Errorf("OSV pointer diagnostic %s is nil", key)
+		}
+		encoded, err := json.Marshal(fieldValue)
+		if err != nil {
+			return "", nil, err
+		}
+		changes = append(changes, rawJSONChange{
+			path:  fmt.Sprintf("lines[%d].%s", lineIndex, key),
+			value: encoded,
+		})
+		object[key] = "<volatile-pointer-field>"
+	}
+	encoded, err := json.Marshal(object)
+	if err != nil {
+		return "", nil, err
+	}
+	return string(encoded), changes, nil
+}
+
+func normalizeOSVGoPointerDiagnostic(payload string, lineIndex int) (string, []rawJSONChange, error) {
+	matches := osvGoField.FindAllStringIndex(payload, -1)
+	if len(matches) == 0 {
+		return "", nil, fmt.Errorf("OSV Go pointer diagnostic has no fields")
+	}
+
+	seen := make(map[string]struct{}, 4)
+	changes := make([]rawJSONChange, 0, 4)
+	var normalized strings.Builder
+	normalized.Grow(len(payload))
+	cursor := 0
+	for _, match := range matches {
+		start, end := match[0], match[1]
+		if start > 0 && payload[start-1] != '{' && payload[start-1] != ' ' {
+			continue
+		}
+		token := payload[start:end]
+		separator := strings.IndexByte(token, ':')
+		if separator <= 0 {
+			return "", nil, fmt.Errorf("OSV Go pointer diagnostic field is malformed")
+		}
+		field := token[:separator]
+		fieldValue := token[separator+1:]
+		if isOSVVolatilePointerField(field) {
+			if _, exists := seen[field]; exists {
+				return "", nil, fmt.Errorf("OSV Go pointer diagnostic repeats %s", field)
+			}
+			seen[field] = struct{}{}
+			if fieldValue == "<nil>" {
+				continue
+			}
+			if !osvPointer.MatchString(fieldValue) {
+				return "", nil, fmt.Errorf("OSV Go pointer diagnostic %s has malformed pointer", field)
+			}
+			changes = append(changes, rawJSONChange{
+				path:  fmt.Sprintf("lines[%d].%s", lineIndex, field),
+				value: []byte(fieldValue),
+			})
+			valueStart := start + separator + 1
+			normalized.WriteString(payload[cursor:valueStart])
+			normalized.WriteString("<volatile-pointer-field>")
+			cursor = end
+			continue
+		}
+		if strings.HasPrefix(fieldValue, "0x") {
+			return "", nil, fmt.Errorf("OSV Go pointer diagnostic has unsupported pointer field %s", field)
+		}
+	}
+	normalized.WriteString(payload[cursor:])
+	return normalized.String(), changes, nil
+}
+
+func isOSVVolatilePointerField(field string) bool {
+	switch field {
+	case "ExternalReferences", "Hashes", "Properties", "SWID":
+		return true
+	default:
+		return false
+	}
 }
 
 func compareNamedAllowedChanges(artifact, prefix string, left, right []rawJSONChange) ([]AllowedBundleDifference, []string) {

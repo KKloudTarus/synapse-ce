@@ -75,6 +75,80 @@ func TestSemanticRawPoliciesFailClosedOnUnclassifiedChanges(t *testing.T) {
 	}
 }
 
+func TestCompareOSVRawNormalizesLivePointerDiagnostics(t *testing.T) {
+	left := []byte(
+		osvPointerDiagnosticPrefix + "{Type:library Name:a Hashes:0xc000010100 ExternalReferences:0xc000010200 Properties:0xc000010300 SWID:0xc000010400}\n" +
+			osvPointerDiagnosticPrefix + "{Type:library Name:b Hashes:0xc000010500 ExternalReferences:<nil> Properties:<nil> SWID:<nil>}\n" +
+			"End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 1ms elapsed, 2ms wall time\n",
+	)
+	right := []byte(
+		osvPointerDiagnosticPrefix + "{Type:library Name:a Hashes:0xc000020100 ExternalReferences:0xc000020200 Properties:0xc000020300 SWID:0xc000020400}\n" +
+			osvPointerDiagnosticPrefix + "{Type:library Name:b Hashes:0xc000020500 ExternalReferences:<nil> Properties:<nil> SWID:<nil>}\n" +
+			"End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 3ms elapsed, 4ms wall time\n",
+	)
+	allowed, differences := compareOSVRaw(left, right)
+	if len(differences) != 0 || len(allowed) != 6 {
+		t.Fatalf("OSV live-shaped policy = allowed=%+v differences=%v", allowed, differences)
+	}
+	paths := make(map[string]struct{}, len(allowed))
+	for _, difference := range allowed {
+		paths[difference.Path] = struct{}{}
+	}
+	for _, path := range []string{
+		"$.scan.stderr.lines[0].ExternalReferences",
+		"$.scan.stderr.lines[0].Hashes",
+		"$.scan.stderr.lines[0].Properties",
+		"$.scan.stderr.lines[0].SWID",
+		"$.scan.stderr.lines[1].Hashes",
+		"$.scan.stderr.lines[2].timing",
+	} {
+		if _, exists := paths[path]; !exists {
+			t.Fatalf("OSV allowed differences omit %s: %+v", path, allowed)
+		}
+	}
+}
+
+func TestCompareOSVRawRejectsUnclassifiedLiveDiagnosticChanges(t *testing.T) {
+	valid := osvPointerDiagnosticPrefix + "{Type:library Name:a Hashes:0xc000010100 ExternalReferences:<nil> Properties:<nil> SWID:<nil>}\n"
+	tests := map[string][2]string{
+		"semantic field": {
+			valid,
+			osvPointerDiagnosticPrefix + "{Type:library Name:b Hashes:0xc000020100 ExternalReferences:<nil> Properties:<nil> SWID:<nil>}\n",
+		},
+		"unknown pointer field": {
+			osvPointerDiagnosticPrefix + "{Type:library Name:a Supplier:0xc000010100 Hashes:<nil>}\n",
+			osvPointerDiagnosticPrefix + "{Type:library Name:a Supplier:0xc000020100 Hashes:<nil>}\n",
+		},
+		"duplicate selected field": {
+			osvPointerDiagnosticPrefix + "{Type:library Name:a Hashes:0xc000010100 Hashes:0xc000010200}\n",
+			valid,
+		},
+		"malformed struct": {
+			osvPointerDiagnosticPrefix + "{Type:library Name:a Hashes:0xc000010100\n",
+			valid,
+		},
+		"malformed pointer": {
+			osvPointerDiagnosticPrefix + "{Type:library Name:a Hashes:0xwrong}\n",
+			valid,
+		},
+		"invalid selected field": {
+			osvPointerDiagnosticPrefix + "{Type:library Name:a Hashes:garbage}\n",
+			valid,
+		},
+		"pointer to nil": {
+			valid,
+			osvPointerDiagnosticPrefix + "{Type:library Name:a Hashes:<nil> ExternalReferences:<nil> Properties:<nil> SWID:<nil>}\n",
+		},
+	}
+	for name, streams := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, differences := compareOSVRaw([]byte(streams[0]), []byte(streams[1])); len(differences) == 0 {
+				t.Fatal("OSV policy accepted an unclassified live diagnostic change")
+			}
+		})
+	}
+}
+
 func writeComparableGrypeBundle(t *testing.T, raw string) string {
 	t.Helper()
 	catalog, manifest := testFixture(t, bench.EngineGrype)
