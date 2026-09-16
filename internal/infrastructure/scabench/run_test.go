@@ -1,8 +1,11 @@
 package scabench
 
 import (
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	bench "github.com/KKloudTarus/synapse-ce/internal/usecase/scabench"
@@ -33,6 +36,42 @@ func TestCanonicalCapabilityComponentsUsesBenchmarkIdentityOrder(t *testing.T) {
 	}
 	if len(components) != 2 || components[0].PURL != "pkg:rpm/sles/bash@"+version || components[1].PURL != "pkg:rpm/sles/bash-sh@"+version {
 		t.Fatalf("capability component order = %+v", components)
+	}
+}
+
+func TestOwnedBuildInjectsStableBenchmarkVersion(t *testing.T) {
+	_, source := testFixture(t, bench.EngineOwned)
+	binaryName := "synapse-sca-bench"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(t.TempDir(), binaryName)
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	build := exec.Command("go", ownedBuildArguments(binaryPath)...)
+	build.Dir = repositoryRoot
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build owned benchmark helper: %v\n%s", err, output)
+	}
+	run := exec.Command(
+		binaryPath,
+		"--owned-helper",
+		"-database", source.Database.Path,
+		"-database-format", string(source.Database.Format),
+		"-sbom", source.SBOMPath,
+	)
+	output, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run owned benchmark helper: %v\n%s", err, output)
+	}
+	var wire ownedWire
+	if err := json.Unmarshal(output, &wire); err != nil {
+		t.Fatalf("decode owned benchmark output: %v", err)
+	}
+	if wire.EngineVersion != ownedBenchmarkVersion {
+		t.Fatalf("owned engine version = %q, want %q", wire.EngineVersion, ownedBenchmarkVersion)
 	}
 }
 

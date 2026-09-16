@@ -21,9 +21,11 @@ import (
 )
 
 const (
-	runResultSchemaVersion = "synapse-sca-benchmark-run-v1"
-	fixedRepetitions       = 2
-	fixedMatrixCells       = 8
+	runResultSchemaVersion            = "synapse-sca-benchmark-run-v1"
+	fixedRepetitions                  = 2
+	fixedMatrixCells                  = 8
+	ownedBenchmarkVersion             = "devel"
+	ownedBenchmarkVersionLinkerSymbol = "github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo.version"
 )
 
 var fixedTargetIDs = []string{
@@ -348,12 +350,21 @@ func (state *runState) loadFrozenInputs() error {
 	return nil
 }
 
+func ownedBuildArguments(binaryPath string) []string {
+	return []string{
+		"build",
+		"-ldflags", "-X " + ownedBenchmarkVersionLinkerSymbol + "=" + ownedBenchmarkVersion,
+		"-o", binaryPath,
+		"./cmd/synapse-sca-bench",
+	}
+}
+
 func (state *runState) buildAndBindOwnedBinary(ctx context.Context) error {
 	binaryPath := filepath.Join(state.workRoot, "tools", "synapse-sca-bench")
 	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o700); err != nil {
 		return fmt.Errorf("create owned binary directory: %w", err)
 	}
-	command := exec.CommandContext(ctx, "go", "build", "-o", binaryPath, "./cmd/synapse-sca-bench")
+	command := exec.CommandContext(ctx, "go", ownedBuildArguments(binaryPath)...)
 	command.Stdout = nil
 	command.Stderr = nil
 	if err := command.Run(); err != nil {
