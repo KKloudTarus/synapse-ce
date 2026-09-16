@@ -11,7 +11,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 - **Coverage-aware complexity rollups and pinned analysis deltas (#1133, EPIC #1120).** Project Code Quality
   now aggregates AST cyclomatic and cognitive complexity from functions to files, directories, and the
-  project root with per-file parse coverage. Unsupported or unparsed files remain unavailable instead of
+  project root with per-file parse coverage. Unsupported-language files are explicitly not applicable and
+  excluded from aggregate coverage, while supported files that fail parsing remain unavailable instead of
   becoming false zeroes. Compatible consecutive analyses persist signed per-path deltas (including
   reductions), baseline analysis provenance, schema versions, and measured/eligible coverage; unknown
   branches, incompatible sources, legacy evidence, and missing paths fail closed with explicit reasons.

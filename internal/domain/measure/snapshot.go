@@ -325,6 +325,14 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 				n.ComplexityCoverage.Reason = "complexity_coverage_missing"
 				continue
 			}
+			// A file whose detected language has no registered AST grammar is outside the
+			// complexity measure's scope. Keep that fact visible on the file, but do not let
+			// it poison directory/project coverage for the supported-language subset.
+			if entry.Reason == "unsupported_language" {
+				n.ComplexityCoverage.EligibleFiles = 0
+				n.ComplexityCoverage.Reason = entry.Reason
+				continue
+			}
 			if entry.Available {
 				n.ComplexityCoverage.MeasuredFiles = 1
 				n.ComplexityCoverage.Availability = AvailabilityAvailable
@@ -549,6 +557,11 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 		if p != "" {
 			children[n.Parent] = append(children[n.Parent], n)
 		}
+	}
+	for parent := range children {
+		sort.Slice(children[parent], func(i, j int) bool {
+			return children[parent][i].Path < children[parent][j].Path
+		})
 	}
 	sort.Slice(paths, func(i, j int) bool { return len(paths[i]) > len(paths[j]) })
 	for _, p := range paths {
