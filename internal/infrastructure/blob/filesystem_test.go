@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -45,7 +46,7 @@ func TestFilesystemDurableImmutableObjects(t *testing.T) {
 		t.Fatalf("reopened bytes = %q, %v", got, err)
 	}
 	info, err := os.Stat(filepath.Join(directory, key))
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("object permission = %v, %v", info, err)
 	}
 	if err := reopened.DeleteObject(ctx, key); err != nil {
@@ -84,6 +85,9 @@ func TestFilesystemRejectsUnsafePathsAndPartialWrites(t *testing.T) {
 	}
 	outside := t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(directory, "escape")); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink privilege unavailable on Windows: %v", err)
+		}
 		t.Fatal(err)
 	}
 	if err := store.PutObject(ctx, "escape/object", bytes.NewReader([]byte("x")), 1); err == nil {

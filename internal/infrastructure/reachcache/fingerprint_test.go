@@ -1,3 +1,6 @@
+//go:build !windows
+// +build !windows
+
 package reachcache
 
 import (
@@ -39,7 +42,9 @@ func hashOf(t *testing.T, dir string) string {
 // The same tree content yields the same source hash across two independent walks (order-independent).
 func TestTreeFingerprintStable(t *testing.T) {
 	files := map[string]string{"main.go": "package main", "pkg/a.go": "package pkg", "go.mod": "module x"}
-	if hashOf(t, writeTree(t, files)) != hashOf(t, writeTree(t, files)) {
+	first := writeTree(t, files)
+	second := writeTree(t, files)
+	if hashOf(t, first) != hashOf(t, second) {
 		t.Fatal("identical trees must hash equal")
 	}
 }

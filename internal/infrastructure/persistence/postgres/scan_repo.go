@@ -159,10 +159,10 @@ func (r *ScanRepository) SaveScan(ctx context.Context, engagementID shared.ID, d
 				&publication.Coverage.Resolved, &publication.Coverage.Unsupported, &publication.AdmittedAt, &publication.PublishedAt, &publication.Current); err != nil {
 				return fmt.Errorf("load idempotent inventory publication: %w", err)
 			}
-			publication.InventoryAdmission.TenantID = tenantID
-			publication.InventoryAdmission.EngagementID = engagementID
-			publication.InventoryAdmission.Scope = admission.Scope
-			publication.InventoryAdmission.Generation = admission.Generation
+			publication.TenantID = tenantID
+			publication.EngagementID = engagementID
+			publication.Scope = admission.Scope
+			publication.Generation = admission.Generation
 			publication.SBOMID = shared.ID(sbomID)
 			publication.Completeness = sbom.InventoryCompleteness(storedCompleteness)
 			publication.Superseded = publication.Authoritative && publication.Completeness == sbom.InventoryComplete && !publication.Current

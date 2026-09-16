@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -219,5 +220,5 @@ func (s *Scanner) renderKustomization(ctx context.Context, root, dir, relDir str
 	default:
 		return k8sScanResult{}, false // kustomize rendering not enabled
 	}
-	return scanKubernetes(filepath.Join(relDir, "kustomization.yaml"), rendered), true
+	return scanKubernetes(path.Join(relDir, "kustomization.yaml"), rendered), true
 }

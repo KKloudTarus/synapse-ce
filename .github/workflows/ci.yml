@@ -77,7 +77,9 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -count=1 ./...
+        # Postgres integration packages share the configured database and reset schemas in
+        # their fixtures. Serialize packages so one fixture cannot invalidate another mid-test.
+        run: go test -p 1 -count=1 ./...
 
       - name: Test Postgres suite again on the same database
         run: go test -count=1 ./internal/infrastructure/persistence/postgres

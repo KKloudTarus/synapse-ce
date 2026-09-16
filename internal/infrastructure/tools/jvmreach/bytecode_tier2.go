@@ -469,11 +469,9 @@ func storedReferenceSource(ins []instruction, storeIdx int, cp parsedCP) (class 
 	if storeIdx <= 0 || storeIdx >= len(ins) {
 		return "", -1, false
 	}
-	j := storeIdx - 1
-	cur := ins[j]
-	if j > 0 && cur.op == 0xc0 {
-		j--
-		cur = ins[j]
+	cur := ins[storeIdx-1] // #nosec G602 -- storeIdx is checked against both bounds above.
+	if storeIdx > 1 && cur.op == 0xc0 {
+		cur = ins[storeIdx-2] // #nosec G602 -- storeIdx > 1 guarantees a non-negative in-range index.
 	}
 	if local, ok := aloadLocal(cur); ok {
 		return "", local, true

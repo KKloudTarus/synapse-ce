@@ -10,7 +10,6 @@ import (
 type peerIdentity struct {
 	pid int
 	uid int
-	gid int
 }
 
 type sandboxProcess struct{}

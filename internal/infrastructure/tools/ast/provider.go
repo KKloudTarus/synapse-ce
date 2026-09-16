@@ -327,7 +327,7 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 	}
 	stdout := boundedOutput{limit: maxASTOutputBytes}
 	stderr := boundedOutput{limit: maxASTOutputBytes}
-	ec := exec.CommandContext(ctx, p.bin, args...)
+	ec := exec.CommandContext(ctx, p.bin, args...) // #nosec G702 -- p.bin is the administrator-configured AST sidecar and args are passed without a shell.
 	ec.Stdout = &stdout
 	ec.Stderr = &stderr
 	err := ec.Run()

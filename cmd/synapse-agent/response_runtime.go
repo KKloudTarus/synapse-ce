@@ -53,7 +53,9 @@ func newEndpointResponseRuntime(cfg config) (*endpointResponseRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
+	//nolint:staticcheck // The Linux implementation can succeed; non-Linux builds always return an error.
 	registry, err := responseactuator.NewRegistry()
+	//nolint:staticcheck // See the platform-specific constructor note above.
 	if err != nil {
 		return nil, err
 	}

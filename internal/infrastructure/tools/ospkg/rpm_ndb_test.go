@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -100,6 +101,9 @@ func newOpenSUSERootfs(t *testing.T) string {
 		t.Fatal(err)
 	}
 	if err := os.Symlink("../../usr/lib/sysimage/rpm", filepath.Join(rootfs, "var/lib/rpm")); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink privilege unavailable on Windows: %v", err)
+		}
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(rootfs, "etc"), 0o755); err != nil {

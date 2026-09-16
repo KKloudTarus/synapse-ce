@@ -5,7 +5,7 @@ import (
 	"context"
 	"io"
 	"os/exec"
-	"path/filepath"
+	"path"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -68,7 +68,7 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 	if len(rendered) > maxRenderedBytes {
 		rendered = rendered[:maxRenderedBytes]
 	}
-	return scanKubernetes(filepath.Join(relDir, "Chart.yaml"), rendered)
+	return scanKubernetes(path.Join(relDir, "Chart.yaml"), rendered)
 }
 
 // cappedBuffer accumulates at most max bytes and silently discards the rest, so a chart that renders
