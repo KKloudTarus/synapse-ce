@@ -56,12 +56,15 @@ func TestIncidentCoordinatorPreparesPostgresActionBeforeRequestProjection(t *tes
 		t.Fatal(err)
 	}
 	if _, err := incidentService.Append(tenantCtx, incidentID, 0, []incident.IncidentEvent{{
-		IncidentID:   incidentID,
-		Kind:         incident.EventCreated,
-		At:           clock.Now(),
-		Actor:        "correlator",
-		AssetID:      "host-1",
-		EngagementID: "eng-1",
+		IncidentID: incidentID,
+		Kind:       incident.EventCreated,
+		At:         clock.Now(),
+		Actor:      "correlator",
+		AssetID:    "host-1",
+		// The coordinator derives the response engagement from this authoritative incident provenance, and
+		// response_actions.engagement_id is a foreign key into engagements. Seeding a placeholder engagement
+		// here would make the prepared action's immutable engagement binding unreachable for the coordinator.
+		EngagementID: engagementID,
 		Severity:     shared.SeverityHigh,
 	}}); err != nil {
 		t.Fatalf("seed incident: %v", err)
