@@ -1,1 +1,0 @@
-{"assets":[{"locator":"capability/osv-scanner-v2.5.1/ecosystem.go"},{"locator":"capability/osv-scanner-v2.5.1/purl_to_package.go"},{"locator":"vendor/debian-bookworm-oval.xml.bz2"},{"locator":"vendor/sles-15-affected-oval.xml.gz"}],"cycle_id":"same-sbom-linux-20260915","schema_version":"synapse-sca-benchmark-source-freeze-template-v1"}

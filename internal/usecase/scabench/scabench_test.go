@@ -905,6 +905,20 @@ func TestDecodeRejectsInvalidUTF8(t *testing.T) {
 	}
 }
 
+func TestValidateJSONDocumentRejectsDuplicateAndTrailingValues(t *testing.T) {
+	for _, document := range []string{
+		`{"state":"COMMENTED","state":"APPROVED"}`,
+		`{"state":"COMMENTED"} {}`,
+	} {
+		if err := ValidateJSONDocument(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid strict JSON document %q was accepted", document)
+		}
+	}
+	if err := ValidateJSONDocument(strings.NewReader(`{"state":"COMMENTED"}`)); err != nil {
+		t.Fatalf("valid strict JSON document: %v", err)
+	}
+}
+
 func validCatalog() Catalog {
 	digest := "sha256:" + hexDigest('a')
 	return Catalog{

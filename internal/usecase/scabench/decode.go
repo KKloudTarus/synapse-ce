@@ -76,207 +76,21 @@ func DecodeResult(reader io.Reader) (Result, error) {
 	return result, nil
 }
 
-// DecodeSourceFreeze strictly decodes a fresh-cycle source freeze.
-func DecodeSourceFreeze(reader io.Reader) (SourceFreeze, error) {
-	var freeze SourceFreeze
-	if err := strictDecode(reader, &freeze); err != nil {
-		return SourceFreeze{}, fmt.Errorf("decode source freeze: %w", err)
+// ValidateJSONDocument applies the shared bounded, UTF-8, depth, duplicate-key,
+// and single-value checks to a JSON document before a boundary-specific decode.
+func ValidateJSONDocument(reader io.Reader) error {
+	raw, err := readBounded(reader)
+	if err != nil {
+		return err
 	}
-	if err := freeze.Validate(); err != nil {
-		return SourceFreeze{}, err
-	}
-	return freeze, nil
+	return validateJSONDocument(raw)
 }
 
-// DecodeOracleCandidate strictly decodes scanner-free proposed oracle truth.
-func DecodeOracleCandidate(reader io.Reader) (OracleCandidate, error) {
-	var candidate OracleCandidate
-	if err := strictDecode(reader, &candidate); err != nil {
-		return OracleCandidate{}, fmt.Errorf("decode oracle candidate: %w", err)
+func validateJSONDocument(raw []byte) error {
+	if !utf8.Valid(raw) {
+		return fmt.Errorf("JSON input is not valid UTF-8")
 	}
-	if err := candidate.Validate(); err != nil {
-		return OracleCandidate{}, err
-	}
-	return candidate, nil
-}
-
-// DecodeAutomatedCrossCheck strictly decodes an automated scanner-blinded cross-check.
-func DecodeAutomatedCrossCheck(reader io.Reader) (AutomatedCrossCheck, error) {
-	var check AutomatedCrossCheck
-	if err := strictDecode(reader, &check); err != nil {
-		return AutomatedCrossCheck{}, fmt.Errorf("decode automated cross-check: %w", err)
-	}
-	if err := check.Validate(); err != nil {
-		return AutomatedCrossCheck{}, err
-	}
-	return check, nil
-}
-
-// DecodeAdjudicationRecord strictly decodes a scanner-free adjudication record.
-func DecodeAdjudicationRecord(reader io.Reader) (AdjudicationRecord, error) {
-	var record AdjudicationRecord
-	if err := strictDecode(reader, &record); err != nil {
-		return AdjudicationRecord{}, fmt.Errorf("decode adjudication record: %w", err)
-	}
-	if err := record.Validate(); err != nil {
-		return AdjudicationRecord{}, err
-	}
-	return record, nil
-}
-
-// DecodeAccountableReview strictly decodes the distinct publication decision.
-func DecodeAccountableReview(reader io.Reader) (AccountableReview, error) {
-	var review AccountableReview
-	if err := strictDecode(reader, &review); err != nil {
-		return AccountableReview{}, fmt.Errorf("decode accountable review: %w", err)
-	}
-	if err := review.Validate(); err != nil {
-		return AccountableReview{}, err
-	}
-	return review, nil
-}
-
-// DecodeGitHubReviewCapture strictly decodes the sanitized GitHub-review form.
-func DecodeGitHubReviewCapture(reader io.Reader) (GitHubReviewCapture, error) {
-	var capture GitHubReviewCapture
-	if err := strictDecode(reader, &capture); err != nil {
-		return GitHubReviewCapture{}, fmt.Errorf("decode github review capture: %w", err)
-	}
-	if err := capture.Validate(); err != nil {
-		return GitHubReviewCapture{}, err
-	}
-	return capture, nil
-}
-
-// DecodeGitHubReviewDispositionCapture strictly decodes the sanitized,
-// immutable maintainer disposition comment.
-func DecodeGitHubReviewDispositionCapture(reader io.Reader) (GitHubReviewDispositionCapture, error) {
-	var capture GitHubReviewDispositionCapture
-	if err := strictDecode(reader, &capture); err != nil {
-		return GitHubReviewDispositionCapture{}, fmt.Errorf("decode github review disposition capture: %w", err)
-	}
-	if err := capture.Validate(); err != nil {
-		return GitHubReviewDispositionCapture{}, err
-	}
-	return capture, nil
-}
-
-func DecodeFinalOracleFreeze(reader io.Reader) (FinalOracleFreeze, error) {
-	var freeze FinalOracleFreeze
-	if err := strictDecode(reader, &freeze); err != nil {
-		return FinalOracleFreeze{}, fmt.Errorf("decode final oracle freeze: %w", err)
-	}
-	if err := freeze.Validate(); err != nil {
-		return FinalOracleFreeze{}, err
-	}
-	return freeze, nil
-}
-
-func DecodeSourceCaseEvidence(reader io.Reader) (SourceCaseEvidenceSet, error) {
-	var source SourceCaseEvidenceSet
-	if err := strictDecode(reader, &source); err != nil {
-		return SourceCaseEvidenceSet{}, fmt.Errorf("decode source case evidence: %w", err)
-	}
-	if err := source.Validate(); err != nil {
-		return SourceCaseEvidenceSet{}, err
-	}
-	return source, nil
-}
-
-// DecodeSourceEvidencePlan decodes a strict, benchmark-only source selection plan.
-func DecodeSourceEvidencePlan(reader io.Reader) (SourceEvidencePlan, error) {
-	var plan SourceEvidencePlan
-	if err := strictDecode(reader, &plan); err != nil {
-		return SourceEvidencePlan{}, fmt.Errorf("decode source evidence plan: %w", err)
-	}
-	if err := plan.Validate(); err != nil {
-		return SourceEvidencePlan{}, err
-	}
-	return plan, nil
-}
-
-// DecodeNativeEvidenceSet decodes generated, target-native version evidence.
-func DecodeNativeEvidenceSet(reader io.Reader) (NativeEvidenceSet, error) {
-	var evidence NativeEvidenceSet
-	if err := strictDecode(reader, &evidence); err != nil {
-		return NativeEvidenceSet{}, fmt.Errorf("decode native evidence: %w", err)
-	}
-	if err := evidence.Validate(); err != nil {
-		return NativeEvidenceSet{}, err
-	}
-	return evidence, nil
-}
-
-// DecodeCyclePlan strictly decodes a cycle plan before any capture can use it.
-func DecodeCyclePlan(reader io.Reader) (CyclePlan, error) {
-	var plan CyclePlan
-	if err := strictDecode(reader, &plan); err != nil {
-		return CyclePlan{}, fmt.Errorf("decode cycle plan: %w", err)
-	}
-	if err := plan.Validate(); err != nil {
-		return CyclePlan{}, err
-	}
-	return plan, nil
-}
-
-// DecodeCycleLedger strictly decodes retained capture attempt records.
-func DecodeCycleLedger(reader io.Reader) (CycleLedger, error) {
-	var ledger CycleLedger
-	if err := strictDecode(reader, &ledger); err != nil {
-		return CycleLedger{}, fmt.Errorf("decode cycle ledger: %w", err)
-	}
-	if err := ledger.validateBasic(); err != nil {
-		return CycleLedger{}, err
-	}
-	return ledger, nil
-}
-
-// DecodeNativeComparisonRecord strictly decodes a target-native comparison record.
-func DecodeNativeComparisonRecord(reader io.Reader) (NativeComparisonRecord, error) {
-	var record NativeComparisonRecord
-	if err := strictDecode(reader, &record); err != nil {
-		return NativeComparisonRecord{}, fmt.Errorf("decode native comparison record: %w", err)
-	}
-	if err := record.Validate(); err != nil {
-		return NativeComparisonRecord{}, err
-	}
-	return record, nil
-}
-
-// DecodePublicationManifest strictly decodes the single publication manifest.
-func DecodePublicationManifest(reader io.Reader) (PublicationManifest, error) {
-	var manifest PublicationManifest
-	if err := strictDecode(reader, &manifest); err != nil {
-		return PublicationManifest{}, fmt.Errorf("decode publication manifest: %w", err)
-	}
-	if err := manifest.Validate(); err != nil {
-		return PublicationManifest{}, err
-	}
-	return manifest, nil
-}
-
-// DecodePublicationControl strictly decodes immutable pre-reduction artifact commitments.
-func DecodePublicationControl(reader io.Reader) (PublicationControl, error) {
-	var control PublicationControl
-	if err := strictDecode(reader, &control); err != nil {
-		return PublicationControl{}, fmt.Errorf("decode publication control: %w", err)
-	}
-	if err := control.Validate(); err != nil {
-		return PublicationControl{}, err
-	}
-	return control, nil
-}
-
-// DecodeFalsifierSpec strictly decodes an executable falsifier specification.
-func DecodeFalsifierSpec(reader io.Reader) (FalsifierSpec, error) {
-	var spec FalsifierSpec
-	if err := strictDecode(reader, &spec); err != nil {
-		return FalsifierSpec{}, fmt.Errorf("decode falsifier spec: %w", err)
-	}
-	if err := spec.Validate(); err != nil {
-		return FalsifierSpec{}, err
-	}
-	return spec, nil
+	return rejectDuplicateKeys(raw)
 }
 
 // Validate validates an observation envelope's self-contained invariants.
@@ -307,10 +121,7 @@ func strictDecode(reader io.Reader, destination any) error {
 	if err != nil {
 		return err
 	}
-	if !utf8.Valid(raw) {
-		return fmt.Errorf("JSON input is not valid UTF-8")
-	}
-	if err := rejectDuplicateKeys(raw); err != nil {
+	if err := validateJSONDocument(raw); err != nil {
 		return err
 	}
 

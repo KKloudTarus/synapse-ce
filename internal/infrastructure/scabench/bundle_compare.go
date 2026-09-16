@@ -4,17 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"reflect"
-	"regexp"
+	"path/filepath"
 	"sort"
-	"strings"
 
 	bench "github.com/KKloudTarus/synapse-ce/internal/usecase/scabench"
 )
 
-const semanticBundleComparisonSchema = "synapse-sca-benchmark-full-bundle-comparison-v1"
+const semanticBundleComparisonSchema = "synapse-sca-benchmark-semantic-comparison-v2"
 
 type BundleFileIdentity struct {
 	Name   string `json:"name"`
@@ -22,8 +19,7 @@ type BundleFileIdentity struct {
 	Size   int64  `json:"size"`
 }
 
-// BundleIdentity is derived from an existing validated bundle; no additional
-// artifact is written into the raw capture directory.
+// BundleIdentity binds every retained raw artifact. It is provenance, not a repeat claim.
 type BundleIdentity struct {
 	TargetID                    string               `json:"target_id"`
 	Engine                      bench.Engine         `json:"engine"`
@@ -39,55 +35,46 @@ type BundleIdentity struct {
 	SBOMDigest                  string               `json:"sbom_digest"`
 }
 
-type AllowedBundleDifference struct {
-	Artifact    string `json:"artifact"`
-	Path        string `json:"path"`
-	LeftDigest  string `json:"left_digest"`
-	RightDigest string `json:"right_digest"`
+type ProcessOutcome struct {
+	ExitKnown           bool   `json:"exit_known"`
+	ExitCode            int    `json:"exit_code"`
+	RunnerError         bool   `json:"runner_error"`
+	Cancelled           bool   `json:"cancelled"`
+	TimedOut            bool   `json:"timed_out"`
+	Truncated           bool   `json:"truncated"`
+	ConnectEventCount   int    `json:"connect_event_count"`
+	Redacted            bool   `json:"redacted"`
+	ParsedEngineVersion string `json:"parsed_engine_version"`
 }
 
-// SemanticBundleComparison retains the two raw roots regardless of whether
-// semantic comparison passes. Any unclassified difference makes comparison
-// fail; callers can retain this report with the protected raw bundles.
+// BundleClaim is the stable, claim-bearing subset of a validated bundle. Raw streams,
+// timing, addresses, timestamps, and formatting remain in BundleIdentity only.
+type BundleClaim struct {
+	Observation    bench.Observation      `json:"observation"`
+	ExpectedState  bench.ObservationState `json:"expected_state"`
+	ParserStatus   ParserStatus           `json:"parser_status"`
+	InputIntegrity InputIntegrityStatus   `json:"input_integrity"`
+	FailureCode    FailureCode            `json:"failure_code"`
+	VersionProbe   *ProcessOutcome        `json:"version_probe,omitempty"`
+	Scan           *ProcessOutcome        `json:"scan,omitempty"`
+}
+
 type SemanticBundleComparison struct {
-	SchemaVersion           string                    `json:"schema_version"`
-	Engine                  bench.Engine              `json:"engine"`
-	Policy                  string                    `json:"policy"`
-	Left                    BundleIdentity            `json:"left"`
-	Right                   BundleIdentity            `json:"right"`
-	AllowedDifferences      []AllowedBundleDifference `json:"allowed_differences"`
-	UnclassifiedDifferences []string                  `json:"unclassified_differences,omitempty"`
-	SemanticEqual           bool                      `json:"semantic_equal"`
+	SchemaVersion           string                 `json:"schema_version"`
+	TargetID                string                 `json:"target_id"`
+	Engine                  bench.Engine           `json:"engine"`
+	ExpectedState           bench.ObservationState `json:"expected_state"`
+	Left                    BundleIdentity         `json:"left"`
+	Right                   BundleIdentity         `json:"right"`
+	LeftClaim               BundleClaim            `json:"left_claim"`
+	RightClaim              BundleClaim            `json:"right_claim"`
+	SemanticEqual           bool                   `json:"semantic_equal"`
+	UnclassifiedDifferences []string               `json:"unclassified_differences,omitempty"`
 }
 
-type semanticBundlePolicy struct {
-	engine bench.Engine
-	name   string
-}
-
-func policyForEngine(engine bench.Engine) (semanticBundlePolicy, error) {
-	switch engine {
-	case bench.EngineOwned:
-		return semanticBundlePolicy{engine: engine, name: "owned-exact-v1"}, nil
-	case bench.EngineGrype:
-		return semanticBundlePolicy{engine: engine, name: "grype-descriptor-timestamp-v1"}, nil
-	case bench.EngineTrivy:
-		return semanticBundlePolicy{engine: engine, name: "trivy-top-level-and-direct-fingerprint-v1"}, nil
-	case bench.EngineOSVScanner:
-		return semanticBundlePolicy{engine: engine, name: "osv-pointer-and-terminal-timing-v1"}, nil
-	default:
-		return semanticBundlePolicy{}, fmt.Errorf("unsupported semantic bundle engine %q", engine)
-	}
-}
-
-// CompareBundles validates each full bundle before comparing it. Its policy is
-// explicitly selected per engine, preserves both raw roots, and fails closed on
-// every difference outside that narrow policy.
-func CompareBundles(leftPath, rightPath string, engine bench.Engine) (SemanticBundleComparison, error) {
-	policy, err := policyForEngine(engine)
-	if err != nil {
-		return SemanticBundleComparison{}, err
-	}
+// CompareBundlesForCell validates and replays both bundles before projecting their
+// benchmark claims. Comparisons are always bound to a target and engine.
+func CompareBundlesForCell(leftPath, rightPath, targetID string, engine bench.Engine, expectedState bench.ObservationState) (SemanticBundleComparison, error) {
 	left, leftObservation, leftEvidence, err := inspectBundleIdentity(leftPath)
 	if err != nil {
 		return SemanticBundleComparison{}, fmt.Errorf("validate left bundle: %w", err)
@@ -97,94 +84,63 @@ func CompareBundles(leftPath, rightPath string, engine bench.Engine) (SemanticBu
 		return SemanticBundleComparison{}, fmt.Errorf("validate right bundle: %w", err)
 	}
 	report := SemanticBundleComparison{
-		SchemaVersion: semanticBundleComparisonSchema,
-		Engine:        engine,
-		Policy:        policy.name,
-		Left:          left,
-		Right:         right,
+		SchemaVersion: semanticBundleComparisonSchema, TargetID: targetID, Engine: engine,
+		ExpectedState: expectedState, Left: left, Right: right,
+		LeftClaim:  bundleClaim(leftObservation, leftEvidence, expectedState),
+		RightClaim: bundleClaim(rightObservation, rightEvidence, expectedState),
 	}
-	if leftObservation.Engine != engine || rightObservation.Engine != engine {
-		report.UnclassifiedDifferences = append(report.UnclassifiedDifferences, "bundle observation engine does not match selected policy")
-		return report, fmt.Errorf("semantic bundle comparison: %s", report.UnclassifiedDifferences[0])
+	for _, observation := range []bench.Observation{leftObservation, rightObservation} {
+		if observation.TargetID != targetID || observation.Engine != engine {
+			report.UnclassifiedDifferences = append(report.UnclassifiedDifferences, "bundle does not match the selected target and engine")
+		}
+		if observation.State != expectedState {
+			report.UnclassifiedDifferences = append(report.UnclassifiedDifferences, "bundle state does not match the planned state")
+		}
 	}
-	if difference := compareNormalizedObservation(leftObservation, rightObservation); difference != "" {
-		report.UnclassifiedDifferences = append(report.UnclassifiedDifferences, difference)
-	}
-	allowed, differences := compareEvidenceForPolicy(policy, leftEvidence, rightEvidence)
-	report.AllowedDifferences = append(report.AllowedDifferences, allowed...)
-	report.UnclassifiedDifferences = append(report.UnclassifiedDifferences, differences...)
-	leftFiles, err := bundleFileMap(leftPath)
+	leftClaim, err := bench.CanonicalJSON(report.LeftClaim)
 	if err != nil {
-		return report, err
+		return SemanticBundleComparison{}, fmt.Errorf("encode left claim: %w", err)
 	}
-	rightFiles, err := bundleFileMap(rightPath)
+	rightClaim, err := bench.CanonicalJSON(report.RightClaim)
 	if err != nil {
-		return report, err
+		return SemanticBundleComparison{}, fmt.Errorf("encode right claim: %w", err)
 	}
-	for _, name := range sortedBundleFileNames(leftFiles) {
-		if name == "observation.json" || name == "evidence.json" {
-			continue
-		}
-		if !bytes.Equal(leftFiles[name], rightFiles[name]) {
-			report.UnclassifiedDifferences = append(report.UnclassifiedDifferences, "unexpected raw bundle artifact difference: "+name)
-		}
+	if !bytes.Equal(leftClaim, rightClaim) {
+		report.UnclassifiedDifferences = append(report.UnclassifiedDifferences, "claim-bearing bundle projection differs")
 	}
-	sort.Slice(report.AllowedDifferences, func(left, right int) bool {
-		if report.AllowedDifferences[left].Artifact != report.AllowedDifferences[right].Artifact {
-			return report.AllowedDifferences[left].Artifact < report.AllowedDifferences[right].Artifact
-		}
-		return report.AllowedDifferences[left].Path < report.AllowedDifferences[right].Path
-	})
 	sort.Strings(report.UnclassifiedDifferences)
+	report.UnclassifiedDifferences = deduplicateStrings(report.UnclassifiedDifferences)
 	report.SemanticEqual = len(report.UnclassifiedDifferences) == 0
 	if !report.SemanticEqual {
-		return report, fmt.Errorf("semantic bundle comparison rejected unclassified differences: %s", strings.Join(report.UnclassifiedDifferences, "; "))
+		return report, fmt.Errorf("semantic bundle comparison rejected: %s", report.UnclassifiedDifferences[0])
 	}
 	return report, nil
 }
 
-// BundleIdentityFromPath exposes full raw evidence identities for the cycle
-// ledger and publication manifest after validating the existing capture bundle.
 func BundleIdentityFromPath(path string) (BundleIdentity, error) {
 	identity, _, _, err := inspectBundleIdentity(path)
 	return identity, err
 }
 
-// CycleEvidenceIdentityFromBundle extends a derived existing-bundle identity
-// with the digest of its target-native comparison record for ledger and
-// publication use. It does not modify the retained capture bundle.
-func CycleEvidenceIdentityFromBundle(identity BundleIdentity, native bench.NativeTargetEvidence) (bench.BundleEvidenceIdentity, error) {
-	if identity.TargetID == "" || identity.Engine == "" || identity.ManifestDigest == "" || identity.RootDigest == "" || identity.NormalizedObservationDigest == "" || identity.RawOutputDigest == "" || identity.ProcessEvidenceDigest == "" || identity.EnvironmentDigest == "" || identity.SBOMDigest == "" {
-		return bench.BundleEvidenceIdentity{}, fmt.Errorf("derived bundle identity is incomplete")
+func bundleClaim(observation bench.Observation, evidence Evidence, expectedState bench.ObservationState) BundleClaim {
+	observation.RawOutputDigest = ""
+	return BundleClaim{
+		Observation: observation, ExpectedState: expectedState, ParserStatus: evidence.ParserStatus,
+		InputIntegrity: evidence.InputIntegrity, FailureCode: evidence.FailureCode,
+		VersionProbe: processOutcome(evidence.VersionProbe), Scan: processOutcome(evidence.Scan),
 	}
-	if err := native.Validate(); err != nil {
-		return bench.BundleEvidenceIdentity{}, err
+}
+
+func processOutcome(evidence *ProcessEvidence) *ProcessOutcome {
+	if evidence == nil {
+		return nil
 	}
-	if native.TargetID != identity.TargetID {
-		return bench.BundleEvidenceIdentity{}, fmt.Errorf("native target evidence does not match bundle identity")
+	return &ProcessOutcome{
+		ExitKnown: evidence.ExitKnown, ExitCode: evidence.ExitCode, RunnerError: evidence.RunnerError,
+		Cancelled: evidence.Cancelled, TimedOut: evidence.TimedOut, Truncated: evidence.Truncated,
+		ConnectEventCount: evidence.ConnectEventCount, Redacted: evidence.Redacted,
+		ParsedEngineVersion: evidence.ParsedEngineVersion,
 	}
-	nativeDigest, err := bench.DigestNativeTargetEvidence(native)
-	if err != nil {
-		return bench.BundleEvidenceIdentity{}, err
-	}
-	result := bench.BundleEvidenceIdentity{
-		TargetID:                    identity.TargetID,
-		Engine:                      identity.Engine,
-		BundleManifestDigest:        identity.ManifestDigest,
-		BundleRootDigest:            identity.RootDigest,
-		RawStdoutDigest:             identity.RawStdoutDigest,
-		RawStderrDigest:             identity.RawStderrDigest,
-		RawOutputDigest:             identity.RawOutputDigest,
-		NormalizedObservationDigest: identity.NormalizedObservationDigest,
-		SBOMDigest:                  identity.SBOMDigest,
-		NativeComparisonDigest:      nativeDigest,
-		ProcessEvidenceDigest:       identity.ProcessEvidenceDigest,
-		EnvironmentDigest:           identity.EnvironmentDigest,
-	}
-	if err := result.Validate(); err != nil {
-		return bench.BundleEvidenceIdentity{}, err
-	}
-	return result, nil
 }
 
 func inspectBundleIdentity(path string) (BundleIdentity, bench.Observation, Evidence, error) {
@@ -225,16 +181,11 @@ func inspectBundleIdentity(path string) (BundleIdentity, bench.Observation, Evid
 		return BundleIdentity{}, bench.Observation{}, Evidence{}, err
 	}
 	identity := BundleIdentity{
-		TargetID:                    observation.TargetID,
-		Engine:                      observation.Engine,
-		ManifestDigest:              bench.SHA256Digest(manifestJSON),
-		RootDigest:                  bench.SHA256Digest(rootMaterial),
-		Files:                       manifest,
-		NormalizedObservationDigest: bench.SHA256Digest(files["observation.json"]),
-		RawOutputDigest:             observation.RawOutputDigest,
-		ProcessEvidenceDigest:       bench.SHA256Digest(processEvidence),
-		EnvironmentDigest:           observation.EnvironmentDigest,
-		SBOMDigest:                  observation.SBOMDigest,
+		TargetID: observation.TargetID, Engine: observation.Engine,
+		ManifestDigest: bench.SHA256Digest(manifestJSON), RootDigest: bench.SHA256Digest(rootMaterial),
+		Files: manifest, NormalizedObservationDigest: bench.SHA256Digest(files["observation.json"]),
+		RawOutputDigest: observation.RawOutputDigest, ProcessEvidenceDigest: bench.SHA256Digest(processEvidence),
+		EnvironmentDigest: observation.EnvironmentDigest, SBOMDigest: observation.SBOMDigest,
 	}
 	if evidence.Scan != nil {
 		identity.RawStdoutDigest = bench.SHA256Digest(evidence.Scan.Stdout)
@@ -253,476 +204,24 @@ func bundleFileMap(path string) (map[string][]byte, error) {
 		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("bundle contains a non-regular artifact")
 		}
-		data, err := readBundleArtifact(path, entry.Name())
-		if err != nil {
-			return nil, err
+		data, readErr := os.ReadFile(filepath.Join(path, entry.Name()))
+		if readErr != nil {
+			return nil, fmt.Errorf("read bundle artifact: %w", readErr)
 		}
 		files[entry.Name()] = data
 	}
 	return files, nil
 }
 
-func sortedBundleFileNames(files map[string][]byte) []string {
-	names := make([]string, 0, len(files))
-	for name := range files {
-		names = append(names, name)
+func deduplicateStrings(values []string) []string {
+	if len(values) < 2 {
+		return values
 	}
-	sort.Strings(names)
-	return names
-}
-
-func compareNormalizedObservation(left, right bench.Observation) string {
-	left.RawOutputDigest = "<raw-output-varies>"
-	right.RawOutputDigest = "<raw-output-varies>"
-	if reflect.DeepEqual(left, right) {
-		return ""
-	}
-	return "observation differs outside raw_output_digest"
-}
-
-func compareEvidenceForPolicy(policy semanticBundlePolicy, left, right Evidence) ([]AllowedBundleDifference, []string) {
-	leftStable := cloneEvidence(left)
-	rightStable := cloneEvidence(right)
-	var leftStdout, leftStderr, rightStdout, rightStderr []byte
-	if leftStable.Scan != nil {
-		leftStdout, leftStderr = append([]byte(nil), leftStable.Scan.Stdout...), append([]byte(nil), leftStable.Scan.Stderr...)
-		leftStable.Scan.Stdout = nil
-		leftStable.Scan.Stderr = nil
-	}
-	if rightStable.Scan != nil {
-		rightStdout, rightStderr = append([]byte(nil), rightStable.Scan.Stdout...), append([]byte(nil), rightStable.Scan.Stderr...)
-		rightStable.Scan.Stdout = nil
-		rightStable.Scan.Stderr = nil
-	}
-	if !reflect.DeepEqual(leftStable, rightStable) {
-		return nil, []string{"evidence differs outside scan raw output"}
-	}
-	if left.Scan == nil || right.Scan == nil {
-		if bytes.Equal(leftStdout, rightStdout) && bytes.Equal(leftStderr, rightStderr) {
-			return nil, nil
-		}
-		return nil, []string{"scan raw output differs without a process record"}
-	}
-	switch policy.engine {
-	case bench.EngineOwned:
-		return compareExactRaw(leftStdout, rightStdout, leftStderr, rightStderr)
-	case bench.EngineGrype:
-		allowed, differences := compareGrypeRaw(leftStdout, rightStdout)
-		if !bytes.Equal(leftStderr, rightStderr) {
-			differences = append(differences, "grype scan stderr differs")
-		}
-		return allowed, differences
-	case bench.EngineTrivy:
-		allowed, differences := compareTrivyRaw(leftStdout, rightStdout)
-		if !bytes.Equal(leftStderr, rightStderr) {
-			differences = append(differences, "trivy scan stderr differs")
-		}
-		return allowed, differences
-	case bench.EngineOSVScanner:
-		allowed, differences := compareOSVRaw(leftStderr, rightStderr)
-		if !bytes.Equal(leftStdout, rightStdout) {
-			differences = append(differences, "OSV scan stdout differs")
-		}
-		return allowed, differences
-	default:
-		return nil, []string{"unknown semantic bundle policy"}
-	}
-}
-
-func compareExactRaw(leftStdout, rightStdout, leftStderr, rightStderr []byte) ([]AllowedBundleDifference, []string) {
-	var differences []string
-	if !bytes.Equal(leftStdout, rightStdout) {
-		differences = append(differences, "scan stdout differs")
-	}
-	if !bytes.Equal(leftStderr, rightStderr) {
-		differences = append(differences, "scan stderr differs")
-	}
-	return nil, differences
-}
-
-func compareGrypeRaw(left, right []byte) ([]AllowedBundleDifference, []string) {
-	if bytes.Equal(left, right) {
-		return nil, nil
-	}
-	leftValue, err := strictJSONValue(left)
-	if err != nil {
-		return nil, []string{"grype left stdout is not strict JSON"}
-	}
-	rightValue, err := strictJSONValue(right)
-	if err != nil {
-		return nil, []string{"grype right stdout is not strict JSON"}
-	}
-	leftTimestamp, err := replaceOnlyGrypeTimestamp(leftValue)
-	if err != nil {
-		return nil, []string{"grype left stdout does not have a valid descriptor timestamp"}
-	}
-	rightTimestamp, err := replaceOnlyGrypeTimestamp(rightValue)
-	if err != nil {
-		return nil, []string{"grype right stdout does not have a valid descriptor timestamp"}
-	}
-	if !semanticJSONEqual(leftValue, rightValue) {
-		return nil, []string{"grype stdout differs outside descriptor timestamp"}
-	}
-	if bytes.Equal(leftTimestamp, rightTimestamp) {
-		return nil, []string{"grype raw stdout differs without a descriptor timestamp difference"}
-	}
-	return []AllowedBundleDifference{newAllowedDifference("evidence.json", "$.scan.stdout.$.descriptor.timestamp", leftTimestamp, rightTimestamp)}, nil
-}
-
-func replaceOnlyGrypeTimestamp(value any) ([]byte, error) {
-	root, ok := value.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("root is not an object")
-	}
-	descriptor, ok := root["descriptor"].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("descriptor is missing")
-	}
-	timestamp, ok := descriptor["timestamp"].(string)
-	if !ok || timestamp == "" {
-		return nil, fmt.Errorf("timestamp is missing")
-	}
-	descriptor["timestamp"] = "<volatile-descriptor-timestamp>"
-	return []byte(timestamp), nil
-}
-
-func compareTrivyRaw(left, right []byte) ([]AllowedBundleDifference, []string) {
-	if bytes.Equal(left, right) {
-		return nil, nil
-	}
-	leftValue, err := strictJSONValue(left)
-	if err != nil {
-		return nil, []string{"trivy left stdout is not strict JSON"}
-	}
-	rightValue, err := strictJSONValue(right)
-	if err != nil {
-		return nil, []string{"trivy right stdout is not strict JSON"}
-	}
-	leftChanges, err := replaceOnlyTrivyVolatileValues(leftValue)
-	if err != nil {
-		return nil, []string{"trivy left stdout violates the narrow policy"}
-	}
-	rightChanges, err := replaceOnlyTrivyVolatileValues(rightValue)
-	if err != nil {
-		return nil, []string{"trivy right stdout violates the narrow policy"}
-	}
-	if !semanticJSONEqual(leftValue, rightValue) {
-		return nil, []string{"trivy stdout differs outside top-level values and direct fingerprints"}
-	}
-	return compareNamedAllowedChanges("evidence.json", "$.scan.stdout", leftChanges, rightChanges)
-}
-
-type rawJSONChange struct {
-	path  string
-	value []byte
-}
-
-func replaceOnlyTrivyVolatileValues(value any) ([]rawJSONChange, error) {
-	root, ok := value.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("root is not an object")
-	}
-	changes := make([]rawJSONChange, 0)
-	for _, key := range []string{"CreatedAt", "ReportID"} {
-		raw, ok := root[key].(string)
-		if !ok || raw == "" {
-			return nil, fmt.Errorf("top-level %s is missing", key)
-		}
-		changes = append(changes, rawJSONChange{path: "$." + key, value: []byte(raw)})
-		root[key] = "<volatile-" + key + ">"
-	}
-	results, ok := root["Results"].([]any)
-	if !ok {
-		return nil, fmt.Errorf("top-level Results is missing")
-	}
-	for resultIndex, resultValue := range results {
-		result, ok := resultValue.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("result is not an object")
-		}
-		vulnerabilities, ok := result["Vulnerabilities"].([]any)
-		if !ok {
-			return nil, fmt.Errorf("result Vulnerabilities is missing")
-		}
-		for vulnerabilityIndex, vulnerabilityValue := range vulnerabilities {
-			vulnerability, ok := vulnerabilityValue.(map[string]any)
-			if !ok {
-				return nil, fmt.Errorf("vulnerability is not an object")
-			}
-			fingerprint, ok := vulnerability["Fingerprint"].(string)
-			if !ok || fingerprint == "" {
-				return nil, fmt.Errorf("direct fingerprint is missing or malformed")
-			}
-			path := fmt.Sprintf("$.Results[%d].Vulnerabilities[%d].Fingerprint", resultIndex, vulnerabilityIndex)
-			changes = append(changes, rawJSONChange{path: path, value: []byte(fingerprint)})
-			vulnerability["Fingerprint"] = "<volatile-direct-fingerprint>"
+	out := values[:1]
+	for _, value := range values[1:] {
+		if value != out[len(out)-1] {
+			out = append(out, value)
 		}
 	}
-	return changes, nil
-}
-
-const osvPointerDiagnosticPrefix = "Neither CPE nor PURL found for package: "
-
-var (
-	osvTimingLine = regexp.MustCompile(`^End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, ([1-9][0-9]*(?:\.[0-9]+)?)ms elapsed, ([1-9][0-9]*(?:\.[0-9]+)?)ms wall time$`)
-	osvGoField    = regexp.MustCompile(`[A-Z][A-Za-z0-9_]*:[^ }]*`)
-	osvPointer    = regexp.MustCompile(`^0x[0-9a-fA-F]+$`)
-)
-
-func compareOSVRaw(left, right []byte) ([]AllowedBundleDifference, []string) {
-	if bytes.Equal(left, right) {
-		return nil, nil
-	}
-	leftLines, leftChanges, err := normalizeOSVStderr(left)
-	if err != nil {
-		return nil, []string{"OSV left stderr violates the narrow policy"}
-	}
-	rightLines, rightChanges, err := normalizeOSVStderr(right)
-	if err != nil {
-		return nil, []string{"OSV right stderr violates the narrow policy"}
-	}
-	if !reflect.DeepEqual(leftLines, rightLines) {
-		return nil, []string{"OSV stderr differs outside pointer metadata and terminal timing"}
-	}
-	return compareNamedAllowedChanges("evidence.json", "$.scan.stderr", leftChanges, rightChanges)
-}
-
-func normalizeOSVStderr(raw []byte) ([]string, []rawJSONChange, error) {
-	lines := strings.Split(string(raw), "\n")
-	changes := make([]rawJSONChange, 0)
-	timingSeen := false
-	for index, line := range lines {
-		if osvTimingLine.MatchString(line) {
-			if timingSeen {
-				return nil, nil, fmt.Errorf("OSV stderr repeats terminal timing")
-			}
-			timingSeen = true
-			changes = append(changes, rawJSONChange{path: fmt.Sprintf("lines[%d].timing", index), value: []byte(line)})
-			lines[index] = "<terminal-timing>"
-			continue
-		}
-		if strings.HasPrefix(line, osvPointerDiagnosticPrefix) {
-			normalized, pointerChanges, err := normalizeOSVPointerDiagnostic(strings.TrimPrefix(line, osvPointerDiagnosticPrefix), index)
-			if err != nil {
-				return nil, nil, err
-			}
-			changes = append(changes, pointerChanges...)
-			lines[index] = osvPointerDiagnosticPrefix + normalized
-		}
-	}
-	return lines, changes, nil
-}
-
-func normalizeOSVPointerDiagnostic(payload string, lineIndex int) (string, []rawJSONChange, error) {
-	if len(payload) < 2 || payload[0] != '{' || payload[len(payload)-1] != '}' {
-		return "", nil, fmt.Errorf("OSV pointer diagnostic is malformed")
-	}
-	afterOpen := strings.TrimLeft(payload[1:], " \t")
-	if strings.HasPrefix(afterOpen, `"`) || afterOpen == "}" {
-		return normalizeOSVJSONPointerDiagnostic(payload, lineIndex)
-	}
-	return normalizeOSVGoPointerDiagnostic(payload, lineIndex)
-}
-
-func normalizeOSVJSONPointerDiagnostic(payload string, lineIndex int) (string, []rawJSONChange, error) {
-	value, err := strictJSONValue([]byte(payload))
-	if err != nil {
-		return "", nil, err
-	}
-	object, ok := value.(map[string]any)
-	if !ok {
-		return "", nil, fmt.Errorf("OSV pointer diagnostic is not an object")
-	}
-	changes := make([]rawJSONChange, 0, 4)
-	for _, key := range []string{"ExternalReferences", "Hashes", "Properties", "SWID"} {
-		fieldValue, exists := object[key]
-		if !exists {
-			continue
-		}
-		if fieldValue == nil {
-			return "", nil, fmt.Errorf("OSV pointer diagnostic %s is nil", key)
-		}
-		encoded, err := json.Marshal(fieldValue)
-		if err != nil {
-			return "", nil, err
-		}
-		changes = append(changes, rawJSONChange{
-			path:  fmt.Sprintf("lines[%d].%s", lineIndex, key),
-			value: encoded,
-		})
-		object[key] = "<volatile-pointer-field>"
-	}
-	encoded, err := json.Marshal(object)
-	if err != nil {
-		return "", nil, err
-	}
-	return string(encoded), changes, nil
-}
-
-func normalizeOSVGoPointerDiagnostic(payload string, lineIndex int) (string, []rawJSONChange, error) {
-	matches := osvGoField.FindAllStringIndex(payload, -1)
-	if len(matches) == 0 {
-		return "", nil, fmt.Errorf("OSV Go pointer diagnostic has no fields")
-	}
-
-	seen := make(map[string]struct{}, 4)
-	changes := make([]rawJSONChange, 0, 4)
-	var normalized strings.Builder
-	normalized.Grow(len(payload))
-	cursor := 0
-	for _, match := range matches {
-		start, end := match[0], match[1]
-		if start > 0 && payload[start-1] != '{' && payload[start-1] != ' ' {
-			continue
-		}
-		token := payload[start:end]
-		separator := strings.IndexByte(token, ':')
-		if separator <= 0 {
-			return "", nil, fmt.Errorf("OSV Go pointer diagnostic field is malformed")
-		}
-		field := token[:separator]
-		fieldValue := token[separator+1:]
-		if isOSVVolatilePointerField(field) {
-			if _, exists := seen[field]; exists {
-				return "", nil, fmt.Errorf("OSV Go pointer diagnostic repeats %s", field)
-			}
-			seen[field] = struct{}{}
-			if fieldValue == "<nil>" {
-				continue
-			}
-			if !osvPointer.MatchString(fieldValue) {
-				return "", nil, fmt.Errorf("OSV Go pointer diagnostic %s has malformed pointer", field)
-			}
-			changes = append(changes, rawJSONChange{
-				path:  fmt.Sprintf("lines[%d].%s", lineIndex, field),
-				value: []byte(fieldValue),
-			})
-			valueStart := start + separator + 1
-			normalized.WriteString(payload[cursor:valueStart])
-			normalized.WriteString("<volatile-pointer-field>")
-			cursor = end
-			continue
-		}
-		if strings.HasPrefix(fieldValue, "0x") {
-			return "", nil, fmt.Errorf("OSV Go pointer diagnostic has unsupported pointer field %s", field)
-		}
-	}
-	normalized.WriteString(payload[cursor:])
-	return normalized.String(), changes, nil
-}
-
-func isOSVVolatilePointerField(field string) bool {
-	switch field {
-	case "ExternalReferences", "Hashes", "Properties", "SWID":
-		return true
-	default:
-		return false
-	}
-}
-
-func compareNamedAllowedChanges(artifact, prefix string, left, right []rawJSONChange) ([]AllowedBundleDifference, []string) {
-	leftByPath := make(map[string][]byte, len(left))
-	rightByPath := make(map[string][]byte, len(right))
-	for _, change := range left {
-		leftByPath[change.path] = change.value
-	}
-	for _, change := range right {
-		rightByPath[change.path] = change.value
-	}
-	if len(leftByPath) != len(rightByPath) {
-		return nil, []string{"allowed volatile field set changed"}
-	}
-	var allowed []AllowedBundleDifference
-	for path, leftValue := range leftByPath {
-		rightValue, exists := rightByPath[path]
-		if !exists {
-			return nil, []string{"allowed volatile field set changed"}
-		}
-		if !bytes.Equal(leftValue, rightValue) {
-			allowed = append(allowed, newAllowedDifference(artifact, prefix+"."+path, leftValue, rightValue))
-		}
-	}
-	if len(allowed) == 0 {
-		return nil, []string{"raw output differs without an allowed volatile value change"}
-	}
-	return allowed, nil
-}
-
-func newAllowedDifference(artifact, path string, left, right []byte) AllowedBundleDifference {
-	return AllowedBundleDifference{Artifact: artifact, Path: path, LeftDigest: bench.SHA256Digest(left), RightDigest: bench.SHA256Digest(right)}
-}
-
-func semanticJSONEqual(left, right any) bool {
-	leftJSON, leftErr := json.Marshal(left)
-	rightJSON, rightErr := json.Marshal(right)
-	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
-}
-
-func strictJSONValue(raw []byte) (any, error) {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	value, err := consumeStrictJSONValue(decoder)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := decoder.Token(); err != io.EOF {
-		if err == nil {
-			return nil, fmt.Errorf("trailing JSON value")
-		}
-		return nil, err
-	}
-	return value, nil
-}
-
-func consumeStrictJSONValue(decoder *json.Decoder) (any, error) {
-	token, err := decoder.Token()
-	if err != nil {
-		return nil, err
-	}
-	switch token := token.(type) {
-	case json.Delim:
-		switch token {
-		case '{':
-			object := make(map[string]any)
-			for decoder.More() {
-				keyToken, err := decoder.Token()
-				if err != nil {
-					return nil, err
-				}
-				key, ok := keyToken.(string)
-				if !ok {
-					return nil, fmt.Errorf("JSON object key is not a string")
-				}
-				if _, exists := object[key]; exists {
-					return nil, fmt.Errorf("duplicate JSON key %q", key)
-				}
-				value, err := consumeStrictJSONValue(decoder)
-				if err != nil {
-					return nil, err
-				}
-				object[key] = value
-			}
-			if end, err := decoder.Token(); err != nil || end != json.Delim('}') {
-				return nil, fmt.Errorf("JSON object is not closed")
-			}
-			return object, nil
-		case '[':
-			array := make([]any, 0)
-			for decoder.More() {
-				value, err := consumeStrictJSONValue(decoder)
-				if err != nil {
-					return nil, err
-				}
-				array = append(array, value)
-			}
-			if end, err := decoder.Token(); err != nil || end != json.Delim(']') {
-				return nil, fmt.Errorf("JSON array is not closed")
-			}
-			return array, nil
-		default:
-			return nil, fmt.Errorf("unexpected JSON delimiter %q", token)
-		}
-	default:
-		return token, nil
-	}
+	return out
 }

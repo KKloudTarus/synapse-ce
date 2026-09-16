@@ -1,0 +1,112 @@
+package scabench
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	bench "github.com/KKloudTarus/synapse-ce/internal/usecase/scabench"
+)
+
+func TestValidateFixedTargetMatrix(t *testing.T) {
+	catalog := bench.Catalog{Targets: make([]bench.Target, len(fixedTargetIDs))}
+	for index, targetID := range fixedTargetIDs {
+		catalog.Targets[index] = bench.Target{ID: targetID}
+	}
+	if err := validateFixedTargetMatrix(catalog); err != nil {
+		t.Fatalf("validate fixed matrix: %v", err)
+	}
+	catalog.Targets = catalog.Targets[:1]
+	if err := validateFixedTargetMatrix(catalog); err == nil {
+		t.Fatal("catalog missing a fixed benchmark target was accepted")
+	}
+}
+
+func TestMaterializeManifestPreservesPinnedCompetitorPathsAndRebindsOwnedBinary(t *testing.T) {
+	for _, engine := range []bench.Engine{bench.EngineGrype, bench.EngineOwned} {
+		t.Run(string(engine), func(t *testing.T) {
+			catalog, source := testFixture(t, engine)
+			workRoot := t.TempDir()
+			if engine == bench.EngineOwned {
+				body, err := os.ReadFile(source.Binary.Path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Join(workRoot, "tools"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(workRoot, "tools", "synapse-sca-bench"), body, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			catalogDigest, err := bench.DigestCatalog(catalog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := runState{
+				input:          RunInput{TrustedInputRoot: t.TempDir()},
+				catalog:        catalog,
+				workRoot:       workRoot,
+				expectedStates: map[string]bench.ObservationState{runCellKey(source.TargetID, engine): bench.ObservationComplete},
+			}
+			template := captureManifestTemplate{
+				SchemaVersion: CaptureManifestSchemaVersion, TargetID: source.TargetID, Engine: engine, EngineVersion: source.EngineVersion,
+				Binary: source.Binary, Database: source.Database, Environment: source.Environment, EnvironmentAttestation: source.EnvironmentAttestation,
+				EnvironmentPinReference: source.EnvironmentPinReference, ProfilePinReference: source.ProfilePinReference, Limits: source.Limits,
+			}
+			materialized, err := state.materializeManifest(catalogDigest, sourceTarget(t, catalog), template)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if materialized.Database.Path != source.Database.Path || materialized.EnvironmentAttestation.Path != source.EnvironmentAttestation.Path {
+				t.Fatal("materialization rewrote template-pinned database or environment paths")
+			}
+			if engine == bench.EngineOwned {
+				if materialized.Binary.Path != filepath.Join(workRoot, "tools", "synapse-sca-bench") {
+					t.Fatal("owned binary was not rebound into the work root")
+				}
+				return
+			}
+			if materialized.Binary.Path != source.Binary.Path {
+				t.Fatal("competitor binary path was not preserved from the template")
+			}
+		})
+	}
+}
+
+func TestBoundInputDigestsRefreshRuntimeBindingsAndExternalEvidence(t *testing.T) {
+	catalog, _ := testFixture(t, bench.EngineGrype)
+	state := runState{catalog: catalog, ratchet: bench.Ratchet{}, inputDigests: InputDigests{Catalog: "stale", Ratchet: "stale"}}
+	state.bindReviewEvidence([]byte("review bytes"), []byte("disposition bytes"))
+	if state.inputDigests.Review != sha256Digest(state.review) || state.inputDigests.Disposition != sha256Digest(state.disposition) {
+		t.Fatal("review evidence digests do not bind the exact validated bytes")
+	}
+	if err := state.refreshBoundInputDigests(); err != nil {
+		t.Fatal(err)
+	}
+	firstCatalog, firstRatchet := state.inputDigests.Catalog, state.inputDigests.Ratchet
+	state.catalog.Revision = "runtime-rebound"
+	state.ratchet.CatalogRevision = "runtime-rebound"
+	if err := state.refreshBoundInputDigests(); err != nil {
+		t.Fatal(err)
+	}
+	catalogDigest, err := bench.DigestCatalog(state.catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ratchetDigest, err := bench.DigestRatchet(state.ratchet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.inputDigests.Catalog != catalogDigest || state.inputDigests.Ratchet != ratchetDigest || state.inputDigests.Catalog == firstCatalog || state.inputDigests.Ratchet == firstRatchet {
+		t.Fatal("published input digests were not refreshed for runtime bindings")
+	}
+}
+
+func sourceTarget(t *testing.T, catalog bench.Catalog) bench.Target {
+	t.Helper()
+	if len(catalog.Targets) != 1 {
+		t.Fatal("fixture catalog must contain exactly one target")
+	}
+	return catalog.Targets[0]
+}
