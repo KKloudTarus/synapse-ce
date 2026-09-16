@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rating"
@@ -28,6 +29,7 @@ func TestDecorateProjectAnalysisPublishesCompletePayload(t *testing.T) {
 	fake := &recordingPRDecorator{}
 	svc := &Service{}
 	svc.SetPRDecorator(fake)
+	newCoverage := 72.5
 	analysis := projectanalysis.Analysis{
 		CI: &projectanalysis.CIContext{
 			RepoSlug: "acme/widget", HeadSHA: "abc123", PullRequest: "42", TargetBranch: "main",
@@ -37,6 +39,14 @@ func TestDecorateProjectAnalysisPublishesCompletePayload(t *testing.T) {
 			Condition: qualitygate.Condition{Metric: qualitygate.MetricNewCritical, Op: qualitygate.OpLE, Threshold: 0}, Actual: 1, Passed: false,
 		}}},
 		Annotations: []projectanalysis.Annotation{{FindingKey: "f-1", RuleKey: "rule-1"}},
+		FileChanges: []projectanalysis.FileChange{{
+			Status: projectanalysis.FileStatusAdded, NewPath: "src/a.go",
+			Hunks: []projectanalysis.DiffHunk{{NewStart: 1, NewLines: 1, Rows: []projectanalysis.DiffRow{{Kind: projectanalysis.DiffRowAdded, NewLine: 1}}}},
+		}},
+		NewCode: projectanalysis.NewCode{Counts: projectanalysis.Counts{Total: 3}},
+		Snapshot: measure.Snapshot{NewCodeCoverage: measure.DecimalMetric{
+			Availability: measure.AvailabilityAvailable, Value: &newCoverage,
+		}},
 	}
 
 	svc.decorateProjectAnalysis(context.Background(), analysis)
@@ -48,6 +58,12 @@ func TestDecorateProjectAnalysisPublishesCompletePayload(t *testing.T) {
 	}
 	if len(fake.got.Annotations) != 1 || fake.got.Annotations[0].FindingKey != "f-1" {
 		t.Fatalf("annotations = %+v", fake.got.Annotations)
+	}
+	if len(fake.got.FileChanges) != 1 || fake.got.FileChanges[0].NewPath != "src/a.go" {
+		t.Fatalf("file changes = %+v", fake.got.FileChanges)
+	}
+	if fake.got.NewIssues == nil || *fake.got.NewIssues != 3 || fake.got.NewCoverage == nil || *fake.got.NewCoverage != 72.5 {
+		t.Fatalf("new-code decoration = issues:%v coverage:%v", fake.got.NewIssues, fake.got.NewCoverage)
 	}
 	if !strings.Contains(fake.got.Summary, "pull request #42 → main") || !strings.Contains(fake.got.Summary, "Quality gate failed") {
 		t.Fatalf("summary = %q", fake.got.Summary)
