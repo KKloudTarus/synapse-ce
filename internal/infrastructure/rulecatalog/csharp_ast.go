@@ -34,6 +34,12 @@ func csharpASTRules() []rule.Rule {
 			"Throw a specific exception type (InvalidOperationException, ArgumentException, a custom type) so callers can catch the failure they expect instead of everything.",
 			"a generic Exception, SystemException, or ApplicationException being thrown",
 			rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityMedium},
+		{"csharp-ast-rethrow-loses-stacktrace", "Rethrow discards the stack trace", "CWE-248",
+			"try {\n    Work();\n} catch (Exception ex) {\n    _log.Error(ex);\n    throw;\n}",
+			"try {\n    Work();\n} catch (Exception ex) {\n    _log.Error(ex);\n    throw ex;\n}",
+			"Use `throw;` to rethrow the current exception with its original stack trace intact, instead of `throw ex;`.",
+			"a caught exception rethrown with throw ex, which resets its stack trace",
+			rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityMedium},
 	}
 	rules := make([]rule.Rule, 0, len(specs))
 	for _, s := range specs {

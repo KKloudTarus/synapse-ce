@@ -16,9 +16,10 @@ const maxCsharpFindingsPerFile = 40
 // producer: a regex cannot tell an empty catch from a commented one, a switch's default section
 // from the word "default" elsewhere, or a type at namespace scope from one nested in a namespace.
 var csharpRules = map[string]pythonRule{
-	"empty-catch":     {"reliability", "csharp-ast-empty-catch", "CWE-390", "medium", "Empty catch block", "An empty catch block silently discards a failure. Handle the expected exception or preserve diagnostic context."},
-	"missing-default": {"reliability", "csharp-ast-missing-switch-default", "CWE-478", "medium", "switch without a default", "A switch with no default section silently ignores unhandled values; add a default (even one that throws)."},
-	"throw-generic":   {"quality", "csharp-ast-throw-generic-exception", "CWE-397", "medium", "Generic exception thrown", "Throwing Exception, SystemException, or ApplicationException forces every caller to catch everything. Throw a specific exception type so callers can handle the failure they expect."},
+	"empty-catch":         {"reliability", "csharp-ast-empty-catch", "CWE-390", "medium", "Empty catch block", "An empty catch block silently discards a failure. Handle the expected exception or preserve diagnostic context."},
+	"missing-default":     {"reliability", "csharp-ast-missing-switch-default", "CWE-478", "medium", "switch without a default", "A switch with no default section silently ignores unhandled values; add a default (even one that throws)."},
+	"throw-generic":       {"quality", "csharp-ast-throw-generic-exception", "CWE-397", "medium", "Generic exception thrown", "Throwing Exception, SystemException, or ApplicationException forces every caller to catch everything. Throw a specific exception type so callers can handle the failure they expect."},
+	"rethrow-loses-trace": {"quality", "csharp-ast-rethrow-loses-stacktrace", "CWE-248", "medium", "Rethrow discards the stack trace", "Rethrowing the caught exception with `throw ex;` resets its stack trace to this line, hiding where the failure originated. Use `throw;` to preserve the original stack trace."},
 }
 
 // csharpGenericExceptionTypes are the exception base types too broad to throw directly (SonarQube S112).
@@ -57,6 +58,8 @@ func csharpFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 		case "throw_statement":
 			if oce := astChildByType(n, "object_creation_expression"); oce != nil && csharpThrowsGenericException(oce, src) {
 				out = append(out, csharpFinding("throw-generic", n, rel))
+			} else if id := astChildByType(n, "identifier"); id != nil && csharpRethrowsCaughtVar(n, id.Content(src), src) {
+				out = append(out, csharpFinding("rethrow-loses-trace", n, rel))
 			}
 		}
 		if len(out) >= maxCsharpFindingsPerFile {
@@ -130,4 +133,28 @@ func csharpThrowsGenericException(oce *sitter.Node, src []byte) bool {
 		name = name[i+1:]
 	}
 	return csharpGenericExceptionTypes[name]
+}
+
+// csharpRethrowsCaughtVar reports whether `throw <name>;` rethrows the variable of the nearest enclosing
+// catch clause, which resets the stack trace (SonarQube S3445 / CA2200). A bare `throw;` has no identifier
+// and is not matched; `throw` of anything other than the caught variable, or outside a catch, is not
+// flagged. The search stops at a method or lambda boundary so it never crosses into an unrelated scope.
+func csharpRethrowsCaughtVar(n *sitter.Node, name string, src []byte) bool {
+	if name == "" {
+		return false
+	}
+	for p := n.Parent(); p != nil; p = p.Parent() {
+		switch p.Type() {
+		case "catch_clause":
+			cd := astChildByType(p, "catch_declaration")
+			if cd == nil {
+				return false
+			}
+			idn := astChildByType(cd, "identifier")
+			return idn != nil && idn.Content(src) == name
+		case "method_declaration", "constructor_declaration", "local_function_statement", "lambda_expression", "anonymous_method_expression":
+			return false
+		}
+	}
+	return false
 }

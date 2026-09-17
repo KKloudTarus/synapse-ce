@@ -196,3 +196,35 @@ func TestQualityForCSharpThrowGeneric(t *testing.T) {
 		}
 	}
 }
+
+// TestQualityForCSharpRethrow pins csharp-ast-rethrow-loses-stacktrace: `throw ex;` where ex is the caught
+// exception resets the stack trace and is flagged, while a bare `throw;`, throwing a new wrapping exception,
+// and throwing an unrelated variable are not (SonarQube S3445 / CA2200).
+func TestQualityForCSharpRethrow(t *testing.T) {
+	root := t.TempDir()
+	source := `namespace App {
+    class Handler {
+        void Bad() { try { X(); } catch (System.Exception ex) { throw ex; } }
+        void Good() { try { X(); } catch (System.Exception ex) { throw; } }
+        void Wrap() { try { X(); } catch (System.Exception ex) { throw new System.InvalidOperationException("y", ex); } }
+        void X() {}
+    }
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "R.cs"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	var lines []int
+	for _, f := range got.Findings {
+		if f.Rule == "csharp-ast-rethrow-loses-stacktrace" {
+			lines = append(lines, f.Line)
+		}
+	}
+	if len(lines) != 1 || lines[0] != 3 {
+		t.Fatalf("rethrow-loses-stacktrace lines = %v, want [3] (only `throw ex;` on line 3)", lines)
+	}
+}

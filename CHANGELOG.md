@@ -9,7 +9,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
-- **C# generic-exception detection (EPIC #1120).** A new AST rule `csharp-ast-throw-generic-exception` flags `throw new Exception(...)`, `SystemException`, or `ApplicationException` (including namespace-qualified forms), matching SonarQube S112: throwing a generic exception forces every caller to catch everything. A specific exception type and a bare rethrow are not flagged. This begins closing the C# detector-depth gap toward parity with SonarQube's C# analyzer.
+- **C# exception-handling detectors (EPIC #1120).** Two new AST rules begin closing the C# detector-depth gap toward SonarQube's C# analyzer. `csharp-ast-throw-generic-exception` flags `throw new Exception(...)`, `SystemException`, or `ApplicationException` (including namespace-qualified forms), matching SonarQube S112: a generic exception forces every caller to catch everything. `csharp-ast-rethrow-loses-stacktrace` flags rethrowing a caught exception with `throw ex;`, which resets its stack trace (SonarQube S3445 / CA2200); a bare `throw;`, a specific exception, and a wrapping `throw new ...(ex)` are not flagged.
 
 - **C/C++ enters the code-quality head-to-head, measured against cppcheck (EPIC #1120).** SonarQube Community Edition does not analyze C/C++ (Developer Edition only), so the benchmark now runs cppcheck as the competitor baseline for those languages and folds its findings into the same flat export the scorecard reducer consumes (`scripts/cqbench/cppcheck_to_export.py`). A C dangling-stack-pointer fixture is added; the owned engine and cppcheck both flag it as a bug on the same line. The corpus now spans six languages (C, Go, Java, JavaScript, Python, Ruby).
 
