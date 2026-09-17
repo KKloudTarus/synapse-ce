@@ -10,7 +10,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 	measurement "github.com/KKloudTarus/synapse-ce/internal/usecase/reachbench"
 )
@@ -191,6 +193,19 @@ func TestEnumerateCellsRequiresEveryEnabledBenchmarkBinding(t *testing.T) {
 	if _, err := materializeInput(fixture.candidate, duplicateCells, duplicateCaptures); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("duplicate capture did not fail: %v", err)
 	}
+	outOfOrder := append([]CaptureResult(nil), captures...)
+	for left, right := 0, len(outOfOrder)-1; left < right; left, right = left+1, right-1 {
+		outOfOrder[left], outOfOrder[right] = outOfOrder[right], outOfOrder[left]
+	}
+	input, err := materializeInput(fixture.candidate, cells, outOfOrder)
+	if err != nil {
+		t.Fatalf("materialize keyed captures: %v", err)
+	}
+	for index, observation := range input.Observations {
+		if observation.CaseID != cells[index].CaseID || observation.BindingID != cells[index].BindingID {
+			t.Fatalf("observation %d = %s/%s, want plan cell %s/%s", index, observation.CaseID, observation.BindingID, cells[index].CaseID, cells[index].BindingID)
+		}
+	}
 }
 
 func TestRunRejectsTwoRunSemanticMismatch(t *testing.T) {
@@ -227,6 +242,65 @@ func TestCleanupFailureBlocksPublication(t *testing.T) {
 	}
 }
 
+func TestRunCancellationCleansPrivateStateAndPublishesNothing(t *testing.T) {
+	fixture := newFixture(t)
+	dependencies := fixture.dependencies(map[string]string{})
+	cleanupCalls := 0
+	dependencies.RuntimeCleanup = func(ctx context.Context) error {
+		cleanupCalls++
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("cleanup inherited capture cancellation: %w", err)
+		}
+		return nil
+	}
+	entered := make(chan struct{})
+	runner, err := NewRunner(dependencies, captureFunc(func(ctx context.Context, _ CaptureRequest) (CaptureResult, error) {
+		close(entered)
+		<-ctx.Done()
+		return CaptureResult{}, ctx.Err()
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := runner.Run(ctx, nil)
+		done <- err
+	}()
+	<-entered
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context cancellation", err)
+	}
+	if cleanupCalls != 1 {
+		t.Fatalf("runtime cleanup calls = %d, want 1", cleanupCalls)
+	}
+	privateRun := filepath.Join(fixture.tempRoot, filepath.FromSlash(privateRunDirectory), "local", "fixed")
+	if _, err := os.Lstat(privateRun); !os.IsNotExist(err) {
+		t.Fatalf("private run remains after cancellation: %v", err)
+	}
+	output := filepath.Join(fixture.tempRoot, filepath.FromSlash(publishedRunDirectory), "local", "fixed")
+	if _, err := os.Lstat(output); !os.IsNotExist(err) {
+		t.Fatalf("output exists after cancellation: %v", err)
+	}
+}
+
+func TestReachabilityEvidenceLimitsBoundTwoPassWorkload(t *testing.T) {
+	limits := reachabilityEvidenceLimits()
+	if limits.MaxFiles != maxCells*fixedRepetitions {
+		t.Fatalf("evidence file limit = %d, want %d", limits.MaxFiles, maxCells*fixedRepetitions)
+	}
+	unboundedWorkload := int64(maxCells*fixedRepetitions) * limits.MaxArtifactBytes
+	if limits.MaxTotalBytes >= unboundedWorkload || limits.MaxTotalBytes >= 20<<30 {
+		t.Fatalf("aggregate evidence limit = %d permits the prior unbounded two-pass retention", limits.MaxTotalBytes)
+	}
+	if limits.MaxTotalBytes < limits.MaxArtifactBytes {
+		t.Fatalf("aggregate evidence limit = %d cannot hold one artifact", limits.MaxTotalBytes)
+	}
+}
+
 func TestPublicationCollisionBlocksOverwrite(t *testing.T) {
 	fixture := newFixture(t)
 	output := filepath.Join(fixture.tempRoot, filepath.FromSlash(publishedRunDirectory), "local", "fixed")
@@ -242,13 +316,89 @@ func TestPublicationCollisionBlocksOverwrite(t *testing.T) {
 	}
 }
 
+func TestCleanupWorkspaceAfterBeginPublicationFailure(t *testing.T) {
+	fixture := newFixture(t)
+	facts := fixture.facts("local/fixed")
+	facts.output = filepath.Join(facts.outputRoot, "local", "fixed")
+	if err := os.MkdirAll(facts.rawRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := benchcycle.PrepareWorkspace(facts.rawRoot, facts.runKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(workspace.RawRunRoot(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := benchcycle.NewEvidenceStore(workspace.RawRunRoot(), reachabilityEvidenceLimits()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(facts.output, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, beginErr := benchcycle.BeginPublication(
+		facts.output,
+		reachabilityPublicationLimits(),
+		func(context.Context) error { return nil },
+		func(context.Context, string, []benchcycle.FileIdentity) error { return nil },
+	)
+	if beginErr == nil || !strings.Contains(beginErr.Error(), "already exists") {
+		t.Fatalf("begin publication error = %v, want destination collision", beginErr)
+	}
+
+	cleanupFailure := errors.New("early cleaner failed")
+	cleanupCalls := 0
+	dependencies := fixture.dependencies(map[string]string{})
+	dependencies.RuntimeCleanup = func(ctx context.Context) error {
+		cleanupCalls++
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("early cleanup received canceled context: %w", err)
+		}
+		deadline, hasDeadline := ctx.Deadline()
+		if !hasDeadline {
+			return errors.New("early cleanup context has no deadline")
+		}
+		if remaining := time.Until(deadline); remaining <= 0 || remaining > reachabilityCleanupTimeout {
+			return fmt.Errorf("early cleanup deadline remaining = %s, want live duration no greater than %s", remaining, reachabilityCleanupTimeout)
+		}
+		return cleanupFailure
+	}
+	runner, err := NewRunner(dependencies, captureFunc(validCapture(fixture.expected)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := fmt.Errorf("begin reachability publication: %w", beginErr)
+	err = runner.cleanupWorkspaceAfterFailure(workspace, failure)
+	if !errors.Is(err, beginErr) {
+		t.Fatalf("begin publication failure was discarded: %v", err)
+	}
+	if !errors.Is(err, cleanupFailure) {
+		t.Fatalf("early cleanup error was discarded: %v", err)
+	}
+	if cleanupCalls != 1 {
+		t.Fatalf("runtime cleanup calls = %d, want 1", cleanupCalls)
+	}
+	for _, path := range []string{workspace.RawRunRoot(), workspace.WorkRoot()} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("private workspace path %q remains after publication setup failure: %v", path, err)
+		}
+	}
+}
+
 func TestRunPublishesOnlySanitizedDigestBoundArtifactsAndReplays(t *testing.T) {
 	fixture := newFixture(t)
 	privateRaw := []byte("controller-private-raw-evidence")
 	runner, err := NewRunner(fixture.dependencies(map[string]string{}), captureFunc(func(ctx context.Context, request CaptureRequest) (CaptureResult, error) {
 		result, err := validCapture(fixture.expected)(ctx, request)
-		result.RawEvidence = privateRaw
-		return result, err
+		if err != nil {
+			return CaptureResult{}, err
+		}
+		receipt, err := request.StoreRawEvidence(ctx, bytes.NewReader(privateRaw))
+		if err != nil {
+			return CaptureResult{}, err
+		}
+		result.EvidenceReceipts = []benchcycle.EvidenceReceipt{receipt}
+		return result, nil
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -260,7 +410,11 @@ func TestRunPublishesOnlySanitizedDigestBoundArtifactsAndReplays(t *testing.T) {
 	if result.Authoritative || result.Manifest.Route != RouteLocalDiagnostic {
 		t.Fatalf("local run manifest = %+v", result.Manifest)
 	}
-	files, err := regularRelativeFiles(result.Output)
+	privateRun := filepath.Join(fixture.tempRoot, filepath.FromSlash(privateRunDirectory), "local", "fixed")
+	if _, err := os.Lstat(privateRun); !os.IsNotExist(err) {
+		t.Fatalf("raw evidence remains after publication: %v", err)
+	}
+	files, err := regularRelativeFiles(context.Background(), result.Output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,13 +437,13 @@ func TestRunPublishesOnlySanitizedDigestBoundArtifactsAndReplays(t *testing.T) {
 		}
 	}
 	facts := fixture.facts("local/fixed")
-	if err := replaySanitizedBundle(result.Output, result.Manifest, SemanticRepeatResult{SchemaVersion: RepeatSchemaVersion, Repetitions: fixedRepetitions, SemanticallyEqual: true, ReportIDs: result.Manifest.ReportIDs, Cells: repeatCells(t, result.Output)}, facts); err != nil {
+	if err := replaySanitizedBundle(context.Background(), result.Output, result.Manifest, SemanticRepeatResult{SchemaVersion: RepeatSchemaVersion, Repetitions: fixedRepetitions, SemanticallyEqual: true, ReportIDs: result.Manifest.ReportIDs, Cells: repeatCells(t, result.Output)}, facts); err != nil {
 		t.Fatalf("replay published bundle: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(result.Output, "repetition-1", "report.json"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := replaySanitizedBundle(result.Output, result.Manifest, SemanticRepeatResult{}, facts); err == nil {
+	if err := replaySanitizedBundle(context.Background(), result.Output, result.Manifest, SemanticRepeatResult{}, facts); err == nil {
 		t.Fatal("replay accepted a digest-tampered report")
 	}
 }
@@ -494,7 +648,7 @@ func TestVerifyNoPrivateLeakRejectsJSONEscapedWindowsPath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stage, "artifact.json"), []byte(`{"path":"C:\\\\private\\\\reachbench"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyNoPrivateLeak(stage, []PublishedArtifact{{Path: "artifact.json"}}, runtimeFacts{temporaryRoot: privateWindowsPath}); err == nil {
+	if err := verifyNoPrivateLeak(context.Background(), stage, []PublishedArtifact{{Path: "artifact.json"}}, runtimeFacts{temporaryRoot: privateWindowsPath}); err == nil {
 		t.Fatal("JSON-escaped Windows private path was accepted")
 	}
 }

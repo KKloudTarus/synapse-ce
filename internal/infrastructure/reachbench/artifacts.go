@@ -2,8 +2,10 @@ package reachbench
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,12 +18,18 @@ import (
 
 const artifactManifestPath = "artifact-manifest.json"
 
-func writeSanitizedBundle(stage string, manifest LifecycleManifest, repeat SemanticRepeatResult, inputs []measurement.MeasurementInput, reports []measurement.MeasurementReport) error {
+func writeSanitizedBundle(ctx context.Context, publication *benchcycle.Publication, manifest LifecycleManifest, repeat SemanticRepeatResult, inputs []measurement.MeasurementInput, reports []measurement.MeasurementReport) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
 	if len(inputs) != fixedRepetitions || len(reports) != fixedRepetitions {
 		return errors.New("sanitary bundle requires exactly two inputs and reports")
 	}
 	files := make([]PublishedArtifact, 0, maxArtifactFiles)
 	for index := range inputs {
+		if err := contextError(ctx); err != nil {
+			return err
+		}
 		prefix := fmt.Sprintf("repetition-%d", index+1)
 		for _, artifact := range []struct {
 			name  string
@@ -34,31 +42,20 @@ func writeSanitizedBundle(stage string, manifest LifecycleManifest, repeat Seman
 			{"exceptions.json", inputs[index].Exceptions},
 			{"input.json", inputs[index]},
 		} {
-			path := prefix + "/" + artifact.name
-			if err := writeCanonicalArtifact(stage, path, artifact.value); err != nil {
-				return err
-			}
-			entry, err := artifactEntry(stage, path)
+			entry, err := writeCanonicalArtifact(ctx, publication, prefix+"/"+artifact.name, artifact.value)
 			if err != nil {
 				return err
 			}
 			files = append(files, entry)
 		}
-		path := prefix + "/report.json"
-		if err := writeReportArtifact(stage, path, reports[index]); err != nil {
-			return err
-		}
-		entry, err := artifactEntry(stage, path)
+		entry, err := writeReportArtifact(ctx, publication, prefix+"/report.json", reports[index])
 		if err != nil {
 			return err
 		}
 		files = append(files, entry)
 	}
 	if manifest.BaselineAllowlist != nil {
-		if err := writeCanonicalArtifact(stage, baselineAllowlistResultPath(), *manifest.BaselineAllowlist); err != nil {
-			return err
-		}
-		entry, err := artifactEntry(stage, baselineAllowlistResultPath())
+		entry, err := writeCanonicalArtifact(ctx, publication, baselineAllowlistResultPath(), *manifest.BaselineAllowlist)
 		if err != nil {
 			return err
 		}
@@ -71,49 +68,56 @@ func writeSanitizedBundle(stage string, manifest LifecycleManifest, repeat Seman
 		{"lifecycle-manifest.json", manifest},
 		{"semantic-repeat.json", repeat},
 	} {
-		if err := writeCanonicalArtifact(stage, artifact.name, artifact.value); err != nil {
-			return err
-		}
-		entry, err := artifactEntry(stage, artifact.name)
+		entry, err := writeCanonicalArtifact(ctx, publication, artifact.name, artifact.value)
 		if err != nil {
 			return err
 		}
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(left, right int) bool { return files[left].Path < files[right].Path })
-	if len(files) > maxArtifactFiles {
+	if len(files) >= maxArtifactFiles {
 		return errors.New("sanitized artifact inventory exceeds lifecycle bound")
 	}
-	if err := writeCanonicalArtifact(stage, artifactManifestPath, ArtifactManifest{SchemaVersion: ArtifactSchemaVersion, Files: files}); err != nil {
-		return err
-	}
-	return benchcycle.SyncDirectory(stage)
+	_, err := writeCanonicalArtifact(ctx, publication, artifactManifestPath, ArtifactManifest{SchemaVersion: ArtifactSchemaVersion, Files: files})
+	return err
 }
 
-func writeCanonicalArtifact(stage, relative string, value any) error {
+func writeCanonicalArtifact(ctx context.Context, publication *benchcycle.Publication, relative string, value any) (PublishedArtifact, error) {
+	if err := contextError(ctx); err != nil {
+		return PublishedArtifact{}, err
+	}
 	encoded, err := benchmark.CanonicalJSON(value)
 	if err != nil {
-		return fmt.Errorf("encode %s: %w", relative, err)
+		return PublishedArtifact{}, fmt.Errorf("encode %s: %w", relative, err)
 	}
 	var body bytes.Buffer
 	if err := benchmark.WriteCanonicalJSON(&body, encoded); err != nil {
-		return fmt.Errorf("write %s: %w", relative, err)
+		return PublishedArtifact{}, fmt.Errorf("write %s: %w", relative, err)
 	}
-	if err := benchcycle.WriteNewFile(filepath.Join(stage, filepath.FromSlash(relative)), body.Bytes(), 0o600); err != nil {
-		return fmt.Errorf("write %s without overwrite: %w", relative, err)
+	identity, err := publication.WriteBytes(ctx, relative, body.Bytes())
+	if err != nil {
+		return PublishedArtifact{}, fmt.Errorf("write %s without overwrite: %w", relative, err)
 	}
-	return nil
+	return publishedArtifact(identity), nil
 }
 
-func writeReportArtifact(stage, relative string, report measurement.MeasurementReport) error {
+func writeReportArtifact(ctx context.Context, publication *benchcycle.Publication, relative string, report measurement.MeasurementReport) (PublishedArtifact, error) {
+	if err := contextError(ctx); err != nil {
+		return PublishedArtifact{}, err
+	}
 	var body bytes.Buffer
 	if err := measurement.EncodeMeasurementReport(&body, report); err != nil {
-		return fmt.Errorf("encode %s: %w", relative, err)
+		return PublishedArtifact{}, fmt.Errorf("encode %s: %w", relative, err)
 	}
-	if err := benchcycle.WriteNewFile(filepath.Join(stage, filepath.FromSlash(relative)), body.Bytes(), 0o600); err != nil {
-		return fmt.Errorf("write %s without overwrite: %w", relative, err)
+	identity, err := publication.WriteBytes(ctx, relative, body.Bytes())
+	if err != nil {
+		return PublishedArtifact{}, fmt.Errorf("write %s without overwrite: %w", relative, err)
 	}
-	return nil
+	return publishedArtifact(identity), nil
+}
+
+func publishedArtifact(identity benchcycle.FileIdentity) PublishedArtifact {
+	return PublishedArtifact{Path: identity.Path, Digest: "sha256:" + identity.Digest}
 }
 
 func encodeReport(report measurement.MeasurementReport) ([]byte, error) {
@@ -124,35 +128,30 @@ func encodeReport(report measurement.MeasurementReport) ([]byte, error) {
 	return body.Bytes(), nil
 }
 
-func artifactEntry(stage, relative string) (PublishedArtifact, error) {
-	raw, err := readRegularFile(filepath.Join(stage, filepath.FromSlash(relative)))
-	if err != nil {
-		return PublishedArtifact{}, fmt.Errorf("digest %s: %w", relative, err)
+func replaySanitizedBundle(ctx context.Context, stage string, expectedManifest LifecycleManifest, expectedRepeat SemanticRepeatResult, facts runtimeFacts) error {
+	if err := contextError(ctx); err != nil {
+		return err
 	}
-	return PublishedArtifact{Path: relative, Digest: benchmark.SHA256Digest(raw)}, nil
-}
-
-func replaySanitizedBundle(stage string, expectedManifest LifecycleManifest, expectedRepeat SemanticRepeatResult, facts runtimeFacts) error {
-	manifestRaw, err := readRegularFile(filepath.Join(stage, artifactManifestPath))
+	manifestRaw, err := readRegularFileContext(ctx, filepath.Join(stage, artifactManifestPath))
 	if err != nil {
 		return fmt.Errorf("reopen artifact manifest: %w", err)
 	}
 	var artifacts ArtifactManifest
-	if _, err := readCanonicalJSON(filepath.Join(stage, artifactManifestPath), &artifacts); err != nil {
+	if _, err := readCanonicalJSONContext(ctx, filepath.Join(stage, artifactManifestPath), &artifacts); err != nil {
 		return fmt.Errorf("replay artifact manifest: %w", err)
 	}
 	if err := artifacts.Validate(); err != nil {
 		return err
 	}
-	if err := verifyArtifactInventory(stage, artifacts); err != nil {
+	if err := verifyArtifactInventory(ctx, stage, artifacts); err != nil {
 		return err
 	}
-	if err := verifyNoPrivateLeak(stage, append(artifacts.Files, PublishedArtifact{Path: artifactManifestPath, Digest: benchmark.SHA256Digest(manifestRaw)}), facts); err != nil {
+	if err := verifyNoPrivateLeak(ctx, stage, append(artifacts.Files, PublishedArtifact{Path: artifactManifestPath, Digest: benchmark.SHA256Digest(manifestRaw)}), facts); err != nil {
 		return err
 	}
 
 	var manifest LifecycleManifest
-	if _, err := readCanonicalJSON(filepath.Join(stage, "lifecycle-manifest.json"), &manifest); err != nil {
+	if _, err := readCanonicalJSONContext(ctx, filepath.Join(stage, "lifecycle-manifest.json"), &manifest); err != nil {
 		return fmt.Errorf("replay lifecycle manifest: %w", err)
 	}
 	if err := manifest.Validate(); err != nil {
@@ -163,7 +162,7 @@ func replaySanitizedBundle(stage string, expectedManifest LifecycleManifest, exp
 	}
 	if manifest.BaselineAllowlist != nil {
 		var allowlist BaselineAllowlistResult
-		if _, err := readCanonicalJSON(filepath.Join(stage, baselineAllowlistResultPath()), &allowlist); err != nil {
+		if _, err := readCanonicalJSONContext(ctx, filepath.Join(stage, baselineAllowlistResultPath()), &allowlist); err != nil {
 			return fmt.Errorf("replay baseline allowlist result: %w", err)
 		}
 		if err := allowlist.Validate(); err != nil || !sameCanonical(allowlist, *manifest.BaselineAllowlist) {
@@ -171,7 +170,7 @@ func replaySanitizedBundle(stage string, expectedManifest LifecycleManifest, exp
 		}
 	}
 	var repeat SemanticRepeatResult
-	if _, err := readCanonicalJSON(filepath.Join(stage, "semantic-repeat.json"), &repeat); err != nil {
+	if _, err := readCanonicalJSONContext(ctx, filepath.Join(stage, "semantic-repeat.json"), &repeat); err != nil {
 		return fmt.Errorf("replay semantic repeat result: %w", err)
 	}
 	if err := repeat.Validate(); err != nil {
@@ -183,7 +182,10 @@ func replaySanitizedBundle(stage string, expectedManifest LifecycleManifest, exp
 
 	reportIDs := make([]string, 0, fixedRepetitions)
 	for repetition := 1; repetition <= fixedRepetitions; repetition++ {
-		input, report, err := replayRepetition(stage, repetition)
+		if err := contextError(ctx); err != nil {
+			return err
+		}
+		input, report, err := replayRepetition(ctx, stage, repetition)
 		if err != nil {
 			return err
 		}
@@ -202,45 +204,48 @@ func replaySanitizedBundle(stage string, expectedManifest LifecycleManifest, exp
 	return nil
 }
 
-func replayRepetition(stage string, repetition int) (measurement.MeasurementInput, measurement.MeasurementReport, error) {
+func replayRepetition(ctx context.Context, stage string, repetition int) (measurement.MeasurementInput, measurement.MeasurementReport, error) {
+	if err := contextError(ctx); err != nil {
+		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, err
+	}
 	prefix := fmt.Sprintf("repetition-%d", repetition)
 	var inventory measurement.ProductionInventory
-	if _, err := readCanonicalJSON(filepath.Join(stage, prefix, "inventory.json"), &inventory); err != nil {
+	if _, err := readCanonicalJSONContext(ctx, filepath.Join(stage, prefix, "inventory.json"), &inventory); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, fmt.Errorf("replay repetition %d inventory: %w", repetition, err)
 	}
 	if err := inventory.Validate(); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, err
 	}
 	var corpus measurement.ContractCorpus
-	if _, err := readCanonicalJSON(filepath.Join(stage, prefix, "corpus.json"), &corpus); err != nil {
+	if _, err := readCanonicalJSONContext(ctx, filepath.Join(stage, prefix, "corpus.json"), &corpus); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, fmt.Errorf("replay repetition %d corpus: %w", repetition, err)
 	}
 	if err := corpus.Validate(); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, err
 	}
 	var oracle measurement.ReachabilityOracle
-	if _, err := readCanonicalJSON(filepath.Join(stage, prefix, "oracle.json"), &oracle); err != nil {
+	if _, err := readCanonicalJSONContext(ctx, filepath.Join(stage, prefix, "oracle.json"), &oracle); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, fmt.Errorf("replay repetition %d oracle: %w", repetition, err)
 	}
 	if err := oracle.ValidateAgainst(corpus); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, err
 	}
 	var policy measurement.MeasurementPolicy
-	if _, err := readCanonicalJSON(filepath.Join(stage, prefix, "policy.json"), &policy); err != nil {
+	if _, err := readCanonicalJSONContext(ctx, filepath.Join(stage, prefix, "policy.json"), &policy); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, fmt.Errorf("replay repetition %d policy: %w", repetition, err)
 	}
 	if err := policy.Validate(); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, err
 	}
 	var exceptions measurement.ExceptionManifest
-	if _, err := readCanonicalJSON(filepath.Join(stage, prefix, "exceptions.json"), &exceptions); err != nil {
+	if _, err := readCanonicalJSONContext(ctx, filepath.Join(stage, prefix, "exceptions.json"), &exceptions); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, fmt.Errorf("replay repetition %d exceptions: %w", repetition, err)
 	}
 	if err := exceptions.Validate(); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, err
 	}
 	var input measurement.MeasurementInput
-	if _, err := readCanonicalJSON(filepath.Join(stage, prefix, "input.json"), &input); err != nil {
+	if _, err := readCanonicalJSONContext(ctx, filepath.Join(stage, prefix, "input.json"), &input); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, fmt.Errorf("replay repetition %d input: %w", repetition, err)
 	}
 	if err := input.Validate(); err != nil {
@@ -250,7 +255,7 @@ func replayRepetition(stage string, repetition int) (measurement.MeasurementInpu
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, fmt.Errorf("replayed contract artifacts for repetition %d do not match its input", repetition)
 	}
 	var report measurement.MeasurementReport
-	if _, err := readCanonicalJSON(filepath.Join(stage, prefix, "report.json"), &report); err != nil {
+	if _, err := readCanonicalJSONContext(ctx, filepath.Join(stage, prefix, "report.json"), &report); err != nil {
 		return measurement.MeasurementInput{}, measurement.MeasurementReport{}, fmt.Errorf("replay repetition %d report: %w", repetition, err)
 	}
 	if err := report.Validate(); err != nil {
@@ -284,6 +289,100 @@ func readCanonicalJSON(path string, destination any) ([]byte, error) {
 	return encoded, nil
 }
 
+func readCanonicalJSONContext(ctx context.Context, path string, destination any) ([]byte, error) {
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
+	raw, err := readRegularFileContext(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
+	if err := benchmark.ValidateJSONDocument(bytes.NewReader(raw)); err != nil {
+		return nil, err
+	}
+	if err := benchmark.StrictDecode(bytes.NewReader(raw), destination); err != nil {
+		return nil, err
+	}
+	encoded, err := benchmark.CanonicalJSON(destination)
+	if err != nil {
+		return nil, err
+	}
+	var canonical bytes.Buffer
+	if err := benchmark.WriteCanonicalJSON(&canonical, encoded); err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(raw, canonical.Bytes()) {
+		return nil, errors.New("JSON document is not canonical")
+	}
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
+	return encoded, nil
+}
+
+func readRegularFileContext(ctx context.Context, path string) ([]byte, error) {
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, errors.New("artifact must be a regular non-symlink file")
+	}
+	if info.Size() > benchmark.MaxJSONBytes {
+		return nil, errors.New("artifact exceeds benchmark JSON size bound")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || opened.Size() != info.Size() {
+		return nil, errors.New("artifact changed while opening")
+	}
+	body := make([]byte, 0, info.Size())
+	buffer := make([]byte, 32<<10)
+	for {
+		if err := contextError(ctx); err != nil {
+			return nil, err
+		}
+		read, readErr := file.Read(buffer)
+		if read > 0 {
+			body = append(body, buffer[:read]...)
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
+		if read == 0 {
+			return nil, io.ErrNoProgress
+		}
+	}
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
+	after, err := os.Lstat(path)
+	if err != nil || after.Mode()&os.ModeSymlink != 0 || !after.Mode().IsRegular() || !os.SameFile(info, after) || after.Size() != int64(len(body)) {
+		return nil, errors.New("artifact changed while reading")
+	}
+	return body, nil
+}
+
+func contextError(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("reachability lifecycle context is required")
+	}
+	return ctx.Err()
+}
+
 func readRegularFile(path string) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -298,14 +397,17 @@ func readRegularFile(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-func verifyArtifactInventory(stage string, artifacts ArtifactManifest) error {
-	actual, err := regularRelativeFiles(stage)
+func verifyArtifactInventory(ctx context.Context, stage string, artifacts ArtifactManifest) error {
+	actual, err := regularRelativeFiles(ctx, stage)
 	if err != nil {
 		return err
 	}
 	expected := make([]string, 0, len(artifacts.Files)+1)
 	for _, item := range artifacts.Files {
-		raw, err := readRegularFile(filepath.Join(stage, filepath.FromSlash(item.Path)))
+		if err := contextError(ctx); err != nil {
+			return err
+		}
+		raw, err := readRegularFileContext(ctx, filepath.Join(stage, filepath.FromSlash(item.Path)))
 		if err != nil {
 			return fmt.Errorf("reopen %s: %w", item.Path, err)
 		}
@@ -322,9 +424,15 @@ func verifyArtifactInventory(stage string, artifacts ArtifactManifest) error {
 	return nil
 }
 
-func regularRelativeFiles(root string) ([]string, error) {
+func regularRelativeFiles(ctx context.Context, root string) ([]string, error) {
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
 	files := make([]string, 0)
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if err := contextError(ctx); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return walkErr
 		}
@@ -354,10 +462,16 @@ func regularRelativeFiles(root string) ([]string, error) {
 	return files, nil
 }
 
-func verifyNoPrivateLeak(stage string, files []PublishedArtifact, facts runtimeFacts) error {
+func verifyNoPrivateLeak(ctx context.Context, stage string, files []PublishedArtifact, facts runtimeFacts) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
 	forbidden := []string{facts.repositoryRoot, facts.checkoutBundleRoot, facts.temporaryRoot, facts.rawRoot, facts.outputRoot, facts.controllerRoot}
 	for _, item := range files {
-		raw, err := readRegularFile(filepath.Join(stage, filepath.FromSlash(item.Path)))
+		if err := contextError(ctx); err != nil {
+			return err
+		}
+		raw, err := readRegularFileContext(ctx, filepath.Join(stage, filepath.FromSlash(item.Path)))
 		if err != nil {
 			return err
 		}

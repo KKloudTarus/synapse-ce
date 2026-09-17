@@ -6,16 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 	measurement "github.com/KKloudTarus/synapse-ce/internal/usecase/reachbench"
 )
 
-const fixedRepetitions = 2
+const (
+	fixedRepetitions           = 2
+	reachabilityCleanupTimeout = 2 * time.Minute
+)
 
 // Run rejects every argument, derives all lifecycle identity internally, and publishes only after cleanup succeeds.
 func (runner *Runner) Run(ctx context.Context, args []string) (result Result, runErr error) {
@@ -92,57 +95,81 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 	if err != nil {
 		return Result{}, err
 	}
-	cleaned := false
+	if err := os.MkdirAll(workspace.RawRunRoot(), 0o700); err != nil {
+		return Result{}, runner.cleanupWorkspaceAfterFailure(workspace, fmt.Errorf("create private reachability evidence root: %w", err))
+	}
+	evidence, err := benchcycle.NewEvidenceStore(workspace.RawRunRoot(), reachabilityEvidenceLimits())
+	if err != nil {
+		return Result{}, runner.cleanupWorkspaceAfterFailure(workspace, fmt.Errorf("create private reachability evidence store: %w", err))
+	}
+
+	var manifest LifecycleManifest
+	var repeat SemanticRepeatResult
+	publication, err := benchcycle.BeginPublication(facts.output, reachabilityPublicationLimits(), func(cleanupCtx context.Context) error {
+		return workspace.Cleanup(cleanupCtx, runner.dependencies.RuntimeCleanup)
+	}, func(verifyCtx context.Context, stage string, _ []benchcycle.FileIdentity) error {
+		return replaySanitizedBundle(verifyCtx, stage, manifest, repeat, facts)
+	})
+	if err != nil {
+		return Result{}, runner.cleanupWorkspaceAfterFailure(workspace, fmt.Errorf("begin reachability publication: %w", err))
+	}
+	publicationTerminal := false
 	defer func() {
-		if !cleaned {
-			_ = workspace.Cleanup(context.Background(), runner.dependencies.RuntimeCleanup)
+		if publicationTerminal {
+			return
+		}
+		if cleanupErr := publication.Abort(); cleanupErr != nil {
+			runErr = errors.Join(runErr, cleanupErr)
 		}
 	}()
 
-	comparisons := make([]CellRepeatDigest, 0, len(cells))
-	captures, err := benchcycle.ExecuteRepeated(ctx, fixedRepetitions, cells,
-		func(captureCtx context.Context, repetition int, cell ExecutionCell) (CaptureResult, error) {
+	plan := benchcycle.TwoPassPlan[ExecutionCell]{Cells: make([]benchcycle.PlanCell[ExecutionCell], len(cells))}
+	for index, cell := range cells {
+		plan.Cells[index] = benchcycle.PlanCell[ExecutionCell]{Key: opaqueCellKey(cell), Cell: cell}
+	}
+	comparisons := make([]CellRepeatDigest, 0, len(plan.Cells))
+	pairs, err := benchcycle.ExecuteTwoPass(ctx, plan,
+		func(captureCtx context.Context, attempt benchcycle.Attempt[ExecutionCell]) (benchcycle.AttemptOutcome[CaptureResult], error) {
 			captured, captureErr := runner.capture.Capture(captureCtx, CaptureRequest{
-				Repetition: repetition,
-				Cell:       cell,
+				Repetition: attempt.Address.Repetition,
+				Cell:       attempt.Cell,
 				Analyzer:   envelope.Analyzer,
 				Snapshot:   template.ActiveSnapshot,
 				WorkRoot:   workspace.WorkRoot(),
+				attempt:    attempt.Address,
+				evidence:   evidence,
 			})
 			if captureErr != nil {
-				return CaptureResult{}, fmt.Errorf("capture repetition %d %s/%s: %w", repetition, cell.CaseID, cell.BindingID, captureErr)
+				return benchcycle.AttemptOutcome[CaptureResult]{}, fmt.Errorf("capture repetition %d %s/%s: %w", attempt.Address.Repetition, attempt.Cell.CaseID, attempt.Cell.BindingID, captureErr)
 			}
-			if err := validateCapturedCell(cell, captured.Observation); err != nil {
-				return CaptureResult{}, fmt.Errorf("capture repetition %d: %w", repetition, err)
+			if err := captureCtx.Err(); err != nil {
+				return benchcycle.AttemptOutcome[CaptureResult]{}, err
 			}
-			if len(captured.RawEvidence) > maxRawEvidenceBytes {
-				return CaptureResult{}, fmt.Errorf("capture repetition %d has raw evidence over %d bytes", repetition, maxRawEvidenceBytes)
+			if err := validateCapturedCell(attempt.Cell, captured.Observation); err != nil {
+				return benchcycle.AttemptOutcome[CaptureResult]{}, fmt.Errorf("capture repetition %d: %w", attempt.Address.Repetition, err)
 			}
-			if len(captured.RawEvidence) != 0 {
-				path := rawEvidencePath(workspace.RawRunRoot(), repetition, cell)
-				if err := benchcycle.WriteNewFile(path, captured.RawEvidence, 0o600); err != nil {
-					return CaptureResult{}, fmt.Errorf("write private raw evidence: %w", err)
-				}
+			if err := validateEvidenceReceipts(captured.EvidenceReceipts); err != nil {
+				return benchcycle.AttemptOutcome[CaptureResult]{}, fmt.Errorf("capture repetition %d evidence: %w", attempt.Address.Repetition, err)
 			}
-			return captured, nil
+			return benchcycle.AttemptOutcome[CaptureResult]{Address: attempt.Address, Outcome: captured}, nil
 		},
-		func(_ context.Context, cell ExecutionCell, repetitions []CaptureResult) error {
-			if len(repetitions) != fixedRepetitions {
-				return errors.New("reachability repeat comparison did not receive two captures")
+		func(compareCtx context.Context, pair benchcycle.PairOutcome[ExecutionCell, CaptureResult]) error {
+			if err := compareCtx.Err(); err != nil {
+				return err
 			}
-			left, err := canonicalProjection(repetitions[0].Observation)
+			left, err := canonicalProjection(pair.Outcomes[0].Outcome.Observation)
 			if err != nil {
 				return err
 			}
-			right, err := canonicalProjection(repetitions[1].Observation)
+			right, err := canonicalProjection(pair.Outcomes[1].Outcome.Observation)
 			if err != nil {
 				return err
 			}
 			if !bytes.Equal(left, right) {
-				return fmt.Errorf("semantic repeat mismatch for %s/%s", cell.CaseID, cell.BindingID)
+				return fmt.Errorf("semantic repeat mismatch for %s/%s", pair.Cell.Cell.CaseID, pair.Cell.Cell.BindingID)
 			}
 			comparisons = append(comparisons, CellRepeatDigest{
-				CaseID: cell.CaseID, BindingID: cell.BindingID, ProjectionDigest: benchmark.SHA256Digest(left),
+				CaseID: pair.Cell.Cell.CaseID, BindingID: pair.Cell.Cell.BindingID, ProjectionDigest: benchmark.SHA256Digest(left),
 			})
 			return nil
 		},
@@ -151,10 +178,23 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 		return Result{}, err
 	}
 
+	captures := make([][]CaptureResult, fixedRepetitions)
+	for repetition := range captures {
+		captures[repetition] = make([]CaptureResult, len(pairs))
+		for index, pair := range pairs {
+			if err := ctx.Err(); err != nil {
+				return Result{}, err
+			}
+			captures[repetition][index] = pair.Outcomes[repetition].Outcome
+		}
+	}
 	inputs := make([]measurement.MeasurementInput, fixedRepetitions)
 	reports := make([]measurement.MeasurementReport, fixedRepetitions)
 	encodedReports := make([][]byte, fixedRepetitions)
 	for repetition := range captures {
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
 		input, inputErr := materializeInput(template, cells, captures[repetition])
 		if inputErr != nil {
 			return Result{}, fmt.Errorf("materialize repetition %d input: %w", repetition+1, inputErr)
@@ -173,28 +213,12 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 		return Result{}, errors.New("canonical reachability reports differ between repetitions")
 	}
 
-	// Raw evidence and the private workspace must be gone before any public artifact is staged.
-	if err := workspace.Cleanup(ctx, runner.dependencies.RuntimeCleanup); err != nil {
-		return Result{}, fmt.Errorf("cleanup reachability lifecycle before publication: %w", err)
-	}
-	cleaned = true
-
-	stage, err := os.MkdirTemp(facts.outputRoot, ".stage-")
-	if err != nil {
-		return Result{}, fmt.Errorf("create sanitized publication stage: %w", err)
-	}
-	published := false
-	defer func() {
-		if !published {
-			_ = os.RemoveAll(stage)
-		}
-	}()
 	sort.Slice(comparisons, func(left, right int) bool {
 		leftKey := comparisons[left].CaseID + "\x00" + comparisons[left].BindingID
 		rightKey := comparisons[right].CaseID + "\x00" + comparisons[right].BindingID
 		return leftKey < rightKey
 	})
-	manifest := LifecycleManifest{
+	manifest = LifecycleManifest{
 		SchemaVersion:     LifecycleSchemaVersion,
 		Route:             envelope.Route,
 		Purpose:           envelope.Purpose,
@@ -211,24 +235,71 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 		Cells:             cells,
 		ReportIDs:         []string{reports[0].ID, reports[1].ID},
 	}
-	repeat := SemanticRepeatResult{
+	repeat = SemanticRepeatResult{
 		SchemaVersion:     RepeatSchemaVersion,
 		Repetitions:       fixedRepetitions,
 		SemanticallyEqual: true,
 		ReportIDs:         []string{reports[0].ID, reports[1].ID},
 		Cells:             comparisons,
 	}
-	if err := writeSanitizedBundle(stage, manifest, repeat, inputs, reports); err != nil {
+	if err := writeSanitizedBundle(ctx, publication, manifest, repeat, inputs, reports); err != nil {
 		return Result{}, err
 	}
-	if err := replaySanitizedBundle(stage, manifest, repeat, facts); err != nil {
-		return Result{}, err
-	}
-	if err := benchcycle.PublishDirectory(stage, facts.output); err != nil {
+	publicationTerminal = true
+	if err := publication.Commit(ctx); err != nil {
 		return Result{}, fmt.Errorf("publish reachability lifecycle: %w", err)
 	}
-	published = true
 	return Result{RunKey: facts.runKey, Authoritative: authoritative, Output: facts.output, Manifest: manifest}, nil
+}
+
+func reachabilityEvidenceLimits() benchcycle.EvidenceLimits {
+	return benchcycle.EvidenceLimits{
+		MaxArtifactBytes: maxRawEvidenceArtifactBytes,
+		MaxTotalBytes:    maxRawEvidenceTotalBytes,
+		MaxFiles:         maxRawEvidenceFiles,
+	}
+}
+
+func reachabilityPublicationLimits() benchcycle.PublicationLimits {
+	return benchcycle.PublicationLimits{
+		MaxFileBytes:   benchmark.MaxJSONBytes,
+		MaxTotalBytes:  int64(maxArtifactFiles) * benchmark.MaxJSONBytes,
+		MaxFiles:       maxArtifactFiles,
+		CleanupTimeout: reachabilityCleanupTimeout,
+	}
+}
+
+func (runner *Runner) cleanupWorkspaceAfterFailure(workspace benchcycle.Workspace, failure error) error {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), reachabilityCleanupTimeout)
+	defer cancel()
+	if cleanupErr := workspace.Cleanup(cleanupCtx, runner.dependencies.RuntimeCleanup); cleanupErr != nil {
+		return errors.Join(failure, fmt.Errorf("cleanup private reachability workspace: %w", cleanupErr))
+	}
+	return failure
+}
+
+func validateEvidenceReceipts(receipts []benchcycle.EvidenceReceipt) error {
+	if len(receipts) > 1 {
+		return errors.New("capture retained more than one raw evidence receipt")
+	}
+	for _, receipt := range receipts {
+		if receipt.Reference == "" || receipt.Size < 0 || receipt.Size > maxRawEvidenceArtifactBytes || !validEvidenceDigest(receipt.Digest) {
+			return errors.New("capture retained an invalid raw evidence receipt")
+		}
+	}
+	return nil
+}
+
+func validEvidenceDigest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, character := range value {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (bundle TrustedBundle) selected(route Route) BundleAsset {
@@ -363,28 +434,47 @@ func materializeInput(template measurement.MeasurementInput, cells []ExecutionCe
 	if len(cells) != len(captures) {
 		return measurement.MeasurementInput{}, errors.New("missing reachability capture cell")
 	}
-	input := template
-	input.Observations = make([]measurement.MeasuredObservation, 0, len(captures))
-	seen := map[string]struct{}{}
-	for index, capture := range captures {
-		cell := cells[index]
+	planned := make(map[string]ExecutionCell, len(cells))
+	for _, cell := range cells {
+		key := observationKey(cell.CaseID, cell.BindingID)
+		if _, exists := planned[key]; exists {
+			return measurement.MeasurementInput{}, fmt.Errorf("duplicate reachability plan observation %q", key)
+		}
+		planned[key] = cell
+	}
+	captured := make(map[string]measurement.MeasuredObservation, len(captures))
+	for _, capture := range captures {
+		key := observationKey(capture.Observation.CaseID, capture.Observation.BindingID)
+		cell, expected := planned[key]
+		if !expected {
+			return measurement.MeasurementInput{}, fmt.Errorf("unexpected reachability capture cell %q", key)
+		}
 		if err := validateCapturedCell(cell, capture.Observation); err != nil {
 			return measurement.MeasurementInput{}, err
 		}
-		key := cellKey(cell)
-		if _, exists := seen[key]; exists {
+		if _, exists := captured[key]; exists {
 			return measurement.MeasurementInput{}, fmt.Errorf("duplicate reachability capture cell %q", key)
 		}
-		seen[key] = struct{}{}
-		input.Observations = append(input.Observations, capture.Observation)
+		captured[key] = capture.Observation
 	}
-	if len(seen) != len(cells) {
-		return measurement.MeasurementInput{}, errors.New("missing reachability capture cell")
+	input := template
+	input.Observations = make([]measurement.MeasuredObservation, 0, len(cells))
+	for _, cell := range cells {
+		key := observationKey(cell.CaseID, cell.BindingID)
+		observation, found := captured[key]
+		if !found {
+			return measurement.MeasurementInput{}, fmt.Errorf("missing reachability capture cell %q", key)
+		}
+		input.Observations = append(input.Observations, observation)
 	}
 	if err := input.Validate(); err != nil {
 		return measurement.MeasurementInput{}, err
 	}
 	return input, nil
+}
+
+func observationKey(caseID, bindingID string) string {
+	return caseID + "\x00" + bindingID
 }
 
 func validateCapturedCell(cell ExecutionCell, observation measurement.MeasuredObservation) error {
@@ -397,9 +487,8 @@ func validateCapturedCell(cell ExecutionCell, observation measurement.MeasuredOb
 	return nil
 }
 
-func rawEvidencePath(root string, repetition int, cell ExecutionCell) string {
-	key := benchmark.SHA256Digest([]byte(cellKey(cell)))
-	return filepath.Join(root, fmt.Sprintf("repetition-%d", repetition), key[len("sha256:"):]+".raw")
+func opaqueCellKey(cell ExecutionCell) string {
+	return benchmark.SHA256Digest([]byte(cellKey(cell)))
 }
 
 func cellKey(cell ExecutionCell) string {

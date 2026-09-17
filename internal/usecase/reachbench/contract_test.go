@@ -885,7 +885,13 @@ func fixtureCheckpoint(t *testing.T, policy MeasurementPolicy, baseline Measurem
 }
 
 func fixtureProof(input MeasurementInput, caseID, bindingID string, complete bool) SuppressionProof {
-	item := corpusCase(input.Corpus, caseID)
+	var item ContractCase
+	for _, candidate := range input.Corpus.Cases {
+		if candidate.ID == caseID {
+			item = candidate
+			break
+		}
+	}
 	cohort, _ := input.Inventory.cohort(cohortKey(item.CohortID, item.ModeID))
 	binding, _ := findBinding(cohort, bindingID)
 	proof := SuppressionProof{Judgment: fixtureReference("judgment"), SubjectID: item.SubjectID, BoundaryID: binding.BoundaryID, Proposer: "proposer", Verifier: "verifier", CompletenessContract: fixtureReference("go-source-completeness"), Snapshot: input.ActiveSnapshot, Analyzer: fixtureReference(cohort.AnalyzerID), Configuration: binding.Configuration, Evidence: fixtureReference("evidence")}

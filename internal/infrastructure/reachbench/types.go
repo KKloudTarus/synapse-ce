@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"strings"
 	"unicode"
@@ -34,10 +35,12 @@ const (
 	ReviewedHarnessID = "synapse-reachability-cycle-v1"
 	AnalyzerSubjectID = "synapse-reachability-analyzer"
 
-	maxCells            = 10_000
-	maxRawEvidenceBytes = 1 << 20
-	maxArtifactFiles    = 32
-	maxIdentifierBytes  = 160
+	maxCells                          = 10_000
+	maxRawEvidenceArtifactBytes int64 = 1 << 20
+	maxRawEvidenceTotalBytes    int64 = 512 << 20
+	maxRawEvidenceFiles               = maxCells * fixedRepetitions
+	maxArtifactFiles                  = 32
+	maxIdentifierBytes                = 160
 )
 
 // Route names the closed lifecycle ingress. A route is not authority by itself.
@@ -150,14 +153,25 @@ type CaptureRequest struct {
 	Analyzer   RevisionIdentity             `json:"analyzer"`
 	Snapshot   measurement.SnapshotIdentity `json:"snapshot"`
 	WorkRoot   string                       `json:"-"`
+
+	attempt  benchcycle.AttemptAddress
+	evidence *benchcycle.EvidenceStore
 }
 
-// CaptureResult contains a measured production output plus bounded private raw evidence.
+// StoreRawEvidence streams the attempt's single raw capture artifact to private storage.
+func (request CaptureRequest) StoreRawEvidence(ctx context.Context, source io.Reader) (benchcycle.EvidenceReceipt, error) {
+	if request.evidence == nil {
+		return benchcycle.EvidenceReceipt{}, errors.New("reachability evidence store is unavailable")
+	}
+	return request.evidence.Write(ctx, request.attempt, "capture.raw", source)
+}
+
+// CaptureResult contains a measured production output and only bounded private-evidence receipts.
 // Suppression.Effects and each proof's MissingProvenance must describe the actual derived output; callers must not
 // infer absence of an effect or provenance from a proof-generation event.
 type CaptureResult struct {
-	Observation measurement.MeasuredObservation `json:"observation"`
-	RawEvidence []byte                          `json:"-"`
+	Observation      measurement.MeasuredObservation `json:"observation"`
+	EvidenceReceipts []benchcycle.EvidenceReceipt    `json:"-"`
 }
 
 // CaptureAdapter is implemented later by package-local adapters at the actual output authority.

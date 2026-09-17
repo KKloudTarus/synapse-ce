@@ -63,12 +63,9 @@ func buildLogicalCases(input MeasurementInput) ([]logicalCase, error) {
 	for _, item := range input.Oracle.Cases {
 		oracleByCase[item.CaseID] = item
 	}
-	observed := make(map[string]*MeasuredObservation, len(input.Observations))
-	for i := range input.Observations {
-		observation := &input.Observations[i]
-		item := corpusCase(input.Corpus, observation.CaseID)
-		key := executionKey(item.CohortID, item.ModeID, observation.BindingID, observation.CaseID)
-		observed[key] = observation
+	observed, err := indexedMeasuredObservations(input)
+	if err != nil {
+		return nil, err
 	}
 	logical := make([]logicalCase, 0, len(input.Corpus.Cases))
 	for _, item := range input.Corpus.Cases {
@@ -93,13 +90,30 @@ func buildLogicalCases(input MeasurementInput) ([]logicalCase, error) {
 	return logical, nil
 }
 
-func corpusCase(corpus ContractCorpus, id string) ContractCase {
-	for _, item := range corpus.Cases {
-		if item.ID == id {
-			return item
+// indexedMeasuredObservations validates unique execution identities while building the O(cases+observations)
+// lookup used by evaluation. The lifecycle caps its execution plan at 10,000 cells.
+func indexedMeasuredObservations(input MeasurementInput) (map[string]*MeasuredObservation, error) {
+	cases := make(map[string]ContractCase, len(input.Corpus.Cases))
+	for _, item := range input.Corpus.Cases {
+		if _, exists := cases[item.ID]; exists {
+			return nil, fmt.Errorf("duplicate corpus case %q", item.ID)
 		}
+		cases[item.ID] = item
 	}
-	return ContractCase{}
+	observed := make(map[string]*MeasuredObservation, len(input.Observations))
+	for index := range input.Observations {
+		observation := &input.Observations[index]
+		item, found := cases[observation.CaseID]
+		if !found {
+			return nil, fmt.Errorf("observation references unknown corpus case %q", observation.CaseID)
+		}
+		key := executionKey(item.CohortID, item.ModeID, observation.BindingID, observation.CaseID)
+		if _, exists := observed[key]; exists {
+			return nil, fmt.Errorf("duplicate measured observation %q", key)
+		}
+		observed[key] = observation
+	}
+	return observed, nil
 }
 
 func validateSuppression(unit evaluationUnit, policy MeasurementPolicy, active SnapshotIdentity) suppressionSafety {
