@@ -9,6 +9,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Recommended and Strict quality-profile presets per language (#1136, EPIC #1120).** Alongside the existing "Synapse way" built-in, every language now offers two more built-in profiles a project can select per language: **Recommended** activates every rule whose default severity is Low or higher and leaves info-level rules off to cut noise, and **Strict** activates every rule with its severity escalated one level (info→low→medium→high→critical) so the gate treats issues more seriously. The presets are generated deterministically from the rule catalog, immutable like the default, listable and assignable through the existing quality-profile API, and applied through the same overlay bridge, so no new subsystem is introduced.
+
 - **Go Tier-2 reachability fails open on opaque control-flow constructs (EPIC #1120, #1138).** The owned `ssacallgraph` source pass records reachable `//go:linkname`, `unsafe`, cgo, and assembly-backed functions as blind constructs before SSA can erase those signals. Package initializers are covered, build-excluded files do not poison active symbols, and dead opaque helpers do not disable unrelated suppressions. A Tier-2 `not_reachable` carrying one of these constructs cannot become suppressing evidence.
 
 - **Code Quality rule catalog coverage audit (#1134).** The shipped catalog now has a deterministic rules × language × type coverage matrix and complete OWASP mappings for security-quality rules; collision-safe display names preserve the distinct VB.NET and C++ empty-catch detectors rather than retiring either detection path.
