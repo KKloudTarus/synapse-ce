@@ -1,6 +1,7 @@
 {
   "recall": {
     "go/code_smell": 1.0,
+    "go/bug": 1.0,
     "python/vulnerability": 1.0,
     "python/code_smell": 1.0,
     "javascript/bug": 1.0,

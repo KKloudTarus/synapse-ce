@@ -44,6 +44,14 @@
       "issues": [
         { "file": "sample.rb", "line": 5, "type": "bug" }
       ]
+    },
+    {
+      "name": "go-self-assignment",
+      "language": "go",
+      "fixture": "go-selfassign",
+      "issues": [
+        { "file": "sample.go", "line": 9, "type": "bug" }
+      ]
     }
   ]
 }
