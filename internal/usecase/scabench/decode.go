@@ -1,19 +1,15 @@
 package scabench
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
-	"reflect"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 )
 
-// MaxJSONBytes bounds each untrusted benchmark JSON document before decoding.
-const MaxJSONBytes int64 = 8 << 20
-
-const maxJSONDepth = 256
+// MaxJSONBytes remains the SCA compatibility name for the neutral document bound.
+const MaxJSONBytes int64 = benchmark.MaxJSONBytes
 
 // DecodeCatalog strictly decodes and validates one versioned catalog JSON value.
 func DecodeCatalog(reader io.Reader) (Catalog, error) {
@@ -76,24 +72,11 @@ func DecodeResult(reader io.Reader) (Result, error) {
 	return result, nil
 }
 
-// ValidateJSONDocument applies the shared bounded, UTF-8, depth, duplicate-key,
-// and single-value checks to a JSON document before a boundary-specific decode.
+// ValidateJSONDocument preserves SCA's bounded strict-document contract through the neutral helper.
 func ValidateJSONDocument(reader io.Reader) error {
-	raw, err := readBounded(reader)
-	if err != nil {
-		return err
-	}
-	return validateJSONDocument(raw)
+	return benchmark.ValidateJSONDocument(reader)
 }
 
-func validateJSONDocument(raw []byte) error {
-	if !utf8.Valid(raw) {
-		return fmt.Errorf("JSON input is not valid UTF-8")
-	}
-	return rejectDuplicateKeys(raw)
-}
-
-// Validate validates an observation envelope's self-contained invariants.
 // Validate validates an observation envelope's self-contained invariants.
 func (set ObservationSet) Validate() error {
 	if set.SchemaVersion != ObservationSchemaVersion {
@@ -117,176 +100,5 @@ func (set ObservationSet) Validate() error {
 }
 
 func strictDecode(reader io.Reader, destination any) error {
-	raw, err := readBounded(reader)
-	if err != nil {
-		return err
-	}
-	if err := validateJSONDocument(raw); err != nil {
-		return err
-	}
-
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return fmt.Errorf("invalid JSON: %w", err)
-	}
-	if err := rejectUnknownFields(value, reflect.TypeOf(destination)); err != nil {
-		return err
-	}
-
-	decoder = json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(destination); err != nil {
-		return fmt.Errorf("invalid JSON shape: %w", err)
-	}
-	return nil
-}
-
-func readBounded(reader io.Reader) ([]byte, error) {
-	raw, err := io.ReadAll(io.LimitReader(reader, MaxJSONBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read JSON: %w", err)
-	}
-	if int64(len(raw)) > MaxJSONBytes {
-		return nil, fmt.Errorf("JSON input exceeds %d byte limit", MaxJSONBytes)
-	}
-	return raw, nil
-}
-
-func rejectDuplicateKeys(raw []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	if err := consumeJSONValue(decoder, 0); err != nil {
-		return err
-	}
-	if _, err := decoder.Token(); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("JSON input must contain exactly one top-level value")
-		}
-		return fmt.Errorf("invalid trailing JSON: %w", err)
-	}
-	return nil
-}
-
-func consumeJSONValue(decoder *json.Decoder, depth int) error {
-	if depth > maxJSONDepth {
-		return fmt.Errorf("JSON nesting exceeds %d levels", maxJSONDepth)
-	}
-	token, err := decoder.Token()
-	if err != nil {
-		return fmt.Errorf("invalid JSON: %w", err)
-	}
-	delimiter, isDelimiter := token.(json.Delim)
-	if !isDelimiter {
-		return nil
-	}
-	switch delimiter {
-	case '{':
-		seen := make(map[string]struct{})
-		for decoder.More() {
-			keyToken, err := decoder.Token()
-			if err != nil {
-				return fmt.Errorf("invalid JSON object key: %w", err)
-			}
-			key, ok := keyToken.(string)
-			if !ok {
-				return fmt.Errorf("invalid JSON object key")
-			}
-			if _, exists := seen[key]; exists {
-				return fmt.Errorf("duplicate JSON key %q", key)
-			}
-			seen[key] = struct{}{}
-			if err := consumeJSONValue(decoder, depth+1); err != nil {
-				return err
-			}
-		}
-		end, err := decoder.Token()
-		if err != nil || end != json.Delim('}') {
-			return fmt.Errorf("invalid JSON object")
-		}
-	case '[':
-		for decoder.More() {
-			if err := consumeJSONValue(decoder, depth+1); err != nil {
-				return err
-			}
-		}
-		end, err := decoder.Token()
-		if err != nil || end != json.Delim(']') {
-			return fmt.Errorf("invalid JSON array")
-		}
-	default:
-		return fmt.Errorf("invalid JSON delimiter %q", delimiter)
-	}
-	return nil
-}
-
-func rejectUnknownFields(value any, destination reflect.Type) error {
-	if destination.Kind() != reflect.Pointer {
-		return fmt.Errorf("strict decoder destination must be a pointer")
-	}
-	return validateJSONShape(value, destination.Elem())
-}
-
-func validateJSONShape(value any, expected reflect.Type) error {
-	for expected.Kind() == reflect.Pointer {
-		expected = expected.Elem()
-	}
-	switch expected.Kind() {
-	case reflect.Struct:
-		object, ok := value.(map[string]any)
-		if !ok {
-			return nil // json.Unmarshal supplies the more useful type error.
-		}
-		fields := jsonFields(expected)
-		for key, nested := range object {
-			field, exists := fields[key]
-			if !exists {
-				return fmt.Errorf("unknown JSON field %q", key)
-			}
-			if err := validateJSONShape(nested, field); err != nil {
-				return err
-			}
-		}
-	case reflect.Slice, reflect.Array:
-		values, ok := value.([]any)
-		if !ok {
-			return nil
-		}
-		for _, nested := range values {
-			if err := validateJSONShape(nested, expected.Elem()); err != nil {
-				return err
-			}
-		}
-	case reflect.Map:
-		object, ok := value.(map[string]any)
-		if !ok {
-			return nil
-		}
-		for _, nested := range object {
-			if err := validateJSONShape(nested, expected.Elem()); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func jsonFields(expected reflect.Type) map[string]reflect.Type {
-	fields := make(map[string]reflect.Type, expected.NumField())
-	for i := 0; i < expected.NumField(); i++ {
-		field := expected.Field(i)
-		if field.PkgPath != "" {
-			continue
-		}
-		name := strings.Split(field.Tag.Get("json"), ",")[0]
-		if name == "-" {
-			continue
-		}
-		if name == "" {
-			name = field.Name
-		}
-		fields[name] = field.Type
-	}
-	return fields
+	return benchmark.StrictDecode(reader, destination)
 }
