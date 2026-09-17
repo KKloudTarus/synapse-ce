@@ -73,16 +73,84 @@ jobs:
     if: ${{ needs.route.outputs.trusted == 'true' }}
     runs-on: [self-hosted, linux, reachability-accuracy-trusted]
     timeout-minutes: 90
+    env:
+      GIT_CONFIG_NOSYSTEM: "1"
+      GIT_CONFIG_COUNT: "0"
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
+      - name: Prepare fresh trusted checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:-}"
+          runner_temp="${RUNNER_TEMP:-}"
+          if [ -z "$workspace" ] || [ -z "$runner_temp" ] || [ "${workspace#/}" = "$workspace" ] || [ "${runner_temp#/}" = "$runner_temp" ] || [ "$workspace" = / ] || [ "$runner_temp" = / ]; then
+            echo "checkout and runner temporary paths must be non-root absolute paths" >&2
+            exit 1
+          fi
+          case "$workspace$runner_temp" in
+            *$'\n'*|*$'\r'*)
+              echo "checkout and runner temporary paths must not contain line breaks" >&2
+              exit 1
+              ;;
+          esac
+          test -d "$runner_temp"
+          test ! -L "$runner_temp"
+          cd "$RUNNER_TEMP"
+          runner_temp="$(pwd -P)"
+          if [ "$runner_temp" != "$RUNNER_TEMP" ]; then
+            echo "runner temporary path must be canonical" >&2
+            exit 1
+          fi
+          workspace_canonical="$(realpath -m -- "$workspace")"
+          if [ "$workspace_canonical" != "$workspace" ] || [ "$workspace_canonical" = / ]; then
+            echo "checkout path must be canonical, absolute, and non-root" >&2
+            exit 1
+          fi
+          workspace="$workspace_canonical"
+          case "$workspace" in
+            "$runner_temp"|"$runner_temp"/*)
+              echo "checkout path must remain outside runner temporary storage" >&2
+              exit 1
+              ;;
+          esac
+          case "$runner_temp" in
+            "$workspace"|"$workspace"/*)
+              echo "runner temporary path must remain outside the checkout" >&2
+              exit 1
+              ;;
+          esac
+          workspace_parent="$(dirname -- "$workspace")"
+          test -d "$workspace_parent"
+          test ! -L "$workspace_parent"
+          test "$GIT_CONFIG_NOSYSTEM" = 1
+          test "$GIT_CONFIG_COUNT" = 0
+          git_config="$runner_temp/synapse-reachability-gitconfig"
+          for name in "${!GIT_CONFIG_@}"; do
+            case "$name" in
+              GIT_CONFIG_NOSYSTEM|GIT_CONFIG_COUNT) ;;
+              *) unset "$name" ;;
+            esac
+          done
+          rm -f -- "$git_config"
+          install -m 0600 /dev/null "$git_config"
+          test -f "$git_config"
+          test ! -L "$git_config"
+          printf 'GIT_CONFIG_GLOBAL=%s\n' "$git_config" >> "$GITHUB_ENV"
+          rm -rf -- "$workspace"
+          install -d -m 0700 -- "$workspace"
+          test -d "$workspace"
+          test ! -L "$workspace"
       - name: Check out exact source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.route.outputs.source_sha }}
           persist-credentials: false
+          clean: true
+          set-safe-directory: false
           fetch-depth: 1
-      - name: Assert exact checkout and protected reference head
+      - name: Assert fresh checkout and protected reference head
         shell: bash
         env:
           SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
@@ -98,11 +166,42 @@ jobs:
             echo "trusted protected branch is unsafe" >&2
             exit 1
           fi
+          workspace="$(pwd -P)"
+          git_dir="$(git rev-parse --absolute-git-dir)"
+          test "$git_dir" = "$workspace/.git"
+          test -d "$git_dir"
+          test ! -L "$git_dir"
+          test -f "$git_dir/HEAD"
+          test ! -e "$git_dir/objects/info/alternates"
+          if git for-each-ref --format='%(refname)' refs/replace | grep -q .; then
+            echo "checkout contains Git replace refs" >&2
+            exit 1
+          fi
+          if git config --global --list | grep -q .; then
+            echo "isolated global Git config is not empty" >&2
+            exit 1
+          fi
+          if git config --local --get-regexp '^(include|includeif\..*)\.path$' >/dev/null; then
+            echo "checkout local Git config contains an include" >&2
+            exit 1
+          fi
+          if git config --local --get core.hooksPath >/dev/null; then
+            echo "checkout local Git config contains a hooks path" >&2
+            exit 1
+          fi
+          git reset --hard "$SOURCE_SHA"
+          git clean -ffdx
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          source_tree="$(git rev-parse "$SOURCE_SHA^{tree}")"
+          test "$(git rev-parse HEAD^{tree})" = "$source_tree"
           test "$GITHUB_REF" = "$TRUSTED_REF"
           test "$SOURCE_SHA" = "$TRUSTED_SHA"
           git fetch --no-tags --depth=1 origin "$TRUSTED_REF:refs/remotes/origin/$branch"
           test "$(git rev-parse "refs/remotes/origin/$branch")" = "$SOURCE_SHA"
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" ]; then
+            echo "trusted checkout contains tracked, untracked, or ignored residue" >&2
+            exit 1
+          fi
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
@@ -190,6 +289,10 @@ jobs:
           set -euo pipefail
           tools_root="$RUNNER_TEMP/synapse-reachability-tools"
           install -d -m 0700 -- "$tools_root"
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" ]; then
+            echo "trusted checkout contains tracked, untracked, or ignored residue" >&2
+            exit 1
+          fi
           go build -o "$tools_root/synapse-callgraph" ./cmd/synapse-callgraph
           go build -o "$tools_root/synapse-ast" ./cmd/synapse-ast
           test -x "$tools_root/synapse-callgraph"
@@ -211,6 +314,10 @@ jobs:
           export SYNAPSE_REACHABILITY_CONTROLLER_ENVELOPE="$RUNNER_TEMP/synapse-reachability-controller/envelopes/$envelope_name"
           export SYNAPSE_TAINT_CALLGRAPH_BIN="$RUNNER_TEMP/synapse-reachability-tools/synapse-callgraph"
           export SYNAPSE_AST_BIN="$RUNNER_TEMP/synapse-reachability-tools/synapse-ast"
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" ]; then
+            echo "trusted checkout contains tracked, untracked, or ignored residue" >&2
+            exit 1
+          fi
           make reachability-benchmark
       - name: Upload sanitized result
         id: upload
@@ -224,7 +331,7 @@ jobs:
       - name: Teardown trusted benchmark workspace
         if: ${{ always() }}
         shell: bash
-        run: rm -rf -- "$RUNNER_TEMP/synapse-reachability-controller" "$RUNNER_TEMP/synapse-reachability-tools" "$RUNNER_TEMP/synapse-reachability/private" "$RUNNER_TEMP/synapse-reachability/published"
+        run: rm -rf -- "$RUNNER_TEMP/synapse-reachability-controller" "$RUNNER_TEMP/synapse-reachability-tools" "$RUNNER_TEMP/synapse-reachability/private" "$RUNNER_TEMP/synapse-reachability/published" "$RUNNER_TEMP/synapse-reachability-gitconfig" "$RUNNER_TEMP/synapse-reachability-prior-checkout"
 
   aggregate:
     name: Aggregate benchmark status

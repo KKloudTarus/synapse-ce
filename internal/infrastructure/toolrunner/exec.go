@@ -1,4 +1,4 @@
-// Package toolrunner runs argv-based tools for use-case adapters. It is the single
+// Package toolrunner runs argv-based tools for the recon use case. It is the single
 // execution primitive behind the ToolRunner port: a command is always invoked as an
 // argv array via os/exec – NEVER a shell string – with a per-run
 // timeout (the WHOLE process group is killed on deadline, so resolver/helper
@@ -12,7 +12,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"time"
 
@@ -72,16 +71,6 @@ func (r *ExecRunner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolRe
 
 	// argv only: the binary is arg 0 and never interpolated into a shell.
 	cmd := exec.CommandContext(runCtx, spec.Name, spec.Args...)
-	if spec.Workdir != "" {
-		info, err := os.Stat(spec.Workdir)
-		if err != nil {
-			return ports.ToolResult{}, fmt.Errorf("toolrunner: validate workdir %q: %w", spec.Workdir, err)
-		}
-		if !info.IsDir() {
-			return ports.ToolResult{}, fmt.Errorf("%w: toolrunner workdir %q is not a directory", shared.ErrValidation, spec.Workdir)
-		}
-		cmd.Dir = spec.Workdir
-	}
 	if len(spec.Stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(spec.Stdin)
 	}

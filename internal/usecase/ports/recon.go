@@ -22,13 +22,11 @@ type ToolSpec struct {
 	Timeout        time.Duration // 0 = the runner's configured default
 	MaxOutputBytes int           // 0 = the runner's configured default cap
 
-	// Workdir scopes child scratch and output. ExecRunner uses it as the child working
-	// directory; SandboxRunner binds it read-write inside the sandbox. Empty selects the
-	// runner default.
-	Workdir string
-	// The following fields are runner-specific optional controls. A zero value means
-	// "runner default" or "not requested".
-	ReadOnlyPaths []string // SandboxRunner-only extra host paths bound READ-ONLY (e.g. an acquired source dir, the grype DB)
+	// Sandbox-only fields: the plain ExecRunner ignores these; the
+	// SandboxRunner uses them to confine the tool. A zero value means "runner default"
+	// / "not requested".
+	Workdir       string   // host dir bound read-WRITE inside the sandbox (scoped scratch/output); empty = ephemeral tmpfs only
+	ReadOnlyPaths []string // extra host paths bound READ-ONLY (e.g. an acquired source dir, the grype DB)
 	CgroupFD      int      // >0: create the process inside this cgroup v2 dir fd (clone-into-cgroup) so the connect-logger captures it; Linux only
 	// ExtraFiles are inherited by the child at fd 3, 4, … (index order), mirroring
 	// exec.Cmd.ExtraFiles. The SandboxRunner uses this to hand bwrap the seccomp-filter fd

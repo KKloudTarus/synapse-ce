@@ -38,6 +38,9 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 	var bundleRoot string
 	authoritative := false
 	if controllerProvided {
+		if err := runner.requirePristineAuthoritativeCheckout(ctx); err != nil {
+			return Result{}, err
+		}
 		envelope, err = runner.loadControllerEnvelope(facts)
 		if err != nil {
 			return Result{}, err

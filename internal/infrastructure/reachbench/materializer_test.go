@@ -94,11 +94,15 @@ func TestFixtureMaterializerBuildsFrozenGeneratedFixture(t *testing.T) {
 	runner := &fixtureToolRunner{}
 	materializer := newFixtureMaterializer(t, runner, "linux/amd64")
 	runner.run = func(_ context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
+		root, args, ok := materializerGoInvocation(spec)
+		if !ok {
+			return ports.ToolResult{}, fmt.Errorf("unexpected tool specification %+v", spec)
+		}
 		switch {
-		case spec.Name == "go" && reflect.DeepEqual(spec.Args, []string{"version"}):
+		case reflect.DeepEqual(args, []string{"version"}):
 			return ports.ToolResult{Stdout: []byte("go version go1.27.0 linux/amd64\n")}, nil
-		case spec.Name == "go" && reflect.DeepEqual(spec.Args, specification.Build.Steps[0].Argv[1:]):
-			path := filepath.Join(spec.Workdir, filepath.FromSlash(specification.Build.Outputs[0].Path))
+		case reflect.DeepEqual(args, specification.Build.Steps[0].Argv[1:]):
+			path := filepath.Join(root, filepath.FromSlash(specification.Build.Outputs[0].Path))
 			if err := os.WriteFile(path, []byte("generated binary fixture"), 0o600); err != nil {
 				return ports.ToolResult{}, err
 			}
@@ -120,17 +124,24 @@ func TestFixtureMaterializerBuildsFrozenGeneratedFixture(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("tool calls = %d, want probe and build", len(calls))
 	}
-	if calls[1].Name != specification.Build.Steps[0].Argv[0] || !reflect.DeepEqual(calls[1].Args, specification.Build.Steps[0].Argv[1:]) {
-		t.Errorf("build argv = %q %q, want %q", calls[1].Name, calls[1].Args, specification.Build.Steps[0].Argv)
+	for index, call := range calls {
+		if call.Workdir != "" {
+			t.Errorf("tool call %d workdir = %q, want empty", index+1, call.Workdir)
+		}
 	}
-	if calls[1].Workdir != fixture.Root {
-		t.Errorf("build workdir = %q, want %q", calls[1].Workdir, fixture.Root)
+	root, buildArgs, ok := materializerGoInvocation(calls[1])
+	if !ok || calls[1].Name != specification.Build.Steps[0].Argv[0] || !reflect.DeepEqual(buildArgs, specification.Build.Steps[0].Argv[1:]) {
+		t.Errorf("build argv = %q %q, want Go -C <root> %q", calls[1].Name, calls[1].Args, specification.Build.Steps[0].Argv[1:])
+	}
+	if root != fixture.Root {
+		t.Errorf("Go build root = %q, want %q", root, fixture.Root)
 	}
 	environment := toolEnvironment(calls[1].Env)
 	for key, want := range map[string]string{
 		"CGO_ENABLED": "0",
 		"GOOS":        "linux",
 		"GOARCH":      "amd64",
+		"GOWORK":      "off",
 		"GOTOOLCHAIN": "local",
 		"GOPROXY":     "off",
 		"GOSUMDB":     "off",
@@ -157,6 +168,84 @@ func TestFixtureMaterializerBuildsFrozenGeneratedFixture(t *testing.T) {
 	}
 	if got := benchmark.SHA256Digest(contents); got != fixture.Outputs[0].Digest {
 		t.Errorf("output digest = %q, want %q", got, fixture.Outputs[0].Digest)
+	}
+}
+
+func TestFixtureMaterializerBuildsEveryFrozenToolFormWithoutRunnerWorkdir(t *testing.T) {
+	for _, fixtureID := range []string{
+		"go-binary-input",
+		"dotnet-build-aware-import-input",
+		"dotnet-symbols-tier2-input",
+		"jvm-coarse-input",
+		"jvm-tier2-input",
+	} {
+		t.Run(fixtureID, func(t *testing.T) {
+			specification := materializerFixture(t, fixtureID)
+			workRoot := privateMaterializerRoot(t)
+			cellKey := "sha256:" + strings.Repeat("a", 64)
+			expectedRoot, err := prepareMaterializationRoot(workRoot, cellKey)
+			if err != nil {
+				t.Fatalf("prepare materialization root: %v", err)
+			}
+			runner := &fixtureToolRunner{}
+			materializer := newFixtureMaterializer(t, runner, "linux/amd64")
+			runner.run = func(_ context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
+				if isFixtureToolchainProbe(specification.Build.Toolchain.Family, spec) {
+					return matchingFixtureToolchainProbe(specification.Build.Toolchain.Family), nil
+				}
+				for _, output := range specification.Build.Outputs {
+					path := filepath.Join(expectedRoot, filepath.FromSlash(output.Path))
+					if err := os.WriteFile(path, []byte("generated "+fixtureID), 0o600); err != nil {
+						return ports.ToolResult{}, err
+					}
+				}
+				return ports.ToolResult{}, nil
+			}
+
+			fixture, err := materializer.Materialize(context.Background(), FixtureMaterializationRequest{
+				Specification: specification,
+				WorkRoot:      workRoot,
+				CellKey:       cellKey,
+			})
+			if err != nil {
+				t.Fatalf("Materialize: %v", err)
+			}
+			calls := runner.Calls()
+			if len(calls) != len(specification.Build.Steps)+1 {
+				t.Fatalf("tool calls = %d, want %d", len(calls), len(specification.Build.Steps)+1)
+			}
+			for index, call := range calls {
+				if call.Workdir != "" {
+					t.Errorf("tool call %d workdir = %q, want empty", index+1, call.Workdir)
+				}
+			}
+			assertFrozenFixtureInvocations(t, fixture.Root, specification.Build, calls)
+		})
+	}
+}
+
+func TestFrozenFixturePathRewritingFailsClosed(t *testing.T) {
+	root := privateMaterializerRoot(t)
+	unsafe := materializerFixture(t, "dotnet-symbols-tier2-input")
+	unsafe.Build.Steps = []reachcontract.FixtureBuildStep{{Argv: []string{"dotnet", "restore", "./../outside"}}}
+	if _, _, err := buildToolInvocation(root, unsafe, unsafe.Build.Steps[0]); err == nil {
+		t.Fatal("build invocation accepted a path that escapes the materialization root")
+	}
+	if _, err := resolveFrozenRootRelativePath(root, "fixtures/not-root-relative"); err == nil {
+		t.Fatal("root-relative resolver accepted a non-frozen path form")
+	}
+	if _, err := resolveFrozenRootRelativePath(root, "./../outside"); err == nil {
+		t.Fatal("root-relative resolver accepted a path that escapes the materialization root")
+	}
+	if err := os.Mkdir(filepath.Join(root, "generated"), 0o700); err != nil {
+		t.Fatalf("create classpath parent: %v", err)
+	}
+	if _, err := rewriteFrozenRootRelativeArg(root, "./generated/a:generated/b"); err == nil {
+		t.Fatal("JVM classpath rewriting accepted a non-root-relative vector entry")
+	}
+	jvm := materializerFixture(t, "jvm-coarse-input")
+	if _, _, err := buildToolInvocation(root, jvm, reachcontract.FixtureBuildStep{Argv: []string{"dotnet", "restore"}}); err == nil {
+		t.Fatal("JVM build invocation accepted a non-frozen tool form")
 	}
 }
 
@@ -205,7 +294,8 @@ func TestFixtureMaterializerRejectsUnsupportedBuildPlatform(t *testing.T) {
 
 func TestFixtureMaterializerRejectsToolchainVersionMismatch(t *testing.T) {
 	runner := &fixtureToolRunner{run: func(_ context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
-		if spec.Name != "go" || !reflect.DeepEqual(spec.Args, []string{"version"}) {
+		_, args, ok := materializerGoInvocation(spec)
+		if !ok || !reflect.DeepEqual(args, []string{"version"}) {
 			return ports.ToolResult{}, fmt.Errorf("unexpected tool %q %q", spec.Name, spec.Args)
 		}
 		return ports.ToolResult{Stdout: []byte("go version go1.26.0 linux/amd64\n")}, nil
@@ -302,7 +392,8 @@ func TestFixtureMaterializerRejectsBuildExecutionFailures(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			runner := &fixtureToolRunner{run: func(_ context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
-				if spec.Name == "go" && reflect.DeepEqual(spec.Args, []string{"version"}) {
+				_, args, ok := materializerGoInvocation(spec)
+				if ok && reflect.DeepEqual(args, []string{"version"}) {
 					return ports.ToolResult{Stdout: []byte("go version go1.27.0 linux/amd64\n")}, nil
 				}
 				return test.result, test.err
@@ -338,7 +429,11 @@ func TestFixtureMaterializerRejectsMissingAndSymlinkOutputs(t *testing.T) {
 	})
 	t.Run("symlink", func(t *testing.T) {
 		runner := successfulGoFixtureRunner(t, func(spec ports.ToolSpec, output string) error {
-			outside := filepath.Join(filepath.Dir(spec.Workdir), "outside")
+			root, _, ok := materializerGoInvocation(spec)
+			if !ok {
+				return errors.New("missing Go materialization root")
+			}
+			outside := filepath.Join(filepath.Dir(root), "outside")
 			if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
 				return err
 			}
@@ -437,6 +532,94 @@ func TestMaterializedFixtureManifestIsCanonicalAndPathIndependent(t *testing.T) 
 	}
 }
 
+func isFixtureToolchainProbe(family string, spec ports.ToolSpec) bool {
+	switch family {
+	case "go":
+		_, args, ok := materializerGoInvocation(spec)
+		return ok && reflect.DeepEqual(args, []string{"version"})
+	case "dotnet-sdk":
+		return spec.Name == "dotnet" && reflect.DeepEqual(spec.Args, []string{"--version"})
+	case "openjdk":
+		return spec.Name == "javac" && reflect.DeepEqual(spec.Args, []string{"-version"})
+	default:
+		return false
+	}
+}
+
+func matchingFixtureToolchainProbe(family string) ports.ToolResult {
+	switch family {
+	case "go":
+		return ports.ToolResult{Stdout: []byte("go version go1.27.0 linux/amd64\n")}
+	case "dotnet-sdk":
+		return ports.ToolResult{Stdout: []byte("8.0.100\n")}
+	case "openjdk":
+		return ports.ToolResult{Stdout: []byte("javac 21.0.5\n")}
+	default:
+		return ports.ToolResult{}
+	}
+}
+
+func assertFrozenFixtureInvocations(t *testing.T, root string, build *reachcontract.FixtureBuild, calls []ports.ToolSpec) {
+	t.Helper()
+	if build == nil || len(calls) != len(build.Steps)+1 {
+		t.Fatalf("fixture build invocation shape is invalid")
+	}
+	probeName, probeArgs := toolchainProbe(build.Toolchain.Family)
+	if build.Kind == reachcontract.FixtureBuildGoBinary {
+		probeRoot, args, ok := materializerGoInvocation(calls[0])
+		if !ok || probeRoot != root || calls[0].Name != probeName || !reflect.DeepEqual(args, probeArgs) {
+			t.Fatalf("Go probe = %q %q, want Go -C %q %q", calls[0].Name, calls[0].Args, root, probeArgs)
+		}
+	} else if calls[0].Name != probeName || !reflect.DeepEqual(calls[0].Args, probeArgs) {
+		t.Fatalf("toolchain probe = %q %q, want %q %q", calls[0].Name, calls[0].Args, probeName, probeArgs)
+	}
+	for index, step := range build.Steps {
+		call := calls[index+1]
+		if call.Name != step.Argv[0] {
+			t.Errorf("build step %d tool = %q, want %q", index+1, call.Name, step.Argv[0])
+			continue
+		}
+		if build.Kind == reachcontract.FixtureBuildGoBinary {
+			gotRoot, args, ok := materializerGoInvocation(call)
+			if !ok || gotRoot != root || !reflect.DeepEqual(args, step.Argv[1:]) {
+				t.Errorf("Go build step %d argv = %q, want Go -C %q %q", index+1, call.Args, root, step.Argv[1:])
+			}
+			continue
+		}
+		assertRootRelativeArgs(t, root, step.Argv[1:], call.Args)
+	}
+}
+
+func assertRootRelativeArgs(t *testing.T, root string, want, got []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("rewritten argv length = %d, want %d", len(got), len(want))
+	}
+	for index, original := range want {
+		if !strings.HasPrefix(original, "./") {
+			if got[index] != original {
+				t.Errorf("argv %d = %q, want unchanged %q", index, got[index], original)
+			}
+			continue
+		}
+		if strings.Contains(original, ":") {
+			parts := strings.Split(original, ":")
+			for partIndex, part := range parts {
+				parts[partIndex] = filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(part, "./")))
+			}
+			wantClasspath := strings.Join(parts, ":")
+			if got[index] != wantClasspath {
+				t.Errorf("classpath argv %d = %q, want %q", index, got[index], wantClasspath)
+			}
+			continue
+		}
+		wantPath := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(original, "./")))
+		if got[index] != wantPath {
+			t.Errorf("argv %d = %q, want %q", index, got[index], wantPath)
+		}
+	}
+}
+
 func newFixtureMaterializer(t *testing.T, runner ports.ToolRunner, platform string) *FixtureMaterializer {
 	t.Helper()
 	toolDirectory := filepath.Join(t.TempDir(), "tools")
@@ -474,18 +657,26 @@ func privateMaterializerRoot(t *testing.T) string {
 func successfulGoFixtureRunner(t *testing.T, build func(ports.ToolSpec, string) error) *fixtureToolRunner {
 	t.Helper()
 	return &fixtureToolRunner{run: func(_ context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
-		if spec.Name == "go" && reflect.DeepEqual(spec.Args, []string{"version"}) {
+		root, args, ok := materializerGoInvocation(spec)
+		if !ok {
+			return ports.ToolResult{}, fmt.Errorf("unexpected tool %q %q", spec.Name, spec.Args)
+		}
+		if reflect.DeepEqual(args, []string{"version"}) {
 			return ports.ToolResult{Stdout: []byte("go version go1.27.0 linux/amd64\n")}, nil
 		}
-		if spec.Name != "go" {
-			return ports.ToolResult{}, fmt.Errorf("unexpected tool %q", spec.Name)
-		}
-		output := filepath.Join(spec.Workdir, "generated", "go-binary-pclntab")
+		output := filepath.Join(root, "generated", "go-binary-pclntab")
 		if build == nil {
 			return ports.ToolResult{}, nil
 		}
 		return ports.ToolResult{}, build(spec, output)
 	}}
+}
+
+func materializerGoInvocation(spec ports.ToolSpec) (string, []string, bool) {
+	if spec.Name != "go" || len(spec.Args) < 3 || spec.Args[0] != "-C" || !filepath.IsAbs(spec.Args[1]) {
+		return "", nil, false
+	}
+	return spec.Args[1], spec.Args[2:], true
 }
 
 func cloneToolSpec(spec ports.ToolSpec) ports.ToolSpec {

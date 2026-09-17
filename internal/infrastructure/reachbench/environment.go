@@ -45,6 +45,17 @@ func DefaultDependencies() Dependencies {
 	}
 }
 
+func (runner *Runner) requirePristineAuthoritativeCheckout(ctx context.Context) error {
+	status, err := runner.dependencies.Command(ctx, "git", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching")
+	if err != nil {
+		return fmt.Errorf("check authoritative checkout with git argv: %w", err)
+	}
+	if len(status) != 0 {
+		return errors.New("authoritative reachability route requires a pristine checkout")
+	}
+	return nil
+}
+
 func (runner *Runner) deriveRuntime(ctx context.Context) (runtimeFacts, error) {
 	rootOutput, err := runner.dependencies.Command(ctx, "git", "rev-parse", "--show-toplevel")
 	if err != nil {

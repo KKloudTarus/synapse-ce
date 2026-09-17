@@ -46,6 +46,27 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 		t.Fatal("workflow must upload only the known sanitized publication leaf")
 	}
 	for _, required := range []string{
+		"GIT_CONFIG_NOSYSTEM: \"1\"",
+		"GIT_CONFIG_COUNT: \"0\"",
+		"git_config=\"$runner_temp/synapse-reachability-gitconfig\"",
+		"printf 'GIT_CONFIG_GLOBAL=%s\\n' \"$git_config\" >> \"$GITHUB_ENV\"",
+		"- name: Prepare fresh trusted checkout",
+		"cd \"$RUNNER_TEMP\"",
+		"realpath -m -- \"$workspace\"",
+		"rm -f -- \"$git_config\"",
+		"rm -rf -- \"$workspace\"",
+		"install -d -m 0700 -- \"$workspace\"",
+		"install -m 0600 /dev/null \"$git_config\"",
+		"clean: true",
+		"persist-credentials: false",
+		"set-safe-directory: false",
+		"git reset --hard \"$SOURCE_SHA\"",
+		"git clean -ffdx",
+		"git rev-parse HEAD^{tree}",
+		"objects/info/alternates",
+		"refs/replace",
+		"git config --local --get-regexp '^(include|includeif\\..*)\\.path$'",
+		"git config --local --get core.hooksPath",
 		"CONTROLLER_SOURCE_ROOT: ${{ vars.REACHABILITY_BENCHMARK_CONTROLLER_ROOT }}",
 		"stage_root=\"$RUNNER_TEMP/synapse-reachability-controller\"",
 		"controller staging root already exists",
@@ -64,6 +85,33 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 			t.Fatalf("workflow does not safely stage controller input: missing %q", required)
 		}
 	}
+	if strings.Contains(workflow, "mv -- \"$workspace\"") || strings.Contains(workflow, "prior_checkout=") {
+		t.Fatal("workflow must remove and recreate the validated checkout without quarantining or copying it")
+	}
+	teardown := strings.Index(workflow, "- name: Teardown trusted benchmark workspace")
+	if teardown < 0 || !strings.Contains(workflow[teardown:], "if: ${{ always() }}") || !strings.Contains(workflow[teardown:], "\"$RUNNER_TEMP/synapse-reachability-gitconfig\"") || !strings.Contains(workflow[teardown:], "\"$RUNNER_TEMP/synapse-reachability-prior-checkout\"") {
+		t.Fatal("workflow teardown must always remove isolated Git state")
+	}
+	const pristineStatus = "git status --porcelain=v1 --untracked-files=all --ignored=matching"
+	if got := strings.Count(workflow, pristineStatus); got != 3 {
+		t.Fatalf("workflow pristine checkout status checks = %d, want 3", got)
+	}
+	prepare := strings.Index(workflow, "- name: Prepare fresh trusted checkout")
+	checkout := strings.Index(workflow, "- name: Check out exact source revision")
+	assertion := strings.Index(workflow, "- name: Assert fresh checkout and protected reference head")
+	setup := strings.Index(workflow, "- name: Set up Go")
+	helperBuild := strings.Index(workflow, "go build -o \"$tools_root/synapse-callgraph\"")
+	benchmark := strings.Index(workflow, "\n          make reachability-benchmark")
+	if prepare < 0 || checkout < 0 || assertion < 0 || setup < 0 || helperBuild < 0 || benchmark < 0 || !(prepare < checkout && checkout < assertion && assertion < setup && setup < helperBuild && helperBuild < benchmark) {
+		t.Fatal("workflow checkout preparation, assertion, setup, helper build, and benchmark are out of order")
+	}
+	if status := strings.LastIndex(workflow[:helperBuild], pristineStatus); status < strings.Index(workflow, "- name: Build trusted helpers") {
+		t.Fatal("workflow does not recheck full clean status immediately before helper compilation")
+	}
+	if status := strings.LastIndex(workflow[:benchmark], pristineStatus); status < strings.Index(workflow, "- name: Run trusted benchmark") {
+		t.Fatal("workflow does not recheck full clean status immediately before benchmark execution")
+	}
+
 	for _, required := range []string{
 		"aggregate:",
 		"needs: [route, benchmark]",

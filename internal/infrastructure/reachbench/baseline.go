@@ -30,13 +30,6 @@ func (runner *Runner) verifyBaselineAllowlist(ctx context.Context, bundleRoot st
 	if err := allowlist.Validate(); err != nil {
 		return BaselineAllowlistResult{}, err
 	}
-	status, err := runner.dependencies.Command(ctx, "git", "status", "--porcelain")
-	if err != nil {
-		return BaselineAllowlistResult{}, fmt.Errorf("check harness working tree with git argv: %w", err)
-	}
-	if strings.TrimSpace(string(status)) != "" {
-		return BaselineAllowlistResult{}, errors.New("protected baseline requires a clean harness working tree")
-	}
 	diff, err := runner.dependencies.Command(ctx, "git", "diff", "--name-status", "--no-renames", "-z", measurement.TrustedBaselineRevision+"..."+facts.harness.Commit)
 	if err != nil {
 		return BaselineAllowlistResult{}, fmt.Errorf("derive harness delta with git argv: %w", err)

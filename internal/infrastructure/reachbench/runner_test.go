@@ -580,22 +580,45 @@ func TestProtectedBaselineAllowsReviewedAdditionsModificationsAndPackageLocalAda
 	}
 }
 
-func TestProtectedBaselineRejectsDirtyHarness(t *testing.T) {
-	fixture := newFixture(t)
-	dependencies := fixture.dependencies(map[string]string{ControllerEnvelopeEnvironment: fixture.writeEnvelope(t, fixture.envelope(RouteProtectedBaseline, measurement.BaselineMeasurement, FinalBaseline, fixture.baselineAnalyzer, fixture.baseline.ActiveSnapshot))})
-	original := dependencies.Command
-	dependencies.Command = func(ctx context.Context, binary string, args ...string) ([]byte, error) {
-		if binary == "git" && strings.Join(args, " ") == "status --porcelain" {
-			return []byte(" M internal/infrastructure/reachbench/runner.go\n"), nil
-		}
-		return original(ctx, binary, args...)
-	}
-	runner, err := NewRunner(dependencies, captureFunc(validCapture(fixture.expected)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := runner.Run(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "clean harness") {
-		t.Fatalf("dirty harness was accepted: %v", err)
+func TestAuthoritativeRoutesRejectIgnoredCheckoutResidue(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		route    Route
+		purpose  measurement.RunPurpose
+		final    FinalMode
+		analyzer func(fixture) RevisionIdentity
+		snapshot func(fixture) measurement.SnapshotIdentity
+	}{
+		{
+			name: "protected baseline", route: RouteProtectedBaseline, purpose: measurement.BaselineMeasurement, final: FinalBaseline,
+			analyzer: func(f fixture) RevisionIdentity { return f.baselineAnalyzer },
+			snapshot: func(f fixture) measurement.SnapshotIdentity { return f.baseline.ActiveSnapshot },
+		},
+		{
+			name: "candidate", route: RouteCandidate, purpose: measurement.CandidateAcceptance, final: FinalAcceptance,
+			analyzer: func(f fixture) RevisionIdentity { return f.candidateAnalyzer },
+			snapshot: func(f fixture) measurement.SnapshotIdentity { return f.candidate.ActiveSnapshot },
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newFixture(t)
+			envelope := fixture.envelope(test.route, test.purpose, test.final, test.analyzer(fixture), test.snapshot(fixture))
+			dependencies := fixture.dependencies(map[string]string{ControllerEnvelopeEnvironment: fixture.writeEnvelope(t, envelope)})
+			original := dependencies.Command
+			dependencies.Command = func(ctx context.Context, binary string, args ...string) ([]byte, error) {
+				if binary == "git" && strings.Join(args, " ") == "status --porcelain=v1 -z --untracked-files=all --ignored=matching" {
+					return []byte("!! .cache/contaminated\x00"), nil
+				}
+				return original(ctx, binary, args...)
+			}
+			runner, err := NewRunner(dependencies, captureFunc(validCapture(fixture.expected)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := runner.Run(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "pristine checkout") {
+				t.Fatalf("ignored checkout residue was accepted: %v", err)
+			}
+		})
 	}
 }
 
@@ -803,7 +826,7 @@ func (fixture fixture) dependencies(environment map[string]string) Dependencies 
 				return []byte(fixture.baselineAnalyzer.Commit + "\n"), nil
 			case "rev-parse " + measurement.TrustedBaselineRevision + "^{tree}":
 				return []byte(fixture.baselineAnalyzer.Tree + "\n"), nil
-			case "status --porcelain":
+			case "status --porcelain=v1 -z --untracked-files=all --ignored=matching":
 				return nil, nil
 			case "diff --name-status --no-renames -z " + measurement.TrustedBaselineRevision + "..." + fixture.harness.Commit:
 				return encodeChangedEntries(fixture.baselineAllowlist.Entries), nil

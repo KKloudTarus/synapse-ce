@@ -462,13 +462,13 @@ func (materializer *FixtureMaterializer) build(ctx context.Context, root string,
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if len(step.Argv) == 0 {
-			return errors.New("empty validated reachability fixture build step")
+		name, args, err := buildToolInvocation(root, specification, step)
+		if err != nil {
+			return fmt.Errorf("prepare reachability fixture build step %d: %w", index+1, err)
 		}
 		result, err := materializer.runner.Run(ctx, ports.ToolSpec{
-			Name:           step.Argv[0],
-			Args:           append([]string(nil), step.Argv[1:]...),
-			Workdir:        root,
+			Name:           name,
+			Args:           args,
 			Timeout:        materializerBuildTimeout,
 			MaxOutputBytes: materializerMaxOutputBytes,
 			Env:            append([]string(nil), environment...),
@@ -478,6 +478,127 @@ func (materializer *FixtureMaterializer) build(ctx context.Context, root string,
 		}
 	}
 	return nil
+}
+
+// buildToolInvocation keeps fixture-local paths out of the shared process runner.
+// The fixture specification was checked against the embedded frozen contract before
+// materialization. Go accepts an argv-native directory switch; the other closed
+// tool forms receive only verified absolute paths below the real materialization root.
+func buildToolInvocation(root string, specification reachcontract.FixtureSpecification, step reachcontract.FixtureBuildStep) (string, []string, error) {
+	frozen, _, err := frozenFixtureSpecification(specification)
+	if err != nil {
+		return "", nil, err
+	}
+	if frozen.Build == nil || !frozenBuildStep(*frozen.Build, step) {
+		return "", nil, errors.New("reachability fixture build step is not frozen")
+	}
+	build := *frozen.Build
+	name := step.Argv[0]
+	args := append([]string(nil), step.Argv[1:]...)
+	switch build.Kind {
+	case reachcontract.FixtureBuildGoBinary:
+		if name != "go" {
+			return "", nil, errors.New("frozen Go fixture build has an unexpected tool")
+		}
+		invocation, err := goInvocationArgs(root, args)
+		if err != nil {
+			return "", nil, err
+		}
+		return name, invocation, nil
+	case reachcontract.FixtureBuildDotNetPublish:
+		if name != "dotnet" {
+			return "", nil, errors.New("frozen .NET fixture build has an unexpected tool")
+		}
+	case reachcontract.FixtureBuildJVMPackage:
+		if name != "javac" && name != "jar" {
+			return "", nil, errors.New("frozen JVM fixture build has an unexpected tool")
+		}
+	default:
+		return "", nil, errors.New("unsupported frozen reachability fixture build kind")
+	}
+	rewritten, err := rewriteFrozenRootRelativeArgs(root, args)
+	if err != nil {
+		return "", nil, err
+	}
+	return name, rewritten, nil
+}
+
+func frozenBuildStep(build reachcontract.FixtureBuild, candidate reachcontract.FixtureBuildStep) bool {
+	for _, step := range build.Steps {
+		if len(step.Argv) != len(candidate.Argv) {
+			continue
+		}
+		matches := true
+		for index := range step.Argv {
+			if step.Argv[index] != candidate.Argv[index] {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}
+
+func goInvocationArgs(root string, args []string) ([]string, error) {
+	trustedRoot, err := benchcycle.RealDirectory(root)
+	if err != nil {
+		return nil, fmt.Errorf("validate reachability fixture Go root: %w", err)
+	}
+	invocation := make([]string, 0, len(args)+2)
+	invocation = append(invocation, "-C", trustedRoot)
+	invocation = append(invocation, args...)
+	return invocation, nil
+}
+
+func rewriteFrozenRootRelativeArgs(root string, args []string) ([]string, error) {
+	rewritten := make([]string, len(args))
+	for index, arg := range args {
+		value, err := rewriteFrozenRootRelativeArg(root, arg)
+		if err != nil {
+			return nil, err
+		}
+		rewritten[index] = value
+	}
+	return rewritten, nil
+}
+
+func rewriteFrozenRootRelativeArg(root, arg string) (string, error) {
+	if !strings.HasPrefix(arg, "./") {
+		return arg, nil
+	}
+	if strings.Contains(arg, ":") {
+		parts := strings.Split(arg, ":")
+		for index, part := range parts {
+			if !strings.HasPrefix(part, "./") {
+				return "", errors.New("frozen JVM classpath contains a non-root-relative entry")
+			}
+			path, err := resolveFrozenRootRelativePath(root, part)
+			if err != nil {
+				return "", err
+			}
+			parts[index] = path
+		}
+		return strings.Join(parts, ":"), nil
+	}
+	return resolveFrozenRootRelativePath(root, arg)
+}
+
+func resolveFrozenRootRelativePath(root, arg string) (string, error) {
+	if !strings.HasPrefix(arg, "./") {
+		return "", errors.New("fixture build path is not root-relative")
+	}
+	relative := strings.TrimPrefix(arg, "./")
+	if !fs.ValidPath(relative) || relative == "." {
+		return "", fmt.Errorf("unsafe frozen fixture build path %q", arg)
+	}
+	path, err := declaredPath(root, relative, false)
+	if err != nil {
+		return "", fmt.Errorf("resolve frozen fixture build path %q: %w", arg, err)
+	}
+	return path, nil
 }
 
 func prepareBuildOutputDirectories(root string, build reachcontract.FixtureBuild) error {
@@ -547,6 +668,7 @@ func (materializer *FixtureMaterializer) buildEnvironment(root string, build rea
 		"LANG":                              "C",
 		"SOURCE_DATE_EPOCH":                 "0",
 		"GOENV":                             "off",
+		"GOWORK":                            "off",
 		"GOTOOLCHAIN":                       "local",
 		"GOPROXY":                           "off",
 		"GOSUMDB":                           "off",
@@ -590,10 +712,16 @@ func (materializer *FixtureMaterializer) probeToolchain(ctx context.Context, roo
 	if name == "" {
 		return fmt.Errorf("unsupported reachability fixture toolchain family %q", build.Toolchain.Family)
 	}
+	if name == "go" {
+		var err error
+		args, err = goInvocationArgs(root, args)
+		if err != nil {
+			return err
+		}
+	}
 	result, err := materializer.runner.Run(ctx, ports.ToolSpec{
 		Name:           name,
 		Args:           args,
-		Workdir:        root,
 		Timeout:        materializerProbeTimeout,
 		MaxOutputBytes: materializerMaxOutputBytes,
 		Env:            append([]string(nil), environment...),
