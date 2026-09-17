@@ -1,0 +1,33 @@
+{
+  "schema_version": "synapse-codequality-corpus-v1",
+  "cases": [
+    {
+      "name": "go-todo-comment",
+      "language": "go",
+      "fixture": "go-todo",
+      "issues": [
+        { "file": "sample.go", "line": 3, "type": "code_smell" }
+      ]
+    },
+    {
+      "name": "python-command-injection-and-smells",
+      "language": "python",
+      "fixture": "py-smells",
+      "issues": [
+        { "file": "sample.py", "line": 5, "type": "code_smell" },
+        { "file": "sample.py", "line": 6, "type": "vulnerability" },
+        { "file": "sample.py", "line": 13, "type": "code_smell" }
+      ]
+    },
+    {
+      "name": "javascript-eval-and-loose-equality",
+      "language": "javascript",
+      "fixture": "js-smells",
+      "issues": [
+        { "file": "sample.js", "line": 2, "type": "code_smell" },
+        { "file": "sample.js", "line": 3, "type": "security_hotspot" },
+        { "file": "sample.js", "line": 7, "type": "bug" }
+      ]
+    }
+  ]
+}
