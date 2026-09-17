@@ -56,10 +56,15 @@ export function CodeQualityProject() {
   const poll = useRef<ReturnType<typeof setTimeout> | null>(null)
   const defaultBranch = project?.sourceBinding.ref || 'main'
   const selectedBranch = searchParams.get('branch') || defaultBranch
+  const branchKinds = useMemo(() => {
+    const kinds = new Map<string, 'long_lived' | 'short_lived'>()
+    for (const b of branchList ?? []) if (b?.name) kinds.set(b.name, b.kind)
+    return kinds
+  }, [branchList])
   const branchOptions = useMemo(() => {
     const set = new Set<string>()
     if (defaultBranch) set.add(defaultBranch)
-    for (const b of branchList ?? []) if (b) set.add(b)
+    for (const b of branchList ?? []) if (b?.name) set.add(b.name)
     if (selectedBranch) set.add(selectedBranch)
     return [...set]
   }, [branchList, defaultBranch, selectedBranch])
@@ -273,7 +278,7 @@ export function CodeQualityProject() {
                   {branchOptions.map((b) => (
                     <option key={b} value={b}>
                       {b}
-                      {b === defaultBranch ? ' (default)' : ''}
+                      {b === defaultBranch ? ' (default)' : branchKinds.get(b) === 'short_lived' ? ' · short-lived' : ''}
                     </option>
                   ))}
                 </select>
