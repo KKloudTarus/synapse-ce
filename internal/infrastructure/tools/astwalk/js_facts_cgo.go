@@ -83,11 +83,14 @@ func JsFactsFor(ctx context.Context, root string) (jsprogram.Document, error) {
 		extractor := jsFactExtractor{
 			doc: &doc, module: module, file: rel, source: content,
 			values: map[string]bool{}, flows: map[string]bool{},
+			importAliases: map[string]string{},
 		}
 		if rootNode.HasError() {
 			extractor.gap(jsprogram.GapParseRecovery, moduleID, "parser_recovery", rootNode)
 		}
 		extractor.walk(rootNode, jsScope{id: moduleID, qualified: "", kind: jsprogram.SymbolModule})
+		extractor.emitLocalReexports(moduleID, modulePos)
+		extractor.markImportValueEscapes(rootNode, moduleID, modulePos)
 	}, func(issue sourceIssue) {
 		// The shared walker only reports issues for python-shaped files; a JS file that is oversized or
 		// unreadable is simply not visited. That is a coverage-recall limitation (a missed file), never a
@@ -145,6 +148,12 @@ type jsFactExtractor struct {
 	values     map[string]bool
 	flows      map[string]bool
 	symbolQual map[string]bool // qualified names already emitted in this module, to disambiguate duplicates
+	// importAliases maps this module's import local binding -> specifier, and localExports collects the local
+	// names re-exported without a source (`export { x }`, `export default x`). After the walk, a local export
+	// whose name is an import binding is a re-export of that package's surface (the twin of `export ... from
+	// 'm'`) and is recorded as an ImportReexport so a reachability negative for that package cannot suppress.
+	importAliases map[string]string
+	localExports  []string
 }
 
 // boundedQualified builds a unique, length-bounded qualified name from a parent scope and a (possibly
@@ -251,6 +260,22 @@ func (e *jsFactExtractor) walk(node *sitter.Node, scope jsScope) {
 		// static and not gapped, so ordinary indexing does not flood the coverage gaps.
 		if idx := node.ChildByFieldName("index"); idx != nil && !jsIsLiteralKeyNode(idx) {
 			e.gap(jsprogram.GapDynamicAttribute, scope.id, "computed_member", node)
+		}
+	case "decorator":
+		// A decorator INVOKES its expression when the declaration is evaluated (a class/method/field decorator
+		// runs at definition time). A parenthesized decorator (`@Foo(cfg)`) carries a call_expression child that
+		// callFact models; a BARE decorator (`@observable`) applies the expression as a call the extractor does
+		// not model. Record a coverage gap for the bare form so a reachability NEGATIVE over a symbol used only
+		// as a bare decorator is never read as sound (the symbol runs at import/definition time).
+		if !jsDecoratorIsCall(node) {
+			e.gap(jsprogram.GapUnresolvedCall, scope.id, "bare_decorator", node)
+		}
+	case "jsx_opening_element", "jsx_self_closing_element":
+		// A JSX COMPONENT element (`<Comp/>`, capitalized or a member) invokes Comp when the element renders; a
+		// host element (`<div/>`) does not. The extractor models neither as a call, so record a coverage gap
+		// for a component element to keep a negative over a symbol used only in JSX from being read as sound.
+		if e.jsxNameIsComponent(node) {
+			e.gap(jsprogram.GapUnresolvedCall, scope.id, "jsx_component", node)
 		}
 	}
 	for i := 0; i < int(node.NamedChildCount()); i++ {
@@ -486,6 +511,38 @@ func (e *jsFactExtractor) exportFacts(node *sitter.Node, scope jsScope) {
 	source := node.ChildByFieldName("source")
 	if spec, ok := jsStringLiteral(source, e.source); ok {
 		e.addImport(scope, jsprogram.ImportReexport, spec, "", "", node)
+		return
+	}
+	// `export default <object/array/other expr>` re-exposes whatever it references to a consumer but, unlike an
+	// assignment or a variable declarator, produces no value facts on its own (the walk recurses past the
+	// literal without ever calling valueFor). Emit its value facts here so a nested affected binding
+	// (`export default { handler: vuln }`, `export default [vuln]`, `export default { a: { b: vuln } }`)
+	// surfaces as a reference Value the escape scan sees. A bare identifier default is handled below (recorded
+	// as a local re-export), so only a non-identifier value needs this.
+	if valueNode := node.ChildByFieldName("value"); valueNode != nil && valueNode.Type() != "identifier" {
+		e.valueFor(valueNode, scope)
+	}
+	// A LOCAL re-export (no `from`): collect the exported local names so emitLocalReexports can attribute any
+	// that are import bindings to their package. `export { a, b as c }` exports the LOCAL names a and b (c is
+	// the exported-as alias, irrelevant to which binding is re-exposed); `export default ident` exports ident.
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if child == nil {
+			continue
+		}
+		switch child.Type() {
+		case "export_clause":
+			for j := 0; j < int(child.NamedChildCount()); j++ {
+				if spec := child.NamedChild(j); spec != nil && spec.Type() == "export_specifier" {
+					if nameNode := spec.ChildByFieldName("name"); nameNode != nil && nameNode.Type() == "identifier" {
+						e.localExports = append(e.localExports, nameNode.Content(e.source))
+					}
+				}
+			}
+		case "identifier":
+			// `export default someIdentifier`
+			e.localExports = append(e.localExports, child.Content(e.source))
+		}
 	}
 }
 
@@ -501,6 +558,112 @@ func (e *jsFactExtractor) addImport(scope jsScope, kind jsprogram.ImportKind, sp
 		// bound), so an over-long import alias cannot emit an Import fact the validator rejects.
 		ScopeID: scope.id, Kind: kind, Module: spec, Name: jsSanitizeSegment(name), Alias: jsSanitizeSegment(alias), Pos: e.position(node),
 	})
+	// Record this module's import local binding (alias, or the imported name) -> specifier, so a later local
+	// re-export of that binding can be attributed to the package (see emitLocalReexports).
+	if kind != jsprogram.ImportReexport && e.importAliases != nil {
+		local := alias
+		if local == "" {
+			local = name
+		}
+		if local = jsSanitizeSegment(local); local != "" {
+			e.importAliases[local] = spec
+		}
+	}
+}
+
+// emitLocalReexports records, after the module walk, an ImportReexport for every local re-export
+// (`export { x }`, `export { x as y }`, `export default x`) whose exported local name is an import binding of
+// this module. Such a form re-exposes the package's surface to consumers without a `from` clause and produces
+// no other fact, so without this a reachability negative for that package would be unsoundly suppressible. It
+// runs post-walk so a re-export that precedes its import (hoisting) is still matched.
+func (e *jsFactExtractor) emitLocalReexports(moduleID string, pos jsprogram.Position) {
+	for _, name := range e.localExports {
+		if spec, ok := e.importAliases[name]; ok {
+			e.doc.Imports = append(e.doc.Imports, jsprogram.Import{
+				ScopeID: moduleID, Kind: jsprogram.ImportReexport, Module: spec, Pos: pos,
+			})
+		}
+	}
+}
+
+// markImportValueEscapes is the comprehensive, position-based escape guard for the suppressing reachability
+// tier (#1139). An affected import binding whose reachability the call graph fully determines is one used
+// ONLY as a call callee (`vuln()`, `ns.vuln()`), because every such call is a resolved edge. An import
+// binding that appears in ANY other position is a VALUE use: it is captured into a slot (a call argument, an
+// assignment, a return, an object/array literal, a default parameter, a class field, an export) that can
+// escape the module and be invoked out of view of the static graph. Rather than enumerate every such
+// construct (each a missing-fact hole), this post-walk pass scans every identifier once: an import-binding
+// identifier NOT in a call-callee position marks its package escaped (an ImportReexport, which
+// escapedImportSpecifiers reads), so a not-reachable verdict for that package can never suppress. It
+// over-approximates toward not-suppressing, which is raise-only-safe: at worst it forgoes a suppression.
+func (e *jsFactExtractor) markImportValueEscapes(root *sitter.Node, moduleID string, pos jsprogram.Position) {
+	if root == nil || len(e.importAliases) == 0 {
+		return
+	}
+	escaped := map[string]bool{}
+	var visit func(n *sitter.Node)
+	visit = func(n *sitter.Node) {
+		if n == nil {
+			return
+		}
+		if n.Type() == "import_statement" {
+			return // the binding DECLARATION (`import { vuln } from 'pkg'`) names the alias but is not a use
+		}
+		if n.Type() == "identifier" {
+			if spec, ok := e.importAliases[n.Content(e.source)]; ok && !jsIdentIsCallCallee(n, e.source) {
+				escaped[spec] = true
+			}
+		}
+		for i := 0; i < int(n.NamedChildCount()); i++ {
+			visit(n.NamedChild(i))
+		}
+	}
+	visit(root)
+	for spec := range escaped {
+		e.doc.Imports = append(e.doc.Imports, jsprogram.Import{
+			ScopeID: moduleID, Kind: jsprogram.ImportReexport, Module: spec, Pos: pos,
+		})
+	}
+}
+
+// jsIdentIsCallCallee reports whether an identifier is the callee of a call (`f()`), a constructor (`new F()`),
+// or the object of a member that is itself called (`ns.method()`). Only these positions are fully resolved by
+// the call graph; every other position is treated as a value use. It is deliberately conservative (returns
+// false unless the callee shape is unambiguous), so an unrecognized shape over-taints rather than under-taints.
+func jsIdentIsCallCallee(n *sitter.Node, source []byte) bool {
+	parent := n.Parent()
+	if parent == nil {
+		return false
+	}
+	switch parent.Type() {
+	case "call_expression":
+		return parent.ChildByFieldName("function") == n
+	case "new_expression":
+		return parent.ChildByFieldName("constructor") == n
+	case "member_expression":
+		if parent.ChildByFieldName("object") != n {
+			return false // n is not the base of the member (e.g. a computed key)
+		}
+		// `n.bind()`/`n.call()`/`n.apply()` invoke or re-bind the FUNCTION n itself (the bound result escapes),
+		// not a package export the graph models, so treat n as a value use rather than a callee.
+		if prop := parent.ChildByFieldName("property"); prop != nil {
+			switch prop.Content(source) {
+			case "bind", "call", "apply":
+				return false
+			}
+		}
+		gp := parent.Parent()
+		if gp == nil {
+			return false
+		}
+		switch gp.Type() {
+		case "call_expression":
+			return gp.ChildByFieldName("function") == parent
+		case "new_expression":
+			return gp.ChildByFieldName("constructor") == parent
+		}
+	}
+	return false
 }
 
 func (e *jsFactExtractor) variableDeclaratorFact(node *sitter.Node, scope jsScope) {
@@ -696,7 +859,11 @@ func (e *jsFactExtractor) valueFor(node *sitter.Node, scope jsScope) string {
 	switch {
 	case node.Type() == "call_expression" || node.Type() == "new_expression":
 		kind = jsprogram.ValueCallResult
-	case node.Type() == "identifier" || node.Type() == "member_expression":
+	case node.Type() == "identifier" || node.Type() == "member_expression" ||
+		node.Type() == "shorthand_property_identifier" || node.Type() == "shorthand_property_identifier_pattern":
+		// An object-literal shorthand (`{ vuln }`) names the binding `vuln` by reference, the same as an
+		// explicit `{ k: vuln }`. reference() already classifies it ReferenceName; keep the Value kind a
+		// reference so an escape scan sees the binding rather than an opaque expression.
 		kind = jsprogram.ValueReference
 	case ref.Kind == jsprogram.ReferenceLiteral && node.NamedChildCount() == 0:
 		kind = jsprogram.ValueLiteral
@@ -1221,6 +1388,35 @@ func jsIsLiteralKeyNode(node *sitter.Node) bool {
 	switch node.Type() {
 	case "string", "number":
 		return true
+	}
+	return false
+}
+
+// jsDecoratorIsCall reports whether a decorator node carries a parenthesized call (`@Foo(...)` / `@new Foo()`),
+// which callFact already models as a Call. A bare decorator (`@foo`, `@ns.foo`) has no call child.
+func jsDecoratorIsCall(node *sitter.Node) bool {
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		if c := node.NamedChild(i); c != nil && (c.Type() == "call_expression" || c.Type() == "new_expression") {
+			return true
+		}
+	}
+	return false
+}
+
+// jsxNameIsComponent reports whether a JSX element names a component (a binding invoked on render) rather than
+// a host element. A capitalized identifier, a member expression (`<ns.Comp/>`), or a namespaced name is a
+// component; a lowercase identifier (`<div/>`) is a host element.
+func (e *jsFactExtractor) jsxNameIsComponent(node *sitter.Node) bool {
+	name := node.ChildByFieldName("name")
+	if name == nil {
+		return false
+	}
+	switch name.Type() {
+	case "member_expression", "nested_identifier", "jsx_namespace_name":
+		return true
+	case "identifier":
+		s := name.Content(e.source)
+		return s != "" && s[0] >= 'A' && s[0] <= 'Z'
 	}
 	return false
 }

@@ -649,6 +649,15 @@ type Config struct {
 	// refuses to answer whenever a binding escapes observation.
 	JSSymbolReachabilityEnabled bool
 
+	// JSInterprocSuppressionEnabled turns on the SUPPRESSING direction of the interprocedural JavaScript
+	// Tier-2 call graph (#1139): a proven-unreached affected npm export becomes not_reachable, which the
+	// export path turns into an OpenVEX not_affected. The interprocedural recorder is otherwise raise-only
+	// (it only ever adds a reachable verdict, #1058). Suppression is sound-gated: the analyzer emits a
+	// negative only on a COMPLETE resolver graph (any dynamic construct or escaping callable taints every
+	// negative), and the coordinator refuses a Tier-2 not_reachable with no entry points. Off by default,
+	// so the shipped behavior stays raise-only; a wrong negative would hide a real vulnerability.
+	JSInterprocSuppressionEnabled bool
+
 	// RustReachabilityEnabled, PHPReachabilityEnabled and RubyReachabilityEnabled turn on deterministic
 	// Tier-1 import-reachability for those ecosystems: a declared dependency that first-party source
 	// never references becomes not_reachable, which the export path turns into an OpenVEX not_affected
@@ -939,6 +948,7 @@ func Load() Config {
 		FleetCorrelationMaxTimelineRefsPerPage:      getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE", 500),
 		JSReachabilityEnabled:                       getbool("SYNAPSE_JSREACH_ENABLED", true),
 		JSSymbolReachabilityEnabled:                 getbool("SYNAPSE_JSREACH_TIER2_ENABLED", false),
+		JSInterprocSuppressionEnabled:               getbool("SYNAPSE_JSREACH_INTERPROC_TIER2_ENABLED", false),
 		RustReachabilityEnabled:                     getbool("SYNAPSE_REACH_RUST", true),
 		PHPReachabilityEnabled:                      getbool("SYNAPSE_REACH_PHP", true),
 		RubyReachabilityEnabled:                     getbool("SYNAPSE_REACH_RUBY", true),
