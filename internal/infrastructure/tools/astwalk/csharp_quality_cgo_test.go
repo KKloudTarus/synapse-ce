@@ -156,3 +156,43 @@ func TestQualityForCSharpExhaustivePatternSwitch(t *testing.T) {
 		t.Errorf("missing-switch-default lines = %v, want exactly one on the guarded-only switch (line >= 14); findings=%+v", missingLines, got.Findings)
 	}
 }
+
+// TestQualityForCSharpThrowGeneric pins csharp-ast-throw-generic-exception: throwing Exception,
+// SystemException, or ApplicationException (including a namespace-qualified form) is flagged, while a
+// specific exception type and a bare rethrow are not (SonarQube S112).
+func TestQualityForCSharpThrowGeneric(t *testing.T) {
+	root := t.TempDir()
+	source := `namespace App {
+    class Thrower {
+        void A() { throw new Exception("a"); }
+        void B() { throw new System.ApplicationException(); }
+        void C() { throw new SystemException(); }
+        void D() { throw new InvalidOperationException("d"); }
+        void E() { try { A(); } catch (Exception e) { throw; } }
+    }
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "T.cs"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	var lines []int
+	for _, f := range got.Findings {
+		if f.Rule == "csharp-ast-throw-generic-exception" {
+			lines = append(lines, f.Line)
+		}
+	}
+	// Lines 3, 4, 5 are the generic throws; line 6 (InvalidOperationException) and line 7 (rethrow) are not.
+	want := map[int]bool{3: true, 4: true, 5: true}
+	if len(lines) != len(want) {
+		t.Fatalf("throw-generic lines = %v, want keys %v", lines, want)
+	}
+	for _, l := range lines {
+		if !want[l] {
+			t.Errorf("unexpected throw-generic finding at line %d (specific exception or rethrow must not fire)", l)
+		}
+	}
+}

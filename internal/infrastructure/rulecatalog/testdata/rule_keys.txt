@@ -813,6 +813,7 @@ cs-zip-extract-slip
 cs-zip-slip-fullname
 csharp-ast-empty-catch
 csharp-ast-missing-switch-default
+csharp-ast-throw-generic-exception
 css:declaration-block-too-large
 css:duplicate-font-face
 css:duplicate-import

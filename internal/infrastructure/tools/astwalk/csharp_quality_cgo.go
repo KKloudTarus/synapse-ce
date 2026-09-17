@@ -2,18 +2,30 @@
 
 package astwalk
 
-import sitter "github.com/smacker/go-tree-sitter"
+import (
+	"strings"
+
+	sitter "github.com/smacker/go-tree-sitter"
+)
 
 const maxCsharpFindingsPerFile = 40
 
 // csharpRules is the metadata for the C# AST-only rules. Pattern-detectable C# rules live in the
 // generated SAST language pack, and complexity is owned by the metrics path (cyclomatic
 // quality-high-complexity), so this analyzer carries only the structural rules with no other
-// producer: a regex cannot tell an empty catch from a commented one, or a switch's default section
-// from the word "default" elsewhere.
+// producer: a regex cannot tell an empty catch from a commented one, a switch's default section
+// from the word "default" elsewhere, or a type at namespace scope from one nested in a namespace.
 var csharpRules = map[string]pythonRule{
 	"empty-catch":     {"reliability", "csharp-ast-empty-catch", "CWE-390", "medium", "Empty catch block", "An empty catch block silently discards a failure. Handle the expected exception or preserve diagnostic context."},
 	"missing-default": {"reliability", "csharp-ast-missing-switch-default", "CWE-478", "medium", "switch without a default", "A switch with no default section silently ignores unhandled values; add a default (even one that throws)."},
+	"throw-generic":   {"quality", "csharp-ast-throw-generic-exception", "CWE-397", "medium", "Generic exception thrown", "Throwing Exception, SystemException, or ApplicationException forces every caller to catch everything. Throw a specific exception type so callers can handle the failure they expect."},
+}
+
+// csharpGenericExceptionTypes are the exception base types too broad to throw directly (SonarQube S112).
+var csharpGenericExceptionTypes = map[string]bool{
+	"Exception":            true,
+	"SystemException":      true,
+	"ApplicationException": true,
 }
 
 func csharpFinding(key string, n *sitter.Node, rel string) QualityFinding {
@@ -24,7 +36,7 @@ func csharpFinding(key string, n *sitter.Node, rel string) QualityFinding {
 // csharpFindings emits the C# AST rules: empty catch blocks and switch statements without a default
 // section. It never suppresses; each finding is propose-only. (Complexity is reported by the metrics
 // path as the cyclomatic quality-high-complexity finding, so it is not repeated here.)
-func csharpFindings(root *sitter.Node, _ []byte, rel string) []QualityFinding {
+func csharpFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 	if root == nil {
 		return nil
 	}
@@ -41,6 +53,10 @@ func csharpFindings(root *sitter.Node, _ []byte, rel string) []QualityFinding {
 		case "switch_statement":
 			if body := astChildByType(n, "switch_body"); body != nil && !csharpSwitchHasDefault(body) {
 				out = append(out, csharpFinding("missing-default", n, rel))
+			}
+		case "throw_statement":
+			if oce := astChildByType(n, "object_creation_expression"); oce != nil && csharpThrowsGenericException(oce, src) {
+				out = append(out, csharpFinding("throw-generic", n, rel))
 			}
 		}
 		if len(out) >= maxCsharpFindingsPerFile {
@@ -94,4 +110,24 @@ func csharpSectionIsExhaustive(sec *sitter.Node) bool {
 // csharpHasChildType reports whether n has a direct named child of the given type.
 func csharpHasChildType(n *sitter.Node, t string) bool {
 	return astChildByType(n, t) != nil
+}
+
+// csharpThrowsGenericException reports whether an object_creation_expression constructs one of the
+// too-broad exception base types (Exception/SystemException/ApplicationException), matching SonarQube S112.
+// The type may be qualified (System.Exception) or generic; only the final identifier segment is compared.
+func csharpThrowsGenericException(oce *sitter.Node, src []byte) bool {
+	typ := oce.ChildByFieldName("type")
+	if typ == nil {
+		return false
+	}
+	name := typ.Content(src)
+	// Drop any generic argument list and namespace qualifier: System.Collections.Exception<T> -> Exception.
+	if i := strings.IndexByte(name, '<'); i >= 0 {
+		name = name[:i]
+	}
+	name = strings.TrimSpace(name)
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		name = name[i+1:]
+	}
+	return csharpGenericExceptionTypes[name]
 }

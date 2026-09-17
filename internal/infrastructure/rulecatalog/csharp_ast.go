@@ -28,6 +28,12 @@ func csharpASTRules() []rule.Rule {
 			"Add a default section (even one that throws) so unhandled values are not silently ignored.",
 			"a switch statement with no default section",
 			rule.TypeBug, rule.QualityReliability, shared.SeverityMedium},
+		{"csharp-ast-throw-generic-exception", "Generic exception thrown", "CWE-397",
+			"throw new InvalidOperationException(\"state is closed\");",
+			"throw new Exception(\"state is closed\");",
+			"Throw a specific exception type (InvalidOperationException, ArgumentException, a custom type) so callers can catch the failure they expect instead of everything.",
+			"a generic Exception, SystemException, or ApplicationException being thrown",
+			rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityMedium},
 	}
 	rules := make([]rule.Rule, 0, len(specs))
 	for _, s := range specs {

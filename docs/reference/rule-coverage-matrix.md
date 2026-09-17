@@ -4,7 +4,7 @@ This matrix is generated from the shipped first-party rule catalog. The drift te
 
 OWASP coverage is required for security-quality rules. An empty OWASP list on a non-security rule means not applicable. Direct CWE mappings follow OWASP Top 10:2021's published mapped-CWE lists where available; CWEs outside those lists use explicit Synapse-reviewed Top 10 classifications and are not presented as OWASP-published CWE crosswalks.
 
-Catalogued rules: **3327**. Security-quality rules with an OWASP mapping: **1183/1183**.
+Catalogued rules: **3328**. Security-quality rules with an OWASP mapping: **1183/1183**.
 
 ## Sonar-equivalent type mapping
 
@@ -21,7 +21,7 @@ Catalogued rules: **3327**. Security-quality rules with an OWASP mapping: **1183
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Azure Resource Manager | 0 | 9 | 18 | 8 | 35 |
 | C | 53 | 55 | 14 | 45 | 167 |
-| C# | 46 | 76 | 28 | 152 | 302 |
+| C# | 46 | 76 | 28 | 153 | 303 |
 | C++ | 66 | 50 | 13 | 113 | 242 |
 | C/C++/Objective-C | 0 | 1 | 0 | 0 | 1 |
 | CSS | 8 | 0 | 0 | 22 | 30 |
