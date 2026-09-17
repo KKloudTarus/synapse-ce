@@ -46,7 +46,7 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 		if err != nil {
 			return Result{}, err
 		}
-		bundle, bundleRef, err = runner.loadBundle(bundleRoot)
+		bundle, bundleRef, err = runner.loadBundle(bundleRoot, envelope.Route)
 		if err != nil {
 			return Result{}, err
 		}
@@ -59,11 +59,11 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 		if err != nil {
 			return Result{}, err
 		}
-		bundle, bundleRef, err = runner.loadBundle(bundleRoot)
+		bundle, bundleRef, err = runner.loadBundle(bundleRoot, RouteLocalDiagnostic)
 		if err != nil {
 			return Result{}, err
 		}
-		candidateTemplate, inputErr := runner.loadInputTemplate(bundleRoot, bundle.CandidateInput, measurement.CandidateAcceptance)
+		candidateTemplate, inputErr := runner.loadInputTemplate(bundleRoot, *bundle.CandidateInput, measurement.CandidateAcceptance)
 		if inputErr != nil {
 			return Result{}, inputErr
 		}
@@ -73,7 +73,11 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 		}
 	}
 
-	template, err := runner.loadInputTemplate(bundleRoot, bundle.selected(envelope.Route), envelope.Purpose)
+	asset, err := bundle.selected(envelope.Route)
+	if err != nil {
+		return Result{}, err
+	}
+	template, err := runner.loadInputTemplate(bundleRoot, asset, envelope.Purpose)
 	if err != nil {
 		return Result{}, err
 	}
@@ -308,11 +312,14 @@ func validEvidenceDigest(value string) bool {
 	return true
 }
 
-func (bundle TrustedBundle) selected(route Route) BundleAsset {
-	if route == RouteProtectedBaseline {
-		return bundle.BaselineInput
+func (bundle TrustedBundle) selected(route Route) (BundleAsset, error) {
+	if err := bundle.ValidateRoute(route); err != nil {
+		return BundleAsset{}, err
 	}
-	return bundle.CandidateInput
+	if route == RouteProtectedBaseline {
+		return bundle.BaselineInput, nil
+	}
+	return *bundle.CandidateInput, nil
 }
 
 func (runner *Runner) validateAuthoritativeEnvelope(ctx context.Context, envelope RunEnvelope, facts runtimeFacts, bundle measurement.ArtifactReference) error {
@@ -383,6 +390,9 @@ func (runner *Runner) loadInputTemplate(root string, asset BundleAsset, purpose 
 	}
 	if err := input.Validate(); err != nil {
 		return measurement.MeasurementInput{}, fmt.Errorf("validate trusted measurement input: %w", err)
+	}
+	if err := validateFrozenTemplateStaticContract(input); err != nil {
+		return measurement.MeasurementInput{}, err
 	}
 	if input.Purpose != purpose {
 		return measurement.MeasurementInput{}, errors.New("trusted bundle selected an input for the wrong lifecycle purpose")

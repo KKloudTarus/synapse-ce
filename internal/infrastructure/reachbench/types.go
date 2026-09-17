@@ -93,11 +93,11 @@ type BundleAsset struct {
 
 // TrustedBundle identifies route-owned contract templates and reviewed baseline evidence. It carries no scores or authority claim.
 type TrustedBundle struct {
-	SchemaVersion     string      `json:"schema_version"`
-	ID                string      `json:"id"`
-	BaselineInput     BundleAsset `json:"baseline_input"`
-	CandidateInput    BundleAsset `json:"candidate_input"`
-	BaselineAllowlist BundleAsset `json:"baseline_allowlist"`
+	SchemaVersion     string       `json:"schema_version"`
+	ID                string       `json:"id"`
+	BaselineInput     BundleAsset  `json:"baseline_input"`
+	CandidateInput    *BundleAsset `json:"candidate_input,omitempty"`
+	BaselineAllowlist BundleAsset  `json:"baseline_allowlist"`
 }
 
 // BaselineAllowlistEntry is one exact permitted harness change.
@@ -335,13 +335,34 @@ func (bundle TrustedBundle) Validate() error {
 	if err := bundle.BaselineInput.validate("baseline-input.json"); err != nil {
 		return err
 	}
-	if err := bundle.CandidateInput.validate("candidate-input.json"); err != nil {
-		return err
-	}
 	if err := bundle.BaselineAllowlist.validate("baseline-allowlist.json"); err != nil {
 		return err
 	}
+	if bundle.CandidateInput != nil {
+		if err := bundle.CandidateInput.validate("candidate-input.json"); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// ValidateRoute requires only the trusted assets that the selected lifecycle
+// route can consume. A protected baseline intentionally has no candidate asset.
+func (bundle TrustedBundle) ValidateRoute(route Route) error {
+	if err := bundle.Validate(); err != nil {
+		return err
+	}
+	switch route {
+	case RouteProtectedBaseline:
+		return nil
+	case RouteCandidate, RouteLocalDiagnostic:
+		if bundle.CandidateInput == nil {
+			return errors.New("candidate route requires a trusted candidate input asset")
+		}
+		return bundle.CandidateInput.validate("candidate-input.json")
+	default:
+		return errors.New("unknown reachability lifecycle route")
+	}
 }
 
 func (allowlist BaselineAllowlist) Validate() error {

@@ -194,7 +194,7 @@ func decimalSegment(value string) bool {
 	return true
 }
 
-func (runner *Runner) loadBundle(root string) (TrustedBundle, measurement.ArtifactReference, error) {
+func (runner *Runner) loadBundle(root string, route Route) (TrustedBundle, measurement.ArtifactReference, error) {
 	path, err := benchcycle.BelowRoot(root, "trusted-bundle.json")
 	if err != nil {
 		return TrustedBundle{}, measurement.ArtifactReference{}, fmt.Errorf("resolve trusted bundle: %w", err)
@@ -204,7 +204,7 @@ func (runner *Runner) loadBundle(root string) (TrustedBundle, measurement.Artifa
 	if err != nil {
 		return TrustedBundle{}, measurement.ArtifactReference{}, fmt.Errorf("read trusted bundle: %w", err)
 	}
-	if err := bundle.Validate(); err != nil {
+	if err := bundle.ValidateRoute(route); err != nil {
 		return TrustedBundle{}, measurement.ArtifactReference{}, err
 	}
 	return bundle, measurement.ArtifactReference{ID: bundle.ID, Digest: benchmark.SHA256Digest(encoded)}, nil

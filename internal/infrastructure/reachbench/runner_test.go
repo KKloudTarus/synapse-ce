@@ -191,8 +191,8 @@ func TestEnumerateCellsRequiresEveryEnabledBenchmarkBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cells) != len(fixture.expected) {
-		t.Fatalf("cells = %d, want %d", len(cells), len(fixture.expected))
+	if len(cells) != 95 {
+		t.Fatalf("cells = %d, want 95", len(cells))
 	}
 	captures := make([]CaptureResult, len(cells))
 	for index, cell := range cells {
@@ -228,8 +228,12 @@ func TestRunRejectsTwoRunSemanticMismatch(t *testing.T) {
 	fixture := newFixture(t)
 	runner, err := NewRunner(fixture.dependencies(map[string]string{}), captureFunc(func(_ context.Context, request CaptureRequest) (CaptureResult, error) {
 		result, err := validCapture(fixture.expected)(context.Background(), request)
-		if request.Repetition == 2 && request.Cell.CaseID == "go-reachable" {
-			result.Observation.Outcome = measurement.OutcomeNoAnalysis
+		if request.Repetition == 2 && request.Cell.CaseID == fixture.candidate.Corpus.Cases[0].ID {
+			if fixture.expected[request.Cell.CaseID] == measurement.OutcomeReachable {
+				result.Observation.Outcome = measurement.OutcomeNoAnalysis
+			} else {
+				result.Observation.Outcome = measurement.OutcomeReachable
+			}
 		}
 		return result, err
 	}))
@@ -772,7 +776,7 @@ func writeFixtureBundle(t *testing.T, root string, baseline, candidate measureme
 		SchemaVersion:     BundleSchemaVersion,
 		ID:                "reachability-trusted",
 		BaselineInput:     BundleAsset{Path: "baseline-input.json", Digest: benchmark.SHA256Digest(baselineEncoded)},
-		CandidateInput:    BundleAsset{Path: "candidate-input.json", Digest: benchmark.SHA256Digest(candidateEncoded)},
+		CandidateInput:    &BundleAsset{Path: "candidate-input.json", Digest: benchmark.SHA256Digest(candidateEncoded)},
 		BaselineAllowlist: BundleAsset{Path: "baseline-allowlist.json", Digest: benchmark.SHA256Digest(allowlistEncoded)},
 	}
 	writeCanonicalTestFile(t, filepath.Join(root, "baseline-input.json"), baseline)
@@ -898,36 +902,26 @@ func encodeChangedEntries(entries []BaselineAllowlistEntry) []byte {
 
 func measurementTemplates(t *testing.T) (measurement.MeasurementInput, measurement.MeasurementInput, map[string]measurement.Outcome) {
 	t.Helper()
-	inventory := measurement.DefaultProductionInventory()
-	corpus := measurement.ContractCorpus{SchemaVersion: measurement.ContractCorpusSchemaVersion, ID: "fixture-corpus", Cases: []measurement.ContractCase{
-		{ID: "go-reachable", SubjectID: "pkg:reachbench/go/source_tier2#controlPositive", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(measurement.ArtifactReference{ID: "go-source-tier2-input", Digest: "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"})},
-		{ID: "go-conditional", SubjectID: "pkg:reachbench/go/source_tier2#controlOpaque", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(measurement.ArtifactReference{ID: "go-source-tier2-input", Digest: "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"})},
-		{ID: "go-unreached", SubjectID: "pkg:reachbench/go/source_tier2#controlUnreachable", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(measurement.ArtifactReference{ID: "go-source-tier2-input", Digest: "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"})},
-		{ID: "go-no-analysis", SubjectID: "pkg:reachbench/go/source_tier2#controlNoCoverage", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(measurement.ArtifactReference{ID: "go-source-tier2-input", Digest: "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"})},
-	}}
-	completeness := reference("go-source-completeness")
-	oracle := measurement.ReachabilityOracle{SchemaVersion: measurement.OracleSchemaVersion, ID: "fixture-oracle", Cases: []measurement.OracleCase{
-		{CaseID: "go-reachable", Expected: measurement.OutcomeReachable, Category: measurement.OracleReachable, CoverageExpectation: measurement.CoverageComplete},
-		{CaseID: "go-conditional", Expected: measurement.OutcomeConditionallyReachable, Category: measurement.OracleOpaque, CoverageExpectation: measurement.CoverageComplete},
-		{CaseID: "go-unreached", Expected: measurement.OutcomePresentUnreached, Category: measurement.OracleTrulyUnreachable, CoverageExpectation: measurement.CoverageComplete, SuppressionApplicable: true, CompletenessContract: pointer(completeness)},
-		{CaseID: "go-no-analysis", Expected: measurement.OutcomeNoAnalysis, Category: measurement.OracleNoCoverage, CoverageExpectation: measurement.CoverageComplete},
-	}}
-	exceptions := measurement.ExceptionManifest{SchemaVersion: measurement.ExceptionManifestSchemaVersion, ID: "no-exceptions"}
-	policy := fixturePolicy(t, inventory, corpus, oracle, exceptions)
-	baseline := measurement.MeasurementInput{
-		SchemaVersion: measurement.MeasurementInputSchemaVersion, Purpose: measurement.BaselineMeasurement,
-		Inventory: inventory, Corpus: corpus, Oracle: oracle, Policy: policy, Exceptions: exceptions,
-		ActiveSnapshot: measurement.SnapshotIdentity{Source: reference("source"), SBOM: reference("sbom"), Run: reference("run")},
+	baseline, err := measurement.DefaultBaselineMeasurementInput()
+	if err != nil {
+		t.Fatal(err)
 	}
-	cohort, binding := goCohort(t, inventory)
-	expected := map[string]measurement.Outcome{}
-	for _, item := range oracle.Cases {
+	cells, err := enumerateCells(baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := make(map[string]measurement.Outcome, len(baseline.Oracle.Cases))
+	for _, item := range baseline.Oracle.Cases {
 		expected[item.CaseID] = item.Expected
+	}
+	for _, cell := range cells {
 		baseline.Observations = append(baseline.Observations, measurement.MeasuredObservation{
-			CaseID: item.CaseID, BindingID: binding.ID, Invoked: true, Outcome: item.Expected,
+			CaseID: cell.CaseID, BindingID: cell.BindingID, Invoked: true, Outcome: expected[cell.CaseID],
 			Coverage:      measurement.ObservedCoverage{Status: measurement.CoverageComplete, Obligations: []measurement.CoverageObligation{{ID: "entrypoints", Status: measurement.CoverageComplete}}},
-			OutputCapture: measurement.CaptureComplete, Analyzer: reference(cohort.AnalyzerID), Configuration: binding.Configuration,
-			Suppression: measurement.SuppressionCapture{Claim: measurement.SuppressionNone, Status: measurement.CaptureComplete},
+			OutputCapture: measurement.CaptureComplete,
+			Analyzer:      measurement.ArtifactReference{ID: cell.AnalyzerID, Digest: benchmark.SHA256Digest([]byte(cell.AnalyzerID))},
+			Configuration: cell.Configuration,
+			Suppression:   measurement.SuppressionCapture{Claim: measurement.SuppressionNone, Status: measurement.CaptureComplete},
 		})
 	}
 	if err := baseline.Validate(); err != nil {
@@ -937,66 +931,16 @@ func measurementTemplates(t *testing.T) (measurement.MeasurementInput, measureme
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkpoint := fixtureCheckpoint(t, policy, report)
-	ratchet, err := measurement.DeriveCandidateRatchet(policy, report, checkpoint, exceptions)
+	checkpoint := fixtureCheckpoint(t, baseline.Policy, report)
+	candidate, err := measurement.BuildCandidateMeasurementInput(report, checkpoint)
 	if err != nil {
 		t.Fatal(err)
-	}
-	candidate := baseline
-	candidate.Purpose = measurement.CandidateAcceptance
-	candidate.Observations = nil
-	candidate.Baseline = &report
-	candidate.Checkpoint = &checkpoint
-	candidate.Ratchet = &ratchet
-	if err := candidate.Validate(); err != nil {
-		t.Fatalf("candidate fixture invalid: %v", err)
 	}
 	baseline.Observations = nil
 	if err := baseline.Validate(); err != nil {
 		t.Fatalf("baseline template invalid: %v", err)
 	}
 	return baseline, candidate, expected
-}
-
-func fixturePolicy(t *testing.T, inventory measurement.ProductionInventory, corpus measurement.ContractCorpus, oracle measurement.ReachabilityOracle, exceptions measurement.ExceptionManifest) measurement.MeasurementPolicy {
-	t.Helper()
-	inventoryDigest, err := measurement.DigestProductionInventory(inventory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	corpusDigest, err := measurement.DigestContractCorpus(corpus)
-	if err != nil {
-		t.Fatal(err)
-	}
-	oracleDigest, err := measurement.DigestReachabilityOracle(oracle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	exceptionDigest, err := measurement.DigestExceptionManifest(exceptions)
-	if err != nil {
-		t.Fatal(err)
-	}
-	completeness := reference("go-source-completeness")
-	rules := make([]measurement.SuppressionPolicyRule, 0, len(inventory.Cohorts))
-	for _, cohort := range inventory.Cohorts {
-		rule := measurement.SuppressionPolicyRule{CohortID: cohort.ID, ModeID: cohort.Mode, Disposition: measurement.SuppressionRaiseOnly}
-		if (cohort.ID == "rust" || cohort.ID == "ruby") && cohort.Mode == "import" {
-			rule.Disposition = measurement.SuppressionProhibited
-		}
-		if cohort.ID == "go" && cohort.Mode == "source_tier2" {
-			rule.Disposition = measurement.SuppressionEligible
-			rule.CompletenessContract = pointer(completeness)
-			rule.ApprovedProposer, rule.ApprovedVerifier = "proposer", "verifier"
-		}
-		rules = append(rules, rule)
-	}
-	return measurement.MeasurementPolicy{
-		SchemaVersion: measurement.PolicySchemaVersion, ID: "fixture-policy",
-		Inventory: measurement.ArtifactReference{ID: inventory.ID, Digest: inventoryDigest}, Corpus: measurement.ArtifactReference{ID: corpus.ID, Digest: corpusDigest},
-		Oracle: measurement.ArtifactReference{ID: oracle.ID, Digest: oracleDigest}, ExceptionManifest: measurement.ArtifactReference{ID: exceptions.ID, Digest: exceptionDigest},
-		SchemaDefinition: reference("contract-schema-definition"), RunPurposeRules: reference("contract-run-purpose-rules"), RatchetConstructionRule: reference("contract-ratchet-construction"),
-		Evaluator: reference("contract-evaluator"), MetricDefinition: reference("contract-metrics"), Adapters: []measurement.ArtifactReference{reference("production-adapter")}, Rules: rules,
-	}
 }
 
 func fixtureCheckpoint(t *testing.T, policy measurement.MeasurementPolicy, baseline measurement.MeasurementReport) measurement.ProceduralBaselineCheckpoint {
@@ -1019,26 +963,9 @@ func fixtureCheckpoint(t *testing.T, policy measurement.MeasurementPolicy, basel
 	return checkpoint
 }
 
-func goCohort(t *testing.T, inventory measurement.ProductionInventory) (measurement.ProductionCohort, measurement.CompositionBinding) {
-	t.Helper()
-	for _, cohort := range inventory.Cohorts {
-		if cohort.ID != "go" || cohort.Mode != "source_tier2" {
-			continue
-		}
-		for _, binding := range cohort.Bindings {
-			if binding.ID == "api" {
-				return cohort, binding
-			}
-		}
-	}
-	t.Fatal("fixture inventory lacks go/source_tier2 api binding")
-	return measurement.ProductionCohort{}, measurement.CompositionBinding{}
-}
-
 func reference(id string) measurement.ArtifactReference {
 	return measurement.ArtifactReference{ID: id, Digest: benchmark.SHA256Digest([]byte(id))}
 }
-func pointer(value measurement.ArtifactReference) *measurement.ArtifactReference { return &value }
 
 func canonicalTestJSON(t *testing.T, value any) []byte {
 	t.Helper()
