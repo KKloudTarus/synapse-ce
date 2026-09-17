@@ -1,0 +1,314 @@
+package reachbench
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/runtimereach"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchcycle"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
+	measurement "github.com/KKloudTarus/synapse-ce/internal/usecase/reachbench"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachproof"
+)
+
+type captureTestMaterializer struct{}
+
+func (captureTestMaterializer) Materialize(_ context.Context, request FixtureMaterializationRequest) (MaterializedFixture, error) {
+	return MaterializedFixture{Root: "/private/reachbench-fixture", Specification: request.Specification}, nil
+}
+
+type captureTestAnalyzer struct {
+	result *reachability.Analysis
+	err    error
+	calls  int
+}
+
+func (analyzer *captureTestAnalyzer) Analyze(_ context.Context, _ string, _ []string) (*reachability.Analysis, error) {
+	analyzer.calls++
+	return analyzer.result, analyzer.err
+}
+
+func TestProductionCaptureRegistersFrozenModes(t *testing.T) {
+	capture, err := NewProductionCapture(ProductionCaptureDependencies{Materializer: captureTestMaterializer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(capture.modes); got != 19 {
+		t.Fatalf("mode count = %d, want 19", got)
+	}
+	missing := make(map[string]productionMode, len(capture.modes)-1)
+	for key, mode := range capture.modes {
+		if key != "runtime\x00library_loads" {
+			missing[key] = mode
+		}
+	}
+	if err := validateProductionModes(missing); err == nil || !strings.Contains(err.Error(), "registry") {
+		t.Fatalf("missing production mode error = %v, want closed-registry failure", err)
+	}
+	unexpected := make(map[string]productionMode, len(capture.modes)+1)
+	for key, mode := range capture.modes {
+		unexpected[key] = mode
+	}
+	unexpected["unexpected\x00mode"] = runGoSourceTier2
+	if err := validateProductionModes(unexpected); err == nil || !strings.Contains(err.Error(), "registry") {
+		t.Fatalf("unexpected production mode error = %v, want closed-registry failure", err)
+	}
+}
+
+func TestRecordingAnalyzerNormalizesOneProductionResult(t *testing.T) {
+	delegate := &captureTestAnalyzer{result: &reachability.Analysis{
+		Entrypoints: []string{"/private/materialization/main.go"},
+		Results:     []reachability.Result{{Symbol: "target", Reachable: true, Path: []string{"/private/materialization/main.go", "target"}}},
+	}}
+	analyzer := &recordingAnalyzer{delegate: delegate, materializedRoot: "/private/materialization"}
+	result, err := analyzer.Analyze(context.Background(), "/private/materialization", []string{"target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegate.calls != 1 || analyzer.calls != 1 {
+		t.Fatalf("analyzer calls = delegate %d wrapper %d, want 1/1", delegate.calls, analyzer.calls)
+	}
+	if strings.Contains(strings.Join(result.Entrypoints, "\n")+strings.Join(result.Results[0].Path, "\n"), "/private/materialization") {
+		t.Fatalf("normalized result retained materialization path: %#v", result)
+	}
+	if _, err := analyzer.Analyze(context.Background(), "/private/materialization", []string{"target"}); err == nil {
+		t.Fatal("second analyzer invocation succeeded")
+	}
+}
+
+func TestProductionCaptureUsesPersistedWinningClaimForSuppression(t *testing.T) {
+	lifecycle, err := newCaptureLifecycle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := measurement.ResolvedFixtureSubject{Subject: measurement.FixtureSubject{
+		ID:              "pkg:reachbench/go/source_tier2#controlUnreachable",
+		PackageIdentity: "example.invalid/reachbench/go-source-tier2",
+		Locator:         measurement.FixtureLocator{Kind: measurement.FixtureLocatorSourceSymbol, ModulePath: "fixtures/golang/source_tier2/main.go", Symbol: "controlUnreachable", Line: 16},
+	}}
+	delegate := &captureTestAnalyzer{result: &reachability.Analysis{Results: []reachability.Result{{Symbol: "controlUnreachable"}}, Entrypoints: []string{"main.main"}}}
+	executed, err := runStatic(context.Background(), MaterializedFixture{Root: "/private/fixture"}, resolved, lifecycle,
+		[]ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), Symbols: []string{"controlUnreachable"}}},
+		func() (staticAnalyzer, error) { return delegate, nil },
+		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
+			return reachproof.NewCoordinator(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock)
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cell := ExecutionCell{
+		CaseID: "go-unreached", CohortID: "go", ModeID: "source_tier2", BindingID: "api", AnalyzerID: "sca-go-source-tier2",
+		Configuration: captureArtifact("configuration"), SubjectID: resolved.Subject.ID, Fixture: captureArtifact("fixture"), BoundaryID: "sca/reachability/go-source-tier2/api",
+	}
+	observation, err := (&ProductionCapture{}).observation(context.Background(), CaptureRequest{
+		Cell: cell, Analyzer: RevisionIdentity{ID: AnalyzerSubjectID, Commit: strings.Repeat("a", 40), Tree: strings.Repeat("b", 40)}, Snapshot: captureSnapshot(),
+	}, lifecycle, executed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Outcome != measurement.OutcomePresentUnreached {
+		t.Fatalf("outcome = %q, want present_unreached", observation.Outcome)
+	}
+	if observation.Suppression.Claim != measurement.SuppressionProduced || len(observation.Suppression.Effects) != 1 {
+		t.Fatalf("suppression = %#v, want actual suppressing winner", observation.Suppression)
+	}
+	proof := observation.Suppression.Effects[0].Proof
+	if proof.SubjectID != cell.SubjectID || proof.BoundaryID != cell.BoundaryID {
+		t.Fatalf("proof identity = %q/%q, want %q/%q", proof.SubjectID, proof.BoundaryID, cell.SubjectID, cell.BoundaryID)
+	}
+	if len(proof.MissingProvenance) == 0 {
+		t.Fatal("current production proof fabricated complete provenance")
+	}
+	judgments, err := lifecycle.judgments.List(context.Background(), productionCaptureEngagementID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := judgment.WinningReachabilityClaims(judgments)
+	winner, ok := claims[cell.SubjectID]
+	if !ok || !winner.SuppressesFinding() {
+		t.Fatalf("persisted winner = %#v, want suppressing reachability claim", winner)
+	}
+}
+
+func TestNilAnalyzerResultIsNoAnalysisNotSuppression(t *testing.T) {
+	analyzer := &recordingAnalyzer{delegate: &captureTestAnalyzer{}}
+	result, err := analyzer.Analyze(context.Background(), "/fixture", []string{"subject"})
+	if result != nil || !errors.Is(err, errNilAnalyzerResult) {
+		t.Fatalf("nil analyzer result = (%#v, %v), want nil and classified error", result, err)
+	}
+}
+
+func TestProductionCaptureClassifiesAnalyzerFailureAsNoAnalysis(t *testing.T) {
+	lifecycle, err := newCaptureLifecycle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := measurement.ResolvedFixtureSubject{Subject: measurement.FixtureSubject{
+		ID: "pkg:reachbench/go/source_tier2#controlNoCoverage", Locator: measurement.FixtureLocator{Symbol: "controlNoCoverage"},
+	}}
+	executed, err := runStatic(context.Background(), MaterializedFixture{Root: "/private/fixture"}, resolved, lifecycle,
+		[]ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), Symbols: []string{"controlNoCoverage"}}},
+		func() (staticAnalyzer, error) {
+			return &captureTestAnalyzer{err: errors.New("analyzer unavailable")}, nil
+		},
+		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
+			return reachproof.NewCoordinator(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock)
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cell := ExecutionCell{
+		CaseID: "go-no-analysis", CohortID: "go", ModeID: "source_tier2", BindingID: "api", AnalyzerID: "sca-go-source-tier2",
+		Configuration: captureArtifact("configuration"), SubjectID: resolved.Subject.ID, Fixture: captureArtifact("fixture"), BoundaryID: "sca/reachability/go-source-tier2/api",
+	}
+	observation, err := (&ProductionCapture{}).observation(context.Background(), CaptureRequest{
+		Cell: cell, Analyzer: RevisionIdentity{ID: AnalyzerSubjectID, Commit: strings.Repeat("a", 40), Tree: strings.Repeat("b", 40)}, Snapshot: captureSnapshot(),
+	}, lifecycle, executed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Outcome != measurement.OutcomeNoAnalysis || observation.Coverage.Status != measurement.CoverageUnavailable {
+		t.Fatalf("analyzer failure observation = %#v, want unavailable no-analysis", observation)
+	}
+	if observation.Suppression.Claim != measurement.SuppressionNone || observation.Suppression.Status != measurement.CaptureComplete {
+		t.Fatalf("analyzer failure suppression = %#v, want complete non-suppression", observation.Suppression)
+	}
+}
+
+func TestRuntimeReportPreservesOpaqueAndUnsupportedControls(t *testing.T) {
+	replay := measurement.RuntimeReplay{
+		Complete: true, LossState: "none",
+		Owners: []measurement.RuntimeReplayOwner{
+			{Library: "direct.so", Owner: measurement.RuntimePackage{Name: "direct", Version: "1"}},
+			{Library: "opaque.so", Owner: measurement.RuntimePackage{Name: "opaque", Version: "1"}},
+			{Library: "unsupported.so", Owner: measurement.RuntimePackage{Name: "unsupported", Version: "1"}},
+		},
+		Events: []measurement.RuntimeReplayEvent{
+			{Operation: "load", Library: "direct.so", Owner: measurement.RuntimePackage{Name: "direct", Version: "1"}},
+			{Operation: "opaque", Library: "opaque.so", Owner: measurement.RuntimePackage{Name: "opaque", Version: "1"}},
+			{Operation: "unsupported", Library: "unsupported.so", Owner: measurement.RuntimePackage{Name: "unsupported", Version: "1"}},
+		},
+	}
+	report, opaque, unsupported := runtimeReport(replay)
+	if err := report.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	ownership, loads := report.Build()
+	pkg, match := ownership.Resolve(loads[0])
+	if pkg.Name != "direct" || match == runtimereach.MatchNone {
+		t.Fatalf("runtime load resolution = %#v/%q, want direct concrete owner", pkg, match)
+	}
+	if !opaque["opaque"] || !unsupported["unsupported"] {
+		t.Fatalf("runtime control state opaque=%v unsupported=%v", opaque, unsupported)
+	}
+}
+
+func TestRuntimeCaptureRecordsProductionReachabilityWithoutStaticAnalyzer(t *testing.T) {
+	fixtures := measurement.DefaultFixtureManifest()
+	fixtureReference := measurement.ArtifactReference{
+		ID:     "runtime-library-loads-input",
+		Digest: "sha256:2ea65181344c35516df313a44c68258c348e9d83d07c04cfef98855ae7ebadca",
+	}
+	resolved, err := fixtures.ResolveFixtureSubject(fixtureReference, "pkg:reachbench/runtime/library_loads#controlPositive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cell := ExecutionCell{
+		CaseID: "runtime-library-loads-control-positive", CohortID: "runtime", ModeID: "library_loads", BindingID: "runtime", AnalyzerID: "runtime-library-loads",
+		Configuration: captureArtifact("configuration"), SubjectID: resolved.Subject.ID, Fixture: fixtureReference, BoundaryID: "sca/reachability/runtime/library-loads",
+	}
+	materializer := newFixtureMaterializer(t, &fixtureToolRunner{}, "linux/amd64")
+	fixture, err := materializer.Materialize(context.Background(), FixtureMaterializationRequest{
+		Specification: resolved.Specification, WorkRoot: privateMaterializerRoot(t), CellKey: opaqueCellKey(cell),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lifecycle, err := newCaptureLifecycle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	executed, err := runRuntimeLibraryLoads(context.Background(), nil, fixture, resolved, lifecycle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !executed.lifecycleRecorded || executed.analyzer != nil {
+		t.Fatalf("runtime execution = %#v, want persisted runtime claim without a static analyzer", executed)
+	}
+	observation, err := (&ProductionCapture{}).observation(context.Background(), CaptureRequest{
+		Cell: cell, Analyzer: RevisionIdentity{ID: AnalyzerSubjectID, Commit: strings.Repeat("a", 40), Tree: strings.Repeat("b", 40)}, Snapshot: captureSnapshot(),
+	}, lifecycle, executed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Outcome != measurement.OutcomeReachable || observation.Positive == nil {
+		t.Fatalf("runtime observation = %#v, want reachable positive result", observation)
+	}
+	if observation.Suppression.Claim != measurement.SuppressionNone {
+		t.Fatalf("runtime suppression = %#v, want no suppression", observation.Suppression)
+	}
+}
+
+func TestProductionCaptureStoresOneCanonicalRuntimeArtifact(t *testing.T) {
+	fixtureReference := measurement.ArtifactReference{
+		ID:     "runtime-library-loads-input",
+		Digest: "sha256:2ea65181344c35516df313a44c68258c348e9d83d07c04cfef98855ae7ebadca",
+	}
+	cell := ExecutionCell{
+		CaseID: "runtime-library-loads-control-positive", CohortID: "runtime", ModeID: "library_loads", BindingID: "runtime", AnalyzerID: "runtime-library-loads",
+		Configuration: captureArtifact("configuration"), SubjectID: "pkg:reachbench/runtime/library_loads#controlPositive", Fixture: fixtureReference, BoundaryID: "sca/reachability/runtime/library-loads",
+	}
+	materializer := newFixtureMaterializer(t, &fixtureToolRunner{}, "linux/amd64")
+	capture, err := NewProductionCapture(ProductionCaptureDependencies{Materializer: materializer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawRoot := t.TempDir()
+	evidenceStore, err := benchcycle.NewEvidenceStore(rawRoot, reachabilityEvidenceLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workRoot := privateMaterializerRoot(t)
+	result, err := capture.Capture(context.Background(), CaptureRequest{
+		Cell: cell, Repetition: 1, WorkRoot: workRoot,
+		Analyzer: RevisionIdentity{ID: AnalyzerSubjectID, Commit: strings.Repeat("a", 40), Tree: strings.Repeat("b", 40)}, Snapshot: captureSnapshot(),
+		attempt: benchcycle.AttemptAddress{CellKey: "runtime-capture", Repetition: 1}, evidence: evidenceStore,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.EvidenceReceipts) != 1 {
+		t.Fatalf("evidence receipts = %#v, want exactly one raw artifact", result.EvidenceReceipts)
+	}
+	receipt := result.EvidenceReceipts[0]
+	raw, err := os.ReadFile(filepath.Join(rawRoot, filepath.FromSlash(receipt.Reference)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), workRoot) {
+		t.Fatal("canonical raw artifact included a private materialization root")
+	}
+	if strings.Contains(string(raw), receipt.Reference) {
+		t.Fatalf("canonical raw artifact copied its physical evidence reference %q", receipt.Reference)
+	}
+	if result.Observation.Outcome != measurement.OutcomeReachable || result.Observation.Suppression.Claim != measurement.SuppressionNone {
+		t.Fatalf("runtime capture observation = %#v", result.Observation)
+	}
+}
+
+func captureArtifact(id string) measurement.ArtifactReference {
+	return measurement.ArtifactReference{ID: id, Digest: "sha256:" + strings.Repeat("c", 64)}
+}
+
+func captureSnapshot() measurement.SnapshotIdentity {
+	return measurement.SnapshotIdentity{Source: captureArtifact("source"), SBOM: captureArtifact("sbom"), Run: captureArtifact("run")}
+}

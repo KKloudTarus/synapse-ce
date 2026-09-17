@@ -288,12 +288,31 @@ const (
 
 // DefaultReachabilityBenchmark returns the checked-in static benchmark contract. It is deliberately separate
 // from DefaultCorpus, which remains the legacy comparator corpus.
+// DefaultReachabilityBenchmark returns the complete embedded frozen benchmark contract.
 func DefaultReachabilityBenchmark() ReachabilityBenchmark {
 	contract, err := LoadReachabilityBenchmark()
 	if err != nil {
 		panic("reachbench: embedded benchmark contract is invalid: " + err.Error())
 	}
 	return contract
+}
+
+// DefaultFixtureManifest returns the embedded fixture manifest without loading the
+// benchmark oracle or challenge labels. Consumers that only need verified fixture
+// identity use this narrower entry point to preserve capture isolation.
+func DefaultFixtureManifest() FixtureManifest {
+	root, err := fs.Sub(reachabilityBenchmarkFiles, benchmarkAssetRoot)
+	if err != nil {
+		panic("reachbench: open embedded fixture assets: " + err.Error())
+	}
+	fixtures, err := loadFixtureManifestFile(root, benchmarkFixturesAsset)
+	if err != nil {
+		panic("reachbench: embedded fixture manifest is invalid: " + err.Error())
+	}
+	if err := validateFixtureFiles(root, fixtures); err != nil {
+		panic("reachbench: embedded fixture files are invalid: " + err.Error())
+	}
+	return fixtures
 }
 
 // LoadReachabilityBenchmark reads only the package-owned embedded asset tree and verifies every physical input.

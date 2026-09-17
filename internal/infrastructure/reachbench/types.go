@@ -144,6 +144,9 @@ type ExecutionCell struct {
 	BindingID     string                        `json:"binding_id"`
 	AnalyzerID    string                        `json:"analyzer_id"`
 	Configuration measurement.ArtifactReference `json:"configuration"`
+	SubjectID     string                        `json:"subject_id"`
+	Fixture       measurement.ArtifactReference `json:"fixture"`
+	BoundaryID    string                        `json:"boundary_id"`
 }
 
 // CaptureRequest is the narrow production-boundary input. The callback reports output derived at the publication boundary.

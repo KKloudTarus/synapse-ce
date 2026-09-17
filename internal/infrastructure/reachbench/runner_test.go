@@ -851,10 +851,10 @@ func measurementTemplates(t *testing.T) (measurement.MeasurementInput, measureme
 	t.Helper()
 	inventory := measurement.DefaultProductionInventory()
 	corpus := measurement.ContractCorpus{SchemaVersion: measurement.ContractCorpusSchemaVersion, ID: "fixture-corpus", Cases: []measurement.ContractCase{
-		{ID: "go-reachable", SubjectID: "subject-go-reachable", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(reference("fixture-reachable"))},
-		{ID: "go-conditional", SubjectID: "subject-go-conditional", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(reference("fixture-conditional"))},
-		{ID: "go-unreached", SubjectID: "subject-go-unreached", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(reference("fixture-unreached"))},
-		{ID: "go-no-analysis", SubjectID: "subject-go-no-analysis", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(reference("fixture-no-analysis"))},
+		{ID: "go-reachable", SubjectID: "pkg:reachbench/go/source_tier2#controlPositive", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(measurement.ArtifactReference{ID: "go-source-tier2-input", Digest: "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"})},
+		{ID: "go-conditional", SubjectID: "pkg:reachbench/go/source_tier2#controlOpaque", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(measurement.ArtifactReference{ID: "go-source-tier2-input", Digest: "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"})},
+		{ID: "go-unreached", SubjectID: "pkg:reachbench/go/source_tier2#controlUnreachable", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(measurement.ArtifactReference{ID: "go-source-tier2-input", Digest: "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"})},
+		{ID: "go-no-analysis", SubjectID: "pkg:reachbench/go/source_tier2#controlNoCoverage", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(measurement.ArtifactReference{ID: "go-source-tier2-input", Digest: "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"})},
 	}}
 	completeness := reference("go-source-completeness")
 	oracle := measurement.ReachabilityOracle{SchemaVersion: measurement.OracleSchemaVersion, ID: "fixture-oracle", Cases: []measurement.OracleCase{

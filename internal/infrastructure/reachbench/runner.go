@@ -388,6 +388,7 @@ func (runner *Runner) loadInputTemplate(root string, asset BundleAsset, purpose 
 }
 
 func enumerateCells(input measurement.MeasurementInput) ([]ExecutionCell, error) {
+	fixtures := measurement.DefaultFixtureManifest()
 	cohorts := make(map[string]measurement.ProductionCohort, len(input.Inventory.Cohorts))
 	for _, cohort := range input.Inventory.Cohorts {
 		cohorts[cohort.ID+"\x00"+cohort.Mode] = cohort
@@ -402,13 +403,30 @@ func enumerateCells(input measurement.MeasurementInput) ([]ExecutionCell, error)
 		if !cohort.BenchmarkRequired {
 			continue
 		}
+		if item.Fixture == nil {
+			return nil, fmt.Errorf("corpus case %q has no fixture", item.ID)
+		}
+		resolved, err := fixtures.ResolveFixtureSubject(*item.Fixture, item.SubjectID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve fixture subject for corpus case %q: %w", item.ID, err)
+		}
+		if resolved.Subject.ID != item.SubjectID {
+			return nil, fmt.Errorf("fixture subject identity mismatch for corpus case %q", item.ID)
+		}
 		for _, binding := range cohort.Bindings {
 			if binding.State != measurement.BindingEnabled {
 				continue
 			}
 			cell := ExecutionCell{
-				CaseID: item.ID, CohortID: item.CohortID, ModeID: item.ModeID, BindingID: binding.ID,
-				AnalyzerID: cohort.AnalyzerID, Configuration: binding.Configuration,
+				CaseID:        item.ID,
+				CohortID:      item.CohortID,
+				ModeID:        item.ModeID,
+				BindingID:     binding.ID,
+				AnalyzerID:    cohort.AnalyzerID,
+				Configuration: binding.Configuration,
+				SubjectID:     resolved.Subject.ID,
+				Fixture:       *item.Fixture,
+				BoundaryID:    binding.BoundaryID,
 			}
 			key := cell.CaseID + "\x00" + cell.BindingID
 			if _, exists := seen[key]; exists {
@@ -492,7 +510,16 @@ func opaqueCellKey(cell ExecutionCell) string {
 }
 
 func cellKey(cell ExecutionCell) string {
-	return strings.Join([]string{cell.CohortID, cell.ModeID, cell.BindingID, cell.CaseID}, "\x00")
+	return strings.Join([]string{
+		cell.CohortID,
+		cell.ModeID,
+		cell.BindingID,
+		cell.CaseID,
+		cell.SubjectID,
+		cell.Fixture.ID,
+		cell.Fixture.Digest,
+		cell.BoundaryID,
+	}, "\x00")
 }
 
 type semanticProjection struct {
