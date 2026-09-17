@@ -44,6 +44,10 @@ func newImportRouter(t *testing.T) *Router {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create project: %d %s", rec.Code, rec.Body.String())
 	}
+	// PR decoration is opt-in per project; enable it so the completion path exercises decoration.
+	if _, err := svc.SetPullRequestDecoration(context.Background(), "ci-bot", shared.ID("tenant-a"), "app", true); err != nil {
+		t.Fatalf("enable decoration: %v", err)
+	}
 	return rt
 }
 

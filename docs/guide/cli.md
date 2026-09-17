@@ -591,6 +591,8 @@ create findings or affect the gate.
 | `--rules <file>` | `<path>/.synapse-rules.yaml` | Rule enable/disable and severity overrides. |
 | `--coverage <file>` | none | Coverage report (lcov, Cobertura, JaCoCo, or a Go `-coverprofile`, auto-detected) so gate conditions can require a coverage floor. A Go profile names files by import path; the CLI reads the `module` directive from `<dir>/go.mod` and strips it so lines key on repo-relative paths. Without a `go.mod` at the scan root the import paths are kept as-is and will not match the tree. |
 | `--format text\|markdown` | `text` | Output format. `markdown` prints a ready-to-post PR summary. |
+| `--decorate` | off | Post the gate result back to the pull/merge request on the CI's forge (commit status, check/report, and a PR/MR comment). The forge is the CI provider (`SYNAPSE_CI_PROVIDER`, auto-detected on GitHub/GitLab/Bitbucket); the token is `SYNAPSE_DECORATION_TOKEN`. A decoration error never fails the gate. |
+| `--dry-run` | off | With `--decorate`, print the resolved decoration target and gate verdict without any forge write, and without needing a token. Use it to confirm decoration will land before provisioning a credential. |
 
 A `.synapse-gate.yaml` overrides the built-in gate, and a `.synapse-rules.yaml` enables/disables rules
 or overrides severities. Use `--gate` and `--rules` to point at files outside the scanned tree:
@@ -689,22 +691,42 @@ backfill CVSS scores with no network access and no API rate limit, which suits a
 
 ### PR decoration
 
-Post the gate result as a pull-request comment. `--format markdown` prints a ready-to-post summary:
+`--decorate` posts the gate result natively to the pull/merge request on the CI's forge: a commit
+status, a check run (GitHub) or Code Insights report (Bitbucket) or Code Quality report (GitLab), and
+one summary comment. It is idempotent (a rerun updates the same status and comment in place) and
+fail-soft (a forge error never fails the gate). The forge is chosen from the CI provider, which is
+auto-detected on GitHub Actions, GitLab CI, and Bitbucket Pipelines (override with `SYNAPSE_CI_PROVIDER`),
+and the PR identity comes from the CI environment. Confirm the wiring first with `--dry-run`, which
+prints the resolved target without any network write:
+
+```bash
+./bin/synapse-cli gate . --new-code-only --base "origin/main" --decorate --dry-run
+```
+
+**Token scopes.** `SYNAPSE_DECORATION_TOKEN` must be able to write back to the change. Grant only what
+decoration needs and prefer a short-lived CI-provided token:
+
+- GitHub: a token with `statuses: write`, `checks: write`, and `pull-requests: write`.
+- GitLab: a project access token with the `api` scope (commit status + MR note), presented as
+  `PRIVATE-TOKEN`.
+- Bitbucket: an access token or app password with `repository:write` and `pullrequest:write`, over
+  Basic auth (`SYNAPSE_DECORATION_USERNAME` pairs with an app password; access tokens default to
+  `x-token-auth`).
 
 ```yaml
 - name: Synapse quality gate
   run: |
     make tools && make build
     ./bin/synapse-cli gate . --new-code-only --base "origin/${{ github.base_ref }}" \
-      --coverage coverage.info --format markdown > gate.md || echo "GATE_FAILED=1" >> "$GITHUB_ENV"
-- name: Comment the gate on the PR
-  if: always()
-  run: gh pr comment "${{ github.event.pull_request.number }}" --body-file gate.md
+      --coverage coverage.info --decorate
   env:
-    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-- name: Fail if the gate failed
-  if: env.GATE_FAILED == '1'
-  run: exit 1
+    SYNAPSE_DECORATION_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+The server decorates automatically too: a project that opts in
+(`PUT /api/v1/projects/{key}/decoration {"enabled": true}`) has every PR-ref analysis decorated using
+the tenant's configured SCM connector, so a CI push through the import route needs no `--decorate` flag.
+Decoration is off for every project by default, so no project performs an outward forge write until it
+opts in.
 
 Next: [Architecture](architecture.md)

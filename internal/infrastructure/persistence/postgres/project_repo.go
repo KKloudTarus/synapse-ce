@@ -16,7 +16,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-const projectCols = `id, tenant_id, name, key, source_binding, default_profile_by_lang, gate_id, created_at, updated_at, created_by, updated_by`
+const projectCols = `id, tenant_id, name, key, source_binding, default_profile_by_lang, gate_id, created_at, updated_at, created_by, updated_by, decorate_pull_requests`
 
 // ProjectRepository persists the long-lived Project identity. projects is RLS-protected
 // (migration 0129), so every statement runs inside requireTenant and keeps its own tenant_id
@@ -50,9 +50,9 @@ func insertProject(ctx context.Context, execer projectExecer, p *project.Project
 	if err != nil {
 		return fmt.Errorf("marshal project profiles: %w", err)
 	}
-	_, err = execer.Exec(ctx, `INSERT INTO projects (`+projectCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+	_, err = execer.Exec(ctx, `INSERT INTO projects (`+projectCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 		p.ID.String(), p.TenantID.String(), p.Name, p.Key, source, profiles, p.GateID,
-		p.Audit.CreatedAt, p.Audit.UpdatedAt, p.Audit.CreatedBy, p.Audit.UpdatedBy)
+		p.Audit.CreatedAt, p.Audit.UpdatedAt, p.Audit.CreatedBy, p.Audit.UpdatedBy, p.DecoratePullRequests)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -134,6 +134,19 @@ func (r *ProjectRepository) UpdateGate(ctx context.Context, tenantID shared.ID, 
 	})
 }
 
+func (r *ProjectRepository) SetPullRequestDecoration(ctx context.Context, tenantID shared.ID, key string, enabled bool) error {
+	return requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		ct, err := tx.Exec(ctx, `UPDATE projects SET decorate_pull_requests=$3, updated_at=now() WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key, enabled)
+		if err != nil {
+			return fmt.Errorf("update project decoration: %w", err)
+		}
+		if ct.RowsAffected() == 0 {
+			return shared.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // AssignProfile sets or clears the quality profile for a language in the project's JSONB
 // default_profile_by_lang map, atomically at the column level (no read-modify-write race).
 func (r *ProjectRepository) AssignProfile(ctx context.Context, tenantID shared.ID, projectKey, language, profileKey string) error {
@@ -192,7 +205,7 @@ func scanProject(row rowScanner) (*project.Project, error) {
 		sourceJSON, profiles []byte
 	)
 	if err := row.Scan(&id, &tenant, &p.Name, &p.Key, &sourceJSON, &profiles, &p.GateID,
-		&p.Audit.CreatedAt, &p.Audit.UpdatedAt, &p.Audit.CreatedBy, &p.Audit.UpdatedBy); err != nil {
+		&p.Audit.CreatedAt, &p.Audit.UpdatedAt, &p.Audit.CreatedBy, &p.Audit.UpdatedBy, &p.DecoratePullRequests); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(sourceJSON, &p.SourceBinding); err != nil {

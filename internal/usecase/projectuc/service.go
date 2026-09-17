@@ -319,6 +319,30 @@ func (s *Service) AssignGate(ctx context.Context, actor string, tenantID shared.
 	return p, nil
 }
 
+// SetPullRequestDecoration toggles the project's opt-in to forge PR decoration. Decoration stays off
+// for every project until this is enabled, so no project performs an outward forge write by default.
+func (s *Service) SetPullRequestDecoration(ctx context.Context, actor string, tenantID shared.ID, key string, enabled bool) (*project.Project, error) {
+	if err := requireActor(actor); err != nil {
+		return nil, err
+	}
+	p, err := s.Get(ctx, tenantID, key)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.SetPullRequestDecoration(ctx, tenantID, p.Key, enabled); err != nil {
+		return nil, fmt.Errorf("set project pull-request decoration: %w", err)
+	}
+	if s.audit != nil {
+		action := "project.decoration.disable"
+		if enabled {
+			action = "project.decoration.enable"
+		}
+		_ = s.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: action, Target: p.ID.String(), Metadata: map[string]string{"project": p.Key}, At: s.clock.Now()})
+	}
+	p.DecoratePullRequests = enabled
+	return p, nil
+}
+
 func (s *Service) StartAnalysis(ctx context.Context, actor string, tenantID shared.ID, key string, coverage *measure.CoverageReport) (ports.ScanJob, error) {
 	if err := requireActor(actor); err != nil {
 		return ports.ScanJob{}, err

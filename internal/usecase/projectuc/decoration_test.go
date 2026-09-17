@@ -5,11 +5,15 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rating"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -25,14 +29,42 @@ func (f *recordingPRDecorator) Decorate(_ context.Context, d ports.PRDecoration)
 	return f.err
 }
 
-func TestDecorateProjectAnalysisPublishesCompletePayload(t *testing.T) {
+const (
+	decTenant  = shared.ID("tenant-a")
+	decProject = shared.ID("proj-1")
+)
+
+// decorationService builds a Service whose project repo holds one project keyed by (decTenant,
+// decProject), opted into decoration per the argument, plus the recording decorator.
+func decorationService(t *testing.T, optedIn bool) (*Service, *recordingPRDecorator) {
+	t.Helper()
+	repo := memory.NewProjectRepository()
+	src := project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}
+	p, err := project.New(decProject, decTenant, "App", "app", src, nil, "", time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("new project: %v", err)
+	}
+	if err := repo.Create(context.Background(), p); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if optedIn {
+		if err := repo.SetPullRequestDecoration(context.Background(), decTenant, "app", true); err != nil {
+			t.Fatalf("enable decoration: %v", err)
+		}
+	}
 	fake := &recordingPRDecorator{}
-	svc := &Service{}
+	svc := &Service{repo: repo}
 	svc.SetPRDecorator(fake)
+	return svc, fake
+}
+
+func prAnalysis() projectanalysis.Analysis {
 	newCoverage := 72.5
-	analysis := projectanalysis.Analysis{
+	return projectanalysis.Analysis{
+		TenantID:  decTenant.String(),
+		ProjectID: decProject.String(),
 		CI: &projectanalysis.CIContext{
-			RepoSlug: "acme/widget", HeadSHA: "abc123", PullRequest: "42", TargetBranch: "main",
+			Provider: "github-actions", RepoSlug: "acme/widget", HeadSHA: "abc123", PullRequest: "42", TargetBranch: "main",
 		},
 		Rating: rating.Report{Security: rating.GradeA, Reliability: rating.GradeB, Maintainability: rating.GradeA},
 		Gate: qualitygate.Result{Passed: false, Results: []qualitygate.ConditionResult{{
@@ -43,15 +75,19 @@ func TestDecorateProjectAnalysisPublishesCompletePayload(t *testing.T) {
 			Status: projectanalysis.FileStatusAdded, NewPath: "src/a.go",
 			Hunks: []projectanalysis.DiffHunk{{NewStart: 1, NewLines: 1, Rows: []projectanalysis.DiffRow{{Kind: projectanalysis.DiffRowAdded, NewLine: 1}}}},
 		}},
-		NewCode: projectanalysis.NewCode{Counts: projectanalysis.Counts{Total: 3}},
-		Snapshot: measure.Snapshot{NewCodeCoverage: measure.DecimalMetric{
-			Availability: measure.AvailabilityAvailable, Value: &newCoverage,
-		}},
+		NewCode:  projectanalysis.NewCode{Counts: projectanalysis.Counts{Total: 3}},
+		Snapshot: measure.Snapshot{NewCodeCoverage: measure.DecimalMetric{Availability: measure.AvailabilityAvailable, Value: &newCoverage}},
 	}
+}
 
-	svc.decorateProjectAnalysis(context.Background(), analysis)
+func TestDecorateProjectAnalysisPublishesCompletePayloadWhenOptedIn(t *testing.T) {
+	svc, fake := decorationService(t, true)
+	svc.decorateProjectAnalysis(context.Background(), prAnalysis())
 	if fake.calls != 1 {
 		t.Fatalf("decorator calls = %d, want 1", fake.calls)
+	}
+	if fake.got.Provider != "github-actions" {
+		t.Fatalf("provider = %q, want the CI provider claim for multiplex dispatch", fake.got.Provider)
 	}
 	if fake.got.Target.Repository != "acme/widget" || fake.got.Target.CommitSHA != "abc123" || fake.got.Target.PullRequest != "42" || fake.got.Target.TargetBranch != "main" {
 		t.Fatalf("target = %+v", fake.got.Target)
@@ -70,17 +106,24 @@ func TestDecorateProjectAnalysisPublishesCompletePayload(t *testing.T) {
 	}
 }
 
+func TestDecorateProjectAnalysisSkipsWhenProjectNotOptedIn(t *testing.T) {
+	svc, fake := decorationService(t, false)
+	svc.decorateProjectAnalysis(context.Background(), prAnalysis())
+	if fake.calls != 0 {
+		t.Fatalf("decoration must be skipped for a project that has not opted in; calls = %d", fake.calls)
+	}
+}
+
 func TestDecorateProjectAnalysisIsFailSoftAndSkipsPartialIdentity(t *testing.T) {
-	fake := &recordingPRDecorator{err: errors.New("forge unavailable")}
-	svc := &Service{}
-	svc.SetPRDecorator(fake)
-	complete := projectanalysis.Analysis{CI: &projectanalysis.CIContext{RepoSlug: "acme/widget", HeadSHA: "abc", PullRequest: "1", TargetBranch: "main"}, Gate: qualitygate.Result{Passed: true}}
-	svc.decorateProjectAnalysis(context.Background(), complete) // adapter error must not escape
+	svc, fake := decorationService(t, true)
+	fake.err = errors.New("forge unavailable")
+	svc.decorateProjectAnalysis(context.Background(), prAnalysis()) // adapter error must not escape
 	if fake.calls != 1 {
 		t.Fatalf("decorator calls = %d, want 1", fake.calls)
 	}
 
-	partial := projectanalysis.Analysis{CI: &projectanalysis.CIContext{RepoSlug: "acme/widget", PullRequest: "2"}}
+	partial := prAnalysis()
+	partial.CI.TargetBranch = ""
 	svc.decorateProjectAnalysis(context.Background(), partial)
 	if fake.calls != 1 {
 		t.Fatalf("partial target should be skipped; calls = %d", fake.calls)

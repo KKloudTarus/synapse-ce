@@ -41,6 +41,10 @@ type Project struct {
 	SourceBinding        SourceBinding
 	DefaultProfileByLang map[string]string
 	GateID               string
+	// DecoratePullRequests opts the project in to writing the quality-gate result back to the forge
+	// (commit status, check/report, PR comment) when an analysis is for a pull request. It defaults to
+	// false so no project performs an outward forge write until an operator enables it.
+	DecoratePullRequests bool
 	Audit                shared.Audit
 }
 

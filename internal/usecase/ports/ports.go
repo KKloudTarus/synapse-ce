@@ -74,6 +74,8 @@ type ProjectRepository interface {
 	GetByKey(ctx context.Context, tenantID shared.ID, key string) (*project.Project, error)
 	GetByID(ctx context.Context, tenantID, projectID shared.ID) (*project.Project, error)
 	UpdateGate(ctx context.Context, tenantID shared.ID, key, gateID string) error
+	// SetPullRequestDecoration toggles the project's opt-in to forge PR decoration (project.DecoratePullRequests).
+	SetPullRequestDecoration(ctx context.Context, tenantID shared.ID, key string, enabled bool) error
 	CountByGate(ctx context.Context, tenantID shared.ID, gateID string) (int, error)
 	DeleteByKey(ctx context.Context, tenantID shared.ID, key string) error
 	// AssignProfile sets (or clears, with an empty profileKey) the quality profile assigned to a

@@ -43,6 +43,9 @@ func (r *overviewProjectRepoSpy) GetByID(context.Context, shared.ID, shared.ID) 
 func (r *overviewProjectRepoSpy) UpdateGate(context.Context, shared.ID, string, string) error {
 	panic("unexpected UpdateGate")
 }
+func (r *overviewProjectRepoSpy) SetPullRequestDecoration(context.Context, shared.ID, string, bool) error {
+	panic("unexpected SetPullRequestDecoration")
+}
 func (r *overviewProjectRepoSpy) AssignProfile(context.Context, shared.ID, string, string, string) error {
 	panic("unexpected AssignProfile")
 }
