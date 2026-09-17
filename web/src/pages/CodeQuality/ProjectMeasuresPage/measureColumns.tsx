@@ -19,6 +19,7 @@ import type {
   MeasureCountMetric,
   MeasureDecimalMetric,
   MeasureGradeMetric,
+  MeasureSignedMetric,
   MeasureNode,
 } from '../../../lib/projectMeasures'
 
@@ -49,7 +50,7 @@ export function MetricValue({
   suffix = '',
   showProgressBar = false,
 }: {
-  m: MeasureCountMetric | MeasureDecimalMetric | MeasureGradeMetric | undefined
+  m: MeasureCountMetric | MeasureDecimalMetric | MeasureGradeMetric | MeasureSignedMetric | undefined
   suffix?: string
   showProgressBar?: boolean
 }) {
@@ -99,6 +100,21 @@ export function MetricValue({
       {suffix}
     </span>
   )
+}
+
+/** Render a signed trend while keeping unavailable evidence visibly distinct from zero. */
+export function SignedMetricValue({ m }: { m: MeasureSignedMetric | undefined }) {
+  if (!m) return <span className="text-tertiary font-mono" title="Omitted">—</span>
+  if (m.availability !== 'available' || m.value === null) {
+    return (
+      <span className="text-tertiary flex items-center gap-1 font-mono" title={m.reason ?? 'Unavailable'}>
+        —
+        {m.reason && <AlertCircle className="size-3 text-brand-secondary" aria-hidden="true" />}
+      </span>
+    )
+  }
+  const prefix = m.value > 0 ? '+' : ''
+  return <span className="tabular-nums font-mono font-medium">{prefix}{m.value.toLocaleString()}</span>
 }
 
 export function getDomainColumns(
@@ -212,6 +228,27 @@ export function getDomainColumns(
           {
             header: 'Cognitive Complexity',
             cell: (i) => <MetricValue m={i.complexity?.cognitive} />,
+          },
+          {
+            header: 'Cyclomatic Δ',
+            cell: (i) => <SignedMetricValue m={i.complexity?.cyclomaticDelta} />,
+          },
+          {
+            header: 'Cognitive Δ',
+            cell: (i) => <SignedMetricValue m={i.complexity?.cognitiveDelta} />,
+          },
+          {
+            header: 'Coverage',
+            cell: (i) => {
+              const coverage = i.complexity?.coverage
+              if (!coverage) return <SignedMetricValue m={undefined} />
+              const eligible = coverage.eligibleFiles.value
+              const measured = coverage.measuredFiles.value
+              if (eligible == null || measured == null || coverage.availability !== 'available') {
+                return <span className="text-tertiary font-mono" title={coverage.reason ?? 'Unavailable'}>—</span>
+              }
+              return <span className="tabular-nums font-mono font-medium">{measured}/{eligible}</span>
+            },
           },
         ]
       case 'coupling':
@@ -386,9 +423,10 @@ export function CurrentNodeMeasures({
   const items: {
     label: string
     icon: typeof File01
-    m: MeasureCountMetric | MeasureDecimalMetric | MeasureGradeMetric | undefined
+    m: MeasureCountMetric | MeasureDecimalMetric | MeasureGradeMetric | MeasureSignedMetric | undefined
     suffix?: string
     showProgress?: boolean
+    signed?: boolean
   }[] = []
 
   if (domain === 'size') {
@@ -404,6 +442,8 @@ export function CurrentNodeMeasures({
     items.push(
       { label: 'Cyclomatic Complexity', icon: CpuChip01, m: node.complexity?.cyclomatic },
       { label: 'Cognitive Complexity', icon: CpuChip01, m: node.complexity?.cognitive },
+      { label: 'Cyclomatic Δ', icon: Activity, m: node.complexity?.cyclomaticDelta, signed: true },
+      { label: 'Cognitive Δ', icon: Activity, m: node.complexity?.cognitiveDelta, signed: true },
     )
   } else if (domain === 'coupling') {
     items.push(
@@ -457,9 +497,17 @@ export function CurrentNodeMeasures({
         <h3 className="text-xs font-bold uppercase tracking-wider text-tertiary">
           Current Node Metrics ({node.name})
         </h3>
-        <span className="text-[11px] font-mono text-tertiary">
-          Type: <strong className="capitalize text-primary">{node.kind}</strong>
-        </span>
+        <div className="flex items-center gap-3 text-[11px] font-mono text-tertiary">
+          {domain === 'complexity' && node.complexity && (
+            <span title={node.complexity.coverage.reason ?? undefined}>
+              AST: <strong className="text-primary">{node.complexity.coverage.measuredFiles.value ?? '—'}/{node.complexity.coverage.eligibleFiles.value ?? '—'}</strong>
+              {node.complexity.baseline?.sourceRef && <span className="ml-2">vs {node.complexity.baseline.sourceRef}</span>}
+            </span>
+          )}
+          <span>
+            Type: <strong className="capitalize text-primary">{node.kind}</strong>
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -477,7 +525,11 @@ export function CurrentNodeMeasures({
                 <Icon className="size-3.5 shrink-0 text-brand-secondary" aria-hidden="true" />
               </div>
               <div className="text-base font-bold tabular-nums text-primary">
+              {item.signed ? (
+                <SignedMetricValue m={item.m as MeasureSignedMetric | undefined} />
+              ) : (
                 <MetricValue m={item.m} suffix={item.suffix} showProgressBar={item.showProgress} />
+              )}
               </div>
             </div>
           )

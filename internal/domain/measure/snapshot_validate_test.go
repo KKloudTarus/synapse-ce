@@ -113,6 +113,20 @@ func TestSnapshot_Validate(t *testing.T) {
 			wantErr: "duplicated lines > ncloc",
 		},
 		{
+			name: "complexity coverage measured exceeds eligible",
+			mutate: func(s *measure.Snapshot) {
+				s.Nodes[2].ComplexityCoverage = measure.ComplexityCoverageSummary{Version: 1, EligibleFiles: 1, MeasuredFiles: 2, Availability: measure.AvailabilityUnavailable}
+			},
+			wantErr: "invalid complexity coverage counts",
+		},
+		{
+			name: "available complexity coverage must be complete",
+			mutate: func(s *measure.Snapshot) {
+				s.Nodes[2].ComplexityCoverage = measure.ComplexityCoverageSummary{Version: 1, EligibleFiles: 2, MeasuredFiles: 1, Availability: measure.AvailabilityAvailable}
+			},
+			wantErr: "available complexity coverage is incomplete",
+		},
+		{
 			name: "unsupported issue type",
 			mutate: func(s *measure.Snapshot) {
 				s.Nodes[1].Counters.IssuesByType = map[string]int{"unsupported": 1}

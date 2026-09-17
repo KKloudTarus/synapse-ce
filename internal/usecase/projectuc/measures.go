@@ -332,6 +332,44 @@ func toBehavioralCount(metric measure.CountMetric) MeasureCountMetric {
 	return MeasureCountMetric{Availability: AvailabilityUnavailable, Reason: &reason}
 }
 
+func toSignedComplexity(metric projectanalysis.ComplexityNodeDelta) MeasureSignedMetric {
+	if metric.Availability == measure.AvailabilityAvailable {
+		value := metric.Cyclomatic
+		return MeasureSignedMetric{Availability: AvailabilityAvailable, Value: &value}
+	}
+	reason := metric.Reason
+	if reason == "" {
+		reason = "complexity_trend_unavailable"
+	}
+	return MeasureSignedMetric{Availability: AvailabilityUnavailable, Reason: &reason}
+}
+
+func intPtr(value int) *int { return &value }
+
+func complexityCoverageMetric(n *measure.Node) ComplexityCoverageMetric {
+	summary := n.ComplexityCoverage
+	toCountMetric := func(value int) MeasureCountMetric {
+		return MeasureCountMetric{Availability: AvailabilityAvailable, Value: intPtr(value)}
+	}
+	reason := summary.Reason
+	if reason == "" && summary.Availability != measure.AvailabilityAvailable {
+		reason = "complexity_not_available"
+	}
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+	availability := AvailabilityUnavailable
+	if summary.Availability == measure.AvailabilityAvailable {
+		availability = AvailabilityAvailable
+		reasonPtr = nil
+	}
+	return ComplexityCoverageMetric{
+		Version: summary.Version, EligibleFiles: toCountMetric(summary.EligibleFiles),
+		MeasuredFiles: toCountMetric(summary.MeasuredFiles), Availability: availability, Reason: reasonPtr,
+	}
+}
+
 func mapDomainMeasures(n *measure.Node, domains map[string]bool, analysis *projectanalysis.Analysis) *MeasureNode {
 	snap := analysis.Snapshot
 	mn := &MeasureNode{
@@ -360,9 +398,35 @@ func mapDomainMeasures(n *measure.Node, domains map[string]bool, analysis *proje
 	}
 	if domains["complexity"] {
 		cxAvail, cxReason := toAvailability(n.ComplexityAvailable, "complexity_not_available")
+		cyclomaticDelta := MeasureSignedMetric{Availability: AvailabilityUnavailable}
+		cognitiveDelta := MeasureSignedMetric{Availability: AvailabilityUnavailable}
+		baseline := (*ComplexityBaseline)(nil)
+		if analysis.Delta == nil {
+			reason := "no_previous_analysis"
+			cyclomaticDelta.Reason, cognitiveDelta.Reason = &reason, &reason
+		} else if analysis.Delta.Complexity == nil {
+			reason := "complexity_trend_not_collected"
+			cyclomaticDelta.Reason, cognitiveDelta.Reason = &reason, &reason
+		} else {
+			if metric, ok := analysis.Delta.Complexity.Nodes[n.Path]; ok {
+				cyclomaticDelta = toSignedComplexity(metric)
+				if metric.Availability == measure.AvailabilityAvailable {
+					cognitiveDelta = MeasureSignedMetric{Availability: AvailabilityAvailable, Value: intPtr(metric.Cognitive)}
+				} else {
+					cognitiveDelta.Reason = cyclomaticDelta.Reason
+				}
+			} else {
+				reason := "path_not_in_baseline"
+				cyclomaticDelta.Reason, cognitiveDelta.Reason = &reason, &reason
+			}
+			if analysis.Delta.Complexity.BaselineAnalysisID != "" {
+				baseline = &ComplexityBaseline{AnalysisID: analysis.Delta.Complexity.BaselineAnalysisID, CreatedAt: analysis.Delta.Complexity.BaselineCreatedAt, SourceRef: analysis.Delta.Complexity.BaselineSourceRef}
+			}
+		}
 		mn.Complexity = &ComplexityMeasures{
-			Cyclomatic: toCount(n.Counters.Cyclomatic, cxAvail, cxReason),
-			Cognitive:  toCount(n.Counters.Cognitive, cxAvail, cxReason),
+			Cyclomatic: toCount(n.Counters.Cyclomatic, cxAvail, cxReason), Cognitive: toCount(n.Counters.Cognitive, cxAvail, cxReason),
+			CyclomaticDelta: cyclomaticDelta, CognitiveDelta: cognitiveDelta,
+			Coverage: complexityCoverageMetric(n), Baseline: baseline,
 		}
 	}
 	if domains["coupling"] {

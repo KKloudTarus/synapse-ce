@@ -9,6 +9,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Coverage-aware complexity rollups and pinned analysis deltas (#1133, EPIC #1120).** Project Code Quality
+  now aggregates AST cyclomatic and cognitive complexity from functions to files, directories, and the
+  project root with per-file parse coverage. Unsupported-language files are explicitly not applicable and
+  excluded from aggregate coverage, while supported files that fail parsing remain unavailable instead of
+  becoming false zeroes. Compatible consecutive analyses persist signed per-path deltas (including
+  reductions), baseline analysis provenance, schema versions, and measured/eligible coverage; unknown
+  branches, incompatible sources, legacy evidence, and missing paths fail closed with explicit reasons.
+  The Measures API/OpenAPI contract and dashboard expose current totals, `Δ` values, and coverage badges.
+
 - **PR decoration wired end to end (#1125, EPIC #1120).** `synapse-cli gate --decorate` posts the quality-gate result back to the pull/merge request on the CI's forge (commit status, check/report, and a summary comment), choosing the GitHub/GitLab/Bitbucket adapter from the CI provider and authenticating with `SYNAPSE_DECORATION_TOKEN`; `--dry-run` previews the resolved target with no network write and no token. The server decorates automatically for a PR-ref analysis when the project opts in (`PUT /api/v1/projects/{key}/decoration`), through one provider-multiplexing decorator that resolves the write credential from the tenant's SCM connector store per call. Decoration is off for every project by default (a new `decorate_pull_requests` column, defaulting false), fail-soft (a forge error never fails the analysis or the gate), and idempotent. The ALM setup and token scopes are documented per provider in the CLI guide.
 
 - **GitLab merge-request decoration adapter (#1123, EPIC #1120).** An owned `GitLabDecorator` publishes the quality-gate verdict to GitLab through the commit-status and merge-request note APIs, idempotently: a rerun updates the one owned status and the one marker-tagged note in place rather than duplicating them, the connector token is presented as `PRIVATE-TOKEN` and never rendered into payloads or errors, and each surface fails soft and independently so the scan is never failed by a forge write. It also renders the native GitLab Code Quality report (`gl-code-quality-report.json`, CodeClimate schema) deterministically, with a stable content fingerprint per finding, so GitLab shows inline quality diffs once the report is emitted. The adapter is network-free until the CLI/server wiring (#1125) composes it.

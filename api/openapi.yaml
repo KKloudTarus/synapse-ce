@@ -10615,6 +10615,21 @@ components:
         - head_commit_mismatch
         - depth_too_small_configure_min_2
         - file_budget_exceeded
+        - no_previous_analysis
+        - unknown_branch
+        - incompatible_source
+        - complexity_trend_not_collected
+        - complexity_trend_unavailable
+        - legacy_complexity_evidence
+        - current_complexity_unavailable
+        - baseline_complexity_unavailable
+        - complexity_coverage_missing
+        - unsupported_language
+        - parse_error
+        - path_not_in_baseline
+        - path_kind_changed
+        - incompatible_complexity_version
+        - no_complexity_files
 
     MeasureCountMetric:
       type: object
@@ -10661,10 +10676,44 @@ components:
 
     MeasureComplexity:
       type: object
-      required: [cyclomatic, cognitive]
+      required: [cyclomatic, cognitive, cyclomatic_delta, cognitive_delta, coverage]
       properties:
         cyclomatic: {$ref: '#/components/schemas/MeasureCountMetric'}
         cognitive: {$ref: '#/components/schemas/MeasureCountMetric'}
+        cyclomatic_delta: {$ref: '#/components/schemas/MeasureSignedMetric'}
+        cognitive_delta: {$ref: '#/components/schemas/MeasureSignedMetric'}
+        coverage: {$ref: '#/components/schemas/ComplexityCoverageMetric'}
+        baseline: {$ref: '#/components/schemas/ComplexityBaseline'}
+
+    MeasureSignedMetric:
+      type: object
+      required: [availability, value, unavailable_reason]
+      properties:
+        availability: {type: string, enum: [available, unavailable, not_applicable]}
+        value: {type: [integer, "null"]}
+        unavailable_reason:
+          anyOf:
+          - $ref: '#/components/schemas/MeasureUnavailableReason'
+          - type: [string, "null"]
+
+    ComplexityCoverageMetric:
+      type: object
+      description: Per-node complexity evidence coverage. unavailable_reason is a stable code or a deterministic `N_of_M_files_unmeasured` detail.
+      required: [version, eligible_files, measured_files, availability, unavailable_reason]
+      properties:
+        version: {type: integer, minimum: 0}
+        eligible_files: {$ref: '#/components/schemas/MeasureCountMetric'}
+        measured_files: {$ref: '#/components/schemas/MeasureCountMetric'}
+        availability: {type: string, enum: [available, unavailable, not_applicable]}
+        unavailable_reason: {type: [string, "null"]}
+
+    ComplexityBaseline:
+      type: object
+      required: [analysis_id, created_at]
+      properties:
+        analysis_id: {type: string}
+        created_at: {type: string, format: date-time}
+        source_ref: {type: string}
 
     MeasureCoupling:
       type: object

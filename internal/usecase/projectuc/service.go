@@ -630,6 +630,21 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 	if len(previous) > 0 {
 		baseline = &previous[0]
 	}
+	// Complexity trend has a stricter baseline policy than the existing new-code counters: an empty
+	// branch is a wildcard in the store and must never accidentally compare two unrelated branches.
+	var complexityBaseline *projectanalysis.Analysis
+	complexityBaselineReason := ""
+	if recordingBranch == "" {
+		if baseline != nil {
+			complexityBaselineReason = "unknown_branch"
+		}
+	} else if baseline != nil {
+		if baseline.SourceRevision.Kind != projectScanKind(p.SourceBinding.Kind) {
+			complexityBaselineReason = "incompatible_source"
+		} else {
+			complexityBaseline = baseline
+		}
+	}
 	detection := append([]finding.Finding{}, result.Findings...)
 	if result.CodeQuality != nil {
 		detection = append(detection, result.CodeQuality.Findings...)
@@ -891,6 +906,7 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 		Capabilities:   capabilities, SourceManifest: manifest, Comparison: comparison, FileChanges: result.FileChanges, Annotations: annotations,
 		Findings: issues, Gate: gate, GateSource: gateSource, GateExempt: exempt, LinesOfCode: loc,
 		Coverage: analysisCoverage, Duplication: dupPtr, Coupling: couplingPtr, BehavioralHotspots: behavioralPtr, AnalysisTruncated: analysisTruncated, Previous: baseline,
+		ComplexityBaseline: complexityBaseline, ComplexityBaselineReason: complexityBaselineReason,
 		Hotspots: overallHsSummary, NewHotspots: newHsSummary, Snapshot: snapshot,
 	})
 	if err != nil {

@@ -221,3 +221,35 @@ func TestBehavioralHotspotsReport_Validation(t *testing.T) {
 		t.Fatal("expected validation error for duplicate path")
 	}
 }
+
+func TestBehavioralHotspotsReport_RejectsMalformedComplexityEvidence(t *testing.T) {
+	inv := Inventory{
+		Files: []FileInventory{
+			{Path: "a.go", Language: "Go"},
+		},
+	}
+	comp := &ComplexityReport{
+		Version: ComplexitySchemaVersion,
+		Files: []ComplexityFileCoverage{
+			{File: "a.go", Language: "Go", Supported: true, Parsed: true},
+			{File: "../escape.go", Language: "Go", Supported: true, Parsed: true},
+		},
+		Functions: []FunctionComplexity{
+			{File: "a.go", Cyclomatic: 5},
+		},
+	}
+	head := strings.Repeat("a", 40)
+	_, err := BuildBehavioralHotspots(BuildBehavioralHotspotsInput{
+		Inventory:        inv,
+		Complexity:       comp,
+		Commits:          []BehavioralCommitEvidence{{CommitID: head, TouchedPaths: []string{"a.go"}}},
+		HeadCommit:       head,
+		RequestedCommits: 1,
+		EvaluatedCommits: 1,
+		ReachedRoot:      true,
+		HistoryAvailable: true,
+	})
+	if err == nil {
+		t.Fatal("expected error on malformed complexity evidence, got nil")
+	}
+}

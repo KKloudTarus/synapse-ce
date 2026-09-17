@@ -126,7 +126,11 @@ func Evaluate(input AssessmentInput, cfg Config, now time.Time) (Assessment, err
 	if err != nil {
 		return Assessment{}, err
 	}
-	now = now.UTC()
+	// Truncate to the microsecond resolution every store can hold. AssessedAt persists in a timestamptz
+	// column while Result.ComputedAt travels inside a JSONB document, so a nanosecond remainder here would
+	// survive in one and be dropped in the other, and Validate's ComputedAt/AssessedAt equality binding
+	// would reject the reloaded assessment.
+	now = now.UTC().Truncate(time.Microsecond)
 	return Assessment{
 		TenantID: input.TenantID, ID: AssessmentID(input.TenantID, input.FindingID, cfg.Version, inputHash),
 		EngagementID: input.EngagementID, FindingID: input.FindingID,
