@@ -11,11 +11,14 @@ import (
 	"time"
 )
 
-// rpmTagEntry is one header tag for the test builder.
+// rpmTagEntry is one header tag for the test builder. A scalar entry sets str (STRING) or i32 (INT32); an
+// array entry sets strs (STRING_ARRAY) or i32s (INT32 array), which drive the on-disk count and data store.
 type rpmTagEntry struct {
 	tag, typ uint32
 	str      string
 	i32      uint32
+	strs     []string
+	i32s     []uint32
 }
 
 // buildRPMHeader encodes tags into an RPM header blob in the exact on-disk layout parseRPMHeader reads:
@@ -25,20 +28,35 @@ func buildRPMHeader(t *testing.T, withMagic bool, tags []rpmTagEntry) []byte {
 	var data, index []byte
 	for _, e := range tags {
 		off := uint32(len(data))
+		count := uint32(1)
+		switch {
+		case e.strs != nil: // STRING_ARRAY: count NUL-terminated strings
+			count = uint32(len(e.strs))
+			for _, s := range e.strs {
+				data = append(data, []byte(s)...)
+				data = append(data, 0)
+			}
+		case e.i32s != nil: // INT32 array: count big-endian uint32s
+			count = uint32(len(e.i32s))
+			for _, v := range e.i32s {
+				b := make([]byte, 4)
+				binary.BigEndian.PutUint32(b, v)
+				data = append(data, b...)
+			}
+		case e.typ == rpmTypeInt32:
+			b := make([]byte, 4)
+			binary.BigEndian.PutUint32(b, e.i32)
+			data = append(data, b...)
+		default:
+			data = append(data, []byte(e.str)...)
+			data = append(data, 0) // NUL terminator
+		}
 		ent := make([]byte, 16)
 		binary.BigEndian.PutUint32(ent[0:], e.tag)
 		binary.BigEndian.PutUint32(ent[4:], e.typ)
 		binary.BigEndian.PutUint32(ent[8:], off)
-		binary.BigEndian.PutUint32(ent[12:], 1) // count
+		binary.BigEndian.PutUint32(ent[12:], count)
 		index = append(index, ent...)
-		if e.typ == rpmTypeInt32 {
-			b := make([]byte, 4)
-			binary.BigEndian.PutUint32(b, e.i32)
-			data = append(data, b...)
-		} else {
-			data = append(data, []byte(e.str)...)
-			data = append(data, 0) // NUL terminator
-		}
 	}
 	var buf []byte
 	if withMagic {
