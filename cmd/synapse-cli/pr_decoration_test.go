@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -88,5 +89,29 @@ func TestTriggerGateDecorationSkipsPartialIdentity(t *testing.T) {
 	triggerGateDecorationFromEnv(context.Background(), fake, qualitygate.Result{Passed: true}, "summary", nil)
 	if fake.calls != 0 {
 		t.Fatalf("partial target should be skipped; decorator calls = %d", fake.calls)
+	}
+}
+
+func TestPRBaseRef(t *testing.T) {
+	pr := projectanalysis.CIContext{PullRequest: "42", TargetBranch: "develop"}
+	cases := []struct {
+		name    string
+		baseRef string
+		image   bool
+		ci      projectanalysis.CIContext
+		want    string
+	}{
+		{"explicit base wins", "origin/custom", false, pr, "origin/custom"},
+		{"pr defaults to target", "", false, pr, "origin/develop"},
+		{"pr target trimmed", "", false, projectanalysis.CIContext{PullRequest: "1", TargetBranch: "  release/2 "}, "origin/release/2"},
+		{"whitespace base is not explicit", "   ", false, pr, "origin/develop"},
+		{"image scan keeps empty", "", true, pr, ""},
+		{"non-pr keeps empty", "", false, projectanalysis.CIContext{Branch: "main"}, ""},
+		{"pr without target keeps empty", "", false, projectanalysis.CIContext{PullRequest: "42"}, ""},
+	}
+	for _, c := range cases {
+		if got := prBaseRef(c.baseRef, c.image, c.ci); got != c.want {
+			t.Errorf("%s: prBaseRef(%q,%v,%+v) = %q, want %q", c.name, c.baseRef, c.image, c.ci, got, c.want)
+		}
 	}
 }

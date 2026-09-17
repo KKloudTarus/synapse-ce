@@ -9,6 +9,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Pull-request analyses are first-class: New Code is measured against the target branch (#1127, EPIC #1120).** When an analysis is for a pull request (its CI context carries a PR number and a target branch), its New-Code baseline is the latest analysis on the target branch, not the PR head's own history, so the PR gates on what it adds relative to where it will merge. This re-bases every `new_*` gate metric and the decoration's new-issue/new-coverage summary automatically. `synapse-cli scan` in a pull-request pipeline now defaults its `--base` to `origin/<target-branch>` (an explicit `--base` still wins), so the CLI's new-code finding scoping is target-relative too. A non-PR analysis is unchanged: it still diffs against its own recording branch.
+
 - **Go Tier-2 reachability fails open on opaque control-flow constructs (EPIC #1120, #1138).** The owned `ssacallgraph` source pass records reachable `//go:linkname`, `unsafe`, cgo, and assembly-backed functions as blind constructs before SSA can erase those signals. Package initializers are covered, build-excluded files do not poison active symbols, and dead opaque helpers do not disable unrelated suppressions. A Tier-2 `not_reachable` carrying one of these constructs cannot become suppressing evidence.
 
 - **Code Quality rule catalog coverage audit (#1134).** The shipped catalog now has a deterministic rules × language × type coverage matrix and complete OWASP mappings for security-quality rules; collision-safe display names preserve the distinct VB.NET and C++ empty-catch detectors rather than retiring either detection path.

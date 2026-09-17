@@ -533,6 +533,17 @@ func (s *Service) ImportAnalysis(ctx context.Context, tenantID shared.ID, key st
 	return s.analyses.Get(ctx, tenantID, p.ID, shared.ID(jobID))
 }
 
+// baselineBranchForRecording returns the branch whose latest analysis is the New-Code baseline. A
+// pull-request analysis (PR number + target branch both known) is a first-class object whose New Code is
+// what it adds relative to the branch it will merge into, so its baseline is the merge target branch,
+// not the PR head's own history. Any other analysis diffs against its own recording branch.
+func baselineBranchForRecording(recordingBranch string, ci *projectanalysis.CIContext) string {
+	if ci != nil && strings.TrimSpace(ci.PullRequest) != "" && strings.TrimSpace(ci.TargetBranch) != "" {
+		return strings.TrimSpace(ci.TargetBranch)
+	}
+	return recordingBranch
+}
+
 // recordProjectAnalysis is the shared recorder behind a server scan and a pipeline import. origin
 // and ci are the only things the two callers supply differently.
 func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared.ID, jobID string, completedAt time.Time, result *scauc.ScanResult, origin projectanalysis.Origin, ci *projectanalysis.CIContext) (recordErr error) {
@@ -569,7 +580,7 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 	// The New-Code baseline is the previous analysis on the SAME branch as the one being recorded,
 	// so a feature branch diffs against its own history, not whichever branch scanned last.
 	recordingBranch := projectanalysis.Analysis{SourceRef: result.SourceRef, CI: ci}.Branch()
-	previous, _, err := s.analyses.List(ctx, p.TenantID, p.ID, recordingBranch, 1, time.Time{}, "")
+	previous, _, err := s.analyses.List(ctx, p.TenantID, p.ID, baselineBranchForRecording(recordingBranch, ci), 1, time.Time{}, "")
 	if err != nil {
 		return fmt.Errorf("list project analyses: %w", err)
 	}
