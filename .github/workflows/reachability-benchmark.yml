@@ -76,6 +76,8 @@ jobs:
     env:
       GIT_CONFIG_NOSYSTEM: "1"
       GIT_CONFIG_COUNT: "0"
+      GIT_CONFIG_PARAMETERS: ""
+      GIT_TEMPLATE_DIR: ""
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
@@ -126,11 +128,16 @@ jobs:
           test ! -L "$workspace_parent"
           test "$GIT_CONFIG_NOSYSTEM" = 1
           test "$GIT_CONFIG_COUNT" = 0
+          test -z "$GIT_CONFIG_PARAMETERS"
+          test -z "$GIT_TEMPLATE_DIR"
           git_config="$runner_temp/synapse-reachability-gitconfig"
-          for name in "${!GIT_CONFIG_@}"; do
+          for name in "${!GIT_@}"; do
             case "$name" in
-              GIT_CONFIG_NOSYSTEM|GIT_CONFIG_COUNT) ;;
-              *) unset "$name" ;;
+              GIT_CONFIG_NOSYSTEM|GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS|GIT_TEMPLATE_DIR) ;;
+              *)
+                echo "unexpected inherited Git environment variable: $name" >&2
+                exit 1
+                ;;
             esac
           done
           rm -f -- "$git_config"
@@ -138,6 +145,7 @@ jobs:
           test -f "$git_config"
           test ! -L "$git_config"
           printf 'GIT_CONFIG_GLOBAL=%s\n' "$git_config" >> "$GITHUB_ENV"
+          printf 'GIT_CONFIG_PARAMETERS=\n' >> "$GITHUB_ENV"
           rm -rf -- "$workspace"
           install -d -m 0700 -- "$workspace"
           test -d "$workspace"

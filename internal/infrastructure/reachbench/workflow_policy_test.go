@@ -48,8 +48,14 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 	for _, required := range []string{
 		"GIT_CONFIG_NOSYSTEM: \"1\"",
 		"GIT_CONFIG_COUNT: \"0\"",
+		"GIT_CONFIG_PARAMETERS: \"\"",
+		"GIT_TEMPLATE_DIR: \"\"",
 		"git_config=\"$runner_temp/synapse-reachability-gitconfig\"",
 		"printf 'GIT_CONFIG_GLOBAL=%s\\n' \"$git_config\" >> \"$GITHUB_ENV\"",
+		"printf 'GIT_CONFIG_PARAMETERS=\\n' >> \"$GITHUB_ENV\"",
+		"for name in \"${!GIT_@}\"; do",
+		"GIT_CONFIG_NOSYSTEM|GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS|GIT_TEMPLATE_DIR) ;;",
+		"unexpected inherited Git environment variable: $name",
 		"- name: Prepare fresh trusted checkout",
 		"cd \"$RUNNER_TEMP\"",
 		"realpath -m -- \"$workspace\"",
@@ -87,6 +93,9 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 	}
 	if strings.Contains(workflow, "mv -- \"$workspace\"") || strings.Contains(workflow, "prior_checkout=") {
 		t.Fatal("workflow must remove and recreate the validated checkout without quarantining or copying it")
+	}
+	if strings.Contains(workflow, "printf '%s=\\n' \"$name\" >> \"$GITHUB_ENV\"") {
+		t.Fatal("workflow must reject unexpected inherited Git variables instead of persisting empty values")
 	}
 	teardown := strings.Index(workflow, "- name: Teardown trusted benchmark workspace")
 	if teardown < 0 || !strings.Contains(workflow[teardown:], "if: ${{ always() }}") || !strings.Contains(workflow[teardown:], "\"$RUNNER_TEMP/synapse-reachability-gitconfig\"") || !strings.Contains(workflow[teardown:], "\"$RUNNER_TEMP/synapse-reachability-prior-checkout\"") {
