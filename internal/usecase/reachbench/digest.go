@@ -32,7 +32,7 @@ func DigestReachabilityOracle(oracle ReachabilityOracle) (string, error) {
 	if err := oracle.Validate(); err != nil {
 		return "", err
 	}
-	return digestCanonical(canonicalOracleV2(oracle))
+	return digestCanonical(canonicalOracle(oracle))
 }
 
 // DigestMeasurementPolicy returns the static policy digest without introducing a baseline/ratchet cycle.
@@ -67,7 +67,7 @@ func DigestProceduralBaselineCheckpoint(checkpoint ProceduralBaselineCheckpoint)
 
 // DigestCandidateRatchet excludes its self-referential ID field.
 func DigestCandidateRatchet(ratchet CandidateRatchet) (string, error) {
-	canonical := canonicalRatchetV2(ratchet)
+	canonical := canonicalRatchet(ratchet)
 	canonical.ID = ""
 	return digestCanonical(canonical)
 }
@@ -102,7 +102,7 @@ func canonicalCorpus(corpus ContractCorpus) ContractCorpus {
 	return out
 }
 
-func canonicalOracleV2(oracle ReachabilityOracle) ReachabilityOracle {
+func canonicalOracle(oracle ReachabilityOracle) ReachabilityOracle {
 	out := oracle
 	out.Cases = append([]OracleCase(nil), oracle.Cases...)
 	sort.Slice(out.Cases, func(left, right int) bool { return out.Cases[left].CaseID < out.Cases[right].CaseID })
@@ -166,7 +166,7 @@ func canonicalReport(report MeasurementReport) MeasurementReport {
 	return out
 }
 
-func canonicalRatchetV2(ratchet CandidateRatchet) CandidateRatchet {
+func canonicalRatchet(ratchet CandidateRatchet) CandidateRatchet {
 	out := ratchet
 	out.Bindings = append([]RatchetBinding(nil), ratchet.Bindings...)
 	sort.Slice(out.Bindings, func(left, right int) bool {
@@ -241,8 +241,8 @@ func sameMeasurementReport(left, right MeasurementReport) bool {
 }
 
 func sameCandidateRatchet(left, right CandidateRatchet) bool {
-	leftJSON, leftErr := benchmark.CanonicalJSON(canonicalRatchetV2(left))
-	rightJSON, rightErr := benchmark.CanonicalJSON(canonicalRatchetV2(right))
+	leftJSON, leftErr := benchmark.CanonicalJSON(canonicalRatchet(left))
+	rightJSON, rightErr := benchmark.CanonicalJSON(canonicalRatchet(right))
 	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
 }
 

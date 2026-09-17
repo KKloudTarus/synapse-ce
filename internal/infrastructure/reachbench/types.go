@@ -24,7 +24,7 @@ const (
 	BaselineAllowlistResultVersion = "synapse-reachability-baseline-allowlist-result-v1"
 
 	ControllerEnvelopeEnvironment = "SYNAPSE_REACHABILITY_CONTROLLER_ENVELOPE"
-	TrustedBundleRelativePath     = "internal/usecase/reachbench/trusted-v2"
+	TrustedBundleRelativePath     = "internal/usecase/reachbench/trusted"
 	controllerRootDirectory       = "synapse-reachability-controller"
 	controllerEnvelopeDirectory   = controllerRootDirectory + "/envelopes"
 	controllerBundleDirectory     = controllerRootDirectory + "/trusted-bundle"
@@ -88,7 +88,7 @@ type BundleAsset struct {
 	Digest string `json:"digest"`
 }
 
-// TrustedBundle identifies route-owned v2 templates and reviewed baseline evidence. It carries no scores or authority claim.
+// TrustedBundle identifies route-owned contract templates and reviewed baseline evidence. It carries no scores or authority claim.
 type TrustedBundle struct {
 	SchemaVersion     string      `json:"schema_version"`
 	ID                string      `json:"id"`

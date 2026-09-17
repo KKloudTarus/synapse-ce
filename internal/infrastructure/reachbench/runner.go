@@ -278,7 +278,7 @@ func validateLocalEnvelope(envelope RunEnvelope, facts runtimeFacts, bundle meas
 
 func validateEnvelopeMeasurement(envelope RunEnvelope, input measurement.MeasurementInput, bundle measurement.ArtifactReference) error {
 	if input.Purpose != envelope.Purpose || input.ActiveSnapshot != envelope.Snapshot || envelope.Bundle != bundle {
-		return errors.New("run envelope does not agree with the v2 measurement input")
+		return errors.New("run envelope does not agree with the measurement contract input")
 	}
 	if envelope.Route == RouteCandidate || envelope.Route == RouteLocalDiagnostic {
 		if input.Baseline == nil || input.Checkpoint == nil || input.Ratchet == nil {

@@ -398,7 +398,7 @@ func TestProtectedBaselineRejectsUnreviewedAnalyzerPath(t *testing.T) {
 	original := dependencies.Command
 	dependencies.Command = func(ctx context.Context, binary string, args ...string) ([]byte, error) {
 		if binary == "git" && strings.HasPrefix(strings.Join(args, " "), "diff --name-status --no-renames -z ") {
-			return encodeChangedEntries([]BaselineAllowlistEntry{{Status: "M", Path: "internal/usecase/reachbench/v2_types.go"}}), nil
+			return encodeChangedEntries([]BaselineAllowlistEntry{{Status: "M", Path: "internal/usecase/reachbench/contract_types.go"}}), nil
 		}
 		return original(ctx, binary, args...)
 	}
@@ -460,7 +460,7 @@ func TestBaselineAllowlistPermitsReviewedFoundationContractAndWorkflowPaths(t *t
 			{Status: "A", Path: "fixtures/reachability/new-case.go"},
 			{Status: "M", Path: "internal/domain/engagement/identity.go"},
 			{Status: "M", Path: "internal/infrastructure/reachbench/launch.go"},
-			{Status: "M", Path: "internal/usecase/reachbench/v2_types.go"},
+			{Status: "M", Path: "internal/usecase/reachbench/contract_types.go"},
 		},
 	}
 	if err := allowlist.Validate(); err != nil {
@@ -567,7 +567,7 @@ func writeFixtureBundle(t *testing.T, root string, baseline, candidate measureme
 	allowlistEncoded := canonicalTestJSON(t, allowlist)
 	bundle := TrustedBundle{
 		SchemaVersion:     BundleSchemaVersion,
-		ID:                "reachability-trusted-v2",
+		ID:                "reachability-trusted",
 		BaselineInput:     BundleAsset{Path: "baseline-input.json", Digest: benchmark.SHA256Digest(baselineEncoded)},
 		CandidateInput:    BundleAsset{Path: "candidate-input.json", Digest: benchmark.SHA256Digest(candidateEncoded)},
 		BaselineAllowlist: BundleAsset{Path: "baseline-allowlist.json", Digest: benchmark.SHA256Digest(allowlistEncoded)},
@@ -703,7 +703,7 @@ func measurementTemplates(t *testing.T) (measurement.MeasurementInput, measureme
 		{ID: "go-no-analysis", SubjectID: "subject-go-no-analysis", CohortID: "go", ModeID: "source_tier2", Fixture: pointer(reference("fixture-no-analysis"))},
 	}}
 	completeness := reference("go-source-completeness")
-	oracle := measurement.ReachabilityOracle{SchemaVersion: measurement.OracleSchemaVersionV2, ID: "fixture-oracle", Cases: []measurement.OracleCase{
+	oracle := measurement.ReachabilityOracle{SchemaVersion: measurement.OracleSchemaVersion, ID: "fixture-oracle", Cases: []measurement.OracleCase{
 		{CaseID: "go-reachable", Expected: measurement.OutcomeReachable, Category: measurement.OracleReachable, CoverageExpectation: measurement.CoverageComplete},
 		{CaseID: "go-conditional", Expected: measurement.OutcomeConditionallyReachable, Category: measurement.OracleOpaque, CoverageExpectation: measurement.CoverageComplete},
 		{CaseID: "go-unreached", Expected: measurement.OutcomePresentUnreached, Category: measurement.OracleTrulyUnreachable, CoverageExpectation: measurement.CoverageComplete, SuppressionApplicable: true, CompletenessContract: pointer(completeness)},
@@ -791,8 +791,8 @@ func fixturePolicy(t *testing.T, inventory measurement.ProductionInventory, corp
 		SchemaVersion: measurement.PolicySchemaVersion, ID: "fixture-policy",
 		Inventory: measurement.ArtifactReference{ID: inventory.ID, Digest: inventoryDigest}, Corpus: measurement.ArtifactReference{ID: corpus.ID, Digest: corpusDigest},
 		Oracle: measurement.ArtifactReference{ID: oracle.ID, Digest: oracleDigest}, ExceptionManifest: measurement.ArtifactReference{ID: exceptions.ID, Digest: exceptionDigest},
-		SchemaDefinition: reference("v2-schema-definition"), RunPurposeRules: reference("v2-run-purpose-rules"), RatchetConstructionRule: reference("v2-ratchet-construction"),
-		Evaluator: reference("v2-evaluator"), MetricDefinition: reference("v2-metrics"), Adapters: []measurement.ArtifactReference{reference("production-adapter")}, Rules: rules,
+		SchemaDefinition: reference("contract-schema-definition"), RunPurposeRules: reference("contract-run-purpose-rules"), RatchetConstructionRule: reference("contract-ratchet-construction"),
+		Evaluator: reference("contract-evaluator"), MetricDefinition: reference("contract-metrics"), Adapters: []measurement.ArtifactReference{reference("production-adapter")}, Rules: rules,
 	}
 }
 

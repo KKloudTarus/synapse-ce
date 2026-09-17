@@ -62,7 +62,7 @@ func DeriveCandidateRatchet(policy MeasurementPolicy, baseline MeasurementReport
 	if err := ratcheted.Validate(); err != nil {
 		return CandidateRatchet{}, err
 	}
-	return canonicalRatchetV2(ratcheted), nil
+	return canonicalRatchet(ratcheted), nil
 }
 
 // Validate checks every self-describing ratchet guard and its self digest before a candidate can consume it.

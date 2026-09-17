@@ -14,7 +14,7 @@ import (
 var defaultProductionInventoryJSON []byte
 
 // DefaultProductionInventory returns the checked-in full production inventory. Its not_assessed state is honest:
-// current v1 fixtures do not exercise each production binding/case required by this v2 contract.
+// current v1 legacy fixtures do not exercise each production binding or case required by this contract.
 func DefaultProductionInventory() ProductionInventory {
 	inventory, err := LoadProductionInventory(bytes.NewReader(defaultProductionInventoryJSON))
 	if err != nil {
@@ -35,7 +35,7 @@ func LoadProductionInventory(reader io.Reader) (ProductionInventory, error) {
 	return canonicalInventory(inventory), nil
 }
 
-// DecodeMeasurementInput strictly decodes one v2 measurement envelope.
+// DecodeMeasurementInput strictly decodes one contract measurement envelope.
 func DecodeMeasurementInput(reader io.Reader) (MeasurementInput, error) {
 	var input MeasurementInput
 	if err := benchmark.StrictDecode(reader, &input); err != nil {
@@ -47,7 +47,7 @@ func DecodeMeasurementInput(reader io.Reader) (MeasurementInput, error) {
 	return input, nil
 }
 
-// EncodeMeasurementReport writes a canonical v2 report and verifies its self digest before publication.
+// EncodeMeasurementReport writes a canonical contract report and verifies its self digest before publication.
 func EncodeMeasurementReport(writer io.Writer, report MeasurementReport) error {
 	if err := report.Validate(); err != nil {
 		return fmt.Errorf("validate reachability measurement report: %w", err)
@@ -74,9 +74,9 @@ func DecodeMeasurementReport(reader io.Reader) (MeasurementReport, error) {
 	return canonicalReport(report), nil
 }
 
-// ConvertV1Input is the only supported v1 conversion direction. It preserves raw bytes, the original digest,
-// and labels while explicitly recording unavailable v2 evidence. The result cannot be accepted by EvaluateMeasurement.
-func ConvertV1Input(raw []byte) (LegacyV1Evidence, error) {
+// ImportLegacyInput is the only supported v1 conversion direction. It preserves raw bytes, the original digest,
+// and labels while explicitly recording unavailable contract evidence. The result cannot be accepted by EvaluateMeasurement.
+func ImportLegacyInput(raw []byte) (LegacyV1Evidence, error) {
 	input, err := DecodeInput(bytes.NewReader(raw))
 	if err != nil {
 		return LegacyV1Evidence{}, fmt.Errorf("decode v1 reachability input: %w", err)
@@ -99,9 +99,9 @@ func ConvertV1Input(raw []byte) (LegacyV1Evidence, error) {
 	}, nil
 }
 
-// MigrateV1Corpus preserves all existing v1 labels in a structurally v2 corpus. LegacyOrigin deliberately
-// prevents its fixture identities from being presented as immutable v2 production evidence.
-func MigrateV1Corpus(corpus Corpus) (ContractCorpus, ReachabilityOracle, error) {
+// ImportLegacyCorpus preserves all existing v1 labels in a contract corpus. LegacyOrigin deliberately
+// prevents its fixture identities from being presented as immutable production evidence.
+func ImportLegacyCorpus(corpus Corpus) (ContractCorpus, ReachabilityOracle, error) {
 	if err := validateCorpus(corpus); err != nil {
 		return ContractCorpus{}, ReachabilityOracle{}, err
 	}
@@ -131,14 +131,14 @@ func MigrateV1Corpus(corpus Corpus) (ContractCorpus, ReachabilityOracle, error) 
 		}
 	}
 	migrated := ContractCorpus{SchemaVersion: ContractCorpusSchemaVersion, ID: "migrated-v1-corpus", Cases: cases}
-	oracle := ReachabilityOracle{SchemaVersion: OracleSchemaVersionV2, ID: "migrated-v1-oracle", Cases: oracleCases}
+	oracle := ReachabilityOracle{SchemaVersion: OracleSchemaVersion, ID: "migrated-v1-oracle", Cases: oracleCases}
 	if err := migrated.Validate(); err != nil {
 		return ContractCorpus{}, ReachabilityOracle{}, err
 	}
 	if err := oracle.ValidateAgainst(migrated); err != nil {
 		return ContractCorpus{}, ReachabilityOracle{}, err
 	}
-	return canonicalCorpus(migrated), canonicalOracleV2(oracle), nil
+	return canonicalCorpus(migrated), canonicalOracle(oracle), nil
 }
 
 func legacyCohort(_ string) (string, string) {

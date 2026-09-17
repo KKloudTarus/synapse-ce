@@ -3,7 +3,7 @@ package reachbench
 const (
 	ProductionInventorySchemaVersion = "synapse-reachability-production-inventory-v2"
 	ContractCorpusSchemaVersion      = "synapse-reachability-contract-corpus-v2"
-	OracleSchemaVersionV2            = "synapse-reachability-oracle-v2"
+	OracleSchemaVersion              = "synapse-reachability-oracle-v2"
 	PolicySchemaVersion              = "synapse-reachability-measurement-policy-v2"
 	ExceptionManifestSchemaVersion   = "synapse-reachability-exception-manifest-v2"
 	MeasurementInputSchemaVersion    = "synapse-reachability-measurement-input-v2"
@@ -240,7 +240,7 @@ type ProductionCohort struct {
 	Bindings          []CompositionBinding `json:"bindings"`
 }
 
-// ProductionInventory is the closed production reachability inventory used by the v2 contract.
+// ProductionInventory is the closed production reachability inventory used by the measurement contract.
 type ProductionInventory struct {
 	SchemaVersion string             `json:"schema_version"`
 	ID            string             `json:"id"`
@@ -248,7 +248,7 @@ type ProductionInventory struct {
 }
 
 // ContractCase describes immutable fixture identity and the semantic cohort assignment. LegacyOrigin is an
-// explicit migration marker; such a case cannot be used for a v2 baseline or candidate acceptance input.
+// explicit migration marker; such a case cannot be used for a baseline or candidate acceptance input.
 type ContractCase struct {
 	ID           string               `json:"id"`
 	SubjectID    string               `json:"subject_id"`
@@ -403,7 +403,7 @@ type ExceptionManifest struct {
 	Entries       []CoverageException `json:"entries"`
 }
 
-// MeasurementInput is the v2 observation/input envelope.
+// MeasurementInput is the measurement input envelope.
 type MeasurementInput struct {
 	SchemaVersion  string                        `json:"schema_version"`
 	Purpose        RunPurpose                    `json:"purpose"`
@@ -660,13 +660,13 @@ type LegacyCaseReference struct {
 	OriginalCaseID       string `json:"original_case_id"`
 }
 
-// LegacyLabel preserves a v1 observation label without reinterpreting it as v2 production proof.
+// LegacyLabel preserves a v1 observation label without reinterpreting it as contract production proof.
 type LegacyLabel struct {
 	CaseID string `json:"case_id"`
 	Label  Label  `json:"label"`
 }
 
-// LegacyV1Evidence retains exact source bytes and limitations. It cannot be evaluated as a v2 baseline or candidate.
+// LegacyV1Evidence retains exact source bytes and limitations. It cannot be evaluated as a baseline or candidate.
 type LegacyV1Evidence struct {
 	OriginalBytes         []byte             `json:"original_bytes"`
 	OriginalDigest        string             `json:"original_digest"`

@@ -8,7 +8,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 )
 
-func TestV2StrictDecodeAndCanonicalDigests(t *testing.T) {
+func TestStrictDecodeAndCanonicalDigests(t *testing.T) {
 	for _, raw := range []string{
 		`{"schema_version":"synapse-reachability-measurement-input-v2","schema_version":"other"}`,
 		`{"schema_version":"synapse-reachability-measurement-input-v2"} {}`,
@@ -19,7 +19,7 @@ func TestV2StrictDecodeAndCanonicalDigests(t *testing.T) {
 		}
 	}
 
-	input := v2FixtureInput(t)
+	input := fixtureInput(t)
 	left := input.Corpus
 	right := input.Corpus
 	right.Cases[0], right.Cases[len(right.Cases)-1] = right.Cases[len(right.Cases)-1], right.Cases[0]
@@ -36,7 +36,7 @@ func TestV2StrictDecodeAndCanonicalDigests(t *testing.T) {
 	}
 }
 
-func TestV2InventoryHasEveryProductionCohortAndHonestBindings(t *testing.T) {
+func TestInventoryHasEveryProductionCohortAndHonestBindings(t *testing.T) {
 	inventory := DefaultProductionInventory()
 	if err := inventory.Validate(); err != nil {
 		t.Fatalf("DefaultProductionInventory: %v", err)
@@ -53,35 +53,35 @@ func TestV2InventoryHasEveryProductionCohortAndHonestBindings(t *testing.T) {
 	}
 }
 
-func TestV2RejectsDuplicateIDsReferencesAndConflictingRawObservations(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestRejectsDuplicateIDsReferencesAndConflictingRawObservations(t *testing.T) {
+	input := fixtureInput(t)
 	duplicateCase := input.Corpus.Cases[0]
 	input.Corpus.Cases = append(input.Corpus.Cases, duplicateCase)
 	if err := input.Corpus.Validate(); err == nil {
 		t.Fatal("duplicate corpus case was accepted")
 	}
 
-	input = v2FixtureInput(t)
+	input = fixtureInput(t)
 	input.Observations = append(input.Observations, input.Observations[0])
 	if _, err := EvaluateMeasurement(input); err == nil || !strings.Contains(err.Error(), "duplicate raw") {
 		t.Fatalf("duplicate raw observation error = %v", err)
 	}
 
-	input = v2FixtureInput(t)
+	input = fixtureInput(t)
 	input.Policy.Rules = append(input.Policy.Rules, input.Policy.Rules[0])
 	if err := input.Policy.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("duplicate policy rule error = %v", err)
 	}
 
-	input = v2FixtureInput(t)
+	input = fixtureInput(t)
 	input.Policy.Rules = append(input.Policy.Rules, SuppressionPolicyRule{CohortID: "not-inventory", ModeID: "mode", Disposition: SuppressionRaiseOnly})
 	if err := input.Validate(); err == nil || !strings.Contains(err.Error(), "non-inventory") {
 		t.Fatalf("extra policy cohort rule error = %v", err)
 	}
 }
 
-func TestV2PreservesExecutionDenominatorsAndDoesNotTreatMissingAsNoAnalysis(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestPreservesExecutionDenominatorsAndDoesNotTreatMissingAsNoAnalysis(t *testing.T) {
+	input := fixtureInput(t)
 	input.Observations = input.Observations[:3]
 	report, err := EvaluateMeasurement(input)
 	if err != nil {
@@ -99,8 +99,8 @@ func TestV2PreservesExecutionDenominatorsAndDoesNotTreatMissingAsNoAnalysis(t *t
 	}
 }
 
-func TestV2PresentUnreachedDoesNotImplySuppression(t *testing.T) {
-	report, err := EvaluateMeasurement(v2FixtureInput(t))
+func TestPresentUnreachedDoesNotImplySuppression(t *testing.T) {
+	report, err := EvaluateMeasurement(fixtureInput(t))
 	if err != nil {
 		t.Fatalf("EvaluateMeasurement: %v", err)
 	}
@@ -112,8 +112,8 @@ func TestV2PresentUnreachedDoesNotImplySuppression(t *testing.T) {
 	}
 }
 
-func TestV2IncompleteCaptureIsNeverZeroSuppressionAuthority(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestIncompleteCaptureIsNeverZeroSuppressionAuthority(t *testing.T) {
+	input := fixtureInput(t)
 	for i := range input.Observations {
 		if input.Observations[i].CaseID == "go-unreached" {
 			input.Observations[i].Suppression.Status = CaptureIncomplete
@@ -128,15 +128,15 @@ func TestV2IncompleteCaptureIsNeverZeroSuppressionAuthority(t *testing.T) {
 	}
 }
 
-func TestV2BaselineRecordsUnsafeEvidenceAndCandidateRejectsIt(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestBaselineRecordsUnsafeEvidenceAndCandidateRejectsIt(t *testing.T) {
+	input := fixtureInput(t)
 	for i := range input.Observations {
 		if input.Observations[i].CaseID != "go-unreached" {
 			continue
 		}
 		input.Observations[i].Suppression = SuppressionCapture{
 			Claim: SuppressionProduced, Status: CaptureComplete,
-			Effects: []SuppressionEffect{{Kind: EffectSuppressingJudgment, Proof: v2Proof(input, "go-unreached", "api", false)}},
+			Effects: []SuppressionEffect{{Kind: EffectSuppressingJudgment, Proof: fixtureProof(input, "go-unreached", "api", false)}},
 		}
 	}
 	baseline, err := EvaluateMeasurement(input)
@@ -147,7 +147,7 @@ func TestV2BaselineRecordsUnsafeEvidenceAndCandidateRejectsIt(t *testing.T) {
 		t.Fatalf("baseline unsafe evidence = suppressions=%+v safety=%+v", baseline.Suppressions, baseline.Safety)
 	}
 
-	candidate := v2CandidateInput(t, input, baseline)
+	candidate := candidateInput(t, input, baseline)
 	report, err := EvaluateMeasurement(candidate)
 	if err != nil {
 		t.Fatalf("candidate evaluation must report rejection rather than erase evidence: %v", err)
@@ -157,11 +157,11 @@ func TestV2BaselineRecordsUnsafeEvidenceAndCandidateRejectsIt(t *testing.T) {
 	}
 }
 
-func TestV2FalseSuppressionRemainsDiagnosticInBaselineAndFailsCandidate(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestFalseSuppressionRemainsDiagnosticInBaselineAndFailsCandidate(t *testing.T) {
+	input := fixtureInput(t)
 	for i := range input.Observations {
 		if input.Observations[i].CaseID == "go-reachable" {
-			input.Observations[i].Suppression = SuppressionCapture{Claim: SuppressionProduced, Status: CaptureComplete, Effects: []SuppressionEffect{{Kind: EffectSuppressingJudgment, Proof: v2Proof(input, "go-reachable", "api", true)}}}
+			input.Observations[i].Suppression = SuppressionCapture{Claim: SuppressionProduced, Status: CaptureComplete, Effects: []SuppressionEffect{{Kind: EffectSuppressingJudgment, Proof: fixtureProof(input, "go-reachable", "api", true)}}}
 		}
 	}
 	baseline, err := EvaluateMeasurement(input)
@@ -171,7 +171,7 @@ func TestV2FalseSuppressionRemainsDiagnosticInBaselineAndFailsCandidate(t *testi
 	if baseline.Suppressions.False != 1 || baseline.Safety.Pass {
 		t.Fatalf("baseline did not retain false suppression: %+v %+v", baseline.Suppressions, baseline.Safety)
 	}
-	candidate := v2CandidateInput(t, input, baseline)
+	candidate := candidateInput(t, input, baseline)
 	report, err := EvaluateMeasurement(candidate)
 	if err != nil {
 		t.Fatalf("candidate false suppression: %v", err)
@@ -181,13 +181,13 @@ func TestV2FalseSuppressionRemainsDiagnosticInBaselineAndFailsCandidate(t *testi
 	}
 }
 
-func TestV2PolicyValidatesInitialSuppressionPermissions(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestPolicyValidatesInitialSuppressionPermissions(t *testing.T) {
+	input := fixtureInput(t)
 	for i := range input.Policy.Rules {
 		rule := &input.Policy.Rules[i]
 		if rule.CohortID == "javascript" && rule.ModeID == "lexical" {
 			rule.Disposition = SuppressionEligible
-			rule.CompletenessContract = refPointer(v2Ref("js-contract"))
+			rule.CompletenessContract = refPointer(fixtureReference("js-contract"))
 			rule.ApprovedProposer = "proposer"
 			rule.ApprovedVerifier = "verifier"
 		}
@@ -197,15 +197,15 @@ func TestV2PolicyValidatesInitialSuppressionPermissions(t *testing.T) {
 	}
 }
 
-func TestV2RejectsStaleProofAndMismatchedAnalyzerConfiguration(t *testing.T) {
+func TestRejectsStaleProofAndMismatchedAnalyzerConfiguration(t *testing.T) {
 	for _, mutate := range []func(*SuppressionProof){
-		func(proof *SuppressionProof) { proof.Snapshot.Source = v2Ref("stale-source") },
-		func(proof *SuppressionProof) { proof.Analyzer = v2Ref("other-analyzer") },
+		func(proof *SuppressionProof) { proof.Snapshot.Source = fixtureReference("stale-source") },
+		func(proof *SuppressionProof) { proof.Analyzer = fixtureReference("other-analyzer") },
 	} {
-		input := v2FixtureInput(t)
+		input := fixtureInput(t)
 		for i := range input.Observations {
 			if input.Observations[i].CaseID == "go-unreached" {
-				proof := v2Proof(input, "go-unreached", "api", true)
+				proof := fixtureProof(input, "go-unreached", "api", true)
 				mutate(&proof)
 				input.Observations[i].Suppression = SuppressionCapture{Claim: SuppressionProduced, Status: CaptureComplete, Effects: []SuppressionEffect{{Kind: EffectSuppressingJudgment, Proof: proof}}}
 			}
@@ -220,16 +220,16 @@ func TestV2RejectsStaleProofAndMismatchedAnalyzerConfiguration(t *testing.T) {
 	}
 }
 
-func TestV2DuplicateRootsDoNotInflateC2Credit(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestDuplicateRootsDoNotInflateC2Credit(t *testing.T) {
+	input := fixtureInput(t)
 	for i := range input.Inventory.Cohorts {
 		if input.Inventory.Cohorts[i].ID == "go" && input.Inventory.Cohorts[i].Mode == "source_tier2" {
-			input.Inventory.Cohorts[i].Bindings = append(input.Inventory.Cohorts[i].Bindings, CompositionBinding{ID: "api-duplicate", Root: "synapse-api", BoundaryID: "sca/reachability/go-source-tier2/api-duplicate", Configuration: v2Ref("go-source-tier2-api-duplicate-config"), State: BindingEnabled})
+			input.Inventory.Cohorts[i].Bindings = append(input.Inventory.Cohorts[i].Bindings, CompositionBinding{ID: "api-duplicate", Root: "synapse-api", BoundaryID: "sca/reachability/go-source-tier2/api-duplicate", Configuration: fixtureReference("go-source-tier2-api-duplicate-config"), State: BindingEnabled})
 		}
 	}
 	for _, observation := range append([]MeasuredObservation(nil), input.Observations...) {
 		observation.BindingID = "api-duplicate"
-		observation.Configuration = v2Ref("go-source-tier2-api-duplicate-config")
+		observation.Configuration = fixtureReference("go-source-tier2-api-duplicate-config")
 		input.Observations = append(input.Observations, observation)
 	}
 	refreshPolicyReferences(t, &input)
@@ -242,7 +242,7 @@ func TestV2DuplicateRootsDoNotInflateC2Credit(t *testing.T) {
 	}
 }
 
-func TestV2StrictC2AndMandatoryGuards(t *testing.T) {
+func TestStrictC2AndMandatoryGuards(t *testing.T) {
 	baseline := C2Vector{ProductionBreadth: 1, CorrectPositiveCases: 2, MacroReachableRecall: ratioFromCounts(1, 2)}
 	if strictlyGreaterC2(baseline, baseline) {
 		t.Fatal("equal C2 vector passed")
@@ -259,11 +259,11 @@ func TestV2StrictC2AndMandatoryGuards(t *testing.T) {
 	}
 }
 
-func TestV2LegacyConversionPreservesBytesLabelsAndCannotEnterAcceptance(t *testing.T) {
+func TestLegacyConversionPreservesBytesLabelsAndCannotEnterAcceptance(t *testing.T) {
 	raw := []byte(`{"schema_version":"synapse-reachability-input-v1","corpus":{"schema_version":"synapse-reachability-corpus-v1","cases":[{"name":"go-hit","language":"go","fixture":"fixture","symbol":"fixture.hit","expected":"reachable"}]},"observations":[{"case":"go-hit","label":"reachable"}]}`)
-	legacy, err := ConvertV1Input(raw)
+	legacy, err := ImportLegacyInput(raw)
 	if err != nil {
-		t.Fatalf("ConvertV1Input: %v", err)
+		t.Fatalf("ImportLegacyInput: %v", err)
 	}
 	if !bytes.Equal(legacy.OriginalBytes, raw) || legacy.OriginalDigest != benchmark.SHA256Digest(raw) || len(legacy.Labels) != 1 || legacy.Labels[0].Label != Reachable {
 		t.Fatalf("legacy conversion lost evidence: %+v", legacy)
@@ -276,30 +276,30 @@ func TestV2LegacyConversionPreservesBytesLabelsAndCannotEnterAcceptance(t *testi
 	if err != nil {
 		t.Fatalf("DecodeInput: %v", err)
 	}
-	corpus, oracle, err := MigrateV1Corpus(v1.Corpus)
+	corpus, oracle, err := ImportLegacyCorpus(v1.Corpus)
 	if err != nil {
-		t.Fatalf("MigrateV1Corpus: %v", err)
+		t.Fatalf("ImportLegacyCorpus: %v", err)
 	}
 	if oracle.Cases[0].Expected != OutcomeReachable || corpus.Cases[0].LegacyOrigin == nil || corpus.Cases[0].CohortID != "legacy" || corpus.Cases[0].ModeID != "v1" || oracle.Cases[0].Category != OracleNoCoverage {
 		t.Fatalf("v1 label was reinterpreted as modern production evidence: %+v %+v", corpus, oracle)
 	}
-	input := v2FixtureInput(t)
+	input := fixtureInput(t)
 	input.Corpus = corpus
 	input.Oracle = oracle
 	input.Observations = nil
 	refreshPolicyReferences(t, &input)
 	if err := input.Validate(); err == nil || !strings.Contains(err.Error(), "legacy v1") {
-		t.Fatalf("v1 migration entered v2 acceptance input: %v", err)
+		t.Fatalf("legacy migration entered a contract acceptance input: %v", err)
 	}
 }
 
-func TestV2ProceduralCheckpointAndAcyclicRatchet(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestProceduralCheckpointAndAcyclicRatchet(t *testing.T) {
+	input := fixtureInput(t)
 	baseline, err := EvaluateMeasurement(input)
 	if err != nil {
 		t.Fatalf("baseline: %v", err)
 	}
-	checkpoint := v2Checkpoint(t, input.Policy, baseline)
+	checkpoint := fixtureCheckpoint(t, input.Policy, baseline)
 	if err := checkpoint.Validate(input.Policy, baseline); err != nil {
 		t.Fatalf("checkpoint: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestV2ProceduralCheckpointAndAcyclicRatchet(t *testing.T) {
 		t.Fatal("procedural checkpoint claimed external origin authentication")
 	}
 	bad = checkpoint
-	bad.BaselineResult = v2Ref("unbound-result")
+	bad.BaselineResult = fixtureReference("unbound-result")
 	if err := bad.Validate(input.Policy, baseline); err == nil {
 		t.Fatal("checkpoint accepted unbound baseline reference")
 	}
@@ -327,8 +327,8 @@ func TestV2ProceduralCheckpointAndAcyclicRatchet(t *testing.T) {
 	}
 }
 
-func TestV2AssessmentDoesNotChangePolicyIdentity(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestAssessmentDoesNotChangePolicyIdentity(t *testing.T) {
+	input := fixtureInput(t)
 	before, err := DigestMeasurementPolicy(input.Policy)
 	if err != nil {
 		t.Fatal(err)
@@ -354,8 +354,8 @@ func TestV2AssessmentDoesNotChangePolicyIdentity(t *testing.T) {
 	}
 }
 
-func TestV2C2BreadthUsesOracleCategoriesRatherThanPublicLabels(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestC2BreadthUsesOracleCategoriesRatherThanPublicLabels(t *testing.T) {
+	input := fixtureInput(t)
 	for i := range input.Oracle.Cases {
 		if input.Oracle.Cases[i].CaseID == "go-conditional" {
 			input.Oracle.Cases[i].Expected = OutcomeReachable
@@ -375,7 +375,7 @@ func TestV2C2BreadthUsesOracleCategoriesRatherThanPublicLabels(t *testing.T) {
 		t.Fatalf("semantic categories with a missing public label lost C2 breadth: %+v", report.C2)
 	}
 
-	input = v2FixtureInput(t)
+	input = fixtureInput(t)
 	for i := range input.Oracle.Cases {
 		if input.Oracle.Cases[i].CaseID == "go-conditional" {
 			input.Oracle.Cases[i].Category = OracleReachable
@@ -390,7 +390,7 @@ func TestV2C2BreadthUsesOracleCategoriesRatherThanPublicLabels(t *testing.T) {
 		t.Fatalf("public labels substituted for required oracle categories: %+v", report.C2)
 	}
 
-	input = v2FixtureInput(t)
+	input = fixtureInput(t)
 	for i := range input.Observations {
 		if input.Observations[i].CaseID == "go-conditional" {
 			input.Observations[i].Outcome = OutcomeReachable
@@ -405,16 +405,16 @@ func TestV2C2BreadthUsesOracleCategoriesRatherThanPublicLabels(t *testing.T) {
 	}
 }
 
-func TestV2RejectsForgedSuppressionProofSubjectAndBoundary(t *testing.T) {
+func TestRejectsForgedSuppressionProofSubjectAndBoundary(t *testing.T) {
 	for name, mutate := range map[string]func(*SuppressionProof){
 		"subject":  func(proof *SuppressionProof) { proof.SubjectID = "forged-subject" },
 		"boundary": func(proof *SuppressionProof) { proof.BoundaryID = "forged-boundary" },
 	} {
 		t.Run(name, func(t *testing.T) {
-			input := v2FixtureInput(t)
+			input := fixtureInput(t)
 			for i := range input.Observations {
 				if input.Observations[i].CaseID == "go-unreached" {
-					proof := v2Proof(input, "go-unreached", "api", true)
+					proof := fixtureProof(input, "go-unreached", "api", true)
 					mutate(&proof)
 					input.Observations[i].Suppression = SuppressionCapture{Claim: SuppressionProduced, Status: CaptureComplete, Effects: []SuppressionEffect{{Kind: EffectSuppressingJudgment, Proof: proof}}}
 				}
@@ -430,8 +430,8 @@ func TestV2RejectsForgedSuppressionProofSubjectAndBoundary(t *testing.T) {
 	}
 }
 
-func TestV2IncompletePositiveGetsNoMetricOrC2Credit(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestIncompletePositiveGetsNoMetricOrC2Credit(t *testing.T) {
+	input := fixtureInput(t)
 	for i := range input.Observations {
 		if input.Observations[i].CaseID == "go-reachable" {
 			input.Observations[i].OutputCapture = CaptureIncomplete
@@ -447,21 +447,21 @@ func TestV2IncompletePositiveGetsNoMetricOrC2Credit(t *testing.T) {
 	}
 }
 
-func TestV2CountsProducedSuppressionWhenAnotherBindingProducesNone(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestCountsProducedSuppressionWhenAnotherBindingProducesNone(t *testing.T) {
+	input := fixtureInput(t)
 	for i := range input.Inventory.Cohorts {
 		if input.Inventory.Cohorts[i].ID == "go" && input.Inventory.Cohorts[i].Mode == "source_tier2" {
-			input.Inventory.Cohorts[i].Bindings = append(input.Inventory.Cohorts[i].Bindings, CompositionBinding{ID: "api-shadow", Root: "synapse-api", BoundaryID: "sca/reachability/go-source-tier2/api-shadow", Configuration: v2Ref("go-source-tier2-api-shadow-config"), State: BindingEnabled})
+			input.Inventory.Cohorts[i].Bindings = append(input.Inventory.Cohorts[i].Bindings, CompositionBinding{ID: "api-shadow", Root: "synapse-api", BoundaryID: "sca/reachability/go-source-tier2/api-shadow", Configuration: fixtureReference("go-source-tier2-api-shadow-config"), State: BindingEnabled})
 		}
 	}
 	for _, observation := range append([]MeasuredObservation(nil), input.Observations...) {
 		observation.BindingID = "api-shadow"
-		observation.Configuration = v2Ref("go-source-tier2-api-shadow-config")
+		observation.Configuration = fixtureReference("go-source-tier2-api-shadow-config")
 		input.Observations = append(input.Observations, observation)
 	}
 	for i := range input.Observations {
 		if input.Observations[i].CaseID == "go-unreached" && input.Observations[i].BindingID == "api" {
-			input.Observations[i].Suppression = SuppressionCapture{Claim: SuppressionProduced, Status: CaptureComplete, Effects: []SuppressionEffect{{Kind: EffectSuppressingJudgment, Proof: v2Proof(input, "go-unreached", "api", true)}}}
+			input.Observations[i].Suppression = SuppressionCapture{Claim: SuppressionProduced, Status: CaptureComplete, Effects: []SuppressionEffect{{Kind: EffectSuppressingJudgment, Proof: fixtureProof(input, "go-unreached", "api", true)}}}
 		}
 	}
 	refreshPolicyReferences(t, &input)
@@ -474,13 +474,13 @@ func TestV2CountsProducedSuppressionWhenAnotherBindingProducesNone(t *testing.T)
 	}
 }
 
-func TestV2RatchetRejectsCopiedIDAndBindingRecallRegression(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestRatchetRejectsCopiedIDAndBindingRecallRegression(t *testing.T) {
+	input := fixtureInput(t)
 	baseline, err := EvaluateMeasurement(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate := v2CandidateInput(t, input, baseline)
+	candidate := candidateInput(t, input, baseline)
 	tampered := *candidate.Ratchet
 	tampered.Cohorts[0].Recall = ratioFromCounts(0, 1)
 	candidate.Ratchet = &tampered
@@ -488,7 +488,7 @@ func TestV2RatchetRejectsCopiedIDAndBindingRecallRegression(t *testing.T) {
 		t.Fatalf("ratchet with copied ID was accepted: %v", err)
 	}
 
-	candidate = v2CandidateInput(t, input, baseline)
+	candidate = candidateInput(t, input, baseline)
 	tampered = *candidate.Ratchet
 	tampered.Cohorts[0].Recall = ratioFromCounts(0, 1)
 	tampered.ID, err = DigestCandidateRatchet(tampered)
@@ -500,7 +500,7 @@ func TestV2RatchetRejectsCopiedIDAndBindingRecallRegression(t *testing.T) {
 		t.Fatalf("self-digested but non-derived ratchet was accepted: %v", err)
 	}
 
-	candidate = v2CandidateInput(t, input, baseline)
+	candidate = candidateInput(t, input, baseline)
 	for i := range candidate.Observations {
 		if candidate.Observations[i].CaseID == "go-reachable" {
 			candidate.Observations[i].Outcome = OutcomePresentUnreached
@@ -515,7 +515,7 @@ func TestV2RatchetRejectsCopiedIDAndBindingRecallRegression(t *testing.T) {
 	}
 }
 
-func TestV2RatioStatusOrderingAndReplayRetention(t *testing.T) {
+func TestRatioStatusOrderingAndReplayRetention(t *testing.T) {
 	if compareRatios(Ratio{Status: RatioAvailable, Numerator: "0", Denominator: "1"}, notApplicableRatio()) <= 0 || compareRatios(notApplicableRatio(), unavailableRatio()) <= 0 || compareRatios(notApplicableRatio(), Ratio{Status: RatioAvailable, Numerator: "0", Denominator: "1"}) >= 0 {
 		t.Fatal("ratio availability status ordering is not antisymmetric")
 	}
@@ -523,7 +523,7 @@ func TestV2RatioStatusOrderingAndReplayRetention(t *testing.T) {
 		t.Fatal("negative exact ratio numerator was accepted")
 	}
 
-	input := v2FixtureInput(t)
+	input := fixtureInput(t)
 	baseline, err := EvaluateMeasurement(input)
 	if err != nil {
 		t.Fatal(err)
@@ -550,13 +550,13 @@ func TestV2RatioStatusOrderingAndReplayRetention(t *testing.T) {
 	if err := tampered.Validate(); err != nil {
 		t.Fatalf("structurally valid tampered replay fixture: %v", err)
 	}
-	candidate := v2CandidateInput(t, input, tampered)
+	candidate := candidateInput(t, input, tampered)
 	if err := candidate.Validate(); err == nil || !strings.Contains(err.Error(), "reducer replay") {
 		t.Fatalf("candidate trusted stored baseline metrics without replay: %v", err)
 	}
 }
 
-func TestV2InitialPermissionsAndInventoryBindingsAreExact(t *testing.T) {
+func TestInitialPermissionsAndInventoryBindingsAreExact(t *testing.T) {
 	inventory := DefaultProductionInventory()
 	for _, target := range []struct {
 		cohort, mode string
@@ -591,12 +591,12 @@ func TestV2InitialPermissionsAndInventoryBindingsAreExact(t *testing.T) {
 		{"php", "symbols_tier2", "raise_only"},
 		{"dotnet", "symbols_tier2", "raise_only"},
 	} {
-		input := v2FixtureInput(t)
+		input := fixtureInput(t)
 		for i := range input.Policy.Rules {
 			rule := &input.Policy.Rules[i]
 			if rule.CohortID == target.cohort && rule.ModeID == target.mode {
 				rule.Disposition = SuppressionEligible
-				rule.CompletenessContract = refPointer(v2Ref("test-contract"))
+				rule.CompletenessContract = refPointer(fixtureReference("test-contract"))
 				rule.ApprovedProposer, rule.ApprovedVerifier = "proposer", "verifier"
 			}
 		}
@@ -605,12 +605,12 @@ func TestV2InitialPermissionsAndInventoryBindingsAreExact(t *testing.T) {
 		}
 	}
 
-	input := v2FixtureInput(t)
+	input := fixtureInput(t)
 	for i := range input.Policy.Rules {
 		rule := &input.Policy.Rules[i]
 		if rule.CohortID == "php" && rule.ModeID == "import" {
 			rule.Disposition = SuppressionEligible
-			rule.CompletenessContract = refPointer(v2Ref("php-contract"))
+			rule.CompletenessContract = refPointer(fixtureReference("php-contract"))
 			rule.ApprovedProposer, rule.ApprovedVerifier = "proposer", "verifier"
 		}
 	}
@@ -626,12 +626,12 @@ func TestV2InitialPermissionsAndInventoryBindingsAreExact(t *testing.T) {
 		t.Fatalf("PHP import with Composer completeness was not potentially eligible: %v", err)
 	}
 
-	input = v2FixtureInput(t)
+	input = fixtureInput(t)
 	for i := range input.Policy.Rules {
 		rule := &input.Policy.Rules[i]
 		if rule.CohortID == "dotnet" && rule.ModeID == "build_aware_import" {
 			rule.Disposition = SuppressionEligible
-			rule.CompletenessContract = refPointer(v2Ref("dotnet-contract"))
+			rule.CompletenessContract = refPointer(fixtureReference("dotnet-contract"))
 			rule.ApprovedProposer, rule.ApprovedVerifier = "proposer", "verifier"
 		}
 	}
@@ -640,17 +640,17 @@ func TestV2InitialPermissionsAndInventoryBindingsAreExact(t *testing.T) {
 	}
 }
 
-func TestV2CandidateAllowsDistinctSnapshotsAndReplaysBaseline(t *testing.T) {
-	input := v2FixtureInput(t)
+func TestCandidateAllowsDistinctSnapshotsAndReplaysBaseline(t *testing.T) {
+	input := fixtureInput(t)
 	baseline, err := EvaluateMeasurement(input)
 	if err != nil {
 		t.Fatalf("baseline: %v", err)
 	}
-	candidate := v2CandidateInput(t, input, baseline)
+	candidate := candidateInput(t, input, baseline)
 	candidate.ActiveSnapshot = SnapshotIdentity{
-		Source: v2Ref("candidate-source"),
-		SBOM:   v2Ref("candidate-sbom"),
-		Run:    v2Ref("candidate-run"),
+		Source: fixtureReference("candidate-source"),
+		SBOM:   fixtureReference("candidate-sbom"),
+		Run:    fixtureReference("candidate-run"),
 	}
 	if err := candidate.Validate(); err != nil {
 		t.Fatalf("candidate with a distinct snapshot was rejected: %v", err)
@@ -664,13 +664,13 @@ func TestV2CandidateAllowsDistinctSnapshotsAndReplaysBaseline(t *testing.T) {
 	}
 }
 
-func TestV2SubjectIDsPermitPackageAndSymbolPunctuation(t *testing.T) {
+func TestSubjectIDsPermitPackageAndSymbolPunctuation(t *testing.T) {
 	accepted := "pkg:golang/example.com/acme/lib@v1.2.3?arch=amd64#Example.(*Type).Method%2A"
 	if !validSubjectID(accepted) || validID(accepted) {
 		t.Fatalf("subject validator did not distinguish package/symbol identity from strict IDs: %q", accepted)
 	}
 
-	input := v2FixtureInput(t)
+	input := fixtureInput(t)
 	for i := range input.Corpus.Cases {
 		if input.Corpus.Cases[i].ID == "go-unreached" {
 			input.Corpus.Cases[i].SubjectID = accepted
@@ -679,7 +679,7 @@ func TestV2SubjectIDsPermitPackageAndSymbolPunctuation(t *testing.T) {
 	refreshPolicyReferences(t, &input)
 	for i := range input.Observations {
 		if input.Observations[i].CaseID == "go-unreached" {
-			input.Observations[i].Suppression = SuppressionCapture{Claim: SuppressionProduced, Status: CaptureComplete, Effects: []SuppressionEffect{{Kind: EffectSuppressingJudgment, Proof: v2Proof(input, "go-unreached", "api", true)}}}
+			input.Observations[i].Suppression = SuppressionCapture{Claim: SuppressionProduced, Status: CaptureComplete, Effects: []SuppressionEffect{{Kind: EffectSuppressingJudgment, Proof: fixtureProof(input, "go-unreached", "api", true)}}}
 		}
 	}
 	report, err := EvaluateMeasurement(input)
@@ -699,7 +699,7 @@ func TestV2SubjectIDsPermitPackageAndSymbolPunctuation(t *testing.T) {
 		"oversized":      strings.Repeat("a", maxSubjectIDBytes+1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			candidate := v2FixtureInput(t).Corpus
+			candidate := fixtureInput(t).Corpus
 			candidate.Cases[0].SubjectID = subject
 			if err := candidate.Validate(); err == nil {
 				t.Fatalf("invalid subject %q was accepted", subject)
@@ -708,7 +708,7 @@ func TestV2SubjectIDsPermitPackageAndSymbolPunctuation(t *testing.T) {
 	}
 }
 
-func TestV2RejectsInconsistentSuppressionApplicableOracle(t *testing.T) {
+func TestRejectsInconsistentSuppressionApplicableOracle(t *testing.T) {
 	for name, mutate := range map[string]func(*OracleCase){
 		"wrong-category":                 func(item *OracleCase) { item.Category = OracleOpaque },
 		"wrong-outcome":                  func(item *OracleCase) { item.Expected = OutcomeNoAnalysis },
@@ -717,7 +717,7 @@ func TestV2RejectsInconsistentSuppressionApplicableOracle(t *testing.T) {
 		"contract-without-applicability": func(item *OracleCase) { item.SuppressionApplicable = false },
 	} {
 		t.Run(name, func(t *testing.T) {
-			oracle := v2FixtureInput(t).Oracle
+			oracle := fixtureInput(t).Oracle
 			for i := range oracle.Cases {
 				if oracle.Cases[i].CaseID == "go-unreached" {
 					mutate(&oracle.Cases[i])
@@ -730,9 +730,9 @@ func TestV2RejectsInconsistentSuppressionApplicableOracle(t *testing.T) {
 	}
 }
 
-func TestV2PinsBindingConfigurationAndCohortSpecificBoundary(t *testing.T) {
-	input := v2FixtureInput(t)
-	input.Observations[0].Configuration = v2Ref("wrong-binding-configuration")
+func TestPinsBindingConfigurationAndCohortSpecificBoundary(t *testing.T) {
+	input := fixtureInput(t)
+	input.Observations[0].Configuration = fixtureReference("wrong-binding-configuration")
 	if err := input.Validate(); err == nil || !strings.Contains(err.Error(), "configuration does not match production binding") {
 		t.Fatalf("observation configuration mismatch was accepted: %v", err)
 	}
@@ -756,10 +756,10 @@ func TestV2PinsBindingConfigurationAndCohortSpecificBoundary(t *testing.T) {
 		t.Fatalf("generic root boundary was accepted: %v", err)
 	}
 
-	input = v2FixtureInput(t)
+	input = fixtureInput(t)
 	for i := range input.Observations {
 		if input.Observations[i].CaseID == "go-unreached" {
-			proof := v2Proof(input, "go-unreached", "api", true)
+			proof := fixtureProof(input, "go-unreached", "api", true)
 			proof.BoundaryID = "sca/default-scan/api"
 			input.Observations[i].Suppression = SuppressionCapture{Claim: SuppressionProduced, Status: CaptureComplete, Effects: []SuppressionEffect{{Kind: EffectSuppressingJudgment, Proof: proof}}}
 		}
@@ -778,25 +778,25 @@ func bindingState(cohort ProductionCohort, id string) BindingState {
 	return binding.State
 }
 
-func v2FixtureInput(t *testing.T) MeasurementInput {
+func fixtureInput(t *testing.T) MeasurementInput {
 	t.Helper()
 	inventory := DefaultProductionInventory()
 	corpus := ContractCorpus{SchemaVersion: ContractCorpusSchemaVersion, ID: "fixture-corpus", Cases: []ContractCase{
-		{ID: "go-reachable", SubjectID: "subject-go-reachable", CohortID: "go", ModeID: "source_tier2", Fixture: refPointer(v2Ref("fixture-reachable"))},
-		{ID: "go-conditional", SubjectID: "subject-go-conditional", CohortID: "go", ModeID: "source_tier2", Fixture: refPointer(v2Ref("fixture-conditional"))},
-		{ID: "go-unreached", SubjectID: "subject-go-unreached", CohortID: "go", ModeID: "source_tier2", Fixture: refPointer(v2Ref("fixture-unreached"))},
-		{ID: "go-no-analysis", SubjectID: "subject-go-no-analysis", CohortID: "go", ModeID: "source_tier2", Fixture: refPointer(v2Ref("fixture-no-analysis"))},
+		{ID: "go-reachable", SubjectID: "subject-go-reachable", CohortID: "go", ModeID: "source_tier2", Fixture: refPointer(fixtureReference("fixture-reachable"))},
+		{ID: "go-conditional", SubjectID: "subject-go-conditional", CohortID: "go", ModeID: "source_tier2", Fixture: refPointer(fixtureReference("fixture-conditional"))},
+		{ID: "go-unreached", SubjectID: "subject-go-unreached", CohortID: "go", ModeID: "source_tier2", Fixture: refPointer(fixtureReference("fixture-unreached"))},
+		{ID: "go-no-analysis", SubjectID: "subject-go-no-analysis", CohortID: "go", ModeID: "source_tier2", Fixture: refPointer(fixtureReference("fixture-no-analysis"))},
 	}}
-	completeness := v2Ref("go-source-completeness")
-	oracle := ReachabilityOracle{SchemaVersion: OracleSchemaVersionV2, ID: "fixture-oracle", Cases: []OracleCase{
+	completeness := fixtureReference("go-source-completeness")
+	oracle := ReachabilityOracle{SchemaVersion: OracleSchemaVersion, ID: "fixture-oracle", Cases: []OracleCase{
 		{CaseID: "go-reachable", Expected: OutcomeReachable, Category: OracleReachable, CoverageExpectation: CoverageComplete},
 		{CaseID: "go-conditional", Expected: OutcomeConditionallyReachable, Category: OracleOpaque, CoverageExpectation: CoverageComplete},
 		{CaseID: "go-unreached", Expected: OutcomePresentUnreached, Category: OracleTrulyUnreachable, CoverageExpectation: CoverageComplete, SuppressionApplicable: true, CompletenessContract: refPointer(completeness)},
 		{CaseID: "go-no-analysis", Expected: OutcomeNoAnalysis, Category: OracleNoCoverage, CoverageExpectation: CoverageComplete},
 	}}
 	exceptions := ExceptionManifest{SchemaVersion: ExceptionManifestSchemaVersion, ID: "no-exceptions"}
-	input := MeasurementInput{SchemaVersion: MeasurementInputSchemaVersion, Purpose: BaselineMeasurement, Inventory: inventory, Corpus: corpus, Oracle: oracle, Exceptions: exceptions, ActiveSnapshot: v2Snapshot()}
-	input.Policy = v2Policy(t, inventory, corpus, oracle, exceptions)
+	input := MeasurementInput{SchemaVersion: MeasurementInputSchemaVersion, Purpose: BaselineMeasurement, Inventory: inventory, Corpus: corpus, Oracle: oracle, Exceptions: exceptions, ActiveSnapshot: fixtureSnapshot()}
+	input.Policy = fixturePolicy(t, inventory, corpus, oracle, exceptions)
 	cohort, ok := inventory.cohort("go/source_tier2")
 	if !ok {
 		t.Fatal("fixture inventory lacks go/source_tier2")
@@ -806,7 +806,7 @@ func v2FixtureInput(t *testing.T) MeasurementInput {
 		t.Fatal("fixture inventory lacks go/source_tier2 api binding")
 	}
 	for _, item := range oracle.Cases {
-		input.Observations = append(input.Observations, MeasuredObservation{CaseID: item.CaseID, BindingID: "api", Invoked: true, Outcome: item.Expected, Coverage: completeCoverage(), OutputCapture: CaptureComplete, Analyzer: v2Ref(cohort.AnalyzerID), Configuration: binding.Configuration, Suppression: SuppressionCapture{Claim: SuppressionNone, Status: CaptureComplete}})
+		input.Observations = append(input.Observations, MeasuredObservation{CaseID: item.CaseID, BindingID: "api", Invoked: true, Outcome: item.Expected, Coverage: completeCoverage(), OutputCapture: CaptureComplete, Analyzer: fixtureReference(cohort.AnalyzerID), Configuration: binding.Configuration, Suppression: SuppressionCapture{Claim: SuppressionNone, Status: CaptureComplete}})
 	}
 	if err := input.Validate(); err != nil {
 		t.Fatalf("fixture input is invalid: %v", err)
@@ -814,7 +814,7 @@ func v2FixtureInput(t *testing.T) MeasurementInput {
 	return input
 }
 
-func v2Policy(t *testing.T, inventory ProductionInventory, corpus ContractCorpus, oracle ReachabilityOracle, exceptions ExceptionManifest) MeasurementPolicy {
+func fixturePolicy(t *testing.T, inventory ProductionInventory, corpus ContractCorpus, oracle ReachabilityOracle, exceptions ExceptionManifest) MeasurementPolicy {
 	t.Helper()
 	inventoryDigest, err := DigestProductionInventory(inventory)
 	if err != nil {
@@ -832,7 +832,7 @@ func v2Policy(t *testing.T, inventory ProductionInventory, corpus ContractCorpus
 	if err != nil {
 		t.Fatal(err)
 	}
-	contract := v2Ref("go-source-completeness")
+	contract := fixtureReference("go-source-completeness")
 	rules := make([]SuppressionPolicyRule, 0, len(inventory.Cohorts))
 	for _, cohort := range inventory.Cohorts {
 		rule := SuppressionPolicyRule{CohortID: cohort.ID, ModeID: cohort.Mode, Disposition: SuppressionRaiseOnly}
@@ -847,17 +847,17 @@ func v2Policy(t *testing.T, inventory ProductionInventory, corpus ContractCorpus
 		}
 		rules = append(rules, rule)
 	}
-	return MeasurementPolicy{SchemaVersion: PolicySchemaVersion, ID: "fixture-policy", Inventory: artifactRef(inventory.ID, inventoryDigest), Corpus: artifactRef(corpus.ID, corpusDigest), Oracle: artifactRef(oracle.ID, oracleDigest), ExceptionManifest: artifactRef(exceptions.ID, exceptionDigest), SchemaDefinition: v2Ref("v2-schema-definition"), RunPurposeRules: v2Ref("v2-run-purpose-rules"), RatchetConstructionRule: v2Ref("v2-ratchet-construction"), Evaluator: v2Ref("v2-evaluator"), MetricDefinition: v2Ref("v2-metrics"), Adapters: []ArtifactReference{v2Ref("production-adapter")}, Rules: rules}
+	return MeasurementPolicy{SchemaVersion: PolicySchemaVersion, ID: "fixture-policy", Inventory: artifactRef(inventory.ID, inventoryDigest), Corpus: artifactRef(corpus.ID, corpusDigest), Oracle: artifactRef(oracle.ID, oracleDigest), ExceptionManifest: artifactRef(exceptions.ID, exceptionDigest), SchemaDefinition: fixtureReference("contract-schema-definition"), RunPurposeRules: fixtureReference("contract-run-purpose-rules"), RatchetConstructionRule: fixtureReference("contract-ratchet-construction"), Evaluator: fixtureReference("contract-evaluator"), MetricDefinition: fixtureReference("contract-metrics"), Adapters: []ArtifactReference{fixtureReference("production-adapter")}, Rules: rules}
 }
 
 func refreshPolicyReferences(t *testing.T, input *MeasurementInput) {
 	t.Helper()
-	input.Policy = v2Policy(t, input.Inventory, input.Corpus, input.Oracle, input.Exceptions)
+	input.Policy = fixturePolicy(t, input.Inventory, input.Corpus, input.Oracle, input.Exceptions)
 }
 
-func v2CandidateInput(t *testing.T, input MeasurementInput, baseline MeasurementReport) MeasurementInput {
+func candidateInput(t *testing.T, input MeasurementInput, baseline MeasurementReport) MeasurementInput {
 	t.Helper()
-	checkpoint := v2Checkpoint(t, input.Policy, baseline)
+	checkpoint := fixtureCheckpoint(t, input.Policy, baseline)
 	ratchet, err := DeriveCandidateRatchet(input.Policy, baseline, checkpoint, input.Exceptions)
 	if err != nil {
 		t.Fatal(err)
@@ -869,13 +869,13 @@ func v2CandidateInput(t *testing.T, input MeasurementInput, baseline Measurement
 	return input
 }
 
-func v2Checkpoint(t *testing.T, policy MeasurementPolicy, baseline MeasurementReport) ProceduralBaselineCheckpoint {
+func fixtureCheckpoint(t *testing.T, policy MeasurementPolicy, baseline MeasurementReport) ProceduralBaselineCheckpoint {
 	t.Helper()
 	policyDigest, err := DigestMeasurementPolicy(policy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkpoint := ProceduralBaselineCheckpoint{SchemaVersion: BaselineCheckpointSchemaVersion, AuthorityClass: "procedural", StartingRevision: TrustedBaselineRevision, Policy: artifactRef(policy.ID, policyDigest), BaselineResult: artifactRef(baseline.ID, baseline.ID), HarnessContract: v2Ref("harness-contract"), AllowlistEvidence: v2Ref("allowlist"), ReviewEvidence: v2Ref("review"), DispositionEvidence: v2Ref("disposition"), Producer: "producer", Reviewer: "reviewer", Maintainer: "maintainer"}
+	checkpoint := ProceduralBaselineCheckpoint{SchemaVersion: BaselineCheckpointSchemaVersion, AuthorityClass: "procedural", StartingRevision: TrustedBaselineRevision, Policy: artifactRef(policy.ID, policyDigest), BaselineResult: artifactRef(baseline.ID, baseline.ID), HarnessContract: fixtureReference("harness-contract"), AllowlistEvidence: fixtureReference("allowlist"), ReviewEvidence: fixtureReference("review"), DispositionEvidence: fixtureReference("disposition"), Producer: "producer", Reviewer: "reviewer", Maintainer: "maintainer"}
 	id, err := DigestProceduralBaselineCheckpoint(checkpoint)
 	if err != nil {
 		t.Fatal(err)
@@ -884,21 +884,21 @@ func v2Checkpoint(t *testing.T, policy MeasurementPolicy, baseline MeasurementRe
 	return checkpoint
 }
 
-func v2Proof(input MeasurementInput, caseID, bindingID string, complete bool) SuppressionProof {
+func fixtureProof(input MeasurementInput, caseID, bindingID string, complete bool) SuppressionProof {
 	item := corpusCase(input.Corpus, caseID)
 	cohort, _ := input.Inventory.cohort(cohortKey(item.CohortID, item.ModeID))
 	binding, _ := findBinding(cohort, bindingID)
-	proof := SuppressionProof{Judgment: v2Ref("judgment"), SubjectID: item.SubjectID, BoundaryID: binding.BoundaryID, Proposer: "proposer", Verifier: "verifier", CompletenessContract: v2Ref("go-source-completeness"), Snapshot: input.ActiveSnapshot, Analyzer: v2Ref(cohort.AnalyzerID), Configuration: binding.Configuration, Evidence: v2Ref("evidence")}
+	proof := SuppressionProof{Judgment: fixtureReference("judgment"), SubjectID: item.SubjectID, BoundaryID: binding.BoundaryID, Proposer: "proposer", Verifier: "verifier", CompletenessContract: fixtureReference("go-source-completeness"), Snapshot: input.ActiveSnapshot, Analyzer: fixtureReference(cohort.AnalyzerID), Configuration: binding.Configuration, Evidence: fixtureReference("evidence")}
 	if !complete {
 		proof.Judgment = ArtifactReference{}
 	}
 	return proof
 }
 
-func v2Snapshot() SnapshotIdentity {
-	return SnapshotIdentity{Source: v2Ref("source"), SBOM: v2Ref("sbom"), Run: v2Ref("run")}
+func fixtureSnapshot() SnapshotIdentity {
+	return SnapshotIdentity{Source: fixtureReference("source"), SBOM: fixtureReference("sbom"), Run: fixtureReference("run")}
 }
-func v2Ref(id string) ArtifactReference {
+func fixtureReference(id string) ArtifactReference {
 	return ArtifactReference{ID: id, Digest: benchmark.SHA256Digest([]byte(id))}
 }
 func refPointer(ref ArtifactReference) *ArtifactReference { return &ref }

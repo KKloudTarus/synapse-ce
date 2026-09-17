@@ -125,7 +125,7 @@ func (corpus ContractCorpus) Validate() error {
 }
 
 func (oracle ReachabilityOracle) Validate() error {
-	if oracle.SchemaVersion != OracleSchemaVersionV2 {
+	if oracle.SchemaVersion != OracleSchemaVersion {
 		return fmt.Errorf("unsupported reachability oracle schema %q", oracle.SchemaVersion)
 	}
 	if !validID(oracle.ID) || len(oracle.Cases) == 0 {
@@ -381,7 +381,7 @@ func validateContractBindings(input MeasurementInput) error {
 	}
 	for _, item := range input.Corpus.Cases {
 		if item.LegacyOrigin != nil {
-			return fmt.Errorf("legacy v1 case %q cannot serve as a v2 %s input", item.ID, input.Purpose)
+			return fmt.Errorf("legacy v1 case %q cannot serve as a %s input", item.ID, input.Purpose)
 		}
 		if _, ok := input.Inventory.cohort(cohortKey(item.CohortID, item.ModeID)); !ok {
 			return fmt.Errorf("reachability corpus case %q references unknown production cohort %q", item.ID, cohortKey(item.CohortID, item.ModeID))

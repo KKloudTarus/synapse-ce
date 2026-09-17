@@ -31,7 +31,7 @@ type logicalCase struct {
 	units   []evaluationUnit
 }
 
-// EvaluateMeasurement validates v2 reachability semantics before projecting explicit positive and suppression
+// EvaluateMeasurement validates reachability contract semantics before projecting explicit positive and suppression
 // sets into benchmark.EvaluateAccuracy. Raw duplicates and contradictory output are rejected before that projection.
 func EvaluateMeasurement(input MeasurementInput) (MeasurementReport, error) {
 	if err := input.Validate(); err != nil {
