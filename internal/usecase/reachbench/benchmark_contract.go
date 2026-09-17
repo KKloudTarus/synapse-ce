@@ -433,7 +433,7 @@ func readFixtureDocument(root fs.FS, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	raw, err := readFixtureReader(file)
 	if err != nil {
 		return nil, fmt.Errorf("document %q: %w", path, err)
@@ -1123,36 +1123,77 @@ func validateFixtureFiles(root fs.FS, manifest FixtureManifest) error {
 	})
 }
 
-func validateFixtureFile(root fs.FS, file FixtureFile) error {
+// ReadFixtureFile returns a fresh verified copy of one frozen fixture input. It accepts
+// only an exact file declaration from the embedded reachability fixture manifest.
+func ReadFixtureFile(file FixtureFile) ([]byte, error) {
 	if err := file.validate("fixture file"); err != nil {
-		return err
+		return nil, err
+	}
+	root, err := fs.Sub(reachabilityBenchmarkFiles, benchmarkAssetRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open reachability benchmark assets: %w", err)
+	}
+	contract, err := loadReachabilityBenchmark(root)
+	if err != nil {
+		return nil, err
+	}
+	declared := false
+	for _, fixture := range contract.Fixtures.Fixtures {
+		for _, candidate := range fixture.Files {
+			if sameFixtureFile(candidate, file) {
+				declared = true
+				break
+			}
+		}
+		if declared {
+			break
+		}
+	}
+	if !declared {
+		return nil, fmt.Errorf("fixture file %q is not declared by the frozen reachability contract", file.Path)
+	}
+	contents, err := readFixtureFile(root, file)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), contents...), nil
+}
+
+func validateFixtureFile(root fs.FS, file FixtureFile) error {
+	_, err := readFixtureFile(root, file)
+	return err
+}
+
+func readFixtureFile(root fs.FS, file FixtureFile) ([]byte, error) {
+	if err := file.validate("fixture file"); err != nil {
+		return nil, err
 	}
 	info, err := fs.Stat(root, file.Path)
 	if err != nil {
-		return fmt.Errorf("stat %q: %w", file.Path, err)
+		return nil, fmt.Errorf("stat %q: %w", file.Path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("fixture path %q is not a regular file", file.Path)
+		return nil, fmt.Errorf("fixture path %q is not a regular file", file.Path)
 	}
 	if info.Size() != file.Size {
-		return fmt.Errorf("fixture path %q size mismatch: got %d", file.Path, info.Size())
+		return nil, fmt.Errorf("fixture path %q size mismatch: got %d", file.Path, info.Size())
 	}
 	opened, err := root.Open(file.Path)
 	if err != nil {
-		return fmt.Errorf("open %q: %w", file.Path, err)
+		return nil, fmt.Errorf("open %q: %w", file.Path, err)
 	}
-	defer opened.Close()
+	defer func() { _ = opened.Close() }()
 	contents, err := io.ReadAll(io.LimitReader(opened, maxFixtureFileBytes+1))
 	if err != nil {
-		return fmt.Errorf("read %q: %w", file.Path, err)
+		return nil, fmt.Errorf("read %q: %w", file.Path, err)
 	}
 	if int64(len(contents)) > maxFixtureFileBytes {
-		return fmt.Errorf("fixture path %q exceeds %d bytes", file.Path, maxFixtureFileBytes)
+		return nil, fmt.Errorf("fixture path %q exceeds %d bytes", file.Path, maxFixtureFileBytes)
 	}
 	if got := benchmark.SHA256Digest(contents); got != file.Digest {
-		return fmt.Errorf("fixture path %q digest mismatch: got %s", file.Path, got)
+		return nil, fmt.Errorf("fixture path %q digest mismatch: got %s", file.Path, got)
 	}
-	return nil
+	return contents, nil
 }
 
 // DigestChallengeManifest returns the canonical digest of the positive challenge declaration.

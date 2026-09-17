@@ -3,7 +3,10 @@ package toolrunner
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -32,6 +35,48 @@ func TestRunArgvCapturesStdout(t *testing.T) {
 	if res.ExitCode != 0 || res.TimedOut || res.Truncated {
 		t.Errorf("unexpected result %+v", res)
 	}
+}
+
+func TestRunUsesValidatedWorkdir(t *testing.T) {
+	workdir := t.TempDir()
+	res, err := NewExecRunner(time.Second, 1<<20).Run(context.Background(), ports.ToolSpec{
+		Name:    os.Args[0],
+		Args:    []string{"-test.run=TestExecRunnerWorkdirHelper", "--"},
+		Workdir: workdir,
+		Env:     []string{"SYNAPSE_TOOLRUNNER_WORKDIR_HELPER=1"},
+	})
+	if err != nil {
+		t.Fatalf("run in workdir: %v", err)
+	}
+	if got := strings.TrimSpace(string(res.Stdout)); got != filepath.Clean(workdir) {
+		t.Errorf("child workdir = %q, want %q", got, filepath.Clean(workdir))
+	}
+}
+
+func TestRunRejectsNonDirectoryWorkdir(t *testing.T) {
+	workfile := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(workfile, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewExecRunner(time.Second, 1<<20).Run(context.Background(), ports.ToolSpec{
+		Name:    os.Args[0],
+		Workdir: workfile,
+	})
+	if err == nil {
+		t.Fatal("Run accepted a non-directory workdir")
+	}
+}
+
+func TestExecRunnerWorkdirHelper(t *testing.T) {
+	if os.Getenv("SYNAPSE_TOOLRUNNER_WORKDIR_HELPER") != "1" {
+		return
+	}
+	workdir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = fmt.Fprint(os.Stdout, filepath.Clean(workdir))
+	os.Exit(0)
 }
 
 func TestRunTimeoutKillsProcess(t *testing.T) {
