@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Reachbench.Unused</AssemblyName>
+    <PackageId>Reachbench.Unused</PackageId>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+</Project>

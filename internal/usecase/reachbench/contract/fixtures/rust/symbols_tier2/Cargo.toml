@@ -1,0 +1,7 @@
+[package]
+name = "reachbench-rust-symbols"
+version = "1.0.0"
+edition = "2024"
+
+[package.metadata.reachbench]
+no_coverage_capability = "macro-expansion"

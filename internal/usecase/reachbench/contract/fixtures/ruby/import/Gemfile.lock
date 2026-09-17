@@ -1,0 +1,45 @@
+PATH
+  remote: .
+  specs:
+    reachbench-ruby-import (1.0.0)
+      reachbench-direct (= 1.0.0)
+      reachbench-dynamic (= 1.0.0)
+      reachbench-unused (= 1.0.0)
+      reachbench-unsupported (= 1.0.0)
+
+PATH
+  remote: gems/reachbench-direct
+  specs:
+    reachbench-direct (1.0.0)
+
+PATH
+  remote: gems/reachbench-dynamic
+  specs:
+    reachbench-dynamic (1.0.0)
+
+PATH
+  remote: gems/reachbench-unused
+  specs:
+    reachbench-unused (1.0.0)
+
+PATH
+  remote: gems/reachbench-unsupported
+  specs:
+    reachbench-unsupported (1.0.0)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  reachbench-direct!
+  reachbench-dynamic!
+  reachbench-ruby-import!
+  reachbench-unused!
+  reachbench-unsupported!
+
+BUNDLED WITH
+   2.6.9

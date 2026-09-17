@@ -1,0 +1,17 @@
+PATH
+  remote: .
+  specs:
+    reachbench-ruby-symbols (1.0.0)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  reachbench-ruby-symbols!
+
+BUNDLED WITH
+   2.6.9

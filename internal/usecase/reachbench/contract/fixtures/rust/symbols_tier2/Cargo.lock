@@ -1,0 +1,5 @@
+version = 4
+
+[[package]]
+name = "reachbench-rust-symbols"
+version = "1.0.0"

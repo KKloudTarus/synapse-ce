@@ -1,0 +1,6 @@
+# Closed local dependency graph. Fixture file digests pin the directory contents.
+--no-index
+reachbench-direct @ file:./local_packages/reachbench_direct
+reachbench-dynamic @ file:./local_packages/reachbench_dynamic
+reachbench-unused @ file:./local_packages/reachbench_unused
+reachbench-unsupported @ file:./local_packages/reachbench_unsupported

@@ -1,0 +1,23 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Reachbench.Direct", "dependencies/Reachbench.Direct/Reachbench.Direct.csproj", "{15F61347-7502-49B8-922B-6CFB0F8B1C01}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Reachbench.Dynamic", "dependencies/Reachbench.Dynamic/Reachbench.Dynamic.csproj", "{A4DBA6DF-59A5-42A0-B1A4-ECCF0D9C2D02}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Reachbench.Unused", "dependencies/Reachbench.Unused/Reachbench.Unused.csproj", "{7E5C3E4D-EDDA-4D73-812C-9D6A8E30E403}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{15F61347-7502-49B8-922B-6CFB0F8B1C01}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{15F61347-7502-49B8-922B-6CFB0F8B1C01}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A4DBA6DF-59A5-42A0-B1A4-ECCF0D9C2D02}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A4DBA6DF-59A5-42A0-B1A4-ECCF0D9C2D02}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7E5C3E4D-EDDA-4D73-812C-9D6A8E30E403}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7E5C3E4D-EDDA-4D73-812C-9D6A8E30E403}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

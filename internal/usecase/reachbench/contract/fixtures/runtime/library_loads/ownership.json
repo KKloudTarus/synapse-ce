@@ -1,0 +1,9 @@
+{
+  "schema_version": "synapse-runtime-library-ownership-v1",
+  "owners": {
+    "libreachbench_direct.so": "pkg:runtime/reachbench-direct",
+    "libreachbench_dynamic.so": "pkg:runtime/reachbench-dynamic",
+    "libreachbench_unused.so": "pkg:runtime/reachbench-unused",
+    "libreachbench_unsupported.so": "pkg:runtime/reachbench-unsupported"
+  }
+}

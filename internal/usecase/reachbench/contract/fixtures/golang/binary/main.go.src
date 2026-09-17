@@ -1,0 +1,37 @@
+package main
+
+import (
+	"os"
+
+	"example.invalid/reachbench/go-binary/internal/dependency"
+)
+
+// retainedControls keeps controlUnreachable in PCLNTAB without calling it; symbol presence is intentionally unsound here.
+var retainedControls = []func(){controlUnreachable}
+
+func main() {
+	entry()
+	if len(retainedControls) == 0 {
+		panic("controls must remain in the binary")
+	}
+	opaqueDispatch(os.Getenv("REACHBENCH_CONTROL"))
+}
+
+func entry() {
+	dependency.Reachable()
+}
+
+func controlPositive() { dependency.Reachable() }
+
+func controlUnreachable() {}
+
+func opaqueDispatch(name string) {
+	if handler, ok := map[string]func(){"opaque": controlOpaque}[name]; ok {
+		handler()
+	}
+}
+
+func controlOpaque() {}
+
+// controlNoCoverage is an explicitly unavailable binary-analysis capability.
+func controlNoCoverage() {}

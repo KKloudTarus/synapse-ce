@@ -1,0 +1,7 @@
+source "https://rubygems.org"
+
+gemspec path: "."
+gem "reachbench-direct", path: "gems/reachbench-direct"
+gem "reachbench-dynamic", path: "gems/reachbench-dynamic"
+gem "reachbench-unused", path: "gems/reachbench-unused"
+gem "reachbench-unsupported", path: "gems/reachbench-unsupported"

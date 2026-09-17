@@ -1,0 +1,836 @@
+{
+  "schema_version": "synapse-reachability-contract-corpus-v2",
+  "id": "synapse-ce-reachability-benchmark",
+  "cases": [
+    {
+      "id": "c-cpp-symbols-tier2-control-no-coverage",
+      "subject_id": "pkg:reachbench/c_cpp/symbols_tier2#controlNoCoverage",
+      "cohort_id": "c_cpp",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "c-cpp-symbols-tier2-input",
+        "digest": "sha256:5da6251e3e046fbbfa7b93a606b8590019a81dbb25899b8190d0aae96414eea0"
+      }
+    },
+    {
+      "id": "c-cpp-symbols-tier2-control-opaque",
+      "subject_id": "pkg:reachbench/c_cpp/symbols_tier2#controlOpaque",
+      "cohort_id": "c_cpp",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "c-cpp-symbols-tier2-input",
+        "digest": "sha256:5da6251e3e046fbbfa7b93a606b8590019a81dbb25899b8190d0aae96414eea0"
+      }
+    },
+    {
+      "id": "c-cpp-symbols-tier2-control-positive",
+      "subject_id": "pkg:reachbench/c_cpp/symbols_tier2#controlPositive",
+      "cohort_id": "c_cpp",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "c-cpp-symbols-tier2-input",
+        "digest": "sha256:5da6251e3e046fbbfa7b93a606b8590019a81dbb25899b8190d0aae96414eea0"
+      }
+    },
+    {
+      "id": "c-cpp-symbols-tier2-control-unreachable",
+      "subject_id": "pkg:reachbench/c_cpp/symbols_tier2#controlUnreachable",
+      "cohort_id": "c_cpp",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "c-cpp-symbols-tier2-input",
+        "digest": "sha256:5da6251e3e046fbbfa7b93a606b8590019a81dbb25899b8190d0aae96414eea0"
+      }
+    },
+    {
+      "id": "dotnet-build-aware-import-control-no-coverage",
+      "subject_id": "pkg:nuget/Reachbench.Unsupported@1.0.0",
+      "cohort_id": "dotnet",
+      "mode_id": "build_aware_import",
+      "fixture": {
+        "id": "dotnet-build-aware-import-input",
+        "digest": "sha256:1231c1423f1903ba85057d977d00f38bfe59c231fc2b2f47bd370607dd27b050"
+      }
+    },
+    {
+      "id": "dotnet-build-aware-import-control-opaque",
+      "subject_id": "pkg:nuget/Reachbench.Dynamic@1.0.0",
+      "cohort_id": "dotnet",
+      "mode_id": "build_aware_import",
+      "fixture": {
+        "id": "dotnet-build-aware-import-input",
+        "digest": "sha256:1231c1423f1903ba85057d977d00f38bfe59c231fc2b2f47bd370607dd27b050"
+      }
+    },
+    {
+      "id": "dotnet-build-aware-import-control-positive",
+      "subject_id": "pkg:nuget/Reachbench.Direct@1.0.0",
+      "cohort_id": "dotnet",
+      "mode_id": "build_aware_import",
+      "fixture": {
+        "id": "dotnet-build-aware-import-input",
+        "digest": "sha256:1231c1423f1903ba85057d977d00f38bfe59c231fc2b2f47bd370607dd27b050"
+      }
+    },
+    {
+      "id": "dotnet-build-aware-import-control-unreachable",
+      "subject_id": "pkg:nuget/Reachbench.Unused@1.0.0",
+      "cohort_id": "dotnet",
+      "mode_id": "build_aware_import",
+      "fixture": {
+        "id": "dotnet-build-aware-import-input",
+        "digest": "sha256:1231c1423f1903ba85057d977d00f38bfe59c231fc2b2f47bd370607dd27b050"
+      }
+    },
+    {
+      "id": "dotnet-symbols-tier2-control-no-coverage",
+      "subject_id": "pkg:reachbench/dotnet/symbols_tier2#controlNoCoverage",
+      "cohort_id": "dotnet",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "dotnet-symbols-tier2-input",
+        "digest": "sha256:8689e42e082cb454aa61eea0835850d20e218de909f51ab868667484e05c5c89"
+      }
+    },
+    {
+      "id": "dotnet-symbols-tier2-control-opaque",
+      "subject_id": "pkg:reachbench/dotnet/symbols_tier2#controlOpaque",
+      "cohort_id": "dotnet",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "dotnet-symbols-tier2-input",
+        "digest": "sha256:8689e42e082cb454aa61eea0835850d20e218de909f51ab868667484e05c5c89"
+      }
+    },
+    {
+      "id": "dotnet-symbols-tier2-control-positive",
+      "subject_id": "pkg:reachbench/dotnet/symbols_tier2#controlPositive",
+      "cohort_id": "dotnet",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "dotnet-symbols-tier2-input",
+        "digest": "sha256:8689e42e082cb454aa61eea0835850d20e218de909f51ab868667484e05c5c89"
+      }
+    },
+    {
+      "id": "dotnet-symbols-tier2-control-unreachable",
+      "subject_id": "pkg:reachbench/dotnet/symbols_tier2#controlUnreachable",
+      "cohort_id": "dotnet",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "dotnet-symbols-tier2-input",
+        "digest": "sha256:8689e42e082cb454aa61eea0835850d20e218de909f51ab868667484e05c5c89"
+      }
+    },
+    {
+      "id": "go-binary-challenge-pclntab-entry-call",
+      "subject_id": "pkg:reachbench/go/binary#reachableDependency",
+      "cohort_id": "go",
+      "mode_id": "binary",
+      "fixture": {
+        "id": "go-binary-input",
+        "digest": "sha256:489871ba6ff90fb0919d3dafb60e68540408f9ebbeaa7ba6b3b6d0018a45b7fa"
+      }
+    },
+    {
+      "id": "go-binary-control-no-coverage",
+      "subject_id": "pkg:reachbench/go/binary#controlNoCoverage",
+      "cohort_id": "go",
+      "mode_id": "binary",
+      "fixture": {
+        "id": "go-binary-input",
+        "digest": "sha256:489871ba6ff90fb0919d3dafb60e68540408f9ebbeaa7ba6b3b6d0018a45b7fa"
+      }
+    },
+    {
+      "id": "go-binary-control-opaque",
+      "subject_id": "pkg:reachbench/go/binary#controlOpaque",
+      "cohort_id": "go",
+      "mode_id": "binary",
+      "fixture": {
+        "id": "go-binary-input",
+        "digest": "sha256:489871ba6ff90fb0919d3dafb60e68540408f9ebbeaa7ba6b3b6d0018a45b7fa"
+      }
+    },
+    {
+      "id": "go-binary-control-positive",
+      "subject_id": "pkg:reachbench/go/binary#controlPositive",
+      "cohort_id": "go",
+      "mode_id": "binary",
+      "fixture": {
+        "id": "go-binary-input",
+        "digest": "sha256:489871ba6ff90fb0919d3dafb60e68540408f9ebbeaa7ba6b3b6d0018a45b7fa"
+      }
+    },
+    {
+      "id": "go-binary-control-unreachable",
+      "subject_id": "pkg:reachbench/go/binary#controlUnreachable",
+      "cohort_id": "go",
+      "mode_id": "binary",
+      "fixture": {
+        "id": "go-binary-input",
+        "digest": "sha256:489871ba6ff90fb0919d3dafb60e68540408f9ebbeaa7ba6b3b6d0018a45b7fa"
+      }
+    },
+    {
+      "id": "go-source-tier2-control-no-coverage",
+      "subject_id": "pkg:reachbench/go/source_tier2#controlNoCoverage",
+      "cohort_id": "go",
+      "mode_id": "source_tier2",
+      "fixture": {
+        "id": "go-source-tier2-input",
+        "digest": "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"
+      }
+    },
+    {
+      "id": "go-source-tier2-control-opaque",
+      "subject_id": "pkg:reachbench/go/source_tier2#controlOpaque",
+      "cohort_id": "go",
+      "mode_id": "source_tier2",
+      "fixture": {
+        "id": "go-source-tier2-input",
+        "digest": "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"
+      }
+    },
+    {
+      "id": "go-source-tier2-control-positive",
+      "subject_id": "pkg:reachbench/go/source_tier2#controlPositive",
+      "cohort_id": "go",
+      "mode_id": "source_tier2",
+      "fixture": {
+        "id": "go-source-tier2-input",
+        "digest": "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"
+      }
+    },
+    {
+      "id": "go-source-tier2-control-unreachable",
+      "subject_id": "pkg:reachbench/go/source_tier2#controlUnreachable",
+      "cohort_id": "go",
+      "mode_id": "source_tier2",
+      "fixture": {
+        "id": "go-source-tier2-input",
+        "digest": "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"
+      }
+    },
+    {
+      "id": "javascript-import-control-no-coverage",
+      "subject_id": "pkg:npm/@reachbench/unsupported@1.0.0",
+      "cohort_id": "javascript",
+      "mode_id": "import",
+      "fixture": {
+        "id": "javascript-import-input",
+        "digest": "sha256:da56a31402f2aab42ba3655ed7020b28db5c86dfa6712949aa61917622658c9b"
+      }
+    },
+    {
+      "id": "javascript-import-control-opaque",
+      "subject_id": "pkg:npm/@reachbench/dynamic@1.0.0",
+      "cohort_id": "javascript",
+      "mode_id": "import",
+      "fixture": {
+        "id": "javascript-import-input",
+        "digest": "sha256:da56a31402f2aab42ba3655ed7020b28db5c86dfa6712949aa61917622658c9b"
+      }
+    },
+    {
+      "id": "javascript-import-control-positive",
+      "subject_id": "pkg:npm/@reachbench/direct@1.0.0",
+      "cohort_id": "javascript",
+      "mode_id": "import",
+      "fixture": {
+        "id": "javascript-import-input",
+        "digest": "sha256:da56a31402f2aab42ba3655ed7020b28db5c86dfa6712949aa61917622658c9b"
+      }
+    },
+    {
+      "id": "javascript-import-control-unreachable",
+      "subject_id": "pkg:npm/@reachbench/unused@1.0.0",
+      "cohort_id": "javascript",
+      "mode_id": "import",
+      "fixture": {
+        "id": "javascript-import-input",
+        "digest": "sha256:da56a31402f2aab42ba3655ed7020b28db5c86dfa6712949aa61917622658c9b"
+      }
+    },
+    {
+      "id": "javascript-interprocedural-challenge-cross-module-call",
+      "subject_id": "pkg:reachbench/javascript/interprocedural#crossModuleTarget",
+      "cohort_id": "javascript",
+      "mode_id": "interprocedural",
+      "fixture": {
+        "id": "javascript-interprocedural-input",
+        "digest": "sha256:87025301e2a826acdb88d87beec2c5e3bf7bf9f57fcde58a16285945c96ea9ef"
+      }
+    },
+    {
+      "id": "javascript-interprocedural-challenge-function-alias",
+      "subject_id": "pkg:reachbench/javascript/interprocedural#functionAliasTarget",
+      "cohort_id": "javascript",
+      "mode_id": "interprocedural",
+      "fixture": {
+        "id": "javascript-interprocedural-input",
+        "digest": "sha256:87025301e2a826acdb88d87beec2c5e3bf7bf9f57fcde58a16285945c96ea9ef"
+      }
+    },
+    {
+      "id": "javascript-interprocedural-challenge-returned-callable",
+      "subject_id": "pkg:reachbench/javascript/interprocedural#returnedCallableTarget",
+      "cohort_id": "javascript",
+      "mode_id": "interprocedural",
+      "fixture": {
+        "id": "javascript-interprocedural-input",
+        "digest": "sha256:87025301e2a826acdb88d87beec2c5e3bf7bf9f57fcde58a16285945c96ea9ef"
+      }
+    },
+    {
+      "id": "javascript-interprocedural-challenge-synchronous-callback",
+      "subject_id": "pkg:reachbench/javascript/interprocedural#callbackTarget",
+      "cohort_id": "javascript",
+      "mode_id": "interprocedural",
+      "fixture": {
+        "id": "javascript-interprocedural-input",
+        "digest": "sha256:87025301e2a826acdb88d87beec2c5e3bf7bf9f57fcde58a16285945c96ea9ef"
+      }
+    },
+    {
+      "id": "javascript-interprocedural-control-no-coverage",
+      "subject_id": "pkg:reachbench/javascript/interprocedural#controlNoCoverage",
+      "cohort_id": "javascript",
+      "mode_id": "interprocedural",
+      "fixture": {
+        "id": "javascript-interprocedural-input",
+        "digest": "sha256:87025301e2a826acdb88d87beec2c5e3bf7bf9f57fcde58a16285945c96ea9ef"
+      }
+    },
+    {
+      "id": "javascript-interprocedural-control-opaque",
+      "subject_id": "pkg:reachbench/javascript/interprocedural#controlOpaque",
+      "cohort_id": "javascript",
+      "mode_id": "interprocedural",
+      "fixture": {
+        "id": "javascript-interprocedural-input",
+        "digest": "sha256:87025301e2a826acdb88d87beec2c5e3bf7bf9f57fcde58a16285945c96ea9ef"
+      }
+    },
+    {
+      "id": "javascript-interprocedural-control-positive",
+      "subject_id": "pkg:reachbench/javascript/interprocedural#controlPositive",
+      "cohort_id": "javascript",
+      "mode_id": "interprocedural",
+      "fixture": {
+        "id": "javascript-interprocedural-input",
+        "digest": "sha256:87025301e2a826acdb88d87beec2c5e3bf7bf9f57fcde58a16285945c96ea9ef"
+      }
+    },
+    {
+      "id": "javascript-interprocedural-control-unreachable",
+      "subject_id": "pkg:reachbench/javascript/interprocedural#controlUnreachable",
+      "cohort_id": "javascript",
+      "mode_id": "interprocedural",
+      "fixture": {
+        "id": "javascript-interprocedural-input",
+        "digest": "sha256:87025301e2a826acdb88d87beec2c5e3bf7bf9f57fcde58a16285945c96ea9ef"
+      }
+    },
+    {
+      "id": "javascript-lexical-control-no-coverage",
+      "subject_id": "pkg:reachbench/javascript/lexical#controlNoCoverage",
+      "cohort_id": "javascript",
+      "mode_id": "lexical",
+      "fixture": {
+        "id": "javascript-lexical-input",
+        "digest": "sha256:1641aeea2c7c40529a96022b0b5c84ec512115b15d3a6b0914821a17fc351e1f"
+      }
+    },
+    {
+      "id": "javascript-lexical-control-opaque",
+      "subject_id": "pkg:reachbench/javascript/lexical#controlOpaque",
+      "cohort_id": "javascript",
+      "mode_id": "lexical",
+      "fixture": {
+        "id": "javascript-lexical-input",
+        "digest": "sha256:1641aeea2c7c40529a96022b0b5c84ec512115b15d3a6b0914821a17fc351e1f"
+      }
+    },
+    {
+      "id": "javascript-lexical-control-positive",
+      "subject_id": "pkg:reachbench/javascript/lexical#controlPositive",
+      "cohort_id": "javascript",
+      "mode_id": "lexical",
+      "fixture": {
+        "id": "javascript-lexical-input",
+        "digest": "sha256:1641aeea2c7c40529a96022b0b5c84ec512115b15d3a6b0914821a17fc351e1f"
+      }
+    },
+    {
+      "id": "javascript-lexical-control-unreachable",
+      "subject_id": "pkg:reachbench/javascript/lexical#controlUnreachable",
+      "cohort_id": "javascript",
+      "mode_id": "lexical",
+      "fixture": {
+        "id": "javascript-lexical-input",
+        "digest": "sha256:1641aeea2c7c40529a96022b0b5c84ec512115b15d3a6b0914821a17fc351e1f"
+      }
+    },
+    {
+      "id": "jvm-coarse-control-no-coverage",
+      "subject_id": "pkg:maven/example.invalid.reachbench/jvm-unsupported@1.0.0",
+      "cohort_id": "jvm",
+      "mode_id": "coarse",
+      "fixture": {
+        "id": "jvm-coarse-input",
+        "digest": "sha256:c55e1f957785a1ca24913e8a2a81da827860a065cc1484886494a2b9f53827fd"
+      }
+    },
+    {
+      "id": "jvm-coarse-control-opaque",
+      "subject_id": "pkg:maven/example.invalid.reachbench/jvm-dynamic@1.0.0",
+      "cohort_id": "jvm",
+      "mode_id": "coarse",
+      "fixture": {
+        "id": "jvm-coarse-input",
+        "digest": "sha256:c55e1f957785a1ca24913e8a2a81da827860a065cc1484886494a2b9f53827fd"
+      }
+    },
+    {
+      "id": "jvm-coarse-control-positive",
+      "subject_id": "pkg:maven/example.invalid.reachbench/jvm-direct@1.0.0",
+      "cohort_id": "jvm",
+      "mode_id": "coarse",
+      "fixture": {
+        "id": "jvm-coarse-input",
+        "digest": "sha256:c55e1f957785a1ca24913e8a2a81da827860a065cc1484886494a2b9f53827fd"
+      }
+    },
+    {
+      "id": "jvm-coarse-control-unreachable",
+      "subject_id": "pkg:maven/example.invalid.reachbench/jvm-unused@1.0.0",
+      "cohort_id": "jvm",
+      "mode_id": "coarse",
+      "fixture": {
+        "id": "jvm-coarse-input",
+        "digest": "sha256:c55e1f957785a1ca24913e8a2a81da827860a065cc1484886494a2b9f53827fd"
+      }
+    },
+    {
+      "id": "jvm-tier2-control-no-coverage",
+      "subject_id": "pkg:maven/example.invalid.reachbench/jvm-unsupported@1.0.0",
+      "cohort_id": "jvm",
+      "mode_id": "tier2",
+      "fixture": {
+        "id": "jvm-tier2-input",
+        "digest": "sha256:1cb586b90dcc888b0f64c4d54b7b3cee6226be688a10b789f4c8eba9014542a2"
+      }
+    },
+    {
+      "id": "jvm-tier2-control-opaque",
+      "subject_id": "pkg:maven/example.invalid.reachbench/jvm-dynamic@1.0.0",
+      "cohort_id": "jvm",
+      "mode_id": "tier2",
+      "fixture": {
+        "id": "jvm-tier2-input",
+        "digest": "sha256:1cb586b90dcc888b0f64c4d54b7b3cee6226be688a10b789f4c8eba9014542a2"
+      }
+    },
+    {
+      "id": "jvm-tier2-control-positive",
+      "subject_id": "pkg:maven/example.invalid.reachbench/jvm-direct@1.0.0",
+      "cohort_id": "jvm",
+      "mode_id": "tier2",
+      "fixture": {
+        "id": "jvm-tier2-input",
+        "digest": "sha256:1cb586b90dcc888b0f64c4d54b7b3cee6226be688a10b789f4c8eba9014542a2"
+      }
+    },
+    {
+      "id": "jvm-tier2-control-unreachable",
+      "subject_id": "pkg:maven/example.invalid.reachbench/jvm-unused@1.0.0",
+      "cohort_id": "jvm",
+      "mode_id": "tier2",
+      "fixture": {
+        "id": "jvm-tier2-input",
+        "digest": "sha256:1cb586b90dcc888b0f64c4d54b7b3cee6226be688a10b789f4c8eba9014542a2"
+      }
+    },
+    {
+      "id": "php-import-control-no-coverage",
+      "subject_id": "pkg:composer/reachbench/unsupported@1.0.0",
+      "cohort_id": "php",
+      "mode_id": "import",
+      "fixture": {
+        "id": "php-import-input",
+        "digest": "sha256:d2277c712600cd3f84998dadc37a277e3cf5e2f428418df20ed1a223f06a7c20"
+      }
+    },
+    {
+      "id": "php-import-control-opaque",
+      "subject_id": "pkg:composer/reachbench/dynamic@1.0.0",
+      "cohort_id": "php",
+      "mode_id": "import",
+      "fixture": {
+        "id": "php-import-input",
+        "digest": "sha256:d2277c712600cd3f84998dadc37a277e3cf5e2f428418df20ed1a223f06a7c20"
+      }
+    },
+    {
+      "id": "php-import-control-positive",
+      "subject_id": "pkg:composer/reachbench/direct@1.0.0",
+      "cohort_id": "php",
+      "mode_id": "import",
+      "fixture": {
+        "id": "php-import-input",
+        "digest": "sha256:d2277c712600cd3f84998dadc37a277e3cf5e2f428418df20ed1a223f06a7c20"
+      }
+    },
+    {
+      "id": "php-import-control-unreachable",
+      "subject_id": "pkg:composer/reachbench/unused@1.0.0",
+      "cohort_id": "php",
+      "mode_id": "import",
+      "fixture": {
+        "id": "php-import-input",
+        "digest": "sha256:d2277c712600cd3f84998dadc37a277e3cf5e2f428418df20ed1a223f06a7c20"
+      }
+    },
+    {
+      "id": "php-symbols-tier2-challenge-symbol-provenance",
+      "subject_id": "pkg:reachbench/php/symbols_tier2#symbolPositive",
+      "cohort_id": "php",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "php-symbols-tier2-input",
+        "digest": "sha256:207336c5ca9ba4bf9093aee3fbc532e635f50a56fb41bea50d411f9009ad1ec8"
+      }
+    },
+    {
+      "id": "php-symbols-tier2-control-no-coverage",
+      "subject_id": "pkg:reachbench/php/symbols_tier2#controlNoCoverage",
+      "cohort_id": "php",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "php-symbols-tier2-input",
+        "digest": "sha256:207336c5ca9ba4bf9093aee3fbc532e635f50a56fb41bea50d411f9009ad1ec8"
+      }
+    },
+    {
+      "id": "php-symbols-tier2-control-opaque",
+      "subject_id": "pkg:reachbench/php/symbols_tier2#controlOpaque",
+      "cohort_id": "php",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "php-symbols-tier2-input",
+        "digest": "sha256:207336c5ca9ba4bf9093aee3fbc532e635f50a56fb41bea50d411f9009ad1ec8"
+      }
+    },
+    {
+      "id": "php-symbols-tier2-control-positive",
+      "subject_id": "pkg:reachbench/php/symbols_tier2#controlPositive",
+      "cohort_id": "php",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "php-symbols-tier2-input",
+        "digest": "sha256:207336c5ca9ba4bf9093aee3fbc532e635f50a56fb41bea50d411f9009ad1ec8"
+      }
+    },
+    {
+      "id": "php-symbols-tier2-control-unreachable",
+      "subject_id": "pkg:reachbench/php/symbols_tier2#controlUnreachable",
+      "cohort_id": "php",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "php-symbols-tier2-input",
+        "digest": "sha256:207336c5ca9ba4bf9093aee3fbc532e635f50a56fb41bea50d411f9009ad1ec8"
+      }
+    },
+    {
+      "id": "python-import-control-no-coverage",
+      "subject_id": "pkg:pypi/reachbench-unsupported@1.0.0",
+      "cohort_id": "python",
+      "mode_id": "import",
+      "fixture": {
+        "id": "python-import-input",
+        "digest": "sha256:f6f96325e9464d3bbdd697c0c6162852ff678264fbb849c4237fc6e474586985"
+      }
+    },
+    {
+      "id": "python-import-control-opaque",
+      "subject_id": "pkg:pypi/reachbench-dynamic@1.0.0",
+      "cohort_id": "python",
+      "mode_id": "import",
+      "fixture": {
+        "id": "python-import-input",
+        "digest": "sha256:f6f96325e9464d3bbdd697c0c6162852ff678264fbb849c4237fc6e474586985"
+      }
+    },
+    {
+      "id": "python-import-control-positive",
+      "subject_id": "pkg:pypi/reachbench-direct@1.0.0",
+      "cohort_id": "python",
+      "mode_id": "import",
+      "fixture": {
+        "id": "python-import-input",
+        "digest": "sha256:f6f96325e9464d3bbdd697c0c6162852ff678264fbb849c4237fc6e474586985"
+      }
+    },
+    {
+      "id": "python-import-control-unreachable",
+      "subject_id": "pkg:pypi/reachbench-unused@1.0.0",
+      "cohort_id": "python",
+      "mode_id": "import",
+      "fixture": {
+        "id": "python-import-input",
+        "digest": "sha256:f6f96325e9464d3bbdd697c0c6162852ff678264fbb849c4237fc6e474586985"
+      }
+    },
+    {
+      "id": "python-semantic-control-no-coverage",
+      "subject_id": "pkg:reachbench/python/semantic#controlNoCoverage",
+      "cohort_id": "python",
+      "mode_id": "semantic",
+      "fixture": {
+        "id": "python-semantic-input",
+        "digest": "sha256:cfd415c0196996b4c45d3b000358dad3ec6aacaaf1f8de44edcd727c6a61fdce"
+      }
+    },
+    {
+      "id": "python-semantic-control-opaque",
+      "subject_id": "pkg:reachbench/python/semantic#controlOpaque",
+      "cohort_id": "python",
+      "mode_id": "semantic",
+      "fixture": {
+        "id": "python-semantic-input",
+        "digest": "sha256:cfd415c0196996b4c45d3b000358dad3ec6aacaaf1f8de44edcd727c6a61fdce"
+      }
+    },
+    {
+      "id": "python-semantic-control-positive",
+      "subject_id": "pkg:reachbench/python/semantic#controlPositive",
+      "cohort_id": "python",
+      "mode_id": "semantic",
+      "fixture": {
+        "id": "python-semantic-input",
+        "digest": "sha256:cfd415c0196996b4c45d3b000358dad3ec6aacaaf1f8de44edcd727c6a61fdce"
+      }
+    },
+    {
+      "id": "python-semantic-control-unreachable",
+      "subject_id": "pkg:reachbench/python/semantic#controlUnreachable",
+      "cohort_id": "python",
+      "mode_id": "semantic",
+      "fixture": {
+        "id": "python-semantic-input",
+        "digest": "sha256:cfd415c0196996b4c45d3b000358dad3ec6aacaaf1f8de44edcd727c6a61fdce"
+      }
+    },
+    {
+      "id": "ruby-import-control-no-coverage",
+      "subject_id": "pkg:gem/reachbench-unsupported@1.0.0",
+      "cohort_id": "ruby",
+      "mode_id": "import",
+      "fixture": {
+        "id": "ruby-import-input",
+        "digest": "sha256:5b9a487e1e6036c91681a0666311fd6b49aa069693a945996742ff63c68dc122"
+      }
+    },
+    {
+      "id": "ruby-import-control-opaque",
+      "subject_id": "pkg:gem/reachbench-dynamic@1.0.0",
+      "cohort_id": "ruby",
+      "mode_id": "import",
+      "fixture": {
+        "id": "ruby-import-input",
+        "digest": "sha256:5b9a487e1e6036c91681a0666311fd6b49aa069693a945996742ff63c68dc122"
+      }
+    },
+    {
+      "id": "ruby-import-control-positive",
+      "subject_id": "pkg:gem/reachbench-direct@1.0.0",
+      "cohort_id": "ruby",
+      "mode_id": "import",
+      "fixture": {
+        "id": "ruby-import-input",
+        "digest": "sha256:5b9a487e1e6036c91681a0666311fd6b49aa069693a945996742ff63c68dc122"
+      }
+    },
+    {
+      "id": "ruby-import-control-unreachable",
+      "subject_id": "pkg:gem/reachbench-unused@1.0.0",
+      "cohort_id": "ruby",
+      "mode_id": "import",
+      "fixture": {
+        "id": "ruby-import-input",
+        "digest": "sha256:5b9a487e1e6036c91681a0666311fd6b49aa069693a945996742ff63c68dc122"
+      }
+    },
+    {
+      "id": "ruby-symbols-tier2-challenge-symbol-provenance",
+      "subject_id": "pkg:reachbench/ruby/symbols_tier2#symbolPositive",
+      "cohort_id": "ruby",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "ruby-symbols-tier2-input",
+        "digest": "sha256:a07e5c8d799ba7d192403e958713de5474b4ad1e3725c83a8e82fc067a622f67"
+      }
+    },
+    {
+      "id": "ruby-symbols-tier2-control-no-coverage",
+      "subject_id": "pkg:reachbench/ruby/symbols_tier2#controlNoCoverage",
+      "cohort_id": "ruby",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "ruby-symbols-tier2-input",
+        "digest": "sha256:a07e5c8d799ba7d192403e958713de5474b4ad1e3725c83a8e82fc067a622f67"
+      }
+    },
+    {
+      "id": "ruby-symbols-tier2-control-opaque",
+      "subject_id": "pkg:reachbench/ruby/symbols_tier2#controlOpaque",
+      "cohort_id": "ruby",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "ruby-symbols-tier2-input",
+        "digest": "sha256:a07e5c8d799ba7d192403e958713de5474b4ad1e3725c83a8e82fc067a622f67"
+      }
+    },
+    {
+      "id": "ruby-symbols-tier2-control-positive",
+      "subject_id": "pkg:reachbench/ruby/symbols_tier2#controlPositive",
+      "cohort_id": "ruby",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "ruby-symbols-tier2-input",
+        "digest": "sha256:a07e5c8d799ba7d192403e958713de5474b4ad1e3725c83a8e82fc067a622f67"
+      }
+    },
+    {
+      "id": "ruby-symbols-tier2-control-unreachable",
+      "subject_id": "pkg:reachbench/ruby/symbols_tier2#controlUnreachable",
+      "cohort_id": "ruby",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "ruby-symbols-tier2-input",
+        "digest": "sha256:a07e5c8d799ba7d192403e958713de5474b4ad1e3725c83a8e82fc067a622f67"
+      }
+    },
+    {
+      "id": "runtime-library-loads-control-no-coverage",
+      "subject_id": "pkg:reachbench/runtime/library_loads#controlNoCoverage",
+      "cohort_id": "runtime",
+      "mode_id": "library_loads",
+      "fixture": {
+        "id": "runtime-library-loads-input",
+        "digest": "sha256:b49f3c222d5454fb9055cd5c64cc576965590b35731e18af9b7829c8cf6bad2a"
+      }
+    },
+    {
+      "id": "runtime-library-loads-control-opaque",
+      "subject_id": "pkg:reachbench/runtime/library_loads#controlOpaque",
+      "cohort_id": "runtime",
+      "mode_id": "library_loads",
+      "fixture": {
+        "id": "runtime-library-loads-input",
+        "digest": "sha256:b49f3c222d5454fb9055cd5c64cc576965590b35731e18af9b7829c8cf6bad2a"
+      }
+    },
+    {
+      "id": "runtime-library-loads-control-positive",
+      "subject_id": "pkg:reachbench/runtime/library_loads#controlPositive",
+      "cohort_id": "runtime",
+      "mode_id": "library_loads",
+      "fixture": {
+        "id": "runtime-library-loads-input",
+        "digest": "sha256:b49f3c222d5454fb9055cd5c64cc576965590b35731e18af9b7829c8cf6bad2a"
+      }
+    },
+    {
+      "id": "runtime-library-loads-control-unreachable",
+      "subject_id": "pkg:reachbench/runtime/library_loads#controlUnreachable",
+      "cohort_id": "runtime",
+      "mode_id": "library_loads",
+      "fixture": {
+        "id": "runtime-library-loads-input",
+        "digest": "sha256:b49f3c222d5454fb9055cd5c64cc576965590b35731e18af9b7829c8cf6bad2a"
+      }
+    },
+    {
+      "id": "rust-import-control-no-coverage",
+      "subject_id": "pkg:cargo/reachbench-unsupported@1.0.0",
+      "cohort_id": "rust",
+      "mode_id": "import",
+      "fixture": {
+        "id": "rust-import-input",
+        "digest": "sha256:dd1cd072692f6412d33a0df4766cba7b3f7658de49c906c8e140af018d5f34cf"
+      }
+    },
+    {
+      "id": "rust-import-control-opaque",
+      "subject_id": "pkg:cargo/reachbench-dynamic@1.0.0",
+      "cohort_id": "rust",
+      "mode_id": "import",
+      "fixture": {
+        "id": "rust-import-input",
+        "digest": "sha256:dd1cd072692f6412d33a0df4766cba7b3f7658de49c906c8e140af018d5f34cf"
+      }
+    },
+    {
+      "id": "rust-import-control-positive",
+      "subject_id": "pkg:cargo/reachbench-direct@1.0.0",
+      "cohort_id": "rust",
+      "mode_id": "import",
+      "fixture": {
+        "id": "rust-import-input",
+        "digest": "sha256:dd1cd072692f6412d33a0df4766cba7b3f7658de49c906c8e140af018d5f34cf"
+      }
+    },
+    {
+      "id": "rust-import-control-unreachable",
+      "subject_id": "pkg:cargo/reachbench-unused@1.0.0",
+      "cohort_id": "rust",
+      "mode_id": "import",
+      "fixture": {
+        "id": "rust-import-input",
+        "digest": "sha256:dd1cd072692f6412d33a0df4766cba7b3f7658de49c906c8e140af018d5f34cf"
+      }
+    },
+    {
+      "id": "rust-symbols-tier2-control-no-coverage",
+      "subject_id": "pkg:reachbench/rust/symbols_tier2#controlNoCoverage",
+      "cohort_id": "rust",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "rust-symbols-tier2-input",
+        "digest": "sha256:191aaed8a9b333cec277daa39db535d0fd6f9d29af7fa6e6f42702876c270047"
+      }
+    },
+    {
+      "id": "rust-symbols-tier2-control-opaque",
+      "subject_id": "pkg:reachbench/rust/symbols_tier2#controlOpaque",
+      "cohort_id": "rust",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "rust-symbols-tier2-input",
+        "digest": "sha256:191aaed8a9b333cec277daa39db535d0fd6f9d29af7fa6e6f42702876c270047"
+      }
+    },
+    {
+      "id": "rust-symbols-tier2-control-positive",
+      "subject_id": "pkg:reachbench/rust/symbols_tier2#controlPositive",
+      "cohort_id": "rust",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "rust-symbols-tier2-input",
+        "digest": "sha256:191aaed8a9b333cec277daa39db535d0fd6f9d29af7fa6e6f42702876c270047"
+      }
+    },
+    {
+      "id": "rust-symbols-tier2-control-unreachable",
+      "subject_id": "pkg:reachbench/rust/symbols_tier2#controlUnreachable",
+      "cohort_id": "rust",
+      "mode_id": "symbols_tier2",
+      "fixture": {
+        "id": "rust-symbols-tier2-input",
+        "digest": "sha256:191aaed8a9b333cec277daa39db535d0fd6f9d29af7fa6e6f42702876c270047"
+      }
+    }
+  ]
+}

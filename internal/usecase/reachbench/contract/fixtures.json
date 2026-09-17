@@ -1,0 +1,2346 @@
+{
+  "fixtures": [
+    {
+      "entries": [
+        {
+          "path": "fixtures/c_cpp/symbols_tier2/main.cpp",
+          "role": "source"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:5cbd34d0439124855e993f70ac143cf6c0d87a9b1d1fc36ccd66d22656f640e7",
+          "path": "fixtures/c_cpp/symbols_tier2/main.cpp",
+          "size": 492
+        }
+      ],
+      "id": "c-cpp-symbols-tier2-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:reachbench/c_cpp/symbols_tier2#controlNoCoverage",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 13,
+            "module_path": "fixtures/c_cpp/symbols_tier2/main.cpp",
+            "symbol": "reachbench::controlNoCoverage"
+          },
+          "package_identity": "example.invalid/reachbench/c-cpp-symbols"
+        },
+        {
+          "id": "pkg:reachbench/c_cpp/symbols_tier2#controlOpaque",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 6,
+            "module_path": "fixtures/c_cpp/symbols_tier2/main.cpp",
+            "symbol": "reachbench::controlOpaque"
+          },
+          "package_identity": "example.invalid/reachbench/c-cpp-symbols"
+        },
+        {
+          "id": "pkg:reachbench/c_cpp/symbols_tier2#controlPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 4,
+            "module_path": "fixtures/c_cpp/symbols_tier2/main.cpp",
+            "symbol": "reachbench::controlPositive"
+          },
+          "package_identity": "example.invalid/reachbench/c-cpp-symbols"
+        },
+        {
+          "id": "pkg:reachbench/c_cpp/symbols_tier2#controlUnreachable",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 5,
+            "module_path": "fixtures/c_cpp/symbols_tier2/main.cpp",
+            "symbol": "reachbench::controlUnreachable"
+          },
+          "package_identity": "example.invalid/reachbench/c-cpp-symbols"
+        }
+      ]
+    },
+    {
+      "build": {
+        "constraints": {
+          "dependency_resolution": "offline",
+          "inherited_config": false,
+          "network": "disabled"
+        },
+        "kind": "dotnet_publish",
+        "outputs": [
+          {
+            "format": "dotnet_restore_metadata",
+            "materialization": "materializer_required",
+            "path": "fixtures/dotnet/build_aware_import/obj/project.assets.json",
+            "semantic_identity": "dotnet-import-project-restore"
+          },
+          {
+            "format": "dotnet_assembly",
+            "materialization": "materializer_required",
+            "path": "generated/dotnet-import/app/Reachbench.Import.dll",
+            "semantic_identity": "dotnet-import-app"
+          },
+          {
+            "format": "dotnet_metadata",
+            "materialization": "materializer_required",
+            "path": "generated/dotnet-import/app/Reachbench.Import.deps.json",
+            "semantic_identity": "dotnet-import-dependencies"
+          },
+          {
+            "format": "nuget_package",
+            "materialization": "materializer_required",
+            "path": "generated/dotnet-import/local-nupkgs/Reachbench.Direct.1.0.0.nupkg",
+            "semantic_identity": "nuget-reachbench-direct-package"
+          },
+          {
+            "format": "nuget_package",
+            "materialization": "materializer_required",
+            "path": "generated/dotnet-import/local-nupkgs/Reachbench.Dynamic.1.0.0.nupkg",
+            "semantic_identity": "nuget-reachbench-dynamic-package"
+          },
+          {
+            "format": "nuget_package",
+            "materialization": "materializer_required",
+            "path": "generated/dotnet-import/local-nupkgs/Reachbench.Unused.1.0.0.nupkg",
+            "semantic_identity": "nuget-reachbench-unused-package"
+          },
+          {
+            "format": "dotnet_assembly",
+            "materialization": "materializer_required",
+            "path": "generated/dotnet-import/package-cache/reachbench.direct/1.0.0/lib/net8.0/Reachbench.Direct.dll",
+            "semantic_identity": "nuget-reachbench-direct-cache"
+          },
+          {
+            "format": "dotnet_assembly",
+            "materialization": "materializer_required",
+            "path": "generated/dotnet-import/package-cache/reachbench.dynamic/1.0.0/lib/net8.0/Reachbench.Dynamic.dll",
+            "semantic_identity": "nuget-reachbench-dynamic-cache"
+          },
+          {
+            "format": "dotnet_assembly",
+            "materialization": "materializer_required",
+            "path": "generated/dotnet-import/package-cache/reachbench.unused/1.0.0/lib/net8.0/Reachbench.Unused.dll",
+            "semantic_identity": "nuget-reachbench-unused-cache"
+          }
+        ],
+        "steps": [
+          {
+            "argv": [
+              "dotnet",
+              "restore",
+              "./fixtures/dotnet/build_aware_import/Reachbench.Packages.sln",
+              "--configfile",
+              "./fixtures/dotnet/build_aware_import/NuGet.Config",
+              "--packages",
+              "./generated/dotnet-import/package-cache",
+              "--ignore-failed-sources"
+            ]
+          },
+          {
+            "argv": [
+              "dotnet",
+              "pack",
+              "./fixtures/dotnet/build_aware_import/Reachbench.Packages.sln",
+              "--no-restore",
+              "--configuration",
+              "Release",
+              "--output",
+              "./generated/dotnet-import/local-nupkgs"
+            ]
+          },
+          {
+            "argv": [
+              "dotnet",
+              "restore",
+              "./fixtures/dotnet/build_aware_import/Reachbench.Import.csproj",
+              "--configfile",
+              "./fixtures/dotnet/build_aware_import/NuGet.Config",
+              "--source",
+              "./generated/dotnet-import/local-nupkgs",
+              "--packages",
+              "./generated/dotnet-import/package-cache",
+              "--ignore-failed-sources"
+            ]
+          },
+          {
+            "argv": [
+              "dotnet",
+              "publish",
+              "./fixtures/dotnet/build_aware_import/Reachbench.Import.csproj",
+              "--no-restore",
+              "--configuration",
+              "Release",
+              "--runtime",
+              "linux-x64",
+              "--self-contained",
+              "false",
+              "--output",
+              "./generated/dotnet-import/app"
+            ]
+          }
+        ],
+        "target_platform": "linux/amd64",
+        "toolchain": {
+          "family": "dotnet-sdk",
+          "resolution": "materializer_required",
+          "target_platform": "linux/amd64",
+          "version": "8.0.100"
+        },
+        "working_directory": "."
+      },
+      "entries": [
+        {
+          "path": "fixtures/dotnet/build_aware_import/Program.cs",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/dotnet/build_aware_import/Reachbench.Import.csproj",
+          "role": "manifest"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:5c8148a107139dc00b02477820ae51dc918274e118f8d46ebb41001b74d6e30a",
+          "path": "fixtures/dotnet/build_aware_import/Program.cs",
+          "size": 445
+        },
+        {
+          "digest": "sha256:2b5aebb268eb5cdbda39708be9386104dc9a751e0cd81575fad6c518835ad356",
+          "path": "fixtures/dotnet/build_aware_import/Reachbench.Import.csproj",
+          "size": 593
+        },
+        {
+          "digest": "sha256:7922ebae9dd4f57bd7e38bb073682a75acb1ec7d4fd01f04048501dff3a57347",
+          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Direct/Entry.cs",
+          "size": 89
+        },
+        {
+          "digest": "sha256:96dd799d21a12db347f5f46ec3bccbc3085e58025fe83f040bbe64a25ae275c0",
+          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Direct/Reachbench.Direct.csproj",
+          "size": 253
+        },
+        {
+          "digest": "sha256:80ff61e7e4e1b72fe26ea19e8d7b0e04dd2e8bdb903cf2175ca2c860c6bdef2a",
+          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Dynamic/Entry.cs",
+          "size": 90
+        },
+        {
+          "digest": "sha256:c1a17c059c7f3d51d7078e672806b4063727d2a1c4ac7de82734c2f072efa213",
+          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Dynamic/Reachbench.Dynamic.csproj",
+          "size": 255
+        },
+        {
+          "digest": "sha256:ca78dbb2e60f1ae71e64a6742ecb466cbc1e2e8c8f1880ed458ec036b5a59e8a",
+          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Unsupported/Entry.cs",
+          "size": 94
+        },
+        {
+          "digest": "sha256:9fcdbbd250d33ae02a60de784995f79b4cf68b33ecf144e19a00328c81bd1571",
+          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Unsupported/Reachbench.Unsupported.csproj",
+          "size": 263
+        },
+        {
+          "digest": "sha256:89336c96f30ac7b5dd9e2efa319aff4a79ef37730a81be46726aac5640ec8b5b",
+          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Unused/Entry.cs",
+          "size": 89
+        },
+        {
+          "digest": "sha256:f3a73f19f2c359861016be926e01f72a8202c07485c354cb29b2eb16097c4c45",
+          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Unused/Reachbench.Unused.csproj",
+          "size": 253
+        },
+        {
+          "digest": "sha256:5256a7e3e07d2c5c94f7a1e6c45f39aab011c659c5e2d53e452dea525ce04575",
+          "path": "fixtures/dotnet/build_aware_import/NuGet.Config",
+          "size": 125
+        },
+        {
+          "digest": "sha256:5721ae7900f928657ef29c7c4447a9ad3b07e2d08ac21dc8ddac6669cb63449f",
+          "path": "fixtures/dotnet/build_aware_import/Reachbench.Packages.sln",
+          "size": 1435
+        }
+      ],
+      "id": "dotnet-build-aware-import-input",
+      "provenance": {
+        "kind": "generated_from_repository_inputs"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:nuget/Reachbench.Direct@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 3,
+            "module_path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Direct/Entry.cs",
+            "symbol": "Reachbench.Direct.Entry.Run"
+          },
+          "package_identity": "pkg:nuget/Reachbench.Direct@1.0.0"
+        },
+        {
+          "id": "pkg:nuget/Reachbench.Dynamic@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 3,
+            "module_path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Dynamic/Entry.cs",
+            "symbol": "Reachbench.Dynamic.Entry.Run"
+          },
+          "package_identity": "pkg:nuget/Reachbench.Dynamic@1.0.0"
+        },
+        {
+          "id": "pkg:nuget/Reachbench.Unused@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 3,
+            "module_path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Unused/Entry.cs",
+            "symbol": "Reachbench.Unused.Entry.Run"
+          },
+          "package_identity": "pkg:nuget/Reachbench.Unused@1.0.0"
+        },
+        {
+          "id": "pkg:nuget/Reachbench.Unsupported@1.0.0",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 12,
+            "module_path": "fixtures/dotnet/build_aware_import/Reachbench.Import.csproj",
+            "symbol": "Reachbench.Unsupported"
+          },
+          "package_identity": "pkg:nuget/Reachbench.Unsupported@1.0.0"
+        }
+      ]
+    },
+    {
+      "build": {
+        "constraints": {
+          "dependency_resolution": "offline",
+          "inherited_config": false,
+          "network": "disabled"
+        },
+        "kind": "dotnet_publish",
+        "outputs": [
+          {
+            "format": "dotnet_restore_metadata",
+            "materialization": "materializer_required",
+            "path": "fixtures/dotnet/symbols_tier2/obj/project.assets.json",
+            "semantic_identity": "dotnet-symbols-project-restore"
+          },
+          {
+            "format": "dotnet_assembly",
+            "materialization": "materializer_required",
+            "path": "generated/dotnet-symbols/Reachbench.Symbols.dll",
+            "semantic_identity": "dotnet-symbols-app"
+          },
+          {
+            "format": "dotnet_metadata",
+            "materialization": "materializer_required",
+            "path": "generated/dotnet-symbols/Reachbench.Symbols.deps.json",
+            "semantic_identity": "dotnet-symbols-dependencies"
+          }
+        ],
+        "steps": [
+          {
+            "argv": [
+              "dotnet",
+              "restore",
+              "./fixtures/dotnet/symbols_tier2/Reachbench.Symbols.csproj",
+              "--configfile",
+              "./fixtures/dotnet/symbols_tier2/NuGet.Config",
+              "--packages",
+              "./generated/dotnet-symbols/package-cache",
+              "--ignore-failed-sources"
+            ]
+          },
+          {
+            "argv": [
+              "dotnet",
+              "publish",
+              "./fixtures/dotnet/symbols_tier2/Reachbench.Symbols.csproj",
+              "--no-restore",
+              "--configuration",
+              "Release",
+              "--runtime",
+              "linux-x64",
+              "--self-contained",
+              "false",
+              "--output",
+              "./generated/dotnet-symbols"
+            ]
+          }
+        ],
+        "target_platform": "linux/amd64",
+        "toolchain": {
+          "family": "dotnet-sdk",
+          "resolution": "materializer_required",
+          "target_platform": "linux/amd64",
+          "version": "8.0.100"
+        },
+        "working_directory": "."
+      },
+      "entries": [
+        {
+          "path": "fixtures/dotnet/symbols_tier2/Program.cs",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/dotnet/symbols_tier2/Reachbench.Symbols.csproj",
+          "role": "manifest"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:ec0514766c9a33095f57311a5423ebccd3d64eb0f7a0cfbe9977236942368bfd",
+          "path": "fixtures/dotnet/symbols_tier2/Program.cs",
+          "size": 528
+        },
+        {
+          "digest": "sha256:031da6a6f6d810b9f23ffe7818f3acefb7b0ff54b0eb8c6752735ad58d254904",
+          "path": "fixtures/dotnet/symbols_tier2/Reachbench.Symbols.csproj",
+          "size": 237
+        },
+        {
+          "digest": "sha256:5256a7e3e07d2c5c94f7a1e6c45f39aab011c659c5e2d53e452dea525ce04575",
+          "path": "fixtures/dotnet/symbols_tier2/NuGet.Config",
+          "size": 125
+        }
+      ],
+      "id": "dotnet-symbols-tier2-input",
+      "provenance": {
+        "kind": "generated_from_repository_inputs"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:reachbench/dotnet/symbols_tier2#controlNoCoverage",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 1,
+            "module_path": "fixtures/dotnet/symbols_tier2/Reachbench.Symbols.csproj",
+            "symbol": "tier-two-metadata"
+          },
+          "package_identity": "nuget:reachbench.symbols"
+        },
+        {
+          "id": "pkg:reachbench/dotnet/symbols_tier2#controlOpaque",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 19,
+            "module_path": "fixtures/dotnet/symbols_tier2/Program.cs",
+            "symbol": "Program.ControlOpaque"
+          },
+          "package_identity": "nuget:reachbench.symbols"
+        },
+        {
+          "id": "pkg:reachbench/dotnet/symbols_tier2#controlPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 11,
+            "module_path": "fixtures/dotnet/symbols_tier2/Program.cs",
+            "symbol": "Program.ControlPositive"
+          },
+          "package_identity": "nuget:reachbench.symbols"
+        },
+        {
+          "id": "pkg:reachbench/dotnet/symbols_tier2#controlUnreachable",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 12,
+            "module_path": "fixtures/dotnet/symbols_tier2/Program.cs",
+            "symbol": "Program.ControlUnreachable"
+          },
+          "package_identity": "nuget:reachbench.symbols"
+        }
+      ]
+    },
+    {
+      "build": {
+        "constraints": {
+          "dependency_resolution": "offline",
+          "inherited_config": false,
+          "network": "disabled"
+        },
+        "env": [
+          {
+            "key": "CGO_ENABLED",
+            "value": "0"
+          },
+          {
+            "key": "GOOS",
+            "value": "linux"
+          },
+          {
+            "key": "GOARCH",
+            "value": "amd64"
+          }
+        ],
+        "kind": "go_binary",
+        "outputs": [
+          {
+            "format": "elf",
+            "materialization": "materializer_required",
+            "path": "generated/go-binary-pclntab",
+            "semantic_identity": "go-pclntab-entry-dependency-call"
+          }
+        ],
+        "steps": [
+          {
+            "argv": [
+              "go",
+              "build",
+              "-trimpath",
+              "-buildvcs=false",
+              "-ldflags=-s -w",
+              "-o",
+              "./generated/go-binary-pclntab",
+              "./fixtures/golang/binary"
+            ]
+          }
+        ],
+        "target_platform": "linux/amd64",
+        "toolchain": {
+          "family": "go",
+          "resolution": "materializer_required",
+          "target_platform": "linux/amd64",
+          "version": "1.27.0"
+        },
+        "working_directory": "."
+      },
+      "entries": [
+        {
+          "path": "fixtures/golang/binary/go.mod.src",
+          "role": "manifest"
+        },
+        {
+          "path": "fixtures/golang/binary/main.go.src",
+          "role": "source"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:6e322e93b7f7371ca24a290f57cc8d2aef7351a2734f3c7518274e37a6af5555",
+          "materialized_path": "fixtures/golang/binary/go.mod",
+          "path": "fixtures/golang/binary/go.mod.src",
+          "size": 55
+        },
+        {
+          "digest": "sha256:2ddf046c089e0068d0f74ac9be9ea4a2836c239e430e0e5c859c3a9e4c40ee8c",
+          "materialized_path": "fixtures/golang/binary/internal/dependency/dependency.go",
+          "path": "fixtures/golang/binary/internal/dependency/dependency.go.src",
+          "size": 91
+        },
+        {
+          "digest": "sha256:08d6d33de21253972ec39a105e0ed2c6962a5cabdc196ca4e55b977a053f85e1",
+          "materialized_path": "fixtures/golang/binary/main.go",
+          "path": "fixtures/golang/binary/main.go.src",
+          "size": 807
+        }
+      ],
+      "id": "go-binary-input",
+      "provenance": {
+        "kind": "generated_from_repository_inputs"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:reachbench/go/binary#reachableDependency",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 19,
+            "module_path": "fixtures/golang/binary/main.go",
+            "symbol": "dependency.Reachable"
+          },
+          "package_identity": "example.invalid/reachbench/go-binary"
+        },
+        {
+          "id": "pkg:reachbench/go/binary#controlNoCoverage",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 34,
+            "module_path": "fixtures/golang/binary/main.go",
+            "symbol": "controlNoCoverage"
+          },
+          "package_identity": "example.invalid/reachbench/go-binary"
+        },
+        {
+          "id": "pkg:reachbench/go/binary#controlOpaque",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 31,
+            "module_path": "fixtures/golang/binary/main.go",
+            "symbol": "controlOpaque"
+          },
+          "package_identity": "example.invalid/reachbench/go-binary"
+        },
+        {
+          "id": "pkg:reachbench/go/binary#controlPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 22,
+            "module_path": "fixtures/golang/binary/main.go",
+            "symbol": "controlPositive"
+          },
+          "package_identity": "example.invalid/reachbench/go-binary"
+        },
+        {
+          "id": "pkg:reachbench/go/binary#controlUnreachable",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 24,
+            "module_path": "fixtures/golang/binary/main.go",
+            "symbol": "controlUnreachable"
+          },
+          "package_identity": "example.invalid/reachbench/go-binary"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/golang/source_tier2/go.mod.src",
+          "role": "manifest"
+        },
+        {
+          "path": "fixtures/golang/source_tier2/main.go.src",
+          "role": "source"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:2415dba7e8b98a78eeb728a210bbd584d496110d68dbc727470396d2aea95f54",
+          "materialized_path": "fixtures/golang/source_tier2/go.mod",
+          "path": "fixtures/golang/source_tier2/go.mod.src",
+          "size": 61
+        },
+        {
+          "digest": "sha256:5c4b4705678b7dee921db7405946f99001219e328677513fac754574a3ef55f3",
+          "materialized_path": "fixtures/golang/source_tier2/internal/dependency/dependency.go",
+          "path": "fixtures/golang/source_tier2/internal/dependency/dependency.go.src",
+          "size": 40
+        },
+        {
+          "digest": "sha256:cbddaf02446c284f22e729d4325b78763c6a7aac2ed613aa7a10185554115eae",
+          "materialized_path": "fixtures/golang/source_tier2/main.go",
+          "path": "fixtures/golang/source_tier2/main.go.src",
+          "size": 544
+        }
+      ],
+      "id": "go-source-tier2-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:reachbench/go/source_tier2#controlNoCoverage",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 27,
+            "module_path": "fixtures/golang/source_tier2/main.go",
+            "symbol": "controlNoCoverage"
+          },
+          "package_identity": "example.invalid/reachbench/go-source-tier2"
+        },
+        {
+          "id": "pkg:reachbench/go/source_tier2#controlOpaque",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 24,
+            "module_path": "fixtures/golang/source_tier2/main.go",
+            "symbol": "controlOpaque"
+          },
+          "package_identity": "example.invalid/reachbench/go-source-tier2"
+        },
+        {
+          "id": "pkg:reachbench/go/source_tier2#controlPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 14,
+            "module_path": "fixtures/golang/source_tier2/main.go",
+            "symbol": "controlPositive"
+          },
+          "package_identity": "example.invalid/reachbench/go-source-tier2"
+        },
+        {
+          "id": "pkg:reachbench/go/source_tier2#controlUnreachable",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 16,
+            "module_path": "fixtures/golang/source_tier2/main.go",
+            "symbol": "controlUnreachable"
+          },
+          "package_identity": "example.invalid/reachbench/go-source-tier2"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/javascript/import/main.js",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/javascript/import/package.json",
+          "role": "manifest"
+        },
+        {
+          "path": "fixtures/javascript/import/package-lock.json",
+          "role": "lockfile"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:412262b38a0d6c19330ed6076e8ecb13fcd5278f84f6b0f3addf5e75ebf42a26",
+          "path": "fixtures/javascript/import/main.js",
+          "size": 205
+        },
+        {
+          "digest": "sha256:f63792815e444a9ff10b47f0870bc42687e318a957c4e7ebb50f9916e69dd16e",
+          "path": "fixtures/javascript/import/package-lock.json",
+          "size": 1135
+        },
+        {
+          "digest": "sha256:b042fc057fd76a47e64526a8697fc20fbfb211b91bdbf70fbdccd6a8bb999917",
+          "path": "fixtures/javascript/import/package.json",
+          "size": 419
+        },
+        {
+          "digest": "sha256:b5f06435c1cf1c76c561447230d9247aa2584cfdeb8ee9083c1396ee8d2e0cfd",
+          "path": "fixtures/javascript/import/packages/direct/index.js",
+          "size": 25
+        },
+        {
+          "digest": "sha256:10abbde31841818371f6089c91382e0cc076bab36db17b961a2cb04a2189a93e",
+          "path": "fixtures/javascript/import/packages/direct/package.json",
+          "size": 87
+        },
+        {
+          "digest": "sha256:b5f06435c1cf1c76c561447230d9247aa2584cfdeb8ee9083c1396ee8d2e0cfd",
+          "path": "fixtures/javascript/import/packages/dynamic/index.js",
+          "size": 25
+        },
+        {
+          "digest": "sha256:0312b0a0de71c32ab3c0296ba694f142f0171577befe0a9d368f89e61e2071d2",
+          "path": "fixtures/javascript/import/packages/dynamic/package.json",
+          "size": 88
+        },
+        {
+          "digest": "sha256:b5f06435c1cf1c76c561447230d9247aa2584cfdeb8ee9083c1396ee8d2e0cfd",
+          "path": "fixtures/javascript/import/packages/unsupported/index.js",
+          "size": 25
+        },
+        {
+          "digest": "sha256:5b77d72649abb53c638fa8d51b1c8e3b008dfe86b92a1e3cd5d20557d612f67c",
+          "path": "fixtures/javascript/import/packages/unsupported/package.json",
+          "size": 92
+        },
+        {
+          "digest": "sha256:b5f06435c1cf1c76c561447230d9247aa2584cfdeb8ee9083c1396ee8d2e0cfd",
+          "path": "fixtures/javascript/import/packages/unused/index.js",
+          "size": 25
+        },
+        {
+          "digest": "sha256:8afe22f4382451fbbc7d544b81df65a0873eb71cd926db8fab36bcec502deb5e",
+          "path": "fixtures/javascript/import/packages/unused/package.json",
+          "size": 87
+        }
+      ],
+      "id": "javascript-import-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:npm/@reachbench/direct@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 1,
+            "module_path": "fixtures/javascript/import/packages/direct/index.js",
+            "symbol": "@reachbench/direct"
+          },
+          "package_identity": "pkg:npm/@reachbench/direct@1.0.0"
+        },
+        {
+          "id": "pkg:npm/@reachbench/dynamic@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 1,
+            "module_path": "fixtures/javascript/import/packages/dynamic/index.js",
+            "symbol": "@reachbench/dynamic"
+          },
+          "package_identity": "pkg:npm/@reachbench/dynamic@1.0.0"
+        },
+        {
+          "id": "pkg:npm/@reachbench/unused@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 1,
+            "module_path": "fixtures/javascript/import/packages/unused/index.js",
+            "symbol": "@reachbench/unused"
+          },
+          "package_identity": "pkg:npm/@reachbench/unused@1.0.0"
+        },
+        {
+          "id": "pkg:npm/@reachbench/unsupported@1.0.0",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 12,
+            "module_path": "fixtures/javascript/import/package.json",
+            "symbol": "@reachbench/unsupported"
+          },
+          "package_identity": "pkg:npm/@reachbench/unsupported@1.0.0"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/javascript/interprocedural/main.mjs",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/javascript/interprocedural/package.json",
+          "role": "manifest"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:2e698fc14ca9d9b73b0f8d91a23daa2e9fae6134b4a9d684f9e4379f65400364",
+          "path": "fixtures/javascript/interprocedural/main.mjs",
+          "size": 836
+        },
+        {
+          "digest": "sha256:577f0587e92524f727792ce4f811222ed4215957c4409527cb2f337a385410fb",
+          "path": "fixtures/javascript/interprocedural/module.mjs",
+          "size": 39
+        },
+        {
+          "digest": "sha256:6fd3a47b5525bf1defd83e6cc4fb95b6f05cdcbda0ef348f8e5ff2fd49fafbd7",
+          "path": "fixtures/javascript/interprocedural/package.json",
+          "size": 204
+        }
+      ],
+      "id": "javascript-interprocedural-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:reachbench/javascript/interprocedural#callbackTarget",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 24,
+            "module_path": "fixtures/javascript/interprocedural/main.mjs",
+            "symbol": "callbackTarget"
+          },
+          "package_identity": "npm:@reachbench/interprocedural"
+        },
+        {
+          "id": "pkg:reachbench/javascript/interprocedural#controlNoCoverage",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 7,
+            "module_path": "fixtures/javascript/interprocedural/package.json",
+            "symbol": "parser-unavailable"
+          },
+          "package_identity": "npm:@reachbench/interprocedural"
+        },
+        {
+          "id": "pkg:reachbench/javascript/interprocedural#controlOpaque",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 21,
+            "module_path": "fixtures/javascript/interprocedural/main.mjs",
+            "symbol": "controlOpaque"
+          },
+          "package_identity": "npm:@reachbench/interprocedural"
+        },
+        {
+          "id": "pkg:reachbench/javascript/interprocedural#controlPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 13,
+            "module_path": "fixtures/javascript/interprocedural/main.mjs",
+            "symbol": "controlPositive"
+          },
+          "package_identity": "npm:@reachbench/interprocedural"
+        },
+        {
+          "id": "pkg:reachbench/javascript/interprocedural#controlUnreachable",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 14,
+            "module_path": "fixtures/javascript/interprocedural/main.mjs",
+            "symbol": "controlUnreachable"
+          },
+          "package_identity": "npm:@reachbench/interprocedural"
+        },
+        {
+          "id": "pkg:reachbench/javascript/interprocedural#crossModuleTarget",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 1,
+            "module_path": "fixtures/javascript/interprocedural/module.mjs",
+            "symbol": "crossModuleTarget"
+          },
+          "package_identity": "npm:@reachbench/interprocedural"
+        },
+        {
+          "id": "pkg:reachbench/javascript/interprocedural#functionAliasTarget",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 23,
+            "module_path": "fixtures/javascript/interprocedural/main.mjs",
+            "symbol": "functionAliasTarget"
+          },
+          "package_identity": "npm:@reachbench/interprocedural"
+        },
+        {
+          "id": "pkg:reachbench/javascript/interprocedural#returnedCallableTarget",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 27,
+            "module_path": "fixtures/javascript/interprocedural/main.mjs",
+            "symbol": "returnedCallableTarget"
+          },
+          "package_identity": "npm:@reachbench/interprocedural"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/javascript/lexical/main.js",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/javascript/lexical/package.json",
+          "role": "manifest"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:c2660d2a98d5ff340bac5036ea3e3feae4568cb1dfd857378549ca39fdcb024c",
+          "path": "fixtures/javascript/lexical/main.js",
+          "size": 420
+        },
+        {
+          "digest": "sha256:779c069a0cb659d7cbf03c448de958d38a2944775dd05a5d7215b12fd6321d76",
+          "path": "fixtures/javascript/lexical/package.json",
+          "size": 196
+        }
+      ],
+      "id": "javascript-lexical-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:reachbench/javascript/lexical#controlNoCoverage",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 7,
+            "module_path": "fixtures/javascript/lexical/package.json",
+            "symbol": "parser-unavailable"
+          },
+          "package_identity": "npm:@reachbench/lexical"
+        },
+        {
+          "id": "pkg:reachbench/javascript/lexical#controlOpaque",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 12,
+            "module_path": "fixtures/javascript/lexical/main.js",
+            "symbol": "controlOpaque"
+          },
+          "package_identity": "npm:@reachbench/lexical"
+        },
+        {
+          "id": "pkg:reachbench/javascript/lexical#controlPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 5,
+            "module_path": "fixtures/javascript/lexical/main.js",
+            "symbol": "controlPositive"
+          },
+          "package_identity": "npm:@reachbench/lexical"
+        },
+        {
+          "id": "pkg:reachbench/javascript/lexical#controlUnreachable",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 6,
+            "module_path": "fixtures/javascript/lexical/main.js",
+            "symbol": "controlUnreachable"
+          },
+          "package_identity": "npm:@reachbench/lexical"
+        }
+      ]
+    },
+    {
+      "build": {
+        "constraints": {
+          "dependency_resolution": "offline",
+          "inherited_config": false,
+          "network": "disabled"
+        },
+        "kind": "jvm_package",
+        "outputs": [
+          {
+            "format": "jvm_jar",
+            "materialization": "materializer_required",
+            "path": "generated/jvm-coarse/jvm-direct.jar",
+            "semantic_identity": "maven-jvm-direct-archive"
+          },
+          {
+            "format": "jvm_jar",
+            "materialization": "materializer_required",
+            "path": "generated/jvm-coarse/jvm-dynamic.jar",
+            "semantic_identity": "maven-jvm-dynamic-archive"
+          },
+          {
+            "format": "jvm_jar",
+            "materialization": "materializer_required",
+            "path": "generated/jvm-coarse/jvm-unused.jar",
+            "semantic_identity": "maven-jvm-unused-archive"
+          },
+          {
+            "format": "jvm_class",
+            "materialization": "materializer_required",
+            "path": "generated/jvm-coarse/classes/Main.class",
+            "semantic_identity": "jvm-app-main-classes"
+          }
+        ],
+        "steps": [
+          {
+            "argv": [
+              "javac",
+              "--release",
+              "21",
+              "-d",
+              "./generated/jvm-coarse/direct-classes",
+              "./fixtures/jvm/coarse/dependencies/reachbench/direct/DirectDependency.java"
+            ]
+          },
+          {
+            "argv": [
+              "jar",
+              "--create",
+              "--file",
+              "./generated/jvm-coarse/jvm-direct.jar",
+              "-C",
+              "./generated/jvm-coarse/direct-classes",
+              ".",
+              "-C",
+              "./fixtures/jvm/coarse/metadata/jvm-direct",
+              "META-INF/maven/example.invalid.reachbench/jvm-direct/pom.properties"
+            ]
+          },
+          {
+            "argv": [
+              "javac",
+              "--release",
+              "21",
+              "-d",
+              "./generated/jvm-coarse/dynamic-classes",
+              "./fixtures/jvm/coarse/dependencies/reachbench/dynamic/DynamicDependency.java"
+            ]
+          },
+          {
+            "argv": [
+              "jar",
+              "--create",
+              "--file",
+              "./generated/jvm-coarse/jvm-dynamic.jar",
+              "-C",
+              "./generated/jvm-coarse/dynamic-classes",
+              ".",
+              "-C",
+              "./fixtures/jvm/coarse/metadata/jvm-dynamic",
+              "META-INF/maven/example.invalid.reachbench/jvm-dynamic/pom.properties"
+            ]
+          },
+          {
+            "argv": [
+              "javac",
+              "--release",
+              "21",
+              "-d",
+              "./generated/jvm-coarse/unused-classes",
+              "./fixtures/jvm/coarse/dependencies/reachbench/unused/UnusedDependency.java"
+            ]
+          },
+          {
+            "argv": [
+              "jar",
+              "--create",
+              "--file",
+              "./generated/jvm-coarse/jvm-unused.jar",
+              "-C",
+              "./generated/jvm-coarse/unused-classes",
+              ".",
+              "-C",
+              "./fixtures/jvm/coarse/metadata/jvm-unused",
+              "META-INF/maven/example.invalid.reachbench/jvm-unused/pom.properties"
+            ]
+          },
+          {
+            "argv": [
+              "javac",
+              "--release",
+              "21",
+              "-cp",
+              "./generated/jvm-coarse/jvm-direct.jar:./generated/jvm-coarse/jvm-dynamic.jar:./generated/jvm-coarse/jvm-unused.jar",
+              "-d",
+              "./generated/jvm-coarse/classes",
+              "./fixtures/jvm/coarse/app/Main.java"
+            ]
+          }
+        ],
+        "target_platform": "linux/amd64",
+        "toolchain": {
+          "family": "openjdk",
+          "resolution": "materializer_required",
+          "target_platform": "linux/amd64",
+          "version": "21.0.5"
+        },
+        "working_directory": "."
+      },
+      "entries": [
+        {
+          "path": "fixtures/jvm/coarse/app/Main.java",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/jvm/coarse/fixture-build.json",
+          "role": "manifest"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:027e3ce6a2bbaed38da90af75f030f1e03723c19f77f57cfa290bfc2b69db53d",
+          "path": "fixtures/jvm/coarse/app/Main.java",
+          "size": 320
+        },
+        {
+          "digest": "sha256:d74ae023c2c9db757d35bc2e223e6d675b335c7825c03ba7a033a503655c880a",
+          "path": "fixtures/jvm/coarse/dependencies/reachbench/direct/DirectDependency.java",
+          "size": 96
+        },
+        {
+          "digest": "sha256:f799c5e7f8bab43bfd0041dc4d611b32cd8dc5a9774c9e14ab6387dacf73b04a",
+          "path": "fixtures/jvm/coarse/dependencies/reachbench/dynamic/DynamicDependency.java",
+          "size": 98
+        },
+        {
+          "digest": "sha256:dc8809dab59fd24038a941f9abfc7cb6d72b4c66f627a72d4331829eb9fe85d4",
+          "path": "fixtures/jvm/coarse/dependencies/reachbench/unsupported/UnsupportedDependency.java",
+          "size": 106
+        },
+        {
+          "digest": "sha256:2e0e1033b3e4d12814b29bddc2409772437ac118f7f89243cb39c83694aed136",
+          "path": "fixtures/jvm/coarse/dependencies/reachbench/unused/UnusedDependency.java",
+          "size": 96
+        },
+        {
+          "digest": "sha256:21cb800325da7b4ad69b3cf7323676f5ad4511e3a2162c00d53541d878434175",
+          "path": "fixtures/jvm/coarse/fixture-build.json",
+          "size": 1070
+        },
+        {
+          "digest": "sha256:3bf5c5daa2714761406b602e378c5443d586c206c5ad946246c7cfbac3eaaded",
+          "path": "fixtures/jvm/coarse/metadata/jvm-direct/META-INF/maven/example.invalid.reachbench/jvm-direct/pom.properties",
+          "size": 71
+        },
+        {
+          "digest": "sha256:c0a845af3767540767593870637b7592872553b58266a88bbb19f08cf9c4a0bd",
+          "path": "fixtures/jvm/coarse/metadata/jvm-dynamic/META-INF/maven/example.invalid.reachbench/jvm-dynamic/pom.properties",
+          "size": 72
+        },
+        {
+          "digest": "sha256:ad3d3f380aa958c5bcdba3d8df9a27b557b2551d11db9137c1fff8987fcf8941",
+          "path": "fixtures/jvm/coarse/metadata/jvm-unused/META-INF/maven/example.invalid.reachbench/jvm-unused/pom.properties",
+          "size": 71
+        }
+      ],
+      "id": "jvm-coarse-input",
+      "provenance": {
+        "kind": "generated_from_repository_inputs"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:maven/example.invalid.reachbench/jvm-direct@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 3,
+            "module_path": "fixtures/jvm/coarse/dependencies/reachbench/direct/DirectDependency.java",
+            "symbol": "reachbench.direct.DirectDependency"
+          },
+          "package_identity": "pkg:maven/example.invalid.reachbench/jvm-direct@1.0.0"
+        },
+        {
+          "id": "pkg:maven/example.invalid.reachbench/jvm-dynamic@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 3,
+            "module_path": "fixtures/jvm/coarse/dependencies/reachbench/dynamic/DynamicDependency.java",
+            "symbol": "reachbench.dynamic.DynamicDependency"
+          },
+          "package_identity": "pkg:maven/example.invalid.reachbench/jvm-dynamic@1.0.0"
+        },
+        {
+          "id": "pkg:maven/example.invalid.reachbench/jvm-unused@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 3,
+            "module_path": "fixtures/jvm/coarse/dependencies/reachbench/unused/UnusedDependency.java",
+            "symbol": "reachbench.unused.UnusedDependency"
+          },
+          "package_identity": "pkg:maven/example.invalid.reachbench/jvm-unused@1.0.0"
+        },
+        {
+          "id": "pkg:maven/example.invalid.reachbench/jvm-unsupported@1.0.0",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 15,
+            "module_path": "fixtures/jvm/coarse/fixture-build.json",
+            "symbol": "example.invalid.reachbench:jvm-unsupported:1.0.0"
+          },
+          "package_identity": "pkg:maven/example.invalid.reachbench/jvm-unsupported@1.0.0"
+        }
+      ]
+    },
+    {
+      "build": {
+        "constraints": {
+          "dependency_resolution": "offline",
+          "inherited_config": false,
+          "network": "disabled"
+        },
+        "kind": "jvm_package",
+        "outputs": [
+          {
+            "format": "jvm_jar",
+            "materialization": "materializer_required",
+            "path": "generated/jvm-tier2/jvm-direct.jar",
+            "semantic_identity": "maven-jvm-direct-archive"
+          },
+          {
+            "format": "jvm_jar",
+            "materialization": "materializer_required",
+            "path": "generated/jvm-tier2/jvm-dynamic.jar",
+            "semantic_identity": "maven-jvm-dynamic-archive"
+          },
+          {
+            "format": "jvm_jar",
+            "materialization": "materializer_required",
+            "path": "generated/jvm-tier2/jvm-unused.jar",
+            "semantic_identity": "maven-jvm-unused-archive"
+          },
+          {
+            "format": "jvm_class",
+            "materialization": "materializer_required",
+            "path": "generated/jvm-tier2/classes/Main.class",
+            "semantic_identity": "jvm-app-main-classes"
+          }
+        ],
+        "steps": [
+          {
+            "argv": [
+              "javac",
+              "--release",
+              "21",
+              "-d",
+              "./generated/jvm-tier2/direct-classes",
+              "./fixtures/jvm/tier2/dependencies/reachbench/direct/DirectDependency.java"
+            ]
+          },
+          {
+            "argv": [
+              "jar",
+              "--create",
+              "--file",
+              "./generated/jvm-tier2/jvm-direct.jar",
+              "-C",
+              "./generated/jvm-tier2/direct-classes",
+              ".",
+              "-C",
+              "./fixtures/jvm/tier2/metadata/jvm-direct",
+              "META-INF/maven/example.invalid.reachbench/jvm-direct/pom.properties"
+            ]
+          },
+          {
+            "argv": [
+              "javac",
+              "--release",
+              "21",
+              "-d",
+              "./generated/jvm-tier2/dynamic-classes",
+              "./fixtures/jvm/tier2/dependencies/reachbench/dynamic/DynamicDependency.java"
+            ]
+          },
+          {
+            "argv": [
+              "jar",
+              "--create",
+              "--file",
+              "./generated/jvm-tier2/jvm-dynamic.jar",
+              "-C",
+              "./generated/jvm-tier2/dynamic-classes",
+              ".",
+              "-C",
+              "./fixtures/jvm/tier2/metadata/jvm-dynamic",
+              "META-INF/maven/example.invalid.reachbench/jvm-dynamic/pom.properties"
+            ]
+          },
+          {
+            "argv": [
+              "javac",
+              "--release",
+              "21",
+              "-d",
+              "./generated/jvm-tier2/unused-classes",
+              "./fixtures/jvm/tier2/dependencies/reachbench/unused/UnusedDependency.java"
+            ]
+          },
+          {
+            "argv": [
+              "jar",
+              "--create",
+              "--file",
+              "./generated/jvm-tier2/jvm-unused.jar",
+              "-C",
+              "./generated/jvm-tier2/unused-classes",
+              ".",
+              "-C",
+              "./fixtures/jvm/tier2/metadata/jvm-unused",
+              "META-INF/maven/example.invalid.reachbench/jvm-unused/pom.properties"
+            ]
+          },
+          {
+            "argv": [
+              "javac",
+              "--release",
+              "21",
+              "-cp",
+              "./generated/jvm-tier2/jvm-direct.jar:./generated/jvm-tier2/jvm-dynamic.jar:./generated/jvm-tier2/jvm-unused.jar",
+              "-d",
+              "./generated/jvm-tier2/classes",
+              "./fixtures/jvm/tier2/app/Main.java"
+            ]
+          }
+        ],
+        "target_platform": "linux/amd64",
+        "toolchain": {
+          "family": "openjdk",
+          "resolution": "materializer_required",
+          "target_platform": "linux/amd64",
+          "version": "21.0.5"
+        },
+        "working_directory": "."
+      },
+      "entries": [
+        {
+          "path": "fixtures/jvm/tier2/app/Main.java",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/jvm/tier2/fixture-build.json",
+          "role": "manifest"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:027e3ce6a2bbaed38da90af75f030f1e03723c19f77f57cfa290bfc2b69db53d",
+          "path": "fixtures/jvm/tier2/app/Main.java",
+          "size": 320
+        },
+        {
+          "digest": "sha256:d74ae023c2c9db757d35bc2e223e6d675b335c7825c03ba7a033a503655c880a",
+          "path": "fixtures/jvm/tier2/dependencies/reachbench/direct/DirectDependency.java",
+          "size": 96
+        },
+        {
+          "digest": "sha256:f799c5e7f8bab43bfd0041dc4d611b32cd8dc5a9774c9e14ab6387dacf73b04a",
+          "path": "fixtures/jvm/tier2/dependencies/reachbench/dynamic/DynamicDependency.java",
+          "size": 98
+        },
+        {
+          "digest": "sha256:dc8809dab59fd24038a941f9abfc7cb6d72b4c66f627a72d4331829eb9fe85d4",
+          "path": "fixtures/jvm/tier2/dependencies/reachbench/unsupported/UnsupportedDependency.java",
+          "size": 106
+        },
+        {
+          "digest": "sha256:2e0e1033b3e4d12814b29bddc2409772437ac118f7f89243cb39c83694aed136",
+          "path": "fixtures/jvm/tier2/dependencies/reachbench/unused/UnusedDependency.java",
+          "size": 96
+        },
+        {
+          "digest": "sha256:27fce5a72f8d6de655e23d00ff17272d245b57cb3de23a0b3c13ba599d74fa6b",
+          "path": "fixtures/jvm/tier2/fixture-build.json",
+          "size": 1065
+        },
+        {
+          "digest": "sha256:3bf5c5daa2714761406b602e378c5443d586c206c5ad946246c7cfbac3eaaded",
+          "path": "fixtures/jvm/tier2/metadata/jvm-direct/META-INF/maven/example.invalid.reachbench/jvm-direct/pom.properties",
+          "size": 71
+        },
+        {
+          "digest": "sha256:c0a845af3767540767593870637b7592872553b58266a88bbb19f08cf9c4a0bd",
+          "path": "fixtures/jvm/tier2/metadata/jvm-dynamic/META-INF/maven/example.invalid.reachbench/jvm-dynamic/pom.properties",
+          "size": 72
+        },
+        {
+          "digest": "sha256:ad3d3f380aa958c5bcdba3d8df9a27b557b2551d11db9137c1fff8987fcf8941",
+          "path": "fixtures/jvm/tier2/metadata/jvm-unused/META-INF/maven/example.invalid.reachbench/jvm-unused/pom.properties",
+          "size": 71
+        }
+      ],
+      "id": "jvm-tier2-input",
+      "provenance": {
+        "kind": "generated_from_repository_inputs"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:maven/example.invalid.reachbench/jvm-direct@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 3,
+            "module_path": "fixtures/jvm/tier2/dependencies/reachbench/direct/DirectDependency.java",
+            "symbol": "reachbench.direct.DirectDependency"
+          },
+          "package_identity": "pkg:maven/example.invalid.reachbench/jvm-direct@1.0.0"
+        },
+        {
+          "id": "pkg:maven/example.invalid.reachbench/jvm-dynamic@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 3,
+            "module_path": "fixtures/jvm/tier2/dependencies/reachbench/dynamic/DynamicDependency.java",
+            "symbol": "reachbench.dynamic.DynamicDependency"
+          },
+          "package_identity": "pkg:maven/example.invalid.reachbench/jvm-dynamic@1.0.0"
+        },
+        {
+          "id": "pkg:maven/example.invalid.reachbench/jvm-unused@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 3,
+            "module_path": "fixtures/jvm/tier2/dependencies/reachbench/unused/UnusedDependency.java",
+            "symbol": "reachbench.unused.UnusedDependency"
+          },
+          "package_identity": "pkg:maven/example.invalid.reachbench/jvm-unused@1.0.0"
+        },
+        {
+          "id": "pkg:maven/example.invalid.reachbench/jvm-unsupported@1.0.0",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 15,
+            "module_path": "fixtures/jvm/tier2/fixture-build.json",
+            "symbol": "example.invalid.reachbench:jvm-unsupported:1.0.0"
+          },
+          "package_identity": "pkg:maven/example.invalid.reachbench/jvm-unsupported@1.0.0"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/php/import/main.php",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/php/import/composer.json",
+          "role": "manifest"
+        },
+        {
+          "path": "fixtures/php/import/composer.lock",
+          "role": "lockfile"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:7f9be1bc56b5f33f276c39116214c38c1adc0c827dee07422c92d7f49e8b1087",
+          "path": "fixtures/php/import/composer.json",
+          "size": 708
+        },
+        {
+          "digest": "sha256:5f4ac384a8009e43ba1a43daf2d1a2d655ee75065473fce14ed17cb3a7e088b8",
+          "path": "fixtures/php/import/composer.lock",
+          "size": 921
+        },
+        {
+          "digest": "sha256:676f695f9c456b4860949a2991e16972a6a65e4f7026693771e407345cc05378",
+          "path": "fixtures/php/import/main.php",
+          "size": 235
+        },
+        {
+          "digest": "sha256:c47bab977ff0ef7a14268808b0bb1d154def7548b56b944fb80b5996b2753776",
+          "path": "fixtures/php/import/packages/reachbench-direct/composer.json",
+          "size": 100
+        },
+        {
+          "digest": "sha256:124c9a2d14baa3cdbaf117706587b1f150b919aea80774256d5e504c3e8318d8",
+          "path": "fixtures/php/import/packages/reachbench-direct/src/Entry.php",
+          "size": 96
+        },
+        {
+          "digest": "sha256:10e7bd00f6c55a4997bf86b6a0b12ab409957f717cbb80732f460382020c4714",
+          "path": "fixtures/php/import/packages/reachbench-dynamic/composer.json",
+          "size": 102
+        },
+        {
+          "digest": "sha256:d0eb5adfde29a0f7eb9d0a049d6982b305b2c202f915c4aa72121311dc238a5a",
+          "path": "fixtures/php/import/packages/reachbench-dynamic/src/Entry.php",
+          "size": 97
+        },
+        {
+          "digest": "sha256:e6c64829657dcab6fb27bd5f69cc23f6ac82cac6c5ed9fdb8b01d5dd2bd67b5f",
+          "path": "fixtures/php/import/packages/reachbench-unsupported/composer.json",
+          "size": 110
+        },
+        {
+          "digest": "sha256:320bd67d63603f6b876f427960a0d77678bf2891ae0a332089486954aed35484",
+          "path": "fixtures/php/import/packages/reachbench-unsupported/src/Entry.php",
+          "size": 101
+        },
+        {
+          "digest": "sha256:c21fa1909a66dcf5ebb030d1abf2b0cec25ff0bad57afa2bcad5b50ff400bd74",
+          "path": "fixtures/php/import/packages/reachbench-unused/composer.json",
+          "size": 100
+        },
+        {
+          "digest": "sha256:91d8a54d873feb723fd1e8036fed6951399f919c307219a60b736f5e211441b1",
+          "path": "fixtures/php/import/packages/reachbench-unused/src/Entry.php",
+          "size": 96
+        }
+      ],
+      "id": "php-import-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:composer/reachbench/direct@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 4,
+            "module_path": "fixtures/php/import/packages/reachbench-direct/src/Entry.php",
+            "symbol": "Reachbench.Direct.Entry"
+          },
+          "package_identity": "pkg:composer/reachbench/direct@1.0.0"
+        },
+        {
+          "id": "pkg:composer/reachbench/dynamic@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 4,
+            "module_path": "fixtures/php/import/packages/reachbench-dynamic/src/Entry.php",
+            "symbol": "Reachbench.Dynamic.Entry"
+          },
+          "package_identity": "pkg:composer/reachbench/dynamic@1.0.0"
+        },
+        {
+          "id": "pkg:composer/reachbench/unused@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 4,
+            "module_path": "fixtures/php/import/packages/reachbench-unused/src/Entry.php",
+            "symbol": "Reachbench.Unused.Entry"
+          },
+          "package_identity": "pkg:composer/reachbench/unused@1.0.0"
+        },
+        {
+          "id": "pkg:composer/reachbench/unsupported@1.0.0",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 6,
+            "module_path": "fixtures/php/import/composer.json",
+            "symbol": "reachbench/unsupported"
+          },
+          "package_identity": "pkg:composer/reachbench/unsupported@1.0.0"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/php/symbols_tier2/main.php",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/php/symbols_tier2/composer.json",
+          "role": "manifest"
+        },
+        {
+          "path": "fixtures/php/symbols_tier2/composer.lock",
+          "role": "lockfile"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:8792afdc3793e8b699bd919e9d99bb0f24a8c31117153f942167be7ea092a1a4",
+          "path": "fixtures/php/symbols_tier2/composer.json",
+          "size": 192
+        },
+        {
+          "digest": "sha256:0d6f5327bf51db14bc4ad73b9f86be8cfe8fa74841d925a60f34db3a974b5fcf",
+          "path": "fixtures/php/symbols_tier2/composer.lock",
+          "size": 198
+        },
+        {
+          "digest": "sha256:36d912c823f7dd9e9d570002c4b9fac5cfc3a434295cd37d2932de34f5a72c69",
+          "path": "fixtures/php/symbols_tier2/main.php",
+          "size": 523
+        }
+      ],
+      "id": "php-symbols-tier2-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:reachbench/php/symbols_tier2#symbolPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 25,
+            "module_path": "fixtures/php/symbols_tier2/main.php",
+            "symbol": "symbolPositive"
+          },
+          "package_identity": "composer:reachbench/php-symbols"
+        },
+        {
+          "id": "pkg:reachbench/php/symbols_tier2#controlNoCoverage",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 6,
+            "module_path": "fixtures/php/symbols_tier2/composer.json",
+            "symbol": "unsupported-tier"
+          },
+          "package_identity": "composer:reachbench/php-symbols"
+        },
+        {
+          "id": "pkg:reachbench/php/symbols_tier2#controlOpaque",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 22,
+            "module_path": "fixtures/php/symbols_tier2/main.php",
+            "symbol": "controlOpaque"
+          },
+          "package_identity": "composer:reachbench/php-symbols"
+        },
+        {
+          "id": "pkg:reachbench/php/symbols_tier2#controlPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 11,
+            "module_path": "fixtures/php/symbols_tier2/main.php",
+            "symbol": "controlPositive"
+          },
+          "package_identity": "composer:reachbench/php-symbols"
+        },
+        {
+          "id": "pkg:reachbench/php/symbols_tier2#controlUnreachable",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 12,
+            "module_path": "fixtures/php/symbols_tier2/main.php",
+            "symbol": "controlUnreachable"
+          },
+          "package_identity": "composer:reachbench/php-symbols"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/python/import/main.py",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/python/import/pyproject.toml",
+          "role": "manifest"
+        },
+        {
+          "path": "fixtures/python/import/requirements.lock",
+          "role": "lockfile"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:691739169bcc30fb43539fa81592303465f52e3cb127d0189f39456475b6b2e2",
+          "path": "fixtures/python/import/local_packages/reachbench_direct/__init__.py",
+          "size": 28
+        },
+        {
+          "digest": "sha256:5e504c8500f2c195f4e7ce40dfb79edc6d2f4e37bb6aba58af987cf2ca8fe1fa",
+          "path": "fixtures/python/import/local_packages/reachbench_direct/pyproject.toml",
+          "size": 125
+        },
+        {
+          "digest": "sha256:691739169bcc30fb43539fa81592303465f52e3cb127d0189f39456475b6b2e2",
+          "path": "fixtures/python/import/local_packages/reachbench_dynamic/__init__.py",
+          "size": 28
+        },
+        {
+          "digest": "sha256:b7f3c5376c9b79a808b7637dc7b88553aa3abae51f87bd0c34e6bf33a3054440",
+          "path": "fixtures/python/import/local_packages/reachbench_dynamic/pyproject.toml",
+          "size": 126
+        },
+        {
+          "digest": "sha256:691739169bcc30fb43539fa81592303465f52e3cb127d0189f39456475b6b2e2",
+          "path": "fixtures/python/import/local_packages/reachbench_unsupported/__init__.py",
+          "size": 28
+        },
+        {
+          "digest": "sha256:dc7b1f61ddf3506caf70a29dcb6d74f716c472f78ea6cc5807408d00073f3c4f",
+          "path": "fixtures/python/import/local_packages/reachbench_unsupported/pyproject.toml",
+          "size": 130
+        },
+        {
+          "digest": "sha256:691739169bcc30fb43539fa81592303465f52e3cb127d0189f39456475b6b2e2",
+          "path": "fixtures/python/import/local_packages/reachbench_unused/__init__.py",
+          "size": 28
+        },
+        {
+          "digest": "sha256:50339f8eb8fec2bd0e607e22a57b4a79dc5ad6cea09e4afd68bd33b0dfa94e4c",
+          "path": "fixtures/python/import/local_packages/reachbench_unused/pyproject.toml",
+          "size": 125
+        },
+        {
+          "digest": "sha256:15df384535e424182dea55918379608f1d09e99fb501a81f6bffd07161ef2ff6",
+          "path": "fixtures/python/import/main.py",
+          "size": 210
+        },
+        {
+          "digest": "sha256:067476a95f01ac68de45a73a30e4e8f0155298bcdc0d8d73ede2948aab59c1a1",
+          "path": "fixtures/python/import/pyproject.toml",
+          "size": 377
+        },
+        {
+          "digest": "sha256:f6337c97a4604007291ac4a94f7e5688dc9e79a93638406bc03ecc7a056494c4",
+          "path": "fixtures/python/import/requirements.lock",
+          "size": 345
+        }
+      ],
+      "id": "python-import-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:pypi/reachbench-direct@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 1,
+            "module_path": "fixtures/python/import/local_packages/reachbench_direct/__init__.py",
+            "symbol": "reachbench_direct"
+          },
+          "package_identity": "pkg:pypi/reachbench-direct@1.0.0"
+        },
+        {
+          "id": "pkg:pypi/reachbench-dynamic@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 1,
+            "module_path": "fixtures/python/import/local_packages/reachbench_dynamic/__init__.py",
+            "symbol": "reachbench_dynamic"
+          },
+          "package_identity": "pkg:pypi/reachbench-dynamic@1.0.0"
+        },
+        {
+          "id": "pkg:pypi/reachbench-unused@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 1,
+            "module_path": "fixtures/python/import/local_packages/reachbench_unused/__init__.py",
+            "symbol": "reachbench_unused"
+          },
+          "package_identity": "pkg:pypi/reachbench-unused@1.0.0"
+        },
+        {
+          "id": "pkg:pypi/reachbench-unsupported@1.0.0",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 17,
+            "module_path": "fixtures/python/import/pyproject.toml",
+            "symbol": "reachbench-unsupported"
+          },
+          "package_identity": "pkg:pypi/reachbench-unsupported@1.0.0"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/python/semantic/main.py",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/python/semantic/pyproject.toml",
+          "role": "manifest"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:5025f601ad0c629239b61a68f4c65e99c1802c352315b5bdc8137e64186145d4",
+          "path": "fixtures/python/semantic/main.py",
+          "size": 574
+        },
+        {
+          "digest": "sha256:c46ea70b9552600aa17f5dbda7db92545305dd3d57447c4294f810c7a152ce35",
+          "path": "fixtures/python/semantic/pyproject.toml",
+          "size": 220
+        }
+      ],
+      "id": "python-semantic-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:reachbench/python/semantic#controlNoCoverage",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 11,
+            "module_path": "fixtures/python/semantic/pyproject.toml",
+            "symbol": "typing-stubs"
+          },
+          "package_identity": "pypi:reachbench-python-semantic@1.0.0"
+        },
+        {
+          "id": "pkg:reachbench/python/semantic#controlOpaque",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 23,
+            "module_path": "fixtures/python/semantic/main.py",
+            "symbol": "control_opaque"
+          },
+          "package_identity": "pypi:reachbench-python-semantic@1.0.0"
+        },
+        {
+          "id": "pkg:reachbench/python/semantic#controlPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 10,
+            "module_path": "fixtures/python/semantic/main.py",
+            "symbol": "control_positive"
+          },
+          "package_identity": "pypi:reachbench-python-semantic@1.0.0"
+        },
+        {
+          "id": "pkg:reachbench/python/semantic#controlUnreachable",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 14,
+            "module_path": "fixtures/python/semantic/main.py",
+            "symbol": "control_unreachable"
+          },
+          "package_identity": "pypi:reachbench-python-semantic@1.0.0"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/ruby/import/main.rb",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/ruby/import/Gemfile",
+          "role": "manifest"
+        },
+        {
+          "path": "fixtures/ruby/import/Gemfile.lock",
+          "role": "lockfile"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:fdd947a38a8eec900c97d1fde2a99f016daf123ce3530211bbc7040c4be496f5",
+          "path": "fixtures/ruby/import/Gemfile",
+          "size": 285
+        },
+        {
+          "digest": "sha256:7337270abba796f9afb9d6b30fac65898e9e74368af1afec1f2541c422c846e6",
+          "path": "fixtures/ruby/import/Gemfile.lock",
+          "size": 744
+        },
+        {
+          "digest": "sha256:f5cf312d2716e5874d32a6d66d17478d764e2bfb0f86bf3bd626055ec6319a74",
+          "path": "fixtures/ruby/import/gems/reachbench-direct/lib/reachbench/direct.rb",
+          "size": 66
+        },
+        {
+          "digest": "sha256:f73a18a27626cd0d814a7a7f4db09e2d66cd12a311d5b848a9283d7cc5cc6013",
+          "path": "fixtures/ruby/import/gems/reachbench-direct/reachbench-direct.gemspec",
+          "size": 222
+        },
+        {
+          "digest": "sha256:6754b50a5c0182c28f518deb046bedc87593071b2bc054ff208d7c15c18fcb12",
+          "path": "fixtures/ruby/import/gems/reachbench-dynamic/lib/reachbench/dynamic.rb",
+          "size": 67
+        },
+        {
+          "digest": "sha256:4f7125e6d3b8545bc114127c6b9ade8a41b57d54623c3d1199c0582b5d76994c",
+          "path": "fixtures/ruby/import/gems/reachbench-dynamic/reachbench-dynamic.gemspec",
+          "size": 225
+        },
+        {
+          "digest": "sha256:4f899ac587b96f9aa1edbb65a4257cbe48aa4faf5ff5b4821108539c8f73afbc",
+          "path": "fixtures/ruby/import/gems/reachbench-unsupported/lib/reachbench/unsupported.rb",
+          "size": 71
+        },
+        {
+          "digest": "sha256:234f5c1c26badd2b3feb98b3622a528d24d0ed758146fd55ea20ad33481e3ef8",
+          "path": "fixtures/ruby/import/gems/reachbench-unsupported/reachbench-unsupported.gemspec",
+          "size": 237
+        },
+        {
+          "digest": "sha256:4af841882680ae73469e16bcbcb433f914e30555f11d9ba7949d0e39b1e984a7",
+          "path": "fixtures/ruby/import/gems/reachbench-unused/lib/reachbench/unused.rb",
+          "size": 66
+        },
+        {
+          "digest": "sha256:f979d508f968aef79c46b5690cb1cc2e1edea08659c23e7a4e3ba0c3654f81b3",
+          "path": "fixtures/ruby/import/gems/reachbench-unused/reachbench-unused.gemspec",
+          "size": 222
+        },
+        {
+          "digest": "sha256:2baca35f86062f9864bf7cc453e41e6225ab2dd520cb506aeb9f5b6bf0d4c54b",
+          "path": "fixtures/ruby/import/main.rb",
+          "size": 174
+        },
+        {
+          "digest": "sha256:697e7644a144fad9c96c320a41a90c49707fe3cbd1f2ea4c50febbb8bd21203f",
+          "path": "fixtures/ruby/import/reachbench-ruby-import.gemspec",
+          "size": 507
+        }
+      ],
+      "id": "ruby-import-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:gem/reachbench-direct@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 2,
+            "module_path": "fixtures/ruby/import/gems/reachbench-direct/lib/reachbench/direct.rb",
+            "symbol": "Reachbench::Direct"
+          },
+          "package_identity": "pkg:gem/reachbench-direct@1.0.0"
+        },
+        {
+          "id": "pkg:gem/reachbench-dynamic@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 2,
+            "module_path": "fixtures/ruby/import/gems/reachbench-dynamic/lib/reachbench/dynamic.rb",
+            "symbol": "Reachbench::Dynamic"
+          },
+          "package_identity": "pkg:gem/reachbench-dynamic@1.0.0"
+        },
+        {
+          "id": "pkg:gem/reachbench-unused@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 2,
+            "module_path": "fixtures/ruby/import/gems/reachbench-unused/lib/reachbench/unused.rb",
+            "symbol": "Reachbench::Unused"
+          },
+          "package_identity": "pkg:gem/reachbench-unused@1.0.0"
+        },
+        {
+          "id": "pkg:gem/reachbench-unsupported@1.0.0",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 9,
+            "module_path": "fixtures/ruby/import/reachbench-ruby-import.gemspec",
+            "symbol": "reachbench-unsupported"
+          },
+          "package_identity": "pkg:gem/reachbench-unsupported@1.0.0"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/ruby/symbols_tier2/main.rb",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/ruby/symbols_tier2/Gemfile",
+          "role": "manifest"
+        },
+        {
+          "path": "fixtures/ruby/symbols_tier2/Gemfile.lock",
+          "role": "lockfile"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:438000041f52b3e8a73bd3b032688c4cdedb566293e7128495e872cda9ba085c",
+          "path": "fixtures/ruby/symbols_tier2/Gemfile",
+          "size": 38
+        },
+        {
+          "digest": "sha256:0b1927b9ce90b8ecb1798b44da605b97b5e9854ccb3f41a4afea00b925678011",
+          "path": "fixtures/ruby/symbols_tier2/Gemfile.lock",
+          "size": 190
+        },
+        {
+          "digest": "sha256:6c66f324f5a3245e3fd3c27830e6fcf099bb2c7e081ee8ac7642a8d51c9cab59",
+          "path": "fixtures/ruby/symbols_tier2/main.rb",
+          "size": 364
+        },
+        {
+          "digest": "sha256:49bd0731868a9510e7638e7b89865ae6a53158ffe5312c3878bfb1db72bfed6c",
+          "path": "fixtures/ruby/symbols_tier2/reachbench-ruby-symbols.gemspec",
+          "size": 203
+        }
+      ],
+      "id": "ruby-symbols-tier2-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:reachbench/ruby/symbols_tier2#symbolPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 18,
+            "module_path": "fixtures/ruby/symbols_tier2/main.rb",
+            "symbol": "symbol_positive"
+          },
+          "package_identity": "rubygems:reachbench-ruby-symbols@1.0.0"
+        },
+        {
+          "id": "pkg:reachbench/ruby/symbols_tier2#controlNoCoverage",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 5,
+            "module_path": "fixtures/ruby/symbols_tier2/reachbench-ruby-symbols.gemspec",
+            "symbol": "unsupported-tier"
+          },
+          "package_identity": "rubygems:reachbench-ruby-symbols@1.0.0"
+        },
+        {
+          "id": "pkg:reachbench/ruby/symbols_tier2#controlOpaque",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 15,
+            "module_path": "fixtures/ruby/symbols_tier2/main.rb",
+            "symbol": "control_opaque"
+          },
+          "package_identity": "rubygems:reachbench-ruby-symbols@1.0.0"
+        },
+        {
+          "id": "pkg:reachbench/ruby/symbols_tier2#controlPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 7,
+            "module_path": "fixtures/ruby/symbols_tier2/main.rb",
+            "symbol": "control_positive"
+          },
+          "package_identity": "rubygems:reachbench-ruby-symbols@1.0.0"
+        },
+        {
+          "id": "pkg:reachbench/ruby/symbols_tier2#controlUnreachable",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 8,
+            "module_path": "fixtures/ruby/symbols_tier2/main.rb",
+            "symbol": "control_unreachable"
+          },
+          "package_identity": "rubygems:reachbench-ruby-symbols@1.0.0"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/runtime/library_loads/replay.json",
+          "role": "replay"
+        },
+        {
+          "path": "fixtures/runtime/library_loads/ownership.json",
+          "role": "ownership"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:db679e4c8b6936555c21cb040fde2134f5281ca6a5a89283620f61fbe6b28030",
+          "path": "fixtures/runtime/library_loads/ownership.json",
+          "size": 349
+        },
+        {
+          "digest": "sha256:92dee910c6c667377e39ab6a700e5256e1dc8a12b8abc6acc125ab84c8946d2b",
+          "path": "fixtures/runtime/library_loads/replay.json",
+          "size": 550
+        }
+      ],
+      "id": "runtime-library-loads-input",
+      "provenance": {
+        "kind": "deterministic_replay"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:reachbench/runtime/library_loads#controlNoCoverage",
+          "locator": {
+            "kind": "runtime_observation",
+            "line": 8,
+            "module_path": "fixtures/runtime/library_loads/replay.json",
+            "symbol": "libreachbench_unsupported.so"
+          },
+          "package_identity": "pkg:runtime/reachbench-unsupported"
+        },
+        {
+          "id": "pkg:reachbench/runtime/library_loads#controlOpaque",
+          "locator": {
+            "kind": "runtime_observation",
+            "line": 7,
+            "module_path": "fixtures/runtime/library_loads/replay.json",
+            "symbol": "libreachbench_dynamic.so"
+          },
+          "package_identity": "pkg:runtime/reachbench-dynamic"
+        },
+        {
+          "id": "pkg:reachbench/runtime/library_loads#controlPositive",
+          "locator": {
+            "kind": "runtime_observation",
+            "line": 6,
+            "module_path": "fixtures/runtime/library_loads/replay.json",
+            "symbol": "libreachbench_direct.so"
+          },
+          "package_identity": "pkg:runtime/reachbench-direct"
+        },
+        {
+          "id": "pkg:reachbench/runtime/library_loads#controlUnreachable",
+          "locator": {
+            "kind": "runtime_observation",
+            "line": 6,
+            "module_path": "fixtures/runtime/library_loads/ownership.json",
+            "symbol": "libreachbench_unused.so"
+          },
+          "package_identity": "pkg:runtime/reachbench-unused"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/rust/import/src/main.rs",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/rust/import/Cargo.toml",
+          "role": "manifest"
+        },
+        {
+          "path": "fixtures/rust/import/Cargo.lock",
+          "role": "lockfile"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:08d9131b6b5b6f7627a582af44bbee20a96833c15f9c1adafc93300071391fe4",
+          "path": "fixtures/rust/import/Cargo.lock",
+          "size": 419
+        },
+        {
+          "digest": "sha256:8c06eaef06f0f716904c9c0d13a86624aec69af4c4f2d75d60494c5aaa5595fa",
+          "path": "fixtures/rust/import/Cargo.toml",
+          "size": 422
+        },
+        {
+          "digest": "sha256:7bc7bcc2527452b522b82e831635abfdec20fabe775e0dd29dd9850baff9805a",
+          "path": "fixtures/rust/import/crates/reachbench-direct/Cargo.toml",
+          "size": 72
+        },
+        {
+          "digest": "sha256:e768a5a9fc60f28420c16e273f146bab45c8dbd1abe6523b878250e20e71e5fc",
+          "path": "fixtures/rust/import/crates/reachbench-direct/lib.rs",
+          "size": 16
+        },
+        {
+          "digest": "sha256:82c13d899c456b914d6a9f11e46cfefb25714d3fd0de410723d7fa17b2049e26",
+          "path": "fixtures/rust/import/crates/reachbench-dynamic/Cargo.toml",
+          "size": 73
+        },
+        {
+          "digest": "sha256:e768a5a9fc60f28420c16e273f146bab45c8dbd1abe6523b878250e20e71e5fc",
+          "path": "fixtures/rust/import/crates/reachbench-dynamic/lib.rs",
+          "size": 16
+        },
+        {
+          "digest": "sha256:d652047c71e06a17fdac71368106f14b747babed41ffc2c39560fcd6a24f5f18",
+          "path": "fixtures/rust/import/crates/reachbench-unsupported/Cargo.toml",
+          "size": 77
+        },
+        {
+          "digest": "sha256:e768a5a9fc60f28420c16e273f146bab45c8dbd1abe6523b878250e20e71e5fc",
+          "path": "fixtures/rust/import/crates/reachbench-unsupported/lib.rs",
+          "size": 16
+        },
+        {
+          "digest": "sha256:c562c88b4d1808080055ad72de0b0c0638fe7add4ace0929f6c822a4557b3904",
+          "path": "fixtures/rust/import/crates/reachbench-unused/Cargo.toml",
+          "size": 72
+        },
+        {
+          "digest": "sha256:e768a5a9fc60f28420c16e273f146bab45c8dbd1abe6523b878250e20e71e5fc",
+          "path": "fixtures/rust/import/crates/reachbench-unused/lib.rs",
+          "size": 16
+        },
+        {
+          "digest": "sha256:5df3bd4ae37eb52a4b64520f894813d8787c5d3fa0ba69d9026bdb6733a1b843",
+          "path": "fixtures/rust/import/src/main.rs",
+          "size": 187
+        }
+      ],
+      "id": "rust-import-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:cargo/reachbench-direct@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 1,
+            "module_path": "fixtures/rust/import/crates/reachbench-direct/lib.rs",
+            "symbol": "reachbench_direct"
+          },
+          "package_identity": "pkg:cargo/reachbench-direct@1.0.0"
+        },
+        {
+          "id": "pkg:cargo/reachbench-dynamic@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 1,
+            "module_path": "fixtures/rust/import/crates/reachbench-dynamic/lib.rs",
+            "symbol": "reachbench_dynamic"
+          },
+          "package_identity": "pkg:cargo/reachbench-dynamic@1.0.0"
+        },
+        {
+          "id": "pkg:cargo/reachbench-unused@1.0.0",
+          "locator": {
+            "kind": "package_dependency",
+            "line": 1,
+            "module_path": "fixtures/rust/import/crates/reachbench-unused/lib.rs",
+            "symbol": "reachbench_unused"
+          },
+          "package_identity": "pkg:cargo/reachbench-unused@1.0.0"
+        },
+        {
+          "id": "pkg:cargo/reachbench-unsupported@1.0.0",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 12,
+            "module_path": "fixtures/rust/import/Cargo.toml",
+            "symbol": "reachbench-unsupported"
+          },
+          "package_identity": "pkg:cargo/reachbench-unsupported@1.0.0"
+        }
+      ]
+    },
+    {
+      "entries": [
+        {
+          "path": "fixtures/rust/symbols_tier2/main.rs",
+          "role": "source"
+        },
+        {
+          "path": "fixtures/rust/symbols_tier2/Cargo.toml",
+          "role": "manifest"
+        },
+        {
+          "path": "fixtures/rust/symbols_tier2/Cargo.lock",
+          "role": "lockfile"
+        }
+      ],
+      "files": [
+        {
+          "digest": "sha256:18b642b7fead1245354de0cf8419a6842ea9b9b4906de7508d5f3c2d66f7bbf1",
+          "path": "fixtures/rust/symbols_tier2/Cargo.lock",
+          "size": 76
+        },
+        {
+          "digest": "sha256:c4ee716c7a7b57989b36f5393c03cdff139d151b72ec101a0d1c11b22329dff5",
+          "path": "fixtures/rust/symbols_tier2/Cargo.toml",
+          "size": 152
+        },
+        {
+          "digest": "sha256:0b3fdbb3f303b9244d6fd52d7bde9db089f48ac6e74d4f4955239ba009c2702f",
+          "path": "fixtures/rust/symbols_tier2/main.rs",
+          "size": 381
+        }
+      ],
+      "id": "rust-symbols-tier2-input",
+      "provenance": {
+        "kind": "repository_authored"
+      },
+      "schema_version": "synapse-reachability-fixture-manifest-v2",
+      "subjects": [
+        {
+          "id": "pkg:reachbench/rust/symbols_tier2#controlNoCoverage",
+          "locator": {
+            "kind": "manifest_capability",
+            "line": 7,
+            "module_path": "fixtures/rust/symbols_tier2/Cargo.toml",
+            "symbol": "macro-expansion"
+          },
+          "package_identity": "cargo:reachbench-rust-symbols@1.0.0"
+        },
+        {
+          "id": "pkg:reachbench/rust/symbols_tier2#controlOpaque",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 10,
+            "module_path": "fixtures/rust/symbols_tier2/main.rs",
+            "symbol": "control_opaque"
+          },
+          "package_identity": "cargo:reachbench-rust-symbols@1.0.0"
+        },
+        {
+          "id": "pkg:reachbench/rust/symbols_tier2#controlPositive",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 6,
+            "module_path": "fixtures/rust/symbols_tier2/main.rs",
+            "symbol": "control_positive"
+          },
+          "package_identity": "cargo:reachbench-rust-symbols@1.0.0"
+        },
+        {
+          "id": "pkg:reachbench/rust/symbols_tier2#controlUnreachable",
+          "locator": {
+            "kind": "source_symbol",
+            "line": 7,
+            "module_path": "fixtures/rust/symbols_tier2/main.rs",
+            "symbol": "control_unreachable"
+          },
+          "package_identity": "cargo:reachbench-rust-symbols@1.0.0"
+        }
+      ]
+    }
+  ],
+  "id": "synapse-ce-reachability-fixtures",
+  "schema_version": "synapse-reachability-fixture-manifest-v2"
+}

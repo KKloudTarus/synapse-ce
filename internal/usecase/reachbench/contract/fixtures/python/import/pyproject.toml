@@ -1,0 +1,17 @@
+[build-system]
+requires = []
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reachbench-python-import"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+  "reachbench-direct==1.0.0",
+  "reachbench-dynamic==1.0.0",
+  "reachbench-unused==1.0.0",
+  "reachbench-unsupported==1.0.0",
+]
+
+[tool.reachbench]
+no_coverage_capabilities = ["reachbench-unsupported"]

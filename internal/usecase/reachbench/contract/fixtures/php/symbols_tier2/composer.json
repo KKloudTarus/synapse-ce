@@ -1,0 +1,7 @@
+{
+  "name": "reachbench/php-symbols",
+  "version": "1.0.0",
+  "require": {},
+  "autoload": {"files": ["main.php"]},
+  "extra": {"reachbench": {"no-coverage-capability": "unsupported-tier"}}
+}
