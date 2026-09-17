@@ -38,15 +38,36 @@ const (
 
 var rpmHeaderMagic = [4]byte{0x8e, 0xad, 0xe8, 0x01}
 
-// RPM header tags + value types (the subset needed for identity).
+// RPM header tags + value types (the subset needed for identity and file ownership).
 const (
-	rpmTagName    = 1000
-	rpmTagVersion = 1001
-	rpmTagRelease = 1002
-	rpmTagEpoch   = 1004
-	rpmTagArch    = 1022
-	rpmTypeInt32  = 4
-	rpmTypeString = 6
+	rpmTagName       = 1000
+	rpmTagVersion    = 1001
+	rpmTagRelease    = 1002
+	rpmTagEpoch      = 1004
+	rpmTagArch       = 1022
+	rpmTagDirIndexes = 1116 // int32 array: for file i, the index into DIRNAMES of its directory
+	rpmTagBaseNames  = 1117 // string array: file i's base name
+	rpmTagDirNames   = 1118 // string array: the distinct directory prefixes (with trailing slash)
+	rpmTypeInt32     = 4
+	rpmTypeString    = 6
+	rpmTypeStringArr = 8
+	// maxRPMArrayCount caps BASENAMES/DIRNAMES/DIRINDEXES element counts. A real package owns at most a few
+	// hundred thousand files (texlive, linux-firmware); this bounds a hostile header's array claim.
+	maxRPMArrayCount = 1 << 20
+	// maxRPMPathLen bounds a single reconstructed file path. A real installed path is well under PATH_MAX
+	// (4096); a longer one is a crafted DIRNAMES entry, so the path is skipped BEFORE the concat that would
+	// allocate it, defeating a header that reuses one multi-megabyte directory across up to maxRPMArrayCount
+	// basenames.
+	maxRPMPathLen = 4096
+	// maxRPMFileListBytes bounds the reconstructed path bytes for ONE package header, so a header claiming up
+	// to maxRPMArrayCount files cannot amplify a ~12 MiB input blob into gigabytes of retained strings (an OOM
+	// the recover cannot catch, since it is a runtime throw, not a panic). 32 MiB clears the largest real
+	// package (texlive at ~200k files averages well under this at typical path lengths).
+	maxRPMFileListBytes = 32 << 20
+	// maxRPMOwnershipBytes bounds the reconstructed path bytes summed across ALL packages in one RPMOwnership
+	// walk, so many medium hostile headers cannot sum past it. 64 MiB clears a real fat image's whole file
+	// inventory (hundreds of thousands of files at typical path lengths).
+	maxRPMOwnershipBytes = 64 << 20
 )
 
 // rpmComponents returns one component per installed RPM package, trying each on-disk backend in turn: the
@@ -82,22 +103,52 @@ func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) ([]sbo
 // error is returned ONLY on context cancellation (so the pipeline surfaces a timed-out read as a failure, never
 // a silently-truncated success); a hostile-DB read error or panic degrades to (nil, nil). An absent/non-sqlite
 // DB (a Berkeley-DB/ndb rootfs) → (nil, nil), and rpmComponents then tries the BerkeleyDB backend.
-func rpmSQLiteComponents(ctx context.Context, rootfsDir, namespace, tag string) (out []sbom.Component, err error) {
+func rpmSQLiteComponents(ctx context.Context, rootfsDir, namespace, tag string) ([]sbom.Component, error) {
+	var out []sbom.Component
+	path := filepath.Join(rootfsDir, rpmDBPath)
+	err := rpmSQLiteBlobs(ctx, rootfsDir, func(b []byte) {
+		if name, evr, arch, ok := safeParseRPMHeader(b); ok {
+			if c, compOK := osComponent("rpm", namespace, name, evr, arch, tag, ""); compOK {
+				c.Location = path // the rpm DB's path, so the component attributes to the DB's image layer
+				out = append(out, c)
+			}
+		}
+	})
+	return out, err
+}
+
+// rpmSQLiteBlobs walks the sqlite rpmdb and hands each installed package's raw header blob to visit. It probes
+// the primary /var/lib/rpm/rpmdb.sqlite first, then the relocated /usr/lib/sysimage/rpm location, and reads
+// the FIRST that is a regular file, so an offline rootfs carrying only the relocated DB is still read while a
+// live host (where /var/lib/rpm symlinks to the sysimage dir) reads it once through the primary path and is
+// never double-counted. It carries the full untrusted-DB hardening of the identity path (streamed, per-blob +
+// total-byte + count budgets, ctx-cancellable, recover-wrapped). An absent/non-sqlite DB → (nil), a hostile-DB
+// read → (nil); only a context cancellation surfaces an error.
+func rpmSQLiteBlobs(ctx context.Context, rootfsDir string, visit func([]byte)) error {
+	for _, rel := range []string{rpmDBPath, rpmSqliteSysimagePath} {
+		path := filepath.Join(rootfsDir, rel)
+		fi, statErr := os.Lstat(path) // regular-file guard: never follow a symlinked DB out of the rootfs
+		if statErr != nil || !fi.Mode().IsRegular() {
+			continue
+		}
+		return rpmSQLiteBlobsAt(ctx, path, visit)
+	}
+	return nil
+}
+
+// rpmSQLiteBlobsAt reads one sqlite rpmdb at an absolute path. It holds the untrusted-DB hardening described on
+// rpmSQLiteBlobs; the recover here degrades a driver panic on a malformed file to no components.
+func rpmSQLiteBlobsAt(ctx context.Context, path string, visit func([]byte)) (err error) {
 	defer func() {
 		if recover() != nil { // the sqlite file is untrusted; a driver panic must degrade to no components
-			out, err = nil, nil
+			err = nil
 		}
 	}()
-	path := filepath.Join(rootfsDir, rpmDBPath)
-	fi, statErr := os.Lstat(path) // regular-file guard: never follow a symlinked DB out of the rootfs
-	if statErr != nil || !fi.Mode().IsRegular() {
-		return nil, nil
-	}
 	// mode=ro + immutable=1: the rootfs is static, never written; the path is a fixed suffix of the workspace
 	// dir (no attacker-controlled '?'), so the DSN query cannot be overridden.
 	db, openErr := sql.Open("sqlite", "file:"+path+"?mode=ro&immutable=1")
 	if openErr != nil {
-		return nil, nil
+		return nil
 	}
 	defer func() { _ = db.Close() }()
 	// Best-effort cancellation backstop. Real cancellation of this read comes from (1) modernc arming a
@@ -124,33 +175,30 @@ func rpmSQLiteComponents(ctx context.Context, rootfsDir, namespace, tag string) 
 	// before Scan allocates it; the read is cancellable via QueryContext + the watchdog above.
 	rows, queryErr := db.QueryContext(ctx, "SELECT blob FROM Packages WHERE LENGTH(blob) > 0 AND LENGTH(blob) <= ?", rpmMaxBlobLen)
 	if queryErr != nil {
-		return nil, ctx.Err() // ctx.Err() is non-nil iff cancelled → surface; else a hostile-DB error → (nil, nil)
+		return ctx.Err() // ctx.Err() is non-nil iff cancelled → surface; else a hostile-DB error → (nil, nil)
 	}
 	defer func() { _ = rows.Close() }()
 	var total int64
+	count := 0
 	for rows.Next() {
-		if len(out) >= maxPackages || total >= maxDBBytes { // row-count + total-byte budgets (bomb guard)
+		if count >= maxPackages || total >= maxDBBytes { // row-count + total-byte budgets (bomb guard)
 			break
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+			return ctxErr
 		}
 		var b []byte
 		if scanErr := rows.Scan(&b); scanErr != nil {
-			return nil, ctx.Err() // watchdog-close (cancelled) → surface; otherwise a hostile-DB error → (nil, nil)
+			return ctx.Err() // watchdog-close (cancelled) → surface; otherwise a hostile-DB error → (nil)
 		}
 		total += int64(len(b))
-		if name, evr, arch, ok := safeParseRPMHeader(b); ok {
-			if c, ok := osComponent("rpm", namespace, name, evr, arch, tag, ""); ok {
-				c.Location = path // the rpm DB's path, so the component attributes to the DB's image layer
-				out = append(out, c)
-			}
-		}
+		count++
+		visit(b)
 	}
 	if rows.Err() != nil {
-		return nil, ctx.Err() // discard partials on a hostile-DB read error (matches parseOSDB); surface a cancel
+		return ctx.Err() // discard partials on a hostile-DB read error (matches parseOSDB); surface a cancel
 	}
-	return out, nil
+	return nil
 }
 
 // safeParseRPMHeader wraps parseRPMHeader in a recover: the bounds checks below should already prevent a
@@ -229,6 +277,168 @@ func parseRPMHeader(blob []byte) (name, evr, arch string, ok bool) {
 		evr = epoch + ":" + evr
 	}
 	return name, evr, arch, true
+}
+
+// safeParseRPMHeaderFiles wraps parseRPMHeaderFiles in a recover, the belt-and-suspenders guard for an
+// attacker-authored header (the bounds checks below should already prevent a panic).
+func safeParseRPMHeaderFiles(blob []byte) (name, evr, arch string, files []string, ok bool) {
+	defer func() {
+		if recover() != nil {
+			name, evr, arch, files, ok = "", "", "", nil, false
+		}
+	}()
+	return parseRPMHeaderFiles(blob)
+}
+
+// parseRPMHeaderFiles extends parseRPMHeader to also reconstruct the absolute file paths the package owns,
+// from BASENAMES (1117), DIRNAMES (1118) and DIRINDEXES (1116): path[i] = DIRNAMES[DIRINDEXES[i]] + BASENAMES[i]
+// (each DIRNAMES entry already carries a trailing slash). A metapackage that owns no files returns ok=true
+// with a nil files slice. Every array read is count-capped and bounds-checked in unsigned space, so a crafted
+// header cannot over-allocate or read out of the data store; a partially-truncated array yields what was read.
+func parseRPMHeaderFiles(blob []byte) (name, evr, arch string, files []string, ok bool) {
+	off := 0
+	if len(blob) >= 4 && [4]byte(blob[:4]) == rpmHeaderMagic {
+		off = 8
+	}
+	if len(blob) < off+8 {
+		return "", "", "", nil, false
+	}
+	nindex := binary.BigEndian.Uint32(blob[off : off+4])
+	hsize := binary.BigEndian.Uint32(blob[off+4 : off+8])
+	if nindex == 0 || nindex > maxRPMIndex || hsize > maxRPMData {
+		return "", "", "", nil, false
+	}
+	idxStart := off + 8
+	dataStart := idxStart + int(nindex)*16
+	if dataStart < idxStart || dataStart+int(hsize) > len(blob) {
+		return "", "", "", nil, false
+	}
+	data := blob[dataStart : dataStart+int(hsize)]
+	var version, release, epoch string
+	var baseNames, dirNames []string
+	var dirIndexes []uint32
+	for i := 0; i < int(nindex); i++ {
+		e := idxStart + i*16
+		tag := binary.BigEndian.Uint32(blob[e : e+4])
+		typ := binary.BigEndian.Uint32(blob[e+4 : e+8])
+		offset := binary.BigEndian.Uint32(blob[e+8 : e+12])
+		count := binary.BigEndian.Uint32(blob[e+12 : e+16])
+		switch tag {
+		case rpmTagName:
+			if typ == rpmTypeString && name == "" {
+				name = rpmCStr(data, offset)
+			}
+		case rpmTagVersion:
+			if typ == rpmTypeString && version == "" {
+				version = rpmCStr(data, offset)
+			}
+		case rpmTagRelease:
+			if typ == rpmTypeString && release == "" {
+				release = rpmCStr(data, offset)
+			}
+		case rpmTagArch:
+			if typ == rpmTypeString && arch == "" {
+				arch = rpmCStr(data, offset)
+			}
+		case rpmTagEpoch:
+			if typ == rpmTypeInt32 && epoch == "" && uint64(offset)+4 <= uint64(len(data)) {
+				epoch = strconv.FormatUint(uint64(binary.BigEndian.Uint32(data[offset:offset+4])), 10)
+			}
+		case rpmTagBaseNames:
+			if typ == rpmTypeStringArr && baseNames == nil {
+				baseNames = rpmStringArray(data, offset, count)
+			}
+		case rpmTagDirNames:
+			if typ == rpmTypeStringArr && dirNames == nil {
+				dirNames = rpmStringArray(data, offset, count)
+			}
+		case rpmTagDirIndexes:
+			if typ == rpmTypeInt32 && dirIndexes == nil {
+				dirIndexes = rpmInt32Array(data, offset, count)
+			}
+		}
+	}
+	if name == "" || version == "" {
+		return "", "", "", nil, false
+	}
+	evr = version
+	if release != "" {
+		evr = version + "-" + release
+	}
+	if epoch != "" && epoch != "0" {
+		evr = epoch + ":" + evr
+	}
+	// Reconstruct paths only when the three arrays are internally consistent (one dir index per base name);
+	// an inconsistent header yields identity with no files rather than fabricated paths.
+	if n := len(baseNames); n > 0 && n == len(dirIndexes) {
+		files = make([]string, 0, minU32(uint32(n), 4096))
+		pathBytes := 0
+		for i, base := range baseNames {
+			di := dirIndexes[i]
+			if uint64(di) >= uint64(len(dirNames)) {
+				continue
+			}
+			dir := dirNames[di]
+			plen := len(dir) + len(base)
+			if plen > maxRPMPathLen {
+				continue // longer than PATH_MAX: a crafted entry, skipped before the concat that would allocate it
+			}
+			if pathBytes+plen > maxRPMFileListBytes {
+				break // bound reconstructed output so a hostile header cannot amplify a ~12 MiB blob to an OOM
+			}
+			pathBytes += plen
+			files = append(files, dir+base)
+		}
+	}
+	return name, evr, arch, files, true
+}
+
+// rpmStringArray reads count NUL-terminated strings from data[off:], bounds- and count-capped. A truncated
+// array (offset past the store, or a missing terminator) returns the entries read so far.
+func rpmStringArray(data []byte, off, count uint32) []string {
+	if count == 0 || count > maxRPMArrayCount {
+		return nil
+	}
+	out := make([]string, 0, minU32(count, 4096))
+	pos := uint64(off)
+	for i := uint32(0); i < count; i++ {
+		if pos >= uint64(len(data)) {
+			return out
+		}
+		s := data[pos:]
+		if idx := bytes.IndexByte(s, 0); idx >= 0 {
+			out = append(out, string(s[:idx]))
+			pos += uint64(idx) + 1
+			continue
+		}
+		out = append(out, string(s)) // no terminator: bounded by the data store length
+		return out
+	}
+	return out
+}
+
+// rpmInt32Array reads count big-endian uint32s from data[off:], bounds- and count-capped.
+func rpmInt32Array(data []byte, off, count uint32) []uint32 {
+	if count == 0 || count > maxRPMArrayCount {
+		return nil
+	}
+	out := make([]uint32, 0, minU32(count, 4096))
+	pos := uint64(off)
+	for i := uint32(0); i < count; i++ {
+		if pos+4 > uint64(len(data)) {
+			return out
+		}
+		out = append(out, binary.BigEndian.Uint32(data[pos:pos+4]))
+		pos += 4
+	}
+	return out
+}
+
+func minU32(a, b uint32) uint32 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // rpmCStr reads the NUL-terminated string at data[off:], bounds-checked in unsigned space (so a >2^31 offset

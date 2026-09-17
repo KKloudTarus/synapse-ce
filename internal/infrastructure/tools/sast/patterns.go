@@ -74,6 +74,10 @@ var rubyExts = map[string]bool{".rb": true, ".rake": true, ".ru": true, ".gemspe
 var vbExts = map[string]bool{".vb": true}
 var phpExts = map[string]bool{".php": true, ".phtml": true, ".inc": true, ".php5": true, ".module": true, ".phar": true}
 
+// tfExts / dartExts gate the langpack rules for Terraform and Dart.
+var tfExts = map[string]bool{".tf": true, ".tfvars": true}
+var dartExts = map[string]bool{".dart": true}
+
 // jsxExts gate rules that only make sense in JSX/TSX markup. A plain .js file may contain a
 // `class = "..."` assignment that has nothing to do with a React prop.
 var jsxExts = map[string]bool{".jsx": true, ".tsx": true}

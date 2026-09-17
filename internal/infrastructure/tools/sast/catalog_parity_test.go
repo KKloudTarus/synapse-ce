@@ -86,6 +86,10 @@ func TestCatalogParity(t *testing.T) {
 			expectedLang = "VB.NET"
 		case tc.exts != nil && tc.exts[".php"]:
 			expectedLang = "PHP"
+		case tc.exts != nil && tc.exts[".tf"]:
+			expectedLang = "Terraform"
+		case tc.exts != nil && tc.exts[".dart"]:
+			expectedLang = "Dart"
 		case explicitSASTLanguages[tc.id] != "":
 			expectedLang = explicitSASTLanguages[tc.id]
 		default:

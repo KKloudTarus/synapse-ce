@@ -196,6 +196,34 @@ func (r *ProjectAnalysisStore) List(ctx context.Context, tenantID, projectID sha
 }
 
 // Branches returns the distinct branch values recorded for the project, sorted.
+// PruneBranchAnalyses deletes all but the newest keep analyses on one branch, tenant-scoped. It uses the
+// (tenant_id, project_id, branch, created_at DESC, id DESC) index from migration 0136, and orders id with
+// COLLATE "C" to match that index and List's tie-break so exactly the newest keep rows survive.
+func (r *ProjectAnalysisStore) PruneBranchAnalyses(ctx context.Context, tenantID, projectID shared.ID, branch string, keep int) (int, error) {
+	if keep < 1 {
+		return 0, nil
+	}
+	deleted := 0
+	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		ct, err := tx.Exec(ctx, `DELETE FROM project_analyses
+			WHERE tenant_id=$1 AND project_id=$2 AND branch=$3
+			  AND id NOT IN (
+				SELECT id FROM project_analyses
+				WHERE tenant_id=$1 AND project_id=$2 AND branch=$3
+				ORDER BY created_at DESC, id COLLATE "C" DESC
+				LIMIT $4
+			  )`, tenantID.String(), projectID.String(), branch, keep)
+		if err != nil {
+			return fmt.Errorf("prune project analysis branch: %w", err)
+		}
+		deleted = int(ct.RowsAffected())
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
 func (r *ProjectAnalysisStore) Branches(ctx context.Context, tenantID, projectID shared.ID) ([]string, error) {
 	out := make([]string, 0)
 	if err := requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {

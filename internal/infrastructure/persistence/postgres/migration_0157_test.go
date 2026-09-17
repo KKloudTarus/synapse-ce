@@ -19,7 +19,10 @@ import (
 func TestMigration0157VisibleProjectBoundaryAndRollbackGuard(t *testing.T) {
 	ctx := context.Background()
 	db, dsn := newAssessmentMigrationDB(t)
-	if err := goose.UpTo(db, ".", 157); err != nil {
+	// Migrate to the latest schema: this test drives the production repositories, which target the
+	// current columns. The migration-157 down-guard it asserts is still exercised by the DownTo below,
+	// which steps back through 157.
+	if err := goose.Up(db, "."); err != nil {
 		t.Fatal(err)
 	}
 	pool, err := Connect(ctx, dsn)

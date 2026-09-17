@@ -32,6 +32,9 @@ func (t PRDecorationTarget) Complete() bool {
 // never turn absence into a misleading zero. FileChanges carries the persisted diff hunks needed by
 // providers that can anchor annotations only to lines present in the pull-request diff.
 type PRDecoration struct {
+	// Provider is the forge/CI provider claim (for example "github-actions", "gitlab-ci"). A concrete
+	// single-provider decorator ignores it; a provider-multiplexing decorator dispatches on it.
+	Provider          string
 	Target            PRDecorationTarget
 	Gate              qualitygate.Result
 	Summary           string

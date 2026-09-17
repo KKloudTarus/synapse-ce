@@ -257,3 +257,49 @@ func TestProjectHandlers(t *testing.T) {
 		t.Fatalf("cross-tenant: got %d, want 404", rec.Code)
 	}
 }
+
+type branchesStub struct {
+	projectService
+	branches []projectanalysis.BranchInfo
+}
+
+func (s branchesStub) Branches(context.Context, shared.ID, string) ([]projectanalysis.BranchInfo, error) {
+	return s.branches, nil
+}
+
+func TestListProjectBranchesReturnsNameAndKind(t *testing.T) {
+	rt := &Router{log: discardLog(), projects: branchesStub{branches: []projectanalysis.BranchInfo{
+		{Name: "feature/x", Kind: projectanalysis.BranchShortLived},
+		{Name: "main", Kind: projectanalysis.BranchLongLived},
+	}}}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/app/branches", nil)
+	req.SetPathValue("key", "app")
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", TenantID: "tenant"}))
+	rec := httptest.NewRecorder()
+
+	rt.listProjectBranches(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var got projectBranchesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Branches) != 2 || got.Branches[0].Name != "feature/x" || got.Branches[0].Kind != projectanalysis.BranchShortLived ||
+		got.Branches[1].Name != "main" || got.Branches[1].Kind != projectanalysis.BranchLongLived {
+		t.Fatalf("branches = %+v", got.Branches)
+	}
+}
+
+func TestListProjectBranchesEmptyRendersEmptyArray(t *testing.T) {
+	rt := &Router{log: discardLog(), projects: branchesStub{branches: nil}}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/app/branches", nil)
+	req.SetPathValue("key", "app")
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", TenantID: "tenant"}))
+	rec := httptest.NewRecorder()
+
+	rt.listProjectBranches(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"branches":[]}`+"\n" {
+		t.Fatalf("code=%d body=%q", rec.Code, rec.Body.String())
+	}
+}

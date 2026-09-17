@@ -40,13 +40,20 @@ type Profile struct {
 
 var keyPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
-// LanguageSlug lowercases a language into a key-safe slug (e.g. "JavaScript/TypeScript" → "javascripttypescript").
+// LanguageSlug lowercases a language into a key-safe slug (e.g. "JavaScript/TypeScript" →
+// "javascripttypescript"). The `#` and `+` disambiguators are preserved as letters so the slug is
+// injective over the C family, which would otherwise all collapse to "c": "C" → "c", "C#" → "csharp",
+// "C++" → "cpp", "F#" → "fsharp". A collision would make two languages share one built-in profile key.
 func LanguageSlug(language string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(strings.TrimSpace(language)) {
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
 			b.WriteRune(r)
+		case r == '#':
+			b.WriteString("sharp")
+		case r == '+':
+			b.WriteString("p")
 		}
 	}
 	return b.String()

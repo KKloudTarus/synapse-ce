@@ -64,12 +64,10 @@ func (s *Service) builtIns(ctx context.Context) ([]qualityprofile.Profile, map[s
 	out := make([]qualityprofile.Profile, 0, len(byLang))
 	byKey := map[string]qualityprofile.Profile{}
 	for lang, rs := range byLang {
-		p, ok := qualityprofile.BuiltIn(lang, rs)
-		if !ok {
-			continue
+		for _, p := range qualityprofile.Presets(lang, rs) {
+			out = append(out, p)
+			byKey[p.Key] = p
 		}
-		out = append(out, p)
-		byKey[p.Key] = p
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, byKey, nil

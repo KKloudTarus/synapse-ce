@@ -151,15 +151,18 @@ func TestCollectApkOwningRecordWithoutVersionIsHonestGap(t *testing.T) {
 	}
 }
 
-func TestCollectRpmIsHonestGap(t *testing.T) {
+// TestCollectRpmCorruptDBIsHonestGap: an rpm DB file that is present but unreadable (here a non-sqlite
+// blob) yields no packages, so the collector declares an honest coverage gap rather than passing the host
+// off as "no vulnerable library loaded". The readable path is covered in collect_rpm_test.go.
+func TestCollectRpmCorruptDBIsHonestGap(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "/var/lib/rpm/rpmdb.sqlite", "binary")
 	rep := NewCollector(root).Collect([]string{"/usr/lib64/libssl.so.3"})
 	if len(rep.PackageFiles) != 0 {
-		t.Fatalf("rpm ownership is not collected; expected no packages, got %+v", rep.PackageFiles)
+		t.Fatalf("a corrupt rpm DB must yield no packages, got %+v", rep.PackageFiles)
 	}
 	if len(rep.Coverage) != 1 || rep.Coverage[0] != runtimereach.CoverageUnreadablePackageDB {
-		t.Fatalf("rpm host must declare a coverage gap, got %v", rep.Coverage)
+		t.Fatalf("rpm host with an unreadable DB must declare a coverage gap, got %v", rep.Coverage)
 	}
 }
 

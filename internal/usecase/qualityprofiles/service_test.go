@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/qualityprofile"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
@@ -53,12 +54,31 @@ func TestServiceListBuiltInsPerLanguage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 2 { // one built-in per language (Go, Python)
-		t.Fatalf("want 2 built-ins, got %d: %+v", len(all), all)
+	if len(all) != 6 { // three presets (Synapse way, Recommended, Strict) per language (Go, Python)
+		t.Fatalf("want 6 built-ins, got %d: %+v", len(all), all)
 	}
 	goOnly, err := svc.List(ctx, tenant, "Go")
-	if err != nil || len(goOnly) != 1 || goOnly[0].Key != "synapse-way-go" || !goOnly[0].BuiltIn {
-		t.Fatalf("Go filter = %+v err=%v", goOnly, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goKeys := map[string]qualityprofile.Profile{}
+	for _, p := range goOnly {
+		if !p.BuiltIn || p.Language != "Go" {
+			t.Fatalf("Go filter returned a non-Go or non-built-in profile: %+v", p)
+		}
+		goKeys[p.Key] = p
+	}
+	if len(goKeys) != 3 || goKeys["synapse-way-go"].Key == "" || goKeys["recommended-go"].Key == "" || goKeys["strict-go"].Key == "" {
+		t.Fatalf("Go presets = %+v, want synapse-way-go, recommended-go, strict-go", goOnly)
+	}
+	// Strict escalates severities one level: go-a (high) -> critical, go-b (medium) -> high.
+	strict := goKeys["strict-go"]
+	if strict.ActivatedRules["go-a"].Severity != shared.SeverityCritical || strict.ActivatedRules["go-b"].Severity != shared.SeverityHigh {
+		t.Fatalf("strict-go severities = %+v, want go-a critical, go-b high", strict.ActivatedRules)
+	}
+	// The default (Synapse way) keeps default severities (no override).
+	if sw := goKeys["synapse-way-go"]; sw.ActivatedRules["go-a"].Severity != "" {
+		t.Fatalf("synapse-way-go must keep default severities, got %+v", sw.ActivatedRules)
 	}
 }
 
@@ -155,5 +175,89 @@ func TestServiceAssignAndOverlay(t *testing.T) {
 	saved, _ = projects.GetByKey(ctx, tenant, "proj")
 	if _, ok := saved.DefaultProfileByLang["Go"]; ok {
 		t.Errorf("cleared assignment must be gone: %+v", saved.DefaultProfileByLang)
+	}
+}
+
+func TestAssignStrictPresetAppliesEscalatedOverlay(t *testing.T) {
+	svc, projects, tenant := newTestService(t)
+	ctx := context.Background()
+	p, err := project.New("p1", tenant, "Proj", "proj", project.SourceBinding{Kind: project.SourceGit, Value: "https://example.com/r.git"}, nil, "", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := projects.Create(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	// A user selects the built-in Strict preset for the Go language.
+	if err := svc.Assign(ctx, "alice", tenant, "proj", "Go", "strict-go"); err != nil {
+		t.Fatalf("assign strict preset: %v", err)
+	}
+	saved, _ := projects.GetByKey(ctx, tenant, "proj")
+	if saved.DefaultProfileByLang["Go"] != "strict-go" {
+		t.Fatalf("preset assignment not persisted: %+v", saved.DefaultProfileByLang)
+	}
+	overlay, err := svc.OverlayForProject(ctx, tenant, saved.DefaultProfileByLang)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Strict escalates: go-a high -> critical, go-b medium -> high; both stay enabled.
+	if overlay.Rules["go-a"].Severity != string(shared.SeverityCritical) || overlay.Rules["go-b"].Severity != string(shared.SeverityHigh) {
+		t.Fatalf("strict overlay = %+v, want go-a critical, go-b high", overlay.Rules)
+	}
+	if overlay.Rules["go-a"].Enabled != nil || overlay.Rules["go-b"].Enabled != nil {
+		t.Fatalf("strict keeps every rule enabled, got %+v", overlay.Rules)
+	}
+}
+
+func TestPresetKeysDistinctAcrossCFamily(t *testing.T) {
+	cat := fakeCatalog{rules: []rule.Rule{
+		{Key: "c-a", Language: "C", DefaultSeverity: shared.SeverityHigh},
+		{Key: "cs-a", Language: "C#", DefaultSeverity: shared.SeverityHigh},
+		{Key: "cpp-a", Language: "C++", DefaultSeverity: shared.SeverityHigh},
+	}}
+	projects := memory.NewProjectRepository()
+	svc := NewService(memory.NewQualityProfileStore(), cat, projects, nopAudit{}, nopClock{})
+	ctx := context.Background()
+	tenant := shared.ID("tenant")
+
+	all, err := svc.List(ctx, tenant, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 9 { // three presets each for C, C#, C++
+		t.Fatalf("want 9 presets, got %d", len(all))
+	}
+	keys := map[string]bool{}
+	for _, p := range all {
+		if keys[p.Key] {
+			t.Fatalf("duplicate preset key %q (C-family slug collision)", p.Key)
+		}
+		keys[p.Key] = true
+	}
+	// The C# strict preset resolves to C# specifically, not whichever C-family language won a map race.
+	csStrict, err := svc.Get(ctx, tenant, "strict-csharp")
+	if err != nil || csStrict.Language != "C#" {
+		t.Fatalf("strict-csharp = %+v err=%v, want language C#", csStrict, err)
+	}
+	// Assigning it to the C# language succeeds (no language-mismatch rejection from a collision).
+	p, err := project.New("p1", tenant, "Proj", "proj", project.SourceBinding{Kind: project.SourceGit, Value: "https://example.com/r.git"}, nil, "", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := projects.Create(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Assign(ctx, "alice", tenant, "proj", "C#", "strict-csharp"); err != nil {
+		t.Fatalf("assign strict-csharp to C# must succeed, got %v", err)
+	}
+}
+
+func TestPresetKeysAreReserved(t *testing.T) {
+	svc, _, tenant := newTestService(t)
+	ctx := context.Background()
+	for _, key := range []string{"recommended-go", "strict-go"} {
+		if _, err := svc.Copy(ctx, "alice", tenant, "synapse-way-go", key, "x"); !errors.Is(err, shared.ErrValidation) {
+			t.Errorf("preset key %q must be reserved against a custom copy, got %v", key, err)
+		}
 	}
 }

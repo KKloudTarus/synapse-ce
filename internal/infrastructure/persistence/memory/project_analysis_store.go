@@ -234,6 +234,59 @@ func (s *ProjectAnalysisStore) Branches(_ context.Context, tenantID, projectID s
 	return out, nil
 }
 
+func (s *ProjectAnalysisStore) PruneBranchAnalyses(_ context.Context, tenantID, projectID shared.ID, branch string, keep int) (int, error) {
+	if keep < 1 {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	type ref struct {
+		idx       int
+		createdAt time.Time
+		id        string
+	}
+	if tenantID.IsZero() {
+		// The postgres path rejects a zero tenant (requireTenant); a delete must be tenant-scoped, so a
+		// zero tenant prunes nothing here rather than sweeping every tenant's rows for this project id.
+		return 0, nil
+	}
+	var refs []ref
+	for i := range s.data {
+		a := s.data[i].analysis
+		if a.ProjectID != projectID.String() || a.TenantID != tenantID.String() {
+			continue
+		}
+		if a.Branch() != branch {
+			continue
+		}
+		refs = append(refs, ref{idx: i, createdAt: a.CreatedAt, id: a.ID})
+	}
+	if len(refs) <= keep {
+		return 0, nil
+	}
+	// Newest first, mirroring List's ordering, so the keep newest survive.
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].createdAt.Equal(refs[j].createdAt) {
+			return refs[i].id > refs[j].id
+		}
+		return refs[i].createdAt.After(refs[j].createdAt)
+	})
+	doomed := make(map[int]bool, len(refs)-keep)
+	for _, r := range refs[keep:] {
+		doomed[r.idx] = true
+	}
+	kept := s.data[:0:0]
+	for i := range s.data {
+		if doomed[i] {
+			continue
+		}
+		kept = append(kept, s.data[i])
+	}
+	deleted := len(s.data) - len(kept)
+	s.data = kept
+	return deleted, nil
+}
+
 func cloneSourceLocation(in *finding.SourceLocation) *finding.SourceLocation {
 	if in == nil {
 		return nil
