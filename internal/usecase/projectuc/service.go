@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -52,6 +53,7 @@ type Service struct {
 	decorator                        ports.PRDecorator
 	allowLocalSource                 bool
 	projectAnalysisCompletionTimeout time.Duration
+	shortLivedBranchKeep             int
 	cursorSecret                     []byte
 }
 
@@ -82,6 +84,10 @@ func (s *Service) SetFindingRepository(repo ports.FindingRepository)      { s.fi
 func (s *Service) SetQualityGates(gates *qualitygatesuc.Service)          { s.gates = gates }
 func (s *Service) SetQualityGateMutator(mutator ports.QualityGateMutator) { s.gateMutator = mutator }
 func (s *Service) SetPRDecorator(decorator ports.PRDecorator)             { s.decorator = decorator }
+
+// SetShortLivedBranchKeep sets how many of the newest analyses to keep on a short-lived (feature/PR)
+// branch; older ones are pruned after each new analysis. A value < 1 disables pruning (keep all).
+func (s *Service) SetShortLivedBranchKeep(keep int) { s.shortLivedBranchKeep = keep }
 
 func (s *Service) completionTimeout() time.Duration {
 	if s.projectAnalysisCompletionTimeout > 0 {
@@ -408,7 +414,7 @@ func (s *Service) ListAnalyses(ctx context.Context, tenantID shared.ID, key, bra
 }
 
 // Branches returns the distinct branch values recorded for the Project, sorted.
-func (s *Service) Branches(ctx context.Context, tenantID shared.ID, key string) ([]string, error) {
+func (s *Service) Branches(ctx context.Context, tenantID shared.ID, key string) ([]projectanalysis.BranchInfo, error) {
 	if s.analyses == nil {
 		return nil, shared.ErrNotFound
 	}
@@ -416,7 +422,19 @@ func (s *Service) Branches(ctx context.Context, tenantID shared.ID, key string) 
 	if err != nil {
 		return nil, err
 	}
-	return s.analyses.Branches(ctx, tenantID, p.ID)
+	names, err := s.analyses.Branches(ctx, tenantID, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	defaultBranch := p.SourceBinding.DefaultBranch
+	if defaultBranch == "" {
+		defaultBranch = p.SourceBinding.Ref
+	}
+	out := make([]projectanalysis.BranchInfo, 0, len(names))
+	for _, name := range names {
+		out = append(out, projectanalysis.BranchInfo{Name: name, Kind: projectanalysis.ClassifyBranch(name, defaultBranch)})
+	}
+	return out, nil
 }
 
 // GetAnalysis returns one snapshot without disclosing another Project's history.
@@ -876,8 +894,36 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 	} else if err := s.analyses.SaveWithResult(ctx, analysis, data); err != nil {
 		return fmt.Errorf("save project analysis: %w", err)
 	}
+	s.pruneShortLivedBranch(ctx, p, recordingBranch)
 	s.decorateProjectAnalysis(ctx, analysis)
 	return nil
+}
+
+// pruneShortLivedBranch retires stale analyses on a short-lived (feature/PR) branch after a new one is
+// recorded, keeping the newest shortLivedBranchKeep. It is fail-soft: the analysis is already persisted,
+// so a prune error never fails it. Long-lived branches (main, release lines, the project default) are
+// never pruned, so their history is retained in full.
+func (s *Service) pruneShortLivedBranch(ctx context.Context, p *project.Project, branch string) {
+	if s.shortLivedBranchKeep < 1 || p == nil || s.analyses == nil {
+		return
+	}
+	defaultBranch := p.SourceBinding.DefaultBranch
+	if defaultBranch == "" {
+		defaultBranch = p.SourceBinding.Ref
+	}
+	// Without a known default branch, short-lived classification is not trustworthy: a non-conventional
+	// mainline (for example "production" or "staging") would look short-lived. Retain everything rather
+	// than risk pruning a real mainline's history.
+	if defaultBranch == "" {
+		return
+	}
+	if !projectanalysis.IsShortLivedBranch(branch, defaultBranch) {
+		return
+	}
+	if _, err := s.analyses.PruneBranchAnalyses(ctx, p.TenantID, p.ID, branch, s.shortLivedBranchKeep); err != nil {
+		slog.Warn("short-lived branch analysis prune failed; the analysis result is unchanged",
+			"error", err, "project", p.ID.String(), "branch", branch)
+	}
 }
 
 // ListHotspots returns projections belonging to the requested tenant and Project for the current analysis lens.
