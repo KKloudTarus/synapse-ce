@@ -36,6 +36,14 @@
       "issues": [
         { "file": "sample.js", "line": 3, "type": "bug" }
       ]
+    },
+    {
+      "name": "ruby-duplicate-when",
+      "language": "ruby",
+      "fixture": "ruby-dup-when",
+      "issues": [
+        { "file": "sample.rb", "line": 5, "type": "bug" }
+      ]
     }
   ]
 }

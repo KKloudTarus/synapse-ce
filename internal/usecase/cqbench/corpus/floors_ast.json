@@ -5,7 +5,8 @@
     "python/code_smell": 1.0,
     "javascript/bug": 1.0,
     "javascript/code_smell": 1.0,
-    "javascript/security_hotspot": 1.0
+    "javascript/security_hotspot": 1.0,
+    "ruby/bug": 1.0
   },
   "precision_tripwire": 0.1
 }
