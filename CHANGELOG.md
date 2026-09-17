@@ -9,6 +9,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Dart and Terraform SAST language-pack coverage (#1135, EPIC #1120).** The owned SAST language pack now covers **Dart** (greenfield: avoid-print, empty-catch swallowing an exception, cleartext HTTP, and hard-coded credentials) and adds **Terraform/HCL** quality rules that complement, rather than duplicate, the IaC misconfig engine (a deprecated interpolation-only string, and a general cleartext http:// endpoint). Dart files (`.dart`) and Terraform files (`.tf`/`.tfvars`/`.hcl`) are gated by extension like every other language. Dockerfile is intentionally not added to the language pack because the IaC misconfig engine already covers it comprehensively. Each new rule fires on its noncompliant example and stays silent on its compliant one, verified by a per-language corpus test.
+
 - **Go Tier-2 reachability fails open on opaque control-flow constructs (EPIC #1120, #1138).** The owned `ssacallgraph` source pass records reachable `//go:linkname`, `unsafe`, cgo, and assembly-backed functions as blind constructs before SSA can erase those signals. Package initializers are covered, build-excluded files do not poison active symbols, and dead opaque helpers do not disable unrelated suppressions. A Tier-2 `not_reachable` carrying one of these constructs cannot become suppressing evidence.
 
 - **Code Quality rule catalog coverage audit (#1134).** The shipped catalog now has a deterministic rules × language × type coverage matrix and complete OWASP mappings for security-quality rules; collision-safe display names preserve the distinct VB.NET and C++ empty-catch detectors rather than retiring either detection path.
