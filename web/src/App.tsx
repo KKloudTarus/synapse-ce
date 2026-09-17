@@ -67,6 +67,7 @@ const ProjectIssuesPage = lazy(() => import('./pages/CodeQuality/ProjectIssues')
 const ProjectMeasuresPage = lazy(() => import('./pages/CodeQuality/ProjectMeasuresPage').then(m => ({ default: m.ProjectMeasuresPage })))
 const ProjectCodePage = lazy(() => import('./pages/CodeQuality/ProjectCodePage').then(m => ({ default: m.ProjectCodePage })))
 const ProjectDependencyGraphPage = lazy(() => import('./pages/CodeQuality/ProjectDependencyGraphPage').then(m => ({ default: m.ProjectDependencyGraphPage })))
+const ProjectComparisonPage = lazy(() => import('./pages/CodeQuality/ProjectComparisonPage').then(m => ({ default: m.ProjectComparisonPage })))
 
 export default function App() {
   return (
@@ -111,6 +112,7 @@ function Gate() {
           <Route path="code" element={<ProjectCodePage />} />
           <Route path="dependencies" element={<ProjectDependencyGraphPage />} />
           <Route path="measures" element={<ProjectMeasuresPage />} />
+          <Route path="compare" element={<ProjectComparisonPage />} />
           <Route path="analysis" element={<ProjectAnalysisPage />} />
           <Route path="activity" element={<ProjectActivityPage />} />
         </Route>

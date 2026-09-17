@@ -236,6 +236,7 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | --- | --- | --- |
 | `SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR` | `data/project-source-artifacts` | Operator-owned local storage for immutable, gzip-compressed Project Code head/base artifacts. Restrict OS access, encrypt/back up it according to source-data policy, and do not place it on a shared writable volume. The full Compose stack mounts its dedicated `project-source-artifacts` named volume here. |
 | `SYNAPSE_PROJECT_SOURCE_RETENTION` | `2160h` (90 days) | How long captured analysis artifacts remain available. Startup cleanup removes expired analysis directories; project deletion removes all of that project's artifacts. Legacy analyses are never backfilled. |
+| `SYNAPSE_PROJECT_ANALYSIS_SHORTLIVED_KEEP` | `20` | How many of the newest analyses to keep on a short-lived (feature/pull-request) branch. After a new analysis is recorded on such a branch, older ones beyond this count are pruned. Long-lived branches (main/develop, release lines, the project default) are retained in full. Set `0` to disable pruning and keep all history. |
 | `SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES` | `2097152` | Maximum captured source file size. Bigger files are retained as unavailable metadata. |
 | `SYNAPSE_PROJECT_SOURCE_MAX_FILES` | `10000` | Maximum source files captured for one analysis. |
 | `SYNAPSE_PROJECT_SOURCE_MAX_BYTES` | `524288000` | Total source-artifact capture budget per analysis. |
@@ -274,6 +275,7 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | `SYNAPSE_AST_BIN` | bundled / `PATH` | Optional path to the `synapse-ast` sidecar used by Python Tier-2 reachability, Python taint, and code-quality analysis. |
 | `SYNAPSE_JSREACH_ENABLED` | `true` | JS/TS Tier-1 import-level reachability. Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_JSREACH_TIER2_ENABLED` | `false` | JS/TS Tier-2 affected-export reachability. When Tier-1 is on, Tier-2 runs by default in raise-only mode (mints only reachable/urgency-raising judgments, never suppresses). Setting this to `true` additionally mints not-reachable (suppressing → OpenVEX not_affected) judgments, which the lexical scanner can only assert conservatively. |
+| `SYNAPSE_JSREACH_INTERPROC_TIER2_ENABLED` | `false` | Suppressing direction of the interprocedural JS/TS Tier-2 call graph. The interprocedural recorder is raise-only by default (it proves a reached affected export via first-party wrappers). Setting this to `true` lets it also mint not-reachable (suppressing → OpenVEX not_affected) for an affected export proven unreached, but only on a COMPLETE resolver graph (any dynamic construct or escaping callable taints every negative) with entry points present. A wrong negative would hide a real vulnerability, so this stays off by default. |
 
 ## Fleet, leader election, and DAST
 
