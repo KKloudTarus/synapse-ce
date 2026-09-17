@@ -149,6 +149,30 @@ func skipGoTodoMarker(line string) bool {
 	return strings.Contains(line, "context.TODO(") || strings.Contains(line, "ctx.TODO(")
 }
 
+// looseEqNullIdiom matches the `== null` / `!= null` comparison (either operand order). `x == null`
+// is the canonical way to test for null-or-undefined in one check, so it is not a coercion bug.
+var looseEqNullIdiom = regexp.MustCompile(`(?:[^=!<>]|^)[!=]=\s*null\b|\bnull\s*[!=]=[^=]`)
+
+// looseEqAny matches any loose `==` / `!=` (not `===` / `!==`), used to tell a null-only line apart
+// from one that also carries a real coercion comparison.
+var looseEqAny = regexp.MustCompile(`(?:[^=!<>]|^)([!=]=)[^=]`)
+
+// skipJsLooseEqNullIdiom keeps js-eqeqeq off the `== null` / `!= null` idiom (which js-eq-null already
+// covers as a maintainability smell) while still flagging every other loose comparison on the line.
+// It skips only when the line's loose comparisons are all null-idiom: a line mixing `a == b` with
+// `c == null` still reports the real coercion bug. Comment-only lines are skipped as before. This
+// mirrors eslint's eqeqeq `{ "null": "ignore" }` default.
+func skipJsLooseEqNullIdiom(line string) bool {
+	if commentOnlyLine(line) {
+		return true
+	}
+	if !looseEqNullIdiom.MatchString(line) {
+		return false
+	}
+	stripped := looseEqNullIdiom.ReplaceAllString(line, " ")
+	return !looseEqAny.MatchString(stripped)
+}
+
 // skipCommentOrPlaceholderSecret is the hardcoded-credential filter: obvious non-secrets plus plain
 // comment lines, where a credential-shaped mention is documentation rather than a leak.
 func skipCommentOrPlaceholderSecret(line string) bool {

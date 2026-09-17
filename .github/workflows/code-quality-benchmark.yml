@@ -38,6 +38,17 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Build the synapse-ast sidecar (cgo)
+        # The owned engine's complexity and AST bug/structural detectors run through this sidecar. Without it
+        # the head-to-head measures a crippled engine (regex + duplication only), so the recall it records is
+        # far below what the product ships. Build it with cgo and hand its path to the gate step below.
+        run: |
+          mkdir -p "${{ github.workspace }}/bin"
+          CGO_ENABLED=1 go build -o "${{ github.workspace }}/bin/synapse-ast" ./cmd/synapse-ast
+          # Smoke-test that the tree-sitter backend is compiled in: a CGO-free build exits 3 (unavailable)
+          # on any input, so a clean exit over one small package proves the cgo grammars are linked.
+          "${{ github.workspace }}/bin/synapse-ast" quality ./internal/domain/rating >/dev/null && echo "sidecar OK"
+
       - name: Start SonarQube CE
         run: |
           mkdir -p "${REPORT_DIR}"
@@ -112,6 +123,9 @@ jobs:
           SYNAPSE_CQBENCH_SONARQUBE_EXPORT: ${{ github.workspace }}/.cqbench/sonarqube-export.json
           SYNAPSE_CQBENCH_OWNED_REPORT: ${{ github.workspace }}/.cqbench/synapse-owned.json
           SYNAPSE_CQBENCH_SONARQUBE_REPORT: ${{ github.workspace }}/.cqbench/sonarqube-ce.json
+          # Run the owned engine with its AST sidecar so the recorded scorecard reflects the full shipped
+          # engine, not the regex-only subset.
+          SYNAPSE_AST_BIN: ${{ github.workspace }}/bin/synapse-ast
         run: go test -count=1 -v -run TestCodeQualityHeadToHead ./internal/infrastructure/cqbenchrun
 
       - name: Upload raw evidence and scorecards

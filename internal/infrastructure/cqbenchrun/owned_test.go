@@ -33,9 +33,21 @@ func TestRunOwnedOnDefaultCorpus(t *testing.T) {
 		t.Logf("  %s/%s: TP=%d FP=%d FN=%d precision=%.3f recall=%.3f",
 			cell.Language, cell.Type, cell.TP, cell.FP, cell.FN, cell.Precision, cell.Recall)
 	}
-	if breaches := cqbench.CheckRatchet(report, cqbench.DefaultFloors()); len(breaches) != 0 {
-		t.Fatalf("owned engine below ratchet floors:\n  %v", breaches)
+	floors, tier := ratchetFloors(context.Background())
+	t.Logf("ratchet tier: %s", tier)
+	if breaches := cqbench.CheckRatchet(report, floors); len(breaches) != 0 {
+		t.Fatalf("owned engine below %s ratchet floors:\n  %v", tier, breaches)
 	}
+}
+
+// ratchetFloors returns the floor set matching the current run: the full-engine AST floors when the
+// synapse-ast sidecar is available, otherwise the non-AST floors. The returned label names the tier for
+// diagnostics so a breach message says which ratchet was enforced.
+func ratchetFloors(ctx context.Context) (cqbench.Floors, string) {
+	if SidecarAvailable(ctx) {
+		return cqbench.DefaultFloorsAST(), "ast"
+	}
+	return cqbench.DefaultFloors(), "base"
 }
 
 // TestCodeQualityHeadToHead is the gated CI entry point for the #1137 owned-vs-SonarQube-CE head-to-head. It
@@ -58,8 +70,10 @@ func TestCodeQualityHeadToHead(t *testing.T) {
 	if len(skipped) != 0 {
 		t.Logf("owned findings skipped (unmapped): %v", skipped)
 	}
-	if breaches := cqbench.CheckRatchet(owned, cqbench.DefaultFloors()); len(breaches) != 0 {
-		t.Fatalf("owned engine below ratchet floors:\n  %v", breaches)
+	floors, tier := ratchetFloors(context.Background())
+	t.Logf("ratchet tier: %s", tier)
+	if breaches := cqbench.CheckRatchet(owned, floors); len(breaches) != 0 {
+		t.Fatalf("owned engine below %s ratchet floors:\n  %v", tier, breaches)
 	}
 	writeReport(t, os.Getenv("SYNAPSE_CQBENCH_OWNED_REPORT"), owned)
 

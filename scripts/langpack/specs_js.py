@@ -41,7 +41,7 @@ RULES = [
       rationale="Loose equality coerces operands (0 == '', null == undefined), a frequent source of bugs. Strict equality avoids coercion.",
       remediation="Replace == with === and != with !== (adjust logic if coercion was relied on).",
       source="https://eslint.org/docs/latest/rules/eqeqeq",
-      re=r"([^=!<>]==[^=]|[^=!]!=[^=])", nc="if (a == b) return 1;", c="if (a === b) return 1;", skip=CC),
+      re=r"([^=!<>]==[^=]|[^=!]!=[^=])", nc="if (a == b) return 1;", c="if (a === b) return 1;", skip="skipJsLooseEqNullIdiom"),
     r(id="js-eq-null", type="smell", qual="maint", sev="info", cwe="", title="Ambiguous == null comparison",
       desc="`== null` matches both null and undefined; make the intent explicit.",
       rationale="== null intentionally matches null and undefined; being explicit (=== null or a nullish check) documents intent and avoids accidental coercion.",

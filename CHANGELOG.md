@@ -9,6 +9,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Code-quality benchmark measures the full owned engine, plus two rule fixes (EPIC #1120).** The owned-vs-SonarQube-CE head-to-head ran the engine without its synapse-ast sidecar and over fixtures under a `testdata/` path that the AST source walker treats as vendored, so it recorded the recall of a regex-and-duplication subset instead of the shipped engine. The benchmark now materializes each corpus fixture into a clean working directory before analysis, and the workflow builds the cgo sidecar and points the gate at it, so the AST bug and structural detectors are measured. A stricter ratchet floor set (`floors_ast.json`) gates the full engine when the sidecar is present, while the non-AST floors keep `go test ./...` green without it. Two rules are corrected in the process: `python-bare-except` moves from bug to code smell to match SonarQube's category (python:S5754) and common Python linters, and `js-eqeqeq` no longer reports the `== null` / `!= null` idiom as a coercion bug (the `js-eq-null` smell still covers it), matching eslint's `eqeqeq { "null": "ignore" }`. The corpus adds a JavaScript identical-branches case.
+
 - **Coverage-aware complexity rollups and pinned analysis deltas (#1133, EPIC #1120).** Project Code Quality
   now aggregates AST cyclomatic and cognitive complexity from functions to files, directories, and the
   project root with per-file parse coverage. Unsupported-language files are explicitly not applicable and

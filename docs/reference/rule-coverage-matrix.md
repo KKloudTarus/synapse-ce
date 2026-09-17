@@ -39,7 +39,7 @@ Catalogued rules: **3326**. Security-quality rules with an OWASP mapping: **1183
 | Kotlin | 22 | 8 | 17 | 83 | 130 |
 | Kubernetes | 3 | 20 | 6 | 1 | 30 |
 | PHP | 32 | 22 | 44 | 84 | 182 |
-| Python | 123 | 35 | 53 | 105 | 316 |
+| Python | 122 | 35 | 53 | 106 | 316 |
 | Ruby | 8 | 14 | 10 | 8 | 40 |
 | Rust | 68 | 17 | 26 | 53 | 164 |
 | Scala | 18 | 1 | 3 | 19 | 41 |

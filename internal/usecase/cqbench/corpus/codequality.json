@@ -28,6 +28,14 @@
         { "file": "sample.js", "line": 3, "type": "security_hotspot" },
         { "file": "sample.js", "line": 7, "type": "bug" }
       ]
+    },
+    {
+      "name": "javascript-identical-branches",
+      "language": "javascript",
+      "fixture": "js-identbranch",
+      "issues": [
+        { "file": "sample.js", "line": 3, "type": "bug" }
+      ]
     }
   ]
 }
