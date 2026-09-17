@@ -10068,10 +10068,22 @@ components:
       properties:
         branches:
           type: array
-          description: Distinct branch values recorded across the Project's analyses, sorted.
-          items: {type: string}
+          description: >
+            Distinct branches recorded across the Project's analyses, sorted by name, each with its
+            lifecycle classification. A long_lived branch (main/develop, a release line, or the
+            Project's default) is retained in full; a short_lived (feature/PR) branch is pruned to the
+            most recent analyses.
+          items: {$ref: "#/components/schemas/ProjectBranch"}
       example:
-        branches: [feature/x, main]
+        branches:
+        - {name: feature/x, kind: short_lived}
+        - {name: main, kind: long_lived}
+    ProjectBranch:
+      type: object
+      required: [name, kind]
+      properties:
+        name: {type: string}
+        kind: {type: string, enum: [long_lived, short_lived]}
 
     ProjectOverview:
       oneOf:
