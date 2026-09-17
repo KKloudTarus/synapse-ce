@@ -49,10 +49,11 @@ func (c *Collector) Collect(loadedPaths []string) runtimereach.Report {
 	case c.exists("lib/apk/db/installed"):
 		pkgs, cov := c.collectApk(loadedSet)
 		report.PackageFiles, report.Coverage = pkgs, cov
-	case c.exists("var/lib/rpm/rpmdb.sqlite") || c.exists("var/lib/rpm/Packages") || c.exists("var/lib/rpm/Packages.db"):
-		// The rpm database is a binary store; file-ownership extraction from it is not yet collected here, so
-		// declare the gap rather than pass an rpm host off as "no vulnerable library loaded".
-		report.Coverage = []runtimereach.CoverageReason{runtimereach.CoverageUnreadablePackageDB}
+	case c.exists("var/lib/rpm/rpmdb.sqlite") || c.exists("usr/lib/sysimage/rpm/rpmdb.sqlite") ||
+		c.exists("var/lib/rpm/Packages") || c.exists("var/lib/rpm/Packages.db") ||
+		c.exists("usr/lib/sysimage/rpm/Packages.db"):
+		pkgs, cov := c.collectRpm(loadedSet)
+		report.PackageFiles, report.Coverage = pkgs, cov
 	default:
 		report.Coverage = []runtimereach.CoverageReason{runtimereach.CoverageUnsupportedPlatform}
 	}
