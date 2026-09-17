@@ -186,6 +186,9 @@ func skipPhpUnreachableAfterReturn(text string) bool {
 	if loc == nil {
 		return true
 	}
+	if phpBracelessGuard.MatchString(masked[:loc[0]]) {
+		return true // the return is the brace-less body of `if (...)`/`while (...)`/`else`: what follows is reachable
+	}
 	rest := strings.TrimLeft(masked[loc[1]:], " \t\r\n")
 	if rest == "" {
 		return true // nothing after the return
@@ -198,6 +201,14 @@ func skipPhpUnreachableAfterReturn(text string) bool {
 	// A real statement follows unless it is a control-flow continuation keyword (case/else/end*/catch/...).
 	return phpBlockContinuationWord[strings.ToLower(phpLeadingIdentWord(rest))]
 }
+
+// phpBracelessGuard matches a control-flow header with no opening brace immediately before a return, i.e. a
+// single-statement `if (...) return X;`, `elseif (...) return X;`, `while (...) return X;`, `for (...)`,
+// `foreach (...)`, or a bare `else return X;`. In that shape the return is conditional and the statement
+// after it is reachable, so php:unreachable-after-return must not fire. A braced guard (`if (...) { return
+// X; }`) is handled separately by the closing brace that follows the return. The `[^{}]` inside the header
+// keeps a braced block on the same joined statement from being read as a guard.
+var phpBracelessGuard = regexp.MustCompile(`(?i)\b(?:if|elseif|while|for|foreach)\s*\([^{}]*\)\s*$|(?i)\belse\s*$`)
 
 // phpMaskLiterals returns s with the contents of PHP string literals ('...', "...") and comments (//, #,
 // /* */) overwritten by spaces, preserving length and byte offsets. It lets a semicolon or keyword inside a
@@ -246,6 +257,45 @@ func phpMaskLiterals(s string) string {
 			end := min(j+2, len(b))
 			blank(i, end)
 			i = end
+		case c == '<' && i+2 < len(b) && b[i+1] == '<' && b[i+2] == '<':
+			// heredoc/nowdoc: <<< [ws] ['"]?LABEL['"]? \n body \n [ws]LABEL. Blank the body and the
+			// closing label so a `;` or keyword inside the body is not read as statement structure.
+			j := i + 3
+			for j < len(b) && (b[j] == ' ' || b[j] == '\t') {
+				j++
+			}
+			if j < len(b) && (b[j] == '\'' || b[j] == '"') {
+				j++
+			}
+			labelStart := j
+			for j < len(b) && phpIdentByte(b[j]) {
+				j++
+			}
+			label := string(b[labelStart:j])
+			if label == "" || (b[labelStart] >= '0' && b[labelStart] <= '9') {
+				i += 3 // labels do not start with a digit: not a heredoc opener
+				continue
+			}
+			for j < len(b) && b[j] != '\n' {
+				j++ // rest of the opener line (a nowdoc quote, etc.)
+			}
+			end := len(b)
+			for k := j; k < len(b); k++ {
+				if b[k] != '\n' {
+					continue
+				}
+				p := k + 1
+				for p < len(b) && (b[p] == ' ' || b[p] == '\t') {
+					p++
+				}
+				if p+len(label) <= len(b) && string(b[p:p+len(label)]) == label &&
+					(p+len(label) >= len(b) || !phpIdentByte(b[p+len(label)])) {
+					end = p + len(label)
+					break
+				}
+			}
+			blank(j, end)
+			i = end
 		default:
 			i++
 		}
@@ -253,17 +303,17 @@ func phpMaskLiterals(s string) string {
 	return string(out)
 }
 
+// phpIdentByte reports whether b is an ASCII identifier byte (letter, digit, or underscore).
+func phpIdentByte(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
 // phpLeadingIdentWord returns the leading run of ASCII identifier characters (letters, digits, underscore)
 // at the start of s, or the empty string when s begins with any other byte.
 func phpLeadingIdentWord(s string) string {
 	i := 0
-	for i < len(s) {
-		c := s[i]
-		if c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
-			i++
-			continue
-		}
-		break
+	for i < len(s) && phpIdentByte(s[i]) {
+		i++
 	}
 	return s[:i]
 }

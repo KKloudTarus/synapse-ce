@@ -2651,6 +2651,7 @@ rb:class-variable
 rb:cognitive-complexity
 rb:command-injection
 rb:command-tainted-argument
+rb:duplicate-when-condition
 rb:dynamic-constantize
 rb:dynamic-regexp
 rb:dynamic-send

@@ -11,12 +11,11 @@ import (
 // statement, so without the filter its `;\s*...` reached the block-closing `}` and falsely flagged nearly
 // every PHP function.
 //
-// Known residual limitations of the line-regex approach, unchanged by this filter and requiring brace/scope
-// awareness (i.e. an AST) to fix: dead code after a *later* return in a multi-branch switch or
-// alternative-syntax block is silently missed (a regex cannot anchor the finding at the correct return);
-// a heredoc/nowdoc body containing a semicolon can still false-positive; and a brace-less guard
-// `if ($x) return 1;` before reachable code false-positives. The braced guard `if ($x) { return 1; }` is
-// handled correctly.
+// Covered non-firing shapes include a returned string/heredoc body that contains a semicolon and a
+// brace-less guard `if ($x) return 1;` before reachable code. The one known residual limitation, requiring
+// brace/scope awareness (an AST) to fix: dead code after a *later* return in a multi-branch switch or
+// alternative-syntax block is silently missed, because a line regex cannot anchor the finding at the correct
+// return, and a silent miss is preferred over a finding pointing at a clean earlier return.
 func TestPhpUnreachableAfterReturn(t *testing.T) {
 	src := `<?php
 function ifReturn($x) {
@@ -68,6 +67,25 @@ function namespacedDeadCall($x) {
     return $x;
     \Acme\Log::write("dead");
 }
+function heredocReturn($x) {
+    return <<<SQL
+SELECT 1; DROP TABLE t;
+SQL;
+}
+function bracelessGuard($x) {
+    if ($x) return 1;
+    doWork();
+}
+function bracedBlockThenDead($x) {
+    if ($x) { doStuff(); }
+    return $y;
+    dead();
+}
+function nowdocReturn($x) {
+    return <<<'EOT'
+line; with EOT word inside
+EOT;
+}
 `
 	root := t.TempDir()
 	writeFile(t, root, "sample.php", src)
@@ -86,8 +104,10 @@ function namespacedDeadCall($x) {
 	// (line 40). A return of a string literal containing a semicolon (line 37) must not fire, and the
 	// semicolon-and-keyword inside the literal on line 40 must not hide the dead echo after it.
 	// 44: dead code is a call that merely starts with the letters of a keyword (caseHandler), which must
-	// not be mistaken for a `case` label. 48: a namespaced dead call (\Acme\Log::write) must fire.
-	want := map[int]bool{29: true, 33: true, 40: true, 44: true, 48: true}
+	// not be mistaken for a `case` label. 48: a namespaced dead call (\Acme\Log::write) must fire. 62: a
+	// braced block `if ($x) { doStuff(); }` before an unconditional return is not a guard, so the dead()
+	// after that return must still fire (the `[^{}]` in the guard pattern keeps the braced block out).
+	want := map[int]bool{29: true, 33: true, 40: true, 44: true, 48: true, 62: true}
 	for _, l := range lines {
 		if !want[l] {
 			t.Errorf("false positive: php:unreachable-after-return at line %d", l)
