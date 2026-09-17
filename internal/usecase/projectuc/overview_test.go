@@ -91,6 +91,9 @@ func (s *overviewAnalysisStoreSpy) Branches(context.Context, shared.ID, shared.I
 func (s *overviewAnalysisStoreSpy) Get(context.Context, shared.ID, shared.ID, shared.ID) (projectanalysis.Analysis, error) {
 	panic("unexpected Get")
 }
+func (s *overviewAnalysisStoreSpy) PruneBranchAnalyses(context.Context, shared.ID, shared.ID, string, int) (int, error) {
+	panic("unexpected PruneBranchAnalyses")
+}
 
 func overviewTestProject() *project.Project {
 	return &project.Project{ID: "p1", TenantID: "tenant-a", Key: "payments-api", Name: "Payments API"}

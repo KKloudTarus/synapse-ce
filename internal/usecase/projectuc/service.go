@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -52,6 +53,7 @@ type Service struct {
 	decorator                        ports.PRDecorator
 	allowLocalSource                 bool
 	projectAnalysisCompletionTimeout time.Duration
+	shortLivedBranchKeep             int
 	cursorSecret                     []byte
 }
 
@@ -82,6 +84,10 @@ func (s *Service) SetFindingRepository(repo ports.FindingRepository)      { s.fi
 func (s *Service) SetQualityGates(gates *qualitygatesuc.Service)          { s.gates = gates }
 func (s *Service) SetQualityGateMutator(mutator ports.QualityGateMutator) { s.gateMutator = mutator }
 func (s *Service) SetPRDecorator(decorator ports.PRDecorator)             { s.decorator = decorator }
+
+// SetShortLivedBranchKeep sets how many of the newest analyses to keep on a short-lived (feature/PR)
+// branch; older ones are pruned after each new analysis. A value < 1 disables pruning (keep all).
+func (s *Service) SetShortLivedBranchKeep(keep int) { s.shortLivedBranchKeep = keep }
 
 func (s *Service) completionTimeout() time.Duration {
 	if s.projectAnalysisCompletionTimeout > 0 {
@@ -432,7 +438,7 @@ func (s *Service) ListAnalyses(ctx context.Context, tenantID shared.ID, key, bra
 }
 
 // Branches returns the distinct branch values recorded for the Project, sorted.
-func (s *Service) Branches(ctx context.Context, tenantID shared.ID, key string) ([]string, error) {
+func (s *Service) Branches(ctx context.Context, tenantID shared.ID, key string) ([]projectanalysis.BranchInfo, error) {
 	if s.analyses == nil {
 		return nil, shared.ErrNotFound
 	}
@@ -440,7 +446,19 @@ func (s *Service) Branches(ctx context.Context, tenantID shared.ID, key string) 
 	if err != nil {
 		return nil, err
 	}
-	return s.analyses.Branches(ctx, tenantID, p.ID)
+	names, err := s.analyses.Branches(ctx, tenantID, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	defaultBranch := p.SourceBinding.DefaultBranch
+	if defaultBranch == "" {
+		defaultBranch = p.SourceBinding.Ref
+	}
+	out := make([]projectanalysis.BranchInfo, 0, len(names))
+	for _, name := range names {
+		out = append(out, projectanalysis.BranchInfo{Name: name, Kind: projectanalysis.ClassifyBranch(name, defaultBranch)})
+	}
+	return out, nil
 }
 
 // GetAnalysis returns one snapshot without disclosing another Project's history.
@@ -557,6 +575,17 @@ func (s *Service) ImportAnalysis(ctx context.Context, tenantID shared.ID, key st
 	return s.analyses.Get(ctx, tenantID, p.ID, shared.ID(jobID))
 }
 
+// baselineBranchForRecording returns the branch whose latest analysis is the New-Code baseline. A
+// pull-request analysis (PR number + target branch both known) is a first-class object whose New Code is
+// what it adds relative to the branch it will merge into, so its baseline is the merge target branch,
+// not the PR head's own history. Any other analysis diffs against its own recording branch.
+func baselineBranchForRecording(recordingBranch string, ci *projectanalysis.CIContext) string {
+	if ci != nil && strings.TrimSpace(ci.PullRequest) != "" && strings.TrimSpace(ci.TargetBranch) != "" {
+		return strings.TrimSpace(ci.TargetBranch)
+	}
+	return recordingBranch
+}
+
 // recordProjectAnalysis is the shared recorder behind a server scan and a pipeline import. origin
 // and ci are the only things the two callers supply differently.
 func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared.ID, jobID string, completedAt time.Time, result *scauc.ScanResult, origin projectanalysis.Origin, ci *projectanalysis.CIContext) (recordErr error) {
@@ -593,7 +622,7 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 	// The New-Code baseline is the previous analysis on the SAME branch as the one being recorded,
 	// so a feature branch diffs against its own history, not whichever branch scanned last.
 	recordingBranch := projectanalysis.Analysis{SourceRef: result.SourceRef, CI: ci}.Branch()
-	previous, _, err := s.analyses.List(ctx, p.TenantID, p.ID, recordingBranch, 1, time.Time{}, "")
+	previous, _, err := s.analyses.List(ctx, p.TenantID, p.ID, baselineBranchForRecording(recordingBranch, ci), 1, time.Time{}, "")
 	if err != nil {
 		return fmt.Errorf("list project analyses: %w", err)
 	}
@@ -889,8 +918,36 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 	} else if err := s.analyses.SaveWithResult(ctx, analysis, data); err != nil {
 		return fmt.Errorf("save project analysis: %w", err)
 	}
+	s.pruneShortLivedBranch(ctx, p, recordingBranch)
 	s.decorateProjectAnalysis(ctx, analysis)
 	return nil
+}
+
+// pruneShortLivedBranch retires stale analyses on a short-lived (feature/PR) branch after a new one is
+// recorded, keeping the newest shortLivedBranchKeep. It is fail-soft: the analysis is already persisted,
+// so a prune error never fails it. Long-lived branches (main, release lines, the project default) are
+// never pruned, so their history is retained in full.
+func (s *Service) pruneShortLivedBranch(ctx context.Context, p *project.Project, branch string) {
+	if s.shortLivedBranchKeep < 1 || p == nil || s.analyses == nil {
+		return
+	}
+	defaultBranch := p.SourceBinding.DefaultBranch
+	if defaultBranch == "" {
+		defaultBranch = p.SourceBinding.Ref
+	}
+	// Without a known default branch, short-lived classification is not trustworthy: a non-conventional
+	// mainline (for example "production" or "staging") would look short-lived. Retain everything rather
+	// than risk pruning a real mainline's history.
+	if defaultBranch == "" {
+		return
+	}
+	if !projectanalysis.IsShortLivedBranch(branch, defaultBranch) {
+		return
+	}
+	if _, err := s.analyses.PruneBranchAnalyses(ctx, p.TenantID, p.ID, branch, s.shortLivedBranchKeep); err != nil {
+		slog.Warn("short-lived branch analysis prune failed; the analysis result is unchanged",
+			"error", err, "project", p.ID.String(), "branch", branch)
+	}
 }
 
 // ListHotspots returns projections belonging to the requested tenant and Project for the current analysis lens.

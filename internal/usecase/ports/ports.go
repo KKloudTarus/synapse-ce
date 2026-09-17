@@ -242,6 +242,10 @@ type ProjectAnalysisStore interface {
 	List(ctx context.Context, tenantID, projectID shared.ID, branch string, limit int, beforeCreatedAt time.Time, beforeID shared.ID) ([]projectanalysis.Analysis, bool, error)
 	// Branches returns the distinct non-deleted branch values recorded for the project, sorted.
 	Branches(ctx context.Context, tenantID, projectID shared.ID) ([]string, error)
+	// PruneBranchAnalyses deletes all but the newest keep analyses on one branch of a project, and
+	// returns how many were deleted. It is used to retire stale short-lived-branch history. keep must
+	// be >= 1 (a keep < 1 is a no-op that deletes nothing, so pruning can be disabled by configuration).
+	PruneBranchAnalyses(ctx context.Context, tenantID, projectID shared.ID, branch string, keep int) (int, error)
 	Get(ctx context.Context, tenantID, projectID, analysisID shared.ID) (projectanalysis.Analysis, error)
 }
 

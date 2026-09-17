@@ -1724,6 +1724,10 @@ export interface ProjectAnalysisCI {
   runId: string
   branch: string
   actor: string
+  /** The forge pull/merge request number this analysis ran for, when the run was a PR/MR build. */
+  pullRequest?: string
+  /** The base branch the pull/merge request targets. */
+  targetBranch?: string
 }
 
 export interface ProjectAnalysis {
