@@ -85,26 +85,26 @@ const (
 // context cancellation (so a timed-out read surfaces as a failure, never a silently-truncated success); an
 // absent/non-BDB/malformed DB or a parse panic degrades to (nil, nil). namespace is the PURL namespace and tag
 // the distro qualifier, both passed straight to osComponent.
-func rpmBDBComponents(ctx context.Context, dbPath, namespace, tag string) (out []sbom.Component, err error) {
+func rpmBDBBlobs(ctx context.Context, dbPath string, visit func([]byte)) (err error) {
 	defer func() {
 		if recover() != nil { // the DB is untrusted; a parse panic must degrade to no components
-			out, err = nil, nil
+			err = nil
 		}
 	}()
 	fi, statErr := os.Lstat(dbPath) // regular-file guard: never follow a symlinked DB out of the rootfs
 	if statErr != nil || !fi.Mode().IsRegular() {
-		return nil, nil
+		return nil
 	}
 	f, openErr := os.Open(dbPath)
 	if openErr != nil {
-		return nil, nil
+		return nil
 	}
 	defer func() { _ = f.Close() }()
 
 	size := fi.Size()
 	order, pageSize, lastPgno, ok := bdbReadMeta(f, size)
 	if !ok {
-		return nil, nil // not a BerkeleyDB HASH database (e.g. a sqlite or ndb rootfs)
+		return nil // not a BerkeleyDB HASH database (e.g. a sqlite or ndb rootfs)
 	}
 
 	// Bound the page walk by the on-disk file size, so a lying last_pgno cannot drive an unbounded loop: a
@@ -113,13 +113,13 @@ func rpmBDBComponents(ctx context.Context, dbPath, namespace, tag string) (out [
 	maxPage := lastPgno
 	if pageCount == 0 || maxPage >= pageCount {
 		if pageCount == 0 {
-			return nil, nil
+			return nil
 		}
 		maxPage = pageCount - 1
 	}
 
 	if ctxErr := ctx.Err(); ctxErr != nil { // honor a context already cancelled before the walk
-		return nil, ctxErr
+		return ctxErr
 	}
 	// Global overflow-page read budget. In a well-formed DB each overflow page belongs to exactly one value
 	// chain, so the sum of all chain reads is <= the page count; capping the AGGREGATE (not just each chain)
@@ -130,23 +130,14 @@ func rpmBDBComponents(ctx context.Context, dbPath, namespace, tag string) (out [
 	page := make([]byte, pageSize)   // reused for the current hash/meta page across the walk
 	ovPage := make([]byte, pageSize) // separate scratch reused by every overflow-chain read (no per-value alloc)
 	var totalBytes int64
-	// emit parses a candidate value blob and appends a component if it is a real header; a non-header
-	// contributes nothing. Shared by the inline and overflow value paths so both behave identically.
-	emit := func(blob []byte) {
-		if name, evr, arch, ok := safeParseRPMHeader(blob); ok {
-			if c, compOK := osComponent("rpm", namespace, name, evr, arch, tag, ""); compOK {
-				c.Location = dbPath // the rpm DB's path, so the component attributes to the DB's image layer
-				out = append(out, c)
-			}
-		}
-	}
+	count := 0
 	for pgno := uint32(1); pgno <= maxPage; pgno++ {
 		if overflowBudget <= 0 { // hostile DB exhausted the overflow budget: stop the best-effort walk
-			return out, nil
+			return nil
 		}
 		if pgno&0x3f == 0 { // ~every 64 pages: honor cancellation of a large parse
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, ctxErr
+				return ctxErr
 			}
 		}
 		if !bdbReadPage(f, size, pageSize, pgno, page) {
@@ -171,7 +162,7 @@ func rpmBDBComponents(ctx context.Context, dbPath, namespace, tag string) (out [
 		for i := uint16(1); i < entries; i += 2 { // values are the odd indices
 			if i&0x1ff == 1 { // periodic cancellation check within a large hash page's value scan
 				if ctxErr := ctx.Err(); ctxErr != nil {
-					return nil, ctxErr
+					return ctxErr
 				}
 			}
 			idxPos := bdbPageHdrLen + int(i)*2
@@ -197,7 +188,8 @@ func rpmBDBComponents(ctx context.Context, dbPath, namespace, tag string) (out [
 					continue // a malformed/broken overflow chain contributes nothing
 				}
 				totalBytes += int64(len(blob))
-				emit(blob)
+				visit(blob)
+				count++
 			case bdbItemKeyData: // stored inline on this page
 				if !offsBuilt {
 					pageOffs = bdbPageOffsets(page, entries, order)
@@ -209,16 +201,32 @@ func rpmBDBComponents(ctx context.Context, dbPath, namespace, tag string) (out [
 				}
 				blob := page[eoff+1 : end] // skip the item-type byte; the rest is the inline value
 				totalBytes += int64(len(blob))
-				emit(blob)
+				visit(blob)
+				count++
 			default:
 				continue // neither inline nor overflow: not a value we can read
 			}
-			if len(out) >= maxPackages || totalBytes >= maxDBBytes { // package-count + total-byte budgets
-				return out, nil
+			if count >= maxPackages || totalBytes >= maxDBBytes { // package-count + total-byte budgets
+				return nil
 			}
 		}
 	}
-	return out, nil
+	return nil
+}
+
+// rpmBDBComponents reads the BerkeleyDB rpmdb and returns one component per installed package, reusing the
+// hardened rpmBDBBlobs walker.
+func rpmBDBComponents(ctx context.Context, dbPath, namespace, tag string) ([]sbom.Component, error) {
+	var out []sbom.Component
+	err := rpmBDBBlobs(ctx, dbPath, func(blob []byte) {
+		if name, evr, arch, ok := safeParseRPMHeader(blob); ok {
+			if c, compOK := osComponent("rpm", namespace, name, evr, arch, tag, ""); compOK {
+				c.Location = dbPath // the rpm DB's path, so the component attributes to the DB's image layer
+				out = append(out, c)
+			}
+		}
+	})
+	return out, err
 }
 
 // bdbPageOffsets returns the valid inp entry offsets on a hash page, ascending. It is used to bound an inline
