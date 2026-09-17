@@ -58,6 +58,11 @@ var (
 )
 
 // ndbCandidate is one package index's best (highest-generation) parsed header.
+type ndbBlobCandidate struct {
+	gen  uint32
+	blob []byte
+}
+
 type ndbCandidate struct {
 	gen             uint32
 	name, evr, arch string
@@ -68,53 +73,53 @@ type ndbCandidate struct {
 // returned ONLY on context cancellation (so a timed-out read surfaces as a failure, never a silently-truncated
 // success); an absent/non-ndb/malformed DB or a parse panic degrades to (nil, nil). namespace is the PURL
 // namespace and tag the distro qualifier, both passed straight to osComponent.
-func rpmNDBComponents(ctx context.Context, dbPath, namespace, tag string) (out []sbom.Component, err error) {
+func rpmNDBBlobs(ctx context.Context, dbPath string, visit func([]byte)) (err error) {
 	defer func() {
 		if recover() != nil { // the DB is untrusted; a parse panic must degrade to no components
-			out, err = nil, nil
+			err = nil
 		}
 	}()
 	fi, statErr := os.Lstat(dbPath) // regular-file guard: never follow a symlinked DB out of the rootfs
 	if statErr != nil || !fi.Mode().IsRegular() {
-		return nil, nil
+		return nil
 	}
 	size := fi.Size()
 	if size < ndbBlobHeaderSize || size > maxDBBytes {
-		return nil, nil // too small to hold a header, or larger than the bomb-guard budget
+		return nil // too small to hold a header, or larger than the bomb-guard budget
 	}
 	f, openErr := os.Open(dbPath)
 	if openErr != nil {
-		return nil, nil
+		return nil
 	}
 	defer func() { _ = f.Close() }()
 
 	var hdr [ndbBlobHeaderSize]byte
 	if _, e := f.ReadAt(hdr[:], 0); e != nil {
-		return nil, nil
+		return nil
 	}
 	if [4]byte(hdr[0:4]) != ndbHeaderMagic {
-		return nil, nil // not an ndb pkgdb (a sqlite/BerkeleyDB rootfs)
+		return nil // not an ndb pkgdb (a sqlite/BerkeleyDB rootfs)
 	}
 	slotNPages := binary.LittleEndian.Uint32(hdr[12:16])
 	if slotNPages == 0 {
-		return nil, nil
+		return nil
 	}
 	slotAreaLen := int64(slotNPages) * ndbSlotPageSize
 	if slotAreaLen <= 0 || slotAreaLen > size { // *4096 overflow, or a slot area that runs past EOF
-		return nil, nil
+		return nil
 	}
 	slots := make([]byte, slotAreaLen)
 	if _, e := f.ReadAt(slots, 0); e != nil {
-		return nil, nil
+		return nil
 	}
 	nSlots := int64(slotNPages) * ndbSlotEntriesPerPage
 
-	best := map[uint32]ndbCandidate{} // package index -> highest-generation parse
-	var order []uint32                // package indices in first-seen order, for deterministic output
+	best := map[uint32]ndbBlobCandidate{} // package index -> highest-generation header blob
+	var order []uint32                    // package indices in first-seen order, for deterministic output
 	var total int64
 	for i := int64(ndbFirstSlot); i < nSlots; i++ {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+			return ctxErr
 		}
 		off := i * ndbSlotSize
 		if off+ndbSlotSize > slotAreaLen {
@@ -161,9 +166,8 @@ func rpmNDBComponents(ctx context.Context, dbPath, namespace, tag string) (out [
 			continue
 		}
 		total += int64(blobLen)
-		name, evr, arch, ok := safeParseRPMHeader(blob)
-		if !ok {
-			continue
+		if _, _, _, ok := safeParseRPMHeader(blob); !ok {
+			continue // not a real header: skip, never fabricate
 		}
 		if prev, seen := best[pkgIdx]; seen {
 			if gen <= prev.gen {
@@ -172,14 +176,25 @@ func rpmNDBComponents(ctx context.Context, dbPath, namespace, tag string) (out [
 		} else {
 			order = append(order, pkgIdx)
 		}
-		best[pkgIdx] = ndbCandidate{gen: gen, name: name, evr: evr, arch: arch}
+		best[pkgIdx] = ndbBlobCandidate{gen: gen, blob: blob}
 	}
 	for _, pkgIdx := range order {
-		c := best[pkgIdx]
-		if comp, ok := osComponent("rpm", namespace, c.name, c.evr, c.arch, tag, ""); ok {
-			comp.Location = dbPath // attribute the component to the DB's image layer
-			out = append(out, comp)
-		}
+		visit(best[pkgIdx].blob)
 	}
-	return out, nil
+	return nil
+}
+
+// rpmNDBComponents reads the ndb rpmdb and returns one component per installed package, reusing the hardened
+// rpmNDBBlobs walker.
+func rpmNDBComponents(ctx context.Context, dbPath, namespace, tag string) ([]sbom.Component, error) {
+	var out []sbom.Component
+	err := rpmNDBBlobs(ctx, dbPath, func(blob []byte) {
+		if name, evr, arch, ok := safeParseRPMHeader(blob); ok {
+			if comp, compOK := osComponent("rpm", namespace, name, evr, arch, tag, ""); compOK {
+				comp.Location = dbPath // attribute the component to the DB's image layer
+				out = append(out, comp)
+			}
+		}
+	})
+	return out, err
 }
