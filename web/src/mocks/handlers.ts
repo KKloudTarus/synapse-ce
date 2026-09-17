@@ -417,9 +417,12 @@ const QUALITY_GATES = [
 
 // --- Quality Profiles ---
 const QUALITY_PROFILES = [
-  { key: 'go-default', name: 'Default (Go)', language: 'go', is_default: true, rule_count: 142, built_in: true },
-  { key: 'ts-default', name: 'Default (TypeScript)', language: 'typescript', is_default: true, rule_count: 98, built_in: true },
-  { key: 'go-strict', name: 'Strict (Go)', language: 'go', is_default: false, rule_count: 198, built_in: false },
+  { key: 'synapse-way-go', name: 'Synapse way (Go)', language: 'go', is_default: true, rule_count: 142, built_in: true },
+  { key: 'recommended-go', name: 'Recommended (Go)', language: 'go', is_default: false, rule_count: 118, built_in: true },
+  { key: 'strict-go', name: 'Strict (Go)', language: 'go', is_default: false, rule_count: 142, built_in: true },
+  { key: 'synapse-way-typescript', name: 'Synapse way (TypeScript)', language: 'typescript', is_default: true, rule_count: 98, built_in: true },
+  { key: 'recommended-typescript', name: 'Recommended (TypeScript)', language: 'typescript', is_default: false, rule_count: 80, built_in: true },
+  { key: 'strict-typescript', name: 'Strict (TypeScript)', language: 'typescript', is_default: false, rule_count: 98, built_in: true },
 ]
 
 // --- Vulnerability Intelligence ---
