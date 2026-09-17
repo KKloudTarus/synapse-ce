@@ -9,6 +9,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Bitbucket pull-request decoration adapter (#1124, EPIC #1120).** An owned `BitbucketDecorator` publishes the quality-gate verdict to Bitbucket Cloud through the build-status, Code Insights (report plus annotations), and pull-request comment APIs, idempotently: the build status is keyed and skipped when unchanged, the Code Insights report is upserted under one owned id, annotations upsert by a stable per-finding external id in batches of 100, and the one marker-tagged comment is updated in place. The connector token is presented via HTTP Basic auth and never rendered into payloads or errors, each surface fails soft and independently so the scan is never failed by a forge write, and pagination cursors are pinned to the Bitbucket host. The adapter is network-free until the CLI/server wiring (#1125) composes it.
+
 - **Go Tier-2 reachability fails open on opaque control-flow constructs (EPIC #1120, #1138).** The owned `ssacallgraph` source pass records reachable `//go:linkname`, `unsafe`, cgo, and assembly-backed functions as blind constructs before SSA can erase those signals. Package initializers are covered, build-excluded files do not poison active symbols, and dead opaque helpers do not disable unrelated suppressions. A Tier-2 `not_reachable` carrying one of these constructs cannot become suppressing evidence.
 
 - **Code Quality rule catalog coverage audit (#1134).** The shipped catalog now has a deterministic rules × language × type coverage matrix and complete OWASP mappings for security-quality rules; collision-safe display names preserve the distinct VB.NET and C++ empty-catch detectors rather than retiring either detection path.
