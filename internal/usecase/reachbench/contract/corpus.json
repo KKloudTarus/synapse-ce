@@ -49,7 +49,7 @@
       "mode_id": "build_aware_import",
       "fixture": {
         "id": "dotnet-build-aware-import-input",
-        "digest": "sha256:1231c1423f1903ba85057d977d00f38bfe59c231fc2b2f47bd370607dd27b050"
+        "digest": "sha256:ac10072712dfe9b9a59f47527fe7b6b824d9415c5ef87b7460e44dde6f1cebc5"
       }
     },
     {
@@ -59,7 +59,7 @@
       "mode_id": "build_aware_import",
       "fixture": {
         "id": "dotnet-build-aware-import-input",
-        "digest": "sha256:1231c1423f1903ba85057d977d00f38bfe59c231fc2b2f47bd370607dd27b050"
+        "digest": "sha256:ac10072712dfe9b9a59f47527fe7b6b824d9415c5ef87b7460e44dde6f1cebc5"
       }
     },
     {
@@ -69,7 +69,7 @@
       "mode_id": "build_aware_import",
       "fixture": {
         "id": "dotnet-build-aware-import-input",
-        "digest": "sha256:1231c1423f1903ba85057d977d00f38bfe59c231fc2b2f47bd370607dd27b050"
+        "digest": "sha256:ac10072712dfe9b9a59f47527fe7b6b824d9415c5ef87b7460e44dde6f1cebc5"
       }
     },
     {
@@ -79,7 +79,7 @@
       "mode_id": "build_aware_import",
       "fixture": {
         "id": "dotnet-build-aware-import-input",
-        "digest": "sha256:1231c1423f1903ba85057d977d00f38bfe59c231fc2b2f47bd370607dd27b050"
+        "digest": "sha256:ac10072712dfe9b9a59f47527fe7b6b824d9415c5ef87b7460e44dde6f1cebc5"
       }
     },
     {
@@ -89,7 +89,7 @@
       "mode_id": "symbols_tier2",
       "fixture": {
         "id": "dotnet-symbols-tier2-input",
-        "digest": "sha256:8689e42e082cb454aa61eea0835850d20e218de909f51ab868667484e05c5c89"
+        "digest": "sha256:2918fb78f5d8efc129a152ce71e642004c27fe7cdea1bff9f719a6d0aa968ece"
       }
     },
     {
@@ -99,7 +99,7 @@
       "mode_id": "symbols_tier2",
       "fixture": {
         "id": "dotnet-symbols-tier2-input",
-        "digest": "sha256:8689e42e082cb454aa61eea0835850d20e218de909f51ab868667484e05c5c89"
+        "digest": "sha256:2918fb78f5d8efc129a152ce71e642004c27fe7cdea1bff9f719a6d0aa968ece"
       }
     },
     {
@@ -109,7 +109,7 @@
       "mode_id": "symbols_tier2",
       "fixture": {
         "id": "dotnet-symbols-tier2-input",
-        "digest": "sha256:8689e42e082cb454aa61eea0835850d20e218de909f51ab868667484e05c5c89"
+        "digest": "sha256:2918fb78f5d8efc129a152ce71e642004c27fe7cdea1bff9f719a6d0aa968ece"
       }
     },
     {
@@ -119,7 +119,7 @@
       "mode_id": "symbols_tier2",
       "fixture": {
         "id": "dotnet-symbols-tier2-input",
-        "digest": "sha256:8689e42e082cb454aa61eea0835850d20e218de909f51ab868667484e05c5c89"
+        "digest": "sha256:2918fb78f5d8efc129a152ce71e642004c27fe7cdea1bff9f719a6d0aa968ece"
       }
     },
     {

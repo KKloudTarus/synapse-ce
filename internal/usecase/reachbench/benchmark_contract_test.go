@@ -417,6 +417,42 @@ func TestGeneratedBuildRecipesUseWorkspaceRoot(t *testing.T) {
 	}
 }
 
+func TestDotNetPublishWithoutRestoreUsesMatchingRuntimeRestore(t *testing.T) {
+	contract := DefaultReachabilityBenchmark()
+	for _, test := range []struct {
+		fixtureID   string
+		restoreStep int
+		publishStep int
+	}{
+		{fixtureID: "dotnet-build-aware-import-input", restoreStep: 2, publishStep: 3},
+		{fixtureID: "dotnet-symbols-tier2-input", restoreStep: 0, publishStep: 1},
+	} {
+		t.Run(test.fixtureID, func(t *testing.T) {
+			fixture := fixtureSpecification(t, contract.Fixtures, test.fixtureID)
+			if fixture.Build == nil || len(fixture.Build.Steps) <= test.publishStep {
+				t.Fatalf("dotnet fixture build recipe is incomplete: %+v", fixture.Build)
+			}
+			restore := fixture.Build.Steps[test.restoreStep].Argv
+			publish := fixture.Build.Steps[test.publishStep].Argv
+			if !hasAdjacentArguments(restore, "--runtime", "linux-x64") {
+				t.Fatalf("runtime-specific publish restore argv = %q, want --runtime linux-x64", restore)
+			}
+			if !hasAdjacentArguments(publish, "--runtime", "linux-x64") || !hasAdjacentArguments(publish, "--no-restore", "--configuration") {
+				t.Fatalf("runtime-specific no-restore publish argv = %q", publish)
+			}
+		})
+	}
+}
+
+func hasAdjacentArguments(argv []string, first, second string) bool {
+	for index := 0; index+1 < len(argv); index++ {
+		if argv[index] == first && argv[index+1] == second {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDotNetBuildAwareFixtureUsesLocalPackages(t *testing.T) {
 	contract := DefaultReachabilityBenchmark()
 	root := fixtureMap(t, contract.Fixtures)
@@ -727,11 +763,11 @@ func TestReachabilityBenchmarkLoadersAreStrictDeterministicAndPinned(t *testing.
 		got  string
 		want string
 	}{
-		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:e8a7fe0cb2a93f4a83d8d240b21895d1ab807e9187be8b310eee23c084171bdf"},
+		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:f4e39dcc1a1c22942098da4d4b72c185be4a10613280ab38e7393f6a7e008ceb"},
 		{"oracle", DigestReachabilityOracleMust(t, first.Oracle), "sha256:0299297cb1bacbdab7156536d2de3b21992e1f3c085ab109f95162f4eef6dfe6"},
 		{"challenges", DigestChallengeManifestMust(t, first.Challenges), "sha256:a967a0b5423e79961f28121cc5dfe71e1464850d1e2af0ca9fa74cebfc7db0aa"},
-		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:f3ce36ee69d164620263071965694e3a5a4c6a3c958f5a7691ff307ce231d3c4"},
-		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:103f7ab4b4528c31976a9a8fdf8e43c1f164c94481444d1ccef2b2963791c039"},
+		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:75f41299e88b41463e407f6e8fe56d135a6cf3c00cdc7f47cc8c85172f07a1e4"},
+		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:fcf68618f3cbe678100a858db5a0496287005f6354c95f3679f78694c17d4e13"},
 	} {
 		if item.got != item.want {
 			t.Errorf("%s digest = %s, want %s", item.name, item.got, item.want)
