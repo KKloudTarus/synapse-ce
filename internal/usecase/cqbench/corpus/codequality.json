@@ -60,6 +60,14 @@
       "issues": [
         { "file": "Branches.java", "line": 4, "type": "bug" }
       ]
+    },
+    {
+      "name": "c-dangling-stack-pointer",
+      "language": "c",
+      "fixture": "c-dangling",
+      "issues": [
+        { "file": "sample.c", "line": 3, "type": "bug" }
+      ]
     }
   ]
 }

@@ -19,9 +19,11 @@ jobs:
     name: Owned code-quality engine vs SonarQube CE
     runs-on: ubuntu-latest
     env:
-      # Reviewed external-tool pins. Updating either pin requires reviewing the resulting scorecard diff.
+      # Reviewed external-tool pins. Updating any pin requires reviewing the resulting scorecard diff.
       SONARQUBE_IMAGE: sonarqube:10.7.0-community
       SONAR_SCANNER_IMAGE: sonarsource/sonar-scanner-cli:5.0.1
+      # cppcheck is the C/C++ competitor baseline: SonarQube CE does not analyze C/C++ (Developer Edition only).
+      CPPCHECK_IMAGE: neszt/cppcheck-docker:2.17.1
       CORPUS_DIR: internal/usecase/cqbench/testdata
       REPORT_DIR: ${{ github.workspace }}/.cqbench
       SONAR_HOST: http://localhost:9000
@@ -143,6 +145,23 @@ jobs:
           }' "${REPORT_DIR}/issues.raw.json" "${REPORT_DIR}/hotspots.raw.json" \
             > "${REPORT_DIR}/sonarqube-export.json"
           echo "Reduced export:"; cat "${REPORT_DIR}/sonarqube-export.json"
+
+      - name: Add the cppcheck C/C++ competitor baseline to the export
+        run: |
+          # SonarQube CE cannot analyze C/C++, so cppcheck is the competitor baseline for those languages.
+          # Run it over the corpus C/C++ fixtures and fold its findings into the same flat export the reducer
+          # consumes, so the head-to-head measures the owned engine against the best available free tool per
+          # language. Fixture-artifact noise (unused function, missing system headers) is suppressed.
+          if [ -z "$(find "${CORPUS_DIR}" -type f \( -name '*.c' -o -name '*.cpp' -o -name '*.cc' -o -name '*.h' -o -name '*.hpp' \) -print -quit)" ]; then
+            echo "no C/C++ fixtures; leaving the export unchanged"
+          else
+            docker run --rm -v "${{ github.workspace }}/${CORPUS_DIR}:/src" -w /src "${CPPCHECK_IMAGE}" \
+              --enable=warning,portability --suppress=missingIncludeSystem --suppress=missingInclude \
+              --suppress=unusedFunction --xml --xml-version=2 . 2> "${REPORT_DIR}/cppcheck.xml" || true
+            python3 scripts/cqbench/cppcheck_to_export.py \
+              "${SONAR_PROJECT}" "${REPORT_DIR}/cppcheck.xml" "${REPORT_DIR}/sonarqube-export.json"
+            echo "Merged export:"; cat "${REPORT_DIR}/sonarqube-export.json"
+          fi
 
       - name: Record the head-to-head and gate the owned ratchet
         env:
