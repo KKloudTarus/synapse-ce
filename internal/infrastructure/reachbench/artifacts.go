@@ -526,7 +526,7 @@ func (manifest LifecycleManifest) Validate() error {
 			return err
 		}
 	case RouteCandidate:
-		if manifest.Purpose != measurement.CandidateAcceptance || manifest.FinalMode != FinalAcceptance || manifest.BaselineAllowlist != nil {
+		if manifest.Purpose != measurement.CandidateAcceptance || manifest.FinalMode != FinalAcceptance || manifest.BaselineAllowlist != nil || manifest.Analyzer.ID != AnalyzerSubjectID || manifest.Analyzer.Commit != manifest.Harness.Commit || manifest.Analyzer.Tree != manifest.Harness.Tree {
 			return errors.New("invalid candidate lifecycle manifest")
 		}
 		if err := manifest.Authority.Validate(); err != nil || manifest.Authority.ReviewedHarnessID != manifest.Harness.ID {

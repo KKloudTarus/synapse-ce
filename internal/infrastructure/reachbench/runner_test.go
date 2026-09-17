@@ -66,6 +66,13 @@ func TestRunDerivesHarnessCommitTreeAndCIKey(t *testing.T) {
 	if result.Manifest.Analyzer.Commit != fixture.harness.Commit || result.Manifest.Analyzer.Tree != fixture.harness.Tree {
 		t.Fatalf("local analyzer did not derive from harness checkout: %+v", result.Manifest.Analyzer)
 	}
+	var report measurement.MeasurementReport
+	if _, err := readCanonicalJSON(filepath.Join(result.Output, "repetition-1", "report.json"), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !report.Candidate.Evaluated || report.Candidate.Accepted {
+		t.Fatalf("local diagnostic report must remain publishable when candidate acceptance fails: %+v", report.Candidate)
+	}
 }
 
 func TestEnvelopeRoutesRejectDowngradesAndConflatedIdentities(t *testing.T) {
@@ -102,9 +109,18 @@ func TestEnvelopeRoutesRejectDowngradesAndConflatedIdentities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate = fixture.envelope(RouteCandidate, measurement.CandidateAcceptance, FinalAcceptance, RevisionIdentity{ID: AnalyzerSubjectID, Commit: fixture.harness.Commit, Tree: fixture.harness.Tree}, fixture.candidate.ActiveSnapshot)
-	if err := runner.validateAuthoritativeEnvelope(context.Background(), candidate, fixture.facts("local/fixed"), fixture.controllerBundleRef); err == nil || !strings.Contains(err.Error(), "distinct") {
-		t.Fatalf("candidate analyzer matched the runtime harness: %v", err)
+	candidate = fixture.envelope(RouteCandidate, measurement.CandidateAcceptance, FinalAcceptance, fixture.candidateAnalyzer, fixture.candidate.ActiveSnapshot)
+	if err := runner.validateAuthoritativeEnvelope(context.Background(), candidate, fixture.facts("local/fixed"), fixture.controllerBundleRef); err != nil {
+		t.Fatalf("candidate analyzer revision matching the runtime harness was rejected: %v", err)
+	}
+	candidate.Analyzer.Commit = strings.Repeat("3", 40)
+	if err := runner.validateAuthoritativeEnvelope(context.Background(), candidate, fixture.facts("local/fixed"), fixture.controllerBundleRef); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("candidate analyzer with an unrelated commit was accepted: %v", err)
+	}
+	candidate = fixture.envelope(RouteCandidate, measurement.CandidateAcceptance, FinalAcceptance, fixture.candidateAnalyzer, fixture.candidate.ActiveSnapshot)
+	candidate.Analyzer.Tree = strings.Repeat("4", 40)
+	if err := runner.validateAuthoritativeEnvelope(context.Background(), candidate, fixture.facts("local/fixed"), fixture.controllerBundleRef); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("candidate analyzer with an unrelated tree was accepted: %v", err)
 	}
 	candidate = fixture.envelope(RouteCandidate, measurement.CandidateAcceptance, FinalAcceptance, fixture.candidateAnalyzer, fixture.candidate.ActiveSnapshot)
 	candidate.Harness.ID = candidate.Analyzer.ID
@@ -161,7 +177,7 @@ func TestAuthoritativeRunIgnoresCheckoutBundleMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := runner.Run(context.Background(), nil)
-	if err != nil {
+	if !errors.Is(err, errAuthoritativeCandidateRejected) {
 		t.Fatalf("authoritative route consulted mutated checkout bundle: %v", err)
 	}
 	if !result.Authoritative || result.Manifest.Bundle != fixture.controllerBundleRef {
@@ -448,14 +464,14 @@ func TestRunPublishesOnlySanitizedDigestBoundArtifactsAndReplays(t *testing.T) {
 	}
 }
 
-func TestAuthoritativeCandidateEnvelopePassesDistinctAnalyzerAndPublishesAuthority(t *testing.T) {
+func TestAuthoritativeCandidateRejectionPublishesSanitizedEvidence(t *testing.T) {
 	fixture := newFixture(t)
 	envelope := fixture.envelope(RouteCandidate, measurement.CandidateAcceptance, FinalAcceptance, fixture.candidateAnalyzer, fixture.candidate.ActiveSnapshot)
 	envelopePath := fixture.writeEnvelope(t, envelope)
 	captures := 0
 	runner, err := NewRunner(fixture.dependencies(map[string]string{ControllerEnvelopeEnvironment: envelopePath}), captureFunc(func(ctx context.Context, request CaptureRequest) (CaptureResult, error) {
 		captures++
-		if request.Analyzer != fixture.candidateAnalyzer || request.Analyzer.Commit == fixture.harness.Commit {
+		if request.Analyzer != fixture.candidateAnalyzer || request.Analyzer.ID == fixture.harness.ID || request.Analyzer.Commit != fixture.harness.Commit || request.Analyzer.Tree != fixture.harness.Tree {
 			return CaptureResult{}, fmt.Errorf("capture received incorrect candidate analyzer %+v", request.Analyzer)
 		}
 		return validCapture(fixture.expected)(ctx, request)
@@ -464,8 +480,8 @@ func TestAuthoritativeCandidateEnvelopePassesDistinctAnalyzerAndPublishesAuthori
 		t.Fatal(err)
 	}
 	result, err := runner.Run(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, errAuthoritativeCandidateRejected) {
+		t.Fatalf("candidate rejection error = %v, want %v", err, errAuthoritativeCandidateRejected)
 	}
 	if !result.Authoritative || result.Manifest.Route != RouteCandidate || result.Manifest.FinalMode != FinalAcceptance {
 		t.Fatalf("candidate controller run = %+v", result.Manifest)
@@ -473,8 +489,27 @@ func TestAuthoritativeCandidateEnvelopePassesDistinctAnalyzerAndPublishesAuthori
 	if captures != fixedRepetitions*len(result.Manifest.Cells) {
 		t.Fatalf("captures = %d", captures)
 	}
+	if result.Manifest.Analyzer.ID == result.Manifest.Harness.ID || result.Manifest.Analyzer.Commit != result.Manifest.Harness.Commit || result.Manifest.Analyzer.Tree != result.Manifest.Harness.Tree {
+		t.Fatalf("candidate lifecycle identity did not preserve separate subjects at the checkout revision: %+v", result.Manifest)
+	}
+	if err := result.Manifest.Validate(); err != nil {
+		t.Fatalf("candidate lifecycle manifest rejected matching analyzer revision: %v", err)
+	}
+	wrongCommit := result.Manifest
+	wrongCommit.Analyzer.Commit = strings.Repeat("3", 40)
+	if err := wrongCommit.Validate(); err == nil {
+		t.Fatal("candidate lifecycle manifest accepted an unrelated analyzer commit")
+	}
+	wrongTree := result.Manifest
+	wrongTree.Analyzer.Tree = strings.Repeat("4", 40)
+	if err := wrongTree.Validate(); err == nil {
+		t.Fatal("candidate lifecycle manifest accepted an unrelated analyzer tree")
+	}
 	if result.Manifest.Authority != envelope.Authority {
 		t.Fatalf("published authority = %+v, want %+v", result.Manifest.Authority, envelope.Authority)
+	}
+	if err := replaySanitizedBundle(context.Background(), result.Output, result.Manifest, SemanticRepeatResult{SchemaVersion: RepeatSchemaVersion, Repetitions: fixedRepetitions, SemanticallyEqual: true, ReportIDs: result.Manifest.ReportIDs, Cells: repeatCells(t, result.Output)}, fixture.facts("local/fixed")); err != nil {
+		t.Fatalf("replay rejected the published candidate evidence: %v", err)
 	}
 	published, err := os.ReadFile(filepath.Join(result.Output, "lifecycle-manifest.json"))
 	if err != nil {
@@ -482,6 +517,13 @@ func TestAuthoritativeCandidateEnvelopePassesDistinctAnalyzerAndPublishesAuthori
 	}
 	if !bytes.Contains(published, []byte("\"class\":\"procedural\"")) || !bytes.Contains(published, []byte("\"reviewed_harness\":true")) || !bytes.Contains(published, []byte("\"reviewed_harness_id\":\""+ReviewedHarnessID+"\"")) {
 		t.Fatalf("publication omitted procedural authority: %s", published)
+	}
+	var report measurement.MeasurementReport
+	if _, err := readCanonicalJSON(filepath.Join(result.Output, "repetition-1", "report.json"), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !report.Candidate.Evaluated || report.Candidate.Accepted || len(report.Candidate.Reasons) == 0 {
+		t.Fatalf("published candidate rejection evidence = %+v", report.Candidate)
 	}
 	var persisted LifecycleManifest
 	if _, err := readCanonicalJSON(filepath.Join(result.Output, "lifecycle-manifest.json"), &persisted); err != nil {
@@ -524,6 +566,13 @@ func TestProtectedBaselineAllowsReviewedAdditionsModificationsAndPackageLocalAda
 	}
 	if _, err := os.Stat(filepath.Join(result.Output, baselineAllowlistResultPath())); err != nil {
 		t.Fatalf("baseline allowlist result was not published: %v", err)
+	}
+	var report measurement.MeasurementReport
+	if _, err := readCanonicalJSON(filepath.Join(result.Output, "repetition-1", "report.json"), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Candidate.Accepted {
+		t.Fatalf("protected baseline must not require candidate acceptance: %+v", report.Candidate)
 	}
 }
 
@@ -690,7 +739,7 @@ func newFixture(t *testing.T) fixture {
 	temporaryRoot := t.TempDir()
 	harness := HarnessIdentity{ID: ReviewedHarnessID, Commit: strings.Repeat("1", 40), Tree: strings.Repeat("2", 40)}
 	baselineAnalyzer := RevisionIdentity{ID: AnalyzerSubjectID, Commit: measurement.TrustedBaselineRevision, Tree: strings.Repeat("5", 40)}
-	candidateAnalyzer := RevisionIdentity{ID: AnalyzerSubjectID, Commit: strings.Repeat("3", 40), Tree: strings.Repeat("4", 40)}
+	candidateAnalyzer := RevisionIdentity{ID: AnalyzerSubjectID, Commit: harness.Commit, Tree: harness.Tree}
 	baseline, candidate, expected := measurementTemplates(t)
 	allowlist := BaselineAllowlist{
 		SchemaVersion: BaselineAllowlistSchemaVersion,

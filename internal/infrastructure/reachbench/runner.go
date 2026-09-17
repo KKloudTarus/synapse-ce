@@ -20,6 +20,8 @@ const (
 	reachabilityCleanupTimeout = 2 * time.Minute
 )
 
+var errAuthoritativeCandidateRejected = errors.New("authoritative candidate reachability benchmark rejected")
+
 // Run rejects every argument, derives all lifecycle identity internally, and publishes only after cleanup succeeds.
 func (runner *Runner) Run(ctx context.Context, args []string) (result Result, runErr error) {
 	if len(args) != 0 {
@@ -249,7 +251,11 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 	if err := publication.Commit(ctx); err != nil {
 		return Result{}, fmt.Errorf("publish reachability lifecycle: %w", err)
 	}
-	return Result{RunKey: facts.runKey, Authoritative: authoritative, Output: facts.output, Manifest: manifest}, nil
+	result = Result{RunKey: facts.runKey, Authoritative: authoritative, Output: facts.output, Manifest: manifest}
+	if authoritative && envelope.Route == RouteCandidate && !reports[0].Candidate.Accepted {
+		return result, errAuthoritativeCandidateRejected
+	}
+	return result, nil
 }
 
 func reachabilityEvidenceLimits() benchcycle.EvidenceLimits {
@@ -316,8 +322,8 @@ func (runner *Runner) validateAuthoritativeEnvelope(ctx context.Context, envelop
 	if envelope.Harness != facts.harness || envelope.Authority.ReviewedHarnessID != facts.harness.ID {
 		return errors.New("controller envelope harness identity does not match independently derived runtime facts")
 	}
-	if envelope.Route == RouteCandidate && (envelope.Analyzer.Commit == facts.harness.Commit || envelope.Analyzer.Tree == facts.harness.Tree) {
-		return errors.New("controller candidate analyzer identity must be distinct from the runtime harness")
+	if envelope.Route == RouteCandidate && (envelope.Analyzer.Commit != facts.harness.Commit || envelope.Analyzer.Tree != facts.harness.Tree) {
+		return errors.New("controller candidate analyzer revision does not match the independently derived runtime harness")
 	}
 	if envelope.Route == RouteProtectedBaseline {
 		analyzer, err := runner.deriveTrustedBaselineAnalyzer(ctx)
