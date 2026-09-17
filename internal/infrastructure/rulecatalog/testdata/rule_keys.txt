@@ -843,6 +843,10 @@ css:todo-marker
 css:unknown-property
 css:vendor-prefix-no-standard
 css:zero-with-unit
+dart-avoid-print
+dart-cleartext-http
+dart-empty-catch
+dart-hardcoded-secret
 databricks-token
 datadog-api-key
 datadog-application-key
@@ -3113,6 +3117,8 @@ text:overlong-line
 text:oversized-file
 text:trailing-whitespace
 text:utf8-bom
+tf-cleartext-http-endpoint
+tf-deprecated-interpolation
 travis-ci-token
 ts-array-type-generic
 ts-as-any-cast

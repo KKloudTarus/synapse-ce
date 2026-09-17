@@ -22,7 +22,7 @@ describe('project analysis origin', () => {
     }) } as Response)
     const analysis = await api.projectAnalysis('app', 'a1')
     expect(analysis.origin).toBe('ci')
-    expect(analysis.ci).toEqual({ provider: 'github-actions', runUrl: 'https://github.com/acme/app/actions/runs/7', runId: '7', branch: 'main', actor: 'octocat' })
+    expect(analysis.ci).toEqual({ provider: 'github-actions', runUrl: 'https://github.com/acme/app/actions/runs/7', runId: '7', branch: 'main', actor: 'octocat', pullRequest: '', targetBranch: '' })
   })
 
   it('reads a server analysis, and a row written before the field existed, as origin server', async () => {

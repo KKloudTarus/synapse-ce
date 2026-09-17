@@ -41,7 +41,7 @@ type projectService interface {
 	GetMeasures(context.Context, string, string, string, []string, int, string) (projectuc.ProjectMeasureResponse, error)
 	GetBehavioralHotspots(context.Context, shared.ID, string, string, string, int) (projectuc.BehavioralHotspotsResponse, error)
 	ListAnalyses(context.Context, shared.ID, string, string, int, time.Time, shared.ID) ([]projectanalysis.Analysis, bool, error)
-	Branches(context.Context, shared.ID, string) ([]string, error)
+	Branches(context.Context, shared.ID, string) ([]projectanalysis.BranchInfo, error)
 	GetAnalysis(context.Context, shared.ID, string, string) (projectanalysis.Analysis, error)
 	ListCodeFiles(context.Context, shared.ID, string, string) ([]projectuc.CodeFile, projectanalysis.SourceCapabilities, error)
 	ListCodeFilesWithFilter(context.Context, shared.ID, string, string, projectuc.CodeFileFilter) ([]projectuc.CodeFile, projectanalysis.SourceCapabilities, error)
@@ -314,7 +314,7 @@ func (rt *Router) latestProjectAnalysis(w http.ResponseWriter, r *http.Request) 
 }
 
 type projectBranchesResponse struct {
-	Branches []string `json:"branches"`
+	Branches []projectanalysis.BranchInfo `json:"branches"`
 }
 
 func (rt *Router) listProjectBranches(w http.ResponseWriter, r *http.Request) {
@@ -324,7 +324,7 @@ func (rt *Router) listProjectBranches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if branches == nil {
-		branches = []string{}
+		branches = []projectanalysis.BranchInfo{}
 	}
 	writeJSON(w, http.StatusOK, projectBranchesResponse{Branches: branches})
 }

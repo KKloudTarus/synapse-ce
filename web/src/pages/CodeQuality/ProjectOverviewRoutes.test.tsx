@@ -100,7 +100,10 @@ describe('Project Overview routes', () => {
   })
 
   it('scopes the overview to the branch chosen in the selector and reflects it in the URL', async () => {
-    vi.mocked(api.projectBranches).mockResolvedValue(['develop', 'main'])
+    vi.mocked(api.projectBranches).mockResolvedValue([
+      { name: 'develop', kind: 'long_lived' },
+      { name: 'main', kind: 'long_lived' },
+    ])
     const router = renderProjectRoute('/code-quality/projects/synapse')
     await waitFor(() => expect(api.projectOverview).toHaveBeenCalledWith('synapse', 'main'))
     const select = await screen.findByLabelText('Branch')

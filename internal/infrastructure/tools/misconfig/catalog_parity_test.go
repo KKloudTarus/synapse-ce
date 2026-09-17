@@ -70,6 +70,12 @@ func TestCatalogParity(t *testing.T) {
 		if !misconfigLanguages[catalogRule.Language] {
 			continue
 		}
+		// A rule tagged "sast" is a SAST language-pack rule for the same language (Terraform/Dockerfile
+		// also have language-pack quality/hotspot rules, #1135), not a misconfiguration rule; the IaC
+		// misconfig engine does not own it, so it must not appear in this engine's inventory.
+		if ruleHasTag(catalogRule, "sast") {
+			continue
+		}
 
 		if _, ok := inventory[string(catalogRule.Key)]; !ok {
 			t.Errorf(
@@ -179,4 +185,13 @@ func TestCatalogParity(t *testing.T) {
 			}
 		}
 	}
+}
+
+func ruleHasTag(r domainrule.Rule, tag string) bool {
+	for _, t := range r.Tags {
+		if t == tag {
+			return true
+		}
+	}
+	return false
 }

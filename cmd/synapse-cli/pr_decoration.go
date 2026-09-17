@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
@@ -57,4 +58,18 @@ func triggerGateDecorationFromEnv(ctx context.Context, decorator ports.PRDecorat
 	if err := decorator.Decorate(ctx, ports.PRDecoration{Target: target, Gate: result, Summary: summary, Annotations: annotations}); err != nil {
 		slog.Warn("PR decoration failed; quality gate result is unchanged")
 	}
+}
+
+// prBaseRef resolves the new-code diff base for a scan. An explicit --base always wins. Otherwise a
+// pull-request scan (PR number + target branch both known from CI) defaults to the merge target branch
+// as origin/<target>, so new code is scoped to what the PR changes relative to where it will merge.
+// An image scan, or a non-PR scan, keeps the given base unchanged.
+func prBaseRef(baseRef string, image bool, ci projectanalysis.CIContext) string {
+	if strings.TrimSpace(baseRef) != "" || image {
+		return baseRef
+	}
+	if strings.TrimSpace(ci.PullRequest) != "" && strings.TrimSpace(ci.TargetBranch) != "" {
+		return "origin/" + strings.TrimSpace(ci.TargetBranch)
+	}
+	return baseRef
 }

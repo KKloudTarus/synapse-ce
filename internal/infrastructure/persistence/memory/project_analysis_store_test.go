@@ -191,3 +191,42 @@ func TestProjectAnalysisStoreFiltersByBranch(t *testing.T) {
 		t.Fatalf("overall latest=%+v err=%v", overall, err)
 	}
 }
+
+func TestProjectAnalysisStorePruneBranchAnalyses(t *testing.T) {
+	ctx := context.Background()
+	store := NewProjectAnalysisStore()
+	// Five analyses on a feature branch, one on main.
+	for i := 1; i <= 5; i++ {
+		a := projectanalysis.Analysis{ID: "feat-" + string(rune('0'+i)), TenantID: "tenant", ProjectID: "project", CreatedAt: time.Unix(int64(i), 0), SourceRef: "feature/x"}
+		if err := store.SaveWithResult(ctx, a, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	main := projectanalysis.Analysis{ID: "main-1", TenantID: "tenant", ProjectID: "project", CreatedAt: time.Unix(9, 0), SourceRef: "main"}
+	if err := store.SaveWithResult(ctx, main, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// keep < 1 is a no-op.
+	if n, err := store.PruneBranchAnalyses(ctx, "tenant", "project", "feature/x", 0); err != nil || n != 0 {
+		t.Fatalf("keep=0 deleted=%d err=%v, want 0", n, err)
+	}
+	// Keep the newest 2 of the feature branch; the other 3 are deleted.
+	n, err := store.PruneBranchAnalyses(ctx, "tenant", "project", "feature/x", 2)
+	if err != nil || n != 3 {
+		t.Fatalf("prune deleted=%d err=%v, want 3", n, err)
+	}
+	list, _, err := store.List(ctx, "tenant", "project", "feature/x", 10, time.Time{}, "")
+	if err != nil || len(list) != 2 || list[0].ID != "feat-5" || list[1].ID != "feat-4" {
+		t.Fatalf("kept feature analyses=%+v err=%v, want the newest two", list, err)
+	}
+	// The main branch is untouched.
+	mainList, _, err := store.List(ctx, "tenant", "project", "main", 10, time.Time{}, "")
+	if err != nil || len(mainList) != 1 || mainList[0].ID != "main-1" {
+		t.Fatalf("main analyses=%+v, prune must not touch another branch", mainList)
+	}
+	// Pruning below the surviving count is a no-op.
+	if n, err := store.PruneBranchAnalyses(ctx, "tenant", "project", "feature/x", 5); err != nil || n != 0 {
+		t.Fatalf("second prune deleted=%d err=%v, want 0", n, err)
+	}
+}
