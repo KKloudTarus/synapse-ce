@@ -958,6 +958,10 @@ func main() {
 	projectService.SetRuleCatalog(ruleCatalog)
 	qualityProfileService := qualityprofilesuc.NewService(qualityProfileStore, ruleCatalog, projectRepo, auditLog, clock)
 	projectService.SetQualityProfiles(qualityProfileService)
+	// Retention: after a new analysis lands on a short-lived (feature/PR) branch, keep only the newest
+	// N and prune the rest, so transient branch history does not accumulate. Long-lived branches are
+	// retained in full. A value < 1 disables pruning.
+	projectService.SetShortLivedBranchKeep(cfg.ProjectAnalysisShortLivedKeep)
 	// Measures API cursor signing: an HMAC-SHA256 key that prevents pagination token tampering.
 	// Production MUST supply at least 32 bytes via SYNAPSE_MEASURE_CURSOR_SECRET; dev gets an
 	// ephemeral random key (cursors won't survive a restart, which is acceptable for dev).

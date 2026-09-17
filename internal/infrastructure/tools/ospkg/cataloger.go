@@ -39,6 +39,10 @@ const (
 	apkDBPath  = "lib/apk/db/installed"
 	rpmDBPath  = "var/lib/rpm/rpmdb.sqlite" // RHEL9+/Fedora/UBI9 sqlite backend
 	rpmBDBPath = "var/lib/rpm/Packages"     // RHEL<=8/CentOS/UBI8/Amazon Linux 2 BerkeleyDB backend
+	// Fedora and RHEL9+ also relocate the rpmdb under /usr/lib/sysimage/rpm and symlink /var/lib/rpm to it; a
+	// live host resolves the symlink through the primary path, but an offline/extracted rootfs may carry only
+	// the relocated file, so the sqlite backend probes both locations.
+	rpmSqliteSysimagePath = "usr/lib/sysimage/rpm/rpmdb.sqlite"
 	// ndb backend (openSUSE/SLE, rpm >= 4.15). openSUSE Leap relocates the rpmdb under
 	// /usr/lib/sysimage/rpm and symlinks /var/lib/rpm to it, so both locations are probed.
 	rpmNDBPath         = "var/lib/rpm/Packages.db"
@@ -50,7 +54,7 @@ const (
 // coverage probe never claims a DB the cataloger cannot read. All three rpm backends are covered: sqlite
 // (rpmDBPath), BerkeleyDB (rpmBDBPath), and ndb (rpmNDBPath and its relocated openSUSE location).
 func SupportedDBPaths() []string {
-	return []string{dpkgDBPath, apkDBPath, rpmDBPath, rpmBDBPath, rpmNDBPath, rpmNDBSysimagePath}
+	return []string{dpkgDBPath, apkDBPath, rpmDBPath, rpmSqliteSysimagePath, rpmBDBPath, rpmNDBPath, rpmNDBSysimagePath}
 }
 
 // debianFamilyIDs are the dpkg os-release IDs the advisory matcher can key (osDistroEcosystem handles Debian +

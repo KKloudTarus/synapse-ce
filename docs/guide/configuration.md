@@ -236,6 +236,7 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | --- | --- | --- |
 | `SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR` | `data/project-source-artifacts` | Operator-owned local storage for immutable, gzip-compressed Project Code head/base artifacts. Restrict OS access, encrypt/back up it according to source-data policy, and do not place it on a shared writable volume. The full Compose stack mounts its dedicated `project-source-artifacts` named volume here. |
 | `SYNAPSE_PROJECT_SOURCE_RETENTION` | `2160h` (90 days) | How long captured analysis artifacts remain available. Startup cleanup removes expired analysis directories; project deletion removes all of that project's artifacts. Legacy analyses are never backfilled. |
+| `SYNAPSE_PROJECT_ANALYSIS_SHORTLIVED_KEEP` | `20` | How many of the newest analyses to keep on a short-lived (feature/pull-request) branch. After a new analysis is recorded on such a branch, older ones beyond this count are pruned. Long-lived branches (main/develop, release lines, the project default) are retained in full. Set `0` to disable pruning and keep all history. |
 | `SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES` | `2097152` | Maximum captured source file size. Bigger files are retained as unavailable metadata. |
 | `SYNAPSE_PROJECT_SOURCE_MAX_FILES` | `10000` | Maximum source files captured for one analysis. |
 | `SYNAPSE_PROJECT_SOURCE_MAX_BYTES` | `524288000` | Total source-artifact capture budget per analysis. |

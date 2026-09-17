@@ -46,6 +46,13 @@ import { ApiError, blobDownload, getToken, getOnUnauthorized, req } from './clie
 import type { ProjectWire } from './wire'
 import { mapScanJob, mapCodeQualityReport } from './scan'
 
+/** A branch recorded for a project, with its lifecycle classification. A short_lived (feature/PR)
+ * branch is pruned to recent analyses; a long_lived branch is retained in full. */
+export interface ProjectBranch {
+  name: string
+  kind: 'long_lived' | 'short_lived'
+}
+
 function mapQualityProfile(r: any): QualityProfile {
   const activatedRules: Record<string, { severity: string }> = {}
   for (const [k, v] of Object.entries(r?.activated_rules ?? {})) {
@@ -479,10 +486,22 @@ export const codeQualityApi = {
   projectOverview: async (key: string, branch = ''): Promise<ProjectOverview> =>
     mapProjectOverviewResponse(await req(`/projects/${encodeURIComponent(key)}/overview${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`)),
 
-  /** The distinct branches this project has recorded analyses on, sorted; empty when never analyzed. */
-  projectBranches: async (key: string): Promise<string[]> => {
+  /** The distinct branches this project has recorded analyses on, sorted, each with its lifecycle
+   * classification; empty when never analyzed. */
+  projectBranches: async (key: string): Promise<ProjectBranch[]> => {
     const r = await req(`/projects/${encodeURIComponent(key)}/branches`)
-    return Array.isArray(r?.branches) ? r.branches.filter((b: unknown): b is string => typeof b === 'string') : []
+    if (!Array.isArray(r?.branches)) return []
+    return r.branches
+      .map((b: unknown): ProjectBranch | null => {
+        if (b && typeof b === 'object' && typeof (b as { name?: unknown }).name === 'string') {
+          const kind = (b as { kind?: unknown }).kind
+          return { name: (b as { name: string }).name, kind: kind === 'short_lived' ? 'short_lived' : 'long_lived' }
+        }
+        // Tolerate the legacy string[] shape so an older server still populates the selector.
+        if (typeof b === 'string') return { name: b, kind: 'long_lived' }
+        return null
+      })
+      .filter((b: ProjectBranch | null): b is ProjectBranch => b !== null)
   },
 
   projectDependencyGraph: async (key: string, signal?: AbortSignal): Promise<ProjectDependencyGraph> =>

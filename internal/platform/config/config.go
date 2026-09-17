@@ -147,11 +147,12 @@ type Config struct {
 	EngagementSourceDir string
 	// ProjectSourceArtifactDir retains immutable, analysis-owned Code source snapshots.
 	// It must be operator-owned; source contents are never fetched again at read time.
-	ProjectSourceArtifactDir  string
-	ProjectSourceRetention    time.Duration
-	ProjectSourceMaxFileBytes int64
-	ProjectSourceMaxFiles     int
-	ProjectSourceMaxBytes     int64
+	ProjectSourceArtifactDir      string
+	ProjectSourceRetention        time.Duration
+	ProjectAnalysisShortLivedKeep int
+	ProjectSourceMaxFileBytes     int64
+	ProjectSourceMaxFiles         int
+	ProjectSourceMaxBytes         int64
 	// ProjectGitComparisonDepth bounds history fetched to resolve an immutable
 	// Code comparison base; comparison degrades gracefully when insufficient.
 	ProjectGitComparisonDepth int
@@ -848,27 +849,28 @@ func Load() Config {
 		// Grype/Trivy/OSV-Scanner – a higher floor silently hides detected vulns and reads as
 		// "missing vulns". Prioritization is done by risk priority (KEV→EPSS×CVSS), not by
 		// dropping findings; raise this floor explicitly to trim a report's actionable set.
-		FindingMinSeverity:        getenv("SYNAPSE_FINDING_MIN_SEVERITY", "info"),
-		IgnoreUnfixed:             getbool("SYNAPSE_IGNORE_UNFIXED", false),
-		Offline:                   getbool("SYNAPSE_OFFLINE", false),
-		MaxWorkspaceBytes:         getint64("SYNAPSE_MAX_WORKSPACE_BYTES", 2<<30),
-		ProjectUploadDir:          getenv("SYNAPSE_PROJECT_UPLOAD_DIR", "data/project-uploads"),
-		EngagementSourceDir:       engagementSourceDir(),
-		ProjectSourceArtifactDir:  projectSourceArtifactDir(),
-		ProjectSourceRetention:    getduration("SYNAPSE_PROJECT_SOURCE_RETENTION", 90*24*time.Hour),
-		ProjectSourceMaxFileBytes: getint64("SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES", 2<<20),
-		ProjectSourceMaxFiles:     getint("SYNAPSE_PROJECT_SOURCE_MAX_FILES", 10_000),
-		ProjectSourceMaxBytes:     getint64("SYNAPSE_PROJECT_SOURCE_MAX_BYTES", 500<<20),
-		ProjectGitComparisonDepth: getint("SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH", 256),
-		BlobEndpoint:              getenv("SYNAPSE_BLOB_ENDPOINT", ""),
-		BlobAccessKey:             getenv("SYNAPSE_BLOB_ACCESS_KEY", ""),
-		BlobSecretKey:             getenv("SYNAPSE_BLOB_SECRET_KEY", ""),
-		BlobBucket:                getenv("SYNAPSE_BLOB_BUCKET", "synapse-evidence"),
-		BlobUseSSL:                getbool("SYNAPSE_BLOB_USE_SSL", false),
-		ReconTimeout:              getduration("SYNAPSE_RECON_TIMEOUT", 3*time.Minute),
-		ReconMaxOutput:            getint("SYNAPSE_RECON_MAX_OUTPUT", 8<<20),
-		ReconConcurrency:          getint("SYNAPSE_RECON_CONCURRENCY", 3),
-		ReconQueueSize:            getint("SYNAPSE_RECON_QUEUE", 64),
+		FindingMinSeverity:            getenv("SYNAPSE_FINDING_MIN_SEVERITY", "info"),
+		IgnoreUnfixed:                 getbool("SYNAPSE_IGNORE_UNFIXED", false),
+		Offline:                       getbool("SYNAPSE_OFFLINE", false),
+		MaxWorkspaceBytes:             getint64("SYNAPSE_MAX_WORKSPACE_BYTES", 2<<30),
+		ProjectUploadDir:              getenv("SYNAPSE_PROJECT_UPLOAD_DIR", "data/project-uploads"),
+		EngagementSourceDir:           engagementSourceDir(),
+		ProjectSourceArtifactDir:      projectSourceArtifactDir(),
+		ProjectSourceRetention:        getduration("SYNAPSE_PROJECT_SOURCE_RETENTION", 90*24*time.Hour),
+		ProjectAnalysisShortLivedKeep: getint("SYNAPSE_PROJECT_ANALYSIS_SHORTLIVED_KEEP", 20),
+		ProjectSourceMaxFileBytes:     getint64("SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES", 2<<20),
+		ProjectSourceMaxFiles:         getint("SYNAPSE_PROJECT_SOURCE_MAX_FILES", 10_000),
+		ProjectSourceMaxBytes:         getint64("SYNAPSE_PROJECT_SOURCE_MAX_BYTES", 500<<20),
+		ProjectGitComparisonDepth:     getint("SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH", 256),
+		BlobEndpoint:                  getenv("SYNAPSE_BLOB_ENDPOINT", ""),
+		BlobAccessKey:                 getenv("SYNAPSE_BLOB_ACCESS_KEY", ""),
+		BlobSecretKey:                 getenv("SYNAPSE_BLOB_SECRET_KEY", ""),
+		BlobBucket:                    getenv("SYNAPSE_BLOB_BUCKET", "synapse-evidence"),
+		BlobUseSSL:                    getbool("SYNAPSE_BLOB_USE_SSL", false),
+		ReconTimeout:                  getduration("SYNAPSE_RECON_TIMEOUT", 3*time.Minute),
+		ReconMaxOutput:                getint("SYNAPSE_RECON_MAX_OUTPUT", 8<<20),
+		ReconConcurrency:              getint("SYNAPSE_RECON_CONCURRENCY", 3),
+		ReconQueueSize:                getint("SYNAPSE_RECON_QUEUE", 64),
 
 		ReconAllowCapabilitySensitive: getbool("SYNAPSE_RECON_ALLOW_CAPABILITY_SENSITIVE", false),
 
@@ -910,38 +912,38 @@ func Load() Config {
 		// absent. Set the flag to false to opt out. Capabilities that need external setup or would be
 		// unsafe unsandboxed stay OFF by default (sandbox, agent/LLM, taint, maven/gradle resolvers,
 		// jarhash egress) – see their fields below.
-		JudgmentsEnabled:                            getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
-		SASTEnabled:                                 getbool("SYNAPSE_SAST_ENABLED", true),
-		SecretScanEnabled:                           getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
-		SecretHistoryEnabled:                        getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
-		SecretVerifyEnabled:                         getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
-		SecretVerifyRPS:                             getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
-		SecretVerifyVaultAddr:                       strings.TrimSpace(getenv("SYNAPSE_SECRET_VERIFY_VAULT_ADDR", "")),
-		MisconfigEnabled:                            getbool("SYNAPSE_MISCONFIG_ENABLED", true),
-		SuppressionEnabled:                          getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
-		VEXEnabled:                                  getbool("SYNAPSE_VEX_ENABLED", true),
-		ComplianceEnabled:                           getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
-		DetectionPriority:                           os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
-		DBMaxAgeDays:                                getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
-		ScanCacheEnabled:                            getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
-		ScanCacheDir:                                os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
-		ImageRootFSEnabled:                          getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
-		OwnedAdvisoryEnabled:                        getbool("SYNAPSE_OWNED_ADVISORY", true),
-		SymbolOverlayDir:                            getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
-		ReachabilityEnabled:                         getbool("SYNAPSE_REACHABILITY_ENABLED", true),
-		PyReachabilityEnabled:                       getbool("SYNAPSE_PYREACH_ENABLED", true),
-		PySemanticReachabilityEnabled:               getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
-		ASTBin:                                      os.Getenv("SYNAPSE_AST_BIN"),
-		PythonTaintEnabled:                          getbool("SYNAPSE_PYTAINT_ENABLED", true),
-		TaintRulesFile:                              strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
-		JsTaintEnabled:                              getbool("SYNAPSE_JSTAINT_ENABLED", false),
-		JavaTaintEnabled:                            getbool("SYNAPSE_JAVATAINT_ENABLED", false),
-		TriScoreReassessEnabled:                     getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
-		FleetCorrelationEnabled:                     getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
-		FleetCorrelationWindow:                      getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
-		FleetCorrelationMaxPerIncident:              getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
-		FleetCorrelationPageSize:                    getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
-		FleetCorrelationMaxActiveSessions:           getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
+		JudgmentsEnabled:                  getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
+		SASTEnabled:                       getbool("SYNAPSE_SAST_ENABLED", true),
+		SecretScanEnabled:                 getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
+		SecretHistoryEnabled:              getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
+		SecretVerifyEnabled:               getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
+		SecretVerifyRPS:                   getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
+		SecretVerifyVaultAddr:             strings.TrimSpace(getenv("SYNAPSE_SECRET_VERIFY_VAULT_ADDR", "")),
+		MisconfigEnabled:                  getbool("SYNAPSE_MISCONFIG_ENABLED", true),
+		SuppressionEnabled:                getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
+		VEXEnabled:                        getbool("SYNAPSE_VEX_ENABLED", true),
+		ComplianceEnabled:                 getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
+		DetectionPriority:                 os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
+		DBMaxAgeDays:                      getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
+		ScanCacheEnabled:                  getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
+		ScanCacheDir:                      os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
+		ImageRootFSEnabled:                getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
+		OwnedAdvisoryEnabled:              getbool("SYNAPSE_OWNED_ADVISORY", true),
+		SymbolOverlayDir:                  getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
+		ReachabilityEnabled:               getbool("SYNAPSE_REACHABILITY_ENABLED", true),
+		PyReachabilityEnabled:             getbool("SYNAPSE_PYREACH_ENABLED", true),
+		PySemanticReachabilityEnabled:     getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
+		ASTBin:                            os.Getenv("SYNAPSE_AST_BIN"),
+		PythonTaintEnabled:                getbool("SYNAPSE_PYTAINT_ENABLED", true),
+		TaintRulesFile:                    strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
+		JsTaintEnabled:                    getbool("SYNAPSE_JSTAINT_ENABLED", false),
+		JavaTaintEnabled:                  getbool("SYNAPSE_JAVATAINT_ENABLED", false),
+		TriScoreReassessEnabled:           getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
+		FleetCorrelationEnabled:           getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
+		FleetCorrelationWindow:            getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
+		FleetCorrelationMaxPerIncident:    getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
+		FleetCorrelationPageSize:          getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
+		FleetCorrelationMaxActiveSessions: getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
 		FleetCorrelationMaxTimelineRefsPerDetection: getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_DETECTION", 32),
 		FleetCorrelationMaxTimelineRefsPerPage:      getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE", 500),
 		JSReachabilityEnabled:                       getbool("SYNAPSE_JSREACH_ENABLED", true),
