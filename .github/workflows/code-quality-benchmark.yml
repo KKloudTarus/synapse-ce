@@ -76,8 +76,33 @@ jobs:
           echo "::add-mask::${TOKEN}"
           echo "token=${TOKEN}" >> "${GITHUB_OUTPUT}"
 
+      - name: Set up a JDK to compile the corpus Java fixtures
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Compile the corpus Java fixtures for SonarQube
+        id: java_compile
+        run: |
+          # SonarQube's Java sensor refuses to analyze .java without compiled classes. Compile each Java
+          # fixture in place (the .class sits next to the .java, which the owned engine's binary-file filter
+          # skips) and pass the fixture dirs as sonar.java.binaries. No-op when the corpus has no Java.
+          bins=""
+          while IFS= read -r dir; do
+            ( cd "${CORPUS_DIR}/${dir}" && javac -d . *.java )
+            bins="${bins:+${bins},}${dir}"
+          done < <(cd "${CORPUS_DIR}" && find . -name '*.java' -printf '%h\n' | sed 's#^\./##' | sort -u)
+          echo "binaries=${bins}" >> "${GITHUB_OUTPUT}"
+          echo "Compiled Java fixtures: ${bins:-<none>}"
+
       - name: Run SonarQube scanner over the corpus
         run: |
+          # Java analysis needs the compiled classes located above; other languages are source-only.
+          java_arg=""
+          if [ -n "${{ steps.java_compile.outputs.binaries }}" ]; then
+            java_arg="-Dsonar.java.binaries=${{ steps.java_compile.outputs.binaries }}"
+          fi
           docker run --rm --network host \
             -e SONAR_HOST_URL="${SONAR_HOST}" \
             -e SONAR_TOKEN="${{ steps.sonar_auth.outputs.token }}" \
@@ -85,7 +110,8 @@ jobs:
             "${SONAR_SCANNER_IMAGE}" \
             -Dsonar.projectKey="${SONAR_PROJECT}" \
             -Dsonar.sources=. \
-            -Dsonar.scm.disabled=true
+            -Dsonar.scm.disabled=true \
+            ${java_arg}
 
       - name: Wait for the Compute Engine to finish
         run: |

@@ -52,6 +52,14 @@
       "issues": [
         { "file": "sample.go", "line": 9, "type": "bug" }
       ]
+    },
+    {
+      "name": "java-identical-branches",
+      "language": "java",
+      "fixture": "java-branches",
+      "issues": [
+        { "file": "Branches.java", "line": 4, "type": "bug" }
+      ]
     }
   ]
 }
