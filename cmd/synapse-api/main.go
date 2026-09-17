@@ -3130,8 +3130,13 @@ func main() {
 			log.Error("javascript interprocedural reachability init failed", "err", ierr)
 			os.Exit(1)
 		}
+		jsInterproc.WithSuppression(cfg.JSInterprocSuppressionEnabled)
 		scaService.AddReachabilityRecorder(jsInterproc)
-		log.Info("javascript INTERPROCEDURAL tier-2 reachability ENABLED (call-graph proof of a reached affected export via first-party wrappers; raise-only, complements the lexical tier-2)")
+		if cfg.JSInterprocSuppressionEnabled {
+			log.Info("javascript INTERPROCEDURAL tier-2 reachability ENABLED with SUPPRESSION (a proven-unreached affected export on a COMPLETE call graph becomes not_affected; positives still raise-only-safe)")
+		} else {
+			log.Info("javascript INTERPROCEDURAL tier-2 reachability ENABLED (call-graph proof of a reached affected export via first-party wrappers; raise-only, complements the lexical tier-2)")
+		}
 	} else if cfg.JSSymbolReachabilityEnabled {
 		log.Warn("SYNAPSE_JSREACH_TIER2_ENABLED is set but tier-1 javascript reachability is off - tier-2 is SKIPPED, because a tier-2 refusal is only safe when a tier-1 judgment can stand in its place")
 	}

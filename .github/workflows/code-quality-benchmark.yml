@@ -1,0 +1,127 @@
+# Code-quality head-to-head (EPIC #1120 / #1137). Runs the owned code-quality engine and SonarQube CE over
+# the same curated corpus and records a per-language, per-issue-type scorecard. The owned engine's recall
+# ratchet is enforced in the normal backend test suite (TestCodeQualityHeadToHead); this job adds the external
+# SonarQube CE baseline and the recorded comparison. The SonarQube image and scanner are pinned so a run is
+# reproducible and a version bump is a reviewed artifact diff.
+name: Code Quality Benchmark
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owned-vs-sonarqube-ce:
+    name: Owned code-quality engine vs SonarQube CE
+    runs-on: ubuntu-latest
+    env:
+      # Reviewed external-tool pins. Updating either pin requires reviewing the resulting scorecard diff.
+      SONARQUBE_IMAGE: sonarqube:10.7.0-community
+      SONAR_SCANNER_IMAGE: sonarsource/sonar-scanner-cli:5.0.1
+      CORPUS_DIR: internal/usecase/cqbench/testdata
+      REPORT_DIR: ${{ github.workspace }}/.cqbench
+      SONAR_HOST: http://localhost:9000
+      SONAR_PROJECT: cqbench
+      # A throwaway password for the ephemeral, network-local admin account; the container dies with the
+      # runner, so this is not a persisted secret. It is masked in logs by the auth step below.
+      SONAR_ADMIN_PASSWORD: Synapse-CI-Benchmark-1!
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Start SonarQube CE
+        run: |
+          mkdir -p "${REPORT_DIR}"
+          docker run -d --name sonarqube -p 9000:9000 \
+            -e SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true "${SONARQUBE_IMAGE}"
+          echo "Waiting for SonarQube to report UP..."
+          for i in $(seq 1 60); do
+            status=$(curl -sf "${SONAR_HOST}/api/system/status" | jq -r '.status // "DOWN"' || echo DOWN)
+            echo "  attempt $i: ${status}"
+            if [ "${status}" = "UP" ]; then break; fi
+            sleep 5
+          done
+          test "$(curl -sf "${SONAR_HOST}/api/system/status" | jq -r .status)" = "UP"
+
+      - name: Authenticate and provision a token
+        id: sonar_auth
+        run: |
+          echo "::add-mask::${SONAR_ADMIN_PASSWORD}"
+          # SonarQube ships with admin/admin and requires the default password to be changed before use.
+          curl -sf -u admin:admin -X POST "${SONAR_HOST}/api/users/change_password" \
+            -d "login=admin&previousPassword=admin&password=${SONAR_ADMIN_PASSWORD}"
+          TOKEN=$(curl -sf -u "admin:${SONAR_ADMIN_PASSWORD}" -X POST \
+            "${SONAR_HOST}/api/user_tokens/generate" -d "name=ci-$(date +%s)" | jq -r .token)
+          test -n "${TOKEN}" && test "${TOKEN}" != "null"
+          echo "::add-mask::${TOKEN}"
+          echo "token=${TOKEN}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run SonarQube scanner over the corpus
+        run: |
+          docker run --rm --network host \
+            -e SONAR_HOST_URL="${SONAR_HOST}" \
+            -e SONAR_TOKEN="${{ steps.sonar_auth.outputs.token }}" \
+            -v "${{ github.workspace }}/${CORPUS_DIR}:/usr/src" \
+            "${SONAR_SCANNER_IMAGE}" \
+            -Dsonar.projectKey="${SONAR_PROJECT}" \
+            -Dsonar.sources=. \
+            -Dsonar.scm.disabled=true
+
+      - name: Wait for the Compute Engine to finish
+        run: |
+          for i in $(seq 1 60); do
+            pending=$(curl -sf -u "admin:${SONAR_ADMIN_PASSWORD}" \
+              "${SONAR_HOST}/api/ce/activity?component=${SONAR_PROJECT}&status=PENDING,IN_PROGRESS" \
+              | jq -r '.tasks | length')
+            if [ "${pending}" = "0" ]; then break; fi
+            echo "  compute engine busy (${pending} task(s)); waiting..."
+            sleep 5
+          done
+
+      - name: Export issues and hotspots, reduce to the flat corpus export
+        run: |
+          AUTH="admin:${SONAR_ADMIN_PASSWORD}"
+          curl -sf -u "${AUTH}" \
+            "${SONAR_HOST}/api/issues/search?componentKeys=${SONAR_PROJECT}&types=BUG,VULNERABILITY,CODE_SMELL&ps=500" \
+            > "${REPORT_DIR}/issues.raw.json"
+          curl -sf -u "${AUTH}" \
+            "${SONAR_HOST}/api/hotspots/search?projectKey=${SONAR_PROJECT}&ps=500" \
+            > "${REPORT_DIR}/hotspots.raw.json"
+          # Reduce SonarQube's two endpoints into the flat, tool-neutral export the Go reducer consumes:
+          # issues keep their type; hotspots become SECURITY_HOTSPOT. Only component/line/type survive.
+          jq -s '{
+            issues: (
+              ((.[0].issues // []) | map({component, line, type}))
+              + ((.[1].hotspots // []) | map({component, line, type: "SECURITY_HOTSPOT"}))
+            ) | map(select(.line != null))
+          }' "${REPORT_DIR}/issues.raw.json" "${REPORT_DIR}/hotspots.raw.json" \
+            > "${REPORT_DIR}/sonarqube-export.json"
+          echo "Reduced export:"; cat "${REPORT_DIR}/sonarqube-export.json"
+
+      - name: Record the head-to-head and gate the owned ratchet
+        env:
+          SYNAPSE_CQBENCH_SONARQUBE_EXPORT: ${{ github.workspace }}/.cqbench/sonarqube-export.json
+          SYNAPSE_CQBENCH_OWNED_REPORT: ${{ github.workspace }}/.cqbench/synapse-owned.json
+          SYNAPSE_CQBENCH_SONARQUBE_REPORT: ${{ github.workspace }}/.cqbench/sonarqube-ce.json
+        run: go test -count=1 -v -run TestCodeQualityHeadToHead ./internal/infrastructure/cqbenchrun
+
+      - name: Upload raw evidence and scorecards
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: code-quality-benchmark-scorecards
+          path: ${{ github.workspace }}/.cqbench
+          if-no-files-found: warn
+
+      - name: SonarQube logs on failure
+        if: failure()
+        run: docker logs sonarqube 2>&1 | tail -100 || true
