@@ -274,6 +274,7 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | `SYNAPSE_AST_BIN` | bundled / `PATH` | Optional path to the `synapse-ast` sidecar used by Python Tier-2 reachability, Python taint, and code-quality analysis. |
 | `SYNAPSE_JSREACH_ENABLED` | `true` | JS/TS Tier-1 import-level reachability. Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_JSREACH_TIER2_ENABLED` | `false` | JS/TS Tier-2 affected-export reachability. When Tier-1 is on, Tier-2 runs by default in raise-only mode (mints only reachable/urgency-raising judgments, never suppresses). Setting this to `true` additionally mints not-reachable (suppressing → OpenVEX not_affected) judgments, which the lexical scanner can only assert conservatively. |
+| `SYNAPSE_JSREACH_INTERPROC_TIER2_ENABLED` | `false` | Suppressing direction of the interprocedural JS/TS Tier-2 call graph. The interprocedural recorder is raise-only by default (it proves a reached affected export via first-party wrappers). Setting this to `true` lets it also mint not-reachable (suppressing → OpenVEX not_affected) for an affected export proven unreached, but only on a COMPLETE resolver graph (any dynamic construct or escaping callable taints every negative) with entry points present. A wrong negative would hide a real vulnerability, so this stays off by default. |
 
 ## Fleet, leader election, and DAST
 
