@@ -9,6 +9,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **GitLab merge-request decoration adapter (#1123, EPIC #1120).** An owned `GitLabDecorator` publishes the quality-gate verdict to GitLab through the commit-status and merge-request note APIs, idempotently: a rerun updates the one owned status and the one marker-tagged note in place rather than duplicating them, the connector token is presented as `PRIVATE-TOKEN` and never rendered into payloads or errors, and each surface fails soft and independently so the scan is never failed by a forge write. It also renders the native GitLab Code Quality report (`gl-code-quality-report.json`, CodeClimate schema) deterministically, with a stable content fingerprint per finding, so GitLab shows inline quality diffs once the report is emitted. The adapter is network-free until the CLI/server wiring (#1125) composes it.
+
 - **Go Tier-2 reachability fails open on opaque control-flow constructs (EPIC #1120, #1138).** The owned `ssacallgraph` source pass records reachable `//go:linkname`, `unsafe`, cgo, and assembly-backed functions as blind constructs before SSA can erase those signals. Package initializers are covered, build-excluded files do not poison active symbols, and dead opaque helpers do not disable unrelated suppressions. A Tier-2 `not_reachable` carrying one of these constructs cannot become suppressing evidence.
 
 - **Code Quality rule catalog coverage audit (#1134).** The shipped catalog now has a deterministic rules × language × type coverage matrix and complete OWASP mappings for security-quality rules; collision-safe display names preserve the distinct VB.NET and C++ empty-catch detectors rather than retiring either detection path.
