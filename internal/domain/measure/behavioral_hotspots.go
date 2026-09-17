@@ -11,9 +11,9 @@ import (
 
 const (
 	BehavioralHotspotsSchemaVersion = 1
-	maxBehavioralCommits             = 2048
-	maxBehavioralFiles               = 50_000
-	maxBehavioralTouches             = 250_000
+	maxBehavioralCommits            = 2048
+	maxBehavioralFiles              = 50_000
+	maxBehavioralTouches            = 250_000
 )
 
 // BehavioralAvailability distinguishes complete, partial, and unavailable reports.
