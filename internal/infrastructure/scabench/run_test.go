@@ -2,13 +2,19 @@ package scabench
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchcycle"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	bench "github.com/KKloudTarus/synapse-ce/internal/usecase/scabench"
 )
 
@@ -198,6 +204,245 @@ func TestBoundInputDigestsRefreshRuntimeBindingsAndExternalEvidence(t *testing.T
 	}
 	if state.inputDigests.Catalog != catalogDigest || state.inputDigests.Ratchet != ratchetDigest || state.inputDigests.Catalog == firstCatalog || state.inputDigests.Ratchet == firstRatchet {
 		t.Fatal("published input digests were not refreshed for runtime bindings")
+	}
+}
+
+func TestCyclePlanUsesStableOpaqueKeysAndCanonicalPairs(t *testing.T) {
+	catalog := bench.Catalog{Targets: []bench.Target{{ID: "target-a"}, {ID: "target-b"}}}
+	state := runState{
+		catalog:        catalog,
+		manifests:      make(map[string]CaptureManifest),
+		expectedStates: make(map[string]bench.ObservationState),
+	}
+	for _, target := range catalog.Targets {
+		for _, engine := range bench.Engines() {
+			key := runCellKey(target.ID, engine)
+			state.manifests[key] = CaptureManifest{TargetID: target.ID, Engine: engine}
+			state.expectedStates[key] = bench.ObservationComplete
+		}
+	}
+	plan := state.cyclePlan()
+	if len(plan) != len(catalog.Targets)*len(bench.Engines()) {
+		t.Fatalf("plan cells = %d", len(plan))
+	}
+	for index, cell := range plan {
+		target := catalog.Targets[index/len(bench.Engines())]
+		engine := bench.Engines()[index%len(bench.Engines())]
+		if want := runCellKey(target.ID, engine); cell.Key != want || cell.Cell.key != want || cell.Cell.manifest.TargetID != target.ID || cell.Cell.manifest.Engine != engine {
+			t.Fatalf("plan[%d] = %#v, want target=%q engine=%q key=%q", index, cell, target.ID, engine, want)
+		}
+		if err := benchcycle.ValidateTwoPassCellKey(cell.Key); err != nil {
+			t.Fatalf("plan[%d] key is not an opaque two-pass key: %v", index, err)
+		}
+	}
+	pairs, err := benchcycle.ExecuteTwoPass(context.Background(), benchcycle.TwoPassPlan[cycleCell]{Cells: plan},
+		func(_ context.Context, attempt benchcycle.Attempt[cycleCell]) (benchcycle.AttemptOutcome[struct{}], error) {
+			return benchcycle.AttemptOutcome[struct{}]{Address: attempt.Address}, nil
+		}, nil)
+	if err != nil {
+		t.Fatalf("execute keyed cycle plan: %v", err)
+	}
+	for index, pair := range pairs {
+		if pair.Cell.Key != plan[index].Key || pair.Outcomes[0].Address != (benchcycle.AttemptAddress{CellKey: plan[index].Key, Repetition: 1}) || pair.Outcomes[1].Address != (benchcycle.AttemptAddress{CellKey: plan[index].Key, Repetition: 2}) {
+			t.Fatalf("pair[%d] = %#v", index, pair)
+		}
+	}
+}
+
+func TestStoredCaptureBundlePreservesExactArtifactBytesAndCancellation(t *testing.T) {
+	catalog, manifest := testFixture(t, bench.EngineGrype)
+	captured, err := NewCapturer(&fakeRunner{result: ports.ToolResult{Stdout: []byte(`{"descriptor":{"name":"grype","version":"1.2.3"},"matches":[]}`)}}).Capture(context.Background(), catalog, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := runState{rawRunRoot: t.TempDir()}
+	store, err := state.newEvidenceStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := state.storeBundle(context.Background(), store, benchcycle.AttemptAddress{CellKey: runCellKey(manifest.TargetID, manifest.Engine), Repetition: 1}, captured)
+	if err != nil {
+		t.Fatalf("store capture bundle: %v", err)
+	}
+	wantPath := filepath.Join(t.TempDir(), "direct")
+	if err := WriteBundle(wantPath, captured); err != nil {
+		t.Fatal(err)
+	}
+	got, err := bundleFileMapContext(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := bundleFileMapContext(context.Background(), wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("stored artifact count = %d, want %d", len(got), len(want))
+	}
+	for name, body := range want {
+		if !bytes.Equal(got[name], body) {
+			t.Fatalf("stored artifact %q differs from WriteBundle bytes", name)
+		}
+	}
+
+	cancelledState := runState{rawRunRoot: t.TempDir()}
+	cancelledStore, err := cancelledState.newEvidenceStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := cancelledState.storeBundle(ctx, cancelledStore, benchcycle.AttemptAddress{CellKey: runCellKey(manifest.TargetID, manifest.Engine), Repetition: 1}, captured); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled bundle storage error = %v, want context cancellation", err)
+	}
+	entries, err := os.ReadDir(cancelledState.rawRunRoot)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("cancelled storage left raw artifacts: %v, %v", entries, err)
+	}
+}
+
+func TestReadBoundedContextStopsDuringMultiChunkRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	reader := &cancellingChunkReader{cancel: cancel}
+	_, _, err := readBoundedContext(ctx, reader, 2*bundleReadBufferSize, 2*bundleReadBufferSize)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("bounded read error = %v, want context cancellation", err)
+	}
+	if reader.reads != 1 {
+		t.Fatalf("bounded reader reads = %d, want cancellation before the second chunk", reader.reads)
+	}
+}
+
+type cancellingChunkReader struct {
+	cancel context.CancelFunc
+	reads  int
+}
+
+func (reader *cancellingChunkReader) Read(buffer []byte) (int, error) {
+	reader.reads++
+	if reader.reads > 1 {
+		return 0, io.EOF
+	}
+	for index := range buffer {
+		buffer[index] = 'x'
+	}
+	reader.cancel()
+	return len(buffer), nil
+}
+
+func TestEvidenceStoreLimitsMatchFixedBundleShape(t *testing.T) {
+	if len(capabilitySourceReferences) != fixedCapabilitySourceArtifacts {
+		t.Fatalf("capability source count = %d, want %d", len(capabilitySourceReferences), fixedCapabilitySourceArtifacts)
+	}
+	limits := evidenceStoreLimits()
+	maxCaptureBytes := maxBundleArtifactBytes + int64(maxRawBundleArtifacts-1)*maxManifestBytes
+	if limits.MaxArtifactBytes != maxBundleArtifactBytes {
+		t.Fatalf("artifact limit = %d, want %d", limits.MaxArtifactBytes, maxBundleArtifactBytes)
+	}
+	if limits.MaxTotalBytes != int64(fixedMatrixCells*fixedRepetitions)*maxCaptureBytes {
+		t.Fatalf("aggregate limit = %d, want %d", limits.MaxTotalBytes, int64(fixedMatrixCells*fixedRepetitions)*maxCaptureBytes)
+	}
+	if limits.MaxFiles != fixedMatrixCells*fixedRepetitions*maxRawBundleArtifacts {
+		t.Fatalf("file limit = %d, want %d", limits.MaxFiles, fixedMatrixCells*fixedRepetitions*maxRawBundleArtifacts)
+	}
+}
+
+func TestCyclePublicationCleansBeforeStageVerificationAndDoesNotOverwrite(t *testing.T) {
+	state := testPublicationState(t)
+	cleanupCalls := 0
+	verified := false
+	state.runtimeCleanup = func(context.Context) error {
+		cleanupCalls++
+		for _, path := range []string{state.workspace.RawRunRoot(), state.workspace.WorkRoot()} {
+			if _, err := os.Lstat(path); !os.IsNotExist(err) {
+				return fmt.Errorf("private state %q remains during runtime cleanup: %v", path, err)
+			}
+		}
+		return nil
+	}
+	state.stageVerifier = func(_ context.Context, stage string, _ []benchcycle.FileIdentity) error {
+		if !state.cleanup.RawRunRemoved || !state.cleanup.DockerCleaned {
+			return errors.New("stage verification ran before cleanup")
+		}
+		if stage == state.input.OutputRoot {
+			return errors.New("stage verification read the destination")
+		}
+		verified = true
+		return nil
+	}
+	publication, err := state.beginPublication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := publication.WriteBytes(context.Background(), "result.json", []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(state.input.OutputRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state.input.OutputRoot, "existing.json"), []byte("existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := publication.Commit(context.Background()); err == nil {
+		t.Fatal("publication overwrote an existing destination")
+	}
+	if !verified || cleanupCalls != 1 {
+		t.Fatalf("verified=%t cleanup calls=%d, want true and one", verified, cleanupCalls)
+	}
+	body, err := os.ReadFile(filepath.Join(state.input.OutputRoot, "existing.json"))
+	if err != nil || string(body) != "existing" {
+		t.Fatalf("existing destination = %q, %v", body, err)
+	}
+}
+
+func TestCyclePublicationFailureCleansPrivateStateOnce(t *testing.T) {
+	state := testPublicationState(t)
+	cleanupCalls := 0
+	state.runtimeCleanup = func(context.Context) error {
+		cleanupCalls++
+		return errors.New("runtime cleanup failed")
+	}
+	state.stageVerifier = func(context.Context, string, []benchcycle.FileIdentity) error {
+		t.Fatal("stage verifier ran after cleanup failure")
+		return nil
+	}
+	publication, err := state.beginPublication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := publication.WriteBytes(context.Background(), "result.json", []byte("result")); err != nil {
+		t.Fatal(err)
+	}
+	if err := publication.Commit(context.Background()); err == nil {
+		t.Fatal("publication succeeded after cleanup failure")
+	}
+	if cleanupCalls != 1 {
+		t.Fatalf("cleanup calls = %d, want 1", cleanupCalls)
+	}
+	for _, path := range []string{state.workspace.RawRunRoot(), state.workspace.WorkRoot(), state.input.OutputRoot} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("path %q remains after failed publication: %v", path, err)
+		}
+	}
+}
+
+func testPublicationState(t *testing.T) runState {
+	t.Helper()
+	rawRoot := t.TempDir()
+	workspace, err := benchcycle.PrepareWorkspace(rawRoot, "run/attempt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(workspace.RawRunRoot()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workspace.RawRunRoot(), []byte("raw"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return runState{
+		input:           RunInput{OutputRoot: filepath.Join(t.TempDir(), "output")},
+		workspace:       workspace,
+		cleanupRequired: true,
 	}
 }
 

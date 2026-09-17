@@ -2,10 +2,10 @@ package scabench
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 
 	bench "github.com/KKloudTarus/synapse-ce/internal/usecase/scabench"
@@ -75,11 +75,22 @@ type SemanticBundleComparison struct {
 // CompareBundlesForCell validates and replays both bundles before projecting their
 // benchmark claims. Comparisons are always bound to a target and engine.
 func CompareBundlesForCell(leftPath, rightPath, targetID string, engine bench.Engine, expectedState bench.ObservationState) (SemanticBundleComparison, error) {
-	left, leftObservation, leftEvidence, err := inspectBundleIdentity(leftPath)
+	return CompareBundlesForCellContext(context.Background(), leftPath, rightPath, targetID, engine, expectedState)
+}
+
+// CompareBundlesForCellContext binds comparison and replay to the caller's cancellation.
+func CompareBundlesForCellContext(ctx context.Context, leftPath, rightPath, targetID string, engine bench.Engine, expectedState bench.ObservationState) (SemanticBundleComparison, error) {
+	if ctx == nil {
+		return SemanticBundleComparison{}, fmt.Errorf("comparison context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return SemanticBundleComparison{}, err
+	}
+	left, leftObservation, leftEvidence, err := inspectBundleIdentityContext(ctx, leftPath)
 	if err != nil {
 		return SemanticBundleComparison{}, fmt.Errorf("validate left bundle: %w", err)
 	}
-	right, rightObservation, rightEvidence, err := inspectBundleIdentity(rightPath)
+	right, rightObservation, rightEvidence, err := inspectBundleIdentityContext(ctx, rightPath)
 	if err != nil {
 		return SemanticBundleComparison{}, fmt.Errorf("validate right bundle: %w", err)
 	}
@@ -90,6 +101,9 @@ func CompareBundlesForCell(leftPath, rightPath, targetID string, engine bench.En
 		RightClaim: bundleClaim(rightObservation, rightEvidence, expectedState),
 	}
 	for _, observation := range []bench.Observation{leftObservation, rightObservation} {
+		if err := ctx.Err(); err != nil {
+			return SemanticBundleComparison{}, err
+		}
 		if observation.TargetID != targetID || observation.Engine != engine {
 			report.UnclassifiedDifferences = append(report.UnclassifiedDifferences, "bundle does not match the selected target and engine")
 		}
@@ -114,11 +128,19 @@ func CompareBundlesForCell(leftPath, rightPath, targetID string, engine bench.En
 	if !report.SemanticEqual {
 		return report, fmt.Errorf("semantic bundle comparison rejected: %s", report.UnclassifiedDifferences[0])
 	}
+	if err := ctx.Err(); err != nil {
+		return SemanticBundleComparison{}, err
+	}
 	return report, nil
 }
 
 func BundleIdentityFromPath(path string) (BundleIdentity, error) {
-	identity, _, _, err := inspectBundleIdentity(path)
+	return BundleIdentityFromPathContext(context.Background(), path)
+}
+
+// BundleIdentityFromPathContext derives an identity while observing cancellation.
+func BundleIdentityFromPathContext(ctx context.Context, path string) (BundleIdentity, error) {
+	identity, _, _, err := inspectBundleIdentityContext(ctx, path)
 	return identity, err
 }
 
@@ -143,11 +165,17 @@ func processOutcome(evidence *ProcessEvidence) *ProcessOutcome {
 	}
 }
 
-func inspectBundleIdentity(path string) (BundleIdentity, bench.Observation, Evidence, error) {
-	if err := ValidateBundle(path); err != nil {
+func inspectBundleIdentityContext(ctx context.Context, path string) (BundleIdentity, bench.Observation, Evidence, error) {
+	if err := ctx.Err(); err != nil {
 		return BundleIdentity{}, bench.Observation{}, Evidence{}, err
 	}
-	files, err := bundleFileMap(path)
+	if err := ValidateBundleContext(ctx, path); err != nil {
+		return BundleIdentity{}, bench.Observation{}, Evidence{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return BundleIdentity{}, bench.Observation{}, Evidence{}, err
+	}
+	files, err := bundleFileMapContext(ctx, path)
 	if err != nil {
 		return BundleIdentity{}, bench.Observation{}, Evidence{}, err
 	}
@@ -191,22 +219,34 @@ func inspectBundleIdentity(path string) (BundleIdentity, bench.Observation, Evid
 		identity.RawStdoutDigest = bench.SHA256Digest(evidence.Scan.Stdout)
 		identity.RawStderrDigest = bench.SHA256Digest(evidence.Scan.Stderr)
 	}
+	if err := ctx.Err(); err != nil {
+		return BundleIdentity{}, bench.Observation{}, Evidence{}, err
+	}
 	return identity, observation, evidence, nil
 }
 
-func bundleFileMap(path string) (map[string][]byte, error) {
+func bundleFileMapContext(ctx context.Context, path string) (map[string][]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, fmt.Errorf("read bundle directory: %w", err)
 	}
 	files := make(map[string][]byte, len(entries))
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("bundle contains a non-regular artifact")
 		}
-		data, readErr := os.ReadFile(filepath.Join(path, entry.Name()))
+		data, readErr := readBundleArtifactContext(ctx, path, entry.Name())
 		if readErr != nil {
 			return nil, fmt.Errorf("read bundle artifact: %w", readErr)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		files[entry.Name()] = data
 	}

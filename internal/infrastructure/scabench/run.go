@@ -27,6 +27,12 @@ const (
 	fixedMatrixCells                  = 8
 	ownedBenchmarkVersion             = "devel"
 	ownedBenchmarkVersionLinkerSymbol = "github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo.version"
+	maxPublicationFileBytes           = 512 << 20
+	maxPublicationTotalBytes          = 6 * maxPublicationFileBytes
+	maxPublicationFiles               = 11
+	publicationCleanupTimeout         = 2 * time.Minute
+	fixedCapabilitySourceArtifacts    = 2
+	maxRawBundleArtifacts             = 5 + 1 + fixedCapabilitySourceArtifacts
 )
 
 var fixedTargetIDs = []string{
@@ -90,6 +96,8 @@ type runState struct {
 	rawRunRoot      string
 	cleanup         CleanupResult
 	cleanupRequired bool
+	runtimeCleanup  func(context.Context) error
+	stageVerifier   benchcycle.PublicationVerifier
 }
 
 type cyclePolicy struct {
@@ -162,23 +170,35 @@ type cycleCapture struct {
 	path        string
 }
 
+type publicationArtifact struct {
+	path string
+	body []byte
+}
+
 func Run(ctx context.Context, input RunInput, runnerFactory RunnerFactory) (result RunResult, runErr error) {
+	if ctx == nil {
+		return RunResult{}, errors.New("run context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return RunResult{}, err
+	}
 	state, err := prepareRun(input)
 	if err != nil {
 		return RunResult{}, err
 	}
-	workspace := state.workspace
+	publication, err := state.beginPublication()
+	if err != nil {
+		_ = state.workspace.RemoveWork()
+		return RunResult{}, err
+	}
+	publicationOpen := true
 	defer func() {
-		if !state.cleanupRequired {
-			_ = workspace.RemoveWork()
+		if !publicationOpen {
 			return
 		}
-		cleanupErr := state.clean(ctx)
-		if cleanupErr != nil {
-			runErr = errors.Join(runErr, cleanupErr)
-			return
+		if abortErr := publication.Abort(); abortErr != nil {
+			runErr = errors.Join(runErr, abortErr)
 		}
-		result.Cleanup = state.cleanup
 	}()
 
 	if err := state.loadFrozenInputs(); err != nil {
@@ -193,35 +213,33 @@ func Run(ctx context.Context, input RunInput, runnerFactory RunnerFactory) (resu
 	if err := state.validateRatchetBindings(); err != nil {
 		return RunResult{}, err
 	}
-
-	cells := make([]cycleCell, 0, len(state.manifests))
-	for _, target := range state.catalog.Targets {
-		for _, engine := range bench.Engines() {
-			key := runCellKey(target.ID, engine)
-			cells = append(cells, cycleCell{
-				key:      key,
-				manifest: state.manifests[key],
-				expected: state.expectedStates[key],
-			})
-		}
+	store, err := state.newEvidenceStore()
+	if err != nil {
+		return RunResult{}, err
 	}
+
+	cells := state.cyclePlan()
 	comparisons := make([]SemanticBundleComparison, 0, len(cells))
-	captures, err := benchcycle.ExecuteRepeated(ctx, fixedRepetitions, cells,
-		func(ctx context.Context, repetition int, cell cycleCell) (cycleCapture, error) {
+	pairs, err := benchcycle.ExecuteTwoPass(ctx, benchcycle.TwoPassPlan[cycleCell]{Cells: cells},
+		func(ctx context.Context, attempt benchcycle.Attempt[cycleCell]) (benchcycle.AttemptOutcome[cycleCapture], error) {
 			state.cleanupRequired = true
-			observation, identity, path, captureErr := state.captureCell(ctx, repetition, cell.manifest, runnerFactory)
+			cell := attempt.Cell
+			observation, identity, path, captureErr := state.captureCell(ctx, attempt.Address, cell.manifest, runnerFactory, store)
 			if captureErr != nil {
-				return cycleCapture{}, fmt.Errorf("capture repetition %d %s: %w", repetition, cell.key, captureErr)
+				return benchcycle.AttemptOutcome[cycleCapture]{}, fmt.Errorf("capture repetition %d %s: %w", attempt.Address.Repetition, cell.key, captureErr)
 			}
 			if observation.State != cell.expected {
-				return cycleCapture{}, fmt.Errorf("capture repetition %d %s returned %q, want %q", repetition, cell.key, observation.State, cell.expected)
+				return benchcycle.AttemptOutcome[cycleCapture]{}, fmt.Errorf("capture repetition %d %s returned %q, want %q", attempt.Address.Repetition, cell.key, observation.State, cell.expected)
 			}
-			return cycleCapture{observation: observation, identity: identity, path: path}, nil
+			return benchcycle.AttemptOutcome[cycleCapture]{
+				Address: attempt.Address,
+				Outcome: cycleCapture{observation: observation, identity: identity, path: path},
+			}, nil
 		},
-		func(_ context.Context, cell cycleCell, repetitions []cycleCapture) error {
-			comparison, compareErr := CompareBundlesForCell(repetitions[0].path, repetitions[1].path, cell.manifest.TargetID, cell.manifest.Engine, cell.expected)
+		func(ctx context.Context, pair benchcycle.PairOutcome[cycleCell, cycleCapture]) error {
+			comparison, compareErr := CompareBundlesForCellContext(ctx, pair.Outcomes[0].Outcome.path, pair.Outcomes[1].Outcome.path, pair.Cell.Cell.manifest.TargetID, pair.Cell.Cell.manifest.Engine, pair.Cell.Cell.expected)
 			if compareErr != nil {
-				return fmt.Errorf("compare repetitions for %s: %w", cell.key, compareErr)
+				return fmt.Errorf("compare repetitions for %s: %w", pair.Cell.Key, compareErr)
 			}
 			comparisons = append(comparisons, comparison)
 			return nil
@@ -232,16 +250,17 @@ func Run(ctx context.Context, input RunInput, runnerFactory RunnerFactory) (resu
 	}
 	observations := make([][]bench.Observation, fixedRepetitions)
 	rawBundles := make([][]BundleIdentity, fixedRepetitions)
-	for repetition, repetitionCaptures := range captures {
-		observations[repetition] = make([]bench.Observation, 0, len(repetitionCaptures))
-		rawBundles[repetition] = make([]BundleIdentity, 0, len(repetitionCaptures))
-		for _, captured := range repetitionCaptures {
+	for repetition := range fixedRepetitions {
+		observations[repetition] = make([]bench.Observation, 0, len(pairs))
+		rawBundles[repetition] = make([]BundleIdentity, 0, len(pairs))
+		for _, pair := range pairs {
+			captured := pair.Outcomes[repetition].Outcome
 			observations[repetition] = append(observations[repetition], captured.observation)
 			rawBundles[repetition] = append(rawBundles[repetition], captured.identity)
 		}
 	}
 
-	finalResult, resultBytes, report, err := reduceRepetitions(state.catalog, state.oracle, state.ratchet, observations)
+	finalResult, resultBytes, report, err := reduceRepetitionsContext(ctx, state.catalog, state.oracle, state.ratchet, observations)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -250,15 +269,34 @@ func Run(ctx context.Context, input RunInput, runnerFactory RunnerFactory) (resu
 		InputDigests: state.inputDigests, Repetitions: fixedRepetitions, Observations: observations,
 		Comparisons: comparisons, RawBundles: rawBundles, Result: finalResult,
 	}
-	// The deferred cleanup must succeed before the result is published.
-	if err := state.clean(ctx); err != nil {
+	if err := state.stagePublication(ctx, publication, &result, resultBytes, report); err != nil {
 		return RunResult{}, err
 	}
+	if err := publication.Commit(ctx); err != nil {
+		publicationOpen = false
+		return RunResult{}, err
+	}
+	publicationOpen = false
 	result.Cleanup = state.cleanup
-	if err := state.publish(result, resultBytes, report); err != nil {
-		return RunResult{}, err
-	}
 	return result, nil
+}
+
+func (state *runState) cyclePlan() []benchcycle.PlanCell[cycleCell] {
+	cells := make([]benchcycle.PlanCell[cycleCell], 0, len(state.manifests))
+	for _, target := range state.catalog.Targets {
+		for _, engine := range bench.Engines() {
+			key := runCellKey(target.ID, engine)
+			cells = append(cells, benchcycle.PlanCell[cycleCell]{
+				Key: key,
+				Cell: cycleCell{
+					key:      key,
+					manifest: state.manifests[key],
+					expected: state.expectedStates[key],
+				},
+			})
+		}
+	}
+	return cells
 }
 
 func prepareRun(input RunInput) (*runState, error) {
@@ -700,7 +738,10 @@ func (state *runState) bindReviewEvidence(review, disposition []byte) {
 	state.inputDigests.Disposition = sha256Digest(disposition)
 }
 
-func (state *runState) captureCell(ctx context.Context, repetition int, manifest CaptureManifest, runnerFactory RunnerFactory) (bench.Observation, BundleIdentity, string, error) {
+func (state *runState) captureCell(ctx context.Context, address benchcycle.AttemptAddress, manifest CaptureManifest, runnerFactory RunnerFactory, store *benchcycle.EvidenceStore) (bench.Observation, BundleIdentity, string, error) {
+	if err := ctx.Err(); err != nil {
+		return bench.Observation{}, BundleIdentity{}, "", err
+	}
 	prepared, err := Prepare(state.catalog, manifest)
 	if err != nil {
 		return bench.Observation{}, BundleIdentity{}, "", fmt.Errorf("prepare capture: %w", err)
@@ -722,27 +763,94 @@ func (state *runState) captureCell(ctx context.Context, repetition int, manifest
 	if err != nil {
 		return bench.Observation{}, BundleIdentity{}, "", fmt.Errorf("capture bundle: %w", err)
 	}
-	path := filepath.Join(state.rawRunRoot, fmt.Sprintf("repetition-%d", repetition), manifest.TargetID+"--"+string(manifest.Engine))
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return bench.Observation{}, BundleIdentity{}, "", err
-	}
-	if err := WriteBundle(path, captured); err != nil {
+	path, err := state.storeBundle(ctx, store, address, captured)
+	if err != nil {
 		return bench.Observation{}, BundleIdentity{}, "", fmt.Errorf("write capture bundle: %w", err)
 	}
-	if err := ValidateBundle(path); err != nil {
+	if err := ctx.Err(); err != nil {
+		return bench.Observation{}, BundleIdentity{}, "", err
+	}
+	if err := ValidateBundleContext(ctx, path); err != nil {
 		return bench.Observation{}, BundleIdentity{}, "", fmt.Errorf("validate written capture bundle: %w", err)
 	}
-	identity, err := BundleIdentityFromPath(path)
+	if err := ctx.Err(); err != nil {
+		return bench.Observation{}, BundleIdentity{}, "", err
+	}
+	identity, err := BundleIdentityFromPathContext(ctx, path)
 	if err != nil {
 		return bench.Observation{}, BundleIdentity{}, "", fmt.Errorf("identify written capture bundle: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return bench.Observation{}, BundleIdentity{}, "", err
 	}
 	return captured.Observation(), identity, path, nil
 }
 
+func (state *runState) newEvidenceStore() (*benchcycle.EvidenceStore, error) {
+	if err := os.MkdirAll(state.rawRunRoot, 0o700); err != nil {
+		return nil, fmt.Errorf("create protected raw evidence root: %w", err)
+	}
+	return benchcycle.NewEvidenceStore(state.rawRunRoot, evidenceStoreLimits())
+}
+
+func evidenceStoreLimits() benchcycle.EvidenceLimits {
+	// A capture retains evidence.json plus four base manifests and, for capability
+	// cells, one statement and the fixed pair of authoritative sources.
+	maxCaptureBytes := maxBundleArtifactBytes + int64(maxRawBundleArtifacts-1)*maxManifestBytes
+	return benchcycle.EvidenceLimits{
+		MaxArtifactBytes: maxBundleArtifactBytes,
+		MaxTotalBytes:    int64(fixedMatrixCells*fixedRepetitions) * maxCaptureBytes,
+		MaxFiles:         fixedMatrixCells * fixedRepetitions * maxRawBundleArtifacts,
+	}
+}
+
+func (state *runState) storeBundle(ctx context.Context, store *benchcycle.EvidenceStore, address benchcycle.AttemptAddress, result CaptureResult) (string, error) {
+	if store == nil {
+		return "", errors.New("raw evidence store is required")
+	}
+	artifacts, err := bundleArtifactsContext(ctx, result)
+	if err != nil {
+		return "", err
+	}
+	var directory string
+	for _, artifact := range artifacts {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if err := validateBundleArtifactData(artifact.name, artifact.data); err != nil {
+			return "", err
+		}
+		receipt, err := store.Write(ctx, address, artifact.name, bytes.NewReader(artifact.data))
+		if err != nil {
+			return "", err
+		}
+		current := filepath.Dir(receipt.Reference)
+		if directory == "" {
+			directory = current
+		} else if directory != current {
+			return "", errors.New("raw evidence artifacts do not share an attempt directory")
+		}
+	}
+	if directory == "" {
+		return "", errors.New("capture bundle has no artifacts")
+	}
+	return filepath.Join(state.rawRunRoot, filepath.FromSlash(directory)), nil
+}
+
 func reduceRepetitions(catalog bench.Catalog, oracle bench.Oracle, ratchet bench.Ratchet, observations [][]bench.Observation) (bench.Result, []byte, []byte, error) {
+	return reduceRepetitionsContext(context.Background(), catalog, oracle, ratchet, observations)
+}
+
+func reduceRepetitionsContext(ctx context.Context, catalog bench.Catalog, oracle bench.Oracle, ratchet bench.Ratchet, observations [][]bench.Observation) (bench.Result, []byte, []byte, error) {
+	if ctx == nil {
+		return bench.Result{}, nil, nil, errors.New("reduction context is required")
+	}
 	var expectedResult []byte
 	var expectedReport []byte
 	for index, repetition := range observations {
+		if err := ctx.Err(); err != nil {
+			return bench.Result{}, nil, nil, err
+		}
 		result, err := bench.Reduce(catalog, oracle, repetition)
 		if err != nil {
 			return bench.Result{}, nil, nil, fmt.Errorf("reduce repetition %d: %w", index+1, err)
@@ -751,12 +859,21 @@ func reduceRepetitions(catalog bench.Catalog, oracle bench.Oracle, ratchet bench
 		if err != nil {
 			return bench.Result{}, nil, nil, fmt.Errorf("apply ratchet to repetition %d: %w", index+1, err)
 		}
+		if err := ctx.Err(); err != nil {
+			return bench.Result{}, nil, nil, err
+		}
 		var resultBuffer bytes.Buffer
 		if err := bench.EncodeResult(&resultBuffer, result); err != nil {
 			return bench.Result{}, nil, nil, err
 		}
+		if err := ctx.Err(); err != nil {
+			return bench.Result{}, nil, nil, err
+		}
 		var reportBuffer bytes.Buffer
 		if err := bench.RenderResult(&reportBuffer, result); err != nil {
+			return bench.Result{}, nil, nil, err
+		}
+		if err := ctx.Err(); err != nil {
 			return bench.Result{}, nil, nil, err
 		}
 		if index == 0 {
@@ -771,20 +888,30 @@ func reduceRepetitions(catalog bench.Catalog, oracle bench.Oracle, ratchet bench
 	if err != nil {
 		return bench.Result{}, nil, nil, fmt.Errorf("decode canonical result: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return bench.Result{}, nil, nil, err
+	}
 	return final, expectedResult, expectedReport, nil
 }
 
 func (state *runState) clean(ctx context.Context) error {
-	if state.cleanup.RawRunRemoved && state.cleanup.DockerCleaned {
+	if state.cleanup.RawRunRemoved && (!state.cleanupRequired || state.cleanup.DockerCleaned) {
 		return nil
 	}
-	if err := state.workspace.Cleanup(ctx, func(ctx context.Context) error {
-		return cleanDocker(ctx, "docker")
-	}); err != nil {
+	var runtimeCleanup func(context.Context) error
+	if state.cleanupRequired {
+		runtimeCleanup = state.runtimeCleanup
+		if runtimeCleanup == nil {
+			runtimeCleanup = func(ctx context.Context) error {
+				return cleanDocker(ctx, "docker")
+			}
+		}
+	}
+	if err := state.workspace.Cleanup(ctx, runtimeCleanup); err != nil {
 		return err
 	}
 	state.cleanup.RawRunRemoved = true
-	state.cleanup.DockerCleaned = true
+	state.cleanup.DockerCleaned = state.cleanupRequired
 	return nil
 }
 
@@ -797,46 +924,285 @@ func cleanDocker(ctx context.Context, binary string) error {
 	return nil
 }
 
-func (state *runState) publish(result RunResult, resultBytes, report []byte) error {
-	if err := os.Mkdir(state.input.OutputRoot, 0o700); err != nil {
-		return fmt.Errorf("create sanitized output: %w", err)
+func (state *runState) beginPublication() (*benchcycle.Publication, error) {
+	verify := state.stageVerifier
+	if verify == nil {
+		verify = verifyFinalPublication
+	}
+	return benchcycle.BeginPublication(state.input.OutputRoot, benchcycle.PublicationLimits{
+		MaxFileBytes:   maxPublicationFileBytes,
+		MaxTotalBytes:  maxPublicationTotalBytes,
+		MaxFiles:       maxPublicationFiles,
+		CleanupTimeout: publicationCleanupTimeout,
+	}, state.clean, verify)
+}
+
+func (state *runState) stagePublication(ctx context.Context, publication *benchcycle.Publication, result *RunResult, resultBytes, report []byte) error {
+	if publication == nil {
+		return errors.New("publication is required")
+	}
+	if result == nil {
+		return errors.New("run result is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// The staged run can only be published after the cleanup barrier succeeds.
+	result.Cleanup = CleanupResult{RawRunRemoved: true, DockerCleaned: true}
+	artifacts, err := state.publicationArtifacts(ctx, *result, resultBytes, report)
+	if err != nil {
+		return err
+	}
+	if len(artifacts) != maxPublicationFiles {
+		return errors.New("sanitized publication artifact set is incomplete")
+	}
+	for _, artifact := range artifacts {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, err := publication.WriteBytes(ctx, artifact.path, artifact.body); err != nil {
+			return fmt.Errorf("stage sanitized artifact %q: %w", artifact.path, err)
+		}
+	}
+	return ctx.Err()
+}
+
+func (state *runState) publicationArtifacts(ctx context.Context, result RunResult, resultBytes, report []byte) ([]publicationArtifact, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	catalog, err := bench.CanonicalJSON(state.catalog)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	oracle, err := bench.CanonicalJSON(state.oracle)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ratchet, err := bench.CanonicalJSON(state.ratchet)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	run, err := bench.CanonicalJSON(result)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	policy, err := readRegularFile(filepath.Join(state.input.CorpusRoot, "cycle-policy.json"))
+	policy, err := readRegularFileContext(ctx, filepath.Join(state.input.CorpusRoot, "cycle-policy.json"), maxPublicationFileBytes)
 	if err != nil {
-		return fmt.Errorf("read cycle policy for publication: %w", err)
+		return nil, fmt.Errorf("read cycle policy for publication: %w", err)
 	}
-	files := map[string][]byte{
-		"catalog.json": catalog, "oracle.json": oracle, "ratchet.json": ratchet,
-		"cycle-policy.json": policy,
-		"run.json":          run, "result.json": resultBytes, "report.md": report,
-		"reviews/review.json": state.review, "reviews/disposition.json": state.disposition,
+	artifacts := []publicationArtifact{
+		{path: "catalog.json", body: catalog},
+		{path: "oracle.json", body: oracle},
+		{path: "ratchet.json", body: ratchet},
+		{path: "cycle-policy.json", body: policy},
+		{path: "run.json", body: run},
+		{path: "result.json", body: resultBytes},
+		{path: "report.md", body: report},
+		{path: "reviews/review.json", body: state.review},
+		{path: "reviews/disposition.json", body: state.disposition},
 	}
 	for _, target := range state.catalog.Targets {
-		body, readErr := readRegularFile(filepath.Join(state.input.TrustedInputRoot, "sboms", target.ID+".cdx.json"))
-		if readErr != nil {
-			return readErr
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		files[filepath.Join("sboms", target.ID+".cdx.json")] = body
+		body, readErr := readRegularFileContext(ctx, filepath.Join(state.input.TrustedInputRoot, "sboms", target.ID+".cdx.json"), maxPublicationFileBytes)
+		if readErr != nil {
+			return nil, readErr
+		}
+		artifacts = append(artifacts, publicationArtifact{path: "sboms/" + target.ID + ".cdx.json", body: body})
 	}
-	for name, body := range files {
-		if err := writeNewFile(filepath.Join(state.input.OutputRoot, name), body, 0o600); err != nil {
-			return err
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return artifacts, nil
+}
+
+func verifyFinalPublication(ctx context.Context, stage string, identities []benchcycle.FileIdentity) error {
+	if ctx == nil {
+		return errors.New("publication verification context is required")
+	}
+	files, err := publicationStageFiles(ctx, stage, identities)
+	if err != nil {
+		return err
+	}
+	catalog, err := bench.DecodeCatalog(bytes.NewReader(files["catalog.json"]))
+	if err != nil {
+		return fmt.Errorf("decode staged catalog: %w", err)
+	}
+	if err := validateFixedTargetMatrix(catalog); err != nil {
+		return err
+	}
+	oracle, err := bench.DecodeOracle(bytes.NewReader(files["oracle.json"]))
+	if err != nil {
+		return fmt.Errorf("decode staged oracle: %w", err)
+	}
+	if err := bench.Validate(catalog, oracle); err != nil {
+		return fmt.Errorf("validate staged catalog and oracle: %w", err)
+	}
+	ratchet, err := bench.DecodeRatchet(bytes.NewReader(files["ratchet.json"]))
+	if err != nil {
+		return fmt.Errorf("decode staged ratchet: %w", err)
+	}
+	if err := ratchet.Validate(); err != nil {
+		return fmt.Errorf("validate staged ratchet: %w", err)
+	}
+	policy, err := decodePolicyBytes(files["cycle-policy.json"])
+	if err != nil {
+		return fmt.Errorf("decode staged cycle policy: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	var run RunResult
+	if err := strictDecodeBytes(files["run.json"], &run); err != nil {
+		return fmt.Errorf("decode staged run: %w", err)
+	}
+	if err := validateStagedRun(ctx, run, catalog, oracle, ratchet, policy, files); err != nil {
+		return err
+	}
+	return ctx.Err()
+}
+
+func publicationStageFiles(ctx context.Context, stage string, identities []benchcycle.FileIdentity) (map[string][]byte, error) {
+	if len(identities) != maxPublicationFiles {
+		return nil, errors.New("sanitized publication artifact set is incomplete")
+	}
+	files := make(map[string][]byte, len(identities))
+	for _, identity := range identities {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if _, exists := files[identity.Path]; exists {
+			return nil, fmt.Errorf("staged artifact %q is duplicated", identity.Path)
+		}
+		path := filepath.Join(stage, filepath.FromSlash(identity.Path))
+		info, err := os.Lstat(path)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() != identity.Size {
+			return nil, fmt.Errorf("staged artifact %q does not match its durable identity", identity.Path)
+		}
+		body, digest, err := readRegularFileDigestContext(ctx, path, identity.Size)
+		if err != nil || int64(len(body)) != identity.Size || digest != "sha256:"+identity.Digest {
+			return nil, fmt.Errorf("read staged artifact %q", identity.Path)
+		}
+		files[identity.Path] = body
+	}
+	return files, nil
+}
+
+func validateStagedRun(ctx context.Context, run RunResult, catalog bench.Catalog, oracle bench.Oracle, ratchet bench.Ratchet, policy cyclePolicy, files map[string][]byte) error {
+	if run.SchemaVersion != runResultSchemaVersion || run.Repetitions != fixedRepetitions || run.Cleanup != (CleanupResult{RawRunRemoved: true, DockerCleaned: true}) {
+		return errors.New("staged run does not carry the fixed lifecycle contract")
+	}
+	if err := benchcycle.ValidateIdentity(run.ImplementationCommit, run.RunKey); err != nil {
+		return fmt.Errorf("validate staged run identity: %w", err)
+	}
+	if policy.Repetitions != fixedRepetitions {
+		return errors.New("staged cycle policy repetitions differ from run")
+	}
+	if err := validateStagedArtifactSet(catalog, files); err != nil {
+		return err
+	}
+	catalogDigest, err := bench.DigestCatalog(catalog)
+	if err != nil {
+		return err
+	}
+	oracleDigest, err := bench.DigestOracle(oracle)
+	if err != nil {
+		return err
+	}
+	ratchetDigest, err := bench.DigestRatchet(ratchet)
+	if err != nil {
+		return err
+	}
+	if run.InputDigests.Catalog != catalogDigest || run.InputDigests.Oracle != oracleDigest || run.InputDigests.Ratchet != ratchetDigest ||
+		run.InputDigests.Policy != sha256Digest(files["cycle-policy.json"]) || run.InputDigests.Review != sha256Digest(files["reviews/review.json"]) || run.InputDigests.Disposition != sha256Digest(files["reviews/disposition.json"]) {
+		return errors.New("staged run input digests do not bind staged artifacts")
+	}
+	if err := validateReviewEvidence(files["reviews/review.json"], files["reviews/disposition.json"], run.ImplementationCommit); err != nil {
+		return fmt.Errorf("validate staged review evidence: %w", err)
+	}
+	if err := validateStagedCycleOrder(run, catalog, oracle); err != nil {
+		return err
+	}
+	final, resultBytes, report, err := reduceRepetitionsContext(ctx, catalog, oracle, ratchet, run.Observations)
+	if err != nil {
+		return fmt.Errorf("replay staged reduction: %w", err)
+	}
+	if !bytes.Equal(resultBytes, files["result.json"]) || !bytes.Equal(report, files["report.md"]) {
+		return errors.New("staged result or report does not match replay")
+	}
+	stagedResult, err := bench.DecodeResult(bytes.NewReader(files["result.json"]))
+	if err != nil {
+		return fmt.Errorf("decode staged result: %w", err)
+	}
+	var runResult bytes.Buffer
+	if err := bench.EncodeResult(&runResult, run.Result); err != nil || !bytes.Equal(runResult.Bytes(), resultBytes) {
+		return errors.New("staged run result does not match replay")
+	}
+	var decodedResult bytes.Buffer
+	if err := bench.EncodeResult(&decodedResult, stagedResult); err != nil || !bytes.Equal(decodedResult.Bytes(), resultBytes) {
+		return errors.New("staged result encoding is not canonical")
+	}
+	if encoded, err := bench.CanonicalJSON(final); err != nil || len(encoded) == 0 {
+		return errors.New("replayed staged result is not canonical")
+	}
+	return ctx.Err()
+}
+
+func validateStagedArtifactSet(catalog bench.Catalog, files map[string][]byte) error {
+	expected := map[string]struct{}{
+		"catalog.json": {}, "oracle.json": {}, "ratchet.json": {}, "cycle-policy.json": {},
+		"run.json": {}, "result.json": {}, "report.md": {}, "reviews/review.json": {}, "reviews/disposition.json": {},
+	}
+	for _, target := range catalog.Targets {
+		path := "sboms/" + target.ID + ".cdx.json"
+		expected[path] = struct{}{}
+		body, found := files[path]
+		if !found || bench.SHA256Digest(body) != target.SBOMDigest {
+			return fmt.Errorf("staged SBOM %q does not match catalog", target.ID)
+		}
+	}
+	if len(files) != len(expected) {
+		return errors.New("staged artifact set is incomplete or unexpected")
+	}
+	for path := range files {
+		if _, found := expected[path]; !found {
+			return fmt.Errorf("staged artifact %q is unexpected", path)
+		}
+	}
+	return nil
+}
+
+func validateStagedCycleOrder(run RunResult, catalog bench.Catalog, oracle bench.Oracle) error {
+	if len(run.Observations) != fixedRepetitions || len(run.RawBundles) != fixedRepetitions || len(run.Comparisons) != fixedMatrixCells {
+		return errors.New("staged run has an incomplete fixed cycle")
+	}
+	expectedStates, err := expectedCellStates(catalog, oracle)
+	if err != nil {
+		return err
+	}
+	for repetition := range fixedRepetitions {
+		if len(run.Observations[repetition]) != fixedMatrixCells || len(run.RawBundles[repetition]) != fixedMatrixCells {
+			return errors.New("staged run repetitions do not cover the fixed matrix")
+		}
+	}
+	index := 0
+	for _, target := range catalog.Targets {
+		for _, engine := range bench.Engines() {
+			key := runCellKey(target.ID, engine)
+			for repetition := range fixedRepetitions {
+				observation := run.Observations[repetition][index]
+				identity := run.RawBundles[repetition][index]
+				if observation.TargetID != target.ID || observation.Engine != engine || observation.State != expectedStates[key] || identity.TargetID != target.ID || identity.Engine != engine {
+					return fmt.Errorf("staged run cell %q is out of canonical order", key)
+				}
+			}
+			comparison := run.Comparisons[index]
+			if comparison.TargetID != target.ID || comparison.Engine != engine || comparison.ExpectedState != expectedStates[key] || !comparison.SemanticEqual || len(comparison.UnclassifiedDifferences) != 0 {
+				return fmt.Errorf("staged comparison for %q is invalid", key)
+			}
+			index++
 		}
 	}
 	return nil
@@ -867,8 +1233,16 @@ func decodeRatchetFile(path string) (bench.Ratchet, error) {
 }
 
 func decodePolicyFile(path string) (cyclePolicy, error) {
+	body, err := readRegularFile(path)
+	if err != nil {
+		return cyclePolicy{}, err
+	}
+	return decodePolicyBytes(body)
+}
+
+func decodePolicyBytes(body []byte) (cyclePolicy, error) {
 	var policy cyclePolicy
-	if err := strictDecodeFile(path, &policy); err != nil {
+	if err := strictDecodeBytes(body, &policy); err != nil {
 		return cyclePolicy{}, err
 	}
 	if policy.SchemaVersion != "synapse-sca-benchmark-cycle-policy-v1" || policy.AcceptedArtifactRetentionDays != 90 || policy.RawRetention != "delete_after_verification" || policy.Repetitions != fixedRepetitions {
@@ -882,18 +1256,22 @@ func strictDecodeFile(path string, output any) error {
 	if err != nil {
 		return err
 	}
+	if err := strictDecodeBytes(body, output); err != nil {
+		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	return nil
+}
+
+func strictDecodeBytes(body []byte, output any) error {
 	if err := bench.ValidateJSONDocument(bytes.NewReader(body)); err != nil {
-		return fmt.Errorf("validate %s: %w", path, err)
+		return err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(output); err != nil {
-		return fmt.Errorf("decode %s: %w", path, err)
+		return err
 	}
-	if err := ensureEOF(decoder); err != nil {
-		return fmt.Errorf("decode %s: %w", path, err)
-	}
-	return nil
+	return ensureEOF(decoder)
 }
 
 func ensureEOF(decoder *json.Decoder) error {
@@ -971,27 +1349,34 @@ func readReviewEvidence(root, implementationCommit string) ([]byte, []byte, erro
 	if err != nil {
 		return nil, nil, err
 	}
-	var reviewRecord reviewCapture
-	var dispositionRecord dispositionCapture
-	if err := strictDecodeFile(reviewPath, &reviewRecord); err != nil {
+	if err := validateReviewEvidence(review, disposition, implementationCommit); err != nil {
 		return nil, nil, err
-	}
-	if err := strictDecodeFile(dispositionPath, &dispositionRecord); err != nil {
-		return nil, nil, err
-	}
-	if reviewRecord.State != "COMMENTED" || reviewRecord.ID == "" || reviewRecord.Login == "" || reviewRecord.CommitID == "" || reviewRecord.Body == "" {
-		return nil, nil, errors.New("independent review must be a complete COMMENTED review")
-	}
-	if _, err := time.Parse(time.RFC3339, reviewRecord.SubmittedAt); err != nil {
-		return nil, nil, errors.New("independent review timestamp is invalid")
-	}
-	if dispositionRecord.Decision != "approved" || dispositionRecord.ID == "" || dispositionRecord.Login == "" || dispositionRecord.Login == reviewRecord.Login || dispositionRecord.ReviewID != reviewRecord.ID || dispositionRecord.ReviewedCommit != reviewRecord.CommitID || dispositionRecord.ImplementationCommit != implementationCommit || dispositionRecord.CreatedAt != dispositionRecord.UpdatedAt || dispositionRecord.Body == "" {
-		return nil, nil, errors.New("maintainer disposition does not separately accept the COMMENTED review")
-	}
-	if _, err := time.Parse(time.RFC3339, dispositionRecord.CreatedAt); err != nil {
-		return nil, nil, errors.New("maintainer disposition timestamp is invalid")
 	}
 	return review, disposition, nil
+}
+
+func validateReviewEvidence(review, disposition []byte, implementationCommit string) error {
+	var reviewRecord reviewCapture
+	var dispositionRecord dispositionCapture
+	if err := strictDecodeBytes(review, &reviewRecord); err != nil {
+		return err
+	}
+	if err := strictDecodeBytes(disposition, &dispositionRecord); err != nil {
+		return err
+	}
+	if reviewRecord.State != "COMMENTED" || reviewRecord.ID == "" || reviewRecord.Login == "" || reviewRecord.CommitID == "" || reviewRecord.Body == "" {
+		return errors.New("independent review must be a complete COMMENTED review")
+	}
+	if _, err := time.Parse(time.RFC3339, reviewRecord.SubmittedAt); err != nil {
+		return errors.New("independent review timestamp is invalid")
+	}
+	if dispositionRecord.Decision != "approved" || dispositionRecord.ID == "" || dispositionRecord.Login == "" || dispositionRecord.Login == reviewRecord.Login || dispositionRecord.ReviewID != reviewRecord.ID || dispositionRecord.ReviewedCommit != reviewRecord.CommitID || dispositionRecord.ImplementationCommit != implementationCommit || dispositionRecord.CreatedAt != dispositionRecord.UpdatedAt || dispositionRecord.Body == "" {
+		return errors.New("maintainer disposition does not separately accept the COMMENTED review")
+	}
+	if _, err := time.Parse(time.RFC3339, dispositionRecord.CreatedAt); err != nil {
+		return errors.New("maintainer disposition timestamp is invalid")
+	}
+	return nil
 }
 
 func singleJSONFile(directory string) (string, error) {
@@ -1042,7 +1427,8 @@ func catalogTarget(catalog bench.Catalog, targetID string) (bench.Target, bool) 
 }
 
 func runCellKey(targetID string, engine bench.Engine) string {
-	return targetID + "\x00" + string(engine)
+	sum := sha256.Sum256([]byte(targetID + "\x00" + string(engine)))
+	return "sca-cell-" + hex.EncodeToString(sum[:])
 }
 
 func capabilityPinReference(locator string) string {
@@ -1060,14 +1446,7 @@ func belowRoot(root, locator string) (string, error) {
 }
 
 func readRegularFile(path string) ([]byte, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return nil, errors.New("file must be regular and not a symlink")
-	}
-	return os.ReadFile(path)
+	return readRegularFileContext(context.Background(), path, -1)
 }
 
 func writeNewFile(path string, body []byte, mode os.FileMode) error {
