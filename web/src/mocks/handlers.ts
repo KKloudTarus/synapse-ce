@@ -1274,17 +1274,23 @@ export const handlers = [
     const p = PROJECTS.find(pr => pr.key === params.key) ?? PROJECTS[0]
     return HttpResponse.json(p)
   }),
-  http.get('/api/v1/projects/:key/overview', ({ params }) => {
+  http.get('/api/v1/projects/:key/overview', ({ params, request }) => {
     const p = PROJECTS.find(pr => pr.key === params.key) ?? PROJECTS[0]
     const analysis = p.latest_analysis
-    const gatePassed = analysis.gate.passed
+    // A non-default branch (a feature or PR branch) is given a distinct, deterministic profile so the branch
+    // comparison view shows a real difference in dev: lower coverage, a worse maintainability grade, and a
+    // failed gate.
+    const branch = new URL(request.url).searchParams.get('branch') ?? ''
+    const onFeature = branch !== '' && branch !== 'main'
+    const gatePassed = onFeature ? false : analysis.gate.passed
+    const worseGrade = (g: string) => (onFeature ? (g === 'A' ? 'C' : g === 'B' ? 'D' : g) : g)
     return HttpResponse.json({
       state: 'analyzed',
       project: { key: p.key, name: p.name },
       latest_analysis: {
         id: analysis.id,
         created_at: analysis.created_at,
-        source_ref: 'refs/heads/main',
+        source_ref: onFeature ? `refs/heads/${branch}` : 'refs/heads/main',
         source_commit: analysis.source_commit,
         new_code: { first_analysis: false, has_baseline: true, baseline_analysis_id: 'an-000' },
       },
@@ -1303,10 +1309,10 @@ export const handlers = [
         overall: {
           security: { availability: 'available', grade: analysis.rating.security, unavailable_reason: null },
           reliability: { availability: 'available', grade: analysis.rating.reliability, unavailable_reason: null },
-          maintainability: { availability: 'available', grade: analysis.rating.maintainability, unavailable_reason: null },
+          maintainability: { availability: 'available', grade: worseGrade(analysis.rating.maintainability), unavailable_reason: null },
           security_hotspots_reviewed: { availability: 'available', value: 50, unavailable_reason: null },
-          coverage: { availability: 'available', value: 72.4, unavailable_reason: null },
-          duplications: { availability: 'available', value: 3.2, unavailable_reason: null },
+          coverage: { availability: 'available', value: onFeature ? 64.1 : 72.4, unavailable_reason: null },
+          duplications: { availability: 'available', value: onFeature ? 4.7 : 3.2, unavailable_reason: null },
         },
         new_code: {
           security: { availability: 'available', grade: 'B', unavailable_reason: null },
@@ -1325,7 +1331,20 @@ export const handlers = [
     { name: 'feature/multi-branch', kind: 'short_lived' },
   ] })),
   http.get('/api/v1/projects/:key/analyses', () => HttpResponse.json({
-    items: Array.from({ length: 8 }, (_, i) => ({
+    items: [{
+      id: 'an-pr-42',
+      created_at: new Date(Date.now() - 86400_000).toISOString(),
+      source_ref: 'refs/heads/feature/multi-branch',
+      source_commit: 'pr42abc',
+      origin: 'ci',
+      ci: { provider: 'github-actions', run_url: 'https://github.com/acme/app/actions/runs/42', run_id: '42', branch: 'feature/multi-branch', actor: 'octocat', pull_request: '42', target_branch: 'main' },
+      gate: { passed: false, results: [{ metric: 'new_critical_issues', condition: '= 0', actual: 1, passed: false }] },
+      gate_info: { key: 'default', name: 'Synapse Way', source: 'managed' },
+      issues: { total: 41, by_severity: { critical: 1, high: 7, medium: 18, low: 15 } },
+      new_code: { counts: { total: 3, critical: 1, high: 1, medium: 1, low: 0 }, period: 'previous_version' },
+      rating: { security: 'A', reliability: 'A', maintainability: 'C' },
+      measures: { lines: 48000, ncloc: 38000, coverage: 64.1, duplicated_lines_density: 4.7 },
+    }, ...Array.from({ length: 8 }, (_, i) => ({
       id: `an-${String(8 - i).padStart(3, '0')}`,
       created_at: new Date(Date.now() - i * 3 * 86400_000).toISOString(),
       source_ref: 'refs/heads/main',
@@ -1336,7 +1355,7 @@ export const handlers = [
       new_code: { counts: { total: Math.max(0, 5 - i), critical: Math.max(0, 1 - i), high: Math.max(0, 2 - i), medium: 2, low: 0 }, period: 'previous_version' },
       rating: { security: i < 2 ? 'B' : 'A', reliability: 'A', maintainability: i < 3 ? 'C' : 'B' },
       measures: { lines: 48520 - i * 500, ncloc: 38200 - i * 400, coverage: 72.4 + i * 1.2, duplicated_lines_density: 3.2 - i * 0.3 },
-    })),
+    }))],
     next: null,
   })),
   http.get('/api/v1/projects/:key/analysis', ({ params }) => {

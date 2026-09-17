@@ -112,7 +112,7 @@ function mapProjectAnalysis(r: any): ProjectAnalysis {
   })
   const origin: ProjectAnalysis['origin'] = r.origin === 'ci' ? 'ci' : 'server'
   const ci: ProjectAnalysis['ci'] = r.ci
-    ? { provider: r.ci.provider ?? '', runUrl: r.ci.run_url ?? '', runId: r.ci.run_id ?? '', branch: r.ci.branch ?? '', actor: r.ci.actor ?? '' }
+    ? { provider: r.ci.provider ?? '', runUrl: r.ci.run_url ?? '', runId: r.ci.run_id ?? '', branch: r.ci.branch ?? '', actor: r.ci.actor ?? '', pullRequest: r.ci.pull_request ?? '', targetBranch: r.ci.target_branch ?? '' }
     : null
   return {
     id: r.id ?? '', createdAt: r.created_at ?? '', origin, ci, sourceRef: r.source_ref ?? '', sourceCommit: r.source_commit ?? '',
