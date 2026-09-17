@@ -66,6 +66,8 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 		"clean: true",
 		"persist-credentials: false",
 		"set-safe-directory: false",
+		"fetch-depth: 0",
+		"BASELINE_REVISION: \"50d205260be412dc2f57736f71d1448a8f58177a\"",
 		"git reset --hard \"$SOURCE_SHA\"",
 		"git clean -ffdx",
 		"git rev-parse HEAD^{tree}",
@@ -81,7 +83,10 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 		"find -P \"$controller_root\" -xdev -type l",
 		"refs/heads/*) branch=",
 		"git check-ref-format --branch \"$branch\"",
-		"git fetch --no-tags --depth=1 origin \"$TRUSTED_REF:refs/remotes/origin/$branch\"",
+		"git rev-parse --is-shallow-repository",
+		"git rev-parse --verify \"$BASELINE_REVISION^{commit}\"",
+		"git merge-base --is-ancestor \"$BASELINE_REVISION\" \"$SOURCE_SHA\"",
+		"git fetch --no-tags origin \"$TRUSTED_REF:refs/remotes/origin/$branch\"",
 		"git rev-parse \"refs/remotes/origin/$branch\"",
 		"assert_jdk_21 java",
 		"assert_jdk_21 javac",
@@ -96,6 +101,9 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 	}
 	if strings.Contains(workflow, "printf '%s=\\n' \"$name\" >> \"$GITHUB_ENV\"") {
 		t.Fatal("workflow must reject unexpected inherited Git variables instead of persisting empty values")
+	}
+	if strings.Contains(workflow, "fetch-depth: 1") || strings.Contains(workflow, "git fetch --no-tags --depth=1") {
+		t.Fatal("workflow must retain complete trusted ancestry for baseline identity checks")
 	}
 	teardown := strings.Index(workflow, "- name: Teardown trusted benchmark workspace")
 	if teardown < 0 || !strings.Contains(workflow[teardown:], "if: ${{ always() }}") || !strings.Contains(workflow[teardown:], "\"$RUNNER_TEMP/synapse-reachability-gitconfig\"") || !strings.Contains(workflow[teardown:], "\"$RUNNER_TEMP/synapse-reachability-prior-checkout\"") {

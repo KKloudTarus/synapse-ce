@@ -157,13 +157,14 @@ jobs:
           persist-credentials: false
           clean: true
           set-safe-directory: false
-          fetch-depth: 1
+          fetch-depth: 0
       - name: Assert fresh checkout and protected reference head
         shell: bash
         env:
           SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
           TRUSTED_REF: ${{ vars.REACHABILITY_BENCHMARK_TRUSTED_REF }}
           TRUSTED_SHA: ${{ vars.REACHABILITY_BENCHMARK_TRUSTED_SHA }}
+          BASELINE_REVISION: "50d205260be412dc2f57736f71d1448a8f58177a"
         run: |
           set -euo pipefail
           case "$TRUSTED_REF" in
@@ -202,9 +203,12 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           source_tree="$(git rev-parse "$SOURCE_SHA^{tree}")"
           test "$(git rev-parse HEAD^{tree})" = "$source_tree"
+          test "$(git rev-parse --is-shallow-repository)" = false
+          test "$(git rev-parse --verify "$BASELINE_REVISION^{commit}")" = "$BASELINE_REVISION"
+          git merge-base --is-ancestor "$BASELINE_REVISION" "$SOURCE_SHA"
           test "$GITHUB_REF" = "$TRUSTED_REF"
           test "$SOURCE_SHA" = "$TRUSTED_SHA"
-          git fetch --no-tags --depth=1 origin "$TRUSTED_REF:refs/remotes/origin/$branch"
+          git fetch --no-tags origin "$TRUSTED_REF:refs/remotes/origin/$branch"
           test "$(git rev-parse "refs/remotes/origin/$branch")" = "$SOURCE_SHA"
           if [ -n "$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" ]; then
             echo "trusted checkout contains tracked, untracked, or ignored residue" >&2

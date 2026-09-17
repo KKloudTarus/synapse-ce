@@ -434,6 +434,9 @@ func TestDotNetPublishWithoutRestoreUsesMatchingRuntimeRestore(t *testing.T) {
 			}
 			restore := fixture.Build.Steps[test.restoreStep].Argv
 			publish := fixture.Build.Steps[test.publishStep].Argv
+			if len(restore) < 3 || len(publish) < 3 || restore[0] != "dotnet" || restore[1] != "restore" || publish[0] != "dotnet" || publish[1] != "publish" || restore[2] != publish[2] {
+				t.Fatalf("runtime restore/publish project mismatch: restore=%q publish=%q", restore, publish)
+			}
 			if !hasAdjacentArguments(restore, "--runtime", "linux-x64") {
 				t.Fatalf("runtime-specific publish restore argv = %q, want --runtime linux-x64", restore)
 			}
