@@ -40,6 +40,12 @@ func csharpASTRules() []rule.Rule {
 			"Use `throw;` to rethrow the current exception with its original stack trace intact, instead of `throw ex;`.",
 			"a caught exception rethrown with throw ex, which resets its stack trace",
 			rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityMedium},
+		{"csharp-ast-unused-catch-variable", "Unused catch variable", "",
+			"try {\n    Work();\n} catch (IOException) {\n    Retry();\n}",
+			"try {\n    Work();\n} catch (IOException ex) {\n    Retry();\n}",
+			"Drop the exception binding (`catch (IOException)`), or use the variable to log or wrap the failure.",
+			"a catch clause whose bound exception variable is never used",
+			rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow},
 	}
 	rules := make([]rule.Rule, 0, len(specs))
 	for _, s := range specs {

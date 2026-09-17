@@ -20,7 +20,12 @@ var csharpRules = map[string]pythonRule{
 	"missing-default":     {"reliability", "csharp-ast-missing-switch-default", "CWE-478", "medium", "switch without a default", "A switch with no default section silently ignores unhandled values; add a default (even one that throws)."},
 	"throw-generic":       {"quality", "csharp-ast-throw-generic-exception", "CWE-397", "medium", "Generic exception thrown", "Throwing Exception, SystemException, or ApplicationException forces every caller to catch everything. Throw a specific exception type so callers can handle the failure they expect."},
 	"rethrow-loses-trace": {"quality", "csharp-ast-rethrow-loses-stacktrace", "CWE-248", "medium", "Rethrow discards the stack trace", "Rethrowing the caught exception with `throw ex;` resets its stack trace to this line, hiding where the failure originated. Use `throw;` to preserve the original stack trace."},
+	"unused-catch-var":    {"quality", "csharp-ast-unused-catch-variable", "", "low", "Unused catch variable", "The caught exception variable is never used in the catch block. Drop the binding (`catch (SomeException)`) or use it to log or wrap the failure."},
 }
+
+// maxCsharpUseScanNodes bounds the per-catch use scan so an adversarially large catch block cannot make
+// variable-use resolution an uncapped walk.
+const maxCsharpUseScanNodes = 8192
 
 // csharpGenericExceptionTypes are the exception base types too broad to throw directly (SonarQube S112).
 var csharpGenericExceptionTypes = map[string]bool{
@@ -48,8 +53,12 @@ func csharpFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 		stack = stack[:len(stack)-1]
 		switch n.Type() {
 		case "catch_clause":
-			if body := astChildByType(n, "block"); body != nil && astBlockEmpty(body) {
+			body := astChildByType(n, "block")
+			switch {
+			case body != nil && astBlockEmpty(body):
 				out = append(out, csharpFinding("empty-catch", n, rel))
+			case body != nil && csharpCatchVarUnused(n, body, src):
+				out = append(out, csharpFinding("unused-catch-var", n, rel))
 			}
 		case "switch_statement":
 			if body := astChildByType(n, "switch_body"); body != nil && !csharpSwitchHasDefault(body) {
@@ -133,6 +142,44 @@ func csharpThrowsGenericException(oce *sitter.Node, src []byte) bool {
 		name = name[i+1:]
 	}
 	return csharpGenericExceptionTypes[name]
+}
+
+// csharpCatchVarUnused reports whether a catch clause binds an exception variable that is never referenced
+// in its (non-empty) block, so the binding is dead (SonarQube's unused-variable, CS0168). The empty-block
+// case is left to empty-catch. The use scan is bounded and fails safe: if the block is larger than the node
+// budget it is treated as using the variable, so a huge block never yields a false positive.
+func csharpCatchVarUnused(catch, body *sitter.Node, src []byte) bool {
+	cd := astChildByType(catch, "catch_declaration")
+	if cd == nil {
+		return false // `catch { }` with no binding: nothing to be unused
+	}
+	idn := astChildByType(cd, "identifier")
+	if idn == nil {
+		return false // `catch (SomeException)` with no name
+	}
+	name := idn.Content(src)
+	return name != "" && !csharpIdentUsedIn(body, name, src)
+}
+
+// csharpIdentUsedIn reports whether an identifier with the given name appears anywhere under n. The walk is
+// capped at maxCsharpUseScanNodes; on overflow it returns true (assume used) so it never over-reports.
+func csharpIdentUsedIn(n *sitter.Node, name string, src []byte) bool {
+	budget := maxCsharpUseScanNodes
+	stack := []*sitter.Node{n}
+	for len(stack) > 0 {
+		c := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if budget--; budget <= 0 {
+			return true
+		}
+		if c.Type() == "identifier" && c.Content(src) == name {
+			return true
+		}
+		for i := 0; i < int(c.ChildCount()); i++ {
+			stack = append(stack, c.Child(i))
+		}
+	}
+	return false
 }
 
 // csharpRethrowsCaughtVar reports whether `throw <name>;` rethrows the variable of the nearest enclosing

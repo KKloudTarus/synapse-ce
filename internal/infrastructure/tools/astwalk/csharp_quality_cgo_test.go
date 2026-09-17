@@ -228,3 +228,37 @@ func TestQualityForCSharpRethrow(t *testing.T) {
 		t.Fatalf("rethrow-loses-stacktrace lines = %v, want [3] (only `throw ex;` on line 3)", lines)
 	}
 }
+
+// TestQualityForCSharpUnusedCatchVar pins csharp-ast-unused-catch-variable: a catch clause whose bound
+// exception variable is never used in a non-empty block is flagged; a used variable, a binding-less catch,
+// and an empty catch (owned by empty-catch) are not.
+func TestQualityForCSharpUnusedCatchVar(t *testing.T) {
+	root := t.TempDir()
+	source := `namespace App {
+    class H {
+        void Unused() { try { X(); } catch (System.IO.IOException e) { Retry(); } }
+        void Used() { try { X(); } catch (System.IO.IOException e) { Log(e); } }
+        void NoBinding() { try { X(); } catch (System.IO.IOException) { Retry(); } }
+        void X() {}
+        void Retry() {}
+        void Log(System.Exception e) {}
+    }
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "U.cs"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	var lines []int
+	for _, f := range got.Findings {
+		if f.Rule == "csharp-ast-unused-catch-variable" {
+			lines = append(lines, f.Line)
+		}
+	}
+	if len(lines) != 1 || lines[0] != 3 {
+		t.Fatalf("unused-catch-variable lines = %v, want [3]", lines)
+	}
+}

@@ -815,6 +815,7 @@ csharp-ast-empty-catch
 csharp-ast-missing-switch-default
 csharp-ast-rethrow-loses-stacktrace
 csharp-ast-throw-generic-exception
+csharp-ast-unused-catch-variable
 css:declaration-block-too-large
 css:duplicate-font-face
 css:duplicate-import
