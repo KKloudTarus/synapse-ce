@@ -59,7 +59,7 @@ REMEDIATIONS = {
 }
 
 
-def r(fam, ident, title, regex, nc, c, *, cwe=None, source=None, remediation=None, type=None, qual=None, sev=None):
+def r(fam, ident, title, regex, nc, c, *, cwe=None, source=None, remediation=None, type=None, qual=None, sev=None, skip=None):
     dt, dq, ds, dc = DEFAULTS[fam]
     weakness = dc if cwe is None else cwe
     concept_source = source or ("https://cwe.mitre.org/data/definitions/" + weakness[4:] + ".html" if weakness else SOURCES[fam])
@@ -70,7 +70,7 @@ def r(fam, ident, title, regex, nc, c, *, cwe=None, source=None, remediation=Non
         "desc": "Detects " + title.lower() + " in PHP source.",
         "cat_desc": "Detects " + title.lower() + " in PHP source.",
         "rationale": RATIONALES[fam], "remediation": remediation or REMEDIATIONS[fam],
-        "source": concept_source, "re": regex, "nc": nc, "c": c, "skip": CC,
+        "source": concept_source, "re": regex, "nc": nc, "c": c, "skip": skip or CC,
         "detection": "pattern",
     }
 
@@ -101,7 +101,7 @@ RULES = [
     r("bugs", "range-zero-step", "Range with zero step", r"range\s*\([^,]+,\s*[^,]+,\s*0\s*\)", '$values = range(1, 5, 0);', '$values = range(1, 5, 1);'),
     r("bugs", "array-rand-empty", "array_rand called on literal empty array", r"array_rand\s*\(\s*\[\s*\]\s*\)", '$key = array_rand([]);', '$key = array_rand($items);'),
     r("bugs", "json-last-error-ignored", "json_decode result checked without JSON_THROW_ON_ERROR", r"json_decode\s*\(\s*\$[A-Za-z_]\w*\s*\)\s*;", '$data = json_decode($body);', '$data = json_decode($body, true, 512, JSON_THROW_ON_ERROR);'),
-    r("bugs", "unreachable-after-return", "Statement after return", r"\breturn\b[^;]*;\s*\S+", 'return $value; save();', 'save(); return $value;'),
+    r("bugs", "unreachable-after-return", "Statement after return", r"\breturn\b[^;]*;\s*[A-Za-z_$\\]", 'return $value; save();', 'save(); return $value;', skip="skipPhpUnreachableAfterReturn"),
     r("bugs", "duplicate-array-key", "Duplicate literal array key", r"(?:['\"]host['\"]\s*=>[^,]+,\s*['\"]host['\"]\s*=>|['\"]id['\"]\s*=>[^,]+,\s*['\"]id['\"]\s*=>)", '$cfg = ["host" => $a, "host" => $b];', '$cfg = ["host" => $a, "port" => $b];'),
     r("bugs", "break-zero-level", "Break with zero level", r"\bbreak\s+0\s*;", 'while ($ready) { break 0; }', 'while ($ready) { break; }'),
     r("bugs", "continue-zero-level", "Continue with zero level", r"\bcontinue\s+0\s*;", 'while ($ready) { continue 0; }', 'while ($ready) { continue; }'),

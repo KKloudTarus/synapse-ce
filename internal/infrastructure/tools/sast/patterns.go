@@ -149,6 +149,125 @@ func skipGoTodoMarker(line string) bool {
 	return strings.Contains(line, "context.TODO(") || strings.Contains(line, "ctx.TODO(")
 }
 
+// phpReturnStmt matches a whole `return ...;` statement (the keyword is case-insensitive in PHP).
+var phpReturnStmt = regexp.MustCompile(`(?i)\breturn\b[^;]*;`)
+
+// phpBlockContinuationWord is a keyword that legitimately follows a return statement without being
+// unreachable code: a switch case label, an else/elseif branch, an alternative-syntax block terminator,
+// or an exception handler. When one of these follows the return, the token after it is control flow, not
+// dead code.
+var phpBlockContinuationWord = map[string]bool{
+	"else": true, "elseif": true, "case": true, "default": true,
+	"endif": true, "endswitch": true, "endforeach": true, "endwhile": true,
+	"endfor": true, "catch": true, "finally": true,
+}
+
+// skipPhpUnreachableAfterReturn keeps php:unreachable-after-return off the common shape where a return is
+// the last statement of its block. php:unreachable-after-return runs over a joined PHP statement, so its
+// regex would otherwise treat the block-closing brace or the next switch/else branch after a return as
+// unreachable code (a false positive on nearly every PHP function with `if (...) { return X; }`). The rule
+// regex already excludes a closing brace or comment as the following token; this filter additionally skips
+// a control-flow continuation keyword, so the rule fires only when a real statement follows the return in
+// the same block (e.g. `return $x; echo $y;`).
+//
+// It analyses the statement with string literals and comments masked, so a semicolon or keyword inside a
+// returned string literal (e.g. `return "a; b";`, `return "x;case";`) is never mistaken for statement
+// structure; that also suppresses the rule's own false match on such a return. It inspects the first return
+// in the joined statement: when a later branch's return has dead code after it but the first return is
+// followed by a `case`/`else` continuation, the statement is suppressed rather than reported at the wrong
+// return, which a line-based regex cannot anchor correctly; that residual miss is preferred over a finding
+// pointing at a clean return. text is the joined statement and may span lines.
+func skipPhpUnreachableAfterReturn(text string) bool {
+	if commentOnlyLine(text) {
+		return true
+	}
+	masked := phpMaskLiterals(text)
+	loc := phpReturnStmt.FindStringIndex(masked)
+	if loc == nil {
+		return true
+	}
+	rest := strings.TrimLeft(masked[loc[1]:], " \t\r\n")
+	if rest == "" {
+		return true // nothing after the return
+	}
+	c := rest[0]
+	isStatementStart := c == '_' || c == '$' || c == '\\' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	if !isStatementStart {
+		return true // a closing brace/paren, PHP close tag, etc. follows: not dead code
+	}
+	// A real statement follows unless it is a control-flow continuation keyword (case/else/end*/catch/...).
+	return phpBlockContinuationWord[strings.ToLower(phpLeadingIdentWord(rest))]
+}
+
+// phpMaskLiterals returns s with the contents of PHP string literals ('...', "...") and comments (//, #,
+// /* */) overwritten by spaces, preserving length and byte offsets. It lets a semicolon or keyword inside a
+// literal or comment be ignored when reading statement structure. Backslash escapes inside quotes are
+// honoured; heredoc/nowdoc (rare inside a return expression) are left as-is.
+func phpMaskLiterals(s string) string {
+	b := []byte(s)
+	out := append([]byte(nil), b...)
+	blank := func(i, j int) {
+		for ; i < j && i < len(out); i++ {
+			if out[i] != '\n' {
+				out[i] = ' '
+			}
+		}
+	}
+	i := 0
+	for i < len(b) {
+		switch c := b[i]; {
+		case c == '"' || c == '\'':
+			j := i + 1
+			for j < len(b) {
+				if b[j] == '\\' && j+1 < len(b) {
+					j += 2
+					continue
+				}
+				if b[j] == c {
+					j++
+					break
+				}
+				j++
+			}
+			blank(i+1, min(j-1, len(b)))
+			i = j
+		case c == '/' && i+1 < len(b) && b[i+1] == '/', c == '#':
+			j := i
+			for j < len(b) && b[j] != '\n' {
+				j++
+			}
+			blank(i, j)
+			i = j
+		case c == '/' && i+1 < len(b) && b[i+1] == '*':
+			j := i + 2
+			for j < len(b) && !(b[j] == '*' && j+1 < len(b) && b[j+1] == '/') {
+				j++
+			}
+			end := min(j+2, len(b))
+			blank(i, end)
+			i = end
+		default:
+			i++
+		}
+	}
+	return string(out)
+}
+
+// phpLeadingIdentWord returns the leading run of ASCII identifier characters (letters, digits, underscore)
+// at the start of s, or the empty string when s begins with any other byte.
+func phpLeadingIdentWord(s string) string {
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		if c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			i++
+			continue
+		}
+		break
+	}
+	return s[:i]
+}
+
 // looseEqNullIdiom matches the `== null` / `!= null` comparison (either operand order). `x == null`
 // is the canonical way to test for null-or-undefined in one check, so it is not a coercion bug.
 var looseEqNullIdiom = regexp.MustCompile(`(?:[^=!<>]|^)[!=]=\s*null\b|\bnull\s*[!=]=[^=]`)
