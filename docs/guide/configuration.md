@@ -566,6 +566,8 @@ The following variables are read by `synapse-agent` and `synapse-cluster-agent`,
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_API_URL` | empty | Server base URL used by `synapse-cli publish-source`; overridden by `--server`. |
+| `SYNAPSE_DECORATION_TOKEN` | (none) | Forge write token for `synapse-cli gate --decorate`. Scoped to the CI provider's forge (a GitHub/GitLab/Bitbucket token with permission to write commit statuses, checks/reports, and PR/MR comments). Prefer a short-lived CI-provided token. Never logged, and never needed for `--dry-run`. |
+| `SYNAPSE_DECORATION_USERNAME` | empty | Username paired with `SYNAPSE_DECORATION_TOKEN` for Bitbucket Basic auth. Leave empty for GitHub/GitLab and for Bitbucket access tokens (defaults to `x-token-auth`). |
 | `SYNAPSE_REACH_RUST` | `true` | Conservative Rust manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_REACH_RUBY` | `true` | Conservative Ruby manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_REACH_PHP` | `true` | Conservative PHP manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |

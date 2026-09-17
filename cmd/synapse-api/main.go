@@ -67,6 +67,7 @@ import (
 	responseobserverinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/responseobserver"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/rulecatalog"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/scmdecoration"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
@@ -958,6 +959,17 @@ func main() {
 	projectService.SetRuleCatalog(ruleCatalog)
 	qualityProfileService := qualityprofilesuc.NewService(qualityProfileStore, ruleCatalog, projectRepo, auditLog, clock)
 	projectService.SetQualityProfiles(qualityProfileService)
+	// PR decoration writes the quality-gate result back to the forge for a project that opted in
+	// (project.DecoratePullRequests). One multiplexing decorator serves all forges, resolving the
+	// write credential from the tenant-scoped SCM connector store per call. It stays off for every
+	// project by default, so composing it here performs no outward write until a project opts in.
+	if scmConnectorStore != nil {
+		if decorator, decErr := scmdecoration.NewMultiplexDecorator(scmConnectorStore); decErr != nil {
+			log.Warn("pr decoration disabled: multiplex decorator not constructed", "error", decErr.Error())
+		} else {
+			projectService.SetPRDecorator(decorator)
+		}
+	}
 	// Measures API cursor signing: an HMAC-SHA256 key that prevents pagination token tampering.
 	// Production MUST supply at least 32 bytes via SYNAPSE_MEASURE_CURSOR_SECRET; dev gets an
 	// ephemeral random key (cursors won't survive a restart, which is acceptable for dev).

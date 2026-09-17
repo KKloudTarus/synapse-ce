@@ -718,10 +718,16 @@ func runGate(args []string) error {
 	rulesPath := filepath.Join(dir, ".synapse-rules.yaml")
 	covPath := ""
 	markdown := false
+	decorate := false
+	dryRun := false
 	for i := 1; i < len(args); i++ {
 		switch {
 		case args[i] == "--new-code-only":
 			newCodeOnly = true
+		case args[i] == "--decorate":
+			decorate = true
+		case args[i] == "--dry-run":
+			dryRun = true
 		case args[i] == "--base" && i+1 < len(args):
 			base = args[i+1]
 			i++
@@ -887,7 +893,12 @@ func runGate(args []string) error {
 			fmt.Printf("  [%s] %s (%s)\n", mark, cr.Condition, conditionActual(cr))
 		}
 	}
-	triggerGateDecorationFromEnv(ctx, cliPRDecorator, result, summary, scoped)
+	decorator, decErr := buildGateDecorator(os.Getenv, decorate, dryRun)
+	if decErr != nil {
+		// A decoration misconfiguration must never fail the gate; report it and continue.
+		fmt.Fprintf(os.Stderr, "warning: PR decoration is not configured; the quality gate result is unchanged: %v\n", decErr)
+	}
+	triggerGateDecorationFromEnv(ctx, decorator, result, summary, scoped)
 	if !result.Passed {
 		return fmt.Errorf("quality gate FAILED: %d condition(s) not met", len(result.Failures()))
 	}

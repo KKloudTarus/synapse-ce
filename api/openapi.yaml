@@ -2027,6 +2027,51 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalServerError"}
 
+  /api/v1/projects/{key}/decoration:
+    parameters:
+    - name: key
+      in: path
+      required: true
+      schema: {type: string}
+      example: payments-api
+    put:
+      tags: [projects]
+      summary: Toggle forge pull-request decoration for a Project
+      operationId: setProjectDecoration
+      description: >
+        Opts the Project in or out of writing the quality-gate result back to the
+        forge (commit status, check/report, and a PR/MR comment) when an analysis
+        is for a pull request. Decoration is off for every Project by default, so
+        no Project performs an outward forge write until this is enabled. Requires
+        the operate permission. Decoration remains fail-soft: an enabled Project
+        whose forge credential is not configured is simply not decorated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: {type: boolean}
+            example: {enabled: true}
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key: {type: string}
+                  decorate_pull_requests: {type: boolean}
+                example: {key: payments-api, decorate_pull_requests: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+
   /api/v1/projects/{key}/branches:
     parameters:
     - name: key

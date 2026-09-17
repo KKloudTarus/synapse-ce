@@ -112,6 +112,17 @@ func (r *ProjectRepository) UpdateGate(_ context.Context, tenantID shared.ID, ke
 	return nil
 }
 
+func (r *ProjectRepository) SetPullRequestDecoration(_ context.Context, tenantID shared.ID, key string, enabled bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, found := r.data[projectStoreKey(tenantID, key)]
+	if !found {
+		return shared.ErrNotFound
+	}
+	p.DecoratePullRequests = enabled
+	return nil
+}
+
 func (r *ProjectRepository) AssignProfile(_ context.Context, tenantID shared.ID, projectKey, language, profileKey string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

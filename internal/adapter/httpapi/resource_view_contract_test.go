@@ -27,7 +27,7 @@ var wireContract = map[string][]string{
 	},
 	"projectView": {
 		"id", "tenant_id", "name", "key", "source_binding", "default_profile_by_lang",
-		"gate_id", "created_at", "updated_at",
+		"gate_id", "decorate_pull_requests", "created_at", "updated_at",
 	},
 	"engagementFindingsView": {"total", "critical", "high", "medium", "low", "info"},
 	"scopeView":              {"in_scope", "out_of_scope"},

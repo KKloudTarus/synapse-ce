@@ -31,6 +31,7 @@ type projectService interface {
 	Get(context.Context, shared.ID, string) (*project.Project, error)
 	Delete(context.Context, string, shared.ID, string) error
 	AssignGate(context.Context, string, shared.ID, string, string) (*project.Project, error)
+	SetPullRequestDecoration(context.Context, string, shared.ID, string, bool) (*project.Project, error)
 	StartAnalysis(context.Context, string, shared.ID, string, *measure.CoverageReport) (ports.ScanJob, error)
 	ImportAnalysis(context.Context, shared.ID, string, projectuc.ImportAnalysisInput) (projectanalysis.Analysis, error)
 	AnalysisStatus(context.Context, shared.ID, string) (ports.ScanJob, error)
@@ -214,6 +215,22 @@ func (rt *Router) assignProjectGate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := rt.projects.AssignGate(r.Context(), PrincipalFrom(r.Context()), shared.ID(TenantFrom(r.Context())), r.PathValue("key"), body.GateID)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toProjectView(p))
+}
+
+func (rt *Router) setProjectDecoration(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
+		return
+	}
+	p, err := rt.projects.SetPullRequestDecoration(r.Context(), PrincipalFrom(r.Context()), shared.ID(TenantFrom(r.Context())), r.PathValue("key"), body.Enabled)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
