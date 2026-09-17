@@ -100,6 +100,9 @@ sca-accuracy-run: ## Run the fixed trusted SCA benchmark cycle
 sca-accuracy-test: ## Run focused SCA benchmark verification
 	$(GO) test -count=1 ./internal/usecase/scabench ./internal/infrastructure/scabench ./cmd/synapse-sca-cycle ./cmd/synapse-sca-bench
 
+reachability-benchmark: ## Run the no-argument reachability benchmark lifecycle
+	$(GO) run ./cmd/synapse-reachability-cycle
+
 rulepack-verify: ## Verify a signed RulePack against the externally pinned release key
 	$(GO) run ./cmd/synapse-cli rulepack verify --artifact $(RULEPACK_ARTIFACT) --public-key $(RULEPACK_PUBLIC_KEY)
 
