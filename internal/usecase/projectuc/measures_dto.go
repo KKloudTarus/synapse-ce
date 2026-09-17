@@ -73,6 +73,7 @@ type MeasureSignedMetric struct {
 	Reason       *string                  `json:"unavailable_reason"`
 }
 
+// ComplexityCoverageMetric records how much of a node's source scope has usable complexity evidence.
 type ComplexityCoverageMetric struct {
 	Version       int                      `json:"version"`
 	EligibleFiles MeasureCountMetric       `json:"eligible_files"`
@@ -81,6 +82,7 @@ type ComplexityCoverageMetric struct {
 	Reason        *string                  `json:"unavailable_reason"`
 }
 
+// ComplexityBaseline identifies the baseline analysis used for computing complexity deltas.
 type ComplexityBaseline struct {
 	AnalysisID string    `json:"analysis_id"`
 	CreatedAt  time.Time `json:"created_at"`

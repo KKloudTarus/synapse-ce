@@ -6,6 +6,7 @@ import (
 	"sort"
 )
 
+// ComplexitySchemaVersion is the current wire and storage format version for complexity reports.
 const ComplexitySchemaVersion = 1
 
 // FunctionComplexity is one function's location + size/complexity measures. Line is 1-based; File is
@@ -76,13 +77,13 @@ func (r ComplexityReport) ComplexityIndex() (map[string]ComplexityFileMetrics, e
 		if err != nil || path == "" || path != function.File {
 			return nil, fmt.Errorf("complexity function path %q is not canonical", function.File)
 		}
+		if function.Cyclomatic < 0 || function.Cognitive < 0 {
+			return nil, fmt.Errorf("negative complexity metric for %q", path)
+		}
 		entry, exists := index[path]
 		if !exists {
 			// A function outside the inventory/coverage set cannot make an unproven file measured.
 			continue
-		}
-		if function.Cyclomatic < 0 || function.Cognitive < 0 {
-			return nil, fmt.Errorf("negative complexity metric for %q", path)
 		}
 		if !entry.Available {
 			continue
@@ -108,30 +109,71 @@ type ComplexityCoverageSummary struct {
 
 // FileCyclomatic returns the sum of cyclomatic complexities for functions in file and whether the file was
 // successfully measured. If the report lacks per-file coverage evidence (legacy report), or the file was
-// unsupported or failed to parse, it returns (0, false).
+// unsupported or failed to parse, it returns (0, false). Damage is localized to the queried file so a
+// malformed path or error elsewhere in the report does not invalidate other files.
 func (r ComplexityReport) FileCyclomatic(file string) (int, bool) {
-	index, err := r.ComplexityIndex()
-	if err != nil {
+	if len(r.Files) == 0 {
 		return 0, false
 	}
-	entry, ok := index[file]
-	if !ok || !entry.Available {
+	canon, err := CanonicalPath(file)
+	if err != nil || canon == "" || canon != file {
 		return 0, false
 	}
-	return entry.Cyclomatic, true
+	var cov *ComplexityFileCoverage
+	for i := range r.Files {
+		if r.Files[i].File == file {
+			if cov != nil {
+				return 0, false
+			}
+			cov = &r.Files[i]
+		}
+	}
+	if cov == nil || !cov.Supported || !cov.Parsed || cov.ParseError {
+		return 0, false
+	}
+	sum := 0
+	for _, f := range r.Functions {
+		if f.File == file {
+			if f.Cyclomatic < 0 || sum > math.MaxInt32-f.Cyclomatic {
+				return 0, false
+			}
+			sum += f.Cyclomatic
+		}
+	}
+	return sum, true
 }
 
 // FileCognitive mirrors FileCyclomatic for the nesting-aware complexity metric.
 func (r ComplexityReport) FileCognitive(file string) (int, bool) {
-	index, err := r.ComplexityIndex()
-	if err != nil {
+	if len(r.Files) == 0 {
 		return 0, false
 	}
-	entry, ok := index[file]
-	if !ok || !entry.Available {
+	canon, err := CanonicalPath(file)
+	if err != nil || canon == "" || canon != file {
 		return 0, false
 	}
-	return entry.Cognitive, true
+	var cov *ComplexityFileCoverage
+	for i := range r.Files {
+		if r.Files[i].File == file {
+			if cov != nil {
+				return 0, false
+			}
+			cov = &r.Files[i]
+		}
+	}
+	if cov == nil || !cov.Supported || !cov.Parsed || cov.ParseError {
+		return 0, false
+	}
+	sum := 0
+	for _, f := range r.Functions {
+		if f.File == file {
+			if f.Cognitive < 0 || sum > math.MaxInt32-f.Cognitive {
+				return 0, false
+			}
+			sum += f.Cognitive
+		}
+	}
+	return sum, true
 }
 
 // ValidateComplexityEvidence checks the bounded wire model before it is persisted.

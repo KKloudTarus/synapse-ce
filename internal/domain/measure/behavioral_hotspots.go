@@ -164,6 +164,18 @@ func BuildBehavioralHotspots(in BuildBehavioralHotspotsInput) (BehavioralHotspot
 		})
 	}
 
+	var complexityIndex map[string]ComplexityFileMetrics
+	if in.Complexity != nil {
+		if err := in.Complexity.ValidateComplexityEvidence(); err != nil {
+			return BehavioralHotspotsReport{}, fmt.Errorf("behavioral hotspots: invalid complexity evidence: %w", err)
+		}
+		var err error
+		complexityIndex, err = in.Complexity.ComplexityIndex()
+		if err != nil {
+			return BehavioralHotspotsReport{}, fmt.Errorf("behavioral hotspots: invalid complexity evidence: %w", err)
+		}
+	}
+
 	// 2. Iterate eligible files from Inventory
 	// An eligible file is a tracked regular source file in inventory.
 	var gaps []BehavioralGap
@@ -190,8 +202,8 @@ func BuildBehavioralHotspots(in BuildBehavioralHotspotsInput) (BehavioralHotspot
 			continue
 		}
 
-		cycSum, measured := in.Complexity.FileCyclomatic(canon)
-		if !measured {
+		entry, ok := complexityIndex[canon]
+		if !ok || !entry.Available {
 			gaps = append(gaps, BehavioralGap{
 				Path:   canon,
 				Reason: "complexity_not_measured",
@@ -201,15 +213,15 @@ func BuildBehavioralHotspots(in BuildBehavioralHotspotsInput) (BehavioralHotspot
 
 		changes := commitTouchCount[canon]
 		// Integer overflow safe calculation
-		if int64(cycSum)*int64(changes) > math.MaxInt32 {
-			return BehavioralHotspotsReport{}, fmt.Errorf("behavioral score overflow for %q: %d * %d", canon, cycSum, changes)
+		if int64(entry.Cyclomatic)*int64(changes) > math.MaxInt32 {
+			return BehavioralHotspotsReport{}, fmt.Errorf("behavioral score overflow for %q: %d * %d", canon, entry.Cyclomatic, changes)
 		}
-		score := cycSum * changes
+		score := entry.Cyclomatic * changes
 
 		files = append(files, BehavioralFile{
 			Path:        canon,
 			Language:    f.Language,
-			Cyclomatic:  cycSum,
+			Cyclomatic:  entry.Cyclomatic,
 			ChangeCount: changes,
 			Score:       score,
 		})

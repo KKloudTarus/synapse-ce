@@ -140,3 +140,57 @@ func TestComplexityIndexIsBoundedAndCoverageAware(t *testing.T) {
 		t.Fatal("expected non-canonical function path error")
 	}
 }
+
+func TestFileCyclomaticAndCognitive_LocalizedDamage(t *testing.T) {
+	// A malformed or duplicate entry elsewhere in the report does not invalidate a valid file.
+	report := ComplexityReport{
+		Version: ComplexitySchemaVersion,
+		Files: []ComplexityFileCoverage{
+			{File: "ok.go", Language: "Go", Supported: true, Parsed: true},
+			{File: "duplicate.go", Language: "Go", Supported: true, Parsed: true},
+			{File: "duplicate.go", Language: "Go", Supported: true, Parsed: true},
+			{File: "../outside.go", Language: "Go", Supported: true, Parsed: true},
+		},
+		Functions: []FunctionComplexity{
+			{File: "ok.go", Cyclomatic: 4, Cognitive: 2},
+			{File: "duplicate.go", Cyclomatic: 10, Cognitive: 5},
+			{File: "../outside.go", Cyclomatic: 7, Cognitive: 3},
+		},
+	}
+
+	// ok.go should succeed despite other malformed files
+	cyc, ok := report.FileCyclomatic("ok.go")
+	if !ok || cyc != 4 {
+		t.Fatalf("FileCyclomatic(ok.go) = (%d, %v), want (4, true)", cyc, ok)
+	}
+	cog, ok := report.FileCognitive("ok.go")
+	if !ok || cog != 2 {
+		t.Fatalf("FileCognitive(ok.go) = (%d, %v), want (2, true)", cog, ok)
+	}
+
+	// duplicate.go should fail gracefully for that file
+	if _, ok := report.FileCyclomatic("duplicate.go"); ok {
+		t.Fatalf("FileCyclomatic(duplicate.go) want ok=false")
+	}
+
+	// non-canonical path should fail gracefully
+	if _, ok := report.FileCyclomatic("../outside.go"); ok {
+		t.Fatalf("FileCyclomatic(../outside.go) want ok=false")
+	}
+}
+
+func TestComplexityIndex_RejectsNegativeMetricForAbsentFile(t *testing.T) {
+	report := ComplexityReport{
+		Version: ComplexitySchemaVersion,
+		Files: []ComplexityFileCoverage{
+			{File: "ok.go", Language: "Go", Supported: true, Parsed: true},
+		},
+		Functions: []FunctionComplexity{
+			{File: "ok.go", Cyclomatic: 1, Cognitive: 1},
+			{File: "unlisted.go", Cyclomatic: -1, Cognitive: 0},
+		},
+	}
+	if err := report.ValidateComplexityEvidence(); err == nil {
+		t.Fatal("expected negative complexity error for unlisted file")
+	}
+}

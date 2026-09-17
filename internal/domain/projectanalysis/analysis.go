@@ -39,6 +39,7 @@ type Delta struct {
 	Complexity *ComplexityDelta   `json:"complexity,omitempty"`
 }
 
+// ComplexityDeltaSchemaVersion is the wire schema version for complexity trends.
 const ComplexityDeltaSchemaVersion = 1
 
 // ComplexityNodeDelta is a signed, path-scoped complexity change. A nil value is represented by
