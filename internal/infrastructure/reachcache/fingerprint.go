@@ -229,12 +229,13 @@ func (f *TreeFingerprinter) hashFile(realRoot string, j fileJob) ([32]byte, erro
 		if oerr != nil {
 			return zero, fmt.Errorf("open %q: %w", j.rel, oerr)
 		}
-		if _, cerr := io.Copy(h, file); cerr != nil {
-			_ = file.Close()
-			return zero, fmt.Errorf("read %q: %w", j.rel, cerr)
+		_, copyErr := io.Copy(h, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return zero, fmt.Errorf("read %q: %w", j.rel, copyErr)
 		}
-		if cerr := file.Close(); cerr != nil {
-			return zero, fmt.Errorf("close %q: %w", j.rel, cerr)
+		if closeErr != nil {
+			return zero, fmt.Errorf("close %q: %w", j.rel, closeErr)
 		}
 	default:
 		// Non-regular, non-symlink (FIFO, device, socket): identity only, never opened.

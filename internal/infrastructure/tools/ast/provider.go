@@ -222,7 +222,7 @@ func (p *Provider) Complexity(ctx context.Context, root string) (measure.Complex
 	if err := json.Unmarshal(out, &wire); err != nil {
 		return measure.ComplexityReport{}, false, fmt.Errorf("parse synapse-ast metrics: %w", err)
 	}
-	return measure.ComplexityReport{Version: measure.ComplexitySchemaVersion, Functions: wire.Functions, Files: wire.Files, Truncated: wire.Truncated}, true, nil
+	return measure.ComplexityReport{Functions: wire.Functions, Files: wire.Files, Truncated: wire.Truncated}, true, nil
 }
 
 // Bugs runs `synapse-ast bugs <root>` and returns the deterministic reliability defects. A sidecar built
@@ -327,7 +327,8 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 	}
 	stdout := boundedOutput{limit: maxASTOutputBytes}
 	stderr := boundedOutput{limit: maxASTOutputBytes}
-	ec := exec.CommandContext(ctx, p.bin, args...) // #nosec G702 -- p.bin is the administrator-configured AST sidecar and args are passed without a shell.
+	//nolint:gosec // The configured binary is executed directly with a fixed argv shape; no shell is involved.
+	ec := exec.CommandContext(ctx, p.bin, args...)
 	ec.Stdout = &stdout
 	ec.Stderr = &stderr
 	err := ec.Run()

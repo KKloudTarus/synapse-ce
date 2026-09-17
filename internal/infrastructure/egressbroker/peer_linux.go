@@ -18,7 +18,6 @@ import (
 type peerIdentity struct {
 	pid int
 	uid int
-	gid int
 }
 
 type sandboxProcess struct {
@@ -48,7 +47,7 @@ func peerIdentityFromConn(conn net.Conn) (peerIdentity, error) {
 	if cred == nil || cred.Pid <= 1 {
 		return peerIdentity{}, errors.New("unix peer credentials contain an invalid pid")
 	}
-	return peerIdentity{pid: int(cred.Pid), uid: int(cred.Uid), gid: int(cred.Gid)}, nil
+	return peerIdentity{pid: int(cred.Pid), uid: int(cred.Uid)}, nil
 }
 
 func authorizeSandboxProcess(peer peerIdentity, pid int, workerUID int, bwrapPath string) (*sandboxProcess, error) {

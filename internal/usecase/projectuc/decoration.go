@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -34,11 +35,18 @@ func (s *Service) decorateProjectAnalysis(ctx context.Context, analysis projecta
 	scope := fmt.Sprintf("pull request #%s → %s", target.PullRequest, target.TargetBranch)
 	summary := qualitygate.RenderMarkdown(scope, analysis.Rating, analysis.Duplication.Density(), coverage, analysis.Gate)
 	annotations := append([]projectanalysis.Annotation(nil), analysis.Annotations...)
+	fileChanges := append([]projectanalysis.FileChange(nil), analysis.FileChanges...)
+	newIssues := analysis.NewCode.Counts.Total
+	var newCoverage *float64
+	newCoverageReason := analysis.Snapshot.NewCodeCoverage.Reason
+	if analysis.Snapshot.NewCodeCoverage.Availability == measure.AvailabilityAvailable && analysis.Snapshot.NewCodeCoverage.Value != nil {
+		value := *analysis.Snapshot.NewCodeCoverage.Value
+		newCoverage = &value
+		newCoverageReason = ""
+	}
 	if err := s.decorator.Decorate(ctx, ports.PRDecoration{
-		Target:      target,
-		Gate:        analysis.Gate,
-		Summary:     summary,
-		Annotations: annotations,
+		Target: target, Gate: analysis.Gate, Summary: summary, Annotations: annotations, FileChanges: fileChanges,
+		NewIssues: &newIssues, NewCoverage: newCoverage, NewCoverageReason: newCoverageReason,
 	}); err != nil {
 		slog.Warn("project analysis PR decoration failed; analysis result is unchanged")
 	}

@@ -20,7 +20,7 @@ jobs:
       OSV_SCANNER_VERSION: v2.4.0
       SEMGREP_VERSION: 1.176.0
       REACHBENCH_DIR: internal/infrastructure/tools/ssacallgraph/testdata/reachbench
-      REACHBENCH_REPORT_DIR: ${{ runner.temp }}/reachbench
+      REACHBENCH_REPORT_DIR: ${{ github.workspace }}/.reachbench
     steps:
       - uses: actions/checkout@v7
 
@@ -67,8 +67,8 @@ jobs:
 
       - name: Gate owned engine recall and parity
         env:
-          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ runner.temp }}/reachbench/synapse-owned.json
-          SYNAPSE_REACHBENCH_BASELINE_REPORTS: osv-scanner=${{ runner.temp }}/reachbench/osv-scanner.json,semgrep-ce=${{ runner.temp }}/reachbench/semgrep-ce.json
+          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/.reachbench/synapse-owned.json
+          SYNAPSE_REACHBENCH_BASELINE_REPORTS: osv-scanner=${{ github.workspace }}/.reachbench/osv-scanner.json,semgrep-ce=${{ github.workspace }}/.reachbench/semgrep-ce.json
         run: go test -count=1 -v -run TestGoReachabilityCorpus ./internal/infrastructure/tools/ssacallgraph
 
       - name: Upload raw evidence and scorecards
@@ -76,7 +76,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: reachability-benchmark-go-scorecards
-          path: ${{ runner.temp }}/reachbench
+          path: ${{ github.workspace }}/.reachbench
           if-no-files-found: warn
 
   python-oss-baselines:
@@ -88,7 +88,7 @@ jobs:
       # not its entrypoint reachability. The owned engine must match or beat its recall AND precision.
       SEMGREP_VERSION: 1.176.0
       REACHBENCH_DIR: internal/infrastructure/tools/astwalk/testdata/reachbench
-      REACHBENCH_REPORT_DIR: ${{ runner.temp }}/reachbench
+      REACHBENCH_REPORT_DIR: ${{ github.workspace }}/.reachbench
     steps:
       - uses: actions/checkout@v7
 
@@ -123,8 +123,8 @@ jobs:
         env:
           # The owned Python reachability engine uses cgo tree-sitter, so the corpus gate runs with CGO enabled.
           CGO_ENABLED: '1'
-          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ runner.temp }}/reachbench/synapse-owned.py.json
-          SYNAPSE_REACHBENCH_BASELINE_REPORTS: semgrep-ce=${{ runner.temp }}/reachbench/semgrep-ce.py.json
+          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/.reachbench/synapse-owned.py.json
+          SYNAPSE_REACHBENCH_BASELINE_REPORTS: semgrep-ce=${{ github.workspace }}/.reachbench/semgrep-ce.py.json
         run: go test -count=1 -v -run TestPythonReachabilityCorpus ./internal/infrastructure/tools/astwalk
 
       - name: Upload raw evidence and scorecards
@@ -132,5 +132,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: reachability-benchmark-python-scorecards
-          path: ${{ runner.temp }}/reachbench
+          path: ${{ github.workspace }}/.reachbench
           if-no-files-found: warn

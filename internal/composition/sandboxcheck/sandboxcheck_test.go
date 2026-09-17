@@ -3,12 +3,12 @@ package sandboxcheck
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/redact"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"io"
 	"strings"
 	"testing"
-
-	"github.com/KKloudTarus/synapse-ce/internal/platform/redact"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	"time"
 )
 
 func TestBaseSpecRequestsConstrainedPosture(t *testing.T) {
@@ -50,6 +50,27 @@ func TestFailedHonorsStrictMode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := Failed(tt.report); got != tt.want {
 				t.Fatalf("Failed() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSandboxRunnerSelectionUsesReadyOnlyForPositiveStrictWait(t *testing.T) {
+	tests := []struct {
+		name      string
+		strict    bool
+		readyWait time.Duration
+		wantReady bool
+	}{
+		{name: "non-strict positive wait", readyWait: time.Second},
+		{name: "strict zero wait", strict: true},
+		{name: "strict negative wait", strict: true, readyWait: -time.Second},
+		{name: "strict positive wait", strict: true, readyWait: time.Second, wantReady: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := needsRunnerReadinessWait(tt.strict, tt.readyWait); got != tt.wantReady {
+				t.Fatalf("needsRunnerReadinessWait(%t, %v) = %t, want %t", tt.strict, tt.readyWait, got, tt.wantReady)
 			}
 		})
 	}

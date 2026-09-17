@@ -1,4 +1,4 @@
-.PHONY: help install tools dev build run test harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify \
+.PHONY: help install tools dev build run test harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify sca-accuracy-run sca-accuracy-test \
         rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down kind-smoke helm-render-test clean web-dev web-build smoke release-smoke
 
 GO ?= go
@@ -19,6 +19,12 @@ RULEPACK_PUBLIC_KEY ?= rulepack-release.pub
 RULEPACK_EVIDENCE ?= rulepack-gate-evidence.json
 RULEPACK_EVIDENCE_PUBLIC_KEY ?= rulepack-evidence.pub
 RULEPACK_PHASE ?= promotion
+SCA_BENCHMARK_CORPUS_ROOT ?=
+SCA_BENCHMARK_TRUSTED_INPUT_ROOT ?=
+SCA_BENCHMARK_OUTPUT_ROOT ?=
+SCA_BENCHMARK_RAW_RETENTION_ROOT ?=
+SCA_BENCHMARK_IMPLEMENTATION_COMMIT ?=
+SCA_BENCHMARK_RUN_KEY ?=
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -86,6 +92,13 @@ ai-triage-verify: ## Reproducibly verify AI-triage eval + shadow gate offline (n
 	$(GO) build ./cmd/synapse-fptriage-eval ./cmd/synapse-fptriage-compare ./cmd/synapse-fptriage-drift ./cmd/synapse-fptriage-release ./cmd/synapse-fptriage-curate
 	$(GO) test -count=1 ./internal/usecase/sca/ -run 'AIEvaluation|FPTriage|AITriage|GoldenDataset|GatePolicy'
 	$(GO) test -count=1 ./internal/usecase/fptriage/...
+
+sca-accuracy-run: ## Run the fixed trusted SCA benchmark cycle
+	@test -n "$(SCA_BENCHMARK_CORPUS_ROOT)" && test -n "$(SCA_BENCHMARK_TRUSTED_INPUT_ROOT)" && test -n "$(SCA_BENCHMARK_OUTPUT_ROOT)" && test -n "$(SCA_BENCHMARK_RAW_RETENTION_ROOT)" && test -n "$(SCA_BENCHMARK_IMPLEMENTATION_COMMIT)" && test -n "$(SCA_BENCHMARK_RUN_KEY)"
+	$(GO) run ./cmd/synapse-sca-cycle run --corpus-root "$(SCA_BENCHMARK_CORPUS_ROOT)" --trusted-input-root "$(SCA_BENCHMARK_TRUSTED_INPUT_ROOT)" --output-root "$(SCA_BENCHMARK_OUTPUT_ROOT)" --raw-retention-root "$(SCA_BENCHMARK_RAW_RETENTION_ROOT)" --implementation-commit "$(SCA_BENCHMARK_IMPLEMENTATION_COMMIT)" --run-key "$(SCA_BENCHMARK_RUN_KEY)"
+
+sca-accuracy-test: ## Run focused SCA benchmark verification
+	$(GO) test -count=1 ./internal/usecase/scabench ./internal/infrastructure/scabench ./cmd/synapse-sca-cycle ./cmd/synapse-sca-bench
 
 rulepack-verify: ## Verify a signed RulePack against the externally pinned release key
 	$(GO) run ./cmd/synapse-cli rulepack verify --artifact $(RULEPACK_ARTIFACT) --public-key $(RULEPACK_PUBLIC_KEY)

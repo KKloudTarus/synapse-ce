@@ -46,8 +46,11 @@ func TestFilesystemDurableImmutableObjects(t *testing.T) {
 		t.Fatalf("reopened bytes = %q, %v", got, err)
 	}
 	info, err := os.Stat(filepath.Join(directory, key))
-	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
-		t.Fatalf("object permission = %v, %v", info, err)
+	if err != nil {
+		t.Fatalf("stat object: %v", err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("object permission = %v, want 0600", info.Mode().Perm())
 	}
 	if err := reopened.DeleteObject(ctx, key); err != nil {
 		t.Fatal(err)
@@ -85,10 +88,7 @@ func TestFilesystemRejectsUnsafePathsAndPartialWrites(t *testing.T) {
 	}
 	outside := t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(directory, "escape")); err != nil {
-		if runtime.GOOS == "windows" {
-			t.Skipf("symlink privilege unavailable on Windows: %v", err)
-		}
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	if err := store.PutObject(ctx, "escape/object", bytes.NewReader([]byte("x")), 1); err == nil {
 		t.Fatal("accepted symlink escape")

@@ -317,7 +317,8 @@ func (s *Service) Publish(ctx context.Context, e domain.Event) ([]shared.ID, err
 }
 
 func (s *Service) seal(tenant, id shared.ID, version int, cfg ports.NotificationChannelConfig) (string, error) {
-	raw, err := json.Marshal(cfg) // #nosec G117 -- the serialized secret is immediately encrypted by protector.Seal below.
+	//nolint:gosec // The secret-bearing configuration is immediately sealed and is never persisted or logged as plaintext.
+	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return "", err
 	}

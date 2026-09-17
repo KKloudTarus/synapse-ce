@@ -10,7 +10,9 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
@@ -21,6 +23,13 @@ import (
 // security-critical part) is unit-testable on any platform.
 func fakeRunner(systemdRun string) *Runner {
 	return &Runner{bwrap: "/usr/bin/bwrap", systemdRun: systemdRun, memMax: 256 << 20, pidsMax: 128, lookupNetIP: func(context.Context, string, string) ([]netip.Addr, error) { return nil, nil }}
+}
+
+// invalidCgroupRoot returns a missing parent, which cannot be made into a per-run
+// cgroup by any platform-specific implementation.
+func invalidCgroupRoot(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "missing-cgroup-parent")
 }
 
 func TestErrUnavailableDoesNotMisidentifyTheMissingControl(t *testing.T) {
@@ -139,7 +148,7 @@ func TestSandboxNoCapAddByDefault(t *testing.T) {
 
 func TestSandboxWrapsInSystemdRunForLimits(t *testing.T) {
 	r := fakeRunner("/usr/bin/systemd-run")
-	argv := r.command(ports.ToolSpec{Name: "syft", MemMaxBytes: 512 << 20, PidsMax: 64}, "", "", 3, 0, 0, false)
+	argv := r.command(ports.ToolSpec{Name: "syft", MemMaxBytes: 512 << 20, PidsMax: 64}, "", "", 3, 0, 0, true)
 	if argv[0] != "/usr/bin/systemd-run" {
 		t.Fatalf("argv[0] = %q, want systemd-run prefix", argv[0])
 	}
@@ -155,14 +164,212 @@ func TestSandboxWrapsInSystemdRunForLimits(t *testing.T) {
 
 func TestSandboxDirectCgroupSkipsSystemdRun(t *testing.T) {
 	r := fakeRunner("/usr/bin/systemd-run")
-	// directCgroup=true → the run is already in a limit cgroup; systemd-run must be skipped
-	// to avoid a redundant scope (F3).
-	argv := r.command(ports.ToolSpec{Name: "syft"}, "", "", 3, 0, 0, true)
+	// useSystemd=false means the direct cgroup already limits this run, so a redundant
+	// systemd scope must not be added.
+	argv := r.command(ports.ToolSpec{Name: "syft"}, "", "", 3, 0, 0, false)
 	if argv[0] == "/usr/bin/systemd-run" {
 		t.Errorf("direct cgroup run must NOT also wrap in systemd-run: %v", argv)
 	}
 	if argv[0] != "/usr/bin/bwrap" {
 		t.Errorf("argv[0] should be bwrap directly: %v", argv)
+	}
+}
+
+func TestNewRunnerReadyAcceptsFallbackOnlyCgroupLimiter(t *testing.T) {
+	fallback := &Runner{systemdRun: "/usr/bin/systemd-run"}
+	attempts := 0
+
+	runner, err := newRunnerReady(context.Background(), time.Second, 0, 0, 0, time.Nanosecond, false, func(time.Duration, int, int64, int) (*Runner, error) {
+		attempts++
+		return fallback, nil
+	})
+	if err != nil {
+		t.Fatalf("newRunnerReady() error = %v", err)
+	}
+	if runner != fallback {
+		t.Fatalf("newRunnerReady() = %#v, want fallback runner", runner)
+	}
+	if runner.directCgroupRequired || runner.ControlSetIdentity() != "" {
+		t.Fatalf("ordinary ready runner must not require or attest a direct cgroup: %#v", runner)
+	}
+	if attempts != 1 {
+		t.Fatalf("constructor calls = %d, want 1", attempts)
+	}
+}
+
+func TestNewDirectCgroupRunnerReadyWaitsForDirectDelegatedCgroup(t *testing.T) {
+	fallback := &Runner{systemdRun: "/usr/bin/systemd-run"}
+	direct := &Runner{directCgroupRoot: "/sys/fs/cgroup/synapse"}
+	attempts := 0
+
+	runner, err := newDirectCgroupRunnerReady(context.Background(), time.Second, 0, 0, 0, time.Nanosecond, func(time.Duration, int, int64, int) (*Runner, error) {
+		attempts++
+		switch attempts {
+		case 1:
+			return fallback, nil
+		case 2:
+			return direct, nil
+		default:
+			t.Fatalf("constructor called %d times", attempts)
+			return nil, nil
+		}
+	})
+	if err != nil {
+		t.Fatalf("newDirectCgroupRunnerReady() error = %v", err)
+	}
+	if runner != direct || !runner.directCgroupRequired {
+		t.Fatalf("newDirectCgroupRunnerReady() = %#v, want direct-only runner", runner)
+	}
+	if got := runner.ControlSetIdentity(); got != ControlSetIdentityBubblewrapSeccompCgroupV2 {
+		t.Fatalf("ControlSetIdentity() = %q, want %q", got, ControlSetIdentityBubblewrapSeccompCgroupV2)
+	}
+	if attempts != 2 {
+		t.Fatalf("constructor calls = %d, want 2", attempts)
+	}
+}
+
+func TestNewDirectCgroupRunnerReadyRetriesNilAndErrorConstructionResults(t *testing.T) {
+	direct := &Runner{directCgroupRoot: "/sys/fs/cgroup/synapse"}
+	attempts := 0
+
+	runner, err := newDirectCgroupRunnerReady(context.Background(), time.Second, 0, 0, 0, time.Nanosecond, func(time.Duration, int, int64, int) (*Runner, error) {
+		attempts++
+		switch attempts {
+		case 1:
+			return nil, nil
+		case 2:
+			return nil, errors.New("constructor unavailable")
+		case 3:
+			return direct, nil
+		default:
+			t.Fatalf("constructor called %d times", attempts)
+			return nil, nil
+		}
+	})
+	if err != nil {
+		t.Fatalf("newDirectCgroupRunnerReady() error = %v", err)
+	}
+	if runner != direct || !runner.directCgroupRequired {
+		t.Fatalf("newDirectCgroupRunnerReady() = %#v, want direct-only runner", runner)
+	}
+	if attempts != 3 {
+		t.Fatalf("constructor calls = %d, want 3", attempts)
+	}
+}
+
+func TestNewDirectCgroupRunnerReadyCancellationWithoutDirectDelegatedCgroupReturnsUnavailable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attempts := 0
+
+	runner, err := newDirectCgroupRunnerReady(ctx, time.Second, 0, 0, 0, time.Hour, func(time.Duration, int, int64, int) (*Runner, error) {
+		attempts++
+		cancel()
+		return &Runner{systemdRun: "/usr/bin/systemd-run"}, nil
+	})
+	if runner != nil {
+		t.Fatalf("newDirectCgroupRunnerReady() runner = %#v, want nil", runner)
+	}
+	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "direct delegated cgroup") {
+		t.Fatalf("newDirectCgroupRunnerReady() error = %v, want unavailable direct delegated cgroup", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("constructor calls = %d, want 1 after cancellation", attempts)
+	}
+}
+
+func TestControlSetIdentityAttestsOnlyDirectCgroupRunners(t *testing.T) {
+	tests := []struct {
+		name string
+		r    *Runner
+		want string
+	}{
+		{name: "nil"},
+		{name: "fallback only", r: &Runner{systemdRun: "/usr/bin/systemd-run"}},
+		{name: "ordinary direct plus fallback", r: &Runner{directCgroupRoot: "/sys/fs/cgroup/synapse", systemdRun: "/usr/bin/systemd-run"}},
+		{name: "direct only", r: &Runner{directCgroupRoot: "/sys/fs/cgroup/synapse", directCgroupRequired: true}, want: ControlSetIdentityBubblewrapSeccompCgroupV2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.r.ControlSetIdentity(); got != tt.want {
+				t.Fatalf("ControlSetIdentity() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCgroupExecutionDirectRunnerFailureDoesNotSelectSystemdFallback(t *testing.T) {
+	tests := []struct {
+		name             string
+		directCgroupRoot string
+	}{
+		{name: "missing direct root"},
+		{name: "missing cgroup parent", directCgroupRoot: invalidCgroupRoot(t)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &Runner{
+				directCgroupRoot:     tt.directCgroupRoot,
+				systemdRun:           "/usr/bin/systemd-run",
+				directCgroupRequired: true,
+			}
+
+			direct, useSystemd, err := r.cgroupExecution(256<<20, 128)
+			if direct != nil || useSystemd {
+				t.Fatalf("cgroupExecution() = (%v, fallback=%t), want no cgroup and no fallback", direct, useSystemd)
+			}
+			if !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("cgroupExecution() error = %v, want ErrUnavailable", err)
+			}
+		})
+	}
+}
+
+func TestCgroupExecutionOrdinaryDirectFailureRetainsSystemdFallback(t *testing.T) {
+	r := &Runner{
+		directCgroupRoot: invalidCgroupRoot(t),
+		systemdRun:       "/usr/bin/systemd-run",
+	}
+
+	direct, useSystemd, err := r.cgroupExecution(256<<20, 128)
+	if err != nil {
+		t.Fatalf("cgroupExecution() error = %v", err)
+	}
+	if direct != nil || !useSystemd {
+		t.Fatalf("cgroupExecution() = (%v, fallback=%t), want systemd fallback", direct, useSystemd)
+	}
+	argv := r.command(ports.ToolSpec{Name: "syft"}, "", "", 3, 0, 0, useSystemd)
+	if argv[0] != "/usr/bin/systemd-run" {
+		t.Fatalf("command() argv[0] = %q, want systemd-run fallback", argv[0])
+	}
+}
+
+func TestDirectCgroupRunnerPolicySupportsConcurrentIdentityReads(t *testing.T) {
+	r := &Runner{
+		directCgroupRoot:     "/sys/fs/cgroup/synapse",
+		directCgroupRequired: true,
+	}
+	const workers = 32
+	const readsPerWorker = 1_000
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < readsPerWorker; j++ {
+				if got := r.ControlSetIdentity(); got != ControlSetIdentityBubblewrapSeccompCgroupV2 {
+					errs <- fmt.Errorf("ControlSetIdentity() = %q", got)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
 

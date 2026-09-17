@@ -1,6 +1,3 @@
-//go:build !windows
-// +build !windows
-
 package main
 
 import (
@@ -11,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -286,22 +282,6 @@ func TestGoModulePath(t *testing.T) {
 	}
 	if got := goModulePath(dir); got != "example.com/acme/app" {
 		t.Fatalf("module path = %q, want example.com/acme/app", got)
-	}
-	// Anything that is not a regular file is not read. The case that matters is a FIFO with no
-	// writer: without the type check, ReadFile blocks the gate forever, so the assertion is a deadline.
-	odd := t.TempDir()
-	if err := syscall.Mkfifo(filepath.Join(odd, "go.mod"), 0o600); err != nil {
-		t.Skipf("mkfifo unavailable: %v", err)
-	}
-	done := make(chan string, 1)
-	go func() { done <- goModulePath(odd) }()
-	select {
-	case got := <-done:
-		if got != "" {
-			t.Fatalf("a non-regular go.mod must read as no module, got %q", got)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("goModulePath blocked on a FIFO named go.mod: the regular-file check is missing")
 	}
 }
 

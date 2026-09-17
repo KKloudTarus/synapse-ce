@@ -1,0 +1,122 @@
+name: Engine accuracy benchmark
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ["**"]
+  schedule:
+    - cron: "17 3 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-accuracy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  route:
+    name: Authorize trusted benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      trusted: ${{ steps.trust.outputs.trusted }}
+    steps:
+      - id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+          case "$sha" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "source revision is not a full SHA" >&2; exit 1 ;;
+          esac
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - id: trust
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ steps.source.outputs.sha }}
+          ENABLED: ${{ vars.ENGINE_ACCURACY_TRUSTED_ENABLED }}
+          TRUSTED_REF: ${{ vars.ENGINE_ACCURACY_TRUSTED_REF }}
+          TRUSTED_SHA: ${{ vars.ENGINE_ACCURACY_TRUSTED_SHA }}
+        run: |
+          set -euo pipefail
+          trusted=false
+          if [ "$EVENT_NAME" != pull_request ] && [ "$ENABLED" = true ] && [ -n "$TRUSTED_SHA" ] && [ "$REF" = "${TRUSTED_REF:-refs/heads/main}" ] && [ "$SHA" = "$TRUSTED_SHA" ]; then
+            trusted=true
+          fi
+          echo "trusted=$trusted" >> "$GITHUB_OUTPUT"
+
+  benchmark:
+    name: Trusted fixed benchmark
+    needs: route
+    if: ${{ needs.route.outputs.trusted == 'true' }}
+    runs-on: [self-hosted, linux, sca-accuracy-trusted]
+    timeout-minutes: 45
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Check out exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.route.outputs.source_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run benchmark
+        shell: bash
+        env:
+          TRUSTED_INPUT_ROOT: ${{ vars.SCA_ACCURACY_TRUSTED_INPUT_ROOT }}
+          RAW_RETENTION_ROOT: ${{ vars.SCA_ACCURACY_RAW_RETENTION_ROOT }}
+          SCA_ACCURACY_DELEGATED_CGROUP_ROOT: ${{ vars.SCA_ACCURACY_DELEGATED_CGROUP_ROOT }}
+        run: |
+          set -euo pipefail
+          go run ./cmd/synapse-sca-cycle run --corpus-root "$GITHUB_WORKSPACE/internal/usecase/scabench/corpus" --trusted-input-root "$TRUSTED_INPUT_ROOT" --output-root "$RUNNER_TEMP/sca-accuracy-candidate" --raw-retention-root "$RAW_RETENTION_ROOT" --implementation-commit "${{ needs.route.outputs.source_sha }}" --run-key "${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
+      - name: Upload sanitized result
+        id: upload
+        if: ${{ success() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: engine-accuracy-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/sca-accuracy-candidate
+          if-no-files-found: error
+          retention-days: 90
+      - name: Teardown candidate workspace
+        if: ${{ always() }}
+        shell: bash
+        run: rm -rf "$RUNNER_TEMP/sca-accuracy-candidate"
+
+  aggregate:
+    name: Aggregate benchmark status
+    needs: [route, benchmark]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - shell: bash
+        env:
+          TRUSTED: ${{ needs.route.outputs.trusted }}
+          ROUTE: ${{ needs.route.result }}
+          BENCHMARK: ${{ needs.benchmark.result }}
+          ARTIFACT: ${{ needs.benchmark.outputs.artifact }}
+        run: |
+          set -euo pipefail
+          test "$ROUTE" = success
+          if [ "$TRUSTED" = true ]; then
+            test "$BENCHMARK" = success
+            test -n "$ARTIFACT"
+          else
+            test "$BENCHMARK" = skipped
+          fi
