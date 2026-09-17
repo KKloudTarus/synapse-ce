@@ -77,7 +77,7 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 		case "Rust":
 			out.Findings = append(out.Findings, rustFindings(tree, content, rel)...)
 		case "C":
-			out.Findings = append(out.Findings, cFindings(tree, content, rel)...)
+			out.Findings = append(out.Findings, cFindings(ctx, tree, content, rel)...)
 		case "C++":
 			out.Findings = append(out.Findings, cppFindings(tree, content, rel)...)
 		case "C#":

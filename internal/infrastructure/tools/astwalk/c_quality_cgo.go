@@ -3,6 +3,7 @@
 package astwalk
 
 import (
+	"context"
 	"regexp"
 	"sort"
 	"strconv"
@@ -12,12 +13,15 @@ import (
 )
 
 const (
-	maxCPerRule    = 20
-	maxCTotal      = 100
-	maxCDepth      = 256
-	maxCNodes      = 20_000
-	maxCWork       = 100_000
-	maxCCandidates = 2_000
+	// maxCFuncVarsNodes bounds the per-function tree walk cFunctionVars performs, so a single
+	// multi-megabyte function in untrusted source cannot turn variable resolution into an uncapped walk.
+	maxCFuncVarsNodes = 20000
+	maxCPerRule       = 20
+	maxCTotal         = 100
+	maxCDepth         = 256
+	maxCNodes         = 20_000
+	maxCWork          = 100_000
+	maxCCandidates    = 2_000
 )
 
 var (
@@ -27,12 +31,12 @@ var (
 	cSensitiveNameRE    = regexp.MustCompile(`(?i)(?:password|secret|token|api[_-]?key|private[_-]?key)`)
 )
 
-func cFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
-	findings, _ := cFindingsLimit(root, src, rel, maxCTotal)
+func cFindings(ctx context.Context, root *sitter.Node, src []byte, rel string) []QualityFinding {
+	findings, _ := cFindingsLimit(ctx, root, src, rel, maxCTotal)
 	return findings
 }
 
-func cFindingsLimit(root *sitter.Node, src []byte, rel string, limit int) ([]QualityFinding, bool) {
+func cFindingsLimit(ctx context.Context, root *sitter.Node, src []byte, rel string, limit int) ([]QualityFinding, bool) {
 	if root == nil {
 		return nil, false
 	}
@@ -42,6 +46,9 @@ func cFindingsLimit(root *sitter.Node, src []byte, rel string, limit int) ([]Qua
 	}
 	candidates := make([]candidate, 0, 16)
 	truncated := false
+	// funcVarMemo caches each function's variable-type facts (cFunctionVars) so detectors that need them
+	// resolve an operand or returned name in O(1) after the first lookup, keeping the whole walk linear.
+	funcVarMemo := map[*sitter.Node]map[string]cVarInfo{}
 	emit := func(key string, n *sitter.Node) {
 		if n != nil {
 			if _, ok := cRuntimeRules[key]; ok {
@@ -73,7 +80,7 @@ func cFindingsLimit(root *sitter.Node, src []byte, rel string, limit int) ([]Qua
 		}
 		if !f.n.HasError() || f.n == root || f.n.Type() == "ERROR" {
 			before := len(candidates)
-			cMatchNode(f.n, src, emit)
+			cMatchNode(ctx, f.n, src, emit, funcVarMemo)
 			work += len(candidates) - before + 1
 			if len(candidates) >= maxCCandidates {
 				truncated = true
@@ -134,7 +141,7 @@ func cFindingsLimit(root *sitter.Node, src []byte, rel string, limit int) ([]Qua
 	return out, truncated
 }
 
-func cMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
+func cMatchNode(ctx context.Context, n *sitter.Node, src []byte, emit func(string, *sitter.Node), memo map[*sitter.Node]map[string]cVarInfo) {
 	t := n.Type()
 	text := n.Content(src)
 
@@ -148,9 +155,9 @@ func cMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 	case "for_statement":
 		cMatchFor(n, text, src, emit)
 	case "return_statement":
-		cMatchReturn(n, text, src, emit)
+		cMatchReturn(ctx, n, text, src, emit, memo)
 	case "binary_expression":
-		cMatchBinary(n, text, src, emit)
+		cMatchBinary(ctx, n, text, src, emit, memo)
 	case "pointer_expression":
 		cMatchPointer(n, text, src, emit)
 	case "field_expression":
@@ -407,22 +414,32 @@ func cMatchFor(n *sitter.Node, text string, src []byte, emit func(string, *sitte
 	}
 }
 
-func cMatchReturn(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
+func cMatchReturn(ctx context.Context, n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node), memo map[*sitter.Node]map[string]cVarInfo) {
 	fn := cEnclosingFunction(n)
-	if fn != nil {
-		fnText := fn.Content(src)
-		if !strings.Contains(fnText, "static ") {
-			varName := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(text, "return")), "&")
-			varName = strings.TrimSuffix(varName, ";")
-			varName = strings.TrimSpace(varName)
-			if varName != "" && (strings.Contains(fnText, "char "+varName+"[") || strings.Contains(fnText, "int "+varName+"[") || strings.Contains(fnText, "int "+varName+";")) {
-				emit("dangling-stack-pointer-return", n)
-			}
-		}
+	if fn == nil {
+		return
+	}
+	// `return &X;` (address of a local) or `return X;` (a local array decaying to a pointer) can dangle.
+	body := strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "return")), ";")
+	body = strings.TrimSpace(body)
+	addrOf := strings.HasPrefix(body, "&")
+	varName := strings.TrimSpace(strings.TrimPrefix(body, "&"))
+	if !cIsPlainIdentifier(varName) {
+		return // &arr[i], &s.field, &*p, ...: keep the rule precise rather than guess
+	}
+	info, ok := cFunctionVars(ctx, fn, src, memo)[varName]
+	if !ok || !info.isLocal || info.isStatic {
+		return // a global or static is not stack storage
+	}
+	// `return &X` dangles for any non-static local (or parameter). `return X` dangles when X is a local
+	// array, which decays to a pointer into the stack frame. Returning a scalar local by value is fine.
+	// This catches an initialized local (`int x = 42; return &x;`) the previous `int x;` text match missed.
+	if addrOf || info.isArray {
+		emit("dangling-stack-pointer-return", n)
 	}
 }
 
-func cMatchBinary(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
+func cMatchBinary(ctx context.Context, n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node), memo map[*sitter.Node]map[string]cVarInfo) {
 	op := ""
 	left := n.ChildByFieldName("left")
 	right := n.ChildByFieldName("right")
@@ -438,9 +455,24 @@ func cMatchBinary(n *sitter.Node, text string, src []byte, emit func(string, *si
 		if left != nil && right != nil {
 			lText := strings.TrimSpace(left.Content(src))
 			rText := strings.TrimSpace(right.Content(src))
-			if (strings.Contains(lText, "signed") || strings.Contains(rText, "signed") || strings.Contains(lText, "int ") || strings.Contains(lText, "count")) &&
-				(strings.Contains(rText, "unsigned") || strings.Contains(lText, "unsigned") || strings.Contains(rText, "size_t") || strings.Contains(rText, "buf_size") || strings.Contains(rText, "len") || strings.Contains(rText, "sizeof")) {
-				if !strings.Contains(text, "(size_t)") && !strings.Contains(string(src), ">= 0") {
+			// Text heuristic: a type keyword appears directly in an operand (e.g. count < sizeof(buf)).
+			byText := (strings.Contains(lText, "signed") || strings.Contains(rText, "signed") || strings.Contains(lText, "int ") || strings.Contains(lText, "count")) &&
+				(strings.Contains(rText, "unsigned") || strings.Contains(lText, "unsigned") || strings.Contains(rText, "size_t") || strings.Contains(rText, "buf_size") || strings.Contains(rText, "len") || strings.Contains(rText, "sizeof"))
+			// Declared-type check: both operands are integer variables of opposite signedness, resolved
+			// from their declarations. Catches the textbook `if (a < b)` where the types are not in the
+			// operand text (a is `unsigned int`, b is `int`).
+			byType := false
+			if left.Type() == "identifier" && right.Type() == "identifier" {
+				vars := cFunctionVars(ctx, cEnclosingFunction(n), src, memo)
+				li, lok := vars[lText]
+				ri, rok := vars[rText]
+				byType = lok && rok && li.isInteger && ri.isInteger && li.isUnsigned != ri.isUnsigned
+			}
+			if byText || byType {
+				// A local range check (`x >= 0`) makes the comparison safe. Scope that guard to the enclosing
+				// control-flow construct rather than the whole file, so an unrelated `>= 0` elsewhere does not
+				// silently suppress every signed/unsigned comparison in the translation unit.
+				if !strings.Contains(text, "(size_t)") && !strings.Contains(cEnclosingGuardText(n, src), ">= 0") {
 					emit("signed-unsigned-comparison", n)
 				}
 			}
@@ -491,7 +523,8 @@ func cMatchFunction(n *sitter.Node, text string, src []byte, emit func(string, *
 	if cParameterCount(n, src) > 7 {
 		emit("excessive-parameters", n)
 	}
-	if cMaxControlNesting(n) > 4 {
+	nestBudget := maxCFuncVarsNodes
+	if cMaxControlNesting(n, &nestBudget) > 4 {
 		emit("deeply-nested-control-flow", n)
 	}
 }
@@ -596,6 +629,212 @@ func cEnclosingFunction(n *sitter.Node) *sitter.Node {
 		curr = curr.Parent()
 	}
 	return nil
+}
+
+// cVarInfo holds the lightweight type facts a detector needs about a C variable: enough to know an
+// operand's signedness or whether a returned address points at stack storage. It is a deliberate
+// substitute for full type inference, resolved from the variable's own declaration.
+type cVarInfo struct {
+	isLocal    bool // a parameter or a body-local declaration: stack storage
+	isStatic   bool // a static/extern local: not stack storage
+	isInteger  bool // an integer-typed scalar (not a pointer, float, or aggregate)
+	isUnsigned bool // an unsigned integer type
+	isArray    bool // a body-local array (decays to a pointer into the stack frame when returned)
+}
+
+// cFunctionVars returns the name->type-facts map for a C function's parameters and body-declared locals,
+// memoized per function so repeated detector lookups stay O(1) and the whole file walk stays linear. The
+// per-function subtree walk is bounded (maxCFuncVarsNodes) and ctx-cancellable so a multi-megabyte function
+// in untrusted source cannot become an uncapped, uninterruptible walk.
+func cFunctionVars(ctx context.Context, fn *sitter.Node, src []byte, memo map[*sitter.Node]map[string]cVarInfo) map[string]cVarInfo {
+	if fn == nil {
+		return nil
+	}
+	if memo != nil {
+		if v, ok := memo[fn]; ok {
+			return v
+		}
+	}
+	vars := map[string]cVarInfo{}
+	budget := maxCFuncVarsNodes
+	if declr := fn.ChildByFieldName("declarator"); declr != nil {
+		cWalkNamed(ctx, declr, &budget, func(p *sitter.Node) {
+			if p.Type() != "parameter_declaration" {
+				return
+			}
+			name := cDeclaratorName(p, src)
+			if name == "" {
+				return
+			}
+			// A parameter's type text is its own (short) node content; an array parameter decays to a pointer.
+			typeText := p.Content(src)
+			vars[name] = cVarInfo{isLocal: true, isInteger: cTypeIsInteger(typeText), isUnsigned: cTypeIsUnsigned(typeText)}
+		})
+	}
+	if body := fn.ChildByFieldName("body"); body != nil {
+		cWalkNamed(ctx, body, &budget, func(d *sitter.Node) {
+			if d.Type() != "declaration" {
+				return
+			}
+			// Read the type once from the prefix before the first declarator. Its length is independent of the
+			// number of comma declarators, so `long a0,a1,...,am;` stays O(m) overall instead of O(m^2) from
+			// copying the whole declaration text per declarator.
+			firstDecl := d.EndByte()
+			for i := 0; i < int(d.NamedChildCount()); i++ {
+				if cIsDeclarator(d.NamedChild(i)) {
+					firstDecl = d.NamedChild(i).StartByte()
+					break
+				}
+			}
+			typeText := ""
+			if firstDecl > d.StartByte() && firstDecl <= uint32(len(src)) {
+				typeText = string(src[d.StartByte():firstDecl])
+			}
+			isStatic := strings.Contains(typeText, "static") || strings.Contains(typeText, "extern")
+			isInteger := cTypeIsInteger(typeText)
+			isUnsigned := cTypeIsUnsigned(typeText)
+			for i := 0; i < int(d.NamedChildCount()); i++ {
+				child := d.NamedChild(i)
+				if name := cDeclaratorName(child, src); name != "" {
+					vars[name] = cVarInfo{
+						isLocal:    true,
+						isStatic:   isStatic,
+						isInteger:  isInteger,
+						isUnsigned: isUnsigned,
+						isArray:    cDeclaratorIsArray(child),
+					}
+				}
+			}
+		})
+	}
+	if memo != nil {
+		memo[fn] = vars
+	}
+	return vars
+}
+
+// cWalkNamed visits n and every named descendant, stopping when the shared node budget is exhausted or the
+// context is cancelled so it cannot run unbounded on adversarial input.
+func cWalkNamed(ctx context.Context, n *sitter.Node, budget *int, visit func(*sitter.Node)) {
+	if n == nil || *budget <= 0 {
+		return
+	}
+	*budget--
+	if *budget%2048 == 0 && ctx.Err() != nil {
+		*budget = 0
+		return
+	}
+	visit(n)
+	for i := 0; i < int(n.NamedChildCount()); i++ {
+		if *budget <= 0 {
+			return
+		}
+		cWalkNamed(ctx, n.NamedChild(i), budget, visit)
+	}
+}
+
+// cEnclosingGuardText returns the source of the nearest control-flow construct enclosing n (an if/while/for
+// condition or a conditional expression), where a range check like `x >= 0` would sit. It falls back to n's
+// own text when n is not inside such a construct, so the signed/unsigned guard is scoped locally rather than
+// to the whole file.
+func cEnclosingGuardText(n *sitter.Node, src []byte) string {
+	for curr := n.Parent(); curr != nil; curr = curr.Parent() {
+		switch curr.Type() {
+		case "if_statement", "while_statement", "for_statement", "do_statement", "conditional_expression":
+			return curr.Content(src)
+		case "function_definition":
+			return n.Content(src)
+		}
+	}
+	return n.Content(src)
+}
+
+// cIsDeclarator reports whether a node is a declarator (the named part of a declaration), used to find
+// where the type specifier ends and the first declared name begins.
+func cIsDeclarator(n *sitter.Node) bool {
+	switch n.Type() {
+	case "identifier", "init_declarator", "array_declarator", "pointer_declarator", "function_declarator":
+		return true
+	}
+	return false
+}
+
+// cDeclaratorName extracts the declared identifier from a declaration, parameter, or declarator node,
+// unwrapping init/array/pointer declarators to the underlying name.
+func cDeclaratorName(n *sitter.Node, src []byte) string {
+	if n == nil {
+		return ""
+	}
+	if n.Type() == "identifier" {
+		return n.Content(src)
+	}
+	if d := n.ChildByFieldName("declarator"); d != nil {
+		return cDeclaratorName(d, src)
+	}
+	for i := 0; i < int(n.NamedChildCount()); i++ {
+		switch c := n.NamedChild(i); c.Type() {
+		case "identifier", "init_declarator", "array_declarator", "pointer_declarator":
+			if name := cDeclaratorName(c, src); name != "" {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+// cDeclaratorIsArray reports whether a declarator declares an array, unwrapping init declarators.
+func cDeclaratorIsArray(n *sitter.Node) bool {
+	if n == nil {
+		return false
+	}
+	if n.Type() == "array_declarator" {
+		return true
+	}
+	if d := n.ChildByFieldName("declarator"); d != nil {
+		return cDeclaratorIsArray(d)
+	}
+	return false
+}
+
+// cUintTypeRe matches fixed-width and pointer-sized unsigned integer type names.
+var cUintTypeRe = regexp.MustCompile(`\buint(_fast|_least)?\d+_t\b|\buintptr_t\b|\bsize_t\b`)
+
+// cIntWidthTypeRe matches fixed-width signed integer type names.
+var cIntWidthTypeRe = regexp.MustCompile(`\bu?int(_fast|_least)?\d+_t\b|\bssize_t\b|\bptrdiff_t\b`)
+
+// cTypeIsUnsigned reports whether a declaration's type text denotes an unsigned integer.
+func cTypeIsUnsigned(typeText string) bool {
+	if strings.Contains(typeText, "*") {
+		return false
+	}
+	return strings.Contains(typeText, "unsigned") || cUintTypeRe.MatchString(typeText)
+}
+
+// cTypeIsInteger reports whether a declaration's type text denotes an integer scalar (not a pointer,
+// floating-point, or aggregate type).
+func cTypeIsInteger(typeText string) bool {
+	if strings.Contains(typeText, "*") || strings.Contains(typeText, "float") || strings.Contains(typeText, "double") {
+		return false
+	}
+	return strings.Contains(typeText, "int") || strings.Contains(typeText, "char") ||
+		strings.Contains(typeText, "short") || strings.Contains(typeText, "long") ||
+		cUintTypeRe.MatchString(typeText) || cIntWidthTypeRe.MatchString(typeText)
+}
+
+// cIsPlainIdentifier reports whether s is a single C identifier (no operators, subscripts, or member
+// access), so a `return &X` can be resolved to a declared variable rather than a computed lvalue.
+func cIsPlainIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9' && i > 0) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func cInSignalHandler(n *sitter.Node, src []byte) bool {
@@ -796,17 +1035,25 @@ func cParameterCount(fn *sitter.Node, src []byte) int {
 	return int(params.NamedChildCount())
 }
 
-func cMaxControlNesting(n *sitter.Node) int {
-	controlTypes := map[string]bool{
-		"if_statement": true, "for_statement": true, "while_statement": true, "do_statement": true, "switch_statement": true,
+// cMaxControlNesting returns the deepest nesting of control-flow statements under n. The walk is bounded by
+// a shared node budget so a single multi-megabyte function in untrusted source cannot make it an uncapped,
+// uninterruptible full-subtree recursion; a truncated walk only under-reports nesting on pathological input.
+func cMaxControlNesting(n *sitter.Node, budget *int) int {
+	if n == nil || *budget <= 0 {
+		return 0
 	}
+	*budget--
 	best := 0
 	for i := 0; i < int(n.ChildCount()); i++ {
-		if d := cMaxControlNesting(n.Child(i)); d > best {
+		if *budget <= 0 {
+			break
+		}
+		if d := cMaxControlNesting(n.Child(i), budget); d > best {
 			best = d
 		}
 	}
-	if controlTypes[n.Type()] {
+	switch n.Type() {
+	case "if_statement", "for_statement", "while_statement", "do_statement", "switch_statement":
 		return best + 1
 	}
 	return best
