@@ -57,15 +57,11 @@ var (
 	ndbBlobMagic   = [4]byte{'B', 'l', 'b', 'S'}
 )
 
-// ndbCandidate is one package index's best (highest-generation) parsed header.
+// ndbBlobCandidate is one package index's best (highest-generation) raw header blob, deduped by generation
+// so a stale slot never shadows the live one.
 type ndbBlobCandidate struct {
 	gen  uint32
 	blob []byte
-}
-
-type ndbCandidate struct {
-	gen             uint32
-	name, evr, arch string
 }
 
 // rpmNDBComponents reads an ndb-backend rpmdb at dbPath and returns one component per installed package,
