@@ -875,6 +875,48 @@ func isControlOracle(oracle OracleCase) bool {
 	}
 }
 
+// RuntimePackage identifies the exact frozen package owner of a runtime library.
+type RuntimePackage struct {
+	Identity string
+	Name     string
+	Version  string
+}
+
+// RuntimeReplayEvent is one ordered runtime library observation.
+type RuntimeReplayEvent struct {
+	Sequence  int
+	Operation string
+	Library   string
+	Owner     RuntimePackage
+}
+
+// RuntimeReplayOwner binds a runtime library to its exact package owner.
+type RuntimeReplayOwner struct {
+	Library string
+	Owner   RuntimePackage
+}
+
+// RuntimeReplay is a complete, lossless runtime replay and its ownership mapping.
+type RuntimeReplay struct {
+	Session   string
+	Complete  bool
+	LossState string
+	Events    []RuntimeReplayEvent
+	Owners    []RuntimeReplayOwner
+}
+
+// DecodeRuntimeReplay strictly decodes bounded replay and ownership documents from materialized files.
+func DecodeRuntimeReplay(replayReader, ownershipReader io.Reader) (RuntimeReplay, error) {
+	replay, ownership, err := decodeRuntimeReplayDocuments(replayReader, ownershipReader)
+	if err != nil {
+		return RuntimeReplay{}, err
+	}
+	if err := validateRuntimeReplayDocuments(replay, ownership); err != nil {
+		return RuntimeReplay{}, err
+	}
+	return runtimeReplayValue(replay, ownership), nil
+}
+
 type runtimeReplayEvent struct {
 	Sequence  int    `json:"sequence"`
 	Operation string `json:"operation"`
@@ -903,34 +945,7 @@ func validateRuntimeReplay(root fs.FS, fixture FixtureSpecification) error {
 	if err != nil {
 		return err
 	}
-	if replay.SchemaVersion != "synapse-runtime-library-replay-v1" || !validID(replay.Session) || !replay.Complete || replay.LossState != "none" {
-		return fmt.Errorf("runtime replay requires complete lossless ordered event data")
-	}
-	if ownership.SchemaVersion != "synapse-runtime-library-ownership-v1" || len(ownership.Owners) != 4 {
-		return fmt.Errorf("runtime replay requires complete ownership mapping")
-	}
-	seenLibraries := map[string]struct{}{}
-	for index, event := range replay.Events {
-		if event.Sequence != index+1 || !validRuntimeLibrary(event.Library) || !validSubjectID(event.Owner) {
-			return fmt.Errorf("runtime replay has incomplete event %d", index+1)
-		}
-		if event.Operation != "load" && event.Operation != "opaque" && event.Operation != "unsupported" {
-			return fmt.Errorf("runtime replay has unknown event operation %q", event.Operation)
-		}
-		if owner, exists := ownership.Owners[event.Library]; !exists || owner != event.Owner {
-			return fmt.Errorf("runtime replay event %q lacks matching ownership", event.Library)
-		}
-		if _, duplicate := seenLibraries[event.Library]; duplicate {
-			return fmt.Errorf("runtime replay duplicates library %q", event.Library)
-		}
-		seenLibraries[event.Library] = struct{}{}
-	}
-	for library, owner := range ownership.Owners {
-		if !validRuntimeLibrary(library) || !validSubjectID(owner) {
-			return fmt.Errorf("runtime replay has invalid ownership mapping")
-		}
-	}
-	return nil
+	return validateRuntimeReplayDocuments(replay, ownership)
 }
 
 func readRuntimeReplayDocuments(root fs.FS, fixture FixtureSpecification) (runtimeReplayDocument, runtimeOwnershipDocument, error) {
@@ -954,6 +969,21 @@ func readRuntimeReplayDocuments(root fs.FS, fixture FixtureSpecification) (runti
 	if err != nil {
 		return runtimeReplayDocument{}, runtimeOwnershipDocument{}, fmt.Errorf("read runtime ownership: %w", err)
 	}
+	return decodeRuntimeReplayDocuments(bytes.NewReader(replayRaw), bytes.NewReader(ownershipRaw))
+}
+
+func decodeRuntimeReplayDocuments(replayReader, ownershipReader io.Reader) (runtimeReplayDocument, runtimeOwnershipDocument, error) {
+	if replayReader == nil || ownershipReader == nil {
+		return runtimeReplayDocument{}, runtimeOwnershipDocument{}, fmt.Errorf("runtime replay requires replay and ownership readers")
+	}
+	replayRaw, err := readFixtureReader(replayReader)
+	if err != nil {
+		return runtimeReplayDocument{}, runtimeOwnershipDocument{}, fmt.Errorf("read runtime replay: %w", err)
+	}
+	ownershipRaw, err := readFixtureReader(ownershipReader)
+	if err != nil {
+		return runtimeReplayDocument{}, runtimeOwnershipDocument{}, fmt.Errorf("read runtime ownership: %w", err)
+	}
 	var replay runtimeReplayDocument
 	if err := benchmark.StrictDecode(bytes.NewReader(replayRaw), &replay); err != nil {
 		return runtimeReplayDocument{}, runtimeOwnershipDocument{}, fmt.Errorf("decode runtime replay: %w", err)
@@ -963,6 +993,93 @@ func readRuntimeReplayDocuments(root fs.FS, fixture FixtureSpecification) (runti
 		return runtimeReplayDocument{}, runtimeOwnershipDocument{}, fmt.Errorf("decode runtime ownership: %w", err)
 	}
 	return replay, ownership, nil
+}
+
+func validateRuntimeReplayDocuments(replay runtimeReplayDocument, ownership runtimeOwnershipDocument) error {
+	if replay.SchemaVersion != "synapse-runtime-library-replay-v2" || !validID(replay.Session) || !replay.Complete || replay.LossState != "none" {
+		return fmt.Errorf("runtime replay requires complete lossless ordered event data")
+	}
+	if ownership.SchemaVersion != "synapse-runtime-library-ownership-v2" || len(ownership.Owners) != 4 {
+		return fmt.Errorf("runtime replay requires complete ownership mapping")
+	}
+	seenLibraries := map[string]struct{}{}
+	for index, event := range replay.Events {
+		if event.Sequence != index+1 || !validRuntimeLibrary(event.Library) {
+			return fmt.Errorf("runtime replay has incomplete event %d", index+1)
+		}
+		if _, ok := parseRuntimePackage(event.Owner); !ok {
+			return fmt.Errorf("runtime replay event %q has invalid owner", event.Library)
+		}
+		if event.Operation != "load" && event.Operation != "opaque" && event.Operation != "unsupported" {
+			return fmt.Errorf("runtime replay has unknown event operation %q", event.Operation)
+		}
+		if owner, exists := ownership.Owners[event.Library]; !exists || owner != event.Owner {
+			return fmt.Errorf("runtime replay event %q lacks matching ownership", event.Library)
+		}
+		if _, duplicate := seenLibraries[event.Library]; duplicate {
+			return fmt.Errorf("runtime replay duplicates library %q", event.Library)
+		}
+		seenLibraries[event.Library] = struct{}{}
+	}
+	for library, owner := range ownership.Owners {
+		if !validRuntimeLibrary(library) {
+			return fmt.Errorf("runtime replay has invalid ownership mapping")
+		}
+		if _, ok := parseRuntimePackage(owner); !ok {
+			return fmt.Errorf("runtime replay has invalid ownership mapping")
+		}
+	}
+	return nil
+}
+
+func runtimeReplayValue(replay runtimeReplayDocument, ownership runtimeOwnershipDocument) RuntimeReplay {
+	events := make([]RuntimeReplayEvent, 0, len(replay.Events))
+	for _, event := range replay.Events {
+		owner, _ := parseRuntimePackage(event.Owner)
+		events = append(events, RuntimeReplayEvent{
+			Sequence:  event.Sequence,
+			Operation: event.Operation,
+			Library:   event.Library,
+			Owner:     owner,
+		})
+	}
+	sort.Slice(events, func(i, j int) bool { return events[i].Sequence < events[j].Sequence })
+
+	owners := make([]RuntimeReplayOwner, 0, len(ownership.Owners))
+	for library, identity := range ownership.Owners {
+		owner, _ := parseRuntimePackage(identity)
+		owners = append(owners, RuntimeReplayOwner{Library: library, Owner: owner})
+	}
+	sort.Slice(owners, func(i, j int) bool { return owners[i].Library < owners[j].Library })
+	return RuntimeReplay{
+		Session:   replay.Session,
+		Complete:  replay.Complete,
+		LossState: replay.LossState,
+		Events:    events,
+		Owners:    owners,
+	}
+}
+
+func parseRuntimePackage(identity string) (RuntimePackage, bool) {
+	const prefix = "pkg:runtime/"
+	if !strings.HasPrefix(identity, prefix) || identity != strings.TrimSpace(identity) || len(identity) > 256 {
+		return RuntimePackage{}, false
+	}
+	nameVersion := strings.TrimPrefix(identity, prefix)
+	separator := strings.LastIndex(nameVersion, "@")
+	if separator <= len("reachbench-") || separator == len(nameVersion)-1 {
+		return RuntimePackage{}, false
+	}
+	name, version := nameVersion[:separator], nameVersion[separator+1:]
+	if !strings.HasPrefix(name, "reachbench-") || version != "benchmark-v1" {
+		return RuntimePackage{}, false
+	}
+	for _, character := range name {
+		if !(character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '-') {
+			return RuntimePackage{}, false
+		}
+	}
+	return RuntimePackage{Identity: identity, Name: name, Version: version}, true
 }
 
 func validateRuntimeReplayContract(root fs.FS, contract ReachabilityBenchmark) error {

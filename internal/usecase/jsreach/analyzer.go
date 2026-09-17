@@ -385,6 +385,12 @@ func dedupeStrings(values []string) []string {
 	return out
 }
 
+// AnswerableSubjects returns only package subjects the import analysis can answer without
+// weakening its fail-closed filtering.
+func (a *Analyzer) AnswerableSubjects(ctx context.Context, dir string, subjects []ports.ReachabilitySubject) ([]ports.ReachabilitySubject, error) {
+	return a.answerableSubjects(ctx, dir, subjects)
+}
+
 // answerableSubjects returns the subset of subjects this analyzer can answer for: every symbol must be a
 // component of the analyzed SBOM and a declared direct dependency. A subject that fails either test is
 // dropped, because the caller mints a claim for everything it passes on and would otherwise seal an

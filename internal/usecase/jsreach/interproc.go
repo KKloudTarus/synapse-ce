@@ -268,6 +268,12 @@ func (r *InterprocRecorder) Record(ctx context.Context, engagementID shared.ID, 
 	return coordinator.WithRaiseOnly().Record(ctx, engagementID, targetRef, encoded)
 }
 
+// EncodeNPMSubjects converts exact npm package identities and affected exports into the
+// interprocedural subject encoding, skipping inputs whose identity is ambiguous or invalid.
+func EncodeNPMSubjects(subjects []ports.ReachabilitySubject) []ports.ReachabilitySubject {
+	return encodeNPMSubjects(subjects)
+}
+
 // encodeNPMSubjects converts the raw (PackagePURL + affected symbols) subjects the SCA pass produces into the
 // `pkg:npm/name@version#export` subjects the interprocedural analyzer parses. Only an npm package with at
 // least one normalizable affected symbol yields a subject; the finding id is preserved so the coordinator's

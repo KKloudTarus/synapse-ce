@@ -1,11 +1,11 @@
 {
-  "schema_version": "synapse-runtime-library-replay-v1",
+  "schema_version": "synapse-runtime-library-replay-v2",
   "session": "reachbench-library-loads",
   "complete": true,
   "loss_state": "none",
   "events": [
-    {"sequence": 1, "operation": "load", "library": "libreachbench_direct.so", "owner": "pkg:runtime/reachbench-direct"},
-    {"sequence": 2, "operation": "opaque", "library": "libreachbench_dynamic.so", "owner": "pkg:runtime/reachbench-dynamic"},
-    {"sequence": 3, "operation": "unsupported", "library": "libreachbench_unsupported.so", "owner": "pkg:runtime/reachbench-unsupported"}
+    {"sequence": 1, "operation": "load", "library": "libreachbench_direct.so", "owner": "pkg:runtime/reachbench-direct@benchmark-v1"},
+    {"sequence": 2, "operation": "opaque", "library": "libreachbench_dynamic.so", "owner": "pkg:runtime/reachbench-dynamic@benchmark-v1"},
+    {"sequence": 3, "operation": "unsupported", "library": "libreachbench_unsupported.so", "owner": "pkg:runtime/reachbench-unsupported@benchmark-v1"}
   ]
 }

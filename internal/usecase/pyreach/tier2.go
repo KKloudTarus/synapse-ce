@@ -8,6 +8,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
 )
 
@@ -115,6 +116,12 @@ func (a *Tier2Analyzer) evidenceFor(ctx context.Context, dir string) (pythonTier
 	evidence := pythonTier2Evidence{resolution: resolution, nodes: indexPythonNodes(resolution)}
 	a.cached, a.cachedDir, a.cachedErr = &evidence, dir, nil
 	return evidence, nil
+}
+
+// AnswerableSubjects returns only advisory subjects the Tier-2 semantic snapshot can answer without
+// weakening its fail-closed filtering.
+func (a *Tier2Analyzer) AnswerableSubjects(ctx context.Context, dir string, subjects []ports.ReachabilitySubject) ([]ports.ReachabilitySubject, error) {
+	return a.answerableSubjects(ctx, dir, subjects)
 }
 
 func (a *Tier2Analyzer) answerableSubjects(ctx context.Context, dir string, subjects []pythonReachabilitySubject) ([]pythonReachabilitySubject, error) {

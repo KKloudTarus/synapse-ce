@@ -2082,14 +2082,14 @@
       ],
       "files": [
         {
-          "digest": "sha256:db679e4c8b6936555c21cb040fde2134f5281ca6a5a89283620f61fbe6b28030",
+          "digest": "sha256:dd5d45cb0cc9b39682c9f2d654ee5a6debe1b2172a4bade8ee7cdf85633b0b21",
           "path": "fixtures/runtime/library_loads/ownership.json",
-          "size": 349
+          "size": 401
         },
         {
-          "digest": "sha256:92dee910c6c667377e39ab6a700e5256e1dc8a12b8abc6acc125ab84c8946d2b",
+          "digest": "sha256:f436a5b1ef1c94070a3552833fba3763903b62fabaca27280ac32639236444ad",
           "path": "fixtures/runtime/library_loads/replay.json",
-          "size": 550
+          "size": 589
         }
       ],
       "id": "runtime-library-loads-input",
@@ -2106,7 +2106,7 @@
             "module_path": "fixtures/runtime/library_loads/replay.json",
             "symbol": "libreachbench_unsupported.so"
           },
-          "package_identity": "pkg:runtime/reachbench-unsupported"
+          "package_identity": "pkg:runtime/reachbench-unsupported@benchmark-v1"
         },
         {
           "id": "pkg:reachbench/runtime/library_loads#controlOpaque",
@@ -2116,7 +2116,7 @@
             "module_path": "fixtures/runtime/library_loads/replay.json",
             "symbol": "libreachbench_dynamic.so"
           },
-          "package_identity": "pkg:runtime/reachbench-dynamic"
+          "package_identity": "pkg:runtime/reachbench-dynamic@benchmark-v1"
         },
         {
           "id": "pkg:reachbench/runtime/library_loads#controlPositive",
@@ -2126,7 +2126,7 @@
             "module_path": "fixtures/runtime/library_loads/replay.json",
             "symbol": "libreachbench_direct.so"
           },
-          "package_identity": "pkg:runtime/reachbench-direct"
+          "package_identity": "pkg:runtime/reachbench-direct@benchmark-v1"
         },
         {
           "id": "pkg:reachbench/runtime/library_loads#controlUnreachable",
@@ -2136,7 +2136,7 @@
             "module_path": "fixtures/runtime/library_loads/ownership.json",
             "symbol": "libreachbench_unused.so"
           },
-          "package_identity": "pkg:runtime/reachbench-unused"
+          "package_identity": "pkg:runtime/reachbench-unused@benchmark-v1"
         }
       ]
     },

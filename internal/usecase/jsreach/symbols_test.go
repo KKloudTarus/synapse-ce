@@ -156,7 +156,7 @@ func TestAnEscapingBindingMakesTheSubjectUnanswerable(t *testing.T) {
 	a := symbolAnalyzerFor(t, graph, result, lodashPURL)
 
 	subject := ports.ReachabilitySubject{FindingID: "f-1", Symbols: []string{mustSubject(t, lodashPURL, "template")}}
-	answerable, err := a.answerableSymbolSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
+	answerable, err := a.AnswerableSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
 	if err != nil {
 		t.Fatalf("answerable: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestWholeModuleFormsAreUnanswerable(t *testing.T) {
 			graph, result := graphWith("src/a.ts", test.edges, test.uses)
 			a := symbolAnalyzerFor(t, graph, result, lodashPURL)
 			subject := ports.ReachabilitySubject{FindingID: "f-1", Symbols: []string{mustSubject(t, lodashPURL, "template")}}
-			answerable, err := a.answerableSymbolSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
+			answerable, err := a.AnswerableSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
 			if err != nil {
 				t.Fatalf("answerable: %v", err)
 			}
@@ -247,7 +247,7 @@ func TestJSXModulesCannotNarrowAWholeModuleBinding(t *testing.T) {
 	a := symbolAnalyzerFor(t, graph, result, lodashPURL)
 
 	subject := ports.ReachabilitySubject{FindingID: "f-1", Symbols: []string{mustSubject(t, lodashPURL, "createElement")}}
-	answerable, err := a.answerableSymbolSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
+	answerable, err := a.AnswerableSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
 	if err != nil {
 		t.Fatalf("answerable: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestTypeOnlyAndDeclarationBindingsAreNotRuntimeUses(t *testing.T) {
 	// No runtime use at all: the package-level question is Tier-1's, so this is unanswerable here
 	// rather than answered "not reached".
 	subject := ports.ReachabilitySubject{FindingID: "f-1", Symbols: []string{mustSubject(t, lodashPURL, "template")}}
-	answerable, err := a.answerableSymbolSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
+	answerable, err := a.AnswerableSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
 	if err != nil {
 		t.Fatalf("answerable: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestTransitivePackagesAreUnanswerable(t *testing.T) {
 	}
 
 	subject := ports.ReachabilitySubject{FindingID: "f-1", Symbols: []string{mustSubject(t, lodashPURL, "merge")}}
-	answerable, aerr := a.answerableSymbolSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
+	answerable, aerr := a.AnswerableSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
 	if aerr != nil {
 		t.Fatalf("answerable: %v", aerr)
 	}
@@ -402,7 +402,7 @@ func TestAnUnobservedWholeModuleBindingInAnotherModuleBlocksTheNegative(t *testi
 	a := symbolAnalyzerFor(t, graph, result, lodashPURL)
 
 	subject := ports.ReachabilitySubject{FindingID: "f-1", Symbols: []string{mustSubject(t, lodashPURL, "template")}}
-	answerable, err := a.answerableSymbolSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
+	answerable, err := a.AnswerableSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
 	if err != nil {
 		t.Fatalf("answerable: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestTheTargetIsScannedOnce(t *testing.T) {
 	}
 
 	subject := ports.ReachabilitySubject{FindingID: "f-1", Symbols: []string{mustSubject(t, lodashPURL, "merge")}}
-	answerable, err := a.answerableSymbolSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
+	answerable, err := a.AnswerableSubjects(context.Background(), "/repo", []ports.ReachabilitySubject{subject})
 	if err != nil {
 		t.Fatalf("answerable: %v", err)
 	}
@@ -537,5 +537,18 @@ func TestNamespaceReExportStaysOpaque(t *testing.T) {
 
 	if reachable, _ := analyzeOne(t, a, mustSubject(t, lodashPURL, "merge")); !reachable {
 		t.Fatal("a namespace re-export could republish any export, so no symbol may be answered not-reachable")
+	}
+}
+
+func TestSymbolAnswerableSubjectsHonorsCancellation(t *testing.T) {
+	graph, result := graphWith("src/a.ts", []modulegraph.Edge{namedEdge("src/a.ts", "template")}, nil)
+	analyzer := symbolAnalyzerFor(t, graph, result, lodashPURL)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := analyzer.AnswerableSubjects(ctx, "/repo", []ports.ReachabilitySubject{{
+		FindingID: "finding",
+		Symbols:   []string{mustSubject(t, lodashPURL, "template")},
+	}}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation error = %v", err)
 	}
 }

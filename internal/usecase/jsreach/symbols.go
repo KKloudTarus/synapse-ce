@@ -357,6 +357,12 @@ func (p *pathProver) proofForModules(modules []string, symbol, subject string) [
 	return []string{sorted[0], "uses " + symbol, subject}
 }
 
+// AnswerableSubjects returns only symbol subjects the lexical analysis can answer without
+// weakening its fail-closed filtering.
+func (a *SymbolAnalyzer) AnswerableSubjects(ctx context.Context, dir string, subjects []ports.ReachabilitySubject) ([]ports.ReachabilitySubject, error) {
+	return a.answerableSymbolSubjects(ctx, dir, subjects)
+}
+
 // answerableSymbolSubjects drops every subject this analyzer cannot answer, BEFORE the coordinator mints
 // a claim for it.
 //

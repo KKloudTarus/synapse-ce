@@ -2,6 +2,7 @@ package pyreach
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
@@ -176,4 +177,63 @@ func mustPythonSubject(t *testing.T, symbol string) string {
 		t.Fatalf("invalid fixture symbol %q", symbol)
 	}
 	return subject
+}
+
+func TestTier2AnswerableSubjectsPreservesSafeCandidatesAndInput(t *testing.T) {
+	positive := mustPythonSubject(t, "requests.sessions.Session.request")
+	negative := mustPythonSubject(t, "requests.sessions.safe")
+	unplaceable := mustPythonSubject(t, "unqualified_missing")
+	subjects := []ports.ReachabilitySubject{
+		{FindingID: "positive", Symbols: []string{positive}},
+		{FindingID: "negative", Symbols: []string{negative}},
+		{FindingID: "unplaceable", Symbols: []string{unplaceable}},
+	}
+	original := append([]ports.ReachabilitySubject(nil), subjects...)
+	for index := range original {
+		original[index].Symbols = append([]string(nil), subjects[index].Symbols...)
+	}
+
+	analyzer, err := NewTier2Analyzer(&fakePythonFactsProvider{document: pythonTier2Fixture(false), available: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answerable, err := analyzer.AnswerableSubjects(context.Background(), "/workspace", subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(answerable) != 2 || answerable[0].FindingID != "positive" || answerable[1].FindingID != "negative" {
+		t.Fatalf("answerable subjects = %+v", answerable)
+	}
+	for index := range subjects {
+		if subjects[index].FindingID != original[index].FindingID || len(subjects[index].Symbols) != len(original[index].Symbols) || subjects[index].Symbols[0] != original[index].Symbols[0] {
+			t.Fatalf("input mutated: got %+v want %+v", subjects, original)
+		}
+	}
+}
+
+func TestTier2AnswerableSubjectsDropsIncompleteNegativeAndPropagatesCancellation(t *testing.T) {
+	negative := mustPythonSubject(t, "requests.sessions.safe")
+	positive := mustPythonSubject(t, "requests.sessions.Session.request")
+	analyzer, err := NewTier2Analyzer(&fakePythonFactsProvider{document: pythonTier2Fixture(true), available: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answerable, err := analyzer.AnswerableSubjects(context.Background(), "/workspace", []ports.ReachabilitySubject{
+		{FindingID: "negative", Symbols: []string{negative}},
+		{FindingID: "positive", Symbols: []string{positive}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(answerable) != 1 || answerable[0].FindingID != "positive" {
+		t.Fatalf("incomplete answerable subjects = %+v", answerable)
+	}
+
+	cancelled, err := NewTier2Analyzer(&fakePythonFactsProvider{err: context.Canceled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cancelled.AnswerableSubjects(context.Background(), "/workspace", nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation error = %v", err)
+	}
 }

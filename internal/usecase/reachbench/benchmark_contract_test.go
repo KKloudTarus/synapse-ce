@@ -652,7 +652,7 @@ func TestRuntimeReplaySemanticMappingRejectsTampering(t *testing.T) {
 		{
 			name: "spurious unreachable event",
 			mutate: func(replay string) string {
-				return strings.Replace(replay, "\n  ]", ",\n    {\"sequence\": 4, \"operation\": \"load\", \"library\": \"libreachbench_unused.so\", \"owner\": \"pkg:runtime/reachbench-unused\"}\n  ]", 1)
+				return strings.Replace(replay, "\n  ]", ",\n    {\"sequence\": 4, \"operation\": \"load\", \"library\": \"libreachbench_unused.so\", \"owner\": \"pkg:runtime/reachbench-unused@benchmark-v1\"}\n  ]", 1)
 			},
 			contains: "truly-unreachable",
 		},
@@ -665,6 +665,26 @@ func TestRuntimeReplaySemanticMappingRejectsTampering(t *testing.T) {
 				t.Fatalf("runtime semantic mutation error = %v", err)
 			}
 		})
+	}
+}
+
+func TestRuntimeReplaySemanticMappingBindsVersionedOwner(t *testing.T) {
+	contract := DefaultReachabilityBenchmark()
+	contract.Fixtures.Fixtures = append([]FixtureSpecification(nil), contract.Fixtures.Fixtures...)
+	for index := range contract.Fixtures.Fixtures {
+		if contract.Fixtures.Fixtures[index].ID != "runtime-library-loads-input" {
+			continue
+		}
+		contract.Fixtures.Fixtures[index] = cloneFixtureSpecification(contract.Fixtures.Fixtures[index])
+		for subjectIndex := range contract.Fixtures.Fixtures[index].Subjects {
+			subject := &contract.Fixtures.Fixtures[index].Subjects[subjectIndex]
+			if subject.Locator.Symbol == "libreachbench_direct.so" {
+				subject.PackageIdentity = "pkg:runtime/reachbench-direct@benchmark-v0"
+			}
+		}
+	}
+	if err := validateRuntimeReplayContract(fixtureMap(t, contract.Fixtures), contract); err == nil || !strings.Contains(err.Error(), "does not match the frozen subject") {
+		t.Fatalf("versioned owner mismatch error = %v", err)
 	}
 }
 
@@ -707,11 +727,11 @@ func TestReachabilityBenchmarkLoadersAreStrictDeterministicAndPinned(t *testing.
 		got  string
 		want string
 	}{
-		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:babe58b98049b4119e4053df1bd3e553c20b9d3ee0b852d39e25e72ff5fc3cc2"},
+		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:e8a7fe0cb2a93f4a83d8d240b21895d1ab807e9187be8b310eee23c084171bdf"},
 		{"oracle", DigestReachabilityOracleMust(t, first.Oracle), "sha256:0299297cb1bacbdab7156536d2de3b21992e1f3c085ab109f95162f4eef6dfe6"},
 		{"challenges", DigestChallengeManifestMust(t, first.Challenges), "sha256:a967a0b5423e79961f28121cc5dfe71e1464850d1e2af0ca9fa74cebfc7db0aa"},
-		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:9cdcd4593ccdd313c8c1c2edbaf320a4356316b3f9df23a7a8d7ee440b4a50fc"},
-		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:fb96897aba1afa60d759a4d88c80fb88d683e676a04bcb1d3cd22ce60648c880"},
+		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:f3ce36ee69d164620263071965694e3a5a4c6a3c958f5a7691ff307ce231d3c4"},
+		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:103f7ab4b4528c31976a9a8fdf8e43c1f164c94481444d1ccef2b2963791c039"},
 	} {
 		if item.got != item.want {
 			t.Errorf("%s digest = %s, want %s", item.name, item.got, item.want)
@@ -829,4 +849,71 @@ func DigestReachabilityBenchmarkMust(t *testing.T, contract ReachabilityBenchmar
 		t.Fatal(err)
 	}
 	return digest
+}
+
+func TestDecodeRuntimeReplayReturnsFrozenPackageIdentity(t *testing.T) {
+	contract := DefaultReachabilityBenchmark()
+	root := fixtureMap(t, contract.Fixtures)
+	replayPath := "fixtures/runtime/library_loads/replay.json"
+	ownershipPath := "fixtures/runtime/library_loads/ownership.json"
+	decoded, err := DecodeRuntimeReplay(bytes.NewReader(root[replayPath].Data), bytes.NewReader(root[ownershipPath].Data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Session != "reachbench-library-loads" || !decoded.Complete || decoded.LossState != "none" {
+		t.Fatalf("replay metadata = %+v", decoded)
+	}
+	if len(decoded.Events) != 3 || decoded.Events[0].Sequence != 1 || decoded.Events[0].Operation != "load" || decoded.Events[0].Library != "libreachbench_direct.so" {
+		t.Fatalf("replay events = %+v", decoded.Events)
+	}
+	if got := decoded.Events[0].Owner; got.Identity != "pkg:runtime/reachbench-direct@benchmark-v1" || got.Name != "reachbench-direct" || got.Version != "benchmark-v1" {
+		t.Fatalf("event owner = %+v", got)
+	}
+	if len(decoded.Owners) != 4 || decoded.Owners[0].Library != "libreachbench_direct.so" || decoded.Owners[0].Owner.Version != "benchmark-v1" {
+		t.Fatalf("replay owners = %+v", decoded.Owners)
+	}
+
+	decoded.Events[0].Owner.Name = "changed"
+	decoded.Owners[0].Owner.Version = "changed"
+	fresh, err := DecodeRuntimeReplay(bytes.NewReader(root[replayPath].Data), bytes.NewReader(root[ownershipPath].Data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Events[0].Owner.Name != "reachbench-direct" || fresh.Owners[0].Owner.Version != "benchmark-v1" {
+		t.Fatalf("decoder did not return defensive copies: %+v", fresh)
+	}
+}
+
+func TestDecodeRuntimeReplayRejectsInvalidDocuments(t *testing.T) {
+	contract := DefaultReachabilityBenchmark()
+	root := fixtureMap(t, contract.Fixtures)
+	replayPath := "fixtures/runtime/library_loads/replay.json"
+	ownershipPath := "fixtures/runtime/library_loads/ownership.json"
+	replay := string(root[replayPath].Data)
+	ownership := string(root[ownershipPath].Data)
+	tests := []struct {
+		name      string
+		replay    string
+		ownership string
+	}{
+		{name: "trailing JSON", replay: replay + "{}", ownership: ownership},
+		{name: "old schema", replay: strings.Replace(replay, "synapse-runtime-library-replay-v2", "synapse-runtime-library-replay-v1", 1), ownership: ownership},
+		{name: "malformed order", replay: strings.Replace(replay, `"sequence": 2`, `"sequence": 4`, 1), ownership: ownership},
+		{name: "unknown operation", replay: strings.Replace(replay, `"operation": "load"`, `"operation": "unknown"`, 1), ownership: ownership},
+		{name: "duplicate library", replay: strings.Replace(replay, `{"sequence": 2, "operation": "opaque", "library": "libreachbench_dynamic.so", "owner": "pkg:runtime/reachbench-dynamic@benchmark-v1"}`, `{"sequence": 2, "operation": "opaque", "library": "libreachbench_direct.so", "owner": "pkg:runtime/reachbench-direct@benchmark-v1"}`, 1), ownership: ownership},
+		{name: "mismatched ownership", replay: strings.Replace(replay, `"owner": "pkg:runtime/reachbench-direct@benchmark-v1"`, `"owner": "pkg:runtime/reachbench-unused@benchmark-v1"`, 1), ownership: ownership},
+		{name: "missing version", replay: strings.Replace(replay, `pkg:runtime/reachbench-direct@benchmark-v1`, `pkg:runtime/reachbench-direct`, 1), ownership: ownership},
+		{name: "missing ownership", replay: replay, ownership: strings.Replace(ownership, `,
+    "libreachbench_unsupported.so": "pkg:runtime/reachbench-unsupported@benchmark-v1"`, "", 1)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := DecodeRuntimeReplay(strings.NewReader(test.replay), strings.NewReader(test.ownership)); err == nil {
+				t.Fatal("expected strict replay decoder to reject invalid document")
+			}
+		})
+	}
+	if _, err := DecodeRuntimeReplay(strings.NewReader(strings.Repeat(" ", 1<<20+1)), strings.NewReader(ownership)); err == nil {
+		t.Fatal("expected strict replay decoder to enforce its document bound")
+	}
 }
