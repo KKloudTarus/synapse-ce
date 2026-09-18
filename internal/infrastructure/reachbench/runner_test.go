@@ -729,6 +729,37 @@ func TestVerifyNoPrivateLeakRejectsJSONEscapedWindowsPath(t *testing.T) {
 	}
 }
 
+func TestVerifyNoPrivateLeakUsesPathBoundaries(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "identifier prefix", body: `{"boundary_id":"sca/reachability/go-source-tier2/worker"}`},
+		{name: "exact path", body: `{"path":"/work"}`, wantErr: true},
+		{name: "descendant path", body: `{"path":"/work/private/capture.json"}`, wantErr: true},
+		{name: "embedded message", body: `{"error":"open /work/private/capture.json: denied"}`, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			stage := t.TempDir()
+			if err := os.WriteFile(filepath.Join(stage, "artifact.json"), []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := verifyNoPrivateLeak(
+				context.Background(),
+				stage,
+				[]PublishedArtifact{{Path: "artifact.json"}},
+				runtimeFacts{repositoryRoot: "/work"},
+			)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("verifyNoPrivateLeak() error = %v, want error %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestCandidateCannotFallBackWhenTrustedLifecycleArtifactsAreMissing(t *testing.T) {
 	fixture := newFixture(t)
 	candidate := fixture.candidate

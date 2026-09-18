@@ -110,11 +110,55 @@ func hasPrivatePathVariant(raw []byte, value string) bool {
 	}
 	variants := []string{value, strings.ReplaceAll(value, "\\", "/"), strings.ReplaceAll(value, "/", "\\")}
 	for _, variant := range variants {
-		if bytes.Contains(raw, []byte(variant)) || bytes.Contains(raw, []byte(strings.ReplaceAll(variant, "\\", "\\\\"))) {
-			return true
+		for _, encoded := range []string{variant, strings.ReplaceAll(variant, "\\", "\\\\")} {
+			if containsPrivatePath(raw, []byte(encoded)) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func containsPrivatePath(raw, privatePath []byte) bool {
+	for offset := 0; offset <= len(raw)-len(privatePath); {
+		relative := bytes.Index(raw[offset:], privatePath)
+		if relative < 0 {
+			return false
+		}
+		start := offset + relative
+		end := start + len(privatePath)
+		if privatePathPrefixBoundary(raw[:start]) && privatePathSuffixBoundary(raw[end:]) {
+			return true
+		}
+		offset = start + 1
+	}
+	return false
+}
+
+func privatePathPrefixBoundary(prefix []byte) bool {
+	if len(prefix) == 0 {
+		return true
+	}
+	switch prefix[len(prefix)-1] {
+	case '"', '\'', ' ', '\t', '\r', '\n', ':', '=', '(', '[', '{', ',':
+		return true
+	case '/':
+		return bytes.HasSuffix(prefix, []byte("file://"))
+	default:
+		return false
+	}
+}
+
+func privatePathSuffixBoundary(suffix []byte) bool {
+	if len(suffix) == 0 {
+		return true
+	}
+	switch suffix[0] {
+	case '/', '\\', '"', '\'', ' ', '\t', '\r', '\n', ',', '}', ']', ')', '?', '#':
+		return true
+	default:
+		return false
+	}
 }
 
 func baselineAllowlistResultPath() string { return "baseline-allowlist-result.json" }

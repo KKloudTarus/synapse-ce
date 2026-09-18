@@ -75,7 +75,7 @@ $RUNNER_TEMP/synapse-reachability-controller/envelopes/
 
 The benchmark receives the staged envelope through `SYNAPSE_REACHABILITY_CONTROLLER_ENVELOPE`; it does not receive controller source paths, identities, purposes, final modes, or run keys as operator inputs. The external controller root is never published.
 
-The trusted bundle currently has no checked-in contents. In particular, no candidate input, ratchet, envelope, or placeholder authority is fabricated in this repository. A controller-owned candidate input can be installed only after a real baseline capture has been independently checkpointed. Until then, a trusted route fails closed when the expected staged material is absent or invalid.
+The repository contains the canonical reviewed measurement inputs, baseline authority assets, candidate ratchet, and digest-bound bundle manifest under `internal/usecase/reachbench/trusted/`. The route envelope remains controller-owned and external: it must bind the selected source commit and tree to that reviewed bundle, and no placeholder envelope is checked in or accepted from operator input. A trusted route fails closed when the expected staged material is absent, stale, or invalid.
 
 ## Baseline and candidate lifecycle
 
