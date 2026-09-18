@@ -89,7 +89,10 @@ func (a *EntryCallAnalyzer) Analyze(ctx context.Context, dir string, subjects []
 		if !d.Type().IsRegular() {
 			return nil
 		}
-		proven, root, ok := entryCallPathsFromLinuxAMD64ELF(path, wanted)
+		proven, root, ok := entryCallPathsFromLinuxAMD64ELF(ctx, path, wanted)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if !ok {
 			return nil
 		}
@@ -120,10 +123,11 @@ func (a *EntryCallAnalyzer) Analyze(ctx context.Context, dir string, subjects []
 }
 
 type pclntabFunction struct {
-	name        string
-	entry       uint64
-	end         uint64
-	inlinePaths [][]string
+	name          string
+	entry         uint64
+	end           uint64
+	inlineCalls   []inlineCall
+	inlineMatches map[string]int
 }
 
 type inlineCall struct {
@@ -131,22 +135,58 @@ type inlineCall struct {
 	parent int
 }
 
+type inlineMetadata struct {
+	calls   []inlineCall
+	matches map[string]int
+}
+
+type symbolTail struct {
+	packageSegment string
+	name           string
+}
+
 type pcDataRange struct {
 	end   uint64
 	value int
 }
 
+func inlineWantedIndex(wanted map[string]symbolcanon.Symbol) map[symbolTail][]string {
+	indexed := make(map[symbolTail][]string, len(wanted))
+	for subject, symbol := range wanted {
+		if len(symbol.Segments) < 2 {
+			continue
+		}
+		key := symbolTail{packageSegment: symbol.Segments[len(symbol.Segments)-2], name: symbol.Segments[len(symbol.Segments)-1]}
+		indexed[key] = append(indexed[key], subject)
+	}
+	return indexed
+}
+
+func symbolTailFor(name string) (symbolTail, bool) {
+	symbol := symbolcanon.Canonicalize(symbolcanon.Go, name)
+	if len(symbol.Segments) < 2 {
+		return symbolTail{}, false
+	}
+	return symbolTail{packageSegment: symbol.Segments[len(symbol.Segments)-2], name: symbol.Segments[len(symbol.Segments)-1]}, true
+}
+
 // entryCallPathsFromLinuxAMD64ELF reads the Linux/amd64 form only. The recover boundary protects the scanner
 // from malformed executable metadata and the debug/gosym parser; either failure is simply no coverage.
-func entryCallPathsFromLinuxAMD64ELF(path string, wanted map[string]symbolcanon.Symbol) (proven map[string][]string, root string, ok bool) {
+func entryCallPathsFromLinuxAMD64ELF(ctx context.Context, path string, wanted map[string]symbolcanon.Symbol) (proven map[string][]string, root string, ok bool) {
 	defer func() {
 		if recover() != nil {
 			proven, root, ok = nil, "", false
 		}
 	}()
+	if ctx.Err() != nil {
+		return nil, "", false
+	}
 
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Size() < 4 || info.Size() > maxBinaryBytes {
+		return nil, "", false
+	}
+	if ctx.Err() != nil {
 		return nil, "", false
 	}
 	executable, err := elf.Open(path)
@@ -164,21 +204,24 @@ func entryCallPathsFromLinuxAMD64ELF(path string, wanted map[string]symbolcanon.
 		return nil, "", false
 	}
 	text, err := textSection.Data()
-	if err != nil || len(text) == 0 || len(text) > maxBinaryBytes {
+	if err != nil || len(text) == 0 || len(text) > maxBinaryBytes || ctx.Err() != nil {
 		return nil, "", false
 	}
 	pclntab, err := pclntabSection.Data()
-	if err != nil || len(pclntab) == 0 || len(pclntab) > maxBinaryBytes {
+	if err != nil || len(pclntab) == 0 || len(pclntab) > maxBinaryBytes || ctx.Err() != nil {
 		return nil, "", false
 	}
 	table, err := gosym.NewTable(nil, gosym.NewLineTable(pclntab, textSection.Addr))
-	if err != nil || table == nil || len(table.Funcs) == 0 || len(table.Funcs) > maxEntryCallFunctions {
+	if err != nil || table == nil || len(table.Funcs) == 0 || len(table.Funcs) > maxEntryCallFunctions || ctx.Err() != nil {
 		return nil, "", false
 	}
 
 	functions := make(map[uint64]pclntabFunction, len(table.Funcs))
 	textEnd := textSection.Addr + uint64(len(text))
 	for _, function := range table.Funcs {
+		if ctx.Err() != nil {
+			return nil, "", false
+		}
 		name := strings.TrimSpace(function.Name)
 		if name == "" || function.Entry < textSection.Addr || function.End <= function.Entry || function.End > textEnd {
 			return nil, "", false
@@ -188,28 +231,35 @@ func entryCallPathsFromLinuxAMD64ELF(path string, wanted map[string]symbolcanon.
 		}
 		functions[function.Entry] = pclntabFunction{name: name, entry: function.Entry, end: function.End}
 	}
-	inlinePaths, inlineOK := pclntabInlinePaths(pclntab, textSection.Addr, functions)
-	if !inlineOK {
+	inlineMetadata, inlineOK := pclntabInlinePaths(ctx, pclntab, textSection.Addr, functions, wanted)
+	if !inlineOK || ctx.Err() != nil {
 		return nil, "", false
 	}
-	for entry, paths := range inlinePaths {
+	for entry, metadata := range inlineMetadata {
 		function := functions[entry]
-		function.inlinePaths = paths
+		function.inlineCalls = metadata.calls
+		function.inlineMatches = metadata.matches
 		functions[entry] = function
 	}
-	start, found := functionsByName(functions, "main.main")
-	if !found {
+	start, found := functionsByName(ctx, functions, "main.main")
+	if !found || ctx.Err() != nil {
 		return nil, "", false
 	}
-	paths, complete := walkDirectCalls(text, textSection.Addr, functions, start, wanted)
+	paths, complete := walkDirectCalls(ctx, text, textSection.Addr, functions, start, wanted)
 	if !complete && len(paths) == 0 {
+		return nil, "", false
+	}
+	if ctx.Err() != nil {
 		return nil, "", false
 	}
 	return paths, start.name, true
 }
 
-func functionsByName(functions map[uint64]pclntabFunction, name string) (pclntabFunction, bool) {
+func functionsByName(ctx context.Context, functions map[uint64]pclntabFunction, name string) (pclntabFunction, bool) {
 	for _, function := range functions {
+		if ctx.Err() != nil {
+			return pclntabFunction{}, false
+		}
 		if function.name == name {
 			return function, true
 		}
@@ -219,9 +269,14 @@ func functionsByName(functions map[uint64]pclntabFunction, name string) (pclntab
 
 // pclntabInlinePaths decodes the Go 1.20+ inlining metadata that accompanies a physical PCLNTAB function.
 // An inlined function has no independently callable machine-code range, but its linker-recorded inline tree is
-// still a concrete may-call proof inside its reached physical parent. Other PCLNTAB formats or any malformed
-// offset are deliberately no coverage rather than a guessed edge.
-func pclntabInlinePaths(data []byte, textStart uint64, functions map[uint64]pclntabFunction) (map[uint64][][]string, bool) {
+// still a concrete may-call proof inside its reached physical parent. Its bounded call records use binary parent
+// lookups, and an ancestor chain is rebuilt only for a requested matching symbol. Other PCLNTAB formats or any
+// malformed offset are deliberately no coverage rather than a guessed edge.
+func pclntabInlinePaths(ctx context.Context, data []byte, textStart uint64, functions map[uint64]pclntabFunction, wanted map[string]symbolcanon.Symbol) (map[uint64]inlineMetadata, bool) {
+	if ctx.Err() != nil {
+		return nil, false
+	}
+	wantedIndex := inlineWantedIndex(wanted)
 	const (
 		go120PCLNMagic      = 0xfffffff1
 		pclnHeaderBytes     = 8 + 8*8
@@ -268,6 +323,9 @@ func pclntabInlinePaths(data []byte, textStart uint64, functions map[uint64]pcln
 	metadata := make([]functionMetadata, 0, nfunc)
 	maximumEnd := uint64(0)
 	for index := uint64(0); index < nfunc; index++ {
+		if ctx.Err() != nil {
+			return nil, false
+		}
 		tableOffset := funcTabOffset + index*8
 		entryOffset := binary.LittleEndian.Uint32(data[tableOffset:])
 		functionOffset := binary.LittleEndian.Uint32(data[tableOffset+4:])
@@ -305,8 +363,11 @@ func pclntabInlinePaths(data []byte, textStart uint64, functions map[uint64]pcln
 		return nil, false
 	}
 
-	out := make(map[uint64][][]string)
+	out := make(map[uint64]inlineMetadata)
 	for _, item := range metadata {
+		if ctx.Err() != nil {
+			return nil, false
+		}
 		if item.nfuncdata <= funcdataInlineIndex {
 			continue
 		}
@@ -322,7 +383,7 @@ func pclntabInlinePaths(data []byte, textStart uint64, functions map[uint64]pcln
 		if pcdataOffset == 0 || pctabOffset+uint64(pcdataOffset) >= uint64(len(data)) {
 			return nil, false
 		}
-		ranges, maximumIndex, valid := inlinePCDataRanges(data, pctabOffset+uint64(pcdataOffset), item.functionLen)
+		ranges, maximumIndex, valid := inlinePCDataRanges(ctx, data, pctabOffset+uint64(pcdataOffset), item.functionLen)
 		if !valid || maximumIndex < 0 || maximumIndex >= maxEntryCallInlineCalls {
 			return nil, false
 		}
@@ -333,6 +394,9 @@ func pclntabInlinePaths(data []byte, textStart uint64, functions map[uint64]pcln
 		}
 		calls := make([]inlineCall, count)
 		for index := range calls {
+			if ctx.Err() != nil {
+				return nil, false
+			}
 			offset := inlineStart + uint64(index*inlineCallBytes)
 			if data[offset+1] != 0 || data[offset+2] != 0 || data[offset+3] != 0 {
 				return nil, false
@@ -352,15 +416,16 @@ func pclntabInlinePaths(data []byte, textStart uint64, functions map[uint64]pcln
 			}
 			calls[index] = inlineCall{name: name, parent: parent}
 		}
-		paths := make([][]string, 0, len(calls))
-		for index := range calls {
-			path, valid := inlineCallPath(calls, index, map[int]bool{})
-			if !valid {
-				return nil, false
-			}
-			paths = append(paths, path)
+		if !validInlineCallParents(ctx, calls) {
+			return nil, false
 		}
-		out[item.function.entry] = paths
+		matches, matched := inlineCallMatches(ctx, calls, wantedIndex)
+		if !matched {
+			return nil, false
+		}
+		if len(matches) != 0 {
+			out[item.function.entry] = inlineMetadata{calls: calls, matches: matches}
+		}
 	}
 	return out, true
 }
@@ -370,16 +435,19 @@ func pclntabFunctionName(data []byte, functionNameOffset uint64, nameOffset int6
 		return "", false
 	}
 	start := functionNameOffset + uint64(nameOffset)
-	remaining := data[start:]
-	end := bytes.IndexByte(remaining, 0)
-	if end <= 0 || end > maxEntryCallFunctionName {
+	endOffset := start + maxEntryCallFunctionName + 1
+	if endOffset < start || endOffset > uint64(len(data)) {
+		endOffset = uint64(len(data))
+	}
+	end := bytes.IndexByte(data[start:endOffset], 0)
+	if end <= 0 {
 		return "", false
 	}
-	return string(remaining[:end]), true
+	return string(data[start : start+uint64(end)]), true
 }
 
-func inlinePCDataRanges(data []byte, offset, functionLen uint64) ([]pcDataRange, int, bool) {
-	if offset >= uint64(len(data)) || functionLen == 0 {
+func inlinePCDataRanges(ctx context.Context, data []byte, offset, functionLen uint64) ([]pcDataRange, int, bool) {
+	if ctx.Err() != nil || offset >= uint64(len(data)) || functionLen == 0 {
 		return nil, 0, false
 	}
 	cursor := offset
@@ -389,6 +457,9 @@ func inlinePCDataRanges(data []byte, offset, functionLen uint64) ([]pcDataRange,
 	first := true
 	var ranges []pcDataRange
 	for steps := 0; steps < maxEntryCallPCDataSteps; steps++ {
+		if ctx.Err() != nil {
+			return nil, 0, false
+		}
 		delta, next, valid := pclntabVarint(data, cursor)
 		if !valid {
 			return nil, 0, false
@@ -443,38 +514,86 @@ func pclntabVarint(data []byte, offset uint64) (uint32, uint64, bool) {
 }
 
 func inlineParentIndex(ranges []pcDataRange, pc uint64, count int) (int, bool) {
-	for _, item := range ranges {
-		if pc < item.end {
-			if item.value < -1 || item.value >= count {
-				return 0, false
-			}
-			return item.value, true
-		}
+	index := sort.Search(len(ranges), func(index int) bool { return pc < ranges[index].end })
+	if index == len(ranges) {
+		return 0, false
 	}
-	return 0, false
+	parent := ranges[index].value
+	if parent < -1 || parent >= count {
+		return 0, false
+	}
+	return parent, true
 }
 
-func inlineCallPath(calls []inlineCall, index int, seen map[int]bool) ([]string, bool) {
-	if index < 0 || index >= len(calls) || seen[index] {
-		return nil, false
+func validInlineCallParents(ctx context.Context, calls []inlineCall) bool {
+	states := make([]uint8, len(calls))
+	for start := range calls {
+		if ctx.Err() != nil {
+			return false
+		}
+		if states[start] != 0 {
+			continue
+		}
+		index := start
+		for index != -1 {
+			if ctx.Err() != nil || index < 0 || index >= len(calls) {
+				return false
+			}
+			if states[index] != 0 {
+				break
+			}
+			states[index] = 1
+			index = calls[index].parent
+		}
+		if index != -1 && states[index] == 1 {
+			return false
+		}
+		for index = start; index != -1 && states[index] == 1; index = calls[index].parent {
+			states[index] = 2
+		}
 	}
-	seen[index] = true
-	call := calls[index]
-	if call.parent == -1 {
-		return []string{call.name}, true
+	return true
+}
+
+func inlineCallMatches(ctx context.Context, calls []inlineCall, wanted map[symbolTail][]string) (map[string]int, bool) {
+	matches := make(map[string]int)
+	for index, call := range calls {
+		if ctx.Err() != nil {
+			return nil, false
+		}
+		tail, valid := symbolTailFor(call.name)
+		if !valid {
+			continue
+		}
+		for _, subject := range wanted[tail] {
+			if _, alreadyMatched := matches[subject]; !alreadyMatched {
+				matches[subject] = index
+			}
+		}
 	}
-	parent, valid := inlineCallPath(calls, call.parent, seen)
-	if !valid {
-		return nil, false
+	return matches, true
+}
+
+func inlineCallPath(ctx context.Context, calls []inlineCall, index int) ([]string, bool) {
+	path := make([]string, 0, 8)
+	for steps := 0; index != -1; steps++ {
+		if ctx.Err() != nil || index < 0 || index >= len(calls) || steps >= len(calls) {
+			return nil, false
+		}
+		path = append(path, calls[index].name)
+		index = calls[index].parent
 	}
-	return append(parent, call.name), true
+	for left, right := 0, len(path)-1; left < right; left, right = left+1, right-1 {
+		path[left], path[right] = path[right], path[left]
+	}
+	return path, true
 }
 
 // walkDirectCalls preserves only edges whose source instruction and target function entry were both observed.
 // It stops an undecodable branch, but retains an already decoded path to a queried symbol: that positive is
 // independent of coverage elsewhere. The complete return value is therefore useful only for deciding whether a
 // binary with no positive evidence provided any usable coverage at all.
-func walkDirectCalls(text []byte, textAddress uint64, functions map[uint64]pclntabFunction, start pclntabFunction, wanted map[string]symbolcanon.Symbol) (map[string][]string, bool) {
+func walkDirectCalls(ctx context.Context, text []byte, textAddress uint64, functions map[uint64]pclntabFunction, start pclntabFunction, wanted map[string]symbolcanon.Symbol) (map[string][]string, bool) {
 	paths := map[string][]string{}
 	complete := true
 
@@ -483,35 +602,39 @@ func walkDirectCalls(text []byte, textAddress uint64, functions map[uint64]pclnt
 	queue := []pclntabFunction{start}
 	seen := map[uint64]bool{start.entry: true}
 	for len(queue) > 0 {
-		if len(seen) > maxEntryCallWalk {
+		if ctx.Err() != nil || len(seen) > maxEntryCallWalk {
 			return paths, false
 		}
 		current := queue[0]
 		queue = queue[1:]
 		path := functionPaths[current.entry]
+		currentSymbol := symbolcanon.Canonicalize(symbolcanon.Go, current.name)
 		for subject, wantedSymbol := range wanted {
+			if ctx.Err() != nil {
+				return paths, false
+			}
 			if _, found := paths[subject]; found {
 				continue
 			}
-			if symbolcanon.TailMatch(wantedSymbol, symbolcanon.Canonicalize(symbolcanon.Go, current.name), 2) {
+			if symbolcanon.TailMatch(wantedSymbol, currentSymbol, 2) {
 				paths[subject] = append([]string(nil), path...)
 			}
 		}
 		// Linker-recorded inline frames are executable code inside the reached physical parent. They carry their
 		// logical source call chain even when optimization eliminated a standalone function range, so retain that
 		// precise metadata rather than treating an optimized-away function as absent.
-		for _, inlinePath := range current.inlinePaths {
-			logicalPath := append(append([]string(nil), path...), inlinePath...)
-			for index, name := range inlinePath {
-				for subject, wantedSymbol := range wanted {
-					if _, found := paths[subject]; found {
-						continue
-					}
-					if symbolcanon.TailMatch(wantedSymbol, symbolcanon.Canonicalize(symbolcanon.Go, name), 2) {
-						paths[subject] = append([]string(nil), logicalPath[:len(path)+index+1]...)
-					}
-				}
+		for subject, index := range current.inlineMatches {
+			if ctx.Err() != nil {
+				return paths, false
 			}
+			if _, found := paths[subject]; found {
+				continue
+			}
+			inlinePath, valid := inlineCallPath(ctx, current.inlineCalls, index)
+			if !valid {
+				return paths, false
+			}
+			paths[subject] = append(append([]string(nil), path...), inlinePath...)
 		}
 
 		codeStart := current.entry - textAddress
@@ -520,11 +643,17 @@ func walkDirectCalls(text []byte, textAddress uint64, functions map[uint64]pclnt
 			complete = false
 			continue
 		}
-		targets, decoded := directCallTargets(text[codeStart:codeEnd], current.entry)
+		targets, decoded := directCallTargets(ctx, text[codeStart:codeEnd], current.entry)
 		if !decoded {
 			complete = false
 		}
+		if ctx.Err() != nil {
+			return paths, false
+		}
 		for _, target := range targets {
+			if ctx.Err() != nil {
+				return paths, false
+			}
 			callee, exists := functions[target]
 			if !exists || seen[target] {
 				continue
@@ -540,9 +669,12 @@ func walkDirectCalls(text []byte, textAddress uint64, functions map[uint64]pclnt
 // directCallTargets decodes an x86-64 function linearly and returns only E8 rel32 calls that begin on a decoded
 // instruction boundary. It supports the compact instruction forms emitted by the Go Linux/amd64 compiler; an
 // unfamiliar form stops this function at the last safe boundary instead of scanning arbitrary bytes for 0xe8.
-func directCallTargets(code []byte, address uint64) ([]uint64, bool) {
+func directCallTargets(ctx context.Context, code []byte, address uint64) ([]uint64, bool) {
 	var targets []uint64
 	for offset := 0; offset < len(code); {
+		if ctx.Err() != nil {
+			return targets, false
+		}
 		size, target, direct, ok := decodeAMD64Instruction(code[offset:], address+uint64(offset))
 		if !ok || size <= 0 || size > len(code)-offset {
 			return targets, false
@@ -584,6 +716,9 @@ opcode:
 	}
 	rexW := index > 0 && code[index-1]&0xf8 == 0x48
 	opcode := code[index]
+	if opcode == 0xc4 || opcode == 0xc5 || opcode == 0x62 {
+		return 0, 0, false, false // unsupported VEX/EVEX encodings must not expose payload bytes as instruction boundaries
+	}
 	index++
 	operandBytes := 4
 	if operand16 {

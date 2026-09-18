@@ -2,6 +2,7 @@ package gobinreach
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,6 +117,18 @@ func TestScanNonBinaryTreeNoCoverage(t *testing.T) {
 	}
 	if len(refs) != 0 {
 		t.Fatalf("a source-only tree must yield no binary symbols, got %v", firstN(refs, 8))
+	}
+}
+
+func TestScanCancellationPropagates(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	refs, err := New().ScanSymbolRefs(ctx, t.TempDir())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("scan cancellation error = %v, want context.Canceled", err)
+	}
+	if refs != nil {
+		t.Fatalf("canceled scan returned refs = %v, want nil", refs)
 	}
 }
 
