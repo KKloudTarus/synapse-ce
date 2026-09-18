@@ -53,7 +53,7 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 		case "Scala":
 			out.Findings = append(out.Findings, scalaFindings(tree, rel)...)
 		case "Ruby":
-			out.Findings = append(out.Findings, rubyFindings(tree, rel)...)
+			out.Findings = append(out.Findings, rubyFindings(ctx, tree, content, rel)...)
 		case "CSS":
 			out.Findings = append(out.Findings, cssFindings(tree, content, rel)...)
 		case "HTML":
@@ -77,7 +77,7 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 		case "Rust":
 			out.Findings = append(out.Findings, rustFindings(tree, content, rel)...)
 		case "C":
-			out.Findings = append(out.Findings, cFindings(tree, content, rel)...)
+			out.Findings = append(out.Findings, cFindings(ctx, tree, content, rel)...)
 		case "C++":
 			out.Findings = append(out.Findings, cppFindings(tree, content, rel)...)
 		case "C#":

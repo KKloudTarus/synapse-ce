@@ -17,7 +17,7 @@ type pythonRule struct {
 
 var pythonRules = map[string]pythonRule{
 	"mutable-default":    {"reliability", "python-mutable-default-argument", "CWE-398", "high", "Mutable default argument", "A mutable default value is shared by every call. Use None and create the value inside the function."},
-	"bare-except":        {"reliability", "python-bare-except", "CWE-396", "medium", "Bare except catches every exception", "Catching every exception can hide unexpected failures. Catch the expected exception type instead."},
+	"bare-except":        {"quality", "python-bare-except", "CWE-396", "medium", "Bare except catches every exception", "Catching every exception can hide unexpected failures. Catch the expected exception type instead."},
 	"return-finally":     {"reliability", "python-return-in-finally", "CWE-584", "medium", "Control flow in finally suppresses exceptions", "Returning or breaking from finally can discard an active exception or return value."},
 	"duplicate-dict":     {"reliability", "python-duplicate-dict-key", "CWE-561", "medium", "Duplicate dictionary key", "A later dictionary entry overwrites an earlier entry with the same literal key."},
 	"assert":             {"sast", "python-assert-for-validation", "CWE-617", "medium", "Runtime assert used for validation", "Assertions can be disabled at runtime. Raise an explicit exception for input validation."},

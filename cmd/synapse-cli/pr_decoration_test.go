@@ -5,7 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	"strings"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -88,5 +91,92 @@ func TestTriggerGateDecorationSkipsPartialIdentity(t *testing.T) {
 	triggerGateDecorationFromEnv(context.Background(), fake, qualitygate.Result{Passed: true}, "summary", nil)
 	if fake.calls != 0 {
 		t.Fatalf("partial target should be skipped; decorator calls = %d", fake.calls)
+	}
+}
+
+func TestBuildGateDecoratorDisabledByDefault(t *testing.T) {
+	clearPRDecorationCIEnv(t)
+	got, err := buildGateDecorator(func(string) string { return "" }, false, false)
+	if err != nil || got != nil {
+		t.Fatalf("no flags = %v,%v want nil decorator, no error", got, err)
+	}
+}
+
+func TestBuildGateDecoratorDryRunNeedsNoToken(t *testing.T) {
+	env := map[string]string{"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": "acme/widget", "SYNAPSE_PR_NUMBER": "7", "GITHUB_BASE_REF": "main", "SYNAPSE_PR_HEAD_SHA": "deadbeef"}
+	got, err := buildGateDecorator(func(k string) string { return env[k] }, true, true)
+	if err != nil {
+		t.Fatalf("dry-run build error = %v", err)
+	}
+	if _, ok := got.(*dryRunDecorator); !ok {
+		t.Fatalf("dry-run decorator = %T, want *dryRunDecorator", got)
+	}
+}
+
+func TestBuildGateDecoratorRequiresTokenWhenDecorating(t *testing.T) {
+	env := map[string]string{"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": "acme/widget", "SYNAPSE_PR_NUMBER": "7", "GITHUB_BASE_REF": "main", "SYNAPSE_PR_HEAD_SHA": "deadbeef"}
+	if _, err := buildGateDecorator(func(k string) string { return env[k] }, true, false); err == nil {
+		t.Fatal("decorate without SYNAPSE_DECORATION_TOKEN must error")
+	}
+}
+
+func TestBuildGateDecoratorBuildsProviderAdapterWithToken(t *testing.T) {
+	env := map[string]string{
+		"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": "acme/widget", "SYNAPSE_PR_NUMBER": "7",
+		"GITHUB_BASE_REF": "main", "SYNAPSE_PR_HEAD_SHA": "deadbeef", "SYNAPSE_DECORATION_TOKEN": "ghp-token",
+	}
+	got, err := buildGateDecorator(func(k string) string { return env[k] }, true, false)
+	if err != nil || got == nil {
+		t.Fatalf("decorate with token = %v,%v", got, err)
+	}
+	if _, ok := got.(*dryRunDecorator); ok {
+		t.Fatal("a real decorate must not return the dry-run decorator")
+	}
+}
+
+func TestBuildGateDecoratorRejectsUnknownProvider(t *testing.T) {
+	env := map[string]string{"SYNAPSE_CI_PROVIDER": "jenkins", "SYNAPSE_REPO_SLUG": "acme/widget", "SYNAPSE_PR_NUMBER": "7", "SYNAPSE_PR_TARGET_BRANCH": "main", "SYNAPSE_PR_HEAD_SHA": "deadbeef", "SYNAPSE_DECORATION_TOKEN": "t"}
+	if _, err := buildGateDecorator(func(k string) string { return env[k] }, true, false); err == nil {
+		t.Fatal("unsupported provider must error")
+	}
+}
+
+func TestDryRunDecoratorPrintsAndPostsNothing(t *testing.T) {
+	var buf strings.Builder
+	d := &dryRunDecorator{out: &buf, provider: "github-actions"}
+	err := d.Decorate(context.Background(), ports.PRDecoration{
+		Target: ports.PRDecorationTarget{Repository: "acme/widget", PullRequest: "7", CommitSHA: "abc", TargetBranch: "main"},
+		Gate:   qualitygate.Result{Passed: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "dry-run") || !strings.Contains(out, "acme/widget") || !strings.Contains(out, "gate=FAILED") {
+		t.Fatalf("dry-run output = %q", out)
+	}
+}
+
+func TestPRBaseRef(t *testing.T) {
+	pr := projectanalysis.CIContext{PullRequest: "42", TargetBranch: "develop"}
+	cases := []struct {
+		name    string
+		baseRef string
+		image   bool
+		ci      projectanalysis.CIContext
+		want    string
+	}{
+		{"explicit base wins", "origin/custom", false, pr, "origin/custom"},
+		{"pr defaults to target", "", false, pr, "origin/develop"},
+		{"pr target trimmed", "", false, projectanalysis.CIContext{PullRequest: "1", TargetBranch: "  release/2 "}, "origin/release/2"},
+		{"whitespace base is not explicit", "   ", false, pr, "origin/develop"},
+		{"image scan keeps empty", "", true, pr, ""},
+		{"non-pr keeps empty", "", false, projectanalysis.CIContext{Branch: "main"}, ""},
+		{"pr without target keeps empty", "", false, projectanalysis.CIContext{PullRequest: "42"}, ""},
+	}
+	for _, c := range cases {
+		if got := prBaseRef(c.baseRef, c.image, c.ci); got != c.want {
+			t.Errorf("%s: prBaseRef(%q,%v,%+v) = %q, want %q", c.name, c.baseRef, c.image, c.ci, got, c.want)
+		}
 	}
 }

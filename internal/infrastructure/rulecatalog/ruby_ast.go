@@ -51,5 +51,30 @@ end`,
 end`,
 			RemediationEffort: 60,
 		},
+		{
+			Key:             rule.Key("rb:duplicate-when-condition"),
+			Name:            "Duplicate when condition",
+			Language:        "Ruby",
+			Type:            rule.TypeBug,
+			Qualities:       []rule.Quality{rule.QualityReliability},
+			DefaultSeverity: shared.SeverityMedium,
+			Tags:            []string{"ruby", "reliability", "dead-code"},
+			CWE:             []string{"CWE-561"},
+			Detection:       rule.DetectionAST,
+			Description:     "A case/when branch repeats the condition of an earlier when in the same case expression.",
+			Rationale:       "Ruby evaluates when clauses top to bottom and executes the first match, so a branch whose condition duplicates an earlier one is dead code. It usually signals a copy-paste error where a different condition was intended.\n\nSource: https://cwe.mitre.org/data/definitions/561.html",
+			Remediation:     "Remove the duplicate branch, or correct its condition to the value that was intended.",
+			CompliantExample: `case status
+when :active then start
+when :paused then hold
+else stop
+end`,
+			NoncompliantExample: `case status
+when :active then start
+when :active then hold
+else stop
+end`,
+			RemediationEffort: 5,
+		},
 	}
 }

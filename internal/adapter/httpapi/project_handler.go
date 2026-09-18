@@ -31,6 +31,7 @@ type projectService interface {
 	Get(context.Context, shared.ID, string) (*project.Project, error)
 	Delete(context.Context, string, shared.ID, string) error
 	AssignGate(context.Context, string, shared.ID, string, string) (*project.Project, error)
+	SetPullRequestDecoration(context.Context, string, shared.ID, string, bool) (*project.Project, error)
 	StartAnalysis(context.Context, string, shared.ID, string, *measure.CoverageReport) (ports.ScanJob, error)
 	ImportAnalysis(context.Context, shared.ID, string, projectuc.ImportAnalysisInput) (projectanalysis.Analysis, error)
 	AnalysisStatus(context.Context, shared.ID, string) (ports.ScanJob, error)
@@ -41,7 +42,7 @@ type projectService interface {
 	GetMeasures(context.Context, string, string, string, []string, int, string) (projectuc.ProjectMeasureResponse, error)
 	GetBehavioralHotspots(context.Context, shared.ID, string, string, string, int) (projectuc.BehavioralHotspotsResponse, error)
 	ListAnalyses(context.Context, shared.ID, string, string, int, time.Time, shared.ID) ([]projectanalysis.Analysis, bool, error)
-	Branches(context.Context, shared.ID, string) ([]string, error)
+	Branches(context.Context, shared.ID, string) ([]projectanalysis.BranchInfo, error)
 	GetAnalysis(context.Context, shared.ID, string, string) (projectanalysis.Analysis, error)
 	ListCodeFiles(context.Context, shared.ID, string, string) ([]projectuc.CodeFile, projectanalysis.SourceCapabilities, error)
 	ListCodeFilesWithFilter(context.Context, shared.ID, string, string, projectuc.CodeFileFilter) ([]projectuc.CodeFile, projectanalysis.SourceCapabilities, error)
@@ -221,6 +222,22 @@ func (rt *Router) assignProjectGate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toProjectView(p))
 }
 
+func (rt *Router) setProjectDecoration(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
+		return
+	}
+	p, err := rt.projects.SetPullRequestDecoration(r.Context(), PrincipalFrom(r.Context()), shared.ID(TenantFrom(r.Context())), r.PathValue("key"), body.Enabled)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toProjectView(p))
+}
+
 type projectAnalysisJobResponse struct {
 	ID          string                 `json:"id"`
 	Target      string                 `json:"target"`
@@ -314,7 +331,7 @@ func (rt *Router) latestProjectAnalysis(w http.ResponseWriter, r *http.Request) 
 }
 
 type projectBranchesResponse struct {
-	Branches []string `json:"branches"`
+	Branches []projectanalysis.BranchInfo `json:"branches"`
 }
 
 func (rt *Router) listProjectBranches(w http.ResponseWriter, r *http.Request) {
@@ -324,7 +341,7 @@ func (rt *Router) listProjectBranches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if branches == nil {
-		branches = []string{}
+		branches = []projectanalysis.BranchInfo{}
 	}
 	writeJSON(w, http.StatusOK, projectBranchesResponse{Branches: branches})
 }

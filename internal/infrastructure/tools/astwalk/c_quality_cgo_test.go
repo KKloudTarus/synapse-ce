@@ -4,10 +4,12 @@ package astwalk
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sitter "github.com/smacker/go-tree-sitter"
 
@@ -21,7 +23,7 @@ func cFixtureFindings(t *testing.T, source string) []QualityFinding {
 	if root == nil || root.HasError() {
 		t.Fatalf("C fixture is not syntactically complete: %q", source)
 	}
-	findings, _ := cFindingsLimit(root, []byte(source), "fixture.c", 100)
+	findings, _ := cFindingsLimit(context.Background(), root, []byte(source), "fixture.c", 100)
 	return findings
 }
 
@@ -169,5 +171,154 @@ void test_vla(int len) {
 	}
 	if !found {
 		t.Fatalf("QualityFor did not find c:vla-stack-allocation in C file: %+v", got.Findings)
+	}
+}
+
+// TestCTypeAwareDetectors pins the type-aware fixes to two C detectors: dangling-stack-pointer-return now
+// resolves the returned name against the function's own declarations (so an initialized local and a bare
+// local-array return are caught, while a global, a static, and a scalar returned by value are not), and
+// signed-unsigned-comparison resolves operand signedness from the declarations (so `if (a < b)` with a
+// unsigned and b signed is caught, while a same-signedness comparison is not).
+func TestCTypeAwareDetectors(t *testing.T) {
+	src := `int global_v = 5;
+
+int *dangle_scalar(void) {
+    int local = 42;
+    return &local;
+}
+
+char *dangle_array(void) {
+    char buf[64];
+    return buf;
+}
+
+int ok_scalar_by_value(void) {
+    int local = 42;
+    return local;
+}
+
+int *ok_global(void) {
+    return &global_v;
+}
+
+int *ok_static(void) {
+    static int s = 1;
+    return &s;
+}
+
+int cmp_signed_unsigned(unsigned int a, int b) {
+    if (a < b) {
+        return 1;
+    }
+    return 0;
+}
+
+int cmp_same_sign(int a, int b) {
+    if (a < b) {
+        return 1;
+    }
+    return 0;
+}
+`
+	findings := cFixtureFindings(t, src)
+	lines := func(rule string) []int {
+		var ls []int
+		for _, f := range findings {
+			if f.Rule == rule {
+				ls = append(ls, f.Line)
+			}
+		}
+		return ls
+	}
+	has := func(ls []int, want int) bool {
+		for _, l := range ls {
+			if l == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	dangling := lines("c:dangling-stack-pointer-return")
+	if !has(dangling, 5) {
+		t.Errorf("initialized-local address return not caught (line 5); got %v", dangling)
+	}
+	if !has(dangling, 10) {
+		t.Errorf("local-array return not caught (line 10); got %v", dangling)
+	}
+	for _, bad := range dangling {
+		if bad != 5 && bad != 10 {
+			t.Errorf("false-positive dangling return at line %d (scalar-by-value/global/static must not fire)", bad)
+		}
+	}
+
+	su := lines("c:signed-unsigned-comparison")
+	if !has(su, 28) {
+		t.Errorf("signed/unsigned comparison `if (a < b)` not caught (line 28); got %v", su)
+	}
+	for _, bad := range su {
+		if bad != 28 {
+			t.Errorf("false-positive signed-unsigned comparison at line %d (same-signedness must not fire)", bad)
+		}
+	}
+}
+
+// TestCSignedUnsignedGuardIsLocal pins that the `>= 0` range-check guard for signed-unsigned-comparison is
+// scoped to the comparison's own control-flow construct, not the whole file: an unrelated `>= 0` in another
+// function must not suppress a genuine unsigned/signed comparison.
+func TestCSignedUnsignedGuardIsLocal(t *testing.T) {
+	src := `int f(unsigned int a, int b) {
+    if (a < b) {
+        return 1;
+    }
+    return 0;
+}
+
+int g(int z) {
+    if (z >= 0) {
+        return 1;
+    }
+    return 0;
+}
+`
+	findings := cFixtureFindings(t, src)
+	n := 0
+	for _, f := range findings {
+		if f.Rule == "c:signed-unsigned-comparison" {
+			n++
+			if f.Line != 2 {
+				t.Errorf("signed-unsigned finding at line %d, want 2", f.Line)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("want exactly 1 signed-unsigned finding despite the unrelated `>= 0` in g(), got %d", n)
+	}
+}
+
+// TestCFunctionVarsBounded pins that resolving variable types over a function with a very large
+// comma-declarator list stays fast (the type text is read once per declaration, not per declarator), so an
+// adversarial single declaration cannot make the walk quadratic.
+func TestCFunctionVarsBounded(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("void f(void) {\n unsigned int u = 0; int s = 0; if (u < s) { s++; }\n long ")
+	for i := 0; i < 8000; i++ {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "v%d", i)
+	}
+	b.WriteString(";\n}\n")
+	src := b.String()
+	done := make(chan struct{})
+	go func() {
+		root := parseRoot(context.Background(), specs["C"], []byte(src))
+		_, _ = cFindingsLimit(context.Background(), root, []byte(src), "f.c", 100)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("cFunctionVars did not complete in time on a large declarator list (possible O(n^2) regression)")
 	}
 }

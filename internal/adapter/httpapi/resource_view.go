@@ -153,6 +153,7 @@ type projectView struct {
 	SourceBinding        project.SourceBinding `json:"source_binding"`
 	DefaultProfileByLang map[string]string     `json:"default_profile_by_lang"`
 	GateID               string                `json:"gate_id,omitempty"`
+	DecoratePullRequests bool                  `json:"decorate_pull_requests"`
 	CreatedAt            time.Time             `json:"created_at"`
 	UpdatedAt            time.Time             `json:"updated_at"`
 }
@@ -169,6 +170,7 @@ func toProjectView(p *project.Project) projectView {
 		SourceBinding:        p.SourceBinding,
 		DefaultProfileByLang: p.DefaultProfileByLang,
 		GateID:               p.GateID,
+		DecoratePullRequests: p.DecoratePullRequests,
 		CreatedAt:            p.Audit.CreatedAt,
 		UpdatedAt:            p.Audit.UpdatedAt,
 	}

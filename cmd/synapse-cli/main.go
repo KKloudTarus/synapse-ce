@@ -718,10 +718,16 @@ func runGate(args []string) error {
 	rulesPath := filepath.Join(dir, ".synapse-rules.yaml")
 	covPath := ""
 	markdown := false
+	decorate := false
+	dryRun := false
 	for i := 1; i < len(args); i++ {
 		switch {
 		case args[i] == "--new-code-only":
 			newCodeOnly = true
+		case args[i] == "--decorate":
+			decorate = true
+		case args[i] == "--dry-run":
+			dryRun = true
 		case args[i] == "--base" && i+1 < len(args):
 			base = args[i+1]
 			i++
@@ -887,7 +893,12 @@ func runGate(args []string) error {
 			fmt.Printf("  [%s] %s (%s)\n", mark, cr.Condition, conditionActual(cr))
 		}
 	}
-	triggerGateDecorationFromEnv(ctx, cliPRDecorator, result, summary, scoped)
+	decorator, decErr := buildGateDecorator(os.Getenv, decorate, dryRun)
+	if decErr != nil {
+		// A decoration misconfiguration must never fail the gate; report it and continue.
+		fmt.Fprintf(os.Stderr, "warning: PR decoration is not configured; the quality gate result is unchanged: %v\n", decErr)
+	}
+	triggerGateDecorationFromEnv(ctx, decorator, result, summary, scoped)
 	if !result.Passed {
 		return fmt.Errorf("quality gate FAILED: %d condition(s) not met", len(result.Failures()))
 	}
@@ -1118,6 +1129,7 @@ func runScan() {
 	verifySecrets := false
 	minConfidence := ""
 	baseRef := ""
+	baseExplicit := false
 	push := pushTarget{token: strings.TrimSpace(os.Getenv("SYNAPSE_API_TOKEN"))}
 	for i := 3; i < len(os.Args); i++ {
 		switch {
@@ -1146,6 +1158,7 @@ func runScan() {
 			i++
 		case os.Args[i] == "--base" && i+1 < len(os.Args):
 			baseRef = os.Args[i+1]
+			baseExplicit = true
 			i++
 		case os.Args[i] == "--include-test":
 			includeTest = true
@@ -1199,6 +1212,7 @@ func runScan() {
 	}
 	if push.enabled() {
 		push.ci = ciContextFromEnv(push.ci, os.Getenv)
+		baseRef = prBaseRef(baseRef, image, push.ci)
 		if image {
 			// A project analysis is a source-tree analysis: it carries measures, ratings and a code
 			// quality report that have no meaning for an image.
@@ -1226,7 +1240,7 @@ func runScan() {
 		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json, --sarif or --sbom")
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, priority, minConfidence, baseRef, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest, verifySecrets, push); err != nil {
+	if err := run(os.Args[2], failOn, mode, priority, minConfidence, baseRef, baseExplicit, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest, verifySecrets, push); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -1459,7 +1473,7 @@ func selectSBOMGenerator(cfg config.Config) (ports.SBOMGenerator, error) {
 	}
 }
 
-func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest, verifySecrets bool, push pushTarget) error {
+func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, baseExplicit, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest, verifySecrets bool, push pushTarget) error {
 	// An image target is an OCI reference (acquired in-process into an OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -1808,11 +1822,19 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	if baseRef != "" {
 		changed, derr := gitdiff.Changed(ctx, target, baseRef)
 		if derr != nil {
-			return fmt.Errorf("new-code diff vs %q: %w", baseRef, derr)
+			// An explicit --base that cannot be diffed is a user error and fails the scan. An
+			// auto-derived pull-request base (origin/<target>) is often unfetched on a shallow CI
+			// checkout, so degrade: warn and skip new-code scoping rather than fail the run — the
+			// server re-bases the New Code against the target branch on its own.
+			if baseExplicit {
+				return fmt.Errorf("new-code diff vs %q: %w", baseRef, derr)
+			}
+			fmt.Fprintf(os.Stderr, "synapse-cli: new-code base %s is not available (%v); scanning without new-code scoping\n", baseRef, derr)
+		} else {
+			before := len(res.Findings)
+			res.Findings = scopeToNewCode(res.Findings, changed)
+			fmt.Fprintf(os.Stderr, "synapse-cli: scoped to new code vs %s (%d of %d findings on changed lines; dependency/license findings kept)\n", baseRef, len(res.Findings), before)
 		}
-		before := len(res.Findings)
-		res.Findings = scopeToNewCode(res.Findings, changed)
-		fmt.Fprintf(os.Stderr, "synapse-cli: scoped to new code vs %s (%d of %d findings on changed lines; dependency/license findings kept)\n", baseRef, len(res.Findings), before)
 	}
 	if !image { // .synapseignore lives in the repo; not applicable to an image reference
 		ignoreRules, ierr := loadSynapseignore(target)

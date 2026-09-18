@@ -34,11 +34,14 @@ type jsFactsProvider interface {
 // it recovers a reachable verdict the lexical model leaves opaque (a whole-module binding that escapes into
 // a reached function) and yields a call-chain proof.
 //
-// It is POSITIVE-ONLY by construction: it reports a subject reachable only when it can exhibit a concrete
-// call path from an entrypoint to the package's external node, and reports nothing otherwise. A proven path
-// is sound regardless of the resolver's Complete flag (an incomplete graph can still contain a real path),
-// so unlike a suppressing analyzer it never needs completeness and never emits a negative. The recorder
-// wires it raise-only, matching #1058's "JS stays raise-only by default".
+// It answers BOTH directions. A subject is reachable when it can exhibit a concrete call path from an
+// entrypoint to the package's external node; a proven path is sound regardless of the resolver's Complete flag
+// (an incomplete graph can still contain a real path). A subject is not-reachable when no such path exists,
+// but that negative is only SOUND when the resolver's graph is Complete: whenever it is not, every gap
+// (a dynamic construct, an escaping first-party callable, an unresolved or ambiguous call) is surfaced as an
+// analysis-wide blind construct so the coordinator taints every not-reachable verdict and none can suppress a
+// finding (#1139). The recorder wires it RAISE-ONLY by default (#1058's "JS stays raise-only by default"), so
+// the negatives are inert unless the suppressing direction is explicitly enabled.
 type InterprocAnalyzer struct {
 	provider  jsFactsProvider
 	cached    *interprocEvidence
@@ -80,6 +83,13 @@ type interprocEvidence struct {
 	// externalNodes is every third-party call-target node present in the graph (id "jsnpm:<specifier>:<export>"),
 	// pre-split so a per-subject match is a scan of a small slice, not a re-parse of every edge.
 	externalNodes []externalNode
+	// escapedSpecifiers is the set of import specifiers whose binding is used as a VALUE (passed as a call
+	// argument, stored in an assignment, or returned) rather than only as a direct call base. Such a binding
+	// can be invoked out of view of the static call graph (a higher-order library callee that calls its
+	// argument, a holder external code later reads), which the resolver's Complete flag does NOT capture for a
+	// third-party binding. A not-reachable verdict for one of these packages is therefore tainted so it can
+	// never suppress a finding (#1139 soundness); positives are unaffected.
+	escapedSpecifiers []string
 }
 
 type externalNode struct {
@@ -88,10 +98,13 @@ type externalNode struct {
 	export    string
 }
 
-// Analyze reports, for each `pkg:npm/name@version#export` subject symbol, whether first-party source
-// reaches a CALL into that package's export from an entrypoint. It returns a result only for a reachable
-// symbol; an unreachable or unparseable symbol yields no positive, which the raise-only coordinator reads as
-// "nothing to mint" (the prior tier stands). It never returns a not-reachable verdict.
+// Analyze reports, for each `pkg:npm/name@version#export` subject symbol, whether first-party source reaches
+// a CALL into that package's export from an entrypoint. A reachable symbol carries its call-path proof; an
+// unreachable one carries a Reachable=false verdict (sound only under a Complete graph, which the blind
+// constructs below enforce). An unparseable symbol yields NO result, leaving it unknown, so a subject that
+// mixes a parseable and an unparseable symbol is never concluded not-reachable. When the resolver's graph is
+// incomplete, every gap is surfaced as an analysis-wide blind construct that taints every not-reachable
+// verdict, so absence of a path can never suppress a finding on an incomplete graph.
 func (a *InterprocAnalyzer) Analyze(ctx context.Context, dir string, symbols []string) (*reachability.Analysis, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("%w: jsreach interprocedural analysis requires a context", shared.ErrValidation)
@@ -131,20 +144,68 @@ func (a *InterprocAnalyzer) Analyze(ctx context.Context, dir string, symbols []s
 		}
 		purl, export, ok := jssymbols.ParseSubject(subject)
 		if !ok {
-			continue // not a component-purl-with-export subject; positive-only, so leave it to another tier
+			continue // not a component-purl-with-export subject; leave it unknown for another tier
 		}
 		name, _, ok := jsresolution.ParseNPMPURL(purl)
 		if !ok {
 			continue
 		}
+		result := reachability.Result{Symbol: subject}
 		if node, path, reached := evidence.reach(name, export); reached {
-			results = append(results, reachability.Result{Symbol: subject, Reachable: true, Path: witness(path, node, subject)})
+			result.Reachable = true
+			result.Path = witness(path, node, subject)
+		} else if evidence.packageEscapes(name) {
+			// The package's binding escapes as a value (see escapedImportSpecifiers): a call into the affected
+			// export could happen out of view of the resolved graph, so this negative is NOT a sound proof of
+			// absence. Tainting it with a per-symbol blind construct keeps ProvedNotReachable false, so it can
+			// never suppress the finding even on an otherwise-Complete graph.
+			result.BlindConstructs = []string{"jsprogram:import_escape"}
+		} else if evidence.exportCalledSomewhere(name, export) {
+			// The affected export IS called in first-party code but no path reaches it from a DECLARED entry
+			// point. The declared entry points (module top level, main/handler) under-approximate a library's
+			// real entry surface: the caller could be an EXPORTED wrapper a consumer or framework invokes
+			// (`export function wrap(){ vuln() }`), which would make the export reachable. A call site not
+			// reached from a declared entry point is therefore not a sound proof of absence; taint it. Only an
+			// affected export with NO first-party call site at all is a sound not-reachable.
+			result.BlindConstructs = []string{"jsprogram:export_call_unreached"}
 		}
+		// A Reachable=false result is a candidate not-reachable verdict; it only becomes a SOUND proof of
+		// absence when neither the analysis (Complete) nor this symbol (no escape) carries a blind construct.
+		results = append(results, result)
 	}
 
 	entrypoints := append([]string(nil), evidence.resolution.Graph.Entrypoints...)
 	sort.Strings(entrypoints)
-	return &reachability.Analysis{Results: results, Entrypoints: entrypoints}, nil
+	analysis := &reachability.Analysis{Results: results, Entrypoints: entrypoints}
+	if !evidence.resolution.Complete {
+		// The graph is incomplete: a dynamic construct, an escaping first-party callable, or an unresolved or
+		// ambiguous call left a hole a real call path could pass through. Surface every such gap as an
+		// analysis-wide blind construct so the coordinator folds it into every not-reachable claim, which
+		// keeps ProvedNotReachable false and forbids suppression. Positives are unaffected (a proven path
+		// stands on an incomplete graph).
+		analysis.BlindConstructs = gapConstructs(evidence.resolution.Gaps)
+	}
+	return analysis, nil
+}
+
+// gapConstructs summarizes the resolver's coverage gaps into distinct, sorted blind-construct labels. An
+// incomplete graph with no explicit gap (a truncated extraction) still returns a generic marker, so a
+// not-reachable verdict is never treated as sound on an incomplete graph.
+func gapConstructs(gaps []jsprogram.CoverageGap) []string {
+	if len(gaps) == 0 {
+		return []string{"jsprogram:incomplete"}
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(gaps))
+	for _, gap := range gaps {
+		label := "jsprogram:" + string(gap.Kind)
+		if !seen[label] {
+			seen[label] = true
+			out = append(out, label)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // evidenceFor resolves the interprocedural call graph for dir at most once per analyzer (the analyzer is
@@ -170,7 +231,92 @@ func (a *InterprocAnalyzer) gather(ctx context.Context, dir string) (interprocEv
 	if err != nil {
 		return interprocEvidence{}, fmt.Errorf("jsreach interprocedural resolution (no coverage - prior tier stands): %w", err)
 	}
-	return interprocEvidence{resolution: resolution, externalNodes: externalNodesOf(resolution)}, nil
+	return interprocEvidence{
+		resolution:        resolution,
+		externalNodes:     externalNodesOf(resolution),
+		escapedSpecifiers: escapedImportSpecifiers(document),
+	}, nil
+}
+
+// escapedImportSpecifiers returns the sorted set of import specifiers whose local binding is used as a VALUE
+// somewhere in the document: passed as a call argument, stored as an assignment value, or returned. Such a
+// binding can be invoked out of view of the resolved call graph (a higher-order callee that calls its
+// argument, a holder read by code we do not model), and the resolver keeps the graph Complete for a
+// third-party binding in these shapes, so this is the guard the Complete flag does not provide. Matching is by
+// the reference's base segment against the import's local alias, so only the affected binding itself (not an
+// unrelated identifier) marks its package escaped. The check is intentionally over-approximate: a binding
+// merely passed to a first-party function that never invokes it is still marked, which at worst forgoes a
+// suppression (raise-only), never an unsound one.
+func escapedImportSpecifiers(doc jsprogram.Document) []string {
+	aliasToSpecifier := make(map[string]string, len(doc.Imports))
+	escaped := map[string]bool{}
+	for _, imp := range doc.Imports {
+		if imp.Kind == jsprogram.ImportReexport {
+			// `export { vuln } from 'pkg'` / `export * from 'pkg'` re-exports the package's surface through this
+			// module. A consumer of this module can call the re-exported symbol, so its export is reachable
+			// beyond what the module's own call graph shows; a not-reachable verdict for it must not suppress.
+			escaped[imp.Module] = true
+			continue
+		}
+		alias := imp.Alias
+		if alias == "" {
+			alias = imp.Name
+		}
+		if alias != "" {
+			aliasToSpecifier[alias] = imp.Module
+		}
+	}
+	if len(aliasToSpecifier) == 0 && len(escaped) == 0 {
+		return nil
+	}
+	mark := func(ref jsprogram.Reference) {
+		if len(ref.Segments) == 0 {
+			return
+		}
+		if specifier, ok := aliasToSpecifier[ref.Segments[0]]; ok {
+			escaped[specifier] = true
+		}
+	}
+	for _, call := range doc.Calls {
+		for _, arg := range call.Arguments {
+			mark(arg.Value)
+		}
+	}
+	for _, assignment := range doc.Assignments {
+		mark(assignment.Value)
+	}
+	for _, ret := range doc.Returns {
+		mark(ret.Value)
+	}
+	// A value slot that references the binding by name (or member) catches an escape the top-level
+	// argument/assignment/return references miss: an affected binding nested inside an escaping object or array
+	// literal (`const o = { h: vuln }`, `[vuln]`) surfaces as a name-reference Value. A call callee is a
+	// call-kind value, not a name reference, so a resolved call into the binding is not mistaken for an escape.
+	for _, value := range doc.Values {
+		if value.Ref.Kind == jsprogram.ReferenceName || value.Ref.Kind == jsprogram.ReferenceAttribute {
+			mark(value.Ref)
+		}
+	}
+	if len(escaped) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(escaped))
+	for specifier := range escaped {
+		out = append(out, specifier)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// packageEscapes reports whether any escaped import specifier belongs to the npm package name (the bare
+// specifier or a subpath), so a not-reachable verdict for that package must be tainted.
+func (e interprocEvidence) packageEscapes(name string) bool {
+	for _, specifier := range e.escapedSpecifiers {
+		if specifierMatchesPackage(specifier, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // externalNodesOf collects the distinct third-party call-target nodes present as edge callees, pre-splitting
@@ -231,6 +377,23 @@ func (e interprocEvidence) reach(name, export string) (string, []string, bool) {
 	return "", nil, false
 }
 
+// exportCalledSomewhere reports whether a call into package `name`'s affected `export` EXISTS anywhere in the
+// resolved graph, regardless of whether a declared entry point reaches it. A call site that exists but is not
+// reached from an entry point is not a sound proof of absence (its caller could be an exported wrapper a
+// consumer invokes), so the caller taints such a negative. It mirrors reach's matching but skips the PathTo.
+func (e interprocEvidence) exportCalledSomewhere(name, export string) bool {
+	for _, node := range e.externalNodes {
+		if !specifierMatchesPackage(node.specifier, name) {
+			continue
+		}
+		if export != "" && !exportMatches(node.export, export) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // specifierMatchesPackage reports whether an import specifier belongs to the npm package `name`: the bare
 // package specifier, or a subpath import ("lodash/fp" for "lodash").
 func specifierMatchesPackage(specifier, name string) bool {
@@ -263,23 +426,37 @@ func firstPartyWitness(path []string, subject string) []string {
 	return append([]string(nil), path...)
 }
 
-// InterprocRecorder wires the interprocedural analyzer into the reachability pass, RAISE-ONLY: it mints only
-// a REACHABLE Tier-2 judgment and never a not-reachable one, so it can only add a reachable verdict (with a
-// call-path proof) the lexical Tier-1/Tier-2 missed, never suppress a finding. It satisfies
-// ports.ReachabilityRecorder and composes alongside the other recorders via Service.AddReachabilityRecorder.
+// InterprocRecorder wires the interprocedural analyzer into the reachability pass. By default it is
+// RAISE-ONLY: it mints only a REACHABLE Tier-2 judgment (with a call-path proof) the lexical Tier-1/Tier-2
+// missed, never a not-reachable one, so it can never suppress a finding. WithSuppression enables the
+// SUPPRESSING direction (#1139, opt-in): the recorder then also mints a not-reachable Tier-2 judgment for a
+// subject whose affected export is unreached in a COMPLETE graph with entry points present, which can drive an
+// OpenVEX not_affected. It satisfies ports.ReachabilityRecorder and composes alongside the other recorders via
+// Service.AddReachabilityRecorder.
 type InterprocRecorder struct {
 	provider  jsFactsProvider
 	judgments recorderPort
 	audit     ports.AuditLogger
 	clock     ports.Clock
+	suppress  bool
 }
 
-// NewInterprocRecorder validates and returns the recorder.
+// NewInterprocRecorder validates and returns the recorder, raise-only by default.
 func NewInterprocRecorder(provider jsFactsProvider, judgments recorderPort, audit ports.AuditLogger, clock ports.Clock) (*InterprocRecorder, error) {
 	if provider == nil || judgments == nil || audit == nil || clock == nil {
 		return nil, fmt.Errorf("%w: jsreach interprocedural recorder is missing a dependency", shared.ErrValidation)
 	}
 	return &InterprocRecorder{provider: provider, judgments: judgments, audit: audit, clock: clock}, nil
+}
+
+// WithSuppression turns the suppressing interprocedural direction on or off and returns the recorder. It is
+// off by default; enabling it (behind SYNAPSE_JSREACH_INTERPROC_TIER2_ENABLED) lets a proven not-reachable
+// npm export drive a not_affected suppression. Soundness is enforced by the analyzer's Complete-gated blind
+// constructs and the coordinator's entry-points-present guard, so a suppression only stands on a complete
+// graph analysed from real entry points.
+func (r *InterprocRecorder) WithSuppression(enabled bool) *InterprocRecorder {
+	r.suppress = enabled
+	return r
 }
 
 // Record analyses the target and mints raise-only Tier-2 JavaScript reachability judgments for the subjects
@@ -305,7 +482,13 @@ func (r *InterprocRecorder) Record(ctx context.Context, engagementID shared.ID, 
 	if err != nil {
 		return 0, err
 	}
-	return coordinator.WithRaiseOnly().Record(ctx, engagementID, targetRef, encoded)
+	if !r.suppress {
+		return coordinator.WithRaiseOnly().Record(ctx, engagementID, targetRef, encoded)
+	}
+	// Suppressing direction (opt-in): the coordinator may mint a not-reachable Tier-2 claim, gated by its
+	// entry-points-present guard and the analyzer's Complete-gated blind constructs; a proven not-reachable
+	// export can then suppress its finding.
+	return coordinator.Record(ctx, engagementID, targetRef, encoded)
 }
 
 // EncodeNPMSubjects converts exact npm package identities and affected exports into the

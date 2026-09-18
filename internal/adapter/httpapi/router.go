@@ -652,6 +652,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/projects/{key}/issues/{id}/transitions", rt.authz(userdom.PermReview, rt.transitionProjectIssue))
 		mux.HandleFunc("GET /api/v1/projects/{key}/issues/{id}/history", rt.authz(userdom.PermView, rt.projectIssueHistory))
 		mux.HandleFunc("PUT /api/v1/projects/{key}/gate", rt.authz(userdom.PermOperate, rt.assignProjectGate))
+		mux.HandleFunc("PUT /api/v1/projects/{key}/decoration", rt.authz(userdom.PermOperate, rt.setProjectDecoration))
 		if rt.qualityProfiles != nil {
 			mux.HandleFunc("PUT /api/v1/projects/{key}/profiles/{language}", rt.authz(userdom.PermOperate, rt.assignProjectProfile))
 		}

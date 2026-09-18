@@ -206,6 +206,159 @@ func TestEncodeNPMSubjectsSkipsVersionAmbiguity(t *testing.T) {
 	}
 }
 
+// injectEvidence bypasses Resolve so Analyze runs against a hand-built resolution (the constructor caches
+// per-dir evidence; a same-package test can seed that cache directly).
+func injectEvidence(t *testing.T, res jsprogram.Resolution) *InterprocAnalyzer {
+	t.Helper()
+	a, err := NewInterprocAnalyzer(fakeFactsProvider{available: true})
+	if err != nil {
+		t.Fatalf("NewInterprocAnalyzer: %v", err)
+	}
+	ev := evidenceFrom(res)
+	a.cached, a.cachedDir = &ev, "/repo"
+	return a
+}
+
+// TestAnalyzeEmitsSoundNegativeOnCompleteGraph: on a COMPLETE graph, an affected export with NO first-party
+// call site at all yields a not-reachable verdict with NO blind constructs, so the coordinator can turn it
+// into a suppression. An export that IS called but only from unreached code (an exported wrapper could invoke
+// it) is tainted instead.
+func TestAnalyzeEmitsSoundNegativeOnCompleteGraph(t *testing.T) {
+	a := injectEvidence(t, wrapperGraph()) // Complete: true; nonexistent has no external node
+	analysis, err := a.Analyze(context.Background(), "/repo", []string{"pkg:npm/lodash@4#nonexistent"})
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if len(analysis.Results) != 1 || analysis.Results[0].Reachable {
+		t.Fatalf("an unreached export must yield exactly one not-reachable result, got %+v", analysis.Results)
+	}
+	if len(analysis.BlindConstructs) != 0 {
+		t.Fatalf("a complete graph must carry no blind constructs, got %v", analysis.BlindConstructs)
+	}
+	if len(analysis.Results[0].BlindConstructs) != 0 {
+		t.Fatalf("a never-called export on a complete, non-escaping graph must carry no per-symbol blind constructs, got %v", analysis.Results[0].BlindConstructs)
+	}
+	// merge HAS a call site (from the unreached js:app:dead) so its negative is tainted: an exported wrapper
+	// could reach it, so absence of a path from declared entry points is not a sound proof of absence.
+	called, _ := a.Analyze(context.Background(), "/repo", []string{"pkg:npm/lodash@4#merge"})
+	if len(called.Results) != 1 || called.Results[0].Reachable ||
+		len(called.Results[0].BlindConstructs) != 1 || called.Results[0].BlindConstructs[0] != "jsprogram:export_call_unreached" {
+		t.Fatalf("a called-but-unreached export must be tainted export_call_unreached, got %+v", called.Results)
+	}
+	// A reached export in the same complete graph is a positive with a path.
+	pos, _ := a.Analyze(context.Background(), "/repo", []string{"pkg:npm/lodash@4#template"})
+	if len(pos.Results) != 1 || !pos.Results[0].Reachable || len(pos.Results[0].Path) == 0 {
+		t.Fatalf("a reached export must be positive with a proof path, got %+v", pos.Results)
+	}
+}
+
+// TestAnalyzeIncompleteGraphTaintsNegative: on an INCOMPLETE graph, an unreached export still yields a
+// not-reachable verdict, but the analysis carries blind constructs derived from the gaps, which the
+// coordinator folds into the claim so ProvedNotReachable is false and the finding is never suppressed.
+func TestAnalyzeIncompleteGraphTaintsNegative(t *testing.T) {
+	res := wrapperGraph()
+	res.Complete = false
+	res.Gaps = []jsprogram.CoverageGap{
+		{Kind: jsprogram.GapUnresolvedCall, SymbolID: "js:app:render", Detail: "callback_escape"},
+		{Kind: jsprogram.GapDynamicImport, SymbolID: "js:app:<module>", Detail: "dynamic_import"},
+	}
+	a := injectEvidence(t, res)
+	analysis, err := a.Analyze(context.Background(), "/repo", []string{"pkg:npm/lodash@4#merge"})
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if len(analysis.Results) != 1 || analysis.Results[0].Reachable {
+		t.Fatalf("unreached export must still be not-reachable, got %+v", analysis.Results)
+	}
+	want := map[string]bool{"jsprogram:unresolved_call": true, "jsprogram:dynamic_import": true}
+	if len(analysis.BlindConstructs) != len(want) {
+		t.Fatalf("incomplete graph must surface its gap kinds as blind constructs, got %v", analysis.BlindConstructs)
+	}
+	for _, bc := range analysis.BlindConstructs {
+		if !want[bc] {
+			t.Errorf("unexpected blind construct %q", bc)
+		}
+	}
+}
+
+// TestAnalyzeIncompleteWithNoGapsStillTaints: a resolution flagged incomplete with an empty gap list (a
+// truncated extraction) must still taint negatives with a generic marker, never present them as sound.
+func TestAnalyzeIncompleteWithNoGapsStillTaints(t *testing.T) {
+	res := wrapperGraph()
+	res.Complete = false
+	res.Gaps = nil
+	a := injectEvidence(t, res)
+	analysis, _ := a.Analyze(context.Background(), "/repo", []string{"pkg:npm/lodash@4#merge"})
+	if len(analysis.BlindConstructs) != 1 || analysis.BlindConstructs[0] != "jsprogram:incomplete" {
+		t.Fatalf("an incomplete graph with no explicit gap must still taint negatives, got %v", analysis.BlindConstructs)
+	}
+}
+
+func TestEscapedImportSpecifiers(t *testing.T) {
+	doc := jsprogram.Document{
+		Imports: []jsprogram.Import{
+			{Module: "pkg", Alias: "vuln"},
+			{Module: "safe", Alias: "ok"},
+			{Module: "lodash", Alias: "_"},                         // only ever a call base below, never a value
+			{Module: "reexported", Kind: jsprogram.ImportReexport}, // export ... from 'reexported'
+		},
+		Calls: []jsprogram.Call{
+			// vuln passed as an argument -> pkg escapes; _.each(...) uses _ as a call base, not a value.
+			{Arguments: []jsprogram.Argument{{Value: jsprogram.Reference{Segments: []string{"vuln"}}}}},
+		},
+		Returns: []jsprogram.Return{
+			{Value: jsprogram.Reference{Segments: []string{"ok"}}}, // ok returned -> safe escapes
+		},
+	}
+	got := escapedImportSpecifiers(doc)
+	want := map[string]bool{"pkg": true, "safe": true, "reexported": true}
+	if len(got) != len(want) {
+		t.Fatalf("escaped specifiers = %v; want pkg, safe, reexported", got)
+	}
+	for _, s := range got {
+		if !want[s] {
+			t.Errorf("unexpected escaped specifier %q (lodash used only as a call base must not escape)", s)
+		}
+	}
+}
+
+// TestAnalyzeTaintsEscapedPackageNegative pins that an unreached export of a package whose binding escapes is
+// NOT a sound negative: the per-symbol blind construct keeps it from suppressing, even on a complete graph.
+func TestAnalyzeTaintsEscapedPackageNegative(t *testing.T) {
+	ev := evidenceFrom(wrapperGraph()) // Complete: true, no analysis-wide blind constructs
+	ev.escapedSpecifiers = []string{"lodash"}
+	a, _ := NewInterprocAnalyzer(fakeFactsProvider{available: true})
+	a.cached, a.cachedDir = &ev, "/repo"
+
+	analysis, err := a.Analyze(context.Background(), "/repo", []string{"pkg:npm/lodash@4#merge"})
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if len(analysis.Results) != 1 || analysis.Results[0].Reachable {
+		t.Fatalf("expected one not-reachable result, got %+v", analysis.Results)
+	}
+	if len(analysis.Results[0].BlindConstructs) == 0 {
+		t.Fatal("an escaped package's negative must carry a blind construct so it cannot suppress")
+	}
+	// The analysis-wide blind set stays empty (the graph is Complete); only THIS symbol is tainted.
+	if len(analysis.BlindConstructs) != 0 {
+		t.Fatalf("a complete graph must carry no analysis-wide blind constructs, got %v", analysis.BlindConstructs)
+	}
+}
+
+func TestWithSuppressionToggles(t *testing.T) {
+	r := &InterprocRecorder{}
+	if r.suppress {
+		t.Fatal("suppression must default off")
+	}
+	if r.WithSuppression(true); !r.suppress {
+		t.Fatal("WithSuppression(true) must enable suppression")
+	}
+	if r.WithSuppression(false); r.suppress {
+		t.Fatal("WithSuppression(false) must disable suppression")
+	}
+}
+
 func TestNewInterprocConstructorsValidate(t *testing.T) {
 	if _, err := NewInterprocAnalyzer(nil); err == nil {
 		t.Error("nil provider must error")

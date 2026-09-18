@@ -1,0 +1,73 @@
+{
+  "schema_version": "synapse-codequality-corpus-v1",
+  "cases": [
+    {
+      "name": "go-todo-comment",
+      "language": "go",
+      "fixture": "go-todo",
+      "issues": [
+        { "file": "sample.go", "line": 3, "type": "code_smell" }
+      ]
+    },
+    {
+      "name": "python-command-injection-and-smells",
+      "language": "python",
+      "fixture": "py-smells",
+      "issues": [
+        { "file": "sample.py", "line": 5, "type": "code_smell" },
+        { "file": "sample.py", "line": 6, "type": "vulnerability" },
+        { "file": "sample.py", "line": 13, "type": "code_smell" }
+      ]
+    },
+    {
+      "name": "javascript-eval-and-loose-equality",
+      "language": "javascript",
+      "fixture": "js-smells",
+      "issues": [
+        { "file": "sample.js", "line": 2, "type": "code_smell" },
+        { "file": "sample.js", "line": 3, "type": "security_hotspot" },
+        { "file": "sample.js", "line": 7, "type": "bug" }
+      ]
+    },
+    {
+      "name": "javascript-identical-branches",
+      "language": "javascript",
+      "fixture": "js-identbranch",
+      "issues": [
+        { "file": "sample.js", "line": 3, "type": "bug" }
+      ]
+    },
+    {
+      "name": "ruby-duplicate-when",
+      "language": "ruby",
+      "fixture": "ruby-dup-when",
+      "issues": [
+        { "file": "sample.rb", "line": 5, "type": "bug" }
+      ]
+    },
+    {
+      "name": "go-self-assignment",
+      "language": "go",
+      "fixture": "go-selfassign",
+      "issues": [
+        { "file": "sample.go", "line": 9, "type": "bug" }
+      ]
+    },
+    {
+      "name": "java-identical-branches",
+      "language": "java",
+      "fixture": "java-branches",
+      "issues": [
+        { "file": "Branches.java", "line": 4, "type": "bug" }
+      ]
+    },
+    {
+      "name": "c-dangling-stack-pointer",
+      "language": "c",
+      "fixture": "c-dangling",
+      "issues": [
+        { "file": "sample.c", "line": 3, "type": "bug" }
+      ]
+    }
+  ]
+}

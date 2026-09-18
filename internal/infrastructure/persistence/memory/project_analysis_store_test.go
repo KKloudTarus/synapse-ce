@@ -23,10 +23,12 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 		Issues:         projectanalysis.Counts{ByKind: map[string]int{"sca": 1}, BySeverity: map[string]int{"high": 1}, ByStatus: map[string]int{"open": 1}},
 		InternalIssues: []projectanalysis.Issue{{Key: "key", Kind: finding.KindSCA}},
 		NewCode:        projectanalysis.NewCode{Counts: projectanalysis.Counts{ByKind: map[string]int{"sca": 1}, BySeverity: map[string]int{}, ByStatus: map[string]int{}}},
-		Delta:          &projectanalysis.Delta{Measures: map[string]float64{"coverage": 1}, Ratings: map[string]int{"security": 1}, Issues: projectanalysis.Counts{ByKind: map[string]int{}, BySeverity: map[string]int{}, ByStatus: map[string]int{}}},
-		Coverage:       &measure.CoverageReport{Files: []measure.FileCoverage{{File: "a.go", CoveredLines: 5, TotalLines: 10}}},
-		Duplication:    measure.DuplicationReport{Blocks: []measure.DuplicationBlock{{Occurrences: []measure.CodeRange{{File: "a.go", StartLine: 1, EndLine: 2}}}}},
-		Coupling:       &measure.CouplingReport{Version: measure.CouplingSchemaVersion, Complete: true, Modules: []measure.CouplingModule{{ID: "go:a", Path: "a", Language: "go"}}},
+		Delta: &projectanalysis.Delta{Measures: map[string]float64{"coverage": 1}, Ratings: map[string]int{"security": 1}, Issues: projectanalysis.Counts{ByKind: map[string]int{}, BySeverity: map[string]int{}, ByStatus: map[string]int{}}, Complexity: &projectanalysis.ComplexityDelta{
+			Version: projectanalysis.ComplexityDeltaSchemaVersion, BaselineAnalysisID: "baseline", Nodes: map[string]projectanalysis.ComplexityNodeDelta{"a.go": {Kind: measure.NodeFile, Cyclomatic: -2, Cognitive: 1, Availability: measure.AvailabilityAvailable}},
+		}},
+		Coverage:    &measure.CoverageReport{Files: []measure.FileCoverage{{File: "a.go", CoveredLines: 5, TotalLines: 10}}},
+		Duplication: measure.DuplicationReport{Blocks: []measure.DuplicationBlock{{Occurrences: []measure.CodeRange{{File: "a.go", StartLine: 1, EndLine: 2}}}}},
+		Coupling:    &measure.CouplingReport{Version: measure.CouplingSchemaVersion, Complete: true, Modules: []measure.CouplingModule{{ID: "go:a", Path: "a", Language: "go"}}},
 		BehavioralHotspots: &measure.BehavioralHotspotsReport{
 			Version: measure.BehavioralHotspotsSchemaVersion, Availability: measure.BehavioralPartial,
 			Reason: "1_of_2_files_unmeasured", HeadCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -78,6 +80,7 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	got.BehavioralHotspots.Files[0].Path = "returned.go"
 	got.BehavioralHotspots.Gaps[0].Path = "returned.go"
 	got.Delta.Measures["coverage"] = 0
+	got.Delta.Complexity.Nodes["a.go"] = projectanalysis.ComplexityNodeDelta{Kind: measure.NodeFile, Cyclomatic: 99, Availability: measure.AvailabilityAvailable}
 	got.Snapshot.Nodes[0].Counters.IssuesByType["bug"] = 0
 	*got.Snapshot.NewCodeCoverage.Value = 0.0
 
@@ -90,6 +93,9 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	}
 	if list[0].Snapshot.Nodes[0].Counters.IssuesByType["bug"] != 1 {
 		t.Fatalf("snapshot node counters mutated")
+	}
+	if list[0].Delta == nil || list[0].Delta.Complexity == nil || list[0].Delta.Complexity.Nodes["a.go"].Cyclomatic != -2 {
+		t.Fatalf("complexity delta mutated")
 	}
 	if list[0].Snapshot.NewCodeCoverage.Value == nil || *list[0].Snapshot.NewCodeCoverage.Value != 10.0 {
 		t.Fatalf("snapshot new code coverage mutated")
@@ -189,5 +195,44 @@ func TestProjectAnalysisStoreFiltersByBranch(t *testing.T) {
 	overall, _, err := store.LatestWithResult(ctx, "tenant", "project", "")
 	if err != nil || overall.ID != "main-new" {
 		t.Fatalf("overall latest=%+v err=%v", overall, err)
+	}
+}
+
+func TestProjectAnalysisStorePruneBranchAnalyses(t *testing.T) {
+	ctx := context.Background()
+	store := NewProjectAnalysisStore()
+	// Five analyses on a feature branch, one on main.
+	for i := 1; i <= 5; i++ {
+		a := projectanalysis.Analysis{ID: "feat-" + string(rune('0'+i)), TenantID: "tenant", ProjectID: "project", CreatedAt: time.Unix(int64(i), 0), SourceRef: "feature/x"}
+		if err := store.SaveWithResult(ctx, a, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	main := projectanalysis.Analysis{ID: "main-1", TenantID: "tenant", ProjectID: "project", CreatedAt: time.Unix(9, 0), SourceRef: "main"}
+	if err := store.SaveWithResult(ctx, main, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// keep < 1 is a no-op.
+	if n, err := store.PruneBranchAnalyses(ctx, "tenant", "project", "feature/x", 0); err != nil || n != 0 {
+		t.Fatalf("keep=0 deleted=%d err=%v, want 0", n, err)
+	}
+	// Keep the newest 2 of the feature branch; the other 3 are deleted.
+	n, err := store.PruneBranchAnalyses(ctx, "tenant", "project", "feature/x", 2)
+	if err != nil || n != 3 {
+		t.Fatalf("prune deleted=%d err=%v, want 3", n, err)
+	}
+	list, _, err := store.List(ctx, "tenant", "project", "feature/x", 10, time.Time{}, "")
+	if err != nil || len(list) != 2 || list[0].ID != "feat-5" || list[1].ID != "feat-4" {
+		t.Fatalf("kept feature analyses=%+v err=%v, want the newest two", list, err)
+	}
+	// The main branch is untouched.
+	mainList, _, err := store.List(ctx, "tenant", "project", "main", 10, time.Time{}, "")
+	if err != nil || len(mainList) != 1 || mainList[0].ID != "main-1" {
+		t.Fatalf("main analyses=%+v, prune must not touch another branch", mainList)
+	}
+	// Pruning below the surviving count is a no-op.
+	if n, err := store.PruneBranchAnalyses(ctx, "tenant", "project", "feature/x", 5); err != nil || n != 0 {
+		t.Fatalf("second prune deleted=%d err=%v, want 0", n, err)
 	}
 }

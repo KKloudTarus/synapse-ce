@@ -30,6 +30,30 @@ export interface SizeMeasures {
 export interface ComplexityMeasures {
   cyclomatic: MeasureCountMetric
   cognitive: MeasureCountMetric
+  cyclomaticDelta: MeasureSignedMetric
+  cognitiveDelta: MeasureSignedMetric
+  coverage: ComplexityCoverageMetric
+  baseline: ComplexityBaseline | null
+}
+
+export interface MeasureSignedMetric {
+  availability: MeasureAvailability
+  value: number | null
+  reason: string | null
+}
+
+export interface ComplexityCoverageMetric {
+  version: number
+  eligibleFiles: MeasureCountMetric
+  measuredFiles: MeasureCountMetric
+  availability: MeasureAvailability
+  reason: string | null
+}
+
+export interface ComplexityBaseline {
+  analysisId: string
+  createdAt: string
+  sourceRef: string
 }
 
 export interface CouplingMeasures {
@@ -194,6 +218,40 @@ function mapComplexityMeasures(raw: any): ComplexityMeasures | null {
   return {
     cyclomatic: mapCountMetric(raw.cyclomatic),
     cognitive: mapCountMetric(raw.cognitive),
+    cyclomaticDelta: mapSignedMetric(raw.cyclomatic_delta),
+    cognitiveDelta: mapSignedMetric(raw.cognitive_delta),
+    coverage: mapComplexityCoverage(raw.coverage),
+    baseline: raw.baseline
+      ? { analysisId: raw.baseline.analysis_id ?? '', createdAt: raw.baseline.created_at ?? '', sourceRef: raw.baseline.source_ref ?? '' }
+      : null,
+  }
+}
+
+function mapSignedMetric(raw: any): MeasureSignedMetric {
+  if (!raw) return { availability: 'unavailable', value: null, reason: null }
+  return {
+    availability: raw.availability ?? 'unavailable',
+    value: raw.availability === 'available' && typeof raw.value === 'number' ? raw.value : null,
+    reason: raw.unavailable_reason ?? null,
+  }
+}
+
+function mapComplexityCoverage(raw: any): ComplexityCoverageMetric {
+  if (!raw) {
+    return {
+      version: 0,
+      eligibleFiles: { availability: 'unavailable', value: null, reason: 'complexity_not_available' },
+      measuredFiles: { availability: 'unavailable', value: null, reason: 'complexity_not_available' },
+      availability: 'unavailable',
+      reason: 'complexity_not_available',
+    }
+  }
+  return {
+    version: typeof raw.version === 'number' ? raw.version : 0,
+    eligibleFiles: mapCountMetric(raw.eligible_files),
+    measuredFiles: mapCountMetric(raw.measured_files),
+    availability: raw.availability ?? 'unavailable',
+    reason: raw.unavailable_reason ?? null,
   }
 }
 

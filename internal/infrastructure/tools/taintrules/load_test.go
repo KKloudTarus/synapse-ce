@@ -33,6 +33,7 @@ func TestLoadBytesValid(t *testing.T) {
 	}
 }
 
+//nolint:misspell // The fixture deliberately misspells "class" to exercise strict decoding.
 func TestLoadBytesRejectsUnknownField(t *testing.T) {
 	// An unknown key must be an error, not a silently-empty ruleset.
 	bad := `

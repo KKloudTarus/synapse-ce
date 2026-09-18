@@ -58,8 +58,35 @@ type SizeMeasures struct {
 
 // ComplexityMeasures encapsulates structural complexity metrics.
 type ComplexityMeasures struct {
-	Cyclomatic MeasureCountMetric `json:"cyclomatic"`
-	Cognitive  MeasureCountMetric `json:"cognitive"`
+	Cyclomatic      MeasureCountMetric       `json:"cyclomatic"`
+	Cognitive       MeasureCountMetric       `json:"cognitive"`
+	CyclomaticDelta MeasureSignedMetric      `json:"cyclomatic_delta"`
+	CognitiveDelta  MeasureSignedMetric      `json:"cognitive_delta"`
+	Coverage        ComplexityCoverageMetric `json:"coverage"`
+	Baseline        *ComplexityBaseline      `json:"baseline,omitempty"`
+}
+
+// MeasureSignedMetric is a signed delta. Negative values are meaningful and never clamped.
+type MeasureSignedMetric struct {
+	Availability MeasureAvailabilityState `json:"availability"`
+	Value        *int                     `json:"value"`
+	Reason       *string                  `json:"unavailable_reason"`
+}
+
+// ComplexityCoverageMetric records how much of a node's source scope has usable complexity evidence.
+type ComplexityCoverageMetric struct {
+	Version       int                      `json:"version"`
+	EligibleFiles MeasureCountMetric       `json:"eligible_files"`
+	MeasuredFiles MeasureCountMetric       `json:"measured_files"`
+	Availability  MeasureAvailabilityState `json:"availability"`
+	Reason        *string                  `json:"unavailable_reason"`
+}
+
+// ComplexityBaseline identifies the baseline analysis used for computing complexity deltas.
+type ComplexityBaseline struct {
+	AnalysisID string    `json:"analysis_id"`
+	CreatedAt  time.Time `json:"created_at"`
+	SourceRef  string    `json:"source_ref,omitempty"`
 }
 
 // CouplingMeasures describes incoming and outgoing first-party module

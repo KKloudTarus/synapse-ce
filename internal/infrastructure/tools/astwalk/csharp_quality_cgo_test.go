@@ -156,3 +156,109 @@ func TestQualityForCSharpExhaustivePatternSwitch(t *testing.T) {
 		t.Errorf("missing-switch-default lines = %v, want exactly one on the guarded-only switch (line >= 14); findings=%+v", missingLines, got.Findings)
 	}
 }
+
+// TestQualityForCSharpThrowGeneric pins csharp-ast-throw-generic-exception: throwing Exception,
+// SystemException, or ApplicationException (including a namespace-qualified form) is flagged, while a
+// specific exception type and a bare rethrow are not (SonarQube S112).
+func TestQualityForCSharpThrowGeneric(t *testing.T) {
+	root := t.TempDir()
+	source := `namespace App {
+    class Thrower {
+        void A() { throw new Exception("a"); }
+        void B() { throw new System.ApplicationException(); }
+        void C() { throw new SystemException(); }
+        void D() { throw new InvalidOperationException("d"); }
+        void E() { try { A(); } catch (Exception e) { throw; } }
+    }
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "T.cs"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	var lines []int
+	for _, f := range got.Findings {
+		if f.Rule == "csharp-ast-throw-generic-exception" {
+			lines = append(lines, f.Line)
+		}
+	}
+	// Lines 3, 4, 5 are the generic throws; line 6 (InvalidOperationException) and line 7 (rethrow) are not.
+	want := map[int]bool{3: true, 4: true, 5: true}
+	if len(lines) != len(want) {
+		t.Fatalf("throw-generic lines = %v, want keys %v", lines, want)
+	}
+	for _, l := range lines {
+		if !want[l] {
+			t.Errorf("unexpected throw-generic finding at line %d (specific exception or rethrow must not fire)", l)
+		}
+	}
+}
+
+// TestQualityForCSharpRethrow pins csharp-ast-rethrow-loses-stacktrace: `throw ex;` where ex is the caught
+// exception resets the stack trace and is flagged, while a bare `throw;`, throwing a new wrapping exception,
+// and throwing an unrelated variable are not (SonarQube S3445 / CA2200).
+func TestQualityForCSharpRethrow(t *testing.T) {
+	root := t.TempDir()
+	source := `namespace App {
+    class Handler {
+        void Bad() { try { X(); } catch (System.Exception ex) { throw ex; } }
+        void Good() { try { X(); } catch (System.Exception ex) { throw; } }
+        void Wrap() { try { X(); } catch (System.Exception ex) { throw new System.InvalidOperationException("y", ex); } }
+        void X() {}
+    }
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "R.cs"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	var lines []int
+	for _, f := range got.Findings {
+		if f.Rule == "csharp-ast-rethrow-loses-stacktrace" {
+			lines = append(lines, f.Line)
+		}
+	}
+	if len(lines) != 1 || lines[0] != 3 {
+		t.Fatalf("rethrow-loses-stacktrace lines = %v, want [3] (only `throw ex;` on line 3)", lines)
+	}
+}
+
+// TestQualityForCSharpUnusedCatchVar pins csharp-ast-unused-catch-variable: a catch clause whose bound
+// exception variable is never used in a non-empty block is flagged; a used variable, a binding-less catch,
+// and an empty catch (owned by empty-catch) are not.
+func TestQualityForCSharpUnusedCatchVar(t *testing.T) {
+	root := t.TempDir()
+	source := `namespace App {
+    class H {
+        void Unused() { try { X(); } catch (System.IO.IOException e) { Retry(); } }
+        void Used() { try { X(); } catch (System.IO.IOException e) { Log(e); } }
+        void NoBinding() { try { X(); } catch (System.IO.IOException) { Retry(); } }
+        void X() {}
+        void Retry() {}
+        void Log(System.Exception e) {}
+    }
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "U.cs"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	var lines []int
+	for _, f := range got.Findings {
+		if f.Rule == "csharp-ast-unused-catch-variable" {
+			lines = append(lines, f.Line)
+		}
+	}
+	if len(lines) != 1 || lines[0] != 3 {
+		t.Fatalf("unused-catch-variable lines = %v, want [3]", lines)
+	}
+}
