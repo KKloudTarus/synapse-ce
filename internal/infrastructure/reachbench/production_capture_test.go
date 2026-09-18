@@ -372,8 +372,42 @@ func TestJVMCoarseCoverageDoesNotTreatUnreferencedAsDeadCode(t *testing.T) {
 	if coverage := jvmCoarseCoverage(measurement.FixtureLocatorPackageDependency, sbom.ReachabilityReachable); coverage.Status != measurement.CoverageComplete {
 		t.Fatalf("reachable JVM coarse coverage = %#v", coverage)
 	}
+	if outcome := jvmCoarseOutcome(sbom.ReachabilityReachable); outcome != measurement.OutcomeReachable {
+		t.Fatalf("reachable JVM coarse outcome = %q", outcome)
+	}
 	if coverage := jvmCoarseCoverage(measurement.FixtureLocatorPackageDependency, sbom.ReachabilityUnreferenced); coverage.Status != measurement.CoveragePartial || coverage.Reasons[0].Code != measurement.CoverageReasonOpaque {
 		t.Fatalf("unreferenced JVM coarse coverage = %#v", coverage)
+	}
+	if outcome := jvmCoarseOutcome(sbom.ReachabilityUnreferenced); outcome != measurement.OutcomeConditionallyReachable {
+		t.Fatalf("unreferenced JVM coarse outcome = %q", outcome)
+	}
+}
+
+func TestJVMCoarseNegativeDoesNotPersistSuppression(t *testing.T) {
+	lifecycle, err := newCaptureLifecycle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := reachproof.NewJVMVerdictCoordinator(lifecycle.judgments, lifecycle.audit, lifecycle.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := coordinator.WithRaiseOnly().RecordVerdicts(context.Background(), productionCaptureEngagementID, []ports.JVMReachabilityVerdict{{
+		FindingID: "jvm-unreferenced",
+		Reachable: false,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recorded != 0 {
+		t.Fatalf("recorded JVM coarse negative judgments = %d, want 0", recorded)
+	}
+	judgments, err := lifecycle.judgments.List(context.Background(), productionCaptureEngagementID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(judgments) != 0 {
+		t.Fatalf("persisted JVM coarse negative judgments = %#v", judgments)
 	}
 }
 

@@ -746,17 +746,18 @@ func runJVMCoarse(ctx context.Context, _ *ProductionCapture, fixture Materialize
 	if coverage.Status == measurement.CoverageUnavailable {
 		return execution{invoked: true, coverage: coverage, detail: "jvm-coarse"}, nil
 	}
+	outcome := jvmCoarseOutcome(components[0].Reachability)
 	coordinator, err := reachproof.NewJVMVerdictCoordinator(lifecycle.judgments, lifecycle.audit, lifecycle.clock)
 	if err != nil {
 		return execution{}, err
 	}
-	_, err = coordinator.RecordVerdicts(ctx, productionCaptureEngagementID, []ports.JVMReachabilityVerdict{{
+	_, err = coordinator.WithRaiseOnly().RecordVerdicts(ctx, productionCaptureEngagementID, []ports.JVMReachabilityVerdict{{
 		FindingID: shared.ID(resolved.Subject.ID), Reachable: components[0].Reachability == sbom.ReachabilityReachable,
 	}})
 	if err != nil {
 		return execution{}, fmt.Errorf("record JVM coarse verdict: %w", err)
 	}
-	return execution{invoked: true, coverage: coverage, lifecycleRecorded: true, detail: "jvm-coarse"}, nil
+	return execution{invoked: true, coverage: coverage, lifecycleRecorded: true, outcome: &outcome, detail: "jvm-coarse"}, nil
 }
 
 func jvmCoarseCoverage(locator measurement.FixtureLocatorKind, reachability string) measurement.ObservedCoverage {
@@ -771,6 +772,13 @@ func jvmCoarseCoverage(locator measurement.FixtureLocatorKind, reachability stri
 	default:
 		return unavailableCoverage(measurement.CoverageReasonUnsupported)
 	}
+}
+
+func jvmCoarseOutcome(reachability string) measurement.Outcome {
+	if reachability == sbom.ReachabilityReachable {
+		return measurement.OutcomeReachable
+	}
+	return measurement.OutcomeConditionallyReachable
 }
 
 func runJVMTier2(ctx context.Context, capture *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
