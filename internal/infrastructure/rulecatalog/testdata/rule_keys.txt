@@ -813,6 +813,9 @@ cs-zip-extract-slip
 cs-zip-slip-fullname
 csharp-ast-empty-catch
 csharp-ast-missing-switch-default
+csharp-ast-rethrow-loses-stacktrace
+csharp-ast-throw-generic-exception
+csharp-ast-unused-catch-variable
 css:declaration-block-too-large
 css:duplicate-font-face
 css:duplicate-import
@@ -2651,6 +2654,7 @@ rb:class-variable
 rb:cognitive-complexity
 rb:command-injection
 rb:command-tainted-argument
+rb:duplicate-when-condition
 rb:dynamic-constantize
 rb:dynamic-regexp
 rb:dynamic-send

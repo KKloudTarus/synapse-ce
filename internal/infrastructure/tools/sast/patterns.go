@@ -149,6 +149,199 @@ func skipGoTodoMarker(line string) bool {
 	return strings.Contains(line, "context.TODO(") || strings.Contains(line, "ctx.TODO(")
 }
 
+// phpReturnStmt matches a whole `return ...;` statement (the keyword is case-insensitive in PHP).
+var phpReturnStmt = regexp.MustCompile(`(?i)\breturn\b[^;]*;`)
+
+// phpBlockContinuationWord is a keyword that legitimately follows a return statement without being
+// unreachable code: a switch case label, an else/elseif branch, an alternative-syntax block terminator,
+// or an exception handler. When one of these follows the return, the token after it is control flow, not
+// dead code.
+var phpBlockContinuationWord = map[string]bool{
+	"else": true, "elseif": true, "case": true, "default": true,
+	"endif": true, "endswitch": true, "endforeach": true, "endwhile": true,
+	"endfor": true, "catch": true, "finally": true,
+}
+
+// skipPhpUnreachableAfterReturn keeps php:unreachable-after-return off the common shape where a return is
+// the last statement of its block. php:unreachable-after-return runs over a joined PHP statement, so its
+// regex would otherwise treat the block-closing brace or the next switch/else branch after a return as
+// unreachable code (a false positive on nearly every PHP function with `if (...) { return X; }`). The rule
+// regex already excludes a closing brace or comment as the following token; this filter additionally skips
+// a control-flow continuation keyword, so the rule fires only when a real statement follows the return in
+// the same block (e.g. `return $x; echo $y;`).
+//
+// It analyses the statement with string literals and comments masked, so a semicolon or keyword inside a
+// returned string literal (e.g. `return "a; b";`, `return "x;case";`) is never mistaken for statement
+// structure; that also suppresses the rule's own false match on such a return. It inspects the first return
+// in the joined statement: when a later branch's return has dead code after it but the first return is
+// followed by a `case`/`else` continuation, the statement is suppressed rather than reported at the wrong
+// return, which a line-based regex cannot anchor correctly; that residual miss is preferred over a finding
+// pointing at a clean return. text is the joined statement and may span lines.
+func skipPhpUnreachableAfterReturn(text string) bool {
+	if commentOnlyLine(text) {
+		return true
+	}
+	masked := phpMaskLiterals(text)
+	loc := phpReturnStmt.FindStringIndex(masked)
+	if loc == nil {
+		return true
+	}
+	if phpBracelessGuard.MatchString(masked[:loc[0]]) {
+		return true // the return is the brace-less body of `if (...)`/`while (...)`/`else`: what follows is reachable
+	}
+	rest := strings.TrimLeft(masked[loc[1]:], " \t\r\n")
+	if rest == "" {
+		return true // nothing after the return
+	}
+	c := rest[0]
+	isStatementStart := c == '_' || c == '$' || c == '\\' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	if !isStatementStart {
+		return true // a closing brace/paren, PHP close tag, etc. follows: not dead code
+	}
+	// A real statement follows unless it is a control-flow continuation keyword (case/else/end*/catch/...).
+	return phpBlockContinuationWord[strings.ToLower(phpLeadingIdentWord(rest))]
+}
+
+// phpBracelessGuard matches a control-flow header with no opening brace immediately before a return, i.e. a
+// single-statement `if (...) return X;`, `elseif (...) return X;`, `while (...) return X;`, `for (...)`,
+// `foreach (...)`, or a bare `else return X;`. In that shape the return is conditional and the statement
+// after it is reachable, so php:unreachable-after-return must not fire. A braced guard (`if (...) { return
+// X; }`) is handled separately by the closing brace that follows the return. The `[^{}]` inside the header
+// keeps a braced block on the same joined statement from being read as a guard.
+var phpBracelessGuard = regexp.MustCompile(`(?i)\b(?:if|elseif|while|for|foreach)\s*\([^{}]*\)\s*$|(?i)\belse\s*$`)
+
+// phpMaskLiterals returns s with the contents of PHP string literals ('...', "...") and comments (//, #,
+// /* */) overwritten by spaces, preserving length and byte offsets. It lets a semicolon or keyword inside a
+// literal or comment be ignored when reading statement structure. Backslash escapes inside quotes are
+// honoured; heredoc/nowdoc (rare inside a return expression) are left as-is.
+func phpMaskLiterals(s string) string {
+	b := []byte(s)
+	out := append([]byte(nil), b...)
+	blank := func(i, j int) {
+		for ; i < j && i < len(out); i++ {
+			if out[i] != '\n' {
+				out[i] = ' '
+			}
+		}
+	}
+	i := 0
+	for i < len(b) {
+		switch c := b[i]; {
+		case c == '"' || c == '\'':
+			j := i + 1
+			for j < len(b) {
+				if b[j] == '\\' && j+1 < len(b) {
+					j += 2
+					continue
+				}
+				if b[j] == c {
+					j++
+					break
+				}
+				j++
+			}
+			blank(i+1, min(j-1, len(b)))
+			i = j
+		case c == '/' && i+1 < len(b) && b[i+1] == '/', c == '#':
+			j := i
+			for j < len(b) && b[j] != '\n' {
+				j++
+			}
+			blank(i, j)
+			i = j
+		case c == '/' && i+1 < len(b) && b[i+1] == '*':
+			j := i + 2
+			for j < len(b) && !(b[j] == '*' && j+1 < len(b) && b[j+1] == '/') {
+				j++
+			}
+			end := min(j+2, len(b))
+			blank(i, end)
+			i = end
+		case c == '<' && i+2 < len(b) && b[i+1] == '<' && b[i+2] == '<':
+			// heredoc/nowdoc: <<< [ws] ['"]?LABEL['"]? \n body \n [ws]LABEL. Blank the body and the
+			// closing label so a `;` or keyword inside the body is not read as statement structure.
+			j := i + 3
+			for j < len(b) && (b[j] == ' ' || b[j] == '\t') {
+				j++
+			}
+			if j < len(b) && (b[j] == '\'' || b[j] == '"') {
+				j++
+			}
+			labelStart := j
+			for j < len(b) && phpIdentByte(b[j]) {
+				j++
+			}
+			label := string(b[labelStart:j])
+			if label == "" || (b[labelStart] >= '0' && b[labelStart] <= '9') {
+				i += 3 // labels do not start with a digit: not a heredoc opener
+				continue
+			}
+			for j < len(b) && b[j] != '\n' {
+				j++ // rest of the opener line (a nowdoc quote, etc.)
+			}
+			end := len(b)
+			for k := j; k < len(b); k++ {
+				if b[k] != '\n' {
+					continue
+				}
+				p := k + 1
+				for p < len(b) && (b[p] == ' ' || b[p] == '\t') {
+					p++
+				}
+				if p+len(label) <= len(b) && string(b[p:p+len(label)]) == label &&
+					(p+len(label) >= len(b) || !phpIdentByte(b[p+len(label)])) {
+					end = p + len(label)
+					break
+				}
+			}
+			blank(j, end)
+			i = end
+		default:
+			i++
+		}
+	}
+	return string(out)
+}
+
+// phpIdentByte reports whether b is an ASCII identifier byte (letter, digit, or underscore).
+func phpIdentByte(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+// phpLeadingIdentWord returns the leading run of ASCII identifier characters (letters, digits, underscore)
+// at the start of s, or the empty string when s begins with any other byte.
+func phpLeadingIdentWord(s string) string {
+	i := 0
+	for i < len(s) && phpIdentByte(s[i]) {
+		i++
+	}
+	return s[:i]
+}
+
+// looseEqNullIdiom matches the `== null` / `!= null` comparison (either operand order). `x == null`
+// is the canonical way to test for null-or-undefined in one check, so it is not a coercion bug.
+var looseEqNullIdiom = regexp.MustCompile(`(?:[^=!<>]|^)[!=]=\s*null\b|\bnull\s*[!=]=[^=]`)
+
+// looseEqAny matches any loose `==` / `!=` (not `===` / `!==`), used to tell a null-only line apart
+// from one that also carries a real coercion comparison.
+var looseEqAny = regexp.MustCompile(`(?:[^=!<>]|^)([!=]=)[^=]`)
+
+// skipJsLooseEqNullIdiom keeps js-eqeqeq off the `== null` / `!= null` idiom (which js-eq-null already
+// covers as a maintainability smell) while still flagging every other loose comparison on the line.
+// It skips only when the line's loose comparisons are all null-idiom: a line mixing `a == b` with
+// `c == null` still reports the real coercion bug. Comment-only lines are skipped as before. This
+// mirrors eslint's eqeqeq `{ "null": "ignore" }` default.
+func skipJsLooseEqNullIdiom(line string) bool {
+	if commentOnlyLine(line) {
+		return true
+	}
+	if !looseEqNullIdiom.MatchString(line) {
+		return false
+	}
+	stripped := looseEqNullIdiom.ReplaceAllString(line, " ")
+	return !looseEqAny.MatchString(stripped)
+}
+
 // skipCommentOrPlaceholderSecret is the hardcoded-credential filter: obvious non-secrets plus plain
 // comment lines, where a credential-shaped mention is documentation rather than a leak.
 func skipCommentOrPlaceholderSecret(line string) bool {

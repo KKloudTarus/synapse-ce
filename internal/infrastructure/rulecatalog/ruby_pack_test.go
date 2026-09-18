@@ -24,8 +24,8 @@ func TestRubyPackSeedContract(t *testing.T) {
 			rubyCount++
 		}
 	}
-	if rubyCount != 40 {
-		t.Fatalf("Ruby catalog rules = %d, want 40", rubyCount)
+	if rubyCount != 41 {
+		t.Fatalf("Ruby catalog rules = %d, want 41", rubyCount)
 	}
 
 	wantSeverity := map[rule.Key]shared.Severity{

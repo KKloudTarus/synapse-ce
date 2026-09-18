@@ -80,6 +80,96 @@ end
 	}
 }
 
+func TestRubyDuplicateWhenCondition(t *testing.T) {
+	scan := func(name, source string) []QualityFinding {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := QualityFor(context.Background(), dir)
+		if err != nil {
+			t.Fatalf("QualityFor: %v", err)
+		}
+		return got.Findings
+	}
+	dupLines := func(fs []QualityFinding) []int {
+		var ls []int
+		for _, f := range fs {
+			if f.Rule == "rb:duplicate-when-condition" {
+				ls = append(ls, f.Line)
+			}
+		}
+		return ls
+	}
+	countDup := func(fs []QualityFinding) int { return len(dupLines(fs)) }
+
+	// A duplicated when condition fires exactly once, anchored at the duplicate branch (not the first).
+	// dup.rb: `when 1` on line 3 then line 4, so the finding is at line 4.
+	if got := dupLines(scan("dup.rb", "def f(x)\n  case x\n  when 1 then 'a'\n  when 1 then 'b'\n  else 'c'\n  end\nend\n")); len(got) != 1 || got[0] != 4 {
+		t.Errorf("literal duplicate when: got lines %v, want [4]", got)
+	}
+	// multi.rb: `when 2, 3` (line 3) then `when 3` (line 4); the finding anchors at the duplicate on line 4.
+	if got := dupLines(scan("multi.rb", "def f(x)\n  case x\n  when 2, 3 then 'a'\n  when 3 then 'b'\n  end\nend\n")); len(got) != 1 || got[0] != 4 {
+		t.Errorf("multi-value duplicate when: got lines %v, want [4]", got)
+	}
+	if n := countDup(scan("sym.rb", "def f(s)\n  case s\n  when :active then 1\n  when :active then 2\n  end\nend\n")); n != 1 {
+		t.Errorf("symbol duplicate when: got %d findings, want 1", n)
+	}
+
+	// Distinct conditions and the same literal reused across two independent case expressions do not fire.
+	if n := countDup(scan("clean.rb", "def f(x)\n  case x\n  when 1 then 'a'\n  when 2 then 'b'\n  else 'c'\n  end\nend\n")); n != 0 {
+		t.Errorf("distinct when conditions: got %d findings, want 0", n)
+	}
+	if n := countDup(scan("two.rb", "def f(x, y)\n  case x\n  when 1 then 'a'\n  end\n  case y\n  when 1 then 'b'\n  end\nend\n")); n != 0 {
+		t.Errorf("same literal in separate case expressions: got %d findings, want 0", n)
+	}
+}
+
+func TestRubyDuplicateWhenCatalogParity(t *testing.T) {
+	ctx := context.Background()
+	cat, err := rulecatalog.Default()
+	if err != nil {
+		t.Fatalf("rulecatalog.Default: %v", err)
+	}
+	catalogRule, err := cat.Get(ctx, rule.Key("rb:duplicate-when-condition"))
+	if err != nil {
+		t.Fatalf("rb:duplicate-when-condition missing from catalog: %v", err)
+	}
+	if catalogRule.Type != rule.TypeBug || catalogRule.Detection != rule.DetectionAST {
+		t.Fatalf("catalog rule type=%q detection=%q, want bug/AST", catalogRule.Type, catalogRule.Detection)
+	}
+	scan := func(name, source string) []QualityFinding {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := QualityFor(ctx, dir)
+		if err != nil {
+			t.Fatalf("QualityFor: %v", err)
+		}
+		return got.Findings
+	}
+	found := false
+	for _, f := range scan("noncompliant.rb", catalogRule.NoncompliantExample) {
+		if f.Rule == string(catalogRule.Key) {
+			found = true
+			if f.Title != catalogRule.Name || f.Severity != string(catalogRule.DefaultSeverity) {
+				t.Fatalf("runtime/catalog mismatch: title=%q sev=%q vs %q/%q", f.Title, f.Severity, catalogRule.Name, catalogRule.DefaultSeverity)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("catalog noncompliant example did not trigger rb:duplicate-when-condition")
+	}
+	for _, f := range scan("compliant.rb", catalogRule.CompliantExample) {
+		if f.Rule == string(catalogRule.Key) {
+			t.Fatal("catalog compliant example triggered rb:duplicate-when-condition")
+		}
+	}
+}
+
 func TestRubyASTCatalogParity(t *testing.T) {
 	ctx := context.Background()
 	cat, err := rulecatalog.Default()

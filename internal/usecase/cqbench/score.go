@@ -159,6 +159,9 @@ var defaultCorpusJSON []byte
 //go:embed corpus/floors.json
 var defaultFloorsJSON []byte
 
+//go:embed corpus/floors_ast.json
+var defaultFloorsASTJSON []byte
+
 // DefaultCorpus returns the checked-in corpus. It panics only on a repository-authoring error; tests call
 // LoadCorpus directly when they want an error instead of a programming-contract failure.
 func DefaultCorpus() Corpus {
@@ -169,11 +172,27 @@ func DefaultCorpus() Corpus {
 	return c
 }
 
-// DefaultFloors returns the checked-in recall ratchet.
+// DefaultFloors returns the checked-in recall ratchet for a run WITHOUT the synapse-ast sidecar: the
+// deterministic rule engine plus duplication and pattern SAST only. Cells whose full recall depends on the
+// AST detectors (bare-except, identical-branches) are floored at the subset those non-AST layers still
+// reach, so the ratchet stays green in a plain `go test ./...` that never builds the cgo sidecar.
 func DefaultFloors() Floors {
 	f, err := LoadFloors(bytes.NewReader(defaultFloorsJSON))
 	if err != nil {
 		panic("cqbench: embedded floors are invalid: " + err.Error())
+	}
+	return f
+}
+
+// DefaultFloorsAST returns the checked-in recall ratchet for a run WITH the synapse-ast sidecar present,
+// i.e. the full shipped engine. It is stricter than DefaultFloors on the AST-dependent cells and is the
+// ratchet the code-quality benchmark workflow enforces after building the sidecar. Running the owned engine
+// against these floors without the sidecar is expected to breach them; callers select the floor set by
+// whether the sidecar is available.
+func DefaultFloorsAST() Floors {
+	f, err := LoadFloors(bytes.NewReader(defaultFloorsASTJSON))
+	if err != nil {
+		panic("cqbench: embedded AST floors are invalid: " + err.Error())
 	}
 	return f
 }

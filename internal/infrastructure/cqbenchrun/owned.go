@@ -8,6 +8,7 @@ package cqbenchrun
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,13 @@ const OwnedEngine = "synapse-owned"
 // (SYNAPSE_AST_BIN), the complexity and AST bug/structural detectors. Without the sidecar those degrade to
 // nothing, so a corpus case that depends on AST-only detections is measured as a miss rather than an error.
 //
+// Each fixture is materialized into a fresh temp directory before analysis. The corpus fixtures live under a
+// `testdata/` tree (so the Go toolchain never compiles the Go fixture), but the AST layer's source walker
+// classifies any path containing `testdata/` as vendored and skips it (go-enry's IsVendor), which would
+// silently blind every AST detector on every fixture. Copying the tree to a realistic, non-vendored path
+// measures the engine's true detection capability the way it runs over a checked-out repository, not the
+// walker's vendor policy.
+//
 // The finding->issue-type mapping goes through the rule catalog: a finding is scored under the
 // SonarQube-compatible rule.Type the catalog assigns its rule key. A finding with no rule key, a key absent
 // from the catalog, or (defensively) an unmappable type is skipped and counted, never silently dropped.
@@ -50,10 +58,19 @@ func RunOwned(ctx context.Context, corpus cqbench.Corpus, fixturesDir string) ([
 		codequality.WithStructuralAnalyzer(astProvider),
 	)
 	sastEngine := sast.New() // pattern SAST adds the vulnerability/security_hotspot axis the head-to-head needs
+	workdir, err := os.MkdirTemp("", "cqbench-owned-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create benchmark workdir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(workdir) }()
 	skipped := map[string]int{}
 	out := make([]cqbench.CaseObservation, 0, len(corpus.Cases))
 	for _, c := range corpus.Cases {
-		root := filepath.Join(fixturesDir, filepath.FromSlash(c.Fixture))
+		src := filepath.Join(fixturesDir, filepath.FromSlash(c.Fixture))
+		root := filepath.Join(workdir, filepath.FromSlash(c.Fixture))
+		if err := copyTree(src, root); err != nil {
+			return nil, nil, fmt.Errorf("materialize fixture %q: %w", c.Name, err)
+		}
 		findings, analyzeErr := svc.Analyze(ctx, root)
 		if analyzeErr != nil {
 			return nil, nil, fmt.Errorf("owned analyze %q: %w", c.Name, analyzeErr)
@@ -85,6 +102,72 @@ func RunOwned(ctx context.Context, corpus cqbench.Corpus, fixturesDir string) ([
 		out = append(out, cqbench.CaseObservation{Case: c.Name, Issues: dedupIssues(issues)})
 	}
 	return out, skipped, nil
+}
+
+// SidecarAvailable reports whether the synapse-ast sidecar (SYNAPSE_AST_BIN, else PATH discovery) is
+// present and functional. The benchmark selects its ratchet floor set with this: the full engine's recall
+// (DefaultFloorsAST) is enforced only when the sidecar can actually run, so a plain `go test ./...` that
+// never builds the cgo sidecar is gated by the non-AST floors (DefaultFloors) instead of failing. It probes
+// FunctionCounts over a throwaway one-file tree; any error or an unavailable backend reads as absent.
+func SidecarAvailable(ctx context.Context) bool {
+	dir, err := os.MkdirTemp("", "cqbench-probe-*")
+	if err != nil {
+		return false
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	if err := os.WriteFile(filepath.Join(dir, "probe.go"), []byte("package p\n\nfunc F() {}\n"), 0o644); err != nil {
+		return false
+	}
+	_, available, err := ast.New(os.Getenv("SYNAPSE_AST_BIN")).FunctionCounts(ctx, dir)
+	return err == nil && available
+}
+
+// copyTree copies the regular files under src into dst (created as needed), preserving the relative layout.
+// It is used to materialize a corpus fixture into a non-vendored working directory before analysis. The
+// corpus fixtures are small, first-party, trusted files, so this is a plain recursive copy: symlinks and
+// non-regular entries are skipped, and file contents are streamed to keep memory flat.
+func copyTree(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		switch {
+		case info.IsDir():
+			return os.MkdirAll(target, 0o755)
+		case info.Mode().IsRegular():
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			return copyFile(path, target)
+		default:
+			return nil // skip symlinks, devices, sockets: fixtures are plain source files
+		}
+	})
+}
+
+// copyFile streams src to dst, creating dst with 0o644.
+func copyFile(src, dst string) (err error) {
+	in, err := os.Open(src) // #nosec G304 -- first-party corpus fixture under the benchmark's own testdata tree
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 // sastIssueType maps a pattern-SAST raw finding's RuleType to a scorecard type. An empty RuleType is a

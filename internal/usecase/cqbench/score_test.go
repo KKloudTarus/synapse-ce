@@ -327,6 +327,13 @@ func TestDefaultCorpusAndFloorsValid(t *testing.T) {
 	if f.Recall == nil {
 		t.Error("default floors should decode a (possibly empty) recall map")
 	}
+	// Validate the sidecar-present floor set unconditionally: it is otherwise only decoded when the
+	// synapse-ast sidecar is available (the benchmark CI job), so a typo in floors_ast.json would pass a
+	// plain `go test ./...` and only panic in that job.
+	fAST := DefaultFloorsAST()
+	if fAST.Recall == nil {
+		t.Error("default AST floors should decode a (possibly empty) recall map")
+	}
 	// The default corpus must evaluate cleanly against a perfect observation set (digest + schema wiring).
 	obs := make([]CaseObservation, 0, len(c.Cases))
 	for _, cs := range c.Cases {

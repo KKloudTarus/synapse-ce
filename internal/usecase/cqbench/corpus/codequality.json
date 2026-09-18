@@ -28,6 +28,46 @@
         { "file": "sample.js", "line": 3, "type": "security_hotspot" },
         { "file": "sample.js", "line": 7, "type": "bug" }
       ]
+    },
+    {
+      "name": "javascript-identical-branches",
+      "language": "javascript",
+      "fixture": "js-identbranch",
+      "issues": [
+        { "file": "sample.js", "line": 3, "type": "bug" }
+      ]
+    },
+    {
+      "name": "ruby-duplicate-when",
+      "language": "ruby",
+      "fixture": "ruby-dup-when",
+      "issues": [
+        { "file": "sample.rb", "line": 5, "type": "bug" }
+      ]
+    },
+    {
+      "name": "go-self-assignment",
+      "language": "go",
+      "fixture": "go-selfassign",
+      "issues": [
+        { "file": "sample.go", "line": 9, "type": "bug" }
+      ]
+    },
+    {
+      "name": "java-identical-branches",
+      "language": "java",
+      "fixture": "java-branches",
+      "issues": [
+        { "file": "Branches.java", "line": 4, "type": "bug" }
+      ]
+    },
+    {
+      "name": "c-dangling-stack-pointer",
+      "language": "c",
+      "fixture": "c-dangling",
+      "issues": [
+        { "file": "sample.c", "line": 3, "type": "bug" }
+      ]
     }
   ]
 }
