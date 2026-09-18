@@ -45,11 +45,11 @@ SYNAPSE_JSREACH_TIER2_ENABLED=true
 SYNAPSE_JVM_REACH_TIER2_POINTS_TO_ENABLED=true
 ```
 
-Local runs are useful for diagnostic development, but only the trusted route can produce authoritative baseline or candidate evidence.
+Local runs are useful for diagnostic development and require no review trust material. An authoritative baseline or candidate route additionally requires externally provisioned detached-review trust and signatures; a controller envelope alone is never authority.
 
 ## GitHub routing and controller input
 
-`.github/workflows/reachability-benchmark.yml` runs for pull requests to `main`, pushes to `main`, a nightly off-minute schedule, and manual dispatch without inputs. It derives one full lower-case source SHA from the event. Pull requests never use the self-hosted trusted runner.
+`.github/workflows/reachability-benchmark.yml` runs for pull requests to `main`, pushes to `main`, a nightly off-minute schedule, and manual dispatch without inputs. It derives one full lower-case source SHA from the event. Pull requests never use the self-hosted trusted runner. Current pre-merge runs remain diagnostic: this repository has no independent pre-merge workflow verifier or bootstrapped workflow trust root. This change does not alter that workflow or claim otherwise.
 
 For non-pull-request events, the route job permits trusted execution only when all reachability-specific repository settings agree exactly:
 
@@ -66,14 +66,60 @@ baseline-<source-sha>.json
 candidate-<source-sha>.json
 ```
 
-It validates the external root, its `trusted-bundle/` directory, and the derived regular envelope for missing files, symlinks, and non-regular entries. It copies only the validated bundle and envelope beneath:
+It validates the external root, its `trusted-bundle/` directory, the derived regular envelope, and a closed route-specific `authority/` inventory. Every staged authority entry must be an ordinary, non-symlink file below the external controller root, must fit the JSON size bound, and must appear exactly once in the route inventory; missing, extra, escaped, reparse, or private-key entries fail closed. It copies only the validated bundle, envelope, and authority files beneath:
 
 ```text
 $RUNNER_TEMP/synapse-reachability-controller/trusted-bundle/
 $RUNNER_TEMP/synapse-reachability-controller/envelopes/
+$RUNNER_TEMP/synapse-reachability-controller/authority/
 ```
 
 The benchmark receives the staged envelope through `SYNAPSE_REACHABILITY_CONTROLLER_ENVELOPE`; it does not receive controller source paths, identities, purposes, final modes, or run keys as operator inputs. The external controller root is never published.
+
+### Curating controller authority
+
+Use the separate curator only to construct controller material after reviewed evidence exists. It derives source identity from the current checkout; it never accepts a SHA, tree, run key, corpus, oracle, purpose, or final mode.
+
+```bash
+go run ./cmd/synapse-reachability-authority prepare-baseline \
+  /secure/reviewed-baseline-evidence.json /secure/baseline-authority
+```
+
+The output directory must not exist; its real parent must already exist, and the destination must be outside the inspected checkout. The command requires a pristine non-shallow checkout with the fixed baseline revision in its ancestry. It validates, references, and stages the supplied canonical review document, then atomically installs an unsigned controller containing `trusted-bundle/`, `authority/baseline-review-evidence.json`, and `envelopes/baseline-<head>.json` without replacing an existing destination. It does not create approval or a signature.
+
+After a protected-baseline lifecycle has published its sanitized leaf, derive the commit-ready candidate authority from that publication and the generated baseline-authority root:
+
+```bash
+go run ./cmd/synapse-reachability-authority derive-candidate \
+  /secure/published-baseline /secure/baseline-authority \
+  /secure/reviewed-candidate-evidence.json /secure/reviewed-disposition-evidence.json \
+  /secure/candidate-authority
+```
+
+The curator replays the sanitized publication, validates the original allowlist, and atomically installs only the candidate authority files intended for the checked-in trusted root. Those files include the trusted bundle, baseline lifecycle material, canonical review and disposition evidence copies, and `authority/candidate-assets-provenance.json`. It writes no candidate envelope, signature, trust policy, or private key; its provenance has no envelope reference. Review and disposition actor text is descriptive only. Each curator destination must not already exist.
+
+Install those files at `internal/usecase/reachbench/trusted` in the final checkout and commit them. From that final pristine checkout, create the separately staged controller material:
+
+```bash
+go run ./cmd/synapse-reachability-authority prepare-candidate \
+  /secure/candidate-controller
+```
+
+`prepare-candidate` accepts no authority-source path. It reads only ordinary `100644` blobs at the fixed `internal/usecase/reachbench/trusted` path in the captured final commit tree, rejects altered index state, replacement refs, and legacy graft files, then revalidates the pristine commit and tree immediately before atomically installing the output. It reconstructs those committed bytes beneath `trusted-bundle/`, stages canonical baseline review and disposition documents, and adds `authority/candidate-review-subject.json` plus `envelopes/candidate-<final-head>.json`. The candidate-review subject binds the repository identity, final harness commit/tree, fixed authority path, committed blob inventory digest, baseline evidence references, bundle, snapshot, and candidate-acceptance approval semantics. It deliberately has no envelope reference. The output is unsigned and non-authoritative until an external process provisions the trust policy and detached signatures; do not commit or publish that external controller material.
+
+### External detached review trust
+
+The controller root receives its trust root only from an external provisioning process. It must contain canonical `authority/review-trust.json`, which maps three distinct bounded principal and key IDs to full Ed25519 public keys, matching SHA-256 fingerprints, and the `baseline_reviewer`, `baseline_maintainer`, and `candidate_reviewer` roles. It is never derived from an environment key, a candidate bundle, or a curator command.
+
+The same external process supplies canonical sidecars containing only a key ID and detached Ed25519 signature at these fixed paths:
+
+```text
+authority/baseline-review-evidence.signature.json
+authority/baseline-disposition-evidence.signature.json
+authority/candidate-review-subject.signature.json
+```
+
+The trusted baseline route stages exactly `review-trust.json`, `baseline-review-evidence.json`, and `baseline-review-evidence.signature.json`. The candidate route stages those three files plus `baseline-disposition-evidence.json`, `baseline-disposition-evidence.signature.json`, `candidate-review-subject.json`, and `candidate-review-subject.signature.json`. No route stages a private key. The runner verifies domain-separated signatures over the original canonical documents. A protected baseline requires the authenticated baseline review. A candidate also requires an authenticated baseline disposition from a distinct maintainer and an authenticated exact-candidate review subject; the three roles require distinct principal IDs, key IDs, fingerprints, and public keys. Missing, stale, malformed, foreign, cross-context, reused-key, or self-supplied material fails closed. No private-key loader, signer command, public-key fixture, repository secret, or independent pre-merge trust root is introduced here.
 
 The trusted bundle currently has no checked-in contents. In particular, no candidate input, ratchet, envelope, or placeholder authority is fabricated in this repository. A controller-owned candidate input can be installed only after a real baseline capture has been independently checkpointed. Until then, a trusted route fails closed when the expected staged material is absent or invalid.
 

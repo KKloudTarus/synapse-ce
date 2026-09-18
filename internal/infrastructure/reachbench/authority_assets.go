@@ -302,6 +302,56 @@ func BuildCandidateControllerAssets(
 	}, nil
 }
 
+// BuildCandidateControllerEnvelope binds a generated candidate bundle to the
+// independently derived candidate checkout and its separately prepared candidate
+// review subject. The subject is signed outside this command and never refers back
+// to the envelope, so it cannot form a self-reference cycle.
+func BuildCandidateControllerEnvelope(
+	assets CandidateControllerAssets,
+	harness HarnessIdentity,
+	controller string,
+	candidateReview measurement.ArtifactReference,
+) (RunEnvelope, string, []byte, measurement.ArtifactReference, error) {
+	if err := assets.CandidateInput.Validate(); err != nil {
+		return RunEnvelope{}, "", nil, measurement.ArtifactReference{}, fmt.Errorf("validate candidate measurement input: %w", err)
+	}
+	if err := assets.TrustedBundle.ValidateRoute(RouteCandidate); err != nil {
+		return RunEnvelope{}, "", nil, measurement.ArtifactReference{}, fmt.Errorf("validate candidate trusted bundle: %w", err)
+	}
+	if err := assets.Checkpoint.Validate(assets.BaselineInput.Policy, assets.BaselineReport); err != nil {
+		return RunEnvelope{}, "", nil, measurement.ArtifactReference{}, fmt.Errorf("validate candidate baseline checkpoint: %w", err)
+	}
+	if err := validateHarness(harness); err != nil || !bounded(controller) || validateArtifact(candidateReview) != nil {
+		return RunEnvelope{}, "", nil, measurement.ArtifactReference{}, errors.New("candidate envelope requires a valid harness, controller, and candidate review subject")
+	}
+	filename := "candidate-" + harness.Commit + ".json"
+	envelope := RunEnvelope{
+		SchemaVersion: EnvelopeSchemaVersion,
+		Route:         RouteCandidate,
+		Purpose:       measurement.CandidateAcceptance,
+		FinalMode:     FinalAcceptance,
+		Harness:       harness,
+		Analyzer:      RevisionIdentity{ID: AnalyzerSubjectID, Commit: harness.Commit, Tree: harness.Tree},
+		Snapshot:      assets.CandidateInput.ActiveSnapshot,
+		Bundle:        assets.BundleRef,
+		Authority: ProceduralAuthority{
+			Class: "procedural", Controller: controller, ReviewEvidence: candidateReview,
+			ReviewedHarness: true, ReviewedHarnessID: harness.ID,
+		},
+	}
+	if err := envelope.Validate(); err != nil {
+		return RunEnvelope{}, "", nil, measurement.ArtifactReference{}, fmt.Errorf("validate candidate envelope: %w", err)
+	}
+	if err := validateEnvelopeMeasurement(envelope, assets.CandidateInput, assets.BundleRef); err != nil {
+		return RunEnvelope{}, "", nil, measurement.ArtifactReference{}, fmt.Errorf("bind candidate envelope to input: %w", err)
+	}
+	encoded, canonical, err := canonicalJSONFile(envelope)
+	if err != nil {
+		return RunEnvelope{}, "", nil, measurement.ArtifactReference{}, fmt.Errorf("encode candidate envelope: %w", err)
+	}
+	return envelope, filename, encoded, canonicalReference(filename, canonical), nil
+}
+
 type harnessContractDescriptor struct {
 	SchemaVersion string          `json:"schema_version"`
 	ID            string          `json:"id"`

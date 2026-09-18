@@ -253,6 +253,7 @@ jobs:
           CONTROLLER_SOURCE_ROOT: ${{ vars.REACHABILITY_BENCHMARK_CONTROLLER_ROOT }}
         run: |
           set -euo pipefail
+          max_authority_file_bytes=$((8 * 1024 * 1024))
           test -n "$CONTROLLER_SOURCE_ROOT"
           test -d "$CONTROLLER_SOURCE_ROOT"
           test ! -L "$CONTROLLER_SOURCE_ROOT"
@@ -265,21 +266,82 @@ jobs:
               ;;
           esac
           case "$ROUTE" in
-            baseline|candidate) envelope_name="${ROUTE}-${SOURCE_SHA}.json" ;;
+            baseline)
+              envelope_name="baseline-${SOURCE_SHA}.json"
+              authority_files=(
+                review-trust.json
+                baseline-review-evidence.json
+                baseline-review-evidence.signature.json
+              )
+              ;;
+            candidate)
+              envelope_name="candidate-${SOURCE_SHA}.json"
+              authority_files=(
+                review-trust.json
+                baseline-review-evidence.json
+                baseline-review-evidence.signature.json
+                baseline-disposition-evidence.json
+                baseline-disposition-evidence.signature.json
+                candidate-review-subject.json
+                candidate-review-subject.signature.json
+              )
+              ;;
             *) echo "unknown closed route" >&2; exit 1 ;;
           esac
           bundle_source="$controller_root/trusted-bundle"
           envelope_root="$controller_root/envelopes"
           envelope_source="$envelope_root/$envelope_name"
-          for path in "$bundle_source" "$envelope_root" "$envelope_source"; do
+          authority_source="$controller_root/authority"
+          for path in "$bundle_source" "$envelope_root" "$envelope_source" "$authority_source"; do
             test -e "$path"
             test ! -L "$path"
           done
           test -d "$bundle_source"
           test -d "$envelope_root"
           test -f "$envelope_source"
+          test -d "$authority_source"
+          authority_source="$(realpath -e -- "$authority_source")"
+          case "$authority_source" in
+            "$controller_root"/authority) ;;
+            *) echo "controller authority root must not escape the controller source root" >&2; exit 1 ;;
+          esac
           if find -P "$controller_root" -xdev -type l -print -quit | grep -q . || find -P "$controller_root" -xdev ! -type d ! -type f -print -quit | grep -q .; then
-            echo "controller source contains a symlink or non-regular entry" >&2
+            echo "controller source contains a symlink, reparse point, or non-regular entry" >&2
+            exit 1
+          fi
+          declare -A expected_authority=()
+          for authority_file in "${authority_files[@]}"; do
+            expected_authority["$authority_file"]=1
+            source="$authority_source/$authority_file"
+            test -e "$source"
+            test ! -L "$source"
+            test -f "$source"
+            resolved="$(realpath -e -- "$source")"
+            case "$resolved" in
+              "$authority_source"/*) ;;
+              *) echo "controller authority entry escapes its root" >&2; exit 1 ;;
+            esac
+            test "$resolved" = "$source"
+            size="$(stat -c %s -- "$source")"
+            case "$size" in
+              ''|*[!0-9]*) echo "controller authority entry has an invalid size" >&2; exit 1 ;;
+            esac
+            if [ "$size" -gt "$max_authority_file_bytes" ]; then
+              echo "controller authority entry exceeds the JSON size bound" >&2
+              exit 1
+            fi
+          done
+          authority_count=0
+          while IFS= read -r -d '' source; do
+            relative="${source#"$authority_source"/}"
+            if [ "$relative" = "$source" ] || [ "$relative" != "${relative##*/}" ] || [ -z "${expected_authority[$relative]+x}" ]; then
+              echo "controller authority inventory is not exact" >&2
+              exit 1
+            fi
+            authority_count=$((authority_count + 1))
+          done < <(find -P "$authority_source" -xdev -mindepth 1 -maxdepth 1 -type f -print0 | sort -z)
+          if [ "$authority_count" -ne "${#authority_files[@]}" ] || find -P "$authority_source" -xdev -mindepth 1 -maxdepth 1 ! -type f -print -quit | grep -q .; then
+            echo "controller authority inventory contains a missing, extra, symlink, reparse point, or non-regular entry" >&2
             exit 1
           fi
           stage_root="$RUNNER_TEMP/synapse-reachability-controller"
@@ -287,12 +349,17 @@ jobs:
             echo "controller staging root already exists" >&2
             exit 1
           fi
-          install -d -m 0700 -- "$stage_root/trusted-bundle" "$stage_root/envelopes"
+          install -d -m 0700 -- "$stage_root/trusted-bundle" "$stage_root/envelopes" "$stage_root/authority"
           while IFS= read -r -d '' source; do
             relative="${source#"$bundle_source"/}"
             install -D -m 0600 -- "$source" "$stage_root/trusted-bundle/$relative"
           done < <(find -P "$bundle_source" -xdev -type f -print0 | sort -z)
           install -m 0600 -- "$envelope_source" "$stage_root/envelopes/$envelope_name"
+          for authority_file in "${authority_files[@]}"; do
+            install -m 0600 -- "$authority_source/$authority_file" "$stage_root/authority/$authority_file"
+            test -f "$stage_root/authority/$authority_file"
+            test ! -L "$stage_root/authority/$authority_file"
+          done
           test -f "$stage_root/envelopes/$envelope_name"
           test ! -L "$stage_root/envelopes/$envelope_name"
       - name: Build trusted helpers
