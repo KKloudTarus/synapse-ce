@@ -53,6 +53,9 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 		if err != nil {
 			return Result{}, err
 		}
+		if err := runner.authenticateAuthoritativeController(ctx, facts, envelope, bundleRef); err != nil {
+			return Result{}, err
+		}
 		if err := runner.validateAuthoritativeEnvelope(ctx, envelope, facts, bundleRef); err != nil {
 			return Result{}, err
 		}

@@ -6,20 +6,25 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	cycle "github.com/KKloudTarus/synapse-ce/internal/infrastructure/reachbench"
 )
 
 func main() {
-	os.Exit(executeCLI(os.Args[1:], os.Stdout, os.Stderr, cycle.RunFromEnvironment))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := executeCLI(ctx, os.Args[1:], os.Stdout, os.Stderr, cycle.RunFromEnvironment)
+	stop()
+	os.Exit(code)
 }
 
-func executeCLI(args []string, stdout, stderr io.Writer, run func(context.Context, []string) (cycle.Result, error)) int {
+func executeCLI(ctx context.Context, args []string, stdout, stderr io.Writer, run func(context.Context, []string) (cycle.Result, error)) int {
 	if len(args) != 0 {
 		_, _ = fmt.Fprintln(stderr, "synapse-reachability-cycle accepts no flags or positional arguments")
 		return 1
 	}
-	if _, err := run(context.Background(), nil); err != nil {
+	if _, err := run(ctx, nil); err != nil {
 		_, _ = fmt.Fprintln(stderr, "synapse-reachability-cycle:", err)
 		return 1
 	}

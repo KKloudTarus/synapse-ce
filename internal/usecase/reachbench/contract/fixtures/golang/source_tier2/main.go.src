@@ -22,6 +22,3 @@ func opaqueDispatch(name string) {
 }
 
 func controlOpaque() {}
-
-// controlNoCoverage denotes an adapter capability excluded by the tier contract, not dead source.
-func controlNoCoverage() {}

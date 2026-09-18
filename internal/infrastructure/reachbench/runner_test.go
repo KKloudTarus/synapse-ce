@@ -776,19 +776,24 @@ func TestCandidateCannotFallBackWhenTrustedLifecycleArtifactsAreMissing(t *testi
 }
 
 type fixture struct {
-	repositoryRoot       string
-	tempRoot             string
-	checkoutBundleRoot   string
-	controllerBundleRoot string
-	harness              HarnessIdentity
-	baselineAnalyzer     RevisionIdentity
-	candidateAnalyzer    RevisionIdentity
-	baselineAllowlist    BaselineAllowlist
-	baseline             measurement.MeasurementInput
-	candidate            measurement.MeasurementInput
-	expected             map[string]measurement.Outcome
-	checkoutBundleRef    measurement.ArtifactReference
-	controllerBundleRef  measurement.ArtifactReference
+	repositoryRoot            string
+	tempRoot                  string
+	checkoutBundleRoot        string
+	controllerBundleRoot      string
+	harness                   HarnessIdentity
+	baselineAnalyzer          RevisionIdentity
+	candidateAnalyzer         RevisionIdentity
+	baselineAllowlist         BaselineAllowlist
+	baseline                  measurement.MeasurementInput
+	candidate                 measurement.MeasurementInput
+	expected                  map[string]measurement.Outcome
+	checkoutBundleRef         measurement.ArtifactReference
+	controllerBundleRef       measurement.ArtifactReference
+	baselineReview            baselineReviewEvidence
+	baselineDisposition       baselineDispositionEvidence
+	candidateReview           candidateReviewSubject
+	candidateReviewRef        measurement.ArtifactReference
+	candidateAuthorityObjects map[string][]byte
 }
 
 func newFixture(t *testing.T) fixture {
@@ -812,12 +817,15 @@ func newFixture(t *testing.T) fixture {
 	controllerBundleRoot := filepath.Join(temporaryRoot, filepath.FromSlash(controllerBundleDirectory))
 	checkoutRef := writeFixtureBundle(t, checkoutBundleRoot, baseline, candidate, allowlist)
 	controllerRef := writeFixtureBundle(t, controllerBundleRoot, baseline, candidate, allowlist)
+	baselineReview, baselineDisposition, candidateReview, candidateReviewRef, candidateAuthorityObjects := newFixtureReviewTrust(t, harness, baselineAnalyzer, candidate.ActiveSnapshot, controllerRef)
 	return fixture{
 		repositoryRoot: repositoryRoot, tempRoot: temporaryRoot,
 		checkoutBundleRoot: checkoutBundleRoot, controllerBundleRoot: controllerBundleRoot,
 		harness: harness, baselineAnalyzer: baselineAnalyzer, candidateAnalyzer: candidateAnalyzer,
 		baselineAllowlist: allowlist, baseline: baseline, candidate: candidate, expected: expected,
 		checkoutBundleRef: checkoutRef, controllerBundleRef: controllerRef,
+		baselineReview: baselineReview, baselineDisposition: baselineDisposition, candidateReview: candidateReview,
+		candidateReviewRef: candidateReviewRef, candidateAuthorityObjects: candidateAuthorityObjects,
 	}
 }
 
@@ -861,9 +869,15 @@ func (fixture fixture) dependencies(environment map[string]string) Dependencies 
 				return nil, nil
 			case "diff --name-status --no-renames -z " + measurement.TrustedBaselineRevision + "..." + fixture.harness.Commit:
 				return encodeChangedEntries(fixture.baselineAllowlist.Entries), nil
-			default:
-				return nil, fmt.Errorf("unexpected git argv %q", args)
+			case "ls-tree -r -z --full-tree " + fixture.harness.Tree + " -- " + TrustedBundleRelativePath:
+				return fixture.candidateAuthorityTree(), nil
 			}
+			if len(args) == 3 && args[0] == "cat-file" && args[1] == "blob" {
+				if body, found := fixture.candidateAuthorityObjects[args[2]]; found {
+					return append([]byte(nil), body...), nil
+				}
+			}
+			return nil, fmt.Errorf("unexpected git argv %q", args)
 		},
 		Environment: func(name string) (string, bool) {
 			value, ok := environment[name]
@@ -886,7 +900,7 @@ func testDependencies(repositoryRoot, temporaryRoot string, environment map[stri
 }
 
 func (fixture fixture) envelope(route Route, purpose measurement.RunPurpose, final FinalMode, analyzer RevisionIdentity, snapshot measurement.SnapshotIdentity) RunEnvelope {
-	return RunEnvelope{
+	envelope := RunEnvelope{
 		SchemaVersion: EnvelopeSchemaVersion,
 		Route:         route,
 		Purpose:       purpose,
@@ -896,14 +910,19 @@ func (fixture fixture) envelope(route Route, purpose measurement.RunPurpose, fin
 		Snapshot:      snapshot,
 		Bundle:        fixture.controllerBundleRef,
 		Authority: ProceduralAuthority{
-			Class: "procedural", Controller: "controller", ReviewEvidence: reference("review-record"),
+			Class: "procedural", Controller: "controller", ReviewEvidence: fixture.baselineReview.Reference,
 			ReviewedHarness: true, ReviewedHarnessID: ReviewedHarnessID,
 		},
 	}
+	if route == RouteCandidate {
+		envelope.Authority.ReviewEvidence = fixture.candidateReviewRef
+	}
+	return envelope
 }
 
 func (fixture fixture) writeEnvelope(t *testing.T, envelope RunEnvelope) string {
 	t.Helper()
+	fixture.provisionExternalReviewTrust(t)
 	root := filepath.Join(fixture.tempRoot, filepath.FromSlash(controllerEnvelopeDirectory))
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)

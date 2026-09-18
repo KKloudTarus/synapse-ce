@@ -195,7 +195,7 @@ func buildProtectedAssets(t *testing.T, fixture fixture) ProtectedBaselineContro
 		fixture.harness,
 		fixture.baselineAnalyzer,
 		"controller",
-		reference("review-record"),
+		fixture.baselineReview.Reference,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -221,6 +221,7 @@ func captureProtectedBaseline(t *testing.T, fixture fixture, assets ProtectedBas
 	if err := os.WriteFile(envelopePath, assets.EnvelopeJSON, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	fixture.provisionExternalReviewTrust(t)
 	runner, err := NewRunner(
 		fixture.dependencies(map[string]string{ControllerEnvelopeEnvironment: envelopePath}),
 		captureFunc(validCapture(fixture.expected)),

@@ -13,10 +13,10 @@ type evaluationUnit struct {
 	cohort      ProductionCohort
 	binding     CompositionBinding
 	observation *MeasuredObservation
-	safety      suppressionSafety
+	safety      observationSafety
 }
 
-type suppressionSafety struct {
+type observationSafety struct {
 	falseClaim        bool
 	invalidClaim      bool
 	captureIncomplete bool
@@ -80,7 +80,7 @@ func buildLogicalCases(input MeasurementInput) ([]logicalCase, error) {
 				key := executionKey(item.CohortID, item.ModeID, binding.ID, item.ID)
 				unit := evaluationUnit{caseDef: item, oracle: entry.oracle, cohort: cohort, binding: binding, observation: observed[key]}
 				if unit.observation != nil {
-					unit.safety = validateSuppression(unit, input.Policy, input.ActiveSnapshot)
+					unit.safety = validateObservationSafety(unit, input.Policy, input.ActiveSnapshot)
 				}
 				entry.units = append(entry.units, unit)
 			}
@@ -116,12 +116,43 @@ func indexedMeasuredObservations(input MeasurementInput) (map[string]*MeasuredOb
 	return observed, nil
 }
 
-func validateSuppression(unit evaluationUnit, policy MeasurementPolicy, active SnapshotIdentity) suppressionSafety {
+func validateObservationSafety(unit evaluationUnit, policy MeasurementPolicy, active SnapshotIdentity) observationSafety {
+	result := observationSafety{}
+	if coverageExceedsOracleCeiling(unit.observation.Coverage.Status, unit.oracle.CoverageExpectation) {
+		result.findings = append(result.findings, safetyFinding("coverage_overclaim", unit, fmt.Sprintf("observed %s coverage exceeds frozen oracle %s coverage ceiling", unit.observation.Coverage.Status, unit.oracle.CoverageExpectation)))
+	}
+	suppression := validateSuppression(unit, policy, active)
+	result.falseClaim = suppression.falseClaim
+	result.invalidClaim = suppression.invalidClaim
+	result.captureIncomplete = suppression.captureIncomplete
+	result.findings = append(result.findings, suppression.findings...)
+	return deduplicateObservationSafety(result)
+}
+
+// coverageExceedsOracleCeiling compares only actual coverage confidence. Not-applicable
+// describes applicability, so an unavailable observation does not overclaim it.
+func coverageExceedsOracleCeiling(observed, ceiling CoverageStatus) bool {
+	if observed == CoverageNotApplicable {
+		return false
+	}
+	switch ceiling {
+	case CoverageComplete:
+		return false
+	case CoveragePartial:
+		return observed == CoverageComplete
+	case CoverageUnavailable, CoverageNotApplicable:
+		return observed == CoverageComplete || observed == CoveragePartial
+	default:
+		return false
+	}
+}
+
+func validateSuppression(unit evaluationUnit, policy MeasurementPolicy, active SnapshotIdentity) observationSafety {
 	observation := unit.observation
 	if observation == nil {
-		return suppressionSafety{}
+		return observationSafety{}
 	}
-	result := suppressionSafety{}
+	result := observationSafety{}
 	capture := observation.Suppression
 	if capture.Claim == SuppressionNone {
 		if capture.Status != CaptureComplete || observation.OutputCapture != CaptureComplete {
@@ -153,7 +184,7 @@ func validateSuppression(unit evaluationUnit, policy MeasurementPolicy, active S
 		result.invalidClaim = true
 		result.findings = append(result.findings, safetyFinding("invalid_suppression", unit, "capture has no suppressing judgment effect"))
 	}
-	return deduplicateSuppressionSafety(result)
+	return deduplicateObservationSafety(result)
 }
 
 func validateSuppressionProof(effect SuppressionEffect, unit evaluationUnit, rule SuppressionPolicyRule, active SnapshotIdentity, observation MeasuredObservation) error {
@@ -204,7 +235,7 @@ func validateSuppressionProof(effect SuppressionEffect, unit evaluationUnit, rul
 	return nil
 }
 
-func deduplicateSuppressionSafety(result suppressionSafety) suppressionSafety {
+func deduplicateObservationSafety(result observationSafety) observationSafety {
 	seen := map[string]struct{}{}
 	out := result
 	out.findings = out.findings[:0]

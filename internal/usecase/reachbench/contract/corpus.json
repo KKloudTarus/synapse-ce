@@ -179,7 +179,7 @@
       "mode_id": "source_tier2",
       "fixture": {
         "id": "go-source-tier2-input",
-        "digest": "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"
+        "digest": "sha256:9a8a21332bea4746c4118a8753b0434eef80ab33af18cf0a95b9fee36c1fb8bd"
       }
     },
     {
@@ -189,7 +189,7 @@
       "mode_id": "source_tier2",
       "fixture": {
         "id": "go-source-tier2-input",
-        "digest": "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"
+        "digest": "sha256:9a8a21332bea4746c4118a8753b0434eef80ab33af18cf0a95b9fee36c1fb8bd"
       }
     },
     {
@@ -199,7 +199,7 @@
       "mode_id": "source_tier2",
       "fixture": {
         "id": "go-source-tier2-input",
-        "digest": "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"
+        "digest": "sha256:9a8a21332bea4746c4118a8753b0434eef80ab33af18cf0a95b9fee36c1fb8bd"
       }
     },
     {
@@ -209,7 +209,7 @@
       "mode_id": "source_tier2",
       "fixture": {
         "id": "go-source-tier2-input",
-        "digest": "sha256:47f381492824aa8af1eb5694ba302d1a65b4f31f6e8fa3fdf87b9ad9e8469782"
+        "digest": "sha256:9a8a21332bea4746c4118a8753b0434eef80ab33af18cf0a95b9fee36c1fb8bd"
       }
     },
     {

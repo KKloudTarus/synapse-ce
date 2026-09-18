@@ -607,10 +607,10 @@
       ],
       "files": [
         {
-          "digest": "sha256:2415dba7e8b98a78eeb728a210bbd584d496110d68dbc727470396d2aea95f54",
+          "digest": "sha256:29faefe74db203ff1302274e010cecea97a0ae4622c9c731b5c99b23121f3ce6",
           "materialized_path": "fixtures/golang/source_tier2/go.mod",
           "path": "fixtures/golang/source_tier2/go.mod.src",
-          "size": 61
+          "size": 110
         },
         {
           "digest": "sha256:5c4b4705678b7dee921db7405946f99001219e328677513fac754574a3ef55f3",
@@ -619,10 +619,10 @@
           "size": 40
         },
         {
-          "digest": "sha256:cbddaf02446c284f22e729d4325b78763c6a7aac2ed613aa7a10185554115eae",
+          "digest": "sha256:54629a90fc8eeb50ca8cad3b2b9c16c88e9656285072db9bd67670fffc5a1d84",
           "materialized_path": "fixtures/golang/source_tier2/main.go",
           "path": "fixtures/golang/source_tier2/main.go.src",
-          "size": 544
+          "size": 416
         }
       ],
       "id": "go-source-tier2-input",
@@ -634,10 +634,10 @@
         {
           "id": "pkg:reachbench/go/source_tier2#controlNoCoverage",
           "locator": {
-            "kind": "source_symbol",
-            "line": 27,
-            "module_path": "fixtures/golang/source_tier2/main.go",
-            "symbol": "controlNoCoverage"
+            "kind": "manifest_capability",
+            "line": 5,
+            "module_path": "fixtures/golang/source_tier2/go.mod.src",
+            "symbol": "entrypoint-authority"
           },
           "package_identity": "example.invalid/reachbench/go-source-tier2"
         },

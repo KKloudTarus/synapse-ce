@@ -242,6 +242,131 @@ func TestDuplicateRootsDoNotInflateC2Credit(t *testing.T) {
 	}
 }
 
+func TestEvaluateMeasurementMarksCoverageOverclaimWithoutSuppression(t *testing.T) {
+	input := fixtureInput(t)
+	for index := range input.Oracle.Cases {
+		if input.Oracle.Cases[index].CaseID == "go-reachable" {
+			input.Oracle.Cases[index].CoverageExpectation = CoveragePartial
+		}
+	}
+	refreshPolicyReferences(t, &input)
+
+	baseline, err := EvaluateMeasurement(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseline.Safety.Pass || !containsSafetyFinding(baseline.Safety.Findings, SafetyFinding{
+		Kind: "coverage_overclaim", CohortID: "go", ModeID: "source_tier2", BindingID: "api", CaseID: "go-reachable",
+		Reason: "observed complete coverage exceeds frozen oracle partial coverage ceiling",
+	}) {
+		t.Fatalf("baseline safety = %#v, want deterministic coverage overclaim", baseline.Safety)
+	}
+
+	candidate, err := EvaluateMeasurement(candidateInput(t, input, baseline))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.Candidate.Accepted || candidate.Safety.Pass {
+		t.Fatalf("candidate accepted unsafe coverage overclaim: %#v", candidate.Candidate)
+	}
+}
+
+func TestEvaluateMeasurementAllowsCoverageUnderclaim(t *testing.T) {
+	input := fixtureInput(t)
+	for index := range input.Observations {
+		if input.Observations[index].CaseID == "go-reachable" {
+			input.Observations[index].Coverage = ObservedCoverage{
+				Status:      CoveragePartial,
+				Obligations: []CoverageObligation{{ID: "entrypoints", Status: CoveragePartial}},
+				Reasons:     []CoverageReason{{Code: CoverageReasonUnknown}},
+			}
+		}
+	}
+	report, err := EvaluateMeasurement(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Safety.Pass || containsSafetyFindingKind(report.Safety.Findings, "coverage_overclaim") {
+		t.Fatalf("coverage underclaim was rejected: %#v", report.Safety)
+	}
+}
+
+func TestCoverageExceedsOracleCeilingTreatsNotApplicableAsApplicability(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		observed CoverageStatus
+		ceiling  CoverageStatus
+		want     bool
+	}{
+		{name: "complete exceeds partial", observed: CoverageComplete, ceiling: CoveragePartial, want: true},
+		{name: "partial exceeds unavailable", observed: CoveragePartial, ceiling: CoverageUnavailable, want: true},
+		{name: "unavailable does not exceed complete", observed: CoverageUnavailable, ceiling: CoverageComplete},
+		{name: "not applicable observation is not a confidence upgrade", observed: CoverageNotApplicable, ceiling: CoverageUnavailable},
+		{name: "unavailable observation does not upgrade inapplicable ceiling", observed: CoverageUnavailable, ceiling: CoverageNotApplicable},
+		{name: "partial observation claims coverage over inapplicable ceiling", observed: CoveragePartial, ceiling: CoverageNotApplicable, want: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := coverageExceedsOracleCeiling(testCase.observed, testCase.ceiling); got != testCase.want {
+				t.Fatalf("coverageExceedsOracleCeiling(%q, %q) = %t, want %t", testCase.observed, testCase.ceiling, got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestCheckCandidateAcceptanceRejectsUnapprovedCoverageRegression(t *testing.T) {
+	input := fixtureInput(t)
+	baseline, err := EvaluateMeasurement(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateInput := candidateInput(t, input, baseline)
+	for index := range candidateInput.Observations {
+		if candidateInput.Observations[index].CaseID == "go-reachable" {
+			candidateInput.Observations[index].Coverage = ObservedCoverage{
+				Status:      CoveragePartial,
+				Obligations: []CoverageObligation{{ID: "entrypoints", Status: CoveragePartial}},
+				Reasons:     []CoverageReason{{Code: CoverageReasonUnknown}},
+			}
+		}
+	}
+	report, err := EvaluateMeasurement(candidateInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(report.Candidate.Reasons, "unlisted coverage regression at go/source_tier2/api/go-reachable") {
+		t.Fatalf("candidate reasons = %#v, want unapproved coverage regression", report.Candidate.Reasons)
+	}
+}
+
+func TestCheckCandidateAcceptanceAllowsApprovedCoverageRegression(t *testing.T) {
+	input := fixtureInput(t)
+	input.Exceptions.Entries = []CoverageException{{
+		ID: "approved-go-reachable-coverage-regression", CohortID: "go", ModeID: "source_tier2", BindingID: "api", CaseID: "go-reachable", Reason: "controlled measurement downgrade",
+	}}
+	refreshPolicyReferences(t, &input)
+	baseline, err := EvaluateMeasurement(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateInput := candidateInput(t, input, baseline)
+	for index := range candidateInput.Observations {
+		if candidateInput.Observations[index].CaseID == "go-reachable" {
+			candidateInput.Observations[index].Coverage = ObservedCoverage{
+				Status:      CoveragePartial,
+				Obligations: []CoverageObligation{{ID: "entrypoints", Status: CoveragePartial}},
+				Reasons:     []CoverageReason{{Code: CoverageReasonUnknown}},
+			}
+		}
+	}
+	report, err := EvaluateMeasurement(candidateInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(report.Candidate.Reasons, "unlisted coverage regression at go/source_tier2/api/go-reachable") {
+		t.Fatalf("candidate reasons = %#v, approved coverage regression was rejected", report.Candidate.Reasons)
+	}
+}
+
 func TestStrictC2AndMandatoryGuards(t *testing.T) {
 	baseline := C2Vector{ProductionBreadth: 1, CorrectPositiveCases: 2, MacroReachableRecall: ratioFromCounts(1, 2)}
 	if strictlyGreaterC2(baseline, baseline) {
@@ -926,6 +1051,24 @@ func cohortSummary(t *testing.T, report MeasurementReport, cohortID, modeID stri
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSafetyFinding(findings []SafetyFinding, want SafetyFinding) bool {
+	for _, finding := range findings {
+		if finding == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSafetyFindingKind(findings []SafetyFinding, kind string) bool {
+	for _, finding := range findings {
+		if finding.Kind == kind {
 			return true
 		}
 	}
