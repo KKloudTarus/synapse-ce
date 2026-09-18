@@ -37,8 +37,10 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 		"osv-scanner",
 		"semgrep",
 		"synapse-bench",
+		"SYNAPSE_JVM_REACH_TIER2_POINTS_TO_ENABLED",
+		"SYNAPSE_JSREACH_TIER2_ENABLED",
 	} {
-		if strings.Contains(strings.ToLower(workflow), forbidden) {
+		if strings.Contains(strings.ToLower(workflow), strings.ToLower(forbidden)) {
 			t.Fatalf("workflow retains forbidden direct orchestration %q", forbidden)
 		}
 	}
@@ -143,16 +145,66 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 	}
 }
 
+func TestReachabilityBenchmarkMakeTargetPolicy(t *testing.T) {
+	makefile := readReachabilityBenchmarkFile(t, "Makefile")
+	target := regexp.MustCompile(`(?m)^reachability-benchmark:[^\n]*(?:\n\t[^\n]*)*`).FindString(makefile)
+	if target == "" {
+		t.Fatal("Makefile must retain the reachability benchmark target")
+	}
+	normalizedTarget := strings.ReplaceAll(target, "\t", "")
+
+	for _, required := range []string{
+		`tools_root=""; \`,
+		`trap cleanup EXIT; \`,
+		`trap 'exit 1' HUP INT TERM; \`,
+		`tools_root="$$(mktemp -d "$${TMPDIR:-/tmp}/synapse-reachability-tools.XXXXXX")"; \`,
+		`chmod 0700 -- "$$tools_root"; \`,
+		`export SYNAPSE_JSREACH_TIER2_ENABLED=true; \`,
+		`export SYNAPSE_JVM_REACH_TIER2_POINTS_TO_ENABLED=true; \`,
+		`$(GO) run ./cmd/synapse-reachability-cycle`,
+	} {
+		if !strings.Contains(normalizedTarget, required) {
+			t.Fatalf("reachability benchmark target is not self-contained: missing %q", required)
+		}
+	}
+
+	const lifecycleCommand = `$(GO) run ./cmd/synapse-reachability-cycle`
+	if strings.Count(normalizedTarget, lifecycleCommand) != 1 || !regexp.MustCompile(`(?m)^\$\(GO\) run \./cmd/synapse-reachability-cycle$`).MatchString(normalizedTarget) {
+		t.Fatal("reachability benchmark target must invoke the lifecycle with no arguments exactly once")
+	}
+
+	for _, helper := range []string{
+		`if [ -z "$${SYNAPSE_TAINT_CALLGRAPH_BIN:-}" ]; then \
+$(GO) build -o "$$tools_root/synapse-callgraph" ./cmd/synapse-callgraph; \
+test -x "$$tools_root/synapse-callgraph"; \
+export SYNAPSE_TAINT_CALLGRAPH_BIN="$$tools_root/synapse-callgraph"; \
+fi; \`,
+		`if [ -z "$${SYNAPSE_AST_BIN:-}" ]; then \
+$(GO) build -o "$$tools_root/synapse-ast" ./cmd/synapse-ast; \
+test -x "$$tools_root/synapse-ast"; \
+export SYNAPSE_AST_BIN="$$tools_root/synapse-ast"; \
+fi; \`,
+	} {
+		if !strings.Contains(normalizedTarget, helper) {
+			t.Fatalf("reachability benchmark target must preserve a supplied helper path: missing %q", helper)
+		}
+	}
+}
+
 func readReachabilityBenchmarkWorkflow(t *testing.T) string {
+	return readReachabilityBenchmarkFile(t, ".github", "workflows", "reachability-benchmark.yml")
+}
+
+func readReachabilityBenchmarkFile(t *testing.T, relativePath ...string) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("locate workflow policy test source")
+		t.Fatal("locate reachability benchmark policy test source")
 	}
-	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", ".github", "workflows", "reachability-benchmark.yml")
-	workflow, err := os.ReadFile(path)
+	path := filepath.Join(append([]string{filepath.Dir(thisFile), "..", "..", ".."}, relativePath...)...)
+	content, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read reachability benchmark workflow: %v", err)
+		t.Fatalf("read reachability benchmark policy file: %v", err)
 	}
-	return strings.ReplaceAll(string(workflow), "\r\n", "\n")
+	return strings.ReplaceAll(string(content), "\r\n", "\n")
 }

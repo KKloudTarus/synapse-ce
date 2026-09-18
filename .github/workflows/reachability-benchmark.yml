@@ -314,8 +314,6 @@ jobs:
         env:
           SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
           ROUTE: ${{ needs.route.outputs.route }}
-          SYNAPSE_JVM_REACH_TIER2_POINTS_TO_ENABLED: "true"
-          SYNAPSE_JSREACH_TIER2_ENABLED: "true"
         run: |
           set -euo pipefail
           case "$ROUTE" in

@@ -36,14 +36,11 @@ The protected-baseline exception is intentional. It measures fixed historical an
 
 ## Local prerequisites
 
-A production run requires Linux on amd64. The trusted workflow also requires the Go version declared by `go.mod`, .NET SDK `8.0.100`, and the OpenJDK `java`, `javac`, and `jar` tools at `21.0.5`. Before the lifecycle starts, it builds `synapse-callgraph` and `synapse-ast` from the exact checkout into a private temporary tools directory and supplies them through `SYNAPSE_TAINT_CALLGRAPH_BIN` and `SYNAPSE_AST_BIN`.
+A production run requires Linux on amd64; the lifecycle continues to reject every other platform. It requires the Go version declared by `go.mod`, .NET SDK `8.0.100`, and the OpenJDK `java`, `javac`, and `jar` tools at `21.0.5`.
 
-The frozen production matrix requires these configuration points:
+`make reachability-benchmark` supplies missing helper binaries automatically. It preserves non-empty `SYNAPSE_TAINT_CALLGRAPH_BIN` and `SYNAPSE_AST_BIN` values, so trusted runners can provide their prebuilt helpers. For each unset path, the target builds the matching helper from the current checkout into a private temporary directory, exports that path only for the lifecycle, and removes the directory at shell exit. It does not write helpers into the checkout.
 
-```text
-SYNAPSE_JSREACH_TIER2_ENABLED=true
-SYNAPSE_JVM_REACH_TIER2_POINTS_TO_ENABLED=true
-```
+The target also freezes `SYNAPSE_JSREACH_TIER2_ENABLED=true` and `SYNAPSE_JVM_REACH_TIER2_POINTS_TO_ENABLED=true`, so a no-argument local diagnostic uses the same production matrix as the trusted workflow without manual configuration. The workflow therefore only supplies its prebuilt helper paths; it does not configure those feature flags separately.
 
 Local runs are useful for diagnostic development, but only the trusted route can produce authoritative baseline or candidate evidence.
 
