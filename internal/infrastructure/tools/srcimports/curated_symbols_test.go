@@ -2,9 +2,12 @@ package srcimports
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/symreach"
@@ -175,5 +178,143 @@ Helper(x);
 	}
 	if contains(refs, "System.Commented.Member") {
 		t.Fatalf("a commented reference must be stripped: %v", refs)
+	}
+}
+
+func TestSourceWalkerBoundsAggregateSourceBytes(t *testing.T) {
+	const body = "<?php\n// bounded source\n"
+	dir := t.TempDir()
+	for _, name := range []string{"a.php", "b.php", "c.php"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	walker := newSourceWalker(scanLimits{
+		maxFiles:       3,
+		maxFileBytes:   int64(len(body)),
+		maxSourceBytes: int64(len(body) * 2),
+		maxEntries:     10,
+	}, []string{".php"}, nil)
+	var visited []string
+	out, err := walker.walk(context.Background(), dir, func(path string, _ []byte, _ *scanAccumulator) {
+		visited = append(visited, path)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"a.php", "b.php"}; !reflect.DeepEqual(visited, want) {
+		t.Fatalf("accepted source files = %v, want %v", visited, want)
+	}
+	if got, want := out.sourceBytes, int64(len(body)*2); got != want {
+		t.Fatalf("accepted source bytes = %d, want %d", got, want)
+	}
+	if !out.reasons["aggregate source byte budget exceeded; traversal stopped"] {
+		t.Fatalf("aggregate byte cap was not recorded: %#v", out.reasons)
+	}
+}
+
+func TestSourceWalkerHonorsCancellationDuringFirstPass(t *testing.T) {
+	const body = "<?php\nfunction target(): void {}\ntarget();\n"
+	dir := writeTemp(t, "main.php", body)
+	walker := newSourceWalker(scanLimits{
+		maxFiles:       1,
+		maxFileBytes:   int64(len(body)),
+		maxSourceBytes: int64(len(body)),
+		maxEntries:     2,
+	}, []string{".php"}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	visited := false
+	_, err := walker.walk(ctx, dir, func(string, []byte, *scanAccumulator) {
+		visited = true
+		cancel()
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation during first pass error = %v, want context cancellation", err)
+	}
+	if !visited {
+		t.Fatal("first-pass visitor did not run")
+	}
+}
+
+func TestLocalSymbolScannersHonorCancelledFirstPassContext(t *testing.T) {
+	dir := writeTemp(t, "main.php", "<?php\nfunction target(): void {}\ntarget();\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, scanner := range []struct {
+		name string
+		scan func(context.Context, string) ([]string, []symreach.SymbolReference, error)
+	}{
+		{name: "php", scan: NewPHPSymbolScanner().ScanSymbolRefsWithProvenance},
+		{name: "ruby", scan: NewRubySymbolScanner().ScanSymbolRefsWithProvenance},
+	} {
+		t.Run(scanner.name, func(t *testing.T) {
+			_, _, err := scanner.scan(ctx, dir)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancelled first pass error = %v, want context cancellation", err)
+			}
+		})
+	}
+}
+
+func TestSourceWalkerHonorsCancellationDuringSecondPass(t *testing.T) {
+	const body = "<?php\nfunction target(): void {}\ntarget();\n"
+	dir := writeTemp(t, "main.php", body)
+	walker := newSourceWalker(scanLimits{
+		maxFiles:       1,
+		maxFileBytes:   int64(len(body)),
+		maxSourceBytes: int64(len(body)),
+		maxEntries:     2,
+	}, []string{".php"}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	visited := false
+	err := walker.rescan(ctx, dir, []sourceFile{{path: "main.php", bytes: int64(len(body))}}, func(string, []byte) error {
+		visited = true
+		cancel()
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation during second pass error = %v, want context cancellation", err)
+	}
+	if !visited {
+		t.Fatal("second-pass visitor did not run")
+	}
+}
+
+func BenchmarkPHPSymbolScannerProvenance(b *testing.B) {
+	benchmarkLocalSymbolScanner(b, ".php", "//", func(index int) string {
+		return fmt.Sprintf("function target_%d(): void {}\ntarget_%d();\n", index, index)
+	}, NewPHPSymbolScanner().ScanSymbolRefsWithProvenance)
+}
+
+func BenchmarkRubySymbolScannerProvenance(b *testing.B) {
+	benchmarkLocalSymbolScanner(b, ".rb", "#", func(index int) string {
+		return fmt.Sprintf("def target_%d; end\ntarget_%d\n", index, index)
+	}, NewRubySymbolScanner().ScanSymbolRefsWithProvenance)
+}
+
+func benchmarkLocalSymbolScanner(
+	b *testing.B,
+	extension, comment string,
+	declarations func(int) string,
+	scan func(context.Context, string) ([]string, []symreach.SymbolReference, error),
+) {
+	b.Helper()
+	dir := b.TempDir()
+	padding := comment + " benchmark padding\n" + strings.Repeat(comment+" padding\n", 256)
+	var sourceBytes int64
+	for index := range 64 {
+		body := declarations(index) + padding
+		sourceBytes += int64(len(body))
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("source_%03d%s", index, extension)), []byte(body), 0o600); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.SetBytes(sourceBytes)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, _, err := scan(context.Background(), dir); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

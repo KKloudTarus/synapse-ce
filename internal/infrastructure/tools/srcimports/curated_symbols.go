@@ -2,6 +2,7 @@ package srcimports
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -104,9 +105,13 @@ func (s *DotNetSymbolScanner) ScanSymbolRefs(ctx context.Context, dir string) ([
 	})
 }
 
-type localSymbolFile struct {
-	path string
-	body string
+// localSymbolMetadata is the bounded state kept between passes: file identity and declarations. It never
+// retains a source body. The two passes take O(accepted source bytes) time
+// and O(max file bytes + declarations + references) space; accepted source is capped by the walker at 64 MiB.
+type localSymbolMetadata struct {
+	files              []sourceFile
+	declarations       map[string][]localSymbolDeclaration
+	declarationsByFile map[string][]localSymbolDeclaration
 }
 
 type localSymbolDeclaration struct {
@@ -116,9 +121,39 @@ type localSymbolDeclaration struct {
 	start  int
 }
 
-// scanLocalSymbolRefs collects legacy qualified refs and, separately, locally resolved bare PHP calls. A local
-// declaration must be unique across the root and the call must be in that declaration's file, preventing a
-// bare name in one package or file from becoming evidence for another.
+func newLocalSymbolMetadata() *localSymbolMetadata {
+	return &localSymbolMetadata{
+		declarations:       map[string][]localSymbolDeclaration{},
+		declarationsByFile: map[string][]localSymbolDeclaration{},
+	}
+}
+
+func (m *localSymbolMetadata) addFile(path string, content []byte) {
+	m.files = append(m.files, sourceFile{path: path, bytes: int64(len(content))})
+}
+
+// addDeclarations derives line numbers as matches advance through the file, so it visits each source byte
+// at most once for line accounting instead of recounting every declaration prefix.
+func (m *localSymbolMetadata) addDeclarations(path, body string, declarationRE *regexp.Regexp) {
+	line, previousStart := 1, 0
+	for _, match := range declarationRE.FindAllStringSubmatchIndex(body, -1) {
+		nameStart := match[2]
+		line += strings.Count(body[previousStart:nameStart], "\n")
+		previousStart = nameStart
+		declaration := localSymbolDeclaration{
+			symbol: body[nameStart:match[3]],
+			path:   path,
+			line:   line,
+			start:  nameStart,
+		}
+		m.declarations[declaration.symbol] = append(m.declarations[declaration.symbol], declaration)
+		m.declarationsByFile[path] = append(m.declarationsByFile[path], declaration)
+	}
+}
+
+// scanLocalSymbolRefs collects qualified references and declaration metadata in its first pass. The second
+// pass is deliberately limited to the accepted first-pass paths, resolving local bare calls without keeping
+// the corpus in memory.
 func scanLocalSymbolRefs(
 	ctx context.Context,
 	dir string,
@@ -130,7 +165,7 @@ func scanLocalSymbolRefs(
 	declarationRE, callRE *regexp.Regexp,
 ) ([]string, []symreach.SymbolReference, error) {
 	refs := map[string]bool{}
-	var files []localSymbolFile
+	metadata := newLocalSymbolMetadata()
 	walker := newSourceWalker(limits, exts, skip)
 	_, err := walker.walk(ctx, dir, func(filePath string, content []byte, _ *scanAccumulator) {
 		body := mask(string(content))
@@ -139,12 +174,17 @@ func scanLocalSymbolRefs(
 				refs[ref] = true
 			}
 		})
-		files = append(files, localSymbolFile{path: filePath, body: body})
+		metadata.addFile(filePath, content)
+		metadata.addDeclarations(filePath, body, declarationRE)
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	return sortedKeys(refs), resolveLocalCalls(files, declarationRE, callRE, phpDynamicNames), nil
+	local, err := resolveLocalCalls(ctx, dir, walker, metadata, mask, callRE, phpDynamicNames)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sortedKeys(refs), local, nil
 }
 
 func collectPHPQualifiedRefs(body string, add func(string)) {
@@ -158,7 +198,8 @@ func collectPHPQualifiedRefs(body string, add func(string)) {
 
 func scanRubyLocalSymbolRefs(ctx context.Context, dir string, limits scanLimits) ([]string, []symreach.SymbolReference, error) {
 	refs := map[string]bool{}
-	var files []localSymbolFile
+	metadata := newLocalSymbolMetadata()
+	assigned := map[string]bool{}
 	walker := newSourceWalker(limits, []string{".rb", ".rake", ".gemspec", ".ru"}, rubySkipDir)
 	_, err := walker.walk(ctx, dir, func(filePath string, content []byte, _ *scanAccumulator) {
 		body := maskRubySource(string(content))
@@ -171,94 +212,119 @@ func scanRubyLocalSymbolRefs(ctx context.Context, dir string, limits scanLimits)
 				refs[m[1]+"#"+m[2]] = true
 			}
 		}
-		files = append(files, localSymbolFile{path: filePath, body: body})
+		metadata.addFile(filePath, content)
+		metadata.addDeclarations(filePath, body, rubyMethodRE)
+		for _, assignment := range rubyAssignmentRE.FindAllStringSubmatch(body, -1) {
+			assigned[assignment[1]] = true
+		}
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	assigned := map[string]bool{}
-	for _, file := range files {
-		for _, m := range rubyAssignmentRE.FindAllStringSubmatch(file.body, -1) {
-			assigned[m[1]] = true
-		}
+	local, err := resolveRubyLocalCalls(ctx, dir, walker, metadata, assigned)
+	if err != nil {
+		return nil, nil, err
 	}
-	return sortedKeys(refs), resolveRubyLocalCalls(files, assigned), nil
+	return sortedKeys(refs), local, nil
 }
 
-func resolveLocalCalls(files []localSymbolFile, declarationRE, callRE *regexp.Regexp, dynamicNames map[string]bool) []symreach.SymbolReference {
-	declarations, byFile := localDeclarations(files, declarationRE)
+func resolveLocalCalls(
+	ctx context.Context,
+	dir string,
+	walker *sourceWalker,
+	metadata *localSymbolMetadata,
+	mask func(string) string,
+	callRE *regexp.Regexp,
+	dynamicNames map[string]bool,
+) ([]symreach.SymbolReference, error) {
 	seen := map[localSymbolDeclaration]bool{}
-	for _, file := range files {
-		body := maskNamedCallArguments(file.body, dynamicNames, isPHPIdentByte)
-		declarationStarts := map[int]bool{}
-		for _, declaration := range byFile[file.path] {
-			declarationStarts[declaration.start] = true
-		}
+	err := walker.rescan(ctx, dir, metadata.files, func(filePath string, content []byte) error {
+		body := maskNamedCallArguments(mask(string(content)), dynamicNames, isPHPIdentByte)
+		declarationStarts := localDeclarationStarts(metadata.declarationsByFile[filePath])
 		for _, match := range callRE.FindAllStringSubmatchIndex(body, -1) {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return fmt.Errorf("source scan cancelled: %w", ctxErr)
+			}
 			nameStart := match[2]
 			if declarationStarts[nameStart] || !isBarePHPCall(body, nameStart) {
 				continue
 			}
-			name := body[match[2]:match[3]]
-			if len(declarations[name]) != 1 || declarations[name][0].path != file.path {
-				continue
+			name := body[nameStart:match[3]]
+			if declarations := metadata.declarations[name]; len(declarations) == 1 && declarations[0].path == filePath {
+				seen[declarations[0]] = true
 			}
-			seen[declarations[name][0]] = true
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return sortedLocalReferences(seen)
+	return sortedLocalReferences(seen), nil
 }
 
-func resolveRubyLocalCalls(files []localSymbolFile, assigned map[string]bool) []symreach.SymbolReference {
-	declarations, byFile := localDeclarations(files, rubyMethodRE)
+func resolveRubyLocalCalls(
+	ctx context.Context,
+	dir string,
+	walker *sourceWalker,
+	metadata *localSymbolMetadata,
+	assigned map[string]bool,
+) ([]symreach.SymbolReference, error) {
 	seen := map[localSymbolDeclaration]bool{}
-	for _, file := range files {
-		body := maskNamedCallArguments(file.body, rubyDynamicNames, isRubyIdentByte)
-		declarationStarts := map[int]bool{}
-		for _, declaration := range byFile[file.path] {
-			declarationStarts[declaration.start] = true
-		}
+	err := walker.rescan(ctx, dir, metadata.files, func(filePath string, content []byte) error {
+		body := maskNamedCallArguments(maskRubySource(string(content)), rubyDynamicNames, isRubyIdentByte)
+		declarationStarts := localDeclarationStarts(metadata.declarationsByFile[filePath])
 		for _, match := range rubyCallRE.FindAllStringSubmatchIndex(body, -1) {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return fmt.Errorf("source scan cancelled: %w", ctxErr)
+			}
 			nameStart := match[2]
 			if declarationStarts[nameStart] || !isBareRubyCall(body, nameStart) {
 				continue
 			}
-			name := body[match[2]:match[3]]
-			if assigned[name] || len(declarations[name]) != 1 || declarations[name][0].path != file.path {
-				continue
-			}
-			seen[declarations[name][0]] = true
-		}
-		for _, line := range strings.SplitAfter(body, "\n") {
-			trimmed := strings.TrimSuffix(line, "\n")
-			match := rubyBareCallLineRE.FindStringSubmatchIndex(trimmed)
-			if match != nil {
-				name := trimmed[match[2]:match[3]]
-				if !assigned[name] && len(declarations[name]) == 1 && declarations[name][0].path == file.path {
-					seen[declarations[name][0]] = true
+			name := body[nameStart:match[3]]
+			if !assigned[name] {
+				if declarations := metadata.declarations[name]; len(declarations) == 1 && declarations[0].path == filePath {
+					seen[declarations[0]] = true
 				}
 			}
 		}
+		for lineStart := 0; lineStart < len(body); {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return fmt.Errorf("source scan cancelled: %w", ctxErr)
+			}
+			lineEnd := strings.IndexByte(body[lineStart:], '\n')
+			if lineEnd < 0 {
+				lineEnd = len(body)
+			} else {
+				lineEnd += lineStart
+			}
+			if match := rubyBareCallLineRE.FindStringSubmatchIndex(body[lineStart:lineEnd]); match != nil {
+				name := body[lineStart+match[2] : lineStart+match[3]]
+				if !assigned[name] {
+					if declarations := metadata.declarations[name]; len(declarations) == 1 && declarations[0].path == filePath {
+						seen[declarations[0]] = true
+					}
+				}
+			}
+			if lineEnd == len(body) {
+				break
+			}
+			lineStart = lineEnd + 1
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return sortedLocalReferences(seen)
+	return sortedLocalReferences(seen), nil
 }
 
-func localDeclarations(files []localSymbolFile, declarationRE *regexp.Regexp) (map[string][]localSymbolDeclaration, map[string][]localSymbolDeclaration) {
-	all := map[string][]localSymbolDeclaration{}
-	byFile := map[string][]localSymbolDeclaration{}
-	for _, file := range files {
-		for _, match := range declarationRE.FindAllStringSubmatchIndex(file.body, -1) {
-			declaration := localSymbolDeclaration{
-				symbol: file.body[match[2]:match[3]],
-				path:   file.path,
-				line:   oneBasedLine(file.body, match[2]),
-				start:  match[2],
-			}
-			all[declaration.symbol] = append(all[declaration.symbol], declaration)
-			byFile[file.path] = append(byFile[file.path], declaration)
-		}
+func localDeclarationStarts(declarations []localSymbolDeclaration) map[int]bool {
+	starts := make(map[int]bool, len(declarations))
+	for _, declaration := range declarations {
+		starts[declaration.start] = true
 	}
-	return all, byFile
+	return starts
 }
 
 func sortedLocalReferences(seen map[localSymbolDeclaration]bool) []symreach.SymbolReference {
@@ -276,10 +342,6 @@ func sortedLocalReferences(seen map[localSymbolDeclaration]bool) []symreach.Symb
 		return out[i].Line < out[j].Line
 	})
 	return out
-}
-
-func oneBasedLine(body string, offset int) int {
-	return strings.Count(body[:offset], "\n") + 1
 }
 
 func isBarePHPCall(body string, start int) bool {
