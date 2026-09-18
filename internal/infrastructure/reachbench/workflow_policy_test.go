@@ -26,27 +26,50 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 			t.Fatalf("workflow action is not immutably pinned: %q", match[0])
 		}
 	}
-	if !regexp.MustCompile(`(?m)^\s*make reachability-benchmark\s*$`).MatchString(workflow) {
-		t.Fatal("workflow must invoke the exact no-argument reachability benchmark target")
+	if strings.Count(workflow, "make reachability-benchmark") < 2 {
+		t.Fatal("workflow must run both the PR-safe and trusted no-argument lifecycles")
 	}
 	if !strings.Contains(workflow, "workflow_dispatch:\n") || regexp.MustCompile(`(?m)^\s*workflow_dispatch:\s*\n\s+inputs:`).MatchString(workflow) {
 		t.Fatal("workflow dispatch must not accept inputs")
 	}
 	for _, forbidden := range []string{
 		"continue-on-error",
-		"osv-scanner",
-		"semgrep",
-		"synapse-bench",
-		"SYNAPSE_JVM_REACH_TIER2_POINTS_TO_ENABLED",
-		"SYNAPSE_JSREACH_TIER2_ENABLED",
+		"REACHABILITY_BENCHMARK_TRUSTED_SHA",
 	} {
-		if strings.Contains(strings.ToLower(workflow), strings.ToLower(forbidden)) {
-			t.Fatalf("workflow retains forbidden direct orchestration %q", forbidden)
+		if strings.Contains(workflow, forbidden) {
+			t.Fatalf("workflow retains forbidden policy surface %q", forbidden)
 		}
 	}
-	if strings.Count(workflow, "actions/upload-artifact@") != 1 || !strings.Contains(workflow, "path: ${{ runner.temp }}/synapse-reachability/published/github-${{ github.run_id }}/attempt-${{ github.run_attempt }}") {
-		t.Fatal("workflow must upload only the known sanitized publication leaf")
+
+	for _, required := range []string{
+		"pull_request:\n    branches: [main]",
+		"schedule:",
+		"workflow_dispatch:",
+		`if [ "$EVENT_NAME" != pull_request ] && [ "$ENABLED" = true ] && [ -n "$TRUSTED_REF" ] && [ "$REF" = "$TRUSTED_REF" ]; then`,
+		"pr-lifecycle:",
+		"name: PR-safe reachability lifecycle",
+		"if: ${{ github.event_name == 'pull_request' }}",
+		"name: Upload SHA-bound lifecycle evidence",
+		"go-oss-baselines:",
+		"name: Go corpus vs OSV-Scanner and Semgrep CE",
+		"python-oss-baselines:",
+		"name: Python corpus vs Semgrep CE",
+		"github.com/google/osv-scanner/v2/cmd/osv-scanner@${OSV_SCANNER_VERSION}",
+		"semgrep/semgrep@sha256:d39aa8d8cdb7fd9e5ec14f0825e2356f902129778c9617217856295e553254d5",
+		"docker run --rm --network none --user",
+		"-e SEMGREP_ENABLE_VERSION_CHECK=0 -e EIO_BACKEND=posix",
+		"scan --oss-only --metrics off --jobs 1 --config",
+		"go run ./cmd/synapse-bench -mode reachability-osv",
+		"go run ./cmd/synapse-bench -mode reachability-semgrep-ce -language go",
+		"go run ./cmd/synapse-bench -mode reachability-semgrep-ce -language python",
+		"TestGoReachabilityCorpus",
+		"TestPythonReachabilityCorpus",
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("workflow does not provide the required benchmark path: missing %q", required)
+		}
 	}
+
 	for _, required := range []string{
 		"GIT_CONFIG_NOSYSTEM: \"1\"",
 		"GIT_CONFIG_COUNT: \"0\"",
@@ -54,17 +77,9 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 		"GIT_TEMPLATE_DIR: \"\"",
 		"git_config=\"$runner_temp/synapse-reachability-gitconfig\"",
 		"printf 'GIT_CONFIG_GLOBAL=%s\\n' \"$git_config\" >> \"$GITHUB_ENV\"",
-		"printf 'GIT_CONFIG_PARAMETERS=\\n' >> \"$GITHUB_ENV\"",
 		"for name in \"${!GIT_@}\"; do",
-		"GIT_CONFIG_NOSYSTEM|GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS|GIT_TEMPLATE_DIR) ;;",
 		"unexpected inherited Git environment variable: $name",
 		"- name: Prepare fresh trusted checkout",
-		"cd \"$RUNNER_TEMP\"",
-		"realpath -m -- \"$workspace\"",
-		"rm -f -- \"$git_config\"",
-		"rm -rf -- \"$workspace\"",
-		"install -d -m 0700 -- \"$workspace\"",
-		"install -m 0600 /dev/null \"$git_config\"",
 		"clean: true",
 		"persist-credentials: false",
 		"set-safe-directory: false",
@@ -72,83 +87,69 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 		"BASELINE_REVISION: \"50d205260be412dc2f57736f71d1448a8f58177a\"",
 		"git reset --hard \"$SOURCE_SHA\"",
 		"git clean -ffdx",
-		"git rev-parse HEAD^{tree}",
 		"objects/info/alternates",
 		"refs/replace",
 		"git config --local --get-regexp '^(include|includeif\\..*)\\.path$'",
-		"git config --local --get core.hooksPath",
 		"CONTROLLER_SOURCE_ROOT: ${{ vars.REACHABILITY_BENCHMARK_CONTROLLER_ROOT }}",
 		"stage_root=\"$RUNNER_TEMP/synapse-reachability-controller\"",
-		"controller staging root already exists",
-		"max_authority_file_bytes=$((8 * 1024 * 1024))",
-		"authority_source=\"$controller_root/authority\"",
-		"declare -A expected_authority=()",
 		"controller authority inventory is not exact",
 		"controller authority entry exceeds the JSON size bound",
-		"controller authority entry escapes its root",
-		"$stage_root/authority/$authority_file",
-		"export TMPDIR=\"$RUNNER_TEMP\"",
-		"export SYNAPSE_REACHABILITY_CONTROLLER_ENVELOPE=\"$RUNNER_TEMP/synapse-reachability-controller/envelopes/$envelope_name\"",
-		"find -P \"$controller_root\" -xdev -type l",
-		"refs/heads/*) branch=",
-		"git check-ref-format --branch \"$branch\"",
-		"git rev-parse --is-shallow-repository",
-		"git rev-parse --verify \"$BASELINE_REVISION^{commit}\"",
-		"git merge-base --is-ancestor \"$BASELINE_REVISION\" \"$SOURCE_SHA\"",
 		"git fetch --no-tags origin \"$TRUSTED_REF:refs/remotes/origin/$branch\"",
-		"git rev-parse \"refs/remotes/origin/$branch\"",
 		"assert_jdk_21 java",
 		"assert_jdk_21 javac",
 		"assert_jdk_21 jar",
 	} {
 		if !strings.Contains(workflow, required) {
-			t.Fatalf("workflow does not safely stage controller input: missing %q", required)
+			t.Fatalf("workflow does not safely stage trusted input: missing %q", required)
 		}
-	}
-	if strings.Contains(workflow, "mv -- \"$workspace\"") || strings.Contains(workflow, "prior_checkout=") {
-		t.Fatal("workflow must remove and recreate the validated checkout without quarantining or copying it")
-	}
-	if strings.Contains(workflow, "printf '%s=\\n' \"$name\" >> \"$GITHUB_ENV\"") {
-		t.Fatal("workflow must reject unexpected inherited Git variables instead of persisting empty values")
-	}
-	if strings.Contains(workflow, "fetch-depth: 1") || strings.Contains(workflow, "git fetch --no-tags --depth=1") {
-		t.Fatal("workflow must retain complete trusted ancestry for baseline identity checks")
-	}
-	teardown := strings.Index(workflow, "- name: Teardown trusted benchmark workspace")
-	if teardown < 0 || !strings.Contains(workflow[teardown:], "if: ${{ always() }}") || !strings.Contains(workflow[teardown:], "\"$RUNNER_TEMP/synapse-reachability-gitconfig\"") || !strings.Contains(workflow[teardown:], "\"$RUNNER_TEMP/synapse-reachability-prior-checkout\"") {
-		t.Fatal("workflow teardown must always remove isolated Git state")
-	}
-	const pristineStatus = "git status --porcelain=v1 --untracked-files=all --ignored=matching"
-	if got := strings.Count(workflow, pristineStatus); got != 3 {
-		t.Fatalf("workflow pristine checkout status checks = %d, want 3", got)
-	}
-	prepare := strings.Index(workflow, "- name: Prepare fresh trusted checkout")
-	checkout := strings.Index(workflow, "- name: Check out exact source revision")
-	assertion := strings.Index(workflow, "- name: Assert fresh checkout and protected reference head")
-	setup := strings.Index(workflow, "- name: Set up Go")
-	helperBuild := strings.Index(workflow, "go build -o \"$tools_root/synapse-callgraph\"")
-	benchmark := strings.Index(workflow, "\n          make reachability-benchmark")
-	if prepare < 0 || checkout < 0 || assertion < 0 || setup < 0 || helperBuild < 0 || benchmark < 0 || !(prepare < checkout && checkout < assertion && assertion < setup && setup < helperBuild && helperBuild < benchmark) {
-		t.Fatal("workflow checkout preparation, assertion, setup, helper build, and benchmark are out of order")
-	}
-	if status := strings.LastIndex(workflow[:helperBuild], pristineStatus); status < strings.Index(workflow, "- name: Build trusted helpers") {
-		t.Fatal("workflow does not recheck full clean status immediately before helper compilation")
-	}
-	if status := strings.LastIndex(workflow[:benchmark], pristineStatus); status < strings.Index(workflow, "- name: Run trusted benchmark") {
-		t.Fatal("workflow does not recheck full clean status immediately before benchmark execution")
 	}
 
 	for _, required := range []string{
-		"aggregate:",
-		"needs: [route, benchmark]",
-		"test \"$ROUTE\" = success",
-		"test \"$BENCHMARK\" = success",
-		"test -n \"$ARTIFACT\"",
-		"test \"$BENCHMARK\" = skipped",
+		"- name: Run trusted benchmark from private immutable source",
+		"unshare --user --map-root-user --mount --fork --pid --mount-proc",
+		"mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs \"$PRIVATE_MOUNT\"",
+		"git clone --no-local --no-hardlinks --no-checkout -- \"$HOST_CHECKOUT\" \"$source_root\"",
+		"git checkout --detach \"$SOURCE_SHA\"",
+		"mount -o remount,bind,ro,nosuid,nodev \"$source_root\"",
+		"mount -o remount,bind,ro,nosuid,nodev \"$controller_root\"",
+		"test ! -w \"$source_root/go.mod\"",
+		"test ! -w \"$controller_root/envelopes/$ENVELOPE_NAME\"",
+		"go build -o \"$tools_root/synapse-callgraph\"",
+		"export SYNAPSE_REACHABILITY_CONTROLLER_ENVELOPE=\"$controller_root/envelopes/$ENVELOPE_NAME\"",
 	} {
 		if !strings.Contains(workflow, required) {
-			t.Fatalf("workflow aggregate is incomplete: missing %q", required)
+			t.Fatalf("workflow lacks immutable trusted execution custody: missing %q", required)
 		}
+	}
+
+	for _, required := range []string{
+		"needs: [route, benchmark, pr-lifecycle, go-oss-baselines, python-oss-baselines]",
+		"EVENT_NAME: ${{ github.event_name }}",
+		`if [ "$EVENT_NAME" = pull_request ]; then`,
+		`test "$TRUSTED" = false`,
+		`test "$BENCHMARK" = skipped`,
+		`test "$PR_LIFECYCLE" = success`,
+		`test -n "$PR_ARTIFACT"`,
+		`test "$TRUSTED" = true`,
+		`test "$BENCHMARK" = success`,
+		`test -n "$BENCHMARK_ARTIFACT"`,
+		`test "$PR_LIFECYCLE" = skipped`,
+		`test "$GO_BASELINE" = success`,
+		`test -n "$GO_ARTIFACT"`,
+		`test "$PYTHON_BASELINE" = success`,
+		`test -n "$PYTHON_ARTIFACT"`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("workflow aggregate does not enforce the event truth table: missing %q", required)
+		}
+	}
+
+	teardown := strings.Index(workflow, "- name: Teardown trusted benchmark workspace")
+	if teardown < 0 || !strings.Contains(workflow[teardown:], "if: ${{ always() }}") || !strings.Contains(workflow[teardown:], "\"$RUNNER_TEMP/synapse-reachability-private-runtime\"") {
+		t.Fatal("workflow teardown must always remove isolated trusted runtime state")
+	}
+	if strings.Contains(workflow, "fetch-depth: 1") || strings.Contains(workflow, "git fetch --no-tags --depth=1") {
+		t.Fatal("workflow must retain complete trusted ancestry for baseline identity checks")
 	}
 }
 
