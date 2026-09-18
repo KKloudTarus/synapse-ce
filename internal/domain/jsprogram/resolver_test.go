@@ -563,3 +563,147 @@ func TestResolveTruncatedDocumentIsIncomplete(t *testing.T) {
 		t.Fatal("a truncated document can never support a negative")
 	}
 }
+
+func TestResolveIndexedCallbacksRemainComplete(t *testing.T) {
+	fixture, target := callbackScaleDocument(64)
+	res := resolveOrFatal(t, fixture)
+	if !res.Complete {
+		t.Fatalf("indexed synchronous callbacks must remain complete, gaps=%v", res.Gaps)
+	}
+	if !res.Graph.Reaches(target) {
+		t.Fatal("the shared callback target must remain reachable")
+	}
+}
+
+func TestCallbackIndexesScaleWithFacts(t *testing.T) {
+	small, _ := callbackScaleDocument(32)
+	large, _ := callbackScaleDocument(64)
+
+	smallStats := callbackIndexStats(small.doc)
+	largeStats := callbackIndexStats(large.doc)
+
+	for _, check := range []struct {
+		name         string
+		small, large int
+	}{
+		{name: "calls", small: smallStats.calls, large: largeStats.calls},
+		{name: "parameter references", small: smallStats.parameterReferences, large: largeStats.parameterReferences},
+		{name: "direct invocation lookups", small: smallStats.directInvocationLookups, large: largeStats.directInvocationLookups},
+	} {
+		if check.large != 2*check.small {
+			t.Errorf("%s work grew from %d to %d; want exactly 2x when facts double", check.name, check.small, check.large)
+		}
+	}
+	if smallStats.assignments != 0 || largeStats.assignments != 0 || smallStats.returns != 0 || largeStats.returns != 0 {
+		t.Fatalf("callback fixture must not contribute assignment or return work: small=%+v large=%+v", smallStats, largeStats)
+	}
+}
+
+func TestResolveIndexedReturnedCallablesRemainComplete(t *testing.T) {
+	fixture, targets := returnedCallableScaleDocument(64)
+	res := resolveOrFatal(t, fixture)
+	if !res.Complete {
+		t.Fatalf("indexed returned callables must remain complete, gaps=%v", res.Gaps)
+	}
+	for _, target := range targets {
+		if !res.Graph.Reaches(target) {
+			t.Errorf("returned callable target %q must remain reachable", target)
+		}
+	}
+}
+
+func TestReturnedCallableIndexesScaleWithFacts(t *testing.T) {
+	small, _ := returnedCallableScaleDocument(32)
+	large, _ := returnedCallableScaleDocument(64)
+
+	smallStats := returnedCallableIndexStats(small.doc)
+	largeStats := returnedCallableIndexStats(large.doc)
+	for _, check := range []struct {
+		name         string
+		small, large int
+	}{
+		{name: "returns", small: smallStats.returns, large: largeStats.returns},
+		{name: "returned callable lookups", small: smallStats.returnedCallableLookups, large: largeStats.returnedCallableLookups},
+	} {
+		if check.large != 2*check.small {
+			t.Errorf("%s work grew from %d to %d; want exactly 2x when facts double", check.name, check.small, check.large)
+		}
+	}
+}
+
+func BenchmarkResolveIndexedCallbacks(b *testing.B) {
+	for _, size := range []int{64, 512, 4096} {
+		fixture, _ := callbackScaleDocument(size)
+		b.Run("calls_"+itoa(2*size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := Resolve(fixture.doc); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkResolveIndexedReturnedCallables(b *testing.B) {
+	for _, size := range []int{64, 512, 4096} {
+		fixture, _ := returnedCallableScaleDocument(size)
+		b.Run("calls_"+itoa(size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := Resolve(fixture.doc); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func callbackScaleDocument(size int) (*docBuilder, string) {
+	fixture := newDoc()
+	moduleID := fixture.module("app")
+	target := fixture.fn("app", "target", "target", moduleID, SymbolFunction)
+	for i := 0; i < size; i++ {
+		invokeName := "invoke" + itoa(i)
+		invoke := fixture.fn("app", invokeName, invokeName, moduleID, SymbolFunction)
+		fixture.positionalParams(invoke, "callback")
+		fixture.call("app", invoke, name("callback"), false)
+		fixture.call("app", moduleID, name(invokeName), false)
+		fixture.doc.Calls[len(fixture.doc.Calls)-1].Arguments = []Argument{{Value: name("target")}}
+	}
+	return fixture, target
+}
+
+func returnedCallableScaleDocument(size int) (*docBuilder, []string) {
+	fixture := newDoc()
+	moduleID := fixture.module("app")
+	targets := make([]string, 0, size)
+	for i := 0; i < size; i++ {
+		targetName := "target" + itoa(i)
+		factoryName := "factory" + itoa(i)
+		target := fixture.fn("app", targetName, targetName, moduleID, SymbolFunction)
+		factory := fixture.fn("app", factoryName, factoryName, moduleID, SymbolFunction)
+		fixture.doc.Returns = append(fixture.doc.Returns, Return{ScopeID: factory, Value: name(targetName), Pos: Position{File: "app.js", Line: 3}})
+		fixture.call("app", moduleID, callref(factoryName), false)
+		targets = append(targets, target)
+	}
+	return fixture, targets
+}
+
+func callbackIndexStats(document Document) resolverIndexStats {
+	resolver := newSemanticResolver(document)
+	resolver.indexImports()
+	resolver.indexCallableAliases()
+	resolver.indexReturnedCallables()
+	resolver.indexDirectInvocations()
+	resolver.indexSynchronousCallbacks()
+	return resolver.indexStats
+}
+
+func returnedCallableIndexStats(document Document) resolverIndexStats {
+	resolver := newSemanticResolver(document)
+	resolver.indexImports()
+	resolver.indexCallableAliases()
+	resolver.indexReturnedCallables()
+	return resolver.indexStats
+}

@@ -59,20 +59,57 @@ type jsType struct {
 	classID string
 }
 
+type parameterUse struct {
+	directCalls int
+	escapes     bool
+}
+
+type callResolution struct {
+	candidates []string
+	external   bool
+}
+
+type scopedName struct {
+	scopeID string
+	name    string
+}
+
+// resolverIndexStats makes resolver-index work visible to deterministic scaling tests rather than relying on
+// elapsed time, which varies between machines and test runs.
+type resolverIndexStats struct {
+	calls                   int
+	assignments             int
+	returns                 int
+	parameterReferences     int
+	directInvocationLookups int
+	returnedCallableLookups int
+}
+
 type semanticResolver struct {
-	document           Document
-	symbols            map[string]Symbol
-	modules            map[string]string                     // module name -> module symbol id
-	children           map[string]map[string][]string        // parent id -> child name -> child ids
-	imports            map[string]map[string][]importBinding // scope id -> local name -> bindings
-	aliases            map[string]map[string][]callableAlias // scope id -> local name -> direct callable assignments
-	parameterCallables map[string]map[string]string          // function id -> parameter name -> unique callable target
-	modeledCallbacks   map[string]bool                       // call id -> all callable arguments are modeled synchronously
-	returnedCallables  map[string]string                     // factory function id -> unique returned callable target
-	receivers          map[string]map[string][]jsType        // owner scope id -> local/attr name -> constructed types
-	bases              map[string][]string                   // class id -> base class ids (extends)
-	subclass           map[string][]string                   // class id -> direct subclass ids (reverse of bases)
-	gaps               []CoverageGap
+	document                  Document
+	symbols                   map[string]Symbol
+	modules                   map[string]string                     // module name -> module symbol id
+	children                  map[string]map[string][]string        // parent id -> child name -> child ids
+	imports                   map[string]map[string][]importBinding // scope id -> local name -> bindings
+	aliases                   map[string]map[string][]callableAlias // scope id -> local name -> direct callable assignments
+	callsByScope              map[string][]Call
+	assignmentsByScope        map[string][]Assignment
+	returnsByScope            map[string][]Return
+	parameterUses             map[string]map[string]parameterUse // function id -> parameter name -> observed uses
+	directInvocationsByTarget map[string][]Call                  // callable id -> unique direct call facts
+	callResolutions           map[string]callResolution          // call id -> current resolver-state resolution
+	directTargets             map[scopedName][]string
+	lexicalLookups            map[scopedName][]string
+	importLookups             map[scopedName][]importBinding
+	scopeChains               map[string][]string
+	parameterCallables        map[string]map[string]string   // function id -> parameter name -> unique callable target
+	modeledCallbacks          map[string]bool                // call id -> all callable arguments are modeled synchronously
+	returnedCallables         map[string]string              // factory function id -> unique returned callable target
+	receivers                 map[string]map[string][]jsType // owner scope id -> local/attr name -> constructed types
+	bases                     map[string][]string            // class id -> base class ids (extends)
+	subclass                  map[string][]string            // class id -> direct subclass ids (reverse of bases)
+	indexStats                resolverIndexStats
+	gaps                      []CoverageGap
 }
 
 type callableAlias struct {
@@ -94,15 +131,18 @@ func Resolve(document Document) (Resolution, error) {
 	r.indexImports()
 	r.indexCallableAliases()
 	r.indexReturnedCallables()
+	r.indexDirectInvocations()
 	r.indexSynchronousCallbacks()
 	r.indexBases()
+	r.resetDirectTargets()
 	r.indexReceivers()
+	r.resetCallResolutions()
 
 	edges := make(map[string]map[string]bool)
 	resolved := make([]ResolvedCall, 0, len(document.Calls))
 	edgeCount := 0
 	for _, call := range document.Calls {
-		candidates, external := r.resolveReference(call.CallerID, call.Callee, call.New, call.Pos)
+		candidates, external := r.resolveCall(call)
 		candidates = sortedUnique(candidates)
 		// A first-party function/class passed as a call argument normally escapes: a higher-order callee (a
 		// library map/forEach/then, or a first-party dispatcher) may invoke it through a path this graph does
@@ -186,18 +226,28 @@ func Resolve(document Document) (Resolution, error) {
 
 func newSemanticResolver(document Document) *semanticResolver {
 	r := &semanticResolver{
-		document:           document,
-		symbols:            make(map[string]Symbol, len(document.Symbols)),
-		modules:            make(map[string]string, len(document.Modules)),
-		children:           map[string]map[string][]string{},
-		imports:            map[string]map[string][]importBinding{},
-		aliases:            map[string]map[string][]callableAlias{},
-		parameterCallables: map[string]map[string]string{},
-		modeledCallbacks:   map[string]bool{},
-		returnedCallables:  map[string]string{},
-		receivers:          map[string]map[string][]jsType{},
-		bases:              map[string][]string{},
-		subclass:           map[string][]string{},
+		document:                  document,
+		symbols:                   make(map[string]Symbol, len(document.Symbols)),
+		modules:                   make(map[string]string, len(document.Modules)),
+		children:                  map[string]map[string][]string{},
+		imports:                   map[string]map[string][]importBinding{},
+		aliases:                   map[string]map[string][]callableAlias{},
+		callsByScope:              map[string][]Call{},
+		assignmentsByScope:        map[string][]Assignment{},
+		returnsByScope:            map[string][]Return{},
+		parameterUses:             map[string]map[string]parameterUse{},
+		directInvocationsByTarget: map[string][]Call{},
+		callResolutions:           map[string]callResolution{},
+		directTargets:             map[scopedName][]string{},
+		lexicalLookups:            map[scopedName][]string{},
+		importLookups:             map[scopedName][]importBinding{},
+		scopeChains:               map[string][]string{},
+		parameterCallables:        map[string]map[string]string{},
+		modeledCallbacks:          map[string]bool{},
+		returnedCallables:         map[string]string{},
+		receivers:                 map[string]map[string][]jsType{},
+		bases:                     map[string][]string{},
+		subclass:                  map[string][]string{},
 	}
 	for _, symbol := range document.Symbols {
 		r.symbols[symbol.ID] = symbol
@@ -216,7 +266,109 @@ func newSemanticResolver(document Document) *semanticResolver {
 			sort.Strings(r.children[parent][name])
 		}
 	}
+	r.indexFacts()
 	return r
+}
+
+// indexFacts groups each source fact once so callback and return resolution stay linear in the fact set.
+func (r *semanticResolver) indexFacts() {
+	for _, symbol := range r.document.Symbols {
+		if !isCallableSymbol(symbol) {
+			continue
+		}
+		for _, parameter := range symbol.Parameters {
+			if parameter.Name == "" {
+				continue
+			}
+			if r.parameterUses[symbol.ID] == nil {
+				r.parameterUses[symbol.ID] = map[string]parameterUse{}
+			}
+			r.parameterUses[symbol.ID][parameter.Name] = parameterUse{}
+		}
+	}
+	for _, call := range r.document.Calls {
+		r.callsByScope[call.CallerID] = append(r.callsByScope[call.CallerID], call)
+		r.indexStats.calls++
+		r.indexParameterUseFromCall(call)
+	}
+	for _, assignment := range r.document.Assignments {
+		r.assignmentsByScope[assignment.ScopeID] = append(r.assignmentsByScope[assignment.ScopeID], assignment)
+		r.indexStats.assignments++
+		r.recordParameterReference(assignment.ScopeID, assignment.Value, "")
+		for _, target := range assignment.Targets {
+			r.recordParameterReference(assignment.ScopeID, target, "")
+		}
+	}
+	for _, returned := range r.document.Returns {
+		r.returnsByScope[returned.ScopeID] = append(r.returnsByScope[returned.ScopeID], returned)
+		r.indexStats.returns++
+		r.recordParameterReference(returned.ScopeID, returned.Value, "")
+	}
+}
+
+func (r *semanticResolver) indexParameterUseFromCall(call Call) {
+	uses := r.parameterUses[call.CallerID]
+	if len(uses) == 0 {
+		return
+	}
+	directName := ""
+	if call.Callee.Kind == ReferenceName && len(call.Callee.Segments) == 1 && !call.New {
+		name := call.Callee.Segments[0]
+		if use, ok := uses[name]; ok {
+			use.directCalls++
+			uses[name] = use
+			r.indexStats.parameterReferences++
+			directName = name
+		}
+	}
+	r.recordParameterReference(call.CallerID, call.Callee, directName)
+	for _, argument := range call.Arguments {
+		r.recordParameterReference(call.CallerID, argument.Value, directName)
+	}
+}
+
+func (r *semanticResolver) recordParameterReference(scopeID string, reference Reference, ignoredName string) {
+	if len(reference.Segments) == 0 || reference.Segments[0] == ignoredName {
+		return
+	}
+	uses := r.parameterUses[scopeID]
+	use, ok := uses[reference.Segments[0]]
+	if !ok {
+		return
+	}
+	use.escapes = true
+	uses[reference.Segments[0]] = use
+	r.indexStats.parameterReferences++
+}
+
+func (r *semanticResolver) indexDirectInvocations() {
+	for _, calls := range r.callsByScope {
+		for _, call := range calls {
+			r.indexStats.directInvocationLookups++
+			candidates, external := r.resolveCall(call)
+			if external || len(candidates) != 1 {
+				continue
+			}
+			r.directInvocationsByTarget[candidates[0]] = append(r.directInvocationsByTarget[candidates[0]], call)
+		}
+	}
+}
+
+func (r *semanticResolver) resolveCall(call Call) ([]string, bool) {
+	if cached, ok := r.callResolutions[call.ID]; ok {
+		return cached.candidates, cached.external
+	}
+	candidates, external := r.resolveReference(call.CallerID, call.Callee, call.New, call.Pos)
+	r.callResolutions[call.ID] = callResolution{candidates: candidates, external: external}
+	return candidates, external
+}
+
+func (r *semanticResolver) resetCallResolutions() {
+	r.callResolutions = map[string]callResolution{}
+}
+
+func (r *semanticResolver) resetDirectTargets() {
+	r.directTargets = map[scopedName][]string{}
 }
 
 func (r *semanticResolver) indexImports() {
@@ -245,18 +397,20 @@ func (r *semanticResolver) indexImports() {
 // is exactly one assignment in its lexical scope, the assignment precedes the call, and its value is a direct
 // first-party callable. Multiple writes, property reads, expressions, and unknown values remain unresolved.
 func (r *semanticResolver) indexCallableAliases() {
-	for _, assignment := range r.document.Assignments {
-		for _, target := range assignment.Targets {
-			if target.Kind != ReferenceName || len(target.Segments) != 1 {
-				continue
+	for scopeID, assignments := range r.assignmentsByScope {
+		for _, assignment := range assignments {
+			for _, target := range assignment.Targets {
+				if target.Kind != ReferenceName || len(target.Segments) != 1 {
+					continue
+				}
+				if r.aliases[scopeID] == nil {
+					r.aliases[scopeID] = map[string][]callableAlias{}
+				}
+				name := target.Segments[0]
+				r.aliases[scopeID][name] = append(r.aliases[scopeID][name], callableAlias{
+					scopeID: scopeID, value: assignment.Value, pos: assignment.Pos,
+				})
 			}
-			if r.aliases[assignment.ScopeID] == nil {
-				r.aliases[assignment.ScopeID] = map[string][]callableAlias{}
-			}
-			name := target.Segments[0]
-			r.aliases[assignment.ScopeID][name] = append(r.aliases[assignment.ScopeID][name], callableAlias{
-				scopeID: assignment.ScopeID, value: assignment.Value, pos: assignment.Pos,
-			})
 		}
 	}
 }
@@ -265,14 +419,11 @@ func (r *semanticResolver) indexCallableAliases() {
 // excludes aliases, member reads, expressions, and multiple return statements; each could select a different
 // runtime value and must leave a later f()() call unresolved.
 func (r *semanticResolver) indexReturnedCallables() {
-	returns := map[string][]Return{}
-	for _, item := range r.document.Returns {
-		returns[item.ScopeID] = append(returns[item.ScopeID], item)
-	}
-	for functionID, items := range returns {
+	for functionID, items := range r.returnsByScope {
 		if len(items) != 1 || !isCallableSymbol(r.symbols[functionID]) {
 			continue
 		}
+		r.indexStats.returnedCallableLookups++
 		targets := r.directCallableTargets(functionID, items[0].Value)
 		if len(targets) == 1 {
 			r.returnedCallables[functionID] = targets[0]
@@ -335,13 +486,14 @@ func (r *semanticResolver) indexSynchronousCallbacks() {
 		}
 		r.parameterCallables[model.functionID][model.name] = model.target
 	}
+	r.resetCallResolutions()
 
 	// Mark an invocation modeled only when every first-party callable argument matched one of the unique parameter
 	// bindings above. This preserves gaps for a dispatcher with one modeled and one escaping callback.
 	for _, call := range r.document.Calls {
 		callableArguments := 0
 		modeled := 0
-		candidates, external := r.resolveReference(call.CallerID, call.Callee, call.New, call.Pos)
+		candidates, external := r.resolveCall(call)
 		if external || len(candidates) != 1 {
 			continue
 		}
@@ -364,60 +516,12 @@ func (r *semanticResolver) indexSynchronousCallbacks() {
 }
 
 func (r *semanticResolver) directInvocations(functionID string) []Call {
-	var out []Call
-	for _, call := range r.document.Calls {
-		candidates, external := r.resolveReference(call.CallerID, call.Callee, call.New, call.Pos)
-		if !external && len(candidates) == 1 && candidates[0] == functionID {
-			out = append(out, call)
-		}
-	}
-	return out
+	return r.directInvocationsByTarget[functionID]
 }
 
 func (r *semanticResolver) parameterIsSingleDirectCall(functionID, parameter string) bool {
-	calls := 0
-	for _, call := range r.document.Calls {
-		if call.CallerID != functionID {
-			continue
-		}
-		if isBareName(call.Callee, parameter) && !call.New {
-			calls++
-			continue
-		}
-		// Any member use of the parameter is a property escape, and any argument use can hand the callback to
-		// another dispatcher. Neither can be folded into this one synchronous invocation.
-		if referenceStartsWith(call.Callee, parameter) {
-			return false
-		}
-		for _, argument := range call.Arguments {
-			if referenceStartsWith(argument.Value, parameter) {
-				return false
-			}
-		}
-	}
-	for _, assignment := range r.document.Assignments {
-		if assignment.ScopeID != functionID {
-			continue
-		}
-		if referenceStartsWith(assignment.Value, parameter) {
-			return false
-		}
-		for _, target := range assignment.Targets {
-			if referenceStartsWith(target, parameter) {
-				return false
-			}
-		}
-	}
-	for _, returned := range r.document.Returns {
-		if returned.ScopeID == functionID && referenceStartsWith(returned.Value, parameter) {
-			return false
-		}
-	}
-	return calls == 1
-}
-
-func referenceStartsWith(reference Reference, name string) bool {
-	return len(reference.Segments) > 0 && reference.Segments[0] == name
+	use, ok := r.parameterUses[functionID][parameter]
+	return ok && use.directCalls == 1 && !use.escapes
 }
 
 func isCallableSymbol(symbol Symbol) bool {
@@ -426,10 +530,6 @@ func isCallableSymbol(symbol Symbol) bool {
 		return true
 	}
 	return false
-}
-
-func isBareName(reference Reference, name string) bool {
-	return reference.Kind == ReferenceName && len(reference.Segments) == 1 && reference.Segments[0] == name
 }
 
 // resolveSpecifier maps an import specifier to an in-document module name. A first-party relative specifier
@@ -673,25 +773,32 @@ func (r *semanticResolver) directCallableTargets(scopeID string, ref Reference) 
 	if ref.Kind != ReferenceName || len(ref.Segments) != 1 {
 		return nil
 	}
-	name := ref.Segments[0]
-	if local := r.lookupLexical(scopeID, name); len(local) > 0 {
+	key := scopedName{scopeID: scopeID, name: ref.Segments[0]}
+	if targets, ok := r.directTargets[key]; ok {
+		return targets
+	}
+	if local := r.lookupLexical(scopeID, key.name); len(local) > 0 {
 		var candidates []string
 		for _, id := range local {
 			candidates = append(candidates, r.targetsFromLocal(id)...)
 		}
-		return sortedUnique(candidates)
+		targets := sortedUnique(candidates)
+		r.directTargets[key] = targets
+		return targets
 	}
 	var candidates []string
-	for _, binding := range r.lookupImports(scopeID, name) {
+	for _, binding := range r.lookupImports(scopeID, key.name) {
 		if !binding.firstParty {
 			continue
 		}
-		ids, external := r.targetsFromImport(binding, []string{name})
+		ids, external := r.targetsFromImport(binding, []string{key.name})
 		if !external {
 			candidates = append(candidates, ids...)
 		}
 	}
-	return sortedUnique(candidates)
+	targets := sortedUnique(candidates)
+	r.directTargets[key] = targets
+	return targets
 }
 
 func (r *semanticResolver) callableTargetsAt(scopeID string, ref Reference, pos Position) []string {
@@ -957,21 +1064,29 @@ func (r *semanticResolver) lookupQualifiedChildren(parent string, path []string)
 }
 
 func (r *semanticResolver) lookupLexical(scopeID, name string) []string {
-	for _, scope := range r.scopeChain(scopeID) {
-		if children := r.children[scope][name]; len(children) > 0 {
-			return children
-		}
+	key := scopedName{scopeID: scopeID, name: name}
+	if values, ok := r.lexicalLookups[key]; ok {
+		return values
 	}
-	return nil
+	values := r.children[scopeID][name]
+	if len(values) == 0 && scopeID != "" {
+		values = r.lookupLexical(r.symbols[scopeID].ParentID, name)
+	}
+	r.lexicalLookups[key] = values
+	return values
 }
 
 func (r *semanticResolver) lookupImports(scopeID, name string) []importBinding {
-	for _, scope := range r.scopeChain(scopeID) {
-		if bindings := r.imports[scope][name]; len(bindings) > 0 {
-			return bindings
-		}
+	key := scopedName{scopeID: scopeID, name: name}
+	if values, ok := r.importLookups[key]; ok {
+		return values
 	}
-	return nil
+	values := r.imports[scopeID][name]
+	if len(values) == 0 && scopeID != "" {
+		values = r.lookupImports(r.symbols[scopeID].ParentID, name)
+	}
+	r.importLookups[key] = values
+	return values
 }
 
 func (r *semanticResolver) receiverTypes(scopeID, name string) []jsType {
@@ -984,6 +1099,10 @@ func (r *semanticResolver) receiverTypes(scopeID, name string) []jsType {
 }
 
 func (r *semanticResolver) scopeChain(scopeID string) []string {
+	if chain, ok := r.scopeChains[scopeID]; ok {
+		return chain
+	}
+	original := scopeID
 	var chain []string
 	seen := map[string]bool{}
 	for scopeID != "" && !seen[scopeID] {
@@ -991,6 +1110,7 @@ func (r *semanticResolver) scopeChain(scopeID string) []string {
 		chain = append(chain, scopeID)
 		scopeID = r.symbols[scopeID].ParentID
 	}
+	r.scopeChains[original] = chain
 	return chain
 }
 
