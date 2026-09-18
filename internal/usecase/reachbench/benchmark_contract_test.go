@@ -8,8 +8,54 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 )
+
+func TestReachabilityBenchmarkSuppressionProjectionControlsRemainSeparateFromOracle(t *testing.T) {
+	contract := DefaultReachabilityBenchmark()
+	for _, item := range contract.Oracle.Cases {
+		if item.SuppressionApplicable || item.CompletenessContract != nil {
+			t.Fatalf("oracle case %q pre-authorizes suppression", item.CaseID)
+		}
+	}
+	expected := map[string]string{
+		"dotnet-build-aware-import-control-unreachable": "dotnet/build_aware_import",
+		"go-source-tier2-control-unreachable":           "go/source_tier2",
+		"python-import-control-unreachable":             "python/import",
+		"python-semantic-control-unreachable":           "python/semantic",
+	}
+	for _, item := range contract.Corpus.Cases {
+		if want, ok := expected[item.ID]; ok {
+			if got := item.CohortID + "/" + item.ModeID; got != want {
+				t.Fatalf("conformance control %q uses %q, want %q", item.ID, got, want)
+			}
+			delete(expected, item.ID)
+		}
+	}
+	if len(expected) != 0 {
+		t.Fatalf("missing suppression conformance controls: %v", expected)
+	}
+	registry, err := judgment.NewInitialReachabilityAuthorityRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	eligible := map[string]bool{}
+	for _, policy := range registry.Policies() {
+		if policy.Disposition() == judgment.SuppressionEligible {
+			eligible[policy.Key().String()] = true
+		}
+	}
+	for _, key := range []string{"dotnet/build_aware_import", "go/source_tier2", "python/import", "python/semantic"} {
+		if !eligible[key] {
+			t.Fatalf("authority registry lacks suppression-eligible mode %q", key)
+		}
+		delete(eligible, key)
+	}
+	if len(eligible) != 0 {
+		t.Fatalf("authority registry has unexpected suppression-eligible modes: %v", eligible)
+	}
+}
 
 func TestReachabilityBenchmarkHasFrozenShape(t *testing.T) {
 	contract := DefaultReachabilityBenchmark()
@@ -655,7 +701,7 @@ func TestNoCoverageLocatorsResolveStableMarkers(t *testing.T) {
 		{"c-cpp-symbols-tier2-input", "pkg:reachbench/c_cpp/symbols_tier2#controlNoCoverage", "fixtures/c_cpp/symbols_tier2/main.cpp", 13, "reachbench::controlNoCoverage", "void controlNoCoverage()"},
 		{"go-source-tier2-input", "pkg:reachbench/go/source_tier2#controlNoCoverage", "fixtures/golang/source_tier2/go.mod.src", 5, "entrypoint-authority", "// no-coverage-capability: entrypoint-authority"},
 		{"javascript-interprocedural-input", "pkg:reachbench/javascript/interprocedural#controlNoCoverage", "fixtures/javascript/interprocedural/package.json", 7, "parser-unavailable", `"noCoverageCapability": "parser-unavailable"`},
-		{"javascript-lexical-input", "pkg:reachbench/javascript/lexical#controlNoCoverage", "fixtures/javascript/lexical/package.json", 7, "parser-unavailable", `"noCoverageCapability": "parser-unavailable"`},
+		{"javascript-lexical-input", "pkg:reachbench/javascript/lexical#controlNoCoverage", "fixtures/javascript/lexical/package.json", 11, "parser-unavailable", `"noCoverageCapability": "parser-unavailable"`},
 		{"php-symbols-tier2-input", "pkg:reachbench/php/symbols_tier2#controlNoCoverage", "fixtures/php/symbols_tier2/composer.json", 6, "unsupported-tier", `"no-coverage-capability": "unsupported-tier"`},
 		{"python-semantic-input", "pkg:reachbench/python/semantic#controlNoCoverage", "fixtures/python/semantic/pyproject.toml", 11, "typing-stubs", `no_coverage_capability = "typing-stubs"`},
 		{"ruby-symbols-tier2-input", "pkg:reachbench/ruby/symbols_tier2#controlNoCoverage", "fixtures/ruby/symbols_tier2/reachbench-ruby-symbols.gemspec", 5, "unsupported-tier", `spec.metadata["reachbench.no_coverage_capability"] = "unsupported-tier"`},
@@ -790,11 +836,11 @@ func TestReachabilityBenchmarkLoadersAreStrictDeterministicAndPinned(t *testing.
 		got  string
 		want string
 	}{
-		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:f160089dcbbb8edc9361d189019e036be50411e7f88d343298808182037e2fea"},
+		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:53bc5178ee731756fdfdd410bda45f2a20a5d14129ce2e8ae85da8d79911d6a0"},
 		{"oracle", DigestReachabilityOracleMust(t, first.Oracle), "sha256:0299297cb1bacbdab7156536d2de3b21992e1f3c085ab109f95162f4eef6dfe6"},
 		{"challenges", DigestChallengeManifestMust(t, first.Challenges), "sha256:a967a0b5423e79961f28121cc5dfe71e1464850d1e2af0ca9fa74cebfc7db0aa"},
-		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:c94d5de54a17439068290c5a07d878fb79e4fe024e905aa3df7c28f5c08cd1db"},
-		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:74ccffb51df59ef30f6b2b73026ebb829ffdd837138f9c2f75d88ea11974eb65"},
+		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:683c48b3a70257e7b7f5441d74a1e64efbd7283e6b9f028c5af8d0f4032d3a7c"},
+		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:81be3b87b9ed704e51164fb392f058a547b63296cceff5b3de0be746e4f31078"},
 	} {
 		if item.got != item.want {
 			t.Errorf("%s digest = %s, want %s", item.name, item.got, item.want)
