@@ -11,7 +11,7 @@ import (
 
 func TestExecuteCLIRejectsAllArguments(t *testing.T) {
 	called := false
-	code := executeCLI([]string{"--run-key", "caller-controlled"}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, []string) (cycle.Result, error) {
+	code := executeCLI(context.Background(), []string{"--run-key", "caller-controlled"}, &bytes.Buffer{}, &bytes.Buffer{}, func(context.Context, []string) (cycle.Result, error) {
 		called = true
 		return cycle.Result{}, nil
 	})
@@ -22,7 +22,7 @@ func TestExecuteCLIRejectsAllArguments(t *testing.T) {
 
 func TestExecuteCLIPassesNoArgumentsToLifecycle(t *testing.T) {
 	var received []string
-	code := executeCLI(nil, &bytes.Buffer{}, &bytes.Buffer{}, func(_ context.Context, args []string) (cycle.Result, error) {
+	code := executeCLI(context.Background(), nil, &bytes.Buffer{}, &bytes.Buffer{}, func(_ context.Context, args []string) (cycle.Result, error) {
 		received = args
 		return cycle.Result{}, nil
 	})
@@ -31,9 +31,22 @@ func TestExecuteCLIPassesNoArgumentsToLifecycle(t *testing.T) {
 	}
 }
 
+func TestExecuteCLIPassesCancellationToLifecycle(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var lifecycleContext context.Context
+	code := executeCLI(ctx, nil, &bytes.Buffer{}, &bytes.Buffer{}, func(received context.Context, _ []string) (cycle.Result, error) {
+		lifecycleContext = received
+		return cycle.Result{}, nil
+	})
+	if code != 0 || lifecycleContext == nil || !errors.Is(lifecycleContext.Err(), context.Canceled) {
+		t.Fatalf("CLI code = %d, lifecycle context error = %v; want propagated cancellation", code, lifecycleContext.Err())
+	}
+}
+
 func TestExecuteCLIReportsLifecycleFailure(t *testing.T) {
 	stderr := &bytes.Buffer{}
-	code := executeCLI(nil, &bytes.Buffer{}, stderr, func(context.Context, []string) (cycle.Result, error) {
+	code := executeCLI(context.Background(), nil, &bytes.Buffer{}, stderr, func(context.Context, []string) (cycle.Result, error) {
 		return cycle.Result{}, errors.New("capture unavailable")
 	})
 	if code != 1 || !bytes.Contains(stderr.Bytes(), []byte("capture unavailable")) {

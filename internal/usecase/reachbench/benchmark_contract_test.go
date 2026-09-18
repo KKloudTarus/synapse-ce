@@ -653,6 +653,7 @@ func TestNoCoverageLocatorsResolveStableMarkers(t *testing.T) {
 		marker    string
 	}{
 		{"c-cpp-symbols-tier2-input", "pkg:reachbench/c_cpp/symbols_tier2#controlNoCoverage", "fixtures/c_cpp/symbols_tier2/main.cpp", 13, "reachbench::controlNoCoverage", "void controlNoCoverage()"},
+		{"go-source-tier2-input", "pkg:reachbench/go/source_tier2#controlNoCoverage", "fixtures/golang/source_tier2/go.mod.src", 5, "entrypoint-authority", "// no-coverage-capability: entrypoint-authority"},
 		{"javascript-interprocedural-input", "pkg:reachbench/javascript/interprocedural#controlNoCoverage", "fixtures/javascript/interprocedural/package.json", 7, "parser-unavailable", `"noCoverageCapability": "parser-unavailable"`},
 		{"javascript-lexical-input", "pkg:reachbench/javascript/lexical#controlNoCoverage", "fixtures/javascript/lexical/package.json", 7, "parser-unavailable", `"noCoverageCapability": "parser-unavailable"`},
 		{"php-symbols-tier2-input", "pkg:reachbench/php/symbols_tier2#controlNoCoverage", "fixtures/php/symbols_tier2/composer.json", 6, "unsupported-tier", `"no-coverage-capability": "unsupported-tier"`},
@@ -789,11 +790,11 @@ func TestReachabilityBenchmarkLoadersAreStrictDeterministicAndPinned(t *testing.
 		got  string
 		want string
 	}{
-		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:973ecaa8d311f5f904a61e1738f52e1178994869ae1cd0a10527fa373cf46330"},
+		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:f160089dcbbb8edc9361d189019e036be50411e7f88d343298808182037e2fea"},
 		{"oracle", DigestReachabilityOracleMust(t, first.Oracle), "sha256:0299297cb1bacbdab7156536d2de3b21992e1f3c085ab109f95162f4eef6dfe6"},
 		{"challenges", DigestChallengeManifestMust(t, first.Challenges), "sha256:a967a0b5423e79961f28121cc5dfe71e1464850d1e2af0ca9fa74cebfc7db0aa"},
-		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:ae8c4e22d548cb0fa6a1fb2e370e8c9385ec16939ba04fada8a771db115bdef6"},
-		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:08a813afbac0b385a77753e4f243b2aa8565cd1f568c3a11a8ed24fcb342fb02"},
+		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:c94d5de54a17439068290c5a07d878fb79e4fe024e905aa3df7c28f5c08cd1db"},
+		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:74ccffb51df59ef30f6b2b73026ebb829ffdd837138f9c2f75d88ea11974eb65"},
 	} {
 		if item.got != item.want {
 			t.Errorf("%s digest = %s, want %s", item.name, item.got, item.want)

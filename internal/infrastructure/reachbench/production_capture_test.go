@@ -10,6 +10,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/runtimereach"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -156,6 +157,226 @@ func TestProductionCaptureCapturesScopedNPMNoCoverageCell(t *testing.T) {
 	}
 }
 
+func TestProductionCaptureMarksGoManifestCapabilityNoCoverageUnsupported(t *testing.T) {
+	contract := measurement.DefaultReachabilityBenchmark()
+	var cell ExecutionCell
+	for _, item := range contract.Corpus.Cases {
+		if item.ID != "go-source-tier2-control-no-coverage" {
+			continue
+		}
+		if item.Fixture == nil {
+			t.Fatal("frozen Go no-coverage control has no fixture")
+		}
+		cell = ExecutionCell{
+			CaseID: item.ID, CohortID: item.CohortID, ModeID: item.ModeID, BindingID: "api", AnalyzerID: "sca-go-source-tier2",
+			Configuration: captureArtifact("configuration"), SubjectID: item.SubjectID, Fixture: *item.Fixture,
+			BoundaryID: "sca/reachability/go-source-tier2/api",
+		}
+		break
+	}
+	if cell.CaseID == "" {
+		t.Fatal("frozen Go no-coverage control is missing")
+	}
+
+	capture, err := NewProductionCapture(ProductionCaptureDependencies{
+		Materializer: newFixtureMaterializer(t, &fixtureToolRunner{}, "linux/amd64"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceStore, err := benchcycle.NewEvidenceStore(t.TempDir(), reachabilityEvidenceLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := capture.Capture(context.Background(), CaptureRequest{
+		Cell: cell, Repetition: 1, WorkRoot: privateMaterializerRoot(t),
+		Analyzer: RevisionIdentity{ID: AnalyzerSubjectID, Commit: measurement.TrustedBaselineRevision, Tree: strings.Repeat("b", 40)},
+		Snapshot: captureSnapshot(), attempt: benchcycle.AttemptAddress{CellKey: "go-manifest-capability", Repetition: 1}, evidence: evidenceStore,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coverage := result.Observation.Coverage
+	if !result.Observation.Invoked || result.Observation.Outcome != measurement.OutcomeNoAnalysis ||
+		coverage.Status != measurement.CoverageUnavailable || len(coverage.Reasons) != 1 || coverage.Reasons[0].Code != measurement.CoverageReasonUnsupported {
+		t.Fatalf("Go manifest capability observation = %#v, want invoked unsupported no-analysis", result.Observation)
+	}
+	if result.Observation.Suppression.Claim != measurement.SuppressionNone || len(result.EvidenceReceipts) != 1 {
+		t.Fatalf("Go manifest capability capture = %#v", result)
+	}
+}
+
+func TestCoverageFromRecordedAnalysisUsesSubjectEvidence(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		requested []string
+		analysis  *reachability.Analysis
+		status    measurement.CoverageStatus
+		reason    measurement.CoverageReasonCode
+	}{
+		{
+			name:      "all requested symbols answered",
+			requested: []string{"first", "second"},
+			analysis:  &reachability.Analysis{Results: []reachability.Result{{Symbol: "first"}, {Symbol: "second"}}},
+			status:    measurement.CoverageComplete,
+		},
+		{
+			name:      "some requested symbols answered",
+			requested: []string{"first", "second"},
+			analysis:  &reachability.Analysis{Results: []reachability.Result{{Symbol: "first"}}},
+			status:    measurement.CoveragePartial,
+			reason:    measurement.CoverageReasonUnknown,
+		},
+		{
+			name:      "no requested symbols answered",
+			requested: []string{"subject"},
+			analysis:  &reachability.Analysis{},
+			status:    measurement.CoverageUnavailable,
+			reason:    measurement.CoverageReasonUnknown,
+		},
+		{
+			name:      "analysis blind construct establishes partial coverage",
+			requested: []string{"subject"},
+			analysis:  &reachability.Analysis{BlindConstructs: []string{"reflection"}},
+			status:    measurement.CoveragePartial,
+			reason:    measurement.CoverageReasonOpaque,
+		},
+		{
+			name:      "relevant result blind construct establishes partial coverage",
+			requested: []string{"subject"},
+			analysis:  &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject", BlindConstructs: []string{"dynamic dispatch"}}}},
+			status:    measurement.CoveragePartial,
+			reason:    measurement.CoverageReasonOpaque,
+		},
+		{
+			name:      "relevant unknown marker establishes partial coverage",
+			requested: []string{"subject"},
+			analysis:  &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject", Path: []string{"coverage:unknown"}}}},
+			status:    measurement.CoveragePartial,
+			reason:    measurement.CoverageReasonUnknown,
+		},
+		{
+			name:      "unrelated blind result does not answer the subject",
+			requested: []string{"subject"},
+			analysis:  &reachability.Analysis{Results: []reachability.Result{{Symbol: "other", BlindConstructs: []string{"reflection"}}}},
+			status:    measurement.CoverageUnavailable,
+			reason:    measurement.CoverageReasonUnknown,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			coverage := coverageFromRecordedAnalysis(testCase.requested, testCase.analysis, coverageAnswersRequestedSymbols)
+			if coverage.Status != testCase.status {
+				t.Fatalf("coverage status = %q, want %q", coverage.Status, testCase.status)
+			}
+			if testCase.reason == "" {
+				if len(coverage.Reasons) != 0 {
+					t.Fatalf("coverage reasons = %#v, want none", coverage.Reasons)
+				}
+				return
+			}
+			if len(coverage.Reasons) != 1 || coverage.Reasons[0].Code != testCase.reason {
+				t.Fatalf("coverage reasons = %#v, want %q", coverage.Reasons, testCase.reason)
+			}
+		})
+	}
+}
+
+func TestCallGraphCoverageRequiresEntrypointAuthority(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		requirement analysisCoverageRequirement
+		analysis    *reachability.Analysis
+		status      measurement.CoverageStatus
+		reason      measurement.CoverageReasonCode
+	}{
+		{
+			name:        "Tier-2 call graph without entrypoints is unavailable",
+			requirement: coverageRequiresEntrypointAuthority,
+			analysis:    &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject"}}},
+			status:      measurement.CoverageUnavailable,
+			reason:      measurement.CoverageReasonUnknown,
+		},
+		{
+			name:        "Tier-2 call graph with recorded entrypoints is complete",
+			requirement: coverageRequiresEntrypointAuthority,
+			analysis:    &reachability.Analysis{Entrypoints: []string{"main.main"}, Results: []reachability.Result{{Symbol: "subject"}}},
+			status:      measurement.CoverageComplete,
+		},
+		{
+			name:        "Tier-1 import analysis does not require entrypoints",
+			requirement: coverageAnswersRequestedSymbols,
+			analysis:    &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject"}}},
+			status:      measurement.CoverageComplete,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			coverage := coverageFromRecordedAnalysis([]string{"subject"}, testCase.analysis, testCase.requirement)
+			if coverage.Status != testCase.status {
+				t.Fatalf("coverage status = %q, want %q", coverage.Status, testCase.status)
+			}
+			if testCase.reason == "" {
+				if len(coverage.Reasons) != 0 {
+					t.Fatalf("coverage reasons = %#v, want none", coverage.Reasons)
+				}
+				return
+			}
+			if len(coverage.Reasons) != 1 || coverage.Reasons[0].Code != testCase.reason {
+				t.Fatalf("coverage reasons = %#v, want %q", coverage.Reasons, testCase.reason)
+			}
+		})
+	}
+}
+
+func TestRunStaticWithNoSubjectsReportsUnsupportedCoverage(t *testing.T) {
+	lifecycle, err := newCaptureLifecycle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	executed, err := runStatic(context.Background(), MaterializedFixture{Root: "/private/fixture"}, measurement.ResolvedFixtureSubject{}, lifecycle, coverageAnswersRequestedSymbols, nil,
+		func() (staticAnalyzer, error) {
+			called = true
+			return &captureTestAnalyzer{}, nil
+		},
+		func(staticAnalyzer) (*reachproof.Coordinator, error) {
+			return nil, errors.New("coordinator must not be constructed")
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called || !executed.invoked || executed.coverage.Status != measurement.CoverageUnavailable || len(executed.coverage.Reasons) != 1 || executed.coverage.Reasons[0].Code != measurement.CoverageReasonUnsupported {
+		t.Fatalf("zero-subject static execution = %#v, analyzer called = %t", executed, called)
+	}
+}
+
+func TestSymbolSubjectsRejectManifestCapabilityLocator(t *testing.T) {
+	manifest := measurement.ResolvedFixtureSubject{Subject: measurement.FixtureSubject{
+		ID:      "pkg:reachbench/javascript/lexical#controlNoCoverage",
+		Locator: measurement.FixtureLocator{Kind: measurement.FixtureLocatorManifestCapability, Symbol: "parser-unavailable"},
+	}}
+	if subjects := symbolSubjects(manifest); len(subjects) != 0 {
+		t.Fatalf("manifest capability subjects = %#v, want none", subjects)
+	}
+	source := manifest
+	source.Subject.Locator.Kind = measurement.FixtureLocatorSourceSymbol
+	if subjects := symbolSubjects(source); len(subjects) != 1 || len(subjects[0].Symbols) != 1 || subjects[0].Symbols[0] != "parser-unavailable" {
+		t.Fatalf("source symbol subjects = %#v", subjects)
+	}
+}
+
+func TestJVMCoarseCoverageDoesNotTreatUnreferencedAsDeadCode(t *testing.T) {
+	if coverage := jvmCoarseCoverage(measurement.FixtureLocatorManifestCapability, sbom.ReachabilityReachable); coverage.Status != measurement.CoverageUnavailable || coverage.Reasons[0].Code != measurement.CoverageReasonUnsupported {
+		t.Fatalf("manifest capability coverage = %#v", coverage)
+	}
+	if coverage := jvmCoarseCoverage(measurement.FixtureLocatorPackageDependency, sbom.ReachabilityReachable); coverage.Status != measurement.CoverageComplete {
+		t.Fatalf("reachable JVM coarse coverage = %#v", coverage)
+	}
+	if coverage := jvmCoarseCoverage(measurement.FixtureLocatorPackageDependency, sbom.ReachabilityUnreferenced); coverage.Status != measurement.CoveragePartial || coverage.Reasons[0].Code != measurement.CoverageReasonOpaque {
+		t.Fatalf("unreferenced JVM coarse coverage = %#v", coverage)
+	}
+}
+
 func TestRecordingAnalyzerNormalizesOneProductionResult(t *testing.T) {
 	delegate := &captureTestAnalyzer{result: &reachability.Analysis{
 		Entrypoints: []string{"/private/materialization/main.go"},
@@ -188,7 +409,7 @@ func TestProductionCaptureUsesPersistedWinningClaimForSuppression(t *testing.T) 
 		Locator:         measurement.FixtureLocator{Kind: measurement.FixtureLocatorSourceSymbol, ModulePath: "fixtures/golang/source_tier2/main.go", Symbol: "controlUnreachable", Line: 16},
 	}}
 	delegate := &captureTestAnalyzer{result: &reachability.Analysis{Results: []reachability.Result{{Symbol: "controlUnreachable"}}, Entrypoints: []string{"main.main"}}}
-	executed, err := runStatic(context.Background(), MaterializedFixture{Root: "/private/fixture"}, resolved, lifecycle,
+	executed, err := runStatic(context.Background(), MaterializedFixture{Root: "/private/fixture"}, resolved, lifecycle, coverageRequiresEntrypointAuthority,
 		[]ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), Symbols: []string{"controlUnreachable"}}},
 		func() (staticAnalyzer, error) { return delegate, nil },
 		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
@@ -246,10 +467,10 @@ func TestProductionCaptureClassifiesAnalyzerFailureAsNoAnalysis(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolved := measurement.ResolvedFixtureSubject{Subject: measurement.FixtureSubject{
-		ID: "pkg:reachbench/go/source_tier2#controlNoCoverage", Locator: measurement.FixtureLocator{Symbol: "controlNoCoverage"},
+		ID: "pkg:reachbench/go/source_tier2#controlPositive", Locator: measurement.FixtureLocator{Symbol: "controlPositive"},
 	}}
-	executed, err := runStatic(context.Background(), MaterializedFixture{Root: "/private/fixture"}, resolved, lifecycle,
-		[]ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), Symbols: []string{"controlNoCoverage"}}},
+	executed, err := runStatic(context.Background(), MaterializedFixture{Root: "/private/fixture"}, resolved, lifecycle, coverageRequiresEntrypointAuthority,
+		[]ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), Symbols: []string{"controlPositive"}}},
 		func() (staticAnalyzer, error) {
 			return &captureTestAnalyzer{err: errors.New("analyzer unavailable")}, nil
 		},
