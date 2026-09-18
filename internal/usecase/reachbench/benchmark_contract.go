@@ -623,7 +623,7 @@ func (requirement FixtureToolchainRequirement) validate(kind FixtureBuildKind, t
 }
 
 func (build FixtureBuild) validate(fixtureID string, inputPaths map[string]struct{}) error {
-	if !build.Kind.valid() || build.WorkingDirectory != "." || !validTargetPlatform(build.TargetPlatform) || len(build.Steps) == 0 || len(build.Steps) > maxFixtureBuildSteps || len(build.Env) > maxFixtureBuildEnv {
+	if !build.Kind.valid() || !validBuildWorkingDirectory(build.WorkingDirectory, inputPaths) || !validTargetPlatform(build.TargetPlatform) || len(build.Steps) == 0 || len(build.Steps) > maxFixtureBuildSteps || len(build.Env) > maxFixtureBuildEnv {
 		return fmt.Errorf("has invalid build declaration")
 	}
 	if err := build.Toolchain.validate(build.Kind, build.TargetPlatform); err != nil {
@@ -682,6 +682,22 @@ func (build FixtureBuild) validate(fixtureID string, inputPaths map[string]struc
 		return fmt.Errorf("generated output paths: %w", err)
 	}
 	return nil
+}
+
+func validBuildWorkingDirectory(value string, inputPaths map[string]struct{}) bool {
+	if value == "." {
+		return true
+	}
+	if !validFixturePath(value) {
+		return false
+	}
+	prefix := value + "/"
+	for input := range inputPaths {
+		if strings.HasPrefix(input, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func fixtureToolchainFamily(kind FixtureBuildKind) string {

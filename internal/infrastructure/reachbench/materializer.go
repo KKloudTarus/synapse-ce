@@ -27,6 +27,7 @@ const (
 
 	materializationDirectory         = "fixture-materializations"
 	maxMaterializedFileBytes   int64 = 1 << 20
+	maxMaterializedOutputBytes int64 = 4 << 20
 	maxMaterializedTotalBytes  int64 = 8 << 20
 	maxMaterializedFiles             = 256
 	materializerProbeTimeout         = 15 * time.Second
@@ -200,11 +201,11 @@ func (fixture MaterializedFixture) Manifest() (MaterializationManifest, error) {
 	if err != nil {
 		return MaterializationManifest{}, fmt.Errorf("validate materialized fixture specification: %w", err)
 	}
-	inputs, err := canonicalMaterializedArtifacts(fixture.Inputs)
+	inputs, err := canonicalMaterializedArtifacts(fixture.Inputs, maxMaterializedFileBytes)
 	if err != nil {
 		return MaterializationManifest{}, fmt.Errorf("validate materialized fixture inputs: %w", err)
 	}
-	outputs, err := canonicalMaterializedArtifacts(fixture.Outputs)
+	outputs, err := canonicalMaterializedArtifacts(fixture.Outputs, maxMaterializedOutputBytes)
 	if err != nil {
 		return MaterializationManifest{}, fmt.Errorf("validate materialized fixture outputs: %w", err)
 	}
@@ -364,7 +365,7 @@ func materializeFixtureInputs(ctx context.Context, root string, specification re
 		}
 		inputs = append(inputs, identity)
 	}
-	return canonicalMaterializedArtifacts(inputs)
+	return canonicalMaterializedArtifacts(inputs, maxMaterializedFileBytes)
 }
 
 func verifyMaterializedInputs(ctx context.Context, root string, specification reachcontract.FixtureSpecification, expected []MaterializedArtifact) ([]MaterializedArtifact, error) {
@@ -393,7 +394,7 @@ func verifyMaterializedInputs(ctx context.Context, root string, specification re
 		}
 		verified = append(verified, identity)
 	}
-	return canonicalMaterializedArtifacts(verified)
+	return canonicalMaterializedArtifacts(verified, maxMaterializedFileBytes)
 }
 
 func writePrivateFixtureFile(ctx context.Context, root, relative string, contents []byte) error {
@@ -500,7 +501,7 @@ func buildToolInvocation(root string, specification reachcontract.FixtureSpecifi
 		if name != "go" {
 			return "", nil, errors.New("frozen Go fixture build has an unexpected tool")
 		}
-		invocation, err := goInvocationArgs(root, args)
+		invocation, err := goInvocationArgs(root, build.WorkingDirectory, args)
 		if err != nil {
 			return "", nil, err
 		}
@@ -542,14 +543,26 @@ func frozenBuildStep(build reachcontract.FixtureBuild, candidate reachcontract.F
 	return false
 }
 
-func goInvocationArgs(root string, args []string) ([]string, error) {
-	trustedRoot, err := benchcycle.RealDirectory(root)
+func goInvocationArgs(root, workingDirectory string, args []string) ([]string, error) {
+	workingRoot := root
+	if workingDirectory != "." {
+		var err error
+		workingRoot, err = declaredPath(root, workingDirectory, false)
+		if err != nil {
+			return nil, fmt.Errorf("resolve reachability fixture Go working directory: %w", err)
+		}
+	}
+	trustedRoot, err := benchcycle.RealDirectory(workingRoot)
 	if err != nil {
 		return nil, fmt.Errorf("validate reachability fixture Go root: %w", err)
 	}
-	invocation := make([]string, 0, len(args)+2)
+	rewritten, err := rewriteFrozenRootRelativeArgs(root, args)
+	if err != nil {
+		return nil, err
+	}
+	invocation := make([]string, 0, len(rewritten)+2)
 	invocation = append(invocation, "-C", trustedRoot)
-	invocation = append(invocation, args...)
+	invocation = append(invocation, rewritten...)
 	return invocation, nil
 }
 
@@ -714,7 +727,7 @@ func (materializer *FixtureMaterializer) probeToolchain(ctx context.Context, roo
 	}
 	if name == "go" {
 		var err error
-		args, err = goInvocationArgs(root, args)
+		args, err = goInvocationArgs(root, build.WorkingDirectory, args)
 		if err != nil {
 			return err
 		}
@@ -797,7 +810,7 @@ func verifyMaterializedOutputs(ctx context.Context, root string, build reachcont
 			return nil, fmt.Errorf("duplicate reachability fixture output %q", output.Path)
 		}
 		seen[output.Path] = struct{}{}
-		identity, err := digestDeclaredRegularFile(ctx, root, output.Path, maxMaterializedFileBytes)
+		identity, err := digestDeclaredRegularFile(ctx, root, output.Path, maxMaterializedOutputBytes)
 		if err != nil {
 			return nil, fmt.Errorf("verify reachability fixture output %q: %w", output.Path, err)
 		}
@@ -814,7 +827,7 @@ func verifyMaterializedOutputs(ctx context.Context, root string, build reachcont
 		}
 		outputs = append(outputs, identity)
 	}
-	return canonicalMaterializedArtifacts(outputs)
+	return canonicalMaterializedArtifacts(outputs, maxMaterializedOutputBytes)
 }
 
 func digestDeclaredRegularFile(ctx context.Context, root, relative string, maxBytes int64) (MaterializedArtifact, error) {
@@ -970,7 +983,7 @@ func ensurePrivateDirectory(root, relative string) (string, error) {
 	return current, nil
 }
 
-func canonicalMaterializedArtifacts(artifacts []MaterializedArtifact) ([]MaterializedArtifact, error) {
+func canonicalMaterializedArtifacts(artifacts []MaterializedArtifact, maxBytes int64) ([]MaterializedArtifact, error) {
 	if len(artifacts) > maxMaterializedFiles {
 		return nil, fmt.Errorf("artifact count exceeds %d", maxMaterializedFiles)
 	}
@@ -978,7 +991,7 @@ func canonicalMaterializedArtifacts(artifacts []MaterializedArtifact) ([]Materia
 	sort.Slice(canonical, func(left, right int) bool { return canonical[left].Path < canonical[right].Path })
 	var total int64
 	for index, artifact := range canonical {
-		if !fs.ValidPath(artifact.Path) || artifact.Size < 0 || artifact.Size > maxMaterializedFileBytes || !validDigest(artifact.Digest) {
+		if !fs.ValidPath(artifact.Path) || artifact.Size < 0 || artifact.Size > maxBytes || !validDigest(artifact.Digest) {
 			return nil, fmt.Errorf("invalid materialized artifact %q", artifact.Path)
 		}
 		if index > 0 && artifact.Path == canonical[index-1].Path {

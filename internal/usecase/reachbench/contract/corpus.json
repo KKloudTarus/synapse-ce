@@ -129,7 +129,7 @@
       "mode_id": "binary",
       "fixture": {
         "id": "go-binary-input",
-        "digest": "sha256:489871ba6ff90fb0919d3dafb60e68540408f9ebbeaa7ba6b3b6d0018a45b7fa"
+        "digest": "sha256:00c4b428fdc3d8b6c802ea6f233a1aceec9019c0cb79c0548605f2cc8a7ea5cd"
       }
     },
     {
@@ -139,7 +139,7 @@
       "mode_id": "binary",
       "fixture": {
         "id": "go-binary-input",
-        "digest": "sha256:489871ba6ff90fb0919d3dafb60e68540408f9ebbeaa7ba6b3b6d0018a45b7fa"
+        "digest": "sha256:00c4b428fdc3d8b6c802ea6f233a1aceec9019c0cb79c0548605f2cc8a7ea5cd"
       }
     },
     {
@@ -149,7 +149,7 @@
       "mode_id": "binary",
       "fixture": {
         "id": "go-binary-input",
-        "digest": "sha256:489871ba6ff90fb0919d3dafb60e68540408f9ebbeaa7ba6b3b6d0018a45b7fa"
+        "digest": "sha256:00c4b428fdc3d8b6c802ea6f233a1aceec9019c0cb79c0548605f2cc8a7ea5cd"
       }
     },
     {
@@ -159,7 +159,7 @@
       "mode_id": "binary",
       "fixture": {
         "id": "go-binary-input",
-        "digest": "sha256:489871ba6ff90fb0919d3dafb60e68540408f9ebbeaa7ba6b3b6d0018a45b7fa"
+        "digest": "sha256:00c4b428fdc3d8b6c802ea6f233a1aceec9019c0cb79c0548605f2cc8a7ea5cd"
       }
     },
     {
@@ -169,7 +169,7 @@
       "mode_id": "binary",
       "fixture": {
         "id": "go-binary-input",
-        "digest": "sha256:489871ba6ff90fb0919d3dafb60e68540408f9ebbeaa7ba6b3b6d0018a45b7fa"
+        "digest": "sha256:00c4b428fdc3d8b6c802ea6f233a1aceec9019c0cb79c0548605f2cc8a7ea5cd"
       }
     },
     {

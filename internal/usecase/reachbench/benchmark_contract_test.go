@@ -396,15 +396,19 @@ func jvmAnalyzerOutputs(mode string) []string {
 	}
 }
 
-func TestGeneratedBuildRecipesUseWorkspaceRoot(t *testing.T) {
+func TestGeneratedBuildRecipesUseFrozenWorkingDirectories(t *testing.T) {
 	contract := DefaultReachabilityBenchmark()
 	for _, fixture := range contract.Fixtures.Fixtures {
 		if fixture.Build == nil {
 			continue
 		}
 		t.Run(fixture.ID, func(t *testing.T) {
-			if fixture.Build.WorkingDirectory != "." {
-				t.Fatalf("working directory = %q, want workspace root", fixture.Build.WorkingDirectory)
+			wantWorkingDirectory := "."
+			if fixture.ID == "go-binary-input" {
+				wantWorkingDirectory = "fixtures/golang/binary"
+			}
+			if fixture.Build.WorkingDirectory != wantWorkingDirectory {
+				t.Fatalf("working directory = %q, want %q", fixture.Build.WorkingDirectory, wantWorkingDirectory)
 			}
 			for _, step := range fixture.Build.Steps {
 				for _, arg := range step.Argv {
@@ -785,11 +789,11 @@ func TestReachabilityBenchmarkLoadersAreStrictDeterministicAndPinned(t *testing.
 		got  string
 		want string
 	}{
-		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:1a7998511810caff2860e76780668b1b25fd95a11c6eac9c26750937e7eb5d16"},
+		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:973ecaa8d311f5f904a61e1738f52e1178994869ae1cd0a10527fa373cf46330"},
 		{"oracle", DigestReachabilityOracleMust(t, first.Oracle), "sha256:0299297cb1bacbdab7156536d2de3b21992e1f3c085ab109f95162f4eef6dfe6"},
 		{"challenges", DigestChallengeManifestMust(t, first.Challenges), "sha256:a967a0b5423e79961f28121cc5dfe71e1464850d1e2af0ca9fa74cebfc7db0aa"},
-		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:15b21169e0aeda2acdc74cea0c71d462d8bc29881e1b1854ca2b89b304ee0ef0"},
-		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:1c2c62f01a66e4e3c6d6ca24c88dd662d23f65ce380571d0c390ea884a0090de"},
+		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:ae8c4e22d548cb0fa6a1fb2e370e8c9385ec16939ba04fada8a771db115bdef6"},
+		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:08a813afbac0b385a77753e4f243b2aa8565cd1f568c3a11a8ed24fcb342fb02"},
 	} {
 		if item.got != item.want {
 			t.Errorf("%s digest = %s, want %s", item.name, item.got, item.want)

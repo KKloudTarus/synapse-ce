@@ -493,7 +493,7 @@
               "-ldflags=-s -w",
               "-o",
               "./generated/go-binary-pclntab",
-              "./fixtures/golang/binary"
+              "."
             ]
           }
         ],
@@ -504,7 +504,7 @@
           "target_platform": "linux/amd64",
           "version": "1.27.0"
         },
-        "working_directory": "."
+        "working_directory": "fixtures/golang/binary"
       },
       "entries": [
         {
