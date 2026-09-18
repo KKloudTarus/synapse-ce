@@ -142,7 +142,8 @@ func TestExecuteCLIDescribesUnsignedPreparation(t *testing.T) {
 
 func TestExecuteCLIRejectsNilContext(t *testing.T) {
 	stderr := &bytes.Buffer{}
-	if code := executeCLI(nil, []string{"prepare-baseline", "review.json", "output"}, &bytes.Buffer{}, stderr, nil, nil, nil); code != 1 || stderr.Len() == 0 {
+	var nilContext context.Context
+	if code := executeCLI(nilContext, []string{"prepare-baseline", "review.json", "output"}, &bytes.Buffer{}, stderr, nil, nil, nil); code != 1 || stderr.Len() == 0 {
 		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
 	}
 }

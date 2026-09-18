@@ -421,7 +421,7 @@ func authorityGitConfigurationPaths(gitDirectory string) ([]string, error) {
 		}
 		candidate := strings.TrimSpace(string(body))
 		if candidate == "" {
-			return nil, errors.New("Git common-directory pointer is empty")
+			return nil, errors.New("git common-directory pointer is empty")
 		}
 		if !filepath.IsAbs(candidate) {
 			candidate = filepath.Join(gitDirectory, candidate)

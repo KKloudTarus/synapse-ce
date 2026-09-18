@@ -141,7 +141,7 @@ func (curator *AuthorityCurator) assertNoReplacementRefs(ctx context.Context, ro
 		}
 		path := strings.TrimSpace(string(pathOutput))
 		if path == "" {
-			return fmt.Errorf("Git did not return a %s path", item.label)
+			return fmt.Errorf("git did not return a %s path", item.label)
 		}
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(root, filepath.FromSlash(path))
@@ -251,28 +251,28 @@ func parseAuthorityTreeEntries(raw []byte, root string) (map[string]authorityTre
 	for len(raw) > 0 {
 		index := bytes.IndexByte(raw, 0)
 		if index < 0 {
-			return nil, errors.New("Git tree inventory is not NUL terminated")
+			return nil, errors.New("git tree inventory is not NUL terminated")
 		}
 		record := raw[:index]
 		raw = raw[index+1:]
 		metadata, location, found := bytes.Cut(record, []byte{'\t'})
 		if !found {
-			return nil, errors.New("Git tree inventory record is malformed")
+			return nil, errors.New("git tree inventory record is malformed")
 		}
 		parts := strings.Fields(string(metadata))
 		if len(parts) != 3 {
-			return nil, errors.New("Git tree inventory metadata is malformed")
+			return nil, errors.New("git tree inventory metadata is malformed")
 		}
 		gitPath := string(location)
 		if !strings.HasPrefix(gitPath, prefix) {
-			return nil, errors.New("Git tree authority path escapes its fixed root")
+			return nil, errors.New("git tree authority path escapes its fixed root")
 		}
 		relative := strings.TrimPrefix(gitPath, prefix)
 		if relative == "" || path.IsAbs(relative) || path.Clean(relative) != relative || strings.HasPrefix(relative, "../") {
-			return nil, errors.New("Git tree authority path is invalid")
+			return nil, errors.New("git tree authority path is invalid")
 		}
 		if _, duplicate := entries[relative]; duplicate {
-			return nil, errors.New("Git tree authority inventory contains duplicate paths")
+			return nil, errors.New("git tree authority inventory contains duplicate paths")
 		}
 		entries[relative] = authorityTreeEntry{mode: parts[0], objectType: parts[1], object: parts[2]}
 	}
@@ -290,12 +290,12 @@ func (curator *AuthorityCurator) assertCandidateAuthorityIndex(ctx context.Conte
 	for len(output) > 0 {
 		index := bytes.IndexByte(output, 0)
 		if index < 0 {
-			return errors.New("Git index inventory is not NUL terminated")
+			return errors.New("git index inventory is not NUL terminated")
 		}
 		record := string(output[:index])
 		output = output[index+1:]
 		if len(record) < 3 || record[1] != ' ' || !strings.HasPrefix(record[2:], prefix) {
-			return errors.New("Git index authority inventory is malformed")
+			return errors.New("git index authority inventory is malformed")
 		}
 		relative := strings.TrimPrefix(record[2:], prefix)
 		if _, expected := expected[relative]; !expected || record[0] != 'H' {
