@@ -3,6 +3,7 @@ package reachbench
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -159,7 +160,10 @@ func TestProductionCaptureCapturesScopedNPMNoCoverageCell(t *testing.T) {
 func TestRecordingAnalyzerNormalizesOneProductionResult(t *testing.T) {
 	delegate := &captureTestAnalyzer{result: &reachability.Analysis{
 		Entrypoints: []string{"/private/materialization/main.go"},
-		Results:     []reachability.Result{{Symbol: "target", Reachable: true, Path: []string{"/private/materialization/main.go", "target"}}},
+		Results: []reachability.Result{{
+			Symbol: "target", Reachable: true, Path: []string{"/private/materialization/main.go", "target"},
+			Provenance: &reachability.SourceProvenance{ModulePath: "fixtures/go/main.go", Line: 7},
+		}},
 	}}
 	analyzer := &recordingAnalyzer{delegate: delegate, materializedRoot: "/private/materialization"}
 	result, err := analyzer.Analyze(context.Background(), "/private/materialization", []string{"target"})
@@ -172,8 +176,26 @@ func TestRecordingAnalyzerNormalizesOneProductionResult(t *testing.T) {
 	if strings.Contains(strings.Join(result.Entrypoints, "\n")+strings.Join(result.Results[0].Path, "\n"), "/private/materialization") {
 		t.Fatalf("normalized result retained materialization path: %#v", result)
 	}
+	if got := result.Results[0].Provenance; got == nil || got.ModulePath != "fixtures/go/main.go" || got.Line != 7 {
+		t.Fatalf("normalized result lost safe declaration provenance: %#v", got)
+	}
 	if _, err := analyzer.Analyze(context.Background(), "/private/materialization", []string{"target"}); err == nil {
 		t.Fatal("second analyzer invocation succeeded")
+	}
+}
+
+func TestRecordingAnalyzerDropsUnsafeProvenance(t *testing.T) {
+	delegate := &captureTestAnalyzer{result: &reachability.Analysis{Results: []reachability.Result{{
+		Symbol: "target", Reachable: true,
+		Provenance: &reachability.SourceProvenance{ModulePath: "/private/materialization/main.php", Line: 7},
+	}}}}
+	analyzer := &recordingAnalyzer{delegate: delegate, materializedRoot: "/private/materialization"}
+	result, err := analyzer.Analyze(context.Background(), "/private/materialization", []string{"target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Results[0].Provenance != nil {
+		t.Fatalf("unsafe provenance leaked through production capture: %#v", result.Results[0].Provenance)
 	}
 }
 
@@ -396,6 +418,69 @@ func TestProductionCaptureStoresOneCanonicalRuntimeArtifact(t *testing.T) {
 	}
 	if result.Observation.Outcome != measurement.OutcomeReachable || result.Observation.Suppression.Claim != measurement.SuppressionNone {
 		t.Fatalf("runtime capture observation = %#v", result.Observation)
+	}
+}
+
+func TestProductionCapturePHPAndRubySymbolsKeepDeclarationProvenanceRaiseOnly(t *testing.T) {
+	tests := []struct {
+		name       string
+		fixtureID  string
+		cohortID   string
+		subjectID  string
+		symbolPath string
+		line       int
+	}{
+		{"php", "php-symbols-tier2-input", "php", "pkg:reachbench/php/symbols_tier2#symbolPositive", "fixtures/php/symbols_tier2/main.php", 25},
+		{"ruby", "ruby-symbols-tier2-input", "ruby", "pkg:reachbench/ruby/symbols_tier2#symbolPositive", "fixtures/ruby/symbols_tier2/main.rb", 18},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			specification := materializerFixture(t, tt.fixtureID)
+			digest, err := measurement.DigestFixtureSpecification(specification)
+			if err != nil {
+				t.Fatal(err)
+			}
+			materializer := newFixtureMaterializer(t, &fixtureToolRunner{}, "linux/amd64")
+			capture, err := NewProductionCapture(ProductionCaptureDependencies{Materializer: materializer})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rawRoot := t.TempDir()
+			evidenceStore, err := benchcycle.NewEvidenceStore(rawRoot, reachabilityEvidenceLimits())
+			if err != nil {
+				t.Fatal(err)
+			}
+			workRoot := privateMaterializerRoot(t)
+			cell := ExecutionCell{
+				CaseID: tt.name + "-local-provenance", CohortID: tt.cohortID, ModeID: "symbols_tier2", BindingID: "api", AnalyzerID: "symbols",
+				Configuration: captureArtifact("configuration"), SubjectID: tt.subjectID,
+				Fixture: measurement.ArtifactReference{ID: specification.ID, Digest: digest}, BoundaryID: "sca/reachability/" + tt.cohortID + "/symbols",
+			}
+			result, err := capture.Capture(context.Background(), CaptureRequest{
+				Cell: cell, Repetition: 1, WorkRoot: workRoot,
+				Analyzer: RevisionIdentity{ID: AnalyzerSubjectID, Commit: strings.Repeat("a", 40), Tree: strings.Repeat("b", 40)}, Snapshot: captureSnapshot(),
+				attempt: benchcycle.AttemptAddress{CellKey: tt.name + "-local-provenance", Repetition: 1}, evidence: evidenceStore,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Observation.Outcome != measurement.OutcomeReachable || result.Observation.Suppression.Claim != measurement.SuppressionNone {
+				t.Fatalf("local symbol observation = %#v", result.Observation)
+			}
+			if len(result.EvidenceReceipts) != 1 {
+				t.Fatalf("evidence receipts = %#v", result.EvidenceReceipts)
+			}
+			raw, err := os.ReadFile(filepath.Join(rawRoot, filepath.FromSlash(result.EvidenceReceipts[0].Reference)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(raw), workRoot) {
+				t.Fatalf("canonical raw evidence leaked private materialization root: %s", raw)
+			}
+			if !strings.Contains(string(raw), tt.symbolPath) || !strings.Contains(string(raw), fmt.Sprintf("\"Line\":%d", tt.line)) {
+				t.Fatalf("canonical raw evidence lost declaration provenance: %s", raw)
+			}
+		})
 	}
 }
 

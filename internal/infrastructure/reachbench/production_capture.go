@@ -331,6 +331,12 @@ func normalizeAnalysisPaths(result *reachability.Analysis, root string) *reachab
 	for index, item := range result.Results {
 		copyResult.Results[index] = item
 		copyResult.Results[index].Path = normalizePathStrings(item.Path, root)
+		copyResult.Results[index].Provenance = nil
+		if item.Provenance != nil {
+			if provenance, ok := reachability.NormalizeSourceProvenance(*item.Provenance); ok {
+				copyResult.Results[index].Provenance = &provenance
+			}
+		}
 	}
 	return &copyResult
 }

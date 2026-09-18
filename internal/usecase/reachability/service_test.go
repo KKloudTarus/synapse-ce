@@ -126,3 +126,27 @@ func TestAnalyzePropagatesBlindConstructs(t *testing.T) {
 		t.Fatalf("Analysis must carry the graph's blind constructs, got %v", a.BlindConstructs)
 	}
 }
+
+func TestNormalizeSourceProvenance(t *testing.T) {
+	tests := []struct {
+		name string
+		in   SourceProvenance
+		want SourceProvenance
+		ok   bool
+	}{
+		{"normalizes relative slashes", SourceProvenance{ModulePath: "./fixtures//php/main.php", Line: 25}, SourceProvenance{ModulePath: "fixtures/php/main.php", Line: 25}, true},
+		{"rejects absolute path", SourceProvenance{ModulePath: "/private/main.php", Line: 25}, SourceProvenance{}, false},
+		{"rejects parent path", SourceProvenance{ModulePath: "../main.php", Line: 25}, SourceProvenance{}, false},
+		{"rejects embedded parent path", SourceProvenance{ModulePath: "fixtures/../main.php", Line: 25}, SourceProvenance{}, false},
+		{"rejects windows path", SourceProvenance{ModulePath: `C:\\private\\main.php`, Line: 25}, SourceProvenance{}, false},
+		{"rejects zero line", SourceProvenance{ModulePath: "main.php"}, SourceProvenance{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := NormalizeSourceProvenance(tt.in)
+			if ok != tt.ok || got != tt.want {
+				t.Fatalf("NormalizeSourceProvenance(%#v) = (%#v, %v), want (%#v, %v)", tt.in, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}

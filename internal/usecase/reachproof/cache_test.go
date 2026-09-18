@@ -342,11 +342,13 @@ func TestInMemoryCacheEvictsOldest(t *testing.T) {
 // The in-memory adapter deep-copies, so a caller mutating a returned Analysis cannot corrupt the store.
 func TestInMemoryCacheIsolatesEntries(t *testing.T) {
 	cache := NewInMemoryCache()
-	orig := &reachability.Analysis{Results: []reachability.Result{{Symbol: "s", Reachable: true, Path: []string{"a", "b"}}}, Entrypoints: []string{"root"}}
+	provenance := &reachability.SourceProvenance{ModulePath: "fixtures/php/main.php", Line: 9}
+	orig := &reachability.Analysis{Results: []reachability.Result{{Symbol: "s", Reachable: true, Path: []string{"a", "b"}, Provenance: provenance}}, Entrypoints: []string{"root"}}
 	if err := cache.Put(context.Background(), "fp", orig); err != nil {
 		t.Fatal(err)
 	}
 	orig.Results[0].Path[0] = "mutated" // mutate the source after Put
+	orig.Results[0].Provenance.ModulePath = "mutated.php"
 	got, hit, err := cache.Get(context.Background(), "fp")
 	if err != nil || !hit {
 		t.Fatalf("want hit, got hit=%v err=%v", hit, err)
@@ -354,9 +356,16 @@ func TestInMemoryCacheIsolatesEntries(t *testing.T) {
 	if got.Results[0].Path[0] != "a" {
 		t.Fatalf("Put must deep-copy: stored path was mutated to %q", got.Results[0].Path[0])
 	}
+	if got.Results[0].Provenance == nil || got.Results[0].Provenance.ModulePath != "fixtures/php/main.php" {
+		t.Fatalf("Put must deep-copy provenance: %#v", got.Results[0].Provenance)
+	}
 	got.Results[0].Symbol = "corrupt" // mutate the returned copy
+	got.Results[0].Provenance.Line = 99
 	got2, _, _ := cache.Get(context.Background(), "fp")
 	if got2.Results[0].Symbol != "s" {
 		t.Fatalf("Get must deep-copy: returned copy mutated the store to %q", got2.Results[0].Symbol)
+	}
+	if got2.Results[0].Provenance == nil || got2.Results[0].Provenance.Line != 9 {
+		t.Fatalf("Get must deep-copy provenance: %#v", got2.Results[0].Provenance)
 	}
 }

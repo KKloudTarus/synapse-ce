@@ -29,6 +29,21 @@ type SymbolReferenceScanner interface {
 	ScanSymbolRefs(ctx context.Context, dir string) ([]string, error)
 }
 
+// SymbolReference identifies a locally resolved source reference by its symbol and declaration location.
+// ModulePath must be slash-separated and relative to the scan root; Line is one-based.
+type SymbolReference struct {
+	Symbol     string
+	ModulePath string
+	Line       int
+}
+
+// ProvenanceSymbolReferenceScanner is an optional extension for scanners that can safely resolve a local
+// bare reference to its declaration. The returned refs preserve legacy qualified-reference behavior; records
+// carry only declaration provenance and never an invocation location.
+type ProvenanceSymbolReferenceScanner interface {
+	ScanSymbolRefsWithProvenance(ctx context.Context, dir string) ([]string, []SymbolReference, error)
+}
+
 // Analyzer is the parameterized raise-only symbol-reachability analyzer for one ecosystem.
 type Analyzer struct {
 	lang     symbolcanon.Language
@@ -61,20 +76,32 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 	if strings.TrimSpace(dir) == "" {
 		return nil, fmt.Errorf("%w: symreach analysis requires a target directory", shared.ErrValidation)
 	}
-	refs, err := a.scanner.ScanSymbolRefs(ctx, dir)
+	refs, local, err := scanReferences(ctx, dir, a.scanner)
 	if err != nil {
 		return nil, fmt.Errorf("symreach: %s symbol scan (no coverage, prior tier stands): %w", a.purlType, err)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	observed := make([]symbolcanon.Symbol, 0, len(refs))
-	for _, r := range refs {
-		c := symbolcanon.Canonicalize(a.lang, r)
-		if len(c.Segments) >= 2 { // an owner+member reference; a bare leaf is not a sound identity
-			observed = append(observed, c)
+	observed := make([]observedReference, 0, len(refs)+len(local))
+	for _, ref := range refs {
+		canonical := symbolcanon.Canonicalize(a.lang, ref)
+		if len(canonical.Segments) >= 2 { // an owner+member reference; a bare leaf is not a sound identity
+			observed = append(observed, observedReference{symbol: canonical})
 		}
 	}
+	for _, ref := range local {
+		provenance, ok := reachability.NormalizeSourceProvenance(reachability.SourceProvenance{
+			ModulePath: ref.ModulePath,
+			Line:       ref.Line,
+		})
+		canonical := symbolcanon.Canonicalize(a.lang, ref.Symbol)
+		if !ok || len(canonical.Segments) != 1 {
+			continue
+		}
+		observed = append(observed, observedReference{symbol: canonical, provenance: &provenance})
+	}
+
 	results := make([]reachability.Result, 0, len(subjects))
 	seen := map[string]bool{}
 	for _, subject := range subjects {
@@ -83,14 +110,55 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 		}
 		seen[subject] = true
 		want := symbolcanon.Canonicalize(a.lang, subject)
-		if len(want.Segments) < 2 {
-			continue // never match on a bare function name (a same-named local); tie it to its owner
+		if len(want.Segments) == 1 {
+			if match, ok := localMatch(want, observed); ok {
+				results = append(results, reachableLocalResult(subject, a.purlType, match))
+			}
+			continue
 		}
-		if p, ok := tailMatchAny(want, observed); ok {
-			results = append(results, reachability.Result{Symbol: subject, Reachable: true, Path: []string{a.purlType + " qualified reference " + p.String()}})
+		if len(want.Segments) < 2 {
+			continue
+		}
+		if match, ok := tailMatchAny(want, observed); ok {
+			results = append(results, reachability.Result{Symbol: subject, Reachable: true, Path: []string{a.purlType + " qualified reference " + match.symbol.String()}})
 		}
 	}
 	return &reachability.Analysis{Results: results}, nil
+}
+
+type observedReference struct {
+	symbol     symbolcanon.Symbol
+	provenance *reachability.SourceProvenance
+}
+
+func scanReferences(ctx context.Context, dir string, scanner SymbolReferenceScanner) ([]string, []SymbolReference, error) {
+	if scannerWithProvenance, ok := scanner.(ProvenanceSymbolReferenceScanner); ok {
+		return scannerWithProvenance.ScanSymbolRefsWithProvenance(ctx, dir)
+	}
+	refs, err := scanner.ScanSymbolRefs(ctx, dir)
+	return refs, nil, err
+}
+
+func reachableLocalResult(subject, purlType string, match observedReference) reachability.Result {
+	provenance := *match.provenance
+	return reachability.Result{
+		Symbol:     subject,
+		Reachable:  true,
+		Path:       []string{purlType + " local declaration " + match.symbol.String()},
+		Provenance: &provenance,
+	}
+}
+
+// localMatch reports a bare symbol match only when a provenance-aware scanner resolved that exact bare name to
+// a local declaration. A legacy scanner's bare reference remains unmatched, preserving the no-global-bare-name
+// safety rule.
+func localMatch(want symbolcanon.Symbol, observed []observedReference) (observedReference, bool) {
+	for _, candidate := range observed {
+		if candidate.provenance != nil && symbolcanon.Equal(want, candidate.symbol) {
+			return candidate, true
+		}
+	}
+	return observedReference{}, false
 }
 
 // tailMatchAny reports whether any observed symbol shares the last TWO segments with want (a function
@@ -100,11 +168,11 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 // symbol often differ in leading namespace depth. Its cost is a possible cross-package collision (a local
 // `App\Parser::parse` tail-matching a vulnerable `Vendor\Pkg\Parser::parse`), which is raise-only-safe: it
 // can only over-raise urgency, never suppress a finding or emit a not_affected.
-func tailMatchAny(want symbolcanon.Symbol, observed []symbolcanon.Symbol) (symbolcanon.Symbol, bool) {
-	for _, o := range observed {
-		if symbolcanon.TailMatch(want, o, 2) {
-			return o, true
+func tailMatchAny(want symbolcanon.Symbol, observed []observedReference) (observedReference, bool) {
+	for _, candidate := range observed {
+		if symbolcanon.TailMatch(want, candidate.symbol, 2) {
+			return candidate, true
 		}
 	}
-	return symbolcanon.Symbol{}, false
+	return observedReference{}, false
 }
