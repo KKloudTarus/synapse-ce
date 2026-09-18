@@ -10,8 +10,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/jsresolution"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/jssymbols"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/runtimereach"
@@ -518,7 +520,7 @@ func importSubjects(resolved measurement.ResolvedFixtureSubject, wantType string
 }
 
 func parseFrozenPURL(value string) (name, kind, canonical string, ok bool) {
-	if !strings.HasPrefix(value, "pkg:") || strings.Contains(value, "#") {
+	if !strings.HasPrefix(value, "pkg:") || strings.ContainsAny(value, "?#") || strings.IndexFunc(value, unicode.IsSpace) >= 0 {
 		return "", "", "", false
 	}
 	rest := strings.TrimPrefix(value, "pkg:")
@@ -526,8 +528,19 @@ func parseFrozenPURL(value string) (name, kind, canonical string, ok bool) {
 	if !ok || kind == "" {
 		return "", "", "", false
 	}
+	if kind == "npm" {
+		versionSeparator := strings.LastIndex(rest, "@")
+		if versionSeparator <= 0 || strings.Contains(strings.TrimPrefix(rest[:versionSeparator], "@"), "@") {
+			return "", "", "", false
+		}
+		name, _, ok = jsresolution.ParseNPMPURL(value)
+		if !ok {
+			return "", "", "", false
+		}
+		return name, kind, value, true
+	}
 	name, version, ok := strings.Cut(rest, "@")
-	if !ok || name == "" || version == "" || strings.ContainsAny(name+version, " \t\r\n") {
+	if !ok || name == "" || version == "" || strings.Contains(version, "@") || strings.ContainsAny(name+version, " \t\r\n") {
 		return "", "", "", false
 	}
 	return name, kind, value, true

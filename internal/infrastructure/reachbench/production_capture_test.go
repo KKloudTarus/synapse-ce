@@ -62,6 +62,100 @@ func TestProductionCaptureRegistersFrozenModes(t *testing.T) {
 	}
 }
 
+func TestImportSubjectsAcceptsScopedNPMPackageURL(t *testing.T) {
+	const subjectID = "pkg:npm/@reachbench/unsupported@1.0.0"
+	subjects, err := importSubjects(measurement.ResolvedFixtureSubject{
+		Subject: measurement.FixtureSubject{ID: subjectID},
+	}, "npm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subjects) != 1 ||
+		subjects[0].PackagePURL != subjectID ||
+		len(subjects[0].Symbols) != 1 ||
+		subjects[0].Symbols[0] != "@reachbench/unsupported" {
+		t.Fatalf("scoped npm subjects = %#v", subjects)
+	}
+}
+
+func TestImportSubjectsRejectsMalformedPackageURLs(t *testing.T) {
+	for _, subjectID := range []string{
+		"pkg:npm/@scope/name@1.0.0@2.0.0",
+		"pkg:npm/@@1.0.0",
+		"pkg:npm/@scope@1.0.0",
+		"pkg:npm/@scope/@1.0.0",
+		"pkg:npm/@scope/name@1.0.0?arch=x64",
+		"pkg:npm/@scope/name @1.0.0",
+		"pkg:npm/@scope/name@ 1.0.0",
+		"pkg:npm/@scope/name@1.0.0 ",
+		"pkg:npm/@scope/name" + string(rune(0x00a0)) + "@1.0.0",
+		"pkg:pypi/@scope/name@1.0.0",
+	} {
+		t.Run(subjectID, func(t *testing.T) {
+			wantType := "npm"
+			if strings.HasPrefix(subjectID, "pkg:pypi/") {
+				wantType = "pypi"
+			}
+			if _, err := importSubjects(measurement.ResolvedFixtureSubject{
+				Subject: measurement.FixtureSubject{ID: subjectID},
+			}, wantType); err == nil {
+				t.Fatalf("importSubjects(%q) succeeded", subjectID)
+			}
+		})
+	}
+}
+
+func TestProductionCaptureCapturesScopedNPMNoCoverageCell(t *testing.T) {
+	fixtureReference := measurement.ArtifactReference{
+		ID:     "javascript-import-input",
+		Digest: "sha256:da56a31402f2aab42ba3655ed7020b28db5c86dfa6712949aa61917622658c9b",
+	}
+	cell := ExecutionCell{
+		CaseID:        "javascript-import-control-no-coverage",
+		CohortID:      "javascript",
+		ModeID:        "import",
+		BindingID:     "api",
+		AnalyzerID:    "sca-javascript-import",
+		Configuration: captureArtifact("configuration"),
+		SubjectID:     "pkg:npm/@reachbench/unsupported@1.0.0",
+		Fixture:       fixtureReference,
+		BoundaryID:    "sca/reachability/javascript-import/api",
+	}
+	materializer := newFixtureMaterializer(t, &fixtureToolRunner{}, "linux/amd64")
+	capture, err := NewProductionCapture(ProductionCaptureDependencies{Materializer: materializer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceStore, err := benchcycle.NewEvidenceStore(t.TempDir(), reachabilityEvidenceLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := capture.Capture(context.Background(), CaptureRequest{
+		Cell:       cell,
+		Repetition: 1,
+		WorkRoot:   privateMaterializerRoot(t),
+		Analyzer: RevisionIdentity{
+			ID: AnalyzerSubjectID, Commit: measurement.TrustedBaselineRevision,
+			Tree: strings.Repeat("b", 40),
+		},
+		Snapshot: captureSnapshot(),
+		attempt:  benchcycle.AttemptAddress{CellKey: "javascript-import-scoped-capture", Repetition: 1},
+		evidence: evidenceStore,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.EvidenceReceipts) != 1 {
+		t.Fatalf("evidence receipts = %#v, want exactly one raw artifact", result.EvidenceReceipts)
+	}
+	if !result.Observation.Invoked || result.Observation.Outcome != measurement.OutcomeNoAnalysis {
+		t.Fatalf("scoped npm observation = %#v, want invoked no-analysis", result.Observation)
+	}
+	if result.Observation.Suppression.Claim != measurement.SuppressionNone {
+		t.Fatalf("scoped npm suppression = %#v, want no suppression", result.Observation.Suppression)
+	}
+}
+
 func TestRecordingAnalyzerNormalizesOneProductionResult(t *testing.T) {
 	delegate := &captureTestAnalyzer{result: &reachability.Analysis{
 		Entrypoints: []string{"/private/materialization/main.go"},
