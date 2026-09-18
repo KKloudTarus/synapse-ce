@@ -30,12 +30,15 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository { return &UserReposit
 var _ ports.UserRepository = (*UserRepository)(nil)
 
 func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
-	if _, err := r.pool.Exec(ctx,
-		`INSERT INTO users (`+userCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		u.ID.String(), u.Name, string(u.Role), u.APIKeyHash, u.Disabled, u.Audit.CreatedAt, u.Audit.UpdatedAt, u.TenantID); err != nil {
-		return fmt.Errorf("create user: %w", err)
-	}
-	return nil
+	tenantID := shared.TenantOrDefault(shared.ID(u.TenantID))
+	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO users (`+userCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			u.ID.String(), u.Name, string(u.Role), u.APIKeyHash, u.Disabled, u.Audit.CreatedAt, u.Audit.UpdatedAt, u.TenantID); err != nil {
+			return fmt.Errorf("create user: %w", err)
+		}
+		return nil
+	})
 }
 
 func (r *UserRepository) Upsert(ctx context.Context, u *user.User) error {

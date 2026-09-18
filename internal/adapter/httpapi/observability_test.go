@@ -184,9 +184,8 @@ func TestInstrumentSensitiveFieldsAbsent(t *testing.T) {
 	}
 }
 
-// TestInstrumentPrincipalPropagation covers principal attribution: setPrincipal (as
-// called by the real auth middleware) must surface in the access log only when the
-// principal actually resolves; an unauthenticated request logs no principal_id field.
+// TestInstrumentPrincipalPropagation covers privacy-preserving principal attribution: the access
+// log records only that authentication succeeded, never a raw principal identifier.
 func TestInstrumentPrincipalPropagation(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if observation := requestObservationFrom(r.Context()); observation != nil {
@@ -200,8 +199,8 @@ func TestInstrumentPrincipalPropagation(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
 
-	if !strings.Contains(buf.String(), "principal_id=user-123") {
-		t.Errorf("access log missing resolved principal_id: %s", buf.String())
+	if !strings.Contains(buf.String(), "authenticated_principal=true") || strings.Contains(buf.String(), "user-123") {
+		t.Errorf("access log did not preserve principal privacy: %s", buf.String())
 	}
 
 	buf.Reset()
@@ -209,8 +208,8 @@ func TestInstrumentPrincipalPropagation(t *testing.T) {
 	h2 := Instrument(anon, log, true, nil)
 	rec2 := httptest.NewRecorder()
 	h2.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/x", nil))
-	if strings.Contains(buf.String(), "principal_id") {
-		t.Errorf("unauthenticated request must not log principal_id: %s", buf.String())
+	if strings.Contains(buf.String(), "authenticated_principal") {
+		t.Errorf("unauthenticated request must not log authentication attribution: %s", buf.String())
 	}
 }
 
