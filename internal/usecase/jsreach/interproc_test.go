@@ -33,6 +33,18 @@ func evidenceFrom(res jsprogram.Resolution) interprocEvidence {
 	return interprocEvidence{resolution: res, externalNodes: externalNodesOf(res)}
 }
 
+func TestFirstPartySymbolSubject(t *testing.T) {
+	subject, ok := FirstPartySymbolSubject("src/main.mjs", "target")
+	if !ok || subject != "js:src/main:target" {
+		t.Fatalf("first-party source subject = %q/%v, want js:src/main:target/true", subject, ok)
+	}
+	for _, invalid := range []string{"package.json", "../app.mjs", "C:/app.mjs", ""} {
+		if _, ok := FirstPartySymbolSubject(invalid, "target"); ok {
+			t.Fatalf("FirstPartySymbolSubject(%q) accepted a non-source or unsafe module", invalid)
+		}
+	}
+}
+
 func TestSplitExternalID(t *testing.T) {
 	cases := map[string]struct {
 		id           string

@@ -2,8 +2,15 @@ function vuln() {
   return 1;
 }
 
-function factory() {
-  return vuln;
+function safe() {
+  return 0;
 }
 
-factory()();
+function factory(selectVulnerable) {
+  if (selectVulnerable) {
+    return vuln;
+  }
+  return safe;
+}
+
+factory(process.env.REACHBENCH_TARGET)();

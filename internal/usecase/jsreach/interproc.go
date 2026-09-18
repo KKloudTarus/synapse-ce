@@ -3,6 +3,7 @@ package jsreach
 import (
 	"context"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -53,6 +54,27 @@ func NewInterprocAnalyzer(provider jsFactsProvider) (*InterprocAnalyzer, error) 
 	return &InterprocAnalyzer{provider: provider}, nil
 }
 
+// FirstPartySymbolSubject constructs the separate local-source query form consumed by InterprocAnalyzer.
+// It is intentionally not a purl and is never passed through npm export normalization: source locators name
+// an analyzed module and its symbol directly, whereas external npm subjects require package/version handling.
+func FirstPartySymbolSubject(modulePath, symbol string) (string, bool) {
+	modulePath = strings.ReplaceAll(strings.TrimSpace(modulePath), "\\", "/")
+	isSourceModule := false
+	for _, extension := range []string{".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"} {
+		if strings.HasSuffix(modulePath, extension) {
+			modulePath = strings.TrimSuffix(modulePath, extension)
+			isSourceModule = true
+			break
+		}
+	}
+	modulePath = path.Clean(modulePath)
+	if !isSourceModule || modulePath == "" || modulePath == "." || strings.HasPrefix(modulePath, "/") || modulePath == ".." || strings.HasPrefix(modulePath, "../") ||
+		strings.ContainsAny(modulePath, ":\r\n\t") || strings.TrimSpace(symbol) == "" || strings.ContainsAny(symbol, "/\\:\r\n\t") {
+		return "", false
+	}
+	return jsprogram.CanonicalSymbolID(modulePath, symbol), true
+}
+
 type interprocEvidence struct {
 	resolution jsprogram.Resolution
 	// externalNodes is every third-party call-target node present in the graph (id "jsnpm:<specifier>:<export>"),
@@ -96,6 +118,17 @@ func (a *InterprocAnalyzer) Analyze(ctx context.Context, dir string, symbols []s
 		}
 		seen[subject] = true
 
+		if strings.HasPrefix(subject, "js:") {
+			// First-party symbols are a distinct production-capture query surface. They are accepted only when
+			// they are actual positioned source symbols in this resolution, so an external npm node can never be
+			// mistaken for a local one and the npm/version-aware contract below remains unchanged.
+			if _, firstParty := evidence.resolution.Graph.Positions[subject]; firstParty {
+				if path := evidence.resolution.Graph.PathTo(subject); len(path) > 0 {
+					results = append(results, reachability.Result{Symbol: subject, Reachable: true, Path: firstPartyWitness(path, subject)})
+				}
+			}
+			continue
+		}
 		purl, export, ok := jssymbols.ParseSubject(subject)
 		if !ok {
 			continue // not a component-purl-with-export subject; positive-only, so leave it to another tier
@@ -221,6 +254,13 @@ func witness(path []string, node, subject string) []string {
 	}
 	out := append([]string(nil), path...)
 	return append(out, subject)
+}
+
+func firstPartyWitness(path []string, subject string) []string {
+	if len(path) > maxInterprocWitnessNodes {
+		return []string{"jsprogram:reachable:witness-budget-exceeded", subject}
+	}
+	return append([]string(nil), path...)
 }
 
 // InterprocRecorder wires the interprocedural analyzer into the reachability pass, RAISE-ONLY: it mints only

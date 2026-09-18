@@ -451,7 +451,16 @@ func runDotNetImport(ctx context.Context, _ *ProductionCapture, fixture Material
 }
 
 func runGoBinary(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
-	return runSymbolAnalyzer(ctx, fixture, resolved, lifecycle, "golang", symbolcanon.Go, gobinreach.New(), judgment.Tier2, reachproof.LanguageGoBinary, true)
+	return runStatic(ctx, fixture, resolved, lifecycle, symbolSubjects(resolved),
+		func() (staticAnalyzer, error) { return gobinreach.NewEntryCallAnalyzer(), nil },
+		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
+			coordinator, err := reachproof.NewCoordinatorForLanguage(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock, judgment.Tier2, reachproof.LanguageGoBinary)
+			if err != nil {
+				return nil, err
+			}
+			return coordinator.WithRaiseOnly(), nil
+		},
+	)
 }
 
 func runRustSymbols(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
@@ -634,13 +643,18 @@ func runJavaScriptLexical(ctx context.Context, capture *ProductionCapture, fixtu
 }
 
 func runJavaScriptInterprocedural(ctx context.Context, capture *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
-	purl := fixturePackagePURL(resolved.Subject.PackageIdentity)
-	encoded := jsreach.EncodeNPMSubjects([]ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), PackagePURL: purl, Symbols: []string{resolved.Subject.Locator.Symbol}}})
+	// The frozen interprocedural fixture subjects identify first-party source symbols, not npm exports. Keep
+	// that local query separate from jsreach's external purl/version contract used by production SCA findings.
+	subject, answerable := jsreach.FirstPartySymbolSubject(resolved.Subject.Locator.ModulePath, resolved.Subject.Locator.Symbol)
+	var subjects []ports.ReachabilitySubject
+	if answerable {
+		subjects = []ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), Symbols: []string{subject}}}
+	}
 	analyzer, err := jsreach.NewInterprocAnalyzer(capture.facts)
 	if err != nil {
 		return execution{}, err
 	}
-	return runStatic(ctx, fixture, resolved, lifecycle, encoded,
+	return runStatic(ctx, fixture, resolved, lifecycle, subjects,
 		func() (staticAnalyzer, error) { return analyzer, nil },
 		func(recording staticAnalyzer) (*reachproof.Coordinator, error) {
 			coordinator, err := reachproof.NewCoordinatorForLanguage(recording, lifecycle.judgments, lifecycle.audit, lifecycle.clock, judgment.Tier2, reachproof.LanguageJavaScript)
@@ -710,12 +724,12 @@ func runRuntimeLibraryLoads(ctx context.Context, _ *ProductionCapture, fixture M
 	if err != nil {
 		return execution{}, fmt.Errorf("open materialized runtime replay: %w", err)
 	}
-	defer replayFile.Close()
+	defer func() { _ = replayFile.Close() }()
 	ownershipFile, err := os.Open(ownershipPath)
 	if err != nil {
 		return execution{}, fmt.Errorf("open materialized runtime ownership: %w", err)
 	}
-	defer ownershipFile.Close()
+	defer func() { _ = ownershipFile.Close() }()
 	replay, err := measurement.DecodeRuntimeReplay(replayFile, ownershipFile)
 	if err != nil {
 		return execution{}, fmt.Errorf("decode materialized runtime replay: %w", err)

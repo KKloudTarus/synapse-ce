@@ -43,6 +43,20 @@ func (b *docBuilder) class(module, name, parentID string, bases ...Reference) st
 	return id
 }
 
+func (b *docBuilder) positionalParams(symbolID string, names ...string) {
+	for index := range b.doc.Symbols {
+		if b.doc.Symbols[index].ID != symbolID {
+			continue
+		}
+		for _, name := range names {
+			b.doc.Symbols[index].Parameters = append(b.doc.Symbols[index].Parameters, Parameter{
+				Name: name, Kind: ParameterPositional, Pos: b.doc.Symbols[index].Pos,
+			})
+		}
+		return
+	}
+}
+
 func (b *docBuilder) call(module, callerID string, callee Reference, isNew bool) {
 	b.callSeq++
 	b.doc.Calls = append(b.doc.Calls, Call{
@@ -302,6 +316,100 @@ func TestResolveDynamicGapFromExtractorDefeatsComplete(t *testing.T) {
 	// Positive evidence still works: handler is reachable even though the document is incomplete.
 	if !res.Graph.Reaches(CanonicalSymbolID("app", "handler")) {
 		t.Error("positive reachability must still hold on an incomplete document")
+	}
+}
+
+func TestResolveDirectLocalFunctionAlias(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	target := b.fn("app", "target", "target", mod, SymbolFunction)
+	b.assign("app", mod, name("alias"), name("target"))
+	b.call("app", mod, name("alias"), false)
+
+	res := resolveOrFatal(t, b)
+	if !res.Complete {
+		t.Fatalf("a unique preceding direct alias must resolve completely, gaps=%v", res.Gaps)
+	}
+	if !res.Graph.Reaches(target) {
+		t.Fatal("target must be reached through a direct local alias")
+	}
+}
+
+func TestResolveUniqueSynchronousCallback(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	entry := b.fn("app", "entry", "entry", mod, SymbolFunction)
+	invoke := b.fn("app", "invoke", "invoke", mod, SymbolFunction)
+	b.positionalParams(invoke, "callback")
+	target := b.fn("app", "target", "target", mod, SymbolFunction)
+	b.call("app", mod, name("entry"), false)
+	b.call("app", entry, name("invoke"), false)
+	b.doc.Calls[len(b.doc.Calls)-1].Arguments = []Argument{{Value: name("target")}}
+	b.call("app", invoke, name("callback"), false)
+
+	res := resolveOrFatal(t, b)
+	if !res.Complete {
+		t.Fatalf("a uniquely bound synchronous callback must resolve completely, gaps=%v", res.Gaps)
+	}
+	if !res.Graph.Reaches(target) {
+		t.Fatal("target must be reached through invoke -> callback")
+	}
+}
+
+func TestResolveAmbiguousSynchronousCallbackBindingDefeatsComplete(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	invoke := b.fn("app", "invoke", "invoke", mod, SymbolFunction)
+	b.positionalParams(invoke, "callback")
+	first := b.fn("app", "first", "first", mod, SymbolFunction)
+	b.fn("app", "second", "second", mod, SymbolFunction)
+	b.call("app", mod, name("invoke"), false)
+	b.doc.Calls[len(b.doc.Calls)-1].Arguments = []Argument{{Value: name("first")}}
+	b.call("app", mod, name("invoke"), false)
+	b.doc.Calls[len(b.doc.Calls)-1].Arguments = []Argument{{Value: name("second")}}
+	b.call("app", invoke, name("callback"), false)
+
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("a callback parameter bound to different direct callables must remain incomplete")
+	}
+	if res.Graph.Reaches(first) {
+		t.Fatal("an ambiguously bound callback must not create a first-callback edge")
+	}
+}
+
+func TestResolveStaticallyUniqueReturnedCallable(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	target := b.fn("app", "target", "target", mod, SymbolFunction)
+	factory := b.fn("app", "factory", "factory", mod, SymbolFunction)
+	b.doc.Returns = append(b.doc.Returns, Return{ScopeID: factory, Value: name("target"), Pos: Position{File: "app.js", Line: 3}})
+	b.call("app", mod, callref("factory"), false)
+
+	res := resolveOrFatal(t, b)
+	if !res.Complete {
+		t.Fatalf("a factory with one direct callable return must resolve completely, gaps=%v", res.Gaps)
+	}
+	if !res.Graph.Reaches(target) {
+		t.Fatal("target must be reached through factory()()")
+	}
+}
+
+func TestResolveAliasedReturnedCallableDefeatsComplete(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	target := b.fn("app", "target", "target", mod, SymbolFunction)
+	factory := b.fn("app", "factory", "factory", mod, SymbolFunction)
+	b.assign("app", factory, name("alias"), name("target"))
+	b.doc.Returns = append(b.doc.Returns, Return{ScopeID: factory, Value: name("alias"), Pos: Position{File: "app.js", Line: 4}})
+	b.call("app", mod, callref("factory"), false)
+
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("an aliased returned callable must remain incomplete")
+	}
+	if res.Graph.Reaches(target) {
+		t.Fatal("an aliased returned callable must not create a target edge")
 	}
 }
 
