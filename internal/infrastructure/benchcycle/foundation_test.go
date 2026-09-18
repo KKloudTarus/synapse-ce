@@ -118,7 +118,7 @@ func TestExecuteTwoPassRejectsUnsafeAndUnboundedPlans(t *testing.T) {
 		{name: "empty cell key", plan: TwoPassPlan[string]{Cells: []PlanCell[string]{{Key: ""}}}},
 		{name: "duplicate key", plan: TwoPassPlan[string]{Cells: []PlanCell[string]{{Key: "same"}, {Key: "same"}}}},
 		{name: "ASCII control key", plan: TwoPassPlan[string]{Cells: []PlanCell[string]{{Key: "\x00"}}}},
-		{name: "Unicode control key", plan: TwoPassPlan[string]{Cells: []PlanCell[string]{{Key: "cell"}}}},
+		{name: "Unicode control key", plan: TwoPassPlan[string]{Cells: []PlanCell[string]{{Key: "cell" + string(rune(0x85))}}}},
 		{name: "leading Unicode whitespace", plan: TwoPassPlan[string]{Cells: []PlanCell[string]{{Key: " cell"}}}},
 		{name: "trailing Unicode whitespace", plan: TwoPassPlan[string]{Cells: []PlanCell[string]{{Key: "cell "}}}},
 		{name: "too many cells", plan: TwoPassPlan[string]{Cells: make([]PlanCell[string], MaxTwoPassCells+1)}},

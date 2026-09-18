@@ -3489,10 +3489,6 @@ func capabilitySourceBundleName(index int) string {
 	return fmt.Sprintf("capability-source-%02d", index)
 }
 
-func readBundleArtifact(root, name string) ([]byte, error) {
-	return readBundleArtifactContext(context.Background(), root, name)
-}
-
 func readBundleArtifactContext(ctx context.Context, root, name string) ([]byte, error) {
 	data, _, err := readRegularFileDigestContext(ctx, filepath.Join(root, name), bundleArtifactByteLimit(name))
 	if err != nil {
@@ -3741,10 +3737,6 @@ func replayPublicationContext(ctx context.Context, result CaptureResult, evidenc
 		return errors.New("parser-success evidence has an invalid failure code")
 	}
 	return ctx.Err()
-}
-
-func replayCapabilityPublication(result CaptureResult, evidence Evidence) error {
-	return replayCapabilityPublicationContext(context.Background(), result, evidence)
 }
 
 func replayCapabilityPublicationContext(ctx context.Context, result CaptureResult, evidence Evidence) error {

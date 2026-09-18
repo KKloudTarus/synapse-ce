@@ -330,8 +330,7 @@ func maskNamedCallArguments(body string, names map[string]bool, isIdent func(byt
 		for index < len(masked) && isIdent(masked[index]) {
 			index++
 		}
-		name := string(masked[start:index])
-		if !names[name] {
+		if !names[string(masked[start:index])] {
 			continue
 		}
 		open := index
@@ -544,54 +543,9 @@ func scanQualifiedRefs(ctx context.Context, dir string, limits scanLimits, exts 
 	return sortedKeys(seen), nil
 }
 
-// scanRubyRefs is scanQualifiedRefs for Ruby, whose comments are "#" lines and "=begin"/"=end" blocks.
-func scanRubyRefs(ctx context.Context, dir string, limits scanLimits, emit func(body string, add func(string))) ([]string, error) {
-	return scanQualifiedRefs(ctx, dir, limits, []string{".rb", ".rake", ".gemspec", ".ru"}, rubySkipDir, stripRubyComments, emit)
-}
-
 // stripDotNetComments removes C-style // line and /* */ block comments.
 func stripDotNetComments(body string) string {
 	return stripRustBlockComments(stripLineComments(body, "//"))
-}
-
-// stripPHPComments removes PHP's // and # line comments and /* */ block comments. A # to end-of-line is a
-// PHP comment; a PHP 8 attribute "#[" is preserved (it is not a comment and may name a referenced class).
-func stripPHPComments(body string) string {
-	body = stripRustBlockComments(stripLineComments(body, "//"))
-	var b strings.Builder
-	for _, line := range strings.Split(body, "\n") {
-		if i := strings.IndexByte(line, '#'); i >= 0 && !strings.HasPrefix(line[i:], "#[") {
-			line = line[:i]
-		}
-		b.WriteString(line)
-		b.WriteByte('\n')
-	}
-	return b.String()
-}
-
-// stripRubyComments removes Ruby "#" line comments and "=begin"/"=end" block comments (each anchored at the
-// start of a line). It runs the block strip first so a "#" inside a =begin block is not mis-handled.
-func stripRubyComments(body string) string {
-	var b strings.Builder
-	inBlock := false
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if inBlock {
-			if strings.HasPrefix(trimmed, "=end") {
-				inBlock = false
-			}
-			b.WriteByte('\n')
-			continue
-		}
-		if strings.HasPrefix(trimmed, "=begin") {
-			inBlock = true
-			b.WriteByte('\n')
-			continue
-		}
-		b.WriteString(line)
-		b.WriteByte('\n')
-	}
-	return stripLineComments(b.String(), "#")
 }
 
 func sortedKeys(m map[string]bool) []string {
