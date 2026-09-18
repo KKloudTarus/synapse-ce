@@ -440,7 +440,7 @@ type PendingJudgmentAudit struct {
 // atomic. It is intentionally separate from the broad JudgmentStore read/create port.
 type JudgmentAuditStore interface {
 	SaveWithProposalAudit(ctx context.Context, j judgment.Judgment, entry AuditEntry) error
-	SetVerdictStateWithAudit(ctx context.Context, engagementID, id shared.ID, score int, state judgment.State, verifiedBy, rationale string, expectedVersion int, entry AuditEntry) (judgment.Judgment, error)
+	SetVerdictStateWithAudit(ctx context.Context, engagementID, id shared.ID, score int, state judgment.State, verifiedBy, rationale string, suppressionProof *judgment.ReachabilitySuppressionProof, expectedVersion int, entry AuditEntry) (judgment.Judgment, error)
 	ListPendingJudgmentAudits(ctx context.Context, engagementID shared.ID) ([]PendingJudgmentAudit, error)
 	AcknowledgeJudgmentAudit(ctx context.Context, kind JudgmentAuditKind, judgmentID shared.ID, version int) error
 }

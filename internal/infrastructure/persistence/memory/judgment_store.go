@@ -38,6 +38,11 @@ var (
 
 // Save inserts or replaces a judgment within its engagement (idempotent by id).
 func (s *JudgmentStore) Save(_ context.Context, j judgment.Judgment) error {
+	var err error
+	j, err = canonicalizeJudgmentSuppressionProof(j)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	list := s.byEng[j.EngagementID]
@@ -125,6 +130,11 @@ func (s *JudgmentStore) SaveWithProposalAudit(ctx context.Context, j judgment.Ju
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	var err error
+	j, err = canonicalizeJudgmentSuppressionProof(j)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	list := s.byEng[j.EngagementID]
@@ -141,8 +151,12 @@ func (s *JudgmentStore) SaveWithProposalAudit(ctx context.Context, j judgment.Ju
 
 // SetVerdictStateWithAudit persists a sealed verdict and its immutable pending audit
 // payload together, so a crash can only leave a recoverable pending delivery.
-func (s *JudgmentStore) SetVerdictStateWithAudit(ctx context.Context, engagementID, id shared.ID, score int, state judgment.State, verifiedBy, rationale string, expectedVersion int, entry ports.AuditEntry) (judgment.Judgment, error) {
+func (s *JudgmentStore) SetVerdictStateWithAudit(ctx context.Context, engagementID, id shared.ID, score int, state judgment.State, verifiedBy, rationale string, suppressionProof *judgment.ReachabilitySuppressionProof, expectedVersion int, entry ports.AuditEntry) (judgment.Judgment, error) {
 	if err := ctx.Err(); err != nil {
+		return judgment.Judgment{}, err
+	}
+	storedProof, err := canonicalizeSuppressionProof(suppressionProof)
+	if err != nil {
 		return judgment.Judgment{}, err
 	}
 	s.mu.Lock()
@@ -157,6 +171,9 @@ func (s *JudgmentStore) SetVerdictStateWithAudit(ctx context.Context, engagement
 		}
 		list[i].EvidenceScore, list[i].State = score, state
 		list[i].VerifiedBy, list[i].VerdictRationale = verifiedBy, rationale
+		if storedProof != nil {
+			list[i].SuppressionProof = storedProof
+		}
 		list[i].Version++
 		s.byEng[engagementID] = list
 		key := judgmentAuditKey{kind: ports.JudgmentVerdictAudit, judgmentID: id, version: list[i].Version}
@@ -179,6 +196,27 @@ func (s *JudgmentStore) ListPendingJudgmentAudits(ctx context.Context, engagemen
 		}
 	}
 	return out, nil
+}
+
+func canonicalizeJudgmentSuppressionProof(item judgment.Judgment) (judgment.Judgment, error) {
+	proof, err := canonicalizeSuppressionProof(item.SuppressionProof)
+	if err != nil {
+		return judgment.Judgment{}, err
+	}
+	item.SuppressionProof = proof
+	return item, nil
+}
+
+func canonicalizeSuppressionProof(proof *judgment.ReachabilitySuppressionProof) (*judgment.ReachabilitySuppressionProof, error) {
+	encoded, err := judgment.MarshalReachabilitySuppressionProof(proof)
+	if err != nil {
+		return nil, fmt.Errorf("marshal judgment suppression provenance: %w", err)
+	}
+	stored, err := judgment.UnmarshalReachabilitySuppressionProof(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("decode judgment suppression provenance: %w", err)
+	}
+	return stored, nil
 }
 
 func (s *JudgmentStore) AcknowledgeJudgmentAudit(ctx context.Context, kind ports.JudgmentAuditKind, judgmentID shared.ID, version int) error {

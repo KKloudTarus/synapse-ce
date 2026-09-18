@@ -138,7 +138,7 @@ func TestReachabilityInputPrefersPublishableProof(t *testing.T) {
 		t.Fatalf("publishable reachability = %#v", got)
 	}
 	uncertain := reachabilityInput(f, []judgment.Judgment{{ID: "refuted-no", EngagementID: "eng", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "finding", Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2}, State: judgment.StateRefuted}})
-	if uncertain.Reachability != judgment.ReachUnknown || uncertain.Confirmed || uncertain.Provenance != "refuted-no" {
+	if uncertain.Reachability != "" || uncertain.Confirmed || uncertain.Provenance != "" {
 		t.Fatalf("unpublishable reachability = %#v", uncertain)
 	}
 }
@@ -158,9 +158,8 @@ func TestReachabilityInputStateAwareWithinTier(t *testing.T) {
 	}
 }
 
-// TestReachabilityInputProofGatesNegative: an unproven not_reachable (a Tier-2 call-graph negative with no
-// entry points) is not a sound basis to drop a finding from attack paths; it downgrades to unknown so
-// traverse.go keeps the finding. A proven negative (entry points recorded) stays not_reachable.
+// TestReachabilityInputProofGatesNegative confirms that even a technically
+// complete negative remains unknown without independently resolved authority.
 func TestReachabilityInputProofGatesNegative(t *testing.T) {
 	f := finding.Finding{ID: "finding", EngagementID: "eng"}
 	unproven := reachabilityInput(f, []judgment.Judgment{
@@ -172,8 +171,8 @@ func TestReachabilityInputProofGatesNegative(t *testing.T) {
 	proven := reachabilityInput(f, []judgment.Judgment{
 		{ID: "with-entry", EngagementID: "eng", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "finding", Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, EntrypointsPresent: true}, State: judgment.StateConfirmed, EvidenceScore: 90},
 	})
-	if proven.Reachability != judgment.NotReachable {
-		t.Fatalf("proven Tier-2 not_reachable must stay not_reachable, got %#v", proven)
+	if proven.Reachability != judgment.ReachUnknown {
+		t.Fatalf("negative without current authority must downgrade to unknown, got %#v", proven)
 	}
 }
 

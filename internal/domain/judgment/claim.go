@@ -301,12 +301,11 @@ func (c ReachabilityClaim) ProvedNotReachable() bool {
 	return c.Reachable == NotReachable && len(c.UnknownSymbols) == 0 && len(c.BlindConstructs) == 0
 }
 
-// SuppressesFinding reports whether this claim is a SOUND basis for hiding or downgrading a finding: an
-// OpenVEX not_affected justification, an attack-path exclusion, a promotion de-escalation, or an SLA
-// urgency subtraction. Every reader that would drop or lower a finding on a not_reachable MUST gate on
-// this, not on Reachable == NotReachable alone, because a legacy or agent-proposed claim can reach a
-// reader without passing the coordinator's mint-time coverage guard (EPIC #1042, 0.6). It requires
-// ProvedNotReachable AND a tier whose negative is a sound proof of absence:
+// SuppressesFinding reports whether a claim satisfies the minimum technical
+// preconditions for a negative. It is not production suppression authority: callers
+// that would hide or lower a finding must use WinningReachabilityDispositions, which
+// additionally validates current provenance, sealed evidence, and frozen authority.
+// It requires ProvedNotReachable AND a tier whose negative is a sound proof of absence:
 //   - Tier-1 (import): the vulnerable package is not imported; there is no entry-point notion.
 //   - Tier-2 (call-graph): valid only relative to a recorded entry-point set, so EntrypointsPresent
 //     is required; a missing/empty value decodes as false, failing the gate closed.

@@ -71,19 +71,21 @@ func NewService(store Store, ev evidenceSealer, audit ports.IdempotentAuditLogge
 }
 
 type sealedProposal struct {
-	JudgmentID  string          `json:"judgment_id"`
-	Capability  string          `json:"capability"`
-	SubjectKind string          `json:"subject_kind"`
-	SubjectID   string          `json:"subject_id"`
-	ProposedBy  string          `json:"proposed_by"`
-	Claim       json.RawMessage `json:"claim"`
+	JudgmentID       string          `json:"judgment_id"`
+	Capability       string          `json:"capability"`
+	SubjectKind      string          `json:"subject_kind"`
+	SubjectID        string          `json:"subject_id"`
+	ProposedBy       string          `json:"proposed_by"`
+	Claim            json.RawMessage `json:"claim"`
+	SuppressionProof json.RawMessage `json:"suppression_proof,omitempty"`
 }
 
 type sealedVerdict struct {
-	JudgmentID string `json:"judgment_id"`
-	Verifier   string `json:"verifier"`
-	Score      int    `json:"score"`
-	Rationale  string `json:"rationale"`
+	JudgmentID       string          `json:"judgment_id"`
+	Verifier         string          `json:"verifier"`
+	Score            int             `json:"score"`
+	Rationale        string          `json:"rationale"`
+	SuppressionProof json.RawMessage `json:"suppression_proof,omitempty"`
 }
 
 type sealedAcceptance struct {
@@ -91,17 +93,46 @@ type sealedAcceptance struct {
 	AcceptedBy string `json:"accepted_by"`
 }
 
+func evidenceIdentity(item evidence.Evidence) (judgment.ArtifactIdentity, error) {
+	identity, err := judgment.NewArtifactIdentity(item.ID.String(), "sha256:"+item.Hash)
+	if err != nil {
+		return judgment.ArtifactIdentity{}, err
+	}
+	return identity, nil
+}
+
 // Propose records a PROPOSED judgment at EvidenceScore 0, sealing the inert (typed) claim into the
 // evidence chain under the proposer (attribution only; confers no power to score). The agent reaches
 // this only via a propose-only catalog tool (added per-capability with E28/E38).
 func (s *Service) Propose(ctx context.Context, proposer string, engagementID shared.ID, capability judgment.Capability, subjectKind judgment.SubjectKind, subjectID shared.ID, claim judgment.Claim) (judgment.Judgment, error) {
+	return s.propose(ctx, proposer, engagementID, capability, subjectKind, subjectID, claim, nil)
+}
+
+// ProposeReachabilityWithSuppressionProof starts the ordinary propose/verify
+// lifecycle with complete draft provenance. The service, not the caller, binds
+// the sealed proposal and verdict evidence references. Existing production
+// seams that cannot supply a complete proof should continue to call Propose;
+// their negative result remains raise-only/non-suppressing.
+func (s *Service) ProposeReachabilityWithSuppressionProof(ctx context.Context, proposer string, engagementID, subjectID shared.ID, claim judgment.ReachabilityClaim, proof judgment.ReachabilitySuppressionProof) (judgment.Judgment, error) {
+	return s.propose(ctx, proposer, engagementID, judgment.CapReachability, judgment.SubjectFinding, subjectID, claim, &proof)
+}
+
+func (s *Service) propose(ctx context.Context, proposer string, engagementID shared.ID, capability judgment.Capability, subjectKind judgment.SubjectKind, subjectID shared.ID, claim judgment.Claim, proof *judgment.ReachabilitySuppressionProof) (judgment.Judgment, error) {
 	if proposer == "" {
 		return judgment.Judgment{}, fmt.Errorf("%w: proposer is required", shared.ErrValidation)
 	}
 	if engagementID.IsZero() { // parity with exploitation.Propose (a use-case precondition, before minting an id)
 		return judgment.Judgment{}, fmt.Errorf("%w: engagement id is required", shared.ErrValidation)
 	}
-	j, err := judgment.New(s.ids.NewID(), engagementID, capability, subjectKind, subjectID, claim, proposer, s.clock.Now())
+	var (
+		j   judgment.Judgment
+		err error
+	)
+	if proof == nil {
+		j, err = judgment.New(s.ids.NewID(), engagementID, capability, subjectKind, subjectID, claim, proposer, s.clock.Now())
+	} else {
+		j, err = judgment.NewWithSuppressionProof(s.ids.NewID(), engagementID, capability, subjectKind, subjectID, claim, proposer, *proof, s.clock.Now())
+	}
 	if err != nil {
 		return judgment.Judgment{}, err
 	}
@@ -109,17 +140,37 @@ func (s *Service) Propose(ctx context.Context, proposer string, engagementID sha
 	if err != nil {
 		return judgment.Judgment{}, fmt.Errorf("marshal claim: %w", err)
 	}
+	proofJSON, err := judgment.MarshalReachabilitySuppressionProposalProof(j.SuppressionProof)
+	if err != nil {
+		return judgment.Judgment{}, fmt.Errorf("marshal suppression proposal proof: %w", err)
+	}
 	payload, err := json.Marshal(sealedProposal{
 		JudgmentID: j.ID.String(), Capability: string(j.Capability), SubjectKind: string(j.SubjectKind),
-		SubjectID: j.SubjectID.String(), ProposedBy: j.ProposedBy, Claim: claimJSON,
+		SubjectID: j.SubjectID.String(), ProposedBy: j.ProposedBy, Claim: claimJSON, SuppressionProof: proofJSON,
 	})
 	if err != nil {
 		return judgment.Judgment{}, fmt.Errorf("marshal judgment proposal: %w", err)
 	}
 	// Seal the inert claim first (custody), then persist; an orphaned proposal seal on a save
-	// failure is harmless (it is score 0, not gating).
-	if _, err := s.evidence.Seal(ctx, engagementID, ProposedEvidenceKind, payload, j.ProposedBy); err != nil {
+	// failure is harmless (it is score 0, not gating). A supplied suppression proof
+	// is bound to this returned sealed link before the proposed judgment is persisted.
+	sealedProposal, err := s.evidence.Seal(ctx, engagementID, ProposedEvidenceKind, payload, j.ProposedBy)
+	if err != nil {
 		return judgment.Judgment{}, fmt.Errorf("seal judgment proposal: %w", err)
+	}
+	if j.SuppressionProof != nil {
+		proposalRef, bindErr := evidenceIdentity(sealedProposal)
+		if bindErr != nil {
+			return judgment.Judgment{}, fmt.Errorf("identify suppression proposal evidence: %w", bindErr)
+		}
+		proof, bindErr := j.SuppressionProof.WithProposalEvidence(proposalRef)
+		if bindErr != nil {
+			return judgment.Judgment{}, fmt.Errorf("bind suppression proposal evidence: %w", bindErr)
+		}
+		j, bindErr = j.WithSuppressionProof(proof)
+		if bindErr != nil {
+			return judgment.Judgment{}, fmt.Errorf("attach suppression proposal evidence: %w", bindErr)
+		}
 	}
 	entry := ports.AuditEntry{
 		Actor: proposer, Action: "judgment.proposed", Target: j.ID.String(),
@@ -183,19 +234,38 @@ func (s *Service) verify(ctx context.Context, verifier string, engagementID, jud
 	if err != nil {
 		return judgment.Judgment{}, err
 	}
-	payload, err := json.Marshal(sealedVerdict{JudgmentID: judgmentID.String(), Verifier: v.Verifier, Score: v.Score, Rationale: v.Rationale})
+	proofJSON, err := judgment.MarshalReachabilitySuppressionVerdictProof(cur.SuppressionProof)
+	if err != nil {
+		return judgment.Judgment{}, fmt.Errorf("marshal suppression verdict proof: %w", err)
+	}
+	payload, err := json.Marshal(sealedVerdict{JudgmentID: judgmentID.String(), Verifier: v.Verifier, Score: v.Score, Rationale: v.Rationale, SuppressionProof: proofJSON})
 	if err != nil {
 		return judgment.Judgment{}, fmt.Errorf("marshal judgment verdict: %w", err)
 	}
-	if _, err := s.evidence.Seal(ctx, engagementID, VerdictEvidenceKind, payload, verifier); err != nil {
+	sealedVerdict, err := s.evidence.Seal(ctx, engagementID, VerdictEvidenceKind, payload, verifier)
+	if err != nil {
 		return judgment.Judgment{}, fmt.Errorf("seal judgment verdict: %w", err)
+	}
+	if cur.SuppressionProof != nil {
+		verdictRef, bindErr := evidenceIdentity(sealedVerdict)
+		if bindErr != nil {
+			return judgment.Judgment{}, fmt.Errorf("identify suppression verdict evidence: %w", bindErr)
+		}
+		proof, bindErr := cur.SuppressionProof.WithVerdictEvidence(verdictRef)
+		if bindErr != nil {
+			return judgment.Judgment{}, fmt.Errorf("bind suppression verdict evidence: %w", bindErr)
+		}
+		updated, bindErr = updated.WithSuppressionProof(proof)
+		if bindErr != nil {
+			return judgment.Judgment{}, fmt.Errorf("attach suppression verdict evidence: %w", bindErr)
+		}
 	}
 	entry := ports.AuditEntry{
 		Actor: verifier, Action: "judgment.verdict", Target: judgmentID.String(),
 		Metadata: map[string]string{"idempotency_key": "judgment.verdict:" + judgmentID.String() + ":" + strconv.Itoa(expectedVersion+1), "engagement": engagementID.String(), "score": strconv.Itoa(v.Score), "state": string(updated.State), "publishable": strconv.FormatBool(updated.Publishable())},
 		At:       s.clock.Now(),
 	}
-	saved, err := s.store.SetVerdictStateWithAudit(ctx, engagementID, judgmentID, updated.EvidenceScore, updated.State, updated.VerifiedBy, updated.VerdictRationale, expectedVersion, entry)
+	saved, err := s.store.SetVerdictStateWithAudit(ctx, engagementID, judgmentID, updated.EvidenceScore, updated.State, updated.VerifiedBy, updated.VerdictRationale, updated.SuppressionProof, expectedVersion, entry)
 	if err != nil {
 		return judgment.Judgment{}, fmt.Errorf("apply judgment verdict: %w", err)
 	}

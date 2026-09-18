@@ -29,11 +29,13 @@ func TestDeriveReachabilityEvidence(t *testing.T) {
 		t.Fatalf("reachable claim must derive reachable + path, got %+v", ev)
 	}
 
-	// A proven not_reachable (Tier-1 import, complete coverage) -> present_unreached.
-	proven := []judgment.Judgment{reachJ("f1", judgment.StateConfirmed, judgment.ReachabilityClaim{
+	// A technically complete negative without a current suppression proof is
+	// explicitly no_analysis. Export has no live authority context and must not
+	// present it as a clean negative.
+	unprovenAuthority := []judgment.Judgment{reachJ("f1", judgment.StateConfirmed, judgment.ReachabilityClaim{
 		Reachable: judgment.NotReachable, Tier: judgment.Tier1, Confidence: 90})}
-	if ev := DeriveReachabilityEvidence(proven, "f1"); ev.Label != LabelPresentUnreached {
-		t.Fatalf("a proven not_reachable must derive present_unreached, got %+v", ev)
+	if ev := DeriveReachabilityEvidence(unprovenAuthority, "f1"); ev.Label != LabelNoAnalysis {
+		t.Fatalf("a negative without current suppression authority must derive no_analysis, got %+v", ev)
 	}
 
 	// An UNPROVEN not_reachable (Tier-2, no entry points) is NOT a sound present_unreached: no_analysis.

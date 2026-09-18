@@ -199,7 +199,7 @@ func TestRecordingAnalyzerDropsUnsafeProvenance(t *testing.T) {
 	}
 }
 
-func TestProductionCaptureUsesPersistedWinningClaimForSuppression(t *testing.T) {
+func TestProductionCaptureDoesNotFabricateSuppressionWithoutAuthority(t *testing.T) {
 	lifecycle, err := newCaptureLifecycle()
 	if err != nil {
 		t.Fatal(err)
@@ -233,24 +233,16 @@ func TestProductionCaptureUsesPersistedWinningClaimForSuppression(t *testing.T) 
 	if observation.Outcome != measurement.OutcomePresentUnreached {
 		t.Fatalf("outcome = %q, want present_unreached", observation.Outcome)
 	}
-	if observation.Suppression.Claim != measurement.SuppressionProduced || len(observation.Suppression.Effects) != 1 {
-		t.Fatalf("suppression = %#v, want actual suppressing winner", observation.Suppression)
-	}
-	proof := observation.Suppression.Effects[0].Proof
-	if proof.SubjectID != cell.SubjectID || proof.BoundaryID != cell.BoundaryID {
-		t.Fatalf("proof identity = %q/%q, want %q/%q", proof.SubjectID, proof.BoundaryID, cell.SubjectID, cell.BoundaryID)
-	}
-	if len(proof.MissingProvenance) == 0 {
-		t.Fatal("current production proof fabricated complete provenance")
+	if observation.Suppression.Claim != measurement.SuppressionNone || len(observation.Suppression.Effects) != 0 {
+		t.Fatalf("suppression = %#v, want fail-closed non-suppression", observation.Suppression)
 	}
 	judgments, err := lifecycle.judgments.List(context.Background(), productionCaptureEngagementID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := judgment.WinningReachabilityClaims(judgments)
-	winner, ok := claims[cell.SubjectID]
-	if !ok || !winner.SuppressesFinding() {
-		t.Fatalf("persisted winner = %#v, want suppressing reachability claim", winner)
+	disposition, ok := judgment.WinningReachabilityDispositions(judgments, nil)[cell.SubjectID]
+	if !ok || disposition.State != judgment.NotReachable || disposition.Suppresses {
+		t.Fatalf("persisted disposition = %#v, want present but unauthorized negative", disposition)
 	}
 }
 

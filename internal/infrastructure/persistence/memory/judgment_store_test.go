@@ -2,12 +2,107 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+func memoryTestArtifact(t *testing.T, id string) judgment.ArtifactIdentity {
+	t.Helper()
+	sum := sha256.Sum256([]byte(id))
+	artifact, err := judgment.NewArtifactIdentity(id, "sha256:"+hex.EncodeToString(sum[:]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return artifact
+}
+
+func memoryTestSuppressionProof(t *testing.T) judgment.ReachabilitySuppressionProof {
+	t.Helper()
+	registry, err := judgment.NewInitialReachabilityAuthorityRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := registry.Lookup(string(judgment.CohortGo), string(judgment.ModeSourceTier2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval, ok := policy.Approval()
+	if !ok {
+		t.Fatal("expected go reachability suppression approval")
+	}
+	snapshot, err := judgment.NewReachabilitySnapshotIdentity(memoryTestArtifact(t, "source"), memoryTestArtifact(t, "sbom"), memoryTestArtifact(t, "run"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := approval.Contract()
+	contractIdentity, err := judgment.NewArtifactIdentity(contract.ID(), contract.Digest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := judgment.NewReachabilitySuppressionProof(judgment.ReachabilitySuppressionProofInput{
+		SubjectID: "f1", BoundaryID: "analysis-boundary", Cohort: string(judgment.CohortGo), Mode: string(judgment.ModeSourceTier2), Snapshot: snapshot,
+		Analyzer: memoryTestArtifact(t, "analyzer"), Configuration: memoryTestArtifact(t, "configuration"), CompletenessContract: contractIdentity,
+		Authority: approval.Authority(), AuthorityCheckpoint: memoryTestArtifact(t, "authority-checkpoint"), Proposer: approval.Proposer(), Verifier: approval.Verifier(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err = proof.WithProposalEvidence(memoryTestArtifact(t, "proposal-evidence"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err = proof.WithVerdictEvidence(memoryTestArtifact(t, "verdict-evidence"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return proof
+}
+
+func TestJudgmentStoreSuppressionProofRoundTrip(t *testing.T) {
+	store := NewJudgmentStore()
+	proof := memoryTestSuppressionProof(t)
+	item := judgment.Judgment{
+		ID: "j-proof", EngagementID: "e1", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "f1",
+		Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, EntrypointsPresent: true}, State: judgment.StateConfirmed, EvidenceScore: 90,
+		ProposedBy: proof.Proposer(), VerifiedBy: proof.Verifier(), Version: 2, SuppressionProof: &proof,
+	}
+	if err := store.Save(context.Background(), item); err != nil {
+		t.Fatalf("save suppression proof: %v", err)
+	}
+	stored, err := store.ListByEngagement(context.Background(), "e1")
+	if err != nil || len(stored) != 1 || stored[0].SuppressionProof == nil {
+		t.Fatalf("suppression proof round trip = %#v err=%v", stored, err)
+	}
+	if !stored[0].SuppressionProof.ProposalEvidence().Equal(proof.ProposalEvidence()) || !stored[0].SuppressionProof.VerdictEvidence().Equal(proof.VerdictEvidence()) {
+		t.Fatalf("sealed evidence changed during memory round trip: %#v", stored[0].SuppressionProof)
+	}
+
+	transition := judgment.Judgment{
+		ID: "j-transition", EngagementID: "e1", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "f1",
+		Claim: judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, EntrypointsPresent: true}, State: judgment.StateProposed,
+		ProposedBy: proof.Proposer(), Version: 1,
+	}
+	if err := store.Save(context.Background(), transition); err != nil {
+		t.Fatal(err)
+	}
+	transitioned, err := store.SetVerdictStateWithAudit(context.Background(), "e1", transition.ID, 90, judgment.StateConfirmed, proof.Verifier(), "confirmed", &proof, 1, ports.AuditEntry{Actor: proof.Verifier(), Action: "judgment.verdict", Target: transition.ID.String()})
+	if err != nil || transitioned.SuppressionProof == nil || !transitioned.SuppressionProof.VerdictEvidence().Equal(proof.VerdictEvidence()) {
+		t.Fatalf("verdict transition did not persist suppression proof: %#v err=%v", transitioned, err)
+	}
+
+	invalid := item
+	invalid.ID = "j-invalid"
+	invalid.SuppressionProof = judgment.MalformedReachabilitySuppressionProof()
+	if err := store.Save(context.Background(), invalid); err == nil {
+		t.Fatal("malformed suppression proof was accepted by memory storage")
+	}
+}
 
 func TestJudgmentStore(t *testing.T) {
 	st := NewJudgmentStore()

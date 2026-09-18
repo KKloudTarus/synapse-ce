@@ -52,37 +52,24 @@ type ReachabilityEvidence struct {
 // conclusive ran), never a silently-absent one. Deriving at the surface keeps the domain verdict enum
 // unchanged.
 func DeriveReachabilityEvidence(judgments []judgment.Judgment, findingID string) *ReachabilityEvidence {
-	var winner judgment.ReachabilityClaim
-	have := false
-	for _, j := range judgments {
-		if !j.Publishable() || j.Capability != judgment.CapReachability || j.SubjectKind != judgment.SubjectFinding {
-			continue
-		}
-		if j.SubjectID.String() != findingID {
-			continue
-		}
-		rc, ok := j.Claim.(judgment.ReachabilityClaim)
-		if !ok {
-			continue
-		}
-		if !have || rc.Supersedes(winner) {
-			winner, have = rc, true
-		}
-	}
+	// This read surface cannot independently resolve the live source/SBOM/run
+	// authority context, so centralized disposition intentionally keeps negatives
+	// non-suppressing while retaining positive findings.
+	winner, have := judgment.WinningReachabilityDispositions(judgments, nil)[findingID]
 	if !have {
 		return &ReachabilityEvidence{Source: "reachability", Label: LabelNoAnalysis}
 	}
 	switch {
-	case winner.Reachable == judgment.Reachable:
+	case winner.State == judgment.Reachable:
 		return &ReachabilityEvidence{Source: "reachability", Label: LabelReachable, Tier: winner.Tier, Path: winner.Path}
-	case winner.Reachable == judgment.ConditionallyReachable:
+	case winner.State == judgment.ConditionallyReachable:
 		// Reached under an unproven precondition: exploitable-under-condition, never a suppression.
 		return &ReachabilityEvidence{Source: "reachability", Label: LabelConditionallyReachable, Tier: winner.Tier, Path: winner.Path}
-	case winner.SuppressesFinding():
+	case winner.Suppresses:
 		return &ReachabilityEvidence{Source: "reachability", Label: LabelPresentUnreached, Tier: winner.Tier}
 	default:
-		// A reachability judgment exists but is inconclusive (unknown, or an unproven negative that cannot
-		// soundly claim present_unreached): report no_analysis rather than overstate a proven-unreached.
+		// A reachability judgment exists but is inconclusive, or its negative lacks
+		// current authority. Report no_analysis rather than overstate absence.
 		return &ReachabilityEvidence{Source: "reachability", Label: LabelNoAnalysis}
 	}
 }

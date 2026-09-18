@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -903,14 +902,14 @@ func (capture *ProductionCapture) observation(ctx context.Context, request Captu
 	if err != nil {
 		return measurement.MeasuredObservation{}, fmt.Errorf("list captured judgments: %w", err)
 	}
-	winner, claim, ok, err := winningCaptureJudgment(judgments, shared.ID(request.Cell.SubjectID))
+	winner, disposition, ok, err := winningCaptureJudgment(judgments, shared.ID(request.Cell.SubjectID))
 	if err != nil {
 		return measurement.MeasuredObservation{}, err
 	}
 	if !ok {
 		return observation, nil
 	}
-	switch claim.Reachable {
+	switch disposition.State {
 	case judgment.Reachable:
 		if executed.analyzer != nil && analysisHasUnknownPath(executed.analyzer.result) {
 			observation.Outcome = measurement.OutcomeConditionallyReachable
@@ -923,28 +922,8 @@ func (capture *ProductionCapture) observation(ctx context.Context, request Captu
 	default:
 		observation.Outcome = measurement.OutcomeNoAnalysis
 	}
-	if claim.Reachable == judgment.Reachable {
+	if disposition.State == judgment.Reachable {
 		observation.Positive = &measurement.PositiveEvidence{Snapshot: request.Snapshot, Evidence: judgmentReference(winner)}
-	}
-	if claim.SuppressesFinding() {
-		evidences, err := lifecycle.evidence.List(ctx, productionCaptureEngagementID)
-		if err != nil {
-			return measurement.MeasuredObservation{}, fmt.Errorf("list captured evidence: %w", err)
-		}
-		if len(evidences) == 0 {
-			return measurement.MeasuredObservation{}, errors.New("suppressing judgment has no sealed evidence")
-		}
-		proofEvidence := evidences[len(evidences)-1]
-		observation.Suppression = measurement.SuppressionCapture{
-			Claim: measurement.SuppressionProduced, Status: measurement.CaptureComplete,
-			Effects: []measurement.SuppressionEffect{{Kind: measurement.EffectSuppressingJudgment, Proof: measurement.SuppressionProof{
-				Judgment: judgmentReference(winner), SubjectID: request.Cell.SubjectID, BoundaryID: request.Cell.BoundaryID,
-				Proposer: winner.ProposedBy, Verifier: winner.VerifiedBy, Snapshot: request.Snapshot,
-				Analyzer: observation.Analyzer, Configuration: request.Cell.Configuration,
-				Evidence:          measurement.ArtifactReference{ID: proofEvidence.ID.String(), Digest: "sha256:" + proofEvidence.Hash},
-				MissingProvenance: []string{"analyzer_identity", "completeness_contract", "configuration_identity", "snapshot_identity"},
-			}}},
-		}
 	}
 	return observation, nil
 }
@@ -971,39 +950,17 @@ func judgmentReference(item judgment.Judgment) measurement.ArtifactReference {
 	return measurement.ArtifactReference{ID: item.ID.String(), Digest: benchmark.SHA256Digest(encoded)}
 }
 
-func winningCaptureJudgment(items []judgment.Judgment, subjectID shared.ID) (judgment.Judgment, judgment.ReachabilityClaim, bool, error) {
-	claims := judgment.WinningReachabilityClaims(items)
-	claim, exists := claims[subjectID.String()]
+func winningCaptureJudgment(items []judgment.Judgment, subjectID shared.ID) (judgment.Judgment, judgment.ReachabilityDisposition, bool, error) {
+	disposition, exists := judgment.WinningReachabilityDispositions(items, nil)[subjectID.String()]
 	if !exists {
-		return judgment.Judgment{}, judgment.ReachabilityClaim{}, false, nil
+		return judgment.Judgment{}, judgment.ReachabilityDisposition{}, false, nil
 	}
-	var winner judgment.Judgment
-	found := false
 	for _, item := range items {
-		if !item.Publishable() || item.Capability != judgment.CapReachability || item.SubjectKind != judgment.SubjectFinding || item.SubjectID != subjectID {
-			continue
-		}
-		candidate, ok := item.Claim.(judgment.ReachabilityClaim)
-		if !ok {
-			continue
-		}
-		if !found || candidate.Supersedes(claimFromJudgment(winner)) {
-			winner, found = item, true
+		if item.ID == disposition.JudgmentID && item.Publishable() && item.Capability == judgment.CapReachability && item.SubjectKind == judgment.SubjectFinding && item.SubjectID == subjectID {
+			return item, disposition, true, nil
 		}
 	}
-	if !found {
-		return judgment.Judgment{}, judgment.ReachabilityClaim{}, false, errors.New("reachability winner has no persisted judgment")
-	}
-	persisted := claimFromJudgment(winner)
-	if !reflect.DeepEqual(persisted, claim) {
-		return judgment.Judgment{}, judgment.ReachabilityClaim{}, false, errors.New("reachability claim winner disagrees with persisted judgment winner")
-	}
-	return winner, claim, true, nil
-}
-
-func claimFromJudgment(item judgment.Judgment) judgment.ReachabilityClaim {
-	claim, _ := item.Claim.(judgment.ReachabilityClaim)
-	return claim
+	return judgment.Judgment{}, judgment.ReachabilityDisposition{}, false, errors.New("reachability disposition has no persisted judgment")
 }
 
 func (capture *ProductionCapture) rawEvidence(request CaptureRequest, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, executed execution, observation measurement.MeasuredObservation) ([]byte, error) {

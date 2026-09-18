@@ -159,7 +159,7 @@ func (s *Service) vexJustifications(ctx context.Context, engagementID shared.ID)
 // reachabilityWinners resolves the WINNING reachability claim per finding id (tier then state, EPIC #1042,
 // 0.4): a superseding claim hides a stale one, so both the not_reachable justification and the reachable
 // reconciliation read a single, consistent verdict. Empty when judgments are disabled.
-func (s *Service) reachabilityWinners(ctx context.Context, engagementID shared.ID) (map[string]judgment.ReachabilityClaim, error) {
+func (s *Service) reachabilityWinners(ctx context.Context, engagementID shared.ID) (map[string]judgment.ReachabilityDisposition, error) {
 	if s.judgments == nil {
 		return nil, nil
 	}
@@ -167,20 +167,18 @@ func (s *Service) reachabilityWinners(ctx context.Context, engagementID shared.I
 	if err != nil {
 		return nil, err
 	}
-	// Shared with the VEX apply/reapply reconciliation, so export and apply read one identical verdict.
-	return judgment.WinningReachabilityClaims(js), nil
+	// Export has no independently resolved live source/SBOM/run authority context.
+	// Passing nil preserves reachable evidence but fails every negative closed.
+	return judgment.WinningReachabilityDispositions(js, nil), nil
 }
 
-// notReachableTiersFrom maps a finding id → the strongest tier of a PUBLISHABLE (confirmed + evidence-gated)
-// not_reachable reachability judgment about it, derived from a winner snapshot. Only a claim that soundly
-// suppresses (ProvedNotReachable, plus entry points on the call-graph tier) may stamp a not_affected
-// justification; a partial, blind, or zero-entrypoint negative is not proof of absence (EPIC #1042, 0.6), and
-// the finding then falls back to its status-derived VEX.
-func notReachableTiersFrom(winner map[string]judgment.ReachabilityClaim) map[string]judgment.ReachabilityTier {
+// notReachableTiersFrom maps a finding id → the strongest centrally authorized
+// negative. No local claim- or actor-based suppression check is permitted here.
+func notReachableTiersFrom(winner map[string]judgment.ReachabilityDisposition) map[string]judgment.ReachabilityTier {
 	out := map[string]judgment.ReachabilityTier{}
-	for id, rc := range winner {
-		if rc.SuppressesFinding() {
-			out[id] = rc.Tier
+	for id, result := range winner {
+		if result.Suppresses {
+			out[id] = result.Tier
 		}
 	}
 	return out
@@ -194,8 +192,8 @@ func notReachableTiersFrom(winner map[string]judgment.ReachabilityClaim) map[str
 // reachable) forbids a vendor not_affected from suppressing it; export upgrades such a would-be not_affected
 // to the more-exploitable affected. Shared with the VEX apply/reapply path so both surfaces protect the same
 // findings.
-func suppressionResistantFrom(winner map[string]judgment.ReachabilityClaim) map[string]bool {
-	return judgment.SuppressionResistantFindingIDs(winner)
+func suppressionResistantFrom(winner map[string]judgment.ReachabilityDisposition) map[string]bool {
+	return judgment.SuppressionResistantDispositionIDs(winner)
 }
 
 // parsedKey is the structured form of a finding dedup key

@@ -32,7 +32,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/promotion"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/verdict"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 
 	evdom "github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
@@ -1090,65 +1089,30 @@ func indexRuntimeLibraryLoads(judgments []judgment.Judgment) map[shared.ID]promo
 	return out
 }
 
-// indexReachability indexes the current publishable finding-scoped reachability
-// judgment. Stronger tiers supersede weaker ones; within a tier, later judgment
-// chronology wins so a contradictory later proof replaces the earlier state.
+// indexReachability projects the single central reachability disposition. This
+// evaluator cannot resolve current live suppression authority, so only positive
+// signals are actionable; negative judgments remain non-deterministic here.
 func indexReachability(judgments []judgment.Judgment) map[shared.ID]reachInfo {
-	out := make(map[shared.ID]reachInfo)
-	for _, j := range judgments {
-		if j.Capability != judgment.CapReachability || j.SubjectKind != judgment.SubjectFinding || !j.Publishable() {
-			continue
+	winner := judgment.WinningReachabilityDispositions(judgments, nil)
+	out := make(map[shared.ID]reachInfo, len(winner))
+	for subjectID, result := range winner {
+		state := result.State
+		if state == judgment.NotReachable && !result.Suppresses {
+			state = judgment.ReachUnknown
 		}
-		rc, ok := j.Claim.(judgment.ReachabilityClaim)
-		if !ok {
-			continue
-		}
-		existing, exists := out[j.SubjectID]
-		if exists && !reachabilitySupersedes(j, rc, existing) {
-			continue
-		}
-		deterministic := j.EvidenceScore >= verdict.DeterministicProofScore && judgment.IsDeterministicReachabilityProof(rc.Tier, j.ProposedBy, j.VerifiedBy)
-		// A not_reachable may only de-escalate when its coverage proves absence: every affected symbol
-		// answered, no blind construct, and (on the call-graph tier) a recorded entry-point set. A partial,
-		// blind, or zero-entrypoint negative is soft no-coverage, not proof (EPIC #1042, 0.6), so it must
-		// not lower priority. A reachable claim keeps its deterministic flag (it only ever raises).
-		if rc.Reachable == judgment.NotReachable && !rc.SuppressesFinding() {
-			deterministic = false
-		}
-		out[j.SubjectID] = reachInfo{
-			judgmentID:    j.ID,
-			state:         rc.Reachable,
-			tier:          rc.Tier,
+		out[shared.ID(subjectID)] = reachInfo{
+			judgmentID:    result.JudgmentID,
+			state:         state,
+			tier:          result.Tier,
 			publishable:   true,
-			deterministic: deterministic,
-			suppresses:    rc.SuppressesFinding(),
-			evidenceScore: j.EvidenceScore,
-			version:       j.Version,
-			updatedAt:     j.Audit.UpdatedAt,
+			deterministic: result.Suppresses,
+			suppresses:    result.Suppresses,
+			evidenceScore: result.EvidenceScore,
+			version:       result.Version,
+			updatedAt:     result.UpdatedAt,
 		}
 	}
 	return out
-}
-
-func reachabilitySupersedes(j judgment.Judgment, rc judgment.ReachabilityClaim, existing reachInfo) bool {
-	// Order by the shared authoritative-selection ranking (tier then state, with an unproven negative
-	// demoted below every valid-tier signal), so a proven reachable is never shadowed by a same-tier
-	// not_reachable and a higher-tier UNPROVEN negative never shadows a lower-tier reachable (EPIC #1042).
-	nt, ns := judgment.ReachabilitySignalRank(rc.Tier, rc.Reachable, rc.SuppressesFinding())
-	et, es := judgment.ReachabilitySignalRank(existing.tier, existing.state, existing.suppresses)
-	if nt != et {
-		return nt > et
-	}
-	if ns != es {
-		return ns > es
-	}
-	if j.Audit.UpdatedAt != existing.updatedAt {
-		return j.Audit.UpdatedAt.After(existing.updatedAt)
-	}
-	if j.Version != existing.version {
-		return j.Version > existing.version
-	}
-	return j.ID > existing.judgmentID
 }
 
 // indexPromotionProposals indexes the latest promotion proposal claim per
