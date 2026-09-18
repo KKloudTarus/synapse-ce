@@ -48,6 +48,22 @@ func TestNormalizeResultDeterministicAndComplete(t *testing.T) {
 	}
 }
 
+func TestNormalizeResultPreservesDeclaredDependencies(t *testing.T) {
+	t.Parallel()
+	got, err := NormalizeResult(Result{DeclaredDependencies: []string{
+		"@reachbench/lexical-opaque",
+		"@reachbench/lexical",
+		"@reachbench/lexical",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"@reachbench/lexical", "@reachbench/lexical-opaque"}
+	if !reflect.DeepEqual(got.DeclaredDependencies, want) {
+		t.Fatalf("declared dependencies = %#v, want %#v", got.DeclaredDependencies, want)
+	}
+}
+
 func TestNormalizeResultCanBeCompleteForResolvedPackageIdentities(t *testing.T) {
 	t.Parallel()
 	got, err := NormalizeResult(Result{Imports: []ImportResolution{

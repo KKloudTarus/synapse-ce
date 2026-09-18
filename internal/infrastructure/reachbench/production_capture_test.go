@@ -80,6 +80,21 @@ func TestImportSubjectsAcceptsScopedNPMPackageURL(t *testing.T) {
 	}
 }
 
+func TestFixturePackagePURLVersionsScopedNPMIdentity(t *testing.T) {
+	for _, testCase := range []struct {
+		identity string
+		want     string
+	}{
+		{identity: "npm:@reachbench/lexical", want: "pkg:npm/@reachbench/lexical@benchmark-v1"},
+		{identity: "npm:@reachbench/lexical@1.0.0", want: "pkg:npm/@reachbench/lexical@1.0.0"},
+		{identity: "pypi:reachbench", want: "pkg:pypi/reachbench@benchmark-v1"},
+	} {
+		if got := fixturePackagePURL(testCase.identity); got != testCase.want {
+			t.Errorf("fixturePackagePURL(%q) = %q, want %q", testCase.identity, got, testCase.want)
+		}
+	}
+}
+
 func TestImportSubjectsRejectsMalformedPackageURLs(t *testing.T) {
 	for _, subjectID := range []string{
 		"pkg:npm/@scope/name@1.0.0@2.0.0",
@@ -207,6 +222,62 @@ func TestProductionCaptureMarksGoManifestCapabilityNoCoverageUnsupported(t *test
 	}
 }
 
+func TestProductionCaptureExercisesJavaScriptLexicalDependency(t *testing.T) {
+	contract := measurement.DefaultReachabilityBenchmark()
+	cases := make(map[string]measurement.ContractCase)
+	for _, item := range contract.Corpus.Cases {
+		if item.CohortID == "javascript" && item.ModeID == "lexical" {
+			cases[item.ID] = item
+		}
+	}
+	capture, err := NewProductionCapture(ProductionCaptureDependencies{
+		Materializer: newFixtureMaterializer(t, &fixtureToolRunner{}, "linux/amd64"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, testCase := range []struct {
+		caseID   string
+		outcome  measurement.Outcome
+		coverage measurement.CoverageStatus
+	}{
+		{caseID: "javascript-lexical-control-no-coverage", outcome: measurement.OutcomeNoAnalysis, coverage: measurement.CoverageUnavailable},
+		{caseID: "javascript-lexical-control-opaque", outcome: measurement.OutcomeConditionallyReachable, coverage: measurement.CoveragePartial},
+		{caseID: "javascript-lexical-control-positive", outcome: measurement.OutcomeReachable, coverage: measurement.CoverageComplete},
+		{caseID: "javascript-lexical-control-unreachable", outcome: measurement.OutcomePresentUnreached, coverage: measurement.CoverageComplete},
+	} {
+		t.Run(testCase.caseID, func(t *testing.T) {
+			item, ok := cases[testCase.caseID]
+			if !ok || item.Fixture == nil {
+				t.Fatalf("frozen lexical case %q is missing", testCase.caseID)
+			}
+			evidenceStore, storeErr := benchcycle.NewEvidenceStore(t.TempDir(), reachabilityEvidenceLimits())
+			if storeErr != nil {
+				t.Fatal(storeErr)
+			}
+			result, captureErr := capture.Capture(context.Background(), CaptureRequest{
+				Cell: ExecutionCell{
+					CaseID: item.ID, CohortID: item.CohortID, ModeID: item.ModeID, BindingID: "api",
+					AnalyzerID: "sca-javascript-symbol-tier2", Configuration: captureArtifact("configuration"),
+					SubjectID: item.SubjectID, Fixture: *item.Fixture, BoundaryID: "sca/reachability/javascript-symbol-tier2/api",
+				},
+				Repetition: 1, WorkRoot: privateMaterializerRoot(t),
+				Analyzer: RevisionIdentity{ID: AnalyzerSubjectID, Commit: measurement.TrustedBaselineRevision, Tree: strings.Repeat("b", 40)},
+				Snapshot: captureSnapshot(), attempt: benchcycle.AttemptAddress{CellKey: testCase.caseID, Repetition: 1}, evidence: evidenceStore,
+			})
+			if captureErr != nil {
+				t.Fatal(captureErr)
+			}
+			if result.Observation.Outcome != testCase.outcome || result.Observation.Coverage.Status != testCase.coverage {
+				t.Fatalf("observation = %#v, want outcome %q coverage %q", result.Observation, testCase.outcome, testCase.coverage)
+			}
+			if result.Observation.Suppression.Claim != measurement.SuppressionNone || len(result.Observation.Suppression.Effects) != 0 {
+				t.Fatalf("lexical suppression = %#v, want none", result.Observation.Suppression)
+			}
+		})
+	}
+}
+
 func TestCoverageFromRecordedAnalysisUsesSubjectEvidence(t *testing.T) {
 	for _, testCase := range []struct {
 		name      string
@@ -277,6 +348,27 @@ func TestCoverageFromRecordedAnalysisUsesSubjectEvidence(t *testing.T) {
 			}
 			if len(coverage.Reasons) != 1 || coverage.Reasons[0].Code != testCase.reason {
 				t.Fatalf("coverage reasons = %#v, want %q", coverage.Reasons, testCase.reason)
+			}
+		})
+	}
+}
+
+func TestOutcomeFromRecordedAnalysisSeparatesMeasurementFromJudgments(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		coverage measurement.ObservedCoverage
+		analysis *reachability.Analysis
+		want     measurement.Outcome
+	}{
+		{name: "reachable", coverage: completeCoverage(), analysis: &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject", Reachable: true}}}, want: measurement.OutcomeReachable},
+		{name: "reachable with unknown path", coverage: partialCoverage(measurement.CoverageReasonUnknown), analysis: &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject", Reachable: true, Path: []string{"coverage:unknown"}}}}, want: measurement.OutcomeConditionallyReachable},
+		{name: "complete negative measurement", coverage: completeCoverage(), analysis: &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject"}}}, want: measurement.OutcomePresentUnreached},
+		{name: "partial negative measurement", coverage: partialCoverage(measurement.CoverageReasonOpaque), analysis: &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject"}}}, want: measurement.OutcomeConditionallyReachable},
+		{name: "unavailable measurement", coverage: unavailableCoverage(measurement.CoverageReasonFailed), want: measurement.OutcomeNoAnalysis},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := outcomeFromRecordedAnalysis(testCase.coverage, testCase.analysis); got != testCase.want {
+				t.Fatalf("outcome = %q, want %q", got, testCase.want)
 			}
 		})
 	}
@@ -420,7 +512,7 @@ func TestRecordingAnalyzerDropsUnsafeProvenance(t *testing.T) {
 	}
 }
 
-func TestProductionCaptureDoesNotFabricateSuppressionFromClaim(t *testing.T) {
+func TestProductionCaptureMeasuresNegativeWithoutPersistingSuppression(t *testing.T) {
 	lifecycle, err := newCaptureLifecycle()
 	if err != nil {
 		t.Fatal(err)
@@ -435,7 +527,11 @@ func TestProductionCaptureDoesNotFabricateSuppressionFromClaim(t *testing.T) {
 		[]ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), Symbols: []string{"controlUnreachable"}}},
 		func() (staticAnalyzer, error) { return delegate, nil },
 		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
-			return reachproof.NewCoordinator(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock)
+			coordinator, coordinatorErr := reachproof.NewCoordinator(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock)
+			if coordinatorErr != nil {
+				return nil, coordinatorErr
+			}
+			return coordinator.WithRaiseOnly(), nil
 		},
 	)
 	if err != nil {
@@ -462,9 +558,8 @@ func TestProductionCaptureDoesNotFabricateSuppressionFromClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	claims := judgment.WinningReachabilityClaims(judgments)
-	winner, ok := claims[cell.SubjectID]
-	if !ok || !winner.SuppressesFinding() {
-		t.Fatalf("persisted winner = %#v, want suppressing reachability claim", winner)
+	if winner, ok := claims[cell.SubjectID]; ok {
+		t.Fatalf("persisted winner = %#v, want no negative benchmark judgment", winner)
 	}
 }
 

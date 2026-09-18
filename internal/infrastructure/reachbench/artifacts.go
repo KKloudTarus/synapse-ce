@@ -18,13 +18,25 @@ import (
 
 const artifactManifestPath = "artifact-manifest.json"
 
-func writeSanitizedBundle(ctx context.Context, publication *benchcycle.Publication, manifest LifecycleManifest, repeat SemanticRepeatResult, inputs []measurement.MeasurementInput, reports []measurement.MeasurementReport) error {
+func writeSanitizedBundle(ctx context.Context, publication *benchcycle.Publication, manifest *LifecycleManifest, repeat *SemanticRepeatResult, inputs []measurement.MeasurementInput, reports []measurement.MeasurementReport, conformances []SuppressionProjectionConformance) error {
 	if err := contextError(ctx); err != nil {
 		return err
+	}
+	if manifest == nil || repeat == nil {
+		return errors.New("sanitary bundle requires lifecycle and repeat results")
 	}
 	if len(inputs) != fixedRepetitions || len(reports) != fixedRepetitions {
 		return errors.New("sanitary bundle requires exactly two inputs and reports")
 	}
+	conformanceRequired := manifest.Route != RouteProtectedBaseline
+	if conformanceRequired && len(conformances) != fixedRepetitions {
+		return errors.New("candidate sanitary bundle requires exactly two suppression conformance reports")
+	}
+	if !conformanceRequired && len(conformances) != 0 {
+		return errors.New("protected baseline sanitary bundle cannot contain suppression conformance reports")
+	}
+	manifest.SuppressionConformance = nil
+	repeat.SuppressionConformance = nil
 	files := make([]PublishedArtifact, 0, maxArtifactFiles)
 	for index := range inputs {
 		if err := contextError(ctx); err != nil {
@@ -53,6 +65,35 @@ func writeSanitizedBundle(ctx context.Context, publication *benchcycle.Publicati
 			return err
 		}
 		files = append(files, entry)
+		if conformanceRequired {
+			if err := validateSuppressionConformance(conformances[index]); err != nil {
+				return fmt.Errorf("validate repetition %d suppression conformance: %w", index+1, err)
+			}
+			conformanceEntry, conformanceErr := writeCanonicalArtifact(ctx, publication, prefix+"/suppression-projection-conformance.json", conformances[index])
+			if conformanceErr != nil {
+				return conformanceErr
+			}
+			files = append(files, conformanceEntry)
+			manifest.SuppressionConformance = append(manifest.SuppressionConformance, conformanceEntry)
+		}
+	}
+	if conformanceRequired {
+		leftDigest, err := suppressionConformanceProjectionDigest(conformances[0])
+		if err != nil {
+			return err
+		}
+		rightDigest, err := suppressionConformanceProjectionDigest(conformances[1])
+		if err != nil {
+			return err
+		}
+		repeat.SuppressionConformance = &SuppressionConformanceRepeat{
+			SemanticallyEqual: leftDigest == rightDigest,
+			ReportDigest:      leftDigest,
+			Passed:            conformances[0].Passed && conformances[1].Passed,
+		}
+		if !repeat.SuppressionConformance.SemanticallyEqual {
+			return errors.New("suppression conformance reports differ between repetitions")
+		}
 	}
 	if manifest.BaselineAllowlist != nil {
 		entry, err := writeCanonicalArtifact(ctx, publication, baselineAllowlistResultPath(), *manifest.BaselineAllowlist)
@@ -178,6 +219,9 @@ func replaySanitizedBundle(ctx context.Context, stage string, expectedManifest L
 	}
 	if !sameCanonical(repeat, expectedRepeat) {
 		return errors.New("replayed semantic repeat result differs from staged result")
+	}
+	if err := replaySuppressionConformance(ctx, stage, manifest, repeat); err != nil {
+		return err
 	}
 
 	reportIDs := make([]string, 0, fixedRepetitions)
@@ -516,7 +560,7 @@ func (manifest LifecycleManifest) Validate() error {
 	}
 	switch manifest.Route {
 	case RouteProtectedBaseline:
-		if manifest.Purpose != measurement.BaselineMeasurement || manifest.FinalMode != FinalBaseline || manifest.Analyzer.ID != AnalyzerSubjectID || manifest.Analyzer.Commit != measurement.TrustedBaselineRevision || manifest.BaselineAllowlist == nil {
+		if manifest.Purpose != measurement.BaselineMeasurement || manifest.FinalMode != FinalBaseline || manifest.Analyzer.ID != AnalyzerSubjectID || manifest.Analyzer.Commit != measurement.TrustedBaselineRevision || manifest.BaselineAllowlist == nil || len(manifest.SuppressionConformance) != 0 {
 			return errors.New("invalid protected baseline lifecycle manifest")
 		}
 		if err := manifest.Authority.Validate(); err != nil || manifest.Authority.ReviewedHarnessID != manifest.Harness.ID || manifest.BaselineAllowlist.Harness != manifest.Harness || manifest.BaselineAllowlist.Analyzer != manifest.Analyzer {
@@ -526,14 +570,14 @@ func (manifest LifecycleManifest) Validate() error {
 			return err
 		}
 	case RouteCandidate:
-		if manifest.Purpose != measurement.CandidateAcceptance || manifest.FinalMode != FinalAcceptance || manifest.BaselineAllowlist != nil || manifest.Analyzer.ID != AnalyzerSubjectID || manifest.Analyzer.Commit != manifest.Harness.Commit || manifest.Analyzer.Tree != manifest.Harness.Tree {
+		if manifest.Purpose != measurement.CandidateAcceptance || manifest.FinalMode != FinalAcceptance || manifest.BaselineAllowlist != nil || manifest.Analyzer.ID != AnalyzerSubjectID || manifest.Analyzer.Commit != manifest.Harness.Commit || manifest.Analyzer.Tree != manifest.Harness.Tree || len(manifest.SuppressionConformance) != fixedRepetitions {
 			return errors.New("invalid candidate lifecycle manifest")
 		}
 		if err := manifest.Authority.Validate(); err != nil || manifest.Authority.ReviewedHarnessID != manifest.Harness.ID {
 			return errors.New("candidate lifecycle authority does not bind the harness")
 		}
 	case RouteLocalDiagnostic:
-		if manifest.Purpose != measurement.CandidateAcceptance || manifest.FinalMode != FinalDiagnostic || manifest.BaselineAllowlist != nil || manifest.Authority != (ProceduralAuthority{}) {
+		if manifest.Purpose != measurement.CandidateAcceptance || manifest.FinalMode != FinalDiagnostic || manifest.BaselineAllowlist != nil || manifest.Authority != (ProceduralAuthority{}) || len(manifest.SuppressionConformance) != fixedRepetitions {
 			return errors.New("invalid local diagnostic lifecycle manifest")
 		}
 	default:
@@ -554,6 +598,11 @@ func (manifest LifecycleManifest) Validate() error {
 			return errors.New("lifecycle manifest contains invalid report ID")
 		}
 	}
+	for index, artifact := range manifest.SuppressionConformance {
+		if artifact.Path != fmt.Sprintf("repetition-%d/suppression-projection-conformance.json", index+1) || !validDigest(artifact.Digest) {
+			return errors.New("lifecycle manifest contains invalid suppression conformance binding")
+		}
+	}
 	return nil
 }
 
@@ -572,6 +621,11 @@ func (repeat SemanticRepeatResult) Validate() error {
 	for _, id := range repeat.ReportIDs {
 		if !validDigest(id) {
 			return errors.New("semantic repeat result contains invalid report ID")
+		}
+	}
+	if repeat.SuppressionConformance != nil {
+		if !repeat.SuppressionConformance.SemanticallyEqual || !validDigest(repeat.SuppressionConformance.ReportDigest) {
+			return errors.New("semantic repeat result contains invalid suppression conformance binding")
 		}
 	}
 	return nil

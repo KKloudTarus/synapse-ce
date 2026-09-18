@@ -273,6 +273,8 @@ func (c *Coordinator) RecordVerdicts(ctx context.Context, engagementID shared.ID
 		state := judgment.NotReachable
 		if v.Reachable {
 			state = judgment.Reachable
+		} else if c.raiseOnly {
+			continue
 		}
 		claim := judgment.ReachabilityClaim{Reachable: state, Tier: c.tier, Confidence: deterministicClaimConfidence}
 		if p, ok := prior[v.FindingID]; ok && !claim.Supersedes(p.claim) {

@@ -110,9 +110,6 @@ func TestRunWithProductionDependenciesPropagatesCaptureConfiguration(t *testing.
 	if !captureDependencies.JVMPointsTo {
 		t.Error("production capture did not enable configured JVM points-to analysis")
 	}
-	if !captureDependencies.EnableJSLexicalNegatives {
-		t.Error("production capture did not enable configured JavaScript symbol reachability")
-	}
 	if runnerDependencies.Command == nil || runnerDependencies.Environment == nil || runnerDependencies.TempRoot == nil || runnerDependencies.RandomSegment == nil {
 		t.Error("runner did not receive default dependencies")
 	}

@@ -245,6 +245,24 @@ func TestJVMVerdictMintsTier15(t *testing.T) {
 	}
 }
 
+func TestJVMVerdictRaiseOnlySkipsNegativeVerdicts(t *testing.T) {
+	recorder := &fakeRecorder{}
+	coordinator, err := NewJVMVerdictCoordinator(recorder, &fakeAudit{}, fakeClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	minted, err := coordinator.WithRaiseOnly().RecordVerdicts(context.Background(), "eng-1", []ports.JVMReachabilityVerdict{
+		{FindingID: "f-reachable", Reachable: true},
+		{FindingID: "f-unreachable", Reachable: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if minted != 1 || len(recorder.proposes) != 1 || recorder.proposes[0].subjectID != "f-reachable" {
+		t.Fatalf("raise-only JVM verdicts minted=%d proposes=%+v, want only reachable", minted, recorder.proposes)
+	}
+}
+
 // TestJVMNotReachableNeverPromotes is the D4.4 SOUNDNESS invariant: a JVM (Tier-1.5) not-reachable verdict is
 // NEVER a deterministic promotable proof, so it can never become a VEX not_affected. JVM class-reachability
 // is coarse and reflection-blind; it must only deprioritize, never suppress.

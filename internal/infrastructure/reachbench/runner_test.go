@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
+	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	measurement "github.com/KKloudTarus/synapse-ce/internal/usecase/reachbench"
 )
 
@@ -47,8 +49,8 @@ func TestRunDerivesHarnessCommitTreeAndCIKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := runner.Run(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, errCandidateRejected) {
+		t.Fatalf("local candidate result = %v, want rejection after publication", err)
 	}
 	if result.RunKey != "github-42/attempt-3" {
 		t.Fatalf("run key = %q", result.RunKey)
@@ -177,7 +179,7 @@ func TestAuthoritativeRunIgnoresCheckoutBundleMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := runner.Run(context.Background(), nil)
-	if !errors.Is(err, errAuthoritativeCandidateRejected) {
+	if !errors.Is(err, errCandidateRejected) {
 		t.Fatalf("authoritative route consulted mutated checkout bundle: %v", err)
 	}
 	if !result.Authoritative || result.Manifest.Bundle != fixture.controllerBundleRef {
@@ -321,6 +323,19 @@ func TestReachabilityEvidenceLimitsBoundTwoPassWorkload(t *testing.T) {
 	}
 }
 
+func TestReachabilityCellLimitFitsPublicationDocumentBudget(t *testing.T) {
+	if err := validatePublicationCapacity(maxCells); err != nil {
+		t.Fatalf("maximum accepted lifecycle cannot be published: %v", err)
+	}
+	if err := validatePublicationCapacity(maxCells + 1); err == nil {
+		t.Fatal("publication capacity accepted more than the end-to-end cell budget")
+	}
+	required := publicationDocumentReserve + int64(maxCells)*maxPublishedCellBytes
+	if required > benchmark.MaxJSONBytes {
+		t.Fatalf("publication budget = %d, document limit = %d", required, benchmark.MaxJSONBytes)
+	}
+}
+
 func TestPublicationCollisionBlocksOverwrite(t *testing.T) {
 	fixture := newFixture(t)
 	output := filepath.Join(fixture.tempRoot, filepath.FromSlash(publishedRunDirectory), "local", "fixed")
@@ -424,8 +439,8 @@ func TestRunPublishesOnlySanitizedDigestBoundArtifactsAndReplays(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := runner.Run(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, errCandidateRejected) {
+		t.Fatalf("local candidate result = %v, want rejection after publication", err)
 	}
 	if result.Authoritative || result.Manifest.Route != RouteLocalDiagnostic {
 		t.Fatalf("local run manifest = %+v", result.Manifest)
@@ -440,8 +455,8 @@ func TestRunPublishesOnlySanitizedDigestBoundArtifactsAndReplays(t *testing.T) {
 	}
 	want := []string{
 		"artifact-manifest.json", "lifecycle-manifest.json", "semantic-repeat.json",
-		"repetition-1/corpus.json", "repetition-1/exceptions.json", "repetition-1/input.json", "repetition-1/inventory.json", "repetition-1/oracle.json", "repetition-1/policy.json", "repetition-1/report.json",
-		"repetition-2/corpus.json", "repetition-2/exceptions.json", "repetition-2/input.json", "repetition-2/inventory.json", "repetition-2/oracle.json", "repetition-2/policy.json", "repetition-2/report.json",
+		"repetition-1/corpus.json", "repetition-1/exceptions.json", "repetition-1/input.json", "repetition-1/inventory.json", "repetition-1/oracle.json", "repetition-1/policy.json", "repetition-1/report.json", "repetition-1/suppression-projection-conformance.json",
+		"repetition-2/corpus.json", "repetition-2/exceptions.json", "repetition-2/input.json", "repetition-2/inventory.json", "repetition-2/oracle.json", "repetition-2/policy.json", "repetition-2/report.json", "repetition-2/suppression-projection-conformance.json",
 	}
 	sort.Strings(want)
 	if fmt.Sprint(files) != fmt.Sprint(want) {
@@ -457,7 +472,11 @@ func TestRunPublishesOnlySanitizedDigestBoundArtifactsAndReplays(t *testing.T) {
 		}
 	}
 	facts := fixture.facts("local/fixed")
-	if err := replaySanitizedBundle(context.Background(), result.Output, result.Manifest, SemanticRepeatResult{SchemaVersion: RepeatSchemaVersion, Repetitions: fixedRepetitions, SemanticallyEqual: true, ReportIDs: result.Manifest.ReportIDs, Cells: repeatCells(t, result.Output)}, facts); err != nil {
+	var publishedRepeat SemanticRepeatResult
+	if _, err := readCanonicalJSON(filepath.Join(result.Output, "semantic-repeat.json"), &publishedRepeat); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaySanitizedBundle(context.Background(), result.Output, result.Manifest, publishedRepeat, facts); err != nil {
 		t.Fatalf("replay published bundle: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(result.Output, "repetition-1", "report.json"), []byte("{}\n"), 0o600); err != nil {
@@ -465,6 +484,59 @@ func TestRunPublishesOnlySanitizedDigestBoundArtifactsAndReplays(t *testing.T) {
 	}
 	if err := replaySanitizedBundle(context.Background(), result.Output, result.Manifest, SemanticRepeatResult{}, facts); err == nil {
 		t.Fatal("replay accepted a digest-tampered report")
+	}
+}
+
+func TestSuppressionConformanceFailurePublishesBeforeReturningFailure(t *testing.T) {
+	fixture := newFixture(t)
+	runner, err := NewRunner(fixture.dependencies(map[string]string{}), captureFunc(func(ctx context.Context, request CaptureRequest) (CaptureResult, error) {
+		result, err := validCapture(fixture.expected)(ctx, request)
+		if err != nil || result.SuppressionConformance == nil || request.Cell.CaseID != "go-source-tier2-control-unreachable" {
+			return result, err
+		}
+		control := *result.SuppressionConformance
+		claim := control.Judgment.Claim
+		claim.Reachable = judgment.Reachable
+		claim.Path = []string{"entry", "affected.symbol"}
+		control.Judgment.Claim = claim
+		control.Evidence = exportuc.DeriveReachabilityEvidence([]judgment.Judgment{control.Judgment.domain()}, control.SubjectID)
+		spec, specErr := suppressionConformanceSpecForCell(request.Cell)
+		if specErr != nil {
+			return CaptureResult{}, specErr
+		}
+		control.FailureCode = suppressionConformanceFailure(control, spec)
+		control.Passed = control.FailureCode == ""
+		result.SuppressionConformance = &control
+		return result, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), nil)
+	if !errors.Is(err, errSuppressionConformance) {
+		t.Fatalf("run error = %v, want suppression conformance failure", err)
+	}
+	if result.Output == "" {
+		t.Fatal("failed conformance did not publish sanitized evidence")
+	}
+	for repetition := 1; repetition <= fixedRepetitions; repetition++ {
+		var report SuppressionProjectionConformance
+		path := filepath.Join(result.Output, fmt.Sprintf("repetition-%d", repetition), "suppression-projection-conformance.json")
+		if _, readErr := readCanonicalJSON(path, &report); readErr != nil {
+			t.Fatal(readErr)
+		}
+		if report.Passed {
+			t.Fatalf("repetition %d conformance unexpectedly passed", repetition)
+		}
+		failed := false
+		for _, control := range report.Controls {
+			if control.CaseID == "go-source-tier2-control-unreachable" {
+				failed = control.FailureCode == "claim_not_suppressing" && !control.Passed
+			}
+		}
+		if !failed {
+			t.Fatalf("repetition %d did not retain the closed failure code: %+v", repetition, report.Controls)
+		}
 	}
 }
 
@@ -484,8 +556,8 @@ func TestAuthoritativeCandidateRejectionPublishesSanitizedEvidence(t *testing.T)
 		t.Fatal(err)
 	}
 	result, err := runner.Run(context.Background(), nil)
-	if !errors.Is(err, errAuthoritativeCandidateRejected) {
-		t.Fatalf("candidate rejection error = %v, want %v", err, errAuthoritativeCandidateRejected)
+	if !errors.Is(err, errCandidateRejected) {
+		t.Fatalf("candidate rejection error = %v, want %v", err, errCandidateRejected)
 	}
 	if !result.Authoritative || result.Manifest.Route != RouteCandidate || result.Manifest.FinalMode != FinalAcceptance {
 		t.Fatalf("candidate controller run = %+v", result.Manifest)
@@ -512,7 +584,11 @@ func TestAuthoritativeCandidateRejectionPublishesSanitizedEvidence(t *testing.T)
 	if result.Manifest.Authority != envelope.Authority {
 		t.Fatalf("published authority = %+v, want %+v", result.Manifest.Authority, envelope.Authority)
 	}
-	if err := replaySanitizedBundle(context.Background(), result.Output, result.Manifest, SemanticRepeatResult{SchemaVersion: RepeatSchemaVersion, Repetitions: fixedRepetitions, SemanticallyEqual: true, ReportIDs: result.Manifest.ReportIDs, Cells: repeatCells(t, result.Output)}, fixture.facts("local/fixed")); err != nil {
+	var publishedRepeat SemanticRepeatResult
+	if _, err := readCanonicalJSON(filepath.Join(result.Output, "semantic-repeat.json"), &publishedRepeat); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaySanitizedBundle(context.Background(), result.Output, result.Manifest, publishedRepeat, fixture.facts("local/fixed")); err != nil {
 		t.Fatalf("replay rejected the published candidate evidence: %v", err)
 	}
 	published, err := os.ReadFile(filepath.Join(result.Output, "lifecycle-manifest.json"))
@@ -557,6 +633,18 @@ func TestProtectedBaselineAllowsReviewedAdditionsModificationsAndPackageLocalAda
 	}
 	if !result.Authoritative || result.Manifest.Route != RouteProtectedBaseline || result.Manifest.BaselineAllowlist == nil {
 		t.Fatalf("protected baseline run = %+v", result.Manifest)
+	}
+	if len(result.Manifest.SuppressionConformance) != 0 {
+		t.Fatalf("protected baseline published candidate-only suppression conformance: %+v", result.Manifest.SuppressionConformance)
+	}
+	files, err := regularRelativeFiles(context.Background(), result.Output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range files {
+		if strings.Contains(name, "suppression-projection-conformance") {
+			t.Fatalf("protected baseline published candidate-only artifact %q", name)
+		}
 	}
 	if result.Manifest.BaselineAllowlist.Harness != fixture.harness || result.Manifest.BaselineAllowlist.Analyzer != fixture.baselineAnalyzer {
 		t.Fatalf("baseline allowlist identity = %+v", result.Manifest.BaselineAllowlist)
@@ -945,20 +1033,54 @@ func (fixture fixture) facts(runKey string) runtimeFacts {
 	}
 }
 
+func validSuppressionConformanceControl(cell ExecutionCell) (SuppressionProjectionConformanceControl, error) {
+	spec, err := suppressionConformanceSpecForCell(cell)
+	if err != nil {
+		return SuppressionProjectionConformanceControl{}, err
+	}
+	claim := judgment.ReachabilityClaim{
+		Reachable: judgment.NotReachable, Tier: spec.tier, Confidence: 100,
+		EntrypointsPresent: spec.tier == judgment.Tier2,
+	}
+	projected := SuppressionProjectionJudgment{
+		FindingID: cell.SubjectID, Claim: claim, State: judgment.StateConfirmed, EvidenceScore: 100,
+		ProposedBy: spec.proposer, VerifiedBy: spec.verifier,
+	}
+	control := SuppressionProjectionConformanceControl{
+		CaseID: cell.CaseID, BindingID: cell.BindingID, CohortID: cell.CohortID, ModeID: cell.ModeID,
+		SubjectID: cell.SubjectID, AnalyzerDigest: benchmark.SHA256Digest([]byte("analysis:" + cell.CaseID)),
+		SubjectsDigest: benchmark.SHA256Digest([]byte("subjects:" + cell.SubjectID)), ExpectedTier: spec.tier,
+		ExpectedProposer: spec.proposer, ExpectedVerifier: spec.verifier, CoordinatorRecorded: true,
+		JudgmentCount: 1, Judgment: &projected,
+	}
+	control.Evidence = exportuc.DeriveReachabilityEvidence([]judgment.Judgment{projected.domain()}, cell.SubjectID)
+	control.FailureCode = suppressionConformanceFailure(control, spec)
+	control.Passed = control.FailureCode == ""
+	return control, nil
+}
+
 func validCapture(expected map[string]measurement.Outcome) func(context.Context, CaptureRequest) (CaptureResult, error) {
 	return func(_ context.Context, request CaptureRequest) (CaptureResult, error) {
 		outcome, ok := expected[request.Cell.CaseID]
 		if !ok {
 			return CaptureResult{}, fmt.Errorf("unexpected case %q", request.Cell.CaseID)
 		}
-		return CaptureResult{Observation: measurement.MeasuredObservation{
+		result := CaptureResult{Observation: measurement.MeasuredObservation{
 			CaseID: request.Cell.CaseID, BindingID: request.Cell.BindingID, Invoked: true, Outcome: outcome,
 			Coverage:      measurement.ObservedCoverage{Status: measurement.CoverageComplete, Obligations: []measurement.CoverageObligation{{ID: "entrypoints", Status: measurement.CoverageComplete}}},
 			OutputCapture: measurement.CaptureComplete,
 			Analyzer:      measurement.ArtifactReference{ID: request.Cell.AnalyzerID, Digest: benchmark.SHA256Digest([]byte(request.Cell.AnalyzerID))},
 			Configuration: request.Cell.Configuration,
 			Suppression:   measurement.SuppressionCapture{Claim: measurement.SuppressionNone, Status: measurement.CaptureComplete},
-		}}, nil
+		}}
+		if request.projectionConformanceControl {
+			control, err := validSuppressionConformanceControl(request.Cell)
+			if err != nil {
+				return CaptureResult{}, err
+			}
+			result.SuppressionConformance = &control
+		}
+		return result, nil
 	}
 }
 

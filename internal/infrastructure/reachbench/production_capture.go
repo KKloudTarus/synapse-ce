@@ -66,37 +66,37 @@ type semanticFactsProvider interface {
 // ProductionCaptureDependencies are trusted package-owned construction inputs.
 // They carry helper locations, never target-derived values.
 type ProductionCaptureDependencies struct {
-	Materializer             fixtureMaterializer
-	Fixtures                 measurement.FixtureManifest
-	CallGraphBinary          string
-	ASTBinary                string
-	SemanticFacts            semanticFactsProvider
-	JVMPointsTo              bool
-	EnableJSLexicalNegatives bool
+	Materializer    fixtureMaterializer
+	Fixtures        measurement.FixtureManifest
+	CallGraphBinary string
+	ASTBinary       string
+	SemanticFacts   semanticFactsProvider
+	JVMPointsTo     bool
 }
 
 // ProductionCapture runs the frozen corpus through the same analyzers and
-// judgment/evidence coordinators used by production composition.
+// raise-only judgment/evidence coordinators used by production composition.
 type ProductionCapture struct {
-	materializer             fixtureMaterializer
-	fixtures                 measurement.FixtureManifest
-	callGraphBinary          string
-	facts                    semanticFactsProvider
-	jvmPointsTo              bool
-	enableJSLexicalNegatives bool
-	modes                    map[string]productionMode
+	materializer    fixtureMaterializer
+	fixtures        measurement.FixtureManifest
+	callGraphBinary string
+	facts           semanticFactsProvider
+	jvmPointsTo     bool
+	modes           map[string]productionMode
 }
 
 type productionMode func(context.Context, *ProductionCapture, MaterializedFixture, measurement.ResolvedFixtureSubject, captureLifecycle) (execution, error)
 
 type execution struct {
-	invoked           bool
-	coverage          measurement.ObservedCoverage
-	analyzer          *recordingAnalyzer
-	analyzerError     error
-	lifecycleRecorded bool
-	outcome           *measurement.Outcome
-	detail            string
+	invoked                bool
+	coverage               measurement.ObservedCoverage
+	analyzer               *recordingAnalyzer
+	analyzerError          error
+	lifecycleRecorded      bool
+	outcome                *measurement.Outcome
+	subjects               []ports.ReachabilitySubject
+	conformanceCoordinator suppressionCoordinatorFactory
+	detail                 string
 }
 
 // NewProductionCapture validates a closed registry of the frozen production
@@ -117,12 +117,11 @@ func NewProductionCapture(dependencies ProductionCaptureDependencies) (*Producti
 		facts = asttool.New(dependencies.ASTBinary)
 	}
 	capture := &ProductionCapture{
-		materializer:             dependencies.Materializer,
-		fixtures:                 fixtures,
-		callGraphBinary:          dependencies.CallGraphBinary,
-		facts:                    facts,
-		jvmPointsTo:              dependencies.JVMPointsTo,
-		enableJSLexicalNegatives: dependencies.EnableJSLexicalNegatives,
+		materializer:    dependencies.Materializer,
+		fixtures:        fixtures,
+		callGraphBinary: dependencies.CallGraphBinary,
+		facts:           facts,
+		jvmPointsTo:     dependencies.JVMPointsTo,
 	}
 	capture.modes = capture.productionModes()
 	if err := validateProductionModes(capture.modes); err != nil {
@@ -229,6 +228,14 @@ func (capture *ProductionCapture) Capture(ctx context.Context, request CaptureRe
 	if err != nil {
 		return CaptureResult{}, err
 	}
+	var conformance *SuppressionProjectionConformanceControl
+	if request.projectionConformanceControl {
+		control, conformanceErr := captureSuppressionConformance(ctx, request, executed)
+		if conformanceErr != nil {
+			return CaptureResult{}, conformanceErr
+		}
+		conformance = &control
+	}
 	raw, err := capture.rawEvidence(request, fixture, resolved, executed, observation)
 	if err != nil {
 		return CaptureResult{}, err
@@ -237,7 +244,7 @@ func (capture *ProductionCapture) Capture(ctx context.Context, request CaptureRe
 	if err != nil {
 		return CaptureResult{}, fmt.Errorf("store production capture raw evidence: %w", err)
 	}
-	return CaptureResult{Observation: observation, EvidenceReceipts: []benchcycle.EvidenceReceipt{receipt}}, nil
+	return CaptureResult{Observation: observation, EvidenceReceipts: []benchcycle.EvidenceReceipt{receipt}, SuppressionConformance: conformance}, nil
 }
 
 func validateCaptureCell(cell ExecutionCell) error {
@@ -290,11 +297,13 @@ func runStatic(
 	_, recordErr := coordinator.Record(ctx, productionCaptureEngagementID, fixture.Root, subjects)
 	if recordErr != nil {
 		if recording.err != nil {
-			return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonFailed), analyzer: recording, analyzerError: recording.err}, nil
+			return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonFailed), analyzer: recording, analyzerError: recording.err, subjects: cloneReachabilitySubjects(subjects)}, nil
 		}
 		return execution{}, fmt.Errorf("record production judgment: %w", recordErr)
 	}
-	return execution{invoked: true, coverage: coverageFromRecordedAnalysis(recording.symbols, recording.result, requirement), analyzer: recording}, nil
+	coverage := coverageFromRecordedAnalysis(recording.symbols, recording.result, requirement)
+	outcome := outcomeFromRecordedAnalysis(coverage, recording.result)
+	return execution{invoked: true, coverage: coverage, analyzer: recording, outcome: &outcome, subjects: cloneReachabilitySubjects(subjects)}, nil
 }
 
 type staticAnalyzer interface {
@@ -397,6 +406,41 @@ func coverageFromRecordedAnalysis(requested []string, analysis *reachability.Ana
 	}
 }
 
+// outcomeFromRecordedAnalysis separates benchmark measurement from persisted
+// judgment policy. A raise-only coordinator may intentionally mint no judgment
+// for an unreachable result, while the benchmark still records what the analyzer
+// measured under the independently derived coverage state.
+func outcomeFromRecordedAnalysis(coverage measurement.ObservedCoverage, analysis *reachability.Analysis) measurement.Outcome {
+	if analysis != nil {
+		for _, result := range analysis.Results {
+			if !result.Reachable {
+				continue
+			}
+			if analysisHasUnknownPath(analysis) {
+				return measurement.OutcomeConditionallyReachable
+			}
+			return measurement.OutcomeReachable
+		}
+	}
+	switch coverage.Status {
+	case measurement.CoverageComplete:
+		return measurement.OutcomePresentUnreached
+	case measurement.CoveragePartial:
+		return measurement.OutcomeConditionallyReachable
+	default:
+		return measurement.OutcomeNoAnalysis
+	}
+}
+
+func cloneReachabilitySubjects(subjects []ports.ReachabilitySubject) []ports.ReachabilitySubject {
+	cloned := make([]ports.ReachabilitySubject, len(subjects))
+	for index, subject := range subjects {
+		cloned[index] = subject
+		cloned[index].Symbols = append([]string(nil), subject.Symbols...)
+	}
+	return cloned
+}
+
 func hasNonblank(values []string) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -448,14 +492,20 @@ func partialCoverage(reason measurement.CoverageReasonCode) measurement.Observed
 
 func runGoSourceTier2(ctx context.Context, capture *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
 	subjects := symbolSubjects(resolved)
-	return runStatic(ctx, fixture, resolved, lifecycle, coverageRequiresEntrypointAuthority, subjects,
+	executed, err := runStatic(ctx, fixture, resolved, lifecycle, coverageRequiresEntrypointAuthority, subjects,
 		func() (staticAnalyzer, error) {
 			return reachability.NewService(taintcallgraph.New(capture.callGraphBinary))
 		},
 		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
-			return reachproof.NewCoordinator(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock)
+			coordinator, coordinatorErr := newGoSuppressionCoordinator(analyzer, lifecycle)
+			if coordinatorErr != nil {
+				return nil, coordinatorErr
+			}
+			return coordinator.WithRaiseOnly(), nil
 		},
 	)
+	executed.conformanceCoordinator = newGoSuppressionCoordinator
+	return executed, err
 }
 
 func runPythonImport(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
@@ -463,16 +513,22 @@ func runPythonImport(ctx context.Context, _ *ProductionCapture, fixture Material
 	if err != nil {
 		return execution{}, err
 	}
-	return runStatic(ctx, fixture, resolved, lifecycle, coverageAnswersRequestedSymbols, subjects,
+	executed, err := runStatic(ctx, fixture, resolved, lifecycle, coverageAnswersRequestedSymbols, subjects,
 		func() (staticAnalyzer, error) {
 			return pyreach.New(pyimports.New(), func(ctx context.Context, dir string) (map[string]bool, bool) {
 				return srcimports.DirectDependencies(ctx, dir, "pypi")
 			})
 		},
 		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
-			return reachproof.NewCoordinatorForTier(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock, judgment.Tier1)
+			coordinator, coordinatorErr := newPythonImportSuppressionCoordinator(analyzer, lifecycle)
+			if coordinatorErr != nil {
+				return nil, coordinatorErr
+			}
+			return coordinator.WithRaiseOnly(), nil
 		},
 	)
+	executed.conformanceCoordinator = newPythonImportSuppressionCoordinator
+	return executed, err
 }
 
 func runRustImport(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
@@ -499,7 +555,11 @@ func runSourceImport(ctx context.Context, fixture MaterializedFixture, resolved 
 			})
 		},
 		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
-			return reachproof.NewCoordinatorForLanguage(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock, judgment.Tier1, language)
+			coordinator, err := reachproof.NewCoordinatorForLanguage(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock, judgment.Tier1, language)
+			if err != nil {
+				return nil, err
+			}
+			return coordinator.WithRaiseOnly(), nil
 		},
 	)
 }
@@ -509,20 +569,22 @@ func runDotNetImport(ctx context.Context, _ *ProductionCapture, fixture Material
 	if err != nil {
 		return execution{}, err
 	}
-	return runStatic(ctx, fixture, resolved, lifecycle, coverageAnswersRequestedSymbols, subjects,
+	executed, err := runStatic(ctx, fixture, resolved, lifecycle, coverageAnswersRequestedSymbols, subjects,
 		func() (staticAnalyzer, error) {
 			return nugetreach.New(srcimports.NewDotNetScanner(), dotnetreach.Loader{}, func(ctx context.Context, dir string) (map[string]bool, bool) {
 				return srcimports.DirectDependencies(ctx, dir, "nuget")
 			})
 		},
 		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
-			coordinator, err := reachproof.NewCoordinatorForLanguage(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock, judgment.Tier1, reachproof.LanguageDotNet)
-			if err != nil {
-				return nil, err
+			coordinator, coordinatorErr := newDotNetSuppressionCoordinator(analyzer, lifecycle)
+			if coordinatorErr != nil {
+				return nil, coordinatorErr
 			}
-			return coordinator.WithSkipUnresolvedSubjects(), nil
+			return coordinator.WithRaiseOnly(), nil
 		},
 	)
+	executed.conformanceCoordinator = newDotNetSuppressionCoordinator
+	return executed, err
 }
 
 func runGoBinary(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
@@ -556,22 +618,22 @@ func runRustSymbols(ctx context.Context, _ *ProductionCapture, fixture Materiali
 }
 
 func runPHPSymbols(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
-	return runSymbolAnalyzer(ctx, fixture, resolved, lifecycle, "composer", symbolcanon.PHP, srcimports.NewPHPSymbolScanner(), judgment.Tier2, reachproof.LanguagePHP, true)
+	return runSymbolAnalyzer(ctx, fixture, resolved, lifecycle, "composer", symbolcanon.PHP, srcimports.NewPHPSymbolScanner(), judgment.Tier2, reachproof.LanguagePHP)
 }
 
 func runRubySymbols(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
-	return runSymbolAnalyzer(ctx, fixture, resolved, lifecycle, "gem", symbolcanon.Ruby, srcimports.NewRubySymbolScanner(), judgment.Tier2, reachproof.LanguageRuby, true)
+	return runSymbolAnalyzer(ctx, fixture, resolved, lifecycle, "gem", symbolcanon.Ruby, srcimports.NewRubySymbolScanner(), judgment.Tier2, reachproof.LanguageRuby)
 }
 
 func runDotNetSymbols(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
-	return runSymbolAnalyzer(ctx, fixture, resolved, lifecycle, "nuget", symbolcanon.DotNet, srcimports.NewDotNetSymbolScanner(), judgment.Tier2, reachproof.LanguageDotNet, true)
+	return runSymbolAnalyzer(ctx, fixture, resolved, lifecycle, "nuget", symbolcanon.DotNet, srcimports.NewDotNetSymbolScanner(), judgment.Tier2, reachproof.LanguageDotNet)
 }
 
 func runCPPSymbols(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
-	return runSymbolAnalyzer(ctx, fixture, resolved, lifecycle, "conan", symbolcanon.Cpp, srcimports.NewCppSymbolScanner(), judgment.Tier2, reachproof.LanguageCPP, true)
+	return runSymbolAnalyzer(ctx, fixture, resolved, lifecycle, "conan", symbolcanon.Cpp, srcimports.NewCppSymbolScanner(), judgment.Tier2, reachproof.LanguageCPP)
 }
 
-func runSymbolAnalyzer(ctx context.Context, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle, purlType string, language symbolcanon.Language, scanner symreach.SymbolReferenceScanner, tier judgment.ReachabilityTier, proofLanguage reachproof.Language, raiseOnly bool) (execution, error) {
+func runSymbolAnalyzer(ctx context.Context, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle, purlType string, language symbolcanon.Language, scanner symreach.SymbolReferenceScanner, tier judgment.ReachabilityTier, proofLanguage reachproof.Language) (execution, error) {
 	return runStatic(ctx, fixture, resolved, lifecycle, coverageAnswersRequestedSymbols, symbolSubjects(resolved),
 		func() (staticAnalyzer, error) { return symreach.New(purlType, language, scanner) },
 		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
@@ -579,10 +641,7 @@ func runSymbolAnalyzer(ctx context.Context, fixture MaterializedFixture, resolve
 			if err != nil {
 				return nil, err
 			}
-			if raiseOnly {
-				return coordinator.WithRaiseOnly(), nil
-			}
-			return coordinator, nil
+			return coordinator.WithRaiseOnly(), nil
 		},
 	)
 }
@@ -648,12 +707,23 @@ func fixturePackagePURL(identity string) string {
 		return identity
 	}
 	if kind, rest, ok := strings.Cut(identity, ":"); ok && kind != "" && rest != "" {
-		if !strings.Contains(rest, "@") {
+		if !fixtureIdentityHasVersion(kind, rest) {
 			rest += "@benchmark-v1"
 		}
 		return "pkg:" + kind + "/" + rest
 	}
 	return "pkg:generic/fixture@benchmark-v1"
+}
+
+func fixtureIdentityHasVersion(kind, identity string) bool {
+	separator := strings.LastIndex(identity, "@")
+	if separator < 0 {
+		return false
+	}
+	if kind == "npm" && strings.HasPrefix(identity, "@") {
+		return separator > 0
+	}
+	return separator > 0
 }
 
 func runPythonSemantic(ctx context.Context, capture *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
@@ -670,12 +740,18 @@ func runPythonSemantic(ctx context.Context, capture *ProductionCapture, fixture 
 	if err != nil {
 		return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonFailed), analyzerError: err}, nil
 	}
-	return runStatic(ctx, fixture, resolved, lifecycle, coverageRequiresEntrypointAuthority, subjects,
+	executed, err := runStatic(ctx, fixture, resolved, lifecycle, coverageRequiresEntrypointAuthority, subjects,
 		func() (staticAnalyzer, error) { return analyzer, nil },
 		func(recording staticAnalyzer) (*reachproof.Coordinator, error) {
-			return reachproof.NewCoordinatorForLanguage(recording, lifecycle.judgments, lifecycle.audit, lifecycle.clock, judgment.Tier2, reachproof.LanguagePython)
+			coordinator, coordinatorErr := newPythonSemanticSuppressionCoordinator(recording, lifecycle)
+			if coordinatorErr != nil {
+				return nil, coordinatorErr
+			}
+			return coordinator.WithRaiseOnly(), nil
 		},
 	)
+	executed.conformanceCoordinator = newPythonSemanticSuppressionCoordinator
+	return executed, err
 }
 
 func runJavaScriptImport(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
@@ -690,24 +766,38 @@ func runJavaScriptImport(ctx context.Context, _ *ProductionCapture, fixture Mate
 	return runStatic(ctx, fixture, resolved, lifecycle, coverageAnswersRequestedSymbols, subjects,
 		func() (staticAnalyzer, error) { return analyzer, nil },
 		func(recording staticAnalyzer) (*reachproof.Coordinator, error) {
-			return reachproof.NewCoordinatorForLanguage(recording, lifecycle.judgments, lifecycle.audit, lifecycle.clock, judgment.Tier1, reachproof.LanguageJavaScript)
+			coordinator, err := reachproof.NewCoordinatorForLanguage(recording, lifecycle.judgments, lifecycle.audit, lifecycle.clock, judgment.Tier1, reachproof.LanguageJavaScript)
+			if err != nil {
+				return nil, err
+			}
+			return coordinator.WithRaiseOnly(), nil
 		},
 	)
 }
 
-func runJavaScriptLexical(ctx context.Context, capture *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
+func runJavaScriptLexical(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
+	if resolved.Subject.Locator.Kind == measurement.FixtureLocatorManifestCapability {
+		return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonUnsupported)}, nil
+	}
 	purl := fixturePackagePURL(resolved.Subject.PackageIdentity)
 	symbol, ok := jssymbols.Subject(purl, resolved.Subject.Locator.Symbol)
 	if !ok {
 		return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonUnsupported)}, nil
 	}
-	analyzer, err := jsreach.NewSymbolAnalyzer(jsimports.New(), jsresolve.NewResolver(), fixtureSBOMProvider{components: []sbom.Component{{Name: purl, Version: "benchmark-v1", PURL: purl}}})
+	analyzer, err := jsreach.NewSymbolAnalyzer(jsimports.New(), jsresolve.NewResolver(), fixtureSBOMProvider{components: []sbom.Component{
+		{Name: "@reachbench/lexical", Version: "1.0.0", PURL: "pkg:npm/%40reachbench/lexical@1.0.0"},
+		{Name: "@reachbench/lexical-opaque", Version: "1.0.0", PURL: "pkg:npm/%40reachbench/lexical-opaque@1.0.0"},
+	}})
 	if err != nil {
 		return execution{}, err
 	}
 	subjects, err := analyzer.AnswerableSubjects(ctx, fixture.Root, []ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), PackagePURL: purl, Symbols: []string{symbol}}})
 	if err != nil {
 		return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonFailed), analyzerError: err}, nil
+	}
+	if len(subjects) == 0 {
+		outcome := measurement.OutcomeConditionallyReachable
+		return execution{invoked: true, coverage: partialCoverage(measurement.CoverageReasonOpaque), outcome: &outcome}, nil
 	}
 	return runStatic(ctx, fixture, resolved, lifecycle, coverageAnswersRequestedSymbols, subjects,
 		func() (staticAnalyzer, error) { return analyzer, nil },
@@ -716,10 +806,7 @@ func runJavaScriptLexical(ctx context.Context, capture *ProductionCapture, fixtu
 			if err != nil {
 				return nil, err
 			}
-			if !capture.enableJSLexicalNegatives {
-				return coordinator.WithRaiseOnly(), nil
-			}
-			return coordinator, nil
+			return coordinator.WithRaiseOnly(), nil
 		},
 	)
 }
@@ -767,17 +854,21 @@ func runJVMCoarse(ctx context.Context, _ *ProductionCapture, fixture Materialize
 	if coverage.Status == measurement.CoverageUnavailable {
 		return execution{invoked: true, coverage: coverage, detail: "jvm-coarse"}, nil
 	}
+	outcome := measurement.OutcomeConditionallyReachable
+	if components[0].Reachability == sbom.ReachabilityReachable {
+		outcome = measurement.OutcomeReachable
+	}
 	coordinator, err := reachproof.NewJVMVerdictCoordinator(lifecycle.judgments, lifecycle.audit, lifecycle.clock)
 	if err != nil {
 		return execution{}, err
 	}
-	_, err = coordinator.RecordVerdicts(ctx, productionCaptureEngagementID, []ports.JVMReachabilityVerdict{{
+	_, err = coordinator.WithRaiseOnly().RecordVerdicts(ctx, productionCaptureEngagementID, []ports.JVMReachabilityVerdict{{
 		FindingID: shared.ID(resolved.Subject.ID), Reachable: components[0].Reachability == sbom.ReachabilityReachable,
 	}})
 	if err != nil {
 		return execution{}, fmt.Errorf("record JVM coarse verdict: %w", err)
 	}
-	return execution{invoked: true, coverage: coverage, lifecycleRecorded: true, detail: "jvm-coarse"}, nil
+	return execution{invoked: true, coverage: coverage, lifecycleRecorded: true, outcome: &outcome, detail: "jvm-coarse"}, nil
 }
 
 func jvmCoarseCoverage(locator measurement.FixtureLocatorKind, reachability string) measurement.ObservedCoverage {
@@ -806,16 +897,19 @@ func runJVMTier2(ctx context.Context, capture *ProductionCapture, fixture Materi
 	if err != nil {
 		return execution{}, err
 	}
-	_, recordErr := coordinator.Record(ctx, productionCaptureEngagementID, fixture.Root, []ports.ReachabilitySubject{{
+	subjects := []ports.ReachabilitySubject{{
 		FindingID: shared.ID(resolved.Subject.ID), PackagePURL: resolved.Subject.ID, Symbols: []string{resolved.Subject.Locator.Symbol},
-	}})
+	}}
+	_, recordErr := coordinator.Record(ctx, productionCaptureEngagementID, fixture.Root, subjects)
 	if recordErr != nil {
 		if recording.err != nil {
-			return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonFailed), analyzer: recording, analyzerError: recording.err, detail: "jvm-tier2"}, nil
+			return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonFailed), analyzer: recording, analyzerError: recording.err, subjects: cloneReachabilitySubjects(subjects), detail: "jvm-tier2"}, nil
 		}
 		return execution{}, fmt.Errorf("record JVM tier-2 verdict: %w", recordErr)
 	}
-	return execution{invoked: true, coverage: coverageFromRecordedAnalysis(recording.symbols, recording.result, coverageRequiresEntrypointAuthority), analyzer: recording, lifecycleRecorded: true, detail: "jvm-tier2"}, nil
+	coverage := coverageFromRecordedAnalysis(recording.symbols, recording.result, coverageRequiresEntrypointAuthority)
+	outcome := outcomeFromRecordedAnalysis(coverage, recording.result)
+	return execution{invoked: true, coverage: coverage, analyzer: recording, lifecycleRecorded: true, outcome: &outcome, subjects: cloneReachabilitySubjects(subjects), detail: "jvm-tier2"}, nil
 }
 
 func runRuntimeLibraryLoads(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {

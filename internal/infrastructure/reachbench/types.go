@@ -35,7 +35,13 @@ const (
 	ReviewedHarnessID = "synapse-reachability-cycle-v1"
 	AnalyzerSubjectID = "synapse-reachability-analyzer"
 
-	maxCells                          = 10_000
+	// maxCells is the publication-safe end-to-end lifecycle bound, not the
+	// generic two-pass executor limit. Each accepted cell is budgeted across
+	// the canonical input, report, lifecycle, and repeat documents so every
+	// published JSON artifact remains below benchmark.MaxJSONBytes.
+	maxCells                          = 512
+	maxPublishedCellBytes       int64 = 12 << 10
+	publicationDocumentReserve  int64 = 2 << 20
 	maxRawEvidenceArtifactBytes int64 = 1 << 20
 	maxRawEvidenceTotalBytes    int64 = 512 << 20
 	maxRawEvidenceFiles               = maxCells * fixedRepetitions
@@ -157,8 +163,9 @@ type CaptureRequest struct {
 	Snapshot   measurement.SnapshotIdentity `json:"snapshot"`
 	WorkRoot   string                       `json:"-"`
 
-	attempt  benchcycle.AttemptAddress
-	evidence *benchcycle.EvidenceStore
+	attempt                      benchcycle.AttemptAddress
+	evidence                     *benchcycle.EvidenceStore
+	projectionConformanceControl bool
 }
 
 // StoreRawEvidence streams the attempt's single raw capture artifact to private storage.
@@ -173,8 +180,9 @@ func (request CaptureRequest) StoreRawEvidence(ctx context.Context, source io.Re
 // Suppression.Effects and each proof's MissingProvenance must describe the actual derived output; callers must not
 // infer absence of an effect or provenance from a proof-generation event.
 type CaptureResult struct {
-	Observation      measurement.MeasuredObservation `json:"observation"`
-	EvidenceReceipts []benchcycle.EvidenceReceipt    `json:"-"`
+	Observation            measurement.MeasuredObservation          `json:"observation"`
+	EvidenceReceipts       []benchcycle.EvidenceReceipt             `json:"-"`
+	SuppressionConformance *SuppressionProjectionConformanceControl `json:"-"`
 }
 
 // CaptureAdapter is implemented later by package-local adapters at the actual output authority.
@@ -213,30 +221,32 @@ type Result struct {
 
 // LifecycleManifest is the public execution provenance and bound output summary.
 type LifecycleManifest struct {
-	SchemaVersion     string                        `json:"schema_version"`
-	Route             Route                         `json:"route"`
-	Purpose           measurement.RunPurpose        `json:"purpose"`
-	FinalMode         FinalMode                     `json:"final_mode"`
-	Authoritative     bool                          `json:"authoritative"`
-	Harness           HarnessIdentity               `json:"harness"`
-	Analyzer          RevisionIdentity              `json:"analyzer"`
-	Authority         ProceduralAuthority           `json:"authority"`
-	Snapshot          measurement.SnapshotIdentity  `json:"snapshot"`
-	Bundle            measurement.ArtifactReference `json:"bundle"`
-	BaselineAllowlist *BaselineAllowlistResult      `json:"baseline_allowlist,omitempty"`
-	RunKey            string                        `json:"run_key"`
-	Repetitions       int                           `json:"repetitions"`
-	Cells             []ExecutionCell               `json:"cells"`
-	ReportIDs         []string                      `json:"report_ids"`
+	SchemaVersion          string                        `json:"schema_version"`
+	Route                  Route                         `json:"route"`
+	Purpose                measurement.RunPurpose        `json:"purpose"`
+	FinalMode              FinalMode                     `json:"final_mode"`
+	Authoritative          bool                          `json:"authoritative"`
+	Harness                HarnessIdentity               `json:"harness"`
+	Analyzer               RevisionIdentity              `json:"analyzer"`
+	Authority              ProceduralAuthority           `json:"authority"`
+	Snapshot               measurement.SnapshotIdentity  `json:"snapshot"`
+	Bundle                 measurement.ArtifactReference `json:"bundle"`
+	BaselineAllowlist      *BaselineAllowlistResult      `json:"baseline_allowlist,omitempty"`
+	RunKey                 string                        `json:"run_key"`
+	Repetitions            int                           `json:"repetitions"`
+	Cells                  []ExecutionCell               `json:"cells"`
+	ReportIDs              []string                      `json:"report_ids"`
+	SuppressionConformance []PublishedArtifact           `json:"suppression_projection_conformance,omitempty"`
 }
 
 // SemanticRepeatResult binds the two canonical capture projections and reports.
 type SemanticRepeatResult struct {
-	SchemaVersion     string             `json:"schema_version"`
-	Repetitions       int                `json:"repetitions"`
-	SemanticallyEqual bool               `json:"semantically_equal"`
-	ReportIDs         []string           `json:"report_ids"`
-	Cells             []CellRepeatDigest `json:"cells"`
+	SchemaVersion          string                        `json:"schema_version"`
+	Repetitions            int                           `json:"repetitions"`
+	SemanticallyEqual      bool                          `json:"semantically_equal"`
+	ReportIDs              []string                      `json:"report_ids"`
+	Cells                  []CellRepeatDigest            `json:"cells"`
+	SuppressionConformance *SuppressionConformanceRepeat `json:"suppression_projection_conformance,omitempty"`
 }
 
 // CellRepeatDigest contains no raw evidence or runtime filesystem location.

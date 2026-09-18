@@ -461,6 +461,7 @@ func TestControllerTrustRejectsAmbiguousPathsAndDirectEnvelopeInjection(t *testi
 		if err := os.Remove(path); err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { _ = os.RemoveAll(path) })
 		if err := os.Symlink(filepath.Join(t.TempDir(), "foreign.signature.json"), path); err != nil {
 			t.Skipf("create signature symlink: %v", err)
 		}
@@ -476,6 +477,7 @@ func TestControllerTrustRejectsAmbiguousPathsAndDirectEnvelopeInjection(t *testi
 		if err := os.Remove(path); err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { _ = os.RemoveAll(path) })
 		if err := os.Symlink(filepath.Join(t.TempDir(), "foreign-policy.json"), path); err != nil {
 			t.Skipf("create policy symlink: %v", err)
 		}
@@ -512,8 +514,8 @@ func TestLocalDiagnosticNeedsNoReviewTrustMaterial(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := runner.Run(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, errCandidateRejected) {
+		t.Fatalf("local candidate result = %v, want rejection after publication", err)
 	}
 	if result.Authoritative || result.Manifest.Route != RouteLocalDiagnostic {
 		t.Fatalf("unsigned local diagnostic route = %+v", result.Manifest)

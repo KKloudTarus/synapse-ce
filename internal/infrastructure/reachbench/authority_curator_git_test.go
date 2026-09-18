@@ -105,6 +105,9 @@ func TestAuthorityCuratorCommittedCandidateAuthorityRealGit(t *testing.T) {
 				path := TrustedBundleRelativePath + "/baseline-input.json"
 				runTestGit(t, repository.root, "update-index", "--chmod=+x", "--", path)
 				runTestGit(t, repository.root, "commit", "-m", "make candidate authority executable")
+				if err := os.Chmod(filepath.Join(repository.root, filepath.FromSlash(path)), 0o755); err != nil {
+					t.Fatal(err)
+				}
 			},
 			want: "ordinary 100644 blobs",
 		},

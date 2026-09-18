@@ -22,6 +22,8 @@ The report evaluates three independent axes:
 
 Read candidate results as a ratchet decision, not a single headline score. The candidate must make strict C2 progress while preserving non-offsettable recall, coverage, and suppression safeguards. The sanitized report carries the evaluated acceptance state and its reasons.
 
+Candidate and local-diagnostic runs also execute a separate suppression-projection conformance sidecar for exactly four frozen controls: Go source Tier-2, Python import, Python semantic, and .NET build-aware import. The sidecar reuses each control's actual normalized analyzer result and subjects in an isolated normal production coordinator, then verifies that the persisted judgment projects through `export.DeriveReachabilityEvidence` as `present_unreached`. Its two digest-bound reports participate in semantic repeat and staged replay. This does not change `MeasuredObservation.Suppression`, which remains `none`, and it does not claim a downstream VEX result, SLA change, promotion, attack-path exclusion, report hiding, or deployment-completeness proof.
+
 ## Execution routes and identities
 
 There are three closed routes.

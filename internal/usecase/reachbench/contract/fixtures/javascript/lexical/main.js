@@ -1,16 +1,8 @@
-export function entry() {
-  controlPositive();
-  opaqueDispatch(process.env.REACHBENCH_CONTROL);
-}
+export { controlPositive } from "@reachbench/lexical";
 
-function controlPositive() {}
-function controlUnreachable() {}
-function opaqueDispatch(name) {
-  const handler = { opaque: controlOpaque }[name];
-  if (handler) handler();
-}
-function controlOpaque() {}
-// This marker tracks deterministic parser unavailability, not dead source.
-function controlNoCoverage() {}
+import * as opaqueControls from "@reachbench/lexical-opaque";
 
-entry();
+const opaqueName = globalThis.__REACHBENCH_CONTROL__;
+if (typeof opaqueName === "string" && opaqueName.length > 0) {
+  opaqueControls[opaqueName]();
+}

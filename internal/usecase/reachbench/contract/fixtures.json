@@ -922,14 +922,38 @@
       ],
       "files": [
         {
-          "digest": "sha256:c2660d2a98d5ff340bac5036ea3e3feae4568cb1dfd857378549ca39fdcb024c",
-          "path": "fixtures/javascript/lexical/main.js",
-          "size": 420
+          "digest": "sha256:58b869a7a3654361e92081a6eacdf1e67646b4d15f7d83435988ed77eb624a02",
+          "materialized_path": "fixtures/javascript/lexical/node_modules/@reachbench/lexical/index.js",
+          "path": "fixtures/javascript/lexical/dependencies/lexical/index.js",
+          "size": 77
         },
         {
-          "digest": "sha256:779c069a0cb659d7cbf03c448de958d38a2944775dd05a5d7215b12fd6321d76",
+          "digest": "sha256:5a45938b59cff117d19bd3c1678d91f9dfa66dbe2a3cff014921c1ac87823ba4",
+          "materialized_path": "fixtures/javascript/lexical/node_modules/@reachbench/lexical/package.json",
+          "path": "fixtures/javascript/lexical/dependencies/lexical/package.json",
+          "size": 105
+        },
+        {
+          "digest": "sha256:aeffc6c4c3f737b07174e8aca79d5181aa3f00a369a353eba2f1e3acd8a243a9",
+          "materialized_path": "fixtures/javascript/lexical/node_modules/@reachbench/lexical-opaque/index.js",
+          "path": "fixtures/javascript/lexical/dependencies/lexical-opaque/index.js",
+          "size": 35
+        },
+        {
+          "digest": "sha256:2a8d2eec84a577b5df9bef9ab3f4e073a5331387bf5882a15923a42d30a14c0e",
+          "materialized_path": "fixtures/javascript/lexical/node_modules/@reachbench/lexical-opaque/package.json",
+          "path": "fixtures/javascript/lexical/dependencies/lexical-opaque/package.json",
+          "size": 112
+        },
+        {
+          "digest": "sha256:edd99f08035d696522b6f393c98e0f8c29992664d6f5c7a7fa60c9e354271671",
+          "path": "fixtures/javascript/lexical/main.js",
+          "size": 270
+        },
+        {
+          "digest": "sha256:102236a633951218ed77b2e3363e577ec1399c73b65bbb2bdbbcebed0977ea70",
           "path": "fixtures/javascript/lexical/package.json",
-          "size": 196
+          "size": 302
         }
       ],
       "id": "javascript-lexical-input",
@@ -942,41 +966,41 @@
           "id": "pkg:reachbench/javascript/lexical#controlNoCoverage",
           "locator": {
             "kind": "manifest_capability",
-            "line": 7,
+            "line": 11,
             "module_path": "fixtures/javascript/lexical/package.json",
             "symbol": "parser-unavailable"
           },
-          "package_identity": "npm:@reachbench/lexical"
+          "package_identity": "npm:@reachbench/lexical@1.0.0"
         },
         {
           "id": "pkg:reachbench/javascript/lexical#controlOpaque",
           "locator": {
             "kind": "source_symbol",
-            "line": 12,
-            "module_path": "fixtures/javascript/lexical/main.js",
+            "line": 1,
+            "module_path": "fixtures/javascript/lexical/dependencies/lexical-opaque/index.js",
             "symbol": "controlOpaque"
           },
-          "package_identity": "npm:@reachbench/lexical"
+          "package_identity": "npm:@reachbench/lexical-opaque@1.0.0"
         },
         {
           "id": "pkg:reachbench/javascript/lexical#controlPositive",
           "locator": {
             "kind": "source_symbol",
-            "line": 5,
-            "module_path": "fixtures/javascript/lexical/main.js",
+            "line": 1,
+            "module_path": "fixtures/javascript/lexical/dependencies/lexical/index.js",
             "symbol": "controlPositive"
           },
-          "package_identity": "npm:@reachbench/lexical"
+          "package_identity": "npm:@reachbench/lexical@1.0.0"
         },
         {
           "id": "pkg:reachbench/javascript/lexical#controlUnreachable",
           "locator": {
             "kind": "source_symbol",
-            "line": 6,
-            "module_path": "fixtures/javascript/lexical/main.js",
+            "line": 2,
+            "module_path": "fixtures/javascript/lexical/dependencies/lexical/index.js",
             "symbol": "controlUnreachable"
           },
-          "package_identity": "npm:@reachbench/lexical"
+          "package_identity": "npm:@reachbench/lexical@1.0.0"
         }
       ]
     },

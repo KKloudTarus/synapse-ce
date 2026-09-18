@@ -339,7 +339,7 @@
       "mode_id": "lexical",
       "fixture": {
         "id": "javascript-lexical-input",
-        "digest": "sha256:1641aeea2c7c40529a96022b0b5c84ec512115b15d3a6b0914821a17fc351e1f"
+        "digest": "sha256:b9f9267a4d48a3e664a96e61c1def78254c483d74b6882f635d6a7e3ba0bdb72"
       }
     },
     {
@@ -349,7 +349,7 @@
       "mode_id": "lexical",
       "fixture": {
         "id": "javascript-lexical-input",
-        "digest": "sha256:1641aeea2c7c40529a96022b0b5c84ec512115b15d3a6b0914821a17fc351e1f"
+        "digest": "sha256:b9f9267a4d48a3e664a96e61c1def78254c483d74b6882f635d6a7e3ba0bdb72"
       }
     },
     {
@@ -359,7 +359,7 @@
       "mode_id": "lexical",
       "fixture": {
         "id": "javascript-lexical-input",
-        "digest": "sha256:1641aeea2c7c40529a96022b0b5c84ec512115b15d3a6b0914821a17fc351e1f"
+        "digest": "sha256:b9f9267a4d48a3e664a96e61c1def78254c483d74b6882f635d6a7e3ba0bdb72"
       }
     },
     {
@@ -369,7 +369,7 @@
       "mode_id": "lexical",
       "fixture": {
         "id": "javascript-lexical-input",
-        "digest": "sha256:1641aeea2c7c40529a96022b0b5c84ec512115b15d3a6b0914821a17fc351e1f"
+        "digest": "sha256:b9f9267a4d48a3e664a96e61c1def78254c483d74b6882f635d6a7e3ba0bdb72"
       }
     },
     {

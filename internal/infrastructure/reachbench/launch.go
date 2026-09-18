@@ -60,12 +60,11 @@ func runWithProductionDependencies(ctx context.Context, args []string, dependenc
 		return Result{}, fmt.Errorf("create reachability fixture materializer: %w", err)
 	}
 	capture, err := dependencies.newProductionCapture(ProductionCaptureDependencies{
-		Materializer:             materializer,
-		Fixtures:                 measurement.DefaultFixtureManifest(),
-		CallGraphBinary:          cfg.TaintCallgraphBin,
-		ASTBinary:                cfg.ASTBin,
-		JVMPointsTo:              cfg.JVMTier2PointsToEnabled(),
-		EnableJSLexicalNegatives: cfg.JSSymbolReachabilityEnabled,
+		Materializer:    materializer,
+		Fixtures:        measurement.DefaultFixtureManifest(),
+		CallGraphBinary: cfg.TaintCallgraphBin,
+		ASTBinary:       cfg.ASTBin,
+		JVMPointsTo:     cfg.JVMTier2PointsToEnabled(),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("create reachability production capture: %w", err)

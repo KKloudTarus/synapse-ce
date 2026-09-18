@@ -20,7 +20,7 @@ const (
 	reachabilityCleanupTimeout = 2 * time.Minute
 )
 
-var errAuthoritativeCandidateRejected = errors.New("authoritative candidate reachability benchmark rejected")
+var errCandidateRejected = errors.New("candidate reachability benchmark rejected")
 
 // Run rejects every argument, derives all lifecycle identity internally, and publishes only after cleanup succeeds.
 func (runner *Runner) Run(ctx context.Context, args []string) (result Result, runErr error) {
@@ -102,6 +102,16 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 	if err != nil {
 		return Result{}, err
 	}
+	if err := validatePublicationCapacity(len(cells)); err != nil {
+		return Result{}, err
+	}
+	conformanceCells := map[string]struct{}{}
+	if envelope.Route != RouteProtectedBaseline {
+		conformanceCells, err = suppressionConformancePlan(cells)
+		if err != nil {
+			return Result{}, err
+		}
+	}
 
 	workspace, err := benchcycle.PrepareWorkspace(facts.rawRoot, facts.runKey)
 	if err != nil {
@@ -142,14 +152,16 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 	comparisons := make([]CellRepeatDigest, 0, len(plan.Cells))
 	pairs, err := benchcycle.ExecuteTwoPass(ctx, plan,
 		func(captureCtx context.Context, attempt benchcycle.Attempt[ExecutionCell]) (benchcycle.AttemptOutcome[CaptureResult], error) {
+			_, projectionConformanceControl := conformanceCells[attempt.Address.CellKey]
 			captured, captureErr := runner.capture.Capture(captureCtx, CaptureRequest{
-				Repetition: attempt.Address.Repetition,
-				Cell:       attempt.Cell,
-				Analyzer:   envelope.Analyzer,
-				Snapshot:   template.ActiveSnapshot,
-				WorkRoot:   workspace.WorkRoot(),
-				attempt:    attempt.Address,
-				evidence:   evidence,
+				Repetition:                   attempt.Address.Repetition,
+				Cell:                         attempt.Cell,
+				Analyzer:                     envelope.Analyzer,
+				Snapshot:                     template.ActiveSnapshot,
+				WorkRoot:                     workspace.WorkRoot(),
+				attempt:                      attempt.Address,
+				evidence:                     evidence,
+				projectionConformanceControl: projectionConformanceControl,
 			})
 			if captureErr != nil {
 				return benchcycle.AttemptOutcome[CaptureResult]{}, fmt.Errorf("capture repetition %d %s/%s: %w", attempt.Address.Repetition, attempt.Cell.CaseID, attempt.Cell.BindingID, captureErr)
@@ -162,6 +174,14 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 			}
 			if err := validateEvidenceReceipts(captured.EvidenceReceipts); err != nil {
 				return benchcycle.AttemptOutcome[CaptureResult]{}, fmt.Errorf("capture repetition %d evidence: %w", attempt.Address.Repetition, err)
+			}
+			if projectionConformanceControl != (captured.SuppressionConformance != nil) {
+				return benchcycle.AttemptOutcome[CaptureResult]{}, fmt.Errorf("capture repetition %d %s/%s has inconsistent suppression conformance output", attempt.Address.Repetition, attempt.Cell.CaseID, attempt.Cell.BindingID)
+			}
+			if captured.SuppressionConformance != nil {
+				if err := validateSuppressionConformanceControl(*captured.SuppressionConformance, attempt.Cell); err != nil {
+					return benchcycle.AttemptOutcome[CaptureResult]{}, fmt.Errorf("capture repetition %d suppression conformance: %w", attempt.Address.Repetition, err)
+				}
 			}
 			return benchcycle.AttemptOutcome[CaptureResult]{Address: attempt.Address, Outcome: captured}, nil
 		},
@@ -179,6 +199,12 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 			}
 			if !bytes.Equal(left, right) {
 				return fmt.Errorf("semantic repeat mismatch for %s/%s", pair.Cell.Cell.CaseID, pair.Cell.Cell.BindingID)
+			}
+			if (pair.Outcomes[0].Outcome.SuppressionConformance != nil) != (pair.Outcomes[1].Outcome.SuppressionConformance != nil) {
+				return fmt.Errorf("suppression conformance repeat presence mismatch for %s/%s", pair.Cell.Cell.CaseID, pair.Cell.Cell.BindingID)
+			}
+			if pair.Outcomes[0].Outcome.SuppressionConformance != nil && !sameCanonical(*pair.Outcomes[0].Outcome.SuppressionConformance, *pair.Outcomes[1].Outcome.SuppressionConformance) {
+				return fmt.Errorf("suppression conformance repeat mismatch for %s/%s", pair.Cell.Cell.CaseID, pair.Cell.Cell.BindingID)
 			}
 			comparisons = append(comparisons, CellRepeatDigest{
 				CaseID: pair.Cell.Cell.CaseID, BindingID: pair.Cell.Cell.BindingID, ProjectionDigest: benchmark.SHA256Digest(left),
@@ -203,6 +229,7 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 	inputs := make([]measurement.MeasurementInput, fixedRepetitions)
 	reports := make([]measurement.MeasurementReport, fixedRepetitions)
 	encodedReports := make([][]byte, fixedRepetitions)
+	conformanceReports := make([]SuppressionProjectionConformance, 0, fixedRepetitions)
 	for repetition := range captures {
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
@@ -220,6 +247,19 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 			return Result{}, fmt.Errorf("encode repetition %d report: %w", repetition+1, encodeErr)
 		}
 		inputs[repetition], reports[repetition], encodedReports[repetition] = input, report, encoded
+		if envelope.Route != RouteProtectedBaseline {
+			controls := make([]SuppressionProjectionConformanceControl, 0, len(conformanceCells))
+			for _, captured := range captures[repetition] {
+				if captured.SuppressionConformance != nil {
+					controls = append(controls, *captured.SuppressionConformance)
+				}
+			}
+			conformanceReport, conformanceErr := buildSuppressionConformanceReport(repetition+1, controls)
+			if conformanceErr != nil {
+				return Result{}, fmt.Errorf("build repetition %d suppression conformance: %w", repetition+1, conformanceErr)
+			}
+			conformanceReports = append(conformanceReports, conformanceReport)
+		}
 	}
 	if !bytes.Equal(encodedReports[0], encodedReports[1]) {
 		return Result{}, errors.New("canonical reachability reports differ between repetitions")
@@ -254,7 +294,7 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 		ReportIDs:         []string{reports[0].ID, reports[1].ID},
 		Cells:             comparisons,
 	}
-	if err := writeSanitizedBundle(ctx, publication, manifest, repeat, inputs, reports); err != nil {
+	if err := writeSanitizedBundle(ctx, publication, &manifest, &repeat, inputs, reports, conformanceReports); err != nil {
 		return Result{}, err
 	}
 	publicationTerminal = true
@@ -262,10 +302,17 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 		return Result{}, fmt.Errorf("publish reachability lifecycle: %w", err)
 	}
 	result = Result{RunKey: facts.runKey, Authoritative: authoritative, Output: facts.output, Manifest: manifest}
-	if authoritative && envelope.Route == RouteCandidate && !reports[0].Candidate.Accepted {
-		return result, errAuthoritativeCandidateRejected
+	var decisionErr error
+	if envelope.Purpose == measurement.CandidateAcceptance && !reports[0].Candidate.Accepted {
+		decisionErr = errors.Join(decisionErr, errCandidateRejected)
 	}
-	return result, nil
+	for _, conformance := range conformanceReports {
+		if !conformance.Passed {
+			decisionErr = errors.Join(decisionErr, errSuppressionConformance)
+			break
+		}
+	}
+	return result, decisionErr
 }
 
 func reachabilityEvidenceLimits() benchcycle.EvidenceLimits {
@@ -468,6 +515,17 @@ func enumerateCells(input measurement.MeasurementInput) ([]ExecutionCell, error)
 		return cellKey(cells[left]) < cellKey(cells[right])
 	})
 	return cells, nil
+}
+
+func validatePublicationCapacity(cellCount int) error {
+	if cellCount <= 0 {
+		return errors.New("reachability lifecycle has no publishable execution cells")
+	}
+	required := publicationDocumentReserve + int64(cellCount)*maxPublishedCellBytes
+	if required > benchmark.MaxJSONBytes {
+		return fmt.Errorf("reachability lifecycle publication budget for %d cells exceeds %d bytes", cellCount, benchmark.MaxJSONBytes)
+	}
+	return nil
 }
 
 func materializeInput(template measurement.MeasurementInput, cells []ExecutionCell, captures []CaptureResult) (measurement.MeasurementInput, error) {
