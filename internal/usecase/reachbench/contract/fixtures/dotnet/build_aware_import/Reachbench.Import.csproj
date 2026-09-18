@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Remove="dependencies/**/*.cs" />
+    <Compile Remove="packages/**/*.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Reachbench.Direct" Version="1.0.0" />

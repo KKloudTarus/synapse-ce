@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/srcimports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	reachcontract "github.com/KKloudTarus/synapse-ce/internal/usecase/reachbench"
@@ -221,6 +222,64 @@ func TestFixtureMaterializerBuildsEveryFrozenToolFormWithoutRunnerWorkdir(t *tes
 			}
 			assertFrozenFixtureInvocations(t, fixture.Root, specification.Build, calls)
 		})
+	}
+}
+
+func TestDotNetBuildAwareFixtureKeepsPackageSourcesOutsideProductionScan(t *testing.T) {
+	specification := materializerFixture(t, "dotnet-build-aware-import-input")
+	workRoot := privateMaterializerRoot(t)
+	cellKey := "sha256:" + strings.Repeat("f", 64)
+	expectedRoot, err := prepareMaterializationRoot(workRoot, cellKey)
+	if err != nil {
+		t.Fatalf("prepare materialization root: %v", err)
+	}
+	runner := &fixtureToolRunner{}
+	materializer := newFixtureMaterializer(t, runner, "linux/amd64")
+	runner.run = func(_ context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
+		if isFixtureToolchainProbe(specification.Build.Toolchain.Family, spec) {
+			return matchingFixtureToolchainProbe(specification.Build.Toolchain.Family), nil
+		}
+		for _, output := range specification.Build.Outputs {
+			path := filepath.Join(expectedRoot, filepath.FromSlash(output.Path))
+			if err := os.WriteFile(path, []byte("generated "+output.Path), 0o600); err != nil {
+				return ports.ToolResult{}, err
+			}
+		}
+		return ports.ToolResult{}, nil
+	}
+
+	fixture, err := materializer.Materialize(context.Background(), FixtureMaterializationRequest{
+		Specification: specification,
+		WorkRoot:      workRoot,
+		CellKey:       cellKey,
+	})
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	graph, err := srcimports.NewDotNetScanner().ScanImports(context.Background(), fixture.Root)
+	if err != nil {
+		t.Fatalf("ScanImports: %v", err)
+	}
+	observed := make(map[string]bool, len(graph.ImportedPackages))
+	for _, name := range graph.ImportedPackages {
+		observed[name] = true
+	}
+	if !observed["reachbench.direct"] {
+		t.Fatalf("first-party import is absent from production scan: %v", graph.ImportedPackages)
+	}
+	for _, packageNamespace := range []string{"reachbench.dynamic", "reachbench.unused", "reachbench.unsupported"} {
+		if observed[packageNamespace] {
+			t.Errorf("package-owned namespace %q leaked into first-party scan: %v", packageNamespace, graph.ImportedPackages)
+		}
+	}
+	direct, present := srcimports.DirectDependencies(context.Background(), fixture.Root, "nuget")
+	if !present {
+		t.Fatal("materialized application manifest is absent from direct-dependency scan")
+	}
+	for _, packageName := range []string{"reachbench.direct", "reachbench.dynamic", "reachbench.unused", "reachbench.unsupported"} {
+		if !direct[packageName] {
+			t.Errorf("application direct dependency %q is absent: %v", packageName, direct)
+		}
 	}
 }
 

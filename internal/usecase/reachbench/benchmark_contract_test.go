@@ -494,11 +494,11 @@ func TestDotNetBuildAwareFixtureUsesLocalPackages(t *testing.T) {
 	if strings.Contains(app, "ProjectReference") {
 		t.Fatal("app project retains ProjectReference semantics")
 	}
-	if !strings.Contains(app, `<Compile Remove="dependencies/**/*.cs" />`) {
+	if !strings.Contains(app, `<Compile Remove="packages/**/*.cs" />`) {
 		t.Fatal("app project compiles package fixture sources as first-party code")
 	}
 	for _, project := range []string{"Reachbench.Direct", "Reachbench.Dynamic", "Reachbench.Unused", "Reachbench.Unsupported"} {
-		path := "fixtures/dotnet/build_aware_import/dependencies/" + project + "/" + project + ".csproj"
+		path := "fixtures/dotnet/build_aware_import/packages/" + project + "/" + project + ".csproj"
 		contents := string(root[path].Data)
 		if !strings.Contains(contents, "<PackageId>"+project+"</PackageId>") || !strings.Contains(contents, "<Version>1.0.0</Version>") {
 			t.Fatalf("package project %q lacks pinned package identity", project)
@@ -785,11 +785,11 @@ func TestReachabilityBenchmarkLoadersAreStrictDeterministicAndPinned(t *testing.
 		got  string
 		want string
 	}{
-		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:4e6d4489084c668b9495794c0e900f352615d678061f7cf74a1556b7663b800c"},
+		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:1a7998511810caff2860e76780668b1b25fd95a11c6eac9c26750937e7eb5d16"},
 		{"oracle", DigestReachabilityOracleMust(t, first.Oracle), "sha256:0299297cb1bacbdab7156536d2de3b21992e1f3c085ab109f95162f4eef6dfe6"},
 		{"challenges", DigestChallengeManifestMust(t, first.Challenges), "sha256:a967a0b5423e79961f28121cc5dfe71e1464850d1e2af0ca9fa74cebfc7db0aa"},
-		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:cc002a992b96db404380dd592f041347159bba830518d6de5c71e1e6a845fb04"},
-		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:b313d6afe5094c23881f81450cd952f7bcec5e562268266de44ec9a17dc6579e"},
+		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:15b21169e0aeda2acdc74cea0c71d462d8bc29881e1b1854ca2b89b304ee0ef0"},
+		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:1c2c62f01a66e4e3c6d6ca24c88dd662d23f65ce380571d0c390ea884a0090de"},
 	} {
 		if item.got != item.want {
 			t.Errorf("%s digest = %s, want %s", item.name, item.got, item.want)

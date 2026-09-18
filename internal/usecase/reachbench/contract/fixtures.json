@@ -208,48 +208,48 @@
           "size": 445
         },
         {
-          "digest": "sha256:f92caf5d1e4c0763bdf12532e103a16c4773933b683cc74331bfd3060299fa41",
+          "digest": "sha256:68d102cc4c7869b45e6ac035b2cf8bf456b8126bed89c3d6c38a5a7c183ed2d0",
           "path": "fixtures/dotnet/build_aware_import/Reachbench.Import.csproj",
-          "size": 668
+          "size": 664
         },
         {
           "digest": "sha256:7922ebae9dd4f57bd7e38bb073682a75acb1ec7d4fd01f04048501dff3a57347",
-          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Direct/Entry.cs",
+          "path": "fixtures/dotnet/build_aware_import/packages/Reachbench.Direct/Entry.cs",
           "size": 89
         },
         {
           "digest": "sha256:96dd799d21a12db347f5f46ec3bccbc3085e58025fe83f040bbe64a25ae275c0",
-          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Direct/Reachbench.Direct.csproj",
+          "path": "fixtures/dotnet/build_aware_import/packages/Reachbench.Direct/Reachbench.Direct.csproj",
           "size": 253
         },
         {
           "digest": "sha256:80ff61e7e4e1b72fe26ea19e8d7b0e04dd2e8bdb903cf2175ca2c860c6bdef2a",
-          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Dynamic/Entry.cs",
+          "path": "fixtures/dotnet/build_aware_import/packages/Reachbench.Dynamic/Entry.cs",
           "size": 90
         },
         {
           "digest": "sha256:c1a17c059c7f3d51d7078e672806b4063727d2a1c4ac7de82734c2f072efa213",
-          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Dynamic/Reachbench.Dynamic.csproj",
+          "path": "fixtures/dotnet/build_aware_import/packages/Reachbench.Dynamic/Reachbench.Dynamic.csproj",
           "size": 255
         },
         {
           "digest": "sha256:ca78dbb2e60f1ae71e64a6742ecb466cbc1e2e8c8f1880ed458ec036b5a59e8a",
-          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Unsupported/Entry.cs",
+          "path": "fixtures/dotnet/build_aware_import/packages/Reachbench.Unsupported/Entry.cs",
           "size": 94
         },
         {
           "digest": "sha256:9fcdbbd250d33ae02a60de784995f79b4cf68b33ecf144e19a00328c81bd1571",
-          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Unsupported/Reachbench.Unsupported.csproj",
+          "path": "fixtures/dotnet/build_aware_import/packages/Reachbench.Unsupported/Reachbench.Unsupported.csproj",
           "size": 263
         },
         {
           "digest": "sha256:89336c96f30ac7b5dd9e2efa319aff4a79ef37730a81be46726aac5640ec8b5b",
-          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Unused/Entry.cs",
+          "path": "fixtures/dotnet/build_aware_import/packages/Reachbench.Unused/Entry.cs",
           "size": 89
         },
         {
           "digest": "sha256:f3a73f19f2c359861016be926e01f72a8202c07485c354cb29b2eb16097c4c45",
-          "path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Unused/Reachbench.Unused.csproj",
+          "path": "fixtures/dotnet/build_aware_import/packages/Reachbench.Unused/Reachbench.Unused.csproj",
           "size": 253
         },
         {
@@ -258,9 +258,9 @@
           "size": 125
         },
         {
-          "digest": "sha256:5721ae7900f928657ef29c7c4447a9ad3b07e2d08ac21dc8ddac6669cb63449f",
+          "digest": "sha256:760a52d6a0e3f49e7dfc70c06a1c95847d251ebe6a2fe147735397f68cb34b7d",
           "path": "fixtures/dotnet/build_aware_import/Reachbench.Packages.sln",
-          "size": 1435
+          "size": 1423
         }
       ],
       "id": "dotnet-build-aware-import-input",
@@ -274,7 +274,7 @@
           "locator": {
             "kind": "package_dependency",
             "line": 3,
-            "module_path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Direct/Entry.cs",
+            "module_path": "fixtures/dotnet/build_aware_import/packages/Reachbench.Direct/Entry.cs",
             "symbol": "Reachbench.Direct.Entry.Run"
           },
           "package_identity": "pkg:nuget/Reachbench.Direct@1.0.0"
@@ -284,7 +284,7 @@
           "locator": {
             "kind": "package_dependency",
             "line": 3,
-            "module_path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Dynamic/Entry.cs",
+            "module_path": "fixtures/dotnet/build_aware_import/packages/Reachbench.Dynamic/Entry.cs",
             "symbol": "Reachbench.Dynamic.Entry.Run"
           },
           "package_identity": "pkg:nuget/Reachbench.Dynamic@1.0.0"
@@ -294,7 +294,7 @@
           "locator": {
             "kind": "package_dependency",
             "line": 3,
-            "module_path": "fixtures/dotnet/build_aware_import/dependencies/Reachbench.Unused/Entry.cs",
+            "module_path": "fixtures/dotnet/build_aware_import/packages/Reachbench.Unused/Entry.cs",
             "symbol": "Reachbench.Unused.Entry.Run"
           },
           "package_identity": "pkg:nuget/Reachbench.Unused@1.0.0"
