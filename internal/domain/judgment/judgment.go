@@ -111,10 +111,6 @@ type Judgment struct {
 	// judgments leave both empty.
 	VerifiedBy       string `json:"verified_by"`
 	VerdictRationale string `json:"verdict_rationale"`
-	// SuppressionProof is optional provenance for a negative reachability judgment.
-	// Its absence is a deliberate fail-closed signal: positive reachability remains
-	// usable, but no consumer may suppress from this judgment.
-	SuppressionProof *ReachabilitySuppressionProof `json:"-"`
 	Version          int
 	Audit            shared.Audit
 }
@@ -122,19 +118,6 @@ type Judgment struct {
 // New builds a PROPOSED judgment at EvidenceScore 0 (the proposer can never set a score). It
 // validates the closed vocabularies + the typed claim; proposer is recorded for attribution only.
 func New(id, engagementID shared.ID, capability Capability, subjectKind SubjectKind, subjectID shared.ID, claim Claim, proposer string, now time.Time) (Judgment, error) {
-	return newJudgment(id, engagementID, capability, subjectKind, subjectID, claim, proposer, nil, now)
-}
-
-// NewWithSuppressionProof creates a proposed reachability judgment carrying a
-// draft suppression proof. The lifecycle binds sealed proposal and verdict
-// evidence before the proof can be consumed. Callers that cannot derive every
-// identity honestly must use New instead; the negative will then stay
-// non-suppressing.
-func NewWithSuppressionProof(id, engagementID shared.ID, capability Capability, subjectKind SubjectKind, subjectID shared.ID, claim Claim, proposer string, proof ReachabilitySuppressionProof, now time.Time) (Judgment, error) {
-	return newJudgment(id, engagementID, capability, subjectKind, subjectID, claim, proposer, &proof, now)
-}
-
-func newJudgment(id, engagementID shared.ID, capability Capability, subjectKind SubjectKind, subjectID shared.ID, claim Claim, proposer string, proof *ReachabilitySuppressionProof, now time.Time) (Judgment, error) {
 	if id == "" || engagementID == "" {
 		return Judgment{}, fmt.Errorf("%w: judgment needs an id + engagement", shared.ErrValidation)
 	}
@@ -160,63 +143,12 @@ func newJudgment(id, engagementID shared.ID, capability Capability, subjectKind 
 	if err != nil {
 		return Judgment{}, err
 	}
-	j := Judgment{
+	return Judgment{
 		ID: id, EngagementID: engagementID, Capability: capability,
 		SubjectKind: subjectKind, SubjectID: subjectID, Claim: canonical,
 		State: StateProposed, EvidenceScore: 0, ProposedBy: strings.TrimSpace(proposer),
 		Version: 1, Audit: shared.Audit{CreatedAt: now, UpdatedAt: now},
-	}
-	if proof == nil {
-		return j, nil
-	}
-	if capability != CapReachability || subjectKind != SubjectFinding {
-		return Judgment{}, fmt.Errorf("%w: suppression provenance is only valid for finding reachability judgments", shared.ErrValidation)
-	}
-	reach, ok := canonical.(ReachabilityClaim)
-	if !ok || reach.Reachable != NotReachable {
-		return Judgment{}, fmt.Errorf("%w: suppression provenance requires a not_reachable claim", shared.ErrValidation)
-	}
-	if err := proof.validateDraft(); err != nil {
-		return Judgment{}, err
-	}
-	if proof.subjectID != subjectID || proof.proposer != j.ProposedBy {
-		return Judgment{}, fmt.Errorf("%w: suppression provenance does not match judgment subject or proposer", shared.ErrValidation)
-	}
-	cloned := cloneReachabilitySuppressionProof(*proof)
-	j.SuppressionProof = &cloned
-	return j, nil
-}
-
-// WithSuppressionProof returns a copy carrying lifecycle-sealed suppression
-// provenance. It cannot create a new proof after proposal; only a proof bound
-// at creation may advance from proposal to verdict evidence.
-func (j Judgment) WithSuppressionProof(proof ReachabilitySuppressionProof) (Judgment, error) {
-	if j.Capability != CapReachability || j.SubjectKind != SubjectFinding || j.SuppressionProof == nil {
-		return Judgment{}, fmt.Errorf("%w: judgment has no reachability suppression proof to update", shared.ErrValidation)
-	}
-	claim, ok := j.Claim.(ReachabilityClaim)
-	if !ok || claim.Reachable != NotReachable || proof.subjectID != j.SubjectID || proof.proposer != j.ProposedBy {
-		return Judgment{}, fmt.Errorf("%w: suppression proof does not match reachability judgment", shared.ErrValidation)
-	}
-	if err := proof.validatePersisted(); err != nil {
-		return Judgment{}, err
-	}
-	previous := *j.SuppressionProof
-	if !sameSuppressionProofCore(previous, proof) {
-		return Judgment{}, fmt.Errorf("%w: suppression proof may not replace its proposal provenance", shared.ErrValidation)
-	}
-	switch {
-	case previous.stage == suppressionProofDraft && proof.stage == suppressionProofProposalSealed:
-	case previous.stage == suppressionProofProposalSealed && proof.stage == suppressionProofVerdictSealed && previous.proposalEvidence.Equal(proof.proposalEvidence):
-	default:
-		return Judgment{}, fmt.Errorf("%w: invalid suppression proof lifecycle transition", shared.ErrValidation)
-	}
-	if proof.stage == suppressionProofVerdictSealed && proof.verifier != j.VerifiedBy {
-		return Judgment{}, fmt.Errorf("%w: suppression proof verifier does not match judgment verdict", shared.ErrValidation)
-	}
-	cloned := cloneReachabilitySuppressionProof(proof)
-	j.SuppressionProof = &cloned
-	return j, nil
+	}, nil
 }
 
 // ApplyVerdict moves a GATED judgment's score via a DISTINCT verifier's verdict – the only path

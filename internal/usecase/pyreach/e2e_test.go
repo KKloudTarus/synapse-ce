@@ -56,10 +56,11 @@ func writePy(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// TestPyReachToOpenVEXEndToEnd confirms a Python project imports `requests` but
-// not `jinja2`, yielding a reachable result and a technical negative. Without an
-// independently resolved authority context, export retains the false-positive's
-// status-derived justification rather than treating the negative as authoritative.
+// TestPyReachToOpenVEXEndToEnd is the acceptance proof for #164: a Python project imports `requests` but
+// NOT `jinja2` (a declared-but-dead dependency). The source-only analyzer + the Tier-1 reachproof
+// coordinator mint a deterministic not_reachable reachability judgment for the jinja2 finding, and the
+// OpenVEX export CONSUMES it — a human-marked false-positive gets the tier-grounded justification
+// `vulnerable_code_not_in_execute_path`. The reachable `requests` finding mints a reachable judgment.
 func TestPyReachToOpenVEXEndToEnd(t *testing.T) {
 	dir := writePy(t, map[string]string{
 		"app/__init__.py": "",
@@ -118,8 +119,8 @@ func TestPyReachToOpenVEXEndToEnd(t *testing.T) {
 		t.Fatalf("requests is imported → must be reachable, got %+v", live)
 	}
 
-	// Export has no live authority context, so this technical negative remains
-	// non-suppressing and the false-positive uses its generic justification.
+	// OpenVEX CONSUMES the not_reachable judgment: a human-marked false-positive jinja2 finding gets the
+	// tier-grounded justification (the deterministic proof), not the generic default.
 	findingRepo := memory.NewFindingRepository()
 	if err := findingRepo.Upsert(context.Background(), []finding.Finding{{
 		ID: deadFinding, EngagementID: eng, Kind: finding.KindSCA, Status: finding.StatusFalsePos,
@@ -137,7 +138,7 @@ func TestPyReachToOpenVEXEndToEnd(t *testing.T) {
 		t.Fatalf("want 1 VEX statement, got %d", len(doc.Statements))
 	}
 	st := doc.Statements[0]
-	if st.Status != "not_affected" || st.Justification != "vulnerable_code_not_present" {
-		t.Fatalf("OpenVEX must fail closed without current authority: got status=%q justification=%q", st.Status, st.Justification)
+	if st.Status != "not_affected" || st.Justification != "vulnerable_code_not_in_execute_path" {
+		t.Fatalf("OpenVEX must consume the Tier-1 not_reachable proof: got status=%q justification=%q", st.Status, st.Justification)
 	}
 }

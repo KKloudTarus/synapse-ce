@@ -2,9 +2,6 @@ package analysis
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -89,18 +86,10 @@ func (f *fakeStore) SaveWithProposalAudit(_ context.Context, j judgment.Judgment
 	f.pending = append(f.pending, ports.PendingJudgmentAudit{Kind: ports.JudgmentProposalAudit, JudgmentID: j.ID, Version: j.Version, EngagementID: j.EngagementID, Entry: entry})
 	return nil
 }
-func (f *fakeStore) SetVerdictStateWithAudit(_ context.Context, eng, id shared.ID, score int, state judgment.State, by, rationale string, suppressionProof *judgment.ReachabilitySuppressionProof, expectedVersion int, entry ports.AuditEntry) (judgment.Judgment, error) {
+func (f *fakeStore) SetVerdictStateWithAudit(_ context.Context, eng, id shared.ID, score int, state judgment.State, by, rationale string, expectedVersion int, entry ports.AuditEntry) (judgment.Judgment, error) {
 	j, err := f.SetVerdictState(context.Background(), eng, id, score, state, by, rationale, expectedVersion)
 	if err != nil {
 		return judgment.Judgment{}, err
-	}
-	if suppressionProof != nil {
-		j.SuppressionProof = suppressionProof
-		for i := range f.saved {
-			if f.saved[i].ID == id {
-				f.saved[i].SuppressionProof = suppressionProof
-			}
-		}
 	}
 	f.pending = append(f.pending, ports.PendingJudgmentAudit{Kind: ports.JudgmentVerdictAudit, JudgmentID: id, Version: j.Version, EngagementID: eng, Entry: entry})
 	return j, nil
@@ -125,21 +114,15 @@ func (f *fakeStore) AcknowledgeJudgmentAudit(_ context.Context, kind ports.Judgm
 }
 
 type fakeSealer struct {
-	kinds    []string
-	contents [][]byte
-	items    []evidence.Evidence
-	err      error
+	kinds []string
+	err   error
 }
 
-func (f *fakeSealer) Seal(_ context.Context, _ shared.ID, kind string, content []byte, _ string) (evidence.Evidence, error) {
+func (f *fakeSealer) Seal(_ context.Context, _ shared.ID, kind string, _ []byte, _ string) (evidence.Evidence, error) {
 	if f.err != nil {
 		return evidence.Evidence{}, f.err
 	}
 	f.kinds = append(f.kinds, kind)
-	f.contents = append(f.contents, append([]byte(nil), content...))
-	if index := len(f.kinds) - 1; index < len(f.items) {
-		return f.items[index], nil
-	}
 	return evidence.Evidence{}, nil
 }
 
@@ -201,66 +184,6 @@ func newSvc() (*Service, *fakeStore, *fakeSealer, *fakeAudit) {
 	return svc, store, sealer, audit
 }
 
-func analysisTestArtifact(t *testing.T, id string) judgment.ArtifactIdentity {
-	t.Helper()
-	sum := sha256.Sum256([]byte(id))
-	identity, err := judgment.NewArtifactIdentity(id, "sha256:"+hex.EncodeToString(sum[:]))
-	if err != nil {
-		t.Fatalf("new artifact identity: %v", err)
-	}
-	return identity
-}
-
-func analysisTestSuppressionProof(t *testing.T) judgment.ReachabilitySuppressionProof {
-	t.Helper()
-	registry, err := judgment.NewInitialReachabilityAuthorityRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	policy, err := registry.Lookup(string(judgment.CohortGo), string(judgment.ModeSourceTier2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	approval, ok := policy.Approval()
-	if !ok {
-		t.Fatal("expected eligible go suppression approval")
-	}
-	snapshot, err := judgment.NewReachabilitySnapshotIdentity(
-		analysisTestArtifact(t, "source"), analysisTestArtifact(t, "sbom"), analysisTestArtifact(t, "run"),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	contract := approval.Contract()
-	proof, err := judgment.NewReachabilitySuppressionProof(judgment.ReachabilitySuppressionProofInput{
-		SubjectID:            "f1",
-		BoundaryID:           "analysis-boundary",
-		Cohort:               string(judgment.CohortGo),
-		Mode:                 string(judgment.ModeSourceTier2),
-		Snapshot:             snapshot,
-		Analyzer:             analysisTestArtifact(t, "analyzer"),
-		Configuration:        analysisTestArtifact(t, "configuration"),
-		CompletenessContract: mustAnalysisArtifact(t, contract.ID(), contract.Digest()),
-		Authority:            approval.Authority(),
-		AuthorityCheckpoint:  analysisTestArtifact(t, "authority-checkpoint"),
-		Proposer:             approval.Proposer(),
-		Verifier:             approval.Verifier(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return proof
-}
-
-func mustAnalysisArtifact(t *testing.T, id, digest string) judgment.ArtifactIdentity {
-	t.Helper()
-	identity, err := judgment.NewArtifactIdentity(id, digest)
-	if err != nil {
-		t.Fatalf("new artifact identity: %v", err)
-	}
-	return identity
-}
-
 func reach() judgment.Claim {
 	return judgment.ReachabilityClaim{Reachable: "not_reachable", Tier: "tier-1.5", Confidence: 90}
 }
@@ -282,76 +205,6 @@ func promo() judgment.Claim {
 		FindingVersion: 1,
 		BeforePriority: 3,
 		AfterPriority:  2,
-	}
-}
-
-func TestReachabilitySuppressionProofBindsSealedLifecycleEvidence(t *testing.T) {
-	svc, store, sealer, _ := newSvc()
-	proof := analysisTestSuppressionProof(t)
-	proposalEvidence := evidence.Evidence{ID: "proposal-evidence", Hash: analysisTestArtifact(t, "proposal-evidence").Digest()[len("sha256:"):]}
-	verdictEvidence := evidence.Evidence{ID: "verdict-evidence", Hash: analysisTestArtifact(t, "verdict-evidence").Digest()[len("sha256:"):]}
-	sealer.items = []evidence.Evidence{proposalEvidence, verdictEvidence}
-
-	proposed, err := svc.ProposeReachabilityWithSuppressionProof(
-		context.Background(), proof.Proposer(), "e1", "f1",
-		judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, Confidence: 90, EntrypointsPresent: true}, proof,
-	)
-	if err != nil {
-		t.Fatalf("propose reachability with proof: %v", err)
-	}
-	if proposed.SuppressionProof == nil || !proposed.SuppressionProof.ProposalEvidence().Matches(proposalEvidence.ID.String(), "sha256:"+proposalEvidence.Hash) {
-		t.Fatalf("proposal evidence was not bound: %#v", proposed.SuppressionProof)
-	}
-	if store.saved[0].SuppressionProof == nil || !store.saved[0].SuppressionProof.ProposalEvidence().Matches(proposalEvidence.ID.String(), "sha256:"+proposalEvidence.Hash) {
-		t.Fatalf("proposal evidence was not persisted: %#v", store.saved[0].SuppressionProof)
-	}
-	var proposalPayload sealedProposal
-	if len(sealer.contents) != 1 || json.Unmarshal(sealer.contents[0], &proposalPayload) != nil || len(proposalPayload.SuppressionProof) == 0 {
-		t.Fatalf("proposal evidence did not seal suppression proof: %q", sealer.contents)
-	}
-	var proposalProof map[string]any
-	if err := json.Unmarshal(proposalPayload.SuppressionProof, &proposalProof); err != nil || proposalProof["stage"] != "draft" || proposalProof["subject_id"] != "f1" {
-		t.Fatalf("sealed proposal proof = %#v, %v", proposalProof, err)
-	}
-	if _, err := svc.Verify(context.Background(), proof.Proposer(), "e1", proposed.ID, 90, "holds", proposed.Version); !errors.Is(err, shared.ErrValidation) {
-		t.Fatalf("self-verification = %v, want validation error", err)
-	}
-
-	confirmed, err := svc.Verify(context.Background(), proof.Verifier(), "e1", proposed.ID, 90, "holds", proposed.Version)
-	if err != nil {
-		t.Fatalf("verify proof judgment: %v", err)
-	}
-	if confirmed.SuppressionProof == nil || !confirmed.SuppressionProof.VerdictEvidence().Matches(verdictEvidence.ID.String(), "sha256:"+verdictEvidence.Hash) {
-		t.Fatalf("verdict evidence was not bound: %#v", confirmed.SuppressionProof)
-	}
-	if store.saved[0].SuppressionProof == nil || !store.saved[0].SuppressionProof.VerdictEvidence().Matches(verdictEvidence.ID.String(), "sha256:"+verdictEvidence.Hash) {
-		t.Fatalf("verdict evidence was not persisted: %#v", store.saved[0].SuppressionProof)
-	}
-	var verdictPayload sealedVerdict
-	if len(sealer.contents) != 2 || json.Unmarshal(sealer.contents[1], &verdictPayload) != nil || len(verdictPayload.SuppressionProof) == 0 {
-		t.Fatalf("verdict evidence did not seal suppression proof: %q", sealer.contents)
-	}
-	var verdictProof map[string]any
-	if err := json.Unmarshal(verdictPayload.SuppressionProof, &verdictProof); err != nil || verdictProof["stage"] != "proposal_sealed" {
-		t.Fatalf("sealed verdict proof = %#v, %v", verdictProof, err)
-	}
-	proposalRef, ok := verdictProof["proposal_evidence"].(map[string]any)
-	if !ok || proposalRef["id"] != proposalEvidence.ID.String() {
-		t.Fatalf("sealed verdict proof proposal evidence = %#v", verdictProof["proposal_evidence"])
-	}
-}
-
-func TestProposeReachabilityWithSuppressionProofRejectsInvalidEvidenceIdentity(t *testing.T) {
-	svc, store, _, _ := newSvc()
-	proof := analysisTestSuppressionProof(t)
-	if _, err := svc.ProposeReachabilityWithSuppressionProof(
-		context.Background(), proof.Proposer(), "e1", "f1",
-		judgment.ReachabilityClaim{Reachable: judgment.NotReachable, Tier: judgment.Tier2, Confidence: 90, EntrypointsPresent: true}, proof,
-	); !errors.Is(err, shared.ErrValidation) {
-		t.Fatalf("invalid proposal evidence = %v, want validation error", err)
-	}
-	if len(store.saved) != 0 {
-		t.Fatalf("invalid proposal evidence persisted a judgment: %#v", store.saved)
 	}
 }
 

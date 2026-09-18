@@ -500,7 +500,7 @@ func TestEvaluatorEscalationWithDetectionOnExposurePath(t *testing.T) {
 	}
 }
 
-func TestEvaluatorNegativeWithoutAuthorityDoesNotDeescalate(t *testing.T) {
+func TestEvaluatorDeterministicUnreachabilityDeescalation(t *testing.T) {
 	tid := testTenantID()
 	eid := testEngagementID()
 	fid := testFindingID()
@@ -508,8 +508,9 @@ func TestEvaluatorNegativeWithoutAuthorityDoesNotDeescalate(t *testing.T) {
 	f := baseFinding()
 	f.Priority = 2
 
-	// Actor names and a technically complete claim alone cannot authorize a
-	// de-escalation when this seam has no current suppression context.
+	// A publishable NotReachable judgment from a system reachproof identity
+	// with score >= DeterministicProofScore. This is the only combination
+	// that triggers deterministic de-escalation (not just Tier0).
 	reachJudgment := judgment.Judgment{
 		ID:           shared.ID("reach-j-1"),
 		EngagementID: eid,
@@ -524,10 +525,6 @@ func TestEvaluatorNegativeWithoutAuthorityDoesNotDeescalate(t *testing.T) {
 		State:         judgment.StateConfirmed,
 		EvidenceScore: 90,
 		ProposedBy:    "system:callgraph-scan", VerifiedBy: "system:callgraph-engine", VerdictRationale: "confirmed",
-	}
-	indexed := indexReachability([]judgment.Judgment{reachJudgment})[fid]
-	if indexed.state != judgment.ReachUnknown || indexed.suppresses || indexed.deterministic {
-		t.Fatalf("unauthorized negative projection = %#v, want non-suppressing unknown", indexed)
 	}
 
 	p := &fakeProposer{}
@@ -550,8 +547,18 @@ func TestEvaluatorNegativeWithoutAuthorityDoesNotDeescalate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if n != 0 || len(p.proposed) != 0 {
-		t.Fatalf("negative without current authority must not de-escalate, got %d proposals", n)
+	if n != 1 {
+		t.Fatalf("expected 1 proposal, got %d", n)
+	}
+	pc := p.proposed[0].Claim.(*judgment.PromotionClaim)
+	if pc.Rule != judgment.RuleDeterministicUnreachable {
+		t.Fatalf("expected rule %s, got %s", judgment.RuleDeterministicUnreachable, pc.Rule)
+	}
+	if pc.Proposed != judgment.PromotionDeescalate {
+		t.Fatalf("expected de_escalate, got %s", pc.Proposed)
+	}
+	if pc.BeforePriority != 2 || pc.AfterPriority != 3 {
+		t.Fatalf("expected priority 2->3, got %d->%d", pc.BeforePriority, pc.AfterPriority)
 	}
 }
 

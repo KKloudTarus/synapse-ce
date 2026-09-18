@@ -17,7 +17,7 @@ import (
 )
 
 // judgmentCols is the SELECT/RETURNING projection scanned by scanJudgment.
-const judgmentCols = `id, engagement_id, capability, subject_kind, subject_id, claim, state, evidence_score, proposed_by, verified_by, verdict_rationale, suppression_provenance, version, created_at, updated_at`
+const judgmentCols = `id, engagement_id, capability, subject_kind, subject_id, claim, state, evidence_score, proposed_by, verified_by, verdict_rationale, version, created_at, updated_at`
 
 // JudgmentRepository persists AI judgments to PostgreSQL, engagement-scoped.
 // All operations route through WithContextTenant so tenant isolation is enforced
@@ -44,10 +44,6 @@ func (r *JudgmentRepository) Save(ctx context.Context, j judgment.Judgment) erro
 	if err != nil {
 		return fmt.Errorf("marshal judgment claim: %w", err)
 	}
-	suppressionProofJSON, err := judgment.MarshalReachabilitySuppressionProof(j.SuppressionProof)
-	if err != nil {
-		return fmt.Errorf("marshal judgment suppression provenance: %w", err)
-	}
 	return WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		// Validate the engagement belongs to this tenant.
 		tenantID, _ := shared.TenantFrom(ctx)
@@ -62,12 +58,12 @@ func (r *JudgmentRepository) Save(ctx context.Context, j judgment.Judgment) erro
 		}
 
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO judgments (id, tenant_id, engagement_id, capability, subject_kind, subject_id, claim, state, evidence_score, proposed_by, verified_by, verdict_rationale, suppression_provenance, version, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			`INSERT INTO judgments (id, tenant_id, engagement_id, capability, subject_kind, subject_id, claim, state, evidence_score, proposed_by, verified_by, verdict_rationale, version, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 			 ON CONFLICT (id) DO NOTHING`,
 			j.ID.String(), tenantID.String(), j.EngagementID.String(),
 			string(j.Capability), string(j.SubjectKind), j.SubjectID.String(),
-			claimJSON, string(j.State), j.EvidenceScore, j.ProposedBy, j.VerifiedBy, j.VerdictRationale, suppressionProofJSON,
+			claimJSON, string(j.State), j.EvidenceScore, j.ProposedBy, j.VerifiedBy, j.VerdictRationale,
 			versionOrDefault(j.Version), j.Audit.CreatedAt, j.Audit.UpdatedAt); err != nil {
 			return fmt.Errorf("save judgment: %w", err)
 		}
@@ -202,10 +198,10 @@ func scanJudgment(row rowScanner) (judgment.Judgment, error) {
 	var (
 		j                               judgment.Judgment
 		id, eid, capStr, sk, sid, state string
-		claimJSON, suppressionProofJSON []byte
+		claimJSON                       []byte
 	)
 	if err := row.Scan(&id, &eid, &capStr, &sk, &sid, &claimJSON, &state,
-		&j.EvidenceScore, &j.ProposedBy, &j.VerifiedBy, &j.VerdictRationale, &suppressionProofJSON, &j.Version, &j.Audit.CreatedAt, &j.Audit.UpdatedAt); err != nil {
+		&j.EvidenceScore, &j.ProposedBy, &j.VerifiedBy, &j.VerdictRationale, &j.Version, &j.Audit.CreatedAt, &j.Audit.UpdatedAt); err != nil {
 		return judgment.Judgment{}, err
 	}
 	claim, err := judgment.UnmarshalClaim(claimJSON)
@@ -219,14 +215,6 @@ func scanJudgment(row rowScanner) (judgment.Judgment, error) {
 	j.SubjectID = shared.ID(sid)
 	j.State = judgment.State(state)
 	j.Claim = claim
-	// A malformed or legacy suppression-provenance row remains readable so a
-	// positive reachability verdict is not lost; the domain treats it as explicit
-	// no-authority and never permits suppression from it.
-	proof, proofErr := judgment.UnmarshalReachabilitySuppressionProof(suppressionProofJSON)
-	if proofErr != nil {
-		proof = judgment.MalformedReachabilitySuppressionProof()
-	}
-	j.SuppressionProof = proof
 	// Fail-closed on a corrupted/hand-edited row: the scalar enums must be known (the claim is
 	// already fail-closed via UnmarshalClaim above). Defense-in-depth at the DB read boundary.
 	if !j.Capability.Valid() || !j.State.Valid() || !j.SubjectKind.Valid() {
@@ -241,10 +229,6 @@ func (r *JudgmentRepository) SaveWithProposalAudit(ctx context.Context, j judgme
 	if err != nil {
 		return fmt.Errorf("marshal judgment claim: %w", err)
 	}
-	suppressionProofJSON, err := judgment.MarshalReachabilitySuppressionProof(j.SuppressionProof)
-	if err != nil {
-		return fmt.Errorf("marshal judgment suppression provenance: %w", err)
-	}
 	metadata, err := json.Marshal(entry.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal proposal audit metadata: %w", err)
@@ -258,7 +242,7 @@ func (r *JudgmentRepository) SaveWithProposalAudit(ctx context.Context, j judgme
 		if !belongs {
 			return fmt.Errorf("%w: engagement %s does not belong to tenant %s", shared.ErrNotFound, j.EngagementID, tenantID)
 		}
-		result, err := tx.Exec(ctx, `INSERT INTO judgments (id, tenant_id, engagement_id, capability, subject_kind, subject_id, claim, state, evidence_score, proposed_by, verified_by, verdict_rationale, suppression_provenance, version, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (id) DO NOTHING`, j.ID.String(), tenantID.String(), j.EngagementID.String(), string(j.Capability), string(j.SubjectKind), j.SubjectID.String(), claimJSON, string(j.State), j.EvidenceScore, j.ProposedBy, j.VerifiedBy, j.VerdictRationale, suppressionProofJSON, versionOrDefault(j.Version), j.Audit.CreatedAt, j.Audit.UpdatedAt)
+		result, err := tx.Exec(ctx, `INSERT INTO judgments (id, tenant_id, engagement_id, capability, subject_kind, subject_id, claim, state, evidence_score, proposed_by, verified_by, verdict_rationale, version, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT (id) DO NOTHING`, j.ID.String(), tenantID.String(), j.EngagementID.String(), string(j.Capability), string(j.SubjectKind), j.SubjectID.String(), claimJSON, string(j.State), j.EvidenceScore, j.ProposedBy, j.VerifiedBy, j.VerdictRationale, versionOrDefault(j.Version), j.Audit.CreatedAt, j.Audit.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("save judgment: %w", err)
 		}
@@ -273,17 +257,13 @@ func (r *JudgmentRepository) SaveWithProposalAudit(ctx context.Context, j judgme
 }
 
 // SetVerdictStateWithAudit commits the verdict and immutable pending audit entry atomically.
-func (r *JudgmentRepository) SetVerdictStateWithAudit(ctx context.Context, engagementID, id shared.ID, score int, state judgment.State, verifiedBy, rationale string, suppressionProof *judgment.ReachabilitySuppressionProof, expectedVersion int, entry ports.AuditEntry) (out judgment.Judgment, err error) {
-	suppressionProofJSON, err := judgment.MarshalReachabilitySuppressionProof(suppressionProof)
-	if err != nil {
-		return out, fmt.Errorf("marshal judgment suppression provenance: %w", err)
-	}
+func (r *JudgmentRepository) SetVerdictStateWithAudit(ctx context.Context, engagementID, id shared.ID, score int, state judgment.State, verifiedBy, rationale string, expectedVersion int, entry ports.AuditEntry) (out judgment.Judgment, err error) {
 	metadata, err := json.Marshal(entry.Metadata)
 	if err != nil {
 		return out, fmt.Errorf("marshal verdict audit metadata: %w", err)
 	}
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
-		out, err = scanJudgment(tx.QueryRow(ctx, `UPDATE judgments SET evidence_score=$1, state=$2, verified_by=$3, verdict_rationale=$4, suppression_provenance=COALESCE($5::jsonb, suppression_provenance), version=version+1, updated_at=now() WHERE id=$6 AND engagement_id=$7 AND version=$8 RETURNING `+judgmentCols, score, string(state), verifiedBy, rationale, suppressionProofJSON, id.String(), engagementID.String(), expectedVersion))
+		out, err = scanJudgment(tx.QueryRow(ctx, `UPDATE judgments SET evidence_score=$1, state=$2, verified_by=$3, verdict_rationale=$4, version=version+1, updated_at=now() WHERE id=$5 AND engagement_id=$6 AND version=$7 RETURNING `+judgmentCols, score, string(state), verifiedBy, rationale, id.String(), engagementID.String(), expectedVersion))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return classifyJudgmentMiss(ctx, tx, engagementID, id)
 		}

@@ -273,9 +273,7 @@ func (s *Service) reachableFindings(ctx context.Context, engagementID shared.ID)
 	if err != nil {
 		return nil, err
 	}
-	// VEX has no independently resolved current suppression authority; central
-	// disposition still preserves positive reachability for reconciliation.
-	return judgment.SuppressionResistantDispositionIDs(judgment.WinningReachabilityDispositions(js, nil)), nil
+	return judgment.SuppressionResistantFindingIDs(judgment.WinningReachabilityClaims(js)), nil
 }
 
 // vexTargetStatus maps an OpenVEX status to the finding status it implies.

@@ -50,8 +50,9 @@ func mkJudg(subj string, st judgment.State, score int, r judgment.ReachabilitySt
 	}
 }
 
-// TestOpenVEXJustificationByTier confirms that a technical negative without a
-// live suppression authority context cannot produce an execute-path justification.
+// TestOpenVEXJustificationByTier: a not_affected finding backed by a PUBLISHABLE not_reachable
+// judgment gets a tier-grounded justification; proposed/unpublishable judgments are ignored; the
+// strongest tier wins; an affected finding is never overridden.
 func TestOpenVEXJustificationByTier(t *testing.T) {
 	repo := memory.NewFindingRepository()
 	ctx := context.Background()
@@ -77,8 +78,8 @@ func TestOpenVEXJustificationByTier(t *testing.T) {
 	for _, s := range vex.Statements {
 		by[s.Vulnerability.Name] = s
 	}
-	if s := by["CVE-2019-14234"]; s.Status != "not_affected" || s.Justification != "vulnerable_code_not_present" {
-		t.Errorf("f2 = %+v, want the status-derived justification without suppression authority", s)
+	if s := by["CVE-2019-14234"]; s.Status != "not_affected" || s.Justification != "vulnerable_code_not_in_execute_path" {
+		t.Errorf("f2 = %+v, want not_affected + execute-path (strongest publishable tier wins, proposed ignored)", s)
 	}
 	if s := by["CVE-2020-7471"]; s.Status != "affected" || s.Justification != "" {
 		t.Errorf("f1 affected must not get a not_affected justification: %+v", s)
@@ -166,8 +167,9 @@ func mkVexJudg(subj string, st judgment.State, score int, just vex.OpenVexJustif
 	}
 }
 
-// TestOpenVEXJustificationFromVexJudgment confirms a validated VEX justification
-// is used when reachability has no current suppression authority.
+// TestOpenVEXJustificationFromVexJudgment: a not_affected finding with no reachability proof but a
+// CONFIRMED CapVexJustification judgment gets that human-ratified justification; a reachability tier
+// (a proof) still WINS over it; a proposed (unpublishable) vex judgment is ignored (falls back to default).
 func TestOpenVEXJustificationFromVexJudgment(t *testing.T) {
 	repo := memory.NewFindingRepository()
 	ctx := context.Background()
@@ -180,10 +182,10 @@ func TestOpenVEXJustificationFromVexJudgment(t *testing.T) {
 	}
 	svc := NewService(repo, fixedClock{}, "v1")
 	svc.SetJudgments(&fakeJudgments{js: []judgment.Judgment{
-		mkVexJudg("fa", judgment.StateConfirmed, 80, vex.InlineMitigationsAlreadyExist),
-		mkJudg("fb", judgment.StateConfirmed, 90, judgment.NotReachable, judgment.Tier2),
-		mkVexJudg("fb", judgment.StateConfirmed, 80, vex.ComponentNotPresent),
-		mkVexJudg("fc", judgment.StateProposed, 0, vex.ComponentNotPresent),
+		mkVexJudg("fa", judgment.StateConfirmed, 80, vex.InlineMitigationsAlreadyExist),  // confirmed, no reachability -> used
+		mkJudg("fb", judgment.StateConfirmed, 90, judgment.NotReachable, judgment.Tier2), // reachability tier...
+		mkVexJudg("fb", judgment.StateConfirmed, 80, vex.ComponentNotPresent),            //...WINS over this vex justification
+		mkVexJudg("fc", judgment.StateProposed, 0, vex.ComponentNotPresent),              // proposed -> unpublishable -> ignored
 	}})
 
 	doc, err := svc.OpenVEX(ctx, "e1", "")
@@ -197,8 +199,8 @@ func TestOpenVEXJustificationFromVexJudgment(t *testing.T) {
 	if s := by["CVE-1111"]; s.Status != "not_affected" || s.Justification != "inline_mitigations_already_exist" {
 		t.Errorf("fa = %+v, want the confirmed vex justification", s)
 	}
-	if s := by["CVE-2222"]; s.Justification != "component_not_present" {
-		t.Errorf("fb = %+v, want the VEX justification when reachability lacks authority", s)
+	if s := by["CVE-2222"]; s.Justification != "vulnerable_code_not_in_execute_path" {
+		t.Errorf("fb = %+v, want the reachability tier to WIN over the vex justification", s)
 	}
 	if s := by["CVE-3333"]; s.Justification != "vulnerable_code_not_present" {
 		t.Errorf("fc = %+v, want the vexStatus default (proposed vex judgment ignored)", s)

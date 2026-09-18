@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -916,14 +917,14 @@ func (capture *ProductionCapture) observation(ctx context.Context, request Captu
 	if err != nil {
 		return measurement.MeasuredObservation{}, fmt.Errorf("list captured judgments: %w", err)
 	}
-	winner, disposition, ok, err := winningCaptureJudgment(judgments, shared.ID(request.Cell.SubjectID))
+	winner, claim, ok, err := winningCaptureJudgment(judgments, shared.ID(request.Cell.SubjectID))
 	if err != nil {
 		return measurement.MeasuredObservation{}, err
 	}
 	if !ok {
 		return observation, nil
 	}
-	switch disposition.State {
+	switch claim.Reachable {
 	case judgment.Reachable:
 		if executed.analyzer != nil && analysisHasUnknownPath(executed.analyzer.result) {
 			observation.Outcome = measurement.OutcomeConditionallyReachable
@@ -936,9 +937,13 @@ func (capture *ProductionCapture) observation(ctx context.Context, request Captu
 	default:
 		observation.Outcome = measurement.OutcomeNoAnalysis
 	}
-	if disposition.State == judgment.Reachable {
+	if claim.Reachable == judgment.Reachable {
 		observation.Positive = &measurement.PositiveEvidence{Snapshot: request.Snapshot, Evidence: judgmentReference(winner)}
 	}
+	// Capturing a claim is not the same as observing a downstream suppression
+	// effect. This production-capture seam does not execute VEX export, SLA,
+	// promotion, or attack-path consumers, so it must not fabricate an effect
+	// from analyzer-local claim state.
 	return observation, nil
 }
 
@@ -964,17 +969,39 @@ func judgmentReference(item judgment.Judgment) measurement.ArtifactReference {
 	return measurement.ArtifactReference{ID: item.ID.String(), Digest: benchmark.SHA256Digest(encoded)}
 }
 
-func winningCaptureJudgment(items []judgment.Judgment, subjectID shared.ID) (judgment.Judgment, judgment.ReachabilityDisposition, bool, error) {
-	disposition, exists := judgment.WinningReachabilityDispositions(items, nil)[subjectID.String()]
+func winningCaptureJudgment(items []judgment.Judgment, subjectID shared.ID) (judgment.Judgment, judgment.ReachabilityClaim, bool, error) {
+	claims := judgment.WinningReachabilityClaims(items)
+	claim, exists := claims[subjectID.String()]
 	if !exists {
-		return judgment.Judgment{}, judgment.ReachabilityDisposition{}, false, nil
+		return judgment.Judgment{}, judgment.ReachabilityClaim{}, false, nil
 	}
+	var winner judgment.Judgment
+	found := false
 	for _, item := range items {
-		if item.ID == disposition.JudgmentID && item.Publishable() && item.Capability == judgment.CapReachability && item.SubjectKind == judgment.SubjectFinding && item.SubjectID == subjectID {
-			return item, disposition, true, nil
+		if !item.Publishable() || item.Capability != judgment.CapReachability || item.SubjectKind != judgment.SubjectFinding || item.SubjectID != subjectID {
+			continue
+		}
+		candidate, ok := item.Claim.(judgment.ReachabilityClaim)
+		if !ok {
+			continue
+		}
+		if !found || candidate.Supersedes(claimFromJudgment(winner)) {
+			winner, found = item, true
 		}
 	}
-	return judgment.Judgment{}, judgment.ReachabilityDisposition{}, false, errors.New("reachability disposition has no persisted judgment")
+	if !found {
+		return judgment.Judgment{}, judgment.ReachabilityClaim{}, false, errors.New("reachability winner has no persisted judgment")
+	}
+	persisted := claimFromJudgment(winner)
+	if !reflect.DeepEqual(persisted, claim) {
+		return judgment.Judgment{}, judgment.ReachabilityClaim{}, false, errors.New("reachability claim winner disagrees with persisted judgment winner")
+	}
+	return winner, claim, true, nil
+}
+
+func claimFromJudgment(item judgment.Judgment) judgment.ReachabilityClaim {
+	claim, _ := item.Claim.(judgment.ReachabilityClaim)
+	return claim
 }
 
 func (capture *ProductionCapture) rawEvidence(request CaptureRequest, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, executed execution, observation measurement.MeasuredObservation) ([]byte, error) {

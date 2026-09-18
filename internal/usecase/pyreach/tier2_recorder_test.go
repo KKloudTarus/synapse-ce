@@ -72,8 +72,8 @@ func TestTier2RecorderMintsSemanticClaimsAndFiltersIncompleteNegative(t *testing
 				exporter.SetJudgments(store)
 				document, err := exporter.OpenVEX(context.Background(), "eng", "")
 				if err != nil || len(document.Statements) != 1 || document.Statements[0].Status != "not_affected" ||
-					document.Statements[0].Justification != "vulnerable_code_not_present" {
-					t.Fatalf("Tier-2 OpenVEX without current authority = %+v err=%v", document, err)
+					document.Statements[0].Justification != "vulnerable_code_not_in_execute_path" {
+					t.Fatalf("Tier-2 OpenVEX = %+v err=%v", document, err)
 				}
 			}
 		})
