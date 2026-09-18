@@ -156,15 +156,15 @@
               "dotnet",
               "restore",
               "./fixtures/dotnet/build_aware_import/Reachbench.Import.csproj",
-              "--runtime",
-              "linux-x64",
               "--configfile",
               "./fixtures/dotnet/build_aware_import/NuGet.Config",
               "--source",
               "./generated/dotnet-import/local-nupkgs",
               "--packages",
               "./generated/dotnet-import/package-cache",
-              "--ignore-failed-sources"
+              "--ignore-failed-sources",
+              "-p:SelfContained=false",
+              "-p:UseAppHost=false"
             ]
           },
           {
@@ -175,10 +175,8 @@
               "--no-restore",
               "--configuration",
               "Release",
-              "--runtime",
-              "linux-x64",
-              "--self-contained",
-              "false",
+              "-p:SelfContained=false",
+              "-p:UseAppHost=false",
               "--output",
               "./generated/dotnet-import/app"
             ]
@@ -210,9 +208,9 @@
           "size": 445
         },
         {
-          "digest": "sha256:2b5aebb268eb5cdbda39708be9386104dc9a751e0cd81575fad6c518835ad356",
+          "digest": "sha256:f92caf5d1e4c0763bdf12532e103a16c4773933b683cc74331bfd3060299fa41",
           "path": "fixtures/dotnet/build_aware_import/Reachbench.Import.csproj",
-          "size": 593
+          "size": 668
         },
         {
           "digest": "sha256:7922ebae9dd4f57bd7e38bb073682a75acb1ec7d4fd01f04048501dff3a57347",
@@ -305,7 +303,7 @@
           "id": "pkg:nuget/Reachbench.Unsupported@1.0.0",
           "locator": {
             "kind": "manifest_capability",
-            "line": 12,
+            "line": 15,
             "module_path": "fixtures/dotnet/build_aware_import/Reachbench.Import.csproj",
             "symbol": "Reachbench.Unsupported"
           },
@@ -347,13 +345,13 @@
               "dotnet",
               "restore",
               "./fixtures/dotnet/symbols_tier2/Reachbench.Symbols.csproj",
-              "--runtime",
-              "linux-x64",
               "--configfile",
               "./fixtures/dotnet/symbols_tier2/NuGet.Config",
               "--packages",
               "./generated/dotnet-symbols/package-cache",
-              "--ignore-failed-sources"
+              "--ignore-failed-sources",
+              "-p:SelfContained=false",
+              "-p:UseAppHost=false"
             ]
           },
           {
@@ -364,10 +362,8 @@
               "--no-restore",
               "--configuration",
               "Release",
-              "--runtime",
-              "linux-x64",
-              "--self-contained",
-              "false",
+              "-p:SelfContained=false",
+              "-p:UseAppHost=false",
               "--output",
               "./generated/dotnet-symbols"
             ]

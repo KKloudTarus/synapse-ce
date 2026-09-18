@@ -417,7 +417,7 @@ func TestGeneratedBuildRecipesUseWorkspaceRoot(t *testing.T) {
 	}
 }
 
-func TestDotNetPublishWithoutRestoreUsesMatchingRuntimeRestore(t *testing.T) {
+func TestDotNetPortablePublishUsesMatchingRestore(t *testing.T) {
 	contract := DefaultReachabilityBenchmark()
 	for _, test := range []struct {
 		fixtureID   string
@@ -435,16 +435,32 @@ func TestDotNetPublishWithoutRestoreUsesMatchingRuntimeRestore(t *testing.T) {
 			restore := fixture.Build.Steps[test.restoreStep].Argv
 			publish := fixture.Build.Steps[test.publishStep].Argv
 			if len(restore) < 3 || len(publish) < 3 || restore[0] != "dotnet" || restore[1] != "restore" || publish[0] != "dotnet" || publish[1] != "publish" || restore[2] != publish[2] {
-				t.Fatalf("runtime restore/publish project mismatch: restore=%q publish=%q", restore, publish)
+				t.Fatalf("portable restore/publish project mismatch: restore=%q publish=%q", restore, publish)
 			}
-			if !hasAdjacentArguments(restore, "--runtime", "linux-x64") {
-				t.Fatalf("runtime-specific publish restore argv = %q, want --runtime linux-x64", restore)
+			for _, argv := range [][]string{restore, publish} {
+				if hasArgument(argv, "--runtime") || hasArgument(argv, "-r") {
+					t.Fatalf("portable .NET fixture declares a runtime identifier: %q", argv)
+				}
+				for _, property := range []string{"-p:SelfContained=false", "-p:UseAppHost=false"} {
+					if !hasArgument(argv, property) {
+						t.Fatalf("portable .NET fixture argv %q omits %q", argv, property)
+					}
+				}
 			}
-			if !hasAdjacentArguments(publish, "--runtime", "linux-x64") || !hasAdjacentArguments(publish, "--no-restore", "--configuration") {
-				t.Fatalf("runtime-specific no-restore publish argv = %q", publish)
+			if !hasAdjacentArguments(publish, "--no-restore", "--configuration") {
+				t.Fatalf("portable publish does not consume its matching restore: %q", publish)
 			}
 		})
 	}
+}
+
+func hasArgument(argv []string, target string) bool {
+	for _, argument := range argv {
+		if argument == target {
+			return true
+		}
+	}
+	return false
 }
 
 func hasAdjacentArguments(argv []string, first, second string) bool {
@@ -477,6 +493,9 @@ func TestDotNetBuildAwareFixtureUsesLocalPackages(t *testing.T) {
 	}
 	if strings.Contains(app, "ProjectReference") {
 		t.Fatal("app project retains ProjectReference semantics")
+	}
+	if !strings.Contains(app, `<Compile Remove="dependencies/**/*.cs" />`) {
+		t.Fatal("app project compiles package fixture sources as first-party code")
 	}
 	for _, project := range []string{"Reachbench.Direct", "Reachbench.Dynamic", "Reachbench.Unused", "Reachbench.Unsupported"} {
 		path := "fixtures/dotnet/build_aware_import/dependencies/" + project + "/" + project + ".csproj"
@@ -766,11 +785,11 @@ func TestReachabilityBenchmarkLoadersAreStrictDeterministicAndPinned(t *testing.
 		got  string
 		want string
 	}{
-		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:f4e39dcc1a1c22942098da4d4b72c185be4a10613280ab38e7393f6a7e008ceb"},
+		{"corpus", DigestContractCorpusMust(t, first.Corpus), "sha256:4e6d4489084c668b9495794c0e900f352615d678061f7cf74a1556b7663b800c"},
 		{"oracle", DigestReachabilityOracleMust(t, first.Oracle), "sha256:0299297cb1bacbdab7156536d2de3b21992e1f3c085ab109f95162f4eef6dfe6"},
 		{"challenges", DigestChallengeManifestMust(t, first.Challenges), "sha256:a967a0b5423e79961f28121cc5dfe71e1464850d1e2af0ca9fa74cebfc7db0aa"},
-		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:75f41299e88b41463e407f6e8fe56d135a6cf3c00cdc7f47cc8c85172f07a1e4"},
-		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:fcf68618f3cbe678100a858db5a0496287005f6354c95f3679f78694c17d4e13"},
+		{"fixtures", DigestFixtureManifestMust(t, first.Fixtures), "sha256:cc002a992b96db404380dd592f041347159bba830518d6de5c71e1e6a845fb04"},
+		{"benchmark", DigestReachabilityBenchmarkMust(t, first), "sha256:b313d6afe5094c23881f81450cd952f7bcec5e562268266de44ec9a17dc6579e"},
 	} {
 		if item.got != item.want {
 			t.Errorf("%s digest = %s, want %s", item.name, item.got, item.want)
