@@ -1,11 +1,14 @@
 {
-  "schema": "synapse-scan-perf-v1",
+  "schema": "synapse-scan-perf-v2",
   "target": "ParseCycloneDXComponents over a pinned CycloneDX 1.5 SBOM (1500 components)",
+  "release_digest": "(devel)",
+  "dataset_digest": "sha256:35aa5b0281d3c95c9dee7106d2dc9823e1dc386308e2611575593727e881e2b3",
   "environment_digest": "env:c00294cee1639545",
   "go_version": "go1.27.0",
+  "warmup_samples": 3,
   "samples": 20,
-  "components": 1500,
   "alloc_bytes_median": 1310760,
-  "latency_p50_millis": 6,
-  "latency_p95_millis": 10
+  "peak_memory_bytes": 5054464,
+  "latency_p50_millis": 7,
+  "latency_p95_millis": 8
 }
