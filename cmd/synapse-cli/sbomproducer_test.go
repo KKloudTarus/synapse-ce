@@ -6,12 +6,14 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
 )
 
-// The CLI honors SYNAPSE_SBOM_PRODUCER like the server: syft by default, Synapse's own ownsbom parsers
-// when asked, and a hard error on an unknown value (fail closed, never a silent default). ownsbom is
-// pure-Go so this needs no third-party binary.
+// The CLI honors SYNAPSE_SBOM_PRODUCER like the server: the owned ownsbom parsers by default (an empty
+// value resolves to ownsbom, matching config.Load), the pinned syft binary when asked, and a hard error
+// on an unknown value (fail closed, never a silent default). ownsbom is pure-Go so the default needs no
+// third-party binary.
 func TestSelectSBOMGenerator(t *testing.T) {
-	for _, p := range []string{"", "syft"} {
-		g, err := selectSBOMGenerator(config.Config{SBOMProducer: p, SyftBin: "syft"})
+	// Empty and "ownsbom" both select the owned default producer.
+	for _, p := range []string{"", "ownsbom"} {
+		g, err := selectSBOMGenerator(config.Config{SBOMProducer: p})
 		if err != nil {
 			t.Fatalf("producer %q: unexpected error %v", p, err)
 		}
@@ -20,12 +22,13 @@ func TestSelectSBOMGenerator(t *testing.T) {
 		}
 	}
 
-	g, err := selectSBOMGenerator(config.Config{SBOMProducer: "ownsbom"})
+	// syft is the opt-in cross-check.
+	g, err := selectSBOMGenerator(config.Config{SBOMProducer: "syft", SyftBin: "syft"})
 	if err != nil {
-		t.Fatalf("ownsbom: unexpected error %v", err)
+		t.Fatalf("syft: unexpected error %v", err)
 	}
 	if g == nil {
-		t.Fatal("ownsbom: nil generator")
+		t.Fatal("syft: nil generator")
 	}
 
 	if _, err := selectSBOMGenerator(config.Config{SBOMProducer: "bogus"}); err == nil {

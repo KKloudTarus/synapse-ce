@@ -15,6 +15,42 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
+// TestResolveSBOMProducerKind pins the single producer-kind decision every composition root shares (EPIC
+// #1034, #1037): an empty value resolves to the owned default (so the server primary, the CLI primary, and
+// the SBOM cross-check secondary can never disagree on what "" means), "ownsbom"/"syft" are explicit, and an
+// unknown value is a hard error rather than a silent default.
+func TestResolveSBOMProducerKind(t *testing.T) {
+	for _, tc := range []struct {
+		producer string
+		want     SBOMProducerKind
+		wantErr  bool
+	}{
+		{"", SBOMProducerOwned, false}, // empty resolves to the owned default (matching config.Load)
+		{"ownsbom", SBOMProducerOwned, false},
+		{"syft", SBOMProducerSyft, false},
+		{"bogus", 0, true},
+	} {
+		got, err := ResolveSBOMProducerKind(config.Config{SBOMProducer: tc.producer})
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("producer %q: expected an error, got kind %v", tc.producer, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("producer %q: got (%v, %v), want (%v, nil)", tc.producer, got, err, tc.want)
+		}
+	}
+	// The cross-check secondary must be the OTHER producer, so an owned primary never self-diffs against
+	// ownsbom. This is the decision cmd/synapse-api's SBOM cross-check keys off.
+	if k, _ := ResolveSBOMProducerKind(config.Config{SBOMProducer: ""}); k != SBOMProducerOwned {
+		t.Fatalf("empty producer must resolve to owned so the cross-check secondary is syft, got %v", k)
+	}
+	if SBOMProducerOwned.String() != "ownsbom" || SBOMProducerSyft.String() != "syft" {
+		t.Errorf("String() mismatch: owned=%q syft=%q", SBOMProducerOwned, SBOMProducerSyft)
+	}
+}
+
 // fakeTaintProposer satisfies TaintProposer (and thus the taintscan coordinator's proposer) without the
 // analysis service, so the attach decision can be tested in isolation.
 type fakeTaintProposer struct{}
@@ -121,17 +157,19 @@ func TestResolveDetectionSourceNames(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "legacy default: online with owned advisory on",
+			// Grype stays in the default detection set as a distro safety net (the owned-vs-grype recall parity
+			// is gated only for the debian-12/sles-15 oracle images today; dropping grype is a follow-up).
+			name: "default: online with owned advisory on",
 			cfg:  config.Config{DetectionSources: "", Offline: false, OwnedAdvisoryEnabled: true},
 			want: []string{"osv", "grype", "advisory-store"},
 		},
 		{
-			name: "legacy default: offline drops live osv",
+			name: "default: offline drops live osv",
 			cfg:  config.Config{DetectionSources: "", Offline: true, OwnedAdvisoryEnabled: true},
 			want: []string{"grype", "advisory-store"},
 		},
 		{
-			name: "legacy default: owned advisory off",
+			name: "default: owned advisory off",
 			cfg:  config.Config{DetectionSources: "", Offline: false, OwnedAdvisoryEnabled: false},
 			want: []string{"osv", "grype"},
 		},

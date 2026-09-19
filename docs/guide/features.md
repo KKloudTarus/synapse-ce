@@ -5,10 +5,12 @@
 ## Software composition analysis
 
 **SBOM generation.** Synapse produces a software bill of materials with owned per-ecosystem lockfile
-parsers and a pluggable producer, so detection is not tied to a single vendor. Current coverage: Go,
-npm, Yarn, pnpm, PyPI, Poetry, Pipfile, uv, Cargo, Maven, Gradle, RubyGems, Composer, NuGet, Swift,
-Dart, Hex/Elixir, Conda, R (renv), Julia, and Conan. It can also ingest a client-supplied CycloneDX
-SBOM as the scan inventory.
+parsers and a pluggable producer, so detection is not tied to a single vendor. The owned producer
+(`ownsbom`) is the shipped default, emitting dependency-graph edges and requiring no third-party
+scanner binary; Syft is retained as an opt-in cross-check (`SYNAPSE_SBOM_PRODUCER=syft`). Current
+coverage: Go, npm, Yarn, pnpm, PyPI, Poetry, Pipfile, uv, Cargo, Maven, Gradle, RubyGems, Composer,
+NuGet, Swift, Dart, Hex/Elixir, Conda, R (renv), Julia, and Conan. It can also ingest a
+client-supplied CycloneDX SBOM as the scan inventory.
 
 **Multi-source detection.** Components are matched against a live advisory API and an offline
 database. Results are cross-correlated and de-duplicated, and each finding records the scanner
