@@ -16,11 +16,11 @@ package taint
 // name floor or is missed (a documented precision gap, never a false suppression, since taint only proposes).
 //
 // This models the classes whose floor is specific enough to defend (Command, PathTraversal, SQL, SSRF,
-// Deserialization, Code), plus LDAP (CWE-90) and XPath (CWE-643), whose receiver-name floors (search/
-// evaluate/compile) are too generic alone and so are IMPORT-GATED via JavaCallablePattern.RequiresImport:
-// they fire only in a file that imports the anchoring API (javax.naming, javax.xml.xpath). Broader,
-// FP-sensitive classes (XSS via response writers, XXE, SSTI, log injection) remain deferred rather than
-// shipped as over-broad floors.
+// Deserialization, Code), plus LDAP (CWE-90), XPath (CWE-643), and reflected XSS (CWE-79), whose receiver-name
+// floors (search/evaluate/compile, println/print/write) are too generic alone and so are IMPORT-GATED via
+// JavaCallablePattern.RequiresImport: they fire only in a file that imports the anchoring API (javax.naming,
+// javax.xml.xpath, javax.servlet/jakarta.servlet). Broader, FP-sensitive classes (XXE, SSTI, log injection)
+// remain deferred rather than shipped as over-broad floors.
 
 // javaMod builds an import-anchored pattern: a callee whose base resolves (via import or FQ path) to one of
 // modules and whose accessed member is one of names.
@@ -134,6 +134,18 @@ func DefaultJavaCatalog() JavaCatalog {
 			// separately verified), so the real injection is still caught at compile/evaluate of the expression.
 			javaSink(JavaCallablePattern{RawSuffixes: []string{"evaluate", "compile"}, RequiresImport: []string{"javax.xml.xpath"}},
 				TaintXPath, "CWE-643", "java-taint-xpath-expression", 0),
+
+			// Reflected XSS (CWE-79). Servlet response writers (PrintWriter.println/print/write and
+			// ServletOutputStream) echo untrusted input into the HTTP response. The method names are generic
+			// (System.out.println logs, StringWriter.write buffers), so like LDAP/XPath the sink is IMPORT-GATED:
+			// it fires only in a file that imports the servlet API (javax.servlet or jakarta.servlet), where a
+			// .println/.print/.write of tainted data is a response write. The written value is arg 0. A servlet
+			// file that also logs via System.out is a propose-only false match (separately verified), and no XSS
+			// output-encoding sanitizer is modeled because a value-based wall cannot tell the HTML-body context a
+			// writer emits from a JS/attribute context, so treating one encoder as clearing the generic writer
+			// sink would hide a context-mismatched XSS.
+			javaSink(JavaCallablePattern{RawSuffixes: []string{"println", "print", "write"}, RequiresImport: []string{"javax.servlet", "jakarta.servlet"}},
+				TaintXSS, "CWE-79", "java-taint-xss-writer", 0),
 		},
 		// A sanitizer is only modeled when it has SOUND, class-specific, single-call semantics AND an import
 		// anchor: an over-matching sanitizer SUPPRESSES a real flow (a false negative, worse than a propose-only
@@ -165,8 +177,10 @@ func DefaultJavaCatalog() JavaCatalog {
 //     by a no-arg ps.execute()). A PreparedStatement built from a CONSTANT string still matches
 //     executeQuery/prepareStatement here (source-only cannot tell a parameterized query from a concatenated
 //     one), so downstream verification separates the true positive; findings are propose-only.
-//   - XSS through a response writer (println/print/write) is deferred: the method-name floor would collide
-//     with System.out logging and produce a flood of false positives without receiver typing.
+//   - XSS through a response writer (println/print/write) is now MODELED, but only under the RequiresImport
+//     gate (javax.servlet/jakarta.servlet): outside a servlet file the same method names are logging/buffering,
+//     so the servlet import is the type proxy that separates a response write from System.out. No output
+//     encoder is modeled as an XSS sanitizer (the writer's output context is unknown at a value-based wall).
 //   - LDAP (DirContext.search) and XPath (XPath.evaluate/compile) are now MODELED, but only under the
 //     RequiresImport gate (javax.naming, javax.xml.xpath): the bare method-name floor is too generic, so the
 //     file's import of the anchoring API is required as a defensible type proxy. Findings stay propose-only.
