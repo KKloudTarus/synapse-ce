@@ -1,6 +1,7 @@
 package taint
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/javaprogram"
@@ -102,6 +103,12 @@ func TestJavaTaintPositivePerClass(t *testing.T) {
 		{"path-paths-get", []string{"Paths", "get"}, false,
 			[]javaprogram.Import{{ScopeID: jModID(), Kind: javaprogram.ImportSingle, Module: "java.nio.file.Paths", Name: "Paths", Pos: jPos()}},
 			"java-taint-path-paths-get"},
+		{"xpath-evaluate", []string{"xp", "evaluate"}, false,
+			[]javaprogram.Import{{ScopeID: jModID(), Kind: javaprogram.ImportSingle, Module: "javax.xml.xpath.XPath", Name: "XPath", Pos: jPos()}},
+			"java-taint-xpath-expression"},
+		{"xpath-compile", []string{"xp", "compile"}, false,
+			[]javaprogram.Import{{ScopeID: jModID(), Kind: javaprogram.ImportOnDemand, Module: "javax.xml.xpath", Name: "", Pos: jPos()}},
+			"java-taint-xpath-expression"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -173,5 +180,171 @@ func TestJavaNoFalsePositive(t *testing.T) {
 		Arguments: []javaprogram.Argument{{Value: javaprogram.Reference{Kind: javaprogram.ReferenceName, Segments: []string{"q"}}, ValueID: "v-arg", Pos: p}}, Pos: p}}
 	if got := javaRules(t, javaSkeleton(nil, values, flows, calls, nil)); len(got) != 0 {
 		t.Errorf("a constant query must not flag; got %v", got)
+	}
+}
+
+// javaTaintSinkDoc models `<sink>(a0, a1, ...)` where the request source, optionally routed through a
+// single-call sanitizer, reaches argument taintArg; the other arguments are constants. It is the rig for the
+// LDAP filter battery (taintArg 1) and the class-specific check (a command sink at taintArg 0).
+func javaTaintSinkDoc(sinkCallee []string, sinkArgCount, taintArg int, sanCallee []string, imports []javaprogram.Import) javaprogram.Document {
+	p := jPos()
+	ref := func(name string) javaprogram.Reference {
+		return javaprogram.Reference{Kind: javaprogram.ReferenceName, Segments: []string{name}}
+	}
+	values := []javaprogram.Value{
+		{ID: "v-src", ScopeID: jHandID(), Kind: javaprogram.ValueCallResult, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceExpression}, Pos: p},
+	}
+	flows := []javaprogram.ValueFlow{}
+	calls := []javaprogram.Call{
+		{ID: "c-src", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"request", "getParameter"}}, ResultID: "v-src", Pos: p},
+	}
+	taintFrom := "v-src"
+	if len(sanCallee) > 0 {
+		values = append(values,
+			javaprogram.Value{ID: "v-sanarg", ScopeID: jHandID(), Kind: javaprogram.ValueReference, Ref: ref("t"), Pos: p},
+			javaprogram.Value{ID: "v-san", ScopeID: jHandID(), Kind: javaprogram.ValueCallResult, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceExpression}, Pos: p},
+		)
+		flows = append(flows, javaprogram.ValueFlow{FromID: "v-src", ToID: "v-sanarg", Kind: javaprogram.FlowAssignment, Pos: p})
+		sanKind := javaprogram.ReferenceAttribute
+		if len(sanCallee) == 1 {
+			sanKind = javaprogram.ReferenceName
+		}
+		calls = append(calls, javaprogram.Call{ID: "c-san", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: sanKind, Segments: sanCallee}, ResultID: "v-san",
+			Arguments: []javaprogram.Argument{{Value: ref("t"), ValueID: "v-sanarg", Pos: p}}, Pos: p})
+		taintFrom = "v-san"
+	}
+	var args []javaprogram.Argument
+	for i := 0; i < sinkArgCount; i++ {
+		if i == taintArg {
+			values = append(values, javaprogram.Value{ID: "v-arg", ScopeID: jHandID(), Kind: javaprogram.ValueReference, Ref: ref("a"), Pos: p})
+			flows = append(flows, javaprogram.ValueFlow{FromID: taintFrom, ToID: "v-arg", Kind: javaprogram.FlowAssignment, Pos: p})
+			args = append(args, javaprogram.Argument{Value: ref("a"), ValueID: "v-arg", Pos: p})
+			continue
+		}
+		id := "v-const" + strconv.Itoa(i)
+		values = append(values, javaprogram.Value{ID: id, ScopeID: jHandID(), Kind: javaprogram.ValueLiteral, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceLiteral}, Pos: p})
+		args = append(args, javaprogram.Argument{Value: javaprogram.Reference{Kind: javaprogram.ReferenceLiteral}, ValueID: id, Pos: p})
+	}
+	sinkKind := javaprogram.ReferenceAttribute
+	if len(sinkCallee) == 1 {
+		sinkKind = javaprogram.ReferenceName
+	}
+	calls = append(calls, javaprogram.Call{ID: "c-sink", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: sinkKind, Segments: sinkCallee}, Arguments: args, Pos: p})
+	return javaSkeleton(nil, values, flows, calls, imports)
+}
+
+func namingImport(kind javaprogram.ImportKind, module, name string) []javaprogram.Import {
+	return []javaprogram.Import{{ScopeID: jModID(), Kind: kind, Module: module, Name: name, Pos: jPos()}}
+}
+
+// TestJavaImportGatedSinksRequireAnchoringImport: LDAP .search (filter arg 1) / XPath .evaluate are
+// receiver-name floors gated on the anchoring API's import. Without that import the method name is too
+// generic to be a sink and must NOT flag; with it (single or on-demand wildcard) it must.
+func TestJavaImportGatedSinksRequireAnchoringImport(t *testing.T) {
+	cases := []struct {
+		name    string
+		sink    []string
+		argN    int
+		taint   int
+		imports []javaprogram.Import
+		rule    string
+		want    bool
+	}{
+		{"ldap-with-import", []string{"ctx", "search"}, 2, 1, namingImport(javaprogram.ImportSingle, "javax.naming.directory.DirContext", "DirContext"), "java-taint-ldap-search", true},
+		{"ldap-with-wildcard-import", []string{"ctx", "search"}, 2, 1, namingImport(javaprogram.ImportOnDemand, "javax.naming.directory", ""), "java-taint-ldap-search", true},
+		{"ldap-no-import", []string{"ctx", "search"}, 2, 1, nil, "java-taint-ldap-search", false},
+		{"ldap-unrelated-import", []string{"ctx", "search"}, 2, 1, namingImport(javaprogram.ImportSingle, "java.util.List", "List"), "java-taint-ldap-search", false},
+		{"xpath-with-wildcard-import", []string{"xp", "evaluate"}, 1, 0, namingImport(javaprogram.ImportOnDemand, "javax.xml.xpath", ""), "java-taint-xpath-expression", true},
+		{"xpath-no-import", []string{"xp", "evaluate"}, 1, 0, nil, "java-taint-xpath-expression", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := javaRules(t, javaTaintSinkDoc(tc.sink, tc.argN, tc.taint, nil, tc.imports))
+			if got[tc.rule] != tc.want {
+				t.Errorf("%s: rule %q present=%v, want %v (got %v)", tc.name, tc.rule, got[tc.rule], tc.want, got)
+			}
+		})
+	}
+}
+
+// TestJavaLdapEncoderSanitizer exercises the one modeled Java sanitizer (OWASP Encode.forLdap) on the LDAP
+// filter argument across positive, wrong-context, class-specific, bypass, import-absent, and partial cases.
+// It is import-anchored and clears ONLY CWE-90 on the value it returns.
+func TestJavaLdapEncoderSanitizer(t *testing.T) {
+	encAndNaming := []javaprogram.Import{
+		{ScopeID: jModID(), Kind: javaprogram.ImportSingle, Module: "org.owasp.encoder.Encode", Name: "Encode", Pos: jPos()},
+		{ScopeID: jModID(), Kind: javaprogram.ImportSingle, Module: "javax.naming.directory.DirContext", Name: "DirContext", Pos: jPos()},
+	}
+	namingOnly := []javaprogram.Import{{ScopeID: jModID(), Kind: javaprogram.ImportSingle, Module: "javax.naming.directory.DirContext", Name: "DirContext", Pos: jPos()}}
+	cases := []struct {
+		name    string
+		san     []string
+		sink    []string
+		argN    int
+		taint   int
+		imports []javaprogram.Import
+		rule    string
+		want    bool
+	}{
+		// positive: the filter is escaped by its exact escaper, so the search is not an LDAP finding.
+		{"forLdap-sanitizes-filter", []string{"Encode", "forLdap"}, []string{"ctx", "search"}, 2, 1, encAndNaming, "java-taint-ldap-search", false},
+		// wrong context: forDn escapes DN, not filter, metacharacters, so it is not a filter sanitizer and the
+		// filter injection still flags. This is exactly the conflation the model refuses to make.
+		{"forDn-does-not-sanitize-filter", []string{"Encode", "forDn"}, []string{"ctx", "search"}, 2, 1, encAndNaming, "java-taint-ldap-search", true},
+		// class-specific: forLdap does NOT sanitize command injection, so a command sink still flags.
+		{"forLdap-does-not-sanitize-command", []string{"Encode", "forLdap"}, []string{"rt", "exec"}, 1, 0, encAndNaming, "java-taint-command-exec", true},
+		// bypass: forHtml is the wrong encoder and is not modeled as a sanitizer, so the flow still flags.
+		{"forHtml-does-not-sanitize-filter", []string{"Encode", "forHtml"}, []string{"ctx", "search"}, 2, 1, encAndNaming, "java-taint-ldap-search", true},
+		// import-absent: without the org.owasp.encoder.Encode import, forLdap does not resolve to the modeled
+		// escaper (a same-named local method never counts), so the flow stays flagged.
+		{"forLdap-unanchored-does-not-sanitize", []string{"Encode", "forLdap"}, []string{"ctx", "search"}, 2, 1, namingOnly, "java-taint-ldap-search", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := javaRules(t, javaTaintSinkDoc(tc.sink, tc.argN, tc.taint, tc.san, tc.imports))
+			if got[tc.rule] != tc.want {
+				t.Errorf("%s: rule %q present=%v, want %v (got %v)", tc.name, tc.rule, got[tc.rule], tc.want, got)
+			}
+		})
+	}
+}
+
+// TestJavaLdapFilterPartialSanitizationFlags: a filter built from an escaped part AND a raw part is still
+// injectable through the raw part, so it must flag. The filter value is fed by both the Encode.forLdap result
+// and the raw source (a concatenation), and the raw path reaches the sink.
+func TestJavaLdapFilterPartialSanitizationFlags(t *testing.T) {
+	p := jPos()
+	ref := func(name string) javaprogram.Reference {
+		return javaprogram.Reference{Kind: javaprogram.ReferenceName, Segments: []string{name}}
+	}
+	values := []javaprogram.Value{
+		{ID: "v-src", ScopeID: jHandID(), Kind: javaprogram.ValueCallResult, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceExpression}, Pos: p},
+		{ID: "v-sanarg", ScopeID: jHandID(), Kind: javaprogram.ValueReference, Ref: ref("t"), Pos: p},
+		{ID: "v-san", ScopeID: jHandID(), Kind: javaprogram.ValueCallResult, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceExpression}, Pos: p},
+		{ID: "v-filter", ScopeID: jHandID(), Kind: javaprogram.ValueReference, Ref: ref("filter"), Pos: p},
+		{ID: "v-base", ScopeID: jHandID(), Kind: javaprogram.ValueLiteral, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceLiteral}, Pos: p},
+	}
+	flows := []javaprogram.ValueFlow{
+		{FromID: "v-src", ToID: "v-sanarg", Kind: javaprogram.FlowAssignment, Pos: p},
+		{FromID: "v-san", ToID: "v-filter", Kind: javaprogram.FlowExpression, Pos: p}, // escaped part
+		{FromID: "v-src", ToID: "v-filter", Kind: javaprogram.FlowExpression, Pos: p}, // raw part (concatenation)
+	}
+	calls := []javaprogram.Call{
+		{ID: "c-src", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"request", "getParameter"}}, ResultID: "v-src", Pos: p},
+		{ID: "c-san", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"Encode", "forLdap"}}, ResultID: "v-san",
+			Arguments: []javaprogram.Argument{{Value: ref("t"), ValueID: "v-sanarg", Pos: p}}, Pos: p},
+		{ID: "c-sink", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"ctx", "search"}},
+			Arguments: []javaprogram.Argument{
+				{Value: ref("base"), ValueID: "v-base", Pos: p},
+				{Value: ref("filter"), ValueID: "v-filter", Pos: p},
+			}, Pos: p},
+	}
+	imports := []javaprogram.Import{
+		{ScopeID: jModID(), Kind: javaprogram.ImportSingle, Module: "org.owasp.encoder.Encode", Name: "Encode", Pos: p},
+		{ScopeID: jModID(), Kind: javaprogram.ImportSingle, Module: "javax.naming.directory.DirContext", Name: "DirContext", Pos: p},
+	}
+	got := javaRules(t, javaSkeleton(nil, values, flows, calls, imports))
+	if !got["java-taint-ldap-search"] {
+		t.Errorf("a filter with a raw (unescaped) part must still flag as LDAP injection; got %v", got)
 	}
 }
