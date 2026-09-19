@@ -1,0 +1,46 @@
+{
+  "schema": "synapse-dimension-contracts-v1",
+  "note": "Versioned truth contracts for the #1040 A5 benchmark dimensions (secrets, IaC/misconfiguration, DAST, CSPM, runtime host-CVE). Each records its own positive/unit semantics, corpus provenance, committed recall/precision floors, and its Unknown/NotAssessed posture. Per the EPIC's no-false-suppression guardrail, no dimension converts an unknown or unassessable input into a clean/compliant result. SAST (per-CWE) and reachability carry their own contracts in the #1039 and reachability lanes.",
+  "dimensions": {
+    "secrets": {
+      "positive": "a planted non-live credential in a provider-recognized format",
+      "unit": "finding",
+      "unknown_semantics": "Closed corpus: planted secrets plus false-positive traps, no NotAssessed state. A high-entropy value without a provider format is a trap the scanner must NOT flag, not an Unknown; abstaining on it is correct, flagging it is a precision miss.",
+      "provenance": "internal/infrastructure/tools/secretscan/gitleaks_differential_test.go buildSecretsCorpus; credentials assembled at runtime in each provider's exact format so no complete secret literal is committed.",
+      "recall_floor": 1.0,
+      "precision_floor": 0.85
+    },
+    "iac-misconfig": {
+      "positive": "a misconfigured resource for a category the owned engine covers",
+      "unit": "resource",
+      "unknown_semantics": "Closed corpus of per-category bad/good fixture pairs, scored on the category's own owned rule. A resource type outside the owned ruleset produces no finding and is never reported as compliant; the benchmark does not label such types, so a missing rule reads as 'not assessed', not 'secure'.",
+      "provenance": "internal/infrastructure/tools/misconfig/checkov_differential_test.go iacCorpus; each category names the owned rule id and the checkov check id that represent it, so the head-to-head is like-for-like.",
+      "recall_floor": 1.0,
+      "precision_floor": 1.0
+    },
+    "dast": {
+      "positive": "a vulnerable observation a passive check must flag",
+      "unit": "observation",
+      "unknown_semantics": "Passive evaluation over synthetic observations, no target contacted. A check abstains (emits no finding) when an observation lacks the data it needs; abstention is never rendered as a 'secure' verdict. Corpus is a closed set of vulnerable and negative observations.",
+      "provenance": "internal/infrastructure/dastchecks/dast_bench_test.go; deterministic expected observations, authorization-safe by construction (no external request).",
+      "recall_floor": 1.0,
+      "precision_floor": 1.0
+    },
+    "cspm": {
+      "positive": "a posture violation on an assessable resource",
+      "unit": "resource",
+      "unknown_semantics": "Explicit NotAssessed: an inaccessible or unknown-state resource is reported NotAssessed and never counted as compliant (TestCSPMNotAssessedIsNotCompliant). Evaluation is a pure function over a fixture Inventory and cannot mutate any cloud resource.",
+      "provenance": "internal/domain/cloudposture/cspm_bench_test.go; the corpus includes an unknown-state case with a paired proof that it is not treated as compliant.",
+      "recall_floor": 1.0,
+      "precision_floor": 1.0
+    },
+    "host-cve": {
+      "positive": "a truly-affected installed package/advisory pair",
+      "unit": "correlation",
+      "unknown_semantics": "An unsupported distro yields no correlation and is reported as unsupported, never as 'no CVEs found'. Coverage spans package identity, advisory version range, aliases, and the unsupported-distro case.",
+      "provenance": "internal/domain/advisory/hostcve_bench_test.go; labeled host/package state with expected advisory correlation, including alias and unsupported-distro cases.",
+      "recall_floor": 1.0,
+      "precision_floor": 1.0
+    }
+  }
+}
