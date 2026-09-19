@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/businessassetuc"
 )
@@ -202,13 +204,45 @@ func (rt *Router) assignEngagementBusinessAsset(w http.ResponseWriter, r *http.R
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+const (
+	clientCapabilitiesHeader       = "X-Synapse-Client-Capabilities"
+	externalFindingKindCapability  = "external-finding-kind-v1"
+)
+
+func hasClientCapability(r *http.Request, capability string) bool {
+	for _, header := range r.Header.Values(clientCapabilitiesHeader) {
+		for _, token := range strings.Split(header, ",") {
+			if strings.TrimSpace(token) == capability {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func findingRowsForClient(rows []businessassetuc.AggregatedFinding, externalKind bool) []businessassetuc.AggregatedFinding {
+	if externalKind {
+		return rows
+	}
+	// Preserve the pre-#1182 wire contract for clients that have not opted into the
+	// new enum. Only the origin enum is hidden; provenance/governance fields remain.
+	out := append([]businessassetuc.AggregatedFinding(nil), rows...)
+	for i := range out {
+		if out[i].Finding.Kind == finding.KindExternal {
+			out[i].Finding.Kind = ""
+		}
+	}
+	return out
+}
+
 func (rt *Router) getBusinessAssetFindings(w http.ResponseWriter, r *http.Request) {
 	rows, err := rt.businessAssets.Findings(r.Context(), requestTenant(r), shared.ID(r.PathValue("assetID")))
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, rows)
+	w.Header().Add("Vary", clientCapabilitiesHeader)
+	writeJSON(w, http.StatusOK, findingRowsForClient(rows, hasClientCapability(r, externalFindingKindCapability)))
 }
 func (rt *Router) getBusinessAssetCoverage(w http.ResponseWriter, r *http.Request) {
 	row, err := rt.businessAssets.Coverage(r.Context(), requestTenant(r), shared.ID(r.PathValue("assetID")))

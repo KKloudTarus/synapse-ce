@@ -251,7 +251,7 @@ func TestOpenAPI_StrictValidation(t *testing.T) {
 	})
 }
 
-func TestAttackPathOpenAPIContract(t *testing.T) {
+func TestFindingAndAttackPathOpenAPIContract(t *testing.T) {
 	b, err := os.ReadFile("openapi.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -286,9 +286,25 @@ func TestAttackPathOpenAPIContract(t *testing.T) {
 	}
 
 	assertEnum("AttackPathAsset", "Kind", []string{"host", "workload", "image", "cloud_account", "storage", "exposure", "identity", "namespace", "cluster", "repository"})
-	assertEnum("Finding", "Kind", []string{"sca", "recon", "exploitation", "manual", "sast", "secret", "misconfig", "cloud_posture", "dast", "threat", "hypothesis", "quality", "reliability"})
+	assertEnum("Finding", "Kind", []string{"", "sca", "recon", "exploitation", "manual", "sast", "secret", "misconfig", "cloud_posture", "dast", "threat", "hypothesis", "quality", "reliability", "external"})
 	assertEnum("AttackPathFindingInput", "reachability", []string{"", "reachable", "not_reachable", "unknown"})
 	assertEnum("AttackPathFindingInput", "tier", []string{"", "tier-0", "tier-1", "tier-1.5", "tier-2"})
+
+	paths := doc["paths"].(map[string]any)
+	assetFindings := paths["/api/v1/appsec/assets/{assetID}/findings"].(map[string]any)["get"].(map[string]any)
+	params, _ := assetFindings["parameters"].([]any)
+	capabilityDocumented := false
+	for _, raw := range params {
+		param, ok := raw.(map[string]any)
+		if !ok || param["name"] != "X-Synapse-Client-Capabilities" || param["in"] != "header" {
+			continue
+		}
+		description, _ := param["description"].(string)
+		capabilityDocumented = strings.Contains(description, "external-finding-kind-v1")
+	}
+	if !capabilityDocumented {
+		t.Error("business-asset findings must document the external finding client capability")
+	}
 
 	bounds := schemas["AttackPathBounds"].(map[string]any)
 	properties := bounds["properties"].(map[string]any)

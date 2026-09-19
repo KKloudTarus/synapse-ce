@@ -13,6 +13,30 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
+func TestFindingRepositoryRejectsReaderOnlyAndUnknownKindsBeforeDatabase(t *testing.T) {
+	// Upsert validates the complete batch before touching the pool. Bind a tenant so any
+	// accidental fall-through past the origin guard reaches the nil pool and fails loudly.
+	repo := NewFindingRepository(nil)
+	ctx := shared.WithTenant(context.Background(), "default")
+	for _, tc := range []struct {
+		name string
+		kind finding.Kind
+		want error
+	}{
+		{name: "external", kind: finding.KindExternal, want: finding.ErrKindReaderOnly},
+		{name: "unknown", kind: finding.Kind("future-origin"), want: finding.ErrKindInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := repo.Upsert(ctx, []finding.Finding{{
+				ID: shared.ID("reader-" + tc.name), EngagementID: "e-reader", Kind: tc.kind, DedupKey: "reader:" + tc.name,
+			}})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Upsert error=%v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestFindingRepository(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {

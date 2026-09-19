@@ -118,6 +118,35 @@ func TestFindingRepositoryDeepCopiesDataFlow(t *testing.T) {
 	}
 }
 
+func TestFindingRepositoryRejectsReaderOnlyAndUnknownKinds(t *testing.T) {
+	repo := NewFindingRepository()
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		kind finding.Kind
+		want error
+	}{
+		{name: "external", kind: finding.KindExternal, want: finding.ErrKindReaderOnly},
+		{name: "unknown", kind: finding.Kind("future-origin"), want: finding.ErrKindInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := repo.Upsert(ctx, []finding.Finding{{
+				ID: shared.ID("reader-" + tc.name), EngagementID: "e-reader", Kind: tc.kind, DedupKey: "reader:" + tc.name,
+			}})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Upsert error=%v, want %v", err, tc.want)
+			}
+		})
+	}
+	rows, err := repo.ListByEngagement(ctx, "e-reader")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("reader-only/unknown findings reached memory storage: %+v", rows)
+	}
+}
+
 func TestFindingRepositoryRuleKey(t *testing.T) {
 	r := NewFindingRepository()
 	ctx := context.Background()

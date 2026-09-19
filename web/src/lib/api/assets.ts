@@ -86,7 +86,9 @@ export const assetsApi = {
     ((await req(`/appsec/assets/${encodeURIComponent(id)}/engagements`)) ?? []).map(mapEngagement),
 
   businessAssetFindings: async (id: string): Promise<AssetFinding[]> =>
-    ((await req(`/appsec/assets/${encodeURIComponent(id)}/findings`)) ?? []).map((r: any) => ({
+    ((await req(`/appsec/assets/${encodeURIComponent(id)}/findings`, {
+      headers: { 'X-Synapse-Client-Capabilities': 'external-finding-kind-v1' },
+    })) ?? []).map((r: any) => ({
       finding: mapFinding(r.finding),
       external: r.external ?? false,
       canSelfPromote: r.can_self_promote,

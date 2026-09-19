@@ -73,6 +73,21 @@ func TestNewGraphValidatesAndGroupsEvidence(t *testing.T) {
 	}
 }
 
+func TestReaderOnlyOrUnknownFindingCannotClaimCanonicalAttackPathAuthority(t *testing.T) {
+	for _, kind := range []finding.Kind{finding.KindExternal, finding.Kind("future-origin")} {
+		_, err := NewGraph(Input{
+			TenantID: tenant,
+			Findings: []FindingInput{{
+				Target:  FindingTarget{ID: "candidate", Kind: TargetCanonical},
+				Finding: finding.Finding{ID: "candidate", Kind: kind},
+			}},
+		})
+		if !errors.Is(err, shared.ErrValidation) {
+			t.Fatalf("kind %q canonical target error=%v, want validation", kind, err)
+		}
+	}
+}
+
 func TestDerivedEvidenceRetainsProducerAndChangesPathID(t *testing.T) {
 	input := Input{
 		TenantID: tenant,
