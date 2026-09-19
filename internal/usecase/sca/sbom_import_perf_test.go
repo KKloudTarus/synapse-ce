@@ -1,35 +1,32 @@
 package sca
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"os"
-	"runtime"
-	"sort"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchperf"
 )
 
 // sbom_import_perf_test.go is the owned SBOM-INGEST performance gate (#1040 A6, the "pinned SBOM" target
 // class). It measures repeated parsing of a pinned client-supplied CycloneDX SBOM into the owned component
-// model and ratchets on BYTES ALLOCATED per parse. Allocation is deterministic for a given Go toolchain and
-// input, so unlike wall-clock latency it gives a stable cross-machine regression signal; the 30% tolerance
-// absorbs the small differences a different Go minor version can introduce while catching a real regression.
-// Wall-clock latency is recorded and compared only within the same environment digest. The baseline lives at
-// docs/benchmarks/cyclonedx-import-perf.json, mirroring the secret-scan and ownsbom-producer perf gates.
+// model and ratchets on BYTES ALLOCATED per parse via the shared benchperf contract. Allocation is
+// deterministic for a given Go toolchain and input, so unlike wall-clock latency it gives a stable
+// cross-machine regression signal; the 30% tolerance absorbs the small differences a different Go minor version
+// can introduce. Wall-clock latency is recorded and compared only within the same environment digest. The
+// baseline lives at docs/benchmarks/cyclonedx-import-perf.json. (This gate is in the usecase layer; it imports
+// the infrastructure benchperf package only from a _test.go file, which the architecture test does not police.)
 
 const (
 	cdxImportPerfSamples      = 20
 	cdxImportPerfWarmup       = 3
 	cdxImportPerfAllocTolFrac = 0.30
 	// cdxImportPerfComponents sizes the pinned SBOM; a fixed count keeps the parsed component set stable.
-	cdxImportPerfComponents = 1500
+	cdxImportPerfComponents   = 1500
+	cdxImportPerfBaselinePath = "../../../docs/benchmarks/cyclonedx-import-perf.json"
 )
 
-// writeCDXWorkload returns a pinned CycloneDX 1.5 SBOM with a fixed number of components, each carrying a
+// buildCDXWorkload returns a pinned CycloneDX 1.5 SBOM with a fixed number of components, each carrying a
 // name/version/purl (so it resolves to an owned component). The content is fully deterministic.
 func buildCDXWorkload() []byte {
 	var b strings.Builder
@@ -50,6 +47,7 @@ func TestSBOMImportPerfGate(t *testing.T) {
 		t.Skip("perf gate skipped in -short")
 	}
 	data := buildCDXWorkload()
+	datasetDigest := benchperf.DatasetDigest("cyclonedx.json", string(data))
 	parse := func() int {
 		comps, err := ParseCycloneDXComponents(data)
 		if err != nil {
@@ -58,132 +56,34 @@ func TestSBOMImportPerfGate(t *testing.T) {
 		return len(comps)
 	}
 
-	var components int
-	for i := 0; i < cdxImportPerfWarmup; i++ {
-		components = parse()
-	}
-	if components != cdxImportPerfComponents {
+	if components := parse(); components != cdxImportPerfComponents {
 		t.Fatalf("workload parsed %d components, want %d (fixture drift would make the perf ratchet meaningless)", components, cdxImportPerfComponents)
 	}
 
-	latencies := make([]time.Duration, 0, cdxImportPerfSamples)
-	allocBytes := make([]uint64, 0, cdxImportPerfSamples)
-	for i := 0; i < cdxImportPerfSamples; i++ {
-		var before, after runtime.MemStats
-		runtime.GC()
-		runtime.ReadMemStats(&before)
-		start := time.Now()
-		parse()
-		latencies = append(latencies, time.Since(start))
-		runtime.ReadMemStats(&after)
-		allocBytes = append(allocBytes, after.TotalAlloc-before.TotalAlloc)
+	res := benchperf.Measure(cdxImportPerfWarmup, cdxImportPerfSamples, func() { parse() })
+	env := benchperf.EnvironmentDigest()
+	t.Logf("cyclonedx-import perf: env=%s components=%d samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s",
+		env, cdxImportPerfComponents, cdxImportPerfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest)
+
+	base, found, err := benchperf.Load(cdxImportPerfBaselinePath, cdxImportPerfSamples)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	medAlloc := cdxImportMedianU64(allocBytes)
-	p50 := cdxImportPercentileDur(latencies, 50)
-	p95 := cdxImportPercentileDur(latencies, 95)
-	env := cdxImportPerfEnvironmentDigest()
-	t.Logf("cyclonedx-import perf: env=%s components=%d samples=%d alloc_bytes(median)=%d latency_p50=%s latency_p95=%s",
-		env, components, cdxImportPerfSamples, medAlloc, p50, p95)
-
-	base, ok := loadCDXImportPerfBaseline(t)
-	if !ok {
+	if !found {
 		t.Fatalf("no committed baseline at %s: the performance ratchet is disabled (commit the measured baseline)", cdxImportPerfBaselinePath)
 	}
-	if base.AllocBytes == 0 {
-		t.Fatalf("malformed baseline %s: alloc_bytes_median is zero", cdxImportPerfBaselinePath)
+	if datasetDigest != base.DatasetDigest {
+		t.Fatalf("fixture drift: workload digest %s != committed %s (the measured workload changed)", datasetDigest, base.DatasetDigest)
 	}
-	ceil := cdxImportAllocCeiling(base.AllocBytes, cdxImportPerfAllocTolFrac)
-	if medAlloc > ceil {
+	ceil := benchperf.AllocCeiling(base.AllocBytes, cdxImportPerfAllocTolFrac)
+	if res.MedianAllocBytes > ceil {
 		t.Errorf("cyclonedx-import allocations regressed: median %d bytes exceeds baseline %d + %.0f%% = %d",
-			medAlloc, base.AllocBytes, cdxImportPerfAllocTolFrac*100, ceil)
+			res.MedianAllocBytes, base.AllocBytes, cdxImportPerfAllocTolFrac*100, ceil)
 	}
 	if base.EnvironmentDigest == env {
 		t.Logf("latency vs same-environment baseline: p50 %s (baseline %dms), p95 %s (baseline %dms)",
-			p50, base.LatencyP50Millis, p95, base.LatencyP95Millis)
+			res.LatencyP50, base.LatencyP50Millis, res.LatencyP95, base.LatencyP95Millis)
 	} else {
 		t.Logf("latency not gated: current environment %s differs from baseline %s", env, base.EnvironmentDigest)
-	}
-}
-
-type cdxImportPerfBaseline struct {
-	Schema            string `json:"schema"`
-	Target            string `json:"target"`
-	EnvironmentDigest string `json:"environment_digest"`
-	GoVersion         string `json:"go_version"`
-	Samples           int    `json:"samples"`
-	Components        int    `json:"components"`
-	AllocBytes        uint64 `json:"alloc_bytes_median"`
-	LatencyP50Millis  int64  `json:"latency_p50_millis"`
-	LatencyP95Millis  int64  `json:"latency_p95_millis"`
-}
-
-const cdxImportPerfBaselinePath = "../../../docs/benchmarks/cyclonedx-import-perf.json"
-
-func loadCDXImportPerfBaseline(t *testing.T) (cdxImportPerfBaseline, bool) {
-	t.Helper()
-	data, err := os.ReadFile(cdxImportPerfBaselinePath)
-	if err != nil {
-		return cdxImportPerfBaseline{}, false
-	}
-	var b cdxImportPerfBaseline
-	if err := json.Unmarshal(data, &b); err != nil {
-		t.Fatalf("decode perf baseline %s: %v", cdxImportPerfBaselinePath, err)
-	}
-	return b, true
-}
-
-func cdxImportPerfEnvironmentDigest() string {
-	seed := fmt.Sprintf("%s|%s|%s|%d", runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
-	sum := sha256.Sum256([]byte(seed))
-	return "env:" + hex.EncodeToString(sum[:8])
-}
-
-// cdxImportAllocCeiling is the ratchet's upper bound: baseline allocation plus the tolerance fraction.
-func cdxImportAllocCeiling(baseline uint64, tolFrac float64) uint64 {
-	return uint64(float64(baseline) * (1 + tolFrac))
-}
-
-// TestCDXImportAllocRatchetFires proves the allocation gate catches a regression and passes at/under the
-// ceiling without a live parse, so the gate's decision cannot silently rot.
-func TestCDXImportAllocRatchetFires(t *testing.T) {
-	const base = 3_000_000
-	ceil := cdxImportAllocCeiling(base, 0.30) // 3,900,000
-	cases := []struct {
-		name    string
-		median  uint64
-		regress bool
-	}{
-		{"well under", 2_700_000, false},
-		{"at ceiling", ceil, false},
-		{"just over ceiling", ceil + 1, true},
-		{"gross regression", 6_000_000, true},
-	}
-	for _, c := range cases {
-		if got := c.median > ceil; got != c.regress {
-			t.Errorf("%s: median %d vs ceiling %d, regressed=%v want %v", c.name, c.median, ceil, got, c.regress)
-		}
-	}
-}
-
-func cdxImportMedianU64(xs []uint64) uint64 {
-	s := append([]uint64(nil), xs...)
-	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
-	return s[len(s)/2]
-}
-
-func cdxImportPercentileDur(xs []time.Duration, p int) time.Duration {
-	s := append([]time.Duration(nil), xs...)
-	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
-	idx := (p * len(s)) / 100
-	if idx >= len(s) {
-		idx = len(s) - 1
-	}
-	return s[idx]
-}
-
-func TestCDXImportMedianU64(t *testing.T) {
-	if got := cdxImportMedianU64([]uint64{5, 1, 3, 2, 4}); got != 3 {
-		t.Errorf("median = %d, want 3", got)
 	}
 }

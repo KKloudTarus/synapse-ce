@@ -3,33 +3,35 @@ package acquire
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"testing"
-	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchperf"
 )
 
 // imagerootfs_perf_test.go is the owned image-extraction performance gate (#1040 A6). It measures repeated
-// extractions of a pinned, in-repo OCI layout fixture and ratchets on BYTES ALLOCATED per extraction.
-// extractOCIRootFS reads a LOCAL OCI layout (no network, no registry), so the workload is fully deterministic:
-// the same layers, in the same order, with the same whiteouts and overwrites, produce the same assembled tree
-// every run. Allocation is deterministic for a given Go toolchain and input (it does not depend on CPU count
-// or clock speed), so it gives a stable cross-machine regression signal; the 30% tolerance absorbs the small
-// differences a Go minor version can introduce while catching a real regression (a leak, or an added copy in
-// the layer-application path that inflates allocations). Wall-clock latency IS CPU-dependent, so it is only
-// recorded and compared to the baseline within the same environment. The baseline lives at
-// docs/benchmarks/image-extract-perf.json and the ratchet consumes it directly.
+// extractions of a pinned, in-repo OCI layout fixture and ratchets on BYTES ALLOCATED per extraction (via the
+// shared benchperf contract). extractOCIRootFS reads a LOCAL OCI layout (no network, no registry), so the
+// workload is fully deterministic: the same layers, in the same order, with the same whiteouts and overwrites,
+// produce the same assembled tree every run. Allocation is deterministic for a given Go toolchain and input, so
+// it gives a stable cross-machine regression signal; the 30% tolerance absorbs the small differences a Go minor
+// version can introduce while catching a real regression. Wall-clock latency is CPU-dependent, so it is only
+// recorded and compared within the same environment. A committed dataset digest (a content hash of the squashed
+// tree) is asserted every run, so a regression can never be masked by the fixture silently drifting.
 
 const (
 	imgPerfSamples      = 20
 	imgPerfWarmup       = 3
 	imgPerfAllocTolFrac = 0.30 // allow 30% growth in allocated bytes before the ratchet trips
+)
+
+const (
+	imgPerfBaselinePath      = "../../../docs/benchmarks/image-extract-perf.json"
+	imgPerfLargeBaselinePath = "../../../docs/benchmarks/image-extract-large-perf.json"
 )
 
 // buildImageExtractWorkload assembles a pinned multi-layer OCI layout fixture into layoutDir and returns the
@@ -112,6 +114,42 @@ func countRegularFiles(t *testing.T, root string) int {
 	return n
 }
 
+// digestExtractedTree hashes the squashed rootfs into a stable content digest: the sorted (relative-path,
+// content-hash) of every regular file. It is the strongest fixture-drift guard, catching a changed file's
+// bytes, a moved path, or an added/removed file, not only a changed count.
+func digestExtractedTree(t *testing.T, root string) string {
+	t.Helper()
+	type entry struct{ rel, hash string }
+	var entries []entry
+	if err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		content, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return rerr
+		}
+		rel, rerr := filepath.Rel(root, p)
+		if rerr != nil {
+			return rerr
+		}
+		sum := sha256.Sum256(content)
+		entries = append(entries, entry{filepath.ToSlash(rel), fmt.Sprintf("%x", sum)})
+		return nil
+	}); err != nil {
+		t.Fatalf("digest tree %s: %v", root, err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].rel < entries[j].rel })
+	parts := make([]string, 0, len(entries)*2)
+	for _, e := range entries {
+		parts = append(parts, e.rel, e.hash)
+	}
+	return benchperf.DatasetDigest(parts...)
+}
+
 func TestImageExtractPerfGate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("perf gate skipped in -short")
@@ -119,25 +157,19 @@ func TestImageExtractPerfGate(t *testing.T) {
 	layout := t.TempDir()
 	expected := buildImageExtractWorkload(t, layout)
 
-	extractOnce := func() string {
-		dest := filepath.Join(t.TempDir(), "rootfs")
-		if _, err := extractOCIRootFS(context.Background(), layout, dest, MaxWorkspaceBytes); err != nil {
-			t.Fatalf("extract: %v", err)
-		}
-		return dest
-	}
-
 	// Correctness pre-check: the fixture must assemble to exactly the squashed tree the gate measures, so a
-	// perf regression is never masked by the fixture drifting to a smaller/larger workload. This also proves
-	// the overwrite and whiteout paths ran.
-	dest := extractOnce()
+	// perf regression is never masked by the fixture drifting. This also proves the overwrite and whiteout ran.
+	dest := filepath.Join(t.TempDir(), "rootfs")
+	if _, err := extractOCIRootFS(context.Background(), layout, dest, MaxWorkspaceBytes); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
 	if got := countRegularFiles(t, dest); got != expected {
 		t.Fatalf("fixture drift: extracted %d regular files, want %d", got, expected)
 	}
 	mustNotExist(t, filepath.Join(dest, "usr/share/doc/f0149.txt"))                      // whiteout applied
 	mustContain(t, filepath.Join(dest, "usr/share/doc/f0000.txt"), docBody("doc-v2", 0)) // layer-1 overwrite won
 
-	measureImageExtractGate(t, "small-image", layout, expected, imgPerfBaselinePath)
+	measureImageExtractGate(t, "small-image", layout, expected, digestExtractedTree(t, dest), imgPerfBaselinePath)
 }
 
 // TestImageExtractLargeImagePerfGate is the large-image target class. It extracts a ~5000-file, 8-layer fixture,
@@ -161,60 +193,44 @@ func TestImageExtractLargeImagePerfGate(t *testing.T) {
 	mustNotExist(t, filepath.Join(dest, "usr/share/doc/d0999.txt"))                      // final-layer whiteout applied
 	mustContain(t, filepath.Join(dest, "usr/share/doc/d0000.txt"), docBody("doc-v2", 0)) // last overlay's overwrite won (correct bytes, not only count)
 
-	measureImageExtractGate(t, "large-image", layout, expected, imgPerfLargeBaselinePath)
+	measureImageExtractGate(t, "large-image", layout, expected, digestExtractedTree(t, dest), imgPerfLargeBaselinePath)
 }
 
-// measureImageExtractGate warms up, samples imgPerfSamples extractions of the layout, and ratchets the median
-// allocated bytes against the committed baseline at baselinePath. It is shared by the small- and large-image
-// gates so both classes measure and ratchet identically.
-func measureImageExtractGate(t *testing.T, label, layout string, expected int, baselinePath string) {
+// measureImageExtractGate warms up, samples imgPerfSamples extractions of the layout, ratchets the median
+// allocated bytes against the committed baseline, and asserts the dataset digest matches. It is shared by the
+// small- and large-image gates so both classes measure and ratchet identically.
+func measureImageExtractGate(t *testing.T, label, layout string, expected int, datasetDigest, baselinePath string) {
 	t.Helper()
-	extractOnce := func() {
+	res := benchperf.Measure(imgPerfWarmup, imgPerfSamples, func() {
 		dest := filepath.Join(t.TempDir(), "rootfs")
 		if _, err := extractOCIRootFS(context.Background(), layout, dest, MaxWorkspaceBytes); err != nil {
 			t.Fatalf("extract: %v", err)
 		}
-	}
-	for i := 0; i < imgPerfWarmup; i++ {
-		extractOnce()
-	}
-	latencies := make([]time.Duration, 0, imgPerfSamples)
-	allocBytes := make([]uint64, 0, imgPerfSamples)
-	for i := 0; i < imgPerfSamples; i++ {
-		var before, after runtime.MemStats
-		runtime.GC()
-		runtime.ReadMemStats(&before)
-		start := time.Now()
-		extractOnce()
-		latencies = append(latencies, time.Since(start))
-		runtime.ReadMemStats(&after)
-		allocBytes = append(allocBytes, after.TotalAlloc-before.TotalAlloc)
-	}
+	})
+	env := benchperf.EnvironmentDigest()
+	t.Logf("image-extract perf [%s]: env=%s samples=%d files=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s",
+		label, env, imgPerfSamples, expected, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest)
 
-	medAlloc := imgMedianU64(allocBytes)
-	p50 := imgPercentileDur(latencies, 50)
-	p95 := imgPercentileDur(latencies, 95)
-	env := imgPerfEnvironmentDigest()
-	t.Logf("image-extract perf [%s]: env=%s samples=%d files=%d alloc_bytes(median)=%d latency_p50=%s latency_p95=%s",
-		label, env, imgPerfSamples, expected, medAlloc, p50, p95)
-
-	base, ok := loadImgPerfBaseline(t, baselinePath)
-	if !ok {
+	base, found, err := benchperf.Load(baselinePath, imgPerfSamples)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
 		// A missing baseline must fail, not silently disable the gate: the committed baseline is what the
 		// ratchet consumes, so its absence is a broken gate, not a pass.
 		t.Fatalf("no committed baseline at %s: the performance ratchet is disabled (commit the measured baseline)", baselinePath)
 	}
-	if base.AllocBytes == 0 {
-		t.Fatalf("malformed baseline %s: alloc_bytes_median is zero", baselinePath)
+	if datasetDigest != base.DatasetDigest {
+		t.Fatalf("fixture drift [%s]: extracted-tree digest %s != committed %s (the measured workload changed)", label, datasetDigest, base.DatasetDigest)
 	}
-	ceil := imgAllocCeiling(base.AllocBytes, imgPerfAllocTolFrac)
-	if medAlloc > ceil {
+	ceil := benchperf.AllocCeiling(base.AllocBytes, imgPerfAllocTolFrac)
+	if res.MedianAllocBytes > ceil {
 		t.Errorf("image-extract [%s] allocations regressed: median %d bytes exceeds baseline %d + %.0f%% = %d",
-			label, medAlloc, base.AllocBytes, imgPerfAllocTolFrac*100, ceil)
+			label, res.MedianAllocBytes, base.AllocBytes, imgPerfAllocTolFrac*100, ceil)
 	}
 	if base.EnvironmentDigest == env {
 		t.Logf("latency vs same-environment baseline: p50 %s (baseline %dms), p95 %s (baseline %dms)",
-			p50, base.LatencyP50Millis, p95, base.LatencyP95Millis)
+			res.LatencyP50, base.LatencyP50Millis, res.LatencyP95, base.LatencyP95Millis)
 	} else {
 		t.Logf("latency not gated: current environment %s differs from baseline %s", env, base.EnvironmentDigest)
 	}
@@ -266,95 +282,4 @@ func buildLargeImageWorkload(t *testing.T, layoutDir string) (expectedFiles int)
 
 	// 3 OS files + 1000 docs + 3600 libs + 400 bins - 10 whiteouts = 4993.
 	return 3 + 1000 + 3600 + 400 - 10
-}
-
-// imgPerfBaseline is the committed reference measurement for image extraction.
-type imgPerfBaseline struct {
-	Schema            string `json:"schema"`
-	Target            string `json:"target"`
-	EnvironmentDigest string `json:"environment_digest"`
-	GoVersion         string `json:"go_version"`
-	Samples           int    `json:"samples"`
-	AllocBytes        uint64 `json:"alloc_bytes_median"`
-	LatencyP50Millis  int64  `json:"latency_p50_millis"`
-	LatencyP95Millis  int64  `json:"latency_p95_millis"`
-}
-
-const (
-	imgPerfBaselinePath      = "../../../docs/benchmarks/image-extract-perf.json"
-	imgPerfLargeBaselinePath = "../../../docs/benchmarks/image-extract-large-perf.json"
-	imgPerfBaselineSchema    = "synapse-scan-perf-v1"
-)
-
-// loadImgPerfBaseline reads the committed baseline at path. It fails closed on a wrong schema or a sample count
-// that does not match this gate's imgPerfSamples: a baseline measured under a different schema or a different
-// sample count is not comparable, so silently ratcheting against it would be a stale, meaningless gate rather
-// than a hard failure. A missing file returns (_, false) so the caller reports the disabled-gate error.
-func loadImgPerfBaseline(t *testing.T, path string) (imgPerfBaseline, bool) {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return imgPerfBaseline{}, false
-	}
-	var b imgPerfBaseline
-	if err := json.Unmarshal(data, &b); err != nil {
-		t.Fatalf("decode perf baseline %s: %v", path, err)
-	}
-	if b.Schema != imgPerfBaselineSchema {
-		t.Fatalf("perf baseline %s has schema %q, want %q (baseline is not comparable)", path, b.Schema, imgPerfBaselineSchema)
-	}
-	if b.Samples != imgPerfSamples {
-		t.Fatalf("perf baseline %s was measured with %d samples, gate uses %d (re-baseline)", path, b.Samples, imgPerfSamples)
-	}
-	return b, true
-}
-
-func imgPerfEnvironmentDigest() string {
-	seed := fmt.Sprintf("%s|%s|%s|%d", runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
-	sum := sha256.Sum256([]byte(seed))
-	return "env:" + hex.EncodeToString(sum[:8])
-}
-
-// imgAllocCeiling is the ratchet's upper bound: the baseline allocation plus the tolerance fraction. Factored
-// out so the gate's decision is unit-tested without running an extraction.
-func imgAllocCeiling(baseline uint64, tolFrac float64) uint64 {
-	return uint64(float64(baseline) * (1 + tolFrac))
-}
-
-// TestImageExtractAllocRatchetFires proves the allocation gate catches a regression and passes at/under the
-// ceiling, independent of a live extraction, so the gate's decision cannot silently rot.
-func TestImageExtractAllocRatchetFires(t *testing.T) {
-	const base = 1_000_000
-	ceil := imgAllocCeiling(base, 0.30) // 1,300,000
-	cases := []struct {
-		name    string
-		median  uint64
-		regress bool
-	}{
-		{"well under", 900_000, false},
-		{"at ceiling", ceil, false}, // strict '>' so exactly at the ceiling passes
-		{"just over ceiling", ceil + 1, true},
-		{"gross regression", 2_000_000, true},
-	}
-	for _, c := range cases {
-		if got := c.median > ceil; got != c.regress {
-			t.Errorf("%s: median %d vs ceiling %d, regressed=%v want %v", c.name, c.median, ceil, got, c.regress)
-		}
-	}
-}
-
-func imgMedianU64(xs []uint64) uint64 {
-	s := append([]uint64(nil), xs...)
-	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
-	return s[len(s)/2]
-}
-
-func imgPercentileDur(xs []time.Duration, p int) time.Duration {
-	s := append([]time.Duration(nil), xs...)
-	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
-	idx := (p * len(s)) / 100
-	if idx >= len(s) {
-		idx = len(s) - 1
-	}
-	return s[idx]
 }

@@ -1,11 +1,14 @@
 {
-  "schema": "synapse-scan-perf-v1",
+  "schema": "synapse-scan-perf-v2",
   "target": "ospkg Cataloger.Catalog over a pinned fixture rootfs (1500-package dpkg status DB)",
+  "release_digest": "(devel)",
+  "dataset_digest": "sha256:9ecdfd0e9b048c81233a0e852668ba271be2cdcb6a99b5682f71c60192dd9238",
   "environment_digest": "env:c00294cee1639545",
   "go_version": "go1.27.0",
+  "warmup_samples": 3,
   "samples": 20,
-  "components": 1500,
-  "alloc_bytes_median": 3714960,
-  "latency_p50_millis": 11,
-  "latency_p95_millis": 15
+  "alloc_bytes_median": 3714992,
+  "peak_memory_bytes": 4087808,
+  "latency_p50_millis": 10,
+  "latency_p95_millis": 13
 }
