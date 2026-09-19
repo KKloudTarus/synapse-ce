@@ -83,6 +83,51 @@ func TestSecuribenchScorecard(t *testing.T) {
 	if len(breaches) > 0 {
 		t.Fatalf("securibench ratchet regression:\n%s", strings.Join(breaches, "\n"))
 	}
+
+	// Optional competitor head-to-head. When SYNAPSE_SEMGREP_SARIF points at a Semgrep SARIF report over the
+	// same corpus (the benchmark workflow generates it), score Semgrep on the identical answer key and log the
+	// per-CWE comparison. Semgrep is COMPARISON DATA, not a gate: the owned ratchet above stands on its own, and
+	// a Semgrep regression or a missing report never fails this test.
+	if sarifPath := strings.TrimSpace(os.Getenv("SYNAPSE_SEMGREP_SARIF")); sarifPath != "" {
+		compareSecuribenchToSemgrep(t, sarifPath, cases, pin, scores)
+	}
+}
+
+// semgrepPin records the Semgrep CE version and ruleset the recorded head-to-head was measured with, so the
+// comparison is reproducible. Semgrep is comparison-only, so these are documentation, not a gate.
+const (
+	semgrepCEVersion = "1.177.0"
+	semgrepCERuleset = "p/java"
+)
+
+// compareSecuribenchToSemgrep scores a Semgrep SARIF report on the same Securibench answer key and logs the
+// owned-vs-Semgrep head-to-head. It never fails the test (competitor data is not truth); it only fails if the
+// SARIF file is set but unreadable, which is an operator error worth surfacing.
+func compareSecuribenchToSemgrep(t *testing.T, sarifPath string, cases []sastbench.LabeledCase, corpusDigest string, owned []sastbench.CWEScore) {
+	t.Helper()
+	f, err := os.Open(sarifPath)
+	if err != nil {
+		t.Fatalf("open SYNAPSE_SEMGREP_SARIF %s: %v", sarifPath, err)
+	}
+	defer func() { _ = f.Close() }()
+	sgFindings, skipped, err := parseSemgrepSARIF(f)
+	if err != nil {
+		t.Fatalf("parse semgrep sarif: %v", err)
+	}
+	sgScores := sastbench.ScoreByCWE(sgFindings, cases, securibenchScoredCWEs, securibenchLineWindow)
+	ownedReport := sastbench.Report{Schema: sastbench.ReportSchemaVersion, Engine: "synapse-owned", CorpusDigest: corpusDigest, CWEs: owned}
+	sgReport := sastbench.Report{
+		Schema: sastbench.ReportSchemaVersion, Engine: "semgrep-ce " + semgrepCEVersion + " " + semgrepCERuleset,
+		CorpusDigest: corpusDigest, CWEs: sgScores,
+	}
+	lines, cerr := sastbench.CompareToBaseline(ownedReport, sgReport)
+	if cerr != nil {
+		t.Fatalf("compare to semgrep baseline: %v", cerr)
+	}
+	t.Logf("securibench head-to-head (owned vs %s, %d semgrep findings unclassifiable):", sgReport.Engine, skipped)
+	for _, line := range lines {
+		t.Logf("  %s", line)
+	}
 }
 
 // runJavaTaintLineAnchored stages every .java file in the corpus flat into one directory (Securibench base
