@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -16,8 +17,9 @@ import (
 )
 
 const (
-	maxPythonFactNodes = 2_000_000
-	maxPythonFacts     = 4_000_000
+	maxPythonFactNodes           = 2_000_000
+	maxPythonFacts               = 4_000_000
+	maxBoundedDispatchCandidates = 128
 )
 
 // PythonFactsFor extracts a bounded, versioned Python semantic-facts document without importing or
@@ -76,7 +78,7 @@ func PythonFactsFor(ctx context.Context, root string) (pythonprogram.Document, e
 		doc.Entrypoints = append(doc.Entrypoints, pythonprogram.EntrypointHint{SymbolID: moduleID, Kind: "module_import", Pos: modulePos})
 		extractor := pythonFactExtractor{
 			doc: &doc, module: module, file: rel, source: content,
-			values: map[string]bool{}, flows: map[string]bool{},
+			values: map[string]bool{}, flows: map[string]bool{}, boundedDispatches: map[string]map[string][]pythonprogram.Reference{},
 		}
 		if rootNode.HasError() {
 			extractor.gap(pythonprogram.GapParseRecovery, moduleID, "parser_recovery", rootNode)
@@ -123,6 +125,10 @@ type pythonFactExtractor struct {
 	budgetHit bool
 	values    map[string]bool
 	flows     map[string]bool
+	// boundedDispatches records only names assigned from a literal dictionary's .get(). A later unknown
+	// assignment poisons the binding rather than discarding it, so the extractor never misses a possible
+	// call target while trying to make unrelated negatives answerable.
+	boundedDispatches map[string]map[string][]pythonprogram.Reference
 }
 
 func (e *pythonFactExtractor) walk(node *sitter.Node, scope pythonScope) {
@@ -288,11 +294,20 @@ func (e *pythonFactExtractor) importFacts(node *sitter.Node, scope pythonScope) 
 }
 
 func (e *pythonFactExtractor) callFact(node *sitter.Node, scope pythonScope) {
+	// A literal mapping's .get() is not itself a callable dispatch. Its finite callable values are carried
+	// on the later invocation of the bound name; emitting this implementation detail as an unknown call would
+	// incorrectly turn that bounded uncertainty into an analysis-wide gap.
+	if _, ok := e.literalMappingGet(node); ok {
+		return
+	}
 	calleeNode := node.ChildByFieldName("function")
 	callee := e.reference(calleeNode)
 	call := pythonprogram.Call{
 		ID: pythonFactID(e.file, node), CallerID: scope.id, Callee: callee, ResultID: e.valueFor(node, scope),
 		Pos: e.position(node), Await: node.Parent() != nil && node.Parent().Type() == "await",
+	}
+	if callee.Kind == pythonprogram.ReferenceName && len(callee.Segments) == 1 {
+		call.BoundedCallees = e.boundedCallees(scope.id, callee.Segments[0])
 	}
 	if calleeNode != nil && calleeNode.Type() == "attribute" {
 		call.ReceiverValueID = e.valueFor(calleeNode.ChildByFieldName("object"), scope)
@@ -363,6 +378,7 @@ func (e *pythonFactExtractor) assignmentFact(node *sitter.Node, scope pythonScop
 	if len(targets) == 0 {
 		return
 	}
+	e.observeBoundedDispatchAssignment(scope.id, targets, right)
 	value := e.reference(right)
 	valueID := e.valueFor(right, scope)
 	if value.Kind == pythonprogram.ReferenceUnknown && valueID == "" {
@@ -378,6 +394,103 @@ func (e *pythonFactExtractor) assignmentFact(node *sitter.Node, scope pythonScop
 	e.doc.Assignments = append(e.doc.Assignments, pythonprogram.Assignment{
 		ScopeID: scope.id, Targets: targets, TargetIDs: targetIDs, Value: value, ValueID: valueID, Pos: e.position(node),
 	})
+}
+
+// observeBoundedDispatchAssignment recognizes only `name = {"key": local_callable}.get(selector)`.
+// The selector may be unknown, but the map is syntactically finite and its callable values are direct local
+// names. Any later assignment with another value deliberately poisons the binding: the normal unresolved-call
+// path will then retain an analysis-wide coverage gap.
+func (e *pythonFactExtractor) observeBoundedDispatchAssignment(scopeID string, targets []pythonprogram.Reference, right *sitter.Node) {
+	candidates, bounded := e.literalMappingGet(right)
+	if e.boundedDispatches[scopeID] == nil {
+		e.boundedDispatches[scopeID] = map[string][]pythonprogram.Reference{}
+	}
+	for _, target := range targets {
+		if target.Kind != pythonprogram.ReferenceName || len(target.Segments) != 1 {
+			continue
+		}
+		name := target.Segments[0]
+		prior, seen := e.boundedDispatches[scopeID][name]
+		if !bounded || seen && len(prior) == 0 {
+			e.boundedDispatches[scopeID][name] = nil
+			continue
+		}
+		e.boundedDispatches[scopeID][name] = mergeBoundedPythonReferences(prior, candidates)
+	}
+}
+
+func (e *pythonFactExtractor) boundedCallees(scopeID, name string) []pythonprogram.Reference {
+	candidates, ok := e.boundedDispatches[scopeID][name]
+	if !ok || len(candidates) == 0 {
+		return nil
+	}
+	return append([]pythonprogram.Reference(nil), candidates...)
+}
+
+// literalMappingGet returns a finite set of direct callable names only when the expression is a strict
+// literal-dictionary `.get()` shape. It intentionally excludes defaults, splats, computed values, and mutable
+// map aliases; those shapes retain the ordinary fail-closed unresolved-call coverage gap.
+func (e *pythonFactExtractor) literalMappingGet(node *sitter.Node) ([]pythonprogram.Reference, bool) {
+	if node == nil || node.Type() != "call" {
+		return nil, false
+	}
+	function := node.ChildByFieldName("function")
+	if function == nil || function.Type() != "attribute" {
+		return nil, false
+	}
+	attribute := function.ChildByFieldName("attribute")
+	object := function.ChildByFieldName("object")
+	if attribute == nil || attribute.Content(e.source) != "get" || object == nil || object.Type() != "dictionary" {
+		return nil, false
+	}
+	arguments := node.ChildByFieldName("arguments")
+	if arguments == nil || arguments.NamedChildCount() != 1 {
+		return nil, false
+	}
+	argument := arguments.NamedChild(0)
+	if argument == nil || argument.Type() == "keyword_argument" || argument.Type() == "list_splat" || argument.Type() == "dictionary_splat" {
+		return nil, false
+	}
+	if object.NamedChildCount() == 0 || object.NamedChildCount() > maxBoundedDispatchCandidates {
+		return nil, false
+	}
+	candidates := make([]pythonprogram.Reference, 0, object.NamedChildCount())
+	seen := map[string]bool{}
+	for index := 0; index < int(object.NamedChildCount()); index++ {
+		pair := object.NamedChild(index)
+		if pair == nil || pair.Type() != "pair" {
+			return nil, false
+		}
+		key := pair.ChildByFieldName("key")
+		value := pair.ChildByFieldName("value")
+		if key == nil || key.Type() != "string" || value == nil {
+			return nil, false
+		}
+		candidate := e.reference(value)
+		if candidate.Kind != pythonprogram.ReferenceName || len(candidate.Segments) != 1 || seen[candidate.Segments[0]] {
+			return nil, false
+		}
+		seen[candidate.Segments[0]] = true
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) == 0 {
+		return nil, false
+	}
+	return mergeBoundedPythonReferences(nil, candidates), true
+}
+
+func mergeBoundedPythonReferences(current, added []pythonprogram.Reference) []pythonprogram.Reference {
+	seen := make(map[string]bool, len(current)+len(added))
+	out := make([]pythonprogram.Reference, 0, len(current)+len(added))
+	for _, candidate := range append(append([]pythonprogram.Reference(nil), current...), added...) {
+		if len(candidate.Segments) != 1 || seen[candidate.Segments[0]] {
+			continue
+		}
+		seen[candidate.Segments[0]] = true
+		out = append(out, candidate)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Segments[0] < out[j].Segments[0] })
+	return out
 }
 
 func (e *pythonFactExtractor) bindingFact(node *sitter.Node, scope pythonScope, leftField, rightField string) {

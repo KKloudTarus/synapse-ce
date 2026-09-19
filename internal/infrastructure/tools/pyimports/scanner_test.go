@@ -74,20 +74,32 @@ from .sub import thing        # relative → ignored
 	}
 }
 
-func TestScanDetectsDynamicImports(t *testing.T) {
-	for name, body := range map[string]string{
-		"__import__":     "mod = __import__('os')\n",
-		"import_module":  "import importlib\nm = importlib.import_module('os')\n",
-		"importlib_dund": "import importlib\nimportlib.__import__('os')\n",
+func TestScanSeparatesResolvedAndUnknownDynamicImports(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		body        string
+		wantModule  string
+		wantUnknown bool
+	}{
+		"literal dunder":           {body: "mod = __import__('os')\n", wantModule: "os"},
+		"literal import module":    {body: "import importlib\nm = importlib.import_module('os')\n", wantModule: "os"},
+		"constant import module":   {body: "from importlib import import_module\nmodule_name = 'requests'\nm = import_module(module_name)\n", wantModule: "requests"},
+		"reassigned target":        {body: "from importlib import import_module\nmodule_name = 'requests'\nif enabled:\n    module_name = 'jinja2'\nm = import_module(module_name)\n", wantUnknown: true},
+		"unknown target":           {body: "from importlib import import_module\nm = import_module(module_name)\n", wantUnknown: true},
+		"unknown importlib method": {body: "import importlib\nimportlib.__import__('os')\n", wantUnknown: true},
 	} {
-		dir := writeTree(t, map[string]string{"m.py": body})
-		g, err := New().ScanImports(context.Background(), dir)
-		if err != nil {
-			t.Fatalf("%s: scan: %v", name, err)
-		}
-		if !g.DynamicImports {
-			t.Errorf("%s: dynamic imports must be detected in %q", name, body)
-		}
+		t.Run(name, func(t *testing.T) {
+			dir := writeTree(t, map[string]string{"m.py": testCase.body})
+			g, err := New().ScanImports(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if g.DynamicImports != testCase.wantUnknown {
+				t.Fatalf("dynamic unknown = %t, want %t for %q", g.DynamicImports, testCase.wantUnknown, testCase.body)
+			}
+			if testCase.wantModule != "" && !has(g.DynamicModules, testCase.wantModule) {
+				t.Fatalf("dynamic modules = %v, want %q", g.DynamicModules, testCase.wantModule)
+			}
+		})
 	}
 }
 
@@ -110,21 +122,22 @@ func TestScanCompoundAndContinuation(t *testing.T) {
 	}
 }
 
-func TestScanDetectsMoreDynamicForms(t *testing.T) {
+func TestScanDetectsUnknownDynamicForms(t *testing.T) {
 	for name, body := range map[string]string{
-		"from-import_module": "from importlib import import_module\nm = import_module('os')\n",
-		"imp_load":           "import imp\nimp.load_module('m', f, p, d)\n",
-		"runpy":              "import runpy\nrunpy.run_module('pkg')\n",
-		"exec":               "exec('import os')\n",
+		"imp load": "import imp\nimp.load_module('m', f, p, d)\n",
+		"runpy":    "import runpy\nrunpy.run_module('pkg')\n",
+		"exec":     "exec('import os')\n",
 	} {
-		dir := writeTree(t, map[string]string{"m.py": body})
-		g, err := New().ScanImports(context.Background(), dir)
-		if err != nil {
-			t.Fatalf("%s: scan: %v", name, err)
-		}
-		if !g.DynamicImports {
-			t.Errorf("%s: dynamic-import mechanism must be detected in %q", name, body)
-		}
+		t.Run(name, func(t *testing.T) {
+			dir := writeTree(t, map[string]string{"m.py": body})
+			g, err := New().ScanImports(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if !g.DynamicImports {
+				t.Fatalf("unknown dynamic-import mechanism must be detected in %q", body)
+			}
+		})
 	}
 }
 

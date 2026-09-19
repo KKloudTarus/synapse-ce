@@ -185,6 +185,98 @@ func (fixture MaterializedFixture) ResolveInput(path string) (string, error) {
 	return resolveDeclaredRegularFile(fixture.Root, materializedPath)
 }
 
+// AnalysisRoot derives the analyzer target from the frozen fixture's material
+// entries. Materialization preserves the contract's nested layout, while each
+// analyzer expects its project or source directory rather than the enclosing
+// private cell workspace. Only declared, verified entries participate; output
+// paths and arbitrary files cannot widen the analysis target.
+func (fixture MaterializedFixture) AnalysisRoot() (string, error) {
+	root, err := benchcycle.RealDirectory(fixture.Root)
+	if err != nil {
+		return "", fmt.Errorf("validate materialized fixture root: %w", err)
+	}
+	// Low-level adapter tests may exercise a manually constructed fixture without
+	// a contract specification. Production materialization always has entries, so
+	// the normal path below remains metadata-derived and fail-closed.
+	if len(fixture.Specification.Entries) == 0 {
+		return root, nil
+	}
+
+	analysisRoot := ""
+	for _, entry := range fixture.Specification.Entries {
+		entryPath, err := fixture.ResolveInput(entry.Path)
+		if err != nil {
+			return "", fmt.Errorf("resolve materialized fixture entry %q: %w", entry.Path, err)
+		}
+		entryRoot := filepath.Dir(entryPath)
+		if analysisRoot == "" {
+			analysisRoot = entryRoot
+			continue
+		}
+		analysisRoot, err = commonMaterializedParent(root, analysisRoot, entryRoot)
+		if err != nil {
+			return "", err
+		}
+	}
+	if analysisRoot == "" {
+		return "", errors.New("materialized fixture has no analysis entries")
+	}
+	analysisRoot, err = benchcycle.RealDirectory(analysisRoot)
+	if err != nil {
+		return "", fmt.Errorf("validate materialized fixture analysis root: %w", err)
+	}
+	if !materializedPathWithin(root, analysisRoot) {
+		return "", errors.New("materialized fixture analysis root escapes fixture root")
+	}
+	return analysisRoot, nil
+}
+
+// AnalysisRelativeInput resolves a declared contract input relative to AnalysisRoot. It is the safe bridge
+// from immutable fixture locator metadata to analyzers that identify first-party source symbols by their
+// root-relative module path; an undeclared path or one outside the derived root is rejected.
+func (fixture MaterializedFixture) AnalysisRelativeInput(path string) (string, error) {
+	analysisRoot, err := fixture.AnalysisRoot()
+	if err != nil {
+		return "", err
+	}
+	input, err := fixture.ResolveInput(path)
+	if err != nil {
+		return "", err
+	}
+	if !materializedPathWithin(analysisRoot, input) {
+		return "", fmt.Errorf("materialized fixture input %q is outside analysis root", path)
+	}
+	relative, err := filepath.Rel(analysisRoot, input)
+	if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || relative == ".." {
+		return "", fmt.Errorf("derive analysis-relative fixture input %q", path)
+	}
+	return filepath.ToSlash(relative), nil
+}
+
+func commonMaterializedParent(root, first, second string) (string, error) {
+	for candidate := first; ; candidate = filepath.Dir(candidate) {
+		if materializedPathWithin(candidate, second) {
+			if !materializedPathWithin(root, candidate) {
+				return "", errors.New("materialized fixture entry parent escapes fixture root")
+			}
+			return candidate, nil
+		}
+		if candidate == root {
+			break
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			break
+		}
+	}
+	return "", errors.New("materialized fixture entries have no common parent")
+}
+
+func materializedPathWithin(parent, child string) bool {
+	relative, err := filepath.Rel(parent, child)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
 // ResolveOutput returns the private absolute path for one declared analyzer-consumed
 // build output.
 func (fixture MaterializedFixture) ResolveOutput(path string) (string, error) {

@@ -113,6 +113,29 @@ func TestPythonFactsForReportsDynamicAndRecoveryGaps(t *testing.T) {
 	}
 }
 
+func TestPythonFactsForKeepsLiteralMappingDispatchBounded(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "main.py", "def dispatch(name):\n    handler = {\"opaque\": control_opaque}.get(name)\n    if handler is not None:\n        handler()\n\ndef control_opaque():\n    return None\n")
+
+	document, err := PythonFactsFor(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !document.Complete() {
+		t.Fatalf("a finite literal dispatch must not become an analysis-wide extraction gap: %+v", document.CoverageGaps)
+	}
+	for _, call := range document.Calls {
+		if joinPythonReference(call.Callee) != "handler" {
+			continue
+		}
+		if len(call.BoundedCallees) != 1 || joinPythonReference(call.BoundedCallees[0]) != "control_opaque" {
+			t.Fatalf("bounded handler call = %+v", call)
+		}
+		return
+	}
+	t.Fatalf("bounded handler invocation not found in calls: %+v", document.Calls)
+}
+
 func TestPythonFactsForExtractsLoopComprehensionAndWithBindings(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "bindings.py", "def process(values, manager):\n"+

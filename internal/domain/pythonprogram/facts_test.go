@@ -53,6 +53,12 @@ func TestDocumentValidateRejectsUnsafeOrUnboundedFacts(t *testing.T) {
 			d.Calls[0].Callee = Reference{Kind: ReferenceUnknown, Segments: []string{"do", "not", "leak"}}
 		}},
 		{"absolute call path", func(d *Document) { d.Calls[0].Pos.File = "C:/target/app.py" }},
+		{"invalid bounded candidate", func(d *Document) {
+			d.Calls[0].BoundedCallees = []Reference{{Kind: ReferenceLiteral}}
+		}},
+		{"nonlocal bounded callee", func(d *Document) {
+			d.Calls[0].BoundedCallees = []Reference{{Kind: ReferenceName, Segments: []string{"candidate"}}}
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

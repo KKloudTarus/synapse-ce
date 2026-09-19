@@ -3,6 +3,7 @@ package pyreach
 import (
 	"context"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -37,6 +38,38 @@ func NewTier2Analyzer(provider semanticFactsProvider) (*Tier2Analyzer, error) {
 	return &Tier2Analyzer{provider: provider}, nil
 }
 
+// FirstPartySymbolSubject constructs a closed-world query for an exact analyzed Python source symbol.
+// Source locators are different from component PURLs: they name a verified file in the analysis root rather
+// than an export of a third-party distribution. Keeping the forms separate prevents a package query from
+// silently gaining first-party semantics.
+func FirstPartySymbolSubject(modulePath, symbol string) (string, bool) {
+	modulePath = strings.ReplaceAll(strings.TrimSpace(modulePath), "\\", "/")
+	if !strings.HasSuffix(modulePath, ".py") {
+		return "", false
+	}
+	modulePath = path.Clean(strings.TrimSuffix(modulePath, ".py"))
+	if modulePath == "" || modulePath == "." || strings.HasPrefix(modulePath, "/") || modulePath == ".." || strings.HasPrefix(modulePath, "../") || strings.ContainsAny(modulePath, ":\r\n\t") {
+		return "", false
+	}
+	parts := strings.Split(modulePath, "/")
+	if len(parts) > 1 && parts[len(parts)-1] == "__init__" {
+		parts = parts[:len(parts)-1]
+	}
+	if len(parts) == 0 {
+		return "", false
+	}
+	for _, part := range parts {
+		if !validPythonDotted(part) {
+			return "", false
+		}
+	}
+	symbol = strings.TrimSpace(symbol)
+	if !validPythonDotted(symbol) {
+		return "", false
+	}
+	return "python:" + strings.Join(parts, ".") + ":" + symbol, true
+}
+
 func (a *Tier2Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (*reachability.Analysis, error) {
 	if ctx == nil || strings.TrimSpace(dir) == "" {
 		return nil, fmt.Errorf("%w: python tier-2 analysis needs a context and target directory", shared.ErrValidation)
@@ -50,21 +83,23 @@ func (a *Tier2Analyzer) Analyze(ctx context.Context, dir string, subjects []stri
 	}
 	results := make([]reachability.Result, 0, len(subjects))
 	seen := map[string]bool{}
+	allLocal := true
 	for _, subject := range subjects {
 		if seen[subject] {
 			continue
 		}
 		seen[subject] = true
 		placement := evidence.place(subject)
+		allLocal = allLocal && placement.local
 		result := reachability.Result{Symbol: subject}
-		if target, path, witness := firstPythonReachable(evidence.resolution, placement.targets); target != "" {
+		if target, path, witness := firstPythonReachable(evidence.graphFor(placement), placement.targets); target != "" {
 			result.Reachable = true
 			if witness {
 				result.Path = path
 			} else {
 				result.Path = []string{"python:reachable:witness-budget-exceeded"}
 			}
-		} else if len(placement.targets) == 0 || !placement.complete || !evidence.resolution.Complete {
+		} else if len(placement.targets) == 0 || !placement.complete || !evidence.negativeSafe(placement.targets) {
 			// The recorder filters this case before calling Analyze. If a different caller bypasses that
 			// contract, fail toward reachable so absence of evidence can never suppress a finding.
 			result.Reachable = true
@@ -72,7 +107,11 @@ func (a *Tier2Analyzer) Analyze(ctx context.Context, dir string, subjects []stri
 		}
 		results = append(results, result)
 	}
-	return &reachability.Analysis{Results: results, Entrypoints: append([]string(nil), evidence.resolution.Graph.Entrypoints...)}, nil
+	entrypoints := evidence.resolution.Graph.Entrypoints
+	if allLocal {
+		entrypoints = evidence.resolution.ClosedWorldEntrypoints
+	}
+	return &reachability.Analysis{Results: results, Entrypoints: append([]string(nil), entrypoints...)}, nil
 }
 
 type pythonTier2Evidence struct {
@@ -90,6 +129,7 @@ type pythonNode struct {
 type symbolPlacement struct {
 	targets  []string
 	complete bool
+	local    bool
 }
 
 func (a *Tier2Analyzer) evidenceFor(ctx context.Context, dir string) (pythonTier2Evidence, error) {
@@ -135,7 +175,7 @@ func (a *Tier2Analyzer) answerableSubjects(ctx context.Context, dir string, subj
 		allPlaceable := len(subject.Symbols) > 0
 		for _, raw := range subject.Symbols {
 			placement := evidence.place(raw)
-			target, _, witness := firstPythonReachable(evidence.resolution, placement.targets)
+			target, _, witness := firstPythonReachable(evidence.graphFor(placement), placement.targets)
 			if target != "" && witness {
 				positive = append(positive, raw)
 				continue
@@ -144,7 +184,7 @@ func (a *Tier2Analyzer) answerableSubjects(ctx context.Context, dir string, subj
 				allPlaceable = false
 				continue
 			}
-			if len(placement.targets) == 0 || !placement.complete {
+			if len(placement.targets) == 0 || !placement.complete || !evidence.negativeSafe(placement.targets) {
 				allPlaceable = false
 			}
 		}
@@ -153,7 +193,7 @@ func (a *Tier2Analyzer) answerableSubjects(ctx context.Context, dir string, subj
 			// One reached affected symbol proves the finding reachable even if another advisory symbol is
 			// unplaceable. Pass only positive subjects so the sealed path is real evidence.
 			out = append(out, pythonReachabilitySubject{FindingID: subject.FindingID, Symbols: sortedUniqueStrings(positive)})
-		case evidence.resolution.Complete && allPlaceable:
+		case allPlaceable:
 			out = append(out, pythonReachabilitySubject{FindingID: subject.FindingID, Symbols: append([]string(nil), subject.Symbols...)})
 		}
 	}
@@ -161,6 +201,14 @@ func (a *Tier2Analyzer) answerableSubjects(ctx context.Context, dir string, subj
 }
 
 func (e pythonTier2Evidence) place(subject string) symbolPlacement {
+	if _, _, canonical := splitCanonicalPythonID(subject); canonical {
+		// Canonical python:* identifiers are issued only by FirstPartySymbolSubject. Require an exact
+		// positioned local symbol so an arbitrary string can never manufacture a first-party negative.
+		if _, exists := e.resolution.Graph.Positions[subject]; !exists {
+			return symbolPlacement{}
+		}
+		return symbolPlacement{targets: []string{subject}, complete: true, local: true}
+	}
 	purl, raw, ok := ParseSymbolSubject(subject)
 	if !ok {
 		return symbolPlacement{}
@@ -170,13 +218,6 @@ func (e pythonTier2Evidence) place(subject string) symbolPlacement {
 	allowedRoots := map[string]bool{}
 	for _, candidate := range imports {
 		allowedRoots[strings.ToLower(candidate)] = true
-	}
-	if module, _, canonical := splitCanonicalPythonID(raw); canonical {
-		root := strings.Split(module, ".")[0]
-		if !allowedRoots[strings.ToLower(root)] {
-			return symbolPlacement{}
-		}
-		return symbolPlacement{targets: []string{raw}, complete: true}
 	}
 
 	normalized := strings.Replace(raw, ":", ".", 1)
@@ -240,6 +281,36 @@ func indexPythonNodes(resolution pythonprogram.Resolution) []pythonNode {
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].id < nodes[j].id })
 	return nodes
+}
+
+func (e pythonTier2Evidence) graphFor(placement symbolPlacement) pythonprogram.Resolution {
+	resolution := e.resolution
+	if placement.local {
+		resolution.Graph.Entrypoints = append([]string(nil), resolution.ClosedWorldEntrypoints...)
+	}
+	return resolution
+}
+
+// negativeSafe keeps the existing global fail-closed rule for every source/recovery/resolution gap. The one
+// narrower exception is a syntactically finite local callable map: its possible targets and known downstream
+// closure remain ineligible, while a disjoint symbol is still a complete absence proof.
+func (e pythonTier2Evidence) negativeSafe(targets []string) bool {
+	if e.resolution.Complete {
+		return true
+	}
+	if !e.resolution.CompleteExceptBounded {
+		return false
+	}
+	uncertain := make(map[string]bool, len(e.resolution.BoundedUncertainNodes))
+	for _, node := range e.resolution.BoundedUncertainNodes {
+		uncertain[node] = true
+	}
+	for _, target := range targets {
+		if uncertain[target] {
+			return false
+		}
+	}
+	return true
 }
 
 func firstPythonReachable(resolution pythonprogram.Resolution, targets []string) (string, []string, bool) {

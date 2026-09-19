@@ -52,13 +52,16 @@ var importRE = regexp.MustCompile(`^\s*import\s+(.+)$`)
 // fromRE matches a `from a.b.c import ...` statement, capturing the (possibly dotted/relative) module.
 var fromRE = regexp.MustCompile(`^\s*from\s+(\.*[A-Za-z0-9_.]*)\s+import\b`)
 
-// dynamicRE matches dynamic-import mechanisms under which a package can be loaded with NO static import
-// statement — making a "not imported" conclusion unsafe. It fails SAFE by over-matching: any hit makes the
-// analyzer refuse a verdict (the prior tier stands), which is always the correct bias. It therefore matches
-// the mechanisms broadly, not just three literal spellings: __import__, importlib (incl. a bare
-// `import_module(` call after `from importlib import import_module`), imp.load*, runpy, pkgutil, and
-// exec()/eval() of code (which can carry imports).
-var dynamicRE = regexp.MustCompile(`__import__|\bimportlib\b|\bimport_module\s*\(|\bimp\.load|\brunpy\b|\bpkgutil\b|\bexec\s*\(|\beval\s*\(`)
+// Dynamic calls with a simple literal or constant module name provide affirmative
+// evidence for that module only. Every other dynamic loader remains a global
+// coverage gap so an unknown target can never produce a negative conclusion.
+var (
+	pythonStringAssignmentRE = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:'([A-Za-z_][A-Za-z0-9_.]*)'|"([A-Za-z_][A-Za-z0-9_.]*)")\s*$`)
+	pythonAssignmentRE       = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=`)
+	pythonDynamicImportRE    = regexp.MustCompile(`(?:\b__import__|\bimportlib\s*\.\s*import_module|\bimport_module)\s*\(\s*([^,)]*)`)
+	pythonImportlibCallRE    = regexp.MustCompile(`\bimportlib\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
+	pythonUnknownDynamicRE   = regexp.MustCompile(`(?:\bimp\s*\.\s*load[A-Za-z_]*|\b(?:runpy|pkgutil)\s*\.\s*[A-Za-z_][A-Za-z0-9_]*|\bexec|\beval)\s*\(`)
+)
 
 // ScanImports walks dir's first-party .py files and returns the import surface. Returns a no-coverage error
 // when the target has no Python source (so a caller never treats a non-Python project as "nothing imported").
@@ -67,15 +70,16 @@ func (s *Scanner) ScanImports(ctx context.Context, dir string) (ports.PyImportGr
 		return ports.PyImportGraph{}, fmt.Errorf("%w: scan dir is required", shared.ErrValidation)
 	}
 	imported := map[string]bool{}
+	dynamicModules := map[string]bool{}
 	firstParty := map[string]bool{}
-	dynamic := false
+	dynamicUnknown := false
 	files := 0
 	degraded := false // some first-party source could not be fully observed → refuse a not-reachable verdict
 
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			degraded = true // an unreadable entry may hide first-party source; do not conclude "not imported"
-			return nil       // skip unreadable entries; never abort the whole walk
+			return nil      // skip unreadable entries; never abort the whole walk
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -100,7 +104,7 @@ func (s *Scanner) ScanImports(ctx context.Context, dir string) (ports.PyImportGr
 				firstParty[top] = true
 			}
 		}
-		if !scanFile(path, s.maxFileLen, imported, &dynamic) {
+		if !scanFile(path, s.maxFileLen, imported, dynamicModules, &dynamicUnknown) {
 			degraded = true // the file was unreadable or byte-truncated: an import past the cut is unseen
 		}
 		return nil
@@ -113,20 +117,21 @@ func (s *Scanner) ScanImports(ctx context.Context, dir string) (ports.PyImportGr
 	}
 	return ports.PyImportGraph{
 		ImportedModules:   sortedKeys(imported),
+		DynamicModules:    sortedKeys(dynamicModules),
 		FirstPartyModules: sortedKeys(firstParty),
-		DynamicImports:    dynamic,
+		DynamicImports:    dynamicUnknown,
 		FilesScanned:      files,
 		CoverageDegraded:  degraded,
 	}, nil
 }
 
-// scanFile line-scans one .py file, adding top-level imported module names to imported and flipping dynamic
-// when a dynamic-import mechanism appears. It JOINS backslash line-continuations and SPLITS compound
-// statements on ";" so `import a, \<newline> b` and `import a; import b` are both fully counted — a MISSED
-// import is the dangerous direction (it can yield a false "not imported"). It returns false when the file
-// could not be FULLY observed (unreadable, or truncated at the per-file byte cap), so the caller can mark
-// the whole scan coverage-degraded and refuse a not-reachable verdict.
-func scanFile(path string, maxLen int64, imported map[string]bool, dynamic *bool) (fullyRead bool) {
+// scanFile line-scans one .py file, adding top-level imported module names to imported and either recovering
+// a constant dynamic target or marking an unknown dynamic target. It JOINS backslash line-continuations and
+// SPLITS compound statements on ";" so `import a, \<newline> b` and `import a; import b` are both fully
+// counted — a MISSED import is the dangerous direction (it can yield a false "not imported"). It returns
+// false when the file could not be FULLY observed (unreadable, or truncated at the per-file byte cap), so the
+// caller can mark the whole scan coverage-degraded and refuse a not-reachable verdict.
+func scanFile(path string, maxLen int64, imported, dynamicModules map[string]bool, dynamicUnknown *bool) (fullyRead bool) {
 	f, err := os.Open(path) //nolint:gosec // path from a bounded first-party walk under the scan root
 	if err != nil {
 		return false // unreadable: its imports are unseen
@@ -136,9 +141,10 @@ func scanFile(path string, maxLen int64, imported map[string]bool, dynamic *bool
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var read int64
 	var cont string // accumulates a backslash-continued logical line
+	constants := map[string]string{}
 	process := func(logical string) {
 		for _, stmt := range strings.Split(logical, ";") { // compound statements: import a; import b
-			scanStmt(stmt, imported, dynamic)
+			scanStmt(stmt, imported, dynamicModules, dynamicUnknown, constants)
 		}
 	}
 	for sc.Scan() {
@@ -164,18 +170,18 @@ func scanFile(path string, maxLen int64, imported map[string]bool, dynamic *bool
 	return true
 }
 
-// scanStmt extracts the top-level imported modules from ONE statement (already split off a logical line)
-// and flips dynamic on a dynamic-import mechanism. Comment content is stripped first so a `# importlib`
-// note doesn't force a (safe but noisy) refusal and an inline `# comment` never pollutes a module name.
-func scanStmt(stmt string, imported map[string]bool, dynamic *bool) {
+// scanStmt extracts the top-level imported modules from ONE statement (already split off a logical line).
+// A plain constant dynamic target is an affirmative observation for that module; unrecognized dynamic forms
+// are explicitly marked unknown. Comment content is stripped first so a `# importlib` note does not affect
+// coverage and an inline `# comment` never pollutes a module name.
+func scanStmt(stmt string, imported, dynamicModules map[string]bool, dynamicUnknown *bool, constants map[string]string) {
 	stmt = stripComment(stmt)
 	trimmed := strings.TrimSpace(stmt)
 	if trimmed == "" {
 		return
 	}
-	if dynamicRE.MatchString(stmt) {
-		*dynamic = true
-	}
+	updatePythonStringConstant(trimmed, constants)
+	observePythonDynamicImport(trimmed, constants, dynamicModules, dynamicUnknown)
 	if m := fromRE.FindStringSubmatch(stmt); m != nil {
 		if top := topLevelOfModule(m[1]); top != "" {
 			imported[top] = true
@@ -193,6 +199,64 @@ func scanStmt(stmt string, imported map[string]bool, dynamic *bool) {
 			}
 		}
 	}
+}
+
+func updatePythonStringConstant(stmt string, constants map[string]string) {
+	if match := pythonStringAssignmentRE.FindStringSubmatch(stmt); match != nil {
+		name, value := match[1], match[2]
+		if value == "" {
+			value = match[3]
+		}
+		// A line scanner does not model branches. Once it has observed a different or nonconstant
+		// assignment, it cannot prove which value reaches a later loader; retain an empty poison marker
+		// rather than overwriting it and missing a possible import target.
+		if prior, seen := constants[name]; !seen {
+			constants[name] = value
+		} else if prior != value {
+			constants[name] = ""
+		}
+		return
+	}
+	if match := pythonAssignmentRE.FindStringSubmatch(stmt); match != nil {
+		constants[match[1]] = ""
+	}
+}
+
+func observePythonDynamicImport(stmt string, constants map[string]string, dynamicModules map[string]bool, dynamicUnknown *bool) {
+	for _, match := range pythonDynamicImportRE.FindAllStringSubmatch(stmt, -1) {
+		if top, ok := pythonDynamicTopLevel(match[1], constants); ok {
+			dynamicModules[top] = true
+			continue
+		}
+		*dynamicUnknown = true
+	}
+	for _, match := range pythonImportlibCallRE.FindAllStringSubmatch(stmt, -1) {
+		if match[1] != "import_module" {
+			*dynamicUnknown = true
+		}
+	}
+	if pythonUnknownDynamicRE.MatchString(stmt) {
+		*dynamicUnknown = true
+	}
+}
+
+func pythonDynamicTopLevel(argument string, constants map[string]string) (string, bool) {
+	argument = strings.TrimSpace(argument)
+	if constant, ok := constants[argument]; ok {
+		if top := topLevelOfModule(constant); top != "" {
+			return top, true
+		}
+		return "", false
+	}
+	if len(argument) < 3 || (argument[0] != '\'' && argument[0] != '"') || argument[len(argument)-1] != argument[0] {
+		return "", false
+	}
+	value := argument[1 : len(argument)-1]
+	if strings.ContainsAny(value, "\\\r\n") {
+		return "", false
+	}
+	top := topLevelOfModule(value)
+	return top, top != ""
 }
 
 // stripComment removes a trailing `# ...` comment. Heuristic (a "#" inside a string literal cuts early),

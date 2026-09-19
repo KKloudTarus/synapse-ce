@@ -1456,11 +1456,11 @@ const (
 type AcquireRequest struct {
 	// SourcePackage is server-resolved and pinned before an upload scan is queued.
 	// HTTP adapters must never accept caller-supplied package metadata or locators.
-	SourcePackage *sourcepackage.Package
-	Kind          string // local | git | archive | upload | image (default: local)
-	Value         string // path, git URL, archive path, or image ref
-	Locator       string // internal locator for a server-owned uploaded source package
-	Ref           string // optional git branch/tag to clone (git kind only)
+	SourcePackage             *sourcepackage.Package
+	Kind                      string // local | git | archive | upload | image (default: local)
+	Value                     string // path, git URL, archive path, or image ref
+	Locator                   string // internal locator for a server-owned uploaded source package
+	Ref                       string // optional git branch/tag to clone (git kind only)
 	BaseRef                   string // optional validated Git comparison base ref
 	BaseCommit                string // optional immutable base commit from a previous analysis
 	RequireCodeQualityHistory bool   // optional hint to clone bounded history for code-quality behavioral hotspots
@@ -1681,12 +1681,14 @@ type CallGraphBuilder interface {
 
 // PyImportGraph is the first-party Python import surface a PyImportScanner extracts (source-only, no
 // execution): the top-level modules imported by first-party code, the first-party module roots (provenance
-// for the reachability proof), and whether first-party code uses DYNAMIC imports (importlib/__import__),
-// which make a static "package not imported" conclusion UNSAFE. Counts bound the evidence.
+// for the reachability proof), and dynamic imports. A recovered constant dynamic target is affirmative
+// evidence only for that target; DynamicImports is reserved for an unresolved target that makes every
+// static negative unsafe. Counts bound the evidence.
 type PyImportGraph struct {
 	ImportedModules   []string // top-level module names appearing in first-party absolute imports
+	DynamicModules    []string // top-level modules recovered from constant __import__/import_module calls
 	FirstPartyModules []string // the project's own top-level modules (import roots), for provenance
-	DynamicImports    bool     // first-party code uses __import__ / importlib – a not-imported conclusion is unsafe
+	DynamicImports    bool     // an unresolved dynamic import or execution could load an unknown package
 	FilesScanned      int
 	// CoverageDegraded is true when some first-party source could not be fully observed (an unreadable entry,
 	// the per-file byte cap truncated a file, or the file-count cap stopped the walk). A missed import in the

@@ -6,7 +6,7 @@
 //
 // SAFETY: a not-reachable verdict must never be a false negative (it can suppress a real vuln downstream).
 // So the analyzer REFUSES a conclusion (returns a no-coverage error → the coordinator mints nothing and the
-// prior tier stands) when the target has no Python source, uses DYNAMIC imports (importlib/__import__) under
+// prior tier stands) when the target has no Python source, uses an unresolved DYNAMIC import target under
 // which a package could be imported invisibly, or when a queried package is NOT a declared direct dependency
 // (a transitive package is loaded by its parent, so a first-party import scan cannot prove it unused).
 // Candidate import names are generous (a package matches on any plausible name), biasing an uncertain case
@@ -60,7 +60,7 @@ func New(s importScanner, directDeps DirectDependencyReader) (*Analyzer, error) 
 // reachability Result (Reachable iff first-party code imports it under ANY of its candidate import names).
 // The dist→import mapping lives HERE (not in the SCA caller), so the caller passes only the package name.
 // It returns a no-coverage error — so the caller falls back to a lower tier, NEVER a false not-reachable —
-// when there is no Python source or the code uses dynamic imports.
+// when there is no Python source or the code has an unresolved dynamic import target.
 func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*reachability.Analysis, error) {
 	g, err := a.scanner.ScanImports(ctx, dir)
 	if err != nil {
@@ -91,8 +91,11 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*
 	// Match case-INSENSITIVELY: a package imported as "PIL" must match the candidate "pil". Python import
 	// names are technically case-sensitive, but folding case here only ever OVER-matches, biasing toward
 	// the safe "reachable" — never a false not-reachable.
-	imported := make(map[string]bool, len(g.ImportedModules))
+	imported := make(map[string]bool, len(g.ImportedModules)+len(g.DynamicModules))
 	for _, m := range g.ImportedModules {
+		imported[strings.ToLower(m)] = true
+	}
+	for _, m := range g.DynamicModules {
 		imported[strings.ToLower(m)] = true
 	}
 	out := make([]reachability.Result, 0, len(symbols))

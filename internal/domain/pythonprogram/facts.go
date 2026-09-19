@@ -18,14 +18,15 @@ const (
 	// SchemaVersion is the only semantic-facts wire version this build understands.
 	SchemaVersion = 2
 
-	maxFiles       = 200_000
-	maxSymbols     = 2_000_000
-	maxFacts       = 4_000_000
-	maxParameters  = 1_024
-	maxArguments   = 4_096
-	maxSegments    = 256
-	maxSubKey      = 256 // bound on a captured literal subscript key (structural selector text, never a scalar value)
-	maxStringBytes = 4_096
+	maxFiles          = 200_000
+	maxSymbols        = 2_000_000
+	maxFacts          = 4_000_000
+	maxParameters     = 1_024
+	maxArguments      = 4_096
+	maxBoundedCallees = 128
+	maxSegments       = 256
+	maxSubKey         = 256 // bound on a captured literal subscript key (structural selector text, never a scalar value)
+	maxStringBytes    = 4_096
 )
 
 // SymbolKind identifies a Python declaration that owns a lexical scope or can appear in a call graph.
@@ -176,16 +177,19 @@ type Argument struct {
 }
 
 // Call is one syntactic call expression owned by CallerID. Callee is a name/attribute reference when
-// statically expressible, otherwise ReferenceUnknown and a matching coverage gap is required.
+// statically expressible, otherwise ReferenceUnknown and a matching coverage gap is required. BoundedCallees
+// is present only when an immutable literal mapping selects from a finite set of local callables. It does not
+// make the call statically resolved: each candidate remains subject-local uncertainty for negative proofs.
 type Call struct {
-	ID              string     `json:"id"`
-	CallerID        string     `json:"caller_id"`
-	Callee          Reference  `json:"callee"`
-	Arguments       []Argument `json:"arguments,omitempty"`
-	ResultID        string     `json:"result_id,omitempty"`
-	ReceiverValueID string     `json:"receiver_value_id,omitempty"`
-	Pos             Position   `json:"position"`
-	Await           bool       `json:"await,omitempty"`
+	ID              string      `json:"id"`
+	CallerID        string      `json:"caller_id"`
+	Callee          Reference   `json:"callee"`
+	BoundedCallees  []Reference `json:"bounded_callees,omitempty"`
+	Arguments       []Argument  `json:"arguments,omitempty"`
+	ResultID        string      `json:"result_id,omitempty"`
+	ReceiverValueID string      `json:"receiver_value_id,omitempty"`
+	Pos             Position    `json:"position"`
+	Await           bool        `json:"await,omitempty"`
 }
 
 // Assignment captures a binding/value relationship without retaining expression text.
@@ -450,6 +454,20 @@ func (d Document) Validate() error {
 		if err := validateReference(item.Callee); err != nil {
 			return err
 		}
+		if len(item.BoundedCallees) > maxBoundedCallees || len(item.BoundedCallees) > 0 &&
+			(item.Callee.Kind != ReferenceName || len(item.Callee.Segments) != 1) {
+			return fmt.Errorf("%w: invalid bounded Python dispatch call", shared.ErrValidation)
+		}
+		bounded := make(map[string]bool, len(item.BoundedCallees))
+		for _, candidate := range item.BoundedCallees {
+			if err := validateReference(candidate); err != nil {
+				return err
+			}
+			if candidate.Kind != ReferenceName || len(candidate.Segments) != 1 || bounded[candidate.Segments[0]] {
+				return fmt.Errorf("%w: invalid bounded Python dispatch candidate", shared.ErrValidation)
+			}
+			bounded[candidate.Segments[0]] = true
+		}
 		for _, arg := range item.Arguments {
 			if !validOptionalName(arg.Keyword) && arg.Keyword != "**" {
 				return fmt.Errorf("%w: invalid python call keyword", shared.ErrValidation)
@@ -700,6 +718,11 @@ func (d *Document) SortCanonical() {
 		a, b := d.Imports[i], d.Imports[j]
 		return factKey(a.Pos, a.ScopeID, a.Module+"."+a.Name+"."+a.Alias) < factKey(b.Pos, b.ScopeID, b.Module+"."+b.Name+"."+b.Alias)
 	})
+	for index := range d.Calls {
+		sort.Slice(d.Calls[index].BoundedCallees, func(left, right int) bool {
+			return strings.Join(d.Calls[index].BoundedCallees[left].Segments, ".") < strings.Join(d.Calls[index].BoundedCallees[right].Segments, ".")
+		})
+	}
 	sort.Slice(d.Calls, func(i, j int) bool { return d.Calls[i].ID < d.Calls[j].ID })
 	sort.Slice(d.Assignments, func(i, j int) bool {
 		return factKey(d.Assignments[i].Pos, d.Assignments[i].ScopeID, "") < factKey(d.Assignments[j].Pos, d.Assignments[j].ScopeID, "")

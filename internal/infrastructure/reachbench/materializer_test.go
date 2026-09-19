@@ -91,6 +91,72 @@ func TestFixtureMaterializerCopiesNonBuildFixtureAtMaterializedPaths(t *testing.
 	}
 }
 
+func TestMaterializedFixtureAnalysisRootUsesDeclaredNestedEntries(t *testing.T) {
+	for _, testCase := range []struct {
+		fixtureID string
+		wantRoot  string
+		input     string
+		wantInput string
+	}{
+		{"go-source-tier2-input", "fixtures/golang/source_tier2", "fixtures/golang/source_tier2/main.go.src", "main.go"},
+		{"python-import-input", "fixtures/python/import", "fixtures/python/import/main.py", "main.py"},
+		{"python-semantic-input", "fixtures/python/semantic", "fixtures/python/semantic/main.py", "main.py"},
+		{"dotnet-build-aware-import-input", "fixtures/dotnet/build_aware_import", "fixtures/dotnet/build_aware_import/Program.cs", "Program.cs"},
+	} {
+		t.Run(testCase.fixtureID, func(t *testing.T) {
+			specification := materializerFixture(t, testCase.fixtureID)
+			workRoot := privateMaterializerRoot(t)
+			cellKey := "sha256:" + strings.Repeat("d", 64)
+			expectedRoot, err := prepareMaterializationRoot(workRoot, cellKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner := &fixtureToolRunner{}
+			runner.run = func(_ context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
+				if specification.Build != nil && isFixtureToolchainProbe(specification.Build.Toolchain.Family, spec) {
+					return matchingFixtureToolchainProbe(specification.Build.Toolchain.Family), nil
+				}
+				if specification.Build == nil {
+					return ports.ToolResult{}, fmt.Errorf("unexpected tool invocation for non-build fixture %s", testCase.fixtureID)
+				}
+				for _, output := range specification.Build.Outputs {
+					path := filepath.Join(expectedRoot, filepath.FromSlash(output.Path))
+					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+						return ports.ToolResult{}, err
+					}
+					if err := os.WriteFile(path, []byte("generated"), 0o600); err != nil {
+						return ports.ToolResult{}, err
+					}
+				}
+				return ports.ToolResult{}, nil
+			}
+			fixture, err := newFixtureMaterializer(t, runner, "linux/amd64").Materialize(context.Background(), FixtureMaterializationRequest{
+				Specification: specification, WorkRoot: workRoot, CellKey: cellKey,
+			})
+			if err != nil {
+				t.Fatalf("Materialize: %v", err)
+			}
+			root, err := fixture.AnalysisRoot()
+			if err != nil {
+				t.Fatalf("AnalysisRoot: %v", err)
+			}
+			if want := filepath.Join(fixture.Root, filepath.FromSlash(testCase.wantRoot)); root != want {
+				t.Fatalf("analysis root = %q, want %q", root, want)
+			}
+			relative, err := fixture.AnalysisRelativeInput(testCase.input)
+			if err != nil {
+				t.Fatalf("AnalysisRelativeInput: %v", err)
+			}
+			if relative != testCase.wantInput {
+				t.Fatalf("analysis-relative input = %q, want %q", relative, testCase.wantInput)
+			}
+			if _, err := fixture.AnalysisRelativeInput("fixtures/not-declared.py"); err == nil {
+				t.Fatal("AnalysisRelativeInput accepted an undeclared input")
+			}
+		})
+	}
+}
+
 func TestFixtureMaterializerBuildsFrozenGeneratedFixture(t *testing.T) {
 	workRoot := privateMaterializerRoot(t)
 	specification := materializerFixture(t, "go-binary-input")
@@ -315,10 +381,12 @@ func TestDotNetBuildAwareFixtureKeepsPackageSourcesOutsideProductionScan(t *test
 	for _, name := range graph.ImportedPackages {
 		observed[name] = true
 	}
-	if !observed["reachbench.direct"] {
-		t.Fatalf("first-party import is absent from production scan: %v", graph.ImportedPackages)
+	for _, expected := range []string{"reachbench.direct", "reachbench.dynamic"} {
+		if !observed[expected] {
+			t.Errorf("first-party reference %q is absent from production scan: %v", expected, graph.ImportedPackages)
+		}
 	}
-	for _, packageNamespace := range []string{"reachbench.dynamic", "reachbench.unused", "reachbench.unsupported"} {
+	for _, packageNamespace := range []string{"reachbench.unused", "reachbench.unsupported"} {
 		if observed[packageNamespace] {
 			t.Errorf("package-owned namespace %q leaked into first-party scan: %v", packageNamespace, graph.ImportedPackages)
 		}

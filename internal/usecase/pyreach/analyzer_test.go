@@ -62,10 +62,27 @@ func TestAnalyzeImportReachability(t *testing.T) {
 	}
 }
 
+func TestAnalyzeResolvedDynamicImportIsAffirmativeOnly(t *testing.T) {
+	a, err := New(fakeScanner{g: ports.PyImportGraph{
+		DynamicModules:    []string{"requests"},
+		FirstPartyModules: []string{"app"},
+	}}, directReader("requests", "jinja2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := resultFor(a, []string{"requests", "jinja2"})
+	if !got["requests"] {
+		t.Error("a recovered constant import target must be affirmative reachability evidence")
+	}
+	if got["jinja2"] {
+		t.Error("an unrelated direct dependency remains not reachable")
+	}
+}
+
 func TestAnalyzeDynamicImportsIsNoCoverage(t *testing.T) {
 	a, _ := New(fakeScanner{g: ports.PyImportGraph{ImportedModules: []string{"requests"}, DynamicImports: true}}, directReader("jinja2"))
 	if _, err := a.Analyze(context.Background(), "/x", []string{"jinja2"}); err == nil {
-		t.Fatal("dynamic imports must yield a no-coverage error (never a false not_reachable)")
+		t.Fatal("an unknown dynamic import target must yield a no-coverage error (never a false not_reachable)")
 	}
 }
 

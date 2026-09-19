@@ -65,6 +65,117 @@ class L { object M(string n) { return Activator.CreateInstance(Type.GetType(n));
 	}
 }
 
+func TestDotNetResolvedAssemblyReflectionIsSubjectLocal(t *testing.T) {
+	dir := t.TempDir()
+	writeDotNetFile(t, dir, "Loader.cs", `using System.Reflection;
+class L {
+    static void Load() {
+        var assemblyName = string.Concat("Reachbench", ".Dynamic");
+        var typeName = string.Concat(assemblyName, ".Entry");
+        var entry = Assembly.Load(assemblyName).GetType(typeName, throwOnError: true)!;
+        entry.GetMethod("Run", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null);
+    }
+}
+`)
+	graph, err := NewDotNetScanner().ScanImports(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !graph.Complete() {
+		t.Fatalf("constant reflection target must not block unrelated negatives: %v", graph.CoverageReasons)
+	}
+	seen := map[string]bool{}
+	for _, item := range graph.ImportedPackages {
+		seen[item] = true
+	}
+	if !seen["reachbench.dynamic"] {
+		t.Fatalf("resolved assembly candidate was not observed: %v", graph.ImportedPackages)
+	}
+}
+
+func TestDotNetResolvedTypeReflectionIsSubjectLocal(t *testing.T) {
+	dir := t.TempDir()
+	writeDotNetFile(t, dir, "Loader.cs", `using System;
+class L {
+    static void Load() {
+        var entry = Type.GetType("Reachbench.Dynamic.Entry, Reachbench.Dynamic", throwOnError: true)!;
+        entry.GetMethod("Run")!.Invoke(null, null);
+    }
+}
+`)
+	graph, err := NewDotNetScanner().ScanImports(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !graph.Complete() {
+		t.Fatalf("constant type reflection target must not block disjoint negatives: %v", graph.CoverageReasons)
+	}
+	if !contains(graph.ImportedPackages, "reachbench.dynamic") {
+		t.Fatalf("resolved type candidate was not observed: %v", graph.ImportedPackages)
+	}
+}
+
+func TestDotNetConditionalReflectionTargetStaysFailClosed(t *testing.T) {
+	dir := t.TempDir()
+	writeDotNetFile(t, dir, "Loader.cs", `using System.Reflection;
+class L {
+    static void Load(bool alternate) {
+        var assemblyName = "Reachbench.Dynamic";
+        if (alternate) { assemblyName = "Reachbench.Other"; }
+        Assembly.Load(assemblyName);
+    }
+}
+`)
+	graph, err := NewDotNetScanner().ScanImports(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.Complete() {
+		t.Fatal("a conditionally reassigned reflection target must remain incomplete")
+	}
+}
+
+func TestDotNetReassignedReflectionValueStaysFailClosed(t *testing.T) {
+	dir := t.TempDir()
+	writeDotNetFile(t, dir, "Loader.cs", `using System;
+class L {
+    static void Load(Type unknown) {
+        var entry = Type.GetType("Reachbench.Dynamic.Entry, Reachbench.Dynamic", throwOnError: true)!;
+        entry = unknown;
+        entry.GetMethod("Run")!.Invoke(null, null);
+    }
+}
+`)
+	graph, err := NewDotNetScanner().ScanImports(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.Complete() {
+		t.Fatal("a reassigned reflection result must not retain a resolved target")
+	}
+}
+
+func TestDotNetUnknownReflectionStaysFailClosedBesideResolvedCandidate(t *testing.T) {
+	dir := t.TempDir()
+	writeDotNetFile(t, dir, "Loader.cs", `using System.Reflection;
+class L {
+    static void Load(object unknown) {
+        var assemblyName = "Reachbench.Dynamic";
+        var entry = Assembly.Load(assemblyName).GetType("Reachbench.Dynamic.Entry", throwOnError: true)!;
+        entry.GetMethod("Run")!.Invoke(null, null);
+        Assembly.Load(assemblyName); unknown.Invoke(null, null);
+    }
+}
+`)
+	graph, err := NewDotNetScanner().ScanImports(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.Complete() {
+		t.Fatal("an unrelated unknown reflection must keep the observation incomplete")
+	}
+}
+
 // TestNuGetDirectDependencies: PackageReference and central-package-management PackageVersion entries across
 // project and props files are the direct dependencies.
 func TestNuGetDirectDependencies(t *testing.T) {

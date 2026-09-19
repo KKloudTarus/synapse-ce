@@ -30,10 +30,12 @@ type captureTestAnalyzer struct {
 	result *reachability.Analysis
 	err    error
 	calls  int
+	target string
 }
 
-func (analyzer *captureTestAnalyzer) Analyze(_ context.Context, _ string, _ []string) (*reachability.Analysis, error) {
+func (analyzer *captureTestAnalyzer) Analyze(_ context.Context, target string, _ []string) (*reachability.Analysis, error) {
 	analyzer.calls++
+	analyzer.target = target
 	return analyzer.result, analyzer.err
 }
 
@@ -443,6 +445,51 @@ func TestRunStaticWithNoSubjectsReportsUnsupportedCoverage(t *testing.T) {
 	}
 }
 
+func TestRunStaticTargetsMetadataDerivedAnalysisRoot(t *testing.T) {
+	root := t.TempDir()
+	analysisRoot := filepath.Join(root, "fixtures", "go", "app")
+	if err := os.MkdirAll(analysisRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"main.go", "go.mod"} {
+		if err := os.WriteFile(filepath.Join(analysisRoot, name), []byte("fixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture := MaterializedFixture{
+		Root: root,
+		Specification: measurement.FixtureSpecification{Entries: []measurement.FixtureEntry{
+			{Path: "fixtures/go/app/main.go"}, {Path: "fixtures/go/app/go.mod"},
+		}},
+		inputPaths: map[string]string{
+			"fixtures/go/app/main.go": "fixtures/go/app/main.go",
+			"fixtures/go/app/go.mod":  "fixtures/go/app/go.mod",
+		},
+	}
+	lifecycle, err := newCaptureLifecycle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegate := &captureTestAnalyzer{result: &reachability.Analysis{Results: []reachability.Result{{Symbol: "target"}}}}
+	_, err = runStatic(context.Background(), fixture, measurement.ResolvedFixtureSubject{}, lifecycle, coverageAnswersRequestedSymbols,
+		[]ports.ReachabilitySubject{{FindingID: "finding", Symbols: []string{"target"}}},
+		func() (staticAnalyzer, error) { return delegate, nil },
+		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
+			coordinator, err := reachproof.NewCoordinator(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock)
+			if err != nil {
+				return nil, err
+			}
+			return coordinator.WithRaiseOnly(), nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegate.target != analysisRoot {
+		t.Fatalf("static analysis target = %q, want nested metadata root %q", delegate.target, analysisRoot)
+	}
+}
+
 func TestSymbolSubjectsRejectManifestCapabilityLocator(t *testing.T) {
 	manifest := measurement.ResolvedFixtureSubject{Subject: measurement.FixtureSubject{
 		ID:      "pkg:reachbench/javascript/lexical#controlNoCoverage",
@@ -523,7 +570,7 @@ func TestProductionCaptureMeasuresNegativeWithoutPersistingSuppression(t *testin
 		Locator:         measurement.FixtureLocator{Kind: measurement.FixtureLocatorSourceSymbol, ModulePath: "fixtures/golang/source_tier2/main.go", Symbol: "controlUnreachable", Line: 16},
 	}}
 	delegate := &captureTestAnalyzer{result: &reachability.Analysis{Results: []reachability.Result{{Symbol: "controlUnreachable"}}, Entrypoints: []string{"main.main"}}}
-	executed, err := runStatic(context.Background(), MaterializedFixture{Root: "/private/fixture"}, resolved, lifecycle, coverageRequiresEntrypointAuthority,
+	executed, err := runStatic(context.Background(), MaterializedFixture{Root: t.TempDir()}, resolved, lifecycle, coverageRequiresEntrypointAuthority,
 		[]ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), Symbols: []string{"controlUnreachable"}}},
 		func() (staticAnalyzer, error) { return delegate, nil },
 		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
@@ -579,7 +626,7 @@ func TestProductionCaptureClassifiesAnalyzerFailureAsNoAnalysis(t *testing.T) {
 	resolved := measurement.ResolvedFixtureSubject{Subject: measurement.FixtureSubject{
 		ID: "pkg:reachbench/go/source_tier2#controlPositive", Locator: measurement.FixtureLocator{Symbol: "controlPositive"},
 	}}
-	executed, err := runStatic(context.Background(), MaterializedFixture{Root: "/private/fixture"}, resolved, lifecycle, coverageRequiresEntrypointAuthority,
+	executed, err := runStatic(context.Background(), MaterializedFixture{Root: t.TempDir()}, resolved, lifecycle, coverageRequiresEntrypointAuthority,
 		[]ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), Symbols: []string{"controlPositive"}}},
 		func() (staticAnalyzer, error) {
 			return &captureTestAnalyzer{err: errors.New("analyzer unavailable")}, nil
