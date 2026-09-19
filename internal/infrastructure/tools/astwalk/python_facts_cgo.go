@@ -379,6 +379,13 @@ func (e *pythonFactExtractor) assignmentFact(node *sitter.Node, scope pythonScop
 		return
 	}
 	e.observeBoundedDispatchAssignment(scope.id, targets, right)
+	// D5.9c: `name = <display>` and `name: T = <display>` freshly bind the whole container, so a display
+	// with all-decodable keys can be desugared into per-key writes. Augmented (`+=`) and walrus bindings
+	// mutate or bind in an expression context and are left to the sound whole-container path.
+	if (node.Type() == "assignment" || node.Type() == "annotated_assignment") &&
+		e.tryDisplayFieldSensitive(node, left, right, scope) {
+		return
+	}
 	value := e.reference(right)
 	valueID := e.valueFor(right, scope)
 	if value.Kind == pythonprogram.ReferenceUnknown && valueID == "" {
@@ -645,6 +652,143 @@ func (e *pythonFactExtractor) addValue(value pythonprogram.Value) {
 	}
 	e.values[value.ID] = true
 	e.doc.Values = append(e.doc.Values, value)
+}
+
+// displayFieldEntry is one refinable entry of a display literal: the entry node (a dict `pair` or a
+// list/tuple element), the value expression whose taint flows to that key, and the normalized subscript
+// key the entry writes.
+type displayFieldEntry struct {
+	node      *sitter.Node
+	valueNode *sitter.Node
+	subKey    string
+}
+
+// isDisplayLiteral reports whether a node is a dict/list/tuple/set display, used to reject a nested
+// display as a display-literal entry value (its own per-key refinement is out of scope and unsound to
+// assume, so the outer display widens).
+func isDisplayLiteral(n *sitter.Node) bool {
+	switch n.Type() {
+	case "dictionary", "list", "tuple", "set":
+		return true
+	}
+	return false
+}
+
+// isDisplayExtra reports whether a named child of a display is a tree-sitter "extra" node rather than an
+// element. tree-sitter-python's named extras are exactly `comment` and `line_continuation`, and either can
+// appear between elements (`[a, # note\n b]`). Extras must not consume a positional index, or a list/tuple
+// element would be keyed to the wrong subscript and a read would miss the taint filed under it.
+func isDisplayExtra(n *sitter.Node) bool {
+	switch n.Type() {
+	case "comment", "line_continuation":
+		return true
+	}
+	return false
+}
+
+// displayFieldEntries returns the refinable entries of a dict/list/tuple display, or ok=false when the
+// display must be widened whole: any dictionary_splat/list_splat, any dict key that is not decodable by
+// the strict literalSubscriptKey decoder (dynamic/float/bool/escaped/prefixed/byte/tuple key), any key
+// that fails ValidSubscriptKey, or any entry value that is itself a nested display. List/tuple elements
+// are keyed by their exact position `i:<index>`, matching how an integer-literal read decodes; the
+// presence of any splat abandons refinement so positions can never be miscounted.
+func (e *pythonFactExtractor) displayFieldEntries(disp *sitter.Node) ([]displayFieldEntry, bool) {
+	switch disp.Type() {
+	case "dictionary":
+		out := make([]displayFieldEntry, 0, disp.NamedChildCount())
+		for i := 0; i < int(disp.NamedChildCount()); i++ {
+			ch := disp.NamedChild(i)
+			if isDisplayExtra(ch) {
+				continue
+			}
+			if ch.Type() != "pair" { // dictionary_splat or any other node: cannot enumerate keys
+				return nil, false
+			}
+			keyNode := ch.ChildByFieldName("key")
+			valNode := ch.ChildByFieldName("value")
+			if keyNode == nil || valNode == nil || isDisplayLiteral(valNode) {
+				return nil, false
+			}
+			key, dyn := literalSubscriptKey(keyNode, e.source)
+			if dyn || !pythonprogram.ValidSubscriptKey(key) {
+				return nil, false
+			}
+			out = append(out, displayFieldEntry{node: ch, valueNode: valNode, subKey: key})
+		}
+		return out, true
+	case "list", "tuple":
+		out := make([]displayFieldEntry, 0, disp.NamedChildCount())
+		idx := 0 // element index, incremented only for real elements so it tracks the runtime subscript
+		for i := 0; i < int(disp.NamedChildCount()); i++ {
+			ch := disp.NamedChild(i)
+			if isDisplayExtra(ch) {
+				continue // a comment/continuation is not an element and must not shift positions
+			}
+			switch ch.Type() {
+			case "list_splat", "list_splat_pattern", "dictionary_splat", "dictionary_splat_pattern":
+				return nil, false // a splat shifts every following index: positions are no longer exact
+			}
+			if isDisplayLiteral(ch) {
+				return nil, false
+			}
+			key := "i:" + strconv.Itoa(idx)
+			if !pythonprogram.ValidSubscriptKey(key) {
+				return nil, false
+			}
+			out = append(out, displayFieldEntry{node: ch, valueNode: ch, subKey: key})
+			idx++
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+// tryDisplayFieldSensitive implements D5.9c: when `name = <display>` binds a bare local identifier to a
+// dictionary, list, or tuple display whose keys/indices all decode via the strict literalSubscriptKey
+// decoder and that has no splat and no nested display, it desugars the display into a born-empty container
+// (`name = {}`) plus one keyed write per entry (`name[key] = <value>`). That reproduces D5.9b's born-empty
+// invariant, so a later read of a clean key is not tainted by a sibling entry, while any doubt widens.
+//
+// Soundness: it only ever ADDS per-key structure to a fresh local binding; the taint engine's
+// refinableContainers gate still widens the whole container on any bare use, alias, parameter, dynamic
+// key, child scope, or coverage gap. Every key is written with the SAME decoder reads use, so a key can
+// never be mis-matched to hide a taint; on any undecodable key or splat or nested display the whole
+// display widens (the sound over-approximation). Returns true when it emitted the field-sensitive facts.
+func (e *pythonFactExtractor) tryDisplayFieldSensitive(node, left, right *sitter.Node, scope pythonScope) bool {
+	if left == nil || left.Type() != "identifier" || right == nil {
+		return false
+	}
+	entries, ok := e.displayFieldEntries(right)
+	if !ok || len(entries) == 0 {
+		return false
+	}
+	targetIDs := e.bindingValues(left, scope)
+	if len(targetIDs) != 1 {
+		return false
+	}
+	name := left.Content(e.source)
+	// Born-empty whole binding: a synthetic ValueLiteral RHS so refinableContainers counts it as freshInit.
+	birthID := pythonValueID(e.file, right, "displaybirth")
+	e.addValue(pythonprogram.Value{
+		ID: birthID, ScopeID: scope.id, Kind: pythonprogram.ValueLiteral,
+		Ref: pythonprogram.Reference{Kind: pythonprogram.ReferenceLiteral}, Pos: e.position(right),
+	})
+	e.addValueFlow(birthID, targetIDs[0], pythonprogram.FlowAssignment, node)
+	e.doc.Assignments = append(e.doc.Assignments, pythonprogram.Assignment{
+		ScopeID: scope.id, Targets: e.targets(left), TargetIDs: targetIDs,
+		Value: pythonprogram.Reference{Kind: pythonprogram.ReferenceLiteral}, ValueID: birthID, Pos: e.position(node),
+	})
+	// One keyed write per entry: its value's taint flows to that key only.
+	for _, en := range entries {
+		keyedID := pythonValueID(e.file, en.node, "binding")
+		e.addValue(pythonprogram.Value{
+			ID: keyedID, ScopeID: scope.id, Kind: pythonprogram.ValueBinding, Name: name,
+			Ref:    pythonprogram.Reference{Kind: pythonprogram.ReferenceName, Segments: []string{name}},
+			SubKey: en.subKey, Pos: e.position(en.node),
+		})
+		e.addValueFlow(e.valueFor(en.valueNode, scope), keyedID, pythonprogram.FlowAssignment, en.node)
+	}
+	return true
 }
 
 func (e *pythonFactExtractor) addValueFlow(from, to string, kind pythonprogram.ValueFlowKind, node *sitter.Node) {
