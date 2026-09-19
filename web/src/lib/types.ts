@@ -732,6 +732,24 @@ export interface AssetReachability { state:ReachabilityState; tier:ReachabilityT
 export interface AssetFinding { finding:Finding; external:boolean; canSelfPromote?:boolean; suppressedByTool:boolean; provenance?:AssetFindingProvenance; reachability:AssetReachability; engagementId:string; engagementName:string }
 export interface AssetHistoryItem { engagementId:string; name:string; status:string; authorizedFrom:string|null; authorizedTo:string|null; scopeCount:number; findingCount:number; retestCount:number; updatedAt:string }
 
+export type FindingKind =
+  | ''
+  | 'sca'
+  | 'recon'
+  | 'exploitation'
+  | 'manual'
+  | 'sast'
+  | 'secret'
+  | 'misconfig'
+  | 'cloud_posture'
+  | 'dast'
+  | 'threat'
+  | 'hypothesis'
+  | 'quality'
+  | 'reliability'
+  | 'external'
+  | (string & {})
+
 export interface Finding {
   id: string
   engagementId: string
@@ -751,7 +769,7 @@ export interface Finding {
   priority: number
   assignee: string
   version: number // optimistic-concurrency token
-  kind: string // sca | recon | exploitation | manual (governs evidence-gated promotion)
+  kind: FindingKind // external is a reader-only origin; native writers never persist it
   evidenceScore: number // 0-100; exploitation findings need >= 75 to be reportable
   proposedBy: string // for an agent-proposed exploitation finding, e.g. "agent:<sid>"
   complianceControls: ComplianceControl[] // curated regulatory/standard controls the CWE maps to

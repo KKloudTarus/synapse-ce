@@ -116,6 +116,9 @@ func NewGraph(in Input) (*Graph, error) {
 		if f.Target.ID.IsZero() || f.Target.ID != f.Finding.ID || !f.Target.Kind.Valid() {
 			return nil, validation("finding target is invalid")
 		}
+		if f.Target.Kind == TargetCanonical && !f.Finding.Kind.Persistable() {
+			return nil, validation("reader-only or unknown finding cannot claim canonical attack-path authority")
+		}
 		if f.Target.Kind == TargetImported && (!f.External || f.ImportedProvenance == nil) {
 			return nil, validation("imported finding needs external provenance")
 		}

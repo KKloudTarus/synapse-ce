@@ -16,7 +16,7 @@ func TestStatusValid(t *testing.T) {
 }
 
 func TestKindValid(t *testing.T) {
-	for _, k := range []Kind{KindSCA, KindRecon, KindExploitation, KindManual, KindSAST, KindSecret, KindMisconfig, KindDAST, KindThreat} {
+	for _, k := range []Kind{KindSCA, KindRecon, KindExploitation, KindManual, KindSAST, KindSecret, KindMisconfig, KindCloudPosture, KindDAST, KindThreat, KindHypothesis, KindQuality, KindReliability, KindExternal} {
 		if !k.Valid() {
 			t.Errorf("Kind %q should be valid", k)
 		}
@@ -44,6 +44,8 @@ func TestPublishable(t *testing.T) {
 		{ID: "recon", Kind: KindRecon},                                                     // not gated → kept
 		{ID: "exp-unproven", Kind: KindExploitation, EvidenceScore: EvidenceThreshold - 1}, // below bar → dropped
 		{ID: "exp-proven", Kind: KindExploitation, EvidenceScore: EvidenceThreshold},       // at bar → kept
+		{ID: "external", Kind: KindExternal, EvidenceScore: 100},                           // reader-only → dropped
+		{ID: "unknown", Kind: Kind("future-origin"), EvidenceScore: 100},                   // unknown → dropped
 	}
 	got := map[string]bool{}
 	for _, f := range Publishable(in) {
@@ -52,14 +54,14 @@ func TestPublishable(t *testing.T) {
 	if !got["sca"] || !got["manual"] || !got["recon"] || !got["exp-proven"] {
 		t.Errorf("Publishable must keep non-gated + proven exploitation findings: %v", got)
 	}
-	if got["exp-unproven"] {
-		t.Error("Publishable must drop an unproven exploitation finding")
+	if got["exp-unproven"] || got["external"] || got["unknown"] {
+		t.Errorf("Publishable must drop unproven, reader-only, and unknown findings: %v", got)
 	}
 	if len(got) != 4 {
 		t.Errorf("want 4 publishable findings, got %d", len(got))
 	}
 	// Input must not be mutated.
-	if len(in) != 5 {
+	if len(in) != 7 {
 		t.Errorf("Publishable must not mutate its input, len now %d", len(in))
 	}
 }
@@ -83,6 +85,8 @@ func TestCanPromote(t *testing.T) {
 		// Provenance gates regardless of kind: an AI-proposed finding of ANY kind is gated.
 		{"AI-proposed sca below bar blocked", KindSCA, "agent:x", 0, false},
 		{"AI-proposed sca at bar promotes", KindSCA, "agent:x", EvidenceThreshold, true},
+		{"external stays blocked above bar", KindExternal, "", 100, false},
+		{"unknown stays blocked above bar", Kind("future-origin"), "", 100, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -90,7 +94,7 @@ func TestCanPromote(t *testing.T) {
 			if got := f.CanPromote(); got != c.want {
 				t.Errorf("Kind %q proposedBy %q score %d: CanPromote = %v, want %v", c.kind, c.proposedBy, c.score, got, c.want)
 			}
-			wantGate := c.kind == KindExploitation || c.proposedBy != ""
+			wantGate := c.kind == KindExploitation || c.kind == KindExternal || !c.kind.Valid() || c.proposedBy != ""
 			if gate := f.RequiresEvidenceGate(); gate != wantGate {
 				t.Errorf("Kind %q proposedBy %q: RequiresEvidenceGate = %v, want %v", c.kind, c.proposedBy, gate, wantGate)
 			}
@@ -165,5 +169,29 @@ func TestValidateRuleKey(t *testing.T) {
 				t.Errorf("Kind %q RuleKey %q: got %v, want %v", c.kind, c.ruleKey, err, c.wantErr)
 			}
 		})
+	}
+}
+
+func TestKindPersistableReaderOnlyContract(t *testing.T) {
+	for _, kind := range []Kind{"", KindSCA, KindManual, KindSAST} {
+		if !kind.Persistable() {
+			t.Errorf("kind %q should remain persistable", kind)
+		}
+	}
+	if KindExternal.Persistable() {
+		t.Fatal("external must remain reader-only")
+	}
+	if Kind("future-origin").Persistable() {
+		t.Fatal("unknown kind must fail closed at the native writer")
+	}
+
+	if err := (Finding{Kind: KindExternal}).ValidatePersistence(); err != ErrKindReaderOnly {
+		t.Fatalf("external write validation=%v, want %v", err, ErrKindReaderOnly)
+	}
+	if err := (Finding{Kind: Kind("future-origin")}).ValidatePersistence(); err != ErrKindInvalid {
+		t.Fatalf("unknown write validation=%v, want %v", err, ErrKindInvalid)
+	}
+	if err := (Finding{Kind: KindSCA}).ValidatePersistence(); err != nil {
+		t.Fatalf("existing native kind no longer persists: %v", err)
 	}
 }

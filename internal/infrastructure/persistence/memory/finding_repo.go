@@ -408,11 +408,11 @@ func (r *FindingRepository) ListPublishableByEngagement(ctx context.Context, eng
 	return finding.Publishable(all), nil
 }
 
-// validateFindingBatch asserts domain invariants (like RuleKey constraints) for a
-// batch before writing to the database. An atomic failure prevents partial writes.
+// validateFindingBatch asserts domain persistence invariants for a batch before
+// writing. An atomic failure prevents partial writes.
 func validateFindingBatch(findings []finding.Finding) error {
 	for _, f := range findings {
-		if err := f.ValidateRuleKey(); err != nil {
+		if err := f.ValidatePersistence(); err != nil {
 			return fmt.Errorf("finding %s (kind %s): %w", f.DedupKey, f.Kind, err)
 		}
 		if f.DataFlow != nil {
