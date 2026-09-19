@@ -20,9 +20,9 @@ const (
 
 // allJavaTaintClasses is the set a fully untrusted request source taints. It is intentionally the Java
 // subset with a MODELED sink today (a source never introduces a class the engine has no sink to terminate);
-// it grows as DefaultJavaCatalog gains sinks for XSS/XXE/SSTI/log.
+// it grows as DefaultJavaCatalog gains sinks for XXE/SSTI/log.
 var allJavaTaintClasses = []TaintClass{
-	TaintCommand, TaintPathTraversal, TaintSQL, TaintSSRF, TaintDeserialization, TaintCode, TaintLDAP, TaintXPath,
+	TaintCommand, TaintPathTraversal, TaintSQL, TaintSSRF, TaintDeserialization, TaintCode, TaintLDAP, TaintXPath, TaintXSS,
 }
 
 // JavaCallablePattern matches a Java callee. Java has NO bare language globals, so matching is two-tiered:

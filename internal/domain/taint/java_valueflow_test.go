@@ -109,6 +109,12 @@ func TestJavaTaintPositivePerClass(t *testing.T) {
 		{"xpath-compile", []string{"xp", "compile"}, false,
 			[]javaprogram.Import{{ScopeID: jModID(), Kind: javaprogram.ImportOnDemand, Module: "javax.xml.xpath", Name: "", Pos: jPos()}},
 			"java-taint-xpath-expression"},
+		{"xss-writer-println", []string{"writer", "println"}, false,
+			[]javaprogram.Import{{ScopeID: jModID(), Kind: javaprogram.ImportSingle, Module: "javax.servlet.http.HttpServletResponse", Name: "HttpServletResponse", Pos: jPos()}},
+			"java-taint-xss-writer"},
+		{"xss-writer-jakarta", []string{"writer", "write"}, false,
+			[]javaprogram.Import{{ScopeID: jModID(), Kind: javaprogram.ImportOnDemand, Module: "jakarta.servlet.http", Name: "", Pos: jPos()}},
+			"java-taint-xss-writer"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -256,6 +262,9 @@ func TestJavaImportGatedSinksRequireAnchoringImport(t *testing.T) {
 		{"ldap-unrelated-import", []string{"ctx", "search"}, 2, 1, namingImport(javaprogram.ImportSingle, "java.util.List", "List"), "java-taint-ldap-search", false},
 		{"xpath-with-wildcard-import", []string{"xp", "evaluate"}, 1, 0, namingImport(javaprogram.ImportOnDemand, "javax.xml.xpath", ""), "java-taint-xpath-expression", true},
 		{"xpath-no-import", []string{"xp", "evaluate"}, 1, 0, nil, "java-taint-xpath-expression", false},
+		{"xss-with-servlet-import", []string{"writer", "println"}, 1, 0, namingImport(javaprogram.ImportSingle, "javax.servlet.http.HttpServletResponse", "HttpServletResponse"), "java-taint-xss-writer", true},
+		{"xss-no-import", []string{"writer", "println"}, 1, 0, nil, "java-taint-xss-writer", false},
+		{"xss-non-servlet-println-not-flagged", []string{"System", "out", "println"}, 1, 0, namingImport(javaprogram.ImportSingle, "java.util.List", "List"), "java-taint-xss-writer", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
