@@ -140,6 +140,38 @@ func TestInterprocAnalyzerReachesFirstPartySymbolsFromRealFacts(t *testing.T) {
 	}
 }
 
+func TestInterprocAnalyzerClosureAliasReassignmentStaysBlind(t *testing.T) {
+	dir := writeApp(t, `
+function defaultStrategy() {}
+function aggressiveStrategy() {}
+function outer() {
+  let strategy = defaultStrategy;
+  function useAggressive() { strategy = aggressiveStrategy; }
+  useAggressive();
+  strategy();
+}
+outer();
+`)
+	analyzer, err := NewInterprocAnalyzer(prodFactsProvider{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject, ok := FirstPartySymbolSubject("app.js", "aggressiveStrategy")
+	if !ok {
+		t.Fatal("build first-party aggressiveStrategy subject")
+	}
+	analysis, err := analyzer.Analyze(context.Background(), dir, []string{subject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, construct := range analysis.BlindConstructs {
+		if construct == "jsprogram:unresolved_call" || construct == "jsprogram:unresolved_value" {
+			return
+		}
+	}
+	t.Fatalf("closure reassignment must keep the analysis blind, got %#v", analysis.BlindConstructs)
+}
+
 // TestInterprocRecorderMintsFromRawSubjectsEndToEnd is the production-path test the unit tests could not
 // give: it feeds the recorder the RAW (PackagePURL + affected symbol) subject the SCA pass actually
 // produces (not a pre-encoded one), over a real extracted call graph, and asserts a raise-only reachable

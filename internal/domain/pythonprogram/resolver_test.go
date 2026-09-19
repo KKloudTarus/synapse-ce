@@ -82,15 +82,18 @@ func TestResolveKeepsLiteralDispatchUncertaintySubjectLocal(t *testing.T) {
 	moduleID := document.Symbols[0].ID
 	dispatch := resolverSymbol("python:app:dispatch", "app", "dispatch", "dispatch", moduleID, SymbolFunction, 3)
 	opaque := resolverSymbol("python:app:opaque", "app", "opaque", "opaque", moduleID, SymbolFunction, 6)
-	downstream := resolverSymbol("python:app:downstream", "app", "downstream", "downstream", moduleID, SymbolFunction, 9)
-	unrelated := resolverSymbol("python:app:unrelated", "app", "unrelated", "unrelated", moduleID, SymbolFunction, 12)
-	document.Symbols = append(document.Symbols, dispatch, opaque, downstream, unrelated)
+	alternate := resolverSymbol("python:app:alternate", "app", "alternate", "alternate", moduleID, SymbolFunction, 9)
+	downstream := resolverSymbol("python:app:downstream", "app", "downstream", "downstream", moduleID, SymbolFunction, 12)
+	alternateDownstream := resolverSymbol("python:app:alternate_downstream", "app", "alternate_downstream", "alternate_downstream", moduleID, SymbolFunction, 15)
+	unrelated := resolverSymbol("python:app:unrelated", "app", "unrelated", "unrelated", moduleID, SymbolFunction, 18)
+	document.Symbols = append(document.Symbols, dispatch, opaque, alternate, downstream, alternateDownstream, unrelated)
 	document.Calls = []Call{
 		{
 			ID: "app.py:4:4", CallerID: dispatch.ID, Callee: nameRef("handler"),
-			BoundedCallees: []Reference{nameRef("opaque")}, Pos: resolverPos("app.py", 4),
+			BoundedCallees: []Reference{nameRef("opaque"), nameRef("alternate")}, Pos: resolverPos("app.py", 4),
 		},
 		{ID: "app.py:7:4", CallerID: opaque.ID, Callee: nameRef("downstream"), Pos: resolverPos("app.py", 7)},
+		{ID: "app.py:10:4", CallerID: alternate.ID, Callee: nameRef("alternate_downstream"), Pos: resolverPos("app.py", 10)},
 	}
 
 	resolution, err := Resolve(document)
@@ -104,7 +107,7 @@ func TestResolveKeepsLiteralDispatchUncertaintySubjectLocal(t *testing.T) {
 	for _, node := range resolution.BoundedUncertainNodes {
 		uncertain[node] = true
 	}
-	for _, node := range []string{opaque.ID, downstream.ID} {
+	for _, node := range []string{opaque.ID, alternate.ID, downstream.ID, alternateDownstream.ID} {
 		if !uncertain[node] {
 			t.Errorf("bounded dispatch must retain %q as local uncertainty: %v", node, resolution.BoundedUncertainNodes)
 		}
@@ -112,8 +115,10 @@ func TestResolveKeepsLiteralDispatchUncertaintySubjectLocal(t *testing.T) {
 	if uncertain[unrelated.ID] {
 		t.Fatalf("unrelated node must remain outside bounded uncertainty: %v", resolution.BoundedUncertainNodes)
 	}
-	if graphHasPythonEdge(resolution, dispatch.ID, opaque.ID) {
-		t.Fatal("a bounded candidate must not be promoted into a fabricated static edge")
+	for _, candidate := range []string{opaque.ID, alternate.ID} {
+		if graphHasPythonEdge(resolution, dispatch.ID, candidate) {
+			t.Fatalf("bounded candidate %q must not become a fabricated static edge", candidate)
+		}
 	}
 }
 

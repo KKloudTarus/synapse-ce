@@ -770,11 +770,37 @@ func fixtureIdentityHasVersion(kind, identity string) bool {
 	return separator > 0
 }
 
+const (
+	pythonSemanticApplicationFixtureID = "python-semantic-input"
+	pythonSemanticApplicationModule    = "fixtures/python/semantic/main.py"
+)
+
+// pythonSemanticSourceIsClosedWorldApplication is the authority boundary for
+// first-party Python subjects. Those subjects intentionally omit exported APIs
+// from the entrypoint set, so library or vendored source must remain on the PURL
+// path (or no coverage) rather than receiving a closed-world negative.
+func pythonSemanticSourceIsClosedWorldApplication(resolved measurement.ResolvedFixtureSubject) bool {
+	if resolved.Specification.ID != pythonSemanticApplicationFixtureID ||
+		resolved.Subject.Locator.Kind != measurement.FixtureLocatorSourceSymbol ||
+		resolved.Subject.Locator.ModulePath != pythonSemanticApplicationModule {
+		return false
+	}
+	for _, entry := range resolved.Specification.Entries {
+		if entry.Role == measurement.FixtureEntrySource && entry.Path == pythonSemanticApplicationModule {
+			return true
+		}
+	}
+	return false
+}
+
 func runPythonSemantic(ctx context.Context, capture *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
 	var symbol string
 	var ok bool
 	purl := fixturePackagePURL(resolved.Subject.PackageIdentity)
 	if resolved.Subject.Locator.Kind == measurement.FixtureLocatorSourceSymbol {
+		if !pythonSemanticSourceIsClosedWorldApplication(resolved) {
+			return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonUnsupported)}, nil
+		}
 		modulePath, pathErr := fixture.AnalysisRelativeInput(resolved.Subject.Locator.ModulePath)
 		if pathErr != nil {
 			return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonFailed), analyzerError: fmt.Errorf("derive Python semantic source module: %w", pathErr)}, nil

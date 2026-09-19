@@ -335,6 +335,58 @@ func TestResolveDirectLocalFunctionAlias(t *testing.T) {
 	}
 }
 
+func TestResolveClosureReassignmentDefeatsCompleteAlias(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	defaultStrategy := b.fn("app", "defaultStrategy", "defaultStrategy", mod, SymbolFunction)
+	b.fn("app", "aggressiveStrategy", "aggressiveStrategy", mod, SymbolFunction)
+	outer := b.fn("app", "outer", "outer", mod, SymbolFunction)
+	mutate := b.fn("app", "outer.useAggressive", "useAggressive", outer, SymbolFunction)
+	b.assign("app", outer, name("strategy"), name("defaultStrategy"))
+	b.assign("app", mutate, name("strategy"), name("aggressiveStrategy"))
+	b.call("app", outer, name("useAggressive"), false)
+	b.call("app", outer, name("strategy"), false)
+	b.call("app", mod, name("outer"), false)
+
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("a descendant-scope write must defeat complete alias resolution")
+	}
+	if res.Graph.Reaches(defaultStrategy) {
+		t.Fatal("an escaped alias must not retain the stale declaring-scope target")
+	}
+	for _, gap := range res.Gaps {
+		if gap.Kind == GapUnresolvedCall {
+			return
+		}
+	}
+	t.Fatalf("expected an unresolved-call gap for the escaped alias, gaps=%v", res.Gaps)
+}
+
+func TestResolveClosureReassignmentDefeatsCompleteWithoutAliasCall(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	b.fn("app", "defaultStrategy", "defaultStrategy", mod, SymbolFunction)
+	b.fn("app", "aggressiveStrategy", "aggressiveStrategy", mod, SymbolFunction)
+	outer := b.fn("app", "outer", "outer", mod, SymbolFunction)
+	mutate := b.fn("app", "outer.useAggressive", "useAggressive", outer, SymbolFunction)
+	b.assign("app", outer, name("strategy"), name("defaultStrategy"))
+	b.assign("app", mutate, name("strategy"), name("aggressiveStrategy"))
+	b.assign("app", outer, attr("bus", "handler"), name("strategy"))
+	b.call("app", mod, name("outer"), false)
+
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("a descendant-scope write must remain a gap when the escaped alias is stored rather than called")
+	}
+	for _, gap := range res.Gaps {
+		if gap.Kind == GapUnresolvedValue && gap.Detail == "closure_alias_write" {
+			return
+		}
+	}
+	t.Fatalf("expected a closure-alias-write gap, gaps=%v", res.Gaps)
+}
+
 func TestResolveUniqueSynchronousCallback(t *testing.T) {
 	b := newDoc()
 	mod := b.module("app")

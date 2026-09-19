@@ -56,12 +56,34 @@ var fromRE = regexp.MustCompile(`^\s*from\s+(\.*[A-Za-z0-9_.]*)\s+import\b`)
 // evidence for that module only. Every other dynamic loader remains a global
 // coverage gap so an unknown target can never produce a negative conclusion.
 var (
-	pythonStringAssignmentRE = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:'([A-Za-z_][A-Za-z0-9_.]*)'|"([A-Za-z_][A-Za-z0-9_.]*)")\s*$`)
-	pythonAssignmentRE       = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=`)
-	pythonDynamicImportRE    = regexp.MustCompile(`(?:\b__import__|\bimportlib\s*\.\s*import_module|\bimport_module)\s*\(\s*([^,)]*)`)
-	pythonImportlibCallRE    = regexp.MustCompile(`\bimportlib\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
-	pythonUnknownDynamicRE   = regexp.MustCompile(`(?:\bimp\s*\.\s*load[A-Za-z_]*|\b(?:runpy|pkgutil)\s*\.\s*[A-Za-z_][A-Za-z0-9_]*|\bexec|\beval)\s*\(`)
+	pythonStringAssignmentRE  = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:'([A-Za-z_][A-Za-z0-9_.]*)'|"([A-Za-z_][A-Za-z0-9_.]*)")\s*$`)
+	pythonAssignmentRE        = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=`)
+	pythonBindingAssignmentRE = regexp.MustCompile(
+		`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*$`,
+	)
+	pythonCallRE = regexp.MustCompile(
+		`\b([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*\(`,
+	)
+	pythonDynamicSurfaceRE = regexp.MustCompile(`\b(?:importlib|runpy|pkgutil|imp|__import__|exec|eval)\b`)
 )
+
+type pythonDynamicBinding uint8
+
+const (
+	pythonDynamicModuleImportlib pythonDynamicBinding = iota + 1
+	pythonDynamicModuleOpaque
+	pythonDynamicCallableImport
+	pythonDynamicCallableOpaque
+	pythonDynamicPoisoned
+)
+
+type pythonDynamicState struct {
+	bindings map[string]pythonDynamicBinding
+}
+
+func newPythonDynamicState() *pythonDynamicState {
+	return &pythonDynamicState{bindings: map[string]pythonDynamicBinding{}}
+}
 
 // ScanImports walks dir's first-party .py files and returns the import surface. Returns a no-coverage error
 // when the target has no Python source (so a caller never treats a non-Python project as "nothing imported").
@@ -142,9 +164,10 @@ func scanFile(path string, maxLen int64, imported, dynamicModules map[string]boo
 	var read int64
 	var cont string // accumulates a backslash-continued logical line
 	constants := map[string]string{}
+	dynamicState := newPythonDynamicState()
 	process := func(logical string) {
 		for _, stmt := range strings.Split(logical, ";") { // compound statements: import a; import b
-			scanStmt(stmt, imported, dynamicModules, dynamicUnknown, constants)
+			scanStmt(stmt, imported, dynamicModules, dynamicUnknown, constants, dynamicState)
 		}
 	}
 	for sc.Scan() {
@@ -174,14 +197,24 @@ func scanFile(path string, maxLen int64, imported, dynamicModules map[string]boo
 // A plain constant dynamic target is an affirmative observation for that module; unrecognized dynamic forms
 // are explicitly marked unknown. Comment content is stripped first so a `# importlib` note does not affect
 // coverage and an inline `# comment` never pollutes a module name.
-func scanStmt(stmt string, imported, dynamicModules map[string]bool, dynamicUnknown *bool, constants map[string]string) {
+func scanStmt(
+	stmt string,
+	imported, dynamicModules map[string]bool,
+	dynamicUnknown *bool,
+	constants map[string]string,
+	dynamicState *pythonDynamicState,
+) {
 	stmt = stripComment(stmt)
 	trimmed := strings.TrimSpace(stmt)
 	if trimmed == "" {
 		return
 	}
 	updatePythonStringConstant(trimmed, constants)
-	observePythonDynamicImport(trimmed, constants, dynamicModules, dynamicUnknown)
+	bindingHandled := observePythonDynamicBinding(trimmed, dynamicState, dynamicUnknown)
+	callHandled := observePythonDynamicImport(trimmed, constants, dynamicState, dynamicModules, dynamicUnknown)
+	if pythonDynamicSurfaceRE.MatchString(pythonCodeOnly(trimmed)) && !bindingHandled && !callHandled {
+		*dynamicUnknown = true
+	}
 	if m := fromRE.FindStringSubmatch(stmt); m != nil {
 		if top := topLevelOfModule(m[1]); top != "" {
 			imported[top] = true
@@ -222,22 +255,271 @@ func updatePythonStringConstant(stmt string, constants map[string]string) {
 	}
 }
 
-func observePythonDynamicImport(stmt string, constants map[string]string, dynamicModules map[string]bool, dynamicUnknown *bool) {
-	for _, match := range pythonDynamicImportRE.FindAllStringSubmatch(stmt, -1) {
-		if top, ok := pythonDynamicTopLevel(match[1], constants); ok {
+func (s *pythonDynamicState) bind(name string, kind pythonDynamicBinding) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	prior, seen := s.bindings[name]
+	if !seen {
+		s.bindings[name] = kind
+		return
+	}
+	if prior != kind {
+		s.bindings[name] = pythonDynamicPoisoned
+	}
+}
+
+func (s *pythonDynamicState) poison(name string) {
+	if _, seen := s.bindings[name]; seen {
+		s.bindings[name] = pythonDynamicPoisoned
+	}
+}
+
+func (s *pythonDynamicState) bindingForReference(reference string) (pythonDynamicBinding, bool) {
+	parts := strings.Split(normalizePythonReference(reference), ".")
+	if len(parts) == 0 || parts[0] == "" {
+		return 0, false
+	}
+	kind, known := s.bindings[parts[0]]
+	if !known {
+		switch parts[0] {
+		case "importlib":
+			kind, known = pythonDynamicModuleImportlib, true
+		case "runpy", "pkgutil", "imp", "builtins":
+			kind, known = pythonDynamicModuleOpaque, true
+		case "__import__", "import_module":
+			kind, known = pythonDynamicCallableImport, true
+		case "exec", "eval":
+			kind, known = pythonDynamicCallableOpaque, true
+		}
+	}
+	if !known || len(parts) == 1 {
+		return kind, known
+	}
+	if kind == pythonDynamicModuleImportlib && len(parts) == 2 && parts[1] == "import_module" {
+		return pythonDynamicCallableImport, true
+	}
+	return pythonDynamicCallableOpaque, true
+}
+
+func observePythonDynamicBinding(
+	stmt string,
+	state *pythonDynamicState,
+	dynamicUnknown *bool,
+) bool {
+	if strings.HasPrefix(stmt, "import ") {
+		handled := false
+		for _, item := range strings.Split(strings.TrimSpace(strings.TrimPrefix(stmt, "import ")), ",") {
+			module, alias, ok := pythonImportAlias(item)
+			if !ok {
+				continue
+			}
+			kind, dynamic := pythonDynamicModuleBinding(module)
+			if !dynamic {
+				continue
+			}
+			if alias == "" {
+				alias = strings.Split(module, ".")[0]
+			}
+			state.bind(alias, kind)
+			handled = true
+		}
+		return handled
+	}
+	if strings.HasPrefix(stmt, "from ") {
+		rest := strings.TrimSpace(strings.TrimPrefix(stmt, "from "))
+		separator := strings.Index(rest, " import ")
+		if separator < 0 {
+			return false
+		}
+		module := strings.TrimSpace(rest[:separator])
+		if _, dynamic := pythonDynamicModuleBinding(module); !dynamic {
+			return false
+		}
+		imports := strings.TrimSpace(rest[separator+len(" import "):])
+		if strings.HasPrefix(imports, "(") != strings.HasSuffix(imports, ")") {
+			*dynamicUnknown = true
+		}
+		imports = strings.TrimSpace(strings.Trim(imports, "()"))
+		for _, item := range strings.Split(imports, ",") {
+			name, alias, ok := pythonImportAlias(item)
+			if !ok || name == "*" {
+				*dynamicUnknown = true
+				continue
+			}
+			if alias == "" {
+				alias = name
+			}
+			state.bind(alias, pythonDynamicImportedBinding(module, name))
+		}
+		return true
+	}
+	if match := pythonBindingAssignmentRE.FindStringSubmatch(stmt); match != nil {
+		kind, dynamic := state.bindingForReference(match[2])
+		if dynamic {
+			state.bind(match[1], kind)
+			return true
+		}
+		state.poison(match[1])
+		return false
+	}
+	if match := pythonAssignmentRE.FindStringSubmatch(stmt); match != nil {
+		state.poison(match[1])
+	}
+	return false
+}
+
+func pythonDynamicModuleBinding(module string) (pythonDynamicBinding, bool) {
+	module = strings.TrimLeft(normalizePythonReference(module), ".")
+	root := strings.Split(module, ".")[0]
+	switch root {
+	case "importlib":
+		if module == "importlib" {
+			return pythonDynamicModuleImportlib, true
+		}
+		return pythonDynamicModuleOpaque, true
+	case "runpy", "pkgutil", "imp", "builtins":
+		return pythonDynamicModuleOpaque, true
+	default:
+		return 0, false
+	}
+}
+
+func pythonDynamicImportedBinding(module, name string) pythonDynamicBinding {
+	module = strings.TrimLeft(normalizePythonReference(module), ".")
+	name = normalizePythonReference(name)
+	if (module == "importlib" && name == "import_module") ||
+		(module == "builtins" && name == "__import__") {
+		return pythonDynamicCallableImport
+	}
+	return pythonDynamicCallableOpaque
+}
+
+func pythonImportAlias(value string) (name, alias string, ok bool) {
+	fields := strings.Fields(strings.TrimSpace(value))
+	switch {
+	case len(fields) == 1:
+		return fields[0], "", fields[0] != ""
+	case len(fields) == 3 && fields[1] == "as":
+		return fields[0], fields[2], fields[0] != "" && fields[2] != ""
+	default:
+		return "", "", false
+	}
+}
+
+func normalizePythonReference(value string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\t', '\r', '\n':
+			return -1
+		default:
+			return r
+		}
+	}, value)
+}
+
+func pythonFirstCallArgument(value string) string {
+	var quote byte
+	escaped := false
+	depth := 0
+	for i := 0; i < len(value); i++ {
+		char := value[i]
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if char == '\\' {
+				escaped = true
+				continue
+			}
+			if char == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch char {
+		case '\'', '"':
+			quote = char
+		case '(', '[', '{':
+			depth++
+		case ')':
+			if depth == 0 {
+				return value[:i]
+			}
+			depth--
+		case ']', '}':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				return value[:i]
+			}
+		}
+	}
+	return value
+}
+
+func pythonCodeOnly(value string) string {
+	var out strings.Builder
+	out.Grow(len(value))
+	var quote byte
+	escaped := false
+	for i := 0; i < len(value); i++ {
+		char := value[i]
+		if quote != 0 {
+			out.WriteByte(' ')
+			if escaped {
+				escaped = false
+				continue
+			}
+			if char == '\\' {
+				escaped = true
+				continue
+			}
+			if char == quote {
+				quote = 0
+			}
+			continue
+		}
+		if char == '\'' || char == '"' {
+			quote = char
+			out.WriteByte(' ')
+			continue
+		}
+		out.WriteByte(char)
+	}
+	return out.String()
+}
+
+func observePythonDynamicImport(
+	stmt string,
+	constants map[string]string,
+	state *pythonDynamicState,
+	dynamicModules map[string]bool,
+	dynamicUnknown *bool,
+) bool {
+	handled := false
+	for _, match := range pythonCallRE.FindAllStringSubmatchIndex(stmt, -1) {
+		kind, dynamic := state.bindingForReference(stmt[match[2]:match[3]])
+		if !dynamic {
+			continue
+		}
+		handled = true
+		if kind != pythonDynamicCallableImport {
+			*dynamicUnknown = true
+			continue
+		}
+		argument := pythonFirstCallArgument(stmt[match[1]:])
+		if top, ok := pythonDynamicTopLevel(argument, constants); ok {
 			dynamicModules[top] = true
 			continue
 		}
 		*dynamicUnknown = true
 	}
-	for _, match := range pythonImportlibCallRE.FindAllStringSubmatch(stmt, -1) {
-		if match[1] != "import_module" {
-			*dynamicUnknown = true
-		}
-	}
-	if pythonUnknownDynamicRE.MatchString(stmt) {
-		*dynamicUnknown = true
-	}
+	return handled
 }
 
 func pythonDynamicTopLevel(argument string, constants map[string]string) (string, bool) {

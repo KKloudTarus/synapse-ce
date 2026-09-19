@@ -539,6 +539,50 @@ func TestSymbolSubjectsRejectManifestCapabilityLocator(t *testing.T) {
 	}
 }
 
+func TestPythonSemanticFirstPartyRequiresClosedWorldApplicationFixture(t *testing.T) {
+	application := measurement.ResolvedFixtureSubject{
+		Specification: measurement.FixtureSpecification{
+			ID: pythonSemanticApplicationFixtureID,
+			Entries: []measurement.FixtureEntry{{
+				Role: measurement.FixtureEntrySource,
+				Path: pythonSemanticApplicationModule,
+			}},
+		},
+		Subject: measurement.FixtureSubject{Locator: measurement.FixtureLocator{
+			Kind:       measurement.FixtureLocatorSourceSymbol,
+			ModulePath: pythonSemanticApplicationModule,
+			Symbol:     "control_unreachable",
+		}},
+	}
+	if !pythonSemanticSourceIsClosedWorldApplication(application) {
+		t.Fatal("the frozen Python semantic application fixture must retain first-party closed-world authority")
+	}
+
+	for name, mutate := range map[string]func(*measurement.ResolvedFixtureSubject){
+		"library path": func(resolved *measurement.ResolvedFixtureSubject) {
+			resolved.Subject.Locator.ModulePath = "fixtures/python/semantic/library.py"
+		},
+		"untrusted fixture": func(resolved *measurement.ResolvedFixtureSubject) {
+			resolved.Specification.ID = "python-library-input"
+		},
+		"missing application entry": func(resolved *measurement.ResolvedFixtureSubject) {
+			resolved.Specification.Entries = nil
+		},
+		"package locator": func(resolved *measurement.ResolvedFixtureSubject) {
+			resolved.Subject.Locator.Kind = measurement.FixtureLocatorPackageDependency
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resolved := application
+			resolved.Specification.Entries = append([]measurement.FixtureEntry(nil), application.Specification.Entries...)
+			mutate(&resolved)
+			if pythonSemanticSourceIsClosedWorldApplication(resolved) {
+				t.Fatalf("%s must not receive first-party closed-world authority", name)
+			}
+		})
+	}
+}
+
 func TestJVMCoarseCoverageDoesNotTreatUnreferencedAsDeadCode(t *testing.T) {
 	if coverage := jvmCoarseCoverage(measurement.FixtureLocatorManifestCapability, sbom.ReachabilityReachable); coverage.Status != measurement.CoverageUnavailable || coverage.Reasons[0].Code != measurement.CoverageReasonUnsupported {
 		t.Fatalf("manifest capability coverage = %#v", coverage)

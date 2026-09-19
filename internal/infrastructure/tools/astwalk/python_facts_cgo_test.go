@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
@@ -115,7 +116,7 @@ func TestPythonFactsForReportsDynamicAndRecoveryGaps(t *testing.T) {
 
 func TestPythonFactsForKeepsLiteralMappingDispatchBounded(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, root, "main.py", "def dispatch(name):\n    handler = {\"opaque\": control_opaque}.get(name)\n    if handler is not None:\n        handler()\n\ndef control_opaque():\n    return None\n")
+	writeFile(t, root, "main.py", "def dispatch(name):\n    handler = {\"alternate\": control_alternate, \"opaque\": control_opaque}.get(name)\n    if handler is not None:\n        handler()\n\ndef control_alternate():\n    return None\n\ndef control_opaque():\n    return None\n")
 
 	document, err := PythonFactsFor(context.Background(), root)
 	if err != nil {
@@ -128,7 +129,11 @@ func TestPythonFactsForKeepsLiteralMappingDispatchBounded(t *testing.T) {
 		if joinPythonReference(call.Callee) != "handler" {
 			continue
 		}
-		if len(call.BoundedCallees) != 1 || joinPythonReference(call.BoundedCallees[0]) != "control_opaque" {
+		bounded := make([]string, 0, len(call.BoundedCallees))
+		for _, candidate := range call.BoundedCallees {
+			bounded = append(bounded, joinPythonReference(candidate))
+		}
+		if !slices.Equal(bounded, []string{"control_alternate", "control_opaque"}) {
 			t.Fatalf("bounded handler call = %+v", call)
 		}
 		return

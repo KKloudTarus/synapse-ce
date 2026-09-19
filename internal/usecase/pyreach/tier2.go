@@ -39,9 +39,10 @@ func NewTier2Analyzer(provider semanticFactsProvider) (*Tier2Analyzer, error) {
 }
 
 // FirstPartySymbolSubject constructs a closed-world query for an exact analyzed Python source symbol.
-// Source locators are different from component PURLs: they name a verified file in the analysis root rather
-// than an export of a third-party distribution. Keeping the forms separate prevents a package query from
-// silently gaining first-party semantics.
+// Callers must first establish that the source is application-owned and has no externally invoked library API;
+// library or vendored source must use a PURL subject or remain no coverage. Source locators are different from
+// component PURLs: they name a verified file in the analysis root rather than an export of a third-party
+// distribution. Keeping the forms separate prevents a package query from silently gaining first-party semantics.
 func FirstPartySymbolSubject(modulePath, symbol string) (string, bool) {
 	modulePath = strings.ReplaceAll(strings.TrimSpace(modulePath), "\\", "/")
 	if !strings.HasSuffix(modulePath, ".py") {

@@ -413,6 +413,32 @@ func (r *semanticResolver) indexCallableAliases() {
 			}
 		}
 	}
+
+	// Assignment facts do not distinguish a descendant's local shadow from a
+	// write to a closed-over binding. Preserve soundness by recording the value
+	// escape and poisoning every same-name alias in an ancestor scope; a nil
+	// slice prevents lookup from falling through to a more distant alias.
+	for scopeID, assignments := range r.assignmentsByScope {
+		chain := r.scopeChain(scopeID)
+		for _, assignment := range assignments {
+			for _, target := range assignment.Targets {
+				if target.Kind != ReferenceName || len(target.Segments) != 1 {
+					continue
+				}
+				name := target.Segments[0]
+				for _, ancestor := range chain[1:] {
+					aliases, declared := r.aliases[ancestor][name]
+					if !declared {
+						continue
+					}
+					if len(aliases) > 0 {
+						r.addGap(GapUnresolvedValue, ancestor, "closure_alias_write", assignment.Pos)
+					}
+					r.aliases[ancestor][name] = nil
+				}
+			}
+		}
+	}
 }
 
 // indexReturnedCallables recognizes one statically unique direct callable return per function. It deliberately

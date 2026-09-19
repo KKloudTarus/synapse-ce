@@ -181,9 +181,12 @@ type Argument struct {
 // is present only when an immutable literal mapping selects from a finite set of local callables. It does not
 // make the call statically resolved: each candidate remains subject-local uncertainty for negative proofs.
 type Call struct {
-	ID              string      `json:"id"`
-	CallerID        string      `json:"caller_id"`
-	Callee          Reference   `json:"callee"`
+	ID       string    `json:"id"`
+	CallerID string    `json:"caller_id"`
+	Callee   Reference `json:"callee"`
+	// BoundedCallees is a producer assertion that every possible direct local callable has been
+	// enumerated from an immutable dispatch source and copied out of mutable extractor state. A
+	// producer that cannot prove both properties must omit this field and retain the normal gap.
 	BoundedCallees  []Reference `json:"bounded_callees,omitempty"`
 	Arguments       []Argument  `json:"arguments,omitempty"`
 	ResultID        string      `json:"result_id,omitempty"`
