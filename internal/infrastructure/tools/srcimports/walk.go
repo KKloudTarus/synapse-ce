@@ -17,21 +17,36 @@ import (
 )
 
 // Bounds cap worst-case work on a hostile or simply enormous repository. Exceeding one is recorded as a
-// coverage reason, so a truncated scan can never look like a complete observation.
+// coverage reason, so a truncated scan can never look like a complete observation. The 64 MiB aggregate
+// admits 32 maximum-sized files while keeping two-pass provenance scans bounded independently of file count.
 const (
-	defaultMaxFiles     = 50000
-	defaultMaxFileBytes = 2 << 20
-	defaultMaxEntries   = 500000
+	defaultMaxFiles       = 50000
+	defaultMaxFileBytes   = 2 << 20
+	defaultMaxSourceBytes = 64 << 20
+	defaultMaxEntries     = 500000
 )
 
 type scanLimits struct {
-	maxFiles     int
-	maxFileBytes int64
-	maxEntries   int
+	maxFiles       int
+	maxFileBytes   int64
+	maxSourceBytes int64
+	maxEntries     int
 }
 
 func defaultScanLimits() scanLimits {
-	return scanLimits{maxFiles: defaultMaxFiles, maxFileBytes: defaultMaxFileBytes, maxEntries: defaultMaxEntries}
+	return scanLimits{
+		maxFiles:       defaultMaxFiles,
+		maxFileBytes:   defaultMaxFileBytes,
+		maxSourceBytes: defaultMaxSourceBytes,
+		maxEntries:     defaultMaxEntries,
+	}
+}
+
+// sourceFile is the metadata retained to rescan an accepted file. Its bytes are the verified first-pass
+// size, so the second pass can enforce the same aggregate source budget without retaining its body.
+type sourceFile struct {
+	path  string
+	bytes int64
 }
 
 // dynamicConstruct is a textual marker for a construct under which a dependency can be referenced
@@ -43,19 +58,32 @@ type dynamicConstruct struct {
 
 // scanAccumulator collects one scan's observations.
 type scanAccumulator struct {
-	packages    map[string]bool
-	entrypoints []string
-	reasons     map[string]bool
-	files       int
+	packages            map[string]bool
+	conditionalPackages map[string]bool
+	entrypoints         []string
+	reasons             map[string]bool
+	files               int
+	sourceBytes         int64
 }
 
 func newScanAccumulator() *scanAccumulator {
-	return &scanAccumulator{packages: map[string]bool{}, reasons: map[string]bool{}}
+	return &scanAccumulator{
+		packages:            map[string]bool{},
+		conditionalPackages: map[string]bool{},
+		reasons:             map[string]bool{},
+	}
 }
 
 func (a *scanAccumulator) addPackage(name string) {
 	if trimmed := strings.ToLower(strings.TrimSpace(name)); trimmed != "" {
 		a.packages[trimmed] = true
+	}
+}
+
+func (a *scanAccumulator) addConditionalPackage(name string) {
+	if trimmed := strings.ToLower(strings.TrimSpace(name)); trimmed != "" {
+		a.packages[trimmed] = true
+		a.conditionalPackages[trimmed] = true
 	}
 }
 
@@ -83,6 +111,12 @@ func (a *scanAccumulator) graph() ports.SourceImportGraph {
 	}
 	sort.Strings(packages)
 
+	conditionalPackages := make([]string, 0, len(a.conditionalPackages))
+	for name := range a.conditionalPackages {
+		conditionalPackages = append(conditionalPackages, name)
+	}
+	sort.Strings(conditionalPackages)
+
 	reasons := make([]string, 0, len(a.reasons))
 	for reason := range a.reasons {
 		reasons = append(reasons, reason)
@@ -99,10 +133,11 @@ func (a *scanAccumulator) graph() ports.SourceImportGraph {
 
 	entrypoints := normalizeNames(a.entrypoints)
 	return ports.SourceImportGraph{
-		ImportedPackages: packages,
-		Entrypoints:      entrypoints,
-		CoverageReasons:  reasons,
-		FilesScanned:     a.files,
+		ImportedPackages:    packages,
+		ConditionalPackages: conditionalPackages,
+		Entrypoints:         entrypoints,
+		CoverageReasons:     reasons,
+		FilesScanned:        a.files,
 	}
 }
 
@@ -137,6 +172,9 @@ func (w *sourceWalker) withExemptCoverage(dirs map[string]bool) *sourceWalker {
 func (w *sourceWalker) walk(ctx context.Context, dir string, visit func(path string, content []byte, out *scanAccumulator)) (*scanAccumulator, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("%w: source scan requires a context", shared.ErrValidation)
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("source scan cancelled: %w", ctxErr)
 	}
 	trimmed := strings.TrimSpace(dir)
 	if trimmed == "" {
@@ -209,12 +247,23 @@ func (w *sourceWalker) walk(ctx context.Context, dir string, visit func(path str
 			out.addReason("a source file could not be read (" + p + ")")
 			return nil
 		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if !utf8.Valid(content) {
 			out.addReason("a source file is not valid UTF-8 (" + p + ")")
 			return nil
 		}
+		if int64(len(content)) > w.limits.maxSourceBytes-out.sourceBytes {
+			out.addReason("aggregate source byte budget exceeded; traversal stopped")
+			return fs.SkipAll
+		}
 		out.files++
+		out.sourceBytes += int64(len(content))
 		visit(p, content, out)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return nil
 	})
 	if walkErr != nil {
@@ -223,10 +272,62 @@ func (w *sourceWalker) walk(ctx context.Context, dir string, visit func(path str
 		}
 		return nil, fmt.Errorf("%w: source scan could not walk the target", shared.ErrValidation)
 	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("source scan cancelled: %w", ctxErr)
+	}
 	if out.files == 0 {
 		return nil, fmt.Errorf("%w: no supported source under the target (no coverage)", shared.ErrNotFound)
 	}
 	return out, nil
+}
+
+// rescan reads only the accepted first-pass files. It retains no source body between passes and rejects an
+// incomplete second pass rather than deriving provenance from a different source set.
+func (w *sourceWalker) rescan(ctx context.Context, dir string, files []sourceFile, visit func(path string, content []byte) error) error {
+	if ctx == nil {
+		return fmt.Errorf("%w: source scan requires a context", shared.ErrValidation)
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("source scan cancelled: %w", ctxErr)
+	}
+	trimmed := strings.TrimSpace(dir)
+	if trimmed == "" {
+		return fmt.Errorf("%w: source scan requires a target directory", shared.ErrValidation)
+	}
+	rootDir, err := os.OpenRoot(trimmed)
+	if err != nil {
+		return fmt.Errorf("%w: source scan root could not be opened", shared.ErrValidation)
+	}
+	defer func() { _ = rootDir.Close() }()
+
+	var sourceBytes int64
+	for _, file := range files {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("source scan cancelled: %w", ctxErr)
+		}
+		if file.path == "" || file.bytes < 0 || file.bytes > w.limits.maxSourceBytes-sourceBytes {
+			return fmt.Errorf("%w: source scan exceeded the aggregate source byte budget", shared.ErrValidation)
+		}
+		info, err := rootDir.Lstat(file.path)
+		if err != nil || info.Mode()&fs.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() != file.bytes {
+			return fmt.Errorf("%w: source changed between scan passes", shared.ErrValidation)
+		}
+		content, ok := readThroughRoot(rootDir, file.path, w.limits.maxFileBytes)
+		if !ok || int64(len(content)) != file.bytes {
+			return fmt.Errorf("%w: source changed between scan passes", shared.ErrValidation)
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("source scan cancelled: %w", ctxErr)
+		}
+		sourceBytes += int64(len(content))
+		if err := visit(file.path, content); err != nil {
+			return err
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("source scan cancelled: %w", ctxErr)
+		}
+	}
+	return nil
 }
 
 func (w *sourceWalker) supported(p string) bool {

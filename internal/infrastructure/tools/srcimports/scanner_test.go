@@ -70,6 +70,31 @@ use {itertools, rayon::prelude::*};
 	}
 }
 
+func TestRustScannerMarksConditionalCrateReferences(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Cargo.toml"), "[package]\nname = \"my-app\"\n")
+	writeFile(t, filepath.Join(root, "src", "main.rs"), `
+fn entry() {
+    direct_crate::run();
+    if std::env::var("MODE").as_deref() == Ok("dynamic") {
+        dynamic_crate::run();
+    }
+}
+`)
+	graph, err := NewRustScanner().ScanImports(context.Background(), root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if !contains(graph.ConditionalPackages, "dynamic_crate") {
+		t.Fatalf("conditional crate reference was not retained: %v", graph.ConditionalPackages)
+	}
+	if contains(graph.ConditionalPackages, "direct_crate") {
+		t.Fatalf("unconditional crate was marked conditional: %v", graph.ConditionalPackages)
+	}
+}
+
 func TestRustDynamicConstructsDegradeCoverage(t *testing.T) {
 	t.Parallel()
 

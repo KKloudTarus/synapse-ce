@@ -43,6 +43,20 @@ func (b *docBuilder) class(module, name, parentID string, bases ...Reference) st
 	return id
 }
 
+func (b *docBuilder) positionalParams(symbolID string, names ...string) {
+	for index := range b.doc.Symbols {
+		if b.doc.Symbols[index].ID != symbolID {
+			continue
+		}
+		for _, name := range names {
+			b.doc.Symbols[index].Parameters = append(b.doc.Symbols[index].Parameters, Parameter{
+				Name: name, Kind: ParameterPositional, Pos: b.doc.Symbols[index].Pos,
+			})
+		}
+		return
+	}
+}
+
 func (b *docBuilder) call(module, callerID string, callee Reference, isNew bool) {
 	b.callSeq++
 	b.doc.Calls = append(b.doc.Calls, Call{
@@ -305,6 +319,152 @@ func TestResolveDynamicGapFromExtractorDefeatsComplete(t *testing.T) {
 	}
 }
 
+func TestResolveDirectLocalFunctionAlias(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	target := b.fn("app", "target", "target", mod, SymbolFunction)
+	b.assign("app", mod, name("alias"), name("target"))
+	b.call("app", mod, name("alias"), false)
+
+	res := resolveOrFatal(t, b)
+	if !res.Complete {
+		t.Fatalf("a unique preceding direct alias must resolve completely, gaps=%v", res.Gaps)
+	}
+	if !res.Graph.Reaches(target) {
+		t.Fatal("target must be reached through a direct local alias")
+	}
+}
+
+func TestResolveClosureReassignmentDefeatsCompleteAlias(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	defaultStrategy := b.fn("app", "defaultStrategy", "defaultStrategy", mod, SymbolFunction)
+	b.fn("app", "aggressiveStrategy", "aggressiveStrategy", mod, SymbolFunction)
+	outer := b.fn("app", "outer", "outer", mod, SymbolFunction)
+	mutate := b.fn("app", "outer.useAggressive", "useAggressive", outer, SymbolFunction)
+	b.assign("app", outer, name("strategy"), name("defaultStrategy"))
+	b.assign("app", mutate, name("strategy"), name("aggressiveStrategy"))
+	b.call("app", outer, name("useAggressive"), false)
+	b.call("app", outer, name("strategy"), false)
+	b.call("app", mod, name("outer"), false)
+
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("a descendant-scope write must defeat complete alias resolution")
+	}
+	if res.Graph.Reaches(defaultStrategy) {
+		t.Fatal("an escaped alias must not retain the stale declaring-scope target")
+	}
+	for _, gap := range res.Gaps {
+		if gap.Kind == GapUnresolvedCall {
+			return
+		}
+	}
+	t.Fatalf("expected an unresolved-call gap for the escaped alias, gaps=%v", res.Gaps)
+}
+
+func TestResolveClosureReassignmentDefeatsCompleteWithoutAliasCall(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	b.fn("app", "defaultStrategy", "defaultStrategy", mod, SymbolFunction)
+	b.fn("app", "aggressiveStrategy", "aggressiveStrategy", mod, SymbolFunction)
+	outer := b.fn("app", "outer", "outer", mod, SymbolFunction)
+	mutate := b.fn("app", "outer.useAggressive", "useAggressive", outer, SymbolFunction)
+	b.assign("app", outer, name("strategy"), name("defaultStrategy"))
+	b.assign("app", mutate, name("strategy"), name("aggressiveStrategy"))
+	b.assign("app", outer, attr("bus", "handler"), name("strategy"))
+	b.call("app", mod, name("outer"), false)
+
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("a descendant-scope write must remain a gap when the escaped alias is stored rather than called")
+	}
+	for _, gap := range res.Gaps {
+		if gap.Kind == GapUnresolvedValue && gap.Detail == "closure_alias_write" {
+			return
+		}
+	}
+	t.Fatalf("expected a closure-alias-write gap, gaps=%v", res.Gaps)
+}
+
+func TestResolveUniqueSynchronousCallback(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	entry := b.fn("app", "entry", "entry", mod, SymbolFunction)
+	invoke := b.fn("app", "invoke", "invoke", mod, SymbolFunction)
+	b.positionalParams(invoke, "callback")
+	target := b.fn("app", "target", "target", mod, SymbolFunction)
+	b.call("app", mod, name("entry"), false)
+	b.call("app", entry, name("invoke"), false)
+	b.doc.Calls[len(b.doc.Calls)-1].Arguments = []Argument{{Value: name("target")}}
+	b.call("app", invoke, name("callback"), false)
+
+	res := resolveOrFatal(t, b)
+	if !res.Complete {
+		t.Fatalf("a uniquely bound synchronous callback must resolve completely, gaps=%v", res.Gaps)
+	}
+	if !res.Graph.Reaches(target) {
+		t.Fatal("target must be reached through invoke -> callback")
+	}
+}
+
+func TestResolveAmbiguousSynchronousCallbackBindingDefeatsComplete(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	invoke := b.fn("app", "invoke", "invoke", mod, SymbolFunction)
+	b.positionalParams(invoke, "callback")
+	first := b.fn("app", "first", "first", mod, SymbolFunction)
+	b.fn("app", "second", "second", mod, SymbolFunction)
+	b.call("app", mod, name("invoke"), false)
+	b.doc.Calls[len(b.doc.Calls)-1].Arguments = []Argument{{Value: name("first")}}
+	b.call("app", mod, name("invoke"), false)
+	b.doc.Calls[len(b.doc.Calls)-1].Arguments = []Argument{{Value: name("second")}}
+	b.call("app", invoke, name("callback"), false)
+
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("a callback parameter bound to different direct callables must remain incomplete")
+	}
+	if res.Graph.Reaches(first) {
+		t.Fatal("an ambiguously bound callback must not create a first-callback edge")
+	}
+}
+
+func TestResolveStaticallyUniqueReturnedCallable(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	target := b.fn("app", "target", "target", mod, SymbolFunction)
+	factory := b.fn("app", "factory", "factory", mod, SymbolFunction)
+	b.doc.Returns = append(b.doc.Returns, Return{ScopeID: factory, Value: name("target"), Pos: Position{File: "app.js", Line: 3}})
+	b.call("app", mod, callref("factory"), false)
+
+	res := resolveOrFatal(t, b)
+	if !res.Complete {
+		t.Fatalf("a factory with one direct callable return must resolve completely, gaps=%v", res.Gaps)
+	}
+	if !res.Graph.Reaches(target) {
+		t.Fatal("target must be reached through factory()()")
+	}
+}
+
+func TestResolveAliasedReturnedCallableDefeatsComplete(t *testing.T) {
+	b := newDoc()
+	mod := b.module("app")
+	target := b.fn("app", "target", "target", mod, SymbolFunction)
+	factory := b.fn("app", "factory", "factory", mod, SymbolFunction)
+	b.assign("app", factory, name("alias"), name("target"))
+	b.doc.Returns = append(b.doc.Returns, Return{ScopeID: factory, Value: name("alias"), Pos: Position{File: "app.js", Line: 4}})
+	b.call("app", mod, callref("factory"), false)
+
+	res := resolveOrFatal(t, b)
+	if res.Complete {
+		t.Fatal("an aliased returned callable must remain incomplete")
+	}
+	if res.Graph.Reaches(target) {
+		t.Fatal("an aliased returned callable must not create a target edge")
+	}
+}
+
 func TestResolveCallbackEscapeDefeatsComplete(t *testing.T) {
 	b := newDoc()
 	mod := b.module("app")
@@ -454,4 +614,148 @@ func TestResolveTruncatedDocumentIsIncomplete(t *testing.T) {
 	if res.Complete {
 		t.Fatal("a truncated document can never support a negative")
 	}
+}
+
+func TestResolveIndexedCallbacksRemainComplete(t *testing.T) {
+	fixture, target := callbackScaleDocument(64)
+	res := resolveOrFatal(t, fixture)
+	if !res.Complete {
+		t.Fatalf("indexed synchronous callbacks must remain complete, gaps=%v", res.Gaps)
+	}
+	if !res.Graph.Reaches(target) {
+		t.Fatal("the shared callback target must remain reachable")
+	}
+}
+
+func TestCallbackIndexesScaleWithFacts(t *testing.T) {
+	small, _ := callbackScaleDocument(32)
+	large, _ := callbackScaleDocument(64)
+
+	smallStats := callbackIndexStats(small.doc)
+	largeStats := callbackIndexStats(large.doc)
+
+	for _, check := range []struct {
+		name         string
+		small, large int
+	}{
+		{name: "calls", small: smallStats.calls, large: largeStats.calls},
+		{name: "parameter references", small: smallStats.parameterReferences, large: largeStats.parameterReferences},
+		{name: "direct invocation lookups", small: smallStats.directInvocationLookups, large: largeStats.directInvocationLookups},
+	} {
+		if check.large != 2*check.small {
+			t.Errorf("%s work grew from %d to %d; want exactly 2x when facts double", check.name, check.small, check.large)
+		}
+	}
+	if smallStats.assignments != 0 || largeStats.assignments != 0 || smallStats.returns != 0 || largeStats.returns != 0 {
+		t.Fatalf("callback fixture must not contribute assignment or return work: small=%+v large=%+v", smallStats, largeStats)
+	}
+}
+
+func TestResolveIndexedReturnedCallablesRemainComplete(t *testing.T) {
+	fixture, targets := returnedCallableScaleDocument(64)
+	res := resolveOrFatal(t, fixture)
+	if !res.Complete {
+		t.Fatalf("indexed returned callables must remain complete, gaps=%v", res.Gaps)
+	}
+	for _, target := range targets {
+		if !res.Graph.Reaches(target) {
+			t.Errorf("returned callable target %q must remain reachable", target)
+		}
+	}
+}
+
+func TestReturnedCallableIndexesScaleWithFacts(t *testing.T) {
+	small, _ := returnedCallableScaleDocument(32)
+	large, _ := returnedCallableScaleDocument(64)
+
+	smallStats := returnedCallableIndexStats(small.doc)
+	largeStats := returnedCallableIndexStats(large.doc)
+	for _, check := range []struct {
+		name         string
+		small, large int
+	}{
+		{name: "returns", small: smallStats.returns, large: largeStats.returns},
+		{name: "returned callable lookups", small: smallStats.returnedCallableLookups, large: largeStats.returnedCallableLookups},
+	} {
+		if check.large != 2*check.small {
+			t.Errorf("%s work grew from %d to %d; want exactly 2x when facts double", check.name, check.small, check.large)
+		}
+	}
+}
+
+func BenchmarkResolveIndexedCallbacks(b *testing.B) {
+	for _, size := range []int{64, 512, 4096} {
+		fixture, _ := callbackScaleDocument(size)
+		b.Run("calls_"+itoa(2*size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := Resolve(fixture.doc); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkResolveIndexedReturnedCallables(b *testing.B) {
+	for _, size := range []int{64, 512, 4096} {
+		fixture, _ := returnedCallableScaleDocument(size)
+		b.Run("calls_"+itoa(size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := Resolve(fixture.doc); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func callbackScaleDocument(size int) (*docBuilder, string) {
+	fixture := newDoc()
+	moduleID := fixture.module("app")
+	target := fixture.fn("app", "target", "target", moduleID, SymbolFunction)
+	for i := 0; i < size; i++ {
+		invokeName := "invoke" + itoa(i)
+		invoke := fixture.fn("app", invokeName, invokeName, moduleID, SymbolFunction)
+		fixture.positionalParams(invoke, "callback")
+		fixture.call("app", invoke, name("callback"), false)
+		fixture.call("app", moduleID, name(invokeName), false)
+		fixture.doc.Calls[len(fixture.doc.Calls)-1].Arguments = []Argument{{Value: name("target")}}
+	}
+	return fixture, target
+}
+
+func returnedCallableScaleDocument(size int) (*docBuilder, []string) {
+	fixture := newDoc()
+	moduleID := fixture.module("app")
+	targets := make([]string, 0, size)
+	for i := 0; i < size; i++ {
+		targetName := "target" + itoa(i)
+		factoryName := "factory" + itoa(i)
+		target := fixture.fn("app", targetName, targetName, moduleID, SymbolFunction)
+		factory := fixture.fn("app", factoryName, factoryName, moduleID, SymbolFunction)
+		fixture.doc.Returns = append(fixture.doc.Returns, Return{ScopeID: factory, Value: name(targetName), Pos: Position{File: "app.js", Line: 3}})
+		fixture.call("app", moduleID, callref(factoryName), false)
+		targets = append(targets, target)
+	}
+	return fixture, targets
+}
+
+func callbackIndexStats(document Document) resolverIndexStats {
+	resolver := newSemanticResolver(document)
+	resolver.indexImports()
+	resolver.indexCallableAliases()
+	resolver.indexReturnedCallables()
+	resolver.indexDirectInvocations()
+	resolver.indexSynchronousCallbacks()
+	return resolver.indexStats
+}
+
+func returnedCallableIndexStats(document Document) resolverIndexStats {
+	resolver := newSemanticResolver(document)
+	resolver.indexImports()
+	resolver.indexCallableAliases()
+	resolver.indexReturnedCallables()
+	return resolver.indexStats
 }

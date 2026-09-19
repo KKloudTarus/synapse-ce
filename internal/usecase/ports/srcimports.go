@@ -10,6 +10,10 @@ import "context"
 type SourceImportGraph struct {
 	// ImportedPackages are the distribution/crate/gem names first-party source references, lowercased.
 	ImportedPackages []string
+	// ConditionalPackages is the subset referenced only through a bounded dynamic or conditional construct.
+	// It is affirmative evidence, but consumers must keep its result partial rather than treating the
+	// observation as an unconditional proof path.
+	ConditionalPackages []string
 	// Entrypoints are the discovered entrypoints, kept as provenance for the sealed proof. They are
 	// discovered structurally, not verified to execute.
 	Entrypoints []string

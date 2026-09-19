@@ -1,0 +1,12 @@
+{
+  "_readme": ["Closed local Composer package graph; the materializer must not contact an index."],
+  "packages": [
+    {"name": "reachbench/direct", "version": "1.0.0", "dist": {"type": "path", "url": "packages/reachbench-direct"}, "autoload": {"psr-4": {"Reachbench\\Direct\\": "src/"}}},
+    {"name": "reachbench/dynamic", "version": "1.0.0", "dist": {"type": "path", "url": "packages/reachbench-dynamic"}, "autoload": {"psr-4": {"Reachbench\\Dynamic\\": "src/"}}},
+    {"name": "reachbench/unused", "version": "1.0.0", "dist": {"type": "path", "url": "packages/reachbench-unused"}, "autoload": {"psr-4": {"Reachbench\\Unused\\": "src/"}}},
+    {"name": "reachbench/unsupported", "version": "1.0.0", "dist": {"type": "path", "url": "packages/reachbench-unsupported"}, "autoload": {"psr-4": {"Reachbench\\Unsupported\\": "src/"}}}
+  ],
+  "packages-dev": [],
+  "minimum-stability": "stable",
+  "prefer-stable": false
+}

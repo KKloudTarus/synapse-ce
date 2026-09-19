@@ -1,0 +1,22 @@
+version = 4
+
+[[package]]
+name = "reachbench-rust-import"
+version = "1.0.0"
+dependencies = ["reachbench-direct", "reachbench-dynamic", "reachbench-unused", "reachbench-unsupported"]
+
+[[package]]
+name = "reachbench-direct"
+version = "1.0.0"
+
+[[package]]
+name = "reachbench-dynamic"
+version = "1.0.0"
+
+[[package]]
+name = "reachbench-unused"
+version = "1.0.0"
+
+[[package]]
+name = "reachbench-unsupported"
+version = "1.0.0"

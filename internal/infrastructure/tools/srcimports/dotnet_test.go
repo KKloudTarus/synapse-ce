@@ -18,9 +18,9 @@ func writeDotNetFile(t *testing.T, dir, name, body string) {
 	}
 }
 
-// TestDotNetScanImportsObservesNamespaces: a `using` names a namespace, which the scanner emits with its
-// dotted prefixes so a package matches whether source imports its root namespace or a sub-namespace. With no
-// dynamic construct the observation is complete (a negative conclusion is safe).
+// TestDotNetScanImportsObservesNamespaces: a `using` names one complete namespace. Preserving that identity
+// keeps sibling package namespaces distinct while the analyzer can still match a package-owned parent. With
+// no dynamic construct the observation is complete (a negative conclusion is safe).
 func TestDotNetScanImportsObservesNamespaces(t *testing.T) {
 	dir := t.TempDir()
 	writeDotNetFile(t, dir, "Program.cs", `using System;
@@ -41,9 +41,14 @@ namespace App { class P { static void Main() {} } }
 	for _, p := range graph.ImportedPackages {
 		refs[p] = true
 	}
-	for _, want := range []string{"newtonsoft.json.linq", "newtonsoft.json", "newtonsoft", "dapper", "serilog"} {
+	for _, want := range []string{"newtonsoft.json.linq", "dapper.sqlmapper", "serilog.log"} {
 		if !refs[want] {
-			t.Errorf("missing observed namespace/prefix %q in %v", want, graph.ImportedPackages)
+			t.Errorf("missing observed namespace %q in %v", want, graph.ImportedPackages)
+		}
+	}
+	for _, siblingCollapsingPrefix := range []string{"newtonsoft", "newtonsoft.json", "dapper", "serilog"} {
+		if refs[siblingCollapsingPrefix] {
+			t.Errorf("derived namespace prefix %q leaked into observations: %v", siblingCollapsingPrefix, graph.ImportedPackages)
 		}
 	}
 }
@@ -62,6 +67,123 @@ class L { object M(string n) { return Activator.CreateInstance(Type.GetType(n));
 	}
 	if graph.Complete() {
 		t.Error("reflection must make the observation incomplete (no safe negative conclusion)")
+	}
+}
+
+func TestDotNetResolvedAssemblyReflectionIsSubjectLocal(t *testing.T) {
+	dir := t.TempDir()
+	writeDotNetFile(t, dir, "Loader.cs", `using System.Reflection;
+class L {
+    static void Load() {
+        var assemblyName = string.Concat("Reachbench", ".Dynamic");
+        var typeName = string.Concat(assemblyName, ".Entry");
+        var entry = Assembly.Load(assemblyName).GetType(typeName, throwOnError: true)!;
+        entry.GetMethod("Run", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null);
+    }
+}
+`)
+	graph, err := NewDotNetScanner().ScanImports(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !graph.Complete() {
+		t.Fatalf("constant reflection target must not block unrelated negatives: %v", graph.CoverageReasons)
+	}
+	seen := map[string]bool{}
+	for _, item := range graph.ImportedPackages {
+		seen[item] = true
+	}
+	if !seen["reachbench.dynamic"] {
+		t.Fatalf("resolved assembly candidate was not observed: %v", graph.ImportedPackages)
+	}
+	if !contains(graph.ConditionalPackages, "reachbench.dynamic") {
+		t.Fatalf("resolved reflection candidate must remain conditional: %v", graph.ConditionalPackages)
+	}
+}
+
+func TestDotNetResolvedTypeReflectionIsSubjectLocal(t *testing.T) {
+	dir := t.TempDir()
+	writeDotNetFile(t, dir, "Loader.cs", `using System;
+class L {
+    static void Load() {
+        var entry = Type.GetType("Reachbench.Dynamic.Entry, Reachbench.Dynamic", throwOnError: true)!;
+        entry.GetMethod("Run")!.Invoke(null, null);
+    }
+}
+`)
+	graph, err := NewDotNetScanner().ScanImports(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !graph.Complete() {
+		t.Fatalf("constant type reflection target must not block disjoint negatives: %v", graph.CoverageReasons)
+	}
+	if !contains(graph.ImportedPackages, "reachbench.dynamic") {
+		t.Fatalf("resolved type candidate was not observed: %v", graph.ImportedPackages)
+	}
+	if !contains(graph.ConditionalPackages, "reachbench.dynamic") {
+		t.Fatalf("resolved type reflection must remain conditional: %v", graph.ConditionalPackages)
+	}
+}
+
+func TestDotNetConditionalReflectionTargetStaysFailClosed(t *testing.T) {
+	dir := t.TempDir()
+	writeDotNetFile(t, dir, "Loader.cs", `using System.Reflection;
+class L {
+    static void Load(bool alternate) {
+        var assemblyName = "Reachbench.Dynamic";
+        if (alternate) { assemblyName = "Reachbench.Other"; }
+        Assembly.Load(assemblyName);
+    }
+}
+`)
+	graph, err := NewDotNetScanner().ScanImports(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.Complete() {
+		t.Fatal("a conditionally reassigned reflection target must remain incomplete")
+	}
+}
+
+func TestDotNetReassignedReflectionValueStaysFailClosed(t *testing.T) {
+	dir := t.TempDir()
+	writeDotNetFile(t, dir, "Loader.cs", `using System;
+class L {
+    static void Load(Type unknown) {
+        var entry = Type.GetType("Reachbench.Dynamic.Entry, Reachbench.Dynamic", throwOnError: true)!;
+        entry = unknown;
+        entry.GetMethod("Run")!.Invoke(null, null);
+    }
+}
+`)
+	graph, err := NewDotNetScanner().ScanImports(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.Complete() {
+		t.Fatal("a reassigned reflection result must not retain a resolved target")
+	}
+}
+
+func TestDotNetUnknownReflectionStaysFailClosedBesideResolvedCandidate(t *testing.T) {
+	dir := t.TempDir()
+	writeDotNetFile(t, dir, "Loader.cs", `using System.Reflection;
+class L {
+    static void Load(object unknown) {
+        var assemblyName = "Reachbench.Dynamic";
+        var entry = Assembly.Load(assemblyName).GetType("Reachbench.Dynamic.Entry", throwOnError: true)!;
+        entry.GetMethod("Run")!.Invoke(null, null);
+        Assembly.Load(assemblyName); unknown.Invoke(null, null);
+    }
+}
+`)
+	graph, err := NewDotNetScanner().ScanImports(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.Complete() {
+		t.Fatal("an unrelated unknown reflection must keep the observation incomplete")
 	}
 }
 
@@ -149,7 +271,7 @@ func TestDotNetReferenceFormsAreObserved(t *testing.T) {
 	for _, p := range graph.ImportedPackages {
 		refs[p] = true
 	}
-	for _, want := range []string{"newtonsoft.json", "mycompany.legacy", "serilog", "serilog.core", "restsharp", "mudblazor", "nservicebus"} {
+	for _, want := range []string{"newtonsoft.json.jsonserializer", "mycompany.legacy.widget", "serilog.core.logger", "restsharp.restclient", "mudblazor", "nservicebus"} {
 		if !refs[want] {
 			t.Errorf("reference %q must be observed (a missed reference becomes a false not-referenced); got %v", want, graph.ImportedPackages)
 		}
@@ -355,8 +477,8 @@ func TestDotNetGeneratedObjSourceObserved(t *testing.T) {
 	for _, p := range graph.ImportedPackages {
 		refs[p] = true
 	}
-	if !refs["grpc.core"] {
-		t.Errorf("a package named only by generated obj source must be observed; got %v", graph.ImportedPackages)
+	if !refs["grpc.core.clientbase"] {
+		t.Errorf("a package type named only by generated obj source must be observed; got %v", graph.ImportedPackages)
 	}
 	if !graph.Complete() {
 		t.Errorf("generated AssemblyInfo naming System.Reflection must not poison the scan; reasons=%v", graph.CoverageReasons)
@@ -377,7 +499,7 @@ func TestDotNetVBGlobalQualifierCaseInsensitive(t *testing.T) {
 	for _, p := range graph.ImportedPackages {
 		refs[p] = true
 	}
-	if !refs["restsharp"] {
+	if !refs["restsharp.restclient"] {
 		t.Errorf("an uppercase GLOBAL. qualifier must be stripped; got %v", graph.ImportedPackages)
 	}
 }

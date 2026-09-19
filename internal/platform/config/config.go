@@ -681,9 +681,10 @@ type Config struct {
 	// mints not_reachable (macros, function pointers, dlopen, LTO/inlining and mangling hide calls), so it can
 	// only ever raise, never suppress.
 	CppReachabilityEnabled bool
-	// GoBinaryReachabilityEnabled turns on the RAISE-ONLY Go-binary reachability: a compiled Go binary in the
-	// workspace whose .gopclntab contains a matched vulnerable function raises the finding's urgency. Absence
-	// is no coverage (stripped-of-pclntab, inlined, or non-Go binaries hide symbols), never not_reachable.
+	// GoBinaryReachabilityEnabled turns on RAISE-ONLY Go-binary reachability: a supported Linux/amd64 binary
+	// must expose a PCLNTAB-backed direct call path, including linker-recorded inline frames, from main.main to
+	// the vulnerable function before raising urgency. Unsupported formats, indirect calls, malformed metadata, or
+	// any absence are no coverage, never not_reachable.
 	GoBinaryReachabilityEnabled bool
 	// TaintCallgraphBin is the pinned synapse-callgraph binary: the sandboxed go/ssa call-graph builder
 	// the taint analyzer shells out to. In-repo cmd (built by `make build` into bin/); pin its hash via

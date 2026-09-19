@@ -2,6 +2,7 @@ package pyreach
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
@@ -27,6 +28,20 @@ func TestPythonSymbolSubjectRoundTripAndValidation(t *testing.T) {
 	} {
 		if subject, ok := SymbolSubject(invalid[0], invalid[1]); ok {
 			t.Errorf("invalid subject accepted: %q", subject)
+		}
+	}
+}
+
+func TestFirstPartySymbolSubject(t *testing.T) {
+	subject, ok := FirstPartySymbolSubject("main.py", "control_unreachable")
+	if !ok || subject != "python:main:control_unreachable" {
+		t.Fatalf("first-party Python subject = %q, %t", subject, ok)
+	}
+	for _, invalid := range [][2]string{
+		{"../main.py", "target"}, {"main.txt", "target"}, {"main.py", "target()"}, {"main.py", ""},
+	} {
+		if subject, ok := FirstPartySymbolSubject(invalid[0], invalid[1]); ok {
+			t.Fatalf("FirstPartySymbolSubject(%q, %q) accepted %q", invalid[0], invalid[1], subject)
 		}
 	}
 }
@@ -75,6 +90,56 @@ func TestTier2AnswerabilityKeepsPartialPositiveAndDropsPartialNegative(t *testin
 	}
 }
 
+func TestTier2LiteralDispatchAllowsOnlyDisjointFirstPartyNegative(t *testing.T) {
+	moduleID := "python:main:<module>"
+	pos := func(line int) pythonprogram.Position { return pythonprogram.Position{File: "main.py", Line: line} }
+	symbol := func(id, qualified string, line int) pythonprogram.Symbol {
+		return pythonprogram.Symbol{ID: id, Module: "main", QualifiedName: qualified, Name: qualified, ParentID: moduleID, Kind: pythonprogram.SymbolFunction, Pos: pos(line)}
+	}
+	entry := symbol("python:main:entry", "entry", 3)
+	positive := symbol("python:main:control_positive", "control_positive", 7)
+	unreachable := symbol("python:main:control_unreachable", "control_unreachable", 10)
+	dispatch := symbol("python:main:opaque_dispatch", "opaque_dispatch", 13)
+	opaque := symbol("python:main:control_opaque", "control_opaque", 18)
+	document := pythonprogram.Document{
+		SchemaVersion: pythonprogram.SchemaVersion, FilesSeen: 1, FilesParsed: 1,
+		Modules: []pythonprogram.Module{{Name: "main", File: "main.py", Pos: pos(1)}},
+		Symbols: append([]pythonprogram.Symbol{{ID: moduleID, Module: "main", QualifiedName: "<module>", Name: "main", Kind: pythonprogram.SymbolModule, Pos: pos(1)}}, entry, positive, unreachable, dispatch, opaque),
+		Calls: []pythonprogram.Call{
+			{ID: "main.py:2:0", CallerID: moduleID, Callee: pythonprogram.Reference{Kind: pythonprogram.ReferenceName, Segments: []string{"entry"}}, Pos: pos(2)},
+			{ID: "main.py:4:4", CallerID: entry.ID, Callee: pythonprogram.Reference{Kind: pythonprogram.ReferenceName, Segments: []string{"control_positive"}}, Pos: pos(4)},
+			{ID: "main.py:5:4", CallerID: entry.ID, Callee: pythonprogram.Reference{Kind: pythonprogram.ReferenceName, Segments: []string{"opaque_dispatch"}}, Pos: pos(5)},
+			{ID: "main.py:15:8", CallerID: dispatch.ID, Callee: pythonprogram.Reference{Kind: pythonprogram.ReferenceName, Segments: []string{"handler"}}, BoundedCallees: []pythonprogram.Reference{{Kind: pythonprogram.ReferenceName, Segments: []string{"control_opaque"}}}, Pos: pos(15)},
+		},
+	}
+	analyzer, err := NewTier2Analyzer(&fakePythonFactsProvider{document: document, available: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	positiveSubject, _ := FirstPartySymbolSubject("main.py", "control_positive")
+	unreachableSubject, _ := FirstPartySymbolSubject("main.py", "control_unreachable")
+	opaqueSubject, _ := FirstPartySymbolSubject("main.py", "control_opaque")
+	subjects := []ports.ReachabilitySubject{
+		{FindingID: "positive", Symbols: []string{positiveSubject}},
+		{FindingID: "unreachable", Symbols: []string{unreachableSubject}},
+		{FindingID: "opaque", Symbols: []string{opaqueSubject}},
+	}
+	answerable, err := analyzer.AnswerableSubjects(context.Background(), "/workspace", subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(answerable) != 2 || answerable[0].FindingID != "positive" || answerable[1].FindingID != "unreachable" {
+		t.Fatalf("answerable bounded-dispatch subjects = %+v", answerable)
+	}
+	analysis, err := analyzer.Analyze(context.Background(), "/workspace", []string{positiveSubject, unreachableSubject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(analysis.Results) != 2 || !analysis.Results[0].Reachable || analysis.Results[1].Reachable {
+		t.Fatalf("bounded-dispatch analysis = %+v", analysis.Results)
+	}
+}
+
 func TestTier2AnswerabilityRequiresEverySymbolForANegative(t *testing.T) {
 	provider := &fakePythonFactsProvider{document: pythonTier2Fixture(false), available: true}
 	analyzer, _ := NewTier2Analyzer(provider)
@@ -92,12 +157,11 @@ func TestTier2AnswerabilityRequiresEverySymbolForANegative(t *testing.T) {
 	}
 }
 
-// TestTier2EveryDynamicDispatchConstructForcesRaiseOnly is the #1058 hard-bar guard for Python: a symbol
-// that the graph does not statically reach must NOT be answerable-as-negative when ANY dynamic-dispatch
-// construct left a coverage gap, because that construct could reach it out of view. Each gap kind the
-// extractor emits for getattr/setattr, importlib, a decorator, import *, eval/exec, or a parse recovery
-// must independently drop the negative to raise-only.
-func TestTier2EveryDynamicDispatchConstructForcesRaiseOnly(t *testing.T) {
+// TestTier2EveryUnboundedDynamicDispatchConstructForcesRaiseOnly is the hard-bar guard for Python: a
+// symbol that the graph does not statically reach must NOT be answerable-as-negative when an unbounded
+// dynamic-dispatch construct left a coverage gap, because it could reach the symbol out of view. The separate
+// finite literal-map case is covered above and only permits a negative outside its candidate closure.
+func TestTier2EveryUnboundedDynamicDispatchConstructForcesRaiseOnly(t *testing.T) {
 	for _, gap := range []pythonprogram.GapKind{
 		pythonprogram.GapDynamicAttribute,
 		pythonprogram.GapDynamicImport,
@@ -176,4 +240,63 @@ func mustPythonSubject(t *testing.T, symbol string) string {
 		t.Fatalf("invalid fixture symbol %q", symbol)
 	}
 	return subject
+}
+
+func TestTier2AnswerableSubjectsPreservesSafeCandidatesAndInput(t *testing.T) {
+	positive := mustPythonSubject(t, "requests.sessions.Session.request")
+	negative := mustPythonSubject(t, "requests.sessions.safe")
+	unplaceable := mustPythonSubject(t, "unqualified_missing")
+	subjects := []ports.ReachabilitySubject{
+		{FindingID: "positive", Symbols: []string{positive}},
+		{FindingID: "negative", Symbols: []string{negative}},
+		{FindingID: "unplaceable", Symbols: []string{unplaceable}},
+	}
+	original := append([]ports.ReachabilitySubject(nil), subjects...)
+	for index := range original {
+		original[index].Symbols = append([]string(nil), subjects[index].Symbols...)
+	}
+
+	analyzer, err := NewTier2Analyzer(&fakePythonFactsProvider{document: pythonTier2Fixture(false), available: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answerable, err := analyzer.AnswerableSubjects(context.Background(), "/workspace", subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(answerable) != 2 || answerable[0].FindingID != "positive" || answerable[1].FindingID != "negative" {
+		t.Fatalf("answerable subjects = %+v", answerable)
+	}
+	for index := range subjects {
+		if subjects[index].FindingID != original[index].FindingID || len(subjects[index].Symbols) != len(original[index].Symbols) || subjects[index].Symbols[0] != original[index].Symbols[0] {
+			t.Fatalf("input mutated: got %+v want %+v", subjects, original)
+		}
+	}
+}
+
+func TestTier2AnswerableSubjectsDropsIncompleteNegativeAndPropagatesCancellation(t *testing.T) {
+	negative := mustPythonSubject(t, "requests.sessions.safe")
+	positive := mustPythonSubject(t, "requests.sessions.Session.request")
+	analyzer, err := NewTier2Analyzer(&fakePythonFactsProvider{document: pythonTier2Fixture(true), available: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answerable, err := analyzer.AnswerableSubjects(context.Background(), "/workspace", []ports.ReachabilitySubject{
+		{FindingID: "negative", Symbols: []string{negative}},
+		{FindingID: "positive", Symbols: []string{positive}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(answerable) != 1 || answerable[0].FindingID != "positive" {
+		t.Fatalf("incomplete answerable subjects = %+v", answerable)
+	}
+
+	cancelled, err := NewTier2Analyzer(&fakePythonFactsProvider{err: context.Canceled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cancelled.AnswerableSubjects(context.Background(), "/workspace", nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation error = %v", err)
+	}
 }

@@ -67,6 +67,29 @@ func TestReachableAndNotReachable(t *testing.T) {
 	}
 }
 
+func TestConditionalReferenceRemainsPartialEvidence(t *testing.T) {
+	t.Parallel()
+
+	a, err := New(fakeScanner{
+		lang: "cargo",
+		graph: ports.SourceImportGraph{
+			ImportedPackages:    []string{"dynamic-crate"},
+			ConditionalPackages: []string{"dynamic-crate"},
+			FilesScanned:        1,
+		},
+	}, identityCandidates, allDirect("dynamic-crate"))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	analysis, err := a.Analyze(context.Background(), "/ws", []string{"dynamic-crate"})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	if len(analysis.Results) != 1 || !analysis.Results[0].Reachable || len(analysis.Results[0].BlindConstructs) != 1 {
+		t.Fatalf("conditional reference must stay reachable but partial: %#v", analysis.Results)
+	}
+}
+
 // TestUnknownNeverResolvesToUnreachable is the acceptance gate of #414, asserted per language: no input
 // may produce an unreachable verdict while an unknown region exists, because an unreachable verdict
 // suppresses work.

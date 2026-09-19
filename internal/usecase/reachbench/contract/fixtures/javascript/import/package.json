@@ -1,0 +1,15 @@
+{
+  "name": "@reachbench/import-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@reachbench/direct": "file:packages/direct",
+    "@reachbench/dynamic": "file:packages/dynamic",
+    "@reachbench/unused": "file:packages/unused",
+    "@reachbench/unsupported": "file:packages/unsupported"
+  },
+  "reachbench": {
+    "no_coverage_capabilities": ["@reachbench/unsupported"]
+  }
+}

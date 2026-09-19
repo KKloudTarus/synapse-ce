@@ -1,0 +1,13 @@
+[package]
+name = "reachbench-rust-import"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+reachbench-direct = { path = "crates/reachbench-direct" }
+reachbench-dynamic = { path = "crates/reachbench-dynamic" }
+reachbench-unused = { path = "crates/reachbench-unused" }
+reachbench-unsupported = { path = "crates/reachbench-unsupported" }
+
+[package.metadata.reachbench]
+no_coverage_capabilities = ["reachbench-unsupported"]

@@ -131,8 +131,8 @@ func (c *InMemoryCache) removeFromOrder(fingerprint string) {
 	}
 }
 
-// cloneAnalysis deep-copies an Analysis (its Results, each Result's Path, and Entrypoints) so no slice is
-// shared between a caller and the store.
+// cloneAnalysis deep-copies an Analysis (its Results, paths, provenance, blind constructs, and Entrypoints)
+// so no mutable value is shared between a caller and the store.
 func cloneAnalysis(a reachability.Analysis) reachability.Analysis {
 	out := reachability.Analysis{}
 	if a.Results != nil {
@@ -142,11 +142,21 @@ func cloneAnalysis(a reachability.Analysis) reachability.Analysis {
 			if r.Path != nil {
 				cp.Path = append([]string(nil), r.Path...)
 			}
+			if r.Provenance != nil {
+				provenance := *r.Provenance
+				cp.Provenance = &provenance
+			}
+			if r.BlindConstructs != nil {
+				cp.BlindConstructs = append([]string(nil), r.BlindConstructs...)
+			}
 			out.Results[i] = cp
 		}
 	}
 	if a.Entrypoints != nil {
 		out.Entrypoints = append([]string(nil), a.Entrypoints...)
+	}
+	if a.BlindConstructs != nil {
+		out.BlindConstructs = append([]string(nil), a.BlindConstructs...)
 	}
 	return out
 }

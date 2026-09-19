@@ -74,20 +74,80 @@ from .sub import thing        # relative → ignored
 	}
 }
 
-func TestScanDetectsDynamicImports(t *testing.T) {
-	for name, body := range map[string]string{
-		"__import__":     "mod = __import__('os')\n",
-		"import_module":  "import importlib\nm = importlib.import_module('os')\n",
-		"importlib_dund": "import importlib\nimportlib.__import__('os')\n",
+func TestScanSeparatesResolvedAndUnknownDynamicImports(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		body        string
+		wantModule  string
+		wantUnknown bool
+	}{
+		"literal dunder":           {body: "mod = __import__('os')\n", wantModule: "os"},
+		"literal import module":    {body: "import importlib\nm = importlib.import_module('os')\n", wantModule: "os"},
+		"constant import module":   {body: "from importlib import import_module\nmodule_name = 'requests'\nm = import_module(module_name)\n", wantModule: "requests"},
+		"reassigned target":        {body: "from importlib import import_module\nmodule_name = 'requests'\nif enabled:\n    module_name = 'jinja2'\nm = import_module(module_name)\n", wantUnknown: true},
+		"unknown target":           {body: "from importlib import import_module\nm = import_module(module_name)\n", wantUnknown: true},
+		"unknown importlib method": {body: "import importlib\nimportlib.__import__('os')\n", wantUnknown: true},
 	} {
-		dir := writeTree(t, map[string]string{"m.py": body})
-		g, err := New().ScanImports(context.Background(), dir)
-		if err != nil {
-			t.Fatalf("%s: scan: %v", name, err)
-		}
-		if !g.DynamicImports {
-			t.Errorf("%s: dynamic imports must be detected in %q", name, body)
-		}
+		t.Run(name, func(t *testing.T) {
+			dir := writeTree(t, map[string]string{"m.py": testCase.body})
+			g, err := New().ScanImports(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if g.DynamicImports != testCase.wantUnknown {
+				t.Fatalf("dynamic unknown = %t, want %t for %q", g.DynamicImports, testCase.wantUnknown, testCase.body)
+			}
+			if testCase.wantModule != "" && !has(g.DynamicModules, testCase.wantModule) {
+				t.Fatalf("dynamic modules = %v, want %q", g.DynamicModules, testCase.wantModule)
+			}
+		})
+	}
+}
+
+func TestScanDynamicAliasesAndNestedFormsFailClosed(t *testing.T) {
+	testCases := []struct {
+		name        string
+		body        string
+		wantModule  string
+		wantUnknown bool
+	}{
+		{name: "assigned importlib literal", body: "import importlib\nloader = importlib.import_module\nloader('requests')\n", wantModule: "requests"},
+		{name: "assigned dunder literal", body: "loader = __import__\nloader('requests')\n", wantModule: "requests"},
+		{name: "from import alias constant", body: "from importlib import import_module as im\nname = 'requests'\nim(name)\n", wantModule: "requests"},
+		{name: "module alias literal", body: "import importlib as il\nil.import_module('requests')\n", wantModule: "requests"},
+		{name: "propagated callable alias", body: "import importlib\nloader = importlib.import_module\nother = loader\nother('requests')\n", wantModule: "requests"},
+		{name: "unused dynamic module", body: "import importlib\nvalue = 'importlib'\n"},
+		{name: "assigned importlib unknown", body: "import importlib\nloader = importlib.import_module\nloader(module_name)\n", wantUnknown: true},
+		{name: "assigned dunder unknown", body: "loader = __import__\nloader(module_name)\n", wantUnknown: true},
+		{name: "from import alias unknown", body: "from importlib import import_module as im\nim(module_name)\n", wantUnknown: true},
+		{name: "nested importlib util", body: "import importlib.util\nimportlib.util.find_spec('requests')\n", wantUnknown: true},
+		{name: "nested importlib machinery", body: "import importlib.machinery\nimportlib.machinery.SourceFileLoader('requests', path)\n", wantUnknown: true},
+		{name: "runpy module alias", body: "import runpy as rp\nrp.run_module('requests')\n", wantUnknown: true},
+		{name: "runpy callable alias", body: "from runpy import run_module as rm\nrm('requests')\n", wantUnknown: true},
+		{name: "pkgutil module alias", body: "import pkgutil as pu\npu.get_loader('requests')\n", wantUnknown: true},
+		{name: "pkgutil callable alias", body: "from pkgutil import get_loader as get\nget('requests')\n", wantUnknown: true},
+		{name: "imp module alias", body: "import imp as legacy\nlegacy.load_module('requests', file, path, desc)\n", wantUnknown: true},
+		{name: "imp callable alias", body: "from imp import load_module as load\nload('requests', file, path, desc)\n", wantUnknown: true},
+		{name: "exec alias", body: "execute = exec\nexecute('import requests')\n", wantUnknown: true},
+		{name: "eval from alias", body: "from builtins import eval as evaluate\nevaluate(code)\n", wantUnknown: true},
+		{name: "conflicting alias assignment", body: "import importlib\nloader = importlib.import_module\nloader = custom_loader\nloader('requests')\n", wantUnknown: true},
+		{name: "indirect getattr loader", body: "import importlib\nloader = getattr(importlib, 'import_module')\nloader('requests')\n", wantUnknown: true},
+		{name: "wildcard dynamic import", body: "from importlib import *\nloader('requests')\n", wantUnknown: true},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			dir := writeTree(t, map[string]string{"m.py": testCase.body})
+			g, err := New().ScanImports(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if g.DynamicImports != testCase.wantUnknown {
+				t.Fatalf("dynamic unknown = %t, want %t for %q", g.DynamicImports, testCase.wantUnknown, testCase.body)
+			}
+			if testCase.wantModule != "" && !has(g.DynamicModules, testCase.wantModule) {
+				t.Fatalf("dynamic modules = %v, want %q", g.DynamicModules, testCase.wantModule)
+			}
+		})
 	}
 }
 
@@ -110,21 +170,22 @@ func TestScanCompoundAndContinuation(t *testing.T) {
 	}
 }
 
-func TestScanDetectsMoreDynamicForms(t *testing.T) {
+func TestScanDetectsUnknownDynamicForms(t *testing.T) {
 	for name, body := range map[string]string{
-		"from-import_module": "from importlib import import_module\nm = import_module('os')\n",
-		"imp_load":           "import imp\nimp.load_module('m', f, p, d)\n",
-		"runpy":              "import runpy\nrunpy.run_module('pkg')\n",
-		"exec":               "exec('import os')\n",
+		"imp load": "import imp\nimp.load_module('m', f, p, d)\n",
+		"runpy":    "import runpy\nrunpy.run_module('pkg')\n",
+		"exec":     "exec('import os')\n",
 	} {
-		dir := writeTree(t, map[string]string{"m.py": body})
-		g, err := New().ScanImports(context.Background(), dir)
-		if err != nil {
-			t.Fatalf("%s: scan: %v", name, err)
-		}
-		if !g.DynamicImports {
-			t.Errorf("%s: dynamic-import mechanism must be detected in %q", name, body)
-		}
+		t.Run(name, func(t *testing.T) {
+			dir := writeTree(t, map[string]string{"m.py": body})
+			g, err := New().ScanImports(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if !g.DynamicImports {
+				t.Fatalf("unknown dynamic-import mechanism must be detected in %q", body)
+			}
+		})
 	}
 }
 

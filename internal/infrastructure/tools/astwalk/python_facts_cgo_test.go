@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
@@ -111,6 +112,33 @@ func TestPythonFactsForReportsDynamicAndRecoveryGaps(t *testing.T) {
 			t.Errorf("missing coverage gap %q (all: %+v)", want, document.CoverageGaps)
 		}
 	}
+}
+
+func TestPythonFactsForKeepsLiteralMappingDispatchBounded(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "main.py", "def dispatch(name):\n    handler = {\"alternate\": control_alternate, \"opaque\": control_opaque}.get(name)\n    if handler is not None:\n        handler()\n\ndef control_alternate():\n    return None\n\ndef control_opaque():\n    return None\n")
+
+	document, err := PythonFactsFor(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !document.Complete() {
+		t.Fatalf("a finite literal dispatch must not become an analysis-wide extraction gap: %+v", document.CoverageGaps)
+	}
+	for _, call := range document.Calls {
+		if joinPythonReference(call.Callee) != "handler" {
+			continue
+		}
+		bounded := make([]string, 0, len(call.BoundedCallees))
+		for _, candidate := range call.BoundedCallees {
+			bounded = append(bounded, joinPythonReference(candidate))
+		}
+		if !slices.Equal(bounded, []string{"control_alternate", "control_opaque"}) {
+			t.Fatalf("bounded handler call = %+v", call)
+		}
+		return
+	}
+	t.Fatalf("bounded handler invocation not found in calls: %+v", document.Calls)
 }
 
 func TestPythonFactsForExtractsLoopComprehensionAndWithBindings(t *testing.T) {

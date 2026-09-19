@@ -129,11 +129,12 @@ func TestParseRejectsBadJSON(t *testing.T) {
 }
 
 func TestEncodeParseCarriesBlindConstructs(t *testing.T) {
-	// The analysis-wide blind-construct list (#1065) must survive the exec-boundary round-trip so a
-	// not_reachable derived from a reflection-blind graph never suppresses a finding.
+	// Analysis-wide and symbol-local blind constructs must survive the exec boundary so neither kind can be
+	// dropped into an unsafe not_reachable result.
 	g := &callgraph.Graph{
 		Entrypoints:     []string{"m.main"},
 		BlindConstructs: []string{"reflection"},
+		BlindSymbols:    map[string][]string{"m.opaque": {"dynamic_dispatch"}},
 	}
 	var buf bytes.Buffer
 	if err := EncodeGraph(&buf, g); err != nil {
@@ -145,5 +146,8 @@ func TestEncodeParseCarriesBlindConstructs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.BlindConstructs, g.BlindConstructs) {
 		t.Errorf("blind constructs must round-trip:\n got %+v\nwant %+v", got.BlindConstructs, g.BlindConstructs)
+	}
+	if !reflect.DeepEqual(got.BlindSymbols, g.BlindSymbols) {
+		t.Errorf("symbol blind constructs must round-trip:\n got %+v\nwant %+v", got.BlindSymbols, g.BlindSymbols)
 	}
 }

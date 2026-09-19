@@ -1,0 +1,13 @@
+{
+  "schema_version": "synapse-reachability-challenge-manifest-v2",
+  "id": "synapse-ce-reachability-positive-challenges",
+  "challenges": [
+    {"case_id":"go-binary-challenge-pclntab-entry-call","cohort_id":"go","mode_id":"binary","kind":"go_binary_pclntab_entry_call"},
+    {"case_id":"javascript-interprocedural-challenge-cross-module-call","cohort_id":"javascript","mode_id":"interprocedural","kind":"javascript_cross_module_call"},
+    {"case_id":"javascript-interprocedural-challenge-function-alias","cohort_id":"javascript","mode_id":"interprocedural","kind":"javascript_function_alias"},
+    {"case_id":"javascript-interprocedural-challenge-returned-callable","cohort_id":"javascript","mode_id":"interprocedural","kind":"javascript_returned_callable"},
+    {"case_id":"javascript-interprocedural-challenge-synchronous-callback","cohort_id":"javascript","mode_id":"interprocedural","kind":"javascript_synchronous_callback"},
+    {"case_id":"php-symbols-tier2-challenge-symbol-provenance","cohort_id":"php","mode_id":"symbols_tier2","kind":"php_symbol_provenance","module_path":"fixtures/php/symbols_tier2/main.php","line":25},
+    {"case_id":"ruby-symbols-tier2-challenge-symbol-provenance","cohort_id":"ruby","mode_id":"symbols_tier2","kind":"ruby_symbol_provenance","module_path":"fixtures/ruby/symbols_tier2/main.rb","line":18}
+  ]
+}

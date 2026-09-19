@@ -11,6 +11,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/modulegraph"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 type fakeScanner struct {
@@ -728,5 +729,39 @@ func TestMixedReachableAndNotReachableSubjects(t *testing.T) {
 	}
 	if !analysis.Results[0].Reachable || analysis.Results[1].Reachable {
 		t.Fatalf("subjects must be answered independently, got %+v", analysis.Results)
+	}
+}
+
+func TestAnswerableSubjectsFiltersInvalidIdentitiesAndPropagatesCancellation(t *testing.T) {
+	const purl = "pkg:npm/lodash@4.17.21"
+	graph := modulegraph.Graph{Modules: []modulegraph.Module{mod("src/index.ts")}, Roots: []string{"src/index.ts"}}
+	result := jsresolution.Result{Imports: []jsresolution.ImportResolution{componentImport("src/index.ts", "lodash", purl)}}
+	analyzer := analyzerFor(t, graph, result, purl)
+	subjects := []ports.ReachabilitySubject{
+		{FindingID: "canonical", Symbols: []string{purl}},
+		{FindingID: "invalid", Symbols: []string{"pkg:npm/lodash"}},
+	}
+	original := append([]ports.ReachabilitySubject(nil), subjects...)
+	for index := range original {
+		original[index].Symbols = append([]string(nil), subjects[index].Symbols...)
+	}
+
+	answerable, err := analyzer.AnswerableSubjects(context.Background(), "/ws", subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(answerable) != 1 || answerable[0].FindingID != "canonical" || len(answerable[0].Symbols) != 1 || answerable[0].Symbols[0] != purl {
+		t.Fatalf("answerable subjects = %+v", answerable)
+	}
+	if !reflect.DeepEqual(subjects, original) {
+		t.Fatalf("input mutated: got %+v want %+v", subjects, original)
+	}
+
+	cancelled, err := New(fakeScanner{}, fakeResolver{}, fakeSBOMs{err: context.Canceled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cancelled.AnswerableSubjects(context.Background(), "/ws", subjects); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation error = %v", err)
 	}
 }

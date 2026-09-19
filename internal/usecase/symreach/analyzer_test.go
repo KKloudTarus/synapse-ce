@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/symbolcanon"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
 )
 
 type fakeScanner struct {
@@ -13,6 +14,15 @@ type fakeScanner struct {
 }
 
 func (f fakeScanner) ScanSymbolRefs(context.Context, string) ([]string, error) { return f.refs, f.err }
+
+type fakeProvenanceScanner struct {
+	fakeScanner
+	local []SymbolReference
+}
+
+func (f fakeProvenanceScanner) ScanSymbolRefsWithProvenance(context.Context, string) ([]string, []SymbolReference, error) {
+	return f.refs, f.local, f.err
+}
 
 func TestSymreachRaiseOnlyMatch(t *testing.T) {
 	a, err := New("composer", symbolcanon.PHP, fakeScanner{refs: []string{`Monolog\Handler\StreamHandler::write`}})
@@ -106,5 +116,66 @@ func TestSymreachCppTemplateTailMatch(t *testing.T) {
 	}
 	if len(res.Results) != 1 || !res.Results[0].Reachable {
 		t.Fatalf("a templated reference must match the template-free subject, got %+v", res.Results)
+	}
+}
+
+func TestSymreachLocalPHPAndRubyReferencesCarryDeclarationProvenance(t *testing.T) {
+	tests := []struct {
+		name       string
+		purlType   string
+		language   symbolcanon.Language
+		symbol     string
+		provenance SymbolReference
+	}{
+		{
+			name: "php", purlType: "composer", language: symbolcanon.PHP, symbol: "symbolPositive",
+			provenance: SymbolReference{Symbol: "symbolPositive", ModulePath: "fixtures/php/symbols_tier2/main.php", Line: 25},
+		},
+		{
+			name: "ruby", purlType: "gem", language: symbolcanon.Ruby, symbol: "symbol_positive",
+			provenance: SymbolReference{Symbol: "symbol_positive", ModulePath: "fixtures/ruby/symbols_tier2/main.rb", Line: 18},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, err := New(tt.purlType, tt.language, fakeProvenanceScanner{local: []SymbolReference{tt.provenance}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			analysis, err := a.Analyze(context.Background(), "/work", []string{tt.symbol, "unresolved"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(analysis.Results) != 1 || !analysis.Results[0].Reachable || analysis.Results[0].Symbol != tt.symbol {
+				t.Fatalf("local result = %#v", analysis.Results)
+			}
+			want := &reachability.SourceProvenance{ModulePath: tt.provenance.ModulePath, Line: tt.provenance.Line}
+			if got := analysis.Results[0].Provenance; got == nil || *got != *want {
+				t.Fatalf("local provenance = %#v, want %#v", got, want)
+			}
+			for _, result := range analysis.Results {
+				if !result.Reachable {
+					t.Fatalf("symreach must remain raise-only, got %#v", result)
+				}
+			}
+		})
+	}
+}
+
+func TestSymreachDropsUnsafeLocalProvenance(t *testing.T) {
+	a, err := New("composer", symbolcanon.PHP, fakeProvenanceScanner{local: []SymbolReference{
+		{Symbol: "target", ModulePath: "/private/materialization/main.php", Line: 9},
+		{Symbol: "target", ModulePath: "../outside.php", Line: 9},
+		{Symbol: "target", ModulePath: `C:\\private\\main.php`, Line: 9},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	analysis, err := a.Analyze(context.Background(), "/work", []string{"target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(analysis.Results) != 0 {
+		t.Fatalf("unsafe provenance must not mint a positive result: %#v", analysis.Results)
 	}
 }

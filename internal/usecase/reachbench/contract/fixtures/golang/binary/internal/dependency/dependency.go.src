@@ -1,0 +1,5 @@
+package dependency
+
+import "fmt"
+
+func Reachable() { fmt.Println("reachable dependency") }

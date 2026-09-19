@@ -77,6 +77,101 @@ func writeApp(t *testing.T, source string) string {
 	return dir
 }
 
+func writeFirstPartyInterprocFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	main := `import { crossModuleTarget } from "./module.mjs";
+
+function entry() {
+  const alias = functionAliasTarget;
+  alias();
+  invokeSynchronously(callbackTarget);
+  returnedCallable()();
+  crossModuleTarget();
+}
+
+function functionAliasTarget() {}
+function callbackTarget() {}
+function invokeSynchronously(callback) { callback(); }
+function returnedCallable() { return returnedCallableTarget; }
+function returnedCallableTarget() {}
+
+entry();
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.mjs"), []byte(main), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "module.mjs"), []byte("export function crossModuleTarget() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestInterprocAnalyzerReachesFirstPartySymbolsFromRealFacts(t *testing.T) {
+	dir := writeFirstPartyInterprocFixture(t)
+	analyzer, err := NewInterprocAnalyzer(prodFactsProvider{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries := make([]string, 0, 4)
+	for _, item := range []struct{ module, symbol string }{
+		{"main.mjs", "functionAliasTarget"},
+		{"main.mjs", "callbackTarget"},
+		{"main.mjs", "returnedCallableTarget"},
+		{"module.mjs", "crossModuleTarget"},
+	} {
+		subject, ok := FirstPartySymbolSubject(item.module, item.symbol)
+		if !ok {
+			t.Fatalf("build first-party subject for %#v", item)
+		}
+		queries = append(queries, subject)
+	}
+	analysis, err := analyzer.Analyze(context.Background(), dir, queries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(analysis.Results) != len(queries) {
+		t.Fatalf("first-party results = %#v, want all %v", analysis.Results, queries)
+	}
+	for index, result := range analysis.Results {
+		if result.Symbol != queries[index] || !result.Reachable || len(result.Path) < 2 {
+			t.Fatalf("result %d = %#v, want a reached local call path", index, result)
+		}
+	}
+}
+
+func TestInterprocAnalyzerClosureAliasReassignmentStaysBlind(t *testing.T) {
+	dir := writeApp(t, `
+function defaultStrategy() {}
+function aggressiveStrategy() {}
+function outer() {
+  let strategy = defaultStrategy;
+  function useAggressive() { strategy = aggressiveStrategy; }
+  useAggressive();
+  strategy();
+}
+outer();
+`)
+	analyzer, err := NewInterprocAnalyzer(prodFactsProvider{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject, ok := FirstPartySymbolSubject("app.js", "aggressiveStrategy")
+	if !ok {
+		t.Fatal("build first-party aggressiveStrategy subject")
+	}
+	analysis, err := analyzer.Analyze(context.Background(), dir, []string{subject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, construct := range analysis.BlindConstructs {
+		if construct == "jsprogram:unresolved_call" || construct == "jsprogram:unresolved_value" {
+			return
+		}
+	}
+	t.Fatalf("closure reassignment must keep the analysis blind, got %#v", analysis.BlindConstructs)
+}
+
 // TestInterprocRecorderMintsFromRawSubjectsEndToEnd is the production-path test the unit tests could not
 // give: it feeds the recorder the RAW (PackagePURL + affected symbol) subject the SCA pass actually
 // produces (not a pre-encoded one), over a real extracted call graph, and asserts a raise-only reachable

@@ -3,6 +3,7 @@ package scabench
 import (
 	"bytes"
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -86,5 +87,14 @@ func TestCompareBundlesForCellValidatesBundlesBeforeSemanticProjection(t *testin
 	}
 	if !comparison.SemanticEqual || comparison.Left.RawOutputDigest == comparison.Right.RawOutputDigest {
 		t.Fatal("semantic comparison did not retain distinct raw provenance while accepting equal claims")
+	}
+}
+
+func TestCompareBundlesForCellContextStopsBeforeReplayAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := CompareBundlesForCellContext(ctx, filepath.Join(t.TempDir(), "left"), filepath.Join(t.TempDir(), "right"), "target", bench.EngineGrype, bench.ObservationComplete)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("comparison error = %v, want context cancellation", err)
 	}
 }

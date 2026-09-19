@@ -117,10 +117,12 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 
 	adj := map[string]map[string]bool{}
 	entry := map[string]bool{}
-	positions := map[string]string{}   // first-party symbol → "relpath:line" (def-use precision for taint findings)
-	reflectiveFns := map[string]bool{} // node id → performs a reflective invocation the graph cannot target
-	pluginFns := map[string]bool{}     // node id → loads a Go plugin (plugin.Open / Lookup): arbitrary code
-	routeBlind := false                // a route registration passed a handler value that could not be resolved
+	positions := map[string]string{}         // first-party symbol → "relpath:line" (def-use precision for taint findings)
+	reflectiveFns := map[string]bool{}       // node id → performs a reflective invocation the graph cannot target
+	pluginFns := map[string]bool{}           // node id → loads a Go plugin (plugin.Open / Lookup): arbitrary code
+	unboundedDynamicFns := map[string]bool{} // node id → invokes a function value whose targets remain unknown
+	dynamicTargets := map[string]map[string]bool{}
+	routeBlind := false // a route registration passed a handler value that could not be resolved
 	for fn, node := range cg.Nodes {
 		caller := nodeID(fn)
 		if caller == "" {
@@ -141,6 +143,18 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 		// reachable surface below.
 		if fnLoadsPlugin(fn) {
 			pluginFns[caller] = true
+		}
+		if isFirstPartyFunc(fn, firstParty) {
+			targets, unbounded := fnUnresolvedDynamicCalls(fn)
+			if unbounded {
+				unboundedDynamicFns[caller] = true
+			}
+			for _, target := range targets {
+				if dynamicTargets[caller] == nil {
+					dynamicTargets[caller] = map[string]bool{}
+				}
+				dynamicTargets[caller][target] = true
+			}
 		}
 		if isFirstPartyFunc(fn, firstParty) {
 			handlers, blind := routeHandlers(fn, firstParty)
@@ -178,6 +192,15 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 				adj[caller] = map[string]bool{}
 			}
 			adj[caller][callee] = true
+		}
+		for target := range dynamicTargets[caller] {
+			if target == caller {
+				continue
+			}
+			if adj[caller] == nil {
+				adj[caller] = map[string]bool{}
+			}
+			adj[caller][target] = true
 		}
 	}
 
@@ -218,6 +241,21 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 			break
 		}
 	}
+	blindSymbols := map[string][]string{}
+	for caller, targets := range dynamicTargets {
+		if !reachable[caller] {
+			continue
+		}
+		for target := range targets {
+			blindSymbols[target] = []string{"dynamic_dispatch"}
+		}
+	}
+	for id := range unboundedDynamicFns {
+		if reachable[id] {
+			blind = append(blind, "dynamic_dispatch")
+			break
+		}
+	}
 	for _, construct := range goOpaqueConstructs {
 		for id := range sourceBlind[construct] {
 			if reachable[id] {
@@ -231,7 +269,91 @@ func BuildGraphAndExecFacts(ctx context.Context, dir string) (*domaincg.Graph, t
 	}
 	sort.Strings(blind)
 	g.BlindConstructs = blind
+	if len(blindSymbols) > 0 {
+		g.BlindSymbols = blindSymbols
+	}
 	return g, taint.ExecFacts{Funcs: execFuncs}, nil
+}
+
+// fnUnresolvedDynamicCalls reports bounded function-value targets and whether any invocation remains
+// unbounded after inspecting the SSA values local to fn.
+// Builtins have no static callee either, but they do not transfer control to application code. Interface
+// invokes are handled by the CHA/VTA edge set and are not treated as opaque here. A lookup from a local map
+// whose function values are all explicit is bounded to those values; every other unresolved call stays global.
+func fnUnresolvedDynamicCalls(fn *ssa.Function) ([]string, bool) {
+	if fn == nil {
+		return nil, false
+	}
+	targets := map[string]bool{}
+	unbounded := false
+	for _, block := range fn.Blocks {
+		for _, instruction := range block.Instrs {
+			call, ok := instruction.(ssa.CallInstruction)
+			if !ok {
+				continue
+			}
+			common := call.Common()
+			if common == nil || common.IsInvoke() || common.StaticCallee() != nil {
+				continue
+			}
+			if _, builtin := common.Value.(*ssa.Builtin); builtin {
+				continue
+			}
+			resolved := dynamicMapTargets(fn, common.Value)
+			if len(resolved) == 0 {
+				unbounded = true
+				continue
+			}
+			for _, target := range resolved {
+				targets[target] = true
+			}
+		}
+	}
+	return sortedKeys(targets), unbounded
+}
+
+func dynamicMapTargets(fn *ssa.Function, value ssa.Value) []string {
+	var lookup *ssa.Lookup
+	switch typed := value.(type) {
+	case *ssa.Lookup:
+		lookup = typed
+	case *ssa.Extract:
+		lookup, _ = typed.Tuple.(*ssa.Lookup)
+	}
+	if lookup == nil {
+		return nil
+	}
+
+	targets := map[string]bool{}
+	for _, block := range fn.Blocks {
+		for _, instruction := range block.Instrs {
+			update, ok := instruction.(*ssa.MapUpdate)
+			if !ok || update.Map != lookup.X {
+				continue
+			}
+			target := dynamicFunctionTarget(update.Value)
+			if target == "" {
+				return nil
+			}
+			targets[target] = true
+		}
+	}
+	return sortedKeys(targets)
+}
+
+func dynamicFunctionTarget(value ssa.Value) string {
+	switch typed := value.(type) {
+	case *ssa.Function:
+		return nodeID(typed)
+	case *ssa.MakeClosure:
+		fn, _ := typed.Fn.(*ssa.Function)
+		return nodeID(fn)
+	case *ssa.ChangeType:
+		return dynamicFunctionTarget(typed.X)
+	case *ssa.Convert:
+		return dynamicFunctionTarget(typed.X)
+	}
+	return ""
 }
 
 // routeHandlers returns the node ids of first-party functions fn passes as handler values to a web-framework

@@ -3,6 +3,7 @@ package jsreach
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/callgraph"
@@ -30,6 +31,18 @@ func wrapperGraph() jsprogram.Resolution {
 
 func evidenceFrom(res jsprogram.Resolution) interprocEvidence {
 	return interprocEvidence{resolution: res, externalNodes: externalNodesOf(res)}
+}
+
+func TestFirstPartySymbolSubject(t *testing.T) {
+	subject, ok := FirstPartySymbolSubject("src/main.mjs", "target")
+	if !ok || subject != "js:src/main:target" {
+		t.Fatalf("first-party source subject = %q/%v, want js:src/main:target/true", subject, ok)
+	}
+	for _, invalid := range []string{"package.json", "../app.mjs", "C:/app.mjs", ""} {
+		if _, ok := FirstPartySymbolSubject(invalid, "target"); ok {
+			t.Fatalf("FirstPartySymbolSubject(%q) accepted a non-source or unsafe module", invalid)
+		}
+	}
 }
 
 func TestSplitExternalID(t *testing.T) {
@@ -149,8 +162,20 @@ func TestEncodeNPMSubjects(t *testing.T) {
 		{FindingID: "f-go", PackagePURL: "pkg:golang/github.com/x/y@1.2.3", Symbols: []string{"Foo"}},
 		// No package identity: dropped.
 		{FindingID: "f-nopurl", Symbols: []string{"bar"}},
+		// A malformed npm identity: dropped rather than guessing a version.
+		{FindingID: "f-invalid", PackagePURL: "pkg:npm/lodash", Symbols: []string{"template"}},
 	}
-	out := encodeNPMSubjects(subjects)
+	original := append([]ports.ReachabilitySubject(nil), subjects...)
+	for index := range original {
+		original[index].Symbols = append([]string(nil), subjects[index].Symbols...)
+	}
+	out := EncodeNPMSubjects(subjects)
+	if !reflect.DeepEqual(subjects, original) {
+		t.Fatalf("input mutated: got %+v want %+v", subjects, original)
+	}
+	if !reflect.DeepEqual(out, EncodeNPMSubjects(subjects)) {
+		t.Fatalf("encoding is not deterministic: %+v", out)
+	}
 	if len(out) != 1 {
 		t.Fatalf("expected only the npm subject to encode, got %d: %+v", len(out), out)
 	}
@@ -175,7 +200,7 @@ func TestEncodeNPMSubjectsSkipsVersionAmbiguity(t *testing.T) {
 		{FindingID: "f-v5", PackagePURL: "pkg:npm/lodash@5.0.0", Symbols: []string{"template"}},
 		{FindingID: "f-express", PackagePURL: "pkg:npm/express@4.18.0", Symbols: []string{"use"}},
 	}
-	out := encodeNPMSubjects(subjects)
+	out := EncodeNPMSubjects(subjects)
 	if len(out) != 1 || out[0].FindingID != "f-express" {
 		t.Fatalf("both lodash versions must be skipped as ambiguous, only express encoded, got %+v", out)
 	}

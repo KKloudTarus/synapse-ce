@@ -142,3 +142,75 @@ func TestPyReachToOpenVEXEndToEnd(t *testing.T) {
 		t.Fatalf("OpenVEX must consume the Tier-1 not_reachable proof: got status=%q justification=%q", st.Status, st.Justification)
 	}
 }
+
+func TestPyReachDynamicImportAliasCannotMintNotReachable(t *testing.T) {
+	testCases := []struct {
+		name      string
+		body      string
+		wantError bool
+	}{
+		{
+			name: "literal alias is affirmative evidence",
+			body: "import importlib\nloader = importlib.import_module\nloader('requests')\n",
+		},
+		{
+			name:      "unknown alias target refuses coverage",
+			body:      "import importlib\nloader = importlib.import_module\nloader(module_name)\n",
+			wantError: true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			dir := writePy(t, map[string]string{
+				"app/main.py":    testCase.body,
+				"pyproject.toml": "[project]\ndependencies = [\"requests\"]\n",
+			})
+			store := memory.NewJudgmentStore()
+			analysisSvc, err := analysis.NewService(store, sealer{}, auditor{}, clock{}, &ids{})
+			if err != nil {
+				t.Fatalf("analysis: %v", err)
+			}
+			analyzer, err := pyreach.New(pyimports.New(), func(ctx context.Context, d string) (map[string]bool, bool) {
+				return srcimports.DirectDependencies(ctx, d, "pypi")
+			})
+			if err != nil {
+				t.Fatalf("analyzer: %v", err)
+			}
+			coord, err := reachproof.NewCoordinatorForTier(analyzer, analysisSvc, auditor{}, clock{}, judgment.Tier1)
+			if err != nil {
+				t.Fatalf("coordinator: %v", err)
+			}
+
+			const engagementID = shared.ID("eng-dynamic")
+			const findingID = shared.ID("f-requests")
+			n, recordErr := coord.Record(context.Background(), engagementID, dir, []ports.ReachabilitySubject{{
+				FindingID: findingID,
+				Symbols:   []string{"requests"},
+			}})
+			claims, listErr := store.ListByEngagement(context.Background(), engagementID)
+			if listErr != nil {
+				t.Fatalf("list judgments: %v", listErr)
+			}
+			if testCase.wantError {
+				if recordErr == nil {
+					t.Fatal("an unknown dynamic target must refuse reachability coverage")
+				}
+				if n != 0 || len(claims) != 0 {
+					t.Fatalf("unknown dynamic target minted judgments: n=%d claims=%v", n, claims)
+				}
+				return
+			}
+			if recordErr != nil {
+				t.Fatalf("record literal dynamic import: %v", recordErr)
+			}
+			if n != 1 || len(claims) != 1 {
+				t.Fatalf("literal dynamic import judgments: n=%d claims=%v", n, claims)
+			}
+			claim, ok := claims[0].Claim.(judgment.ReachabilityClaim)
+			if !ok || claim.Reachable != judgment.Reachable {
+				t.Fatalf("literal dynamic import must be reachable, got %#v", claims[0].Claim)
+			}
+		})
+	}
+}

@@ -1,0 +1,7 @@
+[build-system]
+requires = []
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reachbench-direct"
+version = "1.0.0"

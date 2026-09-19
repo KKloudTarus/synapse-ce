@@ -6,7 +6,7 @@
 //
 // SAFETY: a not-reachable verdict must never be a false negative (it can suppress a real vuln downstream).
 // So the analyzer REFUSES a conclusion (returns a no-coverage error → the coordinator mints nothing and the
-// prior tier stands) when the target has no Python source, uses DYNAMIC imports (importlib/__import__) under
+// prior tier stands) when the target has no Python source, uses an unresolved DYNAMIC import target under
 // which a package could be imported invisibly, or when a queried package is NOT a declared direct dependency
 // (a transitive package is loaded by its parent, so a first-party import scan cannot prove it unused).
 // Candidate import names are generous (a package matches on any plausible name), biasing an uncertain case
@@ -60,7 +60,7 @@ func New(s importScanner, directDeps DirectDependencyReader) (*Analyzer, error) 
 // reachability Result (Reachable iff first-party code imports it under ANY of its candidate import names).
 // The dist→import mapping lives HERE (not in the SCA caller), so the caller passes only the package name.
 // It returns a no-coverage error — so the caller falls back to a lower tier, NEVER a false not-reachable —
-// when there is no Python source or the code uses dynamic imports.
+// when there is no Python source or the code has an unresolved dynamic import target.
 func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*reachability.Analysis, error) {
 	g, err := a.scanner.ScanImports(ctx, dir)
 	if err != nil {
@@ -95,6 +95,10 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*
 	for _, m := range g.ImportedModules {
 		imported[strings.ToLower(m)] = true
 	}
+	dynamic := make(map[string]bool, len(g.DynamicModules))
+	for _, m := range g.DynamicModules {
+		dynamic[strings.ToLower(m)] = true
+	}
 	out := make([]reachability.Result, 0, len(symbols))
 	seen := map[string]bool{}
 	for _, sym := range symbols { // sym is the PyPI DISTRIBUTION name (from the SCA finding's component)
@@ -109,11 +113,22 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*
 			return nil, fmt.Errorf("%w: %q is not a declared direct dependency, so a first-party import scan cannot prove it unused (no coverage)", shared.ErrValidation, sym)
 		}
 		r := reachability.Result{Symbol: sym}
-		for _, cand := range ImportCandidates(sym) { // reachable iff ANY plausible import name is imported
+		candidates := ImportCandidates(sym)
+		for _, cand := range candidates { // reachable iff ANY plausible import name is imported
 			if imported[cand] {
 				r.Reachable = true
 				r.Path = []string{"import " + cand} // the proof: a first-party module imports this package
 				break
+			}
+		}
+		if !r.Reachable {
+			for _, cand := range candidates {
+				if dynamic[cand] {
+					r.Reachable = true
+					r.Path = []string{"dynamic import " + cand}
+					r.BlindConstructs = []string{"python:conditional_dynamic_import"}
+					break
+				}
 			}
 		}
 		out = append(out, r)

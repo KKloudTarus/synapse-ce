@@ -6,16 +6,17 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // DotNetScanner observes namespace references in first-party C#/VB.NET source. A NuGet package is reached
-// through a `using`/`Imports` of one (or a sub-namespace) of the namespaces it ships, so the scanner emits
-// each imported namespace and its dotted prefixes; the candidate namer emits the package name and its
-// prefixes, and a match on any shared prefix is a reference (over-matching biases to "reachable", the safe
-// direction). It is source-only: it lexes text and never runs dotnet, msbuild or a runtime.
+// through a `using`/`Imports` of one (or a sub-namespace) of the namespaces it ships, so the scanner preserves
+// each complete imported namespace. Keeping sibling namespaces distinct avoids treating Reachbench.Direct as
+// evidence for Reachbench.Unused; the build-aware analyzer still matches parent and child namespaces in the
+// conservative direction. It is source-only: it lexes text and never runs dotnet, msbuild or a runtime.
 //
 // A package can also be reached WITHOUT any visible per-file `using`, which observeProjectImports handles on
 // a second pass over the project/props files and the obj/ build output (both skipped by the source walk):
@@ -41,20 +42,24 @@ func NewDotNetScanner() *DotNetScanner { return &DotNetScanner{limits: defaultSc
 // Lang reports the package-URL type this scanner observes.
 func (DotNetScanner) Lang() string { return "nuget" }
 
-// dotnetDynamic are constructs under which a package can be reached without a visible `using`: .NET resolves
-// types and methods at runtime from strings via reflection, and a DI container or assembly load can
-// materialize a type the source never names.
-var dotnetDynamic = []dynamicConstruct{
-	{marker: "System.Reflection", reason: "reflection resolves a type or method from a runtime value"},
-	{marker: "Activator.CreateInstance", reason: "Activator.CreateInstance resolves a type from a runtime value"},
-	{marker: "Type.GetType", reason: "Type.GetType resolves a type name from a runtime string"},
-	{marker: "Assembly.Load", reason: "an assembly is loaded from a name computed at runtime"},
-	{marker: "AppDomain", reason: "AppDomain can load an assembly at runtime"},
-	{marker: ".GetMethod(", reason: "a method is resolved by name from a runtime value"},
-	{marker: ".GetType(", reason: "a type is resolved by name from a runtime value"},
-	{marker: ".Invoke(", reason: "a member is invoked reflectively"},
-	{marker: "dynamic ", reason: "a dynamic binding resolves members at runtime"},
-}
+// Reflection can make a package reachable without a visible using. A statically
+// recoverable assembly or type name is still affirmative subject-local evidence;
+// only a target the scanner cannot recover makes negative conclusions unsafe.
+var (
+	dotnetStringAssignmentRE   = regexp.MustCompile(`(?m)\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*("(?:[^"\\]|\\.)*")\s*;`)
+	dotnetConcatAssignmentRE   = regexp.MustCompile(`(?m)\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*string\.Concat\(\s*([^,()]+)\s*,\s*([^()]+)\s*\)\s*;`)
+	dotnetVariableAssignmentRE = regexp.MustCompile(`(?m)\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[^=]`)
+	dotnetAssemblyLoadRE       = regexp.MustCompile(`\bAssembly\s*\.\s*Load\s*\(\s*([^)]*?)\s*\)`)
+	dotnetLoadAssignmentRE     = regexp.MustCompile(`\b(?:var|[A-Za-z_][A-Za-z0-9_<>?,.\[\]]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*Assembly\s*\.\s*Load\s*\(\s*([^)]*?)\s*\)`)
+	dotnetTypeGetCallRE        = regexp.MustCompile(`\bType\s*\.\s*GetType\s*\(`)
+	dotnetTypeGetTypeRE        = regexp.MustCompile(`\bType\s*\.\s*GetType\s*\(\s*("(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z0-9_]*)`)
+	dotnetTypeGetAssignmentRE  = regexp.MustCompile(`\b(?:var|[A-Za-z_][A-Za-z0-9_<>?,.\[\]]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*Type\s*\.\s*GetType\s*\(\s*("(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z0-9_]*)`)
+	dotnetGetMethodRE          = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*GetMethod\s*\(`)
+	dotnetInvokeRE             = regexp.MustCompile(`\.\s*Invoke\s*\(`)
+	dotnetDynamicBindingRE     = regexp.MustCompile(`\bdynamic\s+[A-Za-z_]`)
+)
+
+const unresolvedDotNetReflection = "reflection resolves a type or member from an unrecognized runtime value"
 
 // csharpUsingRe matches a C# `using`/Razor `@using` directive and a VB `Imports` (plain, `static`, aliased,
 // or `global`). It captures the trailing namespace, which may be a SINGLE segment (`@using MudBlazor`), so it
@@ -89,9 +94,9 @@ func (s *DotNetScanner) ScanImports(ctx context.Context, dir string) (ports.Sour
 	walker := newSourceWalker(s.limits, []string{".cs", ".vb", ".cshtml", ".razor"}, dotnetSkipDir).
 		withExemptCoverage(dotnetSkipDir)
 	scan, err := walker.walk(ctx, dir, func(p string, content []byte, out *scanAccumulator) {
-		raw := string(content)
-		emitDotNetReferences(out, stripLineComments(raw, "//"))
-		out.noteDynamic(raw, dotnetDynamic, p)
+		raw := stripLineComments(string(content), "//")
+		emitDotNetReferences(out, raw)
+		emitDotNetReflection(out, raw, p)
 	})
 	if err != nil {
 		return ports.SourceImportGraph{}, err
@@ -101,6 +106,148 @@ func (s *DotNetScanner) ScanImports(ctx context.Context, dir string) (ports.Sour
 	// join the source ones.
 	s.observeProjectImports(ctx, dir, scan)
 	return scan.graph(), nil
+}
+
+// emitDotNetReflection records a known assembly or type name as an affirmative
+// reference. Other reflective forms retain an explicit coverage gap: a resolved
+// reflection in one statement must never bless a separate unknown reflection.
+func emitDotNetReflection(out *scanAccumulator, body, path string) {
+	constants := dotnetStringConstants(body)
+	resolvedValues := map[string]bool{}
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		for _, match := range dotnetAssemblyLoadRE.FindAllStringSubmatch(line, -1) {
+			candidate, ok := dotnetStringValue(match[1], constants)
+			if !ok {
+				out.addReason(unresolvedDotNetReflection + " (" + path + ")")
+				continue
+			}
+			emitDotNetConditionalName(out, candidate)
+		}
+		knownReflectionAssignments := map[string]bool{}
+		for _, match := range dotnetLoadAssignmentRE.FindAllStringSubmatch(line, -1) {
+			if _, ok := dotnetStringValue(match[2], constants); ok {
+				knownReflectionAssignments[match[1]] = true
+			}
+		}
+		typeGetCalls := len(dotnetTypeGetCallRE.FindAllStringIndex(line, -1))
+		knownTypeGets := 0
+		for _, match := range dotnetTypeGetTypeRE.FindAllStringSubmatch(line, -1) {
+			candidate, ok := dotnetStringValue(match[1], constants)
+			if !ok {
+				continue
+			}
+			emitDotNetConditionalName(out, candidate)
+			knownTypeGets++
+		}
+		if knownTypeGets != typeGetCalls {
+			out.addReason(unresolvedDotNetReflection + " (" + path + ")")
+		}
+		for _, match := range dotnetTypeGetAssignmentRE.FindAllStringSubmatch(line, -1) {
+			if _, ok := dotnetStringValue(match[2], constants); ok {
+				knownReflectionAssignments[match[1]] = true
+			}
+		}
+		assignments := map[string]int{}
+		for _, match := range dotnetVariableAssignmentRE.FindAllStringSubmatch(line, -1) {
+			assignments[match[1]]++
+		}
+		for name, count := range assignments {
+			if resolvedValues[name] && (!knownReflectionAssignments[name] || count != 1) {
+				// A later or competing assignment means the name may no longer hold the statically
+				// recovered reflection result. Forget it so any later GetMethod/Invoke stays fail-closed.
+				delete(resolvedValues, name)
+			}
+		}
+		for name := range knownReflectionAssignments {
+			if assignments[name] == 1 {
+				resolvedValues[name] = true
+			}
+		}
+		methodOnResolvedValue := false
+		for _, match := range dotnetGetMethodRE.FindAllStringSubmatch(line, -1) {
+			if !resolvedValues[match[1]] {
+				out.addReason(unresolvedDotNetReflection + " (" + path + ")")
+				continue
+			}
+			methodOnResolvedValue = true
+		}
+		if dotnetInvokeRE.MatchString(line) && !methodOnResolvedValue {
+			out.addReason(unresolvedDotNetReflection + " (" + path + ")")
+		}
+		if strings.Contains(line, "Activator.CreateInstance") || strings.Contains(line, "AppDomain") || dotnetDynamicBindingRE.MatchString(line) {
+			out.addReason(unresolvedDotNetReflection + " (" + path + ")")
+		}
+	}
+}
+
+func dotnetStringConstants(body string) map[string]string {
+	constants := map[string]string{}
+	for _, line := range strings.Split(body, "\n") {
+		assignedOnLine := map[string]bool{}
+		for _, assignment := range dotnetVariableAssignmentRE.FindAllStringSubmatch(line, -1) {
+			name := assignment[1]
+			if assignedOnLine[name] {
+				// The lightweight assignment matcher is intentionally line-oriented. More than one
+				// assignment to the same name on one line could select a different final value; poison
+				// it rather than accidentally recover the first textual constant twice.
+				constants[name] = ""
+				continue
+			}
+			assignedOnLine[name] = true
+			value, known := dotnetStringAssignmentValue(line, name, constants)
+			if prior, seen := constants[name]; !seen {
+				if known {
+					constants[name] = value
+				} else {
+					constants[name] = ""
+				}
+			} else if !known || prior != value {
+				// The scanner does not model conditional control flow. A second different or unknown
+				// assignment could reach a reflective load, so poison this variable rather than replace
+				// it with the last textual constant.
+				constants[name] = ""
+			}
+		}
+	}
+	return constants
+}
+
+func dotnetStringAssignmentValue(line, name string, constants map[string]string) (string, bool) {
+	for _, match := range dotnetStringAssignmentRE.FindAllStringSubmatch(line, -1) {
+		if match[1] == name {
+			return dotnetStringValue(match[2], constants)
+		}
+	}
+	for _, match := range dotnetConcatAssignmentRE.FindAllStringSubmatch(line, -1) {
+		if match[1] != name {
+			continue
+		}
+		left, leftOK := dotnetStringValue(match[2], constants)
+		right, rightOK := dotnetStringValue(match[3], constants)
+		if leftOK && rightOK {
+			return left + right, true
+		}
+	}
+	return "", false
+}
+
+func dotnetStringValue(value string, constants map[string]string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if constant, ok := constants[value]; ok && constant != "" {
+		return constant, true
+	}
+	if len(value) < 2 || value[0] != '"' {
+		return "", false
+	}
+	decoded, err := strconv.Unquote(value)
+	if err != nil || strings.TrimSpace(decoded) == "" || strings.ContainsAny(decoded, "\x00\r\n") {
+		return "", false
+	}
+	return decoded, true
 }
 
 // emitDotNetReferences records every namespace a body references: a per-file/global `using`, a dotted
@@ -134,15 +281,27 @@ func emitDotNetReferences(out *scanAccumulator, body string) {
 	}
 }
 
-// emitDotNetName records a namespace token and its dotted prefixes. A `Global.` root qualifier is not part
-// of any package's namespace, so it is dropped first; VB is case-insensitive, so `Global.`, `global.` and
-// `GLOBAL.` are all recognised (Global.Newtonsoft.Json -> Newtonsoft.Json).
+// emitDotNetName records one complete namespace token. A `Global.` root qualifier is not part of any
+// package's namespace, so it is dropped first; VB is case-insensitive, so `Global.`, `global.` and `GLOBAL.`
+// are all recognised (Global.Newtonsoft.Json -> Newtonsoft.Json).
 func emitDotNetName(out *scanAccumulator, token string) {
 	if idx := strings.IndexByte(token, '.'); idx > 0 && strings.EqualFold(token[:idx], "global") {
 		token = token[idx+1:]
 	}
-	for _, name := range dottedPrefixes(token) {
-		out.addPackage(name)
+	if token = strings.Trim(strings.TrimSpace(token), "."); token != "" {
+		out.addPackage(token)
+	}
+}
+
+func emitDotNetConditionalName(out *scanAccumulator, token string) {
+	for _, candidate := range strings.Split(token, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if idx := strings.IndexByte(candidate, '.'); idx > 0 && strings.EqualFold(candidate[:idx], "global") {
+			candidate = candidate[idx+1:]
+		}
+		if candidate = strings.Trim(candidate, "."); candidate != "" {
+			out.addConditionalPackage(candidate)
+		}
 	}
 }
 

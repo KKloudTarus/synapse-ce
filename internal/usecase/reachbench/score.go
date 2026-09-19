@@ -193,9 +193,9 @@ func LoadCorpus(r io.Reader) (Corpus, error) {
 	return c, nil
 }
 
-// DecodeInput decodes exactly one strict fixture-runner input. It validates the nested corpus before any
-// observations are scored, so callers that construct JSON rather than using DefaultCorpus get the same
-// closed vocabulary and duplicate-case protections.
+// DecodeInput decodes exactly one strict v1 legacy comparator input. It validates the nested corpus before
+// scoring, but it is retained only for the existing lifecycle command and comparator fixtures; contract production
+// baseline and candidate acceptance use DecodeMeasurementInput.
 func DecodeInput(r io.Reader) (Input, error) {
 	var input Input
 	if err := decodeStrict(r, &input, "reachability input"); err != nil {
@@ -210,7 +210,7 @@ func DecodeInput(r io.Reader) (Input, error) {
 	return input, nil
 }
 
-// EvaluateInput reduces a validated fixture-runner hand-off into its scorecard.
+// EvaluateInput reduces a v1 legacy comparator hand-off into its scorecard. It is not a contract acceptance evaluator.
 func EvaluateInput(input Input) (Report, error) {
 	if input.SchemaVersion != InputSchemaVersion {
 		return Report{}, fmt.Errorf("unsupported reachability input schema version %q", input.SchemaVersion)
@@ -289,6 +289,7 @@ func LoadFloors(r io.Reader) (Floors, error) {
 
 // Evaluate validates a complete observation set and reduces it to per-language accuracy. It is pure: engine
 // adapters own fixture execution while this package owns the corpus vocabulary and score semantics.
+// Evaluate is the legacy comparator scorer. contract acceptance is exclusively EvaluateMeasurement.
 func Evaluate(c Corpus, observations []Observation) (Report, error) {
 	if err := validateCorpus(c); err != nil {
 		return Report{}, err

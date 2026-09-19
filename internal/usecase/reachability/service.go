@@ -14,20 +14,50 @@ package reachability
 import (
 	"context"
 	"fmt"
+	"path"
+	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
+// SourceProvenance identifies a declaration in source. ModulePath is a slash-separated path relative to the
+// analyzed root and Line is one-based. It never carries an absolute or parent-traversing path into evidence.
+type SourceProvenance struct {
+	ModulePath string
+	Line       int
+}
+
+// NormalizeSourceProvenance validates and normalizes a source declaration location before it reaches a
+// reachability result or capture evidence. Invalid locations are omitted rather than exposing a private root.
+func NormalizeSourceProvenance(value SourceProvenance) (SourceProvenance, bool) {
+	modulePath := strings.TrimSpace(value.ModulePath)
+	if value.Line < 1 || modulePath == "" || strings.Contains(modulePath, `\`) || strings.ContainsRune(modulePath, 0) {
+		return SourceProvenance{}, false
+	}
+	for _, segment := range strings.Split(modulePath, "/") {
+		if segment == ".." {
+			return SourceProvenance{}, false
+		}
+	}
+	cleaned := path.Clean(modulePath)
+	if path.IsAbs(modulePath) || cleaned == "." || strings.HasPrefix(cleaned, "/") || strings.Contains(cleaned, ":") {
+		return SourceProvenance{}, false
+	}
+	return SourceProvenance{ModulePath: cleaned, Line: value.Line}, true
+}
+
 // Result is one symbol's reachability verdict. Path is the proof – a shortest entrypoint→symbol call
-// chain ("main → … → vulnFunc") – present only when Reachable. BlindConstructs names any reachable-surface
-// construct the analysis could NOT follow while deciding THIS symbol (reflection, dynamic dispatch beyond
-// its bound, cgo, generated code). A not_reachable Result carrying a blind construct is not a sound proof of
-// absence: the coordinator folds it into the claim so it can never drive an OpenVEX not_affected.
+// chain ("main → … → vulnFunc") – present only when Reachable. Provenance is an optional source declaration
+// location for a lexical proof and is never used as a substitute for Path. BlindConstructs names any
+// reachable-surface construct the analysis could NOT follow while deciding THIS symbol (reflection, dynamic
+// dispatch beyond its bound, cgo, generated code). A not_reachable Result carrying a blind construct is not a
+// sound proof of absence: the coordinator folds it into the claim so it can never drive an OpenVEX not_affected.
 type Result struct {
 	Symbol          string
 	Reachable       bool
 	Path            []string
+	Provenance      *SourceProvenance
 	BlindConstructs []string
 }
 
@@ -87,6 +117,7 @@ func (s *Service) Analyze(ctx context.Context, targetRef string, symbols []strin
 			r.Reachable = true
 			r.Path = g.PathTo(sym) // the proof chain for the human-facing reachability judgment
 		}
+		r.BlindConstructs = append([]string(nil), g.BlindSymbols[sym]...)
 		out = append(out, r)
 	}
 	return &Analysis{Results: out, Entrypoints: g.Entrypoints, BlindConstructs: g.BlindConstructs}, nil

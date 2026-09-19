@@ -1,0 +1,19 @@
+{
+  "name": "reachbench/php-import-app",
+  "version": "1.0.0",
+  "require": {
+    "reachbench/direct": "1.0.0",
+    "reachbench/dynamic": "1.0.0",
+    "reachbench/unused": "1.0.0",
+    "reachbench/unsupported": "1.0.0"
+  },
+  "repositories": [
+    {"type": "path", "url": "packages/reachbench-direct", "options": {"symlink": false}},
+    {"type": "path", "url": "packages/reachbench-dynamic", "options": {"symlink": false}},
+    {"type": "path", "url": "packages/reachbench-unused", "options": {"symlink": false}},
+    {"type": "path", "url": "packages/reachbench-unsupported", "options": {"symlink": false}}
+  ],
+  "extra": {
+    "reachbench": {"no_coverage_capabilities": ["reachbench/unsupported"]}
+  }
+}

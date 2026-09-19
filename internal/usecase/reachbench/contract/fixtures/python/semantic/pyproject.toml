@@ -1,0 +1,11 @@
+[build-system]
+requires = []
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reachbench-python-semantic"
+version = "1.0.0"
+requires-python = ">=3.12"
+
+[tool.reachbench]
+no_coverage_capability = "typing-stubs"

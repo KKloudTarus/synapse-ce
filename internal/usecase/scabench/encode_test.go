@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 )
 
 func TestEncodeObservationSetCanonicalizesAndRoundTripsStrictly(t *testing.T) {
@@ -81,6 +83,24 @@ func TestDigestObservationsSortsNormalizedEquivalentFindingsDeterministically(t 
 	}
 	if first.Findings[0].AdvisoryID != "CVE-2024-0001" || first.Findings[1].AdvisoryID != "cve-2024-0001" {
 		t.Fatalf("digest mutated input findings: %+v", first.Findings)
+	}
+}
+
+func TestNeutralJSONHelpersPreserveSCAIdentity(t *testing.T) {
+	value := map[string]any{"z": []string{"b", "a"}, "a": "value"}
+	got, err := CanonicalJSON(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := benchmark.CanonicalJSON(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) || SHA256Digest(got) != benchmark.SHA256Digest(want) {
+		t.Fatalf("neutral helper changed SCA canonical identity: %q / %q", got, want)
+	}
+	if err := ValidateJSONDocument(strings.NewReader(`{"a":1,"a":2}`)); err == nil {
+		t.Fatal("SCA strict document validation accepted duplicate keys after delegation")
 	}
 }
 

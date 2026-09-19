@@ -1,4 +1,4 @@
-.PHONY: help install tools dev build run test harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify sca-accuracy-run sca-accuracy-test \
+.PHONY: help install tools dev build run test harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify sca-accuracy-run sca-accuracy-test reachability-benchmark \
         rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down kind-smoke helm-render-test clean web-dev web-build smoke release-smoke
 
 GO ?= go
@@ -99,6 +99,32 @@ sca-accuracy-run: ## Run the fixed trusted SCA benchmark cycle
 
 sca-accuracy-test: ## Run focused SCA benchmark verification
 	$(GO) test -count=1 ./internal/usecase/scabench ./internal/infrastructure/scabench ./cmd/synapse-sca-cycle ./cmd/synapse-sca-bench
+
+reachability-benchmark: ## Run the no-argument reachability benchmark lifecycle
+	@set -eu; \
+	tools_root=""; \
+	cleanup() { \
+		if [ -n "$$tools_root" ]; then rm -rf -- "$$tools_root"; fi; \
+	}; \
+	trap cleanup EXIT; \
+	trap 'exit 1' HUP INT TERM; \
+	if [ -z "$${SYNAPSE_TAINT_CALLGRAPH_BIN:-}" ] || [ -z "$${SYNAPSE_AST_BIN:-}" ]; then \
+		tools_root="$$(mktemp -d "$${TMPDIR:-/tmp}/synapse-reachability-tools.XXXXXX")"; \
+		chmod 0700 -- "$$tools_root"; \
+		if [ -z "$${SYNAPSE_TAINT_CALLGRAPH_BIN:-}" ]; then \
+			$(GO) build -o "$$tools_root/synapse-callgraph" ./cmd/synapse-callgraph; \
+			test -x "$$tools_root/synapse-callgraph"; \
+			export SYNAPSE_TAINT_CALLGRAPH_BIN="$$tools_root/synapse-callgraph"; \
+		fi; \
+		if [ -z "$${SYNAPSE_AST_BIN:-}" ]; then \
+			$(GO) build -o "$$tools_root/synapse-ast" ./cmd/synapse-ast; \
+			test -x "$$tools_root/synapse-ast"; \
+			export SYNAPSE_AST_BIN="$$tools_root/synapse-ast"; \
+		fi; \
+	fi; \
+	export SYNAPSE_JSREACH_TIER2_ENABLED=true; \
+	export SYNAPSE_JVM_REACH_TIER2_POINTS_TO_ENABLED=true; \
+	$(GO) run ./cmd/synapse-reachability-cycle
 
 rulepack-verify: ## Verify a signed RulePack against the externally pinned release key
 	$(GO) run ./cmd/synapse-cli rulepack verify --artifact $(RULEPACK_ARTIFACT) --public-key $(RULEPACK_PUBLIC_KEY)

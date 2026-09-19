@@ -103,6 +103,10 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 	for _, name := range graph.ImportedPackages {
 		referenced[strings.ToLower(strings.TrimSpace(name))] = true
 	}
+	conditional := make(map[string]bool, len(graph.ConditionalPackages))
+	for _, name := range graph.ConditionalPackages {
+		conditional[strings.ToLower(strings.TrimSpace(name))] = true
+	}
 
 	results := make([]reachability.Result, 0, len(subjects))
 	seen := make(map[string]bool, len(subjects))
@@ -124,6 +128,9 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 				// The proof names the reference form that matched, which is evidence a reader can check
 				// against the source without the analyzer quoting any of it.
 				result.Path = []string{a.scanner.Lang() + " import " + candidate}
+				if conditional[candidate] {
+					result.BlindConstructs = []string{a.scanner.Lang() + ":conditional_import"}
+				}
 				break
 			}
 		}

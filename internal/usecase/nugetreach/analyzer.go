@@ -59,6 +59,10 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*
 	for _, ns := range graph.ImportedPackages {
 		observed[ns] = true
 	}
+	conditional := make(map[string]bool, len(graph.ConditionalPackages))
+	for _, ns := range graph.ConditionalPackages {
+		conditional[ns] = true
+	}
 
 	direct, ok := a.directDeps(ctx, dir)
 	if !ok {
@@ -90,10 +94,12 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*
 		if !known || !pn.Complete || len(pn.Namespaces) == 0 {
 			continue // incomplete or empty namespace set: unknown, omit (fail closed)
 		}
-		results = append(results, reachability.Result{
-			Symbol:    sym,
-			Reachable: anyNamespaceObserved(pn.Namespaces, observed),
-		})
+		reachable := anyNamespaceObserved(pn.Namespaces, observed)
+		result := reachability.Result{Symbol: sym, Reachable: reachable}
+		if reachable && anyNamespaceObserved(pn.Namespaces, conditional) {
+			result.BlindConstructs = []string{"dotnet:conditional_reflection"}
+		}
+		results = append(results, result)
 	}
 	return &reachability.Analysis{Results: results, Entrypoints: graph.Entrypoints}, nil
 }

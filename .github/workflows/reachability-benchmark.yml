@@ -1,136 +1,672 @@
-# Reachability scorecard (EPIC #1042 / #1049). The corpus and external runners are pinned so a PR cannot
-# improve a score by changing the tool, omitting an analysis record, or comparing a different denominator.
-name: Reachability Benchmark
+name: Reachability benchmark
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
-  pull_request:
+  schedule:
+    - cron: "23 3 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-jobs:
-  go-oss-baselines:
-    name: Go corpus vs OSV-Scanner and Semgrep CE
-    runs-on: ubuntu-latest
-    env:
-      # Reviewed external-tool pins. Updating either pin requires reviewing the resulting artifact diff.
-      OSV_SCANNER_VERSION: v2.4.0
-      SEMGREP_VERSION: 1.176.0
-      REACHBENCH_DIR: internal/infrastructure/tools/ssacallgraph/testdata/reachbench
-      REACHBENCH_REPORT_DIR: ${{ github.workspace }}/.reachbench
-    steps:
-      - uses: actions/checkout@v7
+concurrency:
+  group: reachability-benchmark-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
+jobs:
+  route:
+    name: Authorize trusted benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      trusted: ${{ steps.trust.outputs.trusted }}
+      route: ${{ steps.trust.outputs.route }}
+    steps:
+      - id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source revision is not a full lower-case SHA" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - id: trust
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ steps.source.outputs.sha }}
+          ENABLED: ${{ vars.REACHABILITY_BENCHMARK_TRUSTED_ENABLED }}
+          TRUSTED_REF: ${{ vars.REACHABILITY_BENCHMARK_TRUSTED_REF }}
+          BASELINE_HARNESS_SHA: ${{ vars.REACHABILITY_BENCHMARK_BASELINE_HARNESS_SHA }}
+        run: |
+          set -euo pipefail
+          if [ -n "$BASELINE_HARNESS_SHA" ] && [[ ! "$BASELINE_HARNESS_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "configured baseline harness revision is not a full lower-case SHA" >&2
+            exit 1
+          fi
+          route=candidate
+          if [ -n "$BASELINE_HARNESS_SHA" ] && [ "$SHA" = "$BASELINE_HARNESS_SHA" ]; then
+            route=baseline
+          fi
+          trusted=false
+          if [ "$EVENT_NAME" != pull_request ] && [ "$ENABLED" = true ] && [ -n "$TRUSTED_REF" ] && [ "$REF" = "$TRUSTED_REF" ]; then
+            trusted=true
+          fi
+          echo "route=$route" >> "$GITHUB_OUTPUT"
+          echo "trusted=$trusted" >> "$GITHUB_OUTPUT"
+
+  benchmark:
+    name: Trusted fixed benchmark
+    needs: route
+    if: ${{ needs.route.outputs.trusted == 'true' }}
+    runs-on: [self-hosted, linux, reachability-accuracy-trusted]
+    timeout-minutes: 90
+    env:
+      GIT_CONFIG_NOSYSTEM: "1"
+      GIT_CONFIG_COUNT: "0"
+      GIT_CONFIG_PARAMETERS: ""
+      GIT_TEMPLATE_DIR: ""
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Prepare fresh trusted checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:-}"
+          runner_temp="${RUNNER_TEMP:-}"
+          if [ -z "$workspace" ] || [ -z "$runner_temp" ] || [ "${workspace#/}" = "$workspace" ] || [ "${runner_temp#/}" = "$runner_temp" ] || [ "$workspace" = / ] || [ "$runner_temp" = / ]; then
+            echo "checkout and runner temporary paths must be non-root absolute paths" >&2
+            exit 1
+          fi
+          case "$workspace$runner_temp" in
+            *$'\n'*|*$'\r'*)
+              echo "checkout and runner temporary paths must not contain line breaks" >&2
+              exit 1
+              ;;
+          esac
+          test -d "$runner_temp"
+          test ! -L "$runner_temp"
+          cd "$RUNNER_TEMP"
+          runner_temp="$(pwd -P)"
+          if [ "$runner_temp" != "$RUNNER_TEMP" ]; then
+            echo "runner temporary path must be canonical" >&2
+            exit 1
+          fi
+          workspace_canonical="$(realpath -m -- "$workspace")"
+          if [ "$workspace_canonical" != "$workspace" ] || [ "$workspace_canonical" = / ]; then
+            echo "checkout path must be canonical, absolute, and non-root" >&2
+            exit 1
+          fi
+          workspace="$workspace_canonical"
+          case "$workspace" in
+            "$runner_temp"|"$runner_temp"/*)
+              echo "checkout path must remain outside runner temporary storage" >&2
+              exit 1
+              ;;
+          esac
+          case "$runner_temp" in
+            "$workspace"|"$workspace"/*)
+              echo "runner temporary path must remain outside the checkout" >&2
+              exit 1
+              ;;
+          esac
+          workspace_parent="$(dirname -- "$workspace")"
+          test -d "$workspace_parent"
+          test ! -L "$workspace_parent"
+          test "$GIT_CONFIG_NOSYSTEM" = 1
+          test "$GIT_CONFIG_COUNT" = 0
+          test -z "$GIT_CONFIG_PARAMETERS"
+          test -z "$GIT_TEMPLATE_DIR"
+          git_config="$runner_temp/synapse-reachability-gitconfig"
+          for name in "${!GIT_@}"; do
+            case "$name" in
+              GIT_CONFIG_NOSYSTEM|GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS|GIT_TEMPLATE_DIR) ;;
+              *)
+                echo "unexpected inherited Git environment variable: $name" >&2
+                exit 1
+                ;;
+            esac
+          done
+          rm -f -- "$git_config"
+          install -m 0600 /dev/null "$git_config"
+          test -f "$git_config"
+          test ! -L "$git_config"
+          printf 'GIT_CONFIG_GLOBAL=%s\n' "$git_config" >> "$GITHUB_ENV"
+          printf 'GIT_CONFIG_PARAMETERS=\n' >> "$GITHUB_ENV"
+          rm -rf -- "$workspace"
+          install -d -m 0700 -- "$workspace"
+          test -d "$workspace"
+          test ! -L "$workspace"
+      - name: Check out exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.route.outputs.source_sha }}
+          persist-credentials: false
+          clean: true
+          set-safe-directory: false
+          fetch-depth: 0
+      - name: Assert fresh checkout and protected reference head
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
+          TRUSTED_REF: ${{ vars.REACHABILITY_BENCHMARK_TRUSTED_REF }}
+          BASELINE_REVISION: "50d205260be412dc2f57736f71d1448a8f58177a"
+        run: |
+          set -euo pipefail
+          case "$TRUSTED_REF" in
+            refs/heads/*) branch="${TRUSTED_REF#refs/heads/}" ;;
+            *) echo "trusted ref must name a protected branch" >&2; exit 1 ;;
+          esac
+          if ! git check-ref-format --branch "$branch" >/dev/null; then
+            echo "trusted protected branch is unsafe" >&2
+            exit 1
+          fi
+          workspace="$(pwd -P)"
+          git_dir="$(git rev-parse --absolute-git-dir)"
+          test "$git_dir" = "$workspace/.git"
+          test -d "$git_dir"
+          test ! -L "$git_dir"
+          test -f "$git_dir/HEAD"
+          test ! -e "$git_dir/objects/info/alternates"
+          if git for-each-ref --format='%(refname)' refs/replace | grep -q .; then
+            echo "checkout contains Git replace refs" >&2
+            exit 1
+          fi
+          if git config --global --list | grep -q .; then
+            echo "isolated global Git config is not empty" >&2
+            exit 1
+          fi
+          if git config --local --get-regexp '^(include|includeif\..*)\.path$' >/dev/null; then
+            echo "checkout local Git config contains an include" >&2
+            exit 1
+          fi
+          if git config --local --get core.hooksPath >/dev/null; then
+            echo "checkout local Git config contains a hooks path" >&2
+            exit 1
+          fi
+          git reset --hard "$SOURCE_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          source_tree="$(git rev-parse "$SOURCE_SHA^{tree}")"
+          test "$(git rev-parse HEAD^{tree})" = "$source_tree"
+          test "$(git rev-parse --is-shallow-repository)" = false
+          test "$(git rev-parse --verify "$BASELINE_REVISION^{commit}")" = "$BASELINE_REVISION"
+          git merge-base --is-ancestor "$BASELINE_REVISION" "$SOURCE_SHA"
+          test "$GITHUB_REF" = "$TRUSTED_REF"
+          git fetch --no-tags origin "$TRUSTED_REF:refs/remotes/origin/$branch"
+          test "$(git rev-parse "refs/remotes/origin/$branch")" = "$SOURCE_SHA"
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" ]; then
+            echo "trusted checkout contains tracked, untracked, or ignored residue" >&2
+            exit 1
+          fi
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
           cache: true
+      - name: Assert runner and toolchain prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          test "$(go env GOOS)" = linux
+          test "$(go env GOARCH)" = amd64
+          required_go="$(awk '$1 == "go" { print "go" $2; exit }' go.mod)"
+          test -n "$required_go"
+          test "$(go env GOVERSION)" = "$required_go"
+          test "$(dotnet --version)" = 8.0.100
+          assert_jdk_21() {
+            tool="$1"
+            version_arg=-version
+            if [ "$tool" = jar ]; then
+              version_arg=--version
+            fi
+            if ! output="$("$tool" "$version_arg" 2>&1)"; then
+              echo "$tool version command failed" >&2
+              return 1
+            fi
+            if ! printf '%s\n' "$output" | grep -Eq '(^|[^[:digit:]])21\.0\.5([^[:digit:]]|$)'; then
+              echo "$tool is not version 21.0.5" >&2
+              return 1
+            fi
+          }
+          assert_jdk_21 java
+          assert_jdk_21 javac
+          assert_jdk_21 jar
+      - name: Stage controller-owned input
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
+          ROUTE: ${{ needs.route.outputs.route }}
+          CONTROLLER_SOURCE_ROOT: ${{ vars.REACHABILITY_BENCHMARK_CONTROLLER_ROOT }}
+        run: |
+          set -euo pipefail
+          max_authority_file_bytes=$((8 * 1024 * 1024))
+          test -n "$CONTROLLER_SOURCE_ROOT"
+          test -d "$CONTROLLER_SOURCE_ROOT"
+          test ! -L "$CONTROLLER_SOURCE_ROOT"
+          controller_root="$(realpath -e -- "$CONTROLLER_SOURCE_ROOT")"
+          workspace_root="$(realpath -e -- "$GITHUB_WORKSPACE")"
+          case "$controller_root" in
+            "$workspace_root"|"$workspace_root"/*)
+              echo "controller source root must remain outside the checkout" >&2
+              exit 1
+              ;;
+          esac
+          case "$ROUTE" in
+            baseline)
+              envelope_name="baseline-${SOURCE_SHA}.json"
+              authority_files=(
+                review-trust.json
+                baseline-review-evidence.json
+                baseline-review-evidence.signature.json
+              )
+              ;;
+            candidate)
+              envelope_name="candidate-${SOURCE_SHA}.json"
+              authority_files=(
+                review-trust.json
+                baseline-review-evidence.json
+                baseline-review-evidence.signature.json
+                baseline-disposition-evidence.json
+                baseline-disposition-evidence.signature.json
+                candidate-review-subject.json
+                candidate-review-subject.signature.json
+              )
+              ;;
+            *) echo "unknown closed route" >&2; exit 1 ;;
+          esac
+          bundle_source="$controller_root/trusted-bundle"
+          envelope_root="$controller_root/envelopes"
+          envelope_source="$envelope_root/$envelope_name"
+          authority_source="$controller_root/authority"
+          for path in "$bundle_source" "$envelope_root" "$envelope_source" "$authority_source"; do
+            test -e "$path"
+            test ! -L "$path"
+          done
+          test -d "$bundle_source"
+          test -d "$envelope_root"
+          test -f "$envelope_source"
+          test -d "$authority_source"
+          authority_source="$(realpath -e -- "$authority_source")"
+          case "$authority_source" in
+            "$controller_root"/authority) ;;
+            *) echo "controller authority root must not escape the controller source root" >&2; exit 1 ;;
+          esac
+          if find -P "$controller_root" -xdev -type l -print -quit | grep -q . || find -P "$controller_root" -xdev ! -type d ! -type f -print -quit | grep -q .; then
+            echo "controller source contains a symlink, reparse point, or non-regular entry" >&2
+            exit 1
+          fi
+          declare -A expected_authority=()
+          for authority_file in "${authority_files[@]}"; do
+            expected_authority["$authority_file"]=1
+            source="$authority_source/$authority_file"
+            test -e "$source"
+            test ! -L "$source"
+            test -f "$source"
+            resolved="$(realpath -e -- "$source")"
+            case "$resolved" in
+              "$authority_source"/*) ;;
+              *) echo "controller authority entry escapes its root" >&2; exit 1 ;;
+            esac
+            test "$resolved" = "$source"
+            size="$(stat -c %s -- "$source")"
+            case "$size" in
+              ''|*[!0-9]*) echo "controller authority entry has an invalid size" >&2; exit 1 ;;
+            esac
+            if [ "$size" -gt "$max_authority_file_bytes" ]; then
+              echo "controller authority entry exceeds the JSON size bound" >&2
+              exit 1
+            fi
+          done
+          authority_count=0
+          while IFS= read -r -d '' source; do
+            relative="${source#"$authority_source"/}"
+            if [ "$relative" = "$source" ] || [ "$relative" != "${relative##*/}" ] || [ -z "${expected_authority[$relative]+x}" ]; then
+              echo "controller authority inventory is not exact" >&2
+              exit 1
+            fi
+            authority_count=$((authority_count + 1))
+          done < <(find -P "$authority_source" -xdev -mindepth 1 -maxdepth 1 -type f -print0 | sort -z)
+          if [ "$authority_count" -ne "${#authority_files[@]}" ] || find -P "$authority_source" -xdev -mindepth 1 -maxdepth 1 ! -type f -print -quit | grep -q .; then
+            echo "controller authority inventory contains a missing, extra, symlink, reparse point, or non-regular entry" >&2
+            exit 1
+          fi
+          stage_root="$RUNNER_TEMP/synapse-reachability-controller"
+          if [ -e "$stage_root" ] || [ -L "$stage_root" ]; then
+            echo "controller staging root already exists" >&2
+            exit 1
+          fi
+          install -d -m 0700 -- "$stage_root/trusted-bundle" "$stage_root/envelopes" "$stage_root/authority"
+          while IFS= read -r -d '' source; do
+            relative="${source#"$bundle_source"/}"
+            install -D -m 0600 -- "$source" "$stage_root/trusted-bundle/$relative"
+          done < <(find -P "$bundle_source" -xdev -type f -print0 | sort -z)
+          install -m 0600 -- "$envelope_source" "$stage_root/envelopes/$envelope_name"
+          for authority_file in "${authority_files[@]}"; do
+            install -m 0600 -- "$authority_source/$authority_file" "$stage_root/authority/$authority_file"
+            test -f "$stage_root/authority/$authority_file"
+            test ! -L "$stage_root/authority/$authority_file"
+          done
+          test -f "$stage_root/envelopes/$envelope_name"
+          test ! -L "$stage_root/envelopes/$envelope_name"
+      - name: Run trusted benchmark from private immutable source
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
+          ROUTE: ${{ needs.route.outputs.route }}
+        run: |
+          set -euo pipefail
+          command -v unshare >/dev/null
+          command -v mount >/dev/null
+          case "$ROUTE" in
+            baseline|candidate) envelope_name="${ROUTE}-${SOURCE_SHA}.json" ;;
+            *) echo "unknown closed route" >&2; exit 1 ;;
+          esac
+          private_mount="$RUNNER_TEMP/synapse-reachability-private-runtime"
+          if [ -e "$private_mount" ] || [ -L "$private_mount" ]; then
+            echo "private runtime mount already exists" >&2
+            exit 1
+          fi
+          install -d -m 0700 -- "$private_mount"
+          unshare --user --map-root-user --mount --fork --pid --mount-proc \
+            env SOURCE_SHA="$SOURCE_SHA" ROUTE="$ROUTE" ENVELOPE_NAME="$envelope_name" \
+              HOST_CHECKOUT="$GITHUB_WORKSPACE" HOST_CONTROLLER="$RUNNER_TEMP/synapse-reachability-controller" \
+              PRIVATE_MOUNT="$private_mount" HOST_RUNNER_TEMP="$RUNNER_TEMP" \
+              bash <<'TRUSTED_RUNTIME'
+          set -euo pipefail
+          mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs "$PRIVATE_MOUNT"
+          source_root="$PRIVATE_MOUNT/source"
+          controller_root="$PRIVATE_MOUNT/controller"
+          tools_root="$PRIVATE_MOUNT/tools"
+          install -d -m 0700 -- "$source_root" "$controller_root" "$tools_root"
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
+          git clone --no-local --no-hardlinks --no-checkout -- "$HOST_CHECKOUT" "$source_root"
+          cd "$source_root"
+          git checkout --detach "$SOURCE_SHA"
+          git remote remove origin
+          git reset --hard "$SOURCE_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          source_tree="$(git rev-parse "$SOURCE_SHA^{tree}")"
+          test "$(git rev-parse HEAD^{tree})" = "$source_tree"
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" ]; then
+            echo "private source snapshot contains residue" >&2
+            exit 1
+          fi
+
+          cp -a -- "$HOST_CONTROLLER/." "$controller_root/"
+          if find -P "$controller_root" -xdev -type l -print -quit | grep -q . || find -P "$controller_root" -xdev ! -type d ! -type f -print -quit | grep -q .; then
+            echo "private controller snapshot contains an ambiguous entry" >&2
+            exit 1
+          fi
+          mount --bind "$source_root" "$source_root"
+          mount -o remount,bind,ro,nosuid,nodev "$source_root"
+          mount --bind "$controller_root" "$controller_root"
+          mount -o remount,bind,ro,nosuid,nodev "$controller_root"
+          test ! -w "$source_root/go.mod"
+          test ! -w "$controller_root/envelopes/$ENVELOPE_NAME"
+
+          cd "$source_root"
+          go build -o "$tools_root/synapse-callgraph" ./cmd/synapse-callgraph
+          go build -o "$tools_root/synapse-ast" ./cmd/synapse-ast
+          test -x "$tools_root/synapse-callgraph"
+          test -x "$tools_root/synapse-ast"
+          export TMPDIR="$HOST_RUNNER_TEMP"
+          export SYNAPSE_REACHABILITY_CONTROLLER_ENVELOPE="$controller_root/envelopes/$ENVELOPE_NAME"
+          export SYNAPSE_TAINT_CALLGRAPH_BIN="$tools_root/synapse-callgraph"
+          export SYNAPSE_AST_BIN="$tools_root/synapse-ast"
+          make reachability-benchmark
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$source_tree"
+          TRUSTED_RUNTIME
+      - name: Upload sanitized result
+        id: upload
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          python-version: '3.12'
+          name: reachability-benchmark-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/synapse-reachability/published/github-${{ github.run_id }}/attempt-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+      - name: Teardown trusted benchmark workspace
+        if: ${{ always() }}
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/synapse-reachability-controller" "$RUNNER_TEMP/synapse-reachability-private-runtime" "$RUNNER_TEMP/synapse-reachability/private" "$RUNNER_TEMP/synapse-reachability/published" "$RUNNER_TEMP/synapse-reachability-gitconfig" "$RUNNER_TEMP/synapse-reachability-prior-checkout"
 
-      - name: Install pinned OSS baselines
+  pr-lifecycle:
+    name: PR-safe reachability lifecycle
+    needs: route
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.route.outputs.source_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Set up exact .NET SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-sdk-8.0.100
+        with:
+          dotnet-version: "8.0.100"
+      - name: Set up exact JDK
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: "21.0.5"
+      - name: Assert private lifecycle toolchains
+        shell: bash
         run: |
-          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@${OSV_SCANNER_VERSION}
-          python -m pip install --disable-pip-version-check semgrep==${SEMGREP_VERSION}
+          set -euo pipefail
+          test "$DOTNET_ROOT" = "$RUNNER_TEMP/dotnet-sdk-8.0.100"
+          test "$(dotnet --version)" = "8.0.100"
+          assert_jdk_21() {
+            tool="$1"
+            version_arg=-version
+            if [ "$tool" = jar ]; then
+              version_arg=--version
+            fi
+            if ! output="$("$tool" "$version_arg" 2>&1)"; then
+              echo "$tool version command failed" >&2
+              return 1
+            fi
+            if ! printf '%s\n' "$output" | grep -Eq '(^|[^[:digit:]])21\.0\.5([^[:digit:]]|$)'; then
+              echo "$tool is not version 21.0.5" >&2
+              return 1
+            fi
+          }
+          assert_jdk_21 java
+          assert_jdk_21 javac
+          assert_jdk_21 jar
+      - name: Run candidate lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
+          export TMPDIR="$RUNNER_TEMP"
+          make reachability-benchmark
+      - name: Upload SHA-bound lifecycle evidence
+        id: upload
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: reachability-pr-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/synapse-reachability/published/github-${{ github.run_id }}/attempt-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
 
+  go-oss-baselines:
+    name: Go corpus vs OSV-Scanner and Semgrep CE
+    needs: route
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OSV_SCANNER_VERSION: v2.4.0
+      SEMGREP_IMAGE: semgrep/semgrep@sha256:d39aa8d8cdb7fd9e5ec14f0825e2356f902129778c9617217856295e553254d5
+      REACHBENCH_DIR: internal/infrastructure/tools/ssacallgraph/testdata/reachbench
+      REACHBENCH_REPORT_DIR: ${{ github.workspace }}/reachbench-scorecards/go
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.route.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install pinned OSV-Scanner
+        shell: bash
+        run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@${OSV_SCANNER_VERSION}
       - name: Run OSV-Scanner Go call analysis
+        shell: bash
         run: |
-          mkdir -p "${REACHBENCH_REPORT_DIR}"
+          set -euo pipefail
+          mkdir -p "$REACHBENCH_REPORT_DIR"
           set +e
-          "$(go env GOPATH)/bin/osv-scanner" scan source --recursive --format json --call-analysis=go "${REACHBENCH_DIR}" > "${REACHBENCH_REPORT_DIR}/osv.raw.json"
+          "$(go env GOPATH)/bin/osv-scanner" scan source --recursive --format json --call-analysis=go "$REACHBENCH_DIR" > "$REACHBENCH_REPORT_DIR/osv.raw.json"
           status=$?
           set -e
           if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
-            echo "OSV-Scanner failed with unexpected status $status"
             exit "$status"
           fi
-          go run ./cmd/synapse-bench -mode reachability-osv -language go -input "${REACHBENCH_REPORT_DIR}/osv.raw.json" -output "${REACHBENCH_REPORT_DIR}/osv-scanner.json"
-
+          go run ./cmd/synapse-bench -mode reachability-osv -language go -input "$REACHBENCH_REPORT_DIR/osv.raw.json" -output "$REACHBENCH_REPORT_DIR/osv-scanner.json"
       - name: Run Semgrep CE direct-call baseline
+        shell: bash
         run: |
+          set -euo pipefail
           set +e
-          semgrep scan --config internal/usecase/reachbench/corpus/semgrep-ce.yml --json --no-git-ignore "${REACHBENCH_DIR}" > "${REACHBENCH_REPORT_DIR}/semgrep.raw.json"
+          docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -e SEMGREP_ENABLE_VERSION_CHECK=0 -e EIO_BACKEND=posix \
+            -v "$GITHUB_WORKSPACE:/src:ro" -w /src --entrypoint semgrep "$SEMGREP_IMAGE" \
+            scan --oss-only --metrics off --jobs 1 --config internal/usecase/reachbench/corpus/semgrep-ce.yml --json --no-git-ignore "$REACHBENCH_DIR"/*/main.go > "$REACHBENCH_REPORT_DIR/semgrep.raw.json"
           status=$?
           set -e
           if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
-            echo "Semgrep CE failed with unexpected status $status"
             exit "$status"
           fi
-          go run ./cmd/synapse-bench -mode reachability-semgrep-ce -language go -input "${REACHBENCH_REPORT_DIR}/semgrep.raw.json" -output "${REACHBENCH_REPORT_DIR}/semgrep-ce.json"
-
+          go run ./cmd/synapse-bench -mode reachability-semgrep-ce -language go -input "$REACHBENCH_REPORT_DIR/semgrep.raw.json" -output "$REACHBENCH_REPORT_DIR/semgrep-ce.json"
       - name: Gate owned engine recall and parity
         env:
-          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/.reachbench/synapse-owned.json
-          SYNAPSE_REACHBENCH_BASELINE_REPORTS: osv-scanner=${{ github.workspace }}/.reachbench/osv-scanner.json,semgrep-ce=${{ github.workspace }}/.reachbench/semgrep-ce.json
+          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/reachbench-scorecards/go/synapse-owned.json
+          SYNAPSE_REACHBENCH_BASELINE_REPORTS: osv-scanner=${{ github.workspace }}/reachbench-scorecards/go/osv-scanner.json,semgrep-ce=${{ github.workspace }}/reachbench-scorecards/go/semgrep-ce.json
         run: go test -count=1 -v -run TestGoReachabilityCorpus ./internal/infrastructure/tools/ssacallgraph
-
-      - name: Upload raw evidence and scorecards
-        if: always()
-        uses: actions/upload-artifact@v7
+      - name: Upload Go scorecards
+        id: upload
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: reachability-benchmark-go-scorecards
-          path: ${{ github.workspace }}/.reachbench
-          if-no-files-found: warn
+          name: reachability-go-scorecards-${{ needs.route.outputs.source_sha }}
+          path: ${{ github.workspace }}/reachbench-scorecards/go
+          if-no-files-found: error
+          retention-days: 14
 
   python-oss-baselines:
     name: Python corpus vs Semgrep CE
+    needs: route
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
-      # OSV-Scanner has no Python call-analysis baseline (its call analysis covers Go and Rust), so the
-      # Python head-to-head is against Semgrep CE, whose pattern rule proves a dangerous-sink call site but
-      # not its entrypoint reachability. The owned engine must match or beat its recall AND precision.
-      SEMGREP_VERSION: 1.176.0
+      SEMGREP_IMAGE: semgrep/semgrep@sha256:d39aa8d8cdb7fd9e5ec14f0825e2356f902129778c9617217856295e553254d5
       REACHBENCH_DIR: internal/infrastructure/tools/astwalk/testdata/reachbench
-      REACHBENCH_REPORT_DIR: ${{ github.workspace }}/.reachbench
+      REACHBENCH_REPORT_DIR: ${{ github.workspace }}/reachbench-scorecards/python
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.route.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
-      - name: Install pinned Semgrep CE
-        run: python -m pip install --disable-pip-version-check semgrep==${SEMGREP_VERSION}
-
       - name: Run Semgrep CE Python direct-sink baseline
+        shell: bash
         run: |
-          mkdir -p "${REACHBENCH_REPORT_DIR}"
+          set -euo pipefail
+          mkdir -p "$REACHBENCH_REPORT_DIR"
           set +e
-          semgrep scan --config internal/usecase/reachbench/corpus/semgrep-ce.yml --json --no-git-ignore "${REACHBENCH_DIR}" > "${REACHBENCH_REPORT_DIR}/semgrep.py.raw.json"
+          docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -e SEMGREP_ENABLE_VERSION_CHECK=0 -e EIO_BACKEND=posix \
+            -v "$GITHUB_WORKSPACE:/src:ro" -w /src --entrypoint semgrep "$SEMGREP_IMAGE" \
+            scan --oss-only --metrics off --jobs 1 --config internal/usecase/reachbench/corpus/semgrep-ce.yml --json --no-git-ignore "$REACHBENCH_DIR"/py_*/*.py > "$REACHBENCH_REPORT_DIR/semgrep.py.raw.json"
           status=$?
           set -e
           if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
-            echo "Semgrep CE failed with unexpected status $status"
             exit "$status"
           fi
-          go run ./cmd/synapse-bench -mode reachability-semgrep-ce -language python -input "${REACHBENCH_REPORT_DIR}/semgrep.py.raw.json" -output "${REACHBENCH_REPORT_DIR}/semgrep-ce.py.json"
-
+          go run ./cmd/synapse-bench -mode reachability-semgrep-ce -language python -input "$REACHBENCH_REPORT_DIR/semgrep.py.raw.json" -output "$REACHBENCH_REPORT_DIR/semgrep-ce.py.json"
       - name: Gate owned Python engine recall and parity
         env:
-          # The owned Python reachability engine uses cgo tree-sitter, so the corpus gate runs with CGO enabled.
           CGO_ENABLED: '1'
-          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/.reachbench/synapse-owned.py.json
-          SYNAPSE_REACHBENCH_BASELINE_REPORTS: semgrep-ce=${{ github.workspace }}/.reachbench/semgrep-ce.py.json
+          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/reachbench-scorecards/python/synapse-owned.py.json
+          SYNAPSE_REACHBENCH_BASELINE_REPORTS: semgrep-ce=${{ github.workspace }}/reachbench-scorecards/python/semgrep-ce.py.json
         run: go test -count=1 -v -run TestPythonReachabilityCorpus ./internal/infrastructure/tools/astwalk
-
-      - name: Upload raw evidence and scorecards
-        if: always()
-        uses: actions/upload-artifact@v7
+      - name: Upload Python scorecards
+        id: upload
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: reachability-benchmark-python-scorecards
-          path: ${{ github.workspace }}/.reachbench
-          if-no-files-found: warn
+          name: reachability-python-scorecards-${{ needs.route.outputs.source_sha }}
+          path: ${{ github.workspace }}/reachbench-scorecards/python
+          if-no-files-found: error
+          retention-days: 14
+
+  aggregate:
+    name: Aggregate benchmark status
+    needs: [route, benchmark, pr-lifecycle, go-oss-baselines, python-oss-baselines]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TRUSTED: ${{ needs.route.outputs.trusted }}
+          ROUTE: ${{ needs.route.result }}
+          BENCHMARK: ${{ needs.benchmark.result }}
+          BENCHMARK_ARTIFACT: ${{ needs.benchmark.outputs.artifact }}
+          PR_LIFECYCLE: ${{ needs.pr-lifecycle.result }}
+          PR_ARTIFACT: ${{ needs.pr-lifecycle.outputs.artifact }}
+          GO_BASELINE: ${{ needs.go-oss-baselines.result }}
+          GO_ARTIFACT: ${{ needs.go-oss-baselines.outputs.artifact }}
+          PYTHON_BASELINE: ${{ needs.python-oss-baselines.result }}
+          PYTHON_ARTIFACT: ${{ needs.python-oss-baselines.outputs.artifact }}
+        run: |
+          set -euo pipefail
+          test "$ROUTE" = success
+          test "$GO_BASELINE" = success
+          test -n "$GO_ARTIFACT"
+          test "$PYTHON_BASELINE" = success
+          test -n "$PYTHON_ARTIFACT"
+          if [ "$EVENT_NAME" = pull_request ]; then
+            test "$TRUSTED" = false
+            test "$BENCHMARK" = skipped
+            test "$PR_LIFECYCLE" = success
+            test -n "$PR_ARTIFACT"
+          else
+            test "$TRUSTED" = true
+            test "$BENCHMARK" = success
+            test -n "$BENCHMARK_ARTIFACT"
+            test "$PR_LIFECYCLE" = skipped
+          fi

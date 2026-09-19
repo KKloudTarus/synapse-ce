@@ -1,0 +1,16 @@
+{
+  "app": "example.invalid.reachbench:jvm-coarse:1.0.0",
+  "application_classes": "generated/jvm-coarse/classes/Main.class",
+  "dependencies": [
+    "example.invalid.reachbench:jvm-direct:1.0.0",
+    "example.invalid.reachbench:jvm-dynamic:1.0.0",
+    "example.invalid.reachbench:jvm-unused:1.0.0",
+    "example.invalid.reachbench:jvm-unsupported:1.0.0"
+  ],
+  "dependency_archives": [
+    {"coordinate": "example.invalid.reachbench:jvm-direct:1.0.0", "path": "generated/jvm-coarse/jvm-direct.jar", "metadata": "META-INF/maven/example.invalid.reachbench/jvm-direct/pom.properties"},
+    {"coordinate": "example.invalid.reachbench:jvm-dynamic:1.0.0", "path": "generated/jvm-coarse/jvm-dynamic.jar", "metadata": "META-INF/maven/example.invalid.reachbench/jvm-dynamic/pom.properties"},
+    {"coordinate": "example.invalid.reachbench:jvm-unused:1.0.0", "path": "generated/jvm-coarse/jvm-unused.jar", "metadata": "META-INF/maven/example.invalid.reachbench/jvm-unused/pom.properties"}
+  ],
+  "no_coverage_capabilities": ["example.invalid.reachbench:jvm-unsupported:1.0.0"]
+}

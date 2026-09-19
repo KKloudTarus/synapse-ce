@@ -1,0 +1,12 @@
+{
+  "name": "reachbench-lexical-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=22.0.0"},
+  "dependencies": {
+    "@reachbench/lexical": "1.0.0",
+    "@reachbench/lexical-opaque": "1.0.0"
+  },
+  "reachbench": {"noCoverageCapability": "parser-unavailable"}
+}

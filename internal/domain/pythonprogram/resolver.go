@@ -36,12 +36,17 @@ type ResolvedCall struct {
 }
 
 // Resolution is the pure Tier-2 result. Graph remains useful for positive evidence when Complete is
-// false; callers must require Complete before treating absence of a path as a negative proof.
+// false; callers must require Complete before treating absence of a path as a negative proof. A finite
+// literal-mapping dispatch is retained separately: it prevents analysis-wide completeness, but a target
+// outside every finite candidate and its downstream graph closure may still be eligible for a local negative.
 type Resolution struct {
-	Graph    callgraph.Graph `json:"-"`
-	Calls    []ResolvedCall  `json:"calls"`
-	Gaps     []CoverageGap   `json:"coverage_gaps"`
-	Complete bool            `json:"complete"`
+	Graph                  callgraph.Graph `json:"-"`
+	Calls                  []ResolvedCall  `json:"calls"`
+	Gaps                   []CoverageGap   `json:"coverage_gaps"`
+	ClosedWorldEntrypoints []string        `json:"closed_world_entrypoints"`
+	BoundedUncertainNodes  []string        `json:"bounded_uncertain_nodes,omitempty"`
+	CompleteExceptBounded  bool            `json:"complete_except_bounded"`
+	Complete               bool            `json:"complete"`
 }
 
 type importBinding struct {
@@ -59,15 +64,16 @@ type pythonType struct {
 }
 
 type semanticResolver struct {
-	document  Document
-	symbols   map[string]Symbol
-	modules   map[string]string
-	children  map[string]map[string][]string
-	imports   map[string]map[string][]importBinding
-	receivers map[string]map[string][]pythonType
-	bases     map[string][]string
-	subclass  map[string][]string // class id -> direct subclass ids (reverse of bases), for downward dispatch
-	gaps      []CoverageGap
+	document     Document
+	symbols      map[string]Symbol
+	modules      map[string]string
+	children     map[string]map[string][]string
+	imports      map[string]map[string][]importBinding
+	receivers    map[string]map[string][]pythonType
+	bases        map[string][]string
+	subclass     map[string][]string // class id -> direct subclass ids (reverse of bases), for downward dispatch
+	boundedRoots map[string]bool
+	gaps         []CoverageGap
 }
 
 // Resolve builds a deterministic, conservative Python call graph without filesystem or interpreter I/O.
@@ -84,6 +90,20 @@ func Resolve(document Document) (Resolution, error) {
 	resolved := make([]ResolvedCall, 0, len(document.Calls))
 	edgeCount := 0
 	for _, call := range document.Calls {
+		if bounded, ok := r.resolveBoundedCallees(call.CallerID, call.BoundedCallees); ok {
+			// A literal mapping selects one of these direct local callables, but no static path establishes
+			// which selection occurs. Keep its candidates out of Graph (so it cannot fabricate a positive
+			// witness), and retain their downstream closure as subject-local negative uncertainty instead.
+			for _, candidate := range bounded {
+				r.boundedRoots[candidate] = true
+			}
+			resolved = append(resolved, ResolvedCall{
+				CallID: call.ID, CallerID: call.CallerID, Callees: bounded, Status: CallAmbiguous,
+				Pos: call.Pos, Ambiguous: true,
+			})
+			continue
+		}
+
 		candidates, external := r.resolveReference(call.CallerID, call.Callee)
 		candidates = sortedUnique(candidates)
 		status := CallResolved
@@ -145,19 +165,80 @@ func Resolve(document Document) (Resolution, error) {
 	sort.Strings(graph.Entrypoints)
 	sort.Slice(resolved, func(i, j int) bool { return resolved[i].CallID < resolved[j].CallID })
 	r.gaps = canonicalGaps(append(append([]CoverageGap{}, document.CoverageGaps...), r.gaps...))
-	return Resolution{Graph: graph, Calls: resolved, Gaps: r.gaps, Complete: document.Complete() && len(r.gaps) == 0}, nil
+	completeExceptBounded := document.Complete() && len(r.gaps) == 0
+	boundedUncertain := boundedPythonClosure(edges, r.boundedRoots)
+	return Resolution{
+		Graph: graph, Calls: resolved, Gaps: r.gaps, ClosedWorldEntrypoints: r.closedWorldEntrypoints(),
+		BoundedUncertainNodes: boundedUncertain,
+		CompleteExceptBounded: completeExceptBounded,
+		Complete:              completeExceptBounded && len(boundedUncertain) == 0,
+	}, nil
+}
+
+// closedWorldEntrypoints excludes the conservative public-API roots used for external component queries.
+// It is used only by an explicit first-party source query, whose trusted source locator names a symbol inside
+// the materialized analysis root. Module execution and explicit framework/main hints remain reachable roots.
+func (r *semanticResolver) closedWorldEntrypoints() []string {
+	entrypoints := map[string]bool{}
+	for _, symbol := range r.document.Symbols {
+		if symbol.Kind == SymbolModule {
+			entrypoints[symbol.ID] = true
+		}
+	}
+	for _, hint := range r.document.Entrypoints {
+		if _, exists := r.symbols[hint.SymbolID]; exists {
+			entrypoints[hint.SymbolID] = true
+		}
+	}
+	out := make([]string, 0, len(entrypoints))
+	for entrypoint := range entrypoints {
+		out = append(out, entrypoint)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// boundedPythonClosure returns every locally reachable node from a finite dynamic-dispatch candidate. The
+// candidate itself and every statically known downstream callee remain uncertain for a negative proof; nodes
+// outside this closure can be decided without pretending the dispatch was resolved.
+func boundedPythonClosure(edges map[string]map[string]bool, roots map[string]bool) []string {
+	seen := make(map[string]bool, len(roots))
+	queue := make([]string, 0, len(roots))
+	for root := range roots {
+		if root != "" && !seen[root] {
+			seen[root] = true
+			queue = append(queue, root)
+		}
+	}
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		for child := range edges[node] {
+			if !seen[child] {
+				seen[child] = true
+				queue = append(queue, child)
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for node := range seen {
+		out = append(out, node)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func newSemanticResolver(document Document) *semanticResolver {
 	r := &semanticResolver{
-		document:  document,
-		symbols:   make(map[string]Symbol, len(document.Symbols)),
-		modules:   make(map[string]string, len(document.Modules)),
-		children:  map[string]map[string][]string{},
-		imports:   map[string]map[string][]importBinding{},
-		receivers: map[string]map[string][]pythonType{},
-		bases:     map[string][]string{},
-		subclass:  map[string][]string{},
+		document:     document,
+		symbols:      make(map[string]Symbol, len(document.Symbols)),
+		modules:      make(map[string]string, len(document.Modules)),
+		children:     map[string]map[string][]string{},
+		imports:      map[string]map[string][]importBinding{},
+		receivers:    map[string]map[string][]pythonType{},
+		bases:        map[string][]string{},
+		subclass:     map[string][]string{},
+		boundedRoots: map[string]bool{},
 	}
 	for _, symbol := range document.Symbols {
 		r.symbols[symbol.ID] = symbol
@@ -177,6 +258,31 @@ func newSemanticResolver(document Document) *semanticResolver {
 		}
 	}
 	return r
+}
+
+// resolveBoundedCallees accepts finite candidates only when every candidate resolves uniquely to a local
+// symbol. A malformed or external candidate falls back to the normal unresolved-call path, preserving the
+// analysis-wide fail-closed behavior for anything beyond the extractor's narrow literal-map contract.
+func (r *semanticResolver) resolveBoundedCallees(scopeID string, refs []Reference) ([]string, bool) {
+	if len(refs) == 0 || len(refs) > maxResolvedCandidates {
+		return nil, false
+	}
+	candidates := make([]string, 0, len(refs))
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		resolved, external := r.resolveReference(scopeID, ref)
+		resolved = sortedUnique(resolved)
+		if external || len(resolved) != 1 {
+			return nil, false
+		}
+		candidate := resolved[0]
+		if _, local := r.symbols[candidate]; !local || seen[candidate] {
+			return nil, false
+		}
+		seen[candidate] = true
+		candidates = append(candidates, candidate)
+	}
+	return sortedUnique(candidates), len(candidates) > 0
 }
 
 func (r *semanticResolver) indexImports() {

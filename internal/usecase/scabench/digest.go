@@ -1,29 +1,23 @@
 package scabench
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 )
 
 // SHA256Digest returns a lower-case, immutable sha256 digest with its algorithm prefix.
 func SHA256Digest(data []byte) string {
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return benchmark.SHA256Digest(data)
 }
 
 // CanonicalJSON encodes a value with the deterministic guarantees of encoding/json for structs and maps.
 // Callers with order-insensitive slices should use the type-specific digest helpers below.
 func CanonicalJSON(value any) ([]byte, error) {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return encoded, nil
+	return benchmark.CanonicalJSON(value)
 }
 
 // DigestCatalog produces a stable digest regardless of target, component, or pin input order.
@@ -209,14 +203,7 @@ func EncodeResult(writer io.Writer, result Result) error {
 }
 
 func writeCanonicalJSON(writer io.Writer, encoded []byte) error {
-	encoded = append(encoded, '\n')
-	if int64(len(encoded)) > MaxJSONBytes {
-		return fmt.Errorf("JSON output exceeds %d byte limit", MaxJSONBytes)
-	}
-	if _, err := writer.Write(encoded); err != nil {
-		return err
-	}
-	return nil
+	return benchmark.WriteCanonicalJSON(writer, encoded)
 }
 
 func canonicalCatalog(catalog Catalog) Catalog {

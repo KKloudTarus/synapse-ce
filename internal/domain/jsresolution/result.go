@@ -14,7 +14,7 @@ import (
 // coverage is preserved separately for the later reachability gate.
 func NormalizeResult(in Result) (Result, error) {
 	in.DeclaredDependencies = normalizeNameList(in.DeclaredDependencies)
-	out := Result{}
+	out := Result{DeclaredDependencies: in.DeclaredDependencies}
 	out.Imports = make([]ImportResolution, 0, len(in.Imports))
 	for _, resolution := range in.Imports {
 		normalized, err := normalizeImportResolution(resolution)

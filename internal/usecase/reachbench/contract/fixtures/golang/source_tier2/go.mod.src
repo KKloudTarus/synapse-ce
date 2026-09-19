@@ -1,0 +1,5 @@
+module example.invalid/reachbench/go-source-tier2
+
+go 1.27.0
+
+// no-coverage-capability: entrypoint-authority

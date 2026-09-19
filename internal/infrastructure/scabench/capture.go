@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/redact"
@@ -49,6 +50,7 @@ const (
 	// It is an implementation normalization boundary, distinct from scanner-output truncation.
 	maxNormalizationInputBytes int64 = bench.MaxJSONBytes
 	maxManifestDepth                 = 64
+	bundleReadBufferSize             = 32 << 10
 )
 
 // DatabaseFormat selects the sole importer and fixed database contract for one engine.
@@ -3242,36 +3244,14 @@ func WriteBundle(output string, result CaptureResult) error {
 	if strings.TrimSpace(output) == "" {
 		return errors.New("output bundle directory is required")
 	}
-	if err := validateResultBinding(result); err != nil {
+	artifacts, err := bundleArtifacts(result)
+	if err != nil {
 		return err
 	}
 	if _, err := os.Lstat(output); err == nil {
 		return fmt.Errorf("output bundle already exists")
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("inspect output bundle: %w", err)
-	}
-	set := bench.ObservationSet{
-		SchemaVersion:   bench.ObservationSchemaVersion,
-		CatalogRevision: result.observation.CatalogRevision,
-		CatalogDigest:   result.observation.CatalogDigest,
-		Observations:    []bench.Observation{cloneObservation(result.observation)},
-	}
-	var observation bytes.Buffer
-	if err := bench.EncodeObservationSet(&observation, set); err != nil {
-		return fmt.Errorf("encode observation bundle: %w", err)
-	}
-	if _, err := bench.DecodeObservationSet(bytes.NewReader(observation.Bytes())); err != nil {
-		return fmt.Errorf("validate observation bundle: %w", err)
-	}
-	evidence, err := validateEvidenceObservation(result.observation, result.evidenceJSON)
-	if err != nil {
-		return err
-	}
-	if err := validateProfileBundle(result.observation, result.profileJSON); err != nil {
-		return err
-	}
-	if err := replayPublication(result, evidence); err != nil {
-		return err
 	}
 	parent := filepath.Dir(output)
 	base := filepath.Base(output)
@@ -3280,28 +3260,6 @@ func WriteBundle(output string, result CaptureResult) error {
 		return fmt.Errorf("create bundle staging directory: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
-	artifacts := []struct {
-		name string
-		data []byte
-	}{
-		{name: "observation.json", data: observation.Bytes()},
-		{name: "evidence.json", data: result.evidenceJSON},
-		{name: "profile.json", data: result.profileJSON},
-		{name: "environment.json", data: result.environmentJSON},
-		{name: "environment-attestation.json", data: result.environmentAttestationJSON},
-	}
-	if evidence.Capability != nil {
-		artifacts = append(artifacts, struct {
-			name string
-			data []byte
-		}{name: "capability-statement.json", data: result.capabilityStatementJSON})
-		for i, source := range result.capabilitySources {
-			artifacts = append(artifacts, struct {
-				name string
-				data []byte
-			}{name: capabilitySourceBundleName(i), data: source.Data})
-		}
-	}
 	for _, artifact := range artifacts {
 		if err := writeBundleFile(filepath.Join(stage, artifact.name), artifact.data); err != nil {
 			return err
@@ -3322,12 +3280,94 @@ func WriteBundle(output string, result CaptureResult) error {
 	return nil
 }
 
+type bundleArtifact struct {
+	name string
+	data []byte
+}
+
+func bundleArtifacts(result CaptureResult) ([]bundleArtifact, error) {
+	return bundleArtifactsContext(context.Background(), result)
+}
+
+func bundleArtifactsContext(ctx context.Context, result CaptureResult) ([]bundleArtifact, error) {
+	if ctx == nil {
+		return nil, errors.New("bundle artifact context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateResultBinding(result); err != nil {
+		return nil, err
+	}
+	set := bench.ObservationSet{
+		SchemaVersion:   bench.ObservationSchemaVersion,
+		CatalogRevision: result.observation.CatalogRevision,
+		CatalogDigest:   result.observation.CatalogDigest,
+		Observations:    []bench.Observation{cloneObservation(result.observation)},
+	}
+	var observation bytes.Buffer
+	if err := bench.EncodeObservationSet(&observation, set); err != nil {
+		return nil, fmt.Errorf("encode observation bundle: %w", err)
+	}
+	if _, err := bench.DecodeObservationSet(bytes.NewReader(observation.Bytes())); err != nil {
+		return nil, fmt.Errorf("validate observation bundle: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	evidence, err := validateEvidenceObservation(result.observation, result.evidenceJSON)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateProfileBundle(result.observation, result.profileJSON); err != nil {
+		return nil, err
+	}
+	if err := replayPublicationContext(ctx, result, evidence); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	artifacts := []bundleArtifact{
+		{name: "observation.json", data: observation.Bytes()},
+		{name: "evidence.json", data: result.evidenceJSON},
+		{name: "profile.json", data: result.profileJSON},
+		{name: "environment.json", data: result.environmentJSON},
+		{name: "environment-attestation.json", data: result.environmentAttestationJSON},
+	}
+	if evidence.Capability != nil {
+		artifacts = append(artifacts, bundleArtifact{name: "capability-statement.json", data: result.capabilityStatementJSON})
+		for i, source := range result.capabilitySources {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			artifacts = append(artifacts, bundleArtifact{name: capabilitySourceBundleName(i), data: source.Data})
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return artifacts, nil
+}
+
 // ValidateBundle validates a published bundle without relying on the mutable caller state.
 func ValidateBundle(path string) error {
+	return ValidateBundleContext(context.Background(), path)
+}
+
+// ValidateBundleContext validates a published bundle while observing cancellation
+// between bounded artifact-read chunks and replay steps.
+func ValidateBundleContext(ctx context.Context, path string) error {
+	if ctx == nil {
+		return errors.New("bundle validation context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(path) == "" {
 		return errors.New("bundle directory is required")
 	}
-	observationJSON, err := readBundleArtifact(path, "observation.json")
+	observationJSON, err := readBundleArtifactContext(ctx, path, "observation.json")
 	if err != nil {
 		return err
 	}
@@ -3335,8 +3375,11 @@ func ValidateBundle(path string) error {
 	if err != nil || len(set.Observations) != 1 {
 		return errors.New("bundle must contain one valid observation")
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	observation := set.Observations[0]
-	evidenceJSON, err := readBundleArtifact(path, "evidence.json")
+	evidenceJSON, err := readBundleArtifactContext(ctx, path, "evidence.json")
 	if err != nil {
 		return err
 	}
@@ -3344,35 +3387,44 @@ func ValidateBundle(path string) error {
 	if err != nil {
 		return err
 	}
-	profileJSON, err := readBundleArtifact(path, "profile.json")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	profileJSON, err := readBundleArtifactContext(ctx, path, "profile.json")
 	if err != nil {
 		return err
 	}
 	if err := validateProfileBundle(observation, profileJSON); err != nil {
 		return err
 	}
-	environmentJSON, err := readBundleArtifact(path, "environment.json")
+	environmentJSON, err := readBundleArtifactContext(ctx, path, "environment.json")
 	if err != nil {
 		return err
 	}
-	environmentAttestationJSON, err := readBundleArtifact(path, "environment-attestation.json")
+	environmentAttestationJSON, err := readBundleArtifactContext(ctx, path, "environment-attestation.json")
 	if err != nil {
 		return err
 	}
 	if err := validateEnvironmentBundle(observation, environmentJSON, environmentAttestationJSON); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	expected := map[string]struct{}{"observation.json": {}, "evidence.json": {}, "profile.json": {}, "environment.json": {}, "environment-attestation.json": {}}
 	if evidence.Capability != nil {
-		statementJSON, err := readBundleArtifact(path, "capability-statement.json")
+		statementJSON, err := readBundleArtifactContext(ctx, path, "capability-statement.json")
 		if err != nil {
 			return err
 		}
 		expected["capability-statement.json"] = struct{}{}
 		sources := make([]retainedCapabilitySource, 0, len(capabilitySourceReferences))
 		for i, reference := range capabilitySourceReferences {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			name := capabilitySourceBundleName(i)
-			data, err := readBundleArtifact(path, name)
+			data, err := readBundleArtifactContext(ctx, path, name)
 			if err != nil {
 				return err
 			}
@@ -3383,16 +3435,22 @@ func ValidateBundle(path string) error {
 			return err
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	entries, err := os.ReadDir(path)
 	if err != nil || len(entries) != len(expected) {
 		return errors.New("bundle artifact set is incomplete or contains unexpected files")
 	}
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if _, ok := expected[entry.Name()]; !ok {
 			return errors.New("bundle contains an unexpected artifact")
 		}
 	}
-	return nil
+	return ctx.Err()
 }
 
 func validateCapabilityBundle(observation bench.Observation, evidence Evidence, statementJSON []byte, sources []retainedCapabilitySource) error {
@@ -3431,21 +3489,108 @@ func capabilitySourceBundleName(index int) string {
 	return fmt.Sprintf("capability-source-%02d", index)
 }
 
-func readBundleArtifact(root, name string) ([]byte, error) {
-	path := filepath.Join(root, name)
-	limit := maxBundleArtifactBytes
-	if name == "environment.json" || name == "environment-attestation.json" || name == "capability-statement.json" || strings.HasPrefix(name, "capability-source-") {
-		limit = maxManifestBytes
-	}
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > limit {
-		return nil, fmt.Errorf("bundle artifact %q is not a bounded regular file", name)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil || int64(len(data)) != info.Size() {
-		return nil, fmt.Errorf("read bundle artifact %q", name)
+func readBundleArtifactContext(ctx context.Context, root, name string) ([]byte, error) {
+	data, _, err := readRegularFileDigestContext(ctx, filepath.Join(root, name), bundleArtifactByteLimit(name))
+	if err != nil {
+		return nil, fmt.Errorf("read bundle artifact %q: %w", name, err)
 	}
 	return data, nil
+}
+
+func bundleArtifactByteLimit(name string) int64 {
+	if name == "evidence.json" {
+		return maxBundleArtifactBytes
+	}
+	return maxManifestBytes
+}
+
+func validateBundleArtifactData(name string, data []byte) error {
+	if int64(len(data)) > bundleArtifactByteLimit(name) {
+		return fmt.Errorf("bundle artifact %q exceeds %d byte limit", name, bundleArtifactByteLimit(name))
+	}
+	return nil
+}
+
+func readRegularFileContext(ctx context.Context, path string, maxBytes int64) ([]byte, error) {
+	body, _, err := readRegularFileDigestContext(ctx, path, maxBytes)
+	return body, err
+}
+
+func readRegularFileDigestContext(ctx context.Context, path string, maxBytes int64) ([]byte, string, error) {
+	if ctx == nil {
+		return nil, "", errors.New("file read context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || (maxBytes >= 0 && info.Size() > maxBytes) {
+		return nil, "", errors.New("file must be a bounded regular non-symlink file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = file.Close() }()
+	return readBoundedContext(ctx, file, info.Size(), maxBytes)
+}
+
+func readBoundedContext(ctx context.Context, source io.Reader, expectedSize, maxBytes int64) ([]byte, string, error) {
+	if ctx == nil {
+		return nil, "", errors.New("bounded read context is required")
+	}
+	if source == nil {
+		return nil, "", errors.New("bounded read source is required")
+	}
+	if expectedSize < 0 || (maxBytes >= 0 && expectedSize > maxBytes) {
+		return nil, "", errors.New("bounded read size is invalid")
+	}
+	body := make([]byte, 0, int(min(expectedSize, bundleReadBufferSize)))
+	hash := sha256.New()
+	buffer := make([]byte, bundleReadBufferSize)
+	var size int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, "", err
+		}
+		read, readErr := source.Read(buffer)
+		if read < 0 || read > len(buffer) {
+			return nil, "", errors.New("bounded read source returned an invalid byte count")
+		}
+		if read > 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, "", err
+			}
+			readSize := int64(read)
+			if (maxBytes >= 0 && readSize > maxBytes-size) || readSize > expectedSize-size {
+				return nil, "", errors.New("bounded read source exceeds its byte limit")
+			}
+			body = append(body, buffer[:read]...)
+			if _, err := hash.Write(buffer[:read]); err != nil {
+				return nil, "", fmt.Errorf("hash bounded file read: %w", err)
+			}
+			size += readSize
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return nil, "", fmt.Errorf("read bounded file: %w", readErr)
+		}
+		if read == 0 {
+			return nil, "", io.ErrNoProgress
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
+	if size != expectedSize {
+		return nil, "", errors.New("bounded file size changed while reading")
+	}
+	return body, fmt.Sprintf("sha256:%x", hash.Sum(nil)), nil
 }
 
 func validateResultBinding(result CaptureResult) error {
@@ -3502,11 +3647,24 @@ func sameObservation(left, right bench.Observation) bool {
 }
 
 func replayPublication(result CaptureResult, evidence Evidence) error {
+	return replayPublicationContext(context.Background(), result, evidence)
+}
+
+func replayPublicationContext(ctx context.Context, result CaptureResult, evidence Evidence) error {
+	if ctx == nil {
+		return errors.New("publication replay context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := validateEnvironmentBundle(result.observation, result.environmentJSON, result.environmentAttestationJSON); err != nil {
 		return fmt.Errorf("replay environment artifacts: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if evidence.Capability != nil {
-		return replayCapabilityPublication(result, evidence)
+		return replayCapabilityPublicationContext(ctx, result, evidence)
 	}
 	if result.observation.State == bench.ObservationIncomplete && len(result.observation.Findings) != 0 {
 		return errors.New("incomplete observation must not contain findings")
@@ -3536,17 +3694,23 @@ func replayPublication(result CaptureResult, evidence Evidence) error {
 		default:
 			return errors.New("normalization input size replay state has no oversized source")
 		}
-		return nil
+		return ctx.Err()
 	}
 	if evidence.ParserStatus != ParserOK {
-		return nil
+		return ctx.Err()
 	}
 	if evidence.Scan == nil {
 		return errors.New("successful parser evidence lacks scan output")
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	findings, err := parseEngine(result.binding.profile.Engine, result.binding.observation.EngineVersion, evidence.Scan.Stdout, result.binding.target, result.binding.components, result.binding.profile.DatabaseFormat)
 	if err != nil {
 		return fmt.Errorf("replay retained redacted scan output: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	findings = canonicalFindings(findings)
 	switch evidence.FailureCode {
@@ -3572,15 +3736,24 @@ func replayPublication(result CaptureResult, evidence Evidence) error {
 	default:
 		return errors.New("parser-success evidence has an invalid failure code")
 	}
-	return nil
+	return ctx.Err()
 }
 
-func replayCapabilityPublication(result CaptureResult, evidence Evidence) error {
+func replayCapabilityPublicationContext(ctx context.Context, result CaptureResult, evidence Evidence) error {
+	if ctx == nil {
+		return errors.New("capability replay context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if evidence.Capability == nil || len(result.capabilityStatementJSON) == 0 || len(result.capabilitySources) != len(capabilitySourceReferences) {
 		return errors.New("capability publication lacks retained statement or sources")
 	}
 	statement, err := decodeCapabilityStatement(result.capabilityStatementJSON)
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if bench.SHA256Digest(result.capabilityStatementJSON) != evidence.Capability.StatementDigest || evidence.Capability.StatementDigest != result.observation.CapabilityDigest {
@@ -3596,11 +3769,14 @@ func replayCapabilityPublication(result CaptureResult, evidence Evidence) error 
 		return err
 	}
 	for i, source := range result.capabilitySources {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if source.Reference != capabilitySourceReferences[i] || source.Digest != statement.Sources[i].Digest || bench.SHA256Digest(source.Data) != source.Digest {
 			return errors.New("retained capability source does not match its statement pin")
 		}
 	}
-	return nil
+	return ctx.Err()
 }
 
 func sameFindings(left, right []bench.Finding) bool {
@@ -3610,35 +3786,12 @@ func sameFindings(left, right []bench.Finding) bool {
 }
 
 func writeBundleFile(path string, data []byte) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return fmt.Errorf("create bundle artifact: %w", err)
-	}
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
+	if err := benchcycle.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write bundle artifact: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("sync bundle artifact: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close bundle artifact: %w", err)
 	}
 	return nil
 }
 
 func syncDirectory(path string) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	directory, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open bundle directory for sync: %w", err)
-	}
-	defer func() { _ = directory.Close() }()
-	if err := directory.Sync(); err != nil {
-		return fmt.Errorf("sync bundle directory: %w", err)
-	}
-	return nil
+	return benchcycle.SyncDirectory(path)
 }

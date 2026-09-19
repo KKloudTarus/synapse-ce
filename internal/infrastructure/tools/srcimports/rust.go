@@ -55,6 +55,9 @@ func (s *RustScanner) ScanImports(ctx context.Context, dir string) (ports.Source
 		for _, name := range rustInlinePathRoots(body) {
 			out.addPackage(name)
 		}
+		for _, name := range rustConditionalReferences(body) {
+			out.addConditionalPackage(name)
+		}
 		// Detected on the RAW body: over-stripping must never be able to delete an unknown region.
 		out.noteDynamic(raw, rustDynamic, path)
 	})
@@ -170,6 +173,68 @@ func rustIdentifier(raw string) string {
 		break
 	}
 	return sb.String()
+}
+
+// rustConditionalReferences returns crate references inside conditional control-flow blocks. Those references
+// are affirmative, but a lexical import scan cannot prove the branch executes, so they remain partial evidence.
+func rustConditionalReferences(body string) []string {
+	masked := make([]byte, len(body))
+	for i := range masked {
+		masked[i] = ' '
+	}
+	conditional := make([]bool, 0, 8)
+	segmentStart := 0
+	inString := false
+	escaped := false
+	active := func() bool { return len(conditional) > 0 && conditional[len(conditional)-1] }
+	for i := 0; i < len(body); i++ {
+		if active() {
+			masked[i] = body[i]
+		}
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if body[i] == '\\' {
+				escaped = true
+				continue
+			}
+			if body[i] == '"' {
+				inString = false
+			}
+			continue
+		}
+		if body[i] == '"' {
+			inString = true
+			continue
+		}
+		switch body[i] {
+		case '{':
+			header := strings.TrimSpace(body[segmentStart:i])
+			conditional = append(conditional, active() || rustConditionalHeader(header))
+			segmentStart = i + 1
+		case '}':
+			if len(conditional) > 0 {
+				conditional = conditional[:len(conditional)-1]
+			}
+			segmentStart = i + 1
+		case ';':
+			segmentStart = i + 1
+		}
+	}
+	conditionalBody := string(masked)
+	out := rustCrateReferences(conditionalBody)
+	return append(out, rustInlinePathRoots(conditionalBody)...)
+}
+
+func rustConditionalHeader(header string) bool {
+	for _, prefix := range []string{"if ", "if let ", "else", "match ", "while ", "while let ", "for "} {
+		if header == strings.TrimSpace(prefix) || strings.HasPrefix(header, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // cargoTargets reads the binary and library target names a Cargo manifest declares. Test and bench

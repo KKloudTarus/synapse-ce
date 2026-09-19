@@ -1,0 +1,24 @@
+package main
+
+import (
+	"os"
+
+	"example.invalid/reachbench/go-source-tier2/internal/dependency"
+)
+
+func main() {
+	controlPositive()
+	opaqueDispatch(os.Getenv("REACHBENCH_CONTROL"))
+}
+
+func controlPositive() { dependency.Reachable() }
+
+func controlUnreachable() {}
+
+func opaqueDispatch(name string) {
+	if handler, ok := map[string]func(){"opaque": controlOpaque}[name]; ok {
+		handler()
+	}
+}
+
+func controlOpaque() {}

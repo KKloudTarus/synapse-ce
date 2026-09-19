@@ -52,7 +52,7 @@ func New() *GoBinarySymbolScanner { return &GoBinarySymbolScanner{} }
 func (s *GoBinarySymbolScanner) ScanSymbolRefs(ctx context.Context, dir string) ([]string, error) {
 	seen := map[string]bool{}
 	files := 0
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // an unreadable entry is skipped, not fatal (raise-only: a miss forgoes a raise)
 		}
@@ -71,16 +71,25 @@ func (s *GoBinarySymbolScanner) ScanSymbolRefs(ctx context.Context, dir string) 
 		if !d.Type().IsRegular() {
 			return nil
 		}
-		for _, name := range symbolsFromGoBinary(path) {
+		for _, name := range symbolsFromGoBinary(ctx, path) {
 			seen[name] = true
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		return nil
 	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
 	if len(seen) == 0 {
 		return nil, nil
 	}
 	out := make([]string, 0, len(seen))
 	for n := range seen {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		out = append(out, n)
 	}
 	sort.Strings(out)
@@ -90,14 +99,17 @@ func (s *GoBinarySymbolScanner) ScanSymbolRefs(ctx context.Context, dir string) 
 // symbolsFromGoBinary returns the `.gopclntab` function names of the Go binary at path, or nil for anything
 // that is not a readable Go binary (a non-binary, a stripped binary, an unsupported format, a malformed
 // pclntab). It is panic-contained: a corrupt pclntab that makes debug/gosym panic yields nil, never a crash.
-func symbolsFromGoBinary(path string) (names []string) {
+func symbolsFromGoBinary(ctx context.Context, path string) (names []string) {
 	defer func() {
 		if recover() != nil {
 			names = nil // a debug/gosym panic on a malformed table is no coverage, never a crash
 		}
 	}()
+	if ctx.Err() != nil {
+		return nil
+	}
 	fi, err := os.Lstat(path)
-	if err != nil || !fi.Mode().IsRegular() || fi.Size() < 4 || fi.Size() > maxBinaryBytes {
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() < 4 || fi.Size() > maxBinaryBytes || ctx.Err() != nil {
 		return nil
 	}
 	magic := make([]byte, 4)
@@ -107,19 +119,25 @@ func symbolsFromGoBinary(path string) (names []string) {
 	}
 	n, _ := f.Read(magic)
 	_ = f.Close()
+	if ctx.Err() != nil {
+		return nil
+	}
 	if n < 4 || !looksLikeObject(magic) { // cheap pre-filter so we don't open every source file as a binary
 		return nil
 	}
-	pclntab, textStart, ok := goPclntab(path)
-	if !ok || len(pclntab) == 0 {
+	pclntab, textStart, ok := goPclntab(ctx, path)
+	if !ok || len(pclntab) == 0 || ctx.Err() != nil {
 		return nil // not a Go binary, or stripped of its pclntab -> no coverage (never not_reachable)
 	}
 	lt := gosym.NewLineTable(pclntab, textStart)
 	table, err := gosym.NewTable(nil, lt) // modern Go carries func names in the pclntab; the symtab may be empty
-	if err != nil || table == nil {
+	if err != nil || table == nil || ctx.Err() != nil {
 		return nil
 	}
 	for i := range table.Funcs {
+		if ctx.Err() != nil {
+			return nil
+		}
 		if fn := strings.TrimSpace(table.Funcs[i].Name); fn != "" {
 			names = append(names, fn)
 		}
@@ -147,15 +165,21 @@ func looksLikeObject(magic []byte) bool {
 // goPclntab extracts the .gopclntab bytes and the text-segment start address from a binary in any of the
 // three object formats. ok is false when the format is unreadable or has no pclntab section (a non-Go or
 // stripped binary).
-func goPclntab(path string) (pclntab []byte, textStart uint64, ok bool) {
+func goPclntab(ctx context.Context, path string) (pclntab []byte, textStart uint64, ok bool) {
+	if ctx.Err() != nil {
+		return nil, 0, false
+	}
 	if ef, err := elf.Open(path); err == nil {
 		defer func() { _ = ef.Close() }()
+		if ctx.Err() != nil {
+			return nil, 0, false
+		}
 		sec := ef.Section(".gopclntab")
 		if sec == nil {
 			return nil, 0, false
 		}
 		data, err := sec.Data()
-		if err != nil {
+		if err != nil || ctx.Err() != nil {
 			return nil, 0, false
 		}
 		var text uint64
@@ -164,14 +188,20 @@ func goPclntab(path string) (pclntab []byte, textStart uint64, ok bool) {
 		}
 		return data, text, true
 	}
+	if ctx.Err() != nil {
+		return nil, 0, false
+	}
 	if mf, err := macho.Open(path); err == nil {
 		defer func() { _ = mf.Close() }()
+		if ctx.Err() != nil {
+			return nil, 0, false
+		}
 		sec := mf.Section("__gopclntab")
 		if sec == nil {
 			return nil, 0, false
 		}
 		data, err := sec.Data()
-		if err != nil {
+		if err != nil || ctx.Err() != nil {
 			return nil, 0, false
 		}
 		var text uint64
@@ -180,8 +210,14 @@ func goPclntab(path string) (pclntab []byte, textStart uint64, ok bool) {
 		}
 		return data, text, true
 	}
+	if ctx.Err() != nil {
+		return nil, 0, false
+	}
 	if pf, err := pe.Open(path); err == nil {
 		defer func() { _ = pf.Close() }()
+		if ctx.Err() != nil {
+			return nil, 0, false
+		}
 		sec := pf.Section(".gopclntab")
 		if sec == nil {
 			// A PE Go binary may keep the table under the runtime.pclntab symbol rather than a named section;
@@ -189,7 +225,7 @@ func goPclntab(path string) (pclntab []byte, textStart uint64, ok bool) {
 			return nil, 0, false
 		}
 		data, err := sec.Data()
-		if err != nil {
+		if err != nil || ctx.Err() != nil {
 			return nil, 0, false
 		}
 		var imageBase uint64
