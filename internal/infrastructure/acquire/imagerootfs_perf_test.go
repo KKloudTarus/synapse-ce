@@ -137,6 +137,44 @@ func TestImageExtractPerfGate(t *testing.T) {
 	mustNotExist(t, filepath.Join(dest, "usr/share/doc/f0149.txt"))                      // whiteout applied
 	mustContain(t, filepath.Join(dest, "usr/share/doc/f0000.txt"), docBody("doc-v2", 0)) // layer-1 overwrite won
 
+	measureImageExtractGate(t, "small-image", layout, expected, imgPerfBaselinePath)
+}
+
+// TestImageExtractLargeImagePerfGate is the large-image target class. It extracts a ~5000-file, 8-layer fixture,
+// so a regression that only appears at scale (a superlinear layer-application or per-file map cost that the
+// 272-file small-image fixture cannot surface) is caught. The gate is identical; only the workload is larger.
+func TestImageExtractLargeImagePerfGate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("perf gate skipped in -short")
+	}
+	layout := t.TempDir()
+	expected := buildLargeImageWorkload(t, layout)
+
+	dest := filepath.Join(t.TempDir(), "rootfs")
+	if _, err := extractOCIRootFS(context.Background(), layout, dest, MaxWorkspaceBytes); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if got := countRegularFiles(t, dest); got != expected {
+		t.Fatalf("fixture drift: extracted %d regular files, want %d", got, expected)
+	}
+	mustNotExist(t, filepath.Join(dest, "usr/share/doc/d0990.txt"))                      // final-layer whiteout applied
+	mustNotExist(t, filepath.Join(dest, "usr/share/doc/d0999.txt"))                      // final-layer whiteout applied
+	mustContain(t, filepath.Join(dest, "usr/share/doc/d0000.txt"), docBody("doc-v2", 0)) // last overlay's overwrite won (correct bytes, not only count)
+
+	measureImageExtractGate(t, "large-image", layout, expected, imgPerfLargeBaselinePath)
+}
+
+// measureImageExtractGate warms up, samples imgPerfSamples extractions of the layout, and ratchets the median
+// allocated bytes against the committed baseline at baselinePath. It is shared by the small- and large-image
+// gates so both classes measure and ratchet identically.
+func measureImageExtractGate(t *testing.T, label, layout string, expected int, baselinePath string) {
+	t.Helper()
+	extractOnce := func() {
+		dest := filepath.Join(t.TempDir(), "rootfs")
+		if _, err := extractOCIRootFS(context.Background(), layout, dest, MaxWorkspaceBytes); err != nil {
+			t.Fatalf("extract: %v", err)
+		}
+	}
 	for i := 0; i < imgPerfWarmup; i++ {
 		extractOnce()
 	}
@@ -157,22 +195,22 @@ func TestImageExtractPerfGate(t *testing.T) {
 	p50 := imgPercentileDur(latencies, 50)
 	p95 := imgPercentileDur(latencies, 95)
 	env := imgPerfEnvironmentDigest()
-	t.Logf("image-extract perf: env=%s samples=%d files=%d alloc_bytes(median)=%d latency_p50=%s latency_p95=%s",
-		env, imgPerfSamples, expected, medAlloc, p50, p95)
+	t.Logf("image-extract perf [%s]: env=%s samples=%d files=%d alloc_bytes(median)=%d latency_p50=%s latency_p95=%s",
+		label, env, imgPerfSamples, expected, medAlloc, p50, p95)
 
-	base, ok := loadImgPerfBaseline(t)
+	base, ok := loadImgPerfBaseline(t, baselinePath)
 	if !ok {
 		// A missing baseline must fail, not silently disable the gate: the committed baseline is what the
 		// ratchet consumes, so its absence is a broken gate, not a pass.
-		t.Fatalf("no committed baseline at %s: the performance ratchet is disabled (commit the measured baseline)", imgPerfBaselinePath)
+		t.Fatalf("no committed baseline at %s: the performance ratchet is disabled (commit the measured baseline)", baselinePath)
 	}
 	if base.AllocBytes == 0 {
-		t.Fatalf("malformed baseline %s: alloc_bytes_median is zero", imgPerfBaselinePath)
+		t.Fatalf("malformed baseline %s: alloc_bytes_median is zero", baselinePath)
 	}
 	ceil := imgAllocCeiling(base.AllocBytes, imgPerfAllocTolFrac)
 	if medAlloc > ceil {
-		t.Errorf("image-extract allocations regressed: median %d bytes exceeds baseline %d + %.0f%% = %d",
-			medAlloc, base.AllocBytes, imgPerfAllocTolFrac*100, ceil)
+		t.Errorf("image-extract [%s] allocations regressed: median %d bytes exceeds baseline %d + %.0f%% = %d",
+			label, medAlloc, base.AllocBytes, imgPerfAllocTolFrac*100, ceil)
 	}
 	if base.EnvironmentDigest == env {
 		t.Logf("latency vs same-environment baseline: p50 %s (baseline %dms), p95 %s (baseline %dms)",
@@ -180,6 +218,54 @@ func TestImageExtractPerfGate(t *testing.T) {
 	} else {
 		t.Logf("latency not gated: current environment %s differs from baseline %s", env, base.EnvironmentDigest)
 	}
+}
+
+// buildLargeImageWorkload assembles the large-image fixture: a 1003-file base plus six library overlays and a
+// final binary+whiteout layer, exercising the layer-application, overwrite, and whiteout paths at ~5000-file
+// scale across 8 layers. Content is deterministic so the allocated bytes are stable across runs and platforms.
+func buildLargeImageWorkload(t *testing.T, layoutDir string) (expectedFiles int) {
+	t.Helper()
+	digests := make([]string, 0, 8)
+
+	// Layer 0: base rootfs. 3 fixed OS files + 1000 docs (d0000..d0999).
+	base := []layerEntry{
+		dir("etc/"), reg("etc/os-release", "ID=debian\nVERSION_ID=\"12\"\n"),
+		reg("etc/hostname", "synapse-fixture\n"),
+		dir("var/"), dir("var/lib/"), dir("var/lib/dpkg/"), reg("var/lib/dpkg/status", dpkgStatusFixture(400)),
+		dir("usr/"), dir("usr/share/"), dir("usr/share/doc/"),
+	}
+	for i := 0; i < 1000; i++ {
+		base = append(base, reg(fmt.Sprintf("usr/share/doc/d%04d.txt", i), docBody("doc", i)))
+	}
+	digests = append(digests, addLayer(t, layoutDir, true, base))
+
+	// Layers 1..6: each adds 600 unique library files in its own directory, plus overwrites 20 base docs (same
+	// path, no count change). 6 * 600 = 3600 new files.
+	for layer := 1; layer <= 6; layer++ {
+		entries := []layerEntry{dir(fmt.Sprintf("usr/lib/L%d/", layer))}
+		for i := 0; i < 600; i++ {
+			entries = append(entries, reg(fmt.Sprintf("usr/lib/L%d/f%04d.so", layer, i), docBody("lib", layer*1000+i)))
+		}
+		for i := 0; i < 20; i++ {
+			entries = append(entries, reg(fmt.Sprintf("usr/share/doc/d%04d.txt", i), docBody("doc-v2", i)))
+		}
+		digests = append(digests, addLayer(t, layoutDir, true, entries))
+	}
+
+	// Layer 7: 400 binaries, plus 10 whiteouts deleting d0990..d0999 (net -10).
+	top := []layerEntry{dir("usr/bin/")}
+	for i := 0; i < 400; i++ {
+		top = append(top, reg(fmt.Sprintf("usr/bin/b%04d", i), docBody("bin", i)))
+	}
+	for i := 990; i < 1000; i++ {
+		top = append(top, reg(fmt.Sprintf("usr/share/doc/.wh.d%04d.txt", i), ""))
+	}
+	digests = append(digests, addLayer(t, layoutDir, true, top))
+
+	finishLayout(t, layoutDir, digests)
+
+	// 3 OS files + 1000 docs + 3600 libs + 400 bins - 10 whiteouts = 4993.
+	return 3 + 1000 + 3600 + 400 - 10
 }
 
 // imgPerfBaseline is the committed reference measurement for image extraction.
@@ -195,29 +281,30 @@ type imgPerfBaseline struct {
 }
 
 const (
-	imgPerfBaselinePath   = "../../../docs/benchmarks/image-extract-perf.json"
-	imgPerfBaselineSchema = "synapse-scan-perf-v1"
+	imgPerfBaselinePath      = "../../../docs/benchmarks/image-extract-perf.json"
+	imgPerfLargeBaselinePath = "../../../docs/benchmarks/image-extract-large-perf.json"
+	imgPerfBaselineSchema    = "synapse-scan-perf-v1"
 )
 
-// loadImgPerfBaseline reads the committed baseline. It fails closed on a wrong schema or a sample count that
-// does not match this gate's imgPerfSamples: a baseline measured under a different schema or a different sample
-// count is not comparable, so silently ratcheting against it would be a stale, meaningless gate rather than a
-// hard failure. A missing file returns (_, false) so the caller reports the disabled-gate error.
-func loadImgPerfBaseline(t *testing.T) (imgPerfBaseline, bool) {
+// loadImgPerfBaseline reads the committed baseline at path. It fails closed on a wrong schema or a sample count
+// that does not match this gate's imgPerfSamples: a baseline measured under a different schema or a different
+// sample count is not comparable, so silently ratcheting against it would be a stale, meaningless gate rather
+// than a hard failure. A missing file returns (_, false) so the caller reports the disabled-gate error.
+func loadImgPerfBaseline(t *testing.T, path string) (imgPerfBaseline, bool) {
 	t.Helper()
-	data, err := os.ReadFile(imgPerfBaselinePath)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return imgPerfBaseline{}, false
 	}
 	var b imgPerfBaseline
 	if err := json.Unmarshal(data, &b); err != nil {
-		t.Fatalf("decode perf baseline %s: %v", imgPerfBaselinePath, err)
+		t.Fatalf("decode perf baseline %s: %v", path, err)
 	}
 	if b.Schema != imgPerfBaselineSchema {
-		t.Fatalf("perf baseline %s has schema %q, want %q (baseline is not comparable)", imgPerfBaselinePath, b.Schema, imgPerfBaselineSchema)
+		t.Fatalf("perf baseline %s has schema %q, want %q (baseline is not comparable)", path, b.Schema, imgPerfBaselineSchema)
 	}
 	if b.Samples != imgPerfSamples {
-		t.Fatalf("perf baseline %s was measured with %d samples, gate uses %d (re-baseline)", imgPerfBaselinePath, b.Samples, imgPerfSamples)
+		t.Fatalf("perf baseline %s was measured with %d samples, gate uses %d (re-baseline)", path, b.Samples, imgPerfSamples)
 	}
 	return b, true
 }
