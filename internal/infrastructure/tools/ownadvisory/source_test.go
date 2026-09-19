@@ -112,6 +112,9 @@ func TestOsDistroEcosystem(t *testing.T) {
 		"pkg:rpm/redhat/bash@4.4?distro=rhel-9":                  "Red Hat:9", // mapped: owned RedHat CSAF feed keys "Red Hat:<major>"
 		"pkg:rpm/redhat/bash@4.4?distro=redhat-8.9":              "Red Hat:8", // the "redhat" distro id maps the same
 		"pkg:rpm/centos/bash@4.4?distro=centos-9":                "",          // CentOS Stream drifts ahead of RHEL → deliberately unmapped
+		"pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7":   "Red Hat:7", // CentOS Linux 7 is a RHEL 7 rebuild → approximated to "Red Hat:7" (#1037)
+		"pkg:rpm/centos/openssl@1.0.2k-19.el7.centos?distro=centos-7.9.2009": "Red Hat:7", // point release still keys the major 7
+		"pkg:rpm/centos/bash@4.4?distro=centos-8":                "",          // CentOS >=8 (Stream/Linux ambiguous) stays unmapped
 		"pkg:rpm/fedora/bash@5?distro=fedora-39":                 "Fedora:39", // mapped: owned Fedora updateinfo feed keys "Fedora:<major>"
 		"pkg:rpm/sles/libopenssl1_1@1.1.1w-1?distro=sles-15.6":   "SUSE:15.6", // mapped: owned SLE OVAL feed keys "SUSE:<major.minor>" per service pack
 		"pkg:rpm/sles/bash@4.4-1?distro=sles-15":                 "SUSE:15",   // SLE GA (no service pack) keys the bare major
@@ -352,6 +355,10 @@ func TestDistroEcosystemLockstep(t *testing.T) {
 		"pkg:rpm/fedora/bash@5-1?distro=fedora-40", // Fedora: owned updateinfo feed keys "Fedora:40"
 		// Unmapped families must agree on "" (cataloged for inventory, never keyed to an advisory ecosystem).
 		"pkg:rpm/centos/bash@5-1?distro=centos-9",
+		"pkg:rpm/centos/bash@5-1?distro=centos-8", // CentOS >=8 stays unmapped in both functions
+		// CentOS Linux 7 approximation must agree in both functions ("Red Hat:7").
+		"pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7",
+		"pkg:rpm/centos/openssl@1.0.2k-19.el7.centos?distro=centos-7.9.2009",
 		// Case-variant distro qualifiers must still agree (both functions lowercase the qualifier).
 		"pkg:rpm/amzn/bash@5-1?distro=AMZN-2",
 		"pkg:rpm/opensuse-leap/bash@5-1?distro=OpenSUSE-Leap-15.6",

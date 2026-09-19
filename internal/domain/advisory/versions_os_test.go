@@ -85,6 +85,12 @@ func TestCompareRPM(t *testing.T) {
 		{"3.1.6-7.el3", "3.1.6-8.el3", -1}, // release compared (real RHEL EVR tail)
 		{"2:3.1.6-7.el3", "2:3.1.6-7.el3", 0},
 		{"1.0", "1.0-1", -1}, // release present > absent
+		// CentOS Linux 7 dist-tag ordering vs RHEL 7 errata (the #1037 RHEL-7 approximation depends on this).
+		// rpmvercmp splits the release on non-alphanumerics and ranks a numeric segment above an alpha one, so:
+		{"1.0.2k-19.el7.centos", "1.0.2k-19.el7_9", -1}, // CentOS base (.centos) is OLDER than a RHEL erratum (.el7_9): a below-fix CentOS 7 package is correctly seen as affected
+		{"1.0.2k-19.el7_9.centos", "1.0.2k-19.el7_9", 1}, // a CentOS rebuild of the erratum (extra .centos segment) is NEWER than the RHEL fix: NOT falsely flagged
+		{"1.0.2k-19.el7.centos", "1.0.2k-16.el7.centos", 1}, // base-version bump orders normally within CentOS
+		{"1.0.2k-19.el7_9", "1.0.2k-19.el7_9", 0},           // a CentOS 7 host patched to the exact RHEL erratum NEVR equals the fix (not flagged)
 	}
 	for _, c := range cases {
 		if got := sign(compareRPM(c.a, c.b)); got != c.want {

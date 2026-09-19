@@ -60,7 +60,10 @@ runs owned catalogers over it, so a shipped artifact is inventoried even without
   RHEL/Fedora/AlmaLinux/Rocky/Oracle), BerkeleyDB (`Packages`, RHEL 8 and Amazon Linux 2), and
   ndb (`Packages.db`, openSUSE and SLE), each parsed by owned pure-Go code so `CGO_ENABLED=0`
   still builds. Packages are emitted with a distro qualifier so the advisory matcher keys them to
-  the right OS ecosystem.
+  the right OS ecosystem. CentOS Linux 7 is keyed to the RHEL 7 ecosystem as a documented
+  approximation (it is a downstream rebuild of RHEL 7, and there was never a CentOS Stream 7), and
+  reported as `coverage=approximate`; CentOS Stream and CentOS 8 or later stay `coverage=unsupported`
+  (VERSION_ID=8 is ambiguous and Stream runs ahead of RHEL), never aliased to RHEL.
 - **Installed binaries.** Go build information embedded in ELF, PE, and Mach-O binaries, and
   Python dist-info and egg-info metadata, become `pkg:golang` and `pkg:pypi` components.
 - **Image config hardening.** An owned check over the image config and build history flags a

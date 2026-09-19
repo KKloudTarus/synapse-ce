@@ -2827,6 +2827,33 @@ func inventoryCompletenessState(complete bool) sbom.InventoryCompleteness {
 	return sbom.InventoryIncomplete
 }
 
+// osCoverageWarnings builds the structured OS-package coverage warnings from the cataloger's signals, so none
+// of the non-clean states is ever silent. At most one of unsupportedDistro / approximateDistro / unresolved is
+// set for a given scan (the cataloger makes them mutually exclusive), but the function tolerates any
+// combination and is pure so the exact warning text is unit-tested without running a scan.
+//   - unsupportedDistro: a recognized-but-deliberately-unmatched distro (CentOS Stream / CentOS >=8) →
+//     coverage=unsupported, never aliased to another distro's advisories.
+//   - approximateDistro: a distro resolved through another distro's ecosystem (CentOS Linux 7 → Red Hat:7) →
+//     coverage=approximate provenance, so a Red Hat finding on a CentOS 7 package is never mistaken for
+//     native CentOS-feed coverage and the EPEL/SIG/third-party scope limit is explicit.
+//   - unresolved: packages cataloged but the release could not be keyed at all.
+func osCoverageWarnings(osPkgsAdded int, unsupportedDistro, approximateDistro string, unresolved bool) []string {
+	var out []string
+	if unsupportedDistro != "" {
+		out = append(out, fmt.Sprintf(
+			"%d OS package(s) cataloged from %s but coverage=unsupported: %s is deliberately not matched (CentOS Stream runs ahead of RHEL and VERSION_ID=8 is ambiguous, so applying a RHEL fixed version would be a false match) – OS advisories were NOT matched and were NOT aliased to another distro", osPkgsAdded, unsupportedDistro, unsupportedDistro))
+	}
+	if approximateDistro != "" {
+		out = append(out, fmt.Sprintf(
+			"OS package(s) cataloged from %s: coverage=approximate, matched against Red Hat 7 advisories (CentOS Linux 7 is a downstream rebuild of RHEL 7) – EPEL/SIG/third-party RPMs are NOT covered by RHEL advisories and were NOT matched", approximateDistro))
+	}
+	if unresolved {
+		out = append(out, fmt.Sprintf(
+			"%d OS package(s) cataloged but the distro release could not be resolved (/etc/os-release absent, garbled, or inconsistent with the package database) – OS advisories were NOT matched", osPkgsAdded))
+	}
+	return out
+}
+
 func (s *Service) runPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (*ScanResult, error) {
 	var err error
 	req, err = s.pinUploadedSource(ctx, engagementID, req)
@@ -2970,6 +2997,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// so this is a no-op there.
 	osPkgsAdded, osDistroUnresolved := 0, false
 	osUnsupportedDistro := ""
+	osApproximateDistro := ""
 	if s.osPkgCataloger != nil && ws.RootFS != "" {
 		before := countComponents(doc)
 		step = trace.start(stageSBOM, "os-package-catalog", "ospkg-cataloger", "Catalog OS packages from image rootfs", map[string]int{"components": before})
@@ -2978,11 +3006,20 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		} else {
 			osPkgsAdded = mergeComponents(doc, osRes.Components)
 			// no-silent-gap: packages cataloged but the release could not be keyed to an ecosystem → warn below.
-			// A recognized-but-unsupported distro (CentOS) gets a distinct structured warning instead.
+			// A recognized-but-unsupported distro (CentOS Stream / CentOS >=8) gets a distinct structured warning
+			// instead. A distro keyed by approximation (CentOS Linux 7 → Red Hat:7) is resolved, but gets its own
+			// coverage=approximate provenance warning so the approximation is never silent.
 			if osPkgsAdded > 0 && osRes.UnsupportedDistro != "" {
 				osUnsupportedDistro = osRes.UnsupportedDistro
 			} else {
 				osDistroUnresolved = osPkgsAdded > 0 && !osRes.DistroResolved
+			}
+			// Gate on the flag itself, not osPkgsAdded: the cataloger sets ApproximateDistro only when CentOS 7
+			// components were cataloged, and mergeComponents returns 0 new when an identical pkg:rpm/centos PURL
+			// was already added by another cataloger. Keying it to osPkgsAdded would then suppress the
+			// coverage=approximate provenance banner while Red Hat:7 findings still appear.
+			if osRes.ApproximateDistro != "" {
+				osApproximateDistro = osRes.ApproximateDistro
 			}
 			trace.succeed(step, "OS-package cataloging completed", map[string]int{"os_packages_added": osPkgsAdded})
 		}
@@ -3341,20 +3378,11 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
 			"image rootfs NOT materialized – OS packages NOT owned-cataloged (result may under-report OS vulns): %s", ws.RootFSNote))
 	}
-	// OS packages were cataloged but their distro release could not be resolved (os-release absent/garbled, or
-	// inconsistent with the package DB), so they matched NO OS advisories – surface it so this never reads as
-	// a clean OS posture (a hostile image cannot suppress its own OS vulns by lying in /etc/os-release).
-	if osUnsupportedDistro != "" {
-		// A recognized-but-deliberately-unsupported distro (CentOS): a by-design coverage gap, not a parse
-		// failure. Report it as structured coverage=unsupported so it never reads as clean and is never aliased
-		// to another distro's advisories.
-		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
-			"%d OS package(s) cataloged from %s but coverage=unsupported: %s is deliberately not matched (CentOS Stream runs ahead of RHEL, so applying a RHEL fixed version would be a false match) – OS advisories were NOT matched and were NOT aliased to another distro", osPkgsAdded, osUnsupportedDistro, osUnsupportedDistro))
-	}
-	if osDistroUnresolved {
-		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
-			"%d OS package(s) cataloged but the distro release could not be resolved (/etc/os-release absent, garbled, or inconsistent with the package database) – OS advisories were NOT matched", osPkgsAdded))
-	}
+	// OS packages were cataloged but their distro release could not be resolved, was deliberately unsupported,
+	// or was resolved only by approximation. osCoverageWarnings turns those signals into structured warnings so
+	// none of the states ever reads as a clean OS posture (a hostile image cannot suppress its own OS vulns by
+	// lying in /etc/os-release, and an approximation is never silent).
+	sourceWarnings = append(sourceWarnings, osCoverageWarnings(osPkgsAdded, osUnsupportedDistro, osApproximateDistro, osDistroUnresolved)...)
 	for _, src := range s.sources {
 		p, ok := src.(ports.SourceProvenance)
 		if !ok {
