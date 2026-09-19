@@ -157,21 +157,31 @@ func TestResolveDetectionSourceNames(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			// Grype stays in the default detection set as a distro safety net (the owned-vs-grype recall parity
-			// is gated only for the debian-12/sles-15 oracle images today; dropping grype is a follow-up).
-			name: "default: online with owned advisory on",
+			// Owned-only default (EPIC #1034, #1037): owned advisory-store primary, live OSV enrichment, Grype
+			// dropped to an opt-in cross-check (the OS-distro coverage guard keeps the drop non-silent).
+			name: "owned default: online with owned advisory on",
 			cfg:  config.Config{DetectionSources: "", Offline: false, OwnedAdvisoryEnabled: true},
-			want: []string{"osv", "grype", "advisory-store"},
+			want: []string{"osv", "advisory-store"},
 		},
 		{
-			name: "default: offline drops live osv",
+			name: "owned default: offline runs the owned advisory store alone (no third-party binary)",
 			cfg:  config.Config{DetectionSources: "", Offline: true, OwnedAdvisoryEnabled: true},
-			want: []string{"grype", "advisory-store"},
+			want: []string{"advisory-store"},
 		},
 		{
-			name: "default: owned advisory off",
+			name: "owned default: owned advisory off keeps only live osv (grype is opt-in)",
 			cfg:  config.Config{DetectionSources: "", Offline: false, OwnedAdvisoryEnabled: false},
-			want: []string{"osv", "grype"},
+			want: []string{"osv"},
+		},
+		{
+			name: "owned default: offline + owned advisory off yields no default sources",
+			cfg:  config.Config{DetectionSources: "", Offline: true, OwnedAdvisoryEnabled: false},
+			want: []string{},
+		},
+		{
+			name: "rollback: explicit list restores grype",
+			cfg:  config.Config{DetectionSources: "osv,grype,advisory-store", OwnedAdvisoryEnabled: true},
+			want: []string{"osv", "grype", "advisory-store"},
 		},
 		{
 			name: "explicit list is authoritative and can drop grype (Anchore-free)",

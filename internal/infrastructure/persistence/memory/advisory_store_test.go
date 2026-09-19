@@ -37,6 +37,29 @@ func TestAdvisoryStoreUpsertByPackage(t *testing.T) {
 	}
 }
 
+// TestAdvisoryStoreCoveredEcosystems pins the coverage capability the owned-only detection readiness guard
+// relies on: the distinct ecosystems the corpus has any advisory for, and only those.
+func TestAdvisoryStoreCoveredEcosystems(t *testing.T) {
+	ctx := context.Background()
+	s := NewAdvisoryStore()
+	if got, err := s.CoveredEcosystems(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("empty store must cover no ecosystems, got %v err=%v", got, err)
+	}
+	if err := s.Upsert(ctx, adv("GHSA-1", ap("Red Hat:9", "openssl"), ap("npm", "left-pad"))); err != nil {
+		t.Fatal(err)
+	}
+	covered, err := s.CoveredEcosystems(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !covered["Red Hat:9"] || !covered["npm"] {
+		t.Errorf("covered set must include Red Hat:9 and npm, got %v", covered)
+	}
+	if covered["Alpine:v3.19"] || len(covered) != 2 {
+		t.Errorf("covered set must be exactly the two affected ecosystems, got %v", covered)
+	}
+}
+
 // TestAdvisoryStoreReSyncRebuildsIndex pins the idempotent-replace contract: re-upserting an id with a
 // CHANGED affected set drops the stale index entries (a key no longer affected stops returning the advisory)
 // and adds the new ones – never a duplicate, never a phantom hit on the old package.

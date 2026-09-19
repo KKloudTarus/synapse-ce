@@ -56,6 +56,13 @@ func TestAdvisoryRepository(t *testing.T) {
 		t.Fatalf("AdvisoryFreshness after upsert: latest=%v count=%d err=%v", latest, count, ferr)
 	}
 
+	// CoveredEcosystems reports the distinct ecosystems the corpus has any advisory for, so the owned-only
+	// detection readiness guard can distinguish a covered distro from a silent gap. The upserted advisory
+	// affects Go and npm, so both must appear (a distinct scan of the advisory_affects index).
+	if covered, cerr := repo.CoveredEcosystems(ctx); cerr != nil || !covered["Go"] || !covered["npm"] {
+		t.Fatalf("CoveredEcosystems after upsert must include Go and npm, got %v err=%v", covered, cerr)
+	}
+
 	// round-trip: the full advisory decodes back from the JSONB blob, found via the affect index
 	got, err := repo.ByPackage(ctx, "Go", "github.com/foo/bar")
 	if err != nil || len(got) != 1 {
