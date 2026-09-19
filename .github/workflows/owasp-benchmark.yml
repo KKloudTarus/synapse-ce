@@ -1,7 +1,10 @@
-# OWASP BenchmarkJava SAST scorecard (EPIC #860 D5.8). Provisions the corpus at a PINNED commit and a
-# java-facts-capable synapse-ast, runs the gated per-category recall ratchet, and uploads the scorecard.
-# The corpus is GPL v2, so it is not vendored; it is checked out here at a fixed commit and content-verified.
-name: OWASP SAST Benchmark
+# SAST benchmark scorecards. Each job provisions a pinned, content-verified corpus and a java-facts-capable
+# synapse-ast, then runs a gated per-category / per-CWE recall ratchet and uploads the scorecard. The corpora
+# are not vendored (license and size); each is checked out here at a fixed commit and pinned by content (a
+# checksum, or the test's compiled answer-key digest). Broader #1043 consolidation (Securibench wiring, a
+# capability rename, and lifecycle controls) is tracked separately; this file evolves the OWASP workflow to
+# also run the Juliet gate (EPIC #1034, #1039) rather than adding a duplicate SAST-benchmark workflow.
+name: SAST Benchmarks
 
 on:
   push:
@@ -66,4 +69,54 @@ jobs:
         with:
           name: owasp-benchmark-scorecard
           path: ${{ runner.temp }}/owasp-scorecard.log
+          if-no-files-found: warn
+
+  juliet-scorecard:
+    name: Juliet Java scorecard
+    runs-on: ubuntu-latest
+    env:
+      # Pinned find-sec-bugs/juliet-test-suite commit the ratchet floors and the test's compiled answer-key
+      # digest are calibrated against. Bumping this REQUIRES re-calibrating the floors and re-pinning the
+      # digest constant in juliet_integration_test.go (reviewed together).
+      JULIET_REF: b2c6df3733e2176fe7097e4784895c6891632b4c
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Checkout Juliet Java test suite (pinned)
+        uses: actions/checkout@v7
+        with:
+          repository: find-sec-bugs/juliet-test-suite
+          ref: ${{ env.JULIET_REF }}
+          path: juliet
+          persist-credentials: false
+
+      - name: Build java-facts-capable synapse-ast (CGO)
+        run: CGO_ENABLED=1 go build -o "${RUNNER_TEMP}/synapse-ast" ./cmd/synapse-ast
+
+      - name: Run Juliet scorecard + per-CWE ratchet
+        # The test content-pins the answer key against its compiled julietCorpusDigest constant, so a wrong or
+        # silently-changed corpus fails loudly rather than passing the ratchet falsely. Re-pinning the corpus
+        # therefore requires editing BOTH JULIET_REF above AND that constant in source (reviewed with the
+        # recalibrated floors).
+        env:
+          SYNAPSE_JULIET_DIR: ${{ github.workspace }}/juliet
+          SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
+        run: |
+          set -o pipefail
+          CGO_ENABLED=1 go test -count=1 -v -timeout 1800s -run TestJulietScorecard \
+            ./internal/infrastructure/tools/ast/ | tee "${RUNNER_TEMP}/juliet-scorecard.log"
+
+      - name: Upload scorecard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: juliet-scorecard
+          path: ${{ runner.temp }}/juliet-scorecard.log
           if-no-files-found: warn
