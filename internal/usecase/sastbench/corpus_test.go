@@ -6,6 +6,36 @@ import (
 	"testing"
 )
 
+// TestDefaultSecuribenchFloorsValid guards the checked-in Securibench floors against a malformed edit: the
+// embedded JSON is otherwise only decoded inside the gated integration test, which skips in normal CI.
+func TestDefaultSecuribenchFloorsValid(t *testing.T) {
+	f := DefaultSecuribenchFloors()
+	for _, cwe := range []string{"CWE-79", "CWE-89"} {
+		v, ok := f.Recall[cwe]
+		if !ok {
+			t.Errorf("securibench floors must gate %s recall", cwe)
+			continue
+		}
+		if v <= 0 || v > 1 {
+			t.Errorf("%s recall floor %.3f is not in (0,1]", cwe, v)
+		}
+	}
+	if f.PrecisionTripwire < 0 || f.PrecisionTripwire > 1 {
+		t.Errorf("precision tripwire %.3f is not in [0,1]", f.PrecisionTripwire)
+	}
+}
+
+// TestLoadCWEFloorsRejectsUnknownField pins that the floors decoder is strict, so a typo'd key in a committed
+// floors file fails loud rather than silently gating nothing.
+func TestLoadCWEFloorsRejectsUnknownField(t *testing.T) {
+	if _, err := LoadCWEFloors(strings.NewReader(`{"recall":{"CWE-79":0.6},"typo_field":1}`)); err == nil {
+		t.Errorf("an unknown field in a floors document must be rejected")
+	}
+	if _, err := LoadCWEFloors(strings.NewReader(`{"recall":{"CWE-79":0.6},"precision_tripwire":0.3}`)); err != nil {
+		t.Errorf("a well-formed floors document must decode: %v", err)
+	}
+}
+
 func findScore(scores []CWEScore, cwe string) (CWEScore, bool) {
 	for _, s := range scores {
 		if s.CWE == cwe {
