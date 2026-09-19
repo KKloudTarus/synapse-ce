@@ -9,7 +9,38 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchid"
 )
+
+// competitorManifestPath locates the committed competitor-identity manifest from this package directory.
+const competitorManifestPath = "../../../../docs/benchmarks/competitor-identity.json"
+
+// recordCompetitorIdentity captures the competitor's actual reported version and logs it against the pinned
+// benchmark identity, so a head-to-head names the exact competitor build that produced it. It is comparison-only:
+// an unrecordable version or a mismatch is logged, never fatal.
+func recordCompetitorIdentity(t *testing.T, tool, bin string, versionArgs ...string) {
+	t.Helper()
+	observed, err := benchid.CaptureVersion(context.Background(), bin, versionArgs...)
+	if err != nil {
+		t.Logf("%s identity unrecorded (version command failed: %v)", tool, err)
+		return
+	}
+	m, err := benchid.Load(competitorManifestPath)
+	if err != nil {
+		t.Logf("%s observed version %q; competitor-identity manifest unreadable (%v)", tool, observed, err)
+		return
+	}
+	exp, ok := m.Expected(tool)
+	if !ok {
+		t.Logf("%s observed version %q; no pinned identity recorded for it", tool, observed)
+		return
+	}
+	t.Logf("%s identity: observed %q, pinned %q (ruleset: %s)", tool, observed, exp.Version, exp.Ruleset)
+	if !benchid.VersionMatches(observed, exp.Version) {
+		t.Logf("NOTE: %s version differs from the pinned benchmark version %s; head-to-head numbers may not be comparable to the committed baseline", tool, exp.Version)
+	}
+}
 
 // secretsBenchCase is one labeled secrets-corpus entry. Value is a line of source materialized into its own
 // file (one case per file, so a detection's file trivially identifies the case). Real marks a planted secret
@@ -161,6 +192,7 @@ func runGitleaks(t *testing.T, dir string, byFile map[string]secretsBenchCase) (
 	if err != nil {
 		return nil, false
 	}
+	recordCompetitorIdentity(t, "gitleaks", bin, "version")
 	report := filepath.Join(t.TempDir(), "gitleaks.json")
 	// --exit-code 0 so a "leaks found" run is not treated as a command failure; --no-git scans the tree.
 	cmd := exec.Command(bin, "detect", "-s", dir, "--no-git", "-f", "json", "-r", report, "--exit-code", "0")
