@@ -79,9 +79,12 @@ type Config struct {
 	DBAutoMigrate bool
 	// SyftBin is the Syft executable used for SBOM generation (shell-out).
 	SyftBin string
-	// SBOMProducer selects the SBOM-generation producer: "syft" (default – the pinned
-	// binary, full ecosystem coverage + dep-graph edges via CycloneDX) or "ownsbom" (the detection-
-	// independent owned per-ecosystem parsers – no third-party scanner, but components-only + Tier-1 ecosystems).
+	// SBOMProducer selects the SBOM-generation producer: "ownsbom" (default – the detection-independent
+	// owned per-ecosystem parsers across 23 ecosystems, emitting dependency-graph edges, so a production
+	// deployment needs no third-party scanner binary) or "syft" (the pinned Syft binary, retained as an
+	// opt-in cross-check). The owned producer's ecosystem breadth and Syft edge parity are gated by the
+	// scabench oracle and the per-ecosystem parity tests (EPIC #1034, #1036); the default flip was gated on
+	// those passing (#1037). Set SYNAPSE_SBOM_PRODUCER=syft to roll back.
 	SBOMProducer string
 	// GrypeBin is the Grype executable for the second detection source;
 	// missing binary degrades gracefully to OSV-only.
@@ -91,10 +94,12 @@ type Config struct {
 	// build. Empty = Grype's default (online).
 	GrypeDBDir string
 	// DetectionSources selects and orders the scan-time vulnerability detection sources as a comma
-	// list from {grype, osv, advisory-store}. Empty preserves the legacy behavior (osv unless
-	// SYNAPSE_OFFLINE, then grype, then advisory-store when SYNAPSE_OWNED_ADVISORY). When set it is
-	// authoritative, so an operator can drop grype entirely (e.g. "osv,advisory-store") and run on
-	// Synapse's own advisory store + live OSV for an Anchore-free posture. Unknown names fail closed.
+	// list from {grype, osv, advisory-store}. Empty uses the default (osv unless SYNAPSE_OFFLINE, then
+	// grype, then advisory-store when SYNAPSE_OWNED_ADVISORY, the default). The owned advisory-store is
+	// the default primary source; Grype stays in the default set as a distro safety net until the
+	// owned-vs-Grype recall parity is gated across the distro target matrix. When set it is authoritative,
+	// so an operator can drop grype (e.g. "osv,advisory-store") for an Anchore-free posture. Unknown names
+	// fail closed.
 	DetectionSources string
 	// StrictSources, when true, restores fail-closed detection: any source error aborts the scan.
 	// Default false: a source that errors (a transient OSV.dev outage, an advisory-store read blip)
@@ -543,12 +548,15 @@ type Config struct {
 	ScanCacheDir string
 	// ImageRootFSEnabled materializes a container image's assembled root filesystem from the pulled OCI
 	// layout (applying layers + whiteouts), so the owned parsers can read on-disk OS-package DBs and
-	// /etc/os-release. Off by default; extraction is hardened but adds disk + time to an image scan.
+	// /etc/os-release. ON by default; extraction is hardened but adds disk + time to an image scan. The owned
+	// SBOM producer (the default) can only catalog an image target through this materialized rootfs, so
+	// turning it off darkens image scans under the owned producer (a startup warning names the combination).
 	ImageRootFSEnabled bool
 	// OwnedAdvisoryEnabled wires the owned advisory DetectionSource: match the SBOM
-	// against the owned normalized-advisory store (offline, reproducible) ALONGSIDE live OSV/Grype. Off by
-	// default; opt-in. An empty store yields no findings (a harmless no-op) until the advisory ingester
-	// populates it – so enabling it without a populated store changes nothing.
+	// against the owned normalized-advisory store (offline, reproducible). ON by default (it is the default
+	// primary vulnerability source, alongside live OSV and Grype in the default detection set). An empty
+	// store yields no findings (a harmless no-op) until the advisory ingester populates it, so a deployment
+	// that has not synced advisories still relies on OSV/Grype in SYNAPSE_DETECTION_SOURCES.
 	OwnedAdvisoryEnabled bool
 	// SymbolOverlayDir points at a directory of curated advisory-id -> affected-symbol JSON files. The owned
 	// advisory matcher merges these symbols onto findings so advisories whose feed carries none (non-Go,
@@ -831,7 +839,7 @@ func Load() Config {
 		DBHaltWriterDSN:                  getenv("SYNAPSE_DB_HALT_WRITER_DSN", ""),
 		DBAutoMigrate:                    getbool("SYNAPSE_DB_AUTO_MIGRATE", true),
 		SyftBin:                          getenv("SYNAPSE_SYFT_BIN", "syft"),
-		SBOMProducer:                     getenv("SYNAPSE_SBOM_PRODUCER", "syft"),
+		SBOMProducer:                     getenv("SYNAPSE_SBOM_PRODUCER", "ownsbom"),
 		GrypeBin:                         getenv("SYNAPSE_GRYPE_BIN", "grype"),
 		GrypeDBDir:                       getenv("SYNAPSE_GRYPE_DB_DIR", ""),
 		DetectionSources:                 getenv("SYNAPSE_DETECTION_SOURCES", ""),

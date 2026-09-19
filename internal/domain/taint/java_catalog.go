@@ -15,9 +15,12 @@ package taint
 // java.beans.XMLDecoder) the sink IS import-anchored; an on-demand `import java.io.*` then falls back to the
 // name floor or is missed (a documented precision gap, never a false suppression, since taint only proposes).
 //
-// This first cut models the classes whose floor is specific enough to defend (Command, PathTraversal, SQL,
-// SSRF, Deserialization, Code). Broader, FP-sensitive classes (XSS via response writers, LDAP/XPath/XXE,
-// SSTI, log injection) are deferred to a later catalog expansion rather than shipped as over-broad floors.
+// This models the classes whose floor is specific enough to defend (Command, PathTraversal, SQL, SSRF,
+// Deserialization, Code), plus LDAP (CWE-90), XPath (CWE-643), and reflected XSS (CWE-79), whose receiver-name
+// floors (search/evaluate/compile, println/print/write) are too generic alone and so are IMPORT-GATED via
+// JavaCallablePattern.RequiresImport: they fire only in a file that imports the anchoring API (javax.naming,
+// javax.xml.xpath, javax.servlet/jakarta.servlet). Broader, FP-sensitive classes (XXE, SSTI, log injection)
+// remain deferred rather than shipped as over-broad floors.
 
 // javaMod builds an import-anchored pattern: a callee whose base resolves (via import or FQ path) to one of
 // modules and whose accessed member is one of names.
@@ -112,14 +115,57 @@ func DefaultJavaCatalog() JavaCatalog {
 
 			// Code / script execution (CWE-94). ScriptEngine.eval is receiver-typed; ".eval" is specific.
 			javaSink(javaRecv("eval"), TaintCode, "CWE-94", "java-taint-code-scripteval", 0),
+
+			// LDAP injection (CWE-90). DirContext.search(name, filter, controls) is receiver-typed, and bare
+			// ".search" is far too generic to floor alone (List/String/Stack/... all have search-like names), so
+			// it is IMPORT-GATED: it fires only in a file that imports javax.naming, where a .search(...) is an
+			// LDAP directory search. Only the search FILTER (arg 1) is modeled, the canonical injection point,
+			// because it is paired with its EXACT escaper Encode.forLdap below. The base DN (arg 0) is not
+			// modeled: its correct escaper (Encode.forDn) cannot be told apart from forLdap at a value-based
+			// sanitizer wall, so modeling the DN sink would let a forLdap-escaped value used as a DN be wrongly
+			// cleared (a false negative). DN-context injection is deferred to argument-role-scoped modeling.
+			javaSink(JavaCallablePattern{RawSuffixes: []string{"search"}, RequiresImport: []string{"javax.naming"}},
+				TaintLDAP, "CWE-90", "java-taint-ldap-search", 1),
+
+			// XPath injection (CWE-643). XPath.compile(expr) / XPath.evaluate(expr, item) are receiver-typed and
+			// ".evaluate"/".compile" are generic, so they are IMPORT-GATED on javax.xml.xpath. The injectable
+			// XPATH EXPRESSION is arg 0 of both (XPath.evaluate(String expression, ...) and XPath.compile(String
+			// expression)); XPathExpression.evaluate(item) takes a document at arg 0 (a propose-only false match,
+			// separately verified), so the real injection is still caught at compile/evaluate of the expression.
+			javaSink(JavaCallablePattern{RawSuffixes: []string{"evaluate", "compile"}, RequiresImport: []string{"javax.xml.xpath"}},
+				TaintXPath, "CWE-643", "java-taint-xpath-expression", 0),
+
+			// Reflected XSS (CWE-79). Servlet response writers (PrintWriter.println/print/write and
+			// ServletOutputStream) echo untrusted input into the HTTP response. The method names are generic
+			// (System.out.println logs, StringWriter.write buffers), so like LDAP/XPath the sink is IMPORT-GATED:
+			// it fires only in a file that imports the servlet API (javax.servlet or jakarta.servlet), where a
+			// .println/.print/.write of tainted data is a response write. The written value is arg 0. A servlet
+			// file that also logs via System.out is a propose-only false match (separately verified), and no XSS
+			// output-encoding sanitizer is modeled because a value-based wall cannot tell the HTML-body context a
+			// writer emits from a JS/attribute context, so treating one encoder as clearing the generic writer
+			// sink would hide a context-mismatched XSS.
+			javaSink(JavaCallablePattern{RawSuffixes: []string{"println", "print", "write"}, RequiresImport: []string{"javax.servlet", "jakarta.servlet"}},
+				TaintXSS, "CWE-79", "java-taint-xss-writer", 0),
 		},
-		// No sanitizers are modeled in this cut. None of the modeled classes has a SOUND single-call
-		// sanitizer source-only: path traversal is neutralized by a base-directory CONTAINMENT check
-		// (canonicalPath.startsWith(base)), not by getCanonicalPath()/normalize() alone (a canonicalized path
-		// can still be /etc/passwd); SQL by parameter binding (structural, not a call result); command/SSRF by
-		// an allowlist check. Modeling a canonicalizer as a sanitizer would SUPPRESS a real traversal (a false
-		// negative, worse than an extra propose-only false positive), so it is deliberately omitted.
-		Sanitizers: nil,
+		// A sanitizer is only modeled when it has SOUND, class-specific, single-call semantics AND an import
+		// anchor: an over-matching sanitizer SUPPRESSES a real flow (a false negative, worse than a propose-only
+		// false positive), so unlike a sink floor a sanitizer is never modeled on a bare receiver-name floor.
+		Sanitizers: []JavaSanitizerModel{
+			// LDAP search-filter escaping (OWASP Java Encoder). Encode.forLdap escapes the LDAP filter
+			// metacharacters (* ( ) \ NUL), so its result is safe in the filter argument the LDAP sink models.
+			// It clears ONLY CWE-90 (a command/SQL/SSRF flow through the same value is untouched) and is
+			// import-anchored on org.owasp.encoder.Encode, so a same-named local method never counts as the
+			// escaper. forDn is deliberately NOT modeled here: it escapes DN, not filter, metacharacters, and
+			// the DN argument is not a modeled sink; treating forDn as clearing the filter would hide a real
+			// filter injection.
+			{Pattern: javaMod([]string{"org.owasp.encoder.Encode"}, "forLdap"), Classes: []TaintClass{TaintLDAP}},
+		},
+		// Still deliberately NOT modeled: a path canonicalizer (getCanonicalPath/normalize does not CONTAIN a
+		// path to a base directory, so it cannot sanitize traversal); SQL parameter binding (structural, not a
+		// call result); command/SSRF allowlisting (a check, not a transform); and XPath escaping (XPath
+		// injection is soundly fixed by parameterization via XPathVariableResolver, not by XML/attribute
+		// encoding, so no single-call XPath sanitizer is defensible). Modeling any of these would hide a real
+		// flow.
 	}
 }
 
@@ -131,8 +177,12 @@ func DefaultJavaCatalog() JavaCatalog {
 //     by a no-arg ps.execute()). A PreparedStatement built from a CONSTANT string still matches
 //     executeQuery/prepareStatement here (source-only cannot tell a parameterized query from a concatenated
 //     one), so downstream verification separates the true positive; findings are propose-only.
-//   - XSS through a response writer (println/print/write) is deferred: the method-name floor would collide
-//     with System.out logging and produce a flood of false positives without receiver typing.
-//   - LDAP (DirContext.search), XPath (XPath.evaluate), XXE (DocumentBuilder.parse), SSTI, and log injection
-//     are deferred for the same reason: their floors (search/evaluate/parse) are too generic to ship without
-//     a type anchor. They are candidates for a later catalog expansion once receiver typing exists.
+//   - XSS through a response writer (println/print/write) is now MODELED, but only under the RequiresImport
+//     gate (javax.servlet/jakarta.servlet): outside a servlet file the same method names are logging/buffering,
+//     so the servlet import is the type proxy that separates a response write from System.out. No output
+//     encoder is modeled as an XSS sanitizer (the writer's output context is unknown at a value-based wall).
+//   - LDAP (DirContext.search) and XPath (XPath.evaluate/compile) are now MODELED, but only under the
+//     RequiresImport gate (javax.naming, javax.xml.xpath): the bare method-name floor is too generic, so the
+//     file's import of the anchoring API is required as a defensible type proxy. Findings stay propose-only.
+//   - XXE (DocumentBuilder.parse), SSTI, and log injection remain deferred: parse/format floors are too
+//     generic even import-gated (the same packages parse trusted input), pending real receiver typing.

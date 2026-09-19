@@ -215,18 +215,25 @@ func TestCatalogDistroTagRoundTrips(t *testing.T) {
 }
 
 // TestCatalogRPMDistroResolution locks which rpm-family os-release IDs mark DistroResolved, in lockstep with
-// rpmMatchableIDs and osDistroEcosystem: Amazon Linux resolves now that its updateinfo feed exists, while
-// Fedora (no feed) and CentOS (Stream drifts ahead of RHEL) stay cataloged-but-unresolved. It reuses the real
-// BerkeleyDB rpm fixture (the packages are inventory; only the os-release drives the resolved flag).
+// rpmMatchableIDs and osDistroEcosystem: Amazon Linux resolves now that its updateinfo feed exists, Fedora
+// resolves (its updateinfo feed exists), CentOS Linux 7 resolves by RHEL-7 approximation (and is flagged
+// ApproximateDistro), while CentOS Stream / CentOS >=8 stay cataloged-but-unresolved and flagged
+// UnsupportedDistro. It reuses the real BerkeleyDB rpm fixture (the packages are inventory; only the
+// os-release drives the resolved flag).
 func TestCatalogRPMDistroResolution(t *testing.T) {
 	cases := []struct {
-		id, ver  string
-		resolved bool
+		id, ver         string
+		resolved        bool
+		wantApproximate string
+		wantUnsupported string
 	}{
-		{"amzn", "2", true},
-		{"amzn", "2023", true},
-		{"fedora", "40", true}, // resolves now that the owned Fedora updateinfo feed exists (Fedora:40)
-		{"centos", "9", false}, // deliberately unmapped: CentOS Stream runs ahead of RHEL
+		{id: "amzn", ver: "2", resolved: true},
+		{id: "amzn", ver: "2023", resolved: true},
+		{id: "fedora", ver: "40", resolved: true},                                           // resolves now that the owned Fedora updateinfo feed exists (Fedora:40)
+		{id: "centos", ver: "7", resolved: true, wantApproximate: "centos-7"},               // CentOS Linux 7 → Red Hat:7 approximation (#1037)
+		{id: "centos", ver: "7.9.2009", resolved: true, wantApproximate: "centos-7.9.2009"}, // point release still keys major 7
+		{id: "centos", ver: "8", resolved: false, wantUnsupported: "centos"},                // CentOS >=8 ambiguous (Stream/Linux) → unsupported
+		{id: "centos", ver: "9", resolved: false, wantUnsupported: "centos"},                // CentOS Stream 9 → unsupported
 	}
 	for _, tc := range cases {
 		t.Run(tc.id+"-"+tc.ver, func(t *testing.T) {
@@ -246,6 +253,52 @@ func TestCatalogRPMDistroResolution(t *testing.T) {
 			}
 			if res.DistroResolved != tc.resolved {
 				t.Errorf("%s-%s: DistroResolved=%v, want %v", tc.id, tc.ver, res.DistroResolved, tc.resolved)
+			}
+			if res.ApproximateDistro != tc.wantApproximate {
+				t.Errorf("%s-%s: ApproximateDistro=%q, want %q", tc.id, tc.ver, res.ApproximateDistro, tc.wantApproximate)
+			}
+			if res.UnsupportedDistro != tc.wantUnsupported {
+				t.Errorf("%s-%s: UnsupportedDistro=%q, want %q", tc.id, tc.ver, res.UnsupportedDistro, tc.wantUnsupported)
+			}
+		})
+	}
+}
+
+// TestCatalogRPMResolvedImpliesEcosystem ties the cataloger's independent rpm resolve decision to
+// sbom.DistroEcosystem, the single source of truth the matcher keys on. TestDistroEcosystemLockstep cannot
+// catch this drift (it compares two functions that both delegate to DistroEcosystem), but the cataloger
+// reimplements the resolve decision (cataloger.go, incl. the centos-7 special case). The soundness invariant
+// is one-directional: DistroResolved=true MUST imply DistroEcosystem returns a non-empty key, or the scan
+// reports coverage while the matcher silently keys to nothing (the zero-match the flag exists to prevent). The
+// reverse is allowed: the cataloger is deliberately stricter than DistroEcosystem for a bare-major SLE
+// (sles-15 resolves to "SUSE:15" in DistroEcosystem but the cataloger requires major.minor), which is
+// conservative, not a zero-match.
+func TestCatalogRPMResolvedImpliesEcosystem(t *testing.T) {
+	for _, tc := range []struct{ id, ver string }{
+		{"rhel", "9.2"}, {"redhat", "8"}, {"rocky", "9.3"}, {"almalinux", "8.9"},
+		{"ol", "9"}, {"amzn", "2"}, {"amzn", "2023"}, {"fedora", "40"},
+		{"opensuse-leap", "15.6"}, {"sles", "15.6"}, {"sles", "15"},
+		{"centos", "7"}, {"centos", "7.9.2009"}, {"centos", "8"}, {"centos", "9"},
+	} {
+		t.Run(tc.id+"-"+tc.ver, func(t *testing.T) {
+			rootfs := decompressFixture(t, "ubi8-micro.rpmdb.bdb.gz", rpmBDBPath)
+			if err := os.MkdirAll(filepath.Join(rootfs, "etc"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(rootfs, "etc/os-release"), []byte("ID="+tc.id+"\nVERSION_ID=\""+tc.ver+"\"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			res, err := New().Catalog(context.Background(), rootfs)
+			if err != nil {
+				t.Fatalf("catalog: %v", err)
+			}
+			eco := sbom.DistroEcosystem("rpm", tc.id+"-"+tc.ver)
+			if res.DistroResolved && eco == "" {
+				t.Errorf("%s-%s: cataloger DistroResolved=true but sbom.DistroEcosystem is empty (drift → silent zero-match)", tc.id, tc.ver)
+			}
+			// The centos-7 approximation must both resolve AND key to a non-empty ecosystem.
+			if tc.id == "centos" && tc.ver[0] == '7' && (!res.DistroResolved || eco == "") {
+				t.Errorf("%s-%s: CentOS 7 must resolve with a non-empty ecosystem, got resolved=%v eco=%q", tc.id, tc.ver, res.DistroResolved, eco)
 			}
 		})
 	}

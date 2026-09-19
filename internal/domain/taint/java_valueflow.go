@@ -20,9 +20,9 @@ const (
 
 // allJavaTaintClasses is the set a fully untrusted request source taints. It is intentionally the Java
 // subset with a MODELED sink today (a source never introduces a class the engine has no sink to terminate);
-// it grows as DefaultJavaCatalog gains sinks for XSS/LDAP/XPath/XXE/SSTI/log.
+// it grows as DefaultJavaCatalog gains sinks for XXE/SSTI/log.
 var allJavaTaintClasses = []TaintClass{
-	TaintCommand, TaintPathTraversal, TaintSQL, TaintSSRF, TaintDeserialization, TaintCode,
+	TaintCommand, TaintPathTraversal, TaintSQL, TaintSSRF, TaintDeserialization, TaintCode, TaintLDAP, TaintXPath, TaintXSS,
 }
 
 // JavaCallablePattern matches a Java callee. Java has NO bare language globals, so matching is two-tiered:
@@ -45,6 +45,12 @@ type JavaCallablePattern struct {
 	RawConstructor []string
 	CallModule     bool // a direct call of a statically-imported name (import static ...max; max(x))
 	Constructor    bool // matches only a `new X(...)` (object_creation) call of an imported/FQ type
+	// RequiresImport, when non-empty, is an ADDITIONAL gate on a RawSuffixes floor: the match fires only when
+	// the calling file imports a package or type under one of these anchors (matched both ways like Modules).
+	// It turns an otherwise FP-prone bare method-name floor (`.search`, `.evaluate`) into a defensible
+	// import-anchored sink for an instance method whose receiver type is unknown source-only: a `.search(...)`
+	// in a file that never imports javax.naming cannot be an LDAP sink. It never widens a match on its own.
+	RequiresImport []string
 }
 
 func (p JavaCallablePattern) empty() bool {
@@ -185,12 +191,12 @@ type javaValueBuilder struct {
 	// classByFQN keeps ALL declarers so a duplicate FQN resolves to nothing (ambiguous), never a guess.
 	classByFQN      map[string][]string
 	methodsByParent map[string][]string
-	flows             map[string]bool
-	sources           map[string]JavaTypedValueSource
-	sinks             map[string]JavaTypedValueSink
-	sanitizers        map[string]JavaTypedSanitizer
-	positions         map[string]javaprogram.Position
-	truncated         bool
+	flows           map[string]bool
+	sources         map[string]JavaTypedValueSource
+	sinks           map[string]JavaTypedValueSink
+	sanitizers      map[string]JavaTypedSanitizer
+	positions       map[string]javaprogram.Position
+	truncated       bool
 }
 
 func (b *javaValueBuilder) index() {
@@ -331,6 +337,9 @@ func (b *javaValueBuilder) modelCalls() {
 		for index, model := range b.catalog.Sinks {
 			if !javaCallMatches(model.Pattern, module, member, resolved, raw, call.New) {
 				continue
+			}
+			if len(model.Pattern.RequiresImport) > 0 && !b.fileImportsAny(call.CallerID, model.Pattern.RequiresImport) {
+				continue // an import-gated floor: the anchoring API is not imported in this file
 			}
 			matchedRole = true
 			if len(b.sinks) >= maxJavaTaintSinks {
@@ -791,6 +800,26 @@ func javaCallMatches(pattern JavaCallablePattern, module, member string, resolve
 	// is the instance-method case (stmt.executeQuery) whose receiver type is unknown source-only.
 	for _, suffix := range pattern.RawSuffixes {
 		if raw == suffix || strings.HasSuffix(raw, "."+suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// fileImportsAny reports whether any import visible from the caller's scope chain resolves to a package or
+// type under one of the anchors (matched both ways, like javaMatchesModule: an import of
+// "javax.naming.directory.InitialDirContext" satisfies the anchor "javax.naming"). It is the import-presence
+// gate behind JavaCallablePattern.RequiresImport, so a receiver-name floor fires only in a file that actually
+// uses the anchoring API. It scans the raw import list (not the resolved b.imports binding map, which drops
+// on-demand imports that bind no specific name), so a wildcard `import javax.naming.directory.*` counts too.
+func (b *javaValueBuilder) fileImportsAny(callerID string, anchors []string) bool {
+	chain := b.scopeChain(callerID)
+	inChain := make(map[string]bool, len(chain))
+	for _, scope := range chain {
+		inChain[scope] = true
+	}
+	for _, item := range b.document.Imports {
+		if inChain[item.ScopeID] && javaMatchesModule(item.Module, anchors) {
 			return true
 		}
 	}

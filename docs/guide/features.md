@@ -5,10 +5,12 @@
 ## Software composition analysis
 
 **SBOM generation.** Synapse produces a software bill of materials with owned per-ecosystem lockfile
-parsers and a pluggable producer, so detection is not tied to a single vendor. Current coverage: Go,
-npm, Yarn, pnpm, PyPI, Poetry, Pipfile, uv, Cargo, Maven, Gradle, RubyGems, Composer, NuGet, Swift,
-Dart, Hex/Elixir, Conda, R (renv), Julia, and Conan. It can also ingest a client-supplied CycloneDX
-SBOM as the scan inventory.
+parsers and a pluggable producer, so detection is not tied to a single vendor. The owned producer
+(`ownsbom`) is the shipped default, emitting dependency-graph edges and requiring no third-party
+scanner binary; Syft is retained as an opt-in cross-check (`SYNAPSE_SBOM_PRODUCER=syft`). Current
+coverage: Go, npm, Yarn, pnpm, PyPI, Poetry, Pipfile, uv, Cargo, Maven, Gradle, RubyGems, Composer,
+NuGet, Swift, Dart, Hex/Elixir, Conda, R (renv), Julia, and Conan. It can also ingest a
+client-supplied CycloneDX SBOM as the scan inventory.
 
 **Multi-source detection.** Components are matched against a live advisory API and an offline
 database. Results are cross-correlated and de-duplicated, and each finding records the scanner
@@ -60,7 +62,10 @@ runs owned catalogers over it, so a shipped artifact is inventoried even without
   RHEL/Fedora/AlmaLinux/Rocky/Oracle), BerkeleyDB (`Packages`, RHEL 8 and Amazon Linux 2), and
   ndb (`Packages.db`, openSUSE and SLE), each parsed by owned pure-Go code so `CGO_ENABLED=0`
   still builds. Packages are emitted with a distro qualifier so the advisory matcher keys them to
-  the right OS ecosystem.
+  the right OS ecosystem. CentOS Linux 7 is keyed to the RHEL 7 ecosystem as a documented
+  approximation (it is a downstream rebuild of RHEL 7, and there was never a CentOS Stream 7), and
+  reported as `coverage=approximate`; CentOS Stream and CentOS 8 or later stay `coverage=unsupported`
+  (VERSION_ID=8 is ambiguous and Stream runs ahead of RHEL), never aliased to RHEL.
 - **Installed binaries.** Go build information embedded in ELF, PE, and Mach-O binaries, and
   Python dist-info and egg-info metadata, become `pkg:golang` and `pkg:pypi` components.
 - **Image config hardening.** An owned check over the image config and build history flags a

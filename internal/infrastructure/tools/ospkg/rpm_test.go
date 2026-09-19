@@ -322,9 +322,11 @@ func TestCatalogRPMSLESResolution(t *testing.T) {
 	}
 }
 
-// TestCatalogRPMCentOSUnsupported: CentOS is recognized but deliberately unsupported (CentOS Stream runs
-// ahead of RHEL). Its packages are cataloged for inventory, but the result flags UnsupportedDistro and does
-// NOT resolve (so the pipeline reports coverage=unsupported, never a clean posture and never a RHEL alias).
+// TestCatalogRPMCentOSUnsupported: CentOS Stream / CentOS >=8 is recognized but deliberately unsupported
+// (Stream runs ahead of RHEL and VERSION_ID=8 is ambiguous). CentOS Linux 7 IS supported by RHEL-7
+// approximation (covered by TestCatalogRPMDistroResolution); this case pins the still-unsupported Stream 9.
+// Its packages are cataloged for inventory, but the result flags UnsupportedDistro and does NOT resolve (so
+// the pipeline reports coverage=unsupported, never a clean posture and never a RHEL alias).
 func TestCatalogRPMCentOSUnsupported(t *testing.T) {
 	rootfs := writeRPMRootfs(t, "ID=centos\nVERSION_ID=\"9\"\n")
 	res, err := New().Catalog(context.Background(), rootfs)

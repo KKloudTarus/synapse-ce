@@ -1513,12 +1513,19 @@ type OSPackageResult struct {
 	Components     []sbom.Component
 	DistroResolved bool
 	// UnsupportedDistro names a distro the cataloger RECOGNIZED but deliberately does not match advisories for
-	// (empty otherwise). It distinguishes a by-design coverage gap from a parse failure: CentOS is the case
-	// today (CentOS Stream runs ahead of RHEL, so applying a RHEL fixed version would be a false match). The
-	// packages are still cataloged for inventory; the pipeline surfaces this as a structured
-	// coverage=unsupported warning rather than a generic "release could not be resolved", and never aliases
-	// the packages to RHEL or reads them as clean.
+	// (empty otherwise). It distinguishes a by-design coverage gap from a parse failure: CentOS Stream and
+	// CentOS >=8 are the case today (Stream runs ahead of RHEL and VERSION_ID=8 is ambiguous, so applying a
+	// RHEL fixed version would be a false match). The packages are still cataloged for inventory; the pipeline
+	// surfaces this as a structured coverage=unsupported warning rather than a generic "release could not be
+	// resolved", and never aliases the packages to RHEL or reads them as clean.
 	UnsupportedDistro string
+	// ApproximateDistro names a distro whose packages the cataloger keyed to ANOTHER distro's advisory
+	// ecosystem as a documented, sound approximation (empty otherwise). CentOS Linux 7 is the case today: it is
+	// a downstream rebuild of RHEL 7 (there was never a CentOS Stream 7, so VERSION_ID=7 is unambiguous), so its
+	// packages are keyed to "Red Hat:7". The pipeline surfaces this as a structured coverage=approximate
+	// provenance warning so a Red Hat finding on a CentOS 7 package is never mistaken for native CentOS-feed
+	// coverage; EPEL/SIG/third-party RPMs, absent from RHEL advisories, produce no finding.
+	ApproximateDistro string
 }
 
 // OSPackageCataloger reads a materialized image root filesystem (Workspace.RootFS) and returns the installed

@@ -3346,14 +3346,20 @@ func main() {
 	// judgments, so it needs the judgment lifecycle; composition-root only (the sbomcrosscheckjudge arch
 	// tripwire keeps it off the agent surface). Best-effort: a 2nd-producer error never fails the scan.
 	if cfg.SBOMCrossCheckEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_SBOM_CROSSCHECK_ENABLED", "SBOM cross-check") {
-		// The cross-check producer is whichever Tier-1 producer is NOT the primary, so two INDEPENDENT
-		// producers (owned parsers vs Syft) are diffed. Build the owned registry on demand when Syft is primary.
+		// The cross-check producer is whichever producer is NOT the primary, so two INDEPENDENT producers
+		// (owned parsers vs Syft) are diffed. The primary kind is resolved through the same
+		// scacompose.ResolveSBOMProducerKind the producer-select switch uses, so an empty (default) value
+		// resolves to ownsbom-primary here too and the secondary is Syft, never ownsbom-vs-ownsbom.
+		primaryKind, pkErr := scacompose.ResolveSBOMProducerKind(cfg)
+		if pkErr != nil {
+			log.Error("resolve SBOM producer kind for cross-check", "err", pkErr)
+			os.Exit(1)
+		}
 		var secondary ports.SBOMGenerator
 		var secondaryName string
-		switch cfg.SBOMProducer {
-		case "ownsbom":
+		if primaryKind == scacompose.SBOMProducerOwned {
 			secondary, secondaryName = syftGen, "syft"
-		default: // "" or "syft" (the producer-select switch above already rejected any other value)
+		} else {
 			reg, rerr := ownsbom.DefaultRegistry()
 			if rerr != nil {
 				log.Error("build ownsbom cross-check producer", "err", rerr)

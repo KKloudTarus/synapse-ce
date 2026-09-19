@@ -148,8 +148,9 @@ func distroEcosystem(typ, purl string) string {
 // on. It is the SINGLE source of truth for OS-package ecosystem keying: both the inventory identity here and
 // the scan-side matcher (osDistroEcosystem in the ownadvisory feed) call it, so the two can never drift. The
 // qualifier is lowercased first (Syft emits lowercase; a case-variant keys the same). An unmapped distro
-// (CentOS, openSUSE Tumbleweed) or a malformed qualifier returns "" (cataloged for inventory, never keyed to
-// an advisory ecosystem, so never a false match).
+// (CentOS Stream / CentOS >=8, openSUSE Tumbleweed) or a malformed qualifier returns "" (cataloged for
+// inventory, never keyed to an advisory ecosystem, so never a false match). CentOS Linux 7 is the one
+// approximation: it keys to "Red Hat:7" (see the rpm branch).
 func DistroEcosystem(purlType, distro string) string {
 	distro = strings.ToLower(distro)
 	if distro == "" {
@@ -226,9 +227,8 @@ func DistroEcosystem(purlType, distro string) string {
 		if major == "" {
 			return ""
 		}
-		// The rpm distros key "<Name>:<major>". CentOS is deliberately excluded (Stream runs ahead of RHEL, so
-		// a RHEL fixed NEVR would false-match a Stream package). SUSE Linux Enterprise (sles-*) is keyed by the
-		// major.minor branch above. Each mapped id keys the ecosystem its own feed writes.
+		// The rpm distros key "<Name>:<major>". SUSE Linux Enterprise (sles-*) is keyed by the major.minor
+		// branch above. Each mapped id keys the ecosystem its own feed writes.
 		switch id {
 		case "rhel", "redhat":
 			return "Red Hat:" + major
@@ -242,6 +242,18 @@ func DistroEcosystem(purlType, distro string) string {
 			return "Amazon Linux:" + major
 		case "fedora":
 			return "Fedora:" + major
+		case "centos":
+			// CentOS Linux 7 is a downstream rebuild of RHEL 7 whose base packages carry RHEL-7 NEVRs, and there
+			// was never a "CentOS Stream 7" (Stream began at 8), so VERSION_ID=7 unambiguously means the RHEL 7
+			// rebuild: key it to "Red Hat:7" as a documented approximation (issue #1037). CentOS >=8 is ambiguous
+			// (CentOS Stream and the discontinued CentOS Linux 8 both carry ID=centos and VERSION_ID=8, and Stream
+			// runs ahead of RHEL so a RHEL fixed NEVR would false-match), so it stays unmapped. The rpmvercmp
+			// comparator orders CentOS's ".el7.centos" dist tag against RHEL's ".el7_N" natively, and EPEL/SIG/
+			// third-party RPMs are absent from RHEL advisories (EPEL keeps a namespace disjoint from RHEL), so
+			// they produce no finding rather than a false match.
+			if major == "7" {
+				return "Red Hat:7"
+			}
 		}
 	}
 	return ""

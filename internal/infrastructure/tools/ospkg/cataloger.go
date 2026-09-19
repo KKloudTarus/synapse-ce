@@ -128,6 +128,7 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 	// rootfs is cataloged.
 	rpmNS, rpmTag := "rhel", ""
 	rpmResolved := false
+	rpmApproximate := false
 	if id != "" {
 		rpmNS = id
 		if versionID != "" {
@@ -141,6 +142,13 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 				major = versionID[:i]
 			}
 			rpmResolved = rpmMatchableIDs[id] && major != ""
+			if id == "centos" && major == "7" {
+				// CentOS Linux 7 is a RHEL 7 rebuild keyed to "Red Hat:7" as a documented approximation
+				// (sbom.DistroEcosystem, issue #1037): it resolves, but through another distro's ecosystem, so
+				// it is flagged approximate rather than resolved-natively. There was never a CentOS Stream 7, so
+				// VERSION_ID=7 is unambiguous; CentOS >=8 stays in the unsupported branch below.
+				rpmResolved, rpmApproximate = true, true
+			}
 			if id == "opensuse-leap" || id == "sles" {
 				// openSUSE Leap (openSUSE:15.6) and SUSE Linux Enterprise (SUSE:15.6, keyed per service pack) key
 				// on major.minor, not the major alone, so a bare or trailing-dot VERSION_ID must NOT resolve: it
@@ -158,11 +166,17 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 	}
 	if len(rpmComps) > 0 {
 		res.Components = append(res.Components, rpmComps...)
+		if rpmApproximate {
+			// CentOS Linux 7 resolved through the RHEL 7 ecosystem (an approximation, not a native feed): record
+			// it so the pipeline surfaces a structured coverage=approximate provenance warning and a consumer
+			// never mistakes a Red Hat finding on a CentOS 7 package for native CentOS-feed coverage.
+			res.ApproximateDistro = rpmTag
+		}
 		if !rpmResolved {
 			res.DistroResolved = false
-			// A recognized-but-deliberately-unsupported distro (CentOS) is reported as a structured
-			// coverage gap, distinct from an unparseable release, so the pipeline never presents it as a
-			// generic "release could not be resolved" (nor aliases it to RHEL, nor reads it as clean).
+			// A recognized-but-deliberately-unsupported distro (CentOS Stream / CentOS >=8) is reported as a
+			// structured coverage gap, distinct from an unparseable release, so the pipeline never presents it as
+			// a generic "release could not be resolved" (nor aliases it to RHEL, nor reads it as clean).
 			if knownUnsupportedRPMIDs[id] {
 				res.UnsupportedDistro = id
 			}
@@ -172,9 +186,12 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 }
 
 // knownUnsupportedRPMIDs are rpm-family os-release IDs Synapse RECOGNIZES but deliberately does not match
-// advisories for. CentOS (both classic and Stream carry ID=centos) is excluded because CentOS Stream runs
-// ahead of RHEL, so applying a RHEL fixed version would be a false match; its packages are cataloged for
-// inventory and reported coverage=unsupported, never aliased to RHEL.
+// advisories for. CentOS carries ID=centos for every release; CentOS Linux 7 is handled specially in Catalog
+// (keyed to "Red Hat:7" as a documented approximation, since there was never a CentOS Stream 7), so this map
+// covers only the still-unsupported CentOS releases: CentOS Stream and CentOS >=8, where VERSION_ID=8 is
+// ambiguous (Stream vs the discontinued CentOS Linux 8) and Stream runs ahead of RHEL, so a RHEL fixed version
+// would be a false match. Those packages are cataloged for inventory and reported coverage=unsupported, never
+// aliased to RHEL.
 var knownUnsupportedRPMIDs = map[string]bool{"centos": true}
 
 // rpmMatchableIDs are the rpm-family os-release IDs osDistroEcosystem can key to an advisory ecosystem: RHEL
@@ -184,9 +201,10 @@ var knownUnsupportedRPMIDs = map[string]bool{"centos": true}
 // updateinfo feed), openSUSE Leap (opensuse-leap -> "openSUSE:<major.minor>", owned openSUSE OVAL feed), and
 // SUSE Linux Enterprise (sles -> "SUSE:<major.minor>" per service pack, owned SLE OVAL feed). This set must
 // stay in lockstep with osDistroEcosystem: an id is listed only once its ecosystem mapping AND feed exist, so
-// DistroResolved never claims a keying the matcher cannot make. CentOS (Stream drifts ahead of RHEL, so a RHEL
-// fixed NEVR would false-match a Stream package) and openSUSE Tumbleweed (rolling, no per-release feed) stay
-// OFF, so their rpm packages are cataloged for inventory but honestly flagged unresolved.
+// DistroResolved never claims a keying the matcher cannot make. CentOS is NOT listed here because it resolves
+// only for VERSION_ID=7 (the RHEL-7 approximation, handled by the id=="centos" && major=="7" branch in
+// Catalog); CentOS Stream / CentOS >=8 and openSUSE Tumbleweed (rolling, no per-release feed) stay unresolved,
+// so their rpm packages are cataloged for inventory but honestly flagged unresolved.
 var rpmMatchableIDs = map[string]bool{"rhel": true, "redhat": true, "rocky": true, "almalinux": true, "alma": true, "ol": true, "oracle": true, "amzn": true, "amazon": true, "fedora": true, "opensuse-leap": true, "sles": true}
 
 // dpkgFieldKeys / apkFieldKeys are the ONLY stanza keys each parser reads. parseOSDB stores only these, so a
