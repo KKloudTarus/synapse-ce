@@ -71,6 +71,55 @@ jobs:
           path: ${{ runner.temp }}/owasp-scorecard.log
           if-no-files-found: warn
 
+  securibench-scorecard:
+    name: Securibench Micro scorecard
+    runs-on: ubuntu-latest
+    env:
+      # Pinned too4words/securibench-micro commit the ratchet floors and the test's compiled answer-key digest
+      # are calibrated against. Bumping this REQUIRES re-calibrating the floors and re-pinning the digest
+      # constant in securibench_integration_test.go (reviewed together).
+      SECURIBENCH_REF: 6a5a72488ea830d99f9464fc1f0562c4f864214b
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Checkout Securibench Micro (pinned)
+        uses: actions/checkout@v7
+        with:
+          repository: too4words/securibench-micro
+          ref: ${{ env.SECURIBENCH_REF }}
+          path: securibench
+          persist-credentials: false
+
+      - name: Build java-facts-capable synapse-ast (CGO)
+        run: CGO_ENABLED=1 go build -o "${RUNNER_TEMP}/synapse-ast" ./cmd/synapse-ast
+
+      - name: Run Securibench scorecard + per-CWE ratchet
+        # The test content-pins the answer key against its compiled securibenchCorpusDigest constant, so a wrong
+        # or silently-changed corpus fails loudly. Re-pinning requires editing BOTH SECURIBENCH_REF above AND
+        # that constant in source (reviewed with the recalibrated floors).
+        env:
+          SYNAPSE_SECURIBENCH_DIR: ${{ github.workspace }}/securibench
+          SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
+        run: |
+          set -o pipefail
+          CGO_ENABLED=1 go test -count=1 -v -run TestSecuribenchScorecard \
+            ./internal/infrastructure/tools/ast/ | tee "${RUNNER_TEMP}/securibench-scorecard.log"
+
+      - name: Upload scorecard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: securibench-scorecard
+          path: ${{ runner.temp }}/securibench-scorecard.log
+          if-no-files-found: warn
+
   juliet-scorecard:
     name: Juliet Java scorecard
     runs-on: ubuntu-latest
