@@ -399,10 +399,9 @@ func TestSetAssigneeAndComments(t *testing.T) {
 	})
 }
 
-// TestEvidenceBarGatesExploitationPromotion wires the previously-dead Finding.CanPromote
-// an exploitation/AI finding may not be CONFIRMED until it clears the
-// evidence bar (>= 75); other kinds are never gated.
-func TestEvidenceBarGatesExploitationPromotion(t *testing.T) {
+// TestFindingConfirmationAuthorityGates pins both evidence-gated native promotion and
+// origin authority: external/unknown reader inputs can never enter native confirmation.
+func TestFindingConfirmationAuthorityGates(t *testing.T) {
 	engID, findID := shared.ID("eng1"), shared.ID("find1")
 	confirm := func(repo *fakeRepo) error {
 		svc := newSvc(repo, &fakeComments{}, &fakeAudit{})
@@ -428,9 +427,21 @@ func TestEvidenceBarGatesExploitationPromotion(t *testing.T) {
 		t.Error("a passing finding must reach the repo")
 	}
 
-	// A non-exploitation finding is never gated, even with score 0.
+	// A native, human-authored finding remains ungated.
 	manual := &fakeRepo{list: []finding.Finding{{ID: findID, Kind: finding.KindManual, EvidenceScore: 0}}, ret: finding.Finding{ID: findID, Status: finding.StatusConfirmed}}
 	if err := confirm(manual); err != nil {
-		t.Fatalf("a non-exploitation finding must not be gated: %v", err)
+		t.Fatalf("a manual finding must not be gated: %v", err)
+	}
+
+	// Reader-only and unknown origins never gain native confirmation authority,
+	// even if a caller fabricates an evidence score above the normal bar.
+	for _, kind := range []finding.Kind{finding.KindExternal, finding.Kind("future-origin")} {
+		repo := &fakeRepo{list: []finding.Finding{{ID: findID, Kind: kind, EvidenceScore: 100}}}
+		if err := confirm(repo); !errors.Is(err, shared.ErrValidation) {
+			t.Fatalf("kind %q must not be confirmable through the native workflow, got %v", kind, err)
+		}
+		if repo.called {
+			t.Fatalf("kind %q reached the native status writer", kind)
+		}
 	}
 }

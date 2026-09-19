@@ -278,6 +278,9 @@ func TestFindingsPreserveImportedProvenanceAndReachabilityTiers(t *testing.T) {
 	if externalRow == nil || externalRow.Provenance == nil || externalRow.Provenance.ToolName != "semgrep" || externalRow.CanSelfPromote == nil || *externalRow.CanSelfPromote || !externalRow.SuppressedByTool {
 		t.Fatalf("external governance/provenance lost: %+v", externalRow)
 	}
+	if externalRow.Finding.Kind != finding.KindExternal || externalRow.Finding.Status != finding.StatusTriage {
+		t.Fatalf("external reader must be explicitly external and start in triage: %+v", externalRow.Finding)
+	}
 	if externalRow.Reachability.State != judgment.ReachUnknown {
 		t.Fatalf("external finding without proof must remain unknown: %+v", externalRow.Reachability)
 	}
