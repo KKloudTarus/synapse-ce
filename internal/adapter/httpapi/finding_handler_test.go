@@ -139,6 +139,7 @@ func TestCreateFindingAndStatusConflict(t *testing.T) {
 	body := `{"title":"SQLi in login","cvss_vector":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements/e1/findings", strings.NewReader(body))
 	req.SetPathValue("id", "e1")
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice"}))
 	rec := httptest.NewRecorder()
 	rt.createFinding(rec, req)
 	if rec.Code != http.StatusCreated {
@@ -159,6 +160,7 @@ func TestCreateFindingAndStatusConflict(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/engagements/e1/findings/"+created.ID, strings.NewReader(b))
 		req.SetPathValue("id", "e1")
 		req.SetPathValue("fid", created.ID)
+		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice"}))
 		rec := httptest.NewRecorder()
 		rt.updateFindingStatus(rec, req)
 		return rec.Code
@@ -182,6 +184,7 @@ func TestRecordRetestEndpoint(t *testing.T) {
 		strings.NewReader(`{"outcome":"remediated","note":"fixed in v2","version":1}`))
 	req.SetPathValue("id", "e1")
 	req.SetPathValue("fid", "manual:1")
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice"}))
 	rec := httptest.NewRecorder()
 	rt.recordRetest(rec, req)
 	if rec.Code != http.StatusCreated {

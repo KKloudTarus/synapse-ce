@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -34,6 +35,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/correlation"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
+	identitydom "github.com/KKloudTarus/synapse-ce/internal/domain/identity"
 	integrationdom "github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
@@ -1369,12 +1371,18 @@ func main() {
 		log.Error("bootstrap admin seed failed", "err", err)
 		os.Exit(1)
 	}
-	auth := httpapi.NewAuthenticator(func(ctx context.Context, token string) (httpapi.Principal, bool) {
+	auth := httpapi.NewAuthenticatorWithErrorResolver(func(ctx context.Context, token string) (httpapi.Principal, error) {
 		u, err := usersService.Authenticate(ctx, token)
 		if err != nil {
-			return httpapi.Principal{}, false
+			// The user service uses shared not-found/forbidden errors for unknown and disabled
+			// bearer credentials. At the HTTP boundary both are terminal authentication failures;
+			// only unexpected dependency errors remain retryable 503s.
+			if errors.Is(err, shared.ErrNotFound) || errors.Is(err, shared.ErrForbidden) {
+				return httpapi.Principal{}, identitydom.ErrAuthenticationInvalid
+			}
+			return httpapi.Principal{}, err
 		}
-		return httpapi.Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: u.TenantID}, true
+		return httpapi.Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: u.TenantID}, nil
 	})
 	// Audit read/verify use case: same signer as evidence, so the audit head is
 	// origin-attested at parity with the evidence chain.
@@ -1684,7 +1692,7 @@ func main() {
 			},
 			func(ctx context.Context, token, csrf string, unsafe bool) (httpapi.OIDCPrincipal, error) {
 				result, err := oidcService.Authenticate(ctx, token, csrf, unsafe)
-				return httpapi.OIDCPrincipal{ID: result.ID, Name: result.Name, Role: result.Role, TenantID: result.TenantID}, err
+				return httpapi.OIDCPrincipal(result), err
 			},
 			oidcService.Logout,
 		)

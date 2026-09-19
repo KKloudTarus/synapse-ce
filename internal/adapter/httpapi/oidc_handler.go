@@ -18,7 +18,11 @@ type OIDCSession struct {
 	Token, CSRFToken string
 	Principal        OIDCPrincipal
 }
-type OIDCPrincipal struct{ ID, Name, Role, TenantID string }
+
+// OIDCPrincipal uses the same protocol-neutral human-principal contract as bearer authentication;
+// provider-specific claims remain inside the OIDC adapter/use case and never create a second
+// request-principal shape.
+type OIDCPrincipal = HumanPrincipal
 
 type OIDCService interface {
 	Begin(context.Context) (OIDCAuthorization, error)
@@ -30,12 +34,12 @@ type OIDCService interface {
 
 type oidcSessionResolver struct{ service OIDCService }
 
-func (r oidcSessionResolver) Authenticate(ctx context.Context, token, csrf string, unsafe bool) (Principal, error) {
+func (r oidcSessionResolver) Authenticate(ctx context.Context, token, csrf string, unsafe bool) (HumanPrincipal, error) {
 	p, err := r.service.Authenticate(ctx, token, csrf, unsafe)
 	if err != nil {
-		return Principal{}, err
+		return HumanPrincipal{}, err
 	}
-	return Principal(p), nil
+	return p, nil
 }
 
 // SetOIDC installs the browser OIDC BFF and its fixed, validated frontend destination.
@@ -86,8 +90,13 @@ func (rt *Router) oidcSession(w http.ResponseWriter, r *http.Request) {
 	}
 	session, err := rt.oidc.Discover(r.Context(), cookie.Value)
 	if err != nil {
-		clearSessionCookie(w)
-		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+		code := identityCodeFor(err)
+		if code == IdentityErrorAuthenticationInvalid {
+			// Invalid/revoked/expired credentials are terminal. Dependency and capacity failures are
+			// explicitly NOT cleared so a transient outage cannot log the user out.
+			clearSessionCookie(w)
+		}
+		writeIdentityError(r.Context(), w, code, err)
 		return
 	}
 	setSessionCookie(w, session.Token)
@@ -107,7 +116,14 @@ func (rt *Router) oidcLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil && cookie.Value != "" {
 		if err := rt.oidc.Logout(r.Context(), cookie.Value); err != nil && !errors.Is(err, context.Canceled) {
-			writeError(w, rt.log, err)
+			code := identityCodeFor(err)
+			if code == IdentityErrorAuthenticationInvalid {
+				// The local credential is already unusable; clearing it completes the user's intent.
+				clearSessionCookie(w)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			writeIdentityError(r.Context(), w, code, err)
 			return
 		}
 	}

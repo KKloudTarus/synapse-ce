@@ -19,6 +19,38 @@ type nopAudit struct{}
 
 func (nopAudit) Record(context.Context, ports.AuditEntry) error { return nil }
 
+// failingAudit lets the D5 transaction test prove that an audit failure is returned to the
+// transaction runner instead of being silently discarded.
+type failingAudit struct{ err error }
+
+func (a failingAudit) Record(context.Context, ports.AuditEntry) error { return a.err }
+
+// noopLegacyCredentialProjection enables the D5 atomic path without reaching a database. Update does
+// not need to call the projection for a role/name mutation; the interface is still required to make
+// recordUserAudit mandatory and to exercise the same transaction boundary used by PostgreSQL.
+type noopLegacyCredentialProjection struct{}
+
+func (noopLegacyCredentialProjection) ClassifyAndProjectLegacyCredential(context.Context, shared.ID, shared.ID, time.Time) (ports.LegacyCredentialProjection, error) {
+	return ports.LegacyCredentialProjection{}, nil
+}
+func (noopLegacyCredentialProjection) SyncIssuedLegacyCredential(context.Context, ports.LegacyCredentialSyncRequest) (ports.LegacyCredentialProjection, bool, error) {
+	return ports.LegacyCredentialProjection{}, false, nil
+}
+func (noopLegacyCredentialProjection) SyncLegacyCredentialDisabled(context.Context, ports.LegacyCredentialSyncRequest) (ports.LegacyCredentialProjection, bool, error) {
+	return ports.LegacyCredentialProjection{}, false, nil
+}
+func (noopLegacyCredentialProjection) ResolveLegacyCredentialClassification(context.Context, ports.LegacyCredentialResolutionRequest) (ports.LegacyCredentialProjection, error) {
+	return ports.LegacyCredentialProjection{}, nil
+}
+func (noopLegacyCredentialProjection) GetLegacyCredentialProjection(context.Context, shared.ID, shared.ID) (ports.LegacyCredentialProjection, error) {
+	return ports.LegacyCredentialProjection{}, nil
+}
+func (noopLegacyCredentialProjection) ReconcileLegacyCredentials(context.Context, shared.ID) (ports.LegacyCredentialReconciliation, error) {
+	return ports.LegacyCredentialReconciliation{}, nil
+}
+
+var _ ports.LegacyCredentialProjectionStore = noopLegacyCredentialProjection{}
+
 type fixedClock struct{}
 
 func (fixedClock) Now() time.Time { return time.Date(2026, 6, 21, 0, 0, 0, 0, time.UTC) }
@@ -260,6 +292,41 @@ func TestDisableRejectsTheUsersKeyAndEnableRestoresIt(t *testing.T) {
 	}
 	if !audit.has("user.disabled", target.ID.String()) || !audit.has("user.enabled", target.ID.String()) {
 		t.Errorf("disable/enable were not audited: %v", audit.actions())
+	}
+}
+
+// TestUpdateAuditFailureRollsBackD5Mutation ensures a role change cannot commit without its
+// mandatory audit record once the D5 projection path is enabled. The in-memory transaction runner
+// mirrors the PostgreSQL atomic boundary and the user repository restores its prior aggregate on
+// rollback.
+func TestUpdateAuditFailureRollsBackD5Mutation(t *testing.T) {
+	audit := &recordingAudit{}
+	repo := memory.NewUserRepository()
+	svc, err := NewService(repo, audit, fixedClock{}, &seqIDs{})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	ctx := context.Background()
+	_, _, admin := seedAdmin(t, svc, "acme", "Admin")
+	target, _, err := svc.CreateUser(ctx, admin, "", "Alice", user.RoleMember)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	svc.transactions = memory.NewTenantTransactionRunner()
+	svc.legacyCredentials = noopLegacyCredentialProjection{}
+	auditErr := errors.New("audit backend unavailable")
+	svc.audit = failingAudit{err: auditErr}
+
+	if updated, err := svc.Update(ctx, admin, target.ID, "Alice Admin", user.RoleReviewer); updated != nil || !errors.Is(err, auditErr) {
+		t.Fatalf("update = %+v, err=%v; want audit failure and no result", updated, err)
+	}
+	stored, err := repo.GetByID(ctx, shared.ID("acme"), target.ID)
+	if err != nil {
+		t.Fatalf("reload after rollback: %v", err)
+	}
+	if stored.Name != "Alice" || stored.Role != user.RoleMember {
+		t.Fatalf("failed D5 update committed: %+v", stored)
 	}
 }
 

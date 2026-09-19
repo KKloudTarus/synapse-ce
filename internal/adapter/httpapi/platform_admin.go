@@ -15,15 +15,10 @@ import (
 // PrincipalOperator). It is the operator of the deployment rather than a member of any tenant,
 // which is exactly the authority a global registry needs.
 
-// IsPlatformAdmin reports whether the request principal operates the deployment itself rather
-// than a single tenant.
-//
-// It reads the authenticated principal directly instead of going through PrincipalFrom, which
-// falls back to the operator id when no principal is bound. That fallback keeps historical
-// attribution coherent, but as an authorization test it would fail open for any request that
-// somehow reached a handler without passing the authenticator.
+// IsPlatformAdmin reports whether the explicitly authenticated human principal operates the
+// deployment itself rather than a single tenant. Missing principal context always fails closed.
 func IsPlatformAdmin(ctx context.Context) bool {
-	p, ok := principalObj(ctx)
+	p, ok := HumanPrincipalFrom(ctx)
 	return ok && p.ID == PrincipalOperator
 }
 
