@@ -1455,22 +1455,22 @@ func scopeToNewCode(findings []finding.Finding, changed gitdiff.ChangedLines) []
 	return out
 }
 
-// selectSBOMGenerator picks the SBOM producer from config, mirroring the server (scacompose): syft
-// (default) or Synapse's own pure-Go parsers (ownsbom). An unknown value fails closed, matching the
-// server rather than silently defaulting.
+// selectSBOMGenerator builds the CLI's SBOM producer. The kind decision (including empty → the owned
+// default) is single-sourced in scacompose.ResolveSBOMProducerKind so the CLI, the server, and the SBOM
+// cross-check can never disagree on what an empty SYNAPSE_SBOM_PRODUCER means.
 func selectSBOMGenerator(cfg config.Config) (ports.SBOMGenerator, error) {
-	switch cfg.SBOMProducer {
-	case "", "syft":
-		return syft.New(cfg.SyftBin), nil
-	case "ownsbom":
-		reg, err := ownsbom.DefaultRegistry()
-		if err != nil {
-			return nil, fmt.Errorf("build ownsbom SBOM producer: %w", err)
-		}
-		return reg, nil
-	default:
-		return nil, fmt.Errorf("invalid SYNAPSE_SBOM_PRODUCER (want 'syft' or 'ownsbom'): %s", cfg.SBOMProducer)
+	kind, err := scacompose.ResolveSBOMProducerKind(cfg)
+	if err != nil {
+		return nil, err
 	}
+	if kind == scacompose.SBOMProducerSyft {
+		return syft.New(cfg.SyftBin), nil
+	}
+	reg, rerr := ownsbom.DefaultRegistry()
+	if rerr != nil {
+		return nil, fmt.Errorf("build ownsbom SBOM producer: %w", rerr)
+	}
+	return reg, nil
 }
 
 func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, baseExplicit, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest, verifySecrets bool, push pushTarget) error {
@@ -1519,9 +1519,10 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	// except the resolvers" again.
 	egress := newScanEgress(cfg, offline, os.LookupEnv)
 	// Detection sources are config-driven (SYNAPSE_DETECTION_SOURCES), resolved through the SAME helper
-	// the server uses so the posture is identical across binaries. Grype is the offline matcher; live
-	// OSV runs only when the egress policy allows it. An operator can drop Grype (e.g.
-	// SYNAPSE_DETECTION_SOURCES=osv) for an Anchore-free CLI scan.
+	// the server uses so the posture is identical across binaries. The default is live OSV (when the egress
+	// policy allows it), Grype, and the owned advisory store; the owned store is the primary source and
+	// Grype stays in the default as a distro safety net. An operator can drop Grype
+	// (SYNAPSE_DETECTION_SOURCES=osv,advisory-store) for an Anchore-free CLI scan.
 	var osvSrc ports.DetectionSource
 	if egress.OSV {
 		prov.VulnDBSource = "osv.dev"
@@ -1563,14 +1564,24 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	if egress.LicenseMetadata {
 		licenseEnrichers = append(licenseEnrichers, licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil))
 	}
-	// SBOM producer: syft (default) or Synapse's OWN pure-Go parsers (SYNAPSE_SBOM_PRODUCER=ownsbom),
-	// mirroring the server so the first-party engine is reachable from the CLI, not just synapse-api.
+	// SBOM producer: the owned pure-Go parsers by default (SYNAPSE_SBOM_PRODUCER=ownsbom or empty) or the
+	// pinned Syft binary (SYNAPSE_SBOM_PRODUCER=syft), mirroring the server so the first-party engine is the
+	// default from the CLI too, not just synapse-api.
+	producerKind, pkErr := scacompose.ResolveSBOMProducerKind(cfg)
+	if pkErr != nil {
+		return pkErr
+	}
 	sbomGen, sberr := selectSBOMGenerator(cfg)
 	if sberr != nil {
 		return sberr
 	}
-	if cfg.SBOMProducer == "ownsbom" {
+	if producerKind == scacompose.SBOMProducerOwned {
 		fmt.Fprintln(os.Stderr, "synapse-cli: SBOM producer = ownsbom (owned pure-Go parsers; no third-party SBOM scanner)")
+		// The owned producer walks a filesystem and cannot catalog a packed image layout, so an image scan
+		// with rootfs materialization off would find no components and silently report zero vulnerabilities.
+		if image && !cfg.ImageRootFSEnabled {
+			fmt.Fprintln(os.Stderr, "synapse-cli: WARNING image target with SYNAPSE_IMAGE_ROOTFS_ENABLED=false under the owned producer will find NO components; enable rootfs materialization (default) or set SYNAPSE_SBOM_PRODUCER=syft")
+		}
 	}
 	sca := scauc.NewService(
 		engRepo, memory.NewFindingRepository(), memory.NewScanRepository(), nil, nil, nil, nil, nil, prov, clock, stderrAudit{},

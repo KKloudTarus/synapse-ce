@@ -132,23 +132,34 @@ func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.Adv
 	} else {
 		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) – syft/grype/git run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
 	}
-	// SBOM producer select: default Syft (pinned binary, full coverage + CycloneDX
-	// dep-graph edges) or the detection-independent owned parsers. ownsbom is pure-Go (no exec) so it
-	// needs no sandbox; its SBOM is components-only (no edges) over Tier-1 ecosystems – which OSV and
-	// grype both accept (grype reconstructs a CycloneDX from the components when there is no Raw).
-	sbomGen = syftGen
-	switch cfg.SBOMProducer {
-	case "", "syft":
-		log.Info("SBOM producer = syft (pinned binary; full ecosystem coverage + CycloneDX dep-graph edges)") // default, wired above
-	case "ownsbom":
+	// SBOM producer select: default ownsbom (the detection-independent owned parsers across 23 ecosystems,
+	// emitting dependency-graph edges; pure-Go, no exec, so no sandbox) or the pinned Syft binary as an
+	// opt-in cross-check. The kind decision (including empty → owned default) is single-sourced in
+	// ResolveSBOMProducerKind. The default flip (EPIC #1034, #1037) was gated on the scabench oracle and Syft
+	// dep-graph parity passing.
+	producerKind, pkErr := ResolveSBOMProducerKind(cfg)
+	if pkErr != nil {
+		return Execution{}, pkErr
+	}
+	switch producerKind {
+	case SBOMProducerOwned:
 		reg, rerr := ownsbom.DefaultRegistry()
 		if rerr != nil {
 			return Execution{}, fmt.Errorf("build ownsbom SBOM producer: %w", rerr)
 		}
 		sbomGen = reg
-		log.Info("SBOM producer = ownsbom (detection-independent owned parsers; no third-party scanner; components-only over Tier-1 ecosystems)")
-	default:
-		return Execution{}, fmt.Errorf("invalid SYNAPSE_SBOM_PRODUCER (want 'syft' or 'ownsbom'): %s", cfg.SBOMProducer)
+		log.Info("SBOM producer = ownsbom (default; detection-independent owned parsers across 23 ecosystems with dep-graph edges; no third-party scanner)")
+	case SBOMProducerSyft:
+		sbomGen = syftGen
+		log.Info("SBOM producer = syft (opt-in cross-check; pinned binary; CycloneDX dep-graph edges)")
+	}
+	// The owned producer walks a filesystem; unlike Syft it cannot catalog a packed OCI image layout, so an
+	// image-target scan yields components only from the materialized rootfs. With rootfs materialization off
+	// (SYNAPSE_IMAGE_ROOTFS_ENABLED=false) an image scan under the owned producer would find NO components and
+	// silently report zero vulnerabilities. Warn loudly so the incompatibility is never silent; image scans
+	// need either rootfs materialization on (the default) or SYNAPSE_SBOM_PRODUCER=syft.
+	if producerKind == SBOMProducerOwned && !cfg.ImageRootFSEnabled {
+		log.Warn("owned SBOM producer with image rootfs materialization OFF: image-target scans will find NO components and report zero vulnerabilities; set SYNAPSE_IMAGE_ROOTFS_ENABLED=true (default) or SYNAPSE_SBOM_PRODUCER=syft for image targets")
 	}
 	// Detection sources are config-driven (SYNAPSE_DETECTION_SOURCES). Each name maps to one of
 	// Synapse's own source instances; the resolved list is ordered and, when the var is set,
@@ -192,6 +203,39 @@ type DetectionCandidates struct {
 // of detection sources, drawing from the caller's candidates. It is shared by the server (BuildExecution)
 // and the CLI so the source posture is identical across binaries. Unknown names fail closed at startup;
 // a requested name whose candidate is nil is skipped with a log line.
+// SBOMProducerKind is the resolved SBOM-producer decision, so every composition root keys off one enum
+// rather than re-interpreting the config string (and the meaning of an empty value) independently.
+type SBOMProducerKind int
+
+const (
+	// SBOMProducerOwned is the owned per-ecosystem parsers, the shipped default (EPIC #1034, #1037).
+	SBOMProducerOwned SBOMProducerKind = iota
+	// SBOMProducerSyft is the pinned Syft binary, an opt-in cross-check.
+	SBOMProducerSyft
+)
+
+func (k SBOMProducerKind) String() string {
+	if k == SBOMProducerSyft {
+		return "syft"
+	}
+	return "ownsbom"
+}
+
+// ResolveSBOMProducerKind is the SINGLE decision for which SBOM producer a config selects: an empty value
+// resolves to the owned default (matching config.Load's default), "ownsbom" and "syft" are explicit, and any
+// other value is an error. Every producer-selection site (the server and CLI primary producers, and the
+// server SBOM cross-check's secondary producer) calls this so they can never disagree on what "" means.
+func ResolveSBOMProducerKind(cfg config.Config) (SBOMProducerKind, error) {
+	switch cfg.SBOMProducer {
+	case "", "ownsbom":
+		return SBOMProducerOwned, nil
+	case "syft":
+		return SBOMProducerSyft, nil
+	default:
+		return 0, fmt.Errorf("invalid SYNAPSE_SBOM_PRODUCER (want 'ownsbom' or 'syft'): %s", cfg.SBOMProducer)
+	}
+}
+
 func ResolveDetectionSources(cfg config.Config, c DetectionCandidates, log *slog.Logger) ([]ports.DetectionSource, error) {
 	names, err := resolveDetectionSourceNames(cfg)
 	if err != nil {
@@ -226,9 +270,14 @@ func ResolveDetectionSources(cfg config.Config, c DetectionCandidates, log *slog
 }
 
 // resolveDetectionSourceNames turns SYNAPSE_DETECTION_SOURCES into an ordered source list. When the
-// var is set it is authoritative (lowercased, comma-split, blanks dropped). When empty it reproduces
-// the legacy default exactly: live OSV first (unless SYNAPSE_OFFLINE), then Grype, then the owned
-// advisory store when SYNAPSE_OWNED_ADVISORY is on.
+// var is set it is authoritative (lowercased, comma-split, blanks dropped). When empty it uses the
+// default: live OSV first (unless SYNAPSE_OFFLINE), then Grype, then the owned advisory store when
+// SYNAPSE_OWNED_ADVISORY is on (the default). Grype stays in the default detection set as a distro
+// safety net: the owned advisory store is the default primary source, but the owned-vs-Grype recall
+// parity is gated only for the debian-12 and sles-15 oracle images today (#1035), so dropping Grype's
+// bundled Red Hat / Ubuntu-USN / Alpine-secdb distro feeds from the default is deferred to a follow-up
+// gated on extending the oracle corpus to those distro families. An operator can already drop Grype
+// explicitly (SYNAPSE_DETECTION_SOURCES=osv,advisory-store) for an Anchore-free posture.
 func resolveDetectionSourceNames(cfg config.Config) ([]string, error) {
 	if raw := strings.TrimSpace(cfg.DetectionSources); raw != "" {
 		out := make([]string, 0, 4)

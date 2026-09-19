@@ -771,15 +771,17 @@ func TestFPTriageVerifierIdentityConfig(t *testing.T) {
 	}
 }
 
-// TestLoadSBOMProducer confirms the SBOM producer defaults to syft and honors the env override.
+// TestLoadSBOMProducer confirms the SBOM producer defaults to the owned engine (EPIC #1034, #1037) and
+// honors the env override back to syft (the documented rollback).
 func TestLoadSBOMProducer(t *testing.T) {
 	t.Setenv("SYNAPSE_SBOM_PRODUCER", "")
-	if got := Load().SBOMProducer; got != "syft" {
-		t.Errorf("SBOMProducer default = %q, want syft", got)
-	}
-	t.Setenv("SYNAPSE_SBOM_PRODUCER", "ownsbom")
 	if got := Load().SBOMProducer; got != "ownsbom" {
-		t.Errorf("SBOMProducer from env = %q, want ownsbom", got)
+		t.Errorf("SBOMProducer default = %q, want ownsbom (owned engine is the shipped default)", got)
+	}
+	// Rollback: SYNAPSE_SBOM_PRODUCER=syft restores the pinned Syft binary.
+	t.Setenv("SYNAPSE_SBOM_PRODUCER", "syft")
+	if got := Load().SBOMProducer; got != "syft" {
+		t.Errorf("SBOMProducer from env = %q, want syft (rollback)", got)
 	}
 }
 
