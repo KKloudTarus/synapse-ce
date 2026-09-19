@@ -226,7 +226,11 @@ jobs:
           test "$(dotnet --version)" = 8.0.100
           assert_jdk_21() {
             tool="$1"
-            if ! output="$("$tool" -version 2>&1)"; then
+            version_arg=-version
+            if [ "$tool" = jar ]; then
+              version_arg=--version
+            fi
+            if ! output="$("$tool" "$version_arg" 2>&1)"; then
               echo "$tool version command failed" >&2
               return 1
             fi
@@ -457,6 +461,41 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Set up exact .NET SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-sdk-8.0.100
+        with:
+          dotnet-version: "8.0.100"
+      - name: Set up exact JDK
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: "21.0.5"
+      - name: Assert private lifecycle toolchains
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DOTNET_ROOT" = "$RUNNER_TEMP/dotnet-sdk-8.0.100"
+          test "$(dotnet --version)" = "8.0.100"
+          assert_jdk_21() {
+            tool="$1"
+            version_arg=-version
+            if [ "$tool" = jar ]; then
+              version_arg=--version
+            fi
+            if ! output="$("$tool" "$version_arg" 2>&1)"; then
+              echo "$tool version command failed" >&2
+              return 1
+            fi
+            if ! printf '%s\n' "$output" | grep -Eq '(^|[^[:digit:]])21\.0\.5([^[:digit:]]|$)'; then
+              echo "$tool is not version 21.0.5" >&2
+              return 1
+            fi
+          }
+          assert_jdk_21 java
+          assert_jdk_21 javac
+          assert_jdk_21 jar
       - name: Run candidate lifecycle
         shell: bash
         run: |
@@ -483,7 +522,7 @@ jobs:
       OSV_SCANNER_VERSION: v2.4.0
       SEMGREP_IMAGE: semgrep/semgrep@sha256:d39aa8d8cdb7fd9e5ec14f0825e2356f902129778c9617217856295e553254d5
       REACHBENCH_DIR: internal/infrastructure/tools/ssacallgraph/testdata/reachbench
-      REACHBENCH_REPORT_DIR: ${{ github.workspace }}/.reachbench
+      REACHBENCH_REPORT_DIR: ${{ github.workspace }}/reachbench-scorecards/go
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
@@ -528,8 +567,8 @@ jobs:
           go run ./cmd/synapse-bench -mode reachability-semgrep-ce -language go -input "$REACHBENCH_REPORT_DIR/semgrep.raw.json" -output "$REACHBENCH_REPORT_DIR/semgrep-ce.json"
       - name: Gate owned engine recall and parity
         env:
-          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/.reachbench/synapse-owned.json
-          SYNAPSE_REACHBENCH_BASELINE_REPORTS: osv-scanner=${{ github.workspace }}/.reachbench/osv-scanner.json,semgrep-ce=${{ github.workspace }}/.reachbench/semgrep-ce.json
+          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/reachbench-scorecards/go/synapse-owned.json
+          SYNAPSE_REACHBENCH_BASELINE_REPORTS: osv-scanner=${{ github.workspace }}/reachbench-scorecards/go/osv-scanner.json,semgrep-ce=${{ github.workspace }}/reachbench-scorecards/go/semgrep-ce.json
         run: go test -count=1 -v -run TestGoReachabilityCorpus ./internal/infrastructure/tools/ssacallgraph
       - name: Upload Go scorecards
         id: upload
@@ -537,7 +576,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: reachability-go-scorecards-${{ needs.route.outputs.source_sha }}
-          path: ${{ github.workspace }}/.reachbench
+          path: ${{ github.workspace }}/reachbench-scorecards/go
           if-no-files-found: error
           retention-days: 14
 
@@ -549,7 +588,7 @@ jobs:
     env:
       SEMGREP_IMAGE: semgrep/semgrep@sha256:d39aa8d8cdb7fd9e5ec14f0825e2356f902129778c9617217856295e553254d5
       REACHBENCH_DIR: internal/infrastructure/tools/astwalk/testdata/reachbench
-      REACHBENCH_REPORT_DIR: ${{ github.workspace }}/.reachbench
+      REACHBENCH_REPORT_DIR: ${{ github.workspace }}/reachbench-scorecards/python
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
@@ -580,8 +619,8 @@ jobs:
       - name: Gate owned Python engine recall and parity
         env:
           CGO_ENABLED: '1'
-          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/.reachbench/synapse-owned.py.json
-          SYNAPSE_REACHBENCH_BASELINE_REPORTS: semgrep-ce=${{ github.workspace }}/.reachbench/semgrep-ce.py.json
+          SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/reachbench-scorecards/python/synapse-owned.py.json
+          SYNAPSE_REACHBENCH_BASELINE_REPORTS: semgrep-ce=${{ github.workspace }}/reachbench-scorecards/python/semgrep-ce.py.json
         run: go test -count=1 -v -run TestPythonReachabilityCorpus ./internal/infrastructure/tools/astwalk
       - name: Upload Python scorecards
         id: upload
@@ -589,7 +628,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: reachability-python-scorecards-${{ needs.route.outputs.source_sha }}
-          path: ${{ github.workspace }}/.reachbench
+          path: ${{ github.workspace }}/reachbench-scorecards/python
           if-no-files-found: error
           retention-days: 14
 

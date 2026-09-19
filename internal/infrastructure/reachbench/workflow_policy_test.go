@@ -15,6 +15,8 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 	for _, action := range []string{
 		"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
 		"actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+		"actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9",
+		"actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3",
 		"actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
 	} {
 		if !strings.Contains(workflow, action) {
@@ -35,6 +37,8 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 	for _, forbidden := range []string{
 		"continue-on-error",
 		"REACHABILITY_BENCHMARK_TRUSTED_SHA",
+		"${{ github.workspace }}/.reachbench",
+		"include-hidden-files: true",
 	} {
 		if strings.Contains(workflow, forbidden) {
 			t.Fatalf("workflow retains forbidden policy surface %q", forbidden)
@@ -62,12 +66,29 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 		"go run ./cmd/synapse-bench -mode reachability-osv",
 		"go run ./cmd/synapse-bench -mode reachability-semgrep-ce -language go",
 		"go run ./cmd/synapse-bench -mode reachability-semgrep-ce -language python",
+		"DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-sdk-8.0.100",
+		"dotnet-version: \"8.0.100\"",
+		"java-version: \"21.0.5\"",
+		"test \"$DOTNET_ROOT\" = \"$RUNNER_TEMP/dotnet-sdk-8.0.100\"",
+		"test \"$(dotnet --version)\" = \"8.0.100\"",
+		"version_arg=--version",
+		"REACHBENCH_REPORT_DIR: ${{ github.workspace }}/reachbench-scorecards/go",
+		"REACHBENCH_REPORT_DIR: ${{ github.workspace }}/reachbench-scorecards/python",
+		"path: ${{ github.workspace }}/reachbench-scorecards/go",
+		"path: ${{ github.workspace }}/reachbench-scorecards/python",
 		"TestGoReachabilityCorpus",
 		"TestPythonReachabilityCorpus",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("workflow does not provide the required benchmark path: missing %q", required)
 		}
+	}
+
+	if got := strings.Count(workflow, "version_arg=--version"); got != 2 {
+		t.Fatalf("workflow must use the supported jar version flag in both lifecycle routes: got %d probes", got)
+	}
+	if got := strings.Count(workflow, "assert_jdk_21 jar"); got != 2 {
+		t.Fatalf("workflow must assert the jar toolchain in both lifecycle routes: got %d assertions", got)
 	}
 
 	for _, required := range []string{
