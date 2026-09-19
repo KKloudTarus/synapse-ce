@@ -1,0 +1,11 @@
+{
+  "schema": "synapse-scan-perf-v1",
+  "target": "ownsbom DefaultRegistry.Generate over a pinned source tree (800 npm + 400 go.mod deps, 1200 components)",
+  "environment_digest": "env:c00294cee1639545",
+  "go_version": "go1.27.0",
+  "samples": 20,
+  "components": 1200,
+  "alloc_bytes_median": 2928760,
+  "latency_p50_millis": 5,
+  "latency_p95_millis": 6
+}
