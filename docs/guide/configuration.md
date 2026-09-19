@@ -167,7 +167,7 @@ as intact.
 | `SYNAPSE_SYFT_BIN` | `syft` | Syft executable, resolved on PATH. |
 | `SYNAPSE_GRYPE_BIN` | `grype` | Grype executable. Missing means detection degrades to the live source only. |
 | `SYNAPSE_GRYPE_DB_DIR` | (online) | Pin Grype's vulnerability database to a pre-synced directory for offline, reproducible scans. |
-| `SYNAPSE_DETECTION_SOURCES` | (default) | Comma list selecting and ordering the vulnerability detection sources from `grype`, `osv`, `advisory-store` (Synapse's own advisory corpus). Empty uses the default (`osv` unless offline, then `grype`, then `advisory-store` when `SYNAPSE_OWNED_ADVISORY`). The owned advisory store is the default primary source; Grype stays in the default set as a distro safety net until the owned-vs-Grype recall parity is gated across the distro target matrix. When set it is authoritative, so an operator can drop Grype (e.g. `osv,advisory-store`) for an Anchore-free posture. Unknown names fail closed at startup. |
+| `SYNAPSE_DETECTION_SOURCES` | (owned default) | Comma list selecting and ordering the vulnerability detection sources from `grype`, `osv`, `advisory-store` (Synapse's own advisory corpus). Empty selects the owned-only default: `osv` unless offline, then `advisory-store` when `SYNAPSE_OWNED_ADVISORY` (the default), with Grype dropped to an opt-in cross-check. Dropping Grype does not silently lower OS-package recall: the OS-distro coverage guard marks a scan not-confident when an OS-package's distro is not covered by the owned store and Grype is absent. When set it is authoritative, so an operator restores Grype with `osv,grype,advisory-store`. Unknown names fail closed at startup. |
 | `SYNAPSE_STRICT_SOURCES` | `false` | Fail closed on a detection-source error. Default degrades: a source that errors (a transient OSV.dev outage, an advisory-store read blip) is skipped with a warning and the remaining sources still run, matching how Grype self-degrades when its binary or database is absent. |
 | `SYNAPSE_SCAN_TIMEOUT` | `10m` | Per-scan timeout. 0 disables. |
 | `SYNAPSE_FINDING_MIN_SEVERITY` | `info` | Lowest severity promoted to a finding: critical, high, medium, low, info. The default promotes everything; set `high` to tighten the floor and drop medium/low/info. |
@@ -177,19 +177,23 @@ as intact.
 | `SYNAPSE_JARHASH_ONLINE_ENABLED` | `false` | Recover the coordinate of a shaded or metadata-less JAR by its SHA-1. |
 | `SYNAPSE_OSV_URL`, `SYNAPSE_OSV_BULK_URL`, `SYNAPSE_DEPSDEV_URL`, `SYNAPSE_KEV_URL`, `SYNAPSE_EPSS_URL` | (public) | Feed overrides for tests or mirrors. |
 
-### Owned SBOM producer default and rollback
+### Owned-only scanner default and rollback
 
-The shipped default SBOM producer is the owned engine: `SYNAPSE_SBOM_PRODUCER=ownsbom` produces the SBOM with Synapse's own per-ecosystem parsers (23 ecosystems, dependency-graph edges), so no third-party SBOM scanner binary is required. Syft is retained as an opt-in cross-check. The producer flip was gated on the owned engine meeting the independent oracle and pinned-competitor floors (`internal/usecase/scabench`) and Syft dependency-graph parity (`internal/infrastructure/tools/ownsbom`).
+The shipped default is the owned engine end to end, so a production deployment needs no third-party scanner binary:
 
-The owned `advisory-store` is the default primary detection source. Grype stays in the default detection set as a distro safety net: the owned-vs-Grype recall parity is gated for the debian-12 and sles-15 oracle images today, so dropping Grype's bundled Red Hat / Ubuntu-USN / Alpine-secdb distro feeds from the default is deferred until the oracle corpus is extended to those distro families. Populate the owned advisory store with `synapse-cli sync-advisories`.
+- **SBOM producer:** `SYNAPSE_SBOM_PRODUCER=ownsbom` produces the SBOM with Synapse's own per-ecosystem parsers (23 ecosystems, dependency-graph edges). Syft is retained as an opt-in cross-check. The producer flip was gated on the owned engine meeting the independent oracle and pinned-competitor floors (`internal/usecase/scabench`) and Syft dependency-graph parity (`internal/infrastructure/tools/ownsbom`).
+- **Detection sources:** live OSV (unless offline) plus the owned `advisory-store`, with Grype dropped to an opt-in cross-check. Offline, the default is the owned advisory store alone.
 
-To roll back the producer to Syft:
+Dropping Grype does not silently lower OS-package recall. The OS-distro coverage guard marks a scan not-confident (and, under `SYNAPSE_STRICT_SOURCES`, aborts) when an OS-package's distro ecosystem is not covered by the owned advisory store and Grype is not in the detection set, so an unsynced distro feed surfaces as a gap rather than a false clean posture. Sync the owned distro feeds before relying on the owned-only posture for OS packages: `synapse-cli sync-advisories --remote-distros` (plus `--oval` / `--csaf` for the OVAL and CSAF distro feeds), and `synapse-cli sync-advisories` for the app-ecosystem advisories.
+
+To roll back to the previous Syft plus Grype behavior, set both:
 
 ```bash
 export SYNAPSE_SBOM_PRODUCER=syft
+export SYNAPSE_DETECTION_SOURCES=osv,grype,advisory-store
 ```
 
-This restores the pinned Syft producer; it is exercised by `TestLoadSBOMProducer`. To run an Anchore-free posture that drops Grype today, set `SYNAPSE_DETECTION_SOURCES=osv,advisory-store` (the owned store must be populated first).
+The producer rollback is exercised by `TestLoadSBOMProducer`, and the detection rollback by the `rollback: explicit list restores grype` case in `TestResolveDetectionSourceNames`.
 
 ## Extra scanners and detection tuning (opt-in)
 

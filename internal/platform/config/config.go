@@ -94,12 +94,12 @@ type Config struct {
 	// build. Empty = Grype's default (online).
 	GrypeDBDir string
 	// DetectionSources selects and orders the scan-time vulnerability detection sources as a comma
-	// list from {grype, osv, advisory-store}. Empty uses the default (osv unless SYNAPSE_OFFLINE, then
-	// grype, then advisory-store when SYNAPSE_OWNED_ADVISORY, the default). The owned advisory-store is
-	// the default primary source; Grype stays in the default set as a distro safety net until the
-	// owned-vs-Grype recall parity is gated across the distro target matrix. When set it is authoritative,
-	// so an operator can drop grype (e.g. "osv,advisory-store") for an Anchore-free posture. Unknown names
-	// fail closed.
+	// list from {grype, osv, advisory-store}. Empty selects the owned-only default: live OSV (unless
+	// SYNAPSE_OFFLINE) then the owned advisory-store (when SYNAPSE_OWNED_ADVISORY, the default), with Grype
+	// dropped to an opt-in cross-check. Dropping Grype does not silently lower OS-package recall: the SCA
+	// pipeline's OS-distro coverage guard marks a scan not-confident when an OS-package's distro is not
+	// covered by the owned advisory store and Grype is absent. When set this var is authoritative, so an
+	// operator restores Grype with "osv,grype,advisory-store". Unknown names fail closed.
 	DetectionSources string
 	// StrictSources, when true, restores fail-closed detection: any source error aborts the scan.
 	// Default false: a source that errors (a transient OSV.dev outage, an advisory-store read blip)
@@ -554,9 +554,10 @@ type Config struct {
 	ImageRootFSEnabled bool
 	// OwnedAdvisoryEnabled wires the owned advisory DetectionSource: match the SBOM
 	// against the owned normalized-advisory store (offline, reproducible). ON by default (it is the default
-	// primary vulnerability source, alongside live OSV and Grype in the default detection set). An empty
-	// store yields no findings (a harmless no-op) until the advisory ingester populates it, so a deployment
-	// that has not synced advisories still relies on OSV/Grype in SYNAPSE_DETECTION_SOURCES.
+	// primary vulnerability source, with live OSV as online enrichment and Grype an opt-in cross-check). An
+	// empty store yields no findings (a harmless no-op) until the advisory ingester populates it; the
+	// OS-distro coverage guard flags an OS package whose distro the store does not cover, so an unsynced
+	// distro feed is a surfaced not-confident gap rather than a silent clean posture.
 	OwnedAdvisoryEnabled bool
 	// SymbolOverlayDir points at a directory of curated advisory-id -> affected-symbol JSON files. The owned
 	// advisory matcher merges these symbols onto findings so advisories whose feed carries none (non-Go,

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,9 +32,25 @@ func NewAdvisoryStore() *AdvisoryStore {
 var (
 	_ ports.AdvisoryStore           = (*AdvisoryStore)(nil)
 	_ ports.AdvisoryWriter          = (*AdvisoryStore)(nil) // the ingester loads via the narrow writer port
-	_ ports.AdvisoryAliasStore      = (*AdvisoryStore)(nil)
-	_ ports.AdvisoryCorpusFreshness = (*AdvisoryStore)(nil) // so the owned source's readiness/provenance marker is non-empty when populated
+	_ ports.AdvisoryAliasStore        = (*AdvisoryStore)(nil)
+	_ ports.AdvisoryCorpusFreshness   = (*AdvisoryStore)(nil) // so the owned source's readiness/provenance marker is non-empty when populated
+	_ ports.AdvisoryEcosystemCoverage = (*AdvisoryStore)(nil) // so the readiness guard can tell a covered distro from a gap
 )
+
+// CoveredEcosystems returns the distinct ecosystems this store has any affected-package index entry for, so
+// the readiness guard can distinguish a genuinely-covered distro from a silent gap. The index keys are
+// "ecosystem\x00package", so the ecosystem is the prefix before the NUL separator.
+func (s *AdvisoryStore) CoveredEcosystems(_ context.Context) (map[string]bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := map[string]bool{}
+	for k := range s.byKey {
+		if i := strings.IndexByte(k, 0); i >= 0 {
+			out[k[:i]] = true
+		}
+	}
+	return out, nil
+}
 
 // AdvisoryFreshness reports the corpus size and a freshness timestamp, so the owned detection source's
 // provenance marker (and thus the pipeline's detection-readiness guard) is non-empty when this in-memory

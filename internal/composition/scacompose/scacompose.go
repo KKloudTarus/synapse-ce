@@ -270,14 +270,15 @@ func ResolveDetectionSources(cfg config.Config, c DetectionCandidates, log *slog
 }
 
 // resolveDetectionSourceNames turns SYNAPSE_DETECTION_SOURCES into an ordered source list. When the
-// var is set it is authoritative (lowercased, comma-split, blanks dropped). When empty it uses the
-// default: live OSV first (unless SYNAPSE_OFFLINE), then Grype, then the owned advisory store when
-// SYNAPSE_OWNED_ADVISORY is on (the default). Grype stays in the default detection set as a distro
-// safety net: the owned advisory store is the default primary source, but the owned-vs-Grype recall
-// parity is gated only for the debian-12 and sles-15 oracle images today (#1035), so dropping Grype's
-// bundled Red Hat / Ubuntu-USN / Alpine-secdb distro feeds from the default is deferred to a follow-up
-// gated on extending the oracle corpus to those distro families. An operator can already drop Grype
-// explicitly (SYNAPSE_DETECTION_SOURCES=osv,advisory-store) for an Anchore-free posture.
+// var is set it is authoritative (lowercased, comma-split, blanks dropped). When empty it selects the
+// owned-only default (EPIC #1034, #1037): live OSV first (unless SYNAPSE_OFFLINE), then the owned advisory
+// store when SYNAPSE_OWNED_ADVISORY is on (the default), with Grype dropped to an opt-in cross-check. Dropping
+// Grype no longer silently lowers OS-package recall: the SCA pipeline's OS-distro coverage guard
+// (osDistroCoverageReadiness) marks a scan not-confident when an OS-package's distro ecosystem is not covered
+// by the owned advisory store and Grype is absent, so an unsynced distro feed reads as a surfaced gap rather
+// than a false clean posture. An operator restores Grype by listing it explicitly
+// (SYNAPSE_DETECTION_SOURCES=osv,grype,advisory-store). Offline with the owned advisory store disabled resolves
+// to no sources, which fails closed in ResolveDetectionSources.
 func resolveDetectionSourceNames(cfg config.Config) ([]string, error) {
 	if raw := strings.TrimSpace(cfg.DetectionSources); raw != "" {
 		out := make([]string, 0, 4)
@@ -291,11 +292,10 @@ func resolveDetectionSourceNames(cfg config.Config) ([]string, error) {
 		}
 		return out, nil
 	}
-	names := make([]string, 0, 3)
+	names := make([]string, 0, 2)
 	if !cfg.Offline {
 		names = append(names, "osv")
 	}
-	names = append(names, "grype")
 	if cfg.OwnedAdvisoryEnabled {
 		names = append(names, "advisory-store")
 	}

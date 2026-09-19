@@ -1886,6 +1886,17 @@ type AdvisoryCorpusFreshness interface {
 	AdvisoryFreshness(ctx context.Context) (latest time.Time, count int, err error)
 }
 
+// AdvisoryEcosystemCoverage is an OPTIONAL capability of an AdvisoryStore: it reports the distinct set of
+// ecosystems the owned corpus has ANY advisory for. The detection-readiness guard uses it to tell whether an
+// OS-package component's distro ecosystem (e.g. "Alpine:v3.19", "Red Hat:9") is actually covered by the owned
+// store or is a silent gap, so that dropping Grype from the default detection set never turns an unsynced
+// distro feed into a false clean OS posture. It is a single DISTINCT lookup, run once per scan, not a
+// per-package query. A store that cannot report it (file) does not implement it, and the guard falls back to
+// the coarse any-source-has-data readiness check.
+type AdvisoryEcosystemCoverage interface {
+	CoveredEcosystems(ctx context.Context) (map[string]bool, error)
+}
+
 // AdvisoryAliasStore is an OPTIONAL capability of an AdvisoryStore: it returns the alias edges (alias id ->
 // canonical id) for the advisories touching a set of ids, so correlation can resolve the transitive alias
 // closure of a scan's findings and merge two findings that are the same vulnerability under non-overlapping

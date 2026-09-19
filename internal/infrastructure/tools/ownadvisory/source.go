@@ -68,6 +68,23 @@ func (s *Source) Provenance() (version, dbVersion string) {
 	return "", s.provDB
 }
 
+// CoveredEcosystems reports the distinct ecosystems the owned advisory store has any advisory for, so the SCA
+// detection-readiness guard can tell whether an OS-package's distro is genuinely covered by the owned corpus
+// or is a silent gap (the check that lets Grype leave the default detection set without turning an unsynced
+// distro feed into a false clean posture). ok is false when the backing store cannot report coverage (the
+// file store), so the guard falls back to its coarse any-source-has-data check.
+func (s *Source) CoveredEcosystems(ctx context.Context) (covered map[string]bool, ok bool, err error) {
+	c, capable := s.store.(ports.AdvisoryEcosystemCoverage)
+	if !capable {
+		return nil, false, nil
+	}
+	covered, err = c.CoveredEcosystems(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	return covered, true, nil
+}
+
 // captureFreshness queries the store's corpus freshness (if it supports it) and records the marker. A store
 // that does not implement the capability, an error, or an empty corpus leaves the marker empty (no false
 // freshness). It runs once per Scan; the query is a single indexed MAX/COUNT, cheap on the scan path.

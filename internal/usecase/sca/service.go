@@ -526,6 +526,169 @@ func applyDetectionReadiness(result *ScanResult, warning string, incomplete bool
 	result.SourceWarnings = append(result.SourceWarnings, warning)
 }
 
+// ecosystemCoverageReporter is an owned detection source that can report which ecosystems its corpus covers.
+// The owned advisory store source implements it; Grype and OSV do not.
+type ecosystemCoverageReporter interface {
+	CoveredEcosystems(ctx context.Context) (covered map[string]bool, ok bool, err error)
+}
+
+// osDistroCoverageReadiness is the OS-package distro-coverage guard behind the owned-only detection default.
+// Grype ships bundled Red Hat / Ubuntu-USN / Alpine-secdb distro databases, so with Grype in the source set an
+// OS-package's distro is assumed covered (matching the coarse readiness assumption) and this is a no-op. With
+// Grype dropped (the owned-only posture), an OS-package whose distro the owned advisory store cannot match is a
+// silent coverage gap: a zero-vulnerability result would read as a clean OS posture on a distro whose feed was
+// never synced. This marks such a distro not-confident (and, under strict sources, an error) in three cases:
+// no owned advisory-store source is wired at all (osv-only, so nothing matched the OS packages, since OSV skips
+// OS-distro PURLs); a mapped distro the owned store holds no advisory for; and an unmapped distro (no
+// advisory-matchable key). Language-ecosystem coverage is unaffected (OSV plus the owned store). "covered"
+// here is PRESENCE (the corpus holds at least one advisory for the ecosystem), not feed completeness, matching
+// the coarse readiness model: a partially-synced distro is treated as covered, so this guards against a
+// missing feed, not a partial one. It is a no-op when Grype is present, when the owned store is wired but
+// cannot report coverage (the dev/test file store), or when every OS distro present is covered.
+func (s *Service) osDistroCoverageReadiness(ctx context.Context, doc *sbom.SBOM) (warning string, incomplete bool, err error) {
+	if doc == nil || len(doc.Components) == 0 {
+		return "", false, nil
+	}
+	var reporter ecosystemCoverageReporter
+	for _, src := range s.sources {
+		if src == nil {
+			continue
+		}
+		if src.Name() == "grype" {
+			return "", false, nil // Grype assumed to carry the distro DBs; guard is owned-only
+		}
+		if r, ok := src.(ecosystemCoverageReporter); ok {
+			reporter = r
+		}
+	}
+	// OS-package distros present in this SBOM. A mapped distro (Alpine:v3.19, Red Hat:9) is checked against the
+	// owned store's coverage; an unmapped distro (DistroEcosystem returned "": CentOS Stream, a package with
+	// no os-release) has NO advisory-matchable key, so in the owned-only posture it is never covered and is
+	// flagged directly (labeled by its distro qualifier).
+	osDistros := map[string]bool{}
+	unmapped := map[string]bool{}
+	for _, c := range doc.Components {
+		if !isOSPackagePURL(c.PURL) {
+			continue
+		}
+		if eco := sbom.IdentityFromComponent(c).Ecosystem; eco != "" {
+			osDistros[eco] = true
+		} else if q := purlDistroQualifier(c.PURL); q != "" {
+			unmapped["unmapped distro "+q] = true
+		} else {
+			unmapped["unmapped distro (no os-release)"] = true
+		}
+	}
+	if len(osDistros) == 0 && len(unmapped) == 0 {
+		return "", false, nil // no OS packages: nothing to guard
+	}
+	// No owned advisory-store source AND no Grype (the loop above did not return): nothing matched these OS
+	// packages at all (OSV skips OS-distro PURLs), so every OS distro present is an uncovered gap. This is the
+	// owned-advisory-disabled / osv-only posture.
+	if reporter == nil {
+		return osDistroCoverageWarning(s.strictSources, union(osDistros, unmapped))
+	}
+	covered, ok, cerr := reporter.CoveredEcosystems(ctx)
+	if cerr != nil {
+		return "", false, fmt.Errorf("os distro coverage readiness: %w", cerr)
+	}
+	if !ok {
+		// The owned advisory store is wired and ran matching but cannot report its coverage (the dev/test file
+		// store). The coarse readiness guard still catches a truly-empty store, so this is a tolerable no-op.
+		return "", false, nil
+	}
+	gaps := map[string]bool{}
+	for eco := range osDistros {
+		// covered means the corpus holds at least one advisory for the ecosystem (presence, not feed
+		// completeness); a partially-synced distro is treated as covered, matching the coarse readiness model.
+		if !covered[eco] {
+			gaps[eco] = true
+		}
+	}
+	for u := range unmapped {
+		gaps[u] = true // an unmapped distro has no key the owned store could ever cover
+	}
+	if len(gaps) == 0 {
+		return "", false, nil
+	}
+	return osDistroCoverageWarning(s.strictSources, gaps)
+}
+
+// union merges two string sets into a new set.
+func union(a, b map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(a)+len(b))
+	for k := range a {
+		out[k] = true
+	}
+	for k := range b {
+		out[k] = true
+	}
+	return out
+}
+
+// purlDistroQualifier returns the "distro=" qualifier of a PURL (e.g. "centos-9"), or "" when absent.
+func purlDistroQualifier(purl string) string {
+	i := strings.IndexByte(purl, '?')
+	if i < 0 {
+		return ""
+	}
+	for _, kv := range strings.Split(purl[i+1:], "&") {
+		if v, ok := strings.CutPrefix(kv, "distro="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// osDistroCoverageWarning builds the not-confident verdict naming the uncovered OS distros.
+func osDistroCoverageWarning(strict bool, distros map[string]bool) (string, bool, error) {
+	names := make([]string, 0, len(distros))
+	for eco := range distros {
+		names = append(names, eco)
+	}
+	sort.Strings(names)
+	w := fmt.Sprintf("owned-only detection but no configured source covers OS distro(s) %s (the owned advisory store has no advisories for them and Grype is not in the detection set): their OS packages matched NO advisories and a zero-vulnerability result for them is NOT a clean bill. Sync those distro feeds (synapse-cli sync-advisories --remote-distros / --oval / --csaf) or add grype to SYNAPSE_DETECTION_SOURCES, then re-scan", strings.Join(names, ", "))
+	if strict {
+		return w, true, fmt.Errorf("os distro coverage readiness: %s", w)
+	}
+	return w, true, nil
+}
+
+// isOSPackagePURL reports whether a component PURL is an OS-package (deb/apk/rpm), whose distro ecosystem is
+// the Grype-specialized coverage this guard checks. The type is lowercased, matching PURL canonicalization.
+func isOSPackagePURL(purl string) bool {
+	p := strings.ToLower(purl)
+	return strings.HasPrefix(p, "pkg:deb/") || strings.HasPrefix(p, "pkg:apk/") || strings.HasPrefix(p, "pkg:rpm/")
+}
+
+// detectionReadinessAll runs both readiness guards captured once from the just-finished scan: the coarse
+// no-usable-DB check and the owned-only OS-distro coverage check. It combines them so the snapshot carried to
+// the completeness site reflects either signal; under strict sources either guard's error aborts the scan.
+func (s *Service) detectionReadinessAll(ctx context.Context, doc *sbom.SBOM) (warning string, incomplete bool, err error) {
+	hasComponents := doc != nil && len(doc.Components) > 0
+	baseWarn, baseIncomplete, baseErr := s.detectionReadiness(hasComponents)
+	if baseErr != nil {
+		return baseWarn, true, baseErr
+	}
+	distroWarn, distroIncomplete, distroErr := s.osDistroCoverageReadiness(ctx, doc)
+	if distroErr != nil {
+		return joinReadinessWarnings(baseWarn, distroWarn), true, distroErr
+	}
+	return joinReadinessWarnings(baseWarn, distroWarn), baseIncomplete || distroIncomplete, nil
+}
+
+// joinReadinessWarnings concatenates two readiness warnings, dropping the empties.
+func joinReadinessWarnings(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + "; " + b
+	}
+}
+
 // SetDetectionPriority sets the server-level default detection priority (comprehensive|precise) applied
 // when a scan request does not specify one – so a server-configured SYNAPSE_DETECTION_PRIORITY reaches
 // the API scan path, which has no per-request priority field. Empty leaves the comprehensive default.
@@ -2484,7 +2647,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		// result; non-strict carries the snapshot to the completeness site (applyDetectionReadiness) so a
 		// concurrent advisory sync cannot flip the verdict between the scan and result build.
 		var readyErr error
-		detectionReadinessWarn, detectionReadinessIncomplete, readyErr = s.detectionReadiness(len(doc.Components) > 0)
+		detectionReadinessWarn, detectionReadinessIncomplete, readyErr = s.detectionReadinessAll(ctx, doc)
 		if readyErr != nil {
 			return nil, readyErr
 		}
@@ -3241,7 +3404,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		// result; non-strict carries the snapshot to the completeness site (applyDetectionReadiness) so a
 		// concurrent advisory sync cannot flip the verdict between the scan and result build.
 		var readyErr error
-		detectionReadinessWarn, detectionReadinessIncomplete, readyErr = s.detectionReadiness(len(doc.Components) > 0)
+		detectionReadinessWarn, detectionReadinessIncomplete, readyErr = s.detectionReadinessAll(ctx, doc)
 		if readyErr != nil {
 			return nil, readyErr
 		}

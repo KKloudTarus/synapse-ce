@@ -24,6 +24,7 @@ type AdvisoryRepository struct{ pool *pgxpool.Pool }
 
 var _ ports.AdvisoryCorpusFreshness = (*AdvisoryRepository)(nil)
 var _ ports.AdvisoryAliasStore = (*AdvisoryRepository)(nil)
+var _ ports.AdvisoryEcosystemCoverage = (*AdvisoryRepository)(nil)
 
 // AdvisoryFreshness reports the newest advisory timestamp and the corpus row count so a scan can warn when
 // the owned advisory store is stale. Advisories are global reference data (not tenant-scoped), so the query
@@ -38,6 +39,29 @@ func (r *AdvisoryRepository) AdvisoryFreshness(ctx context.Context) (time.Time, 
 		return time.Time{}, 0, nil // empty corpus: no meaningful date
 	}
 	return latest, count, nil
+}
+
+// CoveredEcosystems returns the distinct ecosystems the corpus has any affected-package row for, so the
+// readiness guard can tell a genuinely-covered distro from a silent gap. One DISTINCT scan of the
+// advisory_affects index, run once per scan.
+func (r *AdvisoryRepository) CoveredEcosystems(ctx context.Context) (map[string]bool, error) {
+	rows, err := r.pool.Query(ctx, `SELECT DISTINCT ecosystem FROM advisory_affects`)
+	if err != nil {
+		return nil, fmt.Errorf("advisory covered ecosystems: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var eco string
+		if err := rows.Scan(&eco); err != nil {
+			return nil, fmt.Errorf("advisory covered ecosystems scan: %w", err)
+		}
+		out[eco] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("advisory covered ecosystems rows: %w", err)
+	}
+	return out, nil
 }
 
 // NewAdvisoryRepository returns a repository backed by the given pool.
