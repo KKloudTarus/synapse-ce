@@ -32,6 +32,35 @@ func TestAdvisoryMatch(t *testing.T) {
 	}
 }
 
+// TestCentOS7RHELApproximationMatch proves the #1037 CentOS-Linux-7-to-RHEL-7 approximation end to end at the
+// domain layer: a CentOS 7 base package is keyed to the "Red Hat:7" ecosystem (see sbom.DistroEcosystem), so a
+// RHEL 7 advisory range matches it exactly like a native RHEL 7 package, and the native rpmvercmp ordering of
+// CentOS's ".el7.centos" dist tag against RHEL's ".el7_N" erratum drives the affected/fixed decision.
+func TestCentOS7RHELApproximationMatch(t *testing.T) {
+	adv := Advisory{
+		ID: "CVE-2022-0778",
+		Affected: []AffectedPackage{{
+			Ecosystem:    "Red Hat:7",
+			Package:      "openssl",
+			Ranges:       []Range{{Type: "ECOSYSTEM", Events: []Event{{Introduced: "0"}, {Fixed: "1.0.2k-19.el7_9"}}}},
+			FixedVersion: "1.0.2k-19.el7_9",
+		}},
+	}
+	// A CentOS 7 base package below the RHEL erratum fix (.el7.centos is older than .el7_9) is affected.
+	if ok, fixed := adv.Match("Red Hat:7", "openssl", "1.0.2k-16.el7.centos"); !ok || fixed != "1.0.2k-19.el7_9" {
+		t.Errorf("below-fix CentOS 7 package must match with fixed 1.0.2k-19.el7_9; got ok=%v fixed=%q", ok, fixed)
+	}
+	// A CentOS 7 rebuild of the erratum (extra .centos segment, so NEWER than the RHEL fix) is not affected.
+	if ok, _ := adv.Match("Red Hat:7", "openssl", "1.0.2k-19.el7_9.centos"); ok {
+		t.Error("a CentOS 7 rebuild at/after the RHEL erratum fix must not match")
+	}
+	// A package absent from the RHEL advisory (an EPEL-only name) produces no match, so EPEL packages on a
+	// CentOS 7 host are not falsely flagged (RHEL and EPEL keep disjoint namespaces).
+	if ok, _ := adv.Match("Red Hat:7", "htop", "3.0.5-1.el7"); ok {
+		t.Error("an EPEL-only package name absent from the RHEL advisory must not match")
+	}
+}
+
 // TestMatchDetailsSymbolsAreVersionScoped guards the P0 soundness fix: OSV allows the same package in several
 // affected[] blocks with different version ranges, each carrying its own symbols. MatchDetails must attach a
 // finding ONLY the symbols of the block(s) that actually match the version, so a version-1.x finding never
