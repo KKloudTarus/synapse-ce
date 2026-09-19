@@ -1,0 +1,7 @@
+{
+  "recall": {
+    "CWE-79": 0.60,
+    "CWE-89": 0.70
+  },
+  "precision_tripwire": 0.30
+}

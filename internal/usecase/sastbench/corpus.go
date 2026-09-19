@@ -14,7 +14,9 @@ package sastbench
 // separate report produced by feeding this scorer only the confirmed detections.
 
 import (
+	"bytes"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -23,6 +25,30 @@ import (
 	"strconv"
 	"strings"
 )
+
+//go:embed securibench-floors.json
+var securibenchFloorsJSON []byte
+
+// LoadCWEFloors decodes a per-CWE ratchet floors document.
+func LoadCWEFloors(r io.Reader) (CWEFloors, error) {
+	var f CWEFloors
+	dec := json.NewDecoder(r)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&f); err != nil {
+		return CWEFloors{}, fmt.Errorf("decode cwe floors: %w", err)
+	}
+	return f, nil
+}
+
+// DefaultSecuribenchFloors returns the checked-in Securibench Micro recall ratchet, calibrated from a real
+// run of the owned engine over the pinned corpus.
+func DefaultSecuribenchFloors() CWEFloors {
+	f, err := LoadCWEFloors(bytes.NewReader(securibenchFloorsJSON))
+	if err != nil {
+		panic("sastbench: embedded securibench floors are invalid: " + err.Error())
+	}
+	return f
+}
 
 const (
 	// CorpusSchemaVersion and ReportSchemaVersion tag the serialized corpus answer key and the scorecard so a
