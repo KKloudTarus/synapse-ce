@@ -58,20 +58,32 @@ type dynamicConstruct struct {
 
 // scanAccumulator collects one scan's observations.
 type scanAccumulator struct {
-	packages    map[string]bool
-	entrypoints []string
-	reasons     map[string]bool
-	files       int
-	sourceBytes int64
+	packages            map[string]bool
+	conditionalPackages map[string]bool
+	entrypoints         []string
+	reasons             map[string]bool
+	files               int
+	sourceBytes         int64
 }
 
 func newScanAccumulator() *scanAccumulator {
-	return &scanAccumulator{packages: map[string]bool{}, reasons: map[string]bool{}}
+	return &scanAccumulator{
+		packages:            map[string]bool{},
+		conditionalPackages: map[string]bool{},
+		reasons:             map[string]bool{},
+	}
 }
 
 func (a *scanAccumulator) addPackage(name string) {
 	if trimmed := strings.ToLower(strings.TrimSpace(name)); trimmed != "" {
 		a.packages[trimmed] = true
+	}
+}
+
+func (a *scanAccumulator) addConditionalPackage(name string) {
+	if trimmed := strings.ToLower(strings.TrimSpace(name)); trimmed != "" {
+		a.packages[trimmed] = true
+		a.conditionalPackages[trimmed] = true
 	}
 }
 
@@ -99,6 +111,12 @@ func (a *scanAccumulator) graph() ports.SourceImportGraph {
 	}
 	sort.Strings(packages)
 
+	conditionalPackages := make([]string, 0, len(a.conditionalPackages))
+	for name := range a.conditionalPackages {
+		conditionalPackages = append(conditionalPackages, name)
+	}
+	sort.Strings(conditionalPackages)
+
 	reasons := make([]string, 0, len(a.reasons))
 	for reason := range a.reasons {
 		reasons = append(reasons, reason)
@@ -115,10 +133,11 @@ func (a *scanAccumulator) graph() ports.SourceImportGraph {
 
 	entrypoints := normalizeNames(a.entrypoints)
 	return ports.SourceImportGraph{
-		ImportedPackages: packages,
-		Entrypoints:      entrypoints,
-		CoverageReasons:  reasons,
-		FilesScanned:     a.files,
+		ImportedPackages:    packages,
+		ConditionalPackages: conditionalPackages,
+		Entrypoints:         entrypoints,
+		CoverageReasons:     reasons,
+		FilesScanned:        a.files,
 	}
 }
 

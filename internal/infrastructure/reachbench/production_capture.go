@@ -441,7 +441,7 @@ func outcomeFromRecordedAnalysis(coverage measurement.ObservedCoverage, analysis
 			if !result.Reachable {
 				continue
 			}
-			if analysisHasUnknownPath(analysis) {
+			if coverage.Status == measurement.CoveragePartial || analysisHasUnknownPath(analysis) {
 				return measurement.OutcomeConditionallyReachable
 			}
 			return measurement.OutcomeReachable
@@ -516,7 +516,7 @@ func partialCoverage(reason measurement.CoverageReasonCode) measurement.Observed
 }
 
 func runGoSourceTier2(ctx context.Context, capture *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
-	subjects := symbolSubjects(resolved)
+	subjects := goSourceTier2Subjects(resolved)
 	executed, err := runStatic(ctx, fixture, resolved, lifecycle, coverageRequiresEntrypointAuthority, subjects,
 		func() (staticAnalyzer, error) {
 			return reachability.NewService(taintcallgraph.New(capture.callGraphBinary))
@@ -671,6 +671,22 @@ func runSymbolAnalyzer(ctx context.Context, fixture MaterializedFixture, resolve
 	)
 }
 
+func goSourceTier2Subjects(resolved measurement.ResolvedFixtureSubject) []ports.ReachabilitySubject {
+	subjects := symbolSubjects(resolved)
+	if len(subjects) != 1 || len(subjects[0].Symbols) != 1 {
+		return subjects
+	}
+	packagePath := strings.TrimSpace(resolved.Subject.PackageIdentity)
+	if packagePath == "" || strings.IndexFunc(packagePath, unicode.IsSpace) >= 0 {
+		return nil
+	}
+	symbol := strings.TrimSpace(subjects[0].Symbols[0])
+	if !strings.HasPrefix(symbol, packagePath+".") {
+		subjects[0].Symbols[0] = packagePath + "." + symbol
+	}
+	return subjects
+}
+
 func symbolSubjects(resolved measurement.ResolvedFixtureSubject) []ports.ReachabilitySubject {
 	if resolved.Subject.Locator.Kind == measurement.FixtureLocatorManifestCapability {
 		return nil
@@ -688,6 +704,9 @@ func symbolSubjects(resolved measurement.ResolvedFixtureSubject) []ports.Reachab
 }
 
 func importSubjects(resolved measurement.ResolvedFixtureSubject, wantType string) ([]ports.ReachabilitySubject, error) {
+	if resolved.Subject.Locator.Kind == measurement.FixtureLocatorManifestCapability {
+		return nil, nil
+	}
 	name, kind, canonical, ok := parseFrozenPURL(resolved.Subject.ID)
 	if !ok || kind != wantType {
 		return nil, fmt.Errorf("fixture subject %q is not an exact %s package URL", resolved.Subject.ID, wantType)
@@ -798,6 +817,9 @@ func runJavaScriptImport(ctx context.Context, _ *ProductionCapture, fixture Mate
 	if err != nil {
 		return execution{}, err
 	}
+	if len(subjects) == 0 {
+		return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonUnsupported)}, nil
+	}
 	analyzer, err := jsreach.New(jsimports.New(), jsresolve.NewResolver(), fixtureSBOMProvider{components: []sbom.Component{{Name: subjects[0].Symbols[0], Version: "benchmark-v1", PURL: subjects[0].PackagePURL}}})
 	if err != nil {
 		return execution{}, err
@@ -893,11 +915,7 @@ func runJVMCoarse(ctx context.Context, _ *ProductionCapture, fixture Materialize
 		return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonUnsupported), detail: "jvm-coarse"}, nil
 	}
 	components := []sbom.Component{{PURL: resolved.Subject.ID, Name: resolved.Subject.PackageIdentity}}
-	analysisRoot, rootErr := fixture.AnalysisRoot()
-	if rootErr != nil {
-		return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonFailed), analyzerError: fmt.Errorf("derive JVM coarse fixture root: %w", rootErr), detail: "jvm-coarse"}, nil
-	}
-	_, err := jvmreach.New().Analyze(ctx, analysisRoot, components)
+	_, err := jvmreach.New().Analyze(ctx, fixture.Root, components)
 	if err != nil {
 		return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonFailed), analyzerError: err, detail: "jvm-coarse"}, nil
 	}
@@ -943,10 +961,6 @@ func runJVMTier2(ctx context.Context, capture *ProductionCapture, fixture Materi
 	if _, kind, _, ok := parseFrozenPURL(resolved.Subject.ID); !ok || kind != "maven" {
 		return execution{}, fmt.Errorf("JVM fixture subject %q is not an exact Maven package URL", resolved.Subject.ID)
 	}
-	analysisRoot, rootErr := fixture.AnalysisRoot()
-	if rootErr != nil {
-		return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonFailed), analyzerError: fmt.Errorf("derive JVM tier-2 fixture root: %w", rootErr), detail: "jvm-tier2"}, nil
-	}
 	recording := &recordingAnalyzer{delegate: jvmreach.NewTier2(capture.jvmPointsTo), materializedRoot: fixture.Root}
 	coordinator, err := reachproof.NewJVMTier2Coordinator(recording, lifecycle.judgments, lifecycle.audit, lifecycle.clock)
 	if err != nil {
@@ -955,7 +969,7 @@ func runJVMTier2(ctx context.Context, capture *ProductionCapture, fixture Materi
 	subjects := []ports.ReachabilitySubject{{
 		FindingID: shared.ID(resolved.Subject.ID), PackagePURL: resolved.Subject.ID, Symbols: []string{resolved.Subject.Locator.Symbol},
 	}}
-	_, recordErr := coordinator.Record(ctx, productionCaptureEngagementID, analysisRoot, subjects)
+	_, recordErr := coordinator.Record(ctx, productionCaptureEngagementID, fixture.Root, subjects)
 	if recordErr != nil {
 		if recording.err != nil {
 			return execution{invoked: true, coverage: unavailableCoverage(measurement.CoverageReasonFailed), analyzer: recording, analyzerError: recording.err, subjects: cloneReachabilitySubjects(subjects), detail: "jvm-tier2"}, nil
@@ -1177,14 +1191,18 @@ func (capture *ProductionCapture) observation(ctx context.Context, request Captu
 	}
 	switch claim.Reachable {
 	case judgment.Reachable:
-		if executed.analyzer != nil && analysisHasUnknownPath(executed.analyzer.result) {
+		if observation.Coverage.Status == measurement.CoveragePartial ||
+			(executed.analyzer != nil && analysisHasUnknownPath(executed.analyzer.result)) {
 			observation.Outcome = measurement.OutcomeConditionallyReachable
-			observation.Coverage = partialCoverage(measurement.CoverageReasonOpaque)
 		} else {
 			observation.Outcome = measurement.OutcomeReachable
 		}
 	case judgment.NotReachable:
-		observation.Outcome = measurement.OutcomePresentUnreached
+		if observation.Coverage.Status == measurement.CoveragePartial {
+			observation.Outcome = measurement.OutcomeConditionallyReachable
+		} else {
+			observation.Outcome = measurement.OutcomePresentUnreached
+		}
 	default:
 		observation.Outcome = measurement.OutcomeNoAnalysis
 	}

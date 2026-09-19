@@ -82,7 +82,11 @@ func TestBuildAwareUsesRealNamespaces(t *testing.T) {
 }
 
 func TestBuildAwareResolvedReflectionIsAffirmativeAndLeavesDisjointNegativeDecidable(t *testing.T) {
-	scanner := fakeScanner{graph: ports.SourceImportGraph{ImportedPackages: []string{"reachbench.dynamic"}, FilesScanned: 1}}
+	scanner := fakeScanner{graph: ports.SourceImportGraph{
+		ImportedPackages:    []string{"reachbench.dynamic"},
+		ConditionalPackages: []string{"reachbench.dynamic"},
+		FilesScanned:        1,
+	}}
 	data := fakeData{present: true, pkgs: map[string]ports.NuGetPackageNamespaces{
 		"reachbench.dynamic": {Namespaces: []string{"reachbench.dynamic"}, Complete: true},
 		"reachbench.unused":  {Namespaces: []string{"reachbench.unused"}, Complete: true},
@@ -94,6 +98,13 @@ func TestBuildAwareResolvedReflectionIsAffirmativeAndLeavesDisjointNegativeDecid
 	}
 	if got["reachbench.unused"] {
 		t.Fatal("a disjoint package remains decidably not-reachable")
+	}
+	analysis, err := a.Analyze(context.Background(), "/fixture", []string{"reachbench.dynamic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(analysis.Results) != 1 || len(analysis.Results[0].BlindConstructs) != 1 {
+		t.Fatalf("resolved reflection result must remain conditional: %#v", analysis.Results)
 	}
 }
 

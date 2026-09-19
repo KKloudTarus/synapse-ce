@@ -117,6 +117,7 @@ func (s *Service) Analyze(ctx context.Context, targetRef string, symbols []strin
 			r.Reachable = true
 			r.Path = g.PathTo(sym) // the proof chain for the human-facing reachability judgment
 		}
+		r.BlindConstructs = append([]string(nil), g.BlindSymbols[sym]...)
 		out = append(out, r)
 	}
 	return &Analysis{Results: out, Entrypoints: g.Entrypoints, BlindConstructs: g.BlindConstructs}, nil

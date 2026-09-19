@@ -127,6 +127,28 @@ func TestAnalyzePropagatesBlindConstructs(t *testing.T) {
 	}
 }
 
+func TestAnalyzeScopesBlindConstructsToSymbol(t *testing.T) {
+	g := &callgraph.Graph{
+		Entrypoints:  []string{"app.main"},
+		Edges:        []callgraph.Edge{{Caller: "app.main", Callees: []string{"dep.opaque"}}},
+		BlindSymbols: map[string][]string{"dep.opaque": {"dynamic_dispatch"}},
+	}
+	svc, err := NewService(fakeBuilder{g: g})
+	if err != nil {
+		t.Fatal(err)
+	}
+	analysis, err := svc.Analyze(context.Background(), "/work", []string{"dep.opaque", "dep.unrelated"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(analysis.Results) != 2 || len(analysis.Results[0].BlindConstructs) != 1 {
+		t.Fatalf("opaque target must carry symbol-local blindness: %#v", analysis.Results)
+	}
+	if len(analysis.Results[1].BlindConstructs) != 0 {
+		t.Fatalf("disjoint result must remain complete: %#v", analysis.Results[1])
+	}
+}
+
 func TestNormalizeSourceProvenance(t *testing.T) {
 	tests := []struct {
 		name string

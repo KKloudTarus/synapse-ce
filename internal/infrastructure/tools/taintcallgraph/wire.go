@@ -23,13 +23,11 @@ import (
 // protocolVersion guards the synapse-callgraph JSON contract: the adapter refuses a stream whose version it
 // doesn't recognize rather than mis-parsing a drifted format (fail-closed, mirroring the govulncheck builder).
 //
-// v1.1.0 adds blind_constructs. Unlike the earlier additive fields (positions, exec_facts, whose ABSENCE is
-// safe: fewer positions, keep CWE-78), a MISSING blind_constructs must not be read as "no blindness" — that
-// would let a not_reachable from a reflection-blind older binary suppress a finding. So this field forces a
-// version bump: a stale binary emitting v1.0.0 is now rejected (no coverage, no suppression) rather than
-// trusted. The binary and the server are built and pinned together, so a version skew is a misconfiguration
-// that should fail closed, not be silently trusted (EPIC #1042 #1065).
-const protocolVersion = "v1.1.0"
+// v1.1.0 added analysis-wide blind_constructs; v1.2.0 adds symbol-local blind_symbols. Missing either field
+// must not be read as "no blindness" because that could let an opaque not_reachable suppress a finding. Each
+// addition therefore forces a version bump: a stale binary is rejected as no coverage rather than trusted.
+// The binary and server are built and pinned together, so version skew is a fail-closed misconfiguration.
+const protocolVersion = "v1.2.0"
 
 // wireGraph is the JSON envelope synapse-callgraph emits + the adapter parses: the protocol version plus the
 // deterministic call graph (entrypoints + edges, "importPath.Symbol" ids).
@@ -50,8 +48,9 @@ type wireGraph struct {
 	// BlindConstructs is the analysis-wide list of reachable-surface constructs the builder could not follow
 	// (reflection, framework routes it could not resolve, ...). It only ever PREVENTS a suppression. Its
 	// ABSENCE is NOT safe to treat as "no blindness" (that would let a reflection-blind older binary suppress),
-	// so v1.1.0 gates it: a stale v1.0.0 binary is rejected, not trusted (EPIC #1042 #1065).
-	BlindConstructs []string `json:"blind_constructs,omitempty"`
+	// so v1.2.0 gates it: a stale binary is rejected, not trusted (EPIC #1042 #1065).
+	BlindConstructs []string            `json:"blind_constructs,omitempty"`
+	BlindSymbols    map[string][]string `json:"blind_symbols,omitempty"`
 }
 
 type wireEdge struct {
@@ -76,7 +75,13 @@ func EncodeGraph(w io.Writer, g *callgraph.Graph) error {
 // cmd/synapse-callgraph). Deterministic input (the builder sorts) ⇒ deterministic bytes. Only constant-safe
 // verdicts are serialized, so an empty facts table emits no exec_facts key (byte-identical to EncodeGraph).
 func EncodeGraphWithFacts(w io.Writer, g *callgraph.Graph, facts taint.ExecFacts) error {
-	wg := wireGraph{ProtocolVersion: protocolVersion, Entrypoints: g.Entrypoints, Positions: g.Positions, BlindConstructs: g.BlindConstructs}
+	wg := wireGraph{
+		ProtocolVersion: protocolVersion,
+		Entrypoints:     g.Entrypoints,
+		Positions:       g.Positions,
+		BlindConstructs: g.BlindConstructs,
+		BlindSymbols:    g.BlindSymbols,
+	}
 	for _, e := range g.Edges {
 		wg.Edges = append(wg.Edges, wireEdge{Caller: e.Caller, Callees: e.Callees})
 	}
@@ -116,7 +121,12 @@ func parseCallgraph(data []byte) (*callgraph.Graph, taint.ExecFacts, error) {
 		// graph suppress a finding. Reject it as no coverage instead (EPIC #1042 #1065).
 		return nil, taint.ExecFacts{}, fmt.Errorf("unsupported synapse-callgraph protocol %q (want %s)", wg.ProtocolVersion, protocolVersion)
 	}
-	g := &callgraph.Graph{Entrypoints: wg.Entrypoints, Positions: wg.Positions, BlindConstructs: wg.BlindConstructs}
+	g := &callgraph.Graph{
+		Entrypoints:     wg.Entrypoints,
+		Positions:       wg.Positions,
+		BlindConstructs: wg.BlindConstructs,
+		BlindSymbols:    wg.BlindSymbols,
+	}
 	for _, e := range wg.Edges {
 		g.Edges = append(g.Edges, callgraph.Edge{Caller: e.Caller, Callees: e.Callees})
 	}

@@ -18,9 +18,9 @@ func writeDotNetFile(t *testing.T, dir, name, body string) {
 	}
 }
 
-// TestDotNetScanImportsObservesNamespaces: a `using` names a namespace, which the scanner emits with its
-// dotted prefixes so a package matches whether source imports its root namespace or a sub-namespace. With no
-// dynamic construct the observation is complete (a negative conclusion is safe).
+// TestDotNetScanImportsObservesNamespaces: a `using` names one complete namespace. Preserving that identity
+// keeps sibling package namespaces distinct while the analyzer can still match a package-owned parent. With
+// no dynamic construct the observation is complete (a negative conclusion is safe).
 func TestDotNetScanImportsObservesNamespaces(t *testing.T) {
 	dir := t.TempDir()
 	writeDotNetFile(t, dir, "Program.cs", `using System;
@@ -41,9 +41,14 @@ namespace App { class P { static void Main() {} } }
 	for _, p := range graph.ImportedPackages {
 		refs[p] = true
 	}
-	for _, want := range []string{"newtonsoft.json.linq", "newtonsoft.json", "newtonsoft", "dapper", "serilog"} {
+	for _, want := range []string{"newtonsoft.json.linq", "dapper.sqlmapper", "serilog.log"} {
 		if !refs[want] {
-			t.Errorf("missing observed namespace/prefix %q in %v", want, graph.ImportedPackages)
+			t.Errorf("missing observed namespace %q in %v", want, graph.ImportedPackages)
+		}
+	}
+	for _, siblingCollapsingPrefix := range []string{"newtonsoft", "newtonsoft.json", "dapper", "serilog"} {
+		if refs[siblingCollapsingPrefix] {
+			t.Errorf("derived namespace prefix %q leaked into observations: %v", siblingCollapsingPrefix, graph.ImportedPackages)
 		}
 	}
 }
@@ -91,6 +96,9 @@ class L {
 	if !seen["reachbench.dynamic"] {
 		t.Fatalf("resolved assembly candidate was not observed: %v", graph.ImportedPackages)
 	}
+	if !contains(graph.ConditionalPackages, "reachbench.dynamic") {
+		t.Fatalf("resolved reflection candidate must remain conditional: %v", graph.ConditionalPackages)
+	}
 }
 
 func TestDotNetResolvedTypeReflectionIsSubjectLocal(t *testing.T) {
@@ -112,6 +120,9 @@ class L {
 	}
 	if !contains(graph.ImportedPackages, "reachbench.dynamic") {
 		t.Fatalf("resolved type candidate was not observed: %v", graph.ImportedPackages)
+	}
+	if !contains(graph.ConditionalPackages, "reachbench.dynamic") {
+		t.Fatalf("resolved type reflection must remain conditional: %v", graph.ConditionalPackages)
 	}
 }
 
@@ -260,7 +271,7 @@ func TestDotNetReferenceFormsAreObserved(t *testing.T) {
 	for _, p := range graph.ImportedPackages {
 		refs[p] = true
 	}
-	for _, want := range []string{"newtonsoft.json", "mycompany.legacy", "serilog", "serilog.core", "restsharp", "mudblazor", "nservicebus"} {
+	for _, want := range []string{"newtonsoft.json.jsonserializer", "mycompany.legacy.widget", "serilog.core.logger", "restsharp.restclient", "mudblazor", "nservicebus"} {
 		if !refs[want] {
 			t.Errorf("reference %q must be observed (a missed reference becomes a false not-referenced); got %v", want, graph.ImportedPackages)
 		}
@@ -466,8 +477,8 @@ func TestDotNetGeneratedObjSourceObserved(t *testing.T) {
 	for _, p := range graph.ImportedPackages {
 		refs[p] = true
 	}
-	if !refs["grpc.core"] {
-		t.Errorf("a package named only by generated obj source must be observed; got %v", graph.ImportedPackages)
+	if !refs["grpc.core.clientbase"] {
+		t.Errorf("a package type named only by generated obj source must be observed; got %v", graph.ImportedPackages)
 	}
 	if !graph.Complete() {
 		t.Errorf("generated AssemblyInfo naming System.Reflection must not poison the scan; reasons=%v", graph.CoverageReasons)
@@ -488,7 +499,7 @@ func TestDotNetVBGlobalQualifierCaseInsensitive(t *testing.T) {
 	for _, p := range graph.ImportedPackages {
 		refs[p] = true
 	}
-	if !refs["restsharp"] {
+	if !refs["restsharp.restclient"] {
 		t.Errorf("an uppercase GLOBAL. qualifier must be stripped; got %v", graph.ImportedPackages)
 	}
 }

@@ -91,12 +91,13 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*
 	// Match case-INSENSITIVELY: a package imported as "PIL" must match the candidate "pil". Python import
 	// names are technically case-sensitive, but folding case here only ever OVER-matches, biasing toward
 	// the safe "reachable" — never a false not-reachable.
-	imported := make(map[string]bool, len(g.ImportedModules)+len(g.DynamicModules))
+	imported := make(map[string]bool, len(g.ImportedModules))
 	for _, m := range g.ImportedModules {
 		imported[strings.ToLower(m)] = true
 	}
+	dynamic := make(map[string]bool, len(g.DynamicModules))
 	for _, m := range g.DynamicModules {
-		imported[strings.ToLower(m)] = true
+		dynamic[strings.ToLower(m)] = true
 	}
 	out := make([]reachability.Result, 0, len(symbols))
 	seen := map[string]bool{}
@@ -112,11 +113,22 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, symbols []string) (*
 			return nil, fmt.Errorf("%w: %q is not a declared direct dependency, so a first-party import scan cannot prove it unused (no coverage)", shared.ErrValidation, sym)
 		}
 		r := reachability.Result{Symbol: sym}
-		for _, cand := range ImportCandidates(sym) { // reachable iff ANY plausible import name is imported
+		candidates := ImportCandidates(sym)
+		for _, cand := range candidates { // reachable iff ANY plausible import name is imported
 			if imported[cand] {
 				r.Reachable = true
 				r.Path = []string{"import " + cand} // the proof: a first-party module imports this package
 				break
+			}
+		}
+		if !r.Reachable {
+			for _, cand := range candidates {
+				if dynamic[cand] {
+					r.Reachable = true
+					r.Path = []string{"dynamic import " + cand}
+					r.BlindConstructs = []string{"python:conditional_dynamic_import"}
+					break
+				}
 			}
 		}
 		out = append(out, r)

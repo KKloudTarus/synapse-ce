@@ -77,6 +77,13 @@ func TestAnalyzeResolvedDynamicImportIsAffirmativeOnly(t *testing.T) {
 	if got["jinja2"] {
 		t.Error("an unrelated direct dependency remains not reachable")
 	}
+	analysis, err := a.Analyze(context.Background(), "/x", []string{"requests"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(analysis.Results) != 1 || len(analysis.Results[0].BlindConstructs) != 1 {
+		t.Fatalf("resolved dynamic import must remain conditional: %#v", analysis.Results)
+	}
 }
 
 func TestAnalyzeDynamicImportsIsNoCoverage(t *testing.T) {

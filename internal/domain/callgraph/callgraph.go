@@ -44,6 +44,9 @@ type Graph struct {
 	// on it (EPIC #1042 #1065). Empty means the builder saw no such construct. Descriptive only: the
 	// adjacency/Reachable/PathTo queries never read it.
 	BlindConstructs []string
+	// BlindSymbols narrows a bounded opaque edge to the symbols it may reach. Unlike BlindConstructs, an
+	// entry here taints only that symbol's result, so an independently disjoint negative remains usable.
+	BlindSymbols map[string][]string
 }
 
 // adjacency builds the caller -> callees map once, for the multi-target queries to share. Empty node

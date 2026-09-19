@@ -13,10 +13,10 @@ import (
 )
 
 // DotNetScanner observes namespace references in first-party C#/VB.NET source. A NuGet package is reached
-// through a `using`/`Imports` of one (or a sub-namespace) of the namespaces it ships, so the scanner emits
-// each imported namespace and its dotted prefixes; the candidate namer emits the package name and its
-// prefixes, and a match on any shared prefix is a reference (over-matching biases to "reachable", the safe
-// direction). It is source-only: it lexes text and never runs dotnet, msbuild or a runtime.
+// through a `using`/`Imports` of one (or a sub-namespace) of the namespaces it ships, so the scanner preserves
+// each complete imported namespace. Keeping sibling namespaces distinct avoids treating Reachbench.Direct as
+// evidence for Reachbench.Unused; the build-aware analyzer still matches parent and child namespaces in the
+// conservative direction. It is source-only: it lexes text and never runs dotnet, msbuild or a runtime.
 //
 // A package can also be reached WITHOUT any visible per-file `using`, which observeProjectImports handles on
 // a second pass over the project/props files and the obj/ build output (both skipped by the source walk):
@@ -125,7 +125,7 @@ func emitDotNetReflection(out *scanAccumulator, body, path string) {
 				out.addReason(unresolvedDotNetReflection + " (" + path + ")")
 				continue
 			}
-			emitDotNetName(out, candidate)
+			emitDotNetConditionalName(out, candidate)
 		}
 		knownReflectionAssignments := map[string]bool{}
 		for _, match := range dotnetLoadAssignmentRE.FindAllStringSubmatch(line, -1) {
@@ -140,7 +140,7 @@ func emitDotNetReflection(out *scanAccumulator, body, path string) {
 			if !ok {
 				continue
 			}
-			emitDotNetName(out, candidate)
+			emitDotNetConditionalName(out, candidate)
 			knownTypeGets++
 		}
 		if knownTypeGets != typeGetCalls {
@@ -281,15 +281,27 @@ func emitDotNetReferences(out *scanAccumulator, body string) {
 	}
 }
 
-// emitDotNetName records a namespace token and its dotted prefixes. A `Global.` root qualifier is not part
-// of any package's namespace, so it is dropped first; VB is case-insensitive, so `Global.`, `global.` and
-// `GLOBAL.` are all recognised (Global.Newtonsoft.Json -> Newtonsoft.Json).
+// emitDotNetName records one complete namespace token. A `Global.` root qualifier is not part of any
+// package's namespace, so it is dropped first; VB is case-insensitive, so `Global.`, `global.` and `GLOBAL.`
+// are all recognised (Global.Newtonsoft.Json -> Newtonsoft.Json).
 func emitDotNetName(out *scanAccumulator, token string) {
 	if idx := strings.IndexByte(token, '.'); idx > 0 && strings.EqualFold(token[:idx], "global") {
 		token = token[idx+1:]
 	}
-	for _, name := range dottedPrefixes(token) {
-		out.addPackage(name)
+	if token = strings.Trim(strings.TrimSpace(token), "."); token != "" {
+		out.addPackage(token)
+	}
+}
+
+func emitDotNetConditionalName(out *scanAccumulator, token string) {
+	for _, candidate := range strings.Split(token, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if idx := strings.IndexByte(candidate, '.'); idx > 0 && strings.EqualFold(candidate[:idx], "global") {
+			candidate = candidate[idx+1:]
+		}
+		if candidate = strings.Trim(candidate, "."); candidate != "" {
+			out.addConditionalPackage(candidate)
+		}
 	}
 }
 

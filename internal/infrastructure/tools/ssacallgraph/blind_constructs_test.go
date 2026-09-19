@@ -129,3 +129,79 @@ func main() {}
 		t.Fatalf("unreachable unsafe code must not globally disable suppression; got %v", g.BlindConstructs)
 	}
 }
+
+func TestBuildGraphScopesBoundedDynamicDispatchToTarget(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module dynamicfix\n\ngo 1.21\n",
+		"main.go": `package main
+import "os"
+func opaque() {}
+func unrelated() {}
+func main() {
+	if handler, ok := map[string]func(){"opaque": opaque}[os.Getenv("HANDLER")]; ok {
+		handler()
+	}
+}
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	if contains(g.BlindConstructs, "dynamic_dispatch") {
+		t.Fatalf("bounded dynamic dispatch must not taint disjoint symbols: %v", g.BlindConstructs)
+	}
+	if !contains(g.BlindSymbols["dynamicfix.opaque"], "dynamic_dispatch") {
+		t.Fatalf("bounded target must retain dynamic-dispatch evidence: %#v", g.BlindSymbols)
+	}
+	if len(g.BlindSymbols["dynamicfix.unrelated"]) != 0 {
+		t.Fatalf("disjoint symbol was tainted by bounded dispatch: %#v", g.BlindSymbols)
+	}
+	if !g.Reaches("dynamicfix.opaque") {
+		t.Fatal("bounded dynamic target must be represented as a possible edge")
+	}
+}
+
+func TestBuildGraphKeepsUnboundedDynamicDispatchGlobal(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module unboundeddynamicfix\n\ngo 1.21\n",
+		"main.go": `package main
+import "os"
+func opaque() {}
+func invoke(handlers map[string]func(), name string) { handlers[name]() }
+func main() { invoke(map[string]func(){"opaque": opaque}, os.Getenv("HANDLER")) }
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	if !contains(g.BlindConstructs, "dynamic_dispatch") {
+		t.Fatalf("unbounded dynamic dispatch must remain analysis-wide: %v", g.BlindConstructs)
+	}
+}
+
+func TestBuildGraphDoesNotRecordDeadDynamicDispatch(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module deaddynamicfix\n\ngo 1.21\n",
+		"main.go": `package main
+func opaque() {}
+func dead() {
+	if handler, ok := map[string]func(){"opaque": opaque}["opaque"]; ok {
+		handler()
+	}
+}
+func main() {}
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	if contains(g.BlindConstructs, "dynamic_dispatch") {
+		t.Fatalf("unreachable dynamic dispatch must not globally disable suppression; got %v", g.BlindConstructs)
+	}
+	if len(g.BlindSymbols) != 0 {
+		t.Fatalf("unreachable dynamic dispatch must not taint symbols; got %#v", g.BlindSymbols)
+	}
+}

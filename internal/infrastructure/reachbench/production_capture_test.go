@@ -82,6 +82,21 @@ func TestImportSubjectsAcceptsScopedNPMPackageURL(t *testing.T) {
 	}
 }
 
+func TestImportSubjectsRejectsManifestCapabilities(t *testing.T) {
+	subjects, err := importSubjects(measurement.ResolvedFixtureSubject{
+		Subject: measurement.FixtureSubject{
+			ID:      "pkg:pypi/reachbench-unsupported@1.0.0",
+			Locator: measurement.FixtureLocator{Kind: measurement.FixtureLocatorManifestCapability},
+		},
+	}, "pypi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subjects) != 0 {
+		t.Fatalf("manifest capability import subjects = %#v, want none", subjects)
+	}
+}
+
 func TestFixturePackagePURLVersionsScopedNPMIdentity(t *testing.T) {
 	for _, testCase := range []struct {
 		identity string
@@ -363,6 +378,7 @@ func TestOutcomeFromRecordedAnalysisSeparatesMeasurementFromJudgments(t *testing
 		want     measurement.Outcome
 	}{
 		{name: "reachable", coverage: completeCoverage(), analysis: &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject", Reachable: true}}}, want: measurement.OutcomeReachable},
+		{name: "reachable with partial coverage", coverage: partialCoverage(measurement.CoverageReasonOpaque), analysis: &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject", Reachable: true, BlindConstructs: []string{"dynamic dispatch"}}}}, want: measurement.OutcomeConditionallyReachable},
 		{name: "reachable with unknown path", coverage: partialCoverage(measurement.CoverageReasonUnknown), analysis: &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject", Reachable: true, Path: []string{"coverage:unknown"}}}}, want: measurement.OutcomeConditionallyReachable},
 		{name: "complete negative measurement", coverage: completeCoverage(), analysis: &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject"}}}, want: measurement.OutcomePresentUnreached},
 		{name: "partial negative measurement", coverage: partialCoverage(measurement.CoverageReasonOpaque), analysis: &reachability.Analysis{Results: []reachability.Result{{Symbol: "subject"}}}, want: measurement.OutcomeConditionallyReachable},
@@ -490,6 +506,24 @@ func TestRunStaticTargetsMetadataDerivedAnalysisRoot(t *testing.T) {
 	}
 }
 
+func TestGoSourceTier2SubjectsUseCallGraphIdentity(t *testing.T) {
+	resolved := measurement.ResolvedFixtureSubject{Subject: measurement.FixtureSubject{
+		ID:              "pkg:reachbench/go/source_tier2#controlOpaque",
+		PackageIdentity: "example.invalid/reachbench/go-source-tier2",
+		Locator: measurement.FixtureLocator{
+			Kind:   measurement.FixtureLocatorSourceSymbol,
+			Symbol: "controlOpaque",
+		},
+	}}
+	subjects := goSourceTier2Subjects(resolved)
+	if len(subjects) != 1 || len(subjects[0].Symbols) != 1 {
+		t.Fatalf("Go source subjects = %#v", subjects)
+	}
+	if got, want := subjects[0].Symbols[0], "example.invalid/reachbench/go-source-tier2.controlOpaque"; got != want {
+		t.Fatalf("Go source symbol = %q, want %q", got, want)
+	}
+}
+
 func TestSymbolSubjectsRejectManifestCapabilityLocator(t *testing.T) {
 	manifest := measurement.ResolvedFixtureSubject{Subject: measurement.FixtureSubject{
 		ID:      "pkg:reachbench/javascript/lexical#controlNoCoverage",
@@ -607,6 +641,53 @@ func TestProductionCaptureMeasuresNegativeWithoutPersistingSuppression(t *testin
 	claims := judgment.WinningReachabilityClaims(judgments)
 	if winner, ok := claims[cell.SubjectID]; ok {
 		t.Fatalf("persisted winner = %#v, want no negative benchmark judgment", winner)
+	}
+}
+
+func TestProductionCaptureKeepsReachablePartialOutcomeConditional(t *testing.T) {
+	lifecycle, err := newCaptureLifecycle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := measurement.ResolvedFixtureSubject{Subject: measurement.FixtureSubject{
+		ID:              "pkg:reachbench/go/source_tier2#controlOpaque",
+		PackageIdentity: "example.invalid/reachbench/go-source-tier2",
+		Locator:         measurement.FixtureLocator{Kind: measurement.FixtureLocatorSourceSymbol, Symbol: "controlOpaque"},
+	}}
+	symbol := "example.invalid/reachbench/go-source-tier2.controlOpaque"
+	delegate := &captureTestAnalyzer{result: &reachability.Analysis{
+		Results:     []reachability.Result{{Symbol: symbol, Reachable: true, BlindConstructs: []string{"dynamic_dispatch"}}},
+		Entrypoints: []string{"example.invalid/reachbench/go-source-tier2.main"},
+	}}
+	executed, err := runStatic(context.Background(), MaterializedFixture{Root: t.TempDir()}, resolved, lifecycle, coverageRequiresEntrypointAuthority,
+		[]ports.ReachabilitySubject{{FindingID: shared.ID(resolved.Subject.ID), Symbols: []string{symbol}}},
+		func() (staticAnalyzer, error) { return delegate, nil },
+		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
+			coordinator, coordinatorErr := reachproof.NewCoordinator(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock)
+			if coordinatorErr != nil {
+				return nil, coordinatorErr
+			}
+			return coordinator.WithRaiseOnly(), nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cell := ExecutionCell{
+		CaseID: "go-opaque", CohortID: "go", ModeID: "source_tier2", BindingID: "api", AnalyzerID: "sca-go-source-tier2",
+		Configuration: captureArtifact("configuration"), SubjectID: resolved.Subject.ID, Fixture: captureArtifact("fixture"), BoundaryID: "sca/reachability/go-source-tier2/api",
+	}
+	observation, err := (&ProductionCapture{}).observation(context.Background(), CaptureRequest{
+		Cell: cell, Analyzer: RevisionIdentity{ID: AnalyzerSubjectID, Commit: strings.Repeat("a", 40), Tree: strings.Repeat("b", 40)}, Snapshot: captureSnapshot(),
+	}, lifecycle, executed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Outcome != measurement.OutcomeConditionallyReachable || observation.Coverage.Status != measurement.CoveragePartial {
+		t.Fatalf("opaque observation = %#v, want conditionally_reachable with partial coverage", observation)
+	}
+	if observation.Positive == nil {
+		t.Fatal("affirmative opaque result must retain positive evidence")
 	}
 }
 

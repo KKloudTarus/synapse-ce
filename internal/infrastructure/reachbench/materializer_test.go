@@ -386,7 +386,7 @@ func TestDotNetBuildAwareFixtureKeepsPackageSourcesOutsideProductionScan(t *test
 			t.Errorf("first-party reference %q is absent from production scan: %v", expected, graph.ImportedPackages)
 		}
 	}
-	for _, packageNamespace := range []string{"reachbench.unused", "reachbench.unsupported"} {
+	for _, packageNamespace := range []string{"reachbench", "reachbench.unused", "reachbench.unsupported"} {
 		if observed[packageNamespace] {
 			t.Errorf("package-owned namespace %q leaked into first-party scan: %v", packageNamespace, graph.ImportedPackages)
 		}
