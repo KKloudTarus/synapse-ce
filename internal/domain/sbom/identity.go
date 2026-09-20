@@ -98,6 +98,19 @@ func IdentityFromComponent(component Component) ComponentIdentity {
 	case "nuget":
 		identity.Ecosystem = "NuGet"
 		identity.Package = decodedName
+	case "hex":
+		// Elixir Hex: OSV ecosystem "Hex", package is the bare hex name. The range comparator for Hex is
+		// already wired (advisory.schemeFor), so resolving the identity makes the match reachable end to end.
+		identity.Ecosystem = "Hex"
+		identity.Package = decodedName
+	case "composer":
+		// PHP Composer -> OSV ecosystem "Packagist"; the package is "vendor/name" (OSV keys Packagist that way).
+		identity.Ecosystem = "Packagist"
+		identity.Package = decodedName
+	case "pub":
+		// Dart Pub: OSV ecosystem "Pub", package is the bare pub name.
+		identity.Ecosystem = "Pub"
+		identity.Package = decodedName
 	case "deb", "apk", "rpm":
 		identity.Ecosystem = distroEcosystem(typ, purl)
 		identity.Package = decodedName[strings.LastIndexByte(decodedName, '/')+1:]
