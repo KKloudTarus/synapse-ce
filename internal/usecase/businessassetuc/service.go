@@ -300,7 +300,7 @@ func (s *Service) Findings(ctx context.Context, tenantID, id shared.ID) ([]Aggre
 			out = append(out, AggregatedFinding{
 				Finding: finding.Finding{
 					ID: imported.ID, EngagementID: imported.EngagementID, Title: imported.Title,
-					Description: imported.Message, Severity: imported.Severity, Status: finding.StatusOpen,
+					Description: imported.Message, Severity: imported.Severity, Status: finding.StatusTriage, Kind: finding.KindExternal,
 					Class: finding.ClassThirdParty, Reachability: string(judgment.ReachUnknown), DedupKey: imported.Fingerprint,
 				},
 				ImportedFinding:  &importedCopy,

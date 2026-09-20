@@ -3083,6 +3083,15 @@ paths:
     get:
       tags: [assets]
       operationId: listBusinessAssetFindings
+      parameters:
+      - name: X-Synapse-Client-Capabilities
+        in: header
+        required: false
+        schema: {type: string}
+        description: >
+          Comma-separated client capabilities. Include external-finding-kind-v1 to receive
+          Kind=external on imported management items; clients that do not opt in retain the
+          legacy empty Kind while external/provenance governance fields remain explicit.
       responses:
         '200':
           description: First-party and imported Findings resolved through assigned Engagements
@@ -9865,7 +9874,13 @@ components:
           Status: {type: string, enum: [open, triage, confirmed, false_positive, remediated]}
           DedupKey: {type: string}
           EvidenceScore: {type: integer}
-          Kind: {type: string, enum: [sca, recon, exploitation, manual, sast, secret, misconfig, cloud_posture, dast, threat, hypothesis, quality, reliability]}
+          Kind:
+            type: string
+            enum: ["", sca, recon, exploitation, manual, sast, secret, misconfig, cloud_posture, dast, threat, hypothesis, quality, reliability, external]
+            description: >
+              Empty is a legacy compatibility representation. Native readers treat it as legacy SCA;
+              the Business Asset findings reader also uses it for external items when the client has
+              not opted into external-finding-kind-v1.
           RuleKey: {type: string}
           SourceLocation:
             type: [object, "null"]

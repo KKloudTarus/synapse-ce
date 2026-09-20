@@ -19,6 +19,8 @@ func TestRequiresEvidenceGate(t *testing.T) {
 		{"empty-kind, no proposer = sca, ungated", "", "", false},
 		{"manual ungated", "", KindManual, false},
 		{"sca ungated", "", KindSCA, false},
+		{"external reader projection gated", "", KindExternal, true},
+		{"unknown non-empty kind gated", "", Kind("future-origin"), true},
 		{"AI-proposed threat gated", "agent:s1", KindThreat, true},
 		{"human dast ungated", "", KindDAST, false},
 	}
@@ -45,5 +47,16 @@ func TestPublishableExcludesUnprovenAIClaim(t *testing.T) {
 	f.EvidenceScore = EvidenceThreshold
 	if !f.CanPromote() {
 		t.Fatal("AI sast at bar should promote")
+	}
+}
+
+func TestExternalAndUnknownNeverPromote(t *testing.T) {
+	for _, kind := range []Kind{KindExternal, Kind("future-origin")} {
+		for _, score := range []int{0, EvidenceThreshold, 100} {
+			f := Finding{Kind: kind, EvidenceScore: score}
+			if f.CanPromote() {
+				t.Fatalf("kind %q with score %d must never gain publication authority", kind, score)
+			}
+		}
 	}
 }
