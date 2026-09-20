@@ -43,6 +43,34 @@ func TestParseUbuntuOVAL(t *testing.T) {
 	}
 }
 
+func TestParseUbuntuOVALNegatedCriteriaFailClosed(t *testing.T) {
+	doc := `<oval_definitions xmlns:linux-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+	  <definitions><definition class="vulnerability" id="oval:com.ubuntu.jammy:def:2026100000000001">
+	    <metadata><title>CVE-2026-10001 on Ubuntu 22.04 LTS</title>
+	      <reference source="CVE" ref_id="CVE-2026-10001"/></metadata>
+	    <criteria><criterion test_ref="oval:com.ubuntu.jammy:tst:2026100000000001" negate="true"/></criteria>
+	  </definition></definitions>
+	  <tests><linux-def:dpkginfo_test id="oval:com.ubuntu.jammy:tst:2026100000000001">
+	    <linux-def:object object_ref="oval:com.ubuntu.jammy:obj:2026100000000001"/>
+	    <linux-def:state state_ref="oval:com.ubuntu.jammy:ste:2026100000000001"/>
+	  </linux-def:dpkginfo_test></tests>
+	  <objects><linux-def:dpkginfo_object id="oval:com.ubuntu.jammy:obj:2026100000000001">
+	    <linux-def:name>openssl</linux-def:name>
+	  </linux-def:dpkginfo_object></objects>
+	  <states><linux-def:dpkginfo_state id="oval:com.ubuntu.jammy:ste:2026100000000001">
+	    <linux-def:evr operation="less than">3.0.2-0ubuntu1.10</linux-def:evr>
+	  </linux-def:dpkginfo_state></states>
+	</oval_definitions>`
+
+	advs, err := ParseUbuntuOVAL([]byte(doc))
+	if err != nil {
+		t.Fatalf("ParseUbuntuOVAL: %v", err)
+	}
+	if len(advs) != 0 {
+		t.Fatalf("negated dpkg criterion minted fixed affected authority: %+v", advs)
+	}
+}
+
 func TestParseUbuntuOVALResolvesCurrentConstantVariablePackageList(t *testing.T) {
 	doc := `<oval_definitions xmlns:linux-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
 	  <definitions><definition class="vulnerability" id="oval:com.ubuntu.jammy:def:2026100000000000">
@@ -848,6 +876,400 @@ func TestRpmOvalBoundedRangeSkipped(t *testing.T) {
 	}
 	if !pkgs["plain-pkg"] {
 		t.Error("a plain less-than package in the same definition must still be emitted")
+	}
+}
+
+func TestRpmOvalNotYetFixedZeroFloor(t *testing.T) {
+	doc := oracleDoc(`<definitions>
+	  <definition class="vulnerability" id="oval:com.oracle.elsa:def:9001"><metadata><title>ELSA not yet fixed</title>
+	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9100"/></metadata>
+	    <criteria><criterion test_ref="t0"/></criteria></definition></definitions>
+	  <tests><linux:rpminfo_test id="t0" check="at least one" comment="openssl is affected"><object object_ref="o0"/><state state_ref="s0"/></linux:rpminfo_test></tests>
+	  <objects><linux:rpminfo_object id="o0"><name>openssl</name></linux:rpminfo_object></objects>
+	  <states><linux:rpminfo_state id="s0"><evr operation="greater than">0:0-0</evr></linux:rpminfo_state></states>`)
+	advs, err := ParseOVAL(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 1 {
+		t.Fatalf("not-yet-fixed advisory not emitted: %+v", advs)
+	}
+	ap := advs[0].Affected[0]
+	if ap.Ecosystem != "Oracle Linux:9" || ap.Package != "openssl" || ap.FixedVersion != "" ||
+		len(ap.Ranges) != 1 || len(ap.Ranges[0].Events) != 1 || ap.Ranges[0].Events[0].Introduced != "0" {
+		t.Fatalf("not-yet-fixed binding = %+v", ap)
+	}
+	if ok, fixed := advs[0].Match("Oracle Linux:9", "openssl", "0:3.2.2-1.el9"); !ok || fixed != "" {
+		t.Fatalf("installed rpm must match open-ended vendor affected state: ok=%v fixed=%q", ok, fixed)
+	}
+}
+
+func TestRpmOvalExistenceOnlyNotYetFixed(t *testing.T) {
+	doc := oracleDoc(`<definitions>
+	  <definition class="vulnerability" id="oval:com.oracle.elsa:def:9002"><metadata><title>ELSA existence affected</title>
+	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9101"/></metadata>
+	    <criteria><criterion test_ref="texists"/></criteria></definition></definitions>
+	  <tests>
+	    <linux:rpminfo_test id="texists" check="at least one" comment="kernel-tools is affected"><object object_ref="oexists"/></linux:rpminfo_test>
+	  </tests>
+	  <objects><linux:rpminfo_object id="oexists"><name>kernel-tools</name></linux:rpminfo_object></objects>`)
+	advs, err := ParseOVAL(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 1 {
+		t.Fatalf("default at_least_one_exists test not emitted: %+v", advs)
+	}
+	ap := advs[0].Affected[0]
+	if ap.Ecosystem != "Oracle Linux:9" || ap.Package != "kernel-tools" || ap.FixedVersion != "" {
+		t.Fatalf("existence-only binding = %+v", ap)
+	}
+	if ok, _ := advs[0].Match("Oracle Linux:9", "kernel-tools", "0:5.14.0-999.el9"); !ok {
+		t.Fatal("existence-only affected package must match an installed version")
+	}
+}
+
+func TestRpmOvalExistenceOnlyDoesNotPromoteInstalledPlatformGate(t *testing.T) {
+	doc := oracleDoc(`<definitions>
+	  <definition class="vulnerability" id="oval:com.oracle.elsa:def:90025"><metadata><title>ELSA platform gate</title>
+	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9105"/></metadata>
+	    <criteria><criterion test_ref="tplatform"/></criteria></definition></definitions>
+	  <tests>
+	    <linux:rpminfo_test id="tplatform" check="at least one" comment="oraclelinux-release is installed"><object object_ref="oplatform"/></linux:rpminfo_test>
+	  </tests>
+	  <objects><linux:rpminfo_object id="oplatform"><name>oraclelinux-release</name></linux:rpminfo_object></objects>`)
+	advs, err := ParseOVAL(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(advs) != 0 {
+		t.Fatalf("platform/package presence gate must not become CVE affected authority: %+v", advs)
+	}
+}
+
+func TestRpmOvalExistenceOnlyFailsClosedWhenAmbiguous(t *testing.T) {
+	t.Run("multi release", func(t *testing.T) {
+		doc := oracleDoc(`<definitions>
+		  <definition class="vulnerability" id="oval:com.oracle.elsa:def:9003"><metadata><title>ELSA ambiguous release</title>
+		    <affected><platform>Oracle Linux 8</platform><platform>Oracle Linux 9</platform></affected>
+		    <reference source="CVE" ref_id="CVE-2099-9102"/></metadata>
+		    <criteria><criterion test_ref="texists"/></criteria></definition></definitions>
+		  <tests><linux:rpminfo_test id="texists" check="at least one" check_existence="at_least_one_exists"><object object_ref="o"/></linux:rpminfo_test></tests>
+		  <objects><linux:rpminfo_object id="o"><name>bash</name></linux:rpminfo_object></objects>`)
+		advs, err := ParseOVAL(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(advs) != 0 {
+			t.Fatalf("release-ambiguous open-ended advisory must be skipped: %+v", advs)
+		}
+	})
+	t.Run("non affirmative existence", func(t *testing.T) {
+		doc := oracleDoc(`<definitions>
+		  <definition class="vulnerability" id="oval:com.oracle.elsa:def:9004"><metadata><title>ELSA none-exist</title>
+		    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9103"/></metadata>
+		    <criteria><criterion test_ref="texists"/></criteria></definition></definitions>
+		  <tests><linux:rpminfo_test id="texists" check="at least one" check_existence="none_exist"><object object_ref="o"/></linux:rpminfo_test></tests>
+		  <objects><linux:rpminfo_object id="o"><name>bash</name></linux:rpminfo_object></objects>`)
+		advs, err := ParseOVAL(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(advs) != 0 {
+			t.Fatalf("none_exist must never become affected authority: %+v", advs)
+		}
+	})
+}
+
+func TestRpmOvalFixedAuthorityClipsNotYetFixedRegardlessOfDefinitionOrder(t *testing.T) {
+	openDef := `<definition class="vulnerability" id="oval:com.oracle.elsa:def:9100"><metadata><title>ELSA affected</title>
+	  <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9200"/></metadata>
+	  <criteria><criterion test_ref="topen"/></criteria></definition>`
+	fixedDef := `<definition class="patch" id="oval:com.oracle.elsa:def:9101"><metadata><title>ELSA fixed</title>
+	  <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9200"/></metadata>
+	  <criteria><criterion test_ref="tfixed"/></criteria></definition>`
+	tail := `</definitions><tests>
+	  <linux:rpminfo_test id="topen" check="at least one" comment="openssl is affected"><object object_ref="o"/><state state_ref="sopen"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="tfixed"><object object_ref="o"/><state state_ref="sfixed"/></linux:rpminfo_test>
+	  </tests><objects><linux:rpminfo_object id="o"><name>openssl</name></linux:rpminfo_object></objects>
+	  <states>
+	    <linux:rpminfo_state id="sopen"><evr operation="greater than">0:0-0</evr></linux:rpminfo_state>
+	    <linux:rpminfo_state id="sfixed"><evr operation="less than">0:3.2.2-6.el9_5</evr></linux:rpminfo_state>
+	  </states>`
+
+	for _, tc := range []struct {
+		name string
+		defs string
+	}{
+		{name: "open then fixed", defs: openDef + fixedDef},
+		{name: "fixed then open", defs: fixedDef + openDef},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			advs, err := ParseOVAL(oracleDoc(`<definitions>` + tc.defs + tail))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(advs) != 1 || len(advs[0].Affected) != 1 {
+				t.Fatalf("merged advisory = %+v", advs)
+			}
+			ap := advs[0].Affected[0]
+			if ap.FixedVersion != "0:3.2.2-6.el9_5" {
+				t.Fatalf("fixed authority did not clip open-ended claim: %+v", ap)
+			}
+			if ok, _ := advs[0].Match("Oracle Linux:9", "openssl", "0:3.2.2-5.el9_5"); !ok {
+				t.Fatal("pre-fix package should remain affected")
+			}
+			if ok, _ := advs[0].Match("Oracle Linux:9", "openssl", "0:3.2.2-6.el9_5"); ok {
+				t.Fatal("vendor fixed version must not match stale not-yet-fixed authority")
+			}
+			if ok, _ := advs[0].Match("Oracle Linux:9", "openssl", "0:3.2.2-7.el9_5"); ok {
+				t.Fatal("post-fix package must not match stale not-yet-fixed authority")
+			}
+		})
+	}
+}
+
+func TestRpmOvalNonZeroLowerBoundNeverWidensToAllVersions(t *testing.T) {
+	doc := oracleDoc(`<definitions>
+	  <definition class="vulnerability" id="oval:com.oracle.elsa:def:9200"><metadata><title>ELSA bounded-only</title>
+	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9300"/></metadata>
+	    <criteria><criterion test_ref="tge"/></criteria></definition></definitions>
+	  <tests><linux:rpminfo_test id="tge" check="at least one"><object object_ref="o"/><state state_ref="sge"/></linux:rpminfo_test></tests>
+	  <objects><linux:rpminfo_object id="o"><name>openssl</name></linux:rpminfo_object></objects>
+	  <states><linux:rpminfo_state id="sge"><evr operation="greater than or equal">0:3.0-1.el9</evr></linux:rpminfo_state></states>`)
+	advs, err := ParseOVAL(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(advs) != 0 {
+		t.Fatalf("non-zero lower bound was widened to open-ended affected range: %+v", advs)
+	}
+}
+
+func TestRpmExplicitAffectedAuthorityUsesCriterionOrTestLayer(t *testing.T) {
+	for _, tc := range []struct {
+		name, criterion, test string
+		want                  bool
+	}{
+		{name: "criterion authority", criterion: "openssl is affected", test: "openssl is >0", want: true},
+		{name: "test authority", criterion: "", test: "openssl is affected", want: true},
+		{name: "installed gate", criterion: "openssl is installed", test: "openssl is >0", want: false},
+		{name: "wrong package", criterion: "libssl is affected", test: "openssl is >0", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rpmExplicitAffectedAuthority(tc.criterion, tc.test, "openssl"); got != tc.want {
+				t.Fatalf("rpmExplicitAffectedAuthority(%q,%q)=%v want %v", tc.criterion, tc.test, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRpmOvalZeroFloorDoesNotPromoteInstalledGate(t *testing.T) {
+	doc := oracleDoc(`<definitions>
+	  <definition class="vulnerability" id="oval:com.oracle.elsa:def:9249"><metadata><title>ELSA zero-floor gate</title>
+	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9349"/></metadata>
+	    <criteria><criterion test_ref="t"/></criteria></definition></definitions>
+	  <tests><linux:rpminfo_test id="t" check="at least one" comment="openssl is installed"><object object_ref="o"/><state state_ref="s"/></linux:rpminfo_test></tests>
+	  <objects><linux:rpminfo_object id="o"><name>openssl</name></linux:rpminfo_object></objects>
+	  <states><linux:rpminfo_state id="s"><evr operation="greater than">0:0-0</evr></linux:rpminfo_state></states>`)
+	advs, err := ParseOVAL(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(advs) != 0 {
+		t.Fatalf("zero-floor installed gate must not become affected authority: %+v", advs)
+	}
+}
+
+func TestRpmOvalOpenEndedRejectsNegatedOrMultiPackageTests(t *testing.T) {
+	t.Run("none satisfy", func(t *testing.T) {
+		doc := oracleDoc(`<definitions>
+		  <definition class="vulnerability" id="oval:com.oracle.elsa:def:9250"><metadata><title>ELSA negated</title>
+		    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9350"/></metadata>
+		    <criteria><criterion test_ref="t"/></criteria></definition></definitions>
+		  <tests><linux:rpminfo_test id="t" check="none satisfy"><object object_ref="o"/><state state_ref="s"/></linux:rpminfo_test></tests>
+		  <objects><linux:rpminfo_object id="o"><name>openssl</name></linux:rpminfo_object></objects>
+		  <states><linux:rpminfo_state id="s"><evr operation="greater than or equal">0</evr></linux:rpminfo_state></states>`)
+		advs, err := ParseOVAL(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(advs) != 0 {
+			t.Fatalf("negated OVAL test minted affected authority: %+v", advs)
+		}
+	})
+
+	t.Run("variable expands to multiple packages", func(t *testing.T) {
+		def := &ovalDefinition{}
+		def.Criteria.Criterion = []ovalCriterion{{TestRef: "t"}}
+		tests := map[string]ovalTest{
+			"t": {
+				ID:    "t",
+				Check: "at least one",
+				State: struct {
+					Ref string `xml:"state_ref,attr"`
+				}{Ref: "s"},
+				Object: struct {
+					Ref string `xml:"object_ref,attr"`
+				}{Ref: "o"},
+			},
+		}
+		objects := map[string][]string{"o": {"openssl", "libssl"}}
+		states := map[string]ovalState{"s": {ID: "s", Evr: ovalEVR{Operation: "greater than or equal", Value: "0"}}}
+		got := rpmOvalAffected(def, "Oracle Linux:", map[string]bool{"9": true}, tests, objects, states)
+		if len(got) != 0 {
+			t.Fatalf("multi-package open-ended object must fail closed: %+v", got)
+		}
+	})
+}
+
+func TestRpmOvalNegatedCriteriaFailClosed(t *testing.T) {
+	tests := []struct {
+		name     string
+		criteria string
+		test     string
+		state    string
+	}{
+		{
+			name:     "zero floor criterion",
+			criteria: `<criteria><criterion test_ref="t" comment="openssl is affected" negate="true"/></criteria>`,
+			test:     `<linux:rpminfo_test id="t" check="at least one"><object object_ref="o"/><state state_ref="s"/></linux:rpminfo_test>`,
+			state:    `<states><linux:rpminfo_state id="s"><evr operation="greater than">0:0-0</evr></linux:rpminfo_state></states>`,
+		},
+		{
+			name:     "zero floor parent criteria",
+			criteria: `<criteria><criteria negate="1"><criterion test_ref="t" comment="openssl is affected"/></criteria></criteria>`,
+			test:     `<linux:rpminfo_test id="t" check="at least one"><object object_ref="o"/><state state_ref="s"/></linux:rpminfo_test>`,
+			state:    `<states><linux:rpminfo_state id="s"><evr operation="greater than or equal">0</evr></linux:rpminfo_state></states>`,
+		},
+		{
+			name:     "existence only criterion",
+			criteria: `<criteria><criterion test_ref="t" comment="openssl is affected" negate="true"/></criteria>`,
+			test:     `<linux:rpminfo_test id="t" check="at least one" check_existence="at_least_one_exists"><object object_ref="o"/></linux:rpminfo_test>`,
+		},
+		{
+			name:     "existence only parent criteria",
+			criteria: `<criteria negate="true"><criterion test_ref="t" comment="openssl is affected"/></criteria>`,
+			test:     `<linux:rpminfo_test id="t" check="at least one" check_existence="at_least_one_exists"><object object_ref="o"/></linux:rpminfo_test>`,
+		},
+		{
+			name:     "fixed criterion",
+			criteria: `<criteria><criterion test_ref="t" negate="true"/></criteria>`,
+			test:     `<linux:rpminfo_test id="t"><object object_ref="o"/><state state_ref="s"/></linux:rpminfo_test>`,
+			state:    `<states><linux:rpminfo_state id="s"><evr operation="less than">0:3.2.2-1.el9</evr></linux:rpminfo_state></states>`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := oracleDoc(`<definitions>
+			  <definition class="vulnerability" id="oval:com.oracle.elsa:def:9251"><metadata><title>ELSA negated criteria</title>
+			    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9351"/></metadata>` +
+				tc.criteria + `</definition></definitions><tests>` + tc.test + `</tests>
+			  <objects><linux:rpminfo_object id="o"><name>openssl</name></linux:rpminfo_object></objects>` + tc.state)
+			advs, err := ParseOVAL(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(advs) != 0 {
+				t.Fatalf("negated criteria minted affected authority: %+v", advs)
+			}
+		})
+	}
+}
+
+func TestRpmAllVersionsFloorVendorShapes(t *testing.T) {
+	for _, tc := range []struct {
+		op, value string
+		want      bool
+	}{
+		{op: "greater than", value: "0:0-0", want: true},
+		{op: "greater than or equal", value: "0", want: true},
+		{op: "greater than or equal", value: "0:0", want: true},
+		{op: "greater than", value: "0:1-0", want: false},
+		{op: "less than", value: "0:0-0", want: false},
+	} {
+		if got := rpmAllVersionsFloor(tc.op, tc.value); got != tc.want {
+			t.Errorf("rpmAllVersionsFloor(%q,%q)=%v want %v", tc.op, tc.value, got, tc.want)
+		}
+	}
+}
+
+func TestRpmZeroFloorIsNarrow(t *testing.T) {
+	for _, value := range []string{"0", "0:0", "0:0-0"} {
+		if !rpmZeroFloor(value) {
+			t.Errorf("rpmZeroFloor(%q)=false, want true", value)
+		}
+	}
+	for _, value := range []string{"", "0:0-1", "0:1", "1", "0.0", "0:0-0.1"} {
+		if rpmZeroFloor(value) {
+			t.Errorf("rpmZeroFloor(%q)=true, want false", value)
+		}
+	}
+}
+
+func TestParseSLENotYetFixedOVAL(t *testing.T) {
+	doc := oracleDoc(`<definitions>
+	  <definition class="vulnerability" id="oval:org.opensuse.security:def:9900"><metadata>
+	    <title>CVE-2099-9400</title>
+	    <affected><platform>SUSE Linux Enterprise Server 15 SP6</platform></affected>
+	    </metadata><criteria><criterion test_ref="t0" comment="libxml2 is affected"/></criteria></definition>
+	  </definitions>
+	  <tests>
+	    <linux:rpminfo_test id="t0" check="at least one" check_existence="at_least_one_exists" comment="libxml2 is >0">
+	      <object object_ref="o0"/><state state_ref="s0"/>
+	    </linux:rpminfo_test>
+	  </tests>
+	  <objects><linux:rpminfo_object id="o0"><name>libxml2</name></linux:rpminfo_object></objects>
+	  <states><linux:rpminfo_state id="s0"><evr operation="greater than">0:0-0</evr></linux:rpminfo_state></states>`)
+	advs, err := ParseOVAL(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(advs) != 1 || advs[0].ID != "CVE-2099-9400" || len(advs[0].Affected) != 1 {
+		t.Fatalf("SLE not-yet-fixed advisory = %+v", advs)
+	}
+	ap := advs[0].Affected[0]
+	if ap.Ecosystem != "SUSE:15.6" || ap.Package != "libxml2" || ap.FixedVersion != "" {
+		t.Fatalf("SLE not-yet-fixed binding = %+v", ap)
+	}
+	if ok, fixed := advs[0].Match("SUSE:15.6", "libxml2", "0:2.12.5-150600.3.9"); !ok || fixed != "" {
+		t.Fatalf("SLE installed rpm must match open-ended affected state: ok=%v fixed=%q", ok, fixed)
+	}
+	if ok, _ := advs[0].Match("SUSE:15.5", "libxml2", "0:2.12.5-150600.3.9"); ok {
+		t.Fatal("a different SLE service pack must not match")
+	}
+}
+
+func TestRpmOvalAmbiguousFixedAuthorityNeverFallsBackOpenEnded(t *testing.T) {
+	doc := oracleDoc(`<definitions>
+	  <definition class="vulnerability" id="oval:com.oracle.elsa:def:9300"><metadata><title>ELSA affected</title>
+	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9500"/></metadata>
+	    <criteria><criterion test_ref="topen"/></criteria></definition>
+	  <definition class="patch" id="oval:com.oracle.elsa:def:9301"><metadata><title>ELSA fixed lineage one</title>
+	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9500"/></metadata>
+	    <criteria><criterion test_ref="tfixed1"/></criteria></definition>
+	  <definition class="patch" id="oval:com.oracle.elsa:def:9302"><metadata><title>ELSA fixed lineage two</title>
+	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-9500"/></metadata>
+	    <criteria><criterion test_ref="tfixed2"/></criteria></definition>
+	  </definitions>
+	  <tests>
+	    <linux:rpminfo_test id="topen" check="at least one"><object object_ref="o"/><state state_ref="sopen"/></linux:rpminfo_test>
+	    <linux:rpminfo_test id="tfixed1"><object object_ref="o"/><state state_ref="sfixed1"/></linux:rpminfo_test>
+	    <linux:rpminfo_test id="tfixed2"><object object_ref="o"/><state state_ref="sfixed2"/></linux:rpminfo_test>
+	  </tests>
+	  <objects><linux:rpminfo_object id="o"><name>kernel</name></linux:rpminfo_object></objects>
+	  <states>
+	    <linux:rpminfo_state id="sopen"><evr operation="greater than or equal">0</evr></linux:rpminfo_state>
+	    <linux:rpminfo_state id="sfixed1"><evr operation="less than">0:4.18.0-1.el9</evr></linux:rpminfo_state>
+	    <linux:rpminfo_state id="sfixed2"><evr operation="less than">0:5.14.0-1.el9</evr></linux:rpminfo_state>
+	  </states>`)
+	advs, err := ParseOVAL(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(advs) != 0 {
+		t.Fatalf("cross-lineage fixed authority is ambiguous and must skip instead of falling back open-ended: %+v", advs)
 	}
 }
 

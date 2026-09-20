@@ -24,17 +24,21 @@ import (
 //     name to a "less than" fixed version (a <version> element for Ubuntu, <evr> for Debian). Keyed
 //     "Ubuntu:<release>" (from the id codename) or "Debian:<major>" (from the affected <platform>), one file
 //     is one release.
-//   - rpm-family (Oracle Linux com.oracle.elsa, AlmaLinux org.almalinux.al, openSUSE org.opensuse.security):
-//     rpminfo tests bind a package name to a "less than" <evr>. A file can mix releases, so each package is
-//     keyed to the release its own rpm dist tag names (.elN / .olN), or, for a version with no dist tag (SUSE),
-//     the definition's single covered release; the covered majors come from the platform (Oracle, SUSE) or the
-//     affected CPE (AlmaLinux). One patch fixes several CVEs and a CVE spans releases, so packages are unioned
-//     per CVE into one advisory. Modular definitions are skipped (they need the enabled module stream the scan
-//     side does not carry). See rpmOvalDistros for the per-feed configuration. SUSE ships gzip, the rest bzip2.
+//   - rpm-family (Oracle Linux com.oracle.elsa, AlmaLinux org.almalinux.al, openSUSE/SLE
+//     org.opensuse.security): rpminfo tests bind a package either to a "less than" fixed EVR or to a
+//     not-yet-fixed fact (an existence-only test, or an explicit zero-floor lower bound such as SUSE's
+//     "greater than 0:0-0"). A file can mix releases, so a
+//     fixed binding keys by its own rpm dist tag (.elN / .olN); a not-yet-fixed binding has no usable EVR and
+//     is emitted only when the definition covers exactly one release. The covered majors come from platform
+//     metadata (Oracle/SUSE) or affected CPEs (AlmaLinux). One definition can name several CVEs and a CVE can
+//     span definitions/releases, so bindings are merged per CVE. A real fixed boundary always dominates an
+//     open-ended claim for the same (CVE, ecosystem, package), preventing a stale not-yet-fixed definition
+//     from matching a version the vendor later fixed. Modular definitions remain skipped because sound
+//     matching needs the enabled module stream the scan side does not carry.
 //
-// Each binding maps to a [0, fixed) ECOSYSTEM range that the owned dpkg/rpm comparator orders and the
-// scan-side osDistroEcosystem keys identically. A package with no "less than" fixed version (not-yet-fixed /
-// not-affected) is skipped conservatively, so a match always carries an actionable fix.
+// Fixed bindings map to [0, fixed); not-yet-fixed bindings map to [0, infinity). Both use the same owned rpm
+// comparator and scan-side distro ecosystem key. Non-zero lower bounds and ambiguous multi-release
+// not-yet-fixed facts fail closed rather than widening a vendor range.
 
 // --- OVAL XML shapes (matched by LOCAL element name, so the linux-def namespace prefix is irrelevant) ---
 
@@ -58,6 +62,7 @@ type ovalRef struct {
 // is an affected+fixed fact regardless of the boolean shape.
 type ovalCriteria struct {
 	Comment   string          `xml:"comment,attr"`
+	Negate    bool            `xml:"negate,attr"`
 	Criteria  []ovalCriteria  `xml:"criteria"`
 	Criterion []ovalCriterion `xml:"criterion"`
 }
@@ -65,11 +70,15 @@ type ovalCriteria struct {
 type ovalCriterion struct {
 	TestRef string `xml:"test_ref,attr"`
 	Comment string `xml:"comment,attr"`
+	Negate  bool   `xml:"negate,attr"`
 }
 
 type ovalTest struct {
-	ID     string `xml:"id,attr"`
-	Object struct {
+	ID             string `xml:"id,attr"`
+	Comment        string `xml:"comment,attr"`
+	Check          string `xml:"check,attr"`
+	CheckExistence string `xml:"check_existence,attr"`
+	Object         struct {
 		Ref string `xml:"object_ref,attr"`
 	} `xml:"object"`
 	State struct {
@@ -328,15 +337,22 @@ func (s *ovalScan) rpmDistro() *rpmOvalDistro {
 type rpmOvalAcc struct {
 	summary  string
 	score    float64
-	affected []advisory.AffectedPackage
-	seen     map[string]bool // "ecosystem\x00package" dedup
+	bindings map[string]*rpmOvalBindingAcc // "ecosystem\x00package" -> merged authority
+	order    []string                      // first-seen binding order
+}
+
+type rpmOvalBindingAcc struct {
+	openEnded bool
+	fixedEVRs map[string]struct{}
 }
 
 // rpmOvalAdvisories builds advisories from an rpm-family OVAL document. One file can mix releases, so the
-// release majors a definition covers come from distro.majorsOf; one patch definition fixes several CVEs and
-// the same CVE is fixed across several releases, so affected packages are UNIONED per CVE across definitions
-// into one advisory (the store upserts by id, overwriting affected, so per-(CVE, definition) advisories would
-// keep only the last release). Modular definitions are skipped.
+// release majors a definition covers come from distro.majorsOf. One definition can name several CVEs and the
+// same CVE can appear in several definitions, so bindings are merged by (CVE, ecosystem, package) before
+// emission. This merge is authority-preserving: any concrete fixed EVR wins over an open-ended
+// not-yet-fixed claim. When several fixed EVRs exist, the same rpm-lineage resolver used by updateinfo/Rocky
+// selects a superseding max within one lineage and fails closed across lineages. Thus definition order can
+// never turn a known-fixed package back into [0, infinity). Modular definitions are skipped.
 func (s *ovalScan) rpmOvalAdvisories(distro rpmOvalDistro) []advisory.Advisory {
 	byCVE := map[string]*rpmOvalAcc{}
 	order := make([]string, 0)
@@ -348,11 +364,11 @@ func (s *ovalScan) rpmOvalAdvisories(distro rpmOvalDistro) []advisory.Advisory {
 		if d.Class != "" && d.Class != "vulnerability" && d.Class != "patch" {
 			continue
 		}
-		// A definition gated on an enabled module stream fixes a MODULAR package; matching it soundly needs the
-		// stream the scan side does not carry, so skip the whole definition. rpmOvalAffected also skips any
-		// per-package binding whose fixed version carries a ".module" build tag (the second signal).
+		if criteriaHasNegation(&d.Criteria) {
+			continue // flattening cannot preserve boolean negation; skip rather than invert affected authority
+		}
 		if criteriaHasModule(&d.Criteria) {
-			continue
+			continue // matching a modular package soundly requires the enabled stream, which inventory lacks
 		}
 		majors := distro.majorsOf(d)
 		if len(majors) == 0 {
@@ -371,7 +387,11 @@ func (s *ovalScan) rpmOvalAdvisories(distro rpmOvalDistro) []advisory.Advisory {
 		for _, cve := range cves {
 			a := byCVE[cve]
 			if a == nil {
-				a = &rpmOvalAcc{summary: summary, score: score, seen: map[string]bool{}}
+				a = &rpmOvalAcc{
+					summary:  summary,
+					score:    score,
+					bindings: map[string]*rpmOvalBindingAcc{},
+				}
 				byCVE[cve] = a
 				order = append(order, cve)
 			}
@@ -380,27 +400,68 @@ func (s *ovalScan) rpmOvalAdvisories(distro rpmOvalDistro) []advisory.Advisory {
 			}
 			for _, ap := range affected {
 				key := ap.Ecosystem + "\x00" + ap.Package
-				if a.seen[key] {
-					continue
+				binding := a.bindings[key]
+				if binding == nil {
+					binding = &rpmOvalBindingAcc{fixedEVRs: map[string]struct{}{}}
+					a.bindings[key] = binding
+					a.order = append(a.order, key)
 				}
-				a.seen[key] = true
-				a.affected = append(a.affected, ap)
+				if fixed := strings.TrimSpace(ap.FixedVersion); fixed != "" {
+					binding.fixedEVRs[fixed] = struct{}{}
+				} else {
+					binding.openEnded = true
+				}
 			}
 		}
 	}
 	out := make([]advisory.Advisory, 0, len(order))
 	for _, cve := range order {
 		a := byCVE[cve]
-		out = append(out, advisory.Advisory{ID: cve, Summary: a.summary, CVSSScore: a.score, Affected: a.affected})
+		affected := make([]advisory.AffectedPackage, 0, len(a.order))
+		for _, key := range a.order {
+			ecosystem, pkg, ok := strings.Cut(key, "\x00")
+			if !ok {
+				continue
+			}
+			binding := a.bindings[key]
+			switch {
+			case len(binding.fixedEVRs) > 0:
+				fixed := resolveRpmFixedInLineage(ecosystem, binding.fixedEVRs)
+				if fixed == "" {
+					continue // ambiguous/unorderable fixed authority: skip instead of falling back open-ended
+				}
+				affected = append(affected, advisory.AffectedPackage{
+					Ecosystem:    ecosystem,
+					Package:      pkg,
+					Ranges:       []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}}}},
+					FixedVersion: fixed,
+				})
+			case binding.openEnded:
+				affected = append(affected, advisory.AffectedPackage{
+					Ecosystem: ecosystem,
+					Package:   pkg,
+					Ranges:    []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}}}},
+				})
+			}
+		}
+		if len(affected) == 0 {
+			continue
+		}
+		out = append(out, advisory.Advisory{ID: cve, Summary: a.summary, CVSSScore: a.score, Affected: affected})
 	}
 	return out
 }
 
-// rpmOvalAffected resolves a definition's non-modular fixed bindings, keying EACH package by the release its
-// OWN version's rpm dist tag names (.elN / .olN), constrained to the definition's covered majors. Because one
-// definition can cover several releases (a shared UEK build, or per-release package tests), keying by the
-// version's own dist tag is what stops a package being emitted under a release it does not belong to (a false
-// match). A version with no recognizable dist tag is keyed only when the definition covers one release.
+// rpmOvalAffected resolves a definition's rpm package bindings. A concrete "less than" fixed EVR is keyed
+// by the release encoded in its own dist tag (.elN/.olN), falling back to the definition's release only when
+// that release is unique. A not-yet-fixed fact has no release-bearing EVR, so it is emitted ONLY for a
+// single-release definition and only in two conservative OVAL shapes:
+//   - existence-only rpminfo test whose check_existence is/defaults to at_least_one_exists;
+//   - a zero-floor state: SUSE affected feeds use "greater than 0:0-0"; some feeds use
+//     "greater than or equal" with an equivalent zero EVR.
+//
+// Any real non-zero lower bound marks the package bounded and suppresses [0,...] emission. The caller merges
+// duplicate bindings across definitions and lets concrete fixed authority dominate open-ended authority.
 func rpmOvalAffected(d *ovalDefinition, ecosystemPrefix string, majors map[string]bool, tests map[string]ovalTest, objects map[string][]string, states map[string]ovalState) []advisory.AffectedPackage {
 	singleMajor := ""
 	if len(majors) == 1 {
@@ -408,65 +469,169 @@ func rpmOvalAffected(d *ovalDefinition, ecosystemPrefix string, majors map[strin
 			singleMajor = m
 		}
 	}
-	// A package that also carries an upper-exclusion ("greater than [or equal]") state in this definition is a
-	// BOUNDED [X, Y) affected range, not a fixed-at boundary; emitting its "less than Y" as [0, Y) would widen
-	// past X and match versions below X that are not affected. Current feeds never pair the two for one package
-	// (verified against the SUSE feed), so this is a fail-closed guard against a future feed that does.
 	bounded := boundedPackages(d, tests, objects, states)
-	seen := map[string]bool{}
 	var out []advisory.AffectedPackage
-	for _, ref := range flattenCriteria(&d.Criteria) {
+	for _, criterion := range flattenCriterionEntries(&d.Criteria) {
+		ref := criterion.TestRef
 		t, ok := tests[ref]
 		if !ok {
 			continue
 		}
 		packages := objects[t.Object.Ref]
+		if len(packages) == 0 {
+			continue
+		}
+
+		// OVAL defaults an omitted check_existence to at_least_one_exists. With no state, the test is a
+		// package-existence fact. Restrict it to one concrete package name and one release so evaluating a
+		// component never depends on another variable-expanded object or an ambiguous distro key.
+		if strings.TrimSpace(t.State.Ref) == "" {
+			if singleMajor == "" || len(packages) != 1 || !rpmPositiveExistence(t.CheckExistence) || !rpmPositiveCheck(t.Check) {
+				continue
+			}
+			pkg := strings.TrimSpace(packages[0])
+			// A state-less test is not enough by itself: OVAL definitions also contain package-existence
+			// gates for the platform ("... is installed"). Require the vendor's explicit affected wording
+			// and bind it to this exact package name before minting vulnerability authority.
+			if pkg == "" || !rpmExplicitAffectedAuthority(criterion.Comment, t.Comment, pkg) || bounded[pkg] {
+				continue
+			}
+			out = append(out, advisory.AffectedPackage{
+				Ecosystem: ecosystemPrefix + singleMajor,
+				Package:   pkg,
+				Ranges:    []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}}}},
+			})
+			continue
+		}
+
 		st, ok := states[t.State.Ref]
-		if len(packages) == 0 || !ok {
+		if !ok {
 			continue
 		}
 		operation, value, ok := st.fixed()
 		if !ok {
 			continue
 		}
-		fixed := strings.TrimSpace(value)
-		if strings.ToLower(strings.TrimSpace(operation)) != "less than" || fixed == "" {
-			continue
-		}
-		if isDebianZeroBound(fixed) || strings.Contains(fixed, ".module") {
-			continue
-		}
-		major := oracleReleaseFromEVR(fixed)
-		if major == "" {
-			major = singleMajor // no dist tag: only safe to key when the definition covers one release
-		}
-		if major == "" || !majors[major] {
-			continue // the version's release is unknown or not one this definition covers: skip
-		}
-		ecosystem := ecosystemPrefix + major
-		for _, pkg := range packages {
-			if bounded[pkg] {
-				continue // a [X, Y) range: skip rather than emit an overshooting [0, Y)
-			}
-			key := ecosystem + "\x00" + pkg
-			if seen[key] {
+		op := strings.ToLower(strings.TrimSpace(operation))
+		value = strings.TrimSpace(value)
+
+		switch op {
+		case "less than":
+			fixed := value
+			if fixed == "" || isDebianZeroBound(fixed) || strings.Contains(fixed, ".module") {
 				continue
 			}
-			seen[key] = true
-			out = append(out, advisory.AffectedPackage{
-				Ecosystem:    ecosystem,
-				Package:      pkg,
-				Ranges:       []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}}}},
-				FixedVersion: fixed,
-			})
+			major := oracleReleaseFromEVR(fixed)
+			if major == "" {
+				major = singleMajor // no dist tag: only safe to key when the definition covers one release
+			}
+			if major == "" || !majors[major] {
+				continue
+			}
+			ecosystem := ecosystemPrefix + major
+			for _, rawPkg := range packages {
+				pkg := strings.TrimSpace(rawPkg)
+				if pkg == "" || bounded[pkg] {
+					continue // a real [X,Y) range must never be widened to [0,Y)
+				}
+				out = append(out, advisory.AffectedPackage{
+					Ecosystem:    ecosystem,
+					Package:      pkg,
+					Ranges:       []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}}}},
+					FixedVersion: fixed,
+				})
+			}
+
+		case "greater than", "greater than or equal":
+			// SUSE's affected-only OVAL feed represents "installed package is affected, no fix published" as
+			// EVR > 0:0-0. Some rpm OVAL producers use >= with an equivalent zero floor. These are the ONLY
+			// lower-bound-only states we widen to [0, infinity); every non-zero lower bound remains fail-closed.
+			// Require a single concrete package and an affirmative check so a variable-expanded/negated test
+			// cannot become per-package authority.
+			if singleMajor == "" || len(packages) != 1 || !rpmAllVersionsFloor(op, value) || !rpmPositiveCheck(t.Check) {
+				continue
+			}
+			ecosystem := ecosystemPrefix + singleMajor
+			for _, rawPkg := range packages {
+				pkg := strings.TrimSpace(rawPkg)
+				if pkg == "" || !rpmExplicitAffectedAuthority(criterion.Comment, t.Comment, pkg) || bounded[pkg] {
+					continue
+				}
+				out = append(out, advisory.AffectedPackage{
+					Ecosystem: ecosystem,
+					Package:   pkg,
+					Ranges:    []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}}}},
+				})
+			}
 		}
 	}
 	return out
 }
 
-// boundedPackages returns the set of packages a definition constrains with an upper-exclusion state
-// ("greater than" / "greater than or equal"), i.e. the lower bound of a [X, Y) affected range. Such a package
-// must not be emitted from its "less than Y" state alone (that would be [0, Y), overshooting past X).
+// rpmPositiveExistence reports whether a state-less OVAL test is an affirmative package-existence fact.
+// OVAL defaults an omitted check_existence to at_least_one_exists. "any_exist" also proves at least one
+// matching object may exist only weakly (zero is permitted), so it is deliberately NOT accepted. Likewise
+// all_exist/only_one_exists depend on set cardinality that the per-component matcher cannot reproduce.
+func rpmPositiveExistence(check string) bool {
+	check = strings.ToLower(strings.TrimSpace(check))
+	return check == "" || check == "at_least_one_exists"
+}
+
+// rpmPositiveCheck accepts only affirmative item-state aggregation. OVAL requires this attribute, so an
+// absent/unknown value is malformed and fails closed. "none satisfy" in particular is a negation and must
+// never mint affected authority. "only one" depends on runtime item cardinality the per-component matcher
+// does not carry, so it is also declined.
+func rpmPositiveCheck(check string) bool {
+	switch strings.ToLower(strings.TrimSpace(check)) {
+	case "at least one", "all":
+		return true
+	default:
+		return false
+	}
+}
+
+// rpmExplicitAffectedAuthority distinguishes a vulnerable-package test from the platform/package-presence
+// gates in the same OVAL definition. SUSE puts "<package> is affected" on the criterion while the referenced
+// rpminfo_test says only "<package> is >0"; some producers may place the explicit wording on the test itself.
+// Accept either layer, but only as an exact package-bound assertion. "... is installed" never grants CVE
+// authority.
+func rpmExplicitAffectedAuthority(criterionComment, testComment, pkg string) bool {
+	pkg = strings.TrimSpace(pkg)
+	if pkg == "" {
+		return false
+	}
+	want := pkg + " is affected"
+	return strings.EqualFold(strings.TrimSpace(criterionComment), want) ||
+		strings.EqualFold(strings.TrimSpace(testComment), want)
+}
+
+// rpmZeroFloor recognizes only canonical zero EVRs used as the lower edge of an "all installed versions"
+// vendor assertion. 0:0-0 is SUSE's affected-feed form; 0 and 0:0 occur in other OVAL producers.
+func rpmZeroFloor(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "0", "0:0", "0:0-0":
+		return true
+	default:
+		return false
+	}
+}
+
+// rpmAllVersionsFloor identifies the two source encodings accepted as not-yet-fixed authority. The
+// operation is part of the contract: any non-zero greater-than bound describes a genuinely bounded affected
+// interval and must not be widened to all versions.
+func rpmAllVersionsFloor(operation, value string) bool {
+	switch strings.ToLower(strings.TrimSpace(operation)) {
+	case "greater than", "greater than or equal":
+		return rpmZeroFloor(value)
+	default:
+		return false
+	}
+}
+
+// boundedPackages returns packages constrained by a REAL lower bound ("greater than", or
+// "greater than or equal" to a non-zero EVR). Those shapes describe [X,Y) when paired with a less-than state,
+// so emitting the upper bound alone as [0,Y) would create false positives. A >=0 state is not a lower-bound
+// restriction: an accepted zero-floor state is the explicit all-versions affected form and therefore does not mark the package bounded.
 func boundedPackages(d *ovalDefinition, tests map[string]ovalTest, objects map[string][]string, states map[string]ovalState) map[string]bool {
 	bounded := map[string]bool{}
 	for _, ref := range flattenCriteria(&d.Criteria) {
@@ -479,14 +644,17 @@ func boundedPackages(d *ovalDefinition, tests map[string]ovalTest, objects map[s
 		if len(packages) == 0 || !ok {
 			continue
 		}
-		op, _, ok := st.fixed()
+		op, value, ok := st.fixed()
 		if !ok {
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(op)) {
 		case "greater than", "greater than or equal":
+			if rpmAllVersionsFloor(op, value) {
+				continue
+			}
 			for _, pkg := range packages {
-				bounded[pkg] = true
+				bounded[strings.TrimSpace(pkg)] = true
 			}
 		}
 	}
@@ -778,6 +946,9 @@ func buildOVALAdvisory(d *ovalDefinition, ecosystem string, tests map[string]ova
 	if d.Class != "" && d.Class != "vulnerability" {
 		return advisory.Advisory{}, false
 	}
+	if criteriaHasNegation(&d.Criteria) {
+		return advisory.Advisory{}, false // flattened package facts cannot soundly represent an inverted branch
+	}
 	cve := ""
 	for _, r := range d.References {
 		if r.Source == "CVE" && strings.HasPrefix(r.RefID, "CVE-") {
@@ -853,6 +1024,32 @@ func affectedFromCriteria(d *ovalDefinition, ecosystem string, tests map[string]
 // in-depth against a corrupt/crafted feed, mirroring the misconfig locator cap).
 const maxCriteriaDepth = 1000
 
+// criteriaHasNegation reports whether any criteria node or criterion in the tree inverts its result. Package
+// extraction deliberately flattens the boolean tree into independent affected facts, so preserving a negated
+// branch would require evaluating the complete OVAL expression against a host. Fail closed for the whole
+// definition instead: ignoring negate can turn "package is NOT affected" into open-ended affected authority.
+func criteriaHasNegation(c *ovalCriteria) bool { return criteriaHasNegationDepth(c, 0) }
+
+func criteriaHasNegationDepth(c *ovalCriteria, depth int) bool {
+	if depth > maxCriteriaDepth {
+		return true // malformed/hostile depth: do not extract facts from a partially inspected tree
+	}
+	if c.Negate {
+		return true
+	}
+	for _, cr := range c.Criterion {
+		if cr.Negate {
+			return true
+		}
+	}
+	for i := range c.Criteria {
+		if criteriaHasNegationDepth(&c.Criteria[i], depth+1) {
+			return true
+		}
+	}
+	return false
+}
+
 // criteriaHasModule reports whether the (possibly nested) criteria tree gates on an enabled module stream,
 // detected by a "Module <name>:<stream> is enabled" comment on any criterion or sub-criteria. Such a
 // definition fixes a modular package.
@@ -881,6 +1078,29 @@ func criteriaHasModuleDepth(c *ovalCriteria, depth int) bool {
 func isModuleComment(comment string) bool {
 	c := strings.ToLower(comment)
 	return strings.Contains(c, "module ") && strings.Contains(c, "is enabled")
+}
+
+// flattenCriterionEntries preserves the criterion-level comment alongside each test_ref. This matters for
+// rpm affected-only feeds: SUSE's vulnerability authority ("<package> is affected") lives on the criterion,
+// while the referenced rpminfo_test comment only describes the mechanical state ("<package> is >0").
+func flattenCriterionEntries(c *ovalCriteria) []ovalCriterion {
+	return flattenCriterionEntriesDepth(c, 0)
+}
+
+func flattenCriterionEntriesDepth(c *ovalCriteria, depth int) []ovalCriterion {
+	if depth > maxCriteriaDepth {
+		return nil
+	}
+	var out []ovalCriterion
+	for _, cr := range c.Criterion {
+		if cr.TestRef != "" {
+			out = append(out, cr)
+		}
+	}
+	for i := range c.Criteria {
+		out = append(out, flattenCriterionEntriesDepth(&c.Criteria[i], depth+1)...)
+	}
+	return out
 }
 
 // flattenCriteria collects every criterion test_ref in the (possibly nested) criteria tree.
