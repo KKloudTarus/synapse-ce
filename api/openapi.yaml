@@ -9885,6 +9885,21 @@ components:
               The derived reachability evidence for this finding (EPIC #1042 0.2), present on the findings
               read path. Omitted when the reachability judgment subsystem is unavailable.
             $ref: "#/components/schemas/ReachabilityEvidence"
+          compliance_controls:
+            type: array
+            description: >
+              The curated regulatory/standard controls this finding's CWE and rule map to (a deterministic
+              lookup of published guidance, never a model output). Each entry is a control the finding BEARS ON
+              (i.e. fails); a mapping is never a pass, certification, or statement of full-framework compliance.
+              Only the curated frameworks are mapped; interpretive frameworks (NIST 800-53, HIPAA, SOC 2, and PCI
+              DSS beyond requirement 6.2.4) are deliberately excluded (issue #1041 / ADR 0009). Omitted when the
+              finding maps to no control.
+            items:
+              type: object
+              properties:
+                Framework: {type: string, description: "e.g. OWASP-2021, PCI-DSS-4.0, ISO-27001-2022, CIS-AWS-3.0, CIS-Kubernetes-1.10"}
+                ID: {type: string, description: "control/category id, e.g. A03:2021, 6.2.4, A.8.28"}
+                Title: {type: string}
           Impact: {type: string}
           Priority: {type: integer}
           ClassReachability: {type: string}
