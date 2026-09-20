@@ -2,10 +2,66 @@ package compliance
 
 import (
 	"reflect"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 )
+
+// TestConstrainedFrameworkControlIDsPinned enforces the ADR 0009 scope at the CONTROL-ID level, not only the
+// framework-name level: PCI DSS is mapped ONLY to requirement 6.2.4 (full PCI DSS is deferred) and ISO 27001
+// ONLY to A.8.28 (secure coding). TestInterpretiveFrameworksExcluded pins the framework NAMES, so it would not
+// catch a NIST-derived control smuggled in under the already-supported "PCI-DSS-4.0" or "ISO-27001-2022" name;
+// pinning the exact control-ID set for these constrained frameworks does. OWASP and CIS control sets may grow
+// with coverage, so they are intentionally not pinned here.
+func TestConstrainedFrameworkControlIDsPinned(t *testing.T) {
+	ids := map[string]map[string]bool{}
+	collect := func(tbl map[string][]Control) {
+		for _, cs := range tbl {
+			for _, c := range cs {
+				if ids[c.Framework] == nil {
+					ids[c.Framework] = map[string]bool{}
+				}
+				ids[c.Framework][c.ID] = true
+			}
+		}
+	}
+	collect(cweControls)
+	collect(ruleControls)
+	want := map[string][]string{
+		"PCI-DSS-4.0":    {"6.2.4"},
+		"ISO-27001-2022": {"A.8.28"},
+	}
+	for framework, wantIDs := range want {
+		got := make([]string, 0, len(ids[framework]))
+		for id := range ids[framework] {
+			got = append(got, id)
+		}
+		sort.Strings(got)
+		if !reflect.DeepEqual(got, wantIDs) {
+			t.Errorf("%s maps control IDs %v, want exactly %v: ADR 0009 scopes it to that set, so adding another control ID (e.g. a full-PCI or NIST-derived control under this name) is scope creep and needs the reopening bar", framework, got, wantIDs)
+		}
+	}
+}
+
+// TestWiredComplianceSpecIsSynapseOwned guards the generic Spec PASS/FAIL engine (Evaluate) against emitting a
+// framework-named certification. The engine renders any Spec as per-control PASS/FAIL, and the interpretive-
+// framework exclusion binds only the curated mapping tables, not the Spec engine. So the wired spec must be
+// Synapse's own baseline, never an external/interpretive framework: a Spec{ID:"NIST-800-53r5"} evaluated here
+// would print PASS per control and bypass the mapping-table guard entirely (ADR 0009's reopening conditions do
+// not cover Spec ingestion). This test is the guard for that side door.
+func TestWiredComplianceSpecIsSynapseOwned(t *testing.T) {
+	spec := BaselineSpec()
+	if !strings.HasPrefix(spec.ID, "synapse-") {
+		t.Errorf("wired compliance Spec ID %q is not Synapse-owned; the Spec PASS/FAIL engine must certify only Synapse's own baseline, not an external framework (ADR 0009)", spec.ID)
+	}
+	for _, c := range spec.Controls {
+		if !strings.HasPrefix(c.ID, "SAB-") {
+			t.Errorf("baseline control %q is not a Synapse-owned SAB- control; the Spec engine must not render an external-framework control as a certified PASS", c.ID)
+		}
+	}
+}
 
 // TestControlsForSASTCWEs: the CWEs the pattern-SAST analyzer emits today all map (so a SAST finding always
 // carries compliance tags), to their published OWASP 2021 categories.
