@@ -161,6 +161,11 @@ func DefaultPythonCatalog() PythonCatalog {
 			{Pattern: pyCall([]string{"django.utils.html", "flask"}, []string{"escape"}), Classes: []TaintClass{TaintXSS}},
 			{Pattern: pyCall([]string{"shlex"}, []string{"quote"}), Classes: []TaintClass{TaintCommand}},
 			{Pattern: pyCall([]string{"werkzeug.utils"}, []string{"secure_filename"}), Classes: []TaintClass{TaintPathTraversal}},
+			// CWE-22: basename strips every leading directory component, so the value can no longer traverse out
+			// of a directory (mirrors the modeled JS path.basename). It neutralizes ONLY path traversal: it does
+			// not make an arbitrary-file-in-cwd read safe (a different concern, not the traversal class) and does
+			// nothing for SQL, command, or XSS. posixpath/ntpath are the platform implementations os.path aliases.
+			{Pattern: pyCall([]string{"os.path", "posixpath", "ntpath"}, []string{"basename"}), Classes: []TaintClass{TaintPathTraversal}},
 			{Pattern: pyCall([]string{"yaml"}, []string{"safe_load"}), Classes: []TaintClass{TaintDeserialization}},
 			// LDAP FILTER escaping neutralizes only the LDAP class; it does nothing for SQL or a URL. DN
 			// escaping (escape_dn_chars) is deliberately excluded: it escapes distinguished-name components,

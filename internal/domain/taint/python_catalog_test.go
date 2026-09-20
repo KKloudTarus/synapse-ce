@@ -185,6 +185,14 @@ func TestPythonCatalogModelsInjectionClasses(t *testing.T) {
 	if !neutralizes("python:ldap.filter:escape_filter_chars", TaintLDAP) {
 		t.Error("twin: escape_filter_chars must neutralize the LDAP class")
 	}
+	// os.path.basename strips directory components, so it neutralizes path traversal (mirrors JS path.basename),
+	// and only that class: it must not be treated as a SQL or command sanitizer.
+	if !neutralizes("python:os.path:basename", TaintPathTraversal) {
+		t.Error("twin: os.path.basename must neutralize the path-traversal class")
+	}
+	if neutralizes("python:os.path:basename", TaintCommand) {
+		t.Error("twin: os.path.basename must not neutralize command injection")
+	}
 	// re.escape turns the value into a literal pattern, so it neutralizes ReDoS, and only ReDoS.
 	if !neutralizes("python:re:escape", TaintReDoS) {
 		t.Error("twin: re.escape must neutralize the ReDoS class")
