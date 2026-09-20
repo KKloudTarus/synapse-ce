@@ -36,6 +36,7 @@ const (
 	SectionTop         = "top"         // top findings to remediate first
 	SectionFindings    = "findings"    // full findings table
 	SectionDetails     = "details"     // per-finding detail
+	SectionCompliance  = "compliance"  // per-framework control-mapping rollup (assessed mappings, never certification)
 	SectionScan        = "scan"        // scan & SBOM insight
 	SectionEvidence    = "evidence"    // evidence & chain of custody
 	SectionExhibits    = "exhibits"    // inline evidence images (captured screenshots)
@@ -45,7 +46,7 @@ const (
 // order regardless of the order requested, so the output stays deterministic.
 var sectionOrder = []string{
 	SectionEngagement, SectionScope, SectionMethodology, SectionSummary,
-	SectionRemediation, SectionRisk, SectionTop, SectionFindings, SectionDetails, SectionScan, SectionEvidence, SectionExhibits,
+	SectionRemediation, SectionRisk, SectionTop, SectionFindings, SectionDetails, SectionCompliance, SectionScan, SectionEvidence, SectionExhibits,
 }
 
 // Report types frame the deliverable: each picks a title, an
@@ -74,14 +75,14 @@ type reportProfile struct {
 // captured images), so including them here is safe – they self-omit otherwise.
 var fullSections = []string{
 	SectionEngagement, SectionScope, SectionMethodology, SectionSummary,
-	SectionRisk, SectionTop, SectionFindings, SectionDetails, SectionScan, SectionEvidence, SectionExhibits,
+	SectionRisk, SectionTop, SectionFindings, SectionDetails, SectionCompliance, SectionScan, SectionEvidence, SectionExhibits,
 }
 
 // assessmentSections is the external/internal pentest set: same client-ready spine,
 // minus the SCA-specific scan section, plus chain-of-custody evidence + image exhibits.
 var assessmentSections = []string{
 	SectionEngagement, SectionScope, SectionMethodology, SectionSummary,
-	SectionRisk, SectionTop, SectionFindings, SectionDetails, SectionEvidence, SectionExhibits,
+	SectionRisk, SectionTop, SectionFindings, SectionDetails, SectionCompliance, SectionEvidence, SectionExhibits,
 }
 
 var reportProfiles = map[string]reportProfile{
@@ -363,6 +364,8 @@ func (s *Service) buildDocument(l loaded, opts Options) ports.ReportDocument {
 			sec, ok = findingsSection(findings)
 		case SectionDetails:
 			sec, ok = detailsSection(findings)
+		case SectionCompliance:
+			sec, ok = complianceSection(findings)
 		case SectionScan:
 			sec, ok = scanSection(l.insight)
 		case SectionEvidence:
@@ -819,6 +822,36 @@ func complianceLabel(cwe, ruleKey string) string {
 		labels[i] = c.Framework + " " + c.ID
 	}
 	return strings.Join(labels, ", ")
+}
+
+// complianceSection surfaces the per-framework control-mapping rollup so a report reader can never mistake a
+// partial mapping for certification. It renders, per assessed framework, how many of its assessable controls a
+// finding maps to (FAILED) against the full assessable-control denominator; the rest are NOT ASSESSED, and
+// Synapse never asserts a control PASS. Only the curated frameworks are assessed; interpretive frameworks
+// (NIST 800-53, HIPAA, SOC 2, full PCI DSS) are deliberately not mapped (ADR 0009 / issue #1041). It self-omits
+// when no finding maps to any control, so a findings-only report is unchanged.
+func complianceSection(findings []finding.Finding) (ports.ReportSection, bool) {
+	rollup := compliance.Rollup(findings)
+	if len(rollup) == 0 {
+		return ports.ReportSection{}, false
+	}
+	tbl := &ports.ReportTable{Headers: []string{"Framework", "Controls Failed", "Assessable Controls", "Findings Mapped"}}
+	for _, fc := range rollup {
+		tbl.Rows = append(tbl.Rows, []string{
+			fc.Framework,
+			fmt.Sprintf("%d", fc.Failed),
+			fmt.Sprintf("%d", fc.Assessable),
+			fmt.Sprintf("%d", fc.Findings),
+		})
+	}
+	return ports.ReportSection{
+		Heading: "Compliance Control Mapping",
+		Paragraphs: []string{
+			"Each framework below is assessed by mapping findings to specific published controls. A control is either FAILED (a finding maps to it) or NOT ASSESSED (no finding maps, or Synapse does not evaluate it); Synapse never asserts that a control PASSES.",
+			"\"Controls Failed\" is counted against the assessable-control denominator only. This is a partial control mapping for the listed weakness classes, NOT a certification, attestation, or statement of full-framework compliance. Interpretive frameworks (NIST 800-53, HIPAA, SOC 2, and PCI DSS beyond requirement 6.2.4) are deliberately not assessed.",
+		},
+		Table: tbl,
+	}, true
 }
 
 func scanSection(insight ports.ReportInsight) (ports.ReportSection, bool) {

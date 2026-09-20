@@ -157,13 +157,22 @@ func TestRenderAssemblesFullDocument(t *testing.T) {
 		t.Errorf("title = %q, want engagement name", cap.last.Title)
 	}
 	// Default = all canonical sections: engagement, scope, methodology, summary, risk,
-	// top, findings, details, scan, evidence (full deliverable structure).
-	if len(cap.last.Sections) != 10 {
+	// top, findings, details, compliance (findings map to controls), scan, evidence.
+	if len(cap.last.Sections) != 11 {
 		var got []string
 		for _, s := range cap.last.Sections {
 			got = append(got, s.Heading)
 		}
-		t.Fatalf("want 10 sections, got %d: %v", len(cap.last.Sections), got)
+		t.Fatalf("want 11 sections, got %d: %v", len(cap.last.Sections), got)
+	}
+	// The compliance rollup must surface the assessed-mapping honesty model (never certification).
+	if sec := findSection(cap.last, "Compliance Control Mapping"); sec == nil {
+		t.Error("compliance control-mapping section must render when findings map to controls")
+	} else {
+		joined := strings.Join(sec.Paragraphs, " ")
+		if !strings.Contains(joined, "NOT a certification") || !strings.Contains(joined, "never asserts") {
+			t.Errorf("compliance section must disclaim certification and never-pass, got %q", joined)
+		}
 	}
 	tbl := findTable(cap.last, "Findings Overview")
 	if tbl == nil || len(tbl.Rows) != 2 {
