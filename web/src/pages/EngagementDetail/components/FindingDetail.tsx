@@ -1,4 +1,4 @@
-import { ChevronRight, CheckVerified01, HelpCircle, Shield01, ShieldTick } from '@untitledui/icons'
+import { ChevronRight, HelpCircle, Shield01, ShieldTick } from '@untitledui/icons'
 import { useState } from 'react'
 import { Tooltip, TooltipTrigger } from '../../../components/base/tooltip/tooltip'
 import { Button, cn } from '../../../components/ui'
@@ -25,11 +25,13 @@ export function frameworkShort(framework: string): string {
 export function ComplianceChips({ controls }: { controls: Finding['complianceControls'] }) {
   if (!controls || controls.length === 0) return null
   return (
-    <div className="flex flex-wrap items-center gap-1.5" role="list" aria-label="Compliance controls">
-      <CheckVerified01 aria-hidden className="size-3.5 shrink-0 text-fg-tertiary" />
-      <span aria-hidden className="text-[11px] font-bold uppercase tracking-wide text-secondary">
-        Compliance
-      </span>
+    <div className="flex flex-wrap items-center gap-1.5" role="list" aria-label="Controls impacted by this finding">
+      <Shield01 aria-hidden className="size-3.5 shrink-0 text-fg-tertiary" />
+      <Tooltip title="Controls this finding maps to (bears on). A mapping marks the control as affected by this finding; it is not a pass, certification, or statement of full-framework compliance.">
+        <TooltipTrigger aria-label="What Controls impacted means">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-secondary">Controls impacted</span>
+        </TooltipTrigger>
+      </Tooltip>
       {controls.map((c) => (
         <span
           key={`${c.framework}:${c.id}`}
