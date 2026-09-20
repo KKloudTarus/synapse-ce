@@ -204,9 +204,10 @@ func (rt *Router) assignEngagementBusinessAsset(w http.ResponseWriter, r *http.R
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
 const (
-	clientCapabilitiesHeader       = "X-Synapse-Client-Capabilities"
-	externalFindingKindCapability  = "external-finding-kind-v1"
+	clientCapabilitiesHeader      = "X-Synapse-Client-Capabilities"
+	externalFindingKindCapability = "external-finding-kind-v1"
 )
 
 func hasClientCapability(r *http.Request, capability string) bool {
