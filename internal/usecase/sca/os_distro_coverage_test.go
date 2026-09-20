@@ -71,17 +71,28 @@ func TestOSDistroCoverageReadiness(t *testing.T) {
 		if !strings.Contains(w, "Alpine:v3.19") {
 			t.Errorf("warning must name the uncovered distro Alpine:v3.19, got %q", w)
 		}
-		if strings.Contains(w, "Red Hat:9") {
-			t.Errorf("warning must NOT name the covered distro Red Hat:9, got %q", w)
+		// Red Hat:9 is covered (patched CVEs), so it is NOT an uncovered gap, but its OVAL feed is patched-only,
+		// so the not-yet-fixed limitation is disclosed rather than left as a silent clean.
+		if !strings.Contains(w, "Red Hat:9") || !strings.Contains(w, "not-yet-fixed") {
+			t.Errorf("a covered rpm distro must disclose the not-yet-fixed limitation, got %q", w)
 		}
 	})
 
-	t.Run("store covers every distro is a no-op", func(t *testing.T) {
+	t.Run("covered rpm distro discloses the not-yet-fixed limitation, apk does not", func(t *testing.T) {
+		// Every OS distro is covered for patched CVEs. Red Hat:9 is rpm (OVAL, patched-only) so the not-yet-fixed
+		// disclosure fires; Alpine (apk, OSV-fed, carries not-yet-fixed) does not. This is the fix for the SLES
+		// false-clean: a covered rpm distro is no longer a silent no-op.
 		full := fakeCoverageSource{covered: map[string]bool{"Red Hat:9": true, "Alpine:v3.19": true}, ok: true}
 		s := &Service{sources: []ports.DetectionSource{osv, full}}
 		w, incomplete, err := s.osDistroCoverageReadiness(ctx, osDoc())
-		if err != nil || incomplete || w != "" {
-			t.Fatalf("full coverage must be a no-op, got warn=%q incomplete=%v err=%v", w, incomplete, err)
+		if err != nil || incomplete {
+			t.Fatalf("the not-yet-fixed disclosure is a warning, not a hard gap: got incomplete=%v err=%v", incomplete, err)
+		}
+		if !strings.Contains(w, "Red Hat:9") || !strings.Contains(w, "not-yet-fixed") {
+			t.Errorf("covered rpm distro Red Hat:9 must carry the not-yet-fixed disclosure, got %q", w)
+		}
+		if strings.Contains(w, "Alpine") {
+			t.Errorf("a covered apk distro (OSV-fed, carries not-yet-fixed) must NOT get the rpm not-yet-fixed note, got %q", w)
 		}
 	})
 
