@@ -76,6 +76,12 @@ type rolieFeed struct {
 				Href string `json:"href"`
 			} `json:"link"`
 		} `json:"entry"`
+		Link []struct {
+			Rel  string `json:"rel"`
+			Href string `json:"href"`
+		} `json:"link"`
+		Next    string `json:"next"`
+		NextURL string `json:"next_url"`
 	} `json:"feed"`
 }
 
@@ -110,4 +116,31 @@ func ParseROLIEFeed(data []byte) ([]string, error) {
 		urls = append(urls, self)
 	}
 	return urls, nil
+}
+
+// ParseCompleteROLIEFeed extracts a feed only when it declares no pagination continuation. Streaming callers use
+// ParseROLIEFeed and may process one page; an authoritative snapshot must reject a partial listing rather than
+// silently treating its current page as the complete provider state.
+func ParseCompleteROLIEFeed(data []byte) ([]string, error) {
+	var feed rolieFeed
+	if err := json.Unmarshal(data, &feed); err != nil {
+		return nil, fmt.Errorf("%w: parse ROLIE feed: %v", shared.ErrValidation, err)
+	}
+	if rolieFeedHasContinuation(feed) {
+		return nil, fmt.Errorf("%w: ROLIE feed declares pagination and cannot form a complete snapshot", shared.ErrValidation)
+	}
+	return ParseROLIEFeed(data)
+}
+
+func rolieFeedHasContinuation(feed rolieFeed) bool {
+	if strings.TrimSpace(feed.Feed.Next) != "" || strings.TrimSpace(feed.Feed.NextURL) != "" {
+		return true
+	}
+	for _, link := range feed.Feed.Link {
+		switch strings.ToLower(strings.TrimSpace(link.Rel)) {
+		case "next", "next-page", "next_page", "continuation", "prev", "previous", "first", "last":
+			return true
+		}
+	}
+	return false
 }

@@ -2,6 +2,7 @@ package ownadvisory
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -45,6 +46,27 @@ func TestCSAFDirFeedIngestsMappableSkipsInert(t *testing.T) {
 	}
 	if skipped != 2 { // CVE-2 inert + broken.json unparseable
 		t.Errorf("want skipped=2 (1 inert advisory + 1 unparseable file), got %d", skipped)
+	}
+}
+
+func TestCSAFDirFeedSkipsRedHatUnfixedBinaryProductsWithoutSnapshot(t *testing.T) {
+	data, err := os.ReadFile("testdata/csaf-redhat-rhel9-unfixed.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "cve-2024-11053.json", string(data))
+
+	var got []advisory.Advisory
+	skipped, err := NewCSAFDirFeed(dir).Each(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Each: %v", err)
+	}
+	if skipped != 1 || len(got) != 0 {
+		t.Fatalf("streaming CSAF must not ingest an unbounded Red Hat RPM range: skipped=%d got=%+v", skipped, got)
 	}
 }
 
