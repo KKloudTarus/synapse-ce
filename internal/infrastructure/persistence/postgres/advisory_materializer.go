@@ -18,6 +18,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityintel"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilitysource"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -28,6 +29,10 @@ func NewAdvisoryMaterializer(pool *pgxpool.Pool) *AdvisoryMaterializer {
 }
 
 var _ ports.AdvisoryMaterializer = (*AdvisoryMaterializer)(nil)
+var _ ports.SourceSnapshotPublisher = (*AdvisoryMaterializer)(nil)
+var _ ports.PublishedSourceSnapshotReader = (*AdvisoryMaterializer)(nil)
+var _ ports.BoundedCurrentSourceRecordIDs = (*AdvisoryMaterializer)(nil)
+var _ ports.AuthoritativeSourceSnapshotStore = (*AdvisoryMaterializer)(nil)
 var _ ports.AdvisoryStore = (*AdvisoryMaterializer)(nil)
 var _ ports.AdvisoryEvaluationCheckpointStore = (*AdvisoryMaterializer)(nil)
 var _ ports.VulnerabilityAdvisoryReadStore = (*AdvisoryMaterializer)(nil)
@@ -35,30 +40,69 @@ var _ ports.VulnerabilityAdvisoryImpactReadStore = (*AdvisoryMaterializer)(nil)
 var _ ports.VulnerabilityCoverageReadStore = (*AdvisoryMaterializer)(nil)
 
 func (r *AdvisoryMaterializer) CurrentSourceRecordIDs(ctx context.Context, sourceID string, yield func(string) error) error {
+	return r.currentSourceRecordIDs(ctx, sourceID, 0, true, yield)
+}
+
+func (r *AdvisoryMaterializer) CurrentSourceRecordIDsBounded(ctx context.Context, sourceID string, limit int, yield func(string) error) error {
+	if limit <= 0 {
+		return fmt.Errorf("%w: source record limit is required", shared.ErrValidation)
+	}
+	return r.currentSourceRecordIDs(ctx, sourceID, limit, false, yield)
+}
+
+func (r *AdvisoryMaterializer) currentSourceRecordIDs(ctx context.Context, sourceID string, limit int, includeAbsenceRetirements bool, yield func(string) error) error {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" || yield == nil {
 		return fmt.Errorf("%w: source id and callback are required", shared.ErrValidation)
 	}
-	rows, err := r.pool.Query(ctx, `SELECT record_id FROM advisory_observations WHERE source_id=$1 AND is_current ORDER BY record_id COLLATE "C"`, sourceID)
+	query := `SELECT record_id FROM advisory_observations WHERE source_id=$1 AND is_current`
+	args := []any{sourceID}
+	if !includeAbsenceRetirements {
+		query += ` AND NOT absence_retirement`
+	}
+	query += ` ORDER BY record_id COLLATE "C"`
+	if limit > 0 {
+		// Read one extra row before invoking the callback. A caller must never publish
+		// a prefix of an authoritative source membership as though it were complete.
+		query += ` LIMIT $2`
+		args = append(args, limit+1)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("list current source observations: %w", err)
 	}
 	defer rows.Close()
+	recordIDs := make([]string, 0, limit)
 	for rows.Next() {
 		var recordID string
 		if err := rows.Scan(&recordID); err != nil {
 			return fmt.Errorf("scan current source observation: %w", err)
 		}
+		recordIDs = append(recordIDs, recordID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if limit > 0 && len(recordIDs) > limit {
+		return fmt.Errorf("%w: current source records exceed %d", shared.ErrValidation, limit)
+	}
+	for _, recordID := range recordIDs {
 		if err := yield(recordID); err != nil {
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 type canonicalRevisionEnvelope struct {
 	Version int                `json:"version"`
 	Value   advisory.Canonical `json:"canonical"`
+}
+
+type advisoryRevisionSyncRunLink struct {
+	AdvisoryID string
+	Revision   int64
+	SyncRunID  shared.ID
 }
 
 func (r *AdvisoryMaterializer) Materialize(ctx context.Context, records []advisory.ObservationRecord) (advisory.MaterializationResult, error) {
@@ -103,12 +147,301 @@ func (r *AdvisoryMaterializer) Materialize(ctx context.Context, records []adviso
 			return advisory.MaterializationResult{}, fmt.Errorf("lock advisory identity: %w", err)
 		}
 	}
+	result, links, err := r.materializeConnected(ctx, tx, normalized, identityIDs)
+	if err != nil {
+		return advisory.MaterializationResult{}, err
+	}
+	if err := insertAdvisoryRevisionSyncRunLinks(ctx, tx, tenantID, links); err != nil {
+		return advisory.MaterializationResult{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return advisory.MaterializationResult{}, fmt.Errorf("commit advisory materialization: %w", err)
+	}
+	return result, nil
+}
+
+// MaterializeSourceSnapshot atomically publishes one complete source view. Independent
+// records are materialized separately inside one transaction because they need not
+// share identities, while any error rolls the full source change back.
+func (r *AdvisoryMaterializer) MaterializeSourceSnapshot(ctx context.Context, records []advisory.ObservationRecord) ([]advisory.MaterializationResult, error) {
+	return r.materializeSourceSnapshot(ctx, ports.SourceSnapshotPublication{}, records)
+}
+
+// PublishSourceSnapshot atomically commits a complete source view with a receipt that
+// preserves its provider checkpoint and exact revision results for durable recovery.
+func (r *AdvisoryMaterializer) PublishSourceSnapshot(ctx context.Context, publication ports.SourceSnapshotPublication, records []advisory.ObservationRecord) ([]advisory.MaterializationResult, error) {
+	if publication.SyncRunID.IsZero() {
+		return nil, fmt.Errorf("%w: source snapshot publication requires a sync run", shared.ErrValidation)
+	}
+	return r.materializeSourceSnapshot(ctx, publication, records)
+}
+
+func (r *AdvisoryMaterializer) materializeSourceSnapshot(ctx context.Context, publication ports.SourceSnapshotPublication, records []advisory.ObservationRecord) ([]advisory.MaterializationResult, error) {
+	normalized, _, err := normalizeSourceSnapshot(records)
+	if err != nil {
+		return nil, err
+	}
+	syncRunIDs := observationSyncRunIDs(normalized)
+	tenantID, hasTenant := shared.TenantFrom(ctx)
+	if !publication.SyncRunID.IsZero() {
+		if !hasTenant {
+			return nil, fmt.Errorf("%w: source snapshot publication requires tenant context", shared.ErrValidation)
+		}
+		if len(syncRunIDs) != 1 || syncRunIDs[0] != publication.SyncRunID {
+			return nil, fmt.Errorf("%w: source snapshot records do not match their publication run", shared.ErrValidation)
+		}
+	}
+	if len(syncRunIDs) > 0 && !hasTenant {
+		return nil, fmt.Errorf("%w: sync run provenance requires tenant context", shared.ErrValidation)
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin advisory source snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if len(syncRunIDs) > 0 {
+		if _, err := tx.Exec(ctx, `SELECT set_config('app.current_tenant',$1,true)`, tenantID.String()); err != nil {
+			return nil, fmt.Errorf("set advisory provenance tenant: %w", err)
+		}
+		for _, runID := range syncRunIDs {
+			var sourceID, adapterType string
+			if err := tx.QueryRow(ctx, `SELECT runs.source_id,runs.adapter_type
+				FROM vulnerability_sync_runs runs
+				JOIN jobs ON jobs.id=runs.durable_job_id AND jobs.tenant_id=$2
+				WHERE runs.id=$1`, runID.String(), tenantID.String()).Scan(&sourceID, &adapterType); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return nil, fmt.Errorf("sync run %s: %w", runID, shared.ErrNotFound)
+				}
+				return nil, fmt.Errorf("verify sync run %s: %w", runID, err)
+			}
+			if sourceID != normalized[0].Observation.SourceID || adapterType != normalized[0].Observation.SourceType {
+				return nil, fmt.Errorf("%w: source snapshot does not match its sync run", shared.ErrValidation)
+			}
+		}
+	}
+	if !publication.SyncRunID.IsZero() {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1 FROM vulnerability_source_snapshot_publications WHERE sync_run_id=$1
+		)`, publication.SyncRunID.String()).Scan(&exists); err != nil {
+			return nil, fmt.Errorf("check source snapshot publication: %w", err)
+		}
+		if exists {
+			return nil, fmt.Errorf("%w: source snapshot publication already exists", shared.ErrConflict)
+		}
+	}
+	sourceType := normalized[0].Observation.SourceType
+	if sourceType != string(vulnerabilitysource.AdapterOVAL) && sourceType != string(vulnerabilitysource.AdapterCSAF) {
+		return nil, fmt.Errorf("%w: unsupported authoritative source adapter %q", shared.ErrValidation, sourceType)
+	}
+	// A complete source can carry tens of thousands of independent identities. Taking one
+	// transaction-scoped advisory lock per identity exhausts PostgreSQL's shared lock table at
+	// real feed cardinality. Serialize the rare atomic snapshot publication against every
+	// observation writer with one table lock instead. Older writers do not know about this
+	// application-level lock, but they touch advisory_observations and acquire PostgreSQL's
+	// RowExclusiveLock, which conflicts with this ShareRowExclusiveLock during a rolling upgrade.
+	// Reads retain AccessShareLock compatibility and remain available throughout publication.
+	if _, err := tx.Exec(ctx, `LOCK TABLE advisory_observations IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return nil, fmt.Errorf("lock authoritative advisory publication: %w", err)
+	}
+	rows, err := tx.Query(ctx, `SELECT record_id, identity_ids, normalized_payload->>'SourceType' FROM advisory_observations WHERE source_id=$1 AND is_current AND NOT absence_retirement`, normalized[0].Observation.SourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list authoritative source identities: %w", err)
+	}
+	for rows.Next() {
+		var recordID, sourceType string
+		var identities []string
+		if err := rows.Scan(&recordID, &identities, &sourceType); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan authoritative source identity: %w", err)
+		}
+		if sourceType != normalized[0].Observation.SourceType {
+			rows.Close()
+			return nil, fmt.Errorf("%w: authoritative source contains an observation from another adapter", shared.ErrValidation)
+		}
+		if len(identities) != 1 || identities[0] != recordID {
+			rows.Close()
+			return nil, fmt.Errorf("%w: authoritative source record has legacy aliases", shared.ErrValidation)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("iterate authoritative source identities: %w", err)
+	}
+	rows.Close()
+	results := make([]advisory.MaterializationResult, 0, len(normalized))
+	links := make([]advisoryRevisionSyncRunLink, 0, len(normalized))
+	for _, record := range normalized {
+		result, pendingLinks, err := r.materializeConnected(ctx, tx, []advisory.ObservationRecord{record}, record.IdentityIDs())
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+		links = append(links, pendingLinks...)
+	}
+	if err := insertAdvisoryRevisionSyncRunLinks(ctx, tx, tenantID, links); err != nil {
+		return nil, err
+	}
+	if !publication.SyncRunID.IsZero() {
+		if _, err := tx.Exec(ctx, `INSERT INTO vulnerability_source_snapshot_publications(
+			sync_run_id,source_id,adapter_type,next_checkpoint,result_count
+		) VALUES($1,$2,$3,$4::jsonb,$5)`, publication.SyncRunID.String(), normalized[0].Observation.SourceID,
+			normalized[0].Observation.SourceType, publication.NextCheckpoint, len(results)); err != nil {
+			return nil, fmt.Errorf("record source snapshot publication: %w", err)
+		}
+		if err := insertSourceSnapshotResults(ctx, tx, publication.SyncRunID, results); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit advisory source snapshot: %w", err)
+	}
+	return results, nil
+}
+
+func (r *AdvisoryMaterializer) PublishedSourceSnapshot(ctx context.Context, syncRunID shared.ID) (ports.PublishedSourceSnapshot, bool, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return ports.PublishedSourceSnapshot{}, false, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
+	if syncRunID.IsZero() {
+		return ports.PublishedSourceSnapshot{}, false, fmt.Errorf("%w: sync run id is required", shared.ErrValidation)
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	publication := ports.PublishedSourceSnapshot{}
+	resultCount := 0
+	found := false
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT publications.source_id,publications.adapter_type,publications.next_checkpoint,publications.result_count
+			FROM vulnerability_source_snapshot_publications publications
+			JOIN vulnerability_sync_runs runs ON runs.id=publications.sync_run_id
+			JOIN jobs ON jobs.id=runs.durable_job_id AND jobs.tenant_id=$2
+			WHERE publications.sync_run_id=$1`, syncRunID.String(), tenantID.String()).Scan(&publication.SourceID, &publication.AdapterType, &publication.NextCheckpoint, &resultCount); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			return fmt.Errorf("load source snapshot publication: %w", err)
+		}
+		found = true
+		rows, err := tx.Query(ctx, `SELECT revisions.data,results.content_hash,results.changed_fields,
+			results.revision,results.created_revision
+			FROM vulnerability_source_snapshot_results results
+			JOIN advisory_revisions revisions ON revisions.advisory_id=results.advisory_id AND revisions.revision=results.revision
+			WHERE results.sync_run_id=$1
+			ORDER BY results.result_index`, syncRunID.String())
+		if err != nil {
+			return fmt.Errorf("list source snapshot results: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var data, fields []byte
+			var result advisory.MaterializationResult
+			if err := rows.Scan(&data, &result.ContentHash, &fields, &result.Revision, &result.CreatedRevision); err != nil {
+				return fmt.Errorf("scan source snapshot result: %w", err)
+			}
+			canonical, err := decodeCanonical(data)
+			if err != nil {
+				return fmt.Errorf("decode source snapshot result: %w", err)
+			}
+			if err := json.Unmarshal(fields, &result.ChangedFields); err != nil {
+				return fmt.Errorf("decode source snapshot result changes: %w", err)
+			}
+			result.Canonical = canonical
+			publication.Results = append(publication.Results, result)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return ports.PublishedSourceSnapshot{}, false, err
+	}
+	if !found {
+		return ports.PublishedSourceSnapshot{}, false, nil
+	}
+	if len(publication.Results) != resultCount {
+		return ports.PublishedSourceSnapshot{}, false, fmt.Errorf("%w: source snapshot publication result count does not match its receipt", shared.ErrConflict)
+	}
+	return publication, true, nil
+}
+
+func normalizeSourceSnapshot(records []advisory.ObservationRecord) ([]advisory.ObservationRecord, []string, error) {
+	if err := advisory.ValidateSourceSnapshot(records); err != nil {
+		return nil, nil, fmt.Errorf("validate advisory source snapshot: %w", err)
+	}
+	normalized := make([]advisory.ObservationRecord, 0, len(records))
+	seen := make(map[string]struct{}, len(records))
+	identitySet := make(map[string]struct{})
+	var sourceID, sourceType string
+	for _, record := range records {
+		normalizedRecord, err := record.Normalize()
+		if err != nil {
+			return nil, nil, fmt.Errorf("normalize advisory observation: %w", err)
+		}
+		if sourceID == "" {
+			sourceID = normalizedRecord.Observation.SourceID
+			sourceType = normalizedRecord.Observation.SourceType
+		}
+		if normalizedRecord.Observation.SourceID != sourceID || normalizedRecord.Observation.SourceType != sourceType {
+			return nil, nil, fmt.Errorf("%w: source snapshot contains multiple sources", shared.ErrValidation)
+		}
+		recordIdentities := normalizedRecord.IdentityIDs()
+		if len(recordIdentities) != 1 || recordIdentities[0] != normalizedRecord.Observation.RecordID {
+			return nil, nil, fmt.Errorf("%w: authoritative source snapshot records must use their record id as the sole identity", shared.ErrValidation)
+		}
+		if normalizedRecord.Observation.AbsenceRetirement {
+			if normalizedRecord.Observation.Status != advisory.StatusActive || len(normalizedRecord.Observation.Advisory.Affected) != 0 {
+				return nil, nil, fmt.Errorf("%w: authoritative source absence must be active with no affected packages", shared.ErrValidation)
+			}
+		} else if normalizedRecord.Observation.Status != advisory.StatusActive {
+			return nil, nil, fmt.Errorf("%w: authoritative source records must be active", shared.ErrValidation)
+		}
+		key := sourceID + "\x00" + normalizedRecord.Observation.RecordID
+		if _, ok := seen[key]; ok {
+			return nil, nil, fmt.Errorf("%w: duplicate provider record %s", shared.ErrConflict, key)
+		}
+		seen[key] = struct{}{}
+		for _, identityID := range normalizedRecord.IdentityIDs() {
+			identitySet[identityID] = struct{}{}
+		}
+		normalized = append(normalized, normalizedRecord)
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		return normalized[i].Observation.SourceID+"\x00"+normalized[i].Observation.RecordID < normalized[j].Observation.SourceID+"\x00"+normalized[j].Observation.RecordID
+	})
+	identityIDs := make([]string, 0, len(identitySet))
+	for identityID := range identitySet {
+		identityIDs = append(identityIDs, identityID)
+	}
+	sort.Strings(identityIDs)
+	return normalized, identityIDs, nil
+}
+
+func (r *AdvisoryMaterializer) materializeConnected(ctx context.Context, tx pgx.Tx, normalized []advisory.ObservationRecord, identityIDs []string) (advisory.MaterializationResult, []advisoryRevisionSyncRunLink, error) {
+	result, err := r.materializeConnectedResult(ctx, tx, normalized, identityIDs)
+	if err != nil {
+		return advisory.MaterializationResult{}, nil, err
+	}
+	if !result.CreatedRevision {
+		return result, nil, nil
+	}
+	runIDs := observationSyncRunIDs(normalized)
+	links := make([]advisoryRevisionSyncRunLink, len(runIDs))
+	for index, runID := range runIDs {
+		links[index] = advisoryRevisionSyncRunLink{
+			AdvisoryID: result.Canonical.Advisory.ID,
+			Revision:   result.Revision,
+			SyncRunID:  runID,
+		}
+	}
+	return result, links, nil
+}
+
+func (r *AdvisoryMaterializer) materializeConnectedResult(ctx context.Context, tx pgx.Tx, normalized []advisory.ObservationRecord, identityIDs []string) (advisory.MaterializationResult, error) {
 	for _, record := range normalized {
 		if err := r.upsertObservation(ctx, tx, record); err != nil {
 			return advisory.MaterializationResult{}, err
 		}
 	}
-
 	observations, err := r.loadConnectedObservations(ctx, tx, identityIDs)
 	if err != nil {
 		return advisory.MaterializationResult{}, err
@@ -121,7 +454,6 @@ func (r *AdvisoryMaterializer) Materialize(ctx context.Context, records []adviso
 	if err := r.validateAliases(ctx, tx, canonical.Advisory.ID, canonicalIDs); err != nil {
 		return advisory.MaterializationResult{}, err
 	}
-
 	contentHash, err := canonical.ContentHash()
 	if err != nil {
 		return advisory.MaterializationResult{}, fmt.Errorf("hash canonical advisory: %w", err)
@@ -134,27 +466,44 @@ func (r *AdvisoryMaterializer) Materialize(ctx context.Context, records []adviso
 	if previousHash != "" {
 		result.ChangedFields = advisory.Diff(previous, canonical)
 	}
-
-	// Marshal the SCAN-FACING projection: the base Advisory plus the canonical's status-derived retraction and
-	// merged risk signals (KEV/EPSS/…), via canonical.Project() so this and the in-memory store project the
-	// same fields. Withdrawn keeps a retracted advisory (a guaranteed false positive) out of the matcher, and
-	// KEV/EPSS let an OFFLINE scan order by exploitation risk without the live network enricher.
 	projection, err := json.Marshal(canonical.Project())
 	if err != nil {
 		return advisory.MaterializationResult{}, fmt.Errorf("marshal canonical projection: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO advisories (id, data, created_at, updated_at)
+
+	var revisionData, changedFields []byte
+	if previousHash != contentHash {
+		revisionData, err = json.Marshal(canonicalRevisionEnvelope{Version: 1, Value: canonical})
+		if err != nil {
+			return advisory.MaterializationResult{}, fmt.Errorf("marshal canonical revision: %w", err)
+		}
+		changedFields, err = json.Marshal(append([]advisory.ChangedField{}, result.ChangedFields...))
+		if err != nil {
+			return advisory.MaterializationResult{}, fmt.Errorf("marshal canonical changes: %w", err)
+		}
+		result.Revision = previousRevision + 1
+		result.CreatedRevision = true
+	}
+
+	var statements advisoryStatementBatch
+	statements.queue(
+		"upsert canonical advisory",
+		`INSERT INTO advisories (id, data, created_at, updated_at)
 		VALUES ($1, $2, now(), now())
-		ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data, updated_at=now()`, canonical.Advisory.ID, projection); err != nil {
-		return advisory.MaterializationResult{}, fmt.Errorf("upsert canonical advisory: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM advisory_affects WHERE advisory_id=$1`, canonical.Advisory.ID); err != nil {
-		return advisory.MaterializationResult{}, fmt.Errorf("clear canonical affects: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM advisory_cpe_affects WHERE advisory_id=$1`, canonical.Advisory.ID); err != nil {
-		return advisory.MaterializationResult{}, fmt.Errorf("clear canonical CPE affects: %w", err)
-	}
+		ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data, updated_at=now()`,
+		canonical.Advisory.ID,
+		projection,
+	)
+	statements.queue(
+		"clear canonical affects",
+		`DELETE FROM advisory_affects WHERE advisory_id=$1`,
+		canonical.Advisory.ID,
+	)
+	statements.queue(
+		"clear canonical CPE affects",
+		`DELETE FROM advisory_cpe_affects WHERE advisory_id=$1`,
+		canonical.Advisory.ID,
+	)
 	seenCPEs := map[string]struct{}{}
 	for _, current := range canonical.Advisory.CPEs {
 		parsed, err := sbom.ParseCPE23(current.Criteria)
@@ -166,9 +515,14 @@ func (r *AdvisoryMaterializer) Materialize(ctx context.Context, records []adviso
 			continue
 		}
 		seenCPEs[key] = struct{}{}
-		if _, err := tx.Exec(ctx, `INSERT INTO advisory_cpe_affects(advisory_id,cpe_part,cpe_vendor,cpe_product) VALUES($1,$2,$3,$4)`, canonical.Advisory.ID, parsed.Part, parsed.Vendor, parsed.Product); err != nil {
-			return advisory.MaterializationResult{}, fmt.Errorf("insert canonical CPE affect: %w", err)
-		}
+		statements.queue(
+			"insert canonical CPE affect",
+			`INSERT INTO advisory_cpe_affects(advisory_id,cpe_part,cpe_vendor,cpe_product) VALUES($1,$2,$3,$4)`,
+			canonical.Advisory.ID,
+			parsed.Part,
+			parsed.Vendor,
+			parsed.Product,
+		)
 	}
 	seenAffects := map[string]struct{}{}
 	for _, affected := range canonical.Advisory.Affected {
@@ -180,48 +534,122 @@ func (r *AdvisoryMaterializer) Materialize(ctx context.Context, records []adviso
 			continue
 		}
 		seenAffects[key] = struct{}{}
-		if _, err := tx.Exec(ctx, `INSERT INTO advisory_affects(advisory_id, ecosystem, package) VALUES($1,$2,$3)`, canonical.Advisory.ID, affected.Ecosystem, affected.Package); err != nil {
-			return advisory.MaterializationResult{}, fmt.Errorf("insert canonical affect: %w", err)
-		}
+		statements.queue(
+			"insert canonical affect",
+			`INSERT INTO advisory_affects(advisory_id, ecosystem, package) VALUES($1,$2,$3)`,
+			canonical.Advisory.ID,
+			affected.Ecosystem,
+			affected.Package,
+		)
 	}
-	if err := r.replaceAliases(ctx, tx, canonical.Advisory.ID, canonicalIDs); err != nil {
+	statements.queue(
+		"replace advisory aliases",
+		`DELETE FROM advisory_aliases WHERE canonical_id=$1`,
+		canonical.Advisory.ID,
+	)
+	for _, id := range canonicalIDs {
+		statements.queue(
+			"insert advisory alias",
+			`INSERT INTO advisory_aliases(alias_id, canonical_id) VALUES($1,$2)`,
+			id,
+			canonical.Advisory.ID,
+		)
+	}
+	if result.CreatedRevision {
+		statements.queue(
+			"insert canonical revision",
+			`INSERT INTO advisory_revisions(advisory_id, revision, content_hash, data, changed_fields)
+			VALUES($1,$2,$3,$4,$5)`,
+			canonical.Advisory.ID,
+			result.Revision,
+			contentHash,
+			revisionData,
+			changedFields,
+		)
+	}
+	if err := statements.execute(ctx, tx); err != nil {
 		return advisory.MaterializationResult{}, err
 	}
-
-	if previousHash != contentHash {
-		revisionData, err := json.Marshal(canonicalRevisionEnvelope{Version: 1, Value: canonical})
-		if err != nil {
-			return advisory.MaterializationResult{}, fmt.Errorf("marshal canonical revision: %w", err)
-		}
-		fields, err := json.Marshal(append([]advisory.ChangedField{}, result.ChangedFields...))
-		if err != nil {
-			return advisory.MaterializationResult{}, fmt.Errorf("marshal canonical changes: %w", err)
-		}
-		revision := previousRevision + 1
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO advisory_revisions(advisory_id, revision, content_hash, data, changed_fields)
-			VALUES($1,$2,$3,$4,$5)`, canonical.Advisory.ID, revision, contentHash, revisionData, fields); err != nil {
-			return advisory.MaterializationResult{}, fmt.Errorf("insert canonical revision: %w", err)
-		}
-		for _, runID := range syncRunIDs {
-			tag, err := tx.Exec(ctx, `INSERT INTO advisory_revision_sync_runs(advisory_id,revision,sync_run_id)
-				SELECT $1,$2,runs.id FROM vulnerability_sync_runs runs
-				JOIN jobs ON jobs.id=runs.durable_job_id AND jobs.tenant_id=$4
-				WHERE runs.id=$3`, canonical.Advisory.ID, revision, runID.String(), tenantID.String())
-			if err != nil {
-				return advisory.MaterializationResult{}, fmt.Errorf("link canonical revision to sync run: %w", err)
-			}
-			if tag.RowsAffected() != 1 {
-				return advisory.MaterializationResult{}, fmt.Errorf("sync run %s: %w", runID, shared.ErrNotFound)
-			}
-		}
-		result.Revision = revision
-		result.CreatedRevision = true
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return advisory.MaterializationResult{}, fmt.Errorf("commit advisory materialization: %w", err)
-	}
 	return result, nil
+}
+
+func insertAdvisoryRevisionSyncRunLinks(ctx context.Context, tx pgx.Tx, tenantID shared.ID, links []advisoryRevisionSyncRunLink) error {
+	if len(links) == 0 {
+		return nil
+	}
+	if tenantID.IsZero() {
+		return fmt.Errorf("%w: sync run provenance requires tenant context", shared.ErrValidation)
+	}
+	for start := 0; start < len(links); start += advisory.MaxMaterializationBatch {
+		end := start + advisory.MaxMaterializationBatch
+		if end > len(links) {
+			end = len(links)
+		}
+		chunk := links[start:end]
+		advisoryIDs := make([]string, len(chunk))
+		revisions := make([]int64, len(chunk))
+		syncRunIDs := make([]string, len(chunk))
+		for index, link := range chunk {
+			advisoryIDs[index] = link.AdvisoryID
+			revisions[index] = link.Revision
+			syncRunIDs[index] = link.SyncRunID.String()
+		}
+		tag, err := tx.Exec(ctx, `INSERT INTO advisory_revision_sync_runs(advisory_id,revision,sync_run_id)
+			SELECT links.advisory_id,links.revision,runs.id
+			FROM unnest($1::text[],$2::bigint[],$3::text[]) AS links(advisory_id,revision,sync_run_id)
+			JOIN vulnerability_sync_runs runs ON runs.id=links.sync_run_id
+			JOIN jobs ON jobs.id=runs.durable_job_id AND jobs.tenant_id=$4`, advisoryIDs, revisions, syncRunIDs, tenantID.String())
+		if err != nil {
+			return fmt.Errorf("link canonical revisions to sync runs: %w", err)
+		}
+		if tag.RowsAffected() != int64(len(chunk)) {
+			return fmt.Errorf("link canonical revisions to sync runs: inserted %d of %d: %w", tag.RowsAffected(), len(chunk), shared.ErrNotFound)
+		}
+	}
+	return nil
+}
+
+func insertSourceSnapshotResults(ctx context.Context, tx pgx.Tx, syncRunID shared.ID, results []advisory.MaterializationResult) error {
+	for start := 0; start < len(results); start += advisory.MaxMaterializationBatch {
+		end := start + advisory.MaxMaterializationBatch
+		if end > len(results) {
+			end = len(results)
+		}
+		chunk := results[start:end]
+		resultIndexes := make([]int, len(chunk))
+		advisoryIDs := make([]string, len(chunk))
+		revisions := make([]int64, len(chunk))
+		contentHashes := make([]string, len(chunk))
+		changedFields := make([]string, len(chunk))
+		createdRevisions := make([]bool, len(chunk))
+		for index, result := range chunk {
+			fields, err := json.Marshal(append([]advisory.ChangedField{}, result.ChangedFields...))
+			if err != nil {
+				return fmt.Errorf("encode source snapshot result changes: %w", err)
+			}
+			resultIndexes[index] = start + index
+			advisoryIDs[index] = result.Canonical.Advisory.ID
+			revisions[index] = result.Revision
+			contentHashes[index] = result.ContentHash
+			changedFields[index] = string(fields)
+			createdRevisions[index] = result.CreatedRevision
+		}
+		tag, err := tx.Exec(ctx, `INSERT INTO vulnerability_source_snapshot_results(
+			sync_run_id,result_index,advisory_id,revision,content_hash,changed_fields,created_revision
+		)
+		SELECT $1,results.result_index,results.advisory_id,results.revision,results.content_hash,
+			results.changed_fields::jsonb,results.created_revision
+		FROM unnest($2::integer[],$3::text[],$4::bigint[],$5::text[],$6::text[],$7::boolean[])
+			AS results(result_index,advisory_id,revision,content_hash,changed_fields,created_revision)`,
+			syncRunID.String(), resultIndexes, advisoryIDs, revisions, contentHashes, changedFields, createdRevisions)
+		if err != nil {
+			return fmt.Errorf("record source snapshot results: %w", err)
+		}
+		if tag.RowsAffected() != int64(len(chunk)) {
+			return fmt.Errorf("record source snapshot results: inserted %d of %d", tag.RowsAffected(), len(chunk))
+		}
+	}
+	return nil
 }
 
 func normalizeObservationBatch(records []advisory.ObservationRecord) ([]advisory.ObservationRecord, []string, error) {
@@ -255,6 +683,30 @@ func normalizeObservationBatch(records []advisory.ObservationRecord) ([]advisory
 	return normalized, identityIDs, nil
 }
 
+type advisoryStatementBatch struct {
+	batch      pgx.Batch
+	operations []string
+}
+
+func (b *advisoryStatementBatch) queue(operation, sql string, arguments ...any) {
+	b.batch.Queue(sql, arguments...)
+	b.operations = append(b.operations, operation)
+}
+
+func (b *advisoryStatementBatch) execute(ctx context.Context, tx pgx.Tx) error {
+	results := tx.SendBatch(ctx, &b.batch)
+	for _, operation := range b.operations {
+		if _, err := results.Exec(); err != nil {
+			_ = results.Close()
+			return fmt.Errorf("%s: %w", operation, err)
+		}
+	}
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("close advisory statement batch: %w", err)
+	}
+	return nil
+}
+
 func (r *AdvisoryMaterializer) upsertObservation(ctx context.Context, tx pgx.Tx, record advisory.ObservationRecord) error {
 	hash, err := record.ContentHash()
 	if err != nil {
@@ -265,20 +717,35 @@ func (r *AdvisoryMaterializer) upsertObservation(ctx context.Context, tx pgx.Tx,
 		return fmt.Errorf("marshal observation: %w", err)
 	}
 	id := observationID(record.Observation.SourceID, record.Observation.RecordID, hash)
-	if _, err := tx.Exec(ctx, `UPDATE advisory_observations SET is_current=FALSE WHERE source_id=$1 AND record_id=$2 AND is_current`, record.Observation.SourceID, record.Observation.RecordID); err != nil {
-		return fmt.Errorf("retire prior observation: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO advisory_observations(id, source_id, record_id, identity_ids, normalized_payload, raw_payload, raw_reference, content_hash, sync_run_id, is_current, observed_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''),TRUE,$10)
+	var statements advisoryStatementBatch
+	statements.queue(
+		"retire prior observation",
+		`UPDATE advisory_observations SET is_current=FALSE WHERE source_id=$1 AND record_id=$2 AND is_current`,
+		record.Observation.SourceID,
+		record.Observation.RecordID,
+	)
+	statements.queue(
+		"upsert advisory observation",
+		`INSERT INTO advisory_observations(id, source_id, record_id, identity_ids, normalized_payload, raw_payload, raw_reference, content_hash, sync_run_id, absence_retirement, is_current, observed_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''),$10,TRUE,$11)
 		ON CONFLICT (source_id, record_id, content_hash) DO UPDATE SET
 			identity_ids=EXCLUDED.identity_ids, normalized_payload=EXCLUDED.normalized_payload,
 			raw_payload=EXCLUDED.raw_payload, raw_reference=EXCLUDED.raw_reference,
-			sync_run_id=EXCLUDED.sync_run_id, is_current=TRUE, observed_at=EXCLUDED.observed_at`,
-		id, record.Observation.SourceID, record.Observation.RecordID, record.IdentityIDs(), payload, record.RawPayload, record.RawReference, hash, record.SyncRunID, record.ObservedAt); err != nil {
-		return fmt.Errorf("upsert advisory observation: %w", err)
-	}
-	return nil
+			sync_run_id=EXCLUDED.sync_run_id, absence_retirement=EXCLUDED.absence_retirement,
+			is_current=TRUE, observed_at=EXCLUDED.observed_at`,
+		id,
+		record.Observation.SourceID,
+		record.Observation.RecordID,
+		record.IdentityIDs(),
+		payload,
+		record.RawPayload,
+		record.RawReference,
+		hash,
+		record.SyncRunID,
+		record.Observation.AbsenceRetirement,
+		record.ObservedAt,
+	)
+	return statements.execute(ctx, tx)
 }
 
 func observationID(sourceID, recordID, hash string) string {
@@ -371,18 +838,6 @@ func (r *AdvisoryMaterializer) validateAliases(ctx context.Context, tx pgx.Tx, c
 		}
 	}
 	return rows.Err()
-}
-
-func (r *AdvisoryMaterializer) replaceAliases(ctx context.Context, tx pgx.Tx, canonicalID string, ids []string) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM advisory_aliases WHERE canonical_id=$1`, canonicalID); err != nil {
-		return fmt.Errorf("replace advisory aliases: %w", err)
-	}
-	for _, id := range ids {
-		if _, err := tx.Exec(ctx, `INSERT INTO advisory_aliases(alias_id, canonical_id) VALUES($1,$2)`, id, canonicalID); err != nil {
-			return fmt.Errorf("insert advisory alias: %w", err)
-		}
-	}
-	return nil
 }
 
 func loadPreviousCanonical(ctx context.Context, tx pgx.Tx, id string) (advisory.Canonical, string, int64, error) {
