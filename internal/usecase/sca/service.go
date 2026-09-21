@@ -612,16 +612,12 @@ func (s *Service) osDistroCoverageReadiness(ctx context.Context, doc *sbom.SBOM)
 	for u := range unmapped {
 		gaps[u] = true // an unmapped distro has no key the owned store could ever cover
 	}
-	// A COVERED rpm distro still carries a completeness limitation the presence-based `covered` check cannot see:
-	// the owned rpm advisory feed is OVAL-sourced and ingests only patched ("< fixed") advisories, so a
-	// not-yet-fixed CVE (the vendor lists the package affected but has shipped no fix) is unmatched. Presence of
-	// patched rows makes `covered` true, so without this note a not-yet-fixed miss reads as a clean bill (a
-	// no-false-suppression violation, confirmed on SLES 15.6: owned 0/16 vs Grype 2/16). Surface it as a
-	// provenance warning rather than a silent false clean. Full ingestion of not-yet-fixed rpm advisories is the
-	// recall fix tracked as a #1037 follow-up.
+	// A covered rpm distro can still carry a feed-completeness limitation that the presence-based `covered`
+	// check cannot see. Runtime coverage reporting does not yet prove that a complete, current not-yet-fixed
+	// vendor snapshot is active, so retain the disclosure for every otherwise-covered rpm ecosystem.
 	notYetFixed := map[string]bool{}
 	for eco := range rpmEcos {
-		if !gaps[eco] { // covered for patched CVEs, but not-yet-fixed CVEs may be unmatched
+		if !gaps[eco] {
 			notYetFixed[eco] = true
 		}
 	}
@@ -643,17 +639,17 @@ func (s *Service) osDistroCoverageReadiness(ctx context.Context, doc *sbom.SBOM)
 	return strings.Join(parts, " "), incompleteOut, errOut
 }
 
-// rpmNotYetFixedWarning surfaces the known completeness limitation of the owned OVAL-sourced rpm advisory feed:
-// it matches CVEs with a published fixed version, so a not-yet-fixed advisory may be unmatched. This keeps a
-// not-yet-fixed miss from reading as a clean bill (no-false-suppression), pending full not-yet-fixed ingestion.
-// It never sets the incomplete flag on its own: it is a disclosure, not a hard gap like an uncovered distro.
+// rpmNotYetFixedWarning surfaces the runtime provenance gap for otherwise-covered rpm ecosystems. The current
+// coverage reporter proves only that matching advisory rows exist, not that a complete and current vendor
+// not-yet-fixed snapshot was successfully published. It never sets the incomplete flag on its own: it is a
+// disclosure, not a hard gap like an uncovered distro.
 func rpmNotYetFixedWarning(distros map[string]bool) string {
 	names := make([]string, 0, len(distros))
 	for eco := range distros {
 		names = append(names, eco)
 	}
 	sort.Strings(names)
-	return fmt.Sprintf("owned rpm advisory coverage for %s matches CVEs with a published fixed version (OVAL-sourced); a not-yet-fixed advisory (the vendor lists the package affected but has shipped no fix) may be unmatched, so a zero-vulnerability result is not a guaranteed clean bill for not-yet-fixed CVEs. Add grype to SYNAPSE_DETECTION_SOURCES for a not-yet-fixed cross-check on these distros", strings.Join(names, ", "))
+	return fmt.Sprintf("owned rpm advisory coverage for %s cannot currently prove that a complete, current vendor not-yet-fixed snapshot is active; a not-yet-fixed advisory (the vendor lists the package affected but has shipped no fix) may be unmatched, so a zero-vulnerability result is not a guaranteed clean bill for not-yet-fixed CVEs. Add grype to SYNAPSE_DETECTION_SOURCES for a not-yet-fixed cross-check on these distros", strings.Join(names, ", "))
 }
 
 // union merges two string sets into a new set.

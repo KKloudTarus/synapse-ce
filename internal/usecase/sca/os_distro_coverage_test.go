@@ -71,17 +71,16 @@ func TestOSDistroCoverageReadiness(t *testing.T) {
 		if !strings.Contains(w, "Alpine:v3.19") {
 			t.Errorf("warning must name the uncovered distro Alpine:v3.19, got %q", w)
 		}
-		// Red Hat:9 is covered (patched CVEs), so it is NOT an uncovered gap, but its OVAL feed is patched-only,
-		// so the not-yet-fixed limitation is disclosed rather than left as a silent clean.
+		// Red Hat:9 has advisory rows, so it is not an uncovered gap, but row presence does not prove that a
+		// complete current not-yet-fixed snapshot is active. Keep that limitation explicit rather than silent.
 		if !strings.Contains(w, "Red Hat:9") || !strings.Contains(w, "not-yet-fixed") {
 			t.Errorf("a covered rpm distro must disclose the not-yet-fixed limitation, got %q", w)
 		}
 	})
 
 	t.Run("covered rpm distro discloses the not-yet-fixed limitation, apk does not", func(t *testing.T) {
-		// Every OS distro is covered for patched CVEs. Red Hat:9 is rpm (OVAL, patched-only) so the not-yet-fixed
-		// disclosure fires; Alpine (apk, OSV-fed, carries not-yet-fixed) does not. This is the fix for the SLES
-		// false-clean: a covered rpm distro is no longer a silent no-op.
+		// Every OS distro has advisory rows, but the reporter cannot prove a complete current rpm lifecycle
+		// snapshot. The disclosure therefore remains for Red Hat:9 and does not apply to Alpine's OSV feed.
 		full := fakeCoverageSource{covered: map[string]bool{"Red Hat:9": true, "Alpine:v3.19": true}, ok: true}
 		s := &Service{sources: []ports.DetectionSource{osv, full}}
 		w, incomplete, err := s.osDistroCoverageReadiness(ctx, osDoc())
