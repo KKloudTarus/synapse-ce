@@ -579,13 +579,19 @@ func scanSyncRunItem(row syncRunRow) (vulnerabilityintel.SyncRunItem, error) {
 }
 
 func findExistingSyncRun(ctx context.Context, tx pgx.Tx, request ports.SyncRunStart) (vulnerabilitysync.Run, bool, error) {
-	query := syncRunSelect + ` WHERE source_id=$1 AND ((client_idempotency_key=$2 AND $2 <> '') OR (mode=$3 AND state IN ('queued','running'))) ORDER BY CASE WHEN client_idempotency_key=$2 AND $2 <> '' THEN 0 ELSE 1 END, created_at LIMIT 1`
-	run, err := scanSyncRun(tx.QueryRow(ctx, query, request.SourceID.String(), request.ClientIdempotencyKey, string(request.Mode)))
+	query := syncRunSelect + ` WHERE source_id=$1 AND ((client_idempotency_key=$2 AND $2 <> '') OR state IN ('queued','running')) ORDER BY CASE WHEN client_idempotency_key=$2 AND $2 <> '' THEN 0 ELSE 1 END, created_at LIMIT 1`
+	run, err := scanSyncRun(tx.QueryRow(ctx, query, request.SourceID.String(), request.ClientIdempotencyKey))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return vulnerabilitysync.Run{}, false, nil
 	}
 	if err != nil {
 		return vulnerabilitysync.Run{}, false, err
+	}
+	if request.ClientIdempotencyKey != "" && run.ClientIdempotencyKey == request.ClientIdempotencyKey {
+		return run, true, nil
+	}
+	if !run.State.Terminal() && run.Mode != request.Mode {
+		return vulnerabilitysync.Run{}, false, fmt.Errorf("%w: source already has an active sync run", shared.ErrConflict)
 	}
 	return run, true, nil
 }

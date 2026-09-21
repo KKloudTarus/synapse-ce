@@ -52,9 +52,13 @@ func (s *SyncRunStore) Start(ctx context.Context, request ports.SyncRunStart) (v
 			s.mu.Unlock()
 			return current.Clone(), false, nil
 		}
-		if current.Mode == request.Mode && !current.State.Terminal() {
+		if !current.State.Terminal() {
+			if current.Mode == request.Mode {
+				s.mu.Unlock()
+				return current.Clone(), false, nil
+			}
 			s.mu.Unlock()
-			return current.Clone(), false, nil
+			return vulnerabilitysync.Run{}, false, fmt.Errorf("%w: source already has an active sync run", shared.ErrConflict)
 		}
 	}
 	if s.ids == nil {
