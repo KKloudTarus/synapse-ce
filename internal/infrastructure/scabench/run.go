@@ -24,12 +24,11 @@ import (
 const (
 	runResultSchemaVersion            = "synapse-sca-benchmark-run-v1"
 	fixedRepetitions                  = 2
-	fixedMatrixCells                  = 8
+	fixedMatrixCells                  = 12
 	ownedBenchmarkVersion             = "devel"
 	ownedBenchmarkVersionLinkerSymbol = "github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo.version"
 	maxPublicationFileBytes           = 512 << 20
 	maxPublicationTotalBytes          = 6 * maxPublicationFileBytes
-	maxPublicationFiles               = 11
 	publicationCleanupTimeout         = 2 * time.Minute
 	fixedCapabilitySourceArtifacts    = 2
 	maxRawBundleArtifacts             = 5 + 1 + fixedCapabilitySourceArtifacts
@@ -38,6 +37,23 @@ const (
 var fixedTargetIDs = []string{
 	"debian-12-13-slim-amd64",
 	"sles-15-6-bci-base-45-31-amd64",
+	"rhel-9-8-ubi-amd64",
+}
+
+var fixedPublicationArtifactPaths = [...]string{
+	"catalog.json",
+	"oracle.json",
+	"ratchet.json",
+	"cycle-policy.json",
+	"run.json",
+	"result.json",
+	"report.md",
+	"reviews/review.json",
+	"reviews/disposition.json",
+}
+
+func expectedPublicationFileCount() int {
+	return len(fixedPublicationArtifactPaths) + len(fixedTargetIDs)
 }
 
 // RunInput is the complete operator contract. All paths must be absolute.
@@ -123,6 +139,7 @@ type captureManifestTemplate struct {
 }
 
 type capabilityTemplate struct {
+	Kind               bench.CapabilityKind       `json:"kind"`
 	StatementReference string                     `json:"statement_reference"`
 	Sources            []capabilitySourceTemplate `json:"sources"`
 }
@@ -504,7 +521,7 @@ func (state *runState) loadTemplates() (map[string]captureManifestTemplate, erro
 		templates[key] = template
 	}
 	if len(templates) != fixedMatrixCells {
-		return nil, errors.New("capture manifest templates do not cover the fixed eight-cell matrix")
+		return nil, errors.New("capture manifest templates do not cover the fixed twelve-cell matrix")
 	}
 	return templates, nil
 }
@@ -558,21 +575,24 @@ func (state *runState) materializeManifest(catalogDigest string, target bench.Ta
 	return manifest, nil
 }
 
-func canonicalCapabilityComponents(input []bench.Component) ([]bench.Component, error) {
+func canonicalCapabilityComponents(kind bench.CapabilityKind, input []bench.Component) ([]bench.Component, error) {
 	type keyedComponent struct {
 		component bench.Component
 		key       string
 	}
-	keyed := make([]keyedComponent, len(input))
+	keyed := make([]keyedComponent, 0, len(input))
 	for i, component := range input {
-		key, err := capabilityComponentKey(component)
+		if !isCapabilityRPMCandidate(kind, component.PURL) {
+			continue
+		}
+		key, err := capabilityComponentKey(kind, component)
 		if err != nil {
 			return nil, fmt.Errorf("capability component %d: %w", i, err)
 		}
-		keyed[i] = keyedComponent{
+		keyed = append(keyed, keyedComponent{
 			component: component,
 			key:       key.Ecosystem + "\x00" + key.Package + "\x00" + key.Version,
-		}
+		})
 	}
 	sort.Slice(keyed, func(i, j int) bool { return keyed[i].key < keyed[j].key })
 	components := make([]bench.Component, len(keyed))
@@ -585,6 +605,10 @@ func canonicalCapabilityComponents(input []bench.Component) ([]bench.Component, 
 func (state *runState) materializeCapability(catalogDigest string, target bench.Target, template captureManifestTemplate) (CapabilityStatement, string, error) {
 	if template.Capability == nil {
 		return CapabilityStatement{}, "", errors.New("capability template is required")
+	}
+	rule, ok := capabilityRule(template.Capability.Kind)
+	if !ok {
+		return CapabilityStatement{}, "", errors.New("capability template has an unsupported kind")
 	}
 	binaryDigest, err := catalogPin(state.catalog, template.Binary.Reference)
 	if err != nil {
@@ -606,7 +630,7 @@ func (state *runState) materializeCapability(catalogDigest string, target bench.
 	if err != nil {
 		return CapabilityStatement{}, "", err
 	}
-	components, err := canonicalCapabilityComponents(target.Components)
+	components, err := canonicalCapabilityComponents(template.Capability.Kind, target.Components)
 	if err != nil {
 		return CapabilityStatement{}, "", err
 	}
@@ -615,8 +639,8 @@ func (state *runState) materializeCapability(catalogDigest string, target bench.
 		statementSources = append(statementSources, CapabilityStatementSource{Reference: source.Reference, Digest: source.Digest})
 	}
 	statement := CapabilityStatement{
-		SchemaVersion: CapabilityStatementSchemaVersion, Kind: bench.CapabilityKindOSVScannerSUSERPM,
-		DecisionRuleRevision: CapabilityDecisionRuleRevision, Scope: CapabilityScopeSameSBOMOSPackageMatching,
+		SchemaVersion: CapabilityStatementSchemaVersion, Kind: template.Capability.Kind,
+		DecisionRuleRevision: rule.decisionRuleRevision, Scope: CapabilityScopeSameSBOMOSPackageMatching,
 		CatalogRevision: state.catalog.Revision, CatalogDigest: catalogDigest, TargetID: target.ID, TargetDigest: target.Digest,
 		SBOMDigest: target.SBOMDigest, Engine: template.Engine, EngineVersion: template.EngineVersion,
 		EngineBinaryDigest: binaryDigest, DatabaseBuild: template.Database.Build, DatabaseDigest: databaseDigest,
@@ -701,7 +725,15 @@ func (state *runState) validateRatchetBindings() error {
 			return fmt.Errorf("ratchet floor %s does not bind the materialized capture", key)
 		}
 		if manifest.Capability != nil {
-			expected.CapabilityKind = bench.CapabilityKindOSVScannerSUSERPM
+			body, err := readRegularFile(manifest.Capability.Statement.Path)
+			if err != nil {
+				return fmt.Errorf("read capability statement for %s: %w", key, err)
+			}
+			statement, err := decodeCapabilityStatement(body)
+			if err != nil {
+				return fmt.Errorf("decode capability statement for %s: %w", key, err)
+			}
+			expected.CapabilityKind = statement.Kind
 			expected.CapabilityDigest = manifest.Capability.Statement.Digest
 		} else if expected.CapabilityDigest != "" || expected.CapabilityKind != "" {
 			return fmt.Errorf("ratchet floor %s has unexpected capability identity", key)
@@ -841,6 +873,19 @@ func reduceRepetitions(catalog bench.Catalog, oracle bench.Oracle, ratchet bench
 	return reduceRepetitionsContext(context.Background(), catalog, oracle, ratchet, observations)
 }
 
+func requireTrustedCycleResult(result bench.Result) error {
+	if result.Gate == nil {
+		return errors.New("absolute ratchet gate is missing")
+	}
+	if !result.Gate.Passed {
+		return errors.New("absolute ratchet gate did not pass")
+	}
+	if err := bench.ValidateMeasuredPerTargetRecallParity(result, fixedTargetIDs); err != nil {
+		return fmt.Errorf("measured per-target recall parity: %w", err)
+	}
+	return nil
+}
+
 func reduceRepetitionsContext(ctx context.Context, catalog bench.Catalog, oracle bench.Oracle, ratchet bench.Ratchet, observations [][]bench.Observation) (bench.Result, []byte, []byte, error) {
 	if ctx == nil {
 		return bench.Result{}, nil, nil, errors.New("reduction context is required")
@@ -858,6 +903,9 @@ func reduceRepetitionsContext(ctx context.Context, catalog bench.Catalog, oracle
 		result, err = bench.ApplyRatchet(result, ratchet)
 		if err != nil {
 			return bench.Result{}, nil, nil, fmt.Errorf("apply ratchet to repetition %d: %w", index+1, err)
+		}
+		if err := requireTrustedCycleResult(result); err != nil {
+			return bench.Result{}, nil, nil, fmt.Errorf("validate trusted result for repetition %d: %w", index+1, err)
 		}
 		if err := ctx.Err(); err != nil {
 			return bench.Result{}, nil, nil, err
@@ -932,7 +980,7 @@ func (state *runState) beginPublication() (*benchcycle.Publication, error) {
 	return benchcycle.BeginPublication(state.input.OutputRoot, benchcycle.PublicationLimits{
 		MaxFileBytes:   maxPublicationFileBytes,
 		MaxTotalBytes:  maxPublicationTotalBytes,
-		MaxFiles:       maxPublicationFiles,
+		MaxFiles:       expectedPublicationFileCount(),
 		CleanupTimeout: publicationCleanupTimeout,
 	}, state.clean, verify)
 }
@@ -953,7 +1001,7 @@ func (state *runState) stagePublication(ctx context.Context, publication *benchc
 	if err != nil {
 		return err
 	}
-	if len(artifacts) != maxPublicationFiles {
+	if len(artifacts) != expectedPublicationFileCount() {
 		return errors.New("sanitized publication artifact set is incomplete")
 	}
 	for _, artifact := range artifacts {
@@ -1065,7 +1113,7 @@ func verifyFinalPublication(ctx context.Context, stage string, identities []benc
 }
 
 func publicationStageFiles(ctx context.Context, stage string, identities []benchcycle.FileIdentity) (map[string][]byte, error) {
-	if len(identities) != maxPublicationFiles {
+	if len(identities) != expectedPublicationFileCount() {
 		return nil, errors.New("sanitized publication artifact set is incomplete")
 	}
 	files := make(map[string][]byte, len(identities))
@@ -1151,9 +1199,9 @@ func validateStagedRun(ctx context.Context, run RunResult, catalog bench.Catalog
 }
 
 func validateStagedArtifactSet(catalog bench.Catalog, files map[string][]byte) error {
-	expected := map[string]struct{}{
-		"catalog.json": {}, "oracle.json": {}, "ratchet.json": {}, "cycle-policy.json": {},
-		"run.json": {}, "result.json": {}, "report.md": {}, "reviews/review.json": {}, "reviews/disposition.json": {},
+	expected := make(map[string]struct{}, expectedPublicationFileCount())
+	for _, path := range fixedPublicationArtifactPaths {
+		expected[path] = struct{}{}
 	}
 	for _, target := range catalog.Targets {
 		path := "sboms/" + target.ID + ".cdx.json"
@@ -1369,6 +1417,9 @@ func validateReviewEvidence(review, disposition []byte, implementationCommit str
 	}
 	if _, err := time.Parse(time.RFC3339, reviewRecord.SubmittedAt); err != nil {
 		return errors.New("independent review timestamp is invalid")
+	}
+	if reviewRecord.CommitID != implementationCommit {
+		return errors.New("independent review does not match the implementation commit")
 	}
 	if dispositionRecord.Decision != "approved" || dispositionRecord.ID == "" || dispositionRecord.Login == "" || dispositionRecord.Login == reviewRecord.Login || dispositionRecord.ReviewID != reviewRecord.ID || dispositionRecord.ReviewedCommit != reviewRecord.CommitID || dispositionRecord.ImplementationCommit != implementationCommit || dispositionRecord.CreatedAt != dispositionRecord.UpdatedAt || dispositionRecord.Body == "" {
 		return errors.New("maintainer disposition does not separately accept the COMMENTED review")

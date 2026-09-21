@@ -187,11 +187,21 @@ func (s ObservationState) valid() bool {
 type CapabilityKind string
 
 const (
-	CapabilityKindOSVScannerSUSERPM CapabilityKind = "osv-scanner-v2.5.1-suse-rpm-same-sbom-v1"
+	CapabilityKindOSVScannerSUSERPM                  CapabilityKind = "osv-scanner-v2.5.1-suse-rpm-same-sbom-v1"
+	CapabilityKindOSVScannerRedHatEnterpriseLinuxRPM CapabilityKind = "osv-scanner-v2.5.1-red-hat-enterprise-linux-rpm-same-sbom-v1"
 )
 
 func (kind CapabilityKind) valid() bool {
-	return kind == CapabilityKindOSVScannerSUSERPM
+	return kind == CapabilityKindOSVScannerSUSERPM || kind == CapabilityKindOSVScannerRedHatEnterpriseLinuxRPM
+}
+
+func capabilityKindEngine(kind CapabilityKind) (Engine, bool) {
+	switch kind {
+	case CapabilityKindOSVScannerSUSERPM, CapabilityKindOSVScannerRedHatEnterpriseLinuxRPM:
+		return EngineOSVScanner, true
+	default:
+		return "", false
+	}
 }
 
 // Finding is one scanner-reported component/advisory pair.
@@ -200,7 +210,6 @@ type Finding struct {
 	AdvisoryID string    `json:"advisory_id"`
 }
 
-// Observation is a captured result from one engine for one pinned target. It is data only; this package does not run engines.
 // Observation is a captured result from one engine for one pinned target. It is data only; this package does not run engines.
 type Observation struct {
 	SchemaVersion      string           `json:"schema_version"`
@@ -519,6 +528,14 @@ func structuralComponentIdentity(component Component) (ComponentBenchmarkKey, er
 	if !strings.HasPrefix(purl, "pkg:") {
 		return ComponentBenchmarkKey{}, fmt.Errorf("component purl must begin with pkg")
 	}
+	query := ""
+	if queryStart := strings.IndexByte(purl, '?'); queryStart >= 0 {
+		queryEnd := len(purl)
+		if fragment := strings.IndexByte(purl[queryStart+1:], '#'); fragment >= 0 {
+			queryEnd = queryStart + 1 + fragment
+		}
+		query = purl[queryStart+1 : queryEnd]
+	}
 	path := purl[len("pkg:"):]
 	if delimiter := strings.IndexAny(path, "?#"); delimiter >= 0 {
 		path = path[:delimiter]
@@ -556,14 +573,33 @@ func structuralComponentIdentity(component Component) (ComponentBenchmarkKey, er
 			return ComponentBenchmarkKey{}, fmt.Errorf("component purl package is invalid")
 		}
 	}
+	effectivePURLVersion := purlVersion
+	if ecosystem == "rpm" && query != "" {
+		qualifiers, err := url.ParseQuery(query)
+		if err != nil {
+			return ComponentBenchmarkKey{}, fmt.Errorf("component purl qualifiers are invalid")
+		}
+		if epochs, ok := qualifiers["epoch"]; ok {
+			if len(epochs) != 1 || purlVersion == "" || strings.TrimSpace(epochs[0]) == "" || strings.Contains(purlVersion, ":") {
+				return ComponentBenchmarkKey{}, fmt.Errorf("component rpm epoch is invalid")
+			}
+			epoch := strings.TrimSpace(epochs[0])
+			for _, character := range epoch {
+				if character < '0' || character > '9' {
+					return ComponentBenchmarkKey{}, fmt.Errorf("component rpm epoch is invalid")
+				}
+			}
+			effectivePURLVersion = epoch + ":" + purlVersion
+		}
+	}
 	version := strings.TrimSpace(component.Version)
 	if version == "" {
-		version = purlVersion
+		version = effectivePURLVersion
 	}
 	if version == "" || containsControlCharacter(version) {
 		return ComponentBenchmarkKey{}, fmt.Errorf("component version is required")
 	}
-	if purlVersion != "" && version != purlVersion {
+	if effectivePURLVersion != "" && version != effectivePURLVersion {
 		return ComponentBenchmarkKey{}, fmt.Errorf("component purl and explicit version disagree")
 	}
 	return ComponentBenchmarkKey{

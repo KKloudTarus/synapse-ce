@@ -1207,6 +1207,23 @@ func TestOwnedFeedUsesDeclaredFormatWithoutFallback(t *testing.T) {
 	if _, err := ownedFeed(directory, DatabaseFormatOVAL); err == nil {
 		t.Fatal("owned feed accepted a mixed corpus")
 	}
+
+	csafDirectory := t.TempDir()
+	writeFile(t, csafDirectory, "advisory.json", []byte(`{
+		"document":{"title":"valid"},
+		"vulnerabilities":[{"cve":"CVE-2026-0001"}]
+	}`))
+	feed, err = ownedFeed(csafDirectory, DatabaseFormatCSAFJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, ok := feed.(*ownedSnapshotFeed)
+	if !ok {
+		t.Fatalf("feed type = %T, want ownedSnapshotFeed", feed)
+	}
+	if len(snapshot.advisories) != 1 || snapshot.advisories[0].ID != "CVE-2026-0001" {
+		t.Fatalf("snapshot advisories = %+v", snapshot.advisories)
+	}
 }
 
 func TestPrepareRejectsOwnedCorpusLayoutsBeforeDispatch(t *testing.T) {
@@ -2256,7 +2273,7 @@ func rebindFixtureCatalog(t *testing.T, catalog *bench.Catalog, manifest *Captur
 
 func TestCapabilityComponentKeyAcceptsQualifiedPercentEncodedRPMVersion(t *testing.T) {
 	component := bench.Component{PURL: "pkg:rpm/sles/bash@1%3A2.0?arch=x86_64&distro=sles-15.6", Version: "1:2.0"}
-	key, err := capabilityComponentKey(component)
+	key, err := capabilityComponentKey(bench.CapabilityKindOSVScannerSUSERPM, component)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2266,7 +2283,7 @@ func TestCapabilityComponentKeyAcceptsQualifiedPercentEncodedRPMVersion(t *testi
 }
 
 func TestCapabilityComponentKeyRejectsMissingEmbeddedVersion(t *testing.T) {
-	_, err := capabilityComponentKey(bench.Component{PURL: "pkg:rpm/sles/bash@", Version: "1:2.0"})
+	_, err := capabilityComponentKey(bench.CapabilityKindOSVScannerSUSERPM, bench.Component{PURL: "pkg:rpm/sles/bash@", Version: "1:2.0"})
 	if err == nil {
 		t.Fatal("capability component key accepted a missing PURL version")
 	}
@@ -2324,6 +2341,37 @@ func TestCaptureCapabilityIgnoresUnrelatedGoComponentsAndPublishesZeroDispatchBu
 		if !bytes.Equal(left, right) {
 			t.Fatalf("publication is not deterministic for %q", name)
 		}
+	}
+}
+
+func TestCaptureCapabilitySupportsExactRedHatEnterpriseLinuxRPMSet(t *testing.T) {
+	catalog, manifest := redHatEnterpriseLinuxCapabilityFixture(t)
+	result, err := CaptureCapability(catalog, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := result.Observation()
+	if observation.State != bench.ObservationUnsupported || observation.CapabilityKind != bench.CapabilityKindOSVScannerRedHatEnterpriseLinuxRPM || observation.CapabilityDigest == "" || len(observation.Findings) != 0 {
+		t.Fatalf("Red Hat Enterprise Linux capability observation = %+v", observation)
+	}
+	bundle := filepath.Join(t.TempDir(), "redhat-enterprise-linux-capability")
+	if err := WriteBundle(bundle, result); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateBundle(bundle); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog, manifest = redHatEnterpriseLinuxCapabilityFixture(t)
+	rewriteCapabilityStatement(t, &manifest, func(statement *CapabilityStatement) {
+		statement.Components[0] = bench.Component{PURL: "pkg:rpm/sles/bash@5.1", Version: "5.1"}
+	})
+	runner := &fakeRunner{}
+	if _, err := NewCapturer(runner).Capture(context.Background(), catalog, manifest); err == nil {
+		t.Fatal("Red Hat Enterprise Linux capability accepted a SLES component")
+	}
+	if runner.calls != 0 {
+		t.Fatalf("invalid Red Hat Enterprise Linux capability dispatched %d tool calls", runner.calls)
 	}
 }
 
@@ -2629,6 +2677,24 @@ func capabilityFixture(t *testing.T) (bench.Catalog, CaptureManifest) {
 		Environment: environment, EnvironmentAttestation: Artifact{Reference: "environment-attestation", Path: environmentAttestationPath}, EnvironmentPinReference: "environment", ProfilePinReference: "profile", Limits: limits,
 		Capability: &CapabilityManifest{Statement: CapabilityArtifact{Reference: "capability-statement", Path: statementPath, Digest: bench.SHA256Digest(statementJSON)}, Sources: sources},
 	}
+	return catalog, manifest
+}
+
+func redHatEnterpriseLinuxCapabilityFixture(t *testing.T) (bench.Catalog, CaptureManifest) {
+	t.Helper()
+	catalog, manifest := capabilityFixture(t)
+	components := []bench.Component{
+		{PURL: "pkg:rpm/redhat/bash@5.1?arch=x86_64&distro=rhel-9.8", Version: "5.1"},
+		{PURL: "pkg:rpm/redhat/coreutils@8.30", Version: "8.30"},
+	}
+	catalog.Targets[0].Components = components
+	sbom := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"name":"bash","version":"5.1","purl":"pkg:rpm/redhat/bash@5.1?arch=x86_64&distro=rhel-9.8"},{"name":"coreutils","version":"8.30","purl":"pkg:rpm/redhat/coreutils@8.30"},{"name":"image-spec","version":"v1.1.1","purl":"pkg:golang/github.com/opencontainers/image-spec@v1.1.1"}]}`)
+	rebindCapabilityFixtureSBOM(t, &catalog, &manifest, sbom)
+	rewriteCapabilityStatement(t, &manifest, func(statement *CapabilityStatement) {
+		statement.Kind = bench.CapabilityKindOSVScannerRedHatEnterpriseLinuxRPM
+		statement.DecisionRuleRevision = "osv-scanner-v2.5.1-red-hat-enterprise-linux-rpm-same-sbom-v1"
+		statement.Components = append([]bench.Component(nil), components...)
+	})
 	return catalog, manifest
 }
 

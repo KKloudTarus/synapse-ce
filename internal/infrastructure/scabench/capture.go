@@ -24,6 +24,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
@@ -37,15 +38,16 @@ import (
 
 const (
 	// CaptureManifestSchemaVersion identifies the strict capture input contract.
-	CaptureManifestSchemaVersion                   = "synapse-sca-benchmark-capture-manifest-v1"
-	CapabilityStatementSchemaVersion               = "synapse-sca-benchmark-capability-statement-v1"
-	CapabilityDecisionRuleRevision                 = "osv-scanner-v2.5.1-suse-rpm-same-sbom-v1"
-	CapabilityScopeSameSBOMOSPackageMatching       = "same-sbom-os-package-vulnerability-matching"
-	EvidenceSchemaVersion                          = "synapse-sca-benchmark-evidence-v1"
-	ProfileSchemaVersion                           = "synapse-sca-benchmark-execution-profile-v1"
-	SandboxIdentityBubblewrapSeccompCgroupV2       = "bubblewrap+seccomp+cgroup-v2"
-	maxManifestBytes                         int64 = 1 << 20
-	maxBundleArtifactBytes                   int64 = 512 << 20
+	CaptureManifestSchemaVersion                         = "synapse-sca-benchmark-capture-manifest-v1"
+	CapabilityStatementSchemaVersion                     = "synapse-sca-benchmark-capability-statement-v1"
+	CapabilityDecisionRuleRevision                       = "osv-scanner-v2.5.1-suse-rpm-same-sbom-v1"
+	CapabilityDecisionRuleRedHatEnterpriseLinuxRPM       = "osv-scanner-v2.5.1-red-hat-enterprise-linux-rpm-same-sbom-v1"
+	CapabilityScopeSameSBOMOSPackageMatching             = "same-sbom-os-package-vulnerability-matching"
+	EvidenceSchemaVersion                                = "synapse-sca-benchmark-evidence-v1"
+	ProfileSchemaVersion                                 = "synapse-sca-benchmark-execution-profile-v1"
+	SandboxIdentityBubblewrapSeccompCgroupV2             = "bubblewrap+seccomp+cgroup-v2"
+	maxManifestBytes                               int64 = 1 << 20
+	maxBundleArtifactBytes                         int64 = 512 << 20
 	// maxNormalizationInputBytes bounds retained redacted process stdout before parsing.
 	// It is an implementation normalization boundary, distinct from scanner-output truncation.
 	maxNormalizationInputBytes int64 = bench.MaxJSONBytes
@@ -59,6 +61,7 @@ type DatabaseFormat string
 
 const (
 	DatabaseFormatOSVJSON           DatabaseFormat = "osv-json"
+	DatabaseFormatCSAFJSON          DatabaseFormat = "csaf-json"
 	DatabaseFormatOVAL              DatabaseFormat = "oval"
 	DatabaseFormatGrypeDBV6         DatabaseFormat = "grype-db-v6"
 	DatabaseFormatTrivyDBV2         DatabaseFormat = "trivy-db-v2"
@@ -800,9 +803,9 @@ func decodeCapabilityStatement(data []byte) (CapabilityStatement, error) {
 
 // Validate verifies the statement's fixed rule identity and canonical declared inputs.
 func (statement CapabilityStatement) Validate() error {
-	if statement.SchemaVersion != CapabilityStatementSchemaVersion ||
-		statement.Kind != bench.CapabilityKindOSVScannerSUSERPM ||
-		statement.DecisionRuleRevision != CapabilityDecisionRuleRevision ||
+	rule, ok := capabilityRule(statement.Kind)
+	if statement.SchemaVersion != CapabilityStatementSchemaVersion || !ok ||
+		statement.DecisionRuleRevision != rule.decisionRuleRevision ||
 		statement.Scope != CapabilityScopeSameSBOMOSPackageMatching ||
 		statement.Engine != bench.EngineOSVScanner || statement.EngineVersion != "v2.5.1" {
 		return errors.New("capability statement has an unsupported rule identity")
@@ -823,7 +826,7 @@ func (statement CapabilityStatement) Validate() error {
 	previous := ""
 	seen := make(map[bench.ComponentBenchmarkKey]struct{}, len(statement.Components))
 	for i, component := range statement.Components {
-		key, err := capabilityComponentKey(component)
+		key, err := capabilityComponentKey(statement.Kind, component)
 		if err != nil {
 			return fmt.Errorf("capability component %d: %w", i, err)
 		}
@@ -900,25 +903,58 @@ func hasControlCharacter(value string) bool {
 	return false
 }
 
-func isSLESRPMCandidate(purl string) bool {
-	return strings.HasPrefix(strings.TrimSpace(purl), "pkg:rpm/sles/")
+type rpmCapabilityRule struct {
+	decisionRuleRevision string
+	purlPrefix           string
+	packagePrefix        string
+	distribution         string
 }
 
-func capabilityComponentKey(component bench.Component) (bench.ComponentBenchmarkKey, error) {
+func capabilityRule(kind bench.CapabilityKind) (rpmCapabilityRule, bool) {
+	switch kind {
+	case bench.CapabilityKindOSVScannerSUSERPM:
+		return rpmCapabilityRule{
+			decisionRuleRevision: CapabilityDecisionRuleRevision,
+			purlPrefix:           "pkg:rpm/sles/",
+			packagePrefix:        "sles/",
+			distribution:         "SLES",
+		}, true
+	case bench.CapabilityKindOSVScannerRedHatEnterpriseLinuxRPM:
+		return rpmCapabilityRule{
+			decisionRuleRevision: CapabilityDecisionRuleRedHatEnterpriseLinuxRPM,
+			purlPrefix:           "pkg:rpm/redhat/",
+			packagePrefix:        "redhat/",
+			distribution:         "Red Hat Enterprise Linux",
+		}, true
+	default:
+		return rpmCapabilityRule{}, false
+	}
+}
+
+func isCapabilityRPMCandidate(kind bench.CapabilityKind, purl string) bool {
+	rule, ok := capabilityRule(kind)
+	return ok && strings.HasPrefix(strings.TrimSpace(purl), rule.purlPrefix)
+}
+
+func capabilityComponentKey(kind bench.CapabilityKind, component bench.Component) (bench.ComponentBenchmarkKey, error) {
+	rule, ok := capabilityRule(kind)
+	if !ok {
+		return bench.ComponentBenchmarkKey{}, errors.New("unsupported capability kind")
+	}
 	purl := component.PURL
 	if delimiter := strings.IndexAny(purl, "?#"); delimiter >= 0 {
 		purl = purl[:delimiter]
 	}
 	if component.PURL != strings.TrimSpace(component.PURL) || component.Version != strings.TrimSpace(component.Version) ||
-		!strings.HasPrefix(purl, "pkg:rpm/sles/") || strings.Count(purl, "@") != 1 {
-		return bench.ComponentBenchmarkKey{}, errors.New("must be an exact pkg:rpm/sles PURL with an embedded version")
+		!strings.HasPrefix(purl, rule.purlPrefix) || strings.Count(purl, "@") != 1 {
+		return bench.ComponentBenchmarkKey{}, fmt.Errorf("must be an exact %s RPM PURL with an embedded version", rule.distribution)
 	}
 	key, err := bench.ComponentKey(component, "capability")
 	if err != nil {
 		return bench.ComponentBenchmarkKey{}, err
 	}
-	if key.Ecosystem != "rpm" || !strings.HasPrefix(key.Package, "sles/") || key.Version != component.Version {
-		return bench.ComponentBenchmarkKey{}, errors.New("must be an exact SLES RPM component identity")
+	if key.Ecosystem != "rpm" || !strings.HasPrefix(key.Package, rule.packagePrefix) || key.Version != component.Version {
+		return bench.ComponentBenchmarkKey{}, fmt.Errorf("must be an exact %s RPM component identity", rule.distribution)
 	}
 	return key, nil
 }
@@ -931,26 +967,30 @@ func verifyCapabilityStatement(statement CapabilityStatement, prepared preparedC
 		statement.EnvironmentID != prepared.manifest.Environment.ID || statement.EnvironmentDigest != prepared.environmentDigest || statement.ConfigDigest != prepared.configDigest {
 		return errors.New("capability statement pins do not match verified capture inputs")
 	}
+	rule, ok := capabilityRule(statement.Kind)
+	if !ok {
+		return errors.New("capability statement has an unsupported rule identity")
+	}
 	actual := make(map[bench.ComponentBenchmarkKey]struct{}, len(prepared.components))
 	for _, component := range prepared.components {
-		if !isSLESRPMCandidate(component.PURL) {
+		if !isCapabilityRPMCandidate(statement.Kind, component.PURL) {
 			continue
 		}
-		key, err := capabilityComponentKey(bench.Component{PURL: component.PURL, Version: component.Version})
+		key, err := capabilityComponentKey(statement.Kind, bench.Component{PURL: component.PURL, Version: component.Version})
 		if err != nil {
-			return fmt.Errorf("SBOM SLES RPM component: %w", err)
+			return fmt.Errorf("SBOM %s RPM component: %w", rule.distribution, err)
 		}
 		if _, exists := actual[key]; exists {
-			return errors.New("SBOM has duplicate SLES RPM component identities")
+			return fmt.Errorf("SBOM has duplicate %s RPM component identities", rule.distribution)
 		}
 		actual[key] = struct{}{}
 	}
 	if len(actual) == 0 {
-		return errors.New("SBOM has no applicable SLES RPM components")
+		return fmt.Errorf("SBOM has no applicable %s RPM components", rule.distribution)
 	}
 	declared := make(map[bench.ComponentBenchmarkKey]struct{}, len(statement.Components))
 	for _, component := range statement.Components {
-		key, err := capabilityComponentKey(component)
+		key, err := capabilityComponentKey(statement.Kind, component)
 		if err != nil {
 			return err
 		}
@@ -963,7 +1003,7 @@ func verifyCapabilityStatement(statement CapabilityStatement, prepared preparedC
 		declared[key] = struct{}{}
 	}
 	if len(actual) != len(declared) {
-		return errors.New("capability component set does not exactly match the applicable SLES RPM SBOM components")
+		return fmt.Errorf("capability component set does not exactly match the applicable %s RPM SBOM components", rule.distribution)
 	}
 	return nil
 }
@@ -1509,7 +1549,7 @@ func knownEngine(engine bench.Engine) bool {
 func validDatabaseFormatForEngine(engine bench.Engine, format DatabaseFormat) bool {
 	switch engine {
 	case bench.EngineOwned:
-		return format == DatabaseFormatOSVJSON || format == DatabaseFormatOVAL
+		return format == DatabaseFormatOSVJSON || format == DatabaseFormatCSAFJSON || format == DatabaseFormatOVAL
 	case bench.EngineGrype:
 		return format == DatabaseFormatGrypeDBV6
 	case bench.EngineTrivy:
@@ -2916,6 +2956,61 @@ func runOwned(ctx context.Context, databasePath string, databaseFormat DatabaseF
 	return out, stats, nil
 }
 
+type ownedSnapshotFeed struct {
+	advisories []advisory.Advisory
+}
+
+func (f *ownedSnapshotFeed) Each(ctx context.Context, fn func(advisory.Advisory) error) (int, error) {
+	for _, current := range f.advisories {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		if err := fn(current); err != nil {
+			return 0, err
+		}
+	}
+	return 0, nil
+}
+
+func newOwnedCSAFSnapshotFeed(directory string) (ports.AdvisoryFeed, error) {
+	paths := []string{}
+	var collect func(string) error
+	collect = func(current string) error {
+		entries, err := os.ReadDir(current)
+		if err != nil {
+			return err
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		for _, entry := range entries {
+			path := filepath.Join(current, entry.Name())
+			if entry.IsDir() {
+				if err := collect(path); err != nil {
+					return err
+				}
+				continue
+			}
+			paths = append(paths, path)
+		}
+		return nil
+	}
+	if err := collect(directory); err != nil {
+		return nil, fmt.Errorf("list owned CSAF snapshot: %w", err)
+	}
+	documents := make([][]byte, 0, len(paths))
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read owned CSAF snapshot document: %w", err)
+		}
+		documents = append(documents, data)
+	}
+	advisories, err := ownadvisory.ParseCSAFSnapshot(documents)
+	if err != nil {
+		return nil, fmt.Errorf("parse owned CSAF snapshot: %w", err)
+	}
+	return &ownedSnapshotFeed{advisories: advisories}, nil
+}
+
 func ownedFeed(directory string, format DatabaseFormat) (ports.AdvisoryFeed, error) {
 	if err := inspectOwnedCorpusLayout(directory, format); err != nil {
 		return nil, err
@@ -2923,6 +3018,8 @@ func ownedFeed(directory string, format DatabaseFormat) (ports.AdvisoryFeed, err
 	switch format {
 	case DatabaseFormatOSVJSON:
 		return ownadvisory.NewDirFeed(directory), nil
+	case DatabaseFormatCSAFJSON:
+		return newOwnedCSAFSnapshotFeed(directory)
 	case DatabaseFormatOVAL:
 		return ownadvisory.NewOVALDirFeed(directory), nil
 	default:
@@ -2966,7 +3063,7 @@ func inspectOwnedCorpusLayout(directory string, format DatabaseFormat) error {
 			if !info.Mode().IsRegular() {
 				return fmt.Errorf("owned advisory corpus contains special file %q", filepath.ToSlash(relativePath))
 			}
-			actual, ok := ownedFileFormat(entry.Name())
+			actual, ok := ownedFileFormat(entry.Name(), format)
 			if !ok {
 				return fmt.Errorf("owned advisory corpus contains unsupported file %q", filepath.ToSlash(relativePath))
 			}
@@ -2986,10 +3083,13 @@ func inspectOwnedCorpusLayout(directory string, format DatabaseFormat) error {
 	return nil
 }
 
-func ownedFileFormat(name string) (DatabaseFormat, bool) {
+func ownedFileFormat(name string, declared DatabaseFormat) (DatabaseFormat, bool) {
 	name = strings.ToLower(name)
 	switch {
 	case strings.HasSuffix(name, ".json"):
+		if declared == DatabaseFormatCSAFJSON {
+			return DatabaseFormatCSAFJSON, true
+		}
 		return DatabaseFormatOSVJSON, true
 	case strings.HasSuffix(name, ".xml"), strings.HasSuffix(name, ".xml.gz"), strings.HasSuffix(name, ".xml.bz2"):
 		return DatabaseFormatOVAL, true
@@ -3125,8 +3225,9 @@ func requireJSONFields(data []byte, names ...string) error {
 
 func validateCapabilityEvidenceObservation(observation bench.Observation, evidence Evidence, evidenceJSON []byte) (Evidence, error) {
 	capability := evidence.Capability
-	if capability == nil || capability.Kind != bench.CapabilityKindOSVScannerSUSERPM ||
-		capability.DecisionRuleRevision != CapabilityDecisionRuleRevision || capability.Decision != string(bench.ObservationUnsupported) ||
+	rule, ok := capabilityRule(observation.CapabilityKind)
+	if capability == nil || !ok || capability.Kind != observation.CapabilityKind ||
+		capability.DecisionRuleRevision != rule.decisionRuleRevision || capability.Decision != string(bench.ObservationUnsupported) ||
 		!validDigest(capability.StatementDigest) {
 		return Evidence{}, errors.New("capability evidence has an invalid decision identity")
 	}
