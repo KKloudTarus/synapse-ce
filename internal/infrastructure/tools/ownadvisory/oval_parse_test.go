@@ -1398,6 +1398,9 @@ func TestParseSLEFixedBindsArchitectureQualifiedDirectPackageCriterion(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Fixture bytes are checked out with platform line endings, so a multi-line mutation anchored on "\n"
+	// must normalise first or it silently stops matching on a CRLF checkout.
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 	group := []byte("        <criteria operator=\"AND\">\n          <criterion test_ref=\"oval:org.opensuse.security:tst:2010099999\" comment=\"libopenssl1_1-1.1.1w-150600.3.10 is installed\"/>\n        </criteria>")
 	direct := []byte("        <criterion test_ref=\"oval:org.opensuse.security:tst:2010099999\" comment=\"libopenssl1_1-1.1.1w-150600.3.10 is installed\"/>")
 	if !bytes.Contains(data, group) {
@@ -1436,6 +1439,9 @@ func TestParseSLEFixedBindsNoarchPackageToNoarchOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Fixture bytes are checked out with platform line endings, so a multi-line mutation anchored on "\n"
+	// must normalise first or it silently stops matching on a CRLF checkout.
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 	group := []byte("        <criteria operator=\"AND\">\n          <criterion test_ref=\"oval:org.opensuse.security:tst:2010099999\" comment=\"libopenssl1_1-1.1.1w-150600.3.10 is installed\"/>\n        </criteria>")
 	direct := []byte("        <criterion test_ref=\"oval:org.opensuse.security:tst:2010099999\" comment=\"libopenssl1_1-1.1.1w-150600.3.10 is installed\"/>")
 	if !bytes.Contains(data, group) {
