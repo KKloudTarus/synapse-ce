@@ -30,6 +30,41 @@ type Event struct {
 // range type/ecosystem with no sound owned comparator – including every GIT range – is skipped, so the
 // explicit versions list is the only signal there (a guessed order would risk a false match). This is what
 // the owned DetectionSource calls; it queries the owned store, no third-party service.
+// ArchitectureApplies reports whether an affected block constrained to architectures applies to a
+// component whose architecture is componentArch.
+//
+// It fails closed in both unprovable directions. An empty constraint set means the source carried no
+// architecture evidence, so the block applies everywhere and every architecture-blind source keeps its
+// existing behavior. A non-empty constraint set is authoritative evidence that the block applies only to
+// those architectures, so an empty componentArch does NOT match: we cannot prove the installed package is
+// inside the vendor's set, and guessing would reintroduce the over-match this constraint exists to prevent.
+//
+// "noarch" is compared literally rather than treated as a wildcard. A vendor block scoped to noarch
+// describes architecture-independent content, and the installed component that carries it is itself tagged
+// noarch, so a literal comparison is both correct and the conservative reading.
+// unsatisfiableArchitecture marks an affected block whose architecture constraint was present in the source
+// but carried no usable token. It is deliberately not a real architecture name and contains a character that
+// cannot appear in one, so ArchitectureApplies never satisfies it and the block matches nothing. Normalization
+// substitutes it rather than emptying the list, because an empty list means "no constraint, applies to every
+// architecture" and would turn malformed vendor evidence into a wider match.
+const unsatisfiableArchitecture = "\x00unsatisfiable"
+
+func ArchitectureApplies(architectures []string, componentArch string) bool {
+	if len(architectures) == 0 {
+		return true
+	}
+	component := strings.ToLower(strings.TrimSpace(componentArch))
+	if component == "" {
+		return false
+	}
+	for _, architecture := range architectures {
+		if strings.ToLower(strings.TrimSpace(architecture)) == component {
+			return true
+		}
+	}
+	return false
+}
+
 func Affected(ecosystem, version string, ranges []Range, versions []string) bool {
 	return AffectedVersionList(ecosystem, version, versions) || affectedRanges(ecosystem, version, ranges)
 }

@@ -41,7 +41,7 @@ func TestApplyConfirmedSeedsAndCandidateDoesNot(t *testing.T) {
 	if n := len(adv.Affected[0].CuratedSymbols); n != 2 {
 		t.Fatalf("want 2 attached Maven entries, got %d: %+v", n, adv.Affected[0].CuratedSymbols)
 	}
-	_, _, syms := adv.MatchDetails("Maven", "org.example:lib", "1.0.0")
+	_, _, syms := adv.MatchDetails("Maven", "org.example:lib", "1.0.0", "")
 	seen := map[string]bool{}
 	for _, s := range syms {
 		seen[s] = true
@@ -74,14 +74,14 @@ func TestApplySeedingIsVersionScopedByBlockRange(t *testing.T) {
 	}}
 	adv = corpus.Apply(adv)
 	// Seeds for a version inside an affected range.
-	if _, _, syms := adv.MatchDetails("Maven", "org.example:lib", "0.5.0"); len(syms) != 1 || syms[0] != "org.example.Foo#sink" {
+	if _, _, syms := adv.MatchDetails("Maven", "org.example:lib", "0.5.0", ""); len(syms) != 1 || syms[0] != "org.example.Foo#sink" {
 		t.Errorf("must seed for an affected version, got %v", syms)
 	}
-	if _, _, syms := adv.MatchDetails("Maven", "org.example:lib", "2.1.0"); len(syms) != 1 || syms[0] != "org.example.Foo#sink" {
+	if _, _, syms := adv.MatchDetails("Maven", "org.example:lib", "2.1.0", ""); len(syms) != 1 || syms[0] != "org.example.Foo#sink" {
 		t.Errorf("must seed for the second affected range, got %v", syms)
 	}
 	// Does NOT seed for a version between the ranges (1.5.0 is fixed in the first range, before the second).
-	if matched, _, syms := adv.MatchDetails("Maven", "org.example:lib", "1.5.0"); matched || len(syms) != 0 {
+	if matched, _, syms := adv.MatchDetails("Maven", "org.example:lib", "1.5.0", ""); matched || len(syms) != 0 {
 		t.Errorf("must not seed for an unaffected version, got matched=%v syms=%v", matched, syms)
 	}
 }
@@ -92,7 +92,7 @@ func seedsVia(t *testing.T, e CuratedEntry) bool {
 	t.Helper()
 	corpus := CuratedCorpus{normID(e.AdvisoryID): {e}}
 	adv := corpus.Apply(mavenAdvisory())
-	_, _, syms := adv.MatchDetails("Maven", "org.example:lib", "1.0.0")
+	_, _, syms := adv.MatchDetails("Maven", "org.example:lib", "1.0.0", "")
 	for _, s := range syms {
 		if s == e.Symbol {
 			return true

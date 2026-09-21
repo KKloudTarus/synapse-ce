@@ -85,10 +85,10 @@ func TestAdvisoryMatchPyPIEcosystem(t *testing.T) {
 			FixedVersion: "4.2.0",
 		}},
 	}
-	if ok, fixed := adv.Match("PyPI", "django", "4.1.post1"); !ok || fixed != "4.2.0" {
+	if ok, fixed := adv.Match("PyPI", "django", "4.1.post1", ""); !ok || fixed != "4.2.0" {
 		t.Errorf("PyPI 4.1.post1 in [0, 4.2.0) must match with fixed 4.2.0: ok=%v fixed=%q", ok, fixed)
 	}
-	if ok, _ := adv.Match("PyPI", "django", "4.2.0"); ok {
+	if ok, _ := adv.Match("PyPI", "django", "4.2.0", ""); ok {
 		t.Error("4.2.0 (== fixed) must not match")
 	}
 }

@@ -59,13 +59,13 @@ func TestParseRockyOSVMatchesViaDomainMatcher(t *testing.T) {
 	}
 	fixed := "0:4.18.0-553.162.1.rt7.503.el8_10"
 	lower := "0:4.18.0-553.100.1.rt7.500.el8_10"
-	if ok, _ := kernel.Match("Rocky Linux:8", "kernel-rt", lower); !ok {
+	if ok, _ := kernel.Match("Rocky Linux:8", "kernel-rt", lower, ""); !ok {
 		t.Errorf("an older kernel-rt (%s) below fix %s must match", lower, fixed)
 	}
-	if ok, _ := kernel.Match("Rocky Linux:8", "kernel-rt", fixed); ok {
+	if ok, _ := kernel.Match("Rocky Linux:8", "kernel-rt", fixed, ""); ok {
 		t.Error("kernel-rt at the fixed version must not match")
 	}
-	if ok, _ := kernel.Match("Rocky Linux:9", "kernel-rt", lower); ok {
+	if ok, _ := kernel.Match("Rocky Linux:9", "kernel-rt", lower, ""); ok {
 		t.Error("a different Rocky release must not match")
 	}
 }

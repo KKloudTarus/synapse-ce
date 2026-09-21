@@ -3,12 +3,14 @@ package ownadvisory
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 func TestParseUbuntuOVAL(t *testing.T) {
@@ -20,9 +22,8 @@ func TestParseUbuntuOVAL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseUbuntuOVAL: %v", err)
 	}
-	// Only the fixed CVE yields an advisory; the deferred (no "less than" fix) one is skipped.
 	if len(advs) != 1 {
-		t.Fatalf("want 1 advisory (deferred CVE dropped), got %d: %+v", len(advs), advs)
+		t.Fatalf("want 1 fixed advisory, got %d: %+v", len(advs), advs)
 	}
 	a := advs[0]
 	if a.ID != "CVE-2023-1000" {
@@ -43,6 +44,23 @@ func TestParseUbuntuOVAL(t *testing.T) {
 	}
 }
 
+func TestParseOVALSnapshotRejectsUnrepresentableDebDefinition(t *testing.T) {
+	fixed, err := os.ReadFile(filepath.Join("testdata", "oval-jammy.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deferred, err := os.ReadFile(filepath.Join("testdata", "oval-jammy-deferred.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, documents := range [][][]byte{{fixed, deferred}, {deferred, fixed}} {
+		advs, err := ParseOVALSnapshot(documents)
+		if err == nil || !errors.Is(err, shared.ErrValidation) || len(advs) != 0 {
+			t.Fatalf("a present deferred definition must reject the complete snapshot: err=%v advisories=%+v", err, advs)
+		}
+	}
+}
+
 func TestParseUbuntuOVALResolvesCurrentConstantVariablePackageList(t *testing.T) {
 	doc := `<oval_definitions xmlns:linux-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
 	  <definitions><definition class="vulnerability" id="oval:com.ubuntu.jammy:def:2026100000000000">
@@ -50,7 +68,7 @@ func TestParseUbuntuOVALResolvesCurrentConstantVariablePackageList(t *testing.T)
 	      <reference source="CVE" ref_id="CVE-2026-10000"/><advisory><severity>High</severity></advisory></metadata>
 	    <criteria><criterion test_ref="oval:com.ubuntu.jammy:tst:2026100000000000"/></criteria>
 	  </definition></definitions>
-	  <tests><linux-def:dpkginfo_test id="oval:com.ubuntu.jammy:tst:2026100000000000">
+	  <tests><linux-def:dpkginfo_test id="oval:com.ubuntu.jammy:tst:2026100000000000" check="at least one">
 	    <linux-def:object object_ref="oval:com.ubuntu.jammy:obj:2026100000000000"/>
 	    <linux-def:state state_ref="oval:com.ubuntu.jammy:ste:2026100000000000"/>
 	  </linux-def:dpkginfo_test></tests>
@@ -58,7 +76,7 @@ func TestParseUbuntuOVALResolvesCurrentConstantVariablePackageList(t *testing.T)
 	    <linux-def:name var_ref="oval:com.ubuntu.jammy:var:2026100000000000"/>
 	  </linux-def:dpkginfo_object></objects>
 	  <states><linux-def:dpkginfo_state id="oval:com.ubuntu.jammy:ste:2026100000000000">
-	    <linux-def:evr operation="less than">2.4.52-1ubuntu4.3</linux-def:evr>
+	    <linux-def:evr datatype="debian_evr_string" operation="less than">2.4.52-1ubuntu4.3</linux-def:evr>
 	  </linux-def:dpkginfo_state></states>
 	  <variables><constant_variable id="oval:com.ubuntu.jammy:var:2026100000000000">
 	    <value>apache2</value><value>apache2-bin</value><value>apache2</value>
@@ -86,13 +104,13 @@ func TestParseUbuntuOVALMatchesViaDomainMatcher(t *testing.T) {
 	a := advs[0]
 	// A lower dpkg version is affected; at/above the fixed version it is not – proves the owned dpkg
 	// comparator wires up end to end through the "Ubuntu:22.04" ecosystem key.
-	if ok, fixed := a.Match("Ubuntu:22.04", "openssl", "3.0.2-0ubuntu1.9"); !ok || fixed != "3.0.2-0ubuntu1.10" {
+	if ok, fixed := a.Match("Ubuntu:22.04", "openssl", "3.0.2-0ubuntu1.9", ""); !ok || fixed != "3.0.2-0ubuntu1.10" {
 		t.Errorf("older openssl must match with fix 3.0.2-0ubuntu1.10, got ok=%v fixed=%q", ok, fixed)
 	}
-	if ok, _ := a.Match("Ubuntu:22.04", "openssl", "3.0.2-0ubuntu1.10"); ok {
+	if ok, _ := a.Match("Ubuntu:22.04", "openssl", "3.0.2-0ubuntu1.10", ""); ok {
 		t.Error("openssl at the fixed version must not match")
 	}
-	if ok, _ := a.Match("Ubuntu:20.04", "openssl", "3.0.2-0ubuntu1.9"); ok {
+	if ok, _ := a.Match("Ubuntu:20.04", "openssl", "3.0.2-0ubuntu1.9", ""); ok {
 		t.Error("a different release must not match (ecosystem key differs)")
 	}
 }
@@ -219,16 +237,16 @@ func TestParseDebianOVALMatchesViaDomainMatcher(t *testing.T) {
 	if glibc.ID == "" {
 		t.Fatal("glibc advisory not parsed")
 	}
-	if ok, fixed := glibc.Match("Debian:12", "glibc", "2.1-1"); !ok || fixed != "0:2.2-1" {
+	if ok, fixed := glibc.Match("Debian:12", "glibc", "2.1-1", ""); !ok || fixed != "0:2.2-1" {
 		t.Errorf("older glibc (no epoch) must match with fix 0:2.2-1, got ok=%v fixed=%q", ok, fixed)
 	}
-	if ok, _ := glibc.Match("Debian:12", "glibc", "0:2.1-1"); !ok {
+	if ok, _ := glibc.Match("Debian:12", "glibc", "0:2.1-1", ""); !ok {
 		t.Error("older glibc with an explicit epoch must match")
 	}
-	if ok, _ := glibc.Match("Debian:12", "glibc", "0:2.2-1"); ok {
+	if ok, _ := glibc.Match("Debian:12", "glibc", "0:2.2-1", ""); ok {
 		t.Error("glibc at the fixed version must not match")
 	}
-	if ok, _ := glibc.Match("Debian:11", "glibc", "2.1-1"); ok {
+	if ok, _ := glibc.Match("Debian:11", "glibc", "2.1-1", ""); ok {
 		t.Error("a different Debian release must not match (ecosystem key differs)")
 	}
 }
@@ -324,9 +342,9 @@ func TestParseOVALMixedFamilyRejected(t *testing.T) {
 	}
 }
 
-// TestOVALAmbiguousStateSkipped proves a dpkginfo_state carrying BOTH <version> and <evr> with divergent
-// values yields no advisory, rather than silently choosing one boundary.
-func TestOVALAmbiguousStateSkipped(t *testing.T) {
+// TestOVALAmbiguousStateRejected proves a dpkginfo_state carrying both <version> and <evr> with divergent
+// values rejects the complete snapshot rather than silently choosing or omitting a boundary.
+func TestOVALAmbiguousStateRejected(t *testing.T) {
 	x := `<oval_definitions><definitions>
 	  <definition class="vulnerability" id="oval:org.debian:def:1">
 	    <metadata><affected><platform>Debian GNU/Linux 12</platform></affected>
@@ -339,11 +357,8 @@ func TestOVALAmbiguousStateSkipped(t *testing.T) {
 	    <evr operation="less than">0:9.9-1</evr></linux:dpkginfo_state></states>
 	</oval_definitions>`
 	advs, err := ParseOVAL([]byte(x))
-	if err != nil {
-		t.Fatalf("ParseOVAL: %v", err)
-	}
-	if len(advs) != 0 {
-		t.Errorf("an ambiguous version/evr state must yield no advisory, got %+v", advs)
+	if err == nil || !errors.Is(err, shared.ErrValidation) || len(advs) != 0 {
+		t.Fatalf("an ambiguous version/evr state must reject the snapshot: err=%v advisories=%+v", err, advs)
 	}
 }
 
@@ -355,11 +370,11 @@ func TestOVALConsistentBothElementsAccepted(t *testing.T) {
 	    <metadata><affected><platform>Debian GNU/Linux 12</platform></affected>
 	      <reference source="CVE" ref_id="CVE-2099-0003"/></metadata>
 	    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
-	  <tests><linux:dpkginfo_test id="t1" xmlns:linux="x"><object object_ref="o1"/><state state_ref="s1"/></linux:dpkginfo_test></tests>
-	  <objects><linux:dpkginfo_object id="o1" xmlns:linux="x"><name>openssl</name></linux:dpkginfo_object></objects>
-	  <states><linux:dpkginfo_state id="s1" xmlns:linux="x">
-	    <version operation="less than">0:1.2-1</version>
-	    <evr operation="less than">0:1.2-1</evr></linux:dpkginfo_state></states>
+	  <tests><linux:dpkginfo_test id="t1" check="at least one" xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux"><linux:object object_ref="o1"/><linux:state state_ref="s1"/></linux:dpkginfo_test></tests>
+	  <objects><linux:dpkginfo_object id="o1" xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux"><linux:name>openssl</linux:name></linux:dpkginfo_object></objects>
+	  <states><linux:dpkginfo_state id="s1" xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+	    <linux:version datatype="debian_evr_string" operation="less than">0:1.2-1</linux:version>
+	    <linux:evr datatype="debian_evr_string" operation="less than">0:1.2-1</linux:evr></linux:dpkginfo_state></states>
 	</oval_definitions>`
 	advs, err := ParseOVAL([]byte(x))
 	if err != nil {
@@ -370,24 +385,26 @@ func TestOVALConsistentBothElementsAccepted(t *testing.T) {
 	}
 }
 
-// TestDebianZeroBoundSkipped proves the "less than 0:0" missing-data sentinel yields no advisory.
-func TestDebianZeroBoundSkipped(t *testing.T) {
+// TestDebianZeroBoundPreservesEmptyAdvisory proves an impossible bound retires stale state without widening.
+func TestDebianZeroBoundPreservesEmptyAdvisory(t *testing.T) {
 	for _, sentinel := range []string{"0:0", "0", "0:0-0"} {
-		x := `<oval_definitions><definitions>
-		  <definition class="vulnerability" id="oval:org.debian:def:1">
-		    <metadata><affected><platform>Debian GNU/Linux 12</platform></affected>
+		x := `<oval_definitions xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5" xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+		  <definitions><definition class="vulnerability" id="oval:org.debian:def:1">
+		    <metadata><title>CVE-2099-0004 bash</title><affected family="unix"><platform>Debian GNU/Linux 12</platform><product>bash</product></affected>
 		      <reference source="CVE" ref_id="CVE-2099-0004"/></metadata>
-		    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
-		  <tests><linux:dpkginfo_test id="t1" xmlns:linux="x"><object object_ref="o1"/><state state_ref="s1"/></linux:dpkginfo_test></tests>
-		  <objects><linux:dpkginfo_object id="o1" xmlns:linux="x"><name>bash</name></linux:dpkginfo_object></objects>
-		  <states><linux:dpkginfo_state id="s1" xmlns:linux="x"><evr operation="less than">` + sentinel + `</evr></linux:dpkginfo_state></states>
+		    <criteria operator="AND"><criterion test_ref="release" comment="Debian 12 is installed"/>
+		      <criteria operator="OR"><criteria operator="AND"><criterion test_ref="arch" comment="all architecture"/><criterion test_ref="t1" comment="bash DPKG is earlier than ` + sentinel + `"/></criteria></criteria>
+		    </criteria></definition></definitions>
+		  <tests><linux:dpkginfo_test id="t1" check="all" check_existence="at_least_one_exists"><linux:object object_ref="o1"/><linux:state state_ref="s1"/></linux:dpkginfo_test></tests>
+		  <objects><linux:dpkginfo_object id="o1"><linux:name>bash</linux:name></linux:dpkginfo_object></objects>
+		  <states><linux:dpkginfo_state id="s1"><linux:evr datatype="debian_evr_string" operation="less than">` + sentinel + `</linux:evr></linux:dpkginfo_state></states>
 		</oval_definitions>`
 		advs, err := ParseOVAL([]byte(x))
 		if err != nil {
-			t.Fatalf("ParseOVAL(%s): %v", sentinel, err)
+			t.Fatalf("zero-bound %q: %v", sentinel, err)
 		}
-		if len(advs) != 0 {
-			t.Errorf("zero-bound %q must yield no advisory, got %+v", sentinel, advs)
+		if len(advs) != 1 || advs[0].ID != "CVE-2099-0004" || len(advs[0].Affected) != 0 {
+			t.Fatalf("zero-bound %q must preserve one empty current advisory: %+v", sentinel, advs)
 		}
 	}
 }
@@ -411,9 +428,9 @@ func TestParseOVALFamilyAnchoredNotSubstring(t *testing.T) {
 	    <metadata><affected><platform>Debian GNU/Linux 12</platform></affected>
 	      <reference source="CVE" ref_id="CVE-2099-0005"/></metadata>
 	    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
-	  <tests><linux:dpkginfo_test id="t1" xmlns:linux="x"><object object_ref="o1"/><state state_ref="s1"/></linux:dpkginfo_test></tests>
-	  <objects><linux:dpkginfo_object id="o1" xmlns:linux="x"><name>zlib</name></linux:dpkginfo_object></objects>
-	  <states><linux:dpkginfo_state id="s1" xmlns:linux="x"><evr operation="less than">0:1.2.13-1</evr></linux:dpkginfo_state></states>
+	  <tests><linux:dpkginfo_test id="t1" check="at least one" xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux"><linux:object object_ref="o1"/><linux:state state_ref="s1"/></linux:dpkginfo_test></tests>
+	  <objects><linux:dpkginfo_object id="o1" xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux"><linux:name>zlib</linux:name></linux:dpkginfo_object></objects>
+	  <states><linux:dpkginfo_state id="s1" xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux"><linux:evr datatype="debian_evr_string" operation="less than">0:1.2.13-1</linux:evr></linux:dpkginfo_state></states>
 	</oval_definitions>`
 	advs, err := ParseOVAL([]byte(x))
 	if err != nil {
@@ -432,69 +449,37 @@ func TestParseOracleOVAL(t *testing.T) {
 		t.Fatal(err)
 	}
 	advs, err := ParseOVAL(data)
-	if err != nil {
-		t.Fatalf("ParseOVAL(oracle): %v", err)
-	}
-	cves := map[string]bool{}
-	pkgs := map[string]bool{}
-	for _, a := range advs {
-		cves[a.ID] = true
-		if len(a.Affected) == 0 {
-			t.Errorf("%s has no affected packages", a.ID)
-		}
-		for _, ap := range a.Affected {
-			pkgs[ap.Package] = true
-			if ap.Ecosystem != "Oracle Linux:9" {
-				t.Errorf("%s: ecosystem = %q, want Oracle Linux:9", a.ID, ap.Ecosystem)
-			}
-			if ap.Ranges[0].Type != "ECOSYSTEM" {
-				t.Errorf("%s: range type = %q, want ECOSYSTEM", a.ID, ap.Ranges[0].Type)
-			}
-			if strings.Contains(ap.FixedVersion, ".module") {
-				t.Errorf("%s: modular fixed version leaked: %s", a.ID, ap.FixedVersion)
-			}
-		}
-	}
-	// One ELSA fixing 7 CVEs in microcode_ctl becomes 7 advisories sharing that package.
-	if len(cves) != 7 {
-		t.Errorf("want 7 CVE advisories from the non-modular ELSA, got %d: %v", len(cves), cves)
-	}
-	if !pkgs["microcode_ctl"] {
-		t.Error("the non-modular microcode_ctl package must be present")
-	}
-	// The modular ELSA (a "Module ... is enabled" gate and a .module fixed version) is skipped wholesale.
-	if pkgs["cjose"] || pkgs["mod_auth_openidc"] {
-		t.Errorf("a modular definition must be skipped, got packages %v", pkgs)
+	if err == nil || !errors.Is(err, shared.ErrValidation) || len(advs) != 0 {
+		t.Fatalf("architecture- and signature-restricted Oracle criteria must reject the snapshot: err=%v advisories=%+v", err, advs)
 	}
 }
 
 // TestParseOracleMatchesViaDomainMatcher proves the Oracle Linux:9 key and the rpm comparator wire end to
 // end, including the .elN dist tag and epoch.
 func TestParseOracleMatchesViaDomainMatcher(t *testing.T) {
-	data, _ := os.ReadFile(filepath.Join("testdata", "oval-oracle-linux.xml"))
-	advs, err := ParseOVAL(data)
+	doc := oracleDoc(`<definitions>
+	  <definition class="patch" id="oval:com.oracle.elsa:def:1"><metadata><title>ELSA-1</title>
+	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-0001"/></metadata>
+	    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
+	  <tests><linux:rpminfo_test id="t1" check="at least one"><linux:object object_ref="o1"/><linux:state state_ref="s1"/></linux:rpminfo_test></tests>
+	  <objects><linux:rpminfo_object id="o1"><linux:name>microcode_ctl</linux:name></linux:rpminfo_object></objects>
+	  <states><linux:rpminfo_state id="s1"><linux:evr datatype="evr_string" operation="less than">4:20240910-1.0.1.el9_5</linux:evr></linux:rpminfo_state></states>`)
+	advs, err := ParseOVAL(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var mc advisory.Advisory
-	for _, a := range advs {
-		for _, ap := range a.Affected {
-			if ap.Package == "microcode_ctl" {
-				mc = a
-			}
-		}
+	if len(advs) != 1 || len(advs[0].Affected) != 1 {
+		t.Fatalf("safe bounded Oracle definition not parsed: %+v", advs)
 	}
-	if mc.ID == "" {
-		t.Fatal("microcode_ctl advisory not parsed")
-	}
-	fixed := mc.Affected[0].FixedVersion // 4:20240910-1.0.1.el9_5
-	if ok, got := mc.Match("Oracle Linux:9", "microcode_ctl", "4:20240815-1.0.1.el9_5"); !ok || got != fixed {
+	mc := advs[0]
+	fixed := mc.Affected[0].FixedVersion
+	if ok, got := mc.Match("Oracle Linux:9", "microcode_ctl", "4:20240815-1.0.1.el9_5", ""); !ok || got != fixed {
 		t.Errorf("older microcode_ctl must match with fix %s, got ok=%v fixed=%q", fixed, ok, got)
 	}
-	if ok, _ := mc.Match("Oracle Linux:9", "microcode_ctl", fixed); ok {
+	if ok, _ := mc.Match("Oracle Linux:9", "microcode_ctl", fixed, ""); ok {
 		t.Error("microcode_ctl at the fixed version must not match")
 	}
-	if ok, _ := mc.Match("Oracle Linux:8", "microcode_ctl", "4:20240815-1.0.1.el9_5"); ok {
+	if ok, _ := mc.Match("Oracle Linux:8", "microcode_ctl", "4:20240815-1.0.1.el9_5", ""); ok {
 		t.Error("a different Oracle release must not match")
 	}
 }
@@ -559,12 +544,12 @@ func TestParseOracleUnionsByCVE(t *testing.T) {
 	    <affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2099-1000"/></metadata>
 	    <criteria><criterion test_ref="t9"/></criteria></definition></definitions>
 	  <tests>
-	    <linux:rpminfo_test id="t8"><object object_ref="o1"/><state state_ref="s8"/></linux:rpminfo_test>
-	    <linux:rpminfo_test id="t9"><object object_ref="o1"/><state state_ref="s9"/></linux:rpminfo_test></tests>
-	  <objects><linux:rpminfo_object id="o1"><name>glibc</name></linux:rpminfo_object></objects>
+	    <linux:rpminfo_test id="t8" check="at least one"><linux:object object_ref="o1"/><linux:state state_ref="s8"/></linux:rpminfo_test>
+	    <linux:rpminfo_test id="t9" check="at least one"><linux:object object_ref="o1"/><linux:state state_ref="s9"/></linux:rpminfo_test></tests>
+	  <objects><linux:rpminfo_object id="o1"><linux:name>glibc</linux:name></linux:rpminfo_object></objects>
 	  <states>
-	    <linux:rpminfo_state id="s8"><evr operation="less than">0:2.28-1.el8_10</evr></linux:rpminfo_state>
-	    <linux:rpminfo_state id="s9"><evr operation="less than">0:2.34-1.el9_4</evr></linux:rpminfo_state></states>`)
+	    <linux:rpminfo_state id="s8"><linux:evr datatype="evr_string" operation="less than">0:2.28-1.el8_10</linux:evr></linux:rpminfo_state>
+	    <linux:rpminfo_state id="s9"><linux:evr datatype="evr_string" operation="less than">0:2.34-1.el9_4</linux:evr></linux:rpminfo_state></states>`)
 	advs, err := ParseOVAL(doc)
 	if err != nil {
 		t.Fatalf("ParseOVAL: %v", err)
@@ -591,9 +576,9 @@ func TestParseOracleKeysByDistTag(t *testing.T) {
 	    <affected><platform>Oracle Linux 8</platform><platform>Oracle Linux 9</platform></affected>
 	    <reference source="CVE" ref_id="CVE-2099-2000"/></metadata>
 	    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
-	  <tests><linux:rpminfo_test id="t1"><object object_ref="o1"/><state state_ref="s1"/></linux:rpminfo_test></tests>
-	  <objects><linux:rpminfo_object id="o1"><name>kernel-uek</name></linux:rpminfo_object></objects>
-	  <states><linux:rpminfo_state id="s1"><evr operation="less than">0:5.15.0-1.el8uek</evr></linux:rpminfo_state></states>`)
+	  <tests><linux:rpminfo_test id="t1" check="at least one"><linux:object object_ref="o1"/><linux:state state_ref="s1"/></linux:rpminfo_test></tests>
+	  <objects><linux:rpminfo_object id="o1"><linux:name>kernel-uek</linux:name></linux:rpminfo_object></objects>
+	  <states><linux:rpminfo_state id="s1"><linux:evr datatype="evr_string" operation="less than">0:5.15.0-1.el8uek</linux:evr></linux:rpminfo_state></states>`)
 	advs, err := ParseOVAL(doc)
 	if err != nil {
 		t.Fatal(err)
@@ -608,15 +593,12 @@ func TestParseOracleKeysByDistTag(t *testing.T) {
 	  <definition class="patch" id="oval:com.oracle.elsa:def:1"><metadata><title>ELSA-X</title>
 	    <affected><platform>Oracle Linux 8</platform></affected><reference source="CVE" ref_id="CVE-2099-3000"/></metadata>
 	    <criteria><criterion test_ref="t1"/></criteria></definition></definitions>
-	  <tests><linux:rpminfo_test id="t1"><object object_ref="o1"/><state state_ref="s1"/></linux:rpminfo_test></tests>
-	  <objects><linux:rpminfo_object id="o1"><name>glibc</name></linux:rpminfo_object></objects>
-	  <states><linux:rpminfo_state id="s1"><evr operation="less than">0:2.34-1.el9_4</evr></linux:rpminfo_state></states>`)
+	  <tests><linux:rpminfo_test id="t1" check="at least one"><linux:object object_ref="o1"/><linux:state state_ref="s1"/></linux:rpminfo_test></tests>
+	  <objects><linux:rpminfo_object id="o1"><linux:name>glibc</linux:name></linux:rpminfo_object></objects>
+	  <states><linux:rpminfo_state id="s1"><linux:evr datatype="evr_string" operation="less than">0:2.34-1.el9_4</linux:evr></linux:rpminfo_state></states>`)
 	advs2, err := ParseOVAL(doc2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(advs2) != 0 {
-		t.Errorf("an el9 version in an OL8-only definition must be skipped, got %+v", advs2)
+	if err == nil || !errors.Is(err, shared.ErrValidation) || len(advs2) != 0 {
+		t.Fatalf("an el9 version in an OL8-only definition must reject the snapshot: err=%v advisories=%+v", err, advs2)
 	}
 }
 
@@ -647,38 +629,8 @@ func TestParseAlmaLinuxOVAL(t *testing.T) {
 		t.Fatal(err)
 	}
 	advs, err := ParseOVAL(data)
-	if err != nil {
-		t.Fatalf("ParseOVAL(alma): %v", err)
-	}
-	if len(advs) == 0 {
-		t.Fatal("no AlmaLinux advisories parsed")
-	}
-	var grafana advisory.Advisory
-	for _, a := range advs {
-		for _, ap := range a.Affected {
-			if ap.Ecosystem != "AlmaLinux:9" {
-				t.Errorf("%s: ecosystem = %q, want AlmaLinux:9", a.ID, ap.Ecosystem)
-			}
-			if strings.Contains(ap.FixedVersion, ".module") {
-				t.Errorf("%s: modular version leaked: %s", a.ID, ap.FixedVersion)
-			}
-			if ap.Package == "grafana" {
-				grafana = a
-			}
-		}
-	}
-	if grafana.ID == "" || grafana.Affected[0].FixedVersion != "0:7.5.11-5.el9_0" {
-		t.Fatalf("grafana advisory not parsed as expected: %+v", grafana)
-	}
-	// end-to-end match through the rpm comparator and the AlmaLinux:9 key
-	if ok, _ := grafana.Match("AlmaLinux:9", "grafana", "0:7.5.11-4.el9_0"); !ok {
-		t.Error("an older grafana must match")
-	}
-	if ok, _ := grafana.Match("AlmaLinux:9", "grafana", "0:7.5.11-5.el9_0"); ok {
-		t.Error("grafana at the fixed version must not match")
-	}
-	if ok, _ := grafana.Match("AlmaLinux:8", "grafana", "0:7.5.11-4.el9_0"); ok {
-		t.Error("a different AlmaLinux release must not match")
+	if err == nil || !errors.Is(err, shared.ErrValidation) || len(advs) != 0 {
+		t.Fatalf("architecture- and signature-restricted AlmaLinux criteria must reject the snapshot: err=%v advisories=%+v", err, advs)
 	}
 }
 
@@ -720,56 +672,37 @@ func TestParseOpenSUSEOVAL(t *testing.T) {
 		t.Fatal(err)
 	}
 	advs, err := ParseOVAL(data)
-	if err != nil {
-		t.Fatalf("ParseOVAL(opensuse): %v", err)
-	}
-	var rc advisory.Advisory
-	for _, a := range advs {
-		for _, ap := range a.Affected {
-			if ap.Ecosystem != "openSUSE:15.6" {
-				t.Errorf("%s: ecosystem = %q, want openSUSE:15.6", a.ID, ap.Ecosystem)
-			}
-			if ap.Ranges[0].Type != "ECOSYSTEM" {
-				t.Errorf("%s: range type = %q, want ECOSYSTEM", a.ID, ap.Ranges[0].Type)
-			}
-			if ap.Package == "roundcubemail" {
-				rc = a
-			}
-		}
-	}
-	if rc.ID != "CVE-2026-25916" || rc.Affected[0].FixedVersion != "0:1.6.13-bp156.2.12.1" {
-		t.Fatalf("roundcubemail advisory (CVE from title) not parsed as expected: %+v", rc)
-	}
-	// end-to-end match through the rpm comparator on SUSE's version format
-	if ok, _ := rc.Match("openSUSE:15.6", "roundcubemail", "0:1.6.13-bp156.2.11.1"); !ok {
-		t.Error("an older roundcubemail must match")
-	}
-	if ok, _ := rc.Match("openSUSE:15.6", "roundcubemail", "0:1.6.13-bp156.2.12.1"); ok {
-		t.Error("roundcubemail at the fixed version must not match")
-	}
-	if ok, _ := rc.Match("openSUSE:15.5", "roundcubemail", "0:1.6.13-bp156.2.11.1"); ok {
-		t.Error("a different openSUSE release must not match")
+	if err == nil || !errors.Is(err, shared.ErrValidation) || len(advs) != 0 {
+		t.Fatalf("architecture-restricted openSUSE criteria must reject the snapshot: err=%v advisories=%+v", err, advs)
 	}
 }
 
 // TestParseOVALGzip proves the gzip-compressed feed path (SUSE ships .gz) parses identically to plain XML.
 func TestParseOVALGzip(t *testing.T) {
-	plain, err := os.ReadFile(filepath.Join("testdata", "oval-opensuse.xml"))
+	plain, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6.xml"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	plainAdvisories, err := ParseOVAL(plain)
+	if err != nil {
+		t.Fatalf("ParseOVAL(plain): %v", err)
 	}
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(plain); err != nil {
 		t.Fatal(err)
 	}
-	gz.Close()
-	advs, err := ParseOVAL(buf.Bytes())
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	compressedAdvisories, err := ParseOVAL(buf.Bytes())
 	if err != nil {
 		t.Fatalf("ParseOVAL(gzip): %v", err)
 	}
-	if len(advs) == 0 || advs[0].Affected[0].Ecosystem != "openSUSE:15.6" {
-		t.Errorf("gzip parse mismatch: %+v", advs)
+	if len(plainAdvisories) != 1 || len(compressedAdvisories) != 1 ||
+		plainAdvisories[0].ID != compressedAdvisories[0].ID ||
+		len(plainAdvisories[0].Affected) != len(compressedAdvisories[0].Affected) {
+		t.Errorf("gzip parse mismatch: plain=%+v compressed=%+v", plainAdvisories, compressedAdvisories)
 	}
 }
 
@@ -823,37 +756,28 @@ func TestRpmOvalBoundedRangeSkipped(t *testing.T) {
 	      <criterion test_ref="tlt"/>
 	      <criterion test_ref="tok"/></criteria></definition></definitions>
 	  <tests>
-	    <linux:rpminfo_test id="tge"><object object_ref="o1"/><state state_ref="sge"/></linux:rpminfo_test>
-	    <linux:rpminfo_test id="tlt"><object object_ref="o1"/><state state_ref="slt"/></linux:rpminfo_test>
-	    <linux:rpminfo_test id="tok"><object object_ref="o2"/><state state_ref="sok"/></linux:rpminfo_test></tests>
+	    <linux:rpminfo_test id="tge" check="at least one"><linux:object object_ref="o1"/><linux:state state_ref="sge"/></linux:rpminfo_test>
+	    <linux:rpminfo_test id="tlt" check="at least one"><linux:object object_ref="o1"/><linux:state state_ref="slt"/></linux:rpminfo_test>
+	    <linux:rpminfo_test id="tok" check="at least one"><linux:object object_ref="o2"/><linux:state state_ref="sok"/></linux:rpminfo_test></tests>
 	  <objects>
-	    <linux:rpminfo_object id="o1"><name>bounded-pkg</name></linux:rpminfo_object>
-	    <linux:rpminfo_object id="o2"><name>plain-pkg</name></linux:rpminfo_object></objects>
+	    <linux:rpminfo_object id="o1"><linux:name>bounded-pkg</linux:name></linux:rpminfo_object>
+	    <linux:rpminfo_object id="o2"><linux:name>plain-pkg</linux:name></linux:rpminfo_object></objects>
 	  <states>
-	    <linux:rpminfo_state id="sge"><evr operation="greater than or equal">0:1.0-1.el9</evr></linux:rpminfo_state>
-	    <linux:rpminfo_state id="slt"><evr operation="less than">0:2.0-1.el9</evr></linux:rpminfo_state>
-	    <linux:rpminfo_state id="sok"><evr operation="less than">0:3.0-1.el9</evr></linux:rpminfo_state></states>`)
+	    <linux:rpminfo_state id="sge"><linux:evr datatype="evr_string" operation="greater than or equal">0:1.0-1.el9</linux:evr></linux:rpminfo_state>
+	    <linux:rpminfo_state id="slt"><linux:evr datatype="evr_string" operation="less than">0:2.0-1.el9</linux:evr></linux:rpminfo_state>
+	    <linux:rpminfo_state id="sok"><linux:evr datatype="evr_string" operation="less than">0:3.0-1.el9</linux:evr></linux:rpminfo_state></states>`)
 	advs, err := ParseOVAL(doc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pkgs := map[string]bool{}
-	for _, a := range advs {
-		for _, ap := range a.Affected {
-			pkgs[ap.Package] = true
-		}
-	}
-	if pkgs["bounded-pkg"] {
-		t.Error("a package with a ge+lt bounded range must be skipped, not emitted as [0, Y)")
-	}
-	if !pkgs["plain-pkg"] {
-		t.Error("a plain less-than package in the same definition must still be emitted")
+	if err == nil || !errors.Is(err, shared.ErrValidation) || len(advs) != 0 {
+		t.Fatalf("an unsupported conjunction must reject the whole definition rather than widen one branch: err=%v advisories=%+v", err, advs)
 	}
 }
 
-// EPIC #860 D1.4: SUSE Linux Enterprise OVAL shares openSUSE's definition-id prefix but uses "SUSE Linux
-// Enterprise ... 15 SP6" platform strings, so it must key "SUSE:15.6" (per service pack), not "openSUSE:".
-func TestParseSLEOVAL(t *testing.T) {
+// SUSE Linux Enterprise OVAL shares openSUSE's definition-id prefix. Architecture-qualified package evidence
+// is authoritative applicability, so it is projected with its exact architecture set and enforced at match
+// time. The architecture-free match below is the invariant that mattered when this evidence was suppressed
+// outright, and it still holds: a component whose architecture is unknown cannot be proven to be inside the
+// vendor's set, so it must not match.
+func TestParseSLEOVALBindsArchitectureQualifiedFixedPackage(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6.xml"))
 	if err != nil {
 		t.Fatal(err)
@@ -862,31 +786,751 @@ func TestParseSLEOVAL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseOVAL(sle): %v", err)
 	}
-	var oss advisory.Advisory
-	for _, a := range advs {
-		for _, ap := range a.Affected {
-			if ap.Ecosystem != "SUSE:15.6" {
-				t.Errorf("%s: ecosystem = %q, want SUSE:15.6 (SLE must not key as openSUSE)", a.ID, ap.Ecosystem)
-			}
-			if ap.Package == "libopenssl1_1" {
-				oss = a
-			}
+	if len(advs) != 1 || advs[0].ID != "CVE-2026-12345" || len(advs[0].Affected) != 1 {
+		t.Fatalf("architecture-qualified evidence must bind exactly one affected block: %+v", advs)
+	}
+	if got, want := strings.Join(advs[0].Affected[0].Architectures, ","), "aarch64,ppc64le,s390x,x86_64"; got != want {
+		t.Fatalf("architectures = %q, want %q", got, want)
+	}
+	if ok, _ := advs[0].Match("SUSE:15.6", "libopenssl1_1", "0:1.1.1w-150600.3.9", ""); ok {
+		t.Error("architecture-qualified evidence must not match a component of unknown architecture")
+	}
+	if ok, _ := advs[0].Match("SUSE:15.6", "libopenssl1_1", "0:1.1.1w-150600.3.9", "i586"); ok {
+		t.Error("architecture-qualified evidence must not match an architecture outside the vendor's set")
+	}
+	// It must match inside the set, below the fixed boundary. That recall is the point of #1295's fix.
+	if ok, fixed := advs[0].Match("SUSE:15.6", "libopenssl1_1", "0:1.1.1w-150600.3.9", "x86_64"); !ok || fixed != "0:1.1.1w-150600.3.10" {
+		t.Errorf("in-set architecture must match with its fixed hint, got ok=%v fixed=%q", ok, fixed)
+	}
+	if ok, _ := advs[0].Match("SUSE:15.6", "libopenssl1_1", "0:1.1.1w-150600.3.10", "x86_64"); ok {
+		t.Error("a version at the fixed boundary must not match")
+	}
+}
+
+func TestParseSLEAffectedOVALNotYetFixed(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6-affected.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatalf("ParseOVAL(sle affected): %v", err)
+	}
+
+	var got advisory.Advisory
+	for _, adv := range advs {
+		if adv.ID == "CVE-2026-53910" {
+			got = adv
+			break
 		}
 	}
-	if oss.ID != "CVE-2026-12345" || len(oss.Affected) == 0 || oss.Affected[0].FixedVersion != "0:1.1.1w-150600.3.10" {
-		t.Fatalf("libopenssl1_1 advisory (CVE from title, SUSE:15.6) not parsed as expected: %+v", oss)
+	if got.ID == "" {
+		t.Fatalf("not-yet-fixed CVE missing: %+v", advs)
 	}
-	// end-to-end match through the rpm comparator on SUSE's version format
-	if ok, _ := oss.Match("SUSE:15.6", "libopenssl1_1", "0:1.1.1w-150600.3.9"); !ok {
-		t.Error("an older libopenssl1_1 must match")
+	if len(got.Affected) != 2 {
+		t.Fatalf("want the two package branches from the authoritative definition, got %+v", got.Affected)
 	}
-	if ok, _ := oss.Match("SUSE:15.6", "libopenssl1_1", "0:1.1.1w-150600.3.10"); ok {
-		t.Error("libopenssl1_1 at the fixed version must not match")
+	seen := map[string]bool{}
+	for _, ap := range got.Affected {
+		seen[ap.Package] = true
+		if ap.Ecosystem != "SUSE:15.6" {
+			t.Errorf("%s ecosystem = %q, want SUSE:15.6", ap.Package, ap.Ecosystem)
+		}
+		if ap.FixedVersion != "" {
+			t.Errorf("%s fabricated fixed version %q", ap.Package, ap.FixedVersion)
+		}
+		if len(ap.Ranges) != 1 || ap.Ranges[0].Type != "ECOSYSTEM" || len(ap.Ranges[0].Events) != 1 || ap.Ranges[0].Events[0].Introduced != "0" {
+			t.Errorf("%s range = %+v, want one open introduced:0 range", ap.Package, ap.Ranges)
+		}
 	}
-	// A different service pack must NOT match: a SP6 fixed NEVR keyed SUSE:15.6 cannot apply to a SUSE:15.5
-	// (SP5) package, mirroring why bare-major keying would be unsound.
-	if ok, _ := oss.Match("SUSE:15.5", "libopenssl1_1", "0:1.1.1w-150600.3.9"); ok {
-		t.Error("a different SLE service pack must not match")
+	if !seen["diffutils"] || !seen["diffutils-lang"] {
+		t.Fatalf("package branches = %v, want diffutils and diffutils-lang", seen)
+	}
+	if ok, fixed := got.Match("SUSE:15.6", "diffutils", "3.6-4.3.1", ""); !ok || fixed != "" {
+		t.Fatalf("installed affected diffutils must match without a fabricated fix: ok=%v fixed=%q", ok, fixed)
+	}
+	if ok, _ := got.Match("SUSE:15.5", "diffutils", "3.6-4.3.1", ""); ok {
+		t.Error("a different SLES service pack must not match")
+	}
+	if ok, _ := got.Match("SUSE:15.6", "findutils", "3.6-4.3.1", ""); ok {
+		t.Error("an unrelated package must not inherit the open range")
+	}
+}
+
+func TestParseSLEAffectedOVALAcceptsExplicitVersionDatatype(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6-affected.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.Replace(data,
+		[]byte(`<linux:version operation="equals">15.6`),
+		[]byte(`<linux:version datatype="version" operation="equals">15.6`),
+		1,
+	)
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatalf("ParseOVAL(sle affected): %v", err)
+	}
+	if len(advs) != 1 || advs[0].ID != "CVE-2026-53910" || len(advs[0].Affected) != 2 {
+		t.Fatalf("an explicit version datatype must retain the authoritative lifecycle evidence: %+v", advs)
+	}
+}
+
+func TestParseSLEAffectedOVALRejectsAmbiguousApplicability(t *testing.T) {
+	base, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6-affected.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base = bytes.ReplaceAll(base, []byte("\r\n"), []byte("\n"))
+	tests := []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{name: "product state disagrees with metadata", old: `operation="equals">15.6`, new: `operation="equals">15.5`},
+		{name: "undeclared product platform", old: `<platform>SUSE Linux Enterprise Server 15 SP6</platform>`, new: `<platform>SUSE Linux Enterprise Server 15 SP6-Unlisted</platform>`},
+		{name: "unsupported explicit version datatype", old: `<linux:version operation="equals">15.6`, new: `<linux:version datatype="string" operation="equals">15.6`},
+		{name: "wrong product predicate", old: `<linux:name>sles-release</linux:name>`, new: `<linux:name>sles-ltss-release</linux:name>`},
+		{name: "negated package criterion", old: `test_ref="oval:org.opensuse.security:tst:diffutils-affected"`, new: `test_ref="oval:org.opensuse.security:tst:diffutils-affected" negate="true"`},
+		{name: "architecture restricted state", old: `<linux:evr datatype="evr_string" operation="greater than">0:0-0</linux:evr>`, new: `<linux:evr datatype="evr_string" operation="greater than">0:0-0</linux:evr><linux:arch operation="equals">x86_64</linux:arch>`},
+		{name: "object filter", old: `<linux:name>diffutils</linux:name>`, new: `<linux:name>diffutils</linux:name><linux:filter action="include">oval:unsupported:state:1</linux:filter>`},
+		{name: "unresolved state", old: `state_ref="oval:org.opensuse.security:ste:affected-zero-sentinel"`, new: `state_ref="oval:org.opensuse.security:ste:missing"`},
+		{name: "unsupported criteria child", old: "</criteria>\n        <criteria operator=\"OR\">", new: "<extend_definition definition_ref=\"oval:unsupported:def:1\"/>\n        </criteria>\n        <criteria operator=\"OR\">"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if !bytes.Contains(base, []byte(tc.old)) {
+				t.Fatalf("fixture mutation anchor missing: %q", tc.old)
+			}
+			doc := bytes.Replace(base, []byte(tc.old), []byte(tc.new), 1)
+			advs, err := ParseOVAL(doc)
+			if err == nil || !errors.Is(err, shared.ErrValidation) || len(advs) != 0 {
+				t.Fatalf("ambiguous present evidence must reject the complete snapshot: err=%v advisories=%+v", err, advs)
+			}
+		})
+	}
+}
+
+func TestParseSLEAffectedOVALSuppressesUnrepresentablePackageEvidence(t *testing.T) {
+	base, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6-affected.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base = bytes.ReplaceAll(base, []byte("\r\n"), []byte("\n"))
+	tests := []struct {
+		name        string
+		old         string
+		new         string
+		wantPackage string
+	}{
+		{
+			name:        "universal check",
+			old:         `id="oval:org.opensuse.security:tst:diffutils-affected" version="1" comment="diffutils is >0" check="at least one"`,
+			new:         `id="oval:org.opensuse.security:tst:diffutils-affected" version="1" comment="diffutils is >0" check="all"`,
+			wantPackage: "diffutils-lang",
+		},
+		{name: "real lower bound", old: `operation="greater than">0:0-0`, new: `operation="greater than">0:3.6-4.3.1`},
+		{
+			name: "multiple evr constraints",
+			old:  `<linux:evr datatype="evr_string" operation="greater than">0:0-0</linux:evr>`,
+			new:  `<linux:evr datatype="evr_string" operation="greater than">0:0-0</linux:evr><linux:evr datatype="evr_string" operation="less than">0:3.6-4.3.2</linux:evr>`,
+		},
+		{
+			name: "package conjunction",
+			old:  "<criteria operator=\"OR\">\n          <criterion test_ref=\"oval:org.opensuse.security:tst:diffutils-affected\"",
+			new:  "<criteria operator=\"AND\">\n          <criterion test_ref=\"oval:org.opensuse.security:tst:diffutils-affected\"",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if !bytes.Contains(base, []byte(tc.old)) {
+				t.Fatalf("fixture mutation anchor missing: %q", tc.old)
+			}
+			doc := bytes.Replace(base, []byte(tc.old), []byte(tc.new), 1)
+			advs, parseErr := ParseOVAL(doc)
+			if parseErr != nil {
+				t.Fatalf("ParseOVAL: %v", parseErr)
+			}
+			if len(advs) != 1 || advs[0].ID != "CVE-2026-53910" {
+				t.Fatalf("unrepresentable exact-package evidence must preserve one current advisory: %+v", advs)
+			}
+			if tc.wantPackage == "" {
+				if len(advs[0].Affected) != 0 {
+					t.Fatalf("unrepresentable package evidence must emit no widened range: %+v", advs[0].Affected)
+				}
+				return
+			}
+			if len(advs[0].Affected) != 1 || advs[0].Affected[0].Package != tc.wantPackage {
+				t.Fatalf("independent representable sibling must survive suppression: %+v", advs[0].Affected)
+			}
+		})
+	}
+}
+
+func TestParseSLEAffectedOVALRejectsCrossBoundOrdinaryServer(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6-affected.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := []byte(`comment="SUSE Linux Enterprise Server 15 SP6 is installed"`)
+	sap := []byte(`comment="SUSE Linux Enterprise Server for SAP Applications 15 SP6 is installed"`)
+	marker := []byte(`comment="SUSE Linux Enterprise Server 15 SP6 swap marker"`)
+	data = bytes.Replace(data, server, marker, 1)
+	data = bytes.Replace(data, sap, server, 1)
+	data = bytes.Replace(data, marker, sap, 1)
+	advs, err := ParseOVAL(data)
+	if err == nil || !errors.Is(err, shared.ErrValidation) || len(advs) != 0 {
+		t.Fatalf("a cross-bound server predicate must reject the complete snapshot: err=%v advisories=%+v", err, advs)
+	}
+}
+
+func TestParseSLEAffectedOVALIgnoresDeclaredRealTimeClause(t *testing.T) {
+	data := oracleDoc(`<definitions>
+	<definition id="oval:org.opensuse.security:def:real-time-sibling" version="1" class="vulnerability">
+	  <metadata>
+	    <title>CVE-2026-53910</title>
+	    <affected family="unix">
+	      <platform>SUSE Linux Enterprise Server 15 SP6</platform>
+	      <platform>SUSE Linux Enterprise Real Time 15 SP6</platform>
+	      <platform>SUSE Real Time Module 15 SP6</platform>
+	    </affected>
+	  </metadata>
+	  <criteria operator="OR">
+	    <criteria operator="AND">
+	      <criteria operator="OR"><criterion test_ref="oval:test:product" comment="SUSE Linux Enterprise Server 15 SP6 is installed"/></criteria>
+	      <criteria operator="OR"><criterion test_ref="oval:test:open" comment="diffutils is affected"/></criteria>
+	    </criteria>
+	    <criteria operator="AND">
+	      <criteria operator="OR">
+	        <criterion test_ref="oval:test:real-time" comment="SUSE Linux Enterprise Real Time 15 SP6 is installed"/>
+	        <criterion test_ref="oval:test:real-time-module" comment="SUSE Real Time Module 15 SP6 is installed"/>
+	      </criteria>
+	      <criteria operator="OR"><criterion test_ref="oval:test:not-affected" comment="kernel-devel-rt is not affected"/></criteria>
+	    </criteria>
+	  </criteria>
+	</definition>
+	</definitions>
+	<tests>
+	  <linux:rpminfo_test id="oval:test:product" check="at least one" comment="sles-release is ==15.6"><linux:object object_ref="oval:obj:product"/><linux:state state_ref="oval:state:product"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:real-time" check="at least one" comment="sle-rt-release is ==15.6"><linux:object object_ref="oval:obj:real-time"/><linux:state state_ref="oval:state:product"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:real-time-module" check="at least one" comment="sle-module-rt-release is ==15.6"><linux:object object_ref="oval:obj:real-time-module"/><linux:state state_ref="oval:state:product"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:open" check="at least one" comment="diffutils is &gt;0"><linux:object object_ref="oval:obj:diffutils"/><linux:state state_ref="oval:state:open"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:not-affected" check="at least one" comment="kernel-devel-rt is ==0"><linux:object object_ref="oval:obj:kernel-devel-rt"/><linux:state state_ref="oval:state:not-affected"/></linux:rpminfo_test>
+	</tests>
+	<objects>
+	  <linux:rpminfo_object id="oval:obj:product"><linux:name>sles-release</linux:name></linux:rpminfo_object>
+	  <linux:rpminfo_object id="oval:obj:real-time"><linux:name>sle-rt-release</linux:name></linux:rpminfo_object>
+	  <linux:rpminfo_object id="oval:obj:real-time-module"><linux:name>sle-module-rt-release</linux:name></linux:rpminfo_object>
+	  <linux:rpminfo_object id="oval:obj:diffutils"><linux:name>diffutils</linux:name></linux:rpminfo_object>
+	  <linux:rpminfo_object id="oval:obj:kernel-devel-rt"><linux:name>kernel-devel-rt</linux:name></linux:rpminfo_object>
+	</objects>
+	<states>
+	  <linux:rpminfo_state id="oval:state:product"><linux:version operation="equals">15.6</linux:version></linux:rpminfo_state>
+	  <linux:rpminfo_state id="oval:state:open"><linux:evr datatype="evr_string" operation="greater than">0:0-0</linux:evr></linux:rpminfo_state>
+	  <linux:rpminfo_state id="oval:state:not-affected"><linux:version operation="equals">0</linux:version></linux:rpminfo_state>
+	</states>`)
+
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatalf("ParseOVAL: %v", err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 1 || advs[0].Affected[0].Package != "diffutils" {
+		t.Fatalf("a declared nonordinary product must not reject or widen ordinary SLES applicability: %+v", advs)
+	}
+}
+
+func TestParseSLEAffectedOVALFixedWinsRegardlessOfDefinitionOrder(t *testing.T) {
+	open := sleAffectedDefinition("open", "oval:test:open")
+	fixed := sleAffectedDefinition("fixed", "oval:test:fixed")
+	for _, tc := range []struct {
+		name        string
+		definitions string
+	}{
+		{name: "open first", definitions: open + fixed},
+		{name: "fixed first", definitions: fixed + open},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			advs, err := ParseOVAL(sleAffectedDefinitionsDoc(tc.definitions))
+			if err != nil {
+				t.Fatalf("ParseOVAL: %v", err)
+			}
+			if len(advs) != 1 || len(advs[0].Affected) != 1 {
+				t.Fatalf("want one deterministic binding, got %+v", advs)
+			}
+			ap := advs[0].Affected[0]
+			if ap.Package != "diffutils" || ap.Ecosystem != "SUSE:15.6" || ap.FixedVersion != "0:3.6-4.3.2" {
+				t.Fatalf("bounded current evidence must replace open evidence, got %+v", ap)
+			}
+			if len(ap.Ranges) != 1 || len(ap.Ranges[0].Events) != 2 || ap.Ranges[0].Events[1].Fixed != "0:3.6-4.3.2" {
+				t.Fatalf("want [0, fixed) range, got %+v", ap.Ranges)
+			}
+		})
+	}
+}
+
+func TestParseSLEAffectedOVALNotAffectedEmitsEmptyReplacement(t *testing.T) {
+	advs, err := ParseOVAL(sleNotAffectedDoc())
+	if err != nil {
+		t.Fatalf("ParseOVAL: %v", err)
+	}
+	if len(advs) != 1 || advs[0].ID != "CVE-2026-53910" {
+		t.Fatalf("want a current replacement record for CVE-2026-53910, got %+v", advs)
+	}
+	if len(advs[0].Affected) != 0 {
+		t.Fatalf("authoritative not-affected state must clear package applicability, got %+v", advs[0].Affected)
+	}
+}
+
+func sleNotAffectedDoc() []byte {
+	return oracleDoc(`<definitions>
+	<definition id="oval:org.opensuse.security:def:not-affected" version="1" class="vulnerability">
+	  <metadata><title>CVE-2026-53910</title><affected family="unix"><platform>SUSE Linux Enterprise Server 15 SP6</platform></affected></metadata>
+	  <criteria operator="AND">
+	    <criteria operator="OR"><criterion test_ref="oval:test:product" comment="SUSE Linux Enterprise Server 15 SP6 is installed"/></criteria>
+	    <criteria operator="OR"><criterion test_ref="oval:test:not-affected" comment="diffutils is not affected"/></criteria>
+	  </criteria>
+	</definition>
+	</definitions>
+	<tests>
+	  <linux:rpminfo_test id="oval:test:product" check="at least one" comment="sles-release is ==15.6"><linux:object object_ref="oval:obj:product"/><linux:state state_ref="oval:state:product"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:not-affected" check="at least one" comment="diffutils is ==0"><linux:object object_ref="oval:obj:diffutils"/><linux:state state_ref="oval:state:not-affected"/></linux:rpminfo_test>
+	</tests>
+	<objects>
+	  <linux:rpminfo_object id="oval:obj:product"><linux:name>sles-release</linux:name></linux:rpminfo_object>
+	  <linux:rpminfo_object id="oval:obj:diffutils"><linux:name>diffutils</linux:name></linux:rpminfo_object>
+	</objects>
+	<states>
+	  <linux:rpminfo_state id="oval:state:product"><linux:version operation="equals">15.6</linux:version></linux:rpminfo_state>
+	  <linux:rpminfo_state id="oval:state:not-affected"><linux:version operation="equals">0</linux:version></linux:rpminfo_state>
+	</states>`)
+}
+
+func sleAffectedDefinition(id, packageTest string) string {
+	packageComment := "diffutils is affected"
+	if packageTest == "oval:test:fixed" {
+		packageComment = "diffutils-3.6-4.3.2 is installed"
+	}
+	return `<definition id="oval:org.opensuse.security:def:` + id + `" version="1" class="vulnerability">
+	  <metadata><title>CVE-2026-53910</title><affected family="unix"><platform>SUSE Linux Enterprise Server 15 SP6</platform></affected></metadata>
+	  <criteria operator="AND">
+	    <criteria operator="OR"><criterion test_ref="oval:test:product" comment="SUSE Linux Enterprise Server 15 SP6 is installed"/></criteria>
+	    <criteria operator="OR"><criterion test_ref="` + packageTest + `" comment="` + packageComment + `"/></criteria>
+	  </criteria>
+	</definition>`
+}
+
+func sleAffectedDefinitionsDoc(definitions string) []byte {
+	return oracleDoc(`<definitions>` + definitions + `</definitions>
+	<tests>
+	  <linux:rpminfo_test id="oval:test:product" check="at least one" comment="sles-release is ==15.6"><linux:object object_ref="oval:obj:product"/><linux:state state_ref="oval:state:product"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:open" check="at least one" comment="diffutils is >0"><linux:object object_ref="oval:obj:diffutils"/><linux:state state_ref="oval:state:open"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:fixed" check="at least one" comment="diffutils is &lt;0:3.6-4.3.2"><linux:object object_ref="oval:obj:diffutils"/><linux:state state_ref="oval:state:fixed"/></linux:rpminfo_test>
+	</tests>
+	<objects>
+	  <linux:rpminfo_object id="oval:obj:product"><linux:name>sles-release</linux:name></linux:rpminfo_object>
+	  <linux:rpminfo_object id="oval:obj:diffutils"><linux:name>diffutils</linux:name></linux:rpminfo_object>
+	</objects>
+	<states>
+	  <linux:rpminfo_state id="oval:state:product"><linux:version operation="equals">15.6</linux:version></linux:rpminfo_state>
+	  <linux:rpminfo_state id="oval:state:open"><linux:evr datatype="evr_string" operation="greater than">0:0-0</linux:evr></linux:rpminfo_state>
+	  <linux:rpminfo_state id="oval:state:fixed"><linux:evr datatype="evr_string" operation="less than">0:3.6-4.3.2</linux:evr></linux:rpminfo_state>
+	</states>`)
+}
+
+func TestParseOVALSnapshotResolvesSUSELifecycleAcrossDocuments(t *testing.T) {
+	open := sleAffectedDefinitionsDoc(sleAffectedDefinition("open", "oval:test:open"))
+	fixed := sleAffectedDefinitionsDoc(sleAffectedDefinition("fixed", "oval:test:fixed"))
+	for _, documents := range [][][]byte{{open, fixed}, {fixed, open}} {
+		advs, err := ParseOVALSnapshot(documents)
+		if err != nil {
+			t.Fatalf("ParseOVALSnapshot: %v", err)
+		}
+		if len(advs) != 1 || len(advs[0].Affected) != 1 {
+			t.Fatalf("want one resolved advisory, got %+v", advs)
+		}
+		ap := advs[0].Affected[0]
+		if ap.Ecosystem != "SUSE:15.6" || ap.Package != "diffutils" || ap.FixedVersion != "0:3.6-4.3.2" {
+			t.Fatalf("fixed evidence must replace open evidence across documents: %+v", ap)
+		}
+	}
+}
+
+func TestParseOVALSnapshotNotAffectedClearsOpenAcrossDocuments(t *testing.T) {
+	open := sleAffectedDefinitionsDoc(sleAffectedDefinition("open", "oval:test:open"))
+	notAffected := sleNotAffectedDoc()
+	for _, documents := range [][][]byte{{open, notAffected}, {notAffected, open}} {
+		advs, err := ParseOVALSnapshot(documents)
+		if err != nil {
+			t.Fatalf("ParseOVALSnapshot: %v", err)
+		}
+		if len(advs) != 1 || advs[0].ID != "CVE-2026-53910" || len(advs[0].Affected) != 0 {
+			t.Fatalf("explicit not-affected evidence must emit an empty current replacement: %+v", advs)
+		}
+	}
+}
+
+func TestParseOVALSnapshotSupersededFixedBoundariesUseGreatest(t *testing.T) {
+	first := sleAffectedDefinitionsDoc(sleAffectedDefinition("fixed-a", "oval:test:fixed"))
+	second := bytes.ReplaceAll(first, []byte("3.6-4.3.2"), []byte("3.6-4.3.3"))
+	for _, documents := range [][][]byte{{first, second}, {second, first}} {
+		advs, err := ParseOVALSnapshot(documents)
+		if err != nil {
+			t.Fatalf("ParseOVALSnapshot: %v", err)
+		}
+		if len(advs) != 1 || len(advs[0].Affected) != 1 || advs[0].Affected[0].FixedVersion != "0:3.6-4.3.3" {
+			t.Fatalf("superseded fixed evidence must keep the greatest boundary independent of document order: %+v", advs)
+		}
+	}
+}
+
+func TestParseSLESupersededFixedAlternativesUseGreatest(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		advs, err := ParseOVAL(sleSupersededFixedAlternativesDoc(reverse))
+		if err != nil {
+			t.Fatalf("ParseOVAL: %v", err)
+		}
+		if len(advs) != 1 || len(advs[0].Affected) != 1 {
+			t.Fatalf("want one superseded package projection, got %+v", advs)
+		}
+		ap := advs[0].Affected[0]
+		if ap.Ecosystem != "SUSE:15.6" || ap.Package != "golang-github-prometheus-node_exporter" || ap.FixedVersion != "0:1.10.2-150100.3.41.2" {
+			t.Fatalf("OR alternatives must reduce to the greatest fixed boundary: %+v", ap)
+		}
+	}
+}
+
+func sleSupersededFixedAlternativesDoc(reverse bool) []byte {
+	older := `<criteria operator="AND">
+	  <criteria operator="OR"><criterion test_ref="oval:test:product" comment="SUSE Linux Enterprise Server 15 SP6 is installed"/></criteria>
+	  <criteria operator="OR"><criterion test_ref="oval:test:fixed-older" comment="golang-github-prometheus-node_exporter-1.3.0-150100.3.18.1 is installed"/></criteria>
+	</criteria>`
+	newer := `<criteria operator="AND">
+	  <criteria operator="OR"><criterion test_ref="oval:test:product" comment="SUSE Linux Enterprise Server 15 SP6 is installed"/></criteria>
+	  <criteria operator="OR"><criterion test_ref="oval:test:fixed-newer" comment="golang-github-prometheus-node_exporter-1.10.2-150100.3.41.2 is installed"/></criteria>
+	</criteria>`
+	if reverse {
+		older, newer = newer, older
+	}
+	return oracleDoc(`<definitions>
+	<definition id="oval:org.opensuse.security:def:202221698" version="1" class="vulnerability">
+	  <metadata><title>CVE-2022-21698</title><affected family="unix"><platform>SUSE Linux Enterprise Server 15 SP6</platform></affected></metadata>
+	  <criteria operator="OR">` + older + newer + `</criteria>
+	</definition>
+	</definitions>
+	<tests>
+	  <linux:rpminfo_test id="oval:test:product" check="at least one" comment="sles-release is ==15.6"><linux:object object_ref="oval:obj:product"/><linux:state state_ref="oval:state:product"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:fixed-older" check="at least one" comment="golang-github-prometheus-node_exporter is &lt;0:1.3.0-150100.3.18.1"><linux:object object_ref="oval:obj:package"/><linux:state state_ref="oval:state:fixed-older"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:fixed-newer" check="at least one" comment="golang-github-prometheus-node_exporter is &lt;0:1.10.2-150100.3.41.2"><linux:object object_ref="oval:obj:package"/><linux:state state_ref="oval:state:fixed-newer"/></linux:rpminfo_test>
+	</tests>
+	<objects>
+	  <linux:rpminfo_object id="oval:obj:product"><linux:name>sles-release</linux:name></linux:rpminfo_object>
+	  <linux:rpminfo_object id="oval:obj:package"><linux:name>golang-github-prometheus-node_exporter</linux:name></linux:rpminfo_object>
+	</objects>
+	<states>
+	  <linux:rpminfo_state id="oval:state:product"><linux:version operation="equals">15.6</linux:version></linux:rpminfo_state>
+	  <linux:rpminfo_state id="oval:state:fixed-older"><linux:evr datatype="evr_string" operation="less than">0:1.3.0-150100.3.18.1</linux:evr></linux:rpminfo_state>
+	  <linux:rpminfo_state id="oval:state:fixed-newer"><linux:evr datatype="evr_string" operation="less than">0:1.10.2-150100.3.41.2</linux:evr></linux:rpminfo_state>
+	</states>`)
+}
+
+func TestParseOVALSnapshotSUSESuppressionClearsOpenAcrossDocuments(t *testing.T) {
+	open := sleAffectedDefinitionsDoc(sleAffectedDefinition("open", "oval:test:open"))
+	suppressed := sleAffectedDefinitionsDoc(sleAffectedDefinition("unsupported-fixed", "oval:test:fixed"))
+	anchor := []byte(`id="oval:test:fixed" check="at least one"`)
+	if !bytes.Contains(suppressed, anchor) {
+		t.Fatal("suppression fixture mutation anchor missing")
+	}
+	suppressed = bytes.Replace(suppressed, anchor, []byte(`id="oval:test:fixed" check="all"`), 1)
+
+	for _, documents := range [][][]byte{{open, suppressed}, {suppressed, open}} {
+		advs, err := ParseOVALSnapshot(documents)
+		if err != nil {
+			t.Fatalf("ParseOVALSnapshot: %v", err)
+		}
+		if len(advs) != 1 || advs[0].ID != "CVE-2026-53910" || len(advs[0].Affected) != 0 {
+			t.Fatalf("unsupported exact-package evidence must suppress stale open applicability: %+v", advs)
+		}
+	}
+}
+
+func TestParseSLECorrelatedBranchSuppressesAllDependentPackages(t *testing.T) {
+	advs, err := ParseOVAL(sleCorrelatedSuppressionDoc())
+	if err != nil {
+		t.Fatalf("ParseOVAL: %v", err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 1 || advs[0].Affected[0].Package != "diffutils" {
+		t.Fatalf("the independent package must survive while the complete correlated branch is suppressed: %+v", advs)
+	}
+}
+
+func TestParseSLESuppressionAllowsSupersededFixedBoundaries(t *testing.T) {
+	first := sleAffectedDefinitionsDoc(sleAffectedDefinition("fixed-a", "oval:test:fixed"))
+	second := bytes.ReplaceAll(first, []byte("3.6-4.3.2"), []byte("3.6-4.3.3"))
+	suppressed := bytes.Replace(first,
+		[]byte(`id="oval:test:fixed" check="at least one"`),
+		[]byte(`id="oval:test:fixed" check="all"`),
+		1,
+	)
+	for _, documents := range [][][]byte{
+		{suppressed, first, second},
+		{first, suppressed, second},
+		{first, second, suppressed},
+	} {
+		advs, err := ParseOVALSnapshot(documents)
+		if err != nil {
+			t.Fatalf("ParseOVALSnapshot: %v", err)
+		}
+		if len(advs) != 1 || len(advs[0].Affected) != 0 {
+			t.Fatalf("suppression must keep the superseded package out of the current projection: %+v", advs)
+		}
+	}
+}
+
+func sleCorrelatedSuppressionDoc() []byte {
+	return oracleDoc(`<definitions>
+	<definition id="oval:org.opensuse.security:def:correlated" version="1" class="vulnerability">
+	  <metadata><title>CVE-2026-53910</title><affected family="unix"><platform>SUSE Linux Enterprise Server 15 SP6</platform></affected></metadata>
+	  <criteria operator="AND">
+	    <criteria operator="OR"><criterion test_ref="oval:test:product" comment="SUSE Linux Enterprise Server 15 SP6 is installed"/></criteria>
+	    <criteria operator="OR">
+	      <criterion test_ref="oval:test:open" comment="diffutils is affected"/>
+	      <criteria operator="OR">
+	        <criterion test_ref="oval:test:kernel-vulnerable" comment="kernel-default-6.4.0-150600.21.3 is installed"/>
+	        <criteria operator="AND">
+	          <criterion test_ref="oval:test:kernel-exact" comment="kernel-default 6.4.0-150600.21.3 is installed"/>
+	          <criterion test_ref="oval:test:livepatch" comment="no kernel-livepatch-6_4_0-150600_21_3-default is greater or equal than 1-1"/>
+	        </criteria>
+	      </criteria>
+	    </criteria>
+	  </criteria>
+	</definition>
+	</definitions>
+	<tests>
+	  <linux:rpminfo_test id="oval:test:product" check="at least one" comment="sles-release is ==15.6"><linux:object object_ref="oval:obj:product"/><linux:state state_ref="oval:state:product"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:open" check="at least one" comment="diffutils is &gt;0"><linux:object object_ref="oval:obj:diffutils"/><linux:state state_ref="oval:state:open"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:kernel-vulnerable" check="all" comment="kernel-default is &lt;6.4.0-150600.21.3"><linux:object object_ref="oval:obj:kernel"/><linux:state state_ref="oval:state:kernel-vulnerable"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:kernel-exact" check="at least one" comment="kernel-default is ==6.4.0-150600.21.3"><linux:object object_ref="oval:obj:kernel"/><linux:state state_ref="oval:state:kernel-exact"/></linux:rpminfo_test>
+	  <linux:rpminfo_test id="oval:test:livepatch" check="none satisfy" comment="kernel-livepatch-6_4_0-150600_21_3-default is &gt;=1-1"><linux:object object_ref="oval:obj:livepatch"/><linux:state state_ref="oval:state:livepatch"/></linux:rpminfo_test>
+	</tests>
+	<objects>
+	  <linux:rpminfo_object id="oval:obj:product"><linux:name>sles-release</linux:name></linux:rpminfo_object>
+	  <linux:rpminfo_object id="oval:obj:diffutils"><linux:name>diffutils</linux:name></linux:rpminfo_object>
+	  <linux:rpminfo_object id="oval:obj:kernel"><linux:name>kernel-default</linux:name></linux:rpminfo_object>
+	  <linux:rpminfo_object id="oval:obj:livepatch"><linux:name>kernel-livepatch-6_4_0-150600_21_3-default</linux:name></linux:rpminfo_object>
+	</objects>
+	<states>
+	  <linux:rpminfo_state id="oval:state:product"><linux:version operation="equals">15.6</linux:version></linux:rpminfo_state>
+	  <linux:rpminfo_state id="oval:state:open"><linux:evr datatype="evr_string" operation="greater than">0:0-0</linux:evr></linux:rpminfo_state>
+	  <linux:rpminfo_state id="oval:state:kernel-vulnerable"><linux:evr datatype="evr_string" operation="less than">0:6.4.0-150600.21.3</linux:evr></linux:rpminfo_state>
+	  <linux:rpminfo_state id="oval:state:kernel-exact"><linux:evr datatype="evr_string" operation="equals">0:6.4.0-150600.21.3</linux:evr></linux:rpminfo_state>
+	  <linux:rpminfo_state id="oval:state:livepatch"><linux:evr datatype="evr_string" operation="greater than or equal">0:1-1</linux:evr></linux:rpminfo_state>
+	</states>`)
+}
+
+func TestParseSLEInvalidDefinitionRejectsIndependentOpen(t *testing.T) {
+	valid := sleAffectedDefinition("valid-open", "oval:test:open")
+	invalid := strings.ReplaceAll(valid, "def:valid-open", "def:invalid-open")
+	invalid = strings.ReplaceAll(invalid, `test_ref="oval:test:open" comment="diffutils is affected"`, `test_ref="oval:test:open" comment="diffutils is affected" negate="true"`)
+	for _, definitions := range []string{invalid + valid, valid + invalid} {
+		advs, err := ParseOVAL(sleAffectedDefinitionsDoc(definitions))
+		if err == nil || !errors.Is(err, shared.ErrValidation) || len(advs) != 0 {
+			t.Fatalf("one valid definition must not hide relevant unrepresentable evidence: err=%v advisories=%+v", err, advs)
+		}
+	}
+}
+
+func TestParseSLEIrrelevantDefinitionDoesNotRejectSnapshot(t *testing.T) {
+	valid := sleAffectedDefinition("valid-open", "oval:test:open")
+	irrelevant := `<definition id="oval:org.opensuse.security:def:inventory" class="inventory"><metadata><title>inventory helper</title></metadata><criteria operator="AND"/></definition>`
+	advs, err := ParseOVAL(sleAffectedDefinitionsDoc(irrelevant + valid))
+	if err != nil {
+		t.Fatalf("ParseOVAL: %v", err)
+	}
+	if len(advs) != 1 || advs[0].ID != "CVE-2026-53910" || len(advs[0].Affected) != 1 {
+		t.Fatalf("a positively irrelevant definition must not hide or reject the valid advisory: %+v", advs)
+	}
+}
+
+func TestParseSLERejectsWrongElementKindAndNamespace(t *testing.T) {
+	base, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6-affected.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		old  []byte
+		new  []byte
+	}{
+		{name: "dpkg lookalike", old: []byte("rpminfo_"), new: []byte("dpkginfo_")},
+		{name: "foreign namespace", old: []byte("http://oval.mitre.org/XMLSchema/oval-definitions-5#linux"), new: []byte("https://example.invalid/oval/linux")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := bytes.ReplaceAll(base, tc.old, tc.new)
+			advs, parseErr := ParseOVAL(doc)
+			if parseErr == nil || !errors.Is(parseErr, shared.ErrValidation) || len(advs) != 0 {
+				t.Fatalf("foreign element identity must reject the complete snapshot: err=%v advisories=%+v", parseErr, advs)
+			}
+		})
+	}
+}
+
+func TestParseOVALRejectsDuplicateRPMIDs(t *testing.T) {
+	doc := sleAffectedDefinitionsDoc(sleAffectedDefinition("open", "oval:test:open"))
+	duplicate := `<linux:rpminfo_test id="oval:test:open" check="at least one" comment="diffutils is &gt;0"><linux:object object_ref="oval:obj:diffutils"/><linux:state state_ref="oval:state:open"/></linux:rpminfo_test>`
+	doc = bytes.Replace(doc, []byte("</tests>"), []byte(duplicate+"</tests>"), 1)
+	if advs, err := ParseOVAL(doc); err == nil || len(advs) != 0 {
+		t.Fatalf("duplicate test IDs must reject the document, got err=%v advisories=%+v", err, advs)
+	}
+}
+
+func TestParseOVALRejectsMixedRPMFamilies(t *testing.T) {
+	sle := string(sleAffectedDefinitionsDoc(sleAffectedDefinition("open", "oval:test:open")))
+	oracleDefinition := `<definition id="oval:com.oracle.elsa:def:1" class="patch"><metadata><affected><platform>Oracle Linux 9</platform></affected><reference source="CVE" ref_id="CVE-2026-9999"/></metadata><criteria operator="AND"/></definition>`
+	doc := strings.Replace(sle, "</definitions>", oracleDefinition+"</definitions>", 1)
+	if advs, err := ParseOVAL([]byte(doc)); err == nil || len(advs) != 0 {
+		t.Fatalf("a document mixing supported RPM families must be rejected, got err=%v advisories=%+v", err, advs)
+	}
+}
+
+func TestParseSLEFixedBindsArchitectureQualifiedDirectPackageCriterion(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := []byte("        <criteria operator=\"AND\">\n          <criterion test_ref=\"oval:org.opensuse.security:tst:2010099999\" comment=\"libopenssl1_1-1.1.1w-150600.3.10 is installed\"/>\n        </criteria>")
+	direct := []byte("        <criterion test_ref=\"oval:org.opensuse.security:tst:2010099999\" comment=\"libopenssl1_1-1.1.1w-150600.3.10 is installed\"/>")
+	if !bytes.Contains(data, group) {
+		t.Fatal("fixture mutation anchor missing")
+	}
+	data = bytes.Replace(data, group, direct, 1)
+	data = bytes.ReplaceAll(data, []byte("libopenssl1_1"), []byte("libopenssl-1_1-devel"))
+	data = bytes.Replace(data,
+		[]byte(`comment="libopenssl-1_1-devel is &lt;1.1.1w-150600.3.10"`),
+		[]byte(`comment="libopenssl-1_1-devel is &lt;1.1.1w-150600.3.10 for aarch64,i586,ppc64le,s390x,x86_64"`),
+		1,
+	)
+	data = bytes.Replace(data,
+		[]byte("(aarch64|ppc64le|s390x|x86_64)"),
+		[]byte("(aarch64|i586|ppc64le|s390x|x86_64)"),
+		1,
+	)
+
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatalf("ParseOVAL: %v", err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 1 {
+		t.Fatalf("an architecture-qualified direct package criterion must bind with its architecture set: %+v", advs)
+	}
+	if got, want := strings.Join(advs[0].Affected[0].Architectures, ","), "aarch64,i586,ppc64le,s390x,x86_64"; got != want {
+		t.Fatalf("architectures = %q, want %q", got, want)
+	}
+	if ok, _ := advs[0].Match("SUSE:15.6", "libopenssl-1_1-devel", "0:1.1.1w-150600.3.9", ""); ok {
+		t.Error("an unknown component architecture must not satisfy an architecture-scoped block")
+	}
+}
+
+func TestParseSLEFixedBindsNoarchPackageToNoarchOnly(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := []byte("        <criteria operator=\"AND\">\n          <criterion test_ref=\"oval:org.opensuse.security:tst:2010099999\" comment=\"libopenssl1_1-1.1.1w-150600.3.10 is installed\"/>\n        </criteria>")
+	direct := []byte("        <criterion test_ref=\"oval:org.opensuse.security:tst:2010099999\" comment=\"libopenssl1_1-1.1.1w-150600.3.10 is installed\"/>")
+	if !bytes.Contains(data, group) {
+		t.Fatal("fixture mutation anchor missing")
+	}
+	data = bytes.Replace(data, group, direct, 1)
+	data = bytes.ReplaceAll(data, []byte("libopenssl1_1"), []byte("apache2-doc"))
+	data = bytes.ReplaceAll(data, []byte("1.1.1w-150600.3.10"), []byte("2.4.51-150400.6.6.1"))
+	data = bytes.Replace(data, []byte("(aarch64|ppc64le|s390x|x86_64)"), []byte("(noarch)"), 1)
+	data = bytes.Replace(data,
+		[]byte(`comment="apache2-doc is &lt;2.4.51-150400.6.6.1"`),
+		[]byte(`comment="apache2-doc is &lt;2.4.51-150400.6.6.1 for noarch"`),
+		1,
+	)
+
+	advs, err := ParseOVAL(data)
+	if err != nil {
+		t.Fatalf("ParseOVAL: %v", err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 1 {
+		t.Fatalf("a noarch package fact must bind with a noarch architecture scope: %+v", advs)
+	}
+	if got, want := strings.Join(advs[0].Affected[0].Architectures, ","), "noarch"; got != want {
+		t.Fatalf("architectures = %q, want %q", got, want)
+	}
+	if ok, _ := advs[0].Match("SUSE:15.6", "apache2-doc", "0:2.4.51-150400.6.6.0", "noarch"); !ok {
+		t.Error("a noarch component must match a noarch-scoped block")
+	}
+	// noarch is compared literally, never as a wildcard across architectures.
+	if ok, _ := advs[0].Match("SUSE:15.6", "apache2-doc", "0:2.4.51-150400.6.6.0", "x86_64"); ok {
+		t.Error("noarch must not act as a wildcard across architectures")
+	}
+}
+
+func TestParseSLEFixedRejectsUnrepresentableRestrictions(t *testing.T) {
+	base, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{name: "negated package", old: `test_ref="oval:org.opensuse.security:tst:2010099999"`, new: `test_ref="oval:org.opensuse.security:tst:2010099999" negate="true"`},
+		{name: "unsupported check existence", old: `comment="libopenssl1_1 is &lt;1.1.1w-150600.3.10" check="at least one"`, new: `comment="libopenssl1_1 is &lt;1.1.1w-150600.3.10" check="at least one" check_existence="none_exist"`},
+		{name: "unsupported state operator", old: `comment="libopenssl1_1 is &lt;1.1.1w-150600.3.10" check="at least one"`, new: `comment="libopenssl1_1 is &lt;1.1.1w-150600.3.10" check="at least one" state_operator="OR"`},
+		{name: "signature restriction", old: `</red-def:rpminfo_state>`, new: `<signature_keyid operation="equals">deadbeef</signature_keyid></red-def:rpminfo_state>`},
+		{name: "object filter", old: `<red-def:name>libopenssl1_1</red-def:name>`, new: `<red-def:name>libopenssl1_1</red-def:name><red-def:filter action="include">oval:state:filter</red-def:filter>`},
+		{name: "unknown state child", old: `</red-def:rpminfo_state>`, new: `<unknown>value</unknown></red-def:rpminfo_state>`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if !bytes.Contains(base, []byte(tc.old)) {
+				t.Fatalf("fixture mutation anchor missing: %q", tc.old)
+			}
+			doc := bytes.Replace(base, []byte(tc.old), []byte(tc.new), 1)
+			advs, parseErr := ParseOVAL(doc)
+			if parseErr == nil || !errors.Is(parseErr, shared.ErrValidation) || len(advs) != 0 {
+				t.Fatalf("unrepresentable fixed restriction must reject the complete snapshot: err=%v advisories=%+v", parseErr, advs)
+			}
+		})
+	}
+}
+
+func TestParseSLEFixedSuppressesRepresentableIdentityWithUnsupportedRestriction(t *testing.T) {
+	base, err := os.ReadFile(filepath.Join("testdata", "oval-sle15sp6.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{
+			name: "universal check",
+			old:  `comment="libopenssl1_1 is &lt;1.1.1w-150600.3.10" check="at least one"`,
+			new:  `comment="libopenssl1_1 is &lt;1.1.1w-150600.3.10" check="all"`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if !bytes.Contains(base, []byte(tc.old)) {
+				t.Fatalf("fixture mutation anchor missing: %q", tc.old)
+			}
+			doc := bytes.Replace(base, []byte(tc.old), []byte(tc.new), 1)
+			advs, parseErr := ParseOVAL(doc)
+			if parseErr != nil {
+				t.Fatalf("ParseOVAL: %v", parseErr)
+			}
+			if len(advs) != 1 || len(advs[0].Affected) != 0 {
+				t.Fatalf("unsupported exact-package restriction must suppress rather than widen: %+v", advs)
+			}
+		})
 	}
 }
 
@@ -895,6 +1539,7 @@ func TestParseSLEOVAL(t *testing.T) {
 func TestSLEPlatformRelease(t *testing.T) {
 	cases := map[string]string{
 		"SUSE Linux Enterprise Server 15 SP6":                "15.6",
+		"SUSE Linux Enterprise Server 15 SP6-LTSS":           "15.6",
 		"SUSE Linux Enterprise Module for Basesystem 15 SP6": "15.6",
 		"SUSE Linux Enterprise Server 12 SP5":                "12.5",
 		"SUSE Linux Enterprise Server 15":                    "15",

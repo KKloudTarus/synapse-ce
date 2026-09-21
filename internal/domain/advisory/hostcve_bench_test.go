@@ -95,7 +95,7 @@ const (
 // matchCorpusAgainst reports whether any advisory in the corpus reports (ecosystem, pkg, version) affected.
 func matchCorpusAgainst(advs []Advisory, ecosystem, pkg, version string) bool {
 	for _, a := range advs {
-		if ok, _ := a.Match(ecosystem, pkg, version); ok {
+		if ok, _ := a.Match(ecosystem, pkg, version, ""); ok {
 			return true
 		}
 	}

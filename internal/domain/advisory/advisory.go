@@ -82,6 +82,17 @@ type AffectedPackage struct {
 	// retained for review but never seeds a match, because a fix commit touches wrappers, tests, and renames
 	// as well as the true sink. omitempty keeps it out of stored blobs that carry none.
 	CuratedSymbols []CuratedSymbol `json:"CuratedSymbols,omitempty"`
+	// Architectures restricts this block to the named package architectures ("x86_64", "aarch64",
+	// "noarch", ...). Empty means the block carries no architecture constraint and applies to every
+	// architecture, which keeps every architecture-blind source (OSV, language ecosystems, Debian)
+	// behaving exactly as before. A non-empty set is authoritative vendor evidence that the block
+	// applies ONLY to those architectures: a component whose architecture is outside the set is not
+	// affected, and a component whose architecture is unknown cannot be proven to be inside the set,
+	// so it does not match either. That fail-closed direction is why the set is sound to admit at all
+	// -- widening "libacl1-32bit for (x86_64)" to every architecture would over-match aarch64.
+	// Values are lowercased and sorted on normalization so the block's content hash is stable.
+	// omitempty keeps it out of stored blobs that carry none.
+	Architectures []string `json:"Architectures,omitempty"`
 }
 
 // Domain-enforced caps on a curated record, so the last guard before seeding (Validate/seedSymbols) is
@@ -243,8 +254,8 @@ func FixedVersions(affected AffectedPackage) []string {
 // Match reports whether the advisory affects (ecosystem, name) at version, and returns the matched block's
 // fixed version. It runs the owned matcher (Affected = explicit-versions OR semver-range) against every
 // affected block for that exact ecosystem+package – so it is a deterministic, third-party-free verdict.
-func (a Advisory) Match(ecosystem, name, version string) (bool, string) {
-	matched, fixed, _ := a.MatchDetails(ecosystem, name, version)
+func (a Advisory) Match(ecosystem, name, version, architecture string) (bool, string) {
+	matched, fixed, _ := a.MatchDetails(ecosystem, name, version, architecture)
 	return matched, fixed
 }
 
@@ -258,10 +269,16 @@ func (a Advisory) Match(ecosystem, name, version string) (bool, string) {
 // apply to. Restricting symbols to the version-matching blocks removes that false-evidence path (a #1-bar
 // no-false-positive requirement before symbol-level reachability runs on any ecosystem). Symbols are
 // deduplicated and sorted; fixed matches Match (the first version-matching block's FixedVersion).
-func (a Advisory) MatchDetails(ecosystem, name, version string) (matched bool, fixed string, symbols []string) {
+func (a Advisory) MatchDetails(ecosystem, name, version, architecture string) (matched bool, fixed string, symbols []string) {
 	var syms []string
 	for _, aff := range a.Affected {
 		if aff.Ecosystem != ecosystem || aff.Package != name {
+			continue
+		}
+		// Architecture is checked before version. A block the vendor scoped to other architectures is not
+		// evidence about this component at all, so it must not contribute a match, a fixed-version hint, or a
+		// reachability symbol seed.
+		if !ArchitectureApplies(aff.Architectures, architecture) {
 			continue
 		}
 		if Affected(aff.Ecosystem, version, aff.Ranges, aff.Versions) {
