@@ -361,7 +361,10 @@ func (f *advisorySnapshotPostgresFixture) advisoryID() string {
 }
 
 func (f *advisorySnapshotPostgresFixture) record(advisoryID, summary string) advisory.ObservationRecord {
-	record := postgresObservationRecord(f.sourceID.String(), advisoryID, advisoryID, summary)
+	// This fixture publishes snapshot receipts, which are immutable and hold their sync run with
+	// ON DELETE RESTRICT, so its advisories outlive cleanup. Scope them to a fixture-owned package so a
+	// second suite run against the same database does not see them in another test's projection.
+	record := postgresObservationRecordForPackage(f.sourceID.String(), advisoryID, advisoryID, summary, "example.com/receipt-concurrency-"+f.suffix)
 	record.Observation.SourceType = "oval"
 	return record
 }

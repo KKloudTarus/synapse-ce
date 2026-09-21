@@ -19,13 +19,26 @@ import (
 )
 
 func postgresObservationRecord(source, record, id, summary string) advisory.ObservationRecord {
+	return postgresObservationRecordForPackage(source, record, id, summary, "example.com/pkg")
+}
+
+// postgresObservationRecordForPackage builds an observation bound to an explicit package key.
+//
+// The shared Postgres database is reused across packages and the suite is run a second time against
+// the same database in CI, so a test that materialises an advisory under the default
+// "example.com/pkg" key leaves a row that a later run can still see. Snapshot publication receipts
+// are deliberately immutable and their sync-run rows are ON DELETE RESTRICT, so those advisories
+// cannot be cleaned up afterwards. Tests that publish receipts therefore take their own package key,
+// which keeps TestAdvisoryMaterializerPostgresReplayAndConcurrency's "exactly one advisory projects
+// onto this package" assertion true on a re-run instead of counting another test's residue.
+func postgresObservationRecordForPackage(source, record, id, summary, packageName string) advisory.ObservationRecord {
 	return advisory.ObservationRecord{Observation: advisory.Observation{
 		SourceType: source,
 		SourceID:   source,
 		RecordID:   record,
 		Status:     advisory.StatusActive,
 		ModifiedAt: time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC),
-		Advisory:   advisory.Advisory{ID: id, Summary: summary, Affected: []advisory.AffectedPackage{{Ecosystem: "Go", Package: "example.com/pkg", Versions: []string{"1.0.0"}}}},
+		Advisory:   advisory.Advisory{ID: id, Summary: summary, Affected: []advisory.AffectedPackage{{Ecosystem: "Go", Package: packageName, Versions: []string{"1.0.0"}}}},
 	}}
 }
 
@@ -94,7 +107,12 @@ func TestAdvisoryMaterializerPostgresReplayAndConcurrency(t *testing.T) {
 	})
 
 	materializer := NewAdvisoryMaterializer(pool)
-	record := postgresObservationRecord(sourceID.String(), advisoryID, advisoryID, "initial")
+	// This test publishes a snapshot receipt below, and receipts are immutable with their sync run held
+	// ON DELETE RESTRICT, so the cleanup DELETE cannot remove this advisory. Bind it to a per-run package
+	// key so the projection assertion further down stays exact when CI runs the suite a second time
+	// against the same database.
+	ownedPackage := "example.com/replay-" + strings.ToLower(strings.TrimPrefix(advisoryID, "CVE-2026-"))
+	record := postgresObservationRecordForPackage(sourceID.String(), advisoryID, advisoryID, "initial", ownedPackage)
 	record.Observation.SourceType = "oval"
 	publishedAt := time.Now().UTC().Add(-time.Second)
 	record.Observation.PublishedAt = publishedAt
@@ -149,7 +167,7 @@ func TestAdvisoryMaterializerPostgresReplayAndConcurrency(t *testing.T) {
 	if err != nil || replay.CreatedRevision || replay.Revision != 1 {
 		t.Fatalf("replay=%+v err=%v", replay, err)
 	}
-	changed := postgresObservationRecord(sourceID.String(), advisoryID, advisoryID, "changed")
+	changed := postgresObservationRecordForPackage(sourceID.String(), advisoryID, advisoryID, "changed", ownedPackage)
 	changed.Observation.SourceType = "oval"
 	changed.Observation.PublishedAt = publishedAt
 	changed.SyncRunID = runID
@@ -210,7 +228,7 @@ func TestAdvisoryMaterializerPostgresReplayAndConcurrency(t *testing.T) {
 	}
 
 	store := NewAdvisoryRepository(pool)
-	matches, err := store.ByPackage(ctx, "Go", "example.com/pkg")
+	matches, err := store.ByPackage(ctx, "Go", ownedPackage)
 	if err != nil || len(matches) != 1 || matches[0].ID != advisoryID {
 		t.Fatalf("owned advisory projection=%+v err=%v", matches, err)
 	}
@@ -396,7 +414,10 @@ func TestAdvisoryMaterializerPostgresSnapshotReceiptPreservesOrderedResults(t *t
 	aliasID := "CVE-2026-RECEIPT-B-" + strings.ToUpper(suffix)
 	freshID := "CVE-2026-RECEIPT-C-" + strings.ToUpper(suffix)
 	materializer := NewAdvisoryMaterializer(pool)
-	link := postgresObservationRecord(linkSourceID.String(), "link-"+suffix, linkedID, "linked receipt")
+	// Receipt rows are immutable and their sync run is ON DELETE RESTRICT, so this test's advisories
+	// survive cleanup. Scope them to their own package so they never inflate another test's projection.
+	receiptPackage := "example.com/receipt-linked-" + suffix
+	link := postgresObservationRecordForPackage(linkSourceID.String(), "link-"+suffix, linkedID, "linked receipt", receiptPackage)
 	link.Observation.SourceType = "osv"
 	link.Observation.Advisory.Aliases = []string{aliasID}
 	if _, err := materializer.Materialize(ctx, []advisory.ObservationRecord{link}); err != nil {
@@ -404,7 +425,7 @@ func TestAdvisoryMaterializerPostgresSnapshotReceiptPreservesOrderedResults(t *t
 	}
 
 	record := func(id string) advisory.ObservationRecord {
-		current := postgresObservationRecord(sourceID.String(), id, id, "linked receipt")
+		current := postgresObservationRecordForPackage(sourceID.String(), id, id, "linked receipt", receiptPackage)
 		current.Observation.SourceType = "oval"
 		current.SyncRunID = runID.String()
 		return current
@@ -489,7 +510,7 @@ func TestAdvisoryMaterializerPostgresSnapshotReceiptBatchesResultsAndRevisionLin
 	records := make([]advisory.ObservationRecord, count)
 	for index := range records {
 		ids[index] = fmt.Sprintf("CVE-2026-RECEIPT-BATCH-%s-%04d", suffix, index)
-		records[index] = postgresObservationRecord(sourceID.String(), ids[index], ids[index], "batched receipt")
+		records[index] = postgresObservationRecordForPackage(sourceID.String(), ids[index], ids[index], "batched receipt", "example.com/receipt-batch-"+suffix)
 		records[index].Observation.SourceType = "oval"
 		records[index].SyncRunID = runID.String()
 	}
