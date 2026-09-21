@@ -1107,7 +1107,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --csaf <dir> # ingest a local CSAF 2.0 advisory dump (requires SYNAPSE_DB_DSN)")
-	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --oval <dir> # ingest a local Ubuntu OVAL dump (com.ubuntu.*.cve.oval.xml[.bz2]; requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli build-cvss-db <out.jsonl[.gz]> <nvd-*.json[.gz]...>  # build an OFFLINE CVSS DB from NVD JSON feeds; use it via SYNAPSE_NVD_CVSS_DB to backfill CVSS with no network/rate-limit")
 	os.Exit(2)
 }
@@ -1252,7 +1251,13 @@ func runScan() {
 // over the dump directory streams every parseable advisory into the store via the narrow AdvisoryWriter.
 func syncAdvisories(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: synapse-cli sync-advisories <dir>|--remote|--remote-distros|--csaf <dir>|--oval <dir> (requires SYNAPSE_DB_DSN)")
+		return fmt.Errorf("usage: synapse-cli sync-advisories <dir>|--remote|--remote-distros|--csaf <dir> (requires SYNAPSE_DB_DSN)")
+	}
+	if args[0] == "--oval" {
+		if len(args) < 2 {
+			return fmt.Errorf("usage: synapse-cli sync-advisories --oval <dir>")
+		}
+		return fmt.Errorf("unsigned local OVAL cannot be imported into durable advisory storage; configure an API-managed OVAL source with a pinned OpenPGP key, trusted provider metadata, or the exact SUSE HTTPS-origin option")
 	}
 	cfg := config.Load()
 	if cfg.DBDSN == "" {
@@ -1278,12 +1283,6 @@ func syncAdvisories(args []string) error {
 		}
 		feed = ownadvisory.NewCSAFDirFeed(args[1])
 		src, bulkAdapter, sourceKey, sourceName = "CSAF dir "+args[1], "csaf", "cli-csaf-bulk", "CLI CSAF bulk ingest"
-	case args[0] == "--oval":
-		if len(args) < 2 {
-			return fmt.Errorf("usage: synapse-cli sync-advisories --oval <dir>")
-		}
-		feed = ownadvisory.NewOVALDirFeed(args[1])
-		src, bulkAdapter, sourceKey, sourceName = "Ubuntu OVAL dir "+args[1], "oval", "cli-oval-bulk", "CLI OVAL bulk ingest"
 	case args[0] == "--updateinfo":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: synapse-cli sync-advisories --updateinfo <dir>")
