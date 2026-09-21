@@ -402,9 +402,6 @@ synapse-cli sync-advisories --remote-distros
 # ingest a local CSAF 2.0 advisory dump
 synapse-cli sync-advisories --csaf <dir>
 
-# ingest a local OVAL dump (Ubuntu/Debian dpkginfo, or Oracle/AlmaLinux/openSUSE/SUSE Linux Enterprise rpminfo, .xml[.bz2/.gz])
-synapse-cli sync-advisories --oval <dir>
-
 # ingest a local yum/dnf updateinfo dump (Amazon Linux ALAS and Fedora: repodata updateinfo.xml[.gz/.bz2/.zst])
 synapse-cli sync-advisories --updateinfo <dir>
 
@@ -414,6 +411,14 @@ synapse-cli sync-advisories --rocky <dir>
 # ingest a local apk secdb dump (Alpine secdb.alpinelinux.org, Wolfi packages.wolfi.dev, Chainguard)
 synapse-cli sync-advisories --secdb <dir>
 ```
+
+Unsigned local OVAL is not accepted by `sync-advisories` because it cannot safely enter durable
+advisory storage. Configure an authenticated API-managed OVAL source instead, with either a pinned
+OpenPGP key or trusted provider metadata. The only exception is the exact SLES 15 SP6 SUSE HTTPS-origin
+source documented in [Vulnerability intelligence](vulnerability-intelligence.md#source-management): it is
+not a local import, generic unsigned OVAL support, or OpenPGP verification. Local OVAL data remains
+suitable for `ownadvisory` parser and `scabench` benchmark fixtures, which do not import it into durable
+advisory storage.
 
 Enable the store at scan time with `SYNAPSE_OWNED_ADVISORY=true`, then it runs alongside the
 live and offline sources.
