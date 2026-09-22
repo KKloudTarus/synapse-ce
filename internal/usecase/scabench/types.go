@@ -123,6 +123,20 @@ type Target struct {
 type ArtifactPin struct {
 	Reference string `json:"reference"`
 	Digest    string `json:"digest"`
+	// Origin is the authoritative upstream location the artifact was obtained from.
+	//
+	// Digest alone makes a pin verifiable but not locatable: it proves two captures used the same
+	// bytes, and says nothing about where those bytes came from. That is insufficient in practice
+	// because most scanner databases are published at mutable locations. Of the four comparator
+	// databases this benchmark pins, only one is addressable by an immutable build path; the others
+	// are republished in place, so a pin set can silently become unobtainable and a later recapture
+	// fails with no explanation of which input moved.
+	//
+	// Recording the origin keeps the pin self-describing, lets a preflight re-fetch the artifact and
+	// verify it against Digest, and turns upstream drift into an immediate, attributable failure
+	// rather than an unexplained score change. It is optional so a locally built artifact (for
+	// example a from-source runner binary) can still be pinned by digest alone.
+	Origin string `json:"origin,omitempty"`
 }
 
 // Catalog identifies the fixed input set shared by every engine.
@@ -666,16 +680,40 @@ func (catalog Catalog) Validate() error {
 	}
 	pins := make(map[string]struct{}, len(catalog.Pins))
 	for i, pin := range catalog.Pins {
-		if err := validatePin(pin.Reference, pin.Digest); err != nil {
+		if err := validatePin(pin.Reference, pin.Digest, pin.Origin); err != nil {
 			return fmt.Errorf("catalog pin %d: %w", i, err)
 		}
 		reference := strings.TrimSpace(pin.Reference)
 		if _, exists := pins[reference]; exists {
 			return fmt.Errorf("catalog pin reference %q is duplicated", reference)
 		}
+		if originRequiredPinKind(reference) && strings.TrimSpace(pin.Origin) == "" {
+			return fmt.Errorf("catalog pin %q requires an origin because its upstream is republished in place", reference)
+		}
 		pins[reference] = struct{}{}
 	}
 	return nil
+}
+
+// originRequiredPinKind reports whether a pin reference names an artifact class that upstreams
+// republish, so a digest alone would leave it unobtainable.
+//
+// Advisory databases and their authoritative source documents are the classes that rotate: vendors
+// overwrite a feed at a stable URL, or drop older builds entirely. A digest still detects that the
+// bytes changed, but without an origin nobody can tell which upstream moved, or re-fetch the artifact
+// to reproduce a past score. Binaries, profiles, and environment descriptors are exempt because they
+// are either released at immutable versioned locations or built locally from pinned source.
+func originRequiredPinKind(reference string) bool {
+	kind, _, ok := strings.Cut(strings.TrimSpace(reference), ":")
+	if !ok {
+		return false
+	}
+	switch kind {
+	case "database", "source":
+		return true
+	default:
+		return false
+	}
 }
 
 // Validate validates an oracle's self-contained independent-review invariants.
@@ -1504,7 +1542,8 @@ func validPortableTargetID(value string) bool {
 }
 
 func validateCitation(citation Citation) error {
-	if err := validatePin(citation.Reference, citation.Digest); err != nil {
+	// A citation carries no origin field: it is already a retrievable reference plus a digest.
+	if err := validatePin(citation.Reference, citation.Digest, ""); err != nil {
 		return err
 	}
 	if competitorCitation(citation.Reference) {
@@ -1513,7 +1552,7 @@ func validateCitation(citation Citation) error {
 	return nil
 }
 
-func validatePin(reference, digest string) error {
+func validatePin(reference, digest, origin string) error {
 	if strings.TrimSpace(reference) == "" {
 		return fmt.Errorf("reference is required")
 	}
@@ -1522,6 +1561,56 @@ func validatePin(reference, digest string) error {
 	}
 	if !validSHA256Digest(digest) {
 		return fmt.Errorf("digest must be an immutable sha256 digest")
+	}
+	return validatePinOrigin(origin)
+}
+
+// validatePinOrigin constrains an optional pin origin.
+//
+// An origin is evidence an auditor may re-fetch, so it must be transport-authenticated and must not
+// carry a credential: a pin is committed to the repository, and a userinfo-bearing URL would leak a
+// secret into history while also making the artifact unfetchable by anyone else. Fragments and opaque
+// or relative forms are rejected because they cannot identify a retrievable artifact on their own.
+// validatePinOrigin constrains an optional pin origin.
+//
+// An origin is evidence an auditor may re-fetch, so it must be transport-authenticated and must not
+// carry a credential: a pin is committed to the repository, so a userinfo-bearing URL would leak a
+// secret into history while also making the artifact unfetchable by anyone else.
+//
+// Two forms are accepted, because vendors publish in two ways. An https URL covers feeds and release
+// archives. An "oci://" reference covers databases distributed only as registry images, where no
+// plain download URL exists; the trivy database is the case in point, published solely as an OCI
+// artifact. A digest-pinned OCI reference is as immutable as an https URL plus the pin's own digest,
+// and registry transport is likewise authenticated, so admitting it loses nothing. Fragments and
+// opaque or relative forms are rejected because they cannot identify a retrievable artifact alone.
+func validatePinOrigin(origin string) error {
+	if strings.TrimSpace(origin) == "" {
+		return nil
+	}
+	if strings.TrimSpace(origin) != origin {
+		return fmt.Errorf("origin must not carry surrounding whitespace")
+	}
+	if hasCredentialBearingAuthority(origin) {
+		return fmt.Errorf("credential-bearing origin is forbidden")
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return fmt.Errorf("origin must be a valid absolute URL")
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "oci" {
+		return fmt.Errorf("origin must use https or oci so the artifact is transport-authenticated")
+	}
+	if parsed.Host == "" || parsed.Opaque != "" {
+		return fmt.Errorf("origin must name an absolute %s location", parsed.Scheme)
+	}
+	if parsed.User != nil {
+		return fmt.Errorf("credential-bearing origin is forbidden")
+	}
+	if parsed.Fragment != "" {
+		return fmt.Errorf("origin must not carry a fragment")
+	}
+	if parsed.Scheme == "oci" && strings.TrimPrefix(parsed.Path, "/") == "" {
+		return fmt.Errorf("oci origin must name a repository path")
 	}
 	return nil
 }

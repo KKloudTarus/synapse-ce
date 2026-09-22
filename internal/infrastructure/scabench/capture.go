@@ -1570,11 +1570,21 @@ func targetByID(catalog bench.Catalog, id string) (bench.Target, bool) {
 	return bench.Target{}, false
 }
 
+// requirePin fails a capture unless the locally verified digest matches the catalog pin.
+//
+// When a pin records an origin, the mismatch message names it. A digest mismatch on a pinned
+// database almost always means the upstream republished in place rather than that the local copy was
+// corrupted, and without the origin in the error an operator only learns that "the database changed"
+// and has to rediscover which of several feeds moved. Naming the origin makes upstream drift
+// immediately attributable, which is the whole reason the field is recorded.
 func requirePin(catalog bench.Catalog, reference, want, subject string) error {
 	for _, pin := range catalog.Pins {
 		if pin.Reference == reference {
 			if pin.Digest != want {
-				return fmt.Errorf("catalog %s pin does not match verified digest", subject)
+				if origin := strings.TrimSpace(pin.Origin); origin != "" {
+					return fmt.Errorf("catalog %s pin does not match verified digest: pinned %s, verified %s, re-fetch and compare %s", subject, pin.Digest, want, origin)
+				}
+				return fmt.Errorf("catalog %s pin does not match verified digest: pinned %s, verified %s", subject, pin.Digest, want)
 			}
 			return nil
 		}
