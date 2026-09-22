@@ -11,13 +11,18 @@ func TestScorePerCategory(t *testing.T) {
 		{Name: "T2", Category: "cmdi", Real: true},  // not detected -> FN
 		{Name: "T3", Category: "cmdi", Real: false}, // detected -> FP (sanitized-safe flagged)
 		{Name: "T4", Category: "cmdi", Real: false}, // not detected -> TN
-		{Name: "T5", Category: "sqli", Real: true},  // detected -> TP
-		{Name: "X1", Category: "xss", Real: true},   // unscored category -> ignored
+		{Name: "T5", Category: "sqli", Real: true},   // detected -> TP
+		{Name: "L1", Category: "ldapi", Real: true},  // detected -> TP (CWE-90)
+		{Name: "L2", Category: "ldapi", Real: false}, // detected -> FP (sanitized-safe flagged)
+		{Name: "P1", Category: "xpathi", Real: true}, // not detected -> FN (CWE-643)
+		{Name: "X1", Category: "xss", Real: true},    // unscored category -> ignored
 	}
 	detected := map[string]map[string]bool{
 		"T1": {"CWE-78": true},
 		"T3": {"CWE-78": true},
 		"T5": {"CWE-89": true},
+		"L1": {"CWE-90": true},
+		"L2": {"CWE-90": true},
 		"X1": {"CWE-79": true},
 	}
 	scores := Score(detected, cases)
@@ -35,13 +40,21 @@ func TestScorePerCategory(t *testing.T) {
 	if byCat["sqli"].TP != 1 || byCat["sqli"].Recall != 1 {
 		t.Errorf("sqli = %+v, want TP=1 recall=1", byCat["sqli"])
 	}
+	// ldapi (CWE-90): one real detected (TP) + one sanitized-safe flagged (FP) => recall 1, precision 0.5.
+	if ldapi := byCat["ldapi"]; ldapi.CWE != "CWE-90" || ldapi.TP != 1 || ldapi.FP != 1 || ldapi.Recall != 1 || ldapi.Precision != 0.5 {
+		t.Errorf("ldapi = %+v, want CWE-90 TP=1 FP=1 recall=1 precision=0.5", ldapi)
+	}
+	// xpathi (CWE-643): one real not detected (FN) => recall 0, and it is scored (present) not not-covered.
+	if xpathi := byCat["xpathi"]; xpathi.CWE != "CWE-643" || xpathi.FN != 1 || xpathi.Recall != 0 {
+		t.Errorf("xpathi = %+v, want CWE-643 FN=1 recall=0", xpathi)
+	}
 	// xss is unscored: it must not appear
 	if _, ok := byCat["xss"]; ok {
 		t.Error("an unscored category must not be scored")
 	}
-	// all three modeled categories are always present (even with zero cases), so a gap reads as not-covered
-	if len(scores) != 3 {
-		t.Fatalf("want the 3 modeled categories, got %d", len(scores))
+	// all five modeled categories are always present (even with zero cases), so a gap reads as not-covered
+	if len(scores) != 5 {
+		t.Fatalf("want the 5 modeled categories, got %d", len(scores))
 	}
 }
 
