@@ -605,7 +605,7 @@ func resolveRPMProduct(purlByProduct, cpeByProduct, nameByProduct map[string]str
 	if !ok {
 		return rpmProductBinding{}, false
 	}
-	name, evr, kind, ok := redHatRPMPurl(purlByProduct[rel.pkgRef])
+	name, evr, kind, ok := redHatRPMPurl(rel.pkgRef, purlByProduct[rel.pkgRef])
 	if !ok {
 		return rpmProductBinding{}, false
 	}
@@ -613,6 +613,13 @@ func resolveRPMProduct(purlByProduct, cpeByProduct, nameByProduct map[string]str
 	if kind == rpmProductOpen && !soundOpenScope {
 		// An unbounded range cannot be reduced to the RHEL major when the platform product is neither an exact
 		// minor release nor an explicit major-wide product.
+		kind = rpmProductUnsupportedVersion
+	}
+	if kind == rpmProductOpen && modularPlatformScope(cpeByProduct[rel.platformRef], rel.platformRef, nameByProduct[rel.platformRef]) {
+		// Defence in depth for the open path. A bounded product is screened for modularity by its EVR
+		// (isModularEVR below), but an unversioned product has no EVR, so the package id is otherwise the
+		// only signal. If the platform side instead carries the module or AppStream marker, the range would
+		// span parallel stream version lines, so refuse it rather than trust the id alone.
 		kind = rpmProductUnsupportedVersion
 	}
 	if kind == rpmProductBounded && (isModularEVR(evr) || !rpmEVRMatchesRHELMajor(evr, major)) {
@@ -624,7 +631,7 @@ func resolveRPMProduct(purlByProduct, cpeByProduct, nameByProduct map[string]str
 	return rpmProductBinding{ecosystem: ecosystem, pkg: name, evr: evr, kind: kind}, true
 }
 
-func redHatRPMPurl(purl string) (name, evr string, kind rpmProductKind, ok bool) {
+func redHatRPMPurl(productID, purl string) (name, evr string, kind rpmProductKind, ok bool) {
 	const prefix = "pkg:rpm/redhat/"
 	if !strings.HasPrefix(purl, prefix) {
 		return "", "", 0, false
@@ -649,10 +656,13 @@ func redHatRPMPurl(purl string) (name, evr string, kind rpmProductKind, ok bool)
 	name = strings.TrimSpace(decodePURLSegment(namePart))
 	arch := strings.TrimSpace(decodePURLSegment(purlQualifier(purl, "arch")))
 	upstream := strings.TrimSpace(decodePURLSegment(purlQualifier(purl, "upstream")))
-	if name == "" || strings.EqualFold(arch, "src") || (arch == "" && upstream == "") {
-		// Unversioned source products are explicitly arch=src. For an unversioned product without an
-		// architecture, the upstream qualifier is the binary-expansion proof that the name is an installable
-		// binary RPM rather than an ambiguous source/component identity.
+	if name == "" || strings.EqualFold(arch, "src") {
+		// A source product is explicitly arch=src and never describes an installed binary.
+		return "", "", 0, false
+	}
+	if arch == "" && upstream == "" && !redHatBinaryProductID(productID) {
+		// Without an architecture or upstream qualifier the product_id is the only remaining proof that the
+		// name is an installable binary rather than a source or modular identity.
 		return "", "", 0, false
 	}
 	if versionPart == "" {
@@ -663,6 +673,70 @@ func redHatRPMPurl(purl string) (name, evr string, kind rpmProductKind, ok bool)
 		return "", "", 0, false
 	}
 	return name, rpmCanonicalEVR(versionPart, decodePURLSegment(purlQualifier(purl, "epoch"))), rpmProductBounded, true
+}
+
+// modularPlatformScope reports whether a platform product describes a module stream or an AppStream-scoped
+// variant rather than a plain RHEL release.
+//
+// This guards the unversioned (open-range) path only. A versioned product is screened by its EVR, which carries
+// a ".module+el" marker, but an unversioned product has no EVR to inspect. Red Hat currently states modularity
+// on the package id, so this is a second, independent signal rather than the primary one: if the module or
+// stream identity is expressed on the platform side, an open range built from it would span parallel version
+// lines and could report a flaw in one stream against an installed build of another.
+//
+// The CPE is checked beyond its major component, because a plain release CPE ("cpe:/o:redhat:enterprise_linux:9")
+// carries nothing after the version, while an AppStream- or module-scoped one appends further components.
+func modularPlatformScope(cpe, productID, productName string) bool {
+	for _, label := range []string{productID, productName} {
+		value := strings.ToLower(strings.TrimSpace(label))
+		if strings.Contains(value, "module") || strings.Contains(value, "appstream") {
+			return true
+		}
+	}
+	value := strings.ToLower(strings.TrimSpace(cpe))
+	for _, prefix := range []string{"cpe:/", "cpe:2.3:"} {
+		value = strings.TrimPrefix(value, prefix)
+	}
+	parts := strings.Split(value, ":")
+	if len(parts) < 4 {
+		return false // not a resolvable platform CPE; rhelMajorFromCPE already rejected those
+	}
+	for _, component := range parts[4:] {
+		if strings.TrimSpace(component) != "" {
+			// Extra qualification beyond vendor:product:version, e.g. an appstream or module scope.
+			return true
+		}
+	}
+	return false
+}
+
+// redHatBinaryProductID reports whether a package product_id names an installable binary RPM, for the
+// unversioned products Red Hat emits when a CVE has no fixed package version. Those products carry no arch or
+// upstream qualifier, so the id is the only available discriminator, and Red Hat states the two identities it
+// must exclude explicitly:
+//   - a source product ends in ".src" (and also carries arch=src, rejected before this call);
+//   - a modular product embeds its stream as "<name>::<module>:<stream>", a parallel version line that the
+//     linear range matcher cannot represent soundly.
+//
+// Anything else is a plain binary name. This admits the not-yet-fixed evidence while keeping both excluded
+// identities out, so a miss stays a miss and never becomes a cross-identity false positive.
+func redHatBinaryProductID(productID string) bool {
+	value := strings.TrimSpace(productID)
+	if value == "" {
+		return false
+	}
+	if strings.ContainsRune(value, ':') {
+		// A colon cannot appear in an RPM package name: it delimits the epoch in NEVRA. So a colon is
+		// positive evidence that the id carries extra structure rather than naming a binary, which is what
+		// a modular stream ("<name>::<module>:<stream>") does. Refusing every colon rather than only the
+		// "::" pair keeps a single-colon or otherwise-shaped stream marker out too, instead of relying on
+		// Red Hat continuing to use exactly the doubled form.
+		return false
+	}
+	if strings.HasSuffix(strings.ToLower(value), ".src") {
+		return false // source identity
+	}
+	return true
 }
 
 func rhelPlatformEcosystem(major, productID, productName string) (string, bool) {

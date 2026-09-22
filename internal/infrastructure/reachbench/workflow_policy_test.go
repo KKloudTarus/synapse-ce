@@ -15,8 +15,8 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 	for _, action := range []string{
 		"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
 		"actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
-		"actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9",
-		"actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3",
+		"actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68",
+		"actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6",
 		"actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
 	} {
 		if !strings.Contains(workflow, action) {

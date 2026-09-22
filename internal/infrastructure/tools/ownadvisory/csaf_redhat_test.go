@@ -586,7 +586,9 @@ func TestParseCSAFRedHatRejectsNonBinaryOrInconsistentAffectedProducts(t *testin
 		{name: "versioned source rpm", productID: "rhel9:curl-src-fixed"},
 		{name: "version contradicts platform major", productID: "rhel9:curl-minimal-wrong-major"},
 		{name: "version lacks a rhel major tag", productID: "rhel9:curl-minimal-tagless"},
-		{name: "unversioned identity lacks binary expansion proof", productID: "rhel9:curl-minimal-ambiguous"},
+		// A streaming document never emits an open range at all, so an unversioned binary stays inert here even
+		// though a complete snapshot admits it. TestParseCSAFSnapshotAdmitsRedHatNotYetFixedBinary covers that.
+		{name: "unversioned binary is inert in a streaming document", productID: "rhel9:curl-minimal-ambiguous"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			doc := redHatBinaryLifecycleDocument(`{"known_affected": ["` + tc.productID + `"]}`)
