@@ -615,6 +615,13 @@ func resolveRPMProduct(purlByProduct, cpeByProduct, nameByProduct map[string]str
 		// minor release nor an explicit major-wide product.
 		kind = rpmProductUnsupportedVersion
 	}
+	if kind == rpmProductOpen && modularPlatformScope(cpeByProduct[rel.platformRef], rel.platformRef, nameByProduct[rel.platformRef]) {
+		// Defence in depth for the open path. A bounded product is screened for modularity by its EVR
+		// (isModularEVR below), but an unversioned product has no EVR, so the package id is otherwise the
+		// only signal. If the platform side instead carries the module or AppStream marker, the range would
+		// span parallel stream version lines, so refuse it rather than trust the id alone.
+		kind = rpmProductUnsupportedVersion
+	}
 	if kind == rpmProductBounded && (isModularEVR(evr) || !rpmEVRMatchesRHELMajor(evr, major)) {
 		// A module is a parallel version line. A tagless or mismatched EVR does not prove a bound for the
 		// platform named by the relationship. Preserve the package identity so a fixed status can suppress a
@@ -668,6 +675,41 @@ func redHatRPMPurl(productID, purl string) (name, evr string, kind rpmProductKin
 	return name, rpmCanonicalEVR(versionPart, decodePURLSegment(purlQualifier(purl, "epoch"))), rpmProductBounded, true
 }
 
+// modularPlatformScope reports whether a platform product describes a module stream or an AppStream-scoped
+// variant rather than a plain RHEL release.
+//
+// This guards the unversioned (open-range) path only. A versioned product is screened by its EVR, which carries
+// a ".module+el" marker, but an unversioned product has no EVR to inspect. Red Hat currently states modularity
+// on the package id, so this is a second, independent signal rather than the primary one: if the module or
+// stream identity is expressed on the platform side, an open range built from it would span parallel version
+// lines and could report a flaw in one stream against an installed build of another.
+//
+// The CPE is checked beyond its major component, because a plain release CPE ("cpe:/o:redhat:enterprise_linux:9")
+// carries nothing after the version, while an AppStream- or module-scoped one appends further components.
+func modularPlatformScope(cpe, productID, productName string) bool {
+	for _, label := range []string{productID, productName} {
+		value := strings.ToLower(strings.TrimSpace(label))
+		if strings.Contains(value, "module") || strings.Contains(value, "appstream") {
+			return true
+		}
+	}
+	value := strings.ToLower(strings.TrimSpace(cpe))
+	for _, prefix := range []string{"cpe:/", "cpe:2.3:"} {
+		value = strings.TrimPrefix(value, prefix)
+	}
+	parts := strings.Split(value, ":")
+	if len(parts) < 4 {
+		return false // not a resolvable platform CPE; rhelMajorFromCPE already rejected those
+	}
+	for _, component := range parts[4:] {
+		if strings.TrimSpace(component) != "" {
+			// Extra qualification beyond vendor:product:version, e.g. an appstream or module scope.
+			return true
+		}
+	}
+	return false
+}
+
 // redHatBinaryProductID reports whether a package product_id names an installable binary RPM, for the
 // unversioned products Red Hat emits when a CVE has no fixed package version. Those products carry no arch or
 // upstream qualifier, so the id is the only available discriminator, and Red Hat states the two identities it
@@ -683,8 +725,13 @@ func redHatBinaryProductID(productID string) bool {
 	if value == "" {
 		return false
 	}
-	if strings.Contains(value, "::") {
-		return false // modular stream identity
+	if strings.ContainsRune(value, ':') {
+		// A colon cannot appear in an RPM package name: it delimits the epoch in NEVRA. So a colon is
+		// positive evidence that the id carries extra structure rather than naming a binary, which is what
+		// a modular stream ("<name>::<module>:<stream>") does. Refusing every colon rather than only the
+		// "::" pair keeps a single-colon or otherwise-shaped stream marker out too, instead of relying on
+		// Red Hat continuing to use exactly the doubled form.
+		return false
 	}
 	if strings.HasSuffix(strings.ToLower(value), ".src") {
 		return false // source identity

@@ -139,6 +139,13 @@ func TestRedHatBinaryProductIDRefusesSourceAndModularVariants(t *testing.T) {
 		"nodejs::nodejs:20",
 		"::",
 		"a::b",
+		// A single colon must be refused too. An RPM package name cannot contain a colon (it delimits the
+		// epoch in NEVRA), so any colon means the id carries extra structure. Refusing every colon rather
+		// than only the doubled form avoids depending on Red Hat keeping exactly the "name::module:stream"
+		// spelling.
+		"nodejs:20",
+		"cargo:rust-toolset",
+		"a:b",
 	} {
 		if redHatBinaryProductID(productID) {
 			t.Fatalf("%q must not be treated as an installable binary", productID)
@@ -173,6 +180,82 @@ func TestRedHatRPMPurlRejectsNonRPMAndMalformedPURLs(t *testing.T) {
 	// An upstream qualifier alone is still sufficient proof, independent of the id.
 	if _, _, kind, ok := redHatRPMPurl("expat.src", "pkg:rpm/redhat/expat?upstream=expat"); !ok || kind != rpmProductOpen {
 		t.Fatalf("an upstream-qualified unversioned binary must remain admitted, got ok=%t kind=%v", ok, kind)
+	}
+}
+
+// The open path has no EVR to screen for modularity, so the platform side is checked as a second, independent
+// signal. A module or AppStream scope expressed on the platform must refuse the open range even when the
+// package id looks like a plain binary.
+func TestParseCSAFSnapshotRefusesOpenRangeOnModularPlatformScope(t *testing.T) {
+	for _, platform := range []struct {
+		name string
+		id   string
+		cpe  string
+	}{
+		{"appstream scoped cpe", "rhel9_appstream", "cpe:/o:redhat:enterprise_linux:9::appstream"},
+		{"module scoped cpe", "rhel9_mod", "cpe:/o:redhat:enterprise_linux:9::appstream-nodejs20"},
+		{"module named platform", "rhel9_nodejs_module", "cpe:/o:redhat:enterprise_linux:9"},
+	} {
+		t.Run(platform.name, func(t *testing.T) {
+			label := "Red Hat Enterprise Linux 9"
+			if platform.id == "rhel9_nodejs_module" {
+				label = "Red Hat Enterprise Linux 9 nodejs:20 module"
+			}
+			document := `{
+              "document": {"category": "csaf_vex", "tracking": {"id": "CVE-2026-40005"}},
+              "product_tree": {
+                "branches": [
+                  {"category": "vendor", "name": "Red Hat", "branches": [
+                    {"category": "product_name", "name": "` + label + `",
+                     "product": {"product_id": "` + platform.id + `", "product_identification_helper": {"cpe": "` + platform.cpe + `"}}},
+                    {"category": "product_version", "name": "nodejs",
+                     "product": {"product_id": "nodejs", "product_identification_helper": {"purl": "pkg:rpm/redhat/nodejs"}}}
+                  ]}
+                ],
+                "relationships": [
+                  {"category": "default_component_of", "full_product_name": {"product_id": "` + platform.id + `:nodejs"},
+                   "product_reference": "nodejs", "relates_to_product_reference": "` + platform.id + `"}
+                ]
+              },
+              "vulnerabilities": [
+                {"cve": "CVE-2026-40005", "product_status": {"known_affected": ["` + platform.id + `:nodejs"]}}
+              ]
+            }`
+			advs, err := ParseCSAFSnapshot([][]byte{[]byte(document)})
+			if err != nil {
+				t.Fatalf("ParseCSAFSnapshot: %v", err)
+			}
+			if len(advs[0].Affected) != 0 {
+				t.Fatalf("a module-scoped platform must not yield an open range, got %+v", advs[0].Affected)
+			}
+			// The concrete cross-stream false positive: a nodejs:20 flaw must not hit an installed nodejs:18.
+			if ok, _ := advs[0].Match("Red Hat:9", "nodejs", "1:18.20.4-1.el9", "x86_64"); ok {
+				t.Fatal("a module-scoped open range must never match an installed component of another stream")
+			}
+		})
+	}
+}
+
+func TestModularPlatformScopeDiscriminatesPlainReleases(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		cpe     string
+		id      string
+		label   string
+		modular bool
+	}{
+		{"plain rhel 9", "cpe:/o:redhat:enterprise_linux:9", "red_hat_enterprise_linux_9", "Red Hat Enterprise Linux 9", false},
+		{"plain rhel 9 minor", "cpe:/o:redhat:enterprise_linux:9.8", "rhel_9_8", "Red Hat Enterprise Linux 9.8", false},
+		{"appstream cpe", "cpe:/o:redhat:enterprise_linux:9::appstream", "rhel9", "Red Hat Enterprise Linux 9", true},
+		{"module cpe", "cpe:/o:redhat:enterprise_linux:8::appstream-nodejs20", "rhel8", "Red Hat Enterprise Linux 8", true},
+		{"module in id", "cpe:/o:redhat:enterprise_linux:9", "rhel9_module_nodejs", "Red Hat Enterprise Linux 9", true},
+		{"appstream in name", "cpe:/o:redhat:enterprise_linux:9", "rhel9", "Red Hat Enterprise Linux 9 AppStream", true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := modularPlatformScope(testCase.cpe, testCase.id, testCase.label); got != testCase.modular {
+				t.Fatalf("modularPlatformScope(%q,%q,%q)=%t, want %t", testCase.cpe, testCase.id, testCase.label, got, testCase.modular)
+			}
+		})
 	}
 }
 
