@@ -3340,7 +3340,8 @@ func main() {
 		log.Info("cross-check disagreement judgments ENABLED (owned vs vendor detection sources; ungated, human-reviewed)")
 	}
 
-	// SBOM producer cross-check (SBOM side), opt-in. A SECOND SBOM producer runs alongside
+	// SBOM producer cross-check (SBOM side), ON BY DEFAULT (SYNAPSE_SBOM_CROSSCHECK_ENABLED defaults true;
+	// set it false to opt out). A SECOND SBOM producer runs alongside
 	// the primary and components only one producer emits become ungated CapCorrelation judgments (system
 	// identity) for human review – detection independence as a feature. Like the advisory cross-check it mints
 	// judgments, so it needs the judgment lifecycle; composition-root only (the sbomcrosscheckjudge arch

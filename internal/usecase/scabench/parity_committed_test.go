@@ -65,6 +65,68 @@ func TestOwnedRecallParityOnCommittedRatchet(t *testing.T) {
 	}
 }
 
+// committedOwnedAccuracyFloor is the reviewed owned-engine threshold policy for every accuracy target the
+// corpus pins. It exists because ValidateRatchetTightening only protects targets present in
+// corpus/ratchet-baseline.json, and that baseline holds 8 floors covering debian and sles only. A target added
+// afterwards -- rhel-9-8-ubi-amd64 is the first -- is anchored by nothing: TestOwnedRecallParityOnCommittedRatchet
+// compares floors against each other, and TestCandidateRatchetPreservesHistoricalFloorPolicy iterates the
+// baseline. Lowering such a floor is the exact "quietly move the bar to match a disappointing capture" edit the
+// ratchet exists to prevent, so the reviewed numbers are stated here and asserted.
+//
+// Raising a floor is a tightening and needs no edit here beyond the new value. LOWERING one is a policy
+// reversal: change it only with the measured evidence and the review that justify it.
+var committedOwnedAccuracyFloor = map[string]struct {
+	Recall            float64
+	Precision         float64
+	MaxFalseNegatives int
+	MaxFalsePositives int
+}{
+	"debian-12-13-slim-amd64":        {Recall: 1, Precision: 1, MaxFalseNegatives: 0, MaxFalsePositives: 0},
+	"rhel-9-8-ubi-amd64":             {Recall: 1, Precision: 1, MaxFalseNegatives: 0, MaxFalsePositives: 0},
+	"sles-15-6-bci-base-45-31-amd64": {Recall: 1, Precision: 1, MaxFalseNegatives: 0, MaxFalsePositives: 0},
+}
+
+// TestCommittedOwnedAccuracyFloorsAreNotLoosened pins the owned engine's reviewed thresholds on every accuracy
+// target, including targets added after the accepted baseline. Without it, an edit that relaxes recall,
+// precision, or an error ceiling to match a weak capture passes the whole package.
+func TestCommittedOwnedAccuracyFloorsAreNotLoosened(t *testing.T) {
+	ratchet := decodeRatchetFile(t, "corpus/ratchet.json")
+
+	seen := map[string]bool{}
+	for _, floor := range ratchet.Floors {
+		if floor.Expected.Engine != EngineOwned || floor.Mode.effective() != FloorGateModeAccuracy {
+			continue
+		}
+		target := floor.Expected.TargetID
+		want, reviewed := committedOwnedAccuracyFloor[target]
+		if !reviewed {
+			t.Errorf("owned accuracy floor for target %q is not covered by the reviewed threshold policy; add its reviewed numbers to committedOwnedAccuracyFloor so the floor cannot be lowered unnoticed", target)
+			continue
+		}
+		seen[target] = true
+		if floor.MinimumRecall == nil || *floor.MinimumRecall < want.Recall {
+			t.Errorf("target %s: committed owned minimum recall %v is below the reviewed floor %v", target, floor.MinimumRecall, want.Recall)
+		}
+		if floor.MinimumPrecision == nil || *floor.MinimumPrecision < want.Precision {
+			t.Errorf("target %s: committed owned minimum precision %v is below the reviewed floor %v", target, floor.MinimumPrecision, want.Precision)
+		}
+		if floor.AllowUndefinedPrecision {
+			t.Errorf("target %s: owned policy must not allow undefined precision", target)
+		}
+		if floor.MaximumFalseNegatives == nil || *floor.MaximumFalseNegatives > want.MaxFalseNegatives {
+			t.Errorf("target %s: committed owned maximum false negatives %v exceeds the reviewed ceiling %d", target, floor.MaximumFalseNegatives, want.MaxFalseNegatives)
+		}
+		if floor.MaximumFalsePositives == nil || *floor.MaximumFalsePositives > want.MaxFalsePositives {
+			t.Errorf("target %s: committed owned maximum false positives %v exceeds the reviewed ceiling %d", target, floor.MaximumFalsePositives, want.MaxFalsePositives)
+		}
+	}
+	for target := range committedOwnedAccuracyFloor {
+		if !seen[target] {
+			t.Errorf("reviewed owned threshold policy names target %q, which the committed ratchet carries no owned accuracy floor for; remove the stale entry or restore the floor", target)
+		}
+	}
+}
+
 // TestCommittedRatchetHasOneFloorForEveryCatalogEngineTarget checks the committed policy structure only.
 // Ratchet floors are release policy, not runtime measurements; measured recall parity is enforced on run metrics
 // during the trusted cycle.

@@ -418,3 +418,91 @@ func TestElixirHexRenameResolves(t *testing.T) {
 		t.Fatalf("range = %q, want ~> 2.2.4", r)
 	}
 }
+
+// --- repeated-target and self-target collapse ---
+//
+// Every edge-emitting parser guards its target list with a per-source `seen` set (julia.go:106-115,
+// elixir.go:107-116, renv.go:81-89), so a source that names the same dependency twice -- or names itself --
+// must yield ONE edge, not a duplicate. The cost of losing the collapse is a duplicated entry in the emitted
+// and serialized dependency list, plus a self-edge that makes a package its own dependent; the graph queries
+// themselves are dedupe-safe (both sbom.IntroducedBy and sbom.PathToRoot walk behind a `visited` set), so this
+// pins the edge list rather than protecting those callers. The #1036 fixtures above never repeat a target, so
+// these cover that class.
+
+func TestJuliaRepeatedAndSelfTargetCollapse(t *testing.T) {
+	fixture := `[[App]]
+deps = ["Lib", "Lib", "App"]
+version = "1.0.0"
+
+[[Lib]]
+version = "2.3.1"
+`
+	_, deps, err := Julia{}.Parse(context.Background(), ParseInput{Path: "/p/Manifest.toml", Content: []byte(fixture)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	on := edgeMap(deps)["pkg:julia/App@1.0.0"]
+	if len(on) != 1 || on[0] != "pkg:julia/Lib@2.3.1" {
+		t.Fatalf("App edges = %v, want exactly one Lib edge (repeat collapsed, self-edge dropped)", on)
+	}
+}
+
+func TestElixirRepeatedAndSelfTargetCollapse(t *testing.T) {
+	fixture := `%{
+  "app": {:hex, :app, "1.0.0", "aaa", [:mix], [{:lib, "~> 2.0", [hex: :lib]}, {:lib, "~> 3.0", [hex: :lib]}, {:app, "~> 1.0", [hex: :app]}], "hexpm", "h1"},
+  "lib": {:hex, :lib, "2.3.1", "bbb", [:mix], [], "hexpm", "h2"},
+}`
+	_, deps, err := Elixir{}.Parse(context.Background(), ParseInput{Path: "/p/mix.lock", Content: []byte(fixture)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	on := edgeMap(deps)["pkg:hex/app@1.0.0"]
+	if len(on) != 1 || on[0] != "pkg:hex/lib@2.3.1" {
+		t.Fatalf("app edges = %v, want exactly one lib edge (repeat collapsed, self-edge dropped)", on)
+	}
+	// The FIRST declared range wins, so a repeat cannot silently rewrite the recorded constraint.
+	if r := rangeOf(deps, "pkg:hex/app@1.0.0", "pkg:hex/lib@2.3.1"); r != "~> 2.0" {
+		t.Fatalf("app->lib range = %q, want the first declared ~> 2.0", r)
+	}
+}
+
+func TestRenvRepeatedAndSelfTargetCollapse(t *testing.T) {
+	fixture := `{"Packages":{
+  "app":{"Package":"app","Version":"1.0.0","Requirements":["lib","lib","app"]},
+  "lib":{"Package":"lib","Version":"2.3.1","Requirements":[]}
+}}`
+	_, deps, err := Renv{}.Parse(context.Background(), ParseInput{Path: "/p/renv.lock", Content: []byte(fixture)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	on := edgeMap(deps)["pkg:cran/app@1.0.0"]
+	if len(on) != 1 || on[0] != "pkg:cran/lib@2.3.1" {
+		t.Fatalf("app edges = %v, want exactly one lib edge (repeat collapsed, self-edge dropped)", on)
+	}
+}
+
+// Julia and Dart had no malformed-input fixture. Neither parser can return a decode error for arbitrary
+// bytes — both are line scanners over key/value text, so unparseable input yields NO component rather than an
+// error. Pinning that keeps a future rewrite from turning a silent empty result into a panic, and records the
+// difference from the JSON-backed parsers (Composer/renv), which do error.
+
+func TestJuliaMalformedYieldsNoComponents(t *testing.T) {
+	comps, deps, err := Julia{}.Parse(context.Background(), ParseInput{Path: "/p/Manifest.toml", Content: []byte("[[Unclosed\nversion = \nnot toml at all")})
+	if err != nil {
+		t.Fatalf("a Julia line scanner must not error on unparseable text: %v", err)
+	}
+	if len(comps) != 0 || len(deps) != 0 {
+		t.Fatalf("malformed Manifest.toml must yield nothing, got %d comps %d edges", len(comps), len(deps))
+	}
+}
+
+func TestDartMalformedYieldsNoComponents(t *testing.T) {
+	dir := t.TempDir()
+	comps, deps, err := Dart{}.Parse(context.Background(), ParseInput{Dir: dir, Path: filepath.Join(dir, "pubspec.lock"), Content: []byte("packages:\n  broken\n    : : :\nnot yaml")})
+	if err != nil {
+		t.Fatalf("a Dart line scanner must not error on unparseable text: %v", err)
+	}
+	if len(comps) != 0 || len(deps) != 0 {
+		t.Fatalf("malformed pubspec.lock must yield nothing, got %d comps %d edges", len(comps), len(deps))
+	}
+}

@@ -1090,7 +1090,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "      --insecure-http   allow a plain-http --server that is not loopback (the token then travels in the clear)")
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled daemonlessly, in-process) instead of a local path")
-	fmt.Fprintln(os.Stderr, "      --offline  no network egress: skip live OSV, every registry resolver (npm/composer/poetry/bundler/maven/gradle), KEV/EPSS, online NVD, license metadata and AI triage; detect with Grype's offline DB only (air-gapped / fast)")
+	fmt.Fprintln(os.Stderr, "      --offline  no network egress: skip live OSV, every registry resolver (npm/composer/poetry/bundler/maven/gradle), KEV/EPSS, online NVD, license metadata and AI triage; detect with the local sources only – the owned advisory store, plus Grype's pre-synced DB when SYNAPSE_DETECTION_SOURCES lists it (air-gapped / fast)")
 	fmt.Fprintln(os.Stderr, "      --include-test  also fail the gate on findings in test/fixture/example paths (default: reported but exempt)")
 	fmt.Fprintln(os.Stderr, "      --verify-secrets  actively confirm each detected credential is live via one read-only provider call (opt-in; sends the secret to its issuing provider; default off)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli publish-source [path] --server URL --project KEY --analysis ID  # stream server-inventoried source; token from SYNAPSE_API_TOKEN")
@@ -1519,9 +1519,9 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	egress := newScanEgress(cfg, offline, os.LookupEnv)
 	// Detection sources are config-driven (SYNAPSE_DETECTION_SOURCES), resolved through the SAME helper
 	// the server uses so the posture is identical across binaries. The default is live OSV (when the egress
-	// policy allows it), Grype, and the owned advisory store; the owned store is the primary source and
-	// Grype stays in the default as a distro safety net. An operator can drop Grype
-	// (SYNAPSE_DETECTION_SOURCES=osv,advisory-store) for an Anchore-free CLI scan.
+	// policy allows it) plus the owned advisory store, which is the primary source; Grype is NOT in the
+	// default and joins only when an operator lists it explicitly
+	// (SYNAPSE_DETECTION_SOURCES=osv,grype,advisory-store) as a distro cross-check.
 	var osvSrc ports.DetectionSource
 	if egress.OSV {
 		prov.VulnDBSource = "osv.dev"
