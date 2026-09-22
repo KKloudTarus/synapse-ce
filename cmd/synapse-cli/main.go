@@ -2156,7 +2156,10 @@ func printReport(target string, res *scauc.ScanResult) {
 		} else if c.IgnoreUnfixed {
 			scope = " (unfixed vulns excluded)"
 		}
-		fmt.Printf("\n  compliance: %s v%s – %d/%d controls passing%s\n", c.Title, c.Version, c.Passed, c.Passed+c.Failed, scope)
+		// AppSec-baseline benchmark only (per-control PASS/FAIL over this scan's findings). This is NOT a
+		// framework certification or a full-framework assessment (interpretive frameworks are out of scope,
+		// docs/adr/0009); the count is over the baseline controls this scan evaluated.
+		fmt.Printf("\n  compliance: %s v%s – %d/%d baseline controls passing%s (AppSec baseline benchmark, not a framework certification)\n", c.Title, c.Version, c.Passed, c.Passed+c.Failed, scope)
 		for _, r := range c.Results {
 			status := "PASS"
 			if !r.Passed {
