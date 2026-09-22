@@ -13,6 +13,11 @@ const (
 	MaxRawPayloadBytes      = 4 << 20
 	MaxRawReferenceLen      = 1024
 	MaxMaterializationBatch = 1024
+	// MaxSourceSnapshotRecords caps the members present in one authoritative source view.
+	MaxSourceSnapshotRecords = 40 * 1024
+	// MaxSourceSnapshotChanges permits a complete replacement of every bounded member
+	// with its append-only source-local absence observation in one atomic publication.
+	MaxSourceSnapshotChanges = 2 * MaxSourceSnapshotRecords
 )
 
 // Status is the canonical lifecycle state of an advisory. Rejected and withdrawn
@@ -45,12 +50,19 @@ type Observation struct {
 	EPSSPercentile     *float64
 	PublicExploit      *bool
 	ActiveExploitation *bool
+	// AbsenceRetirement marks an active, empty observation synthesized after a complete
+	// source snapshot omits a formerly present record. It remains historical evidence,
+	// but is excluded from subsequent source-membership enumeration.
+	AbsenceRetirement bool
 	// SignatureVerified records that this observation's source document carried a valid provider OpenPGP
 	// signature that was verified before ingest (D1.8). It is persisted in the observation's normalized
 	// payload as the authenticity audit trail. omitempty: a provider without signature verification (most
 	// feeds) simply omits it. Because verification is fail-closed, an ingested observation is never marked
 	// with a failed verification; the field is set true only on a document that verified.
 	SignatureVerified bool `json:",omitempty"`
+	// OriginTrusted records the narrow code-owned HTTPS-origin trust decision for the exact SUSE SLES 15 SP6
+	// OVAL artifact. It is distinct from SignatureVerified: a true value never asserts OpenPGP verification.
+	OriginTrusted bool `json:"origin_trusted,omitempty"`
 }
 
 // ObservationRecord is the bounded persistence envelope for one provider record.
@@ -70,6 +82,28 @@ func ValidateBatch(records []ObservationRecord) error {
 	}
 	if len(records) > MaxMaterializationBatch {
 		return fmt.Errorf("advisory observation batch exceeds %d records", MaxMaterializationBatch)
+	}
+	return nil
+}
+
+// ValidateSourceSnapshot applies the separate bounded cardinality allowed for a
+// complete authoritative source view. Ordinary materialization remains restricted to
+// one connected identity batch.
+func ValidateSourceSnapshot(records []ObservationRecord) error {
+	if len(records) == 0 {
+		return fmt.Errorf("advisory source snapshot is empty")
+	}
+	if len(records) > MaxSourceSnapshotChanges {
+		return fmt.Errorf("advisory source snapshot exceeds %d changes", MaxSourceSnapshotChanges)
+	}
+	members := 0
+	for _, record := range records {
+		if !record.Observation.AbsenceRetirement {
+			members++
+		}
+	}
+	if members > MaxSourceSnapshotRecords {
+		return fmt.Errorf("advisory source snapshot exceeds %d records", MaxSourceSnapshotRecords)
 	}
 	return nil
 }

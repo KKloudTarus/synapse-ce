@@ -31,6 +31,15 @@ func TestParseProviderMetadata(t *testing.T) {
 	}
 }
 
+func TestParseProviderMetadataRejectsDirectoryArchiveOnlyProvider(t *testing.T) {
+	// Red Hat's provider metadata advertises a directory/archive distribution rather than a ROLIE feed. It must
+	// not be treated as a complete authoritative snapshot until that distribution shape has an explicit adapter.
+	document := []byte(`{"distributions":[{"directory_url":"https://www.redhat.com/security/data/csaf/v2/advisories/"}]}`)
+	if _, _, err := ParseProviderMetadata(document); err == nil {
+		t.Fatal("directory/archive-only provider metadata was accepted as ROLIE discovery")
+	}
+}
+
 func TestParseROLIEFeed(t *testing.T) {
 	doc := `{"feed":{"entry":[
 		{"content":{"type":"application/json","src":"https://p.example/a/adv-1.json"}},
@@ -61,5 +70,17 @@ func TestParseROLIEFeedRejectsEntryWithoutURL(t *testing.T) {
 	// An empty feed (no entries) is not an error here; the caller treats zero documents as the error.
 	if urls, err := ParseROLIEFeed([]byte(`{"feed":{"entry":[]}}`)); err != nil || len(urls) != 0 {
 		t.Fatalf("empty feed: urls=%v err=%v", urls, err)
+	}
+}
+
+func TestParseCompleteROLIEFeedRejectsPagination(t *testing.T) {
+	paged := []byte(`{"feed":{"link":[{"rel":"next","href":"https://p.example/feed?page=2"}],"entry":[{"content":{"src":"https://p.example/adv-1.json"}}]}}`)
+
+	// Streaming discovery retains its current one-page behavior.
+	if urls, err := ParseROLIEFeed(paged); err != nil || len(urls) != 1 {
+		t.Fatalf("streaming ROLIE parse changed: urls=%v err=%v", urls, err)
+	}
+	if _, err := ParseCompleteROLIEFeed(paged); err == nil {
+		t.Fatal("paginated ROLIE feed was accepted as a complete snapshot")
 	}
 }

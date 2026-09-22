@@ -2,45 +2,80 @@
 <oval_definitions xmlns:red-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
   <definitions>
     <definition id="oval:org.opensuse.security:def:202612345" version="1" class="vulnerability">
- <metadata>
- <title>CVE-2026-12345</title>
-    <affected family="unix">
-            <platform>SUSE Linux Enterprise Server 15 SP6</platform>
-            <platform>SUSE Linux Enterprise Module for Basesystem 15 SP6</platform>
-    </affected>
-    <reference ref_id="Mitre CVE-2026-12345" ref_url="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-12345" source="CVE"/>
-    <description>
-    A flaw in libopenssl affecting SUSE Linux Enterprise Server 15 SP6.
-    </description>
-<advisory from="security@suse.de">
-	<severity>Important</severity>
-	<affected_cpe_list>
-		<cpe>cpe:/o:suse:sle:15:sp6</cpe>
-	</affected_cpe_list>
-</advisory>
- </metadata>
-		<criteria operator="AND">
-			<criterion test_ref="oval:org.opensuse.security:tst:2009856174" comment="SUSE Linux Enterprise Server 15 SP6 is installed"/>
-				<criteria operator="AND">
-	<criterion test_ref="oval:org.opensuse.security:tst:2010099999" comment="libopenssl1_1-1.1.1w-150600.3.10 is installed"/>
-</criteria>
-		</criteria>
-</definition>
+      <metadata>
+        <title>CVE-2026-12345</title>
+        <affected family="unix">
+          <platform>SUSE Linux Enterprise Desktop 15 SP6</platform>
+          <platform>SUSE Linux Enterprise Module for Basesystem 15 SP6</platform>
+          <platform>SUSE Linux Enterprise Server 15 SP6</platform>
+          <platform>SUSE Linux Enterprise Server for SAP Applications 15 SP6</platform>
+        </affected>
+        <reference ref_id="Mitre CVE-2026-12345" ref_url="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-12345" source="CVE"/>
+        <description>A flaw in libopenssl affecting SUSE Linux Enterprise Server 15 SP6.</description>
+        <advisory from="security@suse.de">
+          <severity>Important</severity>
+          <affected_cpe_list><cpe>cpe:/o:suse:sle:15:sp6</cpe></affected_cpe_list>
+        </advisory>
+      </metadata>
+      <criteria operator="AND">
+        <criteria operator="OR">
+          <criterion test_ref="oval:org.opensuse.security:tst:2009856171" comment="SUSE Linux Enterprise Desktop 15 SP6 is installed"/>
+          <criterion test_ref="oval:org.opensuse.security:tst:2009856173" comment="SUSE Linux Enterprise Module for Basesystem 15 SP6 is installed"/>
+          <criterion test_ref="oval:org.opensuse.security:tst:2009856174" comment="SUSE Linux Enterprise Server 15 SP6 is installed"/>
+          <criterion test_ref="oval:org.opensuse.security:tst:2009856175" comment="SUSE Linux Enterprise Server for SAP Applications 15 SP6 is installed"/>
+        </criteria>
+        <criteria operator="AND">
+          <criterion test_ref="oval:org.opensuse.security:tst:2010099999" comment="libopenssl1_1-1.1.1w-150600.3.10 is installed"/>
+        </criteria>
+      </criteria>
+    </definition>
   </definitions>
   <tests>
-    <rpminfo_test id="oval:org.opensuse.security:tst:2010099999" version="1" comment="libopenssl1_1 is &lt;1.1.1w-150600.3.10" check="at least one" xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
-		<object object_ref="oval:org.opensuse.security:obj:2009099999"/>
-		<state state_ref="oval:org.opensuse.security:ste:2009299999"/>
-	</rpminfo_test>
+    <red-def:rpminfo_test id="oval:org.opensuse.security:tst:2009856171" version="1" comment="sled-release is ==15.6" check="at least one">
+      <red-def:object object_ref="oval:org.opensuse.security:obj:2009031917"/>
+      <red-def:state state_ref="oval:org.opensuse.security:ste:2009202136"/>
+    </red-def:rpminfo_test>
+    <red-def:rpminfo_test id="oval:org.opensuse.security:tst:2009856173" version="1" comment="sle-module-basesystem-release is ==15.6" check="at least one">
+      <red-def:object object_ref="oval:org.opensuse.security:obj:2009042619"/>
+      <red-def:state state_ref="oval:org.opensuse.security:ste:2009202136"/>
+    </red-def:rpminfo_test>
+    <red-def:rpminfo_test id="oval:org.opensuse.security:tst:2009856174" version="1" comment="sles-release is ==15.6" check="at least one">
+      <red-def:object object_ref="oval:org.opensuse.security:obj:2009030884"/>
+      <red-def:state state_ref="oval:org.opensuse.security:ste:2009202136"/>
+    </red-def:rpminfo_test>
+    <red-def:rpminfo_test id="oval:org.opensuse.security:tst:2009856175" version="1" comment="SLES_SAP-release is ==15.6" check="at least one">
+      <red-def:object object_ref="oval:org.opensuse.security:obj:2009047546"/>
+      <red-def:state state_ref="oval:org.opensuse.security:ste:2009202136"/>
+    </red-def:rpminfo_test>
+    <red-def:rpminfo_test id="oval:org.opensuse.security:tst:2010099999" version="1" comment="libopenssl1_1 is &lt;1.1.1w-150600.3.10" check="at least one">
+      <red-def:object object_ref="oval:org.opensuse.security:obj:2009099999"/>
+      <red-def:state state_ref="oval:org.opensuse.security:ste:2009299999"/>
+    </red-def:rpminfo_test>
   </tests>
   <objects>
-    <rpminfo_object id="oval:org.opensuse.security:obj:2009099999" version="1" xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
-		<name>libopenssl1_1</name>
-	</rpminfo_object>
+    <red-def:rpminfo_object id="oval:org.opensuse.security:obj:2009031917" version="1">
+      <red-def:name>sled-release</red-def:name>
+    </red-def:rpminfo_object>
+    <red-def:rpminfo_object id="oval:org.opensuse.security:obj:2009042619" version="1">
+      <red-def:name>sle-module-basesystem-release</red-def:name>
+    </red-def:rpminfo_object>
+    <red-def:rpminfo_object id="oval:org.opensuse.security:obj:2009030884" version="1">
+      <red-def:name>sles-release</red-def:name>
+    </red-def:rpminfo_object>
+    <red-def:rpminfo_object id="oval:org.opensuse.security:obj:2009047546" version="1">
+      <red-def:name>SLES_SAP-release</red-def:name>
+    </red-def:rpminfo_object>
+    <red-def:rpminfo_object id="oval:org.opensuse.security:obj:2009099999" version="1">
+      <red-def:name>libopenssl1_1</red-def:name>
+    </red-def:rpminfo_object>
   </objects>
   <states>
-    <rpminfo_state id="oval:org.opensuse.security:ste:2009299999" version="1" xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
-   <evr datatype="evr_string" operation="less than">0:1.1.1w-150600.3.10</evr>
-  </rpminfo_state>
+    <red-def:rpminfo_state id="oval:org.opensuse.security:ste:2009202136" version="1">
+      <red-def:version operation="equals">15.6</red-def:version>
+    </red-def:rpminfo_state>
+    <red-def:rpminfo_state id="oval:org.opensuse.security:ste:2009299999" version="1">
+      <red-def:arch datatype="string" operation="pattern match">(aarch64|ppc64le|s390x|x86_64)</red-def:arch>
+      <red-def:evr datatype="evr_string" operation="less than">0:1.1.1w-150600.3.10</red-def:evr>
+    </red-def:rpminfo_state>
   </states>
 </oval_definitions>

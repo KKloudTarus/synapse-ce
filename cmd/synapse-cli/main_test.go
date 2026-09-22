@@ -330,3 +330,16 @@ func TestRunGateStripsGoModulePathForNewCodeCoverage(t *testing.T) {
 		t.Fatalf("with an unmatched module path the import-path keys must not match the diff, got %v", err)
 	}
 }
+
+func TestSyncAdvisoriesRejectsUnsignedLocalOVALBeforeDatabase(t *testing.T) {
+	t.Setenv("SYNAPSE_DB_DSN", "")
+
+	if err := syncAdvisories([]string{"--oval"}); err == nil || err.Error() != "usage: synapse-cli sync-advisories --oval <dir>" {
+		t.Fatalf("missing path error = %v", err)
+	}
+	err := syncAdvisories([]string{"--oval", t.TempDir()})
+	const want = "unsigned local OVAL cannot be imported into durable advisory storage; configure an API-managed OVAL source with a pinned OpenPGP key, trusted provider metadata, or the exact SUSE HTTPS-origin option"
+	if err == nil || err.Error() != want {
+		t.Fatalf("syncAdvisories error = %v, want %q", err, want)
+	}
+}

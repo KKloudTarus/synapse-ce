@@ -1,13 +1,17 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityintel"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
 )
 
 func TestAdvisoryRevisionSyncRunProvenanceIsTenantScoped(t *testing.T) {
@@ -74,6 +78,113 @@ func TestAdvisoryMaterializerIsIdempotentAndKeepsHistory(t *testing.T) {
 	back, err := store.Materialize(ctx, []advisory.ObservationRecord{record})
 	if err != nil || !back.CreatedRevision || back.Revision != 3 {
 		t.Fatalf("reverted materialization=%+v err=%v", back, err)
+	}
+}
+
+func TestAdvisoryMaterializerReplacesSLESOpenRangeAcrossVendorLifecycle(t *testing.T) {
+	fixture, err := os.ReadFile(filepath.Join("..", "..", "tools", "ownadvisory", "testdata", "oval-sle15sp6-affected.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture = bytes.ReplaceAll(fixture, []byte("\r\n"), []byte("\n"))
+	parseOne := func(t *testing.T, doc []byte) advisory.Advisory {
+		t.Helper()
+		advs, err := ownadvisory.ParseOVAL(doc)
+		if err != nil {
+			t.Fatalf("ParseOVAL: %v", err)
+		}
+		if len(advs) != 1 || advs[0].ID != "CVE-2026-53910" {
+			t.Fatalf("want one current CVE-2026-53910 observation, got %+v", advs)
+		}
+		return advs[0]
+	}
+	materialize := func(t *testing.T, store *AdvisoryMaterializer, adv advisory.Advisory) advisory.MaterializationResult {
+		t.Helper()
+		result, err := store.Materialize(context.Background(), []advisory.ObservationRecord{{Observation: advisory.Observation{
+			SourceType: "oval", SourceID: "suse-sles-15-sp6", RecordID: adv.ID, Status: advisory.StatusActive, Advisory: adv,
+		}}})
+		if err != nil {
+			t.Fatalf("Materialize: %v", err)
+		}
+		return result
+	}
+
+	store := NewAdvisoryMaterializer()
+	open := parseOne(t, fixture)
+	first := materialize(t, store, open)
+	if !first.CreatedRevision || first.Revision != 1 {
+		t.Fatalf("open materialization = %+v", first)
+	}
+	canonical, err := store.GetCanonical(context.Background(), "CVE-2026-53910")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := canonical.Advisory.Match("SUSE:15.6", "diffutils", "3.6-4.3.1", ""); !ok {
+		t.Fatal("open vendor state must match the installed package")
+	}
+
+	packageRemovedXML := bytes.Replace(fixture,
+		[]byte("          <criterion test_ref=\"oval:org.opensuse.security:tst:diffutils-affected\" comment=\"diffutils is affected\"/>\n"),
+		nil,
+		1,
+	)
+	packageRemoved := parseOne(t, packageRemovedXML)
+	removed := materialize(t, store, packageRemoved)
+	if !removed.CreatedRevision || removed.Revision != 2 {
+		t.Fatalf("package-removed materialization = %+v", removed)
+	}
+	canonical, err = store.GetCanonical(context.Background(), "CVE-2026-53910")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := canonical.Advisory.Match("SUSE:15.6", "diffutils", "3.6-4.3.1", ""); ok {
+		t.Fatal("a package removed from the current CVE projection must not retain stale applicability")
+	}
+	if ok, _ := canonical.Advisory.Match("SUSE:15.6", "diffutils-lang", "3.6-4.3.1", ""); !ok {
+		t.Fatal("the remaining current package branch must stay affected")
+	}
+
+	fixedXML := bytes.ReplaceAll(fixture,
+		[]byte(`<linux:evr datatype="evr_string" operation="greater than">0:0-0</linux:evr>`),
+		[]byte(`<linux:evr datatype="evr_string" operation="less than">0:3.6-4.3.2</linux:evr>`),
+	)
+	fixedXML = bytes.ReplaceAll(fixedXML, []byte(`comment="diffutils is affected"`), []byte(`comment="diffutils-3.6-4.3.2 is installed"`))
+	fixedXML = bytes.ReplaceAll(fixedXML, []byte(`comment="diffutils-lang is affected"`), []byte(`comment="diffutils-lang-3.6-4.3.2 is installed"`))
+	fixedXML = bytes.ReplaceAll(fixedXML, []byte(`comment="diffutils is >0"`), []byte(`comment="diffutils is &lt;0:3.6-4.3.2"`))
+	fixedXML = bytes.ReplaceAll(fixedXML, []byte(`comment="diffutils-lang is >0"`), []byte(`comment="diffutils-lang is &lt;0:3.6-4.3.2"`))
+	fixed := parseOne(t, fixedXML)
+	second := materialize(t, store, fixed)
+	if !second.CreatedRevision || second.Revision != 3 {
+		t.Fatalf("fixed materialization = %+v", second)
+	}
+	canonical, err = store.GetCanonical(context.Background(), "CVE-2026-53910")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := canonical.Advisory.Match("SUSE:15.6", "diffutils", "3.6-4.3.2", ""); ok {
+		t.Fatal("a package at the vendor fixed boundary must not retain stale open applicability")
+	}
+
+	notAffectedXML := bytes.ReplaceAll(fixture,
+		[]byte(`<linux:evr datatype="evr_string" operation="greater than">0:0-0</linux:evr>`),
+		[]byte(`<linux:version datatype="version" operation="equals">0</linux:version>`),
+	)
+	notAffectedXML = bytes.ReplaceAll(notAffectedXML, []byte(" is affected"), []byte(" is not affected"))
+	notAffectedXML = bytes.ReplaceAll(notAffectedXML, []byte(" is >0"), []byte(" is ==0"))
+	notAffected := parseOne(t, notAffectedXML)
+	if len(notAffected.Affected) != 0 {
+		t.Fatalf("vendor not-affected observation must be empty, got %+v", notAffected.Affected)
+	}
+	third := materialize(t, store, notAffected)
+	if !third.CreatedRevision || third.Revision != 4 {
+		t.Fatalf("not-affected materialization = %+v", third)
+	}
+	canonical, err = store.GetCanonical(context.Background(), "CVE-2026-53910")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := canonical.Advisory.Match("SUSE:15.6", "diffutils", "3.6-4.3.1", ""); ok {
+		t.Fatal("authoritative not-affected replacement must remove stale applicability")
 	}
 }
 

@@ -77,13 +77,13 @@ func TestParseUpdateInfoMatchesViaDomainMatcher(t *testing.T) {
 	if kernel.ID == "" {
 		t.Fatal("kernel advisory not parsed")
 	}
-	if ok, _ := kernel.Match("Amazon Linux:2", "kernel", "0:4.9.76-38.78.amzn2"); !ok {
+	if ok, _ := kernel.Match("Amazon Linux:2", "kernel", "0:4.9.76-38.78.amzn2", ""); !ok {
 		t.Error("an older kernel must match")
 	}
-	if ok, _ := kernel.Match("Amazon Linux:2", "kernel", "0:4.9.76-38.79.amzn2"); ok {
+	if ok, _ := kernel.Match("Amazon Linux:2", "kernel", "0:4.9.76-38.79.amzn2", ""); ok {
 		t.Error("kernel at the fixed version must not match")
 	}
-	if ok, _ := kernel.Match("Amazon Linux:2023", "kernel", "0:4.9.76-38.78.amzn2"); ok {
+	if ok, _ := kernel.Match("Amazon Linux:2023", "kernel", "0:4.9.76-38.78.amzn2", ""); ok {
 		t.Error("a different Amazon release must not match")
 	}
 }
@@ -190,7 +190,7 @@ func TestUpdateInfoMaxWithinLineage(t *testing.T) {
 		t.Errorf("want the max same-lineage fix 0:4.14.42-61.37.amzn2, got %q", advs[0].Affected[0].FixedVersion)
 	}
 	// a version BETWEEN the two fixes is still vulnerable and must match the max boundary
-	if ok, _ := advs[0].Match("Amazon Linux:2", "kernel", "0:4.14.40-1.amzn2"); !ok {
+	if ok, _ := advs[0].Match("Amazon Linux:2", "kernel", "0:4.14.40-1.amzn2", ""); !ok {
 		t.Error("a version below the max same-lineage fix must match")
 	}
 }
@@ -294,13 +294,13 @@ func TestParseFedoraUpdateInfo(t *testing.T) {
 			t.Errorf("%s must affect curl + libcurl, got %v", cve, names)
 		}
 		// end-to-end match through the rpm comparator on the Fedora .fc43 version format
-		if hit, _ := a.Match("Fedora:43", "curl", "8.10.0-1.fc43"); !hit {
+		if hit, _ := a.Match("Fedora:43", "curl", "8.10.0-1.fc43", ""); !hit {
 			t.Errorf("%s: an older curl must match", cve)
 		}
-		if hit, _ := a.Match("Fedora:43", "curl", "8.11.0-1.fc43"); hit {
+		if hit, _ := a.Match("Fedora:43", "curl", "8.11.0-1.fc43", ""); hit {
 			t.Errorf("%s: curl at the fixed version must not match", cve)
 		}
-		if hit, _ := a.Match("Fedora:42", "curl", "8.10.0-1.fc43"); hit {
+		if hit, _ := a.Match("Fedora:42", "curl", "8.10.0-1.fc43", ""); hit {
 			t.Errorf("%s: a different Fedora release must not match", cve)
 		}
 	}

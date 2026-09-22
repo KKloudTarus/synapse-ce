@@ -1,0 +1,131 @@
+{
+  "document": {
+    "title": "Red Hat CVE-2024-11053",
+    "tracking": {
+      "id": "CVE-2024-11053",
+      "version": "1",
+      "current_release_date": "2026-09-17T21:38:15+00:00"
+    }
+  },
+  "product_tree": {
+    "branches": [
+      {
+        "category": "vendor",
+        "name": "Red Hat",
+        "branches": [
+          {
+            "category": "product_name",
+            "name": "Red Hat Enterprise Linux 9.8",
+            "product": {
+              "product_id": "rhel-9.8",
+              "product_identification_helper": {
+                "cpe": "cpe:/a:redhat:enterprise_linux:9"
+              }
+            }
+          },
+          {
+            "category": "product_version",
+            "name": "curl source",
+            "product": {
+              "product_id": "curl.src",
+              "product_identification_helper": {
+                "purl": "pkg:rpm/redhat/curl?arch=src"
+              }
+            }
+          },
+          {
+            "category": "product_version",
+            "name": "curl-minimal",
+            "product": {
+              "product_id": "curl-minimal",
+              "product_identification_helper": {
+                "purl": "pkg:rpm/redhat/curl-minimal?upstream=curl"
+              }
+            }
+          },
+          {
+            "category": "product_version",
+            "name": "libcurl-minimal",
+            "product": {
+              "product_id": "libcurl-minimal",
+              "product_identification_helper": {
+                "purl": "pkg:rpm/redhat/libcurl-minimal?upstream=curl"
+              }
+            }
+          },
+          {
+            "category": "product_version",
+            "name": "libcurl-devel",
+            "product": {
+              "product_id": "libcurl-devel",
+              "product_identification_helper": {
+                "purl": "pkg:rpm/redhat/libcurl-devel?upstream=curl"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "category": "default_component_of",
+        "full_product_name": {
+          "product_id": "rhel-9.8:curl.src"
+        },
+        "product_reference": "curl.src",
+        "relates_to_product_reference": "rhel-9.8"
+      },
+      {
+        "category": "default_component_of",
+        "full_product_name": {
+          "product_id": "rhel-9.8:curl/curl-minimal"
+        },
+        "product_reference": "curl-minimal",
+        "relates_to_product_reference": "rhel-9.8"
+      },
+      {
+        "category": "default_component_of",
+        "full_product_name": {
+          "product_id": "rhel-9.8:curl/libcurl-minimal"
+        },
+        "product_reference": "libcurl-minimal",
+        "relates_to_product_reference": "rhel-9.8"
+      },
+      {
+        "category": "default_component_of",
+        "full_product_name": {
+          "product_id": "rhel-9.8:curl/libcurl-devel"
+        },
+        "product_reference": "libcurl-devel",
+        "relates_to_product_reference": "rhel-9.8"
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "cve": "CVE-2024-11053",
+      "title": "curl netrc password leak",
+      "product_status": {
+        "known_affected": [
+          "rhel-9.8:curl.src",
+          "rhel-9.8:curl/curl-minimal",
+          "rhel-9.8:curl/libcurl-minimal"
+        ],
+        "known_not_affected": [
+          "rhel-9.8:curl/libcurl-devel"
+        ]
+      },
+      "remediations": [
+        {
+          "category": "none_available",
+          "details": "Affected",
+          "product_ids": [
+            "rhel-9.8:curl.src",
+            "rhel-9.8:curl/curl-minimal",
+            "rhel-9.8:curl/libcurl-minimal"
+          ]
+        }
+      ]
+    }
+  ]
+}

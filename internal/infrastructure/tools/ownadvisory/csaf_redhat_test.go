@@ -2,6 +2,7 @@ package ownadvisory
 
 import (
 	"context"
+	"os"
 	"reflect"
 	"testing"
 
@@ -88,8 +89,8 @@ func TestParseCSAFRedHatRPM(t *testing.T) {
 		t.Fatalf("want 1 affected package, got %+v", a.Affected)
 	}
 	ap := a.Affected[0]
-	if ap.Ecosystem != "Red Hat:9" || ap.Package != "openssl" {
-		t.Fatalf("binding must resolve to Red Hat:9/openssl, got %s/%s", ap.Ecosystem, ap.Package)
+	if ap.Ecosystem != "Red Hat:9.2" || ap.Package != "openssl" {
+		t.Fatalf("binding must resolve to Red Hat:9.2/openssl, got %s/%s", ap.Ecosystem, ap.Package)
 	}
 	if ap.FixedVersion != "1:3.0.7-6.el9_2" {
 		t.Errorf("fixed EVR must carry the epoch qualifier, got %q", ap.FixedVersion)
@@ -106,7 +107,7 @@ func TestParseCSAFRedHatRPM(t *testing.T) {
 	}
 }
 
-// TestScanMatchesRedHatRPM is the end-to-end slice: the parsed RedHat advisory (keyed "Red Hat:9|openssl")
+// TestScanMatchesRedHatRPM is the end-to-end slice: the parsed RedHat advisory (keyed "Red Hat:9.2|openssl")
 // matches a vulnerable RHEL 9 openssl rpm, declines the patched build, and declines the wrong RHEL major —
 // all through the owned rpm comparator, no third-party engine.
 func TestScanMatchesRedHatRPM(t *testing.T) {
@@ -115,7 +116,7 @@ func TestScanMatchesRedHatRPM(t *testing.T) {
 		t.Fatalf("ParseCSAF: %v", err)
 	}
 	adv := advs[0]
-	store := memStore{byKey: map[string][]advisory.Advisory{"Red Hat:9|openssl": {adv}}}
+	store := memStore{byKey: map[string][]advisory.Advisory{"Red Hat:9.2|openssl": {adv}}}
 
 	doc := &sbom.SBOM{Components: []sbom.Component{
 		// vulnerable: el9_1 < el9_2 fix, same epoch (from the qualifier) → affected.
@@ -148,7 +149,7 @@ func TestScanRedHatEpochAsymmetryNoFalsePositive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseCSAF: %v", err)
 	}
-	store := memStore{byKey: map[string][]advisory.Advisory{"Red Hat:9|openssl": {advs[0]}}}
+	store := memStore{byKey: map[string][]advisory.Advisory{"Red Hat:9.2|openssl": {advs[0]}}}
 	// The component embeds the epoch in the version ("1:...") instead of the qualifier; canonicalization must
 	// still line it up with the feed's "1:3.0.7-6.el9_2" fix so this patched build is not a false positive.
 	doc := &sbom.SBOM{Components: []sbom.Component{
@@ -317,6 +318,15 @@ func TestParseCSAFRedHatKnownAffectedNoFix(t *testing.T) {
 	if !reflect.DeepEqual(ap.Versions, []string(nil)) {
 		t.Errorf("no exact versions expected, got %v", ap.Versions)
 	}
+	if ok, fixed := advs[0].Match("Red Hat:9", "webkitgtk", "0:2.0-1.el9", ""); !ok || fixed != "" {
+		t.Fatalf("the exact vendor known-affected EVR must match without a fabricated fix: ok=%v fixed=%q", ok, fixed)
+	}
+	if ok, _ := advs[0].Match("Red Hat:9", "webkitgtk", "0:2.0-2.el9", ""); ok {
+		t.Fatal("a higher unobserved EVR must not be swept into the bounded no-fix range")
+	}
+	if ok, _ := advs[0].Match("Red Hat:8", "webkitgtk", "0:2.0-1.el9", ""); ok {
+		t.Fatal("a different RHEL major must not match")
+	}
 }
 
 // TestParseCSAFRedHatKnownNotAffectedDropsGroup covers fix #3: when a (major, package) also appears in
@@ -371,5 +381,275 @@ func TestParseCSAFRedHatKnownNotAffectedDropsGroup(t *testing.T) {
 	}
 	if len(raws) != 0 {
 		t.Fatalf("not-affected arch must not be flagged, got %+v", raws)
+	}
+}
+
+func redHatBinaryLifecycleDocument(status string) string {
+	return `{
+      "product_tree": {
+        "branches": [
+          {"category": "vendor", "name": "Red Hat", "branches": [
+            {"category": "product_name", "name": "RHEL 9",
+             "product": {"product_id": "rhel9", "product_identification_helper": {"cpe": "cpe:/a:redhat:enterprise_linux:9"}}},
+            {"category": "product_version", "name": "curl-minimal",
+             "product": {"product_id": "curl-minimal-open", "product_identification_helper": {"purl": "pkg:rpm/redhat/curl-minimal?upstream=curl"}}},
+            {"category": "product_version", "name": "curl-minimal ambiguous",
+             "product": {"product_id": "curl-minimal-ambiguous", "product_identification_helper": {"purl": "pkg:rpm/redhat/curl-minimal"}}},
+            {"category": "product_version", "name": "curl-minimal fixed",
+             "product": {"product_id": "curl-minimal-fixed", "product_identification_helper": {"purl": "pkg:rpm/redhat/curl-minimal@7.76.1-31.el9_6.2?epoch=0&upstream=curl"}}},
+            {"category": "product_version", "name": "curl-minimal wrong major",
+             "product": {"product_id": "curl-minimal-wrong-major", "product_identification_helper": {"purl": "pkg:rpm/redhat/curl-minimal@8.0.0-1.el10?epoch=0&upstream=curl"}}},
+            {"category": "product_version", "name": "curl-minimal tagless",
+             "product": {"product_id": "curl-minimal-tagless", "product_identification_helper": {"purl": "pkg:rpm/redhat/curl-minimal@8.0.0-1.hum1?epoch=0&upstream=curl"}}},
+            {"category": "product_version", "name": "curl source",
+             "product": {"product_id": "curl-src-open", "product_identification_helper": {"purl": "pkg:rpm/redhat/curl?arch=src"}}},
+            {"category": "product_version", "name": "curl source version",
+             "product": {"product_id": "curl-src-fixed", "product_identification_helper": {"purl": "pkg:rpm/redhat/curl@7.76.1-31.el9_6.2?arch=src&epoch=0"}}}
+          ]}
+        ],
+        "relationships": [
+          {"category": "default_component_of", "full_product_name": {"product_id": "rhel9:curl-minimal-open"},
+           "product_reference": "curl-minimal-open", "relates_to_product_reference": "rhel9"},
+          {"category": "default_component_of", "full_product_name": {"product_id": "rhel9:curl-minimal-ambiguous"},
+           "product_reference": "curl-minimal-ambiguous", "relates_to_product_reference": "rhel9"},
+          {"category": "default_component_of", "full_product_name": {"product_id": "rhel9:curl-minimal-fixed"},
+           "product_reference": "curl-minimal-fixed", "relates_to_product_reference": "rhel9"},
+          {"category": "default_component_of", "full_product_name": {"product_id": "rhel9:curl-minimal-wrong-major"},
+           "product_reference": "curl-minimal-wrong-major", "relates_to_product_reference": "rhel9"},
+          {"category": "default_component_of", "full_product_name": {"product_id": "rhel9:curl-minimal-tagless"},
+           "product_reference": "curl-minimal-tagless", "relates_to_product_reference": "rhel9"},
+          {"category": "default_component_of", "full_product_name": {"product_id": "rhel9:curl-src-open"},
+           "product_reference": "curl-src-open", "relates_to_product_reference": "rhel9"},
+          {"category": "default_component_of", "full_product_name": {"product_id": "rhel9:curl-src-fixed"},
+           "product_reference": "curl-src-fixed", "relates_to_product_reference": "rhel9"}
+        ]
+      },
+      "vulnerabilities": [{"cve": "CVE-2024-0001", "product_status": ` + status + `}]
+    }`
+}
+
+func TestParseCSAFRedHatUnversionedBinaryKnownAffectedOpenRangeRequiresSnapshot(t *testing.T) {
+	document := []byte(redHatBinaryLifecycleDocument(
+		`{"known_affected": ["rhel9:curl-minimal-open"]}`,
+	))
+	ordinary, err := ParseCSAF(document)
+	if err != nil {
+		t.Fatalf("ParseCSAF: %v", err)
+	}
+	if len(ordinary) != 1 || len(ordinary[0].Affected) != 0 {
+		t.Fatalf("streaming CSAF must not emit an unbounded Red Hat RPM range: %+v", ordinary)
+	}
+
+	advs, err := ParseCSAFSnapshot([][]byte{document})
+	if err != nil {
+		t.Fatalf("ParseCSAFSnapshot: %v", err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 1 {
+		t.Fatalf("want one open binary snapshot binding, got %+v", advs)
+	}
+	ap := advs[0].Affected[0]
+	if ap.Ecosystem != "Red Hat:9" || ap.Package != "curl-minimal" || ap.FixedVersion != "" {
+		t.Fatalf("unexpected open binding: %+v", ap)
+	}
+	if len(ap.Ranges) != 1 || !reflect.DeepEqual(ap.Ranges[0].Events, []advisory.Event{{Introduced: "0"}}) {
+		t.Fatalf("unversioned known_affected binary must emit an open introduced-only range, got %+v", ap.Ranges)
+	}
+	for _, version := range []string{"0:7.76.1-31.el9_6.1", "0:99.0-1.el9"} {
+		if ok, fixed := advs[0].Match("Red Hat:9", "curl-minimal", version, ""); !ok || fixed != "" {
+			t.Fatalf("authoritative open range must match %s without a fabricated fix: ok=%v fixed=%q", version, ok, fixed)
+		}
+	}
+	if ok, _ := advs[0].Match("Red Hat:8", "curl-minimal", "0:7.76.1-31.el9_6.1", ""); ok {
+		t.Fatal("an open RHEL 9 range must not match another RHEL major")
+	}
+}
+
+func TestParseCSAFRedHatBinaryAwareUnfixedFixture(t *testing.T) {
+	// Minimized from the Red Hat binary-aware VEX archive's 2024/cve-2024-11053.json record
+	// (SHA-256 32b0742cfec3523bec52d69f875473fb6e428bb3a1f73f55b180f0a8a857f3c3).
+	data, err := os.ReadFile("testdata/csaf-redhat-rhel9-unfixed.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	advs, err := ParseCSAFSnapshot([][]byte{data})
+	if err != nil {
+		t.Fatalf("ParseCSAFSnapshot: %v", err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 2 {
+		t.Fatalf("want one advisory with two affected binary packages, got %+v", advs)
+	}
+	wantVersions := map[string]string{
+		"curl-minimal":    "0:7.76.1-40.el9_8.5",
+		"libcurl-minimal": "0:7.76.1-40.el9_8.5",
+	}
+	for _, ap := range advs[0].Affected {
+		version, ok := wantVersions[ap.Package]
+		if !ok {
+			t.Fatalf("source or not-affected product leaked into binary projection: %+v", ap)
+		}
+		if ap.Ecosystem != "Red Hat:9.8" || len(ap.Ranges) != 1 ||
+			!reflect.DeepEqual(ap.Ranges[0].Events, []advisory.Event{{Introduced: "0"}}) {
+			t.Fatalf("unexpected minor-scoped open binary binding: %+v", ap)
+		}
+		if matched, fixed := advs[0].Match(ap.Ecosystem, ap.Package, version, ""); !matched || fixed != "" {
+			t.Fatalf("pinned UBI 9.8 package must match %s: matched=%v fixed=%q", version, matched, fixed)
+		}
+		delete(wantVersions, ap.Package)
+	}
+	if len(wantVersions) != 0 {
+		t.Fatalf("missing expected binary bindings: %v", wantVersions)
+	}
+}
+
+func TestScanRedHatOpenRangePreservesMinorScope(t *testing.T) {
+	doc := `{
+      "product_tree": {
+        "branches": [
+          {"category": "vendor", "name": "Red Hat", "branches": [
+            {"category": "product_name", "name": "Red Hat Enterprise Linux 9.10",
+             "product": {"name": "Red Hat Enterprise Linux 9.10", "product_id": "rhel-9.10", "product_identification_helper": {"cpe": "cpe:/a:redhat:enterprise_linux:9"}}},
+            {"category": "product_version", "name": "glib2",
+             "product": {"name": "glib2", "product_id": "glib2", "product_identification_helper": {"purl": "pkg:rpm/redhat/glib2?upstream=glib2"}}}
+          ]}
+        ],
+        "relationships": [
+          {"category": "default_component_of", "full_product_name": {"product_id": "rhel-9.10:glib2"},
+           "product_reference": "glib2", "relates_to_product_reference": "rhel-9.10"}
+        ]
+      },
+      "vulnerabilities": [{"cve": "CVE-2026-0002", "product_status": {"known_affected": ["rhel-9.10:glib2"]}}]
+    }`
+	advs, err := ParseCSAFSnapshot([][]byte{[]byte(doc)})
+	if err != nil {
+		t.Fatalf("ParseCSAFSnapshot: %v", err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 1 || advs[0].Affected[0].Ecosystem != "Red Hat:9.10" {
+		t.Fatalf("RHEL 9.10 evidence must retain its minor scope, got %+v", advs)
+	}
+	store := memStore{byKey: map[string][]advisory.Advisory{
+		"Red Hat:9.10|glib2": advs,
+	}}
+	source := New(store)
+	for _, tc := range []struct {
+		name string
+		purl string
+		want int
+	}{
+		{name: "same minor", purl: "pkg:rpm/redhat/glib2@2.68.4-19.el9_10?arch=x86_64&distro=rhel-9.10", want: 1},
+		{name: "different minor", purl: "pkg:rpm/redhat/glib2@2.68.4-19.el9_8?arch=x86_64&distro=rhel-9.8", want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raws, err := source.Scan(context.Background(), &sbom.SBOM{Components: []sbom.Component{{
+				Name: "glib2", Version: "2.68.4-19.el9", PURL: tc.purl,
+			}}})
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if len(raws) != tc.want {
+				t.Fatalf("got %d findings, want %d: %+v", len(raws), tc.want, raws)
+			}
+		})
+	}
+}
+
+func TestRHELPlatformEcosystem(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		major       string
+		productID   string
+		productName string
+		want        string
+		ok          bool
+	}{
+		{name: "exact minor", major: "9", productID: "rhel-9.8", productName: "Red Hat Enterprise Linux 9.8", want: "Red Hat:9.8", ok: true},
+		{name: "z stream", major: "9", productID: "rhel-9.7.z", productName: "Red Hat Enterprise Linux 9.7 Extended Update Support", want: "Red Hat:9.7", ok: true},
+		{name: "generic id with exact name", major: "9", productID: "rhel-9", productName: "Red Hat Enterprise Linux 9.10", want: "Red Hat:9.10", ok: true},
+		{name: "explicit major", major: "9", productID: "rhel9", productName: "RHEL 9", want: "Red Hat:9", ok: true},
+		{name: "contradictory labels", major: "9", productID: "rhel-9.8", productName: "Red Hat Enterprise Linux 9.10", want: "Red Hat:9", ok: false},
+		{name: "unknown scope", major: "9", productID: "platform", productName: "Enterprise Linux", want: "Red Hat:9", ok: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := rhelPlatformEcosystem(tc.major, tc.productID, tc.productName)
+			if got != tc.want || ok != tc.ok {
+				t.Fatalf("rhelPlatformEcosystem(%q,%q,%q)=(%q,%v), want (%q,%v)", tc.major, tc.productID, tc.productName, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestParseCSAFRedHatRejectsNonBinaryOrInconsistentAffectedProducts(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		productID string
+	}{
+		{name: "unversioned source rpm", productID: "rhel9:curl-src-open"},
+		{name: "versioned source rpm", productID: "rhel9:curl-src-fixed"},
+		{name: "version contradicts platform major", productID: "rhel9:curl-minimal-wrong-major"},
+		{name: "version lacks a rhel major tag", productID: "rhel9:curl-minimal-tagless"},
+		{name: "unversioned identity lacks binary expansion proof", productID: "rhel9:curl-minimal-ambiguous"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := redHatBinaryLifecycleDocument(`{"known_affected": ["` + tc.productID + `"]}`)
+			advs, err := ParseCSAF([]byte(doc))
+			if err != nil {
+				t.Fatalf("ParseCSAF: %v", err)
+			}
+			if len(advs) != 1 || len(advs[0].Affected) != 0 {
+				t.Fatalf("unsupported product identity must not become a binary RPM range, got %+v", advs)
+			}
+		})
+	}
+}
+
+func TestParseCSAFRedHatFixedClosesUnversionedBinaryRange(t *testing.T) {
+	advs, err := ParseCSAF([]byte(redHatBinaryLifecycleDocument(
+		`{"known_affected": ["rhel9:curl-minimal-open"], "fixed": ["rhel9:curl-minimal-fixed"]}`,
+	)))
+	if err != nil {
+		t.Fatalf("ParseCSAF: %v", err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 1 {
+		t.Fatalf("want one fixed binary binding, got %+v", advs)
+	}
+	ap := advs[0].Affected[0]
+	if ap.FixedVersion != "0:7.76.1-31.el9_6.2" || len(ap.Ranges) != 1 ||
+		!reflect.DeepEqual(ap.Ranges[0].Events, []advisory.Event{{Introduced: "0"}, {Fixed: ap.FixedVersion}}) {
+		t.Fatalf("fixed evidence must close the prior open range, got %+v", ap)
+	}
+	if ok, _ := advs[0].Match("Red Hat:9", "curl-minimal", ap.FixedVersion, ""); ok {
+		t.Fatal("the fixed package version must not remain affected")
+	}
+}
+
+func TestParseCSAFRedHatUnsupportedFixedStateSuppressesOpenRange(t *testing.T) {
+	for _, productID := range []string{
+		"rhel9:curl-minimal-open",
+		"rhel9:curl-minimal-wrong-major",
+		"rhel9:curl-minimal-tagless",
+	} {
+		t.Run(productID, func(t *testing.T) {
+			doc := redHatBinaryLifecycleDocument(
+				`{"known_affected": ["rhel9:curl-minimal-open"], "fixed": ["` + productID + `"]}`,
+			)
+			advs, err := ParseCSAF([]byte(doc))
+			if err != nil {
+				t.Fatalf("ParseCSAF: %v", err)
+			}
+			if len(advs) != 1 || len(advs[0].Affected) != 0 {
+				t.Fatalf("a fixed state without a sound boundary must suppress the open range, got %+v", advs)
+			}
+		})
+	}
+}
+
+func TestParseCSAFRedHatUnversionedKnownNotAffectedSuppressesOpenRange(t *testing.T) {
+	advs, err := ParseCSAF([]byte(redHatBinaryLifecycleDocument(
+		`{"known_affected": ["rhel9:curl-minimal-open"], "known_not_affected": ["rhel9:curl-minimal-open"]}`,
+	)))
+	if err != nil {
+		t.Fatalf("ParseCSAF: %v", err)
+	}
+	if len(advs) != 1 || len(advs[0].Affected) != 0 {
+		t.Fatalf("known_not_affected must remove only the scoped binary package binding, got %+v", advs)
 	}
 }

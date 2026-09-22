@@ -3,14 +3,13 @@ package scabench
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
-// parity.go is the #1037 market-leading flip guard. The owned-only default (ownsbom + ownadvisory, no
-// syft/grype) is justified only when the owned engine does not LOSE recall to any pinned comparator on the same
-// independent-oracle matrix. Meeting an absolute recall floor is necessary but NOT sufficient: if grype, trivy,
-// or osv-scanner out-recalls owned, shipping owned-only would silently lower detection, so the flip must stay
-// blocked. This is the relative gate the EPIC #1034 amendment requires, distinct from the absolute per-engine
-// floors the ratchet enforces.
+// The owned-only default is justified only when the owned engine does not lose recall to any pinned comparator on
+// the same independent-oracle matrix. Meeting an absolute recall floor is necessary but not sufficient: if Grype,
+// Trivy, or OSV-Scanner out-recalls Owned, shipping owned-only would silently lower detection, so the flip remains
+// blocked. This relative gate is distinct from the absolute per-engine floors the ratchet enforces.
 
 // RecallParity is the outcome of the owned-vs-comparators recall comparison on one result.
 type RecallParity struct {
@@ -56,4 +55,105 @@ func OwnedBeatsEachComparator(result Result) (ok bool, detail RecallParity, err 
 	}
 	sort.Strings(detail.Breaches)
 	return len(detail.Breaches) == 0, detail, nil
+}
+
+// ValidateMeasuredPerTargetRecallParity requires every expected target to have one measured cell for each
+// benchmark engine. A supported comparator may not out-recall the owned engine. An unsupported comparator is
+// excluded only when its run has a validated capability identity and the unsupported-only metric shape.
+func ValidateMeasuredPerTargetRecallParity(result Result, targetIDs []string) error {
+	targets := make(map[string]struct{}, len(targetIDs))
+	for _, targetID := range targetIDs {
+		if strings.TrimSpace(targetID) == "" {
+			return fmt.Errorf("scabench: measured recall parity target is required")
+		}
+		if _, exists := targets[targetID]; exists {
+			return fmt.Errorf("scabench: measured recall parity target %q is duplicated", targetID)
+		}
+		targets[targetID] = struct{}{}
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("scabench: measured recall parity requires at least one target")
+	}
+	if want := len(targets) * len(Engines()); len(result.RunMetrics) != want {
+		return fmt.Errorf("scabench: measured recall parity has %d run metrics, want %d", len(result.RunMetrics), want)
+	}
+
+	cells := make(map[observationKey]RunMetric, len(result.RunMetrics))
+	for index, metric := range result.RunMetrics {
+		if _, expected := targets[metric.Run.TargetID]; !expected {
+			return fmt.Errorf("scabench: measured recall parity run metric %d has unexpected target %q", index, metric.Run.TargetID)
+		}
+		if !metric.Run.Engine.valid() || !metric.Run.State.valid() {
+			return fmt.Errorf("scabench: measured recall parity run metric %d has unsupported engine or state", index)
+		}
+		if metric.Metrics.Engine != metric.Run.Engine {
+			return fmt.Errorf("scabench: measured recall parity run metric %d engine does not match its run", index)
+		}
+		if err := validateEngineResult(metric.Metrics); err != nil {
+			return fmt.Errorf("scabench: measured recall parity run metric %d is malformed: %w", index, err)
+		}
+		if metric.Run.State == ObservationUnsupported {
+			if err := validateRequiredCapabilityIdentity(metric.Run.CapabilityKind, metric.Run.CapabilityDigest); err != nil {
+				return fmt.Errorf("scabench: measured recall parity unsupported run metric %d capability: %w", index, err)
+			}
+			capabilityEngine, _ := capabilityKindEngine(metric.Run.CapabilityKind)
+			if metric.Run.Engine != capabilityEngine {
+				return fmt.Errorf("scabench: measured recall parity unsupported run metric %d capability does not apply to engine %q", index, metric.Run.Engine)
+			}
+		} else if metric.Run.CapabilityKind != "" || metric.Run.CapabilityDigest != "" {
+			return fmt.Errorf("scabench: measured recall parity supported run metric %d carries a capability identity", index)
+		}
+		key := observationKey{Engine: metric.Run.Engine, TargetID: metric.Run.TargetID}
+		if _, exists := cells[key]; exists {
+			return fmt.Errorf("scabench: measured recall parity cell for engine %q target %q is duplicated", key.Engine, key.TargetID)
+		}
+		cells[key] = metric
+	}
+
+	for _, targetID := range targetIDs {
+		owned, err := measuredRecallCell(cells, targetID, EngineOwned)
+		if err != nil {
+			return err
+		}
+		for _, engine := range Engines() {
+			if engine == EngineOwned {
+				continue
+			}
+			comparator, err := measuredRecallCell(cells, targetID, engine)
+			if err != nil {
+				return err
+			}
+			switch comparator.Run.State {
+			case ObservationUnsupported:
+				if !comparator.Metrics.MetricsComplete || !hasUnsupportedOnlyMetricShape(comparator.Metrics) {
+					return fmt.Errorf("scabench: measured recall parity comparator %q target %q has malformed unsupported metrics", engine, targetID)
+				}
+				continue
+			case ObservationComplete:
+				if !comparator.Metrics.MetricsComplete || comparator.Metrics.Recall == nil {
+					return fmt.Errorf("scabench: measured recall parity comparator %q target %q has incomplete recall", engine, targetID)
+				}
+			default:
+				return fmt.Errorf("scabench: measured recall parity comparator %q target %q is %q rather than complete or unsupported", engine, targetID, comparator.Run.State)
+			}
+			if *comparator.Metrics.Recall > *owned.Metrics.Recall {
+				return fmt.Errorf("scabench: measured recall parity comparator %q target %q recall %.4f exceeds owned recall %.4f", engine, targetID, *comparator.Metrics.Recall, *owned.Metrics.Recall)
+			}
+		}
+	}
+	return nil
+}
+
+func measuredRecallCell(cells map[observationKey]RunMetric, targetID string, engine Engine) (RunMetric, error) {
+	metric, exists := cells[observationKey{Engine: engine, TargetID: targetID}]
+	if !exists {
+		return RunMetric{}, fmt.Errorf("scabench: measured recall parity cell for engine %q target %q is missing", engine, targetID)
+	}
+	if engine != EngineOwned {
+		return metric, nil
+	}
+	if metric.Run.State != ObservationComplete || !metric.Metrics.MetricsComplete || metric.Metrics.Recall == nil {
+		return RunMetric{}, fmt.Errorf("scabench: measured recall parity owned target %q has incomplete recall", targetID)
+	}
+	return metric, nil
 }

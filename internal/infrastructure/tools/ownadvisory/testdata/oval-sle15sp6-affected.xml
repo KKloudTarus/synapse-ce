@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Minimized from SUSE's complete SLES 15 SP6 affected definition for CVE-2026-53910.
+  Source: https://ftp.suse.com/pub/projects/security/oval/suse.linux.enterprise.15-sp6-affected.xml.gz
+  Inspected live artifact SHA-256: 1c13f8779ddf1726ba6edcedc6e0fb14e92268cc6b1dd0e673d6debcfad27774
+  The production feed is regenerated daily; this fixture preserves the authoritative criteria/test/object/state shape.
+-->
+<oval_definitions xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+  <definitions>
+    <definition id="oval:org.opensuse.security:def:202653910" version="1" class="vulnerability">
+      <metadata>
+        <title>CVE-2026-53910</title>
+        <affected family="unix">
+          <platform>SUSE Linux Enterprise Server 15 SP6</platform>
+          <platform>SUSE Linux Enterprise Server 15 SP6-LTSS</platform>
+          <platform>SUSE Linux Enterprise Server for SAP Applications 15 SP6</platform>
+        </affected>
+        <reference ref_id="Mitre CVE-2026-53910" source="CVE"/>
+        <reference ref_id="SUSE CVE-2026-53910" source="SUSE"/>
+        <advisory from="security@suse.de">
+          <severity>Moderate</severity>
+          <affected_cpe_list>
+            <cpe>cpe:/o:suse:sles:15:sp6</cpe>
+          </affected_cpe_list>
+        </advisory>
+      </metadata>
+      <criteria operator="AND">
+        <criteria operator="OR">
+          <criterion test_ref="oval:org.opensuse.security:tst:sles-release-15-6" comment="SUSE Linux Enterprise Server 15 SP6 is installed"/>
+          <criterion test_ref="oval:org.opensuse.security:tst:sles-ltss-release-15-6" comment="SUSE Linux Enterprise Server 15 SP6-LTSS is installed"/>
+          <criterion test_ref="oval:org.opensuse.security:tst:sles-sap-release-15-6" comment="SUSE Linux Enterprise Server for SAP Applications 15 SP6 is installed"/>
+        </criteria>
+        <criteria operator="OR">
+          <criterion test_ref="oval:org.opensuse.security:tst:diffutils-affected" comment="diffutils is affected"/>
+          <criterion test_ref="oval:org.opensuse.security:tst:diffutils-lang-affected" comment="diffutils-lang is affected"/>
+        </criteria>
+      </criteria>
+    </definition>
+  </definitions>
+  <tests>
+    <linux:rpminfo_test id="oval:org.opensuse.security:tst:sles-release-15-6" version="1" comment="sles-release is ==15.6" check="at least one">
+      <linux:object object_ref="oval:org.opensuse.security:obj:sles-release"/>
+      <linux:state state_ref="oval:org.opensuse.security:ste:version-15-6"/>
+    </linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:org.opensuse.security:tst:sles-ltss-release-15-6" version="1" comment="sles-ltss-release is ==15.6" check="at least one">
+      <linux:object object_ref="oval:org.opensuse.security:obj:sles-ltss-release"/>
+      <linux:state state_ref="oval:org.opensuse.security:ste:version-15-6"/>
+    </linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:org.opensuse.security:tst:sles-sap-release-15-6" version="1" comment="SLES_SAP-release is ==15.6" check="at least one">
+      <linux:object object_ref="oval:org.opensuse.security:obj:sles-sap-release"/>
+      <linux:state state_ref="oval:org.opensuse.security:ste:version-15-6"/>
+    </linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:org.opensuse.security:tst:diffutils-affected" version="1" comment="diffutils is >0" check="at least one">
+      <linux:object object_ref="oval:org.opensuse.security:obj:diffutils"/>
+      <linux:state state_ref="oval:org.opensuse.security:ste:affected-zero-sentinel"/>
+    </linux:rpminfo_test>
+    <linux:rpminfo_test id="oval:org.opensuse.security:tst:diffutils-lang-affected" version="1" comment="diffutils-lang is >0" check="at least one">
+      <linux:object object_ref="oval:org.opensuse.security:obj:diffutils-lang"/>
+      <linux:state state_ref="oval:org.opensuse.security:ste:affected-zero-sentinel"/>
+    </linux:rpminfo_test>
+  </tests>
+  <objects>
+    <linux:rpminfo_object id="oval:org.opensuse.security:obj:sles-release" version="1">
+      <linux:name>sles-release</linux:name>
+    </linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:org.opensuse.security:obj:sles-ltss-release" version="1">
+      <linux:name>sles-ltss-release</linux:name>
+    </linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:org.opensuse.security:obj:sles-sap-release" version="1">
+      <linux:name>SLES_SAP-release</linux:name>
+    </linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:org.opensuse.security:obj:diffutils" version="1">
+      <linux:name>diffutils</linux:name>
+    </linux:rpminfo_object>
+    <linux:rpminfo_object id="oval:org.opensuse.security:obj:diffutils-lang" version="1">
+      <linux:name>diffutils-lang</linux:name>
+    </linux:rpminfo_object>
+  </objects>
+  <states>
+    <linux:rpminfo_state id="oval:org.opensuse.security:ste:version-15-6" version="1">
+      <linux:version operation="equals">15.6</linux:version>
+    </linux:rpminfo_state>
+    <linux:rpminfo_state id="oval:org.opensuse.security:ste:affected-zero-sentinel" version="1">
+      <linux:evr datatype="evr_string" operation="greater than">0:0-0</linux:evr>
+    </linux:rpminfo_state>
+  </states>
+</oval_definitions>

@@ -97,7 +97,7 @@ func TestMatchDetailsSeedsConfirmedCuratedSymbolsVersionScoped(t *testing.T) {
 	}
 
 	// A version inside the affected range: the confirmed symbol + its overload/alias seed; the candidate does not.
-	matched, _, syms := adv.MatchDetails("Maven", "org.example:lib", "1.0.0")
+	matched, _, syms := adv.MatchDetails("Maven", "org.example:lib", "1.0.0", "")
 	if !matched {
 		t.Fatal("1.0.0 must match the affected range")
 	}
@@ -115,7 +115,7 @@ func TestMatchDetailsSeedsConfirmedCuratedSymbolsVersionScoped(t *testing.T) {
 	}
 
 	// A version at/after the fix: the block does not match, so NO curated symbol seeds (version-scoped).
-	if matched, _, syms := adv.MatchDetails("Maven", "org.example:lib", "1.5.0"); matched || len(syms) != 0 {
+	if matched, _, syms := adv.MatchDetails("Maven", "org.example:lib", "1.5.0", ""); matched || len(syms) != 0 {
 		t.Errorf("a fixed version must not match or seed a curated symbol, got matched=%v syms=%v", matched, syms)
 	}
 }

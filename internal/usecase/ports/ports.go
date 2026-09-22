@@ -2008,6 +2008,47 @@ type AdvisoryMaterializer interface {
 	CurrentRevision(ctx context.Context, advisoryID string) (int64, error)
 }
 
+// SourceSnapshotPublication identifies a complete source snapshot and its provider checkpoint.
+// Publishers commit its receipt with the source observations, so a failed post-publication
+// reconciliation can resume without fetching the provider again.
+type SourceSnapshotPublication struct {
+	SyncRunID      shared.ID
+	NextCheckpoint []byte
+}
+
+// PublishedSourceSnapshot is the durable receipt and exact materialization results for a
+// completed source snapshot.
+type PublishedSourceSnapshot struct {
+	SourceID       shared.ID
+	AdapterType    string
+	NextCheckpoint []byte
+	Results        []advisory.MaterializationResult
+}
+
+// SourceSnapshotPublisher atomically persists a complete source snapshot and its durable receipt.
+type SourceSnapshotPublisher interface {
+	PublishSourceSnapshot(ctx context.Context, publication SourceSnapshotPublication, records []advisory.ObservationRecord) ([]advisory.MaterializationResult, error)
+}
+
+// PublishedSourceSnapshotReader loads a completed source snapshot before provider resolution.
+type PublishedSourceSnapshotReader interface {
+	PublishedSourceSnapshot(ctx context.Context, syncRunID shared.ID) (PublishedSourceSnapshot, bool, error)
+}
+
+// BoundedCurrentSourceRecordIDs lists source members while capping memory and work
+// before an authoritative snapshot creates absence replacements.
+type BoundedCurrentSourceRecordIDs interface {
+	CurrentSourceRecordIDsBounded(ctx context.Context, sourceID string, limit int, yield func(string) error) error
+}
+
+// AuthoritativeSourceSnapshotStore provides the complete lifecycle contract required
+// before an OVAL source may enter a full authoritative synchronization.
+type AuthoritativeSourceSnapshotStore interface {
+	SourceSnapshotPublisher
+	PublishedSourceSnapshotReader
+	BoundedCurrentSourceRecordIDs
+}
+
 // SyncRunStart describes one durable provider synchronization request. Runs are
 // global control-plane history; the durable job created with the run is tenant-scoped.
 type SyncRunStart struct {

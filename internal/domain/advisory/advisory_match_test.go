@@ -15,19 +15,19 @@ func TestAdvisoryMatch(t *testing.T) {
 		},
 	}
 	// affected within the range -> matched, with the block's fixed version
-	if ok, fixed := adv.Match("Go", "github.com/foo/bar", "1.1.0"); !ok || fixed != "1.2.0" {
+	if ok, fixed := adv.Match("Go", "github.com/foo/bar", "1.1.0", ""); !ok || fixed != "1.2.0" {
 		t.Errorf("want matched with fixed 1.2.0, got ok=%v fixed=%q", ok, fixed)
 	}
 	// at the fixed version -> not affected
-	if ok, _ := adv.Match("Go", "github.com/foo/bar", "1.2.0"); ok {
+	if ok, _ := adv.Match("Go", "github.com/foo/bar", "1.2.0", ""); ok {
 		t.Error("1.2.0 (== fixed) must not match")
 	}
 	// right package, WRONG ecosystem -> no match (no cross-ecosystem false hit)
-	if ok, _ := adv.Match("npm", "github.com/foo/bar", "1.1.0"); ok {
+	if ok, _ := adv.Match("npm", "github.com/foo/bar", "1.1.0", ""); ok {
 		t.Error("a different ecosystem must not match")
 	}
 	// wrong package -> no match
-	if ok, _ := adv.Match("Go", "github.com/other/pkg", "1.1.0"); ok {
+	if ok, _ := adv.Match("Go", "github.com/other/pkg", "1.1.0", ""); ok {
 		t.Error("a different package must not match")
 	}
 }
@@ -47,16 +47,16 @@ func TestCentOS7RHELApproximationMatch(t *testing.T) {
 		}},
 	}
 	// A CentOS 7 base package below the RHEL erratum fix (.el7.centos is older than .el7_9) is affected.
-	if ok, fixed := adv.Match("Red Hat:7", "openssl", "1.0.2k-16.el7.centos"); !ok || fixed != "1.0.2k-19.el7_9" {
+	if ok, fixed := adv.Match("Red Hat:7", "openssl", "1.0.2k-16.el7.centos", ""); !ok || fixed != "1.0.2k-19.el7_9" {
 		t.Errorf("below-fix CentOS 7 package must match with fixed 1.0.2k-19.el7_9; got ok=%v fixed=%q", ok, fixed)
 	}
 	// A CentOS 7 rebuild of the erratum (extra .centos segment, so NEWER than the RHEL fix) is not affected.
-	if ok, _ := adv.Match("Red Hat:7", "openssl", "1.0.2k-19.el7_9.centos"); ok {
+	if ok, _ := adv.Match("Red Hat:7", "openssl", "1.0.2k-19.el7_9.centos", ""); ok {
 		t.Error("a CentOS 7 rebuild at/after the RHEL erratum fix must not match")
 	}
 	// A package absent from the RHEL advisory (an EPEL-only name) produces no match, so EPEL packages on a
 	// CentOS 7 host are not falsely flagged (RHEL and EPEL keep disjoint namespaces).
-	if ok, _ := adv.Match("Red Hat:7", "htop", "3.0.5-1.el7"); ok {
+	if ok, _ := adv.Match("Red Hat:7", "htop", "3.0.5-1.el7", ""); ok {
 		t.Error("an EPEL-only package name absent from the RHEL advisory must not match")
 	}
 }
@@ -86,7 +86,7 @@ func TestMatchDetailsSymbolsAreVersionScoped(t *testing.T) {
 	}
 
 	// A 1.x component matches only block 1, so it must carry ONLY that block's symbol.
-	matched, fixed, syms := adv.MatchDetails("Go", "example.com/mod", "1.1.0")
+	matched, fixed, syms := adv.MatchDetails("Go", "example.com/mod", "1.1.0", "")
 	if !matched || fixed != "1.2.0" {
 		t.Fatalf("1.1.0: want matched fixed=1.2.0, got matched=%v fixed=%q", matched, fixed)
 	}
@@ -95,7 +95,7 @@ func TestMatchDetailsSymbolsAreVersionScoped(t *testing.T) {
 	}
 
 	// A 2.x component matches only block 2.
-	matched, fixed, syms = adv.MatchDetails("Go", "example.com/mod", "2.1.0")
+	matched, fixed, syms = adv.MatchDetails("Go", "example.com/mod", "2.1.0", "")
 	if !matched || fixed != "2.3.0" {
 		t.Fatalf("2.1.0: want matched fixed=2.3.0, got matched=%v fixed=%q", matched, fixed)
 	}
@@ -104,7 +104,7 @@ func TestMatchDetailsSymbolsAreVersionScoped(t *testing.T) {
 	}
 
 	// A version in neither range does not match and yields no symbols.
-	if matched, _, syms := adv.MatchDetails("Go", "example.com/mod", "1.5.0"); matched || len(syms) != 0 {
+	if matched, _, syms := adv.MatchDetails("Go", "example.com/mod", "1.5.0", ""); matched || len(syms) != 0 {
 		t.Errorf("1.5.0 (gap between ranges): want no match/no symbols, got matched=%v syms=%v", matched, syms)
 	}
 

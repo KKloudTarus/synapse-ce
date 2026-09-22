@@ -197,6 +197,29 @@ func TestNormalizeComponentUsesStructuralIdentityNotRawPURLFingerprint(t *testin
 	}
 }
 
+func TestNormalizeRPMComponentUsesEpochQualifier(t *testing.T) {
+	key, err := ComponentKey(Component{
+		PURL:    "pkg:rpm/redhat/dbus@1.12.20-8.el9?arch=x86_64&distro=rhel-9.8&epoch=1",
+		Version: "1:1.12.20-8.el9",
+	}, "catalog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key.Ecosystem != "rpm" || key.Package != "redhat/dbus" || key.Version != "1:1.12.20-8.el9" {
+		t.Fatalf("RPM epoch key = %+v", key)
+	}
+	for _, component := range []Component{
+		{PURL: "pkg:rpm/redhat/dbus@1.12.20-8.el9?epoch=1", Version: "1.12.20-8.el9"},
+		{PURL: "pkg:rpm/redhat/dbus@1.12.20-8.el9?epoch=one", Version: "one:1.12.20-8.el9"},
+		{PURL: "pkg:rpm/redhat/dbus@1.12.20-8.el9?epoch=1&epoch=2", Version: "1:1.12.20-8.el9"},
+		{PURL: "pkg:rpm/redhat/dbus?epoch=1", Version: "1:"},
+	} {
+		if _, err := ComponentKey(component, "catalog"); err == nil {
+			t.Fatalf("ComponentKey(%+v) accepted an ambiguous RPM epoch", component)
+		}
+	}
+}
+
 func TestValidateRejectsControlCharacterPURLCollisions(t *testing.T) {
 	catalog := validCatalog()
 	catalog.Targets[0].Components = []Component{{PURL: "pkg:npm/a%00b@c"}}
@@ -1328,7 +1351,8 @@ func TestRenderResultGoldenPrelude(t *testing.T) {
 		strings.Contains(rendered.String(), "\nobservation_digest:") ||
 		!strings.Contains(rendered.String(), "interpretation:\n") ||
 		!strings.Contains(rendered.String(), "owned_database_coupling:") ||
-		!strings.Contains(rendered.String(), "owned consumes the corresponding pinned vendor OVAL") ||
+		!strings.Contains(rendered.String(), "Debian, SLES, and Red Hat") ||
+		!strings.Contains(rendered.String(), "owned consumes the corresponding pinned vendor OVAL and CSAF") ||
 		!strings.Contains(rendered.String(), "engine_database_scope:") ||
 		!strings.Contains(rendered.String(), "database_build and database_digest") ||
 		!strings.Contains(rendered.String(), "comparative_limit:") ||

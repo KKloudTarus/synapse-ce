@@ -12,6 +12,38 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
+func TestSyncRunStoreRejectsConcurrentModeChange(t *testing.T) {
+	clock := &movableClock{t: time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)}
+	queue := NewJobQueue(&seqIDs{}, clock.now)
+	store := NewSyncRunStore(&seqIDs{}, clock.now, queue)
+	ctx := shared.WithTenant(context.Background(), "tenant-a")
+	base := ports.SyncRunStart{
+		SourceID:    "source-a",
+		AdapterType: "oval",
+		Mode:        vulnerabilitysync.ModeFull,
+		Trigger:     "manual",
+		Actor:       "analyst-a",
+		JobKind:     "vulnerability_sync",
+		JobPayload:  []byte(`{}`),
+	}
+	first, created, err := store.Start(ctx, base)
+	if err != nil || !created {
+		t.Fatalf("start full run=%+v created=%v err=%v", first, created, err)
+	}
+
+	same, created, err := store.Start(ctx, base)
+	if err != nil || created || same.ID != first.ID {
+		t.Fatalf("same-mode start=%+v created=%v err=%v", same, created, err)
+	}
+
+	changed := base
+	changed.AdapterType = "osv"
+	changed.Mode = vulnerabilitysync.ModeIncremental
+	if run, created, err := store.Start(ctx, changed); !errors.Is(err, shared.ErrConflict) || created || !run.ID.IsZero() {
+		t.Fatalf("mode-changing start=%+v created=%v err=%v", run, created, err)
+	}
+}
+
 func TestSyncRunReadMetadataDateAndTenantIsolation(t *testing.T) {
 	clock := &movableClock{t: time.Date(2026, 8, 12, 23, 0, 0, 0, time.UTC)}
 	queue := NewJobQueue(&seqIDs{}, clock.now)

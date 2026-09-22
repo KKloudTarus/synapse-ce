@@ -32,9 +32,91 @@ func TestValidateFixedTargetMatrix(t *testing.T) {
 	}
 }
 
+func TestThreeTargetPublicationAcceptsExactArtifactSet(t *testing.T) {
+	catalog, files := completePublicationArtifacts()
+	if got, want := len(files), expectedPublicationFileCount(); got != want {
+		t.Fatalf("publication artifact count = %d, want %d", got, want)
+	}
+	if err := validateStagedArtifactSet(catalog, files); err != nil {
+		t.Fatalf("complete fixed publication artifact set rejected: %v", err)
+	}
+
+	state := testPublicationState(t)
+	state.runtimeCleanup = func(context.Context) error { return nil }
+	state.stageVerifier = func(ctx context.Context, stage string, identities []benchcycle.FileIdentity) error {
+		staged, err := publicationStageFiles(ctx, stage, identities)
+		if err != nil {
+			return err
+		}
+		return validateStagedArtifactSet(catalog, staged)
+	}
+	publication, err := state.beginPublication()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, body := range files {
+		if _, err := publication.WriteBytes(context.Background(), path, body); err != nil {
+			t.Fatalf("stage publication artifact %q: %v", path, err)
+		}
+	}
+	if err := publication.Commit(context.Background()); err != nil {
+		t.Fatalf("publish complete three-target artifact set: %v", err)
+	}
+}
+
+func TestThreeTargetPublicationRejectsMissingAndUnexpectedArtifacts(t *testing.T) {
+	catalog, complete := completePublicationArtifacts()
+	for _, test := range []struct {
+		name   string
+		mutate func(map[string][]byte)
+	}{
+		{
+			name: "missing fixed artifact",
+			mutate: func(files map[string][]byte) {
+				delete(files, "result.json")
+			},
+		},
+		{
+			name: "unexpected artifact",
+			mutate: func(files map[string][]byte) {
+				files["extra.json"] = []byte("extra")
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			files := make(map[string][]byte, len(complete))
+			for path, body := range complete {
+				files[path] = body
+			}
+			test.mutate(files)
+			if err := validateStagedArtifactSet(catalog, files); err == nil {
+				t.Fatal("incomplete or unexpected publication artifact set was accepted")
+			}
+		})
+	}
+}
+
+func TestRequireTrustedCycleResultRejectsMissingOrFailedAbsoluteGate(t *testing.T) {
+	for _, result := range []bench.Result{
+		{},
+		{Gate: &bench.Gate{Passed: false}},
+	} {
+		if err := requireTrustedCycleResult(result); err == nil {
+			t.Fatal("result without a passed absolute gate was accepted")
+		}
+	}
+}
+
+func TestRequireTrustedCycleResultRejectsMeasuredComparatorRecallBreach(t *testing.T) {
+	result := measuredCycleResult(0.5)
+	if err := requireTrustedCycleResult(result); err == nil {
+		t.Fatal("result with a comparator recall above owned recall was accepted")
+	}
+}
+
 func TestCanonicalCapabilityComponentsUsesBenchmarkIdentityOrder(t *testing.T) {
 	version := "4.4-150400.25.22"
-	components, err := canonicalCapabilityComponents([]bench.Component{
+	components, err := canonicalCapabilityComponents(bench.CapabilityKindOSVScannerSUSERPM, []bench.Component{
 		{PURL: "pkg:rpm/sles/bash-sh@" + version, Version: version},
 		{PURL: "pkg:rpm/sles/bash@" + version, Version: version},
 	})
@@ -43,6 +125,74 @@ func TestCanonicalCapabilityComponentsUsesBenchmarkIdentityOrder(t *testing.T) {
 	}
 	if len(components) != 2 || components[0].PURL != "pkg:rpm/sles/bash@"+version || components[1].PURL != "pkg:rpm/sles/bash-sh@"+version {
 		t.Fatalf("capability component order = %+v", components)
+	}
+}
+
+func TestCanonicalCapabilityComponentsFiltersNonApplicableEcosystems(t *testing.T) {
+	version := "1.2.3-4.el9"
+	components, err := canonicalCapabilityComponents(bench.CapabilityKindOSVScannerRedHatEnterpriseLinuxRPM, []bench.Component{
+		{PURL: "pkg:pypi/example@1.2.3", Version: "1.2.3"},
+		{PURL: "pkg:rpm/redhat/example@" + version, Version: version},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 1 || components[0].PURL != "pkg:rpm/redhat/example@"+version {
+		t.Fatalf("capability components = %+v", components)
+	}
+}
+
+func TestValidateReviewEvidenceRequiresReviewOfImplementationCommit(t *testing.T) {
+	const implementationCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const reviewedCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	const timestamp = "2026-09-21T00:00:00Z"
+	review := reviewCapture{
+		SchemaVersion: "review-v1",
+		ID:            "review-1",
+		URL:           "https://example.invalid/review/1",
+		Login:         "reviewer",
+		State:         "COMMENTED",
+		SubmittedAt:   timestamp,
+		CommitID:      reviewedCommit,
+		Body:          "reviewed",
+	}
+	disposition := dispositionCapture{
+		SchemaVersion:        "disposition-v1",
+		ID:                   "disposition-1",
+		URL:                  "https://example.invalid/disposition/1",
+		Login:                "maintainer",
+		CreatedAt:            timestamp,
+		UpdatedAt:            timestamp,
+		ReviewID:             review.ID,
+		ReviewedCommit:       reviewedCommit,
+		ImplementationCommit: implementationCommit,
+		Decision:             "approved",
+		Body:                 "accepted",
+	}
+	reviewBody, err := json.Marshal(review)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispositionBody, err := json.Marshal(disposition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateReviewEvidence(reviewBody, dispositionBody, implementationCommit); err == nil {
+		t.Fatal("review evidence accepted a review for a different implementation commit")
+	}
+
+	review.CommitID = implementationCommit
+	disposition.ReviewedCommit = implementationCommit
+	reviewBody, err = json.Marshal(review)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispositionBody, err = json.Marshal(disposition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateReviewEvidence(reviewBody, dispositionBody, implementationCommit); err != nil {
+		t.Fatalf("matching review evidence rejected: %v", err)
 	}
 }
 
@@ -82,7 +232,7 @@ func TestOwnedBuildInjectsStableBenchmarkVersion(t *testing.T) {
 	}
 }
 
-func TestReduceRepetitionsReturnsCanonicalResult(t *testing.T) {
+func TestReduceRepetitionsRejectsFailedAbsoluteGate(t *testing.T) {
 	corpusRoot := filepath.Join("..", "..", "usecase", "scabench", "corpus")
 	catalog, err := decodeCatalogFile(filepath.Join(corpusRoot, "catalog.json"))
 	if err != nil {
@@ -113,16 +263,8 @@ func TestReduceRepetitionsReturnsCanonicalResult(t *testing.T) {
 			CapabilityKind: expected.CapabilityKind, CapabilityDigest: expected.CapabilityDigest,
 		})
 	}
-	result, encoded, _, err := reduceRepetitions(catalog, oracle, ratchet, [][]bench.Observation{observations, append([]bench.Observation(nil), observations...)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var reencoded bytes.Buffer
-	if err := bench.EncodeResult(&reencoded, result); err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(encoded, reencoded.Bytes()) {
-		t.Fatal("returned result differs from the canonical encoded result")
+	if _, _, _, err := reduceRepetitions(catalog, oracle, ratchet, [][]bench.Observation{observations, append([]bench.Observation(nil), observations...)}); err == nil {
+		t.Fatal("trusted cycle accepted observations with a failed absolute ratchet gate")
 	}
 }
 
@@ -443,6 +585,67 @@ func testPublicationState(t *testing.T) runState {
 		input:           RunInput{OutputRoot: filepath.Join(t.TempDir(), "output")},
 		workspace:       workspace,
 		cleanupRequired: true,
+	}
+}
+
+func completePublicationArtifacts() (bench.Catalog, map[string][]byte) {
+	catalog := bench.Catalog{Targets: make([]bench.Target, 0, len(fixedTargetIDs))}
+	files := make(map[string][]byte, expectedPublicationFileCount())
+	for _, path := range fixedPublicationArtifactPaths {
+		files[path] = []byte(path)
+	}
+	for _, targetID := range fixedTargetIDs {
+		body := []byte("SBOM for " + targetID)
+		catalog.Targets = append(catalog.Targets, bench.Target{
+			ID:         targetID,
+			SBOMDigest: bench.SHA256Digest(body),
+		})
+		files["sboms/"+targetID+".cdx.json"] = body
+	}
+	return catalog, files
+}
+
+func measuredCycleResult(ownedRecall float64) bench.Result {
+	metrics := make([]bench.RunMetric, 0, len(fixedTargetIDs)*len(bench.Engines()))
+	for _, targetID := range fixedTargetIDs {
+		for _, engine := range bench.Engines() {
+			recall := 1.0
+			if engine == bench.EngineOwned {
+				recall = ownedRecall
+			}
+			metrics = append(metrics, measuredCycleMetric(targetID, engine, recall))
+		}
+	}
+	return bench.Result{
+		Gate:       &bench.Gate{Passed: true},
+		RunMetrics: metrics,
+	}
+}
+
+func measuredCycleMetric(targetID string, engine bench.Engine, recall float64) bench.RunMetric {
+	truePositives := 1
+	falseNegatives := 0
+	if recall < 1 {
+		falseNegatives = 1
+	}
+	precision := 1.0
+	return bench.RunMetric{
+		Run: bench.RunIdentity{
+			TargetID: targetID,
+			Engine:   engine,
+			State:    bench.ObservationComplete,
+		},
+		Metrics: bench.EngineResult{
+			Engine:            engine,
+			Covered:           truePositives + falseNegatives + 1,
+			AffectedRelations: truePositives + falseNegatives,
+			NegativeRelations: 1,
+			TruePositives:     truePositives,
+			FalseNegatives:    falseNegatives,
+			MetricsComplete:   true,
+			Precision:         &precision,
+			Recall:            &recall,
+		},
 	}
 }
 

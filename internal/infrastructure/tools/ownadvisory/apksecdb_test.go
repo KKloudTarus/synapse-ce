@@ -96,13 +96,13 @@ func TestParseSecdbMatchesViaDomainMatcher(t *testing.T) {
 	if a.ID == "" {
 		t.Fatal("CVE-2024-29902 not parsed")
 	}
-	if ok, _ := a.Match("Wolfi", "aactl", "0.4.12-r9"); !ok {
+	if ok, _ := a.Match("Wolfi", "aactl", "0.4.12-r9", ""); !ok {
 		t.Error("aactl 0.4.12-r9 (below the 0.4.12-r10 fix) must match")
 	}
-	if ok, _ := a.Match("Wolfi", "aactl", "0.4.12-r10"); ok {
+	if ok, _ := a.Match("Wolfi", "aactl", "0.4.12-r10", ""); ok {
 		t.Error("aactl at the fixed 0.4.12-r10 must not match")
 	}
-	if ok, _ := a.Match("Alpine:v3.19", "aactl", "0.4.12-r9"); ok {
+	if ok, _ := a.Match("Alpine:v3.19", "aactl", "0.4.12-r9", ""); ok {
 		t.Error("a Wolfi advisory must not match an Alpine ecosystem")
 	}
 }

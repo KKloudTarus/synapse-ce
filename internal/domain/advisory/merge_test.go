@@ -1,6 +1,7 @@
 package advisory
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -9,6 +10,24 @@ import (
 
 func boolPtr(value bool) *bool        { return &value }
 func floatPtr(value float64) *float64 { return &value }
+
+func TestObservationOriginTrustHasSeparateJSONProvenance(t *testing.T) {
+	observation := Observation{OriginTrusted: true}
+	encoded, err := json.Marshal(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["origin_trusted"] != true {
+		t.Fatalf("origin provenance=%s", encoded)
+	}
+	if _, present := got["SignatureVerified"]; present {
+		t.Fatalf("origin trust must not claim OpenPGP signature verification: %s", encoded)
+	}
+}
 
 func TestMergeIsDeterministicAndPreservesSparseFields(t *testing.T) {
 	published := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)

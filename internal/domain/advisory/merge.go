@@ -483,6 +483,25 @@ func normalizeAffected(affected AffectedPackage) AffectedPackage {
 	affected.Package = strings.TrimSpace(affected.Package)
 	affected.FixedVersion = strings.TrimSpace(affected.FixedVersion)
 	affected.Versions = uniqueSorted(affected.Versions)
+	// Architectures are lowercased before sorting so ("X86_64","x86_64") collapses to one token and two
+	// observations that differ only in vendor letter case produce the same content hash and dedup key.
+	// A constraint that is present but entirely blank is malformed evidence, NOT an absent constraint, so it
+	// must not normalize to the empty set (which means "every architecture" and would widen the match).
+	// unsatisfiableArchitecture is retained instead: it cannot equal any real component architecture, so the
+	// block stays unsatisfiable and the malformed input fails closed. It is a non-empty, non-blank token
+	// because uniqueSorted drops blanks, which would otherwise erase the guard.
+	if len(affected.Architectures) > 0 {
+		architectures := make([]string, 0, len(affected.Architectures))
+		for _, architecture := range affected.Architectures {
+			if trimmed := strings.ToLower(strings.TrimSpace(architecture)); trimmed != "" {
+				architectures = append(architectures, trimmed)
+			}
+		}
+		if len(architectures) == 0 {
+			architectures = append(architectures, unsatisfiableArchitecture)
+		}
+		affected.Architectures = uniqueSorted(architectures)
+	}
 	ranges := map[string]Range{}
 	for _, current := range affected.Ranges {
 		current.Type = strings.ToUpper(strings.TrimSpace(current.Type))

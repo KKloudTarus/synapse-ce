@@ -156,9 +156,16 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 			}
 		}
 		if distroPackageMatchable && eco != "" && c.Name != "" && sbom.IsResolvedVersion(c.Version) {
-			// matchName queries the store for (eco, name) and emits any advisory that hits version.
-			matchName := func(name, version string) error {
-				advs, err := s.store.ByPackage(ctx, eco, name)
+			// The component's own architecture, from the PURL "arch=" qualifier. It is decoded for the same
+			// reason the version is, and it gates architecture-scoped affected blocks in MatchDetails. An
+			// absent qualifier stays empty, which cannot satisfy an architecture-scoped block: we would be
+			// unable to prove the installed package is inside the vendor's architecture set, and assuming it
+			// is would reintroduce the cross-architecture over-match. Architecture-blind sources carry no
+			// constraint at all and keep matching exactly as before.
+			componentArch := decodePURLSegment(purlQualifier(c.PURL, "arch"))
+			// matchName queries the store for (ecosystem, name) and emits any advisory that hits version.
+			matchName := func(lookupEco, name, version string) error {
+				advs, err := s.store.ByPackage(ctx, lookupEco, name)
 				if err != nil {
 					return err
 				}
@@ -167,20 +174,24 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 						continue
 					}
 					// MatchDetails (not Match + AffectedSymbolsFor) so the finding carries ONLY the symbols of the
-					// affected blocks that actually match this version. OSV can list the same package in several
-					// blocks with different ranges and different symbols; unioning across all of them would attach
-					// another version's symbol to this finding and seed a false reachable-symbol claim.
-					if affected, fixed, symbols := a.MatchDetails(eco, name, version); affected {
+					// affected blocks that actually match this version.
+					if affected, fixed, symbols := a.MatchDetails(lookupEco, name, version, componentArch); affected {
 						emit(a, c, fixed, symbols)
 					}
 				}
 				return nil
 			}
-			// Normalize to the ecosystem-canonical key on the lookup side too, so a component name that
-			// isn't already normalized (e.g. a Syft-produced PyPI name) still meets the stored advisory key.
-			name := canonicalName(eco, c.Name)
-			if err := matchName(name, matchVersion); err != nil {
-				return nil, err
+			lookupEcosystems := []string{eco}
+			if exact := redHatMinorEcosystem(c.PURL); exact != "" && exact != eco {
+				// Red Hat VEX relationships can be minor-scoped even though the normal distro ecosystem remains
+				// major-scoped. Query the exact release first, then the major key for compatible bounded data.
+				lookupEcosystems = append([]string{exact}, lookupEcosystems...)
+			}
+			for _, lookupEco := range lookupEcosystems {
+				name := canonicalName(lookupEco, c.Name)
+				if err := matchName(lookupEco, name, matchVersion); err != nil {
+					return nil, err
+				}
 			}
 			// A Debian/Ubuntu security advisory is keyed by the SOURCE package (one openssl advisory covers
 			// the libssl1.1, libcrypto1.1, … binaries built from it), so a binary package never matches it by
@@ -193,6 +204,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 			// are equal). The emit map dedups a binary+source double hit. Only deb: an rpm's upstream is a
 			// source-RPM filename needing NEVRA parsing, and the owned RedHat CSAF feed is binary-keyed.
 			if purlType(c.PURL) == "deb" {
+				name := canonicalName(eco, c.Name)
 				// Decode the qualifier BEFORE splitting: PURL encodes the name/version "@" separator as %40
 				// (and an epoch ":" as %3A), so "openssl%401.1.1k" decodes to "openssl@1.1.1k" first.
 				upstreamName, upstreamVer, _ := strings.Cut(decodePURLSegment(purlQualifier(c.PURL, "upstream")), "@")
@@ -201,7 +213,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 					if v := strings.TrimSpace(upstreamVer); v != "" {
 						srcVersion = v // the source version, in the space the source-keyed advisory ranges use
 					}
-					if err := matchName(src, srcVersion); err != nil {
+					if err := matchName(eco, src, srcVersion); err != nil {
 						return nil, err
 					}
 				}
@@ -409,6 +421,22 @@ func rpmCanonicalEVR(version, epoch string) string {
 // sbom.DistroEcosystem so the scan-side matcher key and the inventory identity key (sbom.IdentityFromComponent)
 // can never drift; TestDistroEcosystemLockstep pins the two. An unmapped/malformed distro yields "" (skip,
 // never a false match).
+func redHatMinorEcosystem(purl string) string {
+	if purlType(purl) != "rpm" {
+		return ""
+	}
+	distro := strings.ToLower(strings.TrimSpace(purlQualifier(purl, "distro")))
+	id, release, ok := strings.Cut(distro, "-")
+	if !ok || (id != "rhel" && id != "redhat") {
+		return ""
+	}
+	parts := strings.SplitN(release, ".", 3)
+	if len(parts) < 2 || !allASCIIDigits(parts[0]) || !allASCIIDigits(parts[1]) {
+		return ""
+	}
+	return "Red Hat:" + parts[0] + "." + parts[1]
+}
+
 func osDistroEcosystem(purl string) string {
 	return sbom.DistroEcosystem(purlType(purl), purlQualifier(purl, "distro"))
 }

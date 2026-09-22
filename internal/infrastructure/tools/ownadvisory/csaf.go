@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -28,6 +30,12 @@ import (
 // ecosystem+package – so an advisory only matches when the SBOM carries a CPE-derivable component. A vuln
 // with no resolvable binding yields an advisory with empty Affected (inert in the store); the feed skips it.
 func ParseCSAF(data []byte) ([]advisory.Advisory, error) {
+	return parseCSAF(data, false)
+}
+
+// parseCSAF keeps unbounded Red Hat RPM product status scoped to a complete source snapshot. A streaming
+// document is not evidence that a later document will not close that range, so it must not emit one.
+func parseCSAF(data []byte, allowUnboundedRPM bool) ([]advisory.Advisory, error) {
 	if len(data) > maxAdvisoryBytes {
 		// Self-protect even when called directly: the exported parser invites callers that bypass the feed's
 		// per-file cap (limits.go), so a single CSAF document must fit the same byte budget here too.
@@ -43,6 +51,7 @@ func ParseCSAF(data []byte) ([]advisory.Advisory, error) {
 	}
 	cpeByProduct := doc.ProductTree.cpeByProductID()
 	purlByProduct := doc.ProductTree.purlByProductID()
+	nameByProduct := doc.ProductTree.nameByProductID()
 	rels := doc.ProductTree.relationshipsByProductID()
 	out := make([]advisory.Advisory, 0, len(doc.Vulnerabilities))
 	for _, v := range doc.Vulnerabilities {
@@ -54,12 +63,89 @@ func ParseCSAF(data []byte) ([]advisory.Advisory, error) {
 			ID:       id,
 			Aliases:  v.aliases(),
 			Summary:  firstNonEmpty(v.Title, doc.Document.Title),
-			Affected: v.affected(cpeByProduct, purlByProduct, rels),
+			Affected: v.affected(cpeByProduct, purlByProduct, nameByProduct, rels, allowUnboundedRPM),
 		}
 		adv.CVSSVector, adv.CVSSScore = v.cvss()
 		out = append(out, adv)
 	}
 	return out, nil
+}
+
+var csafSnapshotCVEPattern = regexp.MustCompile(`^CVE-[0-9]{4}-[0-9]{4,}$`)
+
+// ParseCSAFSnapshot reduces a complete CSAF source snapshot into one deterministic replacement record per CVE.
+// Unlike streaming ParseCSAF, every vulnerability must carry a representable CVE and duplicate projections must
+// be identical after aliases are intentionally discarded. A complete snapshot can safely retain Red Hat's
+// unbounded binary VEX ranges; a single streaming document cannot.
+func ParseCSAFSnapshot(documents [][]byte) ([]advisory.Advisory, error) {
+	if len(documents) == 0 {
+		return nil, fmt.Errorf("%w: CSAF snapshot is empty", shared.ErrValidation)
+	}
+	byCVE := make(map[string]advisory.Advisory)
+	for documentIndex, data := range documents {
+		if len(data) > maxAdvisoryBytes {
+			return nil, fmt.Errorf("%w: CSAF snapshot document %d exceeds %d bytes", shared.ErrValidation, documentIndex+1, maxAdvisoryBytes)
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(data, &raw); err != nil || raw == nil {
+			return nil, fmt.Errorf("%w: parse CSAF snapshot document %d", shared.ErrValidation, documentIndex+1)
+		}
+		vulnerabilities, hasVulnerabilities := raw["vulnerabilities"]
+		if !hasVulnerabilities || strings.TrimSpace(string(vulnerabilities)) == "null" {
+			return nil, fmt.Errorf("%w: CSAF snapshot document %d has no vulnerabilities array", shared.ErrValidation, documentIndex+1)
+		}
+		var doc csafDoc
+		if err := json.Unmarshal(data, &doc); err != nil {
+			return nil, fmt.Errorf("%w: parse CSAF snapshot document %d: %v", shared.ErrValidation, documentIndex+1, err)
+		}
+		for vulnerabilityIndex, vulnerability := range doc.Vulnerabilities {
+			if _, err := normalizedCSAFCVE(vulnerability.CVE); err != nil {
+				return nil, fmt.Errorf("%w: CSAF snapshot document %d vulnerability %d: %v", shared.ErrValidation, documentIndex+1, vulnerabilityIndex+1, err)
+			}
+		}
+
+		parsed, err := parseCSAF(data, true)
+		if err != nil {
+			return nil, fmt.Errorf("parse CSAF snapshot document %d: %w", documentIndex+1, err)
+		}
+		if len(parsed) != len(doc.Vulnerabilities) {
+			return nil, fmt.Errorf("%w: CSAF snapshot document %d could not represent every vulnerability", shared.ErrValidation, documentIndex+1)
+		}
+		for _, advisoryRecord := range parsed {
+			cve, err := normalizedCSAFCVE(advisoryRecord.ID)
+			if err != nil {
+				return nil, fmt.Errorf("%w: CSAF snapshot document %d: %v", shared.ErrValidation, documentIndex+1, err)
+			}
+			advisoryRecord.ID = cve
+			advisoryRecord.Aliases = nil
+			if existing, found := byCVE[cve]; found {
+				if !reflect.DeepEqual(existing, advisoryRecord) {
+					return nil, fmt.Errorf("%w: conflicting CSAF snapshot records for %s", shared.ErrValidation, cve)
+				}
+				continue
+			}
+			byCVE[cve] = advisoryRecord
+		}
+	}
+
+	cves := make([]string, 0, len(byCVE))
+	for cve := range byCVE {
+		cves = append(cves, cve)
+	}
+	sort.Strings(cves)
+	out := make([]advisory.Advisory, 0, len(cves))
+	for _, cve := range cves {
+		out = append(out, byCVE[cve])
+	}
+	return out, nil
+}
+
+func normalizedCSAFCVE(raw string) (string, error) {
+	cve := strings.ToUpper(strings.TrimSpace(raw))
+	if !csafSnapshotCVEPattern.MatchString(cve) {
+		return "", fmt.Errorf("invalid or missing CVE %q", raw)
+	}
+	return cve, nil
 }
 
 // --- CSAF 2.0 JSON shape (the subset the owned store needs) ---
@@ -94,6 +180,7 @@ type csafRelationship struct {
 }
 
 type csafProduct struct {
+	Name      string `json:"name"`
 	ProductID string `json:"product_id"`
 	Helper    struct {
 		CPE  string `json:"cpe"`
@@ -141,6 +228,37 @@ func collectBranchCPEs(b csafBranch, depth int, m map[string]string) {
 	}
 	for _, child := range b.Branches {
 		collectBranchCPEs(child, depth+1, m)
+	}
+}
+
+func (t csafTree) nameByProductID() map[string]string {
+	m := make(map[string]string, len(t.FullProductNames))
+	for _, p := range t.FullProductNames {
+		if p.ProductID != "" && p.Name != "" {
+			m[p.ProductID] = p.Name
+		}
+	}
+	for _, b := range t.Branches {
+		collectBranchNames(b, 0, m)
+	}
+	return m
+}
+
+func collectBranchNames(b csafBranch, depth int, m map[string]string) {
+	if depth >= maxBranchDepth {
+		return
+	}
+	if b.Product != nil && b.Product.ProductID != "" {
+		name := strings.TrimSpace(b.Product.Name)
+		if name == "" {
+			name = strings.TrimSpace(b.Name)
+		}
+		if name != "" {
+			m[b.Product.ProductID] = name
+		}
+	}
+	for _, child := range b.Branches {
+		collectBranchNames(child, depth+1, m)
 	}
 }
 
@@ -276,7 +394,8 @@ type affectedAccum struct {
 	allVersions  bool            // a known_affected CPE with version "*" ⇒ every version is affected
 	fixed        string          // fixed version: language ecosystem = the CPE fixed version; distro = MIN fixed EVR
 	distro       bool            // an OS-package (rpm) binding: range-based distro semantics, not exact versions
-	lastAffected string          // distro no-fix case: MAX known_affected EVR ⇒ bound "[0, lastAffected]" (not open)
+	lastAffected string          // versioned no-fix case: MAX known_affected EVR ⇒ bound "[0, lastAffected]"
+	openAffected bool            // unversioned binary VEX product: authoritative affected state without a fix
 }
 
 // affected resolves the vulnerability's product bindings into advisory.AffectedPackage entries, grouped by
@@ -296,7 +415,7 @@ type affectedAccum struct {
 //     risk flagging the not-affected arch. Dropping is a miss on that (rare) package, never a false positive.
 //
 // Deterministic (sorted).
-func (v csafVulnDoc) affected(cpeByProduct, purlByProduct map[string]string, rels map[string]csafRel) []advisory.AffectedPackage {
+func (v csafVulnDoc) affected(cpeByProduct, purlByProduct, nameByProduct map[string]string, rels map[string]csafRel, allowUnboundedRPM bool) []advisory.AffectedPackage {
 	groups := map[string]*affectedAccum{}
 	key := func(eco, pkg string) string { return eco + "\x00" + pkg }
 	getGroup := func(eco, pkg string, distro bool) *affectedAccum {
@@ -307,14 +426,17 @@ func (v csafVulnDoc) affected(cpeByProduct, purlByProduct map[string]string, rel
 		}
 		return g
 	}
-	// (major, package) keys that RedHat marks known_not_affected via the rpm bridge: the distro group for such
-	// a key is dropped at emit time (arch/variant ambiguity the arch-less key cannot resolve soundly).
+	// Package-level matching cannot preserve architecture or repository variants. Any explicit negative for a
+	// resolved binary package therefore removes that coarse package binding rather than risking a false positive.
 	notAffected := map[string]bool{}
 	for _, pid := range v.ProductStatus.KnownNotAffected {
-		if eco, pkg, _, ok := resolveProductPURL(purlByProduct, cpeByProduct, rels, pid); ok {
-			notAffected[key(eco, pkg)] = true
+		if binding, ok := resolveRPMProduct(purlByProduct, cpeByProduct, nameByProduct, rels, pid); ok {
+			notAffected[key(binding.ecosystem, binding.pkg)] = true
 		}
 	}
+	// A fixed state without a usable EVR still proves that an unbounded affected range is stale, but it cannot
+	// supply a sound replacement boundary. Drop that package binding rather than preserving the open range.
+	blockedFixed := map[string]bool{}
 
 	for _, pid := range v.ProductStatus.KnownAffected {
 		if eco, pkg, ver, ok := resolveProductCPE(cpeByProduct, pid); ok {
@@ -330,13 +452,23 @@ func (v csafVulnDoc) affected(cpeByProduct, purlByProduct map[string]string, rel
 			}
 			continue
 		}
-		if eco, pkg, evr, ok := resolveProductPURL(purlByProduct, cpeByProduct, rels, pid); ok {
-			// A distro package RedHat lists as known_affected with no fix ⇒ affected up to this build. Bound the
-			// range by the MAX observed affected EVR (last_affected, inclusive) rather than an open range, so a
-			// higher, not-yet-evaluated build is not swept in.
-			g := getGroup(eco, pkg, true)
-			if g.lastAffected == "" || rpmLess(g.ecosystem, g.lastAffected, evr) {
-				g.lastAffected = evr
+		if binding, ok := resolveRPMProduct(purlByProduct, cpeByProduct, nameByProduct, rels, pid); ok {
+			switch binding.kind {
+			case rpmProductOpen:
+				// Red Hat's binary-aware VEX deliberately omits the version for an affected binary product when no
+				// fixed package version exists. Only a complete source snapshot can safely project that as open.
+				if allowUnboundedRPM {
+					getGroup(binding.ecosystem, binding.pkg, true).openAffected = true
+				}
+			case rpmProductBounded:
+				// A concrete known-affected EVR is bounded inclusively so a later, unevaluated build is not swept in.
+				g := getGroup(binding.ecosystem, binding.pkg, true)
+				if g.lastAffected == "" || rpmLess(g.ecosystem, g.lastAffected, binding.evr) {
+					g.lastAffected = binding.evr
+				}
+			case rpmProductUnsupportedVersion:
+				// The relationship names a binary package, but its EVR cannot be reconciled with the platform. It
+				// contributes no range.
 			}
 			continue
 		}
@@ -357,13 +489,16 @@ func (v csafVulnDoc) affected(cpeByProduct, purlByProduct map[string]string, rel
 			}
 			continue
 		}
-		if eco, pkg, evr, ok := resolveProductPURL(purlByProduct, cpeByProduct, rels, pid); ok {
-			g := getGroup(eco, pkg, true) // a fixed-only distro product still means "[0, fixed) affected"
-			// Keep the MINIMUM fixed EVR. Even with modules skipped, distinct variants of the same base package
-			// can carry different fixes; the minimum yields the narrowest affected range, so a component at or
-			// above it is never falsely flagged (the trade is a possible miss, the safe direction).
-			if g.fixed == "" || rpmLess(g.ecosystem, evr, g.fixed) {
-				g.fixed = evr
+		if binding, ok := resolveRPMProduct(purlByProduct, cpeByProduct, nameByProduct, rels, pid); ok {
+			if binding.kind != rpmProductBounded {
+				blockedFixed[key(binding.ecosystem, binding.pkg)] = true
+				continue
+			}
+			g := getGroup(binding.ecosystem, binding.pkg, true) // a fixed-only product means "[0, fixed) affected"
+			// Keep the MINIMUM fixed EVR. Distinct supported variants can carry different fixes; the minimum
+			// yields the narrowest range, so a component at or above it is never falsely flagged.
+			if g.fixed == "" || rpmLess(g.ecosystem, binding.evr, g.fixed) {
+				g.fixed = binding.evr
 			}
 			continue
 		}
@@ -377,19 +512,21 @@ func (v csafVulnDoc) affected(cpeByProduct, purlByProduct map[string]string, rel
 
 	out := make([]advisory.AffectedPackage, 0, len(groups))
 	for _, g := range groups {
-		if g.distro && notAffected[key(g.ecosystem, g.pkg)] {
-			continue // arch/variant-specific: cannot bound soundly with an arch-less key → drop (miss, not FP)
+		groupKey := key(g.ecosystem, g.pkg)
+		majorKey := key(rhelMajorEcosystem(g.ecosystem), g.pkg)
+		if g.distro && (notAffected[groupKey] || notAffected[majorKey] || blockedFixed[groupKey] || blockedFixed[majorKey]) {
+			continue
 		}
 		ap := advisory.AffectedPackage{Ecosystem: g.ecosystem, Package: g.pkg, FixedVersion: g.fixed}
 		switch {
 		case g.distro:
-			// Distro semantics are range-based. A fix closes the range exclusively ("[0, fixed)"); with no fix
-			// the range is bounded inclusively by the highest observed affected build ("[0, lastAffected]").
-			// The ecosystem key is exact (RHEL major from the platform CPE), so the range can only match
-			// versions of the RIGHT package in the RIGHT release.
+			// Distro semantics are range-based. A usable fix closes the range exclusively. Otherwise an
+			// authoritative unversioned binary product is open; a concrete affected EVR remains bounded.
 			switch {
 			case g.fixed != "":
 				ap.Ranges = []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {Fixed: g.fixed}}}}
+			case g.openAffected:
+				ap.Ranges = []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}}}}
 			case g.lastAffected != "":
 				ap.Ranges = []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{{Introduced: "0"}, {LastAffected: g.lastAffected}}}}
 			}
@@ -444,26 +581,197 @@ func resolveProductCPE(cpeByProduct map[string]string, productID string) (eco, p
 // ok=false → the binding is skipped (never mis-keyed). The "version" it returns is the full EVR, matched by
 // the rpm comparator via advisory.schemeFor("Red Hat:<major>"). This is the ONLY sound way to reach the RH
 // major, which lives on the platform product, not the package product.
-func resolveProductPURL(purlByProduct, cpeByProduct map[string]string, rels map[string]csafRel, productID string) (eco, pkg, evr string, ok bool) {
+type rpmProductKind uint8
+
+const (
+	rpmProductOpen rpmProductKind = iota + 1
+	rpmProductBounded
+	rpmProductUnsupportedVersion
+)
+
+type rpmProductBinding struct {
+	ecosystem string
+	pkg       string
+	evr       string
+	kind      rpmProductKind
+}
+
+func resolveRPMProduct(purlByProduct, cpeByProduct, nameByProduct map[string]string, rels map[string]csafRel, productID string) (rpmProductBinding, bool) {
 	rel, found := rels[productID]
 	if !found {
-		return "", "", "", false // only relationship-bound composites carry both the package and the platform
+		return rpmProductBinding{}, false // only relationship-bound composites carry both package and platform
 	}
-	name, version, okPurl := rpmPurlNameEVR(purlByProduct[rel.pkgRef])
-	if !okPurl {
-		return "", "", "", false
+	major, ok := rhelMajorFromCPE(cpeByProduct[rel.platformRef])
+	if !ok {
+		return rpmProductBinding{}, false
 	}
-	if isModularEVR(version) {
-		// AppStream module build: its stream is a parallel version line, not a point on one linear range, so a
-		// "[0, fixed)" range would falsely flag another stream. Skip until stream-aware matching exists (miss,
-		// never a false positive).
-		return "", "", "", false
+	name, evr, kind, ok := redHatRPMPurl(purlByProduct[rel.pkgRef])
+	if !ok {
+		return rpmProductBinding{}, false
 	}
-	major, okMajor := rhelMajorFromCPE(cpeByProduct[rel.platformRef])
-	if !okMajor {
-		return "", "", "", false
+	ecosystem, soundOpenScope := rhelPlatformEcosystem(major, rel.platformRef, nameByProduct[rel.platformRef])
+	if kind == rpmProductOpen && !soundOpenScope {
+		// An unbounded range cannot be reduced to the RHEL major when the platform product is neither an exact
+		// minor release nor an explicit major-wide product.
+		kind = rpmProductUnsupportedVersion
 	}
-	return "Red Hat:" + major, name, version, true
+	if kind == rpmProductBounded && (isModularEVR(evr) || !rpmEVRMatchesRHELMajor(evr, major)) {
+		// A module is a parallel version line. A tagless or mismatched EVR does not prove a bound for the
+		// platform named by the relationship. Preserve the package identity so a fixed status can suppress a
+		// competing open range, but never use this EVR as a boundary.
+		kind = rpmProductUnsupportedVersion
+	}
+	return rpmProductBinding{ecosystem: ecosystem, pkg: name, evr: evr, kind: kind}, true
+}
+
+func redHatRPMPurl(purl string) (name, evr string, kind rpmProductKind, ok bool) {
+	const prefix = "pkg:rpm/redhat/"
+	if !strings.HasPrefix(purl, prefix) {
+		return "", "", 0, false
+	}
+	rest := purl[len(prefix):]
+	path := rest
+	if q := strings.IndexByte(path, '?'); q >= 0 {
+		path = path[:q]
+	}
+	namePart := path
+	versionPart := ""
+	if at := strings.IndexByte(path, '@'); at >= 0 {
+		namePart = path[:at]
+		versionPart = path[at+1:]
+		if versionPart == "" {
+			return "", "", 0, false
+		}
+	}
+	if strings.Contains(namePart, "/") {
+		return "", "", 0, false
+	}
+	name = strings.TrimSpace(decodePURLSegment(namePart))
+	arch := strings.TrimSpace(decodePURLSegment(purlQualifier(purl, "arch")))
+	upstream := strings.TrimSpace(decodePURLSegment(purlQualifier(purl, "upstream")))
+	if name == "" || strings.EqualFold(arch, "src") || (arch == "" && upstream == "") {
+		// Unversioned source products are explicitly arch=src. For an unversioned product without an
+		// architecture, the upstream qualifier is the binary-expansion proof that the name is an installable
+		// binary RPM rather than an ambiguous source/component identity.
+		return "", "", 0, false
+	}
+	if versionPart == "" {
+		return name, "", rpmProductOpen, true
+	}
+	versionPart = strings.TrimSpace(decodePURLSegment(versionPart))
+	if versionPart == "" {
+		return "", "", 0, false
+	}
+	return name, rpmCanonicalEVR(versionPart, decodePURLSegment(purlQualifier(purl, "epoch"))), rpmProductBounded, true
+}
+
+func rhelPlatformEcosystem(major, productID, productName string) (string, bool) {
+	majorEcosystem := "Red Hat:" + major
+	idMinor, idFound, idAmbiguous := rhelMinorFromPlatformLabel(productID, major)
+	nameMinor, nameFound, nameAmbiguous := rhelMinorFromPlatformLabel(productName, major)
+	if idAmbiguous || nameAmbiguous || (idFound && nameFound && idMinor != nameMinor) {
+		return majorEcosystem, false
+	}
+	minor := idMinor
+	if !idFound {
+		minor = nameMinor
+	}
+	if idFound || nameFound {
+		return majorEcosystem + "." + minor, true
+	}
+	if rhelMajorWidePlatform(productID, major) || rhelMajorWidePlatform(productName, major) {
+		return majorEcosystem, true
+	}
+	return majorEcosystem, false
+}
+
+func rhelMinorFromPlatformLabel(label, major string) (minor string, found, ambiguous bool) {
+	value := strings.ToLower(strings.TrimSpace(label))
+	needle := major + "."
+	for offset := 0; offset < len(value); {
+		rel := strings.Index(value[offset:], needle)
+		if rel < 0 {
+			break
+		}
+		start := offset + rel
+		if start > 0 && value[start-1] >= '0' && value[start-1] <= '9' {
+			offset = start + len(needle)
+			continue
+		}
+		digitStart := start + len(needle)
+		end := digitStart
+		for end < len(value) && value[end] >= '0' && value[end] <= '9' {
+			end++
+		}
+		if end == digitStart {
+			offset = digitStart
+			continue
+		}
+		candidate := value[digitStart:end]
+		if found && candidate != minor {
+			return "", false, true
+		}
+		minor, found = candidate, true
+		offset = end
+	}
+	return minor, found, false
+}
+
+func rhelMajorEcosystem(ecosystem string) string {
+	const prefix = "Red Hat:"
+	if !strings.HasPrefix(ecosystem, prefix) {
+		return ecosystem
+	}
+	release := strings.TrimPrefix(ecosystem, prefix)
+	if major, _, ok := strings.Cut(release, "."); ok && major != "" {
+		return prefix + major
+	}
+	return ecosystem
+}
+
+func rhelMajorWidePlatform(label, major string) bool {
+	value := strings.ToLower(strings.TrimSpace(label))
+	for _, candidate := range []string{
+		"rhel" + major,
+		"rhel-" + major,
+		"rhel_" + major,
+		"rhel " + major,
+		"red_hat_enterprise_linux_" + major,
+		"red hat enterprise linux " + major,
+	} {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func rpmEVRMatchesRHELMajor(evr, major string) bool {
+	if !allASCIIDigits(major) {
+		return false
+	}
+	value := strings.ToLower(strings.TrimSpace(evr))
+	matches := 0
+	for offset := 0; offset < len(value); {
+		rel := strings.Index(value[offset:], ".el")
+		if rel < 0 {
+			break
+		}
+		start := offset + rel + len(".el")
+		end := start
+		for end < len(value) && value[end] >= '0' && value[end] <= '9' {
+			end++
+		}
+		if end == start || (end < len(value) && !strings.ContainsRune("._+~-", rune(value[end]))) {
+			return false
+		}
+		matches++
+		if value[start:end] != major {
+			return false
+		}
+		offset = end
+	}
+	return matches == 1
 }
 
 // isModularEVR reports whether an rpm EVR is an AppStream module build, whose release carries a
