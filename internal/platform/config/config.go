@@ -761,13 +761,17 @@ type Config struct {
 	JarHashBaseURL       string
 	JarHashDBPath        string
 	// CrossCheckEnabled turns on cross-check disagreement judgments: post-scan, where the run
-	// detection sources disagree on a vuln, mint an ungated CapCorrelation judgment for human review. Off by
-	// default; opt-in + best-effort. Requires JudgmentsEnabled (it mints judgments).
+	// detection sources disagree on a vuln, mint an ungated CapCorrelation judgment for human review. On by
+	// default (effective-by-default policy, TestAnalysisDefaultsOn); best-effort — it degrades to a no-op when
+	// a second detection source is unavailable — set SYNAPSE_CROSSCHECK_ENABLED=false to opt out. Requires
+	// JudgmentsEnabled (it mints judgments).
 	CrossCheckEnabled bool
 	// SBOMCrossCheckEnabled turns on SBOM-PRODUCER cross-check judgments: a 2nd SBOM producer runs
 	// alongside the primary and components only one producer emits are minted as ungated CapCorrelation
-	// judgments (subject = component) for human review. Off by default; opt-in + best-effort. Requires
-	// JudgmentsEnabled (it mints judgments).
+	// judgments (subject = component) for human review. On by default (effective-by-default policy,
+	// TestAnalysisDefaultsOn); best-effort — it degrades to a no-op when a second producer is unavailable (the
+	// owned producer alone needs no external tool) — set SYNAPSE_SBOM_CROSSCHECK_ENABLED=false to opt out.
+	// Requires JudgmentsEnabled (it mints judgments).
 	SBOMCrossCheckEnabled bool
 	// WriteupDraftsEnabled turns on the propose_writeup_draft agent tool: the agent can DRAFT a
 	// finding's write-up prose as a proposal; a human edits/signs off out of band. Off by default; opt-in.
