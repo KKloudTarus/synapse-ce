@@ -37,7 +37,7 @@ type ArchivedPin struct {
 
 // PinArchive is the manifest of archived pin bytes for one catalog revision.
 type PinArchive struct {
-	SchemaVersion string        `json:"schema_version"`
+	SchemaVersion string `json:"schema_version"`
 	// CatalogRevision binds the archive to the catalog whose pins it preserves, so an archive cannot
 	// be silently paired with a different corpus.
 	CatalogRevision string        `json:"catalog_revision"`
@@ -46,6 +46,13 @@ type PinArchive struct {
 
 // PinArchiveSchemaVersion is the only accepted archive schema.
 const PinArchiveSchemaVersion = "synapse-sca-benchmark-pin-archive-v1"
+
+// ErrEmptyPinArchive marks an archive that preserved nothing.
+//
+// It is a distinct error because an empty archive is the expected first result for a corpus whose
+// origins have all been republished, and a caller reporting coverage should be able to say which pins
+// are unpreserved rather than only that the manifest was empty.
+var ErrEmptyPinArchive = errors.New("pin archive preserved no entries")
 
 // Validate rejects an archive that could not be used as evidence.
 func (a PinArchive) Validate() error {
@@ -56,7 +63,7 @@ func (a PinArchive) Validate() error {
 		return errors.New("pin archive catalog revision is required")
 	}
 	if len(a.Entries) == 0 {
-		return errors.New("pin archive requires at least one entry")
+		return ErrEmptyPinArchive
 	}
 	seen := make(map[string]struct{}, len(a.Entries))
 	for _, entry := range a.Entries {
@@ -119,7 +126,10 @@ func ArchivablePins(catalog Catalog) []ArtifactPin {
 // unarchived ones, and reads as though the archive did not work. Naming the missing references
 // instead makes an incomplete archive actionable.
 func ValidateArchiveCoverage(catalog Catalog, archive PinArchive) error {
-	if err := archive.Validate(); err != nil {
+	// An empty archive is reported as missing coverage rather than as a malformed manifest. It is the
+	// expected first result for a corpus whose origins have all been republished, and naming the
+	// unpreserved pins is what tells an operator how much of the corpus is already unrecoverable.
+	if err := archive.Validate(); err != nil && !errors.Is(err, ErrEmptyPinArchive) {
 		return err
 	}
 	if archive.CatalogRevision != catalog.Revision {

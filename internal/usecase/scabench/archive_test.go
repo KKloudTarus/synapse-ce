@@ -32,7 +32,7 @@ func TestPinArchiveValidateRejectsUnusableEvidence(t *testing.T) {
 	}{
 		{"unknown schema", func(a *PinArchive) { a.SchemaVersion = "something-else" }, "schema version"},
 		{"blank revision", func(a *PinArchive) { a.CatalogRevision = "  " }, "catalog revision is required"},
-		{"no entries", func(a *PinArchive) { a.Entries = nil }, "at least one entry"},
+		{"no entries", func(a *PinArchive) { a.Entries = nil }, "preserved no entries"},
 		{"blank reference", func(a *PinArchive) { a.Entries[0].Reference = "" }, "reference is required"},
 		{"short digest", func(a *PinArchive) { a.Entries[0].Digest = "sha256:abc" }, "immutable sha256"},
 		{"uppercase digest", func(a *PinArchive) {
@@ -164,6 +164,32 @@ func TestValidateArchiveCoverageRequiresEveryFetchablePin(t *testing.T) {
 			t.Fatalf("an orphaned entry must be rejected, got %v", err)
 		}
 	})
+}
+
+// TestValidateArchiveCoverageNamesEveryPinWhenNothingWasArchived covers the first run against a
+// corpus whose origins have all been republished. Reporting only "the manifest is empty" would tell an
+// operator nothing about how much of the corpus is unrecoverable.
+func TestValidateArchiveCoverageNamesEveryPinWhenNothingWasArchived(t *testing.T) {
+	catalog := Catalog{Revision: "rev-1", Pins: []ArtifactPin{
+		{Reference: "database:owned:sles", Digest: "sha256:" + strings.Repeat("a", 64), Origin: "https://ftp.suse.com/x.gz"},
+		{Reference: "source:redhat-vex", Digest: "sha256:" + strings.Repeat("b", 64), Origin: "https://security.access.redhat.com/v.json"},
+	}}
+	empty := PinArchive{SchemaVersion: PinArchiveSchemaVersion, CatalogRevision: "rev-1"}
+
+	err := ValidateArchiveCoverage(catalog, empty)
+	if err == nil {
+		t.Fatal("an empty archive must not satisfy coverage")
+	}
+	for _, reference := range []string{"database:owned:sles", "source:redhat-vex"} {
+		if !strings.Contains(err.Error(), reference) {
+			t.Errorf("coverage must name %q, got %v", reference, err)
+		}
+	}
+
+	// A malformed empty archive is still rejected on its own terms, so the exemption is narrow.
+	if err := ValidateArchiveCoverage(catalog, PinArchive{CatalogRevision: "rev-1"}); err == nil || !strings.Contains(err.Error(), "schema version") {
+		t.Fatalf("an empty archive with a bad schema must still be rejected, got %v", err)
+	}
 }
 
 // TestValidateArchiveCoverageAcceptsOriginlessOnlyCatalog keeps the coverage rule from demanding an

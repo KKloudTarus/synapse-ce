@@ -35,9 +35,34 @@ type HTTPPinFetcher struct{ client *http.Client }
 
 var _ PinFetcher = (*HTTPPinFetcher)(nil)
 
+// maxPinRedirects bounds a redirect chain. Release artifacts are commonly served by one hop to a
+// signed CDN URL, so a small allowance covers real origins while keeping a redirect loop bounded.
+const maxPinRedirects = 5
+
 // NewHTTPPinFetcher builds a fetcher that refuses private and link-local destinations.
+//
+// Redirects are followed, within a bound, because the pinned release artifacts genuinely require it:
+// a GitHub release download answers 302 with a signed CDN location, so refusing to follow would make
+// every binary and source pin unfetchable. Each hop is revalidated rather than trusted, and the
+// transport's address checks still apply to the redirect target.
 func NewHTTPPinFetcher() *HTTPPinFetcher {
-	return &HTTPPinFetcher{client: safehttp.New(pinFetchTimeout, false)}
+	client := safehttp.New(pinFetchTimeout, false)
+	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if len(via) >= maxPinRedirects {
+			return fmt.Errorf("pin origin exceeded %d redirects", maxPinRedirects)
+		}
+		// A redirect can downgrade the channel or point somewhere unexpected, so the hop is held to the
+		// same rule as the origin. Only scheme and host are reported: a signed CDN location carries
+		// access tokens in its query string, and this message reaches logs and run output.
+		if request.URL.Scheme != "https" {
+			return fmt.Errorf("pin origin redirected to a non-https location at %q", request.URL.Host)
+		}
+		if request.URL.User != nil {
+			return fmt.Errorf("pin origin redirected to a credential-bearing location at %q", request.URL.Host)
+		}
+		return nil
+	}
+	return &HTTPPinFetcher{client: client}
 }
 
 // Fetch retrieves an origin's bytes.
@@ -48,7 +73,7 @@ func NewHTTPPinFetcher() *HTTPPinFetcher {
 // nothing. Redirects are not followed, because the shared client returns the redirect response and a
 // pin must name the location its bytes actually came from.
 func (f *HTTPPinFetcher) Fetch(ctx context.Context, origin string) ([]byte, error) {
-	if err := validatePinOrigin(origin); err != nil {
+	if err := validateFetchableOrigin(origin); err != nil {
 		return nil, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, origin, nil)
@@ -79,15 +104,31 @@ func (f *HTTPPinFetcher) Fetch(ctx context.Context, origin string) ([]byte, erro
 	return data, nil
 }
 
-// validatePinOrigin refuses an origin that could not yield trustworthy evidence.
+// ErrUnsupportedOriginScheme marks an origin this fetcher cannot retrieve even though the catalog
+// legitimately permits it.
+//
+// The catalog admits "oci://" for databases published only as registry images — the trivy database is
+// the case in point. Pulling a registry artifact needs a registry client rather than an HTTP GET, so
+// this fetcher reports the gap distinctly instead of calling a valid pin malformed. An operator can
+// then archive that artifact from a retained copy through the same store.
+var ErrUnsupportedOriginScheme = errors.New("origin scheme is not retrievable over http")
+
+// validateFetchableOrigin refuses an origin this fetcher must not or cannot retrieve.
 //
 // This is separate from Fetch so the rule is decidable without a network dial. Asserting it through
 // Fetch would let a rejected origin and an origin that merely failed to resolve produce the same
 // observable outcome, which is how a missing check passes a test that only expects "some error".
-func validatePinOrigin(origin string) error {
+//
+// The catalog's own origin rule is the authority on what a pin may record
+// (scabench.ArtifactPin, validated in the usecase package); this function is narrower on purpose,
+// answering only whether an HTTP GET can fetch it.
+func validateFetchableOrigin(origin string) error {
 	parsed, err := url.Parse(origin)
 	if err != nil {
 		return fmt.Errorf("parse pin origin: %w", err)
+	}
+	if parsed.Scheme == "oci" {
+		return fmt.Errorf("%w: %q", ErrUnsupportedOriginScheme, parsed.Scheme)
 	}
 	// A pin origin is corpus data rather than a compiled constant, so an artifact fetched over a
 	// tamperable channel would be evidence of nothing.
@@ -110,20 +151,36 @@ type ArchiveResult struct {
 	// Archive is the manifest of everything successfully preserved. It is usable evidence even when
 	// Drifted or Failed is non-empty, so a partial run still yields what it managed to retain.
 	Archive bench.PinArchive
-	// Drifted names pins whose origin now serves different bytes. This is the expected outcome for a
-	// corpus pinned before archiving existed, and it is reported separately from Failed because it is
-	// a finding about the vendor rather than an error in the run.
-	Drifted []DriftedPin
+	// Unverified names pins whose fetched bytes do not hash to the pin digest. It is reported
+	// separately from Failed because the fetch succeeded, and it is deliberately not called drift.
+	//
+	// Two different causes produce this result and the fetched bytes alone cannot tell them apart. The
+	// vendor may have republished the artifact, or the pin digest may describe something derived from
+	// the download rather than the download itself. Both occur in the committed catalog: the grype pin
+	// is the digest of the `grype` executable extracted from a release tarball, not of the tarball, and
+	// the `database:` pins are directory-tree digests. Calling either case "drift" would be a false
+	// claim about a vendor, so both digests are reported and the cause is left to the operator.
+	Unverified []UnverifiedPin
 	// Failed names pins that could not be retrieved at all.
 	Failed []FailedPin
+	// Unsupported names pins whose origin is valid but not fetchable by this fetcher, such as a
+	// registry-hosted database. Kept apart from Failed so a catalog-legal pin is not reported as
+	// broken; it needs a different retrieval route, not a fix.
+	Unsupported []FailedPin
 }
 
-// DriftedPin records an origin that no longer serves its pinned bytes.
-type DriftedPin struct {
+// UnverifiedPin records an origin whose fetched bytes do not hash to the pin digest.
+//
+// Both digests are recorded because the comparison alone does not establish a cause: the artifact may
+// have been republished, or the pin may describe a derived form such as a file extracted from a
+// release archive or a digest over an unpacked directory tree.
+type UnverifiedPin struct {
 	Reference string
 	Origin    string
 	Pinned    string
-	Served    string
+	// Fetched is the digest of exactly the bytes the origin returned, before any extraction or
+	// decompression.
+	Fetched string
 }
 
 // FailedPin records an origin that could not be read.
@@ -164,14 +221,19 @@ func ArchiveCatalogPins(ctx context.Context, catalog bench.Catalog, fetcher PinF
 		}
 		data, err := fetcher.Fetch(ctx, pin.Origin)
 		if err != nil {
-			result.Failed = append(result.Failed, FailedPin{Reference: pin.Reference, Origin: pin.Origin, Reason: err.Error()})
+			entry := FailedPin{Reference: pin.Reference, Origin: pin.Origin, Reason: err.Error()}
+			if errors.Is(err, ErrUnsupportedOriginScheme) {
+				result.Unsupported = append(result.Unsupported, entry)
+				continue
+			}
+			result.Failed = append(result.Failed, entry)
 			continue
 		}
 		if err := store.Put(pin.Digest, data); err != nil {
-			served := bench.SHA256Digest(data)
-			if served != pin.Digest {
-				result.Drifted = append(result.Drifted, DriftedPin{
-					Reference: pin.Reference, Origin: pin.Origin, Pinned: pin.Digest, Served: served,
+			fetched := bench.SHA256Digest(data)
+			if fetched != pin.Digest {
+				result.Unverified = append(result.Unverified, UnverifiedPin{
+					Reference: pin.Reference, Origin: pin.Origin, Pinned: pin.Digest, Fetched: fetched,
 				})
 				continue
 			}
