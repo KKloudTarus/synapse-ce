@@ -92,6 +92,7 @@ nav:
           - Telemetry store ADR: repository/telemetry-store-adr.md
           - CSPM helper ADR: repository/cspm-helper-adr.md
           - Interpretive compliance mappings ADR: repository/interpretive-compliance-mappings-adr.md
+          - Red Hat advisory feed breadth ADR: repository/red-hat-advisory-feed-breadth-adr.md
           - Promotion rules: repository/promotion-rules.md
           - Offensive policy: repository/offensive-policy.md
 
