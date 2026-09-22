@@ -143,6 +143,7 @@ func TestGuideInternalLinksResolve(t *testing.T) {
 var publishedMirrors = map[string]string{
 	"docs/guide/repository/telemetry-store-adr.md": "docs/adr/0001-telemetry-store.md",
 	"docs/guide/repository/cspm-helper-adr.md":     "docs/adr/0004-cspm-helper-authorization.md",
+	"docs/guide/repository/interpretive-compliance-mappings-adr.md": "docs/adr/0009-interpretive-compliance-mappings.md",
 	"docs/guide/repository/promotion-rules.md":     "docs/architecture/promotion-rules.md",
 	"docs/guide/repository/offensive-policy.md":    "docs/redteam/offensive-policy.md",
 }
