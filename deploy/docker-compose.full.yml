@@ -169,11 +169,11 @@ services:
       # --- SCA feature flags: the full analysis set is ON BY DEFAULT (these are the code
       #     defaults, listed explicitly so the enabled surface is visible). Everything here
       #     works WITHOUT the sandbox. Set any to "false" to opt out. ---
-      SYNAPSE_SBOM_PRODUCER: "syft"
+      SYNAPSE_SBOM_PRODUCER: "ownsbom"      # default owned producer (no external tool); this image also bundles Syft for the cross-check below
       SYNAPSE_OWNED_ADVISORY: "true"        # owned matcher; populate with `synapse-cli sync-advisories`
       SYNAPSE_JUDGMENTS_ENABLED: "true"
       SYNAPSE_CROSSCHECK_ENABLED: "true"
-      SYNAPSE_SBOM_CROSSCHECK_ENABLED: "true"
+      SYNAPSE_SBOM_CROSSCHECK_ENABLED: "true" # bundled Syft runs as the 2nd producer for cross-check judgments
       SYNAPSE_SAST_ENABLED: "true"
       SYNAPSE_SECRET_SCAN_ENABLED: "true"   # hardcoded credentials; matches redacted
       SYNAPSE_MISCONFIG_ENABLED: "true"     # Dockerfile + Kubernetes manifests

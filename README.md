@@ -152,8 +152,10 @@ The lasting difference is what sits around the finding:
 ### Prerequisites
 
 - Go 1.26 (pinned in `go.mod`), Node and pnpm (use pnpm, not npm or yarn).
-- Syft (required for any scan) and Grype (optional, adds the offline database). `make tools`
-  installs both, pinned and checksum-verified, into `./bin`.
+- No external scanner is required: the owned SBOM producer + owned advisory store are the default
+  and run with no third-party tool. Syft (optional, broadest SBOM coverage / cross-check) and Grype
+  (optional, adds the offline database) are supported extras — `make tools` installs both, pinned and
+  checksum-verified, into `./bin`.
 - Docker is optional and is the easiest way to run the full stack.
 - The hardened sandbox and live recon need a Linux host. Without them the API still runs
   (SCA, findings, reports); sandboxed execution fails closed rather than running unsandboxed.
