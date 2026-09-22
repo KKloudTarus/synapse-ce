@@ -281,21 +281,43 @@ func (r *AdvisoryMaterializer) materializeSourceSnapshot(ctx context.Context, pu
 		return nil, fmt.Errorf("iterate authoritative source identities: %w", err)
 	}
 	rows.Close()
-	// A complete snapshot's records are disjoint members of one source, so they are materialized in
-	// bounded chunks rather than one at a time. The per-record path costs roughly five round-trips each,
-	// which at the 81,920-change cap exceeds the publication deadline while holding the table lock, so a
-	// maximum-size snapshot could never commit and every attempt would starve ordinary writers.
+	// A complete snapshot is materialized in bounded chunks rather than one record at a time. The
+	// per-record path costs roughly five round-trips each, which at the 81,920-change cap exceeded the
+	// publication deadline while holding the table lock, so a maximum-size snapshot could never commit and
+	// every attempt starved ordinary writers.
+	//
+	// Batching makes that fast for the independent majority, but it does not by itself bound the worst
+	// case: records already linked by existing alias rows take the per-identity closure path, and nothing
+	// limits how many of those one snapshot may contain. The remaining-deadline check below therefore makes
+	// the guarantee structural instead of probabilistic. Rather than starting a chunk it may not finish,
+	// the publication abandons the attempt while the table lock is still young, so the run retires and can
+	// be retried instead of burning the whole lease and blocking writers for its duration.
 	results := make([]advisory.MaterializationResult, 0, len(normalized))
 	links := make([]advisoryRevisionSyncRunLink, 0, len(normalized))
+	chunks := 0
+	started := time.Now()
 	for start := 0; start < len(normalized); start += advisory.MaxMaterializationBatch {
 		end := start + advisory.MaxMaterializationBatch
 		if end > len(normalized) {
 			end = len(normalized)
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("authoritative source snapshot deadline reached after %d of %d records: %w", start, len(normalized), err)
+		}
+		if deadline, ok := ctx.Deadline(); ok && chunks > 0 {
+			// Project this chunk from the average cost of the chunks already done. Refusing to start a
+			// chunk that cannot finish keeps the failure attributable and the lock hold short.
+			projected := time.Since(started) / time.Duration(chunks)
+			if remaining := time.Until(deadline); remaining < projected {
+				return nil, fmt.Errorf("%w: authoritative source snapshot needs about %s for its next batch but only %s of its deadline remains after %d of %d records",
+					shared.ErrValidation, projected.Round(time.Millisecond), remaining.Round(time.Millisecond), start, len(normalized))
+			}
+		}
 		chunkResults, chunkLinks, err := r.materializeSnapshotChunk(ctx, tx, normalized[start:end])
 		if err != nil {
 			return nil, err
 		}
+		chunks++
 		results = append(results, chunkResults...)
 		links = append(links, chunkLinks...)
 	}
