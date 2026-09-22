@@ -39,7 +39,12 @@ Accepted trusted capture (corpus/ratchet-baseline.json, 8 floors, Debian and SLE
 
 Committed corpus (corpus/ratchet.json, 12 floors, adds rhel-9-8-ubi-amd64):
   catalog_revision  same-sbom-linux-20260922
-  oracle_digest     sha256:a6d7092b...
+  oracle_digest     sha256:8012364a...
+
+The oracle digest moved from sha256:a6d7092b under ADR 0010, which re-cited the
+CVE-2026-22185 / openldap case from the binary-aware CSAF VEX to the package-granular
+Red Hat Security Data API record. Truth and expected coverage are unchanged, so the
+measured outcome is unchanged; only the evidence the label rests on was corrected.
 
 Consequences, all currently true:
   - ValidateRatchetTightening cannot be applied to the committed pair: it requires an identical
@@ -98,7 +103,7 @@ func TestCommittedCorpusEvidenceCurrency(t *testing.T) {
 	// else has not been reviewed, so it must fail rather than inherit this acknowledgement.
 	const (
 		acknowledgedCommittedRevision    = "same-sbom-linux-20260922"
-		acknowledgedCommittedOracleDiges = "sha256:a6d7092bd2a6308f91ab78cca63decbfaec830c617ed0e6f44517bec8c2532fa"
+		acknowledgedCommittedOracleDiges = "sha256:8012364a316d6ae05c350d1d5ce0d8730b3ec28163822a0ff41aa7b76d4096ea"
 	)
 	if committed.CatalogRevision != acknowledgedCommittedRevision {
 		t.Fatalf("committed catalog revision %q is not the acknowledged divergence %q; revalidate the corpus or update the debt note",
