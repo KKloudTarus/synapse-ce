@@ -58,6 +58,29 @@ Coverage remains explicit: `covered`, `unknown`, `unsupported`, and `incomplete`
 
 The accepted historical ratchet is byte-pinned. Candidate catalog and Oracle identities may migrate with a reviewed target addition, but the Debian and SLES comparator policy thresholds remain unchanged. The sole historical-floor disposition is SLES Owned: `maximum_unknown` changes from 0 to 537 while `minimum_recall` tightens from 0 to 1 and `maximum_false_negatives` tightens from 16 to 0. This is an exact, tested exception, not a general threshold-relaxation mechanism.
 
+## Vendor evidence is pinned by digest but not archived
+
+A catalog pin records a vendor artifact's digest and its origin, which is enough to detect drift and refuse a
+mismatched capture, but it does not preserve the bytes. Vendors serve these feeds from mutable paths rather than
+content-addressed archives: Red Hat regenerates a CSAF VEX document in place under the same CVE filename, and
+the SUSE OVAL, Debian OVAL, and OSV Debian snapshots change size between fetches of the same advertised build.
+Once a document is regenerated, the originally pinned bytes are no longer retrievable from the origin.
+
+Two consequences follow, and both are expected rather than defects:
+
+- A re-capture on fresh infrastructure fails every ratchet floor with `pin_mismatch` on `database_digest`. That
+  is the gate working: accuracy numbers measured against different evidence must not silently replace numbers
+  measured against the pinned evidence.
+- An Oracle case can outlive the evidence it cites. A vendor may withdraw a product from a CVE's affected set,
+  after which not reporting that component is correct and the case needs re-labelling against newly captured
+  evidence under independent review.
+
+Because engine binaries and the environment attestation do reproduce byte-exactly, drift is confined to the
+vendor data feeds. Re-deriving thresholds from a drifted corpus would pin scores against evidence the Oracle's
+citations no longer describe, so a re-capture on drifted feeds is treated as diagnostic measurement and the
+committed catalog and ratchet stay unchanged. Making a pinned corpus durably reproducible requires archiving the
+exact vendor bytes into content-addressed storage at pin time.
+
 ## Focused offline verification
 
 Use this small local check while changing the benchmark implementation:
