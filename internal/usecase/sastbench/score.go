@@ -2,9 +2,9 @@
 // BenchmarkJava) and reduces the result to a per-category precision/recall scorecard with a regression
 // ratchet. It is a pure reducer: the engine's detections and the benchmark's answer key are passed in, so
 // this package holds no infrastructure and is deterministic. The scorecard is scoped to the CWE classes the
-// engine MODELS (command injection, SQL injection, path traversal, LDAP injection, XPath injection);
-// categories it does not model are reported as "not covered" rather than scored, so the numbers never
-// misrepresent the engine on a vulnerability class it does not claim.
+// engine MODELS (command injection, SQL injection, path traversal, LDAP injection, XPath injection, and
+// reflected XSS); categories it does not model are reported as "not covered" rather than scored, so the
+// numbers never misrepresent the engine on a vulnerability class it does not claim.
 //
 // The precision figure is PROPOSE-STAGE: the taint engine is a propose-stage proposer that deliberately
 // models no sanitizers, so it flags the benchmark's sanitized-safe variants (which a downstream verify /
@@ -21,18 +21,20 @@ import (
 )
 
 // ScoredCategories maps each OWASP BenchmarkJava category the engine models to the CWE the engine emits for
-// it. ldapi (CWE-90) and xpathi (CWE-643) are scored now that the Java catalog carries import-gated,
-// receiver-typed models for them (#1039); their recall floor stays uncommitted in owasp-benchmark-floors.json
-// until a gated OWASP run calibrates it, so they are measured and reported but not yet recall-gated (a new
-// category starts ungated until a floor is committed — see CheckRatchet). Categories the engine does not model
-// (xss, crypto, hash, trustbound, weakrand, securecookie) remain intentionally absent and reported as
-// not-covered.
+// it. ldapi (CWE-90), xpathi (CWE-643) and xss (CWE-79) are scored now that the Java catalog carries models
+// for them (#1039). xss covers ONLY reflected XSS (the servlet response-writer sink), so its recall reflects
+// that subset — stored/DOM XSS are not modeled and drag the OWASP xss recall down honestly rather than being
+// hidden. Their recall floors stay uncommitted in owasp-benchmark-floors.json until a gated OWASP run
+// calibrates them, so they are measured and reported but not yet recall-gated (a new category starts ungated
+// until a floor is committed — see CheckRatchet). Categories the engine does not model (crypto, hash,
+// trustbound, weakrand, securecookie) remain intentionally absent and reported as not-covered.
 var ScoredCategories = map[string]string{
 	"cmdi":       "CWE-78",
 	"sqli":       "CWE-89",
 	"pathtraver": "CWE-22",
 	"ldapi":      "CWE-90",
 	"xpathi":     "CWE-643",
+	"xss":        "CWE-79",
 }
 
 // Case is one benchmark test case from the answer key: its test name, category, and whether it is a real
