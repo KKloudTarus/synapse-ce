@@ -79,7 +79,7 @@ jobs:
           echo "token=${TOKEN}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up a JDK to compile the corpus Java fixtures
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
