@@ -605,7 +605,7 @@ func resolveRPMProduct(purlByProduct, cpeByProduct, nameByProduct map[string]str
 	if !ok {
 		return rpmProductBinding{}, false
 	}
-	name, evr, kind, ok := redHatRPMPurl(purlByProduct[rel.pkgRef])
+	name, evr, kind, ok := redHatRPMPurl(rel.pkgRef, purlByProduct[rel.pkgRef])
 	if !ok {
 		return rpmProductBinding{}, false
 	}
@@ -624,7 +624,7 @@ func resolveRPMProduct(purlByProduct, cpeByProduct, nameByProduct map[string]str
 	return rpmProductBinding{ecosystem: ecosystem, pkg: name, evr: evr, kind: kind}, true
 }
 
-func redHatRPMPurl(purl string) (name, evr string, kind rpmProductKind, ok bool) {
+func redHatRPMPurl(productID, purl string) (name, evr string, kind rpmProductKind, ok bool) {
 	const prefix = "pkg:rpm/redhat/"
 	if !strings.HasPrefix(purl, prefix) {
 		return "", "", 0, false
@@ -649,10 +649,13 @@ func redHatRPMPurl(purl string) (name, evr string, kind rpmProductKind, ok bool)
 	name = strings.TrimSpace(decodePURLSegment(namePart))
 	arch := strings.TrimSpace(decodePURLSegment(purlQualifier(purl, "arch")))
 	upstream := strings.TrimSpace(decodePURLSegment(purlQualifier(purl, "upstream")))
-	if name == "" || strings.EqualFold(arch, "src") || (arch == "" && upstream == "") {
-		// Unversioned source products are explicitly arch=src. For an unversioned product without an
-		// architecture, the upstream qualifier is the binary-expansion proof that the name is an installable
-		// binary RPM rather than an ambiguous source/component identity.
+	if name == "" || strings.EqualFold(arch, "src") {
+		// A source product is explicitly arch=src and never describes an installed binary.
+		return "", "", 0, false
+	}
+	if arch == "" && upstream == "" && !redHatBinaryProductID(productID) {
+		// Without an architecture or upstream qualifier the product_id is the only remaining proof that the
+		// name is an installable binary rather than a source or modular identity.
 		return "", "", 0, false
 	}
 	if versionPart == "" {
@@ -663,6 +666,30 @@ func redHatRPMPurl(purl string) (name, evr string, kind rpmProductKind, ok bool)
 		return "", "", 0, false
 	}
 	return name, rpmCanonicalEVR(versionPart, decodePURLSegment(purlQualifier(purl, "epoch"))), rpmProductBounded, true
+}
+
+// redHatBinaryProductID reports whether a package product_id names an installable binary RPM, for the
+// unversioned products Red Hat emits when a CVE has no fixed package version. Those products carry no arch or
+// upstream qualifier, so the id is the only available discriminator, and Red Hat states the two identities it
+// must exclude explicitly:
+//   - a source product ends in ".src" (and also carries arch=src, rejected before this call);
+//   - a modular product embeds its stream as "<name>::<module>:<stream>", a parallel version line that the
+//     linear range matcher cannot represent soundly.
+//
+// Anything else is a plain binary name. This admits the not-yet-fixed evidence while keeping both excluded
+// identities out, so a miss stays a miss and never becomes a cross-identity false positive.
+func redHatBinaryProductID(productID string) bool {
+	value := strings.TrimSpace(productID)
+	if value == "" {
+		return false
+	}
+	if strings.Contains(value, "::") {
+		return false // modular stream identity
+	}
+	if strings.HasSuffix(strings.ToLower(value), ".src") {
+		return false // source identity
+	}
+	return true
 }
 
 func rhelPlatformEcosystem(major, productID, productName string) (string, bool) {
