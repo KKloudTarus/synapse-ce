@@ -182,6 +182,37 @@ func TestPnpmParseV9Edges(t *testing.T) {
 	}
 }
 
+// TestPnpmParseV9Edges aggregates express's records by source, which deliberately discards the split. This
+// asserts the split itself: `optionalDependencies:` targets must carry Optional and `dependencies:` targets
+// must not (pnpm.go:246-251 emits them as separate records). The bit is a parser OUTPUT contract; no caller
+// reads it to prioritize yet, so this pins the emitted value rather than a consumer's behavior.
+func TestPnpmV9OptionalEdgesCarryOptionalBit(t *testing.T) {
+	_, deps, err := Pnpm{}.Parse(context.Background(), ParseInput{Path: "pnpm-lock.yaml", Content: []byte(pnpmLockV9Edges)})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	const express = "pkg:npm/express@4.18.2"
+	gotReq, gotOpt := map[string]bool{}, map[string]bool{}
+	for _, d := range deps {
+		if d.Ref != express {
+			continue
+		}
+		for _, target := range d.DependsOn {
+			if d.Optional {
+				gotOpt[target] = true
+			} else {
+				gotReq[target] = true
+			}
+		}
+	}
+	if !gotOpt["pkg:npm/bytes@3.1.2"] || gotReq["pkg:npm/bytes@3.1.2"] {
+		t.Errorf("bytes is an optionalDependencies target: want OPTIONAL only, got required=%v optional=%v", gotReq, gotOpt)
+	}
+	if !gotReq["pkg:npm/body-parser@1.20.1"] || gotOpt["pkg:npm/body-parser@1.20.1"] {
+		t.Errorf("body-parser is a dependencies target: want REQUIRED only, got required=%v optional=%v", gotReq, gotOpt)
+	}
+}
+
 // v6: dependency edges come from the `packages:` block (keys carry a leading / and a (peer) suffix).
 const pnpmLockV6Edges = `lockfileVersion: '6.0'
 

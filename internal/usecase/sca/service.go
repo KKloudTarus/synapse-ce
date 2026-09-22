@@ -1035,8 +1035,9 @@ func mergeResolvedManifest(doc *sbom.SBOM, resolved []sbom.Component) {
 	doc.Components = sbom.DedupeComponents(append(kept, resolved...))
 }
 
-// SetSBOMCrossCheck configures the optional SBOM-producer cross-check: a SECOND SBOM producer plus
-// the disagreement→judgment recorder. nil either ⇒ no cross-check. Best-effort + opt-in: the 2nd producer
+// SetSBOMCrossCheck configures the SBOM-producer cross-check: a SECOND SBOM producer plus
+// the disagreement→judgment recorder. nil either ⇒ no cross-check. Best-effort and enabled by default at the
+// composition root (SYNAPSE_SBOM_CROSSCHECK_ENABLED defaults true): the 2nd producer
 // runs only for the cross-check and a failure is ignored (the scan never fails). A setter keeps NewService
 // call sites unchanged.
 func (s *Service) SetSBOMCrossCheck(producer ports.SBOMGenerator, r ports.SBOMCrossCheckRecorder) {

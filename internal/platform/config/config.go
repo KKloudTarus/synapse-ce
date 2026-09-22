@@ -136,8 +136,9 @@ type Config struct {
 	// --ignore-unfixed. Default false (show everything); they remain in the vuln inventory.
 	IgnoreUnfixed bool
 	// Offline, when true, forbids network egress for a scan. It omits detection sources that require it
-	// (the live OSV.dev source), running only offline sources – Grype's pre-synced DB and the owned
-	// advisory store – AND switches off every registry resolver (npm, composer, poetry, Bundler, Maven,
+	// (the live OSV.dev source), running only offline sources – the owned advisory store, plus Grype's
+	// pre-synced DB when SYNAPSE_DETECTION_SOURCES names it (scacompose.resolveDetectionSourceNames owns
+	// the selection and never adds Grype by default) – AND switches off every registry resolver (npm, composer, poetry, Bundler, Maven,
 	// Gradle), the Maven Central JAR SHA-1 lookup, the KEV/EPSS and online NVD enrichers, the deps.dev
 	// and PyPI license metadata, and AI triage. Trades some recall for an air-gapped scan (no HTTP at
 	// all). Default false.

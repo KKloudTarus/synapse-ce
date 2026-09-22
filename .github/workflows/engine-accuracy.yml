@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: ["**"]
+    branches: [main]
   schedule:
     - cron: "17 3 * * 2"
   workflow_dispatch:
@@ -107,6 +107,7 @@ jobs:
     steps:
       - shell: bash
         env:
+          EVENT_NAME: ${{ github.event_name }}
           TRUSTED: ${{ needs.route.outputs.trusted }}
           ROUTE: ${{ needs.route.result }}
           BENCHMARK: ${{ needs.benchmark.result }}
@@ -114,6 +115,18 @@ jobs:
         run: |
           set -euo pipefail
           test "$ROUTE" = success
+          # A pull request can never be authorized: the trust predicate hard-requires a non-PR event, so this
+          # pins that invariant rather than restating it hopefully.
+          if [ "$EVENT_NAME" = pull_request ]; then
+            test "$TRUSTED" = false
+          fi
+          # Gate the evidence assertions on trust rather than asserting trust itself. Engine's trust predicate
+          # pins an exact TRUSTED_SHA, so a bare `test "$TRUSTED" = true` on every non-PR event would be
+          # satisfiable by exactly one commit and red for every other push and for the weekly cron. That is
+          # reachability's contract (reachability-benchmark.yml:662-672), and it holds there only because its
+          # predicate authorizes on ref alone -- REACHABILITY_BENCHMARK_TRUSTED_SHA is a forbidden string in
+          # its policy test. Asserting an unreachable positive would replace a weak gate with a permanently
+          # red one, so an authorized run must produce evidence and an unauthorized run must produce none.
           if [ "$TRUSTED" = true ]; then
             test "$BENCHMARK" = success
             test -n "$ARTIFACT"

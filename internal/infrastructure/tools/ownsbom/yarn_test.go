@@ -211,6 +211,51 @@ react@^18.0.0:
 	}
 }
 
+// The optional edge must also carry the Optional BIT, not merely exist. Required and optional targets are
+// emitted as SEPARATE Dependency records (yarn.go:178 and :181), and the Ref-keyed helpers in
+// edges_1036_test.go collapse same-Ref records, so no existing test can see the split. The bit is a parser
+// OUTPUT contract: nothing reads it to make a decision yet (projectuc/dependency_graph.go only copies the
+// field), so this pins the emitted value rather than a consumer's behavior.
+func TestYarnOptionalDepsCarryOptionalBit(t *testing.T) {
+	lock := `pkg@^1.0.0:
+  version "1.0.0"
+  dependencies:
+    lodash "^4.0.0"
+  optionalDependencies:
+    fsevents "^2.0.0"
+
+lodash@^4.0.0:
+  version "4.17.21"
+
+fsevents@^2.0.0:
+  version "2.3.3"
+`
+	_, deps, err := Yarn{}.Parse(context.Background(), ParseInput{Path: "yarn.lock", Content: []byte(lock)})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	const parent = "pkg:npm/pkg@1.0.0"
+	gotReq, gotOpt := map[string]bool{}, map[string]bool{}
+	for _, d := range deps {
+		if d.Ref != parent {
+			continue
+		}
+		for _, target := range d.DependsOn {
+			if d.Optional {
+				gotOpt[target] = true
+			} else {
+				gotReq[target] = true
+			}
+		}
+	}
+	if !gotOpt["pkg:npm/fsevents@2.3.3"] || gotReq["pkg:npm/fsevents@2.3.3"] {
+		t.Errorf("fsevents must be an OPTIONAL edge only, got required=%v optional=%v", gotReq, gotOpt)
+	}
+	if !gotReq["pkg:npm/lodash@4.17.21"] || gotOpt["pkg:npm/lodash@4.17.21"] {
+		t.Errorf("lodash must be a REQUIRED edge only, got required=%v optional=%v", gotReq, gotOpt)
+	}
+}
+
 // Hostile/malformed dependency-block lines must never panic and must yield no garbage edge (locks the
 // parseYarnDep slice-safety the security review reasoned about).
 func TestYarnParseDepHostileLines(t *testing.T) {
