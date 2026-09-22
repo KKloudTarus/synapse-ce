@@ -14,8 +14,9 @@ func TestScorePerCategory(t *testing.T) {
 		{Name: "T5", Category: "sqli", Real: true},   // detected -> TP
 		{Name: "L1", Category: "ldapi", Real: true},  // detected -> TP (CWE-90)
 		{Name: "L2", Category: "ldapi", Real: false}, // detected -> FP (sanitized-safe flagged)
-		{Name: "P1", Category: "xpathi", Real: true}, // not detected -> FN (CWE-643)
-		{Name: "X1", Category: "xss", Real: true},    // unscored category -> ignored
+		{Name: "P1", Category: "xpathi", Real: true},  // not detected -> FN (CWE-643)
+		{Name: "X1", Category: "xss", Real: true},     // detected -> TP (CWE-79, reflected XSS)
+		{Name: "C1", Category: "crypto", Real: true},  // unscored category -> ignored
 	}
 	detected := map[string]map[string]bool{
 		"T1": {"CWE-78": true},
@@ -48,13 +49,17 @@ func TestScorePerCategory(t *testing.T) {
 	if xpathi := byCat["xpathi"]; xpathi.CWE != "CWE-643" || xpathi.FN != 1 || xpathi.Recall != 0 {
 		t.Errorf("xpathi = %+v, want CWE-643 FN=1 recall=0", xpathi)
 	}
-	// xss is unscored: it must not appear
-	if _, ok := byCat["xss"]; ok {
+	// xss (CWE-79): one real detected (TP) => recall 1; scored (present), not not-covered.
+	if xss := byCat["xss"]; xss.CWE != "CWE-79" || xss.TP != 1 || xss.Recall != 1 {
+		t.Errorf("xss = %+v, want CWE-79 TP=1 recall=1", xss)
+	}
+	// crypto is unscored: it must not appear
+	if _, ok := byCat["crypto"]; ok {
 		t.Error("an unscored category must not be scored")
 	}
-	// all five modeled categories are always present (even with zero cases), so a gap reads as not-covered
-	if len(scores) != 5 {
-		t.Fatalf("want the 5 modeled categories, got %d", len(scores))
+	// all six modeled categories are always present (even with zero cases), so a gap reads as not-covered
+	if len(scores) != 6 {
+		t.Fatalf("want the 6 modeled categories, got %d", len(scores))
 	}
 }
 
