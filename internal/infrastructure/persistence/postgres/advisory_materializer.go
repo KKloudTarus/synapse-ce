@@ -305,12 +305,8 @@ func (r *AdvisoryMaterializer) materializeSourceSnapshot(ctx context.Context, pu
 			return nil, fmt.Errorf("authoritative source snapshot deadline reached after %d of %d records: %w", start, len(normalized), err)
 		}
 		if deadline, ok := ctx.Deadline(); ok && chunks > 0 {
-			// Project this chunk from the average cost of the chunks already done. Refusing to start a
-			// chunk that cannot finish keeps the failure attributable and the lock hold short.
-			projected := time.Since(started) / time.Duration(chunks)
-			if remaining := time.Until(deadline); remaining < projected {
-				return nil, fmt.Errorf("%w: authoritative source snapshot needs about %s for its next batch but only %s of its deadline remains after %d of %d records",
-					shared.ErrValidation, projected.Round(time.Millisecond), remaining.Round(time.Millisecond), start, len(normalized))
+			if err := snapshotBudgetExhausted(time.Since(started), chunks, time.Until(deadline), start, len(normalized)); err != nil {
+				return nil, err
 			}
 		}
 		chunkResults, chunkLinks, err := r.materializeSnapshotChunk(ctx, tx, normalized[start:end])
@@ -339,6 +335,27 @@ func (r *AdvisoryMaterializer) materializeSourceSnapshot(ctx context.Context, pu
 		return nil, fmt.Errorf("commit advisory source snapshot: %w", err)
 	}
 	return results, nil
+}
+
+// snapshotBudgetExhausted reports whether the next chunk should be refused because the publication cannot
+// finish it inside its remaining deadline. The next chunk is projected from the average cost of the chunks
+// already committed; refusing to start one it cannot finish keeps the failure attributable and the table-lock
+// hold short.
+//
+// Running out of lease budget is a bounded timing failure, not invalid input, so the error reports
+// context.DeadlineExceeded. That distinction is load-bearing rather than cosmetic: the caller retires a
+// deadline abort for retry on a fresh lease, while a validation error marks the sync run permanently failed.
+// Reporting this as a validation error would make a snapshot that is merely large terminally unpublishable.
+func snapshotBudgetExhausted(elapsed time.Duration, chunks int, remaining time.Duration, done, total int) error {
+	if chunks <= 0 {
+		return nil // no committed chunk yet, so there is no measured cost to project from
+	}
+	projected := elapsed / time.Duration(chunks)
+	if remaining >= projected {
+		return nil
+	}
+	return fmt.Errorf("authoritative source snapshot needs about %s for its next batch but only %s of its deadline remains after %d of %d records: %w",
+		projected.Round(time.Millisecond), remaining.Round(time.Millisecond), done, total, context.DeadlineExceeded)
 }
 
 func (r *AdvisoryMaterializer) PublishedSourceSnapshot(ctx context.Context, syncRunID shared.ID) (ports.PublishedSourceSnapshot, bool, error) {
