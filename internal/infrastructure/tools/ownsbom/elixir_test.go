@@ -45,6 +45,44 @@ func TestElixirParseMixLock(t *testing.T) {
 	}
 }
 
+// mixLockOptional exercises real edges: parent depends on req_child (optional: false) and opt_child
+// (optional: true), both catalogued top-level entries so the edges are emitted (unlike mixLock's hpax).
+const mixLockOptional = `%{
+  "parent": {:hex, :parent, "1.0.0", "h", [:mix], [{:req_child, "~> 1.0", [hex: :req_child, optional: false]}, {:opt_child, "~> 2.0", [hex: :opt_child, optional: true]}], "hexpm", "h"},
+  "req_child": {:hex, :req_child, "1.2.0", "h", [:mix], [], "hexpm", "h"},
+  "opt_child": {:hex, :opt_child, "2.3.0", "h", [:mix], [], "hexpm", "h"},
+}
+`
+
+// A parent-declared `optional: true` dep must be emitted as a separate Dependency with Optional set, while
+// `optional: false` (or no flag) stays a required edge (#1036).
+func TestElixirMixLockOptionalEdges(t *testing.T) {
+	_, deps, err := (Elixir{}).Parse(context.Background(), ParseInput{Path: "mix.lock", Content: []byte(mixLockOptional)})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	const parent = "pkg:hex/parent@1.0.0"
+	gotReq, gotOpt := map[string]bool{}, map[string]bool{}
+	for _, d := range deps {
+		if d.Ref != parent {
+			continue
+		}
+		for _, on := range d.DependsOn {
+			if d.Optional {
+				gotOpt[on] = true
+			} else {
+				gotReq[on] = true
+			}
+		}
+	}
+	if !gotReq["pkg:hex/req_child@1.2.0"] || gotOpt["pkg:hex/req_child@1.2.0"] {
+		t.Errorf("req_child must be a REQUIRED edge; required=%v optional=%v", gotReq, gotOpt)
+	}
+	if !gotOpt["pkg:hex/opt_child@2.3.0"] || gotReq["pkg:hex/opt_child@2.3.0"] {
+		t.Errorf("opt_child must be an OPTIONAL edge; required=%v optional=%v", gotReq, gotOpt)
+	}
+}
+
 func TestElixirMarkersAndEcosystem(t *testing.T) {
 	e := Elixir{}
 	if e.Ecosystem() != "hex" {

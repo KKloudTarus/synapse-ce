@@ -21,14 +21,22 @@ var hexEntry = regexp.MustCompile(`^\s*"([^"]+)":\s*\{\s*:hex\s*,\s*:[a-zA-Z0-9_
 
 // hexDepTuple matches a nested dependency tuple inside a mix.lock entry's deps list:
 //
-//	{:dep_name, "~> 1.0", [hex: :real_package, ...]}
+//	{:dep_name, "~> 1.0", [hex: :real_package, optional: true]}
 //
 // capturing the dependency's atom name (group 1), its declared version requirement (group 2), and the
-// OPTIONAL `hex: :real_package` rename (group 3): a dep whose atom differs from its published Hex package
-// carries the real package name here, and that name is what the lock keys the component by. The outer
+// tuple's option tail up to its closing brace (group 3), from which the OPTIONAL `hex: :real_package`
+// rename and the `optional: true` flag are read (see hexRename / hexOptionalTrue). The outer
 // `{:hex, :pkg, "ver"}` tuple never matches (`:pkg` is an atom, not a quoted string, so there is no
-// `:name, "…"` shape after it); `[^}]` keeps the optional rename inside the current tuple.
-var hexDepTuple = regexp.MustCompile(`\{\s*:([a-zA-Z0-9_]+)\s*,\s*"([^"]*)"(?:[^}]*?\bhex:\s*:([a-zA-Z0-9_]+))?`)
+// `:name, "…"` shape after it); `[^}]` keeps the captured tail inside the current tuple.
+var hexDepTuple = regexp.MustCompile(`\{\s*:([a-zA-Z0-9_]+)\s*,\s*"([^"]*)"([^}]*)`)
+
+// hexRename extracts a `hex: :real_package` rename from a dep tuple's option tail; hexOptionalTrue detects
+// the `optional: true` flag. A dep with `optional: false` or no flag is a required edge; `optional: true`
+// records a parent-declared optional edge (emitted as a separate Dependency with Optional set).
+var (
+	hexRename       = regexp.MustCompile(`\bhex:\s*:([a-zA-Z0-9_]+)`)
+	hexOptionalTrue = regexp.MustCompile(`\boptional:\s*true\b`)
+)
 
 // Elixir is the owned Elixir/Erlang parser: it reads a mix.lock – the resolved dependency
 // set of a Mix project – into Hex components (pkg:hex/<name>@<version>, OSV ecosystem "Hex"). mix.lock is an
@@ -51,7 +59,10 @@ func (Elixir) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 	baseScope := sbom.ClassifyScope(in.Path, "")
 	// Pass 1: collect each Hex entry with its name, version, and the deps tuples on its line. Two passes are
 	// needed because a dep can name a package defined later in the (unordered) lockfile.
-	type hexReq struct{ name, rng string }
+	type hexReq struct {
+		name, rng string
+		optional  bool
+	}
 	type hexPkg struct {
 		name, version string
 		reqs          []hexReq
@@ -67,11 +78,11 @@ func (Elixir) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 		}
 		p := hexPkg{name: m[1], version: m[2]}
 		for _, dm := range hexDepTuple.FindAllStringSubmatch(line, -1) {
-			name := dm[1]
-			if dm[3] != "" { // a `hex: :real_package` rename: the lock keys the component by the real name
-				name = dm[3]
+			name, opts := dm[1], dm[3]
+			if rn := hexRename.FindStringSubmatch(opts); rn != nil { // `hex: :real_package`: the lock keys the component by the real name
+				name = rn[1]
 			}
-			p.reqs = append(p.reqs, hexReq{name: name, rng: dm[2]})
+			p.reqs = append(p.reqs, hexReq{name: name, rng: dm[2], optional: hexOptionalTrue.MatchString(opts)})
 		}
 		pkgs = append(pkgs, p)
 	}
@@ -95,21 +106,35 @@ func (Elixir) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 		set.add(sbom.Component{Name: p.name, Version: p.version, PURL: ref, Location: in.Path, Scope: baseScope})
 		seen := map[string]bool{ref: true}
 		byTarget := map[string]string{}
-		var on []string
+		targetOptional := map[string]bool{}
 		for _, r := range p.reqs {
 			t, ok := index[r.name]
 			if !ok || seen[t] {
 				continue
 			}
 			seen[t] = true
-			on = append(on, t)
+			targetOptional[t] = r.optional
 			if r.rng != "" {
 				byTarget[t] = r.rng
 			}
 		}
-		if len(on) > 0 {
-			sort.Strings(on)
-			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: on, Scope: baseScope, RequestedRanges: rangesFor(on, byTarget)})
+		// Split required from parent-declared-optional edges into separate Dependency records, mirroring the
+		// poetry/yarn/npm parsers, so a consumer can tell an optional edge from a required one.
+		var required, optional []string
+		for t, isOptional := range targetOptional {
+			if isOptional {
+				optional = append(optional, t)
+			} else {
+				required = append(required, t)
+			}
+		}
+		sort.Strings(required)
+		sort.Strings(optional)
+		if len(required) > 0 {
+			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: required, Scope: baseScope, RequestedRanges: rangesFor(required, byTarget)})
+		}
+		if len(optional) > 0 {
+			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: optional, Scope: baseScope, Optional: true, RequestedRanges: rangesFor(optional, byTarget)})
 		}
 	}
 	comps := set.components()
