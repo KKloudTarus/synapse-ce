@@ -130,6 +130,14 @@ func validateFetchableOrigin(origin string) error {
 	if parsed.Scheme == "oci" {
 		return fmt.Errorf("%w: %q", ErrUnsupportedOriginScheme, parsed.Scheme)
 	}
+	// A directory prefix names a set of documents rather than one artifact, and the committed catalog
+	// contains one: the Red Hat VEX database pin points at `.../data/csaf/v2/vex/`, whose digest is a
+	// tree digest over many assembled documents. A GET there returns the server's index page, so
+	// comparing those bytes to the pin would report a mismatch that means nothing about the vendor.
+	// Verified on real infrastructure: that origin answers 200 with an 18 KB `text/html` listing.
+	if strings.HasSuffix(parsed.Path, "/") {
+		return fmt.Errorf("%w: %q is a directory prefix, not a single artifact", ErrUnsupportedOriginScheme, origin)
+	}
 	// A pin origin is corpus data rather than a compiled constant, so an artifact fetched over a
 	// tamperable channel would be evidence of nothing.
 	if parsed.Scheme != "https" {

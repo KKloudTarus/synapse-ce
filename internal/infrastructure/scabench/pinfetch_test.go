@@ -300,3 +300,46 @@ func TestArchiveCatalogPinsDoesNotClaimDriftForDerivedPins(t *testing.T) {
 		t.Fatalf("nothing may be archived for an unverified pin, got %+v", result.Archive.Entries)
 	}
 }
+
+// TestValidateFetchableOriginRejectsDirectoryPrefix is a regression test for a second false claim,
+// found by running the archive on real infrastructure.
+//
+// The committed catalog pins the Red Hat VEX database at `.../data/csaf/v2/vex/`, a directory prefix
+// whose digest is a tree digest over many assembled documents. A GET there returns the server's index
+// page: verified live, 200 with an 18 KB text/html listing. Comparing that page to the pin reported the
+// pin as unverified, which implies a byte comparison against the artifact took place. It did not, and
+// the two platforms fetched different index bytes, so the result was not even stable.
+func TestValidateFetchableOriginRejectsDirectoryPrefix(t *testing.T) {
+	err := validateFetchableOrigin("https://security.access.redhat.com/data/csaf/v2/vex/")
+	if !errors.Is(err, ErrUnsupportedOriginScheme) {
+		t.Fatalf("a directory prefix must report an unsupported origin, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "directory prefix") {
+		t.Fatalf("the error must say why, got %v", err)
+	}
+	// A document URL under the same tree is still fetchable, so the rule must not over-reach.
+	if err := validateFetchableOrigin("https://security.access.redhat.com/data/csaf/v2/vex/2026/cve-2026-22185.json"); err != nil {
+		t.Fatalf("a document under a directory must remain fetchable: %v", err)
+	}
+}
+
+// TestArchiveCatalogPinsClassifiesDirectoryOriginAsUnsupported keeps a directory-pinned database out of
+// the unverified bucket, where it would read as a vendor having republished.
+func TestArchiveCatalogPinsClassifiesDirectoryOriginAsUnsupported(t *testing.T) {
+	catalog := bench.Catalog{Revision: "rev-1", Pins: []bench.ArtifactPin{{
+		Reference: "database:owned:redhat-rhel9-8-vex",
+		Digest:    bench.SHA256Digest([]byte("tree digest over assembled documents")),
+		Origin:    "https://security.access.redhat.com/data/csaf/v2/vex/",
+	}}}
+
+	result, err := ArchiveCatalogPins(context.Background(), catalog, NewHTTPPinFetcher(), newStore(t), fixedTime(t))
+	if err != nil {
+		t.Fatalf("a directory origin must not fail the run: %v", err)
+	}
+	if len(result.Unverified) != 0 {
+		t.Fatalf("a directory origin must not be reported as unverified, got %+v", result.Unverified)
+	}
+	if len(result.Unsupported) != 1 {
+		t.Fatalf("a directory origin must be reported as unsupported, got %+v", result.Unsupported)
+	}
+}
