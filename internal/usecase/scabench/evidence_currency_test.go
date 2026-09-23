@@ -67,8 +67,43 @@ Revalidation is tracked as EPIC #1034 wave 2 item 9.`
 // permanent red that carries no new information. The assertions that follow keep that exemption from
 // becoming a way to hide a second, different divergence.
 func TestCommittedCorpusEvidenceCurrency(t *testing.T) {
+	catalogFile, err := os.Open("corpus/catalog.json")
+	if err != nil {
+		t.Fatalf("open committed catalog: %v", err)
+	}
+	defer func() { _ = catalogFile.Close() }()
+	catalog, err := DecodeCatalog(catalogFile)
+	if err != nil {
+		t.Fatalf("decode committed catalog: %v", err)
+	}
+
+	oracleFile, err := os.Open("corpus/oracle.json")
+	if err != nil {
+		t.Fatalf("open committed oracle: %v", err)
+	}
+	defer func() { _ = oracleFile.Close() }()
+	oracle, err := DecodeOracle(oracleFile)
+	if err != nil {
+		t.Fatalf("decode committed oracle: %v", err)
+	}
+
 	baseline := decodeRatchetFile(t, "corpus/ratchet-baseline.json")
 	committed := decodeRatchetFile(t, "corpus/ratchet.json")
+
+	catalogDigest, err := DigestCatalog(catalog)
+	if err != nil {
+		t.Fatalf("digest committed catalog: %v", err)
+	}
+	if committed.CatalogDigest != catalogDigest {
+		t.Fatalf("committed ratchet catalog digest %q does not match canonical committed catalog digest %q", committed.CatalogDigest, catalogDigest)
+	}
+	oracleDigest, err := DigestOracle(oracle)
+	if err != nil {
+		t.Fatalf("digest committed oracle: %v", err)
+	}
+	if committed.OracleDigest != oracleDigest {
+		t.Fatalf("committed ratchet oracle digest %q does not match canonical committed oracle digest %q", committed.OracleDigest, oracleDigest)
+	}
 
 	// The accepted identity recorded here must still describe the pinned baseline. If someone advances
 	// the baseline without advancing these constants, the comparison below would silently start
