@@ -81,11 +81,15 @@ func (s *PinArchiveStore) Put(expected string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	// Identical content is already the same file, so a repeat archive is a no-op rather than a
-	// rewrite. Skipping it keeps Put idempotent and avoids truncating a good blob if the source read
-	// later fails.
+	// A digest-named path may exist without holding the pinned bytes. Rehash it before treating a
+	// repeated archive as complete, including its type and length.
 	if _, err := os.Lstat(path); err == nil {
+		if _, err := s.CopyTo(actual, int64(len(data)), io.Discard); err != nil {
+			return fmt.Errorf("verify existing archived pin %s: %w", actual, err)
+		}
 		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect archived pin %s: %w", actual, err)
 	}
 	temporary, err := os.CreateTemp(filepath.Join(s.root, "blobs"), ".partial-*")
 	if err != nil {

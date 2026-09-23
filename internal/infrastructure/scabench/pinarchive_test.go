@@ -86,6 +86,46 @@ func TestPinArchivePutIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestPinArchivePutRejectsCorruptExistingBlob(t *testing.T) {
+	store := newStore(t)
+	payload := []byte("pinned vendor document")
+	digest := digestOf(payload)
+	if err := store.Put(digest, payload); err != nil {
+		t.Fatalf("archive bytes: %v", err)
+	}
+	path, err := store.blobPath(digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatalf("unseal blob for tampering: %v", err)
+	}
+	tampered := append([]byte(nil), payload...)
+	tampered[0] ^= 1
+	if err := os.WriteFile(path, tampered, 0o600); err != nil {
+		t.Fatalf("tamper with blob: %v", err)
+	}
+	if err := store.Put(digest, payload); err == nil || !strings.Contains(err.Error(), "corrupt") {
+		t.Fatalf("repeated archive must reject a corrupt retained blob, got %v", err)
+	}
+}
+
+func TestPinArchivePutRejectsNonRegularExistingBlob(t *testing.T) {
+	store := newStore(t)
+	payload := []byte("pinned vendor document")
+	digest := digestOf(payload)
+	path, err := store.blobPath(digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatalf("create non-regular blob: %v", err)
+	}
+	if err := store.Put(digest, payload); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("archive must reject a non-regular retained blob, got %v", err)
+	}
+}
+
 // TestPinArchiveGetDetectsCorruption is why Get re-hashes. An archive exists to be trusted after the
 // origin is gone, so a silently altered blob must fail rather than be scored as the pinned artifact.
 func TestPinArchiveGetDetectsCorruption(t *testing.T) {
