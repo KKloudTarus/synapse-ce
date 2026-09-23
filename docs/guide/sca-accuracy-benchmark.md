@@ -40,7 +40,7 @@ The RHEL target uses the complete pinned canonical UBI 9.8 SBOM without a scanne
 
 ## Unsigned candidate measurement
 
-From the root of a clean Linux checkout, with a prepared review-free offline input root, an existing evidence directory outside the checkout and offline inputs (not group- or world-writable on Linux), and the same delegated cgroup/sandbox prerequisites as the trusted runner. Before hashing or building, the candidate bounds the offline root to 10,000 members, depth 32, and 8 GiB total, with stricter 64 MiB SBOM and 4 MiB environment-attestation file limits:
+From the root of a clean Linux checkout, with a prepared review-free offline input root, an existing evidence directory outside the checkout and offline inputs (not group- or world-writable on Linux), and the same delegated cgroup/sandbox prerequisites as the trusted runner. Before hashing or building, the candidate bounds the offline root to 10,000 members, depth 32, 3 GiB per file, and 8 GiB total, with stricter 64 MiB SBOM and 4 MiB environment-attestation file limits:
 
 ```sh
 go run ./cmd/synapse-sca-cycle candidate \

@@ -25,7 +25,7 @@ const (
 	MaxTrustedInputArchiveDepth = 32
 	// MaxTrustedInputArchiveFileBytes permits the current database objects while keeping a corrupt or
 	// misdirected materialization from consuming unbounded archive storage.
-	MaxTrustedInputArchiveFileBytes int64 = 2 << 30
+	MaxTrustedInputArchiveFileBytes int64 = 3 << 30
 	// MaxTrustedInputArchiveBytes bounds the complete prepared benchmark input set.
 	MaxTrustedInputArchiveBytes int64 = 8 << 30
 	// MaxTrustedInputArchiveManifestBytes bounds each JSON archive or binding-spec document.

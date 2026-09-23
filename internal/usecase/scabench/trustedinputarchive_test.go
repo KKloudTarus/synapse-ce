@@ -154,6 +154,20 @@ func TestTrustedInputArchiveDecodeRejectsOversizedDocument(t *testing.T) {
 	}
 }
 
+func TestTrustedInputArchiveBoundsCurrentGrypeDatabase(t *testing.T) {
+	entry := TrustedInputInventoryEntry{
+		Locator: "databases/grype/6/vulnerability.db", Kind: TrustedInputInventoryFile,
+		ObjectDigest: "sha256:" + strings.Repeat("a", 64), Bytes: 2_244_804_608, Mode: 0o600,
+	}
+	if err := validateTrustedInputInventoryEntry(entry); err != nil {
+		t.Fatalf("current imported Grype database must fit the bounded archive: %v", err)
+	}
+	entry.Bytes = MaxTrustedInputArchiveFileBytes + 1
+	if err := validateTrustedInputInventoryEntry(entry); err == nil || !strings.Contains(err.Error(), "byte length") {
+		t.Fatalf("oversized database error = %v, want per-file bound", err)
+	}
+}
+
 func committedTrustedInputBindingSpec(t *testing.T) (Catalog, TrustedInputBindingSpec) {
 	t.Helper()
 	catalogFile, err := os.Open("corpus/catalog.json")

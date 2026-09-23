@@ -129,7 +129,15 @@ func candidateCheckout(workingDir string) (string, string, error) {
 	if !filepath.IsAbs(root) {
 		return "", "", errors.New("source checkout path is not absolute")
 	}
-	if filepath.Clean(workingDir) != filepath.Clean(root) {
+	workingDirInfo, err := os.Stat(workingDir)
+	if err != nil {
+		return "", "", fmt.Errorf("inspect working directory: %w", err)
+	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return "", "", fmt.Errorf("inspect source checkout root: %w", err)
+	}
+	if !os.SameFile(workingDirInfo, rootInfo) {
 		return "", "", errors.New("run candidate from the source checkout root")
 	}
 	status, err := exec.Command("git", "-C", root, "status", "--porcelain", "--untracked-files=all").Output()
