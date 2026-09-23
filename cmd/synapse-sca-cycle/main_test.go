@@ -44,17 +44,23 @@ func TestCandidateCheckoutRejectsUncommittedChanges(t *testing.T) {
 		}
 	}
 	runGit("init", "-q")
-	marker := filepath.Join(root, "fixture.txt")
+	expectedCorpus := filepath.Join(root, "internal", "usecase", "scabench", "corpus")
+	if err := os.MkdirAll(expectedCorpus, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(expectedCorpus, "fixture.txt")
 	if err := os.WriteFile(marker, []byte("frozen"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runGit("add", "fixture.txt")
+	runGit("add", "internal/usecase/scabench/corpus/fixture.txt")
 	runGit("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
 	corpus, commit, err := candidateCheckout(root)
 	if err != nil {
 		t.Fatalf("resolve clean candidate checkout: %v", err)
 	}
-	if corpus != filepath.Join(root, "internal", "usecase", "scabench", "corpus") || len(commit) != 40 {
+	actualCorpusInfo, actualErr := os.Stat(corpus)
+	expectedCorpusInfo, expectedErr := os.Stat(expectedCorpus)
+	if actualErr != nil || expectedErr != nil || !os.SameFile(actualCorpusInfo, expectedCorpusInfo) || len(commit) != 40 {
 		t.Fatalf("unexpected clean candidate identity: corpus=%q commit=%q", corpus, commit)
 	}
 	if err := os.WriteFile(marker, []byte("modified"), 0o600); err != nil {
