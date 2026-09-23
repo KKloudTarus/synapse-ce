@@ -25,7 +25,7 @@ The trusted input root contains only prepared, pinned data:
 ```text
 trusted-input-root/
   sboms/<target-id>.cdx.json
-  tools/{grype,trivy,osv-scanner}
+  tools/{grype,trivy,osv-scanner,syft}
   databases/{owned-debian,owned-sles,owned-redhat,grype,trivy,osv}
   evidence-assets/environment/environment-attestation.json
   repository/
@@ -37,6 +37,18 @@ trusted-input-root/
 The runner builds the owned benchmark binary, rebinds its generated capture identity, and validates the materialized catalog and ratchet before scanning. Every engine receives the same canonical SBOM bytes. Capture keeps strict decoding, input integrity checks, authenticated bundles, bounded redacted process evidence, and replay validation.
 
 The RHEL target uses the complete pinned canonical UBI 9.8 SBOM without a scanner-specific projection. The benchmark's structural identity includes an RPM `epoch` PURL qualifier when comparing the explicit component version, so epoch-bearing packages remain representable. Owned and every comparator consume the same byte-for-byte SBOM.
+
+## Unsigned candidate measurement
+
+From the root of a clean Linux checkout, with a prepared review-free offline input root, an existing evidence directory outside the checkout and offline inputs (not group- or world-writable on Linux), and the same delegated cgroup/sandbox prerequisites as the trusted runner. Before hashing or building, the candidate bounds the offline root to 10,000 members, depth 32, and 8 GiB total, with stricter 64 MiB SBOM and 4 MiB environment-attestation file limits:
+
+```sh
+go run ./cmd/synapse-sca-cycle candidate \
+  --offline-input-root /protected/sca-inputs \
+  --evidence-root /protected/sca-candidates
+```
+
+The command derives the corpus path and exact implementation commit from the clean checkout, generates a unique run key, and retains a bounded Git-object source archive for that commit. It builds the owned benchmark binary and freezes the original corpus from the extracted source snapshot, not from subsequent working-tree reads. The archive, built binary, prepared capture inputs, and any raw bundles produced stay under the printed protected evidence path so a failed run can be inspected and replayed. The commit binds the owned binary and corpus; it is not an independent attestation of the already-running cycle controller. Its result declares the retention policy and counts actual retained attempt records, including after partial capture; the inherited `cycle-policy.json` digest records the source policy for the fixed matrix, but its `delete_after_verification` cleanup rule is not applied to candidate evidence. It does not require trusted GitHub review/disposition captures, sign results, or publish an accepted baseline. The candidate's current-input policy and the unchanged historical ratchet are reported separately: binding new bytes for a diagnostic comparison never makes them the old bytes, and a numeric failure returns nonzero without deleting evidence. A successful candidate command still means only that its **diagnostic** gate passed; it is not historical acceptance. The Oracle's existing citations are not reapproved by a successful capture. An independent maintainer review of the evidence and a prospective baseline disposition are still required before accepting new scores.
 
 ## Result and cleanup
 

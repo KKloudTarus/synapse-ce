@@ -128,7 +128,7 @@ absolute runtime paths (with the owned benchmark binary rebound into its private
 ```text
 trusted-input-root/
   sboms/<target-id>.cdx.json
-  tools/{grype,trivy,osv-scanner}
+  tools/{grype,trivy,osv-scanner,syft}
   databases/{owned-debian,owned-sles,owned-redhat,grype,trivy,osv}
   evidence-assets/environment/environment-attestation.json
   repository/

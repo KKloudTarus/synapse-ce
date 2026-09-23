@@ -305,6 +305,43 @@ func Run(ctx context.Context, input RunInput, runnerFactory RunnerFactory) (resu
 		return RunResult{}, err
 	}
 
+	observations, comparisons, rawBundles, err := executeCaptureCycle(ctx, state, runnerFactory, store)
+	if err != nil {
+		return RunResult{}, err
+	}
+
+	finalResult, resultBytes, report, err := reduceRepetitionsContext(ctx, state.catalog, state.oracle, state.ratchet, observations)
+	if err != nil {
+		return RunResult{}, err
+	}
+	result = RunResult{
+		SchemaVersion: runResultSchemaVersion, ImplementationCommit: input.ImplementationCommit, RunKey: input.RunKey,
+		InputDigests: state.inputDigests, Repetitions: fixedRepetitions, Observations: observations,
+		Comparisons: comparisons, RawBundles: rawBundles, Result: finalResult,
+	}
+	if err := state.stagePublication(ctx, publication, &result, resultBytes, report); err != nil {
+		return RunResult{}, err
+	}
+	if err := publication.Commit(ctx); err != nil {
+		publicationOpen = false
+		return RunResult{}, err
+	}
+	publicationOpen = false
+	result.Cleanup = state.cleanup
+	return result, nil
+}
+
+// executeCaptureCycle records the fixed two-pass matrix without imposing trusted-publication semantics.
+func executeCaptureCycle(ctx context.Context, state *runState, runnerFactory RunnerFactory, store *benchcycle.EvidenceStore) ([][]bench.Observation, []SemanticBundleComparison, [][]BundleIdentity, error) {
+	if ctx == nil {
+		return nil, nil, nil, errors.New("capture cycle context is required")
+	}
+	if state == nil {
+		return nil, nil, nil, errors.New("capture cycle state is required")
+	}
+	if store == nil {
+		return nil, nil, nil, errors.New("capture cycle evidence store is required")
+	}
 	cells := state.cyclePlan()
 	comparisons := make([]SemanticBundleComparison, 0, len(cells))
 	pairs, err := benchcycle.ExecuteTwoPass(ctx, benchcycle.TwoPassPlan[cycleCell]{Cells: cells},
@@ -333,7 +370,7 @@ func Run(ctx context.Context, input RunInput, runnerFactory RunnerFactory) (resu
 		},
 	)
 	if err != nil {
-		return RunResult{}, err
+		return nil, nil, nil, err
 	}
 	observations := make([][]bench.Observation, fixedRepetitions)
 	rawBundles := make([][]BundleIdentity, fixedRepetitions)
@@ -346,26 +383,7 @@ func Run(ctx context.Context, input RunInput, runnerFactory RunnerFactory) (resu
 			rawBundles[repetition] = append(rawBundles[repetition], captured.identity)
 		}
 	}
-
-	finalResult, resultBytes, report, err := reduceRepetitionsContext(ctx, state.catalog, state.oracle, state.ratchet, observations)
-	if err != nil {
-		return RunResult{}, err
-	}
-	result = RunResult{
-		SchemaVersion: runResultSchemaVersion, ImplementationCommit: input.ImplementationCommit, RunKey: input.RunKey,
-		InputDigests: state.inputDigests, Repetitions: fixedRepetitions, Observations: observations,
-		Comparisons: comparisons, RawBundles: rawBundles, Result: finalResult,
-	}
-	if err := state.stagePublication(ctx, publication, &result, resultBytes, report); err != nil {
-		return RunResult{}, err
-	}
-	if err := publication.Commit(ctx); err != nil {
-		publicationOpen = false
-		return RunResult{}, err
-	}
-	publicationOpen = false
-	result.Cleanup = state.cleanup
-	return result, nil
+	return observations, comparisons, rawBundles, nil
 }
 
 func (state *runState) cyclePlan() []benchcycle.PlanCell[cycleCell] {
@@ -507,9 +525,17 @@ func (state *runState) buildAndBindOwnedBinary(ctx context.Context) error {
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("build owned benchmark binary: %w", err)
 	}
+	_, err := state.bindOwnedBinaryDigest(binaryPath)
+	return err
+}
+
+func (state *runState) bindOwnedBinaryDigest(binaryPath string) (string, error) {
+	if state == nil {
+		return "", errors.New("owned binary state is required")
+	}
 	digest, err := digestFile(binaryPath)
 	if err != nil {
-		return fmt.Errorf("digest owned benchmark binary: %w", err)
+		return "", fmt.Errorf("digest owned benchmark binary: %w", err)
 	}
 	updated := false
 	for index := range state.catalog.Pins {
@@ -519,14 +545,14 @@ func (state *runState) buildAndBindOwnedBinary(ctx context.Context) error {
 		}
 	}
 	if !updated {
-		return errors.New("catalog does not pin the owned benchmark binary")
+		return "", errors.New("catalog does not pin the owned benchmark binary")
 	}
 	if err := state.catalog.Validate(); err != nil {
-		return fmt.Errorf("validate rebound catalog: %w", err)
+		return "", fmt.Errorf("validate rebound catalog: %w", err)
 	}
 	catalogDigest, err := bench.DigestCatalog(state.catalog)
 	if err != nil {
-		return fmt.Errorf("digest rebound catalog: %w", err)
+		return "", fmt.Errorf("digest rebound catalog: %w", err)
 	}
 	state.ratchet.CatalogDigest = catalogDigest
 	for index := range state.ratchet.Floors {
@@ -534,7 +560,7 @@ func (state *runState) buildAndBindOwnedBinary(ctx context.Context) error {
 			state.ratchet.Floors[index].Expected.EngineBinaryDigest = digest
 		}
 	}
-	return nil
+	return digest, nil
 }
 
 func (state *runState) materializeManifests() error {
@@ -1658,16 +1684,6 @@ func catalogTarget(catalog bench.Catalog, targetID string) (bench.Target, bool) 
 func runCellKey(targetID string, engine bench.Engine) string {
 	sum := sha256.Sum256([]byte(targetID + "\x00" + string(engine)))
 	return "sca-cell-" + hex.EncodeToString(sum[:])
-}
-
-func capabilityPinReference(locator string) string {
-	if strings.Contains(locator, "purl_to_package.go") {
-		return "capability-source:osv-scanner:c84fa4568f2526d0333e9a914ea8a0a5f74ad68b"
-	}
-	if strings.Contains(locator, "ecosystem.go") {
-		return "capability-source:osv-scalibr:23fa66ca68dd17bfdbe0b8b3536d1887a3a940da"
-	}
-	return ""
 }
 
 func belowRoot(root, locator string) (string, error) {
