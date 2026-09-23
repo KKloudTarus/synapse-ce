@@ -57,6 +57,7 @@ jobs:
     needs: route
     if: ${{ needs.route.outputs.trusted == 'true' }}
     runs-on: [self-hosted, linux, sca-accuracy-trusted]
+    environment: trusted-benchmarks
     timeout-minutes: 45
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}

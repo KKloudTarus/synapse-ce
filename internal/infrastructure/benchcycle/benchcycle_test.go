@@ -63,12 +63,37 @@ func TestRealDirectoryAndBelowRootRejectUnsafePaths(t *testing.T) {
 	if _, err := BelowRoot(root, "../asset.json"); err == nil {
 		t.Fatal("accepted escaping asset")
 	}
+	if _, err := BelowRoot(root, "nested/../asset.json"); err == nil {
+		t.Fatal("accepted traversing asset locator")
+	}
+	directory := filepath.Join(root, "database")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if path, err := BelowRootDirectory(root, "database"); err != nil || path != directory {
+		t.Fatalf("resolve trusted directory = %q, %v", path, err)
+	}
 	link := filepath.Join(root, "asset-link.json")
 	if err := os.Symlink(file, link); err != nil {
 		t.Skipf("create symlink: %v", err)
 	}
 	if _, err := BelowRoot(root, "asset-link.json"); err == nil {
 		t.Fatal("accepted symlink asset")
+	}
+	outsideRoot := t.TempDir()
+	outsideFile := filepath.Join(outsideRoot, "outside.json")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	escapedDirectory := filepath.Join(root, "escaped")
+	if err := os.Symlink(outsideRoot, escapedDirectory); err != nil {
+		t.Skipf("create directory symlink: %v", err)
+	}
+	if _, err := BelowRoot(root, "escaped/outside.json"); err == nil {
+		t.Fatal("accepted an asset through an escaping directory symlink")
+	}
+	if _, err := BelowRootDirectory(root, "escaped"); err == nil {
+		t.Fatal("accepted an escaping directory symlink")
 	}
 }
 

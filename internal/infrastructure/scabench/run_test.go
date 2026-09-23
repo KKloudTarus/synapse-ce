@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchcycle"
@@ -142,33 +143,10 @@ func TestCanonicalCapabilityComponentsFiltersNonApplicableEcosystems(t *testing.
 	}
 }
 
-func TestValidateReviewEvidenceRequiresReviewOfImplementationCommit(t *testing.T) {
+func TestValidateReviewEvidence(t *testing.T) {
 	const implementationCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	const reviewedCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	const timestamp = "2026-09-21T00:00:00Z"
-	review := reviewCapture{
-		SchemaVersion: "review-v1",
-		ID:            "review-1",
-		URL:           "https://example.invalid/review/1",
-		Login:         "reviewer",
-		State:         "COMMENTED",
-		SubmittedAt:   timestamp,
-		CommitID:      reviewedCommit,
-		Body:          "reviewed",
-	}
-	disposition := dispositionCapture{
-		SchemaVersion:        "disposition-v1",
-		ID:                   "disposition-1",
-		URL:                  "https://example.invalid/disposition/1",
-		Login:                "maintainer",
-		CreatedAt:            timestamp,
-		UpdatedAt:            timestamp,
-		ReviewID:             review.ID,
-		ReviewedCommit:       reviewedCommit,
-		ImplementationCommit: implementationCommit,
-		Decision:             "approved",
-		Body:                 "accepted",
-	}
+
+	review, disposition := validReviewEvidence(implementationCommit)
 	reviewBody, err := json.Marshal(review)
 	if err != nil {
 		t.Fatal(err)
@@ -177,22 +155,80 @@ func TestValidateReviewEvidenceRequiresReviewOfImplementationCommit(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateReviewEvidence(reviewBody, dispositionBody, implementationCommit); err == nil {
-		t.Fatal("review evidence accepted a review for a different implementation commit")
+	if err := validateReviewEvidence(reviewBody, dispositionBody, implementationCommit); err != nil {
+		t.Fatalf("valid review evidence rejected: %v", err)
 	}
 
-	review.CommitID = implementationCommit
-	disposition.ReviewedCommit = implementationCommit
-	reviewBody, err = json.Marshal(review)
-	if err != nil {
-		t.Fatal(err)
+	for _, test := range []struct {
+		name   string
+		mutate func(*reviewCapture, *dispositionCapture)
+	}{
+		{name: "review schema missing", mutate: func(review *reviewCapture, _ *dispositionCapture) { review.SchemaVersion = "" }},
+		{name: "review schema wrong", mutate: func(review *reviewCapture, _ *dispositionCapture) { review.SchemaVersion = "review-v2" }},
+		{name: "disposition schema missing", mutate: func(_ *reviewCapture, disposition *dispositionCapture) { disposition.SchemaVersion = "" }},
+		{name: "disposition schema wrong", mutate: func(_ *reviewCapture, disposition *dispositionCapture) { disposition.SchemaVersion = "disposition-v2" }},
+		{name: "non HTTPS review URL", mutate: func(review *reviewCapture, _ *dispositionCapture) {
+			review.URL = "http://github.com/example-owner/example-repository/pull/321#pullrequestreview-1234"
+		}},
+		{name: "credentialed review URL", mutate: func(review *reviewCapture, _ *dispositionCapture) {
+			review.URL = "https://reviewer:secret@github.com/example-owner/example-repository/pull/321#pullrequestreview-1234"
+		}},
+		{name: "non GitHub review URL", mutate: func(review *reviewCapture, _ *dispositionCapture) {
+			review.URL = "https://example.invalid/example-owner/example-repository/pull/321#pullrequestreview-1234"
+		}},
+		{name: "review fragment differs from ID", mutate: func(review *reviewCapture, _ *dispositionCapture) {
+			review.URL = "https://github.com/example-owner/example-repository/pull/321#pullrequestreview-9999"
+		}},
+		{name: "disposition fragment differs from ID", mutate: func(_ *reviewCapture, disposition *dispositionCapture) {
+			disposition.URL = "https://github.com/example-owner/example-repository/pull/321#issuecomment-9999"
+		}},
+		{name: "reviewed commit differs", mutate: func(review *reviewCapture, disposition *dispositionCapture) {
+			review.CommitID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			disposition.ReviewedCommit = review.CommitID
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			review, disposition := validReviewEvidence(implementationCommit)
+			test.mutate(&review, &disposition)
+			reviewBody, err := json.Marshal(review)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dispositionBody, err := json.Marshal(disposition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := validateReviewEvidence(reviewBody, dispositionBody, implementationCommit); err == nil {
+				t.Fatal("invalid review evidence was accepted")
+			}
+		})
 	}
-	dispositionBody, err = json.Marshal(disposition)
-	if err != nil {
-		t.Fatal(err)
+}
+
+func validReviewEvidence(implementationCommit string) (reviewCapture, dispositionCapture) {
+	const timestamp = "2026-09-21T00:00:00Z"
+	review := reviewCapture{
+		SchemaVersion: reviewCaptureSchemaVersion,
+		ID:            "1234",
+		URL:           "https://github.com/example-owner/example-repository/pull/321#pullrequestreview-1234",
+		Login:         "reviewer",
+		State:         "COMMENTED",
+		SubmittedAt:   timestamp,
+		CommitID:      implementationCommit,
+		Body:          "reviewed",
 	}
-	if err := validateReviewEvidence(reviewBody, dispositionBody, implementationCommit); err != nil {
-		t.Fatalf("matching review evidence rejected: %v", err)
+	return review, dispositionCapture{
+		SchemaVersion:        dispositionCaptureSchemaVersion,
+		ID:                   "5678",
+		URL:                  "https://github.com/example-owner/example-repository/pull/321#issuecomment-5678",
+		Login:                "maintainer",
+		CreatedAt:            timestamp,
+		UpdatedAt:            timestamp,
+		ReviewID:             review.ID,
+		ReviewedCommit:       review.CommitID,
+		ImplementationCommit: implementationCommit,
+		Decision:             "approved",
+		Body:                 "accepted",
 	}
 }
 
@@ -268,56 +304,205 @@ func TestReduceRepetitionsRejectsFailedAbsoluteGate(t *testing.T) {
 	}
 }
 
-func TestMaterializeManifestPreservesPinnedCompetitorPathsAndRebindsOwnedBinary(t *testing.T) {
-	for _, engine := range []bench.Engine{bench.EngineGrype, bench.EngineOwned} {
-		t.Run(string(engine), func(t *testing.T) {
-			catalog, source := testFixture(t, engine)
-			workRoot := t.TempDir()
-			if engine == bench.EngineOwned {
-				body, err := os.ReadFile(source.Binary.Path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.MkdirAll(filepath.Join(workRoot, "tools"), 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(workRoot, "tools", "synapse-sca-bench"), body, 0o600); err != nil {
-					t.Fatal(err)
-				}
+func TestFixedTemplatesMaterializeTrustedInputs(t *testing.T) {
+	corpusRoot := filepath.Join("..", "..", "usecase", "scabench", "corpus")
+	catalog, err := decodeCatalogFile(filepath.Join(corpusRoot, "catalog.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trustedRoot := t.TempDir()
+	writeTrustedInputLayout(t, trustedRoot)
+	state := runState{
+		input:          RunInput{CorpusRoot: corpusRoot, TrustedInputRoot: trustedRoot},
+		catalog:        catalog,
+		workRoot:       t.TempDir(),
+		expectedStates: make(map[string]bench.ObservationState),
+	}
+	templates, err := state.loadTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(templates); got != fixedMatrixCells {
+		t.Fatalf("template count = %d, want %d", got, fixedMatrixCells)
+	}
+	catalogDigest, err := bench.DigestCatalog(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, template := range templates {
+		t.Run(template.TargetID+"/"+string(template.Engine), func(t *testing.T) {
+			target, ok := catalogTarget(catalog, template.TargetID)
+			if !ok {
+				t.Fatalf("template target %q is absent from catalog", template.TargetID)
 			}
-			catalogDigest, err := bench.DigestCatalog(catalog)
+			template.Capability = nil
+			manifest, err := state.materializeManifest(catalogDigest, target, template)
 			if err != nil {
 				t.Fatal(err)
 			}
-			state := runState{
-				input:          RunInput{TrustedInputRoot: t.TempDir()},
-				catalog:        catalog,
-				workRoot:       workRoot,
-				expectedStates: map[string]bench.ObservationState{runCellKey(source.TargetID, engine): bench.ObservationComplete},
+			for name, path := range map[string]string{
+				"SBOM":                    manifest.SBOMPath,
+				"database":                manifest.Database.Path,
+				"environment attestation": manifest.EnvironmentAttestation.Path,
+			} {
+				if !filepath.IsAbs(path) || !pathBelowRoot(trustedRoot, path) {
+					t.Fatalf("%s path %q is not an absolute trusted-input path", name, path)
+				}
 			}
-			template := captureManifestTemplate{
-				SchemaVersion: CaptureManifestSchemaVersion, TargetID: source.TargetID, Engine: engine, EngineVersion: source.EngineVersion,
-				Binary: source.Binary, Database: source.Database, Environment: source.Environment, EnvironmentAttestation: source.EnvironmentAttestation,
-				EnvironmentPinReference: source.EnvironmentPinReference, ProfilePinReference: source.ProfilePinReference, Limits: source.Limits,
+			binaryLocator, databaseLocator := expectedTrustedInputLocators(t, template.TargetID, template.Engine)
+			if manifest.Database.Path != filepath.Join(trustedRoot, databaseLocator) {
+				t.Fatalf("database path = %q, want %q", manifest.Database.Path, filepath.Join(trustedRoot, databaseLocator))
 			}
-			materialized, err := state.materializeManifest(catalogDigest, sourceTarget(t, catalog), template)
-			if err != nil {
-				t.Fatal(err)
+			if manifest.SBOMPath != filepath.Join(trustedRoot, "sboms", template.TargetID+".cdx.json") {
+				t.Fatalf("SBOM path = %q", manifest.SBOMPath)
 			}
-			if materialized.Database.Path != source.Database.Path || materialized.EnvironmentAttestation.Path != source.EnvironmentAttestation.Path {
-				t.Fatal("materialization rewrote template-pinned database or environment paths")
+			if manifest.EnvironmentAttestation.Path != filepath.Join(trustedRoot, "evidence-assets", "environment", "environment-attestation.json") {
+				t.Fatalf("environment attestation path = %q", manifest.EnvironmentAttestation.Path)
 			}
-			if engine == bench.EngineOwned {
-				if materialized.Binary.Path != filepath.Join(workRoot, "tools", "synapse-sca-bench") {
-					t.Fatal("owned binary was not rebound into the work root")
+			if template.Engine == bench.EngineOwned {
+				if manifest.Binary.Path != filepath.Join(state.workRoot, "tools", "synapse-sca-bench") || !filepath.IsAbs(manifest.Binary.Path) {
+					t.Fatal("owned binary was not rebound to the absolute runtime work root")
 				}
 				return
 			}
-			if materialized.Binary.Path != source.Binary.Path {
-				t.Fatal("competitor binary path was not preserved from the template")
+			if manifest.Binary.Path != filepath.Join(trustedRoot, binaryLocator) || !pathBelowRoot(trustedRoot, manifest.Binary.Path) {
+				t.Fatalf("binary path = %q, want %q", manifest.Binary.Path, filepath.Join(trustedRoot, binaryLocator))
 			}
 		})
 	}
+}
+
+func TestTrustedInputResolverRejectsUnsafeTemplatePaths(t *testing.T) {
+	corpusRoot := filepath.Join("..", "..", "usecase", "scabench", "corpus")
+	trustedRoot := t.TempDir()
+	writeTrustedInputLayout(t, trustedRoot)
+	state := runState{input: RunInput{CorpusRoot: corpusRoot, TrustedInputRoot: trustedRoot}, workRoot: t.TempDir()}
+	templates, err := state.loadTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := templates[runCellKey("debian-12-13-slim-amd64", bench.EngineGrype)]
+	template.Binary.Path = filepath.Join(trustedRoot, "..", "outside-binary")
+	template.Database.Path = filepath.Join(trustedRoot, "..", "outside-database")
+	template.EnvironmentAttestation.Path = filepath.Join(trustedRoot, "..", "outside-attestation")
+	paths, err := state.resolveTrustedManifestPaths(template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pathBelowRoot(trustedRoot, paths.binary) || !pathBelowRoot(trustedRoot, paths.database) || !pathBelowRoot(trustedRoot, paths.environmentAttestation) {
+		t.Fatal("unsafe template host paths escaped the trusted input root")
+	}
+
+	template.Binary.Reference = "binary:../../outside"
+	if _, err := state.resolveTrustedManifestPaths(template); err == nil {
+		t.Fatal("unrecognized binary identity was accepted")
+	}
+	template = templates[runCellKey("debian-12-13-slim-amd64", bench.EngineGrype)]
+	template.TargetID = "../../outside"
+	if _, err := state.resolveTrustedManifestPaths(template); err == nil {
+		t.Fatal("traversing template target was accepted")
+	}
+
+	outside := filepath.Join(t.TempDir(), "grype")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(trustedRoot, "tools", "grype")
+	if err := os.Remove(binary); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, binary); err != nil {
+		t.Skipf("create symlink: %v", err)
+	}
+	template = templates[runCellKey("debian-12-13-slim-amd64", bench.EngineGrype)]
+	if _, err := state.resolveTrustedManifestPaths(template); err == nil {
+		t.Fatal("symlinked binary outside the trusted root was accepted")
+	}
+}
+
+func TestCapabilitySourcesResolveOnlyTrustedLocators(t *testing.T) {
+	trustedRoot := t.TempDir()
+	for reference, identity := range fixedTrustedCapabilitySources {
+		path := filepath.Join(trustedRoot, "repository", filepath.FromSlash(identity.locator))
+		body := []byte(reference)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		state := runState{input: RunInput{TrustedInputRoot: trustedRoot}}
+		source := capabilitySourceTemplate{Reference: reference, Locator: identity.locator, Digest: sha256Digest(body)}
+		artifacts, err := state.capabilitySources([]capabilitySourceTemplate{source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(artifacts) != 1 || artifacts[0].Path != path || !pathBelowRoot(trustedRoot, artifacts[0].Path) {
+			t.Fatalf("capability source = %+v, want trusted path %q", artifacts, path)
+		}
+		source.Locator = "../../outside"
+		if _, err := state.capabilitySources([]capabilitySourceTemplate{source}); err == nil {
+			t.Fatal("traversing capability locator was accepted")
+		}
+	}
+}
+
+func writeTrustedInputLayout(t *testing.T, root string) {
+	t.Helper()
+	for _, locator := range fixedTrustedSBOMLocators {
+		writeTrustedInputFile(t, root, locator)
+	}
+	writeTrustedInputFile(t, root, trustedEnvironmentAttestationLocator)
+	for _, input := range fixedTrustedCompetitorInputs {
+		writeTrustedInputFile(t, root, input.binaryLocator)
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(input.databaseLocator)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, input := range fixedTrustedOwnedInputs {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(input.databaseLocator)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func writeTrustedInputFile(t *testing.T, root, locator string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(locator))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(locator), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func expectedTrustedInputLocators(t *testing.T, targetID string, engine bench.Engine) (string, string) {
+	t.Helper()
+	switch engine {
+	case bench.EngineGrype:
+		return "tools/grype", "databases/grype"
+	case bench.EngineTrivy:
+		return "tools/trivy", "databases/trivy"
+	case bench.EngineOSVScanner:
+		return "tools/osv-scanner", "databases/osv"
+	case bench.EngineOwned:
+		switch targetID {
+		case "debian-12-13-slim-amd64":
+			return "", "databases/owned-debian"
+		case "sles-15-6-bci-base-45-31-amd64":
+			return "", "databases/owned-sles"
+		case "rhel-9-8-ubi-amd64":
+			return "", "databases/owned-redhat"
+		}
+	}
+	t.Fatalf("unexpected fixed template %q/%q", targetID, engine)
+	return "", ""
+}
+
+func pathBelowRoot(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func TestBoundInputDigestsRefreshRuntimeBindingsAndExternalEvidence(t *testing.T) {

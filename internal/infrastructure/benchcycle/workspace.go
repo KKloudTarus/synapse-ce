@@ -85,12 +85,29 @@ func RealDirectory(path string) (string, error) {
 	return filepath.Abs(path)
 }
 
-// BelowRoot resolves locator beneath root and accepts only regular non-symlink files.
+// BelowRoot resolves a regular non-symlink file beneath root.
 func BelowRoot(root, locator string) (string, error) {
-	if filepath.IsAbs(locator) {
-		return "", errors.New("asset locator must be relative")
+	return belowRoot(root, locator, false)
+}
+
+// BelowRootDirectory resolves a real directory beneath root.
+func BelowRootDirectory(root, locator string) (string, error) {
+	return belowRoot(root, locator, true)
+}
+
+func belowRoot(root, locator string, directory bool) (string, error) {
+	if filepath.IsAbs(locator) || hasParentTraversal(locator) {
+		return "", errors.New("asset locator must be a relative path without traversal")
 	}
-	path := filepath.Join(root, filepath.FromSlash(locator))
+	cleanLocator := filepath.Clean(filepath.FromSlash(locator))
+	if cleanLocator == "." || cleanLocator == ".." || strings.HasPrefix(cleanLocator, ".."+string(filepath.Separator)) {
+		return "", errors.New("asset locator escapes trusted input root")
+	}
+	root, err := RealDirectory(root)
+	if err != nil {
+		return "", fmt.Errorf("trusted input root: %w", err)
+	}
+	path := filepath.Join(root, cleanLocator)
 	relative, err := filepath.Rel(root, path)
 	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return "", errors.New("asset locator escapes trusted input root")
@@ -99,10 +116,33 @@ func BelowRoot(root, locator string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return "", errors.New("asset must be a regular non-symlink file")
+	if info.Mode()&os.ModeSymlink != 0 || (directory && !info.IsDir()) || (!directory && !info.Mode().IsRegular()) {
+		return "", errors.New("asset must have the expected non-symlink file type")
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve trusted input root: %w", err)
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	relative, err = filepath.Rel(realRoot, realPath)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", errors.New("asset symlink escapes trusted input root")
 	}
 	return path, nil
+}
+
+func hasParentTraversal(locator string) bool {
+	for _, segment := range strings.FieldsFunc(locator, func(character rune) bool {
+		return character == '/' || character == '\\'
+	}) {
+		if segment == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 // Workspace contains the isolated work and raw-retention paths for one benchmark run.

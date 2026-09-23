@@ -45,6 +45,27 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 		}
 	}
 
+	const trustedEnvironment = "environment: trusted-benchmarks"
+	benchmarkStart := strings.Index(workflow, "\n  benchmark:\n")
+	benchmarkEnd := strings.Index(workflow, "\n  pr-lifecycle:\n")
+	if benchmarkStart < 0 || benchmarkEnd <= benchmarkStart {
+		t.Fatal("workflow must retain a trusted benchmark job before the PR-safe lifecycle")
+	}
+	if got := strings.Count(workflow, trustedEnvironment); got != 1 {
+		t.Fatalf("workflow must declare the trusted environment exactly once: got %d", got)
+	}
+	if !strings.Contains(workflow[benchmarkStart:benchmarkEnd], "\n    "+trustedEnvironment+"\n") {
+		t.Fatal("trusted benchmark job must declare the trusted environment")
+	}
+	prLifecycleEnd := strings.Index(workflow[benchmarkEnd+1:], "\n  go-oss-baselines:\n")
+	if prLifecycleEnd < 0 {
+		t.Fatal("workflow must retain the PR-safe lifecycle boundary")
+	}
+	prLifecycleEnd += benchmarkEnd + 1
+	if strings.Contains(workflow[benchmarkEnd:prLifecycleEnd], trustedEnvironment) {
+		t.Fatal("PR-safe lifecycle must not declare the trusted environment")
+	}
+
 	for _, required := range []string{
 		"pull_request:\n    branches: [main]",
 		"schedule:",

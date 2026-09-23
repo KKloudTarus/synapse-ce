@@ -18,13 +18,14 @@ Measured through the GitHub API on 2026-09-22:
 GET /repos/KKloudTarus/synapse-ce/actions/permissions  -> {"enabled": false}
 GET .../actions/variables                              -> {"total_count": 0}
 GET .../actions/runners                                -> {"total_count": 0}
-GET .../environments                                   -> copilot, github-pages
+GET .../environments                                   -> copilot, github-pages (no trusted-benchmarks)
 GET .../branches/main/protection                       -> 404 Branch not protected
 ```
 
 Actions is disabled repository-wide, so no workflow runs at all today. That is a more categorical
 blocker than the missing variables: provisioning every variable and runner below would still produce no
-run until Actions is enabled.
+run until Actions is enabled. Both trusted jobs now reference the `trusted-benchmarks` GitHub environment,
+which must also be created and protected before it can gate a trusted run.
 
 ## Fork exposure, and why the guards are load-bearing
 
@@ -82,32 +83,47 @@ failure.
 
 This workflow authorizes on ref alone and deliberately has **no** trusted-SHA variable:
 `REACHABILITY_BENCHMARK_TRUSTED_SHA` is a forbidden string in
-`internal/infrastructure/reachbench/workflow_policy_test.go:37-44`. Do not add one to mirror the engine
-workflow; the difference is a recorded decision, and the two aggregates rely on it.
+`internal/infrastructure/reachbench/workflow_policy_test.go:37-44`. Do not add or configure one to mirror
+the engine workflow; the difference is a recorded decision, and the two aggregates rely on it.
+
+The trusted runtime also hard-codes baseline revision
+`50d205260be412dc2f57736f71d1448a8f58177a`. It must exist in the trusted checkout and remain an ancestor
+of the selected source revision. Regenerate the controller review and disposition evidence for the candidate
+before claiming a trusted reachability acceptance run; a passing local or stale-evidence run is not acceptance
+evidence.
 
 ## Runner requirements
 
-Two label sets, both Linux:
+Two label sets, both Linux, are attached to the `trusted-benchmarks` GitHub environment only on their
+self-hosted `benchmark` jobs:
 
 ```text
-[self-hosted, linux, sca-accuracy-trusted]           engine-accuracy.yml:59
-[self-hosted, linux, reachability-accuracy-trusted]  reachability-benchmark.yml:69
+[self-hosted, linux, sca-accuracy-trusted]           engine-accuracy.yml
+[self-hosted, linux, reachability-accuracy-trusted]  reachability-benchmark.yml
+environment: trusted-benchmarks                       both trusted benchmark jobs
 ```
 
 The SCA runner needs a delegated cgroup v2 hierarchy. `cmd/synapse-sca-cycle` requires
 `SCA_ACCURACY_DELEGATED_CGROUP_ROOT` to be non-empty and passes it to the sandbox runner, which rejects
 any path outside `/sys/fs/cgroup` or outside its `synapse-manager` child, and requires both the `memory`
 and `pids` controllers (`internal/infrastructure/sandbox/cgroup_linux.go:51-89`). This is the capability
-that rules out a hosted runner and rules out running the capture on a non-Linux host at all.
+that rules out a hosted runner and rules out running the capture on a non-Linux host at all. The current SCA
+cleanup barrier also invokes `docker container`, `volume`, `image`, and `builder` prune commands. The Docker
+executable and a usable Docker daemon are therefore required today; cleanup failure blocks the cycle.
 
 The reachability runner additionally needs the Go toolchain declared by `go.mod`, .NET SDK `8.0.100`,
 and OpenJDK `java`, `javac` and `jar` at `21.0.5`
-(`docs/guide/reachability-benchmark-runbook.md:39-47`).
+(`docs/guide/reachability-benchmark-runbook.md:39-47`). Its trusted runtime also requires `unshare` and
+`mount`, plus a kernel and runner policy that permit unprivileged user and mount namespaces; it runs
+`unshare --user --map-root-user --mount` before creating the private read-only execution environment.
 
 ## Trusted input tree
 
 `SCA_ACCURACY_TRUSTED_INPUT_ROOT` must be an existing absolute directory containing only prepared,
-pinned data (`docs/guide/sca-accuracy-benchmark.md:23-35`):
+pinned data. This layout is the authoritative runtime contract: setup resolves the fixed template identities
+under this root rather than retaining template host paths, while the materialized capture manifest retains
+absolute runtime paths (with the owned benchmark binary rebound into its private work directory).
+`docs/guide/sca-accuracy-benchmark.md:23-35` describes the pinned corpus:
 
 ```text
 trusted-input-root/
@@ -122,10 +138,12 @@ trusted-input-root/
 ```
 
 The review and disposition captures are not optional and cannot be synthesized. A trusted cycle requires
-exactly one review whose state is exactly `COMMENTED` and whose `commit_id` equals the implementation
-commit, plus exactly one disposition whose `decision` is `approved` and whose `login` differs from the
-reviewer's (`internal/infrastructure/scabench/run.go:1383-1429`). A machine identity cannot satisfy both
-sides, which is the intended effect.
+exactly one strict-v1 review whose state is `COMMENTED`, whose credential-free HTTPS `github.com` pull-request
+URL has a `pullrequestreview-<id>` fragment matching its captured ID, and whose `commit_id` equals the
+implementation commit. It also requires exactly one strict-v1 maintainer disposition whose `decision` is
+`approved`, whose `issuecomment-<id>` pull-request URL fragment matches its captured ID, and whose `login`
+differs from the reviewer's. The disposition binds both the review and implementation commits. A machine
+identity cannot satisfy both sides, which is the intended effect.
 
 ## Databases will not reproduce a pinned digest today
 
@@ -183,17 +201,21 @@ its prepared inputs still verify.
 ## Order of operations
 
 1. Enable Actions for the repository. Nothing below has any effect first.
-2. Stand up the two Linux runners with the exact label sets, delegated cgroup v2, and toolchains.
-3. Build the trusted input tree, including the independent review and the maintainer disposition.
-4. Archive pinned vendor bytes and confirm coverage, or accept that the capture is diagnostic.
-5. Set the variables. Point `ENGINE_ACCURACY_TRUSTED_SHA` at the exact commit being measured.
-6. Dispatch the workflow and confirm the aggregate reports a successful benchmark with a non-empty
+2. Create and protect the `trusted-benchmarks` environment.
+3. Stand up the two Linux runners with the exact label sets, delegated cgroup v2, Docker for SCA cleanup,
+   namespace support for reachability, and the required toolchains.
+4. Build the trusted input tree, including the independent review and the maintainer disposition.
+5. Archive pinned vendor bytes and confirm coverage, or accept that the capture is diagnostic.
+6. Set the variables. Point `ENGINE_ACCURACY_TRUSTED_SHA` at the exact commit being measured.
+7. Dispatch the workflow and confirm the aggregate reports a successful benchmark with a non-empty
    artifact. An aggregate that passes with the benchmark skipped means the route was untrusted.
 
 ## Verifying a run was genuinely authorized
 
 A green aggregate alone does not prove a trusted capture happened. Check that the trusted job ran rather
-than being skipped, that it carries an uploaded artifact, and that the run's commit equals the
-`TRUSTED_SHA` that was configured at the time. `engine-accuracy.yml` requires a successful benchmark and
-a non-empty artifact whenever the route was trusted, and requires the benchmark to be skipped when it was
-not, so the two cases are distinguishable from the aggregate's own conditions.
+than being skipped and that it carries an uploaded artifact. For engine accuracy, also verify that the run's
+commit equals the configured `ENGINE_ACCURACY_TRUSTED_SHA`. Reachability deliberately has no trusted-SHA
+variable: verify its protected ref, selected source SHA, controller evidence, and the required historical
+baseline revision instead. `engine-accuracy.yml` requires a successful benchmark and a non-empty artifact
+whenever the route was trusted, and requires the benchmark to be skipped when it was not, so the two cases
+are distinguishable from the aggregate's own conditions.
