@@ -12,20 +12,24 @@ to confirm a claimed trusted run was actually authorized.
 
 ## Current state
 
-Measured through the GitHub API on 2026-09-22:
+Measured through the GitHub API on 2026-09-23:
 
 ```text
-GET /repos/KKloudTarus/synapse-ce/actions/permissions  -> {"enabled": false}
-GET .../actions/variables                              -> {"total_count": 0}
+GET /repos/KKloudTarus/synapse-ce/actions/permissions  -> {"enabled": true}
+GET .../actions/variables                              -> {"total_count": 10}
 GET .../actions/runners                                -> {"total_count": 0}
-GET .../environments                                   -> copilot, github-pages (no trusted-benchmarks)
+GET .../environments                                   -> copilot, github-pages, trusted-benchmarks
+GET .../environments/trusted-benchmarks                 -> branch_policy only; no required reviewer
+GET .../environments/trusted-benchmarks/deployment-branch-policies
+                                                       -> feat/1034-wave1-wave2-trusted-evidence only
 GET .../branches/main/protection                       -> 404 Branch not protected
 ```
 
-Actions is disabled repository-wide, so no workflow runs at all today. That is a more categorical
-blocker than the missing variables: provisioning every variable and runner below would still produce no
-run until Actions is enabled. Both trusted jobs now reference the `trusted-benchmarks` GitHub environment,
-which must also be created and protected before it can gate a trusted run.
+Actions and the ten variables are present. Both `*_TRUSTED_ENABLED` variables are `false`, no runner is
+registered, and the environment has no required reviewer. Its custom policy permits only the current
+feature branch, which is also the value of both trusted-ref variables. Trusted jobs therefore remain
+skipped; a repository owner must protect the authorized ref and environment and provision an isolated
+runner before enabling either trusted route.
 
 ## Fork exposure, and why the guards are load-bearing
 
@@ -53,8 +57,8 @@ an arbitrary-code-execution path on the runner host, not a configuration conveni
 
 ## Repository variables
 
-Ten variables are referenced and none exists. Both workflows read them through `vars.*`, so an unset
-variable evaluates empty and the trust predicate closes.
+Ten variables are referenced and currently exist. Both workflows read them through `vars.*`; an unset
+variable evaluates empty and the trust predicate closes. Both trusted-enabled flags currently equal `false`.
 
 ### SCA accuracy (`engine-accuracy.yml`)
 
@@ -200,13 +204,14 @@ its prepared inputs still verify.
 
 ## Order of operations
 
-1. Enable Actions for the repository. Nothing below has any effect first.
-2. Create and protect the `trusted-benchmarks` environment.
+1. Confirm Actions is enabled for the repository.
+2. Protect the authorized branch and the `trusted-benchmarks` environment with independent required
+   review. Align the environment branch policy with both trusted-ref variables.
 3. Stand up the two Linux runners with the exact label sets, delegated cgroup v2, Docker for SCA cleanup,
    namespace support for reachability, and the required toolchains.
 4. Build the trusted input tree, including the independent review and the maintainer disposition.
 5. Archive pinned vendor bytes and confirm coverage, or accept that the capture is diagnostic.
-6. Set the variables. Point `ENGINE_ACCURACY_TRUSTED_SHA` at the exact commit being measured.
+6. Confirm the variables and point `ENGINE_ACCURACY_TRUSTED_SHA` at the exact commit being measured.
 7. Dispatch the workflow and confirm the aggregate reports a successful benchmark with a non-empty
    artifact. An aggregate that passes with the benchmark skipped means the route was untrusted.
 
