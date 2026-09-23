@@ -122,7 +122,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 	cpeStore, hasCPE := s.store.(ports.CPEAdvisoryStore)
 	var out []vulnerability.RawFinding
 	emitted := map[string]struct{}{}
-	emit := func(a advisory.Advisory, c sbom.Component, fixed string, symbols []string) {
+	emit := func(a advisory.Advisory, c sbom.Component, fixed string, symbols []string, matched *sbom.ComponentIdentity) {
 		key := a.ID + "\x00" + c.PURL // one finding per (advisory, component), so package + CPE hits don't double
 		if _, done := emitted[key]; done {
 			return
@@ -131,7 +131,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 		if ov := s.overlaySymbols(a); len(ov) > 0 {
 			symbols = dedupSymbols(append(append([]string(nil), symbols...), ov...))
 		}
-		out = append(out, rawFinding(a, c, fixed, symbols))
+		out = append(out, rawFinding(a, c, fixed, symbols, matched))
 	}
 	for _, c := range doc.Components {
 		// 1) Package-key matching against OSV/distro ecosystems.
@@ -176,7 +176,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 					// MatchDetails (not Match + AffectedSymbolsFor) so the finding carries ONLY the symbols of the
 					// affected blocks that actually match this version.
 					if affected, fixed, symbols := a.MatchDetails(lookupEco, name, version, componentArch); affected {
-						emit(a, c, fixed, symbols)
+						emit(a, c, fixed, symbols, &sbom.ComponentIdentity{Ecosystem: lookupEco, Package: name, Version: version})
 					}
 				}
 				return nil
@@ -189,6 +189,13 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 			}
 			for _, lookupEco := range lookupEcosystems {
 				name := canonicalName(lookupEco, c.Name)
+				if lookupEco == "Maven" {
+					purlIdentity, coherent := coherentPURLIdentity(c)
+					if !coherent || purlIdentity.Ecosystem != "Maven" {
+						continue
+					}
+					name = purlIdentity.Package
+				}
 				if err := matchName(lookupEco, name, matchVersion); err != nil {
 					return nil, err
 				}
@@ -259,7 +266,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 					}
 				}
 				if vulnerable && !excluded {
-					emit(a, c, fixedHint, nil)
+					emit(a, c, fixedHint, nil, nil)
 				}
 			}
 		}
@@ -268,9 +275,25 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 }
 
 // rawFinding builds the normalized finding from a matched advisory + component.
-func rawFinding(a advisory.Advisory, c sbom.Component, fixed string, symbols []string) vulnerability.RawFinding {
+func rawFinding(a advisory.Advisory, c sbom.Component, fixed string, symbols []string, matched *sbom.ComponentIdentity) vulnerability.RawFinding {
 	identity := sbom.IdentityFromComponent(c)
-	fixedVersions, rejectedFixedVersions := ownedFixedVersions(a, identity, fixed)
+	purlIdentity, coherentPURL := coherentPURLIdentity(c)
+	remediationIdentity := sbom.ComponentIdentity{}
+	if matched != nil {
+		if coherentPURL {
+			remediationIdentity = *matched
+			if identity.Ecosystem == "" {
+				identity.Ecosystem = matched.Ecosystem
+			}
+		}
+	} else if coherentPURL {
+		remediationIdentity = purlIdentity
+		if identity.Ecosystem == "" {
+			identity.Ecosystem = purlIdentity.Ecosystem
+		}
+	}
+	componentArch := decodePURLSegment(purlQualifier(c.PURL, "arch"))
+	fixedVersions, rejectedFixedVersions := ownedFixedVersions(a, remediationIdentity, componentArch, fixed)
 	rf := vulnerability.RawFinding{
 		Source:                sourceName,
 		AdvisoryID:            preferCVE(a.ID, a.Aliases),
@@ -319,25 +342,90 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string, symbols []s
 	return rf
 }
 
-func ownedFixedVersions(value advisory.Advisory, identity sbom.ComponentIdentity, fallback string) ([]string, []string) {
+func coherentPURLIdentity(c sbom.Component) (sbom.ComponentIdentity, bool) {
+	purlIdentity := sbom.IdentityFromComponent(sbom.Component{PURL: c.PURL})
+	if purlIdentity.Status != sbom.IdentityResolved {
+		return sbom.ComponentIdentity{}, false
+	}
+	nameMatches := canonicalName(purlIdentity.Ecosystem, c.Name) == canonicalName(purlIdentity.Ecosystem, purlIdentity.Package)
+	if purlIdentity.Ecosystem == "Maven" {
+		// Syft can supply only the artifact name while the PURL carries group:artifact.
+		artifact := purlIdentity.Package[strings.LastIndexByte(purlIdentity.Package, ':')+1:]
+		nameMatches = nameMatches || c.Name == artifact
+	}
+	if !nameMatches {
+		return sbom.ComponentIdentity{}, false
+	}
+	if purlType(c.PURL) == "rpm" {
+		epoch := decodePURLSegment(purlQualifier(c.PURL, "epoch"))
+		componentVersion := rpmCanonicalEVR(decodePURLSegment(c.Version), epoch)
+		if componentVersion != rpmCanonicalEVR(purlIdentity.Version, epoch) {
+			return sbom.ComponentIdentity{}, false
+		}
+		purlIdentity.Version = componentVersion
+		return purlIdentity, true
+	}
+	if strings.TrimSpace(c.Version) != purlIdentity.Version {
+		return sbom.ComponentIdentity{}, false
+	}
+	return purlIdentity, true
+}
+
+const maxRemediationVersionComparisons = 100_000
+
+func ownedFixedVersions(value advisory.Advisory, identity sbom.ComponentIdentity, architecture, fallback string) ([]string, []string) {
 	candidates := []string{fallback}
 	ranges := make([]advisory.Range, 0)
+	versionSets := make([][]string, 0)
+	versionCount := 0
 	for _, affected := range value.Affected {
-		if affected.Ecosystem != identity.Ecosystem || affected.Package != identity.Package {
+		if affected.Ecosystem != identity.Ecosystem || affected.Package != identity.Package ||
+			!advisory.ArchitectureApplies(affected.Architectures, architecture) {
 			continue
 		}
 		candidates = append(candidates, advisory.FixedVersions(affected)...)
 		ranges = append(ranges, affected.Ranges...)
+		if len(affected.Versions) > 0 {
+			versionSets = append(versionSets, affected.Versions)
+			versionCount += len(affected.Versions)
+		}
 	}
 	valid := map[string]bool{}
 	rejected := map[string]bool{}
+	pending := map[string]bool{}
 	for _, candidate := range candidates {
 		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if pending[candidate] || rejected[candidate] {
+			continue
+		}
 		comparison, comparable := advisory.CompareVersions(identity.Ecosystem, identity.Version, candidate)
-		if candidate == "" || !comparable || comparison >= 0 || advisory.Affected(identity.Ecosystem, candidate, ranges, nil) {
-			if candidate != "" {
-				rejected[candidate] = true
+		if !comparable || comparison >= 0 || advisory.Affected(identity.Ecosystem, candidate, ranges, nil) {
+			rejected[candidate] = true
+			continue
+		}
+		pending[candidate] = true
+	}
+	// Large explicit lists must not multiply work by every remediation candidate. Withhold unverified
+	// suggestions when their validation exceeds this per-finding budget.
+	if len(pending) > 0 && versionCount > maxRemediationVersionComparisons/len(pending) {
+		for candidate := range pending {
+			rejected[candidate] = true
+		}
+		return nil, sortedVersionKeys(rejected)
+	}
+	for candidate := range pending {
+		stillAffected := false
+		for _, versions := range versionSets {
+			if advisory.AffectedVersionList(identity.Ecosystem, candidate, versions) {
+				stillAffected = true
+				break
 			}
+		}
+		if stillAffected {
+			rejected[candidate] = true
 			continue
 		}
 		valid[candidate] = true
