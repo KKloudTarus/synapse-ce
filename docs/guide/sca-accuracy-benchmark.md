@@ -81,6 +81,18 @@ citations no longer describe, so a re-capture on drifted feeds is treated as dia
 committed catalog and ratchet stay unchanged. Making a pinned corpus durably reproducible requires archiving the
 exact vendor bytes into content-addressed storage at pin time.
 
+## Materialized trusted-input archive
+
+The raw-origin archive records bytes fetched from vendor origins. It is distinct from the materialized trusted-input
+archive, which snapshots an already prepared `trusted-input-root` after its catalog pins have been verified. The
+corpus's `trusted-input-bindings.json` identifies every origin-bearing pin's file or directory in that root. Collection
+records the complete directory and file inventory, preserves executable and safe permission bits, stores file objects
+in the archive CAS, and binds the result to the canonical catalog digest. Restore rebuilds only into an existing empty
+root and re-verifies the inventory and all bindings before accepting it.
+
+This improves future prepared captures; it does not retroactively recover vendor bytes for the committed corpus when
+those bytes have already drifted from their origins.
+
 ## Focused offline verification
 
 Use this small local check while changing the benchmark implementation:

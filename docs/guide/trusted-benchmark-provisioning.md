@@ -139,7 +139,8 @@ archived, 15 could not be verified against their pin, and 1 uses an `oci://` ori
 client. So a capture on freshly provisioned infrastructure is **diagnostic measurement**, not acceptance
 evidence, until the pinned bytes are archived.
 
-Archive first:
+The direct command remains the **raw-origin fetch archive**: it fetches vendors' currently served bytes and
+reports each pin as archived, unverified, or unsupported.
 
 ```sh
 go run ./cmd/synapse-sca-archive \
@@ -147,10 +148,37 @@ go run ./cmd/synapse-sca-archive \
   --archive-root /protected/sca-pin-archive
 ```
 
-The command reports each pin as archived, unverified, or unsupported, and states whether the corpus is
-byte-reproducible. Note that several pins digest something derived from the download rather than the
-download itself. The grype pin, for example, is the digest of the `grype` executable inside a release
-tarball, so an unverified result there is not evidence the vendor republished.
+Several pins digest something derived from the download rather than the download itself. The grype pin, for
+example, is the digest of the `grype` executable inside a release tarball, so an unverified result there is not
+evidence the vendor republished.
+
+After a trusted root has been prepared and its catalog pins verify, snapshot that **materialized trusted-input
+archive** separately. The corpus binding specification covers every origin-bearing pin and does not change the
+raw-origin archive's pin semantics:
+
+```sh
+go run ./cmd/synapse-sca-archive collect \
+  --corpus-root ./internal/usecase/scabench/corpus \
+  --trusted-input-root /protected/sca-inputs \
+  --binding-spec ./internal/usecase/scabench/corpus/trusted-input-bindings.json \
+  --archive-root /protected/sca-pin-archive \
+  --manifest /protected/sca-pin-archive/trusted-input-archive.json
+```
+
+Restore that snapshot only into an existing empty directory:
+
+```sh
+go run ./cmd/synapse-sca-archive restore \
+  --corpus-root ./internal/usecase/scabench/corpus \
+  --binding-spec ./internal/usecase/scabench/corpus/trusted-input-bindings.json \
+  --archive-root /protected/sca-pin-archive \
+  --manifest /protected/sca-pin-archive/trusted-input-archive.json \
+  --destination-root /protected/sca-inputs-restored
+```
+
+Neither command makes old pins retrospectively archivable. For the committed corpus, vendor bytes that have
+already changed at their origins remain unavailable until a future reviewed corpus is pinned and archived while
+its prepared inputs still verify.
 
 ## Order of operations
 
