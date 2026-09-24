@@ -30,6 +30,10 @@ const (
 	// so FQN-dense generated or hostile source cannot inflate the import list that the sink gate scans per
 	// candidate. A real compilation unit references far fewer distinct fully-qualified types than this.
 	maxSyntheticFQNTypes = 4096
+	// maxJavaDeadBranchEligibilityNodes limits the conservative structural proof used before omitting an
+	// exact `if (false)` consequence. Reaching the cap retains the branch, so hostile nesting cannot turn
+	// incomplete inspection into a false suppression.
+	maxJavaDeadBranchEligibilityNodes = 8192
 )
 
 // JavaFactsFor extracts a bounded, versioned Java semantic-facts document without compiling or executing
@@ -153,6 +157,15 @@ func (e *javaFactExtractor) walk(node *sitter.Node, scope javaScope) {
 		return
 	}
 	switch node.Type() {
+	case "if_statement":
+		if e.skipExactFalseConsequence(node) {
+			// Walk condition and alternative normally. The consequence is syntactically unreachable, and the
+			// eligibility proof above established it cannot contain an independently callable body that the
+			// enclosing control flow would otherwise fail to visit.
+			e.walk(node.ChildByFieldName("condition"), scope)
+			e.walk(node.ChildByFieldName("alternative"), scope)
+			return
+		}
 	case "class_declaration", "interface_declaration", "enum_declaration", "record_declaration":
 		e.walkType(node, scope)
 		return
@@ -181,6 +194,55 @@ func (e *javaFactExtractor) walk(node *sitter.Node, scope javaScope) {
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		e.walk(node.NamedChild(i), scope)
 	}
+}
+
+// skipExactFalseConsequence reports whether an if_statement consequence may be omitted without hiding an
+// executable Java body. Java's grammar wraps every if condition in one parenthesized_expression, so it
+// accepts only that wrapper with a single bare `false` literal; expressions such as `false || predicate`,
+// extra parentheses, or malformed syntax are retained. A bounded iterative scan rejects any
+// nested type, method, constructor, lambda, or anonymous-class body because those bodies are independently
+// executable after declaration. Every uncertainty retains the consequence.
+func (e *javaFactExtractor) skipExactFalseConsequence(node *sitter.Node) bool {
+	if node == nil || node.HasError() {
+		return false
+	}
+	condition := node.ChildByFieldName("condition")
+	consequence := node.ChildByFieldName("consequence")
+	if condition == nil || consequence == nil || condition.Type() != "parenthesized_expression" || condition.HasError() || consequence.HasError() || condition.NamedChildCount() != 1 {
+		return false
+	}
+	inner := condition.NamedChild(0)
+	if inner == nil || inner.Type() != "false" || inner.HasError() {
+		return false
+	}
+
+	seen := 0
+	stack := []*sitter.Node{consequence}
+	for len(stack) > 0 {
+		last := len(stack) - 1
+		current := stack[last]
+		stack = stack[:last]
+		if current == nil || current.HasError() {
+			return false
+		}
+		seen++
+		if seen > maxJavaDeadBranchEligibilityNodes {
+			return false
+		}
+		switch current.Type() {
+		case "class_declaration", "interface_declaration", "enum_declaration", "record_declaration",
+			"annotation_type_declaration", "method_declaration", "constructor_declaration", "lambda_expression":
+			return false
+		case "class_body":
+			// A class body below a statement is an anonymous class or a local type. Either owns code that can
+			// execute independently, so retain this consequence for ordinary extraction.
+			return false
+		}
+		for i := 0; i < int(current.ChildCount()); i++ {
+			stack = append(stack, current.Child(i))
+		}
+	}
+	return true
 }
 
 // recordFQNType notes an inline fully-qualified type reference such as
