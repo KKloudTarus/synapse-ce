@@ -25,7 +25,10 @@ import (
 	bench "github.com/KKloudTarus/synapse-ce/internal/usecase/scabench"
 )
 
-const maxDownloadBytes int64 = 512 << 20
+const (
+	maxDownloadBytes      int64 = 512 << 20
+	maxSBOMGenerationTime       = 10 * time.Minute
+)
 
 var errArchiveTooLarge = errors.New("archive decompressed size exceeds limit")
 
@@ -359,7 +362,9 @@ func generateSBOM(ctx context.Context, syft, reference, output string) error {
 	if err := os.MkdirAll(filepath.Dir(output), 0o700); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, syft, "scan", "docker:"+reference, "-o", "cyclonedx-json="+output, "-q")
+	runCtx, cancel := context.WithTimeout(ctx, maxSBOMGenerationTime)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, syft, "scan", "docker:"+reference, "-o", "cyclonedx-json="+output, "-q")
 	cmd.Env = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "SYFT_CHECK_FOR_APP_UPDATE=false"}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("syft execution: %w: %s", err, strings.TrimSpace(string(out)))
