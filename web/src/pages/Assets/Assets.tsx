@@ -81,7 +81,7 @@ export function Assets() {
   // one-row query answers it exactly. Counting the visible page instead under-reported critical
   // assets whenever the estate spanned more than one page, which on a security inventory reads as
   // fewer critical assets than exist.
-  const { data: criticalPage } = useFetch<BusinessAssetPage>(
+  const { data: criticalPage, error: criticalError } = useFetch<BusinessAssetPage>(
     (signal) => {
       const params = new URLSearchParams({ limit: '1', offset: '0', criticality: 'critical' })
       if (debouncedQuery.trim()) params.set('q', debouncedQuery.trim())
@@ -122,12 +122,14 @@ export function Assets() {
       )}
 
       <MetricStrip ariaLabel="Asset inventory summary">
-        <SummaryCard icon={LayersThree01} label="Total assets" value={result?.total ?? 0} tone="muted" />
-        <SummaryCard icon={AlertTriangle} label="Critical" value={criticalPage?.total ?? 0} tone="critical" />
+        {/* A count that failed to load reads as zero, which on a security inventory is a false
+            all-clear. Each card states that its figure is unavailable instead. */}
+        <SummaryCard icon={LayersThree01} label="Total assets" value={countValue(result?.total, error)} tone="muted" />
+        <SummaryCard icon={AlertTriangle} label="Critical" value={countValue(criticalPage?.total, criticalError)} tone="critical" />
         {/* Lifecycle and posture have no aggregate count endpoint, so these stay page-scoped and say
             so. An unlabelled page count next to an estate-wide total reads as an estate-wide figure. */}
-        <SummaryCard icon={Activity} label="Active on this page" value={visible.filter((asset) => asset.lifecycle === 'active').length} tone="accent" />
-        <SummaryCard icon={ShieldTick} label="Needs attention on this page" value={visible.filter((asset) => !['good', 'unknown'].includes(asset.posture ?? 'unknown')).length} tone="brand" />
+        <SummaryCard icon={Activity} label="Active on this page" value={countValue(result ? visible.filter((asset) => asset.lifecycle === 'active').length : undefined, error)} tone="accent" />
+        <SummaryCard icon={ShieldTick} label="Needs attention on this page" value={countValue(result ? visible.filter((asset) => !['good', 'unknown'].includes(asset.posture ?? 'unknown')).length : undefined, error)} tone="brand" />
       </MetricStrip>
 
       <Card className="overflow-hidden" bodyClass="p-0">
@@ -200,6 +202,15 @@ export function Assets() {
       </Card>
     </div>
   )
+}
+
+/**
+ * Renders a count only when it is actually known. A failed request becomes "Unavailable" and an
+ * in-flight one becomes an em dash, so neither is shown as the number zero.
+ */
+function countValue(value: number | undefined, error: string | null): number | string {
+  if (error) return 'Unavailable'
+  return value ?? '—'
 }
 
 function SummaryCard({

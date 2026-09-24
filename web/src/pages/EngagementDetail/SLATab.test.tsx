@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../lib/api'
 import type { Finding, SLAAssessment, SLAEvent, SLAView } from '../../lib/types'
@@ -47,7 +47,16 @@ const view: SLAView = {
   acceptanceExpired: false,
 }
 
-const findings = [{ id: 'finding-1', title: 'Unauthenticated admin route' } as Finding]
+const secondView: SLAView = {
+  ...view,
+  assessment: { ...assessment, id: 'sla-assessment-2', findingId: 'finding-2' },
+  lifecycle: { ...view.lifecycle, findingId: 'finding-2', assessmentId: 'sla-assessment-2' },
+}
+
+const findings = [
+  { id: 'finding-1', title: 'Unauthenticated admin route' } as Finding,
+  { id: 'finding-2', title: 'Secret in build log' } as Finding,
+]
 
 const events: SLAEvent[] = [
   {
@@ -109,5 +118,69 @@ describe('SLATab decision record', () => {
 
     expect(await screen.findByText(/sla events unavailable/)).toBeInTheDocument()
     expect(screen.queryByText('No transitions recorded yet.')).not.toBeInTheDocument()
+  })
+})
+
+describe('SLATab failure and identity handling', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.slaEvents).mockResolvedValue([])
+    vi.mocked(api.slaAssessments).mockResolvedValue([])
+  })
+
+  // An initial list failure left `fetchedItems` null forever, and the null check ran before the
+  // error check, so a failed SLA service rendered as a spinner that never resolved.
+  it('surfaces an initial list failure instead of spinning forever', async () => {
+    vi.mocked(api.slas).mockRejectedValue(new Error('sla service unavailable'))
+    render(<SLATab engagementId="engagement-1" findings={findings} />)
+
+    expect(await screen.findByText('sla service unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('Loading remediation SLAs…')).not.toBeInTheDocument()
+  })
+
+  // Dropping the assessments error would render an outage as "no deadline assessments recorded".
+  it('surfaces a deadline-assessments outage in its own column', async () => {
+    vi.mocked(api.slas).mockResolvedValue([view])
+    vi.mocked(api.slaAssessments).mockRejectedValue(new Error('assessments unavailable'))
+    render(<SLATab engagementId="engagement-1" findings={findings} />)
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Transition' }))[0])
+
+    expect(await screen.findByText('assessments unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('No deadline assessments recorded yet.')).not.toBeInTheDocument()
+  })
+
+  // The panel is keyed on the finding. Without that, the previous finding's audit trail stays on
+  // screen under the new finding's title, and a typed rationale is written against the wrong one.
+  it('never shows one finding\'s history under another finding', async () => {
+    vi.mocked(api.slas).mockResolvedValue([view, secondView])
+    vi.mocked(api.slaEvents).mockImplementation(async (_engagementId: string, findingId: string) =>
+      findingId === 'finding-1' ? events : new Promise(() => []) as never,
+    )
+    render(<SLATab engagementId="engagement-1" findings={findings} />)
+
+    const buttons = await screen.findAllByRole('button', { name: 'Transition' })
+    fireEvent.click(buttons[0])
+    await screen.findByText('Accepted until the gateway ships.')
+
+    // finding-2's history never resolves, so anything from finding-1 still on screen is stale.
+    fireEvent.click(buttons[1])
+    await screen.findByText('Transition: Secret in build log')
+    await waitFor(() => {
+      expect(screen.queryByText('Accepted until the gateway ships.')).not.toBeInTheDocument()
+    })
+  })
+
+  it('clears a typed rationale when the selected finding changes', async () => {
+    vi.mocked(api.slas).mockResolvedValue([view, secondView])
+    render(<SLATab engagementId="engagement-1" findings={findings} />)
+
+    const buttons = await screen.findAllByRole('button', { name: 'Transition' })
+    fireEvent.click(buttons[0])
+    const reason = await screen.findByPlaceholderText('Required audit rationale')
+    fireEvent.change(reason, { target: { value: 'typed while looking at finding-1' } })
+
+    fireEvent.click(buttons[1])
+    await screen.findByText('Transition: Secret in build log')
+    expect(screen.getByPlaceholderText('Required audit rationale')).toHaveValue('')
   })
 })

@@ -75,4 +75,27 @@ describe('Assets', () => {
     // Page-scoped figures state their scope so they are not read as estate-wide.
     expect(screen.getByText('Needs attention on this page')).toBeInTheDocument()
   })
+
+  // A count that failed to load used to render as 0, which on a security inventory is a false
+  // all-clear and is the exact bug class this screen was changed to remove.
+  it('says the critical count is unavailable when its request fails', async () => {
+    vi.mocked(api.listBusinessAssets).mockImplementation(async (query = '') => {
+      if (query.includes('criticality=critical')) throw new Error('count query failed')
+      return { items: [asset], total: 120, limit: 24, offset: 0 }
+    })
+    render(<MemoryRouter><Assets /></MemoryRouter>)
+
+    expect(await screen.findByText('120')).toBeInTheDocument()
+    expect(await screen.findByText('Unavailable')).toBeInTheDocument()
+  })
+
+  it('says every count is unavailable when the inventory request fails', async () => {
+    vi.mocked(api.listBusinessAssets).mockRejectedValue(new Error('inventory unavailable'))
+    render(<MemoryRouter><Assets /></MemoryRouter>)
+
+    await screen.findByText('inventory unavailable')
+    // Total, critical, and the two page-scoped figures all read Unavailable rather than 0.
+    expect(screen.getAllByText('Unavailable').length).toBe(4)
+    expect(screen.queryByText('0')).not.toBeInTheDocument()
+  })
 })

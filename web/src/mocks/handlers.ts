@@ -1493,6 +1493,27 @@ export const handlers = [
       event: { actor: 'admin', status: body.to, rationale: body.rationale, version: body.expected_version + 1, created_at: NOW },
     })
   }),
+  // The issue inspector reads the review history next to the classification form. Without a mock
+  // the request is bypassed to a dev server with no /api route, so every issue shows an error.
+  http.get('/api/v1/projects/:key/issues/:id/history', ({ params }) => HttpResponse.json([
+    {
+      from: 'confirmed',
+      to: 'accepted',
+      actor: 'reviewer@example.test',
+      rationale: `Accepted for ${params.id}: mitigated by the gateway allowlist, re-check next cycle.`,
+      version: 2,
+      created_at: new Date(Date.now() - 3 * 86400_000).toISOString(),
+    },
+    {
+      from: 'open',
+      to: 'confirmed',
+      actor: 'analyst@example.test',
+      rationale: 'Reproduced against the staging build.',
+      version: 1,
+      created_at: new Date(Date.now() - 6 * 86400_000).toISOString(),
+    },
+  ])),
+
   http.get('/api/v1/projects/:key/issues', () => HttpResponse.json({
     items: Array.from({ length: 12 }, (_, i) => {
       const file = `internal/${['handlers', 'usecase', 'adapter', 'domain'][i % 4]}/${['user', 'scan', 'report', 'finding'][i % 4]}.go`

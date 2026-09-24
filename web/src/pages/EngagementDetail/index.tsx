@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, lazy, Suspense, type FC } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense, type ComponentType, type FC } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   Activity,
@@ -38,32 +38,84 @@ import { VulnerabilityIntelligenceBadge } from '../../components/synapse/Vulnera
 // Findings) is a separate chunk. Statically importing all 27 put every tab in the initial
 // bundle, which a user pays for on first paint no matter which tab they open. VulnsTab stays
 // static because this module calls its counting helpers to render the tab-bar counts.
+/**
+ * Wraps a tab's dynamic import so a failed chunk fetch can recover.
+ *
+ * After a deploy rotates the hashed chunk filenames, an already-open session's import 404s.
+ * React.lazy caches that rejection permanently, so the error boundary's Retry remounts into the
+ * same rejected payload forever. Retry the import once (it covers a transient network failure),
+ * then reload the page once, which fetches the current index and its chunk names. The one-shot
+ * flag stops a genuinely missing chunk from turning into a reload loop, and it is cleared on the
+ * next successful load.
+ */
+const CHUNK_RELOAD_FLAG = 'synapse.engagement-chunk-reloaded'
+
+function readReloadFlag(): boolean {
+  try {
+    return sessionStorage.getItem(CHUNK_RELOAD_FLAG) === '1'
+  } catch {
+    // Private mode or blocked storage: treat as "not yet reloaded" and rely on the single attempt.
+    return false
+  }
+}
+
+function writeReloadFlag(value: boolean) {
+  try {
+    if (value) sessionStorage.setItem(CHUNK_RELOAD_FLAG, '1')
+    else sessionStorage.removeItem(CHUNK_RELOAD_FLAG)
+  } catch {
+    // Storage is unavailable; the reload still happens, it just is not deduplicated.
+  }
+}
+
+function lazyTab<T extends ComponentType<any>>(load: () => Promise<{ default: T }>) {
+  return lazy(async () => {
+    try {
+      const loaded = await load()
+      writeReloadFlag(false)
+      return loaded
+    } catch (first) {
+      try {
+        const retried = await load()
+        writeReloadFlag(false)
+        return retried
+      } catch (second) {
+        if (!readReloadFlag()) {
+          writeReloadFlag(true)
+          window.location.reload()
+        }
+        throw second instanceof Error ? second : first
+      }
+    }
+  })
+}
+
 // Lazy-loaded so React Flow stays out of the initial bundle (only the Graph tab needs it).
-const DependencyGraphTab = lazy(() => import('../DependencyGraph').then((m) => ({ default: m.DependencyGraphTab })))
-const AgentTab = lazy(() => import('../AgentTab').then((m) => ({ default: m.AgentTab })))
-const ThreatModelTab = lazy(() => import('./ThreatModelTab').then((m) => ({ default: m.ThreatModelTab })))
-const CodeQualityTab = lazy(() => import('../CodeQuality/CodeQualityTab').then((m) => ({ default: m.CodeQualityTab })))
-const SLATab = lazy(() => import('./SLATab').then((m) => ({ default: m.SLATab })))
-const LicensesTab = lazy(() => import('./LicensesTab').then((m) => ({ default: m.LicensesTab })))
-const ComponentsTab = lazy(() => import('./ComponentsTab').then((m) => ({ default: m.ComponentsTab })))
-const ReconTab = lazy(() => import('./ReconTab').then((m) => ({ default: m.ReconTab })))
-const ScanRunsTab = lazy(() => import('./ScanRunsTab').then((m) => ({ default: m.ScanRunsTab })))
-const PurpleCoverageTab = lazy(() => import('./PurpleCoverageTab').then((m) => ({ default: m.PurpleCoverageTab })))
-const ChainRehearsalTab = lazy(() => import('./ChainRehearsalTab').then((m) => ({ default: m.ChainRehearsalTab })))
-const RiskStoriesTab = lazy(() => import('./RiskStoriesTab').then((m) => ({ default: m.RiskStoriesTab })))
-const VulnPostureTab = lazy(() => import('./VulnPostureTab').then((m) => ({ default: m.VulnPostureTab })))
-const CredentialsTab = lazy(() => import('./CredentialsTab').then((m) => ({ default: m.CredentialsTab })))
-const DetectionsTab = lazy(() => import('./DetectionsTab').then((m) => ({ default: m.DetectionsTab })))
-const ImportedFindingsTab = lazy(() => import('./ImportedFindingsTab').then((m) => ({ default: m.ImportedFindingsTab })))
-const DataGovernanceTab = lazy(() => import('./DataGovernanceTab').then((m) => ({ default: m.DataGovernanceTab })))
-const WriteupDraftsTab = lazy(() => import('./WriteupDraftsTab').then((m) => ({ default: m.WriteupDraftsTab })))
-const CloudPostureTab = lazy(() => import('./CloudPostureTab').then((m) => ({ default: m.CloudPostureTab })))
-const DASTTab = lazy(() => import('./DASTTab').then((m) => ({ default: m.DASTTab })))
-const DetectionProvenanceTab = lazy(() => import('./DetectionProvenanceTab').then((m) => ({ default: m.DetectionProvenanceTab })))
-const EvidenceTab = lazy(() => import('./EvidenceTab').then((m) => ({ default: m.EvidenceTab })))
-const SettingsTab = lazy(() => import('./SettingsTab').then((m) => ({ default: m.SettingsTab })))
-const JudgmentReviewTab = lazy(() => import('./ReviewsTab').then((m) => ({ default: m.JudgmentReviewTab })))
-const AssessmentComparisonTab = lazy(() => import('./AssessmentComparisonTab').then((m) => ({ default: m.AssessmentComparisonTab })))
+const DependencyGraphTab = lazyTab(() => import('../DependencyGraph').then((m) => ({ default: m.DependencyGraphTab })))
+const AgentTab = lazyTab(() => import('../AgentTab').then((m) => ({ default: m.AgentTab })))
+const ThreatModelTab = lazyTab(() => import('./ThreatModelTab').then((m) => ({ default: m.ThreatModelTab })))
+const CodeQualityTab = lazyTab(() => import('../CodeQuality/CodeQualityTab').then((m) => ({ default: m.CodeQualityTab })))
+const SLATab = lazyTab(() => import('./SLATab').then((m) => ({ default: m.SLATab })))
+const LicensesTab = lazyTab(() => import('./LicensesTab').then((m) => ({ default: m.LicensesTab })))
+const ComponentsTab = lazyTab(() => import('./ComponentsTab').then((m) => ({ default: m.ComponentsTab })))
+const ReconTab = lazyTab(() => import('./ReconTab').then((m) => ({ default: m.ReconTab })))
+const ScanRunsTab = lazyTab(() => import('./ScanRunsTab').then((m) => ({ default: m.ScanRunsTab })))
+const PurpleCoverageTab = lazyTab(() => import('./PurpleCoverageTab').then((m) => ({ default: m.PurpleCoverageTab })))
+const ChainRehearsalTab = lazyTab(() => import('./ChainRehearsalTab').then((m) => ({ default: m.ChainRehearsalTab })))
+const RiskStoriesTab = lazyTab(() => import('./RiskStoriesTab').then((m) => ({ default: m.RiskStoriesTab })))
+const VulnPostureTab = lazyTab(() => import('./VulnPostureTab').then((m) => ({ default: m.VulnPostureTab })))
+const CredentialsTab = lazyTab(() => import('./CredentialsTab').then((m) => ({ default: m.CredentialsTab })))
+const DetectionsTab = lazyTab(() => import('./DetectionsTab').then((m) => ({ default: m.DetectionsTab })))
+const ImportedFindingsTab = lazyTab(() => import('./ImportedFindingsTab').then((m) => ({ default: m.ImportedFindingsTab })))
+const DataGovernanceTab = lazyTab(() => import('./DataGovernanceTab').then((m) => ({ default: m.DataGovernanceTab })))
+const WriteupDraftsTab = lazyTab(() => import('./WriteupDraftsTab').then((m) => ({ default: m.WriteupDraftsTab })))
+const CloudPostureTab = lazyTab(() => import('./CloudPostureTab').then((m) => ({ default: m.CloudPostureTab })))
+const DASTTab = lazyTab(() => import('./DASTTab').then((m) => ({ default: m.DASTTab })))
+const DetectionProvenanceTab = lazyTab(() => import('./DetectionProvenanceTab').then((m) => ({ default: m.DetectionProvenanceTab })))
+const EvidenceTab = lazyTab(() => import('./EvidenceTab').then((m) => ({ default: m.EvidenceTab })))
+const SettingsTab = lazyTab(() => import('./SettingsTab').then((m) => ({ default: m.SettingsTab })))
+const JudgmentReviewTab = lazyTab(() => import('./ReviewsTab').then((m) => ({ default: m.JudgmentReviewTab })))
+const AssessmentComparisonTab = lazyTab(() => import('./AssessmentComparisonTab').then((m) => ({ default: m.AssessmentComparisonTab })))
 
 export type Tab =
   | 'overview'
@@ -556,7 +608,7 @@ export function EngagementDetail() {
         {tab === 'risk-stories' && <RiskStoriesTab key={id} engagementId={id} />}
         {tab === 'vuln-posture' && <VulnPostureTab key={id} engagementId={id} />}
 
-        {tab === 'comparison' && <AssessmentComparisonTab assessmentId={id} />}
+        {tab === 'comparison' && <AssessmentComparisonTab key={id} assessmentId={id} />}
         {tab === 'components' && <ComponentsTab scan={scan} />}
         {tab === 'vulns' && <VulnsTab scan={scan} />}
         {tab === 'graph' && <DependencyGraphTab scan={scan} />}

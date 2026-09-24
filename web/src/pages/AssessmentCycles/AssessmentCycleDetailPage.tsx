@@ -88,7 +88,8 @@ export function AssessmentCycleDetailPage() {
 
     {dialog === 'close' ? <ClosureDialog cycleId={cycle.id} onClose={() => setDialog(null)} onCommitted={() => { setDialog(null); result.refetch() }} /> : null}
     {dialog === 'reopen' && activeManifest ? <ReopenDialog cycleId={cycle.id} manifest={activeManifest} onClose={() => setDialog(null)} onCommitted={() => { setDialog(null); result.refetch() }} /> : null}
-    {dialog === 'archive' ? <ArchiveDialog cycleId={cycle.id} cycleVersion={cycle.version} cycleStatus={cycle.status} onClose={() => setDialog(null)} onArchived={() => { setDialog(null); result.refetch() }} /> : null}
+    {/* Closing also refetches so the "close and refresh" the conflict text asks for actually happens. */}
+    {dialog === 'archive' ? <ArchiveDialog cycleId={cycle.id} cycleVersion={cycle.version} cycleStatus={cycle.status} onClose={() => { setDialog(null); result.refetch() }} onArchived={() => { setDialog(null); result.refetch() }} /> : null}
   </div>
 }
 
@@ -211,13 +212,17 @@ function ArchiveDialog({ cycleId, cycleVersion, cycleStatus, onClose, onArchived
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState(false)
+  // Held steady across attempts. A lost response (proxy timeout, reset connection) leaves the
+  // archive committed server-side; retrying with the same key replays that retained request
+  // instead of being rejected by the version precondition as somebody else's change.
+  const [idempotencyKey] = useState(() => newIdempotencyKey())
 
   async function archive() {
     setLoading(true)
     setError('')
     setConflict(false)
     try {
-      await api.archiveAssessmentCycle(cycleId, cycleVersion)
+      await api.archiveAssessmentCycle(cycleId, cycleVersion, idempotencyKey)
       onArchived()
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) setConflict(true)
@@ -233,11 +238,12 @@ function ArchiveDialog({ cycleId, cycleVersion, cycleStatus, onClose, onArchived
       <p className="mt-1">No further Assessment, closure, or reopen is possible afterwards. Sealed closure manifests and their reports stay immutable and downloadable.</p>
     </div>
     <p className="font-mono text-xs text-tertiary">{cycleId} · Cycle version {cycleVersion}</p>
-    {conflict ? <ErrorState message="Another operator changed this Cycle. Refresh and review the current state before archiving." /> : null}
+    {conflict ? <ErrorState message="Another operator changed this Cycle. Close this dialog and refresh: the Cycle version shown here is stale, so archiving cannot proceed from it." /> : null}
     {error ? <ErrorState message={error} /> : null}
     <div className="flex justify-end gap-2">
-      <Button variant="ghost" disabled={loading} onClick={onClose}>Cancel</Button>
-      <Button variant="secondary-color" loading={loading} onClick={archive}><Archive className="size-4" />Archive permanently</Button>
+      <Button variant="ghost" disabled={loading} onClick={onClose}>{conflict ? 'Close and refresh' : 'Cancel'}</Button>
+      {/* Once the version is known stale, resending it can only produce the same conflict. */}
+      <Button variant="secondary-color" loading={loading} disabled={conflict} onClick={archive}><Archive className="size-4" />Archive permanently</Button>
     </div>
   </WorkflowModal>
 }

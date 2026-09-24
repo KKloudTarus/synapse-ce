@@ -4,7 +4,23 @@ import { Dialog, Modal, ModalOverlay } from '../../components/application/modals
 import { Button, ErrorState, Pill, Spinner } from '../../components/ui'
 import { useFetch } from '../../hooks'
 import { ApiError, api } from '../../lib/api'
+import { newIdempotencyKey } from '../../lib/api/client'
 import type { ScanRun } from '../../lib/types'
+
+/**
+ * The server sends two distinct 409 codes: `idempotency_body_mismatch` for a reused request key
+ * with a different selection, and `snapshot_conflict` for everything else it treats as a conflict.
+ * `snapshot_conflict` covers both a default pointer that moved and a selected run whose scan job is
+ * still running, and the response carries nothing that separates them, so the message names both
+ * rather than asserting a concurrent operator who may not exist.
+ */
+function conflictMessage(cause: ApiError): string {
+  const code = (cause.body as { error?: string } | undefined)?.error
+  if (code === 'idempotency_body_mismatch') {
+    return 'This request was already submitted with a different run selection. Close the dialog, refresh, and start a new finalize.'
+  }
+  return 'The server rejected this finalize as a conflict: either another operator finalized a snapshot first, or a scan job for one of the selected runs is still running. Close the dialog and refresh to see the current state.'
+}
 
 function runTime(value: string | null): string {
   if (!value) return 'Not sealed'
@@ -35,11 +51,17 @@ export function FinalizeSnapshotDialog({
   const [selected, setSelected] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [conflict, setConflict] = useState(false)
+  // Held steady across attempts so retrying after a lost response replays the retained request
+  // rather than arriving as a second, differently-keyed finalize.
+  const [idempotencyKey] = useState(() => newIdempotencyKey())
 
   const items = runs.data ?? []
   // A run with no provenance lane cannot contribute to a snapshot; the server rejects it, so it is
-  // not offered here.
+  // not offered here. The count of what was filtered out is shown, because silently dropping runs
+  // makes "no runs available" indistinguishable from "runs exist but none qualify".
   const selectable = items.filter((run) => run.laneCount > 0)
+  const excluded = items.length - selectable.length
 
   function toggle(runId: string) {
     setSelected((current) => (current.includes(runId) ? current.filter((id) => id !== runId) : [...current, runId]))
@@ -49,15 +71,20 @@ export function FinalizeSnapshotDialog({
     if (selected.length === 0) return
     setSaving(true)
     setError('')
+    setConflict(false)
     try {
       await api.finalizeAssessmentSnapshot(assessmentId, {
         selectedRuns: selected.map((runId) => ({ runId })),
         expectedDefaultVersion,
+        idempotencyKey,
       })
       onFinalized()
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
-        setError('Another operator finalized a snapshot for this Assessment. Refresh and review the current snapshots before finalizing again.')
+        setConflict(true)
+        setError(conflictMessage(cause))
+      } else if (cause instanceof ApiError && cause.status === 403) {
+        setError('Finalizing a snapshot requires the operate capability, which this account does not hold.')
       } else if (cause instanceof ApiError && cause.status === 400) {
         setError('The server rejected this selection. Snapshots require an open Assessment Cycle and runs that belong to this Assessment.')
       } else {
@@ -93,7 +120,9 @@ export function FinalizeSnapshotDialog({
             {runs.error ? <ErrorState message={runs.error} /> : null}
             {!runs.loading && !runs.error && selectable.length === 0 ? (
               <p className="rounded-lg border border-secondary bg-primary px-4 py-3 text-sm text-tertiary">
-                No scan run with provenance lanes is available for this Assessment. Run a scan before finalizing a snapshot.
+                {excluded > 0
+                  ? `${excluded} scan run${excluded === 1 ? '' : 's'} exist for this Assessment, but none carry sealed provenance lanes, so none can be finalized into a snapshot.`
+                  : 'No scan run is available for this Assessment. Run a scan before finalizing a snapshot.'}
               </p>
             ) : null}
 
@@ -101,6 +130,11 @@ export function FinalizeSnapshotDialog({
               <fieldset className="space-y-2">
                 <legend className="text-sm font-semibold text-primary">Scan runs to include</legend>
                 <p className="text-xs text-tertiary">All provenance lanes of a selected run are included.</p>
+                {excluded > 0 ? (
+                  <p className="text-xs text-tertiary">
+                    {excluded} run{excluded === 1 ? ' is' : 's are'} not listed: they carry no sealed provenance lanes.
+                  </p>
+                ) : null}
                 <ul className="mt-2 space-y-2">
                   {selectable.map((run) => (
                     <li key={run.id} className="rounded-lg border border-secondary p-3">
@@ -133,8 +167,10 @@ export function FinalizeSnapshotDialog({
             {error ? <ErrorState message={error} /> : null}
 
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" disabled={saving} onClick={onClose}>Cancel</Button>
-              <Button loading={saving} disabled={selected.length === 0} onClick={() => void finalize()}>
+              <Button variant="ghost" disabled={saving} onClick={onClose}>{conflict ? 'Close and refresh' : 'Cancel'}</Button>
+              {/* After a conflict the expected default version in hand is stale, so resending it can
+                  only conflict again. */}
+              <Button loading={saving} disabled={selected.length === 0 || conflict} onClick={() => void finalize()}>
                 <Camera01 className="size-4" />
                 Finalize snapshot
               </Button>

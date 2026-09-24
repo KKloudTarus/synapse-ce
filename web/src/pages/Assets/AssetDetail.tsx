@@ -55,47 +55,47 @@ export function useAssetContext() {
 
 /**
  * Resolves a route param that may be either an asset id or a tenant-scoped business key into the
- * asset id. Returns null only when no asset matches, so "not found" means absent rather than
- * "absent from the first page". A non-404 failure is rethrown so a real outage stays visible.
+ * asset id.
+ *
+ * `GET /appsec/assets/{assetID}` already accepts either form: the handler calls
+ * businessassetuc.Service.Get, which is resolveAsset, which tries the id and falls back to
+ * GetBusinessAssetByKey. So one request settles it, and a 404 means the asset is absent for this
+ * tenant rather than absent from a page we happened to look at. A non-404 failure is rethrown so a
+ * real outage stays visible instead of reading as absence.
  */
-export async function resolveAssetId(keyOrId: string): Promise<string | null> {
+export async function resolveAssetId(keyOrId: string, signal?: AbortSignal): Promise<string | null> {
   if (!keyOrId) return null
   try {
-    const direct = await api.getBusinessAsset(keyOrId)
-    if (direct?.id) return direct.id
+    const direct = await api.getBusinessAsset(keyOrId, signal)
+    return direct?.id ?? null
   } catch (nextError) {
-    if (!(nextError instanceof ApiError && nextError.status === 404)) throw nextError
-  }
-  const pageSize = 100
-  for (let offset = 0; ; offset += pageSize) {
-    const page = await api.listBusinessAssets(`limit=${pageSize}&offset=${offset}`)
-    const match = page.items.find((a) => a.key === keyOrId || a.id === keyOrId)
-    if (match) return match.id
-    if (page.items.length < pageSize || offset + page.items.length >= page.total) return null
+    if (nextError instanceof ApiError && nextError.status === 404) return null
+    throw nextError
   }
 }
 
+/**
+ * "Missing" travels back as a result rather than as separate state. Setting state from inside the
+ * fetcher bypasses useFetch's revision guard, so a slow request for one route param could mark a
+ * newer, already-loaded asset as not found, and nothing reset the flag when the param changed.
+ */
+type AssetDetailResult =
+  | { kind: 'found'; value: Omit<Context, 'reload'> }
+  | { kind: 'missing' }
+
 export function AssetDetail() {
   const { key = '' } = useParams()
-  const [notFound, setNotFound] = useState(false)
 
-  const { data: fetchedData, error, refetch } = useFetch<Omit<Context, 'reload'>>(
-    async () => {
+  const { data: result, error, refetch } = useFetch<AssetDetailResult>(
+    async (signal) => {
       try {
-        // Asset URLs are key-based, but the detail API resolves assets by id only
-        // (GET /appsec/assets/{assetID} → businessAssets.Get). Resolve the route param to an id.
-        //
-        // Try the id path first: when the param already is an id this costs one request and cannot
-        // be defeated by paging. Only fall back to a key search, and page through the WHOLE list
-        // rather than the default first page, because searching one page reported "Asset not found"
-        // for any asset past that page even though it existed.
-        const id = await resolveAssetId(key)
-        if (!id) {
-          setNotFound(true)
-          return null as never
-        }
+        // Asset URLs may carry either the id or the tenant-scoped business key. The detail route
+        // resolves both (businessassetuc.Service.Get falls back to GetBusinessAssetByKey), so this
+        // is one request and a 404 means absent for this tenant.
+        const id = await resolveAssetId(key, signal)
+        if (!id) return { kind: 'missing' }
         const [asset, projects, technical, engagements, findings, coverage, posture, history] = await Promise.all([
-          api.getBusinessAsset(id),
+          api.getBusinessAsset(id, signal),
           api.businessAssetProjects(id),
           api.businessAssetTechnicalAssets(id),
           api.businessAssetEngagements(id),
@@ -104,19 +104,17 @@ export function AssetDetail() {
           api.businessAssetPosture(id),
           api.businessAssetHistory(id),
         ])
-        setNotFound(false)
-        return { asset, projects, technical, engagements, findings, coverage, posture, history }
+        return { kind: 'found', value: { asset, projects, technical, engagements, findings, coverage, posture, history } }
       } catch (nextError) {
-        if (nextError instanceof ApiError && nextError.status === 404) {
-          setNotFound(true)
-          return null as never
-        }
+        if (nextError instanceof ApiError && nextError.status === 404) return { kind: 'missing' }
         throw nextError
       }
     },
     { deps: [key] },
   )
 
+  const notFound = result?.kind === 'missing'
+  const fetchedData = result?.kind === 'found' ? result.value : null
   const context: Context | null = fetchedData ? { ...fetchedData, reload: refetch } : null
 
   if (error && !notFound) return <div className="mx-auto max-w-6xl"><ErrorState message={error} /></div>

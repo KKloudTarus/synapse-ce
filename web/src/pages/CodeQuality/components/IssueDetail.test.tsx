@@ -87,4 +87,29 @@ describe('IssueDetail review history', () => {
 
     await waitFor(() => expect(api.getProjectIssueHistory).toHaveBeenCalledTimes(2))
   })
+
+  // The inspector is keyed on the issue at its mount site. Without that, the target status seeded
+  // in a useState initializer and the typed rationale both carry over to the next issue, so a
+  // follow-up transition can submit a status that does not apply to it.
+  it('does not carry a typed rationale from one issue to the next', async () => {
+    vi.mocked(api.getProjectIssueHistory).mockResolvedValue([])
+    const other: ProjectIssue = { ...issue, id: 'issue-2', title: 'Second issue' }
+    const { rerender } = render(
+      <MemoryRouter>
+        <IssueDetail key={issue.id} projectKey="payments" issue={issue} onClose={() => {}} onTransitioned={() => {}} />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('No review decisions recorded yet.')
+    fireEvent.change(screen.getByLabelText(/Rationale/), { target: { value: 'notes for the first issue' } })
+
+    rerender(
+      <MemoryRouter>
+        <IssueDetail key={other.id} projectKey="payments" issue={other} onClose={() => {}} onTransitioned={() => {}} />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('No review decisions recorded yet.')
+    expect(screen.getByLabelText(/Rationale/)).toHaveValue('')
+  })
 })

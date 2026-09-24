@@ -586,7 +586,12 @@ export function ProjectIssuesPage() {
             aria-labelledby="issue-detail-title"
             className="w-full lg:w-[480px] xl:w-[520px] shrink-0 overflow-y-auto rounded-xl border border-secondary bg-primary p-5 shadow-xs transition-all lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)]"
           >
+            {/* Keyed on the issue so selecting another one remounts the inspector. The target
+                status is seeded from the issue's current status in a useState initializer and the
+                rationale is local state, so without a key both carry over to the next issue and a
+                follow-up transition can submit a status that does not apply to it. */}
             <IssueDetail
+              key={selected.id}
               projectKey={projectKey}
               issue={selected}
               onClose={() => patch('id', null)}

@@ -9,6 +9,7 @@ vi.mock('../../lib/api', () => ({
   api: {
     assessmentLifecycle: vi.fn(), assessmentSnapshots: vi.fn(), createAssessmentComparison: vi.fn(),
     assessmentComparison: vi.fn(), assessmentComparisonSummary: vi.fn(), assessmentComparisonItems: vi.fn(), reviewAssessmentComparisonItem: vi.fn(),
+    me: vi.fn(), finalizeAssessmentSnapshot: vi.fn(), scanRuns: vi.fn(),
   },
   ApiError: class ApiError extends Error { constructor(public status: number, message: string) { super(message) } },
 }))
@@ -43,6 +44,7 @@ function renderComparison(url = configuredUrl) {
 describe('AssessmentComparisonTab', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    vi.mocked(api.me).mockResolvedValue({ id: 'operator', name: 'Operator', role: 'member' })
     vi.mocked(api.assessmentLifecycle).mockResolvedValue({ assessmentId: 'assessment-1', cycle: { id: 'cycle-1', name: 'Cycle', boundaryKind: 'standalone', businessAssetId: '', projectId: '', status: 'open', rootAssessmentId: 'assessment-1', selectedHeadAssessmentId: 'assessment-1', nextRetestNumber: 1, version: 1, createdAt: '', updatedAt: '', createdBy: '', updatedBy: '' }, members: [{ assessmentId: 'assessment-1', assessmentType: 'initial', predecessorAssessmentId: '', retestNumber: 0, relationshipVersion: 1, createdAt: '', createdBy: '', archivedAt: null }], branchHeads: [] })
     vi.mocked(api.assessmentSnapshots).mockResolvedValue({ items: [snapshot('snapshot-1', 1), snapshot('snapshot-2', 2)], defaultSnapshotId: 'snapshot-2', defaultVersion: 2, nextCursor: '' })
     vi.mocked(api.createAssessmentComparison).mockResolvedValue({ comparison, created: true })

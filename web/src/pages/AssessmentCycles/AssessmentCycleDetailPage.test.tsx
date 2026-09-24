@@ -124,7 +124,55 @@ describe('AssessmentCycleDetailPage archive', () => {
     fireEvent.click(screen.getByRole('button', { name: /Archive permanently/ }))
 
     // The Cycle version is the If-Match precondition, so a concurrent change is rejected server-side.
-    await waitFor(() => expect(api.archiveAssessmentCycle).toHaveBeenCalledWith('cycle-1', 5))
+    await waitFor(() => expect(api.archiveAssessmentCycle).toHaveBeenCalledTimes(1))
+    const [cycleId, version, idempotencyKey] = vi.mocked(api.archiveAssessmentCycle).mock.calls[0]
+    expect(cycleId).toBe('cycle-1')
+    expect(version).toBe(5)
+    expect(idempotencyKey).toBeTruthy()
+  })
+
+  // Without this, replacing onArchived with a no-op keeps the suite green while the page goes on
+  // showing an open Cycle and an Archive button for a Cycle that is already archived.
+  it('reloads the Cycle after archiving', async () => {
+    vi.mocked(api.archiveAssessmentCycle).mockResolvedValue(detail)
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Archive Cycle/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Archive permanently/ }))
+
+    await waitFor(() => expect(api.assessmentCycle).toHaveBeenCalledTimes(2))
+  })
+
+  // A retry of a lost response must replay the retained request rather than arrive as a second,
+  // differently-keyed archive that the version precondition then rejects as someone else's change.
+  it('reuses one idempotency key across attempts', async () => {
+    vi.mocked(api.archiveAssessmentCycle)
+      .mockRejectedValueOnce(new Error('network reset'))
+      .mockResolvedValue(detail)
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Archive Cycle/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Archive permanently/ }))
+    await screen.findByText('network reset')
+    fireEvent.click(screen.getByRole('button', { name: /Archive permanently/ }))
+
+    await waitFor(() => expect(api.archiveAssessmentCycle).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(api.archiveAssessmentCycle).mock.calls[1][2]).toBe(
+      vi.mocked(api.archiveAssessmentCycle).mock.calls[0][2],
+    )
+  })
+
+  // The version in hand is stale after a conflict, so resending it can only conflict again.
+  it('stops offering the archive after a conflict', async () => {
+    vi.mocked(api.archiveAssessmentCycle).mockRejectedValue(new ApiError(409, 'conflict'))
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Archive Cycle/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Archive permanently/ }))
+
+    await screen.findByText(/the Cycle version shown here is stale/)
+    expect(screen.getByRole('button', { name: /Archive permanently/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Close and refresh' })).toBeInTheDocument()
   })
 
   it('names the concurrent change instead of a raw conflict status', async () => {

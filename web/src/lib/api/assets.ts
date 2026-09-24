@@ -61,8 +61,9 @@ export const assetsApi = {
     return { items: (raw.items ?? []).map(mapBusinessAsset), total: raw.total ?? 0, limit: raw.limit ?? 50, offset: raw.offset ?? 0 }
   },
 
-  getBusinessAsset: async (id: string): Promise<BusinessAsset> =>
-    mapBusinessAsset(await req(`/appsec/assets/${encodeURIComponent(id)}`)),
+  // Accepts an asset id or a tenant-scoped business key: the handler resolves both.
+  getBusinessAsset: async (idOrKey: string, signal?: AbortSignal): Promise<BusinessAsset> =>
+    mapBusinessAsset(await req(`/appsec/assets/${encodeURIComponent(idOrKey)}`, signal ? { signal } : undefined)),
 
   createBusinessAsset: async (input: BusinessAssetInput): Promise<BusinessAsset> =>
     mapBusinessAsset(await req('/appsec/assets', { method: 'POST', body: JSON.stringify(input) })),

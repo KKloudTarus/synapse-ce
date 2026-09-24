@@ -119,8 +119,10 @@ export function SLATab({ engagementId, findings }: { engagementId: string; findi
     }
   }, [items])
 
-  if (items === null) return <Spinner label="Loading remediation SLAs…" />
+  // Error is checked first: on an initial failure `fetchedItems` stays null forever, so testing for
+  // null first turned a failed SLA service into a spinner that never resolves.
   if (error) return <ErrorState message={error} />
+  if (items === null) return <Spinner label="Loading remediation SLAs…" />
   if (disabled) {
     return (
       <EmptyState
@@ -244,7 +246,11 @@ export function SLATab({ engagementId, findings }: { engagementId: string; findi
       </Card>
 
       {selected && (
+        // Keyed on the finding so selecting another row remounts the panel. Without it the typed
+        // rationale, the chosen target state, and the loaded history all carry over from the
+        // previously selected finding and are then attributed to, or written against, the new one.
         <TransitionPanel
+          key={selected.assessment.findingId}
           item={selected}
           findingTitle={findingByID.get(selected.assessment.findingId)?.title ?? selected.assessment.findingId}
           onClose={() => setSelected(null)}
@@ -300,6 +306,21 @@ function Deadline({ value, overdue = false }: { value: string; overdue?: boolean
   )
 }
 
+/** Orders newest first, leaving rows with an unparseable timestamp in their server order at the end. */
+function newestFirst<T>(rows: T[], at: (row: T) => string | null): T[] {
+  const stamp = (row: T) => {
+    const value = at(row)
+    const parsed = value ? new Date(value).getTime() : Number.NaN
+    return Number.isNaN(parsed) ? -Infinity : parsed
+  }
+  return rows.slice().sort((a, b) => stamp(b) - stamp(a))
+}
+
+/** Falls back to the raw value so an unrecognised status reads as itself, never as a blank. */
+function statusLabel(value: SLARemediationStatus): string {
+  return STATUS_LABEL[value] ?? String(value)
+}
+
 function slaTime(value: string | null): string {
   if (!value) return '—'
   const at = new Date(value)
@@ -312,34 +333,47 @@ function slaTime(value: string | null): string {
  * control and an expiry, so an operator changing the state again needs the prior terms in front of
  * them. Both services are part of the SLA feature, so a failure here is surfaced rather than
  * rendered as an empty history.
+ *
+ * The two services answer in opposite orders (events oldest-first, assessments newest-first), so
+ * both are sorted here into one stated direction. Two adjacent columns with identical styling and
+ * opposite reading directions put the live terms at the bottom of one and the top of the other.
  */
 function SLAHistory({ engagementId, findingId }: { engagementId: string; findingId: string }) {
-  const { data: events, error: eventsError } = useFetch<SLAEvent[]>(
+  const events = useFetch<SLAEvent[]>(
     () => api.slaEvents(engagementId, findingId),
     { deps: [engagementId, findingId] },
   )
-  const { data: assessments, error: assessmentsError } = useFetch<SLAAssessment[]>(
+  const assessments = useFetch<SLAAssessment[]>(
     () => api.slaAssessments(engagementId, findingId),
     { deps: [engagementId, findingId] },
   )
 
+  // `useFetch` keeps the previous array while a new request is in flight, so `loading` is what
+  // separates "no record" from "not answered yet". Reading emptiness off the data alone would
+  // attribute the previous finding's history to this one.
+  const eventRows = events.loading ? null : newestFirst(events.data ?? [], (event) => event.at)
+  const assessmentRows = assessments.loading ? null : newestFirst(assessments.data ?? [], (item) => item.assessedAt)
+
   return (
     <div className="mt-5 grid gap-4 border-t border-secondary pt-5 lg:grid-cols-2">
       <section aria-label="Transition history">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-quaternary">Transition history</div>
-        {eventsError ? <ErrorState message={eventsError} /> : null}
-        {!eventsError && events === null ? <Spinner label="Loading transition history…" /> : null}
-        {!eventsError && events !== null && events.length === 0 ? (
+        <div className="mb-2 flex flex-wrap items-baseline gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-quaternary">Transition history</span>
+          <span className="text-[11px] text-quaternary">newest first</span>
+        </div>
+        {events.error ? <ErrorState message={events.error} /> : null}
+        {!events.error && eventRows === null ? <Spinner label="Loading transition history…" /> : null}
+        {!events.error && eventRows !== null && eventRows.length === 0 ? (
           <p className="text-xs text-tertiary">No transitions recorded yet.</p>
         ) : null}
-        {!eventsError && events !== null && events.length > 0 ? (
+        {!events.error && eventRows !== null && eventRows.length > 0 ? (
           <ol className="space-y-3">
-            {events.map((event) => (
+            {eventRows.map((event) => (
               <li key={event.id} className="space-y-1 border-l-2 border-secondary pl-3">
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                  <span className="font-medium text-secondary">{STATUS_LABEL[event.from]}</span>
+                  <span className="font-medium text-secondary">{statusLabel(event.from)}</span>
                   <ChevronRight className="size-3 text-tertiary" aria-hidden="true" />
-                  <span className="font-semibold text-primary">{STATUS_LABEL[event.to]}</span>
+                  <span className="font-semibold text-primary">{statusLabel(event.to)}</span>
                   <span className="text-tertiary">by {event.actor || 'unknown actor'}</span>
                 </div>
                 <div className="font-mono text-[11px] tabular-nums text-tertiary">{slaTime(event.at)}</div>
@@ -357,15 +391,18 @@ function SLAHistory({ engagementId, findingId }: { engagementId: string; finding
       </section>
 
       <section aria-label="Deadline assessments">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-quaternary">Deadline assessments</div>
-        {assessmentsError ? <ErrorState message={assessmentsError} /> : null}
-        {!assessmentsError && assessments === null ? <Spinner label="Loading deadline assessments…" /> : null}
-        {!assessmentsError && assessments !== null && assessments.length === 0 ? (
+        <div className="mb-2 flex flex-wrap items-baseline gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-quaternary">Deadline assessments</span>
+          <span className="text-[11px] text-quaternary">newest first</span>
+        </div>
+        {assessments.error ? <ErrorState message={assessments.error} /> : null}
+        {!assessments.error && assessmentRows === null ? <Spinner label="Loading deadline assessments…" /> : null}
+        {!assessments.error && assessmentRows !== null && assessmentRows.length === 0 ? (
           <p className="text-xs text-tertiary">No deadline assessments recorded yet.</p>
         ) : null}
-        {!assessmentsError && assessments !== null && assessments.length > 0 ? (
+        {!assessments.error && assessmentRows !== null && assessmentRows.length > 0 ? (
           <ol className="space-y-3">
-            {assessments.map((assessment) => (
+            {assessmentRows.map((assessment) => (
               <li key={assessment.id} className="space-y-1 border-l-2 border-secondary pl-3">
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                   <span

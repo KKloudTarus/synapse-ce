@@ -8,6 +8,14 @@ import { api, ApiError } from '../../../lib/api'
 import { canTransitionIssue, ISSUE_STATUSES, issueStatusLabel, type IssueReviewEvent, type IssueStatus, type ProjectIssue } from '../../../lib/types'
 import { cleanIssueTitle, severityBadge, typeMeta } from './projectIssueHelpers'
 
+/**
+ * `issueStatusLabel` is an exhaustive switch with no default, so a status outside the known set
+ * returns undefined and renders as a blank side of the arrow. Fall back to the raw value.
+ */
+function reviewStatusLabel(value: IssueStatus): string {
+  return issueStatusLabel(value) ?? String(value)
+}
+
 function reviewedAt(value: string): string {
   if (!value) return 'Unknown time'
   const at = new Date(value)
@@ -39,9 +47,9 @@ function ReviewHistory({ projectKey, issueId, revision }: { projectKey: string; 
             {(data ?? []).map((event) => (
               <li key={`${event.version}-${event.createdAt}`} className="space-y-1 border-l-2 border-secondary pl-3">
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                  <span className="font-semibold text-secondary">{issueStatusLabel(event.from)}</span>
+                  <span className="font-semibold text-secondary">{reviewStatusLabel(event.from)}</span>
                   <ArrowRight className="size-3 text-tertiary" aria-hidden="true" />
-                  <span className="font-semibold text-primary">{issueStatusLabel(event.to)}</span>
+                  <span className="font-semibold text-primary">{reviewStatusLabel(event.to)}</span>
                   <span className="text-tertiary">by {event.actor || 'unknown actor'}</span>
                 </div>
                 <div className="text-[11px] text-tertiary">{reviewedAt(event.createdAt)}</div>
