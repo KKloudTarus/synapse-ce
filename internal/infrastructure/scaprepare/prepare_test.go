@@ -4,13 +4,16 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
 func TestExtractBinary_ReturnsNamedArchiveMember(t *testing.T) {
 	body := tarGzip(t, map[string]string{"README": "ignored", "grype": "binary"})
-	got, err := extractBinary("tools/grype", body)
+	got, err := extractBinary(context.Background(), "tools/grype", body)
 	if err != nil {
 		t.Fatalf("extractBinary() error = %v", err)
 	}
@@ -21,12 +24,43 @@ func TestExtractBinary_ReturnsNamedArchiveMember(t *testing.T) {
 
 func TestExtractCapability_ReturnsPinnedSourceMember(t *testing.T) {
 	body := tarGzip(t, map[string]string{"osv-scanner-x/internal/utility/purl/purl_to_package.go": "source"})
-	got, err := extractCapability("repository/capability/osv-scanner-v2.5.1/purl_to_package.go", body)
+	got, err := extractCapability(context.Background(), "repository/capability/osv-scanner-v2.5.1/purl_to_package.go", body)
 	if err != nil {
 		t.Fatalf("extractCapability() error = %v", err)
 	}
 	if string(got) != "source" {
 		t.Fatalf("extractCapability() = %q", got)
+	}
+}
+
+func TestTarFindWithin_RejectsCumulativeDecompressedArchiveOverLimit(t *testing.T) {
+	body := tarGzipMembers(t, []tarMemberFixture{
+		{name: "ignored", body: strings.Repeat("a", 2_000)},
+		{name: "grype", body: strings.Repeat("b", 2_000)},
+	})
+	_, err := tarFindWithin(context.Background(), body, func(name string) bool { return name == "grype" }, 3_000)
+	if !errors.Is(err, errArchiveTooLarge) {
+		t.Fatalf("tarFindWithin() error = %v, want decompressed archive size limit", err)
+	}
+}
+
+func TestTarFindWithin_RejectsSelectedMemberOverLimit(t *testing.T) {
+	body := tarGzipMembers(t, []tarMemberFixture{{name: "grype", body: strings.Repeat("a", 3_001)}})
+	_, err := tarFindWithin(context.Background(), body, func(name string) bool { return name == "grype" }, 3_000)
+	if !errors.Is(err, errArchiveTooLarge) {
+		t.Fatalf("tarFindWithin() error = %v, want selected member size limit", err)
+	}
+}
+
+func TestTarFindWithin_ReturnsCanceledContext(t *testing.T) {
+	body := tarGzip(t, map[string]string{"grype": strings.Repeat("a", 2_000)})
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err := tarFindWithin(ctx, body, func(name string) bool {
+		cancel()
+		return name == "grype"
+	}, 3_000)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("tarFindWithin() error = %v, want context canceled", err)
 	}
 }
 
@@ -70,14 +104,28 @@ func TestWriteWithin_RejectsChildSymlinkEscape(t *testing.T) {
 
 func tarGzip(t *testing.T, members map[string]string) []byte {
 	t.Helper()
+	ordered := make([]tarMemberFixture, 0, len(members))
+	for name, body := range members {
+		ordered = append(ordered, tarMemberFixture{name: name, body: body})
+	}
+	return tarGzipMembers(t, ordered)
+}
+
+type tarMemberFixture struct {
+	name string
+	body string
+}
+
+func tarGzipMembers(t *testing.T, members []tarMemberFixture) []byte {
+	t.Helper()
 	var body bytes.Buffer
 	gz := gzip.NewWriter(&body)
 	tw := tar.NewWriter(gz)
-	for name, value := range members {
-		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(value))}); err != nil {
+	for _, member := range members {
+		if err := tw.WriteHeader(&tar.Header{Name: member.name, Mode: 0o644, Size: int64(len(member.body))}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tw.Write([]byte(value)); err != nil {
+		if _, err := tw.Write([]byte(member.body)); err != nil {
 			t.Fatal(err)
 		}
 	}

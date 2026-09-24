@@ -27,6 +27,8 @@ import (
 
 const maxDownloadBytes int64 = 512 << 20
 
+var errArchiveTooLarge = errors.New("archive decompressed size exceeds limit")
+
 // Config identifies the two output roots. Raw bytes never enter OfflineRoot.
 type Config struct {
 	OfflineRoot      string
@@ -88,9 +90,9 @@ func Prepare(ctx context.Context, catalog bench.Catalog, spec bench.TrustedInput
 		var materialized []byte
 		switch {
 		case strings.HasPrefix(reference, "binary:"):
-			materialized, err = extractBinary(binding.Locator, raw)
+			materialized, err = extractBinary(ctx, binding.Locator, raw)
 		case strings.HasPrefix(reference, "capability-source:"):
-			materialized, err = extractCapability(binding.Locator, raw)
+			materialized, err = extractCapability(ctx, binding.Locator, raw)
 		default:
 			err = errors.New("unsupported public artifact")
 		}
@@ -254,7 +256,10 @@ func fetch(ctx context.Context, origin string) ([]byte, error) {
 	return body, nil
 }
 
-func extractBinary(locator string, raw []byte) ([]byte, error) {
+func extractBinary(ctx context.Context, locator string, raw []byte) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	name := filepath.Base(locator)
 	if name == "" || name == "." || name == string(filepath.Separator) {
 		return nil, errors.New("binary locator has no filename")
@@ -262,10 +267,13 @@ func extractBinary(locator string, raw []byte) ([]byte, error) {
 	if !bytes.HasPrefix(raw, []byte{0x1f, 0x8b}) {
 		return raw, nil
 	}
-	return tarMember(raw, name)
+	return tarMember(ctx, raw, name)
 }
 
-func extractCapability(locator string, raw []byte) ([]byte, error) {
+func extractCapability(ctx context.Context, locator string, raw []byte) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var member string
 	switch filepath.Base(locator) {
 	case "ecosystem.go":
@@ -275,23 +283,33 @@ func extractCapability(locator string, raw []byte) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("no public extraction rule for capability locator %q", locator)
 	}
-	return tarSuffixMember(raw, member)
+	return tarSuffixMember(ctx, raw, member)
 }
 
-func tarMember(raw []byte, name string) ([]byte, error) {
-	return tarFind(raw, func(v string) bool { return v == name || strings.HasSuffix(v, "/"+name) })
+func tarMember(ctx context.Context, raw []byte, name string) ([]byte, error) {
+	return tarFind(ctx, raw, func(v string) bool { return v == name || strings.HasSuffix(v, "/"+name) })
 }
-func tarSuffixMember(raw []byte, suffix string) ([]byte, error) {
-	return tarFind(raw, func(v string) bool { return strings.HasSuffix(v, "/"+suffix) })
+func tarSuffixMember(ctx context.Context, raw []byte, suffix string) ([]byte, error) {
+	return tarFind(ctx, raw, func(v string) bool { return strings.HasSuffix(v, "/"+suffix) })
 }
-func tarFind(raw []byte, matches func(string) bool) ([]byte, error) {
+func tarFind(ctx context.Context, raw []byte, matches func(string) bool) ([]byte, error) {
+	return tarFindWithin(ctx, raw, matches, maxDownloadBytes)
+}
+
+func tarFindWithin(ctx context.Context, raw []byte, matches func(string) bool, limit int64) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	gz, err := gzip.NewReader(bytes.NewReader(raw))
 	if err != nil {
 		return nil, fmt.Errorf("open gzip archive: %w", err)
 	}
 	defer gz.Close()
-	tr := tar.NewReader(gz)
+	tr := tar.NewReader(&boundedContextReader{ctx: ctx, reader: gz, remaining: limit})
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break
@@ -300,10 +318,41 @@ func tarFind(raw []byte, matches func(string) bool) ([]byte, error) {
 			return nil, err
 		}
 		if h.Typeflag == tar.TypeReg && matches(filepath.ToSlash(h.Name)) {
-			return io.ReadAll(io.LimitReader(tr, maxDownloadBytes+1))
+			if h.Size > limit {
+				return nil, errArchiveTooLarge
+			}
+			body, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, err
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return body, nil
 		}
 	}
 	return nil, errors.New("required archive member is absent")
+}
+
+type boundedContextReader struct {
+	ctx       context.Context
+	reader    io.Reader
+	remaining int64
+}
+
+func (reader *boundedContextReader) Read(body []byte) (int, error) {
+	if err := reader.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if reader.remaining <= 0 {
+		return 0, errArchiveTooLarge
+	}
+	if int64(len(body)) > reader.remaining {
+		body = body[:reader.remaining]
+	}
+	n, err := reader.reader.Read(body)
+	reader.remaining -= int64(n)
+	return n, err
 }
 
 func generateSBOM(ctx context.Context, syft, reference, output string) error {
