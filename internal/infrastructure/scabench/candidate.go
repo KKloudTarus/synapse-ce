@@ -76,12 +76,14 @@ func candidateCorpusTemplateFiles() []string {
 // CandidateInput identifies the checked-out source root, benchmark corpus locator, prepared offline
 // inputs, and protected evidence root for one unsigned diagnostic cycle.
 type CandidateInput struct {
-	SourceRoot           string
-	CorpusRoot           string
-	OfflineInputRoot     string
-	EvidenceRoot         string
-	ImplementationCommit string
-	RunKey               string
+	SourceRoot                 string
+	CorpusRoot                 string
+	OfflineInputRoot           string
+	InputBundleRoot            string
+	EnvironmentAttestationPath string
+	EvidenceRoot               string
+	ImplementationCommit       string
+	RunKey                     string
 }
 
 // CandidateArchive identifies the byte-complete input archive used for a candidate capture.
@@ -199,8 +201,15 @@ func RunCandidate(ctx context.Context, input CandidateInput, runnerFactory Runne
 	if input.CorpusRoot, err = candidatePhysicalDirectory("corpus root", input.CorpusRoot); err != nil {
 		return CandidateResult{}, err
 	}
-	if input.OfflineInputRoot, err = candidatePhysicalDirectory("offline input root", input.OfflineInputRoot); err != nil {
-		return CandidateResult{}, err
+	if input.OfflineInputRoot != "" {
+		if input.OfflineInputRoot, err = candidatePhysicalDirectory("offline input root", input.OfflineInputRoot); err != nil {
+			return CandidateResult{}, err
+		}
+	}
+	if input.InputBundleRoot != "" {
+		if input.InputBundleRoot, err = candidatePhysicalDirectory("input bundle root", input.InputBundleRoot); err != nil {
+			return CandidateResult{}, err
+		}
 	}
 	if input.EvidenceRoot, err = candidatePhysicalDirectory("evidence root", input.EvidenceRoot); err != nil {
 		return CandidateResult{}, err
@@ -235,8 +244,10 @@ func RunCandidate(ctx context.Context, input CandidateInput, runnerFactory Runne
 		}
 	}()
 
-	if err := validateCandidateOfflineInputBounds(ctx, input.OfflineInputRoot); err != nil {
-		return result, fmt.Errorf("validate candidate offline input bounds: %w", err)
+	if input.OfflineInputRoot != "" {
+		if err := validateCandidateOfflineInputBounds(ctx, input.OfflineInputRoot); err != nil {
+			return result, fmt.Errorf("validate candidate offline input bounds: %w", err)
+		}
 	}
 	sourceArchive, sourceSnapshotRoot, err := freezeCandidateSource(ctx, input.SourceRoot, input.ImplementationCommit, evidencePath)
 	if err != nil {
@@ -254,7 +265,21 @@ func RunCandidate(ctx context.Context, input CandidateInput, runnerFactory Runne
 	if err := copyCandidateCorpus(ctx, frozenCorpusRoot, candidateCorpusRoot); err != nil {
 		return result, fmt.Errorf("create candidate corpus copy: %w", err)
 	}
-	catalog, oracle, historicalRatchet, policy, err := loadCandidateCorpus(frozenCorpusRoot)
+	captureInputRoot := filepath.Join(evidencePath, "capture-input")
+	materializedInputRoot := input.OfflineInputRoot
+	if input.InputBundleRoot != "" {
+		if err := os.Mkdir(captureInputRoot, 0o700); err != nil {
+			return result, fmt.Errorf("create candidate capture input root: %w", err)
+		}
+		if err := restoreCandidateBundle(ctx, input.InputBundleRoot, input.EnvironmentAttestationPath, captureInputRoot); err != nil {
+			return result, fmt.Errorf("restore candidate input bundle: %w", err)
+		}
+		materializedInputRoot = captureInputRoot
+		if err := validateCandidateOfflineInputBounds(ctx, materializedInputRoot); err != nil {
+			return result, fmt.Errorf("validate restored candidate input bounds: %w", err)
+		}
+	}
+	catalog, oracle, preRebindRatchet, policy, err := loadCandidateCorpus(frozenCorpusRoot)
 	if err != nil {
 		return result, err
 	}
@@ -271,11 +296,10 @@ func RunCandidate(ctx context.Context, input CandidateInput, runnerFactory Runne
 	if err != nil {
 		return result, err
 	}
-	catalog, spec, templates, err = bindCandidateOfflineInputs(ctx, catalog, spec, templates, input.OfflineInputRoot)
+	catalog, spec, templates, err = bindCandidateOfflineInputs(ctx, catalog, spec, templates, materializedInputRoot)
 	if err != nil {
 		return result, fmt.Errorf("bind offline candidate inputs: %w", err)
 	}
-	captureInputRoot := filepath.Join(evidencePath, "capture-input")
 	state := &runState{
 		input: RunInput{
 			CorpusRoot: candidateCorpusRoot, TrustedInputRoot: captureInputRoot,
@@ -310,7 +334,7 @@ func RunCandidate(ctx context.Context, input CandidateInput, runnerFactory Runne
 	if err != nil {
 		return result, fmt.Errorf("create candidate input archive store: %w", err)
 	}
-	archive, err := CollectTrustedInputArchive(ctx, state.catalog, spec, input.OfflineInputRoot, archiveStore)
+	archive, err := CollectTrustedInputArchive(ctx, state.catalog, spec, materializedInputRoot, archiveStore)
 	if err != nil {
 		return result, fmt.Errorf("collect candidate input archive: %w", err)
 	}
@@ -321,11 +345,13 @@ func RunCandidate(ctx context.Context, input CandidateInput, runnerFactory Runne
 	if err := writeNewFile(filepath.Join(evidencePath, "input-archive.json"), archiveBytes, 0o600); err != nil {
 		return result, fmt.Errorf("record candidate input archive: %w", err)
 	}
-	if err := os.Mkdir(captureInputRoot, 0o700); err != nil {
-		return result, fmt.Errorf("create candidate restored input root: %w", err)
-	}
-	if err := RestoreTrustedInputArchive(ctx, state.catalog, spec, archive, captureInputRoot, archiveStore); err != nil {
-		return result, fmt.Errorf("restore candidate input archive: %w", err)
+	if input.InputBundleRoot == "" {
+		if err := os.Mkdir(captureInputRoot, 0o700); err != nil {
+			return result, fmt.Errorf("create candidate restored input root: %w", err)
+		}
+		if err := RestoreTrustedInputArchive(ctx, state.catalog, spec, archive, captureInputRoot, archiveStore); err != nil {
+			return result, fmt.Errorf("restore candidate input archive: %w", err)
+		}
 	}
 	if err := state.materializeManifests(); err != nil {
 		return result, err
@@ -379,7 +405,7 @@ func RunCandidate(ctx context.Context, input CandidateInput, runnerFactory Runne
 	if err != nil {
 		return result, err
 	}
-	historical, err := reduceCandidateRepetitions(ctx, state.catalog, state.oracle, historicalRatchet, observations)
+	historical, err := reduceCandidateRepetitions(ctx, state.catalog, state.oracle, preRebindRatchet, observations)
 	if err != nil {
 		return result, err
 	}
@@ -403,10 +429,15 @@ func RunCandidate(ctx context.Context, input CandidateInput, runnerFactory Runne
 }
 
 func validateCandidateInput(input CandidateInput) error {
+	if (input.OfflineInputRoot == "") == (input.InputBundleRoot == "") {
+		return errors.New("candidate requires exactly one offline input root or input bundle")
+	}
+	if (input.InputBundleRoot == "") != (input.EnvironmentAttestationPath == "") {
+		return errors.New("input bundle requires a current host environment attestation")
+	}
 	for _, item := range []struct{ name, value string }{
 		{"source root", input.SourceRoot},
 		{"corpus root", input.CorpusRoot},
-		{"offline input root", input.OfflineInputRoot},
 		{"evidence root", input.EvidenceRoot},
 	} {
 		if err := benchcycle.ValidateAbsolutePath(item.name, item.value); err != nil {
@@ -427,17 +458,45 @@ func validateCandidateInput(input CandidateInput) error {
 	if _, err := candidateCorpusRelativePath(sourceRoot, corpusRoot); err != nil {
 		return err
 	}
-	offlineInputRoot, err := candidatePhysicalDirectory("offline input root", input.OfflineInputRoot)
-	if err != nil {
-		return err
-	}
-	if candidatePathsOverlap(corpusRoot, offlineInputRoot) || candidatePathsOverlap(sourceRoot, offlineInputRoot) {
-		return errors.New("candidate source, corpus, and offline input roots must be disjoint")
-	}
-	if _, err := os.Lstat(filepath.Join(offlineInputRoot, "repository", "reviews")); err == nil {
-		return errors.New("candidate offline input root must not include trusted review or disposition captures")
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect candidate review inputs: %w", err)
+	var offlineInputRoot, bundleRoot string
+	if input.OfflineInputRoot != "" {
+		if err := benchcycle.ValidateAbsolutePath("offline input root", input.OfflineInputRoot); err != nil {
+			return err
+		}
+		offlineInputRoot, err = candidatePhysicalDirectory("offline input root", input.OfflineInputRoot)
+		if err != nil {
+			return err
+		}
+		if candidatePathsOverlap(corpusRoot, offlineInputRoot) || candidatePathsOverlap(sourceRoot, offlineInputRoot) {
+			return errors.New("candidate source, corpus, and offline input roots must be disjoint")
+		}
+		if _, err := os.Lstat(filepath.Join(offlineInputRoot, "repository", "reviews")); err == nil {
+			return errors.New("candidate offline input root must not include trusted review or disposition captures")
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect candidate review inputs: %w", err)
+		}
+	} else {
+		if err := benchcycle.ValidateAbsolutePath("input bundle root", input.InputBundleRoot); err != nil {
+			return err
+		}
+		if err := benchcycle.ValidateAbsolutePath("environment attestation", input.EnvironmentAttestationPath); err != nil {
+			return err
+		}
+		bundleRoot, err = candidatePhysicalDirectory("input bundle root", input.InputBundleRoot)
+		if err != nil {
+			return err
+		}
+		if candidatePathsOverlap(sourceRoot, bundleRoot) || candidatePathsOverlap(corpusRoot, bundleRoot) {
+			return errors.New("candidate source, corpus, and input bundle roots must be disjoint")
+		}
+		attestationParent, err := candidatePhysicalDirectory("environment attestation parent", filepath.Dir(input.EnvironmentAttestationPath))
+		if err != nil {
+			return err
+		}
+		physicalAttestation := filepath.Join(attestationParent, filepath.Base(input.EnvironmentAttestationPath))
+		if contains, comparable := candidatePathContains(bundleRoot, physicalAttestation); comparable && contains {
+			return errors.New("current host attestation must be outside the archived input bundle")
+		}
 	}
 	evidenceRoot, err := candidatePhysicalDirectory("evidence root", input.EvidenceRoot)
 	if err != nil {
@@ -458,7 +517,6 @@ func validateCandidateInput(input CandidateInput) error {
 	}{
 		{"source root", sourceRoot},
 		{"corpus root", corpusRoot},
-		{"offline input root", offlineInputRoot},
 	} {
 		if candidatePathsOverlap(evidenceRoot, item.path) {
 			return fmt.Errorf("evidence root must be disjoint from %s", item.name)
@@ -468,17 +526,25 @@ func validateCandidateInput(input CandidateInput) error {
 	if err != nil {
 		return err
 	}
+	if offlineInputRoot != "" && candidatePathsOverlap(evidenceRoot, offlineInputRoot) {
+		return errors.New("evidence root must be disjoint from offline input root")
+	}
+	if bundleRoot != "" && candidatePathsOverlap(path, bundleRoot) {
+		return errors.New("candidate evidence path must be disjoint from input bundle")
+	}
 	for _, item := range []struct {
 		name string
 		path string
 	}{
 		{"source root", sourceRoot},
 		{"corpus root", corpusRoot},
-		{"offline input root", offlineInputRoot},
 	} {
 		if candidatePathsOverlap(path, item.path) {
 			return fmt.Errorf("candidate evidence path must be disjoint from %s", item.name)
 		}
+	}
+	if offlineInputRoot != "" && candidatePathsOverlap(path, offlineInputRoot) {
+		return errors.New("candidate evidence path must be disjoint from offline input root")
 	}
 	if err := benchcycle.EnsureAbsent(path, "candidate evidence path"); err != nil {
 		return err
@@ -1225,6 +1291,7 @@ func candidateOwnedBuildArguments(binaryPath string) []string {
 	return []string{
 		"build",
 		"-buildvcs=false",
+		"-trimpath",
 		"-mod=readonly",
 		"-ldflags", "-X " + ownedBenchmarkVersionLinkerSymbol + "=" + ownedBenchmarkVersion,
 		"-o", binaryPath,
@@ -1320,7 +1387,7 @@ func loadCandidateCorpus(corpusRoot string) (bench.Catalog, bench.Oracle, bench.
 	if err := bench.Validate(catalog, oracle); err != nil {
 		return bench.Catalog{}, bench.Oracle{}, bench.Ratchet{}, cyclePolicy{}, fmt.Errorf("validate frozen candidate catalog and oracle: %w", err)
 	}
-	historicalRatchet, err := decodeRatchetFile(filepath.Join(corpusRoot, "ratchet.json"))
+	preRebindRatchet, err := decodeRatchetFile(filepath.Join(corpusRoot, "ratchet.json"))
 	if err != nil {
 		return bench.Catalog{}, bench.Oracle{}, bench.Ratchet{}, cyclePolicy{}, err
 	}
@@ -1332,8 +1399,8 @@ func loadCandidateCorpus(corpusRoot string) (bench.Catalog, bench.Oracle, bench.
 	if err != nil {
 		return bench.Catalog{}, bench.Oracle{}, bench.Ratchet{}, cyclePolicy{}, err
 	}
-	if historicalRatchet.CatalogRevision != catalog.Revision || historicalRatchet.CatalogDigest != catalogDigest || historicalRatchet.OracleDigest != oracleDigest {
-		return bench.Catalog{}, bench.Oracle{}, bench.Ratchet{}, cyclePolicy{}, errors.New("historical ratchet does not bind the frozen candidate corpus")
+	if preRebindRatchet.CatalogRevision != catalog.Revision || preRebindRatchet.CatalogDigest != catalogDigest || preRebindRatchet.OracleDigest != oracleDigest {
+		return bench.Catalog{}, bench.Oracle{}, bench.Ratchet{}, cyclePolicy{}, errors.New("pre-rebind ratchet does not bind the frozen candidate corpus")
 	}
 	policy, err := decodePolicyFile(filepath.Join(corpusRoot, "cycle-policy.json"))
 	if err != nil {
@@ -1342,7 +1409,7 @@ func loadCandidateCorpus(corpusRoot string) (bench.Catalog, bench.Oracle, bench.
 	if policy.Repetitions != fixedRepetitions {
 		return bench.Catalog{}, bench.Oracle{}, bench.Ratchet{}, cyclePolicy{}, fmt.Errorf("candidate cycle policy repetitions must be %d", fixedRepetitions)
 	}
-	return catalog, oracle, historicalRatchet, policy, nil
+	return catalog, oracle, preRebindRatchet, policy, nil
 }
 
 func decodeCandidateInputBindingSpec(path string) (bench.TrustedInputBindingSpec, error) {
@@ -1403,9 +1470,9 @@ func bindCandidateOfflineInputs(ctx context.Context, historicalCatalog bench.Cat
 		var digest string
 		switch binding.Kind {
 		case bench.TrustedInputPinFile:
-			digest, _, err = digestTrustedInputFile(path)
+			digest, _, err = digestTrustedInputFileContext(ctx, path)
 		case bench.TrustedInputPinTree:
-			digest, err = HashTree(path)
+			digest, err = hashTrustedInputTree(ctx, path)
 		default:
 			err = fmt.Errorf("unsupported candidate input binding kind %q", binding.Kind)
 		}

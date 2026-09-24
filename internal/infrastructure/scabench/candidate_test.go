@@ -144,6 +144,46 @@ func TestValidateCandidateInputRejectsCorpusInsideOfflineInputs(t *testing.T) {
 	}
 }
 
+func TestValidateCandidateBundleAllowsPriorEvidenceAndRequiresNewAttestation(t *testing.T) {
+	input := candidateValidationInput(t)
+	input.OfflineInputRoot = ""
+	input.InputBundleRoot = filepath.Join(input.EvidenceRoot, "candidate", "earlier")
+	if err := os.MkdirAll(input.InputBundleRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCandidateInput(input); err == nil || !strings.Contains(err.Error(), "requires a current host") {
+		t.Fatalf("missing attestation error = %v", err)
+	}
+	input.EnvironmentAttestationPath = filepath.Join(t.TempDir(), "current-attestation.json")
+	if err := os.WriteFile(input.EnvironmentAttestationPath, []byte("current host\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCandidateInput(input); err != nil {
+		t.Fatalf("prior evidence bundle in shared evidence root was rejected: %v", err)
+	}
+	input.OfflineInputRoot = t.TempDir()
+	if err := validateCandidateInput(input); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("conflicting input modes error = %v", err)
+	}
+}
+
+func TestValidateCandidateBundleRejectsAttestationAliasIntoBundle(t *testing.T) {
+	input := candidateValidationInput(t)
+	input.OfflineInputRoot = ""
+	input.InputBundleRoot = filepath.Join(input.EvidenceRoot, "candidate", "earlier")
+	if err := os.MkdirAll(input.InputBundleRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "bundle-link")
+	if err := os.Symlink(input.InputBundleRoot, alias); err != nil {
+		t.Skipf("directory symlinks unavailable: %v", err)
+	}
+	input.EnvironmentAttestationPath = filepath.Join(alias, "archived-attestation.json")
+	if err := validateCandidateInput(input); err == nil || !strings.Contains(err.Error(), "outside the archived input bundle") {
+		t.Fatalf("aliased attestation error = %v, want bundle containment rejection", err)
+	}
+}
+
 func TestBindCandidateOfflineInputsRebindsCandidateOnly(t *testing.T) {
 	corpusRoot, err := filepath.Abs(filepath.Join("..", "..", "usecase", "scabench", "corpus"))
 	if err != nil {
@@ -380,7 +420,7 @@ func TestCandidateArchiveRejectsCorruptCASBeforeCapture(t *testing.T) {
 	}
 }
 
-func TestLoadCandidateCorpusRejectsUnboundHistoricalRatchet(t *testing.T) {
+func TestLoadCandidateCorpusRejectsUnboundPreRebindRatchet(t *testing.T) {
 	source := filepath.Join("..", "..", "usecase", "scabench", "corpus")
 	frozen := filepath.Join(t.TempDir(), "frozen")
 	if err := copyCandidateCorpus(context.Background(), source, frozen); err != nil {
@@ -399,7 +439,7 @@ func TestLoadCandidateCorpusRejectsUnboundHistoricalRatchet(t *testing.T) {
 	if err := replaceCandidateDocument(ratchetPath, body); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, _, err := loadCandidateCorpus(frozen); err == nil || !strings.Contains(err.Error(), "historical ratchet does not bind") {
+	if _, _, _, _, err := loadCandidateCorpus(frozen); err == nil || !strings.Contains(err.Error(), "pre-rebind ratchet does not bind") {
 		t.Fatalf("loadCandidateCorpus() error = %v, want frozen-ratchet mismatch", err)
 	}
 }
@@ -644,6 +684,38 @@ func TestRunCandidateSealsConsistentCandidateIdentityChain(t *testing.T) {
 	if digest, err := bench.DigestCatalog(sealedCatalog); err != nil || digest != catalogDigest {
 		t.Fatalf("sealed catalog digest = %q, %v; want %q", digest, err, catalogDigest)
 	}
+	replayed, replayErr := RunCandidate(context.Background(), CandidateInput{
+		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, InputBundleRoot: result.EvidencePath,
+		EnvironmentAttestationPath: filepath.Join(offlineRoot, filepath.FromSlash(trustedEnvironmentAttestationLocator)),
+		EvidenceRoot:               t.TempDir(), ImplementationCommit: commit, RunKey: "candidate/replayed-identity",
+	}, nil)
+	if replayErr == nil || !replayed.Sealed || replayed.Seal == nil {
+		t.Fatalf("bundle replay did not reach a sealed candidate before scanner dispatch: result=%+v, error=%v", replayed, replayErr)
+	}
+	if replayed.Seal.InputArchive.RootManifestDigest != result.Seal.InputArchive.RootManifestDigest {
+		t.Fatalf("replayed input manifest = %s, want %s; catalog=%s/%s owned=%s/%s", replayed.Seal.InputArchive.RootManifestDigest, result.Seal.InputArchive.RootManifestDigest,
+			replayed.Seal.CandidateCatalogDigest, result.Seal.CandidateCatalogDigest, replayed.Seal.OwnedBinaryDigest, result.Seal.OwnedBinaryDigest)
+	}
+	newAttestation := filepath.Join(t.TempDir(), "environment-attestation.json")
+	newAttestationBody := []byte("different current host attestation")
+	if err := os.WriteFile(newAttestation, newAttestationBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rebound, reboundErr := RunCandidate(context.Background(), CandidateInput{
+		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, InputBundleRoot: result.EvidencePath,
+		EnvironmentAttestationPath: newAttestation,
+		EvidenceRoot:               t.TempDir(), ImplementationCommit: commit, RunKey: "candidate/rebound-attestation",
+	}, nil)
+	if reboundErr == nil || !rebound.Sealed || rebound.Seal == nil {
+		t.Fatalf("attestation replay did not reach a sealed candidate before scanner dispatch: result=%+v, error=%v", rebound, reboundErr)
+	}
+	if rebound.Seal.InputArchive.RootManifestDigest == result.Seal.InputArchive.RootManifestDigest {
+		t.Fatal("changed current-host attestation retained the archived input manifest digest")
+	}
+	retainedAttestation, err := os.ReadFile(filepath.Join(rebound.EvidencePath, "capture-input", filepath.FromSlash(trustedEnvironmentAttestationLocator)))
+	if err != nil || !bytes.Equal(retainedAttestation, newAttestationBody) {
+		t.Fatalf("retained current-host attestation = %q, error %v", retainedAttestation, err)
+	}
 }
 
 func writeCandidateOfflineInput(t *testing.T, root string, spec bench.TrustedInputBindingSpec) {
@@ -887,8 +959,8 @@ func TestValidateCandidateSnapshotModuleReplacementRejectsEscape(t *testing.T) {
 func TestCandidateOwnedBuildControlsFlagsAndEnvironment(t *testing.T) {
 	t.Setenv("GOFLAGS", "-overlay=outside.json")
 	arguments := candidateOwnedBuildArguments(filepath.Join(t.TempDir(), "synapse-sca-bench"))
-	if !containsString(arguments, "-buildvcs=false") || !containsString(arguments, "-mod=readonly") {
-		t.Fatalf("candidate build arguments = %#v, want controlled VCS and module flags", arguments)
+	if !containsString(arguments, "-buildvcs=false") || !containsString(arguments, "-trimpath") || !containsString(arguments, "-mod=readonly") {
+		t.Fatalf("candidate build arguments = %#v, want controlled VCS, source path, and module flags", arguments)
 	}
 	environment := candidateOwnedBuildEnvironment()
 	for _, expected := range []string{"GOENV=off", "GOFLAGS=", "GOWORK=off", "GOTOOLCHAIN=local", "GOPROXY=off", "GOOS=" + runtime.GOOS, "GOARCH=" + runtime.GOARCH, "CGO_ENABLED=0"} {

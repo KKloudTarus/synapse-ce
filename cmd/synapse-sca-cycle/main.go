@@ -11,9 +11,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
@@ -22,10 +24,17 @@ import (
 )
 
 func main() {
-	os.Exit(executeCLI(os.Args[1:], os.Stdout, os.Stderr))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := executeCLIContext(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
 
 func executeCLI(args []string, stdout, stderr io.Writer) int {
+	return executeCLIContext(context.Background(), args, stdout, stderr)
+}
+
+func executeCLIContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(stderr, "usage: synapse-sca-cycle {run|candidate} [flags]")
 		return 1
@@ -34,7 +43,7 @@ func executeCLI(args []string, stdout, stderr io.Writer) int {
 	case "run":
 		return executeTrustedCLI(args[1:], stdout, stderr)
 	case "candidate":
-		return executeCandidateCLI(args[1:], stdout, stderr)
+		return executeCandidateCLI(ctx, args[1:], stdout, stderr)
 	default:
 		_, _ = fmt.Fprintln(stderr, "usage: synapse-sca-cycle {run|candidate} [flags]")
 		return 1
@@ -72,10 +81,12 @@ func executeTrustedCLI(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func executeCandidateCLI(args []string, stdout, stderr io.Writer) int {
+func executeCandidateCLI(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("synapse-sca-cycle candidate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	offlineInputRoot := flags.String("offline-input-root", "", "absolute prepared offline input root")
+	inputBundle := flags.String("input-bundle", "", "absolute candidate evidence bundle containing the pinned input archive")
+	environmentAttestation := flags.String("environment-attestation", "", "absolute attestation file for the current host (required with --input-bundle)")
 	evidenceRoot := flags.String("evidence-root", "", "absolute protected evidence root")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -83,8 +94,8 @@ func executeCandidateCLI(args []string, stdout, stderr io.Writer) int {
 		}
 		return 1
 	}
-	if flags.NArg() != 0 || *offlineInputRoot == "" || *evidenceRoot == "" {
-		_, _ = fmt.Fprintln(stderr, "usage: synapse-sca-cycle candidate --offline-input-root PATH --evidence-root PATH")
+	if flags.NArg() != 0 || *evidenceRoot == "" || (*offlineInputRoot == "") == (*inputBundle == "") || (*inputBundle == "") != (*environmentAttestation == "") {
+		_, _ = fmt.Fprintln(stderr, "usage: synapse-sca-cycle candidate (--offline-input-root PATH | --input-bundle PATH --environment-attestation PATH) --evidence-root PATH")
 		return 1
 	}
 	workingDir, err := os.Getwd()
@@ -102,13 +113,15 @@ func executeCandidateCLI(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "synapse-sca-cycle candidate:", err)
 		return 1
 	}
-	result, err := capture.RunCandidate(context.Background(), capture.CandidateInput{
+	result, err := capture.RunCandidate(ctx, capture.CandidateInput{
 		SourceRoot: workingDir, CorpusRoot: corpusRoot, OfflineInputRoot: *offlineInputRoot,
+		InputBundleRoot: *inputBundle, EnvironmentAttestationPath: *environmentAttestation,
 		EvidenceRoot: *evidenceRoot, ImplementationCommit: implementationCommit, RunKey: runKey,
 	}, capture.RunnerFactory(productionRunner))
 	if result.EvidencePath != "" {
 		_, _ = fmt.Fprintln(stdout, "Candidate evidence:", result.EvidencePath)
 	}
+	printCandidateSummary(stdout, result)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "synapse-sca-cycle candidate:", err)
 		if result.Candidate != nil && !result.Gate.CandidatePassed {

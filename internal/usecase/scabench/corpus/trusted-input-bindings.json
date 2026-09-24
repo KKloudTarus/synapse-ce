@@ -1,7 +1,7 @@
 {
   "schema_version": "synapse-sca-trusted-input-binding-spec-v1",
   "catalog_revision": "same-sbom-linux-20260922",
-  "catalog_digest": "sha256:cc4abb0567fa00d82a03aaf2202c289eba802d33d46e76f340cc7b20dbcf13ea",
+  "catalog_digest": "sha256:bc4517da9d88ad7029b48b9ab624147e4ebc739dec385c05cb764f39d3defa87",
   "bindings": [
     {
       "reference": "binary:grype:v0.115.0",
@@ -43,19 +43,19 @@
       "reference": "database:grype:v6.1.9-2026-09-20T00:35:35Z-1789885674",
       "locator": "databases/grype",
       "kind": "tree",
-      "pin_digest": "sha256:ed8844fd88095cb2b94734d4a3c54fb4e4b259bdffb4393bc9c4fe3b09ac257d"
+      "pin_digest": "sha256:0337600ef5e88ae38df997a59a886b0b7e752ad9d817fb2bdbbcf9876d4c9f4a"
     },
     {
       "reference": "database:osv-scanner:debian-all-2026-09-20",
       "locator": "databases/osv",
       "kind": "tree",
-      "pin_digest": "sha256:9f0e3db5fc3edac9b169c44656d0189fed39698c1a3ed01dc995cc148b6c278b"
+      "pin_digest": "sha256:2b3413da00c56e2d4db98af47dd7f09ae7f9a89d609a5a555b5e469809525dea"
     },
     {
       "reference": "database:owned:debian-bookworm-oval-2026-09-20",
       "locator": "databases/owned-debian",
       "kind": "tree",
-      "pin_digest": "sha256:74c56ec5e662899be66cd99eaa353280cb086d95addf95549a43970000fb1049"
+      "pin_digest": "sha256:cb8430a648f0c6892f673ec37f606a6fb00202aa04d4ff7db732414404e4a44c"
     },
     {
       "reference": "database:owned:redhat-rhel9-8-vex-2026-09-21",
@@ -73,13 +73,13 @@
       "reference": "database:trivy:v2-2026-09-20T13:18:06.422928923Z",
       "locator": "databases/trivy",
       "kind": "tree",
-      "pin_digest": "sha256:5ad1536d9777495701d05a1c50ac419fdf62c614e48362b0c67189b3c7f300ba"
+      "pin_digest": "sha256:0d0abf2bb36dc091bf4e1713951f7c4ef66918b1c80af6a409e5020d26f5c153"
     },
     {
       "reference": "source:debian-bookworm-oval-2026-09-20",
       "locator": "databases/owned-debian/debian-bookworm-oval.xml.bz2",
       "kind": "file",
-      "pin_digest": "sha256:015a138cc564204b90fe6ab2210ece8166894d0be940f974b59b4f8dc6012156"
+      "pin_digest": "sha256:0e870d4a3398245140b3625e180967e1ddb595d7830aac9ab965832be103cbcd"
     },
     {
       "reference": "source:redhat-vex-cve-2025-66382-2026-09-18",

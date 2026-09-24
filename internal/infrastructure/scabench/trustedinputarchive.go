@@ -76,7 +76,7 @@ func RestoreTrustedInputArchive(ctx context.Context, catalog bench.Catalog, spec
 		if entry.Kind != bench.TrustedInputInventoryFile {
 			continue
 		}
-		if err := restoreTrustedInputFile(root, entry, store); err != nil {
+		if err := restoreTrustedInputFile(ctx, root, entry, store); err != nil {
 			return err
 		}
 	}
@@ -205,9 +205,9 @@ func walkTrustedInputDirectory(ctx context.Context, directory, relative string, 
 			var digest string
 			var size int64
 			if state.store != nil {
-				digest, size, err = state.store.StoreFile(memberPath)
+				digest, size, err = state.store.StoreFileContext(ctx, memberPath)
 			} else {
-				digest, size, err = digestTrustedInputFile(memberPath)
+				digest, size, err = digestTrustedInputFileContext(ctx, memberPath)
 			}
 			if err != nil {
 				return fmt.Errorf("archive trusted input file %q: %w", locator, err)
@@ -250,6 +250,13 @@ func (state *trustedInputInventoryState) add(entry bench.TrustedInputInventoryEn
 }
 
 func digestTrustedInputFile(filePath string) (string, int64, error) {
+	return digestTrustedInputFileContext(context.Background(), filePath)
+}
+
+func digestTrustedInputFileContext(ctx context.Context, filePath string) (string, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return "", 0, err
+	}
 	before, err := os.Lstat(filePath)
 	if err != nil {
 		return "", 0, fmt.Errorf("inspect trusted input file: %w", err)
@@ -274,10 +281,16 @@ func digestTrustedInputFile(filePath string) (string, int64, error) {
 		return "", 0, errors.New("trusted input file changed while opening")
 	}
 	hash := sha256.New()
-	written, copyErr := io.Copy(hash, io.LimitReader(file, bench.MaxTrustedInputArchiveFileBytes+1))
+	written, copyErr := copyWithContext(ctx, hash, io.LimitReader(file, bench.MaxTrustedInputArchiveFileBytes+1))
 	closeErr := file.Close()
-	if copyErr != nil || closeErr != nil {
+	if copyErr != nil {
+		return "", 0, fmt.Errorf("read trusted input file: %w", copyErr)
+	}
+	if closeErr != nil {
 		return "", 0, errors.New("read trusted input file")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", 0, err
 	}
 	after, err := os.Lstat(filePath)
 	if err != nil || !sameStableFile(before, after) || written != before.Size() {
@@ -298,9 +311,9 @@ func verifyTrustedInputBindings(ctx context.Context, root string, bindings []ben
 		var digest string
 		switch binding.Kind {
 		case bench.TrustedInputPinFile:
-			digest, _, err = digestTrustedInputFile(memberPath)
+			digest, _, err = digestTrustedInputFileContext(ctx, memberPath)
 		case bench.TrustedInputPinTree:
-			digest, err = HashTree(memberPath)
+			digest, err = hashTrustedInputTree(ctx, memberPath)
 		default:
 			return fmt.Errorf("trusted input binding %q has unsupported kind %q", binding.Reference, binding.Kind)
 		}
@@ -314,6 +327,14 @@ func verifyTrustedInputBindings(ctx context.Context, root string, bindings []ben
 	return nil
 }
 
+// hashTrustedInputTree uses the same framing as HashTree while observing cancellation.
+func hashTrustedInputTree(ctx context.Context, path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", errors.New("resolve tree path")
+	}
+	return hashTreeContext(ctx, absolute)
+}
 func createTrustedInputDirectory(root string, entry bench.TrustedInputInventoryEntry) error {
 	path, _, err := safeTrustedInputDestination(root, entry.Locator)
 	if err != nil {
@@ -334,7 +355,7 @@ func createTrustedInputDirectory(root string, entry bench.TrustedInputInventoryE
 	return nil
 }
 
-func restoreTrustedInputFile(root string, entry bench.TrustedInputInventoryEntry, store *PinArchiveStore) error {
+func restoreTrustedInputFile(ctx context.Context, root string, entry bench.TrustedInputInventoryEntry, store *PinArchiveStore) error {
 	destination, parent, err := safeTrustedInputDestination(root, entry.Locator)
 	if err != nil {
 		return err
@@ -353,7 +374,7 @@ func restoreTrustedInputFile(root string, entry bench.TrustedInputInventoryEntry
 		_ = temporary.Close()
 		_ = os.Remove(temporaryPath)
 	}()
-	written, err := store.CopyTo(entry.ObjectDigest, entry.Bytes, temporary)
+	written, err := store.CopyToContext(ctx, entry.ObjectDigest, entry.Bytes, temporary)
 	if err != nil {
 		return fmt.Errorf("restore trusted input file %q: %w", entry.Locator, err)
 	}
@@ -362,6 +383,9 @@ func restoreTrustedInputFile(root string, entry bench.TrustedInputInventoryEntry
 	}
 	if err := temporary.Sync(); err != nil {
 		return fmt.Errorf("sync trusted input temporary file %q: %w", entry.Locator, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("close trusted input temporary file %q: %w", entry.Locator, err)
@@ -372,8 +396,11 @@ func restoreTrustedInputFile(root string, entry bench.TrustedInputInventoryEntry
 	if err := syncDirectory(parent); err != nil {
 		return fmt.Errorf("sync trusted input destination directory %q: %w", entry.Locator, err)
 	}
-	digest, size, err := digestTrustedInputFile(destination)
-	if err != nil || size != entry.Bytes || digest != entry.ObjectDigest {
+	digest, size, err := digestTrustedInputFileContext(ctx, destination)
+	if err != nil {
+		return fmt.Errorf("verify restored trusted input file %q: %w", entry.Locator, err)
+	}
+	if size != entry.Bytes || digest != entry.ObjectDigest {
 		return fmt.Errorf("verify restored trusted input file %q", entry.Locator)
 	}
 	if err := os.Chmod(destination, os.FileMode(entry.Mode)); err != nil {

@@ -2,6 +2,7 @@ package scabench
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,6 +21,9 @@ func TestTrustedInputArchiveRoundTripsFilesTreesEmptyDirectoriesAndModes(t *test
 	beforeTree, err := HashTree(filepath.Join(root, "databases", "tree"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if cancellableTree, err := hashTrustedInputTree(context.Background(), filepath.Join(root, "databases", "tree")); err != nil || cancellableTree != beforeTree {
+		t.Fatalf("cancellable tree digest = %q, error = %v, want %q", cancellableTree, err, beforeTree)
 	}
 	archive, err := CollectTrustedInputArchive(context.Background(), catalog, spec, root, store)
 	if err != nil {
@@ -233,6 +237,36 @@ func TestTrustedInputArchiveRejectsMissingAndOrphanBindings(t *testing.T) {
 	orphan.Bindings[0].Reference = "binary:orphan"
 	if _, err := CollectTrustedInputArchive(context.Background(), catalog, orphan, root, store); err == nil || !strings.Contains(err.Error(), "orphaned") {
 		t.Fatalf("CollectTrustedInputArchive() error = %v, want orphan-binding failure", err)
+	}
+}
+
+func TestTrustedInputArchiveHashingRejectsCanceledContext(t *testing.T) {
+	root, _, _, _ := trustedInputArchiveFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := digestTrustedInputFileContext(ctx, filepath.Join(root, "tools", "engine")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("digestTrustedInputFileContext() error = %v, want context cancellation", err)
+	}
+	if _, err := hashTrustedInputTree(ctx, filepath.Join(root, "databases", "tree")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("hashTrustedInputTree() error = %v, want context cancellation", err)
+	}
+}
+
+func TestRestoreTrustedInputArchiveRejectsCanceledContextBeforePublication(t *testing.T) {
+	root, catalog, spec, store := trustedInputArchiveFixture(t)
+	archive, err := CollectTrustedInputArchive(context.Background(), catalog, spec, root, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := RestoreTrustedInputArchive(ctx, catalog, spec, archive, destination, store); !errors.Is(err, context.Canceled) {
+		t.Fatalf("RestoreTrustedInputArchive() error = %v, want context cancellation", err)
+	}
+	entries, err := os.ReadDir(destination)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("canceled restore destination entries = %v, err %v, want empty", entries, err)
 	}
 }
 

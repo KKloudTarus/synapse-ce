@@ -1,8 +1,12 @@
 package scabench
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -217,6 +221,111 @@ func TestPinArchiveRejectsEmptyContent(t *testing.T) {
 func TestNewPinArchiveStoreRequiresAbsoluteRoot(t *testing.T) {
 	if _, err := NewPinArchiveStore("relative/archive"); err == nil {
 		t.Fatal("a relative archive root must be rejected")
+	}
+}
+
+func TestOpenPinArchiveStoreReadOnlyRequiresExistingArchive(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+	if _, err := OpenPinArchiveStoreReadOnly(root); err == nil {
+		t.Fatal("a missing archive must not be opened for read-only restore")
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("read-only open must not create an archive root, stat err %v", err)
+	}
+
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatalf("create incomplete archive root: %v", err)
+	}
+	if _, err := OpenPinArchiveStoreReadOnly(root); err == nil {
+		t.Fatal("an archive without blobs must be rejected")
+	}
+}
+
+func TestOpenPinArchiveStoreReadOnlyRestoresButCannotWrite(t *testing.T) {
+	root := t.TempDir()
+	writable, err := NewPinArchiveStore(root)
+	if err != nil {
+		t.Fatalf("create archive: %v", err)
+	}
+	payload := []byte("retained materialized input")
+	digest := digestOf(payload)
+	if err := writable.Put(digest, payload); err != nil {
+		t.Fatalf("archive payload: %v", err)
+	}
+	store, err := OpenPinArchiveStoreReadOnly(root)
+	if err != nil {
+		t.Fatalf("open archive read-only: %v", err)
+	}
+	var restored bytes.Buffer
+	written, err := store.CopyTo(digest, int64(len(payload)), &restored)
+	if err != nil || written != int64(len(payload)) || !bytes.Equal(restored.Bytes(), payload) {
+		t.Fatalf("read-only store must restore bytes, written %d err %v got %q", written, err, restored.Bytes())
+	}
+	if err := store.Put(digest, payload); err == nil {
+		t.Fatal("read-only store must reject writes")
+	}
+}
+
+func TestPinArchiveCopyToContextStopsAfterBoundedChunk(t *testing.T) {
+	store := newStore(t)
+	payload := bytes.Repeat([]byte("x"), archiveCopyBufferBytes*2)
+	digest := digestOf(payload)
+	if err := store.Put(digest, payload); err != nil {
+		t.Fatalf("archive payload: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var restored bytes.Buffer
+	written, err := store.CopyToContext(ctx, digest, int64(len(payload)), cancelAfterFirstWrite{Writer: &restored, cancel: cancel})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CopyToContext() error = %v, want context cancellation", err)
+	}
+	if written != archiveCopyBufferBytes || restored.Len() != archiveCopyBufferBytes {
+		t.Fatalf("CopyToContext() wrote %d bytes, restored %d bytes, want exactly one bounded chunk", written, restored.Len())
+	}
+}
+
+func TestPinArchiveStoreFileContextRejectsCanceledContext(t *testing.T) {
+	store := newStore(t)
+	source := filepath.Join(t.TempDir(), "materialized-input")
+	if err := os.WriteFile(source, []byte("input"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := store.StoreFileContext(ctx, source); !errors.Is(err, context.Canceled) {
+		t.Fatalf("StoreFileContext() error = %v, want context cancellation", err)
+	}
+}
+
+type cancelAfterFirstWrite struct {
+	io.Writer
+	cancel func()
+}
+
+func (writer cancelAfterFirstWrite) Write(data []byte) (int, error) {
+	written, err := writer.Writer.Write(data)
+	writer.cancel()
+	return written, err
+}
+
+func TestReadPinnedBundleFileReadsBoundedRegularFile(t *testing.T) {
+	root := t.TempDir()
+	payload := []byte("pinned bundle metadata")
+	if err := os.WriteFile(filepath.Join(root, "catalog.json"), payload, 0o600); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	got, err := readPinnedBundleFile(root, "catalog.json", int64(len(payload)))
+	if err != nil || !bytes.Equal(got, payload) {
+		t.Fatalf("read metadata err %v got %q", err, got)
+	}
+	if _, err := readPinnedBundleFile(root, "catalog.json", int64(len(payload)-1)); err == nil {
+		t.Fatal("metadata above its limit must be rejected")
+	}
+	for _, relative := range []string{"../catalog.json", "metadata/../catalog.json", "./catalog.json", "metadata//catalog.json"} {
+		if _, err := readPinnedBundleFile(root, relative, int64(len(payload))); err == nil {
+			t.Errorf("metadata path %q must be rejected", relative)
+		}
 	}
 }
 

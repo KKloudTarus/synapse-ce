@@ -20,6 +20,8 @@ func TestExecuteCLIRoutesCandidateAndTrustedCommands(t *testing.T) {
 		{name: "trusted help", args: []string{"run", "--help"}, code: 0},
 		{name: "candidate help", args: []string{"candidate", "--help"}, code: 0},
 		{name: "candidate missing input", args: []string{"candidate", "--evidence-root", "/protected"}, code: 1},
+		{name: "candidate bundle missing attestation", args: []string{"candidate", "--input-bundle", "/bundle", "--evidence-root", "/protected"}, code: 1},
+		{name: "candidate inputs conflict", args: []string{"candidate", "--offline-input-root", "/inputs", "--input-bundle", "/bundle", "--environment-attestation", "/attestation", "--evidence-root", "/protected"}, code: 1},
 		{name: "candidate positional input", args: []string{"candidate", "unrecognized"}, code: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
