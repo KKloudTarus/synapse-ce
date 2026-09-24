@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowDown, ArrowNarrowRight, ArrowUp, CheckCircle, ChevronLeft, ChevronRight, FilterLines, GitBranch01, InfoCircle, RefreshCw01, SearchLg, ShieldTick, Sliders04, SwitchVertical01, XClose } from '@untitledui/icons'
+import { AlertCircle, ArrowDown, ArrowNarrowRight, ArrowUp, Camera01, CheckCircle, ChevronLeft, ChevronRight, FilterLines, GitBranch01, InfoCircle, RefreshCw01, SearchLg, ShieldTick, Sliders04, SwitchVertical01, XClose } from '@untitledui/icons'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Dialog, Modal, ModalOverlay } from '../../components/application/modals/modal'
@@ -11,6 +11,7 @@ import { api, ApiError } from '../../lib/api'
 import { sevRank } from '../../lib/severity'
 import type { AssessmentComparison, AssessmentComparisonChangeFlag, AssessmentComparisonItem, AssessmentComparisonMode, AssessmentComparisonRatio, AssessmentComparisonScope, AssessmentComparisonSummary, AssessmentLifecycle, AssessmentSnapshot, AssessmentSnapshotListResponse, Severity } from '../../lib/types'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, type SortDirection } from './components/FindingsTable'
+import { FinalizeSnapshotDialog } from './FinalizeSnapshotDialog'
 
 const ALL = 'all'
 const PRESENCE = ['all', 'new', 'still_detected', 'not_detected_under_comparable_coverage', 'not_evaluated', 'reopened', 'needs_review'].map(option)
@@ -65,6 +66,7 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
   const [createError, setCreateError] = useState('')
   const [selectedItem, setSelectedItem] = useState<AssessmentComparisonItem | null>(null)
   const [configOpen, setConfigOpen] = useState(!comparisonId)
+  const [finalizeOpen, setFinalizeOpen] = useState(false)
   const [expandedItemId, setExpandedItemId] = useState('')
   const [cursorHistory, setCursorHistory] = useState<string[]>([])
 
@@ -150,7 +152,10 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
 
   if (context.loading && !context.data) return <Spinner label="Loading assessment comparison context…" />
   if (context.error) return <ErrorState message={context.error} />
-  if (!lifecycle || !currentSnapshots?.items.length) return <EmptyState icon={GitBranch01} title="No immutable snapshots to compare" hint="Finalize at least one assessment snapshot before creating a comparison." />
+  if (!lifecycle || !currentSnapshots?.items.length) return <>
+    <EmptyState icon={GitBranch01} title="No immutable snapshots to compare" hint="Finalize at least one assessment snapshot before creating a comparison." action={<Button onClick={() => setFinalizeOpen(true)}><Camera01 className="size-4" />Finalize snapshot</Button>} />
+    {finalizeOpen ? <FinalizeSnapshotDialog assessmentId={assessmentId} expectedDefaultVersion={currentSnapshots?.defaultVersion ?? 0} onClose={() => setFinalizeOpen(false)} onFinalized={() => { setFinalizeOpen(false); context.refetch() }} /> : null}
+  </>
 
   const scopeDetails = SCOPES.find((item) => item.value === scope) ?? SCOPES[0]
   const hasAdvancedFilters = Boolean(producer || findingKind || reviewState !== ALL || disposition !== ALL)
@@ -192,8 +197,9 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
   }
 
   return <div className="space-y-5">
-    {!comparisonId ? <EmptyState icon={GitBranch01} title="Configure a comparison" hint="Choose two immutable snapshots and the finding scope you want to inspect." action={<Button onClick={() => setConfigOpen(true)}><Sliders04 className="size-4" />Configure comparison</Button>} /> : <ComparisonPairBar mode={mode} baseline={baselineSnapshot} current={currentSnapshot} baselineLabel={baselineAssessmentId ? memberLabel(lifecycle, baselineAssessmentId, false) : 'Baseline'} currentLabel={memberLabel(lifecycle, assessmentId, false)} onConfigure={() => setConfigOpen(true)} />}
+    {!comparisonId ? <EmptyState icon={GitBranch01} title="Configure a comparison" hint="Choose two immutable snapshots and the finding scope you want to inspect." action={<div className="flex flex-wrap justify-center gap-2"><Button onClick={() => setConfigOpen(true)}><Sliders04 className="size-4" />Configure comparison</Button><Button variant="secondary" onClick={() => setFinalizeOpen(true)}><Camera01 className="size-4" />Finalize snapshot</Button></div>} /> : <ComparisonPairBar mode={mode} baseline={baselineSnapshot} current={currentSnapshot} baselineLabel={baselineAssessmentId ? memberLabel(lifecycle, baselineAssessmentId, false) : 'Baseline'} currentLabel={memberLabel(lifecycle, assessmentId, false)} onConfigure={() => setConfigOpen(true)} />}
     {comparisonId ? <CoverageBanner baseline={baselineSnapshot} current={currentSnapshot} /> : null}
+    {finalizeOpen ? <FinalizeSnapshotDialog assessmentId={assessmentId} expectedDefaultVersion={currentSnapshots.defaultVersion} onClose={() => setFinalizeOpen(false)} onFinalized={() => { setFinalizeOpen(false); context.refetch() }} /> : null}
     {comparisonId && comparisonFetch.loading && !comparison ? <Spinner label="Loading immutable comparison…" /> : null}
     {comparisonFetch.error ? <ErrorState message={comparisonFetch.error} /> : null}
     {comparison ? <ComparisonState comparison={comparison} onRefresh={comparisonFetch.refetch} /> : null}

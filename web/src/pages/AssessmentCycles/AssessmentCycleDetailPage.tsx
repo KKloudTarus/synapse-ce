@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, CheckCircle, Download01, Lock01, RefreshCw01, XClose } from '@untitledui/icons'
+import { AlertTriangle, Archive, ArrowLeft, CheckCircle, Download01, Lock01, RefreshCw01, XClose } from '@untitledui/icons'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Dialog, Modal, ModalOverlay } from '../../components/application/modals/modal'
@@ -22,7 +22,7 @@ export function AssessmentCycleDetailPage() {
   const result = useParallelFetch<CycleDetailData>(() => Promise.all([
     api.assessmentCycle(cycleId), api.listAssessmentClosureManifests(cycleId), api.me(),
   ]), { enabled: Boolean(cycleId), deps: [cycleId] })
-  const [dialog, setDialog] = useState<'close' | 'reopen' | null>(null)
+  const [dialog, setDialog] = useState<'close' | 'reopen' | 'archive' | null>(null)
   const [downloadError, setDownloadError] = useState('')
   const [downloading, setDownloading] = useState('')
 
@@ -60,6 +60,7 @@ export function AssessmentCycleDetailPage() {
         <Button variant="secondary" onClick={result.refetch}><RefreshCw01 className="size-4" />Refresh</Button>
         {canReview && cycle.status === 'open' ? <Button onClick={() => setDialog('close')}><Lock01 className="size-4" />Review closure</Button> : null}
         {canReview && cycle.status === 'completed' && activeManifest ? <Button variant="secondary-color" onClick={() => setDialog('reopen')}><RefreshCw01 className="size-4" />Review reopen</Button> : null}
+        {canReview && cycle.status !== 'archived' ? <Button variant="secondary" onClick={() => setDialog('archive')}><Archive className="size-4" />Archive Cycle</Button> : null}
       </div>
     </header>
 
@@ -87,6 +88,7 @@ export function AssessmentCycleDetailPage() {
 
     {dialog === 'close' ? <ClosureDialog cycleId={cycle.id} onClose={() => setDialog(null)} onCommitted={() => { setDialog(null); result.refetch() }} /> : null}
     {dialog === 'reopen' && activeManifest ? <ReopenDialog cycleId={cycle.id} manifest={activeManifest} onClose={() => setDialog(null)} onCommitted={() => { setDialog(null); result.refetch() }} /> : null}
+    {dialog === 'archive' ? <ArchiveDialog cycleId={cycle.id} cycleVersion={cycle.version} cycleStatus={cycle.status} onClose={() => setDialog(null)} onArchived={() => { setDialog(null); result.refetch() }} /> : null}
   </div>
 }
 
@@ -200,9 +202,49 @@ function ReopenDialog({ cycleId, manifest, onClose, onCommitted }: { cycleId: st
   </WorkflowModal>
 }
 
-function WorkflowModal({ title, onClose, loading, children }: { title: string; onClose: () => void; loading: boolean; children: React.ReactNode }) {
+/**
+ * Archiving is terminal: the domain allows open or completed to reach archived, and archived
+ * transitions nowhere. The Cycle version is sent as If-Match so a concurrent close, reopen, or
+ * archive is rejected rather than silently applied to a Cycle that moved underneath the operator.
+ */
+function ArchiveDialog({ cycleId, cycleVersion, cycleStatus, onClose, onArchived }: { cycleId: string; cycleVersion: number; cycleStatus: string; onClose: () => void; onArchived: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [conflict, setConflict] = useState(false)
+
+  async function archive() {
+    setLoading(true)
+    setError('')
+    setConflict(false)
+    try {
+      await api.archiveAssessmentCycle(cycleId, cycleVersion)
+      onArchived()
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) setConflict(true)
+      else setError(cause instanceof Error ? cause.message : 'Archive failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return <WorkflowModal title="Archive Cycle" subtitle="Archiving is final. An archived Cycle cannot be reopened." onClose={onClose} loading={loading}>
+    <div className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
+      <p className="font-semibold">This Cycle is {cycleStatus}. Archiving it ends the Cycle permanently.</p>
+      <p className="mt-1">No further Assessment, closure, or reopen is possible afterwards. Sealed closure manifests and their reports stay immutable and downloadable.</p>
+    </div>
+    <p className="font-mono text-xs text-tertiary">{cycleId} · Cycle version {cycleVersion}</p>
+    {conflict ? <ErrorState message="Another operator changed this Cycle. Refresh and review the current state before archiving." /> : null}
+    {error ? <ErrorState message={error} /> : null}
+    <div className="flex justify-end gap-2">
+      <Button variant="ghost" disabled={loading} onClick={onClose}>Cancel</Button>
+      <Button variant="secondary-color" loading={loading} onClick={archive}><Archive className="size-4" />Archive permanently</Button>
+    </div>
+  </WorkflowModal>
+}
+
+function WorkflowModal({ title, subtitle = 'Signed previews expire and are single-use.', onClose, loading, children }: { title: string; subtitle?: string; onClose: () => void; loading: boolean; children: React.ReactNode }) {
   return <ModalOverlay isOpen isDismissable={!loading} onOpenChange={(open) => { if (!open && !loading) onClose() }}><Modal className="w-full max-w-3xl"><Dialog aria-label={title}>
-    <div className="flex items-start justify-between gap-3 border-b border-secondary px-6 py-4"><div><h2 className="text-lg font-semibold text-primary">{title}</h2><p className="mt-1 text-sm text-tertiary">Signed previews expire and are single-use.</p></div><button type="button" aria-label="Close dialog" disabled={loading} onClick={onClose} className="rounded-lg p-2 text-tertiary hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"><XClose className="size-5" /></button></div>
+    <div className="flex items-start justify-between gap-3 border-b border-secondary px-6 py-4"><div><h2 className="text-lg font-semibold text-primary">{title}</h2><p className="mt-1 text-sm text-tertiary">{subtitle}</p></div><button type="button" aria-label="Close dialog" disabled={loading} onClick={onClose} className="rounded-lg p-2 text-tertiary hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"><XClose className="size-5" /></button></div>
     <div className="space-y-5 p-6">{children}</div>
   </Dialog></Modal></ModalOverlay>
 }

@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button, Card, EmptyState, ErrorState, Spinner, cn } from '../../components/ui'
 import { useFetch } from '../../hooks'
 import { ApiError, api } from '../../lib/api'
-import type { Finding, SLARemediationStatus, SLAView } from '../../lib/types'
+import type { Finding, SLAAssessment, SLAEvent, SLARemediationStatus, SLAView } from '../../lib/types'
 
 const STATUS_LABEL: Record<SLARemediationStatus, string> = {
   open: 'Open',
@@ -300,6 +300,98 @@ function Deadline({ value, overdue = false }: { value: string; overdue?: boolean
   )
 }
 
+function slaTime(value: string | null): string {
+  if (!value) return '—'
+  const at = new Date(value)
+  return Number.isNaN(at.getTime()) ? '—' : at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+/**
+ * The decision record behind this SLA: every state transition with its actor and audit reason, and
+ * every deadline recomputation with the tier it produced. A risk acceptance carries a compensating
+ * control and an expiry, so an operator changing the state again needs the prior terms in front of
+ * them. Both services are part of the SLA feature, so a failure here is surfaced rather than
+ * rendered as an empty history.
+ */
+function SLAHistory({ engagementId, findingId }: { engagementId: string; findingId: string }) {
+  const { data: events, error: eventsError } = useFetch<SLAEvent[]>(
+    () => api.slaEvents(engagementId, findingId),
+    { deps: [engagementId, findingId] },
+  )
+  const { data: assessments, error: assessmentsError } = useFetch<SLAAssessment[]>(
+    () => api.slaAssessments(engagementId, findingId),
+    { deps: [engagementId, findingId] },
+  )
+
+  return (
+    <div className="mt-5 grid gap-4 border-t border-secondary pt-5 lg:grid-cols-2">
+      <section aria-label="Transition history">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-quaternary">Transition history</div>
+        {eventsError ? <ErrorState message={eventsError} /> : null}
+        {!eventsError && events === null ? <Spinner label="Loading transition history…" /> : null}
+        {!eventsError && events !== null && events.length === 0 ? (
+          <p className="text-xs text-tertiary">No transitions recorded yet.</p>
+        ) : null}
+        {!eventsError && events !== null && events.length > 0 ? (
+          <ol className="space-y-3">
+            {events.map((event) => (
+              <li key={event.id} className="space-y-1 border-l-2 border-secondary pl-3">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="font-medium text-secondary">{STATUS_LABEL[event.from]}</span>
+                  <ChevronRight className="size-3 text-tertiary" aria-hidden="true" />
+                  <span className="font-semibold text-primary">{STATUS_LABEL[event.to]}</span>
+                  <span className="text-tertiary">by {event.actor || 'unknown actor'}</span>
+                </div>
+                <div className="font-mono text-[11px] tabular-nums text-tertiary">{slaTime(event.at)}</div>
+                <p className="text-xs text-secondary">{event.reason || 'No reason was recorded.'}</p>
+                {event.compensatingControl ? (
+                  <p className="text-xs text-tertiary">Compensating control: {event.compensatingControl}</p>
+                ) : null}
+                {event.acceptanceExpiresAt ? (
+                  <p className="text-xs text-tertiary">Acceptance expires {slaTime(event.acceptanceExpiresAt)}</p>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        ) : null}
+      </section>
+
+      <section aria-label="Deadline assessments">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-quaternary">Deadline assessments</div>
+        {assessmentsError ? <ErrorState message={assessmentsError} /> : null}
+        {!assessmentsError && assessments === null ? <Spinner label="Loading deadline assessments…" /> : null}
+        {!assessmentsError && assessments !== null && assessments.length === 0 ? (
+          <p className="text-xs text-tertiary">No deadline assessments recorded yet.</p>
+        ) : null}
+        {!assessmentsError && assessments !== null && assessments.length > 0 ? (
+          <ol className="space-y-3">
+            {assessments.map((assessment) => (
+              <li key={assessment.id} className="space-y-1 border-l-2 border-secondary pl-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span
+                    className={cn(
+                      'inline-flex items-center rounded-md px-2 py-0.5 font-semibold uppercase ring-1',
+                      TIER_STYLE[assessment.result.tier] ?? TIER_STYLE.exception,
+                    )}
+                  >
+                    {assessment.result.tier}
+                  </span>
+                  <span className="font-mono tabular-nums text-tertiary">{slaTime(assessment.assessedAt)}</span>
+                </div>
+                <div className="font-mono text-[11px] tabular-nums text-tertiary">
+                  Mitigate by {slaTime(assessment.result.mitigateBy)} · remediate by{' '}
+                  {slaTime(assessment.result.remediateBy)}
+                </div>
+                <p className="text-xs text-secondary">{assessment.result.reason || 'No reason was recorded.'}</p>
+              </li>
+            ))}
+          </ol>
+        ) : null}
+      </section>
+    </div>
+  )
+}
+
 function TransitionPanel({
   item,
   findingTitle,
@@ -402,6 +494,7 @@ function TransitionPanel({
           Save transition
         </Button>
       </div>
+      <SLAHistory engagementId={item.assessment.engagementId} findingId={item.assessment.findingId} />
     </Card>
   )
 }

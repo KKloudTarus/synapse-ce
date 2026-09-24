@@ -2,10 +2,62 @@ import { ArrowRight, Check, ChevronDown, ChevronUp, Copy01, File02, XClose } fro
 import { copyText } from '../../../lib/clipboard'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Button, cn } from '../../../components/ui'
+import { Button, ErrorState, Spinner, cn } from '../../../components/ui'
+import { useFetch } from '../../../hooks'
 import { api, ApiError } from '../../../lib/api'
-import { canTransitionIssue, ISSUE_STATUSES, issueStatusLabel, type IssueStatus, type ProjectIssue } from '../../../lib/types'
+import { canTransitionIssue, ISSUE_STATUSES, issueStatusLabel, type IssueReviewEvent, type IssueStatus, type ProjectIssue } from '../../../lib/types'
 import { cleanIssueTitle, severityBadge, typeMeta } from './projectIssueHelpers'
+
+function reviewedAt(value: string): string {
+  if (!value) return 'Unknown time'
+  const at = new Date(value)
+  return Number.isNaN(at.getTime()) ? 'Unknown time' : at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+/**
+ * Prior review decisions for this issue. A status change carries a mandatory rationale, so the
+ * record of who changed what and why is the audit trail behind the current status. Without it the
+ * reviewer sees a status with no provenance and re-litigates decisions already made.
+ */
+function ReviewHistory({ projectKey, issueId, revision }: { projectKey: string; issueId: string; revision: number }) {
+  const { data, loading, error } = useFetch<IssueReviewEvent[]>(
+    () => api.getProjectIssueHistory(projectKey, issueId),
+    { deps: [projectKey, issueId, revision] },
+  )
+
+  return (
+    <div>
+      <div className="text-xs font-bold uppercase tracking-wider text-tertiary mb-1.5">Review history</div>
+      <div className="rounded-xl border border-secondary bg-primary p-3.5 shadow-2xs">
+        {loading ? <Spinner label="Loading review history…" /> : null}
+        {error ? <ErrorState message={error} /> : null}
+        {!loading && !error && (data ?? []).length === 0 ? (
+          <p className="text-xs text-tertiary">No review decisions recorded yet.</p>
+        ) : null}
+        {!loading && !error && (data ?? []).length > 0 ? (
+          <ol className="space-y-3">
+            {(data ?? []).map((event) => (
+              <li key={`${event.version}-${event.createdAt}`} className="space-y-1 border-l-2 border-secondary pl-3">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="font-semibold text-secondary">{issueStatusLabel(event.from)}</span>
+                  <ArrowRight className="size-3 text-tertiary" aria-hidden="true" />
+                  <span className="font-semibold text-primary">{issueStatusLabel(event.to)}</span>
+                  <span className="text-tertiary">by {event.actor || 'unknown actor'}</span>
+                </div>
+                <div className="text-[11px] text-tertiary">{reviewedAt(event.createdAt)}</div>
+                {event.rationale ? (
+                  <p className="whitespace-pre-wrap text-xs text-secondary">{event.rationale}</p>
+                ) : (
+                  <p className="text-xs text-tertiary">No rationale was recorded.</p>
+                )}
+              </li>
+            ))}
+          </ol>
+        ) : null}
+      </div>
+    </div>
+  )
+}
 
 export function IssueDetail({
   projectKey,
@@ -25,6 +77,8 @@ export function IssueDetail({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  // Bumped after a committed transition so the history reloads with the decision just recorded.
+  const [historyRevision, setHistoryRevision] = useState(0)
   const panelRef = useRef<HTMLDivElement>(null)
 
   const meta = typeMeta(issue.type)
@@ -70,6 +124,7 @@ export function IssueDetail({
     api.transitionProjectIssue(projectKey, issue.id, to, rationale.trim(), issue.version)
       .then(() => {
         setRationale('')
+        setHistoryRevision((r) => r + 1)
         onTransitioned()
       })
       .catch((e) => setErr(e instanceof ApiError ? e.message : 'Transition failed'))
@@ -175,6 +230,8 @@ export function IssueDetail({
           )}
         </div>
       </div>
+
+      <ReviewHistory projectKey={projectKey} issueId={issue.id} revision={historyRevision} />
 
       {/* Triage Decision Form */}
       <form onSubmit={submit} className="rounded-xl border border-secondary bg-primary p-4 shadow-xs space-y-3.5">
