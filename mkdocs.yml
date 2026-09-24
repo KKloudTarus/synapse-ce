@@ -78,7 +78,10 @@ nav:
       - Reachability benchmark: reachability-benchmark-runbook.md
       - Reachability soundness: reachability-soundness.md
       - SCA accuracy benchmark: sca-accuracy-benchmark.md
+      - Public SCA diagnostic inputs: sca-public-inputs.md
       - Trusted benchmark provisioning: trusted-benchmark-provisioning.md
+      - SAST post-triage benchmark: sast-post-triage-benchmark.md
+      - Benchmark acceptance and retirement: benchmark-acceptance.md
       - Code quality benchmark: code-quality-benchmark.md
       - Operations drill evidence: operations-drill-evidence.md
       - Detection RulePack lifecycle: rulepack.md
