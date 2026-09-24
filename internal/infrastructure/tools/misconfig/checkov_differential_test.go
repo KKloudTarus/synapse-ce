@@ -238,12 +238,22 @@ func runCheckov(t *testing.T, dir string) (map[string]map[string]bool, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "-d", dir, "--compact", "-o", "json", "--quiet")
-	out, _ := cmd.Output()
+	out, runErr := cmd.Output()
 	if ctx.Err() != nil {
 		t.Logf("checkov timed out (%v); skipping the differential", ctx.Err())
 		return nil, false
 	}
 	if len(out) == 0 {
+		if runErr != nil {
+			t.Logf("checkov command failed: %v", runErr)
+			if exitErr, ok := runErr.(*exec.ExitError); ok {
+				stderr := exitErr.Stderr
+				if len(stderr) > 2048 {
+					stderr = stderr[:2048]
+				}
+				t.Logf("checkov stderr prefix: %s", stderr)
+			}
+		}
 		t.Logf("checkov produced no output; skipping the differential")
 		return nil, false
 	}
