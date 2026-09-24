@@ -227,13 +227,15 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
+      {/* Wraps at narrow widths. As a single non-wrapping row the name input was squeezed to a few
+          characters on a phone, so the field could not be read while it was being typed into. */}
+      <div className="flex flex-wrap items-center gap-2">
         <Input
           value={name}
           onChange={(e) => { setName(e.target.value); setErr(null); setIssued(null); setCopied(false); setCopyError(null) }}
           placeholder="Name"
           aria-label="Name"
-          className="h-9 w-56 px-3 py-1.5 text-sm"
+          className="h-9 min-w-40 flex-1 px-3 py-1.5 text-sm sm:w-56 sm:flex-none"
         />
         <Select
           value={role}

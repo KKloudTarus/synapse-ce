@@ -12,7 +12,10 @@ import { req } from './client'
 const id = encodeURIComponent
 
 function mapDescriptor(value: any): IntegrationProviderDescriptor {
-  const fields = (items: any[] = []) => items.map((field) => ({
+  // A default parameter only fills in for `undefined`. Go marshals an empty slice as `null`, so
+  // `config_fields: null` reached `.map` and the whole Integrations screen rendered
+  // "Cannot read properties of null (reading 'map')" instead of the provider list.
+  const fields = (items: unknown) => (Array.isArray(items) ? items : []).map((field: any) => ({
     name: field.name ?? '',
     label: field.label ?? '',
     kind: field.kind ?? 'text',

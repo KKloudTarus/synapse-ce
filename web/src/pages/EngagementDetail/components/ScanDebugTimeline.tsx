@@ -288,8 +288,9 @@ export function ScanDebugTimeline({
             delay={0}
             arrow
           >
-            <TooltipTrigger className="inline-flex cursor-help items-center text-tertiary hover:text-primary">
-              <HelpCircle className="size-3.5" />
+            {/* Icon-only, so it needs its own name: a screen reader otherwise announces "button". */}
+            <TooltipTrigger aria-label="About the pipeline journey" className="inline-flex cursor-help items-center text-tertiary hover:text-primary">
+              <HelpCircle className="size-3.5" aria-hidden="true" />
             </TooltipTrigger>
           </Tooltip>
         </span>

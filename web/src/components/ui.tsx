@@ -176,7 +176,10 @@ export function Field({
 }) {
   return (
     <label htmlFor={htmlFor} className="block space-y-1.5">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">{label}</span>
+      {/* Block, so the label always sits above its control. As an inline span it shared a line with
+          any inline-level control (the Select trigger is inline-flex), which put the label hard
+          against the box while every Input field stacked normally. */}
+      <span className="block text-[11px] font-semibold uppercase tracking-wider text-tertiary">{label}</span>
       {children}
       {hint && <span className="block text-xs text-quaternary">{hint}</span>}
     </label>

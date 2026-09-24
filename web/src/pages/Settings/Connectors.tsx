@@ -119,6 +119,7 @@ function AddConnector({ onCreated }: { onCreated: () => void }) {
             value={provider}
             onValueChange={(v) => setProvider(v as ConnectorProvider)}
             ariaLabel="Connector provider"
+            className="w-full"
             options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
           />
         </Field>
