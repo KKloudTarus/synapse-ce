@@ -100,6 +100,26 @@ describe('Assets', () => {
     expect(api.businessAssetCounts).toHaveBeenCalledTimes(1)
   })
 
+  // The two leading figures are scoped differently: the total follows the filter and the critical
+  // count covers the estate. Unlabelled and side by side they read as one scope, so a search
+  // narrowing the list to two rows showed "Total assets 2" next to "Critical 37".
+  it('names the scope of each figure once a filter narrows the list', async () => {
+    vi.mocked(api.listBusinessAssets)
+      .mockResolvedValueOnce({ items: [asset], total: 120, limit: 24, offset: 0 })
+      .mockResolvedValue({ items: [asset], total: 2, limit: 24, offset: 0 })
+    render(<MemoryRouter><Assets /></MemoryRouter>)
+
+    await screen.findByText('37')
+    expect(screen.getByText('Total assets')).toBeInTheDocument()
+    expect(screen.getByText('Critical')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Search assets'), { target: { value: 'mobile' } })
+
+    expect(await screen.findByText('Matching this filter')).toBeInTheDocument()
+    expect(screen.getByText('Critical in all assets')).toBeInTheDocument()
+    expect(screen.queryByText('Total assets')).not.toBeInTheDocument()
+  })
+
   // A count that failed to load used to render as 0, which on a security inventory is a false
   // all-clear and is the exact bug class this screen was changed to remove.
   it('says the critical count is unavailable when its request fails', async () => {
