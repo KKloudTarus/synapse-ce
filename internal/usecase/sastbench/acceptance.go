@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 )
 
 // PostTriageAcceptance fixes the historical comparison contract for one corpus. ExpectedCounts must be derived
@@ -43,6 +44,9 @@ func AcceptPostTriage(contract PostTriageAcceptance, candidate, baseline Report)
 }
 
 func validateAcceptanceReport(name string, contract PostTriageAcceptance, report Report, engine string) error {
+	if strings.Contains(report.Engine, "[diagnostic-unaccepted]") {
+		return fmt.Errorf("%s report is diagnostic and cannot establish acceptance", name)
+	}
 	if report.Schema != ReportSchemaVersion || report.Stage != "post-triage" || report.Corpus != contract.Corpus || report.CorpusDigest != contract.CorpusDigest || report.Engine != engine || report.LineWindow != contract.LineWindow {
 		return fmt.Errorf("%s report does not match the post-triage acceptance contract", name)
 	}

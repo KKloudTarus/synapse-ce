@@ -32,9 +32,11 @@ The recorded Securibench pre-tuning diagnostic control and its provenance are in
 Its verifier confirmed every proposal, and the model invocation is not reproducibly pinned; treat those
 files as a comparison aid, not as release acceptance evidence.
 
-For acceptance, omit the diagnostic output setting and supply `SYNAPSE_POST_TRIAGE_BASELINE` and
-`SYNAPSE_POST_TRIAGE_BASELINE_ENGINE`. The baseline must be a separately measured and committed pre-change
-post-triage result with its source revision, corpus, verifier policy, response, and report digest recorded.
+For acceptance, omit the diagnostic output setting and supply `SYNAPSE_POST_TRIAGE_BASELINE`,
+`SYNAPSE_POST_TRIAGE_BASELINE_ENGINE`, and `SYNAPSE_POST_TRIAGE_BASELINE_SHA256`. The loader checks the
+baseline file against that exact digest and rejects diagnostic reports. The baseline must be a separately
+measured and committed pre-change post-triage result with its source revision, corpus, verifier policy,
+response, and report digest recorded.
 The acceptance check requires per-CWE recall and precision not to regress, at least one precision gain, the
 absolute floors, and no newly lost true cases. Pin the baseline digest and provenance in the workflow before
 using the result as a release gate. Until the independent response, baseline, and required workflow gate are

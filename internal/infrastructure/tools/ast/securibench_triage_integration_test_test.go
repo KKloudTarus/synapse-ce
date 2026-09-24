@@ -72,3 +72,16 @@ func TestValidatePacketSaltRequiresCryptographicKeyMaterial(t *testing.T) {
 		t.Fatalf("valid 32-byte hex salt rejected: %v", err)
 	}
 }
+
+func TestVerifyPostTriageBaselineDigest(t *testing.T) {
+	data := []byte(`{"schema":"synapse-sast-report-v1"}`)
+	digest := sha256.Sum256(data)
+	if err := verifyPostTriageBaselineDigest(data, hex.EncodeToString(digest[:])); err != nil {
+		t.Fatalf("valid baseline pin rejected: %v", err)
+	}
+	for _, want := range []string{"", "wrong", strings.Repeat("z", 64), strings.Repeat("0", 64)} {
+		if err := verifyPostTriageBaselineDigest(data, want); err == nil {
+			t.Fatalf("invalid baseline pin %q accepted", want)
+		}
+	}
+}

@@ -114,16 +114,19 @@ func verifySecuribenchPostTriage(t *testing.T, verdictPath, srcRoot, corpusDiges
 	responsePath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_RESPONSE"))
 	baselinePath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_BASELINE"))
 	baselineEngine := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_BASELINE_ENGINE"))
-	if responsePath == "" || baselinePath == "" || baselineEngine == "" {
-		t.Fatal("SYNAPSE_POST_TRIAGE_VERDICTS requires SYNAPSE_POST_TRIAGE_RESPONSE, SYNAPSE_POST_TRIAGE_BASELINE, and externally configured SYNAPSE_POST_TRIAGE_BASELINE_ENGINE")
+	baselineDigest := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_BASELINE_SHA256"))
+	if responsePath == "" || baselinePath == "" || baselineEngine == "" || baselineDigest == "" {
+		t.Fatal("SYNAPSE_POST_TRIAGE_VERDICTS requires SYNAPSE_POST_TRIAGE_RESPONSE, SYNAPSE_POST_TRIAGE_BASELINE, SYNAPSE_POST_TRIAGE_BASELINE_ENGINE, and SYNAPSE_POST_TRIAGE_BASELINE_SHA256")
 	}
 	candidate := postTriageSecuribenchReport(t, verdictPath, srcRoot, corpusDigest, detected, cases)
-	baselineFile, err := os.Open(baselinePath)
+	baselineBytes, err := os.ReadFile(baselinePath)
 	if err != nil {
-		t.Fatalf("open post-triage baseline: %v", err)
+		t.Fatalf("read post-triage baseline: %v", err)
 	}
-	defer func() { _ = baselineFile.Close() }()
-	baseline, err := sastbench.LoadReport(baselineFile)
+	if err := verifyPostTriageBaselineDigest(baselineBytes, baselineDigest); err != nil {
+		t.Fatalf("post-triage baseline pin: %v", err)
+	}
+	baseline, err := sastbench.LoadReport(strings.NewReader(string(baselineBytes)))
 	if err != nil {
 		t.Fatalf("load post-triage baseline: %v", err)
 	}
@@ -143,6 +146,20 @@ func verifySecuribenchPostTriage(t *testing.T, verdictPath, srcRoot, corpusDiges
 	for _, line := range detail {
 		t.Log(line)
 	}
+}
+
+func verifyPostTriageBaselineDigest(data []byte, want string) error {
+	if len(want) != sha256.Size*2 {
+		return fmt.Errorf("expected SHA-256 digest must be 64 hexadecimal characters")
+	}
+	if _, err := hex.DecodeString(want); err != nil {
+		return fmt.Errorf("expected SHA-256 digest is not hexadecimal: %w", err)
+	}
+	actual := sha256.Sum256(data)
+	if !strings.EqualFold(hex.EncodeToString(actual[:]), want) {
+		return fmt.Errorf("baseline SHA-256 digest mismatch")
+	}
+	return nil
 }
 
 func findSecuribenchSource(root, name string) (string, error) {

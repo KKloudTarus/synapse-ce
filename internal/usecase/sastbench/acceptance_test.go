@@ -21,6 +21,12 @@ func TestAcceptPostTriageRequiresCompleteHistoricalImprovement(t *testing.T) {
 	if _, err := AcceptPostTriage(contract, candidate, baseline); err == nil {
 		t.Fatal("invalid count must fail acceptance")
 	}
+	candidate = acceptanceReport("owned + verifier", 2, 0, 1, 1)
+	baseline.Engine = "old-owned + verifier [diagnostic-unaccepted]"
+	contract.BaselineEngine = baseline.Engine
+	if _, err := AcceptPostTriage(contract, candidate, baseline); err == nil {
+		t.Fatal("diagnostic control must not be promoted to acceptance baseline")
+	}
 }
 
 func acceptanceReport(engine string, tp, fp, fn, tn int) Report {
