@@ -1,3 +1,4 @@
 internal/usecase/reachbench/contract/fixtures/** text eol=lf
 internal/usecase/reachbench/trusted/** text eol=lf
 internal/usecase/scabench/corpus/** text eol=lf
+internal/infrastructure/reachbench/testdata/go_binary_versioned/** text eol=lf

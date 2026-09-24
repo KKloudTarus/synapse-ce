@@ -1,0 +1,56 @@
+{
+  "schema_version": "synapse-go-binary-capture-proposal-v1",
+  "status": "diagnostic_only",
+  "inventory_delta": {
+    "cohort_id": "go",
+    "mode_id": "binary",
+    "binding_id": "worker",
+    "current_state": "not_wired",
+    "proposed_state": "enabled"
+  },
+  "fixture": {
+    "module": "example.invalid/reachbench-binary",
+    "go_version": "1.27.0",
+    "dependency": "pkg:golang/golang.org/x/net@v0.59.0",
+    "symbol": "golang.org/x/net/idna.ToASCII",
+    "files_sha256": {
+      "direct.go.txt": "073fe1a1009d24a145fbe850dcc2f92f8f0acb1af878dfa5cc65adf638ee4a60",
+      "go.mod": "154c9cbdb62703690f1d9a569f7974a702ad127fbd463fec3c9ee65934b5ad3b",
+      "go.sum": "51107503300d3d4e08ec05ca38b212a804a8110d929c5cf545e28cb46d9171b5",
+      "retained.go.txt": "98a975af572390f7b3a6bc19f9cd8c385d12a5c6f573655ee9574935a6d92e8f",
+      "retained_called.go.txt": "48ed7dd59078b29c43a09f1df285fe2bd6bbff00e86c3fa03ec2c641bc85808d"
+    }
+  },
+  "diagnostic_observations": [
+    {
+      "id": "direct-call",
+      "source": "direct.go.txt",
+      "query_identity": "pkg:golang/golang.org/x/net@v0.59.0",
+      "reachable_claim": true
+    },
+    {
+      "id": "retained-but-uncalled",
+      "source": "retained.go.txt",
+      "query_identity": "pkg:golang/golang.org/x/net@v0.59.0",
+      "reachable_claim": false
+    },
+    {
+      "id": "retained-and-called",
+      "source": "retained_called.go.txt",
+      "query_identity": "pkg:golang/golang.org/x/net@v0.59.0",
+      "reachable_claim": true
+    },
+    {
+      "id": "unversioned-identity",
+      "source": "direct.go.txt",
+      "query_identity": "pkg:golang/golang.org/x/net",
+      "reachable_claim": false
+    },
+    {
+      "id": "wrong-version",
+      "source": "direct.go.txt",
+      "query_identity": "pkg:golang/golang.org/x/net@v0.58.0",
+      "reachable_claim": false
+    }
+  ]
+}
