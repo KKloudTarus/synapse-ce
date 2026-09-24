@@ -35,6 +35,29 @@ UI_AUDIT_TOKEN=<api token> pnpm ui:audit               # in another
 overflow at phone width, a missing page heading, a button with no accessible name, and any
 failed API call. Pass `UI_ROUTES` to sweep detail screens and sub-tabs.
 
+## What the sweep measured
+
+`pnpm ui:audit` also records every `/api/v1` request the app makes while it drives the screens, so
+API coverage can be read from what the product actually calls rather than from a static scan of the
+client. Loading all 75 screens exercised **96 of the 371 registered routes**.
+
+The other 275 are not unreachable; they need something a page load does not do:
+
+- **176 are mutations** (`POST`, `PUT`, `PATCH`, `DELETE`). A read-only sweep never presses a button.
+- **99 are GETs that open on a selection**: `/agent/sessions/{sid}`, `/recon/runs/{rid}`,
+  `/evidence/{sha}`, `/findings/{fid}/comments`, the report and export downloads. You reach them by
+  clicking a row, not by loading a screen.
+
+So this number bounds coverage from below, and does not answer "is anything unreachable" on its own.
+That question was answered separately by auditing every method in `web/src/lib/api` against its
+consumers: 328 methods, of which 10 have no caller. None is an unmapped capability. Two are
+superseded (`reopenAssessmentCycle` lost to the preview-and-commit flow, `listNotificationDeliveries`
+to its paged replacement) and eight are single-record GETs whose list already carries the row.
+
+Where that audit found a real gap, the gap was closed rather than recorded: user administration,
+the assessment-cycle archive, snapshot finalize, issue review history, and the SLA decision record
+all reached the API and no screen before this pass.
+
 ## Start
 
 ### Security Operations

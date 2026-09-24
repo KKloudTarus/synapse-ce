@@ -68,6 +68,10 @@ mkdirSync(OUT, { recursive: true })
 
 const browser = await chromium.launch()
 const findings = []
+// Every /api/v1 request the app makes while the sweep drives it. This is what the product really
+// calls, so it needs no static extraction: a path built from a helper or behind a generic call
+// signature is recorded the same as a literal one.
+const apiCalls = new Set()
 
 for (const viewport of VIEWPORTS) {
   const context = await browser.newContext({
@@ -87,6 +91,10 @@ for (const viewport of VIEWPORTS) {
       if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200))
     })
     page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${String(e).slice(0, 200)}`))
+    page.on('request', (r) => {
+      const u = new URL(r.url(), BASE)
+      if (u.pathname.startsWith('/api/v1')) apiCalls.add(`${r.method()} ${u.pathname}`)
+    })
     page.on('requestfailed', (r) => {
       const url = r.url()
       // An aborted request is the AbortController doing its job when a screen unmounts or a fetch
@@ -168,10 +176,12 @@ for (const viewport of VIEWPORTS) {
 
 await browser.close()
 writeFileSync(`${OUT}/findings.json`, JSON.stringify(findings, null, 2))
+writeFileSync(`${OUT}/api-calls.json`, JSON.stringify([...apiCalls].sort(), null, 2))
 
 const problems = findings.filter(
   (f) => f.loadError || f.renderedError?.length || f.consoleErrors.length || f.failedRequests.length || f.scrollsSideways || !f.headings.length || f.buttonsWithoutName > 0,
 )
+console.log(`distinct API routes exercised: ${apiCalls.size} (written to ${OUT}/api-calls.json)`)
 console.log(`screens visited: ${findings.length} (${ROUTES.length} routes x ${VIEWPORTS.length} viewports)`)
 console.log(`screens with something to look at: ${problems.length}\n`)
 for (const p of problems) {
