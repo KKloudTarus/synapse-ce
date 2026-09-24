@@ -95,8 +95,20 @@ for (const viewport of VIEWPORTS) {
     const page = await context.newPage()
     const consoleErrors = []
     const failedRequests = []
+    // Chromium probes /favicon.ico on every navigation whatever the page declares, so its 404 is
+    // browser behaviour and not something on the screen. Left in, it flagged all 150 screens and
+    // buried the findings that matter.
+    // The client probes the cookie-session endpoint before falling back to the bearer token, and
+    // that route is only registered when OIDC is configured, so it answers 404 on every page load
+    // of a deployment without it. The response handler below already exempts it for that reason;
+    // the console said it anyway, which flagged all 150 screens and buried the real findings.
+    // The URL is in location(), not the text: a failed subresource reads only as
+    // "Failed to load resource: ... 404 (Not Found)".
+    const expected404 = /\/api\/auth\/session$/
     page.on('console', (m) => {
-      if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200))
+      if (m.type() !== 'error') return
+      if (expected404.test(m.location()?.url ?? '')) return
+      consoleErrors.push(m.text().slice(0, 200))
     })
     page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${String(e).slice(0, 200)}`))
     page.on('request', (r) => {
@@ -151,7 +163,6 @@ for (const viewport of VIEWPORTS) {
       // A screen that catches its own exception and renders it as text passes every other check
       // here: no console error, no failed request. That is how an Integrations screen showing
       // "Cannot read properties of null (reading 'map')" was captured and reported as clean.
-      const main = document.querySelector('main') ?? document.body
       const shown = (main.innerText ?? '').replace(/\s+/g, ' ')
       const renderedError = [
         /Cannot read propert(y|ies)/i, /undefined is not/i, /is not a function/i,
