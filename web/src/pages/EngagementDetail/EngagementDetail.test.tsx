@@ -216,6 +216,31 @@ describe('EngagementDetail Page Shell', () => {
     expect(screen.queryByRole('button', { name: 'Comparison' })).not.toBeInTheDocument()
   })
 
+  // Every tab except Overview and Findings is a lazy chunk behind one Suspense boundary. Switching
+  // to a static tab would still pass if a lazy chunk never resolved, so this asserts a lazy tab
+  // actually mounts and renders its own content.
+  it('mounts a lazily loaded tab through the Suspense boundary', async () => {
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456']}>
+        <Routes>
+          <Route path="/engagements/:id" element={<EngagementDetail />} />
+          <Route path="/engagements/:id/:tabSlug" element={<EngagementDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('tablist', { name: 'Engagement Views' })
+    fireEvent.click(screen.getByRole('tab', { name: /Supply Chain/i }))
+
+    // ComponentsTab lives in its own chunk; its own empty state proves the chunk resolved and
+    // mounted, rather than the Suspense fallback staying on screen.
+    expect(await screen.findByText('Run a scan to populate the component inventory')).toBeInTheDocument()
+    expect(screen.queryByText('Loading tab…')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'tab-supply-chain')
+    })
+  })
+
   it('moves between tabs with the arrow keys and keeps one tab stop', async () => {
     render(
       <MemoryRouter initialEntries={['/engagements/eng-123456']}>
