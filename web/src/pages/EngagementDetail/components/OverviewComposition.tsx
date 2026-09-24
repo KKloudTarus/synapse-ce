@@ -3,7 +3,7 @@ import { type ComponentType } from 'react'
 import { Card, cn } from '../../../components/ui'
 import type { ScanResult } from '../../../lib/types'
 import { countEdges } from '../VulnsTab'
-import type { Tab } from '../index'
+import type { Tab } from '../tabs'
 
 const LANG_COLORS = [
   'bg-utility-blue-600',

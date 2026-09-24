@@ -1,7 +1,7 @@
 import { LayoutGrid01 } from '@untitledui/icons'
 import { EmptyState, ErrorState } from '../../components/ui'
 import type { Finding, ScanJob, ScanResult, Severity } from '../../lib/types'
-import type { Tab } from './index'
+import type { Tab } from './tabs'
 import { CompositionProvenanceCard } from './components/OverviewComposition'
 import { ScanHealth } from './components/OverviewHealth'
 import { RiskAnalysisZone } from './components/OverviewRisk'
