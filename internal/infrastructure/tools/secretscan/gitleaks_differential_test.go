@@ -149,7 +149,7 @@ const (
 
 // TestSecretsOwnedAccuracyAndGitleaksDifferential scores the owned secret scanner on a labeled corpus and,
 // when gitleaks is available, records the owned-vs-gitleaks head-to-head. The owned recall/precision floors
-// gate; gitleaks is comparison data only (a competitor result never fails the build).
+// gate; the Gitleaks accuracy score is comparison data, while the hosted workflow requires a real scan.
 func TestSecretsOwnedAccuracyAndGitleaksDifferential(t *testing.T) {
 	dir := t.TempDir()
 	byFile := materializeSecretsCorpus(t, dir)
@@ -207,18 +207,57 @@ func runGitleaks(t *testing.T, dir string, byFile map[string]secretsBenchCase) (
 		t.Logf("gitleaks produced no report (%v); skipping the differential", err)
 		return nil, false
 	}
+	flagged, err := parseGitleaksReport(data, byFile)
+	if err != nil {
+		t.Logf("gitleaks report incomplete (%v); skipping the differential", err)
+		return nil, false
+	}
+	return flagged, true
+}
+
+// parseGitleaksReport requires at least one planted case from this pinned corpus. An empty finding-only
+// report cannot prove that Gitleaks actually scanned the generated fixture files.
+func parseGitleaksReport(data []byte, byFile map[string]secretsBenchCase) (map[string]bool, error) {
 	var results []struct {
 		File      string `json:"File"`
 		StartLine int    `json:"StartLine"`
 		RuleID    string `json:"RuleID"`
 	}
 	if err := json.Unmarshal(data, &results); err != nil {
-		t.Logf("gitleaks report not in the expected JSON shape (%v); skipping the differential", err)
-		return nil, false
+		return nil, fmt.Errorf("decode Gitleaks JSON: %w", err)
+	}
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no Gitleaks findings from the pinned corpus")
 	}
 	flagged := map[string]bool{}
+	plantedFound := false
 	for _, r := range results {
-		flagged[filepath.Base(r.File)] = true
+		if r.File == "" || r.StartLine < 1 || r.RuleID == "" {
+			return nil, fmt.Errorf("Gitleaks finding lacks file, line, or rule identity")
+		}
+		name := filepath.Base(r.File)
+		c, ok := byFile[name]
+		if !ok {
+			return nil, fmt.Errorf("Gitleaks finding references unknown file %s", name)
+		}
+		flagged[name] = true
+		plantedFound = plantedFound || c.real
 	}
-	return flagged, true
+	if !plantedFound {
+		return nil, fmt.Errorf("no planted secret was observed")
+	}
+	return flagged, nil
+}
+
+func TestGitleaksReportRequiresObservedCorpus(t *testing.T) {
+	corpus := map[string]secretsBenchCase{"aws.txt": {name: "aws", real: true}}
+	for _, report := range []string{"[]", "null", `[{}]`} {
+		if _, err := parseGitleaksReport([]byte(report), corpus); err == nil {
+			t.Fatalf("accepted vacuous Gitleaks report %s", report)
+		}
+	}
+	flagged, err := parseGitleaksReport([]byte(`[{"File":"/tmp/aws.txt","StartLine":1,"RuleID":"aws-access-token"}]`), corpus)
+	if err != nil || !flagged["aws.txt"] {
+		t.Fatalf("rejected observed Gitleaks report: flagged=%v err=%v", flagged, err)
+	}
 }
