@@ -167,6 +167,9 @@ func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 	if securibench.Env["SEMGREP_VERSION"] != "1.177.0" || securibench.Env["SEMGREP_RULES_REF"] != "a84ff9cc2453ca91d581380de4b8b3f272f6f4be" {
 		t.Fatal("Securibench Semgrep lane must pin its tool and local rules revisions")
 	}
+	if _, atJobScope := securibench.Env["SEMGREP_REPORT_DIR"]; atJobScope {
+		t.Fatal("runner.temp is unavailable in a job-level environment")
+	}
 	rulesCheckout := requireStep(t, securibench, func(step benchmarkStep) bool {
 		return step.Name == "Checkout Semgrep Java rules (pinned)"
 	})
@@ -184,6 +187,9 @@ func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 	semgrep := requireStep(t, securibench, func(step benchmarkStep) bool {
 		return step.Name == "Run pinned Semgrep CE comparison"
 	})
+	if semgrep.Env["SEMGREP_REPORT_DIR"] != "${{ runner.temp }}/securibench-semgrep" {
+		t.Fatal("Securibench Semgrep output must use a step-level runner temp path")
+	}
 	for _, want := range []string{
 		`--network none`, `--read-only`, `--config /rules/java`, `/src/securibench/src`, `--sarif`,
 		`test "$version" = "$SEMGREP_VERSION"`, `if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then`,
@@ -199,13 +205,13 @@ func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 	runScorecard := requireStep(t, securibench, func(step benchmarkStep) bool {
 		return step.Name == "Run Securibench scorecard + per-CWE ratchet"
 	})
-	if runScorecard.Env["SYNAPSE_SEMGREP_SARIF"] != "${{ env.SEMGREP_REPORT_DIR }}/semgrep.sarif" {
+	if runScorecard.Env["SYNAPSE_SEMGREP_SARIF"] != "${{ runner.temp }}/securibench-semgrep/semgrep.sarif" {
 		t.Fatal("Securibench scorecard must parse the required Semgrep SARIF report")
 	}
 	upload := requireStep(t, securibench, func(step benchmarkStep) bool {
 		return step.Uses == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
 	})
-	if !strings.Contains(upload.With["path"], "${{ env.SEMGREP_REPORT_DIR }}") {
+	if !strings.Contains(upload.With["path"], "${{ runner.temp }}/securibench-semgrep") {
 		t.Fatal("Securibench artifact must retain the Semgrep SARIF and metadata")
 	}
 	adversarial := requireJob(t, workflow, "adversarial-regressions")

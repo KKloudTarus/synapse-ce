@@ -124,7 +124,6 @@ jobs:
       SEMGREP_IMAGE: semgrep/semgrep@sha256:d1825c2c72110b5bfbf0602ff68f7f117322597a7c33037a79dba9f897f5f1f0
       SEMGREP_VERSION: "1.177.0"
       SEMGREP_RULES_REF: a84ff9cc2453ca91d581380de4b8b3f272f6f4be
-      SEMGREP_REPORT_DIR: ${{ runner.temp }}/securibench-semgrep
     steps:
       - name: Checkout synapse
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -168,6 +167,8 @@ jobs:
         # This lane intentionally scans local rules from the pinned semgrep-rules checkout. It never resolves
         # the mutable p/java registry configuration, and network isolation prevents rule or telemetry fetches.
         shell: bash
+        env:
+          SEMGREP_REPORT_DIR: ${{ runner.temp }}/securibench-semgrep
         run: |
           set -euo pipefail
           mkdir -p "$SEMGREP_REPORT_DIR"
@@ -218,7 +219,7 @@ jobs:
         env:
           SYNAPSE_SECURIBENCH_DIR: ${{ github.workspace }}/securibench
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
-          SYNAPSE_SEMGREP_SARIF: ${{ env.SEMGREP_REPORT_DIR }}/semgrep.sarif
+          SYNAPSE_SEMGREP_SARIF: ${{ runner.temp }}/securibench-semgrep/semgrep.sarif
         run: |
           set -o pipefail
           CGO_ENABLED=1 go test -count=1 -v -run TestSecuribenchScorecard \
@@ -231,7 +232,7 @@ jobs:
           name: securibench-scorecard-${{ needs.route.outputs.source_sha }}
           path: |
             ${{ runner.temp }}/securibench-scorecard.log
-            ${{ env.SEMGREP_REPORT_DIR }}
+            ${{ runner.temp }}/securibench-semgrep
           if-no-files-found: error
           retention-days: 90
 
