@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "ui:audit": "node scripts/ui-audit.mjs",
+    "ui:probe": "node scripts/ui-probe.mjs"
   },
   "dependencies": {
     "@internationalized/date": "^3.12.4",
@@ -43,6 +45,7 @@
     "@babel/core": "^8.0.6",
     "@babel/eslint-parser": "^8.0.6",
     "@babel/preset-typescript": "^8.0.1",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

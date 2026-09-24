@@ -53,6 +53,7 @@ nav:
       - Installation: installation.md
       - Quickstart: quickstart.md
       - Features: features.md
+      - Screen walkthrough: ui-walkthrough.md
   - Assessment workflows:
       - Project code quality: project-code-quality.md
       - Governed assessments: governed-assessment-workflows.md
