@@ -1,7 +1,7 @@
 import { CheckCircle, File06, Plus, SearchLg, XClose } from '@untitledui/icons'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Button, Card, EmptyState, Select, Spinner, cn } from '../../components/ui'
+import { Button, Card, EmptyState, ErrorState, Select, Spinner, cn } from '../../components/ui'
 import { findingKindLabel } from '../../lib/format'
 import type { Finding, ScanResult, Severity, Vulnerability } from '../../lib/types'
 import { vulnKey, shortPkg } from './VulnsTab'
@@ -63,6 +63,7 @@ export function findingSearchIndex(finding: Finding, vuln: Vulnerability | undef
 
 export function FindingsTab({
   findings,
+  findingsError,
   scan,
   engagementId,
   filter,
@@ -74,6 +75,8 @@ export function FindingsTab({
   readOnlyReason,
 }: {
   findings: Finding[] | null
+  /** Set when the findings request failed. An empty list would read as "no findings exist". */
+  findingsError?: string | null
   scan: ScanResult | null
   engagementId: string
   filter: Severity | 'all'
@@ -193,6 +196,7 @@ export function FindingsTab({
     return map
   }, [scan])
 
+  if (findingsError) return <ErrorState message={findingsError} />
   if (findings === null) return <Spinner label="Loading findings..." />
 
   function toggle(id: string) {

@@ -1,5 +1,5 @@
 import { LayoutGrid01 } from '@untitledui/icons'
-import { EmptyState } from '../../components/ui'
+import { EmptyState, ErrorState } from '../../components/ui'
 import type { Finding, ScanJob, ScanResult, Severity } from '../../lib/types'
 import type { Tab } from './index'
 import { CompositionProvenanceCard } from './components/OverviewComposition'
@@ -23,17 +23,24 @@ export { CompositionProvenanceCard, CompTile, CardEmpty } from './components/Ove
 
 export function OverviewTab({
   findings,
+  findingsError,
+  scanError,
   scan,
   job,
   onSelectSeverity,
   onGoTab,
 }: {
   findings: Finding[] | null
+  /** Set when the findings request failed, so the risk zone does not read as "no findings". */
+  findingsError?: string | null
+  /** Set when the latest-scan request failed, which is not the same as no scan having been run. */
+  scanError?: string | null
   scan: ScanResult | null
   job: ScanJob | null
   onSelectSeverity: (s: Severity | 'all') => void
   onGoTab: (t: Tab) => void
 }) {
+  if (scanError) return <ErrorState message={scanError} />
   if (!scan) {
     return (
       <EmptyState
@@ -50,6 +57,7 @@ export function OverviewTab({
       <ScanHealth scan={scan} job={job} />
 
       {/* Zone 2: Risk Analysis & Remediation Priorities */}
+      {findingsError ? <ErrorState message={findingsError} /> : null}
       <RiskAnalysisZone
         findings={open}
         scan={scan}

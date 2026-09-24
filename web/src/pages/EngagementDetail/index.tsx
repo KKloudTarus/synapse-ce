@@ -311,16 +311,25 @@ export function EngagementDetail() {
   const eng = engPatch !== undefined ? engPatch : engData
   const setEng = setEngPatch
 
-  const { data: fetchedFindings, refetch: refetchFindings } = useFetch<Finding[]>(
-    () => api.findings(id).catch(() => [] as Finding[]),
+  // Findings are the engagement's core record, so a failure here is surfaced. Catching it into an
+  // empty array rendered a findings-service outage as "this engagement has no findings", with a
+  // zero on the tab bar, which on a security engagement is the most consequential false all-clear
+  // the screen can produce.
+  const { data: fetchedFindings, error: findingsError, refetch: refetchFindings } = useFetch<Finding[]>(
+    () => api.findings(id),
     { deps: [id] },
   )
   useEffect(() => {
     if (fetchedFindings !== null) setFindings(fetchedFindings)
   }, [fetchedFindings])
 
-  const { data: fetchedScan, refetch: refetchScan } = useFetch<ScanResult | null>(
-    () => api.latestScan(id).catch(() => null),
+  // An engagement with no scan yet answers 404, which is the "run a scan" state and stays silent.
+  // Any other failure is an outage and must not read as "no scan has been run".
+  const { data: fetchedScan, error: scanError, refetch: refetchScan } = useFetch<ScanResult | null>(
+    () => api.latestScan(id).catch((error) => {
+      if (error instanceof ApiError && error.status === 404) return null
+      throw error
+    }),
     { deps: [id] },
   )
   useEffect(() => {
@@ -330,7 +339,12 @@ export function EngagementDetail() {
   }, [fetchedScan])
 
   const { data: importedSBOM, refetch: refetchSBOM } = useFetch<ImportedSBOMMetadata | null>(
-    () => api.importedSBOM(id).catch(() => null),
+    () => api.importedSBOM(id).catch((error) => {
+      // No imported SBOM is the ordinary case and answers 404. Anything else is an outage, and the
+      // import panel says so rather than showing the engagement as having no SBOM.
+      if (error instanceof ApiError && error.status === 404) return null
+      throw error
+    }),
     { deps: [id] },
   )
   const { data: uploadedSource, error: uploadedSourceError, refetch: refetchUploadedSource } = useFetch<UploadedSourcePackage | null>(
@@ -437,11 +451,14 @@ export function EngagementDetail() {
   }
 
   const archived = isReadOnly(eng)
-  const counts = {
-    findings: findings?.length ?? 0,
-    components: scan?.components.length ?? 0,
-    vulns: scan ? countVulnerabilityFindings(scan.vulnerabilities, packageLocationMap(scan.components)) : 0,
-    licenses: scan?.licenses.length ?? 0,
+  // `undefined` means "not known". The badge already hides a zero, so this changes nothing on
+  // screen today; it keeps the distinction in the data so a future badge that does render zero
+  // cannot start claiming a clean engagement while the request behind the number is failing.
+  const counts: Record<'findings' | 'components' | 'vulns' | 'licenses', number | undefined> = {
+    findings: findingsError ? undefined : findings?.length,
+    components: scanError ? undefined : scan?.components.length,
+    vulns: scanError ? undefined : scan ? countVulnerabilityFindings(scan.vulnerabilities, packageLocationMap(scan.components)) : undefined,
+    licenses: scanError ? undefined : scan?.licenses.length,
   }
   const viFindingCount = findings?.filter((finding) => Boolean(finding.advisoryId)).length ?? 0
 
@@ -513,7 +530,13 @@ export function EngagementDetail() {
             // Count for top-level badge if applicable
             let groupCount: number | undefined
             if (group.id === 'findings') groupCount = counts.findings
-            else if (group.id === 'supply-chain') groupCount = counts.components + counts.vulns + counts.licenses
+            else if (group.id === 'supply-chain') {
+              // Summing a partly-unknown set would present a smaller total as if it were complete.
+              const parts = [counts.components, counts.vulns, counts.licenses]
+              groupCount = parts.some((part) => part === undefined)
+                ? undefined
+                : parts.reduce((total, part) => total! + part!, 0)
+            }
 
             return (
               <button
@@ -588,11 +611,12 @@ export function EngagementDetail() {
       <div role="tabpanel" id="engagement-tabpanel" aria-labelledby={`tab-${activeGroup.id}`} className="mt-5">
         <Suspense fallback={<Spinner label="Loading tab…" />}>
         {tab === 'overview' && (
-          <OverviewTab findings={findings} scan={scan} job={job} onSelectSeverity={selectSeverity} onGoTab={setTab} />
+          <OverviewTab findings={findings} findingsError={findingsError} scanError={scanError} scan={scan} job={job} onSelectSeverity={selectSeverity} onGoTab={setTab} />
         )}
         {tab === 'findings' && (
           <FindingsTab
             findings={findings}
+            findingsError={findingsError}
             scan={scan}
             engagementId={id}
             filter={findingsFilter}

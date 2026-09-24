@@ -216,6 +216,40 @@ describe('EngagementDetail Page Shell', () => {
     expect(screen.queryByRole('button', { name: 'Comparison' })).not.toBeInTheDocument()
   })
 
+  // Findings are the engagement's core record. Catching the request into an empty array rendered a
+  // findings-service outage as "this engagement has no findings", with a zero on the tab bar.
+  it('surfaces a findings outage instead of an engagement with no findings', async () => {
+    vi.mocked(api.findings).mockRejectedValue(new Error('findings service unavailable'))
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456/findings']}>
+        <Routes>
+          <Route path="/engagements/:id" element={<EngagementDetail />} />
+          <Route path="/engagements/:id/:tabSlug" element={<EngagementDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('findings service unavailable')).toBeInTheDocument()
+    expect(screen.queryByText(/No findings/i)).not.toBeInTheDocument()
+  })
+
+  // 404 is the ordinary "no scan yet" state. Any other failure is an outage and must not be
+  // presented as an engagement that has simply never been scanned.
+  it('separates a scan outage from an engagement that has never been scanned', async () => {
+    vi.mocked(api.latestScan).mockRejectedValue(new Error('scan store unavailable'))
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456']}>
+        <Routes>
+          <Route path="/engagements/:id" element={<EngagementDetail />} />
+          <Route path="/engagements/:id/:tabSlug" element={<EngagementDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('scan store unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('No scan yet')).not.toBeInTheDocument()
+  })
+
   // Every tab except Overview and Findings is a lazy chunk behind one Suspense boundary. Switching
   // to a static tab would still pass if a lazy chunk never resolved, so this asserts a lazy tab
   // actually mounts and renders its own content.
