@@ -77,6 +77,21 @@ export function Assets() {
     { deps: [criticality, lifecycle, page, debouncedQuery, revision, type] },
   )
 
+  // The estate-wide count of critical assets. `total` is the filtered count before pagination, so a
+  // one-row query answers it exactly. Counting the visible page instead under-reported critical
+  // assets whenever the estate spanned more than one page, which on a security inventory reads as
+  // fewer critical assets than exist.
+  const { data: criticalPage } = useFetch<BusinessAssetPage>(
+    (signal) => {
+      const params = new URLSearchParams({ limit: '1', offset: '0', criticality: 'critical' })
+      if (debouncedQuery.trim()) params.set('q', debouncedQuery.trim())
+      if (type && type !== 'all') params.set('type', type)
+      if (lifecycle && lifecycle !== 'all') params.set('lifecycle', lifecycle)
+      return api.listBusinessAssets(params.toString(), signal)
+    },
+    { deps: [lifecycle, debouncedQuery, revision, type] },
+  )
+
   const hasFilters = Boolean(query.trim() || (type && type !== 'all') || (criticality && criticality !== 'all') || (lifecycle && lifecycle !== 'all'))
   const pageCount = result ? Math.max(1, Math.ceil(result.total / PAGE_SIZE)) : 1
   const visible = result?.items ?? []
@@ -108,9 +123,11 @@ export function Assets() {
 
       <MetricStrip ariaLabel="Asset inventory summary">
         <SummaryCard icon={LayersThree01} label="Total assets" value={result?.total ?? 0} tone="muted" />
-        <SummaryCard icon={AlertTriangle} label="Critical" value={visible.filter((asset) => asset.criticality === 'critical').length} tone="critical" />
-        <SummaryCard icon={Activity} label="Active" value={visible.filter((asset) => asset.lifecycle === 'active').length} tone="accent" />
-        <SummaryCard icon={ShieldTick} label="Needs attention" value={visible.filter((asset) => !['good', 'unknown'].includes(asset.posture ?? 'unknown')).length} tone="brand" />
+        <SummaryCard icon={AlertTriangle} label="Critical" value={criticalPage?.total ?? 0} tone="critical" />
+        {/* Lifecycle and posture have no aggregate count endpoint, so these stay page-scoped and say
+            so. An unlabelled page count next to an estate-wide total reads as an estate-wide figure. */}
+        <SummaryCard icon={Activity} label="Active on this page" value={visible.filter((asset) => asset.lifecycle === 'active').length} tone="accent" />
+        <SummaryCard icon={ShieldTick} label="Needs attention on this page" value={visible.filter((asset) => !['good', 'unknown'].includes(asset.posture ?? 'unknown')).length} tone="brand" />
       </MetricStrip>
 
       <Card className="overflow-hidden" bodyClass="p-0">

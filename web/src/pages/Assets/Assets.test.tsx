@@ -59,4 +59,20 @@ describe('Assets', () => {
     await waitFor(() => expect(api.createBusinessAsset).toHaveBeenCalled())
     expect(await screen.findByText('Asset detail route')).toBeInTheDocument()
   })
+
+  // Counting only the visible page under-reported critical assets across a multi-page estate, which
+  // on a security inventory reads as fewer critical assets than exist.
+  it('reports the estate-wide critical count, not the visible page', async () => {
+    vi.mocked(api.listBusinessAssets).mockImplementation(async (query = '') =>
+      query.includes('criticality=critical')
+        ? { items: [asset], total: 37, limit: 1, offset: 0 }
+        : { items: [asset], total: 120, limit: 24, offset: 0 },
+    )
+    render(<MemoryRouter><Assets /></MemoryRouter>)
+    expect(await screen.findByText('120')).toBeInTheDocument()
+    // 37 is the filtered estate total, not the single critical row on this page.
+    expect(await screen.findByText('37')).toBeInTheDocument()
+    // Page-scoped figures state their scope so they are not read as estate-wide.
+    expect(screen.getByText('Needs attention on this page')).toBeInTheDocument()
+  })
 })

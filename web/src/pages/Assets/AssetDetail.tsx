@@ -53,6 +53,28 @@ export function useAssetContext() {
   return useOutletContext<Context>()
 }
 
+/**
+ * Resolves a route param that may be either an asset id or a tenant-scoped business key into the
+ * asset id. Returns null only when no asset matches, so "not found" means absent rather than
+ * "absent from the first page". A non-404 failure is rethrown so a real outage stays visible.
+ */
+export async function resolveAssetId(keyOrId: string): Promise<string | null> {
+  if (!keyOrId) return null
+  try {
+    const direct = await api.getBusinessAsset(keyOrId)
+    if (direct?.id) return direct.id
+  } catch (nextError) {
+    if (!(nextError instanceof ApiError && nextError.status === 404)) throw nextError
+  }
+  const pageSize = 100
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await api.listBusinessAssets(`limit=${pageSize}&offset=${offset}`)
+    const match = page.items.find((a) => a.key === keyOrId || a.id === keyOrId)
+    if (match) return match.id
+    if (page.items.length < pageSize || offset + page.items.length >= page.total) return null
+  }
+}
+
 export function AssetDetail() {
   const { key = '' } = useParams()
   const [notFound, setNotFound] = useState(false)
@@ -60,17 +82,18 @@ export function AssetDetail() {
   const { data: fetchedData, error, refetch } = useFetch<Omit<Context, 'reload'>>(
     async () => {
       try {
-        // Asset URLs are key-based, but the detail API resolves assets by id. Map the
-        // route param (accepting an id too) to the asset id before fetching its
-        // sub-resources. (Proper fix: have the backend getBusinessAsset resolve
-        // key-or-id — the store already exposes GetBusinessAssetByKey.)
-        const list = await api.listBusinessAssets()
-        const match = list.items.find((a) => a.key === key || a.id === key)
-        if (!match) {
+        // Asset URLs are key-based, but the detail API resolves assets by id only
+        // (GET /appsec/assets/{assetID} → businessAssets.Get). Resolve the route param to an id.
+        //
+        // Try the id path first: when the param already is an id this costs one request and cannot
+        // be defeated by paging. Only fall back to a key search, and page through the WHOLE list
+        // rather than the default first page, because searching one page reported "Asset not found"
+        // for any asset past that page even though it existed.
+        const id = await resolveAssetId(key)
+        if (!id) {
           setNotFound(true)
           return null as never
         }
-        const id = match.id
         const [asset, projects, technical, engagements, findings, coverage, posture, history] = await Promise.all([
           api.getBusinessAsset(id),
           api.businessAssetProjects(id),

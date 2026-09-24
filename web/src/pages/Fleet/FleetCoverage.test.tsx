@@ -106,4 +106,23 @@ describe('FleetCoverage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }))
     await waitFor(() => expect(api.exportFleetCoverage).toHaveBeenCalledTimes(1))
   })
+
+  // The desired-capabilities service is optional, so feature-off stays silent. Any other failure
+  // must surface: an empty gaps section during an outage reads as "no capability gaps", which is a
+  // false all-clear on a coverage screen.
+  it('keeps the desired-gaps section silent when the feature is off', async () => {
+    vi.mocked(api.listFleetCoverage).mockResolvedValue([])
+    vi.mocked(api.fleetDesiredGaps).mockRejectedValue(new ApiError(404, 'HTTP 404'))
+    renderPage()
+    await waitFor(() => expect(api.fleetDesiredGaps).toHaveBeenCalled())
+    expect(screen.queryByText(/Desired-capability gaps/)).not.toBeInTheDocument()
+  })
+
+  it('surfaces a desired-gaps outage instead of rendering it as no gaps', async () => {
+    vi.mocked(api.listFleetCoverage).mockResolvedValue([])
+    vi.mocked(api.fleetDesiredGaps).mockRejectedValue(new ApiError(503, 'upstream down'))
+    renderPage()
+    expect(await screen.findByText(/Desired-capability gaps/)).toBeInTheDocument()
+    expect(screen.getByText(/upstream down/)).toBeInTheDocument()
+  })
 })
