@@ -238,7 +238,7 @@ func runCheckov(t *testing.T, dir string, cats []iacCategory) (map[string]map[st
 	// the JSON report regardless.
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "-d", dir, "--compact", "-o", "json", "--quiet")
+	cmd := exec.CommandContext(ctx, bin, "-d", dir, "--compact", "-o", "json")
 	out, runErr := cmd.Output()
 	if ctx.Err() != nil {
 		t.Logf("checkov timed out (%v); skipping the differential", ctx.Err())
