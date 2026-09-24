@@ -71,7 +71,17 @@ func TestSecuribenchScorecard(t *testing.T) {
 		exportSecuribenchBlindedProposals(t, exportPath, srcRoot, pin, detected)
 	}
 	verdictPath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_VERDICTS"))
-	if diagnosticPath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_DIAGNOSTIC_REPORT")); diagnosticPath != "" {
+	baselinePath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_BASELINE_REPORT"))
+	diagnosticPath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_DIAGNOSTIC_REPORT"))
+	if baselinePath != "" && diagnosticPath != "" {
+		t.Fatal("SYNAPSE_POST_TRIAGE_BASELINE_REPORT and SYNAPSE_POST_TRIAGE_DIAGNOSTIC_REPORT are mutually exclusive")
+	}
+	if baselinePath != "" {
+		if verdictPath == "" {
+			t.Fatal("SYNAPSE_POST_TRIAGE_BASELINE_REPORT requires SYNAPSE_POST_TRIAGE_VERDICTS")
+		}
+		writeSecuribenchBaselineReport(t, baselinePath, postTriageSecuribenchReport(t, verdictPath, srcRoot, pin, detected, cases))
+	} else if diagnosticPath != "" {
 		if verdictPath == "" {
 			t.Fatal("SYNAPSE_POST_TRIAGE_DIAGNOSTIC_REPORT requires SYNAPSE_POST_TRIAGE_VERDICTS")
 		}

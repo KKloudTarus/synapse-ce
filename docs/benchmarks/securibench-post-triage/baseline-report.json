@@ -1,0 +1,45 @@
+{
+  "schema": "synapse-sast-report-v1",
+  "engine": "synapse-owned + offline-local-llama-cpp+syntactic-proof-v1",
+  "corpus": "securibench-micro",
+  "corpus_digest": "cdb5a5304703b52bb59ed4a71793ada89c5d89b0e35680dd747cc65b5743ec52",
+  "stage": "post-triage",
+  "line_window": 0,
+  "scored_cwes": [
+    "CWE-78",
+    "CWE-79",
+    "CWE-89"
+  ],
+  "cwes": [
+    {
+      "cwe": "CWE-78",
+      "total": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "true_negatives": 0,
+      "precision": 0,
+      "recall": 0
+    },
+    {
+      "cwe": "CWE-79",
+      "total": 174,
+      "true_positives": 78,
+      "false_positives": 26,
+      "false_negatives": 46,
+      "true_negatives": 24,
+      "precision": 0.75,
+      "recall": 0.6290322580645161
+    },
+    {
+      "cwe": "CWE-89",
+      "total": 6,
+      "true_positives": 5,
+      "false_positives": 0,
+      "false_negatives": 1,
+      "true_negatives": 0,
+      "precision": 1,
+      "recall": 0.8333333333333334
+    }
+  ]
+}

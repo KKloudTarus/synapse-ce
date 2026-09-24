@@ -210,14 +210,17 @@ type Call struct {
 	New             bool       `json:"new,omitempty"`   // a `new X(...)` constructor call
 }
 
-// Assignment captures a binding/value relationship without retaining expression text.
+// Assignment captures a binding/value relationship without retaining expression text. StrongUpdate means
+// the extractor proved a local string-literal assignment executes on every path reaching the following
+// statement in the same callable. Consumers may replace earlier bindings only when this marker is present.
 type Assignment struct {
-	ScopeID   string      `json:"scope_id"`
-	Targets   []Reference `json:"targets"`
-	TargetIDs []string    `json:"target_ids,omitempty"`
-	Value     Reference   `json:"value"`
-	ValueID   string      `json:"value_id,omitempty"`
-	Pos       Position    `json:"position"`
+	ScopeID      string      `json:"scope_id"`
+	Targets      []Reference `json:"targets"`
+	TargetIDs    []string    `json:"target_ids,omitempty"`
+	Value        Reference   `json:"value"`
+	ValueID      string      `json:"value_id,omitempty"`
+	StrongUpdate bool        `json:"strong_update,omitempty"`
+	Pos          Position    `json:"position"`
 }
 
 // Return captures a method return expression summary.

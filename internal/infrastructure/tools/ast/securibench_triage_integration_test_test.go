@@ -23,6 +23,9 @@ class Example {
   int getVulnerabilityCount() { return 1; }
 }`
 	packet := blindedJavaMethod(source, 7)
+	if !strings.HasPrefix(packet, "// synapse-sast-proof-context: start_line=3\n") {
+		t.Fatalf("packet lacks exact source line mapping: %s", packet)
+	}
 	for _, want := range []string{"req.getParameter", "getWriter", "http://example.test/a*b"} {
 		if !strings.Contains(packet, want) {
 			t.Fatalf("packet omitted flow context %q: %s", want, packet)
@@ -38,6 +41,21 @@ class Example {
 	}
 }
 
+func TestStripJavaCommentsPreservesFirstByteAfterLineComment(t *testing.T) {
+	got := stripJavaComments("x(); // benchmark marker\nreturn;\n")
+	if got != "x(); \nreturn;\n" {
+		t.Fatalf("line comment removal changed code on the next line: %q", got)
+	}
+}
+
+func TestBlindedJavaMethodCanonicalizesCheckoutLineEndings(t *testing.T) {
+	lf := "void f() {\n  sink(input); // marker\n}\n"
+	crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+	if got, want := blindedJavaMethod(lf, 2), blindedJavaMethod(crlf, 2); got != want {
+		t.Fatalf("line ending differences changed verifier packet: LF=%q CRLF=%q", got, want)
+	}
+}
+
 func TestWriteSecuribenchDiagnosticReportMarksOutputUnaccepted(t *testing.T) {
 	path := t.TempDir() + "/diagnostic.json"
 	writeSecuribenchDiagnosticReport(t, path, sastbench.Report{Schema: sastbench.ReportSchemaVersion, Engine: "owned + verifier", Stage: "post-triage"})
@@ -47,6 +65,13 @@ func TestWriteSecuribenchDiagnosticReportMarksOutputUnaccepted(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "diagnostic-unaccepted") {
 		t.Fatalf("diagnostic report lacks unaccepted label: %s", data)
+	}
+}
+
+func TestSecuribenchExpectedCountsIncludesEmptyScoredCategory(t *testing.T) {
+	counts := securibenchExpectedCounts([]sastbench.LabeledCase{{CWE: "CWE-79"}, {CWE: "CWE-79"}, {CWE: "CWE-89"}})
+	if len(counts) != len(securibenchScoredCWEs) || counts["CWE-78"] != 0 || counts["CWE-79"] != 2 || counts["CWE-89"] != 1 {
+		t.Fatalf("scored CWE counts must retain zero-case categories: %#v", counts)
 	}
 }
 

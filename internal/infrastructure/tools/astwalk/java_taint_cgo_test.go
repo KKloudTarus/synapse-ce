@@ -316,6 +316,244 @@ public class SqlController {
 	}
 }
 
+func TestJavaStrongUpdatesRespectControlFlow(t *testing.T) {
+	const header = `import java.io.PrintWriter;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+public class Controller {
+  void run(HttpServletRequest request, HttpServletResponse response, boolean overwrite) throws Exception {
+`
+	const footer = `  }
+}
+`
+	cases := []struct {
+		name          string
+		body          string
+		markerLine    int
+		strong        bool
+		wantSinkLines []int
+	}{
+		{
+			name: "straight_line_constant_overwrite",
+			body: `    String name = request.getParameter("name");
+    name = "safe";
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 7, strong: true,
+		},
+		{
+			name: "conditional_overwrite_keeps_prior_taint",
+			body: `    String name = request.getParameter("name");
+    if (overwrite) {
+      name = "safe";
+    }
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 8, strong: false, wantSinkLines: []int{11},
+		},
+		{
+			name: "nonliteral_assignment_retains_prior_taint_when_value_flow_is_incomplete",
+			body: `    String name = request.getParameter("name");
+    String clean = "safe";
+    name = clean;
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 8, strong: false, wantSinkLines: []int{10},
+		},
+		{
+			name: "unicode_escaped_literal_is_not_proof_of_strong_update",
+			body: `    String name = request.getParameter("name");
+    name = "\u0061";
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 7, strong: false, wantSinkLines: []int{9},
+		},
+		{
+			name: "short_circuit_overwrite_keeps_prior_taint",
+			body: `    String name = request.getParameter("name");
+    boolean observed = overwrite && ((name = "safe") != null);
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 7, strong: false, wantSinkLines: []int{9},
+		},
+		{
+			name: "labeled_break_can_skip_overwrite",
+			body: `    String name = request.getParameter("name");
+    label: {
+      if (overwrite) break label;
+      name = "safe";
+    }
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 9, strong: false, wantSinkLines: []int{12},
+		},
+		{
+			name: "sink_before_overwrite_remains",
+			body: `    String name = request.getParameter("name");
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+    name = "safe";
+    writer.println(name);
+`,
+			markerLine: 9, strong: true, wantSinkLines: []int{8},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "Controller.java", header+tc.body+footer)
+			doc, err := JavaFactsFor(context.Background(), root)
+			if err != nil {
+				t.Fatalf("JavaFactsFor: %v", err)
+			}
+			foundMarker := false
+			for _, assignment := range doc.Assignments {
+				if assignment.Pos.Line == tc.markerLine {
+					foundMarker = true
+					if assignment.StrongUpdate != tc.strong {
+						t.Fatalf("assignment at line %d StrongUpdate=%t, want %t", tc.markerLine, assignment.StrongUpdate, tc.strong)
+					}
+				}
+			}
+			if !foundMarker {
+				t.Fatalf("no assignment fact at line %d: %#v", tc.markerLine, doc.Assignments)
+			}
+			graph, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
+			if err != nil {
+				t.Fatalf("BuildJavaValueGraph: %v", err)
+			}
+			gotSinkLines := map[int]bool{}
+			for _, path := range graph.Vulnerabilities() {
+				if path.Rule == "java-taint-xss-writer" {
+					gotSinkLines[path.SinkPos.Line] = true
+				}
+			}
+			wantSinkLines := map[int]bool{}
+			for _, line := range tc.wantSinkLines {
+				wantSinkLines[line] = true
+			}
+			if len(gotSinkLines) != len(wantSinkLines) {
+				t.Fatalf("XSS sink lines=%v, want %v", gotSinkLines, wantSinkLines)
+			}
+			for line := range wantSinkLines {
+				if !gotSinkLines[line] {
+					t.Fatalf("XSS sink lines=%v, want %v", gotSinkLines, wantSinkLines)
+				}
+			}
+		})
+	}
+}
+
+func TestJavaStrongUpdateSharedFieldRetainsTaint(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "Controller.java", `import java.io.PrintWriter;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+public class Controller {
+  private String name;
+  void run(HttpServletRequest request, HttpServletResponse response) throws Exception {
+    name = request.getParameter("name");
+    name = "safe";
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+  }
+}
+`)
+	doc, err := JavaFactsFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("JavaFactsFor: %v", err)
+	}
+	foundMarker := false
+	marker := false
+	for _, assignment := range doc.Assignments {
+		if assignment.Pos.Line == 8 {
+			foundMarker = true
+			marker = assignment.StrongUpdate
+		}
+	}
+	if !foundMarker {
+		t.Fatalf("missing field overwrite assignment: %#v", doc.Assignments)
+	}
+	if marker {
+		t.Fatalf("a shared field overwrite must not be a strong update: %#v", doc.Assignments)
+	}
+	graph, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
+	if err != nil {
+		t.Fatalf("BuildJavaValueGraph: %v", err)
+	}
+	for _, path := range graph.Vulnerabilities() {
+		if path.Rule == "java-taint-xss-writer" {
+			return
+		}
+	}
+	t.Fatalf("a shared field may be changed by another request before the sink, got no XSS finding")
+}
+
+func TestJavaNestedLocalStrongUpdateDoesNotHideOuterValue(t *testing.T) {
+	const header = `import java.io.PrintWriter;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+public class Controller {
+  private String name;
+  void run(HttpServletRequest request, HttpServletResponse response) throws Exception {
+`
+	const footer = `  }
+}
+`
+	cases := []struct {
+		name  string
+		outer string
+	}{
+		{"shared_field", `    name = request.getParameter("name");`},
+		{"outer_local", `    String name = request.getParameter("name");`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "Controller.java", header+tc.outer+`
+    {
+      String name = "inner";
+      name = "safe";
+    }
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`+footer)
+			doc, err := JavaFactsFor(context.Background(), root)
+			if err != nil {
+				t.Fatalf("JavaFactsFor: %v", err)
+			}
+			foundInnerAssignment := false
+			for _, assignment := range doc.Assignments {
+				if assignment.Pos.Line == 10 && assignment.StrongUpdate {
+					t.Fatalf("an inner-block local must not be a strong update: %#v", doc.Assignments)
+				}
+				if assignment.Pos.Line == 10 {
+					foundInnerAssignment = true
+				}
+			}
+			if !foundInnerAssignment {
+				t.Fatalf("missing inner-block assignment: %#v", doc.Assignments)
+			}
+			graph, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
+			if err != nil {
+				t.Fatalf("BuildJavaValueGraph: %v", err)
+			}
+			for _, path := range graph.Vulnerabilities() {
+				if path.Rule == "java-taint-xss-writer" {
+					return
+				}
+			}
+			t.Fatalf("an inner local must not hide the outer tainted value")
+		})
+	}
+}
+
 // TestJavaFactsBoundedOnDeepExpression feeds a pathologically deep expression (nested parentheses and a long
 // binary chain) that would overflow the stack if the expression-lowering helpers recursed unbounded. The
 // extractor must return without panicking; the deep subtree is truncated rather than modeled.

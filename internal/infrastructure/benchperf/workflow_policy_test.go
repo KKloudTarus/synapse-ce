@@ -251,6 +251,40 @@ func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 			}
 		})
 	}
+	postTriage := requireJob(t, workflow, "securibench-post-triage")
+	requireNeeds(t, postTriage, "route")
+	if postTriage.Env["BASELINE_SOURCE_SHA"] != "ad58a4fbd0cb2096f37c2e37e79b7444ec81d230" {
+		t.Fatal("post-triage baseline must pin the historical scanner revision")
+	}
+	for key, want := range map[string]string{
+		"MODEL_ATTESTATION_SHA256":          "f23d47981610b45fabc0750197e44a348ed5000b9afbd0efadbe0f618392e9f9",
+		"BASELINE_MODEL_TRANSCRIPT_SHA256":  "e30ee06ecfe69a6b47dc9899b194ec0dc69aa59af3461150d78dc07cea337041",
+		"CANDIDATE_MODEL_TRANSCRIPT_SHA256": "c451d5cc4b4d3b18b839ab8b5847bd6c015ea8ffe9d8521539527338c0594fcc",
+	} {
+		if postTriage.Env[key] != want {
+			t.Fatalf("post-triage evidence pin %s changed without reviewed evidence", key)
+		}
+	}
+	modelEvidence := requireStep(t, postTriage, func(step benchmarkStep) bool {
+		return step.Name == "Pin retained model observation and exchanges"
+	})
+	for _, want := range []string{
+		`${MODEL_ATTESTATION_SHA256}  ${EVIDENCE_DIR}/model-runtime-attestation.json`,
+		`${BASELINE_MODEL_TRANSCRIPT_SHA256}  ${EVIDENCE_DIR}/baseline-model-transcript.json`,
+		`${CANDIDATE_MODEL_TRANSCRIPT_SHA256}  ${EVIDENCE_DIR}/candidate-model-transcript.json`,
+	} {
+		requireActiveLine(t, modelEvidence.Run, want)
+	}
+	candidateCheckout := requireStep(t, postTriage, func(step benchmarkStep) bool {
+		return step.Name == "Checkout synapse candidate"
+	})
+	if candidateCheckout.With["ref"] != sourceSHA {
+		t.Fatal("post-triage candidate checkout must bind the route source SHA")
+	}
+	postTriageAssertion := requireStep(t, postTriage, func(step benchmarkStep) bool {
+		return step.Name == "Assert exact candidate revision"
+	})
+	requireActiveLine(t, postTriageAssertion.Run, `test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"`)
 	securibench := requireJob(t, workflow, "securibench-scorecard")
 	if securibench.Env["SEMGREP_IMAGE"] != "semgrep/semgrep@sha256:d1825c2c72110b5bfbf0602ff68f7f117322597a7c33037a79dba9f897f5f1f0" {
 		t.Fatal("Securibench Semgrep lane must pin the verified container manifest")
@@ -322,13 +356,16 @@ func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 		requireActiveLine(t, regressions.Run, want)
 	}
 	aggregate := requireJob(t, workflow, "aggregate")
-	requireNeeds(t, aggregate, "route", "owasp-scorecard", "securibench-scorecard", "juliet-scorecard", "adversarial-regressions")
+	requireNeeds(t, aggregate, "route", "owasp-scorecard", "securibench-scorecard", "securibench-post-triage", "juliet-scorecard", "adversarial-regressions")
 	if aggregate.If != "${{ always() }}" {
 		t.Fatal("SAST aggregate must report every run")
 	}
 	step := requireOnlyRunStep(t, aggregate)
 	for _, result := range []string{"ROUTE_RESULT", "OWASP_RESULT", "SECURIBENCH_RESULT", "JULIET_RESULT", "ADVERSARIAL_RESULT"} {
 		requireActiveLine(t, step.Run, fmt.Sprintf(`test "$%s" = success`, result))
+	}
+	if !strings.Contains(step.Run, `test "$POST_TRIAGE_RESULT" = success`) || !strings.Contains(step.Run, `test "$POST_TRIAGE_RESULT" = skipped`) {
+		t.Fatal("SAST aggregate must require post-triage replay for same-repository changes and skip it for forks")
 	}
 }
 

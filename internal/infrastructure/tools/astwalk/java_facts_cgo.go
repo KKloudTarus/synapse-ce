@@ -81,7 +81,7 @@ func JavaFactsFor(ctx context.Context, root string) (javaprogram.Document, error
 		extractor := javaFactExtractor{
 			doc: &doc, module: module, file: rel, source: content, moduleID: moduleID, modulePos: modulePos,
 			values: map[string]bool{}, flows: map[string]bool{}, gapKeys: map[string]bool{}, symbolQual: map[string]bool{},
-			fqnTypes: map[string]bool{},
+			fqnTypes: map[string]bool{}, locals: map[string]map[string][]string{}, rootBlocks: map[string]string{},
 		}
 		doc.Modules = append(doc.Modules, javaprogram.Module{Name: module, File: rel, Package: extractor.packageName(rootNode), Pos: modulePos})
 		doc.Symbols = append(doc.Symbols, javaprogram.Symbol{
@@ -113,9 +113,10 @@ func JavaFactsFor(ctx context.Context, root string) (javaprogram.Document, error
 }
 
 type javaScope struct {
-	id        string
-	qualified string
-	kind      javaprogram.SymbolKind
+	id            string
+	qualified     string
+	kind          javaprogram.SymbolKind
+	strongUpdates bool
 }
 
 type javaFactExtractor struct {
@@ -133,6 +134,8 @@ type javaFactExtractor struct {
 	gapKeys                     map[string]bool // coverage-gap dedup keys, so gap() is O(1) not O(existing gaps)
 	symbolQual                  map[string]bool // qualified names already emitted in this module, to disambiguate overloads
 	fqnTypes                    map[string]bool // inline fully-qualified type refs, lowered to on-demand imports post-walk
+	locals                      map[string]map[string][]string
+	rootBlocks                  map[string]string
 }
 
 // enterExpr bounds recursion into an expression subtree of hostile depth. A true return must be paired with
@@ -170,6 +173,20 @@ func (e *javaFactExtractor) walk(node *sitter.Node, scope javaScope) {
 			e.walk(node.ChildByFieldName("alternative"), scope)
 			return
 		}
+		// Either arm may be skipped, so its assignments cannot replace an earlier value at a later join.
+		e.walk(node.ChildByFieldName("condition"), scope.withoutStrongUpdates())
+		e.walk(node.ChildByFieldName("consequence"), scope.withoutStrongUpdates())
+		e.walk(node.ChildByFieldName("alternative"), scope.withoutStrongUpdates())
+		return
+	case "while_statement", "do_statement", "for_statement", "enhanced_for_statement", "switch_statement", "switch_expression", "try_statement", "ternary_expression", "binary_expression", "assert_statement", "throw_statement", "labeled_statement":
+		// Writes in control-dependent code may be skipped or repeated. binary_expression is deliberately
+		// included because a right-hand &&/|| operand is conditional; treating the whole expression as
+		// conditional avoids relying on grammar-child position. A labeled block is included because a break to
+		// that label can skip a write and still reach a following sink. Keep earlier definitions reachable.
+		for i := 0; i < int(node.NamedChildCount()); i++ {
+			e.walk(node.NamedChild(i), scope.withoutStrongUpdates())
+		}
+		return
 	case "class_declaration", "interface_declaration", "enum_declaration", "record_declaration":
 		e.walkType(node, scope)
 		return
@@ -192,12 +209,21 @@ func (e *javaFactExtractor) walk(node *sitter.Node, scope javaScope) {
 		e.variableDeclaratorFact(node, scope)
 	case "return_statement":
 		e.returnFact(node, scope)
+		for i := 0; i < int(node.NamedChildCount()); i++ {
+			e.walk(node.NamedChild(i), scope.withoutStrongUpdates())
+		}
+		return
 	case "scoped_type_identifier":
 		e.recordFQNType(node)
 	}
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		e.walk(node.NamedChild(i), scope)
 	}
+}
+
+func (scope javaScope) withoutStrongUpdates() javaScope {
+	scope.strongUpdates = false
+	return scope
 }
 
 // skipExactFalseConsequence reports whether an if_statement consequence may be omitted without hiding an
@@ -362,25 +388,32 @@ func (e *javaFactExtractor) walkMethod(node *sitter.Node, parent javaScope) {
 	}
 	qualified := e.uniqueQualified(joinJavaQualified(parent.qualified, name), node)
 	id := javaprogram.CanonicalSymbolID(e.module, qualified)
+	paramsNode := node.ChildByFieldName("parameters")
+	params := e.parameters(paramsNode, id)
 	symbol := javaprogram.Symbol{
 		ID: id, Module: e.module, QualifiedName: qualified, Name: name, ParentID: parent.id, Kind: kind,
-		Pos: e.position(node), Parameters: e.parameters(node.ChildByFieldName("parameters"), id), Annotations: e.modifierAnnotations(node),
+		Pos: e.position(node), Parameters: params, Annotations: e.modifierAnnotations(node),
 	}
 	e.doc.Symbols = append(e.doc.Symbols, symbol)
 	e.entrypointHints(symbol)
-	scope := javaScope{id: id, qualified: qualified, kind: kind}
+	scope := javaScope{id: id, qualified: qualified, kind: kind, strongUpdates: true}
+	body := node.ChildByFieldName("body")
+	e.registerRootBlock(scope.id, body)
+	for _, param := range params {
+		e.registerLocal(scope.id, param.Name, body)
+	}
 	// Record inline fully-qualified types in the signature too, not only the body: a sink receiver is often a
 	// method parameter (`void handle(javax.naming.directory.InitialDirContext idc)`), and its type node lives
 	// in the parameter list, which walkMethod does not otherwise descend into. Walking the parameters and the
 	// return type through the generic walk reaches their scoped_type_identifier nodes (which only trigger
 	// recordFQNType, no parameter or call facts) so the RequiresImport gate fires on an FQN-typed parameter.
-	if params := node.ChildByFieldName("parameters"); params != nil {
-		e.walk(params, scope)
+	if paramsNode != nil {
+		e.walk(paramsNode, scope)
 	}
 	if ret := node.ChildByFieldName("type"); ret != nil {
 		e.walk(ret, scope)
 	}
-	if body := node.ChildByFieldName("body"); body != nil {
+	if body != nil {
 		e.walk(body, scope)
 	}
 }
@@ -392,12 +425,19 @@ func (e *javaFactExtractor) walkLambda(node *sitter.Node, parent javaScope) {
 	name := "<fn@" + strconv.Itoa(pos.Line) + "_" + strconv.Itoa(pos.Column) + ">"
 	qualified := e.uniqueQualified(joinJavaQualified(parent.qualified, name), node)
 	id := javaprogram.CanonicalSymbolID(e.module, qualified)
+	paramsNode := node.ChildByFieldName("parameters")
+	params := e.parameters(paramsNode, id)
 	e.doc.Symbols = append(e.doc.Symbols, javaprogram.Symbol{
 		ID: id, Module: e.module, QualifiedName: qualified, Name: name, ParentID: parent.id,
-		Kind: javaprogram.SymbolLambda, Pos: pos, Parameters: e.parameters(node.ChildByFieldName("parameters"), id),
+		Kind: javaprogram.SymbolLambda, Pos: pos, Parameters: params,
 	})
 	if body := node.ChildByFieldName("body"); body != nil {
-		e.walk(body, javaScope{id: id, qualified: qualified, kind: javaprogram.SymbolLambda})
+		scope := javaScope{id: id, qualified: qualified, kind: javaprogram.SymbolLambda, strongUpdates: parent.strongUpdates}
+		e.registerRootBlock(scope.id, body)
+		for _, param := range params {
+			e.registerLocal(scope.id, param.Name, body)
+		}
+		e.walk(body, scope)
 	}
 }
 
@@ -543,13 +583,98 @@ func (e *javaFactExtractor) assignmentFact(node *sitter.Node, scope javaScope) {
 	for _, targetID := range targetIDs {
 		e.addValueFlow(valueID, targetID, javaprogram.FlowAssignment, node)
 	}
+	// Nonliteral right-hand sides may have incomplete modeled flow. Java also processes Unicode escapes
+	// before tokenization. Neither case justifies removing an older tainted definition.
+	plainLiteral := right.Type() == "string_literal" && !strings.Contains(string(right.Content(e.source)), `\u`)
 	e.doc.Assignments = append(e.doc.Assignments, javaprogram.Assignment{
-		ScopeID: scope.id, Targets: targets, TargetIDs: targetIDs, Value: value, ValueID: valueID, Pos: e.position(node),
+		ScopeID: scope.id, Targets: targets, TargetIDs: targetIDs, Value: value, ValueID: valueID,
+		StrongUpdate: scope.strongUpdates && plainLiteral && e.isLocalAssignment(scope, left) && javaSimpleNameAssignment(node, left, e.source), Pos: e.position(node),
 	})
+}
+
+// javaSimpleNameAssignment reports the form that replaces one simple name. Compound
+// assignments read the prior value, and qualified or array writes are container-granular, so neither can
+// discard earlier taint definitions.
+func javaSimpleNameAssignment(node, left *sitter.Node, source []byte) bool {
+	if node == nil || left == nil || left.Type() != "identifier" {
+		return false
+	}
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child != nil && string(child.Content(source)) == "=" {
+			return true
+		}
+	}
+	return false
+}
+
+// registerLocal records a lexical local declared by a method/lambda parameter or by a local variable
+// declaration. Strong updates use only declarations in the callable body's top-level block: without binding
+// identities in value facts, an inner-block local could otherwise suppress a same-named outer field/value.
+func (e *javaFactExtractor) registerLocal(scopeID, name string, block *sitter.Node) {
+	if name == "" || block == nil || block.Type() != "block" {
+		return
+	}
+	if e.locals[scopeID] == nil {
+		e.locals[scopeID] = map[string][]string{}
+	}
+	e.locals[scopeID][name] = append(e.locals[scopeID][name], javaBlockKey(block))
+}
+
+func (e *javaFactExtractor) registerRootBlock(scopeID string, block *sitter.Node) {
+	if key := javaBlockKey(block); key != "" {
+		e.rootBlocks[scopeID] = key
+	}
+}
+
+func (e *javaFactExtractor) registerLocalDeclarator(scope javaScope, node, nameNode *sitter.Node) {
+	if node == nil || nameNode == nil || (scope.kind != javaprogram.SymbolMethod && scope.kind != javaprogram.SymbolConstructor && scope.kind != javaprogram.SymbolLambda) {
+		return
+	}
+	declaration := node.Parent()
+	if declaration == nil || declaration.Type() != "local_variable_declaration" {
+		return
+	}
+	e.registerLocal(scope.id, e.safeName(nameNode.Content(e.source), nameNode), declaration.Parent())
+}
+
+func (e *javaFactExtractor) isLocalAssignment(scope javaScope, left *sitter.Node) bool {
+	if left == nil || left.Type() != "identifier" {
+		return false
+	}
+	name := e.safeName(left.Content(e.source), left)
+	rootBlock := e.rootBlocks[scope.id]
+	if rootBlock == "" {
+		return false
+	}
+	declared := map[string]bool{}
+	for _, block := range e.locals[scope.id][name] {
+		declared[block] = true
+	}
+	// The nearest declaration wins. An inner local can shadow an outer local/field while its block is active;
+	// only a declaration in the callable root block is safe to use as a strong-update binding.
+	for node := left.Parent(); node != nil; node = node.Parent() {
+		if node.Type() != "block" {
+			continue
+		}
+		block := javaBlockKey(node)
+		if declared[block] {
+			return block == rootBlock
+		}
+	}
+	return false
+}
+
+func javaBlockKey(node *sitter.Node) string {
+	if node == nil || node.Type() != "block" {
+		return ""
+	}
+	return strconv.FormatUint(uint64(node.StartByte()), 10) + ":" + strconv.FormatUint(uint64(node.EndByte()), 10)
 }
 
 func (e *javaFactExtractor) variableDeclaratorFact(node *sitter.Node, scope javaScope) {
 	nameNode := node.ChildByFieldName("name")
+	e.registerLocalDeclarator(scope, node, nameNode)
 	valueNode := node.ChildByFieldName("value")
 	if nameNode == nil || valueNode == nil {
 		return

@@ -60,7 +60,7 @@ func postTriageSecuribenchReport(t *testing.T, verdictPath, srcRoot, corpusDiges
 	if responsePath == "" {
 		t.Fatal("SYNAPSE_POST_TRIAGE_VERDICTS requires SYNAPSE_POST_TRIAGE_RESPONSE")
 	}
-	verdictFile, err := os.Open(verdictPath)
+	verdictFile, err := os.Open(securibenchEvidencePath(verdictPath))
 	if err != nil {
 		t.Fatalf("open post-triage verdict artifact: %v", err)
 	}
@@ -72,7 +72,7 @@ func postTriageSecuribenchReport(t *testing.T, verdictPath, srcRoot, corpusDiges
 	if artifact.ResponseRef != responsePath {
 		t.Fatal("post-triage verdict response reference does not match SYNAPSE_POST_TRIAGE_RESPONSE")
 	}
-	responseBytes, err := os.ReadFile(responsePath)
+	responseBytes, err := os.ReadFile(securibenchEvidencePath(responsePath))
 	if err != nil {
 		t.Fatalf("read recorded verifier response: %v", err)
 	}
@@ -106,6 +106,22 @@ func writeSecuribenchDiagnosticReport(t *testing.T, path string, report sastbenc
 	t.Logf("wrote diagnostic, unaccepted post-triage report to %s; it is not a baseline and cannot promote itself", path)
 }
 
+// writeSecuribenchBaselineReport records a historical scanner measurement using the same fresh replay as the
+// candidate. The workflow checks out and builds the pinned pre-change revision, then compares this report to
+// the committed baseline digest before running candidate acceptance.
+func writeSecuribenchBaselineReport(t *testing.T, path string, report sastbench.Report) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create post-triage baseline report: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := sastbench.EncodeReport(f, report); err != nil {
+		t.Fatalf("write post-triage baseline report: %v", err)
+	}
+	t.Logf("wrote historical post-triage baseline report to %s", path)
+}
+
 // verifySecuribenchPostTriage is enabled only when a verdict path is supplied. It deliberately fails closed
 // without the retained parsed response or a committed historical baseline; ordinary proposal export remains a
 // diagnostic operation until independent verdict evidence exists.
@@ -119,7 +135,7 @@ func verifySecuribenchPostTriage(t *testing.T, verdictPath, srcRoot, corpusDiges
 		t.Fatal("SYNAPSE_POST_TRIAGE_VERDICTS requires SYNAPSE_POST_TRIAGE_RESPONSE, SYNAPSE_POST_TRIAGE_BASELINE, SYNAPSE_POST_TRIAGE_BASELINE_ENGINE, and SYNAPSE_POST_TRIAGE_BASELINE_SHA256")
 	}
 	candidate := postTriageSecuribenchReport(t, verdictPath, srcRoot, corpusDigest, detected, cases)
-	baselineBytes, err := os.ReadFile(baselinePath)
+	baselineBytes, err := os.ReadFile(securibenchEvidencePath(baselinePath))
 	if err != nil {
 		t.Fatalf("read post-triage baseline: %v", err)
 	}
@@ -130,14 +146,7 @@ func verifySecuribenchPostTriage(t *testing.T, verdictPath, srcRoot, corpusDiges
 	if err != nil {
 		t.Fatalf("load post-triage baseline: %v", err)
 	}
-	counts := make(map[string]int, len(securibenchScoredCWEs))
-	for _, c := range cases {
-		for _, cwe := range securibenchScoredCWEs {
-			if c.CWE == cwe {
-				counts[cwe]++
-			}
-		}
-	}
+	counts := securibenchExpectedCounts(cases)
 	contract := sastbench.PostTriageAcceptance{Corpus: candidate.Corpus, CorpusDigest: corpusDigest, CandidateEngine: candidate.Engine, BaselineEngine: baselineEngine, LineWindow: securibenchLineWindow, ScoredCWEs: securibenchScoredCWEs, ExpectedCounts: counts, Floors: sastbench.DefaultSecuribenchFloors()}
 	detail, err := sastbench.AcceptPostTriage(contract, candidate, baseline)
 	if err != nil {
@@ -146,6 +155,30 @@ func verifySecuribenchPostTriage(t *testing.T, verdictPath, srcRoot, corpusDiges
 	for _, line := range detail {
 		t.Log(line)
 	}
+}
+
+func securibenchExpectedCounts(cases []sastbench.LabeledCase) map[string]int {
+	counts := make(map[string]int, len(securibenchScoredCWEs))
+	for _, cwe := range securibenchScoredCWEs {
+		counts[cwe] = 0
+	}
+	for _, c := range cases {
+		for _, cwe := range securibenchScoredCWEs {
+			if c.CWE == cwe {
+				counts[cwe]++
+			}
+		}
+	}
+	return counts
+}
+
+// Go test runs this package from its own directory. Evidence references are
+// portable repository-relative paths, so resolve them from the repository root.
+func securibenchEvidencePath(path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join("..", "..", "..", "..", filepath.FromSlash(path))
 }
 
 func verifyPostTriageBaselineDigest(data []byte, want string) error {
@@ -213,6 +246,11 @@ var corpusOutcomeToken = regexp.MustCompile(`(?i)\b(good|bad)\b`)
 // blindedJavaMethod retains the enclosing method, which gives a verifier the source-to-sink flow, while
 // removing Java comments (including Securibench annotations) without damaging comment-like string literals.
 func blindedJavaMethod(source string, targetLine int) string {
+	// Git checkouts may use LF or CRLF. Canonicalize to CRLF so the same pinned
+	// source produces identical verifier input across hosts.
+	source = strings.ReplaceAll(source, "\r\n", "\n")
+	source = strings.ReplaceAll(source, "\r", "\n")
+	source = strings.ReplaceAll(source, "\n", "\r\n")
 	lines := strings.Split(stripJavaComments(source), "\n")
 	target := targetLine - 1
 	if target < 0 || target >= len(lines) {
@@ -243,7 +281,8 @@ func blindedJavaMethod(source string, targetLine int) string {
 		}
 	}
 	context := strings.Join(lines[start:end], "\n")
-	return corpusOutcomeToken.ReplaceAllString(context, "variant")
+	return fmt.Sprintf("// synapse-sast-proof-context: start_line=%d\n%s",
+		start+1, corpusOutcomeToken.ReplaceAllString(context, "variant"))
 }
 
 func isJavaMethodStart(line string) bool {
