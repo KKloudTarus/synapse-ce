@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
@@ -85,7 +84,10 @@ func publishSourceFromAnalysis(ctx context.Context, client *http.Client, server,
 	if analysis.ID != analysisID || analysis.ProjectKey != projectKey || !analysis.SourceRevision.Kind.Valid() {
 		return projectanalysis.SourceManifest{}, fmt.Errorf("server returned an incompatible source analysis")
 	}
-	paths := retainableAnalysisPaths(analysis)
+	paths, err := fetchAnalysisPaths(ctx, client, analysisFilesURL(base, projectKey, analysisID), token)
+	if err != nil {
+		return projectanalysis.SourceManifest{}, err
+	}
 	if len(paths) == 0 {
 		return projectanalysis.SourceManifest{}, fmt.Errorf("analysis has no retainable source files")
 	}
@@ -158,6 +160,57 @@ func sourcePublishURL(base *url.URL, projectKey, analysisID string, source bool)
 	return u.String()
 }
 
+func analysisFilesURL(base *url.URL, projectKey, analysisID string) string {
+	return base.JoinPath("api", "v1", "projects", projectKey, "analyses", analysisID, "code", "files").String()
+}
+
+// fetchAnalysisPaths asks the server which files the analysis covers.
+//
+// The paths used to be read from the analysis's own measure snapshot, which the analysis endpoint
+// does not serve: it is large and every other consumer reads the aggregates beside it. The field
+// therefore arrived empty and publish-source stopped at "analysis has no retainable source files"
+// for every analysis. The code-files endpoint is the server's own answer to this question and is
+// what the code viewer already reads.
+func fetchAnalysisPaths(ctx context.Context, client *http.Client, endpoint, token string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build analysis files request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch analysis files: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, sourcePublishHTTPError(resp)
+	}
+	var payload struct {
+		Files []struct {
+			Path   string `json:"path"`
+			Binary bool   `json:"binary"`
+		} `json:"files"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode analysis files: %w", err)
+	}
+	seen := make(map[string]struct{}, len(payload.Files))
+	paths := make([]string, 0, len(payload.Files))
+	for _, f := range payload.Files {
+		// A binary file has nothing to show in a code viewer and only costs upload bytes.
+		if f.Binary || !sourcepolicy.RetainPath(f.Path) {
+			continue
+		}
+		if _, ok := seen[f.Path]; ok {
+			continue
+		}
+		seen[f.Path] = struct{}{}
+		paths = append(paths, f.Path)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
 func fetchPublishAnalysis(ctx context.Context, client *http.Client, endpoint, token string) (projectanalysis.Analysis, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -188,23 +241,6 @@ func sourcePublishHTTPError(resp *http.Response) error {
 		return fmt.Errorf("synapse API returned %s: %s", resp.Status, strings.TrimSpace(payload.Error))
 	}
 	return fmt.Errorf("synapse API returned %s", resp.Status)
-}
-
-func retainableAnalysisPaths(analysis projectanalysis.Analysis) []string {
-	seen := make(map[string]struct{})
-	paths := make([]string, 0, len(analysis.Snapshot.Nodes))
-	for _, node := range analysis.Snapshot.Nodes {
-		if node.Kind != measure.NodeFile || !sourcepolicy.RetainPath(node.Path) {
-			continue
-		}
-		if _, ok := seen[node.Path]; ok {
-			continue
-		}
-		seen[node.Path] = struct{}{}
-		paths = append(paths, node.Path)
-	}
-	sort.Strings(paths)
-	return paths
 }
 
 func writeAnalysisSourceTar(absRoot string, paths []string, dst io.Writer) error {
