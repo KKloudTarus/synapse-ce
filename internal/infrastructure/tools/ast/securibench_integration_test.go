@@ -96,20 +96,21 @@ func TestSecuribenchScorecard(t *testing.T) {
 		t.Fatalf("securibench ratchet regression:\n%s", strings.Join(breaches, "\n"))
 	}
 
-	// Optional competitor head-to-head. When SYNAPSE_SEMGREP_SARIF points at a Semgrep SARIF report over the
-	// same corpus (the benchmark workflow generates it), score Semgrep on the identical answer key and log the
-	// per-CWE comparison. Semgrep is COMPARISON DATA, not a gate: the owned ratchet above stands on its own, and
-	// a Semgrep regression or a missing report never fails this test.
+	// When SYNAPSE_SEMGREP_SARIF points at a Semgrep SARIF report over the same corpus, score Semgrep on the
+	// identical answer key and log the per-CWE comparison. The hosted benchmark always supplies this input and
+	// rejects a missing or invalid report before this test; local scorecard runs may omit it. Semgrep remains
+	// comparison data, so its score never controls the owned-engine ratchet above.
 	if sarifPath := strings.TrimSpace(os.Getenv("SYNAPSE_SEMGREP_SARIF")); sarifPath != "" {
 		compareSecuribenchToSemgrep(t, sarifPath, cases, pin, scores)
 	}
 }
 
-// semgrepPin records the Semgrep CE version and ruleset the recorded head-to-head was measured with, so the
-// comparison is reproducible. Semgrep is comparison-only, so these are documentation, not a gate.
+// semgrepPin records the Semgrep CE version and local ruleset revision used by the required comparison lane.
+// The lane rejects missing or invalid reports, while the resulting comparison remains outside the owned
+// engine's accuracy ratchet.
 const (
 	semgrepCEVersion = "1.177.0"
-	semgrepCERuleset = "p/java"
+	semgrepCERuleset = "semgrep/semgrep-rules@a84ff9cc2453ca91d581380de4b8b3f272f6f4be:java"
 )
 
 // compareSecuribenchToSemgrep scores a Semgrep SARIF report on the same Securibench answer key and logs the

@@ -21,6 +21,7 @@ type benchmarkJob struct {
 	Needs   workflowNeeds     `yaml:"needs"`
 	If      string            `yaml:"if"`
 	Outputs map[string]string `yaml:"outputs"`
+	Env     map[string]string `yaml:"env"`
 	Steps   []benchmarkStep   `yaml:"steps"`
 }
 
@@ -158,6 +159,54 @@ func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 				t.Fatal("scorecard artifact must bind the source SHA and require a real log")
 			}
 		})
+	}
+	securibench := requireJob(t, workflow, "securibench-scorecard")
+	if securibench.Env["SEMGREP_IMAGE"] != "semgrep/semgrep@sha256:d1825c2c72110b5bfbf0602ff68f7f117322597a7c33037a79dba9f897f5f1f0" {
+		t.Fatal("Securibench Semgrep lane must pin the verified container manifest")
+	}
+	if securibench.Env["SEMGREP_VERSION"] != "1.177.0" || securibench.Env["SEMGREP_RULES_REF"] != "a84ff9cc2453ca91d581380de4b8b3f272f6f4be" {
+		t.Fatal("Securibench Semgrep lane must pin its tool and local rules revisions")
+	}
+	rulesCheckout := requireStep(t, securibench, func(step benchmarkStep) bool {
+		return step.Name == "Checkout Semgrep Java rules (pinned)"
+	})
+	if rulesCheckout.Uses != "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
+		rulesCheckout.With["repository"] != "semgrep/semgrep-rules" ||
+		rulesCheckout.With["ref"] != "${{ env.SEMGREP_RULES_REF }}" ||
+		rulesCheckout.With["path"] != "semgrep-rules" {
+		t.Fatal("Securibench Semgrep rules checkout must use the pinned local Java rules repository")
+	}
+	rulesVerification := requireStep(t, securibench, func(step benchmarkStep) bool {
+		return step.Name == "Verify Semgrep rules revision"
+	})
+	requireActiveLine(t, rulesVerification.Run, `git -C semgrep-rules rev-parse HEAD)`)
+	requireActiveLine(t, rulesVerification.Run, `test -d semgrep-rules/java`)
+	semgrep := requireStep(t, securibench, func(step benchmarkStep) bool {
+		return step.Name == "Run pinned Semgrep CE comparison"
+	})
+	for _, want := range []string{
+		`--network none`, `--read-only`, `--config /rules/java`, `/src/securibench/src`, `--sarif`,
+		`test "$version" = "$SEMGREP_VERSION"`, `if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then`,
+		`test -s "$SEMGREP_REPORT_DIR/semgrep.sarif"`, `jq -e --arg version "$SEMGREP_VERSION"`,
+		`toolExecutionNotifications`,
+		`semgrep/semgrep-rules`, `rules_commit`, `rules_scope`, `target_scope`, `source_sha`,
+	} {
+		requireActiveLine(t, semgrep.Run, want)
+	}
+	if strings.Contains(semgrep.Run, "p/java") {
+		t.Fatal("Securibench Semgrep lane must not resolve mutable registry rules")
+	}
+	runScorecard := requireStep(t, securibench, func(step benchmarkStep) bool {
+		return step.Name == "Run Securibench scorecard + per-CWE ratchet"
+	})
+	if runScorecard.Env["SYNAPSE_SEMGREP_SARIF"] != "${{ env.SEMGREP_REPORT_DIR }}/semgrep.sarif" {
+		t.Fatal("Securibench scorecard must parse the required Semgrep SARIF report")
+	}
+	upload := requireStep(t, securibench, func(step benchmarkStep) bool {
+		return step.Uses == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+	})
+	if !strings.Contains(upload.With["path"], "${{ env.SEMGREP_REPORT_DIR }}") {
+		t.Fatal("Securibench artifact must retain the Semgrep SARIF and metadata")
 	}
 	aggregate := requireJob(t, workflow, "aggregate")
 	requireNeeds(t, aggregate, "route", "owasp-scorecard", "securibench-scorecard", "juliet-scorecard")

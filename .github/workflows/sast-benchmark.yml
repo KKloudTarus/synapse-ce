@@ -119,6 +119,12 @@ jobs:
       # are calibrated against. Bumping this REQUIRES re-calibrating the floors and re-pinning the digest
       # constant in securibench_integration_test.go (reviewed together).
       SECURIBENCH_REF: 6a5a72488ea830d99f9464fc1f0562c4f864214b
+      # Semgrep is a required, pinned comparison measurement. Its score never controls the owned engine's
+      # ratchet, but the report must be valid and non-empty so every scorecard records a real comparison.
+      SEMGREP_IMAGE: semgrep/semgrep@sha256:d1825c2c72110b5bfbf0602ff68f7f117322597a7c33037a79dba9f897f5f1f0
+      SEMGREP_VERSION: "1.177.0"
+      SEMGREP_RULES_REF: a84ff9cc2453ca91d581380de4b8b3f272f6f4be
+      SEMGREP_REPORT_DIR: ${{ runner.temp }}/securibench-semgrep
     steps:
       - name: Checkout synapse
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -143,6 +149,65 @@ jobs:
           path: securibench
           persist-credentials: false
 
+      - name: Checkout Semgrep Java rules (pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: semgrep/semgrep-rules
+          ref: ${{ env.SEMGREP_RULES_REF }}
+          path: semgrep-rules
+          persist-credentials: false
+
+      - name: Verify Semgrep rules revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C semgrep-rules rev-parse HEAD)" = "$SEMGREP_RULES_REF"
+          test -d semgrep-rules/java
+
+      - name: Run pinned Semgrep CE comparison
+        # This lane intentionally scans local rules from the pinned semgrep-rules checkout. It never resolves
+        # the mutable p/java registry configuration, and network isolation prevents rule or telemetry fetches.
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$SEMGREP_REPORT_DIR"
+          version="$(docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp -e SEMGREP_ENABLE_VERSION_CHECK=0 \
+            --entrypoint semgrep "$SEMGREP_IMAGE" --version)"
+          test "$version" = "$SEMGREP_VERSION"
+          set +e
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp -e SEMGREP_ENABLE_VERSION_CHECK=0 -e EIO_BACKEND=posix \
+            -v "$GITHUB_WORKSPACE:/src:ro" -v "$GITHUB_WORKSPACE/semgrep-rules:/rules:ro" -w /src \
+            --entrypoint semgrep "$SEMGREP_IMAGE" scan --oss-only --metrics off --jobs 1 --sarif --no-git-ignore \
+            --config /rules/java /src/securibench/src > "$SEMGREP_REPORT_DIR/semgrep.sarif"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            exit "$status"
+          fi
+          test -s "$SEMGREP_REPORT_DIR/semgrep.sarif"
+          jq -e --arg version "$SEMGREP_VERSION" '
+            .version == "2.1.0" and
+            (.runs | type == "array" and length > 0) and
+            ([.runs[] | select(.tool.driver.semanticVersion == $version) | .results[]?] | length > 0) and
+            (.runs | all(.[]; .invocations | type == "array" and length > 0 and
+              all(.[]; .executionSuccessful == true and (.toolExecutionNotifications | length == 0))))
+          ' "$SEMGREP_REPORT_DIR/semgrep.sarif" > /dev/null
+          target_count="$(find securibench/src -type f -name '*.java' -print | LC_ALL=C sort | wc -l | tr -d ' ')"
+          test "$target_count" -gt 0
+          jq -n \
+            --arg source_sha "${{ needs.route.outputs.source_sha }}" \
+            --arg semgrep_version "$version" \
+            --arg semgrep_image "$SEMGREP_IMAGE" \
+            --arg rules_repository "semgrep/semgrep-rules" \
+            --arg rules_commit "$SEMGREP_RULES_REF" \
+            --arg rules_scope "java" \
+            --arg target_scope "securibench/src/**/*.java" \
+            --argjson target_count "$target_count" \
+            '{source_sha: $source_sha, semgrep_version: $semgrep_version, semgrep_image: $semgrep_image, rules_repository: $rules_repository, rules_commit: $rules_commit, rules_scope: $rules_scope, target_scope: $target_scope, target_count: $target_count}' \
+            > "$SEMGREP_REPORT_DIR/metadata.json"
+
       - name: Build java-facts-capable synapse-ast (CGO)
         run: CGO_ENABLED=1 go build -o "${RUNNER_TEMP}/synapse-ast" ./cmd/synapse-ast
 
@@ -153,6 +218,7 @@ jobs:
         env:
           SYNAPSE_SECURIBENCH_DIR: ${{ github.workspace }}/securibench
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
+          SYNAPSE_SEMGREP_SARIF: ${{ env.SEMGREP_REPORT_DIR }}/semgrep.sarif
         run: |
           set -o pipefail
           CGO_ENABLED=1 go test -count=1 -v -run TestSecuribenchScorecard \
@@ -163,7 +229,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: securibench-scorecard-${{ needs.route.outputs.source_sha }}
-          path: ${{ runner.temp }}/securibench-scorecard.log
+          path: |
+            ${{ runner.temp }}/securibench-scorecard.log
+            ${{ env.SEMGREP_REPORT_DIR }}
           if-no-files-found: error
           retention-days: 90
 

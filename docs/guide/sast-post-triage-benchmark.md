@@ -41,3 +41,13 @@ The acceptance check requires per-CWE recall and precision not to regress, at le
 absolute floors, and no newly lost true cases. Pin the baseline digest and provenance in the workflow before
 using the result as a release gate. Until the independent response, baseline, and required workflow gate are
 present, this path is diagnostic and the post-triage claim remains unaccepted.
+
+## Semgrep CE comparison lane
+
+The hosted Securibench scorecard also runs Semgrep CE `1.177.0` from the pinned container manifest in
+`sast-benchmark.yml`. It checks out `semgrep/semgrep-rules` at the pinned revision and scans its local `java`
+directory. The scan has no network access, produces SARIF, requires at least one result, and stores SARIF plus
+metadata for the exact source SHA, tool image/version, rules revision, rules scope, and target scope.
+
+The scorecard passes that report to the Securibench comparator. A missing or malformed report fails the lane;
+Semgrep's precision and recall are recorded for comparison only and do not affect the owned scanner's ratchet.
