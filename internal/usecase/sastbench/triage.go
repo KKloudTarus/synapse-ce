@@ -1,7 +1,6 @@
 package sastbench
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -80,13 +79,6 @@ type RecordedVerdictResponse struct {
 }
 
 const RecordedVerdictResponseSchemaVersion = "synapse-sast-verdict-response-v1"
-
-// VerdictProducer is the use-case port for an automated independent verifier such as CapSAST. Its adapter
-// must record the provider response and return its SHA-256 in VerdictArtifact.ResponseDigest. The scorer does
-// not implement this port and never supplies corpus truth labels to it.
-type VerdictProducer interface {
-	Verify(ctx context.Context, batch ProposalBatch) (VerdictArtifact, error)
-}
 
 // NewProposalBatch canonicalizes all detections from a fresh run. Duplicate finding identities are rejected so
 // a verifier cannot satisfy coverage by deciding the same proposal twice under different IDs.
