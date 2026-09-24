@@ -9,9 +9,19 @@ Seventy-five screens including the detail pages and their sub-tabs, each capture
 ## How these were captured
 
 Against a real `synapse-api` on a real PostgreSQL, driven through a browser so every request
-hit the live backend; the mock service worker was off. The data is real: an engagement scanned
-against a clone of OWASP Juice Shop (2,776 findings), a code-quality project with a pushed
-analysis (2,762 issues, managed gate failed), six business assets and eight users.
+hit the live backend; the mock service worker was off. Every feature flag was on. The data is
+real, produced by running the product rather than seeded into its tables:
+
+- an engagement scanned against a clone of OWASP Juice Shop, 2,776 findings;
+- a code-quality project with an analysis pushed by `synapse-cli`, 2,762 issues, managed gate
+  failed, 154 findings at or above high;
+- an AI agent session against OpenAI that spent 10,982 tokens and called the `list_findings`
+  tool, with a distinct verifier model, because the Judgment primitive refuses to let a
+  proposer verify its own claim;
+- a `kind` Kubernetes cluster reporting through `synapse-cluster-agent`: 2 enrolled agents,
+  5 namespaces, 64 assets, 6 workloads with their image digests, 66 coverage rows;
+- a host reporting through `synapse-agent`;
+- six business assets and eight users.
 
 Regenerate them with the dev server running and a token the backend accepts:
 
