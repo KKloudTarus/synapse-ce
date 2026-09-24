@@ -250,6 +250,76 @@ func (r *AssetRepository) ListBusinessAssets(ctx context.Context, tenantID share
 	return out, err
 }
 
+// businessAssetFilterSQL builds the shared WHERE clause. POSITION is used rather than LIKE so the
+// caller's text needs no wildcard escaping and the match is exactly strings.Contains over the
+// lower-cased value, which is what the in-memory twin does.
+func businessAssetFilterSQL(tenantID shared.ID, query ports.BusinessAssetQuery) (string, []any) {
+	args := []any{tenantID.String()}
+	where := `tenant_id=$1`
+	add := func(clause string, value any) {
+		args = append(args, value)
+		where += fmt.Sprintf(clause, len(args))
+	}
+	if q := strings.TrimSpace(query.Query); q != "" {
+		add(` AND POSITION(lower($%d) IN lower("key" || ' ' || name)) > 0`, strings.ToLower(q))
+	}
+	if query.Type != "" {
+		add(` AND asset_type=$%d`, string(query.Type))
+	}
+	if query.Criticality != "" {
+		add(` AND criticality=$%d`, string(query.Criticality))
+	}
+	if query.Lifecycle != "" {
+		add(` AND lifecycle=$%d`, string(query.Lifecycle))
+	}
+	if owner := strings.TrimSpace(query.Owner); owner != "" {
+		add(` AND POSITION(lower($%d) IN lower(owner)) > 0`, strings.ToLower(owner))
+	}
+	return where, args
+}
+
+// ListBusinessAssetsPage filters, orders and pages in the database. The count is of rows matching
+// the filter before the page is applied, so a caller can report a total without fetching it.
+func (r *AssetRepository) ListBusinessAssetsPage(ctx context.Context, tenantID shared.ID, query ports.BusinessAssetQuery) ([]*asset.BusinessAsset, int, error) {
+	out := []*asset.BusinessAsset{}
+	total := 0
+	where, args := businessAssetFilterSQL(tenantID, query)
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM fleet_business_services WHERE `+where, args...).Scan(&total); err != nil {
+			return err
+		}
+		// A non-positive limit means "no page": the caller wants the count only.
+		if query.Limit <= 0 {
+			return nil
+		}
+		offset := query.Offset
+		if offset < 0 {
+			offset = 0
+		}
+		pageArgs := append(append([]any{}, args...), query.Limit, offset)
+		rows, err := tx.Query(ctx,
+			`SELECT `+businessAssetCols+` FROM fleet_business_services WHERE `+where+
+				fmt.Sprintf(` ORDER BY "key" LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2),
+			pageArgs...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			a, err := scanBusinessAsset(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, a)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
 // CountBusinessAssetsByCriticality aggregates in the database rather than shipping rows. Postgres
 // answers it from fleet_business_services without materialising the assets, so the cost does not
 // grow with the size of the response the caller wanted.

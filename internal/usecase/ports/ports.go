@@ -117,6 +117,19 @@ type AssetRepository interface {
 
 // BusinessAssetRepository persists the business-level Asset model without changing the existing
 // technical/fleet Asset API. All methods are tenant-scoped and PostgreSQL implementations run
+// BusinessAssetQuery is the filter, ordering and page a business-asset listing asks the store for.
+// Query and Owner are case-insensitive substring matches, Query against "<key> <name>"; the typed
+// fields match exactly, and an empty value means "do not filter on this".
+type BusinessAssetQuery struct {
+	Query       string
+	Type        asset.BusinessAssetType
+	Criticality asset.Criticality
+	Lifecycle   asset.BusinessAssetLifecycle
+	Owner       string
+	Limit       int
+	Offset      int
+}
+
 // through WithTenant so RLS and composite foreign keys remain the final isolation boundary.
 type BusinessAssetRepository interface {
 	CreateBusinessAsset(ctx context.Context, a *asset.BusinessAsset) error
@@ -124,6 +137,12 @@ type BusinessAssetRepository interface {
 	GetBusinessAssetByID(ctx context.Context, tenantID, id shared.ID) (*asset.BusinessAsset, error)
 	GetBusinessAssetByKey(ctx context.Context, tenantID shared.ID, key string) (*asset.BusinessAsset, error)
 	ListBusinessAssets(ctx context.Context, tenantID shared.ID) ([]*asset.BusinessAsset, error)
+	// ListBusinessAssetsPage applies the filter, the ordering, and the page in the store. It exists
+	// because ListBusinessAssets ships every row for the tenant: filtering and paginating above the
+	// repository makes a five-row page cost a full scan and a full row transfer.
+	//
+	// It returns the page and the count of rows matching the filter before the page is applied.
+	ListBusinessAssetsPage(ctx context.Context, tenantID shared.ID, query BusinessAssetQuery) ([]*asset.BusinessAsset, int, error)
 	// CountBusinessAssetsByCriticality returns the tenant's asset count per criticality. It exists
 	// so a dashboard can state an estate-wide figure without listing the estate: ListBusinessAssets
 	// ships every row regardless of the page asked for, so answering a count with it costs a full

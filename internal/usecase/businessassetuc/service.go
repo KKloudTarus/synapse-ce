@@ -153,6 +153,16 @@ func (s *Service) List(ctx context.Context, tenantID shared.ID, filter Filter) (
 	return out, nil
 }
 
+// ListPage returns one page of the filtered listing plus the count of rows matching the filter
+// before the page. The filter and the page are applied in the store, so the cost tracks the page
+// asked for rather than the size of the tenant's estate.
+func (s *Service) ListPage(ctx context.Context, tenantID shared.ID, filter Filter, limit, offset int) ([]*asset.BusinessAsset, int, error) {
+	return s.repo.ListBusinessAssetsPage(ctx, shared.TenantOrDefault(tenantID), ports.BusinessAssetQuery{
+		Query: filter.Query, Type: filter.Type, Criticality: filter.Criticality,
+		Lifecycle: filter.Lifecycle, Owner: filter.Owner, Limit: limit, Offset: offset,
+	})
+}
+
 // CriticalityCounts answers the estate-wide count per criticality. A dashboard that needs the
 // number of critical assets must not fetch a page to get it: List loads every row for the tenant,
 // so using it as a counter costs a full scan per card.

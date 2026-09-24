@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -371,5 +372,89 @@ func TestCriticalityCountsCoversTheWholeEstateAndOneTenant(t *testing.T) {
 	}
 	if got := other[asset.CriticalityCritical]; got != 1 {
 		t.Fatalf("tenant-b critical count = %d, want 1; counts must not cross tenants", got)
+	}
+}
+
+// ListPage moved filtering and pagination into the store. These assert it answers exactly what the
+// previous list-everything-then-slice path answered: same matches, same order, same total.
+func TestListPageMatchesTheFilterAndPagesInOrder(t *testing.T) {
+	service, _, _, _, _, _, _ := newBusinessAssetService(t)
+	ctx := context.Background()
+
+	seed := func(key, name, owner string, criticality asset.Criticality, lifecycle asset.BusinessAssetLifecycle) {
+		t.Helper()
+		created, err := service.Create(ctx, CreateInput{
+			TenantID: "tenant-a", Key: key, Name: name, Type: asset.BusinessAssetApplication,
+			Criticality: criticality, Owner: owner, Actor: "operator",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if lifecycle != asset.BusinessAssetDraft {
+			if _, err := service.Update(ctx, "tenant-a", created.ID, UpdateInput{
+				Name: name, Type: asset.BusinessAssetApplication, Criticality: criticality,
+				Owner: owner, Lifecycle: lifecycle, Version: created.Version, Actor: "operator",
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	seed("api-gateway", "Edge Gateway", "platform-team", asset.CriticalityCritical, asset.BusinessAssetActive)
+	seed("billing", "Billing Service", "payments-team", asset.CriticalityHigh, asset.BusinessAssetActive)
+	seed("catalog", "Product Catalog", "platform-team", asset.CriticalityLow, asset.BusinessAssetDraft)
+	seed("dashboard", "Ops Dashboard", "platform-team", asset.CriticalityLow, asset.BusinessAssetDraft)
+
+	// Text matches over "<key> <name>", case-insensitively, the way the previous in-process filter did.
+	items, total, err := service.ListPage(ctx, "tenant-a", Filter{Query: "PRODUCT"}, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(items) != 1 || items[0].Key != "catalog" {
+		t.Fatalf("query filter returned total=%d items=%d, want the single catalog match", total, len(items))
+	}
+
+	// Owner is a case-insensitive substring too.
+	if _, total, err = service.ListPage(ctx, "tenant-a", Filter{Owner: "PLATFORM"}, 10, 0); err != nil || total != 3 {
+		t.Fatalf("owner filter total=%d err=%v, want 3", total, err)
+	}
+
+	// The typed filters match exactly.
+	if _, total, err = service.ListPage(ctx, "tenant-a", Filter{Criticality: asset.CriticalityLow}, 10, 0); err != nil || total != 2 {
+		t.Fatalf("criticality filter total=%d err=%v, want 2", total, err)
+	}
+
+	// The total is the filtered count before the page, so a page of one still reports every match.
+	page, total, err := service.ListPage(ctx, "tenant-a", Filter{Owner: "platform-team"}, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 {
+		t.Fatalf("total = %d, want the filtered count 3 rather than the page size", total)
+	}
+	if len(page) != 1 || page[0].Key != "api-gateway" {
+		t.Fatalf("first page = %v, want api-gateway first by key order", page)
+	}
+
+	// Paging walks the same key order without repeating or skipping a row.
+	seen := []string{}
+	for offset := 0; offset < total; offset++ {
+		rows, _, err := service.ListPage(ctx, "tenant-a", Filter{Owner: "platform-team"}, 1, offset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("offset %d returned %d rows, want 1", offset, len(rows))
+		}
+		seen = append(seen, rows[0].Key)
+	}
+	if strings.Join(seen, ",") != "api-gateway,catalog,dashboard" {
+		t.Fatalf("paged order = %v, want key order with no gap or repeat", seen)
+	}
+
+	// An offset past the end is an empty page, not an error, and the total still holds.
+	rows, total, err := service.ListPage(ctx, "tenant-a", Filter{}, 10, 99)
+	if err != nil || len(rows) != 0 || total != 4 {
+		t.Fatalf("offset past end: rows=%d total=%d err=%v, want 0 rows and total 4", len(rows), total, err)
 	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 func TestAssetRepository(t *testing.T) {
@@ -184,5 +185,105 @@ func TestCountBusinessAssetsByCriticality(t *testing.T) {
 	}
 	if got := other[asset.CriticalityCritical]; got != 1 {
 		t.Fatalf("tenant-b critical = %d, want 1", got)
+	}
+}
+
+// The SQL filter must mean exactly what the in-memory twin means, or the dashboard shows different
+// results depending on which store is configured.
+func TestListBusinessAssetsPageFilterSemantics(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ('tpage-a','A'),('tpage-b','B') ON CONFLICT (id) DO NOTHING`); err != nil {
+		t.Fatalf("seed tenants: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM fleet_business_services WHERE tenant_id IN ('tpage-a','tpage-b')`)
+		_, _ = pool.Exec(bg, `DELETE FROM tenants WHERE id IN ('tpage-a','tpage-b')`)
+	})
+
+	repo := NewAssetRepository(pool)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := func(tenant, key, name, owner string, criticality asset.Criticality) {
+		t.Helper()
+		ba, err := asset.NewBusinessAsset(shared.ID("id-"+key), shared.ID(tenant), key, name, "", asset.BusinessAssetApplication, criticality, owner, nil, "operator", now)
+		if err != nil {
+			t.Fatalf("new business asset: %v", err)
+		}
+		if err := repo.CreateBusinessAsset(ctx, ba); err != nil {
+			t.Fatalf("create business asset: %v", err)
+		}
+	}
+
+	seed("tpage-a", "api-gateway", "Edge Gateway", "platform-team", asset.CriticalityCritical)
+	seed("tpage-a", "billing", "Billing Service", "payments-team", asset.CriticalityHigh)
+	seed("tpage-a", "catalog", "Product Catalog", "platform-team", asset.CriticalityLow)
+	seed("tpage-b", "other", "Other Tenant", "platform-team", asset.CriticalityCritical)
+
+	// Text is matched case-insensitively across "<key> <name>" joined by a space, so a substring
+	// spanning the join matches ("api-gateway" + " " + "Edge Gateway" contains "gateway edge")...
+	items, total, err := repo.ListBusinessAssetsPage(ctx, "tpage-a", ports.BusinessAssetQuery{Query: "GATEWAY EDGE", Limit: 10})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].Key != "api-gateway" {
+		t.Fatalf("join-spanning substring total=%d items=%d, want the api-gateway row", total, len(items))
+	}
+	// ...while terms from two different rows match neither, because this is a substring test and
+	// not a word-set test. The in-memory twin does strings.Contains over the same joined value.
+	if _, total, err = repo.ListBusinessAssetsPage(ctx, "tpage-a", ports.BusinessAssetQuery{Query: "gateway billing", Limit: 10}); err != nil || total != 0 {
+		t.Fatalf("cross-row terms matched %d rows (err %v), want 0", total, err)
+	}
+	items, total, err = repo.ListBusinessAssetsPage(ctx, "tpage-a", ports.BusinessAssetQuery{Query: "Product", Limit: 10})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].Key != "catalog" {
+		t.Fatalf("text filter total=%d items=%d, want the catalog row", total, len(items))
+	}
+
+	// A wildcard in the caller's text is a literal, not a pattern.
+	if _, total, err = repo.ListBusinessAssetsPage(ctx, "tpage-a", ports.BusinessAssetQuery{Query: "%", Limit: 10}); err != nil || total != 0 {
+		t.Fatalf("percent matched %d rows (err %v), want 0: caller text must not be a LIKE pattern", total, err)
+	}
+	if _, total, err = repo.ListBusinessAssetsPage(ctx, "tpage-a", ports.BusinessAssetQuery{Query: "_", Limit: 10}); err != nil || total != 0 {
+		t.Fatalf("underscore matched %d rows (err %v), want 0", total, err)
+	}
+
+	// Owner is a case-insensitive substring; the typed filters are exact.
+	if _, total, err = repo.ListBusinessAssetsPage(ctx, "tpage-a", ports.BusinessAssetQuery{Owner: "PLATFORM", Limit: 10}); err != nil || total != 2 {
+		t.Fatalf("owner filter total=%d err=%v, want 2", total, err)
+	}
+	if _, total, err = repo.ListBusinessAssetsPage(ctx, "tpage-a", ports.BusinessAssetQuery{Criticality: asset.CriticalityHigh, Limit: 10}); err != nil || total != 1 {
+		t.Fatalf("criticality filter total=%d err=%v, want 1", total, err)
+	}
+
+	// The total counts every match, not the page, and paging follows key order.
+	page, total, err := repo.ListBusinessAssetsPage(ctx, "tpage-a", ports.BusinessAssetQuery{Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("page: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("total = %d, want 3 matches regardless of the page size", total)
+	}
+	if len(page) != 1 || page[0].Key != "billing" {
+		t.Fatalf("offset 1 = %v, want billing in key order", page)
+	}
+
+	// Another tenant's rows never appear.
+	if _, total, err = repo.ListBusinessAssetsPage(ctx, "tpage-b", ports.BusinessAssetQuery{Limit: 10}); err != nil || total != 1 {
+		t.Fatalf("tenant-b total = %d err=%v, want only its own row", total, err)
 	}
 }
