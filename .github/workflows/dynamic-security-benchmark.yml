@@ -1,0 +1,66 @@
+name: Dynamic security benchmark
+
+# Owned-engine accuracy for the dynamic dimensions: passive DAST evaluation and CSPM posture evaluation.
+#
+# Both corpora are local labeled fixtures: the DAST corpus is a set of recorded observations (headers,
+# cookies, artifact paths, body markers) and the CSPM corpus is a fixture inventory of normalized provider
+# resources. Nothing here reaches a live target or a cloud account, so the workflow is PR-safe and cannot
+# mutate anything. A CSPM resource whose state is unknown stays NotAssessed and produces no finding, so
+# inaccessible evidence is never scored as compliant.
+#
+# An authorized live evaluation (a real DAST target or a cloud read) is deliberately NOT run here. Per the
+# benchmark lifecycle contract it would need a trusted ref, a protected environment, short-lived identity,
+# and rate bounds, so it belongs in a separately authorized lane rather than on a PR-safe workflow.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "37 4 * * 5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dynamic-security-benchmark-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  accuracy:
+    name: Owned dynamic accuracy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Passive DAST accuracy over the labeled observation corpus
+        shell: bash
+        run: go test -count=1 -v ./internal/infrastructure/dastchecks/ -run 'TestDASTOwnedAccuracy'
+      - name: CSPM posture accuracy over the fixture inventory
+        shell: bash
+        run: go test -count=1 -v ./internal/domain/cloudposture/ -run 'TestCSPMOwnedAccuracy'
+
+  aggregate:
+    name: Aggregate dynamic benchmark status
+    needs: [accuracy]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - shell: bash
+        env:
+          ACCURACY: ${{ needs.accuracy.result }}
+        run: |
+          set -euo pipefail
+          test "$ACCURACY" = success
