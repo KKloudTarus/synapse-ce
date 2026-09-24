@@ -138,7 +138,7 @@ func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 	requireActiveLine(t, source.Run, `[[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]`)
 	requireActiveLine(t, source.Run, `echo "sha=$sha" >> "$GITHUB_OUTPUT"`)
 
-	for _, name := range []string{"owasp-scorecard", "securibench-scorecard", "juliet-scorecard"} {
+	for _, name := range []string{"owasp-scorecard", "securibench-scorecard", "juliet-scorecard", "adversarial-regressions"} {
 		t.Run(name, func(t *testing.T) {
 			job := requireJob(t, workflow, name)
 			requireNeeds(t, job, "route")
@@ -208,13 +208,29 @@ func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 	if !strings.Contains(upload.With["path"], "${{ env.SEMGREP_REPORT_DIR }}") {
 		t.Fatal("Securibench artifact must retain the Semgrep SARIF and metadata")
 	}
+	adversarial := requireJob(t, workflow, "adversarial-regressions")
+	regressions := requireStep(t, adversarial, func(step benchmarkStep) bool {
+		return step.Name == "Run required adversarial cases"
+	})
+	for _, want := range []string{
+		`CGO_ENABLED=1 go test -count=1 -json`,
+		`./internal/domain/taint ./internal/infrastructure/tools/astwalk`,
+		`TestPythonDisplayFieldSensitivityWidensOnDisplayUncertainty`,
+		`TestPythonFrameworkEscapersSanitizeXSS`,
+		`TestPythonShadowedSanitizerImportNotWalled`,
+		`TestJavaLdapFilterPartialSanitizationFlags`,
+		`TestJsTaintConfigurableSanitizersNotWalled`,
+		`jq -e --arg name "$name"`,
+	} {
+		requireActiveLine(t, regressions.Run, want)
+	}
 	aggregate := requireJob(t, workflow, "aggregate")
-	requireNeeds(t, aggregate, "route", "owasp-scorecard", "securibench-scorecard", "juliet-scorecard")
+	requireNeeds(t, aggregate, "route", "owasp-scorecard", "securibench-scorecard", "juliet-scorecard", "adversarial-regressions")
 	if aggregate.If != "${{ always() }}" {
 		t.Fatal("SAST aggregate must report every run")
 	}
 	step := requireOnlyRunStep(t, aggregate)
-	for _, result := range []string{"ROUTE_RESULT", "OWASP_RESULT", "SECURIBENCH_RESULT", "JULIET_RESULT"} {
+	for _, result := range []string{"ROUTE_RESULT", "OWASP_RESULT", "SECURIBENCH_RESULT", "JULIET_RESULT", "ADVERSARIAL_RESULT"} {
 		requireActiveLine(t, step.Run, fmt.Sprintf(`test "$%s" = success`, result))
 	}
 }

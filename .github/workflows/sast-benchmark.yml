@@ -294,9 +294,69 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  adversarial-regressions:
+    name: Python and sanitizer adversarial regressions
+    needs: route
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.route.outputs.source_sha }}
+          persist-credentials: false
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run required adversarial cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            TestJavaLdapEncoderSanitizer
+            TestJavaLdapFilterPartialSanitizationFlags
+            TestJavaCanonicalPathIsNotASanitizer
+            TestPythonSanitizersAreClassSpecific
+            TestEncodeURIComponentSanitizesXSS
+            TestEscapeStringRegexpSanitizesReDoS
+            TestPythonDisplayFieldSensitivityRefinesDisplayLiteral
+            TestPythonDisplayFieldSensitivityWidensOnDisplayUncertainty
+            TestPythonDisplayFieldSensitivityExtractorDesugars
+            TestPythonShadowedSanitizerImportNotWalled
+            TestPythonFrameworkEscapersSanitizeXSS
+            TestJsTaintSanitizedTwin
+            TestJsTaintConfigurableSanitizersNotWalled
+            TestJsTaintCrossClassSanitizerDoesNotClean
+            TestJavaTaintCanonicalizeIsNotASanitizer
+          )
+          pattern="^($(IFS='|'; echo "${required[*]}"))$"
+          CGO_ENABLED=1 go test -count=1 -json -run "$pattern" \
+            ./internal/domain/taint ./internal/infrastructure/tools/astwalk \
+            | tee "${RUNNER_TEMP}/sast-adversarial.jsonl"
+          for name in "${required[@]}"; do
+            jq -e --arg name "$name" 'select(.Action == "pass" and .Test == $name)' \
+              "${RUNNER_TEMP}/sast-adversarial.jsonl" > /dev/null
+          done
+
+      - name: Upload adversarial results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sast-adversarial-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/sast-adversarial.jsonl
+          if-no-files-found: error
+          retention-days: 90
+
   aggregate:
     name: Aggregate SAST benchmark status
-    needs: [route, owasp-scorecard, securibench-scorecard, juliet-scorecard]
+    needs: [route, owasp-scorecard, securibench-scorecard, juliet-scorecard, adversarial-regressions]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -308,6 +368,7 @@ jobs:
           OWASP_RESULT: ${{ needs.owasp-scorecard.result }}
           SECURIBENCH_RESULT: ${{ needs.securibench-scorecard.result }}
           JULIET_RESULT: ${{ needs.juliet-scorecard.result }}
+          ADVERSARIAL_RESULT: ${{ needs.adversarial-regressions.result }}
           SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
         run: |
           set -euo pipefail
@@ -315,4 +376,5 @@ jobs:
           test "$OWASP_RESULT" = success
           test "$SECURIBENCH_RESULT" = success
           test "$JULIET_RESULT" = success
+          test "$ADVERSARIAL_RESULT" = success
           test "${#SOURCE_SHA}" -eq 40

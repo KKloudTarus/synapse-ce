@@ -35,9 +35,10 @@ An ordinary green readiness aggregate does not establish currency: it may be for
 designated candidate. The final acceptance artifact for `ACCEPTANCE_SHA` must explicitly contain
 `evidence_current: true`.
 
-The SAST route currently runs three propose-stage corpora. Its green aggregate does not satisfy the SAST
-row until the Semgrep, adversarial, and accepted post-triage gates have been added and passed on
-`ACCEPTANCE_SHA`. The committed pre-tuning diagnostic control is not an accepted baseline.
+The SAST route runs three propose-stage corpora, the pinned Semgrep comparison, and Python and sanitizer
+adversarial regressions. Its green aggregate does not satisfy the SAST row until an accepted post-triage
+improvement gate has been added and passed on `ACCEPTANCE_SHA`. The committed pre-tuning diagnostic control
+is not an accepted baseline.
 
 Record each downloaded artifact's GitHub artifact ID, SHA-256 digest, retention period, and storage location.
 Record a short independent review of the collected evidence and its disposition. The reviewer must not be the
