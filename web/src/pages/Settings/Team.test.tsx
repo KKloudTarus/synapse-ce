@@ -147,4 +147,73 @@ describe('Team administration', () => {
     const shown = await screen.findAllByText('insufficient permissions')
     expect(shown.some((node) => node.className.includes('text-critical'))).toBe(true)
   })
+
+  // The roster refetches after any action on any row, and this row keeps its React key across
+  // that refetch. An editor left open with its selection seeded from the old role would see Save
+  // re-enable itself the moment another admin moved the member, and pressing it would write back
+  // a role the operator never chose.
+  it('never saves a role after the member moved underneath the open editor', async () => {
+    vi.mocked(api.setUserDisabled).mockResolvedValue({ ...bob, disabled: false })
+    vi.mocked(api.listUsers)
+      .mockResolvedValueOnce([alice, bob])
+      .mockResolvedValue([{ ...alice, role: 'admin' }, bob])
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Change role' })[0])
+    const editor = screen.getByRole('group', { name: /Role for Alice/ })
+    expect(within(editor).getByRole('button', { name: 'Save role' })).toBeDisabled()
+
+    // Another admin promotes Alice; any action on any row brings the new roster in.
+    fireEvent.click(screen.getByRole('button', { name: 'Enable' }))
+    await waitFor(() => expect(api.listUsers).toHaveBeenCalledTimes(2))
+
+    await waitFor(() =>
+      expect(within(editor).getByRole('button', { name: 'Save role' })).toBeDisabled(),
+    )
+    expect(screen.getByText(/was moved to admin elsewhere/)).toBeInTheDocument()
+    expect(api.updateUser).not.toHaveBeenCalled()
+  })
+
+  // The key a newly created member is issued is returned exactly once, so it gets the same
+  // treatment as a rotated one rather than being printed into the row.
+  it('masks a new member key until it is revealed, and drops it on dismiss', async () => {
+    vi.mocked(api.createUser).mockResolvedValue({
+      user: { id: 'u-3', name: 'Carol', role: 'member', disabled: false, createdAt: null },
+      apiKey: 'sk-created-456',
+    })
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Carol' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add/ }))
+
+    await waitFor(() => expect(api.createUser).toHaveBeenCalledWith('Carol', 'member'))
+    // The panel is identified by its dismiss control: the "shown once" copy also appears in the
+    // toast, and the point here is what the row itself holds.
+    expect(await screen.findByRole('button', { name: "Dismiss Carol's API key" })).toBeInTheDocument()
+    expect(screen.queryByText('sk-created-456')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal' }))
+    expect(screen.getByText('sk-created-456')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: "Dismiss Carol's API key" }))
+    expect(screen.queryByText('sk-created-456')).not.toBeInTheDocument()
+  })
+
+  it('refuses an empty name and surfaces a failed add', async () => {
+    vi.mocked(api.createUser).mockRejectedValue(new Error('name already taken'))
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getByRole('button', { name: /Add/ }))
+    expect(await screen.findByText('Name required')).toBeInTheDocument()
+    expect(api.createUser).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Carol' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add/ }))
+    // Inline beside the field, not only in the toast, so the reason survives the toast.
+    const shown = await screen.findAllByText('name already taken')
+    expect(shown.some((node) => node.className.includes('text-critical'))).toBe(true)
+  })
 })

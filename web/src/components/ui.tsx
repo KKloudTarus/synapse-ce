@@ -314,6 +314,25 @@ export function ErrorState({
   )
 }
 
+/**
+ * Says a refresh failed and that what follows is the last answer that did arrive.
+ *
+ * A failed refetch used to replace the content with an error, which threw away what the operator
+ * was reading over a transient failure. Keeping the content is only honest if the screen says the
+ * content is not current, which is what this is for. When there is nothing to keep, the screen
+ * shows an ErrorState instead.
+ */
+export function StaleNotice({ message, className }: { message: string; className?: string }) {
+  return (
+    <div
+      role="alert"
+      className={cn('rounded-lg border border-high/30 bg-high/10 px-4 py-2 text-xs text-high', className)}
+    >
+      Could not refresh: {message}. Showing the last result that loaded.
+    </div>
+  )
+}
+
 export function Skeleton({ className }: { className?: string }) {
   return <div className={cn('animate-pulse rounded bg-secondary motion-reduce:animate-none', className)} />
 }

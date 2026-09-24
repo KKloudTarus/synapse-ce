@@ -8,6 +8,16 @@ export interface UseFetchOptions {
   enabled?: boolean
   /** Dependency array for refetching. When any value changes, refetch is triggered. */
   deps?: unknown[]
+  /**
+   * Keep the previous result on screen while a dependency change refetches. Off by default:
+   * when a dependency carries which record is being shown, the result in hand answers the
+   * previous question, and rendering it under the new heading puts one record's data behind
+   * another record's label.
+   *
+   * Turn it on where the dependency is a refresh counter or a polled value, so the fetch asks
+   * the same question again and clearing would only flash.
+   */
+  keepPreviousData?: boolean
 }
 
 /**
@@ -43,12 +53,17 @@ export function useFetch<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
   options: UseFetchOptions = {},
 ): UseFetchResult<T> {
-  const { enabled = true, deps = [] } = options
+  const { enabled = true, deps = [], keepPreviousData = false } = options
 
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(enabled)
   const [error, setError] = useState<string | null>(null)
   const revisionRef = useRef(0)
+  // Distinguishes the first run from a later dependency change. A manual refetch() calls
+  // execute() directly and never passes through the effect, so it keeps what is on screen.
+  const startedRef = useRef(false)
+  const keepPreviousRef = useRef(keepPreviousData)
+  keepPreviousRef.current = keepPreviousData
   // Tracks the controller of the most recent in-flight request so a manual
   // refetch can still be aborted on unmount.
   const controllerRef = useRef<AbortController | null>(null)
@@ -88,6 +103,11 @@ export function useFetch<T>(
   }, [enabled, ...deps])
 
   useEffect(() => {
+    if (startedRef.current && !keepPreviousRef.current) {
+      setData(null)
+      setError(null)
+    }
+    startedRef.current = true
     execute()
     return () => {
       controllerRef.current?.abort()

@@ -132,7 +132,11 @@ for (const viewport of VIEWPORTS) {
 
     const probe = await page.evaluate(() => {
       const doc = document.documentElement
-      const headings = [...document.querySelectorAll('h1, h2')].map((h) => h.textContent?.trim() ?? '').filter(Boolean)
+      // Scoped to the main region, as ui-probe already does. Over the whole document the sidebar's
+      // per-group <h2> is always present, so "this screen has no heading" could never be true and
+      // the headings recorded were the navigation labels rather than anything about the screen.
+      const main = document.querySelector('main') ?? document.body
+      const headings = [...main.querySelectorAll('h1, h2')].map((h) => h.textContent?.trim() ?? '').filter(Boolean)
       // Elements whose right edge is past the viewport are what make a phone scroll sideways.
       const overflowing = [...document.querySelectorAll('body *')]
         .filter((el) => {
@@ -192,6 +196,8 @@ const problems = findings.filter(
 console.log(`distinct API routes exercised: ${apiCalls.size} (written to ${OUT}/api-calls.json)`)
 console.log(`screens visited: ${findings.length} (${ROUTES.length} routes x ${VIEWPORTS.length} viewports)`)
 console.log(`screens with something to look at: ${problems.length}\n`)
+// A sweep that found problems must be able to fail a pipeline, not just print.
+process.exitCode = problems.length ? 1 : 0
 for (const p of problems) {
   console.log(`${p.viewport.padEnd(7)} ${p.route}`)
   if (p.loadError) console.log(`    load error: ${p.loadError}`)

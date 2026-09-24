@@ -1,7 +1,7 @@
 import { CheckCircle, File06, Plus, SearchLg, XClose } from '@untitledui/icons'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Button, Card, EmptyState, ErrorState, Select, Spinner, cn } from '../../components/ui'
+import { Button, Card, EmptyState, ErrorState, Select, Spinner, StaleNotice, cn } from '../../components/ui'
 import { findingKindLabel } from '../../lib/format'
 import type { Finding, ScanResult, Severity, Vulnerability } from '../../lib/types'
 import { vulnKey, shortPkg } from './VulnsTab'
@@ -196,7 +196,8 @@ export function FindingsTab({
     return map
   }, [scan])
 
-  if (findingsError) return <ErrorState message={findingsError} />
+  // Same rule as the overview: replace the table only when there is no table to keep.
+  if (findingsError && findings === null) return <ErrorState message={findingsError} />
   if (findings === null) return <Spinner label="Loading findings..." />
 
   function toggle(id: string) {
@@ -219,6 +220,7 @@ export function FindingsTab({
 
   return (
     <div className="space-y-4">
+      {findingsError ? <StaleNotice message={findingsError} /> : null}
       {/* Action and Filter Console Bar */}
       <Card bodyClass="p-3" className="shadow-xs">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

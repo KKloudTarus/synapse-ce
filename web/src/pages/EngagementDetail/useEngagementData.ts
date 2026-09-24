@@ -78,6 +78,15 @@ export function useEngagementData(id: string): EngagementData {
     () => api.findings(id),
     { deps: [id] },
   )
+  // These two are mirrored into local state so a tab can amend them in place, which means a new
+  // engagement id has to drop them explicitly: the copy outlives the fetch it came from. Without
+  // this, switching engagements while the findings request fails leaves the previous engagement's
+  // findings in hand, and the overview draws that risk analysis under the new engagement's name.
+  useEffect(() => {
+    setFindings(null)
+    setScan(null)
+  }, [id])
+
   useEffect(() => {
     if (fetchedFindings !== null) setFindings(fetchedFindings)
   }, [fetchedFindings])

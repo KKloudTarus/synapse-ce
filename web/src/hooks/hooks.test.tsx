@@ -113,4 +113,117 @@ describe('useFetch', () => {
     unmount()
     expect(signals[1].aborted).toBe(true)
   })
+
+  // Regression: `data` survived a deps change, so a screen that selected a different
+  // record rendered the previous record's payload under the new record's heading until
+  // the request landed. An SLA panel showed one finding's decision history under another.
+  it('drops the previous record when the deps select a different one', async () => {
+    let resolveSecond: (value: string) => void = () => {}
+    const seen: Array<string | null> = []
+
+    function Probe() {
+      const [id, setId] = useState('first')
+      const { data } = useFetch<string>(
+        () =>
+          id === 'first'
+            ? Promise.resolve('first payload')
+            : new Promise<string>((resolve) => {
+                resolveSecond = resolve
+              }),
+        { deps: [id] },
+      )
+      seen.push(data)
+      return (
+        <button type="button" onClick={() => setId('second')}>
+          {data ?? 'none'}
+        </button>
+      )
+    }
+
+    const { getByRole } = render(<Probe />)
+    await waitFor(() => expect(getByRole('button').textContent).toBe('first payload'))
+
+    await act(async () => {
+      getByRole('button').click()
+    })
+    expect(getByRole('button').textContent).toBe('none')
+
+    await act(async () => {
+      resolveSecond('second payload')
+    })
+    await waitFor(() => expect(getByRole('button').textContent).toBe('second payload'))
+    expect(seen).not.toContain(undefined)
+  })
+
+  // The refresh counter and polling call sites ask the same question again, so clearing
+  // would only flash. keepPreviousData holds the result across the deps change.
+  it('keeps the previous result across a deps change when asked to', async () => {
+    let resolveSecond: (value: string) => void = () => {}
+
+    function Probe() {
+      const [tick, setTick] = useState(0)
+      const { data } = useFetch<string>(
+        () =>
+          tick === 0
+            ? Promise.resolve('first payload')
+            : new Promise<string>((resolve) => {
+                resolveSecond = resolve
+              }),
+        { deps: [tick], keepPreviousData: true },
+      )
+      return (
+        <button type="button" onClick={() => setTick(1)}>
+          {data ?? 'none'}
+        </button>
+      )
+    }
+
+    const { getByRole } = render(<Probe />)
+    await waitFor(() => expect(getByRole('button').textContent).toBe('first payload'))
+
+    await act(async () => {
+      getByRole('button').click()
+    })
+    expect(getByRole('button').textContent).toBe('first payload')
+
+    await act(async () => {
+      resolveSecond('second payload')
+    })
+    await waitFor(() => expect(getByRole('button').textContent).toBe('second payload'))
+  })
+
+  // A manual refetch asks the same question again, so it must not blank the screen.
+  it('keeps the current result across a manual refetch', async () => {
+    let calls = 0
+    let resolveSecond: (value: string) => void = () => {}
+
+    function Probe() {
+      const { data, refetch } = useFetch<string>(() => {
+        calls += 1
+        return calls === 1
+          ? Promise.resolve('first payload')
+          : new Promise<string>((resolve) => {
+              resolveSecond = resolve
+            })
+      }, { deps: [] })
+      return (
+        <button type="button" onClick={refetch}>
+          {data ?? 'none'}
+        </button>
+      )
+    }
+
+    const { getByRole } = render(<Probe />)
+    await waitFor(() => expect(getByRole('button').textContent).toBe('first payload'))
+
+    await act(async () => {
+      getByRole('button').click()
+    })
+    expect(getByRole('button').textContent).toBe('first payload')
+
+    await act(async () => {
+      resolveSecond('second payload')
+    })
+    await waitFor(() => expect(getByRole('button').textContent).toBe('second payload'))
+  })
 })
