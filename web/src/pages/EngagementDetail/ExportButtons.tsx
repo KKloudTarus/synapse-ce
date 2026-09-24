@@ -73,7 +73,7 @@ export function ExportButtons({
     }
   }
 
-  function exportExcel(mode: ExcelExportMode = excelMode) {
+  async function exportExcel(mode: ExcelExportMode = excelMode) {
     if (!scan) {
       setErr('Run a scan before exporting Excel.')
       return
@@ -83,7 +83,7 @@ export function ExportButtons({
     setErr(null)
     setMsg(null)
     try {
-      downloadStyledExcel(
+      await downloadStyledExcel(
         `synapse-${excelFileSafeName(engagementId)}-vulnerabilities-licenses.xlsx`,
         scan,
         mode,

@@ -24,42 +24,46 @@ import type {
   Severity,
   UploadedSourcePackage,
 } from '../../lib/types'
-import { AgentTab } from '../AgentTab'
-import { ThreatModelTab } from './ThreatModelTab'
-import { CodeQualityTab } from '../CodeQuality/CodeQualityTab'
-import { SLATab } from './SLATab'
 import { OverviewTab } from './OverviewTab'
 import { FindingsTab } from './FindingsTab'
 import { ScanPanel } from './ScanPanel'
 import { ExportButtons } from './ExportButtons'
 import { packageLocationMap, countVulnerabilityFindings, VulnsTab } from './VulnsTab'
-import { LicensesTab } from './LicensesTab'
-import { ComponentsTab } from './ComponentsTab'
-import { ReconTab } from './ReconTab'
-import { ScanRunsTab } from './ScanRunsTab'
-import { PurpleCoverageTab } from './PurpleCoverageTab'
-import { ChainRehearsalTab } from './ChainRehearsalTab'
-import { RiskStoriesTab } from './RiskStoriesTab'
-import { VulnPostureTab } from './VulnPostureTab'
-import { CredentialsTab } from './CredentialsTab'
-import { DetectionsTab } from './DetectionsTab'
-import { ImportedFindingsTab } from './ImportedFindingsTab'
-import { DataGovernanceTab } from './DataGovernanceTab'
-import { WriteupDraftsTab } from './WriteupDraftsTab'
-import { CloudPostureTab } from './CloudPostureTab'
-import { DASTTab } from './DASTTab'
-import { DetectionProvenanceTab } from './DetectionProvenanceTab'
-import { EvidenceTab } from './EvidenceTab'
-import { SettingsTab } from './SettingsTab'
-import { JudgmentReviewTab } from './ReviewsTab'
 import { ARCHIVED_REASON, isReadOnly } from './readOnly'
 
-import { AssessmentComparisonTab } from './AssessmentComparisonTab'
 import { AssessmentLifecyclePanel } from './AssessmentLifecyclePanel'
 import { VulnerabilityIntelligenceBadge } from '../../components/synapse/VulnerabilityIntelligenceBadge'
 
+// Only one tab renders at a time, so every tab except the two opened first (Overview and
+// Findings) is a separate chunk. Statically importing all 27 put every tab in the initial
+// bundle, which a user pays for on first paint no matter which tab they open. VulnsTab stays
+// static because this module calls its counting helpers to render the tab-bar counts.
 // Lazy-loaded so React Flow stays out of the initial bundle (only the Graph tab needs it).
 const DependencyGraphTab = lazy(() => import('../DependencyGraph').then((m) => ({ default: m.DependencyGraphTab })))
+const AgentTab = lazy(() => import('../AgentTab').then((m) => ({ default: m.AgentTab })))
+const ThreatModelTab = lazy(() => import('./ThreatModelTab').then((m) => ({ default: m.ThreatModelTab })))
+const CodeQualityTab = lazy(() => import('../CodeQuality/CodeQualityTab').then((m) => ({ default: m.CodeQualityTab })))
+const SLATab = lazy(() => import('./SLATab').then((m) => ({ default: m.SLATab })))
+const LicensesTab = lazy(() => import('./LicensesTab').then((m) => ({ default: m.LicensesTab })))
+const ComponentsTab = lazy(() => import('./ComponentsTab').then((m) => ({ default: m.ComponentsTab })))
+const ReconTab = lazy(() => import('./ReconTab').then((m) => ({ default: m.ReconTab })))
+const ScanRunsTab = lazy(() => import('./ScanRunsTab').then((m) => ({ default: m.ScanRunsTab })))
+const PurpleCoverageTab = lazy(() => import('./PurpleCoverageTab').then((m) => ({ default: m.PurpleCoverageTab })))
+const ChainRehearsalTab = lazy(() => import('./ChainRehearsalTab').then((m) => ({ default: m.ChainRehearsalTab })))
+const RiskStoriesTab = lazy(() => import('./RiskStoriesTab').then((m) => ({ default: m.RiskStoriesTab })))
+const VulnPostureTab = lazy(() => import('./VulnPostureTab').then((m) => ({ default: m.VulnPostureTab })))
+const CredentialsTab = lazy(() => import('./CredentialsTab').then((m) => ({ default: m.CredentialsTab })))
+const DetectionsTab = lazy(() => import('./DetectionsTab').then((m) => ({ default: m.DetectionsTab })))
+const ImportedFindingsTab = lazy(() => import('./ImportedFindingsTab').then((m) => ({ default: m.ImportedFindingsTab })))
+const DataGovernanceTab = lazy(() => import('./DataGovernanceTab').then((m) => ({ default: m.DataGovernanceTab })))
+const WriteupDraftsTab = lazy(() => import('./WriteupDraftsTab').then((m) => ({ default: m.WriteupDraftsTab })))
+const CloudPostureTab = lazy(() => import('./CloudPostureTab').then((m) => ({ default: m.CloudPostureTab })))
+const DASTTab = lazy(() => import('./DASTTab').then((m) => ({ default: m.DASTTab })))
+const DetectionProvenanceTab = lazy(() => import('./DetectionProvenanceTab').then((m) => ({ default: m.DetectionProvenanceTab })))
+const EvidenceTab = lazy(() => import('./EvidenceTab').then((m) => ({ default: m.EvidenceTab })))
+const SettingsTab = lazy(() => import('./SettingsTab').then((m) => ({ default: m.SettingsTab })))
+const JudgmentReviewTab = lazy(() => import('./ReviewsTab').then((m) => ({ default: m.JudgmentReviewTab })))
+const AssessmentComparisonTab = lazy(() => import('./AssessmentComparisonTab').then((m) => ({ default: m.AssessmentComparisonTab })))
 
 export type Tab =
   | 'overview'
@@ -530,6 +534,7 @@ export function EngagementDetail() {
 
       {/* A single panel holds whichever tab is active, so all tabs share its id. */}
       <div role="tabpanel" id="engagement-tabpanel" aria-labelledby={`tab-${activeGroup.id}`} className="mt-5">
+        <Suspense fallback={<Spinner label="Loading tab…" />}>
         {tab === 'overview' && (
           <OverviewTab findings={findings} scan={scan} job={job} onSelectSeverity={selectSeverity} onGoTab={setTab} />
         )}
@@ -554,11 +559,7 @@ export function EngagementDetail() {
         {tab === 'comparison' && <AssessmentComparisonTab assessmentId={id} />}
         {tab === 'components' && <ComponentsTab scan={scan} />}
         {tab === 'vulns' && <VulnsTab scan={scan} />}
-        {tab === 'graph' && (
-          <Suspense fallback={<Spinner label="Loading graph…" />}>
-            <DependencyGraphTab scan={scan} />
-          </Suspense>
-        )}
+        {tab === 'graph' && <DependencyGraphTab scan={scan} />}
         {tab === 'licenses' && <LicensesTab scan={scan} />}
         {tab === 'scanruns' && <ScanRunsTab key={id} engagementId={id} />}
         {tab === 'threats' && <ThreatModelTab engagementId={id} />}
@@ -578,6 +579,7 @@ export function EngagementDetail() {
         {tab === 'evidence' && <EvidenceTab key={id} engagementId={id} />}
         {tab === 'credentials' && <CredentialsTab key={id} engagementId={id} />}
         {tab === 'settings' && <SettingsTab eng={eng} onUpdated={setEng} />}
+        </Suspense>
       </div>
     </div>
   )
