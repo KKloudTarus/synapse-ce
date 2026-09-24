@@ -3,6 +3,8 @@
 package astwalk
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -47,6 +49,20 @@ func TestJavaInlineFQNSatisfiesImportGate(t *testing.T) {
     Object someNode() { return null; }
 }`,
 			rule: "java-taint-xpath-expression",
+			want: true,
+		},
+		{
+			// The sink receiver's fully-qualified type is only in the method parameter list, which walkMethod
+			// does not descend into for facts; the signature must still feed the inline-FQN gate.
+			name: "param_type_fqn_fires_ldap",
+			file: "ParamController.java",
+			body: `public class ParamController {
+    public void handle(javax.naming.directory.InitialDirContext idc, javax.servlet.http.HttpServletRequest request) throws Exception {
+        String filter = request.getParameter("q");
+        idc.search("ou=users", filter, new Object[]{}, null);
+    }
+}`,
+			rule: "java-taint-ldap-search",
 			want: true,
 		},
 		{
@@ -115,5 +131,27 @@ func TestJavaInlineFQNHostileInputDoesNotPoisonDocument(t *testing.T) {
 	rules := javaTaintRules(t, files)
 	if !rules["java-taint-ldap-search"] {
 		t.Errorf("hostile over-long FQN poisoned the document: the real LDAP flow was not proven (rules: %v)", javaRuleList(rules))
+	}
+}
+
+// TestJavaInlineFQNCountCapMarksTruncated proves that once a file exceeds the per-file synthetic-import cap,
+// the extractor marks the document truncated instead of silently dropping later fully-qualified types. A
+// silent drop would suppress an import-gated sink and read as a proven-clean result, violating the EPIC's
+// no-false-suppression guardrail.
+func TestJavaInlineFQNCountCapMarksTruncated(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("public class C {\n  void m() {\n")
+	for i := 0; i < maxSyntheticFQNTypes+8; i++ {
+		fmt.Fprintf(&b, "    a.b.T%d v%d = null;\n", i, i)
+	}
+	b.WriteString("  }\n}\n")
+	root := t.TempDir()
+	writeFile(t, root, "C.java", b.String())
+	doc, err := JavaFactsFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("JavaFactsFor: %v", err)
+	}
+	if !doc.Truncated {
+		t.Error("exceeding the synthetic-import cap must mark the document truncated, not silently drop types")
 	}
 }

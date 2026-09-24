@@ -205,6 +205,11 @@ func (e *javaFactExtractor) recordFQNType(node *sitter.Node) {
 		return // an inner prefix of a larger fully-qualified name; the outermost node carries the full type
 	}
 	if len(e.fqnTypes) >= maxSyntheticFQNTypes {
+		// Stop recording, but mark the document truncated and emit a coverage gap so a suppressed
+		// import-gated sink is never mistaken for a proven-clean result (#1034 no-false-suppression). A real
+		// compilation unit references far fewer distinct fully-qualified types than this cap.
+		e.doc.Truncated = true
+		e.gap(javaprogram.GapBudget, e.moduleID, "fqn_import_cap", node)
 		return
 	}
 	fqn := node.Content(e.source)
@@ -296,8 +301,20 @@ func (e *javaFactExtractor) walkMethod(node *sitter.Node, parent javaScope) {
 	}
 	e.doc.Symbols = append(e.doc.Symbols, symbol)
 	e.entrypointHints(symbol)
+	scope := javaScope{id: id, qualified: qualified, kind: kind}
+	// Record inline fully-qualified types in the signature too, not only the body: a sink receiver is often a
+	// method parameter (`void handle(javax.naming.directory.InitialDirContext idc)`), and its type node lives
+	// in the parameter list, which walkMethod does not otherwise descend into. Walking the parameters and the
+	// return type through the generic walk reaches their scoped_type_identifier nodes (which only trigger
+	// recordFQNType, no parameter or call facts) so the RequiresImport gate fires on an FQN-typed parameter.
+	if params := node.ChildByFieldName("parameters"); params != nil {
+		e.walk(params, scope)
+	}
+	if ret := node.ChildByFieldName("type"); ret != nil {
+		e.walk(ret, scope)
+	}
 	if body := node.ChildByFieldName("body"); body != nil {
-		e.walk(body, javaScope{id: id, qualified: qualified, kind: kind})
+		e.walk(body, scope)
 	}
 }
 
