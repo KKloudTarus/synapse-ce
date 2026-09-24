@@ -26,16 +26,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  route:
+    name: Bind benchmark source revision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source revision is not a full lower-case SHA" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
   measure:
     name: Owned performance gates
+    needs: route
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.route.outputs.source_sha }}
           persist-credentials: false
           fetch-depth: 1
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
@@ -64,23 +89,28 @@ jobs:
           cp docs/benchmarks/*perf*.json "$RUNNER_TEMP/performance-baselines/"
           ls -1 "$RUNNER_TEMP/performance-baselines"
       - name: Upload performance baselines
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: performance-baselines-${{ github.run_id }}-${{ github.run_attempt }}
+          name: performance-baselines-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
           path: ${{ runner.temp }}/performance-baselines
           if-no-files-found: error
           retention-days: 30
 
   aggregate:
     name: Aggregate performance status
-    needs: [measure]
+    needs: [route, measure]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - shell: bash
         env:
+          ROUTE: ${{ needs.route.result }}
           MEASURE: ${{ needs.measure.result }}
+          ARTIFACT: ${{ needs.measure.outputs.artifact }}
         run: |
           set -euo pipefail
+          test "$ROUTE" = success
           test "$MEASURE" = success
+          test -n "$ARTIFACT"

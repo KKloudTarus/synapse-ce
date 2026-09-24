@@ -31,16 +31,39 @@ env:
   CHECKOV_VERSION: "3.3.19"
 
 jobs:
+  route:
+    name: Bind benchmark source revision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source revision is not a full lower-case SHA" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
   accuracy:
     name: Owned security accuracy
+    needs: route
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.route.outputs.source_sha }}
           persist-credentials: false
           fetch-depth: 1
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
@@ -90,16 +113,18 @@ jobs:
 
   aggregate:
     name: Aggregate security accuracy status
-    needs: [accuracy]
+    needs: [route, accuracy]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - shell: bash
         env:
+          ROUTE: ${{ needs.route.result }}
           ACCURACY: ${{ needs.accuracy.result }}
         run: |
           set -euo pipefail
-          # This workflow owns no trusted path, so its verdict is the accuracy job itself. Reporting through
-          # an aggregator keeps the required-check name stable if a trusted lane is added later.
+          test "$ROUTE" = success
+          # This workflow owns no trusted path, so its verdict is the SHA-bound accuracy job itself. Reporting
+          # through an aggregator keeps the required-check name stable if a trusted lane is added later.
           test "$ACCURACY" = success
