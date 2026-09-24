@@ -4,7 +4,7 @@
 version: "2"
 
 run:
-  timeout: 5m
+  timeout: 10m
 
 linters:
   default: standard   # errcheck, govet, ineffassign, staticcheck, unused
