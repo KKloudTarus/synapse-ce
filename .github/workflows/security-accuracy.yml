@@ -7,7 +7,8 @@ name: Security accuracy benchmark
 # The owned recall and precision floors are the gate. Competitor differentials (gitleaks, checkov) are
 # comparison data only and never fail the build, matching docs/benchmarks/competitor-identity.json. The
 # competitor versions installed here are the ones pinned in that file, so the committed head-to-head numbers
-# stay reproducible; the differential is skipped cleanly when a competitor is unavailable.
+# stay reproducible. The differential inputs themselves must materialize and match their immutable provenance
+# so an accepted comparison cannot silently become an owned-only run.
 
 on:
   pull_request:
@@ -54,6 +55,10 @@ jobs:
     needs: route
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Release-asset checksum and OCI manifest digest are immutable comparison provenance for the versions above.
+      GITLEAKS_LINUX_X64_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+      CHECKOV_IMAGE: "bridgecrew/checkov@sha256:d3e96adafdb315ca82e792ca8708c01adae85292800fb064c8b309b3d0cb7b80"
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -77,33 +82,50 @@ jobs:
           asset="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
           curl -fsSL --retry 3 -o "$tmp/$asset" "$base/$asset"
-          # Verify against the checksums published for this exact tag. gitleaks is comparison-only and can
-          # never fail or alter the gate, so a verification failure downgrades to no differential.
-          if curl -fsSL --retry 3 -o "$tmp/checksums.txt" "$base/checksums.txt"; then
-            ( cd "$tmp" && grep " $asset\$" checksums.txt | sha256sum -c - )
-          else
-            echo "checksums unavailable for gitleaks v${GITLEAKS_VERSION}; skipping install" >&2
-            exit 0
-          fi
+          printf '%s  %s\n' "$GITLEAKS_LINUX_X64_SHA256" "$tmp/$asset" | sha256sum -c -
           tar -xzf "$tmp/$asset" -C "$tmp" gitleaks
           install -m 0755 "$tmp/gitleaks" /usr/local/bin/gitleaks
-          gitleaks version
+          version="$(gitleaks version)"
+          test "$version" = "$GITLEAKS_VERSION"
       - name: Install pinned checkov
         shell: bash
         run: |
           set -euo pipefail
-          # checkov is comparison-only; a failed install leaves the differential skipped rather than red.
-          python3 -m pip install --quiet --disable-pip-version-check "checkov==${CHECKOV_VERSION}" || {
-            echo "checkov ${CHECKOV_VERSION} install failed; the differential will be skipped" >&2
-            exit 0
-          }
-          checkov --version || true
+          # The image digest pins Checkov and its transitive Python environment. The wrapper exposes only the
+          # benchmark temp directory read-only and rewrites its host path for the container.
+          mkdir -p "$RUNNER_TEMP/benchmark-tmp" "$RUNNER_TEMP/benchmark-bin"
+          cat > "$RUNNER_TEMP/benchmark-bin/checkov" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          : "${SYNAPSE_CHECKOV_HOST_TMPDIR:?missing benchmark temp directory}"
+          : "${SYNAPSE_CHECKOV_IMAGE:?missing Checkov image digest}"
+          args=()
+          for arg in "$@"; do
+            args+=("${arg/"$SYNAPSE_CHECKOV_HOST_TMPDIR"/\/work-tmp}")
+          done
+          exec docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --cap-drop ALL --security-opt no-new-privileges -e HOME=/tmp \
+            -v "$SYNAPSE_CHECKOV_HOST_TMPDIR:/work-tmp:ro" "$SYNAPSE_CHECKOV_IMAGE" "${args[@]}"
+          EOF
+          chmod 0755 "$RUNNER_TEMP/benchmark-bin/checkov"
+          {
+            echo "PATH=$RUNNER_TEMP/benchmark-bin:$PATH"
+            echo "TMPDIR=$RUNNER_TEMP/benchmark-tmp"
+            echo "SYNAPSE_CHECKOV_HOST_TMPDIR=$RUNNER_TEMP/benchmark-tmp"
+            echo "SYNAPSE_CHECKOV_IMAGE=$CHECKOV_IMAGE"
+          } >> "$GITHUB_ENV"
+          version="$("$RUNNER_TEMP/benchmark-bin/checkov" --version)"
+          test "$version" = "$CHECKOV_VERSION"
       - name: Secrets accuracy and gitleaks differential
         shell: bash
-        run: bash scripts/require-go-tests.sh TestSecretsOwnedAccuracyAndGitleaksDifferential "$RUNNER_TEMP/secrets-accuracy.jsonl" pass ./internal/infrastructure/tools/secretscan/ -run '^TestSecretsOwnedAccuracyAndGitleaksDifferential$'
+        run: |
+          bash scripts/require-go-tests.sh TestSecretsOwnedAccuracyAndGitleaksDifferential "$RUNNER_TEMP/secrets-accuracy.jsonl" pass ./internal/infrastructure/tools/secretscan/ -run '^TestSecretsOwnedAccuracyAndGitleaksDifferential$'
+          jq -e 'select(.Action == "output" and .Test == "TestSecretsOwnedAccuracyAndGitleaksDifferential" and (.Output | contains("gitleaks secrets:")))' "$RUNNER_TEMP/secrets-accuracy.jsonl" > /dev/null
       - name: IaC misconfiguration accuracy and checkov differential
         shell: bash
-        run: bash scripts/require-go-tests.sh TestIaCOwnedAccuracyAndCheckovDifferential "$RUNNER_TEMP/iac-accuracy.jsonl" pass ./internal/infrastructure/tools/misconfig/ -run '^TestIaCOwnedAccuracyAndCheckovDifferential$'
+        run: |
+          bash scripts/require-go-tests.sh TestIaCOwnedAccuracyAndCheckovDifferential "$RUNNER_TEMP/iac-accuracy.jsonl" pass ./internal/infrastructure/tools/misconfig/ -run '^TestIaCOwnedAccuracyAndCheckovDifferential$'
+          jq -e 'select(.Action == "output" and .Test == "TestIaCOwnedAccuracyAndCheckovDifferential" and (.Output | contains("checkov iac:")))' "$RUNNER_TEMP/iac-accuracy.jsonl" > /dev/null
       - name: Runtime host-CVE correlation accuracy
         shell: bash
         run: bash scripts/require-go-tests.sh TestHostCVECorrelationAccuracy,TestHostCVEAliasResolution "$RUNNER_TEMP/host-cve-accuracy.jsonl" pass ./internal/domain/advisory/ -run '^TestHostCVE(CorrelationAccuracy|AliasResolution)$'

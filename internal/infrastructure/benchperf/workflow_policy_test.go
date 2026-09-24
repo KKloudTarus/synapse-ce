@@ -103,6 +103,59 @@ func TestHostedBenchmarkWorkflowsBindExactSourceRevision(t *testing.T) {
 	}
 }
 
+func TestSecurityAccuracyComparatorInputsAreImmutableAndRequired(t *testing.T) {
+	workflow := readHostedBenchmarkWorkflow(t, "security-accuracy.yml")
+	accuracy := requireJob(t, workflow, "accuracy")
+	if accuracy.Env["GITLEAKS_LINUX_X64_SHA256"] != "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb" {
+		t.Fatal("Gitleaks comparison asset must use its committed SHA-256")
+	}
+	if accuracy.Env["CHECKOV_IMAGE"] != "bridgecrew/checkov@sha256:d3e96adafdb315ca82e792ca8708c01adae85292800fb064c8b309b3d0cb7b80" {
+		t.Fatal("Checkov comparison environment must use its committed OCI digest")
+	}
+
+	gitleaks := requireStep(t, accuracy, func(step benchmarkStep) bool {
+		return step.Name == "Install pinned gitleaks"
+	})
+	for _, want := range []string{
+		`curl -fsSL --retry 3 -o "$tmp/$asset" "$base/$asset"`,
+		`printf '%s  %s\n' "$GITLEAKS_LINUX_X64_SHA256" "$tmp/$asset" | sha256sum -c -`,
+		`version="$(gitleaks version)"`,
+		`test "$version" = "$GITLEAKS_VERSION"`,
+	} {
+		requireActiveLine(t, gitleaks.Run, want)
+	}
+	if strings.Contains(gitleaks.Run, "checksums.txt") || strings.Contains(gitleaks.Run, "skipping install") {
+		t.Fatal("Gitleaks comparator must verify the committed asset digest and cannot silently skip")
+	}
+
+	checkov := requireStep(t, accuracy, func(step benchmarkStep) bool {
+		return step.Name == "Install pinned checkov"
+	})
+	for _, want := range []string{
+		`"$RUNNER_TEMP/benchmark-bin/checkov" --version`,
+		`test "$version" = "$CHECKOV_VERSION"`,
+		`--network none`, `--read-only`, `--cap-drop ALL`, `--security-opt no-new-privileges`,
+		`-v "$SYNAPSE_CHECKOV_HOST_TMPDIR:/work-tmp:ro"`, `"$SYNAPSE_CHECKOV_IMAGE"`,
+		`echo "TMPDIR=$RUNNER_TEMP/benchmark-tmp"`, `} >> "$GITHUB_ENV"`,
+	} {
+		requireActiveLine(t, checkov.Run, want)
+	}
+	if strings.Contains(checkov.Run, "pip install") || strings.Contains(checkov.Run, "skipping") {
+		t.Fatal("Checkov comparator must run from the pinned image and cannot silently skip")
+	}
+	for _, tc := range []struct {
+		name   string
+		marker string
+	}{
+		{"Secrets accuracy and gitleaks differential", "gitleaks secrets:"},
+		{"IaC misconfiguration accuracy and checkov differential", "checkov iac:"},
+	} {
+		step := requireStep(t, accuracy, func(step benchmarkStep) bool { return step.Name == tc.name })
+		requireActiveLine(t, step.Run, `jq -e 'select(.Action == "output"`)
+		requireActiveLine(t, step.Run, `contains("`+tc.marker+`")))'`)
+	}
+}
+
 func TestPerformanceBenchmarkRequiresEvidenceArtifact(t *testing.T) {
 	workflow := readHostedBenchmarkWorkflow(t, "performance-benchmark.yml")
 	measure := requireJob(t, workflow, "measure")

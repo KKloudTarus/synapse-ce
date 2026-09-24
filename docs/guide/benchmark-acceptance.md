@@ -25,7 +25,7 @@ trusted job is authorization evidence only, not an accepted measurement.
 | --- | --- |
 | `engine-accuracy.yml` | Trusted route is `true`; trusted benchmark job ran; sanitized result artifact is present; its revision equals `ACCEPTANCE_SHA`. |
 | `reachability-benchmark.yml` | Trusted route is `true`; trusted benchmark job ran; controller review and disposition evidence bind the source; sanitized artifact is present. |
-| `security-accuracy.yml` | Route, exact checkout assertion, accuracy job, and aggregate succeeded for `ACCEPTANCE_SHA`. |
+| `security-accuracy.yml` | Route, exact checkout assertion, accuracy job, and aggregate succeeded for `ACCEPTANCE_SHA`. The Gitleaks release asset must verify its recorded SHA-256 and emit its differential; Checkov must run from its recorded OCI digest and emit its differential. |
 | `dynamic-security-benchmark.yml` | Route, exact checkout assertion, accuracy job, and aggregate succeeded for `ACCEPTANCE_SHA`. |
 | `performance-benchmark.yml` | Route, exact checkout assertion, measurement job, aggregate, and SHA-named performance artifact succeeded. Its JSONL results contain passing test events and nonzero sample measurements for every target class alongside the committed baselines. |
 | `sast-benchmark.yml` | Route, exact checkout assertions, all scorecard jobs, aggregate, and SHA-named artifacts succeeded. OWASP, Juliet, and Securibench JSONL results contain passing scorecard test events; pinned Semgrep evidence is present; the Python and sanitizer adversarial gates passed; post-triage precision improved over an accepted committed baseline without losing a true case or breaching a recall floor. |
