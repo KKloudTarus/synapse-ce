@@ -28,6 +28,9 @@ proposed true case lost after triage. Unknown or incomplete source context shoul
 
 For a diagnostic measurement without a baseline, set `SYNAPSE_POST_TRIAGE_DIAGNOSTIC_REPORT` to an output path.
 The machine-readable report is marked `[diagnostic-unaccepted]`. It cannot establish improvement by itself.
+The recorded Securibench pre-tuning diagnostic control and its provenance are in `docs/benchmarks/`.
+Its verifier confirmed every proposal, and the model invocation is not reproducibly pinned; treat those
+files as a comparison aid, not as release acceptance evidence.
 
 For acceptance, omit the diagnostic output setting and supply `SYNAPSE_POST_TRIAGE_BASELINE` and
 `SYNAPSE_POST_TRIAGE_BASELINE_ENGINE`. The baseline must be a separately measured and committed pre-change
