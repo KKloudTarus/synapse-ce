@@ -15,6 +15,7 @@ func TestEngineAccuracyWorkflowPolicy(t *testing.T) {
 		`if [ "$EVENT_NAME" != pull_request ] && [ "$ENABLED" = true ] && [ -n "$TRUSTED_SHA" ] && [ "$REF" = "${TRUSTED_REF:-refs/heads/main}" ] && [ "$SHA" = "$TRUSTED_SHA" ]; then`,
 		"if: ${{ needs.route.outputs.trusted == 'true' }}",
 		"runs-on: [self-hosted, linux, sca-accuracy-trusted]",
+		"bash scripts/run-sca-cycle-delegated.sh run",
 		`if [ "$EVENT_NAME" = pull_request ]; then`,
 		`test "$TRUSTED" = false`,
 	} {

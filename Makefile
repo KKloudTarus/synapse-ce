@@ -95,7 +95,7 @@ ai-triage-verify: ## Reproducibly verify AI-triage eval + shadow gate offline (n
 
 sca-accuracy-run: ## Run the fixed trusted SCA benchmark cycle
 	@test -n "$(SCA_BENCHMARK_CORPUS_ROOT)" && test -n "$(SCA_BENCHMARK_TRUSTED_INPUT_ROOT)" && test -n "$(SCA_BENCHMARK_OUTPUT_ROOT)" && test -n "$(SCA_BENCHMARK_RAW_RETENTION_ROOT)" && test -n "$(SCA_BENCHMARK_IMPLEMENTATION_COMMIT)" && test -n "$(SCA_BENCHMARK_RUN_KEY)"
-	$(GO) run ./cmd/synapse-sca-cycle run --corpus-root "$(SCA_BENCHMARK_CORPUS_ROOT)" --trusted-input-root "$(SCA_BENCHMARK_TRUSTED_INPUT_ROOT)" --output-root "$(SCA_BENCHMARK_OUTPUT_ROOT)" --raw-retention-root "$(SCA_BENCHMARK_RAW_RETENTION_ROOT)" --implementation-commit "$(SCA_BENCHMARK_IMPLEMENTATION_COMMIT)" --run-key "$(SCA_BENCHMARK_RUN_KEY)"
+	bash scripts/run-sca-cycle-delegated.sh run --corpus-root "$(SCA_BENCHMARK_CORPUS_ROOT)" --trusted-input-root "$(SCA_BENCHMARK_TRUSTED_INPUT_ROOT)" --output-root "$(SCA_BENCHMARK_OUTPUT_ROOT)" --raw-retention-root "$(SCA_BENCHMARK_RAW_RETENTION_ROOT)" --implementation-commit "$(SCA_BENCHMARK_IMPLEMENTATION_COMMIT)" --run-key "$(SCA_BENCHMARK_RUN_KEY)"
 
 sca-accuracy-test: ## Run focused SCA benchmark verification
 	$(GO) test -count=1 ./internal/usecase/scabench ./internal/infrastructure/scabench ./cmd/synapse-sca-cycle ./cmd/synapse-sca-bench

@@ -57,7 +57,7 @@ an arbitrary-code-execution path on the runner host, not a configuration conveni
 
 ## Repository variables
 
-Eleven variables are referenced and currently exist. The workflows read them through `vars.*`; an unset
+Ten variables are referenced. The workflows read them through `vars.*`; an unset
 variable evaluates empty and the trust predicate closes. Both trusted-enabled flags currently equal `false`.
 
 ### SCA accuracy (`engine-accuracy.yml`)
@@ -69,7 +69,6 @@ variable evaluates empty and the trust predicate closes. Both trusted-enabled fl
 | `ENGINE_ACCURACY_TRUSTED_SHA` | The exact 40-character commit authorized to run. |
 | `SCA_ACCURACY_TRUSTED_INPUT_ROOT` | Absolute path to the prepared pinned input tree. |
 | `SCA_ACCURACY_RAW_RETENTION_ROOT` | Absolute path where protected raw identities are retained until cleanup. |
-| `SCA_ACCURACY_DELEGATED_CGROUP_ROOT` | The runner's delegated systemd service cgroup. |
 
 `ENGINE_ACCURACY_TRUSTED_SHA` pins one commit, so it must be re-pointed for each authorized capture.
 That is deliberate, because it makes an authorized run name its own subject. It also means a stale value
@@ -132,13 +131,18 @@ self-hosted `benchmark` jobs:
 environment: trusted-benchmarks                       both trusted benchmark jobs
 ```
 
-The SCA runner needs a delegated cgroup v2 hierarchy. `cmd/synapse-sca-cycle` requires
-`SCA_ACCURACY_DELEGATED_CGROUP_ROOT` to be non-empty and passes it to the sandbox runner, which rejects
-any path outside `/sys/fs/cgroup` or outside its `synapse-manager` child, and requires both the `memory`
-and `pids` controllers (`internal/infrastructure/sandbox/cgroup_linux.go:51-89`). This is the capability
-that rules out a hosted runner and rules out running the capture on a non-Linux host at all. The current SCA
-cleanup barrier also invokes `docker container`, `volume`, `image`, and `builder` prune commands. The Docker
-executable and a usable Docker daemon are therefore required today; cleanup failure blocks the cycle.
+The SCA runner needs a delegated cgroup v2 hierarchy. Provision the dedicated runner account with a
+running, lingering systemd user manager that can start transient `Delegate=yes` services. The account must
+receive the `memory` and `pids` controllers and have access to the Docker daemon. The workflow builds the
+cycle binary outside the checkout and starts it as the main process of its own delegated user service.
+`scripts/sca-cycle-service.sh` derives `SCA_ACCURACY_DELEGATED_CGROUP_ROOT` from that process's cgroup;
+the value is no longer a manually configured GitHub variable. A direct `go run` or ordinary runner-step
+process leaves a parent in the service root, preventing the sandbox from enabling those controllers.
+The launcher stops its service on cancellation and limits its runtime to 40 minutes. The sandbox rejects
+paths outside `/sys/fs/cgroup` or outside its `synapse-manager` child
+(`internal/infrastructure/sandbox/cgroup_linux.go:51-89`). These requirements rule out a hosted runner and
+a non-Linux capture. The SCA cleanup barrier also invokes `docker container`, `volume`, `image`, and
+`builder` prune commands; cleanup failure blocks the cycle.
 
 The reachability runner additionally needs the Go toolchain declared by `go.mod`, .NET SDK `8.0.100`,
 and OpenJDK `java`, `javac` and `jar` at `21.0.5`

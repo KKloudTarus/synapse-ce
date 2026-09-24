@@ -81,10 +81,9 @@ jobs:
         env:
           TRUSTED_INPUT_ROOT: ${{ vars.SCA_ACCURACY_TRUSTED_INPUT_ROOT }}
           RAW_RETENTION_ROOT: ${{ vars.SCA_ACCURACY_RAW_RETENTION_ROOT }}
-          SCA_ACCURACY_DELEGATED_CGROUP_ROOT: ${{ vars.SCA_ACCURACY_DELEGATED_CGROUP_ROOT }}
         run: |
           set -euo pipefail
-          go run ./cmd/synapse-sca-cycle run --corpus-root "$GITHUB_WORKSPACE/internal/usecase/scabench/corpus" --trusted-input-root "$TRUSTED_INPUT_ROOT" --output-root "$RUNNER_TEMP/sca-accuracy-candidate" --raw-retention-root "$RAW_RETENTION_ROOT" --implementation-commit "${{ needs.route.outputs.source_sha }}" --run-key "${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
+          bash scripts/run-sca-cycle-delegated.sh run --corpus-root "$GITHUB_WORKSPACE/internal/usecase/scabench/corpus" --trusted-input-root "$TRUSTED_INPUT_ROOT" --output-root "$RUNNER_TEMP/sca-accuracy-candidate" --raw-retention-root "$RAW_RETENTION_ROOT" --implementation-commit "${{ needs.route.outputs.source_sha }}" --run-key "${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
       - name: Upload sanitized result
         id: upload
         if: ${{ success() }}
