@@ -119,6 +119,18 @@ func TestJavaExactFalseConsequenceMalformedConditionIsRetained(t *testing.T) {
 	}
 }
 
+func TestJavaExactFalseConsequenceTotalWorkBudgetRetainsBranch(t *testing.T) {
+	source := []byte(`class Dead { void run() { if (false) { Runtime.getRuntime().exec("cmd"); } } }`)
+	ifNode := javaFirstIfStatement(parseRoot(context.Background(), specs["Java"], source))
+	if ifNode == nil {
+		t.Fatal("fixture must contain an if_statement")
+	}
+	extractor := javaFactExtractor{source: source, deadBranchEligibilityVisits: maxJavaDeadBranchEligibilityWork}
+	if extractor.skipExactFalseConsequence(ifNode) {
+		t.Fatal("exhausted inspection budget must retain the consequence")
+	}
+}
+
 // TestJavaExactFalseConsequenceKeepsReachableTaint proves the optimization does not hide reachable sinks in
 // the adjacent alternative, following statement, or any condition whose value is not syntactically exact.
 func TestJavaExactFalseConsequenceKeepsReachableTaint(t *testing.T) {

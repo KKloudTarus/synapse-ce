@@ -34,6 +34,9 @@ const (
 	// exact `if (false)` consequence. Reaching the cap retains the branch, so hostile nesting cannot turn
 	// incomplete inspection into a false suppression.
 	maxJavaDeadBranchEligibilityNodes = 8192
+	// Multiple ineligible nested branches can inspect the same subtree repeatedly. This per-file cap
+	// bounds their combined work; exhaustion retains later consequences for ordinary extraction.
+	maxJavaDeadBranchEligibilityWork = 65536
 )
 
 // JavaFactsFor extracts a bounded, versioned Java semantic-facts document without compiling or executing
@@ -116,19 +119,20 @@ type javaScope struct {
 }
 
 type javaFactExtractor struct {
-	doc        *javaprogram.Document
-	module     string
-	file       string
-	source     []byte
-	moduleID   string               // the compilation-unit scope id, for file-scoped synthetic imports
-	modulePos  javaprogram.Position // the module position, reused as the synthetic imports' position
-	budgetHit  bool
-	depth      int // current expression-recursion depth, bounded by maxJavaExprDepth
-	values     map[string]bool
-	flows      map[string]bool
-	gapKeys    map[string]bool // coverage-gap dedup keys, so gap() is O(1) not O(existing gaps)
-	symbolQual map[string]bool // qualified names already emitted in this module, to disambiguate overloads
-	fqnTypes   map[string]bool // inline fully-qualified type refs, lowered to on-demand imports post-walk
+	doc                         *javaprogram.Document
+	module                      string
+	file                        string
+	source                      []byte
+	moduleID                    string               // the compilation-unit scope id, for file-scoped synthetic imports
+	modulePos                   javaprogram.Position // the module position, reused as the synthetic imports' position
+	budgetHit                   bool
+	deadBranchEligibilityVisits int
+	depth                       int // current expression-recursion depth, bounded by maxJavaExprDepth
+	values                      map[string]bool
+	flows                       map[string]bool
+	gapKeys                     map[string]bool // coverage-gap dedup keys, so gap() is O(1) not O(existing gaps)
+	symbolQual                  map[string]bool // qualified names already emitted in this module, to disambiguate overloads
+	fqnTypes                    map[string]bool // inline fully-qualified type refs, lowered to on-demand imports post-walk
 }
 
 // enterExpr bounds recursion into an expression subtree of hostile depth. A true return must be paired with
@@ -219,6 +223,9 @@ func (e *javaFactExtractor) skipExactFalseConsequence(node *sitter.Node) bool {
 	seen := 0
 	stack := []*sitter.Node{consequence}
 	for len(stack) > 0 {
+		if seen >= maxJavaDeadBranchEligibilityNodes || e.deadBranchEligibilityVisits >= maxJavaDeadBranchEligibilityWork {
+			return false
+		}
 		last := len(stack) - 1
 		current := stack[last]
 		stack = stack[:last]
@@ -226,9 +233,7 @@ func (e *javaFactExtractor) skipExactFalseConsequence(node *sitter.Node) bool {
 			return false
 		}
 		seen++
-		if seen > maxJavaDeadBranchEligibilityNodes {
-			return false
-		}
+		e.deadBranchEligibilityVisits++
 		switch current.Type() {
 		case "class_declaration", "interface_declaration", "enum_declaration", "record_declaration",
 			"annotation_type_declaration", "method_declaration", "constructor_declaration", "lambda_expression":
