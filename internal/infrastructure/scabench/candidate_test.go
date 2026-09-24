@@ -174,13 +174,16 @@ func TestValidateCandidateBundleRejectsAttestationAliasIntoBundle(t *testing.T) 
 	if err := os.MkdirAll(input.InputBundleRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(input.InputBundleRoot, "archived-attestation.json"), []byte("old host\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	alias := filepath.Join(t.TempDir(), "bundle-link")
 	if err := os.Symlink(input.InputBundleRoot, alias); err != nil {
 		t.Skipf("directory symlinks unavailable: %v", err)
 	}
 	input.EnvironmentAttestationPath = filepath.Join(alias, "archived-attestation.json")
-	if err := validateCandidateInput(input); err == nil || !strings.Contains(err.Error(), "outside the archived input bundle") {
-		t.Fatalf("aliased attestation error = %v, want bundle containment rejection", err)
+	if err := validateCandidateInput(input); err == nil || !strings.Contains(err.Error(), "path must be a real directory") {
+		t.Fatalf("aliased attestation error = %v, want symlinked-parent rejection", err)
 	}
 }
 
