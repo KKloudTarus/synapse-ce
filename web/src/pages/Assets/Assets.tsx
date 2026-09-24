@@ -21,6 +21,7 @@ import type {
   BusinessAsset,
   BusinessAssetCriticality,
   BusinessAssetInput,
+  BusinessAssetCounts,
   BusinessAssetPage,
   BusinessAssetType,
 } from '../../lib/types'
@@ -77,19 +78,13 @@ export function Assets() {
     { deps: [criticality, lifecycle, page, debouncedQuery, revision, type] },
   )
 
-  // The estate-wide count of critical assets. `total` is the filtered count before pagination, so a
-  // one-row query answers it exactly. Counting the visible page instead under-reported critical
-  // assets whenever the estate spanned more than one page, which on a security inventory reads as
-  // fewer critical assets than exist.
-  const { data: criticalPage, error: criticalError } = useFetch<BusinessAssetPage>(
-    (signal) => {
-      const params = new URLSearchParams({ limit: '1', offset: '0', criticality: 'critical' })
-      if (debouncedQuery.trim()) params.set('q', debouncedQuery.trim())
-      if (type && type !== 'all') params.set('type', type)
-      if (lifecycle && lifecycle !== 'all') params.set('lifecycle', lifecycle)
-      return api.listBusinessAssets(params.toString(), signal)
-    },
-    { deps: [lifecycle, debouncedQuery, revision, type] },
+  // The estate-wide count of critical assets, from one database aggregate. Reading it from a
+  // filtered list request instead made every filter change cost a second full scan of the tenant's
+  // assets: the list endpoint loads every row regardless of the page asked for, so a limit=1 query
+  // was measured at the same cost as a full page (101.8ms vs 101.2ms at 100k assets).
+  const { data: assetCounts, error: countsError } = useFetch<BusinessAssetCounts>(
+    (signal) => api.businessAssetCounts(signal),
+    { deps: [revision] },
   )
 
   const hasFilters = Boolean(query.trim() || (type && type !== 'all') || (criticality && criticality !== 'all') || (lifecycle && lifecycle !== 'all'))
@@ -125,7 +120,7 @@ export function Assets() {
         {/* A count that failed to load reads as zero, which on a security inventory is a false
             all-clear. Each card states that its figure is unavailable instead. */}
         <SummaryCard icon={LayersThree01} label="Total assets" value={countValue(result?.total, error)} tone="muted" />
-        <SummaryCard icon={AlertTriangle} label="Critical" value={countValue(criticalPage?.total, criticalError)} tone="critical" />
+        <SummaryCard icon={AlertTriangle} label="Critical" value={countValue(assetCounts?.byCriticality.critical, countsError)} tone="critical" />
         {/* Lifecycle and posture have no aggregate count endpoint, so these stay page-scoped and say
             so. An unlabelled page count next to an estate-wide total reads as an estate-wide figure. */}
         <SummaryCard icon={Activity} label="Active on this page" value={countValue(result ? visible.filter((asset) => asset.lifecycle === 'active').length : undefined, error)} tone="accent" />

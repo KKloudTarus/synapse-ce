@@ -3000,6 +3000,31 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
 
+  /api/v1/appsec/asset-counts:
+    get:
+      tags: [assets]
+      operationId: businessAssetCounts
+      summary: Estate-wide business Asset counts per criticality
+      description: >-
+        Answers the tenant-wide criticality histogram from a single database aggregate. A dashboard
+        that needs the number of critical Assets uses this instead of a filtered list request, which
+        would load every Asset row for the tenant to produce one number.
+      responses:
+        '200':
+          description: Criticality histogram
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [by_criticality, total]
+                properties:
+                  by_criticality:
+                    type: object
+                    description: Count per criticality. A criticality with no Assets is absent rather than zero.
+                    additionalProperties: {type: integer, minimum: 0}
+                  total: {type: integer, minimum: 0}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
   /api/v1/appsec/assets:
     get:
       tags: [assets]

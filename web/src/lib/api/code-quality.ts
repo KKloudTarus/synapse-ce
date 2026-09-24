@@ -616,8 +616,8 @@ export const codeQualityApi = {
       body: JSON.stringify({ to: status, rationale, expected_version: expectedVersion }),
     })),
 
-  getProjectIssueHistory: async (projectKey: string, id: string): Promise<IssueReviewEvent[]> => {
-    const res = await req(`/projects/${encodeURIComponent(projectKey)}/issues/${encodeURIComponent(id)}/history`)
+  getProjectIssueHistory: async (projectKey: string, id: string, signal?: AbortSignal): Promise<IssueReviewEvent[]> => {
+    const res = await req(`/projects/${encodeURIComponent(projectKey)}/issues/${encodeURIComponent(id)}/history`, signal ? { signal } : undefined)
     return (res ?? []).map(mapIssueReviewEvent)
   },
 

@@ -153,6 +153,13 @@ func (s *Service) List(ctx context.Context, tenantID shared.ID, filter Filter) (
 	return out, nil
 }
 
+// CriticalityCounts answers the estate-wide count per criticality. A dashboard that needs the
+// number of critical assets must not fetch a page to get it: List loads every row for the tenant,
+// so using it as a counter costs a full scan per card.
+func (s *Service) CriticalityCounts(ctx context.Context, tenantID shared.ID) (map[asset.Criticality]int, error) {
+	return s.repo.CountBusinessAssetsByCriticality(ctx, shared.TenantOrDefault(tenantID))
+}
+
 func (s *Service) ReplaceProjects(ctx context.Context, tenantID, id shared.ID, links []asset.ComponentMembership, actor string) error {
 	return s.replace(ctx, tenantID, id, links, actor, true)
 }

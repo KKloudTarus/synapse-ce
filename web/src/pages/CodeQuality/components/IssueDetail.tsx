@@ -29,7 +29,7 @@ function reviewedAt(value: string): string {
  */
 function ReviewHistory({ projectKey, issueId, revision }: { projectKey: string; issueId: string; revision: number }) {
   const { data, loading, error } = useFetch<IssueReviewEvent[]>(
-    () => api.getProjectIssueHistory(projectKey, issueId),
+    (signal) => api.getProjectIssueHistory(projectKey, issueId, signal),
     { deps: [projectKey, issueId, revision] },
   )
 

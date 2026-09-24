@@ -326,3 +326,50 @@ func TestRenameKeepsKeyMembershipsAndEngagementAssignment(t *testing.T) {
 		t.Fatalf("rename lost engagement assignment: rows=%+v err=%v", assigned, err)
 	}
 }
+
+// CriticalityCounts exists so a dashboard can state an estate-wide figure without listing the
+// estate. It must count every Asset for the tenant, not a page of them, and it must stay scoped to
+// the tenant.
+func TestCriticalityCountsCoversTheWholeEstateAndOneTenant(t *testing.T) {
+	service, _, _, _, _, _, _ := newBusinessAssetService(t)
+	ctx := context.Background()
+
+	// More Assets than any page the list endpoint will serve, so a page-shaped count would differ.
+	for i := range 250 {
+		criticality := asset.CriticalityLow
+		if i%5 == 0 {
+			criticality = asset.CriticalityCritical
+		}
+		if _, err := service.Create(ctx, CreateInput{
+			TenantID: "tenant-a", Key: fmt.Sprintf("svc-a-%03d", i), Name: "Service",
+			Type: asset.BusinessAssetApplication, Criticality: criticality, Owner: "platform-team", Actor: "operator",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := service.Create(ctx, CreateInput{
+		TenantID: "tenant-b", Key: "svc-b-000", Name: "Other tenant",
+		Type: asset.BusinessAssetApplication, Criticality: asset.CriticalityCritical, Owner: "platform-team", Actor: "operator",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	counts, err := service.CriticalityCounts(ctx, "tenant-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := counts[asset.CriticalityCritical]; got != 50 {
+		t.Fatalf("critical count = %d, want 50 across the whole estate", got)
+	}
+	if got := counts[asset.CriticalityLow]; got != 200 {
+		t.Fatalf("low count = %d, want 200", got)
+	}
+
+	other, err := service.CriticalityCounts(ctx, "tenant-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := other[asset.CriticalityCritical]; got != 1 {
+		t.Fatalf("tenant-b critical count = %d, want 1; counts must not cross tenants", got)
+	}
+}

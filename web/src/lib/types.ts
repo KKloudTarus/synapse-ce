@@ -719,6 +719,12 @@ export type BusinessAssetCriticality = 'critical' | 'high' | 'medium' | 'low'
 export type BusinessAssetLifecycle = 'draft' | 'active' | 'decommissioning' | 'retired'
 export interface BusinessAsset { id:string; key:string; name:string; description:string; type:BusinessAssetType; criticality:BusinessAssetCriticality; lifecycle:BusinessAssetLifecycle; owner:string; metadata:Record<string,string>; version:number; createdAt:string|null; updatedAt:string|null; posture?:string; postureExplanation?:string }
 export interface BusinessAssetInput { key?:string; name:string; description:string; type:BusinessAssetType; criticality:BusinessAssetCriticality; lifecycle?:BusinessAssetLifecycle; owner:string; metadata?:Record<string,string>; version?:number }
+/** Estate-wide Asset counts per criticality, answered by one database aggregate. */
+export interface BusinessAssetCounts {
+  byCriticality: { critical: number; high: number; medium: number; low: number }
+  total: number
+}
+
 export interface BusinessAssetPage { items:BusinessAsset[]; total:number; limit:number; offset:number }
 export interface AssetMembership { componentId:string; role:'primary'|'supporting'|'dependency'; provenance:string }
 export interface TechnicalAsset { id:string; kind:string; key:string; name:string; attributes:Record<string,string> }

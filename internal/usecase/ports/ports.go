@@ -124,6 +124,11 @@ type BusinessAssetRepository interface {
 	GetBusinessAssetByID(ctx context.Context, tenantID, id shared.ID) (*asset.BusinessAsset, error)
 	GetBusinessAssetByKey(ctx context.Context, tenantID shared.ID, key string) (*asset.BusinessAsset, error)
 	ListBusinessAssets(ctx context.Context, tenantID shared.ID) ([]*asset.BusinessAsset, error)
+	// CountBusinessAssetsByCriticality returns the tenant's asset count per criticality. It exists
+	// so a dashboard can state an estate-wide figure without listing the estate: ListBusinessAssets
+	// ships every row regardless of the page asked for, so answering a count with it costs a full
+	// scan and a full row transfer per request.
+	CountBusinessAssetsByCriticality(ctx context.Context, tenantID shared.ID) (map[asset.Criticality]int, error)
 	ReplaceBusinessAssetProjects(ctx context.Context, tenantID, assetID shared.ID, links []asset.ComponentMembership) error
 	ListBusinessAssetProjects(ctx context.Context, tenantID, assetID shared.ID) ([]asset.ComponentMembership, error)
 	ReplaceBusinessAssetTechnicalAssets(ctx context.Context, tenantID, assetID shared.ID, links []asset.ComponentMembership) error

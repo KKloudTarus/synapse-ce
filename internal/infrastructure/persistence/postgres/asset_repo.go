@@ -250,6 +250,33 @@ func (r *AssetRepository) ListBusinessAssets(ctx context.Context, tenantID share
 	return out, err
 }
 
+// CountBusinessAssetsByCriticality aggregates in the database rather than shipping rows. Postgres
+// answers it from fleet_business_services without materialising the assets, so the cost does not
+// grow with the size of the response the caller wanted.
+func (r *AssetRepository) CountBusinessAssetsByCriticality(ctx context.Context, tenantID shared.ID) (map[asset.Criticality]int, error) {
+	out := map[asset.Criticality]int{}
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT criticality, COUNT(*) FROM fleet_business_services WHERE tenant_id=$1 GROUP BY criticality`, tenantID.String())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var criticality string
+			var count int
+			if err := rows.Scan(&criticality, &count); err != nil {
+				return err
+			}
+			out[asset.Criticality(criticality)] = count
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *AssetRepository) ReplaceBusinessAssetProjects(ctx context.Context, tenantID, assetID shared.ID, links []asset.ComponentMembership) error {
 	return r.replaceBusinessAssetLinks(ctx, tenantID, assetID, "business_asset_projects", "project_id", links)
 }

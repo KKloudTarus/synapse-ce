@@ -509,6 +509,9 @@ func (rt *Router) routes() *http.ServeMux {
 		}
 		mux.HandleFunc("POST /api/v1/appsec/assets", rt.authz(userdom.PermOperate, rt.createBusinessAsset))
 		mux.HandleFunc("GET /api/v1/appsec/assets", rt.authz(userdom.PermView, rt.listBusinessAssets))
+		// Deliberately not /appsec/assets/counts: the detail route resolves a business key, so a
+		// literal segment there would shadow an asset legitimately keyed "counts".
+		mux.HandleFunc("GET /api/v1/appsec/asset-counts", rt.authz(userdom.PermView, rt.businessAssetCounts))
 		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}", rt.authz(userdom.PermView, rt.getBusinessAsset))
 		mux.HandleFunc("PATCH /api/v1/appsec/assets/{assetID}", rt.authz(userdom.PermOperate, rt.updateBusinessAsset))
 		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}/projects", rt.authz(userdom.PermView, rt.getBusinessAssetProjects))

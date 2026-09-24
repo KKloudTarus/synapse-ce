@@ -239,6 +239,18 @@ func (s *AssetStore) ListBusinessAssets(_ context.Context, tenantID shared.ID) (
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
 }
+func (s *AssetStore) CountBusinessAssetsByCriticality(_ context.Context, tenantID shared.ID) (map[asset.Criticality]int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[asset.Criticality]int{}
+	for _, a := range s.businessAssets {
+		if a.TenantID == tenantID {
+			out[a.Criticality]++
+		}
+	}
+	return out, nil
+}
+
 func copyLinks(in []asset.ComponentMembership) []asset.ComponentMembership {
 	return append([]asset.ComponentMembership(nil), in...)
 }

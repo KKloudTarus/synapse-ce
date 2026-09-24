@@ -306,14 +306,19 @@ function Deadline({ value, overdue = false }: { value: string; overdue?: boolean
   )
 }
 
-/** Orders newest first, leaving rows with an unparseable timestamp in their server order at the end. */
+/**
+ * Orders newest first, leaving rows with an unparseable timestamp at the end. Timestamps are parsed
+ * once per row rather than inside the comparator, which would parse O(k log k) times per sort.
+ */
 function newestFirst<T>(rows: T[], at: (row: T) => string | null): T[] {
-  const stamp = (row: T) => {
-    const value = at(row)
-    const parsed = value ? new Date(value).getTime() : Number.NaN
-    return Number.isNaN(parsed) ? -Infinity : parsed
-  }
-  return rows.slice().sort((a, b) => stamp(b) - stamp(a))
+  return rows
+    .map((row) => {
+      const value = at(row)
+      const parsed = value ? new Date(value).getTime() : Number.NaN
+      return { row, stamp: Number.isNaN(parsed) ? -Infinity : parsed }
+    })
+    .sort((a, b) => b.stamp - a.stamp)
+    .map((entry) => entry.row)
 }
 
 /** Falls back to the raw value so an unrecognised status reads as itself, never as a blank. */
@@ -340,19 +345,27 @@ function slaTime(value: string | null): string {
  */
 function SLAHistory({ engagementId, findingId }: { engagementId: string; findingId: string }) {
   const events = useFetch<SLAEvent[]>(
-    () => api.slaEvents(engagementId, findingId),
+    (signal) => api.slaEvents(engagementId, findingId, signal),
     { deps: [engagementId, findingId] },
   )
   const assessments = useFetch<SLAAssessment[]>(
-    () => api.slaAssessments(engagementId, findingId),
+    (signal) => api.slaAssessments(engagementId, findingId, signal),
     { deps: [engagementId, findingId] },
   )
 
   // `useFetch` keeps the previous array while a new request is in flight, so `loading` is what
   // separates "no record" from "not answered yet". Reading emptiness off the data alone would
   // attribute the previous finding's history to this one.
-  const eventRows = events.loading ? null : newestFirst(events.data ?? [], (event) => event.at)
-  const assessmentRows = assessments.loading ? null : newestFirst(assessments.data ?? [], (item) => item.assessedAt)
+  // Memoised on the fetched arrays: without this the panel re-sorts both histories on every
+  // keystroke in the transition form.
+  const eventRows = useMemo(
+    () => (events.loading ? null : newestFirst(events.data ?? [], (event) => event.at)),
+    [events.data, events.loading],
+  )
+  const assessmentRows = useMemo(
+    () => (assessments.loading ? null : newestFirst(assessments.data ?? [], (item) => item.assessedAt)),
+    [assessments.data, assessments.loading],
+  )
 
   return (
     <div className="mt-5 grid gap-4 border-t border-secondary pt-5 lg:grid-cols-2">

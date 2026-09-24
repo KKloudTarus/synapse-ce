@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -114,4 +115,74 @@ func TestAssetRepository(t *testing.T) {
 		t.Fatalf("empty tenant asset should be rejected by domain")
 	}
 	_ = shared.ID("")
+}
+
+// CountBusinessAssetsByCriticality answers from a database aggregate rather than by listing, so it
+// needs a real Postgres to prove the SQL and the tenant scoping under RLS.
+func TestCountBusinessAssetsByCriticality(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ('tcount-a','A'),('tcount-b','B') ON CONFLICT (id) DO NOTHING`); err != nil {
+		t.Fatalf("seed tenants: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM fleet_business_services WHERE tenant_id IN ('tcount-a','tcount-b')`)
+		_, _ = pool.Exec(bg, `DELETE FROM tenants WHERE id IN ('tcount-a','tcount-b')`)
+	})
+
+	repo := NewAssetRepository(pool)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := func(tenant, key string, criticality asset.Criticality) {
+		t.Helper()
+		ba, err := asset.NewBusinessAsset(shared.ID(key), shared.ID(tenant), key, "Service", "", asset.BusinessAssetApplication, criticality, "platform-team", nil, "operator", now)
+		if err != nil {
+			t.Fatalf("new business asset: %v", err)
+		}
+		if err := repo.CreateBusinessAsset(ctx, ba); err != nil {
+			t.Fatalf("create business asset: %v", err)
+		}
+	}
+
+	for i := range 7 {
+		seed("tcount-a", fmt.Sprintf("a-crit-%d", i), asset.CriticalityCritical)
+	}
+	for i := range 3 {
+		seed("tcount-a", fmt.Sprintf("a-low-%d", i), asset.CriticalityLow)
+	}
+	seed("tcount-b", "b-crit-0", asset.CriticalityCritical)
+
+	counts, err := repo.CountBusinessAssetsByCriticality(ctx, "tcount-a")
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if got := counts[asset.CriticalityCritical]; got != 7 {
+		t.Fatalf("critical = %d, want 7", got)
+	}
+	if got := counts[asset.CriticalityLow]; got != 3 {
+		t.Fatalf("low = %d, want 3", got)
+	}
+	// A criticality with no rows is absent rather than zero, and another tenant's rows never leak.
+	if _, present := counts[asset.CriticalityHigh]; present {
+		t.Fatalf("high should be absent, got %v", counts)
+	}
+	other, err := repo.CountBusinessAssetsByCriticality(ctx, "tcount-b")
+	if err != nil {
+		t.Fatalf("count other tenant: %v", err)
+	}
+	if got := other[asset.CriticalityCritical]; got != 1 {
+		t.Fatalf("tenant-b critical = %d, want 1", got)
+	}
 }

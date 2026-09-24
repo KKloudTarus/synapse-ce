@@ -303,13 +303,13 @@ export const findingsApi = {
       }),
     })),
 
-  slaAssessments: async (engagementId: string, findingId: string): Promise<SLAAssessment[]> => {
-    const response = await req(`/engagements/${encodeURIComponent(engagementId)}/slas/${encodeURIComponent(findingId)}/assessments`)
+  slaAssessments: async (engagementId: string, findingId: string, signal?: AbortSignal): Promise<SLAAssessment[]> => {
+    const response = await req(`/engagements/${encodeURIComponent(engagementId)}/slas/${encodeURIComponent(findingId)}/assessments`, signal ? { signal } : undefined)
     return (response?.assessments ?? []).map(mapSLAAssessment)
   },
 
-  slaEvents: async (engagementId: string, findingId: string): Promise<SLAEvent[]> => {
-    const response = await req(`/engagements/${encodeURIComponent(engagementId)}/slas/${encodeURIComponent(findingId)}/events`)
+  slaEvents: async (engagementId: string, findingId: string, signal?: AbortSignal): Promise<SLAEvent[]> => {
+    const response = await req(`/engagements/${encodeURIComponent(engagementId)}/slas/${encodeURIComponent(findingId)}/events`, signal ? { signal } : undefined)
     return (response?.events ?? []).map(mapSLAEvent)
   },
 
