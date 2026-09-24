@@ -2,7 +2,9 @@
   "recall": {
     "cmdi": 0.40,
     "sqli": 0.28,
-    "pathtraver": 0.40
+    "pathtraver": 0.40,
+    "ldapi": 0.50,
+    "xpathi": 0.55
   },
   "precision_tripwire": 0.30
 }

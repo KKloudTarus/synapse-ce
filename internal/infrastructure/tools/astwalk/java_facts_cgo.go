@@ -22,6 +22,14 @@ const (
 	// nest, or binary expression in hostile source) so the expression-lowering helpers cannot stack-overflow
 	// before the node/fact budget in walk trips. Generous: a real Java expression is far shallower.
 	maxJavaExprDepth = 512
+	// maxSyntheticFQNBytes bounds an inline-FQN synthetic import's module specifier well below the domain's
+	// 4096-byte validation cap, so a hostile over-long inline type reference is dropped at record time rather
+	// than emitted and then failing document validation (which would discard every fact for the whole target).
+	maxSyntheticFQNBytes = 1024
+	// maxSyntheticFQNTypes bounds how many distinct inline fully-qualified types one file lowers to imports,
+	// so FQN-dense generated or hostile source cannot inflate the import list that the sink gate scans per
+	// candidate. A real compilation unit references far fewer distinct fully-qualified types than this.
+	maxSyntheticFQNTypes = 4096
 )
 
 // JavaFactsFor extracts a bounded, versioned Java semantic-facts document without compiling or executing
@@ -64,8 +72,9 @@ func JavaFactsFor(ctx context.Context, root string) (javaprogram.Document, error
 		modulePos := javaprogram.Position{File: rel, Line: 1}
 		moduleID := javaprogram.CanonicalSymbolID(module, "<module>")
 		extractor := javaFactExtractor{
-			doc: &doc, module: module, file: rel, source: content,
+			doc: &doc, module: module, file: rel, source: content, moduleID: moduleID, modulePos: modulePos,
 			values: map[string]bool{}, flows: map[string]bool{}, gapKeys: map[string]bool{}, symbolQual: map[string]bool{},
+			fqnTypes: map[string]bool{},
 		}
 		doc.Modules = append(doc.Modules, javaprogram.Module{Name: module, File: rel, Package: extractor.packageName(rootNode), Pos: modulePos})
 		doc.Symbols = append(doc.Symbols, javaprogram.Symbol{
@@ -76,6 +85,7 @@ func JavaFactsFor(ctx context.Context, root string) (javaprogram.Document, error
 			extractor.gap(javaprogram.GapParseRecovery, moduleID, "parser_recovery", rootNode)
 		}
 		extractor.walk(rootNode, javaScope{id: moduleID, qualified: "", kind: javaprogram.SymbolModule})
+		extractor.flushFQNImports()
 	}, func(sourceIssue) {
 		// The shared walker only reports issues for python-shaped files; a Java file that is oversized or
 		// unreadable is simply not visited. That is a coverage-recall limitation (a missed file), never a
@@ -106,12 +116,15 @@ type javaFactExtractor struct {
 	module     string
 	file       string
 	source     []byte
+	moduleID   string               // the compilation-unit scope id, for file-scoped synthetic imports
+	modulePos  javaprogram.Position // the module position, reused as the synthetic imports' position
 	budgetHit  bool
 	depth      int // current expression-recursion depth, bounded by maxJavaExprDepth
 	values     map[string]bool
 	flows      map[string]bool
 	gapKeys    map[string]bool // coverage-gap dedup keys, so gap() is O(1) not O(existing gaps)
 	symbolQual map[string]bool // qualified names already emitted in this module, to disambiguate overloads
+	fqnTypes   map[string]bool // inline fully-qualified type refs, lowered to on-demand imports post-walk
 }
 
 // enterExpr bounds recursion into an expression subtree of hostile depth. A true return must be paired with
@@ -162,10 +175,81 @@ func (e *javaFactExtractor) walk(node *sitter.Node, scope javaScope) {
 		e.variableDeclaratorFact(node, scope)
 	case "return_statement":
 		e.returnFact(node, scope)
+	case "scoped_type_identifier":
+		e.recordFQNType(node)
 	}
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		e.walk(node.NamedChild(i), scope)
 	}
+}
+
+// recordFQNType notes an inline fully-qualified type reference such as
+// javax.naming.directory.InitialDirContext. flushFQNImports lowers each noted type to a file-scoped on-demand
+// import, so a receiver-name sink gated on RequiresImport (LDAP search, XPath evaluate/compile) fires even
+// when the source spells the type inline instead of writing an import statement. Writing the fully-qualified
+// name IS using that type, so the synthetic fact carries the full FQN as its module: this keeps the
+// RequiresImport anchor's forward-prefix match (`a.b.C` satisfies the `a.b` package anchor) while a
+// parent-package type (`javax.xml.XMLConstants`) never satisfies a child anchor (`javax.xml.xpath`), which a
+// package-granular module would wrongly do through javaMatchesModule's reverse-prefix branch. The fact is
+// on-demand, so javaImportLocal binds no name from it and it cannot rebind or misresolve a call; it only
+// widens the import-presence gate, never a match on its own (the method-name floor still has to hold).
+//
+// It processes only the OUTERMOST scoped_type_identifier. The Java grammar nests these left-recursively
+// (`a.b.C` is three nested nodes, each spanning its whole prefix), so recording every one would copy each
+// prefix span, an O(depth^2) blowup on a hostile deep reference; the outermost already carries the full type.
+// The FQN length and per-file count are bounded so a crafted or generated file cannot emit an over-long
+// specifier (which would fail document validation and discard every fact for the whole target) or inflate the
+// import list that the gate scans per sink candidate.
+func (e *javaFactExtractor) recordFQNType(node *sitter.Node) {
+	if parent := node.Parent(); parent != nil && parent.Type() == "scoped_type_identifier" {
+		return // an inner prefix of a larger fully-qualified name; the outermost node carries the full type
+	}
+	if len(e.fqnTypes) >= maxSyntheticFQNTypes {
+		return
+	}
+	fqn := node.Content(e.source)
+	if len(fqn) > maxSyntheticFQNBytes {
+		return // stays well under the domain's 4096-byte specifier cap, so it never fails validation
+	}
+	segments := strings.Split(fqn, ".")
+	// Need at least pkg.sub.Type: a package-qualified type has two or more package segments before the type
+	// (javax.naming.directory.InitialDirContext, javax.xml.xpath.XPath). A nested type (Outer.Inner) is
+	// rejected by the lowercase package-root check below.
+	if len(segments) < 3 || !javaPackageRoot(segments[0]) {
+		return
+	}
+	for _, seg := range segments {
+		if !javaValidSegment(seg) {
+			return // generics, arrays, whitespace, or annotations in the node text: not a plain FQN
+		}
+	}
+	e.fqnTypes[fqn] = true
+}
+
+// flushFQNImports appends one file-scoped on-demand import per inline fully-qualified type recorded by
+// recordFQNType. The map already collapses repeats to one entry per distinct FQN, and the document's
+// canonical sort orders the import list, so no sort is needed here.
+func (e *javaFactExtractor) flushFQNImports() {
+	for fqn := range e.fqnTypes {
+		e.doc.Imports = append(e.doc.Imports, javaprogram.Import{
+			ScopeID: e.moduleID, Module: fqn, Kind: javaprogram.ImportOnDemand, Pos: e.modulePos,
+		})
+	}
+}
+
+// javaPackageRoot reports whether a leading path segment looks like a package root (all lowercase, the Java
+// convention) rather than a type or a local variable, so an inline nested type like Outer.Inner is not
+// mistaken for a package-qualified reference.
+func javaPackageRoot(seg string) bool {
+	if seg == "" {
+		return false
+	}
+	for _, r := range seg {
+		if r >= 'A' && r <= 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 // walkType handles a class / interface / enum / record declaration: it emits the type symbol (with its
