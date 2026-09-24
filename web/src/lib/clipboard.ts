@@ -15,8 +15,12 @@ export async function copyText(text: string): Promise<boolean> {
     // Permission denied or not allowed in this context — fall through to the legacy path.
   }
 
+  // The textarea briefly holds whatever is being copied, which on this app includes a freshly
+  // issued API key. It is removed in a finally: execCommand throws in browsers that have dropped
+  // it, and the old code's removeChild was after the throwing call, leaving the value readable in
+  // document.body for the life of the tab.
+  const ta = document.createElement('textarea')
   try {
-    const ta = document.createElement('textarea')
     ta.value = text
     ta.setAttribute('readonly', '')
     ta.style.position = 'fixed'
@@ -26,10 +30,11 @@ export async function copyText(text: string): Promise<boolean> {
     document.body.appendChild(ta)
     ta.focus()
     ta.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(ta)
-    return ok
+    return document.execCommand('copy')
   } catch {
     return false
+  } finally {
+    ta.value = ''
+    ta.remove()
   }
 }

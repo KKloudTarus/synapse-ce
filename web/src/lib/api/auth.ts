@@ -22,8 +22,12 @@ export const authApi = {
 export const teamApi = {
   listUsers: async (): Promise<User[]> => (await req('/users')) ?? [],
 
-  updateUser: async (id: string, name: string, role: UserRole): Promise<User> =>
-    await req(`/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name, role }) }),
+  // Sends only the fields being changed. The server treats an empty name as "leave it alone"
+  // (users/service.go update), so echoing back a name from a roster snapshot would silently revert
+  // a rename another admin made after this screen loaded, and attribute the reversion to whoever
+  // changed the role.
+  updateUser: async (id: string, role: UserRole): Promise<User> =>
+    await req(`/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
 
   // Disabling is how access is revoked; the account and its audit trail are kept.
   setUserDisabled: async (id: string, disabled: boolean): Promise<User> =>

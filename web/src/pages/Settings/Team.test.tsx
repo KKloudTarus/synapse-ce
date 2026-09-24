@@ -55,7 +55,9 @@ describe('Team administration', () => {
     expect(api.updateUser).not.toHaveBeenCalled()
     fireEvent.click(within(editor).getByRole('button', { name: 'Save role' }))
 
-    await waitFor(() => expect(api.updateUser).toHaveBeenCalledWith('u-1', 'Alice', 'reviewer'))
+    // Only the role travels: echoing a name from a roster snapshot would revert a rename another
+    // admin made after this screen loaded.
+    await waitFor(() => expect(api.updateUser).toHaveBeenCalledWith('u-1', 'reviewer'))
   })
 
   it('offers every role the server accepts, not just admin and member', async () => {
@@ -91,16 +93,46 @@ describe('Team administration', () => {
     await waitFor(() => expect(api.setUserDisabled).toHaveBeenCalledWith('u-2', false))
   })
 
-  // The rotated key is returned exactly once, so the screen has to say so where it is read.
-  it('rotates a key and states that it is shown once', async () => {
+  // The rotated key is returned exactly once, so it is masked until asked for, and it must not
+  // outlive the moment: left rendered it stayed readable in the DOM long after the admin moved on,
+  // which makes the "shown once" copy beside it untrue.
+  it('masks the rotated key until it is revealed', async () => {
     vi.mocked(api.rotateUserAPIKey).mockResolvedValue({ user: alice, apiKey: 'sk-rotated-123' })
     renderTeam()
 
     await screen.findByText('Alice')
     fireEvent.click(screen.getAllByRole('button', { name: /Rotate key/ })[0])
 
-    expect(await screen.findByText('sk-rotated-123')).toBeInTheDocument()
-    expect(screen.getByText(/Shown once. The previous key stopped working immediately./)).toBeInTheDocument()
+    expect(await screen.findByText(/is shown once/)).toBeInTheDocument()
+    expect(screen.queryByText('sk-rotated-123')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal' }))
+    expect(screen.getByText('sk-rotated-123')).toBeInTheDocument()
+  })
+
+  it('drops the rotated key when it is dismissed', async () => {
+    vi.mocked(api.rotateUserAPIKey).mockResolvedValue({ user: alice, apiKey: 'sk-rotated-123' })
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getAllByRole('button', { name: /Rotate key/ })[0])
+    fireEvent.click(await screen.findByRole('button', { name: "Dismiss Alice's new API key" }))
+
+    expect(screen.queryByText(/is shown once/)).not.toBeInTheDocument()
+  })
+
+  // A key shown for one action is stale context beside the next one, and leaving it on screen is
+  // what let it outlive the admin's attention.
+  it('drops the rotated key when another action on the row starts', async () => {
+    vi.mocked(api.rotateUserAPIKey).mockResolvedValue({ user: alice, apiKey: 'sk-rotated-123' })
+    vi.mocked(api.setUserDisabled).mockResolvedValue({ ...alice, disabled: true })
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getAllByRole('button', { name: /Rotate key/ })[0])
+    await screen.findByText(/is shown once/)
+    fireEvent.click(screen.getByRole('button', { name: 'Disable' }))
+
+    await waitFor(() => expect(screen.queryByText(/is shown once/)).not.toBeInTheDocument())
   })
 
   it('surfaces a failed action instead of leaving the row unchanged', async () => {

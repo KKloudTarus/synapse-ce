@@ -1,6 +1,6 @@
 import { Key01, ShieldTick, UserPlus01 } from '@untitledui/icons'
 import { copyText } from '../../lib/clipboard'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../../lib/api'
 import type { User, UserRole } from '../../lib/types'
 import { Button, Card, EmptyState, ErrorState, Input, Pill, Select, Spinner } from '../../components/ui'
@@ -44,6 +44,53 @@ export function Team() {
 }
 
 /**
+ * Shows a credential the server returns exactly once.
+ *
+ * It is masked until the operator asks to see it, cleared when they dismiss it, and cleared when
+ * the screen unmounts. Left rendered, a rotated key survived every later action on the roster and
+ * stayed readable in the DOM long after the admin had moved on, which makes the "shown once" copy
+ * beside it untrue.
+ */
+function OneTimeSecret({ label, value, onDismiss }: { label: string; value: string; onDismiss: () => void }) {
+  const [revealed, setRevealed] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const { notify } = useToast()
+
+  useEffect(() => () => setRevealed(false), [])
+
+  return (
+    <div className="mt-2 space-y-1 rounded-md border border-secondary bg-secondary/40 px-2 py-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Key01 className="size-3.5 shrink-0 text-medium" />
+        <code className="flex-1 truncate font-mono text-[11px] text-primary">
+          {revealed ? value : '•'.repeat(Math.min(value.length, 28))}
+        </code>
+        <button type="button" className="shrink-0 text-xs text-brand-secondary hover:underline" onClick={() => setRevealed((v) => !v)}>
+          {revealed ? 'Hide' : 'Reveal'}
+        </button>
+        <button
+          type="button"
+          className="shrink-0 text-xs text-brand-secondary hover:underline"
+          onClick={() => {
+            void copyText(value)
+              .then(() => { setCopied(true); notify('Copied. It cannot be retrieved again.', 'success') })
+              .catch(() => notify('Copy failed. Reveal the value and copy it manually.', 'error'))
+          }}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+        <button type="button" aria-label={`Dismiss ${label}`} className="shrink-0 text-xs text-tertiary hover:text-primary" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </div>
+      <p className="pl-5 text-[11px] font-medium text-medium">
+        {label} is shown once. Once dismissed it cannot be retrieved again.
+      </p>
+    </div>
+  )
+}
+
+/**
  * One member, with the lifecycle actions the server has always exposed and the dashboard never
  * reached: change the role, revoke access, restore it, and rotate a key that may have leaked.
  * Without these, an operator could add a person to the tenant but never take them out of it.
@@ -56,14 +103,18 @@ function MemberRow({ user, onChanged }: { user: User; onChanged: () => void }) {
   const [busy, setBusy] = useState<'role' | 'disabled' | 'key' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [rotated, setRotated] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
   const [editingRole, setEditingRole] = useState(false)
   const [pendingRole, setPendingRole] = useState<UserRole>(user.role)
   const { notify } = useToast()
 
+  // Clearing the key when the screen unmounts, so it does not outlive the route.
+  useEffect(() => () => setRotated(null), [])
+
   async function run(kind: 'role' | 'disabled' | 'key', action: () => Promise<void>, done: string) {
     setBusy(kind)
     setError(null)
+    // A key shown for a previous action is stale context next to a new one.
+    if (kind !== 'key') setRotated(null)
     try {
       await action()
       notify(done, 'success')
@@ -112,7 +163,6 @@ function MemberRow({ user, onChanged }: { user: User; onChanged: () => void }) {
             onClick={() => void run('key', async () => {
               const { apiKey } = await api.rotateUserAPIKey(user.id)
               setRotated(apiKey)
-              setCopied(false)
             }, `${user.name}'s API key was rotated. The previous key no longer works.`)}
           >
             <Key01 className="size-3.5" /> Rotate key
@@ -145,7 +195,7 @@ function MemberRow({ user, onChanged }: { user: User; onChanged: () => void }) {
                 disabled={pendingRole === user.role}
                 className="h-8 px-2.5 text-xs"
                 onClick={() => void run('role', async () => {
-                  await api.updateUser(user.id, user.name, pendingRole)
+                  await api.updateUser(user.id, pendingRole)
                   setEditingRole(false)
                 }, `${user.name} is now ${pendingRole}.`)}
               >
@@ -159,23 +209,7 @@ function MemberRow({ user, onChanged }: { user: User; onChanged: () => void }) {
       {error && <p className="mt-1 text-xs text-critical">{error}</p>}
 
       {rotated && (
-        <div className="mt-2 space-y-1 rounded-md border border-secondary bg-secondary/40 px-2 py-1.5">
-          <div className="flex items-center gap-2">
-            <Key01 className="size-3.5 shrink-0 text-medium" />
-            <code className="flex-1 truncate font-mono text-[11px] text-primary">{rotated}</code>
-            <button
-              type="button"
-              className="shrink-0 text-xs text-brand-secondary hover:underline"
-              onClick={() => { void copyText(rotated).then(() => setCopied(true)).catch(() => setCopied(false)) }}
-            >
-              {copied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
-          {/* The server stores only the hash, so this is the only time the key can be read. */}
-          <p className="pl-5 text-[11px] font-medium text-medium">
-            Shown once. The previous key stopped working immediately.
-          </p>
-        </div>
+        <OneTimeSecret label={`${user.name}'s new API key`} value={rotated} onDismiss={() => setRotated(null)} />
       )}
     </div>
   )
@@ -188,8 +222,6 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [issued, setIssued] = useState<{ name: string; key: string } | null>(null)
-  const [copied, setCopied] = useState(false)
-  const [copyError, setCopyError] = useState<string | null>(null)
   const { notify } = useToast()
 
   async function submit() {
@@ -211,19 +243,6 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
     }
   }
 
-  async function copyKey() {
-    if (!issued) return
-    try {
-      await copyText(issued.key)
-      setCopied(true)
-      setCopyError(null)
-      notify('API key copied to the clipboard.', 'success')
-    } catch {
-      // Clipboard writes reject in non-secure contexts or when the permission is
-      // denied — say so instead of leaving the button silently unchanged.
-      setCopyError('Copy failed. Select the key above and copy it manually.')
-    }
-  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -232,7 +251,7 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
       <div className="flex flex-wrap items-center gap-2">
         <Input
           value={name}
-          onChange={(e) => { setName(e.target.value); setErr(null); setIssued(null); setCopied(false); setCopyError(null) }}
+          onChange={(e) => { setName(e.target.value); setErr(null); setIssued(null) }}
           placeholder="Name"
           aria-label="Name"
           className="h-9 min-w-40 flex-1 px-3 py-1.5 text-sm sm:w-56 sm:flex-none"
@@ -250,21 +269,8 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
       </div>
       {err && <span className="text-xs text-critical">{err}</span>}
       {issued && (
-        <div className="space-y-1 rounded-md border border-secondary bg-secondary/40 px-2 py-1.5">
-          <div className="flex items-center gap-2">
-            <Key01 className="size-3.5 text-medium shrink-0" />
-            <code className="flex-1 truncate font-mono text-[11px] text-primary">{issued.key}</code>
-            <button type="button" onClick={copyKey} className="text-xs text-brand-secondary hover:underline shrink-0">
-              {copied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
-          {/* The server never returns this key again, so say so where it is read. */}
-          <p className="pl-5 text-[11px] font-medium text-medium">
-            Shown once. Copy it now: {issued.name}'s key cannot be retrieved again.
-          </p>
-        </div>
+        <OneTimeSecret label={`${issued.name}'s API key`} value={issued.key} onDismiss={() => setIssued(null)} />
       )}
-      {copyError && <span className="text-xs text-critical">{copyError}</span>}
     </div>
   )
 }

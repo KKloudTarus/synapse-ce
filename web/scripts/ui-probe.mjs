@@ -3,9 +3,12 @@
 // Reads each screen's main region and reports its real heading, tabs and controls, so a
 // walkthrough can be written from what the screen actually says rather than from memory.
 import { chromium } from '@playwright/test'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const BASE = process.env.UI_AUDIT_BASE ?? 'http://localhost:5173'
+const OUT = process.env.UI_AUDIT_OUT ?? mkdtempSync(join(tmpdir(), 'uiprobe-'))
 const TOKEN = process.env.UI_AUDIT_TOKEN ?? ''
 if (!TOKEN) { console.error('set UI_AUDIT_TOKEN'); process.exit(1) }
 
@@ -13,7 +16,9 @@ const ROUTES = JSON.parse(process.env.UI_ROUTES ?? '[]')
 
 const browser = await chromium.launch()
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-await context.addInitScript((t) => sessionStorage.setItem('synapse.token', t), TOKEN)
+await context.addInitScript(({ token, origin }) => {
+  if (location.origin === origin) sessionStorage.setItem('synapse.token', token)
+}, { token: TOKEN, origin: new URL(BASE).origin })
 
 const out = []
 for (const route of ROUTES) {
@@ -41,7 +46,7 @@ for (const route of ROUTES) {
   await page.close()
 }
 await browser.close()
-writeFileSync('/tmp/uiaudit/probe.json', JSON.stringify(out, null, 2))
+writeFileSync(`${OUT}/probe.json`, JSON.stringify(out, null, 2))
 for (const s of out) {
   console.log(`\n## ${s.route}`)
   console.log(`  title   : ${s.title.slice(0, 90)}`)

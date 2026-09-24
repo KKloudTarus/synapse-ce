@@ -10,10 +10,15 @@
 // Without a valid token the app renders its sign-in screen on every route, and the audit says so
 // rather than reporting 64 clean screens.
 import { chromium } from '@playwright/test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const BASE = process.env.UI_AUDIT_BASE ?? 'http://localhost:5173'
-const OUT = process.env.UI_AUDIT_OUT ?? '/tmp/uiaudit'
+// A screenshot of a live tenant shows its findings, hosts, asset names and roster. A fixed path
+// under /tmp is world-readable on a shared machine and can be pre-created as a symlink, so the
+// default is a fresh 0700 directory and a caller who wants a stable path opts in explicitly.
+const OUT = process.env.UI_AUDIT_OUT ?? mkdtempSync(join(tmpdir(), 'uiaudit-'))
 // The dev server proxies /api to the real backend, so the audit needs a real token: a fake one
 // walks 64 copies of the sign-in page and reports them as clean.
 const TOKEN = process.env.UI_AUDIT_TOKEN ?? ''
@@ -80,9 +85,12 @@ for (const viewport of VIEWPORTS) {
   })
   // The app gates every screen behind a token held in sessionStorage. Without this the audit walks
   // 64 copies of the sign-in page and reports them as clean.
-  await context.addInitScript((token) => {
-    sessionStorage.setItem('synapse.token', token)
-  }, TOKEN)
+  // Scoped to the origin under test: addInitScript runs in every page and frame the context
+  // loads, so an unguarded write would hand a working API token to any other origin the app
+  // ever embeds or redirects to.
+  await context.addInitScript(({ token, origin }) => {
+    if (location.origin === origin) sessionStorage.setItem('synapse.token', token)
+  }, { token: TOKEN, origin: new URL(BASE).origin })
   for (const route of ROUTES) {
     const page = await context.newPage()
     const consoleErrors = []
