@@ -135,6 +135,7 @@ func TestSecurityAccuracyComparatorInputsAreImmutableAndRequired(t *testing.T) {
 		`"$RUNNER_TEMP/benchmark-bin/checkov" --version`,
 		`test "$version" = "$CHECKOV_VERSION"`,
 		`--network none`, `--read-only`, `--cap-drop ALL`, `--security-opt no-new-privileges`,
+		`--user "$(id -u):$(id -g)"`,
 		`-v "$SYNAPSE_CHECKOV_HOST_TMPDIR:/work-tmp:ro"`, `"$SYNAPSE_CHECKOV_IMAGE"`,
 		`echo "TMPDIR=$RUNNER_TEMP/benchmark-tmp"`, `} >> "$GITHUB_ENV"`,
 		`export SYNAPSE_CHECKOV_HOST_TMPDIR="$RUNNER_TEMP/benchmark-tmp"`,

@@ -92,7 +92,8 @@ jobs:
         run: |
           set -euo pipefail
           # The image digest pins Checkov and its transitive Python environment. The wrapper exposes only the
-          # benchmark temp directory read-only and rewrites its host path for the container.
+          # benchmark temp directory read-only and rewrites its host path for the container. The generated
+          # fixture directories are mode 0700, so the container uses their owning runner UID and GID.
           mkdir -p "$RUNNER_TEMP/benchmark-tmp" "$RUNNER_TEMP/benchmark-bin"
           cat > "$RUNNER_TEMP/benchmark-bin/checkov" <<'EOF'
           #!/usr/bin/env bash
@@ -104,7 +105,7 @@ jobs:
             args+=("${arg/"$SYNAPSE_CHECKOV_HOST_TMPDIR"/\/work-tmp}")
           done
           exec docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
-            --cap-drop ALL --security-opt no-new-privileges -e HOME=/tmp \
+            --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" -e HOME=/tmp \
             -v "$SYNAPSE_CHECKOV_HOST_TMPDIR:/work-tmp:ro" "$SYNAPSE_CHECKOV_IMAGE" "${args[@]}"
           EOF
           chmod 0755 "$RUNNER_TEMP/benchmark-bin/checkov"
