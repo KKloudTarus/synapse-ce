@@ -127,6 +127,49 @@ func TestPerformanceBenchmarkRequiresEvidenceArtifact(t *testing.T) {
 	requireActiveLine(t, aggregateStep.Run, `test -n "$ARTIFACT"`)
 }
 
+func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
+	workflow := readHostedBenchmarkWorkflow(t, "sast-benchmark.yml")
+	route := requireJob(t, workflow, "route")
+	if route.Outputs["source_sha"] != "${{ steps.source.outputs.sha }}" {
+		t.Fatal("SAST route must expose the source SHA")
+	}
+	source := requireStep(t, route, func(step benchmarkStep) bool { return step.ID == "source" })
+	requireActiveLine(t, source.Run, `[[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]`)
+	requireActiveLine(t, source.Run, `echo "sha=$sha" >> "$GITHUB_OUTPUT"`)
+
+	for _, name := range []string{"owasp-scorecard", "securibench-scorecard", "juliet-scorecard"} {
+		t.Run(name, func(t *testing.T) {
+			job := requireJob(t, workflow, name)
+			requireNeeds(t, job, "route")
+			checkout := requireStep(t, job, func(step benchmarkStep) bool {
+				return step.Uses == "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+			})
+			if checkout.With["ref"] != sourceSHA {
+				t.Fatalf("scorecard checkout must bind route source SHA, got %q", checkout.With["ref"])
+			}
+			assertion := requireStep(t, job, func(step benchmarkStep) bool {
+				return step.Name == "Assert exact checkout revision"
+			})
+			requireActiveLine(t, assertion.Run, `test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"`)
+			upload := requireStep(t, job, func(step benchmarkStep) bool {
+				return step.Uses == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+			})
+			if !strings.Contains(upload.With["name"], sourceSHA) || upload.With["if-no-files-found"] != "error" {
+				t.Fatal("scorecard artifact must bind the source SHA and require a real log")
+			}
+		})
+	}
+	aggregate := requireJob(t, workflow, "aggregate")
+	requireNeeds(t, aggregate, "route", "owasp-scorecard", "securibench-scorecard", "juliet-scorecard")
+	if aggregate.If != "${{ always() }}" {
+		t.Fatal("SAST aggregate must report every run")
+	}
+	step := requireOnlyRunStep(t, aggregate)
+	for _, result := range []string{"ROUTE_RESULT", "OWASP_RESULT", "SECURIBENCH_RESULT", "JULIET_RESULT"} {
+		requireActiveLine(t, step.Run, fmt.Sprintf(`test "$%s" = success`, result))
+	}
+}
+
 func requireJob(t *testing.T, workflow benchmarkWorkflow, name string) benchmarkJob {
 	t.Helper()
 	job, ok := workflow.Jobs[name]

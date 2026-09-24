@@ -15,10 +15,41 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: sast-benchmark-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  route:
+    name: Select exact source revision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - id: source
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$EVENT_SHA"
+          if [ "$EVENT_NAME" = pull_request ]; then
+            sha="$PR_HEAD_SHA"
+          fi
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source revision is not a full lower-case SHA" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
   owasp-scorecard:
     name: OWASP BenchmarkJava scorecard
+    needs: route
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       # Pinned OWASP-Benchmark/BenchmarkJava commit the ratchet floors are calibrated against (v1.2 answer
       # key). Bumping this REQUIRES re-verifying the checksum below and re-calibrating the floors.
@@ -28,7 +59,11 @@ jobs:
       - name: Checkout synapse
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.route.outputs.source_sha }}
           persist-credentials: false
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -69,13 +104,16 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: owasp-benchmark-scorecard
+          name: owasp-benchmark-scorecard-${{ needs.route.outputs.source_sha }}
           path: ${{ runner.temp }}/owasp-scorecard.log
-          if-no-files-found: warn
+          if-no-files-found: error
+          retention-days: 90
 
   securibench-scorecard:
     name: Securibench Micro scorecard
+    needs: route
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       # Pinned too4words/securibench-micro commit the ratchet floors and the test's compiled answer-key digest
       # are calibrated against. Bumping this REQUIRES re-calibrating the floors and re-pinning the digest
@@ -85,7 +123,11 @@ jobs:
       - name: Checkout synapse
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.route.outputs.source_sha }}
           persist-credentials: false
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -120,13 +162,16 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: securibench-scorecard
+          name: securibench-scorecard-${{ needs.route.outputs.source_sha }}
           path: ${{ runner.temp }}/securibench-scorecard.log
-          if-no-files-found: warn
+          if-no-files-found: error
+          retention-days: 90
 
   juliet-scorecard:
     name: Juliet Java scorecard
+    needs: route
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       # Pinned find-sec-bugs/juliet-test-suite commit the ratchet floors and the test's compiled answer-key
       # digest are calibrated against. Bumping this REQUIRES re-calibrating the floors and re-pinning the
@@ -136,7 +181,11 @@ jobs:
       - name: Checkout synapse
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.route.outputs.source_sha }}
           persist-credentials: false
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -172,30 +221,30 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: juliet-scorecard
+          name: juliet-scorecard-${{ needs.route.outputs.source_sha }}
           path: ${{ runner.temp }}/juliet-scorecard.log
-          if-no-files-found: warn
+          if-no-files-found: error
+          retention-days: 90
 
   aggregate:
     name: Aggregate SAST benchmark status
-    needs: [owasp-scorecard, securibench-scorecard, juliet-scorecard]
+    needs: [route, owasp-scorecard, securibench-scorecard, juliet-scorecard]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # One status for the three scorecards, so the branch rule has a single context to require
-      # rather than three that can drift apart. `always()` above means this job runs even when a
-      # scorecard failed, which is the point: it reports that failure rather than being skipped
-      # alongside it.
-      - shell: bash
+      - name: Require every scorecard on the selected revision
+        shell: bash
         env:
-          OWASP: ${{ needs.owasp-scorecard.result }}
-          SECURIBENCH: ${{ needs.securibench-scorecard.result }}
-          JULIET: ${{ needs.juliet-scorecard.result }}
+          ROUTE_RESULT: ${{ needs.route.result }}
+          OWASP_RESULT: ${{ needs.owasp-scorecard.result }}
+          SECURIBENCH_RESULT: ${{ needs.securibench-scorecard.result }}
+          JULIET_RESULT: ${{ needs.juliet-scorecard.result }}
+          SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
         run: |
           set -euo pipefail
-          echo "owasp=$OWASP securibench=$SECURIBENCH juliet=$JULIET"
-          test "$OWASP" = success
-          test "$SECURIBENCH" = success
-          test "$JULIET" = success
-
+          test "$ROUTE_RESULT" = success
+          test "$OWASP_RESULT" = success
+          test "$SECURIBENCH_RESULT" = success
+          test "$JULIET_RESULT" = success
+          test "${#SOURCE_SHA}" -eq 40
