@@ -1441,6 +1441,17 @@ func bindCandidateOfflineInputs(ctx context.Context, historicalCatalog bench.Cat
 		return bench.Catalog{}, bench.TrustedInputBindingSpec{}, nil, fmt.Errorf("digest candidate environment attestation: %w", err)
 	}
 	for key, template := range candidateTemplates {
+		historicalDatabaseDigest, err := catalogPin(historicalCatalog, template.Database.Reference)
+		if err != nil {
+			return bench.Catalog{}, bench.TrustedInputBindingSpec{}, nil, fmt.Errorf("historical candidate database for %s: %w", key, err)
+		}
+		currentDatabaseDigest, bound := candidatePinDigests[template.Database.Reference]
+		if !bound {
+			return bench.Catalog{}, bench.TrustedInputBindingSpec{}, nil, fmt.Errorf("candidate database for %s has no offline input binding", key)
+		}
+		if currentDatabaseDigest != historicalDatabaseDigest {
+			template.Database.Build = "content-" + currentDatabaseDigest
+		}
 		if template.EnvironmentAttestation.Reference != trustedEnvironmentAttestationReference {
 			return bench.Catalog{}, bench.TrustedInputBindingSpec{}, nil, fmt.Errorf("candidate template %s has an unknown environment attestation", key)
 		}

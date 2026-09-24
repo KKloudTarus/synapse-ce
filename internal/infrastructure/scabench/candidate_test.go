@@ -196,6 +196,45 @@ func TestBindCandidateOfflineInputsRebindsCandidateOnly(t *testing.T) {
 	if candidateTemplates[runCellKey("debian-12-13-slim-amd64", bench.EngineGrype)].Environment.ImageDigest == templates[runCellKey("debian-12-13-slim-amd64", bench.EngineGrype)].Environment.ImageDigest {
 		t.Fatal("candidate capture template retained the historical environment identity")
 	}
+	for _, targetID := range fixedTargetIDs {
+		key := runCellKey(targetID, bench.EngineGrype)
+		template := candidateTemplates[key]
+		currentDigest, err := catalogPin(candidateCatalog, template.Database.Reference)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "content-" + currentDigest; template.Database.Build != want {
+			t.Fatalf("candidate %s database build = %q, want %q for changed bytes", key, template.Database.Build, want)
+		}
+	}
+	grypeReference := templates[runCellKey(fixedTargetIDs[0], bench.EngineGrype)].Database.Reference
+	grypeDigest, err := catalogPin(candidateCatalog, grypeReference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matchingCatalog := cloneCandidateCatalog(catalog)
+	for index := range matchingCatalog.Pins {
+		if matchingCatalog.Pins[index].Reference == grypeReference {
+			matchingCatalog.Pins[index].Digest = grypeDigest
+		}
+	}
+	matchingSpec := spec
+	matchingSpec.Bindings = append([]bench.TrustedInputPinBinding(nil), spec.Bindings...)
+	for index := range matchingSpec.Bindings {
+		if matchingSpec.Bindings[index].Reference == grypeReference {
+			matchingSpec.Bindings[index].PinDigest = grypeDigest
+		}
+	}
+	_, _, matchingTemplates, err := bindCandidateOfflineInputs(context.Background(), matchingCatalog, matchingSpec, templates, offlineRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, targetID := range fixedTargetIDs {
+		key := runCellKey(targetID, bench.EngineGrype)
+		if got, want := matchingTemplates[key].Database.Build, templates[key].Database.Build; got != want {
+			t.Fatalf("matching %s database build = %q, want preserved %q", key, got, want)
+		}
+	}
 	candidateCorpus := filepath.Join(t.TempDir(), "candidate-corpus")
 	if err := copyCandidateCorpus(context.Background(), corpusRoot, candidateCorpus); err != nil {
 		t.Fatal(err)
@@ -208,6 +247,37 @@ func TestBindCandidateOfflineInputsRebindsCandidateOnly(t *testing.T) {
 	}
 	if got, err := (&runState{input: RunInput{CorpusRoot: candidateCorpus}}).loadTemplates(); err != nil || len(got) != fixedMatrixCells {
 		t.Fatalf("load candidate templates = %d, %v; want %d templates", len(got), err, fixedMatrixCells)
+	}
+}
+
+func TestBindCandidateOfflineInputsRejectsUnboundDatabase(t *testing.T) {
+	corpusRoot := filepath.Join("..", "..", "usecase", "scabench", "corpus")
+	catalog, err := decodeCatalogFile(filepath.Join(corpusRoot, "catalog.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := decodeCandidateInputBindingSpec(filepath.Join(corpusRoot, "trusted-input-bindings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := runState{input: RunInput{CorpusRoot: corpusRoot}}
+	templates, err := state.loadTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	offlineRoot := t.TempDir()
+	writeCandidateOfflineInput(t, offlineRoot, spec)
+	grypeReference := templates[runCellKey(fixedTargetIDs[0], bench.EngineGrype)].Database.Reference
+	filtered := spec.Bindings[:0:0]
+	for _, binding := range spec.Bindings {
+		if binding.Reference != grypeReference {
+			filtered = append(filtered, binding)
+		}
+	}
+	spec.Bindings = filtered
+	_, _, _, err = bindCandidateOfflineInputs(context.Background(), catalog, spec, templates, offlineRoot)
+	if err == nil || !strings.Contains(err.Error(), "has no offline input binding") {
+		t.Fatalf("bindCandidateOfflineInputs() error = %v, want missing database binding", err)
 	}
 }
 

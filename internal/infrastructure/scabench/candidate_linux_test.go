@@ -114,6 +114,11 @@ func TestRunCandidateRetainsFailedTwentyFourCellDiagnostic(t *testing.T) {
 		if len(observations) != fixedMatrixCells || len(result.RawBundles[repetition]) != fixedMatrixCells {
 			t.Fatalf("repetition %d has %d observations, %d bundles", repetition+1, len(observations), len(result.RawBundles[repetition]))
 		}
+		for _, observation := range observations {
+			if want := "content-" + observation.DatabaseDigest; observation.DatabaseBuild != want {
+				t.Fatalf("repetition %d %s/%s database build = %q, want %q", repetition+1, observation.TargetID, observation.Engine, observation.DatabaseBuild, want)
+			}
+		}
 	}
 	reportBytes, err := os.ReadFile(filepath.Join(result.EvidencePath, "candidate-report.json"))
 	if err != nil {
@@ -125,6 +130,15 @@ func TestRunCandidateRetainsFailedTwentyFourCellDiagnostic(t *testing.T) {
 	}
 	if report.Candidate == nil || report.Historical == nil || report.Gate.CandidatePassed || report.Gate.Accepted {
 		t.Fatalf("retained candidate report lost failed gates: %+v", report.Gate)
+	}
+	candidateRatchet, err := decodeRatchetFile(filepath.Join(result.EvidencePath, "candidate-ratchet.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, floor := range candidateRatchet.Floors {
+		if want := "content-" + floor.Expected.DatabaseDigest; floor.Expected.DatabaseBuild != want {
+			t.Fatalf("candidate ratchet %s/%s database build = %q, want %q", floor.Expected.TargetID, floor.Expected.Engine, floor.Expected.DatabaseBuild, want)
+		}
 	}
 	validated := 0
 	if err := filepath.WalkDir(filepath.Join(result.EvidencePath, "attempts"), func(path string, entry os.DirEntry, walkErr error) error {
