@@ -67,6 +67,7 @@ jobs:
     needs: route
     if: ${{ needs.route.outputs.trusted == 'true' }}
     runs-on: [self-hosted, linux, reachability-accuracy-trusted]
+    environment: trusted-benchmarks
     timeout-minutes: 90
     env:
       GIT_CONFIG_NOSYSTEM: "1"

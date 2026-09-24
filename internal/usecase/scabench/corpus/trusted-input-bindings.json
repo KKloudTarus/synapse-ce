@@ -1,0 +1,109 @@
+{
+  "schema_version": "synapse-sca-trusted-input-binding-spec-v1",
+  "catalog_revision": "same-sbom-linux-20260922",
+  "catalog_digest": "sha256:bc4517da9d88ad7029b48b9ab624147e4ebc739dec385c05cb764f39d3defa87",
+  "bindings": [
+    {
+      "reference": "binary:grype:v0.115.0",
+      "locator": "tools/grype",
+      "kind": "file",
+      "pin_digest": "sha256:05ffd2c28a607e48fb2269d9aac5b3d53e8a51bbac501946644745eae2119907"
+    },
+    {
+      "reference": "binary:osv-scanner:v2.5.1",
+      "locator": "tools/osv-scanner",
+      "kind": "file",
+      "pin_digest": "sha256:f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be"
+    },
+    {
+      "reference": "binary:syft:v1.45.1",
+      "locator": "tools/syft",
+      "kind": "file",
+      "pin_digest": "sha256:385d7d589762df1ec9d1054ea7ffbe458c66f6f820ae51fded8d2f0257475dbf"
+    },
+    {
+      "reference": "binary:trivy:v0.74.0",
+      "locator": "tools/trivy",
+      "kind": "file",
+      "pin_digest": "sha256:d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791"
+    },
+    {
+      "reference": "capability-source:osv-scalibr:23fa66ca68dd17bfdbe0b8b3536d1887a3a940da",
+      "locator": "repository/capability/osv-scanner-v2.5.1/ecosystem.go",
+      "kind": "file",
+      "pin_digest": "sha256:80530bad1a13c3043275ddf005450afc0d1a0041562e52341e4f5df969abd9cb"
+    },
+    {
+      "reference": "capability-source:osv-scanner:c84fa4568f2526d0333e9a914ea8a0a5f74ad68b",
+      "locator": "repository/capability/osv-scanner-v2.5.1/purl_to_package.go",
+      "kind": "file",
+      "pin_digest": "sha256:079452dc6e62d3ac21eb87546ca88a45b44eb251d721fbe620f392f4556e7bd7"
+    },
+    {
+      "reference": "database:grype:v6.1.9-2026-09-20T00:35:35Z-1789885674",
+      "locator": "databases/grype",
+      "kind": "tree",
+      "pin_digest": "sha256:0337600ef5e88ae38df997a59a886b0b7e752ad9d817fb2bdbbcf9876d4c9f4a"
+    },
+    {
+      "reference": "database:osv-scanner:debian-all-2026-09-20",
+      "locator": "databases/osv",
+      "kind": "tree",
+      "pin_digest": "sha256:2b3413da00c56e2d4db98af47dd7f09ae7f9a89d609a5a555b5e469809525dea"
+    },
+    {
+      "reference": "database:owned:debian-bookworm-oval-2026-09-20",
+      "locator": "databases/owned-debian",
+      "kind": "tree",
+      "pin_digest": "sha256:cb8430a648f0c6892f673ec37f606a6fb00202aa04d4ff7db732414404e4a44c"
+    },
+    {
+      "reference": "database:owned:redhat-rhel9-8-vex-2026-09-21",
+      "locator": "databases/owned-redhat",
+      "kind": "tree",
+      "pin_digest": "sha256:1786886d316990e5d30dc445d96bc1ceca89642643f00d931a2e1ee34154320f"
+    },
+    {
+      "reference": "database:owned:sles-15-sp6-affected-oval-2026-09-20",
+      "locator": "databases/owned-sles",
+      "kind": "tree",
+      "pin_digest": "sha256:bec078b7ff5ce08b1f46f84b3005ae2871bb000cd23b1b314c0e17842e61ff71"
+    },
+    {
+      "reference": "database:trivy:v2-2026-09-20T13:18:06.422928923Z",
+      "locator": "databases/trivy",
+      "kind": "tree",
+      "pin_digest": "sha256:0d0abf2bb36dc091bf4e1713951f7c4ef66918b1c80af6a409e5020d26f5c153"
+    },
+    {
+      "reference": "source:debian-bookworm-oval-2026-09-20",
+      "locator": "databases/owned-debian/debian-bookworm-oval.xml.bz2",
+      "kind": "file",
+      "pin_digest": "sha256:0e870d4a3398245140b3625e180967e1ddb595d7830aac9ab965832be103cbcd"
+    },
+    {
+      "reference": "source:redhat-vex-cve-2025-66382-2026-09-18",
+      "locator": "databases/owned-redhat/cve-2025-66382.json",
+      "kind": "file",
+      "pin_digest": "sha256:5963259ec337ca3d6c6c695efd310d9023e429b73b58e9baf024937792433968"
+    },
+    {
+      "reference": "source:redhat-vex-cve-2026-11822-2026-09-18",
+      "locator": "databases/owned-redhat/cve-2026-11822.json",
+      "kind": "file",
+      "pin_digest": "sha256:6a9486b7c453b6bad9303d286a09f62694ea06c5767c46a9a50fc9e1017fce5f"
+    },
+    {
+      "reference": "source:redhat-vex-cve-2026-22185-2026-09-18",
+      "locator": "databases/owned-redhat/cve-2026-22185.json",
+      "kind": "file",
+      "pin_digest": "sha256:5a9ca00fdf9276d14ebc66d24dcf5eebaca01bc51368cf18fdc2b8750a6025da"
+    },
+    {
+      "reference": "source:sles-15-sp6-affected-oval-2026-09-20",
+      "locator": "databases/owned-sles/sles-15-sp6-affected-oval.xml.gz",
+      "kind": "file",
+      "pin_digest": "sha256:1c13f8779ddf1726ba6edcedc6e0fb14e92268cc6b1dd0e673d6debcfad27774"
+    }
+  ]
+}

@@ -1877,6 +1877,13 @@ func HashTree(path string) (string, error) {
 }
 
 func hashTree(root string) (string, error) {
+	return hashTreeContext(context.Background(), root)
+}
+
+func hashTreeContext(ctx context.Context, root string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	info, err := os.Lstat(root)
 	if err != nil {
 		return "", errors.New("inspect tree root")
@@ -1885,13 +1892,19 @@ func hashTree(root string) (string, error) {
 		return "", fmt.Errorf("tree root must be a non-symlink directory")
 	}
 	hash := sha256.New()
-	if err := hashTreeDir(hash, root, "", info); err != nil {
+	if err := hashTreeDirContext(ctx, hash, root, "", info); err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func hashTreeDir(hash io.Writer, dir, relative string, expected os.FileInfo) error {
+func hashTreeDirContext(ctx context.Context, hash io.Writer, dir, relative string, expected os.FileInfo) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if expected.Mode()&os.ModeSymlink != 0 || !expected.IsDir() {
 		return fmt.Errorf("tree contains non-directory at %q", filepath.ToSlash(relative))
 	}
@@ -1904,6 +1917,9 @@ func hashTreeDir(hash io.Writer, dir, relative string, expected os.FileInfo) err
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		name := entry.Name()
 		path := filepath.Join(dir, name)
 		rel := name
@@ -1919,15 +1935,15 @@ func hashTreeDir(hash io.Writer, dir, relative string, expected os.FileInfo) err
 		}
 		switch {
 		case info.IsDir():
-			if err := hashTreeDir(hash, path, rel, info); err != nil {
+			if err := hashTreeDirContext(ctx, hash, path, rel, info); err != nil {
 				return err
 			}
 		case info.Mode().IsRegular():
 			if err := writeFrame(hash, "file", filepath.ToSlash(rel), strconv.FormatInt(info.Size(), 10)); err != nil {
 				return err
 			}
-			if _, err := streamStableRegularFile(path, info, hash); err != nil {
-				return fmt.Errorf("hash tree file %q", filepath.ToSlash(rel))
+			if _, err := streamStableRegularFileContext(ctx, path, info, hash); err != nil {
+				return fmt.Errorf("hash tree file %q: %w", filepath.ToSlash(rel), err)
 			}
 		default:
 			return fmt.Errorf("tree contains special file %q", filepath.ToSlash(rel))
@@ -1944,6 +1960,13 @@ func hashTreeDir(hash io.Writer, dir, relative string, expected os.FileInfo) err
 // metadata. It rejects replacement or mutation while hashing instead of loading a
 // competitor database artifact into memory.
 func streamStableRegularFile(path string, expected os.FileInfo, writer io.Writer) (int64, error) {
+	return streamStableRegularFileContext(context.Background(), path, expected, writer)
+}
+
+func streamStableRegularFileContext(ctx context.Context, path string, expected os.FileInfo, writer io.Writer) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if expected == nil {
 		info, err := os.Lstat(path)
 		if err != nil {
@@ -1967,13 +1990,16 @@ func streamStableRegularFile(path string, expected os.FileInfo, writer io.Writer
 		_ = file.Close()
 		return 0, fmt.Errorf("file changed while opening")
 	}
-	written, copyErr := io.Copy(writer, file)
+	written, copyErr := copyWithContext(ctx, writer, file)
 	closeErr := file.Close()
 	if copyErr != nil {
-		return 0, errors.New("read regular file")
+		return 0, fmt.Errorf("read regular file: %w", copyErr)
 	}
 	if closeErr != nil {
 		return 0, errors.New("close regular file")
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 	after, err := os.Lstat(path)
 	if err != nil || !sameStableFile(expected, after) || written != expected.Size() {

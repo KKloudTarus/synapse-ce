@@ -625,7 +625,13 @@ func (a *rpmOvalAcc) merge(ap advisory.AffectedPackage) {
 	currentFixed := strings.TrimSpace(current.FixedVersion)
 	switch {
 	case currentFixed != "" && candidateFixed != "":
-		if a.fixedBoundaries[packageKey] == candidateFixed {
+		preferred, comparable := higherFixedBoundary(ap.Ecosystem, currentFixed, candidateFixed)
+		if !comparable {
+			a.conflicts[packageKey] = true
+			a.deleteBindings(packageKey)
+			return
+		}
+		if preferred == candidateFixed {
 			a.bindings[bindingKey] = ap
 		}
 	case currentFixed == "" && candidateFixed != "":
@@ -1117,7 +1123,11 @@ func suseLifecycleAffected(d *ovalDefinition, majors map[string]bool, tests map[
 			case status.disposition == susePackageNotAffected:
 				byPackage[statusKey] = status
 			case current.disposition == susePackageFixed && status.disposition == susePackageFixed:
-				if fixedBoundaries[status.packageName] == status.fixedVersion {
+				preferred, comparable := higherFixedBoundary(ecosystem, current.fixedVersion, status.fixedVersion)
+				if !comparable {
+					return suseLifecycleResult{}, false, fmt.Errorf("contradictory SLES fixed boundaries for %q", status.packageName)
+				}
+				if preferred == status.fixedVersion {
 					byPackage[statusKey] = status
 				}
 			case current.disposition == susePackageFixed:

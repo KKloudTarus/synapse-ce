@@ -30,7 +30,7 @@ There are three closed routes.
 
 | Route | When it applies | Analyzer and harness identity | Result use |
 | --- | --- | --- | --- |
-| Local diagnostic | No staged controller envelope is present. | Separate subject IDs; both commit and tree come from the local checkout. | Diagnostic only. A failed candidate ratchet is reported but does not make the command fail solely for that reason. |
+| Local diagnostic | No staged controller envelope is present. | Separate subject IDs; both commit and tree come from the local checkout. | Diagnostic only. A rejected candidate still returns the deterministic candidate-rejection error after its sanitized publication commits; it is not acceptance evidence. |
 | Protected baseline | A trusted controller stages the baseline envelope. | Fixed historical analyzer behavior is measured through reviewed behavior-neutral instrumentation; the harness records the actual reviewed checkout. | Creates or verifies controlled baseline evidence. |
 | Candidate | A trusted controller stages the candidate envelope. | The analyzer and harness retain distinct subject IDs but must have the same independently derived checkout commit and tree. | Acceptance evidence. A rejected candidate returns a deterministic failure only after its validated sanitized publication is committed. |
 
@@ -54,7 +54,7 @@ For non-pull-request events, the route job permits trusted execution only when a
 
 - `REACHABILITY_BENCHMARK_TRUSTED_ENABLED` is `true`.
 - The event ref equals `REACHABILITY_BENCHMARK_TRUSTED_REF`.
-- The event SHA equals `REACHABILITY_BENCHMARK_TRUSTED_SHA`.
+- There is no reachability trusted-SHA variable; `REACHABILITY_BENCHMARK_TRUSTED_SHA` is forbidden.
 
 It selects the protected-baseline route only when that selected SHA exactly equals `REACHABILITY_BENCHMARK_BASELINE_HARNESS_SHA`; every other selected SHA is a candidate route. Baseline routing and trust authorization are separate checks.
 

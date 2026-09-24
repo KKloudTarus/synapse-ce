@@ -21,7 +21,7 @@ func TestHistoricalRatchetBaselineMatchesAcceptedSnapshot(t *testing.T) {
 	}
 }
 
-func TestCandidateRatchetPreservesHistoricalFloorPolicy(t *testing.T) {
+func TestCandidateRatchetRecordsProspectivePolicyExceptions(t *testing.T) {
 	baseline := decodeRatchetFile(t, "corpus/ratchet-baseline.json")
 	candidate := decodeRatchetFile(t, "corpus/ratchet.json")
 	candidateFloors := make(map[observationKey]RatchetFloor, len(candidate.Floors))
@@ -36,6 +36,16 @@ func TestCandidateRatchetPreservesHistoricalFloorPolicy(t *testing.T) {
 			continue
 		}
 		if key.Engine != EngineOwned {
+			if key.Engine == EngineGrype {
+				switch key.TargetID {
+				case "debian-12-13-slim-amd64":
+					assertProspectiveUnknownDisposition(t, historical, current, 255, 258)
+					continue
+				case "sles-15-6-bci-base-45-31-amd64":
+					assertProspectiveUnknownDisposition(t, historical, current, 453, 466)
+					continue
+				}
+			}
 			if !sameRatchetPolicy(historical, current) {
 				t.Errorf("candidate changes comparator policy for engine %q target %q", key.Engine, key.TargetID)
 			}
@@ -48,6 +58,19 @@ func TestCandidateRatchetPreservesHistoricalFloorPolicy(t *testing.T) {
 			continue
 		}
 		assertSLESOwnedHistoricalDisposition(t, historical, current)
+	}
+}
+
+func assertProspectiveUnknownDisposition(t *testing.T, historical, candidate RatchetFloor, previous, proposed int) {
+	t.Helper()
+	if historical.MaximumUnknown == nil || candidate.MaximumUnknown == nil ||
+		*historical.MaximumUnknown != previous || *candidate.MaximumUnknown != proposed {
+		t.Fatalf("maximum unknown = %v -> %v, want %d -> %d", historical.MaximumUnknown, candidate.MaximumUnknown, previous, proposed)
+	}
+	withoutException := candidate
+	withoutException.MaximumUnknown = historical.MaximumUnknown
+	if !sameRatchetPolicy(historical, withoutException) {
+		t.Fatal("prospective disposition changes policy outside its explicit unknown threshold")
 	}
 }
 
@@ -76,8 +99,8 @@ func assertSLESOwnedHistoricalDisposition(t *testing.T, historical, candidate Ra
 	if historical.MaximumFalseNegatives == nil || candidate.MaximumFalseNegatives == nil || *historical.MaximumFalseNegatives != 16 || *candidate.MaximumFalseNegatives != 0 {
 		t.Fatalf("SLES owned maximum false negatives = %v -> %v, want 16 -> 0", historical.MaximumFalseNegatives, candidate.MaximumFalseNegatives)
 	}
-	if historical.MaximumUnknown == nil || candidate.MaximumUnknown == nil || *historical.MaximumUnknown != 0 || *candidate.MaximumUnknown != 537 {
-		t.Fatalf("SLES owned maximum unknown = %v -> %v, want 0 -> 537", historical.MaximumUnknown, candidate.MaximumUnknown)
+	if historical.MaximumUnknown == nil || candidate.MaximumUnknown == nil || *historical.MaximumUnknown != 0 || *candidate.MaximumUnknown != 582 {
+		t.Fatalf("SLES owned maximum unknown = %v -> %v, want historical 0, prior candidate 537, prospective 582", historical.MaximumUnknown, candidate.MaximumUnknown)
 	}
 }
 
