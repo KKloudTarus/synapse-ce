@@ -23,6 +23,11 @@ real, produced by running the product rather than seeded into its tables:
 - a host reporting through `synapse-agent`;
 - six business assets and eight users.
 
+The Code screen was captured a second time, after `synapse-cli publish-source` was repaired. It
+could not publish anything before that, so the screen showed "Source preview unavailable: Not
+retained" beside a caption promising annotated source. It now shows the file the analysis
+inventoried, with its findings against the line numbers.
+
 Regenerate them with the dev server running and a token the backend accepts:
 
 ```bash
@@ -658,7 +663,7 @@ Per-person preferences and the session.
 
 ## Engagement detail
 
-`/engagements/{id}/{tab}` — twenty-eight tabs in five groups. The header carries `Build report`,
+`/engagements/{id}/{tab}`: twenty-eight tabs in five groups. The header carries `Build report`,
 `Export`, `Import`, `Scan settings` and `Run scan` on every tab, and the scan panel shows the
 pipeline stages with their timings.
 
