@@ -24,7 +24,7 @@ export function QualityGates() {
 
   const { data: fetchedGates, error: fetchError } = useFetch(
     () => api.listQualityGates(),
-    { deps: [refresh] },
+    { deps: [refresh], keepPreviousData: true },
   )
 
   useEffect(() => { if (fetchedGates) setGates(fetchedGates) }, [fetchedGates])

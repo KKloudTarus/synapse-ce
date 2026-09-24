@@ -84,7 +84,7 @@ export function Assets() {
   // was measured at the same cost as a full page (101.8ms vs 101.2ms at 100k assets).
   const { data: assetCounts, error: countsError } = useFetch<BusinessAssetCounts>(
     (signal) => api.businessAssetCounts(signal),
-    { deps: [revision] },
+    { deps: [revision], keepPreviousData: true },
   )
 
   const hasFilters = Boolean(query.trim() || (type && type !== 'all') || (criticality && criticality !== 'all') || (lifecycle && lifecycle !== 'all'))

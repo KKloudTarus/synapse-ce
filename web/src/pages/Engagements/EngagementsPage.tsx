@@ -64,7 +64,7 @@ export const EngagementsPage: FC = () => {
       }
       return { list: engagements, assetNames }
     },
-    { deps: [refreshKey] },
+    { deps: [refreshKey], keepPreviousData: true },
   )
 
   const rawList = data?.list ?? []

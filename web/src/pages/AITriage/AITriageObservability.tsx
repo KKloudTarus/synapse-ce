@@ -18,7 +18,7 @@ export function AITriageObservability() {
         }
         throw e
       }),
-    { deps: [revision] },
+    { deps: [revision], keepPreviousData: true },
   )
 
   return (
