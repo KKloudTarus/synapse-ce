@@ -1,0 +1,86 @@
+name: Performance benchmark
+
+# Repeatable throughput, latency, and memory measurement for the owned scan target classes: pinned source,
+# pinned SBOM, small image, and large image.
+#
+# Each gate ratchets on MEDIAN BYTES ALLOCATED against its committed baseline under docs/benchmarks/, with a
+# documented tolerance. Allocation is deterministic for a given Go toolchain and input, so it is a stable
+# regression signal on a shared runner. Wall-clock latency (p50/p95) and peak memory are recorded in the
+# baseline and compared only within the same environment digest, so this workflow never claims cross-hardware
+# comparability. A missing or malformed baseline fails the gate rather than disabling it.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "53 4 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-benchmark-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: Owned performance gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Image extraction perf gates (small and large target classes)
+        shell: bash
+        run: go test -count=1 -v ./internal/infrastructure/acquire/ -run 'TestImageExtractPerfGate|TestImageExtractLargeImagePerfGate'
+      - name: Owned SBOM producer perf gate (pinned source class)
+        shell: bash
+        run: go test -count=1 -v ./internal/infrastructure/tools/ownsbom/ -run 'Perf'
+      - name: OS package catalog perf gate
+        shell: bash
+        run: go test -count=1 -v ./internal/infrastructure/tools/ospkg/ -run 'Perf'
+      - name: SBOM import perf gate (pinned SBOM class)
+        shell: bash
+        run: go test -count=1 -v ./internal/usecase/sca/ -run 'TestSBOMImportPerfGate'
+      - name: Secret scan perf gate
+        shell: bash
+        run: go test -count=1 -v ./internal/infrastructure/tools/secretscan/ -run 'Perf'
+      - name: Publish committed baselines as the run's evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/performance-baselines"
+          cp docs/benchmarks/*perf*.json "$RUNNER_TEMP/performance-baselines/"
+          ls -1 "$RUNNER_TEMP/performance-baselines"
+      - name: Upload performance baselines
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: performance-baselines-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/performance-baselines
+          if-no-files-found: error
+          retention-days: 30
+
+  aggregate:
+    name: Aggregate performance status
+    needs: [measure]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - shell: bash
+        env:
+          MEASURE: ${{ needs.measure.result }}
+        run: |
+          set -euo pipefail
+          test "$MEASURE" = success
