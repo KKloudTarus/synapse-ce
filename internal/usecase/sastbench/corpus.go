@@ -320,10 +320,10 @@ func CompareToBaseline(owned, baseline Report) ([]string, error) {
 	return lines, nil
 }
 
-// ImprovedOverBaseline reports whether every CWE's precision in owned is at least the baseline's minus eps
-// (no regression) AND at least one CWE strictly improves. It is the post-triage acceptance check: the
-// verifier-confirmed report must beat the committed pre-change baseline on precision without dropping any CWE.
-// Recall is gated separately by CheckRatchetByCWE, so this compares precision only.
+// ImprovedOverBaseline reports whether every CWE's precision and recall in owned are at least the baseline's
+// minus eps (no regression) AND at least one CWE strictly improves in precision. It is the post-triage
+// acceptance check: the verifier-confirmed report must beat the committed pre-change baseline on precision
+// without suppressing true findings to do so. CheckRatchetByCWE still enforces the absolute recall floors.
 func ImprovedOverBaseline(owned, baseline Report, eps float64) (improved bool, detail []string, err error) {
 	if owned.CorpusDigest == "" || baseline.CorpusDigest == "" || owned.CorpusDigest != baseline.CorpusDigest {
 		return false, nil, fmt.Errorf("owned and baseline reports measured different or unbound corpora")
@@ -348,6 +348,10 @@ func ImprovedOverBaseline(owned, baseline Report, eps float64) (improved bool, d
 		case o.Precision > b.Precision+eps:
 			anyBetter = true
 			detail = append(detail, fmt.Sprintf("%s precision improved %.3f -> %.3f", o.CWE, b.Precision, o.Precision))
+		}
+		if o.Recall < b.Recall-eps {
+			regressed = true
+			detail = append(detail, fmt.Sprintf("%s recall regressed %.3f -> %.3f", o.CWE, b.Recall, o.Recall))
 		}
 	}
 	// A CWE the baseline covered but owned no longer reports is a coverage loss, not an improvement.

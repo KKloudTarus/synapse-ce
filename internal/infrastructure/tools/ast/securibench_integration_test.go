@@ -67,6 +67,18 @@ func TestSecuribenchScorecard(t *testing.T) {
 	}
 
 	detected := runJavaTaintLineAnchored(t, bin, srcRoot)
+	if exportPath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_PROPOSALS")); exportPath != "" {
+		exportSecuribenchBlindedProposals(t, exportPath, srcRoot, pin, detected)
+	}
+	verdictPath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_VERDICTS"))
+	if diagnosticPath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_DIAGNOSTIC_REPORT")); diagnosticPath != "" {
+		if verdictPath == "" {
+			t.Fatal("SYNAPSE_POST_TRIAGE_DIAGNOSTIC_REPORT requires SYNAPSE_POST_TRIAGE_VERDICTS")
+		}
+		writeSecuribenchDiagnosticReport(t, diagnosticPath, postTriageSecuribenchReport(t, verdictPath, srcRoot, pin, detected, cases))
+	} else if verdictPath != "" {
+		verifySecuribenchPostTriage(t, verdictPath, srcRoot, pin, detected, cases)
+	}
 	scores := sastbench.ScoreByCWE(detected, cases, securibenchScoredCWEs, securibenchLineWindow)
 	for _, s := range scores {
 		t.Logf("securibench %s: total=%d tp=%d fp=%d fn=%d tn=%d precision=%.3f recall=%.3f",
